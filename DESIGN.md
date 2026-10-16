@@ -28,7 +28,11 @@ addressed by those identifiers.
    lowers. Each container's private writes live in its own upper. A new
    version of a tree costs only its changes.
 6. **Strong per-project isolation.** Knowing a C4 ID grants nothing.
-7. **One farm, many kinds of work, scheduled to their objectives** (P5).
+7. **Provenance by construction.** Every task's inputs, outputs, software,
+   place, time and submitter are recorded as signed, content-addressed
+   records that trace any delivered frame back to its sources and forward to
+   everything derived from it, including generative AI use (section 9).
+8. **One farm, many kinds of work, scheduled to their objectives** (P5).
    Render, CI and ML share pools, quotas and capacity hooks. Priorities are
    derived from deadlines, latency targets and measured work instead of set
    by hand. A HUD serves artists, wranglers, developers and platform
@@ -37,7 +41,7 @@ addressed by those identifiers.
 The niche is media and VFX studios and mid-size shops, where one shared
 farm runs deadline-driven rendering, CI, media processing and modest ML
 (fine-tuning, LoRAs, studio-data training, generative batch jobs) over heavy
-content-addressed data. Section 17 lists the non-goals, including the
+content-addressed data. Section 19 lists the non-goals, including the
 training infrastructure that large labs build.
 
 ## Prior art: Scion
@@ -52,7 +56,7 @@ Anthropic described Scion, its replacement for Git, in
 | Fetch is top-down (root tree, then missing trees, then blobs), and every request names an immutable object. | The same. Root record, then the directory records the filter reaches, then file objects, each fetched by C4 ID.   |
 | Each node runs one daemon on a local socket, shared by all jobs on the node.                                | One node daemon per node. It is also the CSI node plugin, and kubelet reaches it on the CSI socket.               |
 | Tiers are strict (daemon, then regional cache, then server), and all tiers answer identical RPCs.           | The same tiers plus peer fetch inside a locality (rack or zone). One content API at every tier.                   |
-| Each tier keeps a hit rate above 99% and holds no long-lived state.                                         | Caches are disposable local disk. Hit rates are exported per tier and are a HUD panel (section 10).               |
+| Each tier keeps a hit rate above 99% and holds no long-lived state.                                         | Caches are disposable local disk. Hit rates are exported per tier and are a HUD panel (section 11).               |
 | Sparse and virtual checkouts: the client never requests trees it does not need.                             | `include` filters stop resolution at directory records. A lazy FUSE lower is designed in section 4.6.             |
 | Directory-level ACLs.                                                                                       | Project grants on (tree, path prefix).                                                                            |
 | Commits are server-side, with cost proportional to the change.                                              | Capture uploads only the changed objects, the directory records along changed paths, and one patch (section 4.4). |
@@ -518,7 +522,7 @@ credentials.
   `c4-tier`). The server validates it with TokenReview, caches the result
   until the token expires, and accepts only the node daemon and regional
   service accounts in `c4-system`, plus the HUD's for reads (it fetches
-  preview proxies, section 10.4, after checking the viewer's access to that
+  preview proxies, section 11.4, after checking the viewer's access to that
   project). A pod that calls a node daemon or a regional replica directly is
   refused, with or without a token.
 - **Knowing an ID is not permission.** Pods cannot fetch by ID at all. They
@@ -616,7 +620,7 @@ task, not to a machine:
    daemon holds them in locked memory, renews the lease while the pod runs,
    and zeroes them when the volume is unpublished.
 4. Every release, renewal and refusal is appended to an audit log that is
-   hash-chained like the usage ledger (section 11): time, project, epoch,
+   hash-chained like the usage ledger (section 12): time, project, epoch,
    pod, node, service account, view, lease, decision and reason.
 
 **Where bytes are plaintext.** The regional tier and peers carry ciphertext
@@ -735,18 +739,191 @@ stacked views:
 The lazy lower (section 4.6) matters most here, because tests read a small
 fraction of a large tree.
 
-## 9. Work system (P5)
+## 9. Provenance
 
-### 9.1 Scope
+A production tracker records what people say happened. This system can
+record what ran, because it is the thing that ran it: it mounted each
+task's inputs by tree ID, captured its outputs by tree ID, and knows the
+container images, the node, the project and the submitter. Lineage is a
+byproduct of execution, not a form someone fills in. That is the reason
+provenance is a core capability here and not an add-on.
+
+### 9.1 Task records
+
+Every unit of work (section 10.4) that finishes produces one record:
+
+| field                 | source                                                                                      |
+| --------------------- | ------------------------------------------------------------------------------------------- |
+| inputs                | the view IDs the unit mounted (from the node daemon's volume state)                          |
+| outputs               | the output view and changeset IDs (from capture)                                             |
+| software              | container image digests (from the pod's status), software versions and the class parameters |
+| parameters            | the job's parameters and the unit's range, as submitted                                      |
+| where and when        | pool, node class, node, start and finish times, exit status, attempts                        |
+| who                   | the project, and the identity that submitted the job, recorded at admission from the API request and protected from later change by an admission policy |
+| keys                  | the key releases (section 6.6) that let the unit read encrypted content                     |
+| generative and ML use | model weights, LoRAs and training-data trees by view ID; prompts and parameters by hash (section 9.4) |
+
+The node daemon gathers the execution facts at capture and sends them to
+the provenance service in the manager, authenticated by its
+service-account token. The service checks them against the pod (it exists,
+ran on that node, with those image digests), joins the job context from the
+work controller, signs the record, and stores it.
+
+**Format.** Records are in-toto Statement v1 in a DSSE envelope, the format
+the software supply chain already verifies. The predicate type is
+`https://cccc.io/provenance/task/v1`, modeled on SLSA build provenance
+(`buildDefinition` with external and internal parameters and resolved
+dependencies, `runDetails` with the builder and run metadata), with the
+production context and generative fields added. Subjects name outputs by
+digest: a file by `sha512` (the hex SHA-512 that is its C4 ID, which generic
+in-toto tooling matches) and `c4`; a tree by `c4` only, since a tree ID is
+not the SHA-512 of one byte stream. CI tasks that build software artifacts
+also emit standard SLSA provenance (`https://slsa.dev/provenance/v1`), so
+existing verifiers work unchanged. Records are generated by the control
+plane and signed with keys no task pod can reach, which is what SLSA Build
+level 3 asks of a build platform. The claim is SLSA Build L3-style
+provenance for compute tasks; SLSA (v1.2) has no data or media track, so
+there is no SLSA compliance claim for media.
+
+### 9.2 Signing, storage and verification
+
+- Each record is signed with its project's key (Ed25519 for the kind e2e;
+  in production a KMS asymmetric key or a keyless Sigstore identity for the
+  installation) and stored as a C4 object in the project's store, so its ID
+  commits to its content and any change is detectable.
+- Keys rotate, and a compromised key is revoked by publishing a revocation
+  record; verification reports records signed with revoked keys. Camera
+  makers have had to revoke signing certificates after flaws were found, so
+  this is planned for, not hoped away.
+- An index (by output file, output view, input view, job, model and dataset)
+  is derived data, rebuildable from the records, kept in the installation's
+  system store as a hash-chained log like the usage ledger (section 12.2).
+- Usage records (section 12) and license usage (section 16.2) reference the
+  task records they come from, so the same signed records are the audit
+  trail for content, for keys, for billing and for licenses.
+
+### 9.3 The lineage graph
+
+The graph has three kinds of node (trees, files, task records) and four
+kinds of edge: a task reads a view, a task writes a changeset and output
+view, a view contains a file, and a view derives from its parent view
+through a changeset.
+
+- **Backward**: from a delivered frame (its C4 ID, or a path in a delivery
+  view) to the record whose output contains it, to that task's inputs, to
+  the records that produced those, back to the ingested plates and assets:
+  delivery, transcode, comp, render, sim, source.
+- **Forward**: from a source (a plate, a texture, a performer scan) to every
+  task that read a view containing it, and onward to everything derived:
+  what must be redone if a plate is recalled or a license ends.
+- Records are small and the index is keyed by ID, so a trace touches only
+  the records on the path, never a scan of the farm's history.
+
+### 9.4 AI usage disclosure and consent
+
+- Generative and ML work classes declare their model inputs, and the
+  records keep them: weights and LoRAs by view ID, training-data trees by
+  view ID, prompts and parameters by hash, with the plaintext prompt stored
+  under the project's access control (a prompt can be confidential script
+  material). A training run's record links its training data to the
+  checkpoint view it produced, so "trained on what" is a graph query.
+- **One query** answers "which shots in this delivery used generative AI,
+  which models, trained on what": a backward traversal from the delivery
+  view, filtered to records with generative fields, joined to the training
+  records of those models.
+- The questions the records are built to answer come from current
+  agreements and policies (sources and verification status in
+  `docs/research/provenance.md`):
+  - WGA 2023 MBA: was any material given to a writer generated by AI?
+  - WGA 2026 MBA and DGA 2026: was a writer's or director's work licensed to
+    train a commercial generative system (a notice trigger)?
+  - SAG-AFTRA 2023 and 2026: does an output contain a digital replica of an
+    identifiable performer, under which consent, and was a synthetic
+    performer used?
+  - IATSE Basic Agreement 2024: which AI systems did covered employees use
+    on which tasks, and was the use disclosed to the producer?
+  - DGA 2026: which AI-generated footage exists, and who approved it?
+  - Streamer guidance (for example Netflix's 2025 guidance for partners):
+    every generative use per title, and the approval behind each one.
+- **Consent as an input.** A consent record (a performer's consent for a
+  digital replica, scoped to a project) is a signed object like any other.
+  A project can require that a generative task using a replica model
+  reference a consent record, and admission refuses the task otherwise.
+- **Human authorship.** The US Copyright Office's 2025 report on
+  copyrightability holds that prompts alone do not give sufficient human
+  control, and registration requires disclosing AI-generated material and
+  describing the human contribution. The graph keeps human-authored inputs,
+  human selection among generated candidates, and human modifications as
+  distinct records from prompt-only generation. It supplies evidence for a
+  case-by-case determination; it does not prove copyrightability.
+- **Regulation.** EU AI Act Article 50 transparency duties apply from
+  2 August 2026, and California's AI Transparency Act (SB 942 as amended)
+  requires latent disclosures from covered providers. A studio that runs
+  its own generative models may itself be a provider. The fields those
+  disclosures need (provider, system and version, time, identifier) derive
+  from the records; whether they apply is a question for counsel.
+
+### 9.5 Standards
+
+- **C2PA (2.4).** Deliverables get Content Credentials derived from the
+  graph: `c2pa.created` with a `digitalSourceType` of
+  `trainedAlgorithmicMedia` for fully generated media,
+  `compositeWithTrainedAlgorithmicMedia` with `c2pa.placed` for comps with
+  generated elements, the `c2pa.ai-disclosure` assertion, and the CAWG
+  `cawg.training-mining` assertion for training permissions. Embedding is
+  defined for MOV (ProRes in MOV) and MP4 through BMFF hashing, WAV and PDF.
+  OpenEXR sequences and MXF have no defined embedding, so they get a sidecar
+  `.c2pa` manifest whose `c2pa.hash.collection.data` binds every frame file.
+  The system writes C2PA manifest definitions and leaves signing and
+  embedding to the C2PA SDK and its `c2patool`; credentials show as
+  "Trusted" only with a certificate on the C2PA Trust List, which needs the
+  C2PA conformance program.
+- **MovieLabs.** Records export as Ontology for Media Creation (v2.8)
+  entities: Task, Participant, Infrastructure and Asset, with
+  `provenance.CreatedBy`, `createdOn`, `Role` and `Origin`, versions as
+  `DerivationOf`, `RevisionOf` and `VariantOf`, and C4 IDs as identifiers
+  with scope `c4`. The 2030 Vision asks that "individual media elements are
+  referenced, accessed, tracked and interrelated using a universal linking
+  system"; content IDs are such a system, independent of where the bytes
+  live.
+- **ASWF.** OpenAssetIO can resolve entity references to view IDs, and
+  OpenTimelineIO media references can carry them. OpenEXR has no
+  standardized C2PA carriage yet, hence the sidecar.
+- **Trackers.** ShotGrid (Flow Production Tracking) published-file links and
+  ftrack version links are fed from the graph (section 15.2). The trackers
+  stay the system of record for production; this is the signed,
+  content-addressed layer underneath them.
+- **Prior art.** Tekton Chains signs SLSA provenance per task on
+  Kubernetes; in-toto Witness and GUAC collect attestations into graphs;
+  OpenLineage and Marquez track job and dataset lineage; cameras from Leica,
+  Sony and Google sign at capture with C2PA. What is particular here is the
+  combination: content-addressed trees as the subjects across render, CI,
+  ML and generative work, production context in signed records, and
+  disclosure queries shaped by the industry's agreements.
+
+### 9.6 HUD and MCP
+
+- The HUD's provenance view starts from any frame: a box in the job view, or
+  a file in an output view. It draws the lineage graph back to sources and
+  forward to derivatives, each node a record with its verification status,
+  with generative steps marked, and produces the disclosure report for a
+  delivery.
+- The MCP server exposes the same queries: `c4_trace_file`,
+  `c4_trace_forward`, `c4_verify_record`, `c4_disclosure_report`,
+  `c4_export_c2pa` and `c4_export_omc` (section 13.2).
+
+## 10. Work system (P5)
+
+### 10.1 Scope
 
 One farm runs several kinds of work: deadline-driven rendering, CI over a
 source monorepo, media processing, and modest ML. They share nodes, data and
 budgets, and they compete for the same capacity on the same days. The work
 system is one queue and one scheduler for all of them. What differs between
-kinds of work lives in **work classes** (section 9.4). Render, CI and ML are
+kinds of work lives in **work classes** (section 10.4). Render, CI and ML are
 the classes built here.
 
-### 9.2 The queue model
+### 10.2 The queue model
 
 The queue is a controller in the manager. It holds **units** of work (a
 chunk of frames, a test shard, a pipeline step, a training run) and
@@ -761,7 +938,7 @@ pod with a frozen priority. The cluster never holds 100,000 pending pods.
 Capacity hooks see a clean signal: pending pods mean real shortage, not queue
 depth.
 
-### 9.3 Prior art and what this builds on
+### 10.3 Prior art and what this builds on
 
 | system                     | what it offers                                                                                                                              | what it lacks for this                                                                                         |
 | -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
@@ -779,7 +956,7 @@ Tractor's expand is the prior art for dynamic graphs. A `RemoteCmd` with
 "those new tasks will become new subtasks of the current Task" (Tractor
 scripting reference). Tractor 1.7 added a file form, and 2.1 added expand
 chunks (`TR_EXPAND_CHUNK "filename"`) so a long-running command can deliver
-tasks while it runs. Section 9.6 adopts both forms.
+tasks while it runs. Section 10.6 adopts both forms.
 
 Decision:
 
@@ -798,7 +975,7 @@ Decision:
   feasibility check, and cost-aware burst decisions. None of the systems
   above estimate remaining work or order by deadline risk.
 
-### 9.4 The shared core and work classes
+### 10.4 The shared core and work classes
 
 Render, CI and ML have the same skeleton. The core owns it:
 
@@ -806,12 +983,12 @@ Render, CI and ML have the same skeleton. The core owns it:
 | ------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------ | --------------------------------------------------- |
 | unit               | the smallest thing the queue releases; one pod, or one wrapped object                                          | a chunk of frames of one pass   | a step or a test shard               | a training run or a sweep trial                     |
 | gang               | members that start and stop together; the queue accounts for them as one unit and never releases or preempts part of one | size 1                          | size 1                               | the ranks of a run; placement by Kueue and JobSet   |
-| generator          | a unit whose evaluation adds units and edges (section 9.6)                                                     | RIB or scene expansion into passes | test discovery into shards         | a sweep planner into trials                         |
-| objective          | an effective deadline or a required rate (section 9.7)                                                         | deadline from job, shot or delivery | latency SLO: ready time plus p95 target | deadline, or a GPU-hour rate                        |
-| estimator          | a duration distribution for every unit and every unexpanded generator (section 9.8)                            | per frame-range bucket and pass | per target and shard history         | steps left times measured step time                 |
-| pools              | where units may run (section 9.10)                                                                             | cpu, gpu, high-mem, spot        | ci runners                           | gpu pools                                           |
-| preemption         | stop with or without a checkpoint; resume from captured state (section 9.13)                                   | checkpointed long frames        | rarely: shards are short             | yield at a checkpoint boundary                      |
-| lens               | the class-specific HUD panel (section 10.4)                                                                    | passes by frame, exposure sheet | pipelines per change, flaky tests    | ranks and trials, useful GPU hours                  |
+| generator          | a unit whose evaluation adds units and edges (section 10.6)                                                     | RIB or scene expansion into passes | test discovery into shards         | a sweep planner into trials                         |
+| objective          | an effective deadline or a required rate (section 10.7)                                                         | deadline from job, shot or delivery | latency SLO: ready time plus p95 target | deadline, or a GPU-hour rate                        |
+| estimator          | a duration distribution for every unit and every unexpanded generator (section 10.8)                            | per frame-range bucket and pass | per target and shard history         | steps left times measured step time                 |
+| pools              | where units may run (section 10.10)                                                                             | cpu, gpu, high-mem, spot        | ci runners                           | gpu pools                                           |
+| preemption         | stop with or without a checkpoint; resume from captured state (section 10.13)                                   | checkpointed long frames        | rarely: shards are short             | yield at a checkpoint boundary                      |
+| lens               | the class-specific HUD panel (section 11.4)                                                                    | passes by frame, exposure sheet | pipelines per change, flaky tests    | ranks and trials, useful GPU hours                  |
 
 A **work class** is a driver plus its configuration. The driver is a Go
 package that implements one interface; the configuration is a `WorkClass`
@@ -833,9 +1010,9 @@ type Class interface {
 
 Adding a class (media transcode, simulation caches, generative batch,
 interactive sessions, data movement) means writing a driver, a `WorkClass`
-object and a lens. Section 9.18 sketches each.
+object and a lens. Section 10.18 sketches each.
 
-### 9.5 Objects
+### 10.5 Objects
 
 | kind              | scope     | written by        | holds                                                                                                              |
 | ----------------- | --------- | ----------------- | ------------------------------------------------------------------------------------------------------------------ |
@@ -890,7 +1067,7 @@ delivery) is therefore also a data-flow graph of content-addressed trees, and
 each output is already cached on the nodes and regional replicas that
 produced it.
 
-### 9.6 Dynamic expansion
+### 10.6 Dynamic expansion
 
 A unit can be a **generator**: a node of the graph whose evaluation adds
 units and edges. A RIB file that produces shadow and reflection passes before
@@ -925,9 +1102,9 @@ and a sweep planner that spawns trials are all generators.
   10.3).
 - **Order.** Unevaluated generators carry information the scheduler needs,
   so a job's generators are evaluated ahead of its concrete units of equal
-  standing (section 9.9), the same reasoning as sampling frames early.
+  standing (section 10.9), the same reasoning as sampling frames early.
 
-### 9.7 Objectives: every SLO becomes a deadline or a rate
+### 10.7 Objectives: every SLO becomes a deadline or a rate
 
 | SLO type   | target                         | effective objective per job                                                                 |
 | ---------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
@@ -946,7 +1123,7 @@ upstream jobs see its pressure.
 under target, its effective deadlines relax toward the target. If it is over,
 they tighten. CI then takes no more of the farm than its SLO needs.
 
-### 9.8 Dispatch order and estimating remaining work
+### 10.8 Dispatch order and estimating remaining work
 
 **Order within a job** is a core option over the job's unit axis (frames
 for render, grid points for a sweep):
@@ -990,7 +1167,7 @@ historical failure rate instead, so a broken change fails fast).
   same region is found when the queue reaches it.
 - Sequential order can only extrapolate from frames already rendered, so its
   estimate of the remainder is blind to whatever lies ahead. The simulation
-  measures the difference (section 9.20).
+  measures the difference (section 10.20).
 - **Remaining work** `W` is the sum of unit estimates for queued units, the
   expected remainder of running ones (past their estimate, a running unit is
   assumed to need a quarter of its elapsed time again), and the expected work
@@ -1002,7 +1179,7 @@ historical failure rate instead, so a broken change fails fast).
   slots the job gets. For a render job it is one frame's passes; for a CI
   pipeline it is build plus the longest shard.
 
-### 9.9 Objective-driven allocation
+### 10.9 Objective-driven allocation
 
 For each runnable job, with `T` the time to its effective deadline:
 
@@ -1053,7 +1230,7 @@ overrides:
 - `deadline`: set or move the job's deadline, which is usually what people
   mean when they raise a priority.
 
-### 9.10 Pools, placement, quotas
+### 10.10 Pools, placement, quotas
 
 - A **pool** maps to a node pool by label selector and tolerations. A slot
   is the pool's unit of capacity (for example 8 cores and 32 GiB, or 1 GPU).
@@ -1067,14 +1244,14 @@ overrides:
   are guaranteed when the pool is contended. Unused nominal slots are lent to
   others up to their borrowing limit. When the owner needs them back, the
   scheduler reclaims them by preempting the borrower's least valuable units
-  (section 9.13).
+  (section 10.13).
 - **Gangs** are accounted as one unit with the sum of their members' slots.
   The queue releases a gang only when its pool has room for all of it. The
   co-placement itself (all members bound together, in one rack or fabric
   domain) is provided by the wrapped scheduler (Kueue with JobSet), not by
   this queue.
 
-### 9.11 Feasibility check and warnings
+### 10.11 Feasibility check and warnings
 
 The scheduler recomputes every job's estimate and slack on every unit
 transition, coalesced to once per second. A job whose 90th-percentile finish
@@ -1090,7 +1267,7 @@ The added slots are the smallest burst that restores feasibility, taking
 each pool's provisioning delay into account. The cost is the pool's price per
 node-hour times node-hours. The same numbers drive capacity requests.
 
-### 9.12 Capacity hooks
+### 10.12 Capacity hooks
 
 The scheduler expresses demand as **CapacityRequest** objects, one per pool.
 Actuators turn them into the platform's own APIs:
@@ -1124,7 +1301,7 @@ nodes only once they are warm (or after a timeout), so the first frames on a
 new node do not wait on a cold cache, and a fleet of fresh nodes fills
 through the tiers instead of from the store.
 
-### 9.13 Preemption and checkpoints
+### 10.13 Preemption and checkpoints
 
 - The scheduler preempts only to reclaim a project's nominal quota, or to
   restore feasibility for a job that is infeasible without it, and only from
@@ -1138,10 +1315,10 @@ through the tiers instead of from the store.
   stacked on top, so it resumes on any node. Long frames lose minutes, not
   hours.
 - A gang is preempted whole: the queue asks it to yield and suspends the
-  wrapped object once it has checkpointed (section 9.17). Members are never
+  wrapped object once it has checkpointed (section 10.17). Members are never
   evicted one by one.
 
-### 9.14 Failures, retries and blacklists
+### 10.14 Failures, retries and blacklists
 
 - A unit is retried up to `retries` times, never on the node where it last
   failed.
@@ -1152,7 +1329,7 @@ through the tiers instead of from the store.
 - A node that fails units across several jobs and projects is flagged as
   suspect, which usually means bad hardware rather than a bad job.
 
-### 9.15 Render class
+### 10.15 Render class
 
 - Units are chunks of frames of one pass. With `expand: true`, each frame
   (or chunk) starts as a generator that evaluates the scene description (a
@@ -1163,7 +1340,7 @@ through the tiers instead of from the store.
 - Order is per job: `Sequential`, `Reverse` or `Binary`. The `render-preview`
   and `render-dailies` classes default to `Binary`.
 - The estimator is keyed by pass and interpolates along the frame axis
-  (section 9.8).
+  (section 10.8).
 - Outputs are captured per unit and folded into the job's output view as
   units finish (each fold costs only that unit's changes), so the output
   view in status is current to the second. A render task that writes
@@ -1171,9 +1348,9 @@ through the tiers instead of from the store.
   through that view.
 - The lens groups units by pass, 24 frames per row (one second of screen
   time per row), with the cost-by-frame strip and the preview player
-  (section 10.4).
+  (section 11.4).
 
-### 9.16 CI class
+### 10.16 CI class
 
 The Scion case (section 8.2) running on the same farm.
 
@@ -1186,7 +1363,7 @@ The Scion case (section 8.2) running on the same farm.
   nothing to spread over.
 - **Objective.** A latency SLO per WorkClass, for example `ci-presubmit`
   with p50 6 min and p95 15 min, and `ci-merge` with a tighter target.
-  Effective deadline = ready time + p95 target (section 9.7).
+  Effective deadline = ready time + p95 target (section 10.7).
 - **Checkout.** Each unit mounts the change's view, sparse by the step's
   include patterns. A node that ran the parent commit adds one delta layer.
   Checkout time and outcome (reused stack, delta, or cold) are publish
@@ -1210,11 +1387,11 @@ The Scion case (section 8.2) running on the same farm.
 - **Runner pools** are ordinary pools (for example `ci-cpu`), shared with
   render under quotas.
 
-### 9.17 ML class
+### 10.17 ML class
 
 ML here means what studios run: fine-tuning, LoRAs, training on studio data,
 and generative batch jobs. Large-scale training infrastructure is not built
-(section 17).
+(section 19).
 
 - **Wrapping, not reimplementing.** An ML WorkJob wraps a JobSet (or a
   Kubeflow TrainJob, a LeaderWorkerSet, or a RayJob). The class creates it
@@ -1249,7 +1426,7 @@ and generative batch jobs. Large-scale training infrastructure is not built
   order covers the grid coarse to fine with no extra mechanism: the corners
   and center first, then finer points.
 
-### 9.18 Adding a class
+### 10.18 Adding a class
 
 | class                         | unit                       | SLO                         | pools                 | estimator                                 | lens                                  |
 | ----------------------------- | -------------------------- | --------------------------- | --------------------- | ----------------------------------------- | ------------------------------------- |
@@ -1259,12 +1436,12 @@ and generative batch jobs. Large-scale training infrastructure is not built
 | interactive sessions          | a session                  | latency to start            | gpu workstations      | none (a reservation)                      | sessions and idle time                |
 | data movement                 | a tree or object batch     | throughput or deadline      | io nodes              | bytes over measured bandwidth             | transfers and tier counters           |
 
-Each is a driver implementing the interface in section 9.4, a WorkClass
+Each is a driver implementing the interface in section 10.4, a WorkClass
 object, and a lens module. A sequential simulation is a chain of units, and
-the critical-path floor in the slack formula (section 9.9) already handles
+the critical-path floor in the slack formula (section 10.9) already handles
 it.
 
-### 9.19 Scale
+### 10.19 Scale
 
 - One controller holds the queue in memory and is the only component that
   watches task pods (label-selected). It rebuilds its state from WorkJobs,
@@ -1275,7 +1452,7 @@ it.
 - Task pods are kept until the job is deleted (logs live with them) unless
   the job sets `keepSucceededUnits: false`.
 
-### 9.20 Simulation harness
+### 10.20 Simulation harness
 
 The policy is a pure Go package. The controller calls it, and so does a
 discrete-event simulator in `hack/sim`, so **the simulation runs the
@@ -1311,18 +1488,18 @@ heavy region is flagged and how soon the job's slack estimate settles within
 A smaller version runs on the kind cluster with real pods and the `kind-sim`
 actuator.
 
-## 10. HUD (P5)
+## 11. HUD (P5)
 
-### 10.1 Information architecture
+### 11.1 Information architecture
 
 - **Farm.** Slots in use and free per pool, queue depth by class, units per
   hour, failures in the last hour, burst in flight and its cost, tier health,
-  and **bytes avoided** (section 11.1): what content addressing, the cache
+  and **bytes avoided** (section 12.1): what content addressing, the cache
   tiers and the overlays saved, today and to date.
 - **Projects.** A scope, not a page. Every view is filtered to the projects
   the viewer may see.
 - **Jobs.** In dispatch order across classes, each with its job view
-  (section 10.3), objective, ETA band, slack and feasibility, owner, pools,
+  (section 11.3), objective, ETA band, slack and feasibility, owner, pools,
   inputs and output view.
 - **Units.** For each unit: state, attempts, node, duration against
   estimate, exit reason, log tail, output changeset, and for generators what
@@ -1340,8 +1517,11 @@ actuator.
   state, spend against budget per project, and the required-slots curve over
   the next 48 hours against capacity, with what-if: "+40 gpu-spot slots
   makes these three jobs feasible for $410".
+- **Provenance.** Any frame's lineage graph, back to its sources and forward
+  to its derivatives, with record verification and generative steps marked,
+  and the disclosure report for a delivery (section 9.6).
 
-### 10.2 At a glance
+### 11.2 At a glance
 
 | who                 | needs at a glance                                                                                                                                                         |
 | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -1352,7 +1532,7 @@ actuator.
 | platform engineer   | tier hit rates and fan-in; shed rates; regional replica health; store request rate; node cache pressure; publish and capture latency; capacity requests and their state   |
 | production          | cost against budget per project and pool; what a burst would buy; which deliveries are at risk; bytes avoided and worker-hours per project                               |
 
-### 10.3 The job view
+### 11.3 The job view
 
 The job view is the signature of the HUD, after the job view of Pixar's
 render queue, and it is the same for every class:
@@ -1387,7 +1567,7 @@ render queue, and it is the same for every class:
   the deadline carry a yellow mark, so a wrangler sees how much of the job is
   at risk, and where.
 
-### 10.4 Lenses and views
+### 11.4 Lenses and views
 
 - **Render lens:** the job view by pass and seconds; the **cost-by-frame
   strip** under the grid, measured frame times as bars and interpolated
@@ -1407,15 +1587,15 @@ render queue, and it is the same for every class:
   10.1.
 
 A lens is a JavaScript module registered by name. It receives the class
-summary (section 9.4) and the unit table, and it draws into the panel the
+summary (section 10.4) and the unit table, and it draws into the panel the
 HUD gives it. Adding a class's lens does not change the HUD shell.
 
-### 10.5 Controls
+### 11.5 Controls
 
 Every control is a Kubernetes write made **as the user**, through
 impersonation, so RBAC alone decides what a person may do. The HUD holds no
 privilege of its own beyond reading. Each control has an MCP tool with the
-same effect (section 12.2).
+same effect (section 13.2).
 
 | control               | effect                                                                       |
 | --------------------- | ---------------------------------------------------------------------------- |
@@ -1427,7 +1607,7 @@ same effect (section 12.2).
 | disable node (farm)   | taint `c4.avalanche.io/disabled=true:NoSchedule`                              |
 | approve burst         | `spec.approved` on the CapacityRequest                                       |
 
-### 10.6 Real-time updates at 10,000 nodes
+### 11.6 Real-time updates at 10,000 nodes
 
 - Unit state reaches the HUD through WorkJob status (run-length encoded,
   written at most once a second per job by the scheduler, which watches task
@@ -1445,7 +1625,7 @@ same effect (section 12.2).
 - Events and logs are read on demand: opening a unit fetches that pod, its
   log tail and its Events (field-selected by involved object), as the user.
 
-### 10.7 Per-project isolation
+### 11.7 Per-project isolation
 
 - Authentication is a bearer token (an OIDC ID token or a service-account
   token) validated with TokenReview, normally behind the cluster's auth
@@ -1461,7 +1641,7 @@ same effect (section 12.2).
   but what a node is running is shown only for the viewer's projects. Cost
   is shown per project only to viewers of that project.
 
-### 10.8 Graphic design direction
+### 11.8 Graphic design direction
 
 Designed for the wall of a machine room and for an artist's laptop, not as
 an admin console:
@@ -1479,7 +1659,7 @@ an admin console:
 - Motion is limited to filling boxes and the split of an expanding
   generator, and respects `prefers-reduced-motion`.
 
-## 11. Usage metering
+## 12. Usage metering
 
 The open-source project is the path to market. Revenue is expected to come
 from metered deployments sold through the AWS, GCP and Azure marketplaces,
@@ -1497,7 +1677,7 @@ candidates without new measurement:
 Usage is recorded per project, attributable to the component that measured
 it, tamper-evident, and exportable in the shape the marketplaces accept.
 
-### 11.1 What is measured, and by whom
+### 12.1 What is measured, and by whom
 
 | quantity                       | measured by                  | used for                                                    |
 | ------------------------------ | ---------------------------- | ----------------------------------------------------------- |
@@ -1512,10 +1692,10 @@ it, tamper-evident, and exportable in the shape the marketplaces accept.
 
 **Bytes avoided is a proof metric, never a billing unit.** It shows what
 content addressing, the cache tiers and the overlays save, and the HUD shows
-it per project, per job and farm-wide (section 10.1). Pricing by bytes saved
+it per project, per job and farm-wide (section 11.1). Pricing by bytes saved
 would be commodity pricing that falls as the system gets better at its job.
 
-### 11.2 Tamper-evident accounting
+### 12.2 Tamper-evident accounting
 
 - Each producer (a node daemon, a regional replica, the work controller)
   keeps counters per project and dimension and, every hour, signs a report
@@ -1532,7 +1712,7 @@ would be commodity pricing that falls as the system gets better at its job.
   kept in a `UsageLedger` status.
 - The key-release audit log (section 6.6) uses the same chained format.
 
-### 11.3 Export
+### 12.3 Export
 
 ```go
 type Exporter interface {
@@ -1553,7 +1733,7 @@ A production window is exported as its own dimension (one unit per window
 hour, or one fixed charge, depending on the listing), so either pricing
 model maps onto the same records.
 
-## 12. Agent-native interface (P6)
+## 13. Agent-native interface (P6)
 
 Agents are first-class users of the farm, from day one. This system is
 itself being designed and built with Claude, working as Joshua's engineering
@@ -1561,7 +1741,7 @@ agent, and the same holds for the people who will run it: a wrangler's
 assistant, a CI bot, or a migration agent should be able to do anything a
 person can do in the HUD, under the same rules.
 
-### 12.1 One API, three faces
+### 13.1 One API, three faces
 
 The HUD backend's REST API is the single implementation. The HUD, the MCP
 server (`c4-operator mcp`) and the CLI are faces of it, so **every HUD
@@ -1569,9 +1749,9 @@ capability has an agent-callable equivalent** by construction, and a test
 fails if a HUD endpoint has no tool. All three act as the caller: the
 caller's own token (a kubeconfig identity over stdio, or a bearer token over
 HTTP), validated with TokenReview, with impersonation for writes, so RBAC and
-the project scopes of section 10.7 bind agents exactly as they bind people.
+the project scopes of section 11.7 bind agents exactly as they bind people.
 
-### 12.2 MCP server
+### 13.2 MCP server
 
 - **Transports.** stdio for a local agent (Claude Code on a wrangler's
   machine, using the wrangler's kubeconfig), and Streamable HTTP, stateless
@@ -1592,8 +1772,11 @@ the project scopes of section 10.7 bind agents exactly as they bind people.
 | act        | `c4_submit_job` (with `dry_run`, which returns the estimate and feasibility first), `c4_hold_job`, `c4_release_job`, `c4_boost_job`, `c4_set_deadline`, `c4_requeue_units`, `c4_blacklist_node` | writes; idempotent with a name or nonce |
 | farm       | `c4_disable_node`, `c4_approve_burst`                                                               | writes; `c4_approve_burst` spends money and is marked open-world |
 | migrate    | `c4_import_deadline_jobs` (dry run produces the translation report), `c4_set_deadline_routing`      | writes                              |
+| provenance | `c4_trace_file`, `c4_trace_forward`, `c4_verify_record`, `c4_disclosure_report`, `c4_export_c2pa`, `c4_export_omc` | read-only                           |
+| providers  | `c4_get_capacity_forecast`, `c4_get_ingress` (section 16.1)                                         | read-only                           |
+| vendors    | `c4_get_license_usage`, `c4_export_license_usage` (section 16.2)                                    | read-only                           |
 
-- **Within policy.** Reprioritizing is the nudges of section 9.9 and nothing
+- **Within policy.** Reprioritizing is the nudges of section 10.9 and nothing
   else: hold, boost between 1 and 2 from the caller's own project quota, and
   deadlines. An agent has no priority knob a person does not have.
 - **Resources and prompts.** Jobs, units and views are also resources
@@ -1601,7 +1784,7 @@ the project scopes of section 10.7 bind agents exactly as they bind people.
   the server offers prompts for the common playbooks: triage a failing job,
   make a deadline, migrate a Deadline job, explain the farm's cost.
 
-### 12.3 Claude skill
+### 13.3 Claude skill
 
 A skill, `c4-farm`, teaches an agent to use the server well. Its
 `description` says what it does and when to use it (render jobs, frames,
@@ -1610,7 +1793,7 @@ migration). Its body holds the playbooks, and its reference files hold the
 concepts an agent needs and does not know (views and changesets, slack and
 required slots, binary order, generators, nudges) and a tool reference.
 
-### 12.4 Documentation for humans and agents
+### 13.4 Documentation for humans and agents
 
 - The tool reference is generated from the tool registry, so the docs, the
   MCP schemas and the skill's reference cannot drift apart.
@@ -1622,11 +1805,11 @@ required slots, binary order, generators, nudges) and a tool reference.
   answer what a wrangler would ask ("which node is failing sh040's frames,
   and what would it cost to make Friday 18:00?").
 
-## 13. Deadline migration bridge
+## 14. Deadline migration bridge
 
 Deadline 10 is in maintenance mode, and studios have years of jobs, plugins
 and submitters built on it. The bridge lets them move gradually, and agents
-can drive it through the MCP tools of section 12.2.
+can drive it through the MCP tools of section 13.2.
 
 - **Submission compatibility.** An endpoint that accepts the Deadline Web
   Service's job submission (`POST /api/jobs` with `JobInfo` and
@@ -1653,9 +1836,9 @@ can drive it through the MCP tools of section 12.2.
   the remaining Deadline jobs draw from the same farm under the same
   objective-driven allocation, and a studio retires Deadline pool by pool.
 
-## 14. Integrations
+## 15. Integrations
 
-### 14.1 DCC submitters
+### 15.1 DCC submitters
 
 Every submitter follows the same steps:
 
@@ -1674,7 +1857,7 @@ Every submitter follows the same steps:
 | Blender | an add-on for Cycles and Eevee frame ranges                                                                 |
 | Unreal  | a Movie Render Queue executor; each shot is a job and its frames are units                                  |
 
-### 14.2 Production tracking
+### 15.2 Production tracking
 
 ShotGrid (Autodesk Flow Production Tracking) and ftrack connect through their
 APIs and event streams:
@@ -1684,7 +1867,108 @@ APIs and event streams:
 - a finished job creates a Version with its output view ID and preview;
 - task statuses follow the jobs that serve them.
 
-## 15. Packaging and deployment
+## 16. Studios, cloud providers and software vendors
+
+The system has three audiences, and each gets its own documentation, its
+own agent tools and its own HUD lens. Each sees only its own data: a vendor
+sees the usage of its products, not studio content; a provider sees
+capacity and ingress in aggregate, not project data. Facts about programs,
+prices and license servers below are sourced in `docs/research/ecosystem.md`.
+
+### 16.1 Cloud providers
+
+- **Neutral by design.** AWS, Google Cloud, Azure, CoreWeave, OCI and
+  on-premises clusters are equal citizens. Nothing in the data path depends
+  on a provider: stores are S3-compatible endpoints or c4d servers,
+  capacity goes through a capacity-request interface (section 10.12), and
+  keys through a KMS interface.
+- **An onboarding ramp, not a lock-in.** A studio's store can stay where it
+  is. A regional tier in a provider's region fills on demand, by content ID,
+  from wherever the store lives, so burst compute can start in any provider
+  without a bulk migration, and only the objects a job reads ever cross.
+  The same mechanism makes leaving cheap, which is what makes arriving
+  easy.
+- **Provider adapters.**
+
+| concern        | AWS                         | Google Cloud                   | Azure                          | CoreWeave                           | OCI                              |
+| -------------- | --------------------------- | ------------------------------ | ------------------------------ | ----------------------------------- | -------------------------------- |
+| capacity       | Karpenter NodePools, EKS Auto Mode | node auto-provisioning with ComputeClasses | node auto-provisioning (Karpenter-based) | Cluster Autoscaler on node pools; bare-metal scale-up takes 5 to 15 minutes | Cluster Autoscaler, or the Karpenter provider for OCI |
+| spot           | Karpenter `capacity-type: spot` | Spot VMs in a ComputeClass     | Spot node pools                | none documented                     | preemptible instances            |
+| object store   | S3                          | Cloud Storage XML API with HMAC keys | Blob has no S3 API: an adapter or gateway | AI Object Storage; virtual-hosted addressing only | S3 compatibility API with customer secret keys |
+| KMS            | AWS KMS                     | Cloud KMS                      | Key Vault                      | no KMS product: Vault or KMIP       | OCI Vault                        |
+
+  The S3 client therefore supports virtual-hosted addressing with custom
+  endpoints, and the KMS interface has a Vault backend.
+- **Marketplaces and co-sell.** The packaging of section 17 fits AWS
+  Marketplace container products (hourly per pod with `RegisterUsage`, or
+  custom units with `MeterUsage`, on EKS), Google Cloud Marketplace
+  Kubernetes apps (usage through the billing agent, on GKE), and Azure
+  Kubernetes application offers (custom meters on AKS). The co-sell
+  programs are AWS ISV Accelerate, the Google Cloud Partner Network
+  (successor to Partner Advantage), and Microsoft's AI Cloud Partner
+  Program with Frontier Accelerate for Marketplace, Azure IP co-sell
+  eligibility and MACC. Oracle's marketplace allows only free or BYOL Helm
+  listings; CoreWeave has a partner network but no marketplace. Co-sell
+  status requires transactable, paid listings and sales thresholds, so the
+  realistic early step is a listing and co-sell-ready status.
+- **The provider lens** shows capacity and ingress: bytes that entered the
+  provider's regional tier, burst node-hours by pool, cache warmth by
+  region, and the transfer avoided.
+
+### 16.2 Software vendors and per-hour licensing
+
+The industry's per-hour licensing channel has moved. Thinkbox's
+usage-based licensing marketplace was retired on 30 September 2025, and
+Deadline 10 has been in maintenance mode since 7 November 2025.
+Usage-based licensing now runs through AWS Deadline Cloud license
+endpoints (for example Arnold at $0.66 an hour), which serve workers in AWS
+only. Vendors who sold through Deadline have a question about their
+channel, and studios on other clouds have none at all.
+
+**Licensing broker.**
+
+- Vendors register products: the license server type (RLM, FlexNet,
+  SideFX hserver, Chaos licset), the features, and the per-hour rates used
+  for reporting and settlement.
+- Jobs declare the licenses each unit needs. The scheduler treats licenses
+  as a pool with a count, like Deadline's Limits: a unit is released only
+  when a license is free, so a farm never runs more renders than it has
+  licenses for, and overflow can go to a per-hour endpoint where one
+  exists.
+- At task start the broker grants the pod a short-lived lease tied to its
+  identity, with the same TokenReview and lease mechanism as the
+  just-in-time keys (section 6.6): network access to the license server
+  (a NetworkPolicy) and the `port@host` variable the application reads. At
+  task end the lease closes and becomes a usage record in the signed
+  metering pipeline.
+- Adapters:
+  - customer-owned RLM and FlexNet servers: gate access, enforce counts, and
+    reconcile leases with the servers' report logs;
+  - AWS Deadline Cloud license endpoints for AWS customers: a
+    vendor-sanctioned per-hour pool for Arnold, Cinema 4D, Nuke, Red Giant,
+    Redshift, Houdini, Mantra, Karma and V-Ray on customer-managed workers;
+  - vendor-hosted services (RLM Cloud, FlexNet Operations metered
+    licensing) where a vendor offers them.
+- **What the broker does not do.** It does not mint or sign licenses, issue
+  grants that vendors' clients honor natively, resell vendor hours, set
+  prices, or host license servers outside a vendor's terms. Each of those
+  needs an agreement with the vendor.
+- **Proof of use.** Every lease is part of a task record (section 9), so
+  license usage is signed, attributable to a task, a project and a node, and
+  verifiable by both the vendor and the studio. The provenance records are
+  the license-usage proof.
+- **The vendor lens** shows usage and revenue by product, customer
+  installation and hour, with export for settlement.
+
+### 16.3 A face for each side
+
+| audience          | documentation                                         | agent tools                                   | HUD lens                                  |
+| ----------------- | ----------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
+| studios           | production guides: submitting, deadlines, previews, provenance | the tools of section 13.2                    | render, CI, ML, provenance, cost          |
+| cloud providers   | hosting a regional tier, capacity adapters, marketplace packaging | capacity forecast, ingress and burst queries | capacity and ingress                      |
+| software vendors  | registering products, license adapters, usage export  | usage queries and exports for their products  | usage and revenue                         |
+
+## 17. Packaging and deployment
 
 - One Helm chart, published as an OCI artifact, installs everything: CRDs,
   manager (controllers, scheduler, key broker, meter), node daemon,
@@ -1699,7 +1983,7 @@ APIs and event streams:
   products, Google Cloud Marketplace Kubernetes apps, and Azure Kubernetes
   application offers. Images are signed and ship with SBOMs.
 
-## 16. Phases and evidence
+## 18. Phases and evidence
 
 Each phase is proven by tests and by a scenario on a multi-node kind cluster
 with 8 workers in two localities. Results land in
@@ -1735,8 +2019,14 @@ with 8 workers in two localities. Results land in
   agent that has only the MCP server; and a recorded session in which an
   agent triages a failing job, makes a deadline with a burst, and migrates a
   Deadline job on the kind cluster.
+- **P7: provenance.** Task records signed and stored as C4 objects, the
+  lineage index, trace queries, the disclosure report, C2PA manifest
+  definitions and OMC export, the HUD view and the MCP tools. Evidence: a
+  delivered frame traced through comp, render and sim to its plates on the
+  kind cluster; a tampered record detected; and the generative-use query
+  answered for a delivery that contains a generated element.
 
-## 17. Non-goals and not in this plan
+## 19. Non-goals and not in this plan
 
 Non-goals:
 
@@ -1745,7 +2035,7 @@ Non-goals:
   training framework. Training jobs that need strict network sync get it
   from the scheduler they are wrapped in (Kueue with JobSet,
   LeaderWorkerSet, Kubeflow Trainer or KubeRay). The ML class owns data,
-  capacity sharing with render and CI, and visibility (section 9.17).
+  capacity sharing with render and CI, and visibility (section 10.17).
 - A version-control system (history, refs, merges, blame).
 - Cross-region replication of the authoritative store, and Windows nodes.
 
@@ -1753,8 +2043,8 @@ Not in this plan:
 
 - The lazy FUSE lower (section 4.6).
 - Encryption with just-in-time keys (section 6.6), the Deadline bridge
-  (section 13), DCC submitters and tracking integrations (section 14), and
-  the marketplace exporters (section 11.3) are designed here. What of them
+  (section 14), DCC submitters and tracking integrations (section 15), and
+  the marketplace exporters (section 12.3) are designed here. What of them
   was built is listed in `REPORT-v2.md`.
 - TLS between tiers in the kind e2e (bearer tokens are sent in clear inside
   the cluster network there). Production needs it.
