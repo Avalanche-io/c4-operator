@@ -43,7 +43,7 @@ function row(ctx, j, multiProject) {
   const capt = done ? `${f.num(u.succeeded)} done` :
     [`${f.num(u.succeeded)}/${f.num(u.total)} done`, u.running + u.retrying ? `${u.running + u.retrying} running` : null, u.failed ? `${u.failed} failed` : null, u.unevaluated ? `${u.unevaluated} to expand` : null].filter(Boolean).join(' · ');
   return h('div', { class: 'qrow' + (done ? ' done' : ''), 'data-key': k, role: 'listitem' },
-    h('div', { class: 'qrank' }, String(j.rank)),
+    h('div', { class: 'qrank' }, j.rank > 0 ? String(j.rank) : '\u2013'),
     h('div', { class: 'qname' },
       h('a', { class: 'jn', href: ctx.href(`job/${j.namespace}/${j.name}`) }, j.name),
       h('div', { class: 'qmeta' },

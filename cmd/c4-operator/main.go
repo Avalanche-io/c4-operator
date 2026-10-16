@@ -5,6 +5,7 @@
 //	c4-operator regional   regional cache tier (Deployment)
 //	c4-operator ingest     hash a directory into a project's store
 //	c4-operator tree-id    view ID of a directory
+//	c4-operator mcp        the farm's MCP server, over stdio or Streamable HTTP
 package main
 
 import (
@@ -29,6 +30,7 @@ commands:
   regional   run a regional cache replica
   ingest     hash a directory into a project's store and print its view ID
   tree-id    print the view ID of a directory
+  mcp        serve the farm's tools to agents (MCP, stdio or HTTP)
 `
 
 func main() {
@@ -43,6 +45,7 @@ func main() {
 		"regional": runRegional,
 		"ingest":   runIngest,
 		"tree-id":  runTreeID,
+		"mcp":      runMCP,
 	}
 	run, ok := commands[cmd]
 	if !ok {

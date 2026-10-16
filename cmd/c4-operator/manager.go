@@ -2,27 +2,37 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
+	"io/fs"
+	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
+	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/controller"
+	"github.com/Avalanche-io/c4-operator/internal/hud"
+	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	hudserver "github.com/Avalanche-io/c4-operator/internal/hud/server"
 	"github.com/Avalanche-io/c4-operator/internal/project"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
@@ -66,6 +76,10 @@ func runManager(args []string) error {
 	tick := fs.Duration("work-tick", 2*time.Second, "work queue decision period")
 	policy := fs.String("work-policy", "objective", "scheduling policy: objective, edf, fifo")
 	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process: kind-sim (tests), or empty for an external provider")
+	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
+	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name=project|project;... (* for all projects)")
+	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
+	farmTZ := fs.String("tz", "UTC", "the farm's time zone, for times the queue and the HUD show")
 	fs.Parse(args)
 
 	ctrl.SetLogger(zap.New())
@@ -108,23 +122,34 @@ func runManager(args []string) error {
 	if err := (&controller.MaterializationReconciler{Client: mgr.GetClient(), Projects: reg, Retry: *retry}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	var q *queue.Queue
+	stores := func(ctx context.Context, name string) (*storeurl.Sharded, error) {
+		p, err := reg.Get(ctx, name)
+		if apierrors.IsNotFound(err) {
+			return nil, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		return reg.Store(ctx, p)
+	}
 	if *work {
 		pol, err := policyFor(*policy)
 		if err != nil {
 			return err
 		}
-		q := &queue.Queue{Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue"),
-			Stores: func(ctx context.Context, name string) (*storeurl.Sharded, error) {
-				p, err := reg.Get(ctx, name)
-				if apierrors.IsNotFound(err) {
-					return nil, nil
-				}
-				if err != nil {
-					return nil, err
-				}
-				return reg.Store(ctx, p)
-			}}
+		loc, err := time.LoadLocation(*farmTZ)
+		if err != nil {
+			return fmt.Errorf("--tz: %w", err)
+		}
+		q = &queue.Queue{Loc: loc, Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue"),
+			Stores: stores}
 		if err := mgr.Add(q); err != nil {
+			return err
+		}
+	}
+	if *hudAddr != "" {
+		if err := addHUD(mgr, cfg, q, stores, *hudAddr, *hudDev, *hudProxy, *farmTZ, *namespace); err != nil {
 			return err
 		}
 	}
@@ -138,4 +163,64 @@ func runManager(args []string) error {
 	mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker())
 	log.Info("starting", "namespace", *namespace)
 	return mgr.Start(ctx)
+}
+
+// addHUD runs the HUD backend: a collector on every replica and an HTTP
+// server for the web app and the HUD API.
+func addHUD(mgr ctrl.Manager, cfg *rest.Config, q *queue.Queue, stores queue.StoreFunc, addr, dev string, proxy bool, tz, namespace string) error {
+	kube, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return fmt.Errorf("--tz: %w", err)
+	}
+	web, err := fs.Sub(hud.Web, "web")
+	if err != nil {
+		return err
+	}
+	srv := &hudserver.Server{Client: mgr.GetClient(), Kube: kube, Queue: q, Stores: stores, Web: web, Loc: loc,
+		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud")}
+	if dev != "" {
+		srv.DevViewers, err = parseViewers(dev)
+		if err != nil {
+			return err
+		}
+	}
+	if err := mgr.Add(srv); err != nil {
+		return err
+	}
+	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		hs := &http.Server{Addr: addr, Handler: srv.Handler(), ReadHeaderTimeout: 10 * time.Second}
+		go func() {
+			<-ctx.Done()
+			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			hs.Shutdown(sctx)
+		}()
+		if err := hs.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return err
+		}
+		return nil
+	}))
+}
+
+// parseViewers reads "wrangler=*;artist=show-a|show-b".
+func parseViewers(s string) (map[string]*api.Viewer, error) {
+	out := map[string]*api.Viewer{}
+	for _, item := range strings.Split(s, ";") {
+		name, projects, ok := strings.Cut(strings.TrimSpace(item), "=")
+		if !ok || name == "" {
+			return nil, fmt.Errorf("--hud-dev-viewers %q: want name=project|project;...", s)
+		}
+		v := &api.Viewer{User: name, Projects: []string{}}
+		if projects == "*" {
+			v.All = true
+		} else {
+			v.Projects = strings.Split(projects, "|")
+		}
+		out[name] = v
+	}
+	return out, nil
 }

@@ -357,12 +357,12 @@ objects. No single endpoint carries all reads.
 A render start puts `P` pods on `N` nodes in `G` localities, all reading the
 same `M` objects:
 
-| tier                    | requests per object                             |
-| ----------------------- | ----------------------------------------------- |
-| pods to node daemons    | `P` (`P/N` per node, coalesced to 1)            |
-| node daemons to homes   | `N - G·k` (each non-home asks its locality home) |
-| homes to regional tier  | `G·k`                                           |
-| regional tier to store  | at most `r`                                     |
+| tier                   | requests per object                              |
+| ---------------------- | ------------------------------------------------ |
+| pods to node daemons   | `P` (`P/N` per node, coalesced to 1)             |
+| node daemons to homes  | `N - G·k` (each non-home asks its locality home) |
+| homes to regional tier | `G·k`                                            |
+| regional tier to store | at most `r`                                      |
 
 With 5,000 nodes in 50 localities, `k = 1`, and `r = 2`, the store sees 2
 GETs per plate frame instead of 5,000, and the regional tier sees 50. The P2
@@ -661,12 +661,12 @@ tiers, fetch nothing else. The timing channel remains, and is documented.
 
 ### 6.5 Credentials
 
-| component        | Tiered project                 | Direct project            |
-| ---------------- | ------------------------------ | ------------------------- |
-| node daemon      | none                           | read and write            |
-| regional tier    | read and write                 | none                      |
-| manager          | read and write (records)       | read and write (records)  |
-| user namespaces  | none                           | none                      |
+| component       | Tiered project           | Direct project           |
+| --------------- | ------------------------ | ------------------------ |
+| node daemon     | none                     | read and write           |
+| regional tier   | read and write           | none                     |
+| manager         | read and write (records) | read and write (records) |
+| user namespaces | none                     | none                     |
 
 Store credentials live in Secrets in `c4-system`, referenced by Projects, and
 are read through a Role in `c4-system` only. That fixes the MVP's cluster-wide
@@ -742,14 +742,14 @@ Studios assess vendors against the MPA Content Security Best Practices
 through the Trusted Partner Network (TPN). The design is meant to make those
 assessments straightforward; it does not certify anything by itself.
 
-| expectation                          | how the design meets it                                                                                                   |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------- |
-| segregation of client content        | a store, cache partitions, layers and keys per project; strict mode shares nothing, not even identical bytes             |
-| encryption at rest and in transit    | AES-256-GCM objects and records in the store and every cache tier; TLS between tiers; plaintext only on a running task's node |
-| key management                       | KMS-held key-encryption keys, envelope encryption, rotation by epoch, revocation, separation between KMS administrators and operators |
-| least privilege and need to know     | keys released per task and per granted view, for the task's life; pods cannot fetch by ID; grants limit paths             |
-| logging and monitoring               | hash-chained key-release log, KMS provider audit trail joined by encryption context, usage ledger                        |
-| asset tracking                       | every release names the exact view, so "which task could read which frames, and when" has an exact answer                |
+| expectation                       | how the design meets it                                                                                                               |
+| --------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| segregation of client content     | a store, cache partitions, layers and keys per project; strict mode shares nothing, not even identical bytes                          |
+| encryption at rest and in transit | AES-256-GCM objects and records in the store and every cache tier; TLS between tiers; plaintext only on a running task's node         |
+| key management                    | KMS-held key-encryption keys, envelope encryption, rotation by epoch, revocation, separation between KMS administrators and operators |
+| least privilege and need to know  | keys released per task and per granted view, for the task's life; pods cannot fetch by ID; grants limit paths                         |
+| logging and monitoring            | hash-chained key-release log, KMS provider audit trail joined by encryption context, usage ledger                                     |
+| asset tracking                    | every release names the exact view, so "which task could read which frames, and when" has an exact answer                             |
 
 ### 6.8 Trust boundary
 
@@ -859,16 +859,16 @@ provenance is a core capability here and not an add-on.
 
 Every unit of work (section 10.4) that finishes produces one record:
 
-| field                 | source                                                                                      |
-| --------------------- | ------------------------------------------------------------------------------------------- |
-| inputs                | the view IDs the unit mounted (from the node daemon's volume state)                          |
-| outputs               | the output view and changeset IDs (from capture)                                             |
-| software              | container image digests (from the pod's status), software versions and the class parameters |
-| parameters            | the job's parameters and the unit's range, as submitted                                      |
-| where and when        | pool, node class, node, start and finish times, exit status, attempts                        |
+| field                 | source                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| inputs                | the view IDs the unit mounted (from the node daemon's volume state)                                                                                     |
+| outputs               | the output view and changeset IDs (from capture)                                                                                                        |
+| software              | container image digests (from the pod's status), software versions and the class parameters                                                             |
+| parameters            | the job's parameters and the unit's range, as submitted                                                                                                 |
+| where and when        | pool, node class, node, start and finish times, exit status, attempts                                                                                   |
 | who                   | the project, and the identity that submitted the job, recorded at admission from the API request and protected from later change by an admission policy |
-| keys                  | the key releases (section 6.6) that let the unit read encrypted content                     |
-| generative and ML use | model weights, LoRAs and training-data trees by view ID; prompts and parameters by hash (section 9.4) |
+| keys                  | the key releases (section 6.6) that let the unit read encrypted content                                                                                 |
+| generative and ML use | model weights, LoRAs and training-data trees by view ID; prompts and parameters by hash (section 9.4)                                                   |
 
 The node daemon gathers the execution facts at capture and sends them to
 the provenance service in the manager, authenticated by its
@@ -1048,18 +1048,34 @@ pod with a frozen priority. The cluster never holds 100,000 pending pods.
 Capacity hooks see a clean signal: pending pods mean real shortage, not queue
 depth.
 
+**As built** (`internal/work/queue`). The queue runs under leader election and
+ticks every two seconds: it reads Pools, Projects, WorkJobs and its own unit
+pods from the manager's cache, builds a snapshot, calls the policy
+(`sched.Decide`, a pure function), and carries out the decisions: create
+pods for released units, ask units to yield or stop them, write
+CapacityRequests, write each job's status. Every pool node advertises its
+slots as an extended resource, `c4.avalanche.io/slots` (as a device plugin
+advertises devices), and every unit pod requests its unit's slots, so
+kube-scheduler places units by slot exactly as the queue counts them. A unit
+pod has a generated name, an owner reference to its job, the pool's node
+selector and tolerations, the job's inputs as C4 CSI volumes, and the unit's
+environment (`C4_FRAMES`, `C4_SHARD`, `C4_STEPS`...). Finished pods are
+deleted only after the status that records them is written, so a restart
+loses no unit. The manager caches only unit pods (a label selector), not
+every pod in the cluster.
+
 ### 10.3 Prior art and what this builds on
 
-| system                     | what it offers                                                                                                                              | what it lacks for this                                                                                         |
-| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
-| Kueue                      | ResourceFlavors; ClusterQueues with quotas; cohorts with borrowing and lending; fair sharing; preemption; all-or-nothing admission; topology-aware scheduling; ProvisioningRequest admission checks; JobSet, LeaderWorkerSet, Kubeflow Trainer and Ray integrations | Admits whole workloads with a static priority that people set. No estimate of remaining work, no deadline model |
-| Volcano                    | Gang scheduling, queues with weights, DRF, proportion, an SLA plugin on waiting time, reclaim and preempt                                   | Replaces kube-scheduler for its pods. Orders by priority, fairness and wait time, not completion deadline       |
-| YuniKorn                   | Hierarchical queues with guaranteed and max resources, fair or FIFO sorting, gang scheduling, preemption                                    | A scheduler replacement with static ordering policies                                                          |
-| JobSet, LeaderWorkerSet    | Multi-pod training and serving jobs with gang semantics, failure policies, exclusive topology placement                                     | No queue: they rely on Kueue or a gang scheduler for admission                                                 |
-| Kubeflow Trainer, KubeRay  | Training jobs (TrainJob on JobSet) and Ray clusters as Kubernetes objects                                                                    | Same: admission and quotas come from Kueue                                                                     |
-| Deadline                   | Pools and groups, priority 0 to 100, machine and license limits, bad-worker detection, Spot Event Plugin bursting                           | Priorities are set by people. Bursting follows queued task counts, not deadline risk                           |
-| OpenCue                    | Shows with subscriptions (guaranteed size and burst per allocation), layers with resource needs, host tags                                  | Orders by subscription share and priority. No deadlines                                                        |
-| Tractor (and Alfred)       | Job scripts of Tasks and Cmds, priorities, sharing limits, blade profiles, and `-expand` commands whose output becomes new subtasks        | Priorities are set by people. Expansion exists, but nothing estimates the work it will reveal                   |
+| system                    | what it offers                                                                                                                                                                                                                                                      | what it lacks for this                                                                                          |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------- |
+| Kueue                     | ResourceFlavors; ClusterQueues with quotas; cohorts with borrowing and lending; fair sharing; preemption; all-or-nothing admission; topology-aware scheduling; ProvisioningRequest admission checks; JobSet, LeaderWorkerSet, Kubeflow Trainer and Ray integrations | Admits whole workloads with a static priority that people set. No estimate of remaining work, no deadline model |
+| Volcano                   | Gang scheduling, queues with weights, DRF, proportion, an SLA plugin on waiting time, reclaim and preempt                                                                                                                                                           | Replaces kube-scheduler for its pods. Orders by priority, fairness and wait time, not completion deadline       |
+| YuniKorn                  | Hierarchical queues with guaranteed and max resources, fair or FIFO sorting, gang scheduling, preemption                                                                                                                                                            | A scheduler replacement with static ordering policies                                                           |
+| JobSet, LeaderWorkerSet   | Multi-pod training and serving jobs with gang semantics, failure policies, exclusive topology placement                                                                                                                                                             | No queue: they rely on Kueue or a gang scheduler for admission                                                  |
+| Kubeflow Trainer, KubeRay | Training jobs (TrainJob on JobSet) and Ray clusters as Kubernetes objects                                                                                                                                                                                           | Same: admission and quotas come from Kueue                                                                      |
+| Deadline                  | Pools and groups, priority 0 to 100, machine and license limits, bad-worker detection, Spot Event Plugin bursting                                                                                                                                                   | Priorities are set by people. Bursting follows queued task counts, not deadline risk                            |
+| OpenCue                   | Shows with subscriptions (guaranteed size and burst per allocation), layers with resource needs, host tags                                                                                                                                                          | Orders by subscription share and priority. No deadlines                                                         |
+| Tractor (and Alfred)      | Job scripts of Tasks and Cmds, priorities, sharing limits, blade profiles, and `-expand` commands whose output becomes new subtasks                                                                                                                                 | Priorities are set by people. Expansion exists, but nothing estimates the work it will reveal                   |
 
 Tractor's expand is the prior art for dynamic graphs. A `RemoteCmd` with
 `-expand 1` "produces new Tractor task descriptions as its output", and
@@ -1089,16 +1105,16 @@ Decision:
 
 Render, CI and ML have the same skeleton. The core owns it:
 
-| concept            | core meaning                                                                                                   | render                          | CI                                   | ML (wrapped)                                        |
-| ------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------ | --------------------------------------------------- |
-| unit               | the smallest thing the queue releases; one pod, or one wrapped object                                          | a chunk of frames of one pass   | a step or a test shard               | a training run or a sweep trial                     |
-| gang               | members that start and stop together; the queue accounts for them as one unit and never releases or preempts part of one | size 1                          | size 1                               | the ranks of a run; placement by Kueue and JobSet   |
-| generator          | a unit whose evaluation adds units and edges (section 10.6)                                                     | RIB or scene expansion into passes | test discovery into shards         | a sweep planner into trials                         |
-| objective          | an effective deadline or a required rate (section 10.7)                                                         | deadline from job, shot or delivery | latency SLO: ready time plus p95 target | deadline, or a GPU-hour rate                        |
-| estimator          | a duration distribution for every unit and every unexpanded generator (section 10.8)                            | per frame-range bucket and pass | per target and shard history         | steps left times measured step time                 |
-| pools              | where units may run (section 10.10)                                                                             | cpu, gpu, high-mem, spot        | ci runners                           | gpu pools                                           |
-| preemption         | stop with or without a checkpoint; resume from captured state (section 10.13)                                   | checkpointed long frames        | rarely: shards are short             | yield at a checkpoint boundary                      |
-| lens               | the class-specific HUD panel (section 11.4)                                                                    | passes by frame, exposure sheet | pipelines per change, flaky tests    | ranks and trials, useful GPU hours                  |
+| concept    | core meaning                                                                                                             | render                              | CI                                      | ML (wrapped)                                      |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | --------------------------------------- | ------------------------------------------------- |
+| unit       | the smallest thing the queue releases; one pod, or one wrapped object                                                    | a chunk of frames of one pass       | a step or a test shard                  | a training run or a sweep trial                   |
+| gang       | members that start and stop together; the queue accounts for them as one unit and never releases or preempts part of one | size 1                              | size 1                                  | the ranks of a run; placement by Kueue and JobSet |
+| generator  | a unit whose evaluation adds units and edges (section 10.6)                                                              | RIB or scene expansion into passes  | test discovery into shards              | a sweep planner into trials                       |
+| objective  | an effective deadline or a required rate (section 10.7)                                                                  | deadline from job, shot or delivery | latency SLO: ready time plus p95 target | deadline, or a GPU-hour rate                      |
+| estimator  | a duration distribution for every unit and every unexpanded generator (section 10.8)                                     | per frame-range bucket and pass     | per target and shard history            | steps left times measured step time               |
+| pools      | where units may run (section 10.10)                                                                                      | cpu, gpu, high-mem, spot            | ci runners                              | gpu pools                                         |
+| preemption | stop with or without a checkpoint; resume from captured state (section 10.13)                                            | checkpointed long frames            | rarely: shards are short                | yield at a checkpoint boundary                    |
+| lens       | the class-specific HUD panel (section 11.4)                                                                              | passes by frame, exposure sheet     | pipelines per change, flaky tests       | ranks and trials, useful GPU hours                |
 
 A **work class** is a driver plus its configuration. The driver is a Go
 package that implements one interface; the configuration is a `WorkClass`
@@ -1124,14 +1140,14 @@ object and a lens. Section 10.18 sketches each.
 
 ### 10.5 Objects
 
-| kind              | scope     | written by        | holds                                                                                                              |
-| ----------------- | --------- | ----------------- | ------------------------------------------------------------------------------------------------------------------ |
-| `WorkClass`       | cluster   | administrators    | driver, SLO type and target, default pools, estimator settings, lens, fair-share weight, preemptibility             |
-| `WorkJob`         | namespace | people and tools  | class, class parameters, objective overrides, requirements, inputs, outputs, dependencies on other jobs, nudges, pod template |
-| `Pool`            | cluster   | administrators    | node selector and tolerations, slot shape, attributes (class, GPU model, VRAM, capacity type), cost per node-hour, capacity bounds and provider |
-| `Project`         | cluster   | administrators    | `spec.work.quotas`: nominal slots and borrowing limit per pool; burst budget; lateness cost                       |
-| `Milestone`       | namespace | production        | a due time and a label selector of the jobs it covers (a shot, a delivery, a release)                              |
-| `CapacityRequest` | cluster   | the scheduler     | per pool: slots wanted, until when, why, estimated cost, approval, views to pre-warm                               |
+| kind              | scope     | written by       | holds                                                                                                                                           |
+| ----------------- | --------- | ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WorkClass`       | cluster   | administrators   | driver, SLO type and target, default pools, estimator settings, lens, fair-share weight, preemptibility                                         |
+| `WorkJob`         | namespace | people and tools | class, class parameters, objective overrides, requirements, inputs, outputs, dependencies on other jobs, nudges, pod template                   |
+| `Pool`            | cluster   | administrators   | node selector and tolerations, slot shape, attributes (class, GPU model, VRAM, capacity type), cost per node-hour, capacity bounds and provider |
+| `Project`         | cluster   | administrators   | `spec.work.quotas`: nominal slots and borrowing limit per pool; burst budget; lateness cost                                                     |
+| `Milestone`       | namespace | production       | a due time and a label selector of the jobs it covers (a shot, a delivery, a release)                                                           |
+| `CapacityRequest` | cluster   | the scheduler    | per pool: slots wanted, until when, why, estimated cost, approval, views to pre-warm                                                            |
 
 A WorkJob looks like this:
 
@@ -1169,9 +1185,15 @@ or after deep expansion) keep their unit table as a c4m-style object in the
 project store, referenced from status, so etcd never holds it.
 
 **Data flows between jobs as views.** Each unit's captured changeset has the
-job's input view as parent. When a job finishes, the controller folds its
-units' changesets into the job's output view (conflicting writes to the same
-path are reported, not merged silently). A downstream job's `fromJob` input
+job's input view as parent. As each unit finishes, the queue folds its
+changeset into the job's output view and appends the fold to the job's
+output chain: the input view on the first line, then one section per fold,
+each sealed by the output view it produced, so every intermediate output is
+a checkpoint that can be verified and mounted. The chain is stored in the
+project's store and named in the job's status with the current output view
+(`status.output`). Writes by two units to the same path are reported in
+status, not merged silently. A unit's pod is deleted only after its fold is
+recorded, so a restart repeats no fold and loses none. A downstream job's `fromJob` input
 mounts that view. The dependency graph (sim to render to comp to transcode to
 delivery) is therefore also a data-flow graph of content-addressed trees, and
 each output is already cached on the nodes and regional replicas that
@@ -1222,11 +1244,11 @@ and a sweep planner that spawns trials are all generators.
 
 ### 10.7 Objectives: every SLO becomes a deadline or a rate
 
-| SLO type   | target                         | effective objective per job                                                                 |
-| ---------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
-| Deadline   | a time                         | the job's `deadline`, else the earliest Milestone that selects it, else submission plus the class's default turnaround |
-| Latency    | p50 and p95 time to finish     | deadline = the time the job became ready plus the p95 target                                  |
-| Throughput | units or GPU-hours per period  | a required rate in slots; slack is how far the job is ahead of or behind that rate          |
+| SLO type   | target                        | effective objective per job                                                                                            |
+| ---------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| Deadline   | a time                        | the job's `deadline`, else the earliest Milestone that selects it, else submission plus the class's default turnaround |
+| Latency    | p50 and p95 time to finish    | deadline = the time the job became ready plus the p95 target                                                           |
+| Throughput | units or GPU-hours per period | a required rate in slots; slack is how far the job is ahead of or behind that rate                                     |
 
 **Deadlines propagate up the dependency graph.** A job's effective deadline
 is also no later than each dependent's deadline minus the dependent's
@@ -1388,12 +1410,12 @@ node-hour times node-hours. The same numbers drive capacity requests.
 The scheduler expresses demand as **CapacityRequest** objects, one per pool.
 Actuators turn them into the platform's own APIs:
 
-| actuator             | mechanism                                                                                                                                         |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| actuator             | mechanism                                                                                                                                                              |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `cluster-autoscaler` | creates a `ProvisioningRequest` (`autoscaling.x-k8s.io/v1`, class `best-effort-atomic-scale-up.autoscaling.x-k8s.io`) with a PodTemplate of the slot shape and a count |
-| `karpenter`          | sets the pool's NodePool `limits`. Karpenter provisions for the pods the queue then releases                                                       |
-| `keda`               | exports `c4_capacity_requested_slots{pool}` and `c4_work_required_slots{pool}` for a KEDA ScaledObject                                             |
-| `kind-sim`           | the e2e stand-in: provisioning removes a `c4.avalanche.io/unprovisioned` taint from pre-created nodes after the pool's delay                       |
+| `karpenter`          | sets the pool's NodePool `limits`. Karpenter provisions for the pods the queue then releases                                                                           |
+| `keda`               | exports `c4_capacity_requested_slots{pool}` and `c4_work_required_slots{pool}` for a KEDA ScaledObject                                                                 |
+| `kind-sim`           | the e2e stand-in: provisioning removes a `c4.avalanche.io/unprovisioned` taint from pre-created nodes after the pool's delay                                           |
 
 Burst decisions are cost-aware:
 
@@ -1424,12 +1446,19 @@ through the tiers instead of from the store.
   jobs whose slack exceeds a threshold. It picks victims by lost work: time
   since the unit's last checkpoint, plus restore cost. It is rate-limited per
   pool, and a unit is preempted at most twice.
-- A job can declare `checkpoint: {signal: SIGTERM, graceSeconds: 120}`. A
-  preempted unit gets the signal and the grace period to write a checkpoint
-  into its working tree. Capture stores the upper as a changeset like any
-  other output, and the requeued attempt mounts its input with that changeset
-  stacked on top, so it resumes on any node. Long frames lose minutes, not
-  hours.
+- A unit of a class that checkpoints is asked to yield, not killed. The
+  queue sets the annotation `c4.avalanche.io/yield` on its pod; the unit sees
+  it through a downward API file (`C4_PODINFO`), saves a checkpoint into its
+  working tree at its next step and exits. Capture stores the upper as a
+  changeset like any other output, and the queue records the captured view
+  as the unit's resume point. The next attempt mounts that view, through a
+  Materialization the queue owns, in place of the job's input, so it
+  resumes on any node from what it saved. A unit that has not yielded after
+  ten minutes is stopped. A yield is not a failure and does not count
+  toward retries. P5 measures one end to end: a training run yields its GPU
+  slots to an urgent render and resumes from the step it saved.
+- Units that do not checkpoint (render frames) are stopped and run again;
+  victims are chosen to lose the least work.
 - A gang is preempted whole: the queue asks it to yield and suspends the
   wrapped object once it has checkpointed (section 10.17). Members are never
   evicted one by one.
@@ -1544,13 +1573,13 @@ and generative batch jobs. Large-scale training infrastructure is not built
 
 ### 10.18 Adding a class
 
-| class                         | unit                       | SLO                         | pools                 | estimator                                 | lens                                  |
-| ----------------------------- | -------------------------- | --------------------------- | --------------------- | ----------------------------------------- | ------------------------------------- |
-| media ingest, transcode, QC, delivery | a clip or segment  | deadline (delivery)         | cpu, gpu encoders     | real-time factor times media duration     | clips by reel, QC flags               |
-| simulation caches             | a frame range, sequential  | deadline                    | high-memory           | per-frame time, growing with the sim      | the sim's frames in order             |
-| generative batch              | a batch of prompts         | throughput or deadline      | gpu                   | items per second by model and resolution  | batches and samples                   |
-| interactive sessions          | a session                  | latency to start            | gpu workstations      | none (a reservation)                      | sessions and idle time                |
-| data movement                 | a tree or object batch     | throughput or deadline      | io nodes              | bytes over measured bandwidth             | transfers and tier counters           |
+| class                                 | unit                      | SLO                    | pools             | estimator                                | lens                        |
+| ------------------------------------- | ------------------------- | ---------------------- | ----------------- | ---------------------------------------- | --------------------------- |
+| media ingest, transcode, QC, delivery | a clip or segment         | deadline (delivery)    | cpu, gpu encoders | real-time factor times media duration    | clips by reel, QC flags     |
+| simulation caches                     | a frame range, sequential | deadline               | high-memory       | per-frame time, growing with the sim     | the sim's frames in order   |
+| generative batch                      | a batch of prompts        | throughput or deadline | gpu               | items per second by model and resolution | batches and samples         |
+| interactive sessions                  | a session                 | latency to start       | gpu workstations  | none (a reservation)                     | sessions and idle time      |
+| data movement                         | a tree or object batch    | throughput or deadline | io nodes          | bytes over measured bandwidth            | transfers and tier counters |
 
 Each is a driver implementing the interface in section 10.4, a WorkClass
 object, and a lens module. A sequential simulation is a chain of units, and
@@ -1639,14 +1668,14 @@ actuator.
 
 ### 11.2 At a glance
 
-| who                 | needs at a glance                                                                                                                                                         |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| artist              | my jobs; which frames are done, running, failed; ETA against deadline; why a frame failed (log lines, node, exit reason); the output view to hand to comp                |
-| render wrangler     | every job in scope in dispatch order; feasibility warnings with the burst that fixes them and its price; stuck jobs; failure hot spots by node; slots by project against quota |
-| CI wrangler         | queue wait against run time; checkout time and cache hit; pipelines per change; time to green against the p50 and p95 targets; flaky tests; merge-queue health; runner pools |
-| ML user             | my runs as boxes per rank or trial; checkpoints as views; when and why a run yielded; useful GPU hours                                                                     |
-| platform engineer   | tier hit rates and fan-in; shed rates; regional replica health; store request rate; node cache pressure; publish and capture latency; capacity requests and their state   |
-| production          | cost against budget per project and pool; what a burst would buy; which deliveries are at risk; bytes avoided and worker-hours per project                               |
+| who               | needs at a glance                                                                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| artist            | my jobs; which frames are done, running, failed; ETA against deadline; why a frame failed (log lines, node, exit reason); the output view to hand to comp                      |
+| render wrangler   | every job in scope in dispatch order; feasibility warnings with the burst that fixes them and its price; stuck jobs; failure hot spots by node; slots by project against quota |
+| CI wrangler       | queue wait against run time; checkout time and cache hit; pipelines per change; time to green against the p50 and p95 targets; flaky tests; merge-queue health; runner pools   |
+| ML user           | my runs as boxes per rank or trial; checkpoints as views; when and why a run yielded; useful GPU hours                                                                         |
+| platform engineer | tier hit rates and fan-in; shed rates; regional replica health; store request rate; node cache pressure; publish and capture latency; capacity requests and their state        |
+| production        | cost against budget per project and pool; what a burst would buy; which deliveries are at risk; bytes avoided and worker-hours per project                                     |
 
 ### 11.3 The job view
 
@@ -1708,20 +1737,25 @@ HUD gives it. Adding a class's lens does not change the HUD shell.
 
 ### 11.5 Controls
 
-Every control is a Kubernetes write made **as the user**, through
-impersonation, so RBAC alone decides what a person may do. The HUD holds no
-privilege of its own beyond reading. Each control has an MCP tool with the
-same effect (section 13.2).
+Every control is one Kubernetes write, and RBAC alone decides what a person
+may do: the HUD asks the API server whether the user may make that write (a
+SubjectAccessReview for the verb and the object), makes it with its own
+service account, and records an Event on the object naming the user. That
+is the as-built form. Impersonation, the alternative, makes RBAC check the
+write itself, but it needs the `impersonate` verb on users and groups,
+which lets the HUD act as anyone; checking first and recording the actor
+keeps the HUD's own permission to the few objects it writes. Each control
+has an MCP tool with the same effect (section 13.2).
 
-| control               | effect                                                                       |
-| --------------------- | ---------------------------------------------------------------------------- |
-| hold / release        | `spec.nudge.hold` on the WorkJob                                             |
-| boost                 | `spec.nudge.boost` (1 to 2)                                                  |
-| set deadline          | `spec.deadline`                                                              |
-| requeue units         | annotation `c4.avalanche.io/requeue: <nonce>:<units>`, processed once by the controller |
-| blacklist node (job)  | append to `spec.blacklist`                                                   |
-| disable node (farm)   | taint `c4.avalanche.io/disabled=true:NoSchedule`                              |
-| approve burst         | `spec.approved` on the CapacityRequest                                       |
+| control             | effect                                                                                                                |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| hold / release      | `spec.nudge.hold` on the WorkJob (`holdStop` also stops running units)                                                |
+| boost               | `spec.nudge.boost` (1 to 2)                                                                                           |
+| set deadline        | `spec.deadline`                                                                                                       |
+| requeue units       | annotation `c4.avalanche.io/requeue: <token>:<units>`, carried out once by the queue                                  |
+| avoid node (job)    | append to `spec.avoidNodes`; allowing a node the queue blacklisted itself is annotation `c4.avalanche.io/allow-nodes` |
+| disable node (farm) | cordon the node (`spec.unschedulable`); running units finish                                                          |
+| approve burst       | `spec.approved` on the CapacityRequest                                                                                |
 
 ### 11.6 Real-time updates at 10,000 nodes
 
@@ -1744,8 +1778,11 @@ same effect (section 13.2).
 ### 11.7 Per-project isolation
 
 - Authentication is a bearer token (an OIDC ID token or a service-account
-  token) validated with TokenReview, normally behind the cluster's auth
-  proxy.
+  token) validated with TokenReview, or the user and groups an SSO proxy in
+  front of the HUD sets (`X-Forwarded-User`, `X-Forwarded-Groups`, trusted
+  only with `--hud-trust-proxy`). A development mode (`--hud-dev-viewers`)
+  takes the viewer from `?as=`; the e2e cluster uses it and nothing else
+  should.
 - A viewer's scope is the set of projects whose namespaces the viewer may
   list WorkJobs in, checked with SubjectAccessReview and cached per user for
   a minute.
@@ -1795,16 +1832,16 @@ it, tamper-evident, and exportable in the shape the marketplaces accept.
 
 ### 12.1 What is measured, and by whom
 
-| quantity                       | measured by                  | used for                                                    |
-| ------------------------------ | ---------------------------- | ----------------------------------------------------------- |
-| cluster-hours                  | the meter (manager)          | billing candidate: hours the installation is running        |
-| container-hours                | node daemons, work controller | billing candidate: hours of managed containers, per project and pool |
-| production windows             | the meter                    | billing candidate: declared periods and the usage inside them |
-| GPU-hours, slot-hours by pool and class | work controller     | reporting, capacity planning, cost attribution              |
-| bytes materialized             | node daemon                  | proof metric                                                |
-| bytes fetched                  | node daemon, regional tier   | proof metric, per tier                                      |
-| bytes avoided                  | derived                      | proof metric: materialized minus fetched from the store, by source (node cache, layer reuse, duplicates within a view, peers, regional cache) |
-| bytes stored and deduplicated  | regional tier (ingest)       | proof metric: new bytes written against bytes already present |
+| quantity                                | measured by                   | used for                                                                                                                                      |
+| --------------------------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| cluster-hours                           | the meter (manager)           | billing candidate: hours the installation is running                                                                                          |
+| container-hours                         | node daemons, work controller | billing candidate: hours of managed containers, per project and pool                                                                          |
+| production windows                      | the meter                     | billing candidate: declared periods and the usage inside them                                                                                 |
+| GPU-hours, slot-hours by pool and class | work controller               | reporting, capacity planning, cost attribution                                                                                                |
+| bytes materialized                      | node daemon                   | proof metric                                                                                                                                  |
+| bytes fetched                           | node daemon, regional tier    | proof metric, per tier                                                                                                                        |
+| bytes avoided                           | derived                       | proof metric: materialized minus fetched from the store, by source (node cache, layer reuse, duplicates within a view, peers, regional cache) |
+| bytes stored and deduplicated           | regional tier (ingest)        | proof metric: new bytes written against bytes already present                                                                                 |
 
 **Bytes avoided is a proof metric, never a billing unit.** It shows what
 content addressing, the cache tiers and the overlays save, and the HUD shows
@@ -1838,12 +1875,12 @@ type Exporter interface {
 }
 ```
 
-| exporter | interface                                                                                                     |
-| -------- | ------------------------------------------------------------------------------------------------------------- |
-| AWS      | Marketplace Metering Service `MeterUsage`, hourly per dimension, with `UsageAllocations` tagged by project     |
-| GCP      | usage reports to the Service Control API, as the Marketplace usage-based billing agent (ubbagent) does        |
-| Azure    | Marketplace Metering Service `usageEvent` and `batchUsageEvent`, hourly per dimension                         |
-| open     | Prometheus series and JSON lines, for self-hosted installs and for reconciling with marketplace invoices      |
+| exporter | interface                                                                                                  |
+| -------- | ---------------------------------------------------------------------------------------------------------- |
+| AWS      | Marketplace Metering Service `MeterUsage`, hourly per dimension, with `UsageAllocations` tagged by project |
+| GCP      | usage reports to the Service Control API, as the Marketplace usage-based billing agent (ubbagent) does     |
+| Azure    | Marketplace Metering Service `usageEvent` and `batchUsageEvent`, hourly per dimension                      |
+| open     | Prometheus series and JSON lines, for self-hosted installs and for reconciling with marketplace invoices   |
 
 A production window is exported as its own dimension (one unit per window
 hour, or one fixed charge, depending on the listing), so either pricing
@@ -1861,17 +1898,35 @@ person can do in the HUD, under the same rules.
 
 The HUD backend's REST API is the single implementation. The HUD, the MCP
 server (`c4-operator mcp`) and the CLI are faces of it, so **every HUD
-capability has an agent-callable equivalent** by construction, and a test
-fails if a HUD endpoint has no tool. All three act as the caller: the
-caller's own token (a kubeconfig identity over stdio, or a bearer token over
-HTTP), validated with TokenReview, with impersonation for writes, so RBAC and
-the project scopes of section 11.7 bind agents exactly as they bind people.
+capability has an agent-callable equivalent** by construction. All three act
+as the caller: the caller's own bearer token, passed through to the HUD
+(from a token file over stdio; from each request's own `Authorization`
+header over HTTP), so the viewer scopes of section 11.7 and the per-write
+checks of section 11.5 bind agents exactly as they bind people, and the
+Events record which user an agent acted for.
 
 ### 13.2 MCP server
 
+**As built** (`internal/mcpserver`, on the official Go SDK v1.8.0, which
+speaks MCP 2026-07-28): sixteen tools, every one a call to the HUD API.
+
+| group   | built                                                                                                                                                                                                                                             | annotations                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| inspect | `c4_farm_status`, `c4_list_jobs` (filters, `limit`, `offset`, `nextOffset`), `c4_get_job` (units on request), `c4_get_unit` (log tail, events), `c4_list_nodes`, `c4_cache_tiers`, `c4_capacity_and_cost`, `c4_dependency_graph`, `c4_diff_views` | read-only, closed-world               |
+| act     | `c4_hold_job`, `c4_boost_job`, `c4_set_deadline`, `c4_avoid_node`, `c4_disable_node`                                                                                                                                                              | idempotent, not destructive           |
+| act     | `c4_requeue_units`                                                                                                                                                                                                                                | destructive (discards results)        |
+| spend   | `c4_approve_capacity`                                                                                                                                                                                                                             | open-world (provisions paid capacity) |
+
+Errors come back as tool results that say what to do next ("Job names are
+namespace/name; call c4_list_jobs to see the jobs you can see"). The tool
+reference (`docs/agents/tools.md`) is generated by `c4-operator mcp
+--tools-md` from the server's own tool list, so docs and schemas cannot
+drift. The rest of this section is the full design; the tools it names
+beyond the table above are not built.
+
 - **Transports.** stdio for a local agent (Claude Code on a wrangler's
-  machine, using the wrangler's kubeconfig), and Streamable HTTP, stateless
-  JSON, for a shared in-cluster server behind the cluster's auth proxy.
+  machine), and Streamable HTTP, stateless JSON, for a shared in-cluster
+  server behind the cluster's auth proxy. Both are built.
 - **Tools.** Named `c4_<verb>_<noun>`, with input and output schemas, a
   `response_format` of JSON or Markdown, pagination (`limit`, `offset`,
   `has_more`) on every list, and annotations (`readOnlyHint`,
@@ -1880,17 +1935,17 @@ the project scopes of section 11.7 bind agents exactly as they bind people.
   held; release it with c4_release_job or ask its owner"), never as stack
   traces.
 
-| group      | tools                                                                                               | annotations                         |
-| ---------- | --------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| inspect    | `c4_get_farm`, `c4_list_jobs`, `c4_get_job`, `c4_get_unit`, `c4_list_nodes`, `c4_get_tiers`, `c4_get_graph`, `c4_list_capacity_requests`, `c4_browse_view`, `c4_diff_views` (changed paths, objects and sizes between two views, or a commit and its merge base), `c4_follow_chain` (a chain's checkpoints after a given one, waiting for new ones) | read-only                           |
-| explain    | `c4_explain_job` (rank, slack decomposition, the limiting factor, the burst that would fix it), `c4_diagnose_failures` (failed units grouped by cause, suspect nodes, flaky shards, suggested actions), `c4_what_if_capacity`, `c4_get_cost` | read-only                           |
-| lenses     | `c4_list_ci_changes` (pipelines, time to green, flaky targets, merge queue), `c4_list_ml_runs` (ranks, checkpoints, yields, useful GPU hours), `c4_get_preview` (frame list) | read-only                           |
-| act        | `c4_submit_job` (with `dry_run`, which returns the estimate and feasibility first), `c4_hold_job`, `c4_release_job`, `c4_boost_job`, `c4_set_deadline`, `c4_requeue_units`, `c4_blacklist_node` | writes; idempotent with a name or nonce |
-| farm       | `c4_disable_node`, `c4_approve_burst`                                                               | writes; `c4_approve_burst` spends money and is marked open-world |
-| migrate    | `c4_import_deadline_jobs` (dry run produces the translation report), `c4_set_deadline_routing`      | writes                              |
-| provenance | `c4_trace_file`, `c4_trace_forward`, `c4_verify_record`, `c4_disclosure_report`, `c4_export_c2pa`, `c4_export_omc` | read-only                           |
-| providers  | `c4_get_capacity_forecast`, `c4_get_ingress` (section 16.1)                                         | read-only                           |
-| vendors    | `c4_get_license_usage`, `c4_export_license_usage` (section 16.2)                                    | read-only                           |
+| group      | tools                                                                                                                                                                                                                                                                                                                                               | annotations                                                      |
+| ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- |
+| inspect    | `c4_get_farm`, `c4_list_jobs`, `c4_get_job`, `c4_get_unit`, `c4_list_nodes`, `c4_get_tiers`, `c4_get_graph`, `c4_list_capacity_requests`, `c4_browse_view`, `c4_diff_views` (changed paths, objects and sizes between two views, or a commit and its merge base), `c4_follow_chain` (a chain's checkpoints after a given one, waiting for new ones) | read-only                                                        |
+| explain    | `c4_explain_job` (rank, slack decomposition, the limiting factor, the burst that would fix it), `c4_diagnose_failures` (failed units grouped by cause, suspect nodes, flaky shards, suggested actions), `c4_what_if_capacity`, `c4_get_cost`                                                                                                        | read-only                                                        |
+| lenses     | `c4_list_ci_changes` (pipelines, time to green, flaky targets, merge queue), `c4_list_ml_runs` (ranks, checkpoints, yields, useful GPU hours), `c4_get_preview` (frame list)                                                                                                                                                                        | read-only                                                        |
+| act        | `c4_submit_job` (with `dry_run`, which returns the estimate and feasibility first), `c4_hold_job`, `c4_release_job`, `c4_boost_job`, `c4_set_deadline`, `c4_requeue_units`, `c4_blacklist_node`                                                                                                                                                     | writes; idempotent with a name or nonce                          |
+| farm       | `c4_disable_node`, `c4_approve_burst`                                                                                                                                                                                                                                                                                                               | writes; `c4_approve_burst` spends money and is marked open-world |
+| migrate    | `c4_import_deadline_jobs` (dry run produces the translation report), `c4_set_deadline_routing`                                                                                                                                                                                                                                                      | writes                                                           |
+| provenance | `c4_trace_file`, `c4_trace_forward`, `c4_verify_record`, `c4_disclosure_report`, `c4_export_c2pa`, `c4_export_omc`                                                                                                                                                                                                                                  | read-only                                                        |
+| providers  | `c4_get_capacity_forecast`, `c4_get_ingress` (section 16.1)                                                                                                                                                                                                                                                                                         | read-only                                                        |
+| vendors    | `c4_get_license_usage`, `c4_export_license_usage` (section 16.2)                                                                                                                                                                                                                                                                                    | read-only                                                        |
 
 - **Within policy.** Reprioritizing is the nudges of section 10.9 and nothing
   else: hold, boost between 1 and 2 from the caller's own project quota, and
@@ -1902,7 +1957,8 @@ the project scopes of section 11.7 bind agents exactly as they bind people.
 
 ### 13.3 Claude skill
 
-A skill, `c4-farm`, teaches an agent to use the server well. Its
+A skill, `c4-farm` (`skills/c4-farm/SKILL.md`, built), teaches an agent to
+use the server well. Its
 `description` says what it does and when to use it (render jobs, frames,
 deadlines, CI pipelines, training runs on a c4 farm, and Deadline
 migration). Its body holds the playbooks, and its reference files hold the
@@ -1965,13 +2021,13 @@ Every submitter follows the same steps:
    frame range and passes;
 4. show the scheduler's estimate and slack before the artist confirms.
 
-| tool    | specifics                                                                                                   |
-| ------- | ----------------------------------------------------------------------------------------------------------- |
+| tool    | specifics                                                                                                       |
+| ------- | --------------------------------------------------------------------------------------------------------------- |
 | Houdini | a ROP for renders and a PDG (TOPs) scheduler; PDG work items map to units, and dynamic work items to generators |
-| Maya    | render layers become passes; renderer settings for Arnold, V-Ray, Redshift and RenderMan                    |
-| Nuke    | Write nodes become jobs, with dependencies on the renders they read                                         |
-| Blender | an add-on for Cycles and Eevee frame ranges                                                                 |
-| Unreal  | a Movie Render Queue executor; each shot is a job and its frames are units                                  |
+| Maya    | render layers become passes; renderer settings for Arnold, V-Ray, Redshift and RenderMan                        |
+| Nuke    | Write nodes become jobs, with dependencies on the renders they read                                             |
+| Blender | an add-on for Cycles and Eevee frame ranges                                                                     |
+| Unreal  | a Movie Render Queue executor; each shot is a job and its frames are units                                      |
 
 ### 15.2 Production tracking
 
@@ -2006,12 +2062,12 @@ prices and license servers below are sourced in `docs/research/ecosystem.md`.
   easy.
 - **Provider adapters.**
 
-| concern        | AWS                         | Google Cloud                   | Azure                          | CoreWeave                           | OCI                              |
-| -------------- | --------------------------- | ------------------------------ | ------------------------------ | ----------------------------------- | -------------------------------- |
-| capacity       | Karpenter NodePools, EKS Auto Mode | node auto-provisioning with ComputeClasses | node auto-provisioning (Karpenter-based) | Cluster Autoscaler on node pools; bare-metal scale-up takes 5 to 15 minutes | Cluster Autoscaler, or the Karpenter provider for OCI |
-| spot           | Karpenter `capacity-type: spot` | Spot VMs in a ComputeClass     | Spot node pools                | none documented                     | preemptible instances            |
-| object store   | S3                          | Cloud Storage XML API with HMAC keys | Blob has no S3 API: an adapter or gateway | AI Object Storage; virtual-hosted addressing only | S3 compatibility API with customer secret keys |
-| KMS            | AWS KMS                     | Cloud KMS                      | Key Vault                      | no KMS product: Vault or KMIP       | OCI Vault                        |
+| concern      | AWS                                | Google Cloud                               | Azure                                     | CoreWeave                                                                   | OCI                                                   |
+| ------------ | ---------------------------------- | ------------------------------------------ | ----------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------- |
+| capacity     | Karpenter NodePools, EKS Auto Mode | node auto-provisioning with ComputeClasses | node auto-provisioning (Karpenter-based)  | Cluster Autoscaler on node pools; bare-metal scale-up takes 5 to 15 minutes | Cluster Autoscaler, or the Karpenter provider for OCI |
+| spot         | Karpenter `capacity-type: spot`    | Spot VMs in a ComputeClass                 | Spot node pools                           | none documented                                                             | preemptible instances                                 |
+| object store | S3                                 | Cloud Storage XML API with HMAC keys       | Blob has no S3 API: an adapter or gateway | AI Object Storage; virtual-hosted addressing only                           | S3 compatibility API with customer secret keys        |
+| KMS          | AWS KMS                            | Cloud KMS                                  | Key Vault                                 | no KMS product: Vault or KMIP                                               | OCI Vault                                             |
 
   The S3 client therefore supports virtual-hosted addressing with custom
   endpoints, and the KMS interface has a Vault backend.
@@ -2078,11 +2134,11 @@ channel, and studios on other clouds have none at all.
 
 ### 16.3 A face for each side
 
-| audience          | documentation                                         | agent tools                                   | HUD lens                                  |
-| ----------------- | ----------------------------------------------------- | --------------------------------------------- | ----------------------------------------- |
-| studios           | production guides: submitting, deadlines, previews, provenance | the tools of section 13.2                    | render, CI, ML, provenance, cost          |
-| cloud providers   | hosting a regional tier, capacity adapters, marketplace packaging | capacity forecast, ingress and burst queries | capacity and ingress                      |
-| software vendors  | registering products, license adapters, usage export  | usage queries and exports for their products  | usage and revenue                         |
+| audience         | documentation                                                     | agent tools                                  | HUD lens                         |
+| ---------------- | ----------------------------------------------------------------- | -------------------------------------------- | -------------------------------- |
+| studios          | production guides: submitting, deadlines, previews, provenance    | the tools of section 13.2                    | render, CI, ML, provenance, cost |
+| cloud providers  | hosting a regional tier, capacity adapters, marketplace packaging | capacity forecast, ingress and burst queries | capacity and ingress             |
+| software vendors | registering products, license adapters, usage export              | usage queries and exports for their products | usage and revenue                |
 
 ## 17. Packaging and deployment
 

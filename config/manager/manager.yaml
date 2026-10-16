@@ -32,6 +32,7 @@ spec:
         ports:
         - {name: webhook, containerPort: 9443}
         - {name: metrics, containerPort: 8080}
+        - {name: hud, containerPort: 8090}
         readinessProbe:
           httpGet: {path: /readyz, port: 8081}
         livenessProbe:
@@ -48,3 +49,19 @@ spec:
       volumes:
       - name: tmp
         emptyDir: {}
+---
+# The HUD: the web app and its API. Put an SSO proxy (or an Ingress with
+# authentication) in front of it, or reach it with bearer tokens.
+apiVersion: v1
+kind: Service
+metadata:
+  name: c4-hud
+  labels:
+    app.kubernetes.io/name: c4-operator
+    app.kubernetes.io/component: hud
+spec:
+  selector:
+    app.kubernetes.io/name: c4-operator
+    app.kubernetes.io/component: manager
+  ports:
+  - {name: hud, port: 80, targetPort: 8090}

@@ -50,13 +50,16 @@ type Queue struct {
 	// annotation before it counts as done without one.
 	CaptureWait time.Duration
 
-	mu    sync.Mutex
-	folds int
-	st    sched.State
-	jobs  map[types.UID]*jobMem
-	spent map[string]float64 // burst dollars per project today
-	day   int
-	last  time.Time
+	mu      sync.Mutex
+	folds   int
+	st      sched.State
+	jobs    map[types.UID]*jobMem
+	spentMu sync.Mutex
+	spent   map[string]float64 // burst dollars per project today
+	day     int
+	last    time.Time
+	// Loc is the farm's time zone, for the times in estimate messages.
+	Loc *time.Location
 	// Stores opens a project's store, to fold unit changesets into job
 	// outputs. Without it, outputs are not folded.
 	Stores StoreFunc
@@ -77,7 +80,13 @@ func (q *Queue) Start(ctx context.Context) error {
 		q.Policy = sched.Decide
 	}
 	if q.Now == nil {
-		q.Now = time.Now
+		loc := q.Loc
+		if loc == nil {
+			loc = time.UTC
+		}
+		// The policy writes times into its messages; they read in the
+		// farm's own time zone.
+		q.Now = func() time.Time { return time.Now().In(loc) }
 	}
 	if q.CaptureWait <= 0 {
 		q.CaptureWait = 2 * time.Minute
@@ -229,12 +238,16 @@ func (q *Queue) Tick(ctx context.Context) error {
 	defer q.mu.Unlock()
 	if q.jobs == nil {
 		q.jobs = map[types.UID]*jobMem{}
+		q.spentMu.Lock()
 		q.spent = map[string]float64{}
+		q.spentMu.Unlock()
 	}
 	q.folds = 0
 	now := q.Now()
 	if d := now.YearDay(); d != q.day {
+		q.spentMu.Lock()
 		q.day, q.spent = d, map[string]float64{}
+		q.spentMu.Unlock()
 	}
 
 	var (
@@ -568,7 +581,7 @@ func (q *Queue) snapshot(now time.Time, pools map[string]*pool, projects []c4v1.
 				sp.Quotas[qt.Pool] = sched.Quota{Nominal: int(qt.Nominal), BorrowingLimit: bl}
 			}
 			sp.Weight = floatOr(w.FairShareWeight, 1)
-			sp.BurstBudgetLeft = math.Max(0, floatOr(w.BurstBudgetPerDay, 0)-q.spent[p.Name])
+			sp.BurstBudgetLeft = math.Max(0, floatOr(w.BurstBudgetPerDay, 0)-q.Spent(p.Name))
 			sp.LateCostPerHour = floatOr(w.LateCostPerHour, 0)
 		}
 		s.Projects = append(s.Projects, sp)
@@ -839,7 +852,9 @@ func (q *Queue) meter(now time.Time, views []*view, pools map[string]*pool) {
 			if p == nil || p.spec.Spec.Burst == nil {
 				continue
 			}
+			q.spentMu.Lock()
 			q.spent[v.project] += float64(r.slots) * p.burstCost * h
+			q.spentMu.Unlock()
 		}
 	}
 }
@@ -997,3 +1012,10 @@ func (q *Queue) foldPod(ctx context.Context, v *view, p *corev1.Pod, idx int) bo
 
 // maxFoldsPerTick bounds the store work one tick does.
 const maxFoldsPerTick = 32
+
+// Spent is a project's burst spending today, in US dollars.
+func (q *Queue) Spent(project string) float64 {
+	q.spentMu.Lock()
+	defer q.spentMu.Unlock()
+	return q.spent[project]
+}

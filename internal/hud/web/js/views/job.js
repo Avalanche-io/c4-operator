@@ -173,7 +173,7 @@ export default {
       h('div', { class: 'jhead' },
         h('div', null,
           h('h1', null, j.name),
-          h('div', { class: 'jmeta' }, classChip(j, cls), phaseText(j), h('span', null, `#${j.rank} in dispatch order`),
+          h('div', { class: 'jmeta' }, classChip(j, cls), phaseText(j), h('span', null, j.rank > 0 ? `#${j.rank} in dispatch order` : 'not in the queue'),
             h('span', null, orderText(j.order)), h('span', { class: 'num' }, j.pools.join(' + ')),
             j.owner ? h('span', null, `owner ${j.owner}`) : null,
             h('span', { class: 'dimmer' }, `created ${f.clock(j.createdAt)}`),

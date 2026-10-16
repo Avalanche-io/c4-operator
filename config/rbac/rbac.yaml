@@ -90,6 +90,40 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-queue
 subjects:
 - {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
+# HUD (in the manager): reads unit pod logs and events, scrapes the node
+# daemons' and regional replicas' metrics, authenticates viewers
+# (TokenReview), checks each viewer's access and each control's write
+# (SubjectAccessReview), makes the control's write, and records it as an
+# Event naming the user.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-hud
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs, capacityrequests]
+  verbs: [get, list, watch, patch]
+- apiGroups: [""]
+  resources: [pods/log]
+  verbs: [get]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [list, create]
+- apiGroups: [authentication.k8s.io]
+  resources: [tokenreviews]
+  verbs: [create]
+- apiGroups: [authorization.k8s.io]
+  resources: [subjectaccessreviews]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-hud
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-hud}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
 # Node daemon: reads Projects, Materializations (by name, on demand) and
 # the Nodes of its locality; validates pod and tier tokens; annotates pods
 # with capture results. A ValidatingAdmissionPolicy (config/policy)

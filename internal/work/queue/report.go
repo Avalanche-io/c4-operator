@@ -202,7 +202,11 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	e := &c4v1.WorkEstimate{
 		RequiredSlots: fmt.Sprintf("%.2f", js.Required), AttainableSlots: fmt.Sprintf("%.2f", js.Attainable),
 		RunningSlots: int32(js.RunningSlots), SlackSeconds: int64(js.Slack.Seconds()),
-		Feasible: js.Feasible, AtRisk: js.AtRisk, Message: js.Message,
+		Feasible: js.Feasible, AtRisk: js.AtRisk,
+	}
+	// The message is a warning: kept only when the job is at risk.
+	if js.AtRisk || !js.Feasible {
+		e.Message = js.Message
 	}
 	if !js.ETA50.IsZero() {
 		e.ETA50 = &metav1.Time{Time: js.ETA50.Truncate(time.Second)}
