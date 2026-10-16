@@ -53,6 +53,9 @@ type Options struct {
 	MaxCommits int
 	// Since imports only commits after this one.
 	Since string
+	// Ref labels the commits in the mapping (for example refs/heads/main),
+	// so a later import of the same ref can start after the last one.
+	Ref string
 
 	// Sink receives file objects, records and changesets.
 	Sink Sink
@@ -62,6 +65,9 @@ type Options struct {
 	// Known maps commits imported earlier to their view IDs. They are
 	// skipped, and a later commit's parent view is taken from here.
 	Known map[string]c4.ID
+	// KnownFiles holds the file counts of commits in Known, so a continued
+	// import does not list its parent's tree to start its running count.
+	KnownFiles map[string]int
 
 	// C4Git is the c4git store. Nil means none: pointer files that
 	// cannot be resolved are reported missing.
@@ -83,7 +89,12 @@ type Options struct {
 // mapping file.
 type Commit struct {
 	Commit string `json:"commit"`
-	Parent string `json:"parent,omitempty"`
+	Ref    string `json:"ref,omitempty"`
+	// RefOnly marks a line that only records where a ref points (a ref
+	// created or moved to a commit imported earlier, or deleted when
+	// Commit is empty); it carries no import work.
+	RefOnly bool   `json:"refOnly,omitempty"`
+	Parent  string `json:"parent,omitempty"`
 	// Base marks a commit imported in full from ls-tree because it is the
 	// parent of the imported range (or a root commit). Its changeset is
 	// relative to the empty view.
@@ -264,7 +275,7 @@ func Run(ctx context.Context, opts Options) (*Summary, error) {
 // importBase imports one commit in full from ls-tree, over the empty view.
 func (im *importer) importBase(c commit) (*Commit, error) {
 	start := time.Now()
-	im.cur = &Commit{Commit: c.sha, Parent: c.parent, Base: true, ParentView: view.EmptyID()}
+	im.cur = &Commit{Commit: c.sha, Ref: im.opts.Ref, Parent: c.parent, Base: true, ParentView: view.EmptyID()}
 	list, err := lsTree(im.ctx, im.opts.Repo, c.sha)
 	if err != nil {
 		return nil, err
@@ -324,7 +335,7 @@ func (im *importer) importDiffs(history []commit, prev c4.ID) (c4.ID, error) {
 				return prev, err
 			}
 		}
-		im.cur = &Commit{Commit: c.sha, Parent: c.parent, ParentView: prev}
+		im.cur = &Commit{Commit: c.sha, Ref: im.opts.Ref, Parent: c.parent, ParentView: prev}
 		edits, err := im.changes(c.sha, changes)
 		if err != nil {
 			return prev, err
@@ -349,6 +360,9 @@ func (im *importer) importDiffs(history []commit, prev c4.ID) (c4.ID, error) {
 func (im *importer) countFiles(rev string) (int, error) {
 	if len(im.sum.Commits) > 0 {
 		return im.sum.Commits[len(im.sum.Commits)-1].Files, nil
+	}
+	if n, ok := im.opts.KnownFiles[rev]; ok {
+		return n, nil
 	}
 	list, err := lsTree(im.ctx, im.opts.Repo, rev)
 	if err != nil {
@@ -734,16 +748,20 @@ func (im *importer) finish(parent c4.ID, edits []view.Edit, start time.Time) (*C
 	if err := im.wait(); err != nil {
 		return nil, err
 	}
+	// The root record and the changeset together: resolving the changeset
+	// reads the parent's records and the new ones below the root, which
+	// are all stored by now.
 	for _, obj := range [][]byte{root, res.Changeset} {
 		if len(obj) == 0 {
 			continue
 		}
-		t := time.Now()
 		id := c4.Identify(bytes.NewReader(obj))
-		if _, err := im.opts.Sink.Put(im.ctx, id, int64(len(obj)), bytes.NewReader(obj)); err != nil {
-			return nil, fmt.Errorf("store %s: %w", id, err)
-		}
-		im.up.busy += time.Since(t)
+		im.async("store "+id.String(), 0, false, func() (bool, error) {
+			return im.opts.Sink.Put(im.ctx, id, int64(len(obj)), bytes.NewReader(obj))
+		})
+	}
+	if err := im.wait(); err != nil {
+		return nil, err
 	}
 	im.cur.RecordsWritten = len(res.Records)
 	im.cur.Changeset = res.ChangesetID

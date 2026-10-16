@@ -34,6 +34,15 @@ func git(ctx context.Context, repo string, args ...string) ([]byte, error) {
 	return out, nil
 }
 
+// ResolveCommit returns the commit SHA rev names in repo.
+func ResolveCommit(ctx context.Context, repo, rev string) (string, error) {
+	out, err := git(ctx, repo, "rev-parse", "--verify", "--end-of-options", rev+"^{commit}")
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // commit is one commit of the first-parent history.
 type commit struct {
 	sha    string

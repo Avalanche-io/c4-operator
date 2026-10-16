@@ -17,6 +17,7 @@ fi
 go build -o "$BIN/c4-operator" ./cmd/c4-operator
 go build -o "$BIN/monorepo" ./hack/e2e/monorepo
 go build -o "$BIN/measure" ./hack/e2e/monorepo/measure
+go build -o "$BIN/pushlat" ./hack/e2e/monorepo/pushlat
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -50,6 +51,9 @@ for sha in $(git -C "$OUT/repo" rev-list --first-parent HEAD | awk 'NR % 40 == 1
 	rm -rf "$OUT/wt/$sha"
 done
 git -C "$OUT/repo" worktree prune
+
+echo "== push-to-view latency (post-receive hook, and webhook to a listener with a mirror)"
+"$BIN/pushlat" -repo "$OUT/repo" -out "$OUT/pushlat" -bin "$BIN" -small 30 -assets 10 -asset-mb 3
 
 echo "== import again into the same shards (everything present)"
 "$BIN/c4-operator" import-git -repo "$OUT/repo" $S -out "$OUT/map-again.jsonl" -quiet

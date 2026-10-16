@@ -24,12 +24,14 @@ GOBIN=$PWD/bin go install github.com/Avalanche-io/c4git/cmd/c4git@latest
 go build -o bin/c4-operator ./cmd/c4-operator
 go build -o bin/monorepo ./hack/e2e/monorepo
 go build -o bin/measure ./hack/e2e/monorepo/measure
+go build -o bin/pushlat ./hack/e2e/monorepo/pushlat
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 bin/monorepo -out $OUT/repo -c4git bin/c4git -seed 1 -services 150 -commits 400
 bin/c4-operator import-git -repo $OUT/repo \
     -store $OUT/shards/a -store $OUT/shards/b -store $OUT/shards/c -out $OUT/map.jsonl
 # sampled checkouts: git worktree add (c4git smudge), then c4-operator tree-id
+bin/pushlat -repo $OUT/repo -out $OUT/pushlat -bin bin -small 30 -assets 10 -asset-mb 3
 bin/c4-operator import-git -repo $OUT/repo -store ... -out $OUT/map-again.jsonl -quiet
 bin/measure -repo $OUT/repo -runs 3
 bin/c4-operator import-git -repo $OUT/repo -rev HEAD~100 -store ... -out $OUT/map-inc.jsonl -quiet
@@ -43,7 +45,7 @@ bin/monorepo -out $OUT/repo-teams -c4git bin/c4git -seed 1 -services 600 -teams 
 
 `bin/measure` runs the same importer into a sink that stores nothing. That
 isolates the importer's own cost (git, hashing, records) from the store's
-write latency.
+write latency. `bin/pushlat` measures push-to-view latency (below).
 
 ## The repository
 
@@ -67,7 +69,7 @@ are fixed, so two runs with seed 1 produce the same head,
 
 | repository         | tracked files at head | .git   | c4git store |
 | ------------------ | --------------------- | ------ | ----------- |
-| `repo` (150 svcs)  | 2,218                 | 4.1 MB | 167 MB      |
+| `repo` (150 svcs)  | 2,218                 | 4.2 MB | 167 MB      |
 | `repo-large` (600) | 8,555                 |        |             |
 | `repo-teams` (600) | 8,555                 |        |             |
 
@@ -81,27 +83,74 @@ view ID the import recorded. Continuing an import (301 commits, then the
 remaining 100 from the mapping file) ends at the same head view as one
 full import:
 `c45q8vJ413Lw8xuabUkon9XiG9jmskZVRRmyp3eG3DCsaxfaCKA7Q6fMcbtMk9wkoGv1rp2HemY9xFqayMiYD3mq6t`.
+Every pushed commit in the latency run below resolved through
+`view.FromID` on its changeset to its view, with the parent's view as the
+chain base.
+
+## Push-to-view latency
+
+`bin/pushlat` clones the repository, then makes 40 commits in random order:
+30 small ones (1 to 3 Go files of one service) and 10 that add a 3 MB c4git
+asset. It pushes each commit to three bare remotes:
+
+- **plain**: no hook. This is what the push alone costs.
+- **hook**: a self-hosted remote whose `post-receive` hook runs
+  `c4-operator import-git -post-receive`. It imports the ref's commits
+  after the last one the mapping records for that ref.
+- **webhook**: a remote whose `post-receive` hook POSTs `{"ref", "after"}`
+  with curl to `c4-operator import-git -listen`. The listener runs `git
+  fetch` into its mirror, then imports. This is a git host webhook without
+  the host's delivery delay.
+
+git waits for `post-receive`, so the push returns once the import is done.
+"View stored" is the time from starting `git push` until the commit's
+mapping line exists and its root record and changeset are in the store.
+The developer's clone and the importer share one c4git store, which the
+importer needs in order to find pushed assets.
+
+| commit | path    | push returns (p50 / p90) | view stored (p50 / p90 / max) | import of the commit (p50) |
+| ------ | ------- | ------------------------ | ----------------------------- | -------------------------- |
+| small  | plain   | 83 / 104 ms              |                               |                            |
+| small  | hook    | 168 / 218 ms             | 169 / 218 / 242 ms            | 46 ms                      |
+| small  | webhook | 246 / 314 ms             | 247 / 315 / 357 ms            | 46 ms                      |
+| asset  | plain   | 98 / 110 ms              |                               |                            |
+| asset  | hook    | 206 / 243 ms             | 206 / 244 / 259 ms            | 58 ms                      |
+| asset  | webhook | 305 / 337 ms             | 306 / 337 / 339 ms            | 56 ms                      |
+
+So the hook adds about 85 ms to a small push: 46 ms imports the commit
+(three fsync rounds into the local shards) and the rest is fixed cost.
+That fixed cost is the importer's process start, reading the mapping, and
+git's rev-parse and rev-list. A no-op hook run takes 25 to 40 ms. The
+webhook path adds about another 80 ms, mostly the listener's `git fetch`
+into its mirror: the listener's own time per request was 143 ms at p50 and
+190 ms at p90, fetch included. The 3 MB asset adds 10 to 12 ms of import
+time, which is the copy from the c4git store, and about 15 ms of push time,
+which is c4git's clean filter at commit time and the larger push. A full
+resolution of the new view through `view.FromID` (every record of the
+2,231-file view) took 135 ms for small commits and 160 to 167 ms for asset
+commits. A sparse CI checkout reads only its include set.
 
 ## Results: `repo`, 401 commits
 
 | measure                                        | value                                  |
 | ---------------------------------------------- | -------------------------------------- |
-| total import, three local shards               | 35.8 s wall, 2.3 s user, 4.7 s sys     |
-| base commit (2,134 files, full ls-tree import) | 14.4 s, 2,039 objects, 130 MiB         |
-| per later commit, local shards                 | p50 40.9 ms, p90 57.3 ms, p99 141 ms   |
-| per later commit, max                          | 1,983 ms (an fsync stall, see below)   |
-| per later commit, importer alone               | p50 2.8 ms, p90 3.2 ms, p99 12.2 ms    |
-| whole history, importer alone                  | 1.28 s (base 156 ms)                   |
+| total import, three local shards               | 37.8 s wall, 2.3 s user, 4.7 s sys     |
+| base commit (2,134 files, full ls-tree import) | 18.1 s, 2,039 objects, 130 MiB         |
+| per later commit, local shards                 | p50 37.0 ms, p90 55.1 ms, p99 162 ms   |
+| per later commit, max                          | 1,755 ms (an fsync stall, see below)   |
+| per later commit, importer alone               | p50 3.0 ms, p90 3.3 ms, p99 12.9 ms    |
+| whole history, importer alone                  | 1.33 s (base 158 ms)                   |
 | objects uploaded                               | 3,045 (176.1 MiB)                      |
 | objects already present                        | 0 on a fresh store                     |
-| re-import into the same shards                 | 1.33 s; 0 uploaded, 3,045 present      |
+| re-import into the same shards                 | 1.37 s; 0 uploaded, 3,045 present      |
 | git blobs read                                 | 3,047: 2,985 hashed, 62 c4git pointers |
 | c4git objects used by ID, no rehash            | 62 (166.7 MiB), copied store to store  |
 | parent records read / new records              | 2,128 / 3,301                          |
 | records per later commit                       | read p50 5 (max 8), new p50 6 (max 12) |
 | largest view                                   | 2,226 files, 2 symlinks, 1,132 dirs    |
 | largest view, bytes                            | 139.9 MiB, 2,127 unique objects        |
-| newest 50 commits only (`-max-commits 50`)     | 17.5 s, base plus 50, 2,239 objects    |
+| continue: 100 commits after 301 imported       | 4.8 s, 253 objects uploaded            |
+| newest 50 commits only (`-max-commits 50`)     | 21.5 s, base plus 50, 2,239 objects    |
 
 Each git blob is read once in the whole import. Of the 3,047 blobs read,
 2,983 are file content (hashed and uploaded), 2 are symlink targets, and 62
@@ -110,22 +159,22 @@ c4git objects. The 166.7 MiB of asset content was never hashed by the
 importer; it was copied under the IDs c4git computed at `git add`.
 
 The local TreeStore makes every write durable with a full fsync, which is
-most of the per-commit wall time: the importer alone takes 2.8 ms at p50,
-and three fsync rounds per commit (file objects and inner records in
-parallel, then the root record, then the changeset) take the rest. The
-outliers of one to two seconds are commits of one or two small files whose
-summed store time was several seconds, which is APFS flush latency, not
-importer work. Against S3 the same structure applies with a network round
-trip (a Head, then a Put when absent) in place of each fsync; the importer
-issues up to `-jobs` (default 8) writes at once.
+most of the per-commit wall time: the importer alone takes 3.0 ms at p50,
+and three fsync rounds per commit take the rest. Those rounds are: file
+objects and inner records in parallel, then the root record and the
+changeset together. The outliers of one to two seconds are commits of one
+or two small files whose summed store time was several seconds, which is
+APFS flush latency, not importer work. Against S3 the same structure
+applies with a network round trip (a Head, then a Put when absent) in place
+of each fsync; the importer issues up to `-jobs` (default 8) writes at once.
 
 ## Cost follows the change, measured on three layouts
 
 | repository                   | files | per commit, importer alone (run 1 of 3) | new record bytes per commit (p50) |
 | ---------------------------- | ----- | --------------------------------------- | --------------------------------- |
-| `repo`, 150 flat services    | 2,218 | p50 2.8 ms, p90 3.2 ms                  | 20,246                            |
-| `repo-large`, 600 flat       | 8,555 | p50 9.5 ms, p90 10.2 ms                 | 73,504                            |
-| `repo-teams`, 600 in 24 dirs | 8,555 | p50 1.2 ms, p90 1.6 ms                  | 7,926                             |
+| `repo`, 150 flat services    | 2,218 | p50 3.0 ms, p90 3.3 ms                  | 20,246                            |
+| `repo-large`, 600 flat       | 8,555 | p50 10.3 ms, p90 13.1 ms                | 73,504                            |
+| `repo-teams`, 600 in 24 dirs | 8,555 | p50 1.3 ms, p90 1.8 ms                  | 7,926                             |
 
 The three histories make the same kinds of changes. Records read and
 written per commit are the same small numbers in all three (read p50 5 or
@@ -135,16 +184,15 @@ records, since a record is a one-level listing that is rewritten when any
 child changes. With 600 services in one `services/` directory, every service
 commit rewrites a 600-entry listing; with the same 8,555 files grouped under
 24 team directories, the rewritten listings are small and a commit costs
-1.2 ms, less than in the 2,218-file flat repository. Repository size alone
+1.3 ms, less than in the 2,218-file flat repository. Repository size alone
 does not enter.
 
 A CPU profile of the 600-flat case puts most of the importer's time in
 `c4.ID.String` (base58 through `math/big`) while canonicalizing those
 listings.
 
-Full imports into local shards: `repo-large` 101.5 s (base 79.6 s for 7,854
-objects and 4,229 records), `repo-teams` 95.1 s; per later commit p50 42 ms
-and 47 ms, again mostly fsync.
+Full imports into local shards: `repo-large` 107.7 s, `repo-teams` 97.0 s;
+per later commit p50 53 ms and 40 ms, again mostly fsync.
 
 ## Notes
 

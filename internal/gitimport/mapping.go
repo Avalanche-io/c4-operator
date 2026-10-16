@@ -51,7 +51,33 @@ func DecodeMapping(r io.Reader) ([]Commit, error) {
 func KnownViews(m []Commit) map[string]c4.ID {
 	out := make(map[string]c4.ID, len(m))
 	for _, c := range m {
-		out[c.Commit] = c.View
+		if c.Commit != "" {
+			out[c.Commit] = c.View
+		}
+	}
+	return out
+}
+
+// KnownFiles returns commit to file count for a mapping.
+func KnownFiles(m []Commit) map[string]int {
+	out := make(map[string]int, len(m))
+	for _, c := range m {
+		if c.Commit != "" && !c.RefOnly {
+			out[c.Commit] = c.Files
+		}
+	}
+	return out
+}
+
+// LastByRef returns, for each ref the mapping labels, the newest commit
+// recorded for it: where an import of that ref can continue. A deleted
+// ref maps to "".
+func LastByRef(m []Commit) map[string]string {
+	out := map[string]string{}
+	for _, c := range m {
+		if c.Ref != "" {
+			out[c.Ref] = c.Commit
+		}
 	}
 	return out
 }
@@ -63,11 +89,18 @@ type MappingWriter struct {
 	enc *json.Encoder
 }
 
-// AppendMapping opens p for appending, creating it if needed.
+// AppendMapping opens p for appending, creating it if needed. It holds an
+// exclusive lock on the file until Close, so concurrent imports (two
+// post-receive hooks, or a hook and a listener) take turns; open the
+// writer before reading the mapping to see what the previous holder wrote.
 func AppendMapping(p string) (*MappingWriter, error) {
 	f, err := os.OpenFile(p, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return nil, err
+	}
+	if err := lockFile(f); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("lock %s: %w", p, err)
 	}
 	return &MappingWriter{f: f, enc: json.NewEncoder(f)}, nil
 }

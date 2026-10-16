@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -42,6 +43,14 @@ content's IDs, and their objects are copied from the c4git store without
 rehashing. With --out, one JSON line per commit is appended, and a later
 run continues after the newest commit the file lists.
 
+Push-driven modes (both need --out, which holds the last commit per ref):
+
+  --since-last --ref R   import only R's commits after the last one imported
+  --post-receive         run as a git post-receive hook: read "<old> <new>
+                         <ref>" lines and import each ref's new commits
+  --listen ADDR          serve push webhooks (POST /import with ref and
+                         after), GET /refs and GET /commits/SHA
+
 S3 shards take credentials from AWS_ACCESS_KEY_ID and
 AWS_SECRET_ACCESS_KEY.
 
@@ -54,10 +63,17 @@ func runImportGit(args []string) error {
 		fmt.Fprint(fs.Output(), importGitUsage)
 		fs.PrintDefaults()
 	}
-	repo := fs.String("repo", ".", "git repository")
-	rev := fs.String("rev", "HEAD", "revision whose first-parent history is imported")
+	repo := fs.String("repo", "", "git repository (default: $GIT_DIR in a hook, else .)")
+	rev := fs.String("rev", "", "revision whose first-parent history is imported (default: --ref, else HEAD)")
+	ref := fs.String("ref", "", "ref the commits are recorded under in the mapping, e.g. refs/heads/main")
 	maxCommits := fs.Int("max-commits", 0, "import only the newest N commits (0: all)")
 	since := fs.String("since", "", "import only commits after this one")
+	sinceLast := fs.Bool("since-last", false, "import only commits after the last one the mapping records for --ref")
+	postReceive := fs.Bool("post-receive", false, "run as a git post-receive hook")
+	listen := fs.String("listen", "", "serve push webhooks on this address, e.g. :8790")
+	secretEnv := fs.String("webhook-secret-env", "C4_WEBHOOK_SECRET", "environment variable holding the webhook secret (unset: no check)")
+	fetch := fs.Bool("fetch", false, "git fetch origin before each import (the repository is a mirror of the git host)")
+	name := fs.String("name", "", "repository name a webhook may give in \"repo\" (default: the directory name)")
 	var shards listFlag
 	fs.Var(&shards, "store", "project store shard as NAME=URL or a bare URL (s3://, c4d://, http(s)://, /path); names decide placement and must match the Project; repeatable or comma-separated; default $C4_STORE")
 	c4gitStore := fs.String("c4git-store", "", "c4git store directory (default REPO/.c4/store when it exists)")
@@ -69,11 +85,23 @@ func runImportGit(args []string) error {
 		fs.Usage()
 		return errors.New("unexpected arguments")
 	}
+	if *repo == "" {
+		*repo = "."
+		if d := os.Getenv("GIT_DIR"); *postReceive && d != "" {
+			*repo = d
+		}
+	}
+	// A hook's environment points git at the hook's repository; the
+	// importer names its repository explicitly instead.
+	os.Unsetenv("GIT_DIR")
 	if len(shards) == 0 {
 		shards.Set(os.Getenv("C4_STORE"))
 	}
 	if len(shards) == 0 {
 		return errors.New("no project store: pass --store or set C4_STORE")
+	}
+	if (*postReceive || *listen != "" || *sinceLast) && *out == "" {
+		return errors.New("--post-receive, --listen and --since-last need --out, the mapping that records each ref")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -88,53 +116,45 @@ func runImportGit(args []string) error {
 	if err != nil {
 		return err
 	}
-	sink := &gitimport.ShardedSink{S: st}
-	opts := gitimport.Options{
-		Repo: *repo, Rev: *rev, MaxCommits: *maxCommits, Since: *since,
-		Sink:    sink,
-		Jobs:    *jobs,
-		Records: view.StoreRecords(st),
-		Warn:    func(s string) { fmt.Fprintln(os.Stderr, "warning: "+s) },
+	svc := &importService{
+		base: gitimport.Options{
+			Repo: *repo, MaxCommits: *maxCommits, Since: *since,
+			Sink:    &gitimport.ShardedSink{S: st},
+			Jobs:    *jobs,
+			Records: view.StoreRecords(st),
+			Warn:    func(s string) { fmt.Fprintln(os.Stderr, "warning: "+s) },
+		},
+		out: *out, fetch: *fetch, quiet: *quiet, log: os.Stdout, name: *name,
 	}
-
+	if svc.name == "" {
+		abs, _ := filepath.Abs(*repo)
+		svc.name = strings.TrimSuffix(filepath.Base(abs), ".git")
+	}
 	src, err := openC4GitStore(*repo, *c4gitStore)
 	if err != nil {
 		return err
 	}
 	if src != nil {
-		opts.C4Git = src
+		svc.base.C4Git = src
 	}
 
-	var mw *gitimport.MappingWriter
-	if *out != "" {
-		prior, err := gitimport.ReadMapping(*out)
-		if err != nil {
-			return err
-		}
-		opts.Known = gitimport.KnownViews(prior)
-		if mw, err = gitimport.AppendMapping(*out); err != nil {
-			return err
-		}
-		defer mw.Close()
+	switch {
+	case *listen != "":
+		svc.log = os.Stderr
+		return svc.listen(ctx, *listen, os.Getenv(*secretEnv))
+	case *postReceive:
+		svc.quiet = true
+		return svc.postReceive(ctx, os.Stdin, os.Stdout)
 	}
-	var writeErr error
-	opts.Progress = func(c gitimport.Commit) {
-		if mw != nil && writeErr == nil {
-			writeErr = mw.Write(c)
-		}
-		if !*quiet {
-			printCommit(c)
-		}
-	}
-
-	sum, err := gitimport.Run(ctx, opts)
+	res, err := svc.importRef(ctx, *ref, *rev, *sinceLast)
 	if err != nil {
 		return err
 	}
-	if writeErr != nil {
-		return fmt.Errorf("mapping file: %w", writeErr)
+	if *sinceLast {
+		fmt.Println(res.line())
+		return nil
 	}
-	return printSummary(ctx, sum, st)
+	return printSummary(ctx, res.summary, st)
 }
 
 // openC4GitStore opens the c4git store: the flag's directory, or the
@@ -150,12 +170,12 @@ func openC4GitStore(repo, dir string) (gitimport.Source, error) {
 	return gitimport.OpenTreeSource(def)
 }
 
-func printCommit(c gitimport.Commit) {
+func printCommitTo(w io.Writer, c gitimport.Commit) {
 	kind := ""
 	if c.Base {
 		kind = " base"
 	}
-	fmt.Printf("%s%s view %s +%d ~%d -%d files %d up %d/%s present %d/%s c4git %d records r%d w%d %.1fms (store %.1fms)\n",
+	fmt.Fprintf(w, "%s%s view %s +%d ~%d -%d files %d up %d/%s present %d/%s c4git %d records r%d w%d %.1fms (store %.1fms)\n",
 		short(c.Commit), kind, shortID(c.View), c.Added, c.Modified, c.Deleted, c.Files,
 		c.ObjectsUploaded, human(c.BytesUploaded), c.ObjectsPresent, human(c.BytesPresent),
 		c.C4GitObjects, c.RecordsRead, c.RecordsWritten, c.Millis, c.SinkMillis)
