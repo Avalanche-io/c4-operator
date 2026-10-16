@@ -2211,7 +2211,7 @@ above. `REPORT-v2.md` has the numbers.
   `hack/e2e/monorepo/pushlat` (`hack/e2e/monorepo/RESULTS.md`), not against
   MinIO.
 - **P5** ran deadlines, binary order with its estimate scored against what
-  the units cost, a CI change under a latency target, two training runs
+  the units cost, a CI change under a latency target, training runs
   yielding at checkpoints and resuming from their captured views, and a burst
   through the kind-sim provider, with live HUD screenshots. Not shown on the
   cluster: a comp job pipelined on a render's output chain (each job's

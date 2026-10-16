@@ -121,15 +121,17 @@ $(ci change-head head "$VIEW")
 $(ci change-head-rerun head "$VIEW")"
 
 log "the same commit checked out by git with c4git"
-rm -rf "$OUT/p4-clone"
+# Outside the module, so Go tooling never sees the synthetic sources.
+CLONE=$(mktemp -d)/clone
 t0=$(now)
-git clone -q --no-checkout "$REPO" "$OUT/p4-clone"
-git -C "$OUT/p4-clone" config filter.c4.smudge "$ROOT/bin/c4git smudge %f"
-git -C "$OUT/p4-clone" config filter.c4.clean "$ROOT/bin/c4git clean %f"
-C4_STORE="$REPO/.c4/store" git -C "$OUT/p4-clone" checkout -q "$HEAD"
-rm -rf "$OUT/p4-clone/.git"
+git clone -q --no-checkout "$REPO" "$CLONE"
+git -C "$CLONE" config filter.c4.smudge "$ROOT/bin/c4git smudge %f"
+git -C "$CLONE" config filter.c4.clean "$ROOT/bin/c4git clean %f"
+C4_STORE="$REPO/.c4/store" git -C "$CLONE" checkout -q "$HEAD"
+rm -rf "$CLONE/.git"
 CLONE_S=$(since "$t0")
-CLONE_ID=$("$TOOL" tree-id "$OUT/p4-clone" 2>/dev/null || echo "")
+CLONE_ID=$("$TOOL" tree-id "$CLONE" 2>/dev/null || echo "")
+rm -rf "$(dirname "$CLONE")"
 
 log "API-only diffs between commits"
 DIFFS=""
