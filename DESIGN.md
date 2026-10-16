@@ -162,16 +162,32 @@ view ID: they fetch the root record, then the records of subdirectories,
 then file objects, all through the tiers. This is Scion's fetch order, and it
 means 5,000 nodes resolving the same view hit their caches for records too.
 
-### 2.3 Changesets
+### 2.3 Changesets and chains
 
 A **changeset** is a c4m patch: a bare C4 ID on the first line naming the
-parent view, followed by `c4m.PatchDiff` entries. Additions and
-modifications are emitted with their new IDs, removals as exact duplicates
-of the parent's entries, and directories along changed paths with their new
-IDs. `c4m.ApplyPatch`, `c4m.ResolveBase` and `c4 cat` read it unchanged.
+parent view, then the changed entries, then a bare C4 ID naming the view the
+patch produces. Additions and modifications are emitted with their new IDs,
+removals as exact duplicates of the parent's entries, and directories along
+changed paths with their new IDs. `c4m.ApplyPatch`, `c4m.ResolveBase` and
+`c4 cat` read it unchanged, and the closing ID lets any reader check the
+result.
 
-A Materialization whose source is a changeset resolves to a chain of views,
-base first (`status.layers`), bounded at 64 steps.
+A changeset is the one-section case of a **chain**: c4m's append-only patch
+chain, in which a base is followed by patch sections, each sealed by a bare
+C4 ID line that must equal the ID of the accumulated state above it (the c4m
+whitepaper's "Version History"). The ID of a full c4m manifest is the ID of
+its root listing, so every checkpoint in a chain is a view ID. A chain is
+therefore a write-ahead log of views: appending a section and its checkpoint
+is a commit, and every sealed prefix is a view that can be verified by
+applying the sections along changed paths and comparing IDs, at a cost
+proportional to the change. `c4 log` lists a chain's versions and `c4 split`
+extracts one, unchanged. Section 2.5 makes chains the system's streaming
+primitive.
+
+A Materialization whose source is a changeset or a chain resolves to its
+sequence of views, base first (`status.layers` keeps the most recent 16 as
+stacking candidates). Chains are not bounded by length; they are re-based
+(section 2.5).
 
 ### 2.4 Layers
 
@@ -188,6 +204,53 @@ A delta is computed by diffing the two views' records top-down and skipping
 any subtree whose ID is equal, so its cost is proportional to the change. Any
 two views can be diffed. The changeset chain only tells a node which views
 are likely to be close (section 4.3).
+
+### 2.5 Chains as streams
+
+A chain grows while work runs, and anything that follows its tail sees each
+sealed checkpoint as it lands. One mechanism serves five uses:
+
+1. **Live capture.** With `capture: live`, the node daemon seals a
+   checkpoint of a running pod's upper on an interval and when the task
+   says so (a line in `.c4/seal`), and appends it to the unit's output
+   chain. A file is sealed only once the task has closed it: the task names
+   it in `.c4/seal`, or its size and modification time have not changed for
+   one interval. The final capture at unpublish seals the rest. A render's
+   output view grows frame by frame instead of appearing at exit.
+2. **Pipelining.** A job whose input is `fromJob` follows the upstream job's
+   output chain. The work queue makes a downstream unit runnable as soon as
+   the frames it reads exist at a sealed checkpoint, so comp starts on
+   rendered frames before the render finishes. With binary order (section
+   10.8) the first checkpoints already span the whole shot.
+3. **Subscribers.** Chains are served by a chain service (in the manager,
+   sharded by chain ID when one replica is not enough) that is the single
+   writer of each chain: unit chains are appended by their node daemon, and
+   a job's chain folds its units' sealed sections in arrival order. Readers
+   long-poll the tail (`GET /chains/{id}?after=<checkpoint>&wait=30s`) rather
+   than poll. Nodes pre-warm downstream inputs, the HUD updates job views
+   and the preview player, and agents watch jobs, all from the same stream.
+   A subscriber needs to trust nothing but the checkpoints: it verifies each
+   sealed prefix by applying the section to the previous view and comparing
+   IDs.
+4. **Git import.** Each branch is one chain, appended per commit, with the
+   commit's view as the checkpoint: Scion's write-ahead log of changesets,
+   expressed natively in c4m. `c4 log` and `c4 split` work on it unchanged.
+5. **Provenance and metering.** Each checkpoint is a natural boundary to
+   sign the batch of task records (section 9) and usage records (section 12)
+   that produced it. The chain of checkpoints is itself the tamper-evident
+   audit log.
+
+**Storage.** A chain is stored as segments: each segment is a changeset
+whose first line is the previous checkpoint, so segments concatenate into
+one valid c4m chain (a repeated boundary ID is read as one), and a chain
+grows without rewriting any object. The chain's index (segment IDs in order,
+and the head checkpoint) is append-only and kept by the chain service.
+
+**Compaction by re-basing.** A chain is never cut off at a length. When a
+chain grows long, the service starts a new chain whose base is the last
+checkpoint (an external base on its first line), and the old chain stays
+retained by ID. Readers of the new chain resolve the base view from its
+records, so re-basing costs nothing but a new index.
 
 ## 3. Data path
 
@@ -417,6 +480,10 @@ It:
    `c4.avalanche.io/output-tree`, `c4.avalanche.io/output-changeset` and
    `c4.avalanche.io/output-changes` (`added=N modified=N deleted=N
    bytes=N`), and as metrics.
+
+With `capture: live`, the same walk runs while the pod runs and seals
+checkpoints into the unit's output chain (section 2.5); the capture at
+unpublish then seals only what is left.
 
 Capture runs detached from the RPC and is keyed by volume. If kubelet's call
 times out, its retry joins the capture in flight. If the daemon restarts, the
@@ -734,7 +801,9 @@ import step, so import must be fast and push-driven.
   changes to its parent's view with the same code capture uses, so the cost
   of a commit is proportional to its change, and publishes the view. Blob
   content is hashed once and remembered by git object ID. P4 measures
-  push-to-view latency as well as per-commit cost.
+  push-to-view latency as well as per-commit cost. Each branch is one chain
+  (section 2.5), appended per commit, so `c4 log` lists a branch's commits
+  as views.
 - **c4git files** are 90-byte C4 IDs in git. The importer uses the ID
   directly, copies the object from the c4git store without rehashing (c4git
   verified it at `git add`), and takes its size from the store.
@@ -813,6 +882,9 @@ there is no SLSA compliance claim for media.
 - An index (by output file, output view, input view, job, model and dataset)
   is derived data, rebuildable from the records, kept in the installation's
   system store as a hash-chained log like the usage ledger (section 12.2).
+- Records are signed in batches at chain checkpoints (section 2.5): the
+  batch of task records that produced a sealed checkpoint is signed with it,
+  so the checkpoint chain and the record batches form one audit log.
 - Usage records (section 12) and license usage (section 16.2) reference the
   task records they come from, so the same signed records are the audit
   trail for content, for keys, for billing and for licenses.
@@ -1081,6 +1153,12 @@ mounts that view. The dependency graph (sim to render to comp to transcode to
 delivery) is therefore also a data-flow graph of content-addressed trees, and
 each output is already cached on the nodes and regional replicas that
 produced it.
+
+Data also flows while jobs run. Units seal their outputs into the job's
+output chain as they go (section 2.5), and a `fromJob` input can be
+pipelined: a downstream unit becomes runnable as soon as the upstream frames
+it reads exist at a sealed checkpoint, instead of when the whole upstream job
+finishes.
 
 ### 10.6 Dynamic expansion
 
@@ -1781,7 +1859,7 @@ the project scopes of section 11.7 bind agents exactly as they bind people.
 
 | group      | tools                                                                                               | annotations                         |
 | ---------- | --------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| inspect    | `c4_get_farm`, `c4_list_jobs`, `c4_get_job`, `c4_get_unit`, `c4_list_nodes`, `c4_get_tiers`, `c4_get_graph`, `c4_list_capacity_requests`, `c4_browse_view` | read-only                           |
+| inspect    | `c4_get_farm`, `c4_list_jobs`, `c4_get_job`, `c4_get_unit`, `c4_list_nodes`, `c4_get_tiers`, `c4_get_graph`, `c4_list_capacity_requests`, `c4_browse_view`, `c4_diff_views` (changed paths, objects and sizes between two views, or a commit and its merge base), `c4_follow_chain` (a chain's checkpoints after a given one, waiting for new ones) | read-only                           |
 | explain    | `c4_explain_job` (rank, slack decomposition, the limiting factor, the burst that would fix it), `c4_diagnose_failures` (failed units grouped by cause, suspect nodes, flaky shards, suggested actions), `c4_what_if_capacity`, `c4_get_cost` | read-only                           |
 | lenses     | `c4_list_ci_changes` (pipelines, time to green, flaky targets, merge queue), `c4_list_ml_runs` (ranks, checkpoints, yields, useful GPU hours), `c4_get_preview` (frame list) | read-only                           |
 | act        | `c4_submit_job` (with `dry_run`, which returns the estimate and feasibility first), `c4_hold_job`, `c4_release_job`, `c4_boost_job`, `c4_set_deadline`, `c4_requeue_units`, `c4_blacklist_node` | writes; idempotent with a name or nonce |
@@ -2022,7 +2100,8 @@ with 8 workers in two localities. Results land in
 - **P4: c4git monorepo.** A repository with c4git-managed assets is imported.
   Evidence: import cost per commit, CI pods doing sparse checkouts, and the
   bytes a node fetches for the next commit.
-- **P5: work system and HUD.** Simulation results for each policy across
+- **P5: work system and HUD.** A comp job pipelined on a render job's output
+  chain, starting before the render finishes. Simulation results for each policy across
   render, CI and ML, and estimate error over time for binary against
   sequential order; the kind run with deadlines, binary order, a generator
   expanding, a CI pipeline under a latency SLO, a training run yielding at a
