@@ -31,7 +31,7 @@ in `REPORT-v2.md`.
 The niche is media and VFX studios and mid-size shops, where one shared
 farm runs deadline-driven rendering, CI, media processing and modest ML
 (fine-tuning, LoRAs, studio-data training, generative batch jobs) over heavy
-content-addressed data. Section 16 lists the non-goals, including the
+content-addressed data. Section 17 lists the non-goals, including the
 training infrastructure that large labs build.
 
 ## Prior art: Scion
@@ -1208,7 +1208,7 @@ The Scion case (section 8.2) running on the same farm.
 
 ML here means what studios run: fine-tuning, LoRAs, training on studio data,
 and generative batch jobs. Large-scale training infrastructure is not built
-(section 16).
+(section 17).
 
 - **Wrapping, not reimplementing.** An ML WorkJob wraps a JobSet (or a
   Kubeflow TrainJob, a LeaderWorkerSet, or a RayJob). The class creates it
@@ -1408,7 +1408,8 @@ HUD gives it. Adding a class's lens does not change the HUD shell.
 
 Every control is a Kubernetes write made **as the user**, through
 impersonation, so RBAC alone decides what a person may do. The HUD holds no
-privilege of its own beyond reading.
+privilege of its own beyond reading. Each control has an MCP tool with the
+same effect (section 12.2).
 
 | control               | effect                                                                       |
 | --------------------- | ---------------------------------------------------------------------------- |
@@ -1474,27 +1475,39 @@ an admin console:
 
 ## 11. Usage metering
 
-The open-source project is the path to market. Revenue comes from per-hour
-metered deployments sold through the AWS, GCP and Azure marketplaces, which
-bill the customer. The queue is not what is sold; metered use of the
-platform is. Metering is therefore a first-class part of the design: per
-project, attributable to the component that measured it, tamper-evident, and
-exportable in the shape the marketplaces accept.
+The open-source project is the path to market. Revenue is expected to come
+from metered deployments sold through the AWS, GCP and Azure marketplaces,
+which bill the customer. The queue is not what is sold. The final pricing
+model is not decided, so the accounting is general enough to support the
+candidates without new measurement:
+
+- **cluster-hours plus container-hours**: hours an installation runs on a
+  cluster, plus hours of containers it manages (task pods and pods that
+  mount its volumes);
+- **fixed production windows**: a declared period (a show's production
+  months) billed as a static, much higher fee, during which usage is still
+  recorded and attributed but not priced per unit.
+
+Usage is recorded per project, attributable to the component that measured
+it, tamper-evident, and exportable in the shape the marketplaces accept.
 
 ### 11.1 What is measured, and by whom
 
-| quantity                             | measured by                     | how                                                                                 |
-| ------------------------------------ | ------------------------------- | ----------------------------------------------------------------------------------- |
-| worker-hours by pool and class       | work controller                 | each unit's run time (pod start to finish) times its slots                          |
-| GPU-hours                            | work controller                 | worker-hours in pools whose slots carry GPUs, times GPUs per slot                   |
-| bytes materialized                   | node daemon                     | bytes of the views mounted into pods, per volume                                    |
-| bytes fetched                        | node daemon, regional tier      | bytes received from peers, the regional tier and the store, by tier                 |
-| bytes avoided                        | derived                         | bytes materialized minus bytes fetched from the store, split by where they came from: node cache, layer reuse, duplicate files within a view, peers, regional cache |
-| bytes stored and deduplicated        | regional tier (ingest)          | new bytes written to the store against bytes uploaded that the store already had    |
+| quantity                       | measured by                  | used for                                                    |
+| ------------------------------ | ---------------------------- | ----------------------------------------------------------- |
+| cluster-hours                  | the meter (manager)          | billing candidate: hours the installation is running        |
+| container-hours                | node daemons, work controller | billing candidate: hours of managed containers, per project and pool |
+| production windows             | the meter                    | billing candidate: declared periods and the usage inside them |
+| GPU-hours, slot-hours by pool and class | work controller     | reporting, capacity planning, cost attribution              |
+| bytes materialized             | node daemon                  | proof metric                                                |
+| bytes fetched                  | node daemon, regional tier   | proof metric, per tier                                      |
+| bytes avoided                  | derived                      | proof metric: materialized minus fetched from the store, by source (node cache, layer reuse, duplicates within a view, peers, regional cache) |
+| bytes stored and deduplicated  | regional tier (ingest)       | proof metric: new bytes written against bytes already present |
 
-**Bytes avoided is the value metric.** It is what content addressing, the
-cache tiers and the overlays save a customer, in bytes and in transfer time,
-and the HUD shows it per project, per job and farm-wide (section 10.1).
+**Bytes avoided is a proof metric, never a billing unit.** It shows what
+content addressing, the cache tiers and the overlays save, and the HUD shows
+it per project, per job and farm-wide (section 10.1). Pricing by bytes saved
+would be commodity pricing that falls as the system gets better at its job.
 
 ### 11.2 Tamper-evident accounting
 
@@ -1506,10 +1519,11 @@ and the HUD shows it per project, per job and farm-wide (section 10.1).
   write another's reports.
 - The meter (in the manager) verifies each report, sums them per project,
   dimension and hour, and appends one ledger entry per hour: the totals, the
-  IDs of the reports it included, and the ID of the previous entry. Entries
-  are content-addressed objects in the installation's system store, so
-  changing any past entry changes its ID and breaks the chain, and a missing
-  hour is a visible gap. The chain head is kept in a `UsageLedger` status.
+  open production windows, the IDs of the reports it included, and the ID of
+  the previous entry. Entries are content-addressed objects in the
+  installation's system store, so changing any past entry changes its ID and
+  breaks the chain, and a missing hour is a visible gap. The chain head is
+  kept in a `UsageLedger` status.
 - The key-release audit log (section 6.6) uses the same chained format.
 
 ### 11.3 Export
@@ -1529,25 +1543,84 @@ type Exporter interface {
 | Azure    | Marketplace Metering Service `usageEvent` and `batchUsageEvent`, hourly per dimension                         |
 | open     | Prometheus series and JSON lines, for self-hosted installs and for reconciling with marketplace invoices      |
 
-Which dimensions are billed (worker-hours by class, GPU-hours, managed
-terabytes) is a pricing decision. The meter records all of them, so pricing
-can change without new measurement.
+A production window is exported as its own dimension (one unit per window
+hour, or one fixed charge, depending on the listing), so either pricing
+model maps onto the same records.
 
-## 12. Deadline migration bridge and the agent API
+## 12. Agent-native interface (P6)
 
-Deadline 10 is in maintenance mode, and studios have years of jobs,
-plugins and submitters built on it. The bridge lets them move gradually.
+Agents are first-class users of the farm, from day one. This system is
+itself being designed and built with Claude, working as Joshua's engineering
+agent, and the same holds for the people who will run it: a wrangler's
+assistant, a CI bot, or a migration agent should be able to do anything a
+person can do in the HUD, under the same rules.
 
-### 12.1 The agent API and MCP server
+### 12.1 One API, three faces
 
-The HUD backend's REST API is the public API: submit, list, describe, nudge,
-requeue, explain an estimate ("why is sh040 late"), what-if capacity, and
-approve a burst. `c4-operator mcp` serves the same operations as an MCP
-server, so AI agents can drive the queue and the migration. Both act as the
-caller (the caller's token, impersonation for writes), so RBAC is the only
-authority, exactly as in the HUD (section 10.5).
+The HUD backend's REST API is the single implementation. The HUD, the MCP
+server (`c4-operator mcp`) and the CLI are faces of it, so **every HUD
+capability has an agent-callable equivalent** by construction, and a test
+fails if a HUD endpoint has no tool. All three act as the caller: the
+caller's own token (a kubeconfig identity over stdio, or a bearer token over
+HTTP), validated with TokenReview, with impersonation for writes, so RBAC and
+the project scopes of section 10.7 bind agents exactly as they bind people.
 
-### 12.2 Bridge
+### 12.2 MCP server
+
+- **Transports.** stdio for a local agent (Claude Code on a wrangler's
+  machine, using the wrangler's kubeconfig), and Streamable HTTP, stateless
+  JSON, for a shared in-cluster server behind the cluster's auth proxy.
+- **Tools.** Named `c4_<verb>_<noun>`, with input and output schemas, a
+  `response_format` of JSON or Markdown, pagination (`limit`, `offset`,
+  `has_more`) on every list, and annotations (`readOnlyHint`,
+  `destructiveHint`, `idempotentHint`, `openWorldHint`) that match what the
+  tool does. Errors come back as tool results with a next step ("job sh040 is
+  held; release it with c4_release_job or ask its owner"), never as stack
+  traces.
+
+| group      | tools                                                                                               | annotations                         |
+| ---------- | --------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| inspect    | `c4_get_farm`, `c4_list_jobs`, `c4_get_job`, `c4_get_unit`, `c4_list_nodes`, `c4_get_tiers`, `c4_get_graph`, `c4_list_capacity_requests`, `c4_browse_view` | read-only                           |
+| explain    | `c4_explain_job` (rank, slack decomposition, the limiting factor, the burst that would fix it), `c4_diagnose_failures` (failed units grouped by cause, suspect nodes, flaky shards, suggested actions), `c4_what_if_capacity`, `c4_get_cost` | read-only                           |
+| lenses     | `c4_list_ci_changes` (pipelines, time to green, flaky targets, merge queue), `c4_list_ml_runs` (ranks, checkpoints, yields, useful GPU hours), `c4_get_preview` (frame list) | read-only                           |
+| act        | `c4_submit_job` (with `dry_run`, which returns the estimate and feasibility first), `c4_hold_job`, `c4_release_job`, `c4_boost_job`, `c4_set_deadline`, `c4_requeue_units`, `c4_blacklist_node` | writes; idempotent with a name or nonce |
+| farm       | `c4_disable_node`, `c4_approve_burst`                                                               | writes; `c4_approve_burst` spends money and is marked open-world |
+| migrate    | `c4_import_deadline_jobs` (dry run produces the translation report), `c4_set_deadline_routing`      | writes                              |
+
+- **Within policy.** Reprioritizing is the nudges of section 9.9 and nothing
+  else: hold, boost between 1 and 2 from the caller's own project quota, and
+  deadlines. An agent has no priority knob a person does not have.
+- **Resources and prompts.** Jobs, units and views are also resources
+  (`c4://jobs/{namespace}/{name}`, `c4://views/{project}/{id}/{path}`), and
+  the server offers prompts for the common playbooks: triage a failing job,
+  make a deadline, migrate a Deadline job, explain the farm's cost.
+
+### 12.3 Claude skill
+
+A skill, `c4-farm`, teaches an agent to use the server well. Its
+`description` says what it does and when to use it (render jobs, frames,
+deadlines, CI pipelines, training runs on a c4 farm, and Deadline
+migration). Its body holds the playbooks, and its reference files hold the
+concepts an agent needs and does not know (views and changesets, slack and
+required slots, binary order, generators, nudges) and a tool reference.
+
+### 12.4 Documentation for humans and agents
+
+- The tool reference is generated from the tool registry, so the docs, the
+  MCP schemas and the skill's reference cannot drift apart.
+- Every concept page leads with a short definition, then the details, and
+  each page is plain Markdown with stable anchors, indexed by an `llms.txt`
+  at the docs root.
+- An evaluation set of questions with verifiable answers, run against the
+  deterministic demo farm, checks that an agent using only the MCP server can
+  answer what a wrangler would ask ("which node is failing sh040's frames,
+  and what would it cost to make Friday 18:00?").
+
+## 13. Deadline migration bridge
+
+Deadline 10 is in maintenance mode, and studios have years of jobs, plugins
+and submitters built on it. The bridge lets them move gradually, and agents
+can drive it through the MCP tools of section 12.2.
 
 - **Submission compatibility.** An endpoint that accepts the Deadline Web
   Service's job submission (`POST /api/jobs` with `JobInfo` and
@@ -1574,9 +1647,9 @@ authority, exactly as in the HUD (section 10.5).
   the remaining Deadline jobs draw from the same farm under the same
   objective-driven allocation, and a studio retires Deadline pool by pool.
 
-## 13. Integrations
+## 14. Integrations
 
-### 13.1 DCC submitters
+### 14.1 DCC submitters
 
 Every submitter follows the same steps:
 
@@ -1595,7 +1668,7 @@ Every submitter follows the same steps:
 | Blender | an add-on for Cycles and Eevee frame ranges                                                                 |
 | Unreal  | a Movie Render Queue executor; each shot is a job and its frames are units                                  |
 
-### 13.2 Production tracking
+### 14.2 Production tracking
 
 ShotGrid (Autodesk Flow Production Tracking) and ftrack connect through their
 APIs and event streams:
@@ -1605,11 +1678,11 @@ APIs and event streams:
 - a finished job creates a Version with its output view ID and preview;
 - task statuses follow the jobs that serve them.
 
-## 14. Packaging and deployment
+## 15. Packaging and deployment
 
 - One Helm chart, published as an OCI artifact, installs everything: CRDs,
   manager (controllers, scheduler, key broker, meter), node daemon,
-  regional tier, HUD, and MCP server. Values select stores, projects, pools,
+  regional tier, HUD, and MCP server, with the skill alongside. Values select stores, projects, pools,
   KMS, and the metering exporter.
 - It runs in the customer's own cluster and cloud account. Data, keys,
   scheduling and metering all stay there. There is no vendor-hosted control
@@ -1620,7 +1693,7 @@ APIs and event streams:
   products, Google Cloud Marketplace Kubernetes apps, and Azure Kubernetes
   application offers. Images are signed and ship with SBOMs.
 
-## 15. Phases and evidence
+## 16. Phases and evidence
 
 Each phase is proven by tests and by a scenario on a multi-node kind cluster
 with 8 workers in two localities. Results land in
@@ -1650,8 +1723,14 @@ with 8 workers in two localities. Results land in
   expanding, a CI pipeline under a latency SLO, a training run yielding at a
   checkpoint, and a burst; and HUD screenshots for an artist (with the
   preview player), a render wrangler, a CI wrangler and a platform engineer.
+- **P6: agent-native interface.** The MCP server (stdio and Streamable
+  HTTP), the `c4-farm` skill, and the generated tool reference. Evidence: a
+  test that every HUD endpoint has a tool; the evaluation set answered by an
+  agent that has only the MCP server; and a recorded session in which an
+  agent triages a failing job, makes a deadline with a burst, and migrates a
+  Deadline job on the kind cluster.
 
-## 16. Non-goals and not in this plan
+## 17. Non-goals and not in this plan
 
 Non-goals:
 
@@ -1668,7 +1747,7 @@ Not in this plan:
 
 - The lazy FUSE lower (section 4.6).
 - Encryption with just-in-time keys (section 6.6), the Deadline bridge
-  (section 12.2), DCC submitters and tracking integrations (section 13), and
+  (section 13), DCC submitters and tracking integrations (section 14), and
   the marketplace exporters (section 11.3) are designed here. What of them
   was built is listed in `REPORT-v2.md`.
 - TLS between tiers in the kind e2e (bearer tokens are sent in clear inside
