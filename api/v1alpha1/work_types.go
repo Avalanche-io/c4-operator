@@ -1,0 +1,393 @@
+package v1alpha1
+
+import (
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+)
+
+// Labels and annotations of the work system.
+const (
+	// LabelJob names the WorkJob a unit pod belongs to.
+	LabelJob = "c4.avalanche.io/job"
+	// LabelUnit is the unit's index within its job.
+	LabelUnit = "c4.avalanche.io/unit"
+	// LabelPool is the pool a unit was released into.
+	LabelPool = "c4.avalanche.io/pool"
+	// AnnotationAttempt is the unit's attempt number, from 1.
+	AnnotationAttempt = "c4.avalanche.io/attempt"
+	// AnnotationYield asks a unit to stop at its next checkpoint boundary.
+	AnnotationYield = "c4.avalanche.io/yield"
+	// TaintUnprovisioned marks a node that stands in for capacity not yet
+	// provisioned (the kind capacity simulator, section 10.12).
+	TaintUnprovisioned = "c4.avalanche.io/unprovisioned"
+)
+
+// WorkJobSpec declares a job: its class, its units' parameters, its
+// objective, where it may run, its inputs and outputs, and the pod each
+// unit runs.
+type WorkJobSpec struct {
+	// Class names the work class: render, ci or ml.
+	// +kubebuilder:validation:Enum=render;ci;ml
+	Class string `json:"class"`
+
+	// Params are the class's parameters, for example frames and chunk for
+	// render, shards for ci, steps for ml.
+	// +optional
+	Params map[string]string `json:"params,omitempty"`
+
+	// Deadline is the job's own deadline. Without one, the class's
+	// objective applies (a latency target from the time the job became
+	// ready, or a default turnaround).
+	// +optional
+	Deadline *metav1.Time `json:"deadline,omitempty"`
+
+	// Pools the job's units may run in. Empty means the class's defaults.
+	// +optional
+	Pools []string `json:"pools,omitempty"`
+
+	// DependsOn names jobs in this namespace that must succeed first.
+	// +optional
+	DependsOn []string `json:"dependsOn,omitempty"`
+
+	// Inputs are C4 views mounted into every unit.
+	// +optional
+	Inputs []WorkInput `json:"inputs,omitempty"`
+
+	// Nudge holds or boosts the job. There are no priorities.
+	// +optional
+	Nudge WorkNudge `json:"nudge,omitempty"`
+
+	// Retries per unit after the first attempt.
+	// +kubebuilder:default=2
+	// +optional
+	Retries int32 `json:"retries,omitempty"`
+
+	// NodeErrorLimit blacklists a node for this job after this many unit
+	// failures on it.
+	// +kubebuilder:default=3
+	// +optional
+	NodeErrorLimit int32 `json:"nodeErrorLimit,omitempty"`
+
+	// MaxParallel caps the job's running units (0: no cap).
+	// +optional
+	MaxParallel int32 `json:"maxParallel,omitempty"`
+
+	// Template is the pod every unit runs. The queue adds the unit's
+	// environment (C4_UNIT, and the class's variables), the pool's node
+	// selector and tolerations, and the input volumes. The API server
+	// validates it when the queue creates each pod; the CRD does not
+	// repeat the pod schema (it would exceed what kubectl apply can carry).
+	// +kubebuilder:validation:Schemaless
+	// +kubebuilder:pruning:PreserveUnknownFields
+	// +kubebuilder:validation:Type=object
+	Template corev1.PodTemplateSpec `json:"template"`
+}
+
+// WorkInput mounts a view into every unit.
+type WorkInput struct {
+	// Materialization in the job's namespace.
+	// +optional
+	Materialization string `json:"materialization,omitempty"`
+	// MountPath in every container of the unit.
+	MountPath string `json:"mountPath"`
+	// ReadOnly mounts without capture.
+	// +optional
+	ReadOnly bool `json:"readOnly,omitempty"`
+}
+
+// WorkNudge is a person's bounded override.
+type WorkNudge struct {
+	// Hold releases no new units; running units finish.
+	// +optional
+	Hold bool `json:"hold,omitempty"`
+	// HoldStop holds and stops running units.
+	// +optional
+	HoldStop bool `json:"holdStop,omitempty"`
+	// Boost multiplies the job's required slots, from 1 to 2, drawn from
+	// its own project's quota first.
+	// +kubebuilder:validation:Pattern=`^(1(\.[0-9]+)?|2(\.0+)?)$`
+	// +optional
+	Boost string `json:"boost,omitempty"`
+}
+
+// WorkJobStatus is the queue's view of a job. Per-unit state is kept as
+// run-length index sets, so its size grows with state changes along the
+// unit range, not with the number of units.
+type WorkJobStatus struct {
+	// +optional
+	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
+	// Phase is Queued, Running, Blocked, Held, Succeeded or Failed.
+	// +optional
+	Phase string `json:"phase,omitempty"`
+	// Order is the dispatch order over the unit axis.
+	// +optional
+	Order string `json:"order,omitempty"`
+	// Units counts units by state.
+	// +optional
+	Units UnitCounts `json:"units,omitempty"`
+	// UnitStates holds run-length index sets by state: queued, running,
+	// succeeded, failed, retrying.
+	// +optional
+	UnitStates map[string]string `json:"unitStates,omitempty"`
+	// Attempts per unit index, for units tried more than once
+	// ("index:attempts" pairs, comma-separated).
+	// +optional
+	Attempts string `json:"attempts,omitempty"`
+	// UnitMillis is each finished unit's run time in milliseconds, by
+	// index (0: not finished). Jobs above 50,000 units keep it in the
+	// project store instead (DESIGN.md section 10.5).
+	// +optional
+	UnitMillis []int64 `json:"unitMillis,omitempty"`
+	// Estimate is the remaining-work estimate and objective state.
+	// +optional
+	Estimate *WorkEstimate `json:"estimate,omitempty"`
+	// Deadline is the effective deadline.
+	// +optional
+	Deadline *metav1.Time `json:"deadline,omitempty"`
+	// Rank is the job's position in dispatch order (1 is next).
+	// +optional
+	Rank int32 `json:"rank,omitempty"`
+	// Blacklist holds nodes this job will not use.
+	// +optional
+	Blacklist []string `json:"blacklist,omitempty"`
+	// Outputs counts unit changesets captured so far.
+	// +optional
+	Outputs int32 `json:"outputs,omitempty"`
+	// Resume maps a unit index to the view its last yielded attempt
+	// captured; the next attempt mounts that view and continues from its
+	// checkpoint.
+	// +optional
+	Resume map[string]string `json:"resume,omitempty"`
+	// Yields lists the most recent yields of checkpointing units.
+	// +optional
+	Yields []WorkYield `json:"yields,omitempty"`
+	// Preemptions counts units stopped or asked to yield to make room.
+	// +optional
+	Preemptions int32 `json:"preemptions,omitempty"`
+	// Started and Finished bound the job's run.
+	// +optional
+	Started *metav1.Time `json:"started,omitempty"`
+	// +optional
+	Finished *metav1.Time `json:"finished,omitempty"`
+	// +optional
+	// +listType=map
+	// +listMapKey=type
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// WorkYield is one yield of a checkpointing unit.
+type WorkYield struct {
+	Unit   int32       `json:"unit"`
+	At     metav1.Time `json:"at"`
+	Reason string      `json:"reason"`
+	// View is what the unit had saved when it stopped.
+	View string `json:"view"`
+}
+
+// UnitCounts counts a job's units by state.
+type UnitCounts struct {
+	Total     int32 `json:"total,omitempty"`
+	Queued    int32 `json:"queued,omitempty"`
+	Blocked   int32 `json:"blocked,omitempty"`
+	Running   int32 `json:"running,omitempty"`
+	Retrying  int32 `json:"retrying,omitempty"`
+	Succeeded int32 `json:"succeeded,omitempty"`
+	Failed    int32 `json:"failed,omitempty"`
+	Held      int32 `json:"held,omitempty"`
+}
+
+// WorkEstimate is the estimate and the objective state. Durations are
+// seconds; slots are fractional.
+type WorkEstimate struct {
+	RemainingSeconds    int64  `json:"remainingSeconds,omitempty"`
+	P90RemainingSeconds int64  `json:"p90RemainingSeconds,omitempty"`
+	RequiredSlots       string `json:"requiredSlots,omitempty"`
+	AttainableSlots     string `json:"attainableSlots,omitempty"`
+	RunningSlots        int32  `json:"runningSlots,omitempty"`
+	SlackSeconds        int64  `json:"slackSeconds,omitempty"`
+	Feasible            bool   `json:"feasible,omitempty"`
+	AtRisk              bool   `json:"atRisk,omitempty"`
+	// +optional
+	ETA50 *metav1.Time `json:"eta50,omitempty"`
+	// +optional
+	ETA90 *metav1.Time `json:"eta90,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+	// HeavyRegions are axis ranges well above the job's median cost.
+	// +optional
+	HeavyRegions []HeavyRegion `json:"heavyRegions,omitempty"`
+}
+
+// HeavyRegion is a range of the unit axis that costs more than the median.
+type HeavyRegion struct {
+	From   int32  `json:"from"`
+	To     int32  `json:"to"`
+	Factor string `json:"factor"`
+}
+
+// WorkJob is a job in the farm's queue.
+// +kubebuilder:object:root=true
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 50",message="a WorkJob name is at most 50 characters (it labels and prefixes its unit pods)"
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:shortName=wj
+// +kubebuilder:printcolumn:name="Class",type=string,JSONPath=`.spec.class`
+// +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
+// +kubebuilder:printcolumn:name="Done",type=integer,JSONPath=`.status.units.succeeded`
+// +kubebuilder:printcolumn:name="Total",type=integer,JSONPath=`.status.units.total`
+// +kubebuilder:printcolumn:name="Slack",type=integer,JSONPath=`.status.estimate.slackSeconds`
+// +kubebuilder:printcolumn:name="Rank",type=integer,JSONPath=`.status.rank`
+type WorkJob struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   WorkJobSpec   `json:"spec,omitempty"`
+	Status WorkJobStatus `json:"status,omitempty"`
+}
+
+// WorkJobList is a list of WorkJobs.
+// +kubebuilder:object:root=true
+type WorkJobList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []WorkJob `json:"items"`
+}
+
+// PoolSpec maps a pool to nodes.
+type PoolSpec struct {
+	// NodeSelector picks the pool's nodes; it is also added to every unit
+	// pod released into the pool.
+	NodeSelector map[string]string `json:"nodeSelector"`
+	// Tolerations are added to unit pods released into the pool.
+	// +optional
+	Tolerations []corev1.Toleration `json:"tolerations,omitempty"`
+	// SlotsPerNode is each node's capacity in slots.
+	// +kubebuilder:validation:Minimum=1
+	SlotsPerNode int32 `json:"slotsPerNode"`
+	// Attributes describe the pool to jobs and to the HUD: class (cpu,
+	// gpu), gpuModel, vram, capacityType (on-demand, spot).
+	// +optional
+	Attributes map[string]string `json:"attributes,omitempty"`
+	// CostPerSlotHour in US dollars, as a decimal string.
+	// +optional
+	CostPerSlotHour string `json:"costPerSlotHour,omitempty"`
+	// Burst makes the pool grow on request.
+	// +optional
+	Burst *PoolBurst `json:"burst,omitempty"`
+}
+
+// PoolBurst describes on-request capacity.
+type PoolBurst struct {
+	// MaxNodes the pool may grow to.
+	MaxNodes int32 `json:"maxNodes"`
+	// ProvisioningSeconds is how long a new node takes to be ready.
+	ProvisioningSeconds int32 `json:"provisioningSeconds"`
+	// CostPerSlotHour of burst capacity, in US dollars.
+	CostPerSlotHour string `json:"costPerSlotHour"`
+	// Provider fulfils CapacityRequests: kind-sim (taint toggling on a
+	// kind cluster), provisioning-request (Cluster Autoscaler), or
+	// karpenter.
+	// +kubebuilder:validation:Enum=kind-sim;provisioning-request;karpenter
+	Provider string `json:"provider"`
+}
+
+// PoolStatus reports the pool's size.
+type PoolStatus struct {
+	// Nodes ready in the pool, and their slots.
+	Nodes int32 `json:"nodes,omitempty"`
+	Slots int32 `json:"slots,omitempty"`
+	// Used slots by running units.
+	Used int32 `json:"used,omitempty"`
+	// Provisioned burst nodes, and how many are requested.
+	// +optional
+	Provisioned int32 `json:"provisioned,omitempty"`
+	// +optional
+	Requested int32 `json:"requested,omitempty"`
+}
+
+// Pool is a named set of nodes the queue releases units into.
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Nodes",type=integer,JSONPath=`.status.nodes`
+// +kubebuilder:printcolumn:name="Slots",type=integer,JSONPath=`.status.slots`
+// +kubebuilder:printcolumn:name="Used",type=integer,JSONPath=`.status.used`
+type Pool struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   PoolSpec   `json:"spec,omitempty"`
+	Status PoolStatus `json:"status,omitempty"`
+}
+
+// PoolList is a list of Pools.
+// +kubebuilder:object:root=true
+type PoolList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []Pool `json:"items"`
+}
+
+// CapacityRequestSpec is the scheduler's request for burst capacity in one
+// pool: the explicit interface between the queue and whatever provisions
+// nodes.
+type CapacityRequestSpec struct {
+	Pool string `json:"pool"`
+	// Slots wanted from the pool's burst capacity, in total.
+	Slots int32 `json:"slots"`
+	// Until is when the capacity is expected to be needed to.
+	// +optional
+	Until *metav1.Time `json:"until,omitempty"`
+	// Reason in the farm's terms, and the jobs it is for.
+	Reason string `json:"reason"`
+	// +optional
+	Jobs []string `json:"jobs,omitempty"`
+	// EstimatedCost in US dollars.
+	// +optional
+	EstimatedCost string `json:"estimatedCost,omitempty"`
+	// Approved is set by a person for requests over budget, or by the
+	// scheduler for automatic ones.
+	// +optional
+	Approved bool `json:"approved,omitempty"`
+	// PrewarmViews are views new nodes fetch before units land on them.
+	// +optional
+	PrewarmViews []string `json:"prewarmViews,omitempty"`
+}
+
+// CapacityRequestStatus reports fulfilment.
+type CapacityRequestStatus struct {
+	// State is PendingApproval, Provisioning or Provisioned.
+	// +optional
+	State string `json:"state,omitempty"`
+	// ProvisionedSlots are ready.
+	// +optional
+	ProvisionedSlots int32 `json:"provisionedSlots,omitempty"`
+	// +optional
+	Message string `json:"message,omitempty"`
+}
+
+// CapacityRequest asks for burst capacity.
+// +kubebuilder:object:root=true
+// +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
+// +kubebuilder:printcolumn:name="Pool",type=string,JSONPath=`.spec.pool`
+// +kubebuilder:printcolumn:name="Slots",type=integer,JSONPath=`.spec.slots`
+// +kubebuilder:printcolumn:name="State",type=string,JSONPath=`.status.state`
+type CapacityRequest struct {
+	metav1.TypeMeta   `json:",inline"`
+	metav1.ObjectMeta `json:"metadata,omitempty"`
+
+	Spec   CapacityRequestSpec   `json:"spec,omitempty"`
+	Status CapacityRequestStatus `json:"status,omitempty"`
+}
+
+// CapacityRequestList is a list of CapacityRequests.
+// +kubebuilder:object:root=true
+type CapacityRequestList struct {
+	metav1.TypeMeta `json:",inline"`
+	metav1.ListMeta `json:"metadata,omitempty"`
+	Items           []CapacityRequest `json:"items"`
+}
+
+func init() {
+	SchemeBuilder.Register(&WorkJob{}, &WorkJobList{}, &Pool{}, &PoolList{}, &CapacityRequest{}, &CapacityRequestList{})
+}

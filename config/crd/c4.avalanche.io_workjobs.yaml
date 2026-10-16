@@ -1,0 +1,410 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: workjobs.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: WorkJob
+    listKind: WorkJobList
+    plural: workjobs
+    shortNames:
+    - wj
+    singular: workjob
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.class
+      name: Class
+      type: string
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.units.succeeded
+      name: Done
+      type: integer
+    - jsonPath: .status.units.total
+      name: Total
+      type: integer
+    - jsonPath: .status.estimate.slackSeconds
+      name: Slack
+      type: integer
+    - jsonPath: .status.rank
+      name: Rank
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: WorkJob is a job in the farm's queue.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              WorkJobSpec declares a job: its class, its units' parameters, its
+              objective, where it may run, its inputs and outputs, and the pod each
+              unit runs.
+            properties:
+              class:
+                description: 'Class names the work class: render, ci or ml.'
+                enum:
+                - render
+                - ci
+                - ml
+                type: string
+              deadline:
+                description: |-
+                  Deadline is the job's own deadline. Without one, the class's
+                  objective applies (a latency target from the time the job became
+                  ready, or a default turnaround).
+                format: date-time
+                type: string
+              dependsOn:
+                description: DependsOn names jobs in this namespace that must succeed
+                  first.
+                items:
+                  type: string
+                type: array
+              inputs:
+                description: Inputs are C4 views mounted into every unit.
+                items:
+                  description: WorkInput mounts a view into every unit.
+                  properties:
+                    materialization:
+                      description: Materialization in the job's namespace.
+                      type: string
+                    mountPath:
+                      description: MountPath in every container of the unit.
+                      type: string
+                    readOnly:
+                      description: ReadOnly mounts without capture.
+                      type: boolean
+                  required:
+                  - mountPath
+                  type: object
+                type: array
+              maxParallel:
+                description: 'MaxParallel caps the job''s running units (0: no cap).'
+                format: int32
+                type: integer
+              nodeErrorLimit:
+                default: 3
+                description: |-
+                  NodeErrorLimit blacklists a node for this job after this many unit
+                  failures on it.
+                format: int32
+                type: integer
+              nudge:
+                description: Nudge holds or boosts the job. There are no priorities.
+                properties:
+                  boost:
+                    description: |-
+                      Boost multiplies the job's required slots, from 1 to 2, drawn from
+                      its own project's quota first.
+                    pattern: ^(1(\.[0-9]+)?|2(\.0+)?)$
+                    type: string
+                  hold:
+                    description: Hold releases no new units; running units finish.
+                    type: boolean
+                  holdStop:
+                    description: HoldStop holds and stops running units.
+                    type: boolean
+                type: object
+              params:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Params are the class's parameters, for example frames and chunk for
+                  render, shards for ci, steps for ml.
+                type: object
+              pools:
+                description: Pools the job's units may run in. Empty means the class's
+                  defaults.
+                items:
+                  type: string
+                type: array
+              retries:
+                default: 2
+                description: Retries per unit after the first attempt.
+                format: int32
+                type: integer
+              template:
+                description: |-
+                  Template is the pod every unit runs. The queue adds the unit's
+                  environment (C4_UNIT, and the class's variables), the pool's node
+                  selector and tolerations, and the input volumes. The API server
+                  validates it when the queue creates each pod; the CRD does not
+                  repeat the pod schema (it would exceed what kubectl apply can carry).
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+            required:
+            - class
+            - template
+            type: object
+          status:
+            description: |-
+              WorkJobStatus is the queue's view of a job. Per-unit state is kept as
+              run-length index sets, so its size grows with state changes along the
+              unit range, not with the number of units.
+            properties:
+              attempts:
+                description: |-
+                  Attempts per unit index, for units tried more than once
+                  ("index:attempts" pairs, comma-separated).
+                type: string
+              blacklist:
+                description: Blacklist holds nodes this job will not use.
+                items:
+                  type: string
+                type: array
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              deadline:
+                description: Deadline is the effective deadline.
+                format: date-time
+                type: string
+              estimate:
+                description: Estimate is the remaining-work estimate and objective
+                  state.
+                properties:
+                  atRisk:
+                    type: boolean
+                  attainableSlots:
+                    type: string
+                  eta50:
+                    format: date-time
+                    type: string
+                  eta90:
+                    format: date-time
+                    type: string
+                  feasible:
+                    type: boolean
+                  heavyRegions:
+                    description: HeavyRegions are axis ranges well above the job's
+                      median cost.
+                    items:
+                      description: HeavyRegion is a range of the unit axis that costs
+                        more than the median.
+                      properties:
+                        factor:
+                          type: string
+                        from:
+                          format: int32
+                          type: integer
+                        to:
+                          format: int32
+                          type: integer
+                      required:
+                      - factor
+                      - from
+                      - to
+                      type: object
+                    type: array
+                  message:
+                    type: string
+                  p90RemainingSeconds:
+                    format: int64
+                    type: integer
+                  remainingSeconds:
+                    format: int64
+                    type: integer
+                  requiredSlots:
+                    type: string
+                  runningSlots:
+                    format: int32
+                    type: integer
+                  slackSeconds:
+                    format: int64
+                    type: integer
+                type: object
+              finished:
+                format: date-time
+                type: string
+              observedGeneration:
+                format: int64
+                type: integer
+              order:
+                description: Order is the dispatch order over the unit axis.
+                type: string
+              outputs:
+                description: Outputs counts unit changesets captured so far.
+                format: int32
+                type: integer
+              phase:
+                description: Phase is Queued, Running, Blocked, Held, Succeeded or
+                  Failed.
+                type: string
+              preemptions:
+                description: Preemptions counts units stopped or asked to yield to
+                  make room.
+                format: int32
+                type: integer
+              rank:
+                description: Rank is the job's position in dispatch order (1 is next).
+                format: int32
+                type: integer
+              resume:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Resume maps a unit index to the view its last yielded attempt
+                  captured; the next attempt mounts that view and continues from its
+                  checkpoint.
+                type: object
+              started:
+                description: Started and Finished bound the job's run.
+                format: date-time
+                type: string
+              unitMillis:
+                description: |-
+                  UnitMillis is each finished unit's run time in milliseconds, by
+                  index (0: not finished). Jobs above 50,000 units keep it in the
+                  project store instead (DESIGN.md section 10.5).
+                items:
+                  format: int64
+                  type: integer
+                type: array
+              unitStates:
+                additionalProperties:
+                  type: string
+                description: |-
+                  UnitStates holds run-length index sets by state: queued, running,
+                  succeeded, failed, retrying.
+                type: object
+              units:
+                description: Units counts units by state.
+                properties:
+                  blocked:
+                    format: int32
+                    type: integer
+                  failed:
+                    format: int32
+                    type: integer
+                  held:
+                    format: int32
+                    type: integer
+                  queued:
+                    format: int32
+                    type: integer
+                  retrying:
+                    format: int32
+                    type: integer
+                  running:
+                    format: int32
+                    type: integer
+                  succeeded:
+                    format: int32
+                    type: integer
+                  total:
+                    format: int32
+                    type: integer
+                type: object
+              yields:
+                description: Yields lists the most recent yields of checkpointing
+                  units.
+                items:
+                  description: WorkYield is one yield of a checkpointing unit.
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    reason:
+                      type: string
+                    unit:
+                      format: int32
+                      type: integer
+                    view:
+                      description: View is what the unit had saved when it stopped.
+                      type: string
+                  required:
+                  - at
+                  - reason
+                  - unit
+                  - view
+                  type: object
+                type: array
+            type: object
+        type: object
+        x-kubernetes-validations:
+        - message: a WorkJob name is at most 50 characters (it labels and prefixes
+            its unit pods)
+          rule: self.metadata.name.size() <= 50
+    served: true
+    storage: true
+    subresources:
+      status: {}

@@ -14,6 +14,9 @@
 //	c4e2e s3get     --list FILE --bucket B --endpoint-fmt http://minio-%s.c4-store:9000
 //	                                                  read every listed object straight from S3
 //	c4e2e probe     --url URL [--project P] [--token FILE]  one request to a cache tier; prints the status
+//	c4e2e frame     --out DIR [--cost 6s] [--heavy A-B:F]    a render unit (P5)
+//	c4e2e shard     [--mean 20s] [--flaky P]                 a CI test shard (P5)
+//	c4e2e train     --dir DIR [--step 200ms]                 a checkpointing training run (P5)
 //
 // Content is deterministic pseudo-random bytes keyed by name, so files that
 // share a key are byte-identical, and the host can recompute what any pod
@@ -59,6 +62,9 @@ func main() {
 		"objects":    objectsCmd,
 		"s3get":      s3get,
 		"probe":      probe,
+		"frame":      frameCmd,
+		"shard":      shardCmd,
+		"train":      trainCmd,
 	}
 	run, ok := cmds[os.Args[1]]
 	if !ok {

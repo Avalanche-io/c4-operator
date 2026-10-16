@@ -9,7 +9,10 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
@@ -21,7 +24,31 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/controller"
 	"github.com/Avalanche-io/c4-operator/internal/project"
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
+	"github.com/Avalanche-io/c4-operator/internal/work/kindsim"
+	"github.com/Avalanche-io/c4-operator/internal/work/queue"
+	"github.com/Avalanche-io/c4-operator/internal/work/sched"
 )
+
+// unitPods selects pods the work queue created.
+func unitPods() labels.Selector {
+	req, err := labels.NewRequirement(c4v1.LabelJob, selection.Exists, nil)
+	if err != nil {
+		panic(err)
+	}
+	return labels.NewSelector().Add(*req)
+}
+
+func policyFor(name string) (sched.Policy, error) {
+	switch name {
+	case "objective", "":
+		return sched.Decide, nil
+	case "edf":
+		return sched.EDF, nil
+	case "fifo":
+		return sched.FIFO, nil
+	}
+	return nil, fmt.Errorf("--work-policy %q: want objective, edf or fifo", name)
+}
 
 func runManager(args []string) error {
 	fs := flag.NewFlagSet("manager", flag.ExitOnError)
@@ -33,6 +60,10 @@ func runManager(args []string) error {
 	namespace := fs.String("namespace", env("POD_NAMESPACE", "c4-system"), "the operator's namespace (holds store credentials)")
 	webhookConfig := fs.String("webhook-config", "c4-operator", "MutatingWebhookConfiguration to keep the CA in")
 	retry := fs.Duration("retry", time.Minute, "recheck interval for Materializations that failed for a reason that may heal")
+	work := fs.Bool("work", true, "run the work queue (WorkJobs, Pools, CapacityRequests)")
+	tick := fs.Duration("work-tick", 2*time.Second, "work queue decision period")
+	policy := fs.String("work-policy", "objective", "scheduling policy: objective, edf, fifo")
+	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process: kind-sim (tests), or empty for an external provider")
 	fs.Parse(args)
 
 	ctrl.SetLogger(zap.New())
@@ -57,6 +88,10 @@ func runManager(args []string) error {
 		// Secrets are never cached: credentials are read on demand, from
 		// the operator's namespace only.
 		Client: client.Options{Cache: &client.CacheOptions{DisableFor: []client.Object{&corev1.Secret{}}}},
+		// The queue watches only its own unit pods, not every pod.
+		Cache: cache.Options{ByObject: map[client.Object]cache.ByObject{
+			&corev1.Pod{}: {Label: unitPods()},
+		}},
 	})
 	if err != nil {
 		return err
@@ -70,6 +105,21 @@ func runManager(args []string) error {
 	}
 	if err := (&controller.MaterializationReconciler{Client: mgr.GetClient(), Projects: reg, Retry: *retry}).SetupWithManager(mgr); err != nil {
 		return err
+	}
+	if *work {
+		pol, err := policyFor(*policy)
+		if err != nil {
+			return err
+		}
+		q := &queue.Queue{Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue")}
+		if err := mgr.Add(q); err != nil {
+			return err
+		}
+	}
+	if *provider == "kind-sim" {
+		if err := mgr.Add(&kindsim.Actuator{Client: mgr.GetClient(), Log: ctrl.Log.WithName("kind-sim")}); err != nil {
+			return err
+		}
 	}
 	mgr.GetWebhookServer().Register("/mutate-pod", &webhook.Admission{Handler: &c4webhook.PodMutator{Decoder: admission.NewDecoder(scheme)}})
 	mgr.AddHealthzCheck("ping", healthz.Ping)

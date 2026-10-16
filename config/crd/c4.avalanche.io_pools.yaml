@@ -1,0 +1,176 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: pools.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: Pool
+    listKind: PoolList
+    plural: pools
+    singular: pool
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.nodes
+      name: Nodes
+      type: integer
+    - jsonPath: .status.slots
+      name: Slots
+      type: integer
+    - jsonPath: .status.used
+      name: Used
+      type: integer
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Pool is a named set of nodes the queue releases units into.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: PoolSpec maps a pool to nodes.
+            properties:
+              attributes:
+                additionalProperties:
+                  type: string
+                description: |-
+                  Attributes describe the pool to jobs and to the HUD: class (cpu,
+                  gpu), gpuModel, vram, capacityType (on-demand, spot).
+                type: object
+              burst:
+                description: Burst makes the pool grow on request.
+                properties:
+                  costPerSlotHour:
+                    description: CostPerSlotHour of burst capacity, in US dollars.
+                    type: string
+                  maxNodes:
+                    description: MaxNodes the pool may grow to.
+                    format: int32
+                    type: integer
+                  provider:
+                    description: |-
+                      Provider fulfils CapacityRequests: kind-sim (taint toggling on a
+                      kind cluster), provisioning-request (Cluster Autoscaler), or
+                      karpenter.
+                    enum:
+                    - kind-sim
+                    - provisioning-request
+                    - karpenter
+                    type: string
+                  provisioningSeconds:
+                    description: ProvisioningSeconds is how long a new node takes
+                      to be ready.
+                    format: int32
+                    type: integer
+                required:
+                - costPerSlotHour
+                - maxNodes
+                - provider
+                - provisioningSeconds
+                type: object
+              costPerSlotHour:
+                description: CostPerSlotHour in US dollars, as a decimal string.
+                type: string
+              nodeSelector:
+                additionalProperties:
+                  type: string
+                description: |-
+                  NodeSelector picks the pool's nodes; it is also added to every unit
+                  pod released into the pool.
+                type: object
+              slotsPerNode:
+                description: SlotsPerNode is each node's capacity in slots.
+                format: int32
+                minimum: 1
+                type: integer
+              tolerations:
+                description: Tolerations are added to unit pods released into the
+                  pool.
+                items:
+                  description: |-
+                    The pod this Toleration is attached to tolerates any taint that matches
+                    the triple <key,value,effect> using the matching operator <operator>.
+                  properties:
+                    effect:
+                      description: |-
+                        Effect indicates the taint effect to match. Empty means match all taint effects.
+                        When specified, allowed values are NoSchedule, PreferNoSchedule and NoExecute.
+                      type: string
+                    key:
+                      description: |-
+                        Key is the taint key that the toleration applies to. Empty means match all taint keys.
+                        If the key is empty, operator must be Exists; this combination means to match all values and all keys.
+                      type: string
+                    operator:
+                      description: |-
+                        Operator represents a key's relationship to the value.
+                        Valid operators are Exists, Equal, Lt, and Gt. Defaults to Equal.
+                        Exists is equivalent to wildcard for value, so that a pod can
+                        tolerate all taints of a particular category.
+                        Lt and Gt perform numeric comparisons (requires feature gate TaintTolerationComparisonOperators).
+                      type: string
+                    tolerationSeconds:
+                      description: |-
+                        TolerationSeconds represents the period of time the toleration (which must be
+                        of effect NoExecute, otherwise this field is ignored) tolerates the taint. By default,
+                        it is not set, which means tolerate the taint forever (do not evict). Zero and
+                        negative values will be treated as 0 (evict immediately) by the system.
+                      format: int64
+                      type: integer
+                    value:
+                      description: |-
+                        Value is the taint value the toleration matches to.
+                        If the operator is Exists, the value should be empty, otherwise just a regular string.
+                      type: string
+                  type: object
+                type: array
+            required:
+            - nodeSelector
+            - slotsPerNode
+            type: object
+          status:
+            description: PoolStatus reports the pool's size.
+            properties:
+              nodes:
+                description: Nodes ready in the pool, and their slots.
+                format: int32
+                type: integer
+              provisioned:
+                description: Provisioned burst nodes, and how many are requested.
+                format: int32
+                type: integer
+              requested:
+                format: int32
+                type: integer
+              slots:
+                format: int32
+                type: integer
+              used:
+                description: Used slots by running units.
+                format: int32
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

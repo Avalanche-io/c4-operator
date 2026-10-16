@@ -48,6 +48,48 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-manag
 subjects:
 - {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
+# Work queue (in the manager): releases units as pods in any namespace that
+# has WorkJobs, writes job, pool and capacity status, and advertises each
+# pool node's slots as an extended resource (nodes/status). Patching Node
+# taints is for the kind-sim capacity provider only; production adapters
+# (Cluster Autoscaler ProvisioningRequests, Karpenter) need none of it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-queue
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs, pools, capacityrequests]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs/status, pools/status, capacityrequests/status]
+  verbs: [get, update, patch]
+- apiGroups: [c4.avalanche.io]
+  resources: [capacityrequests]
+  verbs: [create, update, patch, delete]
+# Resumed units mount the view their last attempt captured, through a
+# Materialization the queue owns in the job's namespace.
+- apiGroups: [c4.avalanche.io]
+  resources: [materializations]
+  verbs: [create, patch]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch, create, patch, delete]
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get, list, watch, patch]
+- apiGroups: [""]
+  resources: [nodes/status]
+  verbs: [patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-queue
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-queue}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
 # Node daemon: reads Projects, Materializations (by name, on demand) and
 # the Nodes of its locality; validates pod and tier tokens; annotates pods
 # with capture results. A ValidatingAdmissionPolicy (config/policy)

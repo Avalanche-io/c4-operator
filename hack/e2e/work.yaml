@@ -1,0 +1,35 @@
+# Pools of the e2e farm (P5). The workers carry c4.avalanche.io/pool labels
+# (kind.yaml): four cpu nodes, two gpu-sim nodes (labeled as GPU nodes; kind
+# has no GPUs) and two spot nodes that start unprovisioned and are
+# "provisioned" by the kind-sim capacity provider on request.
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Pool
+metadata: {name: cpu}
+spec:
+  nodeSelector: {c4.avalanche.io/pool: cpu}
+  slotsPerNode: 4
+  costPerSlotHour: "0.40"
+  attributes: {class: cpu, capacityType: on-demand}
+---
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Pool
+metadata: {name: gpu}
+spec:
+  nodeSelector: {c4.avalanche.io/pool: gpu-sim}
+  slotsPerNode: 4
+  costPerSlotHour: "2.50"
+  attributes: {class: gpu, gpuModel: sim-l4, vram: 24Gi, capacityType: on-demand}
+---
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Pool
+metadata: {name: spot}
+spec:
+  nodeSelector: {c4.avalanche.io/pool: spot}
+  slotsPerNode: 4
+  costPerSlotHour: "0.15"
+  attributes: {class: cpu, capacityType: spot}
+  burst:
+    maxNodes: 2
+    provisioningSeconds: 20
+    costPerSlotHour: "0.15"
+    provider: kind-sim

@@ -1,0 +1,907 @@
+// Package queue is the work system's controller (DESIGN.md section 10.2):
+// every tick it reads pools, projects, jobs and unit pods, asks the
+// scheduling policy (internal/work/sched) what to release, preempt and
+// request, and carries that out. Units become pods only when they can
+// run; kube-scheduler places them.
+package queue
+
+import (
+	"context"
+	"fmt"
+	"math"
+	"sort"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+
+	"github.com/go-logr/logr"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
+	"github.com/Avalanche-io/c4-operator/internal/work/order"
+	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+)
+
+// SlotResource is the extended resource each pool node advertises, one per
+// slot, and each unit pod requests. kube-scheduler then places units by
+// slot, as the queue counts them.
+const SlotResource corev1.ResourceName = "c4.avalanche.io/slots"
+
+// Queue is the controller. Run it under leader election: it keeps state in
+// memory between ticks (rebuilt from WorkJob status on start).
+type Queue struct {
+	Client client.Client
+	// Every is the tick period (default 2 s).
+	Every  time.Duration
+	Policy sched.Policy
+	Cfg    sched.Config
+	Log    logr.Logger
+	Now    func() time.Time
+	// CaptureWait bounds how long a finished unit waits for its capture
+	// annotation before it counts as done without one.
+	CaptureWait time.Duration
+
+	mu    sync.Mutex
+	st    sched.State
+	jobs  map[types.UID]*jobMem
+	spent map[string]float64 // burst dollars per project today
+	day   int
+	last  time.Time
+	// Last decisions, for the HUD.
+	lastSnap sched.Snapshot
+	lastDec  sched.Decisions
+}
+
+// NeedLeaderElection makes the queue run on one replica only.
+func (q *Queue) NeedLeaderElection() bool { return true }
+
+// Start runs ticks until ctx ends.
+func (q *Queue) Start(ctx context.Context) error {
+	if q.Every <= 0 {
+		q.Every = 2 * time.Second
+	}
+	if q.Policy == nil {
+		q.Policy = sched.Decide
+	}
+	if q.Now == nil {
+		q.Now = time.Now
+	}
+	if q.CaptureWait <= 0 {
+		q.CaptureWait = 2 * time.Minute
+	}
+	t := time.NewTicker(q.Every)
+	defer t.Stop()
+	for {
+		if err := q.Tick(ctx); err != nil && ctx.Err() == nil {
+			q.Log.Error(err, "tick")
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-t.C:
+		}
+	}
+}
+
+// jobMem is what the queue knows about a job beyond its pods. It is
+// written to status every tick and rebuilt from status on start.
+type jobMem struct {
+	plan      *class.Plan
+	planGen   int64
+	planErr   error
+	succeeded map[int]bool
+	failed    map[int]bool
+	attempts  map[int]int // attempts made, including the running one
+	millis    map[int]int64
+	outputs   int
+	launched  map[int]time.Time
+	nodeFails map[string]int
+	blacklist map[string]bool
+	// resume holds, per unit, the view a yielded attempt captured: the
+	// next attempt mounts it and continues from its checkpoint.
+	resume map[int]string
+	// yieldAsked is when a unit was asked to yield.
+	yieldAsked  map[int]time.Time
+	preemptions map[int]int
+	yields      []yieldRecord
+	lastRun     time.Time
+	readyAt     time.Time
+	started     time.Time
+	finished    time.Time
+	wrote       time.Time
+}
+
+func newMem() *jobMem {
+	return &jobMem{succeeded: map[int]bool{}, failed: map[int]bool{}, attempts: map[int]int{},
+		millis: map[int]int64{}, launched: map[int]time.Time{}, nodeFails: map[string]int{}, blacklist: map[string]bool{},
+		resume: map[int]string{}, yieldAsked: map[int]time.Time{}, preemptions: map[int]int{}}
+}
+
+// yieldRecord is one yield of a checkpointing unit.
+type yieldRecord struct {
+	Unit   int
+	At     time.Time
+	Reason string
+	View   string
+}
+
+func (m *jobMem) load(st *c4v1.WorkJobStatus) {
+	for _, i := range decode(st.UnitStates["succeeded"]) {
+		m.succeeded[i] = true
+	}
+	for _, i := range decode(st.UnitStates["failed"]) {
+		m.failed[i] = true
+	}
+	for _, pair := range strings.Split(st.Attempts, ",") {
+		i, n, ok := strings.Cut(pair, ":")
+		if !ok {
+			continue
+		}
+		ii, err1 := strconv.Atoi(i)
+		nn, err2 := strconv.Atoi(n)
+		if err1 == nil && err2 == nil {
+			m.attempts[ii] = nn
+		}
+	}
+	for i, ms := range st.UnitMillis {
+		if ms > 0 {
+			m.millis[i] = ms
+		}
+	}
+	m.outputs = int(st.Outputs)
+	for k, view := range st.Resume {
+		if i, err := strconv.Atoi(k); err == nil {
+			m.resume[i] = view
+		}
+	}
+	for _, n := range st.Blacklist {
+		m.blacklist[n] = true
+	}
+	if st.Started != nil {
+		m.started = st.Started.Time
+	}
+	if st.Finished != nil {
+		m.finished = st.Finished.Time
+	}
+}
+
+func decode(s string) []int {
+	out, _ := order.DecodeSet(s)
+	return out
+}
+
+// view is one job during a tick.
+type view struct {
+	job       *c4v1.WorkJob
+	key       string // namespace/name
+	mem       *jobMem
+	driver    class.Driver
+	project   string
+	obj       class.Objective
+	pods      map[int]*corev1.Pod // live unit pods by index
+	done      []*corev1.Pod       // terminal pods to delete once recorded
+	running   map[int]runInfo
+	finishing map[int]bool // succeeded, waiting for capture
+	runnable  []int
+	blocked   bool
+	// unschedulable says why no unit of the job can ever be placed.
+	unschedulable string
+	pools     []string
+	sum       estimate.Summary
+	est       *estimate.Estimator
+}
+
+type runInfo struct {
+	pool    string
+	slots   int
+	started time.Time
+	node    string
+}
+
+// Tick is one round: observe, decide, act, report.
+func (q *Queue) Tick(ctx context.Context) error {
+	q.mu.Lock()
+	defer q.mu.Unlock()
+	if q.jobs == nil {
+		q.jobs = map[types.UID]*jobMem{}
+		q.spent = map[string]float64{}
+	}
+	now := q.Now()
+	if d := now.YearDay(); d != q.day {
+		q.day, q.spent = d, map[string]float64{}
+	}
+
+	var (
+		pools    c4v1.PoolList
+		nodes    corev1.NodeList
+		jobs     c4v1.WorkJobList
+		pods     corev1.PodList
+		projects c4v1.ProjectList
+		crs      c4v1.CapacityRequestList
+	)
+	for _, l := range []struct {
+		list client.ObjectList
+		opts []client.ListOption
+	}{
+		{&pools, nil}, {&nodes, nil}, {&jobs, nil}, {&projects, nil}, {&crs, nil},
+		{&pods, []client.ListOption{client.HasLabels{c4v1.LabelJob}}},
+	} {
+		if err := q.Client.List(ctx, l.list, l.opts...); err != nil {
+			return err
+		}
+	}
+
+	poolInfo := q.pools(ctx, pools.Items, nodes.Items, pods.Items, crs.Items)
+	nsProject := map[string]string{}
+	for _, p := range projects.Items {
+		for _, ns := range p.Spec.Namespaces {
+			nsProject[ns] = p.Name
+		}
+	}
+	podsByJob := map[string][]*corev1.Pod{}
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		key := p.Namespace + "/" + p.Labels[c4v1.LabelJob]
+		podsByJob[key] = append(podsByJob[key], p)
+	}
+	phases := map[string]string{}
+	for _, j := range jobs.Items {
+		phases[j.Namespace+"/"+j.Name] = j.Status.Phase
+	}
+
+	seen := map[types.UID]bool{}
+	var views []*view
+	for i := range jobs.Items {
+		j := &jobs.Items[i]
+		seen[j.UID] = true
+		v := q.observe(ctx, j, podsByJob[j.Namespace+"/"+j.Name], phases, nsProject, poolInfo, now)
+		if v != nil {
+			views = append(views, v)
+		}
+	}
+	for uid := range q.jobs {
+		if !seen[uid] {
+			delete(q.jobs, uid)
+		}
+	}
+
+	snap := q.snapshot(now, poolInfo, projects.Items, views)
+	dec := q.Policy(snap, &q.st, q.Cfg)
+	q.lastSnap, q.lastDec = snap, dec
+	q.act(ctx, now, dec, views, poolInfo)
+	q.meter(now, views, poolInfo)
+	q.capacity(ctx, now, dec, poolInfo, crs.Items)
+	q.report(ctx, now, dec, views)
+	q.last = now
+	return nil
+}
+
+// observe folds a job's pods into its memory and works out what is
+// runnable. Terminal pods are recorded here and deleted after the status
+// that records them is written.
+func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod, phases, nsProject map[string]string, pools map[string]*pool, now time.Time) *view {
+	m, ok := q.jobs[j.UID]
+	if !ok {
+		m = newMem()
+		m.load(&j.Status)
+		q.jobs[j.UID] = m
+	}
+	v := &view{job: j, key: j.Namespace + "/" + j.Name, mem: m, pods: map[int]*corev1.Pod{},
+		running: map[int]runInfo{}, finishing: map[int]bool{}}
+	v.project = nsProject[j.Namespace]
+	if v.project == "" {
+		v.project = "namespace/" + j.Namespace
+	}
+	d, err := class.Lookup(j.Spec.Class)
+	if err != nil {
+		m.planErr = err
+		return v
+	}
+	v.driver = d
+	if m.plan == nil || m.planGen != j.Generation {
+		m.plan, m.planErr = d.Plan(j)
+		m.planGen = j.Generation
+	}
+	if m.planErr != nil {
+		return v
+	}
+	plan := m.plan
+	v.pools = j.Spec.Pools
+	if len(v.pools) == 0 {
+		v.pools = d.Pools()
+	}
+	// A unit larger than any node of the job's pools would wait forever.
+	widest, known := 0, false
+	for _, name := range v.pools {
+		if p := pools[name]; p != nil {
+			widest, known = max(widest, p.perNode), true
+		}
+	}
+	switch {
+	case !known:
+		v.unschedulable = fmt.Sprintf("none of the job's pools %v exists", v.pools)
+	case plan.Units[0].Slots > widest:
+		v.unschedulable = fmt.Sprintf("a unit needs %d slots and the largest node in pools %v has %d", plan.Units[0].Slots, v.pools, widest)
+	}
+	retries := int(j.Spec.Retries)
+	limit := int(j.Spec.NodeErrorLimit)
+	if limit <= 0 {
+		limit = 3
+	}
+	capture := needsCapture(j)
+
+	for _, p := range pods {
+		if !metaOwned(p, j) {
+			continue
+		}
+		idx, err := strconv.Atoi(p.Labels[c4v1.LabelUnit])
+		if err != nil || idx < 0 || idx >= len(plan.Units) {
+			continue
+		}
+		delete(m.launched, idx)
+		slots := plan.Units[idx].Slots
+		switch {
+		case p.DeletionTimestamp != nil:
+			v.running[idx] = runInfo{pool: p.Labels[c4v1.LabelPool], slots: slots, started: startOf(p), node: p.Spec.NodeName}
+		case p.Status.Phase == corev1.PodSucceeded:
+			if capture && p.Annotations[c4v1.AnnotationOutputTree] == "" && now.Sub(finishOf(p, now)) < q.CaptureWait {
+				v.finishing[idx] = true
+				continue
+			}
+			if reason := p.Annotations[c4v1.AnnotationYield]; reason != "" && !m.succeeded[idx] {
+				// A unit that yielded at a checkpoint: its captured view is
+				// where the next attempt resumes. Not a failure, not done.
+				if tree := p.Annotations[c4v1.AnnotationOutputTree]; tree != "" && m.resume[idx] != tree {
+					m.resume[idx] = tree
+					m.yields = append(m.yields, yieldRecord{Unit: idx, At: finishOf(p, now), Reason: reason, View: tree})
+				}
+				if attemptOf(p) == m.attempts[idx] && m.attempts[idx] > 0 {
+					m.attempts[idx]--
+				}
+				delete(m.yieldAsked, idx)
+				v.done = append(v.done, p)
+				continue
+			}
+			if !m.succeeded[idx] {
+				m.succeeded[idx] = true
+				m.millis[idx] = runMillis(p, now)
+				if p.Annotations[c4v1.AnnotationOutputChangeset] != "" {
+					m.outputs++
+				}
+			}
+			v.done = append(v.done, p)
+		case p.Status.Phase == corev1.PodFailed:
+			if !m.failed[idx] && !m.succeeded[idx] && attemptOf(p) >= m.attempts[idx] {
+				if n := p.Spec.NodeName; n != "" {
+					m.nodeFails[n]++
+					if m.nodeFails[n] >= limit {
+						m.blacklist[n] = true
+					}
+				}
+				if m.attempts[idx] > retries {
+					m.failed[idx] = true
+				}
+			}
+			v.done = append(v.done, p)
+		default:
+			v.pods[idx] = p
+			v.running[idx] = runInfo{pool: p.Labels[c4v1.LabelPool], slots: slots, started: startOf(p), node: p.Spec.NodeName}
+		}
+	}
+	// Units launched in an earlier tick whose pods the cache does not show
+	// yet hold their slots.
+	for idx, at := range m.launched {
+		if now.Sub(at) > 30*time.Second {
+			delete(m.launched, idx)
+			continue
+		}
+		if _, ok := v.running[idx]; !ok {
+			v.running[idx] = runInfo{pool: "", slots: plan.Units[idx].Slots, started: at}
+		}
+	}
+
+	// Dependencies.
+	for _, dep := range j.Spec.DependsOn {
+		if phases[j.Namespace+"/"+dep] != "Succeeded" {
+			v.blocked = true
+		}
+	}
+	if !v.blocked && m.readyAt.IsZero() {
+		m.readyAt = now
+		if len(j.Spec.DependsOn) == 0 {
+			m.readyAt = j.CreationTimestamp.Time
+		}
+	}
+	v.obj = d.Objective(j, m.readyAt)
+	if len(v.running) > 0 {
+		m.lastRun = now
+		if m.started.IsZero() {
+			m.started = now
+		}
+	}
+	for _, idx := range plan.Order {
+		if m.succeeded[idx] || m.failed[idx] || v.finishing[idx] {
+			continue
+		}
+		if _, ok := v.running[idx]; ok {
+			continue
+		}
+		v.runnable = append(v.runnable, idx)
+	}
+	q.estimate(v, now)
+	return v
+}
+
+// estimate rebuilds the job's estimator from its measured units and
+// summarizes the remaining work.
+func (q *Queue) estimate(v *view, now time.Time) {
+	plan := v.mem.plan
+	e := estimate.New(plan.Estimate)
+	if plan.Prior != nil {
+		for _, u := range plan.Units {
+			e.SetPrior(u.Key, *plan.Prior)
+			break
+		}
+	}
+	idxs := make([]int, 0, len(v.mem.millis))
+	for i := range v.mem.millis {
+		idxs = append(idxs, i)
+	}
+	sort.Ints(idxs)
+	for _, i := range idxs {
+		u := plan.Units[i]
+		e.Observe(u.Key, u.Pos, float64(v.mem.millis[i])/1000)
+	}
+	var queued []estimate.Unit
+	var run []estimate.RunningUnit
+	for _, idx := range v.runnable {
+		u := plan.Units[idx]
+		queued = append(queued, estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots})
+	}
+	for idx, r := range v.running {
+		u := plan.Units[idx]
+		run = append(run, estimate.RunningUnit{Unit: estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots},
+			Elapsed: math.Max(0, now.Sub(r.started).Seconds())})
+	}
+	s := e.Summarize(queued, run)
+	// No unit depends on another within these classes, so the critical
+	// path is the longest single remaining unit.
+	for _, qu := range queued {
+		s.TPath = math.Max(s.TPath, e.Predict(qu.Key, qu.Pos).Mean)
+	}
+	for _, ru := range run {
+		rem, _ := e.Remainder(e.Predict(ru.Key, ru.Pos), 0, ru.Elapsed)
+		s.TPath = math.Max(s.TPath, rem)
+	}
+	v.sum, v.est = s, e
+}
+
+// snapshot builds the policy's input.
+func (q *Queue) snapshot(now time.Time, pools map[string]*pool, projects []c4v1.Project, views []*view) sched.Snapshot {
+	s := sched.Snapshot{Now: now}
+	free := 0
+	names := make([]string, 0, len(pools))
+	for n := range pools {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, n := range names {
+		p := pools[n]
+		sp := sched.Pool{Name: n, Slots: p.slots, Used: p.used, Attrs: p.spec.Spec.Attributes, CostPerSlotHour: p.cost}
+		if b := p.spec.Spec.Burst; b != nil {
+			sp.Burst = &sched.Burst{MaxSlots: int(b.MaxNodes) * p.perNode,
+				Provisioning:    time.Duration(b.ProvisioningSeconds) * time.Second,
+				CostPerSlotHour: p.burstCost, Requested: p.requested, Provisioned: p.slots}
+			sp.CostPerSlotHour = p.burstCost
+		}
+		free += max(0, p.slots-p.used)
+		s.Pools = append(s.Pools, sp)
+	}
+	for _, p := range projects {
+		sp := sched.Project{Name: p.Name, Weight: 1, Quotas: map[string]sched.Quota{}}
+		if w := p.Spec.Work; w != nil {
+			for _, qt := range w.Quotas {
+				bl := -1
+				if qt.BorrowingLimit != nil {
+					bl = int(*qt.BorrowingLimit)
+				}
+				sp.Quotas[qt.Pool] = sched.Quota{Nominal: int(qt.Nominal), BorrowingLimit: bl}
+			}
+			sp.Weight = floatOr(w.FairShareWeight, 1)
+			sp.BurstBudgetLeft = math.Max(0, floatOr(w.BurstBudgetPerDay, 0)-q.spent[p.Name])
+			sp.LateCostPerHour = floatOr(w.LateCostPerHour, 0)
+		}
+		s.Projects = append(s.Projects, sp)
+	}
+	for _, v := range views {
+		if v.mem.plan == nil || v.mem.planErr != nil || v.unschedulable != "" || isFinished(v) {
+			continue
+		}
+		plan := v.mem.plan
+		j := sched.Job{
+			ID: v.key, Project: v.project, Class: v.job.Spec.Class,
+			Submitted: v.job.CreationTimestamp.Time, Ready: v.mem.readyAt,
+			Deadline: v.obj.Deadline, RequiredRate: v.obj.Rate,
+			Pools: v.pools, MaxParallel: int(v.job.Spec.MaxParallel),
+			SlotsPerUnit: plan.Units[0].Slots, Running: map[string]int{},
+			Estimate: v.sum, Hold: v.job.Spec.Nudge.Hold || v.job.Spec.Nudge.HoldStop, HoldStop: v.job.Spec.Nudge.HoldStop,
+			Boost: floatOr(v.job.Spec.Nudge.Boost, 0), LastRunning: v.mem.lastRun,
+			Preemptible: v.driver.Preemptible(), Checkpoints: v.driver.Checkpoints(),
+		}
+		if v.blocked {
+			j.Blocked = len(v.runnable)
+		} else {
+			j.RunnableTotal = len(v.runnable)
+			k := min(len(v.runnable), free/max(1, j.SlotsPerUnit)+1)
+			for _, idx := range v.runnable[:k] {
+				u := plan.Units[idx]
+				j.Runnable = append(j.Runnable, sched.UnitRef{ID: unitID(v.key, idx), Info: u.Info, Slots: u.Slots})
+			}
+		}
+		for idx, r := range v.running {
+			j.Running[r.pool] += r.slots
+			j.RunningUnits = append(j.RunningUnits, sched.RunningUnit{ID: unitID(v.key, idx), Pool: r.pool,
+				Slots: r.slots, Started: r.started, Preemptions: 0})
+		}
+		sort.Slice(j.RunningUnits, func(a, b int) bool { return j.RunningUnits[a].ID < j.RunningUnits[b].ID })
+		s.Jobs = append(s.Jobs, j)
+	}
+	return s
+}
+
+func isFinished(v *view) bool {
+	plan := v.mem.plan
+	return plan != nil && len(v.mem.succeeded)+len(v.mem.failed) >= len(plan.Units) && len(v.running) == 0
+}
+
+// act creates pods for dispatched units and stops preempted ones.
+func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, views []*view, pools map[string]*pool) {
+	byKey := map[string]*view{}
+	for _, v := range views {
+		byKey[v.key] = v
+	}
+	for _, d := range dec.Dispatch {
+		key, idx, ok := parseUnitID(d.Unit)
+		v := byKey[key]
+		p := pools[d.Pool]
+		if !ok || v == nil || p == nil {
+			continue
+		}
+		if view := v.mem.resume[idx]; view != "" {
+			ready, err := q.ensureResume(ctx, v.job, idx, view)
+			if err != nil {
+				q.Log.Error(err, "resume materialization", "job", key, "unit", idx)
+				continue
+			}
+			if !ready {
+				continue
+			}
+		}
+		v.mem.attempts[idx]++
+		pod := q.podFor(v, idx, v.mem.attempts[idx], p)
+		if err := q.Client.Create(ctx, pod); err != nil {
+			v.mem.attempts[idx]--
+			q.Log.Error(err, "create unit pod", "job", key, "unit", idx)
+			continue
+		}
+		v.mem.launched[idx] = now
+		q.Log.Info("released", "job", key, "unit", idx, "pool", d.Pool, "tier", d.Tier)
+	}
+	for _, pr := range dec.Preempt {
+		key, idx, ok := parseUnitID(pr.Unit)
+		v := byKey[key]
+		if !ok || v == nil {
+			continue
+		}
+		pod := v.pods[idx]
+		if pod == nil {
+			continue
+		}
+		v.mem.preemptions[idx]++
+		if pr.Yield && v.driver.Checkpoints() {
+			// Ask the unit to stop at its next checkpoint: it sees the
+			// annotation through its downward API volume, saves, and
+			// exits; capture keeps what it saved.
+			if _, asked := v.mem.yieldAsked[idx]; asked {
+				continue
+			}
+			patch := client.MergeFrom(pod.DeepCopy())
+			if pod.Annotations == nil {
+				pod.Annotations = map[string]string{}
+			}
+			pod.Annotations[c4v1.AnnotationYield] = string(pr.Reason)
+			if err := q.Client.Patch(ctx, pod, patch); err != nil {
+				q.Log.Error(err, "ask to yield", "job", key, "unit", idx)
+				continue
+			}
+			v.mem.yieldAsked[idx] = now
+			q.Log.Info("yield requested", "job", key, "unit", idx, "reason", pr.Reason, "for", pr.For)
+			continue
+		}
+		// A preempted attempt is not a failure: it does not count toward
+		// retries.
+		if v.mem.attempts[idx] > 0 {
+			v.mem.attempts[idx]--
+		}
+		if err := q.Client.Delete(ctx, pod, client.GracePeriodSeconds(0)); err != nil && !apierrors.IsNotFound(err) {
+			q.Log.Error(err, "preempt", "job", key, "unit", idx)
+			continue
+		}
+		q.Log.Info("preempted", "job", key, "unit", idx, "reason", pr.Reason, "for", pr.For)
+	}
+	// A unit asked to yield that has not within ten minutes is stopped.
+	for _, v := range views {
+		for idx, at := range v.mem.yieldAsked {
+			if now.Sub(at) < 10*time.Minute {
+				continue
+			}
+			if pod := v.pods[idx]; pod != nil {
+				q.Client.Delete(ctx, pod)
+			}
+			delete(v.mem.yieldAsked, idx)
+		}
+	}
+	// Hold-stop: stop every running unit of the job.
+	for _, v := range views {
+		if !v.job.Spec.Nudge.HoldStop {
+			continue
+		}
+		for idx, pod := range v.pods {
+			if v.mem.attempts[idx] > 0 {
+				v.mem.attempts[idx]--
+			}
+			q.Client.Delete(ctx, pod)
+		}
+	}
+}
+
+// podFor builds a unit's pod from the job's template.
+func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
+	j := v.job
+	u := v.mem.plan.Units[idx]
+	tpl := j.Spec.Template.DeepCopy()
+	pod := &corev1.Pod{ObjectMeta: tpl.ObjectMeta, Spec: tpl.Spec}
+	// A unit can be launched again after a preemption with the same
+	// attempt number, so names are generated; the launch expectation in
+	// jobMem keeps a unit from being released twice.
+	pod.Name = ""
+	pod.GenerateName = fmt.Sprintf("%s-u%d-", j.Name, idx)
+	pod.Namespace = j.Namespace
+	if pod.Labels == nil {
+		pod.Labels = map[string]string{}
+	}
+	pod.Labels[c4v1.LabelJob] = j.Name
+	pod.Labels[c4v1.LabelUnit] = strconv.Itoa(idx)
+	pod.Labels[c4v1.LabelPool] = p.spec.Name
+	if pod.Annotations == nil {
+		pod.Annotations = map[string]string{}
+	}
+	pod.Annotations[c4v1.AnnotationAttempt] = strconv.Itoa(attempt)
+	t := true
+	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob",
+		Name: j.Name, UID: j.UID, Controller: &t, BlockOwnerDeletion: &t}}
+	pod.Spec.RestartPolicy = corev1.RestartPolicyNever
+	if pod.Spec.NodeSelector == nil {
+		pod.Spec.NodeSelector = map[string]string{}
+	}
+	for k, val := range p.spec.Spec.NodeSelector {
+		pod.Spec.NodeSelector[k] = val
+	}
+	pod.Spec.Tolerations = append(pod.Spec.Tolerations, p.spec.Spec.Tolerations...)
+	if len(v.mem.blacklist) > 0 {
+		var bad []string
+		for n := range v.mem.blacklist {
+			bad = append(bad, n)
+		}
+		sort.Strings(bad)
+		pod.Spec.Affinity = notOnNodes(pod.Spec.Affinity, bad)
+	}
+	env := append([]corev1.EnvVar{
+		{Name: "C4_JOB", Value: j.Name}, {Name: "C4_UNIT", Value: strconv.Itoa(idx)},
+		{Name: "C4_ATTEMPT", Value: strconv.Itoa(attempt)}, {Name: "C4_UNIT_LABEL", Value: u.Label},
+	}, u.Env...)
+	if v.driver.Checkpoints() {
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "c4-podinfo", VolumeSource: corev1.VolumeSource{
+			DownwardAPI: &corev1.DownwardAPIVolumeSource{Items: []corev1.DownwardAPIVolumeFile{
+				{Path: "annotations", FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.annotations"}}}}}})
+		for c := range pod.Spec.Containers {
+			pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
+				corev1.VolumeMount{Name: "c4-podinfo", MountPath: "/etc/c4/podinfo", ReadOnly: true})
+		}
+		env = append(env, corev1.EnvVar{Name: "C4_PODINFO", Value: "/etc/c4/podinfo/annotations"})
+	}
+	resumed := false
+	for i, in := range j.Spec.Inputs {
+		name := fmt.Sprintf("c4-input-%d", i)
+		if !in.ReadOnly && !resumed && v.mem.resume[idx] != "" {
+			// The first writable input resumes from the view the last
+			// attempt captured.
+			in.Materialization = resumeName(j.Name, idx)
+			resumed = true
+			env = append(env, corev1.EnvVar{Name: "C4_RESUME_VIEW", Value: v.mem.resume[idx]})
+		}
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{
+			CSI: &corev1.CSIVolumeSource{Driver: c4v1.DriverName, ReadOnly: &in.ReadOnly,
+				VolumeAttributes: map[string]string{c4v1.VolumeAttrMaterialization: in.Materialization, c4v1.VolumeAttrClass: j.Spec.Class}}}})
+		for c := range pod.Spec.Containers {
+			pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
+				corev1.VolumeMount{Name: name, MountPath: in.MountPath, ReadOnly: in.ReadOnly})
+		}
+	}
+	for c := range pod.Spec.Containers {
+		pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, env...)
+	}
+	// The first container holds the unit's slots.
+	if len(pod.Spec.Containers) > 0 {
+		c := &pod.Spec.Containers[0]
+		qty := resource.MustParse(strconv.Itoa(u.Slots))
+		if c.Resources.Requests == nil {
+			c.Resources.Requests = corev1.ResourceList{}
+		}
+		if c.Resources.Limits == nil {
+			c.Resources.Limits = corev1.ResourceList{}
+		}
+		c.Resources.Requests[SlotResource] = qty
+		c.Resources.Limits[SlotResource] = qty
+	}
+	return pod
+}
+
+func notOnNodes(a *corev1.Affinity, nodes []string) *corev1.Affinity {
+	if a == nil {
+		a = &corev1.Affinity{}
+	}
+	if a.NodeAffinity == nil {
+		a.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	req := a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+	if req == nil {
+		req = &corev1.NodeSelector{NodeSelectorTerms: []corev1.NodeSelectorTerm{{}}}
+	}
+	for i := range req.NodeSelectorTerms {
+		req.NodeSelectorTerms[i].MatchExpressions = append(req.NodeSelectorTerms[i].MatchExpressions,
+			corev1.NodeSelectorRequirement{Key: "kubernetes.io/hostname", Operator: corev1.NodeSelectorOpNotIn, Values: nodes})
+	}
+	a.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = req
+	return a
+}
+
+// meter adds burst spending per project: slots its units hold in burst
+// pools, times the pool's burst price, over the time since the last tick.
+func (q *Queue) meter(now time.Time, views []*view, pools map[string]*pool) {
+	if q.last.IsZero() {
+		return
+	}
+	h := now.Sub(q.last).Hours()
+	for _, v := range views {
+		for _, r := range v.running {
+			p := pools[r.pool]
+			if p == nil || p.spec.Spec.Burst == nil {
+				continue
+			}
+			q.spent[v.project] += float64(r.slots) * p.burstCost * h
+		}
+	}
+}
+
+func unitID(key string, idx int) string { return key + "#" + strconv.Itoa(idx) }
+
+// resumeName is the Materialization a resumed unit mounts.
+func resumeName(job string, idx int) string { return fmt.Sprintf("%s-resume-u%d", job, idx) }
+
+func parseUnitID(id string) (string, int, bool) {
+	key, n, ok := strings.Cut(id, "#")
+	if !ok {
+		return "", 0, false
+	}
+	i, err := strconv.Atoi(n)
+	return key, i, err == nil
+}
+
+func needsCapture(j *c4v1.WorkJob) bool {
+	for _, in := range j.Spec.Inputs {
+		if !in.ReadOnly {
+			return true
+		}
+	}
+	return false
+}
+
+func metaOwned(p *corev1.Pod, j *c4v1.WorkJob) bool {
+	for _, o := range p.OwnerReferences {
+		if o.UID == j.UID {
+			return true
+		}
+	}
+	return false
+}
+
+func attemptOf(p *corev1.Pod) int {
+	n, _ := strconv.Atoi(p.Annotations[c4v1.AnnotationAttempt])
+	return n
+}
+
+func startOf(p *corev1.Pod) time.Time {
+	if p.Status.StartTime != nil {
+		return p.Status.StartTime.Time
+	}
+	return p.CreationTimestamp.Time
+}
+
+// finishOf is when the unit's containers ended.
+func finishOf(p *corev1.Pod, now time.Time) time.Time {
+	var end time.Time
+	for _, c := range p.Status.ContainerStatuses {
+		if t := c.State.Terminated; t != nil && t.FinishedAt.After(end) {
+			end = t.FinishedAt.Time
+		}
+	}
+	if end.IsZero() {
+		return now
+	}
+	return end
+}
+
+// runMillis is the run time of the unit's containers.
+func runMillis(p *corev1.Pod, now time.Time) int64 {
+	var start, end time.Time
+	for _, c := range p.Status.ContainerStatuses {
+		t := c.State.Terminated
+		if t == nil {
+			continue
+		}
+		if start.IsZero() || t.StartedAt.Time.Before(start) {
+			start = t.StartedAt.Time
+		}
+		if t.FinishedAt.After(end) {
+			end = t.FinishedAt.Time
+		}
+	}
+	if start.IsZero() {
+		start, end = startOf(p), finishOf(p, now)
+	}
+	return max(1, end.Sub(start).Milliseconds())
+}
+
+func floatOr(s string, def float64) float64 {
+	f, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return def
+	}
+	return f
+}
+
+// ensureResume makes the Materialization a resumed unit mounts point at the
+// view its last attempt captured, and reports whether it is Ready.
+func (q *Queue) ensureResume(ctx context.Context, j *c4v1.WorkJob, idx int, view string) (bool, error) {
+	name := resumeName(j.Name, idx)
+	var m c4v1.Materialization
+	err := q.Client.Get(ctx, types.NamespacedName{Namespace: j.Namespace, Name: name}, &m)
+	if apierrors.IsNotFound(err) {
+		t := true
+		m = c4v1.Materialization{
+			ObjectMeta: metav1.ObjectMeta{Namespace: j.Namespace, Name: name,
+				OwnerReferences: []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob",
+					Name: j.Name, UID: j.UID, Controller: &t, BlockOwnerDeletion: &t}}},
+			Spec: c4v1.MaterializationSpec{Source: c4v1.ManifestSource{ID: view}},
+		}
+		return false, q.Client.Create(ctx, &m)
+	}
+	if err != nil {
+		return false, err
+	}
+	if m.Spec.Source.ID != view {
+		patch := client.MergeFrom(m.DeepCopy())
+		m.Spec.Source = c4v1.ManifestSource{ID: view}
+		return false, q.Client.Patch(ctx, &m, patch)
+	}
+	return m.Status.Phase == c4v1.PhaseReady && m.Status.ObservedGeneration == m.Generation, nil
+}
