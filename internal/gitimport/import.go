@@ -121,6 +121,10 @@ type Commit struct {
 	Pointers       int `json:"pointers"`
 	RecordsRead    int `json:"recordsRead"`    // parent records Apply read
 	RecordsWritten int `json:"recordsWritten"` // new records of this view
+	// RecordBytes is the size of the new records. A record is a one-level
+	// listing, so this is the width of the directories along the changed
+	// paths, which is what a commit's cost tracks.
+	RecordBytes int64 `json:"recordBytes"`
 
 	Millis float64 `json:"ms"`
 	// SinkMillis is the time spent in sink writes, summed over the
@@ -227,6 +231,8 @@ func Run(ctx context.Context, opts Options) (*Summary, error) {
 		records: newRecordCache(opts.Records),
 		up:      &uploads{sem: make(chan struct{}, opts.Jobs)},
 	}
+	// On an error return, let writes in flight finish before returning.
+	defer im.up.wg.Wait()
 
 	// The view the first imported commit applies to.
 	first := history[0]
@@ -506,15 +512,17 @@ func (im *importer) entries(rev string, list []treeEntry) ([]view.Edit, error) {
 // it is seen: its C4 ID, and its bytes when it is small. Content that is
 // not a c4git pointer is uploaded here, in the same pass that hashes it.
 func (im *importer) read(e treeEntry) error {
-	if b, ok := im.blobs[e.sha]; ok && (e.mode != modeLink || b.data != nil) {
+	prior, seen := im.blobs[e.sha]
+	if seen && (e.mode != modeLink || prior.data != nil) {
 		return nil
 	}
+	// Unseen, or seen as a large file and now needed as a symlink target.
 	size, r, done, err := im.cat.blob(e.sha)
 	if err != nil {
 		return err
 	}
 	im.cur.BlobsRead++
-	b := &blobInfo{size: size}
+	b := &blobInfo{size: size, present: seen && prior.present}
 	keep := size <= smallBlob || e.mode == modeLink
 	switch {
 	case keep:
@@ -714,6 +722,7 @@ func (im *importer) finish(parent c4.ID, edits []view.Edit, start time.Time) (*C
 	var root []byte
 	for _, r := range res.Records {
 		im.records.add(r.ID, r.Data)
+		im.cur.RecordBytes += int64(len(r.Data))
 		if r.ID == res.ID {
 			root = r.Data
 			continue

@@ -1,5 +1,6 @@
 // Command monorepo builds a synthetic source monorepo for the import-git
-// measurements: services/<name>/ with Go-like sources and tests,
+// measurements: services/<name>/ (or services/<team>/<name>/ with
+// -teams) with Go-like sources and tests,
 // libs/common/, tools/ with executable scripts, a few symlinks, and binary
 // assets (services/<name>/testdata/*.exr) committed through the real c4git
 // filter. Its history has mostly small commits to one service, some to the
@@ -33,7 +34,8 @@ type gen struct {
 	rng   *rand.Rand
 	when  time.Time
 	files map[string]bool // tracked paths
-	svcs  []string
+	svcs  []string        // service directories
+	teams int
 	// assetMin and assetMax bound asset sizes in bytes.
 	assetMin, assetMax int
 }
@@ -44,6 +46,7 @@ func main() {
 	seed := flag.Uint64("seed", 1, "seed")
 	commits := flag.Int("commits", 400, "commits after the initial one")
 	services := flag.Int("services", 150, "services in the initial tree")
+	teams := flag.Int("teams", 0, "group services under services/team-NN/ (0: flat)")
 	assetMin := flag.Int("asset-min-mb", 1, "smallest asset, MB")
 	assetMax := flag.Int("asset-max-mb", 4, "largest asset, MB")
 	flag.Parse()
@@ -69,6 +72,7 @@ func main() {
 		rng:      rand.New(rand.NewPCG(*seed, *seed^0x9e3779b97f4a7c15)),
 		when:     time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC),
 		files:    map[string]bool{},
+		teams:    *teams,
 		assetMin: *assetMin << 20, assetMax: *assetMax << 20,
 	}
 	g.env = append(os.Environ(),
@@ -240,8 +244,11 @@ func (g *gen) asset() []byte {
 
 func (g *gen) newService(i int) string {
 	name := fmt.Sprintf("svc-%03d-%s", i, g.word())
-	g.svcs = append(g.svcs, name)
 	base := "services/" + name
+	if g.teams > 0 {
+		base = fmt.Sprintf("services/team-%02d/%s", i%g.teams, name)
+	}
+	g.svcs = append(g.svcs, base)
 	pkg := strings.ReplaceAll(strings.Split(name, "-")[2], "-", "")
 	for range 3 + g.rng.IntN(5) {
 		w := g.word()
@@ -275,7 +282,8 @@ func (g *gen) initial(services int) {
 	}
 	g.write("tools/README.md", []byte("Build and CI scripts.\n"), 0o644)
 	g.symlink("build.sh", "tools/b")
-	g.symlink("../../libs/common/config/default.yaml", "services/"+g.svcs[0]+"/config.yaml")
+	up := strings.Repeat("../", strings.Count(g.svcs[0], "/")+1)
+	g.symlink(up+"libs/common/config/default.yaml", g.svcs[0]+"/config.yaml")
 	g.write("go.mod", []byte("module example.com/mono\n\ngo 1.26\n"), 0o644)
 	g.write("README.md", []byte("# mono\n\nA synthetic monorepo.\n"), 0o644)
 	g.commit("initial import", ".")
@@ -285,7 +293,7 @@ func (g *gen) initial(services int) {
 func (g *gen) hot() string {
 	n := len(g.svcs)
 	i := int(float64(n) * g.rng.Float64() * g.rng.Float64())
-	return "services/" + g.svcs[i]
+	return g.svcs[i]
 }
 
 // under lists tracked regular files under dir with suffix, sorted.
@@ -330,7 +338,7 @@ func (g *gen) step(i int) {
 			return
 		}
 		k := 1 + g.rng.IntN(len(g.svcs)-1) // never the one with the symlink
-		base := "services/" + g.svcs[k]
+		base := g.svcs[k]
 		g.svcs = append(g.svcs[:k], g.svcs[k+1:]...)
 		g.remove(base)
 		g.commit(fmt.Sprintf("%d: remove %s", i, filepath.Base(base)), base)
