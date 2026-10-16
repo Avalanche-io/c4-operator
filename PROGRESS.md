@@ -2,16 +2,29 @@
 
 ## Branches
 
-| Branch | Opened     | Closed | Purpose                                                                           |
-| ------ | ---------- | ------ | --------------------------------------------------------------------------------- |
-| `main` | 2026-10-15 |        | Empty until the MVP is reviewed.                                                  |
-| `mvp`  | 2026-10-15 |        | Working MVP: CRD, controller, node agent, webhook, envtest, kind e2e. Not merged. |
+| Branch          | Opened     | Closed | Purpose                                                                                      |
+| --------------- | ---------- | ------ | -------------------------------------------------------------------------------------------- |
+| `main`          | 2026-10-15 |        | Empty until the work is reviewed.                                                            |
+| `mvp`           | 2026-10-15 |        | Working MVP: CRD, controller, node agent, webhook, envtest, single-node kind e2e. Not merged. |
+| `v2`            | 2026-10-15 |        | The v2 redesign (DESIGN.md): views and records, tiers, overlay and CSI, isolation, work system, provenance. |
+| `v2-sim`        | 2026-10-16 |        | Worktree `.worktrees/sim`: scheduling policy core and the simulation harness. Merges into `v2`. |
+| `v2-hud`        | 2026-10-16 |        | Worktree `.worktrees/hud`: the HUD frontend and its mock backend. Merges into `v2`.         |
+| `v2-gitimport`  | 2026-10-16 |        | Worktree `.worktrees/gitimport`: the c4git-aware importer (P4). Merges into `v2`.           |
 
-No worktrees are in use. If one is needed, it goes under `.worktrees/`.
+Worktrees live under `.worktrees/` (ignored by git). `.worktrees/c4` is a symlink
+to `../c4` so the `replace => ../c4` in each worktree's `go.mod` resolves.
 
 Nothing has been pushed anywhere. There is no remote. No image has been pushed to
-any registry; `c4-operator:dev` exists only in the local Docker daemon and the
-local kind cluster.
+any registry; `c4-operator:dev` and `c4-e2e:dev` exist only in the local Docker
+daemon and the local kind cluster.
+
+## Open questions for Joshua
+
+1. **Name collisions before any launch.** C4 stands for the Cinema Content
+   Creation Cloud (cccc.io). Before a public launch, check collisions:
+   Cinema 4D (commonly "C4D") in the same industry, the C4 model for software
+   architecture diagrams, and existing trademarks. The module path and the repo
+   name are unchanged; those decisions are Joshua's.
 
 ## Release blockers
 
@@ -21,12 +34,8 @@ local kind cluster.
    in `../../RELEASE.md` ("Lessons from v1.0.13", item 1).
 
    It cannot simply be dropped today. Building against the published
-   `github.com/Avalanche-io/c4 v1.0.18` fails, because the operator uses three APIs
-   that exist on c4 `master` but in no release:
-
-   - `c4m.IsJournal`
-   - `c4m.ResolveBase`
-   - `scan.ModeContent`
+   `github.com/Avalanche-io/c4 v1.0.18` fails, because the operator uses APIs that
+   exist on c4 `master` but in no release (for example `c4m.IsJournal`).
 
    Order of operations: ship the next c4 suite release (through `oss/c4toolkit`),
    bump the `require` to that version, delete the `replace`, and run
@@ -41,66 +50,54 @@ local kind cluster.
 
 ## Changes proposed for oss/c4, oss/c4d, oss/c4-containers (not made)
 
-Those repos were read, not modified. These are the places where the operator had
-to work around something, or noticed something while reading.
+Those repos were read, not modified.
 
-1. **Record expansion is not importable.** `expandRecursive`, `expandIfRecord`, and
-   `storeDescend` live in `cmd/c4` (package `main`). The operator re-implements
-   them in `internal/manifest/resolve.go`, generalized so a directory known only by
-   ID is expanded only when the include filter can reach it. A
-   `c4m.Expand(m, src, mayContain func(dir string) bool)` in the library would
-   remove the copy, and give `c4 restore` sparse restores for free.
+### c4
+
+1. **Record expansion is not importable.** `expandRecursive`, `expandIfRecord` and
+   `storeDescend` live in `cmd/c4` (package `main`). The operator implements its
+   own (`internal/view`), generalized so a directory known only by ID is expanded
+   only when the include filter can reach it. A library `c4m.Expand(m, src,
+   mayContain)` would let `c4 restore` do sparse restores too.
 2. **Store opening by URL is not importable.** `store.openS3Configured` is
-   unexported and reads credentials only from the environment. The operator copies
-   its URL parsing (`internal/storeurl`) so object keys match exactly. An exported
-   `store.Open(uri string, creds ...)` would remove the copy.
-3. **S3 prefix concatenation.** `S3Store.objectKey` is `prefix + id`, with no
-   separator. `s3://datasets/c4` (the form in `c4-containers/k8s/*.yaml`) writes
-   keys like `c4c4...`. That works, but it is surprising, and changing it now would
-   orphan existing stores. At minimum it should be documented; the e2e uses a
-   trailing slash (`s3://c4-store/show/`).
-4. **`S3Store.Has` returns false on network errors.** Absent and unreachable read
-   the same. The controller therefore reports an unreachable store as "content
-   missing". A `Has(id) (bool, error)` variant would let it say which.
-5. **`reconcile` has no link mode.** `Apply` copies from a `LocalSource` path. A
-   hardlink option (with copy fallback on `EXDEV`) would let `c4 restore`
-   materialize from a local store the way this operator does.
-6. **c4-containers k8s examples will break on the next c4 release.** The examples
-   `materializer-job.yaml` and `render-pipeline.yaml` run `c4 patch <c4m> <dir>`.
-   That works with the released 1.0.18. On c4 `master`, `patch` is text algebra
-   that "never touches directories" (ARCHITECTURAL_CATALOG.md), and the tree
-   writer is `c4 restore`. This is from reading the catalog, not from running
-   master's CLI.
-7. **c4-containers README names `S3_ENDPOINT`.** The c4 store reads
-   `C4_S3_ENDPOINT` or the `endpoint=` URL query, not `S3_ENDPOINT`.
-8. **c4d `checkout` ignores depth.** `checkout.go` writes each entry to
-   `filepath.Join(targetDir, entry.Name)`. c4m names are bare names with a depth,
-   so nested files land flat in the target directory. This is from reading the
-   code; it was not executed.
+   unexported and reads credentials only from the environment.
+3. **S3 reads cannot resume, and `Has` hides errors.** `S3Store.Open` sends no
+   `Range`, and `S3Store.Has` returns false on network errors, so "absent" and
+   "unreachable" read the same. The operator signs its own ranged GET and HEAD
+   (`internal/storeurl/sigv4.go`, checked against the AWS SigV4 example) and uses
+   `S3Store.Create` only for multipart uploads. A ranged `OpenAt(id, offset)` and a
+   `Head(id) (size, error)` in the library would remove that.
+4. **S3 addressing.** With a custom endpoint, `S3Store` always uses path-style
+   URLs. CoreWeave AI Object Storage requires virtual-hosted addressing.
+5. **S3 prefix concatenation.** `S3Store.objectKey` is `prefix + id` with no
+   separator, so `s3://datasets/c4` writes keys like `c4c4...`. The e2e uses a
+   trailing slash.
+6. **`reconcile` has no link mode.** A hardlink option (copy fallback on `EXDEV`)
+   would let `c4 restore` materialize from a local store the way the node does.
+7. **The content projection drops the executable bit.** Views record mode 0755 on
+   executable files and null elsewhere, so a tree without executables has the same
+   ID as `c4 id` in content mode. A scan mode with that projection in the c4
+   scanner would let the CLI compute view IDs directly.
 
-## Design decisions worth a second look
+### c4d
 
-- **Views live inside the cache volume.** `link(2)` returns `EXDEV` across two bind
-  mounts even when both are the same filesystem, so an init container cannot
-  hardlink from a hostPath cache into a pod's `emptyDir`. The agent builds each view
-  once per node under `/var/lib/c4/views/<viewID>`, and pods mount that directory
-  read-only. One tree serves every pod on the node that wants the same view.
-- **`viewID` is the content-level C4 ID of the tree.** The ID is computed from the
-  description with c4's own directory identity (content projection: names, sizes,
-  and IDs real; mode and timestamp null). A pod can scan its mount and compare, so
-  "the pod sees the exact tree" is a recomputation, not an assertion. The e2e does
-  exactly that, and also scans hardlinked subsets on the host.
-- **The filesystem is the cache index.** An object's link count is its reference
-  count, its atime is its LRU position, and its mtime is a fixed sentinel (c4m's
-  null timestamp) that any write disturbs. The node has no database to drift.
-- **Rebuilt trees are retired, not deleted.** Running pods bind-mount the old tree.
-  It is removed only when no pod on the node uses that view.
-- **Pods for a Materialization with missing content are admitted.** The init
-  container's preflight fails before any byte is fetched, and the workload never
-  starts. A pod that restarts on failure picks the content up once it is uploaded.
-  Denying at admission is the alternative; it gives faster feedback but no
-  self-healing.
+1. **No `Range` support** on `GET /{id}`, so an interrupted 10 GB transfer from a
+   c4d shard restarts at zero (the operator detects the 200 and restarts cleanly).
+2. **No notion of a project.** The content plane authorizes any mTLS peer to read
+   any ID; a cache tier needs a partition header and a per-request decision.
+3. **Whole-object buffering on peer misses.** `handleGetContent` tees a peer
+   fetch into a `bytes.Buffer` before caching it: a 10 GB object needs 10 GB of
+   RAM. Streaming to a temporary file fixes it.
+4. **`checkout` ignores depth** (from reading `checkout.go`; not executed): nested
+   files land flat in the target directory.
+
+### c4-containers
+
+1. The k8s examples run `c4 patch <c4m> <dir>`, which on c4 `master` is text
+   algebra; the tree writer is `c4 restore`.
+2. The README names `S3_ENDPOINT`; the store reads `C4_S3_ENDPOINT` or the
+   `endpoint=` URL query.
 
 ## Status
 
-See README "What it is not yet" for the scope boundary.
+See `REPORT-v2.md` for what each phase proved and what is open.
