@@ -26,6 +26,14 @@ const (
 	// AnnotationOutputChanges summarizes the changeset:
 	// "added=N modified=N deleted=N bytes=N".
 	AnnotationOutputChanges = "c4.avalanche.io/output-changes"
+	// AnnotationOutputProvenance is the C4 ID of the signed task record
+	// (a DSSE envelope) the node daemon made for the capture.
+	AnnotationOutputProvenance = "c4.avalanche.io/output-provenance"
+	// AnnotationAIUsage on a WorkJob (copied to its unit pods) declares the
+	// job's use of generative models, as JSON: {"generated": "none" |
+	// "assisted" | "generated", "model": ..., "oversight": ...,
+	// "consent": [...]}. Task records carry it (DESIGN.md section 9.4).
+	AnnotationAIUsage = "c4.avalanche.io/ai-usage"
 	// AnnotationOutputPrefix is what the node daemon's admission policy
 	// allows it to write on pods.
 	AnnotationOutputPrefix = "c4.avalanche.io/output-"

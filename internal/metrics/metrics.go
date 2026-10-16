@@ -77,6 +77,7 @@ var (
 	NodeCaptureSec  = histogram("c4_node_capture_seconds", "Capture duration.",
 		[]float64{0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30, 60, 300}, "project")
 	NodeCacheBytes   = gauge("c4_node_cache_bytes", "Bytes held in the node object cache.")
+	NodeRecords      = counter("c4_node_task_records_total", "Task records made at capture, by result (signed, error).", "project", "result")
 	NodeMaterialized = counter("c4_node_materialized_bytes_total",
 		"Bytes of the views mounted into pods (each mount counts its view's full size). Less what the store sent, it is the bytes the tiers avoided.", "project")
 	NodeEvictions    = counter("c4_node_evictions_total", "Evicted objects and layers.", "kind")

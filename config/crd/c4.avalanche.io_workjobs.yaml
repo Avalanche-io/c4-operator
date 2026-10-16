@@ -93,8 +93,15 @@ spec:
               inputs:
                 description: Inputs are C4 views mounted into every unit.
                 items:
-                  description: WorkInput mounts a view into every unit.
+                  description: |-
+                    WorkInput mounts a view into every unit: a Materialization, or the
+                    output view of another job in the namespace.
                   properties:
+                    fromJob:
+                      description: |-
+                        FromJob mounts the output view of that job (in this namespace) once
+                        it has succeeded. List it in dependsOn too.
+                      type: string
                     materialization:
                       description: Materialization in the job's namespace.
                       type: string
@@ -288,6 +295,18 @@ spec:
                     format: int64
                     type: integer
                   remainingSeconds:
+                    description: |-
+                      RemainingSeconds is wall-clock time to the ETA (p50): the plan's
+                      answer, after allocation.
+                    format: int64
+                    type: integer
+                  remainingWork:
+                    description: |-
+                      RemainingWork is the estimated work left (W) and its 90th percentile
+                      (W90), in slot-seconds: the estimator's answer, before allocation.
+                    format: int64
+                    type: integer
+                  remainingWorkP90:
                     format: int64
                     type: integer
                   requiredSlots:
@@ -328,6 +347,11 @@ spec:
                     items:
                       type: string
                     type: array
+                  provenance:
+                    description: |-
+                      Provenance is the C4 ID of the job's provenance index: for each file
+                      the job wrote, the signed task record of the unit that wrote it.
+                    type: string
                   view:
                     description: View is the output after the latest fold.
                     type: string

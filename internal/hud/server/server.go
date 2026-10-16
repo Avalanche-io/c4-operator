@@ -14,6 +14,7 @@ package server
 
 import (
 	"context"
+	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,6 +59,8 @@ type Server struct {
 	viewers map[string]accessEntry
 	// previewCache indexes preview proxies by output view.
 	previewCache map[string]map[int]string
+	keys         map[string]ed25519.PublicKey
+	keysUntil    time.Time
 }
 
 type accessEntry struct {
@@ -76,6 +79,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/preview", s.handlePreview)
 	mux.HandleFunc("GET /api/v1/objects/{project}/{id}", s.handleObject)
 	mux.HandleFunc("GET /api/v1/views/{project}/diff", s.handleDiff)
+	mux.HandleFunc("GET /api/v1/trace/{ns}/{name}", s.handleTrace)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/nudge", s.handleNudge)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/requeue", s.handleRequeue)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/blacklist", s.handleBlacklist)

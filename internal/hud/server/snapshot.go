@@ -264,7 +264,14 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		}
 	}
 	for _, in := range j.Spec.Inputs {
-		aj.Inputs = append(aj.Inputs, api.Input{Materialization: in.Materialization})
+		ai := api.Input{Materialization: in.Materialization}
+		if in.FromJob != "" {
+			ai.FromJob = j.Namespace + "/" + in.FromJob
+			if up := m.byKey[ai.FromJob]; up != nil && up.job.Status.Output != nil && up.job.Status.Phase == "Succeeded" {
+				ai.View = up.job.Status.Output.View
+			}
+		}
+		aj.Inputs = append(aj.Inputs, ai)
 	}
 	if o := st.Output; o != nil && o.View != "" {
 		aj.Output = &api.Output{View: o.View, Changesets: int(o.Changesets)}

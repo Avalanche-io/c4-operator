@@ -39,6 +39,17 @@ k -n c4-system rollout status deploy/c4-manager --timeout=180s
 k -n c4-system rollout status deploy/c4-regional --timeout=180s
 k -n c4-system rollout status ds/c4-node --timeout=300s
 
+log "provenance key"
+# The farm's task-record key: the private half for node daemons only, the
+# public half for anyone who verifies. Made once; kept across up.sh runs.
+if ! k -n c4-system get secret c4-provenance-key >/dev/null 2>&1; then
+  keys=$("$OP" keygen)
+  key=$(echo "$keys" | sed -n 's/^key=//p') pub=$(echo "$keys" | sed -n 's/^public=//p') kid=$(echo "$keys" | sed -n 's/^keyid=//p')
+  k -n c4-system create secret generic c4-provenance-key --from-literal=key="$key" >/dev/null
+  k -n c4-system create configmap c4-provenance --from-literal="$kid=$pub" >/dev/null
+  k -n c4-system rollout restart ds/c4-node >/dev/null
+fi
+
 log "projects"
 k -n c4-system create secret generic store-root \
   --from-literal=AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" --from-literal=AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \

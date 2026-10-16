@@ -104,9 +104,14 @@ workjob show-a ci-change-4521 ci 0 cpu 'shards: "16", latencyTarget: "4m", estim
 echo "t,job,phase,succeeded,total,slack,eta50" >"$LOG"
 echo "t,requested,state,provisioned,spot_units" >"$OUT/p5-capacity.csv"
 : >"$OUT/p5-resume-raw.txt"
+: >"$OUT/p5-sh010-samples.jsonl"
 sample() {
   local t
   t=$(since "$T0")
+  # The binary-order job's unit states and estimate, to score the
+  # estimator against what the units turned out to cost.
+  k -n show-a get workjob sh010-comp-v003 -o json 2>/dev/null |
+    python3 -I -c 'import json,sys; j=json.load(sys.stdin); st=j.get("status",{}); print(json.dumps({"t":float(sys.argv[1]),"unitStates":st.get("unitStates",{}),"estimate":st.get("estimate") or {}}))' "$t" >>"$OUT/p5-sh010-samples.jsonl" || true
   # Resumed training attempts say where they started; their pods are gone
   # once they finish, so keep the line now.
   k -n show-b logs -l c4.avalanche.io/job --prefix --tail=3 2>/dev/null | grep 'training from step' | grep -v 'from step 0 ' >>"$OUT/p5-resume-raw.txt" || true

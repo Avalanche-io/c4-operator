@@ -74,6 +74,8 @@ func Tools(c *Client) []Tool {
 			readOnly, c.graph),
 		tool("c4_diff_views", "Diff two views", "The files that differ between two views (C4 IDs) of a project: added, modified and removed paths with sizes and IDs, computed from directory records without a checkout. Use it to choose which CI targets a change affects.",
 			readOnly, c.diffViews),
+		tool("c4_trace_file", "Trace a file to the task that made it", "The signed task record of the unit that wrote a file of a job's output (or of a unit): whether its signature verifies against the farm's keys, the node and container images it ran on, the input views it mounted and the jobs that produced them, its declared AI use, and the file's C2PA manifest definition and OMC asset.",
+			readOnly, c.traceFile),
 		tool("c4_hold_job", "Hold or release a job", "Hold a job (no new units start; running ones finish, or stop with stop_running) or release it (hold false).",
 			idempotent, c.holdJob),
 		tool("c4_boost_job", "Boost a job", "Multiply a job's required slots by 1 to 2, drawn from its own project's quota first. 1 removes the boost.",
@@ -509,4 +511,28 @@ func (c *Client) approveCapacity(ctx context.Context, _ *mcp.CallToolRequest, in
 		return nil, Done{}, fmt.Errorf("give the pool; c4_capacity_and_cost lists requests waiting for approval")
 	}
 	return c.control(ctx, "/capacity/"+url.PathEscape(in.Pool)+"/approve", map[string]any{})
+}
+
+type TraceIn struct {
+	JobRef
+	Path string `json:"path,omitempty" jsonschema:"a file the job wrote, relative to its output view, for example renders/sh010/sh010.1039.exr"`
+	Unit *int   `json:"unit,omitempty" jsonschema:"or a unit index, for the unit's own record"`
+}
+
+func (c *Client) traceFile(ctx context.Context, _ *mcp.CallToolRequest, in TraceIn) (*mcp.CallToolResult, map[string]any, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, nil, err
+	}
+	q := url.Values{}
+	switch {
+	case in.Path != "":
+		q.Set("path", in.Path)
+	case in.Unit != nil:
+		q.Set("unit", strconv.Itoa(*in.Unit))
+	default:
+		return nil, nil, fmt.Errorf("give path (a file the job wrote) or unit (a unit index)")
+	}
+	var d map[string]any
+	return nil, d, c.do(ctx, "GET", strings.Replace(p, "/jobs/", "/trace/", 1)+"?"+q.Encode(), nil, &d)
 }

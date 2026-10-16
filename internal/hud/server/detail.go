@@ -309,6 +309,22 @@ func (s *Server) handleUnit(w http.ResponseWriter, r *http.Request) {
 	if i < len(rec.job.Status.UnitMillis) && rec.job.Status.UnitMillis[i] > 0 {
 		out["durationSeconds"] = math.Round(float64(rec.job.Status.UnitMillis[i]) / 1000)
 	}
+	if ix, err := s.index(r.Context(), rec); err == nil && ix != nil && ix.Units[i] != "" {
+		if t, err := s.trace(r.Context(), m, rec, ix.Units[i], ""); err == nil {
+			p := map[string]any{"record": t.Record, "verified": t.Verified, "signer": t.Signer, "problem": t.Problem}
+			if st := t.Statement; st != nil {
+				p["node"] = st.Predicate.Runtime.Node
+				p["images"] = st.Predicate.Runtime.Images
+				p["inputs"] = st.Predicate.Inputs
+				p["files"] = st.Predicate.Output.FilesListed
+				p["attempt"] = st.Predicate.Invocation.Attempt
+				if len(st.Predicate.AI) > 0 {
+					p["ai"] = st.Predicate.AI
+				}
+			}
+			out["provenance"] = p
+		}
+	}
 	var pod *corev1.Pod
 	for k := range m.pods {
 		p := &m.pods[k]

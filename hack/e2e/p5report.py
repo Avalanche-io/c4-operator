@@ -89,25 +89,40 @@ else:
     print("Burst: no CapacityRequest was needed.")
 print()
 
-# The binary-order estimate on sh010.
-tl = [r for r in csv.DictReader(open(os.path.join(out, "p5-timeline.csv"))) if r["job"] == "show-a/sh010-comp-v003"]
-fin = ts(json.load(open(os.path.join(out, "p5-sh010.json")))["status"].get("finished"))
-if fin and tl:
-    start = next((float(r["t"]) for r in tl if r["phase"] == "Running"), None)
-    end = fin - t0
-    print("Estimate of sh010-comp-v003 (binary order; frames cost 6 s, and 24 s from 1040 to 1052), against when it finished. The ETA is the queue's plan for the job, so it includes waiting for slots other jobs hold:")
-    print()
-    print("| elapsed share of the run | done | predicted finish | actual finish | error of the remaining time |")
-    print("|---|---|---|---|---|")
-    for share in (0.1, 0.25, 0.5, 0.75):
-        t = start + share * (end - start)
-        r = min((r for r in tl if r["eta50"]), key=lambda r: abs(float(r["t"]) - t), default=None)
-        if r is None:
+# The binary-order estimate on sh010: the estimator's remaining work W
+# (slot-seconds, before allocation) against the work the units turned out
+# to need, and the estimate a render manager shows (the mean of finished
+# frames times the frames left), at the same moments.
+def decode(s):
+    out = []
+    for part in (s or "").split(","):
+        if not part:
             continue
-        pred = ts(r["eta50"]) - t0
-        tt = float(r["t"])
-        err = abs(pred - end) / max(1.0, end - tt)
-        print(f"| {share:.0%} | {r['succeeded']} of {r['total']} | +{pred:.0f} s | +{end:.0f} s | {err:.0%} |")
+        a, _, b = part.partition("-")
+        out.extend(range(int(a), int(b or a) + 1))
+    return out
+
+final = json.load(open(os.path.join(out, "p5-sh010.json")))["status"]
+millis = final.get("unitMillis") or []
+samples = [json.loads(l) for l in open(os.path.join(out, "p5-sh010-samples.jsonl")) if l.strip()]
+running_samples = [x for x in samples if x["unitStates"].get("succeeded") and x["estimate"].get("remainingWork")]
+if millis and running_samples:
+    first, last = running_samples[0]["t"], running_samples[-1]["t"]
+    print("Estimate of sh010-comp-v003 (binary order; frames cost 6 s, and 24 s from 1040 to 1052). W is the estimator's remaining work in slot-seconds; the truth is what the units not yet finished went on to take (a running unit counts half). The render-manager estimate is the mean of finished frames times the frames left:")
+    print()
+    print("| point in the run | frames done | W (estimator) | W90 | truth | estimator error | render-manager error |")
+    print("|---|---|---|---|---|---|---|")
+    for share in (0.1, 0.25, 0.5, 0.75):
+        t = first + share * (last - first)
+        x = min(running_samples, key=lambda r: abs(r["t"] - t))
+        done = set(decode(x["unitStates"].get("succeeded")))
+        running = set(decode(x["unitStates"].get("running")))
+        truth = sum(m for i, m in enumerate(millis) if i not in done) / 1000 - sum(millis[i] for i in running if i < len(millis)) / 2000
+        w, w90 = x["estimate"]["remainingWork"], x["estimate"].get("remainingWorkP90", 0)
+        mean = sum(millis[i] for i in done if i < len(millis)) / 1000 / max(1, len(done))
+        naive = mean * (len(millis) - len(done) - len(running) / 2)
+        err = lambda e: f"{abs(e - truth) / max(1.0, truth):.0%}"
+        print(f"| {share:.0%} | {len(done)} of {len(millis)} | {w:.0f} | {w90:.0f} | {truth:.0f} | {err(w)} | {err(naive)} |")
     print()
 
 o = json.load(open(os.path.join(out, "p5-sh010.json")))["status"].get("output") or {}

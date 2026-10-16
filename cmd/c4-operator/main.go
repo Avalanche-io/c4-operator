@@ -9,6 +9,9 @@
 package main
 
 import (
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
 	"errors"
 	"flag"
 	"fmt"
@@ -19,8 +22,12 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
+
+// version is set at build time with -ldflags "-X main.version=...".
+var version = "v2-dev"
 
 const usage = `usage: c4-operator <command> [flags]
 
@@ -31,6 +38,7 @@ commands:
   ingest     hash a directory into a project's store and print its view ID
   tree-id    print the view ID of a directory
   mcp        serve the farm's tools to agents (MCP, stdio or HTTP)
+  keygen     make an Ed25519 key for signing task records
 `
 
 func main() {
@@ -46,6 +54,7 @@ func main() {
 		"ingest":   runIngest,
 		"tree-id":  runTreeID,
 		"mcp":      runMCP,
+		"keygen":   runKeygen,
 	}
 	run, ok := commands[cmd]
 	if !ok {
@@ -95,5 +104,17 @@ func runTreeID(args []string) error {
 	if *hold > 0 {
 		time.Sleep(*hold)
 	}
+	return nil
+}
+
+// runKeygen prints a new Ed25519 signing key and its public half, base64,
+// for the c4-provenance-key Secret and the c4-provenance ConfigMap.
+func runKeygen(args []string) error {
+	pub, priv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("key=%s\npublic=%s\nkeyid=%s\n", base64.StdEncoding.EncodeToString(priv.Seed()),
+		base64.StdEncoding.EncodeToString(pub), provenance.KeyID(pub))
 	return nil
 }

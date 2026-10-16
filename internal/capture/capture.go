@@ -57,6 +57,8 @@ type Result struct {
 	Unusual   []string
 	Duration  time.Duration
 	Records   int
+	// Files are the added and modified regular files, for the task record.
+	Files []view.ChangedFile
 }
 
 // Run captures one upper directory. It is idempotent: running it again on
@@ -112,6 +114,7 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	res.Output, res.Changeset = applied.ID, applied.ChangesetID
 	res.Added, res.Modified, res.Deleted, res.Bytes = applied.Added, applied.Modified, applied.Deleted, applied.Bytes
 	res.Records = len(applied.Records)
+	res.Files = applied.Files
 
 	// New objects: keep a copy in the node cache (a hardlink from the
 	// upper, so later stages on this node read them without a fetch) and

@@ -420,13 +420,26 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 	d.Log.Info("captured", "pod", vol.Namespace+"/"+vol.Pod, "output", res.Output.String(),
 		"changeset", changeset, "added", res.Added, "modified", res.Modified, "deleted", res.Deleted,
 		"uploaded", res.Uploaded, "reused", res.Reused, "seconds", time.Since(start).Seconds())
-	return d.annotate(ctx, vol, res)
+	record := ""
+	if d.Cfg.SigningKey != nil && !res.Changeset.IsNil() {
+		id, err := d.signRecord(ctx, pc, vol, res, start)
+		if err != nil {
+			// A capture without its record is still a capture; the gap is
+			// visible (no output-provenance annotation) and counted.
+			metrics.NodeRecords.WithLabelValues(p.Name, "error").Inc()
+			d.Log.Error(err, "task record", "pod", vol.Namespace+"/"+vol.Pod)
+		} else {
+			metrics.NodeRecords.WithLabelValues(p.Name, "signed").Inc()
+			record = id.String()
+		}
+	}
+	return d.annotate(ctx, vol, res, record)
 }
 
 // annotate records a capture on its pod. The node daemon's admission
 // policy lets it change only c4.avalanche.io/output-* annotations, and
 // only on pods bound to its own node.
-func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result) error {
+func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result, record string) error {
 	var pod corev1.Pod
 	err := d.Kube.Get(ctx, types.NamespacedName{Namespace: vol.Namespace, Name: vol.Pod}, &pod)
 	if apierrors.IsNotFound(err) {
@@ -439,11 +452,15 @@ func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result)
 		return nil
 	}
 	tree, changeset, changes := res.AnnotationValues()
-	patch := map[string]any{"metadata": map[string]any{"annotations": map[string]string{
+	ann := map[string]string{
 		c4v1.AnnotationOutputTree:      tree,
 		c4v1.AnnotationOutputChangeset: changeset,
 		c4v1.AnnotationOutputChanges:   changes,
-	}}}
+	}
+	if record != "" {
+		ann[c4v1.AnnotationOutputProvenance] = record
+	}
+	patch := map[string]any{"metadata": map[string]any{"annotations": ann}}
 	data, _ := json.Marshal(patch)
 	err = d.Kube.Patch(ctx, &pod, client.RawPatch(types.MergePatchType, data))
 	if apierrors.IsNotFound(err) {

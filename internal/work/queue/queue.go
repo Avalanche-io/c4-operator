@@ -118,6 +118,7 @@ type jobMem struct {
 	out       *output
 	foldedPod map[types.UID]bool
 	outLoad   string // the stored chain to load before the next fold
+	outIndex  string // the stored provenance index to load before the next fold
 	launched  map[int]time.Time
 	nodeFails map[string]int
 	blacklist map[string]bool
@@ -177,6 +178,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.requeued = st.Requeued
 	if o := st.Output; o != nil {
 		m.outLoad = o.Chain
+		m.outIndex = o.Provenance
 		m.out.count = int(o.Changesets)
 	}
 	for k, view := range st.Resume {
@@ -640,6 +642,12 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		if !ok || v == nil || p == nil {
 			continue
 		}
+		if ok, err := q.ensureFromJobs(ctx, v, byKey); err != nil || !ok {
+			if err != nil {
+				q.Log.Error(err, "input from job", "job", key)
+			}
+			continue
+		}
 		if view := v.mem.resume[idx]; view != "" {
 			ready, err := q.ensureResume(ctx, v.job, idx, view)
 			if err != nil {
@@ -750,6 +758,10 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		pod.Annotations = map[string]string{}
 	}
 	pod.Annotations[c4v1.AnnotationAttempt] = strconv.Itoa(attempt)
+	if ai := j.Annotations[c4v1.AnnotationAIUsage]; ai != "" {
+		// Task records carry the job's declared use of models.
+		pod.Annotations[c4v1.AnnotationAIUsage] = ai
+	}
 	t := true
 	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob",
 		Name: j.Name, UID: j.UID, Controller: &t, BlockOwnerDeletion: &t}}
@@ -786,6 +798,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	resumed := false
 	for i, in := range j.Spec.Inputs {
 		name := fmt.Sprintf("c4-input-%d", i)
+		if in.FromJob != "" {
+			in.Materialization = fromJobName(j.Name, in.FromJob)
+		}
 		if !in.ReadOnly && !resumed && v.mem.resume[idx] != "" {
 			// The first writable input resumes from the view the last
 			// attempt captured.
@@ -860,6 +875,10 @@ func (q *Queue) meter(now time.Time, views []*view, pools map[string]*pool) {
 }
 
 func unitID(key string, idx int) string { return key + "#" + strconv.Itoa(idx) }
+
+// fromJobName is the Materialization through which a job mounts another
+// job's output.
+func fromJobName(job, from string) string { return fmt.Sprintf("%s-from-%s", job, from) }
 
 // resumeName is the Materialization a resumed unit mounts.
 func resumeName(job string, idx int) string { return fmt.Sprintf("%s-resume-u%d", job, idx) }
@@ -949,7 +968,12 @@ func floatOr(s string, def float64) float64 {
 // ensureResume makes the Materialization a resumed unit mounts point at the
 // view its last attempt captured, and reports whether it is Ready.
 func (q *Queue) ensureResume(ctx context.Context, j *c4v1.WorkJob, idx int, view string) (bool, error) {
-	name := resumeName(j.Name, idx)
+	return q.ensureMaterialization(ctx, j, resumeName(j.Name, idx), view)
+}
+
+// ensureMaterialization makes a Materialization the job owns resolve view,
+// and reports whether it is Ready.
+func (q *Queue) ensureMaterialization(ctx context.Context, j *c4v1.WorkJob, name, view string) (bool, error) {
 	var m c4v1.Materialization
 	err := q.Client.Get(ctx, types.NamespacedName{Namespace: j.Namespace, Name: name}, &m)
 	if apierrors.IsNotFound(err) {
@@ -1002,7 +1026,14 @@ func (q *Queue) foldPod(ctx context.Context, v *view, p *corev1.Pod, idx int) bo
 		}
 		m.outLoad = ""
 	}
-	if err := q.fold(ctx, st, m.out, idx, cs); err != nil {
+	if m.outIndex != "" {
+		if err := m.out.loadIndex(st, m.outIndex); err != nil {
+			q.Log.Error(err, "load provenance index", "job", v.key)
+			return false
+		}
+		m.outIndex = ""
+	}
+	if err := q.fold(ctx, st, m.out, idx, cs, p.Annotations[c4v1.AnnotationOutputProvenance]); err != nil {
 		q.Log.Error(err, "fold", "job", v.key, "unit", idx)
 		return false
 	}
@@ -1018,4 +1049,28 @@ func (q *Queue) Spent(project string) float64 {
 	q.spentMu.Lock()
 	defer q.spentMu.Unlock()
 	return q.spent[project]
+}
+
+// ensureFromJobs makes the Materializations of a job's fromJob inputs
+// point at the upstream jobs' output views, and reports whether all are
+// Ready. Data flows between jobs as views (DESIGN.md section 10.5).
+func (q *Queue) ensureFromJobs(ctx context.Context, v *view, byKey map[string]*view) (bool, error) {
+	j := v.job
+	for _, in := range j.Spec.Inputs {
+		if in.FromJob == "" {
+			continue
+		}
+		var up c4v1.WorkJob
+		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: j.Namespace, Name: in.FromJob}, &up); err != nil {
+			return false, err
+		}
+		if up.Status.Phase != "Succeeded" || up.Status.Output == nil || up.Status.Output.View == "" {
+			return false, nil
+		}
+		ready, err := q.ensureMaterialization(ctx, j, fromJobName(j.Name, in.FromJob), up.Status.Output.View)
+		if err != nil || !ready {
+			return false, err
+		}
+	}
+	return true, nil
 }

@@ -5,6 +5,7 @@ package node
 
 import (
 	"context"
+	"crypto/ed25519"
 	"fmt"
 	"net"
 	"net/http"
@@ -55,6 +56,11 @@ type Config struct {
 	// PublishTimeout bounds the work behind one publish (fetch and build).
 	// kubelet's call may time out sooner; its retry joins the work.
 	PublishTimeout time.Duration
+	// SigningKey signs a task record for every capture (DESIGN.md section
+	// 9). Nil makes no records.
+	SigningKey ed25519.PrivateKey
+	// Version names this build in task records.
+	Version string
 }
 
 // Daemon serves one node.

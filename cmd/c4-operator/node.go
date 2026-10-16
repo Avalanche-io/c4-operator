@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ed25519"
 	"errors"
 	"flag"
 	"fmt"
@@ -23,6 +24,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/membership"
 	"github.com/Avalanche-io/c4-operator/internal/node"
 	"github.com/Avalanche-io/c4-operator/internal/project"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/tier"
 )
 
@@ -47,6 +49,7 @@ func runNode(args []string) error {
 	retain := fs.Duration("retain", 10*time.Minute, "keep unused layers at least this long")
 	gcEvery := fs.Duration("gc-interval", 30*time.Second, "eviction interval")
 	noAuth := fs.Bool("insecure-no-auth", false, "skip TokenReview (tests only)")
+	keyFile := fs.String("provenance-key", "/etc/c4/provenance/key", "Ed25519 key (base64) for signing task records; records are off when the file is absent")
 	fs.Parse(args)
 
 	ctrl.SetLogger(zap.New())
@@ -96,7 +99,7 @@ func runNode(args []string) error {
 			NodeName: *nodeName, Root: *root, Budget: budget.Value(), PeerAddr: *peerAddr, PeerPort: *peerPort,
 			Namespace: *namespace, HomesK: *homesK, RegionalR: *regionalR, RegionalService: *regionalService,
 			FetchWorkers: *workers, Limits: fill.Limits{Fills: *maxFills, Waiters: *maxWaiters}, MaxServing: *maxServing,
-			Retain: *retain, GCInterval: *gcEvery,
+			Retain: *retain, GCInterval: *gcEvery, Version: version,
 		},
 		Kube:     direct,
 		Projects: &project.Registry{Cache: watch, Secrets: direct, Namespace: *namespace},
@@ -106,6 +109,16 @@ func runNode(args []string) error {
 		},
 		Token: (&tier.TokenFile{Path: *tokenFile}).Token,
 		Log:   log,
+	}
+	if b, err := os.ReadFile(*keyFile); err == nil {
+		key, err := provenance.ParseKey(string(b))
+		if err != nil {
+			return fmt.Errorf("--provenance-key: %w", err)
+		}
+		d.Cfg.SigningKey = key
+		log.Info("signing task records", "key", provenance.KeyID(key.Public().(ed25519.PublicKey)))
+	} else {
+		log.Info("no provenance key; task records are off", "path", *keyFile)
 	}
 	if !*noAuth {
 		cs, err := kubernetes.NewForConfig(cfg)

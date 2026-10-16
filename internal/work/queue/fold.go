@@ -3,6 +3,7 @@ package queue
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -31,9 +32,66 @@ type output struct {
 	writer    map[string]int
 	conflicts []string
 	count     int
+	// records maps each file the job wrote to the task record of the unit
+	// that wrote it; index is its stored form.
+	records map[string]string
+	units   map[int]string // unit -> its latest task record
+	index   c4.ID
+	dirty   bool
 }
 
-func newOutput() *output { return &output{folded: map[int]int{}, writer: map[string]int{}} }
+func newOutput() *output {
+	return &output{folded: map[int]int{}, writer: map[string]int{}, records: map[string]string{}, units: map[int]string{}}
+}
+
+// Index is a job's provenance index as stored.
+type Index struct {
+	Job     string            `json:"job"`
+	Output  string            `json:"output"`
+	Records map[string]string `json:"records"` // path -> task record ID
+	Units   map[int]string    `json:"units"`   // unit -> its latest task record ID
+}
+
+// saveIndex stores the provenance index when it changed.
+func (o *output) saveIndex(ctx context.Context, st *storeurl.Sharded, job string) error {
+	if !o.dirty {
+		return nil
+	}
+	b, err := json.Marshal(Index{Job: job, Output: o.view.String(), Records: o.records, Units: o.units})
+	if err != nil {
+		return err
+	}
+	id, err := st.PutBytes(ctx, b)
+	if err != nil {
+		return err
+	}
+	o.index, o.dirty = id, false
+	return nil
+}
+
+// loadIndex restores the provenance index after a restart.
+func (o *output) loadIndex(st *storeurl.Sharded, id string) error {
+	pid, err := c4.Parse(id)
+	if err != nil {
+		return err
+	}
+	data, err := c4view.ReadObject(st, pid)
+	if err != nil {
+		return err
+	}
+	var ix Index
+	if err := json.Unmarshal(data, &ix); err != nil {
+		return err
+	}
+	if ix.Records != nil {
+		o.records = ix.Records
+	}
+	if ix.Units != nil {
+		o.units = ix.Units
+	}
+	o.index = pid
+	return nil
+}
 
 // load restores an output from its stored chain after a restart.
 func (o *output) load(st *storeurl.Sharded, chainID string) error {
@@ -55,7 +113,7 @@ func (o *output) load(st *storeurl.Sharded, chainID string) error {
 
 // fold applies the changeset csID, which unit idx's capture produced, to
 // the job's output.
-func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx int, csID string) error {
+func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx int, csID, record string) error {
 	id, err := c4.Parse(csID)
 	if err != nil {
 		return err
@@ -87,6 +145,10 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx i
 				o.conflicts = append(o.conflicts, fmt.Sprintf("%s written by units %d and %d", p, w, idx))
 			}
 			o.writer[p] = idx
+			if record != "" {
+				o.records[p] = record
+				o.dirty = true
+			}
 		}
 		res, err := c4view.ApplyPatch(ctx, cur, sec.Patch, src)
 		if err != nil {
@@ -101,6 +163,10 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx i
 		o.chain = append(o.chain, texts[i]...)
 		o.chain = append(o.chain, []byte(res.ID.String()+"\n")...)
 		cur = res.ID
+	}
+	if record != "" {
+		o.units[idx] = record
+		o.dirty = true
 	}
 	chainID, err := st.PutBytes(ctx, o.chain)
 	if err != nil {

@@ -87,6 +87,24 @@ function legend(j) {
   return h('div', { class: 'legend', 'aria-label': 'Legend' }, items.map(([c, t]) => h('span', null, h('i', { class: c }), t)));
 }
 
+// provenanceBlock shows the unit's signed task record: who signed it,
+// whether it verifies against the farm's keys, where it ran and on what.
+function provenanceBlock(p) {
+  const imgs = (p.images || []).map((i) => `${i.image}${i.digest ? ' @' + i.digest.slice(0, 19) : ''}`);
+  const ins = (p.inputs || []).map((i) => `${i.materialization} ${f.shortId(i.view)}`);
+  return h('div', { class: 'prov', 'data-key': 'prov' },
+    h('div', { class: 'lab', style: { marginTop: '10px' } }, 'Task record'),
+    h('dl', { class: 'kv' },
+      h('dt', null, 'Signature'), h('dd', null,
+        p.verified ? h('span', { class: 'chip green' }, 'verified') : h('span', { class: 'chip red' }, 'does not verify'),
+        h('span', { class: 'mono dim', style: { marginLeft: '6px' } }, p.signer || p.problem || '')),
+      h('dt', null, 'Record'), h('dd', { class: 'mono', title: p.record }, f.shortId(p.record)),
+      h('dt', null, 'Ran on'), h('dd', { class: 'mono' }, p.node || '–'),
+      h('dt', null, 'Images'), h('dd', { class: 'mono', style: { fontSize: '11.5px' } }, imgs.join(', ') || '–'),
+      h('dt', null, 'Inputs'), h('dd', { class: 'mono', style: { fontSize: '11.5px' } }, ins.join(', ') || '–'),
+      p.ai ? [h('dt', null, 'AI use'), h('dd', null, `${p.ai.generated || 'declared'}${p.ai.model ? ' · ' + p.ai.model : ''}`)] : null));
+}
+
 function unitPanel(ctx, j, k) {
   if (st.sel < 0) {
     return h('div', { class: 'panel', 'data-key': 'unit-hint' },
@@ -121,6 +139,7 @@ function unitPanel(ctx, j, k) {
           h('td', { class: 'num ' + (a.exitCode ? 't-red' : '') }, a.exitCode !== undefined ? String(a.exitCode) : '')),
         a.reason ? h('tr', { 'data-key': 'r' + a.n }, h('td'), h('td', { colspan: 4, class: a.exitCode ? 't-red' : 'dim', style: { fontSize: '11.5px' } }, a.reason)) : null,
       ]))) : null,
+    u.provenance ? provenanceBlock(u.provenance) : null,
     h('div', { class: 'lab', style: { marginTop: '10px' } }, 'Log tail'),
     h('pre', { class: 'log' }, u.logTail.join('\n') || '(no output yet)'),
     h('div', { class: 'lab' }, 'Events'),

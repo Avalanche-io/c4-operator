@@ -28,6 +28,13 @@ const statusEvery = 10 * time.Second
 // restart never loses a finished unit.
 func (q *Queue) report(ctx context.Context, now time.Time, dec sched.Decisions, views []*view) {
 	for _, v := range views {
+		if o := v.mem.out; o != nil && o.dirty && q.Stores != nil {
+			if store, err := q.Stores(ctx, v.project); err == nil && store != nil {
+				if err := o.saveIndex(ctx, store, v.key); err != nil {
+					q.Log.Error(err, "save provenance index", "job", v.key)
+				}
+			}
+		}
 		st := q.status(now, dec, v)
 		old := v.job.Status
 		changed := !reflect.DeepEqual(withoutEstimate(old), withoutEstimate(st))
@@ -142,6 +149,9 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	if o := m.out; o != nil && !o.view.IsNil() {
 		st.Output = &c4v1.WorkOutput{View: o.view.String(), Chain: o.id.String(), Changesets: int32(o.count)}
+		if !o.index.IsNil() {
+			st.Output.Provenance = o.index.String()
+		}
 		if n := len(o.conflicts); n > 0 {
 			st.Output.Conflicts = o.conflicts[max(0, n-8):]
 		}
@@ -200,6 +210,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	st.Rank = int32(js.Rank)
 	e := &c4v1.WorkEstimate{
+		RemainingWork: int64(v.sum.W), RemainingWorkP90: int64(v.sum.W90),
 		RequiredSlots: fmt.Sprintf("%.2f", js.Required), AttainableSlots: fmt.Sprintf("%.2f", js.Attainable),
 		RunningSlots: int32(js.RunningSlots), SlackSeconds: int64(js.Slack.Seconds()),
 		Feasible: js.Feasible, AtRisk: js.AtRisk,

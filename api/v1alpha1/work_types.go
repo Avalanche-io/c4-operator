@@ -95,11 +95,16 @@ type WorkJobSpec struct {
 	Template corev1.PodTemplateSpec `json:"template"`
 }
 
-// WorkInput mounts a view into every unit.
+// WorkInput mounts a view into every unit: a Materialization, or the
+// output view of another job in the namespace.
 type WorkInput struct {
 	// Materialization in the job's namespace.
 	// +optional
 	Materialization string `json:"materialization,omitempty"`
+	// FromJob mounts the output view of that job (in this namespace) once
+	// it has succeeded. List it in dependsOn too.
+	// +optional
+	FromJob string `json:"fromJob,omitempty"`
 	// MountPath in every container of the unit.
 	MountPath string `json:"mountPath"`
 	// ReadOnly mounts without capture.
@@ -200,6 +205,10 @@ type WorkOutput struct {
 	Chain string `json:"chain"`
 	// Changesets folded so far.
 	Changesets int32 `json:"changesets"`
+	// Provenance is the C4 ID of the job's provenance index: for each file
+	// the job wrote, the signed task record of the unit that wrote it.
+	// +optional
+	Provenance string `json:"provenance,omitempty"`
 	// Conflicts lists paths two units wrote (the later write is kept).
 	// +optional
 	Conflicts []string `json:"conflicts,omitempty"`
@@ -229,6 +238,12 @@ type UnitCounts struct {
 // WorkEstimate is the estimate and the objective state. Durations are
 // seconds; slots are fractional.
 type WorkEstimate struct {
+	// RemainingWork is the estimated work left (W) and its 90th percentile
+	// (W90), in slot-seconds: the estimator's answer, before allocation.
+	RemainingWork    int64 `json:"remainingWork,omitempty"`
+	RemainingWorkP90 int64 `json:"remainingWorkP90,omitempty"`
+	// RemainingSeconds is wall-clock time to the ETA (p50): the plan's
+	// answer, after allocation.
 	RemainingSeconds    int64  `json:"remainingSeconds,omitempty"`
 	P90RemainingSeconds int64  `json:"p90RemainingSeconds,omitempty"`
 	RequiredSlots       string `json:"requiredSlots,omitempty"`

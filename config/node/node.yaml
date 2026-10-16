@@ -91,6 +91,7 @@ spec:
         - {name: pods-dir, mountPath: /var/lib/kubelet/pods, mountPropagation: Bidirectional}
         - {name: cache, mountPath: /var/lib/c4}
         - {name: tier-token, mountPath: /var/run/secrets/c4-tier, readOnly: true}
+        - {name: provenance-key, mountPath: /etc/c4/provenance, readOnly: true}
       - name: registrar
         image: registry.k8s.io/sig-storage/csi-node-driver-registrar:v2.15.0
         imagePullPolicy: IfNotPresent
@@ -111,6 +112,11 @@ spec:
         hostPath: {path: /var/lib/kubelet/pods, type: Directory}
       - name: cache
         hostPath: {path: /var/lib/c4, type: DirectoryOrCreate}
+      # The key that signs task records at capture (DESIGN.md section 9).
+      # Only node daemons mount it; no task pod can reach it. Without the
+      # Secret, records are off.
+      - name: provenance-key
+        secret: {secretName: c4-provenance-key, optional: true, defaultMode: 0400}
       # The daemon's own identity toward peers and the regional tier.
       - name: tier-token
         projected:
