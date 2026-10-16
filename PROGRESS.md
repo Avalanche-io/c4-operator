@@ -93,11 +93,9 @@ quit; nothing deleted). These wait for it:
 3. **Image name.** Proposed: `ghcr.io/avalanche-io/c4-operator`
    (`config/release`, `.goreleaser.yaml`). Joshua's decision.
 
-4. **History.** One internal working note (`HANDOFF-v2.md`) is in the history;
-   it is deleted from the tree. `RELEASING.md` gives three options for the
-   published history; the recommended one drops the note with `git
-   filter-repo` in a fresh clone. Waiting for Joshua's choice; nothing is
-   rewritten.
+4. **History.** Published with option B of `RELEASING.md` (2026-10-16): the
+   internal working note was dropped from the history with `git filter-repo`,
+   and the commit IDs the docs cite were updated to the rewritten ones.
 
 ## c4 dependencies and the release plan
 

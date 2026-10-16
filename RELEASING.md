@@ -82,9 +82,9 @@ The history was audited on 2026-10-16 (60 commits, branches `mvp` and `v2`;
   26 MiB.
 - Every commit is by "Joshua Kolden <joshua@avalanche.io>".
 - One internal working note from the development sessions,
-  `HANDOFF-v2.md`, is in the history from its introduction (94164e4) to
-  d20d76f. It was not written for publication. It is deleted from the tree,
-  but not from the history.
+  `HANDOFF-v2.md`, is in the history from its introduction (be24446) to
+  24cbb8e. It was not written for publication. The public history was made
+  with option B on 2026-10-16, so the note is in no published commit.
 
 Options:
 
@@ -97,8 +97,8 @@ Options:
   git branch -m v2 main
   git filter-repo --invert-paths --path HANDOFF-v2.md --refs main
   ```
-  Commits from 94164e4 on get new IDs. Three IDs that the docs cite
-  (`hack/e2e/out/results.md`, `REPORT-v2.md`: dcd055e, a5175da, d259c38) are
+  Commits from be24446 on get new IDs. Three IDs that the docs cite
+  (`hack/e2e/out/results.md`, `REPORT-v2.md`: 1f0a287, e8b101b, 83ca7f2) are
   then updated from `.git/filter-repo/commit-map` in one more commit. The
   story of the work, 60 one-line commits, is kept.
 - **C. One squashed commit.** The simplest public history; the commit

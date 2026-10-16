@@ -4,7 +4,7 @@ Measured on the kind cluster of `hack/e2e/kind.yaml` (one control plane, eight
 workers in two zones, Kubernetes 1.36.1) with three MinIO shards, on Docker
 Desktop (16 CPUs, 47 GB) on an Apple M3 Max. Each section is appended by its
 script (`hack/e2e/pN.sh`). P1 to P3 ran on earlier builds of the `v2` branch
-(from dcd055e to a5175da); P4 to P7 on d259c38. Between those builds the view
+(from 1f0a287 to e8b101b); P4 to P7 on 83ca7f2. Between those builds the view
 records of directories that hold symlinks changed (see P4), which changes the
 view IDs of trees with symlinks in subdirectories and no measured quantity.
 
@@ -178,7 +178,7 @@ API-only diffs: the HUD's `GET /views/mono/diff` (and the MCP tool `c4_diff_view
 | HEAD~10 to HEAD  | 2 added, 22 modified, 0 removed    | 34 ms       | yes                         |
 | HEAD~100 to HEAD | 28 added, 198 modified, 22 removed | 221 ms      | yes                         |
 
-## P5: the work queue on the e2e farm (2026-10-16T10:44Z, policy objective, build d259c38)
+## P5: the work queue on the e2e farm (2026-10-16T10:44Z, policy objective, build 83ca7f2)
 
 Pools: cpu (4 nodes, 4 slots each), gpu (2 nodes, 4 slots each), and spot (2 nodes, 4 slots each, unprovisioned until a CapacityRequest asks for them; the kind-sim provider untaints them after a 20 s provisioning delay). Each show has a quota of 8 nominal cpu slots plus 8 borrowable, 4 + 4 gpu slots, and 0 + 8 spot slots, a burst budget of $5 a day, and lateness priced at $200 an hour. Times are seconds after the first submission; the run took 329 s.
 
@@ -211,7 +211,7 @@ Estimate of sh010-comp-v003 (binary order; frames cost 6 s, and 24 s from 1040 t
 
 Output: sh010-comp-v003 folded 96 unit changesets into its output view c44b1SF86Z...; the stored chain c423YJ1UbW... has one section per fold, each sealed by the output view after it.
 
-## P6: the agent interface (2026-10-16T12:45Z, build d259c38)
+## P6: the agent interface (2026-10-16T12:45Z, build 83ca7f2)
 
 | #   | question                                                                                    | expected                   | answered through MCP       | match |
 | --- | ------------------------------------------------------------------------------------------- | -------------------------- | -------------------------- | ----- |
@@ -232,7 +232,7 @@ Output: sh010-comp-v003 folded 96 unit changesets into its output view c44b1SF86
 - c4_hold_job sh010-comp-v003: released
 - Events recorded on the job: sh010-comp-v003: held (by wrangler in the HUD);sh010-comp-v003: released (by wrangler in the HUD);
 
-## P7: provenance (2026-10-16T10:50Z, build d259c38)
+## P7: provenance (2026-10-16T10:50Z, build 83ca7f2)
 
 |                        | sh050-render-v001, frame 1004                                 | sh050-denoise-v001, frame 1004                                          |
 | ---------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
