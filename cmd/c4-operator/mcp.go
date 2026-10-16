@@ -31,6 +31,7 @@ func runMCP(args []string) error {
 	addr := fs.String("http", "", "serve Streamable HTTP on this address instead of stdio")
 	toolsMD := fs.Bool("tools-md", false, "print the tool reference as markdown and exit")
 	fs.Parse(args)
+	mcpserver.Version = version
 
 	token := ""
 	if *tokenFile != "" {

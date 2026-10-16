@@ -1,0 +1,9 @@
+# The operator from its published images. `make install-yaml` renders this
+# into one file for a release (bin/install.yaml, attached to the GitHub
+# release); `kubectl apply -k config/release` applies it from a checkout.
+resources:
+- ../default
+images:
+- name: c4-operator
+  newName: ghcr.io/avalanche-io/c4-operator
+  newTag: v0.1.0

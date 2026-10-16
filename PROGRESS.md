@@ -4,13 +4,14 @@
 
 | Branch         | Opened     | Closed     | Purpose                                                                                                                                                                                                             |
 | -------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `main`         | 2026-10-15 |            | Empty until the work is reviewed.                                                                                                                                                                                   |
+| `main`         | 2026-10-15 |            | Not present in this repository; `RELEASING.md` publishes `v2` as `main`.                                                                                                                                            |
 | `mvp`          | 2026-10-15 |            | Working MVP: CRD, controller, node agent, webhook, envtest, single-node kind e2e. Not merged.                                                                                                                       |
 | `v2`           | 2026-10-15 |            | The v2 redesign (DESIGN.md): views and records, tiers, overlay and CSI, isolation, work system, provenance.                                                                                                         |
 | `v2-sim`       | 2026-10-16 | 2026-10-16 | Scheduling policy core (`internal/work`) and the simulation harness (`hack/sim`). Rebased onto `v2` and fast-forwarded; worktree removed.                                                                           |
 | `v2-hud`       | 2026-10-16 | 2026-10-16 | The HUD frontend (`internal/hud/web`), its API contract and the mock backend (`hack/hudmock`). Rebased onto `v2` and fast-forwarded; worktree removed.                                                              |
 | `v2-gitimport` | 2026-10-16 | 2026-10-16 | The c4git-aware importer (`internal/gitimport`, `import-git`), push-driven import, per-branch chains, the synthetic monorepo harness (`hack/e2e/monorepo`). Rebased onto `v2` and fast-forwarded; worktree removed. |
 | `v2-followup` | 2026-10-16 | 2026-10-16 | The c4 release audit and the c4 pin (no `replace`), a signer per entity for provenance, the Scion comparison, the name question closed. `NEXT.md` and the persona views were deferred for the open-source release. Fast-forwarded into `v2`; worktree removed. |
+| `release-v0.1` | 2026-10-16 | 2026-10-16 | Open-source release readiness for v0.1: the public-repo audit, the install path (images, GoReleaser, install.yaml, CI), the quickstart, the README, the community files and `RELEASING.md`. Fast-forwarded into `v2`; worktree removed. |
 
 Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
 c4 pseudo-version, so worktrees need nothing else; to build against a local c4
@@ -31,10 +32,13 @@ quit; nothing deleted). These wait for it:
    workload signers, the issuer's refusals, and the CA's reach. It needs
    `hack/e2e/redeploy.sh` first (new manifests: `config/signing`, the node
    daemon's `c4-signer` token, the manager's issuer port).
-2. Validate the kind quickstart from a clean cluster.
+2. Validate `docs/quickstart.md` on a fresh kind cluster with locally built
+   images, then delete that cluster.
 3. Rerun the privileged Linux tests (`make test-linux`); `internal/node`
    changed (task records are signed with the node's certificate). Its Linux
    build and `go vet` with `GOOS=linux` are clean.
+4. `make release-snapshot` and `make images`: the release images, built
+   locally and published nowhere.
 
 ## Open questions for Joshua
 
@@ -79,12 +83,21 @@ quit; nothing deleted). These wait for it:
    build that also requires c4 v1.0.18 would select it and fail; a pre-release
    tag on c4 master would end that.
 
-2. **Dockerfile builds from a host binary.** `make image` cross-compiles on the
-   host and copies the binary in. With the `replace` gone, a multi-stage build
-   that compiles inside the image works too.
+2. **Images.** The Dockerfiles only copy a cross-compiled binary, so
+   multi-arch images need no emulation: `make images` (buildx, linux/amd64 and
+   linux/arm64; an OCI archive unless `PUSH=1`) and GoReleaser
+   (`Dockerfile.release`, run by the release workflow on a tag). Neither has
+   built an image yet, because Docker is stopped; `make release-snapshot` will
+   check both.
 
-3. **Image name.** Manifests use `c4-operator:dev`. A release needs a registry path
-   (for example `ghcr.io/avalanche-io/c4-operator`), which is Joshua's decision.
+3. **Image name.** Proposed: `ghcr.io/avalanche-io/c4-operator`
+   (`config/release`, `.goreleaser.yaml`). Joshua's decision.
+
+4. **History.** One internal working note (`HANDOFF-v2.md`) is in the history;
+   it is deleted from the tree. `RELEASING.md` gives three options for the
+   published history; the recommended one drops the note with `git
+   filter-repo` in a fresh clone. Waiting for Joshua's choice; nothing is
+   rewritten.
 
 ## c4 dependencies and the release plan
 

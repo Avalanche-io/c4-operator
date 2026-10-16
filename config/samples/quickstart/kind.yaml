@@ -1,0 +1,15 @@
+# The quickstart cluster: two workers in one zone, both in the cpu pool.
+# The node daemon runs on nodes that name a zone; the work queue places
+# render units on nodes of the cpu pool. The control plane maps the store
+# (30900) and the HUD (30080) to this machine.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+- role: control-plane
+  extraPortMappings:
+  - {containerPort: 30900, hostPort: 30900, listenAddress: 127.0.0.1}
+  - {containerPort: 30080, hostPort: 30080, listenAddress: 127.0.0.1}
+- role: worker
+  labels: {topology.kubernetes.io/zone: zone-a, c4.avalanche.io/pool: cpu}
+- role: worker
+  labels: {topology.kubernetes.io/zone: zone-a, c4.avalanche.io/pool: cpu}

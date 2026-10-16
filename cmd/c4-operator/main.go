@@ -24,7 +24,7 @@ import (
 )
 
 // version is set at build time with -ldflags "-X main.version=...".
-var version = "v2-dev"
+var version = "dev"
 
 const usage = `usage: c4-operator <command> [flags]
 

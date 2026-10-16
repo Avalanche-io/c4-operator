@@ -1,0 +1,8 @@
+# The release image, built by GoReleaser (.goreleaser.yaml) with buildx for
+# each platform. GoReleaser places each platform's binary at
+# $TARGETPLATFORM/c4-operator in the build context. `make image` and
+# `make images` use Dockerfile instead.
+FROM gcr.io/distroless/static-debian12:latest
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/c4-operator /c4-operator
+ENTRYPOINT ["/c4-operator"]

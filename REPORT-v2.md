@@ -186,7 +186,7 @@ Two follow-ups Joshua asked for were not started when the open-source release be
 
 ## Decisions for Joshua
 
-1. The release path: c4 is pinned to a master pseudo-version until a c4 release carries what the operator uses (the table below), and the image registry path.
+1. The release path: c4 is pinned to a master pseudo-version until a c4 release carries what the operator uses (the table below); the proposed image path is `ghcr.io/avalanche-io/c4-operator`, and `RELEASING.md` lists the steps that are Joshua's, including how the history is published.
 2. The billing model: cluster-hours with container-hours, GPU-hours, or fixed production windows, and prices.
 3. Transport security between cache tiers (mTLS through a mesh, or the tiers' own certificates).
 4. Whether Direct mode (node daemons holding store credentials) stays a supported mode.
@@ -238,3 +238,4 @@ To add to the plan: (1) in the v1.1 re-scope, keep `c4m.IsJournal` exported (or 
 | agent docs                                    | `docs/agents/tools.md`, `docs/agents/eval.xml`, `skills/c4-farm/SKILL.md`, `llms.txt` |
 | research briefs                               | `docs/research/provenance.md`, `docs/research/ecosystem.md`                           |
 | branches, blockers, proposals, open questions | `PROGRESS.md`                                                                         |
+| install, quickstart, release steps            | `docs/install.md`, `docs/quickstart.md`, `RELEASING.md`                               |

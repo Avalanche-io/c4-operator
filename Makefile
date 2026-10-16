@@ -8,16 +8,33 @@ KIND ?= $(GOBIN)/kind
 ENVTEST_K8S_VERSION ?= 1.37.0
 IMG ?= c4-operator:dev
 ARCH ?= $(shell go env GOARCH)
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+REGISTRY ?= ghcr.io/avalanche-io
+RELEASE_IMG ?= $(REGISTRY)/c4-operator:$(VERSION)
+PLATFORMS ?= linux/amd64,linux/arm64
+LDFLAGS := -s -w -X main.version=$(VERSION)
+comma := ,
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image e2e e2e-down tools
+.PHONY: all generate manifests test test-linux envtest build image images install-yaml release-snapshot verify e2e e2e-down tools
 
 all: generate manifests test build
 
 tools:
-	go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
-	go install sigs.k8s.io/controller-runtime/tools/setup-envtest@latest
-	go install sigs.k8s.io/kind@latest
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@v0.23.0
+	go install sigs.k8s.io/controller-runtime/tools/setup-envtest@v0.25.2
+	go install sigs.k8s.io/kind@v0.33.0
+
+# What CI checks besides the tests: formatting, vet, generated code and
+# manifests in step with the API, and the manifests render.
+verify:
+	@test -z "$$(gofmt -l $$(git ls-files '*.go'))" || { gofmt -l $$(git ls-files '*.go'); exit 1; }
+	go vet ./...
+	$(CONTROLLER_GEN) object paths=./api/...
+	$(CONTROLLER_GEN) crd:allowDangerousTypes=false paths=./api/... output:crd:artifacts:config=config/crd
+	git diff --exit-code -- api config/crd
+	kubectl kustomize config/default >/dev/null
+	kubectl kustomize config/release >/dev/null
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
@@ -49,13 +66,39 @@ test-linux:
 	done
 
 build:
-	CGO_ENABLED=0 go build -trimpath -o bin/c4-operator ./cmd/c4-operator
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/c4-operator ./cmd/c4-operator
 
 # The image is assembled from a binary cross-compiled on the host: Go builds
 # for any architecture without emulation, and the image needs no toolchain.
 image:
-	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="-s -w" -o bin/linux_$(ARCH)/c4-operator ./cmd/c4-operator
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o bin/linux_$(ARCH)/c4-operator ./cmd/c4-operator
 	docker build --build-arg TARGETARCH=$(ARCH) -t $(IMG) .
+
+# The release image for every platform in PLATFORMS, in one buildx build.
+# The Dockerfile only copies the binary, so no platform is emulated.
+# Without PUSH=1 the image is written to bin/ as an OCI archive and nothing
+# leaves this machine; with PUSH=1 it goes to RELEASE_IMG (log in first).
+images:
+	@for p in $$(echo $(PLATFORMS) | tr , ' '); do \
+	  a=$${p#linux/}; \
+	  echo "build linux/$$a"; \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=$$a go build -trimpath -ldflags="$(LDFLAGS)" -o bin/linux_$$a/c4-operator ./cmd/c4-operator || exit 1; \
+	done
+	docker buildx build --platform $(PLATFORMS) -t $(RELEASE_IMG) \
+	  --label org.opencontainers.image.source=https://github.com/Avalanche-io/c4-operator \
+	  --label org.opencontainers.image.version=$(VERSION) \
+	  $(if $(PUSH),--push,--output type=oci$(comma)dest=bin/c4-operator-$(VERSION).oci.tar) .
+
+# The install manifest of a release: config/release with RELEASE_IMG.
+install-yaml:
+	@mkdir -p bin
+	kubectl kustomize config/release | sed 's#ghcr.io/avalanche-io/c4-operator:v0.1.0#$(RELEASE_IMG)#' > bin/install.yaml
+	@echo bin/install.yaml uses $(RELEASE_IMG)
+
+# A local dry run of the release: binaries, archives, checksums and the
+# images, into dist/, published nowhere.
+release-snapshot:
+	goreleaser release --snapshot --clean
 
 e2e:
 	hack/e2e/run.sh

@@ -1,0 +1,63 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: gofmt, vet, generated code, manifests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - run: make tools
+    - run: make verify
+
+  test:
+    name: unit and envtest
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - run: make tools
+    # The controllers and the queue run against a real API server and etcd
+    # (envtest); setup-envtest downloads them.
+    - run: make test
+    - name: cache tiers under the race detector
+      run: go test -race -count=1 ./internal/tier/... ./internal/fill/... ./internal/objcache/...
+
+  linux-privileged:
+    name: overlay, layers and capture (privileged container)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    # Overlay mounts, whiteouts and capture need root: the test binaries run
+    # in a privileged container on a Docker volume.
+    - run: make test-linux ARCH=amd64
+
+  build:
+    name: binaries and the release config
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - uses: goreleaser/goreleaser-action@v7
+      with:
+        version: "~> v2"
+        args: build --snapshot --clean

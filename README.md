@@ -1,40 +1,90 @@
-# c4-operator
+# The Cinema Content Creation Cloud: c4-operator
 
-The Kubernetes operator of The Cinema Content Creation Cloud (C4,
-[cccc.io](https://cccc.io)): a farm for media and machine-learning work built
-on content identity. Every tree a pod reads or writes is a C4 view: a directory tree in
-which every file is named by its C4 ID (SMPTE ST 2114). Pods mount views
-through a CSI driver as overlay filesystems; the bytes come through node,
-peer and regional caches that fetch each object from the store about once,
-whatever the number of pods. What a pod writes is captured as a changeset when
-it exits. A deadline-driven queue runs render, CI and ML work on the same
-farm, a HUD shows it, an MCP server gives agents the same controls as people,
-and every task leaves a signed record of what it read, where it ran and what
-it wrote.
+c4-operator runs a render, CI and machine-learning farm on Kubernetes on top
+of content identity. Every tree a pod reads or writes is a C4 view: a
+directory tree in which each file is named by its C4 ID (SMPTE ST 2114), the
+SHA-512 of its bytes. C4 is the short form of The Cinema Content Creation
+Cloud ([cccc.io](https://cccc.io)).
 
-The operator is rebuilt from a 2017 design by Joshua Kolden, who also wrote
-SMPTE ST 2114, the C4 ID standard.
+- **Views, not volumes.** A pod mounts exactly the files it needs through a
+  CSI driver, as an overlay of layers that every pod on the node shares. The
+  bytes come through node, peer and regional caches that read each object
+  from the store about once, however many pods ask for it.
+- **Outputs are versions.** When a pod exits, what it wrote is captured as a
+  changeset over the view it mounted, and a job's output is one view folded
+  from its units' changesets.
+- **Isolation by project.** A project's pods can mount only what its own
+  store holds; vendors see exactly the paths they were granted, and a
+  revoked grant stops new mounts at once.
+- **Deadlines, not priorities.** One queue runs render, CI and ML work
+  together, ordered by each job's deadline and an estimate of its remaining
+  work. People move deadlines, boost or hold; renders can run frames in
+  binary order so the estimate is good early; training runs yield their GPUs
+  at a checkpoint and resume from it.
+- **A HUD and an MCP server.** The HUD shows the farm from live cluster
+  state, and an MCP server gives agents every HUD capability as the calling
+  user.
+- **Provenance by construction.** Every task leaves a signed record of what
+  it mounted, where it ran, from which images, and what it wrote. Every
+  entity signs as itself: the node that ran the unit, the controller that
+  resolved its inputs, the queue that scheduled it, the HUD for each action
+  a person or agent took, and the importer that brought the content in. A
+  file traces back to its sources, with its declared AI use and a C2PA
+  manifest definition.
 
-Status: the `v2` branch, unreleased (see [Release](#release)). Every phase is
-measured on an eight-worker kind cluster; the numbers below come from
-[`hack/e2e/out/results.md`](hack/e2e/out/results.md) and the design is in
-[`DESIGN.md`](DESIGN.md). [`REPORT-v2.md`](REPORT-v2.md) summarizes both.
+**Status: alpha, v0.1 (pre-1.0).** The API (`c4.avalanche.io/v1alpha1`),
+the manifests and the record formats will change. Every number below was
+measured on kind on one laptop, not at production scale.
 
-## What the evidence shows
+![The HUD's queue on the kind test farm, mid-run](docs/hud/live/mid-queue.png)
 
-| phase                  | what was shown on the kind cluster                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
-| ---------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| P1 views, capture, CSI | 16 pods under Pod Security `restricted` mount one shot through the CSI driver: one shared layer per node, one writable upper per pod, a warm mount in 2 ms (cold 80 ms), no bytes hashed on the read path. Every captured output equals the tree the pod saw, recomputed on the host. The next version of the shot mounts as a delta layer: 17 objects fetched across 8 nodes.                                                                                                                                                                                                                                                                                   |
-| P2 tiers               | 64 pods reading one 28-object shot cost the store 42 GETs through the tiers (1.5 per object), against 224 when each node fetches for itself and 1,792 when each pod does. A regional replica killed with SIGKILL mid-transfer: all 32 pods finished, 7 transfers resumed from their offsets elsewhere, none went to the store directly.                                                                                                                                                                                                                                                                                                                          |
-| P3 isolation           | Nine attempts by one project to read another's data (by view ID, by a hand-written c4m, through both cache tiers' APIs with and without a token, through a forged CSI volume context) are refused. Strict projects get separate copies of identical bytes; Shared projects share one copy only after proving they hold it. A vendor sees exactly its granted shot; revoking the grant takes effect at the next mount, 0.1 s later.                                                                                                                                                                                                                               |
-| P4 monorepo CI         | The synthetic monorepo (2,219 files, 401 commits, 62 c4git assets) imports into MinIO in 5.4 s (7.5 ms per commit at p50). For 16 CI shards per change, a node mounts the parent commit cold in 1.7 s, the next commit as a 3-file delta layer in 16 ms, and a rerun in 2 ms; a git clone and c4git checkout of the same commit takes 1.1 s on the host SSD. Which files changed between two commits is answered from records alone in 13 to 221 ms, identical to `git diff`.                                                                                                                                                                                    |
-| P5 work queue          | Seven jobs from two shows on 16 cpu, 8 GPU and up to 8 burst slots: 6 of 7 deadlines met. A training run gave its GPU slots to an urgent render at a checkpoint and resumed from the step it saved, through the view its capture made. Burst capacity was requested, provisioned and in use within about 20 s, for $0.03. The remaining-work estimate of a binary-order render was within 10% from a tenth of the way in and within 3% from a quarter on (a render manager's mean-frame estimate: 15% and 7%). In simulation over five weeks, the policy misses 43% fewer render deadlines than manual priorities and cuts the CI p95 from 17.2 to 14.4 minutes. |
-| P6 agents              | 17 MCP tools in the measured run (18 now) over stdio and stateless HTTP, each a call to the HUD API as the caller. An MCP client answers all 10 questions of the evaluation set from the live farm, and a hold made through MCP shows up as an Event naming the user.                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| P7 provenance          | Each capture is signed by the node daemon as an in-toto Statement in a DSSE envelope. A frame of a model-assisted denoise traces to its render through the input view, with the declared model, oversight and consent; its C2PA definition carries the AI disclosure. Changing one field of a record breaks its signature. Measured with one farm key; since then each entity signs as itself (nodes, controller, queue, HUD, importers) with short-lived certificates, tested in envtest, cluster run pending.                                                                                                                                                                                                                                                                                              |
+## Measured on kind, on one laptop
 
-The HUD on the live farm (more in [`docs/hud/live`](docs/hud/live)):
+kind v0.33 (Kubernetes 1.36), eight workers in two zones, three MinIO
+shards, all on one Apple M3 Max. Every link ran at memory speed, so these
+numbers show mechanisms, not production performance.
+[REPORT-v2.md](REPORT-v2.md) has every measurement, its method and its
+limits.
 
-![The queue on the live e2e farm, mid-run](docs/hud/live/mid-queue.png)
+| what                         | result                                                                                                                                                                                              |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| store load as pods grow      | 64 pods reading one 28-object shot cost the store 42 GETs through the tiers (1.5 per object), against 224 when each node reads for itself and 1,792 when each pod does                             |
+| mounts                       | a warm mount in 2 ms; a cold one in 80 ms at the median, mostly from a peer in the same zone (0.8 to 1.0 s when nothing in the zone held the bytes); the next version as a delta layer               |
+| failure                      | a regional cache replica killed mid-transfer: all 32 pods finished, 7 transfers resumed from their offsets at another replica, none fell through to the store                                       |
+| isolation                    | nine attempts by one project to read another's data refused; a revoked vendor grant took effect 0.1 s later                                                                                       |
+| monorepo CI                  | 401 commits imported in 5.4 s; 16 test shards per change mount the next commit as a 3-file delta in 16 ms; which files changed between two commits in 13 to 221 ms, identical to `git diff`          |
+| deadlines                    | 6 of 7 jobs met their deadlines on a contended farm while a training run yielded its GPUs at a checkpoint and resumed; in a five-week simulation, 43% fewer missed render deadlines than manual priorities |
+| agents                       | an MCP client answered all 10 questions of the evaluation set from the live farm, each call in under 10 ms                                                                                          |
+
+How this compares with Anthropic's Scion, and what a fair benchmark would
+need, is in [REPORT-v2.md](REPORT-v2.md#comparison-with-scion).
+
+<p>
+<img src="docs/hud/live/mid-job-sh010-comp-v003.png" alt="A render's job view: frames in binary order and the remaining-work estimate" width="49%">
+<img src="docs/hud/live/mid-tiers.png" alt="The cache tiers: hit rates and requests at the node, peer, regional and store tiers" width="49%">
+</p>
+
+More screenshots: [docs/hud/live](docs/hud/live) (the kind farm) and
+[docs/hud](docs/hud) (a synthetic farm).
+
+## Quickstart
+
+On a laptop with Docker, kind, kubectl and Go:
+
+```sh
+git clone https://github.com/Avalanche-io/c4-operator && cd c4-operator && git checkout v0.1.0
+go install ./cmd/c4-operator
+kind create cluster --name c4 --config config/samples/quickstart/kind.yaml
+kubectl apply -k config/release
+```
+
+[docs/quickstart.md](docs/quickstart.md) continues from there: a store, a
+project, a tree ingested and mounted in a pod, its output captured, and a
+render queued and watched in the HUD, in about five minutes.
+
+To install on a cluster of your own, see [docs/install.md](docs/install.md).
+Releases attach one `install.yaml`, and the image is
+`ghcr.io/avalanche-io/c4-operator` for `linux/amd64` and `linux/arm64`.
 
 ## How it works
 
@@ -70,46 +120,60 @@ The HUD on the live farm (more in [`docs/hud/live`](docs/hud/live)):
 - **Work** (`internal/work`). A queue in the manager releases units as pods
   only when they can run, in an order derived from each job's deadline and an
   estimate of its remaining work. Slots are an extended resource, so
-  kube-scheduler places units as the queue counts them. There are no
-  priorities: people move deadlines, boost or hold.
+  kube-scheduler places units as the queue counts them.
 - **HUD** (`internal/hud`) and **MCP** (`internal/mcpserver`): one API, two
-  faces. **Provenance** (`internal/provenance`): task records, lineage, C2PA
-  and OMC exports.
+  faces. **Provenance** (`internal/provenance`): records signed by each
+  entity with short-lived certificates from a farm signing CA, the chain of
+  custody, C2PA and OMC exports.
 
-## Try it
+[DESIGN.md](DESIGN.md) is the full design, including what is designed and
+not yet built.
 
-Requirements: Docker, kind 0.33, Go 1.26, kubectl. Everything runs on one
-machine; nothing is pushed anywhere.
+## Documentation
+
+| document                                         | what it covers                                                            |
+| ------------------------------------------------ | ------------------------------------------------------------------------- |
+| [docs/quickstart.md](docs/quickstart.md)         | five minutes on kind                                                      |
+| [docs/install.md](docs/install.md)               | requirements, install, projects, pools, the HUD, limits before production |
+| [DESIGN.md](DESIGN.md)                           | the design of record                                                      |
+| [REPORT-v2.md](REPORT-v2.md)                     | what each phase proved, the numbers, the Scion comparison, open decisions |
+| [docs/agents/tools.md](docs/agents/tools.md)     | the MCP tools, generated from the server                                  |
+| [skills/c4-farm](skills/c4-farm/SKILL.md)        | a skill for agents that operate the farm                                  |
+| [PROGRESS.md](PROGRESS.md)                       | branches, release blockers, proposed changes to the c4 suite              |
+
+## Development
+
+Go 1.26, Docker, kind 0.33 and kubectl.
 
 ```sh
-hack/e2e/up.sh          # kind cluster (8 workers, 2 zones), MinIO, the operator, projects
-hack/e2e/p1.sh          # views, capture, CSI
-hack/e2e/p2.sh          # tiers and herds
-hack/e2e/p3.sh          # isolation
-hack/e2e/p5.sh          # the work queue (sets up pools; run before p4, p6, p7)
-hack/e2e/p4.sh          # monorepo CI
-hack/e2e/p7.sh          # provenance
-hack/e2e/p6.sh          # the MCP evaluation
-go run ./hack/sim       # the scheduling simulation
+make tools          # controller-gen, setup-envtest, kind (pinned)
+make test           # unit tests, and controllers and the queue against a real API server (envtest)
+make test-linux     # overlay, layer and capture tests in a privileged Linux container
+make verify         # gofmt, vet, generated code and CRDs in step, manifests render
+go run ./hack/sim   # the scheduling simulation
+go run ./hack/hudmock   # the HUD against a synthetic farm, no cluster
 ```
 
-The HUD is at <http://127.0.0.1:30080/?as=wrangler> (the e2e runs the HUD
-with development viewers; `?as=artist` sees one show). To give Claude Code
-the farm's tools:
+The end-to-end phases run on an eight-worker kind cluster:
 
 ```sh
-go build -o bin/c4-operator ./cmd/c4-operator
-claude mcp add c4-farm -- "$PWD/bin/c4-operator" mcp --hud http://127.0.0.1:30080 --as wrangler
+hack/e2e/up.sh      # kind (8 workers, 2 zones), MinIO, the operator, projects
+hack/e2e/p1.sh      # views, capture, CSI
+hack/e2e/p2.sh      # tiers and herds
+hack/e2e/p3.sh      # isolation
+hack/e2e/p5.sh      # the work queue (sets up pools; run before p4, p6, p7)
+hack/e2e/p4.sh      # monorepo CI
+hack/e2e/p7.sh      # provenance
+hack/e2e/p6.sh      # the MCP evaluation
 ```
 
-and see [`skills/c4-farm`](skills/c4-farm/SKILL.md) and
-[`docs/agents/tools.md`](docs/agents/tools.md). The HUD can also run against a
-synthetic farm with no cluster: `go run ./hack/hudmock`.
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security reports go through
+[SECURITY.md](SECURITY.md).
 
 ## Commands
 
 ```
-c4-operator manager      controllers, the work queue, the HUD, the pod webhook
+c4-operator manager      controllers, the work queue, the HUD, the pod webhook, the certificate issuer
 c4-operator node         CSI node plugin, node cache, peer tier, capture, task records
 c4-operator regional     regional cache tier
 c4-operator ingest       hash a directory into a project's store; print its view ID
@@ -137,8 +201,9 @@ internal/auth/         TokenReview for pods and tiers
 internal/work/         order, estimate, sched (policy), class, queue, kindsim
 internal/hud/          web app, API types, backend
 internal/mcpserver/    MCP tools over the HUD API
-internal/provenance/   task records, DSSE, C2PA and OMC exports
+internal/provenance/   signers, certificates, records, verification, C2PA and OMC exports
 internal/gitimport/    git history -> views, changesets, chains
+config/                kustomize: default (local images), release (GHCR), samples
 hack/e2e/              the kind cluster and the phase scripts
 hack/sim/              the scheduling simulation
 hack/hudmock/          a synthetic farm behind the HUD API
@@ -154,23 +219,23 @@ stores, and reads and writes stores the c4 CLI uses.
 
 Anthropic's [Scion](https://www.anthropic.com/engineering/redesigning-source-control)
 showed what a content-addressed tree service does for a monorepo's CI. This
-project takes the same idea to media pipelines, with one difference in the
-monorepo case: Scion made source control server-side, while here git stays
-where it is and its history is mirrored into C4 views (`import-git`, push by
-push).
+project takes the same structure to media pipelines, with one difference in
+the monorepo case: Scion made source control server-side, while here git
+stays where it is and its history is mirrored into C4 views (`import-git`,
+push by push).
 
-## Release
+## Versioning
 
-Not released. `go.mod` pins c4 to a master pseudo-version
-(`v1.0.17-0.20261016134402-db4c7bec2376`, commit db4c7be) because no c4 release
-carries the APIs the operator uses yet; expect to re-pin after c4's v1.1
-re-scope. The image registry path is open.
-See [`PROGRESS.md`](PROGRESS.md) for the release blockers, the open decisions,
-and changes proposed for c4, c4d, c4git and c4-containers.
+c4-operator follows semantic versioning; before 1.0, minor versions may
+break the API, the manifests and the record formats. It depends on c4
+master at a pseudo-version (`v1.0.17-0.20261016134402-db4c7bec2376`, commit
+db4c7be) because no c4 release carries the APIs it uses yet; expect a
+re-pin after c4's v1.1 re-scope.
 
-This system was designed and built with Claude, working as Joshua's
-engineering agent.
+The operator is rebuilt from a 2017 design by Joshua Kolden, who also wrote
+SMPTE ST 2114, the C4 ID standard. It was designed and built with Claude,
+working as his engineering agent.
 
 ## License
 
-Apache License 2.0, the same as c4. See [LICENSE](LICENSE).
+Apache License 2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

@@ -15,7 +15,7 @@ import (
 )
 
 // Version is the server's version, reported to clients.
-var Version = "v2-dev"
+var Version = "dev"
 
 // Instructions are sent to clients when they connect.
 const Instructions = `This server operates a render, CI and ML farm on Kubernetes, the same farm the HUD shows. Jobs are named namespace/name.

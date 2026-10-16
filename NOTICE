@@ -1,0 +1,11 @@
+c4-operator
+The Cinema Content Creation Cloud (C4)
+Copyright 2026 Joshua Ian Kolden
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+C4 IDs are defined by SMPTE ST 2114:2017. This product uses the c4 Go module
+(https://github.com/Avalanche-io/c4), also under the Apache License,
+Version 2.0, and the third-party Go modules listed in go.mod, each under its
+own license. Release images are built on gcr.io/distroless/static-debian12,
+whose packages carry their licenses in /usr/share/doc.

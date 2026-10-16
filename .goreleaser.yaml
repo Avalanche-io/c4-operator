@@ -1,0 +1,64 @@
+# Releases are cut by pushing a tag (vX.Y.Z); .github/workflows/release.yaml
+# runs GoReleaser, which builds the CLI for Linux and macOS, the multi-arch
+# image on GHCR, the install manifest, and a draft GitHub release to review
+# before publishing. `make release-snapshot` runs the same locally and
+# publishes nothing.
+version: 2
+project_name: c4-operator
+
+before:
+  hooks:
+  - go mod verify
+  - make install-yaml VERSION={{ .Tag }}
+
+builds:
+- id: c4-operator
+  main: ./cmd/c4-operator
+  binary: c4-operator
+  env: [CGO_ENABLED=0]
+  goos: [linux, darwin]
+  goarch: [amd64, arm64]
+  flags: [-trimpath]
+  ldflags: ["-s -w -X main.version={{ .Tag }}"]
+
+archives:
+- id: c4-operator
+  ids: [c4-operator]
+  formats: [tar.gz]
+  name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  files: [LICENSE, NOTICE, README.md]
+
+checksum:
+  name_template: checksums.txt
+
+# One image for the manager, the node daemon and the regional tier, for
+# linux/amd64 and linux/arm64. GoReleaser puts each platform's binary at
+# $TARGETPLATFORM/c4-operator in the build context.
+dockers_v2:
+- id: c4-operator
+  ids: [c4-operator]
+  dockerfile: Dockerfile.release
+  images: [ghcr.io/avalanche-io/c4-operator]
+  tags: ["{{ .Tag }}"]
+  platforms: [linux/amd64, linux/arm64]
+  labels:
+    org.opencontainers.image.title: c4-operator
+    org.opencontainers.image.description: "The Cinema Content Creation Cloud: the Kubernetes operator"
+    org.opencontainers.image.source: https://github.com/Avalanche-io/c4-operator
+    org.opencontainers.image.licenses: Apache-2.0
+    org.opencontainers.image.version: "{{ .Tag }}"
+    org.opencontainers.image.revision: "{{ .FullCommit }}"
+
+changelog:
+  use: git
+  sort: asc
+
+release:
+  github: {owner: Avalanche-io, name: c4-operator}
+  draft: true
+  prerelease: auto
+  extra_files:
+  - glob: bin/install.yaml
+  footer: |
+    Install: `kubectl apply -f https://github.com/Avalanche-io/c4-operator/releases/download/{{ .Tag }}/install.yaml`
+    Image: `ghcr.io/avalanche-io/c4-operator:{{ .Tag }}`
