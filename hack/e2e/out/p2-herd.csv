@@ -1,0 +1,10 @@
+path,pods,objects,store_gets,store_gets_per_object,regional_requests,peer_requests,wall_s
+tiered,8,28,52,1.857,56,168,3.83
+tiered,32,28,46,1.643,56,168,6.69
+tiered,64,28,42,1.500,56,168,11.15
+direct,8,28,224,8.000,0,0,3.81
+direct,32,28,224,8.000,0,0,6.56
+direct,64,28,224,8.000,0,0,10.30
+naive,8,28,224,8.000,0,0,3.86
+naive,32,28,896,32.000,0,0,6.13
+naive,64,28,1792,64.000,0,0,29.56
