@@ -6,256 +6,52 @@ import (
 	"sort"
 	"strconv"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/hud/api"
 )
 
 // The types below are the HUD API contract (internal/hud/API.md).
 
-type viewer struct {
-	User     string   `json:"user"`
-	Projects []string `json:"projects"`
-	All      bool     `json:"allProjects"`
-}
-
-func (v *viewer) sees(p string) bool { return contains(v.Projects, p) }
+type viewer = api.Viewer
 
 var viewers = map[string]*viewer{
 	"wrangler": {User: "dana", Projects: []string{"harbor", "kestrel"}, All: true},
 	"artist":   {User: "maya", Projects: []string{"harbor"}, All: false},
 }
 
-type apiSnapshot struct {
-	Now      time.Time    `json:"now"`
-	Viewer   *viewer      `json:"viewer"`
-	Farm     apiFarm      `json:"farm"`
-	Pools    []apiPool    `json:"pools"`
-	Classes  []apiClass   `json:"classes"`
-	Projects []apiProject `json:"projects"`
-	Jobs     []apiJob     `json:"jobs"`
-	Nodes    []apiNode    `json:"nodes"`
-	Tiers    apiTiers     `json:"tiers"`
-	Capacity []apiCap     `json:"capacity"`
-	Usage    apiUsage     `json:"usage"`
-}
-
-// apiUsage is metered use. Billing is by cluster-hours, container-hours or
-// a production window, never by bytes; bytes avoided is the savings proof.
-type apiUsage struct {
-	ClusterHours      float64           `json:"clusterHours"`
-	ContainerHours    []apiContainerHrs `json:"containerHours"`
-	GPUHours          []apiGPUHrs       `json:"gpuHours"`
-	ProductionWindows []apiWindow       `json:"productionWindows"`
-}
-
-type apiContainerHrs struct {
-	Project string  `json:"project"`
-	Pool    string  `json:"pool"`
-	Hours   float64 `json:"hours"`
-}
-
-type apiGPUHrs struct {
-	Project string  `json:"project"`
-	Hours   float64 `json:"hours"`
-}
-
-type apiWindow struct {
-	Project string    `json:"project"`
-	Name    string    `json:"name"`
-	From    time.Time `json:"from"`
-	To      time.Time `json:"to"`
-	Active  bool      `json:"active"`
-}
-
-type apiFarm struct {
-	SlotsUsed          int     `json:"slotsUsed"`
-	SlotsTotal         int     `json:"slotsTotal"`
-	QueuedUnits        int     `json:"queuedUnits"`
-	UnitsPerHour       int     `json:"unitsPerHour"`
-	FailuresLastHour   int     `json:"failuresLastHour"`
-	BurstSlots         int     `json:"burstSlots"`
-	BurstCostPerHour   float64 `json:"burstCostPerHour"`
-	BytesMaterialized  float64 `json:"bytesMaterialized"`
-	BytesFetchedStore  float64 `json:"bytesFetchedFromStore"`
-	BytesAvoided       float64 `json:"bytesAvoided"`
-	OtherProjectsSlots int     `json:"otherProjectsSlots"`
-}
-
-type apiPool struct {
-	Name            string         `json:"name"`
-	Attrs           map[string]any `json:"attrs"`
-	Slots           int            `json:"slots"`
-	Used            int            `json:"used"`
-	CostPerSlotHour float64        `json:"costPerSlotHour"`
-	Burst           *apiPoolBurst  `json:"burst,omitempty"`
-}
-
-type apiPoolBurst struct {
-	MaxSlots            int     `json:"maxSlots"`
-	ProvisioningSeconds float64 `json:"provisioningSeconds"`
-	CostPerSlotHour     float64 `json:"costPerSlotHour"`
-	Requested           int     `json:"requested"`
-	Provisioned         int     `json:"provisioned"`
-}
-
-type apiClass struct {
-	Name   string         `json:"name"`
-	Driver string         `json:"driver"`
-	SLO    map[string]any `json:"slo"`
-	Lens   string         `json:"lens"`
-}
-
-type apiProject struct {
-	Name              string           `json:"name"`
-	Quotas            []map[string]any `json:"quotas"`
-	BurstSpendToday   float64          `json:"burstSpendToday"`
-	BurstBudgetPerDay float64          `json:"burstBudgetPerDay"`
-	BytesAvoided      float64          `json:"bytesAvoided"`
-	WorkerHours       []map[string]any `json:"workerHours"`
-	GPUHours          float64          `json:"gpuHours"`
-}
-
-type apiCounts struct {
-	Total       int `json:"total"`
-	Unevaluated int `json:"unevaluated"`
-	Queued      int `json:"queued"`
-	Blocked     int `json:"blocked"`
-	Running     int `json:"running"`
-	Retrying    int `json:"retrying"`
-	Succeeded   int `json:"succeeded"`
-	Failed      int `json:"failed"`
-	Held        int `json:"held"`
-}
-
-type apiStates struct {
-	Unevaluated string `json:"unevaluated"`
-	Queued      string `json:"queued"`
-	Blocked     string `json:"blocked"`
-	Running     string `json:"running"`
-	Retrying    string `json:"retrying"`
-	Succeeded   string `json:"succeeded"`
-	Failed      string `json:"failed"`
-}
-
-type apiObjective struct {
-	Type                 string     `json:"type"`
-	Deadline             *time.Time `json:"deadline,omitempty"`
-	LatencyTargetSeconds float64    `json:"latencyTargetSeconds,omitempty"`
-	From                 string     `json:"from,omitempty"`
-}
-
-type apiEstimate struct {
-	RemainingSeconds    float64     `json:"remainingSeconds"`
-	P90RemainingSeconds float64     `json:"p90RemainingSeconds"`
-	EtaP50              time.Time   `json:"etaP50"`
-	EtaP90              time.Time   `json:"etaP90"`
-	RequiredSlots       float64     `json:"requiredSlots"`
-	AttainableSlots     float64     `json:"attainableSlots"`
-	RunningSlots        int         `json:"runningSlots"`
-	SlackSeconds        float64     `json:"slackSeconds"`
-	Feasible            bool        `json:"feasible"`
-	Message             string      `json:"message,omitempty"`
-	Burst               *BurstOffer `json:"burst,omitempty"`
-}
-
-type apiInput struct {
-	Materialization string `json:"materialization,omitempty"`
-	View            string `json:"view,omitempty"`
-	FromJob         string `json:"fromJob,omitempty"`
-}
-
-type apiJob struct {
-	Namespace    string       `json:"namespace"`
-	Name         string       `json:"name"`
-	Project      string       `json:"project"`
-	Class        string       `json:"class"`
-	Driver       string       `json:"driver"`
-	Owner        string       `json:"owner,omitempty"`
-	Phase        string       `json:"phase"`
-	Order        string       `json:"order"`
-	Units        apiCounts    `json:"units"`
-	UnitStates   apiStates    `json:"unitStates"`
-	Objective    apiObjective `json:"objective"`
-	Estimate     apiEstimate  `json:"estimate"`
-	Rank         int          `json:"rank"`
-	Pools        []string     `json:"pools"`
-	Inputs       []apiInput   `json:"inputs"`
-	Output       *apiOutput   `json:"output,omitempty"`
-	DependsOn    []string     `json:"dependsOn"`
-	CreatedAt    time.Time    `json:"createdAt"`
-	Nudge        apiNudge     `json:"nudge"`
-	HeavyRegions []apiHeavy   `json:"heavyRegions,omitempty"`
-	Blacklist    []string     `json:"blacklist,omitempty"`
-}
-
-type apiOutput struct {
-	View       string `json:"view"`
-	Changesets int    `json:"changesets"`
-}
-
-type apiNudge struct {
-	Hold  bool    `json:"hold"`
-	Boost float64 `json:"boost"`
-}
-
-type apiHeavy struct {
-	From   int     `json:"from"`
-	To     int     `json:"to"`
-	Factor float64 `json:"factor"`
-	Label  string  `json:"label,omitempty"`
-}
-
-type apiNode struct {
-	Name             string       `json:"name"`
-	Pool             string       `json:"pool"`
-	Locality         string       `json:"locality"`
-	State            string       `json:"state"`
-	Slots            int          `json:"slots"`
-	Used             int          `json:"used"`
-	FailuresLastHour int          `json:"failuresLastHour"`
-	Suspect          bool         `json:"suspect"`
-	CacheBytes       float64      `json:"cacheBytes"`
-	CacheHitRate     float64      `json:"cacheHitRate"`
-	Running          []apiRunning `json:"running,omitempty"`
-}
-
-type apiRunning struct {
-	Job   string `json:"job"`
-	Unit  int    `json:"unit"`
-	Slots int    `json:"slots"`
-}
-
-type apiTiers struct {
-	Tiers      []apiTier      `json:"tiers"`
-	FanIn      map[string]int `json:"fanIn"`
-	PublishP50 float64        `json:"publishP50"`
-	PublishP95 float64        `json:"publishP95"`
-	CaptureP50 float64        `json:"captureP50"`
-}
-
-type apiTier struct {
-	Name             string  `json:"name"`
-	HitRate          float64 `json:"hitRate"`
-	RequestsIn       int     `json:"requestsIn"`
-	UpstreamRequests int     `json:"upstreamRequests"`
-	BytesServed      float64 `json:"bytesServed"`
-	ShedRate         float64 `json:"shedRate"`
-	InflightFills    int     `json:"inflightFills"`
-}
-
-type apiCap struct {
-	Pool         string    `json:"pool"`
-	Slots        int       `json:"slots"`
-	Until        time.Time `json:"until"`
-	Reason       string    `json:"reason"`
-	Jobs         []string  `json:"jobs"`
-	EstCost      float64   `json:"estCost"`
-	State        string    `json:"state"`
-	PrewarmViews []string  `json:"prewarmViews"`
-}
+// The HUD API contract types live in internal/hud/api; these aliases keep
+// the mock's names.
+type (
+	apiCap          = api.Capacity
+	apiClass        = api.Class
+	apiContainerHrs = api.ContainerHours
+	apiCounts       = api.Counts
+	apiEstimate     = api.Estimate
+	apiFarm         = api.Farm
+	apiGPUHrs       = api.GPUHours
+	apiHeavy        = api.Heavy
+	apiInput        = api.Input
+	apiJob          = api.Job
+	apiNode         = api.Node
+	apiNudge        = api.Nudge
+	apiObjective    = api.Objective
+	apiOutput       = api.Output
+	apiPool         = api.Pool
+	apiPoolBurst    = api.PoolBurst
+	apiProject      = api.Project
+	apiRunning      = api.Running
+	apiSnapshot     = api.Snapshot
+	apiStates       = api.States
+	apiTier         = api.Tier
+	apiTiers        = api.Tiers
+	apiUsage        = api.Usage
+	apiWindow       = api.Window
+)
 
 func (s *Sim) ts(sec float64) time.Time { return s.at(math.Round(sec)) }
 
 func (s *Sim) visible(v *viewer, j *Job) bool {
-	return v.sees(j.Project) && s.t >= j.Created
+	return v.Sees(j.Project) && s.t >= j.Created
 }
 
 func (s *Sim) snapshot(v *viewer) *apiSnapshot {
@@ -267,7 +63,7 @@ func (s *Sim) snapshot(v *viewer) *apiSnapshot {
 		}
 		for _, r := range n.running {
 			f.SlotsUsed += r.u.Slots
-			if !v.sees(r.j.Project) {
+			if !v.Sees(r.j.Project) {
 				f.OtherProjectsSlots += r.u.Slots
 			}
 		}
@@ -338,7 +134,7 @@ func (s *Sim) snapshot(v *viewer) *apiSnapshot {
 		out.Classes = append(out.Classes, apiClass{Name: c.Name, Driver: c.Driver, SLO: slo, Lens: c.Lens})
 	}
 	for _, p := range s.projects {
-		if !v.sees(p.Name) {
+		if !v.Sees(p.Name) {
 			continue
 		}
 		ap := apiProject{Name: p.Name, BurstSpendToday: round2(p.BurstSpent), BurstBudgetPerDay: p.BurstBudget,
@@ -378,7 +174,7 @@ func (s *Sim) snapshot(v *viewer) *apiSnapshot {
 	}
 	out.Tiers = s.tiers()
 	for _, c := range s.capReqs {
-		if !v.sees(c.Project) {
+		if !v.Sees(c.Project) {
 			continue
 		}
 		out.Capacity = append(out.Capacity, apiCap{Pool: c.Pool, Slots: c.Slots, Until: s.ts(c.Until), Reason: c.Reason,
@@ -424,7 +220,7 @@ func (s *Sim) nodeSummary(n *Node, v *viewer) apiNode {
 	}
 	an.Suspect = faults >= 3 && len(jobs) >= 2
 	for _, r := range n.running {
-		if v.sees(r.j.Project) {
+		if v.Sees(r.j.Project) {
 			an.Running = append(an.Running, apiRunning{Job: r.j.key(), Unit: r.u.I, Slots: r.u.Slots})
 		}
 	}
@@ -992,7 +788,7 @@ func (s *Sim) usage(v *viewer) apiUsage {
 	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 	u := apiUsage{ClusterHours: round2(now.Sub(midnight).Hours())}
 	for _, p := range s.projects {
-		if !v.sees(p.Name) {
+		if !v.Sees(p.Name) {
 			continue
 		}
 		for _, pool := range s.pools {

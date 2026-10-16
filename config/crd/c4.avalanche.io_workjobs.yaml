@@ -63,6 +63,13 @@ spec:
               objective, where it may run, its inputs and outputs, and the pod each
               unit runs.
             properties:
+              avoidNodes:
+                description: |-
+                  AvoidNodes are nodes a person took out of this job's use; the queue
+                  adds nodes that failed its units NodeErrorLimit times.
+                items:
+                  type: string
+                type: array
               class:
                 description: 'Class names the work class: render, ci or ml.'
                 enum:
@@ -301,10 +308,34 @@ spec:
               order:
                 description: Order is the dispatch order over the unit axis.
                 type: string
-              outputs:
-                description: Outputs counts unit changesets captured so far.
-                format: int32
-                type: integer
+              output:
+                description: |-
+                  Output is the job's output view: every unit's captured changeset
+                  folded in as the unit finishes.
+                properties:
+                  chain:
+                    description: |-
+                      Chain is the stored c4m chain: the job's input view, then one
+                      section per fold, each sealed by the output view it produced.
+                    type: string
+                  changesets:
+                    description: Changesets folded so far.
+                    format: int32
+                    type: integer
+                  conflicts:
+                    description: Conflicts lists paths two units wrote (the later
+                      write is kept).
+                    items:
+                      type: string
+                    type: array
+                  view:
+                    description: View is the output after the latest fold.
+                    type: string
+                required:
+                - chain
+                - changesets
+                - view
+                type: object
               phase:
                 description: Phase is Queued, Running, Blocked, Held, Succeeded or
                   Failed.
@@ -318,6 +349,10 @@ spec:
                 description: Rank is the job's position in dispatch order (1 is next).
                 format: int32
                 type: integer
+              requeued:
+                description: Requeued is the token of the last requeue request carried
+                  out.
+                type: string
               resume:
                 additionalProperties:
                   type: string

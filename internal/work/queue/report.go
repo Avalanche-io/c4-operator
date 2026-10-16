@@ -140,7 +140,14 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			}
 		}
 	}
-	st.Outputs = int32(m.outputs)
+	if o := m.out; o != nil && !o.view.IsNil() {
+		st.Output = &c4v1.WorkOutput{View: o.view.String(), Chain: o.id.String(), Changesets: int32(o.count)}
+		if n := len(o.conflicts); n > 0 {
+			st.Output.Conflicts = o.conflicts[max(0, n-8):]
+		}
+	} else if old := v.job.Status.Output; old != nil {
+		st.Output = old
+	}
 	if len(m.resume) > 0 {
 		st.Resume = map[string]string{}
 		for i, view := range m.resume {
@@ -153,7 +160,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	for _, n := range m.preemptions {
 		st.Preemptions += int32(n)
 	}
-	for node := range m.blacklist {
+	st.Requeued = m.requeued
+	for node := range v.avoid {
 		st.Blacklist = append(st.Blacklist, node)
 	}
 	sort.Strings(st.Blacklist)

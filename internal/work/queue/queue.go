@@ -9,6 +9,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -50,11 +51,15 @@ type Queue struct {
 	CaptureWait time.Duration
 
 	mu    sync.Mutex
+	folds int
 	st    sched.State
 	jobs  map[types.UID]*jobMem
 	spent map[string]float64 // burst dollars per project today
 	day   int
 	last  time.Time
+	// Stores opens a project's store, to fold unit changesets into job
+	// outputs. Without it, outputs are not folded.
+	Stores StoreFunc
 	// Last decisions, for the HUD.
 	lastSnap sched.Snapshot
 	lastDec  sched.Decisions
@@ -101,7 +106,9 @@ type jobMem struct {
 	failed    map[int]bool
 	attempts  map[int]int // attempts made, including the running one
 	millis    map[int]int64
-	outputs   int
+	out       *output
+	foldedPod map[types.UID]bool
+	outLoad   string // the stored chain to load before the next fold
 	launched  map[int]time.Time
 	nodeFails map[string]int
 	blacklist map[string]bool
@@ -112,6 +119,7 @@ type jobMem struct {
 	yieldAsked  map[int]time.Time
 	preemptions map[int]int
 	yields      []yieldRecord
+	requeued    string
 	lastRun     time.Time
 	readyAt     time.Time
 	started     time.Time
@@ -122,7 +130,8 @@ type jobMem struct {
 func newMem() *jobMem {
 	return &jobMem{succeeded: map[int]bool{}, failed: map[int]bool{}, attempts: map[int]int{},
 		millis: map[int]int64{}, launched: map[int]time.Time{}, nodeFails: map[string]int{}, blacklist: map[string]bool{},
-		resume: map[int]string{}, yieldAsked: map[int]time.Time{}, preemptions: map[int]int{}}
+		resume: map[int]string{}, yieldAsked: map[int]time.Time{}, preemptions: map[int]int{},
+		out: newOutput(), foldedPod: map[types.UID]bool{}}
 }
 
 // yieldRecord is one yield of a checkpointing unit.
@@ -133,7 +142,7 @@ type yieldRecord struct {
 	View   string
 }
 
-func (m *jobMem) load(st *c4v1.WorkJobStatus) {
+func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	for _, i := range decode(st.UnitStates["succeeded"]) {
 		m.succeeded[i] = true
 	}
@@ -156,14 +165,20 @@ func (m *jobMem) load(st *c4v1.WorkJobStatus) {
 			m.millis[i] = ms
 		}
 	}
-	m.outputs = int(st.Outputs)
+	m.requeued = st.Requeued
+	if o := st.Output; o != nil {
+		m.outLoad = o.Chain
+		m.out.count = int(o.Changesets)
+	}
 	for k, view := range st.Resume {
 		if i, err := strconv.Atoi(k); err == nil {
 			m.resume[i] = view
 		}
 	}
 	for _, n := range st.Blacklist {
-		m.blacklist[n] = true
+		if !slices.Contains(spec.AvoidNodes, n) {
+			m.blacklist[n] = true
+		}
 	}
 	if st.Started != nil {
 		m.started = st.Started.Time
@@ -194,9 +209,11 @@ type view struct {
 	blocked   bool
 	// unschedulable says why no unit of the job can ever be placed.
 	unschedulable string
-	pools     []string
-	sum       estimate.Summary
-	est       *estimate.Estimator
+	// avoid is the job's blacklist: automatic plus person-set nodes.
+	avoid map[string]bool
+	pools []string
+	sum   estimate.Summary
+	est   *estimate.Estimator
 }
 
 type runInfo struct {
@@ -214,6 +231,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 		q.jobs = map[types.UID]*jobMem{}
 		q.spent = map[string]float64{}
 	}
+	q.folds = 0
 	now := q.Now()
 	if d := now.YearDay(); d != q.day {
 		q.day, q.spent = d, map[string]float64{}
@@ -291,7 +309,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	m, ok := q.jobs[j.UID]
 	if !ok {
 		m = newMem()
-		m.load(&j.Status)
+		m.load(&j.Spec, &j.Status)
 		q.jobs[j.UID] = m
 	}
 	v := &view{job: j, key: j.Namespace + "/" + j.Name, mem: m, pods: map[int]*corev1.Pod{},
@@ -317,6 +335,37 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	v.pools = j.Spec.Pools
 	if len(v.pools) == 0 {
 		v.pools = d.Pools()
+	}
+	// A person's requeue request: run these units again.
+	if req := j.Annotations[c4v1.AnnotationRequeue]; req != "" {
+		token, set, _ := strings.Cut(req, ":")
+		if token != m.requeued {
+			for _, i := range decode(set) {
+				if i < 0 || i >= len(plan.Units) {
+					continue
+				}
+				delete(m.succeeded, i)
+				delete(m.failed, i)
+				delete(m.millis, i)
+				m.attempts[i] = 0
+			}
+			m.requeued = token
+			m.finished = time.Time{}
+		}
+	}
+	// Nodes a person allowed again leave the automatic blacklist.
+	for _, n := range strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",") {
+		if n = strings.TrimSpace(n); n != "" && m.blacklist[n] {
+			delete(m.blacklist, n)
+			delete(m.nodeFails, n)
+		}
+	}
+	v.avoid = map[string]bool{}
+	for n := range m.blacklist {
+		v.avoid[n] = true
+	}
+	for _, n := range j.Spec.AvoidNodes {
+		v.avoid[n] = true
 	}
 	// A unit larger than any node of the job's pools would wait forever.
 	widest, known := 0, false
@@ -356,6 +405,12 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				v.finishing[idx] = true
 				continue
 			}
+			if !q.foldPod(ctx, v, p, idx) {
+				// The output could not take the unit's changeset yet (the
+				// store is unreachable); keep the pod and try next tick.
+				v.finishing[idx] = true
+				continue
+			}
 			if reason := p.Annotations[c4v1.AnnotationYield]; reason != "" && !m.succeeded[idx] {
 				// A unit that yielded at a checkpoint: its captured view is
 				// where the next attempt resumes. Not a failure, not done.
@@ -373,9 +428,6 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			if !m.succeeded[idx] {
 				m.succeeded[idx] = true
 				m.millis[idx] = runMillis(p, now)
-				if p.Annotations[c4v1.AnnotationOutputChangeset] != "" {
-					m.outputs++
-				}
 			}
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed:
@@ -696,9 +748,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		pod.Spec.NodeSelector[k] = val
 	}
 	pod.Spec.Tolerations = append(pod.Spec.Tolerations, p.spec.Spec.Tolerations...)
-	if len(v.mem.blacklist) > 0 {
+	if len(v.avoid) > 0 {
 		var bad []string
-		for n := range v.mem.blacklist {
+		for n := range v.avoid {
 			bad = append(bad, n)
 		}
 		sort.Strings(bad)
@@ -905,3 +957,43 @@ func (q *Queue) ensureResume(ctx context.Context, j *c4v1.WorkJob, idx int, view
 	}
 	return m.Status.Phase == c4v1.PhaseReady && m.Status.ObservedGeneration == m.Generation, nil
 }
+
+// foldPod folds a finished unit pod's captured changeset into its job's
+// output, once per pod. It reports false when the fold must be retried.
+func (q *Queue) foldPod(ctx context.Context, v *view, p *corev1.Pod, idx int) bool {
+	m := v.mem
+	cs := p.Annotations[c4v1.AnnotationOutputChangeset]
+	if cs == "" || m.foldedPod[p.UID] || q.Stores == nil {
+		return true
+	}
+	if q.folds >= maxFoldsPerTick {
+		return false
+	}
+	q.folds++
+	st, err := q.Stores(ctx, v.project)
+	if err != nil {
+		q.Log.Error(err, "open store for fold", "job", v.key)
+		return false
+	}
+	if st == nil {
+		// A namespace without a Project has no store to fold into.
+		m.foldedPod[p.UID] = true
+		return true
+	}
+	if m.outLoad != "" {
+		if err := m.out.load(st, m.outLoad); err != nil {
+			q.Log.Error(err, "load output chain", "job", v.key)
+			return false
+		}
+		m.outLoad = ""
+	}
+	if err := q.fold(ctx, st, m.out, idx, cs); err != nil {
+		q.Log.Error(err, "fold", "job", v.key, "unit", idx)
+		return false
+	}
+	m.foldedPod[p.UID] = true
+	return true
+}
+
+// maxFoldsPerTick bounds the store work one tick does.
+const maxFoldsPerTick = 32

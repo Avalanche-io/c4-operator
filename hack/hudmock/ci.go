@@ -332,7 +332,7 @@ func (s *Sim) retest(j *Job) {
 // ciSummary is the CI class summary, scoped to the jobs the viewer sees.
 func (s *Sim) ciSummary(v *viewer) map[string]any {
 	c := s.ci
-	if !v.sees("kestrel") {
+	if !v.Sees("kestrel") {
 		return map[string]any{"changes": []any{}, "ttg": map[string]any{"p50": 0, "p95": 0, "targetP50": 360, "targetP95": 900, "samples": []any{}},
 			"flaky": []any{}, "mergeQueue": map[string]any{"depth": 0, "p50WaitSeconds": 0, "p95WaitSeconds": 0, "ejectRate": 0, "mergesPerHour": 0, "entries": []any{}},
 			"runnerPools": []any{}}

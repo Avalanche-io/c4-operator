@@ -291,7 +291,7 @@ func (sv *server) handleObject(w http.ResponseWriter, r *http.Request) {
 	o, ok := sv.objects[r.PathValue("id")]
 	sv.mu.Unlock()
 	p := r.PathValue("project")
-	if !ok || o.project != p || !viewerOf(r).sees(p) {
+	if !ok || o.project != p || !viewerOf(r).Sees(p) {
 		fail(w, 404, "no such object")
 		return
 	}
@@ -489,7 +489,7 @@ func (sv *server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	v := viewerOf(r)
 	pool := r.PathValue("pool")
 	for _, c := range sv.sim.capReqs {
-		if c.Pool != pool || c.State != "PendingApproval" || !v.sees(c.Project) {
+		if c.Pool != pool || c.State != "PendingApproval" || !v.Sees(c.Project) {
 			continue
 		}
 		sv.sim.approve(c)

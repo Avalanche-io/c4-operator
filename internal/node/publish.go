@@ -212,6 +212,7 @@ func (d *Daemon) Publish(ctx context.Context, req PublishRequest) (err error) {
 	pc.layers.Touch(st)
 	d.rememberView(pc, mat, target)
 	metrics.NodeMounts.WithLabelValues(p.Name).Inc()
+	metrics.NodeMaterialized.WithLabelValues(p.Name).Add(float64(mat.Status.Bytes))
 	outcome = how
 	d.Log.Info("published", "pod", ns+"/"+podName, "materialization", name, "view", target.String(),
 		"layers", len(st.Layers), "outcome", how, "seconds", time.Since(start).Seconds())

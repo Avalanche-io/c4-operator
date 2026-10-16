@@ -6,6 +6,8 @@ import (
 	"math/rand"
 	"sort"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/hud/api"
 )
 
 // dt is the simulation step in simulated seconds. The scenario is a pure
@@ -107,12 +109,7 @@ type Estimate struct {
 	ProjectedFinish map[int]float64
 }
 
-type BurstOffer struct {
-	Pool          string  `json:"pool"`
-	Slots         int     `json:"slots"`
-	Cost          float64 `json:"cost"`
-	NeedsApproval bool    `json:"needsApproval"`
-}
+type BurstOffer = api.BurstOffer
 
 type Job struct {
 	NS, Name, Project, Class, Driver, Owner string

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -23,6 +24,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/controller"
 	"github.com/Avalanche-io/c4-operator/internal/project"
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
 	"github.com/Avalanche-io/c4-operator/internal/work/kindsim"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
@@ -111,7 +113,17 @@ func runManager(args []string) error {
 		if err != nil {
 			return err
 		}
-		q := &queue.Queue{Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue")}
+		q := &queue.Queue{Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue"),
+			Stores: func(ctx context.Context, name string) (*storeurl.Sharded, error) {
+				p, err := reg.Get(ctx, name)
+				if apierrors.IsNotFound(err) {
+					return nil, nil
+				}
+				if err != nil {
+					return nil, err
+				}
+				return reg.Store(ctx, p)
+			}}
 		if err := mgr.Add(q); err != nil {
 			return err
 		}

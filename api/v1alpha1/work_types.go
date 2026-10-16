@@ -15,6 +15,13 @@ const (
 	LabelPool = "c4.avalanche.io/pool"
 	// AnnotationAttempt is the unit's attempt number, from 1.
 	AnnotationAttempt = "c4.avalanche.io/attempt"
+	// AnnotationRequeue on a WorkJob asks the queue to run units again:
+	// "TOKEN:SET", where SET is a run-length index set and TOKEN makes
+	// each request distinct.
+	AnnotationRequeue = "c4.avalanche.io/requeue"
+	// AnnotationAllowNodes on a WorkJob lists nodes (comma-separated) to
+	// take off the job's automatic blacklist.
+	AnnotationAllowNodes = "c4.avalanche.io/allow-nodes"
 	// AnnotationYield asks a unit to stop at its next checkpoint boundary.
 	AnnotationYield = "c4.avalanche.io/yield"
 	// TaintUnprovisioned marks a node that stands in for capacity not yet
@@ -67,6 +74,11 @@ type WorkJobSpec struct {
 	// +kubebuilder:default=3
 	// +optional
 	NodeErrorLimit int32 `json:"nodeErrorLimit,omitempty"`
+
+	// AvoidNodes are nodes a person took out of this job's use; the queue
+	// adds nodes that failed its units NodeErrorLimit times.
+	// +optional
+	AvoidNodes []string `json:"avoidNodes,omitempty"`
 
 	// MaxParallel caps the job's running units (0: no cap).
 	// +optional
@@ -150,9 +162,10 @@ type WorkJobStatus struct {
 	// Blacklist holds nodes this job will not use.
 	// +optional
 	Blacklist []string `json:"blacklist,omitempty"`
-	// Outputs counts unit changesets captured so far.
+	// Output is the job's output view: every unit's captured changeset
+	// folded in as the unit finishes.
 	// +optional
-	Outputs int32 `json:"outputs,omitempty"`
+	Output *WorkOutput `json:"output,omitempty"`
 	// Resume maps a unit index to the view its last yielded attempt
 	// captured; the next attempt mounts that view and continues from its
 	// checkpoint.
@@ -161,6 +174,9 @@ type WorkJobStatus struct {
 	// Yields lists the most recent yields of checkpointing units.
 	// +optional
 	Yields []WorkYield `json:"yields,omitempty"`
+	// Requeued is the token of the last requeue request carried out.
+	// +optional
+	Requeued string `json:"requeued,omitempty"`
 	// Preemptions counts units stopped or asked to yield to make room.
 	// +optional
 	Preemptions int32 `json:"preemptions,omitempty"`
@@ -173,6 +189,20 @@ type WorkJobStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// WorkOutput is a job's output.
+type WorkOutput struct {
+	// View is the output after the latest fold.
+	View string `json:"view"`
+	// Chain is the stored c4m chain: the job's input view, then one
+	// section per fold, each sealed by the output view it produced.
+	Chain string `json:"chain"`
+	// Changesets folded so far.
+	Changesets int32 `json:"changesets"`
+	// Conflicts lists paths two units wrote (the later write is kept).
+	// +optional
+	Conflicts []string `json:"conflicts,omitempty"`
 }
 
 // WorkYield is one yield of a checkpointing unit.
