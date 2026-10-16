@@ -56,7 +56,7 @@ test-linux:
 	@for p in $(LINUX_TEST_PKGS); do \
 	  [ -d $$p ] || continue; \
 	  n=$$(basename $$p); \
-	  GOOS=linux GOARCH=$(ARCH) go test -c -o bin/linux-tests/$$n.test $$p || exit 1; \
+	  CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go test -c -o bin/linux-tests/$$n.test $$p || exit 1; \
 	done
 	docker volume create c4-linux-tests >/dev/null
 	@for t in bin/linux-tests/*.test; do \
