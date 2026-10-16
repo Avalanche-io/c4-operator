@@ -38,6 +38,17 @@ type Applied struct {
 
 	Added, Modified, Deleted int
 	Bytes                    int64 // size of added and modified files
+	// Files lists the added and modified regular files, the objects a
+	// writer must make sure the store holds.
+	Files []ChangedFile
+}
+
+// ChangedFile is an added or modified regular file of an Applied view.
+type ChangedFile struct {
+	Path string
+	ID   c4.ID
+	Size int64
+	Exec bool
 }
 
 // Apply applies edits to the view parent and returns the new view's ID,
@@ -63,7 +74,7 @@ func Apply(ctx context.Context, parent c4.ID, edits []Edit, src RecordSource) (*
 		return res, nil
 	}
 	var patch []*c4m.Entry
-	if err := t.emit(t.root, 0, &patch, res); err != nil {
+	if err := t.emit(t.root, "", 0, &patch, res); err != nil {
 		return nil, err
 	}
 	m := c4m.NewManifest()
@@ -260,7 +271,7 @@ func (t *atree) identify(n *anode, records *[]Record) *c4m.Entry {
 // exact copies of the parent's entries, additions and modifications as
 // new entries, and changed directories as their new entry followed by
 // their own changes.
-func (t *atree) emit(n *anode, depth int, out *[]*c4m.Entry, res *Applied) error {
+func (t *atree) emit(n *anode, prefix string, depth int, out *[]*c4m.Entry, res *Applied) error {
 	at := func(e *c4m.Entry) *c4m.Entry {
 		cp := *e
 		cp.Depth = depth
@@ -288,8 +299,11 @@ func (t *atree) emit(n *anode, depth int, out *[]*c4m.Entry, res *Applied) error
 		} else {
 			res.Added++
 		}
-		if e.Size > 0 && !IsLink(e) {
-			res.Bytes += e.Size
+		if !IsLink(e) {
+			res.Files = append(res.Files, ChangedFile{Path: prefix + name, ID: e.C4ID, Size: e.Size, Exec: IsExec(e)})
+			if e.Size > 0 {
+				res.Bytes += e.Size
+			}
 		}
 	}
 	names := make([]string, 0, len(n.dirs))
@@ -306,12 +320,12 @@ func (t *atree) emit(n *anode, depth int, out *[]*c4m.Entry, res *Applied) error
 		*out = append(*out, at(child.entry))
 		if !existed {
 			res.Added++
-			if err := t.emitAll(child, depth+1, out, res); err != nil {
+			if err := t.emitAll(child, prefix+name, depth+1, out, res); err != nil {
 				return err
 			}
 			continue
 		}
-		if err := t.emit(child, depth+1, out, res); err != nil {
+		if err := t.emit(child, prefix+name, depth+1, out, res); err != nil {
 			return err
 		}
 	}
@@ -321,7 +335,7 @@ func (t *atree) emit(n *anode, depth int, out *[]*c4m.Entry, res *Applied) error
 // emitAll writes the whole contents of a new directory. Subdirectories it
 // holds by ID only are written as ID-only entries, which readers expand
 // from their records.
-func (t *atree) emitAll(n *anode, depth int, out *[]*c4m.Entry, res *Applied) error {
+func (t *atree) emitAll(n *anode, prefix string, depth int, out *[]*c4m.Entry, res *Applied) error {
 	if !n.loaded {
 		return nil
 	}
@@ -330,8 +344,11 @@ func (t *atree) emitAll(n *anode, depth int, out *[]*c4m.Entry, res *Applied) er
 		cp.Depth = depth
 		*out = append(*out, &cp)
 		res.Added++
-		if cp.Size > 0 && !IsLink(&cp) {
-			res.Bytes += cp.Size
+		if !IsLink(&cp) {
+			res.Files = append(res.Files, ChangedFile{Path: prefix + name, ID: cp.C4ID, Size: cp.Size, Exec: IsExec(&cp)})
+			if cp.Size > 0 {
+				res.Bytes += cp.Size
+			}
 		}
 	}
 	names := make([]string, 0, len(n.dirs))
@@ -345,7 +362,7 @@ func (t *atree) emitAll(n *anode, depth int, out *[]*c4m.Entry, res *Applied) er
 		cp.Depth = depth
 		*out = append(*out, &cp)
 		res.Added++
-		if err := t.emitAll(child, depth+1, out, res); err != nil {
+		if err := t.emitAll(child, prefix+name, depth+1, out, res); err != nil {
 			return err
 		}
 	}

@@ -5,6 +5,12 @@ baseline. This document says what changes, why, and how each claim is
 proven. Measured results are in `hack/e2e/out/results.md` and the summary is
 in `REPORT-v2.md`.
 
+C4 stands for the Cinema Content Creation Cloud (cccc.io). Its identifiers,
+standardized as SMPTE ST 2114, name every file and tree by its content, and
+they are what everything here is built on. This operator is the cloud part
+of the name: a production farm whose data, caches, work and records are all
+addressed by those identifiers.
+
 ## Goals
 
 1. **Grab objects, do not re-check them.** As in a c4 store, a reader asks
