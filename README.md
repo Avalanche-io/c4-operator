@@ -211,15 +211,15 @@ Frames are 16 MiB. Run of 2026-10-16:
 
 Totals for the four pods on the node:
 
-| measure                                      | value                           |
-| -------------------------------------------- | ------------------------------- |
-| unique objects in the store (whole show)     | 106                             |
-| unique objects fetched to the node           | 74, each once (+1 refetch)      |
-| bytes fetched from the store                 | 2,030,043,136 (1.89 GiB)        |
-| bytes materialized into pods                 | 6,190,792,704 (5.77 GiB)        |
-| bytes on the node's disk                     | 2,013,265,920 (1.88 GiB)        |
-| fetched / materialized                       | 0.33                            |
-| `shots/sh030/` (in the store, never requested) | 0 bytes fetched               |
+| measure                                        | value                      |
+| ---------------------------------------------- | -------------------------- |
+| unique objects in the store (whole show)       | 106                        |
+| unique objects fetched to the node             | 74, each once (+1 refetch) |
+| bytes fetched from the store                   | 2,030,043,136 (1.89 GiB)   |
+| bytes materialized into pods                   | 6,190,792,704 (5.77 GiB)   |
+| bytes on the node's disk                       | 2,013,265,920 (1.88 GiB)   |
+| fetched / materialized                         | 0.33                       |
+| `shots/sh030/` (in the store, never requested) | 0 bytes fetched            |
 
 Every pod scanned its mount and got its Materialization's `viewID`. The e2e
 also builds each expected subset on the host from hardlinks and scans it with
