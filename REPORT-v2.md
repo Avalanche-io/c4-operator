@@ -15,15 +15,15 @@ Headline numbers:
 
 ## Phases
 
-| phase | status | evidence |
-| --- | --- | --- |
-| P1 views, capture, CSI | done | `hack/e2e/p1.sh` |
-| P2 tiers | done | `hack/e2e/p2.sh` |
-| P3 isolation | done | `hack/e2e/p3.sh`, `internal/controller` envtest |
-| P4 monorepo CI | done | `hack/e2e/p4.sh`, `hack/e2e/monorepo/run.sh` |
+| phase                  | status                       | evidence                                                                              |
+| ---------------------- | ---------------------------- | ------------------------------------------------------------------------------------- |
+| P1 views, capture, CSI | done                         | `hack/e2e/p1.sh`                                                                      |
+| P2 tiers               | done                         | `hack/e2e/p2.sh`                                                                      |
+| P3 isolation           | done                         | `hack/e2e/p3.sh`, `internal/controller` envtest                                       |
+| P4 monorepo CI         | done                         | `hack/e2e/p4.sh`, `hack/e2e/monorepo/run.sh`                                          |
 | P5 work system and HUD | done, with gaps listed below | `hack/e2e/p5.sh`, `go run ./hack/sim`, `internal/work/queue` envtest, `docs/hud/live` |
-| P6 agent interface | done, with gaps listed below | `hack/e2e/p6.sh`, `internal/mcpserver` tests |
-| P7 provenance | done, with gaps listed below | `hack/e2e/p7.sh`, `internal/provenance` tests |
+| P6 agent interface     | done, with gaps listed below | `hack/e2e/p6.sh`, `internal/mcpserver` tests                                          |
+| P7 provenance          | done, with gaps listed below | `hack/e2e/p7.sh`, `internal/provenance` tests                                         |
 
 ### P1: views, overlay layers, capture, CSI
 
@@ -36,11 +36,11 @@ Pods under Pod Security `restricted` mount views through the CSI driver (inline 
 
 ### P2: tiers and thundering herds
 
-| path | pods | store GETs per object |
-| --- | --- | --- |
-| tiered (node, peer homes, regional r = 2) | 8, 32, 64 | 1.86, 1.64, 1.50 |
-| Direct (each node reads the store) | 8, 32, 64 | 8.00 each |
-| per-pod copies | 8, 32, 64 | 8, 32, 64 |
+| path                                      | pods      | store GETs per object |
+| ----------------------------------------- | --------- | --------------------- |
+| tiered (node, peer homes, regional r = 2) | 8, 32, 64 | 1.86, 1.64, 1.50      |
+| Direct (each node reads the store)        | 8, 32, 64 | 8.00 each             |
+| per-pod copies                            | 8, 32, 64 | 8, 32, 64             |
 
 Store GETs are counted by MinIO itself. On kind every link runs at memory speed, so wall time is not where the tiers win here (64 pods: tiered 11.2 s, Direct 10.3 s, per-pod 29.6 s); store requests, egress and per-prefix request limits are. Killing the busiest regional replica with SIGKILL while it streamed: 32 of 32 pods finished, 7 transfers resumed from their offsets at the other home, no node fell through to the store, and store GETs stayed at 1.67 per object.
 
@@ -74,13 +74,13 @@ On the kind farm (16 cpu slots, 8 GPU slots, up to 8 burst slots on spot nodes t
 
 In simulation (`go run ./hack/sim`, five seeded weeks of a three-show farm, mean over seeds):
 
-| policy | render deadlines missed per week | late hours | CI p95 (min) |
-| --- | --- | --- | --- |
-| manual priorities | 43.0 | 107.8 | 17.3 |
-| FIFO | 46.6 | 140.3 | 17.1 |
-| EDF | 24.4 | 60.1 | 17.2 |
-| objective (this policy) | 24.4 | 61.0 | 14.4 |
-| objective with burst | 23.2 | 51.7 | 14.4 |
+| policy                  | render deadlines missed per week | late hours | CI p95 (min) |
+| ----------------------- | -------------------------------- | ---------- | ------------ |
+| manual priorities       | 43.0                             | 107.8      | 17.3         |
+| FIFO                    | 46.6                             | 140.3      | 17.1         |
+| EDF                     | 24.4                             | 60.1       | 17.2         |
+| objective (this policy) | 24.4                             | 61.0       | 14.4         |
+| objective with burst    | 23.2                             | 51.7       | 14.4         |
 
 Against EDF on the same weeks the policy matches deadline performance and cuts the CI tail (p95 17.2 to 14.4 minutes, CI runs over 15 minutes from 9.1% to 4.2%); with burst it has fewer late hours on 4 of 5 weeks, for about $578 a week. With half the GPUs, burst cuts late hours from 382 (EDF) to 52. Binary order roughly halves the error of the remaining-time estimate when a shot has a heavy region (whole-render error 0.24 against 0.46 at 3x) and flags the region at a median 15% of the render instead of 46%. It costs makespan when heavy frames land in the last wave (median 5% longer at 3x, 12% at 8x), and W90 under-covers heavy shots (83% at 3x, 68% at 8x, against a target of 90%). The simulation also showed that the allocation formula as first written (`R = W90 / T`) misses more deadlines than EDF; the built policy reserves room for the last wave (`R = W90 / (T - t_path)`).
 
@@ -125,23 +125,22 @@ Gaps: one farm key (per-node keys or a KMS are stronger); C2PA manifests are emi
 
 ## Decisions for Joshua
 
-1. Name collisions before a launch: Cinema 4D ("C4D") and the C4 software architecture model.
-2. The release path: a c4 suite release so `go.mod` can drop its `replace`, and the image registry path.
-3. The billing model: cluster-hours with container-hours, GPU-hours, or fixed production windows, and prices.
-4. Transport security between cache tiers (mTLS through a mesh, or the tiers' own certificates).
-5. Whether Direct mode (node daemons holding store credentials) stays a supported mode.
-6. Task-record key custody (one farm key, per-node keys, a KMS, or keyless signing), and whether to pursue C2PA conformance for trusted credentials.
-7. The HUD's authorization model: per-write checks with an audit Event (as built), or impersonation.
-8. Which proposed upstream changes (c4 library APIs, c4d range reads, the c4git smudge truncation) go into the next c4 suite release.
+1. The release path: a c4 suite release so `go.mod` can drop its `replace`, and the image registry path.
+2. The billing model: cluster-hours with container-hours, GPU-hours, or fixed production windows, and prices.
+3. Transport security between cache tiers (mTLS through a mesh, or the tiers' own certificates).
+4. Whether Direct mode (node daemons holding store credentials) stays a supported mode.
+5. Task-record key custody (one farm key, per-node keys, a KMS, or keyless signing), and whether to pursue C2PA conformance for trusted credentials.
+6. The HUD's authorization model: per-write checks with an audit Event (as built), or impersonation.
+7. Which proposed upstream changes (c4 library APIs, c4d range reads, the c4git smudge truncation) go into the next c4 suite release.
 
 ## Where things are
 
-| what | where |
-| --- | --- |
-| design | `DESIGN.md` |
-| measured results | `hack/e2e/out/results.md`, `hack/e2e/monorepo/RESULTS.md`, `hack/sim/out/results.md` |
-| phase scripts | `hack/e2e/p1.sh` to `p7.sh` (after `hack/e2e/up.sh`) |
-| HUD screenshots | `docs/hud/live`, `docs/hud` |
-| agent docs | `docs/agents/tools.md`, `docs/agents/eval.xml`, `skills/c4-farm/SKILL.md`, `llms.txt` |
-| research briefs | `docs/research/provenance.md`, `docs/research/ecosystem.md` |
-| branches, blockers, proposals, open questions | `PROGRESS.md` |
+| what                                          | where                                                                                 |
+| --------------------------------------------- | ------------------------------------------------------------------------------------- |
+| design                                        | `DESIGN.md`                                                                           |
+| measured results                              | `hack/e2e/out/results.md`, `hack/e2e/monorepo/RESULTS.md`, `hack/sim/out/results.md`  |
+| phase scripts                                 | `hack/e2e/p1.sh` to `p7.sh` (after `hack/e2e/up.sh`)                                  |
+| HUD screenshots                               | `docs/hud/live`, `docs/hud`                                                           |
+| agent docs                                    | `docs/agents/tools.md`, `docs/agents/eval.xml`, `skills/c4-farm/SKILL.md`, `llms.txt` |
+| research briefs                               | `docs/research/provenance.md`, `docs/research/ecosystem.md`                           |
+| branches, blockers, proposals, open questions | `PROGRESS.md`                                                                         |

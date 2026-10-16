@@ -1,7 +1,8 @@
 # c4-operator
 
-A Kubernetes operator for media and machine-learning work built on content
-identity. Every tree a pod reads or writes is a C4 view: a directory tree in
+The Kubernetes operator of The Cinema Content Creation Cloud (C4,
+[cccc.io](https://cccc.io)): a farm for media and machine-learning work built
+on content identity. Every tree a pod reads or writes is a C4 view: a directory tree in
 which every file is named by its C4 ID (SMPTE ST 2114). Pods mount views
 through a CSI driver as overlay filesystems; the bytes come through node,
 peer and regional caches that fetch each object from the store about once,
@@ -11,9 +12,8 @@ farm, a HUD shows it, an MCP server gives agents the same controls as people,
 and every task leaves a signed record of what it read, where it ran and what
 it wrote.
 
-C4 is the Cinema Content Creation Cloud ([cccc.io](https://cccc.io)). The
-operator is rebuilt from a 2017 design by Joshua Kolden, who also wrote SMPTE
-ST 2114, the C4 ID standard.
+The operator is rebuilt from a 2017 design by Joshua Kolden, who also wrote
+SMPTE ST 2114, the C4 ID standard.
 
 Status: the `v2` branch, unreleased (see [Release](#release)). Every phase is
 measured on an eight-worker kind cluster; the numbers below come from

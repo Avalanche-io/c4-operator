@@ -10,6 +10,7 @@
 | `v2-sim`       | 2026-10-16 | 2026-10-16 | Scheduling policy core (`internal/work`) and the simulation harness (`hack/sim`). Rebased onto `v2` and fast-forwarded; worktree removed.                                                                           |
 | `v2-hud`       | 2026-10-16 | 2026-10-16 | The HUD frontend (`internal/hud/web`), its API contract and the mock backend (`hack/hudmock`). Rebased onto `v2` and fast-forwarded; worktree removed.                                                              |
 | `v2-gitimport` | 2026-10-16 | 2026-10-16 | The c4git-aware importer (`internal/gitimport`, `import-git`), push-driven import, per-branch chains, the synthetic monorepo harness (`hack/e2e/monorepo`). Rebased onto `v2` and fast-forwarded; worktree removed. |
+| `v2-followup`  | 2026-10-16 |            | Worktree `.worktrees/v2-followup`: release audit, signers per entity, viewpoint views, next-work intent, the Scion comparison. Merges into `v2`.                                                                    |
 
 Worktrees live under `.worktrees/` (ignored by git). `.worktrees/c4` is a symlink
 to `../c4` so the `replace => ../c4` in each worktree's `go.mod` resolves.
@@ -20,36 +21,31 @@ daemon and the local kind cluster.
 
 ## Open questions for Joshua
 
-1. **Name collisions before any launch.** C4 stands for the Cinema Content
-   Creation Cloud (cccc.io). Before a public launch, check collisions:
-   Cinema 4D (commonly "C4D") in the same industry, the C4 model for software
-   architecture diagrams, and existing trademarks. The module path and the repo
-   name are unchanged; those decisions are Joshua's.
-2. **Release path.** The `replace => ../c4` blocks any public build until a c4
+1. **Release path.** The `replace => ../c4` blocks any public build until a c4
    suite release carries the APIs the operator uses (release blocker 1). The
    image registry path is also open (blocker 3).
-3. **Billing model.** Usage is metered as cluster-hours, container-hours and
+2. **Billing model.** Usage is metered as cluster-hours, container-hours and
    GPU-hours (the HUD shows them; a signed ledger is designed, not built), and
    DESIGN.md section 12 allows fixed production windows instead. Which to offer,
    and at what prices, is a business decision.
-4. **Transport security between tiers.** Tier requests are authenticated with
+3. **Transport security between tiers.** Tier requests are authenticated with
    projected service-account tokens (TokenReview) but travel as plain HTTP
    inside the cluster. mTLS through a mesh, or the tiers' own certificates, is
    a deployment choice to make before a multi-tenant install.
-5. **Direct mode.** In Direct mode node daemons hold a project's store
+4. **Direct mode.** In Direct mode node daemons hold a project's store
    credentials. It is the baseline P2 measures against and suits small
    installs; keeping it as a supported mode is a choice.
-6. **Task-record signing keys.** Records are signed with one farm key held in
+5. **Task-record signing keys.** Records are signed with one farm key held in
    a Secret that only node daemons mount. Per-node keys, a KMS, or keyless
    signing (Sigstore) are stronger. C2PA credentials that validators show as
    "Trusted" need a certificate on the C2PA Trust List, which means the C2PA
    Conformance Program; the farm today emits manifest definitions, not signed
    C2PA manifests.
-7. **HUD authorization model.** Controls are checked per write
+6. **HUD authorization model.** Controls are checked per write
    (SubjectAccessReview) and made by the HUD's service account, with an Event
    naming the user. Impersonation would let RBAC check the write itself but
    needs the `impersonate` verb. The current choice is reversible.
-8. **Proposed upstream changes.** The c4, c4d, c4-containers and c4git changes
+7. **Proposed upstream changes.** The c4, c4d, c4-containers and c4git changes
    below were found while building; none was made. Which to take into the next
    c4 suite release is Joshua's call.
 
