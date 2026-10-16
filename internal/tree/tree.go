@@ -140,17 +140,23 @@ func copyFile(src, dst string, mtime time.Time) (int64, error) {
 	return n, os.Chtimes(dst, time.Now(), mtime)
 }
 
-// replace publishes tmp at dst atomically, retiring any previous tree.
+// replace publishes tmp at dst atomically. A previous tree is renamed
+// aside, never deleted here: running pods bind-mount it, and deleting
+// it would pull files out from under them. RetiredPrefix names it so
+// the cache's collector can remove it once no pod uses the view.
 func replace(dst, tmp string) error {
 	if _, err := os.Lstat(dst); err == nil {
-		old := filepath.Join(filepath.Dir(dst), ".old-"+filepath.Base(dst)+"-"+randSuffix())
+		old := filepath.Join(filepath.Dir(dst), RetiredPrefix+filepath.Base(dst)+"-"+randSuffix())
 		if err := os.Rename(dst, old); err != nil {
 			return err
 		}
-		defer os.RemoveAll(old)
 	}
 	return os.Rename(tmp, dst)
 }
+
+// RetiredPrefix starts the name of a tree replaced by a rebuild:
+// ".retired-<viewID>-<random>".
+const RetiredPrefix = ".retired-"
 
 // Check reports whether the tree at dst is still v as built from the
 // cache: every file is the very inode the cache holds for its ID (so a

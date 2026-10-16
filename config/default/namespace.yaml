@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: c4-system
+  labels:
+    # The agent writes its cache to a hostPath.
+    pod-security.kubernetes.io/enforce: privileged

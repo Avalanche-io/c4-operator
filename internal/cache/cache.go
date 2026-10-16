@@ -90,6 +90,7 @@ func Open(root string, budget int64, log logr.Logger) (*Cache, error) {
 
 // cleanTemps removes leftovers of interrupted fetches and builds.
 func (c *Cache) cleanTemps() {
+	// Retired trees are left to the collector: pods may still mount them.
 	for _, pat := range []string{"objects/.ingest.*", "views/.build-*", "views/.old-*"} {
 		matches, _ := filepath.Glob(filepath.Join(c.root, pat))
 		for _, m := range matches {

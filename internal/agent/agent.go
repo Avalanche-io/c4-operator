@@ -423,8 +423,8 @@ func (a *Agent) gcOnce(ctx context.Context) {
 		a.Log.Error(err, "eviction")
 		return
 	}
-	if st.Objects > 0 || st.Views > 0 || st.Over > 0 {
-		a.Log.Info("eviction", "objects", st.Objects, "bytes", st.ObjectBytes, "views", st.Views,
+	if st.Objects > 0 || st.Views > 0 || st.Retired > 0 || st.Over > 0 {
+		a.Log.Info("eviction", "objects", st.Objects, "bytes", st.ObjectBytes, "views", st.Views, "retired", st.Retired,
 			"cacheBytes", a.Cache.Bytes(), "budget", a.Cache.Budget(), "over", st.Over)
 	}
 }

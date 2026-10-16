@@ -1,0 +1,13 @@
+namespace: c4-system
+resources:
+- namespace.yaml
+- ../crd
+- ../rbac/manager
+- ../rbac/agent
+- ../manager
+- ../agent
+- ../webhook
+images:
+- name: c4-operator
+  newName: c4-operator
+  newTag: dev

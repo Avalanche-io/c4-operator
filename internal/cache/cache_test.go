@@ -230,6 +230,18 @@ func TestCorruptionDetectedAndRefetched(t *testing.T) {
 	if got, _ := manifest.ScanContentID(dir); got != v.ID {
 		t.Fatal("rebuilt tree does not match")
 	}
+
+	// The replaced tree is kept while a pod may still mount it.
+	retired, _ := filepath.Glob(filepath.Join(filepath.Dir(dir), tree.RetiredPrefix+"*"))
+	if len(retired) != 1 {
+		t.Fatalf("retired trees: %v", retired)
+	}
+	if st, _ := c.Evict(map[c4.ID]bool{v.ID: true}, time.Now()); st.Retired != 0 {
+		t.Fatal("removed a retired tree whose view is in use")
+	}
+	if st, _ := c.Evict(nil, time.Now()); st.Retired != 1 {
+		t.Fatal("kept a retired tree nobody uses")
+	}
 }
 
 func TestFullVerifyCatchesSilentCorruption(t *testing.T) {

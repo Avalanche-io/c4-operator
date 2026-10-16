@@ -1,0 +1,48 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: c4-store
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: c4-store
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: minio}
+  template:
+    metadata:
+      labels: {app: minio}
+    spec:
+      containers:
+      - name: minio
+        image: minio/minio:latest
+        imagePullPolicy: IfNotPresent
+        args: [server, /data]
+        env:
+        - {name: MINIO_ROOT_USER, value: c4e2eaccess}
+        - {name: MINIO_ROOT_PASSWORD, value: c4e2esecretkey}
+        ports:
+        - containerPort: 9000
+        readinessProbe:
+          httpGet: {path: /minio/health/ready, port: 9000}
+        volumeMounts:
+        - {name: data, mountPath: /data}
+      volumes:
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: c4-store
+spec:
+  type: NodePort
+  selector: {app: minio}
+  ports:
+  - port: 9000
+    targetPort: 9000
+    nodePort: 30900

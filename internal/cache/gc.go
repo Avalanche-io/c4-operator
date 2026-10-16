@@ -2,7 +2,9 @@ package cache
 
 import (
 	"os"
+	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4"
@@ -13,6 +15,7 @@ type EvictStats struct {
 	Objects     int
 	ObjectBytes int64
 	Views       int
+	Retired     int   // replaced trees removed because no pod uses their view
 	Over        int64 // bytes still over budget afterwards (0 when within)
 }
 
@@ -29,6 +32,7 @@ func (c *Cache) Evict(inUse map[c4.ID]bool, now time.Time) (EvictStats, error) {
 	defer c.gc.Unlock()
 
 	var st EvictStats
+	st.Retired = c.removeRetired(inUse)
 	if c.Bytes() <= c.budget {
 		return st, nil
 	}
@@ -60,6 +64,28 @@ func (c *Cache) Evict(inUse map[c4.ID]bool, now time.Time) (EvictStats, error) {
 		st.Over = over
 	}
 	return st, nil
+}
+
+// removeRetired deletes trees replaced by a rebuild once no pod on the
+// node uses their view; until then a running pod may be reading one.
+func (c *Cache) removeRetired(inUse map[c4.ID]bool) int {
+	dir := filepath.Join(c.root, "views")
+	matches, _ := filepath.Glob(filepath.Join(dir, ".retired-*"))
+	n := 0
+	for _, m := range matches {
+		name := strings.TrimPrefix(filepath.Base(m), ".retired-")
+		if len(name) < 90 {
+			continue
+		}
+		id, err := c4.Parse(name[:90])
+		if err != nil || inUse[id] {
+			continue
+		}
+		if os.RemoveAll(m) == nil {
+			n++
+		}
+	}
+	return n
 }
 
 type candidate struct {
