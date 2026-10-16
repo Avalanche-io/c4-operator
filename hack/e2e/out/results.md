@@ -172,3 +172,24 @@ Estimate of sh010-comp-v003 (binary order; frames cost 6 s, and 24 s from 1040 t
 | 75%              | 77 of 96    | 166           | 181 | 163   | 2%              | 10%                  |
 
 Output: sh010-comp-v003 folded 96 unit changesets into its output view c435ue2eEo...; the stored chain c43PVtxxnV... has one section per fold, each sealed by the output view after it.
+
+## P7: provenance (2026-10-16T10:32Z)
+
+|                        | sh050-render-v001, frame 1004                                 | sh050-denoise-v001, frame 1004                                          |
+| ---------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| record                 | c426nmvP19...                                                 | c44E8hcKWB...                                                           |
+| signature              | verified, key c4-23906723b314e8a4                             | verified, key c4-23906723b314e8a4                                       |
+| unit, attempt, node    | 3, 1, c4-operator-e2e-worker                                  | 3, 1, c4-operator-e2e-worker5                                           |
+| image                  | docker.io/library/c4-e2e:dev @sha256:385c13d9ed12...          | docker.io/library/c4-e2e:dev @sha256:385c13d9ed12...                    |
+| input                  | p5-show c42aH8EBP5...                                         | the render's output c43LdExVdn..., produced by show-a/sh050-render-v001 |
+| file                   | c44f7BwBRD... (subject digest: c4 and the SHA-512 it encodes) | c41Lo1hzwS...                                                           |
+| declared AI use        | none                                                          | assisted, denoise-v3, human_validated, consent plates-release-2026-031  |
+| C2PA digitalSourceType | algorithmicMedia                                              | compositeWithTrainedAlgorithmicMedia                                    |
+| C2PA AI disclosure     | no                                                            | yes (c2pa.ai-disclosure)                                                |
+
+The signing key (Secret `c4-provenance-key`) is mounted only by `c4-system/node` pods; a task's service account may read it: no.
+
+Checked outside the cluster with the public key only: the stored record says "verified: signed by c4-23906723b314e8a4 for unit 3 of sh050-denoise-v001 on c4-operator-e2e-worker5". The same record with its AI use changed to "none" and the signature kept says "rejected: no trusted key signed this record".
+
+An agent asking the MCP server (c4_trace_file, over stdio, as the wrangler) got the same record in 5 ms: verified True, input produced by show-a/sh050-render-v001.
+

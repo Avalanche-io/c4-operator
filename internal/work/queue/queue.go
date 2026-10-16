@@ -128,6 +128,7 @@ type jobMem struct {
 	// yieldAsked is when a unit was asked to yield.
 	yieldAsked  map[int]time.Time
 	preemptions map[int]int
+	preemptBase int // preemptions counted before the last restart
 	yields      []yieldRecord
 	requeued    string
 	lastRun     time.Time
@@ -176,6 +177,11 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		}
 	}
 	m.requeued = st.Requeued
+	// Yields and preemptions before a restart stay in the record.
+	for _, y := range st.Yields {
+		m.yields = append(m.yields, yieldRecord{Unit: int(y.Unit), At: y.At.Time, Reason: y.Reason, View: y.View})
+	}
+	m.preemptBase = int(st.Preemptions)
 	if o := st.Output; o != nil {
 		m.outLoad = o.Chain
 		m.outIndex = o.Provenance

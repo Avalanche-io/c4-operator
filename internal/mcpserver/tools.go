@@ -60,7 +60,7 @@ func Tools(c *Client) []Tool {
 			readOnly, c.farmStatus),
 		tool("c4_list_jobs", "List jobs", "Jobs in dispatch order (rank 1 runs next), filtered by project, class (render, ci, ml), phase or at_risk_only. Each row has progress, deadline, ETA and slack. Paginated with limit and offset.",
 			readOnly, c.listJobs),
-		tool("c4_get_job", "Get a job", "One job: objective, estimate (ETA p50 and p90, required and attainable slots, slack, feasibility message), heavy frame ranges, inputs, output view, unit counts and, with include_units, each unit's state.",
+		tool("c4_get_job", "Get a job", "One job: objective, estimate (ETA p50 and p90, required and attainable slots, slack, feasibility message), heavy frame ranges, inputs, output view, unit counts, the class's summary (CI pipelines, ML checkpoints and yields) and, with include_units, each unit's state.",
 			readOnly, c.getJob),
 		tool("c4_get_unit", "Get a unit", "One unit of a job: state, attempts, node, run time against its estimate, the last lines of its log, its Kubernetes events and its output changeset.",
 			readOnly, c.getUnit),
@@ -266,6 +266,10 @@ type GetJobOut struct {
 	Blacklist    []string         `json:"blacklist,omitempty"`
 	Units        []UnitRow        `json:"units,omitempty"`
 	UnitsShown   int              `json:"unitsShown,omitempty"`
+	// Lens is the class's own summary: passes for render; pipelines,
+	// time to green and flaky targets for CI; ranks, checkpoints and
+	// yields for ML.
+	Lens map[string]any `json:"lens,omitempty"`
 }
 
 func (c *Client) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobIn) (*mcp.CallToolResult, GetJobOut, error) {
@@ -286,6 +290,9 @@ func (c *Client) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobIn
 		Pools: j.Pools, DependsOn: j.DependsOn, Blacklist: j.Blacklist}
 	if o := asMap(d["output"]); len(o) > 0 {
 		out.Output = o
+	}
+	if l := asMap(d["classSummary"]); len(l) > 0 {
+		out.Lens = l
 	}
 	if in.IncludeUnits {
 		for _, u := range asMaps(d["unitList"]) {

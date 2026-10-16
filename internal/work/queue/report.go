@@ -167,6 +167,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	for _, y := range m.yields[max(0, len(m.yields)-8):] {
 		st.Yields = append(st.Yields, c4v1.WorkYield{Unit: int32(y.Unit), At: metav1.Time{Time: y.At.Truncate(time.Second)}, Reason: y.Reason, View: y.View})
 	}
+	st.Preemptions = int32(m.preemptBase)
 	for _, n := range m.preemptions {
 		st.Preemptions += int32(n)
 	}
@@ -201,6 +202,10 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			m.finished = now
 		}
 		st.Finished = &metav1.Time{Time: m.finished.Truncate(time.Second)}
+		// A finished job keeps what its units cost: the heavy ranges.
+		if hr := q.heavy(v); len(hr) > 0 {
+			st.Estimate = &c4v1.WorkEstimate{HeavyRegions: hr}
+		}
 		return st
 	}
 
@@ -227,14 +232,23 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		e.ETA90 = &metav1.Time{Time: js.ETA90.Truncate(time.Second)}
 		e.P90RemainingSeconds = int64(js.ETA90.Sub(now).Seconds())
 	}
-	if v.est != nil && len(m.plan.Units) > 0 {
-		// Positions are offsets along the axis (frames past the first).
-		key, span := m.plan.Units[0].Key, m.plan.Units[n-1].Pos+1
-		for _, r := range v.est.Heavy(key, span) {
-			e.HeavyRegions = append(e.HeavyRegions, c4v1.HeavyRegion{
-				From: int32(m.plan.Axis.Start + r.Lo), To: int32(m.plan.Axis.Start + r.Hi), Factor: fmt.Sprintf("%.1f", r.Factor)})
-		}
-	}
+	e.HeavyRegions = q.heavy(v)
 	st.Estimate = e
 	return st
+}
+
+// heavy lists the job's heavy ranges in axis values (frames).
+func (q *Queue) heavy(v *view) []c4v1.HeavyRegion {
+	m := v.mem
+	if v.est == nil || m.plan == nil || len(m.plan.Units) == 0 {
+		return nil
+	}
+	var out []c4v1.HeavyRegion
+	// Positions are offsets along the axis (frames past the first).
+	key, span := m.plan.Units[0].Key, m.plan.Units[len(m.plan.Units)-1].Pos+1
+	for _, r := range v.est.Heavy(key, span) {
+		out = append(out, c4v1.HeavyRegion{
+			From: int32(m.plan.Axis.Start + r.Lo), To: int32(m.plan.Axis.Start + r.Hi), Factor: fmt.Sprintf("%.1f", r.Factor)})
+	}
+	return out
 }

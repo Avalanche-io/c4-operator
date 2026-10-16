@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/ed25519"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -16,6 +17,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
 // The P5 workloads. Each reads the unit's environment from the queue
@@ -248,4 +251,45 @@ func trainCmd(args []string) error {
 func yieldAsked(path string) bool {
 	b, err := os.ReadFile(path)
 	return err == nil && bytes.Contains(b, []byte("c4.avalanche.io/yield="))
+}
+
+// verifyRecord checks a task record (a DSSE envelope) against public keys
+// given as KEYID=BASE64 lines, and prints the signer, or the failure.
+//
+//	c4e2e verify-record --keys FILE RECORD
+func verifyRecord(args []string) error {
+	fs := flag.NewFlagSet("verify-record", flag.ExitOnError)
+	keysFile := fs.String("keys", "", "file of KEYID=BASE64 public keys")
+	fs.Parse(args)
+	if fs.NArg() != 1 || *keysFile == "" {
+		return errors.New("usage: c4e2e verify-record --keys FILE RECORD")
+	}
+	text, err := os.ReadFile(*keysFile)
+	if err != nil {
+		return err
+	}
+	keys := map[string]ed25519.PublicKey{}
+	for _, line := range strings.Split(string(text), "\n") {
+		id, b64, ok := strings.Cut(strings.TrimSpace(line), "=")
+		if !ok {
+			continue
+		}
+		// base64 padding may follow the first '='.
+		pub, err := provenance.ParsePublic(b64)
+		if err != nil {
+			return fmt.Errorf("key %s: %w", id, err)
+		}
+		keys[id] = pub
+	}
+	data, err := os.ReadFile(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	st, signer, err := provenance.Verify(data, keys)
+	if err != nil {
+		fmt.Println("rejected:", err)
+		return nil
+	}
+	fmt.Printf("verified: signed by %s for unit %s of %s on %s\n", signer, st.Predicate.Invocation.Unit, st.Predicate.Invocation.Job, st.Predicate.Runtime.Node)
+	return nil
 }

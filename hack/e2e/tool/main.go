@@ -50,21 +50,22 @@ func main() {
 		os.Exit(2)
 	}
 	cmds := map[string]func([]string) error{
-		"gen-show":   genShow,
-		"gen-shot":   genShot,
-		"tree-id":    treeID,
-		"verify":     verify,
-		"render":     render,
-		"read":       readAll,
-		"expect":     expect,
-		"add-frames": addFrames,
-		"hold":       hold,
-		"objects":    objectsCmd,
-		"s3get":      s3get,
-		"probe":      probe,
-		"frame":      frameCmd,
-		"shard":      shardCmd,
-		"train":      trainCmd,
+		"gen-show":      genShow,
+		"gen-shot":      genShot,
+		"tree-id":       treeID,
+		"verify":        verify,
+		"render":        render,
+		"read":          readAll,
+		"expect":        expect,
+		"add-frames":    addFrames,
+		"hold":          hold,
+		"objects":       objectsCmd,
+		"s3get":         s3get,
+		"probe":         probe,
+		"frame":         frameCmd,
+		"shard":         shardCmd,
+		"train":         trainCmd,
+		"verify-record": verifyRecord,
 	}
 	run, ok := cmds[os.Args[1]]
 	if !ok {

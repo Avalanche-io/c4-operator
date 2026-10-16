@@ -310,6 +310,14 @@ func TestYieldedUnitResumesFromItsCapturedView(t *testing.T) {
 	if !found || envOf(pods[0].Spec.Containers[0], "C4_RESUME_VIEW") != saved || pods[0].Annotations[c4v1.AnnotationAttempt] != "1" {
 		t.Fatalf("the relaunch does not mount the captured view, or counted the yield as a failure: %+v", pods[0].Annotations)
 	}
+	// A restarted queue keeps the record of the yield.
+	q2 := &Queue{Client: k8s, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait}
+	*now = now.Add(20 * time.Second)
+	tick(t, q2)
+	st = get(t, ns, "train").Status
+	if len(st.Yields) != 1 || st.Yields[0].View != saved || st.Resume["0"] != saved {
+		t.Fatalf("after a restart: yields %v, resume %v", st.Yields, st.Resume)
+	}
 }
 
 func TestUnitWiderThanAnyNodeIsReported(t *testing.T) {
