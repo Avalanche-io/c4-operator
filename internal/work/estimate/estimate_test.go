@@ -44,14 +44,15 @@ func TestFallbackChain(t *testing.T) {
 	if p := e.Predict("beauty", 5); p.Source != ClassDefault || p.Mean != 77 {
 		t.Fatalf("default: %+v", p)
 	}
-	e.SetPrior("beauty", Prior{Mean: 300, SD: 90})
-	if p := e.Predict("beauty", 5); p.Source != History || p.Mean != 300 {
-		t.Fatalf("history: %+v", p)
-	}
 	e.Observe("shadow", 1, 40)
 	e.Observe("shadow", 2, 60)
 	if p := e.Predict("beauty", 5); p.Source != JobMedian || p.Mean != 50 {
 		t.Fatalf("job median: %+v", p)
+	}
+	// History for the key itself outranks other keys' durations.
+	e.SetPrior("beauty", Prior{Mean: 300, SD: 90})
+	if p := e.Predict("beauty", 5); p.Source != History || p.Mean != 300 {
+		t.Fatalf("history: %+v", p)
 	}
 	e.Observe("beauty", 10, 200)
 	e.Observe("beauty", 11, 220)
@@ -233,5 +234,38 @@ func TestPlus(t *testing.T) {
 	c := a.Plus(b)
 	if c.W != 30 || c.Sigma != 5 || c.TPath != 5 || c.W90 != 30+1.28*5 || c.Queued != 1 || c.Running != 2 {
 		t.Fatalf("%+v", c)
+	}
+}
+
+func TestRunningUnitsAreCensoredObservations(t *testing.T) {
+	e := New(DefaultConfig())
+	for _, p := range []int{0, 50, 100} {
+		e.Observe("b", p, 100)
+	}
+	before := e.Predict("b", 60).Mean
+	// The unit at 75 has run 400 s against a prediction of 100.
+	run := []RunningUnit{{Unit: Unit{Key: "b", Pos: 75}, Elapsed: 400}}
+	s := e.Summarize([]Unit{{Key: "b", Pos: 60}}, run)
+	after := e.Predict("b", 60).Mean
+	if before != 100 || after <= 200 {
+		t.Fatalf("before %v after %v", before, after)
+	}
+	// Its own remainder follows the overrun rule: a quarter of elapsed.
+	if want := after + 0.25*400; math.Abs(s.W-want) > 1e-6 {
+		t.Fatalf("W %v want %v", s.W, want)
+	}
+	// Heavy uses the elapsed time (a lower bound): 400 > 3*100.
+	h := e.Heavy("b", 101)
+	if len(h) != 1 || h[0].Lo > 75 || h[0].Hi < 75 {
+		t.Fatalf("heavy %+v", h)
+	}
+	// A unit within its prediction adds nothing, and the provisional
+	// observation goes away when the unit is no longer running.
+	e.SetRunning([]RunningUnit{{Unit: Unit{Key: "b", Pos: 75}, Elapsed: 50}})
+	if got := e.Predict("b", 60).Mean; got != 100 {
+		t.Fatalf("stale provisional: %v", got)
+	}
+	if len(e.Heavy("b", 101)) != 0 {
+		t.Fatal("stale heavy flag")
 	}
 }

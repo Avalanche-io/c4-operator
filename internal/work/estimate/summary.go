@@ -72,7 +72,8 @@ func (e *Estimator) Remainder(p Pred, done, elapsed float64) (float64, float64) 
 }
 
 // Summarize computes W, its spread and W90 over queued and running units,
-// including the expected work of unexpanded generators.
+// including the expected work of unexpanded generators. It first calls
+// SetRunning with the running units.
 //
 // Variance: queued units use the region model in the package comment.
 // Running units are independent of each other and of the regions. For G
@@ -81,6 +82,7 @@ func (e *Estimator) Remainder(p Pred, done, elapsed float64) (float64, float64) 
 // the fan-out mean), so many generators of an unknown key are treated as
 // one large correlated unknown until the job's own expansions narrow it.
 func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
+	e.SetRunning(run)
 	var s Summary
 	corr := map[RegionID]float64{}
 	var indVar float64
@@ -145,8 +147,11 @@ type Region struct {
 // Heavy returns the heavy regions of key on an axis of n units: maximal
 // runs of positions whose measured or interpolated cost exceeds
 // HeavyFactor times the key's reference cost, each containing at least
-// one completed unit (which, being inside the run, was itself measured
-// above the threshold). It needs at least three completed units.
+// one measured unit (which, being inside the run, was itself measured
+// above the threshold). A running unit counts as measured once its elapsed
+// time alone is above the threshold (see SetRunning); its cost there is
+// its elapsed time, a lower bound. It needs at least three completed
+// units.
 //
 // The reference cost is the lower of two medians: the median of the
 // completed units, and the median over every position of the axis of the
@@ -162,14 +167,18 @@ func (e *Estimator) Heavy(key string, n int) []Region {
 	}
 	cost := make([]float64, n)
 	measured := make([]bool, n)
+	v := t.view()
 	oi := 0
 	for pos := range n {
-		for oi < len(t.obs) && t.obs[oi].pos < pos {
+		for oi < len(v) && v[oi].pos < pos {
 			oi++
 		}
-		if oi < len(t.obs) && t.obs[oi].pos == pos {
+		if oi < len(v) && v[oi].pos == pos {
 			measured[pos] = true
-			cost[pos] = t.obs[oi].dur
+			cost[pos] = v[oi].dur
+			if v[oi].prov {
+				cost[pos] = v[oi].lb // what is known for certain
+			}
 			continue
 		}
 		cost[pos] = e.Predict(key, pos).Mean

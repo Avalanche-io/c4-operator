@@ -6,8 +6,15 @@
 // unit's duration is interpolated between the nearest completed units on
 // each side. When that is not possible the estimate falls back, in order,
 // to the median of the nearest completed units on the one side that has
-// them, to the job's median over all keys, to a prior from history for the
-// (project, class key), and to the class default.
+// them, to a prior from history for the (project, class key), to the job's
+// median over all keys, and to the class default.
+//
+// DESIGN.md lists the job median before the history prior. That order is
+// changed here on purpose: a key with no completed unit in the job (a
+// beauty pass just revealed by a generator) would otherwise be predicted
+// from other keys' durations (45-second generator evaluations), which can
+// be off by two orders of magnitude, while history for the same key is
+// not.
 //
 // Error model, stated exactly:
 //
@@ -133,10 +140,16 @@ const (
 type obs struct {
 	pos int
 	dur float64
+	// lb is set on provisional observations (running units past their
+	// prediction): the elapsed time, a lower bound on the duration.
+	lb   float64
+	prov bool
 }
 
 type track struct {
-	obs    []obs // sorted by pos
+	obs    []obs // completed units, sorted by pos
+	prov   []obs // provisional observations from running units
+	merged []obs // obs and prov, sorted by pos; nil when prov is empty
 	looOK  bool
 	looRMS float64
 	looN   int
@@ -148,8 +161,26 @@ func (t *track) add(pos int, dur float64) {
 	i := sort.Search(len(t.obs), func(i int) bool { return t.obs[i].pos > pos })
 	t.obs = append(t.obs, obs{})
 	copy(t.obs[i+1:], t.obs[i:])
-	t.obs[i] = obs{pos, dur}
+	t.obs[i] = obs{pos: pos, dur: dur}
 	t.looOK, t.sortOK = false, false
+	t.merge()
+}
+
+// view is what interpolation uses: completed units plus provisional ones.
+func (t *track) view() []obs {
+	if t.merged != nil {
+		return t.merged
+	}
+	return t.obs
+}
+
+func (t *track) merge() {
+	if len(t.prov) == 0 {
+		t.merged = nil
+		return
+	}
+	t.merged = append(append(t.merged[:0:0], t.obs...), t.prov...)
+	sort.SliceStable(t.merged, func(i, j int) bool { return t.merged[i].pos < t.merged[j].pos })
 }
 
 func (t *track) median() float64 {
@@ -306,49 +337,100 @@ func (e *Estimator) relSD(t *track) float64 {
 // Predict returns the predicted duration of the unit of key at pos.
 func (e *Estimator) Predict(key string, pos int) Pred {
 	t := e.tracks[key]
-	if t == nil || len(t.obs) == 0 {
+	if t == nil || len(t.view()) == 0 {
 		return e.fallback(key)
 	}
 	if e.cfg.NoLocality {
+		if len(t.obs) == 0 {
+			return e.fallback(key)
+		}
 		return e.noLocality(key, t)
 	}
 	rel := e.relSD(t)
-	i := sort.Search(len(t.obs), func(i int) bool { return t.obs[i].pos >= pos })
-	if i < len(t.obs) && t.obs[i].pos == pos {
-		// A completed position (a retry, or a second unit of the same key
-		// at the same place): use what was measured there.
+	v := t.view()
+	i := sort.Search(len(v), func(i int) bool { return v[i].pos >= pos })
+	if i < len(v) && v[i].pos == pos {
+		// A position with a completed unit (a retry, or a second unit of
+		// the same key at the same place) or a provisional one: use what
+		// was measured there.
 		sum, n := 0.0, 0
-		for j := i; j < len(t.obs) && t.obs[j].pos == pos; j++ {
-			sum += t.obs[j].dur
+		for j := i; j < len(v) && v[j].pos == pos; j++ {
+			sum += v[j].dur
 			n++
 		}
 		m := sum / float64(n)
 		return Pred{Mean: m, SDCorr: rel * m, Source: Measured, Region: RegionID{key, pos}}
 	}
 	switch {
-	case i > 0 && i < len(t.obs):
-		l, r := t.obs[i-1], t.obs[i]
+	case i > 0 && i < len(v):
+		l, r := v[i-1], v[i]
 		f := float64(pos-l.pos) / float64(r.pos-l.pos)
 		m := l.dur + (r.dur-l.dur)*f
 		sd := math.Hypot(math.Abs(r.dur-l.dur)/2, rel*m)
 		return Pred{Mean: m, SDCorr: sd, Source: Interpolated, Region: RegionID{key, l.pos}}
 	case i == 0:
-		return e.oneSided(key, t, 0, rel, edgeLeft)
+		return e.oneSided(key, v, 0, rel, edgeLeft)
 	default:
-		return e.oneSided(key, t, len(t.obs)-1, rel, edgeRight)
+		return e.oneSided(key, v, len(v)-1, rel, edgeRight)
 	}
 }
 
-// oneSided predicts from the median of the (up to) three completed units
-// nearest the edge at index from.
-func (e *Estimator) oneSided(key string, t *track, from int, rel float64, edge int) Pred {
+// SetRunning replaces the provisional observations with those implied by
+// the given running units. A running unit that has already run longer
+// than its prediction from completed units is censored data: its duration
+// is at least its elapsed time. It is entered at its position as a
+// provisional observation of (Done+Elapsed)*(1+Overrun), the same overrun
+// rule its own remainder uses, so interpolation around it reflects what
+// is already known before the unit finishes. Leave-one-out residuals and
+// medians use completed units only. Keys without locality are skipped.
+func (e *Estimator) SetRunning(run []RunningUnit) {
+	for _, t := range e.tracks {
+		if len(t.prov) > 0 {
+			t.prov = t.prov[:0]
+			t.merge()
+		}
+	}
+	if e.cfg.NoLocality {
+		return
+	}
+	type add struct {
+		key string
+		o   obs
+	}
+	var adds []add
+	for _, r := range run {
+		p := e.Predict(r.Key, r.Pos)
+		took := r.Done + r.Elapsed
+		if took <= p.Mean {
+			continue
+		}
+		adds = append(adds, add{r.Key, obs{pos: r.Pos, dur: took * (1 + e.cfg.Overrun), lb: took, prov: true}})
+	}
+	touched := map[*track]bool{}
+	for _, a := range adds {
+		t := e.tracks[a.key]
+		if t == nil {
+			t = &track{}
+			e.tracks[a.key] = t
+		}
+		t.prov = append(t.prov, a.o)
+		touched[t] = true
+	}
+	for t := range touched {
+		t.merge()
+	}
+}
+
+// oneSided predicts from the median of the (up to) three observed units
+// nearest the edge at index from of v.
+func (e *Estimator) oneSided(key string, v []obs, from int, rel float64, edge int) Pred {
 	var near []float64
-	for k := 0; k < 3 && k < len(t.obs); k++ {
+	for k := 0; k < 3 && k < len(v); k++ {
 		j := from + k
 		if edge == edgeRight {
 			j = from - k
 		}
-		near = append(near, t.obs[j].dur)
+		near = append(near, v[j].dur)
 	}
 	sort.Float64s(near)
 	m := median(near)
@@ -384,12 +466,12 @@ func (e *Estimator) noLocality(key string, t *track) Pred {
 
 func (e *Estimator) fallback(key string) Pred {
 	r := RegionID{key, wholeKey}
+	if p, ok := e.priors[key]; ok && p.ok() {
+		return Pred{Mean: p.Mean, SDCorr: p.SD, Source: History, Region: r}
+	}
 	if len(e.all) > 0 {
 		m := e.jobMedian()
 		return Pred{Mean: m, SDCorr: 0.5 * m, Source: JobMedian, Region: r}
-	}
-	if p, ok := e.priors[key]; ok && p.ok() {
-		return Pred{Mean: p.Mean, SDCorr: p.SD, Source: History, Region: r}
 	}
 	return Pred{Mean: e.cfg.Default.Mean, SDCorr: e.cfg.Default.SD, Source: ClassDefault, Region: r}
 }
