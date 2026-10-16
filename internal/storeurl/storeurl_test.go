@@ -2,9 +2,9 @@ package storeurl
 
 import (
 	"bytes"
-	"fmt"
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"

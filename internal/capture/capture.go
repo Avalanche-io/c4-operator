@@ -45,18 +45,18 @@ type Input struct {
 
 // Result describes a capture.
 type Result struct {
-	Output      c4.ID // the output view; equal to Parent when nothing changed
-	Changeset   c4.ID // nil when nothing changed
-	Added       int
-	Modified    int
-	Deleted     int
-	Bytes       int64 // bytes of added and modified files
-	Uploaded    int   // objects written to the sink
-	Reused      int   // files the container rewrote without changing them
-	Hashed      int64 // bytes hashed
-	Unusual     []string
-	Duration    time.Duration
-	Records     int
+	Output    c4.ID // the output view; equal to Parent when nothing changed
+	Changeset c4.ID // nil when nothing changed
+	Added     int
+	Modified  int
+	Deleted   int
+	Bytes     int64 // bytes of added and modified files
+	Uploaded  int   // objects written to the sink
+	Reused    int   // files the container rewrote without changing them
+	Hashed    int64 // bytes hashed
+	Unusual   []string
+	Duration  time.Duration
+	Records   int
 }
 
 // Run captures one upper directory. It is idempotent: running it again on

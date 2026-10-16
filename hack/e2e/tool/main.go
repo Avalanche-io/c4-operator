@@ -10,6 +10,10 @@
 //	c4e2e expect    --src DIR --include a/,b/ [--render POD] [--add-frames N --frames-dir D --pod P]
 //	                                                  view ID of a subset, optionally after a render
 //	c4e2e add-frames --count N --dir REL --pod NAME DIR  add N new frames (keyed by pod) under DIR/REL
+//	c4e2e objects   --src DIR --shards s0,s1,s2        each object's shard, as "shard id" lines
+//	c4e2e s3get     --list FILE --bucket B --endpoint-fmt http://minio-%s.c4-store:9000
+//	                                                  read every listed object straight from S3
+//	c4e2e probe     --url URL [--project P] [--token FILE]  one request to a cache tier; prints the status
 //
 // Content is deterministic pseudo-random bytes keyed by name, so files that
 // share a key are byte-identical, and the host can recompute what any pod
@@ -17,6 +21,7 @@
 package main
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/binary"
 	"errors"
@@ -29,6 +34,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/internal/rendezvous"
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
@@ -47,6 +56,9 @@ func main() {
 		"expect":     expect,
 		"add-frames": addFrames,
 		"hold":       hold,
+		"objects":    objectsCmd,
+		"s3get":      s3get,
+		"probe":      probe,
 	}
 	run, ok := cmds[os.Args[1]]
 	if !ok {
@@ -424,5 +436,76 @@ func hold(args []string) error {
 		d = v
 	}
 	time.Sleep(d)
+	return nil
+}
+
+// objectsCmd lists a directory's objects with the shard each lives on, by
+// the same rendezvous placement the store uses.
+func objectsCmd(args []string) error {
+	fs := flag.NewFlagSet("objects", flag.ExitOnError)
+	src := fs.String("src", "", "directory")
+	shards := fs.String("shards", "s0,s1,s2", "shard names")
+	fs.Parse(args)
+	v, err := view.ScanDir(*src)
+	if err != nil {
+		return err
+	}
+	names := strings.Split(*shards, ",")
+	for _, o := range v.Objects() {
+		fmt.Println(rendezvous.Rank(names, o.ID[:])[0], o.ID)
+	}
+	for _, r := range v.Records() {
+		fmt.Println(rendezvous.Rank(names, r.ID[:])[0], r.ID)
+	}
+	return nil
+}
+
+// s3get is the naive baseline: what an init container that copies its
+// inputs from S3 does, one GET per object per pod.
+func s3get(args []string) error {
+	fs := flag.NewFlagSet("s3get", flag.ExitOnError)
+	list := fs.String("list", "", "file of \"shard id\" lines")
+	bucket := fs.String("bucket", "", "bucket")
+	prefix := fs.String("prefix", "c4/", "key prefix")
+	endpointFmt := fs.String("endpoint-fmt", "http://minio-%s.c4-store:9000", "endpoint, %s is the shard number")
+	fs.Parse(args)
+	data, err := os.ReadFile(*list)
+	if err != nil {
+		return err
+	}
+	creds := storeurl.Credentials{AccessKeyID: os.Getenv("AWS_ACCESS_KEY_ID"), SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY")}
+	shards := map[string]storeurl.Shard{}
+	start := time.Now()
+	var total int64
+	for _, line := range strings.Split(strings.TrimSpace(string(data)), "\n") {
+		name, idText, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok {
+			continue
+		}
+		sh, ok := shards[name]
+		if !ok {
+			url := fmt.Sprintf("s3://%s/%s?endpoint=%s", *bucket, *prefix, fmt.Sprintf(*endpointFmt, strings.TrimPrefix(name, "s")))
+			sh, err = storeurl.Open(url, creds)
+			if err != nil {
+				return err
+			}
+			shards[name] = sh
+		}
+		id, err := c4.Parse(idText)
+		if err != nil {
+			return err
+		}
+		body, _, _, err := sh.Get(context.Background(), id, 0)
+		if err != nil {
+			return fmt.Errorf("%s: %w", idText, err)
+		}
+		n, err := io.Copy(io.Discard, body)
+		body.Close()
+		if err != nil {
+			return err
+		}
+		total += n
+	}
+	fmt.Printf("read %d bytes from S3 in %s\n", total, time.Since(start).Round(time.Millisecond))
 	return nil
 }

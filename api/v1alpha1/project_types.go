@@ -74,6 +74,20 @@ type StoreShard struct {
 	URL string `json:"url"`
 }
 
+// Scope says which trees a project may materialize.
+// +kubebuilder:validation:Enum=Store;Grants
+type Scope string
+
+const (
+	// ScopeStore allows any description that resolves from the project's
+	// own store.
+	ScopeStore Scope = "Store"
+	// ScopeGrants allows only the trees, and the paths of them, listed in
+	// Grants. With no grants it allows nothing, so revoking the last grant
+	// never opens the whole store.
+	ScopeGrants Scope = "Grants"
+)
+
 // Grant allows a project to use part of a tree in its store.
 type Grant struct {
 	// Tree is the ID of a view, root record, source c4m, or changeset base
@@ -103,9 +117,14 @@ type ProjectSpec struct {
 
 	Store ProjectStore `json:"store"`
 
-	// Grants restrict which trees the project may materialize, and which
-	// paths of them. With no grants, any description resolvable from the
-	// project's own store is allowed.
+	// Scope is Store (anything in the project's own store) or Grants
+	// (only what Grants lists). Listing grants requires scope Grants.
+	// +kubebuilder:default=Store
+	// +optional
+	Scope Scope `json:"scope,omitempty"`
+
+	// Grants are the trees a Grants-scoped project may materialize, and
+	// which paths of them.
 	// +optional
 	Grants []Grant `json:"grants,omitempty"`
 
@@ -191,6 +210,13 @@ func (p *Project) Partition() string {
 		return "g-" + p.Spec.SharingGroup
 	}
 	return "p-" + p.Name
+}
+
+// Restricted reports whether the project may materialize only granted
+// trees. Grants listed under scope Store (which validation reports) are
+// still enforced: the stricter reading wins.
+func (p *Project) Restricted() bool {
+	return p.Spec.Scope == ScopeGrants || len(p.Spec.Grants) > 0
 }
 
 // AccessMode returns the store access mode with its default.

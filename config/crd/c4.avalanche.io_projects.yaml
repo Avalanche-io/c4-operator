@@ -56,9 +56,8 @@ spec:
             properties:
               grants:
                 description: |-
-                  Grants restrict which trees the project may materialize, and which
-                  paths of them. With no grants, any description resolvable from the
-                  project's own store is allowed.
+                  Grants are the trees a Grants-scoped project may materialize, and
+                  which paths of them.
                 items:
                   description: Grant allows a project to use part of a tree in its
                     store.
@@ -95,6 +94,15 @@ spec:
                   type: string
                 minItems: 1
                 type: array
+              scope:
+                default: Store
+                description: |-
+                  Scope is Store (anything in the project's own store) or Grants
+                  (only what Grants lists). Listing grants requires scope Grants.
+                enum:
+                - Store
+                - Grants
+                type: string
               sharingGroup:
                 description: SharingGroup names the group a Shared project shares
                   caches with.

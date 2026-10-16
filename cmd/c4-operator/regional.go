@@ -40,10 +40,15 @@ func runRegional(args []string) error {
 	maxWaiters := fs.Int("max-waiters", 16384, "concurrent waiters on fills")
 	maxServing := fs.Int("max-serving", 2048, "concurrent responses")
 	noAuth := fs.Bool("insecure-no-auth", false, "skip TokenReview (tests only)")
+	maxRate := fs.String("max-rate", "0", "pace each response to this many bytes per second (test knob; 0 is unlimited)")
 	fs.Parse(args)
 
 	ctrl.SetLogger(zap.New())
 	log := ctrl.Log.WithName("regional")
+	rate, err := resource.ParseQuantity(*maxRate)
+	if err != nil {
+		return fmt.Errorf("--max-rate: %w", err)
+	}
 	budget, err := resource.ParseQuantity(*size)
 	if err != nil {
 		return fmt.Errorf("--cache-size: %w", err)
@@ -104,6 +109,7 @@ func runRegional(args []string) error {
 			return reg.Store(context.Background(), p)
 		},
 		MaxServing: *maxServing,
+		MaxRate:    rate.Value(),
 		Log:        log,
 	}
 	if !*noAuth {

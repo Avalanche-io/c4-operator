@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/Avalanche-io/c4"
 
@@ -50,7 +51,12 @@ type Server struct {
 	MaxServing int
 	// FillTimeout bounds one upstream fill (0: 6 h).
 	FillTimeout time.Duration
-	Log         logr.Logger
+	// MaxRate limits each response to this many bytes per second (0: no
+	// limit). It is a test knob: on a kind cluster every link runs at
+	// memory speed, and a slower link makes transfers long enough to kill
+	// a replica in the middle of one.
+	MaxRate int64
+	Log     logr.Logger
 
 	serving atomic.Int64
 }
@@ -134,9 +140,8 @@ func (s *Server) get(w http.ResponseWriter, r *http.Request, project, partition 
 		metrics.TierRequests.WithLabelValues(s.Tier, project, "hit").Inc()
 		w.Header().Set(HeaderServed, "hit")
 		w.Header().Set("Content-Type", "application/octet-stream")
-		cw := &countingWriter{w: w}
+		cw := &countingWriter{w: w, rate: s.MaxRate, served: metrics.TierServedBytes.WithLabelValues(s.Tier, project)}
 		http.ServeContent(cw, r, "", time.Time{}, f)
-		metrics.TierServedBytes.WithLabelValues(s.Tier, project).Add(float64(cw.n))
 		return
 	}
 
@@ -229,8 +234,8 @@ func (s *Server) serveFlight(w http.ResponseWriter, r *http.Request, project str
 		h.Set("Content-Range", fmt.Sprintf("bytes %d-%d/%d", start, size-1, size))
 		w.WriteHeader(http.StatusPartialContent)
 	}
-	n, _ := io.Copy(w, body)
-	metrics.TierServedBytes.WithLabelValues(s.Tier, project).Add(float64(n))
+	cw := &countingWriter{w: w, rate: s.MaxRate, served: metrics.TierServedBytes.WithLabelValues(s.Tier, project)}
+	io.Copy(cw, body)
 }
 
 // rangeStart parses "bytes=N-"; anything else serves the whole object.
@@ -361,11 +366,45 @@ func (s *Server) writeThrough(ctx context.Context, st *storeurl.Sharded, cache *
 	return "stored", nil
 }
 
+// countingWriter counts what it writes into the served-bytes series as it
+// goes, so a long transfer shows in the metrics while it runs, and, with a
+// rate, paces it.
 type countingWriter struct {
-	w http.ResponseWriter
-	n int64
+	w      http.ResponseWriter
+	n      int64
+	rate   int64
+	start  time.Time
+	served prometheus.Counter
 }
 
-func (c *countingWriter) Header() http.Header         { return c.w.Header() }
-func (c *countingWriter) WriteHeader(code int)        { c.w.WriteHeader(code) }
-func (c *countingWriter) Write(p []byte) (int, error) { n, err := c.w.Write(p); c.n += int64(n); return n, err }
+func (c *countingWriter) Header() http.Header  { return c.w.Header() }
+func (c *countingWriter) WriteHeader(code int) { c.w.WriteHeader(code) }
+
+func (c *countingWriter) Write(p []byte) (int, error) {
+	if c.rate <= 0 {
+		n, err := c.w.Write(p)
+		c.n += int64(n)
+		c.served.Add(float64(n))
+		return n, err
+	}
+	if c.start.IsZero() {
+		c.start = time.Now()
+	}
+	written := 0
+	for len(p) > 0 {
+		chunk := p[:min(len(p), 64<<10)]
+		n, err := c.w.Write(chunk)
+		written += n
+		c.n += int64(n)
+		c.served.Add(float64(n))
+		if err != nil {
+			return written, err
+		}
+		p = p[n:]
+		ahead := time.Duration(float64(c.n)/float64(c.rate)*float64(time.Second)) - time.Since(c.start)
+		if ahead > 0 {
+			time.Sleep(ahead)
+		}
+	}
+	return written, nil
+}

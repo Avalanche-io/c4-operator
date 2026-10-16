@@ -103,7 +103,7 @@ record "A pod with the MVP's hostPath volume is refused by Pod Security restrict
 record ""
 
 log "16 render pods, two per worker, writable views"
-HASHED0=$(nodes_metric 'c4_node_hashed_bytes_total{reason="verify-fill"}')
+HASHED0=$(nodes_metric c4_node_hashed_bytes_total 'reason="verify-fill"')
 for i in "${!NODES[@]}"; do
   for s in a b; do
     name=render-$((i + 1))$s
@@ -158,7 +158,7 @@ for i in "${!NODES[@]}"; do
 done
 HOST_OUT=$("$TOOL" expect --src "$SHOW" --include "$INCLUDE" --render render-1a | tail -1)
 [ "$HOST_OUT" = "$(annotation "$NS" render-1a c4.avalanche.io/output-tree)" ] || fail "host recomputation of render-1a differs"
-HASHED1=$(nodes_metric 'c4_node_hashed_bytes_total{reason="verify-fill"}')
+HASHED1=$(nodes_metric c4_node_hashed_bytes_total 'reason="verify-fill"')
 med() { printf '%s\n' "$@" | sort -n | awk '{a[NR]=$1} END {print (NR%2 ? a[(NR+1)/2] : (a[NR/2]+a[NR/2+1])/2)}'; }
 record ""
 record "- Cold publishes (first pod on a node): ${#COLD[@]}, median $(med "${COLD[@]}") s. Warm publishes (second pod): ${#WARM[@]}, median $(med "${WARM[@]}") s."
@@ -182,7 +182,7 @@ V12=$(mat_view "$NS" sh010-v12)
 HOST_V12=$("$TOOL" expect --src "$SHOW" --include "$INCLUDE" --add-frames 3 --frames-dir shots/sh010/plates --pod adder | tail -1)
 [ "$V12" = "$HOST_V12" ] || fail "v12 $V12 != host $HOST_V12"
 CHAIN=$(k -n "$NS" get mat sh010-v12 -o jsonpath='{.status.layers}' | tr -cd ',' | wc -c)
-FETCH0=$(nodes_metric 'c4_node_object_requests_total{project="show-a",result="fetch"}')
+FETCH0=$(nodes_metric c4_node_object_requests_total 'project="show-a"' 'result="fetch"')
 for i in "${!NODES[@]}"; do
   pod "v12-$((i + 1))" "${NODES[$i]}" sh010-v12 true "c4e2e verify --expect $V12 /show"
 done
@@ -196,7 +196,7 @@ for i in "${!NODES[@]}"; do
   read -r outcome secs nlayers <<<"$(publish_info "$NS" "$name")"
   record "| $name | ${NODES[$i]} | $outcome | $secs | $nlayers |"
 done
-FETCH1=$(nodes_metric 'c4_node_object_requests_total{project="show-a",result="fetch"}')
+FETCH1=$(nodes_metric c4_node_object_requests_total 'project="show-a"' 'result="fetch"')
 record ""
 record "The changeset resolves to a chain of $((CHAIN + 1)) views. Every node that held v11 added one delta layer for v12 and fetched $(((FETCH1 - FETCH0))) objects in total across ${#NODES[@]} nodes (three new frames per node, minus any a node already had), while v12 has $(k -n "$NS" get mat sh010-v12 -o jsonpath='{.status.files}') files. Read-only mounts of v12 on all eight nodes match the host's recomputation."
 record ""

@@ -74,27 +74,42 @@ store_gets() {
   echo "$total"
 }
 
-# node_metric NODE SERIES: sum of a Prometheus series on a node daemon.
-node_metric() {
-  docker exec "$1" curl -sf localhost:7444/metrics | awk -v s="$2" 'index($0, s) == 1 {v+=$NF} END {printf "%d", v}'
+# sum_series NAME LABEL...: sum a Prometheus series from stdin over every
+# line of that metric that carries all the given label pairs (in any order).
+sum_series() {
+  local name=$1
+  shift
+  awk -v name="$name" -v want="$*" '
+    BEGIN { n = split(want, labels, " ") }
+    index($0, name "{") == 1 || $1 == name {
+      for (i = 1; i <= n; i++) if (index($0, labels[i]) == 0) next
+      v += $NF
+    }
+    END { printf "%d", v }'
 }
 
-# nodes_metric SERIES: the series summed over all workers.
+# node_metric NODE NAME LABEL...: a series on one node daemon.
+node_metric() {
+  local n=$1
+  shift
+  docker exec "$n" curl -sf localhost:7444/metrics | sum_series "$@"
+}
+
+# nodes_metric NAME LABEL...: the series summed over all workers.
 nodes_metric() {
   local n total=0 v
   for n in $WORKERS; do
-    v=$(node_metric "$n" "$1")
+    v=$(node_metric "$n" "$@")
     total=$((total + ${v:-0}))
   done
   echo "$total"
 }
 
-# regional_metric SERIES: the series summed over the regional replicas.
+# regional_metric NAME LABEL...: the series summed over the regional replicas.
 regional_metric() {
   local p total=0 v
-  for p in $(k -n c4-system get pods -l app.kubernetes.io/component=regional -o jsonpath='{.items[*].metadata.name}'); do
-    v=$(k get --raw "/api/v1/namespaces/c4-system/pods/$p:7443/proxy/metrics" 2>/dev/null |
-      awk -v s="$1" 'index($0, s) == 1 {v+=$NF} END {printf "%d", v}')
+  for p in $(k -n c4-system get pods -l app.kubernetes.io/component=regional --field-selector=status.phase=Running -o jsonpath='{.items[*].metadata.name}'); do
+    v=$(k get --raw "/api/v1/namespaces/c4-system/pods/$p:7443/proxy/metrics" 2>/dev/null | sum_series "$@")
     total=$((total + ${v:-0}))
   done
   echo "$total"
@@ -156,4 +171,26 @@ cold_start() {
   k -n c4-system rollout restart ds/c4-node deploy/c4-regional >/dev/null
   k -n c4-system rollout status deploy/c4-regional --timeout=180s >/dev/null
   k -n c4-system rollout status ds/c4-node --timeout=300s >/dev/null
+}
+
+# store_gets_settled: store_gets once MinIO's metrics (cached for about ten
+# seconds) stop changing.
+store_gets_settled() {
+  local a b
+  sleep 12
+  a=$(store_gets)
+  while :; do
+    sleep 6
+    b=$(store_gets)
+    [ "$a" = "$b" ] && break
+    a=$b
+  done
+  echo "$b"
+}
+
+# regional_pod_metric POD NAME LABEL...: a series on one regional replica.
+regional_pod_metric() {
+  local p=$1
+  shift
+  k get --raw "/api/v1/namespaces/c4-system/pods/$p:7443/proxy/metrics" 2>/dev/null | sum_series "$@"
 }

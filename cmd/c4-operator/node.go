@@ -75,7 +75,7 @@ func runNode(args []string) error {
 	watch, err := cache.New(cfg, cache.Options{
 		Scheme: scheme,
 		ByObject: map[client.Object]cache.ByObject{
-			&corev1.Node{}:                {Label: labels.SelectorFromSet(labels.Set{*localityKey: locality})},
+			&corev1.Node{}:               {Label: labels.SelectorFromSet(labels.Set{*localityKey: locality})},
 			&discoveryv1.EndpointSlice{}: {Namespaces: map[string]cache.Config{*namespace: {}}, Label: labels.SelectorFromSet(labels.Set{discoveryv1.LabelServiceName: *regionalService})},
 			&c4v1.Project{}:              {},
 		},

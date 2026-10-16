@@ -162,6 +162,12 @@ func (d *Daemon) Publish(ctx context.Context, req PublishRequest) (err error) {
 	if mat.Status.Project != "" && mat.Status.Project != p.Name {
 		return fmt.Errorf("materialization %s/%s was resolved for project %s, not %s", ns, name, mat.Status.Project, p.Name)
 	}
+	// A Project change (a revoked grant, new shards) re-resolves its
+	// Materializations; until that lands, the old resolution is not used.
+	if mat.Status.ProjectGeneration != p.Generation {
+		return fmt.Errorf("materialization %s/%s was resolved under project %s generation %d, now %d; re-resolving",
+			ns, name, p.Name, mat.Status.ProjectGeneration, p.Generation)
+	}
 	target, err := c4.Parse(mat.Status.ViewID)
 	if err != nil {
 		return err

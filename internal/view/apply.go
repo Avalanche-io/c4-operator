@@ -117,7 +117,7 @@ func SortEdits(edits []Edit) {
 // from its base record only when an edit reaches it.
 type anode struct {
 	name   string
-	base   c4.ID                // ID in the parent view; nil for a new directory
+	base   c4.ID                 // ID in the parent view; nil for a new directory
 	orig   map[string]*c4m.Entry // base children by name, once loaded
 	files  map[string]*c4m.Entry
 	dirs   map[string]*anode

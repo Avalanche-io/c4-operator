@@ -79,6 +79,9 @@ func (r *ProjectReconciler) validate(ctx context.Context, p *c4v1.Project) []str
 			problems = append(problems, "shard "+s.Name+" ("+storeurl.Redact(s.URL)+") carries credentials in its URL; use credentialsSecretRef")
 		}
 	}
+	if len(p.Spec.Grants) > 0 && p.Spec.Scope != c4v1.ScopeGrants {
+		problems = append(problems, "grants are listed but scope is not Grants; set scope: Grants (the grants are enforced either way)")
+	}
 	for _, g := range p.Spec.Grants {
 		if _, err := view.NewFilter(g.Paths); err != nil {
 			problems = append(problems, fmt.Sprintf("grant %s: %v", g.Tree, err))

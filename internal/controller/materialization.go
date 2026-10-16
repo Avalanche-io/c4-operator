@@ -105,11 +105,15 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	if err != nil {
 		return r.fail(ctx, orig, &mat, "ResolveFailed", err, r.Retry)
 	}
-	if len(p.Spec.Grants) > 0 && g == nil {
+	if p.Restricted() && g == nil {
 		g = grantFor(p, res.Chain[0].ID, res.RootID)
+		if g == nil && len(p.Spec.Grants) == 0 {
+			return r.fail(ctx, orig, &mat, "NotGranted",
+				fmt.Errorf("project %s has scope Grants and no grants", p.Name), 0)
+		}
 		if g == nil {
 			return r.fail(ctx, orig, &mat, "NotGranted",
-				fmt.Errorf("project %s has grants, and neither source %s nor its base %s is one of them", p.Name, sourceID, res.Chain[0].ID), 0)
+				fmt.Errorf("project %s may materialize only granted trees, and neither source %s nor its base %s is one of them", p.Name, sourceID, res.Chain[0].ID), 0)
 		}
 		if f, err = intersect(include, g); err != nil {
 			return r.fail(ctx, orig, &mat, "NotGranted", err, 0)
@@ -119,12 +123,17 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		}
 	}
 
+	v := res.View()
+	t := v.Totals()
+	// A grant narrows; it does not quietly produce an empty mount.
+	if g != nil && len(g.Paths) > 0 && t.Files == 0 {
+		return r.fail(ctx, orig, &mat, "NotGranted",
+			fmt.Errorf("nothing in granted tree %s under paths %v matches include %v", g.Tree, g.Paths, mat.Spec.Include), 0)
+	}
 	if err := publishRecords(ctx, store, res.Chain); err != nil {
 		return r.fail(ctx, orig, &mat, "StoreUnavailable", fmt.Errorf("publish records: %w", err), r.Retry)
 	}
 
-	v := res.View()
-	t := v.Totals()
 	st.SourceID = sourceID.String()
 	st.RootID = res.RootID.String()
 	st.ViewID = v.ID.String()
