@@ -42,6 +42,10 @@ export function subscribe(onSnapshot, onStatus) {
   }
   let es;
   let pollTimer;
+  let streamed = false;
+  // Paint from one plain request, so the first view never waits on the
+  // stream (a proxy that buffers event streams would otherwise hold it).
+  get('/snapshot').then((s) => { if (!streamed) onSnapshot(s); }, () => {});
   const poll = () => {
     get('/snapshot').then((s) => { onSnapshot(s); onStatus('polling'); }, (e) => onStatus('error', e.message));
   };
@@ -50,6 +54,7 @@ export function subscribe(onSnapshot, onStatus) {
     es.addEventListener('snapshot', (ev) => {
       clearInterval(pollTimer);
       pollTimer = null;
+      streamed = true;
       onStatus('live');
       onSnapshot(JSON.parse(ev.data));
     });

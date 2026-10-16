@@ -133,7 +133,7 @@ export default {
                     b && b.requested > b.provisioned ? h('i', { style: { marginLeft: 'auto', width: `${((b.requested - b.provisioned) / tot) * 100}%`, background: 'repeating-linear-gradient(135deg, var(--bar-blue) 0 3px, transparent 3px 6px)' } }) : null),
                   h('div', { class: 'num dim', style: { fontSize: '11px', marginTop: '3px' } }, `${p.used} of ${p.slots}`)),
                 h('td', { class: 'r num' }, f.money(p.costPerSlotHour, true)),
-                h('td', { class: 'r num' }, b ? h('span', { class: 't-blue' }, `${b.provisioned}/${b.maxSlots}`) : h('span', { class: 'dimmer' }, '—')));
+                h('td', { class: 'r num' }, b ? h('span', { class: 't-blue' }, `${b.provisioned}/${b.maxSlots}`) : h('span', { class: 'dimmer' }, '–')));
             })))),
         h('div', { class: 'section' },
           h('header', null, h('h2', null, 'Burst spend today')),

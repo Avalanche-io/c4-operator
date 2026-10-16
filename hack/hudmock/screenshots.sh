@@ -75,7 +75,7 @@ sel aggregate && shot job-density-aggregate "$base$W#/job/kestrel-render/ep104-f
 sel workers && shot workers "$base$W#/workers" 1600 1500
 sel tiers && shot tiers "$base$W#/tiers" 1600 900
 sel graph && shot graph "$base$W#/graph" 1600 1100
-sel cost && shot cost-capacity "$base$W#/cost" 1600 1700
+sel cost && shot cost-capacity "$base$W#/cost" 1600 1380
 sel artist && shot artist-scoped-queue "$base$A#/queue" 1600 1000
 sel laptop && shot laptop-job-view "$base$W#/job/harbor-render/sh040-fx-v003" 1280 800
 exit 0

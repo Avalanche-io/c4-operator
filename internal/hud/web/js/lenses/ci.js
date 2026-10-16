@@ -8,7 +8,7 @@ import * as f from '../fmt.js';
 const STAGES = [['build', 'Build'], ['test', 'Test shards'], ['integration', 'Integration'], ['speculative', 'Land']];
 
 function stageCell(p, scale, current) {
-  if (!p) return h('td', { class: 'dimmer' }, '—');
+  if (!p) return h('td', { class: 'dimmer' }, '–');
   const w = (v) => `${Math.max(0, Math.min(100, (v / scale) * 100)).toFixed(1)}%`;
   const runCol = { passed: 'var(--u-done)', failed: 'var(--bar-red)', running: 'url(#ci-stripe)' }[p.state];
   const runBg = { passed: 'var(--u-done)', failed: 'var(--bar-red)' }[p.state] ||
@@ -100,7 +100,7 @@ export function ciLens(ctx, job) {
         h('table', { class: 't' },
           h('thead', null, h('tr', null, h('th', null, 'Pos'), h('th', null, 'Change'), h('th', null, 'State'), h('th', null, 'Speculative base'))),
           h('tbody', null, mq.entries.map((e) => h('tr', { 'data-key': e.change },
-            h('td', { class: 'num' }, e.position ? String(e.position) : '—'),
+            h('td', { class: 'num' }, e.position ? String(e.position) : '–'),
             h('td', { class: 'mono' }, e.change),
             h('td', null, h('span', { class: 'chip ' + ({ merged: 'green', ejected: 'red', testing: '' }[e.state] || '') }, e.state)),
             h('td', { class: 'mono dim', title: e.speculativeBase }, f.shortId(e.speculativeBase))))))),

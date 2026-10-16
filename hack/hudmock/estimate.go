@@ -168,6 +168,11 @@ func (s *Sim) attainable(j *Job, future bool) float64 {
 				if r.j == j {
 					continue
 				}
+				// Short units of jobs behind this one in dispatch order free
+				// their slots to it soon; a running gang does not.
+				if r.j.ML == nil && s.rankPos[r.j] > s.rankPos[j] && s.rankPos[j] > 0 {
+					continue
+				}
 				other += r.u.Slots
 				if r.j.Project == j.Project {
 					projOther += r.u.Slots
@@ -226,6 +231,10 @@ func (s *Sim) estimateAll() {
 	for _, j := range s.jobs {
 		j.rankScore = s.rankScore(j)
 	}
+	s.rankPos = map[*Job]int{}
+	for i, j := range s.ranked() {
+		s.rankPos[j] = i + 1
+	}
 }
 
 func (s *Sim) workAndPath(j *Job) {
@@ -234,7 +243,8 @@ func (s *Sim) workAndPath(j *Job) {
 	region := map[string]float64{}
 	unexp := 0
 	for _, u := range j.Units {
-		if u == nil || u.State == stSucceeded {
+		// Failed units wait for a person; they are not remaining work.
+		if u == nil || u.State == stSucceeded || u.State == stFailed {
 			continue
 		}
 		r := s.remaining(u)
@@ -285,7 +295,7 @@ func (s *Sim) workAndPath(j *Job) {
 	}
 	tp := 0.0
 	for _, u := range j.Units {
-		if u == nil || u.State == stSucceeded {
+		if u == nil || u.State == stSucceeded || u.State == stFailed {
 			continue
 		}
 		tp = math.Max(tp, finish(u, 0))

@@ -99,8 +99,8 @@ export function phaseText(j) {
 
 export function slackCell(j) {
   const e = j.estimate;
-  if (j.phase === 'Succeeded') return h('div', { class: 'slack dimmer' }, '—', h('small', null, 'done'));
-  if (!j.objective.deadline) return h('div', { class: 'slack dimmer' }, '—', h('small', null, 'no deadline'));
+  if (j.phase === 'Succeeded') return h('div', { class: 'slack dimmer' }, '–', h('small', null, 'done'));
+  if (!j.objective.deadline) return h('div', { class: 'slack dimmer' }, '–', h('small', null, 'no deadline'));
   const neg = e.slackSeconds < 0;
   return h('div', { class: 'slack' + (neg ? ' t-yellow' : '') }, f.signed(e.slackSeconds), h('small', null, 'slack'));
 }

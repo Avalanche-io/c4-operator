@@ -279,6 +279,7 @@ type Sim struct {
 	done     []float64 // completion times, for units per hour
 	ci       *CIState
 	version  uint64
+	rankPos  map[*Job]int
 }
 
 func (s *Sim) at(sec float64) time.Time {

@@ -59,7 +59,11 @@ func (m *MLState) step(t float64) float64 {
 
 // conflict returns a job that shares a pool with j and will miss its
 // deadline at current capacity.
-func (s *Sim) mlConflict(j *Job) *Job {
+func (s *Sim) mlConflict(j *Job) *Job { return s.mlConflictMargin(j, 0) }
+
+// mlConflictMargin also counts jobs with less than margin seconds of slack,
+// so a run does not resume into slots a job at risk is about to need.
+func (s *Sim) mlConflictMargin(j *Job, margin float64) *Job {
 	for _, x := range s.jobs {
 		if x == j || x.ML != nil || !x.ready || x.Done || x.Hold {
 			continue
@@ -68,7 +72,7 @@ func (s *Sim) mlConflict(j *Job) *Job {
 		for _, p := range x.Pools {
 			share = share || contains(j.Pools, p)
 		}
-		if share && !x.est.Feasible && x.est.EtaP90 > 0 {
+		if share && (!x.est.Feasible || x.est.Slack < margin) && x.est.EtaP90 > 0 {
 			return x
 		}
 	}
@@ -85,7 +89,7 @@ func (s *Sim) mlTick() {
 			if m.resumePending || j.Hold {
 				continue
 			}
-			c := s.mlConflict(j)
+			c := s.mlConflictMargin(j, 1800)
 			switch {
 			case c == nil:
 				m.resumePending, m.resumeReason = true, "gpu pool has room again"
