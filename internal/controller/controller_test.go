@@ -219,7 +219,7 @@ func TestIDSourceResolves(t *testing.T) {
 		},
 	})
 	mat := waitPhase(t, "c", c4v1.PhaseReady)
-	if mat.Status.Files != 1 || mat.Status.RootID != id.String() || mat.Status.SourceID != id.String() {
+	if mat.Status.Files != 1 || mat.Status.RootID != m.ComputeC4ID().String() || mat.Status.SourceID != id.String() {
 		t.Fatalf("status: %+v (snapshot %s)", mat.Status, m.ComputeC4ID())
 	}
 }

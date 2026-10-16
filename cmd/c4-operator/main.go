@@ -228,7 +228,7 @@ func runEnsure(args []string) error {
 	}
 	fmt.Printf("view %s ready in %dms: %d files, %d bytes; %d objects (%d cached, %d fetched, %d refetched after failing verification), %d bytes fetched\n",
 		r.View, r.Millis, r.Files, r.Bytes, r.Objects, r.Hits, r.Misses, r.Refetched, r.BytesFetched)
-	fmt.Println(string(raw))
+	fmt.Println(string(bytes.TrimSpace(raw)))
 	return nil
 }
 

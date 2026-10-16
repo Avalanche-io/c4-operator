@@ -37,7 +37,10 @@ var ErrIncomplete = errors.New("description is incomplete")
 
 // Resolved is a resolved Materialization source.
 type Resolved struct {
-	RootID c4.ID // the ID of the description that was asked for
+	// RootID is the tree's canonical ID (Manifest.ComputeC4ID): the
+	// snapshot ID `c4 id` reports. It is the same whether the tree came
+	// as c4m text, as a stored c4m file, or as stored directory records.
+	RootID c4.ID
 	View   *View
 }
 
@@ -56,7 +59,8 @@ func FromBytes(data []byte, src Source, f Filter) (*Resolved, error) {
 	return &Resolved{RootID: m.ComputeC4ID(), View: v}, nil
 }
 
-// FromID resolves a c4m file stored under id.
+// FromID resolves a description stored under id: a c4m file (as the
+// c4 1.0 CLI stores) or a root directory record (as later CLIs store).
 func FromID(id c4.ID, src Source, f Filter) (*Resolved, error) {
 	if src == nil {
 		return nil, fmt.Errorf("resolving %s needs a store", id)
@@ -73,7 +77,7 @@ func FromID(id c4.ID, src Source, f Filter) (*Resolved, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Resolved{RootID: id, View: v}, nil
+	return &Resolved{RootID: m.ComputeC4ID(), View: v}, nil
 }
 
 // ReadVerified reads an object and rehashes it. The bytes are returned
