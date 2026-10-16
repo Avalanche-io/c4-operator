@@ -72,14 +72,18 @@ The farm at a glance. Also delivered by the event stream.
   tiers: { tiers: [ { name, hitRate, requestsIn, upstreamRequests, bytesServed, shedRate, inflightFills } ],
            fanIn: { requesters, nodeRequests, peerRequests, regionalRequests, storeRequests },
            publishP50, publishP95, captureP50 },
-  capacity: [ { pool, slots, until, reason, jobs[], estCost, state, prewarmViews[] } ]
+  capacity: [ { pool, slots, until, reason, jobs[], estCost, state, prewarmViews[] } ],
+  usage: { clusterHours,
+           containerHours: [ { project, pool, hours } ],
+           gpuHours: [ { project, hours } ],
+           productionWindows: [ { project, name, from, to, active } ] }
 }
 ```
 
 | field                         | meaning                                                                                                   |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------- |
 | `farm.slotsTotal`             | slots on ready nodes, including disabled ones (they still hold running units)                             |
-| `farm.bytesAvoided`           | `bytesMaterialized - bytesFetchedFromStore`, today (DESIGN 11.1); the HUD's headline value metric          |
+| `farm.bytesAvoided`           | `bytesMaterialized - bytesFetchedFromStore`, today (DESIGN 11.1); the savings proof, shown as savings and never billed |
 | `classes[].slo.type`          | `deadline`, `latency` or `throughput`                                                                     |
 | `classes[].lens`              | the name of the HUD lens module for the class (`render`, `ci`, `ml`; anything else gets the generic lens) |
 | `nodes[].state`               | `idle`, `busy`, `disabled`, `notReady`, `unprovisioned`, `warming`                                        |
@@ -88,6 +92,11 @@ The farm at a glance. Also delivered by the event stream.
 | `tiers.fanIn`                 | requests per minute entering each tier; each tier forwards only its misses                               |
 | `capacity[].state`            | `PendingApproval`, `Provisioning`, `Provisioned`                                                          |
 | `capacity[].prewarmViews`     | views the new nodes fetch before units land on them                                                      |
+| `usage`                       | metered use today: what billing is based on. Billing is never by bytes                                    |
+| `usage.clusterHours`          | hours the installation has run today (farm-wide, shown to every viewer)                                   |
+| `usage.containerHours`        | pod run time per project and pool, not weighted by slots; only the viewer's projects                     |
+| `usage.gpuHours`              | GPU-hours per project; only the viewer's projects                                                         |
+| `usage.productionWindows`     | declared fixed-fee periods (for example "Show A production window, Oct 1 to Dec 20"); `active` if `now` is inside it |
 
 `jobs` is in dispatch order, and `rank` is the position in that order within
 the viewer's scope (1 is next).
@@ -284,6 +293,7 @@ the updated JobSummary; `node` the updated node. Errors are `4xx` with
 | `objective.from` added                   | an inherited deadline names the job it came from                                                          |
 | `nodes[].running[].slots` added          | units can take more than one slot; the node card splits slots between the viewer's and other projects    |
 | ML `classSummary.step`, `totalSteps`     | the ML lens shows progress in steps                                                                       |
+| `usage` added to the snapshot           | usage is shown and billed as cluster-hours, container-hours, GPU-hours or a production window; bytes avoided is savings only |
 | control responses `{ ok, message, ... }` | the HUD shows the farm's own sentence after each control                                                  |
 | `requeue` accepts an index array         | convenience; the unit set string is still the canonical form                                             |
 | `blacklist` accepts `remove`             | the job view offers "Allow node again"                                                                    |

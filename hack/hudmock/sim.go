@@ -233,6 +233,15 @@ type Project struct {
 	BytesStore  float64
 	WorkerHours map[[2]string]float64
 	GPUHours    float64
+	// ContainerHours is pod run time by pool, not weighted by slots.
+	ContainerHours map[string]float64
+	Windows        []ProductionWindow
+}
+
+// ProductionWindow is a declared fixed-fee period for a project.
+type ProductionWindow struct {
+	Name     string
+	From, To time.Time
 }
 
 type CapReq struct {
@@ -424,6 +433,10 @@ func (s *Sim) account(j *Job, u *Unit, seconds float64) {
 	p := s.projBy[j.Project]
 	hours := seconds * float64(u.Slots) / 3600
 	p.WorkerHours[[2]string{n.Pool, j.Class}] += hours
+	if p.ContainerHours == nil {
+		p.ContainerHours = map[string]float64{}
+	}
+	p.ContainerHours[n.Pool] += seconds / 3600
 	if s.poolClass(n.Pool) == "gpu" {
 		p.GPUHours += hours
 	}

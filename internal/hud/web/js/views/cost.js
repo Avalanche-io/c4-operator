@@ -82,6 +82,47 @@ function curve(p, need, extra) {
       h('div', { class: 'num dimmer', style: { position: 'relative', height: '14px', fontSize: '10px' } }, ticks)));
 }
 
+// usageSection shows what is metered: cluster-hours, container-hours per
+// project and pool, GPU-hours, and any production window (a declared
+// fixed-fee period). Billing is never by bytes.
+function usageSection(snap) {
+  const u = snap.usage;
+  if (!u) return null;
+  const byProject = new Map();
+  for (const c of u.containerHours) {
+    if (!byProject.has(c.project)) byProject.set(c.project, []);
+    byProject.get(c.project).push(c);
+  }
+  const gpu = new Map(u.gpuHours.map((g) => [g.project, g.hours]));
+  const pools = [...new Set(u.containerHours.map((c) => c.pool))];
+  return h('div', { class: 'section', 'data-key': 'usage' },
+    h('header', null, h('h2', null, 'Usage today'),
+      h('span', { class: 'dim' }, 'What is metered: cluster-hours, container-hours by project and pool, and GPU-hours. A production window is a fixed fee for its period.')),
+    h('div', { class: 'cols2' },
+      h('div', null,
+        h('div', { class: 'figs' },
+          h('div', { class: 'fig' }, h('div', { class: 'lab' }, 'Cluster-hours'), h('div', { class: 'big' }, u.clusterHours.toFixed(1))),
+          [...byProject.keys()].map((p) => h('div', { class: 'fig', 'data-key': 'ch-' + p }, h('div', { class: 'lab' }, `${p}, container-hours`),
+            h('div', { class: 'val', style: { fontSize: '26px' } }, f.num(byProject.get(p).reduce((a, c) => a + c.hours, 0))),
+            h('div', { class: 'dim num', style: { fontSize: '11px', marginTop: '4px' } }, `${(gpu.get(p) || 0).toFixed(1)} GPU-hours`)))),
+        h('table', { class: 't' },
+          h('thead', null, h('tr', null, h('th', null, 'Container-hours'), pools.map((p) => h('th', { class: 'r' }, p)), h('th', { class: 'r' }, 'GPU-hours'))),
+          h('tbody', null, [...byProject.keys()].map((proj) => h('tr', { 'data-key': 'row-' + proj },
+            h('td', { class: 'mono' }, proj),
+            pools.map((pool) => {
+              const c = byProject.get(proj).find((x) => x.pool === pool);
+              return h('td', { class: 'r num' }, c ? c.hours.toFixed(1) : '–');
+            }),
+            h('td', { class: 'r num' }, (gpu.get(proj) || 0).toFixed(1))))))),
+      h('div', null,
+        h('div', { class: 'lab', style: { marginBottom: '6px' } }, 'Production windows'),
+        u.productionWindows.length ? h('table', { class: 't' }, h('tbody', null, u.productionWindows.map((w) => h('tr', { 'data-key': w.name },
+          h('td', null, w.name, h('div', { class: 'dimmer', style: { fontSize: '11px' } }, w.project)),
+          h('td', { class: 'num' }, `${f.dateLine(w.from)} to ${f.dateLine(w.to)}`),
+          h('td', { class: 'r' }, h('span', { class: 'chip ' + (w.active ? 'green' : '') }, w.active ? 'active, fixed fee' : 'not started')))))) :
+          h('p', { class: 'dim' }, 'No production window; usage is metered by the hour.'))));
+}
+
 export default {
   render(ctx) {
     const snap = ctx.snap;
@@ -109,14 +150,14 @@ export default {
       h('div', { class: 'scopebar' },
         h('div', null, h('h1', null, 'Cost & capacity'),
           h('div', { class: 'dim', style: { marginTop: '4px' } }, 'What the farm has, what the deadlines need, and what a burst would buy.'))),
+      usageSection(snap),
       h('div', { class: 'section' },
-        h('header', null, h('h2', null, 'Bytes avoided today'),
-          h('span', { class: 'dim' }, 'Bytes mounted into pods minus bytes fetched from the store: what content addressing, the cache tiers and the overlays saved.')),
+        h('header', null, h('h2', null, 'Savings: bytes avoided today'),
+          h('span', { class: 'dim' }, 'Not billed. Bytes mounted into pods minus bytes fetched from the store: what content addressing, the cache tiers and the overlays saved.')),
         h('div', { class: 'figs', style: { alignItems: 'flex-end' } },
           h('div', { class: 'fig' }, h('div', { class: 'lab' }, snap.viewer.allProjects ? 'Farm' : 'Farm, all projects'), h('div', { class: 'big' }, f.bytes(fm.bytesAvoided)),
             h('div', { class: 'dim num', style: { fontSize: '11px', marginTop: '4px' } }, `${f.pct(fm.bytesAvoided / fm.bytesMaterialized)} of ${f.bytes(fm.bytesMaterialized)} mounted`)),
-          projects.map((p) => h('div', { class: 'fig', 'data-key': p.name }, h('div', { class: 'lab' }, p.name), h('div', { class: 'val', style: { fontSize: '26px' } }, f.bytes(p.bytesAvoided)),
-            h('div', { class: 'dim num', style: { fontSize: '11px', marginTop: '4px' } }, `${f.num(p.workerHours.reduce((a, w) => a + w.hours, 0))} worker-hours · ${p.gpuHours.toFixed(1)} GPU-hours`))))),
+          projects.map((p) => h('div', { class: 'fig', 'data-key': p.name }, h('div', { class: 'lab' }, p.name), h('div', { class: 'val', style: { fontSize: '26px' } }, f.bytes(p.bytesAvoided)))))),
       h('div', { class: 'cols2' },
         h('div', { class: 'section' },
           h('header', null, h('h2', null, 'Pools')),

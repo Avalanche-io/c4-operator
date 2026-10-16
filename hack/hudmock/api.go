@@ -34,6 +34,35 @@ type apiSnapshot struct {
 	Nodes    []apiNode    `json:"nodes"`
 	Tiers    apiTiers     `json:"tiers"`
 	Capacity []apiCap     `json:"capacity"`
+	Usage    apiUsage     `json:"usage"`
+}
+
+// apiUsage is metered use. Billing is by cluster-hours, container-hours or
+// a production window, never by bytes; bytes avoided is the savings proof.
+type apiUsage struct {
+	ClusterHours      float64           `json:"clusterHours"`
+	ContainerHours    []apiContainerHrs `json:"containerHours"`
+	GPUHours          []apiGPUHrs       `json:"gpuHours"`
+	ProductionWindows []apiWindow       `json:"productionWindows"`
+}
+
+type apiContainerHrs struct {
+	Project string  `json:"project"`
+	Pool    string  `json:"pool"`
+	Hours   float64 `json:"hours"`
+}
+
+type apiGPUHrs struct {
+	Project string  `json:"project"`
+	Hours   float64 `json:"hours"`
+}
+
+type apiWindow struct {
+	Project string    `json:"project"`
+	Name    string    `json:"name"`
+	From    time.Time `json:"from"`
+	To      time.Time `json:"to"`
+	Active  bool      `json:"active"`
 }
 
 type apiFarm struct {
@@ -355,6 +384,7 @@ func (s *Sim) snapshot(v *viewer) *apiSnapshot {
 		out.Capacity = append(out.Capacity, apiCap{Pool: c.Pool, Slots: c.Slots, Until: s.ts(c.Until), Reason: c.Reason,
 			Jobs: c.Jobs, EstCost: c.EstCost, State: c.State, PrewarmViews: c.Prewarm})
 	}
+	out.Usage = s.usage(v)
 	if out.Capacity == nil {
 		out.Capacity = []apiCap{}
 	}
@@ -954,3 +984,36 @@ func (s *Sim) tiers() apiTiers {
 }
 
 func round3(x float64) float64 { return math.Round(x*1000) / 1000 }
+
+// usage reports today's metered use: cluster-hours since midnight farm time,
+// and per-project container-hours and GPU-hours for the viewer's projects.
+func (s *Sim) usage(v *viewer) apiUsage {
+	now := s.at(s.t)
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	u := apiUsage{ClusterHours: round2(now.Sub(midnight).Hours())}
+	for _, p := range s.projects {
+		if !v.sees(p.Name) {
+			continue
+		}
+		for _, pool := range s.pools {
+			if h, ok := p.ContainerHours[pool.Name]; ok {
+				u.ContainerHours = append(u.ContainerHours, apiContainerHrs{Project: p.Name, Pool: pool.Name, Hours: round1(h)})
+			}
+		}
+		u.GPUHours = append(u.GPUHours, apiGPUHrs{Project: p.Name, Hours: round1(p.GPUHours)})
+		for _, w := range p.Windows {
+			u.ProductionWindows = append(u.ProductionWindows, apiWindow{Project: p.Name, Name: w.Name, From: w.From, To: w.To,
+				Active: !now.Before(w.From) && now.Before(w.To)})
+		}
+	}
+	if u.ContainerHours == nil {
+		u.ContainerHours = []apiContainerHrs{}
+	}
+	if u.GPUHours == nil {
+		u.GPUHours = []apiGPUHrs{}
+	}
+	if u.ProductionWindows == nil {
+		u.ProductionWindows = []apiWindow{}
+	}
+	return u
+}

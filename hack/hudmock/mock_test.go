@@ -112,7 +112,8 @@ func TestContract(t *testing.T) {
 	ts := frozenServer(t)
 	var snap map[string]any
 	getJSON(t, ts.URL+"/api/v1/snapshot?as=wrangler", &snap)
-	hasKeys(t, "snapshot", snap, "now", "viewer", "farm", "pools", "classes", "projects", "jobs", "nodes", "tiers", "capacity")
+	hasKeys(t, "snapshot", snap, "now", "viewer", "farm", "pools", "classes", "projects", "jobs", "nodes", "tiers", "capacity", "usage")
+	hasKeys(t, "usage", snap["usage"].(map[string]any), "clusterHours", "containerHours", "gpuHours", "productionWindows")
 	hasKeys(t, "farm", snap["farm"].(map[string]any), "slotsUsed", "slotsTotal", "queuedUnits", "unitsPerHour", "failuresLastHour",
 		"burstSlots", "burstCostPerHour", "bytesMaterialized", "bytesFetchedFromStore", "bytesAvoided", "otherProjectsSlots")
 	jobs := snap["jobs"].([]any)
@@ -191,6 +192,14 @@ func TestArtistScope(t *testing.T) {
 		for _, r := range asList(n.(map[string]any)["running"]) {
 			if !strings.HasPrefix(r.(map[string]any)["job"].(string), "harbor-") {
 				t.Errorf("artist sees what a node runs for another project: %v", r)
+			}
+		}
+	}
+	usage := snap["usage"].(map[string]any)
+	for _, k := range []string{"containerHours", "gpuHours", "productionWindows"} {
+		for _, e := range asList(usage[k]) {
+			if p := e.(map[string]any)["project"]; p != "harbor" {
+				t.Errorf("artist sees %s of project %v", k, p)
 			}
 		}
 	}

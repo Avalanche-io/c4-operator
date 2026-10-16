@@ -102,7 +102,7 @@ function slate() {
     h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Burst in flight'),
       h('span', { class: 'val' + (fm.burstSlots ? ' t-blue' : '') }, f.num(fm.burstSlots), h('small', null, 'slots')),
       h('span', { class: 'sub' }, fm.burstSlots ? `${f.money(fm.burstCostPerHour, true)} per hour` : 'none')),
-    h('div', { class: 'cell head' }, h('span', { class: 'lab' }, 'Bytes avoided today'),
+    h('div', { class: 'cell head' }, h('span', { class: 'lab' }, 'Savings: bytes avoided today'),
       h('span', { class: 'val' }, f.bytes(fm.bytesAvoided)),
       h('span', { class: 'ratio', 'aria-hidden': 'true' }, h('i', { style: { width: `${(avoidedFrac * 100).toFixed(2)}%` } })),
       h('span', { class: 'sub' }, `of ${f.bytes(fm.bytesMaterialized)} mounted; ${f.bytes(fm.bytesFetchedFromStore)} came from the store`)));

@@ -71,6 +71,13 @@ func newSim(seed int64) *Sim {
 	for _, p := range s.projects {
 		s.projBy[p.Name] = p
 	}
+	// Usage so far today, before the scenario starts.
+	s.projBy["harbor"].ContainerHours = map[string]float64{"cpu": 61.0, "gpu": 58.2, "spot": 3.1}
+	s.projBy["kestrel"].ContainerHours = map[string]float64{"cpu": 104.6, "ci": 51.9}
+	s.projBy["harbor"].Windows = []ProductionWindow{{Name: "Harbor production window",
+		From: time.Date(2026, 10, 1, 0, 0, 0, 0, pdt), To: time.Date(2026, 12, 20, 0, 0, 0, 0, pdt)}}
+	s.projBy["kestrel"].Windows = []ProductionWindow{{Name: "Kestrel season 2 window",
+		From: time.Date(2026, 11, 2, 0, 0, 0, 0, pdt), To: time.Date(2027, 2, 26, 0, 0, 0, 0, pdt)}}
 	s.projBy["harbor"].WorkerHours[[2]string{"gpu", "render"}] = 41.2
 	s.projBy["harbor"].WorkerHours[[2]string{"cpu", "render"}] = 66.8
 	s.projBy["harbor"].WorkerHours[[2]string{"gpu", "ml-finetune"}] = 20.2
