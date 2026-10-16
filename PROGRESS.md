@@ -25,6 +25,33 @@ daemon and the local kind cluster.
    Cinema 4D (commonly "C4D") in the same industry, the C4 model for software
    architecture diagrams, and existing trademarks. The module path and the repo
    name are unchanged; those decisions are Joshua's.
+2. **Release path.** The `replace => ../c4` blocks any public build until a c4
+   suite release carries the APIs the operator uses (release blocker 1). The
+   image registry path is also open (blocker 3).
+3. **Billing model.** Usage is metered as cluster-hours, container-hours and
+   GPU-hours (the HUD shows them; a signed ledger is designed, not built), and
+   DESIGN.md section 12 allows fixed production windows instead. Which to offer,
+   and at what prices, is a business decision.
+4. **Transport security between tiers.** Tier requests are authenticated with
+   projected service-account tokens (TokenReview) but travel as plain HTTP
+   inside the cluster. mTLS through a mesh, or the tiers' own certificates, is
+   a deployment choice to make before a multi-tenant install.
+5. **Direct mode.** In Direct mode node daemons hold a project's store
+   credentials. It is the baseline P2 measures against and suits small
+   installs; keeping it as a supported mode is a choice.
+6. **Task-record signing keys.** Records are signed with one farm key held in
+   a Secret that only node daemons mount. Per-node keys, a KMS, or keyless
+   signing (Sigstore) are stronger. C2PA credentials that validators show as
+   "Trusted" need a certificate on the C2PA Trust List, which means the C2PA
+   Conformance Program; the farm today emits manifest definitions, not signed
+   C2PA manifests.
+7. **HUD authorization model.** Controls are checked per write
+   (SubjectAccessReview) and made by the HUD's service account, with an Event
+   naming the user. Impersonation would let RBAC check the write itself but
+   needs the `impersonate` verb. The current choice is reversible.
+8. **Proposed upstream changes.** The c4, c4d, c4-containers and c4git changes
+   below were found while building; none was made. Which to take into the next
+   c4 suite release is Joshua's call.
 
 ## Release blockers
 
@@ -98,6 +125,16 @@ Those repos were read, not modified.
    RAM. Streaming to a temporary file fixes it.
 4. **`checkout` ignores depth** (from reading `checkout.go`; not executed): nested
    files land flat in the target directory.
+
+### c4git
+
+1. **The smudge filter truncates non-pointer blobs to 256 bytes.** c4git
+   1.0.18 reads 256 bytes to look for an ID and, when the blob is not a
+   pointer, writes only what it read. A file committed before its path became
+   c4git-managed is therefore truncated in a c4git checkout. Found by the
+   monorepo importer (`hack/e2e/monorepo/RESULTS.md`); the importer records
+   the blob's real content. Copying the rest of the stream after the probe
+   fixes it.
 
 ### c4-containers
 

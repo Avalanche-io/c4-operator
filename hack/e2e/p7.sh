@@ -21,6 +21,7 @@ record ""
 record "## P7: provenance ($(date -u +%Y-%m-%dT%H:%MZ))"
 record ""
 
+farm_manager
 log "the farm's signing key"
 if ! k -n c4-system get secret c4-provenance-key >/dev/null 2>&1; then
   keys=$("$OP" keygen)

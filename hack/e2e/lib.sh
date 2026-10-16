@@ -239,3 +239,15 @@ regional_pod_metric() {
   shift
   k get --raw "/api/v1/namespaces/c4-system/pods/$p:7443/proxy/metrics" 2>/dev/null | sum_series "$@"
 }
+
+# farm_manager [POLICY]: run the manager with the e2e farm's settings: the
+# kind-sim capacity provider, development HUD viewers, the farm's time zone.
+farm_manager() {
+  local policy=${1:-objective} want
+  want="[\"manager\",\"--capacity-provider=kind-sim\",\"--work-policy=$policy\",\"--hud-dev-viewers=wrangler=*;artist=show-a\",\"--tz=America/Los_Angeles\"]"
+  if [ "$(k -n c4-system get deploy c4-manager -o jsonpath='{.spec.template.spec.containers[0].args}' | tr -d ' ')" != "$want" ]; then
+    k -n c4-system patch deploy c4-manager --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args\",\"value\":$want}]" >/dev/null
+  fi
+  k -n c4-system rollout status deploy/c4-manager --timeout=180s >/dev/null
+  until curl -sf "http://127.0.0.1:30080/api/v1/snapshot?as=wrangler" >/dev/null; do sleep 1; done
+}

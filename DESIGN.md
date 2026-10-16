@@ -2199,6 +2199,37 @@ with 8 workers in two localities. Results land in
   kind cluster; a tampered record detected; and the generative-use query
   answered for a delivery that contains a generated element.
 
+### 18.1 As run
+
+What the phase scripts (`hack/e2e/p1.sh` to `p7.sh`) show, against the plan
+above. `REPORT-v2.md` has the numbers.
+
+- **P1 to P3** ran as planned.
+- **P4** imports the synthetic monorepo into MinIO and runs CI shards on
+  consecutive commits (cold, delta, warm mounts) and API-only diffs checked
+  against `git diff`. Push-to-view latency was measured on local stores by
+  `hack/e2e/monorepo/pushlat` (`hack/e2e/monorepo/RESULTS.md`), not against
+  MinIO.
+- **P5** ran deadlines, binary order with its estimate scored against what
+  the units cost, a CI change under a latency target, two training runs
+  yielding at checkpoints and resuming from their captured views, and a burst
+  through the kind-sim provider, with live HUD screenshots. Not shown on the
+  cluster: a comp job pipelined on a render's output chain (each job's
+  output is a sealed chain, but downstream units start when the upstream job
+  succeeds, through `fromJob`), and generators expanding (the policy and the
+  simulator handle them; the queue's classes do not create generators yet).
+  Wrapped ML (Kueue and JobSet) is designed; the ML class runs a gang as one
+  pod holding all its slots.
+- **P6** answers the evaluation set through the MCP server with a reference
+  client (`hack/e2e/mcpcheck`) and checks the answers. A recorded session
+  of an agent using the server is not included, and the HUD's preview,
+  object and event-stream endpoints have no tools (they serve bytes and
+  streams, not answers).
+- **P7** traces a model-assisted denoise to the render it read, verifies
+  every record, and rejects a forged one. The disclosure report, the
+  forward trace (`c4_trace_forward`) and signed C2PA manifests are not built;
+  the farm emits C2PA manifest definitions and OMC assets per file.
+
 ## 19. Non-goals and not in this plan
 
 Non-goals:

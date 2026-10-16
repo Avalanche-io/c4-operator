@@ -80,6 +80,7 @@ func runImportGit(args []string) error {
 	name := fs.String("name", "", "repository name a webhook may give in \"repo\" (default: the directory name)")
 	var shards listFlag
 	fs.Var(&shards, "store", "project store shard as NAME=URL or a bare URL (s3://, c4d://, http(s)://, /path); names decide placement and must match the Project; repeatable or comma-separated; default $C4_STORE")
+	fs.Var(&shards, "shard", "the same as -store (the flag ingest takes)")
 	c4gitStore := fs.String("c4git-store", "", "c4git store directory (default REPO/.c4/store when it exists)")
 	out := fs.String("out", "", "mapping file to append one JSON line per commit to")
 	quiet := fs.Bool("quiet", false, "print only the summary")

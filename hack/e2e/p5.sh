@@ -64,7 +64,7 @@ record "## P5: the work queue on the e2e farm ($(date -u +%Y-%m-%dT%H:%MZ), poli
 record ""
 
 log "farm"
-k -n c4-system patch deploy c4-manager --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args\",\"value\":[\"manager\",\"--capacity-provider=kind-sim\",\"--work-policy=$POLICY\",\"--hud-dev-viewers=wrangler=*;artist=show-a\",\"--tz=America/Los_Angeles\"]}]" >/dev/null
+farm_manager "$POLICY"
 for ns in show-a show-b; do k -n "$ns" delete workjobs --all --wait=true >/dev/null 2>&1 || true; done
 k delete capacityrequests --all >/dev/null 2>&1 || true
 for n in $CLUSTER-worker4 $CLUSTER-worker8; do
@@ -72,7 +72,7 @@ for n in $CLUSTER-worker4 $CLUSTER-worker8; do
 done
 k apply -f "$ROOT/hack/e2e/work.yaml" -f "$ROOT/hack/e2e/hud.yaml" >/dev/null
 cold_start
-k -n c4-system rollout status deploy/c4-manager --timeout=180s >/dev/null
+farm_manager "$POLICY"
 for p in show-a show-b; do
   k patch project "$p" --type=merge -p '{"spec":{"work":{"quotas":[{"pool":"cpu","nominal":8,"borrowingLimit":8},{"pool":"gpu","nominal":4,"borrowingLimit":4},{"pool":"spot","nominal":0,"borrowingLimit":8}],"burstBudgetPerDay":"5","lateCostPerHour":"200"}}}' >/dev/null
 done

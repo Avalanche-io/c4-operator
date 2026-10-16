@@ -1,352 +1,174 @@
 # c4-operator
 
-A Kubernetes operator that gives each pod exactly the files it needs, from a
-content-addressed store, through a cache on each node. Jobs declare their inputs
-as a c4m file, a plain-text description of a directory tree in which every file
-is named by its C4 ID. The node fetches only the content it does not already
-hold and checks every byte against its ID. It then hands pods a read-only tree
-built from hardlinks. Identical bytes are fetched once per node and shared by
-every pod on that node.
+A Kubernetes operator for media and machine-learning work built on content
+identity. Every tree a pod reads or writes is a C4 view: a directory tree in
+which every file is named by its C4 ID (SMPTE ST 2114). Pods mount views
+through a CSI driver as overlay filesystems; the bytes come through node,
+peer and regional caches that fetch each object from the store about once,
+whatever the number of pods. What a pod writes is captured as a changeset when
+it exits. A deadline-driven queue runs render, CI and ML work on the same
+farm, a HUD shows it, an MCP server gives agents the same controls as people,
+and every task leaves a signed record of what it read, where it ran and what
+it wrote.
 
-It is built for heavy media: EXR sequences, ProRes, USD, and model weights.
+C4 is the Cinema Content Creation Cloud ([cccc.io](https://cccc.io)). The
+operator is rebuilt from a 2017 design by Joshua Kolden, who also wrote SMPTE
+ST 2114, the C4 ID standard.
 
-The operator is rebuilt from a 2017 design by the author, Joshua Kolden, who
-also wrote SMPTE ST 2114, the C4 ID standard.
+Status: the `v2` branch, unreleased (see [Release](#release)). Every phase is
+measured on an eight-worker kind cluster; the numbers below come from
+[`hack/e2e/out/results.md`](hack/e2e/out/results.md) and the design is in
+[`DESIGN.md`](DESIGN.md). [`REPORT-v2.md`](REPORT-v2.md) summarizes both.
 
-Status: a working MVP, unreleased. See [What it is not yet](#what-it-is-not-yet).
+## What the evidence shows
 
-## The problem
+| phase                  | what was shown on the kind cluster                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| P1 views, capture, CSI | 16 pods under Pod Security `restricted` mount one shot through the CSI driver: one shared layer per node, one writable upper per pod, a warm mount in 2 ms (cold 80 ms), no bytes hashed on the read path. Every captured output equals the tree the pod saw, recomputed on the host. The next version of the shot mounts as a delta layer: 17 objects fetched across 8 nodes.                                                                                                                                                                                                                                  |
+| P2 tiers               | 64 pods reading one 28-object shot cost the store 42 GETs through the tiers (1.5 per object), against 224 when each node fetches for itself and 1,792 when each pod does. A regional replica killed with SIGKILL mid-transfer: all 32 pods finished, 7 transfers resumed from their offsets elsewhere, none went to the store directly.                                                                                                                                                                                                                                                                         |
+| P3 isolation           | Nine attempts by one project to read another's data (by view ID, by a hand-written c4m, through both cache tiers' APIs with and without a token, through a forged CSI volume context) are refused. Strict projects get separate copies of identical bytes; Shared projects share one copy only after proving they hold it. A vendor sees exactly its granted shot; revoking the grant takes effect at the next mount, 0.1 s later.                                                                                                                                                                              |
+| P4 monorepo CI         | The synthetic monorepo (2,219 files, 401 commits, 62 c4git assets) imports into MinIO in 5.4 s (7.5 ms per commit at p50). For 16 CI shards per change, a node mounts the parent commit cold in 1.7 s, the next commit as a 3-file delta layer in 16 ms, and a rerun in 2 ms; a git clone and c4git checkout of the same commit takes 1.1 s on the host SSD. Which files changed between two commits is answered from records alone in 13 to 221 ms, identical to `git diff`.                                                                                                                                   |
+| P5 work queue          | Seven jobs from two shows on 16 cpu, 8 GPU and up to 8 burst slots: 6 of 7 deadlines met. Two training runs gave their GPU slots to an urgent render at a checkpoint and resumed from the step they saved, through the view their capture made. Burst capacity was requested and provisioned in 22 s for $0.03. The remaining-work estimate of a binary-order render was within 10% from a tenth of the way in (a render manager's mean-frame estimate: 16%). In simulation over five weeks, the policy misses 43% fewer render deadlines than manual priorities and cuts the CI p95 from 17.2 to 14.4 minutes. |
+| P6 agents              | 17 MCP tools over stdio and stateless HTTP, each a call to the HUD API as the caller. The evaluation set is answered through the tools against the live farm.                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| P7 provenance          | Each capture is signed by the node daemon as an in-toto Statement in a DSSE envelope. A frame of a model-assisted denoise traces to its render through the input view, with the declared model, oversight and consent; its C2PA definition carries the AI disclosure. Changing one field of a record breaks its signature. The key is mounted only by node daemons.                                                                                                                                                                                                                                             |
 
-A render, training, or conform job usually needs a small, precise slice of a
-large tree: one shot's plates out of a show, one checkpoint out of a model
-directory. Pipelines tend to move far more than that slice:
+The HUD on the live farm (more in [`docs/hud/live`](docs/hud/live)):
 
-- A shared filesystem mount gives every pod everything. Each pod pulls whatever
-  it touches over the network, and every pod on a node pulls the same frames
-  again.
-- Copying a job's inputs into each pod (init containers running `aws s3 sync`,
-  for example) makes N pods on a node fetch and store the same bytes N times.
-- Git and Git LFS are built for source code. A clone carries history the job
-  does not need. LFS addresses content by SHA-256 but materializes per working
-  copy. Neither has a node-level cache shared by many pods, and neither suits a
-  200 GB plate set.
-
-Identity by content changes the cost model. If a job's inputs are a list of
-content IDs, a node can tell exactly which bytes it already has. It fetches the
-rest once and serves every pod from the same copy. It can also prove that what
-it served is what was asked for.
+![The queue on the live e2e farm, mid-run](docs/hud/live/mid-queue.png)
 
 ## How it works
 
 ```
-  ConfigMap (c4m text)  or  C4 ID of a c4m in the store
-                 |
-                 v
-   +----------------------------- manager (Deployment) -----------------------------+
-   | controller: parse c4m -> resolve directory records -> apply include filter      |
-   |             -> view ID + totals -> ask the store whether every object exists    |
-   |             -> Materialization status (Ready / Failed, missing paths)           |
-   | webhook:    pod annotated c4.avalanche.io/materialize -> add init container     |
-   |             + read-only mount of the view                                       |
-   +----------------------------------------------------------------------------------+
-
-   node
-   +----------------------------------------------------------------------------------+
-   |  pod: init container --- unix socket ---> agent (DaemonSet)                     |
-   |                                             | preflight: store has every       |
-   |                                             |   object this node lacks?        |
-   |                                             | fetch missing IDs only --------------> store
-   |                                             |   (S3, c4d, or a local path)     |
-   |                                             | hash on write -> objects/<C4 ID> |
-   |                                             | hardlink -> views/<view ID>/     |
-   |  pod: workload containers <-- read-only bind of /var/lib/c4/views/<view ID>     |
-   +----------------------------------------------------------------------------------+
+                     project store (S3 shards, c4d)
+                                  |  each object about once per regional home
+            regional tier (Deployment, r = 2 homes per object, streams, resumes)
+                                  |  one request per locality
+      node daemons (DaemonSet): peer homes by rendezvous hashing within a zone
+                                  |
+   CSI NodePublishVolume: verify the pod's token, stack the view's layers
+   (hardlinks into the node cache), overlay with a private upper -> pod
+                                  |
+   NodeUnpublishVolume: capture the upper as a changeset over the view,
+   store it, sign a task record, annotate the pod
 ```
 
-**Materialization** (namespaced CRD, `c4.avalanche.io/v1alpha1`) names a c4m
-source, a store, and optionally a list of `include` patterns. The include list
-is the sparse part: only those paths are materialized. When the source is a
-snapshot stored as per-directory records (as `c4 id -s` writes them), the
-resolver never fetches the records of directories the filter cannot reach.
+- **Views and records** (`internal/view`). A view's ID is the C4 ID of its
+  root record; directory records are stored like any object, so a node loads
+  only the parts of a tree its filter reaches. A changeset is a c4m patch
+  sealed by the view it produces, and changesets append into chains that the
+  c4 CLI reads (`c4 log`, `c4 split`).
+- **Tiers** (`internal/tier`, `internal/fill`). One content API at every
+  tier. Fills are coalesced (one upstream fetch per object, however many
+  waiters), streamed to waiters while they arrive, shed with `503` and
+  `Retry-After` past capacity, and resumed from their offset at another home
+  when an upstream dies.
+- **Isolation** (`internal/project`, `internal/auth`). A Project names its
+  namespaces, its store shards and credentials (in a Secret only the operator
+  reads), Strict or Shared caching, and optional grants. Pods never fetch by
+  ID; they mount Materializations in their own namespace, resolved through
+  their project's store.
+- **Work** (`internal/work`). A queue in the manager releases units as pods
+  only when they can run, in an order derived from each job's deadline and an
+  estimate of its remaining work. Slots are an extended resource, so
+  kube-scheduler places units as the queue counts them. There are no
+  priorities: people move deadlines, boost or hold.
+- **HUD** (`internal/hud`) and **MCP** (`internal/mcpserver`): one API, two
+  faces. **Provenance** (`internal/provenance`): task records, lineage, C2PA
+  and OMC exports.
 
-**Controller.** The controller resolves the source into a *view*: the exact
-directories and files a pod will see. It computes the view's ID, counts files
-and unique bytes, and checks the store for every unique object. A
-Materialization whose content is missing goes `Failed` and lists sample paths.
-It is rechecked every minute, so uploading the content heals it.
+## Try it
 
-**View ID.** `status.viewID` is the content-level C4 ID of the tree pods
-receive. It uses c4's content projection: names, sizes, and IDs are real, and
-modes and timestamps are null. The controller computes it from the description,
-and anyone can recompute it from the materialized directory:
-`c4-operator tree-id /assets` scans with the c4 library in content mode. The
-e2e test makes every pod do this.
+Requirements: Docker, kind 0.33, Go 1.26, kubectl. Everything runs on one
+machine; nothing is pushed anywhere.
 
-**Webhook.** The webhook acts only on pods that carry the annotation (a CEL
-`matchCondition`), so failing closed cannot block unrelated pods. It admits a
-pod only once its Materialization has a view. It then adds an init container,
-two hostPath volumes, and a read-only mount at the requested path in every other
-container. The workload's image and command are not touched.
-
-**Agent.** The agent owns `/var/lib/c4` on its node:
-
-```
-/var/lib/c4/objects/            c4 TreeStore, one file per C4 ID, mode 0444
-/var/lib/c4/views/<view ID>/    the tree, every file a hardlink into objects/
-/var/lib/c4/meta/<view ID>.c4m  the view's description, rechecked on load
-/var/lib/c4/agent/agent.sock    what init containers talk to
-```
-
-For each request it:
-
-1. Loads the view (from `meta/`, or by resolving the Materialization), and
-   refuses if the view no longer matches what the pod was admitted for.
-2. Asks the store about every object the node lacks, and fails before fetching
-   anything if one is missing.
-3. Fetches missing objects in parallel. A fetched object is named by the hash of
-   the bytes actually written (c4 `TreeStore.Put`), so a wrong or truncated
-   response can never appear under the requested ID.
-4. Checks cached objects. Every cached object carries a fixed mtime (c4m's null
-   timestamp), so any write to it, including a write through a view, moves the
-   mtime and fails the check. A failed object is rehashed and refetched.
-   `verify: Full` rehashes every object on every request.
-5. Confirms each file in the existing tree is the same inode as the cached
-   object, and otherwise builds a new tree in a temporary directory and renames
-   it into place.
-6. Reports hits, misses, refetches, bytes, and timing into
-   `status.nodes[<node>]`.
-
-The filesystem is the cache index. An object's link count is its reference
-count, its atime is its LRU position, and its mtime is the verification
-sentinel. Eviction removes unlinked objects in LRU order. Under pressure it also
-removes trees that no pod on the node uses and whose `retainOnNode` has passed.
-A tree replaced by a rebuild is renamed aside rather than deleted, because
-running pods still mount it. It is removed once no pod uses that view.
-
-**Why the tree is built inside the cache volume.** `link(2)` returns `EXDEV`
-across two bind mounts, even when both sit on one filesystem. An init container
-therefore cannot hardlink from a hostPath cache into a pod's `emptyDir`. The
-agent builds each tree once per node next to the objects, and pods mount it
-read-only. Fifty pods reading one plate set read one set of inodes. If the cache
-and the views are ever on different filesystems, the builder falls back to
-copying and reports the copies.
-
-## Quickstart (kind)
-
-Requirements: Go 1.26+, Docker, kubectl, and the `c4` CLI (`brew install
-mrjoshuak/tap/c4`) for the end-to-end run. The tools install silently:
-
-```bash
-make tools          # controller-gen, setup-envtest, kind (go install)
-make envtest        # downloads kube-apiserver and etcd for envtest
-make test           # unit tests and envtest
-make e2e            # kind cluster + MinIO + the full scenario below
-make e2e-down       # delete the cluster
+```sh
+hack/e2e/up.sh          # kind cluster (8 workers, 2 zones), MinIO, the operator, projects
+hack/e2e/p1.sh          # views, capture, CSI
+hack/e2e/p2.sh          # tiers and herds
+hack/e2e/p3.sh          # isolation
+hack/e2e/p5.sh          # the work queue (sets up pools; run before p4, p6, p7)
+hack/e2e/p4.sh          # monorepo CI
+hack/e2e/p7.sh          # provenance
+hack/e2e/p6.sh          # the MCP evaluation
+go run ./hack/sim       # the scheduling simulation
 ```
 
-`make e2e` (`hack/e2e/run.sh`) does the following:
+The HUD is at <http://127.0.0.1:30080/?as=wrangler> (the e2e runs the HUD
+with development viewers; `?as=artist` sees one show). To give Claude Code
+the farm's tools:
 
-1. Creates a single-node kind cluster, builds `c4-operator:dev` locally, loads it
-   into kind, and deploys the operator with `kubectl apply -k config/default`.
-2. Runs MinIO in the cluster as the store.
-3. Generates a synthetic show (131 files, 2.77 GiB) of deterministic
-   pseudo-random EXR-sized frames, a reference movie, and a model file. Some files
-   are byte-identical within a shot and across shots.
-4. Snapshots the show into MinIO with the released `c4` CLI
-   (`c4 id -s show > show.c4m`).
-5. Creates three Materializations:
-   - `sh010`: from a ConfigMap holding `show.c4m`, with include
-     `shots/sh010/`, `editorial/`, `weights/`.
-   - `sh020`: from the stored c4m's C4 ID, with include `shots/sh020/`,
-     `weights/`.
-   - `missing`: names a file that was never uploaded.
-6. Starts render pods that run `tree-id --expect <viewID> /assets` as a
-   non-root user: two pods on `sh010`, one on `sh020`, a fourth `sh010` pod
-   after corrupting a cached frame, and one on `missing`.
-7. Asserts the results and writes the measurements to
-   `hack/e2e/out/results.md`.
-
-To use it by hand after `make e2e`:
-
-```bash
-kubectl -n render get materializations -o wide
-kubectl -n render logs render-sh010-a -c c4-materialize
-kubectl -n c4-system logs ds/c4-operator-agent
+```sh
+go build -o bin/c4-operator ./cmd/c4-operator
+claude mcp add c4-farm -- "$PWD/bin/c4-operator" mcp --hud http://127.0.0.1:30080 --as wrangler
 ```
 
-A pod asks for a Materialization with two annotations:
+and see [`skills/c4-farm`](skills/c4-farm/SKILL.md) and
+[`docs/agents/tools.md`](docs/agents/tools.md). The HUD can also run against a
+synthetic farm with no cluster: `go run ./hack/hudmock`.
 
-```yaml
-metadata:
-  annotations:
-    c4.avalanche.io/materialize: sh010          # Materialization in the pod's namespace
-    c4.avalanche.io/mount-path: /assets         # default /c4
+## Commands
+
 ```
-
-See [`config/samples/materialization.yaml`](config/samples/materialization.yaml)
-for a full Materialization and a 50-pod Job.
-
-## Measured results
-
-Environment: kind v0.33.0 (Kubernetes v1.37.0), one node, on Docker Desktop
-(linuxkit 7.0.14) on an Apple Silicon Mac with 16 cores. The store is MinIO in
-the same cluster, so "fetch" here means a local network hop and disk, not a WAN.
-Frames are 16 MiB. Run of 2026-10-16:
-
-| pod            | Materialization | wall to Ready (s) | agent ms | objects | cached | fetched | refetched | bytes fetched | bytes in tree |
-| -------------- | --------------- | ----------------- | -------- | ------- | ------ | ------- | --------- | ------------- | ------------- |
-| render-sh010-a | sh010           | 1.74              | 877      | 50      | 0      | 50      | 0         | 1,610,612,736 | 1,610,612,736 |
-| render-sh010-b | sh010           | 0.93              | 3        | 50      | 50     | 0       | 0         | 0             | 1,610,612,736 |
-| render-sh020-a | sh020           | 1.02              | 181      | 49      | 25     | 24      | 0         | 402,653,184   | 1,358,954,496 |
-| render-sh010-c | sh010           | 1.23              | 29       | 50      | 49     | 1       | 1         | 16,777,216    | 1,610,612,736 |
-
-- *wall to Ready*: from `kubectl apply` of the pod to its Ready condition,
-  including scheduling, both containers starting, and the workload scanning its
-  tree.
-- *agent ms*: the agent's own time for the request: preflight, fetch and verify,
-  and the tree check or build.
-- `render-sh010-c` started after one cached frame was overwritten through the
-  view on the node. The agent caught the moved mtime, refetched that one frame,
-  and rebuilt the tree. `render-sh010-a`, still running, kept its original tree.
-
-Totals for the four pods on the node:
-
-| measure                                        | value                      |
-| ---------------------------------------------- | -------------------------- |
-| unique objects in the store (whole show)       | 106                        |
-| unique objects fetched to the node             | 74, each once (+1 refetch) |
-| bytes fetched from the store                   | 2,030,043,136 (1.89 GiB)   |
-| bytes materialized into pods                   | 6,190,792,704 (5.77 GiB)   |
-| bytes on the node's disk                       | 2,013,265,920 (1.88 GiB)   |
-| fetched / materialized                         | 0.33                       |
-| `shots/sh030/` (in the store, never requested) | 0 bytes fetched            |
-
-Every pod scanned its mount and got its Materialization's `viewID`. The e2e
-also builds each expected subset on the host from hardlinks and scans it with
-the c4 scanner. The controller's `viewID` matched both.
-
-Cold versus warm: in this setup a cold request moved 1.5 GiB in 0.88 s, about
-1.8 GB/s, which is local disk and SHA-512 throughput. Against a real object
-store, cold time is bytes fetched divided by store bandwidth, while warm time
-stays a stat per file. The warm `sh010` request took 3 ms for 50 files. `sh020`
-reused the shared weights and 24 shared frames and fetched only its 24 unique
-frames.
-
-Failure cases, from the same run:
-
-- Missing content. The `missing` Materialization went `Failed` with
-  `missing: 1`. Its pod's init container exited with
-  `content missing from store: 1 of 2 objects, e.g. plates/never-uploaded.exr (c418Yf...)`
-  before fetching anything, and the workload container never started.
-- Unknown Materialization. Admission refused the pod: `admission webhook
-  "pods.c4.avalanche.io" denied the request: materialization
-  "no-such-materialization": ... not found`.
-
-Status after the run (abridged):
-
-```yaml
-status:
-  phase: Ready
-  sourceID: c42RKtpjnbycDqTnuRfBpM8j7oBGE3RgLthFtHvdMhtJkqdWmrTb2ht6omQhQ8ZJaHM38Fg8CBMM5aCS9uNnH7HqwC
-  rootID: c45NhuUT8z7Q7dDJB2ocpK1HWZPDnFTtAuiNtAZq5ig2QuBiSmEWwcrT8seqG2mZij2VCkRLAU98JeKFaGTgLnXDLo
-  viewID: c44SYdn8GXJmDnyttxEyo1oDS68wzSmXweGyJ4e6n1mvL4d2XEjm8VtMERTmPLZNb28Diz2dNGqbvCZm3HAUtp21Q4
-  files: 50
-  bytes: 1610612736
-  uniqueObjects: 50
-  uniqueBytes: 1610612736
-  nodes:
-  - node: c4-operator-e2e-control-plane
-    requests: 3
-    hits: 99
-    misses: 51
-    refetched: 1
-    bytesFetched: 1627389952
-    bytesMaterialized: 4831838208
-    lastReadyMillis: 29
+c4-operator manager      controllers, the work queue, the HUD, the pod webhook
+c4-operator node         CSI node plugin, node cache, peer tier, capture, task records
+c4-operator regional     regional cache tier
+c4-operator ingest       hash a directory into a project's store; print its view ID
+c4-operator import-git   import a git history (with c4git assets) as views, changesets and chains
+c4-operator mcp          the farm's MCP server, over stdio or Streamable HTTP
+c4-operator keygen       an Ed25519 key for signing task records
+c4-operator tree-id      the view ID of a directory
 ```
-
-The `sh010` (ConfigMap) and `sh020` (stored ID) Materializations report the
-same `rootID`, because they describe the same show. The ConfigMap's `sourceID`
-equals the ID the `c4` CLI printed when it stored the c4m.
-
-## Relation to C4 and SMPTE ST 2114
-
-A C4 ID is a SHA-512 digest encoded as a 90-character string that starts with
-`c4`, as standardized in SMPTE ST 2114:2017. Because the ID is derived from the
-bytes, any holder of the bytes can check them. That is what lets the node trust
-its cache: it never trusts a name, only a recomputation.
-
-A c4m file describes a filesystem: one line per entry with mode, timestamp,
-size, name, and C4 ID, nested by indentation. It is small enough for a
-ConfigMap. The `show.c4m` for the 2.77 GiB e2e show is 21 KB.
-
-This operator is a consumer of the C4 ecosystem, not a fork of it. It imports
-the [c4 Go module](https://github.com/Avalanche-io/c4) for IDs, c4m parsing,
-base-chain resolution, the content-mode scanner, and the `TreeStore` and
-`S3Store` backends. It reads stores written by the `c4` CLI and the
-`avalancheio/c4` images, with the same `C4_STORE` URL forms
-(`s3://bucket/prefix?region=..&endpoint=..`). It follows c4's "push intent, pull
-content" model: the c4m (intent) travels through the Kubernetes API, and each
-node pulls content by ID.
-
-## What it is not yet
-
-- **Not released.** `go.mod` uses a local `replace` for the c4 module, because
-  the operator needs c4 APIs that are on `master` but in no release yet. See
-  `PROGRESS.md`.
-- **hostPath, not CSI.** Pods mount the view through a hostPath volume, which
-  namespaces under the Pod Security `baseline` or `restricted` levels reject. A
-  CSI node plugin publishing the view as an inline ephemeral volume is the right
-  long-term interface. It would also remove the init container.
-- **Trust boundary.** Any process that can reach the agent socket can ask the
-  node to materialize any Materialization in any namespace. Only pods with the
-  injected hostPath can reach it, but the agent does not yet check that the
-  caller's namespace matches the request. The agent and controller read store
-  credentials from Secrets in the Materialization's namespace, so the agent's
-  ClusterRole can get Secrets cluster-wide.
-- **Read-only trees.** Views are mounted read-only and every file is mode 0444.
-  Executable bits and per-file timestamps from the c4m are not applied, because
-  hardlinked files share one inode and the views are content-level. There is no
-  writable overlay for jobs that edit their inputs in place.
-- **No output capture.** The `render-pipeline.yaml` pattern (scan an output
-  directory, store new content, write `output.c4m`) is not implemented.
-- **No cache-aware scheduling.** Pods are not steered toward nodes that already
-  hold most of a view. The per-node numbers in `status.nodes` are the input such
-  a scorer would need.
-- **No peer or regional tier.** Each node fetches from the store. Nodes do not
-  fetch from each other, and there is no shared regional cache between the
-  nodes and the store.
-- **Corruption detection is cheap by default.** `verify: Stat` catches writes,
-  which move the mtime. It does not catch bit rot, or a write followed by
-  resetting the mtime. `verify: Full` catches both, at the cost of rehashing on
-  every request. There is no background scrubber.
-- **Changing a Materialization under running pods.** A pod is admitted for one
-  view. If the spec or ConfigMap changes before the pod's init container runs on
-  a node that has never seen the old view, the init container fails and asks for
-  the pod to be recreated.
-- **Unreachable stores look like missing content** (c4's `S3Store.Has` returns
-  false on network errors).
-- **Symlinks** are materialized as recorded, but trees with symlinks are not
-  covered by the `tree-id` equality check.
-- **Scale untested.** The e2e uses one node, 131 files, and 2.8 GiB. Trees with
-  millions of files, many nodes, and eviction under real pressure have only unit
-  test coverage.
 
 ## Layout
 
 ```
-api/v1alpha1/          Materialization types
-cmd/c4-operator/       one binary: manager, agent, ensure (init), tree-id
-internal/manifest/     c4m source -> view: records, bases, sequences, include filter, view ID
-internal/storeurl/     C4_STORE URL forms -> read-only store
-internal/cache/        node cache: fetch, verify, refetch, LRU eviction, view metadata
-internal/tree/         hardlinked tree builder and checker
-internal/agent/        node agent: socket API, preflight, status reporting, GC loop
-internal/controller/   reconciler (envtest)
-internal/webhook/      pod mutation, self-managed webhook certificate
-config/                CRD, RBAC, manager, agent, webhook, samples (kustomize)
-hack/e2e/              kind config, MinIO, seed tool, run.sh
+api/v1alpha1/          Materialization, Project, WorkJob, Pool, CapacityRequest
+cmd/c4-operator/       the one binary
+internal/view/         views, records, filters, changesets, chains, diffs
+internal/tier/         the content API, fetcher, server, uploader
+internal/fill/         coalesced, streamed fills with admission limits
+internal/objcache/     partitioned node cache
+internal/layer/        layers (full and delta), whiteouts, stacks
+internal/overlay/      overlayfs mounts and upper walks
+internal/capture/      upper -> changeset -> store
+internal/node/         the node daemon: CSI, publish, capture, records, GC
+internal/controller/   Materialization and Project controllers (envtest)
+internal/project/      projects, stores, credentials
+internal/auth/         TokenReview for pods and tiers
+internal/work/         order, estimate, sched (policy), class, queue, kindsim
+internal/hud/          web app, API types, backend
+internal/mcpserver/    MCP tools over the HUD API
+internal/provenance/   task records, DSSE, C2PA and OMC exports
+internal/gitimport/    git history -> views, changesets, chains
+hack/e2e/              the kind cluster and the phase scripts
+hack/sim/              the scheduling simulation
+hack/hudmock/          a synthetic farm behind the HUD API
 ```
+
+## Relation to C4, SMPTE ST 2114 and Scion
+
+A C4 ID is a SHA-512 digest encoded as a 90-character string that starts with
+`c4`, standardized in SMPTE ST 2114:2017. Because the ID is derived from the
+bytes, any holder of the bytes can check them. The operator imports the
+[c4 Go module](https://github.com/Avalanche-io/c4) for IDs, c4m and its
+stores, and reads and writes stores the c4 CLI uses.
+
+Anthropic's [Scion](https://www.anthropic.com/engineering/redesigning-source-control)
+showed what a content-addressed tree service does for a monorepo's CI. This
+project takes the same idea to media pipelines, with one difference in the
+monorepo case: Scion made source control server-side, while here git stays
+where it is and its history is mirrored into C4 views (`import-git`, push by
+push).
+
+## Release
+
+Not released. `go.mod` replaces the c4 module with a local checkout until a c4
+release carries the APIs the operator uses; the image registry path is open.
+See [`PROGRESS.md`](PROGRESS.md) for the release blockers, the open decisions,
+and changes proposed for c4, c4d, c4git and c4-containers.
+
+This system was designed and built with Claude, working as Joshua's
+engineering agent.
 
 ## License
 

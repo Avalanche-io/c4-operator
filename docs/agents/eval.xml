@@ -1,0 +1,50 @@
+<!--
+  Questions an agent should answer using only the c4-farm MCP server
+  (c4-operator mcp), on the e2e farm after hack/e2e/p5.sh and hack/e2e/p7.sh.
+  Every answer is read-only and comes from content or configuration the e2e
+  makes the same way on every run (deterministic renders, fixed pools).
+  hack/e2e/p6.sh answers each question through the MCP server the way a
+  reference agent would and checks it against these answers.
+-->
+<evaluation>
+  <qa_pair>
+    <question>The denoise job show-a/sh050-denoise-v001 mounted another job's output as its input. Which job produced that input? Answer as namespace/name.</question>
+    <answer>show-a/sh050-render-v001</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>According to its signed task records, which generative model did show-a/sh050-denoise-v001 declare, and at what level of human oversight? Answer as model,level.</question>
+    <answer>denoise-v3,human_validated</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>In the C2PA manifest definition the farm produces for frame 1004 of show-a/sh050-render-v001 (renders/sh050/sh050.1004.exr), what digital source type does the c2pa.created action carry? Give only the last segment of the IRI.</question>
+    <answer>algorithmicMedia</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What C4 ID does the farm's task record give for the file renders/sh050/sh050.1004.exr written by show-a/sh050-render-v001?</question>
+    <answer>c44f7BwBRDCFeGq5z8Wj727QonKYLS7pyTGnCD9LCAqHFpB9m6dNQNqEWTNEHLN8dL2hKermesKWKvxHtEQ7aooWnj</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many unit changesets have been folded into the output view of show-a/sh010-comp-v003?</question>
+    <answer>96</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which range of frames of show-a/sh010-comp-v003 did the estimator flag as heavy? Answer as first-last.</question>
+    <answer>1040-1052</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>Which two worker nodes make up the farm's spot pool? Answer with their names in alphabetical order, separated by a comma.</question>
+    <answer>c4-operator-e2e-worker4,c4-operator-e2e-worker8</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>How many slots does each node in the farm's gpu pool provide?</question>
+    <answer>4</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>One of show-b's training runs gave up its GPU slots because show-a needed its nominal quota back (the reclaim-nominal rule). Which run was it? Answer with the job's name.</question>
+    <answer>train-denoise</answer>
+  </qa_pair>
+  <qa_pair>
+    <question>What does a slot-hour cost in the farm's cpu pool, in US dollars?</question>
+    <answer>0.40</answer>
+  </qa_pair>
+</evaluation>
