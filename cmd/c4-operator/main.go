@@ -1,9 +1,10 @@
 // Command c4-operator is every component of the operator in one binary.
 //
-//	c4-operator tree-id DIR     view ID of a directory
-//
-// The manager, node daemon, regional tier and tools are added as they
-// land on branch v2.
+//	c4-operator manager    controllers and the pod webhook (Deployment)
+//	c4-operator node       CSI node plugin, node cache, peer tier (DaemonSet)
+//	c4-operator regional   regional cache tier (Deployment)
+//	c4-operator ingest     hash a directory into a project's store
+//	c4-operator tree-id    view ID of a directory
 package main
 
 import (
@@ -13,13 +14,21 @@ import (
 	"os"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 const usage = `usage: c4-operator <command> [flags]
 
 commands:
-  tree-id   print the view ID of a directory
+  manager    run the controllers and the pod webhook
+  node       run the node daemon (CSI node plugin, cache, peer tier)
+  regional   run a regional cache replica
+  ingest     hash a directory into a project's store and print its view ID
+  tree-id    print the view ID of a directory
 `
 
 func main() {
@@ -28,18 +37,40 @@ func main() {
 		os.Exit(2)
 	}
 	cmd, args := os.Args[1], os.Args[2:]
-	var err error
-	switch cmd {
-	case "tree-id":
-		err = runTreeID(args)
-	default:
+	commands := map[string]func([]string) error{
+		"manager":  runManager,
+		"node":     runNode,
+		"regional": runRegional,
+		"ingest":   runIngest,
+		"tree-id":  runTreeID,
+	}
+	run, ok := commands[cmd]
+	if !ok {
 		fmt.Fprint(os.Stderr, usage)
 		os.Exit(2)
 	}
-	if err != nil {
+	if err := run(args); err != nil {
 		fmt.Fprintln(os.Stderr, "c4-operator "+cmd+": "+err.Error())
 		os.Exit(1)
 	}
+}
+
+func newScheme() *runtime.Scheme {
+	s := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(s); err != nil {
+		panic(err)
+	}
+	if err := c4v1.AddToScheme(s); err != nil {
+		panic(err)
+	}
+	return s
+}
+
+func env(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }
 
 func runTreeID(args []string) error {

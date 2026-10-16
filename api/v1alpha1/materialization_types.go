@@ -115,6 +115,11 @@ type MaterializationStatus struct {
 	// Project that owns this Materialization's namespace.
 	// +optional
 	Project string `json:"project,omitempty"`
+	// ProjectGeneration is the generation of the Project the status was
+	// resolved under; a change to the Project's store or grants resolves
+	// again.
+	// +optional
+	ProjectGeneration int64 `json:"projectGeneration,omitempty"`
 	// SourceID identifies the exact description resolved.
 	// +optional
 	SourceID string `json:"sourceID,omitempty"`
