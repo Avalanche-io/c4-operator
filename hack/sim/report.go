@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"sort"
 	"strconv"
@@ -362,7 +363,7 @@ func writeOrderSection(b *strings.Builder, o *orderResults) {
 		}
 	}
 	table(b, head, rows)
-	b.WriteString("![remaining-time error against elapsed time](order_error.svg)\n\n")
+	b.WriteString("Relative error grows near the end of every render because the true remainder approaches zero; the chart therefore shows the absolute error as a fraction of the render, averaged over trials with a heavy region of 3x or more.\n\n![remaining-time error against elapsed time](order_error.svg)\n\n")
 
 	fmt.Fprintf(b, "### Heavy region flagged, and slack settled\n\nA heavy region is flagged when the estimator reports a run of frames above %.0fx the reference cost that overlaps the true region (a running frame counts once its elapsed time alone is above the threshold). Times are fractions of the render. False flags are trials in which a region not overlapping the true one was flagged at some moment. The deadline is set so the true slack is %.0f%% of the render; the slack estimate is within the band when its error is at most %.0f%% of the true slack, and has settled when it stays in the band from then on (trials that never settle count as 1.00).\n\n",
 		p.HeavyFactor, 100*p.SlackFrac, 100*p.SettleFrac)
@@ -476,17 +477,27 @@ func writeParams(b *strings.Builder, p params, o *orderResults) {
 	fmt.Fprintf(b, "Manual baseline priorities by job type: %s, plus the show bonus. Quotas apply only to the objective policy; the baselines have none.\n\n", strings.Join(mp, ", "))
 
 	b.WriteString("### Workload\n\n```\n")
-	b.WriteString(strings.ReplaceAll(fmt.Sprintf("%+v", p), " ", "\n"))
+	b.WriteString(fields(p))
 	b.WriteString("\n```\n\nRender jobs whose frames are generators evaluate a scene description (45 s median, on the job's pool) and expand into a shadow pass (0.2x the frame's cost), a reflection pass with a per-job probability (0.3x), and a beauty pass that depends on both. CI pipelines are a build that discovers 4 + Poisson(10) shards from a fixed monorepo of 400 test targets, each with its own duration and failure rate; shards run in order of failure rate. Failures happen per attempt (render and CI 2%, the fourth attempt always succeeds; ML runs at 0.5% per hour of progress) and are drawn from the seed and the unit, so every policy sees the same failures. ML runs checkpoint at a per-run interval; a yield waits for the next checkpoint and loses only restore time, a kill loses the work since the last checkpoint.\n\nThe estimator's history priors are built from 2,400 render jobs and 3,000 CI pipelines drawn from the same generator with a seed no experiment uses, so they describe the population a job comes from, not the job. An ML run's prior is its declared length (steps times historical step time), off by a lognormal factor with sigma 0.15.\n\n")
 
 	b.WriteString("### Policy settings\n\n```\n")
-	b.WriteString(strings.ReplaceAll(fmt.Sprintf("%+v", sched.DefaultConfig()), " ", "\n"))
+	b.WriteString(fields(sched.DefaultConfig()))
 	fmt.Fprintf(b, "\n```\n\nSimulation: a decision at most every %.0f s after a change and at least every %.0f s; a job's estimate is refreshed on change or every %.0f s while it runs. The Manual wrangler reviews every 2 hours.\n\n", coalesce, heartbeat, stale)
 	if o != nil {
 		b.WriteString("### Binary-order experiment\n\n```\n")
-		b.WriteString(strings.ReplaceAll(fmt.Sprintf("%+v", o.P), " ", "\n"))
+		b.WriteString(fields(o.P))
 		b.WriteString("\n```\n\n")
 	}
+}
+
+// fields lists a struct's fields one per line as "Name: value".
+func fields(v any) string {
+	rv := reflect.ValueOf(v)
+	var lines []string
+	for i := 0; i < rv.NumField(); i++ {
+		lines = append(lines, fmt.Sprintf("%s: %v", rv.Type().Field(i).Name, rv.Field(i).Interface()))
+	}
+	return strings.Join(lines, "\n")
 }
 
 func writeCSVs(dir string, p params, pols []policySpec, res map[string][]*runResult, o *orderResults) error {
@@ -551,16 +562,36 @@ func writeCSVs(dir string, p params, pols []policySpec, res map[string][]*runRes
 		return nil
 	}
 	var trials, errs [][]string
+	type cell struct {
+		n    int
+		mult float64
+		arm  string
+	}
+	sums := map[cell][][3]float64{} // per grid moment: sum |rel|, sum signed rel, count
+	var cells []cell
 	for _, r := range o.Rows {
-		trials = append(trials, []string{strconv.Itoa(r.N), ff(r.Mult), strconv.Itoa(r.Trial), r.Arm, ff(r.Makespan / hour), ff(r.FlagAt), strconv.FormatBool(r.FalseFlag), ff(r.SettleAt)})
+		trials = append(trials, []string{strconv.Itoa(r.N), ff(r.Mult), strconv.Itoa(r.Trial), r.Arm, ff(r.Makespan / hour), ff(r.FlagAt), strconv.FormatBool(r.FalseFlag), ff(r.SettleAt), ff(r.InBand)})
+		k := cell{r.N, r.Mult, r.Arm}
+		if sums[k] == nil {
+			sums[k] = make([][3]float64, len(r.AbsErr))
+			cells = append(cells, k)
+		}
 		for g := range r.AbsErr {
-			errs = append(errs, []string{strconv.Itoa(r.N), ff(r.Mult), strconv.Itoa(r.Trial), r.Arm, ff(float64(g+1) / float64(o.P.GridPoints+1)), strconv.FormatFloat(r.SignedErr[g], 'f', 4, 64)})
+			sums[k][g][0] += r.AbsErr[g]
+			sums[k][g][1] += r.SignedErr[g]
+			sums[k][g][2]++
 		}
 	}
-	if err := write("order_trials.csv", []string{"frames", "mult", "trial", "arm", "makespan_h", "flag_at", "false_flag", "settle_at"}, trials); err != nil {
+	for _, k := range cells {
+		for g, v := range sums[k] {
+			f := float64(g+1) / float64(o.P.GridPoints+1)
+			errs = append(errs, []string{strconv.Itoa(k.n), ff(k.mult), k.arm, ff(f), strconv.FormatFloat(v[0]/v[2], 'f', 4, 64), strconv.FormatFloat(v[1]/v[2], 'f', 4, 64), strconv.Itoa(int(v[2]))})
+		}
+	}
+	if err := write("order_trials.csv", []string{"frames", "mult", "trial", "arm", "makespan_h", "flag_at", "false_flag", "settle_at", "in_band_share"}, trials); err != nil {
 		return err
 	}
-	return write("order_error.csv", []string{"frames", "mult", "trial", "arm", "elapsed_frac", "signed_rel_error"}, errs)
+	return write("order_error.csv", []string{"frames", "mult", "arm", "elapsed_frac", "mean_abs_rel_error", "mean_signed_rel_error", "trials"}, errs)
 }
 
 // Chart styling: the light surface and the first three categorical slots
@@ -589,7 +620,7 @@ func orderErrorSVG(o *orderResults) string {
 	var s strings.Builder
 	fmt.Fprintf(&s, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" font-family="Helvetica, Arial, sans-serif">`+"\n", W, H, W, H)
 	fmt.Fprintf(&s, `<rect width="%d" height="%d" fill="%s"/>`+"\n", W, H, svgSurface)
-	fmt.Fprintf(&s, `<text x="%d" y="24" font-size="15" fill="%s">Remaining-time estimate error, shots with a heavy region of 3x or more</text>`+"\n", L, svgInk)
+	fmt.Fprintf(&s, `<text x="%d" y="24" font-size="15" fill="%s">Remaining-time estimate error, shots with a heavy region of 3x or more (%d trials per arm)</text>`+"\n", L, svgInk, len(orderCells(o, "binary", func(m float64) bool { return m >= 3 })))
 	for _, v := range []float64{0, 0.25, 0.5, 0.75, 1} {
 		fmt.Fprintf(&s, `<line x1="%d" x2="%.1f" y1="%.1f" y2="%.1f" stroke="%s"/>`+"\n", L, x(1), y(v), y(v), svgGrid)
 		fmt.Fprintf(&s, `<text x="%d" y="%.1f" font-size="11" fill="%s" text-anchor="end">%.2f</text>`+"\n", L-8, y(v)+4, svgInk2, v)
@@ -598,18 +629,18 @@ func orderErrorSVG(o *orderResults) string {
 		fmt.Fprintf(&s, `<text x="%.1f" y="%d" font-size="11" fill="%s" text-anchor="middle">%.0f%%</text>`+"\n", x(f), H-B+18, svgInk2, 100*f)
 	}
 	fmt.Fprintf(&s, `<text x="%.1f" y="%d" font-size="12" fill="%s" text-anchor="middle">elapsed time, fraction of the render</text>`+"\n", x(0.5), H-12, svgInk2)
-	fmt.Fprintf(&s, `<text transform="translate(18 %.1f) rotate(-90)" font-size="12" fill="%s" text-anchor="middle">mean |estimate - truth| / truth, capped at 1</text>`+"\n", y(0.5), svgInk2)
+	fmt.Fprintf(&s, `<text transform="translate(18 %.1f) rotate(-90)" font-size="12" fill="%s" text-anchor="middle">mean |error|, fraction of the render</text>`+"\n", y(0.5), svgInk2)
 	for i, arm := range orderArms {
 		cells := orderCells(o, arm, func(m float64) bool { return m >= 3 })
 		var pts []string
 		var last end
 		for g := 0; g < o.P.GridPoints; g++ {
+			f := float64(g+1) / float64(o.P.GridPoints+1)
 			var xs []float64
 			for _, c := range cells {
-				xs = append(xs, c.AbsErr[g])
+				xs = append(xs, math.Abs(c.SignedErr[g])*(1-f))
 			}
 			m, _ := meanSD(xs)
-			f := float64(g+1) / float64(o.P.GridPoints+1)
 			pts = append(pts, fmt.Sprintf("%.1f,%.1f", x(f), y(m)))
 			last = end{arm, x(f), y(m), svgSeries[i]}
 		}
@@ -618,10 +649,19 @@ func orderErrorSVG(o *orderResults) string {
 	}
 	// Direct labels at the line ends, nudged apart so they never overlap.
 	sort.Slice(ends, func(i, j int) bool { return ends[i].y < ends[j].y })
+	ly := make([]float64, len(ends))
 	prev := -100.0
-	for _, e := range ends {
-		ly := math.Max(e.y+4, prev+15)
-		prev = ly
+	for i, e := range ends {
+		ly[i] = math.Max(e.y+4, prev+15)
+		prev = ly[i]
+	}
+	if over := ly[len(ly)-1] - (float64(T) + ph); over > 0 {
+		for i := range ly {
+			ly[i] -= over
+		}
+	}
+	for i, e := range ends {
+		ly := ly[i]
 		fmt.Fprintf(&s, `<circle cx="%.1f" cy="%.1f" r="4" fill="%s" stroke="%s" stroke-width="2"/>`+"\n", e.x, e.y, e.c, svgSurface)
 		fmt.Fprintf(&s, `<line x1="%.1f" x2="%.1f" y1="%.1f" y2="%.1f" stroke="%s" stroke-width="2"/>`+"\n", e.x+8, e.x+18, ly-4, ly-4, e.c)
 		fmt.Fprintf(&s, `<text x="%.1f" y="%.1f" font-size="12" fill="%s">%s</text>`+"\n", e.x+22, ly, svgInk, e.arm)
@@ -639,15 +679,15 @@ func lateHoursSVG(pols []policySpec, aggs map[string]agg) string {
 			maxv = math.Max(maxv, v)
 		}
 	}
-	maxv = math.Max(50, math.Ceil(maxv/50)*50)
+	step := niceStep(maxv / 4)
+	maxv = math.Ceil(maxv/step) * step
 	pw := float64(W - L - R)
 	x := func(v float64) float64 { return float64(L) + v/maxv*pw }
 	var s strings.Builder
 	fmt.Fprintf(&s, `<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" viewBox="0 0 %d %d" font-family="Helvetica, Arial, sans-serif">`+"\n", W, H, W, H)
 	fmt.Fprintf(&s, `<rect width="%d" height="%d" fill="%s"/>`+"\n", W, H, svgSurface)
 	fmt.Fprintf(&s, `<text x="%d" y="24" font-size="15" fill="%s">Render late hours per week: mean (bar) and each seed (dots)</text>`+"\n", L, svgInk)
-	for k := 0; k <= 4; k++ {
-		v := maxv * float64(k) / 4
+	for v := 0.0; v <= maxv+1e-9; v += step {
 		fmt.Fprintf(&s, `<line x1="%.1f" x2="%.1f" y1="%d" y2="%d" stroke="%s"/>`+"\n", x(v), x(v), T, H-40, svgGrid)
 		fmt.Fprintf(&s, `<text x="%.1f" y="%d" font-size="11" fill="%s" text-anchor="middle">%.0f</text>`+"\n", x(v), H-24, svgInk2, v)
 	}
@@ -665,6 +705,20 @@ func lateHoursSVG(pols []policySpec, aggs map[string]agg) string {
 	}
 	s.WriteString("</svg>\n")
 	return s.String()
+}
+
+// niceStep rounds x up to 1, 2 or 5 times a power of ten.
+func niceStep(x float64) float64 {
+	if x <= 0 {
+		return 1
+	}
+	p := math.Pow(10, math.Floor(math.Log10(x)))
+	for _, m := range []float64{1, 2, 5, 10} {
+		if m*p >= x {
+			return m * p
+		}
+	}
+	return 10 * p
 }
 
 func debugJobs(res map[string][]*runResult, a, b string) {

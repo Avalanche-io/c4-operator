@@ -84,9 +84,13 @@ func (e *Estimator) Remainder(p Pred, done, elapsed float64) (float64, float64) 
 func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 	e.SetRunning(run)
 	var s Summary
+	// Maps are summed in first-seen order, so the result does not depend
+	// on map iteration order (floating-point addition is not associative).
 	corr := map[RegionID]float64{}
+	var regions []RegionID
 	var indVar float64
 	gens := map[string]int{}
+	var genKeys []string
 	for _, u := range queued {
 		p := e.Predict(u.Key, u.Pos)
 		rem := p.Mean - u.Done
@@ -95,10 +99,16 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		}
 		f := rem / p.Mean * u.slots()
 		s.W += p.Mean * f
+		if _, ok := corr[p.Region]; !ok {
+			regions = append(regions, p.Region)
+		}
 		corr[p.Region] += p.SDCorr * f
 		indVar += (p.SDInd * f) * (p.SDInd * f)
 		s.Queued++
 		if u.Gen != "" {
+			if gens[u.Gen] == 0 {
+				genKeys = append(genKeys, u.Gen)
+			}
 			gens[u.Gen]++
 		}
 	}
@@ -109,10 +119,14 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		indVar += (sd * r.slots()) * (sd * r.slots())
 		s.Running++
 		if r.Gen != "" {
+			if gens[r.Gen] == 0 {
+				genKeys = append(genKeys, r.Gen)
+			}
 			gens[r.Gen]++
 		}
 	}
-	for k, n := range gens {
+	for _, k := range genKeys {
+		n := gens[k]
 		g := e.Generator(k)
 		G := float64(n)
 		s.W += G * g.Mean
@@ -120,8 +134,8 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		s.Unevaluated += n
 	}
 	v := indVar
-	for _, c := range corr {
-		v += c * c
+	for _, r := range regions {
+		v += corr[r] * corr[r]
 	}
 	s.Sigma = math.Sqrt(v)
 	s.W90 = s.W + e.z()*s.Sigma

@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="760" height="262" viewBox="0 0 760 262" font-family="Helvetica, Arial, sans-serif">
+<rect width="760" height="262" fill="#fcfcfb"/>
+<text x="150" y="24" font-size="15" fill="#0b0b0b">Render late hours per week: mean (bar) and each seed (dots)</text>
+<line x1="150.0" x2="150.0" y1="48" y2="222" stroke="#e4e3df"/>
+<text x="150.0" y="238" font-size="11" fill="#52514e" text-anchor="middle">0</text>
+<line x1="285.0" x2="285.0" y1="48" y2="222" stroke="#e4e3df"/>
+<text x="285.0" y="238" font-size="11" fill="#52514e" text-anchor="middle">100</text>
+<line x1="420.0" x2="420.0" y1="48" y2="222" stroke="#e4e3df"/>
+<text x="420.0" y="238" font-size="11" fill="#52514e" text-anchor="middle">200</text>
+<line x1="555.0" x2="555.0" y1="48" y2="222" stroke="#e4e3df"/>
+<text x="555.0" y="238" font-size="11" fill="#52514e" text-anchor="middle">300</text>
+<line x1="690.0" x2="690.0" y1="48" y2="222" stroke="#e4e3df"/>
+<text x="690.0" y="238" font-size="11" fill="#52514e" text-anchor="middle">400</text>
+<text x="420.0" y="256" font-size="12" fill="#52514e" text-anchor="middle">late hours</text>
+<text x="140" y="69.0" font-size="12" fill="#0b0b0b" text-anchor="end">manual</text>
+<rect x="150" y="56.0" width="145.5" height="18" rx="4" fill="#2a78d6"><title>manual: 107.8 late hours (mean)</title></rect>
+<circle cx="304.7" cy="65.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>114.6</title></circle>
+<circle cx="442.8" cy="65.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>216.9</title></circle>
+<circle cx="259.4" cy="65.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>81.0</title></circle>
+<circle cx="178.0" cy="65.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>20.8</title></circle>
+<circle cx="292.6" cy="65.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>105.6</title></circle>
+<text x="698.0" y="69.0" font-size="12" fill="#0b0b0b">108</text>
+<text x="140" y="103.0" font-size="12" fill="#0b0b0b" text-anchor="end">fifo</text>
+<rect x="150" y="90.0" width="189.4" height="18" rx="4" fill="#2a78d6"><title>fifo: 140.3 late hours (mean)</title></rect>
+<circle cx="335.6" cy="99.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>137.5</title></circle>
+<circle cx="582.3" cy="99.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>320.2</title></circle>
+<circle cx="251.8" cy="99.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>75.4</title></circle>
+<circle cx="175.6" cy="99.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>19.0</title></circle>
+<circle cx="351.6" cy="99.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>149.4</title></circle>
+<text x="698.0" y="103.0" font-size="12" fill="#0b0b0b">140</text>
+<text x="140" y="137.0" font-size="12" fill="#0b0b0b" text-anchor="end">edf</text>
+<rect x="150" y="124.0" width="81.2" height="18" rx="4" fill="#2a78d6"><title>edf: 60.1 late hours (mean)</title></rect>
+<circle cx="189.8" cy="133.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>29.5</title></circle>
+<circle cx="292.9" cy="133.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>105.8</title></circle>
+<circle cx="232.5" cy="133.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>61.1</title></circle>
+<circle cx="173.9" cy="133.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>17.7</title></circle>
+<circle cx="266.9" cy="133.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>86.6</title></circle>
+<text x="698.0" y="137.0" font-size="12" fill="#0b0b0b">60</text>
+<text x="140" y="171.0" font-size="12" fill="#0b0b0b" text-anchor="end">objective</text>
+<rect x="150" y="158.0" width="82.3" height="18" rx="4" fill="#2a78d6"><title>objective: 61.0 late hours (mean)</title></rect>
+<circle cx="201.7" cy="167.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>38.3</title></circle>
+<circle cx="296.3" cy="167.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>108.3</title></circle>
+<circle cx="218.6" cy="167.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>50.8</title></circle>
+<circle cx="174.6" cy="167.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>18.2</title></circle>
+<circle cx="270.6" cy="167.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>89.4</title></circle>
+<text x="698.0" y="171.0" font-size="12" fill="#0b0b0b">61</text>
+<text x="140" y="205.0" font-size="12" fill="#0b0b0b" text-anchor="end">objective+burst</text>
+<rect x="150" y="192.0" width="69.8" height="18" rx="4" fill="#2a78d6"><title>objective+burst: 51.7 late hours (mean)</title></rect>
+<circle cx="203.1" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>39.4</title></circle>
+<circle cx="280.1" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>96.4</title></circle>
+<circle cx="192.6" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>31.5</title></circle>
+<circle cx="173.5" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>17.4</title></circle>
+<circle cx="249.8" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>73.9</title></circle>
+<text x="698.0" y="205.0" font-size="12" fill="#0b0b0b">52</text>
+</svg>
