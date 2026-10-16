@@ -30,6 +30,7 @@ export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 bin/monorepo -out $OUT/repo -c4git bin/c4git -seed 1 -services 150 -commits 400
 bin/c4-operator import-git -repo $OUT/repo \
     -store $OUT/shards/a -store $OUT/shards/b -store $OUT/shards/c -out $OUT/map.jsonl
+c4 log $OUT/map.jsonl.chains/refs_heads_main.c4m   # compared with the mapping's views
 # sampled checkouts: git worktree add (c4git smudge), then c4-operator tree-id
 bin/pushlat -repo $OUT/repo -out $OUT/pushlat -bin bin -small 30 -assets 10 -asset-mb 3
 bin/c4-operator import-git -repo $OUT/repo -store ... -out $OUT/map-again.jsonl -quiet
@@ -82,10 +83,61 @@ checkout smudged by c4git, scanned by `c4-operator tree-id`, has exactly the
 view ID the import recorded. Continuing an import (301 commits, then the
 remaining 100 from the mapping file) ends at the same head view as one
 full import:
-`c45q8vJ413Lw8xuabUkon9XiG9jmskZVRRmyp3eG3DCsaxfaCKA7Q6fMcbtMk9wkoGv1rp2HemY9xFqayMiYD3mq6t`.
+`c44GBH6esR5FjoZTX2kggfotFjvnLUEg2ekxR1SAaypfYbiCsgTefX9YYiu49GR7JJzq6ZA1yaVQJwQfNNuUTkRPzG`.
 Every pushed commit in the latency run below resolved through
 `view.FromID` on its changeset to its view, with the parent's view as the
 chain base.
+
+## The branch chain
+
+Each ref is one c4m chain (DESIGN.md sections 2.3 and 2.5): the base view
+ID, then each commit's patch section followed by its checkpoint, the
+commit's view ID. The importer appends each commit's changeset to the ref's
+chain file (`OUT.chains/refs_heads_main.c4m`, next to the mapping), at a
+cost of the changeset's size. The mapping is the chain's index: each commit
+line holds the changeset, the checkpoint (`view`), the chain's base and the
+section number. Stored, the chain is its per-commit changesets, which
+concatenate into it. The whole chain is stored as one object when it is
+sealed: at the end of a one-shot import, when it reaches `-chain-max`
+sections (1,024 by default), or when a force push leaves its head. A
+sealed chain gets a mapping line with its object ID, and the next chain
+starts from the last checkpoint.
+
+On `repo`: the chain of `refs/heads/main` has 401 sections in 748,353
+bytes, and was stored once at the end of the import. `c4 log` (c4 1.0.18)
+on the chain file, unchanged, takes 5.6 s and lists 401 versions whose IDs
+are exactly the mapping's 401 commit views, in order.
+
+What the c4 CLI does with these chains:
+
+- `c4 log` and `c4 split` read a chain from the root commit as it is. Its
+  base is the empty view, and section 1 is the whole tree.
+- A chain over a non-empty external base (a branch from an imported
+  commit, or a chain after re-basing) is misread by c4 1.0.18: it takes
+  section 1 as the base. `c4-operator import-git -export-chain REF` (and
+  the listener's `GET /chains/REF?full=1`) writes the chain with its base
+  listing in full (`view.ExportChain`), and `c4 log` and `c4 split` then
+  read it correctly. The tests check both cases with the c4 binary on PATH.
+- `c4 split` drops the closing checkpoint of the last section, so its
+  `after` file ends in an unsealed section. Its sections verify, and the
+  last patch still produces the head view.
+
+Getting `c4 log` to list the view IDs needed a fix in `internal/view`. A
+directory holding a symlink has a null size, because the symlink's size is
+null. The directory's own entry, and so the changeset, said null. But its
+parent's record said 0, because the record was canonicalized with c4m's
+`PropagateMetadata`, which reads a child directory with a null size and no
+children in scope as empty. The records still hashed to their IDs, so
+nothing inside the operator noticed. `c4 log` computes each version's ID
+from the nested tree, which keeps the null, so on this repository (two
+symlinks in subdirectories) every listed ID differed from the view ID. Now
+`dirEntry` hashes the listing exactly as written and `listingOf` no longer
+canonicalizes it. View IDs change only for trees with a null-size directory
+(one holding a symlink, at any depth). A new test checks that a view's ID
+equals c4m's ID of the same tree as one nested manifest, both for a
+scanned tree and for one built by `Apply`. As a side effect the importer
+is about 20% faster, since each listing is no longer copied and propagated
+before hashing.
 
 ## Push-to-view latency
 
@@ -110,47 +162,46 @@ importer needs in order to find pushed assets.
 
 | commit | path    | push returns (p50 / p90) | view stored (p50 / p90 / max) | import of the commit (p50) |
 | ------ | ------- | ------------------------ | ----------------------------- | -------------------------- |
-| small  | plain   | 83 / 104 ms              |                               |                            |
-| small  | hook    | 168 / 218 ms             | 169 / 218 / 242 ms            | 46 ms                      |
-| small  | webhook | 246 / 314 ms             | 247 / 315 / 357 ms            | 46 ms                      |
-| asset  | plain   | 98 / 110 ms              |                               |                            |
-| asset  | hook    | 206 / 243 ms             | 206 / 244 / 259 ms            | 58 ms                      |
-| asset  | webhook | 305 / 337 ms             | 306 / 337 / 339 ms            | 56 ms                      |
+| small  | plain   | 75 / 81 ms               |                               |                            |
+| small  | hook    | 172 / 192 ms             | 173 / 192 / 198 ms            | 48 ms                      |
+| small  | webhook | 232 / 247 ms             | 232 / 247 / 328 ms            | 50 ms                      |
+| asset  | plain   | 73 / 75 ms               |                               |                            |
+| asset  | hook    | 175 / 183 ms             | 176 / 184 / 185 ms            | 53 ms                      |
+| asset  | webhook | 238 / 256 ms             | 239 / 256 / 262 ms            | 54 ms                      |
 
-So the hook adds about 85 ms to a small push: 46 ms imports the commit
-(three fsync rounds into the local shards) and the rest is fixed cost.
-That fixed cost is the importer's process start, reading the mapping, and
-git's rev-parse and rev-list. A no-op hook run takes 25 to 40 ms. The
-webhook path adds about another 80 ms, mostly the listener's `git fetch`
-into its mirror: the listener's own time per request was 143 ms at p50 and
-190 ms at p90, fetch included. The 3 MB asset adds 10 to 12 ms of import
-time, which is the copy from the c4git store, and about 15 ms of push time,
-which is c4git's clean filter at commit time and the larger push. A full
-resolution of the new view through `view.FromID` (every record of the
-2,231-file view) took 135 ms for small commits and 160 to 167 ms for asset
-commits. A sparse CI checkout reads only its include set.
+So the hook adds about 100 ms to a small push. About 50 ms imports the
+commit: three fsync rounds into the local shards, plus appending the commit
+to the branch chain. The rest is fixed cost: the importer's process start,
+reading the mapping, and git's rev-parse and rev-list. A no-op hook run
+takes 25 to 40 ms. The webhook path adds about another 60 ms, mostly the
+listener's `git fetch` into its mirror; the listener's own time per
+request was 142 ms at p50 and 151 ms at p90, fetch included. The 3 MB
+asset adds about 5 ms of import time, which is the copy from the c4git
+store. A full resolution of the new view through `view.FromID` (every
+record of the 2,231-file view) took about 100 ms. A sparse CI checkout
+reads only its include set.
 
 ## Results: `repo`, 401 commits
 
 | measure                                        | value                                  |
 | ---------------------------------------------- | -------------------------------------- |
-| total import, three local shards               | 37.8 s wall, 2.3 s user, 4.7 s sys     |
-| base commit (2,134 files, full ls-tree import) | 18.1 s, 2,039 objects, 130 MiB         |
-| per later commit, local shards                 | p50 37.0 ms, p90 55.1 ms, p99 162 ms   |
-| per later commit, max                          | 1,755 ms (an fsync stall, see below)   |
-| per later commit, importer alone               | p50 3.0 ms, p90 3.3 ms, p99 12.9 ms    |
-| whole history, importer alone                  | 1.33 s (base 158 ms)                   |
+| total import, three local shards               | 36.0 s wall, 2.3 s user, 5.2 s sys     |
+| base commit (2,134 files, full ls-tree import) | 15.7 s, 2,039 objects, 130 MiB         |
+| per later commit, local shards                 | p50 38.8 ms, p90 56.0 ms, p99 136 ms   |
+| per later commit, max                          | 2,464 ms (an fsync stall, see below)   |
+| per later commit, importer alone               | p50 2.4 ms, p90 2.7 ms, p99 10.7 ms    |
+| whole history, importer alone                  | 1.09 s (base 140 ms)                   |
 | objects uploaded                               | 3,045 (176.1 MiB)                      |
 | objects already present                        | 0 on a fresh store                     |
-| re-import into the same shards                 | 1.37 s; 0 uploaded, 3,045 present      |
+| re-import into the same shards                 | 1.20 s; 0 uploaded, 3,045 present      |
 | git blobs read                                 | 3,047: 2,985 hashed, 62 c4git pointers |
 | c4git objects used by ID, no rehash            | 62 (166.7 MiB), copied store to store  |
 | parent records read / new records              | 2,128 / 3,301                          |
 | records per later commit                       | read p50 5 (max 8), new p50 6 (max 12) |
 | largest view                                   | 2,226 files, 2 symlinks, 1,132 dirs    |
 | largest view, bytes                            | 139.9 MiB, 2,127 unique objects        |
-| continue: 100 commits after 301 imported       | 4.8 s, 253 objects uploaded            |
-| newest 50 commits only (`-max-commits 50`)     | 21.5 s, base plus 50, 2,239 objects    |
+| continue: 100 commits after 301 imported       | 7.9 s, 253 objects uploaded            |
+| newest 50 commits only (`-max-commits 50`)     | 17.6 s, base plus 50, 2,239 objects    |
 
 Each git blob is read once in the whole import. Of the 3,047 blobs read,
 2,983 are file content (hashed and uploaded), 2 are symlink targets, and 62
@@ -159,7 +210,7 @@ c4git objects. The 166.7 MiB of asset content was never hashed by the
 importer; it was copied under the IDs c4git computed at `git add`.
 
 The local TreeStore makes every write durable with a full fsync, which is
-most of the per-commit wall time: the importer alone takes 3.0 ms at p50,
+most of the per-commit wall time: the importer alone takes 2.4 ms at p50,
 and three fsync rounds per commit take the rest. Those rounds are: file
 objects and inner records in parallel, then the root record and the
 changeset together. The outliers of one to two seconds are commits of one
@@ -172,9 +223,9 @@ of each fsync; the importer issues up to `-jobs` (default 8) writes at once.
 
 | repository                   | files | per commit, importer alone (run 1 of 3) | new record bytes per commit (p50) |
 | ---------------------------- | ----- | --------------------------------------- | --------------------------------- |
-| `repo`, 150 flat services    | 2,218 | p50 3.0 ms, p90 3.3 ms                  | 20,246                            |
-| `repo-large`, 600 flat       | 8,555 | p50 10.3 ms, p90 13.1 ms                | 73,504                            |
-| `repo-teams`, 600 in 24 dirs | 8,555 | p50 1.3 ms, p90 1.8 ms                  | 7,926                             |
+| `repo`, 150 flat services    | 2,218 | p50 2.4 ms, p90 2.7 ms                  | 20,246                            |
+| `repo-large`, 600 flat       | 8,555 | p50 8.4 ms, p90 9.1 ms                  | 73,504                            |
+| `repo-teams`, 600 in 24 dirs | 8,555 | p50 1.1 ms, p90 1.4 ms                  | 7,926                             |
 
 The three histories make the same kinds of changes. Records read and
 written per commit are the same small numbers in all three (read p50 5 or
@@ -184,15 +235,15 @@ records, since a record is a one-level listing that is rewritten when any
 child changes. With 600 services in one `services/` directory, every service
 commit rewrites a 600-entry listing; with the same 8,555 files grouped under
 24 team directories, the rewritten listings are small and a commit costs
-1.3 ms, less than in the 2,218-file flat repository. Repository size alone
+1.1 ms, less than in the 2,218-file flat repository. Repository size alone
 does not enter.
 
 A CPU profile of the 600-flat case puts most of the importer's time in
 `c4.ID.String` (base58 through `math/big`) while canonicalizing those
 listings.
 
-Full imports into local shards: `repo-large` 107.7 s, `repo-teams` 97.0 s;
-per later commit p50 53 ms and 40 ms, again mostly fsync.
+Full imports into local shards: `repo-large` 90.6 s, `repo-teams` 104.4 s;
+per later commit p50 39 ms and 49 ms, again mostly fsync.
 
 ## Notes
 
