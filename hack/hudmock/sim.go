@@ -257,6 +257,7 @@ type Class struct {
 type failRec struct {
 	node, job, project string
 	at                 float64
+	nodeFault          bool
 }
 
 type Sim struct {
@@ -537,7 +538,7 @@ func (s *Sim) failUnit(j *Job, u *Unit) {
 	a.Reason = u.failMsg
 	s.account(j, u, s.t-u.StartAt)
 	s.release(j, u)
-	s.failures = append(s.failures, failRec{node: u.Node, job: j.key(), project: j.Project, at: s.t})
+	s.failures = append(s.failures, failRec{node: u.Node, job: j.key(), project: j.Project, at: s.t, nodeFault: u.failExit == 139})
 	j.nodeErrs[u.Node]++
 	if j.nodeErrs[u.Node] >= j.NodeErrorLimit && !contains(j.Blacklist, u.Node) {
 		j.Blacklist = append(j.Blacklist, u.Node)
@@ -650,6 +651,15 @@ func (s *Sim) runnable(j *Job) bool {
 // nextUnits returns up to k units of j that could start now, in dispatch order.
 func (s *Sim) nextUnits(j *Job, k int) []*Unit {
 	var out []*Unit
+	// Generators go first (they reveal work), but take at most half the
+	// job's slots, so expanded children keep moving.
+	gens := 0
+	for _, u := range j.Units {
+		if u != nil && u.Gen && u.Node != "" {
+			gens++
+		}
+	}
+	genCap := gens >= (j.Cap+1)/2
 	for c := j.cursor; c < len(j.order); c++ {
 		u := j.Units[j.order[c]]
 		if u == nil {
@@ -659,6 +669,9 @@ func (s *Sim) nextUnits(j *Job, k int) []*Unit {
 			if c == j.cursor && (u.State == stSucceeded) {
 				j.cursor++
 			}
+			continue
+		}
+		if u.Gen && genCap {
 			continue
 		}
 		if !s.depsMet(j, u) {

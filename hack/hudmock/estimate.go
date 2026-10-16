@@ -395,7 +395,17 @@ func (s *Sim) slackAndRisk(j *Job) {
 		return
 	}
 	if !j.ready {
-		e.Message = fmt.Sprintf("%s will miss %s by about %s: its inputs finish too late.", j.Name, s.clock(j.eff), approx(e.DeadlineMissBy))
+		late := ""
+		for _, d := range j.DependsOn {
+			if u := s.jobBy[d]; u != nil && !u.Done && (late == "" || u.est.EtaP90 > s.jobBy[late].est.EtaP90) {
+				late = d
+			}
+		}
+		name := late
+		if u := s.jobBy[late]; u != nil {
+			name = u.Name
+		}
+		e.Message = fmt.Sprintf("Will miss %s by about %s: waiting on %s.", s.clock(j.eff), approx(e.DeadlineMissBy), name)
 		return
 	}
 	e.Burst = s.burstOffer(j, a+pend, T)

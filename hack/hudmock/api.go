@@ -189,8 +189,9 @@ type apiNode struct {
 }
 
 type apiRunning struct {
-	Job  string `json:"job"`
-	Unit int    `json:"unit"`
+	Job   string `json:"job"`
+	Unit  int    `json:"unit"`
+	Slots int    `json:"slots"`
 }
 
 type apiTiers struct {
@@ -379,17 +380,22 @@ func (s *Sim) nodeSummary(n *Node, v *viewer) apiNode {
 	default:
 		an.State = "idle"
 	}
-	projects := map[string]bool{}
+	// Suspect: node faults across several jobs, which usually means hardware.
+	jobs, faults := map[string]bool{}, 0
 	for _, f := range s.failures {
-		if f.node == n.Name && s.t-f.at <= 3600 {
-			an.FailuresLastHour++
-			projects[f.job] = true
+		if f.node != n.Name || s.t-f.at > 3600 {
+			continue
+		}
+		an.FailuresLastHour++
+		if f.nodeFault {
+			faults++
+			jobs[f.job] = true
 		}
 	}
-	an.Suspect = an.FailuresLastHour >= 3 && len(projects) >= 2
+	an.Suspect = faults >= 3 && len(jobs) >= 2
 	for _, r := range n.running {
 		if v.sees(r.j.Project) {
-			an.Running = append(an.Running, apiRunning{Job: r.j.key(), Unit: r.u.I})
+			an.Running = append(an.Running, apiRunning{Job: r.j.key(), Unit: r.u.I, Slots: r.u.Slots})
 		}
 	}
 	return an
@@ -589,11 +595,18 @@ func (s *Sim) jobDetail(j *Job, v *viewer) map[string]any {
 			}
 			units = append(units, um)
 		}
-		out["units"] = units
+		out["unitList"] = units
 	}
 	progress := map[string]any{}
 	for _, u := range j.Units {
-		if u == nil || u.Node == "" {
+		if u == nil {
+			continue
+		}
+		if u.Node == "" {
+			// A yielded run keeps the progress its last checkpoint saved.
+			if j.ML != nil && !j.Done {
+				progress[strconv.Itoa(u.I)] = map[string]any{"fraction": round2(float64(j.ML.LastCkpt) / float64(j.ML.TotalSteps)), "measured": true}
+			}
 			continue
 		}
 		el := s.t - u.StartAt
@@ -862,7 +875,7 @@ func (s *Sim) graph(v *viewer) map[string]any {
 		}
 	}
 	for _, j := range s.jobs {
-		if hasDependent[j.key()] || len(j.DependsOn) == 0 || !vis[j.key()] {
+		if hasDependent[j.key()] || len(j.DependsOn) == 0 || !vis[j.key()] || j.Done || j.FailedJob {
 			continue
 		}
 		cur := j

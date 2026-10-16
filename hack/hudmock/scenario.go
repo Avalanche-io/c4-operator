@@ -55,8 +55,8 @@ func newSim(seed int64) *Sim {
 	node("gpu-r3-01", "gpu", "rack r3", 4, 3.3e12, 0.973)
 	node("gpu-r3-02", "gpu", "rack r3", 4, 3.0e12, 0.969)
 	node("gpu-r3-03", "gpu", "rack r3", 4, 2.7e12, 0.958)
-	node("ci-r4-01", "ci", "rack r4", 12, 1.6e12, 0.991)
-	node("ci-r4-02", "ci", "rack r4", 12, 1.5e12, 0.989)
+	node("ci-r4-01", "ci", "rack r4", 8, 1.6e12, 0.991)
+	node("ci-r4-02", "ci", "rack r4", 8, 1.5e12, 0.989)
 	sp := node("spot-z1-01", "spot", "us-west-2a", 4, 1.1e12, 0.902)
 	sp.CacheCap = 2.0e12
 	ph := node("spot-z1-02", "spot", "us-west-2a", 4, 0, 0)
@@ -65,7 +65,7 @@ func newSim(seed int64) *Sim {
 	s.projects = []*Project{
 		{Name: "harbor", Quotas: map[string][2]int{"cpu": {16, 16}, "gpu": {8, 4}, "spot": {0, 32}, "ci": {0, 0}},
 			BurstBudget: 300, BurstSpent: 262, BytesMat: 8.61e13, BytesStore: 9.2e11, WorkerHours: map[[2]string]float64{}, GPUHours: 61.4},
-		{Name: "kestrel", Quotas: map[string][2]int{"cpu": {16, 16}, "gpu": {4, 0}, "spot": {0, 16}, "ci": {24, 0}},
+		{Name: "kestrel", Quotas: map[string][2]int{"cpu": {16, 16}, "gpu": {4, 0}, "spot": {0, 16}, "ci": {16, 0}},
 			BurstBudget: 300, BurstSpent: 0, BytesMat: 5.37e13, BytesStore: 6.1e11, WorkerHours: map[[2]string]float64{}, GPUHours: 0},
 	}
 	for _, p := range s.projects {
@@ -103,7 +103,7 @@ func newSim(seed int64) *Sim {
 	fx := s.frameJob(frameSpec{ns: "harbor-render", name: "sh040-fx-v003", project: "harbor", class: "render", driver: "render",
 		owner: "maya", frames: 240, start: 1001, passes: []string{"beauty"}, pools: []string{"gpu", "spot"}, cap: 24, order: "binary",
 		median: map[string]float64{"beauty": 690}, bytes: 2.2e10, measured: true, fps: 24,
-		heavy: []Heavy{{From: 99, To: 149, Factor: 3.4, Label: "hero FX: tanker hull breach"}},
+		heavy:  []Heavy{{From: 99, To: 149, Factor: 3.4, Label: "hero FX: tanker hull breach"}},
 		inputs: []Input{plates, simIn}, deps: []string{"harbor-render/sh040-sim-v003"}})
 	fx.Units[fx.order[38]].FailPlan = 1
 	fx.Units[fx.order[5]].FailPlan = 3
@@ -286,8 +286,8 @@ func (s *Sim) genJob() *Job {
 		Pools: []string{"cpu"}, Cap: 16, Created: 2280, BytesPerUnit: 1.2e10, StoreFrac: 0.009,
 		Units:    make([]*Unit, n*4),
 		genPrior: 1000, genPriorSD: 350,
-		prior:    map[string]float64{"rib": 150, "shadow": 140, "reflection": 190, "beauty": 520},
-		Inputs:   []Input{{Materialization: "sh050-plates", View: fakeID("view", "sh050-plates")}, {Materialization: "harbor-assets@v212", View: fakeID("view", "harbor-assets", "212")}},
+		prior:  map[string]float64{"rib": 150, "shadow": 140, "reflection": 190, "beauty": 520},
+		Inputs: []Input{{Materialization: "sh050-plates", View: fakeID("view", "sh050-plates")}, {Materialization: "harbor-assets@v212", View: fakeID("view", "harbor-assets", "212")}},
 	}
 	for p := 0; p < n; p++ {
 		j.Units[p] = &Unit{I: p, Pos: p, Group: "rib", Label: fmt.Sprintf("%d rib", 1001+p), State: stUnevaluated,

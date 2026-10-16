@@ -112,7 +112,7 @@ func (s *Sim) ciTick() {
 	c := s.ci
 	if s.t >= c.next {
 		s.newChange()
-		c.next = s.t + 400 + s.rng.Float64()*160
+		c.next = s.t + 170 + s.rng.Float64()*140
 	}
 	active := 0
 	for _, e := range c.mq {
@@ -127,7 +127,7 @@ func (s *Sim) ciTick() {
 			e.State = "testing"
 		}
 	}
-	// Changes whose work is all finished leave the HUD 25 minutes later.
+	// Changes whose work is all finished leave the HUD 12 minutes later.
 	keep := c.changes[:0]
 	for _, ch := range c.changes {
 		done := ch.Pre.Done || ch.Pre.FailedJob
@@ -137,7 +137,7 @@ func (s *Sim) ciTick() {
 			done = false
 		}
 		if done && ch.gone == 0 {
-			ch.gone = s.t + 1500
+			ch.gone = s.t + 720
 		}
 		if ch.gone > 0 && s.t >= ch.gone {
 			s.removeJob(ch.Pre)
@@ -177,7 +177,7 @@ func (s *Sim) newChange() {
 		BytesPerUnit: 3.1e9, StoreFrac: 0.002,
 		Units:    make([]*Unit, 19),
 		genPrior: 11 * 150, genPriorSD: 400,
-		prior:    map[string]float64{"build": 210, "discover": 32, "test": 150, "integration": 220},
+		prior:  map[string]float64{"build": 210, "discover": 32, "test": 150, "integration": 220},
 		Inputs: []Input{{View: fakeID("view", "pipeline", ch.ID), Materialization: "pipeline@" + ch.ID}},
 		CI:     &CIJob{Change: ch, Kind: "presubmit"},
 	}
@@ -217,12 +217,12 @@ func (s *Sim) newLand(e *MQEntry) {
 	j := &Job{
 		NS: "kestrel-ci", Name: ch.ID + "-land", Project: "kestrel", Class: "ci-merge", Driver: "ci",
 		Owner: ch.Author, Order: "sequential", AxisKind: "step",
-		Groups:    []GroupDef{{Key: "speculative", Label: "speculative base"}},
-		Pools:     []string{"ci"}, Cap: 4, Created: s.t, LatencyTarget: 600, Retries: 1,
+		Groups: []GroupDef{{Key: "speculative", Label: "speculative base"}},
+		Pools:  []string{"ci"}, Cap: 4, Created: s.t, LatencyTarget: 600, Retries: 1,
 		DependsOn: []string{ch.Pre.key()}, BytesPerUnit: 2.2e9, StoreFrac: 0.001,
-		prior:     map[string]float64{"speculative": 160},
-		Inputs:    []Input{{View: e.Base, Materialization: "speculative base"}},
-		CI:        &CIJob{Change: ch, Kind: "land"},
+		prior:  map[string]float64{"speculative": 160},
+		Inputs: []Input{{View: e.Base, Materialization: "speculative base"}},
+		CI:     &CIJob{Change: ch, Kind: "land"},
 	}
 	j.Units = []*Unit{
 		{I: 0, Pos: 0, Group: "speculative", Label: "build on speculative base", State: stBlocked, Cost: 110 + s.rng.Float64()*60, Slots: 2, Parent: -1},
@@ -423,7 +423,7 @@ func roundAll(xs []float64) []float64 {
 func (s *Sim) stage(j *Job, group string, ch *Change) map[string]any {
 	var first, last, ready float64 = math.Inf(1), 0, math.Inf(1)
 	state := "waiting"
-	n, done, failed, running, co := 0, 0, 0, 0, 0.0
+	n, done, failed, running, blocked, co := 0, 0, 0, 0, 0, 0.0
 	outcome := map[string]int{}
 	for _, u := range j.Units {
 		if u == nil || (u.Group != group && !(group == "test" && u.Group == "discover")) {
@@ -446,6 +446,11 @@ func (s *Sim) stage(j *Job, group string, ch *Change) map[string]any {
 			}
 		case stFailed:
 			failed++
+			if a := u.Attempts[len(u.Attempts)-1]; a.End > last {
+				last = a.End
+			}
+		case stBlocked:
+			blocked++
 		case stRunning, stRetrying:
 			if u.Node != "" {
 				running++
@@ -465,18 +470,18 @@ func (s *Sim) stage(j *Job, group string, ch *Change) map[string]any {
 		state = "passed"
 	case running > 0 || done > 0:
 		state = "running"
-	case !j.ready || n == 0:
+	case !j.ready || n == 0 || blocked == n:
 		state = "blocked"
 	}
 	qw, run := 0.0, 0.0
 	if !math.IsInf(first, 1) {
 		qw = math.Max(0, first-ready)
 		end := s.t
-		if state == "passed" {
+		if state == "passed" || state == "failed" {
 			end = last
 		}
 		run = math.Max(0, end-first)
-	} else if j.ready {
+	} else if j.ready && state != "blocked" {
 		qw = s.t - ready
 	}
 	best, bc := "warm", -1

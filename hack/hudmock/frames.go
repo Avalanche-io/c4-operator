@@ -103,8 +103,10 @@ func renderFrame(job string, frame, first, last int, heavy float64) []byte {
 	c := newCanvas()
 	t := float64(frame - first)
 	switch {
-	case strings.HasPrefix(job, "sh050"):
+	case strings.HasPrefix(job, "sh050"), strings.HasPrefix(job, "sh010"):
 		duskHarbor(c, t, float64(last-first))
+	case strings.HasPrefix(job, "ep104"):
+		crowdPlaza(c, t)
 	default:
 		nightTanker(c, t, heavy, frame)
 	}
@@ -245,4 +247,33 @@ func duskHarbor(c *canvas, t, span float64) {
 	c.rect(bx, horizon+6, bx+70, horizon+16, 24, 18, 22)
 	c.rect(bx+20, horizon-10, bx+44, horizon+6, 28, 22, 26)
 	c.rect(bx+31, horizon-34, bx+33, horizon-10, 28, 22, 26)
+}
+
+// crowdPlaza is a plaza seen from above, with people crossing it.
+func crowdPlaza(c *canvas, t float64) {
+	for y := 0; y < ph; y++ {
+		for x := 0; x < pw; x++ {
+			v := 92 + 14*math.Sin(float64(x)/23)*math.Sin(float64(y)/17)
+			if (x/48+y/48)%2 == 0 {
+				v += 8
+			}
+			c.set(x, y, v, v-4, v-10)
+		}
+	}
+	rng := rand.New(rand.NewSource(104))
+	for i := 0; i < 420; i++ {
+		x0, y0 := rng.Float64()*pw, rng.Float64()*(ph-24)
+		ang := rng.Float64() * 2 * math.Pi
+		sp := 0.4 + rng.Float64()*0.8
+		x := math.Mod(x0+math.Cos(ang)*sp*t+4*pw, pw)
+		y := math.Mod(y0+math.Sin(ang)*sp*t*0.6+4*(ph-24), ph-24)
+		col := []float64{60, 40, 38}
+		if i%5 == 0 {
+			col = []float64{170, 60, 50}
+		} else if i%7 == 0 {
+			col = []float64{40, 70, 120}
+		}
+		c.rect(int(x), int(y), int(x)+3, int(y)+3, col[0], col[1], col[2])
+		c.rect(int(x)+1, int(y)+3, int(x)+2, int(y)+5, 30, 30, 30)
+	}
 }
