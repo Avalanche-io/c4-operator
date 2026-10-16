@@ -1,0 +1,38 @@
+# A Materialization names a c4m file and a store, optionally narrowed to
+# the paths a job needs. Pods ask for it by annotation.
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Materialization
+metadata:
+  name: sh010-plates
+spec:
+  source:
+    # Either a ConfigMap key holding c4m text ...
+    configMapKeyRef: {name: show-c4m, key: show.c4m}
+    # ... or the C4 ID of a c4m file or `c4 id -s` snapshot in the store:
+    # id: c42RKtpjnbycDqTnuRfBpM8j7oBGE3RgLthFtHvdMhtJkqdWmrTb2ht6omQhQ8ZJaHM38Fg8CBMM5aCS9uNnH7HqwC
+  store: "s3://c4-store/show/?region=us-west-2"
+  storeSecretRef: {name: store-credentials}
+  include:
+  - shots/sh010/
+  - weights/
+  verify: Stat
+  retainOnNode: 2h
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: render-sh010
+spec:
+  completions: 50
+  parallelism: 50
+  template:
+    metadata:
+      annotations:
+        c4.avalanche.io/materialize: sh010-plates
+        c4.avalanche.io/mount-path: /assets
+    spec:
+      restartPolicy: OnFailure
+      containers:
+      - name: render
+        image: render-engine:latest
+        args: [--input=/assets/shots/sh010/plates, --output=/output]

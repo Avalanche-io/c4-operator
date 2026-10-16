@@ -5,7 +5,7 @@
 | Branch | Opened     | Closed | Purpose                                                                                     |
 | ------ | ---------- | ------ | ------------------------------------------------------------------------------------------- |
 | `main` | 2026-10-15 |        | Empty until the MVP is reviewed.                                                            |
-| `mvp`  | 2026-10-15 |        | First working version: CRD, controller, node agent, webhook, envtest, kind e2e. Not merged. |
+| `mvp`  | 2026-10-15 |        | Working MVP: CRD, controller, node agent, webhook, envtest, kind e2e. Not merged. |
 
 No worktrees are in use. If one is needed, it goes under `.worktrees/`.
 
