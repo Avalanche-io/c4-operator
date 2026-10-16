@@ -91,3 +91,49 @@ Store GETs per object stay flat on the tiered path as pods grow: each object is 
 | transfers resumed from their offset on another replica | 7                                   |
 | node requests that went to the store directly          | 0                                   |
 
+
+## P3: isolation (2026-10-16T09:26Z)
+
+Projects `iso-a` and `iso-b` are Strict, each with its own bucket and its own MinIO user whose policy allows only that bucket. `dept-1` and `dept-2` are Shared in sharing group `show-x`, also with their own buckets and users. The same show (134 files) is in all four buckets and has the same view ID in each, c42aH8EBP5cjxARq5hfMbubcxqcGRpowrDxrGnQ1cF2K9N3NDmS4njVZPtf9T6yjh7UUkZYHUrAGG1itUzMVU47zDp. Shot sh900 is only in `iso-a`'s bucket (A's unreleased work); shot sh500 is only in `dept-1`'s. Every attempt below is made from project B's side.
+
+### Attempts to read another project's data
+
+| attempt                                                                          | made as                       | outcome                                                                                                            |
+| -------------------------------------------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| GET A's objects from A's bucket                                                  | B's MinIO user, from the host | refused by MinIO: 403: Access Denied.                                                                              |
+| Materialization naming A's unreleased view by ID                                 | namespace `iso-b`             | Failed ResolveFailed: description is incomplete: c41nzrCtvK... not in store: s3 get c41nzrCtvK...: not in store    |
+| ConfigMap c4m listing A's object IDs                                             | namespace `iso-b`             | Failed ContentMissing: 4 of 4 objects are not in the store, e.g. shots/sh900/plates/sh900.1001.exr (c464GRpeZe...) |
+| GET an object of A from the regional tier, no token                              | pod in `iso-b`                | 401 bearer token required                                                                                          |
+| the same with the pod's own token for audience `c4-tier`                         | pod in `iso-b`                | 403 system:serviceaccount:iso-b:default may not use the tier API                                                   |
+| GET it from the node daemon's peer port, no token                                | pod in `iso-b`                | 401 bearer token required                                                                                          |
+| the same with the pod's token                                                    | pod in `iso-b`                | 403 system:serviceaccount:iso-b:default may not use the tier API                                                   |
+| the same, asking as project `iso-b`                                              | pod in `iso-b`                | 403 system:serviceaccount:iso-b:default may not use the tier API                                                   |
+| CSI volume attributes claiming A's pod (namespace, name, UID) and a forged token | pod in `iso-b`                | pod stays Pending; FailedMount: materialization iso-b/show: materializations.c4.avalanche.io "show" not found      |
+
+### Partitions on one node (c4-operator-e2e-worker3)
+
+|                                                          | Strict: `iso-a` then `iso-b`                                       | Shared: `dept-1` then `dept-2`                                                                                    |
+| -------------------------------------------------------- | ------------------------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| view ID in both projects                                 | c42aH8EBP5...                                                      | the same                                                                                                          |
+| copies of plate sh010.1001 in the node cache             | 2 (inodes 2228733 and 2229345, partitions `p-iso-a` and `p-iso-b`) | 1 (inode 2401368, 2 links, partition `g-show-x`)                                                                  |
+| second project's publish                                 | cold, 0.056 s, 1 layer                                             | warm, 0.002 s, 1 layer                                                                                            |
+| node upstream requests during the second project's mount | 120                                                                | 0                                                                                                                 |
+| second project's fills at the regional tier              | 120, each from its own store                                       | 0 requests                                                                                                        |
+| second project's bucket during its turn                  | 132 GETs, 109 HEADs                                                | 12 GETs (the manager reading the view's directory records), 109 HEADs (preflight: every object, in its own store) |
+
+Proof of possession: shot sh500 is only in `dept-1`'s bucket. After a `dept-1` pod used it on c4-operator-e2e-worker3, its bytes sat in the shared partition (frame 1001 at inode 2402528). `dept-2` asking for it by ID: Failed ResolveFailed: description is incomplete: c44hV64NgU... not in store: s3 get c44hV64NgU...: not in store. By a c4m listing its IDs: Failed ContentMissing: 4 of 4 objects are not in the store, e.g. shots/sh500/plates/sh500.1001.exr (c41EJBPzZa...).
+
+### Grants: a vendor project on the show's store
+
+Project `vendor` reads `iso-a`'s bucket through its own MinIO user, with scope Grants and one grant: the show's view, paths `shots/sh010/`.
+
+| Materialization in `vendor`                                      | outcome                                                                                                                                          |
+| ---------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| the granted view                                                 | Ready with 49 files; a pod verified its mount is the sh010 subset, c44oVCvP5L...                                                                 |
+| the granted view with include `shots/sh020/`                     | Failed NotGranted: nothing in granted tree c42aH8EBP5... under paths [shots/sh010/] matches include [shots/sh020/]                               |
+| sh900, another tree in the same bucket                           | Failed NotGranted: project vendor may materialize only granted trees, and neither source c41nzrCtvK... nor its base c41nzrCtvK... is one of them |
+| a ConfigMap c4m listing exactly the granted files                | Failed NotGranted: project vendor may materialize only granted trees, and neither source c464JBzt9S... nor its base c44oVCvP5L... is one of them |
+| the granted view after the grant is removed (scope stays Grants) | Failed NotGranted: project vendor has scope Grants and no grants, 0.12 s after the Project change                                                |
+| a new pod mounting it after the revocation                       | Pending; FailedMount: materialization vendor/show is not ready (phase "Failed")                                                                  |
+| the pod that mounted it before the revocation                    | still running, still reads its 48 plates: revocation takes effect at the next mount                                                              |
+

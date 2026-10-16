@@ -273,6 +273,11 @@ func TestIsolationBetweenProjects(t *testing.T) {
 		if m.Status.Missing != int64(len(va.Objects())) {
 			t.Fatalf("missing %d of %d objects", m.Status.Missing, len(va.Objects()))
 		}
+		// A refused description leaves nothing in B's store: by ID, A's
+		// view still does not resolve there.
+		if _, err := storeB.store.Head(context.Background(), va.ID); err == nil {
+			t.Fatal("the refused view's records were written to B's store")
+		}
 	})
 }
 

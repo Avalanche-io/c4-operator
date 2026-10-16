@@ -3,11 +3,11 @@
 //
 //	c4e2e gen-show  --out DIR [--frame-kib N]        the P1 show
 //	c4e2e gen-shot  --out DIR --name N --frames N --frame-kib N --seed S
-//	c4e2e tree-id   DIR                               view ID (as c4-operator tree-id)
+//	c4e2e tree-id   DIR|FILE                          view ID (as c4-operator tree-id), or a file's ID
 //	c4e2e verify    --expect ID DIR                   fail unless DIR is that view
 //	c4e2e render    --pod NAME [--shot sh010] DIR     a deterministic render into DIR
 //	c4e2e read      DIR                               read every file, print bytes and time
-//	c4e2e expect    --src DIR --include a/,b/ [--render POD] [--add-frames N --frames-dir D --pod P]
+//	c4e2e expect    --src DIR --include a/,b/ [--c4m FILE] [--render POD] [--add-frames N --frames-dir D --pod P]
 //	                                                  view ID of a subset, optionally after a render
 //	c4e2e add-frames --count N --dir REL --pod NAME DIR  add N new frames (keyed by pod) under DIR/REL
 //	c4e2e objects   --src DIR --shards s0,s1,s2        each object's shard, as "shard id" lines
@@ -205,7 +205,16 @@ func writeKeyed(path, key string, n int64) error {
 
 func treeID(args []string) error {
 	if len(args) != 1 {
-		return errors.New("usage: c4e2e tree-id DIR")
+		return errors.New("usage: c4e2e tree-id DIR|FILE")
+	}
+	if fi, err := os.Stat(args[0]); err == nil && fi.Mode().IsRegular() {
+		f, err := os.Open(args[0])
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		fmt.Println(c4.Identify(f))
+		return nil
 	}
 	id, err := view.ScanID(args[0])
 	if err != nil {
@@ -320,6 +329,7 @@ func expect(args []string) error {
 	frames := fs.Int("add-frames", 0, "apply c4e2e add-frames with this count")
 	framesDir := fs.String("frames-dir", "", "add-frames directory")
 	pod := fs.String("pod", "", "add-frames pod name")
+	listing := fs.String("c4m", "", "also write the view's c4m listing here")
 	fs.Parse(args)
 	var pats []string
 	if *include != "" {
@@ -372,6 +382,19 @@ func expect(args []string) error {
 	}
 	if *frames > 0 {
 		if err := addFrames([]string{"--count", fmt.Sprint(*frames), "--dir", *framesDir, "--pod", *pod, tmp}); err != nil {
+			return err
+		}
+	}
+	if *listing != "" {
+		v, err := view.ScanDir(tmp)
+		if err != nil {
+			return err
+		}
+		data, err := v.Marshal()
+		if err != nil {
+			return err
+		}
+		if err := os.WriteFile(*listing, data, 0o644); err != nil {
 			return err
 		}
 	}

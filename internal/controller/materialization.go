@@ -130,10 +130,6 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return r.fail(ctx, orig, &mat, "NotGranted",
 			fmt.Errorf("nothing in granted tree %s under paths %v matches include %v", g.Tree, g.Paths, mat.Spec.Include), 0)
 	}
-	if err := publishRecords(ctx, store, res.Chain); err != nil {
-		return r.fail(ctx, orig, &mat, "StoreUnavailable", fmt.Errorf("publish records: %w", err), r.Retry)
-	}
-
 	st.SourceID = sourceID.String()
 	st.RootID = res.RootID.String()
 	st.ViewID = v.ID.String()
@@ -162,6 +158,11 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		setCond(st, mat.Generation, c4v1.ConditionContentAvailable, false, "ContentMissing", msg)
 		setCond(st, mat.Generation, c4v1.ConditionReady, false, "ContentMissing", msg)
 		return r.finish(ctx, orig, &mat, r.Retry)
+	}
+	// Records are written only for a view whose every object is present,
+	// so a refused description leaves nothing behind in the store.
+	if err := publishRecords(ctx, store, res.Chain); err != nil {
+		return r.fail(ctx, orig, &mat, "StoreUnavailable", fmt.Errorf("publish records: %w", err), r.Retry)
 	}
 	st.Phase = c4v1.PhaseReady
 	setCond(st, mat.Generation, c4v1.ConditionContentAvailable, true, "AllPresent", "every object is in the store")

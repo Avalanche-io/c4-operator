@@ -162,7 +162,7 @@ mat_view() {
 # phase measures cold behavior and not leftovers from an earlier one.
 cold_start() {
   local ns n
-  for ns in show-a show-b herd-tiered herd-direct mono; do
+  for ns in show-a show-b herd-tiered herd-direct mono iso-a iso-b dept-1 dept-2 vendor; do
     k -n "$ns" delete pods --all --wait=true >/dev/null 2>&1 || true
   done
   for n in $WORKERS; do
@@ -173,19 +173,64 @@ cold_start() {
   k -n c4-system rollout status ds/c4-node --timeout=300s >/dev/null
 }
 
-# store_gets_settled: store_gets once MinIO's metrics (cached for about ten
-# seconds) stop changing.
-store_gets_settled() {
+# settled CMD...: CMD's output once two readings six seconds apart agree.
+# MinIO caches its metrics for about ten seconds.
+settled() {
   local a b
   sleep 12
-  a=$(store_gets)
+  a=$("$@")
   while :; do
     sleep 6
-    b=$(store_gets)
+    b=$("$@")
     [ "$a" = "$b" ] && break
     a=$b
   done
   echo "$b"
+}
+
+store_gets_settled() { settled store_gets; }
+
+# bucket_requests BUCKET: "GETS HEADS" MinIO served for one bucket, summed
+# over the three shards.
+bucket_requests() {
+  local i g=0 h=0 line
+  for i in 0 1 2; do
+    line=$(curl -sf "http://127.0.0.1:3090$i/minio/v2/metrics/bucket" |
+      awk -v b="bucket=\"$1\"" '
+        /^minio_bucket_requests_total\{/ && index($0, b) && /api="getobject"/ { g += $NF }
+        /^minio_bucket_requests_total\{/ && index($0, b) && /api="headobject"/ { h += $NF }
+        END { printf "%d %d", g, h }')
+    line=${line:-0 0}
+    g=$((g + ${line% *})) h=$((h + ${line#* }))
+  done
+  echo "$g $h"
+}
+
+# mat_outcome NS NAME: once the Materialization is Ready or Failed,
+# "PHASE REASON: MESSAGE".
+mat_outcome() {
+  local i ph
+  for i in $(seq 1 120); do
+    ph=$(k -n "$1" get materialization "$2" -o jsonpath='{.status.phase}' 2>/dev/null || true)
+    case "$ph" in Ready | Failed) break ;; esac
+    sleep 1
+  done
+  k -n "$1" get materialization "$2" -o jsonpath='{.status.phase} {.status.conditions[?(@.type=="Ready")].reason}: {.status.conditions[?(@.type=="Ready")].message}'
+}
+
+# mount_error NS POD: the pod's latest FailedMount message, from the CSI
+# driver's answer onward.
+mount_error() {
+  local i msg
+  for i in $(seq 1 90); do
+    msg=$(k -n "$1" get events --field-selector "involvedObject.name=$2,reason=FailedMount" -o jsonpath='{.items[-1:].message}' 2>/dev/null || true)
+    if [ -n "$msg" ]; then
+      echo "${msg#*desc = }"
+      return 0
+    fi
+    sleep 1
+  done
+  fail "pod $1/$2 never reported FailedMount"
 }
 
 # regional_pod_metric POD NAME LABEL...: a series on one regional replica.
