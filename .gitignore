@@ -1,0 +1,5 @@
+bin/
+.worktrees/
+hack/e2e/out/
+*.test
+cover.out
