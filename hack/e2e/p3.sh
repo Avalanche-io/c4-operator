@@ -117,7 +117,7 @@ short() { printf '%s...' "$(printf '%s' "$1" | cut -c1-10)"; }
 pub() { publish_info "$1" "$2" | awk '{printf "%s, %.3f s, %d layer%s", $1, $2, $3, ($3 == 1 ? "" : "s")}'; }
 
 record ""
-record "## P3: isolation ($(date -u +%Y-%m-%dT%H:%MZ))"
+record "## P3: isolation ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 cold_start
 for ns in $P3NS; do

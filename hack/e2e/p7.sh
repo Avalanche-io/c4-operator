@@ -18,7 +18,7 @@ get() { # PATH: GET from the HUD as the wrangler
 }
 
 record ""
-record "## P7: provenance ($(date -u +%Y-%m-%dT%H:%MZ))"
+record "## P7: provenance ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 
 farm_manager

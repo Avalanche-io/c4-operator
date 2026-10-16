@@ -5,6 +5,8 @@ ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CLUSTER=${CLUSTER:-c4-operator-e2e}
 CTX=kind-$CLUSTER
 OUT=$ROOT/hack/e2e/out
+# The commit the binaries and images were built from, for the results.
+BUILD=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
 RESULTS=$OUT/results.md
 GOBIN=$(go env GOBIN); GOBIN=${GOBIN:-$(go env GOPATH)/bin}
 KIND=${KIND:-$(command -v kind || echo "$GOBIN/kind")}

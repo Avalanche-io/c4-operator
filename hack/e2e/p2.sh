@@ -93,7 +93,7 @@ EOF
 }
 
 record ""
-record "## P2: tiers and thundering herds ($(date -u +%Y-%m-%dT%H:%MZ))"
+record "## P2: tiers and thundering herds ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 k -n herd-direct create secret generic naive-s3 \
   --from-literal=AWS_ACCESS_KEY_ID="$AWS_ACCESS_KEY_ID" --from-literal=AWS_SECRET_ACCESS_KEY="$AWS_SECRET_ACCESS_KEY" \

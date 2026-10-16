@@ -59,7 +59,7 @@ cold_start
 k -n "$NS" delete materializations --all >/dev/null 2>&1 || true
 
 record ""
-record "## P1: overlay views, capture, CSI ($(date -u +%Y-%m-%dT%H:%MZ))"
+record "## P1: overlay views, capture, CSI ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 
 log "show: generate (${FRAME_KIB} KiB frames) and ingest into three shards"

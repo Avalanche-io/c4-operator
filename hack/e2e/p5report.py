@@ -36,9 +36,10 @@ print(
 print()
 print("| job | class | submitted | deadline | finished | deadline met | units done | preemptions |")
 print("|---|---|---|---|---|---|---|---|")
-rows = list(csv.reader(open(os.path.join(out, "p5-jobs.csv"))))
 order = ["sh010-comp-v003", "sh020-light-v002", "ci-change-4521", "train-denoise", "train-upres", "sh030-fx-v001", "sh040-lookdev-v001"]
-rows.sort(key=lambda r: order.index(r[1]) if r[1] in order else 99)
+# Only this scenario's jobs: other phases leave theirs in other namespaces.
+rows = [r for r in csv.reader(open(os.path.join(out, "p5-jobs.csv"))) if r[0] in ("show-a", "show-b") and r[1] in order]
+rows.sort(key=lambda r: order.index(r[1]))
 met = missed = 0
 for ns, name, cls, phase, done, total, dl, started, fin, pre, slack in rows:
     d, f = ts(dl), ts(fin)

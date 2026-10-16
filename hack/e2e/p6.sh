@@ -13,7 +13,7 @@ go build -o "$ROOT/bin/mcpcheck" "$ROOT/hack/e2e/mcpcheck"
 SERVER="$OP mcp --hud http://127.0.0.1:30080 --as wrangler"
 
 record ""
-record "## P6: the agent interface ($(date -u +%Y-%m-%dT%H:%MZ))"
+record "## P6: the agent interface ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 
 log "answer the evaluation set through MCP"

@@ -19,7 +19,7 @@ fi
 HEAD=$(git -C "$REPO" rev-parse HEAD)
 
 record ""
-record "## P4: monorepo CI ($(date -u +%Y-%m-%dT%H:%MZ))"
+record "## P4: monorepo CI ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 
 farm_manager

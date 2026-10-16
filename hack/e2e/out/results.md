@@ -1,3 +1,12 @@
+# e2e results
+
+Measured on the kind cluster of `hack/e2e/kind.yaml` (one control plane, eight
+workers in two zones, Kubernetes 1.36.1) with three MinIO shards, on Docker
+Desktop (16 CPUs, 47 GB) on an Apple M3 Max. Each section is appended by its
+script (`hack/e2e/pN.sh`). P1 to P3 ran on earlier builds of the `v2` branch
+(from dcd055e to a5175da); P4 to P7 on d259c38. Between those builds the view
+records of directories that hold symlinks changed (see P4), which changes the
+view IDs of trees with symlinks in subdirectories and no measured quantity.
 
 ## P1: overlay views, capture, CSI (2026-10-16T08:48Z)
 
@@ -168,3 +177,77 @@ API-only diffs: the HUD's `GET /views/mono/diff` (and the MCP tool `c4_diff_view
 | HEAD~1 to HEAD   | 0 added, 3 modified, 0 removed     | 13 ms       | yes                         |
 | HEAD~10 to HEAD  | 2 added, 22 modified, 0 removed    | 34 ms       | yes                         |
 | HEAD~100 to HEAD | 28 added, 198 modified, 22 removed | 221 ms      | yes                         |
+
+## P5: the work queue on the e2e farm (2026-10-16T10:44Z, policy objective, build d259c38)
+
+Pools: cpu (4 nodes, 4 slots each), gpu (2 nodes, 4 slots each), and spot (2 nodes, 4 slots each, unprovisioned until a CapacityRequest asks for them; the kind-sim provider untaints them after a 20 s provisioning delay). Each show has a quota of 8 nominal cpu slots plus 8 borrowable, 4 + 4 gpu slots, and 0 + 8 spot slots, a burst budget of $5 a day, and lateness priced at $200 an hour. Times are seconds after the first submission; the run took 329 s.
+
+| job                       | class  | submitted | deadline | finished | deadline met  | units done | preemptions |
+| ------------------------- | ------ | --------- | -------- | -------- | ------------- | ---------- | ----------- |
+| show-a/sh010-comp-v003    | render | +0 s      | +420 s   | +283 s   | yes, +137 s   | 96 of 96   | 0           |
+| show-b/sh020-light-v002   | render | +0 s      | +540 s   | +257 s   | yes, +283 s   | 72 of 72   | 0           |
+| show-a/ci-change-4521     | ci     | +0 s      | +240 s   | +77 s    | yes, +163 s   | 16 of 16   | 0           |
+| show-b/train-denoise      | ml     | +0 s      | +86400 s | +327 s   | yes, +86073 s | 1 of 1     | 1           |
+| show-b/train-upres        | ml     | +0 s      | +86400 s | +245 s   | yes, +86155 s | 1 of 1     | 0           |
+| show-a/sh030-fx-v001      | render | +60 s     | +264 s   | +145 s   | yes, +119 s   | 24 of 24   | 0           |
+| show-b/sh040-lookdev-v001 | render | +90 s     | +240 s   | +251 s   | no, -11 s     | 144 of 144 | 0           |
+
+Deadlines met: 6 of 7. The CI change's deadline is its latency target (4 minutes) from when it was submitted.
+
+Reclaim: 1 yield of training runs for the urgent GPU render.
+- train-denoise yielded (reclaim-nominal) at 2026-10-16T10:46:08Z, its checkpoint captured as view c45my9NpLZ...
+- train-denoise resumed: "training from step 316 of 1200", reading the checkpoint from that view.
+
+Burst: the queue first asked for spot capacity at 125 s (peak request 8 slots); slots were provisioned by 138 s and the first unit ran on spot at 143 s. Burst spend for the run: $0.03.
+
+Estimate of sh010-comp-v003 (binary order; frames cost 6 s, and 24 s from 1040 to 1052). W is the estimator's remaining work in slot-seconds; the truth is what the units not yet finished went on to take (a running unit counts half). The render-manager estimate is the mean of finished frames times the frames left:
+
+| point in the run | frames done | W (estimator) | W90 | truth | estimator error | render-manager error |
+| ---------------- | ----------- | ------------- | --- | ----- | --------------- | -------------------- |
+| 10%              | 16 of 96    | 611           | 872 | 676   | 10%             | 15%                  |
+| 25%              | 22 of 96    | 606           | 691 | 594   | 2%              | 7%                   |
+| 50%              | 50 of 96    | 369           | 394 | 360   | 2%              | 4%                   |
+| 75%              | 72 of 96    | 211           | 228 | 204   | 3%              | 6%                   |
+
+Output: sh010-comp-v003 folded 96 unit changesets into its output view c44b1SF86Z...; the stored chain c423YJ1UbW... has one section per fold, each sealed by the output view after it.
+
+## P6: the agent interface (2026-10-16T12:45Z, build d259c38)
+
+| #   | question                                                                                    | expected                   | answered through MCP       | match |
+| --- | ------------------------------------------------------------------------------------------- | -------------------------- | -------------------------- | ----- |
+| 1   | The denoise job show-a/sh050-denoise-v001 mounted another job's output as its input. Which? | show-a/sh050-render-v001   | show-a/sh050-render-v001   | yes   |
+| 2   | According to its signed task records, which generative model did show-a/sh050-denoise-v001? | denoise-v3,human_validated | denoise-v3,human_validated | yes   |
+| 3   | In the C2PA manifest definition the farm produces for frame 1004 of show-a/sh050-render-v0? | algorithmicMedia           | algorithmicMedia           | yes   |
+| 4   | What C4 ID does the farm's task record give for the file renders/sh050/sh050.1004.exr writ? | c44f7BwBRDCF...            | c44f7BwBRDCF...            | yes   |
+| 5   | How many unit changesets have been folded into the output view of show-a/sh010-comp-v003?   | 96                         | 96                         | yes   |
+| 6   | Which range of frames of show-a/sh010-comp-v003 did the estimator flag as heavy?            | 1040-1052                  | 1040-1052                  | yes   |
+| 7   | Which two worker nodes make up the farm's spot pool?                                        | c4-operator-...            | c4-operator-...            | yes   |
+| 8   | How many slots does each node in the farm's gpu pool provide?                               | 4                          | 4                          | yes   |
+| 9   | One of show-b's training runs gave up its GPU slots because show-a needed its nominal quot? | train-denoise              | train-denoise              | yes   |
+| 10  | What does a slot-hour cost in the farm's cpu pool, in US dollars?                           | 0.40                       | 0.40                       | yes   |
+
+10 of 10 answers match. 17 tools listed; 10 calls answered in 0 to 9 ms each (median 1 ms), including the HUD round trip.
+
+- c4_hold_job sh010-comp-v003: held
+- c4_hold_job sh010-comp-v003: released
+- Events recorded on the job: sh010-comp-v003: held (by wrangler in the HUD);sh010-comp-v003: released (by wrangler in the HUD);
+
+## P7: provenance (2026-10-16T10:50Z, build d259c38)
+
+|                        | sh050-render-v001, frame 1004                                 | sh050-denoise-v001, frame 1004                                          |
+| ---------------------- | ------------------------------------------------------------- | ----------------------------------------------------------------------- |
+| record                 | c42pPqX2NJ...                                                 | c45FsFsB1a...                                                           |
+| signature              | verified, key c4-23906723b314e8a4                             | verified, key c4-23906723b314e8a4                                       |
+| unit, attempt, node    | 3, 1, c4-operator-e2e-worker5                                 | 3, 1, c4-operator-e2e-worker5                                           |
+| image                  | docker.io/library/c4-e2e:dev @sha256:7f8ac4a3a301...          | docker.io/library/c4-e2e:dev @sha256:7f8ac4a3a301...                    |
+| input                  | p5-show c43wMG6NHV...                                         | the render's output c44h4aSs9L..., produced by show-a/sh050-render-v001 |
+| file                   | c44f7BwBRD... (subject digest: c4 and the SHA-512 it encodes) | c41Lo1hzwS...                                                           |
+| declared AI use        | none                                                          | assisted, denoise-v3, human_validated, consent plates-release-2026-031  |
+| C2PA digitalSourceType | algorithmicMedia                                              | compositeWithTrainedAlgorithmicMedia                                    |
+| C2PA AI disclosure     | no                                                            | yes (c2pa.ai-disclosure)                                                |
+
+The signing key (Secret `c4-provenance-key`) is mounted only by `c4-system/node` pods; a task's service account may read it: no.
+
+Checked outside the cluster with the public key only: the stored record says "verified: signed by c4-23906723b314e8a4 for unit 3 of sh050-denoise-v001 on c4-operator-e2e-worker5". The same record with its AI use changed to "none" and the signature kept says "rejected: no trusted key signed this record".
+
+An agent asking the MCP server (c4_trace_file, over stdio, as the wrangler) got the same record in 310 ms: verified True, input produced by show-a/sh050-render-v001.
