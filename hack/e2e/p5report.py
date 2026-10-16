@@ -28,7 +28,7 @@ def rel(x):
 print(
     "Pools: cpu (4 nodes, 4 slots each), gpu (2 nodes, 4 slots each), and spot "
     "(2 nodes, 4 slots each, unprovisioned until a CapacityRequest asks for them; "
-    "the kind-sim provider untaints them after a 20 s provisioning delay). Each show "
+    "a simulated capacity provider brings them up after a 20 s provisioning delay). Each show "
     "has a quota of 8 nominal cpu slots plus 8 borrowable, 4 + 4 gpu slots, and 0 + 8 "
     "spot slots, a burst budget of $5 a day, and lateness priced at $200 an hour. "
     f"Times are seconds after the first submission; the run took {wall:.0f} s."

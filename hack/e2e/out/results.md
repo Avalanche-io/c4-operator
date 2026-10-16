@@ -1,9 +1,8 @@
-# e2e results
+# End-to-end results
 
-Measured on the kind cluster of `hack/e2e/kind.yaml` (one control plane, eight
-workers in two zones, Kubernetes 1.36.1) with three MinIO shards, on Docker
-Desktop (16 CPUs, 47 GB) on an Apple M3 Max. Each section is appended by its
-script (`hack/e2e/pN.sh`). P1 to P3 ran on earlier builds of the `v2` branch
+The test cluster of `hack/e2e/kind.yaml`: eight workers in two zones
+(Kubernetes 1.36.1) and a three-shard object store. Each section is appended
+by its script (`hack/e2e/pN.sh`). P1 to P3 ran on earlier builds of the `v2` branch
 (from 1f0a287 to e8b101b); P4 to P7 on 83ca7f2. Between those builds the view
 records of directories that hold symlinks changed (see P4), which changes the
 view IDs of trees with symlinks in subdirectories and no measured quantity.
@@ -159,7 +158,7 @@ The synthetic monorepo (seed 1: 150 services, 400 commits after the initial one,
 | head view                                                                                | c44GBH6esR5Fjo..., 2219 files, 136 MiB            |
 | the parent's Materialization resolved and preflighted (every object HEADed in the store) | 0.50 s                                            |
 | the head's Materialization, by its commit changeset                                      | a chain of 2 views: the parent's, then the head's |
-| git clone and c4git checkout of the head, on the host's SSD                              | 1.05 s; the tree equals the view: yes             |
+| git clone and c4git checkout of the head, from a local remote                            | 1.05 s; the tree equals the view: yes             |
 | a sparse view: services/svc-002-tracer/ and libs/common/                                 | 67 of 2219 files, view c43FeacYbA...              |
 
 CI on the farm: 16 test shards per change on the four cpu nodes, each shard verifying that its mount is exactly the commit's view before testing. A node's first mount of a view builds its layer once, and the other shards on that node wait on that build; publishes are counted per pod:
@@ -180,7 +179,7 @@ API-only diffs: the HUD's `GET /views/mono/diff` (and the MCP tool `c4_diff_view
 
 ## P5: the work queue on the e2e farm (2026-10-16T10:44Z, policy objective, build 83ca7f2)
 
-Pools: cpu (4 nodes, 4 slots each), gpu (2 nodes, 4 slots each), and spot (2 nodes, 4 slots each, unprovisioned until a CapacityRequest asks for them; the kind-sim provider untaints them after a 20 s provisioning delay). Each show has a quota of 8 nominal cpu slots plus 8 borrowable, 4 + 4 gpu slots, and 0 + 8 spot slots, a burst budget of $5 a day, and lateness priced at $200 an hour. Times are seconds after the first submission; the run took 329 s.
+Pools: cpu (4 nodes, 4 slots each), gpu (2 nodes, 4 slots each), and spot (2 nodes, 4 slots each, unprovisioned until a CapacityRequest asks for them; a simulated capacity provider brings them up after a 20 s provisioning delay). Each show has a quota of 8 nominal cpu slots plus 8 borrowable, 4 + 4 gpu slots, and 0 + 8 spot slots, a burst budget of $5 a day, and lateness priced at $200 an hour. Times are seconds after the first submission; the run took 329 s.
 
 | job                       | class  | submitted | deadline | finished | deadline met  | units done | preemptions |
 | ------------------------- | ------ | --------- | -------- | -------- | ------------- | ---------- | ----------- |

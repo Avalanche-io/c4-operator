@@ -12,19 +12,18 @@
 | `v2-gitimport` | 2026-10-16 | 2026-10-16 | The c4git-aware importer (`internal/gitimport`, `import-git`), push-driven import, per-branch chains, the synthetic monorepo harness (`hack/e2e/monorepo`). Rebased onto `v2` and fast-forwarded; worktree removed. |
 | `v2-followup` | 2026-10-16 | 2026-10-16 | The c4 release audit and the c4 pin (no `replace`), a signer per entity for provenance, the Scion comparison, the name question closed. `NEXT.md` and the persona views were deferred for the open-source release. Fast-forwarded into `v2`; worktree removed. |
 | `release-v0.1` | 2026-10-16 | 2026-10-16 | Open-source release readiness for v0.1: the public-repo audit, the install path (images, GoReleaser, install.yaml, CI), the quickstart, the README, the community files and `RELEASING.md`. Fast-forwarded into `v2`; worktree removed. |
+| `docs-positioning` | 2026-10-16 | 2026-10-16 | Public docs lead with the project's scope and present results plainly: development-machine context removed, results under "Results (end-to-end suite)", the Scion comparison operation by operation with what C4 adds. Fast-forwarded into `main`; worktree removed. |
 
 Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
 c4 pseudo-version, so worktrees need nothing else; to build against a local c4
 checkout, use an uncommitted `go.work` (`go work init . ../c4`).
 
-Nothing has been pushed anywhere. There is no remote. No image has been pushed to
-any registry; `c4-operator:dev` and `c4-e2e:dev` exist only in the local Docker
-daemon and the local kind cluster.
+The repository is public at
+[github.com/Avalanche-io/c4-operator](https://github.com/Avalanche-io/c4-operator);
+`main` is the published branch. The release workflow pushes images to
+`ghcr.io/avalanche-io/c4-operator` when a tag is pushed.
 
-## Pending: needs the kind cluster
-
-The cluster was stopped on 2026-10-16 for a power emergency (Docker Desktop
-quit; nothing deleted). These wait for it:
+## Pending end-to-end runs
 
 1. Run `hack/e2e/p7.sh`, rewritten for a signer per entity: a signed ingest,
    a source record from another project refused, a held denoise released
@@ -34,10 +33,7 @@ quit; nothing deleted). These wait for it:
    daemon's `c4-signer` token, the manager's issuer port).
 2. Validate `docs/quickstart.md` on a fresh kind cluster with locally built
    images, then delete that cluster.
-3. Rerun the privileged Linux tests (`make test-linux`); `internal/node`
-   changed (task records are signed with the node's certificate). Its Linux
-   build and `go vet` with `GOOS=linux` are clean.
-4. `make release-snapshot` and `make images`: the release images, built
+3. `make release-snapshot` and `make images`: the release images, built
    locally and published nowhere.
 
 ## Open questions for Joshua

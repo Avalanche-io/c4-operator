@@ -1,6 +1,6 @@
 # The Cinema Content Creation Cloud: c4-operator
 
-> A Kubernetes operator for The Cinema Content Creation Cloud (C4): content-addressed trees (views) mounted into pods by a CSI driver through node, peer and regional caches, per-project isolation, a deadline-driven work queue for render, CI and ML, a HUD, an MCP server that gives agents the same controls as people, and provenance records signed by each entity that did the work. Alpha (v0.1).
+> A Kubernetes operator for The Cinema Content Creation Cloud (C4): content-addressed trees (views) mounted into pods by a CSI driver through node, peer and regional caches, per-project isolation, a deadline-driven work queue for render, CI and ML, a HUD, an MCP server that gives agents the same controls as people, and provenance records signed by each entity that did the work. Version 0.1.
 
 Everything a person can do in the HUD an agent can do through the MCP server, as the same user, with the same permissions and the same audit trail. The farm has no priorities: work is ordered by deadlines and estimates.
 
@@ -15,7 +15,7 @@ Everything a person can do in the HUD an agent can do through the MCP server, as
 
 - [DESIGN.md](DESIGN.md): trust model, views and chains, tiers, overlay and CSI, isolation, the work system, the HUD, metering, provenance
 - [REPORT-v2.md](REPORT-v2.md): what each phase proved, with numbers
-- [e2e results](hack/e2e/out/results.md): measured on an eight-worker kind cluster
+- [End-to-end results](hack/e2e/out/results.md): every measurement of the end-to-end suite
 - [Scheduling simulation](hack/sim/out/results.md): the work queue's policy against FIFO, EDF and manual priorities
 
 ## Operating

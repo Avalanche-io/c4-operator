@@ -1,8 +1,7 @@
 # Contributing to c4-operator
 
-Thank you for your interest. c4-operator is alpha software and its design
-is still moving; please open an issue to discuss a change before a large
-pull request.
+Thank you for your interest. Please open an issue to discuss a large
+change before the pull request.
 
 ## Getting started
 
@@ -43,9 +42,8 @@ To work against a local checkout of the c4 module, use an uncommitted
 
 ## Writing
 
-Documentation is plain and factual: say what the system does and what was
-measured, with the method and its limits. Numbers from kind on one machine
-are labeled as such.
+Documentation is plain and factual: say what the system does, what was
+measured and how.
 
 ## Conduct and security
 

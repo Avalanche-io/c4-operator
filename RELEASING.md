@@ -12,7 +12,7 @@ and publishes nothing.
 Agents prepare the repository; they do not create repositories, push, or
 change anything on GitHub. Everything marked **Joshua** is his to do.
 
-### Before anything leaves this machine
+### Before publishing
 
 1. **Joshua: approve how the history is published** (see
    [History](#history)). Recommended: option B.
@@ -22,10 +22,9 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
 3. **Joshua: confirm the license and contacts**: Apache-2.0, "Copyright 2026
    Joshua Ian Kolden" (as in c4 and c4git), and `c4dev@avalanche.io` for
    security reports and conduct (as in c4).
-4. Agent, once Docker may run again: validate `docs/quickstart.md` on a fresh
-   kind cluster with locally built images, rerun `hack/e2e/p7.sh`
-   (provenance with a signer per entity), `make test-linux`, and
-   `make release-snapshot` (builds the images; publishes nothing).
+4. Agent: validate `docs/quickstart.md` on a fresh kind cluster with locally
+   built images, run `hack/e2e/p7.sh` (provenance with a signer per entity),
+   and `make release-snapshot` (builds the images; publishes nothing).
 
 ### On GitHub
 

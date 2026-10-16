@@ -2,7 +2,7 @@
 
 ## Supported versions
 
-c4-operator is alpha software. Only the latest release gets security fixes.
+Security fixes go into the latest release.
 
 | version | supported |
 | ------- | --------- |

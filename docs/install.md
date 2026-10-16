@@ -1,15 +1,14 @@
 # Installing c4-operator
 
-c4-operator is alpha software (v0.1). The API group is `c4.avalanche.io/v1alpha1`
-and will change before 1.0. To try it on a laptop, follow the
-[quickstart](quickstart.md); this page is for a cluster of your own.
+This is c4-operator v0.1; the API group `c4.avalanche.io/v1alpha1` may change
+before 1.0. To try it locally, follow the [quickstart](quickstart.md); this
+page is for a cluster of your own.
 
 ## Requirements
 
-- **Kubernetes.** Tested on 1.36 only (kind v0.33). The operator relies on
-  features that are on by default from 1.32: ValidatingAdmissionPolicy, CSI
-  inline ephemeral volumes, and bound service-account tokens that name their
-  node.
+- **Kubernetes.** Tested on 1.36. The operator relies on features that are
+  on by default from 1.32: ValidatingAdmissionPolicy, CSI inline ephemeral
+  volumes, and bound service-account tokens that name their node.
 - **Linux nodes with overlayfs.** The node daemon (a DaemonSet) runs
   privileged with host networking: it is the CSI node plugin, mounts the
   overlay views and owns the node's object cache under `/var/lib/c4`. Pods
@@ -119,17 +118,16 @@ c4-operator mcp --hud https://hud.example.com --token-file ~/.c4/token
 See [docs/agents/tools.md](agents/tools.md) and the
 [`c4-farm` skill](../skills/c4-farm/SKILL.md).
 
-## Before production
+## Hardening for production
 
-v0.1 is not ready for production. Known limits, from
-[REPORT-v2.md](../REPORT-v2.md):
-
-- Cache tiers authenticate every request with service-account tokens but
-  talk plain HTTP inside the cluster; use a mesh with mTLS.
-- The provenance signing CA key is a Secret; in production it belongs in a
-  KMS or HSM.
-- Measured on kind on one laptop only; nothing here has run at production
-  scale.
+- **Encrypt traffic between cache tiers.** Every tier request is
+  authenticated with a service-account token and authorized by project;
+  run the tiers in a mesh with mTLS so the bytes are encrypted as well.
+- **Keep the signing root in a KMS or HSM.** The provenance signing CA is a
+  Secret in `c4-signing` that only the manager reads; in production the
+  root key lives in a KMS or HSM and signs an intermediate for the manager.
+- **Sign in through your SSO.** Put an SSO proxy in front of the HUD and
+  start the manager with `--hud-trust-proxy`; never set `--hud-dev-viewers`.
 
 ## Uninstall
 

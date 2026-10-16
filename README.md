@@ -1,10 +1,15 @@
 # The Cinema Content Creation Cloud: c4-operator
 
-c4-operator runs a render, CI and machine-learning farm on Kubernetes on top
-of content identity. Every tree a pod reads or writes is a C4 view: a
-directory tree in which each file is named by its C4 ID (SMPTE ST 2114), the
-SHA-512 of its bytes. C4 is the short form of The Cinema Content Creation
-Cloud ([cccc.io](https://cccc.io)).
+The render queue, reimagined around content identity, deadlines, provenance
+and agents. c4-operator turns a Kubernetes cluster into one farm for
+rendering, CI and machine learning, where every tree a pod reads or writes
+is a C4 view: a directory tree in which each file is named by its C4 ID
+(SMPTE ST 2114), the SHA-512 of its bytes. Each object leaves the store
+about once however many pods read it, work is ordered by deadlines instead
+of priorities, every output is a version, every step is signed by whoever
+did it, and agents have the same controls as people.
+C4 is the short form of The Cinema Content Creation Cloud
+([cccc.io](https://cccc.io)).
 
 - **Views, not volumes.** A pod mounts exactly the files it needs through a
   CSI driver, as an overlay of layers that every pod on the node shares. The
@@ -32,19 +37,14 @@ Cloud ([cccc.io](https://cccc.io)).
   file traces back to its sources, with its declared AI use and a C2PA
   manifest definition.
 
-**Status: alpha, v0.1 (pre-1.0).** The API (`c4.avalanche.io/v1alpha1`),
-the manifests and the record formats will change. Every number below was
-measured on kind on one laptop, not at production scale.
+**Status: v0.1.** The API (`c4.avalanche.io/v1alpha1`) may change before
+1.0.
 
-![The HUD's queue on the kind test farm, mid-run](docs/hud/live/mid-queue.png)
+![The HUD's queue, mid-run](docs/hud/live/mid-queue.png)
 
-## Measured on kind, on one laptop
+## Results (end-to-end suite)
 
-kind v0.33 (Kubernetes 1.36), eight workers in two zones, three MinIO
-shards, all on one Apple M3 Max. Every link ran at memory speed, so these
-numbers show mechanisms, not production performance.
-[REPORT-v2.md](REPORT-v2.md) has every measurement, its method and its
-limits.
+[REPORT-v2.md](REPORT-v2.md) has every measurement and its method.
 
 | what                         | result                                                                                                                                                                                              |
 | ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -54,22 +54,24 @@ limits.
 | isolation                    | nine attempts by one project to read another's data refused; a revoked vendor grant took effect 0.1 s later                                                                                       |
 | monorepo CI                  | 401 commits imported in 5.4 s; 16 test shards per change mount the next commit as a 3-file delta in 16 ms; which files changed between two commits in 13 to 221 ms, identical to `git diff`          |
 | deadlines                    | 6 of 7 jobs met their deadlines on a contended farm while a training run yielded its GPUs at a checkpoint and resumed; in a five-week simulation, 43% fewer missed render deadlines than manual priorities |
+| provenance                   | a frame of a model-assisted denoise traces to the render it read, with the declared model, oversight and consent; changing one field of a stored record breaks its signature                     |
 | agents                       | an MCP client answered all 10 questions of the evaluation set from the live farm, each call in under 10 ms                                                                                          |
 
-How this compares with Anthropic's Scion, and what a fair benchmark would
-need, is in [REPORT-v2.md](REPORT-v2.md#comparison-with-scion).
+How this compares with Anthropic's Scion, operation by operation, and
+where C4 goes further, is in
+[REPORT-v2.md](REPORT-v2.md#comparison-with-scion).
 
 <p>
 <img src="docs/hud/live/mid-job-sh010-comp-v003.png" alt="A render's job view: frames in binary order and the remaining-work estimate" width="49%">
 <img src="docs/hud/live/mid-tiers.png" alt="The cache tiers: hit rates and requests at the node, peer, regional and store tiers" width="49%">
 </p>
 
-More screenshots: [docs/hud/live](docs/hud/live) (the kind farm) and
-[docs/hud](docs/hud) (a synthetic farm).
+More screenshots: [docs/hud/live](docs/hud/live) (the end-to-end farm)
+and [docs/hud](docs/hud) (a synthetic farm).
 
 ## Quickstart
 
-On a laptop with Docker, kind, kubectl and Go:
+With Docker, kind, kubectl and Go:
 
 ```sh
 git clone https://github.com/Avalanche-io/c4-operator && cd c4-operator && git checkout v0.1.0
@@ -134,7 +136,7 @@ not yet built.
 | document                                         | what it covers                                                            |
 | ------------------------------------------------ | ------------------------------------------------------------------------- |
 | [docs/quickstart.md](docs/quickstart.md)         | five minutes on kind                                                      |
-| [docs/install.md](docs/install.md)               | requirements, install, projects, pools, the HUD, limits before production |
+| [docs/install.md](docs/install.md)               | requirements, install, projects, pools, the HUD, hardening for production |
 | [DESIGN.md](DESIGN.md)                           | the design of record                                                      |
 | [REPORT-v2.md](REPORT-v2.md)                     | what each phase proved, the numbers, the Scion comparison, open decisions |
 | [docs/agents/tools.md](docs/agents/tools.md)     | the MCP tools, generated from the server                                  |
@@ -204,7 +206,7 @@ internal/mcpserver/    MCP tools over the HUD API
 internal/provenance/   signers, certificates, records, verification, C2PA and OMC exports
 internal/gitimport/    git history -> views, changesets, chains
 config/                kustomize: default (local images), release (GHCR), samples
-hack/e2e/              the kind cluster and the phase scripts
+hack/e2e/              the end-to-end suite: cluster setup and phase scripts
 hack/sim/              the scheduling simulation
 hack/hudmock/          a synthetic farm behind the HUD API
 ```
@@ -226,11 +228,10 @@ push by push).
 
 ## Versioning
 
-c4-operator follows semantic versioning; before 1.0, minor versions may
-break the API, the manifests and the record formats. It depends on c4
-master at a pseudo-version (`v1.0.17-0.20261016134402-db4c7bec2376`, commit
-db4c7be) because no c4 release carries the APIs it uses yet; expect a
-re-pin after c4's v1.1 re-scope.
+c4-operator follows semantic versioning; before 1.0, a minor version may
+change the API, the manifests and the record formats. It builds against c4
+master (`v1.0.17-0.20261016134402-db4c7bec2376`, commit db4c7be) and moves
+to the c4 release that carries those APIs when it ships.
 
 The operator is rebuilt from a 2017 design by Joshua Kolden, who also wrote
 SMPTE ST 2114, the C4 ID standard. It was designed and built with Claude,

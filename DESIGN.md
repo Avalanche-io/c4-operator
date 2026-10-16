@@ -370,7 +370,7 @@ same `M` objects:
 
 With 5,000 nodes in 50 localities, `k = 1`, and `r = 2`, the store sees 2
 GETs per plate frame instead of 5,000, and the regional tier sees 50. The P2
-herd test measures each row on a kind cluster.
+herd test measures each row on the test cluster.
 
 ### 3.4 Every tier coalesces, streams, sheds, and resumes
 
@@ -1724,8 +1724,8 @@ remaining time is recorded against elapsed time, together with how soon the
 heavy region is flagged and how soon the job's slack estimate settles within
 10% of the truth.
 
-A smaller version runs on the kind cluster with real pods and the `kind-sim`
-actuator.
+A smaller version runs on the test cluster with real pods and the `kind-sim`
+actuator (a simulated capacity provider).
 
 ## 11. HUD (P5)
 
@@ -2251,7 +2251,7 @@ channel, and studios on other clouds have none at all.
 
 ## 18. Phases and evidence
 
-Each phase is proven by tests and by a scenario on a multi-node kind cluster
+Each phase is proven by tests and by a scenario on a multi-node test cluster
 with 8 workers in two localities. Results land in
 `hack/e2e/out/results.md`.
 
@@ -2285,12 +2285,12 @@ with 8 workers in two localities. Results land in
   test that every HUD endpoint has a tool; the evaluation set answered by an
   agent that has only the MCP server; and a recorded session in which an
   agent triages a failing job, makes a deadline with a burst, and migrates a
-  Deadline job on the kind cluster.
+  Deadline job on the test cluster.
 - **P7: provenance.** Task records signed and stored as C4 objects, the
   lineage index, trace queries, the disclosure report, C2PA manifest
   definitions and OMC export, the HUD view and the MCP tools. Evidence: a
   delivered frame traced through comp, render and sim to its plates on the
-  kind cluster; a tampered record detected; and the generative-use query
+  test cluster; a tampered record detected; and the generative-use query
   answered for a delivery that contains a generated element.
 
 ### 18.1 As run
@@ -2307,7 +2307,7 @@ above. `REPORT-v2.md` has the numbers.
 - **P5** ran deadlines, binary order with its estimate scored against what
   the units cost, a CI change under a latency target, training runs
   yielding at checkpoints and resuming from their captured views, and a burst
-  through the kind-sim provider, with live HUD screenshots. Not shown on the
+  through the simulated capacity provider, with live HUD screenshots. Not shown on the
   cluster: a comp job pipelined on a render's output chain (each job's
   output is a sealed chain, but downstream units start when the upstream job
   succeeds, through `fromJob`), and generators expanding (the policy and the

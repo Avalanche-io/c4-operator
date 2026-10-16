@@ -2,12 +2,10 @@
 
 Measured 2026-10-16 on branch `v2-gitimport`.
 
-Machine: Apple M3 Max (16 cores, 128 GB), macOS 27.2, internal SSD (APFS).
 Tools: git 2.55.0, go 1.26.7, c4git 1.0.18 (`go install
 github.com/Avalanche-io/c4git/cmd/c4git@latest`). Store: three c4 TreeStore
-shards on the local SSD, given as three `-store` flags, so objects spread by
-rendezvous hashing exactly as they would over three S3 buckets. No network
-store was used.
+shards on local disk, given as three `-store` flags, so objects spread by
+rendezvous hashing exactly as they would over three S3 buckets.
 
 ## Commands
 
@@ -215,7 +213,7 @@ and three fsync rounds per commit take the rest. Those rounds are: file
 objects and inner records in parallel, then the root record and the
 changeset together. The outliers of one to two seconds are commits of one
 or two small files whose summed store time was several seconds, which is
-APFS flush latency, not importer work. Against S3 the same structure
+filesystem flush latency, not importer work. Against S3 the same structure
 applies with a network round trip (a Head, then a Put when absent) in place
 of each fsync; the importer issues up to `-jobs` (default 8) writes at once.
 
