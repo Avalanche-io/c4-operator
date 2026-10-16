@@ -41,9 +41,10 @@ type Set struct {
 	root string
 	opts Options
 
-	mu    sync.Mutex
-	parts map[string]*Cache
-	bytes int64
+	mu     sync.Mutex
+	initMu sync.Mutex
+	parts  map[string]*Cache
+	bytes  int64
 }
 
 // OpenSet opens or creates the cache under root (root/p/<partition>/...).
@@ -116,6 +117,16 @@ func (s *Set) Partition(name string) (*Cache, error) {
 	if ok {
 		return c, nil
 	}
+	// One partition is created once: creation clears its tmp directory,
+	// which must never race with a fill already writing there.
+	s.initMu.Lock()
+	defer s.initMu.Unlock()
+	s.mu.Lock()
+	c, ok = s.parts[name]
+	s.mu.Unlock()
+	if ok {
+		return c, nil
+	}
 	dir := filepath.Join(s.root, "p", name)
 	for _, d := range []string{"objects", "xobjects", "tmp"} {
 		if err := os.MkdirAll(filepath.Join(dir, d), 0o700); err != nil {
@@ -132,10 +143,6 @@ func (s *Set) Partition(name string) (*Cache, error) {
 		return nil, err
 	}
 	s.mu.Lock()
-	if existing, ok := s.parts[name]; ok {
-		s.mu.Unlock()
-		return existing, nil
-	}
 	s.parts[name] = c
 	s.bytes += n
 	s.mu.Unlock()

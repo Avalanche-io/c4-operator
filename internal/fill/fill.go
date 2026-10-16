@@ -133,10 +133,8 @@ type Flight struct {
 func (f *Flight) Release() {
 	f.g.mu.Lock()
 	f.g.waiters--
-	f.g.mu.Unlock()
-	f.mu.Lock()
 	f.waiters--
-	f.mu.Unlock()
+	f.g.mu.Unlock()
 }
 
 func (f *Flight) changed() {
@@ -197,10 +195,19 @@ func (f *Flight) Commit(commit func(tmp string) (string, error)) error {
 		err = fmt.Errorf("short object: %d of %d bytes", f.written, f.size)
 	}
 	f.mu.Unlock()
-	var final string
-	if err == nil {
-		final, err = commit(f.tmp)
+	if err != nil {
+		os.Remove(f.tmp)
+		f.finish("", err)
+		return err
 	}
+	// Rename under the lock, so a waiter opening the object sees either
+	// the temporary path or the final one, never a path in between.
+	f.mu.Lock()
+	final, err := commit(f.tmp)
+	if err == nil {
+		f.final = final
+	}
+	f.mu.Unlock()
 	if err != nil {
 		os.Remove(f.tmp)
 		f.finish("", err)
