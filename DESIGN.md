@@ -573,7 +573,8 @@ spec:
     shards: ["s3://show-a/c4/?endpoint=http://minio-0...", "s3://show-a/c4/?endpoint=http://minio-1..."]
     credentialsSecretRef: {name: show-a-store}   # a Secret in c4-system
     access: Tiered                    # Tiered | Direct
-  grants:                             # optional; empty means anything in the project's own store
+  scope: Grants                       # Store (default): anything in the project's own store
+  grants:                             # with scope Grants, only these; none means nothing
   - tree: c4...                       # a view, root record, source c4m, or changeset ID
     paths: [shots/sh010/, editorial/]
   work:                               # P5: quotas per pool, budgets
@@ -601,14 +602,28 @@ credentials.
   refused, with or without a token.
 - **Knowing an ID is not permission.** Pods cannot fetch by ID at all. They
   can only mount Materializations in their own namespace. A Materialization
-  resolves through its project's store with its project's credentials and
-  through its project's grants:
-  - with grants, the source must be a granted tree, and the include filter is
-    intersected with the grant's paths;
-  - without grants, the description is resolved against the project's own
-    store. A hand-written ConfigMap c4m that lists another project's IDs
-    resolves against this project's store, where those objects do not
-    exist, and the Materialization fails before any node is involved.
+  resolves through its project's store with its project's credentials, and
+  the manager checks that every object of the resolved view is in that
+  store (the preflight) before any node is involved:
+  - with scope `Store`, any description that resolves from the project's
+    own store is allowed. A hand-written ConfigMap c4m that lists another
+    project's IDs resolves against this project's store, where those objects
+    do not exist, and the Materialization fails;
+  - with scope `Grants`, the source (or, for a changeset, its base) must be a
+    granted tree, the include filter is intersected with the grant's paths,
+    and an include that the grant's paths do not reach is refused rather
+    than mounted empty. A grant names a tree, not files: a c4m that lists
+    exactly the granted files is a different tree and is refused. Removing
+    the last grant leaves the project able to read nothing, never
+    everything; listing grants under scope `Store` is reported as invalid
+    and the grants are still enforced.
+  - Records of a view are written to the project's store only after its
+    preflight passes, so a refused description leaves nothing behind.
+  - A change to a Project (a revoked grant, new shards) re-resolves every
+    Materialization of its namespaces, and node daemons refuse to mount a
+    Materialization resolved under an older Project generation. Revocation
+    therefore takes effect at the next mount; pods already running keep
+    their mount until they end (P3 measures both).
 - **Writes the daemons make to the API.** Node daemons annotate pods with
   capture results and label their own Node when its cache is warm (section
   9.8). RBAC cannot scope those verbs, so a ValidatingAdmissionPolicy does:
@@ -638,10 +653,11 @@ bytes if B's store lacks them. Partitioning removes both channels.
 
 `Shared` trades this away deliberately for projects that trust each other,
 such as departments of one show. Projects in the same `sharingGroup` share
-objects and layers. Before serving a shared object to project B, the tier
-checks `HEAD` on B's own store (proof of possession), so B never reads bytes
-it could not have read anyway. The timing channel remains, and is
-documented.
+objects and layers. Project B is served a shared object only as part of
+one of B's own Materializations, whose preflight has already found every
+object of the view in B's own store (proof of possession), so B never reads
+bytes it could not have read anyway. Node daemons, the only clients of the
+tiers, fetch nothing else. The timing channel remains, and is documented.
 
 ### 6.5 Credentials
 
