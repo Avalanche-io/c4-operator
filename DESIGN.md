@@ -180,9 +180,15 @@ its root listing, so every checkpoint in a chain is a view ID. A chain is
 therefore a write-ahead log of views: appending a section and its checkpoint
 is a commit, and every sealed prefix is a view that can be verified by
 applying the sections along changed paths and comparing IDs, at a cost
-proportional to the change. `c4 log` lists a chain's versions and `c4 split`
-extracts one, unchanged. Section 2.5 makes chains the system's streaming
+proportional to the change. Section 2.5 makes chains the system's streaming
 primitive.
+
+The c4 CLI reads these chains as they are. `c4 split` works on a stored
+chain unchanged. `c4 log` computes each version's ID from the chain text
+alone, so a chain exported with its base listing written out in full lists
+exactly the checkpoint view IDs (checked with c4 1.0.18); a chain stored with
+an external base needs `c4 log` to resolve that base from the store, a
+proposed c4 change (PROGRESS.md).
 
 A Materialization whose source is a changeset or a chain resolves to its
 sequence of views, base first (`status.layers` keeps the most recent 16 as
@@ -234,7 +240,8 @@ sealed checkpoint as it lands. One mechanism serves five uses:
    IDs.
 4. **Git import.** Each branch is one chain, appended per commit, with the
    commit's view as the checkpoint: Scion's write-ahead log of changesets,
-   expressed natively in c4m. `c4 log` and `c4 split` work on it unchanged.
+   expressed natively in c4m, readable by `c4 log` and `c4 split` (section
+   2.3).
 5. **Provenance and metering.** Each checkpoint is a natural boundary to
    sign the batch of task records (section 9) and usage records (section 12)
    that produced it. The chain of checkpoints is itself the tamper-evident

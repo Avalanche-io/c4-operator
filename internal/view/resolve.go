@@ -20,8 +20,14 @@ type Store interface {
 // ErrIncomplete reports a description that cannot be materialized.
 var ErrIncomplete = errors.New("description is incomplete")
 
-// MaxChain bounds how many changesets a chain may stack.
-const MaxChain = 64
+// MaxChain bounds how deep external base references may nest (a changeset
+// whose parent is a changeset whose parent is...). Chains themselves are
+// not bounded; long ones are re-based.
+const MaxChain = 4096
+
+// KeepLevels is how many of a chain's most recent views a resolution keeps
+// as stacking candidates.
+const KeepLevels = 16
 
 // Resolved is a resolved source.
 type Resolved struct {
@@ -31,9 +37,12 @@ type Resolved struct {
 	// RootID is the ID of the top description's root listing as recorded
 	// (the snapshot ID `c4 id` reports for a full description).
 	RootID c4.ID
-	// Chain holds the views of the changeset chain, base first. The last
-	// one is what pods see. A plain description has one.
+	// Chain holds the most recent views of the changeset chain (at most
+	// KeepLevels), base first. The last one is what pods see. A plain
+	// description has one.
 	Chain []*View
+	// Levels counts every view of the chain, including those not kept.
+	Levels int
 }
 
 // View returns the view pods see.
@@ -107,8 +116,12 @@ func newResolver(st Store, f Filter) *resolver {
 }
 
 func (r *resolver) finish(levels [][]item) (*Resolved, error) {
-	res := &Resolved{}
-	for _, lv := range levels {
+	res := &Resolved{Levels: len(levels)}
+	kept := levels
+	if len(kept) > KeepLevels {
+		kept = kept[len(kept)-KeepLevels:]
+	}
+	for _, lv := range kept {
 		root, err := buildNode(lv, r.f)
 		if err != nil {
 			return nil, err
@@ -183,6 +196,11 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 	if c4m.IsJournal(data) {
 		return nil, fmt.Errorf("this is a c4 store journal, not a description")
 	}
+	// A chain of several sealed sections from an external base resolves to
+	// one view per checkpoint.
+	if sections, err := c4m.DecodePatchChain(bytes.NewReader(data)); err == nil && len(sections) > 1 && !sections[0].BaseID.IsNil() {
+		return r.resolveSections(sections, depth)
+	}
 	m, err := c4m.NewDecoder(bytes.NewReader(data)).Decode()
 	if err != nil {
 		return nil, fmt.Errorf("parse c4m: %w", err)
@@ -209,6 +227,29 @@ func (r *resolver) resolveData(data []byte, depth int) ([][]item, error) {
 		return nil, err
 	}
 	return append(chain, top), nil
+}
+
+// resolveSections resolves a chain section by section from its external
+// base.
+func (r *resolver) resolveSections(sections []*c4m.PatchSection, depth int) ([][]item, error) {
+	if depth >= MaxChain {
+		return nil, fmt.Errorf("base references nest deeper than %d", MaxChain)
+	}
+	if r.st == nil {
+		return nil, fmt.Errorf("%w: chain over %s and no store is configured", ErrIncomplete, sections[0].BaseID)
+	}
+	levels, err := r.resolveID(sections[0].BaseID, depth+1)
+	if err != nil {
+		return nil, fmt.Errorf("chain base %s: %w", sections[0].BaseID, err)
+	}
+	for _, sec := range sections {
+		top, err := r.applyPatch(levels[len(levels)-1], &c4m.Manifest{Version: "1.0", Entries: sec.Entries})
+		if err != nil {
+			return nil, err
+		}
+		levels = append(levels, top)
+	}
+	return levels, nil
 }
 
 // walk flattens m (entries in filesystem-walk order) under prefix. With

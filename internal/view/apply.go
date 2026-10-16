@@ -83,6 +83,10 @@ func Apply(ctx context.Context, parent c4.ID, edits []Edit, src RecordSource) (*
 	if err := c4m.NewEncoder(&buf).EncodePatch(&c4m.PatchResult{Patch: m, OldID: parent, NewID: res.ID}); err != nil {
 		return nil, err
 	}
+	// The closing checkpoint seals the patch: the changeset is a one-section
+	// c4m chain, verifiable and appendable to a stream.
+	buf.WriteString(res.ID.String())
+	buf.WriteByte('\n')
 	res.Changeset = buf.Bytes()
 	res.ChangesetID = c4.Identify(bytes.NewReader(res.Changeset))
 	return res, nil

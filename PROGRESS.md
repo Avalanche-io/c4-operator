@@ -79,6 +79,14 @@ Those repos were read, not modified.
    ID as `c4 id` in content mode. A scan mode with that projection in the c4
    scanner would let the CLI compute view IDs directly.
 
+8. **`c4 log` on a chain with an external base.** `c4 log` treats the first
+   section as the base state and computes version IDs from the chain text, so
+   on a chain whose first line is an external base reference its IDs are those
+   of the patches alone, not of the versions. With the base written out in full
+   (the operator's chain export) it lists exactly the checkpoints. Resolving a
+   first-line external base from the configured store, when there is one,
+   would make `c4 log` list the true version IDs of any stored chain.
+
 ### c4d
 
 1. **No `Range` support** on `GET /{id}`, so an interrupted 10 GB transfer from a
