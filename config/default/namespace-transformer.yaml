@@ -1,0 +1,7 @@
+apiVersion: builtin
+kind: NamespaceTransformer
+metadata:
+  name: c4-system
+  namespace: c4-system
+unsetOnly: true
+setRoleBindingSubjects: none

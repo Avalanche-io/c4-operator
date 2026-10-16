@@ -5,7 +5,6 @@ package node
 
 import (
 	"context"
-	"crypto/ed25519"
 	"fmt"
 	"net"
 	"net/http"
@@ -30,6 +29,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/metrics"
 	"github.com/Avalanche-io/c4-operator/internal/objcache"
 	"github.com/Avalanche-io/c4-operator/internal/project"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/internal/tier"
 )
@@ -56,9 +56,11 @@ type Config struct {
 	// PublishTimeout bounds the work behind one publish (fetch and build).
 	// kubelet's call may time out sooner; its retry joins the work.
 	PublishTimeout time.Duration
-	// SigningKey signs a task record for every capture (DESIGN.md section
-	// 9). Nil makes no records.
-	SigningKey ed25519.PrivateKey
+	// Signer signs a task record for every capture as this node (DESIGN.md
+	// section 9.2), with a key that never leaves the daemon and a
+	// short-lived certificate for the node's identity. Nil makes no
+	// records.
+	Signer *provenance.Signer
 	// Version names this build in task records.
 	Version string
 }

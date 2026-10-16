@@ -10,19 +10,38 @@
 | `v2-sim`       | 2026-10-16 | 2026-10-16 | Scheduling policy core (`internal/work`) and the simulation harness (`hack/sim`). Rebased onto `v2` and fast-forwarded; worktree removed.                                                                           |
 | `v2-hud`       | 2026-10-16 | 2026-10-16 | The HUD frontend (`internal/hud/web`), its API contract and the mock backend (`hack/hudmock`). Rebased onto `v2` and fast-forwarded; worktree removed.                                                              |
 | `v2-gitimport` | 2026-10-16 | 2026-10-16 | The c4git-aware importer (`internal/gitimport`, `import-git`), push-driven import, per-branch chains, the synthetic monorepo harness (`hack/e2e/monorepo`). Rebased onto `v2` and fast-forwarded; worktree removed. |
-| `v2-followup`  | 2026-10-16 |            | Worktree `.worktrees/v2-followup`: release audit, signers per entity, viewpoint views, next-work intent, the Scion comparison. Merges into `v2`.                                                                    |
+| `v2-followup` | 2026-10-16 | 2026-10-16 | The c4 release audit and the c4 pin (no `replace`), a signer per entity for provenance, the Scion comparison, the name question closed. `NEXT.md` and the persona views were deferred for the open-source release. Fast-forwarded into `v2`; worktree removed. |
 
-Worktrees live under `.worktrees/` (ignored by git). `.worktrees/c4` is a symlink
-to `../c4` so the `replace => ../c4` in each worktree's `go.mod` resolves.
+Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
+c4 pseudo-version, so worktrees need nothing else; to build against a local c4
+checkout, use an uncommitted `go.work` (`go work init . ../c4`).
 
 Nothing has been pushed anywhere. There is no remote. No image has been pushed to
 any registry; `c4-operator:dev` and `c4-e2e:dev` exist only in the local Docker
 daemon and the local kind cluster.
 
+## Pending: needs the kind cluster
+
+The cluster was stopped on 2026-10-16 for a power emergency (Docker Desktop
+quit; nothing deleted). These wait for it:
+
+1. Run `hack/e2e/p7.sh`, rewritten for a signer per entity: a signed ingest,
+   a source record from another project refused, a held denoise released
+   through MCP, the custody walk across node, controller, queue, HUD and
+   workload signers, the issuer's refusals, and the CA's reach. It needs
+   `hack/e2e/redeploy.sh` first (new manifests: `config/signing`, the node
+   daemon's `c4-signer` token, the manager's issuer port).
+2. Validate the kind quickstart from a clean cluster.
+3. Rerun the privileged Linux tests (`make test-linux`); `internal/node`
+   changed (task records are signed with the node's certificate). Its Linux
+   build and `go vet` with `GOOS=linux` are clean.
+
 ## Open questions for Joshua
 
-1. **Release path.** The `replace => ../c4` blocks any public build until a c4
-   suite release carries the APIs the operator uses (release blocker 1). The
+1. **Release path.** c4 is pinned to the master pseudo-version
+   `v1.0.17-0.20261016134402-db4c7bec2376` (db4c7be) until a c4 release carries
+   what the operator uses; expect to re-pin after the v1.1 re-scope, because
+   packages may move. See "c4 dependencies and the release plan" below. The
    image registry path is also open (blocker 3).
 2. **Billing model.** Usage is metered as cluster-hours, container-hours and
    GPU-hours (the HUD shows them; a signed ledger is designed, not built), and
@@ -35,12 +54,14 @@ daemon and the local kind cluster.
 4. **Direct mode.** In Direct mode node daemons hold a project's store
    credentials. It is the baseline P2 measures against and suits small
    installs; keeping it as a supported mode is a choice.
-5. **Task-record signing keys.** Records are signed with one farm key held in
-   a Secret that only node daemons mount. Per-node keys, a KMS, or keyless
-   signing (Sigstore) are stronger. C2PA credentials that validators show as
-   "Trusted" need a certificate on the C2PA Trust List, which means the C2PA
-   Conformance Program; the farm today emits manifest definitions, not signed
-   C2PA manifests.
+5. **Signing key custody.** Built: each entity signs its own records with a
+   short-lived certificate from a farm signing CA (DESIGN.md section 9.2); the
+   CA key is a Secret in `c4-signing` that only the manager reads. Open: a KMS
+   or HSM for the root in production, a private Sigstore (Fulcio and Rekor) for
+   independent timestamps and an append-only log, certificates for people from
+   the studio's OIDC provider, and C2PA conformance: credentials that
+   validators show as "Trusted" need a certificate on the C2PA Trust List; the
+   farm emits manifest definitions, not signed C2PA manifests.
 6. **HUD authorization model.** Controls are checked per write
    (SubjectAccessReview) and made by the HUD's service account, with an Event
    naming the user. Impersonation would let RBAC check the write itself but
@@ -51,25 +72,58 @@ daemon and the local kind cluster.
 
 ## Release blockers
 
-1. **Remove the `replace` in go.mod before release.**
-   `go.mod` has `replace github.com/Avalanche-io/c4 => ../c4`. It builds here and
-   nowhere else; a public CI runner has no `../c4`. This is the mistake recorded
-   in `../../RELEASE.md` ("Lessons from v1.0.13", item 1).
+1. **The `replace` is gone; the c4 pin is a pseudo-version.** `go.mod` requires
+   `github.com/Avalanche-io/c4 v1.0.17-0.20261016134402-db4c7bec2376` (c4 master
+   at db4c7be, public), which has every API the operator uses; v1.0.18 does not.
+   Re-pin after the v1.1 re-scope. The pseudo-version sorts below v1.0.18, so a
+   build that also requires c4 v1.0.18 would select it and fail; a pre-release
+   tag on c4 master would end that.
 
-   It cannot simply be dropped today. Building against the published
-   `github.com/Avalanche-io/c4 v1.0.18` fails, because the operator uses APIs that
-   exist on c4 `master` but in no release (for example `c4m.IsJournal`).
-
-   Order of operations: ship the next c4 suite release (through `oss/c4toolkit`),
-   bump the `require` to that version, delete the `replace`, and run
-   `go build ./... && make test` with `GOFLAGS=-mod=mod` from a clean checkout.
-
-2. **Dockerfile builds from a host binary.** Because of the `replace`, `make image`
-   cross-compiles on the host and copies the binary in. Once the `replace` is gone,
-   switch to a multi-stage build that compiles inside the image.
+2. **Dockerfile builds from a host binary.** `make image` cross-compiles on the
+   host and copies the binary in. With the `replace` gone, a multi-stage build
+   that compiles inside the image works too.
 
 3. **Image name.** Manifests use `c4-operator:dev`. A release needs a registry path
    (for example `ghcr.io/avalanche-io/c4-operator`), which is Joshua's decision.
+
+## c4 dependencies and the release plan
+
+Audited 2026-10-16 from the c4 suite's plans (`../../RELEASE.md`,
+`../ROADMAP.md`, `../../PLAN.md`, `../c4/design/ash-brief.md` and the other
+design notes, `../c4-design`, `../c4toolkit`, the c4d dev plans) and the git
+history, branches and tags of c4, c4d, c4git, c4-containers and c4toolkit.
+Paths are relative to the repository named in each row.
+
+None of the needed c4 changes is in a release: v1.0.18 lacks all three the operator uses, and 1.0.19 is a patch release with no new exported API. So `go.mod` now requires the c4 master pseudo-version `v1.0.17-0.20261016134402-db4c7bec2376` (commit db4c7be on `origin/master`, which contains every c4 commit named below) instead of `replace => ../c4`, and the operator builds and passes its tests from a clean checkout. Two caveats: it must be re-pinned after the v1.1 re-scope, because packages may move; and the pseudo-version sorts below v1.0.18, so a build that also required c4 v1.0.18 would select v1.0.18 and fail. A pre-release tag on c4 master (for example `v1.1.0-alpha.1`) would end both. The status of every c4-side item the operator needs or found:
+
+| item                                                                                                     | repo           | status                                                       | evidence                                                                                          |
+| -------------------------------------------------------------------------------------------------------- | -------------- | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| `c4m.IsJournal`                                                                                          | c4             | on master, in no tag                                         | fc7ca48; `git tag --contains` is empty                                                            |
+| `scan.ModeContent`                                                                                       | c4             | on master, in no tag                                         | 31f3c20 (used by one test)                                                                        |
+| the parser accepting a closing checkpoint line, which ends every changeset the operator writes          | c4             | on master, in no tag                                         | 6c2b82d, CHANGELOG.md "Unreleased"; on v1.0.18 three operator tests fail ("empty patch section") |
+| `c4m.ResolveBase`                                                                                        | c4             | on master, in no tag; v2 no longer calls it                  | 72c79cf, external bases in 5f5a5d2                                                                |
+| `c4 patch` no longer writes directories                                                                  | c4             | on master, in no tag                                         | f15c1c2, CHANGELOG.md                                                                             |
+| record expansion as a library                                                                            | c4             | not planned                                                  | `cmd/c4/cat.go` (package main); a finding only in `design/ash-brief.md`:152-153                   |
+| opening a store from a URL                                                                               | c4             | not planned                                                  | `store/config.go`:70 is unexported                                                                |
+| S3 ranged reads, and a `Has` that reports errors                                                         | c4             | not planned                                                  | `store/s3store.go`:118-158                                                                        |
+| S3 virtual-hosted addressing with a custom endpoint                                                      | c4             | not planned                                                  | `store/s3store.go`:83-103                                                                         |
+| a separator between the S3 prefix and the ID                                                            | c4             | not planned; the store-layout draft keeps prefix + ID        | `design/store-layout-finish-results.json`:116                                                     |
+| a hardlink mode for reconcile                                                                            | c4             | not planned (v1.1 plans clonefile only)                      | `design/ash-brief.md`:39-40                                                                       |
+| a scan projection that keeps the executable bit                                                          | c4             | not planned; decision D1 left it open                        | `plans/handoff-2026-07/03-DESIGN-DECISIONS.md`:9-18                                               |
+| `c4 log` resolving an external base reference                                                            | c4             | not planned; base fetching is given to cat, patch, restore   | `design/chain-resolution.md`:79-82                                                                |
+| k8s examples that run `c4 patch <c4m> <dir>`                                                             | c4-containers  | planned for v1.1                                             | `design/ash-brief.md`:149-151                                                                     |
+| five more `patch`-on-a-directory uses (`render-pipeline.yaml`:94, three compose files, `scan-bucket.sh`) | c4-containers  | not planned                                                  | found by this audit                                                                               |
+| the README names `S3_ENDPOINT`                                                                           | c4-containers  | planned ("fits 1.0.19") but missing from the 1.0.19 list     | `design/ash-brief.md`:215-216 against :74-98                                                      |
+| `Range` on `GET /{id}`                                                                                   | c4d            | not planned (an archived design only)                        | `design/archive/HTTP_API.md`:410-420                                                              |
+| project or partition authorization of content reads                                                      | c4d            | not planned (namespace RBAC flagged, subtree ACLs designed)  | `dev-plans/open-source-release/02-DESIGN.md`:239-243                                              |
+| whole objects held in memory on peer misses                                                              | c4d            | not planned                                                  | `internal/server/content.go`:60-75                                                                |
+| `checkout` ignores depth                                                                                 | c4d            | not planned; the unmerged open-source branch deletes it      | f74c26c                                                                                           |
+| a release path for c4d                                                                                   | c4d            | none: c4d is not a suite component (last tag v0.1.0)         | `RELEASE.md`:31-42                                                                                |
+| smudge writes only 256 bytes of a non-pointer blob                                                       | c4git          | not planned; a plain fix that fits 1.0.19                    | `filter/filter.go`:53-65                                                                          |
+| the v1.1 suite release from master                                                                       | c4, c4toolkit  | planned, on hold for a re-scope                              | `design/ash-brief.md`:25-29, 105-149                                                              |
+| porting the v1.0.17 and v1.0.18 fixes to master                                                          | c4             | planned                                                      | `design/ash-brief.md`:138-143                                                                     |
+
+To add to the plan: (1) in the v1.1 re-scope, keep `c4m.IsJournal` exported (or name its replacement), keep `scan.ModeContent` and the 6c2b82d parsing, and correct the operator's list in `design/ash-brief.md`:145-149, which names `ResolveBase` (unused by v2) and omits the parser change; (2) extend c4-containers' move from `patch` to `restore` to the five other uses; (3) put the c4git smudge fix and the `S3_ENDPOINT` README fix into the 1.0.19 content list; (4) schedule or reject the not-planned c4 items for v1.1 (each adds API or changes CLI output, so none fits a patch release); (5) give c4d a release path, or record that the operator keeps its own workarounds (it does today).
 
 ## Changes proposed for oss/c4, oss/c4d, oss/c4-containers (not made)
 

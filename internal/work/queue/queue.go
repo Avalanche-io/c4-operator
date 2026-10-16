@@ -25,6 +25,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
 	"github.com/Avalanche-io/c4-operator/internal/work/order"
@@ -60,6 +61,10 @@ type Queue struct {
 	last    time.Time
 	// Loc is the farm's time zone, for the times in estimate messages.
 	Loc *time.Location
+	// Signer signs the queue's decisions and job records; nil signs none.
+	Signer *provenance.Signer
+	// PolicyName names the policy in decision records.
+	PolicyName string
 	// Stores opens a project's store, to fold unit changesets into job
 	// outputs. Without it, outputs are not folded.
 	Stores StoreFunc
@@ -131,6 +136,8 @@ type jobMem struct {
 	preemptBase int // preemptions counted before the last restart
 	yields      []yieldRecord
 	requeued    string
+	decisions   []decisionRecord
+	jobRecord   string
 	lastRun     time.Time
 	readyAt     time.Time
 	started     time.Time
@@ -182,6 +189,12 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		m.yields = append(m.yields, yieldRecord{Unit: int(y.Unit), At: y.At.Time, Reason: y.Reason, View: y.View})
 	}
 	m.preemptBase = int(st.Preemptions)
+	for _, d := range st.Decisions {
+		m.decisions = append(m.decisions, decisionRecord{Unit: int(d.Unit), At: d.At.Time, Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record})
+	}
+	if st.Output != nil {
+		m.jobRecord = st.Output.Record
+	}
 	if o := st.Output; o != nil {
 		m.outLoad = o.Chain
 		m.outIndex = o.Provenance
@@ -702,6 +715,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 				continue
 			}
 			v.mem.yieldAsked[idx] = now
+			q.recordDecision(ctx, v, idx, "yield", string(pr.Reason), pr.For, now)
 			q.Log.Info("yield requested", "job", key, "unit", idx, "reason", pr.Reason, "for", pr.For)
 			continue
 		}
@@ -714,6 +728,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			q.Log.Error(err, "preempt", "job", key, "unit", idx)
 			continue
 		}
+		q.recordDecision(ctx, v, idx, "stop", string(pr.Reason), pr.For, now)
 		q.Log.Info("preempted", "job", key, "unit", idx, "reason", pr.Reason, "for", pr.For)
 	}
 	// A unit asked to yield that has not within ten minutes is stopped.
@@ -886,6 +901,14 @@ func unitID(key string, idx int) string { return key + "#" + strconv.Itoa(idx) }
 // job's output.
 func fromJobName(job, from string) string { return fmt.Sprintf("%s-from-%s", job, from) }
 
+// InputMaterialization names the Materialization a job's input mounts.
+func InputMaterialization(job string, in c4v1.WorkInput) string {
+	if in.FromJob != "" {
+		return fromJobName(job, in.FromJob)
+	}
+	return in.Materialization
+}
+
 // resumeName is the Materialization a resumed unit mounts.
 func resumeName(job string, idx int) string { return fmt.Sprintf("%s-resume-u%d", job, idx) }
 
@@ -974,12 +997,15 @@ func floatOr(s string, def float64) float64 {
 // ensureResume makes the Materialization a resumed unit mounts point at the
 // view its last attempt captured, and reports whether it is Ready.
 func (q *Queue) ensureResume(ctx context.Context, j *c4v1.WorkJob, idx int, view string) (bool, error) {
-	return q.ensureMaterialization(ctx, j, resumeName(j.Name, idx), view)
+	return q.ensureMaterialization(ctx, j, resumeName(j.Name, idx), view, "")
 }
 
 // ensureMaterialization makes a Materialization the job owns resolve view,
 // and reports whether it is Ready.
-func (q *Queue) ensureMaterialization(ctx context.Context, j *c4v1.WorkJob, name, view string) (bool, error) {
+// ensureMaterialization makes or updates a Materialization of view. record,
+// if set, is the signed record of where the view came from (the upstream
+// job's record), which the controller verifies and links.
+func (q *Queue) ensureMaterialization(ctx context.Context, j *c4v1.WorkJob, name, view, record string) (bool, error) {
 	var m c4v1.Materialization
 	err := q.Client.Get(ctx, types.NamespacedName{Namespace: j.Namespace, Name: name}, &m)
 	if apierrors.IsNotFound(err) {
@@ -990,6 +1016,9 @@ func (q *Queue) ensureMaterialization(ctx context.Context, j *c4v1.WorkJob, name
 					Name: j.Name, UID: j.UID, Controller: &t, BlockOwnerDeletion: &t}}},
 			Spec: c4v1.MaterializationSpec{Source: c4v1.ManifestSource{ID: view}},
 		}
+		if record != "" {
+			m.Annotations = map[string]string{c4v1.AnnotationSourceRecord: record}
+		}
 		return false, q.Client.Create(ctx, &m)
 	}
 	if err != nil {
@@ -998,6 +1027,13 @@ func (q *Queue) ensureMaterialization(ctx context.Context, j *c4v1.WorkJob, name
 	if m.Spec.Source.ID != view {
 		patch := client.MergeFrom(m.DeepCopy())
 		m.Spec.Source = c4v1.ManifestSource{ID: view}
+		if m.Annotations == nil {
+			m.Annotations = map[string]string{}
+		}
+		delete(m.Annotations, c4v1.AnnotationSourceRecord)
+		if record != "" {
+			m.Annotations[c4v1.AnnotationSourceRecord] = record
+		}
 		return false, q.Client.Patch(ctx, &m, patch)
 	}
 	return m.Status.Phase == c4v1.PhaseReady && m.Status.ObservedGeneration == m.Generation, nil
@@ -1073,7 +1109,12 @@ func (q *Queue) ensureFromJobs(ctx context.Context, v *view, byKey map[string]*v
 		if up.Status.Phase != "Succeeded" || up.Status.Output == nil || up.Status.Output.View == "" {
 			return false, nil
 		}
-		ready, err := q.ensureMaterialization(ctx, j, fromJobName(j.Name, in.FromJob), up.Status.Output.View)
+		if q.Signer != nil && up.Status.Output.Record == "" {
+			// The upstream job's record names what this input mounts; it
+			// is signed when the job ends, within a tick or two.
+			return false, nil
+		}
+		ready, err := q.ensureMaterialization(ctx, j, fromJobName(j.Name, in.FromJob), up.Status.Output.View, up.Status.Output.Record)
 		if err != nil || !ready {
 			return false, err
 		}

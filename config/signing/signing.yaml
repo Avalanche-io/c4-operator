@@ -1,0 +1,78 @@
+# Signing (DESIGN.md section 9.2). The farm's signing CA lives in a Secret
+# in its own namespace, so the Role that lets node daemons and the regional
+# tier read store credentials in c4-system never reaches it. Only the
+# manager may read or create it. In production the root key belongs in a
+# KMS or HSM and this Secret holds nothing but a reference to it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: c4-signing
+  labels:
+    pod-security.kubernetes.io/enforce: restricted
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-signing-ca
+  namespace: c4-signing
+rules:
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [c4-signing-ca]
+  verbs: [get]
+# create cannot be limited by name; the namespace holds nothing else.
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-signing-ca
+  namespace: c4-signing
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-signing-ca}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
+# The manager publishes the CA certificate in the farm's trust bundle
+# (ConfigMap c4-provenance, key ca.crt), which anyone may read to verify.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-trust-bundle
+  namespace: c4-system
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [c4-provenance]
+  verbs: [get, update]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-trust-bundle
+  namespace: c4-system
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-trust-bundle}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
+# The certificate issuer: node daemons and importers send a public key and
+# a service account token (audience c4-signer) and get back a short-lived
+# certificate for the identity the token proves.
+apiVersion: v1
+kind: Service
+metadata:
+  name: c4-signer
+  namespace: c4-system
+  labels:
+    app.kubernetes.io/name: c4-operator
+    app.kubernetes.io/component: signer
+spec:
+  selector:
+    app.kubernetes.io/name: c4-operator
+    app.kubernetes.io/component: manager
+  ports:
+  - {name: signer, port: 80, targetPort: 8092}

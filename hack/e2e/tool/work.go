@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/ed25519"
 	"crypto/sha256"
+	"crypto/x509"
 	"encoding/binary"
 	"errors"
 	"flag"
@@ -256,40 +257,62 @@ func yieldAsked(path string) bool {
 // verifyRecord checks a task record (a DSSE envelope) against public keys
 // given as KEYID=BASE64 lines, and prints the signer, or the failure.
 //
-//	c4e2e verify-record --keys FILE RECORD
+//	c4e2e verify-record [--roots PEM] [--keys FILE] RECORD
+//
+// verify-record checks a record outside the cluster: a bundle against the
+// farm's root certificates (the trust bundle's ca.crt), or a bare envelope
+// against legacy KEYID=BASE64 keys, then applies the signer policy.
 func verifyRecord(args []string) error {
 	fs := flag.NewFlagSet("verify-record", flag.ExitOnError)
-	keysFile := fs.String("keys", "", "file of KEYID=BASE64 public keys")
+	rootsFile := fs.String("roots", "", "PEM file of the farm's signing roots")
+	keysFile := fs.String("keys", "", "file of KEYID=BASE64 legacy public keys")
 	fs.Parse(args)
-	if fs.NArg() != 1 || *keysFile == "" {
-		return errors.New("usage: c4e2e verify-record --keys FILE RECORD")
-	}
-	text, err := os.ReadFile(*keysFile)
-	if err != nil {
-		return err
+	if fs.NArg() != 1 || (*rootsFile == "" && *keysFile == "") {
+		return errors.New("usage: c4e2e verify-record [--roots PEM] [--keys FILE] RECORD")
 	}
 	keys := map[string]ed25519.PublicKey{}
-	for _, line := range strings.Split(string(text), "\n") {
-		id, b64, ok := strings.Cut(strings.TrimSpace(line), "=")
-		if !ok {
-			continue
-		}
-		// base64 padding may follow the first '='.
-		pub, err := provenance.ParsePublic(b64)
+	if *keysFile != "" {
+		text, err := os.ReadFile(*keysFile)
 		if err != nil {
-			return fmt.Errorf("key %s: %w", id, err)
+			return err
 		}
-		keys[id] = pub
+		for _, line := range strings.Split(string(text), "\n") {
+			id, b64, ok := strings.Cut(strings.TrimSpace(line), "=")
+			if !ok || id == "ca.crt" {
+				continue
+			}
+			// base64 padding may follow the first '='.
+			pub, err := provenance.ParsePublic(b64)
+			if err != nil {
+				return fmt.Errorf("key %s: %w", id, err)
+			}
+			keys[id] = pub
+		}
+	}
+	var roots *x509.CertPool
+	if *rootsFile != "" {
+		text, err := os.ReadFile(*rootsFile)
+		if err != nil {
+			return err
+		}
+		if roots, err = provenance.RootsFromPEM(text); err != nil {
+			return err
+		}
 	}
 	data, err := os.ReadFile(fs.Arg(0))
 	if err != nil {
 		return err
 	}
-	st, signer, err := provenance.Verify(data, keys)
+	v, err := provenance.VerifyRecord(data, roots, keys)
 	if err != nil {
 		fmt.Println("rejected:", err)
 		return nil
 	}
-	fmt.Printf("verified: signed by %s for unit %s of %s on %s\n", signer, st.Predicate.Invocation.Unit, st.Predicate.Invocation.Job, st.Predicate.Runtime.Node)
+	policy := "policy ok"
+	if err := provenance.CheckSigner(v); err != nil {
+		policy = "policy: " + err.Error()
+	}
+	fmt.Printf("verified: %s record signed by %s at %s (%s)\n", strings.TrimPrefix(v.PredicateType, "https://cccc.io/provenance/"),
+		v.Identity, v.SignedAt.UTC().Format(time.RFC3339), policy)
 	return nil
 }

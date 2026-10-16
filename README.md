@@ -29,8 +29,8 @@ measured on an eight-worker kind cluster; the numbers below come from
 | P3 isolation           | Nine attempts by one project to read another's data (by view ID, by a hand-written c4m, through both cache tiers' APIs with and without a token, through a forged CSI volume context) are refused. Strict projects get separate copies of identical bytes; Shared projects share one copy only after proving they hold it. A vendor sees exactly its granted shot; revoking the grant takes effect at the next mount, 0.1 s later.                                                                                                                                                                                                                               |
 | P4 monorepo CI         | The synthetic monorepo (2,219 files, 401 commits, 62 c4git assets) imports into MinIO in 5.4 s (7.5 ms per commit at p50). For 16 CI shards per change, a node mounts the parent commit cold in 1.7 s, the next commit as a 3-file delta layer in 16 ms, and a rerun in 2 ms; a git clone and c4git checkout of the same commit takes 1.1 s on the host SSD. Which files changed between two commits is answered from records alone in 13 to 221 ms, identical to `git diff`.                                                                                                                                                                                    |
 | P5 work queue          | Seven jobs from two shows on 16 cpu, 8 GPU and up to 8 burst slots: 6 of 7 deadlines met. A training run gave its GPU slots to an urgent render at a checkpoint and resumed from the step it saved, through the view its capture made. Burst capacity was requested, provisioned and in use within about 20 s, for $0.03. The remaining-work estimate of a binary-order render was within 10% from a tenth of the way in and within 3% from a quarter on (a render manager's mean-frame estimate: 15% and 7%). In simulation over five weeks, the policy misses 43% fewer render deadlines than manual priorities and cuts the CI p95 from 17.2 to 14.4 minutes. |
-| P6 agents              | 17 MCP tools over stdio and stateless HTTP, each a call to the HUD API as the caller. An MCP client answers all 10 questions of the evaluation set from the live farm, and a hold made through MCP shows up as an Event naming the user.                                                                                                                                                                                                                                                                                                                                                                                                                         |
-| P7 provenance          | Each capture is signed by the node daemon as an in-toto Statement in a DSSE envelope. A frame of a model-assisted denoise traces to its render through the input view, with the declared model, oversight and consent; its C2PA definition carries the AI disclosure. Changing one field of a record breaks its signature. The key is mounted only by node daemons.                                                                                                                                                                                                                                                                                              |
+| P6 agents              | 17 MCP tools in the measured run (18 now) over stdio and stateless HTTP, each a call to the HUD API as the caller. An MCP client answers all 10 questions of the evaluation set from the live farm, and a hold made through MCP shows up as an Event naming the user.                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| P7 provenance          | Each capture is signed by the node daemon as an in-toto Statement in a DSSE envelope. A frame of a model-assisted denoise traces to its render through the input view, with the declared model, oversight and consent; its C2PA definition carries the AI disclosure. Changing one field of a record breaks its signature. Measured with one farm key; since then each entity signs as itself (nodes, controller, queue, HUD, importers) with short-lived certificates, tested in envtest, cluster run pending.                                                                                                                                                                                                                                                                                              |
 
 The HUD on the live farm (more in [`docs/hud/live`](docs/hud/live)):
 
@@ -115,7 +115,6 @@ c4-operator regional     regional cache tier
 c4-operator ingest       hash a directory into a project's store; print its view ID
 c4-operator import-git   import a git history (with c4git assets) as views, changesets and chains
 c4-operator mcp          the farm's MCP server, over stdio or Streamable HTTP
-c4-operator keygen       an Ed25519 key for signing task records
 c4-operator tree-id      the view ID of a directory
 ```
 
@@ -162,8 +161,10 @@ push).
 
 ## Release
 
-Not released. `go.mod` replaces the c4 module with a local checkout until a c4
-release carries the APIs the operator uses; the image registry path is open.
+Not released. `go.mod` pins c4 to a master pseudo-version
+(`v1.0.17-0.20261016134402-db4c7bec2376`, commit db4c7be) because no c4 release
+carries the APIs the operator uses yet; expect to re-pin after c4's v1.1
+re-scope. The image registry path is open.
 See [`PROGRESS.md`](PROGRESS.md) for the release blockers, the open decisions,
 and changes proposed for c4, c4d, c4git and c4-containers.
 

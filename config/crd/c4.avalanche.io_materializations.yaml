@@ -227,6 +227,12 @@ spec:
                   again.
                 format: int64
                 type: integer
+              record:
+                description: |-
+                  Record is the C4 ID of the resolution record the controller signed:
+                  which view this resolved to, under which grant, with every object
+                  present (DESIGN.md section 9.2).
+                type: string
               rootID:
                 description: |-
                   RootID is the ID of the top description's root listing as recorded
@@ -234,6 +240,12 @@ spec:
                 type: string
               sourceID:
                 description: SourceID identifies the exact description resolved.
+                type: string
+              sourceRecord:
+                description: |-
+                  SourceRecord is the verified record of where the source came from
+                  (an import or ingest), named by the annotation
+                  c4.avalanche.io/source-record.
                 type: string
               uniqueBytes:
                 format: int64

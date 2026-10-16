@@ -179,6 +179,10 @@ type WorkJobStatus struct {
 	// Yields lists the most recent yields of checkpointing units.
 	// +optional
 	Yields []WorkYield `json:"yields,omitempty"`
+	// Decisions lists the most recent preemptions and yields the queue
+	// decided for this job's units, each with its signed decision record.
+	// +optional
+	Decisions []WorkDecision `json:"decisions,omitempty"`
 	// Requeued is the token of the last requeue request carried out.
 	// +optional
 	Requeued string `json:"requeued,omitempty"`
@@ -209,6 +213,11 @@ type WorkOutput struct {
 	// the job wrote, the signed task record of the unit that wrote it.
 	// +optional
 	Provenance string `json:"provenance,omitempty"`
+	// Record is the C4 ID of the job record the queue signed when the job
+	// ended: the output view, chain and index, and the decisions that
+	// touched the job.
+	// +optional
+	Record string `json:"record,omitempty"`
 	// Conflicts lists paths two units wrote (the later write is kept).
 	// +optional
 	Conflicts []string `json:"conflicts,omitempty"`
@@ -221,6 +230,22 @@ type WorkYield struct {
 	Reason string      `json:"reason"`
 	// View is what the unit had saved when it stopped.
 	View string `json:"view"`
+}
+
+// WorkDecision is one scheduling decision that stopped or asked a unit to
+// yield.
+type WorkDecision struct {
+	Unit int32       `json:"unit"`
+	At   metav1.Time `json:"at"`
+	// Kind is yield (stop at the next checkpoint) or stop.
+	Kind   string `json:"kind"`
+	Reason string `json:"reason"`
+	// For is the job the slots went to, if any.
+	// +optional
+	For string `json:"for,omitempty"`
+	// Record is the C4 ID of the queue's signed decision record.
+	// +optional
+	Record string `json:"record,omitempty"`
 }
 
 // UnitCounts counts a job's units by state.

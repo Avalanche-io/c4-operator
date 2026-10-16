@@ -17,7 +17,9 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/order"
+	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
 // Every control is one Kubernetes write. Outside development mode the
@@ -107,6 +109,7 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
 	var did []string
 	if body.Hold != nil {
 		j.Spec.Nudge.Hold = *body.Hold
@@ -144,16 +147,40 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "nothing to change: send hold, holdStop, boost or deadline")
 		return
 	}
+	msg := j.Name + ": " + strings.Join(did, ", ")
+	s.finishJobControl(w, r, v, rec, j, patch, before, "nudge", body, "Nudged", msg)
+}
+
+// finishJobControl signs the control record, writes the job with the
+// record's ID in its annotation, records an Event and answers.
+func (s *Server) finishJobControl(w http.ResponseWriter, r *http.Request, v *api.Viewer, rec *jobRec, j *c4v1.WorkJob, patch client.Patch,
+	before, action string, change any, reason, msg string) {
+	ctx := r.Context()
+	id, err := s.controlJob(ctx, r, v, rec, j, before, action, change)
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
 	if err := s.Client.Patch(ctx, j, patch); err != nil {
 		fail(w, http.StatusConflict, "%v", err)
 		return
 	}
-	msg := j.Name + ": " + strings.Join(did, ", ")
-	s.record(ctx, j, "WorkJob", v.User, "Nudged", msg)
+	note := msg
+	if id != "" {
+		note += "; record " + shortID(id)
+	}
+	if via(r) == "mcp" {
+		note += "; via MCP"
+	}
+	s.record(ctx, j, "WorkJob", v.User, reason, note)
 	m := s.current()
 	rec2 := *rec
 	rec2.job = *j
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg, "job": s.jobSummary(m, &rec2)})
+	out := map[string]any{"ok": true, "message": msg, "job": s.jobSummary(m, &rec2)}
+	if id != "" {
+		out["record"] = id
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleRequeue(w http.ResponseWriter, r *http.Request) {
@@ -193,20 +220,13 @@ func (s *Server) handleRequeue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
 	if j.Annotations == nil {
 		j.Annotations = map[string]string{}
 	}
 	j.Annotations[c4v1.AnnotationRequeue] = strconv.FormatInt(time.Now().UnixNano(), 36) + ":" + order.EncodeSet(idx)
-	if err := s.Client.Patch(ctx, j, patch); err != nil {
-		fail(w, http.StatusConflict, "%v", err)
-		return
-	}
 	msg := fmt.Sprintf("%s: %d units queued again", j.Name, len(idx))
-	s.record(ctx, j, "WorkJob", v.User, "Requeued", msg)
-	m := s.current()
-	rec2 := *rec
-	rec2.job = *j
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg, "job": s.jobSummary(m, &rec2)})
+	s.finishJobControl(w, r, v, rec, j, patch, before, "requeue", map[string]any{"units": order.EncodeSet(idx)}, "Requeued", msg)
 }
 
 func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +253,7 @@ func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
 	msg := ""
 	if body.Remove {
 		j.Spec.AvoidNodes = slices.DeleteFunc(j.Spec.AvoidNodes, func(n string) bool { return n == body.Node })
@@ -249,15 +270,7 @@ func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
 		}
 		msg = fmt.Sprintf("%s: will not use %s", j.Name, body.Node)
 	}
-	if err := s.Client.Patch(ctx, j, patch); err != nil {
-		fail(w, http.StatusConflict, "%v", err)
-		return
-	}
-	s.record(ctx, j, "WorkJob", v.User, "Blacklist", msg)
-	m := s.current()
-	rec2 := *rec
-	rec2.job = *j
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg, "job": s.jobSummary(m, &rec2)})
+	s.finishJobControl(w, r, v, rec, j, patch, before, "avoid-node", body, "Blacklist", msg)
 }
 
 func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {
@@ -330,14 +343,47 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	patch := client.MergeFrom(cr.DeepCopy())
+	before := sha256JSON(cr.Spec)
 	cr.Spec.Approved = true
+	// The approval is recorded in the stores of the projects whose jobs
+	// the capacity is for.
+	m := s.current()
+	var projects []string
+	for _, key := range cr.Spec.Jobs {
+		if jr := m.byKey[key]; jr != nil && !slices.Contains(projects, jr.project) {
+			projects = append(projects, jr.project)
+		}
+	}
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
+		Authorization: s.authorization("patch", "capacityrequests", "", cr.Name), Action: "approve-capacity",
+		Target: "capacityrequest:" + cr.Name,
+		Change: map[string]any{"pool": pool, "slots": cr.Spec.Slots, "jobs": cr.Spec.Jobs, "estimatedCost": cr.Spec.EstimatedCost}}
+	id, err := s.signControl(ctx, projects, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, pred)
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
+	if id != "" {
+		if cr.Annotations == nil {
+			cr.Annotations = map[string]string{}
+		}
+		cr.Annotations[c4v1.AnnotationControlRecords] = appendRecord(cr.Annotations[c4v1.AnnotationControlRecords], id)
+	}
 	if err := s.Client.Patch(ctx, cr, patch); err != nil {
 		fail(w, http.StatusConflict, "%v", err)
 		return
 	}
 	msg := fmt.Sprintf("%s: %d slots approved for %s", pool, cr.Spec.Slots, strings.Join(cr.Spec.Jobs, ", "))
-	s.record(ctx, cr, "CapacityRequest", v.User, "Approved", msg)
-	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg})
+	note := msg
+	if id != "" {
+		note += "; record " + shortID(id)
+	}
+	s.record(ctx, cr, "CapacityRequest", v.User, "Approved", note)
+	out := map[string]any{"ok": true, "message": msg}
+	if id != "" {
+		out["record"] = id
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // jsonMap turns a struct into a map through its JSON form.

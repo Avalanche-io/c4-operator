@@ -22,9 +22,10 @@ import (
 const maxSubjects = 1000
 
 // signRecord makes the task record of a capture: what the pod was, what it
-// mounted, what it wrote, signs it with the node's key, and stores it in
-// the project's store like any object. The pod cannot reach the key, so it
-// cannot shape its own record.
+// mounted, what it wrote, signs it as this node, and stores it in the
+// project's store like any object. The pod cannot reach the node's key,
+// so it cannot shape its own record, and no other node can sign for this
+// one.
 func (d *Daemon) signRecord(ctx context.Context, pc *projectCtx, vol *Volume, res *capture.Result, finished time.Time) (c4.ID, error) {
 	var pod corev1.Pod
 	podErr := d.Kube.Get(ctx, types.NamespacedName{Namespace: vol.Namespace, Name: vol.Pod}, &pod)
@@ -69,7 +70,7 @@ func (d *Daemon) signRecord(ctx context.Context, pc *projectCtx, vol *Volume, re
 			st.Predicate.Runtime.Images = append(st.Predicate.Runtime.Images, img)
 		}
 	}
-	env, err := provenance.Sign(st, d.Cfg.SigningKey)
+	env, err := provenance.SignStatement(ctx, d.Cfg.Signer, provenance.PredicateTask, st.Subject, st.Predicate, time.Now())
 	if err != nil {
 		return c4.ID{}, err
 	}

@@ -8,3 +8,14 @@ spec:
   selector: {app.kubernetes.io/name: c4-operator, app.kubernetes.io/component: manager}
   ports:
   - {name: hud, port: 8090, targetPort: 8090, nodePort: 30080}
+---
+# The certificate issuer, for importers and ingests run from the host
+# (kind maps it to 127.0.0.1:30081).
+apiVersion: v1
+kind: Service
+metadata: {name: c4-signer-e2e, namespace: c4-system}
+spec:
+  type: NodePort
+  selector: {app.kubernetes.io/name: c4-operator, app.kubernetes.io/component: manager}
+  ports:
+  - {name: signer, port: 8092, targetPort: 8092, nodePort: 30081}

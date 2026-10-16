@@ -421,7 +421,7 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 		"changeset", changeset, "added", res.Added, "modified", res.Modified, "deleted", res.Deleted,
 		"uploaded", res.Uploaded, "reused", res.Reused, "seconds", time.Since(start).Seconds())
 	record := ""
-	if d.Cfg.SigningKey != nil && !res.Changeset.IsNil() {
+	if d.Cfg.Signer != nil && !res.Changeset.IsNil() {
 		id, err := d.signRecord(ctx, pc, vol, res, start)
 		if err != nil {
 			// A capture without its record is still a capture; the gap is

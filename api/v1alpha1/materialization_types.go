@@ -34,6 +34,16 @@ const (
 	// "assisted" | "generated", "model": ..., "oversight": ...,
 	// "consent": [...]}. Task records carry it (DESIGN.md section 9.4).
 	AnnotationAIUsage = "c4.avalanche.io/ai-usage"
+	// AnnotationSourceRecord on a Materialization names the signed record
+	// of its source (an import or ingest record whose subject is the
+	// source). The controller verifies it before resolving, refuses a
+	// mismatch, and links it from its own resolution record.
+	AnnotationSourceRecord = "c4.avalanche.io/source-record"
+	// AnnotationControlRecords on a WorkJob or CapacityRequest lists the
+	// C4 IDs of the signed control records of the HUD and MCP actions that
+	// changed it, oldest first (at most 16). The queue's job record
+	// includes them.
+	AnnotationControlRecords = "c4.avalanche.io/control-records"
 	// AnnotationOutputPrefix is what the node daemon's admission policy
 	// allows it to write on pods.
 	AnnotationOutputPrefix = "c4.avalanche.io/output-"
@@ -158,6 +168,16 @@ type MaterializationStatus struct {
 	Missing int64 `json:"missing,omitempty"`
 	// +optional
 	MissingPaths []string `json:"missingPaths,omitempty"`
+	// Record is the C4 ID of the resolution record the controller signed:
+	// which view this resolved to, under which grant, with every object
+	// present (DESIGN.md section 9.2).
+	// +optional
+	Record string `json:"record,omitempty"`
+	// SourceRecord is the verified record of where the source came from
+	// (an import or ingest), named by the annotation
+	// c4.avalanche.io/source-record.
+	// +optional
+	SourceRecord string `json:"sourceRecord,omitempty"`
 	// +optional
 	// +listType=map
 	// +listMapKey=type

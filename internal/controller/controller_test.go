@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"crypto/x509"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,11 +28,17 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/project"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
-var k8s client.Client
+var (
+	k8s client.Client
+	// farmCA signs the test farm's certificates; the controller signs its
+	// resolution records with one it issued.
+	farmCA *provenance.CA
+)
 
 // TestMain runs the manager's two controllers against a real API server
 // (envtest) with stores on local disk.
@@ -72,13 +79,23 @@ func TestMain(m *testing.M) {
 	if err := (&ProjectReconciler{Client: mgr.GetClient(), Projects: reg}).SetupWithManager(mgr); err != nil {
 		panic(err)
 	}
-	if err := (&MaterializationReconciler{Client: mgr.GetClient(), Projects: reg, Retry: time.Second}).SetupWithManager(mgr); err != nil {
+	if farmCA, err = provenance.NewCA(time.Now()); err != nil {
+		panic(err)
+	}
+	signer, err := provenance.NewSigner(context.Background(), provenance.LocalIssuer(farmCA, provenance.ComponentIdentity("controller"), time.Hour))
+	if err != nil {
+		panic(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(farmCA.Cert)
+	if err := (&MaterializationReconciler{Client: mgr.GetClient(), Projects: reg, Retry: time.Second,
+		Signer: signer, Roots: roots}).SetupWithManager(mgr); err != nil {
 		panic(err)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	go mgr.Start(ctx)
 	k8s = mgr.GetClient()
-	for _, ns := range []string{"c4-system", "a", "b", "vendor", "scoped", "dup-1"} {
+	for _, ns := range []string{"c4-system", "a", "b", "vendor", "scoped", "dup-1", "signed"} {
 		if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
 			panic(err)
 		}
@@ -414,4 +431,108 @@ func TestProjectValidation(t *testing.T) {
 			t.Fatalf("project %s never reported %q", p.Name, tc.problem)
 		})
 	}
+}
+
+// signedAs signs a record as identity and stores it.
+func signedAs(t *testing.T, st *tree, identity, predicateType string, subjects []provenance.Subject, pred any) string {
+	t.Helper()
+	ctx := context.Background()
+	sg, err := provenance.NewSigner(ctx, provenance.LocalIssuer(farmCA, identity, time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, err := provenance.SignStatement(ctx, sg, predicateType, subjects, pred, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	id, err := st.store.PutBytes(ctx, rec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return id.String()
+}
+
+func putMatWithRecord(t *testing.T, ns, name string, src c4v1.ManifestSource, record string) {
+	t.Helper()
+	m := &c4v1.Materialization{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Annotations: map[string]string{c4v1.AnnotationSourceRecord: record}},
+		Spec:       c4v1.MaterializationSpec{Source: src},
+	}
+	if err := k8s.Create(context.Background(), m); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestResolutionRecords covers DESIGN.md section 9.2: the controller signs
+// what it resolved, and checks who vouched for the source.
+func TestResolutionRecords(t *testing.T) {
+	st := newStore(t)
+	v := st.ingest(t, show("signed"))
+	other := st.ingest(t, map[string]string{"plates/x.exr": "another tree"})
+	putProject(t, "signed", []string{"signed"}, st, "", nil)
+	roots := x509.NewCertPool()
+	roots.AddCert(farmCA.Cert)
+	ingest := map[string]any{"source": "plates"}
+	good := signedAs(t, st, provenance.ServiceAccountIdentity("signed", "ingest"), provenance.PredicateIngest,
+		[]provenance.Subject{provenance.SubjectFor("view", v.ID)}, ingest)
+
+	t.Run("a resolution is signed by the controller and links the ingest record", func(t *testing.T) {
+		putMatWithRecord(t, "signed", "plates", byID(v.ID), good)
+		m := waitMat(t, "signed", "plates", c4v1.PhaseReady, "Ready")
+		if m.Status.SourceRecord != good || m.Status.Record == "" {
+			t.Fatalf("status record %q, source record %q", m.Status.Record, m.Status.SourceRecord)
+		}
+		id, _ := c4.Parse(m.Status.Record)
+		data, err := view.ReadObject(st.store, id)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rv, err := provenance.VerifyBundle(data, roots)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if rv.Identity != provenance.ComponentIdentity("controller") || provenance.CheckSigner(rv) != nil {
+			t.Fatalf("signed by %s, policy %v", rv.Identity, provenance.CheckSigner(rv))
+		}
+		if rv.Subject("view") != v.ID.String() || !strings.Contains(string(rv.Predicate), good) {
+			t.Fatalf("resolution record %s", rv.Predicate)
+		}
+	})
+	t.Run("an ingest record from another project's workload is refused", func(t *testing.T) {
+		foreign := signedAs(t, st, provenance.ServiceAccountIdentity("b", "ingest"), provenance.PredicateIngest,
+			[]provenance.Subject{provenance.SubjectFor("view", v.ID)}, ingest)
+		putMatWithRecord(t, "signed", "foreign", byID(v.ID), foreign)
+		m := waitMat(t, "signed", "foreign", c4v1.PhaseFailed, "SourceRecordInvalid")
+		if !strings.Contains(readyMessage(m), "not a workload of project signed") {
+			t.Fatal(readyMessage(m))
+		}
+	})
+	t.Run("a record for another tree does not vouch for this one", func(t *testing.T) {
+		putMatWithRecord(t, "signed", "mismatch", byID(other.ID), good)
+		m := waitMat(t, "signed", "mismatch", c4v1.PhaseFailed, "SourceRecordInvalid")
+		if !strings.Contains(readyMessage(m), "does not name the source") {
+			t.Fatal(readyMessage(m))
+		}
+	})
+	t.Run("a node cannot vouch for a source", func(t *testing.T) {
+		byNode := signedAs(t, st, provenance.NodeIdentity("w1"), provenance.PredicateIngest,
+			[]provenance.Subject{provenance.SubjectFor("view", v.ID)}, ingest)
+		putMatWithRecord(t, "signed", "by-node", byID(v.ID), byNode)
+		waitMat(t, "signed", "by-node", c4v1.PhaseFailed, "SourceRecordInvalid")
+	})
+	t.Run("a record signed outside the farm is refused", func(t *testing.T) {
+		otherCA, _ := provenance.NewCA(time.Now())
+		sg, _ := provenance.NewSigner(context.Background(), provenance.LocalIssuer(otherCA, provenance.ServiceAccountIdentity("signed", "ingest"), time.Hour))
+		rec, _ := provenance.SignStatement(context.Background(), sg, provenance.PredicateIngest,
+			[]provenance.Subject{provenance.SubjectFor("view", v.ID)}, ingest, time.Now())
+		id, err := st.store.PutBytes(context.Background(), rec)
+		if err != nil {
+			t.Fatal(err)
+		}
+		putMatWithRecord(t, "signed", "outsider", byID(v.ID), id.String())
+		m := waitMat(t, "signed", "outsider", c4v1.PhaseFailed, "SourceRecordInvalid")
+		if !strings.Contains(readyMessage(m), "chain") {
+			t.Fatal(readyMessage(m))
+		}
+	})
 }

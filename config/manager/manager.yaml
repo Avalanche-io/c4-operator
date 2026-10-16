@@ -33,6 +33,7 @@ spec:
         - {name: webhook, containerPort: 9443}
         - {name: metrics, containerPort: 8080}
         - {name: hud, containerPort: 8090}
+        - {name: signer, containerPort: 8092}
         readinessProbe:
           httpGet: {path: /readyz, port: 8081}
         livenessProbe:

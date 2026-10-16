@@ -3,7 +3,10 @@ package server
 import (
 	"context"
 	"crypto/ed25519"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"sort"
 	"strconv"
@@ -18,40 +21,84 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
-// KeysConfigMap holds the farm's trusted task-record keys: key ID to
-// base64 Ed25519 public key, in the operator's namespace.
+// KeysConfigMap is the farm's trust bundle, in the operator's namespace:
+// ca.crt holds the signing roots (PEM), and any other key is a legacy
+// key ID mapped to a base64 Ed25519 public key, for records signed before
+// signers had certificates.
 const KeysConfigMap = "c4-provenance"
 
-// trustedKeys reads the farm's public keys (cached for a minute).
-func (s *Server) trustedKeys(ctx context.Context) map[string]ed25519.PublicKey {
+// trustSet is what records are checked against.
+type trustSet struct {
+	roots  *x509.CertPool
+	legacy map[string]ed25519.PublicKey
+}
+
+// trust reads the farm's trust bundle (cached for a minute).
+func (s *Server) trust(ctx context.Context) trustSet {
 	s.mu.RLock()
-	if s.keys != nil && time.Now().Before(s.keysUntil) {
-		k := s.keys
+	if s.trusted.legacy != nil && time.Now().Before(s.keysUntil) {
+		t := s.trusted
 		s.mu.RUnlock()
-		return k
+		return t
 	}
 	s.mu.RUnlock()
-	out := map[string]ed25519.PublicKey{}
+	t := trustSet{roots: x509.NewCertPool(), legacy: map[string]ed25519.PublicKey{}}
 	if s.Kube != nil {
 		if cm, err := s.Kube.CoreV1().ConfigMaps(s.Namespace).Get(ctx, KeysConfigMap, metav1.GetOptions{}); err == nil {
 			for id, text := range cm.Data {
+				if id == "ca.crt" {
+					t.roots.AppendCertsFromPEM([]byte(text))
+					continue
+				}
 				if pub, err := provenance.ParsePublic(text); err == nil && provenance.KeyID(pub) == id {
-					out[id] = pub
+					t.legacy[id] = pub
 				}
 			}
 		}
 	}
 	s.mu.Lock()
-	s.keys, s.keysUntil = out, time.Now().Add(time.Minute)
+	s.trusted, s.keysUntil = t, time.Now().Add(time.Minute)
 	s.mu.Unlock()
-	return out
+	return t
+}
+
+// verify reads a record from a project's store and checks its signature,
+// its certificate chain and the farm's signer policy.
+func (s *Server) verify(ctx context.Context, project, recordID string) (*provenance.Verified, error) {
+	if s.Stores == nil {
+		return nil, errors.New("no stores")
+	}
+	st, err := s.Stores(ctx, project)
+	if err != nil || st == nil {
+		return nil, fmt.Errorf("project %s store: %v", project, err)
+	}
+	id, err := c4.Parse(recordID)
+	if err != nil {
+		return nil, fmt.Errorf("record %q is not a C4 ID", recordID)
+	}
+	data, err := c4view.ReadObject(st, id)
+	if err != nil {
+		return nil, fmt.Errorf("record %s: %w", recordID, err)
+	}
+	t := s.trust(ctx)
+	v, err := provenance.VerifyRecord(data, t.roots, t.legacy)
+	if err != nil {
+		return nil, err
+	}
+	return v, nil
 }
 
 // traced is a verified task record and what it implies.
 type traced struct {
-	Record    string                `json:"record"`
-	Verified  bool                  `json:"verified"`
-	Signer    string                `json:"signer,omitempty"`
+	Record   string `json:"record"`
+	Verified bool   `json:"verified"`
+	// Signer is the identity that signed: this node's URI, or key:ID for
+	// a record signed with a farm key before signers had certificates.
+	Signer string `json:"signer,omitempty"`
+	// Policy is empty when the signer is the one the farm's policy wants
+	// for this record (the node the record says the task ran on).
+	Policy    string                `json:"policy,omitempty"`
+	SignedAt  *time.Time            `json:"signedAt,omitempty"`
 	Problem   string                `json:"problem,omitempty"`
 	Statement *provenance.Statement `json:"statement,omitempty"`
 	File      *fileRef              `json:"file,omitempty"`
@@ -68,25 +115,22 @@ type fileRef struct {
 
 // trace reads and verifies one task record.
 func (s *Server) trace(ctx context.Context, m *model, rec *jobRec, recordID, path string) (*traced, error) {
-	st, err := s.Stores(ctx, rec.project)
-	if err != nil || st == nil {
-		return nil, err
-	}
-	id, err := c4.Parse(recordID)
-	if err != nil {
-		return nil, err
-	}
-	data, err := c4view.ReadObject(st, id)
-	if err != nil {
-		return nil, err
-	}
 	out := &traced{Record: recordID, Lineage: []map[string]any{}}
-	stmt, signer, err := provenance.Verify(data, s.trustedKeys(ctx))
+	v, err := s.verify(ctx, rec.project, recordID)
 	if err != nil {
 		out.Problem = err.Error()
 		return out, nil
 	}
-	out.Verified, out.Signer, out.Statement = true, signer, stmt
+	stmt, err := taskStatement(v)
+	if err != nil {
+		out.Problem = err.Error()
+		return out, nil
+	}
+	at := v.SignedAt
+	out.Verified, out.Signer, out.Statement, out.SignedAt = true, v.Identity, stmt, &at
+	if err := provenance.CheckSigner(v); err != nil {
+		out.Policy = err.Error()
+	}
 	for _, in := range stmt.Predicate.Inputs {
 		l := map[string]any{"materialization": in.Materialization, "view": in.View}
 		for _, other := range m.jobs {
@@ -132,7 +176,7 @@ func (s *Server) index(ctx context.Context, rec *jobRec) (*queue.Index, error) {
 
 // handleTrace is GET /trace/{ns}/{name}?path=P or ?unit=N: the signed task
 // record of the unit that wrote a file of the job's output (or of a unit),
-// verified against the farm's keys, with its lineage and the file's C2PA
+// verified against the farm's roots and signer policy, with its lineage and the file's C2PA
 // manifest definition and OMC asset.
 func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 	m, rec, _ := s.job(w, r)
@@ -180,4 +224,13 @@ func (s *Server) handleTrace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, t)
+}
+
+// taskStatement reads a verified task record as a task Statement.
+func taskStatement(v *provenance.Verified) (*provenance.Statement, error) {
+	if v.PredicateType != provenance.PredicateTask {
+		return nil, fmt.Errorf("a %s record, not a task record", v.PredicateType)
+	}
+	st := &provenance.Statement{Type: provenance.StatementType, Subject: v.Subjects, PredicateType: v.PredicateType}
+	return st, json.Unmarshal(v.Predicate, &st.Predicate)
 }

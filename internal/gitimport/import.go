@@ -119,6 +119,9 @@ type Commit struct {
 	ChainRef      string `json:"chainRef,omitempty"`
 	Chain         c4.ID  `json:"chain,omitempty"`
 	ChainSections int    `json:"chainSections,omitempty"`
+	// Record is the ID of the import record the importer signed for this
+	// commit (DESIGN.md section 9.2), when it signs.
+	Record c4.ID `json:"record,omitempty"`
 
 	// Git-level counts of files and symlinks (submodules excluded).
 	Added    int `json:"added"`

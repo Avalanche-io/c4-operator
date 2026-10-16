@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
@@ -23,6 +24,7 @@ import (
 	"github.com/Avalanche-io/c4"
 
 	"github.com/Avalanche-io/c4-operator/internal/gitimport"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
@@ -42,6 +44,9 @@ type importService struct {
 	// imports). Push-driven runs store it only when it is sealed; until
 	// then the chain is its stored per-commit changesets.
 	storeChain bool
+	// signer signs an import record per commit as the importer's own
+	// workload identity; nil signs none.
+	signer *provenance.Signer
 
 	mu sync.Mutex
 }
@@ -132,6 +137,9 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 	var writeErr error
 	commits := []gitimport.Commit{}
 	opts.Progress = func(c gitimport.Commit) {
+		if s.signer != nil && writeErr == nil {
+			c.Record, writeErr = s.signImport(ctx, ref, c)
+		}
 		written := false
 		if chain != nil && writeErr == nil {
 			written, writeErr = s.chainAppend(ctx, chain, ref, &c, mw)
@@ -430,4 +438,48 @@ func writeJSON(w http.ResponseWriter, v any) {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	enc.Encode(v)
+}
+
+// signImport signs and stores the import record of one commit: the git
+// commit, the view it became and the changeset over its parent's view.
+func (s *importService) signImport(ctx context.Context, ref string, c gitimport.Commit) (c4.ID, error) {
+	subjects := []provenance.Subject{
+		provenance.SubjectFor("view", c.View),
+		{Name: "git:" + s.name + "@" + c.Commit, Digest: map[string]string{"gitCommit": c.Commit}},
+	}
+	if !c.Changeset.IsNil() {
+		subjects = append(subjects, provenance.SubjectFor("changeset", c.Changeset))
+	}
+	pred := map[string]any{"repository": s.name, "commit": c.Commit, "ref": ref, "parent": c.Parent,
+		"parentView": c.ParentView.String(), "base": c.Base, "files": c.Files,
+		"added": c.Added, "modified": c.Modified, "deleted": c.Deleted, "importer": "c4-operator import-git " + version}
+	rec, err := provenance.SignStatement(ctx, s.signer, provenance.PredicateImport, subjects, pred, time.Now())
+	if err != nil {
+		return c4.ID{}, fmt.Errorf("import record: %w", err)
+	}
+	id := c4.Identify(bytes.NewReader(rec))
+	if _, err := s.base.Sink.Put(ctx, id, int64(len(rec)), bytes.NewReader(rec)); err != nil {
+		return c4.ID{}, fmt.Errorf("import record: %w", err)
+	}
+	return id, nil
+}
+
+// remoteSigner obtains a certificate from the farm's issuer for the
+// identity the token file proves (a service account token with audience
+// c4-signer, for example from kubectl create token).
+func remoteSigner(ctx context.Context, url, tokenFile string) (*provenance.Signer, error) {
+	if url == "" {
+		return nil, nil
+	}
+	if tokenFile == "" {
+		return nil, errors.New("--signer needs --sign-token-file: a service account token with audience c4-signer")
+	}
+	token := func() (string, error) {
+		b, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return "", err
+		}
+		return strings.TrimSpace(string(b)), nil
+	}
+	return provenance.NewSigner(ctx, provenance.RemoteIssuer(url, token, nil))
 }

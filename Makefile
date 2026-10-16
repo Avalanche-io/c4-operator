@@ -51,8 +51,8 @@ test-linux:
 build:
 	CGO_ENABLED=0 go build -trimpath -o bin/c4-operator ./cmd/c4-operator
 
-# The image is assembled from a binary built on the host because go.mod
-# still points at ../c4 with a replace directive during development.
+# The image is assembled from a binary cross-compiled on the host: Go builds
+# for any architecture without emulation, and the image needs no toolchain.
 image:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="-s -w" -o bin/linux_$(ARCH)/c4-operator ./cmd/c4-operator
 	docker build --build-arg TARGETARCH=$(ARCH) -t $(IMG) .

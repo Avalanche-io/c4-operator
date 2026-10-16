@@ -87,6 +87,8 @@ func runImportGit(args []string) error {
 	jobs := fs.Int("jobs", 8, "concurrent store writes")
 	chainMax := fs.Int("chain-max", 1024, "re-base a branch's chain after this many sections (0: never)")
 	exportChain := fs.String("export-chain", "", "write this ref's chain to standard output with its base view in full (for c4 log and c4 split), and exit")
+	signerURL := fs.String("signer", "", "the farm's certificate issuer (for example http://c4-signer.c4-system.svc): sign an import record per commit as this importer's workload identity")
+	signToken := fs.String("sign-token-file", "", "service account token (audience c4-signer) that proves the importer's identity to the issuer")
 	fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
@@ -137,6 +139,9 @@ func runImportGit(args []string) error {
 	if svc.name == "" {
 		abs, _ := filepath.Abs(*repo)
 		svc.name = strings.TrimSuffix(filepath.Base(abs), ".git")
+	}
+	if svc.signer, err = remoteSigner(ctx, *signerURL, *signToken); err != nil {
+		return fmt.Errorf("signer: %w", err)
 	}
 	src, err := openC4GitStore(*repo, *c4gitStore)
 	if err != nil {

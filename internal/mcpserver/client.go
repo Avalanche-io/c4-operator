@@ -64,6 +64,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		return err
 	}
 	req.Header.Set("Accept", "application/json")
+	// The HUD notes the client in its signed control records.
+	req.Header.Set("X-C4-Client", "mcp")
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

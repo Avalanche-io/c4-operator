@@ -14,6 +14,7 @@ import (
 
 	"github.com/Avalanche-io/c4"
 
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
@@ -34,6 +35,9 @@ func runIngest(args []string) error {
 	workers := fs.Int("workers", 16, "parallel uploads")
 	out := fs.String("c4m", "", "also write the view as a nested c4m file here")
 	quiet := fs.Bool("q", false, "print only the view ID")
+	signerURL := fs.String("signer", "", "the farm's certificate issuer: sign an ingest record of the view as this workload's identity")
+	signToken := fs.String("sign-token-file", "", "service account token (audience c4-signer) that proves the ingesting workload's identity to the issuer")
+	recordOut := fs.String("record-out", "", "write the ingest record's ID to this file")
 	fs.Parse(args)
 	if fs.NArg() != 1 || len(shards) == 0 {
 		return errors.New("usage: c4-operator ingest --shard NAME=URL [--shard NAME=URL...] [--c4m FILE] DIR")
@@ -47,6 +51,11 @@ func runIngest(args []string) error {
 	st, err := storeurl.OpenSharded(specs, creds)
 	if err != nil {
 		return err
+	}
+	ctx := context.Background()
+	signer, err := remoteSigner(ctx, *signerURL, *signToken)
+	if err != nil {
+		return fmt.Errorf("signer: %w", err)
 	}
 	start := time.Now()
 	v, err := view.ScanDir(dir)
@@ -63,7 +72,6 @@ func runIngest(args []string) error {
 		}
 	}
 	objs := v.Objects()
-	ctx := context.Background()
 	var (
 		uploaded, present atomic.Int64
 		bytesUp           atomic.Int64
@@ -120,6 +128,28 @@ func runIngest(args []string) error {
 			return fmt.Errorf("record %s: %w", r.ID, err)
 		}
 	}
+	record := ""
+	if signer != nil {
+		// The ingest record vouches for the view as hashed here, the point
+		// where content is verified once (DESIGN.md section 1).
+		t := v.Totals()
+		pred := map[string]any{"source": filepath.Base(filepath.Clean(dir)), "files": t.Files, "bytes": t.Bytes,
+			"uniqueObjects": t.UniqueObjects, "uploaded": uploaded.Load(), "ingester": "c4-operator ingest " + version}
+		rec, err := provenance.SignStatement(ctx, signer, provenance.PredicateIngest, []provenance.Subject{provenance.SubjectFor("view", v.ID)}, pred, time.Now())
+		if err != nil {
+			return fmt.Errorf("ingest record: %w", err)
+		}
+		id, err := st.PutBytes(ctx, rec)
+		if err != nil {
+			return fmt.Errorf("ingest record: %w", err)
+		}
+		record = id.String()
+		if *recordOut != "" {
+			if err := os.WriteFile(*recordOut, []byte(record+"\n"), 0o644); err != nil {
+				return err
+			}
+		}
+	}
 	if *out != "" {
 		data, err := v.Marshal()
 		if err != nil {
@@ -135,6 +165,9 @@ func runIngest(args []string) error {
 	}
 	t := v.Totals()
 	fmt.Printf("view %s\n", v.ID)
+	if record != "" {
+		fmt.Printf("record %s signed by %s\n", record, signer.Identity())
+	}
 	fmt.Printf("files=%d dirs=%d bytes=%d unique=%d uniqueBytes=%d uploaded=%d present=%d bytesUploaded=%d scan=%s total=%s\n",
 		t.Files, t.Dirs, t.Bytes, t.UniqueObjects, t.UniqueBytes, uploaded.Load(), present.Load(), bytesUp.Load(),
 		scanned.Round(time.Millisecond), time.Since(start).Round(time.Millisecond))

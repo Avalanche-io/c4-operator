@@ -1,7 +1,6 @@
 package main
 
 import (
-	"crypto/ed25519"
 	"errors"
 	"flag"
 	"fmt"
@@ -49,7 +48,8 @@ func runNode(args []string) error {
 	retain := fs.Duration("retain", 10*time.Minute, "keep unused layers at least this long")
 	gcEvery := fs.Duration("gc-interval", 30*time.Second, "eviction interval")
 	noAuth := fs.Bool("insecure-no-auth", false, "skip TokenReview (tests only)")
-	keyFile := fs.String("provenance-key", "/etc/c4/provenance/key", "Ed25519 key (base64) for signing task records; records are off when the file is absent")
+	signerURL := fs.String("signer-url", "http://c4-signer.c4-system.svc", "the farm's certificate issuer; task records are signed as this node (empty turns records off)")
+	signerToken := fs.String("signer-token", "/var/run/secrets/c4-signer/token", "projected token that proves this daemon's identity to the issuer (audience c4-signer)")
 	fs.Parse(args)
 
 	ctrl.SetLogger(zap.New())
@@ -110,15 +110,26 @@ func runNode(args []string) error {
 		Token: (&tier.TokenFile{Path: *tokenFile}).Token,
 		Log:   log,
 	}
-	if b, err := os.ReadFile(*keyFile); err == nil {
-		key, err := provenance.ParseKey(string(b))
-		if err != nil {
-			return fmt.Errorf("--provenance-key: %w", err)
+	if *signerURL != "" {
+		// The node's key is made here and never leaves the process; the
+		// issuer binds it to this node's identity for a day at a time.
+		tf := &tier.TokenFile{Path: *signerToken}
+		token := func() (string, error) {
+			if t := tf.Token(); t != "" {
+				return t, nil
+			}
+			return "", fmt.Errorf("no token at %s", *signerToken)
 		}
-		d.Cfg.SigningKey = key
-		log.Info("signing task records", "key", provenance.KeyID(key.Public().(ed25519.PublicKey)))
+		d.Cfg.Signer = provenance.LazySigner(provenance.RemoteIssuer(*signerURL, token, nil))
+		go func() {
+			if err := d.Cfg.Signer.Ready(ctx, 5*time.Second); err != nil {
+				log.Error(err, "task records")
+				return
+			}
+			log.Info("signing task records", "as", d.Cfg.Signer.Identity())
+		}()
 	} else {
-		log.Info("no provenance key; task records are off", "path", *keyFile)
+		log.Info("no signer; task records are off")
 	}
 	if !*noAuth {
 		cs, err := kubernetes.NewForConfig(cfg)

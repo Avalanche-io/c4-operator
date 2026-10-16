@@ -252,6 +252,41 @@ spec:
                 description: Deadline is the effective deadline.
                 format: date-time
                 type: string
+              decisions:
+                description: |-
+                  Decisions lists the most recent preemptions and yields the queue
+                  decided for this job's units, each with its signed decision record.
+                items:
+                  description: |-
+                    WorkDecision is one scheduling decision that stopped or asked a unit to
+                    yield.
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    for:
+                      description: For is the job the slots went to, if any.
+                      type: string
+                    kind:
+                      description: Kind is yield (stop at the next checkpoint) or
+                        stop.
+                      type: string
+                    reason:
+                      type: string
+                    record:
+                      description: Record is the C4 ID of the queue's signed decision
+                        record.
+                      type: string
+                    unit:
+                      format: int32
+                      type: integer
+                  required:
+                  - at
+                  - kind
+                  - reason
+                  - unit
+                  type: object
+                type: array
               estimate:
                 description: Estimate is the remaining-work estimate and objective
                   state.
@@ -351,6 +386,12 @@ spec:
                     description: |-
                       Provenance is the C4 ID of the job's provenance index: for each file
                       the job wrote, the signed task record of the unit that wrote it.
+                    type: string
+                  record:
+                    description: |-
+                      Record is the C4 ID of the job record the queue signed when the job
+                      ended: the output view, chain and index, and the decisions that
+                      touched the job.
                     type: string
                   view:
                     description: View is the output after the latest fold.

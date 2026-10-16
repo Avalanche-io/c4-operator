@@ -17,7 +17,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -34,6 +33,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/hud/api"
 	hudserver "github.com/Avalanche-io/c4-operator/internal/hud/server"
 	"github.com/Avalanche-io/c4-operator/internal/project"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
 	"github.com/Avalanche-io/c4-operator/internal/work/kindsim"
@@ -80,6 +80,8 @@ func runManager(args []string) error {
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name=project|project;... (* for all projects)")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
 	farmTZ := fs.String("tz", "UTC", "the farm's time zone, for times the queue and the HUD show")
+	signingNS := fs.String("signing-namespace", "c4-signing", "namespace of the farm's signing CA, readable only by the manager (empty turns signing off)")
+	signerAddr := fs.String("signer-addr", ":8092", "certificate issuer listen address, for node daemons and importers")
 	fs.Parse(args)
 
 	ctrl.SetLogger(zap.New())
@@ -94,6 +96,19 @@ func runManager(args []string) error {
 	ctx := ctrl.SetupSignalHandler()
 	if err := c4webhook.BootstrapCerts(ctx, direct, *certDir, *service, *namespace, *webhookConfig); err != nil {
 		return fmt.Errorf("webhook certificates: %w", err)
+	}
+	kube, err := kubernetes.NewForConfig(cfg)
+	if err != nil {
+		return err
+	}
+	// Every component that decides something signs it as itself
+	// (DESIGN.md section 9.2).
+	sig := &signing{}
+	if *signingNS != "" {
+		if sig, err = setupSigning(ctx, kube, *signingNS, *namespace); err != nil {
+			return err
+		}
+		log.Info("signing", "ca", provenance.Fingerprint(sig.ca.Cert)[:16], "issuer", *signerAddr)
 	}
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
@@ -119,7 +134,8 @@ func runManager(args []string) error {
 	if err := (&controller.ProjectReconciler{Client: mgr.GetClient(), Projects: reg}).SetupWithManager(mgr); err != nil {
 		return err
 	}
-	if err := (&controller.MaterializationReconciler{Client: mgr.GetClient(), Projects: reg, Retry: *retry}).SetupWithManager(mgr); err != nil {
+	if err := (&controller.MaterializationReconciler{Client: mgr.GetClient(), Projects: reg, Retry: *retry,
+		Signer: sig.controller, Roots: sig.pool}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	var q *queue.Queue
@@ -143,13 +159,18 @@ func runManager(args []string) error {
 			return fmt.Errorf("--tz: %w", err)
 		}
 		q = &queue.Queue{Loc: loc, Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue"),
-			Stores: stores}
+			Stores: stores, Signer: sig.queue, PolicyName: *policy}
 		if err := mgr.Add(q); err != nil {
 			return err
 		}
 	}
 	if *hudAddr != "" {
-		if err := addHUD(mgr, cfg, q, stores, *hudAddr, *hudDev, *hudProxy, *farmTZ, *namespace); err != nil {
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *farmTZ, *namespace); err != nil {
+			return err
+		}
+	}
+	if sig.ca != nil && *signerAddr != "" {
+		if err := mgr.Add(issuerRunnable(sig, kube, *namespace, *signerAddr)); err != nil {
 			return err
 		}
 	}
@@ -167,11 +188,7 @@ func runManager(args []string) error {
 
 // addHUD runs the HUD backend: a collector on every replica and an HTTP
 // server for the web app and the HUD API.
-func addHUD(mgr ctrl.Manager, cfg *rest.Config, q *queue.Queue, stores queue.StoreFunc, addr, dev string, proxy bool, tz, namespace string) error {
-	kube, err := kubernetes.NewForConfig(cfg)
-	if err != nil {
-		return err
-	}
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, tz, namespace string) error {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		return fmt.Errorf("--tz: %w", err)
@@ -181,7 +198,7 @@ func addHUD(mgr ctrl.Manager, cfg *rest.Config, q *queue.Queue, stores queue.Sto
 		return err
 	}
 	srv := &hudserver.Server{Client: mgr.GetClient(), Kube: kube, Queue: q, Stores: stores, Web: web, Loc: loc,
-		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud")}
+		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud}
 	if dev != "" {
 		srv.DevViewers, err = parseViewers(dev)
 		if err != nil {

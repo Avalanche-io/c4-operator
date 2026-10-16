@@ -14,7 +14,6 @@ package server
 
 import (
 	"context"
-	"crypto/ed25519"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -32,6 +31,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
@@ -50,6 +50,9 @@ type Server struct {
 	TrustProxy bool
 	Namespace  string // the operator's namespace
 	Log        logr.Logger
+	// Signer signs a control record for each action a person or agent
+	// takes through the HUD or MCP; nil signs none.
+	Signer *provenance.Signer
 
 	mu      sync.RWMutex
 	m       *model
@@ -59,7 +62,7 @@ type Server struct {
 	viewers map[string]accessEntry
 	// previewCache indexes preview proxies by output view.
 	previewCache map[string]map[int]string
-	keys         map[string]ed25519.PublicKey
+	trusted      trustSet
 	keysUntil    time.Time
 }
 
@@ -80,6 +83,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/objects/{project}/{id}", s.handleObject)
 	mux.HandleFunc("GET /api/v1/views/{project}/diff", s.handleDiff)
 	mux.HandleFunc("GET /api/v1/trace/{ns}/{name}", s.handleTrace)
+	mux.HandleFunc("GET /api/v1/custody/{ns}/{name}", s.handleCustody)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/nudge", s.handleNudge)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/requeue", s.handleRequeue)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/blacklist", s.handleBlacklist)

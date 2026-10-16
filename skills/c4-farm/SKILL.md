@@ -50,6 +50,17 @@ Views are C4 IDs of whole trees. `c4_diff_views` lists the files that differ bet
 two views of a project from directory records alone, without a checkout: use it to
 decide which CI targets a change touches, or what a render changed.
 
+## Provenance questions
+
+Every entity that does or decides work signs its own record: the node that ran a
+unit, the controller that resolved its inputs, the queue that scheduled it, the HUD
+for actions people and agents take (including yours), and the importer or ingest
+that brought the content in. `c4_trace_file` returns the task record of one file,
+with its declared AI use and its C2PA and OMC definitions. `c4_verify_custody`
+walks from that file back to its ingest or import and reports whether every record
+verifies, whether any step lacks a record, and who signed each step. Report gaps as
+gaps: a step with no record is not a forgery.
+
 ## Conventions
 
 - Jobs are `namespace/name`; tools take them as `namespace` and `name`.

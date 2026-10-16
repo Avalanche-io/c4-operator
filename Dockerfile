@@ -1,5 +1,5 @@
 # One image for the manager, the node agent, and the init container.
-# Build with `make image`: the binary is compiled on the host first
+# Build with `make image`: the binary is cross-compiled on the host first
 # (see Makefile), then copied in.
 FROM gcr.io/distroless/static-debian12:latest
 ARG TARGETARCH

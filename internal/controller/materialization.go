@@ -11,6 +11,7 @@ package controller
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"sort"
@@ -33,6 +34,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/project"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/internal/view"
 )
@@ -46,6 +48,10 @@ type MaterializationReconciler struct {
 	Retry time.Duration
 	// PreflightWorkers bounds concurrent existence checks.
 	PreflightWorkers int
+	// Signer signs resolution records as the controller; nil signs none.
+	Signer *provenance.Signer
+	// Roots are the farm's signing roots, for checking source records.
+	Roots *x509.CertPool
 }
 
 // Reconcile resolves one Materialization.
@@ -85,6 +91,14 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	store, err := r.Projects.Store(ctx, p)
 	if err != nil {
 		return r.fail(ctx, orig, &mat, "StoreUnavailable", err, r.Retry)
+	}
+	var source *provenance.Verified
+	st.SourceRecord = ""
+	if rec := mat.Annotations[c4v1.AnnotationSourceRecord]; rec != "" {
+		if source, err = r.sourceRecord(store, p, rec, sourceID); err != nil {
+			return r.fail(ctx, orig, &mat, "SourceRecordInvalid", err, 0)
+		}
+		st.SourceRecord = rec
 	}
 	resolve := func(f view.Filter) (*view.Resolved, error) {
 		if data != nil {
@@ -163,6 +177,14 @@ func (r *MaterializationReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 	// so a refused description leaves nothing behind in the store.
 	if err := publishRecords(ctx, store, res.Chain); err != nil {
 		return r.fail(ctx, orig, &mat, "StoreUnavailable", fmt.Errorf("publish records: %w", err), r.Retry)
+	}
+	st.Record = ""
+	if r.Signer != nil {
+		id, err := r.signResolution(ctx, store, p, &mat, sourceID, g, v, t, res, source)
+		if err != nil {
+			return r.fail(ctx, orig, &mat, "SigningFailed", err, r.Retry)
+		}
+		st.Record = id
 	}
 	st.Phase = c4v1.PhaseReady
 	setCond(st, mat.Generation, c4v1.ConditionContentAvailable, true, "AllPresent", "every object is in the store")

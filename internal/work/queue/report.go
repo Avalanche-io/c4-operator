@@ -164,6 +164,10 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			st.Resume[strconv.Itoa(i)] = view
 		}
 	}
+	for _, d := range m.decisions[max(0, len(m.decisions)-16):] {
+		st.Decisions = append(st.Decisions, c4v1.WorkDecision{Unit: int32(d.Unit), At: metav1.Time{Time: d.At.Truncate(time.Second)},
+			Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record})
+	}
 	for _, y := range m.yields[max(0, len(m.yields)-8):] {
 		st.Yields = append(st.Yields, c4v1.WorkYield{Unit: int32(y.Unit), At: metav1.Time{Time: y.At.Truncate(time.Second)}, Reason: y.Reason, View: y.View})
 	}
@@ -202,6 +206,12 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			m.finished = now
 		}
 		st.Finished = &metav1.Time{Time: m.finished.Truncate(time.Second)}
+		// The queue seals the job: a signed record of its output and of the
+		// decisions that touched it.
+		q.sealJob(context.Background(), v, &st, now)
+		if st.Output != nil && m.jobRecord != "" {
+			st.Output.Record = m.jobRecord
+		}
 		// A finished job keeps what its units cost: the heavy ranges.
 		if hr := q.heavy(v); len(hr) > 0 {
 			st.Estimate = &c4v1.WorkEstimate{HeavyRegions: hr}

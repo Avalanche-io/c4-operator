@@ -1,4 +1,7 @@
-namespace: c4-system
+# Everything goes in c4-system except what names its namespace itself
+# (the signing CA's namespace, config/signing).
+transformers:
+- namespace-transformer.yaml
 resources:
 - namespace.yaml
 - ../crd
@@ -8,6 +11,7 @@ resources:
 - ../regional
 - ../webhook
 - ../policy
+- ../signing
 images:
 - name: c4-operator
   newName: c4-operator
