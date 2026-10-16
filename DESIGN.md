@@ -720,21 +720,36 @@ moment, and write new frames.
 ### 8.2 Monorepo CI (Scion's case)
 
 A repository imported into C4. Each commit is a view, and each commit's diff
-against its first parent is a changeset. Many CI pods check out sparse,
-stacked views:
+against its first parent is a changeset.
 
-- `c4-operator import-git` walks first-parent history with `git diff-tree`
-  and applies each commit's changes to the previous view with the same code
-  capture uses, so import cost is proportional to each commit's change. Blob
-  content is hashed once and remembered by git object ID;
-- files managed by c4git are 90-byte C4 IDs in git. The importer uses the ID
+**The one place this differs from Scion.** Scion made source control itself
+server-side: commits are created on the server, and git is gone. This system
+keeps git as the system of record and mirrors it into C4 views. Studios and
+their developers keep their tools, hosting, review and hooks; the price is an
+import step, so import must be fast and push-driven.
+
+- **Push-driven import.** A webhook from the git host (or a `post-receive`
+  hook on a self-hosted remote) names the new commits. `c4-operator
+  import-git` imports only those, applying each commit's `git diff-tree`
+  changes to its parent's view with the same code capture uses, so the cost
+  of a commit is proportional to its change, and publishes the view. Blob
+  content is hashed once and remembered by git object ID. P4 measures
+  push-to-view latency as well as per-commit cost.
+- **c4git files** are 90-byte C4 IDs in git. The importer uses the ID
   directly, copies the object from the c4git store without rehashing (c4git
-  verified it at `git add`), and takes its size from the store;
-- a CI job's Materialization is (commit view or changeset, `include:
-  services/foo/, libs/common/`);
-- a node that ran CI for the parent commit adds one thin delta layer for the
-  child commit;
-- build outputs captured from the upper become the input of the next stage.
+  verified it at `git add`), and takes its size from the store.
+- **API-only CI.** Many CI decisions need no checkout. A query on the tier
+  API and the MCP server returns the changed paths, objects and sizes between
+  any two views, and the merge-base view of a commit against a branch. It
+  walks directory records top-down and skips every subtree whose ID is equal
+  (the same diff nodes use for delta layers), so its cost is proportional to
+  the change, not to the repository. A pipeline decides which test shards to
+  run before any pod mounts anything; test discovery (section 10.6) is often
+  just this query.
+- **Sparse, stacked checkouts.** A CI job that does need files mounts (commit
+  view or changeset, `include: services/foo/, libs/common/`). A node that ran
+  CI for the parent commit adds one thin delta layer for the child commit.
+- Build outputs captured from the upper become the input of the next stage.
 
 The lazy lower (section 4.6) matters most here, because tests read a small
 fraction of a large tree.
