@@ -137,3 +137,38 @@ Project `vendor` reads `iso-a`'s bucket through its own MinIO user, with scope G
 | a new pod mounting it after the revocation                       | Pending; FailedMount: materialization vendor/show is not ready (phase "Failed")                                                                  |
 | the pod that mounted it before the revocation                    | still running, still reads its 48 plates: revocation takes effect at the next mount                                                              |
 
+
+## P5: the work queue on the e2e farm (2026-10-16T10:22Z, policy objective)
+
+Pools: cpu (4 nodes, 4 slots each), gpu (2 nodes, 4 slots each), and spot (2 nodes, 4 slots each, unprovisioned until a CapacityRequest asks for them; the kind-sim provider untaints them after a 20 s provisioning delay). Each show has a quota of 8 nominal cpu slots plus 8 borrowable, 4 + 4 gpu slots, and 0 + 8 spot slots, a burst budget of $5 a day, and lateness priced at $200 an hour. Times are seconds after the first submission; the run took 316 s.
+
+| job                       | class  | submitted | deadline | finished | deadline met  | units done | preemptions |
+| ------------------------- | ------ | --------- | -------- | -------- | ------------- | ---------- | ----------- |
+| show-a/sh010-comp-v003    | render | +0 s      | +420 s   | +274 s   | yes, +146 s   | 96 of 96   | 0           |
+| show-b/sh020-light-v002   | render | +0 s      | +540 s   | +168 s   | yes, +372 s   | 72 of 72   | 0           |
+| show-a/ci-change-4521     | ci     | +0 s      | +240 s   | +76 s    | yes, +164 s   | 16 of 16   | 0           |
+| show-b/train-denoise      | ml     | +0 s      | +86400 s | +314 s   | yes, +86086 s | 1 of 1     | 1           |
+| show-b/train-upres        | ml     | +0 s      | +86400 s | +276 s   | yes, +86124 s | 1 of 1     | 1           |
+| show-a/sh030-fx-v001      | render | +60 s     | +264 s   | +136 s   | yes, +128 s   | 24 of 24   | 0           |
+| show-b/sh040-lookdev-v001 | render | +90 s     | +241 s   | +252 s   | no, -11 s     | 144 of 144 | 0           |
+
+Deadlines met: 6 of 7. The CI change's deadline is its latency target (4 minutes) from when it was submitted.
+
+Reclaim: 2 yields of training runs for the urgent GPU render.
+- train-denoise yielded (reclaim-nominal) at 2026-10-16T10:23:32Z, its checkpoint captured as view c41AgYJRC7...
+- train-upres yielded (restore-feasibility) at 2026-10-16T10:24:14Z, its checkpoint captured as view c42EFFmk9N...
+- train-denoise resumed: "training from step 315 of 1200", reading the checkpoint from that view.
+- train-upres resumed: "training from step 523 of 1200", reading the checkpoint from that view.
+
+Burst: the queue first asked for spot capacity at 120 s (peak request 8 slots); slots were provisioned by 142 s and the first unit ran on spot at 142 s. Burst spend for the run: $0.03.
+
+Estimate of sh010-comp-v003 (binary order; frames cost 6 s, and 24 s from 1040 to 1052). W is the estimator's remaining work in slot-seconds; the truth is what the units not yet finished went on to take (a running unit counts half). The render-manager estimate is the mean of finished frames times the frames left:
+
+| point in the run | frames done | W (estimator) | W90 | truth | estimator error | render-manager error |
+| ---------------- | ----------- | ------------- | --- | ----- | --------------- | -------------------- |
+| 10%              | 16 of 96    | 592           | 851 | 656   | 10%             | 16%                  |
+| 25%              | 21 of 96    | 596           | 683 | 590   | 1%              | 8%                   |
+| 50%              | 45 of 96    | 388           | 419 | 388   | 0%              | 3%                   |
+| 75%              | 77 of 96    | 166           | 181 | 163   | 2%              | 10%                  |
+
+Output: sh010-comp-v003 folded 96 unit changesets into its output view c435ue2eEo...; the stored chain c43PVtxxnV... has one section per fold, each sealed by the output view after it.
