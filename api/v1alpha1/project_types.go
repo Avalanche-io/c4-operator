@@ -38,11 +38,12 @@ const (
 
 // ProjectStore is where a project's content lives.
 type ProjectStore struct {
-	// Shards hold the project's objects, in C4_STORE URL form (s3://,
-	// c4d://, http(s)://). An object lives on the shard with the highest
-	// rendezvous score for its ID, so no one endpoint carries every read.
+	// Shards hold the project's objects. An object lives on the shard
+	// whose name has the highest rendezvous score for its ID, so no one
+	// endpoint carries every read, adding a shard moves about 1/(n+1) of
+	// the objects, and moving a shard to a new URL moves none.
 	// +kubebuilder:validation:MinItems=1
-	Shards []string `json:"shards"`
+	Shards []StoreShard `json:"shards"`
 
 	// CredentialsSecretRef names a Secret in the operator's namespace with
 	// AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY. Users of the project's
@@ -59,6 +60,18 @@ type ProjectStore struct {
 	// bytes are verified once, when they enter the store.
 	// +optional
 	VerifyFill bool `json:"verifyFill,omitempty"`
+}
+
+// StoreShard is one shard of a project's store.
+type StoreShard struct {
+	// Name is the shard's stable identity; placement depends on it, not on
+	// the URL.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+	// URL in C4_STORE form: s3://bucket/prefix?region=..&endpoint=..,
+	// c4d://host:port, or http(s)://host:port.
+	// +kubebuilder:validation:MinLength=1
+	URL string `json:"url"`
 }
 
 // Grant allows a project to use part of a tree in its store.

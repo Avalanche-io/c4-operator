@@ -17,6 +17,9 @@ spec:
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
+    - jsonPath: .status.project
+      name: Project
+      type: string
     - jsonPath: .status.phase
       name: Phase
       type: string
@@ -25,9 +28,6 @@ spec:
       type: integer
     - jsonPath: .status.bytes
       name: Bytes
-      type: integer
-    - jsonPath: .status.uniqueBytes
-      name: Unique
       type: integer
     - jsonPath: .status.viewID
       name: View
@@ -39,7 +39,9 @@ spec:
     name: v1alpha1
     schema:
       openAPIV3Schema:
-        description: Materialization declares a content-addressed tree that pods mount.
+        description: |-
+          Materialization is a tree, by C4 ID, that pods mount through the c4 CSI
+          driver.
         properties:
           apiVersion:
             description: |-
@@ -59,28 +61,31 @@ spec:
           metadata:
             type: object
           spec:
-            description: MaterializationSpec declares the tree a pod needs.
+            description: |-
+              MaterializationSpec declares the tree a pod needs. The store and its
+              credentials come from the Project that owns the namespace.
             properties:
               include:
                 description: |-
                   Include limits the tree to these paths (sparse materialization).
                   Each pattern matches a path or any of its ancestors, component by
-                  component, with path.Match. Empty means the whole tree.
+                  component, with path.Match. Empty means the whole tree. A project's
+                  grant paths further limit it.
                 items:
                   type: string
                 type: array
               retainOnNode:
                 description: |-
-                  RetainOnNode pins the materialized tree on a node for this long
-                  after the last pod using it ends. Unpinned trees stay cached until
-                  the node needs the space.
+                  RetainOnNode keeps the view's layers on a node for this long after
+                  the last volume using them is unmounted.
                 type: string
               source:
-                description: Source of the c4m file.
+                description: Source of the description.
                 properties:
                   configMapKeyRef:
-                    description: ConfigMapKeyRef selects a ConfigMap key holding c4m
-                      text.
+                    description: |-
+                      ConfigMapKeyRef selects a ConfigMap key holding c4m text, in the
+                      Materialization's namespace.
                     properties:
                       key:
                         description: |-
@@ -105,51 +110,24 @@ spec:
                     type: object
                     x-kubernetes-map-type: atomic
                   id:
-                    description: ID is the C4 ID of a c4m file (or a `c4 id -s` snapshot)
-                      in the store.
+                    description: |-
+                      ID is the C4 ID of a description in the project's store: a c4m file,
+                      a view or snapshot root record, or a changeset (a c4m whose first
+                      line names its parent). A changeset resolves to a chain of views that
+                      nodes can mount as stacked layers.
                     pattern: ^c4[1-9A-HJ-NP-Za-km-z]{88}$
                     type: string
                 type: object
                 x-kubernetes-validations:
                 - message: set exactly one of configMapKeyRef or id
                   rule: has(self.configMapKeyRef) != has(self.id)
-              store:
-                description: |-
-                  Store holding the content, in C4_STORE form: s3://bucket/prefix?region=..&endpoint=..,
-                  a c4d endpoint (http://, https://, c4d://), or an absolute path on the node.
-                minLength: 1
-                type: string
-              storeSecretRef:
-                description: |-
-                  StoreSecretRef names a Secret with S3 credentials, under the keys
-                  AWS_ACCESS_KEY_ID / AWS_SECRET_ACCESS_KEY (or access-key-id /
-                  secret-access-key, as the c4 container examples use).
-                properties:
-                  name:
-                    default: ""
-                    description: |-
-                      Name of the referent.
-                      This field is effectively required, but due to backwards compatibility is
-                      allowed to be empty. Instances of this type with an empty value here are
-                      almost certainly wrong.
-                      More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
-                    type: string
-                type: object
-                x-kubernetes-map-type: atomic
-              verify:
-                default: Stat
-                description: Verify selects how cached content is checked before use.
-                enum:
-                - Stat
-                - Full
-                type: string
             required:
             - source
-            - store
             type: object
           status:
-            description: MaterializationStatus reports the resolved tree and how nodes
-              served it.
+            description: |-
+              MaterializationStatus is written by the controller only, once per
+              generation. Per-node behavior is exported as metrics, not here.
             properties:
               bytes:
                 format: int64
@@ -213,98 +191,49 @@ spec:
                 x-kubernetes-list-map-keys:
                 - type
                 x-kubernetes-list-type: map
-              files:
-                description: Files and Bytes in the tree; duplicates count each time.
+              dirs:
                 format: int64
                 type: integer
+              files:
+                format: int64
+                type: integer
+              layers:
+                description: |-
+                  Layers are the view IDs of the source's changeset chain, base first.
+                  The last is ViewID. Nodes use them as candidates to stack on.
+                items:
+                  type: string
+                type: array
               missing:
                 description: Missing counts unique objects the store does not have.
                 format: int64
                 type: integer
               missingPaths:
-                description: MissingPaths samples paths whose content is missing.
                 items:
                   type: string
                 type: array
-              nodes:
-                description: Nodes reports per-node cache behavior.
-                items:
-                  description: NodeCacheStatus is one node's account of serving this
-                    Materialization.
-                  properties:
-                    bytesFetched:
-                      description: BytesFetched is what this node read from the store.
-                      format: int64
-                      type: integer
-                    bytesMaterialized:
-                      description: BytesMaterialized is what pods on this node were
-                        given.
-                      format: int64
-                      type: integer
-                    hits:
-                      description: Hits counts objects already cached and valid.
-                      format: int64
-                      type: integer
-                    lastError:
-                      description: LastError is the most recent failure on this node,
-                        cleared on success.
-                      type: string
-                    lastReadyMillis:
-                      description: LastReadyMillis is how long the most recent request
-                        took.
-                      format: int64
-                      type: integer
-                    lastRequest:
-                      description: LastRequest is when the most recent request finished.
-                      format: date-time
-                      type: string
-                    misses:
-                      description: Misses counts objects fetched from the store.
-                      format: int64
-                      type: integer
-                    node:
-                      type: string
-                    refetched:
-                      description: Refetched counts cached objects that failed verification
-                        and were replaced.
-                      format: int64
-                      type: integer
-                    requests:
-                      description: Requests is how many pods asked this node for the
-                        tree.
-                      format: int64
-                      type: integer
-                    viewID:
-                      description: ViewID last materialized on this node.
-                      type: string
-                  required:
-                  - bytesFetched
-                  - bytesMaterialized
-                  - hits
-                  - lastReadyMillis
-                  - misses
-                  - node
-                  - refetched
-                  - requests
-                  type: object
-                type: array
-                x-kubernetes-list-map-keys:
-                - node
-                x-kubernetes-list-type: map
               observedGeneration:
                 format: int64
                 type: integer
               phase:
-                description: Phase is Pending, Ready, or Failed.
                 type: string
+              project:
+                description: Project that owns this Materialization's namespace.
+                type: string
+              projectGeneration:
+                description: |-
+                  ProjectGeneration is the generation of the Project the status was
+                  resolved under; a change to the Project's store or grants resolves
+                  again.
+                format: int64
+                type: integer
               rootID:
-                description: RootID is the C4 ID of the resolved description (the
-                  snapshot ID).
+                description: |-
+                  RootID is the ID of the top description's root listing as recorded
+                  (the snapshot ID).
                 type: string
               sourceID:
-                description: |-
-                  SourceID identifies the exact source resolved: the c4m text's ID for
-                  a ConfigMap, or spec.source.id.
+                description: SourceID identifies the exact description resolved.
                 type: string
               uniqueBytes:
                 format: int64
@@ -314,10 +243,7 @@ spec:
                 format: int64
                 type: integer
               viewID:
-                description: |-
-                  ViewID is the content-level C4 ID of the tree pods receive, after
-                  the include filter. Scanning a pod's mount in c4 content mode gives
-                  this ID.
+                description: ViewID is the ID of the tree pods see.
                 type: string
             type: object
         type: object

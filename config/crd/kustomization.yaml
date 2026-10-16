@@ -1,2 +1,3 @@
 resources:
 - c4.avalanche.io_materializations.yaml
+- c4.avalanche.io_projects.yaml

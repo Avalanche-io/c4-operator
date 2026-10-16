@@ -3,5 +3,6 @@ kind: Namespace
 metadata:
   name: c4-system
   labels:
-    # The agent writes its cache to a hostPath.
+    # The node daemon mounts overlays and owns the node cache. User
+    # namespaces can stay at restricted: they only get csi volumes.
     pod-security.kubernetes.io/enforce: privileged

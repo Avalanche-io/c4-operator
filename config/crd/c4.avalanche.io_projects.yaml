@@ -1,0 +1,279 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: projects.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: Project
+    listKind: ProjectList
+    plural: projects
+    singular: project
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.isolation
+      name: Isolation
+      type: string
+    - jsonPath: .spec.store.access
+      name: Access
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Project is a unit of data isolation: its namespaces, its store and
+          credentials, the trees it may use, and its share of the farm.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ProjectSpec defines a project.
+            properties:
+              grants:
+                description: |-
+                  Grants restrict which trees the project may materialize, and which
+                  paths of them. With no grants, any description resolvable from the
+                  project's own store is allowed.
+                items:
+                  description: Grant allows a project to use part of a tree in its
+                    store.
+                  properties:
+                    paths:
+                      description: |-
+                        Paths limits the grant to these path patterns (Materialization
+                        include syntax). Empty means the whole tree.
+                      items:
+                        type: string
+                      type: array
+                    tree:
+                      description: |-
+                        Tree is the ID of a view, root record, source c4m, or changeset base
+                        the project may materialize.
+                      pattern: ^c4[1-9A-HJ-NP-Za-km-z]{88}$
+                      type: string
+                  required:
+                  - tree
+                  type: object
+                type: array
+              isolation:
+                default: Strict
+                description: Isolation modes.
+                enum:
+                - Strict
+                - Shared
+                type: string
+              namespaces:
+                description: |-
+                  Namespaces whose Materializations belong to this project. A
+                  namespace belongs to at most one project.
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              sharingGroup:
+                description: SharingGroup names the group a Shared project shares
+                  caches with.
+                type: string
+              store:
+                description: ProjectStore is where a project's content lives.
+                properties:
+                  access:
+                    default: Tiered
+                    description: Access selects tiered or direct reads.
+                    enum:
+                    - Tiered
+                    - Direct
+                    type: string
+                  credentialsSecretRef:
+                    description: |-
+                      CredentialsSecretRef names a Secret in the operator's namespace with
+                      AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY. Users of the project's
+                      namespaces can neither read nor choose it.
+                    properties:
+                      name:
+                        default: ""
+                        description: |-
+                          Name of the referent.
+                          This field is effectively required, but due to backwards compatibility is
+                          allowed to be empty. Instances of this type with an empty value here are
+                          almost certainly wrong.
+                          More info: https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#names
+                        type: string
+                    type: object
+                    x-kubernetes-map-type: atomic
+                  shards:
+                    description: |-
+                      Shards hold the project's objects. An object lives on the shard
+                      whose name has the highest rendezvous score for its ID, so no one
+                      endpoint carries every read, adding a shard moves about 1/(n+1) of
+                      the objects, and moving a shard to a new URL moves none.
+                    items:
+                      description: StoreShard is one shard of a project's store.
+                      properties:
+                        name:
+                          description: |-
+                            Name is the shard's stable identity; placement depends on it, not on
+                            the URL.
+                          minLength: 1
+                          type: string
+                        url:
+                          description: |-
+                            URL in C4_STORE form: s3://bucket/prefix?region=..&endpoint=..,
+                            c4d://host:port, or http(s)://host:port.
+                          minLength: 1
+                          type: string
+                      required:
+                      - name
+                      - url
+                      type: object
+                    minItems: 1
+                    type: array
+                  verifyFill:
+                    description: |-
+                      VerifyFill rehashes objects as node caches fill. Off by default:
+                      bytes are verified once, when they enter the store.
+                    type: boolean
+                required:
+                - shards
+                type: object
+              work:
+                description: Work configures the project's share of the farm (P5).
+                properties:
+                  burstBudgetPerDay:
+                    description: |-
+                      BurstBudgetPerDay caps automatic burst spending, in the pools'
+                      currency.
+                    type: string
+                  fairShareWeight:
+                    description: FairShareWeight scales the project's share of free
+                      capacity.
+                    type: string
+                  lateCostPerHour:
+                    description: |-
+                      LateCostPerHour prices an hour of lateness, so the scheduler can
+                      weigh a burst against the lateness it prevents.
+                    type: string
+                  quotas:
+                    description: |-
+                      Quotas per pool, with Kueue's semantics: nominal slots are
+                      guaranteed when the pool is contended; unused nominal slots are lent
+                      to others; up to BorrowingLimit slots may be borrowed.
+                    items:
+                      description: Quota is a project's entitlement in one pool.
+                      properties:
+                        borrowingLimit:
+                          format: int32
+                          minimum: 0
+                          type: integer
+                        nominal:
+                          format: int32
+                          minimum: 0
+                          type: integer
+                        pool:
+                          type: string
+                      required:
+                      - nominal
+                      - pool
+                      type: object
+                    type: array
+                type: object
+            required:
+            - namespaces
+            - store
+            type: object
+          status:
+            description: ProjectStatus reports validation.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              observedGeneration:
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

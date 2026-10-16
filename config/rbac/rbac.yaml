@@ -1,0 +1,146 @@
+# Service accounts and RBAC. Store credentials are Secrets in c4-system,
+# readable only through the namespaced Roles below; nothing here can read a
+# Secret in any other namespace (the MVP's cluster-wide Secret read is gone).
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: c4-manager
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: c4-node
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: c4-regional
+---
+# Manager: resolves Materializations, validates Projects, publishes view
+# records to project stores, runs the pod webhook.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-manager
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [materializations, projects]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [materializations/status, projects/status]
+  verbs: [get, update, patch]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+- apiGroups: [admissionregistration.k8s.io]
+  resources: [mutatingwebhookconfigurations]
+  resourceNames: [c4-operator]
+  verbs: [get, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-manager
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-manager}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
+# Node daemon: reads Projects, Materializations (by name, on demand) and
+# the Nodes of its locality; validates pod and tier tokens; annotates pods
+# with capture results. A ValidatingAdmissionPolicy (config/policy)
+# narrows the pod patch to output annotations on pods of its own node.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-node
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [projects]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [materializations]
+  verbs: [get]
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get, list, watch]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, patch]
+- apiGroups: [""]
+  resources: [events]
+  verbs: [create, patch]
+- apiGroups: [authentication.k8s.io]
+  resources: [tokenreviews]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-node
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-node}
+subjects:
+- {kind: ServiceAccount, name: c4-node, namespace: c4-system}
+---
+# Regional tier: reads Projects and validates tier tokens.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-regional
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [projects]
+  verbs: [get, list, watch]
+- apiGroups: [authentication.k8s.io]
+  resources: [tokenreviews]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-regional
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-regional}
+subjects:
+- {kind: ServiceAccount, name: c4-regional, namespace: c4-system}
+---
+# Store credentials: the manager and the regional tier read them. The node
+# daemon needs them only for projects with access: Direct; an installation
+# without Direct projects can remove c4-node from this binding.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-store-credentials
+rules:
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-store-credentials
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-store-credentials}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+- {kind: ServiceAccount, name: c4-regional, namespace: c4-system}
+- {kind: ServiceAccount, name: c4-node, namespace: c4-system}
+---
+# Node daemons find the regional tier through its EndpointSlices.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-node-discovery
+rules:
+- apiGroups: [discovery.k8s.io]
+  resources: [endpointslices]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-node-discovery
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-node-discovery}
+subjects:
+- {kind: ServiceAccount, name: c4-node, namespace: c4-system}

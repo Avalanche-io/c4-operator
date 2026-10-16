@@ -1,9 +1,42 @@
+# Eight workers in two localities (zones), so peer homes, the regional
+# tier and per-node layer sharing all have something to do. Render pools
+# for the work queue (P5) are labels on the same workers: cpu, gpu-sim
+# (labeled as GPU nodes; kind has no GPUs) and spot (tainted as
+# unprovisioned until the kind-sim actuator "provisions" them).
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:
 - role: control-plane
+  image: kindest/node:v1.36.1
   extraPortMappings:
-  # MinIO S3 API, so the seeding tool on the host can upload.
-  - containerPort: 30900
-    hostPort: 30900
-    listenAddress: 127.0.0.1
+  # MinIO shards (S3 API), so the ingest tool on the host can upload.
+  - {containerPort: 30900, hostPort: 30900, listenAddress: 127.0.0.1}
+  - {containerPort: 30901, hostPort: 30901, listenAddress: 127.0.0.1}
+  - {containerPort: 30902, hostPort: 30902, listenAddress: 127.0.0.1}
+  # HUD and MCP (P5, P6).
+  - {containerPort: 30080, hostPort: 30080, listenAddress: 127.0.0.1}
+  - {containerPort: 30081, hostPort: 30081, listenAddress: 127.0.0.1}
+- role: worker
+  image: kindest/node:v1.36.1
+  labels: {topology.kubernetes.io/zone: zone-a, c4.avalanche.io/pool: cpu}
+- role: worker
+  image: kindest/node:v1.36.1
+  labels: {topology.kubernetes.io/zone: zone-a, c4.avalanche.io/pool: cpu}
+- role: worker
+  image: kindest/node:v1.36.1
+  labels: {topology.kubernetes.io/zone: zone-a, c4.avalanche.io/pool: gpu-sim}
+- role: worker
+  image: kindest/node:v1.36.1
+  labels: {topology.kubernetes.io/zone: zone-a, c4.avalanche.io/pool: spot}
+- role: worker
+  image: kindest/node:v1.36.1
+  labels: {topology.kubernetes.io/zone: zone-b, c4.avalanche.io/pool: cpu}
+- role: worker
+  image: kindest/node:v1.36.1
+  labels: {topology.kubernetes.io/zone: zone-b, c4.avalanche.io/pool: cpu}
+- role: worker
+  image: kindest/node:v1.36.1
+  labels: {topology.kubernetes.io/zone: zone-b, c4.avalanche.io/pool: gpu-sim}
+- role: worker
+  image: kindest/node:v1.36.1
+  labels: {topology.kubernetes.io/zone: zone-b, c4.avalanche.io/pool: spot}

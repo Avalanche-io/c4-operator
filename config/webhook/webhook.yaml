@@ -19,7 +19,8 @@ webhooks:
   admissionReviewVersions: [v1]
   sideEffects: None
   # Only pods that ask for a materialization reach the webhook, so
-  # failing closed cannot block unrelated pods.
+  # failing closed cannot block unrelated pods. The webhook only adds a csi
+  # volume; writing that volume into the pod spec needs no webhook.
   failurePolicy: Fail
   matchConditions:
   - name: requests-materialization

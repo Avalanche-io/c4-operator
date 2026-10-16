@@ -75,8 +75,8 @@ func (r *ProjectReconciler) validate(ctx context.Context, p *c4v1.Project) []str
 		problems = append(problems, err.Error())
 	}
 	for _, s := range p.Spec.Store.Shards {
-		if strings.Contains(s, "@") {
-			problems = append(problems, "shard "+storeurl.Redact(s)+" carries credentials in its URL; use credentialsSecretRef")
+		if strings.Contains(s.URL, "@") {
+			problems = append(problems, "shard "+s.Name+" ("+storeurl.Redact(s.URL)+") carries credentials in its URL; use credentialsSecretRef")
 		}
 	}
 	for _, g := range p.Spec.Grants {

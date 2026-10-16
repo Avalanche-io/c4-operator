@@ -30,17 +30,21 @@ func (m *multiFlag) Set(v string) error { *m = append(*m, v); return nil }
 func runIngest(args []string) error {
 	fs := flag.NewFlagSet("ingest", flag.ExitOnError)
 	var shards multiFlag
-	fs.Var(&shards, "shard", "store shard URL (repeat for each shard)")
+	fs.Var(&shards, "shard", "store shard as name=URL (repeat for each shard; names decide placement and must match the Project)")
 	workers := fs.Int("workers", 16, "parallel uploads")
 	out := fs.String("c4m", "", "also write the view as a nested c4m file here")
 	quiet := fs.Bool("q", false, "print only the view ID")
 	fs.Parse(args)
 	if fs.NArg() != 1 || len(shards) == 0 {
-		return errors.New("usage: c4-operator ingest --shard URL [--shard URL...] [--c4m FILE] DIR")
+		return errors.New("usage: c4-operator ingest --shard NAME=URL [--shard NAME=URL...] [--c4m FILE] DIR")
 	}
 	dir := fs.Arg(0)
 	creds := storeurl.Credentials{AccessKeyID: os.Getenv("AWS_ACCESS_KEY_ID"), SecretAccessKey: os.Getenv("AWS_SECRET_ACCESS_KEY")}
-	st, err := storeurl.OpenSharded(shards, creds)
+	var specs []storeurl.Spec
+	for _, sh := range shards {
+		specs = append(specs, storeurl.ParseSpec(sh))
+	}
+	st, err := storeurl.OpenSharded(specs, creds)
 	if err != nil {
 		return err
 	}

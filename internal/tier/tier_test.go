@@ -113,7 +113,17 @@ func newHarness(t *testing.T, limits fill.Limits, route func(project string, id 
 		Log: logr.Discard(),
 	}
 	h := &harness{srv: s, http: httptest.NewServer(s), caches: caches}
-	t.Cleanup(h.http.Close)
+	t.Cleanup(func() {
+		h.http.Close()
+		// Fills commit after their last byte is served; let them finish
+		// before the cache directory is removed.
+		for range 200 {
+			if s.Fills.Stats().Fills == 0 {
+				return
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+	})
 	return h
 }
 
@@ -263,7 +273,11 @@ func TestRangeOnACachedObject(t *testing.T) {
 
 func TestShedsBeyondTheFillLimit(t *testing.T) {
 	gate := make(chan struct{})
-	defer close(gate)
+	var bg sync.WaitGroup
+	defer func() {
+		close(gate)
+		bg.Wait()
+	}()
 	objects := make([][]byte, 3)
 	ids := make([]c4.ID, 3)
 	for i := range objects {
@@ -279,7 +293,9 @@ func TestShedsBeyondTheFillLimit(t *testing.T) {
 		return nil
 	})
 	for i := range 2 {
+		bg.Add(1)
 		go func(id c4.ID) {
+			defer bg.Done()
 			req, _ := http.NewRequest(http.MethodGet, h.http.URL+"/"+id.String(), nil)
 			req.Header.Set(HeaderProject, "show")
 			if resp, err := http.DefaultClient.Do(req); err == nil {
@@ -376,7 +392,7 @@ func TestVerifyFillRefusesWrongBytes(t *testing.T) {
 
 func TestIngestComputesTheKey(t *testing.T) {
 	h := newHarness(t, fill.Limits{}, nil)
-	shard, err := storeurl.OpenSharded([]string{t.TempDir()}, storeurl.Credentials{})
+	shard, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: t.TempDir()}}, storeurl.Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,0 +1,75 @@
+# The regional cache tier: stateless replicas with a local-disk cache.
+# Node daemons pick a replica per object by rendezvous over the ready
+# endpoints of this Service, so it needs no load balancer of its own.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: c4-regional
+  labels:
+    app.kubernetes.io/name: c4-operator
+    app.kubernetes.io/component: regional
+spec:
+  replicas: 3
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: c4-operator
+      app.kubernetes.io/component: regional
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: c4-operator
+        app.kubernetes.io/component: regional
+    spec:
+      serviceAccountName: c4-regional
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        fsGroup: 65532
+        seccompProfile: {type: RuntimeDefault}
+      topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: kubernetes.io/hostname
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: c4-operator
+            app.kubernetes.io/component: regional
+      terminationGracePeriodSeconds: 10
+      containers:
+      - name: regional
+        image: c4-operator
+        args: [regional, --root=/cache, --cache-size=20Gi, --addr=:7443]
+        env:
+        - name: POD_NAMESPACE
+          valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
+        ports:
+        - {name: tier, containerPort: 7443}
+        readinessProbe:
+          httpGet: {path: /healthz, port: 7443}
+          periodSeconds: 3
+        resources:
+          requests: {cpu: 200m, memory: 128Mi}
+          limits: {memory: 2Gi}
+        securityContext:
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: true
+          capabilities: {drop: [ALL]}
+        volumeMounts:
+        - {name: cache, mountPath: /cache}
+      volumes:
+      - name: cache
+        emptyDir: {sizeLimit: 25Gi}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: c4-regional
+  labels:
+    app.kubernetes.io/name: c4-operator
+    app.kubernetes.io/component: regional
+spec:
+  selector:
+    app.kubernetes.io/name: c4-operator
+    app.kubernetes.io/component: regional
+  ports:
+  - {name: tier, port: 7443, targetPort: 7443}

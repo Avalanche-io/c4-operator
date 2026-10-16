@@ -73,6 +73,23 @@ func Open(raw string, creds Credentials) (Shard, error) {
 	return nil, fmt.Errorf("unsupported store URL %q (want s3://, c4d://, http(s)://, or an absolute path)", raw)
 }
 
+// Spec names one shard. Placement depends on Name, never on URL, so the
+// same store reached through different endpoints (a NodePort from a
+// laptop, a Service inside the cluster) places every object identically,
+// and moving a shard to a new URL moves no objects.
+type Spec struct {
+	Name string
+	URL  string
+}
+
+// ParseSpec reads "name=url", or a bare URL that is then its own name.
+func ParseSpec(s string) Spec {
+	if name, url, ok := strings.Cut(s, "="); ok && !strings.Contains(name, "/") && !strings.Contains(name, ":") {
+		return Spec{Name: name, URL: url}
+	}
+	return Spec{Name: s, URL: s}
+}
+
 // Sharded spreads objects over several shards by rendezvous hashing on the
 // ID. Adding a shard moves about 1/(n+1) of the objects.
 type Sharded struct {
@@ -81,24 +98,36 @@ type Sharded struct {
 }
 
 // OpenSharded opens every shard.
-func OpenSharded(urls []string, creds Credentials) (*Sharded, error) {
-	if len(urls) == 0 {
+func OpenSharded(specs []Spec, creds Credentials) (*Sharded, error) {
+	if len(specs) == 0 {
 		return nil, errors.New("no store shards")
 	}
 	s := &Sharded{byName: map[string]Shard{}}
-	for _, u := range urls {
-		sh, err := Open(u, creds)
+	for _, sp := range specs {
+		if sp.Name == "" {
+			sp.Name = sp.URL
+		}
+		if _, dup := s.byName[sp.Name]; dup {
+			return nil, fmt.Errorf("shard %s is listed twice", sp.Name)
+		}
+		sh, err := Open(sp.URL, creds)
 		if err != nil {
-			return nil, fmt.Errorf("shard %s: %w", Redact(u), err)
+			return nil, fmt.Errorf("shard %s: %w", sp.Name, err)
 		}
-		if _, dup := s.byName[sh.Name()]; dup {
-			return nil, fmt.Errorf("shard %s is listed twice", sh.Name())
-		}
-		s.names = append(s.names, sh.Name())
-		s.byName[sh.Name()] = sh
+		s.names = append(s.names, sp.Name)
+		s.byName[sp.Name] = sh
 	}
 	return s, nil
 }
+
+// Names lists the shard names.
+func (s *Sharded) Names() []string { return append([]string(nil), s.names...) }
+
+// Named returns a shard by name.
+func (s *Sharded) Named(name string) Shard { return s.byName[name] }
+
+// NameFor returns the name of the shard that holds id.
+func (s *Sharded) NameFor(id c4.ID) string { return rendezvous.Rank(s.names, id[:])[0] }
 
 // For returns the shard that holds id.
 func (s *Sharded) For(id c4.ID) Shard {

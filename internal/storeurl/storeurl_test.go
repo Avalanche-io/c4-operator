@@ -2,6 +2,7 @@ package storeurl
 
 import (
 	"bytes"
+	"fmt"
 	"context"
 	"errors"
 	"io"
@@ -55,7 +56,11 @@ func TestTreeShardResumesAtOffset(t *testing.T) {
 
 func TestShardedSpreadsAndIsStable(t *testing.T) {
 	dirs := []string{t.TempDir(), t.TempDir(), t.TempDir()}
-	s, err := OpenSharded(dirs, Credentials{})
+	var specs []Spec
+	for i, d := range dirs {
+		specs = append(specs, Spec{Name: fmt.Sprintf("s%d", i), URL: d})
+	}
+	s, err := OpenSharded(specs, Credentials{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +81,16 @@ func TestShardedSpreadsAndIsStable(t *testing.T) {
 			t.Errorf("shard %s holds %d of 1200", name, n)
 		}
 	}
-	if _, err := OpenSharded([]string{dirs[0], dirs[0]}, Credentials{}); err == nil {
-		t.Fatal("a shard listed twice was accepted")
+	if _, err := OpenSharded([]Spec{{Name: "a", URL: dirs[0]}, {Name: "a", URL: dirs[1]}}, Credentials{}); err == nil {
+		t.Fatal("a shard name listed twice was accepted")
+	}
+	// Placement follows names, not URLs: the same shards reached at other
+	// URLs place every object identically.
+	moved, _ := OpenSharded([]Spec{{Name: "s0", URL: t.TempDir()}, {Name: "s1", URL: t.TempDir()}, {Name: "s2", URL: t.TempDir()}}, Credentials{})
+	for i := range 200 {
+		id := c4.Identify(strings.NewReader(fmt.Sprint(i)))
+		if s.NameFor(id) != moved.NameFor(id) {
+			t.Fatal("placement changed with the shard URLs")
+		}
 	}
 }

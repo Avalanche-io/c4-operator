@@ -2,11 +2,12 @@ namespace: c4-system
 resources:
 - namespace.yaml
 - ../crd
-- ../rbac/manager
-- ../rbac/agent
+- ../rbac
 - ../manager
-- ../agent
+- ../node
+- ../regional
 - ../webhook
+- ../policy
 images:
 - name: c4-operator
   newName: c4-operator

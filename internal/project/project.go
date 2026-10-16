@@ -101,7 +101,11 @@ func (r *Registry) Store(ctx context.Context, p *c4v1.Project) (*storeurl.Sharde
 	if e, ok := r.stores[p.Name]; ok && e.key == key {
 		return e.store, nil
 	}
-	st, err := storeurl.OpenSharded(p.Spec.Store.Shards, creds)
+	specs := make([]storeurl.Spec, 0, len(p.Spec.Store.Shards))
+	for _, sh := range p.Spec.Store.Shards {
+		specs = append(specs, storeurl.Spec{Name: sh.Name, URL: sh.URL})
+	}
+	st, err := storeurl.OpenSharded(specs, creds)
 	if err != nil {
 		return nil, fmt.Errorf("project %s store: %w", p.Name, err)
 	}
