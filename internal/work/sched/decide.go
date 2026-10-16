@@ -14,24 +14,25 @@ import (
 //  0. Hold-stop preemptions, then the starvation guard: a job with no
 //     running unit for StarvationAfter gets one unit (a gang that does not
 //     fit reserves its pool's free slots instead).
-//  1. Deadline need: jobs below their required slots R, feasible jobs
-//     first, most behind first by (running+incoming)/R; ratios in the same
-//     TieBand bucket go to the project with lower fair-share usage, then
-//     to the older job. Infeasible jobs follow in order of smallest
-//     remaining work.
+//  1. Deadline need: jobs below their required slots R (see plan.go for
+//     how R is computed), jobs on time in the plan first, most behind
+//     first by (running+incoming)/R; ratios in the same TieBand bucket go
+//     to the project with lower fair-share usage, then to the older job.
+//     Jobs late in the plan follow in order of smallest remaining work.
 //  2. Boost: the extra slots of a boosted job (R*(boost-1)), from its own
 //     project's nominal quota first, then from lendable capacity.
 //  3. Information: unevaluated generators and coarse binary-order units,
 //     round robin over jobs by least slack.
-//  4. Fair share: per pool, cheapest first, one unit at a time to the
-//     project with the lowest usage over entitlement, and within it to the
-//     job with least slack.
+//  4. Surplus: per pool, cheapest first, one unit at a time, by least
+//     planned slack with fair share as the tiebreaker (or, with
+//     SurplusFairShare, by fair share first as DESIGN.md 9.9 has it).
 //  5. Preemption (section 9.13) to reclaim nominal quota and to restore
 //     feasibility.
 //  6. Burst (section 9.12), when enabled.
 func Decide(s Snapshot, st *State, cfg Config) Decisions {
 	a := newAlloc(&s, st, cfg, true)
 	a.objectives()
+	a.needDemand()
 	a.plan()
 	a.holdStop()
 	a.starvation()
@@ -118,7 +119,7 @@ func (a *alloc) objectives() {
 		case !j.Deadline.IsZero():
 			jc.hasDeadline = true
 			jc.T = j.Deadline.Sub(a.now).Seconds()
-			jc.R = jc.W90 / math.Max(jc.T, a.cfg.MinRemaining.Seconds())
+			jc.R = jc.W90 / math.Max(a.effective(jc), a.cfg.MinRemaining.Seconds())
 			finish := math.Max(div(jc.W90, jc.A), jc.tpath)
 			jc.slack = secs(jc.T - finish)
 			jc.feasible = jc.T-finish >= 0
@@ -179,132 +180,6 @@ func waterfill(w, caps []float64, C float64) []float64 {
 		break
 	}
 	return x
-}
-
-// plan estimates each job's share of current capacity (owned pools plus
-// burst already requested) and from it whether the job is at risk.
-//
-// Pools linked by any job that may use both are planned together as one
-// group, treating their slots as interchangeable; this is an
-// approximation. Within a group: feasible jobs are water-filled up to
-// their required slots R, infeasible ones then get what is left in order
-// of smallest remaining work, and any surplus is spread evenly up to each
-// job's attainable slots.
-func (a *alloc) plan() {
-	parent := map[string]string{}
-	var find func(string) string
-	find = func(x string) string {
-		if parent[x] == "" || parent[x] == x {
-			parent[x] = x
-			return x
-		}
-		r := find(parent[x])
-		parent[x] = r
-		return r
-	}
-	var planned []*jobCtx
-	for _, jc := range a.jobs {
-		if jc.j.Hold || jc.j.HoldStop || jc.R <= 0 {
-			continue
-		}
-		first := ""
-		for _, name := range jc.j.Pools {
-			if a.pools[name] == nil {
-				continue
-			}
-			if first == "" {
-				first = find(name)
-				continue
-			}
-			parent[find(name)] = first
-		}
-		if first != "" {
-			planned = append(planned, jc)
-		}
-	}
-	capacity := map[string]float64{}
-	for _, ps := range a.poolList {
-		c := float64(ps.p.Slots)
-		if ps.p.Burst != nil {
-			c += float64(max(0, ps.p.Burst.Requested-ps.p.Burst.Provisioned))
-		}
-		capacity[find(ps.p.Name)] += c
-	}
-	groups := map[string][]*jobCtx{}
-	var roots []string
-	for _, jc := range planned {
-		var root string
-		for _, name := range jc.j.Pools {
-			if a.pools[name] != nil {
-				root = find(name)
-				break
-			}
-		}
-		if groups[root] == nil {
-			roots = append(roots, root)
-		}
-		groups[root] = append(groups[root], jc)
-	}
-	for _, root := range roots {
-		js := groups[root]
-		C := capacity[root]
-		caps := make([]float64, len(js))
-		for i, jc := range js {
-			caps[i] = a.attainable(jc, true)
-		}
-		// Phase 1: feasible jobs up to R.
-		var w, c []float64
-		var fi []int
-		for i, jc := range js {
-			if !jc.feasible {
-				continue
-			}
-			fi = append(fi, i)
-			w = append(w, jc.R)
-			c = append(c, math.Min(jc.R, caps[i]))
-		}
-		for k, x := range waterfill(w, c, C) {
-			js[fi[k]].share = x
-			C -= x
-		}
-		// Phase 2: infeasible jobs by smallest remaining work.
-		var inf []int
-		for i, jc := range js {
-			if !jc.feasible {
-				inf = append(inf, i)
-			}
-		}
-		sort.SliceStable(inf, func(p, q int) bool { return js[inf[p]].W < js[inf[q]].W })
-		for _, i := range inf {
-			x := math.Min(caps[i], math.Max(0, C))
-			js[i].share = x
-			C -= x
-		}
-		// Phase 3: surplus, evenly, up to attainable.
-		if C > 1e-9 {
-			w = w[:0]
-			c = c[:0]
-			for i, jc := range js {
-				w = append(w, 1)
-				c = append(c, math.Max(0, caps[i]-jc.share))
-			}
-			for i, x := range waterfill(w, c, C) {
-				js[i].share += x
-			}
-		}
-	}
-	for _, jc := range a.jobs {
-		switch {
-		case jc.hasDeadline && jc.W90 > 0:
-			finish := math.Max(div(jc.W90, jc.share), jc.tpath)
-			if finish > jc.T {
-				jc.atRisk = true
-				jc.lateBy = secs(finish - jc.T)
-			}
-		case jc.hasRate:
-			jc.atRisk = jc.share < jc.R
-		}
-	}
 }
 
 func (a *alloc) starvation() {
@@ -397,7 +272,7 @@ func (a *alloc) need() {
 		if jc.R <= 0 || !jc.canRelease() || jc.needSlots(jc.R) <= 0 {
 			continue
 		}
-		if jc.feasible {
+		if jc.planOK {
 			h.js = append(h.js, jc)
 			continue
 		}
@@ -435,6 +310,9 @@ func (a *alloc) boost() {
 }
 
 func (a *alloc) info() {
+	if a.cfg.NoInfoTier {
+		return
+	}
 	var js []*jobCtx
 	for _, jc := range a.jobs {
 		if jc.canRelease() && jc.j.Runnable[jc.next].Info {
@@ -460,7 +338,77 @@ func (a *alloc) info() {
 	}
 }
 
+// fair fills what is left after the deadline, boost and information
+// tiers.
+//
+// SurplusSlack (default): per pool, cheapest first, one unit at a time to
+// the job with the least planned slack (deadline minus planned finish),
+// slack in the same SlackBand going to the project with the lower
+// fair-share usage in that pool, then to the older job. This is the rule
+// in the requirements ("the jobs most at risk get capacity first, with
+// fair share across projects as the tiebreaker").
+//
+// SurplusFairShare: DESIGN.md 9.9 as written: per pool, one unit at a time
+// to the project with the lowest usage over entitlement, and within it to
+// the job with least slack.
 func (a *alloc) fair() {
+	if a.cfg.Surplus == SurplusFairShare {
+		a.fairShareFirst()
+		return
+	}
+	var js []*jobCtx
+	for _, jc := range a.jobs {
+		if jc.canRelease() {
+			js = append(js, jc)
+		}
+	}
+	band := a.cfg.SlackBand.Seconds()
+	if band <= 0 {
+		band = 3600
+	}
+	key := func(jc *jobCtx) float64 { return math.Floor(a.planSlack(jc) / band) }
+	for _, ps := range a.poolList {
+		out := map[*jobCtx]bool{}
+		for ps.free > 0 && !ps.blocked {
+			var best *jobCtx
+			var bk, bf float64
+			for _, jc := range js {
+				if out[jc] || !jc.canRelease() || !allows(jc, ps.p.Name) {
+					continue
+				}
+				k, f := key(jc), a.fairKey(jc.proj, ps)
+				switch {
+				case best == nil, k < bk, k == bk && f < bf,
+					k == bk && f == bf && jc.j.Submitted.Before(best.j.Submitted),
+					k == bk && f == bf && jc.j.Submitted.Equal(best.j.Submitted) && jc.j.ID < best.j.ID:
+					best, bk, bf = jc, k, f
+				}
+			}
+			if best == nil {
+				break
+			}
+			if !a.release(best, TierFair, false, ps) {
+				out[best] = true
+			}
+		}
+	}
+}
+
+// planSlack is a job's deadline less its planned finish, in seconds.
+func (a *alloc) planSlack(jc *jobCtx) float64 {
+	switch {
+	case jc.hasDeadline:
+		if math.IsInf(jc.finish90, 1) {
+			return -bigSeconds
+		}
+		return jc.T - jc.finish90
+	case jc.hasRate:
+		return jc.slack.Seconds()
+	}
+	return bigSeconds
+}
+
+func (a *alloc) fairShareFirst() {
 	byProject := map[*projState][]*jobCtx{}
 	for _, jc := range a.jobs {
 		if jc.canRelease() {
@@ -527,7 +475,7 @@ func (a *alloc) rank() {
 	js := append([]*jobCtx(nil), a.jobs...)
 	for _, jc := range js {
 		switch {
-		case jc.R > 0 && jc.feasible:
+		case jc.R > 0 && jc.planOK:
 			jc.group = 0
 		case jc.R > 0:
 			jc.group = 1

@@ -11,8 +11,9 @@ import (
 // burst implements the cost-aware capacity decisions of DESIGN.md section
 // 9.12.
 //
-// For every job at risk at its planned share of current capacity, with
-// time left, the shortfall is D = W90 - share*T slot-seconds. Burst pools
+// For every job at risk in the plan with time left, the planner gives the
+// shortfall D in slot-seconds and the horizon T by which it must be
+// covered (plan.go). Burst pools
 // the job may use are tried cheapest first by price per slot-hour. A pool
 // whose provisioning delay d is not shorter than T is skipped; otherwise
 // each of its new slots contributes T-d seconds, so it takes
@@ -39,13 +40,13 @@ func (a *alloc) burst() {
 	}
 	var cands []*jobCtx
 	for _, jc := range a.jobs {
-		if jc.hasDeadline && jc.atRisk && jc.T > 0 && !jc.j.Hold && !jc.j.HoldStop {
+		if jc.hasDeadline && jc.atRisk && jc.T > 0 && jc.deficit > 0 && !jc.j.Hold && !jc.j.HoldStop {
 			cands = append(cands, jc)
 		}
 	}
 	sort.SliceStable(cands, func(i, j int) bool {
-		if cands[i].T != cands[j].T {
-			return cands[i].T < cands[j].T
+		if cands[i].horizon != cands[j].horizon {
+			return cands[i].horizon < cands[j].horizon
 		}
 		return cands[i].j.ID < cands[j].j.ID
 	})
@@ -129,7 +130,8 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 	sort.SliceStable(pools, func(i, j int) bool {
 		return pools[i].p.Burst.CostPerSlotHour < pools[j].p.Burst.CostPerSlotHour
 	})
-	left := jc.W90 - jc.share*jc.T
+	left := jc.deficit
+	T := jc.horizon
 	room := math.Inf(1)
 	if jc.j.MaxParallel > 0 {
 		room = float64(jc.j.MaxParallel) - jc.share
@@ -146,7 +148,7 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 		}
 		b := ps.p.Burst
 		d := b.Provisioning.Seconds()
-		if d >= jc.T {
+		if d >= T {
 			slow++
 			continue
 		}
@@ -154,7 +156,7 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 		if avail <= 0 {
 			continue
 		}
-		per := jc.T - d
+		per := T - d
 		x := int(math.Ceil(left / per))
 		x = min(x, avail, int(room))
 		if x <= 0 {
@@ -198,9 +200,9 @@ func (a *alloc) report() {
 		st.AtRisk = jc.atRisk
 		st.LateBy = jc.lateBy
 		st.Burst = jc.burst
-		if jc.share > 0 && (jc.hasDeadline || jc.hasRate) {
-			st.ETA50 = a.now.Add(secs(math.Max(div(jc.W, jc.share), jc.tpath)))
-			st.ETA90 = a.now.Add(secs(math.Max(div(jc.W90, jc.share), jc.tpath)))
+		if jc.hasDeadline && jc.finish90 > 0 && !math.IsInf(jc.finish90, 1) {
+			st.ETA50 = a.now.Add(secs(jc.finish50))
+			st.ETA90 = a.now.Add(secs(jc.finish90))
 		}
 		st.Message = a.message(jc, st)
 		a.out.Jobs[jc.j.ID] = st
@@ -222,8 +224,8 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 	dl := jc.j.Deadline.Format("Mon 15:04")
 	if jc.T <= 0 {
 		more := "with no capacity planned for it"
-		if jc.share > 0 {
-			more = fmt.Sprintf("about %s more at current capacity", human(secs(math.Max(div(jc.W90, jc.share), jc.tpath))))
+		if jc.finish90 > 0 && !math.IsInf(jc.finish90, 1) {
+			more = fmt.Sprintf("about %s more at current capacity", human(secs(jc.finish90)))
 		}
 		return fmt.Sprintf("%s is past its deadline %s by %s; %s.", id, dl, human(secs(-jc.T)), more)
 	}
@@ -234,7 +236,7 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		return fmt.Sprintf("%s is on track for %s: ETA %s, slack %s.", id, dl, st.ETA90.Format("Mon 15:04"), human(jc.slack))
 	}
 	var b strings.Builder
-	if jc.share <= 0 {
+	if math.IsInf(jc.finish90, 1) {
 		fmt.Fprintf(&b, "%s will miss %s: no capacity is planned for it.", id, dl)
 	} else {
 		fmt.Fprintf(&b, "%s will miss %s by about %s at current capacity.", id, dl, human(jc.lateBy))

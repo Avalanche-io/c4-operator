@@ -32,9 +32,11 @@ type poolState struct {
 }
 
 type projState struct {
-	p      Project
-	usage  map[string]int // slots in use per pool, including this decision's dispatches
-	demand map[string]int // runnable slots not yet released, per pool
+	p     Project
+	usage map[string]int // slots in use per pool, including this decision's dispatches
+	// demand is the project's unmet deadline need per pool: slots its
+	// jobs need to reach their required rate and could start now.
+	demand map[string]int
 }
 
 type jobCtx struct {
@@ -42,20 +44,23 @@ type jobCtx struct {
 	next  int // cursor into Runnable
 	slots int // default slots per unit
 	// running is slots running before this decision plus those released
-	// by it; incoming is slots being freed for this job by earlier
-	// preemptions.
-	running, incoming int
-	proj              *projState
+	// by it; incoming is slots being freed for this job by preemptions;
+	// outgoing is slots of this job's own units being stopped.
+	running, incoming, outgoing int
+	proj                        *projState
 
 	hasDeadline, hasRate bool
 	T, W, W90, tpath     float64 // seconds, slot-seconds, slot-seconds, seconds
 	R, Rb, A             float64
 	slack                time.Duration
-	feasible             bool
+	feasible             bool // finishes in time with all attainable slots (DESIGN 9.9)
+	planOK               bool // on time in the plan; the deadline tier serves these first
 	share                float64
 	atRisk               bool
 	lateBy               time.Duration
-	group                int // 0 feasible with need, 1 infeasible with need, 2 other
+	finish50, finish90   float64 // planned finish, seconds from now
+	horizon, deficit     float64 // what a burst must cover: slot-seconds short by horizon
+	group                int     // 0 feasible with need, 1 infeasible with need, 2 other
 	burst                *BurstSuggestion
 }
 
@@ -107,14 +112,6 @@ func newAlloc(s *Snapshot, st *State, cfg Config, quotas bool) *alloc {
 		for _, ru := range j.RunningUnits {
 			running[ru.ID] = true
 		}
-		if !j.Hold && !j.HoldStop {
-			left := j.RunnableTotal * jc.slots
-			for _, pool := range j.Pools {
-				if ps := a.pools[pool]; ps != nil {
-					pr.demand[pool] += min(left, ps.p.Slots)
-				}
-			}
-		}
 		a.jobs = append(a.jobs, jc)
 		a.byID[j.ID] = jc
 	}
@@ -127,8 +124,30 @@ func newAlloc(s *Snapshot, st *State, cfg Config, quotas bool) *alloc {
 		if jc := a.byID[pp.forJob]; jc != nil {
 			jc.incoming += pp.slots
 		}
+		if jc := a.byID[pp.job]; jc != nil {
+			jc.outgoing += pp.slots
+		}
 	}
 	return a
+}
+
+// needDemand fills each project's demand from its jobs' deadline need. It
+// runs after objectives, because need depends on R.
+func (a *alloc) needDemand() {
+	for _, jc := range a.jobs {
+		if jc.j.Hold || jc.j.HoldStop || jc.R <= 0 {
+			continue
+		}
+		need := min(jc.needSlots(jc.R), jc.j.RunnableTotal*jc.slots)
+		if need <= 0 {
+			continue
+		}
+		for _, pool := range jc.j.Pools {
+			if ps := a.pools[pool]; ps != nil {
+				jc.proj.demand[pool] += min(need, ps.p.Slots)
+			}
+		}
+	}
 }
 
 func (a *alloc) quota(proj, pool string) Quota {
@@ -158,8 +177,11 @@ func (a *alloc) admit(pr *projState, ps *poolState, k int, ownOnly bool) bool {
 	if q.BorrowingLimit >= 0 && use+k-q.Nominal > q.BorrowingLimit {
 		return false
 	}
-	// Borrowing: only capacity that no other project's unmet nominal
-	// demand is waiting for may be lent.
+	// Borrowing: capacity another project needs, within its nominal, for
+	// jobs below their required rate is not lent. Kueue lends all unused
+	// quota and reclaims it later by preemption; holding back only what is
+	// needed for deadlines now avoids lending slots that would be taken
+	// back within minutes, without holding quota for work that has slack.
 	reserve := 0
 	for _, other := range a.projects {
 		if other == pr {

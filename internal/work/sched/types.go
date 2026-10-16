@@ -162,7 +162,7 @@ const (
 	TierNeed       Tier = "deadline-need"
 	TierBoost      Tier = "boost"
 	TierInfo       Tier = "information"
-	TierFair       Tier = "fair-share"
+	TierFair       Tier = "surplus"
 	TierBaseline   Tier = "baseline"
 )
 
@@ -252,14 +252,33 @@ type Config struct {
 	PreemptWindow         time.Duration
 	PreemptPerWindow      int
 	MaxPreemptionsPerUnit int
+	// MaxLostWork: a unit whose preemption would throw away more than
+	// this (time since its last checkpoint plus restore cost) is not a
+	// victim. Zero means no cap. A unit asked to yield at its next
+	// checkpoint loses only its restore cost.
+	MaxLostWork time.Duration
 	// ScaleDownAfter: a burst request shrinks only after idle slots have
 	// persisted this long.
 	ScaleDownAfter time.Duration
 	// Burst enables capacity requests.
 	Burst bool
-	// MinRemaining floors T when computing R for a job at or past its
-	// deadline.
+	// MinRemaining floors the time left when computing R for a job at or
+	// near its deadline.
 	MinRemaining time.Duration
+	// TailAware computes required slots as R = W90/(T - t_path) instead of
+	// DESIGN.md's R = W90/T. List scheduling on R slots finishes within
+	// W/R + (longest unit), so W90/T slots leave no room for the last wave
+	// of units: a job given exactly W90/T starts its longest units too
+	// late. Default true; false is the literal formula.
+	TailAware bool
+	// Planner chooses how R and shares are computed (plan.go).
+	Planner Planner
+	// NoInfoTier skips the information tier (for ablation).
+	NoInfoTier bool
+	// Surplus chooses how the fourth tier hands out what is left, and
+	// SlackBand is the width of a slack tie band under SurplusSlack.
+	Surplus   Surplus
+	SlackBand time.Duration
 	// RateSlack is the slack reported for a throughput job at or above
 	// its rate.
 	RateSlack time.Duration
@@ -282,9 +301,14 @@ func DefaultConfig() Config {
 		PreemptWindow:         10 * time.Minute,
 		PreemptPerWindow:      8,
 		MaxPreemptionsPerUnit: 2,
+		MaxLostWork:           15 * time.Minute,
 		ScaleDownAfter:        10 * time.Minute,
 		Burst:                 true,
 		MinRemaining:          5 * time.Minute,
+		TailAware:             true,
+		Planner:               PlanFluid,
+		Surplus:               SurplusSlack,
+		SlackBand:             time.Hour,
 		RateSlack:             24 * time.Hour,
 		WranglerEvery:         2 * time.Hour,
 		WranglerMargin:        time.Hour,
@@ -329,6 +353,14 @@ func (st *State) init() {
 
 // Bumped reports whether the Manual baseline's wrangler has bumped a job.
 func (st *State) Bumped(job string) bool { return st.manual.bumped[job] }
+
+// Surplus names a rule for the fourth (fair-share) tier.
+type Surplus string
+
+const (
+	SurplusSlack     Surplus = "least-slack"
+	SurplusFairShare Surplus = "fair-share"
+)
 
 // Policy is the signature shared by Decide and the baselines.
 type Policy func(s Snapshot, st *State, cfg Config) Decisions

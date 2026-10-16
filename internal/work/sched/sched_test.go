@@ -55,24 +55,24 @@ func count(d Decisions, jobID string) int {
 }
 
 func TestNeedTierFillsMostBehindFirst(t *testing.T) {
-	// a needs 40 slot-hours in 10h (R=4), b 20 in 10h (R=2). With 5 free
-	// slots both get their need before anyone gets more: 4/4 and 1/2 is
-	// impossible; water-filling by running/R gives a 3 or 4 and b 1 or 2,
-	// never a starved b.
+	// a needs 40 slot-hours in 10h, b 20: 60 slot-hours of work on 5 slots
+	// (50 slot-hours by the deadline). Planned together, one job must be
+	// late; Moore-Hodgson keeps b (dropping the larger a), so b gets its
+	// 2 slots and a the remaining 3, and only a is reported at risk.
 	s := Snapshot{Now: t0, Pools: []Pool{cpu(5)}, Jobs: []Job{
 		job("a", "p", 100, 40, 10*time.Hour),
 		job("b", "p", 100, 20, 10*time.Hour),
 	}}
 	d := Decide(s, &State{}, DefaultConfig())
-	na, nb := count(d, "a"), count(d, "b")
-	if na+nb != 5 || nb < 1 || na < 3 {
-		t.Fatalf("a=%d b=%d", na, nb)
+	if count(d, "a") != 3 || count(d, "b") != 2 {
+		t.Fatalf("a=%d b=%d", count(d, "a"), count(d, "b"))
 	}
-	if d.Jobs["a"].Required != 4 || d.Jobs["b"].Required != 2 {
-		t.Fatalf("R: %+v %+v", d.Jobs["a"], d.Jobs["b"])
+	if !d.Jobs["a"].AtRisk || d.Jobs["b"].AtRisk || d.Jobs["b"].Required != 2 {
+		t.Fatalf("%+v %+v", d.Jobs["a"], d.Jobs["b"])
 	}
-	// With more room every job gets its need in the need tier and the rest
-	// goes by fair share and least slack.
+	// With 20 slots both fit. Same deadline: the fluid plan's rate
+	// (60/10 = 6) is shared in proportion to work, 4 and 2, in the need
+	// tier; the rest goes by fair share and least slack.
 	s.Pools[0].Slots = 20
 	d = Decide(s, &State{}, DefaultConfig())
 	need := map[string]int{}
@@ -83,6 +83,35 @@ func TestNeedTierFillsMostBehindFirst(t *testing.T) {
 	}
 	if need["a"] != 4 || need["b"] != 2 || count(d, "a")+count(d, "b") != 20 {
 		t.Fatalf("need %v total a=%d b=%d", need, count(d, "a"), count(d, "b"))
+	}
+	// The literal DESIGN formula: each job's own W90/T.
+	cfg := DefaultConfig()
+	cfg.Planner, cfg.TailAware = PlanPerJob, false
+	s.Pools[0].Slots = 5
+	d = Decide(s, &State{}, cfg)
+	if d.Jobs["a"].Required != 4 || d.Jobs["b"].Required != 2 || count(d, "a")+count(d, "b") != 5 || count(d, "b") < 1 {
+		t.Fatalf("per-job: a=%d b=%d %+v", count(d, "a"), count(d, "b"), d.Jobs)
+	}
+}
+
+func TestFluidPlanDefersLaterDeadlines(t *testing.T) {
+	// urgent: 30 slot-hours due in 5h; later: 60 slot-hours due in 48h.
+	// On 10 slots the per-job rule would give later 60/48 = 1.25 slots now
+	// and urgent 6; the fluid plan gives urgent what the group's rate
+	// allows (rho = max(30/5, 90/48) = 6) and later nothing yet, because
+	// it is on time once urgent is done.
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{
+		job("urgent", "p", 100, 30, 5*time.Hour),
+		job("later", "p", 100, 60, 48*time.Hour),
+	}}
+	d := Decide(s, &State{}, DefaultConfig())
+	if d.Jobs["urgent"].Required != 6 || d.Jobs["later"].Required != 0 || d.Jobs["later"].AtRisk {
+		t.Fatalf("%+v %+v", d.Jobs["urgent"], d.Jobs["later"])
+	}
+	// Both are planned to finish on time: urgent at 30/10 = 3h, later at
+	// 90/10 = 9h.
+	if got := d.Jobs["later"].ETA90.Sub(t0); got != 9*time.Hour {
+		t.Fatalf("later ETA %v", got)
 	}
 }
 
@@ -148,10 +177,10 @@ func TestQuotaLendingAndBorrowingLimit(t *testing.T) {
 	if n := count(Decide(s, &State{}, DefaultConfig()), "p1"); n != 8 {
 		t.Fatalf("borrowing limit: %d", n)
 	}
-	// q has pending work: its nominal is not lent even though p's job is
-	// more behind.
+	// q has a job below its required rate (R=4): its nominal is not lent
+	// even though p's job is more behind.
 	s.Projects = quotas(-1)
-	s.Jobs = append(s.Jobs, job("q1", "q", 100, 1, 10*time.Hour))
+	s.Jobs = append(s.Jobs, job("q1", "q", 100, 40, 10*time.Hour))
 	d := Decide(s, &State{}, DefaultConfig())
 	if count(d, "q1") != 4 || count(d, "p1") != 6 {
 		t.Fatalf("guarantee: p1=%d q1=%d", count(d, "p1"), count(d, "q1"))
@@ -161,7 +190,7 @@ func TestQuotaLendingAndBorrowingLimit(t *testing.T) {
 func runningUnits(job, pool string, n int, started time.Time) ([]RunningUnit, map[string]int) {
 	var rus []RunningUnit
 	for i := 0; i < n; i++ {
-		rus = append(rus, RunningUnit{ID: fmt.Sprintf("%s/r%d", job, i), Pool: pool, Slots: 1, Started: started.Add(time.Duration(i) * time.Minute)})
+		rus = append(rus, RunningUnit{ID: fmt.Sprintf("%s/r%d", job, i), Pool: pool, Slots: 1, Started: started.Add(time.Duration(i) * 10 * time.Second)})
 	}
 	return rus, map[string]int{pool: n}
 }
@@ -173,8 +202,8 @@ func TestReclaimPreemptsBorrowersByLeastLostWork(t *testing.T) {
 	p1 := job("p1", "p", 0, 1, 72*time.Hour)
 	p1.RunnableTotal = 0
 	p1.Runnable = nil
-	p1.RunningUnits, p1.Running = runningUnits("p1", "cpu", 10, t0.Add(-time.Hour))
-	q1 := job("q1", "q", 50, 5, 10*time.Hour)
+	p1.RunningUnits, p1.Running = runningUnits("p1", "cpu", 10, t0.Add(-10*time.Minute))
+	q1 := job("q1", "q", 50, 40, 10*time.Hour) // R=4
 	s := Snapshot{Now: t0, Pools: []Pool{{Name: "cpu", Slots: 10, Used: 10}},
 		Projects: []Project{
 			{Name: "p", Quotas: map[string]Quota{"cpu": {Nominal: 6, BorrowingLimit: -1}}},
@@ -200,6 +229,17 @@ func TestReclaimPreemptsBorrowersByLeastLostWork(t *testing.T) {
 	if d3 := Decide(s, &State{}, DefaultConfig()); len(d3.Preempt) != 0 {
 		t.Fatalf("preempted a job without slack: %+v", d3.Preempt)
 	}
+	// Units that would lose more than MaxLostWork are protected.
+	s.Jobs[0].Deadline = t0.Add(72 * time.Hour)
+	for i := range s.Jobs[0].RunningUnits {
+		s.Jobs[0].RunningUnits[i].Started = t0.Add(-time.Hour)
+	}
+	if d := Decide(s, &State{}, DefaultConfig()); len(d.Preempt) != 0 {
+		t.Fatalf("preempted an hour of work: %+v", d.Preempt)
+	}
+	for i := range s.Jobs[0].RunningUnits {
+		s.Jobs[0].RunningUnits[i].Started = t0.Add(-10 * time.Minute)
+	}
 	// Units already preempted twice are protected.
 	s.Jobs[0].Deadline = t0.Add(72 * time.Hour)
 	for i := range s.Jobs[0].RunningUnits {
@@ -213,8 +253,8 @@ func TestReclaimPreemptsBorrowersByLeastLostWork(t *testing.T) {
 func TestPreemptionRateLimit(t *testing.T) {
 	p1 := job("p1", "p", 0, 1, 72*time.Hour)
 	p1.Runnable, p1.RunnableTotal = nil, 0
-	p1.RunningUnits, p1.Running = runningUnits("p1", "cpu", 40, t0.Add(-time.Hour))
-	q1 := job("q1", "q", 100, 50, 10*time.Hour)
+	p1.RunningUnits, p1.Running = runningUnits("p1", "cpu", 40, t0.Add(-10*time.Minute))
+	q1 := job("q1", "q", 100, 200, 10*time.Hour) // R=20
 	s := Snapshot{Now: t0, Pools: []Pool{{Name: "cpu", Slots: 40, Used: 40}},
 		Projects: []Project{
 			{Name: "p", Quotas: map[string]Quota{"cpu": {Nominal: 20, BorrowingLimit: -1}}},
@@ -238,6 +278,9 @@ func TestPreemptionRateLimit(t *testing.T) {
 		t.Fatalf("same window: %d", len(d.Preempt))
 	}
 	s.Now = t0.Add(cfg.PreemptWindow + time.Minute)
+	for i := range s.Jobs[0].RunningUnits {
+		s.Jobs[0].RunningUnits[i].Started = s.Now.Add(-5 * time.Minute)
+	}
 	if d := Decide(s, st, cfg); len(d.Preempt) != cfg.PreemptPerWindow {
 		t.Fatalf("next window: %d", len(d.Preempt))
 	}
@@ -343,16 +386,17 @@ func TestHoldAndBoost(t *testing.T) {
 			boost++
 		}
 	}
-	// b: need 2, boost +1 inside its nominal 3; the 4th would borrow q's
-	// nominal, which q's pending work protects.
-	if count(d, "b") != 3 || count(d, "c") != 3 || boost != 1 || d.Jobs["b"].Required != 4 {
+	// b: need 2, boost +1 inside its nominal 3, then +1 borrowed from q,
+	// whose job already has its required 2 slots.
+	if count(d, "b") != 4 || count(d, "c") != 2 || boost != 2 || d.Jobs["b"].Required != 4 {
 		t.Fatalf("b=%d c=%d boost=%d %+v", count(d, "b"), count(d, "c"), boost, d.Jobs["b"])
 	}
 }
 
 func TestInformationTier(t *testing.T) {
-	// Both jobs are satisfied by need; the leftover goes first to the
-	// generators of g, then to fair share.
+	// a is planned first (earlier deadline) and g is on time after it, so
+	// only a has a need now; the leftover goes first to g's generators,
+	// then to fair share.
 	a := job("a", "p", 100, 10, 10*time.Hour) // R=1
 	g := job("g", "p", 100, 10, 20*time.Hour) // R=0.5
 	g.Unevaluated = 3
@@ -365,7 +409,7 @@ func TestInformationTier(t *testing.T) {
 	for _, x := range d.Dispatch {
 		tiers = append(tiers, x.Job+":"+string(x.Tier))
 	}
-	want := []string{"a:deadline-need", "g:deadline-need", "g:information", "g:information", "a:fair-share", "a:fair-share"}
+	want := []string{"a:deadline-need", "g:information", "g:information", "g:information", "a:surplus", "a:surplus"}
 	if !reflect.DeepEqual(tiers, want) {
 		t.Fatalf("%v", tiers)
 	}
