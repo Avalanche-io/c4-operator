@@ -7,6 +7,9 @@
 //	c4e2e verify    --expect ID DIR                   fail unless DIR is that view
 //	c4e2e render    --pod NAME [--shot sh010] DIR     a deterministic render into DIR
 //	c4e2e read      DIR                               read every file, print bytes and time
+//	c4e2e expect    --src DIR --include a/,b/ [--render POD] [--add-frames N --frames-dir D --pod P]
+//	                                                  view ID of a subset, optionally after a render
+//	c4e2e add-frames --count N --dir REL --pod NAME DIR  add N new frames (keyed by pod) under DIR/REL
 //
 // Content is deterministic pseudo-random bytes keyed by name, so files that
 // share a key are byte-identical, and the host can recompute what any pod
@@ -23,6 +26,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/view"
@@ -34,12 +38,15 @@ func main() {
 		os.Exit(2)
 	}
 	cmds := map[string]func([]string) error{
-		"gen-show": genShow,
-		"gen-shot": genShot,
-		"tree-id":  treeID,
-		"verify":   verify,
-		"render":   render,
-		"read":     readAll,
+		"gen-show":   genShow,
+		"gen-shot":   genShot,
+		"tree-id":    treeID,
+		"verify":     verify,
+		"render":     render,
+		"read":       readAll,
+		"expect":     expect,
+		"add-frames": addFrames,
+		"hold":       hold,
 	}
 	run, ok := cmds[os.Args[1]]
 	if !ok {
@@ -285,5 +292,137 @@ func readAll(args []string) error {
 		return err
 	}
 	fmt.Printf("read %d bytes in %s\n", total, time.Since(start).Round(time.Millisecond))
+	return nil
+}
+
+// expect builds the subset of src an include list selects (hardlinks, so
+// no bytes are copied, except files a render would change in place, which
+// are copied), optionally applies a render or adds frames exactly as a
+// pod would, and prints the view ID. This is the host's independent
+// computation of what a pod should see and what its capture should be.
+func expect(args []string) error {
+	fs := flag.NewFlagSet("expect", flag.ExitOnError)
+	src := fs.String("src", "", "source directory")
+	include := fs.String("include", "", "comma-separated include patterns")
+	renderPod := fs.String("render", "", "apply c4e2e render for this pod")
+	frames := fs.Int("add-frames", 0, "apply c4e2e add-frames with this count")
+	framesDir := fs.String("frames-dir", "", "add-frames directory")
+	pod := fs.String("pod", "", "add-frames pod name")
+	fs.Parse(args)
+	var pats []string
+	if *include != "" {
+		pats = strings.Split(*include, ",")
+	}
+	f, err := view.NewFilter(pats)
+	if err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp(filepath.Dir(filepath.Clean(*src)), ".expect-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	err = filepath.Walk(*src, func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
+			return err
+		}
+		rel, _ := filepath.Rel(*src, p)
+		if !f.Includes(filepath.ToSlash(rel)) {
+			return nil
+		}
+		dst := filepath.Join(tmp, rel)
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			t, err := os.Readlink(p)
+			if err != nil {
+				return err
+			}
+			return os.Symlink(t, dst)
+		}
+		if strings.HasSuffix(rel, "notes.txt") {
+			data, err := os.ReadFile(p)
+			if err != nil {
+				return err
+			}
+			return os.WriteFile(dst, data, info.Mode().Perm())
+		}
+		return os.Link(p, dst)
+	})
+	if err != nil {
+		return err
+	}
+	if *renderPod != "" {
+		if err := render([]string{"--pod", *renderPod, tmp}); err != nil {
+			return err
+		}
+	}
+	if *frames > 0 {
+		if err := addFrames([]string{"--count", fmt.Sprint(*frames), "--dir", *framesDir, "--pod", *pod, tmp}); err != nil {
+			return err
+		}
+	}
+	id, err := view.ScanID(tmp)
+	if err != nil {
+		return err
+	}
+	fmt.Println(id)
+	return nil
+}
+
+// addFrames writes count new frames into DIR/REL, numbered after the
+// highest existing frame and keyed by the pod name.
+func addFrames(args []string) error {
+	fs := flag.NewFlagSet("add-frames", flag.ExitOnError)
+	count := fs.Int("count", 3, "frames to add")
+	rel := fs.String("dir", "", "directory under DIR")
+	pod := fs.String("pod", os.Getenv("POD_NAME"), "keys the new frames")
+	kib := fs.Int("frame-kib", 4096, "frame size in KiB")
+	fs.Parse(args)
+	if fs.NArg() != 1 || *rel == "" {
+		return errors.New("usage: c4e2e add-frames --count N --dir REL --pod NAME DIR")
+	}
+	dir := filepath.Join(fs.Arg(0), filepath.FromSlash(*rel))
+	if err := os.MkdirAll(dir, 0o777); err != nil {
+		return err
+	}
+	ents, err := os.ReadDir(dir)
+	if err != nil {
+		return err
+	}
+	prefix := filepath.Base(filepath.Dir(dir))
+	last := 0
+	for _, e := range ents {
+		var n int
+		if _, err := fmt.Sscanf(strings.TrimPrefix(e.Name(), prefix+"."), "%d.exr", &n); err == nil && n > last {
+			last = n
+		}
+	}
+	for i := 1; i <= *count; i++ {
+		name := fmt.Sprintf("%s.%04d.exr", prefix, last+i)
+		if err := writeKeyed(filepath.Join(dir, name), *pod+"/"+name, int64(*kib)<<10); err != nil {
+			return err
+		}
+	}
+	id, err := view.ScanID(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	fmt.Printf("output %s\n", id)
+	return nil
+}
+
+// hold sleeps, so a pod stays mounted while the e2e inspects the node.
+func hold(args []string) error {
+	d := 30 * time.Second
+	if len(args) == 1 {
+		v, err := time.ParseDuration(args[0])
+		if err != nil {
+			return err
+		}
+		d = v
+	}
+	time.Sleep(d)
 	return nil
 }

@@ -85,7 +85,7 @@ func (fe *Fetcher) Fill(ctx context.Context, f *fill.Flight, project string, id 
 			case errors.Is(err, ErrBusy):
 			case errors.Is(err, errCorrupt):
 				return err
-			case err != nil:
+			case Unreachable(err):
 				fe.Breakers.Fail(s.Name())
 			}
 			if missing {

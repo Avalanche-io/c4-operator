@@ -20,6 +20,9 @@ spec:
   tokenRequests:
   - audience: c4.avalanche.io
     expirationSeconds: 3600
+  # Pass the token in the request's secrets field rather than in volume
+  # attributes, so it is never logged with them.
+  serviceAccountTokenInSecrets: true
   requiresRepublish: false
 ---
 apiVersion: apps/v1

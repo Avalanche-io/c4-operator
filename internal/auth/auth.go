@@ -155,10 +155,15 @@ type PodClaims struct {
 	Name, Namespace, UID, ServiceAccount string
 }
 
-// VerifyPod checks a CSI volume context: the pod's token must validate for
-// the pod audience and name the same namespace, pod and UID that kubelet
-// put in the volume context.
-func (r *Reviewer) VerifyPod(ctx context.Context, volumeContext map[string]string) (*Identity, error) {
+// TokensKey is where kubelet puts service-account tokens for a CSI
+// driver: in the request's secrets with serviceAccountTokenInSecrets, or
+// in the volume context without it.
+const TokensKey = "csi.storage.k8s.io/serviceAccount.tokens"
+
+// VerifyPod checks a CSI request: the pod's token must validate for the
+// pod audience and name the same namespace, pod and UID that kubelet put
+// in the volume context.
+func (r *Reviewer) VerifyPod(ctx context.Context, volumeContext, secrets map[string]string) (*Identity, error) {
 	claims := PodClaims{
 		Name:           volumeContext["csi.storage.k8s.io/pod.name"],
 		Namespace:      volumeContext["csi.storage.k8s.io/pod.namespace"],
@@ -168,7 +173,11 @@ func (r *Reviewer) VerifyPod(ctx context.Context, volumeContext map[string]strin
 	if claims.Name == "" || claims.Namespace == "" || claims.UID == "" {
 		return nil, errors.New("volume context lacks pod information; the CSIDriver needs podInfoOnMount: true")
 	}
-	token, err := tokenFor(volumeContext["csi.storage.k8s.io/serviceAccount.tokens"], AudiencePod)
+	raw := secrets[TokensKey]
+	if raw == "" {
+		raw = volumeContext[TokensKey]
+	}
+	token, err := tokenFor(raw, AudiencePod)
 	if err != nil {
 		return nil, err
 	}

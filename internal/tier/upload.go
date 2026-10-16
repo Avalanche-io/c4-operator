@@ -69,7 +69,7 @@ func (u *Uploader) put(ctx context.Context, project string, id c4.ID, open func(
 			if errors.Is(err, errRejected) {
 				return err
 			}
-			if !errors.Is(err, ErrBusy) {
+			if Unreachable(err) {
 				u.Breakers.Fail(c.Name())
 			}
 		}
@@ -80,7 +80,7 @@ func (u *Uploader) put(ctx context.Context, project string, id c4.ID, open func(
 		}
 	}
 	if last == nil {
-		last = ErrNoRoute
+		last = fmt.Errorf("%w: every regional replica was unreachable", ErrNoRoute)
 	}
 	return fmt.Errorf("upload %s: %w", id, last)
 }
@@ -127,7 +127,7 @@ func (u *Uploader) putOnce(ctx context.Context, c *HTTPSource, project string, i
 	case resp.StatusCode == http.StatusUnprocessableEntity, resp.StatusCode == http.StatusBadRequest:
 		return fmt.Errorf("%w: %s", errRejected, strings.TrimSpace(string(msg)))
 	}
-	return fmt.Errorf("PUT %s at %s: status %d: %s", id, c.Name(), resp.StatusCode, strings.TrimSpace(string(msg)))
+	return &StatusError{Source: c.Name(), Code: resp.StatusCode, Msg: "PUT " + id.String() + ": " + strings.TrimSpace(string(msg))}
 }
 
 // TokenFile reads a projected service-account token from disk, rereading

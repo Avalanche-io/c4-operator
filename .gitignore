@@ -1,5 +1,7 @@
 bin/
 .worktrees/
-hack/e2e/out/
+hack/e2e/out/*
+!hack/e2e/out/results.md
+!hack/e2e/out/*.csv
 *.test
 cover.out

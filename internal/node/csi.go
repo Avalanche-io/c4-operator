@@ -77,6 +77,7 @@ func (s *csiServer) NodePublishVolume(ctx context.Context, req *csi.NodePublishV
 		Target:   req.GetTargetPath(),
 		ReadOnly: req.GetReadonly(),
 		Context:  req.GetVolumeContext(),
+		Secrets:  req.GetSecrets(),
 	})
 	if err != nil {
 		s.d.Log.Error(err, "publish", "volume", req.GetVolumeId(), "pod", req.GetVolumeContext()["csi.storage.k8s.io/pod.namespace"]+"/"+req.GetVolumeContext()["csi.storage.k8s.io/pod.name"])

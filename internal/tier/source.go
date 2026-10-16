@@ -65,6 +65,32 @@ type Source interface {
 	Get(ctx context.Context, project string, id c4.ID, offset int64) (body io.ReadCloser, total, start int64, err error)
 }
 
+// StatusError is an HTTP answer a tier did not expect. The peer is up and
+// answered, so it does not open a circuit breaker.
+type StatusError struct {
+	Source string
+	Code   int
+	Msg    string
+}
+
+func (e *StatusError) Error() string {
+	return fmt.Sprintf("%s: status %d: %s", e.Source, e.Code, e.Msg)
+}
+
+// Unreachable reports whether err means a source could not be reached or
+// dropped the connection, as opposed to answering with an error. Only
+// these open circuit breakers.
+func Unreachable(err error) bool {
+	if err == nil {
+		return false
+	}
+	var se *StatusError
+	if errors.As(err, &se) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrBusy) || errors.Is(err, ErrDenied) {
+		return false
+	}
+	return true
+}
+
 // TokenFunc returns the bearer token to present upstream.
 type TokenFunc func() string
 
@@ -131,7 +157,7 @@ func (s *HTTPSource) Get(ctx context.Context, project string, id c4.ID, offset i
 	case http.StatusUnauthorized, http.StatusForbidden:
 		return nil, 0, 0, fmt.Errorf("%w: %s", ErrDenied, string(body))
 	}
-	return nil, 0, 0, fmt.Errorf("%s: status %d: %s", s.SourceName, resp.StatusCode, string(body))
+	return nil, 0, 0, &StatusError{Source: s.SourceName, Code: resp.StatusCode, Msg: string(body)}
 }
 
 func parseContentRange(v string) (start, total int64, err error) {

@@ -52,6 +52,7 @@ type PublishRequest struct {
 	Target   string
 	ReadOnly bool
 	Context  map[string]string
+	Secrets  map[string]string
 }
 
 func (d *Daemon) volumePath(id string) string {
@@ -133,7 +134,7 @@ func (d *Daemon) Publish(ctx context.Context, req PublishRequest) (err error) {
 	podName := req.Context["csi.storage.k8s.io/pod.name"]
 	podUID := req.Context["csi.storage.k8s.io/pod.uid"]
 	if d.Reviewer != nil {
-		id, err := d.Reviewer.VerifyPod(ctx, req.Context)
+		id, err := d.Reviewer.VerifyPod(ctx, req.Context, req.Secrets)
 		if err != nil {
 			return fmt.Errorf("pod identity: %w", err)
 		}
@@ -408,9 +409,10 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 		metrics.NodeCaptureB.WithLabelValues(p.Name).Add(float64(res.Bytes))
 	}
 	metrics.NodeCaptureObj.WithLabelValues(p.Name, "reused").Add(float64(res.Reused))
+	_, changeset, _ := res.AnnotationValues()
 	d.Log.Info("captured", "pod", vol.Namespace+"/"+vol.Pod, "output", res.Output.String(),
-		"changeset", res.Changeset.String(), "added", res.Added, "modified", res.Modified, "deleted", res.Deleted,
-		"uploaded", res.Uploaded, "seconds", time.Since(start).Seconds())
+		"changeset", changeset, "added", res.Added, "modified", res.Modified, "deleted", res.Deleted,
+		"uploaded", res.Uploaded, "reused", res.Reused, "seconds", time.Since(start).Seconds())
 	return d.annotate(ctx, vol, res)
 }
 
