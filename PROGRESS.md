@@ -2,14 +2,14 @@
 
 ## Branches
 
-| Branch         | Opened     | Closed     | Purpose                                                                                                                                                |
-| -------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `main`         | 2026-10-15 |            | Empty until the work is reviewed.                                                                                                                      |
-| `mvp`          | 2026-10-15 |            | Working MVP: CRD, controller, node agent, webhook, envtest, single-node kind e2e. Not merged.                                                          |
-| `v2`           | 2026-10-15 |            | The v2 redesign (DESIGN.md): views and records, tiers, overlay and CSI, isolation, work system, provenance.                                            |
-| `v2-sim`       | 2026-10-16 | 2026-10-16 | Scheduling policy core (`internal/work`) and the simulation harness (`hack/sim`). Rebased onto `v2` and fast-forwarded; worktree removed.              |
-| `v2-hud`       | 2026-10-16 | 2026-10-16 | The HUD frontend (`internal/hud/web`), its API contract and the mock backend (`hack/hudmock`). Rebased onto `v2` and fast-forwarded; worktree removed. |
-| `v2-gitimport` | 2026-10-16 |            | Worktree `.worktrees/gitimport`: the c4git-aware importer (P4). Merges into `v2`.                                                                      |
+| Branch         | Opened     | Closed     | Purpose                                                                                                                                                                                                             |
+| -------------- | ---------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `main`         | 2026-10-15 |            | Empty until the work is reviewed.                                                                                                                                                                                   |
+| `mvp`          | 2026-10-15 |            | Working MVP: CRD, controller, node agent, webhook, envtest, single-node kind e2e. Not merged.                                                                                                                       |
+| `v2`           | 2026-10-15 |            | The v2 redesign (DESIGN.md): views and records, tiers, overlay and CSI, isolation, work system, provenance.                                                                                                         |
+| `v2-sim`       | 2026-10-16 | 2026-10-16 | Scheduling policy core (`internal/work`) and the simulation harness (`hack/sim`). Rebased onto `v2` and fast-forwarded; worktree removed.                                                                           |
+| `v2-hud`       | 2026-10-16 | 2026-10-16 | The HUD frontend (`internal/hud/web`), its API contract and the mock backend (`hack/hudmock`). Rebased onto `v2` and fast-forwarded; worktree removed.                                                              |
+| `v2-gitimport` | 2026-10-16 | 2026-10-16 | The c4git-aware importer (`internal/gitimport`, `import-git`), push-driven import, per-branch chains, the synthetic monorepo harness (`hack/e2e/monorepo`). Rebased onto `v2` and fast-forwarded; worktree removed. |
 
 Worktrees live under `.worktrees/` (ignored by git). `.worktrees/c4` is a symlink
 to `../c4` so the `replace => ../c4` in each worktree's `go.mod` resolves.
