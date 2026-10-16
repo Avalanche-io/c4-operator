@@ -5,7 +5,9 @@
 //	c4-operator regional   regional cache tier (Deployment)
 //	c4-operator ingest     hash a directory into a project's store
 //	c4-operator tree-id    view ID of a directory
+//	c4-operator import-git import a git history as views, changesets and chains
 //	c4-operator mcp        the farm's MCP server, over stdio or Streamable HTTP
+//	c4-operator keygen     an Ed25519 key for signing task records
 package main
 
 import (
@@ -37,6 +39,7 @@ commands:
   regional   run a regional cache replica
   ingest     hash a directory into a project's store and print its view ID
   tree-id    print the view ID of a directory
+  import-git import a git repository's first-parent history into a store
   mcp        serve the farm's tools to agents (MCP, stdio or HTTP)
   keygen     make an Ed25519 key for signing task records
 `
@@ -48,13 +51,14 @@ func main() {
 	}
 	cmd, args := os.Args[1], os.Args[2:]
 	commands := map[string]func([]string) error{
-		"manager":  runManager,
-		"node":     runNode,
-		"regional": runRegional,
-		"ingest":   runIngest,
-		"tree-id":  runTreeID,
-		"mcp":      runMCP,
-		"keygen":   runKeygen,
+		"manager":    runManager,
+		"node":       runNode,
+		"regional":   runRegional,
+		"ingest":     runIngest,
+		"tree-id":    runTreeID,
+		"import-git": runImportGit,
+		"mcp":        runMCP,
+		"keygen":     runKeygen,
 	}
 	run, ok := commands[cmd]
 	if !ok {

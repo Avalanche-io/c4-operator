@@ -402,7 +402,11 @@ func TestParsePointer(t *testing.T) {
 }
 
 func openShardedForTest(dirs []string) (*ShardedSink, error) {
-	s, err := storeurl.OpenSharded(dirs, storeurl.Credentials{})
+	var specs []storeurl.Spec
+	for _, d := range dirs {
+		specs = append(specs, storeurl.ParseSpec(d))
+	}
+	s, err := storeurl.OpenSharded(specs, storeurl.Credentials{})
 	if err != nil {
 		return nil, err
 	}

@@ -34,6 +34,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Avalanche-io/c4"
@@ -69,6 +70,9 @@ type Options struct {
 	// default.
 	Filter string
 
+	// Jobs bounds concurrent sink writes; 8 by default.
+	Jobs int
+
 	// Progress is called after each commit.
 	Progress func(Commit)
 	// Warn receives warnings (skipped submodules, missing c4git objects).
@@ -103,17 +107,25 @@ type Commit struct {
 	// C4GitObjects counts distinct c4git objects this commit's changes
 	// referenced, each used by ID without rehashing.
 	C4GitObjects int `json:"c4gitObjects"`
+	// C4GitBytes is the content size of the c4git objects this commit
+	// resolved for the first time in the import.
+	C4GitBytes int64 `json:"c4gitBytes"`
 	// C4GitMissing lists c4git-managed paths whose object is in neither
 	// the c4git store nor the project store.
 	C4GitMissing []string `json:"c4gitMissing,omitempty"`
 	Submodules   int      `json:"submodules,omitempty"`
 
-	BlobsRead      int `json:"blobsRead"`      // git blobs read through cat-file
-	BlobsHashed    int `json:"blobsHashed"`    // of those, hashed as content
+	BlobsRead int `json:"blobsRead"` // git blobs read through cat-file
+	// Pointers counts blobs read that are c4git pointers (or shaped like
+	// one); every other blob read is content, hashed here once.
+	Pointers       int `json:"pointers"`
 	RecordsRead    int `json:"recordsRead"`    // parent records Apply read
 	RecordsWritten int `json:"recordsWritten"` // new records of this view
 
 	Millis float64 `json:"ms"`
+	// SinkMillis is the time spent in sink writes, summed over the
+	// concurrent uploads.
+	SinkMillis float64 `json:"sinkMs"`
 }
 
 // Summary is the result of an import.
@@ -156,6 +168,7 @@ type importer struct {
 	// a .gitattributes file clears it.
 	managed map[string]bool
 	records *recordCache
+	up      *uploads
 
 	cur *Commit
 	sum *Summary
@@ -169,6 +182,9 @@ func Run(ctx context.Context, opts Options) (*Summary, error) {
 	}
 	if opts.Filter == "" {
 		opts.Filter = "c4"
+	}
+	if opts.Jobs <= 0 {
+		opts.Jobs = 8
 	}
 	if opts.Sink == nil {
 		return nil, errors.New("no sink")
@@ -209,6 +225,7 @@ func Run(ctx context.Context, opts Options) (*Summary, error) {
 		c4git:   map[c4.ID]int64{},
 		managed: map[string]bool{},
 		records: newRecordCache(opts.Records),
+		up:      &uploads{sem: make(chan struct{}, opts.Jobs)},
 	}
 
 	// The view the first imported commit applies to.
@@ -518,7 +535,9 @@ func (im *importer) read(e treeEntry) error {
 			return err
 		}
 	}
-	im.cur.BlobsHashed++
+	if !b.ptr.IsNil() {
+		im.cur.Pointers++
+	}
 	im.blobs[e.sha] = b
 	return nil
 }
@@ -534,7 +553,8 @@ func (im *importer) hashAndUpload(sha string, b *blobInfo, r io.Reader) error {
 		}
 		h.Write(buf)
 		copy(b.id[:], h.Sum(nil))
-		return im.put(b, bytes.NewReader(buf))
+		im.put(b, buf)
+		return nil
 	}
 	f, err := os.CreateTemp("", "c4-gitimport-*")
 	if err != nil {
@@ -549,7 +569,11 @@ func (im *importer) hashAndUpload(sha string, b *blobInfo, r io.Reader) error {
 	if _, err := f.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	return im.put(b, f)
+	// The temporary file goes away on return, so this upload is waited for.
+	b.present = true
+	id, size := b.id, b.size
+	im.async("store "+id.String(), size, true, func() (bool, error) { return im.opts.Sink.Put(im.ctx, id, size, f) })
+	return im.wait()
 }
 
 // ensureRaw stores a small blob's own bytes, for a pointer-shaped file
@@ -561,19 +585,66 @@ func (im *importer) ensureRaw(sha string, b *blobInfo) error {
 	if b.data == nil {
 		return fmt.Errorf("blob %s: content not kept", sha)
 	}
-	return im.put(b, bytes.NewReader(b.data))
-}
-
-func (im *importer) put(b *blobInfo, r io.Reader) error {
-	stored, err := im.opts.Sink.Put(im.ctx, b.id, b.size, r)
-	if err != nil {
-		return fmt.Errorf("store %s: %w", b.id, err)
-	}
-	b.present = true
-	im.count(stored, b.size)
+	im.put(b, b.data)
 	return nil
 }
 
+// put stores a blob's bytes in the background.
+func (im *importer) put(b *blobInfo, data []byte) {
+	b.present = true
+	id, size := b.id, b.size
+	im.async("store "+id.String(), size, true, func() (bool, error) {
+		return im.opts.Sink.Put(im.ctx, id, size, bytes.NewReader(data))
+	})
+}
+
+// uploads runs sink writes with bounded concurrency. Every write a commit
+// starts finishes before the commit writes its root record, so the stats
+// of a write belong to the commit that started it.
+type uploads struct {
+	sem  chan struct{}
+	wg   sync.WaitGroup
+	mu   sync.Mutex
+	err  error
+	busy time.Duration
+}
+
+// async runs fn, a sink write of an object of size bytes. With object
+// set, its result counts toward the commit's uploaded or present objects.
+func (im *importer) async(what string, size int64, object bool, fn func() (bool, error)) {
+	u := im.up
+	u.sem <- struct{}{}
+	u.wg.Add(1)
+	go func() {
+		defer u.wg.Done()
+		defer func() { <-u.sem }()
+		t := time.Now()
+		stored, err := fn()
+		u.mu.Lock()
+		defer u.mu.Unlock()
+		u.busy += time.Since(t)
+		if err != nil {
+			if u.err == nil {
+				u.err = fmt.Errorf("%s: %w", what, err)
+			}
+			return
+		}
+		if object {
+			im.count(stored, size)
+		}
+	}()
+}
+
+// wait waits for every write started so far and returns the first error.
+func (im *importer) wait() error {
+	u := im.up
+	u.wg.Wait()
+	u.mu.Lock()
+	defer u.mu.Unlock()
+	return u.err
+}
+
+// count adds one object to the commit's stats. The caller holds im.up.mu.
 func (im *importer) count(stored bool, size int64) {
 	if stored {
 		im.cur.ObjectsUploaded++
@@ -596,12 +667,11 @@ func (im *importer) c4gitObject(p string, id c4.ID) (int64, error) {
 		size, err := im.opts.C4Git.Stat(id)
 		switch {
 		case err == nil:
-			stored, err := im.opts.Sink.Copy(im.ctx, id, size, im.opts.C4Git)
-			if err != nil {
-				return 0, fmt.Errorf("copy c4git object %s (%s): %w", id, p, err)
-			}
-			im.count(stored, size)
+			im.async(fmt.Sprintf("copy c4git object %s (%s)", id, p), size, true, func() (bool, error) {
+				return im.opts.Sink.Copy(im.ctx, id, size, im.opts.C4Git)
+			})
 			im.c4git[id] = size
+			im.cur.C4GitBytes += size
 			return size, nil
 		case !errors.Is(err, os.ErrNotExist):
 			return 0, fmt.Errorf("c4git store: %s: %w", id, err)
@@ -613,8 +683,11 @@ func (im *importer) c4gitObject(p string, id c4.ID) (int64, error) {
 			return 0, err
 		}
 		if present {
+			im.up.mu.Lock()
 			im.count(false, size)
+			im.up.mu.Unlock()
 			im.c4git[id] = size
+			im.cur.C4GitBytes += size
 			return size, nil
 		}
 	}
@@ -635,21 +708,38 @@ func (im *importer) finish(parent c4.ID, edits []view.Edit, start time.Time) (*C
 	}
 	im.cur.RecordsRead = im.records.reads
 	im.cur.View = res.ID
-	// Deepest first, so the root record is written last: when it exists,
-	// the whole view does.
+	// File objects and the records below the root first, then the root
+	// record: when the root record exists, the whole view does. Then the
+	// changeset, which names the view's parent and so needs nothing new.
+	var root []byte
 	for _, r := range res.Records {
-		if _, err := im.opts.Sink.Put(im.ctx, r.ID, int64(len(r.Data)), bytes.NewReader(r.Data)); err != nil {
-			return nil, fmt.Errorf("store record %s: %w", r.ID, err)
-		}
 		im.records.add(r.ID, r.Data)
+		if r.ID == res.ID {
+			root = r.Data
+			continue
+		}
+		im.async("store record "+r.ID.String(), 0, false, func() (bool, error) {
+			return im.opts.Sink.Put(im.ctx, r.ID, int64(len(r.Data)), bytes.NewReader(r.Data))
+		})
+	}
+	if err := im.wait(); err != nil {
+		return nil, err
+	}
+	for _, obj := range [][]byte{root, res.Changeset} {
+		if len(obj) == 0 {
+			continue
+		}
+		t := time.Now()
+		id := c4.Identify(bytes.NewReader(obj))
+		if _, err := im.opts.Sink.Put(im.ctx, id, int64(len(obj)), bytes.NewReader(obj)); err != nil {
+			return nil, fmt.Errorf("store %s: %w", id, err)
+		}
+		im.up.busy += time.Since(t)
 	}
 	im.cur.RecordsWritten = len(res.Records)
-	if len(res.Changeset) > 0 {
-		if _, err := im.opts.Sink.Put(im.ctx, res.ChangesetID, int64(len(res.Changeset)), bytes.NewReader(res.Changeset)); err != nil {
-			return nil, fmt.Errorf("store changeset %s: %w", res.ChangesetID, err)
-		}
-		im.cur.Changeset = res.ChangesetID
-	}
+	im.cur.Changeset = res.ChangesetID
+	im.cur.SinkMillis = float64(im.up.busy.Microseconds()) / 1000
+	im.up.busy = 0
 	im.cur.Millis = float64(time.Since(start).Microseconds()) / 1000
 	c := *im.cur
 	im.sum.Commits = append(im.sum.Commits, c)
