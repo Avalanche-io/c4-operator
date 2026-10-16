@@ -1,7 +1,9 @@
 # c4-operator v2 design
 
 Status: design of record for branch `v2`. The MVP on branch `mvp` is the
-baseline; this document says what changes and why.
+baseline. This document says what changes, why, and how each claim is
+proven. Measured results are in `hack/e2e/out/results.md` and the summary is
+in `REPORT-v2.md`.
 
 ## Goals
 
@@ -10,19 +12,27 @@ baseline; this document says what changes and why.
    enter the system.
 2. **Track what a job changes.** A job's writes become a changeset against
    the tree it was given: a c4m patch over a parent, with content-addressed
-   pointers to new objects.
+   pointers to new objects. Cost is proportional to the change.
 3. **Very large render clusters.** Tens of thousands of nodes, and a render
    start in which thousands of nodes ask for the same plates in the same
    second.
 4. **No single point of failure or overload.** No single NFS server, S3
-   endpoint, cache replica, or node may be on the critical path for everyone.
+   endpoint, cache replica, or node is on the critical path for everyone.
 5. **Minimal duplication on disk.** Containers share read-only overlay
    lowers. Each container's private writes live in its own upper. A new
    version of a tree costs only its changes.
 6. **Strong per-project isolation.** Knowing a C4 ID grants nothing.
+7. **One farm, many kinds of work, scheduled to their objectives** (P5).
+   Render, CI and ML share pools, quotas and capacity hooks. Priorities are
+   derived from deadlines, latency targets and measured work instead of set
+   by hand. A HUD serves artists, wranglers, developers and platform
+   engineers.
 
-Non-goals for v2: a version-control system (history, refs, merges, blame),
-cross-region replication of the authoritative store, and Windows nodes.
+The niche is media and VFX studios and mid-size shops, where one shared
+farm runs deadline-driven rendering, CI, media processing and modest ML
+(fine-tuning, LoRAs, studio-data training, generative batch jobs) over heavy
+content-addressed data. Section 12 lists the non-goals, including the
+training infrastructure that large labs build.
 
 ## Prior art: Scion
 
@@ -30,284 +40,405 @@ Anthropic described Scion, its replacement for Git, in
 [Redesigning source control](https://www.anthropic.com/engineering/redesigning-source-control)
 (2026-10-13). The parts this design borrows:
 
-| Scion                                                                                                       | Here                                                                                            |
-| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------- |
-| Changesets record the files changed relative to the first parent, with content-addressed blob pointers.     | A changeset is a c4m patch: a base tree ID on the first line, then the changed entries.         |
-| Fetch is top-down (root tree, then missing trees, then blobs), and every request names an immutable object. | The same. Directory records, then file objects, each fetched by C4 ID.                          |
-| Each node runs one daemon on a local socket, shared by all jobs on the node.                                | One node daemon per node, which is also the CSI node plugin.                                    |
-| Tiers are strict (daemon, then regional cache, then server), and all tiers answer identical RPCs.           | The same three tiers plus peer fetch inside a pool. One content API at every tier.              |
-| Sparse and virtual checkouts: the client does not request what it does not want.                            | `include` filters stop the fetch at directory records. A lazy lower is designed in section 5.5. |
-| Directory-level ACLs.                                                                                       | Project grants on (tree, path prefix).                                                          |
-| Commits are server-side, with cost proportional to the change.                                              | Capture uploads only the changed objects, the new directory records, and one patch.             |
+| Scion                                                                                                       | Here                                                                                                              |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| Changesets record the files changed relative to the first parent, with content-addressed blob pointers.     | A changeset is a c4m patch: the parent tree ID on the first line, then the changed entries (section 2.3).         |
+| Fetch is top-down (root tree, then missing trees, then blobs), and every request names an immutable object. | The same. Root record, then the directory records the filter reaches, then file objects, each fetched by C4 ID.   |
+| Each node runs one daemon on a local socket, shared by all jobs on the node.                                | One node daemon per node. It is also the CSI node plugin, and kubelet reaches it on the CSI socket.               |
+| Tiers are strict (daemon, then regional cache, then server), and all tiers answer identical RPCs.           | The same tiers plus peer fetch inside a locality (rack or zone). One content API at every tier.                   |
+| Each tier keeps a hit rate above 99% and holds no long-lived state.                                         | Caches are disposable local disk. Hit rates are exported per tier and are a HUD panel (section 10).               |
+| Sparse and virtual checkouts: the client never requests trees it does not need.                             | `include` filters stop resolution at directory records. A lazy FUSE lower is designed in section 4.6.             |
+| Directory-level ACLs.                                                                                       | Project grants on (tree, path prefix).                                                                            |
+| Commits are server-side, with cost proportional to the change.                                              | Capture uploads only the changed objects, the directory records along changed paths, and one patch (section 4.4). |
 
 Scion is built for one code monorepo. This design applies the same
 structure to media trees, where single objects are 10 MB to 10 GB rather
-than 10 KB, and where outputs (rendered frames) dominate writes.
+than 10 KB, and where outputs (rendered frames) dominate writes. Section 8.2
+applies it back to source code through `oss/c4git`.
 
 ## 1. Trust model
 
-**Bytes are verified once, when they enter the system.** Entry happens in
-exactly two places:
+### 1.1 Verified once, where bytes enter
 
-- **Ingest**: `c4-operator ingest` (or the c4 CLI with `c4 id -s`) hashes
-  a file as it uploads it, and the store key is the computed ID.
-- **Capture**: when a container's writes are captured (section 3.4), each
-  new file is hashed once as it is uploaded.
+Bytes enter the system at exactly three places, and each computes the IDs
+of what it writes:
 
-Everything after that trusts the ID-to-bytes binding. The node daemon,
-peers, and regional caches do not rehash on fill or on read. The c4 store
-works the same way: `TreeStore.Create(id)` writes under a caller-supplied
-ID without hashing.
+- **Ingest.** `c4-operator ingest`, `c4-operator import-git`, or the c4 CLI
+  (`c4 id -s`) hash content as they upload it. The store key is the
+  computed ID.
+- **Record publishing.** The controller computes the records of each view
+  (section 2.2) and stores them under their computed IDs.
+- **Capture.** When a container's writes are captured (section 4.4), each
+  new file is hashed once.
 
-Why this is safe enough:
+Everything after that trusts the ID-to-bytes binding. Node daemons, peers
+and regional caches do not rehash on fill or on read. The c4 store works the
+same way: `TreeStore.Create(id)` writes under a caller-supplied ID.
 
-1. **Immutability is structural.** Containers never see cache objects
-   writable. Lowers are read-only overlay layers. A container's writes go to
-   its own upperdir, and overlayfs copies up before the first write. The MVP
+### 1.2 Writers never choose the key
+
+Verify-once has a weak point that the MVP did not have: if a component that
+holds store write credentials is compromised, it can write wrong bytes under
+an existing ID, and readers that do not rehash will serve them. The design
+therefore keeps write credentials away from the large, exposed population of
+node daemons:
+
+- In tiered mode a node daemon holds **no store credentials at all**. It
+  uploads captured objects with `PUT /` to the regional tier. The regional
+  tier hashes the body itself, rejects it if it does not match the
+  `X-C4-ID` the client claimed, and writes it under the ID it computed,
+  only if the store lacks that ID.
+- A compromised node can therefore add new objects (under their true IDs,
+  which is harmless) but cannot replace an existing one.
+- In direct mode (no regional tier, section 3.2) the node daemon holds the
+  project's credentials and is trusted to the same degree as the regional
+  tier. Direct mode is for small installations.
+
+### 1.3 Why no per-read check is needed
+
+1. **Immutability is structural.** Containers never reach cache objects.
+   Lowers are read-only overlay layers. A container's writes go to its own
+   upperdir, and overlayfs copies a file up before the first write. The MVP
    needed an mtime sentinel and a per-request inode check because pods
-   mounted hardlinks directly. With overlay, a pod cannot reach the object
-   inode, so there is nothing to check per read.
+   mounted the hardlinked tree itself. With overlay, a pod cannot reach the
+   object inode, so there is nothing to check per read.
 2. **Transport integrity.** Tier-to-tier traffic is TLS in production.
-   Length is checked on every fill: a short read is retried with a ranged
-   resume, never accepted.
+   Length is checked on every fill. A short read is resumed with a ranged
+   request, never accepted.
 3. **Scrub.** An optional background scrubber on each tier rehashes cached
-   objects at a configurable byte rate, oldest-verified first, and evicts any
-   that do not match. A mismatch is a disk or software fault, reported as a
-   metric and an event. It is off by default on nodes and on by default on
-   the regional tier, whose objects are served many times.
+   objects at a configured byte rate, oldest first, and evicts any that do
+   not match. A mismatch is a disk or software fault, reported as a metric
+   and an event. It is off by default on nodes and on by default on the
+   regional tier, whose objects are served many times.
 
 What this gives up: a corrupt object in a regional cache is served to every
-node that asks for it until a scrub finds it. The mitigations are TLS, scrub,
-and the fact that a cache entry can be dropped and refetched at any time.
-`verifyFill: true` (per project) restores hash-on-fill at the node for
-projects that want it. Hashing while writing costs about 1 to 2 GB/s per core
-and almost nothing when the network is slower than that.
+node that asks for it until a scrub finds it. The mitigations are TLS,
+scrub, and the fact that any cache entry can be dropped and refetched.
+`spec.store.verifyFill: true` on a Project restores hash-on-fill at the node.
+Hashing while writing costs about 1 to 2 GB/s per core, which is free when
+the network is slower than that.
 
-## 2. Data path
+## 2. Data model
 
-### 2.1 One content API at every tier
+### 2.1 Views and their identity
+
+A **view** is the exact tree a container sees: directories, regular files
+and symlinks, after the include filter and any grant paths. Its ID is the
+C4 ID of its root record (section 2.2) under one projection:
+
+- names, sizes, content IDs and symlink targets are real;
+- timestamps are null everywhere;
+- mode is null everywhere except on executable files, which record
+  `-rwxr-xr-x`.
+
+The c4 scanner's content mode nulls every mode. This projection differs only
+for executable files, so **a tree without executable files has the same ID
+as `c4 id` in content mode**, which is what media trees are. Source trees
+need the executable bit, or a checkout of a repository would lose it and
+`./configure` would fail. `c4-operator tree-id DIR` computes the projection
+from a directory, and every e2e pod runs it against its own mount.
+
+### 2.2 Records
+
+A **record** is the one-level canonical c4m listing of a directory's direct
+children under the view projection. Its bytes hash to the directory's ID, so
+a record is an immutable, content-addressed object like any other: every tier
+caches records exactly as it caches file content.
+
+The controller publishes each view's records to the project store when it
+resolves a Materialization (deepest first, root last, so an existing root
+record means the whole view is present). Nodes then need nothing but the
+view ID: they fetch the root record, then the records of subdirectories,
+then file objects, all through the tiers. This is Scion's fetch order, and it
+means 5,000 nodes resolving the same view hit their caches for records too.
+
+### 2.3 Changesets
+
+A **changeset** is a c4m patch: a bare C4 ID on the first line naming the
+parent view, followed by `c4m.PatchDiff` entries. Additions and
+modifications are emitted with their new IDs, removals as exact duplicates
+of the parent's entries, and directories along changed paths with their new
+IDs. `c4m.ApplyPatch`, `c4m.ResolveBase` and `c4 cat` read it unchanged.
+
+A Materialization whose source is a changeset resolves to a chain of views,
+base first (`status.layers`), bounded at 64 steps.
+
+### 2.4 Layers
+
+A **layer** is an immutable directory on a node that overlay stacks as a
+lower:
+
+- a **full layer** is a whole view, hardlinked from the node's object cache;
+- a **delta layer** holds what changes from one view to another: added and
+  modified files (hardlinked), removed paths as overlay whiteouts (character
+  device 0/0), and directories whose contents were mostly replaced marked
+  opaque (`trusted.overlay.opaque=y`).
+
+A delta is computed by diffing the two views' records top-down and skipping
+any subtree whose ID is equal, so its cost is proportional to the change. Any
+two views can be diffed. The changeset chain only tells a node which views
+are likely to be close (section 4.3).
+
+## 3. Data path
+
+### 3.1 One content API at every tier
 
 Every tier answers the same HTTP API. It is the c4d content plane, extended
 in a compatible way:
 
 ```
-GET  /{c4id}            object bytes; honors Range (206) for resume
-HEAD /{c4id}            200 if this tier can serve the object, 404 if not
-PUT  /                  body is content; reply is its C4 ID (writes only)
+GET  /{c4id}   object bytes; honors Range (206) for resume
+HEAD /{c4id}   200 if this tier can serve the object, 404 if not
+PUT  /         body is content; reply is its C4 ID (regional tier and stores)
 
 Request headers:
-  Authorization: Bearer <projected service-account token>
-  X-C4-Project:  <project>      cache partition and credential scope
-  X-C4-Hop:      peer           marks a peer request (see 2.3)
+  Authorization: Bearer <projected service-account token, audience c4-tier>
+  X-C4-Project:  <project>    cache partition and credential scope
+  X-C4-Hop:      peer         marks a peer request (section 3.2)
+  X-C4-ID:       <c4id>       on PUT: the ID the client computed
 Response headers:
   Content-Length, Accept-Ranges: bytes
-  Retry-After                   with 503 when shedding load
+  Retry-After                 with 503 when shedding load
+  X-C4-Served:   hit | fill | join   how this tier answered (metrics, tests)
 ```
 
 **Does c4d's API fit?** The path shape and semantics do: `GET/HEAD /{c4id}`
-and `PUT /` are exactly c4d's content plane, so a c4d can be the
-authoritative store tier (`c4d://host:7433`) unchanged. c4d is not suitable as
-a cache tier as it stands, for two reasons:
+and `PUT /` are c4d's content plane, so a c4d server can be an authoritative
+store shard (`c4d://host:7433`) unchanged. c4d is not suitable as a cache
+tier as it stands:
 
 - It does not honor `Range`, so a transfer interrupted at 9 GB of a 10 GB
   object restarts at zero. The client handles that: a 200 in reply to a
   ranged GET means "start over".
 - Its content plane authorizes any mTLS peer to read any ID, so it has no
-  notion of a project. Project isolation needs the partition header and a
+  notion of a project. Isolation needs the partition header and a
   per-request authorization decision.
+- On a miss served from a peer, it buffers the whole object in memory
+  (`bytes.Buffer` in `handleGetContent`) before caching it. A 10 GB plate
+  would need 10 GB of RAM.
 
-Both are additive changes to c4d, written up in PROGRESS.md.
+These are additive changes to c4d, written up in PROGRESS.md.
 
-### 2.2 Tiers
+### 3.2 Tiers
 
 ```
- pod --CSI--> node daemon ----> peer daemons (same pool) ----> regional cache ----> authoritative store
-              (one per node)    rendezvous home(s)             (Deployment,          (sharded: several
-                                                                stateless, sharded    buckets, endpoints,
-                                                                by rendezvous)        or regions)
+ pod --CSI--> node daemon ----> peer daemons (same locality) ----> regional cache ----> authoritative store
+              one per node,     rendezvous home(s) per object      Deployment,           sharded: buckets,
+              hostNetwork                                           stateless, homed      endpoints, c4d
+                                                                    by rendezvous         servers, regions
 ```
 
-The tiers are strict: a node never talks to the store when a regional tier
-is configured. That keeps the store's load bounded by the number of regional
-replicas, not the number of nodes. A small installation can run with
-`tiers: direct`, in which nodes fetch from the store. The kind e2e uses that
-mode for P1.
+The tiers are strict for reads: a node never reads the store when a regional
+tier is configured, and in that mode it holds no credentials that would let
+it. The store's read load is bounded by the number of regional replicas, not
+the number of nodes. A Project can choose `access: Direct`, in which its nodes
+read the store themselves. The herd test uses Direct as the baseline.
 
-**Node daemon** (DaemonSet). It holds the node's object cache, builds
-lowers, mounts overlays for pods (it is the CSI node plugin), captures
-changesets, and serves its cache to peers.
+**Node daemon** (DaemonSet). It holds the node's object cache, builds layers,
+mounts overlays for pods (it is the CSI node plugin), captures changesets,
+and serves its cache to peers.
 
-**Peer fetch** (inside a pool). A pool is a set of nodes with cheap
-bandwidth between them: a rack, a node pool, or a zone. The node's
-`topology.kubernetes.io/zone` label, or a configured label, defines it. For
-each object, rendezvous hashing over the pool's daemons, `score(peer, id) =
-hash(peer.name || id)`, picks the top `k` (default 1) as the object's
+**Peer fetch** (inside a locality). A locality is a set of nodes with cheap
+bandwidth between them: a rack or a zone, taken from the node label
+`topology.kubernetes.io/zone` or a configured label. For each object,
+rendezvous hashing over the locality's nodes, `score(node, id) =
+mix(hash(node || id))`, picks the top `k` (default 1) as the object's
 **homes**. A daemon that needs an object:
 
 1. serves it from its own cache, or
 2. if it is not a home, asks the homes in rank order, or
-3. if it is a home (or every home failed), asks the regional tier.
+3. if it is a home, or every home failed, asks the regional tier.
 
 A home that receives a peer request for an object it lacks fetches it from
-the regional tier itself, coalesced with any other request for that object.
-A non-home that receives a peer request for an object it lacks answers 404
-and does not fetch. Requests never cascade from peer to peer.
+the regional tier itself, coalesced with any other request for that object,
+and streams it to the requester as it arrives. A non-home that receives a
+peer request for an object it lacks answers 404 and does not fetch. Requests
+never cascade from peer to peer.
 
-**Regional cache** (Deployment). It is stateless: its cache is local disk
-that can be lost at any time. It scales horizontally. Clients pick a replica
-by rendezvous over the replicas for (project, id). The top `r` (default 2)
-are the object's regional homes, and a client spreads its requests over them
-by hashing its own node name. Each object is therefore fetched from the store
-at most `r` times per region, and a hot object is served by `r` replicas, not
-one.
+**Regional cache** (Deployment). Its cache is local disk that can be lost at
+any time. It scales horizontally. Clients rank replicas by rendezvous on
+(project, id). The top `r` (default 2) are the object's regional homes, and a
+client starts at the one chosen by hashing its own node name, so a hot object
+is served by `r` replicas, not one. Each object is fetched from the store at
+most `r` times per region per eviction.
+
+**Writes.** Captured objects, records and changesets go to the regional
+tier with `PUT /`, addressed to the object's regional home, which keeps a
+copy in its cache: the next stage usually reads what the last one wrote.
 
 **Authoritative store.** A project's store is a list of shards: S3 buckets,
 S3 endpoints, c4d servers, or regions. An object lives on the shard with the
 highest rendezvous score for its ID. Rendezvous is used rather than an ID
-prefix modulo N, because adding a shard then moves only 1/(N+1) of the
+prefix modulo N because adding a shard then moves only 1/(N+1) of the
 objects. No single endpoint carries all reads.
 
-### 2.3 Fan-in arithmetic
+### 3.3 Fan-in arithmetic
 
-A render start puts `P` pods on `N` nodes in `G` pools, all reading the same
-`M` objects:
+A render start puts `P` pods on `N` nodes in `G` localities, all reading the
+same `M` objects:
 
-| tier                   | requests per object                        |
-| ---------------------- | ------------------------------------------ |
-| pods to node daemons   | `P` (`P/N` per node, coalesced to 1)       |
-| node daemons to homes  | `N - G·k` (each node asks its pool's home) |
-| homes to regional tier | `G·k`                                      |
-| regional tier to store | at most `r`                                |
+| tier                    | requests per object                             |
+| ----------------------- | ----------------------------------------------- |
+| pods to node daemons    | `P` (`P/N` per node, coalesced to 1)            |
+| node daemons to homes   | `N - G·k` (each non-home asks its locality home) |
+| homes to regional tier  | `G·k`                                           |
+| regional tier to store  | at most `r`                                     |
 
-With 5,000 nodes in 50 pools, `k = 1`, and `r = 2`, the store sees 2 GETs
-per plate frame instead of 5,000. The regional tier sees 50.
+With 5,000 nodes in 50 localities, `k = 1`, and `r = 2`, the store sees 2
+GETs per plate frame instead of 5,000, and the regional tier sees 50. The P2
+herd test measures each row on a kind cluster.
 
-### 2.4 Every tier coalesces, sheds, and resumes
+### 3.4 Every tier coalesces, streams, sheds, and resumes
 
-- **Singleflight.** Concurrent requests for the same (project, id) at a tier
-  share one upstream fetch. Followers wait for the leader's file and are then
-  served from it.
-- **Admission control.** Each tier caps concurrent upstream fetches and
+- **Singleflight.** Concurrent requests for the same (partition, id) at a
+  tier share one upstream fetch.
+- **Streaming fills.** The fill writes to a temporary file. Waiters read
+  that file as it grows and are not held until the leader finishes. A
+  three-hop path (store, regional, home, node) therefore pipelines instead
+  of costing three full transfer times.
+- **Admission control.** Each tier caps concurrent upstream fills and
   queued waiters. Beyond the queue it answers `503` with `Retry-After`. It
   never forwards the excess upstream.
-- **Backpressure, not stampede.** A client that gets 503 or a connection
-  error tries the next candidate at the same tier (the next home, or the next
-  regional replica). If every candidate refuses, it backs off with jitter and
-  retries. It does not skip a tier: a node never falls through to the store
-  because the regional tier is busy. A regional outage slows nodes down but
-  cannot multiply load on the store.
-- **Resumable transfers.** Fills write to a temporary file. On failure the
-  client retries with `Range: bytes=<written>-`, against the same or a
-  different replica. Every replica serves identical bytes for an ID, so
-  stitching across replicas is correct.
-- **Bounded memory.** Objects stream to disk, never through memory, at
-  every tier.
+- **Backpressure, not stampede.** A client that gets a 503 or a connection
+  error tries the next candidate at the same tier (the next home, or the
+  next regional replica). If every candidate refuses, it backs off with
+  jitter and retries. It never skips a tier: a node never falls through to
+  the store because the regional tier is busy. A regional outage slows nodes
+  down but cannot multiply load on the store.
+- **Resumable transfers.** On failure the client retries with
+  `Range: bytes=<written>-`, against the same or another replica. Every
+  replica serves identical bytes for an ID, so stitching across replicas is
+  correct. A 200 in reply to a ranged request restarts the object.
+- **Circuit breaking.** A peer or replica that fails is skipped for a short,
+  growing interval. Membership is not changed by failures, so rendezvous
+  homes stay stable while a peer restarts.
+- **Bounded memory.** Objects stream to disk, never through memory.
 
-### 2.5 Fetch order
+### 3.5 Fetch order
 
-Resolution is top-down: the root record or c4m, then the directory records
-the include filter can reach, then file objects. Directory records are
-small, are fetched on the request path, and are also cached in every tier.
-File objects are fetched in parallel, largest first, so the long transfers
-start early.
+Resolution on a node is top-down: the root record, then the directory
+records of each level in parallel, then file objects, largest first, so the
+long transfers start early.
 
-## 3. Overlay filesystems
+### 3.6 Membership and discovery
 
-### 3.1 Layout on a node
+- Node daemons run with `hostNetwork` and serve the tier API on the node's
+  address. A daemon learns its locality from its own Node object and watches
+  only the Nodes in that locality (a label selector, so the watch is bounded
+  by the locality size). Rendezvous members are node names.
+- The regional tier is a Service. Daemons watch its EndpointSlices (tens of
+  endpoints). Members are pod names.
+- Every component reads the same objects, so every daemon computes the same
+  homes without coordination.
+
+## 4. Overlay filesystems
+
+### 4.1 Layout on a node
 
 ```
 /var/lib/c4/
-  p/<project>/objects/               object cache (strict); shared mode uses /var/lib/c4/objects
-  p/<project>/lowers/<layer>/        immutable layer trees, hardlinked from objects/
-  p/<project>/vols/<volume>/upper    one per mounted volume
-  p/<project>/vols/<volume>/work     overlay workdir
-  p/<project>/meta/                  layer descriptions, retention
+  p/<partition>/objects/<id[3:5]>/<id>     object cache; partition = project (Strict) or sharing group (Shared)
+  p/<partition>/xobjects/<id[3:5]>/<id>    executable variant of an object (separate inode, mode 0777)
+  p/<partition>/layers/<key>/              immutable layer trees, files hardlinked from objects/
+  p/<partition>/layers/<key>.json          layer description and last use
+  p/<partition>/vols/<volume>/upper        one per mounted volume
+  p/<partition>/vols/<volume>/work         overlay workdir
+  vols/<volume>.json                       volume state (project, pod, view, stack, capture)
 ```
 
 Everything is on one filesystem, so lowers are hardlinks (`link(2)` returns
-`EXDEV` across filesystems, and even across bind mounts). A file in a lower
-costs an inode, not its bytes.
+`EXDEV` across filesystems, and even across bind mounts). A file in a layer
+costs a directory entry, not its bytes, and directories cost one inode each.
 
-### 3.2 Lower layers
+### 4.2 Permissions in the merged view
 
-A **full layer** is the tree of one view (a c4m after the include filter),
-hardlinked from the object cache. It is built once per (project, view ID) on
-a node and shared read-only by every container on the node that mounts that
-view.
+A writable view behaves like an `emptyDir`: directories are mode 0777,
+regular files 0666 (0777 if executable), all owned by root, and every
+timestamp is the epoch (c4m's null timestamp). Any container user can
+therefore create, replace and edit files, and overlay copies a file up before
+the first write, so the cached object is never touched. Objects are 0666 on
+disk, but `/var/lib/c4` is 0700 and only the node daemon can reach it. Pods
+never see a path into the cache.
 
-A **delta layer** holds what one changeset changes, relative to its parent
-view:
+### 4.3 Stacking policy
 
-- added or modified files, hardlinked;
-- deleted files, as overlay whiteouts (character device 0/0);
-- directories whose contents were replaced, marked opaque
-  (`trusted.overlay.opaque=y`).
+A node stacks only on what it already holds:
 
-### 3.3 Version stacking
+1. Look for the newest view in `status.layers` (the chain) for which the
+   node holds a stack, and also the last view this node built for the same
+   Materialization.
+2. If one is found and the delta to the target is small (fewer changed
+   entries than half the base's), mount `delta(base -> target)` over that
+   stack. Each version adds one layer.
+3. Otherwise build the target as one full layer.
+4. A stack never exceeds 16 layers (overlay's mount options fit in one page,
+   and lookups walk every layer). At the bound, the node builds a full layer
+   for the target. This is compaction, and it is local to the node.
 
-A Materialization whose source is a changeset resolves to a chain:
-`changeset_n -> changeset_(n-1) -> ... -> base tree`. The mount's lowerdir is
-the stack `delta_n : delta_(n-1) : ... : full_base`. Shot v12 that is v11 plus
-three changed frames costs three hardlinks and a directory on a node that
-already has v11.
+Shot v12 that is v11 plus three changed frames costs three hardlinks and a
+few directories on a node that already has v11.
 
-Stacks are bounded. Past 16 layers (overlay's per-mount option length is a
-page), or once the deltas hold more than half the base's entries, the node
-builds a full layer for the newest view instead. That is compaction, and it
-is local to the node.
+### 4.4 Upper layers and changeset capture
 
-### 3.4 Upper layers and changeset capture
+Each writable volume gets its own upperdir and workdir. Lowers are never
+modified.
 
-Each mounted volume gets its own upperdir and workdir. The container sees
-the merged tree, writable. Lowers are untouched.
-
-Capture runs when the volume is unpublished (the pod has terminated, and
-kubelet tears down volumes before the pod object is deleted). It can also be
-requested on demand. Capture:
+Capture runs at `NodeUnpublishVolume`, which kubelet calls when the pod has
+terminated (its containers have exited, and volumes of terminated pods are
+unmounted by default) or is being deleted, before the pod object is removed.
+It:
 
 1. unmounts the overlay, so the upper is quiescent;
 2. walks the upper:
-   - regular file: added or modified. It is hashed (the verify-once point),
-     put into the node cache, and uploaded to the project's store. If its ID
-     equals the lower's, it was a metadata-only copy-up and is not a change.
-   - character device 0/0: a whiteout, so the path was deleted.
-   - directory with `trusted.overlay.opaque=y`: the lower's subtree was
-     replaced.
-   - new directory or symlink: added.
-3. applies those changes to the lower's view to get the output tree, at
-   content level, and computes its ID;
-4. stores the directory records the output tree needs (those along changed
-   paths; the rest are the parent's), and a changeset c4m: the parent view ID
-   on a bare first line, then `c4m.PatchDiff` entries. `c4m.ResolveBase` and
-   `c4 cat` can read it;
-5. records the result on the pod as annotations:
-   `c4.avalanche.io/output-tree`, `c4.avalanche.io/output-changeset`, and
-   `c4.avalanche.io/output-changes` (added, modified, deleted counts), and as
-   metrics.
+   - regular file: added or modified. It is hashed (the verify-once point).
+     If its ID and executable bit equal the lower's, it was a metadata-only
+     copy-up and is not a change;
+   - character device 0/0: a whiteout, so the path was deleted;
+   - directory with `trusted.overlay.opaque=y`: the lower subtree was
+     replaced by the upper's;
+   - other directories: merged; symlinks: added or changed;
+3. hardlinks each new file into the node's object cache, so a later stage on
+   this node reads it without a fetch;
+4. computes the output view by rewriting only the records along changed
+   paths (the parent's records come from the node cache), and computes the
+   changeset c4m;
+5. uploads new objects, new records and the changeset with `PUT /`;
+6. records the result on the pod as annotations,
+   `c4.avalanche.io/output-tree`, `c4.avalanche.io/output-changeset` and
+   `c4.avalanche.io/output-changes` (`added=N modified=N deleted=N
+   bytes=N`), and as metrics.
 
-The output is a tree ID. A downstream Materialization can mount it, or mount
-the changeset to get a stacked lower. Capture is at least once: if it fails,
-the upper is kept and retried. An empty upper produces no changeset.
+Capture runs detached from the RPC and is keyed by volume. If kubelet's call
+times out, its retry joins the capture in flight. If the daemon restarts, the
+upper is still on disk and the retry starts over, which is safe because every
+step is idempotent. The volume is not released until its outputs are stored,
+so a pod's outputs are never lost to a slow upload. An empty upper produces
+no changeset.
 
-Cost is proportional to the change. A render that writes 200 new EXRs
-uploads 200 objects and a few directory records, whatever the size of the
+Cost is proportional to the change: a render that writes 200 new EXRs
+uploads 200 objects, a few records and one patch, whatever the size of the
 input tree.
 
-### 3.5 Lazy lower (designed, not built)
+### 4.5 Read-only volumes
+
+A volume with `readOnly: true` gets no upper: a read-only overlay of its
+stack, or a read-only bind mount when the stack is one layer. Nothing is
+captured.
+
+### 4.6 Lazy lower (designed, not built)
 
 For trees where jobs read a small fraction (a 25 GB source tree in which a
 test touches 300 files), materializing every object up front wastes the
 fetch. The lazy option is a FUSE filesystem served by the node daemon. It
-presents the view from its directory records, and fetches an object on the
-first `open` through the same tiered client. Overlay mounts it as the bottom
-lower, so writes still go to the per-container upper and capture works
-unchanged. Costs: one FUSE round trip per `open` (reads of cached objects go
-through passthrough or a kernel page-cache bypass), a privileged daemon
-holding the FUSE session, and failure handling for a daemon restart under
-live mounts. A Materialization chooses `materialize: Eager | Lazy`. Eager
-remains the default for render inputs, which are read whole.
+presents the view from its records and fetches an object through the tier
+client on first `open`. Overlay mounts it as the bottom lower, so writes go to
+the per-container upper and capture works unchanged. Costs: one FUSE round
+trip per `open` (reads can use FUSE passthrough on kernels that have it), a
+daemon that must hold the FUSE session, and recovery for a daemon restart
+under live mounts. A Materialization would choose `materialize: Eager |
+Lazy`. Eager stays the default for render inputs, which are read whole.
 
-## 4. Mounting: a CSI node driver
+## 5. Mounting: a CSI node driver
 
 The MVP's init container and hostPath volumes are replaced by a CSI driver,
 `c4.avalanche.io`, with ephemeral inline volumes:
@@ -317,31 +448,33 @@ volumes:
 - name: assets
   csi:
     driver: c4.avalanche.io
+    readOnly: false
     volumeAttributes:
       materialization: sh010
       capture: "true"
 ```
 
 - Pods under Pod Security `restricted` may use `csi` volumes. hostPath is
-  gone from user pods.
+  gone from user pods, and the e2e enforces `restricted` on its namespaces.
 - All privileged work (mounting overlays, creating whiteouts, writing the
-  cache) happens in the driver, which runs privileged in `c4-system`.
-- `NodePublishVolume` resolves the Materialization, makes the layers present,
-  and mounts the overlay at the target path. It is idempotent. Fetching runs
-  detached from the RPC, so if kubelet's call times out on a 200 GB cold
-  fetch, the retry joins the work in flight instead of restarting it. The pod
-  stays `ContainerCreating` until the tree is complete. Missing content fails
-  the publish, and the workload never starts.
-- `NodeUnpublishVolume` captures (section 3.4) and unmounts.
-- The `CSIDriver` object requests a projected service-account token
-  (`tokenRequests`, audience `c4.avalanche.io`), used for identity
-  (section 5.2).
+  cache) happens in the node daemon, which runs privileged in `c4-system`.
+- The `CSIDriver` object sets `podInfoOnMount: true`,
+  `volumeLifecycleModes: [Ephemeral]`, `fsGroupPolicy: None` (kubelet must
+  never chown a view recursively, which would copy every file up), and
+  `tokenRequests` with audience `c4.avalanche.io` (section 6.2).
+- `NodePublishVolume` authenticates the pod, resolves its Materialization,
+  makes the layers present, and mounts the overlay at the target path. It is
+  idempotent. Fetching runs detached from the RPC, so if kubelet's call
+  times out on a 200 GB cold fetch, the retry joins the work in flight. The
+  pod stays `ContainerCreating` until the tree is complete. Missing content
+  fails the publish, and the workload never starts.
+- `NodeUnpublishVolume` captures (section 4.4) and unmounts.
 - The mutating webhook stays as a convenience. It turns the MVP's
   annotations into the `csi` volume and mounts, and nothing more.
 
-## 5. Per-project isolation
+## 6. Per-project isolation
 
-### 5.1 Projects
+### 6.1 Projects
 
 A `Project` is cluster-scoped and owned by cluster administrators:
 
@@ -351,189 +484,975 @@ kind: Project
 metadata: {name: show-a}
 spec:
   namespaces: [show-a-render, show-a-comp]
-  isolation: Strict                 # Strict | Shared
+  isolation: Strict                   # Strict | Shared
   store:
-    shards: ["s3://a-store-1/c4/?endpoint=...", "s3://a-store-2/c4/?endpoint=..."]
-    credentialsSecretRef: {name: show-a-store}   # in c4-system, not in user namespaces
-    kmsKeyRef: ...                  # optional, see 5.5
-  grants:                           # optional; empty means any tree in the project's own store
-  - tree: c4...                     # a root tree, source c4m, or changeset ID
+    shards: ["s3://show-a/c4/?endpoint=http://minio-0...", "s3://show-a/c4/?endpoint=http://minio-1..."]
+    credentialsSecretRef: {name: show-a-store}   # a Secret in c4-system
+    access: Tiered                    # Tiered | Direct
+  grants:                             # optional; empty means anything in the project's own store
+  - tree: c4...                       # a view, root record, source c4m, or changeset ID
     paths: [shots/sh010/, editorial/]
+  work:                               # P5: quotas per pool, budgets
+    quotas: [{pool: cpu, nominal: 40, borrowingLimit: 40}]
+    burstBudgetPerDay: "800"
 ```
 
-A Materialization belongs to the project that lists its namespace. Users
-choose neither the store nor the credentials. Those come from the Project.
+A namespace belongs to at most one Project. A Materialization belongs to the
+Project that lists its namespace. Users choose neither the store nor the
+credentials.
 
-### 5.2 Identity and authorization
+### 6.2 Identity and authorization
 
 - **Pods.** `NodePublishVolume` receives the pod's projected token (audience
-  `c4.avalanche.io`). The driver validates it with TokenReview, and checks
-  that the token's namespace and pod UID match the volume context. The
-  namespace maps to a project, and the Materialization must be in that
-  namespace. The driver does not rely on the caller being kubelet.
-- **Daemons and caches.** Tier-to-tier requests carry the caller's own
-  projected token (audience `c4-tier`). The server validates it with
-  TokenReview, caches the result for the token's lifetime, and accepts only
-  the `c4-system` service accounts of the node daemon and the regional tier.
-  Pods never reach the tier API with valid credentials.
-- **Knowing an ID is not permission.** Pods cannot fetch by ID at all; they
+  `c4.avalanche.io`). The daemon validates it with TokenReview and checks
+  that the token's namespace, pod name and pod UID match the volume context.
+  kubelet already overrides any user-supplied `csi.storage.k8s.io/*` keys,
+  and the token check makes that a verified fact rather than an assumption.
+- **Tiers.** Tier requests carry the caller's own projected token (audience
+  `c4-tier`). The server validates it with TokenReview, caches the result
+  until the token expires, and accepts only the node daemon and regional
+  service accounts in `c4-system`, plus the HUD's for reads (it fetches
+  preview proxies, section 10.4, after checking the viewer's access to that
+  project). A pod that calls a node daemon or a regional replica directly is
+  refused, with or without a token.
+- **Knowing an ID is not permission.** Pods cannot fetch by ID at all. They
   can only mount Materializations in their own namespace. A Materialization
-  resolves through the project's store with the project's credentials, and
-  through the project's grants. An object is served to a project only if it
-  is reachable from a tree the project may use:
-  - with grants: from a granted tree, under granted paths (the include filter
-    is intersected with the grant paths);
-  - without grants: from a description in the project's own store. A
-    hand-written ConfigMap c4m that lists another project's IDs resolves
-    against this project's store, where those objects do not exist.
-- **Directory-level grants** are the `paths` of a grant, applied as a second
-  filter that the user cannot widen.
+  resolves through its project's store with its project's credentials and
+  through its project's grants:
+  - with grants, the source must be a granted tree, and the include filter is
+    intersected with the grant's paths;
+  - without grants, the description is resolved against the project's own
+    store. A hand-written ConfigMap c4m that lists another project's IDs
+    resolves against this project's store, where those objects do not
+    exist, and the Materialization fails before any node is involved.
+- **Writes the daemons make to the API.** Node daemons annotate pods with
+  capture results and label their own Node when its cache is warm (section
+  9.8). RBAC cannot scope those verbs, so a ValidatingAdmissionPolicy does:
+  the node daemon's service account may change only
+  `c4.avalanche.io/output-*` annotations, only on pods bound to its own node
+  (from the token's `authentication.kubernetes.io/node-name`), and only the
+  `c4.avalanche.io/` labels of its own Node.
 
-### 5.3 Strict mode: no shared caches
+### 6.3 Strict mode: no shared caches
 
-In `Strict` mode (the default), each project has its own object cache, its own
-lowers on every node, and its own partition at every cache tier (the
-`X-C4-Project` header is part of the cache key, and upstream fetches use the
-project's credentials). No byte is shared across projects, even when the
-content is identical.
+In `Strict` mode (the default), each project has its own object cache, its
+own layers on every node, and its own partition at every cache tier (the
+project is part of the cache key, and upstream fetches use the project's
+credentials). No byte is shared across projects, even when the content is
+identical.
 
 **Why not deduplicate across projects?** A shared content-addressed cache is
-an oracle. If project B can make the node fetch ID X and time the result, a
-fast answer reveals that someone on that node (or region) recently used X.
-Because IDs are hashes of content, B can test guesses: render a candidate
+an oracle. If project B can make a node fetch ID X and time the result, a
+fast answer reveals that someone on that node or in that region recently used
+X. Because IDs are hashes of content, B can test guesses: render a candidate
 frame of a competitor's unreleased shot, compute its ID, and probe. That is
 a confirmation-of-file attack, and it needs no read access to A's data. Even
 without timing, a cache that answers B's request from A's fill leaks A's
 bytes if B's store lacks them. Partitioning removes both channels.
 
-`Shared` mode trades this away deliberately for projects that trust each
-other, such as departments of one show. It shares objects and lowers across
-the projects listed in a `sharingGroup`. Before serving a shared cached
-object to project B, the tier checks `HEAD` on B's own store (a proof of
-possession), so B can never read bytes it could not have read anyway. The
-timing channel remains, and is documented.
+### 6.4 Shared mode
 
-### 5.4 Credentials
+`Shared` trades this away deliberately for projects that trust each other,
+such as departments of one show. Projects in the same `sharingGroup` share
+objects and layers. Before serving a shared object to project B, the tier
+checks `HEAD` on B's own store (proof of possession), so B never reads bytes
+it could not have read anyway. The timing channel remains, and is
+documented.
 
-Store credentials live in Secrets in `c4-system`, referenced by Projects. The
-node daemon and the regional tier get them through a Role in `c4-system`
-only. That fixes the MVP's cluster-wide Secret read. In strict tier mode only
-the regional tier needs read credentials, and nodes need write credentials
-only for capture.
+### 6.5 Credentials
 
-### 5.5 Encryption (designed, not built)
+| component        | Tiered project                 | Direct project            |
+| ---------------- | ------------------------------ | ------------------------- |
+| node daemon      | none                           | read and write            |
+| regional tier    | read and write                 | none                      |
+| manager          | read and write (records)       | read and write (records)  |
+| user namespaces  | none                           | none                      |
+
+Store credentials live in Secrets in `c4-system`, referenced by Projects, and
+are read through a Role in `c4-system` only. That fixes the MVP's cluster-wide
+Secret read. The MVP's agent socket is gone: kubelet reaches the driver on
+the CSI socket, and every publish is authenticated with the pod's own token.
+
+### 6.6 Encryption (designed, not built)
 
 With `kmsKeyRef`, objects are encrypted at rest in the store under a
-per-project data key wrapped by KMS. The C4 ID stays the ID of the plaintext,
-so the store key does not reveal anything that the ID would not. Encryption
-uses a convergent-free scheme: a random nonce per object, stored with the
-object, so equal plaintexts in two projects are different ciphertexts.
-Decryption happens at the regional tier (strict) or the node (direct). Caches
-hold plaintext on local disk, so per-project encryption protects the store and
-not a compromised node.
+per-project data key wrapped by KMS. The C4 ID stays the ID of the plaintext.
+Each object has a random nonce stored with it, so equal plaintexts in two
+projects are different ciphertexts. Decryption happens at the regional tier
+(Tiered) or the node (Direct). Caches hold plaintext on local disk, so this
+protects the store, not a compromised node.
 
-### 5.6 Trust boundary
+### 6.7 Trust boundary
 
 Pods are untrusted. Node daemons and regional caches are trusted
-infrastructure: they run privileged or hold credentials, and anyone who owns a
-node already owns what is mounted on it. Tier traffic is authenticated so
-that pods and other workloads in the cluster cannot use the tiers.
+infrastructure: they run privileged or hold credentials, and whoever owns a
+node already owns what is mounted on it. Within that, node daemons are the
+large, exposed population, so they hold the least: no store credentials in
+tiered mode, and API writes limited by admission policy.
 
-## 6. Very large clusters
+## 7. Very large clusters
 
 - **The control plane is not in the data path.** The controller resolves a
-  Materialization once per generation (IDs, totals, store preflight) and
-  writes one status. Nodes and caches talk to each other and to the store,
-  never through the API server.
-- **No per-node or per-pod status in the CR.** At 10,000 nodes, per-node
-  status entries would make every Materialization a hot, megabyte-sized etcd
-  object. The MVP's `status.nodes` is removed. Per-tier and per-node behavior
-  is reported as Prometheus metrics (hits, misses, coalesced waits, shed
-  requests, upstream fetches and bytes, publish latency, capture counts),
-  aggregated by the cluster's metrics stack. The only per-pod write is the
-  capture annotation on the pod itself, which the pod already owns.
-- **Bounded watches.** A node daemon watches:
-  - only the daemon pods in its own pool (label selector
-    `c4.avalanche.io/pool=<pool>`), for peer membership;
-  - the regional tier's EndpointSlices, which hold tens of endpoints;
-  - Projects and Materializations by name, on demand, with a short-lived
-    cache. There is no cluster-wide pod watch.
-
-  A Materialization change wakes the controller, not 10,000 nodes.
-- **Eviction under pressure.** Each node has a byte budget. Unlinked objects
-  go first, in LRU order by atime. Then layers that no mounted volume uses
-  and whose `retainOnNode` has passed. A layer under a live mount is never
-  removed. The regional tier evicts by LRU only, since it has no mounts.
-- **Node churn.** When a node leaves a pool, rendezvous moves only the objects
-  homed on it (1/n of the pool's objects) to new homes. Those homes refetch
-  them from the regional tier on demand, which coalesces. A node that joins
-  starts empty and becomes home for 1/n of objects. Peers that ask it early
-  get 404s or coalesced waits, never cascades.
-- **Regional churn.** Losing a regional replica moves its objects to the next
-  replica in rendezvous order. That replica refetches each one at most once,
-  so the store sees at most one extra GET per affected object. Clients resume
+  Materialization once per generation (IDs, totals, records, store
+  preflight) and writes one status. Nodes and caches talk to each other and
+  to the store, never through the API server.
+- **No per-node or per-pod status in custom resources.** At 10,000 nodes,
+  per-node entries would make every Materialization a hot, megabyte-sized
+  etcd object. The MVP's `status.nodes` is removed. Behavior is exported as
+  Prometheus metrics (hits, misses, coalesced waits, shed requests, upstream
+  fetches and bytes, publish latency, capture counts) and aggregated by the
+  metrics stack. The only per-pod write is the capture annotation on the pod.
+- **Bounded watches.** A node daemon watches the Nodes of its locality, the
+  regional tier's EndpointSlices, and Projects (cluster-scoped and small).
+  It reads a Materialization only when a pod mounts it, with
+  `resourceVersion=0` so the API server answers from its watch cache, and
+  caches it briefly. A Materialization change wakes the controller, not
+  10,000 nodes.
+- **Eviction under pressure.** Each node has a byte budget. Layers that no
+  mounted volume uses and whose retention has passed go first, least recently
+  used first, then objects no layer links (link count 1), least recently
+  used first. A layer under a live mount is never removed. The regional tier
+  evicts by LRU only.
+- **Node churn.** When a node leaves a locality, rendezvous moves only the
+  objects homed on it (1/n) to new homes, which refetch them from the
+  regional tier on demand, coalesced. A joining node starts empty. Peers that
+  ask it early get 404s or coalesced waits, never cascades.
+- **Regional churn.** Losing a replica moves its objects to the next replica
+  in rank order, which refetches each one at most once. Clients resume
   interrupted transfers there.
 
-## 7. Use cases
+## 8. Use cases
 
-### 7.1 Render farms
+### 8.1 Render farms
 
 Plates (EXR sequences), USD stages and layers, caches (Alembic, VDB),
-textures, and model weights. The pattern is many pods reading one tree
-whole, at the same moment, and writing new frames.
+textures, and model weights. Many pods read one tree whole, at the same
+moment, and write new frames.
 
 - Inputs: a Materialization per shot (`include: shots/sh010/`, `assets/`),
-  eager lowers, homed per pool, served from one lower per node.
-- Outputs: written into the mounted tree (for example `shots/sh010/render/`),
-  captured per pod as a changeset with the pod's frames. A downstream comp job
-  mounts the output tree, or the input stacked with every frame changeset.
+  eager layers, homed per locality, one layer per node shared by every pod
+  on it.
+- Outputs: written into the mounted tree (for example
+  `shots/sh010/render/`), captured per pod as a changeset. A downstream comp
+  job mounts the output view, or the input stacked with the changeset.
 - Versioning: "v12 = v11 + 3 changed frames" is a changeset. Nodes that had
   v11 add a three-file delta layer.
 
-### 7.2 Monorepo CI (Scion's case)
+### 8.2 Monorepo CI (Scion's case)
 
-A large repository imported into C4. Each commit is a tree, and each
-commit's diff against its first parent is a changeset c4m. Many CI pods
-check out sparse, stacked views:
+A repository imported into C4. Each commit is a view, and each commit's diff
+against its first parent is a changeset. Many CI pods check out sparse,
+stacked views:
 
-- the import walks `git ls-tree`/`git cat-file` and ingests blobs once.
-  Files already managed by c4git are 90-byte C4 IDs in git, which the
-  importer uses directly, so large files are never re-hashed;
-- a CI job's Materialization is (commit tree or changeset, `include:
+- `c4-operator import-git` walks first-parent history with `git diff-tree`
+  and applies each commit's changes to the previous view with the same code
+  capture uses, so import cost is proportional to each commit's change. Blob
+  content is hashed once and remembered by git object ID;
+- files managed by c4git are 90-byte C4 IDs in git. The importer uses the ID
+  directly, copies the object from the c4git store without rehashing (c4git
+  verified it at `git add`), and takes its size from the store;
+- a CI job's Materialization is (commit view or changeset, `include:
   services/foo/, libs/common/`);
 - a node that ran CI for the parent commit adds one thin delta layer for the
   child commit;
-- build outputs captured from the upper become the cache key for the next
-  stage.
+- build outputs captured from the upper become the input of the next stage.
 
-The lazy lower (section 3.5) matters most here, because tests read a small
+The lazy lower (section 4.6) matters most here, because tests read a small
 fraction of a large tree.
 
-## 8. What it is not yet, and the plan
+## 9. Work system (P5)
 
-### Phases
+### 9.1 Scope
 
-- **P1:** no per-read verification; Project CRD; overlay views with a shared
-  lower per (project, view) and an upper per volume; changeset capture with
-  store ingest; the CSI driver; status without per-node entries; metrics.
-- **P2:** the tier API server and client with singleflight, admission control
-  and resume; peer fetch with rendezvous homes; the regional cache
-  Deployment; sharded stores (several MinIO instances); a thundering-herd e2e
-  on a multi-node kind cluster, including a regional replica killed mid-run.
-- **P3:** project isolation: TokenReview at publish and between tiers; strict
-  partitions; grants; credentials scoped to `c4-system`. Tests show project B
-  cannot read project A's objects even with their IDs.
-- **P4:** the monorepo CI case through a git importer that understands c4git,
-  if time allows.
+One farm runs several kinds of work: deadline-driven rendering, CI over a
+source monorepo, media processing, and modest ML. They share nodes, data and
+budgets, and they compete for the same capacity on the same days. The work
+system is one queue and one scheduler for all of them. What differs between
+kinds of work lives in **work classes** (section 9.4). Render, CI and ML are
+the classes built here.
 
-### Not in this plan
+### 9.2 The queue model
 
-- The lazy FUSE lower (section 3.5).
-- KMS encryption (section 5.5).
-- Cache-aware scheduling, which places pods on nodes or pools that already
-  hold most of a tree. The node metrics are its input.
-- On-demand capture through an API (capture happens at unpublish only).
-- Cross-region store replication, and garbage collection of unreferenced
-  objects in the store.
-- Streaming to coalesced waiters while the leader is still downloading. They
-  wait for the whole object.
+The queue is a controller in the manager. It holds **units** of work (a
+chunk of frames, a test shard, a pipeline step, a training run) and
+**releases them into the cluster only when they can run**, in an order
+derived from each job's objective. kube-scheduler places each pod on a node.
+This is admission-style queueing, the division of labor Kueue uses: the queue
+decides what runs next and how much, the scheduler decides where.
+
+Releasing units only when capacity is free matters for three reasons.
+Changes of order take effect immediately, because nothing waits as a pending
+pod with a frozen priority. The cluster never holds 100,000 pending pods.
+Capacity hooks see a clean signal: pending pods mean real shortage, not queue
+depth.
+
+### 9.3 Prior art and what this builds on
+
+| system                     | what it offers                                                                                                                              | what it lacks for this                                                                                         |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Kueue                      | ResourceFlavors; ClusterQueues with quotas; cohorts with borrowing and lending; fair sharing; preemption; all-or-nothing admission; topology-aware scheduling; ProvisioningRequest admission checks; JobSet, LeaderWorkerSet, Kubeflow Trainer and Ray integrations | Admits whole workloads with a static priority that people set. No estimate of remaining work, no deadline model |
+| Volcano                    | Gang scheduling, queues with weights, DRF, proportion, an SLA plugin on waiting time, reclaim and preempt                                   | Replaces kube-scheduler for its pods. Orders by priority, fairness and wait time, not completion deadline       |
+| YuniKorn                   | Hierarchical queues with guaranteed and max resources, fair or FIFO sorting, gang scheduling, preemption                                    | A scheduler replacement with static ordering policies                                                          |
+| JobSet, LeaderWorkerSet    | Multi-pod training and serving jobs with gang semantics, failure policies, exclusive topology placement                                     | No queue: they rely on Kueue or a gang scheduler for admission                                                 |
+| Kubeflow Trainer, KubeRay  | Training jobs (TrainJob on JobSet) and Ray clusters as Kubernetes objects                                                                    | Same: admission and quotas come from Kueue                                                                     |
+| Deadline                   | Pools and groups, priority 0 to 100, machine and license limits, bad-worker detection, Spot Event Plugin bursting                           | Priorities are set by people. Bursting follows queued task counts, not deadline risk                           |
+| OpenCue                    | Shows with subscriptions (guaranteed size and burst per allocation), layers with resource needs, host tags                                  | Orders by subscription share and priority. No deadlines                                                        |
+| Tractor (and Alfred)       | Job scripts of Tasks and Cmds, priorities, sharing limits, blade profiles, and `-expand` commands whose output becomes new subtasks        | Priorities are set by people. Expansion exists, but nothing estimates the work it will reveal                   |
+
+Tractor's expand is the prior art for dynamic graphs. A `RemoteCmd` with
+`-expand 1` "produces new Tractor task descriptions as its output", and
+"those new tasks will become new subtasks of the current Task" (Tractor
+scripting reference). Tractor 1.7 added a file form, and 2.1 added expand
+chunks (`TR_EXPAND_CHUNK "filename"`) so a long-running command can deliver
+tasks while it runs. Section 9.6 adopts both forms.
+
+Decision:
+
+- **Build on** kube-scheduler for placement, Pods for execution, the Cluster
+  Autoscaler `ProvisioningRequest` API and Karpenter NodePools for capacity,
+  Prometheus metrics for KEDA, and **Kueue with JobSet** for anything that
+  needs gang or topology-aware scheduling (ML training). Kueue is chosen over
+  Volcano and YuniKorn because it admits work and leaves placement to
+  kube-scheduler, as this queue does, so the two compose instead of competing,
+  and because JobSet, LeaderWorkerSet, Kubeflow Trainer and KubeRay all
+  integrate with it. Project quotas use Kueue's semantics (nominal quota,
+  borrowing limit, lending of unused quota, reclaim by preemption), so a farm
+  that runs Kueue reads the same rules.
+- **Build** the unit-level queue, dynamic expansion with estimates of
+  unrevealed work, runtime estimation, objective-driven allocation, the
+  feasibility check, and cost-aware burst decisions. None of the systems
+  above estimate remaining work or order by deadline risk.
+
+### 9.4 The shared core and work classes
+
+Render, CI and ML have the same skeleton. The core owns it:
+
+| concept            | core meaning                                                                                                   | render                          | CI                                   | ML (wrapped)                                        |
+| ------------------ | -------------------------------------------------------------------------------------------------------------- | ------------------------------- | ------------------------------------ | --------------------------------------------------- |
+| unit               | the smallest thing the queue releases; one pod, or one wrapped object                                          | a chunk of frames of one pass   | a step or a test shard               | a training run or a sweep trial                     |
+| gang               | members that start and stop together; the queue accounts for them as one unit and never releases or preempts part of one | size 1                          | size 1                               | the ranks of a run; placement by Kueue and JobSet   |
+| generator          | a unit whose evaluation adds units and edges (section 9.6)                                                     | RIB or scene expansion into passes | test discovery into shards         | a sweep planner into trials                         |
+| objective          | an effective deadline or a required rate (section 9.7)                                                         | deadline from job, shot or delivery | latency SLO: ready time plus p95 target | deadline, or a GPU-hour rate                        |
+| estimator          | a duration distribution for every unit and every unexpanded generator (section 9.8)                            | per frame-range bucket and pass | per target and shard history         | steps left times measured step time                 |
+| pools              | where units may run (section 9.10)                                                                             | cpu, gpu, high-mem, spot        | ci runners                           | gpu pools                                           |
+| preemption         | stop with or without a checkpoint; resume from captured state (section 9.13)                                   | checkpointed long frames        | rarely: shards are short             | yield at a checkpoint boundary                      |
+| lens               | the class-specific HUD panel (section 10.4)                                                                    | passes by frame, exposure sheet | pipelines per change, flaky tests    | ranks and trials, useful GPU hours                  |
+
+A **work class** is a driver plus its configuration. The driver is a Go
+package that implements one interface; the configuration is a `WorkClass`
+object. The core imports no class package except through a registry, and
+nothing in the core mentions frames, tests or ranks.
+
+```go
+type Class interface {
+    Name() string
+    Plan(job *Job) (Graph, error)                        // units, edges, gangs, generators
+    Expand(job *Job, gen UnitID, doc []byte) (Graph, error) // a generator's output becomes units and edges
+    Objective(job *Job, wc *WorkClass, now time.Time) Objective
+    Estimator(job *Job, h History) Estimator             // includes the fan-out model for generators
+    Launch(job *Job, u *Unit) ([]client.Object, error)   // pods, or a suspended JobSet for wrapped work
+    Observe(job *Job, u *Unit, r Result)                 // class signals: flaky tests, useful GPU hours
+    Summary(job *Job) json.RawMessage                    // bounded, for the HUD lens
+}
+```
+
+Adding a class (media transcode, simulation caches, generative batch,
+interactive sessions, data movement) means writing a driver, a `WorkClass`
+object and a lens. Section 9.18 sketches each.
+
+### 9.5 Objects
+
+| kind              | scope     | written by        | holds                                                                                                              |
+| ----------------- | --------- | ----------------- | ------------------------------------------------------------------------------------------------------------------ |
+| `WorkClass`       | cluster   | administrators    | driver, SLO type and target, default pools, estimator settings, lens, fair-share weight, preemptibility             |
+| `WorkJob`         | namespace | people and tools  | class, class parameters, objective overrides, requirements, inputs, outputs, dependencies on other jobs, nudges, pod template |
+| `Pool`            | cluster   | administrators    | node selector and tolerations, slot shape, attributes (class, GPU model, VRAM, capacity type), cost per node-hour, capacity bounds and provider |
+| `Project`         | cluster   | administrators    | `spec.work.quotas`: nominal slots and borrowing limit per pool; burst budget; lateness cost                       |
+| `Milestone`       | namespace | production        | a due time and a label selector of the jobs it covers (a shot, a delivery, a release)                              |
+| `CapacityRequest` | cluster   | the scheduler     | per pool: slots wanted, until when, why, estimated cost, approval, views to pre-warm                               |
+
+A WorkJob looks like this:
+
+```yaml
+apiVersion: c4.avalanche.io/v1alpha1
+kind: WorkJob
+metadata:
+  name: sh040-light-v007
+  namespace: show-a-render
+  labels: {c4.avalanche.io/shot: sh040}
+spec:
+  class: render
+  params: {frames: "1001-1240", chunk: 1, passes: [beauty], expand: true}
+  deadline: "2026-10-23T18:00:00-07:00"     # optional; else from Milestones; else class default
+  requirements: {pools: [gpu]}
+  dependsOn: [sh040-fx-v003]
+  inputs:
+  - {materialization: sh040-plates, mountPath: /show}
+  - {fromJob: sh040-fx-v003, mountPath: /fx}  # mounts the upstream job's output view
+  output: {capture: true}
+  nudge: {hold: false, boost: "1.0"}
+  retries: 2
+  nodeErrorLimit: 3
+  checkpoint: {signal: SIGTERM, graceSeconds: 120}
+  template: {spec: {containers: [...]}}
+```
+
+WorkJob status holds counts, per-unit state as run-length encoded index sets
+(`succeeded: "0-99,102-180"`), the graph's size and expansion state, the
+estimate (remaining slot-seconds with a 90th percentile, required and
+attainable slots, ETA, slack, feasibility), a bounded blacklist, the output
+view, and the class summary. Its size is bounded by state changes along the
+unit range, not by the number of units. Very large graphs (over 50,000 units
+or after deep expansion) keep their unit table as a c4m-style object in the
+project store, referenced from status, so etcd never holds it.
+
+**Data flows between jobs as views.** Each unit's captured changeset has the
+job's input view as parent. When a job finishes, the controller folds its
+units' changesets into the job's output view (conflicting writes to the same
+path are reported, not merged silently). A downstream job's `fromJob` input
+mounts that view. The dependency graph (sim to render to comp to transcode to
+delivery) is therefore also a data-flow graph of content-addressed trees, and
+each output is already cached on the nodes and regional replicas that
+produced it.
+
+### 9.6 Dynamic expansion
+
+A unit can be a **generator**: a node of the graph whose evaluation adds
+units and edges. A RIB file that produces shadow and reflection passes before
+its beauty render, a CI step that discovers which test shards a change needs,
+and a sweep planner that spawns trials are all generators.
+
+- **States.** A generator starts *unevaluated*. Evaluating it is itself a
+  schedulable unit. When it finishes, its expansion document becomes new
+  concrete units and edges attached under it, and the generator becomes
+  *expanded*. Expansion may nest (a generator may emit generators), bounded
+  in depth and in total units per job.
+- **Transport.** The evaluation writes its expansion document into its own
+  C4 volume (`.c4/expand.json`, the Tractor 1.7 file form). Capture stores it
+  like any output, and the controller reads it from the store by path. Long
+  evaluations can write numbered chunks (`.c4/expand.0001.json`, the Tractor
+  2.1 chunk form); the node daemon notices each complete chunk in the upper,
+  ingests it, and reports its ID in a pod annotation, so children can start
+  before the generator ends. No unit table travels through pod annotations or
+  termination messages.
+- **Edges.** Children inherit the generator's dependents: whatever waited on
+  the generator now waits on its children (all of them, unless the document
+  names a subset). A child may depend on its siblings, as beauty depends on
+  shadow.
+- **Estimating work that does not exist yet.** Before evaluation, a
+  generator's eventual work is a distribution taken from history for similar
+  generators (same class and generator key, for example "rib-expand, layer
+  lighting, show A"): the number of children and their total work, with
+  variance. As generators in the job are evaluated, the job's own observed
+  fan-out replaces the prior (a running mean and variance per generator key),
+  and expanded children carry their own estimates. The job's remaining-work
+  band narrows as expansion happens, and the HUD draws that band (section
+  10.3).
+- **Order.** Unevaluated generators carry information the scheduler needs,
+  so a job's generators are evaluated ahead of its concrete units of equal
+  standing (section 9.9), the same reasoning as sampling frames early.
+
+### 9.7 Objectives: every SLO becomes a deadline or a rate
+
+| SLO type   | target                         | effective objective per job                                                                 |
+| ---------- | ------------------------------ | ------------------------------------------------------------------------------------------- |
+| Deadline   | a time                         | the job's `deadline`, else the earliest Milestone that selects it, else submission plus the class's default turnaround |
+| Latency    | p50 and p95 time to finish     | deadline = the time the job became ready plus the p95 target                                  |
+| Throughput | units or GPU-hours per period  | a required rate in slots; slack is how far the job is ahead of or behind that rate          |
+
+**Deadlines propagate up the dependency graph.** A job's effective deadline
+is also no later than each dependent's deadline minus the dependent's
+estimated duration at its attainable parallelism. Comp due Friday 18:00 that
+needs 4 hours gives its render inputs Friday 14:00, and their sim inputs
+earlier still. A job waiting on dependencies is not runnable, but its
+upstream jobs see its pressure.
+
+**Latency SLOs feed back.** If a class's measured p95 over the last hour is
+under target, its effective deadlines relax toward the target. If it is over,
+they tighten. CI then takes no more of the farm than its SLO needs.
+
+### 9.8 Dispatch order and estimating remaining work
+
+**Order within a job** is a core option over the job's unit axis (frames
+for render, grid points for a sweep):
+
+- `Sequential` and `Reverse`;
+- `Binary`: the first and last unit, then the midpoint, then the quarter
+  points, then the eighths, and so on. Within each level the order is
+  bit-reversed (van der Corput: 1/2, 1/4, 3/4, 1/8, 5/8, 3/8, 7/8, ...), so
+  every prefix of the order is spread as evenly as the level allows. For a
+  range that is not a power of two, each fraction maps to the nearest index
+  of the range and indexes already taken are skipped, which still visits
+  every index exactly once. Frame steps (`1001-1240x2`) and chunking apply
+  first: the order runs over units, so a chunked job fills coarse to fine at
+  chunk granularity.
+
+`Binary` is the default for render preview and dailies classes, and
+available to every job. After 33 units of a 240-frame shot, every 8th frame
+exists: a preview plays the whole shot at low temporal resolution, and the
+estimator has a spot check across the entire sequence. A class can declare a
+different default where its axis has no locality (CI shards are ordered by
+historical failure rate instead, so a broken change fails fast).
+
+**Estimating** is stratified along the same axis:
+
+- **Per-region cost.** Durations are kept per (job, class key), indexed by
+  position on the axis. An unrendered frame's cost is interpolated between
+  the nearest completed frames on each side, which binary order guarantees
+  exist early. Its error bar combines the difference between those
+  neighbors and the interpolation's measured error (each completed frame is
+  also predicted from its own neighbors, leave-one-out, and the residuals
+  give the spread). Errors are treated as correlated within a region and
+  independent across regions, so the job's error bar is honest rather than
+  shrunk by averaging.
+- **Fallbacks.** With no neighbors on one side, the estimate is the nearest
+  region's median, else the job's median, else a prior from the project's
+  history for that class key, else the class default. Each class picks its
+  key: pass for render, test target for CI, steps and step time for ML.
+- **Heavy regions.** A region whose interpolated cost exceeds three times
+  the job median is flagged ("frames 1100-1150 run 3.4x the median, hero
+  FX") as soon as one of its frames is measured. Under sequential order the
+  same region is found when the queue reaches it.
+- Sequential order can only extrapolate from frames already rendered, so its
+  estimate of the remainder is blind to whatever lies ahead. The simulation
+  measures the difference (section 9.20).
+- **Remaining work** `W` is the sum of unit estimates for queued units, the
+  expected remainder of running ones (past their estimate, a running unit is
+  assumed to need a quarter of its elapsed time again), and the expected work
+  of unexpanded generators. Its spread `σ` combines the variances, and the
+  scheduler plans on `W90 = W + 1.28 σ`, so a job with few samples or many
+  unexpanded generators is treated as riskier.
+- **Critical path.** Within a job, the longest chain of estimated durations
+  through the unit graph (`t_path`) bounds the finish time no matter how many
+  slots the job gets. For a render job it is one frame's passes; for a CI
+  pipeline it is build plus the longest shard.
+
+### 9.9 Objective-driven allocation
+
+For each runnable job, with `T` the time to its effective deadline:
+
+- **required slots** `R = W90 / T`, the average parallelism that finishes
+  exactly on time (a Throughput job's `R` is its required rate);
+- **attainable slots** `A`: the job's parallel cap, its pools' size, and its
+  project's quota plus borrowable slots, whichever is least;
+- **slack** `S = T - max(W90 / A, t_path)`. This is the laxity in the brief:
+  deadline minus now minus estimated remaining time over attainable
+  parallelism, with the critical path as a floor.
+
+Each time capacity frees up in a pool, the scheduler fills it in this order:
+
+1. **Deadline need.** Jobs running below their required rate, most behind
+   first by `running / R`. Every feasible job gets the parallelism its
+   objective needs before anyone gets more. This is load-to-deadline
+   balancing, and it applies to a render job due Friday and a CI pipeline due
+   in twelve minutes alike.
+2. **Information.** Unevaluated generators, and the coarse levels of jobs
+   in binary order (up to every 8th unit), of jobs that have them. Both
+   reveal what the rest of the job will cost.
+3. **Fair share.** Remaining capacity goes to projects in order of usage
+   divided by entitlement (their quota share, weighted by class), and within
+   a project to the job with the least slack. Finishing early is how a farm
+   builds margin for surprises.
+4. **Ties** within 10% on the deadline ratio go to the project with the
+   lower fair-share usage, then to the older job.
+
+**Overload.** When the total `R` exceeds capacity even with burst, ordering
+purely by urgency (EDF and least-laxity-first both do this) makes every job
+late. The scheduler instead marks jobs whose objective is lost even with all
+attainable capacity as infeasible, serves feasible jobs first, and serves
+infeasible ones in order of smallest remaining work, which minimizes the
+number of late jobs. The infeasible state is what the HUD and the capacity
+hooks act on.
+
+**Starvation guard.** A job with no running unit for 30 minutes gets one
+slot regardless of order, so far-deadline work keeps progressing and keeps
+its estimate fresh.
+
+**Nudges, not priorities.** Manual priorities are gone. People get bounded
+overrides:
+
+- `hold`: release no new units (running ones finish, unless `hold: Stop`);
+- `boost` (1 to 2): multiply the job's required slots, drawn from its own
+  project's quota first, so a boost cannot take another project's
+  guarantee;
+- `deadline`: set or move the job's deadline, which is usually what people
+  mean when they raise a priority.
+
+### 9.10 Pools, placement, quotas
+
+- A **pool** maps to a node pool by label selector and tolerations. A slot
+  is the pool's unit of capacity (for example 8 cores and 32 GiB, or 1 GPU).
+  A node's slots come from its allocatable resources divided by the slot
+  shape, or from a node label.
+- A job states **requirements**: pool names, or attributes (`class: gpu`,
+  `gpu.vram >= 24Gi`, `capacityType: on-demand`). The scheduler releases
+  units only into matching pools, prefers the cheapest matching pool with
+  room, and adds the pool's node selector and tolerations to the pod.
+- **Quotas** follow Kueue's semantics. A project's nominal slots in a pool
+  are guaranteed when the pool is contended. Unused nominal slots are lent to
+  others up to their borrowing limit. When the owner needs them back, the
+  scheduler reclaims them by preempting the borrower's least valuable units
+  (section 9.13).
+- **Gangs** are accounted as one unit with the sum of their members' slots.
+  The queue releases a gang only when its pool has room for all of it. The
+  co-placement itself (all members bound together, in one rack or fabric
+  domain) is provided by the wrapped scheduler (Kueue with JobSet), not by
+  this queue.
+
+### 9.11 Feasibility check and warnings
+
+The scheduler recomputes every job's estimate and slack on every unit
+transition, coalesced to once per second. A job whose 90th-percentile finish
+is after its effective deadline gets a `Feasible=False` condition with a
+message in production's terms:
+
+```
+sh040-fx-v003 will miss Fri 18:00 by about 3h at current capacity.
++40 gpu-spot slots closes it (est. $410).
+```
+
+The added slots are the smallest burst that restores feasibility, taking
+each pool's provisioning delay into account. The cost is the pool's price per
+node-hour times node-hours. The same numbers drive capacity requests.
+
+### 9.12 Capacity hooks
+
+The scheduler expresses demand as **CapacityRequest** objects, one per pool.
+Actuators turn them into the platform's own APIs:
+
+| actuator             | mechanism                                                                                                                                         |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cluster-autoscaler` | creates a `ProvisioningRequest` (`autoscaling.x-k8s.io/v1`, class `best-effort-atomic-scale-up.autoscaling.x-k8s.io`) with a PodTemplate of the slot shape and a count |
+| `karpenter`          | sets the pool's NodePool `limits`. Karpenter provisions for the pods the queue then releases                                                       |
+| `keda`               | exports `c4_capacity_requested_slots{pool}` and `c4_work_required_slots{pool}` for a KEDA ScaledObject                                             |
+| `kind-sim`           | the e2e stand-in: provisioning removes a `c4.avalanche.io/unprovisioned` taint from pre-created nodes after the pool's delay                       |
+
+Burst decisions are cost-aware:
+
+- A burst is considered when a job is infeasible on current capacity and the
+  slots it needs exist in a burst pool it may use.
+- Candidate pools are ranked by price per slot-hour, and the scheduler picks
+  the cheapest set that restores feasibility after each pool's provisioning
+  delay. A pool too slow to help before the deadline is skipped.
+- The burst is requested only if its cost is within the project's daily
+  burst budget and below the lateness it prevents, priced at the project's
+  `lateCostPerHour`. Otherwise the HUD shows the option and its price, and a
+  person approves it.
+- Scale-down uses hysteresis: a request shrinks only after a pool's surplus
+  has lasted ten minutes, and nodes are released by the autoscaler's own
+  consolidation, never by the queue.
+
+**Pre-warm.** A CapacityRequest lists the views its jobs will mount. The node
+daemon on a node joining that pool fetches those layers before it labels its
+Node `c4.avalanche.io/cache-warm=true`. The queue releases units to burst
+nodes only once they are warm (or after a timeout), so the first frames on a
+new node do not wait on a cold cache, and a fleet of fresh nodes fills
+through the tiers instead of from the store.
+
+### 9.13 Preemption and checkpoints
+
+- The scheduler preempts only to reclaim a project's nominal quota, or to
+  restore feasibility for a job that is infeasible without it, and only from
+  jobs whose slack exceeds a threshold. It picks victims by lost work: time
+  since the unit's last checkpoint, plus restore cost. It is rate-limited per
+  pool, and a unit is preempted at most twice.
+- A job can declare `checkpoint: {signal: SIGTERM, graceSeconds: 120}`. A
+  preempted unit gets the signal and the grace period to write a checkpoint
+  into its working tree. Capture stores the upper as a changeset like any
+  other output, and the requeued attempt mounts its input with that changeset
+  stacked on top, so it resumes on any node. Long frames lose minutes, not
+  hours.
+- A gang is preempted whole: the queue asks it to yield and suspends the
+  wrapped object once it has checkpointed (section 9.17). Members are never
+  evicted one by one.
+
+### 9.14 Failures, retries and blacklists
+
+- A unit is retried up to `retries` times, never on the node where it last
+  failed.
+- When a node accumulates `nodeErrorLimit` failures for one job, the job
+  blacklists it, and later pods carry a node anti-affinity rule. People can
+  add a node to a job's blacklist, or disable a node farm-wide (a taint),
+  from the HUD.
+- A node that fails units across several jobs and projects is flagged as
+  suspect, which usually means bad hardware rather than a bad job.
+
+### 9.15 Render class
+
+- Units are chunks of frames of one pass. With `expand: true`, each frame
+  (or chunk) starts as a generator that evaluates the scene description (a
+  RIB or USD expansion) and emits its passes, for example shadow and
+  reflection passes that beauty depends on.
+- The objective is a deadline: the job's own, or a Milestone selecting its
+  shot or delivery, or the class default turnaround.
+- Order is per job: `Sequential`, `Reverse` or `Binary`. The `render-preview`
+  and `render-dailies` classes default to `Binary`.
+- The estimator is keyed by pass and interpolates along the frame axis
+  (section 9.8).
+- Outputs are captured per unit and folded into the job's output view as
+  units finish (each fold costs only that unit's changes), so the output
+  view in status is current to the second. A render task that writes
+  proxies (`preview/<frame>.jpg`) makes them visible to the preview player
+  through that view.
+- The lens groups units by pass, 24 frames per row (one second of screen
+  time per row), with the cost-by-frame strip and the preview player
+  (section 10.4).
+
+### 9.16 CI class
+
+The Scion case (section 8.2) running on the same farm.
+
+- **Pipelines per change.** A change (a commit view and its changeset from
+  `import-git`) gets one WorkJob per pipeline stage group, labeled with the
+  change. Units are steps (build) and test shards. Test discovery is a
+  generator that emits the shards a change needs.
+- **Order.** Shards run in order of historical failure rate, so a broken
+  change fails fast. Shard indexes have no locality, so binary order has
+  nothing to spread over.
+- **Objective.** A latency SLO per WorkClass, for example `ci-presubmit`
+  with p50 6 min and p95 15 min, and `ci-merge` with a tighter target.
+  Effective deadline = ready time + p95 target (section 9.7).
+- **Checkout.** Each unit mounts the change's view, sparse by the step's
+  include patterns. A node that ran the parent commit adds one delta layer.
+  Checkout time and outcome (reused stack, delta, or cold) are publish
+  metrics labeled by class.
+- **Flaky tests.** A view ID is the exact identity of a shard's inputs. A
+  shard that fails and then passes on the same view ID, on a retry or in
+  another pipeline, is flaky by definition, with no heuristics about
+  timing. The class records (target, input view, result) and the lens ranks
+  flaky targets.
+- **Result reuse.** A shard whose input view (its include set at the change)
+  already passed is marked passed without running, as Bazel does with input
+  digests. This is opt-in, because it trusts the declared include set to
+  cover every input.
+- **Merge queue.** Changes queued to land are tested in order, each on a
+  speculative base: the queue head with the changesets ahead of it applied.
+  C4 changesets compose, so a speculative base is a view computed from
+  records, and nodes mount it as a thin delta over the head. A failing change
+  is ejected and the changes behind it are retested on a corrected base.
+  Health is depth, time in queue (p50, p95), ejection rate and merges per
+  hour.
+- **Runner pools** are ordinary pools (for example `ci-cpu`), shared with
+  render under quotas.
+
+### 9.17 ML class
+
+ML here means what studios run: fine-tuning, LoRAs, training on studio data,
+and generative batch jobs. Large-scale training infrastructure is not built
+(section 12).
+
+- **Wrapping, not reimplementing.** An ML WorkJob wraps a JobSet (or a
+  Kubeflow TrainJob, a LeaderWorkerSet, or a RayJob). The class creates it
+  suspended, with Kueue's queue label, and unsuspends it when the work queue
+  releases the unit. Kueue with JobSet provides what training needs and this
+  system does not implement: all-or-nothing admission of the ranks,
+  topology-aware placement in one rack or fabric domain, and failure
+  policies. A gang member that fails is handled by JobSet, which restarts the
+  whole set.
+- **What this system owns:**
+  1. **Data.** Datasets and checkpoints are versioned C4 trees. Training data
+     is materialized through the same tiers and overlays as render inputs.
+     Checkpoints are captured from the run's working tree, so the store
+     deduplicates every tensor file that did not change between checkpoints.
+     A run is reproducible from its tree IDs: dataset view, code view, base
+     checkpoint view, and output checkpoint view, all recorded in status.
+  2. **Sharing capacity.** Training competes with render and CI under the
+     same scheduler. Its objective is a deadline if it has one, otherwise a
+     GPU-hour rate. When a render deadline is at risk and GPU capacity is the
+     shortage, the queue asks the training run to yield at its next
+     checkpoint boundary (annotation `c4.avalanche.io/yield`, which the run's
+     training loop or a small sidecar reads), waits for the checkpoint to be
+     captured, then suspends the wrapped object. Kueue releases the quota.
+     When capacity returns, the run resumes from its latest checkpoint view.
+  3. **Visibility.** The lens shows one box per rank (or per trial in a
+     sweep, where the sweep planner is a generator), and **useful GPU
+     hours**: GPU time whose work survived in a checkpoint or a finished run,
+     against GPU time lost to preemption and failure.
+- Sweeps are generators: the planner emits trials, each a wrapped run, and a
+  successive-halving planner is a generator that expands again after each
+  rung. A grid sweep emits its trials along each axis of the grid, so binary
+  order covers the grid coarse to fine with no extra mechanism: the corners
+  and center first, then finer points.
+
+### 9.18 Adding a class
+
+| class                         | unit                       | SLO                         | pools                 | estimator                                 | lens                                  |
+| ----------------------------- | -------------------------- | --------------------------- | --------------------- | ----------------------------------------- | ------------------------------------- |
+| media ingest, transcode, QC, delivery | a clip or segment  | deadline (delivery)         | cpu, gpu encoders     | real-time factor times media duration     | clips by reel, QC flags               |
+| simulation caches             | a frame range, sequential  | deadline                    | high-memory           | per-frame time, growing with the sim      | the sim's frames in order             |
+| generative batch              | a batch of prompts         | throughput or deadline      | gpu                   | items per second by model and resolution  | batches and samples                   |
+| interactive sessions          | a session                  | latency to start            | gpu workstations      | none (a reservation)                      | sessions and idle time                |
+| data movement                 | a tree or object batch     | throughput or deadline      | io nodes              | bytes over measured bandwidth             | transfers and tier counters           |
+
+Each is a driver implementing the interface in section 9.4, a WorkClass
+object, and a lens module. A sequential simulation is a chain of units, and
+the critical-path floor in the slack formula (section 9.9) already handles
+it.
+
+### 9.19 Scale
+
+- One controller holds the queue in memory and is the only component that
+  watches task pods (label-selected). It rebuilds its state from WorkJobs,
+  their stored unit tables, and task pods after a restart.
+- Status writes are coalesced to at most one per job per second.
+- Pods are created only for runnable units, so the number of pending pods is
+  bounded by free slots, not by queue depth.
+- Task pods are kept until the job is deleted (logs live with them) unless
+  the job sets `keepSucceededUnits: false`.
+
+### 9.20 Simulation harness
+
+The policy is a pure Go package. The controller calls it, and so does a
+discrete-event simulator in `hack/sim`, so **the simulation runs the
+production policy code**. The simulated farm has CPU, GPU and CI pools, spot
+and on-demand burst pools with provisioning delays and prices, and a week of
+synthetic work:
+
+- render jobs with dailies due at 08:00 and client deliveries on Fridays,
+  evening submission surges, lognormal frame times with heavy stretches
+  inside a shot, generators that expand into passes, and task failures;
+- CI pipelines arriving during working hours with a p95 latency SLO;
+- ML fine-tuning runs that checkpoint every few minutes and yield on
+  request.
+
+It replays the same workload, over several seeds, under:
+
+- manual priority (static priorities by show and task type, plus a wrangler
+  who bumps late jobs every two hours);
+- FIFO;
+- EDF;
+- the objective-driven policy, with and without burst.
+
+It reports missed deadlines, total late hours, CI p50 and p95 time to green,
+utilization, useful GPU hours, and burst cost.
+
+A second experiment isolates the estimator: synthetic sequences with heavy
+regions (a hero FX section at a random place, at several cost multiples) are
+rendered in sequential and in binary order, and the error of the estimated
+remaining time is recorded against elapsed time, together with how soon the
+heavy region is flagged and how soon the job's slack estimate settles within
+10% of the truth.
+
+A smaller version runs on the kind cluster with real pods and the `kind-sim`
+actuator.
+
+## 10. HUD (P5)
+
+### 10.1 Information architecture
+
+- **Farm.** Slots in use and free per pool, queue depth by class, units per
+  hour, failures in the last hour, burst in flight and its cost, tier health.
+- **Projects.** A scope, not a page. Every view is filtered to the projects
+  the viewer may see.
+- **Jobs.** In dispatch order across classes, each with its job view
+  (section 10.3), objective, ETA band, slack and feasibility, owner, pools,
+  inputs and output view.
+- **Units.** For each unit: state, attempts, node, duration against
+  estimate, exit reason, log tail, output changeset, and for generators what
+  they expanded into.
+- **Workers.** Nodes grouped by pool and locality: state (idle, busy,
+  disabled, not ready, unprovisioned, warming), slots used, recent failures,
+  cache warmth.
+- **Cache tiers.** Node, peer, regional and store: hit rate, bytes served,
+  upstream fetches, fan-in (requests in per request out), shed rate,
+  in-flight fills, publish latency.
+- **Dependency graph.** Jobs across classes as a graph (sim to render to comp
+  to transcode to delivery, or build to test to merge), with the critical
+  path, propagated deadlines, and the views flowing along edges.
+- **Cost and capacity.** Per pool: capacity, use, requested burst and its
+  state, spend against budget per project, and the required-slots curve over
+  the next 48 hours against capacity, with what-if: "+40 gpu-spot slots
+  makes these three jobs feasible for $410".
+
+### 10.2 At a glance
+
+| who                 | needs at a glance                                                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| artist              | my jobs; which frames are done, running, failed; ETA against deadline; why a frame failed (log lines, node, exit reason); the output view to hand to comp                |
+| render wrangler     | every job in scope in dispatch order; feasibility warnings with the burst that fixes them and its price; stuck jobs; failure hot spots by node; slots by project against quota |
+| CI wrangler         | queue wait against run time; checkout time and cache hit; pipelines per change; time to green against the p50 and p95 targets; flaky tests; merge-queue health; runner pools |
+| ML user             | my runs as boxes per rank or trial; checkpoints as views; when and why a run yielded; useful GPU hours                                                                     |
+| platform engineer   | tier hit rates and fan-in; shed rates; regional replica health; store request rate; node cache pressure; publish and capture latency; capacity requests and their state   |
+| production          | cost against budget per project and pool; what a burst would buy; which deliveries are at risk                                                                           |
+
+### 10.3 The job view
+
+The job view is the signature of the HUD, after the job view of Pixar's
+render queue, and it is the same for every class:
+
+- **One box per unit.** Light gray: not yet evaluated (a generator that may
+  expand). Dark gray: a concrete unit waiting to run. Dark gray with a
+  hatch: blocked by a dependency. A running unit **fills with green** in
+  place as it progresses. Solid green: done. Red: failed. A retrying unit
+  shows its failed attempts as red notches along its edge while its new
+  attempt fills. Held units are outlined.
+- **Expansion is visible.** When a light gray box is evaluated, it splits
+  into its dark gray children in place, and the graph's new edges appear.
+- **Progress is honest.** A unit that reports progress (a line in
+  `.c4/progress` inside its volume, read by the node daemon and exported as
+  a gauge) fills by measured progress. Others fill by elapsed time over
+  their estimate, drawn with a fine stripe so an estimate never passes for
+  a measurement. Progress never touches the API server.
+- **Grouping.** Rows by pass or layer (render), stage and shard (CI), or
+  rank and trial (ML). Render wraps 24 frames per row, one second of screen
+  time.
+- **Order is visible.** A job in binary order fills its grid coarse to
+  fine: the end frames, the middle, the quarters, then ever finer stripes
+  across the whole shot, instead of a wipe from left to right.
+- **Density.** Labeled boxes up to about 2,000 units; compact cells up to
+  about 20,000; above that each cell aggregates a run of units and shows the
+  mix of states inside it as stacked color. Clicking a group or an
+  aggregated cell drills down. The view is drawn on a canvas, so tens of
+  thousands of units stay smooth.
+- **Slack and risk on the same view.** The header carries the deadline, the
+  ETA band (p50 to p90, which narrows as generators expand), and the slack.
+  In the grid, waiting units that the scheduler's projection finishes after
+  the deadline carry a yellow mark, so a wrangler sees how much of the job is
+  at risk, and where.
+
+### 10.4 Lenses and views
+
+- **Render lens:** the job view by pass and seconds; the **cost-by-frame
+  strip** under the grid, measured frame times as bars and interpolated
+  estimates as a band with error bars, heavy regions marked; the **preview
+  player**, which plays the shot at its frame rate as soon as the coarse
+  frames exist, holding each rendered frame until the next rendered one, and
+  sharpens in time as more frames land (it reads proxies from the job's
+  output view through the regional tier, with the HUD's own tier identity,
+  only for viewers of that project); the output view and its changesets.
+- **CI lens:** changes as rows of pipelines; queue wait and run time as
+  paired bars per stage; checkout time with its cache outcome; time to green
+  against the p50 and p95 lines; flaky targets ranked; the merge queue with
+  its speculative bases, depth and ejections; runner pool use.
+- **ML lens:** ranks and trials in the job view; checkpoints as views on a
+  timeline; yields and resumes; useful against lost GPU hours.
+- **Dependency graph view** and **cost and capacity view** as in section
+  10.1.
+
+A lens is a JavaScript module registered by name. It receives the class
+summary (section 9.4) and the unit table, and it draws into the panel the
+HUD gives it. Adding a class's lens does not change the HUD shell.
+
+### 10.5 Controls
+
+Every control is a Kubernetes write made **as the user**, through
+impersonation, so RBAC alone decides what a person may do. The HUD holds no
+privilege of its own beyond reading.
+
+| control               | effect                                                                       |
+| --------------------- | ---------------------------------------------------------------------------- |
+| hold / release        | `spec.nudge.hold` on the WorkJob                                             |
+| boost                 | `spec.nudge.boost` (1 to 2)                                                  |
+| set deadline          | `spec.deadline`                                                              |
+| requeue units         | annotation `c4.avalanche.io/requeue: <nonce>:<units>`, processed once by the controller |
+| blacklist node (job)  | append to `spec.blacklist`                                                   |
+| disable node (farm)   | taint `c4.avalanche.io/disabled=true:NoSchedule`                              |
+| approve burst         | `spec.approved` on the CapacityRequest                                       |
+
+### 10.6 Real-time updates at 10,000 nodes
+
+- Unit state reaches the HUD through WorkJob status (run-length encoded,
+  written at most once a second per job by the scheduler, which watches task
+  pods anyway). The HUD never watches pods.
+- The HUD backend holds a constant number of watches: WorkJobs, Nodes (with
+  a transform that keeps only labels, taints, conditions and allocatable),
+  Projects, Pools, WorkClasses and CapacityRequests. Browsers add no
+  API-server load: they receive server-sent events, coalesced to at most one
+  update per second per scope.
+- Tier, node and progress metrics come from Prometheus with aggregate
+  queries (sum by tier, pool, locality, class and project; the top-N worst
+  nodes; progress only for the job on screen). The HUD never scrapes 10,000
+  nodes. Without Prometheus (the kind e2e) it scrapes the regional replicas
+  and node daemons directly, which is fine for small clusters.
+- Events and logs are read on demand: opening a unit fetches that pod, its
+  log tail and its Events (field-selected by involved object), as the user.
+
+### 10.7 Per-project isolation
+
+- Authentication is a bearer token (an OIDC ID token or a service-account
+  token) validated with TokenReview, normally behind the cluster's auth
+  proxy.
+- A viewer's scope is the set of projects whose namespaces the viewer may
+  list WorkJobs in, checked with SubjectAccessReview and cached per user for
+  a minute.
+- The event stream a browser receives is filtered on the server. Job names,
+  units, logs, views and per-project tier series of other projects never
+  leave the server.
+- Farm totals are shown as aggregates ("other projects: 290 slots").
+  Workers are shared infrastructure, so node names and health are visible,
+  but what a node is running is shown only for the viewer's projects. Cost
+  is shown per project only to viewers of that project.
+
+### 10.8 Graphic design direction
+
+Designed for the wall of a machine room and for an artist's laptop, not as
+an admin console:
+
+- **Surround.** A neutral, mid-dark gray like a grading suite's surround, so
+  state colors read true. No blue-black, no cream.
+- **State colors.** The job view's grays and green follow the Pixar queue
+  Joshua knows. Other states take the SMPTE color bars: failed is the red
+  bar, held the magenta bar, risk and blacklists the yellow bar, links and
+  selection the cyan bar. People in post read these colors instantly, and
+  they are used only for state.
+- **Type.** A condensed grotesk for labels (dense tables, small uppercase
+  labels in the manner of a slate) and a monospaced face with tabular
+  figures for frame numbers, durations and IDs, both embedded in the binary.
+- Motion is limited to filling boxes and the split of an expanding
+  generator, and respects `prefers-reduced-motion`.
+
+## 11. Phases and evidence
+
+Each phase is proven by tests and by a scenario on a multi-node kind cluster
+with 8 workers in two localities. Results land in
+`hack/e2e/out/results.md`.
+
+- **P1: overlay views, capture, CSI, no per-read verification.** Pods under
+  Pod Security `restricted` mount views through the CSI driver. Evidence: one
+  layer per node serves every pod on it (link counts), one upper per pod, a
+  warm publish hashes nothing, captured output views equal views computed
+  independently on the host, and v12 = v11 + 3 frames fetches 3 objects and
+  adds one delta layer.
+- **P2: tiers.** Three MinIO shards, three regional replicas, peer homes in
+  two localities. Evidence: store GETs per object counted by MinIO itself,
+  against the number of requesting pods, for the tiered path, the Direct
+  path, and per-pod fetching; and a regional replica killed mid-run while
+  the job completes, with the extra store GETs bounded.
+- **P3: isolation.** Two projects with separate buckets and MinIO users.
+  Evidence: project B cannot read A's objects by ID through any path
+  (Materialization, ConfigMap c4m, tier API, peer port, forged volume
+  context), strict partitions on a shared node, and grant paths.
+- **P4: c4git monorepo.** A repository with c4git-managed assets is imported.
+  Evidence: import cost per commit, CI pods doing sparse checkouts, and the
+  bytes a node fetches for the next commit.
+- **P5: work system and HUD.** Simulation results for each policy across
+  render, CI and ML, and estimate error over time for binary against
+  sequential order; the kind run with deadlines, binary order, a generator
+  expanding, a CI pipeline under a latency SLO, a training run yielding at a
+  checkpoint, and a burst; and HUD screenshots for an artist (with the
+  preview player), a render wrangler, a CI wrangler and a platform engineer.
+
+## 12. Non-goals and not in this plan
+
+Non-goals:
+
+- **Training infrastructure.** This system does not implement gang
+  scheduling, topology-aware placement, NCCL or other collective tuning, or a
+  training framework. Training jobs that need strict network sync get it
+  from the scheduler they are wrapped in (Kueue with JobSet,
+  LeaderWorkerSet, Kubeflow Trainer or KubeRay). The ML class owns data,
+  capacity sharing with render and CI, and visibility (section 9.17).
+- A version-control system (history, refs, merges, blame).
+- Cross-region replication of the authoritative store, and Windows nodes.
+
+Not in this plan:
+
+- The lazy FUSE lower (section 4.6).
+- KMS encryption (section 6.6).
+- TLS between tiers in the kind e2e (bearer tokens are sent in clear inside
+  the cluster network there). Production needs it.
+- Cache-aware placement of individual pods by kube-scheduler (the queue
+  pre-warms burst nodes, but does not score nodes by cache contents).
+- On-demand capture through an API, beyond expansion chunks and
+  checkpoints.
+- Garbage collection of unreferenced objects in the store.
