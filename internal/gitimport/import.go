@@ -102,8 +102,23 @@ type Commit struct {
 	View       c4.ID `json:"view"`
 	ParentView c4.ID `json:"parentView"`
 	// Changeset is the ID of the stored changeset (ParentView on its first
-	// line). Nil when the commit changes nothing the view records.
+	// line, View on its last). Nil when the commit changes nothing the view
+	// records.
 	Changeset c4.ID `json:"changeset,omitempty"`
+	// Patch is the changeset's text, for appending to the branch's chain.
+	Patch []byte `json:"-"`
+	// ChainBase and ChainSeq place the commit in its ref's chain: the
+	// chain's base view and the number of the section whose checkpoint is
+	// View (0 when the commit is the base itself). Set by the caller that
+	// keeps the chain.
+	ChainBase c4.ID `json:"chainBase,omitempty"`
+	ChainSeq  int   `json:"chainSeq,omitempty"`
+	// A line that records storing a ref's whole chain has ChainRef (and no
+	// Commit or Ref), Chain (the chain object's ID), ChainBase,
+	// ChainSections, and View, the chain's head checkpoint.
+	ChainRef      string `json:"chainRef,omitempty"`
+	Chain         c4.ID  `json:"chain,omitempty"`
+	ChainSections int    `json:"chainSections,omitempty"`
 
 	// Git-level counts of files and symlinks (submodules excluded).
 	Added    int `json:"added"`
@@ -765,6 +780,7 @@ func (im *importer) finish(parent c4.ID, edits []view.Edit, start time.Time) (*C
 	}
 	im.cur.RecordsWritten = len(res.Records)
 	im.cur.Changeset = res.ChangesetID
+	im.cur.Patch = res.Changeset
 	im.cur.SinkMillis = float64(im.up.busy.Microseconds()) / 1000
 	im.up.busy = 0
 	im.cur.Millis = float64(time.Since(start).Microseconds()) / 1000

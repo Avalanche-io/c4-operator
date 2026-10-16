@@ -39,6 +39,16 @@ S=$(shards "$OUT/shards")
 /usr/bin/time -p "$BIN/c4-operator" import-git -repo "$OUT/repo" $S -out "$OUT/map.jsonl" >"$OUT/import.log"
 tail -9 "$OUT/import.log"
 
+echo "== the branch chain, read by c4 log"
+CHAIN="$OUT/map.jsonl.chains/refs_heads_main.c4m"
+echo "chain: $(wc -c <"$CHAIN" | tr -d ' ') bytes, $(grep -c '^c4' "$CHAIN") ID lines"
+/usr/bin/time -p c4 log "$CHAIN" >"$OUT/c4log.txt"
+awk '{print $2}' "$OUT/c4log.txt" >"$OUT/c4log.ids"
+grep '"commit":"[0-9a-f]' "$OUT/map.jsonl" | grep '"changeset":"c4' | grep -v '"refOnly"' |
+	sed 's/.*"view":"\([^"]*\)".*/\1/' >"$OUT/map.ids"
+cmp -s "$OUT/c4log.ids" "$OUT/map.ids" || { echo "c4 log versions differ from the mapping's views"; exit 1; }
+echo "c4 log lists $(wc -l <"$OUT/c4log.ids" | tr -d ' ') versions, equal to the mapping's commit views"
+
 echo "== checkouts (smudged by c4git) of sampled commits against the imported views"
 mkdir -p "$OUT/wt"
 for sha in $(git -C "$OUT/repo" rev-list --first-parent HEAD | awk 'NR % 40 == 1'); do

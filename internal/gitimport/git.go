@@ -43,6 +43,27 @@ func ResolveCommit(ctx context.Context, repo, rev string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// SymbolicRef returns the full ref name rev stands for (HEAD on a branch
+// is refs/heads/<branch>), or "" for a commit, a tag's commit, or a
+// detached HEAD.
+func SymbolicRef(ctx context.Context, repo, rev string) string {
+	if rev == "" {
+		rev = "HEAD"
+	}
+	if strings.HasPrefix(rev, "-") {
+		return ""
+	}
+	out, err := git(ctx, repo, "rev-parse", "--symbolic-full-name", rev)
+	if err != nil {
+		return ""
+	}
+	ref := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(ref, "refs/heads/") {
+		return ""
+	}
+	return ref
+}
+
 // commit is one commit of the first-parent history.
 type commit struct {
 	sha    string

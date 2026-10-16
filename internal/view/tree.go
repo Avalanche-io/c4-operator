@@ -173,7 +173,12 @@ func (n *Node) Identify() c4.ID {
 // dirEntry is the projected entry of a directory whose one-level listing
 // (canonicalized) is m.
 func dirEntry(name string, m *c4m.Manifest) *c4m.Entry {
-	id := m.ComputeC4ID()
+	// The ID is the hash of the listing exactly as recorded. ComputeC4ID
+	// would first re-run PropagateMetadata over the one-level listing, which
+	// reads a child directory with a null size (one holding a symlink) as
+	// empty and records 0, so the record would disagree with the child's
+	// own entry and with c4m's ID of the same tree as one nested manifest.
+	id := c4.Identify(strings.NewReader(m.Canonical()))
 	self := &c4m.Entry{Name: name, Size: -1, Timestamp: c4m.NullTimestamp()}
 	scope := []*c4m.Entry{self}
 	for _, c := range m.Entries {
@@ -198,7 +203,8 @@ func listingOf(children []*c4m.Entry) *c4m.Manifest {
 		cp.Depth = 0
 		m.AddEntry(&cp)
 	}
-	m.Canonicalize()
+	// Not Canonicalize: the children are already projected, and every child
+	// directory's size was propagated by dirEntry from its own children.
 	return m
 }
 

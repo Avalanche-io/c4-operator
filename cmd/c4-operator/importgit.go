@@ -43,7 +43,11 @@ content's IDs, and their objects are copied from the c4git store without
 rehashing. With --out, one JSON line per commit is appended, and a later
 run continues after the newest commit the file lists.
 
-Push-driven modes (both need --out, which holds the last commit per ref):
+Each ref's chain (its commits' changesets as one c4m chain, DESIGN.md 2.5)
+is kept in OUT.chains/ and indexed in the mapping; --export-chain REF
+writes it with its base in full, which c4 log and c4 split read.
+
+Push-driven modes (these need --out, which holds the last commit per ref):
 
   --since-last --ref R   import only R's commits after the last one imported
   --post-receive         run as a git post-receive hook: read "<old> <new>
@@ -80,6 +84,8 @@ func runImportGit(args []string) error {
 	out := fs.String("out", "", "mapping file to append one JSON line per commit to")
 	quiet := fs.Bool("quiet", false, "print only the summary")
 	jobs := fs.Int("jobs", 8, "concurrent store writes")
+	chainMax := fs.Int("chain-max", 1024, "re-base a branch's chain after this many sections (0: never)")
+	exportChain := fs.String("export-chain", "", "write this ref's chain to standard output with its base view in full (for c4 log and c4 split), and exit")
 	fs.Parse(args)
 	if fs.NArg() != 0 {
 		fs.Usage()
@@ -100,8 +106,8 @@ func runImportGit(args []string) error {
 	if len(shards) == 0 {
 		return errors.New("no project store: pass --store or set C4_STORE")
 	}
-	if (*postReceive || *listen != "" || *sinceLast) && *out == "" {
-		return errors.New("--post-receive, --listen and --since-last need --out, the mapping that records each ref")
+	if (*postReceive || *listen != "" || *sinceLast || *exportChain != "") && *out == "" {
+		return errors.New("--post-receive, --listen, --since-last and --export-chain need --out, the mapping that records each ref")
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -125,6 +131,7 @@ func runImportGit(args []string) error {
 			Warn:    func(s string) { fmt.Fprintln(os.Stderr, "warning: "+s) },
 		},
 		out: *out, fetch: *fetch, quiet: *quiet, log: os.Stdout, name: *name,
+		chainMax: *chainMax,
 	}
 	if svc.name == "" {
 		abs, _ := filepath.Abs(*repo)
@@ -139,6 +146,17 @@ func runImportGit(args []string) error {
 	}
 
 	switch {
+	case *exportChain != "":
+		data, err := os.ReadFile(svc.chainPath(*exportChain))
+		if err != nil {
+			return err
+		}
+		full, err := view.ExportChain(ctx, data, svc.base.Records)
+		if err != nil {
+			return err
+		}
+		_, err = os.Stdout.Write(full)
+		return err
 	case *listen != "":
 		svc.log = os.Stderr
 		return svc.listen(ctx, *listen, os.Getenv(*secretEnv))
@@ -146,9 +164,18 @@ func runImportGit(args []string) error {
 		svc.quiet = true
 		return svc.postReceive(ctx, os.Stdin, os.Stdout)
 	}
+	// A one-shot import records its chain under the revision's ref
+	// (HEAD on a branch is that branch) and stores the whole chain.
+	if *ref == "" {
+		*ref = gitimport.SymbolicRef(ctx, *repo, *rev)
+	}
+	svc.storeChain = true
 	res, err := svc.importRef(ctx, *ref, *rev, *sinceLast)
 	if err != nil {
 		return err
+	}
+	if res.ChainObject != "" && !*quiet {
+		fmt.Printf("chain %s for %s: %d sections from %s, head %s\n", res.ChainObject, *ref, res.ChainSections, shortID(mustParse(res.ChainBase)), shortID(mustParse(res.ChainHead)))
 	}
 	if *sinceLast {
 		fmt.Println(res.line())
@@ -256,6 +283,11 @@ func short(sha string) string {
 		return sha[:10]
 	}
 	return sha
+}
+
+func mustParse(s string) c4.ID {
+	id, _ := c4.Parse(s)
+	return id
 }
 
 func shortID(id c4.ID) string {

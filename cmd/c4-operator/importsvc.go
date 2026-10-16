@@ -13,12 +13,17 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Avalanche-io/c4"
+
 	"github.com/Avalanche-io/c4-operator/internal/gitimport"
+	"github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 // importService runs imports of one repository into one store, one at a
@@ -31,8 +36,19 @@ type importService struct {
 	fetch bool              // fetch from origin before importing (a mirror)
 	quiet bool
 	log   io.Writer
+	// chainMax re-bases a branch's chain after this many sections.
+	chainMax int
+	// storeChain stores the whole chain at the end of each run (one-shot
+	// imports). Push-driven runs store it only when it is sealed; until
+	// then the chain is its stored per-commit changesets.
+	storeChain bool
 
 	mu sync.Mutex
+}
+
+// chainPath is the local file of a ref's chain, next to the mapping.
+func (s *importService) chainPath(ref string) string {
+	return filepath.Join(s.out+".chains", gitimport.ChainFileName(ref))
 }
 
 // refResult is what one import of one ref did, as the listener returns it.
@@ -44,8 +60,14 @@ type refResult struct {
 	Deleted bool               `json:"deleted,omitempty"`
 	Commits []gitimport.Commit `json:"commits"`
 	Skipped int                `json:"skipped"`
-	FetchMs float64            `json:"fetchMs"`
-	TotalMs float64            `json:"totalMs"`
+	// Chain is the ref's chain: base, head checkpoint and sections, and
+	// the stored chain object when this run stored one.
+	ChainBase     string  `json:"chainBase,omitempty"`
+	ChainHead     string  `json:"chainHead,omitempty"`
+	ChainSections int     `json:"chainSections,omitempty"`
+	ChainObject   string  `json:"chainObject,omitempty"`
+	FetchMs       float64 `json:"fetchMs"`
+	TotalMs       float64 `json:"totalMs"`
 
 	summary *gitimport.Summary
 }
@@ -98,11 +120,26 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 			res.Since = last
 		}
 	}
+	var chain *gitimport.ChainFile
+	if mw != nil && ref != "" {
+		if err := os.MkdirAll(s.out+".chains", 0o755); err != nil {
+			return nil, err
+		}
+		if chain, err = gitimport.OpenChainFile(s.chainPath(ref)); err != nil {
+			return nil, err
+		}
+	}
 	var writeErr error
+	commits := []gitimport.Commit{}
 	opts.Progress = func(c gitimport.Commit) {
-		if mw != nil && writeErr == nil {
+		written := false
+		if chain != nil && writeErr == nil {
+			written, writeErr = s.chainAppend(ctx, chain, ref, &c, mw)
+		}
+		if mw != nil && writeErr == nil && !written {
 			writeErr = mw.Write(c)
 		}
+		commits = append(commits, c)
 		if !s.quiet {
 			printCommitTo(s.log, c)
 		}
@@ -115,8 +152,18 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 		return nil, fmt.Errorf("mapping file: %w", writeErr)
 	}
 	res.summary = sum
-	res.Commits = sum.Commits
+	res.Commits = commits
 	res.Skipped = sum.Skipped
+	if chain != nil && s.storeChain && chain.Sections > 0 {
+		id, err := s.sealChain(ctx, chain, ref, mw)
+		if err != nil {
+			return nil, err
+		}
+		res.ChainObject = id.String()
+	}
+	if chain != nil && !chain.Empty() {
+		res.ChainBase, res.ChainHead, res.ChainSections = chain.Base.String(), chain.Head.String(), chain.Sections
+	}
 
 	// Publish where the ref points. A ref moved to a commit imported
 	// earlier (a new branch, a fast-forward to a known commit) gets a
@@ -136,6 +183,53 @@ func (s *importService) importRef(ctx context.Context, ref, rev string, sinceLas
 	}
 	res.TotalMs = msSince(start)
 	return res, nil
+}
+
+// chainAppend appends a commit's changeset to its ref's chain and records
+// the commit's place in it. A commit whose parent is not the chain's head
+// (a force push, or a branch's first commit after it was moved) seals the
+// chain and starts a new one from the parent. A chain that reaches
+// chainMax sections is sealed and re-based on its head; then the commit's
+// line is written here, before the seal line, and written reports true.
+func (s *importService) chainAppend(ctx context.Context, chain *gitimport.ChainFile, ref string, c *gitimport.Commit, mw *gitimport.MappingWriter) (written bool, err error) {
+	if c.Changeset.IsNil() {
+		c.ChainBase, c.ChainSeq = chain.Base, chain.Sections
+		return false, nil
+	}
+	if !chain.Empty() && chain.Head != c.ParentView {
+		if chain.Sections > 0 {
+			if _, err := s.sealChain(ctx, chain, ref, mw); err != nil {
+				return false, err
+			}
+		}
+		if err := chain.Rebase(c.ParentView); err != nil {
+			return false, err
+		}
+	}
+	if err := chain.Append(c.Patch); err != nil {
+		return false, fmt.Errorf("chain %s: %w", ref, err)
+	}
+	c.ChainBase, c.ChainSeq = chain.Base, chain.Sections
+	if s.chainMax <= 0 || chain.Sections < s.chainMax {
+		return false, nil
+	}
+	if err := mw.Write(*c); err != nil {
+		return true, err
+	}
+	if _, err := s.sealChain(ctx, chain, ref, mw); err != nil {
+		return true, err
+	}
+	return true, chain.Rebase(chain.Head)
+}
+
+// sealChain stores the whole chain and records it in the mapping.
+func (s *importService) sealChain(ctx context.Context, chain *gitimport.ChainFile, ref string, mw *gitimport.MappingWriter) (c4.ID, error) {
+	id, _, err := chain.Store(ctx, s.base.Sink)
+	if err != nil {
+		return c4.ID{}, fmt.Errorf("store chain %s: %w", ref, err)
+	}
+	line := gitimport.Commit{ChainRef: ref, View: chain.Head, ChainBase: chain.Base, Chain: id, ChainSections: chain.Sections}
+	return id, mw.Write(line)
 }
 
 // deleteRef records that ref no longer exists.
@@ -262,6 +356,23 @@ func (s *importService) handler(secret string) http.Handler {
 		}
 		log.Print(res.line())
 		writeJSON(w, res)
+	})
+	// The chain of a ref, as c4 split reads it; with ?full=1 its base is
+	// written out in full, as c4 log needs (DESIGN.md section 2.3).
+	mux.HandleFunc("GET /chains/{ref...}", func(w http.ResponseWriter, r *http.Request) {
+		data, err := os.ReadFile(s.chainPath(r.PathValue("ref")))
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+		if r.URL.Query().Get("full") != "" {
+			if data, err = view.ExportChain(r.Context(), data, s.base.Records); err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+		w.Write(data)
 	})
 	mux.HandleFunc("GET /refs", func(w http.ResponseWriter, r *http.Request) {
 		m, err := gitimport.ReadMapping(s.out)
