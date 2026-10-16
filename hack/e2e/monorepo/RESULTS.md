@@ -65,11 +65,11 @@ are fixed, so two runs with seed 1 produce the same head,
   change a tool script; 3.5% regenerate or add an asset; the rest add or
   remove a whole service.
 
-| repository          | tracked files at head | .git   | c4git store |
-| ------------------- | --------------------- | ------ | ----------- |
-| `repo` (150 svcs)   | 2,218                 | 4.1 MB | 167 MB      |
-| `repo-large` (600)  | 8,555                 |        |             |
-| `repo-teams` (600)  | 8,555                 |        |             |
+| repository         | tracked files at head | .git   | c4git store |
+| ------------------ | --------------------- | ------ | ----------- |
+| `repo` (150 svcs)  | 2,218                 | 4.1 MB | 167 MB      |
+| `repo-large` (600) | 8,555                 |        |             |
+| `repo-teams` (600) | 8,555                 |        |             |
 
 A changed commit touched 2 files at p50, 4 at p90, and 19 at most.
 
@@ -121,11 +121,11 @@ issues up to `-jobs` (default 8) writes at once.
 
 ## Cost follows the change, measured on three layouts
 
-| repository                  | files | per commit, importer alone (run 1 of 3) | new record bytes per commit (p50) |
-| --------------------------- | ----- | -------------------------- | --------------------------------- |
-| `repo`, 150 flat services   | 2,218 | p50 2.8 ms, p90 3.2 ms     | 20,246                            |
-| `repo-large`, 600 flat      | 8,555 | p50 9.5 ms, p90 10.2 ms    | 73,504                            |
-| `repo-teams`, 600 in 24 dirs | 8,555 | p50 1.2 ms, p90 1.6 ms    | 7,926                             |
+| repository                   | files | per commit, importer alone (run 1 of 3) | new record bytes per commit (p50) |
+| ---------------------------- | ----- | --------------------------------------- | --------------------------------- |
+| `repo`, 150 flat services    | 2,218 | p50 2.8 ms, p90 3.2 ms                  | 20,246                            |
+| `repo-large`, 600 flat       | 8,555 | p50 9.5 ms, p90 10.2 ms                 | 73,504                            |
+| `repo-teams`, 600 in 24 dirs | 8,555 | p50 1.2 ms, p90 1.6 ms                  | 7,926                             |
 
 The three histories make the same kinds of changes. Records read and
 written per commit are the same small numbers in all three (read p50 5 or
