@@ -174,7 +174,9 @@ func (r *report) writeFindings(p pf) {
 
 // causes explains invariants that failed for a reason found in the code.
 // Filled in from the investigation of each finding.
-var causes = map[string]string{}
+var causes = map[string]string{
+	"losses": "The large losses come from `starvation-over-deadline` (see Findings): on small farms the starvation guard gives slots to jobs with a day or more of slack ahead of jobs due within hours, and a guard unit that has run past MaxLostWork cannot be preempted. The rest are quota points: the baselines ignore quotas, and where nominal quotas and borrowing limits are small the policy may not use capacity they use; at the extreme (a small farm whose nominal quotas and borrowing limits all round to 0) nothing may run at all, as Kueue's rules require.",
+}
 
 func mdEscape(s string) string { return strings.ReplaceAll(s, "|", "\\|") }
 
