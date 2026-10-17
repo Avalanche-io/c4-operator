@@ -51,7 +51,7 @@ export function costStrip(job) {
     heavy.map((r) => s('rect', { x: r.a, y: 0, width: r.b - r.a + 1, height: 100, fill: 'rgba(196,196,0,0.07)' })),
     band, errs, bars,
     s('polyline', { points: line.join(' '), fill: 'none', stroke: 'var(--ink-3)', 'stroke-width': 1, 'stroke-dasharray': '3 2', 'vector-effect': 'non-scaling-stroke' }),
-    heavy.map((r) => s('rect', { x: r.a, y: 0, width: r.b - r.a + 1, height: 1.6, fill: 'var(--bar-yellow)' })),
+    heavy.map((r) => s('rect', { x: r.a, y: 0, width: r.b - r.a + 1, height: 1.6, fill: 'var(--ink-2)' })),
     s('line', { x1: 0, x2: n, y1: 100, y2: 100, class: 'axis', 'vector-effect': 'non-scaling-stroke' }));
   const xt = [];
   const xstep = 24 * Math.max(1, Math.ceil(n / 24 / 10));
@@ -62,7 +62,7 @@ export function costStrip(job) {
     h('div', { class: 'cost', 'data-cost': '1', style: { position: 'relative', paddingLeft: '34px' } },
       h('div', { class: 'num dimmer', style: { position: 'absolute', left: 0, top: '-2px', fontSize: '10px' } }, f.dur(max)),
       h('div', { class: 'num dimmer', style: { position: 'absolute', left: 0, top: '52px', fontSize: '10px' } }, f.dur(max / 2)),
-      heavy.map((r) => h('div', { class: 't-yellow', style: { position: 'absolute', left: `calc(34px + (100% - 34px) * ${r.a / n})`, top: '4px', fontSize: '11px', paddingLeft: '4px', whiteSpace: 'nowrap' } },
+      heavy.map((r) => h('div', { class: 'dim', style: { position: 'absolute', left: `calc(34px + (100% - 34px) * ${r.a / n})`, top: '4px', fontSize: '11px', paddingLeft: '4px', whiteSpace: 'nowrap' } },
         `${r.label ? r.label + ': ' : ''}frames ${r.from}-${r.to} run ${r.factor}× the median`)),
       plot,
       h('div', { class: 'xt num dimmer', style: { position: 'relative', height: '14px', fontSize: '10px' } },
@@ -71,7 +71,7 @@ export function costStrip(job) {
     h('div', { class: 'legend' },
       h('span', null, h('i', { style: { background: 'var(--ink-2)' } }), 'measured'),
       h('span', null, h('i', { style: { background: '#4a4a4a', borderTop: '1px dashed var(--ink-3)' } }), 'estimate, with its error band'),
-      heavy.length ? h('span', null, h('i', { style: { background: 'var(--bar-yellow)', height: '3px' } }), 'heavy region, over 3× the median') : null));
+      heavy.length ? h('span', null, h('i', { style: { background: 'var(--ink-2)', height: '3px' } }), 'heavy region, over 3× the median') : null));
 }
 
 function niceMax(v) {
