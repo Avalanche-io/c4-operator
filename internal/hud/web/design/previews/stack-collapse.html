@@ -1,0 +1,31 @@
+<!-- @dsCard group="STACK" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>STACK: collapse to aggregate</title>
+<link rel="stylesheet" href="_preview.css">
+<style> .pv-grid > div { width: 410px; } </style>
+</head>
+<body>
+<div class="pv-h"><h1>Collapse to aggregate</h1><p class="dim">The same sh040 data four ways. Any container collapses to one block whose fill is the aggregate of everything inside it and upstream of it, by work where the estimate exists: green done, a blue sliver running with green rising inside, an orange tick if anything inside is retrying, a red tick if anything failed, a dashed red outline if any of it is projected late. An expanded container keeps its aggregate as a thin gauge on its edge so the fill is never read as rows.</p></div>
+<div class="pv-grid">
+  <div><div class="pv-box" id="a"></div><div class="pv-cap">1 &#183; expanded</div><div class="pv-sub">every batch open, every stage visible</div></div>
+  <div><div class="pv-box" id="b"></div><div class="pv-cap">2 &#183; upstream folded</div><div class="pv-sub">sim and render fold into each frame&#8217;s aggregate block</div></div>
+  <div><div class="pv-box" id="c"></div><div class="pv-cap">3 &#183; batches collapsed (default)</div><div class="pv-sub">open only where something needs attention</div></div>
+  <div><div class="pv-box" id="d"></div><div class="pv-cap">4 &#183; shot collapsed</div><div class="pv-sub">one block: the shot and everything upstream</div></div>
+</div>
+<script type="module">
+  import { own, hydrate } from '../components/live.js';
+  import { buildSheet } from '../components/stack.js';
+  import { snapshot, graph, shot } from './_data.js';
+  const key = 'harbor-render/sh040-fx-v003';
+  const s = await snapshot(), g = await graph();
+  const { details } = await shot(s, g, key);
+  const mk = () => buildSheet({ key: 'pv', title: 'sh040', details, anchor: key, graph: g, jobs: s.jobs });
+  const all = (n) => new Set([...Array(n).keys()]);
+  const NB = Math.ceil(mk().N / mk().batch);
+  const views = { a: { box: 4, collapsed: new Set(), lineA: false }, b: { box: 4, collapsed: new Set(), upstream: 2, lineA: false }, c: { box: 4, lineA: false }, d: { box: 4, shotCollapsed: true, lineA: false } };
+  for (const [id, v] of Object.entries(views)) document.getElementById(id).appendChild(own('stack', 'pv-' + id, { sheet: Object.assign(mk(), { key: 'pv-' + id }), view: v }));
+  hydrate(document);
+  for (const id of ['b']) { const c = document.querySelector(`[data-key="pv-${id}"]`).__comp; c.view.upstream = 2; c.relayout(false); }
+  void all; void NB;
+</script>
+</body></html>

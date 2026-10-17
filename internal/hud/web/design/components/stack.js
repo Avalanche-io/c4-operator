@@ -302,7 +302,7 @@ function rectsOf(sheet, L) {
   return out;
 }
 
-function drawUnit(g, T, it, t, glowAt) {
+export function drawUnit(g, T, it, t, glowAt) {
   const { x, y, w, h, u } = it;
   if (w <= 0 || h <= 0) return;
   const st = u.state;
@@ -357,7 +357,7 @@ function drawUnit(g, T, it, t, glowAt) {
   }
 }
 
-function drawAgg(g, T, it) {
+export function drawAgg(g, T, it) {
   const { x, y, w, h } = it;
   const a = agg(it.units);
   g.fillStyle = T.plate2; g.fillRect(x, y, w, h);

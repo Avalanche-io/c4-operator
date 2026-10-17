@@ -101,7 +101,7 @@ export function pylonSVG(g, o = {}) {
     s += `<line x1="${tx + 1.5}" x2="${tx + 1.5}" y1="${Math.min(dy, ty(p90))}" y2="${Math.max(dy, ty(p90))}" stroke="${late ? T.fail : T.g[13]}" stroke-width="3" stroke-dasharray="${late ? '2 2' : 'none'}"/>`;
     s += `<path d="M${tx} ${dy} l${mini ? 5 : 9} -${mini ? 4 : 6} v${mini ? 8 : 12} z" fill="${late ? T.fail : T.ink}"/>`;
     if (!mini) s += `<text x="${tx + 11}" y="${dy - 8}" fill="${late ? T.fail : T.ink}" font-size="${fs * 0.9}" font-family="${T.mono}">${f.clock(g.deadline, false)}</text>`;
-    if (full && Number.isFinite(g.slack)) s += `<text x="${tx - 8}" text-anchor="end" y="${(dy + ty(p90)) / 2 + fs * 0.3}" fill="${late ? T.fail : T.pencil}" font-size="${fs * 0.85}" font-family="${T.mono}">slack ${f.signed(g.slack)}</text>`;
+    if (full && Number.isFinite(g.slack)) s += `<text x="${tx + 11}" y="${dy + fs * 0.9}" fill="${late ? T.fail : T.pencil}" font-size="${fs * 0.85}" font-family="${T.mono}">slack ${f.signed(g.slack)}</text>`;
   }
   if (!mini && g.phase !== 'Succeeded' && Number.isFinite(g.eta)) {
     s += `<text x="${tx - 18}" y="${ty(eta) + fs * 0.45}" fill="${T.ink}" font-size="${fs * (full ? 1.7 : 1.3)}" text-anchor="end" font-family="${T.sans}" font-weight="500">${f.approx(eta)}</text>`;

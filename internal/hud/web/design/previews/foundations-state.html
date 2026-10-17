@@ -1,0 +1,31 @@
+<!-- @dsCard group="Foundations" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>State colors</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .sw { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; }
+  .sw div { height: 150px; padding: 12px; display: flex; flex-direction: column; justify-content: flex-end; font: 400 11px/1.4 var(--mono); }
+  .sw b { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; margin-bottom: 6px; }
+  table { border-collapse: collapse; margin-top: 28px; font-size: 13px; }
+  td, th { text-align: left; padding: 7px 14px 7px 0; border-bottom: 1px solid var(--rule-2); vertical-align: top; }
+  th { font: 600 10px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+</style></head>
+<body>
+<div class="pv-h"><h1>Four state colors</h1><p class="dim">Green is completed work. Blue is work running now. Orange is temporary trouble the farm is already handling. Red is failure and lateness; in pencil (dashed) it is a projection, not yet true. Nothing else on the screen is colored.</p></div>
+<div class="sw">
+  <div style="background:var(--done);color:var(--g01)"><b>done</b>--done #3dc86a<br>completed progress; the fill</div>
+  <div style="background:var(--done-settled);color:var(--g19)"><b>settled</b>--done-settled #2a7a47<br>a finished upstream job, one step down, so the brightest green is current work</div>
+  <div style="background:var(--run);color:var(--g01)"><b>running</b>--run #4b93ff<br>body --run-body #1b3460; the leading edge; the running share</div>
+  <div style="background:var(--temp);color:var(--g01)"><b>temporary</b>--temp #ff9433<br>retrying, an earlier failed attempt, backoff, a suspect node</div>
+  <div style="background:var(--fail);color:var(--g01)"><b>failure</b>--fail #ee4136<br>failed; missed deadline; dashed = projected late</div>
+</div>
+<table>
+<tr><th>meaning</th><th>drawn as</th><th>data</th></tr>
+<tr><td>at risk (projected after the deadline)</td><td>a dashed red tick on a unit; a dashed red outline on a container</td><td class="mono">riskUnits, estimate.feasible</td></tr>
+<tr><td>held</td><td>a grey hold mark, two bars (g16)</td><td class="mono">nudge.hold</td></tr>
+<tr><td>selection, links</td><td>a paper outline (g19); links are g17 hairlines</td><td></td></tr>
+<tr><td>burst capacity</td><td>grey slots like any other; blue only while running; headroom dotted; a pending request dashed with its price</td><td class="mono">pools[].burst, capacity[]</td></tr>
+<tr><td>not yet evaluated</td><td>a stippled g08 cell with a g13 outline</td><td class="mono">unitStates.unevaluated</td></tr>
+<tr><td>expected (not yet real)</td><td>a dashed g12 outline</td><td>a generator's children before it expands</td></tr>
+</table>
+</body></html>

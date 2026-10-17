@@ -1,0 +1,43 @@
+<!-- @dsCard group="STACK" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>STACK units</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .units { display: grid; grid-template-columns: repeat(12, 96px); gap: 0; }
+  .units .l { font: 400 10px/1.35 var(--mono); color: var(--ink-3); padding-right: 10px; }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>Unit states</h1><p class="dim">One box per unit. Green fills it from the bottom as it progresses: solid when the unit reports progress itself, striped when the fill is elapsed time over the estimate, so an estimate never passes for a measurement. A running unit has a blue body and a breathing blue leading edge. Earlier failed attempts are orange notches. Rows thinner than 6 px fill sideways, because stacked one-pixel lines of blue, green and orange blend into false colors. Below: the same states as collapsed aggregate blocks.</p></div>
+<canvas id="c" width="1152" height="200" style="width:1152px;height:200px;display:block"></canvas>
+<div class="units" id="l"></div>
+<canvas id="a" width="1152" height="70" style="width:1152px;height:70px;display:block;margin-top:24px"></canvas>
+<script type="module">
+  import { tok } from '../components/core.js';
+  import { drawUnit, drawAgg } from '../components/stack.js';
+  const S = [
+    ['succeeded', {}, 'done'], ['succeeded', { settled: true }, 'done, a finished upstream'], ['running', { fraction: 0.55, measured: true }, 'running, measured'],
+    ['running', { fraction: 0.55, measured: false }, 'running, estimated'], ['retrying', { fraction: 0.3, measured: true, attempts: 2 }, 'retrying, 2nd attempt'],
+    ['failed', { attempts: 3 }, 'failed after 3'], ['queued', {}, 'waiting'], ['queued', { risk: true }, 'waiting, projected late'],
+    ['blocked', {}, 'blocked'], ['held', {}, 'held'], ['unevaluated', {}, 'not yet evaluated'], ['ghost', {}, 'expected'],
+  ];
+  const T = tok();
+  const g = document.getElementById('c').getContext('2d');
+  S.forEach(([state, extra], k) => {
+    const x = k * 96;
+    drawUnit(g, T, { x, y: 4, w: 64, h: 96, u: { state, ...extra }, ghost: state === 'ghost' }, 0, null);
+    drawUnit(g, T, { x, y: 116, w: 64, h: 26, u: { state, ...extra }, ghost: state === 'ghost' }, 0, null);
+    drawUnit(g, T, { x, y: 158, w: 64, h: 5, u: { state, ...extra }, ghost: state === 'ghost' }, 0, null);
+  });
+  document.getElementById('l').innerHTML = S.map((s) => `<div class="l">${s[2]}</div>`).join('');
+  const ag = document.getElementById('a').getContext('2d');
+  const W = (n, st, x) => Array.from({ length: n }, () => ({ state: st, work: { spent: st === 'succeeded' ? 60 : st === 'running' ? 20 : 0, expected: 60 }, ...(x || {}) }));
+  const sets = [
+    [W(30, 'succeeded'), 'all done'],
+    [[...W(12, 'succeeded'), ...W(4, 'running'), ...W(14, 'queued')], '12 done, 4 running'],
+    [[...W(12, 'succeeded'), ...W(3, 'running'), ...W(1, 'retrying', { attempts: 2 }), ...W(14, 'queued')], 'a retry inside'],
+    [[...W(12, 'succeeded'), ...W(1, 'failed'), ...W(17, 'queued', { risk: true })], 'a failure; projected late'],
+  ];
+  sets.forEach(([units, label], k) => drawAgg(ag, T, { x: k * 288, y: 2, w: 270, h: 30, units, label, toggle: '+' }));
+</script>
+</body></html>

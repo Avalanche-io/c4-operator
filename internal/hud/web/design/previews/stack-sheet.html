@@ -1,0 +1,24 @@
+<!-- @dsCard group="STACK" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>STACK: a shot's sheet</title>
+<link rel="stylesheet" href="_preview.css">
+</head>
+<body>
+<div class="pv-h"><h1>STACK</h1><p class="dim">The shot's work tree as merged cells, one row per frame, in the order work flows: the shot, its batches, upstream work, render, comp, transcode, delivery. Containment is adjacency; no line runs from a container to what it contains. By default a batch opens only where something needs attention (a failure, a retry, a heavy region); the rest are aggregate blocks. Hover any block; click a batch or the shot to collapse or open it; the fold mark on a stage folds everything upstream into each frame. Live: fills tween, running edges breathe, a finished unit glows and settles.</p></div>
+<div class="pv-box" id="s" style="width:100%"></div>
+<script type="module">
+  import { own, hydrate } from '../components/live.js';
+  import '../components/stack.js';
+  import { buildSheet } from '../components/stack.js';
+  import { snapshot, graph, shot } from './_data.js';
+  const key = new URLSearchParams(location.search).get('job') || 'harbor-render/sh040-fx-v003';
+  const s = await snapshot(), g = await graph();
+  const { keys, details } = await shot(s, g, key);
+  const me = s.jobs.find((j) => `${j.namespace}/${j.name}` === key);
+  const sheet = buildSheet({ key: 'pv', title: (me && me.shot) || key.split('/')[1], details, anchor: key, graph: g, jobs: s.jobs });
+  const host = document.getElementById('s');
+  host.appendChild(own('stack', 'pv-stack', { sheet, view: { deadline: me && me.objective.deadline ? Date.parse(me.objective.deadline) : null } }));
+  hydrate(document);
+  void keys;
+</script>
+</body></html>

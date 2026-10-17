@@ -1,0 +1,30 @@
+<!-- @dsCard group="Ledger" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Ledger marks</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .seals { display: flex; gap: 28px; align-items: center; font: 400 11px var(--mono); color: var(--ink-3); }
+  .seals span { display: inline-flex; gap: 8px; align-items: center; }
+  .bookbox { width: 640px; margin-top: 18px; }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>Ledger marks</h1><p class="dim">Nothing on the farm is overwritten. Every action is an entry in the book, signed by whoever acted: a node, the queue, the controller, an importer, or the HUD on behalf of a person or an agent (the same seal, named). A seal is dashed until its record is signed; a superseded entry is struck through, never erased. The edge code carries a job's output view and counts the changesets folded into its chain.</p></div>
+<div class="seals" id="seals"></div>
+<div class="edgecode" style="width:640px;margin-top:22px"><b>c43L 2MDG &#8230; UypQ</b>0038+00<span class="dimmer">c43L2MDGfhkNTCkTBcmRgtS9DxQ2tAKWjU35a4kbn25YmsUNi9yFGKj3uvDy5YsytTYScLRF6bTshaqeYiQ7zuUypQ</span></div>
+<div class="pv-box bookbox"><div class="lab" style="margin-bottom:8px">The book</div><div id="book"></div></div>
+<script type="module">
+  import { seal, bookList } from '../components/ledger.js';
+  import { snapshot, book } from './_data.js';
+  const s = document.getElementById('seals');
+  for (const [k, l] of [['node', 'node/gpu-r3-01'], ['queue', 'component/queue'], ['controller', 'component/controller'], ['importer', 'importer'], ['hud', 'dana, via the HUD'], ['hud', 'agent/wrangler-bot for dana']]) {
+    const sp = document.createElement('span'); sp.append(seal(k), l); s.append(sp);
+  }
+  const sp = document.createElement('span'); sp.append(seal('hud', { open: true }), 'awaiting a signature'); s.append(sp);
+  await snapshot();
+  const b = await book();
+  const entries = (b.entries || []).slice(-14);
+  if (!entries.length) entries.push({ seq: 1, at: new Date().toISOString(), signer: 'queue', actor: 'component/queue', kind: 'yield', message: 'the book is empty on this farm' });
+  document.getElementById('book').append(bookList(entries));
+</script>
+</body></html>

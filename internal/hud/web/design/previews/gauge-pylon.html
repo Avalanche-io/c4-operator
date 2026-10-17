@@ -1,0 +1,27 @@
+<!-- @dsCard group="Gauges" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>PYLON</title>
+<link rel="stylesheet" href="_preview.css">
+</head>
+<body>
+<div class="pv-h"><h1>PYLON</h1><p class="dim">The glance gauge. Green fills the column by work done (slot-seconds where the estimate exists, else units, and it says so); the blue band above is the work in flight with green rising inside it; an orange notch is the share retrying; red from the top is failed; the dashed red hatch is waiting work projected after the deadline. The readout rides the fill level. On the right, a square-root time tape: p50 tick and p90 bar in pencil, the deadline bug in ink, both red when the p90 lands after the deadline.</p></div>
+<div class="pv-grid" id="g"></div>
+<script type="module">
+  import { pylonSVG } from '../components/pylon.js';
+  import { glance } from '../components/core.js';
+  import * as f from '../components/fmt.js';
+  import { snapshot } from './_data.js';
+  const s = await snapshot();
+  const now = f.now();
+  // the brief's example, set by hand: 68% done, 10% running in parallel, about 5 minutes
+  const ex = { name: 'sh020-light-v007', basis: 'estimate', done: 0.68, run: 0.10, runSpent: 0.05, par: 0.10, retry: 0, fail: 0, risk: 0, eta: 290, p90: 410, slack: 1100, feasible: true, req: 16.4, att: 24, slots: 24, deadline: now + 25 * 60000, phase: 'Running' };
+  const card = (svg, cap, sub) => `<div><div class="pv-box">${svg}</div><div class="pv-cap">${cap}</div><div class="pv-sub">${sub}</div></div>`;
+  let html = card(pylonSVG(ex, { w: 300, h: 520, mode: 'full', title: 'SH020-LIGHT-V007' }), 'full', 'the brief’s example: 68% done, 10% running in parallel, about 5 min');
+  for (const n of ['sh040-fx-v003', 'sh050-light-v002', 'c48223-presubmit']) {
+    const j = s.jobs.find((x) => x.name === n);
+    if (j) html += card(pylonSVG(glance(j), { w: 190, h: 330, mode: 'compact' }), 'compact', `${n} · ${j.phase.toLowerCase()} · slack ${f.signed(j.estimate.slackSeconds)}`);
+  }
+  html += card(`<div style="display:flex;gap:10px;align-items:flex-end">${pylonSVG(ex, { w: 46, h: 120, mode: 'mini' })}${pylonSVG(ex, { w: 24, h: 48, mode: 'mini' })}${pylonSVG(ex, { w: 14, h: 28, mode: 'mini' })}</div>`, 'mini', 'a wall rail cell, a phone row, a menu-bar corner');
+  document.getElementById('g').innerHTML = html;
+</script>
+</body></html>

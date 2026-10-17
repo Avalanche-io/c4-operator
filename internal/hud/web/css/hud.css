@@ -6,6 +6,13 @@
    Tokens and the thesis: ../design/tokens.css, ../design/README.md. */
 
 @import url("../design/tokens.css");
+@import url("queue.css");
+@import url("wall.css");
+@import url("pools.css");
+@import url("map.css");
+@import url("widget.css");
+@import url("views.css");
+@import url("phone.css");
 
 :root {
   color-scheme: dark;
