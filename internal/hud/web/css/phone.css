@@ -1,1 +1,69 @@
-/* phone: owned by the phone view. */
+/* phone: under 720 px the farm sheet and the job sheet become one column,
+   and a pending decision leads the screen: what it costs,
+   what it does to the budget, and the seal approving it writes. */
+
+@media (max-width: 720px) {
+  /* ---- the farm sheet ------------------------------------------------ */
+  .qsheet .sheethead { gap: 12px; }
+  .qsheet .sheethead h1 { font-size: 30px; }
+  .qsheet .sheethead .meta { font-size: 10.5px; }
+  .titleblock { flex-wrap: wrap; }
+  .titleblock .cell { flex: 1 1 40%; min-width: 0; border-bottom: var(--hair) solid var(--rule-1); }
+  .titleblock .cell .val { font-size: 18px; white-space: normal; overflow-wrap: anywhere; }
+  .titleblock .cell .val span[style] { font-size: 13px !important; }
+  .titleblock .cell .sub { white-space: normal; }
+  .qsheet .titleblock .cell:nth-child(2), .qsheet .titleblock .cell:nth-child(5) { display: none; }
+
+  .qcollar { margin-bottom: 10px; }
+  .qdecide { order: -1; }
+  .dc { grid-template-columns: minmax(0, 1fr); grid-template-areas: "hd" "t" "p" "b" "s" "btn" "foot"; padding: 14px 14px 12px; gap: 12px; }
+  .dc .dct { font-size: 26px; }
+  .dc .dct a { white-space: nowrap; }
+  .dc .dcp { font-size: 14px; }
+  .dc .dcb { border-top: var(--hair) solid var(--rule-1); padding-top: 10px; }
+  .dc .dcs { border-top: var(--hair) solid var(--rule-1); padding-top: 10px; }
+  .dc .dcbtn .btn { padding: 15px 12px; font-size: 12px; }
+
+  .qshots { flex-wrap: nowrap; overflow-x: auto; padding: 2px 2px 6px; scroll-snap-type: x mandatory; }
+  .qshots .bandlab { display: none; }
+  .shot { min-width: 200px; scroll-snap-align: start; }
+
+  .qtools .filters { overflow-x: auto; max-width: 100%; }
+  .qtools .seg { flex-wrap: nowrap; }
+  .qtools .btn { white-space: nowrap; }
+
+  .qneat { padding: 0 10px 6px; }
+  .qr.qhead { display: none; }
+  .qr {
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    grid-template-areas: "py name slack" "py strip due" "act act act";
+    column-gap: 10px; row-gap: 6px; padding: 10px 0; min-height: 0;
+  }
+  .qr .qrank, .qr .qshot, .qr .qdatum { display: none; }
+  .qr .qpy { grid-area: py; align-self: start; }
+  .qr .qname { grid-area: name; }
+  .qr .qstrip { grid-area: strip; min-width: 0; }
+  .qr .qstrip .strip svg { width: 100%; height: auto; }
+  .qr .qdue { grid-area: due; align-items: flex-end; font-size: 12px; }
+  .qr .qslack { grid-area: slack; font-size: 18px; }
+  .qr .qact { grid-area: act; justify-content: flex-start; }
+  .qr .qact:empty { display: none; }
+  .qr .qact .btn { width: 100%; justify-content: space-between; padding: 12px; }
+  .qname .jn { font-size: 15px; }
+  .qmeta { gap: 2px 7px; font-size: 10px; }
+  .qlist.fin .qr { grid-template-areas: "py name due"; }
+  .qlist.fin .qstrip, .qlist.fin .qslack { display: none; }
+
+  /* ---- the job sheet ------------------------------------------------- */
+  .sheet { padding: 12px; }
+  .sheethead h1 { font-size: 26px; word-break: break-all; }
+  .layout-job > div[style] { width: auto !important; display: flex; flex-direction: column; align-items: center; }
+  .layout-job .legend { display: grid !important; grid-template-columns: 1fr 1fr; gap: 6px 12px; width: 100%; }
+  .wellbox { overflow-x: auto; }
+  .wellbox .tools { position: sticky; left: 0; }
+  .neat { padding: 8px !important; }
+  .warn { flex-wrap: wrap; }
+  .warn .btn { width: 100%; padding: 12px; }
+  .controls .btn { padding: 10px 12px; }
+  .panel + .panel { margin-top: 10px; }
+}

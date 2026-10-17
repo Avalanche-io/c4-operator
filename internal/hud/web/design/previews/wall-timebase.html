@@ -1,0 +1,40 @@
+<!-- @dsCard group="Wall" -->
+<!doctype html>
+<html lang="en" data-scale="wall"><head><meta charset="utf-8"><title>TIMEBASE: the scope</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  body { background: var(--g01); }
+  .pv-scope { width: 1600px; height: 640px; background: var(--g01); outline: 1px solid var(--rule-2); }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>TIMEBASE</h1><p class="dim">Every job a channel sweeping toward its deadline. Left of the now line is history, kept by the HUD from the snapshots it receives and fading over fifteen minutes; each step up (a capture) settles as a dot. Right of it is the forecast in pencil to the p50, the p50 to p90 band on the top line, and the deadline as the trigger. Past the deadline the pencil turns red. Blue at the sweep is the share running now; orange ticks are retries, red failures. Deadlines beyond the horizon are arrows at the edge with their T-minus. Here the history is seeded by running each job's current rate backwards; served by a live mock the scope keeps sweeping.</p></div>
+<div class="pv-scope" id="tb"></div>
+<script type="module">
+  import { snapshot } from './_data.js';
+  import { hydrate, own } from '../components/live.js';
+  import { sweep, channelOf, record } from '../components/timebase.js';
+  let s = await snapshot();
+  const now = Date.parse(s.now);
+  const chs = () => s.jobs.filter((j) => j.phase !== 'Succeeded').map((j) => channelOf(j, { hi: /sh040/.test(j.name) }));
+  // seed: each channel's progress over the last fifteen minutes at its current rate
+  for (let m = 15; m >= 1; m--) {
+    const t = now - m * 60000;
+    record(chs().map((c) => {
+      const left = Number.isFinite(c.eta) && c.eta > now ? (c.eta - now) : 3600e3;
+      const rate = c.run > 0 ? (1 - c.done) / left : 0;
+      return { ...c, done: Math.max(0, c.done - rate * m * 60000 * (0.9 + 0.2 * Math.sin(m + c.name.length))) };
+    }), t, 'preview');
+  }
+  const host = document.getElementById('tb');
+  const draw = () => {
+    sweep.feed(Date.parse(s.now));
+    host.replaceChildren(own('timebase', 'pv:tb', { channels: chs(), now: Date.parse(s.now), scope: 'preview' }, { style: 'width:100%;height:100%' }));
+    hydrate(host);
+  };
+  draw();
+  setInterval(async () => {
+    try { const r = await fetch('/api/v1/snapshot?as=wrangler'); if (r.ok) { s = await r.json(); sweep.feed(Date.parse(s.now)); const el = host.firstChild; if (el.__comp) el.__comp.update({ channels: chs(), now: Date.parse(s.now), scope: 'preview' }); } } catch { /* fixtures only */ }
+  }, 1000);
+</script>
+</body></html>

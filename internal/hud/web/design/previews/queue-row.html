@@ -1,0 +1,51 @@
+<!-- @dsCard group="Queue" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>The farm sheet: dispatch rows</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .pv-rows { background: var(--field); outline: 1px solid var(--rule-2); padding: 6px 14px 10px; max-width: 1840px; }
+  .pv-strips { display: grid; grid-template-columns: repeat(3, 240px); gap: 24px; }
+  .pv-datum { width: 520px; }
+  .pv-datum .row { display: grid; grid-template-columns: 150px 1fr 70px; gap: 12px; align-items: center; font: 400 11px var(--mono); color: var(--ink-2); }
+  .pv-datum .row .qdatum { line-height: 0; }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>Dispatch rows</h1><p class="dim">The farm sheet in dispatch order: each job's PYLON (mini), its name and class, its shot, its batches collapsed to aggregates (green done from the bottom, a blue sliver running, orange and red ticks, a dashed red rule under waiting work projected late), its deadline in ink and p90 in pencil, and its slack against the datum. The datum is sea level: one rule down the whole list; height above it in grey pencil, depth below it in red, dashed while projected. A pending burst is a grey dashed button with its price.</p></div>
+<div class="pv-rows" id="rows"></div>
+<div class="pv-grid" style="margin-top:28px">
+  <div><div class="pv-box pv-strips" id="strips"></div><div class="pv-cap">batch strip</div><div class="pv-sub">batches of 24 frames for render, otherwise whatever keeps the strip under forty cells; by units, from unitStates alone, so a row costs one small SVG</div></div>
+  <div><div class="pv-box pv-datum" id="datum"></div><div class="pv-cap">the datum</div><div class="pv-sub">log scale, −6h to +3d, zero at a third of the column; red ink once the deadline has passed</div></div>
+</div>
+<script type="module">
+  import { snapshot } from './_data.js';
+  import { hydrate } from '../components/live.js';
+  import '../components/pylon.js';
+  import { batchStrip, datumBar, DATUM_X } from '../components/dispatch.js';
+  import * as f from '../components/fmt.js';
+  import queue from '../../js/views/queue.js';
+  const s = await snapshot();
+  const ctx = {
+    snap: s, route: { name: 'queue', parts: [], q: {} }, href: (x) => '#/' + x, refresh() {},
+    cls: (n) => s.classes.find((c) => c.name === n), job: (k) => s.jobs.find((j) => `${j.namespace}/${j.name}` === k),
+  };
+  const sheet = queue.render(ctx);
+  const table = sheet.querySelector('.qtable');
+  const list = table.querySelector('.qlist');
+  [...list.children].slice(8).forEach((r) => r.remove());
+  table.querySelectorAll('.qdiv, .qlist.fin').forEach((x) => x.remove());
+  const host = document.getElementById('rows');
+  host.append(table);
+  hydrate(host);
+  const lens = (j) => (s.classes.find((c) => c.name === j.class) || {}).lens;
+  const pick = (re) => s.jobs.find((j) => re.test(j.name));
+  const strips = document.getElementById('strips');
+  for (const j of [pick(/fx-v/), pick(/presubmit/), pick(/flood|crowd/)].filter(Boolean)) {
+    strips.insertAdjacentHTML('beforeend', `<div>${batchStrip(j, { w: 240, h: 24, lens: lens(j) }).svg}<div class="pv-sub">${j.name} · ${j.units.succeeded}/${j.units.total}</div></div>`);
+  }
+  const datum = document.getElementById('datum');
+  datum.style.setProperty('--datum', `${DATUM_X * 100}%`);
+  const open = s.jobs.filter((j) => j.objective && j.objective.deadline).slice(0, 8);
+  for (const j of open) datum.insertAdjacentHTML('beforeend', `<div class="row"><span>${j.name}</span><div class="qdatum">${datumBar(j, { h: 22 })}</div><span style="text-align:right">${j.phase === 'Succeeded' ? 'done' : f.signed(j.estimate.slackSeconds)}</span></div>`);
+</script>
+</body></html>

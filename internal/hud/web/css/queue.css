@@ -1,1 +1,132 @@
-/* queue: owned by the queue view. */
+/* queue: the farm sheet, the HUD's home. Rows in dispatch order on one
+   grid; the datum column (the deadline is sea level) runs the full height of
+   the list as one rule, so lateness reads down the sheet at a glance. */
+
+.qsheet .sheethead h1 { font-size: 40px; letter-spacing: -.005em; }
+.qsheet .sheethead .meta { max-width: 640px; }
+.qsheet .titleblock .val.late { color: var(--fail); }
+
+/* ---- the collar band: decisions and shots ---------------------------- */
+.qcollar { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gutter); margin-bottom: 14px; }
+
+.qshots { display: flex; flex-wrap: wrap; gap: 8px; align-content: flex-start; align-items: stretch; }
+.qshots .bandlab { display: flex; flex-direction: column; gap: 6px; width: 132px; padding: 6px 0; }
+.qshots .bandlab .sub { font: 400 10px/1.35 var(--mono); color: var(--ink-4); }
+.shot {
+  position: relative; display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; grid-template-rows: auto auto auto; column-gap: 8px; row-gap: 2px;
+  min-width: 212px; padding: 8px 10px 8px 8px; background: var(--well); outline: var(--hair) solid var(--rule-2); color: var(--ink);
+}
+.shot:hover { text-decoration: none; outline-color: var(--g15); }
+.shot.sel { outline: 1.5px solid var(--paper); }
+.shot.late { outline: var(--hair) dashed var(--fail); }
+.shot.late.sel { outline: 1.5px solid var(--paper); box-shadow: inset 0 0 0 1px var(--fail); }
+.shot.fin { opacity: .62; }
+.shot .spy { grid-row: 1 / span 3; align-self: center; line-height: 0; }
+.shot .sname { font: 600 13px/1.1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--paper); }
+.shot .sslack { font: 400 13px/1.1 var(--mono); color: var(--ink-2); text-align: right; }
+.shot .ssub, .shot .sdel { grid-column: 2 / span 2; font: 400 10px/1.3 var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shot .sdel.t-fail { color: var(--fail); }
+
+/* ---- decisions waiting on the viewer ---------------------------------- */
+.qdecide { display: grid; gap: var(--gutter); align-content: start; }
+.dc { background: var(--plate); outline: var(--hair) dashed var(--g15); padding: 12px 16px 12px; display: grid; gap: 10px 28px;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr) minmax(0, 1.05fr);
+  grid-template-areas: "hd hd hd" "t b s" "p b s" "p b btn" "p b foot"; }
+.dc header { grid-area: hd; }
+.dc .dct { grid-area: t; }
+.dc .dcp { grid-area: p; }
+.dc .dcb { grid-area: b; align-self: start; display: grid; gap: 4px; }
+.dc .dcs { grid-area: s; }
+.dc .dcbtn { grid-area: btn; }
+.dc .dcfoot { grid-area: foot; }
+.dc header { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 10px; }
+.dc .dct { font: 300 22px/1.15 var(--sans); color: var(--paper); }
+.dc .dct b { font-weight: 500; }
+.dc .dct a { color: var(--paper); font-weight: 500; }
+.dc .dcp { margin: 0; font: 400 12.5px/1.5 var(--sans); color: var(--ink); }
+.dc .dcp b { font-weight: 600; color: var(--paper); }
+.dc .row { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; font-size: 11px; }
+.dc .row.mono { font: 400 11px/1.3 var(--mono); color: var(--ink-2); }
+.dc .budget { margin: 4px 0 2px; }
+.dc .budget svg { display: block; }
+.dc .dcs { display: grid; gap: 6px; align-content: start; }
+.dc .entry { display: grid; grid-template-columns: 14px 1fr; gap: 8px; align-items: baseline; font: 400 11.5px/1.45 var(--sans); }
+.dc .entry .mono { font: 400 11px/1.45 var(--mono); color: var(--paper); }
+.dc .entry b { color: var(--paper); font-weight: 600; }
+.dc .entry.quiet { font-size: 10.5px; }
+.dc .entry .seal { margin-top: 2px; }
+.dc .dcbtn { display: grid; grid-template-columns: 1.6fr 1fr; gap: 8px; }
+.dc .dcbtn .btn { padding: 11px 12px; font-size: 11px; }
+.dc .dcfoot { margin: 0; font: 400 10px/1.3 var(--mono); color: var(--ink-4); }
+
+/* ---- tools ------------------------------------------------------------- */
+.qtools { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; margin: 0 0 10px; }
+.qtools .filters { display: flex; align-items: center; gap: 8px; }
+.qtools .scale { margin-left: auto; font-size: 10px; color: var(--ink-4); }
+
+/* ---- the table --------------------------------------------------------- */
+.qneat { padding: 6px 14px 10px; }
+.qtable { position: relative; }
+.qr {
+  position: relative; display: grid; align-items: center; column-gap: 14px; min-height: 58px; padding: 5px 0;
+  grid-template-columns: 22px 30px minmax(220px, 1fr) 92px 200px 104px minmax(200px, 1.25fr) 76px 150px;
+  border-bottom: var(--hair) solid var(--rule-0);
+}
+.qr.qhead { min-height: 0; padding: 8px 0 6px; border-bottom: var(--hair) solid var(--rule-2); align-items: end; }
+.qlist .qr:hover { background: var(--plate); }
+.qlist .qr:focus-within { background: var(--plate); }
+.qr.late { background: linear-gradient(90deg, rgba(238, 65, 54, .045), transparent 38%); }
+.qrank { font: 400 11px/1 var(--mono); color: var(--ink-4); text-align: right; }
+.qpy { line-height: 0; }
+.qname { min-width: 0; }
+.qname .jn { font: 500 14.5px/1.2 var(--sans); color: var(--paper); letter-spacing: .01em; }
+.qname .jn::after { content: ""; position: absolute; inset: 0; z-index: 0; }
+.qr.late .qname .jn { color: var(--fail); }
+.qmeta { display: flex; flex-wrap: wrap; gap: 2px 9px; align-items: baseline; margin-top: 4px; font: 400 10.5px/1.3 var(--mono); color: var(--ink-3); }
+.qmeta .chip { font-size: 8.5px; padding: 2px 4px; }
+.ph.held { color: var(--g16); }
+.holdmark { display: inline-block; width: 6px; height: 8px; margin-right: 4px; border-left: 1.5px solid var(--g16); border-right: 1.5px solid var(--g16); vertical-align: -1px; }
+.qshot { font: 500 11.5px/1 var(--mono); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qshot .shotref { position: relative; z-index: 1; color: var(--ink-2); letter-spacing: .04em; }
+.qshot .shotref:hover { color: var(--paper); }
+.qstrip .strip { line-height: 0; }
+.qstrip .cap { margin-top: 3px; font: 400 10px/1.2 var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.qdue { display: flex; flex-direction: column; gap: 4px; font: 400 13px/1 var(--mono); }
+.qdue .sub { font-size: 10px; color: var(--ink-4); }
+.qdatum { line-height: 0; }
+.qslack { text-align: right; font: 300 20px/1 var(--mono); color: var(--ink-2); }
+.qslack small { display: block; margin-top: 4px; font: 400 9.5px/1 var(--mono); color: var(--ink-4); letter-spacing: .02em; }
+.qslack.late { color: var(--fail); }
+.qslack.late .pencil { color: var(--fail); text-decoration-color: rgba(238, 65, 54, .55); }
+.qslack.late small { color: var(--fail); opacity: .8; }
+.qslack.none { color: var(--ink-4); }
+.qact { display: flex; justify-content: flex-end; gap: 6px; position: relative; z-index: 1; }
+.btn.request { display: inline-flex; gap: 10px; align-items: baseline; background: transparent; border: var(--hair) dashed var(--g15); color: var(--ink); padding: 8px 10px; }
+.btn.request b { font: 500 12px/1 var(--mono); letter-spacing: 0; color: var(--paper); }
+.btn.request:hover { border-color: var(--paper); }
+
+/* the datum: one rule down the whole list, at sea level; each row's cell
+   stretches to the row's full height so the rule reads unbroken */
+.datumhead { position: relative; height: 26px; }
+.datumhead .lab { position: absolute; left: 0; top: 0; }
+.datumhead .tk { position: absolute; bottom: 0; transform: translateX(-50%); font: 400 9px/1 var(--mono); color: var(--ink-4); white-space: nowrap; }
+.datumhead .tk.zero { color: var(--paper); }
+.datumhead .tk:last-child { transform: translateX(-100%); }
+.qdatum, .datumhead { background-image: linear-gradient(90deg, transparent calc(var(--datum) - .5px), var(--g13) calc(var(--datum) - .5px), var(--g13) calc(var(--datum) + .5px), transparent calc(var(--datum) + .5px)); }
+.qr .qdatum { align-self: stretch; display: flex; align-items: center; margin: -5px 0; }
+
+/* finished jobs: settled, quieter */
+.qdiv { display: flex; gap: 14px; align-items: baseline; padding: 14px 0 6px; border-bottom: var(--hair) solid var(--rule-2); }
+.qdiv .sub { font: 400 10px/1 var(--mono); color: var(--ink-4); }
+.qlist.fin .qr { min-height: 44px; opacity: .58; }
+.qlist.fin .qr:hover { opacity: 1; }
+.qlist.fin .qname .jn { font-size: 13px; color: var(--ink); }
+.qlist.fin .qpy { transform: scale(.8); transform-origin: left center; }
+
+@media (max-width: 1500px) {
+  .qr { grid-template-columns: 22px 30px minmax(180px, 1.3fr) 64px 160px 96px minmax(120px, 1fr) 70px 150px; column-gap: 10px; }
+  .qtools .scale { display: none; }
+}
+@media (max-width: 1200px) {
+  .dc { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); grid-template-areas: "hd hd" "t t" "p p" "b s" "btn btn" "foot foot"; }
+}

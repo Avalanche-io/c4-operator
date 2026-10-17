@@ -1,0 +1,46 @@
+<!-- @dsCard group="Wall" -->
+<!doctype html>
+<html lang="en" data-scale="wall"><head><meta charset="utf-8"><title>Mission clocks, the strobe strip, the book ticker</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  body { background: var(--g01); }
+  .pv-wall { background: var(--g01); outline: 1px solid var(--rule-2); }
+  .pv-wall .wclocks { height: calc(118 * var(--k)); }
+  .pv-wall .wband { height: calc(124 * var(--k)); }
+  .pv-wall .wtick { height: calc(36 * var(--k)); }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>Clocks, strobe, ticker</h1><p class="dim">Mission clocks count down in the farm's clock: the deliveries, the jobs at the root of a lateness (with what closes the gap), the next deadline on a shot, the production window as a mission day, and the farm working now. Red when late; a passed deadline counts up. The strobe strip is the most urgent binary-order render as film: frames lit where rendered, blue running, orange retrying, red failed, under a dyadic ruler whose bright ticks show how fine the shot exists now; a frame that just landed glows and settles over a minute. The book runs along the bottom, each entry with its signer's seal.</p></div>
+<div class="pv-wall wall" style="height:auto;display:block">
+  <div id="clocks"></div>
+  <div class="wband wstrobe" id="strobe"></div>
+  <div id="tick"></div>
+</div>
+<script type="module">
+  import { snapshot, job, book } from './_data.js';
+  import { hydrate, own } from '../components/live.js';
+  import { sweep } from '../components/timebase.js';
+  import * as f from '../components/fmt.js';
+  const s = await snapshot();
+  sweep.feed(Date.parse(s.now));
+  const J = (re) => s.jobs.find((j) => re.test(j.name));
+  const late = (j) => j && j.estimate.slackSeconds < 0;
+  const items = [];
+  for (const j of [J(/delivery/), J(/fx-v/), J(/light-v002/)].filter(Boolean)) {
+    const b = j.estimate.burst;
+    items.push({ kind: 'tminus', target: Date.parse(j.objective.deadline), late: late(j), label: `${j.name} · due ${f.clock(j.objective.deadline, false)}`,
+      sub: late(j) ? `<b>late ${f.dur(-j.estimate.slackSeconds)}</b>${b ? ` · +${b.slots} ${b.pool} closes it, ${f.money(b.cost)}` : ''}` : `slack ${f.signed(j.estimate.slackSeconds)}` });
+  }
+  const win = (s.usage.productionWindows || []).find((w) => w.active);
+  if (win) items.push({ kind: 'day', from: Date.parse(win.from), label: `${win.project} window · mission day`, sub: win.name.toLowerCase() });
+  items.push({ kind: 'slots', label: 'working now', value: `<span class="t-run">${s.farm.slotsUsed}</span><small> / ${s.farm.slotsTotal} slots</small>`, sub: `${f.num(s.farm.unitsPerHour)} units/h` });
+  const fx = s.jobs.find((j) => j.order === 'binary' && j.phase !== 'Succeeded');
+  const d = fx ? await job(`${fx.namespace}/${fx.name}`) : null;
+  const b = await book();
+  document.getElementById('clocks').append(own('clocks', 'pv:ck', { items }, { class: 'wclocks' }));
+  document.getElementById('strobe').append(own('strobe', 'pv:st', { detail: d, title: fx ? fx.name : '' }, { class: 'wstrobe-c' }));
+  document.getElementById('tick').append(own('ticker', 'pv:tk', { entries: (b.entries || []).slice(-20) }, { class: 'wtick' }));
+  hydrate(document.body);
+</script>
+</body></html>

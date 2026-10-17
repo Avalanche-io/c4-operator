@@ -1,0 +1,43 @@
+<!-- @dsCard group="Queue" -->
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>Decision card: approve a burst</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .pv-wide { width: 1500px; }
+  .pv-phone { width: 362px; }
+  /* the phone's single column, as phone.css lays it out under 720 px */
+  .pv-phone .dc { grid-template-columns: minmax(0, 1fr); grid-template-areas: "hd" "t" "p" "b" "s" "btn" "foot"; gap: 12px; }
+  .pv-phone .dc .dct { font-size: 26px; }
+  .pv-phone .dc .dct a { white-space: nowrap; }
+  .pv-phone .dc .dcp { font-size: 14px; }
+  .pv-phone .dc .dcb, .pv-phone .dc .dcs { border-top: 1px solid var(--rule-1); padding-top: 10px; }
+  .pv-phone .dc .dcbtn .btn { padding: 15px 12px; font-size: 12px; }
+  .shot-row { display: flex; gap: 8px; flex-wrap: wrap; }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>Decision card</h1><p class="dim">A burst over budget waits for a person (or an agent acting for one). The card says what the slots change (the late finish and the deliveries that slip with it), the project's burst budget today with the price on top of it, and the entry approving it writes to the book: the HUD's seal, dashed until signed, naming who signs. An agent gets the same seal, named. On the desk it is one strip above the shots; on a phone it leads the screen. Below it, the shots band: each shot one aggregate, late shots in a dashed red outline, deliveries named.</p></div>
+<div class="pv-grid">
+  <div><div class="pv-wide" id="wide"></div><div class="pv-cap">desk</div><div class="pv-sub">price, budget after it, the seal; Approve posts the existing control, Not now leaves the request pending</div></div>
+  <div><div class="pv-phone" id="phone"></div><div class="pv-cap">phone</div><div class="pv-sub">one decision per screen</div></div>
+  <div><div class="shot-row" id="shots"></div><div class="pv-cap">the shots band</div><div class="pv-sub">PYLON mini per shot: the aggregate of the shot's jobs, by work when every job carries it</div></div>
+</div>
+<script type="module">
+  import { snapshot } from './_data.js';
+  import { hydrate } from '../components/live.js';
+  import '../components/pylon.js';
+  import queue from '../../js/views/queue.js';
+  const s = await snapshot();
+  const ctx = {
+    snap: s, route: { name: 'queue', parts: [], q: {} }, href: (x) => '#/' + x, refresh() {},
+    cls: (n) => s.classes.find((c) => c.name === n), job: (k) => s.jobs.find((j) => `${j.namespace}/${j.name}` === k),
+  };
+  const a = queue.render(ctx), b = queue.render(ctx);
+  const dcA = a.querySelector('.dc'), dcB = b.querySelector('.dc');
+  if (dcA) document.getElementById('wide').append(dcA); else document.getElementById('wide').textContent = 'No burst is awaiting approval in this farm.';
+  if (dcB) document.getElementById('phone').append(dcB);
+  const shots = a.querySelectorAll('.qshots .shot');
+  document.getElementById('shots').append(...shots);
+  hydrate(document.body);
+</script>
+</body></html>

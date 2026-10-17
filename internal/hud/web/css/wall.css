@@ -1,1 +1,57 @@
-/* wall: owned by the wall view. */
+/* wall: TIMEBASE at room scale. Everything is sized against a 1920-pixel
+   wall (--k is one such pixel), so a 3840 x 2160 panel reads the same
+   from across the room, only sharper. Bands, top to bottom: mission clocks,
+   the scope, the strobe strip, the shots collapsed, the book. */
+
+[data-scale="wall"] main { min-height: 100vh; }
+.wall {
+  --k: calc(100vw / 1920);
+  --lw: calc(280 * var(--k));
+  position: relative; height: 100vh; overflow: hidden; background: var(--g01); color: var(--ink);
+  display: grid; grid-template-rows: calc(118 * var(--k)) minmax(0, 1fr) calc(124 * var(--k)) calc(122 * var(--k)) calc(36 * var(--k));
+}
+
+/* ---- mission clocks ----------------------------------------------------- */
+.wclocks { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(0, 1fr); background: var(--g02); border-bottom: calc(1 * var(--k)) solid var(--g08); }
+.wclocks .ck { padding: calc(14 * var(--k)) calc(24 * var(--k)) 0; border-right: calc(1 * var(--k)) solid var(--g07); min-width: 0; }
+.wclocks .ck:first-child { grid-column: span 1; }
+.wclocks .k { font: 600 calc(11.5 * var(--k))/1 var(--sans); letter-spacing: .16em; color: var(--g15); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wclocks .v { font: 300 calc(50 * var(--k))/1 var(--mono); letter-spacing: -.02em; margin-top: calc(10 * var(--k)); color: var(--paper); white-space: nowrap; }
+.wclocks .v small { font-size: calc(22 * var(--k)); color: var(--g15); letter-spacing: 0; }
+.wclocks .s { font: 400 calc(12.5 * var(--k))/1.3 var(--mono); color: var(--g15); margin-top: calc(8 * var(--k)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wclocks .s b { font-weight: 500; color: var(--ink); }
+.wclocks .late { background: linear-gradient(90deg, rgba(238, 65, 54, .08), transparent 72%); }
+.wclocks .late .v, .wclocks .late .s b { color: var(--fail); }
+.wclocks .ck.slots { border-right: 0; }
+
+/* ---- the scope ---------------------------------------------------------- */
+.wscope { position: relative; min-height: 0; margin-top: calc(8 * var(--k)); }
+.wscope canvas, .wstrobe canvas, .wtick canvas { display: block; }
+
+/* ---- bands under the scope --------------------------------------------- */
+.wband { display: grid; grid-template-columns: var(--lw) minmax(0, 1fr); align-items: stretch; padding-right: calc(24 * var(--k)); border-top: calc(1 * var(--k)) solid var(--g06); }
+.wstrobe .wstrobe-c { display: contents; }
+.wstrobe .stcap, .wshots .wlab { padding: calc(14 * var(--k)) calc(18 * var(--k)) 0 calc(24 * var(--k)); }
+.wstrobe .stcap .k, .wshots .wlab .k { font: 600 calc(11 * var(--k))/1.2 var(--sans); letter-spacing: .16em; color: var(--g15); text-transform: uppercase; }
+.wstrobe .stcap .s, .wshots .wlab .s { font: 400 calc(11.5 * var(--k))/1.45 var(--mono); color: var(--g15); margin-top: calc(6 * var(--k)); }
+.wstrobe .stbox { position: relative; min-width: 0; min-height: 0; padding: calc(6 * var(--k)) 0 calc(4 * var(--k)); }
+.wstrobe .stbox canvas { width: 100%; height: 100%; }
+
+.wcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(236 * var(--k)), 1fr)); grid-auto-rows: calc(98 * var(--k)); gap: calc(14 * var(--k)); padding: calc(12 * var(--k)) 0; overflow: hidden; }
+.wshot { position: relative; display: grid; grid-template-columns: calc(40 * var(--k)) minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; column-gap: calc(12 * var(--k)); background: var(--g03); outline: calc(1 * var(--k)) solid var(--g07); padding-right: calc(10 * var(--k)); min-width: 0; }
+.wshot.late { outline: calc(1.5 * var(--k)) dashed var(--fail); }
+.wshot.hi { outline: calc(2 * var(--k)) solid var(--paper); background: var(--g05); }
+.wshot.late.hi { box-shadow: inset 0 0 0 calc(2 * var(--k)) var(--fail); }
+.wshot .wspy { grid-row: 1 / span 4; line-height: 0; align-self: end; }
+.wshot .wst { margin-top: calc(10 * var(--k)); font: 400 calc(12 * var(--k))/1.1 var(--sans); color: var(--g16); letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wshot .wst b { font-weight: 600; color: var(--ink); letter-spacing: .08em; }
+.wshot .wss { margin-top: calc(5 * var(--k)); font: 400 calc(11 * var(--k))/1.1 var(--mono); color: var(--g15); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wshot .wsn { align-self: end; display: flex; align-items: baseline; gap: calc(3 * var(--k)); white-space: nowrap; }
+.wshot .wsn .big { font: 300 calc(30 * var(--k))/1 var(--mono); color: var(--paper); }
+.wshot .wsn .pc { font: 400 calc(12 * var(--k))/1 var(--mono); color: var(--g15); }
+.wshot .wsn .run { margin-left: calc(14 * var(--k)); font: 400 calc(13 * var(--k))/1 var(--mono); color: var(--run); }
+.wshot .wsu { margin: calc(4 * var(--k)) 0 calc(8 * var(--k)); font: 400 calc(10.5 * var(--k))/1 var(--mono); color: var(--g14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ---- the book --------------------------------------------------------- */
+.wtick { position: relative; background: var(--g02); border-top: calc(1 * var(--k)) solid var(--g08); overflow: hidden; }
+.wtick canvas { width: 100%; height: 100%; }
