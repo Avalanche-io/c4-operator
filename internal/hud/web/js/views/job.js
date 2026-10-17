@@ -209,6 +209,7 @@ export default {
     }
     const sheet = details.length ? buildSheet({ key: `sheet:${keys.join('|')}`, title: sheetTitle, details, anchor, graph: st.graph, jobs: ctx.snap.jobs }) : null;
     const readers = details.filter((d) => (d.unitList || []).some((u) => u.reads));
+    if (ctx.route.q && ctx.route.q.reads === '1') for (const d of readers) st.lineB.add(keyOf(d));
     const deadline = j.objective && j.objective.deadline ? Date.parse(j.objective.deadline) : null;
     const g = glance(j, detail);
     const main = detail && !(sheet && sheet.cost) ? lens.main(ctx, j, st) : [];

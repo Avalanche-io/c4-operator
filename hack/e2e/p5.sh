@@ -139,7 +139,7 @@ workjob show-b sh040-lookdev-v001 render 150 'cpu, spot' 'frames: "1001-1144", o
 wait_until 120
 if [ "$SHOTS" = 1 ]; then
   log "HUD screenshots, mid-run"
-  "$ROOT/hack/e2e/hud-shots.sh" mid queue workers tiers cost job:show-a/sh010-comp-v003 job:show-b/train-denoise job:show-a/ci-change-4521 artist >/dev/null
+  "$ROOT/hack/e2e/hud-shots.sh" mid queue pools map tiers cost wall job:show-a/sh010-comp-v003 job:show-b/train-denoise job:show-a/ci-change-4521 artist >/dev/null
 fi
 
 log "until every job ends"
@@ -152,7 +152,7 @@ while :; do
 done
 WALL=$(since "$T0")
 if [ "$SHOTS" = 1 ]; then
-  "$ROOT/hack/e2e/hud-shots.sh" end queue cost job:show-a/sh010-comp-v003 job:show-b/sh040-lookdev-v001 graph >/dev/null
+  "$ROOT/hack/e2e/hud-shots.sh" end queue pools wall cost job:show-a/sh010-comp-v003 job:show-b/sh040-lookdev-v001 graph >/dev/null
 fi
 
 log "results"

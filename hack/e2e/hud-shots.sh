@@ -3,7 +3,7 @@
 # docs/hud/live/. Each shot loads one snapshot (static=1), so it shows the
 # farm at the moment it is taken.
 #
-#   hack/e2e/hud-shots.sh PREFIX shot...     shots: queue job:NS/NAME workers tiers cost graph artist
+#   hack/e2e/hud-shots.sh PREFIX shot...     shots: queue job:NS/NAME pools map tiers cost graph artist wall widget:NS/NAME
 #
 # Uses chrome-headless-shell (a plain binary, not an .app bundle). The
 # browser exits by itself after each capture; it is never killed.
@@ -35,7 +35,13 @@ W="?as=wrangler&static=1"
 for s in "$@"; do
   case "$s" in
     queue) shot "$prefix-queue" "$base$W#/queue" 1600 1100 ;;
-    workers) shot "$prefix-workers" "$base$W#/workers" 1600 1200 ;;
+    workers|pools) shot "$prefix-pools" "$base$W#/pools" 1600 1200 ;;
+    map) shot "$prefix-map" "$base$W#/map" 1600 1000 ;;
+    wall) shot "$prefix-wall" "$base$W#/wall" 1920 1080 ;;
+    widget:*)
+      j="${s#widget:}"
+      shot "$prefix-widget-${j##*/}" "$base$W#/widget/$j" 420 560
+      ;;
     tiers) shot "$prefix-tiers" "$base$W#/tiers" 1600 900 ;;
     cost) shot "$prefix-cost" "$base$W#/cost" 1600 1300 ;;
     graph) shot "$prefix-graph" "$base$W#/graph" 1600 1000 ;;

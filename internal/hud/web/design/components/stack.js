@@ -651,11 +651,19 @@ export class Stack {
     }
     // line B: units that read other rows (per job, off by default)
     if (this.view.lineB.size && S.reads.length) {
-      g.strokeStyle = T.paper; g.lineWidth = 1;
+      // every reading unit gets a tick; the bracket to its inputs is drawn for
+      // the hovered or selected unit only, so a temporal comp (every frame
+      // reading its neighbours) stays legible
+      const focus = (it) => (this.hover && this.hover.it === it) || (this.hover === it) ||
+        (this.view.sel && it.u && this.view.sel.job === it.u.job && this.view.sel.i === it.u.i);
+      g.lineWidth = 1;
       for (const { cell } of S.reads) {
         if (!this.view.lineB.has(cell.u.job)) continue;
         const me = this.items.find((it) => it.kind === 'unit' && it.u === cell.u);
         if (!me) continue;
+        g.fillStyle = T.g[16]; g.fillRect(me.x - 3, me.y + me.h / 2 - 0.5, 3, 1);
+        if (!focus(me)) continue;
+        g.strokeStyle = T.paper;
         for (const rd of cell.u.reads) {
           const idx = new Set();
           for (const [a, b] of ranges(rd.units)) for (let i = a; i <= b; i++) idx.add(i);
@@ -691,18 +699,25 @@ export class Stack {
     for (let t = Math.ceil(now / 9e5) * 9e5; t < dl + 3 * 36e5; t += 9e5) levels.push(t);
     const rows = [...rowsEta.entries()].sort((a, b) => a[0] - b[0]);
     const draw = (lev, dl2) => {
-      g.beginPath();
-      let on = false;
-      for (const [, pts] of rows) {
+      // where the contour crosses each row, then a moving average over nine
+      // rows: binary order makes neighbouring frames finish far apart
+      const xs = rows.map(([, pts]) => {
         pts.sort((a, b) => a.x - b.x);
-        let x = null;
         for (let k = 0; k + 1 < pts.length; k++) {
           const a = pts[k], b = pts[k + 1];
-          if ((a.t <= lev && b.t >= lev) || (a.t >= lev && b.t <= lev)) { x = a.x + (b.x - a.x) * ((lev - a.t) / ((b.t - a.t) || 1)); break; }
+          if ((a.t <= lev && b.t >= lev) || (a.t >= lev && b.t <= lev)) return a.x + (b.x - a.x) * ((lev - a.t) / ((b.t - a.t) || 1));
         }
-        if (x === null) { on = false; continue; }
+        return null;
+      });
+      g.beginPath();
+      let on = false;
+      rows.forEach(([, pts], k) => {
+        if (xs[k] === null) { on = false; return; }
+        let sum = 0, n = 0;
+        for (let j = Math.max(0, k - 4); j <= Math.min(rows.length - 1, k + 4); j++) if (xs[j] !== null) { sum += xs[j]; n++; }
+        const x = sum / n;
         if (!on) { g.moveTo(x, pts[0].y); on = true; } else g.lineTo(x, pts[0].y);
-      }
+      });
       if (dl2) { g.strokeStyle = T.fail; g.setLineDash([4, 3]); g.lineWidth = 1.4; } else { g.strokeStyle = T.g[14]; g.setLineDash([1, 3]); g.lineWidth = 1; }
       g.stroke(); g.setLineDash([]); g.lineWidth = 1;
     };
