@@ -240,7 +240,7 @@ export default {
               h('label', null, h('input', { type: 'checkbox', 'data-stack': 'lineA', checked: st.lineA ? true : false }), 'other inputs'),
               readers.map((d) => h('label', { 'data-key': 'lb-' + keyOf(d) }, h('input', { type: 'checkbox', 'data-stack': 'lineB', 'data-job': keyOf(d), checked: st.lineB.has(keyOf(d)) ? true : false }), `reads · ${d.name.replace(/^sh\d+-/, '')}`)),
               h('label', null, h('input', { type: 'checkbox', 'data-stack': 'contours', checked: st.contours ? true : false }), 'time lines')),
-            sheet ? own('stack', 'stack:' + k, { sheet, view: { deadline, sel: st.sel, box: st.box, lineA: st.lineA, lineB: st.lineB, contours: st.contours } }) : h('div', { class: 'body dim' }, 'Reading the sheet…'),
+            sheet ? own('stack', 'stack:' + k, { sheet, view: { deadline, sel: st.sel, box: st.box, lineA: st.lineA, lineB: st.lineB, contours: st.contours, ...(ctx.route.q && ctx.route.q.collapse === 'shot' ? { shotCollapsed: true } : {}) } }) : h('div', { class: 'body dim' }, 'Reading the sheet…'),
             j.output ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset folded into its chain' },
               h('b', null, f.gridRef(j.output.view)), `${String(j.output.changesets).padStart(4, '0')}+00`, h('span', { class: 'dimmer' }, j.output.view)) : null),
           h('div', null,

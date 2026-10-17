@@ -16,7 +16,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 comma := ,
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images install-yaml release-snapshot verify e2e e2e-down tools
+.PHONY: all generate manifests test test-linux envtest build image images install-yaml release-snapshot verify e2e e2e-down tools tutorials
 
 all: generate manifests test build
 
@@ -38,6 +38,13 @@ verify:
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
+
+# The tutorials: every farm in examples/farms, scheduled by the production
+# policy and captured at its moments into docs/tutorials (frozen API
+# fixtures, screenshots taken with chrome-headless-shell, and a walkthrough
+# per farm). Set CHROME to the browser binary if it is not found.
+tutorials:
+	go run ./hack/hudmock tutorials --out docs/tutorials examples/farms/*.yaml
 
 manifests:
 	$(CONTROLLER_GEN) crd:allowDangerousTypes=false paths=./api/... output:crd:artifacts:config=config/crd

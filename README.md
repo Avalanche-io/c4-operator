@@ -48,16 +48,16 @@ C4 is the short form of The Cinema Content Creation Cloud
 
 [REPORT-v2.md](REPORT-v2.md) has every measurement and its method.
 
-| what                         | result                                                                                                                                                                                              |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| store load as pods grow      | 64 pods reading one 28-object shot cost the store 42 GETs through the tiers (1.5 per object), against 224 when each node reads for itself and 1,792 when each pod does                             |
-| mounts                       | a warm mount in 2 ms; a cold one in 80 ms at the median, mostly from a peer in the same zone (0.8 to 1.0 s when nothing in the zone held the bytes); the next version as a delta layer               |
-| failure                      | a regional cache replica killed mid-transfer: all 32 pods finished, 7 transfers resumed from their offsets at another replica, none fell through to the store                                       |
-| isolation                    | nine attempts by one project to read another's data refused; a revoked vendor grant took effect 0.1 s later                                                                                       |
-| monorepo CI                  | 401 commits imported in 5.4 s; 16 test shards per change mount the next commit as a 3-file delta in 16 ms; which files changed between two commits in 13 to 221 ms, identical to `git diff`          |
-| deadlines                    | 6 of 7 jobs met their deadlines on a contended farm while a training run yielded its GPUs at a checkpoint and resumed; in a five-week simulation, 43% fewer missed render deadlines than manual priorities |
-| provenance                   | a frame of a model-assisted denoise traces to the render it read, with the declared model, oversight and consent; changing one field of a stored record breaks its signature                     |
-| agents                       | an MCP client answered all 10 questions of the evaluation set from the live farm, each call in under 10 ms                                                                                          |
+| what                    | result                                                                                                                                                                                                     |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| store load as pods grow | 64 pods reading one 28-object shot cost the store 42 GETs through the tiers (1.5 per object), against 224 when each node reads for itself and 1,792 when each pod does                                     |
+| mounts                  | a warm mount in 2 ms; a cold one in 80 ms at the median, mostly from a peer in the same zone (0.8 to 1.0 s when nothing in the zone held the bytes); the next version as a delta layer                     |
+| failure                 | a regional cache replica killed mid-transfer: all 32 pods finished, 7 transfers resumed from their offsets at another replica, none fell through to the store                                              |
+| isolation               | nine attempts by one project to read another's data refused; a revoked vendor grant took effect 0.1 s later                                                                                                |
+| monorepo CI             | 401 commits imported in 5.4 s; 16 test shards per change mount the next commit as a 3-file delta in 16 ms; which files changed between two commits in 13 to 221 ms, identical to `git diff`                |
+| deadlines               | 6 of 7 jobs met their deadlines on a contended farm while a training run yielded its GPUs at a checkpoint and resumed; in a five-week simulation, 43% fewer missed render deadlines than manual priorities |
+| provenance              | a frame of a model-assisted denoise traces to the render it read, with the declared model, oversight and consent; changing one field of a stored record breaks its signature                               |
+| agents                  | an MCP client answered all 10 questions of the evaluation set from the live farm, each call in under 10 ms                                                                                                 |
 
 How this compares with Anthropic's Scion, operation by operation, and
 where C4 goes further, is in
@@ -72,6 +72,10 @@ More screenshots: [docs/hud](docs/hud) (a synthetic farm: pools, the map,
 the side widget, the phone, the class lenses) and [docs/hud/live](docs/hud/live)
 (the end-to-end farm). The design system and its thesis are in
 [internal/hud/web/design](internal/hud/web/design).
+
+Walkthroughs: [docs/tutorials](docs/tutorials) steps through five farms
+scheduled by the operator's own policy, from one artist's home lab to a
+facility of four rooms on four continents, at the moments worth stopping at.
 
 ## Quickstart
 
@@ -137,15 +141,15 @@ not yet built.
 
 ## Documentation
 
-| document                                         | what it covers                                                            |
-| ------------------------------------------------ | ------------------------------------------------------------------------- |
-| [docs/quickstart.md](docs/quickstart.md)         | five minutes on kind                                                      |
-| [docs/install.md](docs/install.md)               | requirements, install, projects, pools, the HUD, hardening for production |
-| [DESIGN.md](DESIGN.md)                           | the design of record                                                      |
-| [REPORT-v2.md](REPORT-v2.md)                     | what each phase proved, the numbers, the Scion comparison, open decisions |
-| [docs/agents/tools.md](docs/agents/tools.md)     | the MCP tools, generated from the server                                  |
-| [skills/c4-farm](skills/c4-farm/SKILL.md)        | a skill for agents that operate the farm                                  |
-| [PROGRESS.md](PROGRESS.md)                       | branches, release blockers, proposed changes to the c4 suite              |
+| document                                     | what it covers                                                            |
+| -------------------------------------------- | ------------------------------------------------------------------------- |
+| [docs/quickstart.md](docs/quickstart.md)     | five minutes on kind                                                      |
+| [docs/install.md](docs/install.md)           | requirements, install, projects, pools, the HUD, hardening for production |
+| [DESIGN.md](DESIGN.md)                       | the design of record                                                      |
+| [REPORT-v2.md](REPORT-v2.md)                 | what each phase proved, the numbers, the Scion comparison, open decisions |
+| [docs/agents/tools.md](docs/agents/tools.md) | the MCP tools, generated from the server                                  |
+| [skills/c4-farm](skills/c4-farm/SKILL.md)    | a skill for agents that operate the farm                                  |
+| [PROGRESS.md](PROGRESS.md)                   | branches, release blockers, proposed changes to the c4 suite              |
 
 ## Development
 
@@ -158,6 +162,8 @@ make test-linux     # overlay, layer and capture tests in a privileged Linux con
 make verify         # gofmt, vet, generated code and CRDs in step, manifests render
 go run ./hack/sim   # the scheduling simulation
 go run ./hack/hudmock   # the HUD against a synthetic farm, no cluster
+go run ./hack/hudmock --scenario examples/farms/large.yaml   # a farm from a spec, scheduled by the policy
+make tutorials      # docs/tutorials from every farm in examples/farms
 ```
 
 The end-to-end phases run on an eight-worker kind cluster:
@@ -212,7 +218,8 @@ internal/gitimport/    git history -> views, changesets, chains
 config/                kustomize: default (local images), release (GHCR), samples
 hack/e2e/              the end-to-end suite: cluster setup and phase scripts
 hack/sim/              the scheduling simulation
-hack/hudmock/          a synthetic farm behind the HUD API
+hack/hudmock/          a synthetic farm behind the HUD API; spec-driven farms scheduled by the policy
+examples/farms/        farm and scenario specs, from a home lab to a global facility
 ```
 
 ## Relation to C4, SMPTE ST 2114 and Scion
