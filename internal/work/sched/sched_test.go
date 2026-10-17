@@ -731,4 +731,18 @@ func TestEvictedJobIsLateAtItsShare(t *testing.T) {
 	if d.Jobs["b"].AtRisk {
 		t.Fatalf("b at risk: %+v", d.Jobs["b"])
 	}
+	// With c (34 due in 5h) the on-time set {b, c} takes all 10 slots and
+	// a gets no share: it runs after the set (75 slot-hours at 10 slots,
+	// 7.5h), so it is late by about 4.5h, not 0.
+	c := job("c", "p", 100, 34, 5*time.Hour)
+	c.Pools = []string{"cpu", "cpu-spot"}
+	s.Jobs = append(s.Jobs, c)
+	d = Decide(s, &State{}, DefaultConfig())
+	ja = d.Jobs["a"]
+	if !ja.AtRisk || ja.LateBy < 4*time.Hour || ja.LateBy > 5*time.Hour {
+		t.Fatalf("a with no share: at risk %v, late by %v; want about 4.5h", ja.AtRisk, ja.LateBy)
+	}
+	if ja.Burst == nil || !ja.Burst.Closes || !ja.Burst.Auto {
+		t.Fatalf("a with no share: burst %+v", ja.Burst)
+	}
 }
