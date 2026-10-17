@@ -1203,7 +1203,7 @@ Render, CI and ML have the same skeleton. The core owns it:
 | ---------- | ------------------------------------------------------------------------------------------------------------------------ | ----------------------------------- | --------------------------------------- | ------------------------------------------------- |
 | unit       | the smallest thing the queue releases; one pod, or one wrapped object                                                    | a chunk of frames of one pass       | a step or a test shard                  | a training run or a sweep trial                   |
 | gang       | members that start and stop together; the queue accounts for them as one unit and never releases or preempts part of one | size 1                              | size 1                                  | the ranks of a run; placement by Kueue and JobSet |
-| generator  | a unit whose evaluation adds units and edges (section 10.6)                                                              | RIB or scene expansion into passes  | test discovery into shards              | a sweep planner into trials                       |
+| generator  | a unit whose evaluation adds units and edges (section 10.6)                                                              | USD export expanding into passes    | test discovery into shards              | a sweep planner into trials                       |
 | objective  | an effective deadline or a required rate (section 10.7)                                                                  | deadline from job, shot or delivery | latency SLO: ready time plus p95 target | deadline, or a GPU-hour rate                      |
 | estimator  | a duration distribution for every unit and every unexpanded generator (section 10.8)                                     | per frame-range bucket and pass     | per target and shard history            | steps left times measured step time               |
 | pools      | where units may run (section 10.10)                                                                                      | cpu, gpu, high-mem, spot            | ci runners                              | gpu pools                                         |
@@ -1302,8 +1302,9 @@ finishes.
 ### 10.6 Dynamic expansion
 
 A unit can be a **generator**: a node of the graph whose evaluation adds
-units and edges. A RIB file that produces shadow and reflection passes before
-its beauty render, a CI step that discovers which test shards a change needs,
+units and edges. A USD export that produces deep env and volumes layers
+before the beauty layer that holds out against them, a CI step that
+discovers which test shards a change needs,
 and a sweep planner that spawns trials are all generators.
 
 - **States.** A generator starts *unevaluated*. Evaluating it is itself a
@@ -1322,10 +1323,10 @@ and a sweep planner that spawns trials are all generators.
 - **Edges.** Children inherit the generator's dependents: whatever waited on
   the generator now waits on its children (all of them, unless the document
   names a subset). A child may depend on its siblings, as beauty depends on
-  shadow.
+  the deep layers it holds out against.
 - **Estimating work that does not exist yet.** Before evaluation, a
   generator's eventual work is a distribution taken from history for similar
-  generators (same class and generator key, for example "rib-expand, layer
+  generators (same class and generator key, for example "usd-export, layer
   lighting, show A"): the number of children and their total work, with
   variance. As generators in the job are evaluated, the job's own observed
   fan-out replaces the prior (a running mean and variance per generator key),
@@ -1570,10 +1571,12 @@ through the tiers instead of from the store.
 
 ### 10.15 Render class
 
-- Units are chunks of frames of one pass. With `expand: true`, each frame
-  (or chunk) starts as a generator that evaluates the scene description (a
-  RIB or USD expansion) and emits its passes, for example shadow and
-  reflection passes that beauty depends on.
+- Units are chunks of frames of one pass, rendered through a Hydra delegate
+  (Karma XPU or CPU, RenderMan, Arnold, V-Ray) to OpenEXR. With
+  `expand: true`, each frame (or chunk) starts as a generator that exports
+  the frame's USD stage (from Solaris, or a layout or animation publish to
+  USD layers) and emits its passes, for example deep env and volumes layers
+  that the beauty layer holds out against.
 - The objective is a deadline: the job's own, or a Milestone selecting its
   shot or delivery, or the class default turnaround.
 - Order is per job: `Sequential`, `Reverse` or `Binary`. The `render-preview`
@@ -1782,7 +1785,7 @@ they feed) laid out as one STACK, in the order work flows.
   it spans its batches (the job script's batch generators, or 24 frames,
   one second of screen time, when it has none); a batch spans exactly the
   rows of its frames; a frame's stages sit side by side in its row:
-  upstream work (sim, RIB generation), its passes, render, then comp,
+  upstream work (sim caches, USD export), its passes, render, then comp,
   transcode and delivery, which span the rows they read. Containment is
   shown by adjacency, never by lines.
 - **Expansion is visible.** An unevaluated generator is a stippled block

@@ -227,9 +227,9 @@ A JobSummary with these fields added:
 | `progress`            | running units; `measured` is true when the unit reports progress itself, false when the fill is elapsed time over the estimate                           |
 | `costByFrame`         | one entry per frame of the last pass: `seconds` when measured, else `estimate` with its band `low` to `high`                                             |
 | `expansions`          | generators that have been evaluated: `children` is a unit set, `at` a time; a client that sees a new entry animates the split                            |
-| `edges`               | unit-level dependencies inside the job (beauty after shadow and reflection; integration after the shards); omitted above 5,000 units                     |
+| `edges`               | unit-level dependencies inside the job (beauty after the deep env and volumes layers; integration after the shards); omitted above 5,000 units                     |
 | `axis.batch`          | frames per display batch: the render class's `chunk` when it is above 1, else the class fps (24, one second of screen time); frame axes only             |
-| `groups[].parent`     | the key of the generator group whose expansion creates this group's units (`batch` under `shot`, `rib` under `batch`)                                    |
+| `groups[].parent`     | the key of the generator group whose expansion creates this group's units (`batch` under `shot`, `usd` under `batch`)                                    |
 | `unitList[].parent`   | the index of the generator unit whose expansion created this unit; omitted for units the job planned                                                     |
 | `unitList[].work`     | the unit's work in slot-seconds: `spent` so far and `expected` in total (below)                                                                          |
 | `unitList[].reads`    | units of other jobs this unit reads, when that is not simply the same frame (a temporal comp reads frames n-1 to n+1); `units` is a unit set of that job |

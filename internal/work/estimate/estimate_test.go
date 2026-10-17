@@ -142,37 +142,37 @@ func TestNoLocality(t *testing.T) {
 func TestGeneratorFanOutNarrows(t *testing.T) {
 	cfg := DefaultConfig()
 	e := New(cfg)
-	e.SetGenPrior("rib", GenPrior{
+	e.SetGenPrior("usd-export", GenPrior{
 		Children: Prior{Mean: 2, SD: 1},
 		Work:     Prior{Mean: 1000, SD: 600},
 		Longest:  Prior{Mean: 700, SD: 300},
 	})
-	g0 := e.Generator("rib")
+	g0 := e.Generator("usd-export")
 	if g0.Mean != 1000 || g0.PerSD != 600 {
 		t.Fatalf("prior %+v", g0)
 	}
-	s0 := e.Summarize([]Unit{{Key: "eval", Pos: 0, Gen: "rib"}, {Key: "eval", Pos: 1, Gen: "rib"}}, nil)
+	s0 := e.Summarize([]Unit{{Key: "eval", Pos: 0, Gen: "usd-export"}, {Key: "eval", Pos: 1, Gen: "usd-export"}}, nil)
 	if s0.Unevaluated != 2 {
 		t.Fatal(s0)
 	}
 	// Generators in this job expand to 3 children and about 1800 s of work.
-	e.Expanded("rib", 3)
-	g1 := e.Generator("rib")
+	e.Expanded("usd-export", 3)
+	g1 := e.Generator("usd-export")
 	if !near(g1.Mean, 1500, 1e-9) {
 		t.Fatalf("after one expansion %+v", g1)
 	}
 	r := rand.New(rand.NewPCG(3, 4))
 	prev := g1.MeanSD
 	for i := 0; i < 20; i++ {
-		e.Expanded("rib", 3)
-		e.ExpansionDone("rib", 1800+r.NormFloat64()*50, 900)
-		g := e.Generator("rib")
+		e.Expanded("usd-export", 3)
+		e.ExpansionDone("usd-export", 1800+r.NormFloat64()*50, 900)
+		g := e.Generator("usd-export")
 		if g.MeanSD > prev+1e-9 {
 			t.Fatalf("band widened at %d: %v > %v", i, g.MeanSD, prev)
 		}
 		prev = g.MeanSD
 	}
-	g := e.Generator("rib")
+	g := e.Generator("usd-export")
 	// The prior (scaled to 3 children: 1500 +- 900) is outweighed 20 to 3
 	// by observations near 1800 +- 50.
 	if math.Abs(g.Mean-1800) > 60 || g.PerSD > 0.4*900 || g.MeanSD > 0.1*900 {
