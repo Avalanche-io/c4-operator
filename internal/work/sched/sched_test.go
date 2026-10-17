@@ -677,3 +677,25 @@ func TestHuman(t *testing.T) {
 		}
 	}
 }
+
+// TestBlockedJobsRankAfterRunnable: a job waiting on its upstream (as the
+// queue passes it: Blocked set, nothing runnable) has R > 0 and nothing
+// running, so by the need ratio alone it would rank first. It ranks after
+// every job that can use slots now.
+func TestBlockedJobsRankAfterRunnable(t *testing.T) {
+	blocked := job("comp", "p", 0, 10, 8*time.Hour)
+	blocked.Runnable, blocked.RunnableTotal, blocked.Blocked = nil, 0, 100
+	blocked.Ready = time.Time{}
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{
+		blocked,
+		job("light", "p", 100, 40, 6*time.Hour),
+		job("fx", "p", 100, 20, 12*time.Hour),
+	}}
+	d := Decide(s, &State{}, DefaultConfig())
+	if r := d.Jobs["comp"].Rank; r != 3 {
+		t.Fatalf("blocked job ranked %d, want last (3); light %d fx %d", r, d.Jobs["light"].Rank, d.Jobs["fx"].Rank)
+	}
+	if count(d, "comp") != 0 {
+		t.Fatal("a blocked job was dispatched")
+	}
+}

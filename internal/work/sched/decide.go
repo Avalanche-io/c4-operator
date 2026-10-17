@@ -475,6 +475,11 @@ func (a *alloc) rank() {
 	js := append([]*jobCtx(nil), a.jobs...)
 	for _, jc := range js {
 		switch {
+		case jc.waiting():
+			// Nothing it could run now (its upstream jobs or its own
+			// dependencies are unfinished): ranked after every job that
+			// can use slots, though its R counts in the plan.
+			jc.group = 3
 		case jc.R > 0 && jc.planOK:
 			jc.group = 0
 		case jc.R > 0:
@@ -508,4 +513,13 @@ func (a *alloc) rank() {
 		st.Rank = i + 1
 		a.out.Jobs[jc.j.ID] = st
 	}
+}
+
+// waiting reports whether a job can use no slot now: nothing runnable,
+// nothing running, no generator left to evaluate, but units still to come.
+// The queue passes jobs whose upstream jobs have not finished this way
+// (Blocked set, Runnable empty).
+func (jc *jobCtx) waiting() bool {
+	j := jc.j
+	return j.RunnableTotal == 0 && len(j.Runnable) == 0 && len(j.RunningUnits) == 0 && j.Unevaluated == 0 && j.Blocked > 0
 }
