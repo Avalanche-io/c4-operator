@@ -57,6 +57,7 @@ type unit struct {
 	endAt       float64
 	retained    float64
 	yieldAt     float64
+	pre         sched.Preempt // the preemption it is yielding to
 }
 
 type job struct {
@@ -293,6 +294,9 @@ func (e *engine) run() *runResult {
 		case evFinish, evFail, evYield:
 			if ev.u.state != stRunning || ev.u.attempt != ev.attempt {
 				continue
+			}
+			if ev.kind == evYield && e.ck != nil {
+				e.ck.stopped(ev.u.pre)
 			}
 			e.stop(ev.u, ev.kind)
 		case evProvision:
@@ -858,20 +862,24 @@ func (e *engine) decide() {
 		}
 		fmt.Fprintf(h, "|p%s", x.Unit)
 		if e.ck != nil {
-			e.ck.preempted(x)
+			e.ck.requested(x)
 		}
 		if x.Yield && u.j.spec.ml != nil {
 			ml := u.j.spec.ml
 			prog := e.now - u.start - u.restore
 			nb := u.start + u.restore + (math.Floor(math.Max(0, prog)/ml.ckpt)+1)*ml.ckpt
 			if nb >= u.endAt {
-				continue
+				continue // it ends before its next checkpoint
 			}
 			u.yieldAt = nb
 			e.push(&event{t: nb, kind: evYield, u: u, attempt: u.attempt})
-			continue
+			u.pre = x
+		} else {
+			if e.ck != nil {
+				e.ck.stopped(x)
+			}
+			e.stopAs(u, evFail, true)
 		}
-		e.stopAs(u, evFail, true)
 	}
 	for _, b := range d.Bursts {
 		if b.Auto {

@@ -275,12 +275,16 @@ func (pr *pointResult) collect() {
 		if r == nil || base.DueJobs == 0 {
 			continue
 		}
+		// Late jobs (finished late, or unfinished past their deadline)
+		// are compared rather than on-time ones: a looser deadline can
+		// leave a job unfinished and not yet due at the end of the run,
+		// which counts as neither.
 		tol := max(2, int(math.Ceil(0.05*float64(base.DueJobs))))
-		if r.OnTime >= base.OnTime-tol {
+		if r.Late <= base.Late+tol {
 			continue
 		}
-		detail := fmt.Sprintf("on time %d of %d with the %s variant, %d in the base (tolerance %d); repro with -variant %s",
-			r.OnTime, r.DueJobs, v, base.OnTime, tol, v)
+		detail := fmt.Sprintf("%d late jobs with the %s variant, %d in the base (tolerance %d); repro with -variant %s",
+			r.Late, v, base.Late, tol, v)
 		// A variant that asked for approval of more bursts priced at $0
 		// lost its bursts to lateness-unpriced, not to its own change.
 		zero := func(x *runResult) int { return x.Why["costs more than the lateness it prevents ($0)"] }

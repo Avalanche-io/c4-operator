@@ -34,9 +34,9 @@ var invariants = []struct{ name, what string }{
 	{"churn-pool", "a pool sees at most PreemptPerWindow preemptions per PreemptWindow"},
 	{"churn-pingpong", "two jobs never take slots back and forth within an hour"},
 	{"determinism", "the same point and seed give the same decisions"},
-	{"metamorphic-capacity", "more owned capacity does not lower on-time completions beyond noise"},
-	{"metamorphic-deadline", "looser deadlines do not lower on-time completions beyond noise"},
-	{"metamorphic-budget", "a bigger burst budget does not lower on-time completions beyond noise"},
+	{"metamorphic-capacity", "more owned capacity does not make more jobs late, beyond noise"},
+	{"metamorphic-deadline", "looser deadlines do not make more jobs late, beyond noise"},
+	{"metamorphic-budget", "a bigger burst budget does not make more jobs late, beyond noise"},
 	{"decide-latency", "one decision takes under a second at every farm size in the grid"},
 	{"dispatch-invalid", "dispatches name a known unit and a pool the job may use"},
 }
@@ -98,13 +98,14 @@ type checker struct {
 	// incoming: units being stopped for a job (sched counts their slots
 	// toward it), by unit.
 	incoming map[string]string
+	asked    map[string]bool // units sched asked to stop, while they run
 	cur      *view
 	dumped   bool
 }
 
 func newChecker(e *engine) *checker {
 	return &checker{e: e, cfg: e.cfg, byUnit: map[string]int{}, poolTS: map[string][]float64{},
-		pairs: map[[2]string]float64{}, pred: map[string]*predRec{}, incoming: map[string]string{}}
+		pairs: map[[2]string]float64{}, pred: map[string]*predRec{}, incoming: map[string]string{}, asked: map[string]bool{}}
 }
 
 // view is the bookkeeping of one decision: what was free and used before
@@ -303,6 +304,11 @@ func (c *checker) decision(s sched.Snapshot, d sched.Decisions) {
 	e := c.e
 	v := c.newView(s, d)
 	c.cur = v
+	for id := range c.asked {
+		if u := e.byID[id]; u == nil || u.state != stRunning {
+			delete(c.asked, id)
+		}
+	}
 	inc := map[string]bool{}
 	for id, forJob := range c.incoming {
 		if u := e.byID[id]; u == nil || u.state != stRunning {
@@ -529,7 +535,7 @@ func (c *checker) checkHolds(v *view) {
 
 // pendingStop says whether sched already asked a unit to stop (it is then
 // in State and not asked again).
-func (c *checker) pendingStop(id string) bool { return c.byUnit["stop:"+id] > 0 }
+func (c *checker) pendingStop(id string) bool { return c.asked[id] }
 
 func (c *checker) checkQuotas(v *view) {
 	for _, x := range v.d.Dispatch {
@@ -654,22 +660,17 @@ func (c *checker) checkBursts(v *view) {
 	}
 }
 
-// preempted is called for each preemption the engine applies.
-func (c *checker) preempted(x sched.Preempt) {
+// requested is called for every preemption sched emits; sched keeps it
+// pending and does not ask again while the unit runs. Its rate limit per
+// pool counts what it emits, so the window and ping-pong checks do too.
+func (c *checker) requested(x sched.Preempt) {
+	c.asked[x.Unit] = true
+	if x.Reason == sched.ReasonHoldStop || x.Reason == sched.ReasonWrangler {
+		return
+	}
 	now := c.e.now
-	if x.Reason == sched.ReasonHoldStop {
-		c.byUnit["stop:"+x.Unit]++
-		return
-	}
-	if x.Reason == sched.ReasonWrangler {
-		return
-	}
 	if x.For != "" {
 		c.incoming[x.Unit] = x.For
-	}
-	c.byUnit[x.Unit]++
-	if n := c.byUnit[x.Unit]; n > c.cfg.MaxPreemptionsPerUnit {
-		c.violate("churn-unit", x.Job, fmt.Sprintf("%s preempted %d times (limit %d)", x.Unit, n, c.cfg.MaxPreemptionsPerUnit))
 	}
 	ts := append(c.poolTS[x.Pool], now)
 	keep := ts[:0]
@@ -680,7 +681,11 @@ func (c *checker) preempted(x sched.Preempt) {
 	}
 	c.poolTS[x.Pool] = keep
 	if len(keep) > c.cfg.PreemptPerWindow {
-		c.violate("churn-pool", x.Pool, fmt.Sprintf("%d preemptions in %s (limit %d)", len(keep), c.cfg.PreemptWindow, c.cfg.PreemptPerWindow))
+		var at []string
+		for _, t := range keep {
+			at = append(at, clock(t)[6:])
+		}
+		c.violate("churn-pool", x.Pool, fmt.Sprintf("%d preemptions in %s (limit %d) at %s", len(keep), c.cfg.PreemptWindow, c.cfg.PreemptPerWindow, strings.Join(at, " ")))
 	}
 	if x.For == "" {
 		return
@@ -689,6 +694,18 @@ func (c *checker) preempted(x sched.Preempt) {
 		c.violate("churn-pingpong", x.Job, fmt.Sprintf("lost a unit to %s, which lost one to it %s earlier", x.For, time.Duration((now-t)*float64(time.Second)).Round(time.Minute)))
 	}
 	c.pairs[[2]string{x.Job, x.For}] = now
+}
+
+// stopped is called when a preemption takes effect (a kill, or a yield
+// at a checkpoint): a unit faulted before its yield was not preempted.
+func (c *checker) stopped(x sched.Preempt) {
+	if x.Reason == sched.ReasonHoldStop || x.Reason == sched.ReasonWrangler {
+		return
+	}
+	c.byUnit[x.Unit]++
+	if n := c.byUnit[x.Unit]; n > c.cfg.MaxPreemptionsPerUnit {
+		c.violate("churn-unit", x.Job, fmt.Sprintf("%s preempted %d times (limit %d)", x.Unit, n, c.cfg.MaxPreemptionsPerUnit))
+	}
 }
 
 // recordPredictions keeps each deadline job's first prediction after it
