@@ -1774,37 +1774,47 @@ actuator (a simulated capacity provider).
 ### 11.3 The job view
 
 The job view is the signature of the HUD, after the job view of Pixar's
-render queue, and it is the same for every class:
+render queue, and it is the same for every class. It is a sheet: the job's
+shot (every job carrying the same `c4.avalanche.io/shot`, and the deliveries
+they feed) laid out as one STACK, in the order work flows.
 
-- **One box per unit.** Light gray: not yet evaluated (a generator that may
-  expand). Dark gray: a concrete unit waiting to run. Dark gray with a
-  hatch: blocked by a dependency. A running unit **fills with green** in
-  place as it progresses. Solid green: done. Red: failed. A retrying unit
-  shows its failed attempts as red notches along its edge while its new
-  attempt fills. Held units are outlined.
-- **Expansion is visible.** When a light gray box is evaluated, it splits
-  into its dark gray children in place, and the graph's new edges appear.
-- **Progress is honest.** A unit that reports progress (a line in
-  `.c4/progress` inside its volume, read by the node daemon and exported as
-  a gauge) fills by measured progress. Others fill by elapsed time over
-  their estimate, drawn with a fine stripe so an estimate never passes for
-  a measurement. Progress never touches the API server.
-- **Grouping.** Rows by pass or layer (render), stage and shard (CI), or
-  rank and trial (ML). Render wraps 24 frames per row, one second of screen
-  time.
-- **Order is visible.** A job in binary order fills its grid coarse to
-  fine: the end frames, the middle, the quarters, then ever finer stripes
-  across the whole shot, instead of a wipe from left to right.
-- **Density.** Labeled boxes up to about 2,000 units; compact cells up to
-  about 20,000; above that each cell aggregates a run of units and shows the
-  mix of states inside it as stacked color. Clicking a group or an
-  aggregated cell drills down. The view is drawn on a canvas, so tens of
-  thousands of units stay smooth.
-- **Slack and risk on the same view.** The header carries the deadline, the
-  ETA band (p50 to p90, which narrows as generators expand), and the slack.
-  In the grid, waiting units that the scheduler's projection finishes after
-  the deadline carry a yellow mark, so a wrangler sees how much of the job is
-  at risk, and where.
+- **One row per frame, dependencies to the right.** The shot is one block;
+  it spans its batches (the job script's batch generators, or 24 frames,
+  one second of screen time, when it has none); a batch spans exactly the
+  rows of its frames; a frame's stages sit side by side in its row:
+  upstream work (sim, RIB generation), its passes, render, then comp,
+  transcode and delivery, which span the rows they read. Containment is
+  shown by adjacency, never by lines.
+- **Expansion is visible.** An unevaluated generator is a stippled block
+  with its expected children drawn as dashed outlines; when it expands, its
+  row opens to the width of its widest stage (shadow and reflection side by
+  side, then beauty).
+- **Progress fills from the bottom.** A running unit has a blue body with a
+  breathing leading edge, and green rises inside it by measured progress
+  (a line in `.c4/progress` inside its volume, read by the node daemon), or
+  by elapsed time over the estimate, striped so an estimate never passes for
+  a measurement. Done is green; a finished upstream job is a settled green
+  one step down. Earlier failed attempts are orange notches while the new
+  attempt fills; failed is red. Progress never touches the API server.
+- **Any container collapses to its aggregate.** A collapsed shot, batch or
+  folded run of upstream stages is one block: green to the share done of
+  everything inside and upstream of it, by work (slot-seconds) where the
+  estimate exists, a blue sliver for the share running, an orange tick if
+  anything inside is retrying, a red tick if anything failed, a dashed red
+  outline if any of it is projected late. By default a batch opens only
+  where something needs attention (a failure, a retry, a heavy region).
+- **Lines only where grouping cannot say it.** A: a dependency on a job
+  outside the sheet (delivery wk43 also needs the other shot's transcode),
+  on by default. B: a unit that reads other rows (a temporal comp reading
+  frames n-1 to n+1), off by default, per job.
+- **Slack and risk on the same view.** The collar's title block carries the
+  deadline in ink, the ETA band (p50 to p90) and the slack in pencil; waiting
+  units the scheduler projects after the deadline carry a red pencil tick;
+  time lines (projected finish contours) cross the rows, with the deadline
+  as a red pencil datum. The cost per frame runs beside the rows, measured
+  in ink, estimated as a band.
+- **Scale.** The sheet is drawn on a canvas; very large jobs batch more
+  frames per row so the sheet stays a few hundred rows tall.
 
 ### 11.4 Lenses and views
 
@@ -1890,21 +1900,37 @@ has an MCP tool with the same effect (section 13.2).
 
 ### 11.8 Graphic design direction
 
-Designed for the wall of a machine room and for an artist's laptop, not as
-an admin console:
+GRATICULE: designed for the wall of a machine room and for an artist's
+second monitor, not as an admin console. The design system lives in
+`internal/hud/web/design` (tokens, components, previews and a README on the
+thesis and motifs).
 
-- **Surround.** A neutral, mid-dark gray like a grading suite's surround, so
-  state colors read true. No blue-black, no cream.
-- **State colors.** The job view's grays and green follow the Pixar queue
-  Joshua knows. Other states take the SMPTE color bars: failed is the red
-  bar, held the magenta bar, risk and blacklists the yellow bar, links and
-  selection the cyan bar. People in post read these colors instantly, and
-  they are used only for state.
-- **Type.** A condensed grotesk for labels (dense tables, small uppercase
-  labels in the manner of a slate) and a monospaced face with tabular
-  figures for frame numbers, durations and IDs, both embedded in the binary.
-- Motion is limited to filling boxes and the split of an expanding
-  generator, and respects `prefers-reduced-motion`.
+- **Every screen is a sheet in a series.** A neatline bounds the data; the
+  collar says what, when and at what scale; the neighbouring sheets are
+  named at the edges (upstream jobs, downstream jobs, sibling shots).
+- **Value carries depth.** A 20-step grey ramp, packed densely below
+  L*20, layers the room, the sheet, recessed wells and raised plates.
+- **Four colors carry state, and nothing else is colored.** Green is
+  completed work, blue is work running now, orange is temporary trouble the
+  farm is handling (a retry, a backoff, a suspect node), red is failure and
+  lateness (dashed red pencil when it is projected, not yet true). Held is a
+  grey hold mark; selection a paper outline; burst capacity ordinary slots.
+- **Ink and pencil.** Measured values are ink and never move; estimates are
+  pencil, lighter and dash-underlined. Every action is an entry in the book,
+  signed by whoever acted, with that signer's seal: a node, the queue, the
+  controller, an importer, or the HUD for a person or an agent.
+- **Type.** IBM Plex Sans Condensed for labels and the glance numbers, IBM
+  Plex Mono with tabular figures for every value, frame and ID; C4 IDs are
+  printed as grid references (`c43L 2MDG ... UypQ`), the full ID on hover.
+- **Motion is meaning.** Fills tween between snapshots, a running unit's
+  edge breathes, a finished unit glows and settles over a minute, a
+  collapse slides; the wall's sweep advances between snapshots and its
+  history fades over fifteen minutes. All of it stops under
+  `prefers-reduced-motion`.
+- **Scales.** The desk; the wall (`#/wall`: every job a channel sweeping
+  toward its deadline, mission clocks, the strobe strip, the shots
+  collapsed, the book); the side widget (`#/widget/ns/name`, 240 to 420 px);
+  the phone (one column, one decision per screen).
 
 ## 12. Usage metering
 

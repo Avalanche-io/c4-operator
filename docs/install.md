@@ -126,6 +126,13 @@ Nodes join a site by region; `localities` are the values of the nodes'
 locality label (`topology.kubernetes.io/zone` unless a project sets another)
 in display order.
 
+The HUD has three more faces besides the desk: the wall, `#/wall`, for a
+machine room or a visitor gallery (add `?tour=1` to cycle the shots); the
+side widget, `#/widget/<namespace>/<job>`, sized for the edge of an
+artist's second monitor (`?compact=1` for a corner); and a phone layout
+below 720 px. Component previews for the design system are served at
+`/design/previews/`.
+
 Agents use the same API through MCP:
 
 ```sh

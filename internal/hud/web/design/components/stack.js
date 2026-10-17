@@ -133,7 +133,8 @@ export function buildSheet({ key, title, details, anchor, graph, jobs }) {
       }
       lanes.forEach((x) => used.add(x.key));
       const short = d.name.replace(/^sh\d+-|^ep\d+-/, '').replace(/-v\d+$/, '').replace(/-wk\d+$/, '');
-      const label = gs.length === 1 && d !== A ? short : lanes.map((x) => x.label || x.key).join(' / ');
+      // many parallel groups (a wedge of variants) are named by their short keys
+      const label = gs.length === 1 && d !== A ? short : lanes.map((x) => (gs.length > 8 ? x.key : x.label || x.key)).join(' / ');
       const col = { key: jobKey + ':' + lanes.map((x) => x.key).join('+'), job: jobKey, jobName: d.name, phase: d.phase, label,
         lanes: lanes.length, perRow: n === N, cells: [], generator: !!g.generator, settled: d.phase === 'Succeeded' };
       if (n === N) {
