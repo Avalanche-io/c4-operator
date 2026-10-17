@@ -45,6 +45,21 @@ type Snapshot struct {
 	Tiers    Tiers      `json:"tiers"`
 	Capacity []Capacity `json:"capacity"`
 	Usage    Usage      `json:"usage"`
+	// Sites place nodes on a map; omitted when the farm declares none.
+	Sites []Site `json:"sites,omitempty"`
+}
+
+// Site is a place the farm's nodes run: a studio machine room or a cloud
+// region. Nodes join a site by region, and the site's localities are the
+// node localities (racks, zones) it holds.
+type Site struct {
+	Name       string   `json:"name"`
+	Label      string   `json:"label"`
+	Region     string   `json:"region"`
+	Lat        float64  `json:"lat"`
+	Lon        float64  `json:"lon"`
+	Kind       string   `json:"kind"` // onprem or cloud
+	Localities []string `json:"localities"`
 }
 
 // Usage is metered use. Billing is by cluster-hours, container-hours or
@@ -194,7 +209,81 @@ type Job struct {
 	Nudge        Nudge     `json:"nudge"`
 	HeavyRegions []Heavy   `json:"heavyRegions,omitempty"`
 	Blacklist    []string  `json:"blacklist,omitempty"`
+	// Shot is the job's c4.avalanche.io/shot label: the jobs of one shot
+	// (sim, render, comp, transcode) are drawn as one sheet.
+	Shot string `json:"shot,omitempty"`
+	// Work is the job's progress weighted by work, in slot-seconds.
+	Work Work `json:"work"`
 }
+
+// Work is a job's work done, in flight and left, in slot-seconds. With
+// Basis "units" no estimate exists and the fields count units instead.
+type Work struct {
+	DoneSlotSeconds             float64 `json:"doneSlotSeconds"`
+	RunningSlotSeconds          float64 `json:"runningSlotSeconds"`
+	RunningRemainingSlotSeconds float64 `json:"runningRemainingSlotSeconds"`
+	RemainingSlotSeconds        float64 `json:"remainingSlotSeconds"`
+	P90RemainingSlotSeconds     float64 `json:"p90RemainingSlotSeconds"`
+	Basis                       string  `json:"basis"` // estimate or units
+}
+
+// Work bases.
+const (
+	BasisEstimate = "estimate"
+	BasisUnits    = "units"
+)
+
+// UnitWork is one unit's work in slot-seconds: spent so far and expected
+// in total.
+type UnitWork struct {
+	Spent    float64 `json:"spent"`
+	Expected float64 `json:"expected"`
+}
+
+// UnitRead names units of another job that a unit reads, when that is
+// not simply the same frame (a temporal comp reads frames n-1 to n+1).
+type UnitRead struct {
+	Job   string `json:"job"`
+	Units string `json:"units"`
+}
+
+// Book is GET /book: the farm's history, newest last.
+type Book struct {
+	Entries []BookEntry `json:"entries"`
+}
+
+// BookEntry is one line of the book: who did what to which object, and
+// the signed record that proves it when there is one.
+type BookEntry struct {
+	Seq     int64      `json:"seq"`
+	At      time.Time  `json:"at"`
+	Actor   string     `json:"actor"`
+	Signer  string     `json:"signer"` // node, queue, controller, hud, importer, ingest
+	Kind    string     `json:"kind"`
+	Object  BookObject `json:"object"`
+	Message string     `json:"message"`
+	Record  string     `json:"record,omitempty"`
+}
+
+// BookObject is what a book entry is about.
+type BookObject struct {
+	Type string `json:"type"` // job, unit, node, capacity, view
+	Job  string `json:"job,omitempty"`
+	Unit *int   `json:"unit,omitempty"`
+	Node string `json:"node,omitempty"`
+	Pool string `json:"pool,omitempty"`
+	View string `json:"view,omitempty"`
+}
+
+// Signers of book entries.
+const (
+	SignerNode       = "node"
+	SignerQueue      = "queue"
+	SignerController = "controller"
+	SignerHUD        = "hud"
+	SignerImporter   = "importer"
+	SignerIngest     = "ingest"
+)
 
 type Output struct {
 	View       string `json:"view"`
@@ -225,6 +314,10 @@ type Node struct {
 	CacheBytes       float64   `json:"cacheBytes"`
 	CacheHitRate     float64   `json:"cacheHitRate"`
 	Running          []Running `json:"running,omitempty"`
+	// Zone and Region are the node's topology.kubernetes.io/zone and
+	// /region labels; Region joins the node to a Site.
+	Zone   string `json:"zone,omitempty"`
+	Region string `json:"region,omitempty"`
 }
 
 type Running struct {
