@@ -27,8 +27,10 @@ C4 is the short form of The Cinema Content Creation Cloud
   binary order so the estimate is good early; training runs yield their GPUs
   at a checkpoint and resume from it.
 - **A HUD and an MCP server.** The HUD shows the farm from live cluster
-  state, and an MCP server gives agents every HUD capability as the calling
-  user.
+  state as sheets: each shot's work tree in the order work flows, progress
+  by work, every action signed by whoever took it; a wall for the machine
+  room, a widget for an artist's second monitor, a phone for the producer.
+  An MCP server gives agents every HUD capability as the calling user.
 - **Provenance by construction.** Every task leaves a signed record of what
   it mounted, where it ran, from which images, and what it wrote. Every
   entity signs as itself: the node that ran the unit, the controller that
@@ -40,7 +42,7 @@ C4 is the short form of The Cinema Content Creation Cloud
 **Status: v0.1.** The API (`c4.avalanche.io/v1alpha1`) may change before
 1.0.
 
-![The HUD's queue, mid-run](docs/hud/live/mid-queue.png)
+![A shot's sheet in the HUD: one row per frame, the work flowing right from sim to delivery, batches collapsed to their aggregate where nothing needs attention](docs/hud/job-render-binary-order.png)
 
 ## Results (end-to-end suite)
 
@@ -62,12 +64,14 @@ where C4 goes further, is in
 [REPORT-v2.md](REPORT-v2.md#comparison-with-scion).
 
 <p>
-<img src="docs/hud/live/mid-job-sh010-comp-v003.png" alt="A render's job view: frames in binary order and the remaining-work estimate" width="49%">
-<img src="docs/hud/live/mid-tiers.png" alt="The cache tiers: hit rates and requests at the node, peer, regional and store tiers" width="49%">
+<img src="docs/hud/wall.png" alt="The wall: every job a channel sweeping toward its deadline, mission clocks for the deliveries, the shots collapsed to their aggregate" width="49%">
+<img src="docs/hud/queue.png" alt="The farm sheet: dispatch order with each job's gauge, batches and slack, and the burst decision with its price" width="49%">
 </p>
 
-More screenshots: [docs/hud/live](docs/hud/live) (the end-to-end farm)
-and [docs/hud](docs/hud) (a synthetic farm).
+More screenshots: [docs/hud](docs/hud) (a synthetic farm: pools, the map,
+the side widget, the phone, the class lenses) and [docs/hud/live](docs/hud/live)
+(the end-to-end farm). The design system and its thesis are in
+[internal/hud/web/design](internal/hud/web/design).
 
 ## Quickstart
 

@@ -104,7 +104,7 @@ function arc(cx, cy, r, a0, a1) {
   return `M${x0.toFixed(2)} ${y0.toFixed(2)} A${r} ${r} 0 ${a1 - a0 > 0.5 ? 1 : 0} 1 ${x1.toFixed(2)} ${y1.toFixed(2)}`;
 }
 
-// ringsSVG draws a site's pool rings around (cx, cy), outermost first.
+// ringsSVG draws a site's pool rings around (cx, cy), outermost to innermost.
 export function ringsSVG(T, g, cx, cy, o = {}) {
   const sw = o.sw || 3.5, gap = o.gap || 3, r0 = o.r0 || 9;
   let r = r0 + (g.rings.length - 1) * (sw + gap);

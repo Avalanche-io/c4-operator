@@ -79,7 +79,7 @@ export function latticeSVG(snap, pool, o = {}) {
   const step = c + gp;
   const perRow = Math.max(4, Math.floor((o.width + gp) / step));
   const nRows = Math.max(1, Math.ceil(M.cells.length / perRow));
-  // labels under a project's bracket when its first row segment is wide enough
+  // labels under a project's bracket when its opening row segment is wide enough
   const lw = (s) => s.length * 5.4 + 6;
   const labelRow = new Map();
   const label = (r) => `${r.project} ${f.num(r.used)} of ${f.num(r.nominal)} nominal${r.used > r.nominal ? `, ${f.num(r.used - r.nominal)} borrowed` : ''}`;
@@ -185,7 +185,7 @@ export function nodeTip(n) {
 }
 
 // LatticeNodes: the physical view at scale. One cell per node on a
-// canvas, a block per pool, ordinary nodes first by fill, exceptions last.
+// canvas, a block per pool, ordinary nodes leading, by fill, exceptions last.
 //   props: { snap, width, onSelect? }
 export class LatticeNodes {
   constructor(el) {

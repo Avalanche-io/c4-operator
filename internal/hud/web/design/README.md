@@ -78,7 +78,7 @@ ES modules with no build step, shared by the HUD (`../js`) and the previews.
 
 ## Previews
 
-Each file in `previews/` is one card: its first line is
+Each file in `previews/` is one card: its opening line is
 `<!-- @dsCard group="…" -->`, so the set can be synced to a claude.ai/design
 design-system project with `/design-sync`. The previews read
 `fixtures/` (frozen from `hack/hudmock`) when present, else the live API of
