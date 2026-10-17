@@ -93,7 +93,7 @@ function tcell(label, val, sub, cls = '') {
 
 function titleBlock(j) {
   const e = j.estimate, o = j.objective, w = j.work;
-  const done = glance(j).done;
+  const done = glance(j, j).done;
   const late = Number.isFinite(e.slackSeconds) && e.slackSeconds < 0 && j.phase !== 'Succeeded';
   const src = o.from ? `from ${f.jobName(o.from)}` : o.type === 'latency' ? `ready + ${f.dur(o.latencyTargetSeconds)}` : o.deadline ? 'set on the job' : 'no objective';
   return h('div', { class: 'titleblock' },
@@ -101,7 +101,7 @@ function titleBlock(j) {
     tcell('ETA p50 · p90', j.phase === 'Succeeded' ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' }, `${f.clock(e.etaP50, false)} · ${f.clock(e.etaP90, false)}`),
       j.units.unevaluated ? `${j.units.unevaluated} generators to expand` : 'projected', ''),
     tcell('Slack', o.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-fail pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', e.feasible ? 'feasible at current capacity' : 'will miss at current capacity', late ? 'late' : ''),
-    tcell('Done', `${Math.round(done * 100)}%`, w && w.basis === 'estimate' ? `by work · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)} units` : `by units · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)}`),
+    tcell('Done', `${Math.round(done * 100)}%`, glance(j, j).basis === 'steps' ? `by steps · ${f.num(j.classSummary.step)} of ${f.num(j.classSummary.totalSteps)}` : w && w.basis === 'estimate' ? `by work · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)} units` : `by units · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)}`),
     tcell('Slots', h('span', null, h('span', { class: 't-run' }, String(e.runningSlots)), h('small', null, ` of ${(+e.requiredSlots).toFixed(1)} needed`)), `can get ${e.attainableSlots}`),
     j.output ? tcell('Output view', h('span', { title: j.output.view, style: { fontSize: '15px' } }, f.gridRef(j.output.view)), `${f.num(j.output.changesets)} changesets folded in`) : null);
 }

@@ -41,6 +41,7 @@ function unitsOf(d) {
   const mk = (u) => ({
     ...u, state: st.get(u.i) || u.state, fraction: prog[u.i] ? prog[u.i].fraction : null, measured: prog[u.i] ? prog[u.i].measured : null,
     risk: risk.has(u.i) || !!u.risk, settled, job: `${d.namespace}/${d.name}`, jobName: d.name,
+    yielded: d.phase === 'Yielded',
   });
   if (d.unitList && d.unitList.length) return d.unitList.map(mk);
   const out = [];
@@ -63,7 +64,19 @@ function groupEdges(d, byI) {
 
 // buildSheet lays a shot's jobs (details, in flow order) onto rows.
 // anchor: the key of the job whose axis defines the rows.
+// rankRows turns a job whose groups are single units (ML ranks, sweep trials)
+// into one group with a row per unit, so ranks read down like frames.
+function rankRows(d) {
+  const gs = d.groups || [];
+  if (gs.length < 2 || !gs.every((g) => unitsCount(g.units) === 1)) return d;
+  const units = gs.map((g) => g.units).join(',');
+  const label = (d.axis && d.axis.kind) === 'rank' ? 'ranks' : 'units';
+  const list = (d.unitList || []).map((u, k) => ({ ...u, group: 'rows', pos: k, label: u.label || gs[k].label }));
+  return { ...d, groups: [{ key: 'rows', label, units }], unitList: list.length ? list : d.unitList };
+}
+
 export function buildSheet({ key, title, details, anchor, graph, jobs }) {
+  details = details.map(rankRows);
   const A = details.find((d) => `${d.namespace}/${d.name}` === anchor) || details[0];
   const aUnits = unitsOf(A);
   // rows: the anchor's widest group (frames for render, shards for CI, ranks for ML)
@@ -343,11 +356,13 @@ export function drawUnit(g, T, it, t, glowAt) {
       g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); g.strokeStyle = T.g[12]; g.beginPath();
       for (let k = -h; k < w + h; k += 5) { g.moveTo(x + k, y); g.lineTo(x + k + h, y + h); } g.stroke(); g.restore();
     }
+    // a yielded run keeps the fraction its latest checkpoint saved
+    if (u.fraction > 0 && st !== 'blocked') { g.fillStyle = T.settled; g.fillRect(x, y + h - h * Math.min(1, u.fraction), w, h * Math.min(1, u.fraction)); }
     if (st === 'held' && h >= 6 && w >= 8) { g.fillStyle = T.g[16]; g.fillRect(x + w / 2 - 2.5, y + h / 2 - 3, 1.5, 6); g.fillRect(x + w / 2 + 1, y + h / 2 - 3, 1.5, 6); }
   }
   // earlier failed attempts of a unit still going: orange notches
   const prior = (u.attempts || 0) - (st === 'running' || st === 'retrying' || st === 'succeeded' ? 1 : 0);
-  if (st !== 'failed' && h >= 4) { g.fillStyle = T.temp; for (let k = 0; k < Math.min(prior, 3); k++) g.fillRect(x + w - 3, y + 1 + k * 3.5, 3, 2.2); }
+  if (st !== 'failed' && !u.yielded && h >= 4) { g.fillStyle = T.temp; for (let k = 0; k < Math.min(prior, 3); k++) g.fillRect(x + w - 3, y + 1 + k * 3.5, 3, 2.2); }
   // projected late: a red pencil tick
   if (u.risk && st !== 'succeeded' && st !== 'failed') { g.strokeStyle = T.fail; g.lineWidth = 1.5; g.setLineDash([2, 1.5]); g.beginPath(); g.moveTo(x + 1, y + 1); g.lineTo(x + 1, y + h - 1); g.stroke(); g.setLineDash([]); g.lineWidth = 1; }
   // persistence: a unit that just finished glows and settles over a minute
