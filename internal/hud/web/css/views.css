@@ -125,3 +125,12 @@
 .vgraph .vsec .vt td:nth-child(n+2) { width: 1%; white-space: nowrap; padding-left: 28px; }
 .settled { color: var(--done-settled); }
 canvas[data-player] { background: var(--g02); }
+
+/* Preview player (render lens). The canvas must take its size from the
+   layout: it sets its own pixel size from clientWidth on every draw, so an
+   unsized canvas doubles itself at a device pixel ratio of 2. */
+.player { position: relative; aspect-ratio: 16 / 9; background: var(--g02); overflow: hidden; }
+.player canvas { display: block; width: 100%; height: 100%; }
+.player .badge { position: absolute; left: 8px; top: 8px; padding: 3px 6px; font-size: 11px; background: rgba(0, 0, 0, 0.6); }
+.pbar { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
+.pbar .strip { display: block; flex: 1; min-width: 0; height: 10px; }
