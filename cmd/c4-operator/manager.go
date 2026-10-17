@@ -79,6 +79,7 @@ func runManager(args []string) error {
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name=project|project;... (* for all projects)")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
+	hudSites := fs.String("hud-sites", "", "JSON file of the farm's sites (name, label, region, lat, lon, kind onprem or cloud, localities) for the HUD's map; nodes join a site by their topology.kubernetes.io/region label")
 	farmTZ := fs.String("tz", "UTC", "the farm's time zone, for times the queue and the HUD show")
 	signingNS := fs.String("signing-namespace", "c4-signing", "namespace of the farm's signing CA, readable only by the manager (empty turns signing off)")
 	signerAddr := fs.String("signer-addr", ":8092", "certificate issuer listen address, for node daemons and importers")
@@ -165,7 +166,7 @@ func runManager(args []string) error {
 		}
 	}
 	if *hudAddr != "" {
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *farmTZ, *namespace); err != nil {
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *farmTZ, *namespace); err != nil {
 			return err
 		}
 	}
@@ -188,7 +189,7 @@ func runManager(args []string) error {
 
 // addHUD runs the HUD backend: a collector on every replica and an HTTP
 // server for the web app and the HUD API.
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, tz, namespace string) error {
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, tz, namespace string) error {
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		return fmt.Errorf("--tz: %w", err)
@@ -203,6 +204,11 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		srv.DevViewers, err = parseViewers(dev)
 		if err != nil {
 			return err
+		}
+	}
+	if sites != "" {
+		if srv.Sites, err = hudserver.LoadSites(sites); err != nil {
+			return fmt.Errorf("--hud-sites: %w", err)
 		}
 	}
 	if err := mgr.Add(srv); err != nil {

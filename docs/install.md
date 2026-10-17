@@ -109,6 +109,23 @@ namespaces they may list WorkJobs in, and every control is checked against
 their permissions. `--hud-dev-viewers` skips sign-in and is for local trials
 only.
 
+To place nodes on the HUD's map, label them with
+`topology.kubernetes.io/region` and `topology.kubernetes.io/zone` and give
+the manager `--hud-sites` with a JSON file of the farm's sites:
+
+```json
+[
+  {"name": "burbank", "label": "Studio, Burbank", "region": "burbank", "lat": 34.18, "lon": -118.31,
+   "kind": "onprem", "localities": ["rack r1", "rack r2"]},
+  {"name": "aws-us-west-2", "label": "AWS us-west-2", "region": "us-west-2", "lat": 45.84, "lon": -119.70,
+   "kind": "cloud", "localities": ["us-west-2a"]}
+]
+```
+
+Nodes join a site by region; `localities` are the values of the nodes'
+locality label (`topology.kubernetes.io/zone` unless a project sets another)
+in display order.
+
 Agents use the same API through MCP:
 
 ```sh

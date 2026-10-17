@@ -361,43 +361,58 @@ units, views and capacity requests are not returned. Entries about a node
 alone (provisioned, disabled, not ready) are shared infrastructure and are
 returned to everyone.
 
-| field         | meaning                                                                                                                                                          |
-| ------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `seq`         | orders entries that share a time; increasing along the book                                                                                                      |
-| `actor`       | who: `node/gpu-r3-01`, `component/queue`, `component/controller`, a person (`dana`), or an agent and the person it acts for (`agent/wrangler-bot for dana`)      |
-| `signer`      | the entity that signed the entry's record (DESIGN 9.2): `node`, `queue`, `controller`, `hud`, `importer` or `ingest`                                             |
-| `kind`        | what happened; see below                                                                                                                                         |
-| `object.type` | `job`, `unit` (with `job` and `unit`), `node`, `capacity` (with `pool`, and `job` when it is for one job) or `view` (with `view`, and `job` when a job reads it) |
-| `message`     | a sentence in production's terms                                                                                                                                 |
-| `record`      | the C4 ID of the signed record, when there is one: a task record for a capture, a decision record for a yield, a control record for an action                    |
+| field         | meaning                                                                                                                                                                                                        |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `seq`         | orders entries that share a time; increasing along the book                                                                                                                                                    |
+| `actor`       | who: `node/gpu-r3-01`, `component/queue`, `component/controller`, a person (`dana`), or an agent and the person it acts for (`agent/wrangler-bot for dana`; the agent names itself in the `X-C4-Agent` header) |
+| `signer`      | the entity that signed the entry's record (DESIGN 9.2): `node`, `queue`, `controller`, `hud`, `importer` or `ingest`                                                                                           |
+| `kind`        | what happened; see below                                                                                                                                                                                       |
+| `object.type` | `job`, `unit` (with `job` and `unit`), `node`, `capacity` (with `pool`, and `job` when it is for one job) or `view` (with `view`, and `job` when a job reads it)                                               |
+| `message`     | a sentence in production's terms                                                                                                                                                                               |
+| `record`      | the C4 ID of the signed record, when there is one: a task record for a capture, a decision record for a yield, a control record for an action                                                                  |
 
-| kind                                                                                     | signer             | entry                                                                        |
-| ---------------------------------------------------------------------------------------- | ------------------ | ---------------------------------------------------------------------------- |
-| `captured`                                                                               | node               | a unit's output captured as a changeset and folded into the job's output     |
-| `failed`                                                                                 | node               | a unit's attempt failed, with the exit and the reason                        |
-| `retry`                                                                                  | queue              | a failed unit queued again, away from the node it failed on                  |
-| `blacklist`                                                                              | queue              | a node added to a job's blacklist after `nodeErrorLimit` failures            |
-| `expanded`                                                                               | queue              | a generator's expansion document became units                                |
-| `yield`, `resume`                                                                        | queue              | a checkpointing run asked to yield at its next checkpoint, and resumed       |
-| `capacity-requested`                                                                     | queue              | burst capacity requested for jobs at risk                                    |
-| `capacity-approved`                                                                      | hud or queue       | a person approved a request over budget, or the queue approved one within it |
-| `provisioned`                                                                            | controller         | burst nodes ready                                                            |
-| `hold`, `release`, `boost`, `deadline`, `requeue`, `disable`, `enable`, `avoid`, `allow` | hud                | a person's or agent's control                                                |
-| `ingest`, `import`                                                                       | ingest or importer | a view entered the farm                                                      |
-| `started`, `finished`                                                                    | queue              | a job began running, and its last unit ended                                 |
+| kind                                                                                     | signer             | entry                                                                                                    |
+| ---------------------------------------------------------------------------------------- | ------------------ | -------------------------------------------------------------------------------------------------------- |
+| `captured`                                                                               | node               | a unit's output captured as a changeset and folded into the job's output                                 |
+| `failed`                                                                                 | node               | a unit's attempt failed, with the exit and the reason                                                    |
+| `retry`                                                                                  | queue              | a failed unit queued again, away from the node it failed on                                              |
+| `blacklist`                                                                              | queue              | a node added to a job's blacklist after `nodeErrorLimit` failures                                        |
+| `expanded`                                                                               | queue              | a generator's expansion document became units                                                            |
+| `yield`, `stop`, `yielded`, `resume`                                                     | queue              | a unit asked to yield at its next checkpoint (or stopped) to make room, the yield itself, and the resume |
+| `capacity-requested`                                                                     | queue              | burst capacity requested for jobs at risk                                                                |
+| `capacity-approved`                                                                      | hud or queue       | a person approved a request over budget, or the queue approved one within it                             |
+| `provisioned`                                                                            | controller         | burst nodes ready                                                                                        |
+| `hold`, `release`, `boost`, `deadline`, `requeue`, `disable`, `enable`, `avoid`, `allow` | hud                | a person's or agent's control                                                                            |
+| `ingest`, `import`                                                                       | ingest or importer | a view entered the farm                                                                                  |
+| `started`, `finished`                                                                    | queue              | a job began running, and its last unit ended                                                             |
 
 Kinds are open: a client shows an unknown kind by its `message`.
 
-In the real backend the book is read on demand, never watched: Kubernetes
-Events on WorkJobs in the viewer's namespaces, on CapacityRequests, and on
-Nodes (field-selected by involved object kind, and by name for `job=`),
-the queue's scheduling decisions and the jobs' start and finish from
-WorkJob status, and CapacityRequests themselves. The HUD's own control
-Events carry the actor, the action and the control record's ID as
-annotations, so a control's entry names its record. Events expire after the
-API server's event TTL (an hour by default): older captures and controls
-leave the book, while their signed records stay in the project store and the
-queue's decisions stay in WorkJob status.
+In the real backend the book is read on demand, never watched, from these
+sources:
+
+- Kubernetes Events on WorkJobs in the viewer's namespaces, and on
+  CapacityRequests and Nodes in the operator's namespace and `default`,
+  field-selected by involved object kind (and by name for `job=`). Events
+  from the kubelet are signed `node`, from the queue `queue`, from other
+  components `controller`; the kind is the Event's reason in kebab case
+  (`NodeNotReady` is `node-not-ready`).
+- The HUD's own control Events, whose annotations carry the actor
+  (`c4.avalanche.io/actor`), the book kind (`c4.avalanche.io/book-kind`)
+  and the control record (`c4.avalanche.io/record`), so a control's entry
+  names who made it and the record that proves it.
+- WorkJob status: each job's start and finish (the finish names the job
+  record the queue signed), the queue's decisions with their signed decision
+  records, and yields with the view each one saved.
+- CapacityRequests themselves, as `capacity-requested` at their creation.
+
+Per-unit captures and failures are in the job's provenance index (each
+capture's task record, `GET /trace`) and its status counts rather than in
+the real backend's book. `seq` there is the entry's time in microseconds,
+made strictly increasing, so it is stable from one request to the next.
+Events expire after the API server's event TTL (an hour by default); the
+signed records they name stay in the project store, and decisions stay in
+WorkJob status.
 
 ## GET /events
 

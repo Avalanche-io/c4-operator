@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
@@ -31,6 +32,9 @@ type model struct {
 	nsProject map[string]string
 	nodes     []corev1.Node
 	pods      []corev1.Pod // unit pods
+	// podsByJob holds the unfinished unit pods by job key; nil in models
+	// built by hand, which scan pods instead.
+	podsByJob map[string][]*corev1.Pod
 	crs       []c4v1.CapacityRequest
 	metrics   farmMetrics
 	usage     usageSnapshot
@@ -45,6 +49,9 @@ type jobRec struct {
 	plan    *class.Plan
 	planErr error
 	driver  class.Driver
+	// work is JobSummary.work, computed once per collection.
+	work    api.Work
+	hasWork bool
 }
 
 // collect reads the farm. Metrics are scraped every fifth call.
@@ -105,6 +112,10 @@ func (s *Server) collect(ctx context.Context) error {
 		}
 		return m.jobs[a].job.CreationTimestamp.Before(&m.jobs[b].job.CreationTimestamp)
 	})
+	m.indexPods()
+	for _, rec := range m.jobs {
+		rec.work, rec.hasWork = jobWork(m, rec), true
+	}
 	if prev == nil || m.at.Sub(prev.metrics.at) >= 5*time.Second {
 		m.metrics = s.scrape(ctx)
 	} else {

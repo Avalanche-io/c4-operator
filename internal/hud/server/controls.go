@@ -60,7 +60,9 @@ func (s *Server) liveJob(ctx context.Context, ns, name string) (*c4v1.WorkJob, e
 	return &j, err
 }
 
-func (s *Server) record(ctx context.Context, obj client.Object, kind, user, reason, msg string) {
+// record writes the Event of a control, naming the user. Its annotations
+// carry the actor, the book kind and the control record for GET /book.
+func (s *Server) record(ctx context.Context, obj client.Object, kind, user, reason, msg string, note bookNote) {
 	if s.Kube == nil {
 		return
 	}
@@ -70,13 +72,20 @@ func (s *Server) record(ctx context.Context, obj client.Object, kind, user, reas
 	}
 	now := metav1.Now()
 	ev := &corev1.Event{
-		ObjectMeta:     metav1.ObjectMeta{GenerateName: obj.GetName() + "-", Namespace: ns},
+		ObjectMeta: metav1.ObjectMeta{GenerateName: obj.GetName() + "-", Namespace: ns, Annotations: map[string]string{
+			annoActor: note.actor, annoBookKind: note.kind}},
 		InvolvedObject: corev1.ObjectReference{Kind: kind, Name: obj.GetName(), Namespace: obj.GetNamespace(), UID: obj.GetUID(), APIVersion: c4v1.GroupVersion.String()},
 		Reason:         reason, Message: msg + " (by " + user + " in the HUD)", Type: corev1.EventTypeNormal,
 		Source: corev1.EventSource{Component: "c4-hud"}, FirstTimestamp: now, LastTimestamp: now, Count: 1,
 	}
 	if kind == "Node" {
 		ev.InvolvedObject.APIVersion = "v1"
+	}
+	if note.record != "" {
+		ev.Annotations[annoRecord] = note.record
+	}
+	if note.actor == "" {
+		ev.Annotations[annoActor] = user
 	}
 	if _, err := s.Kube.CoreV1().Events(ns).Create(ctx, ev, metav1.CreateOptions{}); err != nil {
 		s.Log.Error(err, "record control event")
@@ -148,13 +157,22 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := j.Name + ": " + strings.Join(did, ", ")
-	s.finishJobControl(w, r, v, rec, j, patch, before, "nudge", body, "Nudged", msg)
+	kind := "boost"
+	switch {
+	case body.HoldStop != nil && *body.HoldStop:
+		kind = "hold"
+	case body.Hold != nil:
+		kind = map[bool]string{true: "hold", false: "release"}[*body.Hold]
+	case body.Deadline != nil:
+		kind = "deadline"
+	}
+	s.finishJobControl(w, r, v, rec, j, patch, before, "nudge", kind, body, "Nudged", msg)
 }
 
 // finishJobControl signs the control record, writes the job with the
 // record's ID in its annotation, records an Event and answers.
 func (s *Server) finishJobControl(w http.ResponseWriter, r *http.Request, v *api.Viewer, rec *jobRec, j *c4v1.WorkJob, patch client.Patch,
-	before, action string, change any, reason, msg string) {
+	before, action, bookKind string, change any, reason, msg string) {
 	ctx := r.Context()
 	id, err := s.controlJob(ctx, r, v, rec, j, before, action, change)
 	if err != nil {
@@ -172,7 +190,7 @@ func (s *Server) finishJobControl(w http.ResponseWriter, r *http.Request, v *api
 	if via(r) == "mcp" {
 		note += "; via MCP"
 	}
-	s.record(ctx, j, "WorkJob", v.User, reason, note)
+	s.record(ctx, j, "WorkJob", v.User, reason, note, bookNote{actor: actorOf(r, v), kind: bookKind, record: id})
 	m := s.current()
 	rec2 := *rec
 	rec2.job = *j
@@ -226,7 +244,7 @@ func (s *Server) handleRequeue(w http.ResponseWriter, r *http.Request) {
 	}
 	j.Annotations[c4v1.AnnotationRequeue] = strconv.FormatInt(time.Now().UnixNano(), 36) + ":" + order.EncodeSet(idx)
 	msg := fmt.Sprintf("%s: %d units queued again", j.Name, len(idx))
-	s.finishJobControl(w, r, v, rec, j, patch, before, "requeue", map[string]any{"units": order.EncodeSet(idx)}, "Requeued", msg)
+	s.finishJobControl(w, r, v, rec, j, patch, before, "requeue", "requeue", map[string]any{"units": order.EncodeSet(idx)}, "Requeued", msg)
 }
 
 func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
@@ -270,7 +288,7 @@ func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
 		}
 		msg = fmt.Sprintf("%s: will not use %s", j.Name, body.Node)
 	}
-	s.finishJobControl(w, r, v, rec, j, patch, before, "avoid-node", body, "Blacklist", msg)
+	s.finishJobControl(w, r, v, rec, j, patch, before, "avoid-node", map[bool]string{true: "allow", false: "avoid"}[body.Remove], body, "Blacklist", msg)
 }
 
 func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {
@@ -310,7 +328,7 @@ func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {
 	if !body.Disabled {
 		msg = name + ": enabled"
 	}
-	s.record(ctx, &n, "Node", v.User, "Disabled", msg)
+	s.record(ctx, &n, "Node", v.User, "Disabled", msg, bookNote{actor: actorOf(r, v), kind: map[bool]string{true: "disable", false: "enable"}[body.Disabled]})
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": msg, "node": map[string]any{"name": name, "disabled": body.Disabled}})
 }
 
@@ -378,7 +396,7 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 	if id != "" {
 		note += "; record " + shortID(id)
 	}
-	s.record(ctx, cr, "CapacityRequest", v.User, "Approved", note)
+	s.record(ctx, cr, "CapacityRequest", v.User, "Approved", note, bookNote{actor: actorOf(r, v), kind: "capacity-approved", record: id})
 	out := map[string]any{"ok": true, "message": msg}
 	if id != "" {
 		out["record"] = id

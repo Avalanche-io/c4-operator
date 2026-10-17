@@ -77,6 +77,7 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 	axis := map[string]any{"kind": plan.Axis.Kind}
 	if plan.Axis.Kind == "frame" {
 		axis["start"], axis["step"] = plan.Axis.Start, max(1, plan.Axis.Step)
+		axis["batch"] = displayBatch(rec)
 	}
 	out["axis"] = axis
 	groupKey, groupLabel := "units", "units"
@@ -110,6 +111,17 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 	}
 	held := rec.job.Spec.Nudge.Hold || rec.job.Spec.Nudge.HoldStop
 	est := estimatorFor(rec)
+	var works []api.UnitWork
+	runRem := 0.0
+	if n <= 5000 {
+		works, runRem = unitWorks(m, rec, states, est)
+	} else {
+		runRem = runningRemainder(m, rec, est)
+	}
+	if w := sum.Work; w.Basis == api.BasisEstimate {
+		w.RunningRemainingSlotSeconds = math.Round(math.Min(runRem, w.RemainingSlotSeconds))
+		out["work"] = w
+	}
 	list := make([]map[string]any, 0, n)
 	progress := map[string]any{}
 	for i, u := range plan.Units {
@@ -119,6 +131,9 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		}
 		e := map[string]any{"i": i, "label": u.Label, "state": st, "attempts": max(attempts[i], boolInt(st != "queued" && st != "held" && st != "blocked")),
 			"group": groupKey, "pos": u.Pos}
+		if works != nil {
+			e["work"] = works[i]
+		}
 		if p := running[i]; p != nil {
 			e["node"] = p.Spec.NodeName
 			if p.Status.StartTime != nil {
@@ -491,6 +506,9 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		}
 		j := &rec.job
 		n := map[string]any{"id": rec.key, "class": j.Spec.Class, "driver": j.Spec.Class, "phase": j.Status.Phase, "critical": false}
+		if shot := j.Labels[LabelShot]; shot != "" {
+			n["shot"] = shot
+		}
 		if e := j.Status.Estimate; e != nil {
 			if e.ETA90 != nil {
 				n["etaP90"] = e.ETA90.Time.In(s.Loc)

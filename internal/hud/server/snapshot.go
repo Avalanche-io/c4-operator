@@ -159,6 +159,8 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 		}
 	}
 
+	snap.Sites = s.Sites
+
 	snap.Usage = api.Usage{ClusterHours: round2(m.usage.clusterHours), ContainerHours: []api.ContainerHours{},
 		GPUHours: []api.GPUHours{}, ProductionWindows: []api.Window{}}
 	for k, h := range m.usage.container {
@@ -188,6 +190,11 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		Pools: j.Spec.Pools, DependsOn: []string{}, CreatedAt: j.CreationTimestamp.Time.In(s.Loc),
 		Nudge:     api.Nudge{Hold: j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop, Boost: num(j.Spec.Nudge.Boost)},
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}
+	aj.Shot = j.Labels[LabelShot]
+	aj.Work = r.work
+	if !r.hasWork {
+		aj.Work = jobWork(m, r)
+	}
 	if aj.Phase == "" {
 		aj.Phase = "Queued"
 	}
@@ -281,7 +288,8 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 
 // nodeSummary describes one node.
 func (s *Server) nodeSummary(m *model, n *corev1.Node, pool *c4v1.Pool, visible map[string]bool) api.Node {
-	an := api.Node{Name: n.Name, Pool: pool.Name, Locality: n.Labels[c4v1.LabelLocality], Slots: int(max(1, pool.Spec.SlotsPerNode))}
+	an := api.Node{Name: n.Name, Pool: pool.Name, Locality: n.Labels[c4v1.LabelLocality], Zone: n.Labels[corev1.LabelTopologyZone],
+		Region: n.Labels[corev1.LabelTopologyRegion], Slots: int(max(1, pool.Spec.SlotsPerNode))}
 	for _, p := range m.pods {
 		if p.Spec.NodeName != n.Name || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
 			continue

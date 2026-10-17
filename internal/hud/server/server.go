@@ -53,6 +53,9 @@ type Server struct {
 	// Signer signs a control record for each action a person or agent
 	// takes through the HUD or MCP; nil signs none.
 	Signer *provenance.Signer
+	// Sites place the farm's nodes on the HUD's map (--hud-sites); nil
+	// leaves the map out.
+	Sites []api.Site
 
 	mu      sync.RWMutex
 	m       *model
@@ -77,6 +80,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/snapshot", s.handleSnapshot)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 	mux.HandleFunc("GET /api/v1/graph", s.handleGraph)
+	mux.HandleFunc("GET /api/v1/book", s.handleBook)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}", s.handleJob)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/units/{i}", s.handleUnit)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/preview", s.handlePreview)
