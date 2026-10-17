@@ -113,17 +113,28 @@ export function buildSheet({ key, title, details, anchor, graph, jobs }) {
     for (let gi = 0; gi < gs.length; gi++) {
       const g = gs[gi];
       if (used.has(g.key)) continue;
-      const n = unitsCount(g.units);
+      const n0 = unitsCount(g.units);
+      // a group is laid out a unit per row when it has a unit per row, or when
+      // its units sit on the anchor's axis at sparse positions (passes of a
+      // shot whose generators have not all expanded yet)
+      const members0 = us.filter((u) => u.group === g.key);
+      const maxPos = Math.max(-1, ...members0.map((u) => u.pos));
+      const sameAxis = d.axis && A.axis && d.axis.kind === A.axis.kind;
+      const n = n0 === N || (sameAxis && n0 > 1 && maxPos >= n0 && maxPos < N) ? N : n0;
       // lane mates: later groups with the same count, no edge between, a shared successor
       const lanes = [g];
       if (n === N) for (let gj = gi + 1; gj < gs.length; gj++) {
         const h = gs[gj];
-        if (used.has(h.key) || unitsCount(h.units) !== n || ge.has(g.key + '>' + h.key) || ge.has(h.key + '>' + g.key)) continue;
+        const hn = unitsCount(h.units), hMax = Math.max(-1, ...us.filter((u) => u.group === h.key).map((u) => u.pos));
+        const hRow = hn === N || (sameAxis && hn > 1 && hMax >= hn && hMax < N);
+        if (used.has(h.key) || !hRow || n !== N || ge.has(g.key + '>' + h.key) || ge.has(h.key + '>' + g.key)) continue;
         const succ = (x) => [...ge].filter((e) => e.startsWith(x + '>')).map((e) => e.split('>')[1]).sort().join();
         if (succ(g.key) && succ(g.key) === succ(h.key)) lanes.push(h);
       }
       lanes.forEach((x) => used.add(x.key));
-      const col = { key: jobKey + ':' + lanes.map((x) => x.key).join('+'), job: jobKey, jobName: d.name, phase: d.phase, label: lanes.map((x) => x.label || x.key).join(' / '),
+      const short = d.name.replace(/^sh\d+-|^ep\d+-/, '').replace(/-v\d+$/, '').replace(/-wk\d+$/, '');
+      const label = gs.length === 1 && d !== A ? short : lanes.map((x) => x.label || x.key).join(' / ');
+      const col = { key: jobKey + ':' + lanes.map((x) => x.key).join('+'), job: jobKey, jobName: d.name, phase: d.phase, label,
         lanes: lanes.length, perRow: n === N, cells: [], generator: !!g.generator, settled: d.phase === 'Succeeded' };
       if (n === N) {
         // a unit per row: position on the axis is the row
@@ -208,7 +219,7 @@ export function layout(sheet, v) {
   for (let k = 0; k < NB; k++) {
     const a = k * sheet.batch, z = Math.min(sheet.N, (k + 1) * sheet.batch) - 1;
     const isSel = v.sel && sheet.cols.some((c) => c.job === v.sel.job && c.cells.some((x) => x.u.i === v.sel.i && x.a >= a && x.a <= z));
-    if (auto ? (sheet.N > 48 && !attention(sheet, a, z) && !isSel) : v.collapsed.has(k)) collapsed.add(k);
+    if (auto ? (sheet.N > 120 && !attention(sheet, a, z) && !isSel) : v.collapsed.has(k)) collapsed.add(k);
   }
   const up = Math.max(0, Math.min(v.upstream || 0, sheet.cols.length - 1));
   const folded = sheet.cols.slice(0, up).filter((c) => c.perRow);

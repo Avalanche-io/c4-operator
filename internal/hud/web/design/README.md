@@ -72,6 +72,7 @@ ES modules with no build step, shared by the HUD (`../js`) and the previews.
 | `components/lattice.js` | LATTICE: pools as identical cells, quotas, borrowing, burst                                |
 | `components/atlas.js`   | ATLAS: sites as pool rings, regions and burst, the tiers' fan-in                           |
 | `components/timebase.js`| TIMEBASE: channels sweeping toward deadlines, mission clocks, the strobe strip            |
+| `components/dispatch.js`| the farm sheet: batch strips, the slack datum, shot grouping, the burst decision          |
 | `components/live.js`    | live components: hosts the views do not morph, tweening                                    |
 | `components/fmt.js`, `rle.js` | the farm's clock, durations, grid-reference IDs; unit sets                          |
 

@@ -45,7 +45,7 @@ export function tween(ms, fn, done) {
   let raf = 0;
   const ease = (t) => 1 - Math.pow(1 - t, 3);
   const step = (now) => {
-    const t = Math.min(1, (now - t0) / ms);
+    const t = Math.max(0, Math.min(1, (now - t0) / ms));
     fn(ease(t));
     if (t < 1) raf = requestAnimationFrame(step);
     else if (done) done();
