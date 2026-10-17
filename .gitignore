@@ -6,3 +6,4 @@ hack/e2e/out/*
 *.test
 cover.out
 dist/
+hack/stress/out/

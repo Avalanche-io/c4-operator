@@ -16,7 +16,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 comma := ,
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images install-yaml release-snapshot verify e2e e2e-down tools tutorials
+.PHONY: all generate manifests test test-linux envtest build image images install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -112,3 +112,17 @@ e2e:
 
 e2e-down:
 	$(KIND) delete cluster --name c4-operator-e2e
+
+# The scheduler stress grid (hack/stress): a seeded sample of farms and
+# workloads run through sched.Decide and the baselines, with invariant
+# and metamorphic checks on every decision. Writes hack/stress/out/ and
+# fails if an invariant fails for a cause not yet known. stress-quick is
+# the CI grid (small farms, short windows); TestQuickGrid runs the same
+# grid as a Go test.
+STRESS_WORKERS ?= 4
+
+stress-quick:
+	go run ./hack/stress -quick -workers $(STRESS_WORKERS)
+
+stress:
+	go run ./hack/stress -workers $(STRESS_WORKERS)
