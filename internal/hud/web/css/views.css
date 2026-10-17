@@ -13,7 +13,7 @@
 .mcollar .go { margin-left: auto; display: flex; gap: 14px; font: 600 9.5px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; }
 .mcollar .go a { color: var(--ink-2); }
 .mcollar .go a:hover { color: var(--paper); }
-.mbody { display: grid; grid-template-columns: 150px minmax(0, 1fr) minmax(300px, 380px); gap: 16px; padding: 12px; align-items: start; }
+.mbody { display: grid; grid-template-columns: 180px minmax(0, 1fr) minmax(300px, 380px); gap: 16px; padding: 12px; align-items: start; }
 .mpylon svg { display: block; }
 .mstack { background: var(--well); outline: var(--hair) solid var(--rule-2); min-width: 0; }
 .mst-h { display: flex; align-items: baseline; gap: 10px; padding: 6px 8px; border-bottom: var(--hair) solid var(--rule-1); font: 400 var(--t-tiny)/1 var(--mono); color: var(--ink-4); }

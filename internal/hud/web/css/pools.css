@@ -89,3 +89,10 @@
 .pools .sheethead { padding-bottom: 24px; }
 .ncard .btn.small { padding: 4px 6px; font-size: 9px; letter-spacing: .12em; white-space: nowrap; }
 .lat-pool { padding-bottom: 12px; margin-bottom: 14px; }
+.lat-svg svg { max-width: 100%; height: auto; }
+@media (max-width: 720px) {
+  .ncards { grid-template-columns: 1fr; }
+  .lat-req { flex-wrap: wrap; }
+  .psite-h { flex-wrap: wrap; }
+}
+@media (max-width: 720px) { .lat-req .what { flex-basis: 100%; } .lat-req .btn { margin-left: auto; } }

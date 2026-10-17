@@ -74,3 +74,5 @@
   .wg:not(.compact) { padding: 0 12px; min-width: 0; }
   .wg .big { font-size: 48px; }
 }
+.wg-collar.bot .mt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.wg-collar.bot .mt:first-child { flex: none; }

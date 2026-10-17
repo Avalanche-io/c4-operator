@@ -49,3 +49,10 @@
 .map .lat-req .what b { font: 500 13px/1 var(--sans); color: var(--paper); }
 .map .lat-req .why { font-size: var(--t-tiny); color: var(--ink-4); margin-top: 3px; }
 .map .lat-req .btn { white-space: nowrap; background: var(--g18); color: var(--g01); border-color: var(--g18); }
+.map-side { grid-template-columns: repeat(auto-fill, minmax(min(440px, 100%), 1fr)); }
+@media (max-width: 720px) {
+  .map .lat-req { flex-wrap: wrap; }
+  .mblk-h { flex-wrap: wrap; }
+  .mblk-h span { margin-left: 0; text-align: left; max-width: none; }
+}
+@media (max-width: 720px) { .map .lat-req .what { flex-basis: 100%; } .map .lat-req .btn { margin-left: auto; } }
