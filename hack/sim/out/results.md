@@ -14,7 +14,7 @@ Mean ± standard deviation across seeds. A render deadline is missed when the jo
 | fifo            | 46.6 ± 25.0             | 15.0 ± 7.7 | 140.3 ± 113.3 | 8.9 ± 0.1  | 17.1 ± 1.2 | 8.9 ± 1.3        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9 | 0 ± 0     |
 | edf             | 24.4 ± 8.8              | 7.9 ± 2.5  | 60.1 ± 37.2   | 8.9 ± 0.1  | 17.2 ± 1.3 | 9.1 ± 1.4        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9 | 0 ± 0     |
 | objective       | 24.4 ± 10.6             | 7.9 ± 3.2  | 61.0 ± 37.1   | 8.7 ± 0.1  | 14.4 ± 0.5 | 4.2 ± 0.8        | 47.2 ± 6.1 | 36.5 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 28.0 ± 9.7 | 0 ± 0     |
-| objective+burst | 22.0 ± 10.3             | 7.1 ± 3.1  | 51.6 ± 33.0   | 8.7 ± 0.1  | 14.4 ± 0.5 | 4.2 ± 0.8        | 45.4 ± 6.0 | 34.5 ± 3.1 | 17.3 ± 0.3 | 1935 ± 332   | 28.4 ± 9.6 | 543 ± 180 |
+| objective+burst | 22.2 ± 10.6             | 7.2 ± 3.2  | 53.7 ± 35.4   | 8.7 ± 0.1  | 14.4 ± 0.5 | 4.2 ± 0.8        | 45.8 ± 6.1 | 34.5 ± 3.1 | 17.3 ± 0.3 | 1935 ± 332   | 28.4 ± 9.6 | 452 ± 285 |
 
 Render jobs with deadlines per week: 305 on average. The spread across seeds is large because each seed is a different week (job counts, shot lengths, where heavy shots land); compare policies within a seed, below.
 
@@ -29,7 +29,7 @@ Difference from EDF on the same week (policy minus EDF): mean ± standard deviat
 | manual                           | 18.6 ± 13.1 | 47.6 ± 47.4  | 0.1 ± 0.1    | 0 / 0 / 5                                  |
 | fifo                             | 22.2 ± 18.4 | 80.1 ± 86.1  | -0.1 ± 0.1   | 0 / 0 / 5                                  |
 | objective                        | 0.0 ± 6.0   | 0.8 ± 7.0    | -2.8 ± 1.3   | 1 / 0 / 4                                  |
-| objective+burst                  | -2.4 ± 7.0  | -8.5 ± 13.6  | -2.8 ± 1.2   | 4 / 0 / 1                                  |
+| objective+burst                  | -2.2 ± 7.3  | -6.4 ± 14.2  | -2.8 ± 1.2   | 3 / 0 / 2                                  |
 | objective, no information tier   | -0.4 ± 5.7  | 1.1 ± 8.0    | -1.6 ± 1.0   | 2 / 0 / 3                                  |
 | objective, fair-share surplus    | 0.4 ± 4.9   | 2.7 ± 12.4   | -2.7 ± 1.2   | 3 / 0 / 2                                  |
 | objective, DESIGN 9.9 as written | 14.0 ± 14.0 | 17.3 ± 27.0  | 0.1 ± 1.7    | 1 / 0 / 4                                  |
@@ -44,7 +44,7 @@ Missed deadlines and late hours per kind. ML runs carry a deadline of submission
 | fifo                             | 12.6 ± 7.8 of 106  | 53.1 ± 34.7    | 33.8 ± 20.0 of 186 | 85.6 ± 79.8    | 0.2 ± 0.4 of 13 | 1.6 ± 3.6       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | edf                              | 8.6 ± 5.1 of 106   | 34.0 ± 25.4    | 14.8 ± 4.0 of 186  | 19.6 ± 8.9     | 1.0 ± 1.0 of 13 | 6.6 ± 6.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective                        | 8.2 ± 3.6 of 106   | 34.5 ± 25.5    | 15.0 ± 6.1 of 186  | 21.5 ± 11.8    | 1.2 ± 1.3 of 13 | 5.0 ± 5.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective+burst                  | 6.4 ± 3.4 of 106   | 27.0 ± 21.3    | 14.6 ± 6.1 of 186  | 20.2 ± 10.9    | 1.0 ± 1.0 of 13 | 4.4 ± 4.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective+burst                  | 6.4 ± 3.4 of 106   | 27.8 ± 21.9    | 14.8 ± 6.3 of 186  | 21.0 ± 12.0    | 1.0 ± 1.0 of 13 | 4.9 ± 5.0       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective, no information tier   | 8.4 ± 4.3 of 106   | 35.0 ± 25.0    | 14.4 ± 5.3 of 186  | 20.8 ± 11.2    | 1.2 ± 1.3 of 13 | 5.5 ± 5.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective, fair-share surplus    | 8.6 ± 3.9 of 106   | 36.0 ± 27.3    | 15.2 ± 5.4 of 186  | 22.3 ± 12.9    | 1.0 ± 1.0 of 13 | 4.5 ± 4.6       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective, DESIGN 9.9 as written | 18.4 ± 13.5 of 106 | 49.4 ± 43.4    | 19.0 ± 8.7 of 186  | 24.1 ± 14.2    | 1.0 ± 1.0 of 13 | 4.0 ± 4.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
@@ -59,7 +59,7 @@ Late hours of each show's render jobs (fairness across projects).
 | fifo                             | 62.3 ± 48.3  | 47.2 ± 35.7  | 30.9 ± 34.2  |
 | edf                              | 23.0 ± 17.8  | 26.4 ± 18.5  | 10.7 ± 10.5  |
 | objective                        | 24.5 ± 19.6  | 22.4 ± 18.5  | 14.1 ± 13.9  |
-| objective+burst                  | 18.9 ± 18.0  | 21.8 ± 18.0  | 10.9 ± 9.6   |
+| objective+burst                  | 20.3 ± 20.9  | 21.9 ± 18.0  | 11.6 ± 9.5   |
 | objective, no information tier   | 24.9 ± 19.2  | 22.5 ± 18.7  | 13.9 ± 13.9  |
 | objective, fair-share surplus    | 23.5 ± 18.5  | 24.3 ± 22.3  | 15.0 ± 14.6  |
 | objective, DESIGN 9.9 as written | 30.8 ± 21.5  | 27.6 ± 27.2  | 19.0 ± 19.9  |
@@ -73,10 +73,10 @@ Preemptions counts units stopped (yields and kills). Lost CPU hours include task
 | manual                           | 7 ± 1       | wrangler-suspend 7                            | 198 ± 37   | 378 ± 95        | 2.3 ± 0.9     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
 | fifo                             | 0 ± 0       | none                                          | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
 | edf                              | 0 ± 0       | none                                          | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
-| objective                        | 1176 ± 441  | reclaim-nominal 304, restore-feasibility 871  | 223 ± 34   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 5.4 ± 2.1               |
-| objective+burst                  | 1229 ± 437  | reclaim-nominal 319, restore-feasibility 910  | 223 ± 29   | 378 ± 95        | 0.4 ± 0.4     | 861 ± 240        | 543 ± 180 | 2.2 ± 1.5               |
-| objective, no information tier   | 1279 ± 463  | reclaim-nominal 320, restore-feasibility 960  | 225 ± 33   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 5.4 ± 2.1               |
-| objective, fair-share surplus    | 1122 ± 391  | reclaim-nominal 262, restore-feasibility 860  | 222 ± 34   | 378 ± 95        | 0.4 ± 0.5     | 0 ± 0            | 0 ± 0     | 7.0 ± 2.3               |
+| objective                        | 1176 ± 441  | reclaim-nominal 304, restore-feasibility 871  | 223 ± 34   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.2 ± 2.0               |
+| objective+burst                  | 1180 ± 484  | reclaim-nominal 316, restore-feasibility 864  | 220 ± 32   | 378 ± 95        | 0.4 ± 0.4     | 709 ± 421        | 452 ± 285 | 1.4 ± 1.7               |
+| objective, no information tier   | 1279 ± 463  | reclaim-nominal 320, restore-feasibility 960  | 225 ± 33   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.0 ± 1.4               |
+| objective, fair-share surplus    | 1122 ± 391  | reclaim-nominal 262, restore-feasibility 860  | 222 ± 34   | 378 ± 95        | 0.4 ± 0.5     | 0 ± 0            | 0 ± 0     | 5.2 ± 1.3               |
 | objective, DESIGN 9.9 as written | 1256 ± 588  | reclaim-nominal 227, restore-feasibility 1029 | 232 ± 50   | 378 ± 95        | 0.9 ± 1.1     | 0 ± 0            | 0 ± 0     | 56.4 ± 32.9             |
 
 ### Ablations
@@ -100,7 +100,7 @@ The main farm's GPU pool runs at about a third of capacity, so ML runs and GPU r
 | fifo            | 82.0 ± 30.0   | 610.0 ± 645.9 | 39.8 ± 15.9       | 480.0 ± 694.0     | 2.2 ± 4.9 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9  | 0 ± 0       | 0 ± 0     |
 | edf             | 49.2 ± 18.8   | 381.6 ± 574.9 | 27.6 ± 19.9       | 328.5 ± 591.0     | 4.4 ± 8.8 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9  | 0 ± 0       | 0 ± 0     |
 | objective       | 47.4 ± 23.8   | 532.7 ± 563.1 | 24.6 ± 16.7       | 476.3 ± 540.0     | 0.4 ± 0.9 | 73.2 ± 11.9 | 378 ± 95        | 4.3 ± 1.2     | 47.2 ± 11.3 | 1839 ± 698  | 0 ± 0     |
-| objective+burst | 23.0 ± 9.1    | 52.6 ± 30.2   | 1.4 ± 1.7         | 2.6 ± 4.8         | 0.0 ± 0.0 | 50.3 ± 5.8  | 378 ± 95        | 3.7 ± 1.0     | 46.6 ± 10.2 | 1574 ± 382  | 985 ± 324 |
+| objective+burst | 23.2 ± 9.3    | 54.6 ± 32.5   | 1.4 ± 1.7         | 2.6 ± 4.8         | 0.0 ± 0.0 | 50.3 ± 5.8  | 378 ± 95        | 3.8 ± 1.0     | 46.5 ± 10.4 | 1539 ± 433  | 919 ± 374 |
 
 ## Binary against sequential order
 
