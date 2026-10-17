@@ -1,0 +1,74 @@
+<!-- @dsCard group="Map" -->
+<!doctype html>
+<html lang="en" data-motion="off"><head><meta charset="utf-8"><title>ATLAS</title>
+<link rel="stylesheet" href="_preview.css">
+<link rel="stylesheet" href="../../css/map.css">
+<style>
+  .pv-three { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 32px; align-items: start; }
+  .pv-three > div { min-width: 0; }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>ATLAS</h1><p class="dim">Capacity on the map. Each site is a set of concentric rings, one per pool: the ring is the pool's slots at the site, the lit arc slots in use, a blue thread inside it the share running your units; a dashed arc is a request awaiting approval and a dotted arc the burst the provider can still give. The diamond is the project stores; arcs carry bytes from it, and the funnel shows how few of the nodes' reads ever reach it. Land is a dot matrix from Natural Earth 110m (public domain).</p></div>
+<div class="pv-three">
+  <div>
+    <div class="pv-box svghost atlas" id="region"></div>
+    <div class="pv-cap">region · the mock farm at 09:30</div>
+    <div class="pv-sub">Harbor studio in Burbank (racks r1 to r4), spot burst in us-west-2, the project stores in us-west-1</div>
+  </div>
+  <div>
+    <div class="pv-box" id="fan"></div>
+    <div class="pv-cap">fan-in · requests per minute entering each tier</div>
+    <div class="pv-sub" id="ratio"></div>
+    <div class="pv-box" id="site" style="margin-top:20px"></div>
+    <div class="pv-cap">site scale · racks, nodes, slots</div>
+    <div class="pv-sub">blue your running units, grey other projects, outlined idle; the suspect node outlined orange, failures counted in red</div>
+    <div class="pv-box svghost" id="schem" style="margin-top:20px"></div>
+    <div class="pv-cap">no sites declared</div>
+    <div class="pv-sub">the same farm with snapshot.sites absent: zones drawn without a map, labeled as such</div>
+  </div>
+</div>
+<div style="margin-top:28px">
+  <div class="pv-box svghost atlas" id="world"></div>
+  <div class="pv-cap">global · scale study: four studios bursting into three cloud regions</div>
+  <div class="pv-sub" style="max-width:900px">synthetic sites with the API's field shapes; the map switches to the world grid when the sites outrun the regional one</div>
+</div>
+<script type="module">
+  import { atlasSVG, schematicSVG, funnelSVG, siteScaleSVG, sitesModel, fanRatio } from '../components/atlas.js';
+  import { installTips } from '../components/lattice.js';
+  import * as f from '../components/fmt.js';
+  import { snapshot } from './_data.js';
+  installTips();
+  const s = await snapshot();
+  document.getElementById('region').innerHTML = atlasSVG(s, { w: 640, h: 700 });
+  document.getElementById('fan').innerHTML = funnelSVG(s, { w: 520 });
+  document.getElementById('ratio').textContent = `1 store read per ${f.num(fanRatio(s))} node requests`;
+  const M = sitesModel(s);
+  if (M.compute.length) document.getElementById('site').innerHTML = siteScaleSVG(s, M.compute[0], { w: 520 });
+  document.getElementById('schem').innerHTML = schematicSVG({ ...s, sites: undefined }, { w: 620, h: 300 });
+
+  // a global farm: synthetic sites and nodes, real field shapes
+  const sites = [
+    { name: 'burbank', label: 'Burbank', region: 'bur', lat: 34.18, lon: -118.31, kind: 'onprem', localities: [] },
+    { name: 'vancouver', label: 'Vancouver', region: 'yvr', lat: 49.28, lon: -123.12, kind: 'onprem', localities: [] },
+    { name: 'london', label: 'London', region: 'lon', lat: 51.51, lon: -0.13, kind: 'onprem', localities: [] },
+    { name: 'wellington', label: 'Wellington', region: 'wlg', lat: -41.29, lon: 174.78, kind: 'onprem', localities: [] },
+    { name: 'usw2', label: 'us-west-2', region: 'us-west-2', lat: 45.84, lon: -119.7, kind: 'cloud', localities: [] },
+    { name: 'euw2', label: 'eu-west-2', region: 'eu-west-2', lat: 53.4, lon: -6.3, kind: 'cloud', localities: [] },
+    { name: 'apse2', label: 'ap-southeast-2', region: 'ap-southeast-2', lat: -33.87, lon: 151.21, kind: 'cloud', localities: [] },
+    { name: 'store', label: 'project stores', region: 'us-west-1', lat: 37.34, lon: -121.9, kind: 'cloud', localities: [] },
+  ];
+  let seed = 11;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const nodes = [];
+  const add = (region, pool, n, per, fill) => { for (let i = 0; i < n; i++) { const used = Math.round(per * Math.min(1, fill + rnd() * 0.15)); nodes.push({ name: `${region}-${pool}-${i}`, pool, region, zone: region, locality: region, state: 'busy', slots: per, used, failuresLastHour: 0, suspect: false, cacheBytes: 1e12, cacheHitRate: 0.95, running: rnd() < 0.5 ? [{ job: 'harbor-render/x', unit: i, slots: Math.round(used / 2) }] : [] }); } };
+  add('bur', 'cpu', 300, 8, 0.8); add('bur', 'gpu', 160, 4, 0.9);
+  add('yvr', 'cpu', 150, 8, 0.7); add('yvr', 'gpu', 50, 4, 0.6);
+  add('lon', 'cpu', 200, 8, 0.85); add('lon', 'gpu', 100, 4, 0.95);
+  add('wlg', 'cpu', 375, 8, 0.75); add('wlg', 'gpu', 240, 4, 0.85);
+  add('us-west-2', 'spot', 78, 4, 0.9); add('eu-west-2', 'spot', 24, 4, 1); add('ap-southeast-2', 'spot', 96, 4, 0.8);
+  const pools = ['cpu', 'gpu', 'spot'].map((p) => { const ns = nodes.filter((n) => n.pool === p); return { name: p, attrs: { capacityType: p === 'spot' ? 'spot' : 'on-demand' }, slots: ns.reduce((a, n) => a + n.slots, 0), used: ns.reduce((a, n) => a + n.used, 0), costPerSlotHour: 1, burst: p === 'spot' ? { maxSlots: 3200, provisioned: 792, provisioningSeconds: 240, costPerSlotHour: 2.4, requested: 792 } : undefined }; });
+  const world = { sites, nodes, pools, capacity: [{ pool: 'spot', slots: 120, state: 'PendingApproval', estCost: 540 }], tiers: s.tiers };
+  document.getElementById('world').innerHTML = atlasSVG(world, { w: 1500, h: 620 });
+</script>
+</body></html>

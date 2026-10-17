@@ -1,0 +1,48 @@
+<!-- @dsCard group="Widget" -->
+<!doctype html>
+<html lang="en" data-motion="off"><head><meta charset="utf-8"><title>Side widget</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .pv-mon { background: var(--deep); padding: 12px 0; outline: 1px solid var(--rule-2); }
+  .pv-grid > div { flex: none; }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>Side widget</h1><p class="dim">One job as a small sheet for a second screen or a docked browser window: the collar names the job, its owner and the datum; a mini PYLON and three numbers (done by work, the share running now, about how long); the shot collapsed to batches on one line; the deadline; the upstream and downstream jobs at its edges in microtype. Three states, and nothing else changes between them: on time is quiet; temporary trouble only adds an orange tick (the pylon's edge, one band, its frame label); late turns the neatline to red pencil and names the fix and its price. Open it at <span class="mono">#/widget/&lt;ns&gt;/&lt;name&gt;</span>, or <span class="mono">?compact=1</span> for the 240 px corner.</p></div>
+<div class="pv-grid">
+  <div><div class="pv-mon" id="a" style="width:380px"></div><div class="pv-cap">A · on time</div><div class="pv-sub">sh050-light-v002 at 09:30</div></div>
+  <div><div class="pv-mon" id="b" style="width:380px"></div><div class="pv-cap">B · temporary trouble</div><div class="pv-sub">sh050-light-v002 at 09:24: one unit retrying; the numbers and the slack stay as they were</div></div>
+  <div><div class="pv-mon" id="c" style="width:380px"></div><div class="pv-cap">C · late</div><div class="pv-sub">sh040-fx-v003 at 09:30: projected about an hour late; +12 spot slots close it, est. $53, awaiting approval</div></div>
+  <div><div class="pv-mon" id="d" style="width:320px"></div><div class="pv-cap">docked narrow · 320 px</div><div class="pv-sub">sh010-light-v014, held</div></div>
+  <div><div class="pv-mon" id="e" style="width:248px"></div><div class="pv-cap">corner · 240 px</div><div class="pv-sub">?compact=1</div>
+    <div class="pv-mon" id="f" style="width:248px;margin-top:12px"></div></div>
+</div>
+<script type="module">
+  import '../components/pylon.js';
+  import { hydrate } from '../components/live.js';
+  import * as f from '../components/fmt.js';
+  import { widgetSheet, paintStrip } from '../../js/views/widget.js';
+  const json = async (u, alt) => { try { const r = await fetch(u); if (!r.ok) throw 0; return r.json(); } catch { const r = await fetch(alt); return r.json(); } };
+  const snap50 = await json('../fixtures/snapshot.json', '/api/v1/snapshot?as=artist');
+  const snap44 = await json('../fixtures/44m/snapshot.json', '/api/v1/snapshot?as=artist');
+  const graph = await json('../fixtures/graph.json', '/api/v1/graph?as=artist');
+  const detail = (dir, k) => json(`../fixtures/${dir}jobs/${k.replace('/', '__')}.json`, `/api/v1/jobs/${k}?as=artist`);
+  const ctxOf = (snap) => ({ snap, href: (x) => `../../index.html#/${x}`, job: (k) => snap.jobs.find((j) => `${j.namespace}/${j.name}` === k) });
+  async function card(id, snap, dir, k, compact) {
+    f.setClock(snap.now);
+    const ctx = ctxOf(snap);
+    const s = ctx.job(k), d = await detail(dir, k);
+    const j = { ...d, ...(s || {}), unitStates: (s || d).unitStates };
+    const host = document.getElementById(id);
+    host.appendChild(widgetSheet(ctx, k, j, d, graph, compact));
+    hydrate(host);
+    paintStrip(host, j, compact);
+  }
+  await card('b', snap44, '44m/', 'harbor-render/sh050-light-v002', false);
+  await card('a', snap50, '', 'harbor-render/sh050-light-v002', false);
+  await card('c', snap50, '', 'harbor-render/sh040-fx-v003', false);
+  await card('d', snap50, '', 'harbor-render/sh010-light-v014', false);
+  await card('e', snap50, '', 'harbor-render/sh040-fx-v003', true);
+  await card('f', snap50, '', 'harbor-render/sh050-light-v002', true);
+</script>
+</body></html>

@@ -1,6 +1,9 @@
 // Dependency graph across classes: sim to render to comp to transcode to
 // delivery, build to test to merge. Deadlines propagate upstream; the
-// critical path is drawn heavy; each edge carries the view that flows on it.
+// critical path is drawn heavy in ink; each edge carries the view that
+// flows on it. A sheet: the title block counts what is late, a job
+// projected past its deadline is outlined in red pencil (dashed), a failed
+// one in red ink, a held one carries the grey hold mark.
 
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
@@ -108,21 +111,24 @@ function layout(data) {
 function nodeBox(ctx, n, p) {
   const j = ctx.job(n.id);
   const done = j ? j.units.succeeded / Math.max(1, j.units.total) : n.phase === 'Succeeded' ? 1 : 0;
+  const run = j ? (j.units.running + j.units.retrying) / Math.max(1, j.units.total) : 0;
   const late = n.slackSeconds !== undefined && n.slackSeconds < 0 && n.phase !== 'Succeeded';
   const name = f.jobName(n.id);
-  const phaseCol = { Failed: 'var(--t-red)', Held: 'var(--t-magenta)', Succeeded: '#7bd17f' }[n.phase] || 'var(--ink-2)';
+  const phaseCol = { Failed: 'var(--fail)', Held: 'var(--g16)', Succeeded: 'var(--done-settled)', Running: 'var(--run)' }[n.phase] || 'var(--ink-3)';
   return s('a', { href: ctx.href(`job/${n.id}`), 'data-key': n.id, class: 'gnode' + (n.critical ? ' crit' : '') },
     s('g', { class: 'gnode' + (n.critical ? ' crit' : ''), transform: `translate(${p.x} ${p.y})` },
       s('title', null, `${name}: ${n.phase}`),
-      s('rect', { class: 'box', width: BW, height: BH, rx: 1 }),
+      s('rect', { class: 'box' + (n.phase === 'Failed' ? ' failed' : late ? ' late' : ''), width: BW, height: BH }),
+      n.phase === 'Held' ? s('g', { fill: 'var(--g16)' }, s('rect', { x: BW - 52, y: 29, width: 1.6, height: 8 }), s('rect', { x: BW - 48.4, y: 29, width: 1.6, height: 8 })) : null,
       s('text', { x: 10, y: 19, style: { 'font-weight': 650, 'font-size': '13px' } }, name.length > 27 ? name.slice(0, 26) + '…' : name),
       s('text', { x: BW - 10, y: 19, 'text-anchor': 'end', class: 'm', style: { 'text-transform': 'uppercase' } }, n.class),
       s('text', { x: 10, y: 36, class: 'm', style: { fill: phaseCol } }, n.phase),
       n.deadline ? s('text', { x: BW - 10, y: 36, 'text-anchor': 'end', class: 'm' }, `due ${f.clock(n.deadline)}`) : null,
       n.etaP90 ? s('text', { x: 10, y: 52, class: 'm' }, `p90 ${f.clock(n.etaP90)}`) : s('text', { x: 10, y: 52, class: 'm' }, 'finished'),
-      n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? s('text', { x: BW - 10, y: 52, 'text-anchor': 'end', class: 'm', style: { fill: late ? 'var(--t-yellow)' : 'var(--ink-2)' } }, `slack ${f.signed(n.slackSeconds)}`) : null,
-      s('rect', { x: 0, y: BH - 4, width: BW, height: 4, fill: 'var(--u-queued)' }),
-      s('rect', { x: 0, y: BH - 4, width: BW * done, height: 4, fill: 'var(--u-done)' })));
+      n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? s('text', { x: BW - 10, y: 52, 'text-anchor': 'end', class: 'm', style: { fill: late ? 'var(--fail)' : 'var(--pencil)' } }, `slack ${f.signed(n.slackSeconds)}`) : null,
+      s('rect', { x: 0, y: BH - 4, width: BW, height: 4, fill: 'var(--g09)' }),
+      s('rect', { x: 0, y: BH - 4, width: BW * done, height: 4, fill: n.phase === 'Succeeded' ? 'var(--done-settled)' : 'var(--done)' }),
+      run > 0 ? s('rect', { x: BW * done, y: BH - 4, width: Math.max(2, BW * run), height: 4, fill: 'var(--run)' }) : null));
 }
 
 export default {
@@ -132,11 +138,21 @@ export default {
       st.now = ctx.snap.now;
       get('/graph').then((d) => { st.data = d; }).catch(() => {}).finally(() => { st.busy = false; ctx.refresh(); });
     }
-    const head = h('div', { class: 'scopebar' },
-      h('div', null, h('h1', null, 'Dependencies'),
-        h('div', { class: 'dim', style: { marginTop: '4px' } }, 'Jobs across classes. A job is due no later than each dependent’s deadline minus that dependent’s duration, so a delivery’s deadline reaches back through comp and render to the sim. The critical path is drawn heavy.')));
-    if (!st.data) return h('section', null, head, h('p', { class: 'dim' }, 'Loading the graph…'));
     const data = st.data;
+    const nodes = data ? data.nodes : [];
+    const lateN = nodes.filter((n) => n.slackSeconds !== undefined && n.slackSeconds < 0 && n.phase !== 'Succeeded');
+    const crit = nodes.filter((n) => n.critical);
+    const tcell = (label, val, sub, cls = '') => h('div', { class: 'cell' }, h('span', { class: 'lab' }, label), h('span', { class: 'val ' + cls }, val), sub ? h('span', { class: 'sub' }, sub) : null);
+    const head = h('div', { class: 'sheethead' },
+      h('div', null,
+        h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ' / dependencies'),
+        h('h1', null, 'Dependencies'),
+        h('div', { class: 'meta vmeta' }, 'Jobs across classes. A job is due no later than each dependent’s deadline minus that dependent’s duration, so a delivery’s deadline reaches back through comp and render to the sim. The critical path is drawn heavy.')),
+      h('div', { class: 'titleblock' },
+        tcell('Jobs', f.num(nodes.length), `${f.num(data ? data.edges.length : 0)} dependencies`),
+        tcell('Critical path', f.num(crit.length), 'jobs that finish last'),
+        tcell('Projected late', h('span', { class: lateN.length ? 't-fail' : '' }, f.num(lateN.length)), lateN.length ? 'red pencil: past the deadline' : 'all on time')));
+    if (!data) return h('section', { class: 'sheet vgraph' }, head, h('p', { class: 'dim' }, 'Reading the graph…'));
     const L = layout(data);
     const byId = new Map(data.nodes.map((n) => [n.id, n]));
     const edges = data.edges.filter((e) => L.pos.has(e.from) && L.pos.has(e.to)).map((e) => {
@@ -150,29 +166,35 @@ export default {
       const mx = (x1 + x2) / 2;
       return [
         s('path', { class: 'e' + (crit ? ' crit' : ''), d: `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2 - 4} ${y2}`, 'data-key': `${e.from}>${e.to}` }),
-        s('path', { d: `M${x2 - 6} ${y2 - 4} L${x2} ${y2} L${x2 - 6} ${y2 + 4}`, fill: 'none', stroke: crit ? 'var(--ink)' : '#6a6a6a', 'stroke-width': crit ? 2 : 1.2 }),
+        s('path', { d: `M${x2 - 6} ${y2 - 4} L${x2} ${y2} L${x2 - 6} ${y2 + 4}`, fill: 'none', stroke: crit ? 'var(--ink)' : 'var(--g13)', 'stroke-width': crit ? 2 : 1.2 }),
         e.view ? s('text', { x: mx, y: (y1 + y2) / 2 - 5, 'text-anchor': 'middle', class: 'm', style: { 'font-size': '9px', fill: 'var(--ink-3)' } }, f.shortId(e.view).slice(0, 9)) : null,
       ];
     });
     const singles = L.single.map((id) => byId.get(id));
-    return h('section', { class: 'graph' }, head,
-      h('div', { class: 'well', style: { overflowX: 'auto', padding: '16px' } },
+    return h('section', { class: 'sheet vgraph', 'data-key': 'graph', 'aria-label': 'Dependencies' }, head,
+      h('div', { class: 'neat' },
+      h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('queue') }, 'queue'), ': the same jobs in dispatch order'),
+      h('div', { class: 'edge e' }, h('a', { href: ctx.href('cost') }, 'cost'), ': what the late chains need ▸'),
+      h('div', { class: 'vgwell' },
         s('svg', { width: Math.max(L.width + 10, 600), height: L.height, viewBox: `-2 0 ${Math.max(L.width + 10, 600)} ${L.height}`, style: { width: `${Math.max(L.width + 10, 600)}px`, maxWidth: 'none' }, role: 'group', 'aria-label': 'Dependency graph' },
           edges, data.nodes.filter((n) => L.pos.has(n.id)).map((n) => nodeBox(ctx, n, L.pos.get(n.id))))),
-      h('div', { class: 'legend' },
-        h('span', null, h('i', { style: { background: 'var(--ink)', height: '3px' } }), 'critical path: the inputs that finish last'),
-        h('span', null, h('i', { style: { background: '#6a6a6a', height: '1px' } }), 'dependency; the label is the C4 view that flows along it')),
-      L.finished.length ? h('div', { class: 'section', style: { marginTop: '22px' } },
+      h('div', { class: 'legend vlegend' },
+        h('span', null, h('i', { class: 'lg crit' }), 'critical path: the inputs that finish last'),
+        h('span', null, h('i', { class: 'lg dep' }), 'dependency; the label is the C4 view that flows along it'),
+        h('span', null, h('i', { class: 'lg late' }), 'projected late (red pencil)'),
+        h('span', null, h('i', { class: 'lg failed' }), 'failed'),
+        h('span', null, h('i', { class: 'lg bar' }), 'units done, and running now')),
+      L.finished.length ? h('div', { class: 'vsec', style: { marginTop: '22px' } },
         h('header', null, h('h2', null, 'Finished chains')),
-        h('table', { class: 't' }, h('tbody', null, L.finished.map((g) => h('tr', { 'data-key': g.join('>') },
+        h('table', { class: 'vt' }, h('tbody', null, L.finished.map((g) => h('tr', { 'data-key': g.join('>') },
           h('td', null, g.map((id, i) => [i ? ' → ' : '', h('a', { href: ctx.href(`job/${id}`) }, f.jobName(id))])),
-          h('td', { class: 'dim' }, g.map((id) => byId.get(id).phase).includes('Failed') ? h('span', { class: 't-red' }, 'ended with a failure') : 'all succeeded')))))) : null,
-      singles.length ? h('div', { class: 'section', style: { marginTop: '22px' } },
+          h('td', { class: 'dim' }, g.map((id) => byId.get(id).phase).includes('Failed') ? h('span', { class: 't-fail' }, 'ended with a failure') : 'all succeeded')))))) : null,
+      singles.length ? h('div', { class: 'vsec', style: { marginTop: '22px' } },
         h('header', null, h('h2', null, 'Jobs with no dependencies')),
-        h('table', { class: 't' }, h('tbody', null, singles.map((n) => h('tr', { 'data-key': n.id },
+        h('table', { class: 'vt' }, h('tbody', null, singles.map((n) => h('tr', { 'data-key': n.id },
           h('td', null, h('a', { href: ctx.href(`job/${n.id}`) }, f.jobName(n.id))),
           h('td', { class: 'mono dim' }, n.class), h('td', { class: 'dim' }, n.phase),
           h('td', { class: 'num' }, n.deadline ? `due ${f.clock(n.deadline)}` : ''),
-          h('td', { class: 'num r ' + (n.slackSeconds < 0 && n.phase !== 'Succeeded' ? 't-yellow' : '') }, n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? `slack ${f.signed(n.slackSeconds)}` : '')))))) : null);
+          h('td', { class: 'num r ' + (n.slackSeconds < 0 && n.phase !== 'Succeeded' ? 't-fail pencil' : 'pencil') }, n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? `slack ${f.signed(n.slackSeconds)}` : '')))))) : null));
   },
 };

@@ -1,0 +1,68 @@
+<!-- @dsCard group="Pools" -->
+<!doctype html>
+<html lang="en" data-motion="off"><head><meta charset="utf-8"><title>LATTICE</title>
+<link rel="stylesheet" href="_preview.css">
+<style>
+  .pv-two { display: grid; grid-template-columns: 620px minmax(0, 1fr); gap: 32px; align-items: start; }
+  .pv-two > div { min-width: 0; }
+</style>
+</head>
+<body>
+<div class="pv-h"><h1>LATTICE</h1><p class="dim">Pools as identical cells: what the slots are, not where. One cell per slot, sorted by project; a bracket under each project's run is its nominal quota, a tick where borrowing begins, and a borrowed cell has its corner notched. Blue only on slots running your units; other projects are grey ink, shown only as a total. Burst: requested is dashed with its price, headroom dotted. At scale a cell is a node filled from the bottom by slots in use, and the exceptions (suspect orange, not ready red, failing, disabled) sort to the end of each pool.</p></div>
+<div class="pv-two">
+  <div>
+    <div class="pv-box" id="reg"></div>
+    <div class="pv-cap">regularized · the mock farm at 09:30</div>
+    <div class="pv-sub">68 slots in 4 pools; harbor borrows 4 gpu slots past its nominal 8 and all 8 spot slots; +12 spot awaiting approval at est. $53</div>
+    <div class="pv-box" id="regA" style="margin-top:20px"></div>
+    <div class="pv-cap">the same, as the artist sees it</div>
+    <div class="pv-sub">maya, harbor only: kestrel's slots fold into one grey total</div>
+  </div>
+  <div>
+    <div class="pv-box" id="big"></div>
+    <div class="pv-cap">scale study · synthetic counts, the same fields · one cell per node</div>
+    <div class="pv-sub">10,600 nodes in four pools; exceptions sorted to the end of each pool</div>
+    <div class="pv-box" id="bigreg" style="margin-top:20px"></div>
+    <div class="pv-cap">regularized at scale</div>
+    <div class="pv-sub">past 640 cells a cell stands for a fixed number of slots, and says so</div>
+  </div>
+</div>
+<script type="module">
+  import { latticeSVG, installTips } from '../components/lattice.js';
+  import { own, hydrate } from '../components/live.js';
+  import { snapshot } from './_data.js';
+  installTips();
+  const s = await snapshot();
+  const reg = (snap, w = 600) => snap.pools.map((p) => `<div style="margin-bottom:16px"><div style="display:flex;gap:10px;align-items:baseline;margin-bottom:8px"><h2 style="color:var(--paper);letter-spacing:.2em">${p.name}</h2><span class="dimmer mono" style="font-size:9.5px">${[p.attrs.class, p.attrs.gpuModel, p.attrs.capacityType].filter(Boolean).join(' · ')}</span><span class="mono dim" style="margin-left:auto;font-size:11px">${p.used} of ${p.slots} slots</span></div>${latticeSVG(snap, p, { width: w }).svg}</div>`).join('');
+  document.getElementById('reg').innerHTML = reg(s);
+  // the artist's scope: harbor only, kestrel as a total
+  const artist = { ...s, projects: s.projects.filter((p) => p.name === 'harbor'), nodes: s.nodes.map((n) => ({ ...n, running: (n.running || []).filter((r) => r.job.startsWith('harbor')) })) };
+  document.getElementById('regA').innerHTML = reg(artist);
+
+  // a synthetic farm at scale, with the API's field shapes
+  let seed = 7;
+  const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const pools = [
+    { name: 'cpu', attrs: { class: 'cpu', capacityType: 'on-demand' }, n: 6000, per: 8, cost: 0.68 },
+    { name: 'gpu', attrs: { class: 'gpu', gpuModel: 'L40S', capacityType: 'on-demand' }, n: 1800, per: 4, cost: 1.1 },
+    { name: 'ci', attrs: { class: 'cpu', capacityType: 'on-demand' }, n: 2200, per: 8, cost: 0.34 },
+    { name: 'spot', attrs: { class: 'gpu', gpuModel: 'L4', capacityType: 'spot' }, n: 600, per: 4, cost: 2.4, burst: { maxSlots: 4000, provisioned: 2400, provisioningSeconds: 240, costPerSlotHour: 2.4, requested: 2400 } },
+  ];
+  const nodes = [];
+  for (const p of pools) for (let i = 0; i < p.n; i++) {
+    const r = rnd();
+    const state = r < 0.004 ? 'notReady' : r < 0.008 ? 'disabled' : 'busy';
+    const used = state === 'busy' ? Math.max(0, Math.min(p.per, Math.round(p.per * (0.6 + rnd() * 0.5)))) : 0;
+    const mine = Math.round(used * (rnd() < 0.5 ? 1 : 0.4));
+    nodes.push({ name: `${p.name}-${String(i).padStart(5, '0')}`, pool: p.name, locality: `rack ${Math.floor(i / 40)}`, state, slots: p.per, used,
+      failuresLastHour: rnd() < 0.01 ? Math.ceil(rnd() * 9) : 0, suspect: rnd() < 0.002, cacheBytes: 2e12, cacheHitRate: 0.9 + rnd() * 0.09,
+      running: mine ? [{ job: 'harbor-render/sh040-fx-v003', unit: i, slots: mine }] : [] });
+  }
+  const P = pools.map((p) => { const ns = nodes.filter((n) => n.pool === p.name); return { name: p.name, attrs: p.attrs, slots: ns.reduce((a, n) => a + n.slots, 0), used: ns.reduce((a, n) => a + n.used, 0), costPerSlotHour: p.cost, burst: p.burst }; });
+  const big = { nodes, pools: P, projects: [{ name: 'harbor', quotas: P.map((p) => ({ pool: p.name, nominal: Math.round(p.slots * 0.45), used: Math.round(p.used * 0.55), borrowingLimit: p.slots })) }],
+    capacity: [{ pool: 'spot', slots: 320, state: 'PendingApproval', estCost: 1420, reason: 'ep104 misses Mon 09:00 by about 3 h at current capacity', jobs: [] }] };
+  document.getElementById('big').appendChild(own('lattice-nodes', 'pv-big', { snap: big }));
+  document.getElementById('bigreg').innerHTML = reg(big, 820);
+  hydrate(document);
+</script>
+</body></html>

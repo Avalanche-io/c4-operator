@@ -1,6 +1,9 @@
-// Cost and capacity: bytes avoided (the value metric), per pool capacity
-// and burst, spend against budget, the required-slots curve for the next 48
-// hours against capacity, and a what-if for burst.
+// Cost and capacity: what is metered, bytes avoided (savings, never
+// billed), per pool capacity and burst, spend against budget, the
+// required-slots curve for the next 48 hours against capacity, and a
+// what-if for burst. A sheet: need above capacity is red pencil (a
+// projected shortfall), a request awaiting approval is dashed grey with its
+// price, burst capacity is grey like any other slot.
 
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
@@ -64,7 +67,10 @@ function curve(p, need, extra) {
   const over = [];
   need.forEach((v, hr) => {
     d += ` L${x(hr)} ${y(v)} L${x(hr + 1)} ${y(v)}`;
-    if (v > cap) over.push(s('rect', { x: x(hr), y: y(v), width: x(1), height: y(cap) - y(v), fill: 'var(--bar-yellow)' }));
+    if (v > cap) {
+      over.push(s('rect', { x: x(hr), y: y(v), width: x(1), height: y(cap) - y(v), fill: 'var(--fail)', 'fill-opacity': 0.28 }));
+      over.push(s('line', { x1: x(hr), x2: x(hr + 1), y1: y(v), y2: y(v), stroke: 'var(--fail)', 'stroke-width': 1.5, 'stroke-dasharray': '3 2', 'vector-effect': 'non-scaling-stroke' }));
+    }
   });
   d += ` L${W} ${y(0)} Z`;
   const peak = Math.max(...need);
@@ -75,10 +81,10 @@ function curve(p, need, extra) {
       h('span', { class: 'num dim' }, `peak need ${peak.toFixed(1)} slots · capacity ${cap}${extra ? ` (+${extra} what-if)` : ''}`)),
     h('div', { class: 'well', style: { padding: '8px 10px 4px' } },
       s('svg', { class: 'chart', viewBox: '0 0 100 62', preserveAspectRatio: 'none', style: { height: '92px' }, role: 'img', 'aria-label': `${p.name}: peak need ${peak.toFixed(1)} slots against ${cap}` },
-        s('path', { d, fill: '#555555', stroke: 'var(--ink-2)', 'stroke-width': 1, 'vector-effect': 'non-scaling-stroke' }),
+        s('path', { d, fill: 'var(--g11)', stroke: 'var(--g16)', 'stroke-width': 1, 'vector-effect': 'non-scaling-stroke' }),
         over,
         s('line', { x1: 0, x2: W, y1: y(p.slots), y2: y(p.slots), stroke: 'var(--ink)', 'stroke-width': 2, 'vector-effect': 'non-scaling-stroke' }),
-        extra ? s('line', { x1: 0, x2: W, y1: y(cap), y2: y(cap), stroke: 'var(--bar-blue)', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke' }) : null),
+        extra ? s('line', { x1: 0, x2: W, y1: y(cap), y2: y(cap), stroke: 'var(--g15)', 'stroke-width': 2, 'stroke-dasharray': '4 3', 'vector-effect': 'non-scaling-stroke' }) : null),
       h('div', { class: 'num dimmer', style: { position: 'relative', height: '14px', fontSize: '10px' } }, ticks)));
 }
 
@@ -95,7 +101,7 @@ function usageSection(snap) {
   }
   const gpu = new Map(u.gpuHours.map((g) => [g.project, g.hours]));
   const pools = [...new Set(u.containerHours.map((c) => c.pool))];
-  return h('div', { class: 'section', 'data-key': 'usage' },
+  return h('div', { class: 'vsec', 'data-key': 'usage' },
     h('header', null, h('h2', null, 'Usage today'),
       h('span', { class: 'dim' }, 'What is metered: cluster-hours, container-hours by project and pool, and GPU-hours. A production window is a fixed fee for its period.')),
     h('div', { class: 'cols2' },
@@ -105,7 +111,7 @@ function usageSection(snap) {
           [...byProject.keys()].map((p) => h('div', { class: 'fig', 'data-key': 'ch-' + p }, h('div', { class: 'lab' }, `${p}, container-hours`),
             h('div', { class: 'val', style: { fontSize: '26px' } }, f.num(byProject.get(p).reduce((a, c) => a + c.hours, 0))),
             h('div', { class: 'dim num', style: { fontSize: '11px', marginTop: '4px' } }, `${(gpu.get(p) || 0).toFixed(1)} GPU-hours`)))),
-        h('table', { class: 't' },
+        h('table', { class: 'vt' },
           h('thead', null, h('tr', null, h('th', null, 'Container-hours'), pools.map((p) => h('th', { class: 'r' }, p)), h('th', { class: 'r' }, 'GPU-hours'))),
           h('tbody', null, [...byProject.keys()].map((proj) => h('tr', { 'data-key': 'row-' + proj },
             h('td', { class: 'mono' }, proj),
@@ -116,10 +122,10 @@ function usageSection(snap) {
             h('td', { class: 'r num' }, (gpu.get(proj) || 0).toFixed(1))))))),
       h('div', null,
         h('div', { class: 'lab', style: { marginBottom: '6px' } }, 'Production windows'),
-        u.productionWindows.length ? h('table', { class: 't' }, h('tbody', null, u.productionWindows.map((w) => h('tr', { 'data-key': w.name },
+        u.productionWindows.length ? h('table', { class: 'vt' }, h('tbody', null, u.productionWindows.map((w) => h('tr', { 'data-key': w.name },
           h('td', null, w.name, h('div', { class: 'dimmer', style: { fontSize: '11px' } }, w.project)),
           h('td', { class: 'num' }, `${f.dateLine(w.from)} to ${f.dateLine(w.to)}`),
-          h('td', { class: 'r' }, h('span', { class: 'chip ' + (w.active ? 'green' : '') }, w.active ? 'active, fixed fee' : 'not started')))))) :
+          h('td', { class: 'r' }, h('span', { class: 'chip' + (w.active ? ' on' : '') }, w.active ? 'active, fixed fee' : 'not started')))))) :
           h('p', { class: 'dim' }, 'No production window; usage is metered by the hour.'))));
 }
 
@@ -146,12 +152,26 @@ export default {
     const whatCost = fixed.length ? Math.max(...fixed.map((x) => x.cost)) : 0;
     const need = demand(snap);
     const projects = snap.projects;
-    return h('section', null,
-      h('div', { class: 'scopebar' },
-        h('div', null, h('h1', null, 'Cost & capacity'),
-          h('div', { class: 'dim', style: { marginTop: '4px' } }, 'What the farm has, what the deadlines need, and what a burst would buy.'))),
+    const tcell = (label, val, sub, cls = '') => h('div', { class: 'cell' }, h('span', { class: 'lab' }, label), h('span', { class: 'val ' + cls }, val), sub ? h('span', { class: 'sub' }, sub) : null);
+    const pendingCaps = snap.capacity.filter((c) => c.state === 'PendingApproval');
+    const shortPools = snap.pools.filter((p) => Array.from(need.get(p.name)).some((v) => v > p.slots));
+    return h('section', { class: 'sheet vcost', 'data-key': 'cost', 'aria-label': 'Cost and capacity' },
+      h('div', { class: 'sheethead' },
+        h('div', null,
+          h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ' / cost and capacity'),
+          h('h1', null, 'Cost & capacity'),
+          h('div', { class: 'meta' }, 'What the farm has, what the deadlines need, and what a burst would buy.')),
+        h('div', { class: 'titleblock' },
+          snap.usage ? tcell('Cluster-hours', snap.usage.clusterHours.toFixed(1), 'today, farm-wide') : null,
+          tcell('Burst in flight', f.num(fm.burstSlots), fm.burstSlots ? `${f.money(fm.burstCostPerHour, true)} per hour` : 'none'),
+          tcell('Awaiting approval', pendingCaps.length ? h('span', { class: 'pencil' }, `+${f.num(pendingCaps.reduce((a, c) => a + c.slots, 0))}`) : '0', pendingCaps.length ? `est. ${f.money(pendingCaps.reduce((a, c) => a + c.estCost, 0))}` : 'no requests'),
+          tcell('Short, next 48 h', h('span', { class: shortPools.length ? 't-fail' : '' }, shortPools.length ? shortPools.map((p) => p.name).join(', ') : 'none'), shortPools.length ? 'need above capacity' : 'capacity covers the deadlines'),
+          tcell('Bytes avoided', f.bytes(fm.bytesAvoided), 'today, savings only'))),
+      h('div', { class: 'neat' },
+      h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('pools') }, 'pools'), ': the slots being priced'),
+      h('div', { class: 'edge e' }, h('a', { href: ctx.href('map') }, 'map'), ': where burst comes from ▸'),
       usageSection(snap),
-      h('div', { class: 'section' },
+      h('div', { class: 'vsec' },
         h('header', null, h('h2', null, 'Savings: bytes avoided today'),
           h('span', { class: 'dim' }, 'Not billed. Bytes mounted into pods minus bytes fetched from the store: what content addressing, the cache tiers and the overlays saved.')),
         h('div', { class: 'figs', style: { alignItems: 'flex-end' } },
@@ -159,9 +179,9 @@ export default {
             h('div', { class: 'dim num', style: { fontSize: '11px', marginTop: '4px' } }, `${f.pct(fm.bytesAvoided / fm.bytesMaterialized)} of ${f.bytes(fm.bytesMaterialized)} mounted`)),
           projects.map((p) => h('div', { class: 'fig', 'data-key': p.name }, h('div', { class: 'lab' }, p.name), h('div', { class: 'val', style: { fontSize: '26px' } }, f.bytes(p.bytesAvoided)))))),
       h('div', { class: 'cols2' },
-        h('div', { class: 'section' },
+        h('div', { class: 'vsec' },
           h('header', null, h('h2', null, 'Pools')),
-          h('table', { class: 't' },
+          h('table', { class: 'vt' },
             h('thead', null, h('tr', null, h('th', null, 'Pool'), h('th', { style: { width: '42%' } }, 'Slots in use'), h('th', { class: 'r' }, 'Per slot-hour'), h('th', { class: 'r' }, 'Burst'))),
             h('tbody', null, snap.pools.map((p) => {
               const b = p.burst;
@@ -169,40 +189,40 @@ export default {
               return h('tr', { 'data-key': p.name },
                 h('td', null, h('span', { class: 'mono' }, p.name), h('div', { class: 'dimmer', style: { fontSize: '11px' } }, [p.attrs.class, p.attrs.gpuModel, p.attrs.capacityType].filter(Boolean).join(' · '))),
                 h('td', null,
-                  h('div', { style: { display: 'flex', height: '10px', background: 'var(--u-queued)' }, 'aria-hidden': 'true' },
-                    h('i', { style: { width: `${(p.used / tot) * 100}%`, background: 'var(--u-done)' } }),
-                    b && b.requested > b.provisioned ? h('i', { style: { marginLeft: 'auto', width: `${((b.requested - b.provisioned) / tot) * 100}%`, background: 'repeating-linear-gradient(135deg, var(--bar-blue) 0 3px, transparent 3px 6px)' } }) : null),
+                  h('div', { class: 'vuse', 'aria-hidden': 'true' },
+                    h('i', { class: 'u', style: { width: `${(p.used / tot) * 100}%` } }),
+                    b && b.requested > b.provisioned ? h('i', { class: 'req', style: { width: `${((b.requested - b.provisioned) / tot) * 100}%` } }) : null),
                   h('div', { class: 'num dim', style: { fontSize: '11px', marginTop: '3px' } }, `${p.used} of ${p.slots}`)),
                 h('td', { class: 'r num' }, f.money(p.costPerSlotHour, true)),
-                h('td', { class: 'r num' }, b ? h('span', { class: 't-blue' }, `${b.provisioned}/${b.maxSlots}`) : h('span', { class: 'dimmer' }, '–')));
+                h('td', { class: 'r num' }, b ? h('span', null, `${b.provisioned}/${b.maxSlots}`) : h('span', { class: 'dimmer' }, '–')));
             })))),
-        h('div', { class: 'section' },
+        h('div', { class: 'vsec' },
           h('header', null, h('h2', null, 'Burst spend today')),
           projects.map((p) => {
             const frac = p.burstBudgetPerDay ? p.burstSpendToday / p.burstBudgetPerDay : 0;
             return h('div', { 'data-key': p.name, style: { marginBottom: '12px' } },
               h('div', { class: 'nrow' }, h('span', { class: 'mono' }, p.name), h('span', { class: 'num' }, `${f.money(p.burstSpendToday)} of ${f.money(p.burstBudgetPerDay)}`)),
-              h('div', { style: { height: '8px', background: 'var(--u-queued)', marginTop: '4px' } },
-                h('i', { style: { display: 'block', height: '100%', width: `${Math.min(100, frac * 100)}%`, background: frac > 0.9 ? 'var(--bar-yellow)' : 'var(--bar-blue)' } })),
+              h('div', { class: 'vspend' },
+                h('i', { style: { width: `${Math.min(100, frac * 100)}%`, background: frac >= 1 ? 'var(--fail)' : 'var(--g16)' } })),
               h('div', { class: 'dimmer', style: { fontSize: '11px', marginTop: '3px' } }, `Bursts under ${f.money(Math.max(0, p.burstBudgetPerDay - p.burstSpendToday))} are requested without asking; larger ones wait for approval.`));
           }),
           !snap.viewer.allProjects ? h('p', { class: 'dim', style: { fontSize: '12px' } }, `Other projects: ${fm.otherProjectsSlots} slots in use. Their costs are not shown.`) : null)),
-      h('div', { class: 'section' },
+      h('div', { class: 'vsec' },
         h('header', null, h('h2', null, 'Capacity requests'), h('span', { class: 'dim' }, 'The scheduler asks for capacity when a deadline is at risk; nodes pre-warm the listed views before units land.')),
-        snap.capacity.length ? h('table', { class: 't' },
+        snap.capacity.length ? h('table', { class: 'vt' },
           h('thead', null, h('tr', null, ['Pool', 'Slots', 'Why', 'Until', 'Est. cost', 'Pre-warm', 'State', ''].map((x, i) => h('th', { class: i === 1 || i === 4 ? 'r' : '' }, x)))),
           h('tbody', null, snap.capacity.map((c, i) => h('tr', { 'data-key': `${c.pool}-${i}` },
             h('td', { class: 'mono' }, c.pool), h('td', { class: 'r num' }, `+${c.slots}`),
             h('td', { style: { fontSize: '12px' } }, c.reason), h('td', { class: 'num' }, f.clock(c.until)),
             h('td', { class: 'r num' }, f.money(c.estCost)), h('td', { class: 'num dim' }, `${c.prewarmViews.length} views`),
-            h('td', null, h('span', { class: 'chip ' + (c.state === 'PendingApproval' ? 'flag' : 'blue') }, c.state === 'PendingApproval' ? 'awaiting approval' : c.state.toLowerCase())),
+            h('td', null, h('span', { class: 'chip' + (c.state === 'PendingApproval' ? ' pend' : '') }, c.state === 'PendingApproval' ? 'awaiting approval' : c.state.toLowerCase())),
             h('td', { class: 'r' }, c.state === 'PendingApproval' ? h('button', { class: 'btn primary small', 'data-action': 'approve', 'data-pool': c.pool }, `Approve burst, ${f.money(c.estCost)}`) : null))))) :
           h('p', { class: 'dim' }, 'No capacity requests.')),
-      h('div', { class: 'section' },
+      h('div', { class: 'vsec' },
         h('header', null, h('h2', null, 'Slots needed, next 48 hours'),
-          h('span', { class: 'dim' }, 'Gray: slots the deadlines need. White line: capacity. Yellow: need above capacity.')),
+          h('span', { class: 'dim' }, 'Grey: slots the deadlines need. Ink line: capacity. Red pencil: need above capacity. Dashed: capacity with the what-if.')),
         h('div', { class: 'cols' }, snap.pools.map((p) => curve(p, Array.from(need.get(p.name)), p.name === st.pool ? add : 0)))),
-      burstPools.length ? h('div', { class: 'section' },
+      burstPools.length ? h('div', { class: 'vsec' },
         h('header', null, h('h2', null, 'What if')),
         h('div', { class: 'controls', style: { justifyContent: 'flex-start', gap: '12px' } },
           h('label', { class: 'lab', for: 'wi-pool' }, 'Add to pool'),
@@ -212,9 +232,9 @@ export default {
         h('p', { style: { fontSize: '15px', margin: '10px 0 4px' } },
           fixed.length ? [`+${add} ${st.pool} slots makes `, fixed.map((x, i) => [i ? ', ' : '', h('a', { href: ctx.href(`job/${key(x.j)}`) }, x.j.name)]), ` feasible for about ${f.money(whatCost)}.`] :
             infeasible.length ? `${infeasible.length} job${infeasible.length > 1 ? 's' : ''} using ${st.pool} will miss; +${add} slots is not enough for any of them.` : `Every job that can use ${st.pool} is on track.`),
-        fixes.length ? h('table', { class: 't', style: { maxWidth: '720px' } },
+        fixes.length ? h('table', { class: 'vt', style: { maxWidth: '720px' } },
           h('tbody', null, fixes.map((x) => h('tr', { 'data-key': key(x.j) },
             h('td', null, x.j.name), h('td', { class: 'num' }, `needs +${x.need}`),
-            h('td', { class: 'num' }, x.ok ? h('span', { class: 't-green' }, 'feasible') : h('span', { class: 't-yellow' }, `misses by ${f.dur(-x.j.estimate.slackSeconds)}`)))))) : null) : null);
+            h('td', { class: 'num' }, x.ok ? h('span', { class: 'ink' }, 'feasible') : h('span', { class: 't-fail pencil' }, `misses by ${f.dur(-x.j.estimate.slackSeconds)}`)))))) : null) : null));
   },
 };

@@ -1,1 +1,91 @@
-/* pools: owned by the pools view. */
+/* Pools: LATTICE (what the slots are) beside racks and nodes (where they
+   are). Owned by js/views/pools.js. */
+
+.pools .neat { padding: 18px 20px 22px; }
+.pools-grid { display: grid; grid-template-columns: minmax(0, 600px) minmax(0, 1fr); gap: 28px; align-items: start; }
+.pools .half-h { display: flex; align-items: baseline; gap: 12px; padding: 0 0 8px; margin-bottom: 14px; border-bottom: var(--hair) solid var(--rule-2); }
+.pools .half-h span { font: 400 var(--t-tiny)/1.2 var(--mono); color: var(--ink-4); }
+.pools .small { font-size: var(--t-small); }
+
+/* the regularized pools */
+.lat-pool { padding: 0 0 18px; margin-bottom: 16px; border-bottom: var(--hair) solid var(--rule-0); }
+.lat-pool:last-of-type { border-bottom: 0; }
+.lat-pool header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 9px; }
+.lat-pool h2 { color: var(--paper); font-size: 12px; letter-spacing: .2em; }
+.lat-pool .attrs { font: 400 var(--t-tiny)/1 var(--mono); color: var(--ink-4); }
+.lat-pool .use { margin-left: auto; font: 400 var(--t-small)/1 var(--mono); color: var(--ink-3); }
+.lat-pool .use b { font-weight: 400; color: var(--paper); }
+.lat-svg svg { display: block; overflow: visible; }
+.lat-svg g[data-tip] { cursor: default; }
+.lat-svg g[data-tip]:hover rect { stroke: var(--paper); }
+.lat-foot { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 6px; font: 400 var(--t-tiny)/1.4 var(--mono); color: var(--ink-4); }
+.lat-req { display: flex; align-items: center; gap: 14px; margin-top: 10px; padding: 8px 10px; border: var(--hair) dashed var(--g15); font: 400 var(--t-small)/1.35 var(--mono); color: var(--ink-2); }
+.lat-req .what { flex: 1; min-width: 0; }
+.lat-req .what b { font: 500 13px/1 var(--sans); color: var(--paper); }
+.lat-req .why { font-size: var(--t-tiny); color: var(--ink-4); margin-top: 3px; }
+.lat-req .price { white-space: nowrap; }
+.lat-req .btn { white-space: nowrap; background: var(--g18); color: var(--g01); border-color: var(--g18); }
+.lat-req .btn:hover { background: var(--paper); }
+.lat-req.prov { border-color: var(--g13); color: var(--ink-3); }
+
+.lat-key { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 4px; padding-top: 10px; border-top: var(--hair) solid var(--rule-1); font: 400 10px/1.2 var(--sans); color: var(--ink-3); }
+.lat-key span { display: inline-flex; align-items: center; gap: 6px; }
+.lat-key .sw, .ncard .s { display: inline-block; width: 12px; height: 12px; flex: none; position: relative; }
+.sw.mine, .ncard .s.mine { background: var(--run-body); box-shadow: inset 0 2px 0 var(--run); }
+.sw.mine.notch { background: linear-gradient(225deg, var(--field) 0 4px, var(--run-body) 4px); }
+.sw.other, .ncard .s.other { background: var(--g13); }
+.sw.idle, .ncard .s.idle { background: var(--g04); box-shadow: inset 0 0 0 1px var(--g12); }
+.sw.pending { box-shadow: none; border: 1px dashed var(--g15); }
+.sw.headroom { border: 1px dotted var(--g13); transform: scale(.7); }
+.sw.suspect { border: 1.5px solid var(--temp); }
+.sw.notready { border: 1.5px solid var(--fail); }
+
+/* where they are: sites, racks, node cards */
+.psite + .psite { margin-top: 18px; }
+.psite-h { display: flex; align-items: baseline; gap: 10px; padding-bottom: 6px; margin-bottom: 10px; border-bottom: var(--hair) solid var(--rule-1); }
+.psite-h .sn { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--paper); }
+.psite-h .sk { font: 400 var(--t-tiny)/1 var(--mono); color: var(--ink-4); }
+.psite-h .sk.r { margin-left: auto; color: var(--ink-3); }
+.prack { display: grid; grid-template-columns: 74px minmax(0, 1fr); gap: 10px; margin-bottom: 10px; }
+.prack-h { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; border-right: var(--hair) solid var(--rule-1); }
+.prack-h .mono { font-size: var(--t-micro); }
+.ncards { display: grid; grid-template-columns: repeat(auto-fill, minmax(212px, 1fr)); gap: 8px; }
+
+.ncard { background: var(--plate); outline: var(--hair) solid var(--rule-2); padding: 8px 9px 8px; font: 400 10.5px/1.4 var(--mono); color: var(--ink-2); display: flex; flex-direction: column; gap: 5px; }
+.ncard.suspect { outline: 1.5px solid var(--temp); }
+.ncard.st-notReady { outline: 1.5px solid var(--fail); }
+.ncard.st-disabled { background: var(--well); }
+.ncard.st-disabled .nslots { opacity: .55; }
+.ncard.st-warming, .ncard.st-unprovisioned { outline-style: dashed; outline-color: var(--g14); }
+.ncard.sel { outline: 1.5px solid var(--paper); }
+.ncard .nh { display: flex; align-items: center; gap: 6px; }
+.ncard .nn { font: 500 12px/1 var(--mono); color: var(--paper); margin-right: auto; }
+.ncard .nslots { display: flex; flex-wrap: wrap; gap: 2px; }
+.ncard .s { width: 14px; height: 14px; }
+.ncard a.s:hover, .ncard i.s:hover { outline: 1px solid var(--paper); text-decoration: none; }
+.ncard .nrow { display: flex; justify-content: space-between; gap: 8px; }
+.ncard .nrow b { font-weight: 400; color: var(--paper); }
+.ncache { position: relative; height: 15px; background: var(--g05); }
+.ncache i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--g09); box-shadow: inset 0 -2px 0 var(--g16); }
+.ncache span { position: relative; padding-left: 5px; font-size: 9.5px; line-height: 15px; color: var(--ink-2); }
+.ncard .nruns { font-size: 10px; color: var(--ink-3); line-height: 1.5; }
+.ncard .nruns a { color: var(--ink); }
+.ncard .nbl { display: flex; flex-direction: column; gap: 3px; font-size: 10px; }
+.ncard .nbl > span { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.ncard .nctl { display: flex; gap: 6px; margin-top: 2px; }
+.nsel { margin-top: 14px; max-width: 280px; }
+.nsel .lab { margin-bottom: 6px; display: block; }
+.lattice-nodes canvas { display: block; }
+.lattice-nodes canvas:focus-visible { outline-offset: 3px; }
+
+@media (max-width: 1280px) {
+  .pools-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 720px) {
+  .pools .neat { padding: 12px; }
+  .prack { grid-template-columns: 1fr; }
+  .prack-h { border-right: 0; flex-direction: row; gap: 10px; }
+}
+.pools .sheethead { padding-bottom: 24px; }
+.ncard .btn.small { padding: 4px 6px; font-size: 9px; letter-spacing: .12em; white-space: nowrap; }
+.lat-pool { padding-bottom: 12px; margin-bottom: 14px; }

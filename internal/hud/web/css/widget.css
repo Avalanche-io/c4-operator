@@ -1,1 +1,76 @@
-/* widget: owned by the widget view. */
+/* The side-monitor widget: a small sheet, 320 to 420 px wide, or a 240 px
+   corner with ?compact=1. The shell hides the top bar and the slate and
+   sets data-scale="widget". Owned by js/views/widget.js. */
+
+[data-scale="widget"] body { background: var(--deep); }
+[data-scale="widget"] main { min-height: 0; padding: 10px 0; }
+[data-scale="widget"] .toast { left: 8px; right: 8px; bottom: 8px; max-width: none; font-size: 10.5px; }
+
+.wg { position: relative; max-width: 420px; min-width: 300px; margin: 0 auto; padding: 0 14px; }
+.wg.compact { max-width: 240px; min-width: 0; padding: 0 4px; }
+.wg-empty { padding: 14px 10px; font: 400 var(--t-small)/1.4 var(--mono); color: var(--ink-3); }
+
+/* neighbours at the edges, in microtype */
+.wg-edge { position: absolute; top: 0; bottom: 0; width: 14px; display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.wg-edge.l { left: 0; } .wg-edge.r { right: 0; }
+.wg-edge span { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; font: 400 8px/14px var(--mono); color: var(--ink-4); letter-spacing: .04em; max-height: 100%; overflow: hidden; text-overflow: ellipsis; }
+.wg-edge.r span { transform: none; }
+.wg-edge .sq { display: inline-block; width: 6px; height: 6px; margin: 0 0 4px; vertical-align: middle; }
+.wg-edge .sq.settled { background: var(--done-settled); }
+
+.wg-sheet { background: var(--field); border: var(--hair) solid var(--g10); }
+.wg-sheet.late { border: 1px dashed var(--fail); }
+.wg-collar { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 6px 9px 5px; border-bottom: var(--hair) solid var(--rule-2); }
+.wg-collar.bot { border-bottom: 0; border-top: var(--hair) solid var(--rule-2); padding: 5px 9px 6px; }
+.wg-collar .nm { font: 600 10px/1.1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.wg-collar .nm span { color: var(--ink-3); font-weight: 400; letter-spacing: .04em; text-transform: none; }
+.wg-collar .mt { font: 400 8px/1 var(--mono); color: var(--ink-4); letter-spacing: .02em; white-space: nowrap; }
+
+.wg-body { display: flex; gap: 10px; padding: 9px 9px 2px; }
+.wg-pylon { flex: none; }
+.wg-pylon svg { display: block; }
+.wg .nums { flex: 1; min-width: 0; }
+.wg .lbl { font: 600 8px/1 var(--sans); letter-spacing: .14em; color: var(--ink-4); text-transform: uppercase; }
+.wg .r1 { display: flex; align-items: flex-end; justify-content: space-between; margin-top: 2px; }
+.wg .big { font: 300 60px/.86 var(--sans); color: var(--paper); letter-spacing: -.02em; }
+.wg .big small { font: 400 17px var(--mono); color: var(--ink-3); letter-spacing: 0; margin-left: 2px; }
+.wg .runs { text-align: right; padding-bottom: 3px; }
+.wg .runs .v { font: 500 19px/1 var(--sans); color: var(--run); white-space: nowrap; }
+.wg .runs .v.idle { color: var(--ink-4); }
+.wg i.par { display: inline-block; width: .42em; height: .7em; border-left: 2px solid currentColor; border-right: 2px solid currentColor; margin-right: .22em; vertical-align: -.02em; }
+.wg .r2 { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; white-space: nowrap; }
+.wg .eta { font: 400 19px/1 var(--mono); color: var(--ink); }
+.wg .eta.pencil { color: var(--pencil); }
+.wg .sm { font: 400 10.5px/1 var(--mono); }
+.wg .r3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 9px; font: 400 11px/1 var(--mono); white-space: nowrap; }
+.wg .r3.small { margin-top: 7px; font-size: 10px; }
+.wg .ink { color: var(--ink); }
+.wg .rpen, .wg .pencil.rpen { color: var(--fail); text-decoration: underline dashed var(--fail); text-underline-offset: 3px; }
+
+.wg-strip { padding: 8px 9px 6px; font: 400 var(--t-tiny)/1.2 var(--mono); }
+.wg-strip .h { display: flex; justify-content: space-between; gap: 8px; font: 400 8px/1 var(--mono); color: var(--ink-4); margin-bottom: 4px; white-space: nowrap; }
+.wg-strip canvas.wg-stripcv { display: block; width: 100%; }
+
+.wg-fix { margin: 2px 9px 8px; border: var(--hair) dashed var(--g15); padding: 6px 8px 7px; }
+.wg-fix .a { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font: 500 12.5px/1.2 var(--sans); color: var(--paper); }
+.wg-fix .a .p { font: 400 12px var(--mono); }
+.wg-fix .b { font: 400 8.5px/1.4 var(--mono); color: var(--ink-3); margin-top: 4px; }
+.wg-fix .btn { display: block; margin: 7px 0 0 auto; padding: 5px 9px; font-size: 9px; }
+.wg-fix .btn:hover { border-color: var(--paper); }
+.wg-fixc { display: flex; justify-content: space-between; gap: 6px; margin: 0 6px 6px; padding: 4px 6px; border: var(--hair) dashed var(--g15); font: 400 9.5px/1.2 var(--mono); color: var(--ink-2); }
+
+/* the corner: 240 px */
+.wg.compact .wg-collar { padding: 4px 6px; }
+.wg.compact .wg-body { gap: 7px; padding: 6px 6px 0; }
+.wg.compact .big { font-size: 40px; }
+.wg.compact .big small { font-size: 12px; }
+.wg.compact .runs .v { font-size: 13px; }
+.wg.compact .r2 { margin-top: 6px; }
+.wg.compact .eta { font-size: 13px; }
+.wg.compact .r3 { margin-top: 6px; font-size: 9.5px; }
+.wg.compact .wg-strip { padding: 6px 6px 4px; }
+
+@media (max-width: 340px) {
+  .wg:not(.compact) { padding: 0 12px; min-width: 0; }
+  .wg .big { font-size: 48px; }
+}
