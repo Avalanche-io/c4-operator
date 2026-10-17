@@ -247,7 +247,7 @@ export class Player {
       }
     } else {
       g.fillStyle = '#7f7f7f';
-      g.font = '13px Archivo';
+      g.font = "13px 'IBM Plex Sans Condensed'";
       g.textAlign = 'center';
       g.fillText('No frames rendered yet', W / 2, H / 2);
     }

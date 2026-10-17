@@ -13,11 +13,12 @@ import pools from './views/pools.js';
 import map from './views/map.js';
 import wall from './views/wall.js';
 import widget from './views/widget.js';
+import mine from './views/mine.js';
 import tiers from './views/tiers.js';
 import graph from './views/graph.js';
 import cost from './views/cost.js';
 
-const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget };
+const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine };
 const NAV = [
   ['queue', 'Queue'],
   ['pools', 'Pools'],
@@ -123,7 +124,9 @@ function render() {
   document.documentElement.dataset.scale = route.name === 'wall' ? 'wall' : route.name === 'widget' ? 'widget' : 'desk';
   document.getElementById('top').hidden = bare;
   document.getElementById('slate').hidden = bare;
-  const view = VIEWS[route.name];
+  // an artist's queue is their own shots
+  const mineView = route.name === 'queue' && state.snap && state.snap.viewer && !state.snap.viewer.allProjects;
+  const view = mineView ? VIEWS.mine : VIEWS[route.name];
   if (lastView && lastView !== view && lastView.leave) lastView.leave();
   lastView = view;
   morphInto(document.getElementById('top'), topBar());
@@ -137,7 +140,7 @@ function render() {
     console.error(e);
     el = h('div', { class: 'err' }, `This view failed to draw: ${e.message}`);
   }
-  const wrap = h('main', { id: 'main', tabindex: '-1', 'data-view': route.name }, el);
+  const wrap = h('main', { id: 'main', tabindex: '-1', 'data-view': mineView ? 'mine' : route.name }, el);
   morph(main, wrap);
   hydrate(main);
   if (view.after) view.after(ctx, main);

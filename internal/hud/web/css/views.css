@@ -123,3 +123,4 @@
   .funnel .frow { grid-template-columns: 140px minmax(0, 1fr) 70px; }
 }
 .vgraph .vsec .vt td:nth-child(n+2) { width: 1%; white-space: nowrap; padding-left: 28px; }
+.settled { color: var(--done-settled); }

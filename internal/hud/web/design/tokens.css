@@ -63,7 +63,7 @@
   --paper: var(--g19);
 
   /* Type */
-  --sans: "IBM Plex Sans Condensed", "Archivo", system-ui, sans-serif;
+  --sans: "IBM Plex Sans Condensed", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;
   --t-micro: 8px;   /* IDs as texture */
   --t-tiny: 9.5px;  /* collar labels, axis */

@@ -17,7 +17,8 @@ export function tok(fresh = false) {
     field: v('--field'), well: v('--well'), plate: v('--plate'), plate2: v('--plate-2'),
     rule0: v('--rule-0'), rule1: v('--rule-1'), rule2: v('--rule-2'), neat: v('--neat'),
     ink: v('--ink'), ink2: v('--ink-2'), ink3: v('--ink-3'), ink4: v('--ink-4'), pencil: v('--pencil'), paper: v('--paper'),
-    sans: v('--sans') || 'IBM Plex Sans Condensed', mono: v('--mono') || 'IBM Plex Mono', scale,
+    // single quotes, so the family lists drop into SVG attributes and canvas fonts alike
+    sans: (v('--sans') || 'IBM Plex Sans Condensed').replace(/"/g, "'"), mono: (v('--mono') || 'IBM Plex Mono').replace(/"/g, "'"), scale,
   };
   return cache;
 }

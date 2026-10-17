@@ -50,7 +50,7 @@ export function pylonSVG(g, o = {}) {
   }
   // failed from the top, then waiting work projected after the deadline (red pencil)
   if (g.fail > 0) s += `<rect x="${colX}" y="${top}" width="${colW}" height="${Math.max(2, ch * g.fail)}" fill="${T.fail}"/>`;
-  if (g.risk > 0) s += `<rect x="${colX}" y="${top + ch * (g.fail || 0)}" width="${colW}" height="${ch * Math.min(g.risk, 1 - g.done - g.run)}" fill="url(#${id}-rk)"/>`;
+  if (g.risk > 0) s += `<rect x="${colX}" y="${top + ch * (g.fail || 0)}" width="${colW}" height="${Math.max(0, ch * Math.min(g.risk, 1 - g.done - g.run - (g.fail || 0)))}" fill="url(#${id}-rk)"/>`;
   // done, then the work in flight: blue body, green rising inside, blue edge
   const r0 = g.done, r1 = Math.min(1, g.done + g.run);
   s += `<rect x="${colX}" y="${y(r0)}" width="${colW}" height="${ch * r0}" fill="${T.done}"/>`;

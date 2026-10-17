@@ -53,12 +53,12 @@ function holdMark() {
 }
 
 function phase(j) {
-  if (j.phase === 'Held') return h('span', { class: 'ph held' }, holdMark(), 'held');
-  if (j.phase === 'Failed') return h('span', { class: 'ph t-fail' }, 'failed');
-  if (j.phase === 'Running' && j.units.retrying) return h('span', { class: 'ph' }, h('span', { class: 't-run' }, 'running'), h('span', { class: 't-temp' }, ` · ${j.units.retrying} retrying`));
-  if (j.phase === 'Running') return h('span', { class: 'ph t-run' }, 'running');
-  if (j.phase === 'Succeeded') return h('span', { class: 'ph t-done' }, 'done');
-  return h('span', { class: 'ph' }, j.phase.toLowerCase());
+  if (j.phase === 'Held') return h('span', { class: 'q-ph held' }, holdMark(), 'held');
+  if (j.phase === 'Failed') return h('span', { class: 'q-ph t-fail' }, 'failed');
+  if (j.phase === 'Running' && j.units.retrying) return h('span', { class: 'q-ph' }, h('span', { class: 't-run' }, 'running'), h('span', { class: 't-temp' }, ` · ${j.units.retrying} retrying`));
+  if (j.phase === 'Running') return h('span', { class: 'q-ph t-run' }, 'running');
+  if (j.phase === 'Succeeded') return h('span', { class: 'q-ph t-done' }, 'done');
+  return h('span', { class: 'q-ph' }, j.phase.toLowerCase());
 }
 
 // ------------------------------------------------------------ rows
@@ -144,7 +144,7 @@ function shotsBand(ctx, shots, cur) {
       const g = s.glance;
       const sl = s.open ? g.slack : NaN;
       const dlv = s.deliveries.filter((d) => d.phase !== 'Succeeded');
-      return h('a', { class: `shot${s.late ? ' late' : ''}${s.open ? '' : ' fin'}${cur === s.key ? ' sel' : ''}`, href: qhref(ctx, { ...ctx.route.q, shot: cur === s.key ? '' : s.key }), 'data-key': 'sh:' + s.key, role: 'listitem', 'aria-current': cur === s.key ? 'true' : false },
+      return h('a', { class: `q-shot${s.late ? ' late' : ''}${s.open ? '' : ' fin'}${cur === s.key ? ' sel' : ''}`, href: qhref(ctx, { ...ctx.route.q, shot: cur === s.key ? '' : s.key }), 'data-key': 'sh:' + s.key, role: 'listitem', 'aria-current': cur === s.key ? 'true' : false },
         own('pylon', 'qshot:' + s.key, { glance: g, w: 24, h: 40, mode: 'mini' }, { class: 'spy' }),
         h('span', { class: 'sname' }, s.key),
         h('span', { class: 'sslack' + (s.late ? ' t-fail' : '') }, s.open ? f.signed(sl) : 'done'),

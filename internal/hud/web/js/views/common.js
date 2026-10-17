@@ -93,7 +93,7 @@ export function classChip(j, cls) {
 }
 
 export function phaseText(j) {
-  const cls = { Failed: 't-red', Held: 't-magenta', Yielded: 'dim', Succeeded: 't-green' }[j.phase] || '';
+  const cls = { Failed: 't-red', Held: 't-magenta', Yielded: 'dim', Succeeded: 'settled' }[j.phase] || '';
   return h('span', { class: cls }, j.phase);
 }
 
