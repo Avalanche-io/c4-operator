@@ -8,13 +8,13 @@ The simulator calls the production policy code (`internal/work/sched.Decide`) an
 
 Mean ± standard deviation across seeds. A render deadline is missed when the job finishes after it; late hours sum the lateness of missed jobs. CI time to green runs from submission to the last shard passing. Utilization is busy slot time over owned capacity for the week (Monday 00:00 to Monday 00:00), including work later lost. Useful GPU hours are GPU time whose work was kept (finished units, and ML progress saved in a checkpoint); lost GPU hours are GPU time thrown away by failures and preemptions, plus ML restore time.
 
-| policy          | render deadlines missed | missed %   | late hours    | CI p50 min | CI p95 min | CI over 15 min % | util cpu % | util gpu % | util ci %  | useful GPU h | lost GPU h  | burst $   |
-| --------------- | ----------------------- | ---------- | ------------- | ---------- | ---------- | ---------------- | ---------- | ---------- | ---------- | ------------ | ----------- | --------- |
-| manual          | 43.0 ± 20.5             | 13.9 ± 6.1 | 107.8 ± 71.2  | 8.9 ± 0.1  | 17.3 ± 1.3 | 9.0 ± 1.3        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 20.1 ± 5.3  | 0 ± 0     |
-| fifo            | 46.6 ± 25.0             | 15.0 ± 7.7 | 140.3 ± 113.3 | 8.9 ± 0.1  | 17.1 ± 1.2 | 8.9 ± 1.3        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9  | 0 ± 0     |
-| edf             | 24.4 ± 8.8              | 7.9 ± 2.5  | 60.1 ± 37.2   | 8.9 ± 0.1  | 17.2 ± 1.3 | 9.1 ± 1.4        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9  | 0 ± 0     |
-| objective       | 24.4 ± 10.6             | 7.9 ± 3.2  | 61.0 ± 37.1   | 8.7 ± 0.1  | 14.4 ± 0.5 | 4.2 ± 0.8        | 47.2 ± 6.1 | 36.5 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 28.0 ± 9.7  | 0 ± 0     |
-| objective+burst | 23.2 ± 9.9              | 7.5 ± 2.9  | 51.7 ± 32.5   | 8.7 ± 0.1  | 14.4 ± 0.5 | 4.1 ± 0.8        | 45.4 ± 6.0 | 34.4 ± 3.4 | 17.3 ± 0.3 | 1935 ± 332   | 28.9 ± 10.2 | 578 ± 262 |
+| policy          | render deadlines missed | missed %   | late hours    | CI p50 min | CI p95 min | CI over 15 min % | util cpu % | util gpu % | util ci %  | useful GPU h | lost GPU h | burst $   |
+| --------------- | ----------------------- | ---------- | ------------- | ---------- | ---------- | ---------------- | ---------- | ---------- | ---------- | ------------ | ---------- | --------- |
+| manual          | 43.0 ± 20.5             | 13.9 ± 6.1 | 107.8 ± 71.2  | 8.9 ± 0.1  | 17.3 ± 1.3 | 9.0 ± 1.3        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 20.1 ± 5.3 | 0 ± 0     |
+| fifo            | 46.6 ± 25.0             | 15.0 ± 7.7 | 140.3 ± 113.3 | 8.9 ± 0.1  | 17.1 ± 1.2 | 8.9 ± 1.3        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9 | 0 ± 0     |
+| edf             | 24.4 ± 8.8              | 7.9 ± 2.5  | 60.1 ± 37.2   | 8.9 ± 0.1  | 17.2 ± 1.3 | 9.1 ± 1.4        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9 | 0 ± 0     |
+| objective       | 24.4 ± 10.6             | 7.9 ± 3.2  | 61.0 ± 37.1   | 8.7 ± 0.1  | 14.4 ± 0.5 | 4.2 ± 0.8        | 47.2 ± 6.1 | 36.5 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 28.0 ± 9.7 | 0 ± 0     |
+| objective+burst | 22.0 ± 10.3             | 7.1 ± 3.1  | 51.6 ± 33.0   | 8.7 ± 0.1  | 14.4 ± 0.5 | 4.2 ± 0.8        | 45.4 ± 6.0 | 34.5 ± 3.1 | 17.3 ± 0.3 | 1935 ± 332   | 28.4 ± 9.6 | 543 ± 180 |
 
 Render jobs with deadlines per week: 305 on average. The spread across seeds is large because each seed is a different week (job counts, shot lengths, where heavy shots land); compare policies within a seed, below.
 
@@ -29,7 +29,7 @@ Difference from EDF on the same week (policy minus EDF): mean ± standard deviat
 | manual                           | 18.6 ± 13.1 | 47.6 ± 47.4  | 0.1 ± 0.1    | 0 / 0 / 5                                  |
 | fifo                             | 22.2 ± 18.4 | 80.1 ± 86.1  | -0.1 ± 0.1   | 0 / 0 / 5                                  |
 | objective                        | 0.0 ± 6.0   | 0.8 ± 7.0    | -2.8 ± 1.3   | 1 / 0 / 4                                  |
-| objective+burst                  | -1.2 ± 5.5  | -8.4 ± 14.7  | -2.8 ± 1.2   | 4 / 0 / 1                                  |
+| objective+burst                  | -2.4 ± 7.0  | -8.5 ± 13.6  | -2.8 ± 1.2   | 4 / 0 / 1                                  |
 | objective, no information tier   | -0.4 ± 5.7  | 1.1 ± 8.0    | -1.6 ± 1.0   | 2 / 0 / 3                                  |
 | objective, fair-share surplus    | 0.4 ± 4.9   | 2.7 ± 12.4   | -2.7 ± 1.2   | 3 / 0 / 2                                  |
 | objective, DESIGN 9.9 as written | 14.0 ± 14.0 | 17.3 ± 27.0  | 0.1 ± 1.7    | 1 / 0 / 4                                  |
@@ -44,7 +44,7 @@ Missed deadlines and late hours per kind. ML runs carry a deadline of submission
 | fifo                             | 12.6 ± 7.8 of 106  | 53.1 ± 34.7    | 33.8 ± 20.0 of 186 | 85.6 ± 79.8    | 0.2 ± 0.4 of 13 | 1.6 ± 3.6       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | edf                              | 8.6 ± 5.1 of 106   | 34.0 ± 25.4    | 14.8 ± 4.0 of 186  | 19.6 ± 8.9     | 1.0 ± 1.0 of 13 | 6.6 ± 6.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective                        | 8.2 ± 3.6 of 106   | 34.5 ± 25.5    | 15.0 ± 6.1 of 186  | 21.5 ± 11.8    | 1.2 ± 1.3 of 13 | 5.0 ± 5.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective+burst                  | 7.6 ± 3.6 of 106   | 27.7 ± 22.3    | 14.8 ± 5.9 of 186  | 20.0 ± 10.4    | 0.8 ± 0.8 of 13 | 3.9 ± 4.5       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective+burst                  | 6.4 ± 3.4 of 106   | 27.0 ± 21.3    | 14.6 ± 6.1 of 186  | 20.2 ± 10.9    | 1.0 ± 1.0 of 13 | 4.4 ± 4.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective, no information tier   | 8.4 ± 4.3 of 106   | 35.0 ± 25.0    | 14.4 ± 5.3 of 186  | 20.8 ± 11.2    | 1.2 ± 1.3 of 13 | 5.5 ± 5.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective, fair-share surplus    | 8.6 ± 3.9 of 106   | 36.0 ± 27.3    | 15.2 ± 5.4 of 186  | 22.3 ± 12.9    | 1.0 ± 1.0 of 13 | 4.5 ± 4.6       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective, DESIGN 9.9 as written | 18.4 ± 13.5 of 106 | 49.4 ± 43.4    | 19.0 ± 8.7 of 186  | 24.1 ± 14.2    | 1.0 ± 1.0 of 13 | 4.0 ± 4.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
@@ -59,7 +59,7 @@ Late hours of each show's render jobs (fairness across projects).
 | fifo                             | 62.3 ± 48.3  | 47.2 ± 35.7  | 30.9 ± 34.2  |
 | edf                              | 23.0 ± 17.8  | 26.4 ± 18.5  | 10.7 ± 10.5  |
 | objective                        | 24.5 ± 19.6  | 22.4 ± 18.5  | 14.1 ± 13.9  |
-| objective+burst                  | 18.8 ± 17.7  | 21.6 ± 18.0  | 11.3 ± 10.6  |
+| objective+burst                  | 18.9 ± 18.0  | 21.8 ± 18.0  | 10.9 ± 9.6   |
 | objective, no information tier   | 24.9 ± 19.2  | 22.5 ± 18.7  | 13.9 ± 13.9  |
 | objective, fair-share surplus    | 23.5 ± 18.5  | 24.3 ± 22.3  | 15.0 ± 14.6  |
 | objective, DESIGN 9.9 as written | 30.8 ± 21.5  | 27.6 ± 27.2  | 19.0 ± 19.9  |
@@ -73,10 +73,10 @@ Preemptions counts units stopped (yields and kills). Lost CPU hours include task
 | manual                           | 7 ± 1       | wrangler-suspend 7                            | 198 ± 37   | 378 ± 95        | 2.3 ± 0.9     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
 | fifo                             | 0 ± 0       | none                                          | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
 | edf                              | 0 ± 0       | none                                          | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
-| objective                        | 1176 ± 441  | reclaim-nominal 304, restore-feasibility 871  | 223 ± 34   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 7.4 ± 4.0               |
-| objective+burst                  | 1225 ± 406  | reclaim-nominal 323, restore-feasibility 902  | 229 ± 29   | 378 ± 95        | 0.4 ± 0.4     | 875 ± 441        | 578 ± 262 | 5.6 ± 4.6               |
-| objective, no information tier   | 1279 ± 463  | reclaim-nominal 320, restore-feasibility 960  | 225 ± 33   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 7.8 ± 4.8               |
-| objective, fair-share surplus    | 1122 ± 391  | reclaim-nominal 262, restore-feasibility 860  | 222 ± 34   | 378 ± 95        | 0.4 ± 0.5     | 0 ± 0            | 0 ± 0     | 8.4 ± 3.6               |
+| objective                        | 1176 ± 441  | reclaim-nominal 304, restore-feasibility 871  | 223 ± 34   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 5.4 ± 2.1               |
+| objective+burst                  | 1229 ± 437  | reclaim-nominal 319, restore-feasibility 910  | 223 ± 29   | 378 ± 95        | 0.4 ± 0.4     | 861 ± 240        | 543 ± 180 | 2.2 ± 1.5               |
+| objective, no information tier   | 1279 ± 463  | reclaim-nominal 320, restore-feasibility 960  | 225 ± 33   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 5.4 ± 2.1               |
+| objective, fair-share surplus    | 1122 ± 391  | reclaim-nominal 262, restore-feasibility 860  | 222 ± 34   | 378 ± 95        | 0.4 ± 0.5     | 0 ± 0            | 0 ± 0     | 7.0 ± 2.3               |
 | objective, DESIGN 9.9 as written | 1256 ± 588  | reclaim-nominal 227, restore-feasibility 1029 | 232 ± 50   | 378 ± 95        | 0.9 ± 1.1     | 0 ± 0            | 0 ± 0     | 56.4 ± 32.9             |
 
 ### Ablations
@@ -94,13 +94,13 @@ The objective policy with parts of DESIGN.md section 9.9 restored as written (se
 
 The main farm's GPU pool runs at about a third of capacity, so ML runs and GPU renders rarely contend there. This scenario replays the same weeks (same seeds, same jobs) with 16 owned GPUs instead of 32 and every GPU quota halved. Everything else is unchanged.
 
-| policy          | render missed | render late h | GPU render missed | GPU render late h | ML missed | util gpu %  | ML useful GPU h | ML lost GPU h | lost GPU h  | preemptions | burst $    |
-| --------------- | ------------- | ------------- | ----------------- | ----------------- | --------- | ----------- | --------------- | ------------- | ----------- | ----------- | ---------- |
-| manual          | 68.8 ± 23.7   | 476.3 ± 596.1 | 28.6 ± 23.7       | 375.5 ± 621.8     | 5.4 ± 7.9 | 72.7 ± 12.3 | 378 ± 95        | 3.8 ± 2.7     | 21.8 ± 3.7  | 10 ± 6      | 0 ± 0      |
-| fifo            | 82.0 ± 30.0   | 610.0 ± 645.9 | 39.8 ± 15.9       | 480.0 ± 694.0     | 2.2 ± 4.9 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9  | 0 ± 0       | 0 ± 0      |
-| edf             | 49.2 ± 18.8   | 381.6 ± 574.9 | 27.6 ± 19.9       | 328.5 ± 591.0     | 4.4 ± 8.8 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9  | 0 ± 0       | 0 ± 0      |
-| objective       | 47.4 ± 23.8   | 532.7 ± 563.1 | 24.6 ± 16.7       | 476.3 ± 540.0     | 0.4 ± 0.9 | 73.2 ± 11.9 | 378 ± 95        | 4.3 ± 1.2     | 47.2 ± 11.3 | 1839 ± 698  | 0 ± 0      |
-| objective+burst | 24.2 ± 9.1    | 51.8 ± 30.5   | 2.6 ± 2.3         | 2.3 ± 3.7         | 0.0 ± 0.0 | 50.2 ± 4.2  | 378 ± 95        | 3.7 ± 1.1     | 45.1 ± 13.6 | 1588 ± 510  | 1110 ± 331 |
+| policy          | render missed | render late h | GPU render missed | GPU render late h | ML missed | util gpu %  | ML useful GPU h | ML lost GPU h | lost GPU h  | preemptions | burst $   |
+| --------------- | ------------- | ------------- | ----------------- | ----------------- | --------- | ----------- | --------------- | ------------- | ----------- | ----------- | --------- |
+| manual          | 68.8 ± 23.7   | 476.3 ± 596.1 | 28.6 ± 23.7       | 375.5 ± 621.8     | 5.4 ± 7.9 | 72.7 ± 12.3 | 378 ± 95        | 3.8 ± 2.7     | 21.8 ± 3.7  | 10 ± 6      | 0 ± 0     |
+| fifo            | 82.0 ± 30.0   | 610.0 ± 645.9 | 39.8 ± 15.9       | 480.0 ± 694.0     | 2.2 ± 4.9 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9  | 0 ± 0       | 0 ± 0     |
+| edf             | 49.2 ± 18.8   | 381.6 ± 574.9 | 27.6 ± 19.9       | 328.5 ± 591.0     | 4.4 ± 8.8 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9  | 0 ± 0       | 0 ± 0     |
+| objective       | 47.4 ± 23.8   | 532.7 ± 563.1 | 24.6 ± 16.7       | 476.3 ± 540.0     | 0.4 ± 0.9 | 73.2 ± 11.9 | 378 ± 95        | 4.3 ± 1.2     | 47.2 ± 11.3 | 1839 ± 698  | 0 ± 0     |
+| objective+burst | 23.0 ± 9.1    | 52.6 ± 30.2   | 1.4 ± 1.7         | 2.6 ± 4.8         | 0.0 ± 0.0 | 50.3 ± 5.8  | 378 ± 95        | 3.7 ± 1.0     | 46.6 ± 10.2 | 1574 ± 382  | 985 ± 324 |
 
 ## Binary against sequential order
 
@@ -236,13 +236,13 @@ GPUShare: 0.25
 DeliveryGPUShare: 0.2
 ExpandShare: 0.3
 DeliveryExpandShare: 0.4
-ShadowCost: 0.2
-ReflCost: 0.3
+EnvCost: 0.2
+VolumesCost: 0.3
 PassSigma: 0.1
-ReflProbLo: 0.3
-ReflProbHi: 0.9
-RibEvalSec: 45
-RibEvalSigma: 0.3
+VolumesProbLo: 0.3
+VolumesProbHi: 0.9
+UsdExportSec: 45
+UsdExportSigma: 0.3
 RenderFailProb: 0.02
 CIRatePerHour: 30
 CIBuildMin: 3
@@ -270,7 +270,7 @@ MLDeadlineHours: 36
 MLDeclaredSigma: 0.15
 ```
 
-Render jobs whose frames are generators evaluate a scene description (45 s median, on the job's pool) and expand into a shadow pass (0.2x the frame's cost), a reflection pass with a per-job probability (0.3x), and a beauty pass that depends on both. CI pipelines are a build that discovers 4 + Poisson(10) shards from a fixed monorepo of 400 test targets, each with its own duration and failure rate; shards run in order of failure rate. Failures happen per attempt (render and CI 2%, the fourth attempt always succeeds; ML runs at 0.5% per hour of progress) and are drawn from the seed and the unit, so every policy sees the same failures. ML runs checkpoint at a per-run interval; a yield waits for the next checkpoint and loses only restore time, a kill loses the work since the last checkpoint.
+Render jobs whose frames are generators export the frame's USD stage (a Solaris USD export, 45 s median, on the job's pool) and expand into a deep environment layer (0.2x the frame's cost), a deep volumes layer with a per-job probability (0.3x), and a beauty layer that holds out against both, so it depends on both. CI pipelines are a build that discovers 4 + Poisson(10) shards from a fixed monorepo of 400 test targets, each with its own duration and failure rate; shards run in order of failure rate. Failures happen per attempt (render and CI 2%, the fourth attempt always succeeds; ML runs at 0.5% per hour of progress) and are drawn from the seed and the unit, so every policy sees the same failures. ML runs checkpoint at a per-run interval; a yield waits for the next checkpoint and loses only restore time, a kill loses the work since the last checkpoint.
 
 The estimator's history priors are built from 2,400 render jobs and 3,000 CI pipelines drawn from the same generator with a seed no experiment uses, so they describe the population a job comes from, not the job. An ML run's prior is its declared length (steps times historical step time), off by a lognormal factor with sigma 0.15.
 

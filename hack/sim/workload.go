@@ -30,22 +30,22 @@ type params struct {
 	DeliveryCost      float64
 	DeliveryFrames    float64 // median frames
 
-	FramesMedian, FramesSigma  float64
-	FramesMin, FramesMax       int
-	CPUFrameMin, GPUFrameMin   float64 // median minutes per frame, dailies quality
-	JobSigma, FrameSigma       float64 // lognormal sigma across jobs and per frame
-	TrendAmp                   float64 // amplitude of the smooth cost drift along a shot
-	HeavyProb                  float64 // probability a shot has a heavy region
-	HeavyLenLo, HeavyLenHi     float64 // region length as a fraction of the shot
-	HeavyMults                 []float64
-	GPUShare, DeliveryGPUShare float64
-	ExpandShare                float64 // jobs whose frames are generators expanding into passes
-	DeliveryExpandShare        float64
-	ShadowCost, ReflCost       float64 // pass cost relative to beauty
-	PassSigma                  float64
-	ReflProbLo, ReflProbHi     float64 // per job, probability a frame emits a reflection pass
-	RibEvalSec, RibEvalSigma   float64
-	RenderFailProb             float64 // per attempt; the 4th attempt always succeeds
+	FramesMedian, FramesSigma    float64
+	FramesMin, FramesMax         int
+	CPUFrameMin, GPUFrameMin     float64 // median minutes per frame, dailies quality
+	JobSigma, FrameSigma         float64 // lognormal sigma across jobs and per frame
+	TrendAmp                     float64 // amplitude of the smooth cost drift along a shot
+	HeavyProb                    float64 // probability a shot has a heavy region
+	HeavyLenLo, HeavyLenHi       float64 // region length as a fraction of the shot
+	HeavyMults                   []float64
+	GPUShare, DeliveryGPUShare   float64
+	ExpandShare                  float64 // jobs whose frames are generators expanding into passes
+	DeliveryExpandShare          float64
+	EnvCost, VolumesCost         float64 // deep layer cost relative to beauty
+	PassSigma                    float64
+	VolumesProbLo, VolumesProbHi float64 // per job, probability a frame has a volumes layer
+	UsdExportSec, UsdExportSigma float64 // per-frame USD export (Solaris) before the render
+	RenderFailProb               float64 // per attempt; the 4th attempt always succeeds
 
 	// CI: pipelines on weekdays 08:00 to 20:00 (rate shaped by hour), a
 	// build that discovers test shards, p95 SLO 15 minutes.
@@ -93,9 +93,9 @@ func defaultParams() params {
 		GPUShare:         0.25,
 		DeliveryGPUShare: 0.2,
 		ExpandShare:      0.3, DeliveryExpandShare: 0.4,
-		ShadowCost: 0.2, ReflCost: 0.3, PassSigma: 0.1,
-		ReflProbLo: 0.3, ReflProbHi: 0.9,
-		RibEvalSec: 45, RibEvalSigma: 0.3,
+		EnvCost: 0.2, VolumesCost: 0.3, PassSigma: 0.1,
+		VolumesProbLo: 0.3, VolumesProbHi: 0.9,
+		UsdExportSec: 45, UsdExportSigma: 0.3,
 		RenderFailProb: 0.02,
 
 		CIRatePerHour: 30, CIBuildMin: 3, CIBuildSigma: 0.3,
@@ -323,7 +323,7 @@ func renderJob(r *rand.Rand, p params, kind, show string, gpu bool, at, due floa
 		return c * math.Exp(p.FrameSigma*r.NormFloat64())
 	}
 	js.expand = r.Float64() < expandShare
-	reflProb := p.ReflProbLo + r.Float64()*(p.ReflProbHi-p.ReflProbLo)
+	volProb := p.VolumesProbLo + r.Float64()*(p.VolumesProbHi-p.VolumesProbLo)
 	for pos := 0; pos < frames; pos++ {
 		c := frameCost(pos)
 		if !js.expand {
@@ -331,16 +331,16 @@ func renderJob(r *rand.Rand, p params, kind, show string, gpu bool, at, due floa
 			continue
 		}
 		g := len(js.units)
-		js.units = append(js.units, unitSpec{key: "rib", pos: pos, slots: 1, genKey: "rib-expand",
-			dur: lognorm(r, p.RibEvalSec, p.RibEvalSigma), parent: -1})
+		js.units = append(js.units, unitSpec{key: "usd", pos: pos, slots: 1, genKey: "usd-export",
+			dur: lognorm(r, p.UsdExportSec, p.UsdExportSigma), parent: -1})
 		sh := len(js.units)
-		js.units = append(js.units, unitSpec{key: "shadow", pos: pos, sub: 0, slots: 1, hidden: true, parent: g,
-			dur: c * p.ShadowCost * math.Exp(p.PassSigma*r.NormFloat64())})
+		js.units = append(js.units, unitSpec{key: "env", pos: pos, sub: 0, slots: 1, hidden: true, parent: g,
+			dur: c * p.EnvCost * math.Exp(p.PassSigma*r.NormFloat64())})
 		deps := []int{sh}
-		if r.Float64() < reflProb {
+		if r.Float64() < volProb {
 			rf := len(js.units)
-			js.units = append(js.units, unitSpec{key: "reflection", pos: pos, sub: 1, slots: 1, hidden: true, parent: g,
-				dur: c * p.ReflCost * math.Exp(p.PassSigma*r.NormFloat64())})
+			js.units = append(js.units, unitSpec{key: "volumes", pos: pos, sub: 1, slots: 1, hidden: true, parent: g,
+				dur: c * p.VolumesCost * math.Exp(p.PassSigma*r.NormFloat64())})
 			deps = append(deps, rf)
 		}
 		bt := len(js.units)

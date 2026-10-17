@@ -45,11 +45,11 @@
 <circle cx="270.6" cy="167.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>89.4</title></circle>
 <text x="698.0" y="171.0" font-size="12" fill="#0b0b0b">61</text>
 <text x="140" y="205.0" font-size="12" fill="#0b0b0b" text-anchor="end">objective+burst</text>
-<rect x="150" y="192.0" width="69.8" height="18" rx="4" fill="#2a78d6"><title>objective+burst: 51.7 late hours (mean)</title></rect>
-<circle cx="203.1" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>39.4</title></circle>
-<circle cx="280.1" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>96.4</title></circle>
-<circle cx="192.6" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>31.5</title></circle>
-<circle cx="173.5" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>17.4</title></circle>
-<circle cx="249.8" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>73.9</title></circle>
+<rect x="150" y="192.0" width="69.7" height="18" rx="4" fill="#2a78d6"><title>objective+burst: 51.6 late hours (mean)</title></rect>
+<circle cx="199.2" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>36.4</title></circle>
+<circle cx="278.3" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>95.0</title></circle>
+<circle cx="193.0" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>31.9</title></circle>
+<circle cx="173.2" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>17.2</title></circle>
+<circle cx="254.6" cy="201.0" r="4" fill="#52514e" stroke="#fcfcfb" stroke-width="2"><title>77.5</title></circle>
 <text x="698.0" y="205.0" font-size="12" fill="#0b0b0b">52</text>
 </svg>
