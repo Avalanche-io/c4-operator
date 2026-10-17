@@ -1,0 +1,104 @@
+/* GRATICULE design tokens. One source for the HUD (internal/hud/web) and
+   the component previews (design/previews). See design/README.md for the
+   thesis and the motifs these tokens serve. */
+
+@font-face { font-family: "IBM Plex Sans Condensed"; src: url("../fonts/IBMPlexSansCondensed-Light.woff2") format("woff2"); font-weight: 300; font-display: block; }
+@font-face { font-family: "IBM Plex Sans Condensed"; src: url("../fonts/IBMPlexSansCondensed-Regular.woff2") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "IBM Plex Sans Condensed"; src: url("../fonts/IBMPlexSansCondensed-Medium.woff2") format("woff2"); font-weight: 500; font-display: block; }
+@font-face { font-family: "IBM Plex Sans Condensed"; src: url("../fonts/IBMPlexSansCondensed-SemiBold.woff2") format("woff2"); font-weight: 600; font-display: block; }
+@font-face { font-family: "IBM Plex Mono"; src: url("../fonts/IBMPlexMono-Light.woff2") format("woff2"); font-weight: 300; font-display: block; }
+@font-face { font-family: "IBM Plex Mono"; src: url("../fonts/IBMPlexMono-Regular.woff2") format("woff2"); font-weight: 400; font-display: block; }
+@font-face { font-family: "IBM Plex Mono"; src: url("../fonts/IBMPlexMono-Medium.woff2") format("woff2"); font-weight: 500; font-display: block; }
+
+:root {
+  /* The grey ramp: 20 steps, even in CIELAB lightness, packed twice as
+     densely below L*20 where layering lives. A faint cool tint matches the
+     ink. Value carries depth and hierarchy; color is reserved for state. */
+  --g00: #020505; /* void: the room beyond the screen */
+  --g01: #06090a; /* deep: wall background, off-sheet margins */
+  --g02: #0b0d0e; /* field: the sheet */
+  --g03: #0f1111; /* well: recessed data wells */
+  --g04: #121415; /* plate: panels, the collar */
+  --g05: #161718; /* plate raised: hover, a container block */
+  --g06: #191b1b; /* rule 0: faintest graticule */
+  --g07: #1c1e1e; /* rule 1: minor graticule */
+  --g08: #202222; /* rule 2: major graticule, gutters */
+  --g09: #252727; /* wait: waiting units, empty gauges */
+  --g10: #2b2d2d; /* rule 3: neatlines, frames */
+  --g11: #323434; /* ghost: expected children, pencil marks */
+  --g12: #3b3d3d; /* not yet evaluated */
+  --g13: #464848; /* faint: IDs as texture, tertiary labels */
+  --g14: #555758; /* axis labels */
+  --g15: #696b6b; /* secondary labels */
+  --g16: #7f8282; /* quiet values, pencil numbers */
+  --g17: #999c9c; /* values */
+  --g18: #b7b9b9; /* ink: primary labels and traces */
+  --g19: #dbdddd; /* paper: the brightest mark, selection */
+
+  /* State: four colors and nothing else. */
+  --done: #3dc86a;        /* completed progress, the fill */
+  --done-settled: #2a7a47;/* a finished upstream job, one step down */
+  --run: #4b93ff;         /* running now: the leading edge, the running share */
+  --run-body: #1b3460;    /* the body of a running unit */
+  --temp: #ff9433;        /* temporary trouble: retrying, backoff, suspect node */
+  --temp-body: #4a2c12;
+  --fail: #ee4136;        /* failure and missed deadline; dashed = projected late */
+
+  /* Roles */
+  --void: var(--g00);
+  --deep: var(--g01);
+  --field: var(--g02);
+  --well: var(--g03);
+  --plate: var(--g04);
+  --plate-2: var(--g05);
+  --rule-0: var(--g06);
+  --rule-1: var(--g07);
+  --rule-2: var(--g08);
+  --neat: var(--g10);
+  --ink: var(--g18);
+  --ink-2: var(--g17);
+  --ink-3: var(--g15);
+  --ink-4: var(--g14);
+  --pencil: var(--g16);
+  --paper: var(--g19);
+
+  /* Type */
+  --sans: "IBM Plex Sans Condensed", "Archivo", system-ui, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, monospace;
+  --t-micro: 8px;   /* IDs as texture */
+  --t-tiny: 9.5px;  /* collar labels, axis */
+  --t-small: 11px;
+  --t-body: 13px;
+  --t-mid: 16px;
+  --t-big: 28px;
+  --t-huge: 56px;   /* the glance numbers */
+  --label-track: .14em;
+
+  /* Lines: hairlines at desk scale, doubled on the wall */
+  --hair: 1px;
+  --rule: 1px;
+  --neatline: 1px;
+  --emph: 1.5px;
+
+  /* Space: a 4 px step; the collar is the sheet's margin */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px;
+  --collar: 28px;   /* neatline to the screen edge on the desk */
+  --gutter: 12px;   /* between wells */
+
+  /* Motion: fills ease, collapses slide, the sweep waits for the farm */
+  --fill-ms: 600ms;
+  --collapse-ms: 180ms;
+  --ease: cubic-bezier(.2, .7, .2, 1);
+}
+
+/* the wall: thicker lines, bigger type, three fewer dark steps */
+[data-scale="wall"] {
+  --hair: 2px; --rule: 2px; --neatline: 2px; --emph: 3px;
+  --t-tiny: 13px; --t-small: 15px; --t-body: 18px; --t-mid: 24px; --t-big: 44px; --t-huge: 96px;
+  --field: var(--g01); --well: var(--g02); --plate: var(--g03);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root { --fill-ms: 0ms; --collapse-ms: 0ms; }
+}
+[data-motion="off"] { --fill-ms: 0ms; --collapse-ms: 0ms; }

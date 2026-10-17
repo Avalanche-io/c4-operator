@@ -1,156 +1,176 @@
-// The job view: the same for every class. One box per unit, grouped by
-// pass, stage or rank, with slack and deadline risk on the same screen, the
-// class's lens around it, and the selected unit's detail.
+// The job view: a sheet. The job's shot (every job carrying the same shot,
+// and the deliveries they feed) is laid out as one STACK in the order work
+// flows; the collar carries the title block, the PYLON, the unit card, the
+// job's book and its controls; the neighbouring sheets are named at the
+// edges.
 
 import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
-import { JobGrid } from '../grid.js';
+import { own } from '../../design/components/live.js';
+import { glance } from '../../design/components/core.js';
+import { buildSheet } from '../../design/components/stack.js';
+import { bookList } from '../../design/components/ledger.js';
 import { lensFor } from '../lenses/index.js';
-import { lane, classChip, phaseText, orderText, burstButton, failedUnits } from './common.js';
+import { classChip, phaseText, orderText, burstButton, failedUnits } from './common.js';
 
 const st = {
-  key: null, detail: null, err: null, lastNow: null, fetching: false,
-  sel: -1, unit: null, unitFor: null, unitNow: null,
-  unit0: null, unit0Now: null, focus: null, grid: null, lens: null,
+  key: null, details: new Map(), graph: null, book: null, lastNow: null, fetching: false,
+  sel: null, unit: null, unitFor: null, unitNow: null, err: null, lens: null,
+  lineB: new Set(), contours: true, lineA: true, box: 10,
 };
 
 document.addEventListener('hud:changed', () => { st.lastNow = null; st.unitNow = null; });
+document.addEventListener('stack:select', (e) => {
+  const { job, i } = e.detail;
+  if (!st.key) return;
+  st.sel = { job, i };
+  if (job === st.key) history.replaceState(null, '', `#/job/${job}/unit/${i}`);
+  document.dispatchEvent(new CustomEvent('hud:refresh'));
+});
 
-function reset(k) {
-  if (st.grid) st.grid.destroy();
-  Object.assign(st, { key: k, detail: null, err: null, lastNow: null, sel: -1, unit: null, unitFor: null, unitNow: null, unit0: null, unit0Now: null, focus: null, grid: null });
+const keyOf = (j) => `${j.namespace}/${j.name}`;
+
+// sheetJobs: the shot's jobs and the deliveries they feed, in flow order.
+function sheetJobs(ctx, k) {
+  const jobs = ctx.snap.jobs;
+  const me = ctx.job(k);
+  const g = st.graph || { nodes: [], edges: [] };
+  let set;
+  if (me && me.shot) {
+    set = new Set(jobs.filter((j) => j.shot === me.shot).map(keyOf));
+    for (const e of g.edges) if (set.has(e.from)) { const t = jobs.find((j) => keyOf(j) === e.to); if (t && !t.shot) set.add(e.to); }
+  } else {
+    set = new Set([k]);
+    for (const e of g.edges) { if (e.to === k) set.add(e.from); if (e.from === k) set.add(e.to); }
+  }
+  // topological order over the graph's edges inside the set
+  const list = [...set];
+  const indeg = new Map(list.map((x) => [x, 0]));
+  for (const e of g.edges) if (set.has(e.from) && set.has(e.to)) indeg.set(e.to, indeg.get(e.to) + 1);
+  const out = [], q = list.filter((x) => !indeg.get(x));
+  while (q.length) {
+    const x = q.shift();
+    out.push(x);
+    for (const e of g.edges) if (e.from === x && set.has(e.to)) { indeg.set(e.to, indeg.get(e.to) - 1); if (!indeg.get(e.to)) q.push(e.to); }
+  }
+  for (const x of list) if (!out.includes(x)) out.push(x);
+  return out;
 }
 
-function ensure(ctx, k, ns, name, lens) {
+function ensure(ctx, k) {
   const now = ctx.snap.now;
   if (!st.fetching && st.lastNow !== now) {
     st.lastNow = now;
     st.fetching = true;
-    get(`/jobs/${ns}/${name}`)
-      .then((d) => { st.detail = d; st.err = null; })
-      .catch((e) => { st.err = e.message; })
+    const graphP = st.graph && st.graphNow === now ? Promise.resolve(st.graph) : get('/graph').then((g) => { st.graph = g; st.graphNow = now; return g; }, () => st.graph);
+    graphP.then(() => {
+      const keys = sheetJobs(ctx, k);
+      st.sheetKeys = keys;
+      return Promise.all(keys.map((x) => get(`/jobs/${x}`).then((d) => st.details.set(x, d), (e) => { if (x === k) st.err = e.message; })));
+    }).then(() => get(`/book?job=${encodeURIComponent(k)}&limit=40`).then((b) => { st.book = b; }, () => { st.book = null; }))
       .finally(() => { st.fetching = false; if (st.key === k) ctx.refresh(); });
   }
-  if (st.sel >= 0 && (st.unitFor !== st.sel || st.unitNow !== now)) {
-    const want = st.sel;
-    const stale = st.unitFor !== want;
+  const sel = st.sel;
+  if (sel && (st.unitFor !== sel.job + '#' + sel.i || st.unitNow !== now)) {
+    const want = sel.job + '#' + sel.i;
+    if (st.unitFor !== want) st.unit = null;
     st.unitFor = want;
     st.unitNow = now;
-    if (stale) st.unit = null;
-    get(`/jobs/${ns}/${name}/units/${want}`)
-      .then((u) => { if (st.sel === want) { st.unit = u; ctx.refresh(); } })
+    get(`/jobs/${sel.job}/units/${sel.i}`)
+      .then((u) => { if (st.unitFor === want) { st.unit = u; ctx.refresh(); } })
       .catch((e) => { st.unit = { error: e.message }; ctx.refresh(); });
-  }
-  if (lens.needs && lens.needs().unit0 && st.unit0Now !== now) {
-    st.unit0Now = now;
-    get(`/jobs/${ns}/${name}/units/0`).then((u) => { st.unit0 = u; ctx.refresh(); }, () => {});
   }
 }
 
-function cell(label, val, sub, cls = '') {
+function reset(k) {
+  Object.assign(st, { key: k, details: new Map(), book: null, lastNow: null, sel: null, unit: null, unitFor: null, unitNow: null, err: null, sheetKeys: null });
+}
+
+function tcell(label, val, sub, cls = '') {
   return h('div', { class: 'cell' }, h('span', { class: 'lab' }, label), h('span', { class: 'val ' + cls }, val), sub ? h('span', { class: 'sub' }, sub) : null);
+}
+
+function titleBlock(j) {
+  const e = j.estimate, o = j.objective, w = j.work;
+  const done = glance(j).done;
+  const late = Number.isFinite(e.slackSeconds) && e.slackSeconds < 0 && j.phase !== 'Succeeded';
+  const src = o.from ? `from ${f.jobName(o.from)}` : o.type === 'latency' ? `ready + ${f.dur(o.latencyTargetSeconds)}` : o.deadline ? 'set on the job' : 'no objective';
+  return h('div', { class: 'titleblock' },
+    tcell('Deadline', o.deadline ? f.clock(o.deadline) : '–', src),
+    tcell('ETA p50 · p90', j.phase === 'Succeeded' ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' }, `${f.clock(e.etaP50, false)} · ${f.clock(e.etaP90, false)}`),
+      j.units.unevaluated ? `${j.units.unevaluated} generators to expand` : 'projected', ''),
+    tcell('Slack', o.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-fail pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', e.feasible ? 'feasible at current capacity' : 'will miss at current capacity', late ? 'late' : ''),
+    tcell('Done', `${Math.round(done * 100)}%`, w && w.basis === 'estimate' ? `by work · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)} units` : `by units · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)}`),
+    tcell('Slots', h('span', null, h('span', { class: 't-run' }, String(e.runningSlots)), h('small', null, ` of ${(+e.requiredSlots).toFixed(1)} needed`)), `can get ${e.attainableSlots}`),
+    j.output ? tcell('Output view', h('span', { title: j.output.view, style: { fontSize: '15px' } }, f.gridRef(j.output.view)), `${f.num(j.output.changesets)} changesets folded in`) : null);
 }
 
 function controls(j, k) {
   const held = j.nudge.hold;
   const dl = j.objective.deadline ? j.objective.deadline.slice(0, 16) : '';
-  const boosts = [1, 1.25, 1.5, 2];
-  return h('div', { class: 'controls', role: 'group', 'aria-label': 'Job controls' },
-    held ? h('button', { class: 'btn', 'data-action': 'release', 'data-job': k }, 'Release job')
-      : h('button', { class: 'btn', 'data-action': 'hold', 'data-job': k, title: 'Release no new units; running units finish' }, 'Hold job'),
-    !held && j.units.running + j.units.retrying > 0 ? h('button', { class: 'btn', 'data-action': 'holdstop', 'data-job': k, title: 'Hold, and stop the units that are running now' }, 'Hold and stop running units') : null,
-    h('span', { class: 'lab' }, 'Boost'),
-    h('span', { class: 'seg' }, boosts.map((b) => h('button', {
-      class: 'btn small', 'data-action': 'boost', 'data-job': k, 'data-value': String(b), 'aria-pressed': Math.abs(j.nudge.boost - b) < 0.01 ? 'true' : 'false',
-      title: b === 1 ? 'No boost' : `Ask for ${b}× the slots the deadline needs, from this project's quota first`,
-    }, `×${b}`))),
-    h('label', { class: 'lab', for: 'deadline-input' }, 'Deadline'),
-    h('input', { type: 'datetime-local', id: 'deadline-input', value: dl, 'data-key': 'dl-' + k }),
-    h('button', { class: 'btn', 'data-action': 'deadline', 'data-job': k, 'data-input': 'deadline-input' }, 'Set deadline'),
-    j.units.failed ? h('button', { class: 'btn', 'data-action': 'requeue', 'data-job': k, 'data-units': failedUnits(j) }, `Requeue failed units (${j.units.failed})`) : null);
+  return h('div', { class: 'panel', 'data-key': 'ctl' },
+    h('header', null, h('h2', null, 'Controls'), h('span', { class: 'dim mono', style: { fontSize: '10px' } }, 'each one is signed by the HUD, for you')),
+    h('div', { class: 'body controls' },
+      held ? h('button', { class: 'btn', 'data-action': 'release', 'data-job': k }, 'Release job')
+        : h('button', { class: 'btn', 'data-action': 'hold', 'data-job': k, title: 'Release no new units; running units finish' }, 'Hold job'),
+      !held && j.units.running + j.units.retrying > 0 ? h('button', { class: 'btn', 'data-action': 'holdstop', 'data-job': k }, 'Hold and stop') : null,
+      h('span', { class: 'seg' }, [1, 1.25, 1.5, 2].map((b) => h('button', { class: 'btn small', 'data-action': 'boost', 'data-job': k, 'data-value': String(b), 'aria-pressed': Math.abs(j.nudge.boost - b) < 0.01 ? 'true' : 'false' }, `×${b}`))),
+      h('input', { type: 'datetime-local', id: 'deadline-input', value: dl, 'data-key': 'dl-' + k, 'aria-label': 'Deadline' }),
+      h('button', { class: 'btn small', 'data-action': 'deadline', 'data-job': k, 'data-input': 'deadline-input' }, 'Set deadline'),
+      j.units.failed ? h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': failedUnits(j) }, `Requeue failed (${j.units.failed})`) : null,
+      (j.blacklist || []).map((n) => h('button', { class: 'btn small', 'data-action': 'unblacklist', 'data-job': k, 'data-node': n, title: 'Blacklisted for this job' }, h('span', { class: 't-temp' }, n), ' allow again'))));
 }
 
-function warning(j) {
-  const e = j.estimate;
-  if (!e.message) return null;
-  const tone = j.phase === 'Held' ? ' mag' : j.phase === 'Failed' ? ' red' : '';
-  return h('div', { class: 'jwarn' + tone, role: 'status' }, h('span', null, e.message), burstButton(j));
-}
-
-function legend(j) {
-  const items = [
-    ['lg-uneval', 'not yet evaluated; may expand'], ['lg-queued', 'waiting'], ['lg-blocked', 'blocked by a dependency'],
-    ['lg-running', 'running, measured'], ['lg-est', 'running, estimated'], ['lg-done', 'done'], ['lg-retry', 'retrying'],
-    ['lg-failed', 'failed'], ['lg-held', 'held'], ['lg-risk', 'projected after the deadline'], ['lg-sel', 'selected'],
-  ];
-  return h('div', { class: 'legend', 'aria-label': 'Legend' }, items.map(([c, t]) => h('span', null, h('i', { class: c }), t)));
-}
-
-// provenanceBlock shows the unit's signed task record: who signed it,
-// whether it verifies against the farm's keys, where it ran and on what.
-function provenanceBlock(p) {
-  const imgs = (p.images || []).map((i) => `${i.image}${i.digest ? ' @' + i.digest.slice(0, 19) : ''}`);
-  const ins = (p.inputs || []).map((i) => `${i.materialization} ${f.shortId(i.view)}`);
-  return h('div', { class: 'prov', 'data-key': 'prov' },
-    h('div', { class: 'lab', style: { marginTop: '10px' } }, 'Task record'),
-    h('dl', { class: 'kv' },
-      h('dt', null, 'Signature'), h('dd', null,
-        p.verified ? h('span', { class: 'chip green' }, 'verified') : h('span', { class: 'chip red' }, 'does not verify'),
-        h('span', { class: 'mono dim', style: { marginLeft: '6px' } }, p.signer || p.problem || '')),
-      h('dt', null, 'Record'), h('dd', { class: 'mono', title: p.record }, f.shortId(p.record)),
-      h('dt', null, 'Ran on'), h('dd', { class: 'mono' }, p.node || '–'),
-      h('dt', null, 'Images'), h('dd', { class: 'mono', style: { fontSize: '11.5px' } }, imgs.join(', ') || '–'),
-      h('dt', null, 'Inputs'), h('dd', { class: 'mono', style: { fontSize: '11.5px' } }, ins.join(', ') || '–'),
-      p.ai ? [h('dt', null, 'AI use'), h('dd', null, `${p.ai.generated || 'declared'}${p.ai.model ? ' · ' + p.ai.model : ''}`)] : null));
-}
-
-function unitPanel(ctx, j, k) {
-  if (st.sel < 0) {
-    return h('div', { class: 'panel', 'data-key': 'unit-hint' },
-      h('header', null, h('h2', null, 'Unit')),
-      h('p', { class: 'dim', style: { margin: 0 } }, 'Select a box to see its attempts, node, duration against its estimate, log tail, events and output. In the grid, arrow keys move and Enter opens.'));
-  }
+function unitCard(ctx, j) {
+  if (!st.sel) return h('div', { class: 'panel', 'data-key': 'unit-hint' }, h('header', null, h('h2', null, 'Unit')),
+    h('div', { class: 'body dim' }, 'Hover any block for what it is; select a unit for its attempts, node, log, record and output. Click a batch or the shot to collapse or open it; the fold mark on a stage folds everything upstream into each frame.'));
   const u = st.unit;
-  if (!u) return h('div', { class: 'unit', 'data-key': 'unit' }, h('p', { class: 'dim' }, 'Loading unit…'));
-  if (u.error) return h('div', { class: 'unit', 'data-key': 'unit' }, h('p', { class: 't-red' }, u.error));
+  if (!u) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body dim' }, 'Reading the unit…'));
+  if (u.error) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body t-fail' }, u.error));
   const last = u.attempts[u.attempts.length - 1];
   const node = last && last.node;
-  const blk = (j.blacklist || []).includes(node);
-  const durFrac = u.durationSeconds && u.estimateSeconds ? u.durationSeconds / Math.max(u.estimateSeconds, u.durationSeconds) : 0;
-  const estFrac = u.durationSeconds && u.estimateSeconds ? u.estimateSeconds / Math.max(u.estimateSeconds, u.durationSeconds) : 1;
-  const stateChip = { failed: 'red', retrying: 'red', held: 'mag', succeeded: 'green' }[u.state] || '';
-  return h('div', { class: 'unit', 'data-key': 'unit', role: 'region', 'aria-label': `Unit ${u.label}` },
-    h('h3', null, h('span', { class: 'mono' }, u.label), h('span', { class: 'chip ' + stateChip }, u.state)),
-    h('dl', { class: 'kv' },
-      h('dt', null, 'Node'), h('dd', { class: 'mono' }, node || '–', blk ? h('span', { class: 'chip flag', style: { marginLeft: '6px' } }, 'blacklisted') : null),
-      h('dt', null, 'Attempts'), h('dd', { class: 'num' }, String(u.attempts.length)),
-      h('dt', null, 'Duration'), h('dd', null,
-        h('span', { class: 'num' }, u.durationSeconds !== undefined ? `${f.dur(u.durationSeconds)} of an estimated ${f.dur(u.estimateSeconds)}` : `estimated ${f.dur(u.estimateSeconds)}`),
-        u.durationSeconds !== undefined ? h('div', { class: 'durbar', 'aria-hidden': 'true' }, h('i', { style: { width: `${durFrac * 100}%` } }), h('b', { style: { left: `${estFrac * 100}%` } })) : null),
-      u.outputChangeset ? [h('dt', null, 'Output'), h('dd', { class: 'mono', title: u.outputChangeset }, f.shortId(u.outputChangeset))] : null,
-      u.expandedInto ? [h('dt', null, 'Expanded into'), h('dd', { class: 'mono' }, `units ${u.expandedInto}`)] : null),
-    u.attempts.length ? h('table', { class: 't' },
-      h('thead', null, h('tr', null, h('th', null, '#'), h('th', null, 'Node'), h('th', null, 'Start'), h('th', null, 'End'), h('th', null, 'Exit'))),
-      h('tbody', null, u.attempts.map((a) => [
-        h('tr', { 'data-key': 'a' + a.n },
-          h('td', { class: 'num' }, String(a.n)), h('td', { class: 'mono' }, a.node),
-          h('td', { class: 'num' }, f.clockSec(a.start)), h('td', { class: 'num' }, a.end ? f.clockSec(a.end) : 'running'),
-          h('td', { class: 'num ' + (a.exitCode ? 't-red' : '') }, a.exitCode !== undefined ? String(a.exitCode) : '')),
-        a.reason ? h('tr', { 'data-key': 'r' + a.n }, h('td'), h('td', { colspan: 4, class: a.exitCode ? 't-red' : 'dim', style: { fontSize: '11.5px' } }, a.reason)) : null,
-      ]))) : null,
-    u.provenance ? provenanceBlock(u.provenance) : null,
-    h('div', { class: 'lab', style: { marginTop: '10px' } }, 'Log tail'),
-    h('pre', { class: 'log' }, u.logTail.join('\n') || '(no output yet)'),
-    h('div', { class: 'lab' }, 'Events'),
-    h('table', { class: 't', style: { marginBottom: '10px' } }, h('tbody', null, u.events.slice(-6).map((e, i) => h('tr', { 'data-key': 'e' + i },
-      h('td', { class: 'num dim', style: { width: '64px' } }, f.clockSec(e.at)),
-      h('td', { class: e.type === 'Warning' ? 't-red' : '' }, e.reason),
-      h('td', { class: 'dim', style: { fontSize: '11.5px' } }, e.message))))),
-    h('div', { class: 'controls', style: { justifyContent: 'flex-start' } },
-      ['failed', 'succeeded'].includes(u.state) ? h('button', { class: 'btn', 'data-action': 'requeue', 'data-job': k, 'data-units': String(u.i) }, u.state === 'failed' ? 'Requeue unit' : 'Render again') : null,
-      node && !blk ? h('button', { class: 'btn', 'data-action': 'blacklist', 'data-job': k, 'data-node': node }, `Blacklist ${node} for this job`) : null,
-      h('a', { class: 'btn', href: ctx.href(`job/${j.namespace}/${j.name}`) }, 'Close')));
+  const chip = { failed: 'red', retrying: 'temp', running: 'run', succeeded: 'green' }[u.state] || '';
+  const k = st.sel.job;
+  return h('div', { class: 'panel', 'data-key': 'unit', role: 'region', 'aria-label': `Unit ${u.label}` },
+    h('header', null, h('h2', null, u.label), h('span', { class: 'chip ' + chip }, u.state), h('span', { class: 'dim mono', style: { fontSize: '10px', marginLeft: 'auto' } }, f.jobName(k))),
+    h('div', { class: 'body' },
+      h('div', { class: 'mono', style: { fontSize: '11px', lineHeight: '1.6' } },
+        h('div', null, h('span', { class: 'dim' }, 'node '), node || '–'),
+        h('div', null, h('span', { class: 'dim' }, 'duration '), u.durationSeconds !== undefined ? `${f.dur(u.durationSeconds)} ` : '', h('span', { class: 'pencil' }, `est. ${f.dur(u.estimateSeconds)}`)),
+        u.outputChangeset ? h('div', { title: u.outputChangeset }, h('span', { class: 'dim' }, 'output '), f.gridRef(u.outputChangeset)) : null,
+        u.expandedInto ? h('div', null, h('span', { class: 'dim' }, 'expanded into '), `units ${u.expandedInto}`) : null),
+      h('div', { class: 'book', style: { marginTop: '8px' } }, u.attempts.map((a) => h('div', { class: 'e', 'data-key': 'a' + a.n },
+        h('span', { class: 'seq' }, `#${a.n}`), h('span', { class: 'at' }, f.clockSec(a.start).slice(0, 5)), h('i', { class: 'seal node' + (a.end ? '' : ' open') }),
+        h('span', { class: 'msg' + (a.exitCode ? ' t-temp' : '') }, `${a.node}${a.end ? (a.exitCode ? ` exit ${a.exitCode}` : ' captured') : ' running'}`),
+        a.reason ? h('span', { class: 'who' }, a.reason) : null))),
+      u.provenance ? h('div', { class: 'mono', style: { fontSize: '10.5px', marginTop: '8px' } },
+        h('span', { class: 'seal node' }), ' ', u.provenance.verified ? 'record verifies' : h('span', { class: 't-fail' }, 'record does not verify'),
+        h('span', { class: 'dim' }, ` · ${u.provenance.signer || ''}`)) : null,
+      h('div', { class: 'lab', style: { margin: '10px 0 4px' } }, 'Log tail'),
+      h('pre', { class: 'mono', style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-2)', background: 'var(--well)', padding: '6px', whiteSpace: 'pre-wrap', maxHeight: '120px', overflow: 'auto' } }, (u.logTail || []).join('\n') || '(no output yet)'),
+      h('div', { class: 'controls', style: { marginTop: '8px' } },
+        ['failed', 'succeeded'].includes(u.state) ? h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': String(u.i) }, u.state === 'failed' ? 'Requeue unit' : 'Render again') : null,
+        node ? h('button', { class: 'btn small', 'data-action': 'blacklist', 'data-job': k, 'data-node': node }, `Avoid ${node}`) : null)));
+}
+
+// adjacent sheets: upstream and downstream jobs outside this sheet, other shots of the project
+function edges(ctx, j, keys) {
+  const g = st.graph || { edges: [] };
+  const inS = new Set(keys || []);
+  const up = [...new Set(g.edges.filter((e) => inS.has(e.to) && !inS.has(e.from)).map((e) => e.from))];
+  const down = [...new Set(g.edges.filter((e) => inS.has(e.from) && !inS.has(e.to)).map((e) => e.to))];
+  const inputs = (j.inputs || []).filter((i) => i.materialization).map((i) => i.materialization);
+  const shots = [...new Set(ctx.snap.jobs.filter((x) => x.project === j.project && x.shot).map((x) => x.shot))].sort();
+  const si = shots.indexOf(j.shot);
+  const link = (key) => h('a', { href: ctx.href(`job/${key}`) }, f.jobName(key));
+  const shotLink = (s) => { const x = ctx.snap.jobs.find((y) => y.shot === s && y.project === j.project); return x ? h('a', { href: ctx.href(`job/${keyOf(x)}`) }, `sheet ${s}`) : s; };
+  return [
+    h('div', { class: 'edge w' }, '◂ ', up.length ? up.map((x, i) => [i ? ' · ' : '', link(x)]) : inputs.length ? `inputs ${inputs.join(' · ')}` : 'no upstream'),
+    h('div', { class: 'edge e' }, down.length ? down.map((x, i) => [i ? ' · ' : '', link(x)]) : 'to the client', ' ▸'),
+    si > 0 ? h('div', { class: 'edge n' }, '▴ ', shotLink(shots[si - 1])) : h('div', { class: 'edge n' }, `${j.project} · ${j.namespace}`),
+    si >= 0 && si < shots.length - 1 ? h('div', { class: 'edge s' }, '▾ ', shotLink(shots[si + 1])) : null,
+  ];
 }
 
 export default {
@@ -158,97 +178,98 @@ export default {
     const [ns, name, sub, idx] = ctx.route.parts;
     const k = `${ns}/${name}`;
     if (st.key !== k) reset(k);
-    st.sel = sub === 'unit' ? Number(idx) : -1;
+    if (sub === 'unit' && !st.sel) st.sel = { job: k, i: Number(idx) };
+    ensure(ctx, k);
     const summary = ctx.job(k);
-    const cls = summary && ctx.cls(summary.class);
+    const detail = st.details.get(k);
+    if (!summary && !detail) {
+      return h('section', { class: 'sheet' }, h('div', { class: 'sheethead' }, h('div', null, h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm')), h('h1', null, name || 'Job'),
+        h('p', { class: 'dim' }, st.err ? `No job named ${name} in your projects.` : 'Reading the sheet…'))));
+    }
+    const j = detail ? { ...detail, ...(summary || {}) } : summary;
+    if (detail && summary) j.unitStates = detail.unitStates;
+    const cls = ctx.cls(j.class);
     const lens = lensFor(cls ? cls.lens : 'frames');
     st.lens = lens;
-    ensure(ctx, k, ns, name, lens);
     st.pickFrame = (frame) => {
-      const d = st.detail;
+      const d = st.details.get(k);
       if (!d || !d.unitList) return;
-      const last = (d.classSummary.passes || []).slice(-1)[0];
-      const u = d.unitList.find((x) => x.group === last && x.label.startsWith(String(frame)));
-      if (u) location.replace(ctx.href(`job/${ns}/${name}/unit/${u.i}`));
+      const u = d.unitList.find((x) => x.label.startsWith(String(frame)));
+      if (u) { st.sel = { job: k, i: u.i }; ctx.refresh(); }
     };
-    if (!summary && !st.detail) {
-      return h('div', null, h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Queue')),
-        h('h1', null, name || 'Job'), h('p', { class: 'dim' }, st.err ? `No job named ${name} in your projects.` : 'Loading…'));
+    const keys = st.sheetKeys || [k];
+    const details = keys.map((x) => st.details.get(x)).filter(Boolean).map((d) => ({ ...d, ...(ctx.job(keyOf(d)) || {}), unitStates: d.unitStates }));
+    const sheetTitle = j.shot ? `${j.shot}` : j.name;
+    let anchor = k;
+    {
+      const width = (d) => Math.max(0, ...(d.groups || []).map((g) => (g.units || '').split(',').reduce((n, p) => { const [a, b] = p.split('-').map(Number); return n + (Number.isFinite(b) ? b - a + 1 : Number.isFinite(a) ? 1 : 0); }, 0)));
+      const me = details.find((d) => keyOf(d) === k);
+      let best = me ? width(me) : 0;
+      for (const d of details) if (d.axis && me && d.axis.kind === me.axis.kind && width(d) > best) { best = width(d); anchor = keyOf(d); }
     }
-    // The summary from the stream is newest; the detail adds the unit table.
-    const j = st.detail ? { ...st.detail, ...(summary || {}) } : summary;
-    if (st.detail && summary) j.unitStates = st.detail.unitStates;
-    const e = j.estimate;
-    const u = j.units;
-    const main = st.detail ? lens.main(ctx, j, st) : [];
-    const side = st.detail ? lens.side(ctx, j, st) : [];
-    const wideLens = lens !== lensFor('render') && lens !== lensFor('frames');
-    const obj = j.objective;
-    const dlSub = obj.from ? `inherited from ${f.jobName(obj.from)}` : obj.type === 'latency' ? `ready + ${f.dur(obj.latencyTargetSeconds)} target` : 'set on the job';
-    const groups = st.detail ? st.detail.groups : [];
-    const focusLabel = st.focus && groups.find((g) => g.key === st.focus.group);
-    return h('article', { 'data-key': 'job-' + k },
-      h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Queue'), ' / ', j.project, ' / ', j.namespace),
-      h('div', { class: 'jhead' },
+    const sheet = details.length ? buildSheet({ key: `sheet:${keys.join('|')}`, title: sheetTitle, details, anchor, graph: st.graph, jobs: ctx.snap.jobs }) : null;
+    const readers = details.filter((d) => (d.unitList || []).some((u) => u.reads));
+    const deadline = j.objective && j.objective.deadline ? Date.parse(j.objective.deadline) : null;
+    const g = glance(j, detail);
+    const main = detail && !(sheet && sheet.cost) ? lens.main(ctx, j, st) : [];
+    const side = detail ? lens.side(ctx, j, st) : [];
+    const late = j.estimate.slackSeconds < 0 && j.phase !== 'Succeeded';
+    return h('section', { class: 'sheet', 'data-key': 'sheet-' + k, 'aria-label': `Sheet ${sheetTitle}` },
+      h('div', { class: 'sheethead' },
         h('div', null,
+          h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${j.project} / `, j.shot ? `sheet ${j.shot} / ` : '', j.namespace),
           h('h1', null, j.name),
-          h('div', { class: 'jmeta' }, classChip(j, cls), phaseText(j), h('span', null, j.rank > 0 ? `#${j.rank} in dispatch order` : 'not in the queue'),
-            h('span', null, orderText(j.order)), h('span', { class: 'num' }, j.pools.join(' + ')),
-            j.owner ? h('span', null, `owner ${j.owner}`) : null,
-            h('span', { class: 'dimmer' }, `created ${f.clock(j.createdAt)}`),
-            (j.dependsOn || []).length ? h('span', null, 'after ', j.dependsOn.map((d, i) => [i ? ', ' : '', h('a', { href: ctx.href(`job/${d}`) }, f.jobName(d))])) : null)),
-        controls(j, k)),
-      h('div', { class: 'jslate' },
-        cell('Deadline', obj.deadline ? f.clock(obj.deadline) : 'none', obj.deadline ? dlSub : 'no objective'),
-        cell('ETA, p50 to p90', j.phase === 'Succeeded' ? f.clock(e.etaP90) : `${f.clock(e.etaP50, false)} – ${f.clock(e.etaP90, false)}`,
-          u.unevaluated ? `${u.unevaluated} generators still to expand; the band narrows as they do` : `band ${f.dur((f.ms(e.etaP90) - f.ms(e.etaP50)) / 1000)} wide`),
-        cell('Slack', obj.deadline && j.phase !== 'Succeeded' ? f.signed(e.slackSeconds) : '–', e.feasible ? 'feasible' : 'will miss at current capacity', e.slackSeconds < 0 && j.phase !== 'Succeeded' ? 't-yellow' : ''),
-        cell('Done', `${f.num(u.succeeded)}`, `of ${f.num(u.total)} units` + (u.failed ? `, ${u.failed} failed` : '') + (u.retrying ? `, ${u.retrying} retrying` : '')),
-        cell('Slots', `${e.runningSlots}`, `running; deadline needs ${e.requiredSlots}, can get ${e.attainableSlots}`),
-        j.output ? cell('Output view', f.shortId(j.output.view), `${f.num(j.output.changesets)} changesets folded in`, 'mono-sm') : null),
-      h('div', { class: 'jlane' }, lane(j, { tall: true })),
-      warning(j),
-      (j.blacklist || []).length ? h('div', { class: 'controls', style: { justifyContent: 'flex-start', marginTop: '8px' } },
-        h('span', { class: 'lab' }, 'Blacklisted for this job'),
-        j.blacklist.map((n) => h('span', { class: 'chip flag', 'data-key': 'bl-' + n }, n)),
-        j.blacklist.map((n) => h('button', { class: 'btn small', 'data-action': 'unblacklist', 'data-job': k, 'data-node': n }, `Allow ${n} again`))) : null,
-      h('div', { class: 'jbody' },
-        h('div', null,
-          h('div', { class: 'panel', 'data-key': 'gridpanel' },
-            h('header', null, h('h2', null, 'Units'),
-              h('span', { class: 'dim' }, st.detail ? gridCaption(st.detail, u.total) : '')),
-            focusLabel ? h('div', { class: 'focusbar' }, h('span', null, `Showing ${focusLabel.label} only.`),
-              h('button', { class: 'btn small', 'data-focus-clear': '1' }, 'Show all groups')) : null,
-            h('div', { class: 'well' },
-              h('canvas', { class: 'grid', 'data-key': 'grid-' + k, tabindex: '0', role: 'img', 'aria-label': `Job view of ${j.name}. ${u.succeeded} of ${u.total} units done.` }),
-              h('div', { class: 'tip', hidden: true, 'data-gridtip': '1', 'data-own': '1' })),
-            legend(j)),
-          wideLens ? null : main),
-        h('div', null, side, unitPanel(ctx, j, k))),
-      wideLens ? h('div', { style: { marginTop: '8px' } }, main) : null);
+          h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 ? ` · #${j.rank} in dispatch order` : ''}`)),
+        titleBlock(j)),
+      j.estimate.message ? h('div', { class: 'warn' + (late || j.phase === 'Failed' ? ' red' : ''), style: { marginBottom: '12px' }, role: 'status' },
+        h('span', { class: late ? 't-fail' : '' }, j.estimate.message), burstButton(j)) : null,
+      h('div', { class: 'neat', style: { padding: '14px' } },
+        edges(ctx, j, keys),
+        h('div', { class: 'layout-job' },
+          h('div', { style: { width: '250px' } },
+            own('pylon', 'pylon:' + k, { glance: g, w: 250, h: 470, mode: 'full', title: j.name.toUpperCase() }),
+            h('div', { class: 'legend', style: { marginTop: '14px', flexDirection: 'column', alignItems: 'flex-start' } }, legend())),
+          h('div', { class: 'wellbox', 'data-key': 'stackbox' },
+            h('div', { class: 'tools' },
+              h('span', { class: 'lab' }, `Sheet ${sheetTitle}`),
+              h('span', { class: 'dim mono', style: { fontSize: '10px' } }, sheet ? `${sheet.cols.length} stages · ${f.num(sheet.N)} rows · ${sheet.batchFromData ? 'batches from the job script' : `${sheet.batch} frames per batch`}` : ''),
+              h('span', { style: { marginLeft: 'auto' } }),
+              h('button', { class: 'btn small', 'data-stack': 'zoom-', title: 'Smaller boxes (-)' }, '−'),
+              h('button', { class: 'btn small', 'data-stack': 'zoom+', title: 'Bigger boxes (+)' }, '+'),
+              h('label', null, h('input', { type: 'checkbox', 'data-stack': 'lineA', checked: st.lineA ? true : false }), 'other inputs'),
+              readers.map((d) => h('label', { 'data-key': 'lb-' + keyOf(d) }, h('input', { type: 'checkbox', 'data-stack': 'lineB', 'data-job': keyOf(d), checked: st.lineB.has(keyOf(d)) ? true : false }), `reads · ${d.name.replace(/^sh\d+-/, '')}`)),
+              h('label', null, h('input', { type: 'checkbox', 'data-stack': 'contours', checked: st.contours ? true : false }), 'time lines')),
+            sheet ? own('stack', 'stack:' + k, { sheet, view: { deadline, sel: st.sel, box: st.box, lineA: st.lineA, lineB: st.lineB, contours: st.contours } }) : h('div', { class: 'body dim' }, 'Reading the sheet…'),
+            j.output ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset folded into its chain' },
+              h('b', null, f.gridRef(j.output.view)), `${String(j.output.changesets).padStart(4, '0')}+00`, h('span', { class: 'dimmer' }, j.output.view)) : null),
+          h('div', null,
+            unitCard(ctx, j),
+            side,
+            controls(j, k),
+            st.book && st.book.entries ? h('div', { class: 'panel', 'data-key': 'book' },
+              h('header', null, h('h2', null, 'The book'), h('span', { class: 'dim mono', style: { fontSize: '10px' } }, 'append only · signed by whoever acted')),
+              h('div', { class: 'body' }, bookList(st.book.entries.slice(-16)))) : null))),
+      main.length ? h('div', { style: { marginTop: '14px' } }, main) : null);
   },
 
   after(ctx, root) {
-    const cv = root.querySelector('canvas.grid');
-    if (!cv || !st.detail) return;
-    if (!st.grid || st.grid.cv !== cv) {
-      if (st.grid) st.grid.destroy();
-      const [ns, name] = ctx.route.parts;
-      st.grid = new JobGrid(cv, {
-        tip: root.querySelector('[data-gridtip]'),
-        onSelect: (i) => location.replace(ctx.href(i < 0 ? `job/${ns}/${name}` : `job/${ns}/${name}/unit/${i}`)),
-        onFocus: (fo) => { st.focus = fo; ctx.refresh(); },
+    for (const el of root.querySelectorAll('[data-stack]')) {
+      if (el.dataset.wired) continue;
+      el.dataset.wired = '1';
+      el.addEventListener(el.tagName === 'INPUT' ? 'change' : 'click', () => {
+        const comp = root.querySelector('[data-comp="stack"]');
+        const c = comp && comp.__comp;
+        const a = el.dataset.stack;
+        if (a === 'zoom+') st.box = Math.min(32, st.box + 2);
+        if (a === 'zoom-') st.box = Math.max(3, st.box - 2);
+        if (a === 'lineA') st.lineA = el.checked;
+        if (a === 'contours') st.contours = el.checked;
+        if (a === 'lineB') { if (el.checked) st.lineB.add(el.dataset.job); else st.lineB.delete(el.dataset.job); }
+        if (c) { Object.assign(c.view, { box: st.box, lineA: st.lineA, contours: st.contours, lineB: st.lineB }); c.relayout(false); }
       });
-      const clear = root.querySelector('[data-focus-clear]');
-      void clear;
     }
-    st.grid.set(st.detail, { selected: st.sel, focus: st.focus });
-    const fc = root.querySelector('[data-focus-clear]');
-    if (fc && !fc.dataset.wired) {
-      fc.dataset.wired = '1';
-      fc.addEventListener('click', () => { st.focus = null; ctx.refresh(); });
-    }
-    if (st.lens && st.lens.after) st.lens.after(ctx, root, { ...st.detail, ...(ctx.job(st.key) || {}), unitStates: st.detail.unitStates }, st);
+    const d = st.details.get(st.key);
+    if (st.lens && st.lens.after && d) st.lens.after(ctx, root, { ...d, ...(ctx.job(st.key) || {}), unitStates: d.unitStates }, st);
   },
 
   leave() {
@@ -256,18 +277,18 @@ export default {
   },
 };
 
-function gridCaption(d, total) {
-  const kind = d.axis && d.axis.kind;
-  const groups = d.groups.filter((g) => !g.generator).map((g) => g.label);
-  if (st.focus) return 'Drilled down to one group. Select a box for its detail.';
-  if (total > 20000) return `${f.num(total)} units. Each cell stacks the states of a run of frames; select a row to show only that ${groups.length > 1 ? 'group' : 'range'}.`;
-  if (total > 2000) return `${f.num(total)} units as compact cells. Select a pass name to show only that pass, box by box.`;
-  if (kind === 'frame') {
-    const gen = d.groups.find((g) => g.generator);
-    return gen ? `Each column is a frame, 24 to a row (one second). A light gray frame has not expanded yet; it splits into ${groups.join(', ')}.` :
-      `24 frames to a row, one second of screen time${groups.length > 1 ? ', grouped by pass' : ''}.`;
-  }
-  if (kind === 'rank') return 'One row per rank. The ranks start and stop together; the fill is training progress in steps.';
-  if (kind === 'shard') return 'Rows by stage. Test discovery is a generator that expands into the shards this change needs.';
-  return `Rows by ${groups.join(', ')}.`;
+function legend() {
+  const sw = (fill, extra = '') => h('i', { style: { display: 'inline-block', width: '14px', height: '10px', background: fill, boxShadow: extra } });
+  return [
+    h('span', null, sw('var(--done)'), 'done'),
+    h('span', null, sw('var(--done-settled)'), 'done, a finished upstream'),
+    h('span', null, sw('linear-gradient(var(--run-body) 45%, var(--run) 45% 55%, var(--done) 55%)', 'inset 0 0 0 1px var(--run)'), 'running: green rises inside'),
+    h('span', null, sw('var(--run-body)', 'inset 0 0 0 1.5px var(--temp)'), 'retrying, temporary'),
+    h('span', null, sw('var(--fail)'), 'failed'),
+    h('span', null, sw('var(--g09)', 'inset 2px 0 0 0 var(--fail)'), 'projected late (pencil)'),
+    h('span', null, sw('var(--g09)'), 'waiting'),
+    h('span', null, sw('repeating-linear-gradient(45deg, var(--g09) 0 3px, var(--g12) 3px 4px)'), 'blocked'),
+    h('span', null, sw('var(--g08)', 'inset 0 0 0 1px var(--g13)'), 'not yet evaluated'),
+    h('span', null, sw('transparent', 'inset 0 0 0 1px var(--g12)'), 'expected'),
+  ];
 }

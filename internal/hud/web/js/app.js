@@ -2,22 +2,30 @@
 // controls. Views render plain DOM that is morphed into place.
 
 import { h, morph } from './dom.js';
+import { hydrate } from '../design/components/live.js';
+import '../design/components/pylon.js';
+import '../design/components/stack.js';
 import { subscribe, post, get, as, staticMode } from './api.js';
 import * as f from './fmt.js';
 import queue from './views/queue.js';
 import job from './views/job.js';
-import workers from './views/workers.js';
+import pools from './views/pools.js';
+import map from './views/map.js';
+import wall from './views/wall.js';
+import widget from './views/widget.js';
 import tiers from './views/tiers.js';
 import graph from './views/graph.js';
 import cost from './views/cost.js';
 
-const VIEWS = { queue, job, workers, tiers, graph, cost };
+const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget };
 const NAV = [
   ['queue', 'Queue'],
-  ['workers', 'Workers'],
-  ['tiers', 'Cache tiers'],
-  ['graph', 'Dependencies'],
-  ['cost', 'Cost & capacity'],
+  ['pools', 'Pools'],
+  ['map', 'Map'],
+  ['tiers', 'Tiers'],
+  ['graph', 'Graph'],
+  ['cost', 'Cost'],
+  ['wall', 'Wall'],
 ];
 
 if (staticMode || new URLSearchParams(location.search).get('motion') === 'off') {
@@ -62,14 +70,14 @@ function topBar() {
   const role = v ? (v.allProjects ? 'wrangler' : 'artist') : '';
   const other = role === 'wrangler' ? 'artist' : 'wrangler';
   return h('header', { class: 'top' },
-    h('a', { class: 'brand', href: href('queue'), 'aria-label': 'c4 farm HUD, queue' },
-      h('span', { class: 'bars', 'aria-hidden': 'true' }, h('i'), h('i'), h('i'), h('i'), h('i'), h('i'), h('i')),
-      h('span', { class: 'wordmark' }, 'c4', h('b', null, 'farm'))),
+    h('a', { class: 'brand', href: href('queue'), 'aria-label': 'c4 HUD, the farm sheet' },
+      h('span', { class: 'tick', 'aria-hidden': 'true' }),
+      h('span', { class: 'wordmark' }, 'C4', h('b', null, 'HUD'))),
     h('div', { class: 'clock' },
       h('span', { class: 'num' }, s ? f.clockSec(s.now) : '--:--:--'),
       h('span', { class: 'lab' }, s ? `${f.dateLine(s.now)} \u00b7 ${f.offsetLabel()}` : '')),
     h('nav', { class: 'views', 'aria-label': 'Views' },
-      NAV.map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job')) ? 'page' : false }, label))),
+      NAV.map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
     h('div', { class: 'who' },
       h('span', { class: 'live', 'data-state': state.status, title: `Updates: ${state.status}` }),
       v ? h('span', null, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
@@ -111,6 +119,10 @@ function slate() {
 let lastView = null;
 function render() {
   const route = state.route;
+  const bare = route.name === 'wall' || route.name === 'widget';
+  document.documentElement.dataset.scale = route.name === 'wall' ? 'wall' : route.name === 'widget' ? 'widget' : 'desk';
+  document.getElementById('top').hidden = bare;
+  document.getElementById('slate').hidden = bare;
   const view = VIEWS[route.name];
   if (lastView && lastView !== view && lastView.leave) lastView.leave();
   lastView = view;
@@ -127,6 +139,7 @@ function render() {
   }
   const wrap = h('main', { id: 'main', tabindex: '-1', 'data-view': route.name }, el);
   morph(main, wrap);
+  hydrate(main);
   if (view.after) view.after(ctx, main);
 }
 

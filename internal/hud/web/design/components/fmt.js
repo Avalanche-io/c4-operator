@@ -103,3 +103,27 @@ export function jobName(key) {
   const i = key.indexOf('/');
   return i < 0 ? key : key.slice(i + 1);
 }
+
+// gridRef prints a C4 ID as a grid reference: the opening and closing groups
+// of four, the full ID left for hover (SURVEY: an ID is a coordinate).
+export function gridRef(id) {
+  if (!id) return '';
+  return id.length > 16 ? `${id.slice(0, 4)} ${id.slice(4, 8)} … ${id.slice(-4)}` : id;
+}
+
+// tminus prints a time as mission time to or since now: T-02:06:24, T+00:03:10.
+export function tminus(iso) {
+  const t = typeof iso === 'number' ? iso : ms(iso);
+  if (!Number.isFinite(t)) return '';
+  let d = Math.round((t - nowMs) / 1000);
+  const sign = d >= 0 ? MINUS : '+';
+  d = Math.abs(d);
+  return `T${sign}${p2(Math.floor(d / 3600))}:${p2(Math.floor((d % 3600) / 60))}:${p2(d % 60)}`;
+}
+
+// approx prints an estimate the way pencil is written: about 5 min, about 2h46.
+export function approx(sec) {
+  if (!Number.isFinite(sec)) return '';
+  const d = dur(sec);
+  return '≈' + (/^\d+m$/.test(d) ? d.replace('m', ' min') : d);
+}
