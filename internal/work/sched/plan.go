@@ -338,9 +338,21 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		finish := math.Max(a.fluidFinish(m.jobCtx, before+m.W90, C), math.Max(div(m.W90, m.cap), m.tpath))
 		m.finish90 = finish
 		m.finish50 = finish
-		m.lateBy = secs(math.Max(0, finish-m.T))
+		late, deficit := finish, math.Max(before+m.W90-C*t, m.W90-m.cap*t)
+		if m.share > 0 {
+			// A member evicted to make the on-time set fit (the largest
+			// one, not always the latest) can finish by its deadline when
+			// inserted alone in deadline order, yet the plan runs it only
+			// at its share: it is late by at least what that share leaves,
+			// and that shortfall is what a burst must cover. Without this
+			// floor its lateness priced at $0 and no burst for it could
+			// ever be approved automatically.
+			late = math.Max(late, math.Max(div(m.W90, m.share), m.tpath))
+			deficit = math.Max(deficit, m.W90-m.share*t)
+		}
+		m.lateBy = secs(math.Max(0, late-m.T))
 		m.horizon = t
-		m.deficit = math.Max(before+m.W90-C*t, m.W90-m.cap*t)
+		m.deficit = deficit
 	}
 }
 

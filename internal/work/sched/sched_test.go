@@ -699,3 +699,36 @@ func TestBlockedJobsRankAfterRunnable(t *testing.T) {
 		t.Fatal("a blocked job was dispatched")
 	}
 }
+
+// TestEvictedJobIsLateAtItsShare reproduces the overflow, evict, lateBy=0
+// case. On 10 slots, a (25 slot-hours due in 3h) enters the on-time set,
+// then b (16 due in 4h) overflows it (41 > 40), so the largest member, a,
+// is evicted to late. Inserted alone in deadline order a finishes at 2.5h,
+// before its deadline, which used to make its lateness 0 and price any
+// burst for it at $0 of lateness, so none could be approved
+// automatically. The plan runs a at its share (6 slots), finishing at
+// about 4.2h: it is late by about 1.2h, and a burst that fits the budget
+// and costs less than that lateness is requested on its own.
+func TestEvictedJobIsLateAtItsShare(t *testing.T) {
+	a := job("a", "p", 100, 25, 3*time.Hour)
+	b := job("b", "p", 100, 16, 4*time.Hour)
+	s := Snapshot{Now: t0,
+		Pools: []Pool{cpu(10), {Name: "cpu-spot", CostPerSlotHour: 0.2,
+			Burst: &Burst{MaxSlots: 40, Provisioning: 5 * time.Minute, CostPerSlotHour: 0.2}}},
+		Projects: []Project{{Name: "p", BurstBudgetLeft: 100, LateCostPerHour: 100}},
+		Jobs:     []Job{a, b}}
+	for i := range s.Jobs {
+		s.Jobs[i].Pools = []string{"cpu", "cpu-spot"}
+	}
+	d := Decide(s, &State{}, DefaultConfig())
+	ja := d.Jobs["a"]
+	if !ja.AtRisk || ja.LateBy < time.Hour || ja.LateBy > 90*time.Minute {
+		t.Fatalf("a: at risk %v, late by %v; want about 1.2h", ja.AtRisk, ja.LateBy)
+	}
+	if ja.Burst == nil || !ja.Burst.Closes || !ja.Burst.Auto {
+		t.Fatalf("a: burst %+v; want one that closes it, requested without approval", ja.Burst)
+	}
+	if d.Jobs["b"].AtRisk {
+		t.Fatalf("b at risk: %+v", d.Jobs["b"])
+	}
+}
