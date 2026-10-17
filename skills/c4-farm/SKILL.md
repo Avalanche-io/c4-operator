@@ -27,8 +27,8 @@ is checked against their Kubernetes permissions and recorded as an Event naming 
    `namespace` and `name` for one job's history.
 
 `c4_get_job` also reports `work`: progress weighted by slot-seconds, which is
-the honest measure when frames differ in cost (a hero FX range can be a third
-of a shot's work in a tenth of its frames). `c4_list_jobs` filters by `shot` to
+the honest measure when frames differ in cost (a hero FX range at 3.4 times the
+median can be half a shot's work in a fifth of its frames). `c4_list_jobs` filters by `shot` to
 show a shot's whole chain (sim, FX, comp, transcode).
 
 ## Changing what happens
