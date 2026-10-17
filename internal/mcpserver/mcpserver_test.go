@@ -46,6 +46,10 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(b, &m)
 		m["unitList"] = []map[string]any{{"i": 0, "label": "1001", "state": "succeeded", "attempts": 1}, {"i": 1, "label": "1002", "state": "running", "attempts": 1, "node": "w1"}}
 		json.NewEncoder(w).Encode(m)
+	case r.Method == "GET" && r.URL.Path == "/api/v1/book":
+		u := 3
+		json.NewEncoder(w).Encode(api.Book{Entries: []api.BookEntry{{Seq: 1, At: due.Add(-time.Hour), Actor: "node/w1", Signer: "node", Kind: "failed",
+			Object: api.BookObject{Type: "unit", Job: r.URL.Query().Get("job"), Unit: &u}, Message: "1004 failed on w1 (exit 137): OOMKilled"}}})
 	case r.Method == "POST":
 		body, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
@@ -114,7 +118,7 @@ func TestToolsAreNamedAndAnnotated(t *testing.T) {
 			t.Errorf("tool %s lacks the c4_ prefix, a title, a description or annotations", tl.Name)
 		}
 		readOnly := strings.HasPrefix(tl.Name, "c4_list") || strings.HasPrefix(tl.Name, "c4_get") || tl.Name == "c4_farm_status" ||
-			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody"
+			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book"
 		if tl.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %s: readOnlyHint %v", tl.Name, tl.Annotations.ReadOnlyHint)
 		}
@@ -198,5 +202,23 @@ func TestGetJobListsUnitsOnRequest(t *testing.T) {
 	units, _ := out["units"].([]any)
 	if len(units) != 1 || units[0].(map[string]any)["node"] != "w1" {
 		t.Fatalf("units %v", out["units"])
+	}
+}
+
+func TestReadBookFiltersToAJob(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "")
+	res, out := call(t, cs, "c4_read_book", map[string]any{"namespace": "show-a", "name": "sh010", "limit": 5})
+	entries, _ := out["entries"].([]any)
+	if res.IsError || len(entries) != 1 {
+		t.Fatalf("book %v %q", out, text(res))
+	}
+	e := entries[0].(map[string]any)
+	if e["kind"] != "failed" || e["object"].(map[string]any)["job"] != "show-a/sh010" {
+		t.Fatalf("entry %v", e)
+	}
+	res, _ = call(t, cs, "c4_read_book", map[string]any{"namespace": "show-a"})
+	if !res.IsError {
+		t.Fatal("a namespace without a name was accepted")
 	}
 }

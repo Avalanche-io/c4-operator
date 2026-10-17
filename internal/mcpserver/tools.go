@@ -72,6 +72,8 @@ func Tools(c *Client) []Tool {
 			readOnly, c.capacityCost),
 		tool("c4_dependency_graph", "Dependency graph", "Jobs and the jobs they depend on, with effective deadlines, ETAs and the critical path.",
 			readOnly, c.graph),
+		tool("c4_read_book", "Read the farm's book", "The farm's history, newest last: units captured and failed on which node, retries, expansions, yields and resumes, capacity requested, approved and provisioned, and every hold, boost, deadline and requeue a person or agent made, each with who did it, which entity signed it and the C4 ID of its signed record. Filter to one job with namespace and name. Use it to answer why a unit retried, why a run yielded or who moved a deadline.",
+			readOnly, c.readBook),
 		tool("c4_diff_views", "Diff two views", "The files that differ between two views (C4 IDs) of a project: added, modified and removed paths with sizes and IDs, computed from directory records without a checkout. Use it to choose which CI targets a change affects.",
 			readOnly, c.diffViews),
 		tool("c4_trace_file", "Trace a file to the task that made it", "The signed task record of the unit that wrote a file of a job's output (or of a unit): whether it verifies against the farm's signing roots and who signed it, the node and container images it ran on, the input views it mounted and the jobs that produced them, its declared AI use, and the file's C2PA manifest definition and OMC asset.",
@@ -155,6 +157,7 @@ type ListJobsIn struct {
 	Class      string `json:"class,omitempty" jsonschema:"render, ci or ml"`
 	Phase      string `json:"phase,omitempty" jsonschema:"Queued, Running, Blocked, Held, Succeeded or Failed"`
 	AtRiskOnly bool   `json:"at_risk_only,omitempty" jsonschema:"only jobs projected to miss their deadline"`
+	Shot       string `json:"shot,omitempty" jsonschema:"only the jobs of this shot (sim, render, comp, transcode)"`
 	Limit      int    `json:"limit,omitempty" jsonschema:"rows to return, 1 to 100 (default 20)"`
 	Offset     int    `json:"offset,omitempty" jsonschema:"rows to skip, for the next page"`
 }
@@ -175,6 +178,7 @@ type JobRow struct {
 	Message      string  `json:"message,omitempty"`
 	Held         bool    `json:"held,omitempty"`
 	Boost        float64 `json:"boost,omitempty"`
+	Shot         string  `json:"shot,omitempty"`
 }
 
 type ListJobsOut struct {
@@ -187,7 +191,7 @@ type ListJobsOut struct {
 func row(j api.Job) JobRow {
 	r := JobRow{Job: j.Namespace + "/" + j.Name, Project: j.Project, Class: j.Class, Phase: j.Phase, Rank: j.Rank,
 		Done: j.Units.Succeeded, Total: j.Units.Total, Running: j.Units.Running, SlackSeconds: j.Estimate.SlackSeconds,
-		Feasible: j.Estimate.Feasible, Message: j.Estimate.Message, Held: j.Nudge.Hold}
+		Feasible: j.Estimate.Feasible, Message: j.Estimate.Message, Held: j.Nudge.Hold, Shot: j.Shot}
 	if j.Nudge.Boost > 1 {
 		r.Boost = j.Nudge.Boost
 	}
@@ -213,7 +217,7 @@ func (c *Client) listJobs(ctx context.Context, _ *mcp.CallToolRequest, in ListJo
 	var rows []JobRow
 	for _, j := range s.Jobs {
 		if in.Project != "" && j.Project != in.Project || in.Class != "" && j.Class != in.Class ||
-			in.Phase != "" && !strings.EqualFold(j.Phase, in.Phase) || in.AtRiskOnly && !atRisk(j) {
+			in.Phase != "" && !strings.EqualFold(j.Phase, in.Phase) || in.AtRiskOnly && !atRisk(j) || in.Shot != "" && j.Shot != in.Shot {
 			continue
 		}
 		rows = append(rows, row(j))
@@ -263,11 +267,14 @@ type GetJobOut struct {
 	Inputs       []map[string]any `json:"inputs"`
 	Output       map[string]any   `json:"output,omitempty"`
 	UnitStates   map[string]any   `json:"unitStates"`
-	Pools        []string         `json:"pools"`
-	DependsOn    []string         `json:"dependsOn"`
-	Blacklist    []string         `json:"blacklist,omitempty"`
-	Units        []UnitRow        `json:"units,omitempty"`
-	UnitsShown   int              `json:"unitsShown,omitempty"`
+	// Work is progress weighted by work in slot-seconds: done, running,
+	// the running units' remainder, and W and W90 still to do.
+	Work       api.Work  `json:"work"`
+	Pools      []string  `json:"pools"`
+	DependsOn  []string  `json:"dependsOn"`
+	Blacklist  []string  `json:"blacklist,omitempty"`
+	Units      []UnitRow `json:"units,omitempty"`
+	UnitsShown int       `json:"unitsShown,omitempty"`
 	// Lens is the class's own summary: passes for render; pipelines,
 	// time to green and flaky targets for CI; ranks, checkpoints and
 	// yields for ML.
@@ -289,7 +296,7 @@ func (c *Client) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobIn
 	}
 	out := GetJobOut{Job: row(j), Objective: asMap(d["objective"]), Estimate: asMap(d["estimate"]),
 		HeavyRegions: asMaps(d["heavyRegions"]), Inputs: asMaps(d["inputs"]), UnitStates: asMap(d["unitStates"]),
-		Pools: j.Pools, DependsOn: j.DependsOn, Blacklist: j.Blacklist}
+		Pools: j.Pools, DependsOn: j.DependsOn, Blacklist: j.Blacklist, Work: j.Work}
 	if o := asMap(d["output"]); len(o) > 0 {
 		out.Output = o
 	}
@@ -552,4 +559,33 @@ func (c *Client) provenance(ctx context.Context, in TraceIn, route string) (*mcp
 	}
 	var d map[string]any
 	return nil, d, c.do(ctx, "GET", strings.Replace(p, "/jobs/", route, 1)+"?"+q.Encode(), nil, &d)
+}
+
+type BookIn struct {
+	Namespace string `json:"namespace,omitempty" jsonschema:"with name, only this job's entries"`
+	Name      string `json:"name,omitempty" jsonschema:"with namespace, only this job's entries"`
+	Limit     int    `json:"limit,omitempty" jsonschema:"newest entries to return, 1 to 1000 (default 50)"`
+}
+
+func (c *Client) readBook(ctx context.Context, _ *mcp.CallToolRequest, in BookIn) (*mcp.CallToolResult, api.Book, error) {
+	q := url.Values{}
+	limit := in.Limit
+	if limit <= 0 {
+		limit = 50
+	}
+	q.Set("limit", strconv.Itoa(min(limit, 1000)))
+	if in.Namespace != "" || in.Name != "" {
+		if _, err := (JobRef{Namespace: in.Namespace, Name: in.Name}).path(); err != nil {
+			return nil, api.Book{}, err
+		}
+		q.Set("job", in.Namespace+"/"+in.Name)
+	}
+	var b api.Book
+	if err := c.do(ctx, "GET", "/book?"+q.Encode(), nil, &b); err != nil {
+		return nil, api.Book{}, err
+	}
+	if b.Entries == nil {
+		b.Entries = []api.BookEntry{}
+	}
+	return nil, b, nil
 }

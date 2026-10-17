@@ -26,8 +26,11 @@ type Client struct {
 	Token string
 	// As selects a development viewer (?as=) on HUDs started with
 	// --hud-dev-viewers. Never used in production.
-	As   string
-	HTTP *http.Client
+	As string
+	// Agent names the agent using this client; the HUD books its
+	// controls as "agent/NAME for USER" (X-C4-Agent).
+	Agent string
+	HTTP  *http.Client
 }
 
 // APIError is a HUD error, phrased for an agent to act on.
@@ -66,6 +69,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	req.Header.Set("Accept", "application/json")
 	// The HUD notes the client in its signed control records.
 	req.Header.Set("X-C4-Client", "mcp")
+	if c.Agent != "" {
+		req.Header.Set("X-C4-Agent", c.Agent)
+	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
 	}

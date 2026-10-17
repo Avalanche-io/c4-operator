@@ -21,6 +21,15 @@ is checked against their Kubernetes permissions and recorded as an Event naming 
    what is wrong ("needs 14 slots, can get 8; misses by 25 minutes"). Heavy frame
    ranges explain a render that is slower than its average frame suggests.
 4. `c4_get_unit` for a failed or slow unit: attempts, node, log tail, events.
+5. `c4_read_book` for what happened and who did it: captures and failures by
+   node, retries, yields and resumes, capacity requests and approvals, and every
+   hold, boost and deadline change, each with its signer and signed record. Give
+   `namespace` and `name` for one job's history.
+
+`c4_get_job` also reports `work`: progress weighted by slot-seconds, which is
+the honest measure when frames differ in cost (a hero FX range can be a third
+of a shot's work in a tenth of its frames). `c4_list_jobs` filters by `shot` to
+show a shot's whole chain (sim, FX, comp, transcode).
 
 ## Changing what happens
 

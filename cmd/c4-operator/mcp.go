@@ -28,6 +28,7 @@ func runMCP(args []string) error {
 	hud := fs.String("hud", env("C4_HUD", "http://127.0.0.1:30080"), "the HUD's address")
 	tokenFile := fs.String("token-file", "", "file holding the bearer token sent to the HUD (stdio mode; over HTTP each request's own token is used)")
 	as := fs.String("as", "", "development only: the viewer to ask as, on a HUD started with --hud-dev-viewers")
+	agent := fs.String("agent", "", "the agent's name; the farm's book records its controls as agent/NAME for the user")
 	addr := fs.String("http", "", "serve Streamable HTTP on this address instead of stdio")
 	toolsMD := fs.Bool("tools-md", false, "print the tool reference as markdown and exit")
 	fs.Parse(args)
@@ -47,10 +48,10 @@ func runMCP(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *addr == "" {
-		return mcpserver.New(&mcpserver.Client{Base: *hud, Token: token, As: *as}).Run(ctx, &mcp.StdioTransport{})
+		return mcpserver.New(&mcpserver.Client{Base: *hud, Token: token, As: *as, Agent: *agent}).Run(ctx, &mcp.StdioTransport{})
 	}
 	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		c := &mcpserver.Client{Base: *hud, Token: token, As: *as}
+		c := &mcpserver.Client{Base: *hud, Token: token, As: *as, Agent: *agent}
 		if t, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 			c.Token = t
 		}
