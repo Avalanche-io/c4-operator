@@ -229,6 +229,22 @@ func risk(now time.Time, v *view, js sched.JobState, e *c4v1.WorkEstimate) strin
 	return c4v1.RiskNone
 }
 
+// shownSlack is the deadline less the shown finish risk() judges by (p90,
+// p95 for a suggested deadline), so slack, ETA and risk agree. The
+// scheduler's Slack is at all attainable capacity, and can read "+7h"
+// while the shown ETA is late. ok is false without a deadline or an ETA.
+func shownSlack(v *view, e *c4v1.WorkEstimate) (int64, bool) {
+	d := v.obj.Deadline
+	f := e.ETA90
+	if v.source == "suggested" && e.ETA95 != nil {
+		f = e.ETA95
+	}
+	if d.IsZero() || f == nil {
+		return 0, false
+	}
+	return int64(d.Sub(f.Time).Seconds()), true
+}
+
 // needsPerson sets or clears the NeedsPerson condition.
 func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting int, gen int64) {
 	reason, msg := "", ""

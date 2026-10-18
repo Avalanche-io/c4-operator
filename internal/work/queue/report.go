@@ -288,6 +288,9 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	e.Calibrated = v.sum.Calibrated
 	e.HeavyRegions = q.heavy(v)
 	e.Risk = risk(now, v, js, e)
+	if sl, ok := shownSlack(v, e); ok {
+		e.SlackSeconds = sl
+	}
 	st.Estimate = e
 	return st
 }

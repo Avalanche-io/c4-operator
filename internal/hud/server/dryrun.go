@@ -46,8 +46,13 @@ func estimateOf(d queue.DryRun) api.SubmitEstimate {
 		Deadline: timePtr(d.Deadline), DeadlineSource: d.DeadlineSource,
 		Feasible: d.Feasible, AtRisk: d.AtRisk, Calibrated: d.Estimate.Calibrated, Message: d.Message,
 	}
-	if !d.Deadline.IsZero() && !d.Band.P50.IsZero() {
-		e.SlackSeconds = int64(d.Deadline.Sub(d.Band.P50).Seconds())
+	// slack against the shown p90, as a running job's (queue report.go;
+	// p95 for a suggested deadline)
+	if f := d.Band.P90; !d.Deadline.IsZero() && !f.IsZero() {
+		if d.DeadlineSource == "suggested" && !d.Band.P95.IsZero() {
+			f = d.Band.P95
+		}
+		e.SlackSeconds = int64(d.Deadline.Sub(f).Seconds())
 	}
 	if s := d.Suggestion; s != nil {
 		e.Suggestion = &api.SubmitSuggestion{Deadline: s.Deadline.Time, State: s.State, Policy: s.Policy, Quantile: s.Quantile}

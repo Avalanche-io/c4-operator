@@ -246,3 +246,32 @@ func TestPreflightOf(t *testing.T) {
 		t.Fatalf("done: %+v", pf)
 	}
 }
+
+func TestShownSlack(t *testing.T) {
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	d := now.Add(4 * time.Hour)
+	at := func(h float64) *metav1.Time {
+		return &metav1.Time{Time: now.Add(time.Duration(h * float64(time.Hour)))}
+	}
+	for _, c := range []struct {
+		name   string
+		dl     time.Time
+		source string
+		e      c4v1.WorkEstimate
+		want   int64
+		ok     bool
+	}{
+		{"no deadline", time.Time{}, "spec", c4v1.WorkEstimate{ETA90: at(2)}, 0, false},
+		{"no ETA", d, "spec", c4v1.WorkEstimate{}, 0, false},
+		{"early, against p90", d, "spec", c4v1.WorkEstimate{ETA50: at(1), ETA90: at(3), ETA95: at(5)}, 3600, true},
+		{"late, against p90", d, "spec", c4v1.WorkEstimate{ETA50: at(3), ETA90: at(41)}, -37 * 3600, true},
+		{"suggested, against p95", d, "suggested", c4v1.WorkEstimate{ETA90: at(3), ETA95: at(5)}, -3600, true},
+	} {
+		v := &view{source: c.source}
+		v.obj.Deadline = c.dl
+		got, ok := shownSlack(v, &c.e)
+		if got != c.want || ok != c.ok {
+			t.Errorf("%s: slack %d %v, want %d %v", c.name, got, ok, c.want, c.ok)
+		}
+	}
+}
