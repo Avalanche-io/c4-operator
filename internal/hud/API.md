@@ -508,6 +508,83 @@ the updated JobSummary; `node` the updated node. Errors are `4xx` with
 | `/nodes/{name}/disable`       | `{ disabled }`                                                         | taint or untaint the node farm-wide; running units finish                                                                                                                                                                                                                                                                                                                |
 | `/capacity/{pool}/approve`    | `{}`                                                                   | approve the pending capacity request in the pool                                                                                                                                                                                                                                                                                                                         |
 
+## Submitting
+
+What `c4 farm submit` calls, and MCP's `c4_submit_job` wraps. Each write
+is checked like a control (a SubjectAccessReview for creating
+materializations, or workjobs, in the project's namespace) and made with the
+HUD's service account; the bytes go through the manager's own store access,
+so no store credential leaves the cluster. `{project}` is a project the
+viewer sees; anything else is `404`.
+
+### POST /objects/{project}/missing
+
+```
+{ ids: [c4id] }  ->  { missing: [c4id] }
+```
+
+The IDs the project's store lacks, in the order given, without duplicates.
+At most 100,000 per request.
+
+### PUT /objects/{project}/{c4id}
+
+The body is the object's bytes. It is held on the manager's disk and
+identified first: `400` if its C4 ID is not `{c4id}`, so the store never
+holds bytes under the wrong name. `200 { ok, id, stored, bytes? }`;
+`stored` is false when the store already had it.
+
+### POST /views/{project}
+
+```
+{ files: [ { path, id, size, exec? } ] }  ->  { view, files, bytes }
+```
+
+Records a tree of stored objects as a view: its directory records go into
+the store and `view` is the tree's C4 ID, the same ID `c4-operator tree-id`
+gives the directory on disk. Paths are clean, relative and slash-separated.
+`409 { missing: [c4id], files, bytes }` when an object is not in the store.
+
+### GET /views/{project}/{c4id}/files[?path=prefix&limit=N]
+
+```
+{ view, files: [ { path, id, size, exec? } ], truncated? }
+```
+
+The files of a view, or of the subtree at `path`; the bytes of each come
+from `GET /objects/{project}/{c4id}`. This is what `c4 farm get` reads.
+
+### POST /jobs
+
+```
+{ project? | namespace?, name?, type?, shot?, spec, inputs?: [ { view? | fromJob?, mountPath, readOnly? } ],
+  aiUsage?, dryRun? }
+->
+{ ok, dryRun?, namespace, name, project, link, message, materializations?,
+  estimate?: { units, work50, work90, eta50?, eta80?, eta90?, eta95?, deadline?, deadlineSource,
+               suggestion?: { deadline, state, policy, quantile, nextSession? },
+               slackSeconds, feasible, atRisk, calibrated?, message? },
+  estimateError? }
+```
+
+`spec` is a WorkJob spec (`c4.avalanche.io/v1alpha1`). The HUD names the
+job `<shot>-<type>-vNNN` when `name` is empty, one version past the latest
+such job in the namespace; makes a Materialization for each input view
+(named from the view's ID, so the same view is one Materialization);
+adds `fromJob` inputs to `dependsOn`; sets the deadline mode to `Suggested`
+when the spec has no deadline; and stamps `c4.avalanche.io/owner` (the
+viewer), `c4.avalanche.io/submitted-via` (`hud` or `mcp`), and the labels
+`c4.avalanche.io/shot` and `c4.avalanche.io/job-type`. `aiUsage` becomes
+the job's `c4.avalanche.io/ai-usage` annotation.
+
+`estimate` is what the queue expects of the job against the farm as it last
+planned it. `slackSeconds` is the deadline less `eta50`. With `dryRun`
+nothing is created; the answer is `200`, or `503` when the queue has not
+planned yet (or runs on another replica) and `422` when the job's class
+cannot plan it. Without `dryRun` the answer is `201`, with
+`estimateError` when there was no estimate; `409` when the name is taken.
+A book entry of kind `submit` names the viewer (or the agent for the
+viewer, through MCP).
+
 ## Changes from the first draft of the contract
 
 | change                                    | why                                                                                                                                               |

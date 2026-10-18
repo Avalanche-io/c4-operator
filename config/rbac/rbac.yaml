@@ -103,6 +103,11 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [workjobs, capacityrequests]
   verbs: [get, list, watch, patch]
+# Submitting for a signed-in viewer (POST /api/v1/jobs), after a
+# SubjectAccessReview says the viewer may create the same objects.
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs, materializations]
+  verbs: [create]
 - apiGroups: [""]
   resources: [pods/log]
   verbs: [get]

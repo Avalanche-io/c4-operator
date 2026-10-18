@@ -208,6 +208,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// Without the work system the HUD has no queue to ask (a nil
 		// *queue.Queue in the interface would not compare equal to nil).
 		srv.Queue = q
+		srv.DryRun = hudserver.QueueDryRun(q)
 	}
 	if dev != "" {
 		srv.DevViewers, err = parseViewers(dev)
