@@ -504,10 +504,13 @@ func (c *checker) checkGuard(v *view) {
 			if q := quotaOf(v.projects[j.Project], x.Pool); v.hasQuota[x.Pool] && q.BorrowingLimit >= 0 && v.useAfter[j.Project][x.Pool]+k-q.Nominal > q.BorrowingLimit {
 				continue
 			}
-			// Short by at least a whole slot (the band preemption uses).
-			if have := running(j) + v.sent[j.ID]; float64(have)+1 <= st.Required+1e-9 {
+			// Short by at least a whole slot (the band preemption uses) of
+			// its deadline need: the boosted part of Required is served
+			// by the boost tier, after the guard.
+			need := st.Required / math.Min(2, math.Max(1, j.Boost))
+			if have := running(j) + v.sent[j.ID]; float64(have)+1 <= need+1e-9 {
 				c.violate("starvation-over-deadline", x.Job, fmt.Sprintf("guard gave the last slot of %s to %s (slack %s) while %s, due %s, holds %d of the %.1f slots it needs",
-					x.Pool, x.Job, v.d.Jobs[x.Job].Slack.Round(time.Hour), j.ID, j.Deadline.Format("Mon 15:04"), have, st.Required))
+					x.Pool, x.Job, v.d.Jobs[x.Job].Slack.Round(time.Hour), j.ID, j.Deadline.Format("Mon 15:04"), have, need))
 				return
 			}
 		}
