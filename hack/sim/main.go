@@ -64,7 +64,9 @@ func main() {
 		os.Exit(1)
 	}
 	if !*skipETA {
-		if err := writeETA(*out, runETAExperiment(p, seedList), seedList); err != nil {
+		x := runETAExperiment(etaVariant{name: "main workload", p: p}, seedList, mainETAArms)
+		cont := runETAExperiment(contentionVariant(p), seedList, deadlineArms)
+		if err := writeETA(*out, x, cont, seedList); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
