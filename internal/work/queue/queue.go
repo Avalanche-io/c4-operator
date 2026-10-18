@@ -293,6 +293,8 @@ type view struct {
 	preflight map[int]bool // live pods still preparing
 	runnable  []int
 	blocked   bool
+	// after lists the jobs it waits on that have not succeeded (keys).
+	after []string
 	// stuckOn names a dependency that failed: the job cannot start.
 	stuckOn string
 	// unschedulable says why no unit of the job can ever be placed.
@@ -589,6 +591,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	for _, dep := range j.Spec.DependsOn {
 		if ph := phases[j.Namespace+"/"+dep]; ph != "Succeeded" {
 			v.blocked = true
+			v.after = append(v.after, j.Namespace+"/"+dep)
 			if ph == "Failed" && v.stuckOn == "" {
 				v.stuckOn = j.Namespace + "/" + dep
 			}
@@ -737,6 +740,9 @@ func schedJob(v *view, free int) sched.Job {
 		Boost: floatOr(v.job.Spec.Nudge.Boost, 0), LastRunning: v.mem.lastRun,
 		Preemptible: v.driver.Preemptible(), Checkpoints: v.driver.Checkpoints(),
 	}
+	// sched propagates deadlines up the dependency graph and starts a
+	// waiting job no earlier than its upstream jobs finish (sched.Job.After).
+	j.After = v.after
 	if v.blocked {
 		j.Blocked = len(v.runnable)
 	} else {

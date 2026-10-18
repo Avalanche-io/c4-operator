@@ -53,19 +53,27 @@ type jobCtx struct {
 	proj                        *projState
 
 	hasDeadline, hasRate bool
-	T, W, W90, tpath     float64 // seconds, slot-seconds, slot-seconds, seconds
-	R, Rb, A             float64
-	slack                time.Duration
-	feasible             bool // finishes in time with all attainable slots (DESIGN 9.9)
-	planOK               bool // on time in the plan; the deadline tier serves these first
-	share                float64
-	atRisk               bool
-	lateBy               time.Duration
-	finish50, finish90   float64 // planned finish, seconds from now
-	horizon, deficit     float64 // what a burst must cover: slot-seconds short by horizon
-	group                int     // 0 feasible with need, 1 infeasible with need, 2 other, 3 can use no slot
-	noPool               bool    // none of its pools is in the snapshot
-	burst                *BurstSuggestion
+	// deadline is the effective deadline (Job.After); deadlineFor the
+	// dependent job that set it, if not the job's own.
+	deadline    time.Time
+	deadlineFor string
+	// startAfter is when a waiting job's upstream jobs are planned to
+	// finish, seconds from now (0: none), in the plan and as they report
+	// it (shownPlan).
+	startAfter, startShown float64
+	T, W, W90, tpath       float64 // seconds, slot-seconds, slot-seconds, seconds
+	R, Rb, A               float64
+	slack                  time.Duration
+	feasible               bool // finishes in time with all attainable slots (DESIGN 9.9)
+	planOK                 bool // on time in the plan; the deadline tier serves these first
+	share                  float64
+	atRisk                 bool
+	lateBy                 time.Duration
+	finish50, finish90     float64 // planned finish, seconds from now
+	horizon, deficit       float64 // what a burst must cover: slot-seconds short by horizon
+	group                  int     // 0 feasible with need, 1 infeasible with need, 2 other, 3 can use no slot
+	noPool                 bool    // none of its pools is in the snapshot
+	burst                  *BurstSuggestion
 	// shown is what the job reports when it differs from the plan's own
 	// figures above (planFluid); nil means it reports those.
 	shown  *shownPlan

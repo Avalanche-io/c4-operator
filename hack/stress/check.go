@@ -159,7 +159,7 @@ func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 	// the time left (less the critical path), not the planned R.
 	for i := range s.Jobs {
 		j := &s.Jobs[i]
-		r := c.perJobR(s, j)
+		r := c.perJobR(s, d, j)
 		if j.Hold || j.HoldStop || r <= 0 {
 			continue
 		}
@@ -211,11 +211,17 @@ func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 	return v
 }
 
-func (c *checker) perJobR(s sched.Snapshot, j *sched.Job) float64 {
+// perJobR is a job's R before planning, for the deadline it is planned for
+// (its own, or earlier for a job waiting on it: JobState.Deadline).
+func (c *checker) perJobR(s sched.Snapshot, d sched.Decisions, j *sched.Job) float64 {
+	dl := j.Deadline
+	if st := d.Jobs[j.ID]; !st.Deadline.IsZero() {
+		dl = st.Deadline
+	}
 	switch {
-	case !j.Deadline.IsZero():
+	case !dl.IsZero():
 		w90 := math.Max(j.Estimate.W90, j.Estimate.W)
-		t := j.Deadline.Sub(s.Now).Seconds()
+		t := dl.Sub(s.Now).Seconds()
 		if c.cfg.TailAware {
 			t -= j.Estimate.TPath
 		}
@@ -419,7 +425,7 @@ func (c *checker) dump(v *view, job, detail string) {
 			v.s.Now.Sub(since(&j)).Round(time.Minute), v.sent[j.ID], st.Required, st.Share, st.AtRisk, st.LateBy.Round(time.Minute), st.Rank, j.Estimate.W90, j.Estimate.TPath, st.Message)
 	}
 	for _, x := range v.d.Dispatch {
-		fmt.Fprintf(w, "dispatch %s %s %s %d\n", x.Job, x.Unit, x.Pool, x.Slots)
+		fmt.Fprintf(w, "dispatch %s %s %s %d %s\n", x.Job, x.Unit, x.Pool, x.Slots, x.Tier)
 	}
 	for _, x := range v.d.Preempt {
 		fmt.Fprintf(w, "preempt %s %s %s for %s %s yield %v\n", x.Job, x.Unit, x.Pool, x.For, x.Reason, x.Yield)
@@ -726,7 +732,16 @@ func (c *checker) checkPlan(v *view) {
 	for i := range v.s.Jobs {
 		j := &v.s.Jobs[i]
 		st, ok := v.d.Jobs[j.ID]
-		if !ok || j.Deadline.IsZero() || j.Hold || j.HoldStop || math.Max(j.Estimate.W90, j.Estimate.W) <= 0 {
+		if !ok || j.Hold || j.HoldStop || math.Max(j.Estimate.W90, j.Estimate.W) <= 0 {
+			continue
+		}
+		// The deadline the job was planned for: its own, or earlier for a
+		// job that waits on it (sched.Job.After).
+		dl := st.Deadline
+		if dl.IsZero() {
+			dl = j.Deadline
+		}
+		if dl.IsZero() {
 			continue
 		}
 		pr := v.projects[j.Project]
@@ -736,17 +751,17 @@ func (c *checker) checkPlan(v *view) {
 		}
 		if !st.ETA90.IsZero() && !bad["eta-inconsistent"] {
 			switch {
-			case st.AtRisk && !st.ETA90.After(j.Deadline):
+			case st.AtRisk && !st.ETA90.After(dl):
 				bad["eta-inconsistent"] = true
-				c.violate("eta-inconsistent", j.ID, fmt.Sprintf("at risk but ETA90 %s is before its deadline %s", st.ETA90.Format("Mon 15:04"), j.Deadline.Format("Mon 15:04")))
-			case !st.AtRisk && st.ETA90.Sub(j.Deadline) > time.Second:
+				c.violate("eta-inconsistent", j.ID, fmt.Sprintf("at risk but ETA90 %s is before its deadline %s", st.ETA90.Format("Mon 15:04"), dl.Format("Mon 15:04")))
+			case !st.AtRisk && st.ETA90.Sub(dl) > time.Second:
 				bad["eta-inconsistent"] = true
-				c.violate("eta-inconsistent", j.ID, fmt.Sprintf("on track but ETA90 %s is after its deadline %s", st.ETA90.Format("Mon 15:04"), j.Deadline.Format("Mon 15:04")))
+				c.violate("eta-inconsistent", j.ID, fmt.Sprintf("on track but ETA90 %s is after its deadline %s", st.ETA90.Format("Mon 15:04"), dl.Format("Mon 15:04")))
 			}
 		}
-		if !j.Deadline.After(v.s.Now) && !st.AtRisk && !bad["past-due-on-track"] {
+		if !dl.After(v.s.Now) && !st.AtRisk && !bad["past-due-on-track"] {
 			bad["past-due-on-track"] = true
-			c.violate("past-due-on-track", j.ID, fmt.Sprintf("past its deadline %s and reported on track", j.Deadline.Format("Mon 15:04")))
+			c.violate("past-due-on-track", j.ID, fmt.Sprintf("past its deadline %s and reported on track", dl.Format("Mon 15:04")))
 		}
 	}
 	for _, b := range v.d.Bursts {

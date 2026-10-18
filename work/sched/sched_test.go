@@ -1007,3 +1007,102 @@ func TestSubsetOverloadIsAtRisk(t *testing.T) {
 		t.Fatalf("60 slot-hours on 10 slots in 5 hours: %d of 10 at risk, %d with a lon-spot burst", risk, burst)
 	}
 }
+
+// waitingJob is a job of n one-slot units all waiting on upstream jobs.
+func waitingJob(id string, n int, wHours float64, due time.Duration, after ...string) Job {
+	j := job(id, "p", 0, wHours, due)
+	j.Blocked = n
+	j.After = after
+	return j
+}
+
+func TestAfterPropagatesDeadlines(t *testing.T) {
+	// comp (10 units, 10 slot-hours, due in 10h) waits on light, which has
+	// no deadline of its own: light must finish by 9h (10h less comp's 1h
+	// on its 10 slots), and is planned in the deadline tier.
+	light := job("light", "p", 10, 10, 0)
+	comp := waitingJob("comp", 10, 10, 10*time.Hour, "light")
+	other := job("other", "p", 10, 9, 9*time.Hour+30*time.Minute)
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{other, light, comp}}
+	d := Decide(s, &State{}, DefaultConfig())
+	ls := d.Jobs["light"]
+	if !ls.Deadline.Equal(t0.Add(9*time.Hour)) || ls.DeadlineFor != "comp" {
+		t.Fatalf("light deadline %v for %q, want %v for comp", ls.Deadline, ls.DeadlineFor, t0.Add(9*time.Hour))
+	}
+	if !strings.Contains(ls.Message, "(for comp)") {
+		t.Fatalf("message %q does not name comp", ls.Message)
+	}
+	if ls.Required <= 0 || tierCount(d, "light", TierNeed) == 0 {
+		t.Fatalf("light required %v, %d need-tier units", ls.Required, tierCount(d, "light", TierNeed))
+	}
+	if cs := d.Jobs["comp"]; cs.DeadlineFor != "" || !cs.Deadline.Equal(t0.Add(10*time.Hour)) {
+		t.Fatalf("comp deadline %v for %q, want its own", cs.Deadline, cs.DeadlineFor)
+	}
+	// Without After, light has no deadline and no need.
+	s.Jobs[2].After = nil
+	d = Decide(s, &State{}, DefaultConfig())
+	if !d.Jobs["light"].Deadline.IsZero() || d.Jobs["light"].Required != 0 || tierCount(d, "light", TierNeed) != 0 {
+		t.Fatalf("without After: light deadline %v, required %v", d.Jobs["light"].Deadline, d.Jobs["light"].Required)
+	}
+}
+
+func TestAfterChainTakesTheRootDeadline(t *testing.T) {
+	// a -> b -> c; c is due in 10h and takes 1h, b takes 2h: b is due by
+	// 9h and a by 7h, both for c.
+	a := job("a", "p", 10, 10, 0)
+	b := waitingJob("b", 10, 20, 0, "a")
+	c := waitingJob("c", 10, 10, 10*time.Hour, "b")
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{c, b, a}}
+	d := Decide(s, &State{}, DefaultConfig())
+	for id, want := range map[string]time.Duration{"a": 7 * time.Hour, "b": 9 * time.Hour} {
+		st := d.Jobs[id]
+		if !st.Deadline.Equal(t0.Add(want)) || st.DeadlineFor != "c" {
+			t.Fatalf("%s deadline %v for %q, want in %v for c", id, st.Deadline.Sub(t0), st.DeadlineFor, want)
+		}
+	}
+}
+
+func TestAfterCycleTerminates(t *testing.T) {
+	a := waitingJob("a", 10, 10, 10*time.Hour, "b")
+	b := waitingJob("b", 10, 10, 10*time.Hour, "a")
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{a, b}}
+	_ = Decide(s, &State{}, DefaultConfig())
+}
+
+func TestWaitingJobStartsAfterUpstream(t *testing.T) {
+	// light (10 units, 50 slot-hours) on 20 slots finishes in 2.5h in the
+	// plan; comp waits on it and then takes 5h on its 10 units, so it
+	// finishes at 7.5h, past its 7h deadline. Planned as if it could
+	// start now, it read on time (100 slot-hours on 20 slots by 5h).
+	light := job("light", "p", 10, 50, 0)
+	comp := waitingJob("comp", 10, 50, 7*time.Hour, "light")
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(20)}, Jobs: []Job{light, comp}}
+	cfg := DefaultConfig()
+	cfg.TailAware = false
+	d := Decide(s, &State{}, cfg)
+	cs := d.Jobs["comp"]
+	ls := d.Jobs["light"]
+	if !cs.StartAfter.Equal(ls.ETA90) || cs.StartAfter.IsZero() {
+		t.Fatalf("comp starts after %v, light ETA90 %v", cs.StartAfter, ls.ETA90)
+	}
+	if !cs.AtRisk || cs.ETA90.Sub(cs.StartAfter) < 5*time.Hour || cs.LateBy <= 0 {
+		t.Fatalf("comp at risk %v ETA90 %v start %v late %v: %s", cs.AtRisk, cs.ETA90.Sub(t0), cs.StartAfter.Sub(t0), cs.LateBy, cs.Message)
+	}
+	if cs.Burst != nil {
+		t.Fatalf("a waiting job bursts: %+v", cs.Burst)
+	}
+	s.Jobs[1].After = nil
+	if st := Decide(s, &State{}, cfg).Jobs["comp"]; st.AtRisk || !st.StartAfter.IsZero() {
+		t.Fatalf("without After comp at risk %v start %v", st.AtRisk, st.StartAfter)
+	}
+}
+
+func tierCount(d Decisions, jobID string, tier Tier) int {
+	n := 0
+	for _, x := range d.Dispatch {
+		if x.Job == jobID && x.Tier == tier {
+			n += x.Slots
+		}
+	}
+	return n
+}

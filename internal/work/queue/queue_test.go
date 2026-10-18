@@ -381,3 +381,40 @@ func TestOutputEnv(t *testing.T) {
 		}
 	}
 }
+
+// A dependent's deadline reaches the job it waits on: the queue passes
+// DependsOn to the policy as After, sched plans the upstream job for the
+// dependent's deadline less the dependent's duration, and the waiting
+// job starts no earlier than its upstream job's planned finish.
+func TestDependsOnPropagatesDeadline(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 2)
+	ctx := context.Background()
+	var dec sched.Decisions
+	q.Policy = func(s sched.Snapshot, st *sched.State, cfg sched.Config) sched.Decisions {
+		dec = sched.Decide(s, st, cfg)
+		return dec
+	}
+	params := map[string]string{"frames": "1-4", "estimateSeconds": "600"}
+	// light's own deadline, after comp's, is what the dependency must move.
+	due := now.Add(3 * time.Hour)
+	light := job(ns, "light", "render", "cpu-"+ns, params, now.Add(5*time.Hour))
+	comp := job(ns, "comp", "render", "cpu-"+ns, params, due)
+	comp.Spec.DependsOn = []string{"light"}
+	for _, j := range []*c4v1.WorkJob{light, comp} {
+		if err := k8s.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tick(t, q)
+	tick(t, q)
+	ls, cs := dec.Jobs[ns+"/light"], dec.Jobs[ns+"/comp"]
+	if ls.DeadlineFor != ns+"/comp" || !ls.Deadline.Before(due) {
+		t.Fatalf("light planned for %v (for %q), want before comp's %v", ls.Deadline, ls.DeadlineFor, due)
+	}
+	if cs.StartAfter.IsZero() || !cs.StartAfter.Equal(ls.ETA90) {
+		t.Fatalf("comp starts after %v, light's ETA90 is %v", cs.StartAfter, ls.ETA90)
+	}
+	if n := len(unitPods(t, ns, "comp")); n != 0 {
+		t.Fatalf("comp released %d units before light succeeded", n)
+	}
+}

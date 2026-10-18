@@ -72,6 +72,7 @@ type job struct {
 	blocked     int
 	uneval      int
 	upLeft      int
+	upstream    []*job
 	downstream  []*job
 	arrived     bool
 	released    bool
@@ -258,6 +259,7 @@ func newEngine(w *workload, pol policy, check bool) *engine {
 	for _, j := range e.jobs {
 		for _, up := range j.spec.upstream {
 			j.upLeft++
+			j.upstream = append(j.upstream, byIdx[up])
 			byIdx[up].downstream = append(byIdx[up].downstream, j)
 		}
 	}
@@ -762,6 +764,12 @@ func (e *engine) jobSnap(j *job, now time.Time, free map[string]int) sched.Job {
 	}
 	if js.hasDue {
 		sj.Deadline = e.at(j.due)
+	}
+	// As the queue does: the jobs it still waits on (sched.Job.After).
+	for _, u := range j.upstream {
+		if u.done < len(u.units) {
+			sj.After = append(sj.After, u.spec.id)
+		}
 	}
 	sj.Runnable = make([]sched.UnitRef, k)
 	for i := range k {

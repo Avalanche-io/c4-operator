@@ -131,11 +131,16 @@ func (a *alloc) objectives() {
 		j := jc.j
 		jc.W, jc.W90, jc.tpath = j.Estimate.W, math.Max(j.Estimate.W90, j.Estimate.W), j.Estimate.TPath
 		jc.A = a.attainable(jc, false)
+		jc.deadline = j.Deadline
+	}
+	a.propagate()
+	for _, jc := range a.jobs {
+		j := jc.j
 		have := float64(jc.running + jc.incoming)
 		switch {
-		case !j.Deadline.IsZero():
+		case !jc.deadline.IsZero():
 			jc.hasDeadline = true
-			jc.T = j.Deadline.Sub(a.now).Seconds()
+			jc.T = jc.deadline.Sub(a.now).Seconds()
 			jc.R = jc.W90 / math.Max(a.effective(jc), a.cfg.MinRemaining.Seconds())
 			finish := math.Max(div(jc.W90, jc.A), jc.tpath)
 			jc.slack = secs(jc.T - finish)
@@ -152,6 +157,49 @@ func (a *alloc) objectives() {
 			jc.feasible = true
 		}
 		jc.Rb = jc.R * clamp(j.Boost, 1, 2)
+	}
+}
+
+// duration is how long the job takes on all its attainable slots at p90,
+// max(W90/A, t_path): what a dependent subtracts from its deadline to
+// give its upstream jobs theirs. Infinite with no attainable slot.
+func (jc *jobCtx) duration() float64 {
+	return math.Max(div(jc.W90, jc.A), jc.tpath)
+}
+
+// propagate moves each upstream job's deadline (Job.After) to no later
+// than each dependent's effective deadline less the dependent's
+// duration, in rounds until nothing moves (at most one round per job, so
+// a cycle in After cannot loop). A dependent with no attainable slot
+// gives no deadline: it cannot finish whenever its upstream jobs do.
+func (a *alloc) propagate() {
+	for round := 0; round < len(a.jobs); round++ {
+		moved := false
+		for _, d := range a.jobs {
+			if d.deadline.IsZero() || len(d.j.After) == 0 {
+				continue
+			}
+			dur := d.duration()
+			if math.IsInf(dur, 1) {
+				continue
+			}
+			by := d.deadline.Add(-secs(dur))
+			for _, id := range d.j.After {
+				u := a.byID[id]
+				if u == nil || u == d || !u.deadline.IsZero() && !by.Before(u.deadline) {
+					continue
+				}
+				u.deadline = by
+				u.deadlineFor = d.j.ID
+				if d.deadlineFor != "" {
+					u.deadlineFor = d.deadlineFor
+				}
+				moved = true
+			}
+		}
+		if !moved {
+			return
+		}
 	}
 }
 

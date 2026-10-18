@@ -36,6 +36,7 @@ func (a *alloc) plan() {
 		a.planSubsets(g)
 	}
 	a.planNoPool()
+	a.startAfterUpstream()
 	for _, jc := range a.jobs {
 		jc.Rb = jc.R * clamp(jc.j.Boost, 1, 2)
 	}
@@ -374,7 +375,7 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 	left := rho
 	for i := 0; i < len(set); {
 		k := i + 1
-		for k < len(set) && set[k].j.Deadline.Equal(set[i].j.Deadline) {
+		for k < len(set) && set[k].deadline.Equal(set[i].deadline) {
 			k++
 		}
 		band := set[i:k]
@@ -630,6 +631,70 @@ func (a *alloc) planSubsets(g []groupMember) {
 			cur.share = math.Min(cur.share, r.share)
 			cur.groupC = math.Min(cur.groupC, r.groupC)
 			m.setPlanState(cur)
+		}
+	}
+}
+
+// startAfterUpstream delays the planned finish of a deadline job still
+// waiting on upstream jobs (Job.After): it starts no earlier than their
+// latest planned finish and then takes its own duration, so its finish
+// is the later of that and its place in the plan, and it is at risk if
+// that passes its deadline. The plan above treats it as able to start
+// now. Upstream finishes may themselves move, so this runs in rounds
+// from each job's own plan until nothing moves. It changes what the job
+// reports, not the shares or bursts: a job waiting on upstream work can
+// use no slot now, and what makes it late is its upstream jobs, which
+// carry its deadline (propagate) and burst for it.
+func (a *alloc) startAfterUpstream() {
+	type entry struct {
+		jc   *jobCtx
+		base planState
+		gs   shownPlan
+	}
+	var es []entry
+	for _, jc := range a.jobs {
+		if !jc.hasDeadline || len(jc.j.After) == 0 || !jc.waiting() || jc.noPool || jc.j.Hold || jc.j.HoldStop {
+			continue
+		}
+		es = append(es, entry{jc: jc, base: jc.planState(), gs: jc.view()})
+	}
+	for round := 0; round <= len(es); round++ {
+		moved := false
+		for _, e := range es {
+			jc := e.jc
+			s50, s90, g50, g90 := 0.0, 0.0, 0.0, 0.0
+			for _, id := range jc.j.After {
+				u := a.byID[id]
+				if u == nil || u == jc || u.finish90 <= 0 {
+					continue
+				}
+				v := u.view()
+				s50, s90 = math.Max(s50, u.finish50), math.Max(s90, u.finish90)
+				g50, g90 = math.Max(g50, v.finish50), math.Max(g90, v.finish90)
+			}
+			if s90 == jc.startAfter {
+				continue
+			}
+			moved = true
+			jc.startAfter, jc.startShown = s90, g90
+			jc.setPlanState(e.base)
+			d50, d90 := math.Max(div(jc.W, jc.A), jc.tpath), jc.duration()
+			f50, f90 := math.Max(e.base.finish50, s50+d50), math.Max(e.base.finish90, s90+d90)
+			jc.finish50, jc.finish90 = f50, f90
+			if f90 > jc.T {
+				jc.atRisk = true
+				jc.lateBy = secs(math.Min(f90, bigSeconds) - jc.T)
+			}
+			gs := e.gs
+			gs.finish50, gs.finish90 = math.Max(gs.finish50, g50+d50), math.Max(gs.finish90, g90+d90)
+			if gs.finish90 > jc.T {
+				gs.atRisk = true
+				gs.lateBy = secs(math.Min(gs.finish90, bigSeconds) - jc.T)
+			}
+			jc.shown = &gs
+		}
+		if !moved {
+			return
 		}
 	}
 }

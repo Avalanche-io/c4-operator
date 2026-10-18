@@ -242,6 +242,12 @@ func (a *alloc) report() {
 		st.AtRisk = v.atRisk
 		st.LateBy = v.lateBy
 		st.Burst = jc.burst
+		if jc.hasDeadline {
+			st.Deadline, st.DeadlineFor = jc.deadline, jc.deadlineFor
+		}
+		if jc.startShown > 0 && !math.IsInf(jc.startShown, 1) {
+			st.StartAfter = a.now.Add(secs(jc.startShown))
+		}
 		if jc.hasDeadline && v.finish90 > 0 && !math.IsInf(v.finish90, 1) {
 			st.ETA50 = a.now.Add(secs(v.finish50))
 			st.ETA90 = a.now.Add(secs(v.finish90))
@@ -263,7 +269,10 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 	case !jc.hasDeadline:
 		return ""
 	}
-	dl := jc.j.Deadline.Format("Mon 15:04")
+	dl := jc.deadline.Format("Mon 15:04")
+	if jc.deadlineFor != "" {
+		dl += " (for " + jc.deadlineFor + ")"
+	}
 	v := jc.view()
 	if jc.noPool {
 		return fmt.Sprintf("%s cannot run: no pool can run it (none of %s is in the farm); due %s.", id, strings.Join(jc.j.Pools, ", "), dl)

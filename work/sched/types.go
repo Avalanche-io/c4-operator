@@ -74,9 +74,19 @@ type Quota struct {
 type Job struct {
 	ID, Project, Class string
 	Submitted, Ready   time.Time
-	// Deadline is the effective deadline (from the job, a milestone, the
+	// Deadline is the job's own deadline (from the job, a milestone, the
 	// class turnaround, or ready time plus a latency target). Zero: none.
+	// Decide moves it earlier for jobs that others wait on (After).
 	Deadline time.Time
+	// After lists the IDs of jobs that must finish before this one can
+	// start. A job named here that is not in the snapshot counts as
+	// finished. Decide gives each upstream job an effective deadline no
+	// later than every dependent's effective deadline less that
+	// dependent's duration (max(W90/A, t_path)), so an upstream job with
+	// no deadline of its own is planned for its dependents', and a job
+	// still waiting starts no earlier than its upstream jobs' planned
+	// finish.
+	After []string
 	// RequiredRate is a throughput objective in slots, used when Deadline
 	// is zero.
 	RequiredRate float64
@@ -259,6 +269,14 @@ type JobState struct {
 	Rank             int
 	Message          string
 	Burst            *BurstSuggestion
+	// Deadline is the deadline the job was planned for: its own, or
+	// earlier for a dependent job (see Job.After), and then DeadlineFor
+	// names that dependent. Zero for a job with no deadline.
+	Deadline    time.Time
+	DeadlineFor string
+	// StartAfter is when a job waiting on upstream jobs can start: their
+	// latest planned finish at p90. Zero when it can start now.
+	StartAfter time.Time
 }
 
 // Config holds policy settings. DefaultConfig returns DESIGN.md's values.
