@@ -242,10 +242,10 @@ func TestReproStarvationOverDeadline(t *testing.T) {
 	}
 }
 
-// Found by the stress grid: a held job releases nothing but has R > 0, so
-// rank() sorted it with the jobs that need slots, ahead of ready work.
+// Regression, found by the stress grid: a held job releases nothing but
+// had R > 0, so rank() sorted it with the jobs that need slots, ahead of
+// ready work.
 func TestReproHeldRank(t *testing.T) {
-	skipRepro(t, "sched bug held-rank (found by hack/stress): rank() places held jobs among jobs that can use slots; awaiting a fix in internal/work/sched")
 	ready := rjob("ready", "p", 10, 10*3600, 600, 0) // no deadline: R = 0
 	ready.Running = map[string]int{"cpu": 2}
 	held := rjob("held", "p", 10, 10*3600, 600, 4*time.Hour)

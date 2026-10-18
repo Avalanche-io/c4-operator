@@ -475,10 +475,11 @@ func (a *alloc) rank() {
 	js := append([]*jobCtx(nil), a.jobs...)
 	for _, jc := range js {
 		switch {
-		case jc.waiting():
+		case jc.waiting(), jc.j.Hold, jc.j.HoldStop:
 			// Nothing it could run now (its upstream jobs or its own
-			// dependencies are unfinished): ranked after every job that
-			// can use slots, though its R counts in the plan.
+			// dependencies are unfinished, or it is on hold): ranked
+			// after every job that can use slots, though its R may be
+			// above 0.
 			jc.group = 3
 		case jc.R > 0 && jc.planOK:
 			jc.group = 0

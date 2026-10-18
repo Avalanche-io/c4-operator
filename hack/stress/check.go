@@ -49,8 +49,6 @@ var invariants = []struct{ name, what string }{
 // instead of failing, and each has a skipped reproducer in stress_test.go.
 // Remove an entry when its fix lands.
 var knownBugs = map[string]string{
-	"held-rank": "rank() in decide.go groups jobs by R > 0; a held job keeps the R its deadline gives it although it releases nothing, so it ranks " +
-		"ahead of ready jobs without a deadline need (found by this grid, reported by the lead)",
 	"lend-then-reclaim": "admit() in alloc.go holds free slots back for another project's unmet nominal demand only against borrowers; a release inside " +
 		"a third project's nominal quota takes the held-back slot, the guaranteed project is never served from free capacity, and reclaim() preempts a " +
 		"borrower for it in the same decision, so the slots lent to borrowers are taken back at once and the preempted work is lost (found by this grid)",
