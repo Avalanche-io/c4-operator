@@ -1,0 +1,34 @@
+# A WorkJob's owner is set once, when it is created (by the
+# /mutate-workjob webhook from the requesting user, or by the manager for
+# jobs it creates for HUD and MCP users), and never changes: the HUD's
+# "My shots", the book and the job's signed record all read it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-workjob-owner
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [c4.avalanche.io]
+      apiVersions: [v1alpha1]
+      operations: [UPDATE]
+      resources: [workjobs]
+  variables:
+  - name: before
+    expression: "has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
+  - name: after
+    expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+  validations:
+  - expression: >-
+      ['c4.avalanche.io/owner', 'c4.avalanche.io/submitted-via'].all(k,
+        !(k in variables.before) || (k in variables.after && variables.after[k] == variables.before[k]))
+    message: a WorkJob's owner and how it was submitted are set at creation and cannot change
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-workjob-owner
+spec:
+  policyName: c4-workjob-owner
+  validationActions: [Deny]

@@ -181,6 +181,10 @@ func runManager(args []string) error {
 		}
 	}
 	mgr.GetWebhookServer().Register("/mutate-pod", &webhook.Admission{Handler: &c4webhook.PodMutator{Decoder: admission.NewDecoder(scheme)}})
+	// The manager creates WorkJobs for signed-in HUD and MCP users and names
+	// them as owner; everyone else is stamped with their own name.
+	self := "system:serviceaccount:" + *namespace + ":" + env("POD_SERVICE_ACCOUNT", "c4-manager")
+	mgr.GetWebhookServer().Register("/mutate-workjob", &webhook.Admission{Handler: &c4webhook.WorkJobOwner{Decoder: admission.NewDecoder(scheme), Delegates: []string{self}}})
 	mgr.AddHealthzCheck("ping", healthz.Ping)
 	mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker())
 	log.Info("starting", "namespace", *namespace)

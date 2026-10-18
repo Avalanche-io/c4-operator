@@ -24,6 +24,18 @@ const (
 	AnnotationAllowNodes = "c4.avalanche.io/allow-nodes"
 	// AnnotationYield asks a unit to stop at its next checkpoint boundary.
 	AnnotationYield = "c4.avalanche.io/yield"
+	// AnnotationOwner on a WorkJob is the user who submitted it, set at
+	// admission from the request's user (or, for jobs the HUD creates for
+	// a signed-in viewer, by the HUD) and never changed afterwards.
+	AnnotationOwner = "c4.avalanche.io/owner"
+	// AnnotationSubmittedVia says how the job was submitted: hud, mcp,
+	// or api (anything else that wrote the WorkJob directly).
+	AnnotationSubmittedVia = "c4.avalanche.io/submitted-via"
+	// LabelShot groups a shot's jobs (the HUD's shot view).
+	LabelShot = "c4.avalanche.io/shot"
+	// LabelJobType names the prebuilt job type a job was made from
+	// (render, usd, sim, comp, transcode, ci, lora, infer, ...).
+	LabelJobType = "c4.avalanche.io/job-type"
 	// TaintUnprovisioned marks a node that stands in for capacity not yet
 	// provisioned (the kind capacity simulator, section 10.12).
 	TaintUnprovisioned = "c4.avalanche.io/unprovisioned"

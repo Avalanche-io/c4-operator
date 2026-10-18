@@ -41,3 +41,20 @@ webhooks:
       name: c4-operator-webhook
       namespace: c4-system
       path: /mutate-pod
+- name: workjobs.c4.avalanche.io
+  admissionReviewVersions: [v1]
+  sideEffects: None
+  # Every new WorkJob is stamped with the user who created it. WorkJobs
+  # need the manager to run at all, so failing closed blocks nothing that
+  # could otherwise proceed.
+  failurePolicy: Fail
+  rules:
+  - operations: [CREATE]
+    apiGroups: [c4.avalanche.io]
+    apiVersions: [v1alpha1]
+    resources: [workjobs]
+  clientConfig:
+    service:
+      name: c4-operator-webhook
+      namespace: c4-system
+      path: /mutate-workjob
