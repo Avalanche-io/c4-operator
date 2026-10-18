@@ -369,6 +369,34 @@ func (h *Harness) stopIdle(ctx context.Context, name string) (YieldResult, error
 	return YieldResult{State: "stopped", Checkpoint: cp}, nil
 }
 
+// ForceStop stops a member's session now, even mid-turn, after saving a
+// checkpoint at its last complete line: the turn in flight is lost. It is
+// for a hard limit (a power line that must not be crossed), after a yield
+// has waited too long.
+func (h *Harness) ForceStop(ctx context.Context, name string) (*Checkpoint, error) {
+	unlock, err := h.Store.Lock(name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	m, err := h.Store.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	cp, _, err := h.checkpointLocked(ctx, m, "forced-stop")
+	if err != nil {
+		return nil, err
+	}
+	if live, _, err := h.live(ctx, m); err != nil {
+		return nil, err
+	} else if live {
+		if err := h.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
+			return nil, err
+		}
+	}
+	return cp, nil
+}
+
 // MemberStatus is a member and what is known of it now.
 type MemberStatus struct {
 	Member *Member

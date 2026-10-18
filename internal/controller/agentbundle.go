@@ -75,12 +75,17 @@ func JobForBundle(b *c4v1.AgentBundle) *c4v1.WorkJob {
 			OwnerReferences: []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "AgentBundle",
 				Name: b.Name, UID: b.UID, Controller: &t, BlockOwnerDeletion: &t}}},
 		Spec: c4v1.WorkJobSpec{
-			Class:       "agent",
-			Params:      map[string]string{"members": strings.Join(names, ","), "bundle": b.Name},
-			Deadline:    b.Spec.Deadline,
-			Pools:       b.Spec.Pools,
-			MaxParallel: b.Spec.MaxRunning,
-			Nudge:       c4v1.WorkNudge{Hold: b.Spec.Suspend, HoldStop: b.Spec.Suspend},
+			Class:    "agent",
+			Params:   map[string]string{"members": strings.Join(names, ","), "bundle": b.Name},
+			Deadline: b.Spec.Deadline,
+			// The bundle's owner owns its deadline: the farm never suggests
+			// one from an ETA, which for open-ended agent work means
+			// nothing. With no deadline, the agent class's long turnaround
+			// applies, so a research bundle has the most slack on the farm.
+			DeadlineMode: "Pinned",
+			Pools:        b.Spec.Pools,
+			MaxParallel:  b.Spec.MaxRunning,
+			Nudge:        c4v1.WorkNudge{Hold: b.Spec.Suspend, HoldStop: b.Spec.Suspend},
 			// A member that fails is tried again on another runner, up to the
 			// default; a yield is never a failure.
 			Retries: 2,
@@ -115,7 +120,7 @@ func (r *AgentBundleReconciler) ensureJob(ctx context.Context, b *c4v1.AgentBund
 	// The template and the rest stay as created: changing a template does
 	// not reach units already planned.
 	have.Spec.Params, have.Spec.Deadline, have.Spec.Pools = want.Spec.Params, want.Spec.Deadline, want.Spec.Pools
-	have.Spec.MaxParallel, have.Spec.Nudge = want.Spec.MaxParallel, want.Spec.Nudge
+	have.Spec.MaxParallel, have.Spec.Nudge, have.Spec.DeadlineMode = want.Spec.MaxParallel, want.Spec.Nudge, want.Spec.DeadlineMode
 	if err := r.Patch(ctx, &have, client.MergeFrom(orig)); err != nil {
 		return nil, err
 	}

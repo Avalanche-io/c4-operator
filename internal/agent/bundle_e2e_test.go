@@ -348,3 +348,118 @@ func TestRunnerCapacity(t *testing.T) {
 		t.Fatalf("limit %q, want 5 (the runner's slots)", l)
 	}
 }
+
+// TestPowerCapShedsAtTurnBoundary: the night of 2026-10-17 on the farm.
+// Two bundles share one machine's runner: a deadline bundle (the push) and
+// a research bundle with no deadline. The power reader lowers the machine
+// from two slots to one; the queue sheds the member with the most slack,
+// the research one, which yields at a turn boundary, and the push keeps
+// running. When the power returns and holds, the research member resumes
+// from its checkpoint.
+func TestPowerCapShedsAtTurnBoundary(t *testing.T) {
+	if k8s == nil {
+		t.Skip("no envtest binaries (make envtest)")
+	}
+	ctx := context.Background()
+	ns := fmt.Sprintf("pw-%d", time.Now().UnixNano()%1e9)
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+		t.Fatal(err)
+	}
+	host := ns + "-abyss"
+	sel := map[string]string{"c4.avalanche.io/host": host}
+	pool := &c4v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "agent-" + ns}, Spec: c4v1.PoolSpec{NodeSelector: sel, SlotsPerNode: 2,
+		Tolerations: []corev1.Toleration{{Key: agent.TaintHostRunner, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}}}
+	if err := k8s.Create(ctx, pool); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		k8s.Delete(ctx, pool)
+		k8s.Delete(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: host}})
+	})
+	root := t.TempDir()
+	cfg, work := filepath.Join(root, "claude"), filepath.Join(root, "work")
+	os.MkdirAll(work, 0o755)
+	fk := &fake{active: map[string]bool{}}
+	h := agent.New(&agent.Store{Dir: filepath.Join(root, "agents")}, fk)
+	h.Workspace, h.Poll, h.SettleQuiet, h.SettleMax = "none", time.Millisecond, time.Millisecond, 5*time.Millisecond
+	sessions := map[string]string{}
+	for i, name := range []string{"hud-scenarios", "prov-graph"} {
+		s := fmt.Sprintf("%08d-0000-0000-0000-%012d", i+1, i+1)
+		sessions[s] = name
+		tr := filepath.Join(cfg, "projects", agent.ProjectSlug(work), s+".jsonl")
+		os.MkdirAll(filepath.Dir(tr), 0o755)
+		os.WriteFile(tr, []byte(`{"turn":1}`+"\n"), 0o644)
+		if _, err := h.Register(ctx, agent.RegisterOptions{Name: name, Session: s, Cwd: work, ConfigDir: cfg}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	now := time.Date(2026, 10, 18, 5, 50, 0, 0, time.UTC) // 22:50 PDT
+	slots, reason := 2, ""
+	runner := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Slots: 2, YieldTimeout: time.Second,
+		Capacity: func() (int, string) { return slots, reason }, RaiseAfter: time.Minute,
+		Now: func() time.Time { return now }, Logf: t.Logf}
+	q := &queue.Queue{Client: k8s, Policy: sched.Decide, Cfg: sched.DefaultConfig(), Log: zap.New(zap.WriteTo(os.Stderr)),
+		Now: func() time.Time { return now }, CaptureWait: time.Minute}
+	rec := &controller.AgentBundleReconciler{Client: k8s, Now: func() time.Time { return now }}
+	push := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "push"}, Spec: c4v1.AgentBundleSpec{
+		Pools: []string{pool.Name}, Members: []c4v1.AgentMemberSpec{{Name: "hud-scenarios"}},
+		Deadline: &metav1.Time{Time: now.Add(11 * time.Hour)}}} // Sunday 10:00 PDT
+	research := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "research"}, Spec: c4v1.AgentBundleSpec{
+		Pools: []string{pool.Name}, Members: []c4v1.AgentMemberSpec{{Name: "prov-graph"}}}}
+	for _, b := range []*c4v1.AgentBundle{push, research} {
+		if err := k8s.Create(ctx, b); err != nil {
+			t.Fatal(err)
+		}
+	}
+	round := func() {
+		t.Helper()
+		for i := 0; i < 3; i++ {
+			for _, name := range []string{"push", "research"} {
+				if _, err := rec.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: name}}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := runner.Tick(ctx); err != nil {
+				t.Fatal(err)
+			}
+			if err := q.Tick(ctx); err != nil {
+				t.Fatal(err)
+			}
+			now = now.Add(5 * time.Second)
+		}
+	}
+	running := func() []string {
+		fk.mu.Lock()
+		defer fk.mu.Unlock()
+		var out []string
+		for s := range fk.active {
+			out = append(out, sessions[s])
+		}
+		return out
+	}
+	round()
+	if got := running(); len(got) != 2 {
+		t.Fatalf("before the cap: running %v, want both", got)
+	}
+	// 22:55: the battery falls on a 45 W adapter; the reader allows one.
+	slots, reason = 1, "power: battery 21% falling on a 45 W adapter"
+	round()
+	round()
+	if got := running(); len(got) != 1 || got[0] != "hud-scenarios" {
+		t.Fatalf("under the cap: running %v, want only hud-scenarios (the push keeps its slot)", got)
+	}
+	var b c4v1.AgentBundle
+	k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "research"}, &b)
+	if len(b.Status.Members) != 1 || b.Status.Members[0].State != "parked" || b.Status.Members[0].Checkpoint == "" {
+		t.Fatalf("research member: %+v", b.Status.Members)
+	}
+	// Power returns and holds for a minute: research resumes.
+	slots, reason = 2, ""
+	round()
+	now = now.Add(time.Minute)
+	round()
+	round()
+	if got := running(); len(got) != 2 {
+		t.Fatalf("after the power returned: running %v, want both", got)
+	}
+}

@@ -58,12 +58,19 @@ type Runner struct {
 	// YieldTimeout bounds one wait for a busy member to finish its turn;
 	// the runner tries again on the next tick.
 	YieldTimeout time.Duration
+	// HardStopAfter, when set, stops a member that has not reached a turn
+	// boundary this long after it was asked to yield, losing its turn in
+	// flight. Zero waits for the boundary however long it takes (the queue
+	// still stops a unit that has not yielded within ten minutes).
+	HardStopAfter time.Duration
 	// Now is the clock.
 	Now func() time.Time
 	// Logf reports what the runner does.
 	Logf func(format string, args ...any)
 
 	seen map[types.UID]bool
+	// asked is when the runner first saw each pod's yield request.
+	asked map[types.UID]time.Time
 	// rising is a higher capacity waiting out RaiseAfter, and since when.
 	rising      int
 	risingSince time.Time
@@ -100,6 +107,7 @@ func (r *Runner) Run(ctx context.Context, every time.Duration) error {
 func (r *Runner) Tick(ctx context.Context) error {
 	if r.seen == nil {
 		r.seen = map[types.UID]bool{}
+		r.asked = map[types.UID]time.Time{}
 	}
 	if err := r.heartbeat(ctx); err != nil {
 		return fmt.Errorf("node %s: %w", r.Node, err)
@@ -225,8 +233,25 @@ func point(m *Member, cp *Checkpoint) string {
 }
 
 func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
+	if _, ok := r.asked[p.UID]; !ok {
+		r.asked[p.UID] = r.now()
+	}
 	res, err := r.Harness.Yield(ctx, m.Name, r.YieldTimeout)
 	if errors.Is(err, ErrBusy) {
+		if r.HardStopAfter > 0 && r.now().Sub(r.asked[p.UID]) >= r.HardStopAfter {
+			cp, err := r.Harness.ForceStop(ctx, m.Name)
+			if err != nil {
+				return err
+			}
+			if cp != nil {
+				if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputCheckpoint: point(m, cp)}); err != nil {
+					return err
+				}
+			}
+			r.logf("stopped %s mid-turn after %s waiting for a turn boundary (%s)", m.Name, r.HardStopAfter, p.Annotations[c4v1.AnnotationYield])
+			return r.finish(ctx, p, corev1.PodSucceeded, "StoppedMidTurn",
+				"stopped mid-turn after waiting "+r.HardStopAfter.String()+" for a turn boundary: "+p.Annotations[c4v1.AnnotationYield], 0)
+		}
 		r.logf("%s still busy; will try again", m.Name)
 		return nil
 	}
