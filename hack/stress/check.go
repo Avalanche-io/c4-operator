@@ -775,11 +775,14 @@ func (c *checker) checkBursts(v *view) {
 		if !b.Auto {
 			continue
 		}
+		// The lateness a burst prevents is priced from the plan the
+		// decision used (with its margin), which BurstSuggestion.LateCost
+		// carries; JobState.LateBy is what the job reports, under
+		// Graham's bound, and can be smaller.
 		pr := v.projects[b.Project]
-		st := v.d.Jobs[b.Job]
-		late := lateCostOf(pr) * st.LateBy.Hours()
-		if b.Margin {
-			late = b.LateCost
+		late := b.LateCost
+		if late == 0 {
+			late = lateCostOf(pr) * v.d.Jobs[b.Job].LateBy.Hours()
 		}
 		switch {
 		case !b.Closes:
