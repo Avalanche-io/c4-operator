@@ -151,6 +151,9 @@ func runPoint(enc string, seed uint64, v, specOut string, workers int) int {
 		r := res.Runs[name]
 		fmt.Printf("  %-16s shots %4d/%-4d late %6.1fh | on time %4d/%-4d (%s)  late %6.1fh  burst $%-8.0f util %4.0f%%  preempt %4d  decisions %5d (mean %s)\n",
 			name, r.FinalOnTime, r.FinalDue, r.FinalLateHours, r.OnTime, r.DueJobs, pct(r.onTimePct()), r.LateHours, r.BurstCost, 100*r.Util, r.Preemptions, r.Decides, r.DecideMean.Round(time.Microsecond))
+		if pt.Sites > 1 {
+			fmt.Printf("  %-16s late hours by home site %.1f; staged jobs %.1f\n", "", r.SiteLateHours[:int(pt.Sites)], r.StagedLateHours)
+		}
 		if r.Stages+r.StageApprovals > 0 {
 			fmt.Printf("  %-16s stages %d ($%.0f), %d more needing approval\n", "", r.Stages, r.StageCost, r.StageApprovals)
 		}

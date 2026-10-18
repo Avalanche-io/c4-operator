@@ -309,6 +309,14 @@ func corners() []Point {
 		p.Sites, p.Links, p.InputGB, p.Load, p.Tightness, p.Projects = 3, 1, 300, 1.5, 1.2, 3
 		p.BurstFrac, p.BurstBudget, p.LateCost = 1, 1, 800
 	})
+	// Follow the sun with priced links: each site's projects peak at a
+	// different time, so a stage lands on a site whose own work arrives
+	// later (the global tutorial's Vancouver lights staged to London
+	// ahead of London's dailies).
+	add("priced-links-sun", func(p *Point) {
+		p.Sites, p.Links, p.InputGB, p.Load, p.Tightness, p.Projects, p.Arrivals = 3, 1, 200, 1.5, 1.2, 3, 3
+		p.BurstFrac, p.BurstBudget, p.LateCost = 1, 1, 800
+	})
 	// Heavy inputs and little burst: the slow channels cannot help in
 	// time, and a stage competes with bursting.
 	add("priced-links-heavy", func(p *Point) {

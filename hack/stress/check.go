@@ -1038,8 +1038,12 @@ type runResult struct {
 	W90Moments, W90Covered, W90CalMoments, W90CalCovered int
 	// Links: stages approved (and their cost), stages that would close a
 	// deadline but need approval.
-	Stages, StageApprovals              int
-	StageCost                           float64
+	Stages, StageApprovals int
+	StageCost              float64
+	// Late hours by the home site of the job (Sites above 1), and of jobs
+	// that staged their inputs to another site.
+	SiteLateHours                       [5]float64
+	StagedLateHours                     float64
 	LateHours, LateDollars              float64
 	BurstCost                           float64
 	Util                                float64

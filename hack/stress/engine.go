@@ -1083,6 +1083,12 @@ func (e *engine) finishRun() {
 		r.Late++
 		lh := math.Max(0, lateBy) / hour
 		r.LateHours += lh
+		if js.site < len(r.SiteLateHours) {
+			r.SiteLateHours[js.site] += lh
+		}
+		if len(j.staged)+len(j.staging) > 0 {
+			r.StagedLateHours += lh
+		}
 		r.LateDollars += lh * late[js.project]
 	}
 	if len(e.lat) > 0 {
