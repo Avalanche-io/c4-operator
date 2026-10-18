@@ -1,52 +1,31 @@
 package server
 
 import (
-	"encoding/json"
-	"fmt"
-	"os"
-	"time"
-
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/work/topology"
 )
 
-// LoadSites reads the farm's sites for the HUD's map (--hud-sites): a JSON
-// array of { name, label, region, lat, lon, kind, localities, tz }. Nodes join
-// a site by their topology.kubernetes.io/region label, and a site's
-// localities are the node localities (racks, zones) it holds.
+// LoadSites reads the farm's sites for the HUD's map (--hud-sites): a
+// topology file (work/topology: sites and the links between them), or the
+// older bare JSON array of { name, label, region, lat, lon, kind,
+// localities, tz }. Nodes join a site by their topology.kubernetes.io/region
+// label, and a site's localities are the node localities (racks, zones) it
+// holds.
 func LoadSites(path string) ([]api.Site, error) {
-	b, err := os.ReadFile(path)
+	t, err := topology.Load(path)
 	if err != nil {
 		return nil, err
 	}
-	var sites []api.Site
-	if err := json.Unmarshal(b, &sites); err != nil {
-		return nil, fmt.Errorf("%s: want a JSON array of sites: %w", path, err)
-	}
-	seen := map[string]bool{}
-	for i := range sites {
-		s := &sites[i]
-		switch {
-		case s.Name == "":
-			return nil, fmt.Errorf("%s: site %d has no name", path, i)
-		case seen[s.Name]:
-			return nil, fmt.Errorf("%s: site %s appears twice", path, s.Name)
-		case s.Kind != "onprem" && s.Kind != "cloud":
-			return nil, fmt.Errorf("%s: site %s: kind %q, want onprem or cloud", path, s.Name, s.Kind)
-		case s.Lat < -90 || s.Lat > 90 || s.Lon < -180 || s.Lon > 180:
-			return nil, fmt.Errorf("%s: site %s: lat %g lon %g is not a position", path, s.Name, s.Lat, s.Lon)
+	sites := make([]api.Site, 0, len(t.Sites))
+	for _, s := range t.Sites {
+		as := api.Site{Name: s.Name, Label: s.Label, Region: s.Region, Lat: s.Lat, Lon: s.Lon, Kind: s.Kind, Localities: s.Localities, TZ: s.TZ}
+		if as.Label == "" {
+			as.Label = as.Name
 		}
-		if s.TZ != "" {
-			if _, err := time.LoadLocation(s.TZ); err != nil {
-				return nil, fmt.Errorf("%s: site %s: tz %q is not an IANA time zone", path, s.Name, s.TZ)
-			}
+		if as.Localities == nil {
+			as.Localities = []string{}
 		}
-		seen[s.Name] = true
-		if s.Label == "" {
-			s.Label = s.Name
-		}
-		if s.Localities == nil {
-			s.Localities = []string{}
-		}
+		sites = append(sites, as)
 	}
 	return sites, nil
 }
