@@ -185,7 +185,7 @@ func (notYet) Error() string { return "not in force yet" }
 var errNotYet error = notYet{}
 
 // TestHostRunnerWrites checks what a host runner (service account
-// c4-hosts/abyss) may write: its own Node, Lease and pods, nothing else.
+// c4-hosts/laptop-1) may write: its own Node, Lease and pods, nothing else.
 func TestHostRunnerWrites(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
@@ -203,7 +203,7 @@ func TestHostRunnerWrites(t *testing.T) {
 		}
 		return c
 	}
-	abyss := as("abyss")
+	laptop := as("laptop-1")
 	taint := []corev1.Taint{{Key: "c4.avalanche.io/host-runner", Value: "true", Effect: corev1.TaintEffectNoSchedule}}
 	node := func(name string, taints []corev1.Taint) *corev1.Node {
 		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"c4.avalanche.io/pool": "agent",
@@ -212,43 +212,43 @@ func TestHostRunnerWrites(t *testing.T) {
 	// policies reach admission after a moment: wait until a forbidden
 	// create is refused, then run the cases
 	eventually(t, "the node policy in force", func() error {
-		if err := abyss.Create(ctx, node("someone-else", taint)); err == nil {
+		if err := laptop.Create(ctx, node("someone-else", taint)); err == nil {
 			admin.Delete(ctx, node("someone-else", nil))
 			return errNotYet
 		}
 		return nil
 	})
-	if err := abyss.Create(ctx, node("abyss", nil)); err == nil {
+	if err := laptop.Create(ctx, node("laptop-1", nil)); err == nil {
 		t.Fatal("a Node without the host-runner taint was created")
 	}
-	mine := node("abyss", taint)
-	if err := abyss.Create(ctx, mine); err != nil {
+	mine := node("laptop-1", taint)
+	if err := laptop.Create(ctx, mine); err != nil {
 		t.Fatalf("its own Node: %v", err)
 	}
 	patch := func(c client.Client, o client.Object, body string) error {
 		return c.Patch(ctx, o, client.RawPatch(types.MergePatchType, []byte(body)))
 	}
-	if err := patch(abyss, mine, `{"metadata":{"labels":{"c4.avalanche.io/slot-limit":"1"},"annotations":{"c4.avalanche.io/capacity-reason":"on battery"}}}`); err != nil {
+	if err := patch(laptop, mine, `{"metadata":{"labels":{"c4.avalanche.io/slot-limit":"1"},"annotations":{"c4.avalanche.io/capacity-reason":"on battery"}}}`); err != nil {
 		t.Errorf("slot-limit and capacity-reason: %v", err)
 	}
-	if err := patch(abyss, mine, `{"metadata":{"labels":{"c4.avalanche.io/pool":"gpu"}}}`); err == nil {
+	if err := patch(laptop, mine, `{"metadata":{"labels":{"c4.avalanche.io/pool":"gpu"}}}`); err == nil {
 		t.Error("the runner moved its Node to another pool")
 	}
-	if err := patch(abyss, mine, `{"spec":{"taints":null}}`); err == nil {
+	if err := patch(laptop, mine, `{"spec":{"taints":null}}`); err == nil {
 		t.Error("the runner removed its taint")
 	}
-	status := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "abyss"}}
-	if err := abyss.Status().Patch(ctx, status, client.RawPatch(types.MergePatchType,
+	status := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "laptop-1"}}
+	if err := laptop.Status().Patch(ctx, status, client.RawPatch(types.MergePatchType,
 		[]byte(`{"status":{"conditions":[{"type":"Ready","status":"True","reason":"HostRunnerReady"}]}}`))); err != nil {
 		t.Errorf("its own status: %v", err)
 	}
 	other := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "w1"}}
-	if err := abyss.Status().Patch(ctx, other, client.RawPatch(types.MergePatchType,
+	if err := laptop.Status().Patch(ctx, other, client.RawPatch(types.MergePatchType,
 		[]byte(`{"status":{"conditions":[{"type":"Ready","status":"False","reason":"x"}]}}`))); err == nil {
 		t.Error("the runner wrote another Node's status")
 	}
 
-	// pods: its own, bound to abyss, and one on w1
+	// pods: its own, bound to laptop-1, and one on w1
 	pod := func(name, node string) *corev1.Pod {
 		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: name},
 			Spec: corev1.PodSpec{NodeName: node, Containers: []corev1.Container{{Name: "m", Image: "x"}}}}
@@ -257,31 +257,31 @@ func TestHostRunnerWrites(t *testing.T) {
 		}
 		return p
 	}
-	onMe, onW1, unbound := pod("member-0", "abyss"), pod("render-3", "w1"), pod("member-1", "")
-	if err := patch(abyss, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/output-checkpoint":"c4abc","c4.avalanche.io/output-epoch":"3"}}}`); err != nil {
+	onMe, onW1, unbound := pod("member-0", "laptop-1"), pod("render-3", "w1"), pod("member-1", "")
+	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/output-checkpoint":"c4abc","c4.avalanche.io/output-epoch":"3"}}}`); err != nil {
 		t.Errorf("checkpoint annotations on its pod: %v", err)
 	}
-	if err := patch(abyss, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/owner":"someone"}}}`); err == nil {
+	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/owner":"someone"}}}`); err == nil {
 		t.Error("the runner set another annotation")
 	}
-	if err := patch(abyss, onW1, `{"metadata":{"annotations":{"c4.avalanche.io/output-epoch":"1"}}}`); err == nil {
+	if err := patch(laptop, onW1, `{"metadata":{"annotations":{"c4.avalanche.io/output-epoch":"1"}}}`); err == nil {
 		t.Error("the runner wrote to a pod on another node")
 	}
-	if err := abyss.Status().Patch(ctx, onMe, client.RawPatch(types.MergePatchType, []byte(`{"status":{"phase":"Running"}}`))); err != nil {
+	if err := laptop.Status().Patch(ctx, onMe, client.RawPatch(types.MergePatchType, []byte(`{"status":{"phase":"Running"}}`))); err != nil {
 		t.Errorf("its pod's status: %v", err)
 	}
-	if err := abyss.Status().Patch(ctx, onW1, client.RawPatch(types.MergePatchType, []byte(`{"status":{"phase":"Failed"}}`))); err == nil {
+	if err := laptop.Status().Patch(ctx, onW1, client.RawPatch(types.MergePatchType, []byte(`{"status":{"phase":"Failed"}}`))); err == nil {
 		t.Error("the runner wrote another node's pod's status")
 	}
 	bind := func(target string) error {
-		return abyss.SubResource("binding").Create(ctx, unbound, &corev1.Binding{
+		return laptop.SubResource("binding").Create(ctx, unbound, &corev1.Binding{
 			ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: unbound.Name},
 			Target:     corev1.ObjectReference{Kind: "Node", Name: target}})
 	}
 	if err := bind("w1"); err == nil {
 		t.Error("the runner bound a pod to another node")
 	}
-	if err := bind("abyss"); err != nil {
+	if err := bind("laptop-1"); err != nil {
 		t.Errorf("binding to itself: %v", err)
 	}
 
@@ -294,10 +294,10 @@ func TestHostRunnerWrites(t *testing.T) {
 	ls := runtime.NewScheme()
 	coordv1.AddToScheme(ls)
 	hc := rest.CopyConfig(cfg)
-	hc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-hosts:abyss",
+	hc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-hosts:laptop-1",
 		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-hosts", "system:authenticated"}}
 	lc, _ := client.New(hc, client.Options{Scheme: ls})
-	if err := lc.Create(ctx, lease("abyss")); err != nil {
+	if err := lc.Create(ctx, lease("laptop-1")); err != nil {
 		t.Errorf("its own Lease: %v", err)
 	}
 	if err := lc.Create(ctx, lease("w1")); err == nil {

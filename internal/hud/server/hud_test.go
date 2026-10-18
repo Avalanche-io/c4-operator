@@ -368,7 +368,7 @@ func TestAgentSummaryInDetail(t *testing.T) {
 	s.m.bundles = []c4v1.AgentBundle{{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research"},
 		Spec: c4v1.AgentBundleSpec{MaxRunning: 1, Members: []c4v1.AgentMemberSpec{{Name: "prov-graph"}, {Name: "agent-jobs", Kind: "task"}}},
 		Status: c4v1.AgentBundleStatus{Phase: "Running", Members: []c4v1.AgentMemberStatus{
-			{Name: "prov-graph", State: "running", Node: "c4-host-abyss", Epoch: "3"},
+			{Name: "prov-graph", State: "running", Node: "c4-host-laptop-1", Epoch: "3"},
 			{Name: "agent-jobs", State: "parked", Checkpoint: "s#7:c4abc"}},
 			Clock: c4v1.AgentClock{Start: &start, VirtualNow: &vnow, DriftSeconds: 3600, Suspensions: []c4v1.AgentSuspension{{From: from, To: to}}}}}}
 	var got map[string]any

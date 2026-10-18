@@ -1,7 +1,7 @@
 # Host runners: `c4 farm agent --runner` (or `c4-agent runner`) on a
 # person's own machine, running the members of their agent bundles. Each
 # machine signs in as its own service account in c4-hosts, named for the
-# machine's Node (c4-hosts/abyss for the Node abyss). The c4-host-runner
+# machine's Node (c4-hosts/laptop-1 for the Node laptop-1). The c4-host-runner
 # admission policies (config/policy/host-runner.yaml) narrow what RBAC
 # grants here to that one Node, its Lease, and the pods bound to it.
 apiVersion: v1

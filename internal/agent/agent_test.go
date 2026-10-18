@@ -484,8 +484,8 @@ func TestForcedRestarts(t *testing.T) {
 
 func TestProjectSlug(t *testing.T) {
 	cases := map[string]string{
-		"/Users/joshua/ws/Seattle":                                    "-Users-joshua-ws-Seattle",
-		"/Users/joshua/ws/active/software/openra/.worktrees/F3-spine": "-Users-joshua-ws-active-software-openra--worktrees-F3-spine",
+		"/Users/dev/work": "-Users-dev-work",
+		"/Users/dev/src/compiler/.worktrees/F3-spine": "-Users-dev-src-compiler--worktrees-F3-spine",
 	}
 	for in, want := range cases {
 		if got := ProjectSlug(in); got != want {
