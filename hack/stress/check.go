@@ -941,10 +941,18 @@ type runResult struct {
 	Decides                                 int
 	DecideMean, DecideMax                   time.Duration
 	MaxStarve                               time.Duration // longest wait of a ready job with nothing running
-	MaxStarveJob                            string
-	Hash                                    uint64
-	End                                     float64
-	Pred                                    predStats
+	// Spot: interruptions (and those caused by a maximum price), units
+	// killed by one, saves (a checkpoint or a move on a warning), work
+	// lost by unit length, units judged too risky for spot and those moved
+	// to on-demand.
+	SpotInterruptions, SpotKills, SpotSaves, PriceInterruptions int
+	SpotLostSlotHours                                           float64
+	SpotLostByLen                                               [4]float64
+	SpotRiskyUnits, SpotMoved                                   int
+	MaxStarveJob                                                string
+	Hash                                                        uint64
+	End                                                         float64
+	Pred                                                        predStats
 
 	Why      map[string]int // reasons bursts that would close a deadline needed approval
 	Counts   map[string]int

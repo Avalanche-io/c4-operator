@@ -18,6 +18,7 @@ type report struct {
 	Perf    []perfRow
 	Took    time.Duration
 	Workers int
+	Spot    []*spotResult
 }
 
 func (r *report) runs() int {
@@ -32,6 +33,13 @@ func (r *report) runs() int {
 func (r *report) total(known bool) int {
 	n := 0
 	for _, pr := range r.Results {
+		for _, f := range pr.Viol {
+			if f.Known == known {
+				n += f.N
+			}
+		}
+	}
+	for _, pr := range r.Spot {
 		for _, f := range pr.Viol {
 			if f.Known == known {
 				n += f.N
@@ -81,6 +89,9 @@ func (r *report) write(dir string) error {
 	p("Every run calls the production policy (`sched.Decide`) or a baseline through `sched.Policy` on a simulated farm; the invariants below are checked on every decision of `objective` and `objective+burst`.\n\n")
 	p("%d violations of invariants without a known cause, %d of known bugs.\n\n", r.total(false), r.total(true))
 
+	if len(r.Spot) > 0 {
+		p("Spot capacity by provider (AWS, GCP, Azure), with and without the completion-aware spot policy, is in [spot.md](spot.md).\n\n")
+	}
 	r.writeInvariants(p)
 	r.writeFindings(p)
 	r.writeComparison(p)

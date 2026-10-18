@@ -58,6 +58,7 @@ type unit struct {
 	retained    float64
 	yieldAt     float64
 	pre         sched.Preempt // the preemption it is yielding to
+	noticeKept  float64       // progress a checkpoint on an interruption notice saved
 }
 
 type job struct {
@@ -103,6 +104,7 @@ type pool struct {
 	bill      float64
 	last      float64
 	reclaims  int
+	price     float64 // current price per slot-hour (spot pools move)
 }
 
 func (p *pool) meter(now float64) {
@@ -111,7 +113,7 @@ func (p *pool) meter(now float64) {
 	}
 	p.busy += float64(p.used) * (now - p.last)
 	if b := p.def.burst; b != nil {
-		p.bill += float64(p.requested) * (now - p.last) * b.price / hour
+		p.bill += float64(p.requested) * (now - p.last) * p.price / hour
 	}
 	p.last = now
 }
@@ -131,6 +133,10 @@ const (
 	evReclaim
 	evNudge
 	evUnnudge
+	evSpot
+	evSignal
+	evKill
+	evPrice
 )
 
 type event struct {
@@ -171,6 +177,9 @@ type policy struct {
 	usesEs  bool
 	checked bool // run the invariant checks on its decisions
 	tweak   func(*sched.Config)
+	// spotAware: the completion-aware spot policy (spot.go) wraps the
+	// policy and acts on rebalance recommendations and notices.
+	spotAware bool
 }
 
 type engine struct {
@@ -208,11 +217,17 @@ func newEngine(w *workload, pol policy, check bool) *engine {
 	e.res = &runResult{Policy: pol.name, Point: w.pt.Name, Seed: w.seed}
 	for i, pd := range w.pools {
 		p := &pool{def: pd, idx: i, slots: pd.slots(), down: make([]bool, pd.nodes)}
+		if pd.burst != nil {
+			p.price = pd.burst.price
+		}
 		e.pools = append(e.pools, p)
 		e.byName[pd.name] = p
 		e.scheduleFaults(p)
 		if pd.burst != nil && pd.burst.interrupt > 0 {
 			e.nextReclaim(p, 0, 0)
+		}
+		if pd.burst != nil && pd.burst.spot != nil {
+			e.startSpot(p)
 		}
 	}
 	for _, pd := range w.projects {
@@ -246,6 +261,9 @@ func newEngine(w *workload, pol policy, check bool) *engine {
 		}
 	}
 	e.left = len(e.jobs)
+	if pol.spotAware {
+		e.pol.fn = e.completionAware
+	}
 	if check {
 		e.ck = newChecker(e)
 	}
@@ -323,6 +341,14 @@ func (e *engine) run() *runResult {
 			e.reclaim(ev.p, ev.attempt)
 		case evNudge:
 			e.applyNudge(ev.j, ev.j.spec.nudges[ev.n])
+		case evSpot:
+			e.spotEvent(ev.p, ev.attempt)
+		case evSignal:
+			e.signal(ev.p, ev.u, ev.attempt, ev.n)
+		case evKill:
+			e.kill(ev.p, ev.u, ev.attempt)
+		case evPrice:
+			e.priceStep(ev.p, ev.attempt)
 		case evUnnudge:
 			ev.j.hold, ev.j.stop = false, false
 			ev.j.dirty = true
@@ -419,6 +445,7 @@ func (e *engine) start(u *unit, p *pool) {
 	u.start = e.now
 	u.attempt++
 	u.yieldAt = 0
+	u.noticeKept = 0
 	j.runSlots[p.def.name] += slots
 	j.running = append(j.running, u)
 	j.dirty = true
@@ -484,7 +511,7 @@ func (e *engine) stopAs(u *unit, how evKind, preempted bool) {
 		useful, lost = prog*slots, u.restore*slots
 	case ml != nil:
 		prog := math.Max(0, elapsed-u.restore)
-		kept := math.Floor(prog/ml.ckpt) * ml.ckpt
+		kept := math.Max(math.Floor(prog/ml.ckpt)*ml.ckpt, math.Min(prog, u.noticeKept))
 		u.retained += kept
 		useful, lost = kept*slots, (elapsed-kept)*slots
 	default:
@@ -681,9 +708,9 @@ func (e *engine) snapshot() sched.Snapshot {
 	for _, p := range e.pools {
 		sp := sched.Pool{Name: p.def.name, Slots: p.slots, Used: p.used}
 		if b := p.def.burst; b != nil {
-			sp.CostPerSlotHour = b.price
+			sp.CostPerSlotHour = p.price
 			sp.Burst = &sched.Burst{MaxSlots: b.max, Provisioning: time.Duration(b.delay * float64(time.Second)),
-				CostPerSlotHour: b.price, Requested: p.requested, Provisioned: p.slots}
+				CostPerSlotHour: p.price, Requested: p.requested, Provisioned: p.slots}
 		}
 		free[p.def.name] = p.slots - p.used
 		s.Pools = append(s.Pools, sp)

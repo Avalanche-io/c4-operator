@@ -28,6 +28,7 @@ type burstDef struct {
 	delay     float64 // seconds
 	price     float64 // dollars per slot-hour
 	interrupt float64 // reclaims per slot-hour
+	spot      *spotDef
 }
 
 type projectDef struct {
@@ -134,11 +135,25 @@ func build(pt Point, seed uint64) *workload {
 		b := func(ref, price float64) *burstDef {
 			return &burstDef{max: int(math.Ceil(pt.BurstFrac * ref)), delay: pt.Provisioning * minute, price: price, interrupt: pt.Interruptions}
 		}
-		if refCPU > 0 {
-			w.pools = append(w.pools, poolDef{name: "cpu-burst", class: "cpu", spn: 1, burst: b(refCPU, pt.BurstCost)})
-		}
-		if refGPU > 0 {
-			w.pools = append(w.pools, poolDef{name: "gpu-burst", class: "gpu", spn: 1, burst: b(refGPU, 3*pt.BurstCost)})
+		for _, c := range []struct {
+			class      string
+			ref, price float64
+		}{{"cpu", refCPU, pt.BurstCost}, {"gpu", refGPU, 3 * pt.BurstCost}} {
+			if c.ref <= 0 {
+				continue
+			}
+			if pt.Provider == 0 {
+				w.pools = append(w.pools, poolDef{name: c.class + "-burst", class: c.class, spn: 1, burst: b(c.ref, c.price)})
+				continue
+			}
+			od := b(c.ref, c.price)
+			od.interrupt = 0
+			sp := b(c.ref, c.price*(1-pt.SpotDiscount))
+			sp.interrupt = 0
+			sp.spot = spotFor(pt, c.price)
+			w.pools = append(w.pools,
+				poolDef{name: c.class + "-spot", class: c.class, spn: 1, burst: sp},
+				poolDef{name: c.class + "-od", class: c.class, spn: 1, burst: od})
 		}
 	}
 	fullDay := 0.0

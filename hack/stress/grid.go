@@ -72,6 +72,19 @@ type Point struct {
 	PastDue float64 // every deadline already past at submission
 	Gate    float64 // every shot waits on a gate job that is held throughout
 	Huge    float64 // one job carrying the whole load
+	// Spot points (Provider above 0: 1 AWS, 2 GCP, 3 Azure; see spot.go).
+	// Each burst pool becomes an on-demand pool at BurstCost and a spot
+	// pool at SpotDiscount off it. SpotBand is the AWS Spot Instance
+	// Advisor band (0: <5% a month .. 4: >20%), Diversity the number of
+	// capacity pools AWS allocates over, HazardScale a capacity-crunch
+	// multiplier on the hazard, MaxPrice a maximum price as a fraction of
+	// on-demand (0: none, -1 on Azure), Evict 1 for Azure's delete (0:
+	// deallocate), Rebalance the chance AWS sends a rebalance
+	// recommendation first, CkptWrite the seconds a training checkpoint
+	// takes to write.
+	Provider, SpotBand, Diversity, HazardScale, SpotDiscount float64
+	MaxPrice, Evict, Rebalance, CkptWrite                    float64
+
 	// Drain is how long the run goes on after the arrival window, in days
 	// (0: one day). Jobs unfinished at the end and not yet due are left
 	// out of on-time counts.
@@ -127,6 +140,15 @@ var dims = []dim{
 	{name: "gate", lo: 0, hi: 0, f: func(p *Point) *float64 { return &p.Gate }},
 	{name: "huge", lo: 0, hi: 0, f: func(p *Point) *float64 { return &p.Huge }},
 	{name: "drain", lo: 0, hi: 0, f: func(p *Point) *float64 { return &p.Drain }},
+	{name: "provider", integ: true, f: func(p *Point) *float64 { return &p.Provider }},
+	{name: "spotBand", integ: true, f: func(p *Point) *float64 { return &p.SpotBand }},
+	{name: "diversity", integ: true, f: func(p *Point) *float64 { return &p.Diversity }},
+	{name: "hazardScale", log: true, f: func(p *Point) *float64 { return &p.HazardScale }},
+	{name: "spotDiscount", f: func(p *Point) *float64 { return &p.SpotDiscount }},
+	{name: "maxPrice", f: func(p *Point) *float64 { return &p.MaxPrice }},
+	{name: "evict", integ: true, f: func(p *Point) *float64 { return &p.Evict }},
+	{name: "rebalance", f: func(p *Point) *float64 { return &p.Rebalance }},
+	{name: "ckptWrite", f: func(p *Point) *float64 { return &p.CkptWrite }},
 }
 
 var arrivalNames = []string{"steady", "dailies", "crunch", "sun"}

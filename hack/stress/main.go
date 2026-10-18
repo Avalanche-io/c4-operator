@@ -35,6 +35,9 @@ func main() {
 	specOut := flag.String("spec", "", "with -point: write the point as a hack/hudmock scenario spec to this file")
 	noBase := flag.Bool("no-baselines", false, "skip the baseline policies")
 	noPerf := flag.Bool("no-perf", false, "skip the Decide latency sweep")
+	spotN := flag.Int("spot-n", 0, "spot grid points (default 48, quick 12; see spot.go)")
+	noSpot := flag.Bool("no-spot", false, "skip the spot grid")
+	spotPoint := flag.Bool("spot", false, "with -point: run the spot policies on it")
 	perfOnly := flag.String("perf", "", "only measure Decide at these farm sizes (comma-separated node counts)")
 	flag.Parse()
 	// The runs allocate many short-lived snapshots; a larger heap target
@@ -55,6 +58,9 @@ func main() {
 		return
 	}
 	if *point != "" {
+		if *spotPoint {
+			os.Exit(runSpotPoint(*point, *seed, *workers))
+		}
 		os.Exit(runPoint(*point, *seed, *variantF, *specOut, *workers))
 	}
 	started := time.Now()
@@ -77,8 +83,26 @@ func main() {
 	if !*noPerf {
 		perf = perfSweep(sizes, *workers)
 	}
-	rep := &report{Grid: g, Quick: *quick, Points: pts, Results: res, Perf: perf, Took: time.Since(started), Workers: *workers}
+	var spot []*spotResult
+	var spotTook time.Duration
+	if !*noSpot {
+		so := gridOpts{N: 48, Seed: *gridSeed, Drain: 1}
+		if *quick {
+			so = gridOpts{N: 12, Seed: *gridSeed, MaxNodes: 24, MaxDays: 0.5, Drain: 0.5}
+		}
+		if *spotN > 0 {
+			so.N = *spotN
+		}
+		t := time.Now()
+		spot = runSpotGrid(sampleSpot(so), ss, *workers, true)
+		spotTook = time.Since(t)
+	}
+	rep := &report{Grid: g, Quick: *quick, Points: pts, Results: res, Perf: perf, Took: time.Since(started), Workers: *workers, Spot: spot}
 	if err := rep.write(*out); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+	if err := writeSpot(*out, spot, *quick, spotTook); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
@@ -143,4 +167,30 @@ func runPoint(enc string, seed uint64, v, specOut string, workers int) int {
 		fmt.Printf("  %s%s (%s)\n", strings.TrimSpace(f.String()), k, f.Policy)
 	}
 	return 1
+}
+
+func runSpotPoint(enc string, seed uint64, workers int) int {
+	pt, err := decodePoint(enc)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 2
+	}
+	if pt.Provider == 0 {
+		fmt.Fprintln(os.Stderr, "not a spot point: set provider=1 (aws), 2 (gcp) or 3 (azure)")
+		return 2
+	}
+	pr := runSpotGrid([]Point{pt}, []uint64{seed}, workers, false)[0]
+	fmt.Printf("%s seed %d: %s, %s\n", pt.Name, seed, providerNames[int(pt.Provider)%4], pt.label())
+	for _, pol := range spotPolicies {
+		r := pr.Runs[pol.name]
+		fmt.Printf("  %-17s on time %4d/%-4d (%s)  burst $%-8.0f late $%-8.0f lost %6.1f slot-h  interruptions %4d  kills %4d  saves %4d  moved %4d\n",
+			pol.name, r.OnTime, r.DueJobs, pct(r.onTimePct()), r.BurstCost, r.LateDollars, r.SpotLostSlotHours, r.SpotInterruptions, r.SpotKills, r.SpotSaves, r.SpotMoved)
+	}
+	for _, f := range pr.Viol {
+		fmt.Printf("  %s (%s)\n", f.String(), f.Policy)
+	}
+	if len(pr.Viol) > 0 {
+		return 1
+	}
+	return 0
 }
