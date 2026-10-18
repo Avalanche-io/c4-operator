@@ -98,8 +98,25 @@ func TestTypes(t *testing.T) {
 		t.Fatalf("sim: one unit over the range: %v %v", spec.Params, err)
 	}
 	tr, _ := LookupType("transcode")
-	if _, err := tr.Spec(Options{Asset: "plates", Frames: "1-48", Set: map[string]string{"codec": "dnxhr-hqx"}}); err != nil {
+	spec, err = tr.Spec(Options{Asset: "plates/sm0140.1001.exr", Shot: "sm0140", Frames: "1001-1048", Set: map[string]string{"codec": "dnxhr-hqx"}})
+	if err != nil {
 		t.Fatal(err)
+	}
+	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, "-profile:v dnxhr_hqx") || !strings.Contains(a, "'/show/plates/sm0140.#.exr'") ||
+		!strings.Contains(a, "/show/review/sm0140_review.mov") || spec.Params["chunk"] != "48" {
+		t.Fatalf("transcode:\n%s", a)
+	}
+	if _, err := tr.Spec(Options{Asset: "p.exr", Frames: "1-4", Set: map[string]string{"codec": "h264"}}); err == nil {
+		t.Fatal("an unknown codec was accepted")
+	}
+	comp, _ := LookupType("comp")
+	spec, _ = comp.Spec(Options{Asset: "sm0140/comp.nk", Shot: "sm0140", Frames: "1001-1048"})
+	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, `nuke -x -F "$C4_FRAME_START-$C4_FRAME_END" /show/sm0140/comp.nk`) {
+		t.Fatalf("comp with Nuke:\n%s", a)
+	}
+	spec, _ = comp.Spec(Options{Asset: "sm0140/comp.sh", Shot: "sm0140", Frames: "1001-1048"})
+	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, "sh /show/sm0140/comp.sh") {
+		t.Fatalf("comp with OIIO:\n%s", a)
 	}
 	if _, err := tr.Spec(Options{Asset: "plates", Frames: "1-48", Set: map[string]string{"bitrate": "9"}}); err == nil {
 		t.Fatal("an unknown --set was accepted")

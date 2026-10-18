@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"path"
+	"regexp"
 	"sort"
 	"strings"
 	"text/template"
@@ -52,7 +53,9 @@ type JobType struct {
 // Vars are what a type's script sees.
 type Vars struct {
 	Asset    string // the asset's path under the mount, e.g. sm0140.usda
+	Dir      string // the asset's folder under the mount, with a trailing slash, or ""
 	Stem     string // its base name without extension, e.g. sm0140
+	Seq      string // a frame's sequence pattern: sm0140.1001.exr gives sm0140.#.exr
 	Shot     string
 	Mount    string
 	Renderer string
@@ -90,20 +93,26 @@ d.cache_directory, d.cache_data_format = '{{.Mount}}/cache', 'OPENVDB'
 bpy.ops.fluid.bake_all()
 "`},
 	"comp": {Name: "comp", Stage: "comp", Class: "render", Image: "oiio", Pools: []string{"cpu"}, Mount: "/show",
-		Summary: "composite frames: a Nuke script, or an OpenImageIO graph on farms without Nuke",
+		Summary: "composite frames: a Nuke script (.nk, on farms with Nuke), or an OpenImageIO script on any farm",
 		Frames:  true, Order: "binary", Chunk: "4",
 		Script: `mkdir -p {{.Mount}}/comp
-c4-comp --script {{.Mount}}/{{.Asset}} --frames "$C4_FRAME_START-$C4_FRAME_END" --out {{.Mount}}/comp/{{.Shot}}.%04d.exr
+{{if hasSuffix .Asset ".nk"}}nuke -x -F "$C4_FRAME_START-$C4_FRAME_END" {{.Mount}}/{{.Asset}}{{else}}sh {{.Mount}}/{{.Asset}}{{end}}
 for f in $(seq "$C4_FRAME_START" "$C4_FRAME_END"); do
   c4-unit preview "{{.Mount}}/comp/{{.Shot}}.$f.exr" "$f"
 done`},
 	"transcode": {Name: "transcode", Stage: "review", Class: "render", Image: "media", Pools: []string{"cpu"}, Mount: "/show",
 		Summary: "ACES-managed review movie (ProRes 422 HQ, ProRes 4444 or DNxHR HQX) and a contact sheet",
 		Frames:  true, Order: "sequential", Chunk: "all",
-		Set: map[string]string{"codec": "prores-422hq", "fps": "24"},
-		Script: `mkdir -p {{.Mount}}/review
-c4-transcode --codec {{index .Set "codec"}} --fps {{index .Set "fps"}} --frames "$C4_FRAME_START-$C4_FRAME_END" \
-  --in '{{.Mount}}/{{.Asset}}' --out {{.Mount}}/review/{{.Shot}}_review --contact {{.Mount}}/review/{{.Shot}}_contact.jpg`},
+		Set: map[string]string{"codec": "prores-422hq", "fps": "24", "frames": "{{.Seq}}"},
+		Script: `mkdir -p {{.Mount}}/review /tmp/f
+oiiotool --frames "$C4_FRAME_START-$C4_FRAME_END" '{{.Mount}}/{{.Dir}}{{index .Set "frames"}}' \
+  --colorconfig ocio://studio-config-latest --iscolorspace ACES2065-1 \
+  --ociodisplay "Rec.1886 Rec.709 - Display" "ACES 1.0 - SDR Video" \
+  -d uint16 -o /tmp/f/f.#.tif
+ffmpeg -loglevel error -framerate {{index .Set "fps"}} -start_number "$C4_FRAME_START" -i /tmp/f/f.%04d.tif \
+  {{codecArgs (index .Set "codec")}} {{.Mount}}/review/{{.Shot}}_review.mov
+oiiotool --frames "$C4_FRAME_START-$C4_FRAME_END" /tmp/f/f.#.tif --resize 320x0 \
+  --mosaic:pad=4 8x6 -o {{.Mount}}/review/{{.Shot}}_contact.jpg`},
 	"ci": {Name: "ci", Stage: "ci", Class: "ci", Image: "ci", Pools: []string{"cpu"}, Mount: "/src", WorkDir: "/src",
 		Summary: "run a repository's tests in shards",
 		Params:  map[string]string{"shards": "8", "target": "//..."},
@@ -211,21 +220,35 @@ func (t JobType) Spec(o Options) (c4v1.WorkJobSpec, error) {
 	if shot == "" {
 		shot = stem
 	}
-	v := Vars{Asset: o.Asset, Stem: stem, Shot: shot, Mount: t.Mount, Renderer: renderer, Set: set}
+	dir := path.Dir(o.Asset) + "/"
+	if dir == "./" {
+		dir = ""
+	}
+	seq := path.Base(o.Asset)
+	if m := frameFile.FindStringSubmatch(seq); m != nil {
+		seq = m[1] + ".#" + m[3]
+	}
+	v := Vars{Asset: o.Asset, Dir: dir, Stem: stem, Seq: seq, Shot: shot, Mount: t.Mount, Renderer: renderer, Set: set}
+	// a --set value may itself use the vars ({{.Stem}})
+	for k, val := range set {
+		if strings.Contains(val, "{{") {
+			x, err := expand(k, val, v)
+			if err != nil {
+				return c4v1.WorkJobSpec{}, err
+			}
+			set[k] = x
+		}
+	}
 	c := jobspec.Container{Image: o.Image}
 	if c.Image == "" {
 		c.Image = ImageRepo + "/c4-job-" + t.Image + ":" + ImageTag
 	}
 	if t.Script != "" {
-		tpl, err := template.New(t.Name).Option("missingkey=error").Parse(t.Script)
+		script, err := expand(t.Name, t.Script, v)
 		if err != nil {
 			return c4v1.WorkJobSpec{}, err
 		}
-		var b bytes.Buffer
-		if err := tpl.Execute(&b, v); err != nil {
-			return c4v1.WorkJobSpec{}, err
-		}
-		c.Command, c.Args = []string{"sh", "-euc"}, []string{b.String()}
+		c.Command, c.Args = []string{"sh", "-euc"}, []string{script}
 	} else {
 		c.Command, c.Args = t.Command, t.Args
 	}
@@ -242,6 +265,36 @@ func (t JobType) Spec(o Options) (c4v1.WorkJobSpec, error) {
 		pools = t.Pools
 	}
 	return c4v1.WorkJobSpec{Class: t.Class, Params: params, Pools: pools, Template: pod}, nil
+}
+
+// frameFile is name.FRAME.ext.
+var frameFile = regexp.MustCompile(`^(.*)\.(\d+)(\.[A-Za-z0-9]+)$`)
+
+var funcs = template.FuncMap{
+	"hasSuffix": strings.HasSuffix,
+	"codecArgs": func(codec string) (string, error) {
+		switch codec {
+		case "prores-422hq":
+			return "-c:v prores_ks -profile:v 3 -pix_fmt yuv422p10le", nil
+		case "prores-4444":
+			return "-c:v prores_ks -profile:v 4 -pix_fmt yuva444p10le", nil
+		case "dnxhr-hqx":
+			return "-c:v dnxhd -profile:v dnxhr_hqx -pix_fmt yuv422p10le", nil
+		}
+		return "", fmt.Errorf("codec %q: use prores-422hq, prores-4444 or dnxhr-hqx", codec)
+	},
+}
+
+func expand(name, text string, v Vars) (string, error) {
+	tpl, err := template.New(name).Funcs(funcs).Option("missingkey=error").Parse(text)
+	if err != nil {
+		return "", err
+	}
+	var b bytes.Buffer
+	if err := tpl.Execute(&b, v); err != nil {
+		return "", err
+	}
+	return b.String(), nil
 }
 
 // frameCount counts the frames of a range set like "1001-1048,1050".
