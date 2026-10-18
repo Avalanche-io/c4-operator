@@ -335,7 +335,7 @@ nothing is spent. `at` is an RFC 3339 time, given up to 8 times.
 Suggested deadlines are generous (met 95% of the time by default) and the
 farm never moves one earlier: tightening is the person's choice, and this
 is where they make it. Without `at`, the queue offers the tighter choices
-itself, each with a `label`: the upcoming sessions of the job's project
+itself, each with a `label` (times in labels are local, with UTC alongside): the upcoming sessions of the job's project
 (from its `sessions` deadline policies, three per calendar) before the
 job's deadline, and the earliest time it makes at 80% without making
 another job late. Each comes with its odds (`meets`) and what it would
@@ -354,7 +354,7 @@ displace.
 | `deadline`, `band`    | the job's effective deadline and finish band as things stand                                                                                                                                                                                                                            |
 | `achievable`          | the earliest deadline, on the policy's times, by which the job is ready at `quantile` without making a job that is on time late                                                                                                                                                         |
 | `floor`, `floorWhy`   | the earliest the job can finish at all: its longest remaining unit, or its remaining work on every slot it can attain, and which binds                                                                                                                                                  |
-| `options[].label`     | the choice the queue offered (`dailies session Tue 08:00`, `earliest at 80% without making another job late`); absent for a time the caller gave |
+| `options[].label`     | the choice the queue offered (`dailies session Tue 08:00 PDT (15:00 UTC)`, `earliest at 80% without making another job late`); absent for a time the caller gave |
 | `options[].band`      | the finish band with the job's deadline at `at`                                                                                                                                                                                                                                         |
 | `options[].meets`     | the highest of 50, 80, 90 and 95 whose finish is at or before `at`; 0 when none                                                                                                                                                                                                         |
 | `options[].onTime`    | the finish at `quantile` is at or before `at`                                                                                                                                                                                                                                           |

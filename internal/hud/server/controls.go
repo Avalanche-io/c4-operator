@@ -19,6 +19,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
+	"github.com/Avalanche-io/c4-operator/work/forecast"
 	"github.com/Avalanche-io/c4-operator/work/order"
 )
 
@@ -154,7 +155,7 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		j.Spec.Deadline = &metav1.Time{Time: t}
-		did = append(did, "deadline "+t.In(s.Loc).Format("Mon 15:04"))
+		did = append(did, "deadline "+forecast.Clock(t, s.Loc))
 		if j.Spec.DeadlineMode == "Suggested" && body.DeadlineMode == nil {
 			// A time a person sets is theirs.
 			j.Spec.DeadlineMode = "Pinned"
@@ -172,7 +173,7 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		}
 		j.Spec.Deadline = &metav1.Time{Time: sg.NextSession.Time}
 		j.Spec.DeadlineMode = "Pinned"
-		did = append(did, "deadline "+sg.NextSession.Time.In(s.Loc).Format("Mon 15:04")+" (next session)")
+		did = append(did, "deadline "+forecast.Clock(sg.NextSession.Time, s.Loc)+", the next session")
 	}
 	if body.DeadlineMode != nil && !body.NextSession {
 		m := *body.DeadlineMode
@@ -190,7 +191,7 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				j.Spec.Deadline = &metav1.Time{Time: cur.Time}
-				did = append(did, "deadline "+cur.Time.In(s.Loc).Format("Mon 15:04")+" pinned")
+				did = append(did, "deadline "+forecast.Clock(cur.Time, s.Loc)+" pinned")
 			}
 		case "Suggested", "Tracking":
 			if body.Deadline != nil {

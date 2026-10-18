@@ -73,7 +73,7 @@ type Options struct {
 // Option is the readout for one candidate deadline.
 type Option struct {
 	At time.Time
-	// Label names an offered choice ("dailies session Tue 08:00"); empty
+	// Label names an offered choice ("dailies session Tue 08:00 PDT (15:00 UTC)"); empty
 	// for a time the caller gave.
 	Label string
 	// Band is the job's finish band with its deadline at At, and Meets the
@@ -389,7 +389,7 @@ func tighter(now, deadline time.Time, policies map[string]forecast.Policy, at80 
 				if loc == nil {
 					loc = time.UTC
 				}
-				labels[s] = fmt.Sprintf("%s session %s", c, s.In(loc).Format("Mon 15:04"))
+				labels[s] = fmt.Sprintf("%s session %s", c, forecast.Clock(s, loc))
 			}
 			t = s.Add(time.Minute)
 		}

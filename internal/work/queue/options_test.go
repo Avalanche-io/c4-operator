@@ -183,7 +183,7 @@ func TestTighterChoices(t *testing.T) {
 			t.Fatalf("choices %v %v, want %v", got, labels, want)
 		}
 	}
-	if labels[want[1]] != "dailies session Thu 08:00" {
+	if labels[want[1]] != "dailies session Thu 08:00 UTC" {
 		t.Fatalf("label %q", labels[want[1]])
 	}
 	// Nothing is offered at or after the deadline.

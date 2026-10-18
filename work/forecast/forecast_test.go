@@ -264,3 +264,22 @@ func TestFinishCalibration(t *testing.T) {
 		t.Fatal("stages")
 	}
 }
+
+func TestClock(t *testing.T) {
+	ts := time.Date(2026, 10, 22, 15, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		loc  *time.Location
+		want string
+	}{
+		{la, "Thu 08:00 PDT (15:00 UTC)"},
+		{nil, "Thu 15:00 UTC"},
+		{time.UTC, "Thu 15:00 UTC"},
+	} {
+		if got := Clock(ts, c.loc); got != c.want {
+			t.Errorf("%v: %q, want %q", c.loc, got, c.want)
+		}
+	}
+	if got := Clock(time.Date(2026, 10, 23, 3, 0, 0, 0, time.UTC), la); got != "Thu 20:00 PDT (Fri 03:00 UTC)" {
+		t.Errorf("across midnight: %q", got)
+	}
+}
