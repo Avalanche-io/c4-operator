@@ -341,7 +341,8 @@ fraction its latest checkpoint saved.
   the job's units):
   ```
   { bundle, phase, cap?, running,
-    members: [ { name, unit, kind, state, node?, epoch?, checkpoint?: { session, seq, id } } ],
+    members: [ { name, unit, kind, state, node?, epoch?, checkpoint?: { session, seq, id },
+                 runs: [ { from, to? } ] } ],
     clock: { start?, virtualNow?, suspendedSince?, suspendedBy?, driftSeconds },
     suspended: [ { from, to?, by } ] }
   ```
@@ -359,7 +360,10 @@ fraction its latest checkpoint saved.
   is still suspended. `by` is `queue` (the farm stopped every member at a
   turn boundary, and resumes them itself) or `person` (someone suspended
   the bundle, and a person resumes it). `phase` is `Running`, `Holding` or
-  `Held` (by a person), `Suspended` (by the queue), or `Pending`. `cap` is the bundle's limit on members running at
+  `Held` (by a person), `Suspended` (by the queue), or `Pending`. `runs` are the
+  member's recent runs, oldest first, the current one without `to`. The
+  real backend reports only the current run, from its unit pod; hudmock
+  reports the scenario's history. `cap` is the bundle's limit on members running at
   once.
 
 ## GET /jobs/{ns}/{name}/units/{i}
