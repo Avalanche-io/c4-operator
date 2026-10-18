@@ -1,6 +1,6 @@
 ---
 name: c4-farm
-description: Operate a C4 render, CI and ML farm on Kubernetes through its MCP tools (c4_*). Use when someone asks why a shot, change or training run is late, what is running or waiting, whether a deadline will be met, how to make a job finish sooner, which nodes are failing work, what burst capacity costs, or which files changed between two versions. The farm has no priorities: work is ordered by deadlines and estimates, and you change outcomes by moving a deadline, boosting, holding, requeuing units or approving capacity.
+description: Operate a C4 render, CI and ML farm on Kubernetes through its MCP tools (c4_*). Use when someone wants to submit a render, test or training job, or asks why a shot, change or training run is late, what is running or waiting, whether a deadline will be met, how to make a job finish sooner, which nodes are failing work, what burst capacity costs, or which files changed between two versions. The farm has no priorities: work is ordered by deadlines and estimates, and you change outcomes by moving a deadline, boosting, holding, requeuing units or approving capacity.
 ---
 
 # Operating a C4 farm
@@ -30,6 +30,16 @@ is checked against their Kubernetes permissions and recorded as an Event naming 
 the honest measure when frames differ in cost (a hero FX range at 3.4 times the
 median can be half a shot's work in a fifth of its frames). `c4_list_jobs` filters by `shot` to
 show a shot's whole chain (sim, FX, comp, transcode).
+
+## Submitting work
+
+`c4_submit_job` puts a new job in the queue for the person you act for: the class
+(`render` with `frames`, `ci` with `shards`, `ml` with `steps`), the image each unit
+runs, its inputs (a view's C4 ID, or `from_job` for an upstream job's output) and,
+if they gave one, a deadline. Always call it with `dry_run: true` first and tell the
+person what the farm expects (units, ready p50 and p90, slack, on track or not);
+submit only when they agree. Without a deadline the farm suggests one. The job is
+owned by the person, and the book records that you submitted it for them.
 
 ## Changing what happens
 

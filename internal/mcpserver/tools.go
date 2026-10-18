@@ -19,7 +19,7 @@ var Version = "dev"
 
 // Instructions are sent to clients when they connect.
 const Instructions = `This server operates a render, CI and ML farm on Kubernetes, the same farm the HUD shows. Jobs are named namespace/name.
-Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
+Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in with c4_submit_job (dry_run first). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
 Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. Costs: c4_approve_capacity provisions paid burst capacity.`
 
 func boolPtr(b bool) *bool { return &b }
@@ -98,6 +98,8 @@ func Tools(c *Client) []Tool {
 			idempotent, c.avoidNode),
 		tool("c4_disable_node", "Disable or enable a node", "Take a node out of service for the whole farm (running units finish) or put it back.",
 			idempotent, c.disableNode),
+		tool("c4_submit_job", "Submit a job", "Submit a render, CI or training job: the class and its parameters, the image each unit runs, input views or upstream jobs, and an optional deadline (omit it and the farm suggests one). Call with dry_run first: it returns the estimate (units, ETA p50 and p90, slack, on track or not) and creates nothing; show it to the person, then submit. The job is owned by the person you act for.",
+			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.submitJob),
 		tool("c4_approve_capacity", "Approve burst capacity", "Approve the burst capacity request waiting in a pool. This provisions paid capacity; check c4_capacity_and_cost first for its cost and the jobs it is for.",
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.approveCapacity),
 	}

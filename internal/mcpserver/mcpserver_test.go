@@ -66,6 +66,18 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		u := 3
 		json.NewEncoder(w).Encode(api.Book{Entries: []api.BookEntry{{Seq: 1, At: due.Add(-time.Hour), Actor: "node/w1", Signer: "node", Kind: "failed",
 			Object: api.BookObject{Type: "unit", Job: r.URL.Query().Get("job"), Unit: &u}, Message: "1004 failed on w1 (exit 137): OOMKilled"}}})
+	case r.Method == "POST" && r.URL.Path == "/api/v1/jobs":
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.posts = append(f.posts, r.URL.Path+" "+string(body))
+		f.mu.Unlock()
+		var req api.SubmitRequest
+		json.Unmarshal(body, &req)
+		eta := due.Add(-3 * time.Hour)
+		json.NewEncoder(w).Encode(api.SubmitResponse{OK: true, DryRun: req.DryRun, Namespace: "show-a", Name: "sm0140-render-v001",
+			Message: "sm0140-render-v001: planned, not submitted",
+			Estimate: &api.SubmitEstimate{Units: 48, ETA50: &eta, ETA90: &eta, Deadline: &due, DeadlineSource: "suggested",
+				SlackSeconds: 10800, Feasible: true}})
 	case r.Method == "POST":
 		body, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
@@ -310,5 +322,26 @@ func TestDeadlineModeAndNextSession(t *testing.T) {
 		if hud.posts[i] != "/api/v1/jobs/show-a/sh010/nudge "+w {
 			t.Errorf("post %d: %s, want %s", i, hud.posts[i], w)
 		}
+	}
+}
+
+func TestSubmitJobDryRun(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "tok-noor")
+	res, out := call(t, cs, "c4_submit_job", map[string]any{"project": "show-a", "type": "render", "shot": "sm0140", "class": "render",
+		"params": map[string]any{"frames": "1001-1048"}, "image": "ghcr.io/avalanche-io/c4-job-hydra:v0.1.0",
+		"inputs": []any{map[string]any{"view": "c4abc", "mount_path": "/show"}}, "dry_run": true})
+	if res.IsError || out["job"] != "show-a/sm0140-render-v001" || out["submitted"] != false || out["onTrack"] != true || out["units"] != float64(48) {
+		t.Fatalf("dry run: %v %q", out, text(res))
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	if len(hud.posts) != 1 || !strings.Contains(hud.posts[0], `"dryRun":true`) || !strings.Contains(hud.posts[0], `"runAsNonRoot":true`) ||
+		!strings.Contains(hud.posts[0], `"view":"c4abc"`) {
+		t.Fatalf("posts %v", hud.posts)
+	}
+	res, _ = call(t, cs, "c4_submit_job", map[string]any{"class": "render", "image": "x", "env": map[string]any{"C4_UNIT": "1"}})
+	if !res.IsError {
+		t.Fatal("a C4_ variable was accepted")
 	}
 }

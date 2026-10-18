@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -155,7 +156,7 @@ func TestSubmit(t *testing.T) {
 			SlackSeconds: int64(deadline.Sub(eta).Seconds()), Feasible: true}, nil
 	}
 	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1001-1048", "order": "binary"},
-		Deadline: nil})
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
 	view := c4.Identify(strings.NewReader("a tree")).String()
 	req := api.SubmitRequest{Project: "show-a", Type: "render", Shot: "sm0140", Spec: spec,
 		Inputs: []api.SubmitInput{{View: view, MountPath: "/show"}}, DryRun: true}
@@ -187,6 +188,9 @@ func TestSubmit(t *testing.T) {
 		job.Labels[c4v1.LabelShot] != "sm0140" || job.Labels[c4v1.LabelJobType] != "render" {
 		t.Fatalf("job metadata %v %v", job.Annotations, job.Labels)
 	}
+	if sc := job.Spec.Template.Spec.SecurityContext; sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {
+		t.Fatalf("the template was not restricted: %+v", sc)
+	}
 	if len(job.Spec.Inputs) != 1 || job.Spec.Inputs[0].Materialization != inputMaterialization(view) {
 		t.Fatalf("inputs %+v", job.Spec.Inputs)
 	}
@@ -217,7 +221,8 @@ func TestSubmitNamesTheNextVersion(t *testing.T) {
 
 func TestSubmitDryRunErrors(t *testing.T) {
 	s := submitFarm(t)
-	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-4"}})
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-4"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
 	req := api.SubmitRequest{Project: "show-a", Spec: spec, DryRun: true}
 	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", req, nil); code != http.StatusServiceUnavailable {
 		t.Fatalf("no queue: %d", code)

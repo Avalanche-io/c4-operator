@@ -32,6 +32,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/jobspec"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 )
@@ -456,6 +457,11 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "spec.class is required: render, ci or ml")
 		return
 	}
+	if len(spec.Template.Spec.Containers) == 0 {
+		fail(w, http.StatusBadRequest, "spec.template needs a container: the image each unit runs")
+		return
+	}
+	spec.Template = jobspec.Restrict(spec.Template)
 	name := body.Name
 	if name == "" {
 		name = nextName(m, ns, body.Shot, body.Type)
