@@ -209,7 +209,7 @@ import json, sys
 call = [json.loads(l) for l in open(sys.argv[1])][1]
 r = call["result"]
 assert not call["isError"] and r["verified"] and r["complete"]
-print("An agent asking the MCP server (c4_verify_custody, as the wrangler) got the same verdict in {} ms: verified {}, complete {}, {} signers.".format(
+print("An agent asking the MCP server (c4_verify_custody, as the wrangler) got the same verdict in {} ms (one tool call on an open session, from the request to the answer, including the HUD reading and verifying the job's records from the store): verified {}, complete {}, {} signers.".format(
     call["ms"], r["verified"], r["complete"], len(r["signers"])))
 PY2
 record ""

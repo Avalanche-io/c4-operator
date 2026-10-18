@@ -249,4 +249,4 @@ The signing key (Secret `c4-provenance-key`) is mounted only by `c4-system/node`
 
 Checked outside the cluster with the public key only: the stored record says "verified: signed by c4-23906723b314e8a4 for unit 3 of sh050-denoise-v001 on c4-operator-e2e-worker5". The same record with its AI use changed to "none" and the signature kept says "rejected: no trusted key signed this record".
 
-An agent asking the MCP server (c4_trace_file, over stdio, as the wrangler) got the same record in 310 ms: verified True, input produced by show-a/sh050-render-v001.
+An agent asking the MCP server (c4_trace_file, over stdio, as the wrangler) got the same record in 310 ms: verified True, input produced by show-a/sh050-render-v001. The 310 ms is one tool call on an open session, from the request to the answer: the stdio hop, the HUD API, reading the job's record index and the signed record from the project's store, and verifying the record's signature. The P6 queries through MCP, which read no records, answer in 0 to 9 ms.

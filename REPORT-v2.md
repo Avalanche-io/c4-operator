@@ -103,7 +103,7 @@ At every capture the node daemon writes a task record: an in-toto Statement (v1)
 - A frame of a model-assisted denoise traces to the render it read (through its input view), with the declared model, oversight level and consent record; every record verifies.
 - The C2PA manifest definition for the render's frame says `algorithmicMedia`; the denoised frame's says `compositeWithTrainedAlgorithmicMedia`, with a `c2pa.ai-disclosure` assertion (C2PA 2.4). An OMC v2.8 Asset with the C4 ID as an identifier is emitted for each file.
 - Changing the declared AI use in a stored record, keeping its signature, makes it fail verification.
-- The same trace through the MCP server answers in a few milliseconds.
+- The same trace through the MCP server answered in 310 ms: one tool call on an open session, from the request to the answer, including the HUD reading the job's record index and the signed record from the store and verifying its signature (`hack/e2e/out/results.md`). Status queries through MCP, which read no records, answer in 0 to 9 ms (P6).
 
 **Signers per entity (built after the run above).** A provenance record is now the set of records each entity that did or decided part of the work signed itself (DESIGN.md section 9.2):
 
