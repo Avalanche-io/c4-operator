@@ -226,8 +226,21 @@ func (a *alloc) starvation(first bool) {
 		starving = append(starving, jc)
 	}
 	sort.SliceStable(starving, func(i, j int) bool { return since(starving[i]).Before(since(starving[j])) })
+	if !first {
+		// Gangs that did not fit in the first pass hold their pool only
+		// now, after the deadline tier: draining a pool for a gang
+		// before it would stop deadline work for as long as the drain
+		// takes (hours, with long units), a reservation rather than a
+		// floor on progress.
+		starving = append(a.gangsWaiting, starving...)
+		a.gangsWaiting = nil
+	}
 	for _, jc := range starving {
 		if a.release(jc, TierStarvation, false, nil) {
+			continue
+		}
+		if first && jc.canRelease() && jc.unitSlots(jc.j.Runnable[jc.next]) > 1 {
+			a.gangsWaiting = append(a.gangsWaiting, jc)
 			continue
 		}
 		a.holdForGang(jc)
@@ -375,7 +388,7 @@ func (a *alloc) guarantee() {
 			for _, jc := range js {
 				for pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && a.release(jc, TierGuarantee, true, ps) {
 				}
-				if pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && jc.R > 0 && a.holdForGang(jc) {
+				if pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && jc.R > 0 && a.guaranteeFits(jc, ps) && a.holdForGang(jc) {
 					break
 				}
 			}

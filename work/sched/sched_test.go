@@ -857,3 +857,48 @@ func TestGuardUnitIsAFloorNotAReservation(t *testing.T) {
 		}
 	}
 }
+
+// TestUnfittableGangHoldsNothingBack: a project's 8-GPU gang cannot fit in
+// its 7 nominal GPUs on a 16-GPU pool whose nominal quotas are all given
+// out, so admit holds no free GPUs back for it and another project may
+// borrow them. Holding them kept up to 8 GPUs idle for days in hack/sim's
+// half-GPU scenario.
+func TestUnfittableGangHoldsNothingBack(t *testing.T) {
+	ml := job("train", "rnd", 1, 16, 30*time.Hour)
+	ml.Pools, ml.SlotsPerUnit = []string{"gpu"}, 8
+	ml.Runnable[0].Slots = 8
+	ml.Estimate = estimate.Summary{W: 8 * 4 * 3600, W90: 8 * 4 * 3600, TPath: 4 * 3600}
+	render := job("render", "show", 100, 60, 6*time.Hour)
+	render.Pools = []string{"gpu"}
+	render.Running = map[string]int{"gpu": 9}
+	s := Snapshot{Now: t0,
+		Pools: []Pool{{Name: "gpu", Slots: 16, Used: 9}},
+		Projects: []Project{
+			{Name: "rnd", Quotas: map[string]Quota{"gpu": {Nominal: 7, BorrowingLimit: -1}}},
+			{Name: "show", Quotas: map[string]Quota{"gpu": {Nominal: 9, BorrowingLimit: -1}}},
+		},
+		Jobs: []Job{ml, render}}
+	d := Decide(s, &State{}, DefaultConfig())
+	if n := count(d, "render"); n < 7 {
+		t.Fatalf("render borrowed %d of the 7 free GPUs; the gang can never fit in rnd's guarantee", n)
+	}
+}
+
+// TestStarvingGangDrainsAfterDeadlineTier: a gang starving past
+// StarvationDeferMax that does not fit holds its pool only after the
+// deadline tier: a job due within hours still gets the free slots it
+// needs, and the gang gets what is left.
+func TestStarvingGangDrainsAfterDeadlineTier(t *testing.T) {
+	ml := job("train", "p", 1, 16, 30*time.Hour)
+	ml.Pools, ml.SlotsPerUnit = []string{"gpu"}, 8
+	ml.Runnable[0].Slots = 8
+	ml.LastRunning = time.Time{}
+	ml.Ready = t0.Add(-3 * time.Hour)
+	urgent := job("urgent", "p", 20, 6, 3*time.Hour)
+	urgent.Pools = []string{"gpu"}
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "gpu", Slots: 16, Used: 12}}, Jobs: []Job{ml, urgent}}
+	d := Decide(s, &State{}, DefaultConfig())
+	if count(d, "urgent") == 0 {
+		t.Fatalf("the starving gang's drain kept the urgent job from the free GPUs: %+v", d.Dispatch)
+	}
+}

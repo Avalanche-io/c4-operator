@@ -19,7 +19,10 @@ type alloc struct {
 	jobs     []*jobCtx
 	byID     map[string]*jobCtx
 	quotas   bool // enforce project quotas (Decide) or not (baselines)
-	out      Decisions
+	// gangsWaiting: starving gangs from the guard's first pass that did
+	// not fit; they hold their pool after the deadline tier.
+	gangsWaiting []*jobCtx
+	out          Decisions
 }
 
 type poolState struct {
@@ -162,11 +165,37 @@ func (a *alloc) needDemand() {
 			continue
 		}
 		for _, pool := range jc.j.Pools {
-			if ps := a.pools[pool]; ps != nil {
+			if ps := a.pools[pool]; ps != nil && a.guaranteeFits(jc, ps) {
 				jc.proj.demand[pool] += min(need, ps.p.Slots)
 			}
 		}
 	}
+}
+
+// guaranteeFits reports whether the job's next unit could ever run in ps
+// on its project's guarantee: a gang larger than the project's nominal
+// quota plus the pool's slots no project is guaranteed fits only when
+// other projects happen to fall below their own quota, and no reclaim can
+// make room for it. Holding free slots back for such a gang (admit's
+// reserve, the guarantee's hold) leaves them idle while it waits; on a
+// 16-GPU pool an 8-GPU training gang of a project with 7 nominal GPUs
+// kept up to 8 GPUs idle for days while renders waited. Such a gang
+// still runs when capacity frees, and the starvation guard can drain a
+// pool for it.
+func (a *alloc) guaranteeFits(jc *jobCtx, ps *poolState) bool {
+	k := jc.slots
+	if jc.next < len(jc.j.Runnable) {
+		k = jc.unitSlots(jc.j.Runnable[jc.next])
+	}
+	if k <= 1 || !a.quotas || !ps.hasQuota {
+		return k <= ps.p.Slots
+	}
+	guaranteed := 0
+	for name := range a.projects {
+		guaranteed += max(0, a.quota(name, ps.p.Name).Nominal)
+	}
+	spare := max(0, ps.p.Slots-guaranteed)
+	return k <= a.quota(jc.proj.p.Name, ps.p.Name).Nominal+spare
 }
 
 func (a *alloc) quota(proj, pool string) Quota {
