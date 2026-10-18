@@ -225,7 +225,14 @@ func (d *Daemon) ensureObjects(ctx context.Context, pc *projectCtx, objs []view.
 		next  atomic.Int64
 		mu    sync.Mutex
 		first error
+		done  atomic.Int64
+		of    int64
 	)
+	for _, o := range objs {
+		of += max(o.Size, 0)
+	}
+	report := progressOf(ctx)
+	report(0, of)
 	for range min(workers, len(objs)) {
 		wg.Add(1)
 		go func() {
@@ -251,6 +258,7 @@ func (d *Daemon) ensureObjects(ctx context.Context, pc *projectCtx, objs []view.
 					return
 				}
 				metrics.NodeObjects.WithLabelValues(pc.p.Name, [...]string{"hit", "join", "fetch"}[res]).Inc()
+				report(done.Add(max(objs[i].Size, 0)), of)
 			}
 		}()
 	}

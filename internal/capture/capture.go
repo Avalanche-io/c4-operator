@@ -42,6 +42,9 @@ type Input struct {
 	Records view.RecordSource
 	Sink    Sink
 	Workers int
+	// Progress, if set, is told how many of the new objects' bytes have
+	// reached the store, as they do.
+	Progress func(done, of int64)
 }
 
 // Result describes a capture.
@@ -208,7 +211,21 @@ func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.
 		wg    sync.WaitGroup
 		mu    sync.Mutex
 		first error
+		sent  int64
+		of    int64
 	)
+	sizes := map[c4.ID]int64{}
+	for _, f := range res.Files {
+		if changed[f.ID] {
+			sizes[f.ID] = f.Size
+		}
+	}
+	for _, n := range sizes {
+		of += n
+	}
+	if in.Progress != nil {
+		in.Progress(0, of)
+	}
 	for range workers {
 		wg.Add(1)
 		go func() {
@@ -224,8 +241,13 @@ func upload(ctx context.Context, in Input, changed map[c4.ID]bool, paths map[c4.
 				}
 				if err == nil {
 					res.Uploaded++
+					sent += sizes[id]
 				}
+				done := sent
 				mu.Unlock()
+				if err == nil && in.Progress != nil {
+					in.Progress(done, of)
+				}
 			}
 		}()
 	}

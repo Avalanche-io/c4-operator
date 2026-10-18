@@ -1,7 +1,8 @@
 # RBAC cannot say "only these annotations, only pods on your own node", so
 # this policy does. The node daemon's service account may change pods only
-# by adding or replacing c4.avalanche.io/output-* annotations, and only on
-# pods bound to the node its token was issued for (the token's
+# by adding or replacing c4.avalanche.io/output-* annotations and the unit
+# phase notes c4.avalanche.io/preflight and c4.avalanche.io/egress, and
+# only on pods bound to the node its token was issued for (the token's
 # authentication.kubernetes.io/node-name). Everything else about the pod
 # must be unchanged.
 apiVersion: admissionregistration.k8s.io/v1
@@ -24,16 +25,18 @@ spec:
     expression: "has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
   - name: after
     expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+  - name: mine
+    expression: "['c4.avalanche.io/preflight', 'c4.avalanche.io/egress']"
   validations:
   - expression: >-
       'authentication.kubernetes.io/node-name' in request.userInfo.extra &&
       object.spec.nodeName == request.userInfo.extra['authentication.kubernetes.io/node-name'][0]
     message: the c4 node daemon may only write to pods on its own node
   - expression: >-
-      variables.after.all(k, k.startsWith('c4.avalanche.io/output-') ||
+      variables.after.all(k, k.startsWith('c4.avalanche.io/output-') || k in variables.mine ||
         (k in variables.before && variables.before[k] == variables.after[k])) &&
-      variables.before.all(k, k.startsWith('c4.avalanche.io/output-') || k in variables.after)
-    message: the c4 node daemon may only change c4.avalanche.io/output-* annotations
+      variables.before.all(k, k.startsWith('c4.avalanche.io/output-') || k in variables.mine || k in variables.after)
+    message: the c4 node daemon may only change c4.avalanche.io/output-*, preflight and egress annotations
   - expression: >-
       (has(object.metadata.labels) ? object.metadata.labels : {}) ==
       (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {})

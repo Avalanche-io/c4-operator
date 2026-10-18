@@ -177,7 +177,10 @@ func (d *Daemon) Publish(ctx context.Context, req PublishRequest) (err error) {
 		return err
 	}
 
-	st, how, err := d.ensureStack(ctx, pc, target, mat)
+	// the pod shows as preparing while its inputs arrive
+	pctx, preflightDone := d.preflightNote(ctx, ns, podName, podUID)
+	defer preflightDone()
+	st, how, err := d.ensureStack(pctx, pc, target, mat)
 	if err != nil {
 		return err
 	}
@@ -397,9 +400,12 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 		return err
 	}
 	upper, _ := d.volumeDirs(vol.Partition, vol.ID)
+	// the finished pod shows its output still moving while capture uploads
+	egress := d.note(vol.Namespace, vol.Pod, vol.PodUID, c4v1.AnnotationEgress)
 	res, err := capture.Run(ctx, capture.Input{
 		Project: p.Name, Parent: parent, Upper: upper,
 		Cache: pc.cache, Records: d.records(pc), Sink: d.sink(pc), Workers: 8,
+		Progress: func(done, of int64) { egress.set(ctx, Egress{Bytes: done, Of: of}, false) },
 	})
 	if err != nil {
 		metrics.NodeCapture.WithLabelValues(p.Name, "error").Inc()
@@ -437,8 +443,8 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 }
 
 // annotate records a capture on its pod. The node daemon's admission
-// policy lets it change only c4.avalanche.io/output-* annotations, and
-// only on pods bound to its own node.
+// policy lets it change only c4.avalanche.io/output-*, preflight and
+// egress annotations, and only on pods bound to its own node.
 func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result, record string) error {
 	var pod corev1.Pod
 	err := d.Kube.Get(ctx, types.NamespacedName{Namespace: vol.Namespace, Name: vol.Pod}, &pod)
@@ -452,10 +458,13 @@ func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result,
 		return nil
 	}
 	tree, changeset, changes := res.AnnotationValues()
+	moved, _ := json.Marshal(Egress{Bytes: res.Bytes, Of: res.Bytes})
 	ann := map[string]string{
 		c4v1.AnnotationOutputTree:      tree,
 		c4v1.AnnotationOutputChangeset: changeset,
 		c4v1.AnnotationOutputChanges:   changes,
+		// sealed with the output tree in one write: done, nothing moving
+		c4v1.AnnotationEgress: string(moved),
 	}
 	if record != "" {
 		ann[c4v1.AnnotationOutputProvenance] = record
