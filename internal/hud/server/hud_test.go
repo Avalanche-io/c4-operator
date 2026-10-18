@@ -425,3 +425,47 @@ func TestCappedNodeInSnapshot(t *testing.T) {
 		}
 	}
 }
+
+// A job the scheduler projects no ETA for (here, a suspended bundle with no
+// deadline) reports the snapshot's time and the reason, never the zero time.
+func TestNoETAInSnapshot(t *testing.T) {
+	s := farm(t)
+	now := s.m.at
+	j := c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research",
+		Labels: map[string]string{"c4.avalanche.io/agent-bundle": "research"}, CreationTimestamp: metav1.Time{Time: now.Add(-3 * time.Hour)}},
+		Spec: c4v1.WorkJobSpec{Class: "agent", Params: map[string]string{"members": "prov-graph", "bundle": "research"}},
+		Status: c4v1.WorkJobStatus{Phase: "Running", Units: c4v1.UnitCounts{Total: 1, Queued: 1},
+			Estimate: &c4v1.WorkEstimate{Feasible: true}}}
+	d, err := class.Lookup("agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := d.Plan(&j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &jobRec{job: j, key: "show-a/research", project: "show-a", plan: plan, driver: d}
+	s.m.jobs = append(s.m.jobs, rec)
+	s.m.byKey[rec.key] = rec
+	s.m.bundles = []c4v1.AgentBundle{{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research"},
+		Status: c4v1.AgentBundleStatus{Phase: "Suspended"}}}
+	var snap map[string]any
+	if code := get(t, s, "/api/v1/snapshot?as=wrangler", &snap); code != 200 {
+		t.Fatalf("snapshot: %d", code)
+	}
+	for _, x := range snap["jobs"].([]any) {
+		jj := x.(map[string]any)
+		if jj["name"] != "research" {
+			continue
+		}
+		e := jj["estimate"].(map[string]any)
+		if e["noEta"] != "suspended: it resumes from its checkpoints when capacity returns" {
+			t.Fatalf("noEta %v", e["noEta"])
+		}
+		if at, _ := time.Parse(time.RFC3339, e["etaP50"].(string)); !at.Equal(now) {
+			t.Fatalf("etaP50 %v, want the snapshot's time %v", e["etaP50"], now)
+		}
+		return
+	}
+	t.Fatal("research not in the snapshot")
+}

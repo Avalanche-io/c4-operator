@@ -286,17 +286,22 @@ type Burst struct {
 }
 
 type Estimate struct {
-	RemainingSeconds    float64     `json:"remainingSeconds"`
-	P90RemainingSeconds float64     `json:"p90RemainingSeconds"`
-	EtaP50              time.Time   `json:"etaP50"`
-	EtaP90              time.Time   `json:"etaP90"`
-	RequiredSlots       float64     `json:"requiredSlots"`
-	AttainableSlots     float64     `json:"attainableSlots"`
-	RunningSlots        int         `json:"runningSlots"`
-	SlackSeconds        float64     `json:"slackSeconds"`
-	Feasible            bool        `json:"feasible"`
-	Message             string      `json:"message,omitempty"`
-	Burst               *BurstOffer `json:"burst,omitempty"`
+	RemainingSeconds    float64   `json:"remainingSeconds"`
+	P90RemainingSeconds float64   `json:"p90RemainingSeconds"`
+	EtaP50              time.Time `json:"etaP50"`
+	EtaP90              time.Time `json:"etaP90"`
+	// NoETA, when set, says why the job has no ETA (held, suspended,
+	// waiting for capacity, no deadline). EtaP50 and EtaP90 then carry the
+	// snapshot's time, never a past start or the zero time; show the reason,
+	// not a time.
+	NoETA           string      `json:"noEta,omitempty"`
+	RequiredSlots   float64     `json:"requiredSlots"`
+	AttainableSlots float64     `json:"attainableSlots"`
+	RunningSlots    int         `json:"runningSlots"`
+	SlackSeconds    float64     `json:"slackSeconds"`
+	Feasible        bool        `json:"feasible"`
+	Message         string      `json:"message,omitempty"`
+	Burst           *BurstOffer `json:"burst,omitempty"`
 	// EtaP80 and EtaP95 complete the band etaP50 and etaP90 begin.
 	EtaP80 *time.Time `json:"etaP80,omitempty"`
 	EtaP95 *time.Time `json:"etaP95,omitempty"`

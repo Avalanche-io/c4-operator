@@ -255,6 +255,10 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		if e.ETA90 != nil {
 			aj.Estimate.EtaP90 = e.ETA90.Time.UTC()
 		}
+		if e.ETA50 == nil {
+			aj.Estimate.EtaP50, aj.Estimate.EtaP90 = m.at, m.at
+			aj.Estimate.NoETA = noETA(m, j, st.Deadline != nil, int(e.RunningSlots))
+		}
 		aj.Estimate.EtaP80, aj.Estimate.EtaP95 = s.timePtr(e.ETA80), s.timePtr(e.ETA95)
 		aj.Estimate.Calibrated = e.Calibrated
 		aj.Estimate.Risk = e.Risk
@@ -264,6 +268,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	} else {
 		aj.Estimate.Feasible = true
 		aj.Estimate.EtaP50, aj.Estimate.EtaP90 = m.at, m.at
+		aj.Estimate.NoETA = "no estimate yet"
 	}
 	if st.Finished != nil {
 		// A finished job's "ETA" is when it finished.
@@ -536,4 +541,32 @@ func shownRisk(now time.Time, st *c4v1.WorkJobStatus, queued string) string {
 		return c4v1.RiskNone
 	}
 	return queued
+}
+
+// noETA says, in plain words, why the scheduler projects no ETA for a job.
+func noETA(m *model, j *c4v1.WorkJob, hasDeadline bool, running int) string {
+	if j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop {
+		return "held"
+	}
+	if name := j.Labels["c4.avalanche.io/agent-bundle"]; name != "" {
+		for i := range m.bundles {
+			b := &m.bundles[i]
+			if b.Namespace != j.Namespace || b.Name != name {
+				continue
+			}
+			switch b.Status.Phase {
+			case "Suspended":
+				return "suspended: it resumes from its checkpoints when capacity returns"
+			case "Held", "Holding":
+				return "held by a person"
+			}
+		}
+	}
+	if running == 0 {
+		return "waiting for capacity"
+	}
+	if !hasDeadline {
+		return "no deadline, so none projected"
+	}
+	return "no estimate yet"
 }
