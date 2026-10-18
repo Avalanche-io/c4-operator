@@ -82,6 +82,8 @@ type Queue struct {
 	lastDec  sched.Decisions
 	lastPol  map[string]forecast.Policy
 	lastAdj  map[string]func(time.Time, forecast.Band) forecast.Band
+	// approvals are the jobs a capacity request waits on a person for.
+	approvals map[string]bool
 }
 
 // NeedLeaderElection makes the queue run on one replica only.
@@ -147,6 +149,12 @@ type jobMem struct {
 	preemptBase int // preemptions counted before the last restart
 	yields      []yieldRecord
 	requeued    string
+	// accepted are failed units a person accepted (also in failed);
+	// acks the standing acknowledgements, acked the last request's token
+	// (states.go).
+	accepted    map[int]bool
+	acks        []*ackRecord
+	acked       string
 	decisions   []decisionRecord
 	jobRecord   string
 	lastRun     time.Time
@@ -168,7 +176,7 @@ type jobMem struct {
 }
 
 func newMem() *jobMem {
-	return &jobMem{succeeded: map[int]bool{}, failed: map[int]bool{}, attempts: map[int]int{},
+	return &jobMem{succeeded: map[int]bool{}, failed: map[int]bool{}, accepted: map[int]bool{}, attempts: map[int]int{},
 		millis: map[int]int64{}, launched: map[int]time.Time{}, nodeFails: map[string]int{}, blacklist: map[string]bool{},
 		resume: map[int]string{}, yieldAsked: map[int]time.Time{}, preemptions: map[int]int{},
 		out: newOutput(), foldedPod: map[types.UID]bool{}, ended: map[int]time.Time{}}
@@ -206,6 +214,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		}
 	}
 	m.requeued = st.Requeued
+	m.loadAcks(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
 		m.yields = append(m.yields, yieldRecord{Unit: int(y.Unit), At: y.At.Time, Reason: y.Reason, View: y.View})
@@ -258,8 +267,11 @@ type view struct {
 	done      []*corev1.Pod       // terminal pods to delete once recorded
 	running   map[int]runInfo
 	finishing map[int]bool // succeeded, waiting for capture
+	preflight map[int]bool // live pods still preparing
 	runnable  []int
 	blocked   bool
+	// stuckOn names a dependency that failed: the job cannot start.
+	stuckOn string
 	// unschedulable says why no unit of the job can ever be placed.
 	unschedulable string
 	// avoid is the job's blacklist: automatic plus person-set nodes.
@@ -329,6 +341,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 		}
 	}
 	q.loadPolicies(projects.Items)
+	q.approvals = approvals(crs.Items)
 	podsByJob := map[string][]*corev1.Pod{}
 	for i := range pods.Items {
 		p := &pods.Items[i]
@@ -387,7 +400,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		q.jobs[j.UID] = m
 	}
 	v := &view{job: j, key: j.Namespace + "/" + j.Name, mem: m, pods: map[int]*corev1.Pod{},
-		running: map[int]runInfo{}, finishing: map[int]bool{}}
+		running: map[int]runInfo{}, finishing: map[int]bool{}, preflight: map[int]bool{}}
 	v.project = nsProject[j.Namespace]
 	if v.project == "" {
 		v.project = "namespace/" + j.Namespace
@@ -422,6 +435,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				delete(m.failed, i)
 				delete(m.millis, i)
 				delete(m.ended, i)
+				m.forgetAcks(i)
 				m.attempts[i] = 0
 			}
 			m.requeued = token
@@ -431,6 +445,8 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			m.finPts, m.finLearned = nil, true
 		}
 	}
+	// People taking or accepting failed units.
+	applyAcks(j, m, len(plan.Units))
 	// Nodes a person allowed again leave the automatic blacklist.
 	for _, n := range strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",") {
 		if n = strings.TrimSpace(n); n != "" && m.blacklist[n] {
@@ -525,6 +541,9 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		default:
 			v.pods[idx] = p
 			v.running[idx] = runInfo{pool: p.Labels[c4v1.LabelPool], slots: slots, started: startOf(p), node: p.Spec.NodeName}
+			if PreflightOf(p) != nil {
+				v.preflight[idx] = true
+			}
 		}
 	}
 	// Units launched in an earlier tick whose pods the cache does not show
@@ -541,8 +560,11 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 
 	// Dependencies.
 	for _, dep := range j.Spec.DependsOn {
-		if phases[j.Namespace+"/"+dep] != "Succeeded" {
+		if ph := phases[j.Namespace+"/"+dep]; ph != "Succeeded" {
 			v.blocked = true
+			if ph == "Failed" && v.stuckOn == "" {
+				v.stuckOn = j.Namespace + "/" + dep
+			}
 		}
 	}
 	if !v.blocked && m.readyAt.IsZero() {

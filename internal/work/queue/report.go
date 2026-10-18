@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -98,41 +99,70 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	n := len(m.plan.Units)
 	st.Order = strings.ToLower(m.plan.OrderName)
-	var succ, fail, run, retry, queued []int
+	// Each unit is in one state. Units holding a slot are preflight,
+	// running, retrying or egress; between attempts, backoff.
+	var succ, egress, fail, accepted, pre, run, retry, backoff, queued []int
 	for i := 0; i < n; i++ {
 		_, running := v.running[i]
 		switch {
 		case m.succeeded[i]:
 			succ = append(succ, i)
+		case m.accepted[i]:
+			accepted = append(accepted, i)
 		case m.failed[i]:
 			fail = append(fail, i)
-		case running || v.finishing[i]:
+		case v.finishing[i]:
+			egress = append(egress, i)
+		case running && v.preflight[i]:
+			pre = append(pre, i)
+		case running && m.attempts[i] > 1:
+			retry = append(retry, i)
+		case running:
 			run = append(run, i)
 		case m.attempts[i] > 0:
-			retry = append(retry, i)
+			backoff = append(backoff, i)
 		default:
 			queued = append(queued, i)
 		}
 	}
 	held := v.job.Spec.Nudge.Hold || v.job.Spec.Nudge.HoldStop
-	st.Units = c4v1.UnitCounts{Total: int32(n), Succeeded: int32(len(succ)), Failed: int32(len(fail)),
-		Running: int32(len(run)), Retrying: int32(len(retry)), Queued: int32(len(queued))}
+	st.Units = c4v1.UnitCounts{Total: int32(n), Succeeded: int32(len(succ)), Egress: int32(len(egress)),
+		Failed: int32(len(fail)), Accepted: int32(len(accepted)), Preflight: int32(len(pre)),
+		Running: int32(len(run)), Retrying: int32(len(retry)), Backoff: int32(len(backoff)), Queued: int32(len(queued))}
 	switch {
 	case v.blocked:
-		st.Units.Blocked, st.Units.Queued = int32(len(queued)+len(retry)), 0
+		st.Units.Blocked, st.Units.Queued, st.Units.Backoff = int32(len(queued)+len(backoff)), 0, 0
 	case held:
 		st.Units.Held, st.Units.Queued = int32(len(queued)), 0
 	}
 	st.UnitStates = map[string]string{}
-	for name, set := range map[string][]int{"succeeded": succ, "failed": fail, "running": run, "retrying": retry, "queued": queued} {
+	for name, set := range map[string][]int{"succeeded": succ, "egress": egress, "failed": fail, "accepted": accepted,
+		"preflight": pre, "running": run, "retrying": retry, "backoff": backoff, "queued": queued} {
 		if len(set) > 0 {
 			st.UnitStates[name] = order.EncodeSet(set)
 		}
 	}
-	if v.blocked && len(queued) > 0 {
-		st.UnitStates["blocked"] = st.UnitStates["queued"]
+	if v.blocked && len(queued)+len(backoff) > 0 {
+		st.UnitStates["blocked"] = order.EncodeSet(slices.Sorted(slices.Values(append(append([]int{}, queued...), backoff...))))
 		delete(st.UnitStates, "queued")
+		delete(st.UnitStates, "backoff")
 	}
+	st.Acked = m.acked
+	st.Acks = m.ackStatus()
+	taken := map[int]bool{}
+	for _, a := range st.Acks {
+		for _, i := range decode(a.Units) {
+			taken[i] = true
+		}
+	}
+	waiting := 0
+	for _, i := range fail {
+		if !taken[i] {
+			waiting++
+		}
+	}
+	needsPerson(&st, v, q.approvals[v.key], waiting, v.job.Generation)
+	active := len(pre) + len(run) + len(retry) + len(egress)
 	var att []string
 	for i := 0; i < n; i++ {
 		if a := m.attempts[i]; a > 1 {
@@ -190,16 +220,17 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		st.Started = &metav1.Time{Time: m.started.Truncate(time.Second)}
 	}
 
+	// Accepted units count as done: nothing waits on them.
 	switch {
-	case len(succ) == n:
+	case len(succ)+len(accepted) == n:
 		st.Phase = "Succeeded"
-	case len(succ)+len(fail) == n && len(run) == 0:
+	case len(succ)+len(accepted)+len(fail) == n && active == 0:
 		st.Phase = "Failed"
 	case v.blocked:
 		st.Phase = "Blocked"
-	case held && len(run) == 0:
+	case held && active == 0:
 		st.Phase = "Held"
-	case len(run) > 0 || len(succ) > 0 || len(fail) > 0:
+	case active > 0 || len(succ) > 0 || len(fail) > 0 || len(accepted) > 0:
 		st.Phase = "Running"
 	default:
 		st.Phase = "Queued"
@@ -255,6 +286,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	e.Calibrated = v.sum.Calibrated
 	e.HeavyRegions = q.heavy(v)
+	e.Risk = risk(now, v, js, e)
 	st.Estimate = e
 	return st
 }

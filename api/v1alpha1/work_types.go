@@ -36,6 +36,20 @@ const (
 	// LabelJobType names the prebuilt job type a job was made from
 	// (render, usd, sim, comp, transcode, ci, lora, infer, ...).
 	LabelJobType = "c4.avalanche.io/job-type"
+	// AnnotationAcks on a WorkJob carries people's acknowledgements of
+	// units that need a person: a JSON list of WorkAckRequest, newest last.
+	// The queue carries out each request once (status.acked) and records
+	// it in status.acks.
+	AnnotationAcks = "c4.avalanche.io/acks"
+	// AnnotationPreflight on a unit pod reports the step it is preparing
+	// before the work starts: JSON {"step": "stage" | "fetch" | "image" |
+	// "license", "bytes": n, "of": n}. The node daemon and the class
+	// drivers write it; "step": "done" (or no annotation once the
+	// container runs) ends preflight.
+	AnnotationPreflight = "c4.avalanche.io/preflight"
+	// AnnotationEgress on a finished unit pod reports its output's
+	// capture: JSON {"bytes": n, "of": n}.
+	AnnotationEgress = "c4.avalanche.io/egress"
 	// TaintUnprovisioned marks a node that stands in for capacity not yet
 	// provisioned (the kind capacity simulator, section 10.12).
 	TaintUnprovisioned = "c4.avalanche.io/unprovisioned"
@@ -166,8 +180,15 @@ type WorkJobStatus struct {
 	// Units counts units by state.
 	// +optional
 	Units UnitCounts `json:"units,omitempty"`
-	// UnitStates holds run-length index sets by state: queued, running,
-	// succeeded, failed, retrying.
+	// UnitStates holds run-length index sets by state, each unit in one:
+	// queued (or blocked), preflight (its pod is preparing: placement,
+	// inputs, cache, image, license), running (the first attempt is
+	// working), retrying (a later attempt is working), backoff (an attempt
+	// failed and the next waits for a slot), egress (the work is done and
+	// its output is being captured and added to the job's output),
+	// succeeded (the output is added and recorded), failed (failed after
+	// its retries: a person must act) and accepted (failed, and a person
+	// accepted it, so nothing waits on it).
 	// +optional
 	UnitStates map[string]string `json:"unitStates,omitempty"`
 	// Attempts per unit index, for units tried more than once
@@ -217,6 +238,14 @@ type WorkJobStatus struct {
 	// Requeued is the token of the last requeue request carried out.
 	// +optional
 	Requeued string `json:"requeued,omitempty"`
+	// Acked is the token of the last acknowledgement request carried out
+	// (AnnotationAcks).
+	// +optional
+	Acked string `json:"acked,omitempty"`
+	// Acks are the standing acknowledgements: who took, was assigned or
+	// accepted which failed units, and when. A requeue clears a unit's.
+	// +optional
+	Acks []WorkAck `json:"acks,omitempty"`
 	// Preemptions counts units stopped or asked to yield to make room.
 	// +optional
 	Preemptions int32 `json:"preemptions,omitempty"`
@@ -332,11 +361,86 @@ type UnitCounts struct {
 	Total     int32 `json:"total,omitempty"`
 	Queued    int32 `json:"queued,omitempty"`
 	Blocked   int32 `json:"blocked,omitempty"`
+	Preflight int32 `json:"preflight,omitempty"`
 	Running   int32 `json:"running,omitempty"`
 	Retrying  int32 `json:"retrying,omitempty"`
+	Backoff   int32 `json:"backoff,omitempty"`
+	Egress    int32 `json:"egress,omitempty"`
 	Succeeded int32 `json:"succeeded,omitempty"`
 	Failed    int32 `json:"failed,omitempty"`
+	Accepted  int32 `json:"accepted,omitempty"`
 	Held      int32 `json:"held,omitempty"`
+}
+
+// Ack kinds.
+const (
+	AckAcknowledge = "acknowledge"
+	AckAssign      = "assign"
+	AckAccept      = "accept"
+)
+
+// Deadline risk (WorkEstimate.Risk).
+const (
+	RiskNone     = "none"
+	RiskAt       = "atRisk"
+	RiskWillMiss = "willMiss"
+	RiskMissed   = "missed"
+)
+
+// ConditionNeedsPerson is True while the job waits on a person. Its
+// LastTransitionTime is since when; its reason is one of the
+// NeedsPerson reasons.
+const ConditionNeedsPerson = "NeedsPerson"
+
+// NeedsPerson reasons.
+const (
+	// NeedsFailed: units failed after their retries and nobody has
+	// acknowledged or accepted them.
+	NeedsFailed = "Failed"
+	// NeedsStuck: the job can never run as it stands (no plan, no pool
+	// that fits a unit, a dependency that failed).
+	NeedsStuck = "Stuck"
+	// NeedsApproval: capacity that would restore the deadline waits for
+	// a person's approval.
+	NeedsApproval = "Approval"
+	// NeedsQuota and NeedsPermission are reserved for a project's quota
+	// and an access block.
+	NeedsQuota      = "Quota"
+	NeedsPermission = "Permission"
+)
+
+// WorkAckRequest is one request in AnnotationAcks.
+type WorkAckRequest struct {
+	// Token makes each request distinct; requests are carried out in
+	// token order (base-36 nanoseconds).
+	Token string `json:"token"`
+	// Kind is acknowledge (I have it), assign (Assignee has it) or accept
+	// (the failure stands: accept the units as they are).
+	Kind  string `json:"kind"`
+	Units string `json:"units"`
+	Actor string `json:"actor"`
+	// +optional
+	Assignee string `json:"assignee,omitempty"`
+	// +optional
+	Note string      `json:"note,omitempty"`
+	At   metav1.Time `json:"at"`
+	// Record is the C4 ID of the signed control record.
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkAck is a standing acknowledgement of failed units.
+type WorkAck struct {
+	Kind  string `json:"kind"`
+	Units string `json:"units"`
+	Actor string `json:"actor"`
+	// +optional
+	Assignee string `json:"assignee,omitempty"`
+	// +optional
+	Note string      `json:"note,omitempty"`
+	At   metav1.Time `json:"at"`
+	// +optional
+	Record string `json:"record,omitempty"`
 }
 
 // WorkEstimate is the estimate and the objective state. Durations are
@@ -356,6 +460,14 @@ type WorkEstimate struct {
 	SlackSeconds        int64  `json:"slackSeconds,omitempty"`
 	Feasible            bool   `json:"feasible,omitempty"`
 	AtRisk              bool   `json:"atRisk,omitempty"`
+	// Risk is the deadline risk a person is shown: none, atRisk (the
+	// band at the job's quantile, 0.95 for a suggested deadline and 0.9
+	// otherwise, ends after the deadline, or the scheduler's conservative
+	// finish does), willMiss (late even with every slot it can get, or
+	// the median finish is after the deadline) or missed (the deadline
+	// has passed and the job is not finished).
+	// +optional
+	Risk string `json:"risk,omitempty"`
 	// ETA50 and ETA90 are the finish a person is shown, at 50 and 90%:
 	// the plan's finish with the calibrated percentiles of the remaining
 	// work, and half the critical path as the last wave's tail (the

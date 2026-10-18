@@ -194,6 +194,40 @@ spec:
               run-length index sets, so its size grows with state changes along the
               unit range, not with the number of units.
             properties:
+              acked:
+                description: |-
+                  Acked is the token of the last acknowledgement request carried out
+                  (AnnotationAcks).
+                type: string
+              acks:
+                description: |-
+                  Acks are the standing acknowledgements: who took, was assigned or
+                  accepted which failed units, and when. A requeue clears a unit's.
+                items:
+                  description: WorkAck is a standing acknowledgement of failed units.
+                  properties:
+                    actor:
+                      type: string
+                    assignee:
+                      type: string
+                    at:
+                      format: date-time
+                      type: string
+                    kind:
+                      type: string
+                    note:
+                      type: string
+                    record:
+                      type: string
+                    units:
+                      type: string
+                  required:
+                  - actor
+                  - at
+                  - kind
+                  - units
+                  type: object
+                type: array
               attempts:
                 description: |-
                   Attempts per unit index, for units tried more than once
@@ -383,6 +417,15 @@ spec:
                     type: integer
                   requiredSlots:
                     type: string
+                  risk:
+                    description: |-
+                      Risk is the deadline risk a person is shown: none, atRisk (the
+                      band at the job's quantile, 0.95 for a suggested deadline and 0.9
+                      otherwise, ends after the deadline, or the scheduler's conservative
+                      finish does), willMiss (late even with every slot it can get, or
+                      the median finish is after the deadline) or missed (the deadline
+                      has passed and the job is not finished).
+                    type: string
                   runningSlots:
                     format: int32
                     type: integer
@@ -554,19 +597,38 @@ spec:
                 additionalProperties:
                   type: string
                 description: |-
-                  UnitStates holds run-length index sets by state: queued, running,
-                  succeeded, failed, retrying.
+                  UnitStates holds run-length index sets by state, each unit in one:
+                  queued (or blocked), preflight (its pod is preparing: placement,
+                  inputs, cache, image, license), running (the first attempt is
+                  working), retrying (a later attempt is working), backoff (an attempt
+                  failed and the next waits for a slot), egress (the work is done and
+                  its output is being captured and added to the job's output),
+                  succeeded (the output is added and recorded), failed (failed after
+                  its retries: a person must act) and accepted (failed, and a person
+                  accepted it, so nothing waits on it).
                 type: object
               units:
                 description: Units counts units by state.
                 properties:
+                  accepted:
+                    format: int32
+                    type: integer
+                  backoff:
+                    format: int32
+                    type: integer
                   blocked:
+                    format: int32
+                    type: integer
+                  egress:
                     format: int32
                     type: integer
                   failed:
                     format: int32
                     type: integer
                   held:
+                    format: int32
+                    type: integer
+                  preflight:
                     format: int32
                     type: integer
                   queued:
