@@ -903,16 +903,16 @@ which did or decided part of it signed itself. No farm key signs for
 everyone, so every record names who vouches for it, and the chain of
 custody crosses signers.
 
-| record     | predicate (`https://cccc.io/provenance/...`) | signed by                                                                                                                               | identity (`https://cccc.io/id/...`) |
-| ---------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
-| task       | `task/v1`                                    | the node daemon that ran and captured the unit                                                                                          | `node/<node>`                       |
-| resolution | `resolution/v1`                              | the controller, for the view a Materialization resolved to, under which grant, with every object present                                | `component/controller`              |
-| decision   | `decision/v1`                                | the queue, for each preemption or yield it decides, and for whom                                                                        | `component/queue`                   |
-| job        | `job/v1`                                     | the queue, when a job ends: its output view, chain and record index, and the decision and control records that touched it              | `component/queue`                   |
+| record     | predicate (`https://cccc.io/provenance/...`) | signed by                                                                                                                             | identity (`https://cccc.io/id/...`) |
+| ---------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
+| task       | `task/v1`                                    | the node daemon that ran and captured the unit                                                                                        | `node/<node>`                       |
+| resolution | `resolution/v1`                              | the controller, for the view a Materialization resolved to, under which grant, with every object present                              | `component/controller`              |
+| decision   | `decision/v1`                                | the queue, for each preemption or yield it decides, and for whom                                                                      | `component/queue`                   |
+| job        | `job/v1`                                     | the queue, when a job ends: its output view, chain and record index, and the decision and control records that touched it             | `component/queue`                   |
 | control    | `control/v1`                                 | the HUD, for each action a person or agent takes through the HUD or MCP: the actor, how they signed in, the client, the authorization | `component/hud`                     |
-| import     | `import/v1`                                  | the importer's workload identity, one per git commit (the commit, its view and its changeset)                                           | `sa/<namespace>/<name>`             |
-| ingest     | `ingest/v1`                                  | the ingesting workload's identity, for the view it hashed                                                                               | `sa/<namespace>/<name>`             |
-| submission | designed                                     | the person or agent who submits or approves work, with their own key                                                                    | `user/<name>`                       |
+| import     | `import/v1`                                  | the importer's workload identity, one per git commit (the commit, its view and its changeset)                                         | `sa/<namespace>/<name>`             |
+| ingest     | `ingest/v1`                                  | the ingesting workload's identity, for the view it hashed                                                                             | `sa/<namespace>/<name>`             |
+| submission | designed                                     | the person or agent who submits or approves work, with their own key                                                                  | `user/<name>`                       |
 
 **Identity: short-lived certificates from a farm signing CA.** Each signer
 makes its own Ed25519 key, which never leaves its process, and obtains a
@@ -1386,6 +1386,21 @@ half the critical path as the last wave's tail. The scheduler's own finish
 adds the whole critical path, which is the right margin for deciding who
 is late and what to buy, and run against isolated synthetic jobs it was about a quarter late as a
 median.
+
+**Deadline options.** Before a person sets a time, the queue says what it
+would take (`GET /jobs/{ns}/{name}/deadline-options`, `c4_deadline_options`),
+from what-if runs of the policy on a copy of its last snapshot with the
+job's deadline at the candidate time: the band and which percentile makes
+it; the smallest boost from 1.1 to 2.0 that makes it (a boost asks for the
+slots of a deadline 1/boost as far away, and is served only after every
+job's need, so it may not make an on-time job late); the burst the policy
+would buy and whether it needs approval; the jobs on time with this job's
+deadline far out that the time would make late, counted for everyone and
+named only in the viewer's projects; and, when nothing makes it, the
+earliest finish possible (the critical path, or the remaining work on every
+slot the job can attain). The readout also gives the achievable deadline,
+the earliest that makes no one late. At most eight times per request; it
+never spends or changes anything.
 
 **Latency SLOs feed back.** If a class's measured p95 over the last hour is
 under target, its effective deadlines relax toward the target. If it is over,
@@ -2097,14 +2112,15 @@ Events record which user an agent acted for.
 ### 13.2 MCP server
 
 **As built** (`internal/mcpserver`, on the official Go SDK v1.8.0, which
-speaks MCP 2026-07-28): sixteen tools, every one a call to the HUD API.
+speaks MCP 2026-07-28): twenty-two tools, every one a call to the HUD API.
 
-| group   | built                                                                                                                                                                                                                                             | annotations                           |
-| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| inspect | `c4_farm_status`, `c4_list_jobs` (filters, `limit`, `offset`, `nextOffset`), `c4_get_job` (units on request), `c4_get_unit` (log tail, events), `c4_list_nodes`, `c4_cache_tiers`, `c4_capacity_and_cost`, `c4_dependency_graph`, `c4_diff_views` | read-only, closed-world               |
-| act     | `c4_hold_job`, `c4_boost_job`, `c4_set_deadline`, `c4_avoid_node`, `c4_disable_node`                                                                                                                                                              | idempotent, not destructive           |
-| act     | `c4_requeue_units`                                                                                                                                                                                                                                | destructive (discards results)        |
-| spend   | `c4_approve_capacity`                                                                                                                                                                                                                             | open-world (provisions paid capacity) |
+| group   | built                                                                                                                                                                                                                                                                                                   | annotations                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| inspect | `c4_farm_status`, `c4_list_jobs` (filters, `limit`, `offset`, `nextOffset`), `c4_get_job` (units on request), `c4_get_unit` (log tail, events), `c4_list_nodes`, `c4_cache_tiers`, `c4_capacity_and_cost`, `c4_dependency_graph`, `c4_diff_views`, `c4_read_book`, `c4_trace_file`, `c4_verify_custody` | read-only, closed-world               |
+| plan    | `c4_suggest_deadline` (the suggestion, its source and band), `c4_deadline_options` (what candidate deadlines would take, section 10.7)                                                                                                                                                                  | read-only, closed-world               |
+| act     | `c4_hold_job`, `c4_boost_job`, `c4_set_deadline` (with `mode`: pin, suggested, tracking), `c4_move_to_next_session`, `c4_avoid_node`, `c4_disable_node`                                                                                                                                                 | idempotent, not destructive           |
+| act     | `c4_requeue_units`                                                                                                                                                                                                                                                                                      | destructive (discards results)        |
+| spend   | `c4_approve_capacity`                                                                                                                                                                                                                                                                                   | open-world (provisions paid capacity) |
 
 Errors come back as tool results that say what to do next ("Job names are
 namespace/name; call c4_list_jobs to see the jobs you can see"). The tool

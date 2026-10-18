@@ -121,8 +121,10 @@ the viewer's scope (1 is next).
   namespace, name, project, class, driver, owner?, phase, order,
   units: { total, unevaluated, queued, blocked, running, retrying, succeeded, failed, held },
   unitStates: { unevaluated, queued, blocked, running, retrying, succeeded, failed },
-  objective: { type, deadline?, latencyTargetSeconds?, from? },
-  estimate: { remainingSeconds, p90RemainingSeconds, etaP50, etaP90,
+  objective: { type, deadline?, latencyTargetSeconds?, from?, source?, mode?,
+               suggestion?: { deadline, state, policy, quantile, revisions, maxRevisions, nextSession?,
+                              history: [ { at, deadline, unitsMeasured, record? } ] } },
+  estimate: { remainingSeconds, p90RemainingSeconds, etaP50, etaP80?, etaP90, etaP95?, calibrated,
               requiredSlots, attainableSlots, runningSlots, slackSeconds, feasible,
               message?, burst?: { pool, slots, cost, needsApproval } },
   rank, pools[],
@@ -138,27 +140,36 @@ the viewer's scope (1 is next).
 }
 ```
 
-| field                          | meaning                                                                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------ |
-| `phase`                        | `Queued`, `Running`, `Blocked` (waiting on `dependsOn`), `Held`, `Yielded` (a wrapped run that yielded), `Succeeded`, `Failed` |
-| `order`                        | `binary`, `sequential`, `reverse`, `failure-rate` (CI), `gang` (wrapped ML)                                                    |
-| `units.held`                   | waiting units of a held job; they are not also counted in `queued`                                                             |
-| `unitStates`                   | has no `held` key: a held job's waiting units are in `queued`, and the client draws them as held when `nudge.hold` is set      |
-| `unitStates.running`           | includes a generator while it is being evaluated                                                                               |
-| `objective.deadline`           | the effective deadline: the job's own, or one propagated from a dependent, or ready time plus the latency target               |
-| `objective.from`               | the dependent job whose deadline binds, when the deadline is inherited                                                         |
-| `estimate.remainingSeconds`    | wall-clock seconds from `now` to `etaP50`                                                                                      |
-| `estimate.p90RemainingSeconds` | wall-clock seconds from `now` to `etaP90`                                                                                      |
-| `estimate.requiredSlots`       | `W90 / T` (DESIGN 9.9)                                                                                                         |
-| `estimate.slackSeconds`        | `T - max(W90 / A, t_path)`; negative when the job will miss                                                                    |
-| `estimate.message`             | the feasibility warning in production's terms; also set for held and failed jobs                                               |
-| `estimate.burst`               | the smallest burst that restores feasibility, its estimated cost, and whether a person must approve it                         |
-| `output.changesets`            | the number of unit changesets folded into the output view so far                                                               |
-| `heavyRegions[].from`, `.to`   | axis values (frame numbers for render), inclusive                                                                              |
-| `heavyRegions[].factor`        | the region's mean estimated cost over the job median                                                                           |
-| `blacklist`                    | nodes the job will not use, added automatically after `nodeErrorLimit` failures or by a person                                 |
-| `shot`                         | the job's `c4.avalanche.io/shot` label; the HUD draws a shot's jobs (sim, FX, comp, transcode) as one sheet                    |
-| `work`                         | progress weighted by work, in slot-seconds (seconds times the slots a unit holds); see below                                   |
+| field                          | meaning                                                                                                                         |
+| ------------------------------ | ------------------------------------------------------------------------------------------------------------------------------- |
+| `phase`                        | `Queued`, `Running`, `Blocked` (waiting on `dependsOn`), `Held`, `Yielded` (a wrapped run that yielded), `Succeeded`, `Failed`  |
+| `order`                        | `binary`, `sequential`, `reverse`, `failure-rate` (CI), `gang` (wrapped ML)                                                     |
+| `units.held`                   | waiting units of a held job; they are not also counted in `queued`                                                              |
+| `unitStates`                   | has no `held` key: a held job's waiting units are in `queued`, and the client draws them as held when `nudge.hold` is set       |
+| `unitStates.running`           | includes a generator while it is being evaluated                                                                                |
+| `objective.deadline`           | the effective deadline: the job's own, or one propagated from a dependent, or ready time plus the latency target                |
+| `objective.from`               | the dependent job whose deadline binds, when the deadline is inherited                                                          |
+| `objective.source`             | where the deadline comes from: `spec` (a person, a tool or tracking), `suggested` (the farm) or `class` (the class's objective) |
+| `objective.mode`               | who owns the deadline: `Pinned`, `Suggested` or `Tracking` (DESIGN 10.7)                                                        |
+| `objective.suggestion`         | the farm's suggested deadline, kept for reference also once a person pins another                                               |
+| `suggestion.state`             | `Estimating`, `Settling` or `Settled`; a settled suggestion never moves                                                         |
+| `suggestion.policy`            | `achievable`, `sessions` or `turnaround`; `quantile` is the finish percentile it meets (0.8, 0.9)                               |
+| `suggestion.nextSession`       | for a sessions policy, the following session when the job is not expected to make its own: the one-click alternative            |
+| `suggestion.history[].record`  | the C4 ID of the queue's signed record of that value                                                                            |
+| `estimate.etaP50` to `etaP95`  | the finish band a person is shown: ready by then with probability 50, 80, 90 and 95%                                            |
+| `estimate.calibrated`          | the band comes from finished jobs' outcomes (live calibration), not the estimator's own spread                                  |
+| `estimate.remainingSeconds`    | wall-clock seconds from `now` to `etaP50`                                                                                       |
+| `estimate.p90RemainingSeconds` | wall-clock seconds from `now` to `etaP90`                                                                                       |
+| `estimate.requiredSlots`       | `W90 / T` (DESIGN 9.9)                                                                                                          |
+| `estimate.slackSeconds`        | `T - max(W90 / A, t_path)`; negative when the job will miss                                                                     |
+| `estimate.message`             | the feasibility warning in production's terms; also set for held and failed jobs                                                |
+| `estimate.burst`               | the smallest burst that restores feasibility, its estimated cost, and whether a person must approve it                          |
+| `output.changesets`            | the number of unit changesets folded into the output view so far                                                                |
+| `heavyRegions[].from`, `.to`   | axis values (frame numbers for render), inclusive                                                                               |
+| `heavyRegions[].factor`        | the region's mean estimated cost over the job median                                                                            |
+| `blacklist`                    | nodes the job will not use, added automatically after `nodeErrorLimit` failures or by a person                                  |
+| `shot`                         | the job's `c4.avalanche.io/shot` label; the HUD draws a shot's jobs (sim, FX, comp, transcode) as one sheet                     |
+| `work`                         | progress weighted by work, in slot-seconds (seconds times the slots a unit holds); see below                                    |
 
 #### Work-weighted progress
 
@@ -227,7 +238,7 @@ A JobSummary with these fields added:
 | `progress`            | running units; `measured` is true when the unit reports progress itself, false when the fill is elapsed time over the estimate                           |
 | `costByFrame`         | one entry per frame of the last pass: `seconds` when measured, else `estimate` with its band `low` to `high`                                             |
 | `expansions`          | generators that have been evaluated: `children` is a unit set, `at` a time; a client that sees a new entry animates the split                            |
-| `edges`               | unit-level dependencies inside the job (beauty after the deep env and volumes layers; integration after the shards); omitted above 5,000 units                     |
+| `edges`               | unit-level dependencies inside the job (beauty after the deep env and volumes layers; integration after the shards); omitted above 5,000 units           |
 | `axis.batch`          | frames per display batch: the render class's `chunk` when it is above 1, else the class fps (24, one second of screen time); frame axes only             |
 | `groups[].parent`     | the key of the generator group whose expansion creates this group's units (`batch` under `shot`, `usd` under `batch`)                                    |
 | `unitList[].parent`   | the index of the generator unit whose expansion created this unit; omitted for units the job planned                                                     |
@@ -312,6 +323,40 @@ a running one. `expandedInto` is a unit set. `events[].type` is `Normal` or
 One entry per frame of the last pass, in frame order. `url` is set for
 rendered frames and points at `/api/v1/objects/{project}/{c4id}`. The player
 holds each rendered frame until the next rendered one.
+
+## GET /jobs/{ns}/{name}/deadline-options?at={time}[&at={time}...]
+
+What each candidate deadline would take, from what-if runs of the
+scheduling policy on a copy of the queue's last plan. Nothing changes and
+nothing is spent. `at` is an RFC 3339 time, given 1 to 8 times.
+
+```
+{ job, now, policy, quantile, deadline?, band?: { p50, p80, p90, p95 }, achievable?, floor, floorWhy,
+  options: [ { at, band?: { p50, p80, p90, p95 }, meets, onTime, boost?,
+               burst?: { slots: { pool: n }, pools[], cost, closes, automatic, why? },
+               displaces, displaced[], unnamed, floor?, floorWhy? } ] }
+```
+
+| field                 | meaning                                                                                                                                                                                                                                                                                 |
+| --------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `policy`, `quantile`  | the job's deadline policy and the finish percentile its deadlines are read at                                                                                                                                                                                                           |
+| `deadline`, `band`    | the job's effective deadline and finish band as things stand                                                                                                                                                                                                                            |
+| `achievable`          | the earliest deadline, on the policy's times, by which the job is ready at `quantile` without making a job that is on time late                                                                                                                                                         |
+| `floor`, `floorWhy`   | the earliest the job can finish at all: its longest remaining unit, or its remaining work on every slot it can attain, and which binds                                                                                                                                                  |
+| `options[].band`      | the finish band with the job's deadline at `at`                                                                                                                                                                                                                                         |
+| `options[].meets`     | the highest of 50, 80, 90 and 95 whose finish is at or before `at`; 0 when none                                                                                                                                                                                                         |
+| `options[].onTime`    | the finish at `quantile` is at or before `at`                                                                                                                                                                                                                                           |
+| `options[].boost`     | the smallest boost, 1.1 to 2.0, by which the job keeping its own deadline is ready by `at` without making an on-time job late; omitted when none does or none is needed                                                                                                                 |
+| `options[].burst`     | the burst the policy would buy for the job at `at`: slots per pool, cheapest first, and the estimated cost; `closes` when it restores the deadline, `automatic` when it is within the project's budget and below the lateness it prevents (otherwise `why` says what approval it needs) |
+| `options[].displaces` | jobs on time with this job's deadline far out that `at` would make late                                                                                                                                                                                                                 |
+| `options[].displaced` | those of them in the viewer's projects, by name; `unnamed` counts the others, which are never named                                                                                                                                                                                     |
+| `options[].floor`     | set when nothing closes `at` (not on time, no boost, no closing burst): the earliest finish possible, with `floorWhy`                                                                                                                                                                   |
+
+`400` for a missing, malformed or ninth `at`; `404` for a job outside the
+viewer's projects; `409` when the job is not in the queue's plan (finished,
+not schedulable, or newer than the last tick); `501` when the manager runs
+without the work queue; `503` when the queue has not planned yet (it runs
+on the leader replica, so a HUD on another replica answers this).
 
 ## GET /objects/{project}/{c4id}
 
@@ -443,36 +488,40 @@ the object names the user. Success is `200` with:
 the updated JobSummary; `node` the updated node. Errors are `4xx` with
 `{ error }`.
 
-| path                          | body                                      | effect                                                                                                                              |
-| ----------------------------- | ----------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `/jobs/{ns}/{name}/nudge`     | `{ hold?, holdStop?, boost?, deadline? }` | `hold`: release no new units (`false` releases); `holdStop: true`: hold and stop running units; `boost` 1 to 2; `deadline` RFC 3339 |
-| `/jobs/{ns}/{name}/requeue`   | `{ units }`                               | queue the units again; `units` is a unit set string or an array of indexes                                                          |
-| `/jobs/{ns}/{name}/blacklist` | `{ node, remove? }`                       | add the node to the job's blacklist, or remove it                                                                                   |
-| `/nodes/{name}/disable`       | `{ disabled }`                            | taint or untaint the node farm-wide; running units finish                                                                           |
-| `/capacity/{pool}/approve`    | `{}`                                      | approve the pending capacity request in the pool                                                                                    |
+| path                          | body                                                                   | effect                                                                                                                                                                                                                                                                                                                                                                   |
+| ----------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `/jobs/{ns}/{name}/nudge`     | `{ hold?, holdStop?, boost?, deadline?, deadlineMode?, nextSession? }` | `hold`: release no new units (`false` releases); `holdStop: true`: hold and stop running units; `boost` 1 to 2; `deadline` RFC 3339, which pins it; `deadlineMode` `Pinned` (alone, pins the deadline the job has now), `Suggested` or `Tracking`; `nextSession: true` moves the deadline to `objective.suggestion.nextSession` and pins it (`409` when none is offered) |
+| `/jobs/{ns}/{name}/requeue`   | `{ units }`                                                            | queue the units again; `units` is a unit set string or an array of indexes                                                                                                                                                                                                                                                                                               |
+| `/jobs/{ns}/{name}/blacklist` | `{ node, remove? }`                                                    | add the node to the job's blacklist, or remove it                                                                                                                                                                                                                                                                                                                        |
+| `/nodes/{name}/disable`       | `{ disabled }`                                                         | taint or untaint the node farm-wide; running units finish                                                                                                                                                                                                                                                                                                                |
+| `/capacity/{pool}/approve`    | `{}`                                                                   | approve the pending capacity request in the pool                                                                                                                                                                                                                                                                                                                         |
 
 ## Changes from the first draft of the contract
 
-| change                                   | why                                                                                                                                               |
-| ---------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
-| job detail `units?` list is `unitList`   | `units` is already JobSummary's counts; a detail is a JobSummary plus fields, so the names collided                                               |
-| `unitList[].pos` added                   | children of a generator are not in their group's position order, so the client needs each unit's position                                         |
-| `groups[].generator`, `groups[].spans`   | the client draws an unexpanded generator across the rows its children will occupy, and splits it in place                                         |
-| `riskUnits` added                        | yellow risk marks for jobs above 5,000 units, where `unitList` is omitted                                                                         |
-| `JobSummary.blacklist` added             | blacklists are shown in the queue, the job view and on node cards                                                                                 |
-| `objective.from` added                   | an inherited deadline names the job it came from                                                                                                  |
-| `nodes[].running[].slots` added          | units can take more than one slot; the node card splits slots between the viewer's and other projects                                             |
-| ML `classSummary.step`, `totalSteps`     | the ML lens shows progress in steps                                                                                                               |
-| `usage` added to the snapshot            | usage is shown and billed as cluster-hours, container-hours, GPU-hours or a production window; bytes avoided is savings only                      |
-| control responses `{ ok, message, ... }` | the HUD shows the farm's own sentence after each control                                                                                          |
-| `requeue` accepts an index array         | convenience; the unit set string is still the canonical form                                                                                      |
-| `blacklist` accepts `remove`             | the job view offers "Allow node again"                                                                                                            |
-| `JobSummary.work` added                  | progress by unit count misleads when frames differ tenfold in cost; the fill is drawn by work, from the same `W` and `W90` the scheduler plans on |
-| `unitList[].work` added                  | each box can show how much of the job it is, and a running box fills against its own expected total                                               |
-| `JobSummary.shot`, graph `shot` added    | a shot's chain of jobs (sim, FX, comp, transcode) is shown as one sheet                                                                           |
-| `unitList[].parent`, `groups[].parent`   | expansion nests (job script, batches, frames, passes); the client draws each level and links children to their generator                          |
-| `axis.batch` added                       | the HUD groups frames into batches the same way whether or not the job has batch generators                                                       |
-| `unitList[].reads` added                 | a unit that reads several upstream frames (a temporal comp) draws its reads across rows, not only the same frame                                  |
-| `GET /book` added                        | the farm's history with who signed each line, so a wrangler can read why a unit retried or a run yielded without kubectl                          |
-| `nodes[].zone`, `.region`, `sites` added | nodes are drawn at their sites on a map: the studio machine room and the cloud regions burst capacity comes from                                  |
-| `unitList[].eta` added                   | the projected finish of each waiting unit, drawn as isochrones across the job view                                                                |
+| change                                    | why                                                                                                                                               |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| job detail `units?` list is `unitList`    | `units` is already JobSummary's counts; a detail is a JobSummary plus fields, so the names collided                                               |
+| `unitList[].pos` added                    | children of a generator are not in their group's position order, so the client needs each unit's position                                         |
+| `groups[].generator`, `groups[].spans`    | the client draws an unexpanded generator across the rows its children will occupy, and splits it in place                                         |
+| `riskUnits` added                         | yellow risk marks for jobs above 5,000 units, where `unitList` is omitted                                                                         |
+| `JobSummary.blacklist` added              | blacklists are shown in the queue, the job view and on node cards                                                                                 |
+| `objective.from` added                    | an inherited deadline names the job it came from                                                                                                  |
+| `nodes[].running[].slots` added           | units can take more than one slot; the node card splits slots between the viewer's and other projects                                             |
+| ML `classSummary.step`, `totalSteps`      | the ML lens shows progress in steps                                                                                                               |
+| `usage` added to the snapshot             | usage is shown and billed as cluster-hours, container-hours, GPU-hours or a production window; bytes avoided is savings only                      |
+| control responses `{ ok, message, ... }`  | the HUD shows the farm's own sentence after each control                                                                                          |
+| `requeue` accepts an index array          | convenience; the unit set string is still the canonical form                                                                                      |
+| `blacklist` accepts `remove`              | the job view offers "Allow node again"                                                                                                            |
+| `JobSummary.work` added                   | progress by unit count misleads when frames differ tenfold in cost; the fill is drawn by work, from the same `W` and `W90` the scheduler plans on |
+| `unitList[].work` added                   | each box can show how much of the job it is, and a running box fills against its own expected total                                               |
+| `JobSummary.shot`, graph `shot` added     | a shot's chain of jobs (sim, FX, comp, transcode) is shown as one sheet                                                                           |
+| `unitList[].parent`, `groups[].parent`    | expansion nests (job script, batches, frames, passes); the client draws each level and links children to their generator                          |
+| `axis.batch` added                        | the HUD groups frames into batches the same way whether or not the job has batch generators                                                       |
+| `unitList[].reads` added                  | a unit that reads several upstream frames (a temporal comp) draws its reads across rows, not only the same frame                                  |
+| `GET /book` added                         | the farm's history with who signed each line, so a wrangler can read why a unit retried or a run yielded without kubectl                          |
+| `nodes[].zone`, `.region`, `sites` added  | nodes are drawn at their sites on a map: the studio machine room and the cloud regions burst capacity comes from                                  |
+| `unitList[].eta` added                    | the projected finish of each waiting unit, drawn as isochrones across the job view                                                                |
+| `estimate.etaP80`, `etaP95`, `calibrated` | the whole finish band a person is shown, and whether it is calibrated from finished jobs, so the HUD can say "ready by ~14:20 (80%)"              |
+| `objective.source`, `mode`, `suggestion`  | the deadline's source is always visible (you, suggested, tracking), with the farm's suggestion and its signed revisions                           |
+| `GET /jobs/{ns}/{name}/deadline-options`  | the feasibility readout as a person picks a time: likelihood, boost, burst cost, displacement (named only in the viewer's projects), floor        |
+| nudge `deadlineMode`, `nextSession`       | accept the suggestion, hand the deadline to tracking, or move a job that will miss its session to the next one in one click                       |

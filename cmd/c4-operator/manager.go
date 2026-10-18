@@ -198,8 +198,13 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 	if err != nil {
 		return err
 	}
-	srv := &hudserver.Server{Client: mgr.GetClient(), Kube: kube, Queue: q, Stores: stores, Web: web, Loc: loc,
+	srv := &hudserver.Server{Client: mgr.GetClient(), Kube: kube, Stores: stores, Web: web, Loc: loc,
 		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud}
+	if q != nil {
+		// Without the work system the HUD has no queue to ask (a nil
+		// *queue.Queue in the interface would not compare equal to nil).
+		srv.Queue = q
+	}
 	if dev != "" {
 		srv.DevViewers, err = parseViewers(dev)
 		if err != nil {

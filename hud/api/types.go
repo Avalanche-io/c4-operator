@@ -165,6 +165,90 @@ type Objective struct {
 	Deadline             *time.Time `json:"deadline,omitempty"`
 	LatencyTargetSeconds float64    `json:"latencyTargetSeconds,omitempty"`
 	From                 string     `json:"from,omitempty"`
+	// Source is where the deadline comes from: spec (a person, a tool or
+	// tracking), suggested (the farm), or class (the class's objective).
+	Source string `json:"source,omitempty"`
+	// Mode is who owns the deadline: Pinned, Suggested or Tracking.
+	Mode string `json:"mode,omitempty"`
+	// Suggestion is the farm's suggested deadline, when it made one.
+	Suggestion *Suggestion `json:"suggestion,omitempty"`
+}
+
+// Suggestion is a suggested deadline and how it got there.
+type Suggestion struct {
+	Deadline time.Time `json:"deadline"`
+	// State is Estimating, Settling or Settled.
+	State string `json:"state"`
+	// Policy is achievable, sessions or turnaround; Quantile the finish
+	// percentile it meets (0.8, 0.9).
+	Policy       string  `json:"policy"`
+	Quantile     float64 `json:"quantile"`
+	Revisions    int     `json:"revisions"`
+	MaxRevisions int     `json:"maxRevisions"`
+	// NextSession is the following session, offered when the job is not
+	// expected to make the suggested one.
+	NextSession *time.Time           `json:"nextSession,omitempty"`
+	History     []SuggestionRevision `json:"history"`
+}
+
+// SuggestionRevision is one value a suggestion took, with its signed
+// record.
+type SuggestionRevision struct {
+	At            time.Time `json:"at"`
+	Deadline      time.Time `json:"deadline"`
+	UnitsMeasured int       `json:"unitsMeasured"`
+	Record        string    `json:"record,omitempty"`
+}
+
+// Band is a finish forecast: the times by which a job finishes with
+// probability 50, 80, 90 and 95%.
+type Band struct {
+	P50 time.Time `json:"p50"`
+	P80 time.Time `json:"p80"`
+	P90 time.Time `json:"p90"`
+	P95 time.Time `json:"p95"`
+}
+
+// DeadlineOptions is GET /jobs/{ns}/{name}/deadline-options: what each
+// candidate deadline would take.
+type DeadlineOptions struct {
+	Job        string           `json:"job"`
+	Now        time.Time        `json:"now"`
+	Policy     string           `json:"policy"`
+	Quantile   float64          `json:"quantile"`
+	Deadline   *time.Time       `json:"deadline,omitempty"`
+	Band       *Band            `json:"band,omitempty"`
+	Achievable *time.Time       `json:"achievable,omitempty"`
+	Floor      time.Time        `json:"floor"`
+	FloorWhy   string           `json:"floorWhy"`
+	Options    []DeadlineOption `json:"options"`
+}
+
+// DeadlineOption is the readout for one candidate time.
+type DeadlineOption struct {
+	At     time.Time `json:"at"`
+	Band   *Band     `json:"band,omitempty"`
+	Meets  int       `json:"meets"`
+	OnTime bool      `json:"onTime"`
+	Boost  float64   `json:"boost,omitempty"`
+	Burst  *Burst    `json:"burst,omitempty"`
+	// Displaces counts the jobs this deadline would make late; Displaced
+	// names those in the viewer's projects, and Unnamed counts the rest.
+	Displaces int        `json:"displaces"`
+	Displaced []string   `json:"displaced"`
+	Unnamed   int        `json:"unnamed"`
+	Floor     *time.Time `json:"floor,omitempty"`
+	FloorWhy  string     `json:"floorWhy,omitempty"`
+}
+
+// Burst is the burst capacity that would serve a deadline.
+type Burst struct {
+	Slots     map[string]int `json:"slots"`
+	Pools     []string       `json:"pools"`
+	Cost      float64        `json:"cost"`
+	Closes    bool           `json:"closes"`
+	Automatic bool           `json:"automatic"`
+	Why       string         `json:"why,omitempty"`
 }
 
 type Estimate struct {
@@ -179,6 +263,11 @@ type Estimate struct {
 	Feasible            bool        `json:"feasible"`
 	Message             string      `json:"message,omitempty"`
 	Burst               *BurstOffer `json:"burst,omitempty"`
+	// EtaP80 and EtaP95 complete the band etaP50 and etaP90 begin.
+	EtaP80 *time.Time `json:"etaP80,omitempty"`
+	EtaP95 *time.Time `json:"etaP95,omitempty"`
+	// Calibrated says the band comes from finished jobs' outcomes.
+	Calibrated bool `json:"calibrated"`
 }
 
 type Input struct {

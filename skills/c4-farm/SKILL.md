@@ -35,12 +35,24 @@ show a shot's whole chain (sim, FX, comp, transcode).
 
 There are no priorities. To make a job finish sooner:
 
-- `c4_set_deadline` moves its deadline. This is usually what "raise its priority"
-  means; the queue reorders everything else to meet it.
+- `c4_deadline_options` first, with the times the user has in mind: for each, how
+  likely the job is to be ready by then, the boost or burst (and its cost) that
+  would make it, how many other jobs it would make late (named only in the user's
+  own projects; say "would make 2 jobs late", never guess the others), and, when
+  nothing makes it, the earliest the job can finish. It changes nothing.
+- `c4_set_deadline` moves its deadline and pins it. This is usually what "raise its
+  priority" means; the queue reorders everything else to meet it. With `mode`
+  (`pin`, `suggested`, `tracking`) it changes who owns the deadline instead.
 - `c4_boost_job` (1 to 2) asks for more slots than the deadline needs, from the
   job's own project's quota first.
 - `c4_hold_job` stops new units of a job that should wait; with `stop_running` it
   also stops the units running now. Release it with `hold: false`.
+
+A job submitted without a deadline gets one from the farm: the earliest it can
+make without making another job late, or the next review session.
+`c4_suggest_deadline` shows it, where the deadline comes from, the finish band
+("ready by 14:20, 80%") and whether the suggestion has settled. A job that will
+miss its session is offered the next one: `c4_move_to_next_session`.
 
 For failures:
 

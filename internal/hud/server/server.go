@@ -39,7 +39,7 @@ import (
 type Server struct {
 	Client client.Client        // the manager's cached client
 	Kube   kubernetes.Interface // logs, events, token and access reviews, c4-system pods
-	Queue  *queue.Queue         // burst spend (optional)
+	Queue  Queue                // burst spend and deadline options (optional)
 	Stores queue.StoreFunc      // project stores, for previews and objects
 	Web    fs.FS                // the web app
 	Loc    *time.Location       // the farm's time zone
@@ -69,6 +69,15 @@ type Server struct {
 	keysUntil    time.Time
 }
 
+// Queue is what the HUD asks the work queue (*queue.Queue).
+type Queue interface {
+	// Spent is a project's burst spending today, in US dollars.
+	Spent(project string) float64
+	// DeadlineOptions reads out what candidate deadlines would take for a
+	// job, naming displaced jobs only in projects sees reports.
+	DeadlineOptions(job string, at []time.Time, sees func(project string) bool) (*queue.Options, error)
+}
+
 type accessEntry struct {
 	viewer *api.Viewer
 	until  time.Time
@@ -84,6 +93,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}", s.handleJob)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/units/{i}", s.handleUnit)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/preview", s.handlePreview)
+	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/deadline-options", s.handleDeadlineOptions)
 	mux.HandleFunc("GET /api/v1/objects/{project}/{id}", s.handleObject)
 	mux.HandleFunc("GET /api/v1/views/{project}/diff", s.handleDiff)
 	mux.HandleFunc("GET /api/v1/trace/{ns}/{name}", s.handleTrace)

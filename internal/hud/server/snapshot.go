@@ -5,8 +5,10 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
@@ -230,6 +232,9 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		d := st.Deadline.Time.In(s.Loc)
 		aj.Objective.Deadline = &d
 	}
+	aj.Objective.Source = st.DeadlineSource
+	aj.Objective.Mode = deadlineMode(j)
+	aj.Objective.Suggestion = s.suggestion(st.Suggestion)
 	if e := st.Estimate; e != nil {
 		aj.Estimate = api.Estimate{RemainingSeconds: float64(e.RemainingSeconds), P90RemainingSeconds: float64(e.P90RemainingSeconds),
 			RequiredSlots: round1(num(e.RequiredSlots)), AttainableSlots: round1(num(e.AttainableSlots)),
@@ -240,6 +245,8 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		if e.ETA90 != nil {
 			aj.Estimate.EtaP90 = e.ETA90.Time.In(s.Loc)
 		}
+		aj.Estimate.EtaP80, aj.Estimate.EtaP95 = s.timePtr(e.ETA80), s.timePtr(e.ETA95)
+		aj.Estimate.Calibrated = e.Calibrated
 		for _, h := range e.HeavyRegions {
 			aj.HeavyRegions = append(aj.HeavyRegions, api.Heavy{From: int(h.From), To: int(h.To), Factor: num(h.Factor)})
 		}
@@ -251,6 +258,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		// A finished job's "ETA" is when it finished.
 		f := st.Finished.Time.In(s.Loc)
 		aj.Estimate.EtaP50, aj.Estimate.EtaP90 = f, f
+		aj.Estimate.EtaP80, aj.Estimate.EtaP95 = &f, &f
 		aj.Estimate.RemainingSeconds, aj.Estimate.P90RemainingSeconds = 0, 0
 		if st.Deadline != nil {
 			aj.Estimate.SlackSeconds = st.Deadline.Time.Sub(f).Seconds()
@@ -456,3 +464,43 @@ func ratio(a, b float64) float64 {
 func round1(x float64) float64 { return math.Round(x*10) / 10 }
 func round2(x float64) float64 { return math.Round(x*100) / 100 }
 func round3(x float64) float64 { return math.Round(x*1000) / 1000 }
+
+// deadlineMode is who owns the job's deadline: the spec's deadlineMode,
+// else Pinned for a job with a deadline of its own, else Suggested when
+// the farm suggested one.
+func deadlineMode(j *c4v1.WorkJob) string {
+	switch {
+	case j.Spec.DeadlineMode != "":
+		return j.Spec.DeadlineMode
+	case j.Spec.Deadline != nil:
+		return "Pinned"
+	case j.Status.DeadlineSource == "suggested" || j.Status.Suggestion != nil:
+		return "Suggested"
+	}
+	return ""
+}
+
+// suggestion is a job's suggested deadline as the API reports it.
+func (s *Server) suggestion(sg *c4v1.WorkSuggestion) *api.Suggestion {
+	if sg == nil || sg.Deadline.IsZero() {
+		return nil
+	}
+	q, _ := strconv.ParseFloat(sg.Quantile, 64)
+	out := &api.Suggestion{Deadline: sg.Deadline.Time.In(s.Loc), State: sg.State, Policy: sg.Policy, Quantile: q,
+		Revisions: int(sg.Revisions), MaxRevisions: int(sg.MaxRevisions), NextSession: s.timePtr(sg.NextSession),
+		History: []api.SuggestionRevision{}}
+	for _, h := range sg.History {
+		out.History = append(out.History, api.SuggestionRevision{At: h.At.Time.In(s.Loc), Deadline: h.Deadline.Time.In(s.Loc),
+			UnitsMeasured: int(h.UnitsMeasured), Record: h.Record})
+	}
+	return out
+}
+
+// timePtr is t in the farm's time zone, nil when t is.
+func (s *Server) timePtr(t *metav1.Time) *time.Time {
+	if t == nil || t.IsZero() {
+		return nil
+	}
+	v := t.Time.In(s.Loc)
+	return &v
+}

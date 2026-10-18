@@ -19,7 +19,7 @@ var Version = "dev"
 
 // Instructions are sent to clients when they connect.
 const Instructions = `This server operates a render, CI and ML farm on Kubernetes, the same farm the HUD shows. Jobs are named namespace/name.
-Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
+Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
 Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. Costs: c4_approve_capacity provisions paid burst capacity.`
 
 func boolPtr(b bool) *bool { return &b }
@@ -84,8 +84,14 @@ func Tools(c *Client) []Tool {
 			idempotent, c.holdJob),
 		tool("c4_boost_job", "Boost a job", "Multiply a job's required slots by 1 to 2, drawn from its own project's quota first. 1 removes the boost.",
 			idempotent, c.boostJob),
-		tool("c4_set_deadline", "Set a job's deadline", "Set or move a job's deadline (RFC 3339, for example 2026-10-23T18:00:00-07:00). The queue reorders work to meet it; this is what raising a priority means here.",
+		tool("c4_suggest_deadline", "Suggested deadline", "A job's deadline and who owns it (pinned by a person, suggested by the farm, or set by production tracking), the farm's suggested deadline with its policy, state (estimating, settling, settled), revisions and their signed records, the finish band (ready by, at 50, 80, 90 and 95%), and, for a job that will miss its review session, the next session.",
+			readOnly, c.suggestDeadline),
+		tool("c4_deadline_options", "Deadline options", "What one or more candidate deadlines would take for a job, without changing anything: the finish band and which percentile is on time, the smallest boost that makes it, the burst capacity and its cost (and whether it needs approval), how many other jobs it would make late (named only in your projects), and, when nothing makes it, the earliest the job can finish. Also the earliest deadline that makes no other job late.",
+			readOnly, c.deadlineOptions),
+		tool("c4_set_deadline", "Set a job's deadline", "Set or move a job's deadline (RFC 3339, for example 2026-10-23T18:00:00-07:00), which pins it. The queue reorders work to meet it; this is what raising a priority means here. With mode, choose who owns the deadline instead: pin (keep the one it has now), suggested (follow the farm's suggestion) or tracking (production tracking sets it). Check c4_deadline_options first for what a time would take.",
 			idempotent, c.setDeadline),
+		tool("c4_move_to_next_session", "Move to the next session", "Move a job that will miss its review session to the next one the farm offers (c4_suggest_deadline shows it), and pin it there.",
+			idempotent, c.moveToNextSession),
 		tool("c4_requeue_units", "Requeue units", "Run units of a job again, discarding their previous results: a unit set like \"0-9,14\".",
 			destructive, c.requeue),
 		tool("c4_avoid_node", "Avoid or allow a node for a job", "Keep a job's units off a node (a bad worker for that job), or allow it again.",
@@ -397,6 +403,79 @@ func (c *Client) graph(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*m
 	return nil, g, c.do(ctx, "GET", "/graph", nil, &g)
 }
 
+type SuggestOut struct {
+	Job string `json:"job"`
+	// Deadline is the effective deadline; Source where it comes from
+	// (spec, suggested, class) and Mode who owns it.
+	Deadline string `json:"deadline,omitempty"`
+	Source   string `json:"source,omitempty" jsonschema:"spec (a person, a tool or tracking), suggested (the farm) or class (the class's objective)"`
+	Mode     string `json:"mode,omitempty" jsonschema:"Pinned, Suggested or Tracking"`
+	// Band is when the job is ready, at 50, 80, 90 and 95%.
+	Band        map[string]string `json:"band,omitempty"`
+	Calibrated  bool              `json:"calibrated" jsonschema:"the band comes from finished jobs' outcomes"`
+	Suggestion  *api.Suggestion   `json:"suggestion,omitempty"`
+	NextSession string            `json:"nextSession,omitempty" jsonschema:"the next review session, offered when the job will miss its own; c4_move_to_next_session moves it there"`
+}
+
+func (c *Client) suggestDeadline(ctx context.Context, _ *mcp.CallToolRequest, in JobRef) (*mcp.CallToolResult, SuggestOut, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, SuggestOut{}, err
+	}
+	var j api.Job
+	if err := c.do(ctx, "GET", p, nil, &j); err != nil {
+		return nil, SuggestOut{}, err
+	}
+	o, e := j.Objective, j.Estimate
+	out := SuggestOut{Job: j.Namespace + "/" + j.Name, Source: o.Source, Mode: o.Mode, Calibrated: e.Calibrated, Suggestion: o.Suggestion}
+	if o.Deadline != nil {
+		out.Deadline = o.Deadline.Format(time.RFC3339)
+	}
+	if !e.EtaP50.IsZero() {
+		out.Band = map[string]string{"p50": e.EtaP50.Format(time.RFC3339), "p90": e.EtaP90.Format(time.RFC3339)}
+		if e.EtaP80 != nil {
+			out.Band["p80"] = e.EtaP80.Format(time.RFC3339)
+		}
+		if e.EtaP95 != nil {
+			out.Band["p95"] = e.EtaP95.Format(time.RFC3339)
+		}
+	}
+	if sg := o.Suggestion; sg != nil && sg.NextSession != nil {
+		out.NextSession = sg.NextSession.Format(time.RFC3339)
+	}
+	return nil, out, nil
+}
+
+type OptionsIn struct {
+	JobRef
+	At []string `json:"at" jsonschema:"candidate deadlines, 1 to 8 RFC 3339 times, for example 2026-10-23T18:00:00-07:00"`
+}
+
+func (c *Client) deadlineOptions(ctx context.Context, _ *mcp.CallToolRequest, in OptionsIn) (*mcp.CallToolResult, api.DeadlineOptions, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, api.DeadlineOptions{}, err
+	}
+	if len(in.At) == 0 || len(in.At) > 8 {
+		return nil, api.DeadlineOptions{}, fmt.Errorf("give 1 to 8 candidate times in at")
+	}
+	q := url.Values{}
+	for _, a := range in.At {
+		if _, err := time.Parse(time.RFC3339, a); err != nil {
+			return nil, api.DeadlineOptions{}, fmt.Errorf("at %q is not RFC 3339 (2026-10-23T18:00:00-07:00)", a)
+		}
+		q.Add("at", a)
+	}
+	var out api.DeadlineOptions
+	if err := c.do(ctx, "GET", p+"/deadline-options?"+q.Encode(), nil, &out); err != nil {
+		return nil, api.DeadlineOptions{}, err
+	}
+	if out.Options == nil {
+		out.Options = []api.DeadlineOption{}
+	}
+	return nil, out, nil
+}
+
 type DiffIn struct {
 	Project string `json:"project" jsonschema:"the project whose store holds both views"`
 	From    string `json:"from" jsonschema:"the earlier view's C4 ID"`
@@ -465,18 +544,46 @@ func (c *Client) boostJob(ctx context.Context, _ *mcp.CallToolRequest, in BoostI
 
 type DeadlineIn struct {
 	JobRef
-	Deadline string `json:"deadline" jsonschema:"RFC 3339 time, for example 2026-10-23T18:00:00-07:00"`
+	Deadline string `json:"deadline,omitempty" jsonschema:"RFC 3339 time, for example 2026-10-23T18:00:00-07:00"`
+	Mode     string `json:"mode,omitempty" jsonschema:"who owns the deadline: pin, suggested or tracking (default pin when deadline is given)"`
 }
+
+var deadlineModes = map[string]string{"pin": "Pinned", "pinned": "Pinned", "suggested": "Suggested", "tracking": "Tracking"}
 
 func (c *Client) setDeadline(ctx context.Context, _ *mcp.CallToolRequest, in DeadlineIn) (*mcp.CallToolResult, Done, error) {
 	p, err := in.path()
 	if err != nil {
 		return nil, Done{}, err
 	}
-	if _, err := time.Parse(time.RFC3339, in.Deadline); err != nil {
-		return nil, Done{}, fmt.Errorf("deadline %q is not RFC 3339 (2026-10-23T18:00:00-07:00)", in.Deadline)
+	body := map[string]any{}
+	if in.Deadline != "" {
+		if _, err := time.Parse(time.RFC3339, in.Deadline); err != nil {
+			return nil, Done{}, fmt.Errorf("deadline %q is not RFC 3339 (2026-10-23T18:00:00-07:00)", in.Deadline)
+		}
+		body["deadline"] = in.Deadline
 	}
-	return c.control(ctx, p+"/nudge", map[string]any{"deadline": in.Deadline})
+	if in.Mode != "" {
+		m, ok := deadlineModes[strings.ToLower(in.Mode)]
+		if !ok {
+			return nil, Done{}, fmt.Errorf("mode %q: use pin, suggested or tracking", in.Mode)
+		}
+		if m != "Pinned" && in.Deadline != "" {
+			return nil, Done{}, fmt.Errorf("a deadline is pinned: give deadline alone (or with mode pin), or mode %s alone", in.Mode)
+		}
+		body["deadlineMode"] = m
+	}
+	if len(body) == 0 {
+		return nil, Done{}, fmt.Errorf("give deadline (RFC 3339), mode (pin, suggested or tracking), or both")
+	}
+	return c.control(ctx, p+"/nudge", body)
+}
+
+func (c *Client) moveToNextSession(ctx context.Context, _ *mcp.CallToolRequest, in JobRef) (*mcp.CallToolResult, Done, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, Done{}, err
+	}
+	return c.control(ctx, p+"/nudge", map[string]any{"nextSession": true})
 }
 
 type RequeueIn struct {

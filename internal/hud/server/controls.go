@@ -102,6 +102,10 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		HoldStop *bool    `json:"holdStop"`
 		Boost    *float64 `json:"boost"`
 		Deadline *string  `json:"deadline"`
+		// DeadlineMode is Pinned, Suggested or Tracking; NextSession moves
+		// the deadline to the session the suggestion offers next.
+		DeadlineMode *string `json:"deadlineMode"`
+		NextSession  bool    `json:"nextSession"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		fail(w, http.StatusBadRequest, "body: %v", err)
@@ -151,9 +155,60 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		}
 		j.Spec.Deadline = &metav1.Time{Time: t}
 		did = append(did, "deadline "+t.In(s.Loc).Format("Mon 15:04"))
+		if j.Spec.DeadlineMode == "Suggested" && body.DeadlineMode == nil {
+			// A time a person sets is theirs.
+			j.Spec.DeadlineMode = "Pinned"
+		}
+	}
+	if body.NextSession {
+		if body.Deadline != nil || (body.DeadlineMode != nil && *body.DeadlineMode != "Pinned") {
+			fail(w, http.StatusBadRequest, "nextSession pins the next session: send it without deadline or another deadlineMode")
+			return
+		}
+		sg := j.Status.Suggestion
+		if sg == nil || sg.NextSession == nil {
+			fail(w, http.StatusConflict, "%s has no next session to move to: only a job on a sessions policy that will miss its session is offered one", j.Name)
+			return
+		}
+		j.Spec.Deadline = &metav1.Time{Time: sg.NextSession.Time}
+		j.Spec.DeadlineMode = "Pinned"
+		did = append(did, "deadline "+sg.NextSession.Time.In(s.Loc).Format("Mon 15:04")+" (next session)")
+	}
+	if body.DeadlineMode != nil && !body.NextSession {
+		m := *body.DeadlineMode
+		switch m {
+		case "Pinned":
+			if body.Deadline == nil {
+				// Pinning without a time keeps the deadline the job has now
+				// (a suggestion, typically).
+				cur := j.Status.Deadline
+				if cur == nil {
+					cur = j.Spec.Deadline
+				}
+				if cur == nil {
+					fail(w, http.StatusBadRequest, "%s has no deadline to pin: send deadline too", j.Name)
+					return
+				}
+				j.Spec.Deadline = &metav1.Time{Time: cur.Time}
+				did = append(did, "deadline "+cur.Time.In(s.Loc).Format("Mon 15:04")+" pinned")
+			}
+		case "Suggested", "Tracking":
+			if body.Deadline != nil {
+				fail(w, http.StatusBadRequest, "a deadline is pinned: send deadline with deadlineMode Pinned or alone")
+				return
+			}
+		default:
+			fail(w, http.StatusBadRequest, "deadlineMode must be Pinned, Suggested or Tracking")
+			return
+		}
+		j.Spec.DeadlineMode = m
+		if m != "Pinned" {
+			did = append(did, map[string]string{"Suggested": "deadline follows the farm's suggestion",
+				"Tracking": "deadline follows production tracking"}[m])
+		}
 	}
 	if len(did) == 0 {
-		fail(w, http.StatusBadRequest, "nothing to change: send hold, holdStop, boost or deadline")
+		fail(w, http.StatusBadRequest, "nothing to change: send hold, holdStop, boost, deadline, deadlineMode or nextSession")
 		return
 	}
 	msg := j.Name + ": " + strings.Join(did, ", ")
@@ -163,7 +218,7 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		kind = "hold"
 	case body.Hold != nil:
 		kind = map[bool]string{true: "hold", false: "release"}[*body.Hold]
-	case body.Deadline != nil:
+	case body.Deadline != nil || body.DeadlineMode != nil || body.NextSession:
 		kind = "deadline"
 	}
 	s.finishJobControl(w, r, v, rec, j, patch, before, "nudge", kind, body, "Nudged", msg)

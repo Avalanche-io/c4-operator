@@ -29,10 +29,16 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
 	due := time.Date(2026, 10, 23, 18, 0, 0, 0, time.UTC)
+	next := due.Add(4 * time.Hour)
 	job := func(name string, rank int, feasible bool, slack float64) api.Job {
+		eta := due.Add(time.Duration(-slack) * time.Second)
 		return api.Job{Namespace: "show-a", Name: name, Project: "show-a", Class: "render", Phase: "Running", Rank: rank,
-			Units: api.Counts{Total: 96, Succeeded: 40, Running: 8}, Objective: api.Objective{Type: "deadline", Deadline: &due},
-			Estimate: api.Estimate{Feasible: feasible, SlackSeconds: slack, EtaP90: due.Add(time.Duration(-slack) * time.Second)}}
+			Units: api.Counts{Total: 96, Succeeded: 40, Running: 8},
+			Objective: api.Objective{Type: "deadline", Deadline: &due, Source: "suggested", Mode: "Suggested",
+				Suggestion: &api.Suggestion{Deadline: due, State: "Settled", Policy: "sessions", Quantile: 0.8, NextSession: &next,
+					History: []api.SuggestionRevision{{At: due.Add(-2 * time.Hour), Deadline: due, UnitsMeasured: 1, Record: "c4rec"}}}},
+			Estimate: api.Estimate{Feasible: feasible, SlackSeconds: slack, EtaP50: eta.Add(-time.Hour), EtaP80: &eta, EtaP90: eta,
+				EtaP95: &eta, Calibrated: true}}
 	}
 	switch {
 	case r.Method == "GET" && r.URL.Path == "/api/v1/snapshot":
@@ -46,6 +52,16 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(b, &m)
 		m["unitList"] = []map[string]any{{"i": 0, "label": "1001", "state": "succeeded", "attempts": 1}, {"i": 1, "label": "1002", "state": "running", "attempts": 1, "node": "w1"}}
 		json.NewEncoder(w).Encode(m)
+	case r.Method == "GET" && r.URL.Path == "/api/v1/jobs/show-a/sh010/deadline-options":
+		out := api.DeadlineOptions{Job: "show-a/sh010", Now: due.Add(-time.Hour), Policy: "achievable", Quantile: 0.8,
+			Floor: due.Add(-30 * time.Minute), FloorWhy: "its longest remaining unit alone takes 30m", Options: []api.DeadlineOption{}}
+		for _, a := range r.URL.Query()["at"] {
+			at, _ := time.Parse(time.RFC3339, a)
+			out.Options = append(out.Options, api.DeadlineOption{At: at, Meets: 50, Boost: 1.3, Displaces: 2,
+				Displaced: []string{"show-a/sh020"}, Unnamed: 1,
+				Burst: &api.Burst{Slots: map[string]int{"spot": 4}, Pools: []string{"spot"}, Cost: 12, Closes: true}})
+		}
+		json.NewEncoder(w).Encode(out)
 	case r.Method == "GET" && r.URL.Path == "/api/v1/book":
 		u := 3
 		json.NewEncoder(w).Encode(api.Book{Entries: []api.BookEntry{{Seq: 1, At: due.Add(-time.Hour), Actor: "node/w1", Signer: "node", Kind: "failed",
@@ -118,7 +134,8 @@ func TestToolsAreNamedAndAnnotated(t *testing.T) {
 			t.Errorf("tool %s lacks the c4_ prefix, a title, a description or annotations", tl.Name)
 		}
 		readOnly := strings.HasPrefix(tl.Name, "c4_list") || strings.HasPrefix(tl.Name, "c4_get") || tl.Name == "c4_farm_status" ||
-			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book"
+			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book" ||
+			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options"
 		if tl.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %s: readOnlyHint %v", tl.Name, tl.Annotations.ReadOnlyHint)
 		}
@@ -220,5 +237,77 @@ func TestReadBookFiltersToAJob(t *testing.T) {
 	res, _ = call(t, cs, "c4_read_book", map[string]any{"namespace": "show-a"})
 	if !res.IsError {
 		t.Fatal("a namespace without a name was accepted")
+	}
+}
+
+func TestSuggestDeadline(t *testing.T) {
+	cs := session(t, &fakeHUD{}, "")
+	res, out := call(t, cs, "c4_suggest_deadline", map[string]any{"namespace": "show-a", "name": "sh010"})
+	if res.IsError {
+		t.Fatalf("suggest: %q", text(res))
+	}
+	band, _ := out["band"].(map[string]any)
+	sg, _ := out["suggestion"].(map[string]any)
+	if out["source"] != "suggested" || out["mode"] != "Suggested" || out["nextSession"] != "2026-10-23T22:00:00Z" ||
+		len(band) != 4 || out["calibrated"] != true || sg == nil || sg["state"] != "Settled" {
+		t.Fatalf("suggestion %v", out)
+	}
+}
+
+func TestDeadlineOptionsTool(t *testing.T) {
+	cs := session(t, &fakeHUD{}, "")
+	res, out := call(t, cs, "c4_deadline_options", map[string]any{"namespace": "show-a", "name": "sh010",
+		"at": []string{"2026-10-23T16:00:00-07:00", "2026-10-23T17:00:00Z"}})
+	opts, _ := out["options"].([]any)
+	if res.IsError || len(opts) != 2 {
+		t.Fatalf("options %v %q", out, text(res))
+	}
+	o := opts[0].(map[string]any)
+	if o["at"] != "2026-10-23T16:00:00-07:00" || o["boost"] != 1.3 || o["unnamed"] != 1.0 || o["burst"].(map[string]any)["closes"] != true {
+		t.Fatalf("option %v", o)
+	}
+	for _, args := range []map[string]any{
+		{"namespace": "show-a", "name": "sh010", "at": []string{"tomorrow"}},
+		{"namespace": "show-a", "name": "sh010", "at": []string{}},
+	} {
+		if res, _ := call(t, cs, "c4_deadline_options", args); !res.IsError {
+			t.Errorf("accepted %v", args)
+		}
+	}
+}
+
+func TestDeadlineModeAndNextSession(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "")
+	for _, args := range []map[string]any{
+		{"namespace": "show-a", "name": "sh010", "mode": "suggested"},
+		{"namespace": "show-a", "name": "sh010", "deadline": "2026-10-23T18:00:00-07:00", "mode": "pin"},
+	} {
+		if res, _ := call(t, cs, "c4_set_deadline", args); res.IsError {
+			t.Fatalf("set deadline %v: %q", args, text(res))
+		}
+	}
+	if res, _ := call(t, cs, "c4_move_to_next_session", map[string]any{"namespace": "show-a", "name": "sh010"}); res.IsError {
+		t.Fatalf("next session: %q", text(res))
+	}
+	for _, args := range []map[string]any{
+		{"namespace": "show-a", "name": "sh010"},
+		{"namespace": "show-a", "name": "sh010", "mode": "soon"},
+		{"namespace": "show-a", "name": "sh010", "deadline": "2026-10-23T18:00:00-07:00", "mode": "tracking"},
+	} {
+		if res, _ := call(t, cs, "c4_set_deadline", args); !res.IsError {
+			t.Errorf("accepted %v", args)
+		}
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	want := []string{`{"deadlineMode":"Suggested"}`, `{"deadline":"2026-10-23T18:00:00-07:00","deadlineMode":"Pinned"}`, `{"nextSession":true}`}
+	if len(hud.posts) != len(want) {
+		t.Fatalf("posts %v", hud.posts)
+	}
+	for i, w := range want {
+		if hud.posts[i] != "/api/v1/jobs/show-a/sh010/nudge "+w {
+			t.Errorf("post %d: %s, want %s", i, hud.posts[i], w)
+		}
 	}
 }
