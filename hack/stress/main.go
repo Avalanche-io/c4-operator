@@ -146,8 +146,8 @@ func runPoint(enc string, seed uint64, v, specOut string, workers int) int {
 	fmt.Printf("%s seed %d: %s\n", pt.Name, seed, pt.label())
 	for _, name := range sortedRuns(res.Runs) {
 		r := res.Runs[name]
-		fmt.Printf("  %-16s on time %4d/%-4d (%s)  late %6.1fh  burst $%-8.0f util %4.0f%%  preempt %4d  decisions %5d (mean %s)\n",
-			name, r.OnTime, r.DueJobs, pct(r.onTimePct()), r.LateHours, r.BurstCost, 100*r.Util, r.Preemptions, r.Decides, r.DecideMean.Round(time.Microsecond))
+		fmt.Printf("  %-16s shots %4d/%-4d late %6.1fh | on time %4d/%-4d (%s)  late %6.1fh  burst $%-8.0f util %4.0f%%  preempt %4d  decisions %5d (mean %s)\n",
+			name, r.FinalOnTime, r.FinalDue, r.FinalLateHours, r.OnTime, r.DueJobs, pct(r.onTimePct()), r.LateHours, r.BurstCost, 100*r.Util, r.Preemptions, r.Decides, r.DecideMean.Round(time.Microsecond))
 	}
 	for vv, r := range res.Meta {
 		if vv == vRepeat {

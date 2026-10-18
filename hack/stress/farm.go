@@ -19,6 +19,7 @@ type poolDef struct {
 	name, class string
 	nodes, spn  int // nodes and slots per node
 	burst       *burstDef
+	site        int // with Sites above 1, the CPU pool's site
 }
 
 func (p poolDef) slots() int { return p.nodes * p.spn }
@@ -39,6 +40,7 @@ type projectDef struct {
 	budget   float64
 	lateCost float64
 	rank     int // static priority order, 0 first
+	site     int // home site (Sites above 1)
 }
 
 type unitSpec struct {
@@ -93,6 +95,7 @@ type jobSpec struct {
 	makespan       float64 // reference makespan for the deadline
 	maxUnitSlots   int
 	gate           bool
+	final          bool // the last stage of its shot (or a job alone): its deadline is the shot's
 	shot           int
 	deadlineFactor float64
 }
@@ -125,7 +128,19 @@ func build(pt Point, seed uint64) *workload {
 		refCPU = 16
 		refGPU = 4 * math.Round(16*pt.GPUFrac)
 	}
-	if cpuSlots > 0 {
+	sites := max(1, int(pt.Sites))
+	switch {
+	case cpuSlots > 0 && sites > 1:
+		for s := range sites {
+			n := cpuSlots / sites
+			if s < cpuSlots%sites {
+				n++
+			}
+			if n > 0 {
+				w.pools = append(w.pools, poolDef{name: fmt.Sprintf("cpu-s%d", s), class: "cpu", nodes: n, spn: 1, site: s})
+			}
+		}
+	case cpuSlots > 0:
 		w.pools = append(w.pools, poolDef{name: "cpu", class: "cpu", nodes: cpuSlots, spn: 1})
 	}
 	if gpuNodes > 0 {
@@ -140,6 +155,13 @@ func build(pt Point, seed uint64) *workload {
 			ref, price float64
 		}{{"cpu", refCPU, pt.BurstCost}, {"gpu", refGPU, 3 * pt.BurstCost}} {
 			if c.ref <= 0 {
+				continue
+			}
+			if pt.Provider == 0 && c.class == "cpu" && sites > 1 {
+				for s := range sites {
+					bd := b(c.ref/float64(sites), c.price)
+					w.pools = append(w.pools, poolDef{name: fmt.Sprintf("cpu-s%d-burst", s), class: c.class, spn: 1, burst: bd, site: s})
+				}
 				continue
 			}
 			if pt.Provider == 0 {
@@ -170,7 +192,7 @@ func build(pt Point, seed uint64) *workload {
 		tot += shares[i]
 	}
 	for i := range np {
-		pd := projectDef{name: fmt.Sprintf("p%d", i), nominal: map[string]int{}, borrow: -1, rank: i}
+		pd := projectDef{name: fmt.Sprintf("p%d", i), nominal: map[string]int{}, borrow: -1, rank: i, site: i % sites}
 		if pt.Arrivals == 3 {
 			pd.tz = float64((i % 3) * 8)
 		}
@@ -342,6 +364,11 @@ func (g *gen) shot(class string) float64 {
 			total += js.work
 			lv = append(lv, js)
 		}
+		if l == depth-1 {
+			for _, js := range lv {
+				js.final = true
+			}
+		}
 		levels = append(levels, lv)
 	}
 	// The shot is due f times its reference makespan after submission;
@@ -358,7 +385,11 @@ func (g *gen) shot(class string) float64 {
 	after := 0.0
 	for l := depth - 1; l >= 0; l-- {
 		for _, js := range levels[l] {
-			g.setDue(js, due-f*after, noDue, f)
+			stageDue := due - f*after
+			if pt.FlatDue > 0 {
+				stageDue = due
+			}
+			g.setDue(js, stageDue, noDue, f)
 		}
 		after += lm[l]
 	}
@@ -368,12 +399,40 @@ func (g *gen) shot(class string) float64 {
 func (g *gen) newJob(pd projectDef, kind, class string, at float64, level int) *jobSpec {
 	js := &jobSpec{
 		id: g.id(pd.name), project: pd.name, kind: kind, class: class, submit: at, level: level,
-		pools: poolsOf(g.w, class), estBias: math.Exp(g.pt.EstErr * g.r.NormFloat64()),
+		pools: g.poolsFor(pd, class), estBias: math.Exp(g.pt.EstErr * g.r.NormFloat64()),
 		spread: g.pt.Spread, failRate: g.pt.FailRate, preemptible: true, shot: g.shots,
 		priority: 50 + 10*(len(g.w.projects)-pd.rank) + 5*level,
 	}
 	g.w.jobs = append(g.w.jobs, js)
 	return js
+}
+
+// poolsFor is the pools a new job of project pd may use: with several
+// sites, its home site's CPU pools, and with probability Spill also the
+// next site's owned CPUs.
+func (g *gen) poolsFor(pd projectDef, class string) []string {
+	sites := max(1, int(g.pt.Sites))
+	if class != "cpu" || sites == 1 {
+		return poolsOf(g.w, class)
+	}
+	var out []string
+	for _, p := range g.w.pools {
+		if p.class == "cpu" && p.site == pd.site {
+			out = append(out, p.name)
+		}
+	}
+	if g.pt.Spill > 0 && g.r.Float64() < g.pt.Spill {
+		next := fmt.Sprintf("cpu-s%d", (pd.site+1)%sites)
+		for _, p := range g.w.pools {
+			if p.name == next {
+				out = append(out, next)
+			}
+		}
+	}
+	if len(out) == 0 {
+		return poolsOf(g.w, class)
+	}
+	return out
 }
 
 func poolsOf(w *workload, class string) []string {
@@ -486,6 +545,7 @@ func (g *gen) mlJob() float64 {
 	js := g.newJob(pd, "ml", "gpu", at, 0)
 	js.pools = poolsOf(g.w, "gpu")
 	js.priority = 30
+	js.final = true
 	js.ml = &mlSpec{ckpt: math.Max(5, pt.CkptMin) * minute, restore: 3 * minute, hazard: pt.FailRate * 0.5 / hour}
 	js.units = []unitSpec{{nominal: length, dur: length, slots: ranks}}
 	js.work = length * float64(ranks)
@@ -502,6 +562,7 @@ func (g *gen) hugeJob(work float64) {
 	js := g.newJob(pd, "huge", "cpu", 0, 0)
 	unit := g.pt.UnitMin * minute
 	frames := max(1, int(work/unit))
+	js.final = true
 	g.renderUnits(js, frames, unit)
 	par := math.Max(1, g.refCPU)
 	js.makespan = math.Max(js.makespan, js.work/par)

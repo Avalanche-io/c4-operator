@@ -1024,6 +1024,14 @@ func (e *engine) finishRun() {
 		}
 		r.DueJobs++
 		lateBy := done - j.due
+		if js.final {
+			r.FinalDue++
+			if j.finish >= 0 && lateBy <= 1 {
+				r.FinalOnTime++
+			} else {
+				r.FinalLateHours += math.Max(0, lateBy) / hour
+			}
+		}
 		if j.finish >= 0 && lateBy <= 1 {
 			r.OnTime++
 			continue

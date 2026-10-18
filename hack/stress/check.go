@@ -992,16 +992,20 @@ type runResult struct {
 	Seed          uint64
 
 	Jobs, DueJobs, OnTime, Late, Unfinished int
-	LateHours, LateDollars                  float64
-	BurstCost                               float64
-	Util                                    float64
-	Dispatches, Preemptions, FaultKills     int
-	Reclaims, Nudges                        int
-	AutoBursts, Approvals                   int
-	UsefulSlotHours, LostSlotHours          float64
-	Decides                                 int
-	DecideMean, DecideMax                   time.Duration
-	MaxStarve                               time.Duration // longest wait of a ready job with nothing running
+	// Shots: the last stage of each shot against the shot's deadline
+	// (what a person waits for), whatever the earlier stages' deadlines.
+	FinalDue, FinalOnTime               int
+	FinalLateHours                      float64
+	LateHours, LateDollars              float64
+	BurstCost                           float64
+	Util                                float64
+	Dispatches, Preemptions, FaultKills int
+	Reclaims, Nudges                    int
+	AutoBursts, Approvals               int
+	UsefulSlotHours, LostSlotHours      float64
+	Decides                             int
+	DecideMean, DecideMax               time.Duration
+	MaxStarve                           time.Duration // longest wait of a ready job with nothing running
 	// Spot: interruptions (and those caused by a maximum price), units
 	// killed by one, saves (a checkpoint or a move on a warning), work
 	// lost by unit length, units judged too risky for spot and those moved

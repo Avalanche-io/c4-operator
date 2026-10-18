@@ -89,6 +89,16 @@ type Point struct {
 	// (0: one day). Jobs unfinished at the end and not yet due are left
 	// out of on-time counts.
 	Drain float64
+	// FlatDue gives every stage of a shot the shot's deadline, as the
+	// queue does today (each job's own objective, no propagation up the
+	// DAG). 0 stages them: each stage due early enough for those after it.
+	FlatDue float64
+	// Sites splits the owned CPU nodes and the CPU burst pool over that
+	// many sites; each project works at a home site. Spill is the share of
+	// CPU jobs that may also use the next site's owned CPUs (as a studio's
+	// lights may run on another site's nodes), which links the sites'
+	// pools into one planning group.
+	Sites, Spill float64
 }
 
 type dim struct {
@@ -140,6 +150,9 @@ var dims = []dim{
 	{name: "gate", lo: 0, hi: 0, f: func(p *Point) *float64 { return &p.Gate }},
 	{name: "huge", lo: 0, hi: 0, f: func(p *Point) *float64 { return &p.Huge }},
 	{name: "drain", lo: 0, hi: 0, f: func(p *Point) *float64 { return &p.Drain }},
+	{name: "flatDue", lo: 0, hi: 2, integ: true, f: func(p *Point) *float64 { return &p.FlatDue }},
+	{name: "sites", lo: 1, hi: 5, integ: true, f: func(p *Point) *float64 { return &p.Sites }},
+	{name: "spill", lo: 0, hi: 0.5, zero: 0.05, f: func(p *Point) *float64 { return &p.Spill }},
 	{name: "provider", integ: true, f: func(p *Point) *float64 { return &p.Provider }},
 	{name: "spotBand", integ: true, f: func(p *Point) *float64 { return &p.SpotBand }},
 	{name: "diversity", integ: true, f: func(p *Point) *float64 { return &p.Diversity }},
@@ -265,6 +278,18 @@ func corners() []Point {
 	add("overload-2x-tight", func(p *Point) { p.Load, p.Tightness, p.SlackSpread = 2, 0.8, 0.1 })
 	add("spot-storm", func(p *Point) { p.Interruptions, p.BurstFrac, p.BurstBudget, p.Load = 0.3, 1, 1, 1.5 })
 	add("deep-dag", func(p *Point) { p.Depth, p.Width, p.Expand = 5, 3, 0.6 })
+	// The global tutorial farm's night: overnight dailies through a deep
+	// pipeline, every stage carrying the shot's deadline, burst available.
+	// Three sites, the first overloaded overnight, the others reaching
+	// into it: the global tutorial farm's London night.
+	add("multi-site-spill", func(p *Point) {
+		p.Sites, p.Spill, p.Load, p.Tightness, p.Projects = 3, 0.4, 1.5, 1.2, 3
+		p.BurstFrac, p.BurstBudget, p.LateCost = 1, 1, 800
+	})
+	add("dag-overnight-flat", func(p *Point) {
+		p.Depth, p.Width, p.FlatDue, p.Load, p.Tightness, p.SlackSpread = 4, 3, 1, 1.4, 1.5, 0.2
+		p.BurstFrac, p.BurstBudget, p.LateCost, p.Arrivals = 1, 1, 800, 1
+	})
 	add("nudge-storm", func(p *Point) { p.BoostRate, p.HoldRate, p.MoveRate = 0.3, 0.3, 0.3 })
 	add("quota-skew", func(p *Point) { p.Projects, p.QuotaSkew, p.QuotaFill, p.Borrow, p.Load = 8, 2, 1, 0.1, 1.4 })
 	return out
