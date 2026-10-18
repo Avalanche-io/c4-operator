@@ -8,3 +8,8 @@ cover.out
 dist/
 hack/stress/out/
 /c4-agent
+# generated: a local `go build ./cmd/c4-farm` (make build writes bin/c4-farm),
+# and the largest simulator outputs (`go run ./hack/sim` writes them)
+/c4-farm
+/hack/sim/out/eta.csv
+/hack/sim/out/jobs.csv
