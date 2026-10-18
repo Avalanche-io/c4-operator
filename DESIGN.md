@@ -1361,8 +1361,7 @@ class (`spec.work.deadlinePolicies`), else the class's:
 
 - `achievable` (render and ML by default): the earliest time, rounded up to
   the quarter hour, by which the job finishes at the policy's quantile
-  (80% by default, 90% suits deliveries) without making any job that is on
-  time now late. The queue finds it by running the policy on copies of the
+  (95% by default) without making any job that is on time now late. The queue finds it by running the policy on copies of the
   farm with the job's deadline moved (a bisection, a dozen policy runs, at
   most two jobs a tick).
 - `sessions`: the next of a calendar of review sessions (dailies at 08:00
@@ -1371,14 +1370,21 @@ class (`spec.work.deadlinePolicies`), else the class's:
   click away.
 - `turnaround`: submission plus a duration, the old default.
 
-An achievable suggestion is revised only at binary order's information
-points (1, 3, 5, 9, 17, 33 units finished), only when the move exceeds
-max(10% of the time left, 15 minutes), and only when the finish band has
-narrowed by 20% since the value it replaces. It is revised at most twice,
-and it settles after the second revision, after 33 units, or once a
-quarter of the time to it has passed. A settled suggestion never moves;
-only a person moves a deadline. Every value is signed into the book.
-`work/forecast` holds the rules; the queue applies them.
+Suggestions are generous on purpose. A deadline met two days early is
+still met, and the person can then decide it really needs to make
+tomorrow's dailies. So padding is not treated as a cost, and the farm
+never moves a suggestion earlier: tightening is the person's act, made with
+the deadline-options readout below. The only move the farm makes is later,
+and only when the suggestion itself is at risk. At binary order's
+information points (1, 3, 5, 9, 17, 33 units finished), if the finish at
+the policy's quantile is after the suggestion, the suggestion moves to the
+new achievable time when that is later by more than max(10% of the time
+left, 15 minutes). Such a move is recorded with reason `at-risk` and shown
+(`status.suggestion.atRisk`, orchid in the HUD). There are at most two such
+moves. The suggestion settles after the second, after 33 units, or once a
+quarter of the time to it has passed; a settled suggestion never moves,
+and if it falls at risk the job's warning says so. Every value is signed
+into the book. `work/forecast` holds the rules; the queue applies them.
 
 **What a person is shown.** `status.estimate.eta50` to `eta95` start from
 the plan's finish for the calibrated percentiles of the remaining work, with
@@ -1417,7 +1423,11 @@ named only in the viewer's projects; and, when nothing makes it, the
 earliest finish possible (the critical path, or the remaining work on every
 slot the job can attain). The readout also gives the achievable deadline,
 the earliest that makes no one late. At most eight times per request; it
-never spends or changes anything.
+never spends or changes anything. Asked for no particular time, it offers
+the tighter choices itself, one click each: the project's upcoming review
+sessions before the job's deadline (from its `sessions` policies) and the
+earliest time the job makes at 80% without making another job late, each
+with its odds and what it would displace in the viewer's own project.
 
 **Latency SLOs feed back.** If a class's measured p95 over the last hour is
 under target, its effective deadlines relax toward the target. If it is over,

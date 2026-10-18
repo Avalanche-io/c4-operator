@@ -122,8 +122,8 @@ the viewer's scope (1 is next).
   units: { total, unevaluated, queued, blocked, running, retrying, succeeded, failed, held },
   unitStates: { unevaluated, queued, blocked, running, retrying, succeeded, failed },
   objective: { type, deadline?, latencyTargetSeconds?, from?, source?, mode?,
-               suggestion?: { deadline, state, policy, quantile, revisions, maxRevisions, nextSession?,
-                              history: [ { at, deadline, unitsMeasured, record? } ] } },
+               suggestion?: { deadline, state, policy, quantile, revisions, maxRevisions, nextSession?, atRisk?,
+                              history: [ { at, deadline, unitsMeasured, record?, reason? } ] } },
   estimate: { remainingSeconds, p90RemainingSeconds, etaP50, etaP80?, etaP90, etaP95?, calibrated,
               requiredSlots, attainableSlots, runningSlots, slackSeconds, feasible,
               message?, burst?: { pool, slots, cost, needsApproval } },
@@ -152,8 +152,10 @@ the viewer's scope (1 is next).
 | `objective.source`             | where the deadline comes from: `spec` (a person, a tool or tracking), `suggested` (the farm) or `class` (the class's objective) |
 | `objective.mode`               | who owns the deadline: `Pinned`, `Suggested` or `Tracking` (DESIGN 10.7)                                                        |
 | `objective.suggestion`         | the farm's suggested deadline, kept for reference also once a person pins another                                               |
-| `suggestion.state`             | `Estimating`, `Settling` or `Settled`; a settled suggestion never moves                                                         |
-| `suggestion.policy`            | `achievable`, `sessions` or `turnaround`; `quantile` is the finish percentile it meets (0.8, 0.9)                               |
+| `suggestion.state`             | `Estimating` (it may still move later, only if at risk) or `Settled`; the farm never moves a suggestion earlier, and a settled one not at all |
+| `suggestion.policy`            | `achievable`, `sessions` or `turnaround`; `quantile` is the finish percentile it meets, 0.95 by default: suggestions are generous, and tightening one is the person's choice (`deadline-options`) |
+| `suggestion.atRisk`            | the finish at `quantile` is now after the suggestion (shown in orchid)                                                         |
+| `suggestion.history[].reason`  | `first`, or `at-risk` for a later move the farm made because the suggestion was at risk                                        |
 | `suggestion.nextSession`       | for a sessions policy, the following session when the job is not expected to make its own: the one-click alternative            |
 | `suggestion.history[].record`  | the C4 ID of the queue's signed record of that value                                                                            |
 | `estimate.etaP50` to `etaP95`  | the finish band a person is shown: ready by then with probability 50, 80, 90 and 95%                                            |
@@ -324,15 +326,24 @@ One entry per frame of the last pass, in frame order. `url` is set for
 rendered frames and points at `/api/v1/objects/{project}/{c4id}`. The player
 holds each rendered frame until the next rendered one.
 
-## GET /jobs/{ns}/{name}/deadline-options?at={time}[&at={time}...]
+## GET /jobs/{ns}/{name}/deadline-options[?at={time}[&at={time}...]]
 
 What each candidate deadline would take, from what-if runs of the
 scheduling policy on a copy of the queue's last plan. Nothing changes and
-nothing is spent. `at` is an RFC 3339 time, given 1 to 8 times.
+nothing is spent. `at` is an RFC 3339 time, given up to 8 times.
+
+Suggested deadlines are generous (met 95% of the time by default) and the
+farm never moves one earlier: tightening is the person's choice, and this
+is where they make it. Without `at`, the queue offers the tighter choices
+itself, each with a `label`: the upcoming sessions of the job's project
+(from its `sessions` deadline policies, three per calendar) before the
+job's deadline, and the earliest time it makes at 80% without making
+another job late. Each comes with its odds (`meets`) and what it would
+displace.
 
 ```
 { job, now, policy, quantile, deadline?, band?: { p50, p80, p90, p95 }, achievable?, floor, floorWhy,
-  options: [ { at, band?: { p50, p80, p90, p95 }, meets, onTime, boost?,
+  options: [ { at, label?, band?: { p50, p80, p90, p95 }, meets, onTime, boost?,
                burst?: { slots: { pool: n }, pools[], cost, closes, automatic, why? },
                displaces, displaced[], unnamed, floor?, floorWhy? } ] }
 ```
@@ -343,6 +354,7 @@ nothing is spent. `at` is an RFC 3339 time, given 1 to 8 times.
 | `deadline`, `band`    | the job's effective deadline and finish band as things stand                                                                                                                                                                                                                            |
 | `achievable`          | the earliest deadline, on the policy's times, by which the job is ready at `quantile` without making a job that is on time late                                                                                                                                                         |
 | `floor`, `floorWhy`   | the earliest the job can finish at all: its longest remaining unit, or its remaining work on every slot it can attain, and which binds                                                                                                                                                  |
+| `options[].label`     | the choice the queue offered (`dailies session Tue 08:00`, `earliest at 80% without making another job late`); absent for a time the caller gave |
 | `options[].band`      | the finish band with the job's deadline at `at`                                                                                                                                                                                                                                         |
 | `options[].meets`     | the highest of 50, 80, 90 and 95 whose finish is at or before `at`; 0 when none                                                                                                                                                                                                         |
 | `options[].onTime`    | the finish at `quantile` is at or before `at`                                                                                                                                                                                                                                           |
@@ -352,7 +364,7 @@ nothing is spent. `at` is an RFC 3339 time, given 1 to 8 times.
 | `options[].displaced` | those of them in the viewer's projects, by name; `unnamed` counts the others, which are never named                                                                                                                                                                                     |
 | `options[].floor`     | set when nothing closes `at` (not on time, no boost, no closing burst): the earliest finish possible, with `floorWhy`                                                                                                                                                                   |
 
-`400` for a missing, malformed or ninth `at`; `404` for a job outside the
+`400` for a malformed or ninth `at`; `404` for a job outside the
 viewer's projects; `409` when the job is not in the queue's plan (finished,
 not schedulable, or newer than the last tick); `501` when the manager runs
 without the work queue; `503` when the queue has not planned yet (it runs

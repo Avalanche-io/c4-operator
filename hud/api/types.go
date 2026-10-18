@@ -177,10 +177,12 @@ type Objective struct {
 // Suggestion is a suggested deadline and how it got there.
 type Suggestion struct {
 	Deadline time.Time `json:"deadline"`
-	// State is Estimating, Settling or Settled.
+	// State is Estimating (it may still move later if at risk) or
+	// Settled. The farm never moves a suggestion earlier.
 	State string `json:"state"`
 	// Policy is achievable, sessions or turnaround; Quantile the finish
-	// percentile it meets (0.8, 0.9).
+	// percentile it meets (0.95 by default: suggestions are generous, and
+	// tightening is the person's choice).
 	Policy       string  `json:"policy"`
 	Quantile     float64 `json:"quantile"`
 	Revisions    int     `json:"revisions"`
@@ -189,6 +191,9 @@ type Suggestion struct {
 	// expected to make the suggested one.
 	NextSession *time.Time           `json:"nextSession,omitempty"`
 	History     []SuggestionRevision `json:"history"`
+	// AtRisk: the job's finish at Quantile is now after the suggestion
+	// (the HUD shows it in orchid).
+	AtRisk bool `json:"atRisk,omitempty"`
 }
 
 // SuggestionRevision is one value a suggestion took, with its signed
@@ -198,6 +203,9 @@ type SuggestionRevision struct {
 	Deadline      time.Time `json:"deadline"`
 	UnitsMeasured int       `json:"unitsMeasured"`
 	Record        string    `json:"record,omitempty"`
+	// Reason is first, or at-risk for a later move the farm made because
+	// the suggestion was at risk.
+	Reason string `json:"reason,omitempty"`
 }
 
 // Band is a finish forecast: the times by which a job finishes with
@@ -226,12 +234,15 @@ type DeadlineOptions struct {
 
 // DeadlineOption is the readout for one candidate time.
 type DeadlineOption struct {
-	At     time.Time `json:"at"`
-	Band   *Band     `json:"band,omitempty"`
-	Meets  int       `json:"meets"`
-	OnTime bool      `json:"onTime"`
-	Boost  float64   `json:"boost,omitempty"`
-	Burst  *Burst    `json:"burst,omitempty"`
+	At time.Time `json:"at"`
+	// Label names a choice the queue offered ("dailies session Tue
+	// 08:00"); empty for a time the caller gave.
+	Label  string  `json:"label,omitempty"`
+	Band   *Band   `json:"band,omitempty"`
+	Meets  int     `json:"meets"`
+	OnTime bool    `json:"onTime"`
+	Boost  float64 `json:"boost,omitempty"`
+	Burst  *Burst  `json:"burst,omitempty"`
 	// Displaces counts the jobs this deadline would make late; Displaced
 	// names those in the viewer's projects, and Unnamed counts the rest.
 	Displaces int        `json:"displaces"`

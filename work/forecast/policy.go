@@ -45,27 +45,36 @@ type Policy struct {
 	Location *time.Location
 	// Turnaround is the duration for Turnaround and Latency policies.
 	Turnaround time.Duration
-	// Quantile is the finish percentile a suggestion must meet (0.8 for
-	// dailies and soft classes, 0.9 for deliveries).
+	// Quantile is the finish percentile a suggestion must meet. Suggestions
+	// are generous on purpose (0.95 by default): a deadline met two days
+	// early is still met, and tightening it is the person's choice, made
+	// with the deadline-options readout.
 	Quantile float64
 	// Round and MinLead shape Achievable deadlines.
 	Round, MinLead time.Duration
-	// Revision rules (see Suggestion).
+	// Revision rules (see Suggestion): at most MaxRevisions later moves,
+	// each only when the suggestion is at risk and by more than
+	// max(MinMoveFrac of the time left, MinMove).
 	MaxRevisions int
 	MinMoveFrac  float64
 	MinMove      time.Duration
-	MinNarrowing float64
 }
 
-// DefaultPolicy returns the soft "as soon as reasonable" policy:
-// achievable at 80%, rounded to 15 minutes, at most two revisions.
+// DefaultPolicy returns the soft policy: the earliest deadline the job
+// meets at 95% without making another job late, rounded up to the quarter
+// hour, moved later at most twice and only when at risk.
 func DefaultPolicy() Policy {
 	return Policy{
-		Kind: Achievable, Quantile: 0.8, Round: 15 * time.Minute, MinLead: 15 * time.Minute,
-		MaxRevisions: 2, MinMoveFrac: 0.1, MinMove: 15 * time.Minute, MinNarrowing: 0.2,
+		Kind: Achievable, Quantile: DefaultQuantile, Round: 15 * time.Minute, MinLead: 15 * time.Minute,
+		MaxRevisions: 2, MinMoveFrac: 0.1, MinMove: 15 * time.Minute,
 		Location: time.UTC,
 	}
 }
+
+// DefaultQuantile is the finish percentile a suggested deadline meets by
+// default (Joshua, 2026-10-18: suggest generously; padding is not a
+// cost).
+const DefaultQuantile = 0.95
 
 // Hard reports whether the policy's deadlines are commitments made outside
 // the farm (tracking, latency SLOs): they are never suggested or moved,

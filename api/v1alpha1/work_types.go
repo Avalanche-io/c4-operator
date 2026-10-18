@@ -219,13 +219,17 @@ type WorkJobStatus struct {
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
 
-// WorkSuggestion is a suggested deadline: set from the deadline policy
-// and the estimate, revised only when the first units narrow the estimate,
-// at most MaxRevisions times, then Settled. A settled suggestion never
-// moves; a person can still set a deadline.
+// WorkSuggestion is a suggested deadline: the earliest time the job meets
+// at a generous quantile (0.95 by default) without making another job
+// late. The farm never moves it earlier; tightening it is a person's
+// choice, made with the deadline-options readout. It moves later only
+// when it is itself at risk, at most MaxRevisions times, each recorded
+// with reason at-risk, and then it is Settled and does not move again; a
+// person can always set a deadline.
 type WorkSuggestion struct {
 	Deadline metav1.Time `json:"deadline"`
-	// State is Estimating, Settling or Settled.
+	// State is Estimating (it may still move later if at risk) or
+	// Settled.
 	State string `json:"state"`
 	// Policy names the deadline policy kind (achievable, sessions,
 	// turnaround) and Quantile the finish percentile it meets.
@@ -238,6 +242,9 @@ type WorkSuggestion struct {
 	// History lists every value the suggestion took, oldest first.
 	// +optional
 	History []WorkSuggestionRevision `json:"history,omitempty"`
+	// AtRisk: the job's finish at Quantile is now after the suggestion.
+	// +optional
+	AtRisk bool `json:"atRisk,omitempty"`
 	// NextSession, for a sessions policy whose deadline the job is not
 	// expected to make at Quantile, is the following session: the
 	// one-click alternative.
@@ -251,6 +258,10 @@ type WorkSuggestionRevision struct {
 	Deadline metav1.Time `json:"deadline"`
 	// UnitsMeasured is how many units had finished.
 	UnitsMeasured int32 `json:"unitsMeasured"`
+	// Reason is first, or at-risk for a later move made because the
+	// suggestion was at risk.
+	// +optional
+	Reason string `json:"reason,omitempty"`
 	// Record is the C4 ID of the queue's signed record of it.
 	// +optional
 	Record string `json:"record,omitempty"`

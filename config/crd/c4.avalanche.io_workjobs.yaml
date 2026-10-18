@@ -471,6 +471,10 @@ spec:
                 description: Suggestion is the farm's suggested deadline and how it
                   got there.
                 properties:
+                  atRisk:
+                    description: 'AtRisk: the job''s finish at Quantile is now after
+                      the suggestion.'
+                    type: boolean
                   deadline:
                     format: date-time
                     type: string
@@ -486,6 +490,11 @@ spec:
                           type: string
                         deadline:
                           format: date-time
+                          type: string
+                        reason:
+                          description: |-
+                            Reason is first, or at-risk for a later move made because the
+                            suggestion was at risk.
                           type: string
                         record:
                           description: Record is the C4 ID of the queue's signed record
@@ -522,7 +531,9 @@ spec:
                     format: int32
                     type: integer
                   state:
-                    description: State is Estimating, Settling or Settled.
+                    description: |-
+                      State is Estimating (it may still move later if at risk) or
+                      Settled.
                     type: string
                 required:
                 - deadline

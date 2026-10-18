@@ -26,6 +26,14 @@ import (
 //   - floor: when nothing closes D, the earliest the job can finish at all.
 //
 // The readout never changes the farm. It prices; people decide.
+//
+// Suggested deadlines are generous (forecast.DefaultQuantile), and the
+// farm never moves one earlier: tightening is the person's act. Called
+// with no candidate times, the readout offers the tighter choices itself
+// (Option.Label): each upcoming review session of the job's project (from
+// its sessions deadline policies) before the job's deadline, and the
+// earliest deadline the job meets at 80% without making a job that is on
+// time late. Each comes with its odds and what it would displace.
 
 // MaxDeadlineOptions bounds the candidate times of one call: each runs the
 // policy several times.
@@ -65,6 +73,9 @@ type Options struct {
 // Option is the readout for one candidate deadline.
 type Option struct {
 	At time.Time
+	// Label names an offered choice ("dailies session Tue 08:00"); empty
+	// for a time the caller gave.
+	Label string
 	// Band is the job's finish band with its deadline at At, and Meets the
 	// highest of 50, 80, 90 and 95 whose finish is at or before At (0:
 	// none). OnTime: the finish at the policy's quantile is by At.
@@ -106,9 +117,6 @@ type OptionBurst struct {
 // project; displaced jobs of other projects are counted, not named. A nil
 // sees names every job.
 func (q *Queue) DeadlineOptions(job string, at []time.Time, sees func(project string) bool) (*Options, error) {
-	if len(at) == 0 {
-		return nil, errors.New("give at least one candidate time")
-	}
 	if len(at) > MaxDeadlineOptions {
 		return nil, fmt.Errorf("at most %d candidate times", MaxDeadlineOptions)
 	}
@@ -116,7 +124,7 @@ func (q *Queue) DeadlineOptions(job string, at []time.Time, sees func(project st
 	// snapshot is rebuilt every tick, never changed in place, and each
 	// what-if copies the jobs it changes.
 	q.mu.Lock()
-	snap, pol, policy, cfg, adj := q.lastSnap, q.lastPol[job], q.Policy, q.Cfg, q.lastAdj[job]
+	snap, pol, policy, cfg, adj, policies := q.lastSnap, q.lastPol[job], q.Policy, q.Cfg, q.lastAdj[job], q.policies
 	q.mu.Unlock()
 	if snap.Now.IsZero() || policy == nil {
 		return nil, ErrNoPlan
@@ -146,8 +154,18 @@ func (q *Queue) DeadlineOptions(job string, at []time.Time, sees func(project st
 	}
 	out.Floor, out.FloorWhy = w.floor(cur.Jobs[job])
 
+	labels := map[time.Time]string{}
+	if len(at) == 0 {
+		at, labels = tighter(now, j.Deadline, policies[j.Project], func() time.Time {
+			if d := w.achievable(0.8, onTime, now.Add(pol.MinLead), hi); !d.Equal(hi) {
+				ref := forecast.DefaultPolicy()
+				return ref.Earliest(d, now, j.Submitted, j.Ready)
+			}
+			return time.Time{}
+		})
+	}
 	for _, d := range at {
-		o := Option{At: d}
+		o := Option{At: d, Label: labels[d]}
 		r := w.run(d, 0)
 		js := r.Jobs[job]
 		o.Band = w.band(r)
@@ -343,4 +361,51 @@ func span(d time.Duration) string {
 		return fmt.Sprintf("%dh", int(d.Hours()))
 	}
 	return fmt.Sprintf("%dh%02dm", int(d.Hours()), int(d.Minutes())%60)
+}
+
+// tighter lists the choices the readout offers when given no times: the
+// project's upcoming review sessions before the deadline (each sessions
+// policy, labeled by its class), and the earliest no-bump deadline at 80%,
+// earliest first, at most MaxDeadlineOptions.
+func tighter(now, deadline time.Time, policies map[string]forecast.Policy, at80 func() time.Time) ([]time.Time, map[time.Time]string) {
+	labels := map[time.Time]string{}
+	var classes []string
+	for c, p := range policies {
+		if p.Kind == forecast.Sessions {
+			classes = append(classes, c)
+		}
+	}
+	sort.Strings(classes)
+	for _, c := range classes {
+		p := policies[c]
+		t := now.Add(p.MinLead)
+		for range 3 {
+			s := p.NextSession(t)
+			if s.IsZero() || (!deadline.IsZero() && !s.Before(deadline)) {
+				break
+			}
+			if _, ok := labels[s]; !ok {
+				loc := p.Location
+				if loc == nil {
+					loc = time.UTC
+				}
+				labels[s] = fmt.Sprintf("%s session %s", c, s.In(loc).Format("Mon 15:04"))
+			}
+			t = s.Add(time.Minute)
+		}
+	}
+	if d := at80(); !d.IsZero() && (deadline.IsZero() || d.Before(deadline)) {
+		if _, ok := labels[d]; !ok {
+			labels[d] = "earliest at 80% without making another job late"
+		}
+	}
+	out := make([]time.Time, 0, len(labels))
+	for t := range labels {
+		out = append(out, t)
+	}
+	sort.Slice(out, func(a, b int) bool { return out[a].Before(out[b]) })
+	if len(out) > MaxDeadlineOptions {
+		out = out[:MaxDeadlineOptions]
+	}
+	return out, labels
 }

@@ -139,48 +139,52 @@ func band(start time.Time, p50h, p80h float64) Band {
 	return Band{P50: h(p50h), P80: h(p80h), P90: h(p80h * 1.1), P95: h(p80h * 1.2)}
 }
 
-func TestSuggestionRevisesOnlyOnInformation(t *testing.T) {
+func TestSuggestionMovesOnlyLaterWhenAtRisk(t *testing.T) {
 	p := DefaultPolicy()
 	start := at("2026-10-21 10:00")
 	var s Suggestion
-	if !s.Observe(p, Event{Now: start, Total: 200, Candidate: at("2026-10-21 16:00"), Band: band(start, 4, 6)}) {
+	if !s.Observe(p, Event{Now: start, Total: 200, Candidate: at("2026-10-21 16:00"), Band: band(start, 4, 5)}) {
 		t.Fatal("first suggestion not set")
 	}
-	if s.State != Estimating || s.Width != 0.5 {
-		t.Fatalf("state %s width %v", s.State, s.Width)
+	if s.State != Estimating || s.History[0].Reason != ReasonFirst {
+		t.Fatalf("state %s, %+v", s.State, s.History)
 	}
 	t1 := start.Add(20 * time.Minute)
-	// Not an information event: no move.
-	if s.Observe(p, Event{Now: t1, Finished: 2, Total: 200, Candidate: at("2026-10-21 19:00"), Band: band(start, 6, 7)}) {
+	// The band now says the job could be done much sooner: never earlier.
+	if s.Observe(p, Event{Now: t1, Finished: 3, Total: 200, Info: true, Candidate: at("2026-10-21 12:00"), Band: band(start, 1, 1.2)}) {
+		t.Error("moved earlier")
+	}
+	// At risk, but not at an information point: no move.
+	if s.Observe(p, Event{Now: t1, Finished: 4, Total: 200, Candidate: at("2026-10-21 19:00"), Band: band(start, 6, 7)}) {
 		t.Error("moved between information events")
 	}
-	// An information event with a big move but no narrowing: no move.
-	if s.Observe(p, Event{Now: t1, Finished: 3, Total: 200, Info: true, Candidate: at("2026-10-21 19:00"), Band: band(start, 5, 8)}) {
-		t.Error("moved without the band narrowing")
+	// Not at risk at 95% (band P95 is 1.2 x P80 here: 5 x 1.2 = 6h, 16:00): no move even with a later candidate.
+	if s.Observe(p, Event{Now: t1, Finished: 5, Total: 200, Info: true, Candidate: at("2026-10-21 19:00"), Band: band(start, 4, 5)}) {
+		t.Error("moved later while not at risk")
 	}
-	// Narrowed by more than 20%, moved by more than the threshold: moves.
-	if !s.Observe(p, Event{Now: t1, Finished: 5, Total: 200, Info: true, Candidate: at("2026-10-21 19:00"), Band: band(start, 6, 7)}) {
-		t.Fatal("did not revise")
+	// At risk at an information point: moves later, recorded as at risk.
+	if !s.Observe(p, Event{Now: t1, Finished: 9, Total: 200, Info: true, Candidate: at("2026-10-21 19:00"), Band: band(start, 6, 7)}) {
+		t.Fatal("did not move later when at risk")
 	}
-	if s.State != Settling || s.Revisions != 1 {
-		t.Fatalf("after one revision: %s, %d", s.State, s.Revisions)
+	if s.Revisions != 1 || s.History[1].Reason != ReasonAtRisk || !s.Deadline.Equal(at("2026-10-21 19:00")) {
+		t.Fatalf("after an at-risk move: %+v", s)
 	}
-	// A small move is ignored even with narrowing.
-	if s.Observe(p, Event{Now: t1, Finished: 9, Total: 200, Info: true, Candidate: at("2026-10-21 19:10"), Band: band(start, 6, 6.2)}) {
+	// A move smaller than the threshold is ignored.
+	if s.Observe(p, Event{Now: t1, Finished: 17, Total: 200, Info: true, Candidate: at("2026-10-21 19:10"), Band: band(start, 9, 9.5)}) {
 		t.Error("moved by less than the threshold")
 	}
-	// Second revision, then settled: nothing moves it again.
-	if !s.Observe(p, Event{Now: t1, Finished: 17, Total: 200, Info: true, Candidate: at("2026-10-21 17:00"), Band: band(start, 6, 6.2)}) {
-		t.Fatal("second revision")
+	// The second move uses the last revision and settles it.
+	if !s.Observe(p, Event{Now: t1, Finished: 17, Total: 200, Info: true, Candidate: at("2026-10-21 22:00"), Band: band(start, 9, 9.5)}) {
+		t.Fatal("second at-risk move")
 	}
 	if s.State != Settled {
-		t.Fatalf("after %d revisions state %s", s.Revisions, s.State)
+		t.Fatalf("after %d moves state %s", s.Revisions, s.State)
 	}
-	if s.Observe(p, Event{Now: t1, Finished: 33, Total: 200, Info: true, Candidate: at("2026-10-21 12:00"), Band: band(start, 1, 1.01)}) {
+	if s.Observe(p, Event{Now: t1, Finished: 33, Total: 200, Info: true, Candidate: at("2026-10-22 12:00"), Band: band(start, 30, 31)}) {
 		t.Error("a settled suggestion moved")
 	}
-	if len(s.History) != 3 {
-		t.Errorf("history %d entries, want 3", len(s.History))
+	if !s.AtRisk(p.Quantile, band(start, 30, 31)) {
+		t.Error("AtRisk")
 	}
 }
 
@@ -188,7 +192,7 @@ func TestSuggestionSettlesOnTimeAndUnits(t *testing.T) {
 	p := DefaultPolicy()
 	start := at("2026-10-21 10:00")
 	var s Suggestion
-	s.Observe(p, Event{Now: start, Total: 200, Candidate: at("2026-10-21 18:00"), Band: band(start, 6, 8)})
+	s.Observe(p, Event{Now: start, Total: 200, Candidate: at("2026-10-21 18:00"), Band: band(start, 6, 6.5)})
 	// A quarter of the way to the deadline: settled.
 	s.Observe(p, Event{Now: at("2026-10-21 12:00"), Finished: 2, Total: 200, Band: band(start, 6, 8), Candidate: at("2026-10-21 18:00")})
 	if s.State != Settled {

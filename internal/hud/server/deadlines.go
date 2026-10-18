@@ -11,8 +11,9 @@ import (
 )
 
 // handleDeadlineOptions is GET /jobs/{ns}/{name}/deadline-options: for
-// each candidate time (?at=RFC 3339, repeated), what the deadline would
-// take. Jobs it would make late are named only in the viewer's projects.
+// each candidate time (?at=RFC 3339, repeated; none: the tighter choices
+// the queue offers), what the deadline would take. Jobs it would make late
+// are named only in the viewer's projects.
 func (s *Server) handleDeadlineOptions(w http.ResponseWriter, r *http.Request) {
 	_, rec, v := s.job(w, r)
 	if rec == nil {
@@ -31,8 +32,8 @@ func (s *Server) handleDeadlineOptions(w http.ResponseWriter, r *http.Request) {
 		}
 		at = append(at, t)
 	}
-	if len(at) == 0 || len(at) > queue.MaxDeadlineOptions {
-		fail(w, http.StatusBadRequest, "give 1 to %d candidate times as ?at=", queue.MaxDeadlineOptions)
+	if len(at) > queue.MaxDeadlineOptions {
+		fail(w, http.StatusBadRequest, "give at most %d candidate times as ?at=", queue.MaxDeadlineOptions)
 		return
 	}
 	o, err := s.Queue.DeadlineOptions(rec.key, at, v.Sees)
@@ -56,7 +57,7 @@ func (s *Server) deadlineOptions(o *queue.Options) api.DeadlineOptions {
 		Deadline: s.optTime(o.Deadline), Band: s.band(o.Band), Achievable: s.optTime(o.Achievable),
 		Floor: o.Floor.In(s.Loc), FloorWhy: o.FloorWhy, Options: []api.DeadlineOption{}}
 	for _, x := range o.Options {
-		ao := api.DeadlineOption{At: x.At.In(s.Loc), Band: s.band(x.Band), Meets: x.Meets, OnTime: x.OnTime, Boost: x.Boost,
+		ao := api.DeadlineOption{At: x.At.In(s.Loc), Label: x.Label, Band: s.band(x.Band), Meets: x.Meets, OnTime: x.OnTime, Boost: x.Boost,
 			Displaces: x.Displaces, Displaced: x.Displaced, Unnamed: x.Unnamed, Floor: s.optTime(x.Floor), FloorWhy: x.FloorWhy}
 		if ao.Displaced == nil {
 			ao.Displaced = []string{}

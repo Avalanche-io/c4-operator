@@ -268,7 +268,8 @@ func TestDeadlineOptionsTool(t *testing.T) {
 	}
 	for _, args := range []map[string]any{
 		{"namespace": "show-a", "name": "sh010", "at": []string{"tomorrow"}},
-		{"namespace": "show-a", "name": "sh010", "at": []string{}},
+		{"namespace": "show-a", "name": "sh010", "at": []string{"2026-10-23T11:00:00Z", "2026-10-23T11:00:00Z", "2026-10-23T11:00:00Z",
+			"2026-10-23T11:00:00Z", "2026-10-23T11:00:00Z", "2026-10-23T11:00:00Z", "2026-10-23T11:00:00Z", "2026-10-23T11:00:00Z", "2026-10-23T11:00:00Z"}},
 	} {
 		if res, _ := call(t, cs, "c4_deadline_options", args); !res.IsError {
 			t.Errorf("accepted %v", args)

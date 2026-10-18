@@ -55,6 +55,7 @@ type suggestMem struct {
 	records  []string // signed record per History entry
 	lastInfo int      // finished count of the last information point used
 	next     time.Time
+	atRisk   bool // the band at the policy quantile ends after the deadline
 }
 
 // classPolicy is a class's default deadline policy for a job.
@@ -210,36 +211,37 @@ func (q *Queue) suggest(ctx context.Context, now time.Time, snap sched.Snapshot,
 		ev := forecast.Event{Now: now, Finished: finished, Total: total, Band: band, Candidate: sg.s.Deadline}
 		switch {
 		case sg.s.State == forecast.Settled:
-		case sg.s.Deadline.IsZero() || (info && p.Kind == forecast.Achievable):
+		case sg.s.Deadline.IsZero() || (info && p.Kind == forecast.Achievable && sg.s.AtRisk(p.Quantile, band)):
+			// The first suggestion, or one at risk at an information
+			// point: the only times the policy is searched. The system
+			// never moves a suggestion earlier (forecast.Suggestion).
 			if p.Kind == forecast.Achievable {
 				if budget == 0 {
 					continue
 				}
 				budget--
 			}
-			c, b := q.candidate(now, snap, v, p)
+			c, _ := q.candidate(now, snap, v, p)
 			if c.IsZero() {
 				continue
 			}
-			ev.Candidate, ev.Band, ev.Info = c, b, info
-			if info {
-				sg.lastInfo = finished
-			}
+			ev.Candidate, ev.Info = c, info
 		}
-		if sg.s.Width < 0 && ev.Info {
-			// Restored after a restart: this information point sets the
-			// width a revision must narrow, and moves nothing.
-			sg.s.Width, ev.Info = ev.Band.Width(sg.s.Start), false
+		if info {
+			sg.lastInfo = finished
 		}
 		before := len(sg.s.History)
-		sg.s.Observe(p, ev)
+		changed := sg.s.Observe(p, ev)
 		for i := before; i < len(sg.s.History); i++ {
 			sg.records = append(sg.records, q.recordSuggestion(ctx, v, sg, sg.s.History[i], now))
 		}
 		// Status reports the deadline the next decision plans on.
 		q.applySuggestion(v)
 		sg.next = time.Time{}
-		if p.Kind == forecast.Sessions && !band.IsZero() && band.At(p.Quantile).After(sg.s.Deadline) {
+		// A suggestion set this tick was not what this tick's decision
+		// planned on; its risk is judged from the next one.
+		sg.atRisk = !changed && sg.s.AtRisk(p.Quantile, band)
+		if p.Kind == forecast.Sessions && sg.atRisk {
 			sg.next = p.NextSession(sg.s.Deadline.Add(time.Minute))
 		}
 	}
@@ -285,7 +287,7 @@ func (q *Queue) recordSuggestion(ctx context.Context, v *view, sg *suggestMem, r
 	if q.Signer == nil {
 		return ""
 	}
-	pred := map[string]any{"decision": "suggest-deadline", "job": v.key, "deadline": r.Deadline.UTC().Format(time.RFC3339),
+	pred := map[string]any{"decision": "suggest-deadline", "job": v.key, "deadline": r.Deadline.UTC().Format(time.RFC3339), "reason": r.Reason,
 		"state": string(sg.s.State), "revision": sg.s.Revisions, "unitsMeasured": r.Finished,
 		"policy": string(sg.policy.Kind), "quantile": sg.policy.Quantile, "at": now.UTC().Format(time.RFC3339)}
 	rec, err := provenance.SignStatement(ctx, q.Signer, provenance.PredicateDecision, []provenance.Subject{jobSubject(v.job)}, pred, now)
@@ -308,11 +310,11 @@ func suggestionStatus(sg *suggestMem) *c4v1.WorkSuggestion {
 	out := &c4v1.WorkSuggestion{
 		Deadline: metav1.Time{Time: sg.s.Deadline}, State: string(sg.s.State), Policy: string(sg.policy.Kind),
 		Quantile: strconv.FormatFloat(sg.policy.Quantile, 'f', -1, 64), Revisions: int32(sg.s.Revisions),
-		MaxRevisions: int32(sg.policy.MaxRevisions),
+		MaxRevisions: int32(sg.policy.MaxRevisions), AtRisk: sg.atRisk,
 	}
 	for i, r := range sg.s.History {
 		h := c4v1.WorkSuggestionRevision{At: metav1.Time{Time: r.At.Truncate(time.Second)}, Deadline: metav1.Time{Time: r.Deadline},
-			UnitsMeasured: int32(r.Finished)}
+			UnitsMeasured: int32(r.Finished), Reason: r.Reason}
 		if i < len(sg.records) {
 			h.Record = sg.records[i]
 		}
@@ -332,7 +334,7 @@ func loadSuggestion(st *c4v1.WorkSuggestion) *suggestMem {
 	sg := &suggestMem{}
 	sg.s.Deadline, sg.s.State, sg.s.Revisions = st.Deadline.Time, forecast.State(st.State), int(st.Revisions)
 	for _, h := range st.History {
-		sg.s.History = append(sg.s.History, forecast.Revision{At: h.At.Time, Deadline: h.Deadline.Time, Finished: int(h.UnitsMeasured)})
+		sg.s.History = append(sg.s.History, forecast.Revision{At: h.At.Time, Deadline: h.Deadline.Time, Finished: int(h.UnitsMeasured), Reason: h.Reason})
 		sg.records = append(sg.records, h.Record)
 		sg.lastInfo = max(sg.lastInfo, int(h.UnitsMeasured))
 	}
@@ -342,9 +344,6 @@ func loadSuggestion(st *c4v1.WorkSuggestion) *suggestMem {
 	if st.NextSession != nil {
 		sg.next = st.NextSession.Time
 	}
-	// The band width behind the deadline is not kept: the next
-	// information point sets it (suggest), and only a later, narrower
-	// band can revise.
-	sg.s.Width = -1
+	sg.atRisk = st.AtRisk
 	return sg
 }

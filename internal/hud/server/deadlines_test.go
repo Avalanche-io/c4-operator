@@ -88,7 +88,6 @@ func TestDeadlineOptionsEndpoint(t *testing.T) {
 
 	for p, want := range map[string]int{
 		"/api/v1/jobs/show-b/ep104-crowd/deadline-options?as=artist&at=2026-10-23T11:00:00Z":                              http.StatusNotFound,
-		"/api/v1/jobs/show-a/sh040-light-v007/deadline-options?as=artist":                                                 http.StatusBadRequest,
 		"/api/v1/jobs/show-a/sh040-light-v007/deadline-options?as=artist&at=Friday":                                       http.StatusBadRequest,
 		"/api/v1/jobs/show-a/sh040-light-v007/deadline-options?as=artist" + strings.Repeat("&at=2026-10-23T11:00:00Z", 9): http.StatusBadRequest,
 	} {

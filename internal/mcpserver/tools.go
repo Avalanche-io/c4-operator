@@ -84,9 +84,9 @@ func Tools(c *Client) []Tool {
 			idempotent, c.holdJob),
 		tool("c4_boost_job", "Boost a job", "Multiply a job's required slots by 1 to 2, drawn from its own project's quota first. 1 removes the boost.",
 			idempotent, c.boostJob),
-		tool("c4_suggest_deadline", "Suggested deadline", "A job's deadline and who owns it (pinned by a person, suggested by the farm, or set by production tracking), the farm's suggested deadline with its policy, state (estimating, settling, settled), revisions and their signed records, the finish band (ready by, at 50, 80, 90 and 95%), and, for a job that will miss its review session, the next session.",
+		tool("c4_suggest_deadline", "Suggested deadline", "A job's deadline and who owns it (pinned by a person, suggested by the farm, or set by production tracking), and the farm's suggested deadline: generous on purpose (met 95% of the time by default), never moved earlier by the farm, moved later only when it is itself at risk (each such move listed with reason at-risk and its signed record). Also its state (estimating, settled), whether it is at risk now, the finish band (ready by, at 50, 80, 90 and 95%), and, for a job that will miss its review session, the next session. To make it sooner, see c4_deadline_options.",
 			readOnly, c.suggestDeadline),
-		tool("c4_deadline_options", "Deadline options", "What one or more candidate deadlines would take for a job, without changing anything: the finish band and which percentile is on time, the smallest boost that makes it, the burst capacity and its cost (and whether it needs approval), how many other jobs it would make late (named only in your projects), and, when nothing makes it, the earliest the job can finish. Also the earliest deadline that makes no other job late.",
+		tool("c4_deadline_options", "Deadline options", "What tighter deadlines would take for a job, without changing anything. With no times given, it offers the choices itself: the project's upcoming review sessions (dailies and the like) before the job's deadline, and the earliest time it makes at 80% without making another job late. For each time: the finish band and which percentile is on time, the smallest boost that makes it, the burst capacity and its cost (and whether it needs approval), how many other jobs it would make late (named only in your projects), and, when nothing makes it, the earliest the job can finish. Suggested deadlines are generous; tightening one is your choice, made with c4_set_deadline.",
 			readOnly, c.deadlineOptions),
 		tool("c4_set_deadline", "Set a job's deadline", "Set or move a job's deadline (RFC 3339, for example 2026-10-23T18:00:00-07:00), which pins it. The queue reorders work to meet it; this is what raising a priority means here. With mode, choose who owns the deadline instead: pin (keep the one it has now), suggested (follow the farm's suggestion) or tracking (production tracking sets it). Check c4_deadline_options first for what a time would take.",
 			idempotent, c.setDeadline),
@@ -448,7 +448,7 @@ func (c *Client) suggestDeadline(ctx context.Context, _ *mcp.CallToolRequest, in
 
 type OptionsIn struct {
 	JobRef
-	At []string `json:"at" jsonschema:"candidate deadlines, 1 to 8 RFC 3339 times, for example 2026-10-23T18:00:00-07:00"`
+	At []string `json:"at" jsonschema:"candidate deadlines, up to 8 RFC 3339 times (for example 2026-10-23T18:00:00-07:00); none: the tighter choices the farm offers"`
 }
 
 func (c *Client) deadlineOptions(ctx context.Context, _ *mcp.CallToolRequest, in OptionsIn) (*mcp.CallToolResult, api.DeadlineOptions, error) {
@@ -456,8 +456,8 @@ func (c *Client) deadlineOptions(ctx context.Context, _ *mcp.CallToolRequest, in
 	if err != nil {
 		return nil, api.DeadlineOptions{}, err
 	}
-	if len(in.At) == 0 || len(in.At) > 8 {
-		return nil, api.DeadlineOptions{}, fmt.Errorf("give 1 to 8 candidate times in at")
+	if len(in.At) > 8 {
+		return nil, api.DeadlineOptions{}, fmt.Errorf("give at most 8 candidate times in at")
 	}
 	q := url.Values{}
 	for _, a := range in.At {
@@ -467,7 +467,11 @@ func (c *Client) deadlineOptions(ctx context.Context, _ *mcp.CallToolRequest, in
 		q.Add("at", a)
 	}
 	var out api.DeadlineOptions
-	if err := c.do(ctx, "GET", p+"/deadline-options?"+q.Encode(), nil, &out); err != nil {
+	path := p + "/deadline-options"
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	if err := c.do(ctx, "GET", path, nil, &out); err != nil {
 		return nil, api.DeadlineOptions{}, err
 	}
 	if out.Options == nil {

@@ -73,7 +73,7 @@ func TestDeadlineOptions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if o.Policy != forecast.Achievable || o.Quantile != 0.8 || !o.Deadline.Equal(now.Add(8*time.Hour)) || o.Band.IsZero() {
+	if o.Policy != forecast.Achievable || o.Quantile != forecast.DefaultQuantile || !o.Deadline.Equal(now.Add(8*time.Hour)) || o.Band.IsZero() {
 		t.Fatalf("readout %+v", o)
 	}
 	// The achievable deadline bumps nobody.
@@ -160,5 +160,34 @@ func TestDeadlineOptionsBoost(t *testing.T) {
 	}
 	if want := now.Add(15 * time.Minute); !o.Floor.Equal(want) {
 		t.Fatalf("floor %s, want W/A = 15m", o.Floor.Sub(now))
+	}
+}
+
+// With no times given, the readout offers the project's upcoming sessions
+// before the deadline and the earliest no-bump time at 80%, labeled,
+// earliest first.
+func TestTighterChoices(t *testing.T) {
+	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC) // a Wednesday
+	dailies := forecast.Policy{Kind: forecast.Sessions, Sessions: []string{"08:00"}, Location: time.UTC, Quantile: 0.95,
+		Weekdays: []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday}}
+	policies := map[string]forecast.Policy{"render": forecast.DefaultPolicy(), "dailies": dailies}
+	deadline := time.Date(2026, 10, 24, 12, 0, 0, 0, time.UTC) // Saturday noon
+	at80 := now.Add(3 * time.Hour)
+	got, labels := tighter(now, deadline, policies, func() time.Time { return at80 })
+	want := []time.Time{at80, time.Date(2026, 10, 22, 8, 0, 0, 0, time.UTC), time.Date(2026, 10, 23, 8, 0, 0, 0, time.UTC)}
+	if len(got) != len(want) {
+		t.Fatalf("choices %v", got)
+	}
+	for i := range want {
+		if !got[i].Equal(want[i]) || labels[got[i]] == "" {
+			t.Fatalf("choices %v %v, want %v", got, labels, want)
+		}
+	}
+	if labels[want[1]] != "dailies session Thu 08:00" {
+		t.Fatalf("label %q", labels[want[1]])
+	}
+	// Nothing is offered at or after the deadline.
+	if got, _ := tighter(now, now.Add(2*time.Hour), policies, func() time.Time { return at80 }); len(got) != 0 {
+		t.Fatalf("choices after the deadline: %v", got)
 	}
 }

@@ -6,13 +6,17 @@ import "time"
 type State string
 
 const (
-	// Estimating: the first suggestion, from history and policy, before
-	// any revision.
+	// Estimating: the suggestion may still move later if it turns out to
+	// be at risk.
 	Estimating State = "Estimating"
-	// Settling: revised at least once, still allowed to move.
-	Settling State = "Settling"
 	// Settled: fixed. The system never moves it again; only a person does.
 	Settled State = "Settled"
+)
+
+// Reasons a suggestion took a value.
+const (
+	ReasonFirst  = "first"
+	ReasonAtRisk = "at-risk"
 )
 
 // SettleUnits is the number of finished units after which a suggestion
@@ -38,75 +42,89 @@ func InfoPoint(n int) bool {
 	return m&(m-1) == 0
 }
 
-// Revision is one value the suggestion took.
+// Revision is one value the suggestion took, and why.
 type Revision struct {
 	At       time.Time
 	Deadline time.Time
 	Finished int // units finished when it was set
+	Reason   string
 }
 
-// Suggestion is a job's suggested deadline and the rules that let it move
-// at most a few times over the first binary-order units and then settle.
+// Suggestion is a job's suggested deadline.
 //
-// A revision happens only at an information event, only when the policy's
-// earliest deadline has moved by more than max(MinMoveFrac of the time
-// left, MinMove), and only when the new band is narrower than the band
-// behind the current suggestion by MinNarrowing: the suggestion moves
-// when the system knows more, not when noise moves the center. After
-// MaxRevisions revisions, after SettleUnits finished units, or once
-// SettleShare of the time to the deadline has passed, it is Settled and
-// never moves again.
+// Suggestions are generous (Policy.Quantile, 0.95 by default) and the
+// system never moves one earlier: a deadline met early is still met, and
+// tightening it is the person's act, made with the deadline-options
+// readout. The only move the system makes is later, and only when the
+// suggestion itself is at risk: at an information event, if the band's
+// point at the policy quantile is after the deadline, the suggestion moves
+// to the new candidate when that is later by more than max(MinMoveFrac of
+// the time left, MinMove). Such a move is recorded with ReasonAtRisk, so
+// it is shown, not silent. After MaxRevisions moves, after SettleUnits
+// finished units, or once SettleShare of the time to the deadline has
+// passed, the suggestion is Settled; a settled suggestion that becomes at
+// risk stays put and the job's feasibility warning says so.
 type Suggestion struct {
 	Deadline  time.Time
 	State     State
 	Revisions int
-	// Width is the band width (Band.Width from Start) behind Deadline.
-	Width   float64
-	Start   time.Time
-	History []Revision
+	Start     time.Time
+	History   []Revision
 }
 
 // Event is what the caller observes at one moment.
 type Event struct {
 	Now time.Time
-	// Finished and Total count the job's units (Total includes units not
-	// yet revealed by generators only as far as they are known).
+	// Finished and Total count the job's units.
 	Finished, Total int
 	// Info marks an information event (InfoPoint, or a generator that
 	// just expanded).
 	Info bool
-	// Candidate is the policy's earliest deadline for the band's finish at
-	// the policy quantile (Policy.Earliest).
+	// Candidate is the policy's deadline for the band's finish at the
+	// policy quantile now (Policy.Earliest). It is consulted only when the
+	// suggestion is at risk.
 	Candidate time.Time
-	Band      Band
+	// Band is the band shown now.
+	Band Band
+}
+
+// AtRisk reports whether the band's point at quantile q is after the
+// suggested deadline.
+func (s *Suggestion) AtRisk(q float64, b Band) bool {
+	return !s.Deadline.IsZero() && !b.IsZero() && b.At(q).After(s.Deadline)
 }
 
 // Observe applies an event and reports whether Deadline changed.
 func (s *Suggestion) Observe(p Policy, ev Event) bool {
-	if ev.Candidate.IsZero() || s.State == Settled {
+	if s.State == Settled {
 		return false
 	}
 	if s.Deadline.IsZero() {
+		if ev.Candidate.IsZero() {
+			return false
+		}
 		s.Deadline, s.Start, s.State = ev.Candidate, ev.Now, Estimating
-		s.Width = ev.Band.Width(ev.Now)
-		s.History = append(s.History, Revision{At: ev.Now, Deadline: ev.Candidate, Finished: ev.Finished})
+		s.History = append(s.History, Revision{At: ev.Now, Deadline: ev.Candidate, Finished: ev.Finished, Reason: ReasonFirst})
 		s.settle(p, ev)
 		return true
 	}
 	changed := false
-	if ev.Info && s.Revisions < p.MaxRevisions && s.moves(p, ev) {
+	if ev.Info && s.Revisions < p.MaxRevisions && s.AtRisk(p.Quantile, ev.Band) && s.later(p, ev) {
 		s.Deadline = ev.Candidate
-		s.Width = ev.Band.Width(s.Start)
 		s.Revisions++
-		s.State = Settling
-		s.History = append(s.History, Revision{At: ev.Now, Deadline: ev.Candidate, Finished: ev.Finished})
+		s.History = append(s.History, Revision{At: ev.Now, Deadline: ev.Candidate, Finished: ev.Finished, Reason: ReasonAtRisk})
 		changed = true
 	}
 	s.settle(p, ev)
 	return changed
 }
 
-func (s *Suggestion) moves(p Policy, ev Event) bool {
+// later reports whether the candidate is later than the deadline by more
+// than the policy's minimum move. An earlier candidate never moves it.
+func (s *Suggestion) later(p Policy, ev Event) bool {
+	if ev.Candidate.IsZero() {
+		return false
+	}
 	left := s.Deadline.Sub(ev.Now)
 	if left < 0 {
 		left = 0
@@ -115,14 +133,7 @@ func (s *Suggestion) moves(p Policy, ev Event) bool {
 	if min < p.MinMove {
 		min = p.MinMove
 	}
-	d := ev.Candidate.Sub(s.Deadline)
-	if d < 0 {
-		d = -d
-	}
-	if d <= min {
-		return false
-	}
-	return ev.Band.Width(s.Start) <= (1-p.MinNarrowing)*s.Width
+	return ev.Candidate.Sub(s.Deadline) > min
 }
 
 func (s *Suggestion) settle(p Policy, ev Event) {

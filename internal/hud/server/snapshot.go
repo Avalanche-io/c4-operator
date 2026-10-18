@@ -488,10 +488,10 @@ func (s *Server) suggestion(sg *c4v1.WorkSuggestion) *api.Suggestion {
 	q, _ := strconv.ParseFloat(sg.Quantile, 64)
 	out := &api.Suggestion{Deadline: sg.Deadline.Time.In(s.Loc), State: sg.State, Policy: sg.Policy, Quantile: q,
 		Revisions: int(sg.Revisions), MaxRevisions: int(sg.MaxRevisions), NextSession: s.timePtr(sg.NextSession),
-		History: []api.SuggestionRevision{}}
+		History: []api.SuggestionRevision{}, AtRisk: sg.AtRisk}
 	for _, h := range sg.History {
 		out.History = append(out.History, api.SuggestionRevision{At: h.At.Time.In(s.Loc), Deadline: h.Deadline.Time.In(s.Loc),
-			UnitsMeasured: int(h.UnitsMeasured), Record: h.Record})
+			UnitsMeasured: int(h.UnitsMeasured), Record: h.Record, Reason: h.Reason})
 	}
 	return out
 }

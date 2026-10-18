@@ -29,7 +29,8 @@ func TestRenderWithoutDeadlineGetsSuggestion(t *testing.T) {
 		t.Fatalf("no suggestion: source %q, %+v", st.DeadlineSource, sg)
 	}
 	d := sg.Deadline.Time
-	if sg.State != string(forecast.Estimating) || sg.Policy != "achievable" || sg.Quantile != "0.8" || len(sg.History) != 1 {
+	if sg.State != string(forecast.Estimating) || sg.Policy != "achievable" || sg.Quantile != "0.95" || len(sg.History) != 1 ||
+		sg.History[0].Reason != forecast.ReasonFirst || sg.AtRisk {
 		t.Fatalf("suggestion %+v", sg)
 	}
 	if d.Before(now.Add(15*time.Minute)) || d.Unix()%(15*60) != 0 {
@@ -44,8 +45,8 @@ func TestRenderWithoutDeadlineGetsSuggestion(t *testing.T) {
 	if st.Deadline == nil || !st.Deadline.Time.Equal(d) {
 		t.Fatalf("effective deadline %v, suggestion %s", st.Deadline, d)
 	}
-	if e := st.Estimate; e == nil || e.ETA80 == nil || e.ETA80.Time.After(d) {
-		t.Fatalf("80%% finish after the suggestion: %+v", e)
+	if e := st.Estimate; e == nil || e.ETA95 == nil || e.ETA95.Time.After(d) || st.Suggestion.AtRisk {
+		t.Fatalf("95%% finish after the suggestion: %+v, at risk %v", e, st.Suggestion.AtRisk)
 	}
 
 	q2 := &Queue{Client: k8s, Policy: sched.Decide, Cfg: sched.DefaultConfig(), Log: q.Log, Now: q.Now, CaptureWait: time.Minute}
