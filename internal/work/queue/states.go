@@ -209,7 +209,7 @@ func (m *jobMem) loadAcks(st *c4v1.WorkJobStatus) {
 // the shown band at the job's quantile, the scheduler's own finish, and
 // the clock.
 func risk(now time.Time, v *view, js sched.JobState, e *c4v1.WorkEstimate) string {
-	d := v.obj.Deadline
+	d := plannedDeadline(v, js)
 	if d.IsZero() {
 		return c4v1.RiskNone
 	}
@@ -229,12 +229,23 @@ func risk(now time.Time, v *view, js sched.JobState, e *c4v1.WorkEstimate) strin
 	return c4v1.RiskNone
 }
 
-// shownSlack is the deadline less the shown finish risk() judges by (p90,
-// p95 for a suggested deadline), so slack, ETA and risk agree. The
-// scheduler's Slack is at all attainable capacity, and can read "+7h"
-// while the shown ETA is late. ok is false without a deadline or an ETA.
-func shownSlack(v *view, e *c4v1.WorkEstimate) (int64, bool) {
-	d := v.obj.Deadline
+// plannedDeadline is the deadline the scheduler planned the job for: its
+// own, or the earlier one a dependent job set (sched DeadlineFor names it,
+// and the job's message names it too); the job's own when sched has none.
+func plannedDeadline(v *view, js sched.JobState) time.Time {
+	if !js.Deadline.IsZero() {
+		return js.Deadline
+	}
+	return v.obj.Deadline
+}
+
+// shownSlack is the planned deadline less the shown finish risk() judges
+// by (p90; p95 for a suggested deadline, which the farm sets at p95), so
+// slack, ETA and risk agree. The scheduler's Slack is at all attainable
+// capacity and only decides Feasible: shown, it read "+7h" beside a late
+// ETA. ok is false without a deadline or a shown band: then it is unset.
+func shownSlack(v *view, js sched.JobState, e *c4v1.WorkEstimate) (int64, bool) {
+	d := plannedDeadline(v, js)
 	f := e.ETA90
 	if v.source == "suggested" && e.ETA95 != nil {
 		f = e.ETA95

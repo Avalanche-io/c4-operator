@@ -266,8 +266,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	e := &c4v1.WorkEstimate{
 		RemainingWork: int64(v.sum.W), RemainingWorkP90: int64(v.sum.W90),
 		RequiredSlots: fmt.Sprintf("%.2f", js.Required), AttainableSlots: fmt.Sprintf("%.2f", js.Attainable),
-		RunningSlots: int32(js.RunningSlots), SlackSeconds: int64(js.Slack.Seconds()),
-		Feasible: js.Feasible, AtRisk: js.AtRisk,
+		RunningSlots: int32(js.RunningSlots),
+		Feasible:     js.Feasible, AtRisk: js.AtRisk,
 	}
 	// The message is a warning: kept only when the job is at risk.
 	if js.AtRisk || !js.Feasible {
@@ -288,7 +288,9 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	e.Calibrated = v.sum.Calibrated
 	e.HeavyRegions = q.heavy(v)
 	e.Risk = risk(now, v, js, e)
-	if sl, ok := shownSlack(v, e); ok {
+	// js.Slack (at all attainable capacity) only decides Feasible; the
+	// slack shown is against the shown band, and unset without one
+	if sl, ok := shownSlack(v, js, e); ok {
 		e.SlackSeconds = sl
 	}
 	st.Estimate = e

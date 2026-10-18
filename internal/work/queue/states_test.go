@@ -269,9 +269,30 @@ func TestShownSlack(t *testing.T) {
 	} {
 		v := &view{source: c.source}
 		v.obj.Deadline = c.dl
-		got, ok := shownSlack(v, &c.e)
+		got, ok := shownSlack(v, sched.JobState{}, &c.e)
 		if got != c.want || ok != c.ok {
 			t.Errorf("%s: slack %d %v, want %d %v", c.name, got, ok, c.want, c.ok)
 		}
+	}
+}
+
+func TestShownSlackUsesThePlannedDeadline(t *testing.T) {
+	now := time.Date(2026, 10, 18, 12, 0, 0, 0, time.UTC)
+	eta := &metav1.Time{Time: now.Add(3 * time.Hour)}
+	// an upstream job with no deadline of its own, planned for its
+	// dependent's: slack and risk against that one
+	v := &view{source: "spec"}
+	js := sched.JobState{Feasible: true, Deadline: now.Add(2 * time.Hour), DeadlineFor: "comp"}
+	e := &c4v1.WorkEstimate{ETA50: eta, ETA90: eta}
+	if got, ok := shownSlack(v, js, e); !ok || got != -3600 {
+		t.Fatalf("slack %d %v, want -3600 against the planned deadline", got, ok)
+	}
+	if r := risk(now, v, js, e); r != c4v1.RiskWillMiss {
+		t.Fatalf("risk %s, want willMiss against the planned deadline", r)
+	}
+	// the job's own deadline when sched planned none
+	v.obj.Deadline = now.Add(5 * time.Hour)
+	if got, _ := shownSlack(v, sched.JobState{}, e); got != 2*3600 {
+		t.Fatalf("slack %d, want 7200 against the job's own deadline", got)
 	}
 }
