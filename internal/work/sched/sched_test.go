@@ -698,6 +698,13 @@ func TestBlockedJobsRankAfterRunnable(t *testing.T) {
 	if count(d, "comp") != 0 {
 		t.Fatal("a blocked job was dispatched")
 	}
+	// The same with generators not yet evaluated: they wait upstream too
+	// (found by hack/stress).
+	s.Jobs[0].Unevaluated = 40
+	d = Decide(s, &State{}, DefaultConfig())
+	if r := d.Jobs["comp"].Rank; r != 3 {
+		t.Fatalf("blocked job with unevaluated generators ranked %d, want last (3)", r)
+	}
 }
 
 // TestEvictedJobIsLateAtItsShare reproduces the overflow, evict, lateBy=0

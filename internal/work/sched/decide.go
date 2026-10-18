@@ -515,11 +515,12 @@ func (a *alloc) rank() {
 	}
 }
 
-// waiting reports whether a job can use no slot now: nothing runnable,
-// nothing running, no generator left to evaluate, but units still to come.
-// The queue passes jobs whose upstream jobs have not finished this way
-// (Blocked set, Runnable empty).
+// waiting reports whether a job can use no slot now: nothing runnable and
+// nothing running, but units still to come. The queue passes jobs whose
+// upstream jobs have not finished this way (Blocked set, Runnable empty).
+// Generators not yet evaluated do not make a job ready: one that could
+// run would be in Runnable.
 func (jc *jobCtx) waiting() bool {
 	j := jc.j
-	return j.RunnableTotal == 0 && len(j.Runnable) == 0 && len(j.RunningUnits) == 0 && j.Unevaluated == 0 && j.Blocked > 0
+	return j.RunnableTotal == 0 && len(j.Runnable) == 0 && len(j.RunningUnits) == 0 && (j.Blocked > 0 || j.Unevaluated > 0)
 }
