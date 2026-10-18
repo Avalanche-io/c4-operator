@@ -345,3 +345,15 @@ func TestSubmitJobDryRun(t *testing.T) {
 		t.Fatal("a C4_ variable was accepted")
 	}
 }
+
+func TestNoETAIsNotATime(t *testing.T) {
+	now := time.Date(2026, 10, 17, 22, 56, 0, 0, time.UTC)
+	r := row(api.Job{Name: "research", Estimate: api.Estimate{EtaP50: now, EtaP90: now, NoETA: "suspended"}})
+	if r.EtaP90 != "" || r.NoETA != "suspended" {
+		t.Fatalf("a job with no ETA must report why, not a time: etaP90 %q, noEta %q", r.EtaP90, r.NoETA)
+	}
+	r = row(api.Job{Name: "push", Estimate: api.Estimate{EtaP50: now, EtaP90: now}})
+	if r.EtaP90 == "" || r.NoETA != "" {
+		t.Fatalf("a job with an ETA reports it: etaP90 %q, noEta %q", r.EtaP90, r.NoETA)
+	}
+}

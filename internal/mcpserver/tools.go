@@ -188,6 +188,7 @@ type JobRow struct {
 	Running      int     `json:"running"`
 	Deadline     string  `json:"deadline,omitempty"`
 	EtaP90       string  `json:"etaP90,omitempty"`
+	NoETA        string  `json:"noEta,omitempty" jsonschema:"when set, the job has no ETA and this says why (held, suspended, waiting for capacity, no deadline); etaP90 is then absent"`
 	SlackSeconds float64 `json:"slackSeconds"`
 	Feasible     bool    `json:"feasible"`
 	Message      string  `json:"message,omitempty"`
@@ -235,7 +236,8 @@ func row(j api.Job) JobRow {
 	if j.Objective.Deadline != nil {
 		r.Deadline = j.Objective.Deadline.Format(time.RFC3339)
 	}
-	if !j.Estimate.EtaP90.IsZero() {
+	r.NoETA = j.Estimate.NoETA
+	if !j.Estimate.EtaP90.IsZero() && r.NoETA == "" {
 		r.EtaP90 = j.Estimate.EtaP90.Format(time.RFC3339)
 	}
 	return r
@@ -443,6 +445,7 @@ type SuggestOut struct {
 	Mode     string `json:"mode,omitempty" jsonschema:"Pinned, Suggested or Tracking"`
 	// Band is when the job is ready, at 50, 80, 90 and 95%.
 	Band        map[string]string `json:"band,omitempty"`
+	NoETA       string            `json:"noEta,omitempty" jsonschema:"when set, the job has no ETA and this says why; band is then absent"`
 	Calibrated  bool              `json:"calibrated" jsonschema:"the band comes from finished jobs' outcomes"`
 	Suggestion  *api.Suggestion   `json:"suggestion,omitempty"`
 	NextSession string            `json:"nextSession,omitempty" jsonschema:"the next review session, offered when the job will miss its own; c4_move_to_next_session moves it there"`
@@ -462,7 +465,8 @@ func (c *Client) suggestDeadline(ctx context.Context, _ *mcp.CallToolRequest, in
 	if o.Deadline != nil {
 		out.Deadline = o.Deadline.Format(time.RFC3339)
 	}
-	if !e.EtaP50.IsZero() {
+	out.NoETA = e.NoETA
+	if !e.EtaP50.IsZero() && e.NoETA == "" {
 		out.Band = map[string]string{"p50": e.EtaP50.Format(time.RFC3339), "p90": e.EtaP90.Format(time.RFC3339)}
 		if e.EtaP80 != nil {
 			out.Band["p80"] = e.EtaP80.Format(time.RFC3339)
