@@ -24,6 +24,7 @@ type pool struct {
 	requested int // burst slots requested
 	cost      float64
 	burstCost float64
+	site      string // from Queue.Placement; "" without one
 }
 
 // pools sizes every pool from its nodes, advertises each node's slots as
@@ -56,6 +57,17 @@ func (q *Queue) pools(ctx context.Context, list []c4v1.Pool, nodes []corev1.Node
 		}
 		sort.Strings(p.nodes)
 		sort.Strings(p.spare)
+		if q.Placement != nil {
+			var regions []string
+			for n := range nodes {
+				if sel.Matches(labels.Set(nodes[n].Labels)) {
+					if r := nodes[n].Labels[corev1.LabelTopologyRegion]; r != "" {
+						regions = append(regions, r)
+					}
+				}
+			}
+			p.site = q.Placement.Site(ps, regions)
+		}
 		out[ps.Name] = p
 	}
 	for i := range pods {

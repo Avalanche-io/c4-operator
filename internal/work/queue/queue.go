@@ -67,6 +67,10 @@ type Queue struct {
 	Signer *provenance.Signer
 	// PolicyName names the policy in decision records.
 	PolicyName string
+	// Placement (experimental) locates pools at sites and prices moving a
+	// job's inputs between them (placement.go); nil keeps every pool a job
+	// may use as holding its inputs.
+	Placement Placement
 	// Stores opens a project's store, to fold unit changesets into job
 	// outputs. Without it, outputs are not folded.
 	Stores StoreFunc
@@ -307,6 +311,9 @@ type view struct {
 	// source is where the effective deadline comes from: spec,
 	// suggested or class.
 	source string
+	// sources are the ways to get its inputs to pools at other sites
+	// (placement.go), by pool.
+	sources map[string][]sched.Source
 }
 
 type runInfo struct {
@@ -396,6 +403,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 		}
 	}
 
+	q.placeJobs(ctx, views, poolInfo)
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
 	cfg := q.Cfg
 	if cfg.Loc == nil {
@@ -413,6 +421,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.lastSnap, q.lastDec, q.lastPol, q.lastAdj = snap, dec, pol, adj
 	q.suggest(ctx, now, snap, dec, views)
 	q.act(ctx, now, dec, views, poolInfo)
+	q.stage(ctx, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
 	q.report(ctx, now, dec, views)
@@ -691,6 +700,9 @@ func (q *Queue) estimate(v *view, now time.Time) {
 // snapshot builds the policy's input.
 func (q *Queue) snapshot(now time.Time, pools map[string]*pool, projects []c4v1.Project, views []*view) sched.Snapshot {
 	s := sched.Snapshot{Now: now}
+	if q.Placement != nil {
+		s.Links = q.Placement.Links()
+	}
 	free := 0
 	names := make([]string, 0, len(pools))
 	for n := range pools {
@@ -748,6 +760,7 @@ func schedJob(v *view, free int) sched.Job {
 		Boost: floatOr(v.job.Spec.Nudge.Boost, 0), LastRunning: v.mem.lastRun,
 		Preemptible: v.driver.Preemptible(), Checkpoints: v.driver.Checkpoints(),
 	}
+	j.Sources = v.sources
 	// sched propagates deadlines up the dependency graph and starts a
 	// waiting job no earlier than its upstream jobs finish (sched.Job.After).
 	j.After = v.after

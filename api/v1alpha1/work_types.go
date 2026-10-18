@@ -36,6 +36,12 @@ const (
 	// admission from the request's user (or, for jobs the HUD creates for
 	// a signed-in viewer, by the HUD) and never changed afterwards.
 	AnnotationOwner = "c4.avalanche.io/owner"
+	// AnnotationAcceptValidated, "true" on a WorkJob, accepts a validated
+	// recompute of its inputs in place of moving them (staging,
+	// experimental): the recomputed output differs from the recorded one,
+	// so only the consuming job may choose it. Exact recomputes and
+	// identical outputs need no consent; volatile ones are never offered.
+	AnnotationAcceptValidated = "c4.avalanche.io/accept-validated"
 	// AnnotationSubmittedVia says how the job was submitted: hud, mcp,
 	// or api (anything else that wrote the WorkJob directly).
 	AnnotationSubmittedVia = "c4.avalanche.io/submitted-via"
