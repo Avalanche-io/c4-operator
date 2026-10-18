@@ -337,6 +337,26 @@ fraction its latest checkpoint saved.
     yields: [ { at, reason, resumedAt? } ], usefulGpuHours, lostGpuHours,
     datasetView, codeView, step, totalSteps }
   ```
+- **agent**: the bundle that owns the job (an AgentBundle; its members are
+  the job's units):
+  ```
+  { bundle, cap?, running,
+    members: [ { name, unit, kind, state, node?, epoch?, checkpoint? } ],
+    clock: { start?, virtualNow?, suspendedSince?, driftSeconds },
+    suspended: [ { from, to? } ] }
+  ```
+  `kind` is `resident` or `task`. `state` is `running`; `yielding` (asked to
+  stop at its next turn boundary); `suspended` (the queue stopped it at a
+  turn boundary, and it resumes from `checkpoint`); `held` (a person
+  suspended the bundle); `waiting` (not started); `done`; or `failed`.
+  `epoch` is the member's lease number, and `checkpoint` is where it
+  resumes (`<session>#<seq>:<head>`, a C4 ID after the colon). `clock` is
+  the bundle's time: it stops while the bundle is suspended.
+  `virtualNow` is its value at the last status write, and `driftSeconds`
+  is how far it trails the real clock. `suspended` lists the recent
+  suspended intervals, oldest first; the last has no `to` while the bundle
+  is still suspended. `cap` is the bundle's limit on members running at
+  once.
 
 ## GET /jobs/{ns}/{name}/units/{i}
 

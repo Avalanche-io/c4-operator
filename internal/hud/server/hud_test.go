@@ -344,3 +344,60 @@ func TestWireTimesAreUTC(t *testing.T) {
 		}
 	}
 }
+
+func TestAgentSummaryInDetail(t *testing.T) {
+	s := farm(t)
+	now := s.m.at
+	j := c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research",
+		Labels: map[string]string{"c4.avalanche.io/agent-bundle": "research"}, CreationTimestamp: metav1.Time{Time: now.Add(-3 * time.Hour)}},
+		Spec:   c4v1.WorkJobSpec{Class: "agent", Params: map[string]string{"members": "prov-graph,agent-jobs", "bundle": "research"}},
+		Status: c4v1.WorkJobStatus{Phase: "Running", Units: c4v1.UnitCounts{Total: 2, Running: 1, Queued: 1}}}
+	d, err := class.Lookup("agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := d.Plan(&j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &jobRec{job: j, key: "show-a/research", project: "show-a", plan: plan, driver: d}
+	s.m.jobs = append(s.m.jobs, rec)
+	s.m.byKey[rec.key] = rec
+	from, to := metav1.NewTime(now.Add(-2*time.Hour)), metav1.NewTime(now.Add(-time.Hour))
+	start, vnow := metav1.NewTime(now.Add(-3*time.Hour)), metav1.NewTime(now.Add(-time.Hour))
+	s.m.bundles = []c4v1.AgentBundle{{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research"},
+		Spec: c4v1.AgentBundleSpec{MaxRunning: 1, Members: []c4v1.AgentMemberSpec{{Name: "prov-graph"}, {Name: "agent-jobs", Kind: "task"}}},
+		Status: c4v1.AgentBundleStatus{Phase: "Running", Members: []c4v1.AgentMemberStatus{
+			{Name: "prov-graph", State: "running", Node: "c4-host-abyss", Epoch: "3"},
+			{Name: "agent-jobs", State: "parked", Checkpoint: "s#7:c4abc"}},
+			Clock: c4v1.AgentClock{Start: &start, VirtualNow: &vnow, DriftSeconds: 3600, Suspensions: []c4v1.AgentSuspension{{From: from, To: to}}}}}}
+	var got map[string]any
+	if code := get(t, s, "/api/v1/jobs/show-a/research?as=artist", &got); code != 200 {
+		t.Fatalf("detail: %d", code)
+	}
+	cs := got["classSummary"].(map[string]any)
+	if cs["bundle"] != "research" || cs["cap"] != 1.0 || cs["running"] != 1.0 {
+		t.Fatalf("summary %v", cs)
+	}
+	ms := cs["members"].([]any)
+	m0, m1 := ms[0].(map[string]any), ms[1].(map[string]any)
+	if m0["state"] != "running" || m0["epoch"] != "3" || m0["kind"] != "resident" {
+		t.Fatalf("member 0 %v", m0)
+	}
+	if m1["state"] != "suspended" || m1["checkpoint"] != "s#7:c4abc" || m1["kind"] != "task" {
+		t.Fatalf("member 1 %v", m1)
+	}
+	c := cs["clock"].(map[string]any)
+	if c["driftSeconds"] != 3600.0 || !strings.HasSuffix(c["virtualNow"].(string), "Z") {
+		t.Fatalf("clock %v", c)
+	}
+	if sus := cs["suspended"].([]any); len(sus) != 1 || sus[0].(map[string]any)["to"] == nil {
+		t.Fatalf("suspended %v", sus)
+	}
+	// A person's suspension: the parked member is held, not suspended.
+	s.m.bundles[0].Spec.Suspend = true
+	get(t, s, "/api/v1/jobs/show-a/research?as=artist", &got)
+	if st := got["classSummary"].(map[string]any)["members"].([]any)[1].(map[string]any)["state"]; st != "held" {
+		t.Fatalf("held member state %v", st)
+	}
+}

@@ -560,4 +560,7 @@ func TestAdvanceClock(t *testing.T) {
 	if !c.VirtualNow.Time.Equal(t0.Add(90*time.Minute)) || c.SuspendedSince != nil {
 		t.Fatalf("resumed: %+v", c)
 	}
+	if len(c.Suspensions) != 1 || !c.Suspensions[0].From.Time.Equal(t0.Add(time.Hour)) || !c.Suspensions[0].To.Time.Equal(t0.Add(10*time.Hour+30*time.Minute)) {
+		t.Fatalf("suspensions %+v", c.Suspensions)
+	}
 }

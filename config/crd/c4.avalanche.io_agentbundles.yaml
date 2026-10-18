@@ -141,6 +141,25 @@ spec:
                     description: SuspendedSince is set while the bundle is suspended.
                     format: date-time
                     type: string
+                  suspensions:
+                    description: |-
+                      Suspensions are the most recent suspended intervals, oldest first
+                      (at most 16): where the HUD draws a gap in the bundle's time.
+                    items:
+                      description: AgentSuspension is one interval a bundle spent
+                        suspended.
+                      properties:
+                        from:
+                          format: date-time
+                          type: string
+                        to:
+                          format: date-time
+                          type: string
+                      required:
+                      - from
+                      - to
+                      type: object
+                    type: array
                   virtualNow:
                     description: |-
                       VirtualNow is the bundle's time as of the last status write: Start

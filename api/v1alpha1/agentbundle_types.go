@@ -39,6 +39,16 @@ type AgentClock struct {
 	// DriftSeconds is how far the bundle's time trails the real clock.
 	// +optional
 	DriftSeconds int64 `json:"driftSeconds,omitempty"`
+	// Suspensions are the most recent suspended intervals, oldest first
+	// (at most 16): where the HUD draws a gap in the bundle's time.
+	// +optional
+	Suspensions []AgentSuspension `json:"suspensions,omitempty"`
+}
+
+// AgentSuspension is one interval a bundle spent suspended.
+type AgentSuspension struct {
+	From metav1.Time `json:"from"`
+	To   metav1.Time `json:"to"`
 }
 
 // AgentMemberSpec is one member of an agent bundle: a Claude Code session

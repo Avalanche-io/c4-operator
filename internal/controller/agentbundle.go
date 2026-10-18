@@ -214,6 +214,10 @@ func advanceClock(c c4v1.AgentClock, phase string, now time.Time) c4v1.AgentCloc
 		c.SuspendedSince = &t
 	case phase != "Suspended" && c.SuspendedSince != nil:
 		c.SuspendedSeconds += int64(now.Sub(c.SuspendedSince.Time).Seconds())
+		c.Suspensions = append(c.Suspensions, c4v1.AgentSuspension{From: *c.SuspendedSince, To: metav1.NewTime(now)})
+		if n := len(c.Suspensions); n > 16 {
+			c.Suspensions = append([]c4v1.AgentSuspension(nil), c.Suspensions[n-16:]...)
+		}
 		c.SuspendedSince = nil
 	}
 	suspended := time.Duration(c.SuspendedSeconds) * time.Second

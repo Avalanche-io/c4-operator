@@ -248,6 +248,8 @@ func (s *Server) classSummary(m *model, rec *jobRec) map[string]any {
 		return map[string]any{"wrapped": false, "ranks": ranks, "checkpoints": ckpts, "yields": yields,
 			"usefulGpuHours": round2(useful), "lostGpuHours": 0, "datasetView": data, "codeView": "",
 			"step": 0, "totalSteps": steps}
+	case "agent":
+		return agentSummary(m, rec)
 	case "ci":
 		var pipelines []map[string]any
 		for i := range m.jobs {
@@ -613,4 +615,96 @@ func unitAcks(st *c4v1.WorkJobStatus) map[int]api.Ack {
 		}
 	}
 	return out
+}
+
+// agentSummary is the agent lens's data for a bundle's WorkJob: its
+// members, its cap and its clock, from the AgentBundle that owns the job.
+func agentSummary(m *model, rec *jobRec) map[string]any {
+	j := &rec.job
+	name := j.Labels["c4.avalanche.io/agent-bundle"]
+	var b *c4v1.AgentBundle
+	for i := range m.bundles {
+		if m.bundles[i].Namespace == j.Namespace && m.bundles[i].Name == name {
+			b = &m.bundles[i]
+		}
+	}
+	out := map[string]any{"bundle": name, "members": []any{}, "suspended": []any{}, "clock": map[string]any{"driftSeconds": 0}}
+	if b == nil {
+		return out
+	}
+	kinds := map[string]string{}
+	for _, mem := range b.Spec.Members {
+		kinds[mem.Name] = mem.Kind
+	}
+	running := 0
+	var members []any
+	for i, ms := range b.Status.Members {
+		e := map[string]any{"name": ms.Name, "unit": i, "kind": orDefault(kinds[ms.Name], "resident"), "state": memberState(b, ms)}
+		if e["state"] == "running" || e["state"] == "yielding" {
+			running++
+		}
+		for k, v := range map[string]string{"node": ms.Node, "epoch": ms.Epoch, "checkpoint": ms.Checkpoint} {
+			if v != "" {
+				e[k] = v
+			}
+		}
+		members = append(members, e)
+	}
+	if members != nil {
+		out["members"] = members
+	}
+	out["running"] = running
+	if b.Spec.MaxRunning > 0 {
+		out["cap"] = b.Spec.MaxRunning
+	}
+	c := b.Status.Clock
+	clock := map[string]any{"driftSeconds": c.DriftSeconds}
+	if c.Start != nil {
+		clock["start"] = c.Start.Time.UTC()
+	}
+	if c.VirtualNow != nil {
+		clock["virtualNow"] = c.VirtualNow.Time.UTC()
+	}
+	if c.SuspendedSince != nil {
+		clock["suspendedSince"] = c.SuspendedSince.Time.UTC()
+	}
+	out["clock"] = clock
+	var sus []any
+	for _, x := range c.Suspensions {
+		sus = append(sus, map[string]any{"from": x.From.Time.UTC(), "to": x.To.Time.UTC()})
+	}
+	if c.SuspendedSince != nil {
+		sus = append(sus, map[string]any{"from": c.SuspendedSince.Time.UTC()})
+	}
+	if sus != nil {
+		out["suspended"] = sus
+	}
+	return out
+}
+
+// memberState maps a member's status to the lens's states: running,
+// yielding, suspended (the queue stopped it at a turn boundary; it resumes
+// from its checkpoint), held (a person suspended the bundle), waiting (not
+// started), done or failed.
+func memberState(b *c4v1.AgentBundle, ms c4v1.AgentMemberStatus) string {
+	switch ms.State {
+	case "running", "yielding", "done", "failed":
+		return ms.State
+	case "parked":
+		if b.Spec.Suspend {
+			return "held"
+		}
+		return "suspended"
+	}
+	if b.Spec.Suspend {
+		return "held"
+	}
+	return "waiting"
+}
+
+func orDefault(s, def string) string {
+	if s == "" {
+		return def
+	}
+	return s
 }

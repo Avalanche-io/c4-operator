@@ -36,6 +36,7 @@ type model struct {
 	// built by hand, which scan pods instead.
 	podsByJob map[string][]*corev1.Pod
 	crs       []c4v1.CapacityRequest
+	bundles   []c4v1.AgentBundle
 	metrics   farmMetrics
 	usage     usageSnapshot
 	unitsHour int
@@ -64,17 +65,18 @@ func (s *Server) collect(ctx context.Context) error {
 		nodes    corev1.NodeList
 		pods     corev1.PodList
 		crs      c4v1.CapacityRequestList
+		bundles  c4v1.AgentBundleList
 	)
 	for _, l := range []struct {
 		list client.ObjectList
 		opts []client.ListOption
-	}{{&jobs, nil}, {&pools, nil}, {&projects, nil}, {&nodes, nil}, {&crs, nil},
+	}{{&jobs, nil}, {&pools, nil}, {&projects, nil}, {&nodes, nil}, {&crs, nil}, {&bundles, nil},
 		{&pods, []client.ListOption{client.HasLabels{c4v1.LabelJob}}}} {
 		if err := s.Client.List(ctx, l.list, l.opts...); err != nil {
 			return err
 		}
 	}
-	m.pools, m.projects, m.nodes, m.pods, m.crs = pools.Items, projects.Items, nodes.Items, pods.Items, crs.Items
+	m.pools, m.projects, m.nodes, m.pods, m.crs, m.bundles = pools.Items, projects.Items, nodes.Items, pods.Items, crs.Items, bundles.Items
 	sort.Slice(m.pools, func(i, j int) bool { return m.pools[i].Name < m.pools[j].Name })
 	sort.Slice(m.projects, func(i, j int) bool { return m.projects[i].Name < m.projects[j].Name })
 	sort.Slice(m.nodes, func(i, j int) bool { return m.nodes[i].Name < m.nodes[j].Name })
