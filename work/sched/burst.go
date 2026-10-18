@@ -384,10 +384,12 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 	case jc.stage != nil:
 		st := jc.stage
 		switch {
+		// Still at risk with its stage (showStaged found the plan with it
+		// late): say what is under way, not that it closes the deadline.
 		case st.Source.Via == "staging":
-			fmt.Fprintf(&b, " With %s it can finish there in time.", stageWords(st))
+			fmt.Fprintf(&b, " Its inputs are arriving at %s in %s.", st.Pool, human(st.Delay))
 		case st.Auto:
-			fmt.Fprintf(&b, " %s, closes it (%s).", capitalize(stageWords(st)), stageCost(st))
+			fmt.Fprintf(&b, " %s (%s).", capitalize(stageWords(st)), stageCost(st))
 		default:
 			fmt.Fprintf(&b, " %s, would close it (%s). Needs approval: %s.", capitalize(stageWords(st)), stageCost(st), st.Why)
 		}
