@@ -208,6 +208,30 @@ subjects:
 - {kind: ServiceAccount, name: c4-regional, namespace: c4-system}
 - {kind: ServiceAccount, name: c4-node, namespace: c4-system}
 ---
+# Work queue calibrations: the queue saves each project's calibrations in
+# that project's own store and keeps the pointer to the latest object in
+# the ConfigMap c4-work-calibrations (project: C4 ID), here only.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-queue-calibrations
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [c4-work-calibrations]
+  verbs: [get, patch]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-queue-calibrations
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-queue-calibrations}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
 # Node daemons find the regional tier through its EndpointSlices.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

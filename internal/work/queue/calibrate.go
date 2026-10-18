@@ -20,9 +20,9 @@ import (
 // "aggregate" also adds its scores to a farm-wide calibration per class,
 // which every opted-in project consults behind its own once at least
 // farmMinProjects projects contribute. Scores carry no names, inputs or
-// IDs. Calibrations are in memory: after a restart they refill from the
-// jobs that finish, and until a stratum has estimate.Calibration.Min
-// scores the as-built percentiles apply.
+// IDs. Each project's own calibrations are saved in its store and
+// restored after a restart (persist.go); until a stratum has
+// estimate.Calibration.Min scores the as-built percentiles apply.
 
 const (
 	// calCapacity is how many recent scores each stratum keeps.
@@ -153,6 +153,7 @@ func (q *Queue) learn(v *view) {
 			return
 		}
 		q.cal.add(v.project, v.job.Spec.Class, share, p.sum.Stratum, estimate.Score(p.sum, actual))
+		q.calp.touch(v.project)
 	}
 }
 
@@ -252,6 +253,7 @@ func (q *Queue) learnFinish(v *view) {
 	for _, p := range m.finPts {
 		q.fcal.add(v.project, v.job.Spec.Class, share, forecast.FinishKey{Class: v.job.Spec.Class, Stage: p.stage},
 			forecast.FinishScore(p.at, p.rawP50, m.finished))
+		q.calp.touch(v.project)
 	}
 }
 

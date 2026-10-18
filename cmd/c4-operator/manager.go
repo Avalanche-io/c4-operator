@@ -70,7 +70,7 @@ func runManager(args []string) error {
 	webhookPort := fs.Int("webhook-port", 9443, "webhook server port")
 	certDir := fs.String("cert-dir", filepath.Join(os.TempDir(), "c4-operator-webhook"), "where the generated webhook certificate is written")
 	service := fs.String("webhook-service", "c4-operator-webhook", "Service in front of the webhook")
-	namespace := fs.String("namespace", env("POD_NAMESPACE", "c4-system"), "the operator's namespace (holds store credentials)")
+	namespace := fs.String("namespace", env("POD_NAMESPACE", "c4-system"), "the operator's namespace (holds store credentials and the work queue's calibration pointers)")
 	webhookConfig := fs.String("webhook-config", "c4-operator", "MutatingWebhookConfiguration to keep the CA in")
 	retry := fs.Duration("retry", time.Minute, "recheck interval for Materializations that failed for a reason that may heal")
 	work := fs.Bool("work", true, "run the work queue (WorkJobs, Pools, CapacityRequests)")
@@ -161,7 +161,7 @@ func runManager(args []string) error {
 			return fmt.Errorf("--tz: %w", err)
 		}
 		q = &queue.Queue{Loc: loc, Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue"),
-			Stores: stores, Signer: sig.queue, PolicyName: *policy,
+			Stores: stores, Signer: sig.queue, PolicyName: *policy, Namespace: *namespace,
 			// Units' reported progress, filled by the HUD's scrape of the
 			// node daemons (without the HUD, units are estimated from
 			// elapsed time alone).

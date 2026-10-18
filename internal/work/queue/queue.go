@@ -69,11 +69,16 @@ type Queue struct {
 	// Stores opens a project's store, to fold unit changesets into job
 	// outputs. Without it, outputs are not folded.
 	Stores StoreFunc
+	// Namespace is the operator's namespace, where the queue keeps the
+	// pointers to each project's saved calibrations (persist.go). Empty,
+	// or without Stores, calibrations are not saved.
+	Namespace string
 	// cal holds live calibrations, shareHist the projects that share
-	// theirs (calibrate.go).
+	// theirs (calibrate.go), calp their persistence (persist.go).
 	cal       calibrations
 	fcal      finishCals
 	shareHist map[string]bool
+	calp      calPersist
 	// profiles are the latest finished job's durations per project, shot,
 	// class and unit key (history.go).
 	profiles map[profileKey]*shotProfile
@@ -348,6 +353,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 			q.shareHist[p.Name] = true
 		}
 	}
+	q.loadCalibrations(ctx)
 	q.loadPolicies(projects.Items)
 	q.approvals = approvals(crs.Items)
 	podsByJob := map[string][]*corev1.Pod{}
@@ -394,6 +400,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.meter(now, views, poolInfo)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
 	q.report(ctx, now, dec, views)
+	q.saveCalibrations(ctx, now)
 	q.last = now
 	return nil
 }

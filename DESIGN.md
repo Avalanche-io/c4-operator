@@ -1400,9 +1400,10 @@ finished count, or hourly. When the job succeeds, each moment's log ratio
 of actual remaining time to that median becomes a score, kept per project
 and class and by stage (nothing finished, under a quarter, under three
 quarters, the rest). With 100 scores, bands are shown at those quantiles;
-in `hack/sim` that gave 50/79/89/94%. Sharing follows `shareHistory`, as
-for the work calibration. The suggestion search and the deadline-options
-readout use the same calibrated band.
+in `hack/sim` that gave 50/79/89/94%. Sharing, and keeping the scores
+across a restart, work as for the work calibration (section 10.8). The
+suggestion search and the deadline-options readout use the same calibrated
+band.
 
 **Dry runs.** `Queue.DryRun` plans a job that does not exist yet against
 the farm as the last tick left it: its class's plan, its estimate with the
@@ -1518,10 +1519,20 @@ historical failure rate instead, so a broken change fails fast).
   `W + z σ`. A project with `spec.work.shareHistory: aggregate` also adds
   its scores to a farm-wide pool per class, which opted-in projects consult
   behind their own once three projects contribute. Scores carry no names,
-  inputs or IDs. Calibrations are kept in memory and refill after a
-  restart. In `hack/sim`, binary-order W90 covers 87 to 93% for every heavy
-  multiple once a quarter of the frames are done and the heavy region has
-  been sampled. Before that, a 3x and an 8x region look alike to any
+  inputs or IDs. Calibrations survive a restart. Every five minutes, each
+  project that has learned scores since its last save has its own
+  calibrations (remaining work and finish, every class, at most 500 scores
+  per stratum) written as one JSON object into that project's own store,
+  never another's. The ConfigMap `c4-work-calibrations` in the operator's
+  namespace points each project at its latest object. On its first tick,
+  before any estimate, the queue restores every project from it. A missing
+  or unreadable object starts that project empty; a store that cannot be
+  reached is retried, and the project is not saved over until it answers.
+  The farm-wide pools are not stored: they are rebuilt from the restored
+  calibrations of the projects that share at that point, so a project that
+  has stopped sharing drops out. In `hack/sim`, binary-order W90 covers 87
+  to 93% for every heavy multiple once a quarter of the frames are done and
+  the heavy region has been sampled. Before that, a 3x and an 8x region look alike to any
   estimator, so calibration covers 90% of the mix.
 - **Critical path.** Within a job, the longest chain of estimated durations
   through the unit graph (`t_path`) bounds the finish time no matter how many
