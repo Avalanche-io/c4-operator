@@ -203,8 +203,12 @@ export default {
             return h('div', { 'data-key': p.name, style: { marginBottom: '12px' } },
               h('div', { class: 'nrow' }, h('span', { class: 'mono' }, p.name), h('span', { class: 'num' }, `${f.money(p.burstSpendToday)} of ${f.money(p.burstBudgetPerDay)}`)),
               h('div', { class: 'vspend' },
-                h('i', { style: { width: `${Math.min(100, frac * 100)}%`, background: frac >= 1 ? 'var(--fail)' : 'var(--g16)' } })),
-              h('div', { class: 'dimmer', style: { fontSize: '11px', marginTop: '3px' } }, `Bursts under ${f.money(Math.max(0, p.burstBudgetPerDay - p.burstSpendToday))} are requested without asking; larger ones wait for approval.`));
+                // past the budget only with a person's approval: true (over),
+                // with the mitigating context (approved), so pale red
+                h('i', { style: { width: `${Math.min(100, frac * 100)}%`, background: frac > 1 ? 'var(--fail-pale)' : 'var(--g16)' } })),
+              h('div', { class: 'dimmer', style: { fontSize: '11px', marginTop: '3px' } }, frac > 1
+                ? `${f.money(p.burstSpendToday - p.burstBudgetPerDay)} over the day\u2019s budget, approved by a person. Any further burst waits for approval.`
+                : `Bursts under ${f.money(Math.max(0, p.burstBudgetPerDay - p.burstSpendToday))} are requested without asking; larger ones wait for approval.`));
           }),
           !snap.viewer.allProjects ? h('p', { class: 'dim', style: { fontSize: '12px' } }, `Other projects: ${fm.otherProjectsSlots} slots in use. Their costs are not shown.`) : null)),
       h('div', { class: 'vsec' },
@@ -214,7 +218,7 @@ export default {
           h('tbody', null, snap.capacity.map((c, i) => h('tr', { 'data-key': `${c.pool}-${i}` },
             h('td', { class: 'mono' }, c.pool), h('td', { class: 'r num' }, `+${c.slots}`),
             h('td', { style: { fontSize: '12px' } }, c.reason), h('td', { class: 'num' }, f.clock(c.until)),
-            h('td', { class: 'r num' }, f.money(c.estCost)), h('td', { class: 'num dim' }, `${c.prewarmViews.length} views`),
+            h('td', { class: 'r num' }, f.money(c.estCost)), h('td', { class: 'num dim' }, `${(c.prewarmViews || []).length} views`),
             h('td', null, h('span', { class: 'chip' + (c.state === 'PendingApproval' ? ' pend' : '') }, c.state === 'PendingApproval' ? 'awaiting approval' : c.state.toLowerCase())),
             h('td', { class: 'r' }, c.state === 'PendingApproval' ? h('button', { class: 'btn primary small', 'data-action': 'approve', 'data-pool': c.pool }, `Approve burst, ${f.money(c.estCost)}`) : null))))) :
           h('p', { class: 'dim' }, 'No capacity requests.')),

@@ -2,6 +2,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>PYLON</title>
 <link rel="stylesheet" href="_preview.css">
+<script type="module">import { initScheme } from "../scheme.js"; initScheme();</script>
 </head>
 <body>
 <div class="pv-h"><h1>PYLON</h1><p class="dim">The glance gauge. Green fills the column by work done (slot-seconds where the estimate exists, else units, and it says so); the blue band above is the work in flight with green rising inside it; an orange notch is the share retrying; red from the top is failed; the dashed red hatch is waiting work projected after the deadline. The readout rides the fill level. On the right, a square-root time tape: p50 tick and p90 bar in pencil, the deadline bug in ink, both red when the p90 lands after the deadline.</p></div>

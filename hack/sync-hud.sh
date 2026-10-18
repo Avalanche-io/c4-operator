@@ -29,8 +29,9 @@ fi
 mkdir -p "$dst/design"
 cp "$src/web/index.html" "$dst/index.html"
 for d in css js fonts; do rsync -a --delete "$src/web/$d/" "$dst/$d/"; done
-cp "$src/web/design/tokens.css" "$src/web/design/README.md" "$dst/design/"
-for d in components previews; do rsync -a --delete "$src/web/design/$d/" "$dst/design/$d/"; done
+# the design system: tokens, components, the scheme modules and previews;
+# not its fixtures or its build scripts (*.mjs)
+rsync -a --delete --exclude fixtures/ --exclude '*.mjs' "$src/web/design/" "$dst/design/"
 
 printf 'c4-hud %s\n' "$sha" > "$dst/VERSION"
 echo "sync-hud: internal/hud/web is c4-hud $sha"

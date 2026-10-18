@@ -22,8 +22,8 @@
 .wclocks .k .cx { font: 400 calc(10.5 * var(--k))/1 var(--mono); color: var(--g14); margin-left: calc(8 * var(--k)); letter-spacing: 0; text-transform: none; }
 .wclocks .s { font: 400 calc(12.5 * var(--k))/1.3 var(--mono); color: var(--g15); margin-top: calc(8 * var(--k)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wclocks .s b { font-weight: 500; color: var(--ink); }
-.wclocks .late { background: linear-gradient(90deg, rgba(238, 65, 54, .08), transparent 72%); }
-.wclocks .late .v, .wclocks .late .s b { color: var(--risk); }
+.wclocks .late { background: linear-gradient(90deg, color-mix(in srgb, var(--fail) 8%, transparent), transparent 72%); }
+.wclocks .late .v, .wclocks .late .s b { color: var(--risk-text); }
 .wclocks .ck.slots { border-right: 0; }
 
 /* ---- the scope ---------------------------------------------------------- */
@@ -51,7 +51,7 @@
 .wshot .wsn { align-self: end; display: flex; align-items: baseline; gap: calc(3 * var(--k)); white-space: nowrap; }
 .wshot .wsn .big { font: 300 calc(30 * var(--k))/1 var(--mono); color: var(--paper); }
 .wshot .wsn .pc { font: 400 calc(12 * var(--k))/1 var(--mono); color: var(--g15); }
-.wshot .wsn .run { margin-left: calc(14 * var(--k)); font: 400 calc(13 * var(--k))/1 var(--mono); color: var(--run); }
+.wshot .wsn .run { margin-left: calc(14 * var(--k)); font: 400 calc(13 * var(--k))/1 var(--mono); color: var(--run-text); }
 .wshot .wsu { margin: calc(4 * var(--k)) 0 calc(8 * var(--k)); font: 400 calc(10.5 * var(--k))/1 var(--mono); color: var(--g14); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 
 /* ---- the book --------------------------------------------------------- */

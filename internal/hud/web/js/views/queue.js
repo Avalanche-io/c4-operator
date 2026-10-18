@@ -12,7 +12,7 @@ import { own } from '../../design/components/live.js';
 import { glance, inFlight, retries } from '../../design/components/core.js';
 import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
-import { classChip, orderText, failedUnits, empty } from './common.js';
+import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
 
 const FILTERS = [['all', 'All'], ['render', 'Render'], ['ci', 'CI'], ['ml', 'ML'], ['other', 'Sim and media']];
 
@@ -35,7 +35,7 @@ function matches(ctx, j, flt) {
 // queue hrefs keep the other filter
 function qhref(ctx, q) {
   const p = new URLSearchParams();
-  for (const [k, v] of Object.entries(q)) if (v && v !== 'all') p.set(k, v);
+  for (const [k, v] of Object.entries(q)) if (v && (v !== 'all' || k === 'shots')) p.set(k, v);
   const s = p.toString();
   return ctx.href(s ? `queue?${s}` : 'queue');
 }
@@ -104,7 +104,7 @@ function row(ctx, j, multiProject, sk) {
     h('div', { class: 'qname' },
       h('a', { class: 'jn', href: ctx.href(`job/${j.namespace}/${j.name}`) }, j.name),
       h('div', { class: 'qmeta' },
-        classChip(j, ctx.cls(j.class)), phase(j),
+        classChip(j, ctx.cls(j.class)), phase(j), personMark(j),
         j.owner ? h('span', null, j.owner) : null,
         multiProject ? h('span', { class: 'dimmer' }, j.project) : null,
         h('span', { class: 'dimmer' }, orderText(j.order)),
@@ -136,10 +136,28 @@ function head() {
 
 // ------------------------------------------------------------ the shots band
 
-function shotsBand(ctx, shots, cur) {
-  if (!shots.length) return null;
+// At most two rows of shots show: the late ones first, then the open ones
+// soonest due, then the finished; the selected shot always shows. The
+// rest are one click away (?shots=all), so a farm of hundreds of shots
+// still opens on its run order.
+const SHOT_CAP = 12;
+const dueOf = (s) => {
+  const t = s.glance && s.glance.deadline;
+  return Number.isFinite(t) ? t : Infinity;
+};
+function shotsBand(ctx, all, cur) {
+  if (!all.length) return null;
+  const q = ctx.route.q;
+  const every = q.shots === 'all';
+  const ranked = all.map((s, i) => ({ s, i })).sort((a, b) =>
+    (b.s.late && b.s.open) - (a.s.late && a.s.open) || b.s.open - a.s.open || dueOf(a.s) - dueOf(b.s) || a.i - b.i).map((x) => x.s);
+  let shots = every ? all : ranked.slice(0, SHOT_CAP);
+  if (!every && cur && !shots.some((x) => x.key === cur)) { const c = all.find((x) => x.key === cur); if (c) shots = [...shots.slice(0, SHOT_CAP - 1), c]; }
+  const more = all.length - shots.length;
   return h('div', { class: 'qshots', role: 'list', 'aria-label': 'Shots and the deliveries they feed' },
-    h('div', { class: 'bandlab' }, h('span', { class: 'lab' }, 'Shots'), h('span', { class: 'sub' }, 'each shot one aggregate: its jobs and what they feed')),
+    h('div', { class: 'bandlab' }, h('span', { class: 'lab' }, 'Shots'), h('span', { class: 'sub' }, 'each shot one aggregate: its jobs and what they feed'),
+      more > 0 ? h('a', { class: 'more', href: qhref(ctx, { ...q, shots: 'all' }) }, `+${more} more shot${more > 1 ? 's' : ''}`)
+        : every && all.length > SHOT_CAP ? h('a', { class: 'more', href: qhref(ctx, { ...q, shots: '' }) }, 'fewer shots') : null),
     shots.map((s) => {
       const g = s.glance;
       const sl = s.open ? g.slack : NaN;
@@ -219,7 +237,7 @@ function simpleRow(ctx, j, rank) {
     own('pylon', 'sqpy:' + keyOf(j), { glance: g, w: 30, h: 46, mode: 'mini' }, { class: 'qpy' }),
     h('div', { class: 'qname' },
       h('a', { class: 'jn', href: ctx.href(`job/${j.namespace}/${j.name}`) }, j.name),
-      h('div', { class: 'qmeta' }, classChip(j, ctx.cls(j.class)), phase(j), j.owner ? h('span', null, j.owner) : null)),
+      h('div', { class: 'qmeta' }, classChip(j, ctx.cls(j.class)), phase(j), personMark(j), j.owner ? h('span', null, j.owner) : null)),
     h('div', { class: 'stack2' },
       h('span', { class: 'big' }, `${Math.round(g.done * 100)}%`),
       h('span', { class: 'sub' }, fin ? `${f.num(u.total)} ${unitWord(j)}, all done` : `${f.num(u.succeeded)} of ${f.num(u.total)} ${unitWord(j)}`,

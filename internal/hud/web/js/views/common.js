@@ -97,6 +97,25 @@ export function phaseText(j) {
   return h('span', { class: cls }, j.phase);
 }
 
+// personMark: a job waiting on a person (needsPerson) in red with a white
+// flag, or failures someone has taken in pale red with their seal: the
+// state is still true, with the context that a person has it in hand.
+const NEEDS = { failed: (j) => `${j.units.failed} failed`, stuck: () => 'stuck', approval: () => 'approve burst', quota: () => 'over quota', permission: () => 'no permission' };
+export function personMark(j) {
+  const np = j.needsPerson;
+  if (np) {
+    const what = (NEEDS[np.reason] || (() => np.reason))(j);
+    return h('span', { class: 'needs', title: `${np.message} (since ${f.clock(np.since)})` }, h('i', { class: 'flag', 'aria-hidden': 'true' }), `needs you · ${what}`);
+  }
+  const taken = (j.acks || []).filter((a) => a.kind !== 'accept');
+  if (j.units.failed && taken.length) {
+    const a = taken[taken.length - 1];
+    const who = a.kind === 'assign' && a.assignee ? a.assignee : a.actor;
+    return h('span', { class: 'taken', title: `${a.kind === 'assign' ? 'assigned to' : 'taken by'} ${who} at ${f.clock(a.at)}${a.note ? ': ' + a.note : ''}` }, h('i', { class: 'seal', 'aria-hidden': 'true' }), `taken · ${who}`);
+  }
+  return null;
+}
+
 export function slackCell(j) {
   const e = j.estimate;
   if (j.phase === 'Succeeded') return h('div', { class: 'slack dimmer' }, '–', h('small', null, 'done'));

@@ -463,7 +463,7 @@ export function drawAgg(g, T, it) {
     const pct = `${Math.round(a.fDone * 100)}%`;
     g.fillText(pct, tx0, y + h / 2);
     let tx = tx0 + g.measureText(pct).width + 8;
-    if (a.running) { g.fillStyle = T.run; g.font = `400 ${fs * 0.85}px ${T.mono}`; const s = `${a.running} run`; g.fillText(s, tx, y + h / 2); tx += g.measureText(s).width + 8; }
+    if (a.running) { g.fillStyle = T.runText; g.font = `400 ${fs * 0.85}px ${T.mono}`; const s = `${a.running} run`; g.fillText(s, tx, y + h / 2); tx += g.measureText(s).width + 8; }
     g.fillStyle = T.ink3; g.font = `400 ${fs * 0.85}px ${T.mono}`; g.fillText(it.label + (a.basis === 'units' ? '  by units' : ''), Math.max(tx, x + w - 8 - g.measureText(it.label).width - (a.basis === 'units' ? 60 : 0)), y + h / 2);
   }
   if (it.vlabel && h > 60 && w >= 12) {

@@ -40,6 +40,7 @@ export const TERMS = {
   guaranteed: { term: 'Guaranteed share', def: 'The slots a project is promised in a pool. Unused ones are lent out and taken back when needed.' },
   accepted: { term: 'Accepted', def: 'A failure resolved by accepting the bad frames, so the job is not blocked and nobody has to act: pale red with a check.', swatch: 'accepted' },
   pale: { term: 'Pale', def: 'A pale tint means the state is true, with context that softens it: done but still copying, rendering but still preparing, failed but accepted. A new case takes the pale of its color.' },
+  derivation: { term: 'Derivation class', def: 'How a unit\u2019s output can be checked: exact (the same inputs always give the same bytes), validated (checked against a tolerance) or volatile (not repeatable). It is verification, not quality: no class is better than another.' },
 };
 export const TERM_ORDER = Object.keys(TERMS);
 export const numberOf = (k) => (TERM_ORDER.indexOf(k) + 1) || null;

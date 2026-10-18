@@ -3,11 +3,13 @@
 
 import { h, morph } from './dom.js';
 import { hydrate } from '../design/components/live.js';
+import { setScheme } from '../design/scheme.js';
 import '../design/components/pylon.js';
 import '../design/components/stack.js';
 import { subscribe, post, get, as, staticMode } from './api.js';
 import * as f from './fmt.js';
 import * as lv from './level.js';
+import * as prefs from './prefs.js';
 import queue from './views/queue.js';
 import job from './views/job.js';
 import pools from './views/pools.js';
@@ -35,7 +37,25 @@ if (staticMode || new URLSearchParams(location.search).get('motion') === 'off') 
   document.documentElement.dataset.motion = 'off';
 }
 
-const state = { snap: null, status: staticMode ? 'static' : 'connecting', route: null, current: null, level: { level: 5, source: 'role', mine: 5 } };
+const state = { snap: null, status: staticMode ? 'static' : 'connecting', route: null, current: null, level: { level: 5, source: 'role', mine: 5 }, sheet: false };
+
+// applyPrefs puts the viewer's preferences into effect: the clock, the UTC
+// complication, the zone and the scheme (the level is read where it is
+// drawn). A link's ?clock= ?utc= ?tz= ?scheme= win for that page.
+const me = () => (state.snap && state.snap.viewer && state.snap.viewer.user) || '';
+function applyPrefs() {
+  const u = me();
+  f.setClockStyle(prefs.effective(u, 'clock').value);
+  f.setShowUTC(prefs.effective(u, 'utc').value);
+  f.setZone(prefs.effective(u, 'zone').value);
+  applyScheme(prefs.effective(u, 'scheme').value);
+}
+// 'system' | 'dark' | 'light': design/scheme.js sets data-scheme, follows
+// the OS under 'system', and fires c4:scheme on a change
+function applyScheme(v) {
+  setScheme(v);
+}
+applyPrefs();
 
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '');
@@ -72,7 +92,7 @@ function viewAs(who) {
 function topBar() {
   const s = state.snap;
   const v = s && s.viewer;
-  const role = v ? (v.allProjects ? 'wrangler' : 'artist') : '';
+  const role = v ? v.role || (v.allProjects ? 'wrangler' : 'artist') : '';
   const other = role === 'wrangler' ? 'artist' : 'wrangler';
   return h('header', { class: 'top' },
     h('a', { class: 'brand', href: href('queue'), 'aria-label': 'c4 HUD, the queue' },
@@ -87,8 +107,84 @@ function topBar() {
     h('div', { class: 'who' },
       h('span', { class: 'live', 'data-state': state.status, title: `Updates: ${state.status}` }),
       v ? h('span', null, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
-      v ? h('a', { href: viewAs(other) }, `View as ${other}`) : null));
+      v ? h('a', { href: viewAs(other) }, `View as ${other}`) : null,
+      h('button', { class: 'prefs-btn', 'data-prefs': 'open', 'aria-expanded': state.sheet ? 'true' : 'false', title: 'Preferences' }, 'Preferences')));
 }
+
+// ------------------------------------------------------------ preferences
+
+// sheet: the Preferences sheet, one row per preference in the schema,
+// grouped. Every change applies at once and is kept for the viewer.
+function sheet() {
+  if (!state.sheet) return h('div', { class: 'pf-sheet', hidden: true });
+  const u = me();
+  const row = (key) => {
+    const S = prefs.SCHEMA[key];
+    const eff = prefs.effective(u, key);
+    const cur = prefs.get(u, key);
+    let input;
+    if (S.type === 'enum') {
+      input = h('select', { 'data-pref': key, id: 'pref-' + key }, S.values.map((x) => h('option', { value: x, selected: x === cur ? 'selected' : null }, S.names ? S.names[x] : x)));
+    } else if (S.type === 'bool') {
+      input = h('input', { type: 'checkbox', 'data-pref': key, id: 'pref-' + key, checked: cur ? 'checked' : null });
+    } else if (S.type === 'zone') {
+      const zones = [...new Set([...(cur ? [cur] : []), ...prefs.ZONES])];
+      input = h('select', { 'data-pref': key, id: 'pref-' + key },
+        h('option', { value: '', selected: cur === '' ? 'selected' : null }, `Your browser\u2019s (${browserZone()})`),
+        zones.map((z) => h('option', { value: z, selected: z === cur ? 'selected' : null }, z.replace(/_/g, ' '))));
+    } else if (key === 'level') {
+      input = h('span', { class: 'pf-levels' },
+        lv.LEVELS.map((L) => h('button', { class: 'btn small' + (cur === L.n ? ' on' : ''), 'data-pref': 'level', 'data-value': String(L.n), title: L.q }, `${L.n} ${L.name}`)),
+        h('button', { class: 'btn small' + (cur == null ? ' on' : ''), 'data-pref': 'level', 'data-value': '' }, `For my role (${lv.roleDefault(state.snap && state.snap.viewer)})`));
+    }
+    return h('div', { class: 'pf-row' },
+      h('label', { class: 'pf-lab', for: 'pref-' + key }, S.label),
+      h('div', { class: 'pf-in2' }, input,
+        eff.source === 'link' ? h('span', { class: 'pf-note' }, `This page\u2019s link sets ${S.link}=${eff.value}.`) : null,
+        S.help ? h('span', { class: 'pf-help' }, S.help) : null));
+  };
+  return h('div', { class: 'pf-sheet', role: 'dialog', 'aria-label': 'Preferences' },
+    h('div', { class: 'pf-in' },
+      h('div', { class: 'pf-hd' }, h('span', { class: 'lab' }, 'Preferences'),
+        h('span', { class: 'dim' }, u ? `kept for ${u} in this browser` : 'kept in this browser'),
+        h('button', { class: 'btn small', 'data-prefs': 'close' }, 'Done')),
+      prefs.GROUPS.map((g) => h('section', { class: 'pf-group' }, h('h3', { class: 'lab' }, g),
+        Object.keys(prefs.SCHEMA).filter((k) => prefs.SCHEMA[k].group === g).map(row))),
+      h('div', { class: 'pf-ft' }, h('button', { class: 'btn small', 'data-prefs': 'reset' }, 'Reset to defaults'))));
+}
+
+function browserZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+}
+
+function setPref(key, value) {
+  try { prefs.set(me(), key, value); } catch (e) { toast(e.message, true); return; }
+  applyPrefs();
+  render();
+}
+
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-prefs]');
+  if (b) {
+    e.preventDefault();
+    const what = b.dataset.prefs;
+    if (what === 'open') state.sheet = !state.sheet;
+    else if (what === 'close') state.sheet = false;
+    else if (what === 'reset') { prefs.reset(me()); applyPrefs(); }
+    render();
+    return;
+  }
+  const lvb = e.target.closest('.pf-sheet [data-pref="level"]');
+  if (lvb) { e.preventDefault(); setPref('level', lvb.dataset.value === '' ? null : Number(lvb.dataset.value)); }
+});
+document.addEventListener('change', (e) => {
+  const el = e.target.closest('.pf-sheet [data-pref]');
+  if (!el) return;
+  setPref(el.dataset.pref, el.type === 'checkbox' ? el.checked : el.value);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && state.sheet) { state.sheet = false; render(); }
+});
 
 // detail: the level switch. Six cells and the level's name; a cell sets
 // the viewer's own level. [ and ] step down and up.
@@ -175,6 +271,7 @@ function render() {
   morphInto(document.getElementById('slate'), slate());
   document.getElementById('slate').hidden = bare || ctx.level < 4;
   morphInto(document.getElementById('offer'), offerBar());
+  morphInto(document.getElementById('prefs'), sheet());
   document.getElementById('offer').hidden = bare;
   const main = document.getElementById('main');
   if (!state.snap) return;
@@ -273,6 +370,8 @@ document.addEventListener('keydown', (e) => {
 });
 
 document.addEventListener('hud:refresh', () => render());
+// canvases and SVG drawn from tok() redraw in the new scheme
+window.addEventListener('c4:scheme', () => { if (state.route) render(); });
 document.addEventListener('hud:changed', () => {
   get('/snapshot').then((snap) => { f.setClock(snap.now); state.snap = snap; render(); }, () => {});
 });
@@ -287,7 +386,10 @@ window.addEventListener('hashchange', () => {
 state.route = parseRoute();
 subscribe((snap) => {
   f.setClock(snap.now);
+  const was = me();
   state.snap = snap;
+  // the viewer is known now: their preferences apply
+  if (me() !== was) applyPrefs();
   render();
 }, (st, msg) => {
   state.status = staticMode ? 'static' : st;

@@ -10,10 +10,19 @@
 @font-face { font-family: "IBM Plex Mono"; src: url("../fonts/IBMPlexMono-Regular.woff2") format("woff2"); font-weight: 400; font-display: block; }
 @font-face { font-family: "IBM Plex Mono"; src: url("../fonts/IBMPlexMono-Medium.woff2") format("woff2"); font-weight: 500; font-display: block; }
 
-:root {
-  /* The grey ramp: 20 steps, even in CIELAB lightness, packed twice as
-     densely below L*20 where layering lives. A faint cool tint matches the
-     ink. Value carries depth and hierarchy; color is reserved for state. */
+/* The grey ramp: 20 steps, even in CIELAB lightness, packed twice as
+   densely near the ground where layering lives; a faint cool tint matches
+   the ink. g00 is the ground's end (the void), g19 the ink's (paper, the
+   strongest mark). State: a hue per family, and its intensity is the
+   phase. Full strength is the action itself; the pale (the hue, more
+   transparent) is the phase before or after it. Every phase also has a
+   shape, so no state rests on color alone (README). */
+/* ---- begin generated: design/gen-tokens.mjs from design/scheme-rules.js; edit the rules, then `make tokens` ---- */
+/* The schemes: the ramp and the state hues at full strength. Dark is the
+   default; light mirrors the ramp in L* and moves a hue toward the ink
+   only where a cell needs 3:1. Pages without data-scheme follow the OS. */
+:root, [data-scheme="dark"] {
+  color-scheme: dark;
   --g00: #020505; /* void: the room beyond the screen */
   --g01: #06090a; /* deep: wall background, off-sheet margins */
   --g02: #0b0d0e; /* field: the sheet */
@@ -33,28 +42,91 @@
   --g16: #7f8282; /* quiet values, pencil numbers */
   --g17: #999c9c; /* values */
   --g18: #b7b9b9; /* ink: primary labels and traces */
-  --g19: #dbdddd; /* paper: the brightest mark, selection */
+  --g19: #dbdddd; /* paper: the strongest mark, selection */
+  --done: #3dc86a; /* committed: folded into the output and verified */
+  --run: #4b93ff; /* rendering now, at the top edge of the green */
+  --temp: #ff9433; /* temporary error the farm is handling: a retry running */
+  --fail: #ee4136; /* needs a person: failed after retries, stuck, approval, blocked */
+  --risk: #b269a3; /* deadline: will miss (hatched), missed (solid) */
+  --done-text: #3dc86a; /* the hue set as text: 4.5:1 on every text surface */
+  --run-text: #4b93ff;
+  --temp-text: #ff9433;
+  --fail-text: #ee4136;
+  --risk-text: #b269a3;
+}
+[data-scheme="light"] {
+  color-scheme: light;
+  --g00: #fafcfc;
+  --g01: #f6f9fa;
+  --g02: #f3f5f6;
+  --g03: #eff1f1;
+  --g04: #ebeeef;
+  --g05: #e8e9eb;
+  --g06: #e1e4e4;
+  --g07: #dde0e0;
+  --g08: #d8dada;
+  --g09: #d1d4d4;
+  --g10: #c9cccc;
+  --g11: #c0c3c3;
+  --g12: #b5b8b8;
+  --g13: #a8aaaa;
+  --g14: #97999a;
+  --g15: #828484;
+  --g16: #666969;
+  --g17: #525555;
+  --g18: #3a3c3c;
+  --g19: #1e2020;
+  --done: #009e48;
+  --run: #3f87f2;
+  --temp: #d07000;
+  --fail: #ee4136;
+  --risk: #b269a3;
+  --done-text: #007a36;
+  --run-text: #1c66ce;
+  --temp-text: #a15500;
+  --fail-text: #cf1b18;
+  --risk-text: #975089;
+}
+@media (prefers-color-scheme: light) {
+  :root:not([data-scheme]) {
+    color-scheme: light;
+    --g00: #fafcfc;
+    --g01: #f6f9fa;
+    --g02: #f3f5f6;
+    --g03: #eff1f1;
+    --g04: #ebeeef;
+    --g05: #e8e9eb;
+    --g06: #e1e4e4;
+    --g07: #dde0e0;
+    --g08: #d8dada;
+    --g09: #d1d4d4;
+    --g10: #c9cccc;
+    --g11: #c0c3c3;
+    --g12: #b5b8b8;
+    --g13: #a8aaaa;
+    --g14: #97999a;
+    --g15: #828484;
+    --g16: #666969;
+    --g17: #525555;
+    --g18: #3a3c3c;
+    --g19: #1e2020;
+    --done: #009e48;
+    --run: #3f87f2;
+    --temp: #d07000;
+    --fail: #ee4136;
+    --risk: #b269a3;
+    --done-text: #007a36;
+    --run-text: #1c66ce;
+    --temp-text: #a15500;
+    --fail-text: #cf1b18;
+    --risk-text: #975089;
+  }
+}
 
-  /* State: a hue per family, and its intensity is the phase. Full
-     strength is the action itself; the pale (a dim tint: OKLCH chroma
-     x0.55, lightness x0.62) is the phase before or after it. Every phase
-     also has a shape, so no state rests on color alone (README). */
-  --done: #3dc86a;        /* committed: folded into the output and verified */
-  --done-pale: #276639;   /* done, output still moving: capture, upload, verify (egress) */
-  --run: #4b93ff;         /* rendering now, at the top edge of the green */
-  --run-pale: #294b80;    /* preflight: staging inputs, cache fetch, image, license */
-  --temp: #ff9433;        /* temporary error the farm is handling: a retry running */
-  --temp-pale: #824e22;   /* backoff: a retry scheduled */
-  --fail: #ee4136;        /* needs a person: failed after retries, stuck, approval, blocked */
-  --fail-pale: #77251e;   /* acknowledged or assigned */
-  --risk: #b269a3;        /* deadline: will miss (hatched), missed (solid) */
-  --risk-pale: #593652;   /* deadline: at risk, projected late (dashed) */
-  /* retired names, kept as aliases for older views and lenses */
-  --done-settled: var(--done);
-  --run-body: var(--run-pale);
-  --temp-body: var(--temp-pale);
-
-  /* Roles */
+/* Roles and semantic tokens, in every scheme (and on any element that sets
+   data-scheme, so a page can show both). Value carries depth and
+   hierarchy; color is reserved for state. */
+:root, [data-scheme] {
   --void: var(--g00);
   --deep: var(--g01);
   --field: var(--g02);
@@ -71,7 +143,24 @@
   --ink-4: var(--g14);
   --pencil: var(--g16);
   --paper: var(--g19);
+  --ground: var(--field);   /* what a pale is transparent over */
+  --line: var(--neat);
+  /* A pale is its state hue, more transparent: the same state with
+     mitigating context worth showing (README). */
+  --done-pale: color-mix(in srgb, var(--done) 48%, var(--ground));       /* done, output still moving: capture, upload, verify (egress) */
+  --run-pale: color-mix(in srgb, var(--run) 48%, var(--ground));         /* preflight: staging inputs, cache fetch, image, license */
+  --temp-pale: color-mix(in srgb, var(--temp) 48%, var(--ground));       /* backoff: a retry scheduled */
+  --fail-pale: color-mix(in srgb, var(--fail) 48%, var(--ground));       /* acknowledged or assigned, or accepted */
+  --risk-pale: color-mix(in srgb, var(--risk) 48%, var(--ground));       /* deadline: at risk, projected late (dashed) */
+  /* retired names, kept as aliases for older views and lenses */
+  --done-settled: var(--done);
+  --run-body: var(--run-pale);
+  --temp-body: var(--temp-pale);
+  --note-tint: color-mix(in srgb, #8755c0 15%, var(--void));   /* the callout plates' violet */
+}
+/* ---- end generated ---- */
 
+:root {
   /* Type */
   --sans: "IBM Plex Sans Condensed", system-ui, sans-serif;
   --mono: "IBM Plex Mono", ui-monospace, monospace;

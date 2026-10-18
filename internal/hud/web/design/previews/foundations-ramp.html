@@ -2,6 +2,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>Grey ramp</title>
 <link rel="stylesheet" href="_preview.css">
+<script type="module">import { initScheme } from "../scheme.js"; initScheme();</script>
 <style>
   .ramp { display: grid; grid-template-columns: repeat(20, 1fr); gap: 2px; }
   .ramp div { height: 150px; padding: 8px 6px; display: flex; flex-direction: column; justify-content: flex-end; font: 400 9.5px/1.3 var(--mono); }
@@ -9,7 +10,7 @@
   .layers div { flex: 1; display: flex; align-items: flex-end; padding: 10px; font: 400 10px/1.3 var(--mono); color: var(--ink-3); }
 </style></head>
 <body>
-<div class="pv-h"><h1>Grey ramp</h1><p class="dim">Twenty steps from the room's black to paper, even in CIELAB lightness but packed twice as densely below L*20, where layering lives. Value carries depth and hierarchy: the farther back, the darker. Color is reserved for state.</p></div>
+<div class="pv-h"><h1>Grey ramp</h1><p class="dim">Twenty steps from the ground (the room beyond the sheet) to the ink, even in CIELAB lightness but packed twice as densely near the ground, where layering lives. The light scheme mirrors the dark one in L*. Value carries depth and hierarchy: the farther back, the closer to the ground. Color is reserved for state.</p></div>
 <div class="ramp" id="ramp"></div>
 <div class="layers">
   <div style="background:var(--g00)">g00 void<br>beyond the sheet</div>
@@ -19,13 +20,18 @@
   <div style="background:var(--g04)">g04 plate<br>the collar rises above it</div>
   <div style="background:var(--g05)">g05 raised<br>a container block, hover</div>
 </div>
-<script>
+<script type="module">
+  import { hex2lab } from '../color.js';
+  import { tok } from '../components/core.js';
   const roles = ['void', 'deep', 'field', 'well', 'plate', 'raised', 'rule 0', 'rule 1', 'rule 2', 'wait', 'neatline', 'ghost', 'uneval', 'faint', 'axis', 'dim', 'pencil', 'values', 'ink', 'paper'];
-  const L = [1.2, 2.4, 3.6, 4.9, 6.3, 7.8, 9.4, 11.2, 13.2, 15.5, 18.2, 21.5, 25.5, 30.5, 37, 45, 54, 64, 75, 88];
-  const cs = getComputedStyle(document.documentElement);
-  document.getElementById('ramp').innerHTML = roles.map((r, i) => {
-    const n = 'g' + String(i).padStart(2, '0');
-    return `<div style="background:var(--${n});color:${i < 13 ? 'var(--g17)' : 'var(--g01)'}">${n}<br>${cs.getPropertyValue('--' + n).trim()}<br>L*${L[i]}<br>${r}</div>`;
-  }).join('');
+  const draw = () => {
+    const g = tok(true).g;
+    document.getElementById('ramp').innerHTML = roles.map((r, i) => {
+      const n = 'g' + String(i).padStart(2, '0');
+      return `<div style="background:var(--${n});color:${i < 13 ? 'var(--g17)' : 'var(--g01)'}">${n}<br>${g[i]}<br>L*${hex2lab(g[i])[0].toFixed(1)}<br>${r}</div>`;
+    }).join('');
+  };
+  draw();
+  window.addEventListener('c4:scheme', draw);
 </script>
 </body></html>

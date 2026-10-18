@@ -3,6 +3,7 @@
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
 import { get, objectURL, staticMode } from '../api.js';
+import { tok } from '../../design/components/core.js';
 
 // costStrip: measured frame times as bars, interpolated estimates as a band
 // with error bars, heavy regions marked.
@@ -22,7 +23,7 @@ export function costStrip(job) {
   let lo = [];
   let hi = [];
   const flush = () => {
-    if (lo.length > 1) band.push(s('polygon', { points: [...hi, ...lo.reverse()].join(' '), fill: '#4a4a4a' }));
+    if (lo.length > 1) band.push(s('polygon', { points: [...hi, ...lo.reverse()].join(' '), fill: 'var(--g13)' }));
     lo = [];
     hi = [];
   };
@@ -70,7 +71,7 @@ export function costStrip(job) {
       h('div', { class: 'tip', hidden: true, 'data-costtip': '1' })),
     h('div', { class: 'legend' },
       h('span', null, h('i', { style: { background: 'var(--ink-2)' } }), 'measured'),
-      h('span', null, h('i', { style: { background: '#4a4a4a', borderTop: '1px dashed var(--ink-3)' } }), 'estimate, with its error band'),
+      h('span', null, h('i', { style: { background: 'var(--g13)', borderTop: '1px dashed var(--ink-3)' } }), 'estimate, with its error band'),
       heavy.length ? h('span', null, h('i', { style: { background: 'var(--ink-2)', height: '3px' } }), 'heavy region, over 3× the median') : null));
 }
 
@@ -235,10 +236,12 @@ export class Player {
     if (cv.width !== Math.round(W * dpr)) { cv.width = Math.round(W * dpr); cv.height = Math.round(H * dpr); }
     const g = cv.getContext('2d');
     g.setTransform(dpr, 0, 0, dpr, 0, 0);
-    g.fillStyle = '#000';
-    g.fillRect(0, 0, W, H);
     const cur = this.frames[this.pos];
     const sh = this.shown(this.pos);
+    // a frame plays on black, as rendered; the empty player is a well
+    const T = tok();
+    g.fillStyle = sh ? '#000' : T.well;
+    g.fillRect(0, 0, W, H);
     if (sh) {
       const im = this.imgs.get(sh.url);
       if (im && im.complete && im.naturalWidth) {
@@ -246,7 +249,7 @@ export class Player {
         g.drawImage(im, 0, 0, W, H);
       }
     } else {
-      g.fillStyle = '#7f7f7f';
+      g.fillStyle = T.ink3;
       g.font = "13px 'IBM Plex Sans Condensed'";
       g.textAlign = 'center';
       g.fillText('No frames rendered yet', W / 2, H / 2);

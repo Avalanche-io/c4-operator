@@ -313,7 +313,7 @@ export function siteScaleSVG(snap, g, o = {}) {
       if (n.state === 'disabled') cells += `<line x1="${x}" x2="${x + perRow * step - gp}" y1="${yy + (rows * step) / 2}" y2="${yy + (rows * step) / 2}" stroke="${T.g[15]}"/>`;
       const bw = Math.min(n.slots, perRow) * step - gp, bh = rows * step - gp;
       if (n.suspect) cells += `<rect x="${x - 2.5}" y="${yy - 2.5}" width="${bw + 5}" height="${bh + 5}" fill="none" stroke="${T.temp}" stroke-width="1.5"/>`;
-      if (n.failuresLastHour) cells += `<text x="${x + bw + 6}" y="${yy + c}" fill="${T.fail}" font-size="8.5" font-family='${T.mono}'>${n.failuresLastHour}×</text>`;
+      if (n.failuresLastHour) cells += `<text x="${x + bw + 6}" y="${yy + c}" fill="${T.failText}" font-size="8.5" font-family='${T.mono}'>${n.failuresLastHour}×</text>`;
       s += `<g data-tip="${esc(nodeTip(n))}"><rect x="${x - 3}" y="${yy - 3}" width="${bw + 30}" height="${bh + 6}" fill="transparent"/>${cells}</g>`;
       yy += bh + 7;
     }

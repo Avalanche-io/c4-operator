@@ -99,19 +99,59 @@ const at = (iso) => (typeof iso === 'number' ? iso : ms(iso));
 
 function hm(d) { return `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`; }
 
+// ------------------------------------------------------------ display options
+
+// The clock is 24-hour or 12-hour: the viewer's preference, "auto" from the
+// browser's locale, or ?clock=24 / ?clock=12 on the link (captures pin
+// 24). The UTC complication can be turned off (?utc=0). Machine forms
+// (inputValue, fromInput) and the UTC complication itself stay 24-hour.
+function linkParam(k) {
+  try { return new URLSearchParams(globalThis.location ? globalThis.location.search : '').get(k); } catch { return null; }
+}
+function localeHour12() {
+  try {
+    const hc = new Intl.DateTimeFormat(undefined, { hour: 'numeric' }).resolvedOptions().hourCycle;
+    return hc === 'h11' || hc === 'h12';
+  } catch { return false; }
+}
+let hour12 = false, showUTC = true;
+// setClockStyle: 'auto', '24' or '12'; the link's ?clock= wins.
+export function setClockStyle(pref = 'auto') {
+  const v = linkParam('clock') || pref;
+  hour12 = v === '12' ? true : v === '24' ? false : localeHour12();
+  return hour12 ? '12' : '24';
+}
+// setShowUTC: whether the UTC complication shows; the link's ?utc=0|1 wins.
+export function setShowUTC(on = true) {
+  const v = linkParam('utc');
+  showUTC = v === '0' ? false : v === '1' ? true : !!on;
+  return showUTC;
+}
+export const clockStyle = () => (hour12 ? '12' : '24');
+setClockStyle();
+setShowUTC();
+
+// shown: hours and minutes as the viewer reads them: 14:20 or 2:20 PM
+function shown(d, sec = false) {
+  const s = sec ? ':' + p2(d.getUTCSeconds()) : '';
+  if (!hour12) return `${hm(d)}${s}`;
+  const h = d.getUTCHours();
+  return `${h % 12 || 12}:${p2(d.getUTCMinutes())}${s} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
 // clock: 14:20, or Thu 14:20 with the day, in the viewer's zone.
 export function clock(iso, withDay = true) {
   const t = at(iso);
   if (!Number.isFinite(t)) return '';
   const d = wall(t);
-  return withDay ? `${DAYS[d.getUTCDay()]} ${hm(d)}` : hm(d);
+  return withDay ? `${DAYS[d.getUTCDay()]} ${shown(d)}` : shown(d);
 }
 
 export function clockSec(iso) {
   const t = at(iso);
   if (!Number.isFinite(t)) return '';
   const d = wall(t);
-  return `${hm(d)}:${p2(d.getUTCSeconds())}`;
+  return shown(d, true);
 }
 
 export function dateLine(iso) {
@@ -147,7 +187,7 @@ export function offsetLabel(iso) {
 // viewer's zone is UTC at that instant, where it would only repeat itself.
 export function utc(iso, sec = false) {
   const t = at(iso);
-  if (!Number.isFinite(t) || offsetAt(t) === 0) return '';
+  if (!showUTC || !Number.isFinite(t) || offsetAt(t) === 0) return '';
   const d = new Date(t);
   return `${hm(d)}${sec ? ':' + p2(d.getUTCSeconds()) : ''}Z`;
 }
@@ -158,7 +198,7 @@ export function siteClock(iso, siteZone, withDay = false) {
   const t = at(iso);
   if (!Number.isFinite(t) || !siteZone || !validZone(siteZone)) return '';
   const d = wall(t, siteZone);
-  return `${withDay ? DAYS[d.getUTCDay()] + ' ' : ''}${hm(d)} ${abbrAt(t, siteZone)}`;
+  return `${withDay ? DAYS[d.getUTCDay()] + ' ' : ''}${shown(d)} ${abbrAt(t, siteZone)}`;
 }
 
 // inputValue is a time as a datetime-local field holds it, in the viewer's

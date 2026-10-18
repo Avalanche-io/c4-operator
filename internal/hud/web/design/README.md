@@ -46,7 +46,17 @@ even in CIELAB lightness, packed densely below L*20 where layering lives),
 the state colors, type (IBM Plex Sans Condensed, IBM Plex Mono), line
 weights, spacing (a 4 px step; the collar and gutter) and motion
 (`--fill-ms`, `--collapse-ms`, zero under reduced motion). The wall scale
-(`[data-scale="wall"]`) doubles lines and type and drops three dark steps.
+(`[data-scale="wall"]`) doubles lines and type and drops three steps
+toward the ground.
+
+The colors are generated: `scheme-rules.js` holds the anchors (the
+approved dark ramp and hues) and the rules, `make tokens` writes them into
+`tokens.css` (and the palette page's data), and `web/test/contrast.test.mjs`
+checks the result against WCAG and the ΔE rules. Edit the rules, not the
+generated block. `scheme.js` chooses the scheme: `?scheme=light|dark` in
+the URL, else the stored preference, else the system's; a change fires
+`c4:scheme` and the canvases redraw. Captures name the scheme, since
+headless Chrome prefers light.
 
 **The rule (Joshua).** A hue is a state family. A pale (dim) tint means
 that state is true, but there is mitigating context worth showing. Pale
@@ -56,11 +66,57 @@ orange: a retry is scheduled, nothing is failing right now. Pale red: a
 failure a person has acknowledged, or accepted (bad frames accepted so the
 job is not blocked), so nobody has to act now. Pale orchid: at risk, not late
 yet. A new edge case takes the pale of its family's hue, never a new hue.
-The pale is a dim tint (OKLCH chroma ×0.55, lightness ×0.62), and every
-state also has a shape, so none rests on color alone. Approved by Joshua (see
+Every state also has a shape, so none rests on color alone. Approved by
+Joshua (see
 [docs/intro/palette/state-colors.html](../../docs/intro/palette/state-colors.html)).
 The table lists today's cases; they are examples of the rule, not its
 definition.
+
+**A pale is more transparent, not darker.** It is the state's hue at 48%
+opacity over the ground (`color-mix(in srgb, var(--done) 48%,
+var(--ground))`, exactly what a 48% alpha composites to), so the same rule
+reads on black and on white. On the dark field it lands within ΔE 1.1 of
+the dim tints Joshua approved (#276639, #294b80, #824e22, #77251e, #593652).
+
+**The translation rule: one set of rules, two schemes** (light: *pending
+Joshua's approval*). The light scheme inverts fills and lines: white
+ground, black ink, the same hues.
+
+- *Ground, ink and lines.* The light ramp mirrors the dark one in CIELAB
+  lightness (L* becomes 100 − L*, the cool tint kept): `--g00` becomes the
+  white ground, `--g19` the black ink, and every pair of steps keeps its
+  perceptual distance. So "a step up the ramp" means "farther from the
+  ground", never "lighter": emphasis, rules and neatlines translate
+  without edits. A step that carries a text role moves toward the ink only
+  as far as its floor needs (in light, the pencil step moves 1.6 L*).
+- *Hues.* A hue keeps its OKLCH hue and chroma in both schemes. Its
+  lightness moves toward the ink only where a cell needs 3:1 (WCAG
+  non-text) against the surfaces it sits on: on white, green, blue and
+  orange darken; red and orchid already pass. A hue set as text uses its
+  text form (`--done-text` and so on), moved the same way to 4.5:1. In the
+  dark scheme every hue and text form is the approved one, unchanged.
+- *Pales.* The opacity rule above, over the scheme's own ground.
+- *Shadows, scrims, glows.* Made from the void at an opacity, so on white a
+  card lifts on a white halo and a scrim whitens what is behind it; a glow
+  (the wall's sweep) is the paper mark at an opacity.
+- *Images* stay as rendered: a frame in the preview plays on black in both.
+
+Measured (`node web/design/gen-tokens.mjs --report`): body text 4.5:1 and
+secondary labels 3:1 on every surface, every cell 3:1, in both schemes. In
+light, one opacity cannot hold every pale ΔE 18 from its full strength
+under every vision (2.11); the worst are blue under tritanopia (14.4) and
+green (15.2), and the test holds light to ΔE 14.
+
+**Verification is not a state.** Some facts are verification metadata, not
+state: a unit's derivation class (exact, validated, volatile: how its output
+can be checked, see c4 `design/derivation-records.md`; "class is
+verification, never worth"), a record's signer, whether a record verifies.
+They never take a state hue and never render as a quality tier: no green
+for exact, nothing ranked. Show them as a neutral label or a seal in the job
+and provenance views, in ink, with a glossary entry. The planner's reuse and
+recompute decisions are shown as the choice it made ("reused output, exact
+verified", "recomputed locally"), never as good or bad. Red stays for a
+record that does not verify: that one needs a person.
 
 | family          | phase          | token           | shape                                                      |
 | --------------- | -------------- | --------------- | ---------------------------------------------------------- |

@@ -2,6 +2,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><title>STACK: a shot's sheet</title>
 <link rel="stylesheet" href="_preview.css">
+<script type="module">import { initScheme } from "../scheme.js"; initScheme();</script>
 </head>
 <body>
 <div class="pv-h"><h1>STACK</h1><p class="dim">The shot's work tree as merged cells, one row per frame, in the order work flows: the shot, its batches, upstream work, render, comp, transcode, delivery. Containment is adjacency; no line runs from a container to what it contains. By default a batch opens only where something needs attention (a failure, a retry, a heavy region); the rest are aggregate blocks. Hover any block; click a batch or the shot to collapse or open it; the fold mark on a stage folds everything upstream into each frame. Live: fills tween, running edges breathe, a finished unit glows and settles.</p></div>

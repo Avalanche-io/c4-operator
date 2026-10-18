@@ -49,12 +49,12 @@ a:hover { text-decoration: underline; text-decoration-color: var(--g13); text-un
 .dimmer { color: var(--ink-4); }
 .pencil { color: var(--pencil); text-decoration: underline dashed var(--g12); text-underline-offset: 3px; }
 .ink { color: var(--paper); }
-.t-run { color: var(--run); }
-.t-temp, .t-yellow { color: var(--temp); }
-.t-fail, .t-red { color: var(--fail); }
-.t-risk { color: var(--risk); }
-.pencil.t-risk { text-decoration-color: rgba(178, 105, 163, .6); }
-.t-done, .t-green { color: var(--done); }
+.t-run { color: var(--run-text); }
+.t-temp, .t-yellow { color: var(--temp-text); }
+.t-fail, .t-red { color: var(--fail-text); }
+.t-risk { color: var(--risk-text); }
+.pencil.t-risk { text-decoration-color: color-mix(in srgb, var(--risk) 60%, transparent); }
+.t-done, .t-green { color: var(--done-text); }
 .t-magenta, .t-blue { color: var(--g16); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 h1, h2, h3 { margin: 0; font-family: var(--sans); color: var(--paper); }
@@ -108,7 +108,7 @@ nav.views a[aria-current="page"] { color: var(--paper); border-bottom-color: var
 
 main { display: block; padding: 0; min-height: calc(100vh - 44px); }
 main:focus { outline: none; }
-.err { padding: 24px; color: var(--fail); font-family: var(--mono); }
+.err { padding: 24px; color: var(--fail-text); font-family: var(--mono); }
 
 /* ---- the sheet: neatline, collar, edges ----------------------------- */
 .sheet { position: relative; margin: 0; padding: var(--collar); background: var(--field); min-height: calc(100vh - 44px); }
@@ -121,7 +121,7 @@ main:focus { outline: none; }
 .titleblock { margin-left: auto; display: flex; gap: 0; border: var(--hair) solid var(--rule-2); background: var(--plate); }
 .titleblock .cell { border-right: var(--hair) solid var(--rule-1); }
 .titleblock .cell:last-child { border-right: 0; }
-.titleblock .val.late { color: var(--risk); }
+.titleblock .val.late { color: var(--risk-text); }
 .edge { position: absolute; font: 400 var(--t-micro)/1.2 var(--mono); color: var(--ink-4); letter-spacing: .06em; white-space: nowrap; }
 .edge a { color: var(--ink-3); }
 .edge a:hover { color: var(--paper); }
@@ -139,7 +139,7 @@ main:focus { outline: none; }
 .stack { position: relative; }
 .stack canvas { display: block; }
 .stack canvas:focus-visible { outline-offset: 3px; }
-.tipcard { position: absolute; z-index: 30; pointer-events: none; width: 250px; background: rgba(2,5,5,.96); border: var(--hair) solid var(--paper); padding: 8px 10px; font: 400 10.5px/1.5 var(--mono); color: var(--ink); }
+.tipcard { position: absolute; z-index: 30; pointer-events: none; width: 250px; background: color-mix(in srgb, var(--void) 96%, transparent); border: var(--hair) solid var(--paper); padding: 8px 10px; font: 400 10.5px/1.5 var(--mono); color: var(--ink); }
 .tipcard b { font: 600 9.5px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--paper); }
 .tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 8px 12px; border-bottom: var(--hair) solid var(--rule-1); font-size: var(--t-small); }
 .tools .lab { margin-right: 4px; }
@@ -180,11 +180,11 @@ main:focus { outline: none; }
 input[type="datetime-local"] { background: var(--well); color: var(--ink); border: var(--hair) solid var(--g13); font: 400 11px var(--mono); padding: 6px; color-scheme: dark; }
 .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chip { display: inline-block; font: 600 9px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; padding: 3px 5px; border: var(--hair) solid var(--g13); color: var(--ink-2); }
-.chip.red { border-color: var(--fail); color: var(--fail); }
-.chip.risk { border-color: var(--risk); color: var(--risk); }
-.chip.temp, .chip.flag { border-color: var(--temp); color: var(--temp); }
-.chip.run, .chip.blue { border-color: var(--run); color: var(--run); }
-.chip.green { border-color: var(--done); color: var(--done); }
+.chip.red { border-color: var(--fail); color: var(--fail-text); }
+.chip.risk { border-color: var(--risk); color: var(--risk-text); }
+.chip.temp, .chip.flag { border-color: var(--temp); color: var(--temp-text); }
+.chip.run, .chip.blue { border-color: var(--run); color: var(--run-text); }
+.chip.green { border-color: var(--done); color: var(--done-text); }
 .chip.mag { border-color: var(--g16); color: var(--g16); }
 .warn { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border-left: 2px solid var(--g15); background: var(--plate); }
 .warn.red { border-left-color: var(--fail); }
@@ -193,11 +193,11 @@ input[type="datetime-local"] { background: var(--well); color: var(--ink); borde
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend svg { flex: none; }
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 50; background: var(--plate-2); border: var(--hair) solid var(--g15); padding: 10px 14px; font: 400 12px var(--mono); max-width: 520px; }
-.toast.err { border-color: var(--fail); color: var(--fail); }
+.toast.err { border-color: var(--fail); color: var(--fail-text); }
 
 /* stage-1 view classes still used by lenses and older views */
 .well { background: var(--well); outline: var(--hair) solid var(--rule-2); }
-.tip { position: absolute; pointer-events: none; z-index: 30; background: rgba(2,5,5,.96); border: var(--hair) solid var(--paper); padding: 8px 10px; font: 400 10.5px/1.5 var(--mono); }
+.tip { position: absolute; pointer-events: none; z-index: 30; background: color-mix(in srgb, var(--void) 96%, transparent); border: var(--hair) solid var(--paper); padding: 8px 10px; font: 400 10.5px/1.5 var(--mono); }
 .jbody { display: grid; gap: var(--gutter); }
 
 /* ---- phone: one column, one decision per screen ---------------------- */
@@ -249,9 +249,40 @@ html[data-level="2"] .qhead > :nth-child(4), html[data-level="2"] .qhead > :nth-
   grid-template-columns: 22px 30px minmax(240px, 1fr) 230px 210px 150px; }
 .sq-row.head { min-height: 0; padding: 8px 0 6px; border-bottom: var(--hair) solid var(--rule-2); }
 .sq-row .jn { font: 500 15px/1.2 var(--sans); color: var(--paper); }
-.sq-row.late .jn { color: var(--risk); }
+.sq-row.late .jn { color: var(--risk-text); }
 .sq-row .stack2 { display: flex; flex-direction: column; gap: 5px; }
 .sq-row .big { font: 300 21px/1 var(--mono); color: var(--paper); }
 .sq-row .bigs { font: 400 20px/1 var(--sans); color: var(--paper); }
 .sq-row .sub { font: 400 11px/1.2 var(--mono); color: var(--ink-3); }
 .sq-row.fin .jn, .sq-row.fin .big, .sq-row.fin .bigs { color: var(--ink-3); }
+
+/* ---- preferences (js/prefs.js, the sheet in app.js) ------------------- */
+.prefs-btn { background: none; border: var(--hair) solid var(--rule-2); color: var(--ink-2); font: 500 var(--t-tiny) var(--sans);
+  letter-spacing: var(--label-track); text-transform: uppercase; padding: 3px 8px; cursor: pointer; }
+.prefs-btn:hover, .prefs-btn[aria-expanded="true"] { color: var(--paper); border-color: var(--ink-3); }
+.pf-sheet { position: fixed; inset: 0; z-index: 60; background: color-mix(in oklab, var(--void) 55%, transparent); display: flex; justify-content: flex-end; }
+.pf-sheet[hidden] { display: none; }
+.pf-in { width: min(520px, 100vw); height: 100%; overflow: auto; background: var(--plate); border-left: var(--hair) solid var(--neat);
+  padding: var(--s5) var(--s5) var(--s6); display: flex; flex-direction: column; gap: var(--s5); }
+.pf-hd { display: flex; align-items: baseline; gap: var(--s3); }
+.pf-hd .lab { font-size: var(--t-small); color: var(--paper); }
+.pf-hd .dim { flex: 1; font-size: var(--t-tiny); }
+.pf-group { display: flex; flex-direction: column; gap: var(--s4); border-top: var(--hair) solid var(--rule-2); padding-top: var(--s4); }
+.pf-group h3 { margin: 0; font-size: var(--t-tiny); color: var(--ink-3); }
+.pf-row { display: grid; grid-template-columns: 140px 1fr; gap: var(--s3); align-items: start; }
+.pf-lab { color: var(--ink); font-size: var(--t-body); padding-top: 3px; }
+.pf-in2 { display: flex; flex-direction: column; gap: 6px; }
+.pf-in2 select { background: var(--well); color: var(--ink); border: var(--hair) solid var(--rule-2); font: 400 var(--t-body) var(--sans); padding: 4px 6px; max-width: 100%; }
+.pf-in2 input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--run); margin: 3px 0 0; }
+.pf-help { color: var(--ink-3); font-size: var(--t-small); line-height: 1.4; }
+.pf-note { color: var(--pencil); font-size: var(--t-small); }
+.pf-levels { display: flex; flex-wrap: wrap; gap: 4px; }
+.pf-levels .btn.on { color: var(--paper); border-color: var(--paper); }
+.pf-ft { border-top: var(--hair) solid var(--rule-2); padding-top: var(--s4); }
+
+/* ---- a person: needs you (red, white flag) or taken (pale red, a seal) */
+.needs, .taken { display: inline-flex; align-items: center; gap: 5px; font: 500 var(--t-tiny) var(--sans); letter-spacing: var(--label-track); text-transform: uppercase; margin-left: 6px; }
+.needs { color: var(--fail-text); }
+.needs .flag { width: 9px; height: 9px; background: linear-gradient(225deg, var(--paper) 0 32%, var(--fail) 32%); }
+.taken { color: var(--ink-2); }
+.taken .seal { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--fail-pale); background: var(--fail-pale); }

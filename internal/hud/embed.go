@@ -9,5 +9,5 @@ import "embed"
 // (design/: tokens, components, previews). The previews' fixtures stay out
 // of the binary; served by the manager, the previews read the live API.
 //
-//go:embed web/index.html web/css web/js web/fonts web/design/tokens.css web/design/components web/design/previews web/design/README.md
+//go:embed web/index.html web/css web/js web/fonts web/design
 var Web embed.FS

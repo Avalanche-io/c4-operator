@@ -35,7 +35,7 @@
 .wg .big { font: 300 60px/.86 var(--sans); color: var(--paper); letter-spacing: -.02em; }
 .wg .big small { font: 400 17px var(--mono); color: var(--ink-3); letter-spacing: 0; margin-left: 2px; }
 .wg .runs { text-align: right; padding-bottom: 3px; }
-.wg .runs .v { font: 500 19px/1 var(--sans); color: var(--run); white-space: nowrap; }
+.wg .runs .v { font: 500 19px/1 var(--sans); color: var(--run-text); white-space: nowrap; }
 .wg .runs .v.idle { color: var(--ink-4); }
 .wg i.par { display: inline-block; width: .42em; height: .7em; border-left: 2px solid currentColor; border-right: 2px solid currentColor; margin-right: .22em; vertical-align: -.02em; }
 .wg .r2 { display: flex; align-items: baseline; gap: 8px; margin-top: 10px; white-space: nowrap; }
@@ -45,7 +45,7 @@
 .wg .r3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 9px; font: 400 11px/1 var(--mono); white-space: nowrap; }
 .wg .r3.small { margin-top: 7px; font-size: 10px; }
 .wg .ink { color: var(--ink); }
-.wg .rpen, .wg .pencil.rpen { color: var(--risk); text-decoration: underline dashed var(--risk); text-underline-offset: 3px; }
+.wg .rpen, .wg .pencil.rpen { color: var(--risk-text); text-decoration: underline dashed var(--risk); text-underline-offset: 3px; }
 
 .wg-strip { padding: 8px 9px 6px; font: 400 var(--t-tiny)/1.2 var(--mono); }
 .wg-strip .h { display: flex; justify-content: space-between; gap: 8px; font: 400 8px/1 var(--mono); color: var(--ink-4); margin-bottom: 4px; white-space: nowrap; }

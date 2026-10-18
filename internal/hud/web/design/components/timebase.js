@@ -319,7 +319,7 @@ export class TimeBase {
         const lx = xx + 7 * k + lw > x2 ? xx - 7 * k - lw : xx + 7 * k, ly = y0 + Math.min(laneH - 9 * k, 27 * k);
         g.font = mono(10.5);
         g.fillText(lab, lx, ly);
-        if (z) { g.font = mono(8.5); g.fillStyle = late || passed ? T.risk : T.g[14]; g.globalAlpha = late || passed ? 0.7 : 1; g.fillText(z, lx + lw0 + 6 * k, ly); g.globalAlpha = 1; }
+        if (z) { g.font = mono(8.5); g.fillStyle = late || passed ? T.riskText : T.g[14]; g.globalAlpha = late || passed ? 0.7 : 1; g.fillText(z, lx + lw0 + 6 * k, ly); g.globalAlpha = 1; }
       } else if (c.deadline) {
         // beyond the horizon: an arrow at the edge names it
         const ym = y0 + laneH / 2;
@@ -337,7 +337,7 @@ export class TimeBase {
     }
     // the sweep: a bright now line with a faint phosphor wash behind it
     const grad = g.createLinearGradient(xNow - 28 * k, 0, xNow, 0);
-    grad.addColorStop(0, 'rgba(219,221,221,0)'); grad.addColorStop(1, 'rgba(219,221,221,0.10)');
+    grad.addColorStop(0, T.paper + '00'); grad.addColorStop(1, T.paper + '1a');
     g.fillStyle = grad; g.fillRect(xNow - 28 * k, top, 28 * k, H - top - bot);
     g.fillStyle = T.paper; g.fillRect(xNow - 0.75 * k, top - 16 * k, 1.5 * k, H - top - bot + 18 * k);
     g.font = mono(13, 500); g.textAlign = 'center';

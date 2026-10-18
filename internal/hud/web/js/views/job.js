@@ -12,7 +12,7 @@ import { glance, inFlight } from '../../design/components/core.js';
 import { buildSheet } from '../../design/components/stack.js';
 import { bookList } from '../../design/components/ledger.js';
 import { lensFor } from '../lenses/index.js';
-import { classChip, phaseText, orderText, burstButton, failedUnits } from './common.js';
+import { classChip, phaseText, orderText, burstButton, failedUnits, personMark } from './common.js';
 
 const st = {
   key: null, details: new Map(), graph: null, book: null, lastNow: null, fetching: false,
@@ -126,7 +126,7 @@ function controls(j, k) {
 function unitCard(ctx, j) {
   if (!st.sel) return h('div', { class: 'panel', 'data-key': 'unit-hint' }, h('header', null, h('h2', null, 'Unit')),
     h('div', { class: 'body dim' }, ctx.level >= 3
-      ? 'Hover any block for what it is; select a unit for its attempts, node, log, record and output. Click a batch or the shot to collapse or open it; the fold mark on a stage folds everything upstream into each frame.'
+      ? 'Hover any block for what it is; select a unit for its attempts, node, log, record and output. Click a batch or the shot to collapse or open it; the collapse mark on a stage collapses everything upstream into each frame.'
       : 'Hover a frame for what it is; select one for its attempts, the node it ran on, its log and why it failed.'));
   const u = st.unit;
   if (!u) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body dim' }, 'Reading the unit…'));
@@ -153,7 +153,7 @@ function unitCard(ctx, j) {
       h('div', { class: 'lab', style: { margin: '10px 0 4px' } }, 'Log tail'),
       h('pre', { class: 'mono', style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-2)', background: 'var(--well)', padding: '6px', whiteSpace: 'pre-wrap', maxHeight: '120px', overflow: 'auto' } }, (u.logTail || []).join('\n') || '(no output yet)'),
       h('div', { class: 'controls', style: { marginTop: '8px' } },
-        ['failed', 'succeeded'].includes(u.state) ? h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': String(u.i) }, u.state === 'failed' ? 'Requeue unit' : 'Render again') : null,
+        ['failed', 'succeeded'].includes(u.state) ? h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': String(u.i) }, u.state === 'failed' ? 'Requeue unit' : (j.class === 'render' ? 'Render again' : 'Run again')) : null,
         node ? h('button', { class: 'btn small', 'data-action': 'blacklist', 'data-job': k, 'data-node': node }, `Avoid ${node}`) : null)));
 }
 
@@ -227,10 +227,11 @@ export default {
         h('div', null,
           h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${j.project} / `, j.shot ? `shot ${j.shot} / ` : '', j.namespace),
           h('h1', null, j.name),
-          h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 && L >= 2 ? ` · #${j.rank} in run order` : ''}`)),
+          h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 && L >= 2 ? ` · #${j.rank} in run order` : ''}`, personMark(j) ? [' ', personMark(j)] : null)),
         L >= 2 ? titleBlock(j, L) : null),
       j.estimate.message && L >= 2 ? h('div', { class: 'warn' + (j.phase === 'Failed' ? ' red' : late ? ' risk' : ''), style: { marginBottom: '12px' }, role: 'status' },
         h('span', { class: j.phase === 'Failed' ? 't-fail' : late ? 't-risk' : '' }, j.estimate.message), L >= 4 ? burstButton(j) : null) : null,
+      main.length && ownView ? h('div', { style: { marginBottom: '14px' } }, main) : null,
       h('div', { class: 'neat', style: { padding: '14px' } },
         L >= 3 ? edges(ctx, j, keys) : null,
         h('div', { class: 'layout-job' },
@@ -256,8 +257,10 @@ export default {
             L >= 2 ? controls(j, k) : null,
             st.book && st.book.entries && L >= 5 ? h('div', { class: 'panel', 'data-key': 'book' },
               h('header', null, h('h2', null, 'The book'), h('span', { class: 'dim mono', style: { fontSize: '10px' } }, 'append only · signed by whoever acted')),
-              h('div', { class: 'body' }, bookList(st.book.entries.slice(-16)))) : null))),
-      main.length ? h('div', { style: { marginTop: '14px' } }, main) : null);
+              // the book scrolls in its panel, so a long one never pushes the rest down
+              h('div', { class: 'body', style: { maxHeight: '420px', overflow: 'auto' } }, bookList(st.book.entries.slice(-16)))) : null))),
+      // a class with its own view (CI, ML) puts that view first
+      main.length && !ownView ? h('div', { style: { marginTop: '14px' } }, main) : null);
   },
 
   after(ctx, root) {

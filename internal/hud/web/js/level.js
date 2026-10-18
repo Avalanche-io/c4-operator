@@ -9,8 +9,10 @@
 //   5 Full    C4 IDs, output views, the book, cache tiers, the wall, CI and ML views
 //
 // The level comes from the link (?level=N, for this page only), else the
-// viewer's own choice (kept in the browser per user), else the role's
-// default. It is set on <html data-level> so CSS can follow it.
+// viewer's own choice (a preference, prefs.js), else the role's default. It
+// is set on <html data-level> so CSS can follow it.
+
+import * as prefs from './prefs.js';
 
 export const LEVELS = [
   { n: 0, name: 'Queue', q: 'What is running, and when will it be done?' },
@@ -33,13 +35,11 @@ export function roleDefault(viewer) {
 }
 
 const clampLevel = (n) => Math.max(0, Math.min(MAX, Math.round(n)));
-const key = (viewer) => `c4hud:level:${(viewer && viewer.user) || 'anyone'}`;
+const user = (viewer) => (viewer && viewer.user) || '';
 
 export function stored(viewer) {
-  try {
-    const v = localStorage.getItem(key(viewer));
-    return v == null ? null : clampLevel(Number(v));
-  } catch { return null; }
+  const v = prefs.get(user(viewer), 'level');
+  return v == null ? null : clampLevel(v);
 }
 
 export function fromLink() {
@@ -57,7 +57,7 @@ export function current(viewer) {
 // choose makes n the viewer's level, and drops a link's level from the URL
 // so the choice shows at once.
 export function choose(viewer, n) {
-  try { localStorage.setItem(key(viewer), String(clampLevel(n))); } catch { /* private mode: the link carries it */ }
+  prefs.set(user(viewer), 'level', clampLevel(n));
   const p = new URLSearchParams(location.search);
   if (p.has('level')) {
     p.delete('level');

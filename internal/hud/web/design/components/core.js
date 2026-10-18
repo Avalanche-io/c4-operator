@@ -2,28 +2,70 @@
 // aggregation, and the glance numbers every gauge reads.
 
 // tok reads the design tokens (design/tokens.css) for canvas and SVG
-// drawing. Cached; call tok(true) after a scale change.
+// drawing, every color resolved to #rrggbb (the pales are color-mix()
+// in CSS). Cached by scale and scheme; tok(true) rereads.
 let cache = null;
+const schemeNow = () => document.documentElement.dataset.scheme
+  || (typeof matchMedia === 'function' && matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
 export function tok(fresh = false) {
   const scale = document.documentElement.dataset.scale || '';
-  if (cache && !fresh && cache.scale === scale) return cache;
+  const scheme = schemeNow();
+  if (cache && !fresh && cache.scale === scale && cache.scheme === scheme) return cache;
   const cs = getComputedStyle(document.documentElement);
+  const color = resolver();
   const v = (n) => cs.getPropertyValue(n).trim();
+  const c = (n) => color(n) || v(n);
   const g = [];
-  for (let i = 0; i < 20; i++) g.push(v(`--g${String(i).padStart(2, '0')}`));
+  for (let i = 0; i < 20; i++) g.push(c(`--g${String(i).padStart(2, '0')}`));
+  const done = c('--done'), run = c('--run'), temp = c('--temp'), runPale = c('--run-pale'), tempPale = c('--temp-pale');
   cache = {
-    g, done: v('--done'), donePale: v('--done-pale'), run: v('--run'), runPale: v('--run-pale'),
-    temp: v('--temp'), tempPale: v('--temp-pale'), fail: v('--fail'), failPale: v('--fail-pale'),
-    risk: v('--risk'), riskPale: v('--risk-pale'),
+    g, done, donePale: c('--done-pale'), run, runPale,
+    temp, tempPale, fail: c('--fail'), failPale: c('--fail-pale'),
+    risk: c('--risk'), riskPale: c('--risk-pale'),
+    // each hue set as text (4.5:1); the same as the hue in the dark scheme
+    doneText: c('--done-text'), runText: c('--run-text'), tempText: c('--temp-text'), failText: c('--fail-text'), riskText: c('--risk-text'),
     // retired: a finished upstream job is the same green; a running body is no longer drawn
-    settled: v('--done'), runBody: v('--run-pale'), tempBody: v('--temp-pale'),
-    field: v('--field'), well: v('--well'), plate: v('--plate'), plate2: v('--plate-2'),
-    rule0: v('--rule-0'), rule1: v('--rule-1'), rule2: v('--rule-2'), neat: v('--neat'),
-    ink: v('--ink'), ink2: v('--ink-2'), ink3: v('--ink-3'), ink4: v('--ink-4'), pencil: v('--pencil'), paper: v('--paper'),
+    settled: done, runBody: runPale, tempBody: tempPale,
+    field: c('--field'), well: c('--well'), plate: c('--plate'), plate2: c('--plate-2'),
+    rule0: c('--rule-0'), rule1: c('--rule-1'), rule2: c('--rule-2'), neat: c('--neat'),
+    ink: c('--ink'), ink2: c('--ink-2'), ink3: c('--ink-3'), ink4: c('--ink-4'), pencil: c('--pencil'), paper: c('--paper'),
+    void: c('--void'), ground: c('--ground'),
     // single quotes, so the family lists drop into SVG attributes and canvas fonts alike
-    sans: (v('--sans') || 'IBM Plex Sans Condensed').replace(/"/g, "'"), mono: (v('--mono') || 'IBM Plex Mono').replace(/"/g, "'"), scale,
+    sans: (v('--sans') || 'IBM Plex Sans Condensed').replace(/"/g, "'"), mono: (v('--mono') || 'IBM Plex Mono').replace(/"/g, "'"), scale, scheme,
   };
+  color.done();
   return cache;
+}
+
+// resolver turns a custom property into #rrggbb in the root's cascade: a
+// probe element computes it (var() and color-mix() included), and a 1x1
+// canvas paints the computed color and reads the pixel back, so any color
+// syntax the browser computes to (rgb(), color(srgb ...), oklab()) ends as
+// the same bytes a canvas fill would draw.
+function resolver() {
+  const root = document.documentElement;
+  const el = document.createElement('i');
+  el.style.cssText = 'position:absolute;width:0;height:0;visibility:hidden';
+  root.appendChild(el);
+  let ctx = null;
+  try { const cv = document.createElement('canvas'); cv.width = cv.height = 1; ctx = cv.getContext('2d', { willReadFrequently: true }); } catch (e) { ctx = null; }
+  const hex2 = (n) => n.toString(16).padStart(2, '0');
+  const f = (name) => {
+    el.style.color = `var(${name})`;
+    const computed = getComputedStyle(el).color;
+    if (!computed) return '';
+    const m = /^rgb\((\d+), (\d+), (\d+)\)$/.exec(computed);
+    if (m) return '#' + hex2(+m[1]) + hex2(+m[2]) + hex2(+m[3]);
+    if (!ctx) return computed;
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = '#000';
+    ctx.fillStyle = computed;
+    ctx.fillRect(0, 0, 1, 1);
+    const d = ctx.getImageData(0, 0, 1, 1).data;
+    return '#' + hex2(d[0]) + hex2(d[1]) + hex2(d[2]);
+  };
+  f.done = () => el.remove();
+  return f;
 }
 
 export const reducedMotion = () =>

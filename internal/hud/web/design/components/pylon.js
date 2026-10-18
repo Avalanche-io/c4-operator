@@ -86,7 +86,7 @@ export function pylonSVG(g, o = {}) {
     const py = Math.min(y(r1), wy - wh / 2 - fs * 0.6);
     if (g.par > 0) {
       s += `<rect x="${wx}" y="${py - pf * 0.78}" width="${Math.max(1.5, pf * 0.1)}" height="${pf * 0.8}" fill="${T.run}"/><rect x="${wx + pf * 0.24}" y="${py - pf * 0.78}" width="${Math.max(1.5, pf * 0.1)}" height="${pf * 0.8}" fill="${T.run}"/>`;
-      s += `<text x="${wx + pf * 0.55}" y="${py}" fill="${T.run}" font-size="${pf}" font-family="${T.mono}">${Math.max(1, Math.round(g.par * 100))}%</text>`;
+      s += `<text x="${wx + pf * 0.55}" y="${py}" fill="${T.runText}" font-size="${pf}" font-family="${T.mono}">${Math.max(1, Math.round(g.par * 100))}%</text>`;
     }
   }
   // time tape: now at the bottom, later is up; square-root scale
@@ -110,10 +110,10 @@ export function pylonSVG(g, o = {}) {
     const dy = ty(dl);
     s += `<line x1="${tx + 1.5}" x2="${tx + 1.5}" y1="${Math.min(dy, ty(p90))}" y2="${Math.max(dy, ty(p90))}" stroke="${late ? T.risk : T.g[13]}" stroke-width="3" stroke-dasharray="${late ? '2 2' : 'none'}"/>`;
     s += `<path d="M${tx} ${dy} l${mini ? 5 : 9} -${mini ? 4 : 6} v${mini ? 8 : 12} z" fill="${late ? T.risk : T.ink}"/>`;
-    if (!mini) s += `<text x="${tx + 11}" y="${dy - 8}" fill="${late ? T.risk : T.ink}" font-size="${fs * 0.9}" font-family="${T.mono}">${f.clock(g.deadline, false)}</text>`;
+    if (!mini) s += `<text x="${tx + 11}" y="${dy - 8}" fill="${late ? T.riskText : T.ink}" font-size="${fs * 0.9}" font-family="${T.mono}">${f.clock(g.deadline, false)}</text>`;
     // the UTC complication, small, on its own line above the deadline time
-    if (!mini && f.utc(g.deadline) && dy - 8 - fs * 1.6 > 0) s += `<text x="${tx + 11}" y="${(dy - 8 - fs * 0.95).toFixed(1)}" fill="${late ? T.risk : T.g[14]}"${late ? ' fill-opacity="0.7"' : ''} font-size="${(fs * 0.68).toFixed(1)}" font-family="${T.mono}">${f.utc(g.deadline)}</text>`;
-    if (full && Number.isFinite(g.slack)) s += `<text x="${tx + 11}" y="${dy + fs * 0.9}" fill="${late ? T.risk : T.pencil}" font-size="${fs * 0.85}" font-family="${T.mono}">slack ${f.signed(g.slack)}</text>`;
+    if (!mini && f.utc(g.deadline) && dy - 8 - fs * 1.6 > 0) s += `<text x="${tx + 11}" y="${(dy - 8 - fs * 0.95).toFixed(1)}" fill="${late ? T.riskText : T.g[14]}"${late ? ' fill-opacity="0.7"' : ''} font-size="${(fs * 0.68).toFixed(1)}" font-family="${T.mono}">${f.utc(g.deadline)}</text>`;
+    if (full && Number.isFinite(g.slack)) s += `<text x="${tx + 11}" y="${dy + fs * 0.9}" fill="${late ? T.riskText : T.pencil}" font-size="${fs * 0.85}" font-family="${T.mono}">slack ${f.signed(g.slack)}</text>`;
   }
   if (!mini && g.phase !== 'Succeeded' && Number.isFinite(g.eta)) {
     s += `<text x="${tx - 18}" y="${ty(eta) + fs * 0.45}" fill="${T.ink}" font-size="${fs * (full ? 1.7 : 1.3)}" text-anchor="end" font-family="${T.sans}" font-weight="500">${f.approx(eta)}</text>`;
