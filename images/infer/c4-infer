@@ -1,0 +1,117 @@
+#!/opt/venv/bin/python3
+"""c4-infer: run a model over a range of frames, OpenEXR in and out.
+
+    c4-infer --task depth --model depth-anything-v2-small \
+        --in '/show/sm0140.%04d.exr' --out '/show/depth/sm0140.%04d.exr' --frames 1001-1004
+
+Tasks:
+  depth    relative depth, written as one float channel Z (Depth Anything V2)
+  matte    a foreground matte, written as one float channel A (BiRefNet)
+  upscale  2x super-resolution, written as RGB (Swin2SR)
+
+Frames are read with OpenImageIO; scene-linear input is shown to the model
+through the sRGB transfer curve, as the models were trained on display
+images. Weights download on first use into $HF_HOME; mount a cache volume
+there to keep them. Progress goes to the farm through c4-unit.
+"""
+
+import argparse
+import subprocess
+import sys
+
+MODELS = {
+    "depth": {"depth-anything-v2-small": "depth-anything/Depth-Anything-V2-Small-hf"},
+    "matte": {"birefnet": "ZhengPeng7/BiRefNet"},
+    "upscale": {"swin2sr-x2": "caidas/swin2SR-classical-sr-x2-64"},
+}
+DEFAULT = {"depth": "depth-anything-v2-small", "matte": "birefnet", "upscale": "swin2sr-x2"}
+
+
+def frames(spec):
+    out = []
+    for part in spec.split(","):
+        a, _, b = part.partition("-")
+        out.extend(range(int(a), int(b or a) + 1))
+    return out
+
+
+def read_rgb(path, np, oiio):
+    buf = oiio.ImageBuf(path)
+    if buf.has_error:
+        sys.exit(f"c4-infer: {path}: {buf.geterror()}")
+    px = buf.get_pixels(oiio.FLOAT)[..., :3]
+    if px.shape[-1] == 1:
+        px = np.repeat(px, 3, axis=-1)
+    # scene-linear to display-referred, as the models expect
+    px = np.clip(px, 0.0, 1.0)
+    srgb = np.where(px <= 0.0031308, 12.92 * px, 1.055 * np.power(px, 1 / 2.4) - 0.055)
+    return px, (srgb * 255.0 + 0.5).astype("uint8")
+
+
+def write(path, data, channels, oiio):
+    import os
+
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    h, w = data.shape[:2]
+    spec = oiio.ImageSpec(w, h, len(channels), oiio.HALF)
+    spec.channelnames = tuple(channels)
+    spec.attribute("compression", "zip")
+    out = oiio.ImageOutput.create(path)
+    if not out or not out.open(path, spec):
+        sys.exit(f"c4-infer: cannot write {path}: {oiio.geterror()}")
+    out.write_image(data.reshape(h, w, len(channels)).astype("float32"))
+    out.close()
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--task", choices=sorted(MODELS), default="depth")
+    ap.add_argument("--model")
+    ap.add_argument("--in", dest="src", required=True, help="input frames, printf-style: sm0140.%%04d.exr")
+    ap.add_argument("--out", required=True, help="output frames, printf-style")
+    ap.add_argument("--frames", required=True, help="1001-1004, or 1001,1003")
+    a = ap.parse_args()
+    name = a.model or DEFAULT[a.task]
+    repo = MODELS[a.task].get(name, name)  # a known short name, or a Hugging Face ID
+
+    import numpy as np
+    import OpenImageIO as oiio
+    import torch
+    from PIL import Image
+    from transformers import pipeline
+
+    device = 0 if torch.cuda.is_available() else -1
+    if a.task == "depth":
+        run = pipeline("depth-estimation", model=repo, device=device)
+    elif a.task == "matte":
+        run = pipeline("image-segmentation", model=repo, trust_remote_code=True, device=device)
+    else:
+        run = pipeline("image-to-image", model=repo, device=device)
+
+    todo = frames(a.frames)
+    for i, f in enumerate(todo):
+        src, dst = a.src % f, a.out % f
+        linear, display = read_rgb(src, np, oiio)
+        h, w = display.shape[:2]
+        image = Image.fromarray(display)
+        if a.task == "depth":
+            d = run(image)["predicted_depth"]
+            d = torch.nn.functional.interpolate(d.reshape(1, 1, *d.shape[-2:]), size=(h, w), mode="bicubic")
+            write(dst, d.squeeze().cpu().numpy(), ["Z"], oiio)
+        elif a.task == "matte":
+            m = run(image)
+            mask = m[0]["mask"] if isinstance(m, list) else m
+            alpha = np.asarray(mask.resize((w, h)), dtype="float32") / 255.0
+            write(dst, alpha, ["A"], oiio)
+        else:
+            up = run(image)
+            up = np.asarray(up, dtype="float32") / 255.0
+            lin = np.where(up <= 0.04045, up / 12.92, np.power((up + 0.055) / 1.055, 2.4))
+            write(dst, lin, ["R", "G", "B"], oiio)
+        subprocess.run(["c4-unit", "progress", f"{(i + 1) / len(todo):.4f}"], capture_output=True)
+        print(f"c4-infer: {a.task} {f} -> {dst}", flush=True)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

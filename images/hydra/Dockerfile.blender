@@ -1,0 +1,45 @@
+# c4-job-hydra, fallback: Blender renders the USD stage with Cycles. Use it
+# only if the primary recipe (Dockerfile: usdrecord with Cycles' Hydra
+# delegate) does not hold on a first run.
+#
+# amd64 only. blender.org publishes Linux builds for x64 alone, and
+# Debian's Blender is built without USD, so there is no arm64 Blender that
+# reads USD. On an Apple-silicon local farm this image does not run.
+#
+# It installs c4-render-usd as `usdrecord`, taking the same command line
+# the render type uses (--renderer, --frames A:B, --imageWidth, stage,
+# output with #### for the frame), so job templates do not change.
+
+ARG DEBIAN=debian:13.7-slim
+ARG GO=golang:1.26.9-trixie
+
+FROM ${GO} AS unit
+WORKDIR /src
+COPY go.mod go.sum ./
+COPY cmd/c4-unit ./cmd/c4-unit
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/c4-unit ./cmd/c4-unit
+
+FROM --platform=linux/amd64 ${DEBIAN}
+ARG BLENDER=5.2.2
+ARG OIIO=3.2.1.3
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates curl xz-utils \
+      libx11-6 libxi6 libxxf86vm1 libxfixes3 libxrender1 libxkbcommon0 libgl1 libegl1 libsm6 libice6 \
+ && curl -fsSL "https://download.blender.org/release/Blender${BLENDER%.*}/blender-${BLENDER}-linux-x64.tar.xz" \
+      | tar -xJ -C /opt \
+ && mv /opt/blender-${BLENDER}-linux-x64 /opt/blender \
+ && apt-get purge -y curl xz-utils && apt-get autoremove -y && rm -rf /var/lib/apt/lists/* \
+ && python3 -m venv /opt/venv \
+ && /opt/venv/bin/pip install --no-cache-dir "OpenImageIO==${OIIO}" \
+ && useradd --uid 65532 --user-group --create-home --home-dir /home/c4 --shell /usr/sbin/nologin c4
+COPY --from=unit /out/c4-unit /usr/local/bin/c4-unit
+COPY cmd/c4-unit/c4unit.py /opt/c4/python/c4unit.py
+COPY images/hydra/c4-render-usd /usr/local/bin/usdrecord
+COPY images/hydra/render_usd.py /opt/c4/render_usd.py
+ENV PATH=/opt/blender:/opt/venv/bin:$PATH PYTHONPATH=/opt/c4/python HOME=/home/c4 XDG_CACHE_HOME=/home/c4/.cache
+LABEL org.opencontainers.image.title=c4-job-hydra \
+      org.opencontainers.image.description="C4 job image (fallback, amd64): USD to OpenEXR with Blender's Cycles, and c4-unit" \
+      org.opencontainers.image.source=https://github.com/Avalanche-io/c4-operator \
+      org.opencontainers.image.licenses=Apache-2.0
+USER 65532:65532
+WORKDIR /home/c4

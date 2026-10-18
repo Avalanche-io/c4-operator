@@ -1,0 +1,56 @@
+#!/bin/sh
+# c4-test: run this unit's shard of a repository's tests and write JUnit.
+#
+#   c4-test --shard I --shards N [--target T] [--junit FILE]
+#
+# Run from the repository's root (the job's working directory). Python
+# tests run with pytest-shard when the repository has a pytest
+# configuration or a tests/ folder; Go packages are dealt out by position,
+# package i goes to shard i mod N. --target narrows Go to a package pattern
+# (//... and ./... mean everything). Exits non-zero if any test fails.
+set -eu
+
+shard=${C4_SHARD:-0}
+shards=${C4_SHARDS:-1}
+target=${C4_TARGET:-//...}
+junit=results/shard-$shard.xml
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --shard) shard=$2; shift 2 ;;
+    --shards) shards=$2; shift 2 ;;
+    --target) target=$2; shift 2 ;;
+    --junit) junit=$2; shift 2 ;;
+    *) echo "c4-test: unknown option $1" >&2; exit 2 ;;
+  esac
+done
+mkdir -p "$(dirname "$junit")"
+status=0
+ran=0
+
+if [ -f pytest.ini ] || [ -f pyproject.toml ] || [ -f setup.cfg ] || [ -d tests ]; then
+  ran=1
+  pytest --shard-id="$shard" --num-shards="$shards" --junitxml="${junit%.xml}.py.xml" || status=$?
+  # pytest exits 5 when this shard collected no tests: not a failure
+  [ "$status" -eq 5 ] && status=0
+fi
+
+if [ -f go.mod ]; then
+  ran=1
+  case "$target" in
+    //...|./...|"") pattern=./... ;;
+    //*) pattern=./${target#//} ;;
+    *) pattern=$target ;;
+  esac
+  pkgs=$(go list "$pattern" | awk -v n="$shards" -v i="$shard" '(NR - 1) % n == i')
+  if [ -n "$pkgs" ]; then
+    # shellcheck disable=SC2086 # one argument per package
+    gotestsum --junitfile "${junit%.xml}.go.xml" -- $pkgs || status=$?
+  fi
+fi
+
+if [ "$ran" -eq 0 ]; then
+  echo "c4-test: no pytest configuration, tests/ folder or go.mod in $(pwd)" >&2
+  exit 2
+fi
+c4-unit progress 1 2>/dev/null || true
+exit "$status"

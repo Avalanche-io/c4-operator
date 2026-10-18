@@ -14,9 +14,11 @@ RELEASE_IMG ?= $(REGISTRY)/c4-operator:$(VERSION)
 PLATFORMS ?= linux/amd64,linux/arm64
 LDFLAGS := -s -w -X main.version=$(VERSION)
 comma := ,
+# The prebuilt job images (images/<name>/Dockerfile), named c4-job-<name>.
+JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github job-images job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -119,6 +121,29 @@ images:
 	  --label org.opencontainers.image.source=https://github.com/Avalanche-io/c4-operator \
 	  --label org.opencontainers.image.version=$(VERSION) \
 	  $(if $(PUSH),--push,--output type=oci$(comma)dest=bin/c4-operator-$(VERSION).oci.tar) .
+
+# The prebuilt job images, for every platform in PLATFORMS, from the
+# repository root (each copies cmd/c4-unit). Without PUSH=1 each is written
+# to bin/ as an OCI archive; with PUSH=1 it goes to
+# $(REGISTRY)/c4-job-<name>:$(VERSION). JOB_IMAGES=oiio builds one.
+job-images:
+	@mkdir -p bin
+	@for i in $(JOB_IMAGES); do \
+	  echo "build c4-job-$$i ($(PLATFORMS))"; \
+	  docker buildx build --platform $(PLATFORMS) -f images/$$i/Dockerfile \
+	    -t $(REGISTRY)/c4-job-$$i:$(VERSION) \
+	    --label org.opencontainers.image.version=$(VERSION) \
+	    --label org.opencontainers.image.revision=$$(git rev-parse HEAD) \
+	    $(if $(PUSH),--push,--output type=oci$(comma)dest=bin/c4-job-$$i-$(VERSION).oci.tar) . || exit 1; \
+	done
+
+# The fallback hydra image (Blender's Cycles reading USD), amd64 only.
+job-image-hydra-blender:
+	@mkdir -p bin
+	docker buildx build --platform linux/amd64 -f images/hydra/Dockerfile.blender \
+	  -t $(REGISTRY)/c4-job-hydra:$(VERSION)-blender \
+	  --label org.opencontainers.image.version=$(VERSION) \
+	  $(if $(PUSH),--push,--output type=oci$(comma)dest=bin/c4-job-hydra-blender-$(VERSION).oci.tar) .
 
 # The install manifest of a release: config/release with RELEASE_IMG.
 install-yaml:

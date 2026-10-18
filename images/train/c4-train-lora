@@ -1,0 +1,157 @@
+#!/opt/venv/bin/python3
+"""c4-train-lora: fine-tune a LoRA adapter on a text-to-image model's UNet,
+as a C4 ml unit.
+
+    c4-train-lora --base /work/models/tiny-sd --data /work/frames --out /work/out --rank 16
+
+--base is a diffusers model folder (or a Hugging Face model ID). --data
+holds images, each with a caption in a .txt file of the same name (or one
+caption for all in captions.txt). The run takes $C4_STEPS steps and saves
+a checkpoint every $C4_CHECKPOINT_EVERY steps under --out (adapter
+weights, optimizer state and the step), atomically, so a capture always
+holds a whole checkpoint. When the farm asks the unit to yield
+(c4-unit yield-requested), it saves at once and exits 0; the next attempt
+mounts what was saved and continues from its last step. Progress goes to
+the farm through c4-unit progress.
+"""
+
+import argparse
+import json
+import os
+import random
+import shutil
+import subprocess
+import sys
+from pathlib import Path
+
+
+def yield_requested():
+    return subprocess.run(["c4-unit", "yield-requested"], capture_output=True).returncode == 0
+
+
+def progress(f):
+    subprocess.run(["c4-unit", "progress", f"{min(1.0, max(0.0, f)):.4f}"], capture_output=True)
+
+
+def load_examples(data, size):
+    from PIL import Image
+
+    data = Path(data)
+    common = data / "captions.txt"
+    common = common.read_text().strip() if common.exists() else None
+    out = []
+    for p in sorted(data.iterdir()):
+        if p.suffix.lower() not in (".png", ".jpg", ".jpeg", ".webp"):
+            continue
+        cap = p.with_suffix(".txt")
+        caption = cap.read_text().strip() if cap.exists() else common
+        if not caption:
+            sys.exit(f"c4-train-lora: no caption for {p.name} (add {cap.name} or captions.txt)")
+        img = Image.open(p).convert("RGB").resize((size, size))
+        out.append((img, caption))
+    if not out:
+        sys.exit(f"c4-train-lora: no images in {data}")
+    return out
+
+
+def save(out, step, unet, opt, torch):
+    """Write checkpoint-STEP atomically, then point latest at it."""
+    from peft.utils import get_peft_model_state_dict
+    from safetensors.torch import save_file
+
+    out.mkdir(parents=True, exist_ok=True)
+    tmp = out / f".checkpoint-{step}.tmp"
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir()
+    save_file(get_peft_model_state_dict(unet), str(tmp / "adapter.safetensors"))
+    torch.save(opt.state_dict(), tmp / "optimizer.pt")
+    (tmp / "state.json").write_text(json.dumps({"step": step}))
+    final = out / f"checkpoint-{step}"
+    shutil.rmtree(final, ignore_errors=True)
+    tmp.rename(final)
+    (out / "latest.tmp").write_text(final.name)
+    (out / "latest.tmp").rename(out / "latest")
+    for old in sorted(out.glob("checkpoint-*"), key=lambda p: int(p.name.split("-")[1]))[:-2]:
+        shutil.rmtree(old)  # keep the last two
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--base", required=True)
+    ap.add_argument("--data", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--rank", type=int, default=16)
+    ap.add_argument("--lr", type=float, default=1e-4)
+    ap.add_argument("--size", type=int, default=512)
+    ap.add_argument("--seed", type=int, default=0)
+    a = ap.parse_args()
+    steps = int(os.environ.get("C4_STEPS", "400"))
+    every = int(os.environ.get("C4_CHECKPOINT_EVERY", "50"))
+
+    import numpy as np
+    import torch
+    import torch.nn.functional as F
+    from diffusers import DDPMScheduler, StableDiffusionPipeline
+    from peft import LoraConfig, set_peft_model_state_dict
+    from safetensors.torch import load_file
+
+    torch.manual_seed(a.seed)
+    random.seed(a.seed)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    pipe = StableDiffusionPipeline.from_pretrained(a.base, safety_checker=None)
+    unet, vae, text, tok = pipe.unet, pipe.vae, pipe.text_encoder, pipe.tokenizer
+    noise = DDPMScheduler.from_config(pipe.scheduler.config)
+    for m in (vae, text, unet):
+        m.requires_grad_(False)
+        m.to(device)
+    unet.add_adapter(LoraConfig(r=a.rank, lora_alpha=a.rank, init_lora_weights="gaussian",
+                                target_modules=["to_k", "to_q", "to_v", "to_out.0"]))
+    params = [p for p in unet.parameters() if p.requires_grad]
+    opt = torch.optim.AdamW(params, lr=a.lr)
+
+    out = Path(a.out)
+    step = 0
+    latest = out / "latest"
+    if latest.exists():  # this attempt resumes a yielded or failed one
+        ck = out / latest.read_text().strip()
+        set_peft_model_state_dict(unet, load_file(str(ck / "adapter.safetensors")))
+        opt.load_state_dict(torch.load(ck / "optimizer.pt", map_location=device))
+        step = json.loads((ck / "state.json").read_text())["step"]
+        print(f"c4-train-lora: resuming at step {step} from {ck.name}", flush=True)
+
+    examples = load_examples(a.data, a.size)
+
+    def to_tensor(im):
+        return torch.from_numpy((np.asarray(im, dtype="float32") / 127.5 - 1.0).transpose(2, 0, 1))
+
+    unet.train()
+    while step < steps:
+        img, caption = random.choice(examples)
+        pixels = to_tensor(img).unsqueeze(0).to(device)
+        with torch.no_grad():
+            latents = vae.encode(pixels).latent_dist.sample() * vae.config.scaling_factor
+            ids = tok(caption, padding="max_length", max_length=tok.model_max_length,
+                      truncation=True, return_tensors="pt").input_ids.to(device)
+            cond = text(ids)[0]
+        n = torch.randn_like(latents)
+        t = torch.randint(0, noise.config.num_train_timesteps, (1,), device=device)
+        pred = unet(noise.add_noise(latents, n, t), t, cond).sample
+        loss = F.mse_loss(pred.float(), n.float())
+        loss.backward()
+        opt.step()
+        opt.zero_grad()
+        step += 1
+        progress(step / steps)
+        if step % every == 0 or step == steps:
+            save(out, step, unet, opt, torch)
+            print(f"c4-train-lora: step {step}/{steps} loss {loss.item():.4f}, checkpoint saved", flush=True)
+        if yield_requested():
+            if step % every:
+                save(out, step, unet, opt, torch)
+            print(f"c4-train-lora: asked to yield; saved at step {step}", flush=True)
+            return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
