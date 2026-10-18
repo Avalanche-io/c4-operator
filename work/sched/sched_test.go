@@ -972,3 +972,38 @@ func TestGroupSlotsReported(t *testing.T) {
 		t.Fatalf("GroupSlots %v, want 16 (12 owned + 4 burst requested)", got)
 	}
 }
+
+// TestSubsetOverloadIsAtRisk: ten jobs may use only pool lon (10 slots),
+// 6 slot-hours each, due in 5 hours: 60 slot-hours against 50. Another
+// job may use lon and van (100 slots), which links the two pools into one
+// group of 110 slots. Planned against the group, all ten look on time;
+// planned against what they may use, some are late, and a burst in
+// lon-spot should be sized for them.
+func TestSubsetOverloadIsAtRisk(t *testing.T) {
+	s := Snapshot{Now: t0,
+		Pools: []Pool{{Name: "lon", Slots: 10}, {Name: "van", Slots: 100},
+			{Name: "lon-spot", CostPerSlotHour: 1, Burst: &Burst{MaxSlots: 20, Provisioning: 5 * time.Minute, CostPerSlotHour: 1}}},
+		Projects: []Project{{Name: "p", BurstBudgetLeft: 1000, LateCostPerHour: 500}}}
+	for i := range 10 {
+		j := job(fmt.Sprintf("lon%d", i), "p", 6, 6, 5*time.Hour)
+		j.Pools = []string{"lon", "lon-spot"}
+		s.Jobs = append(s.Jobs, j)
+	}
+	v := job("van", "p", 50, 50, 5*time.Hour)
+	v.Pools = []string{"lon", "van"}
+	s.Jobs = append(s.Jobs, v)
+	d := Decide(s, &State{}, DefaultConfig())
+	risk, burst := 0, 0
+	for i := range 10 {
+		st := d.Jobs[fmt.Sprintf("lon%d", i)]
+		if st.AtRisk {
+			risk++
+		}
+		if st.Burst != nil && st.Burst.Slots["lon-spot"] > 0 {
+			burst++
+		}
+	}
+	if risk == 0 || burst == 0 {
+		t.Fatalf("60 slot-hours on 10 slots in 5 hours: %d of 10 at risk, %d with a lon-spot burst", risk, burst)
+	}
+}

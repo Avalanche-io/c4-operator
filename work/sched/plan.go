@@ -2,7 +2,10 @@ package sched
 
 import (
 	"math"
+	"slices"
 	"sort"
+	"strings"
+	"time"
 )
 
 // Planner selects how required slots R and planned shares are computed.
@@ -30,6 +33,7 @@ func (a *alloc) plan() {
 			continue
 		}
 		a.planFluid(g, capacity[g[0].root])
+		a.planSubsets(g)
 	}
 	a.planNoPool()
 	for _, jc := range a.jobs {
@@ -494,4 +498,138 @@ func (a *alloc) fluidFinish(jc *jobCtx, cum, C float64) float64 {
 		return f + jc.tpath
 	}
 	return math.Max(f, jc.tpath)
+}
+
+const maxSubsets = 64
+
+// planState is the part of a job's context a plan writes.
+type planState struct {
+	R, share, groupC                     float64
+	planOK, atRisk                       bool
+	lateBy                               time.Duration
+	finish50, finish90, horizon, deficit float64
+	shown                                *shownPlan
+}
+
+func (jc *jobCtx) planState() planState {
+	return planState{R: jc.R, share: jc.share, groupC: jc.groupC, planOK: jc.planOK, atRisk: jc.atRisk, lateBy: jc.lateBy,
+		finish50: jc.finish50, finish90: jc.finish90, horizon: jc.horizon, deficit: jc.deficit, shown: jc.shown}
+}
+
+func (jc *jobCtx) setPlanState(p planState) {
+	jc.R, jc.share, jc.groupC, jc.planOK, jc.atRisk, jc.lateBy = p.R, p.share, p.groupC, p.planOK, p.atRisk, p.lateBy
+	jc.finish50, jc.finish90, jc.horizon, jc.deficit, jc.shown = p.finish50, p.finish90, p.horizon, p.deficit, p.shown
+}
+
+// planSubsets plans, inside a pool group, every set of pools some job may
+// use (its pools in the snapshot) that is smaller than the whole group,
+// with the jobs confined to it and its own capacity. Pools are grouped
+// because some job may use both, and the group plan treats their slots as
+// interchangeable; a job that may use only some of them can be late in
+// what it may use while the group as a whole looks fine. On the global
+// tutorial farm, Vancouver and Sydney lights that may also use London's
+// CPUs linked three sites into one group of 7,000 slots, and London's
+// dailies, 40,600 slot-hours due by 08:00 on London's 2,900 slots, were
+// planned on time, so nothing burst until too late.
+//
+// A job takes the more pessimistic of the plans: at risk if late in
+// either (with that plan's lateness and burst shortfall, which is what
+// its own pools must cover), the larger R, the smaller share and
+// capacity. Subsets are deduplicated, so the cost is one plan per
+// distinct set of pools jobs use.
+func (a *alloc) planSubsets(g []groupMember) {
+	poolsOf := func(jc *jobCtx) []string {
+		var out []string
+		for _, name := range jc.j.Pools {
+			if a.pools[name] != nil {
+				out = append(out, name)
+			}
+		}
+		sort.Strings(out)
+		return slices.Compact(out)
+	}
+	all := map[string]bool{}
+	sigs := map[string][]string{}
+	for _, m := range g {
+		ps := poolsOf(m.jobCtx)
+		for _, p := range ps {
+			all[p] = true
+		}
+		sigs[strings.Join(ps, ",")] = ps
+	}
+	keys := make([]string, 0, len(sigs))
+	for k, ps := range sigs {
+		if len(ps) < len(all) {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	// Bounded cost: beyond maxSubsets distinct sets, plan the ones with
+	// the least capacity, where a shortfall the group hides is likeliest.
+	// Sets come from the pools jobs name (pipelines and classes), not
+	// from the number of jobs, so farms stay well under the bound.
+	if len(keys) > maxSubsets {
+		capOf := func(k string) float64 {
+			c := 0.0
+			for _, p := range sigs[k] {
+				c += float64(a.pools[p].p.Slots)
+			}
+			return c
+		}
+		sort.SliceStable(keys, func(i, j int) bool { return capOf(keys[i]) < capOf(keys[j]) })
+		keys = keys[:maxSubsets]
+	}
+	for _, k := range keys {
+		in := map[string]bool{}
+		for _, p := range sigs[k] {
+			in[p] = true
+		}
+		var sub []groupMember
+		projects := map[*projState]bool{}
+		for _, m := range g {
+			inside := true
+			for _, p := range poolsOf(m.jobCtx) {
+				inside = inside && in[p]
+			}
+			if inside {
+				sub = append(sub, m)
+				projects[m.proj] = true
+			}
+		}
+		C, usable := 0.0, 0.0
+		for _, ps := range a.poolList {
+			if !in[ps.p.Name] {
+				continue
+			}
+			c := float64(ps.p.Slots)
+			if ps.p.Burst != nil {
+				c += float64(max(0, ps.p.Burst.Requested-ps.p.Burst.Provisioned))
+			}
+			C += c
+			for pr := range projects {
+				usable += a.usable(pr, ps)
+			}
+		}
+		C = math.Min(C, usable)
+		saved := make([]planState, len(sub))
+		for i, m := range sub {
+			saved[i] = m.planState()
+		}
+		a.planFluid(sub, C)
+		for i, m := range sub {
+			r := m.planState()
+			cur := saved[i]
+			if r.atRisk && (!cur.atRisk || r.lateBy > cur.lateBy) {
+				cur.atRisk, cur.planOK, cur.lateBy = true, false, r.lateBy
+				cur.finish50, cur.finish90, cur.horizon, cur.deficit = r.finish50, r.finish90, r.horizon, r.deficit
+			}
+			if r.shown != nil && r.shown.atRisk && (cur.shown == nil || !cur.shown.atRisk || r.shown.lateBy > cur.shown.lateBy) {
+				cur.shown = r.shown
+			}
+			cur.R = math.Max(cur.R, r.R)
+			cur.share = math.Min(cur.share, r.share)
+			cur.groupC = math.Min(cur.groupC, r.groupC)
+			m.setPlanState(cur)
+		}
+	}
 }
