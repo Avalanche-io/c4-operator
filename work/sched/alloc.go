@@ -68,7 +68,8 @@ type jobCtx struct {
 	burst                *BurstSuggestion
 	// shown is what the job reports when it differs from the plan's own
 	// figures above (planFluid); nil means it reports those.
-	shown *shownPlan
+	shown  *shownPlan
+	groupC float64 // the planning capacity of its pool group
 }
 
 // shownPlan is a job's risk, lateness and planned finish as it reports

@@ -239,6 +239,13 @@ type JobState struct {
 	// Share is the job's planned slots at current capacity (including
 	// burst already requested), from water-filling every job's need.
 	Share float64
+	// GroupSlots is the capacity the plan gave the job's pool group (the
+	// C its planned finish divides by: owned slots plus burst already
+	// requested, less throughput jobs' rates, within what the group's
+	// projects may hold). With SlotsPerUnit as k, a display can see how
+	// far the critical path's own work (k/C of t_path) moves the ETA.
+	// Zero for a job that is not planned.
+	GroupSlots float64
 	// Slack is T - max(W90/A, t_path).
 	Slack time.Duration
 	// Feasible: the job finishes by its deadline with all attainable

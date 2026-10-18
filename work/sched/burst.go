@@ -235,6 +235,7 @@ func (a *alloc) report() {
 		st.Attainable = jc.A
 		st.RunningSlots = float64(jc.running)
 		st.Share = jc.share
+		st.GroupSlots = jc.groupC
 		st.Slack = jc.slack
 		st.Feasible = jc.feasible
 		v := jc.view()

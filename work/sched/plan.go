@@ -193,6 +193,7 @@ func (a *alloc) effective(jc *jobCtx) float64 {
 // what is left by smallest remaining work, and surplus is spread evenly.
 func (a *alloc) planPerJob(g []groupMember, C float64) {
 	for _, m := range g {
+		m.groupC = C
 		m.planOK = m.feasible
 		if m.hasDeadline {
 			m.R = m.W90 / math.Max(a.effective(m.jobCtx), a.cfg.MinRemaining.Seconds())
@@ -311,6 +312,9 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		dl = append(dl, m)
 	}
 	C = math.Max(C, 0)
+	for _, m := range g {
+		m.groupC = C
+	}
 	minT := a.cfg.MinRemaining.Seconds()
 	eff := func(m groupMember) float64 { return a.effective(m.jobCtx) }
 	sort.SliceStable(dl, func(i, j int) bool {

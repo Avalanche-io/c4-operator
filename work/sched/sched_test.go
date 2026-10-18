@@ -938,3 +938,17 @@ func TestBurstForMarginIsLabelled(t *testing.T) {
 		}
 	}
 }
+
+// TestGroupSlotsReported: JobState carries the planning capacity of the
+// job's pool group (owned slots plus burst already on its way), so a
+// display can weigh the critical path against it.
+func TestGroupSlotsReported(t *testing.T) {
+	a := job("a", "p", 10, 5, 8*time.Hour)
+	a.Pools = []string{"cpu", "cpu-burst"}
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(12), {Name: "cpu-burst", CostPerSlotHour: 1,
+		Burst: &Burst{MaxSlots: 10, Provisioning: 5 * time.Minute, CostPerSlotHour: 1, Requested: 4, Provisioned: 0}}},
+		Jobs: []Job{a}}
+	if got := Decide(s, &State{}, DefaultConfig()).Jobs["a"].GroupSlots; got != 16 {
+		t.Fatalf("GroupSlots %v, want 16 (12 owned + 4 burst requested)", got)
+	}
+}
