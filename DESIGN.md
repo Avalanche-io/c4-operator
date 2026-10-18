@@ -6,8 +6,10 @@ proven. Measured results are in `hack/e2e/out/results.md` and the summary is
 in `REPORT-v2.md`.
 
 This is The Cinema Content Creation Cloud, C4 for short (cccc.io). Its
-identifiers, the C4 IDs standardized as SMPTE ST 2114, name every file and
-tree by its content, and they are what everything here is built on. This
+identifiers, C4 IDs, have named production media by content since before
+their standardization as SMPTE ST 2114 in 2017 (they were presented at the
+SMPTE Annual Technical Conference in 2015). They name every file and tree
+here, and they are what everything here is built on. This
 operator is the cloud part of the name: a production farm whose data, caches,
 work and records are all addressed by those identifiers.
 
@@ -44,11 +46,12 @@ farm runs deadline-driven rendering, CI, media processing and modest ML
 content-addressed data. Section 19 lists the non-goals, including the
 training infrastructure that large labs build.
 
-## Prior art: Scion
+## Related work: Scion
 
 Anthropic described Scion, its replacement for Git, in
 [Redesigning source control](https://www.anthropic.com/engineering/redesigning-source-control)
-(2026-10-13). The parts this design borrows:
+(2026-10-13). It shares the structure of C4's content-addressed trees,
+built for a code monorepo. Where the two meet:
 
 | Scion                                                                                                       | Here                                                                                                              |
 | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -65,8 +68,9 @@ The post's update of 2026-10-15 credits Mononoke, Sapling's server, and its
 Bonsai data model for many of Scion's techniques (its footnote 2); they are
 prior art for this design as well. REPORT-v2.md compares the measurements.
 
-Scion is built for one code monorepo. This design applies the same
-structure to media trees, where single objects are 10 MB to 10 GB rather
+Scion is built for one code monorepo. Here the structure serves media
+trees, the case C4 was made for, where single objects are 10 MB to 10 GB
+rather
 than 10 KB, and where outputs (rendered frames) dominate writes. Section 8.2
 applies it back to source code through `oss/c4git`.
 
@@ -1081,14 +1085,15 @@ through a changeset.
   embedding to the C2PA SDK and its `c2patool`; credentials show as
   "Trusted" only with a certificate on the C2PA Trust List, which needs the
   C2PA conformance program.
-- **MovieLabs.** Records export as Ontology for Media Creation (v2.8)
-  entities: Task, Participant, Infrastructure and Asset, with
-  `provenance.CreatedBy`, `createdOn`, `Role` and `Origin`, versions as
+- **MovieLabs.** C4 references every media element by its content ID,
+  independent of where the bytes live; MovieLabs' 2030 Vision asks for the
+  same, that "individual media elements are referenced, accessed, tracked and
+  interrelated using a universal linking system". Records export as Ontology
+  for Media Creation (v2.8) entities: Task, Participant, Infrastructure and
+  Asset, with `provenance.CreatedBy`, `createdOn`, `Role` and `Origin`,
+  versions as
   `DerivationOf`, `RevisionOf` and `VariantOf`, and C4 IDs as identifiers
-  with scope `c4`. The 2030 Vision asks that "individual media elements are
-  referenced, accessed, tracked and interrelated using a universal linking
-  system"; content IDs are such a system, independent of where the bytes
-  live.
+  with scope `c4`.
 - **ASWF.** OpenAssetIO can resolve entity references to view IDs, and
   OpenTimelineIO media references can carry them. OpenEXR has no
   standardized C2PA carriage yet, hence the sidecar.

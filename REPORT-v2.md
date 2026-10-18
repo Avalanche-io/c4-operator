@@ -125,7 +125,7 @@ Next: an independent signing time (a timestamp authority or a private Rekor; `si
 
 ## Comparison with Scion
 
-Anthropic's Scion ([Redesigning source control](https://www.anthropic.com/engineering/redesigning-source-control), 2026-10-13, updated 2026-10-15) and C4 share an architecture: content-addressed trees fetched top-down by immutable ID, one daemon per node shared by every job on it, strict cache tiers that answer the same requests, sparse checkouts, and commits whose cost follows the change (DESIGN.md, "Prior art: Scion"). Scion's figures are the medians in the post's Figure 6 and the numbers in its text; C4's are from the end-to-end suite and the monorepo harness.
+Anthropic's Scion ([Redesigning source control](https://www.anthropic.com/engineering/redesigning-source-control), 2026-10-13, updated 2026-10-15) and C4 share an architecture: content-addressed trees fetched top-down by immutable ID, one daemon per node shared by every job on it, strict cache tiers that answer the same requests, sparse checkouts, and commits whose cost follows the change (DESIGN.md, "Related work: Scion"). Scion's figures are the medians in the post's Figure 6 and the numbers in its text; C4's are from the end-to-end suite and the monorepo harness.
 
 | operation        | Scion (published)                                                           | C4                                                                                                                                                           |
 | ---------------- | --------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
