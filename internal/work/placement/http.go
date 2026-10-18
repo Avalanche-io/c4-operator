@@ -135,6 +135,9 @@ func (s StoreViews) Objects(ctx context.Context, project, id string) ([]Object, 
 	if err != nil {
 		return nil, err
 	}
+	if st == nil {
+		return nil, fmt.Errorf("project %s has no store", project)
+	}
 	v, err := view.Load(ctx, vid, view.StoreRecords(st), 16)
 	if err != nil {
 		return nil, err

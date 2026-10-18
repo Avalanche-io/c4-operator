@@ -38,8 +38,10 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
 	"github.com/Avalanche-io/c4-operator/internal/work/kindsim"
+	"github.com/Avalanche-io/c4-operator/internal/work/placement"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 	"github.com/Avalanche-io/c4-operator/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/topology"
 )
 
 // unitPods selects pods the work queue created.
@@ -82,6 +84,8 @@ func runManager(args []string) error {
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
 	hudSites := fs.String("hud-sites", "", "JSON file of the farm's sites (name, label, region, lat, lon, kind onprem or cloud, localities) for the HUD's map; nodes join a site by their topology.kubernetes.io/region label")
 	farmTZ := fs.String("tz", "UTC", "the farm's time zone, for times the queue and the HUD show")
+	staging := fs.Bool("staging", false, "experimental: let the work queue move jobs' inputs to pools at other sites over the links in the --hud-sites topology file")
+	tierToken := fs.String("tier-token-file", "/var/run/secrets/c4-tier/token", "with --staging: the operator's service account token (audience c4-tier) for the sites' regional replicas")
 	signingNS := fs.String("signing-namespace", "c4-signing", "namespace of the farm's signing CA, readable only by the manager (empty turns signing off)")
 	signerAddr := fs.String("signer-addr", ":8092", "certificate issuer listen address, for node daemons and importers")
 	fs.Parse(args)
@@ -171,6 +175,11 @@ func runManager(args []string) error {
 			Progress: &queue.ProgressCache{}}
 		if err := mgr.Add(q); err != nil {
 			return err
+		}
+		if *staging {
+			if err := addStaging(mgr, q, stores, *hudSites, *tierToken); err != nil {
+				return err
+			}
 		}
 	}
 	if *hudAddr != "" {
@@ -271,4 +280,35 @@ func parseViewers(s string) (map[string]*api.Viewer, error) {
 		out[name] = v
 	}
 	return out, nil
+}
+
+// addStaging gives the work queue a Placement (experimental): pools at
+// sites, what each site lacks of jobs' inputs, and moving them over the
+// topology's links (internal/work/placement).
+func addStaging(mgr ctrl.Manager, q *queue.Queue, stores func(context.Context, string) (*storeurl.Sharded, error), topoFile, tokenFile string) error {
+	if topoFile == "" {
+		return errors.New("--staging needs --hud-sites: a topology file with the sites' links and regional replicas")
+	}
+	tp, err := topology.Load(topoFile)
+	if err != nil {
+		return fmt.Errorf("--hud-sites: %w", err)
+	}
+	if len(tp.Links) == 0 {
+		return errors.New("--staging: the topology file has no links")
+	}
+	token := func() string {
+		b, err := os.ReadFile(tokenFile)
+		if err != nil {
+			return ""
+		}
+		return strings.TrimSpace(string(b))
+	}
+	reg := &placement.Regional{Topo: tp, Client: &http.Client{Timeout: 30 * time.Second}, Token: token}
+	p := &placement.Provider{Topo: tp, Views: placement.StoreViews{Stores: stores}, Holdings: reg, Warmer: reg,
+		Cost: q.RecomputeCost, Log: ctrl.Log.WithName("placement")}
+	q.Placement = p
+	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
+		p.Run(ctx, 15*time.Second)
+		return nil
+	}))
 }

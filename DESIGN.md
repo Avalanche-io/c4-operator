@@ -1706,6 +1706,37 @@ Known limit: the spare is what the other site's current plan leaves, so a
 site whose own work arrives after a stage can find it holding slots that
 work needs.
 
+The queue gets these from a Placement (`--staging`, off by default;
+`internal/work/placement`):
+
+- **Sites and links** come from the topology file (`--hud-sites`, also the
+  HUD's map), one versioned schema (`work/topology`): sites with their
+  region, regional replicas and the projects whose store is there; links
+  with their channel, throughput, latency and price at each end. Its types
+  are shaped to become Site and Link resources (link capacity is
+  facilities' to declare in the long run). A pool's site is its `site`
+  attribute or its nodes' region.
+- **What a site lacks** is a C4 ID set difference: the objects of the views
+  a job mounts, less those the site's regional replicas hold (`HEAD` with
+  `X-C4-Cached: only`, which never answers from the store) and those
+  already on their way. It is learned in the background and cached; a job
+  whose inputs are not known yet runs where it may, as without staging.
+  Objects shared by several jobs cross a link once per site, and an
+  identical output elsewhere is the same IDs, so it needs no special case.
+- **Moving** comes from the project's store site over each link, first come
+  first served (the provider keeps the bytes committed to each link), and
+  is carried out by `POST /warm` on the target site's regional replicas.
+  Warming spends egress, so a replica admits it only for the operator's own
+  identity (never anonymously), within a byte budget per day and a pace
+  (`--warm-bytes-per-day`, `--warm-bytes-per-second`; off at 0), and
+  records each request.
+- **Recomputing** an input at the target site is offered from the
+  derivation records' cost (`Queue.RecomputeCost`) for exact processes,
+  for validated ones only to a job that accepts them
+  (`c4.avalanche.io/accept-validated`), and never for volatile ones; it
+  waits for an actuator that runs the producing work at the site, so it is
+  not offered yet.
+
 **Pre-warm.** A CapacityRequest lists the views its jobs will mount. The node
 daemon on a node joining that pool fetches those layers before it labels its
 Node `c4.avalanche.io/cache-warm=true`. The queue releases units to burst

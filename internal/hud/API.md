@@ -657,6 +657,12 @@ cannot plan it. Without `dryRun` the answer is `201`, with
 A book entry of kind `submit` names the viewer (or the agent for the
 viewer, through MCP).
 
+A job may carry `c4.avalanche.io/accept-validated: "true"` (experimental,
+staging): it accepts a validated recompute of an input in place of moving
+it to another site. A validated recompute's output differs from the
+recorded one, so only the consuming job may choose it; exact recomputes and
+identical outputs need no consent, and volatile ones are never offered.
+
 ## Changes from the first draft of the contract
 
 | change                                    | why                                                                                                                                               |

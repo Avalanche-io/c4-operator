@@ -49,9 +49,16 @@ spec:
           capabilities: {drop: [ALL]}
         volumeMounts:
         - {name: tmp, mountPath: /tmp}
+        # The operator's identity toward the sites' regional replicas, for
+        # staging (--staging): what a site holds, and asking it to warm.
+        - {name: tier-token, mountPath: /var/run/secrets/c4-tier, readOnly: true}
       volumes:
       - name: tmp
         emptyDir: {}
+      - name: tier-token
+        projected:
+          sources:
+          - serviceAccountToken: {audience: c4-tier, expirationSeconds: 3600, path: token}
 ---
 # The HUD: the web app and its API. Put an SSO proxy (or an Ingress with
 # authentication) in front of it, or reach it with bearer tokens.
