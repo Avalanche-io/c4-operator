@@ -539,7 +539,14 @@ func (c *checker) checkGuard(v *view) {
 			// its deadline need: the boosted part of Required is served
 			// by the boost tier, after the guard.
 			need := st.Required / math.Min(2, math.Max(1, j.Boost))
-			if have := running(j) + v.sent[j.ID]; float64(have)+1 <= need+1e-9 {
+			// Slots being freed for it by preemptions count, as in sched.
+			have := running(j) + v.sent[j.ID]
+			for id, forJob := range c.incoming {
+				if u := c.e.byID[id]; forJob == j.ID && u != nil && u.state == stRunning {
+					have += u.spec.slots
+				}
+			}
+			if float64(have)+1 <= need+1e-9 {
 				c.violate("starvation-over-deadline", x.Job, fmt.Sprintf("guard gave the last slot of %s to %s (slack %s) while %s, due %s, holds %d of the %.1f slots it needs",
 					x.Pool, x.Job, v.d.Jobs[x.Job].Slack.Round(time.Hour), j.ID, j.Deadline.Format("Mon 15:04"), have, need))
 				return

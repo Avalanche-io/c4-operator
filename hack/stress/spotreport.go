@@ -140,6 +140,7 @@ func writeSpot(dir string, rs []*spotResult, quick bool, took time.Duration) err
 		cmd, len(rs), took.Round(time.Second))
 	p("Each point's burst capacity is an on-demand pool and a spot pool per pool class; the provider models and every assumed number are in `hack/stress/spot.go`.\n\n")
 	p("- `all-spot`: `sched.Decide` with only the spot pools.\n- `all-on-demand`: only the on-demand pools.\n- `cheapest-first`: both; `sched.Decide` picks the cheaper pool (spot) first.\n")
+	p("Every policy has the same burst ceiling: a policy with one pool gets both pools' limits.\n")
 	p("- `completion-aware`: both, with the wrapper in `spot.go` moving a unit to on-demand when its expected interruption loss (hazard x remaining time x (work since its last checkpoint + lateness cost of the delay)) exceeds the on-demand premium, and checkpointing or moving units on a rebalance recommendation or a notice.\n\n")
 	p("## By provider\n\nMeans per point; cost is burst spend (spot and on-demand), lost is spot work thrown away by interruptions.\n\n")
 	p("| Provider | Policy | On time | Burst $ per point | Lateness $ per point | Lost slot-hours per point | Interruptions | Units killed | Saves on a warning | Units moved on demand |\n|---|---|---|---|---|---|---|---|---|---|\n")

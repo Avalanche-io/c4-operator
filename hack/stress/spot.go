@@ -152,16 +152,32 @@ var spotPolicies = []policy{
 	{name: "completion-aware", fn: sched.Decide, burst: true, usesEs: true, spotAware: true},
 }
 
-// spotWorkload removes the pools a spot policy does not use.
+// spotWorkload removes the pools a spot policy does not use. The pool
+// that remains takes both pools' limits, so every policy has the same
+// burst ceiling and the comparison is of where capacity comes from, not
+// how much of it there is.
 func spotWorkload(w *workload, pol string) *workload {
 	out := *w
 	out.pools = nil
+	drop := map[string]string{"all-spot": "-od", "all-on-demand": "-spot"}[pol]
+	if drop == "" {
+		out.pools = w.pools
+		return &out
+	}
+	extra := map[string]int{}
 	for _, p := range w.pools {
-		switch {
-		case pol == "all-spot" && strings.HasSuffix(p.name, "-od"):
+		if p.burst != nil && strings.HasSuffix(p.name, drop) {
+			extra[p.class] += p.burst.max
+		}
+	}
+	for _, p := range w.pools {
+		if strings.HasSuffix(p.name, drop) {
 			continue
-		case pol == "all-on-demand" && strings.HasSuffix(p.name, "-spot"):
-			continue
+		}
+		if p.burst != nil && extra[p.class] > 0 {
+			b := *p.burst
+			b.max += extra[p.class]
+			p.burst = &b
 		}
 		out.pools = append(out.pools, p)
 	}
