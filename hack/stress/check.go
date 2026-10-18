@@ -84,7 +84,7 @@ type checker struct {
 	// incoming: units being stopped for a job (sched counts their slots
 	// toward it), by unit.
 	incoming map[string]string
-	asked    map[string]bool // units sched asked to stop, while they run
+	asked    map[string]bool    // units sched asked to stop, while they run
 	guardHit map[string]float64 // jobs whose guard unit was preempted, and when
 	cur      *view
 	dumped   bool

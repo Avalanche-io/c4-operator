@@ -104,6 +104,9 @@ func (r *report) write(dir string) error {
 	if err := os.WriteFile(filepath.Join(dir, "README.md"), []byte(b.String()), 0o644); err != nil {
 		return err
 	}
+	if err := r.writeRuns(filepath.Join(dir, "runs.csv")); err != nil {
+		return err
+	}
 	return r.writeCSV(filepath.Join(dir, "violations.csv"))
 }
 
@@ -261,6 +264,8 @@ func (r *report) writeComparison(p pf) {
 	p("Units the starvation guard started and a job at risk of missing its deadline took back (`objective+burst`): %d, losing %.0f slot-hours of work, %.1f%% of all work the policy lost.\n\n", gp, gl, 100*gl/math.Max(lost, 1e-9))
 	r.writeRegions(p)
 	r.writeLosses(p)
+	r.writeTrailing(p)
+	r.writeBurstValue(p)
 }
 
 // writeLosses lists the points where objective+burst trails the best
@@ -600,4 +605,131 @@ func sortedBool(m map[string]bool) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// writeTrailing lists every point where objective+burst is more than 5
+// points of on-time percentage behind EDF, with the parameters that
+// usually explain it.
+func (r *report) writeTrailing(p pf) {
+	type row struct {
+		pr   *pointResult
+		d    float64
+		why  []string
+		a, e *runResult
+	}
+	var rows []row
+	for _, pr := range r.Results {
+		a, e := pr.Runs[mainPolicy], pr.Runs["edf"]
+		if a == nil || e == nil || a.DueJobs == 0 || e.DueJobs == 0 {
+			continue
+		}
+		d := a.onTimePct() - e.onTimePct()
+		if d >= -5 {
+			continue
+		}
+		pt := pr.Pt
+		var why []string
+		if pt.QuotaFill > 0 && pt.Borrow >= 0 && pt.Borrow < 0.3 {
+			why = append(why, "tight borrowing limits (EDF ignores quotas)")
+		}
+		if pt.QuotaFill > 0 && pt.Nodes*pt.QuotaFill/math.Max(1, pt.Projects) < 1 {
+			why = append(why, "nominal quotas round to 0")
+		}
+		if pt.Nodes <= 4 {
+			why = append(why, "a farm of a few slots")
+		}
+		if a.GuardPreemptions > 0 || pt.UnitMin*pt.HeavyMult*math.Exp(pt.Spread) > 120 {
+			why = append(why, "long units started by the starvation guard")
+		}
+		if pt.Depth >= 3 {
+			why = append(why, "deep pipelines with staged deadlines")
+		}
+		if a.Util < e.Util-0.1 {
+			why = append(why, fmt.Sprintf("owned use %.0f%% against EDF's %.0f%%", 100*a.Util, 100*e.Util))
+		}
+		if len(why) == 0 {
+			why = append(why, "not classified")
+		}
+		rows = append(rows, row{pr, d, why, a, e})
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].d < rows[j].d })
+	p("### Points where the policy trails EDF by more than 5 points\n\n")
+	if len(rows) == 0 {
+		p("None.\n\n")
+		return
+	}
+	p("%d points. The likely causes are read from each point's parameters and run (quotas, farm size, unit length and the guard, pipeline depth, owned use).\n\n", len(rows))
+	p("| Point | Farm and load | objective+burst | EDF | Likely cause |\n|---|---|---|---|---|\n")
+	for _, x := range rows {
+		p("| %s | %s | %s | %s | %s |\n", x.pr.Pt.Name, x.pr.Pt.label(), pct(x.a.onTimePct()), pct(x.e.onTimePct()), strings.Join(x.why, "; "))
+	}
+	p("\n")
+}
+
+// writeBurstValue frames burst spend against the lateness it avoided:
+// objective+burst against objective (the same policy without burst) on
+// the same work.
+func (r *report) writeBurstValue(p pf) {
+	type row struct {
+		pr           *pointResult
+		cost, avoid  float64
+		dollarsAvoid float64
+	}
+	var rows []row
+	cost, avoid, usd := 0.0, 0.0, 0.0
+	for _, pr := range r.Results {
+		a, n := pr.Runs[mainPolicy], pr.Runs["objective"]
+		if a == nil || n == nil {
+			continue
+		}
+		x := row{pr: pr, cost: a.BurstCost, avoid: n.LateHours - a.LateHours, dollarsAvoid: n.LateDollars - a.LateDollars}
+		rows = append(rows, x)
+		cost += x.cost
+		avoid += x.avoid
+		usd += x.dollarsAvoid
+	}
+	budgetFails := 0
+	for _, pr := range r.Results {
+		budgetFails += pr.Counts["burst-budget"]
+	}
+	p("### Burst spend against lateness avoided\n\n")
+	p("`objective+burst` against `objective` (the same policy without burst) on the same work. ")
+	p("Each project's lateness price (`LateCostPerHour`) is the point's `lateCost` (sampled log-uniformly from $10 to $2,000 an hour; $400 at the corners) times a project factor from 0.5 to 1.5. ")
+	p("A burst is requested automatically only if it closes the deadline, costs less than the lateness it prevents at that price, and fits the project's remaining daily budget.\n\n")
+	p("- Overall: $%.0f of burst bought %.0f fewer late hours, $%.2f per late hour avoided; at the projects' prices those hours were worth $%.0f.\n", cost, avoid, cost/math.Max(avoid, 1e-9), usd)
+	if budgetFails == 0 {
+		p("- No run approved a burst beyond its project's remaining daily budget (the `burst-budget` invariant, checked on every decision, held everywhere).\n\n")
+	} else {
+		p("- **The budget was exceeded %d times** (`burst-budget`).\n\n", budgetFails)
+	}
+	sort.SliceStable(rows, func(i, j int) bool { return rows[i].cost > rows[j].cost })
+	p("The five largest spends:\n\n| Point | Farm and load | Burst $ | Late hours avoided | $ per late hour avoided | Lateness $ avoided |\n|---|---|---|---|---|---|\n")
+	for i, x := range rows {
+		if i == 5 {
+			break
+		}
+		per := "-"
+		if x.avoid > 0 {
+			per = fmt.Sprintf("$%.2f", x.cost/x.avoid)
+		}
+		p("| %s | %s | $%.0f | %.0f | %s | $%.0f |\n", x.pr.Pt.Name, x.pr.Pt.label(), x.cost, x.avoid, per, x.dollarsAvoid)
+	}
+	p("\n")
+}
+
+// writeRuns writes every run's measures, one line per point and policy.
+func (r *report) writeRuns(path string) error {
+	var b strings.Builder
+	b.WriteString("point,seed,policy,due,on_time,late,unfinished,late_hours,late_usd,burst_usd,util,preemptions,guard_preemptions,guard_lost_slot_hours,lost_slot_hours,decisions,decide_mean_us,point_encoded\n")
+	for _, pr := range r.Results {
+		for _, pol := range policies {
+			x := pr.Runs[pol.name]
+			if x == nil {
+				continue
+			}
+			fmt.Fprintf(&b, "%s,%d,%s,%d,%d,%d,%d,%.2f,%.2f,%.2f,%.3f,%d,%d,%.2f,%.2f,%d,%d,%q\n", pr.Pt.Name, pr.Seed, pol.name, x.DueJobs, x.OnTime, x.Late, x.Unfinished,
+				x.LateHours, x.LateDollars, x.BurstCost, x.Util, x.Preemptions, x.GuardPreemptions, x.GuardLostSlotHours, x.LostSlotHours, x.Decides, x.DecideMean.Microseconds(), pr.Pt.encode())
+		}
+	}
+	return os.WriteFile(path, []byte(b.String()), 0o644)
 }
