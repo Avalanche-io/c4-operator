@@ -216,6 +216,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	st.DeadlineSource = v.source
 	st.Suggestion = suggestionStatus(m.sugg)
+	st.Derivation = q.derivationStatus(v)
 	if !m.started.IsZero() {
 		st.Started = &metav1.Time{Time: m.started.Truncate(time.Second)}
 	}

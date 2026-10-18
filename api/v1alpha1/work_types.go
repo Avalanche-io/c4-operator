@@ -213,6 +213,10 @@ type WorkJobStatus struct {
 	// Suggestion is the farm's suggested deadline and how it got there.
 	// +optional
 	Suggestion *WorkSuggestion `json:"suggestion,omitempty"`
+	// Derivation is the record of the job's process. Experimental: it
+	// will change with C4's derivation-record design.
+	// +optional
+	Derivation *WorkDerivation `json:"derivation,omitempty"`
 	// Rank is the job's position in dispatch order (1 is next).
 	// +optional
 	Rank int32 `json:"rank,omitempty"`
@@ -291,6 +295,34 @@ type WorkSuggestion struct {
 	// one-click alternative.
 	// +optional
 	NextSession *metav1.Time `json:"nextSession,omitempty"`
+}
+
+// WorkDerivation is what the farm's record says about a job's process
+// (its images, command, parameters and, for GPU work, platform): the class
+// the job declared, the class the evidence supports, and the evidence.
+// Class is a verification mode, never a grade. Experimental.
+type WorkDerivation struct {
+	// Program is the ID of the program the job's units run: images,
+	// command and parameters, without what tells one unit from another
+	// (frames, shards). Evidence and class accrue to it.
+	Program string `json:"program"`
+	// Declared is the class the job declared (annotation
+	// c4.avalanche.io/derivation-class): exact, validated or volatile.
+	Declared string `json:"declared"`
+	// Class is the class the record supports. An exact declaration reads
+	// as validated once a re-run wrote a different output, or while its
+	// pods are not sealed. Verified: an exact class has been confirmed by
+	// re-runs that wrote the same output, which is what allows reusing an
+	// output in place of moving it.
+	Class    string `json:"class"`
+	Verified bool   `json:"verified,omitempty"`
+	// Matched and Mismatched count re-runs of the same process on the same
+	// inputs that wrote the same output, or another.
+	Matched    int32 `json:"matched,omitempty"`
+	Mismatched int32 `json:"mismatched,omitempty"`
+	// Why says why the class is not the declared one.
+	// +optional
+	Why string `json:"why,omitempty"`
 }
 
 // WorkSuggestionRevision is one value a suggestion took.

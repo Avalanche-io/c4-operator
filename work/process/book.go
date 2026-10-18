@@ -39,8 +39,11 @@ func ParseClass(s string) Class {
 
 // Run is one succeeded unit.
 type Run struct {
-	Key    Key
-	Inputs []Input
+	Key Key
+	// Program is the process's program (ProgramID): where evidence and
+	// class accrue.
+	Program string
+	Inputs  []Input
 	// Declared is the class the job declared for its process, and Sealed
 	// says the unit's pod could read nothing outside its closure: no
 	// network egress, no host paths, every image pinned by digest. An
@@ -66,8 +69,8 @@ type Cost struct {
 	Work    estimate.Prior
 	W90     float64
 	Longest float64
-	// Basis is "exact" (this computation ran before) or "process" (this
-	// process ran on other inputs).
+	// Basis is "exact" (this computation ran before) or "program" (its
+	// program ran on other units or inputs).
 	Basis string
 	Runs  int
 	// Class is the process's effective class (Book.Class), and Verified
@@ -106,6 +109,7 @@ func (s stats) sd() float64 {
 }
 
 type entry struct {
+	Program  string         `json:"program"`
 	Inputs   []Input        `json:"inputs"`
 	Work     stats          `json:"work"`
 	Duration stats          `json:"duration"`
@@ -182,14 +186,17 @@ func (b *Book) Record(r Run) {
 	if r.Key.Process == "" || r.Key.Inputs == "" || r.Output == "" {
 		return
 	}
+	if r.Program == "" {
+		r.Program = r.Key.Process
+	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	b.init()
 	b.dirty = true
-	p := b.procs[r.Key.Process]
+	p := b.procs[r.Program]
 	if p == nil {
 		p = &procRecord{}
-		b.procs[r.Key.Process] = p
+		b.procs[r.Program] = p
 	}
 	p.Declared = ParseClass(string(r.Declared))
 	if !r.Sealed {
@@ -197,7 +204,7 @@ func (b *Book) Record(r Run) {
 	}
 	e := b.entries[r.Key]
 	if e == nil {
-		e = &entry{Inputs: append([]Input(nil), r.Inputs...), Outputs: map[string]int{}}
+		e = &entry{Program: r.Program, Inputs: append([]Input(nil), r.Inputs...), Outputs: map[string]int{}}
 		b.entries[r.Key] = e
 	} else {
 		switch _, same := e.Outputs[r.Output]; {
@@ -242,7 +249,7 @@ func (b *Book) evict() {
 	}
 }
 
-// Class returns a process's effective class, and whether an exact class
+// Class returns a program's effective class, and whether an exact class
 // is verified.
 func (b *Book) Class(process string) (Class, bool) {
 	b.mu.RLock()
@@ -259,6 +266,14 @@ func (b *Book) Why(process string) string {
 	return why
 }
 
+// Has reports whether a process has run.
+func (b *Book) Has(process string) bool {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	_, ok := b.procs[process]
+	return ok
+}
+
 // Evidence returns how many re-runs of a process's computations wrote the
 // output earlier runs wrote, and how many wrote another.
 func (b *Book) Evidence(process string) (matched, mismatched int) {
@@ -270,36 +285,45 @@ func (b *Book) Evidence(process string) (matched, mismatched int) {
 	return 0, 0
 }
 
-// ProducedBy returns the computation that wrote an output, and its
-// inputs.
-func (b *Book) ProducedBy(output string) (Key, []Input, bool) {
+// ProducedBy returns the computation that wrote an output, its program,
+// and its inputs.
+func (b *Book) ProducedBy(output string) (Key, string, []Input, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	k, ok := b.byOutput[output]
 	if !ok {
-		return Key{}, nil, false
+		return Key{}, "", nil, false
 	}
-	return k, append([]Input(nil), b.entries[k].Inputs...), true
+	e := b.entries[k]
+	return k, e.Program, append([]Input(nil), e.Inputs...), true
 }
 
 // Recompute returns what recomputing k costs: from k's own runs when it
-// has any, else from its process's runs on other inputs. It reports false
-// when the process has never run. What a recompute yields depends on the
+// has any, else from its program's runs (other units, other inputs). It
+// reports false when the program has never run. program may be empty
+// when k ran before. What a recompute yields depends on the
 // class: the same output (Exact), an acceptable different one
 // (Validated), or a new output that is not a substitute for the recorded
 // one (Volatile); the caller weighs that.
-func (b *Book) Recompute(k Key) (Cost, bool) {
+func (b *Book) Recompute(k Key, program string) (Cost, bool) {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
-	p := b.procs[k.Process]
+	e := b.entries[k]
+	if e != nil {
+		program = e.Program
+	}
+	if program == "" {
+		program = k.Process
+	}
+	p := b.procs[program]
 	if p == nil {
 		return Cost{}, false
 	}
 	var c Cost
 	c.Class, c.Verified = p.class()
 	work, dur := p.Work, p.Duration
-	c.Basis = "process"
-	if e := b.entries[k]; e != nil {
+	c.Basis = "program"
+	if e != nil {
 		work, dur, c.Basis = e.Work, e.Duration, "exact"
 		if c.Class == Exact && c.Verified && len(e.Outputs) == 1 {
 			for out := range e.Outputs {

@@ -52,24 +52,24 @@ func TestExactVerifiedThenFalsified(t *testing.T) {
 	if c, v := b.Class("p"); c != Exact || v {
 		t.Fatalf("one run: %s verified=%v", c, v)
 	}
-	if c, _ := b.Recompute(Key{"p", "i1"}); c.Reuse != "" || c.Basis != "exact" {
+	if c, _ := b.Recompute(Key{"p", "i1"}, ""); c.Reuse != "" || c.Basis != "exact" {
 		t.Fatalf("unverified exact offered reuse: %+v", c)
 	}
 	b.Record(run("p", "i1", "o1", 110, Exact, true))
 	b.Record(run("p", "i2", "o2", 90, Exact, true))
 	b.Record(run("p", "i2", "o2", 95, Exact, true))
-	c, ok := b.Recompute(Key{"p", "i1"})
+	c, ok := b.Recompute(Key{"p", "i1"}, "")
 	if !ok || c.Class != Exact || !c.Verified || c.Reuse != "o1" || c.Runs != 2 || math.Abs(c.Work.Mean-105) > 1e-9 || c.W90 <= c.Work.Mean {
 		t.Fatalf("verified exact: %+v", c)
 	}
-	if k, in, ok := b.ProducedBy("o2"); !ok || k != (Key{"p", "i2"}) || len(in) != 1 {
+	if k, _, in, ok := b.ProducedBy("o2"); !ok || k != (Key{"p", "i2"}) || len(in) != 1 {
 		t.Fatalf("produced by: %v %v %v", k, in, ok)
 	}
 	if !b.NeedsVerification("p", 0.01) || b.NeedsVerification("p", 0.5) {
 		t.Fatal("verification sampling")
 	}
 	// Another input set: the process's runs give the cost.
-	if c, _ := b.Recompute(Key{"p", "i9"}); c.Basis != "process" || c.Reuse != "" || c.Runs != 4 {
+	if c, _ := b.Recompute(Key{"p", "i9"}, "p"); c.Basis != "program" || c.Reuse != "" || c.Runs != 4 {
 		t.Fatalf("process basis: %+v", c)
 	}
 	// A re-run that writes another output falsifies the declaration.
@@ -77,7 +77,7 @@ func TestExactVerifiedThenFalsified(t *testing.T) {
 	if c, v := b.Class("p"); c != Validated || v || b.Why("p") == "" {
 		t.Fatalf("after a mismatch: %s %v %q", c, v, b.Why("p"))
 	}
-	if c, _ := b.Recompute(Key{"p", "i2"}); c.Reuse != "" {
+	if c, _ := b.Recompute(Key{"p", "i2"}, ""); c.Reuse != "" {
 		t.Fatal("a falsified process offered reuse")
 	}
 	b.Record(run("p", "i2", "o2", 95, Exact, true))
@@ -103,10 +103,10 @@ func TestUnsealedAndUndeclared(t *testing.T) {
 	if m, mm := b.Evidence("v"); c != Volatile || m != 4 || mm != 0 {
 		t.Fatalf("undeclared: %s, evidence %d/%d", c, m, mm)
 	}
-	if cost, _ := b.Recompute(Key{"v", "i"}); cost.Reuse != "" || cost.Class != Volatile {
+	if cost, _ := b.Recompute(Key{"v", "i"}, ""); cost.Reuse != "" || cost.Class != Volatile {
 		t.Fatalf("volatile reuse: %+v", cost)
 	}
-	if _, ok := b.Recompute(Key{"never", "i"}); ok {
+	if _, ok := b.Recompute(Key{"never", "i"}, "never"); ok {
 		t.Fatal("a process that never ran has a cost")
 	}
 }
@@ -128,12 +128,33 @@ func TestBookSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	r := RestoreBook(s)
-	want, _ := b.Recompute(Key{"p", "i"})
-	got, ok := r.Recompute(Key{"p", "i"})
+	want, _ := b.Recompute(Key{"p", "i"}, "")
+	got, ok := r.Recompute(Key{"p", "i"}, "")
 	if !ok || got != want {
 		t.Fatalf("restored %+v, want %+v", got, want)
 	}
-	if k, _, ok := r.ProducedBy("o"); !ok || k.Process != "p" {
+	if k, _, _, ok := r.ProducedBy("o"); !ok || k.Process != "p" {
 		t.Fatal("restored output index")
+	}
+}
+
+func TestProgramPoolsEvidenceAcrossUnits(t *testing.T) {
+	unit := func(frames string) []Container {
+		return []Container{{Digest: "sha256:aa", Command: []string{"render"}, Env: map[string]string{"PASS": "beauty", "C4_FRAMES": frames}}}
+	}
+	per := map[string]bool{"C4_FRAMES": true}
+	p1, _ := ProcessID(unit("1001"), "")
+	p2, _ := ProcessID(unit("1002"), "")
+	g1, _ := ProgramID(unit("1001"), "", per)
+	g2, _ := ProgramID(unit("1002"), "", per)
+	if p1 == p2 || g1 != g2 {
+		t.Fatal("frames must split processes and not programs")
+	}
+	var b Book
+	for _, p := range []string{p1, p2, p1, p2} {
+		b.Record(Run{Key: Key{p, "i"}, Program: g1, Declared: Exact, Sealed: true, Output: "o" + p, Work: 1})
+	}
+	if c, v := b.Class(g1); c != Exact || !v {
+		t.Fatalf("two frames re-run once each: %s %v", c, v)
 	}
 }

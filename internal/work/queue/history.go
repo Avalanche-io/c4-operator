@@ -6,7 +6,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
-	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
 // Shot history (proposal eta-deadlines section 1.3). The best prior for a
@@ -79,15 +78,15 @@ func (q *Queue) noteProfiles(v *view) {
 	}
 }
 
-// useProfiles gives a job's estimator the profiles of the previous job of
-// its shot.
-func (q *Queue) useProfiles(v *view, e *estimate.Estimator) {
+// shotProfiles are, per unit key, the durations of the previous job of a
+// job's shot by unit position, for its estimator (estimate.SetProfile).
+func (q *Queue) shotProfiles(v *view) map[string]map[int]float64 {
+	byKey := map[string]map[int]float64{}
 	shot := v.job.Labels[c4v1.LabelShot]
 	if shot == "" || len(q.profiles) == 0 {
-		return
+		return byKey
 	}
 	plan := v.mem.plan
-	byKey := map[string]map[int]float64{}
 	for _, u := range plan.Units {
 		p := q.profiles[profileKey{v.project, shot, v.job.Spec.Class, u.Key}]
 		if p == nil || p.uid == v.job.UID {
@@ -102,7 +101,5 @@ func (q *Queue) useProfiles(v *view, e *estimate.Estimator) {
 		}
 		byKey[u.Key][u.Pos] = d
 	}
-	for key, byPos := range byKey {
-		e.SetProfile(key, byPos)
-	}
+	return byKey
 }

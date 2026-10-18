@@ -30,6 +30,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 	"github.com/Avalanche-io/c4-operator/work/forecast"
 	"github.com/Avalanche-io/c4-operator/work/order"
+	"github.com/Avalanche-io/c4-operator/work/process"
 	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
@@ -82,6 +83,12 @@ type Queue struct {
 	// profiles are the latest finished job's durations per project, shot,
 	// class and unit key (history.go).
 	profiles map[profileKey]*shotProfile
+	// books are each project's derivations, digests the image digest last
+	// seen for each image reference, and lastPlatform each job's GPU
+	// platform (derive.go).
+	books        map[string]*process.Book
+	digests      map[string]string
+	lastPlatform map[string]string
 	// Progress, when set, holds the progress running units report
 	// (progress.go); without it units are estimated from elapsed time.
 	Progress *ProgressCache
@@ -182,10 +189,13 @@ type jobMem struct {
 	sugg *suggestMem
 	// finPts are the medians kept for live finish calibration.
 	// profiled: the job's durations are in the shot history.
-	profiled   bool
-	finPts     []finishPoint
-	finLast    int
-	finLearned bool
+	profiled bool
+	// proc is the process of the job's last recorded derivation, and
+	// unsealedWhy why its pod was not sealed (derive.go).
+	proc, unsealedWhy string
+	finPts            []finishPoint
+	finLast           int
+	finLearned        bool
 }
 
 func newMem() *jobMem {
@@ -539,6 +549,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				m.succeeded[idx] = true
 				m.millis[idx] = runMillis(p, now)
 				m.ended[idx] = finishOf(p, now)
+				q.recordDerivation(ctx, v, idx, p, m.millis[idx])
 			}
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed:
@@ -617,7 +628,11 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	cfg := plan.Estimate
 	cfg.Calibration = q.cal.forJob(v.project, v.job.Spec.Class, q.shareHist[v.project])
 	e := estimate.New(cfg)
-	q.useProfiles(v, e)
+	byKey := q.shotProfiles(v)
+	q.useDerivations(context.Background(), v, byKey)
+	for key, byPos := range byKey {
+		e.SetProfile(key, byPos)
+	}
 	if plan.Prior != nil {
 		for _, u := range plan.Units {
 			e.SetPrior(u.Key, *plan.Prior)

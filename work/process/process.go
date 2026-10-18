@@ -75,6 +75,20 @@ var RunEnv = map[string]bool{
 // validated, not exact, across platforms), so only runs on one platform
 // are comparable. It reports false if a container has no image digest.
 func ProcessID(cs []Container, platform string) (string, bool) {
+	return programID(cs, platform, nil)
+}
+
+// ProgramID is the identity of the program a process runs: ProcessID
+// without the environment variables in perUnit, the parameters that tell
+// one unit of a job from another (which frames, which shard). Identity is
+// per process, for reuse; trust is per program, because a renderer that
+// repeats on frame 1001 is the same renderer on frame 1002. A process's
+// class and its evidence accrue to its program.
+func ProgramID(cs []Container, platform string, perUnit map[string]bool) (string, bool) {
+	return programID(cs, platform, perUnit)
+}
+
+func programID(cs []Container, platform string, drop map[string]bool) (string, bool) {
 	type canon struct {
 		Digest  string      `json:"d"`
 		Command []string    `json:"c,omitempty"`
@@ -89,7 +103,7 @@ func ProcessID(cs []Container, platform string) (string, bool) {
 		}
 		x := canon{Digest: c.Digest, Command: c.Command, Args: c.Args, Dir: c.WorkingDir}
 		for k, v := range c.Env {
-			if !RunEnv[k] {
+			if !RunEnv[k] && !drop[k] {
 				x.Env = append(x.Env, [2]string{k, v})
 			}
 		}

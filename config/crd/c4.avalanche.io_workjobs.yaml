@@ -341,6 +341,49 @@ spec:
                   - unit
                   type: object
                 type: array
+              derivation:
+                description: |-
+                  Derivation is the record of the job's process. Experimental: it
+                  will change with C4's derivation-record design.
+                properties:
+                  class:
+                    description: |-
+                      Class is the class the record supports. An exact declaration reads
+                      as validated once a re-run wrote a different output, or while its
+                      pods are not sealed. Verified: an exact class has been confirmed by
+                      re-runs that wrote the same output, which is what allows reusing an
+                      output in place of moving it.
+                    type: string
+                  declared:
+                    description: |-
+                      Declared is the class the job declared (annotation
+                      c4.avalanche.io/derivation-class): exact, validated or volatile.
+                    type: string
+                  matched:
+                    description: |-
+                      Matched and Mismatched count re-runs of the same process on the same
+                      inputs that wrote the same output, or another.
+                    format: int32
+                    type: integer
+                  mismatched:
+                    format: int32
+                    type: integer
+                  program:
+                    description: |-
+                      Program is the ID of the program the job's units run: images,
+                      command and parameters, without what tells one unit from another
+                      (frames, shards). Evidence and class accrue to it.
+                    type: string
+                  verified:
+                    type: boolean
+                  why:
+                    description: Why says why the class is not the declared one.
+                    type: string
+                required:
+                - class
+                - declared
+                - program
+                type: object
               estimate:
                 description: Estimate is the remaining-work estimate and objective
                   state.

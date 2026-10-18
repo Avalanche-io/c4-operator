@@ -1696,6 +1696,46 @@ through the tiers instead of from the store.
   wrapped object once it has checkpointed (section 10.17). Members are never
   evicted one by one.
 
+**Derivations (experimental).** Every unit that succeeds cleanly is a
+derivation: process + inputs → output, with what it cost. The process is
+the unit's images by digest, command, arguments, environment (less what
+names the run) and, on a GPU node, its platform (GPU model, driver,
+compute stack). The inputs are the C4 IDs of every view it mounted; the
+output is the view it wrote. Views are projected, so equal IDs mean equal
+bytes. The queue keeps one record per project (`work/process`): input IDs
+identify content, so a shared record would tell one project what another
+holds.
+
+The record answers three things. The first is what recomputing an output
+costs: work and its 90th percentile in slot-seconds, plus the longest
+unit, for the scheduler to weigh against moving the output. The second is
+whether an identical output already exists to reuse in its place. The
+third is what a unit that ran before with the same process and inputs
+will take, which becomes its estimate.
+
+Reuse needs trust, and trust is evidence, kept per program (the process
+without what tells one unit from another, such as frames or shards):
+
+- what the job declared, with the annotation
+  `c4.avalanche.io/derivation-class` (`exact`, `validated` or `volatile`,
+  the default);
+- whether its pods were sealed: images pinned by digest, no host network or
+  paths, no environment from secrets, and a network policy denying egress;
+- how many re-runs of the same process on the same inputs wrote the same
+  output, and how many wrote another.
+
+A program is exact if it is declared exact, sealed and never contradicted,
+and verified once two re-runs matched. Only exact and verified allows
+reuse, and even then 5% of reuse opportunities are recomputed to keep the
+declaration checked. A mismatch, or an unsealed pod, makes an exact
+declaration read as validated, recomputed but never reused, and
+`status.derivation` says why. An undeclared program stays volatile however
+often it repeats; its matching re-runs are shown as evidence a person may
+use to declare it. This follows C4's derivation-record design
+(c4/design/derivation-records.md) and feeds its redesign
+(proposals/eta-deadlines/DERIVATION-LESSONS.md); the annotation, the status
+field and the record will change with it.
+
 ### 10.14 Failures, retries and blacklists
 
 - A unit is retried up to `retries` times, never on the node where it last
