@@ -4,6 +4,10 @@
 //	GET  /{c4id}   object bytes; Range: bytes=N- resumes (206)
 //	HEAD /{c4id}   200 if this tier can serve the object, 404 if not
 //	PUT  /         body is content; this tier computes its ID (regional only)
+//	POST /warm     fetch the listed objects ahead of staged work (WarmPolicy)
+//
+// HEAD with X-C4-Cached: only answers from this tier's cache, never from
+// the store behind it.
 //
 // Requests carry X-C4-Project (the cache partition and credential scope),
 // Authorization (the caller's projected service-account token), and

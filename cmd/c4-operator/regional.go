@@ -39,6 +39,8 @@ func runRegional(args []string) error {
 	maxFills := fs.Int("max-fills", 128, "concurrent fills from the store (admission control)")
 	maxWaiters := fs.Int("max-waiters", 16384, "concurrent waiters on fills")
 	maxServing := fs.Int("max-serving", 2048, "concurrent responses")
+	warmPerDay := fs.Int64("warm-bytes-per-day", 0, "bytes POST /warm may fetch per UTC day for staged work (0: no warming)")
+	warmRate := fs.Int64("warm-bytes-per-second", 0, "pace of warm fetches (0: unpaced)")
 	noAuth := fs.Bool("insecure-no-auth", false, "skip TokenReview (tests only)")
 	maxRate := fs.String("max-rate", "0", "pace each response to this many bytes per second (test knob; 0 is unlimited)")
 	fs.Parse(args)
@@ -119,6 +121,12 @@ func runRegional(args []string) error {
 		}
 		ns := *namespace
 		srv.Authorize = (&auth.Reviewer{Client: cs, Tier: "regional"}).TierAuthorizer(ns+"/c4-node", ns+"/c4-hud", ns+"/c4-manager")
+		// Warming spends egress: only the operator (the queue) may ask,
+		// within a daily byte budget. Without authentication it is off.
+		if *warmPerDay > 0 {
+			srv.Warm = &tier.WarmPolicy{Callers: []string{"system:serviceaccount:" + ns + ":c4-manager"},
+				BytesPerDay: *warmPerDay, BytesPerSecond: *warmRate}
+		}
 	}
 	go func() {
 		t := time.NewTicker(30 * time.Second)

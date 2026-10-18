@@ -47,6 +47,8 @@ type Server struct {
 	// Store returns a project's authoritative store, for HEAD on a miss and
 	// for PUT. Nil on node daemons.
 	Store func(project string) (*storeurl.Sharded, error)
+	// Warm admits POST /warm (warm.go); nil refuses it.
+	Warm *WarmPolicy
 	// MaxServing caps concurrent object responses (0: unlimited).
 	MaxServing int
 	// FillTimeout bounds one upstream fill (0: 6 h).
@@ -61,15 +63,18 @@ type Server struct {
 	serving atomic.Int64
 }
 
-// ServeHTTP routes GET, HEAD and PUT.
+// ServeHTTP routes GET, HEAD, PUT and POST /warm.
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path == "/healthz" {
 		w.Write([]byte("ok"))
 		return
 	}
 	project := r.Header.Get(HeaderProject)
+	caller := ""
 	if s.Authorize != nil {
-		if _, status, err := s.Authorize(r); err != nil {
+		c, status, err := s.Authorize(r)
+		caller = c
+		if err != nil {
 			metrics.TierRequests.WithLabelValues(s.Tier, project, "denied").Inc()
 			http.Error(w, err.Error(), status)
 			return
@@ -93,6 +98,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method == http.MethodPut && r.URL.Path == "/" {
 		s.ingest(w, r, project, cache)
+		return
+	}
+	if r.Method == http.MethodPost && r.URL.Path == "/warm" {
+		s.warm(w, r, caller, project, partition, cache)
 		return
 	}
 	id, err := c4.Parse(strings.TrimPrefix(r.URL.Path, "/"))
@@ -257,7 +266,7 @@ func (s *Server) head(w http.ResponseWriter, r *http.Request, project string, ca
 		w.WriteHeader(http.StatusOK)
 		return
 	}
-	if s.Store == nil {
+	if s.Store == nil || r.Header.Get(HeaderCached) == "only" {
 		w.WriteHeader(http.StatusNotFound)
 		return
 	}
