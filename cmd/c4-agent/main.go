@@ -165,8 +165,11 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 		}
 		res, err := h.Resume(ctx, fs.Arg(0), strings.Join(fs.Args()[min(1, fs.NArg()):], " "))
 		if err != nil {
-			if res.Copy != "" {
-				fmt.Fprintf(out, "a copy was started as %s; stop it with: claude stop %s\n", res.Copy, res.Copy)
+			switch {
+			case res.Copy != "" && res.CopyStopped:
+				fmt.Fprintf(out, "the CLI started a copy, %s, and c4-agent stopped it; the member's own session was not resumed\n", res.Copy)
+			case res.Copy != "":
+				fmt.Fprintf(out, "the CLI started a copy, %s; stop it with: claude stop %s\n", res.Copy, agent.ShortID(res.Copy))
 			}
 			return err
 		}

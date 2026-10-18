@@ -26,6 +26,21 @@ before any cluster is involved. It does four things:
 It drives Claude Code only through its published interfaces: transcript
 files, hooks, and the `claude` CLI. It never changes Claude Code's settings.
 
+What it relies on from the CLI, checked on a real session on 2026-10-18:
+- `claude --bg --resume <id>` with no other flags continues a stopped
+  background session under the same ID. With extra flags, or while the
+  session runs, it starts a copy under a new ID instead. So `c4-agent
+  resume` passes a member's saved flags only the first time, when the CLI
+  does not yet know the session as a background session (`claude agents
+  --json --all`), and never again.
+- It prints `backgrounded · <short id> · <name>`. The short ID is the
+  session ID's first eight characters.
+- `claude stop` takes the short ID.
+
+If the CLI starts a copy anyway (a race with another resume), `c4-agent
+resume` stops the copy at once and fails with exit 4. A copy is never a
+member.
+
 ## Commands
 
 | command                                   | does                                                                                          |
@@ -59,8 +74,10 @@ when the CLI started a copy, 5 when a member is still busy.
 two ways to use it. Neither changes how Claude Code itself is installed.
 
 - **Per member**, with no change to any settings file: save the fragment to
-  a file and register the member with `--flag --settings --flag
-  <file>`. The hook then applies from the member's next resume.
+  a file and give it with `--settings` when the session first starts.
+  Whether a background session keeps hooks given that way across a
+  resume with no flags is what `proposals/agent-jobs/c4-agent-recheck.sh`
+  checks. If it does not, use the next route.
 - **For every session** under a configuration directory: add the fragment's
   `Stop` entry to that directory's `settings.json`. Sessions that are not
   members are ignored by the hook.

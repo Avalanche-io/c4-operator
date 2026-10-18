@@ -25,6 +25,9 @@ type Harness struct {
 	// SettleQuiet and SettleMax bound the wait for the transcript to stop
 	// growing after a Stop hook.
 	SettleQuiet, SettleMax time.Duration
+	// KeepCopies leaves running a copy the CLI started by mistake; by
+	// default Resume stops it at once, since a copy is never a member.
+	KeepCopies bool
 }
 
 // New returns a Harness with the defaults.
@@ -140,7 +143,7 @@ func (h *Harness) Register(ctx context.Context, o RegisterOptions) (*Member, err
 
 // live reports whether a member's session is running.
 func (h *Harness) live(ctx context.Context, m *Member) (bool, Active, error) {
-	as, err := h.Claude.Active(ctx, m.ConfigDir)
+	as, err := h.Claude.Active(ctx, m.ConfigDir, false)
 	if err != nil {
 		return false, Active{}, err
 	}
@@ -150,6 +153,22 @@ func (h *Harness) live(ctx context.Context, m *Member) (bool, Active, error) {
 		}
 	}
 	return false, Active{}, nil
+}
+
+// knownBackground reports whether the CLI already knows the member's
+// session as a background session, running or stopped. Resuming such a
+// session with any flag starts a copy, so it is resumed with none.
+func (h *Harness) knownBackground(ctx context.Context, m *Member) (bool, error) {
+	as, err := h.Claude.Active(ctx, m.ConfigDir, true)
+	if err != nil {
+		return false, err
+	}
+	for _, a := range as {
+		if strings.EqualFold(a.SessionID, m.Session) && a.Kind != "interactive" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // Checkpoint saves a member's turn boundary now. It returns false when the
@@ -252,8 +271,25 @@ func (h *Harness) Hook(ctx context.Context, r io.Reader) (*Checkpoint, error) {
 // ResumeResult reports a resume.
 type ResumeResult struct {
 	Member *Member
-	// Copy is set when the CLI started a copy (ErrForked).
-	Copy string
+	// Copy is set when the CLI started a copy (ErrForked), and
+	// CopyStopped when the harness stopped it again.
+	Copy        string
+	CopyStopped bool
+}
+
+// fullID maps an ID the CLI printed (often short) to a running session's
+// full ID; it returns id unchanged when no running session matches.
+func (h *Harness) fullID(ctx context.Context, configDir, id string) string {
+	as, err := h.Claude.Active(ctx, configDir, false)
+	if err != nil {
+		return id
+	}
+	for _, a := range as {
+		if SameSession(id, a.SessionID) {
+			return strings.ToLower(a.SessionID)
+		}
+	}
+	return id
 }
 
 // Resume continues a stopped member's session in the background with
@@ -279,6 +315,15 @@ func (h *Harness) Resume(ctx context.Context, name, prompt string) (ResumeResult
 	if err := checkFlags(m.Flags); err != nil {
 		return ResumeResult{}, err
 	}
+	known, err := h.knownBackground(ctx, m)
+	if err != nil {
+		return ResumeResult{}, err
+	}
+	flags := m.Flags
+	if known {
+		// A background session the CLI knows continues only with no flags.
+		flags = nil
+	}
 	if _, _, err := h.checkpointLocked(ctx, m, "resume"); err != nil {
 		return ResumeResult{}, err
 	}
@@ -286,14 +331,23 @@ func (h *Harness) Resume(ctx context.Context, name, prompt string) (ResumeResult
 	if err := h.Store.Put(m); err != nil {
 		return ResumeResult{}, err
 	}
-	id, err := h.Claude.Resume(ctx, m.ConfigDir, m.Cwd, m.Session, m.Flags, prompt)
+	id, err := h.Claude.Resume(ctx, m.ConfigDir, m.Cwd, m.Session, flags, prompt)
 	if err != nil {
 		return ResumeResult{Member: m}, err
 	}
-	if !strings.EqualFold(id, m.Session) {
-		return ResumeResult{Member: m, Copy: id}, fmt.Errorf("member %s: the CLI started %s instead of continuing %s: %w", m.Name, id, m.Session, ErrForked)
+	if SameSession(id, m.Session) {
+		return ResumeResult{Member: m}, nil
 	}
-	return ResumeResult{Member: m}, nil
+	// The CLI started a copy. A copy is never a member: stop it, and fail.
+	copyID := h.fullID(ctx, m.ConfigDir, id)
+	res := ResumeResult{Member: m, Copy: copyID}
+	if !h.KeepCopies {
+		if err := h.Claude.Stop(ctx, m.ConfigDir, copyID); err != nil {
+			return res, fmt.Errorf("member %s: the CLI started %s instead of continuing %s, and stopping it failed (%v): %w", m.Name, copyID, m.Session, err, ErrForked)
+		}
+		res.CopyStopped = true
+	}
+	return res, fmt.Errorf("member %s: the CLI started %s instead of continuing %s: %w", m.Name, copyID, m.Session, ErrForked)
 }
 
 // YieldResult reports a yield.
@@ -417,7 +471,7 @@ func (h *Harness) Status(ctx context.Context) ([]MemberStatus, error) {
 	for _, m := range ms {
 		as, ok := actives[m.ConfigDir]
 		if !ok {
-			list, err := h.Claude.Active(ctx, m.ConfigDir)
+			list, err := h.Claude.Active(ctx, m.ConfigDir, false)
 			if err != nil {
 				return nil, err
 			}

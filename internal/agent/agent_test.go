@@ -16,8 +16,10 @@ import (
 
 // fakeClaude stands in for the claude CLI. No test touches a real session.
 type fakeClaude struct {
-	mu      sync.Mutex
-	active  map[string]Active // by session
+	mu     sync.Mutex
+	active map[string]Active // by session
+	// known are background sessions the CLI has run, stopped or not.
+	known   map[string]bool
 	resumes []resumeCall
 	stops   []string
 	// copyOnResume makes Resume report a different session ID, as the CLI
@@ -34,13 +36,20 @@ type resumeCall struct {
 }
 
 func newFake() *fakeClaude {
-	return &fakeClaude{active: map[string]Active{}, busyFor: map[string]int{}}
+	return &fakeClaude{active: map[string]Active{}, busyFor: map[string]int{}, known: map[string]bool{}}
 }
 
-func (f *fakeClaude) Active(ctx context.Context, configDir string) ([]Active, error) {
+func (f *fakeClaude) Active(ctx context.Context, configDir string, all bool) ([]Active, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []Active
+	if all {
+		for s := range f.known {
+			if _, running := f.active[s]; !running {
+				out = append(out, Active{SessionID: s, Status: "stopped", Kind: "background"})
+			}
+		}
+	}
 	for s, a := range f.active {
 		if n := f.busyFor[s]; n > 0 {
 			f.busyFor[s] = n - 1
@@ -58,12 +67,21 @@ func (f *fakeClaude) Resume(ctx context.Context, configDir, dir, session string,
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.resumes = append(f.resumes, resumeCall{configDir, dir, session, prompt, flags})
-	if f.copyOnResume != "" {
-		f.active[f.copyOnResume] = Active{SessionID: f.copyOnResume, Status: "busy"}
-		return f.copyOnResume, nil
+	_, running := f.active[session]
+	// As the real CLI: a running session, or a known background session
+	// resumed with flags, gets a copy under a new ID. It prints short IDs.
+	if f.copyOnResume != "" || running || (f.known[session] && len(flags) > 0) {
+		c := f.copyOnResume
+		if c == "" {
+			c = fmt.Sprintf("%08x-0000-4000-8000-%012d", len(f.resumes), len(f.resumes))
+		}
+		f.active[c] = Active{SessionID: c, Status: "busy", Kind: "background"}
+		f.known[c] = true
+		return ShortID(c), nil
 	}
-	f.active[session] = Active{SessionID: session, Status: "busy", Pid: 4242}
-	return session, nil
+	f.active[session] = Active{SessionID: session, Status: "busy", Pid: 4242, Kind: "background"}
+	f.known[session] = true
+	return ShortID(session), nil
 }
 
 func (f *fakeClaude) Stop(ctx context.Context, configDir, session string) error {
@@ -250,14 +268,71 @@ func TestResumeStoppedRaisesEpochAndPassesFlags(t *testing.T) {
 	}
 }
 
-func TestResumeDetectsCopy(t *testing.T) {
+func TestResumeDetectsAndStopsCopy(t *testing.T) {
 	e := newEnv(t)
 	e.transcript(sess, turn(1))
 	e.register("lead", sess)
 	e.fake.copyOnResume = sess2
 	res, err := e.h.Resume(context.Background(), "lead", "")
-	if !errors.Is(err, ErrForked) || res.Copy != sess2 {
+	if !errors.Is(err, ErrForked) || res.Copy != sess2 || !res.CopyStopped {
 		t.Fatalf("res %+v err %v", res, err)
+	}
+	if len(e.fake.stops) != 1 || e.fake.stops[0] != sess2 {
+		t.Fatalf("stops %v: the copy must be stopped, and only the copy", e.fake.stops)
+	}
+}
+
+// The check of 2026-10-18 on a real CLI: a stopped background session
+// resumed with its saved flags became a copy, twice. A known background
+// session must be resumed with no flags, which continues it.
+func TestKnownBackgroundSessionResumesWithoutFlags(t *testing.T) {
+	e := newEnv(t)
+	e.transcript(sess, turn(1))
+	e.register("lead", sess) // saved flags: -n lead
+	ctx := context.Background()
+	if _, err := e.h.Resume(ctx, "lead", ""); err != nil { // first adoption: flags allowed
+		t.Fatal(err)
+	}
+	if got := strings.Join(e.fake.resumes[0].flags, " "); got != "-n lead" {
+		t.Fatalf("first resume flags %q", got)
+	}
+	delete(e.fake.busyFor, sess)
+	e.fake.active[sess] = Active{SessionID: sess, Status: "idle", Kind: "background"}
+	if r, err := e.h.Yield(ctx, "lead", time.Second); err != nil || r.State != "stopped" {
+		t.Fatalf("yield %+v %v", r, err)
+	}
+	for i := 0; i < 3; i++ {
+		res, err := e.h.Resume(ctx, "lead", "")
+		if err != nil || res.Copy != "" {
+			t.Fatalf("resume %d of a known background session: %+v %v", i+2, res, err)
+		}
+		if f := e.fake.resumes[len(e.fake.resumes)-1].flags; len(f) != 0 {
+			t.Fatalf("resume %d passed flags %v to a known background session", i+2, f)
+		}
+		e.fake.active[sess] = Active{SessionID: sess, Status: "idle", Kind: "background"}
+		if _, err := e.h.Yield(ctx, "lead", time.Second); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := len(e.fake.active); n != 0 {
+		t.Fatalf("%d sessions left running: %v", n, e.fake.active)
+	}
+}
+
+func TestShortIDs(t *testing.T) {
+	if ShortID(strings.ToUpper(sess)) != "11111111" || !SameSession("11111111", sess) || !SameSession(sess, sess) || SameSession("1111111", sess) || SameSession("22222222", sess) {
+		t.Fatal("short IDs")
+	}
+	for out, want := range map[string]string{
+		"backgrounded · caab0817 · check\n":      "caab0817",
+		"Resumed " + sess + " in the background": sess,
+	} {
+		if got, err := printedID(out); err != nil || got != want {
+			t.Fatalf("printedID(%q) = %q %v", out, got, err)
+		}
+	}
+	if _, err := printedID("nothing here"); err == nil {
+		t.Fatal("no ID accepted")
 	}
 }
 

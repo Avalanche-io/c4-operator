@@ -28,14 +28,42 @@ type Active struct {
 func (a Active) Idle() bool { return a.Status == "idle" }
 
 // Claude is the part of the `claude` CLI the harness uses.
+//
+// Facts about the CLI the harness relies on (Claude Code 2.1.302, checked
+// against a throwaway session on 2026-10-18):
+//   - `claude agents --json` lists running sessions with full IDs; with
+//     `--all` it also lists stopped background sessions.
+//   - `claude --bg --resume <full id>` with no other flags continues a
+//     stopped background session under the same ID. With extra flags, or
+//     while the session runs, it starts a copy under a new ID instead.
+//   - It prints "backgrounded · <short id> · <name>": the short ID is the
+//     first eight characters of the session ID.
+//   - `claude stop` takes the short ID; the full ID is "No job matching".
 type Claude interface {
-	// Active lists running sessions.
-	Active(ctx context.Context, configDir string) ([]Active, error)
+	// Active lists running sessions. With all, it also lists stopped
+	// background sessions.
+	Active(ctx context.Context, configDir string, all bool) ([]Active, error)
 	// Resume continues a stopped session in the background, in dir, and
-	// returns the session ID the CLI reports.
+	// returns the ID the CLI printed: a short ID, or a full one.
 	Resume(ctx context.Context, configDir, dir, session string, flags []string, prompt string) (string, error)
-	// Stop stops a background session.
+	// Stop stops a background session, given its full ID.
 	Stop(ctx context.Context, configDir, session string) error
+}
+
+// ShortID is the CLI's short form of a session ID: its first eight
+// characters, lowercase.
+func ShortID(session string) string {
+	s := strings.ToLower(session)
+	if len(s) > 8 {
+		return s[:8]
+	}
+	return s
+}
+
+// SameSession reports whether id, full or short, names session.
+func SameSession(id, session string) bool {
+	id, session = strings.ToLower(id), strings.ToLower(session)
+	return id != "" && strings.HasPrefix(session, id) && (len(id) == 8 || id == session)
 }
 
 // CLI runs the real `claude` binary: $C4_AGENT_CLAUDE, else claude on PATH.
@@ -68,9 +96,13 @@ func (c *CLI) run(ctx context.Context, configDir, dir string, args ...string) ([
 	return append(stdout.Bytes(), stderr.Bytes()...), nil
 }
 
-// Active runs `claude agents --json`.
-func (c *CLI) Active(ctx context.Context, configDir string) ([]Active, error) {
-	out, err := c.run(ctx, configDir, "", "agents", "--json")
+// Active runs `claude agents --json` (and `--all`).
+func (c *CLI) Active(ctx context.Context, configDir string, all bool) ([]Active, error) {
+	args := []string{"agents", "--json"}
+	if all {
+		args = append(args, "--all")
+	}
+	out, err := c.run(ctx, configDir, "", args...)
 	if err != nil {
 		return nil, err
 	}
@@ -85,14 +117,16 @@ func (c *CLI) Active(ctx context.Context, configDir string) ([]Active, error) {
 	return as, nil
 }
 
-var sessionInText = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+var (
+	fullInText  = regexp.MustCompile(`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`)
+	shortInText = regexp.MustCompile(`(?:^|[^0-9A-Za-z])([0-9a-f]{8})(?:[^0-9A-Za-z-]|$)`)
+)
 
-// Resume runs `claude --bg --resume <session> [flags] <prompt>` and returns
-// the session ID it prints. The flags are given only for a stopped session;
-// the harness never resumes a live one, which is when the CLI starts a
-// copy instead.
+// Resume runs `claude --bg --resume <session> [flags] [prompt]` and returns
+// the ID it printed, full or short. The harness gives flags only when the
+// CLI does not already know the session as a background session.
 func (c *CLI) Resume(ctx context.Context, configDir, dir, session string, flags []string, prompt string) (string, error) {
-	args := append([]string{"--bg", "--resume", session}, flags...)
+	args := append([]string{"--bg", "--resume", strings.ToLower(session)}, flags...)
 	if prompt != "" {
 		args = append(args, prompt)
 	}
@@ -100,21 +134,24 @@ func (c *CLI) Resume(ctx context.Context, configDir, dir, session string, flags 
 	if err != nil {
 		return "", err
 	}
-	ids := sessionInText.FindAllString(string(out), -1)
-	for _, id := range ids {
-		if !strings.EqualFold(id, session) {
-			return id, nil // a different ID: the CLI started a copy
-		}
-	}
-	if len(ids) == 0 {
-		return "", fmt.Errorf("claude --bg --resume printed no session ID: %q", truncate(out, 200))
-	}
-	return session, nil
+	return printedID(string(out))
 }
 
-// Stop runs `claude stop <session>`.
+// printedID finds the session ID the CLI printed: a full ID if there is
+// one, else the short ID of "backgrounded · <short id> · <name>".
+func printedID(out string) (string, error) {
+	if id := fullInText.FindString(out); id != "" {
+		return strings.ToLower(id), nil
+	}
+	if m := shortInText.FindStringSubmatch(out); m != nil {
+		return m[1], nil
+	}
+	return "", fmt.Errorf("claude --bg --resume printed no session ID: %q", truncate([]byte(out), 200))
+}
+
+// Stop runs `claude stop <short id>`; the CLI does not match full IDs.
 func (c *CLI) Stop(ctx context.Context, configDir, session string) error {
-	_, err := c.run(ctx, configDir, "", "stop", session)
+	_, err := c.run(ctx, configDir, "", "stop", ShortID(session))
 	return err
 }
 

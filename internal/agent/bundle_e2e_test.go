@@ -65,7 +65,7 @@ type fake struct {
 	stops   []string
 }
 
-func (f *fake) Active(ctx context.Context, configDir string) ([]agent.Active, error) {
+func (f *fake) Active(ctx context.Context, configDir string, all bool) ([]agent.Active, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	var out []agent.Active
@@ -80,7 +80,7 @@ func (f *fake) Resume(ctx context.Context, configDir, dir, session string, flags
 	defer f.mu.Unlock()
 	f.active[session] = true
 	f.resumes = append(f.resumes, session)
-	return session, nil
+	return agent.ShortID(session), nil
 }
 
 func (f *fake) Stop(ctx context.Context, configDir, session string) error {
