@@ -161,7 +161,11 @@ func runManager(args []string) error {
 			return fmt.Errorf("--tz: %w", err)
 		}
 		q = &queue.Queue{Loc: loc, Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue"),
-			Stores: stores, Signer: sig.queue, PolicyName: *policy}
+			Stores: stores, Signer: sig.queue, PolicyName: *policy,
+			// Units' reported progress, filled by the HUD's scrape of the
+			// node daemons (without the HUD, units are estimated from
+			// elapsed time alone).
+			Progress: &queue.ProgressCache{}}
 		if err := mgr.Add(q); err != nil {
 			return err
 		}
@@ -210,6 +214,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// *queue.Queue in the interface would not compare equal to nil).
 		srv.Queue = q
 		srv.DryRun = hudserver.QueueDryRun(q)
+		srv.Progress = q.Progress
 	}
 	if dev != "" {
 		srv.DevViewers, err = parseViewers(dev)

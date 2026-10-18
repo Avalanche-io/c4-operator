@@ -80,6 +80,9 @@ type Config struct {
 	NoLocality bool
 	// Default is the class default per unit.
 	Default Prior
+	// ProgressRelSD is the relative spread of a remainder computed from a
+	// unit's reported progress at half done (RemainderAt).
+	ProgressRelSD float64
 	// Calibration, when set, supplies conformal percentiles of W (see
 	// Calibration). It is shared, not copied, by every estimator of the
 	// class.
@@ -89,12 +92,13 @@ type Config struct {
 // DefaultConfig returns the settings in DESIGN.md section 9.8.
 func DefaultConfig() Config {
 	return Config{
-		HeavyFactor: 3,
-		Overrun:     0.25,
-		Z:           1.28,
-		PriorRelSD:  0.25,
-		ShrinkK:     3,
-		Default:     Prior{Mean: 600, SD: 600},
+		HeavyFactor:   3,
+		Overrun:       0.25,
+		Z:             1.28,
+		PriorRelSD:    0.25,
+		ShrinkK:       3,
+		Default:       Prior{Mean: 600, SD: 600},
+		ProgressRelSD: 0.2,
 	}
 }
 
@@ -405,6 +409,16 @@ func (e *Estimator) SetRunning(run []RunningUnit) {
 	for _, r := range run {
 		p := e.Predict(r.Key, r.Pos)
 		took := r.Done + r.Elapsed
+		if r.Progress >= ProgressMin && r.Progress < 1 {
+			// The unit says how far along it is: its total is took/f.
+			// Entered only when that exceeds the prediction, so a unit
+			// reporting fast progress does not pull its neighbors down
+			// before it finishes.
+			if total := took / r.Progress; total > p.Mean {
+				adds = append(adds, add{r.Key, obs{pos: r.Pos, dur: total, lb: took, prov: true}})
+			}
+			continue
+		}
 		if took <= p.Mean {
 			continue
 		}

@@ -119,6 +119,9 @@ func (s *Server) collect(ctx context.Context) error {
 	s.steady(m)
 	if prev == nil || m.at.Sub(prev.metrics.at) >= 5*time.Second {
 		m.metrics = s.scrape(ctx)
+		if s.Progress != nil {
+			s.Progress.Set(m.metrics.at, progressReadings(m.metrics))
+		}
 	} else {
 		m.metrics = prev.metrics
 	}
@@ -467,4 +470,19 @@ func (h *history) add(m *model) (int, int) {
 		fails += x.fails
 	}
 	return done, fails
+}
+
+// progressReadings is every unit's reported progress in a scrape, by
+// namespace and pod, for the queue's estimates (queue.ProgressCache).
+func progressReadings(fm farmMetrics) map[[2]string]float64 {
+	out := map[[2]string]float64{}
+	for _, ss := range fm.nodes {
+		for _, x := range ss {
+			if x.name != "c4_task_progress" {
+				continue
+			}
+			out[[2]string{x.labels["namespace"], x.labels["pod"]}] = x.value
+		}
+	}
+	return out
 }

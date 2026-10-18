@@ -269,3 +269,48 @@ func TestRunningUnitsAreCensoredObservations(t *testing.T) {
 		t.Fatal("stale heavy flag")
 	}
 }
+
+// A long single unit with a wrong prior: 0.6h predicted, 4.9h actual. At
+// an hour in, the overrun rule says a quarter hour is left; a unit that
+// reports 20% done says about four hours, and the estimate follows it.
+func TestRemainderWithProgress(t *testing.T) {
+	e := New(DefaultConfig())
+	p := Pred{Mean: 0.6 * 3600, SDCorr: 0.3 * 3600}
+	hour := 3600.0
+	plain, _ := e.RemainderAt(p, 0, hour, 0)
+	if plain != 0.25*hour {
+		t.Fatalf("no progress: %v, want the overrun rule's %v", plain, 0.25*hour)
+	}
+	rem, sd := e.RemainderAt(p, 0, hour, 0.2)
+	if rem < 3*hour || rem > 4.1*hour || sd <= 0 {
+		t.Fatalf("at 20%%: remainder %.2fh sd %.2fh, want about 4h", rem/hour, sd/hour)
+	}
+	late, lsd := e.RemainderAt(p, 0, 4*hour, 0.8)
+	if math.Abs(late-hour) > 0.1*hour || lsd >= sd {
+		t.Fatalf("at 80%%: remainder %.2fh sd %.2fh", late/hour, lsd/hour)
+	}
+	if r, _ := e.RemainderAt(p, 0, hour, 0.01); r != plain {
+		t.Fatal("progress below ProgressMin was used")
+	}
+	if r, s := e.RemainderAt(p, 0, hour, 1); r != 0 || s != 0 {
+		t.Fatal("a unit reporting done has work left")
+	}
+	// Summarize reads it from running units.
+	s := e.Summarize(nil, []RunningUnit{{Unit: Unit{Key: "train"}, Elapsed: hour, Progress: 0.2}})
+	if s.W < 3*hour {
+		t.Fatalf("W %.2fh with a unit at 20%% after an hour", s.W/hour)
+	}
+}
+
+// Within its prediction, the prior and the reported progress are blended.
+func TestRemainderBlendsWithinPrediction(t *testing.T) {
+	e := New(DefaultConfig())
+	hour := 3600.0
+	p := Pred{Mean: 10 * hour, SDCorr: 2 * hour}
+	prior, _ := e.RemainderAt(p, 0, hour, 0)
+	prog := hour // at 50% after an hour
+	got, _ := e.RemainderAt(p, 0, hour, 0.5)
+	if !(got > prog && got < prior) {
+		t.Fatalf("blend %.2fh not between progress %.2fh and prior %.2fh", got/hour, prog/hour, prior/hour)
+	}
+}

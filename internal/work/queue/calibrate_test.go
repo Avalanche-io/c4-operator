@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
@@ -115,5 +116,56 @@ func TestSucceededJobCalibrates(t *testing.T) {
 	x, ok := cal.Quantile(all, 0.5)
 	if !ok || math.Abs(x) > 1 {
 		t.Fatalf("score at the start %v %v, want near 0 (units took what was declared)", x, ok)
+	}
+}
+
+func TestProgressCache(t *testing.T) {
+	var nilCache *ProgressCache
+	if _, ok := nilCache.Get("ns", "p", time.Now()); ok {
+		t.Fatal("a nil cache has readings")
+	}
+	c := &ProgressCache{}
+	t0 := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	c.Set(t0, map[[2]string]float64{{"ns", "p"}: 0.4})
+	if f, ok := c.Get("ns", "p", t0.Add(time.Minute)); !ok || f != 0.4 {
+		t.Fatalf("got %v %v", f, ok)
+	}
+	if _, ok := c.Get("ns", "q", t0); ok {
+		t.Fatal("a pod with no reading has one")
+	}
+	if _, ok := c.Get("ns", "p", t0.Add(progressStale+time.Second)); ok {
+		t.Fatal("a stale reading was used")
+	}
+}
+
+// A running unit that reports progress is estimated from it.
+func TestQueueUsesReportedProgress(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 1)
+	q.Progress = &ProgressCache{}
+	ctx := context.Background()
+	j := job(ns, "ml001", "render", "cpu-"+ns, map[string]string{"frames": "1-1", "estimateSeconds": "2160"}, now.Add(24*time.Hour))
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	pods := unitPods(t, ns, "ml001")
+	if len(pods) != 1 {
+		t.Fatalf("%d pods", len(pods))
+	}
+	p := pods[0]
+	p.Status.Phase = corev1.PodRunning
+	p.Status.StartTime = &metav1.Time{Time: *now}
+	if err := k8s.Status().Update(ctx, &p); err != nil {
+		t.Fatal(err)
+	}
+	*now = now.Add(time.Hour)
+	tick(t, q)
+	without := get(t, ns, "ml001").Status.Estimate.RemainingWork
+	q.Progress.Set(*now, map[[2]string]float64{{ns, p.Name}: 0.2})
+	*now = now.Add(time.Second)
+	tick(t, q)
+	with := get(t, ns, "ml001").Status.Estimate.RemainingWork
+	if with < 3*3600 || with <= 2*without {
+		t.Fatalf("remaining work %ds with 20%% reported after an hour, %ds without", with, without)
 	}
 }

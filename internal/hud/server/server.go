@@ -41,8 +41,11 @@ type Server struct {
 	Client client.Client        // the manager's cached client
 	Kube   kubernetes.Interface // logs, events, token and access reviews, c4-system pods
 	Queue  Queue                // burst spend and deadline options (optional)
-	Stores queue.StoreFunc      // project stores, for previews and objects
-	Web    fs.FS                // the web app
+	// Progress, when set, receives units' reported progress from each
+	// scrape of the node daemons, for the queue's estimates.
+	Progress *queue.ProgressCache
+	Stores   queue.StoreFunc // project stores, for previews and objects
+	Web      fs.FS           // the web app
 	// Loc is the farm's time zone, for times inside sentences the HUD
 	// writes (control confirmations). Every time field on the wire is UTC.
 	Loc *time.Location

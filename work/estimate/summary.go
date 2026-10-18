@@ -31,6 +31,9 @@ func (u Unit) slots() float64 {
 type RunningUnit struct {
 	Unit
 	Elapsed float64 // seconds since this attempt started
+	// Progress is the share of the unit done that the unit itself reports
+	// (.c4/progress), 0 to 1; 0 when it reports none.
+	Progress float64
 }
 
 // Summary is a job's remaining work. W, Sigma and the percentiles W50 to
@@ -114,6 +117,48 @@ func (e *Estimator) Remainder(p Pred, done, elapsed float64) (float64, float64) 
 	return rem, p.SD() * rem / p.Mean
 }
 
+// ProgressMin is the least reported progress the estimator uses: below
+// it, elapsed*(1-f)/f says too little.
+const ProgressMin = 0.02
+
+// RemainderAt is Remainder for a unit that reports progress f (the share
+// of it done). A unit that reports none, or too little, gets Remainder.
+//
+// Progress says what a single long unit cannot otherwise say: it has no
+// siblings to sample, so without it the estimator knows only its prior
+// and how long it has run, and a 4.9-hour unit with a 0.6-hour prior
+// looks nearly done for hours. From progress, the unit's total is
+// (done+elapsed)/f, so the remainder is (done+elapsed)*(1-f)/f, with a
+// relative spread of ProgressRelSD*sqrt((1-f)/f): wide early, where a
+// unit's progress is least linear, narrow late. While the unit is within
+// its prediction, the two remainders are combined by precision, so
+// progress takes over as f grows. Once it has run past its prediction,
+// the prediction is disproved and the overrun rule is a guess with no
+// evidence behind it, so progress alone decides.
+func (e *Estimator) RemainderAt(p Pred, done, elapsed, progress float64) (float64, float64) {
+	rem, sd := e.Remainder(p, done, elapsed)
+	if progress < ProgressMin {
+		return rem, sd
+	}
+	if progress >= 1 {
+		return 0, 0
+	}
+	took := done + elapsed
+	overrun := p.Mean-took <= 0
+	rp := took * (1 - progress) / progress
+	rel := e.cfg.ProgressRelSD
+	if rel <= 0 {
+		rel = 0.2
+	}
+	sp := math.Max(rp*rel*math.Sqrt((1-progress)/progress), 1)
+	if overrun {
+		return rp, sp
+	}
+	sd = math.Max(sd, 0.05*rem+1)
+	w1, w2 := 1/(sd*sd), 1/(sp*sp)
+	return (rem*w1 + rp*w2) / (w1 + w2), 1 / math.Sqrt(w1+w2)
+}
+
 // Summarize computes W, its spread and its percentiles over queued and
 // running units, including the expected work of unexpanded generators.
 // It first calls SetRunning with the running units. The percentiles are
@@ -158,7 +203,7 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 	}
 	for _, r := range run {
 		p := e.Predict(r.Key, r.Pos)
-		rem, sd := e.Remainder(p, r.Done, r.Elapsed)
+		rem, sd := e.RemainderAt(p, r.Done, r.Elapsed, r.Progress)
 		s.W += rem * r.slots()
 		indVar += (sd * r.slots()) * (sd * r.slots())
 		s.Running++

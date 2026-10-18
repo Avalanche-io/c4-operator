@@ -74,6 +74,9 @@ type Queue struct {
 	cal       calibrations
 	fcal      finishCals
 	shareHist map[string]bool
+	// Progress, when set, holds the progress running units report
+	// (progress.go); without it units are estimated from elapsed time.
+	Progress *ProgressCache
 	// policies are the projects' deadline policies by project and class.
 	policies map[string]map[string]forecast.Policy
 	// Last decisions, for the HUD, and each job's deadline policy then
@@ -624,8 +627,12 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	}
 	for idx, r := range v.running {
 		u := plan.Units[idx]
-		run = append(run, estimate.RunningUnit{Unit: estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots},
-			Elapsed: math.Max(0, now.Sub(r.started).Seconds())})
+		ru := estimate.RunningUnit{Unit: estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots},
+			Elapsed: math.Max(0, now.Sub(r.started).Seconds())}
+		if pod := v.pods[idx]; pod != nil {
+			ru.Progress, _ = q.Progress.Get(pod.Namespace, pod.Name, now)
+		}
+		run = append(run, ru)
 	}
 	s := e.Summarize(queued, run)
 	// No unit depends on another within these classes, so the critical
@@ -634,7 +641,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		s.TPath = math.Max(s.TPath, e.Predict(qu.Key, qu.Pos).Mean)
 	}
 	for _, ru := range run {
-		rem, _ := e.Remainder(e.Predict(ru.Key, ru.Pos), 0, ru.Elapsed)
+		rem, _ := e.RemainderAt(e.Predict(ru.Key, ru.Pos), 0, ru.Elapsed, ru.Progress)
 		s.TPath = math.Max(s.TPath, rem)
 	}
 	v.sum, v.est = s, e

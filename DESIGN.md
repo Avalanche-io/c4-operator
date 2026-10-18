@@ -1481,7 +1481,14 @@ historical failure rate instead, so a broken change fails fast).
 - **Remaining work** `W` is the sum of unit estimates for queued units, the
   expected remainder of running ones (past their estimate, a running unit is
   assumed to need a quarter of its elapsed time again), and the expected work
-  of unexpanded generators. Its spread `σ` combines the variances, and the
+  of unexpanded generators. A unit that reports its progress `f` (a fraction
+  in `.c4/progress`, which the node daemon exports as `c4_task_progress` and
+  the manager's scrape hands to the queue, never through the API server) is
+  estimated from it. Its remainder is `(done + elapsed)(1 - f)/f`, with a
+  relative spread of `0.2 sqrt((1 - f)/f)`, blended by precision with its
+  prediction while it is within it, and on its own once the unit has
+  outrun the prediction. That is what tracks a single long unit, which has
+  nothing to sample. Its spread `σ` combines the variances, and the
   scheduler plans on `W90 = W + 1.28 σ`, so a job with few samples or many
   unexpanded generators is treated as riskier.
 - **Calibration.** `W + 1.28 σ` under-covers wherever work has not been
