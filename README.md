@@ -225,9 +225,10 @@ bytes, any holder of the bytes can check them. The operator imports the
 stores, and reads and writes stores the c4 CLI uses.
 
 Anthropic's [Scion](https://www.anthropic.com/engineering/redesigning-source-control)
-uses the same structure, a content-addressed tree service, for a monorepo's
-CI. Here it serves the media pipelines C4 was made for, with one difference
-in the monorepo case: Scion made source control server-side, while here git
+showed what a content-addressed tree service does for a monorepo's CI, and
+the operator's tier design follows its architecture. This project takes the
+same structure to media pipelines, with trees named by C4 IDs, and one
+difference in the monorepo case: Scion made source control server-side, while here git
 stays where it is and its history is mirrored into C4 views (`import-git`,
 push by push).
 

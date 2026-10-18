@@ -46,12 +46,14 @@ farm runs deadline-driven rendering, CI, media processing and modest ML
 content-addressed data. Section 19 lists the non-goals, including the
 training infrastructure that large labs build.
 
-## Related work: Scion
+## Prior art: Scion
 
 Anthropic described Scion, its replacement for Git, in
 [Redesigning source control](https://www.anthropic.com/engineering/redesigning-source-control)
-(2026-10-13). It shares the structure of C4's content-addressed trees,
-built for a code monorepo. Where the two meet:
+(2026-10-13). The tier design here follows Scion's architecture: one
+daemon per node, strict cache tiers that answer the same requests,
+top-down fetch by immutable ID, sparse checkouts, and commits whose cost
+follows the change. The parts this design borrows:
 
 | Scion                                                                                                       | Here                                                                                                              |
 | ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
@@ -68,11 +70,17 @@ The post's update of 2026-10-15 credits Mononoke, Sapling's server, and its
 Bonsai data model for many of Scion's techniques (its footnote 2); they are
 prior art for this design as well. REPORT-v2.md compares the measurements.
 
-Scion is built for one code monorepo. Here the structure serves media
-trees, the case C4 was made for, where single objects are 10 MB to 10 GB
-rather
+Scion is built for one code monorepo. This design applies the same
+structure to media trees, where single objects are 10 MB to 10 GB rather
 than 10 KB, and where outputs (rendered frames) dominate writes. Section 8.2
 applies it back to source code through `oss/c4git`.
+
+What C4 brings to that architecture: the trees are C4 views, every file
+and tree named by its C4 ID (SMPTE ST 2114, in production use before the
+standard) and described as c4m, so the same names hold in any c4 store
+and tool outside the farm; and peer fetch by rendezvous hashing inside a
+locality, so a node's cache misses go to its neighbours before the
+regional tier.
 
 ## 1. Trust model
 
