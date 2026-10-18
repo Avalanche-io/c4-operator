@@ -99,8 +99,12 @@ func buildHistory(p params, targets []ciTarget) *history {
 }
 
 // estimatorFor returns a fresh estimator for a job, seeded with history.
-func (h *history) estimatorFor(js *jobSpec) *estimate.Estimator {
+func (h *history) estimatorFor(js *jobSpec) *estimate.Estimator { return h.estimatorWith(js, nil) }
+
+// estimatorWith is estimatorFor with a W calibration (etaeval.go).
+func (h *history) estimatorWith(js *jobSpec, cal *estimate.Calibration) *estimate.Estimator {
 	cfg := estimate.DefaultConfig()
+	cfg.Calibration = cal
 	if d, ok := h.def[js.priorKey]; ok && d.Mean > 0 {
 		cfg.Default = d
 	}

@@ -47,6 +47,7 @@ type runResult struct {
 	approvalJobs  map[string]bool
 	Unfinished    int
 	end           float64
+	eta           *etaRunResult // the ETA experiment's records (etaeval.go)
 }
 
 func newResult(policy string, seed uint64) *runResult {
@@ -84,7 +85,7 @@ func (r *runResult) outcome(j *job, done float64) {
 	}
 	r.Jobs = append(r.Jobs, jobOutcome{ID: js.id, Kind: js.kind, Project: js.project, GPU: js.gpu, Expand: js.expand,
 		Units: len(js.units), WorkSlotHours: w / hour, HeavyMult: js.heavyMult,
-		Submit: js.submit / hour, Deadline: js.deadline / hour, Done: done / hour})
+		Submit: js.submit / hour, Deadline: j.deadline / hour, Done: done / hour})
 }
 
 func (r *runResult) jobDone(j *job) {
@@ -96,7 +97,7 @@ func (r *runResult) jobDone(j *job) {
 	}
 	s := r.stat(js.kind)
 	s.Jobs++
-	if late := j.finish - js.deadline; late > 0 {
+	if late := j.finish - j.deadline; late > 0 {
 		s.Missed++
 		s.LateHours += late / hour
 	}
@@ -112,7 +113,7 @@ func (r *runResult) unfinished(j *job, end float64) {
 	}
 	s := r.stat(js.kind)
 	s.Jobs++
-	if late := end - js.deadline; late > 0 {
+	if late := end - j.deadline; late > 0 {
 		s.Missed++
 		s.LateHours += late / hour
 	}

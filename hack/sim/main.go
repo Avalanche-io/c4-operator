@@ -23,6 +23,7 @@ func main() {
 	only := flag.String("policy", "", "run only these policies, comma-separated (debugging)")
 	skipOrder := flag.Bool("skip-order", false, "skip the binary-order experiment")
 	trials := flag.Int("order-trials", 40, "binary-order trials per (frames, multiplier)")
+	skipETA := flag.Bool("skip-eta", false, "skip the ETA band and suggested-deadline experiment")
 	flag.Parse()
 
 	started := time.Now()
@@ -61,6 +62,12 @@ func main() {
 	if err := writeReport(*out, p, seedList, pols, results, tight, tightRes, ord, time.Since(started)); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+	if !*skipETA {
+		if err := writeETA(*out, runETAExperiment(p, seedList), seedList); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	}
 	fmt.Printf("wrote %s/results.md in %s\n", *out, time.Since(started).Round(time.Second))
 }

@@ -56,8 +56,12 @@ func (b Band) Width(start time.Time) float64 {
 //  1. places each calibrated percentile Wq on the line through (W, ETA50)
 //     and (W90, ETA90), so the band follows the calibrated percentiles
 //     and the plan's rate for this job alike;
-//  2. takes back half the tail, s.TPath/2, never ending before now plus
-//     that half.
+//  2. takes back half the tail, s.TPath/2, but never ends before now
+//     plus the whole critical path: every remaining unit must finish, so
+//     a job whose units all run in one wave (a CI pipeline, a short
+//     preview) finishes no sooner than its longest unit, however small
+//     W/C is. (hack/sim's ETA experiment found the half-tail floor
+//     halved such jobs' remaining time.)
 //
 // It returns the zero Band when the scheduler gave no ETA.
 func Display(now time.Time, s estimate.Summary, eta50, eta90 time.Time) Band {
@@ -75,7 +79,7 @@ func Display(now time.Time, s estimate.Summary, eta50, eta90 time.Time) Band {
 		}
 		half := time.Duration(s.TPath / 2 * float64(time.Second))
 		t = t.Add(-half)
-		if floor := now.Add(half); t.Before(floor) {
+		if floor := now.Add(2 * half); t.Before(floor) {
 			t = floor
 		}
 		return t

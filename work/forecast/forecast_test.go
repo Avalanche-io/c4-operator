@@ -1,6 +1,7 @@
 package forecast
 
 import (
+	"math"
 	"testing"
 	"time"
 
@@ -108,10 +109,10 @@ func TestDisplay(t *testing.T) {
 	if !Display(now, s, time.Time{}, time.Time{}).IsZero() {
 		t.Errorf("no ETA, want no band")
 	}
-	// Never earlier than now plus half the longest unit.
+	// Never earlier than now plus the critical path.
 	b = Display(now, estimate.Summary{W: 10, W90: 20, W50: 10, W80: 15, W95: 25, TPath: 7200}, now.Add(time.Minute), now.Add(2*time.Minute))
-	if b.P50.Before(now.Add(time.Hour)) {
-		t.Errorf("P50 %s before now + tail/2", b.P50.In(la).Format("15:04"))
+	if b.P50.Before(now.Add(2 * time.Hour)) {
+		t.Errorf("P50 %s before now + the critical path", b.P50.In(la).Format("15:04"))
 	}
 }
 
@@ -224,5 +225,35 @@ func TestAchievable(t *testing.T) {
 	}
 	if !FirstAchievable(lo, hi, time.Minute, func(time.Time) bool { return true }).Equal(lo) {
 		t.Error("always achievable: want lo")
+	}
+}
+
+func TestFinishCalibration(t *testing.T) {
+	c := NewFinishCalibration(0)
+	c.Min = 10
+	k := FinishKey{Class: "render", Stage: 1}
+	now := at("2026-10-21 10:00")
+	b := Band{P50: now.Add(time.Hour), P80: now.Add(90 * time.Minute), P90: now.Add(2 * time.Hour), P95: now.Add(3 * time.Hour)}
+	if got := c.Apply(k, now, b); got != b {
+		t.Fatal("an empty calibration changed the band")
+	}
+	// Jobs took 1x to 2x what their median said, evenly.
+	for i := range 101 {
+		f := 1 + float64(i)/100
+		c.Add(k, FinishScore(now, now.Add(time.Hour), now.Add(time.Duration(f*float64(time.Hour)))))
+	}
+	got := c.Apply(k, now, b)
+	near := func(x time.Time, h float64) bool { return math.Abs(x.Sub(now).Hours()-h) < 0.03 }
+	if !near(got.P50, 1.5) || !near(got.P80, 1.8) || !near(got.P95, 1.95) {
+		t.Fatalf("calibrated %v %v %v", got.P50.Sub(now), got.P80.Sub(now), got.P95.Sub(now))
+	}
+	if c.Apply(FinishKey{Class: "ci"}, now, b) != b {
+		t.Fatal("a key with no scores borrowed another's")
+	}
+	if got := c.Apply(FinishKey{Class: "render", Stage: 3}, now, b); !near(got.P50, 1.5) {
+		t.Fatal("a stage with no scores did not fall back to its class")
+	}
+	if StageOf(0, 10) != 0 || StageOf(2, 10) != 1 || StageOf(5, 10) != 2 || StageOf(8, 10) != 3 {
+		t.Fatal("stages")
 	}
 }

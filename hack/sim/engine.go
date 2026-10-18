@@ -55,9 +55,11 @@ type unit struct {
 	endAt       float64
 	retained    float64 // ML progress secured in checkpoints, seconds
 	yieldAt     float64
-	kidsLeft    int
-	kidsWork    float64
-	kidsLongest float64
+	// finStart and finEnd bound the attempt that finished (etaeval.go).
+	finStart, finEnd float64
+	kidsLeft         int
+	kidsWork         float64
+	kidsLongest      float64
 }
 
 type job struct {
@@ -77,6 +79,10 @@ type job struct {
 	dirty       bool
 	finish      float64
 	lastRunning float64
+	// deadline is the job's deadline in this run: the workload's, unless
+	// an ETA experiment arm sets another (etaeval.go).
+	deadline float64
+	eta      *etaJob
 }
 
 type batch struct {
@@ -184,6 +190,7 @@ type engine struct {
 	pol       policySpec
 	pcfg      sched.Config
 	pst       sched.State
+	eta       *etaArm // nil outside the ETA experiment
 	now       float64
 	q         evHeap
 	seq       int
@@ -215,7 +222,7 @@ func newEngine(w *workload, h *history, seed uint64, pol policySpec, f farm) *en
 		e.byName[pd.name] = p
 	}
 	for i, js := range w.jobs {
-		j := &job{spec: js, idx: i, runSlots: map[string]int{}, finish: -1, lastRunning: -1, dirty: true}
+		j := &job{spec: js, idx: i, runSlots: map[string]int{}, finish: -1, lastRunning: -1, dirty: true, deadline: js.deadline}
 		for k := range js.units {
 			us := &js.units[k]
 			u := &unit{spec: us, j: j, idx: k, id: fmt.Sprintf("%s/%d", js.id, k), state: stHidden}
@@ -291,6 +298,9 @@ func (e *engine) run() *runResult {
 
 func (e *engine) arrive(j *job) {
 	j.est = e.hist.estimatorFor(j.spec)
+	if e.eta != nil {
+		e.eta.arrive(e, j)
+	}
 	for _, u := range j.units {
 		if u.spec.hidden {
 			continue
@@ -461,6 +471,7 @@ func (e *engine) stop(u *unit, how evKind, killed bool) {
 		return
 	}
 	u.state = stDone
+	u.finStart, u.finEnd = u.start, e.now
 	e.complete(u, elapsed)
 	e.requestDecide()
 }
@@ -501,6 +512,9 @@ func (e *engine) complete(u *unit, elapsed float64) {
 		j.finish = e.now
 		e.left--
 		e.res.jobDone(j)
+		if e.eta != nil {
+			e.eta.done(e, j)
+		}
 		for i, x := range e.active {
 			if x == j {
 				e.active = append(e.active[:i], e.active[i+1:]...)
@@ -551,7 +565,7 @@ func (e *engine) snapshot() sched.Snapshot {
 		k := min(len(j.runnable), room/slots+1)
 		sj := sched.Job{
 			ID: js.id, Project: js.project, Class: js.kind,
-			Submitted: e.at(js.submit), Ready: e.at(js.submit), Deadline: e.at(js.deadline),
+			Submitted: e.at(js.submit), Ready: e.at(js.submit), Deadline: e.at(j.deadline),
 			Pools: poolsFor(js.kind, js.gpu), SlotsPerUnit: slots,
 			Running: j.runSlots, RunnableTotal: len(j.runnable), Blocked: j.blocked, Unevaluated: j.uneval,
 			Preemptible: js.kind != "ci", Checkpoints: js.ml != nil,
@@ -645,7 +659,13 @@ func (e *engine) decide() {
 		p.meter(e.now)
 	}
 	s := e.snapshot()
+	if e.eta != nil {
+		e.eta.beforeDecide(e, &s)
+	}
 	d := e.pol.fn(s, &e.pst, e.pcfg)
+	if e.eta != nil {
+		e.eta.afterDecide(e, s, d)
+	}
 	if traceJob != "" && e.pol.name == tracePolicy && e.seed == 1 && e.farm.name == "main" {
 		e.trace(s, d)
 	}
