@@ -205,6 +205,9 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		if m.finished.IsZero() {
 			m.finished = now
 		}
+		if st.Phase == "Succeeded" {
+			q.learn(v)
+		}
 		st.Finished = &metav1.Time{Time: m.finished.Truncate(time.Second)}
 		// The queue seals the job: a signed record of its output and of the
 		// decisions that touched it.

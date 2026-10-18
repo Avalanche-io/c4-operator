@@ -1407,6 +1407,26 @@ historical failure rate instead, so a broken change fails fast).
   of unexpanded generators. Its spread `σ` combines the variances, and the
   scheduler plans on `W90 = W + 1.28 σ`, so a job with few samples or many
   unexpanded generators is treated as riskier.
+- **Calibration.** `W + 1.28 σ` under-covers wherever work has not been
+  sampled yet (68 to 83% on shots with a 3x to 8x heavy region in
+  `hack/sim`). So the percentiles W50, W80, W90 and W95 are calibrated
+  against finished jobs (`estimate.Calibration`). The queue keeps a job's
+  summaries at up to 80 moments: every finished-unit count up to 33, then
+  about every 1/32 of the job. When the job succeeds, each moment's true
+  remaining work is known, and the gap from W, scaled by the summary's
+  spread, becomes a split-conformal score. Scores are kept per project and
+  class and by what the estimator could see at that moment: the share of
+  units finished, the heavy multiple measured on finished units, and
+  running units that have outlasted it. A stratum with 200 scores supplies
+  its quantiles; one with fewer falls back to coarser strata, then to
+  `W + z σ`. A project with `spec.work.shareHistory: aggregate` also adds
+  its scores to a farm-wide pool per class, which opted-in projects consult
+  behind their own once three projects contribute. Scores carry no names,
+  inputs or IDs. Calibrations are kept in memory and refill after a
+  restart. In `hack/sim`, binary-order W90 covers 87 to 93% for every heavy
+  multiple once a quarter of the frames are done and the heavy region has
+  been sampled. Before that, a 3x and an 8x region look alike to any
+  estimator, so calibration covers 90% of the mix.
 - **Critical path.** Within a job, the longest chain of estimated durations
   through the unit graph (`t_path`) bounds the finish time no matter how many
   slots the job gets. For a render job it is one frame's passes; for a CI

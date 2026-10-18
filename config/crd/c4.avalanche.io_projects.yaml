@@ -209,6 +209,18 @@ spec:
                       - pool
                       type: object
                     type: array
+                  shareHistory:
+                    description: |-
+                      ShareHistory says whether the project's finished jobs may inform
+                      other projects' estimates. "none" (the default) keeps the project's
+                      history to itself. "aggregate" adds its calibration scores to a
+                      farm-wide pool per class, which every opted-in project consults
+                      behind its own, and only once at least three projects contribute.
+                      Scores carry no names, inputs or C4 IDs.
+                    enum:
+                    - none
+                    - aggregate
+                    type: string
                 type: object
             required:
             - namespaces

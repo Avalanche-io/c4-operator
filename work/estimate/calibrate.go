@@ -37,6 +37,11 @@ type Calibration struct {
 	// to the as-built normal quantiles.
 	Min int
 
+	// Fallback, when set, is consulted when no stratum of this
+	// calibration has Min scores: a farm-wide calibration that projects
+	// opt in to, behind each project's own.
+	Fallback *Calibration
+
 	mu    sync.RWMutex
 	cap   int
 	rings map[Stratum]*ring
@@ -107,9 +112,19 @@ func (c *Calibration) Add(s Stratum, score float64) {
 }
 
 // Quantile returns the conformal q-quantile of the scores of s or of the
-// finest coarser stratum with at least Min scores, and whether one was
-// found.
+// finest coarser stratum with at least Min scores, then the same from
+// Fallback, and whether one was found.
 func (c *Calibration) Quantile(s Stratum, q float64) (float64, bool) {
+	if x, ok := c.quantile(s, q); ok {
+		return x, true
+	}
+	if c.Fallback != nil && c.Fallback != c {
+		return c.Fallback.quantile(s, q)
+	}
+	return 0, false
+}
+
+func (c *Calibration) quantile(s Stratum, q float64) (float64, bool) {
 	c.mu.Lock() // quantile caches a sorted copy
 	defer c.mu.Unlock()
 	for _, k := range s.coarser() {

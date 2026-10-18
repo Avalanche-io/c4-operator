@@ -151,6 +151,15 @@ type ProjectWork struct {
 	// FairShareWeight scales the project's share of free capacity.
 	// +optional
 	FairShareWeight string `json:"fairShareWeight,omitempty"`
+	// ShareHistory says whether the project's finished jobs may inform
+	// other projects' estimates. "none" (the default) keeps the project's
+	// history to itself. "aggregate" adds its calibration scores to a
+	// farm-wide pool per class, which every opted-in project consults
+	// behind its own, and only once at least three projects contribute.
+	// Scores carry no names, inputs or C4 IDs.
+	// +kubebuilder:validation:Enum=none;aggregate
+	// +optional
+	ShareHistory string `json:"shareHistory,omitempty"`
 }
 
 // Quota is a project's entitlement in one pool.

@@ -68,6 +68,10 @@ type Queue struct {
 	// Stores opens a project's store, to fold unit changesets into job
 	// outputs. Without it, outputs are not folded.
 	Stores StoreFunc
+	// cal holds live calibrations, shareHist the projects that share
+	// theirs (calibrate.go).
+	cal       calibrations
+	shareHist map[string]bool
 	// Last decisions, for the HUD.
 	lastSnap sched.Snapshot
 	lastDec  sched.Decisions
@@ -143,13 +147,18 @@ type jobMem struct {
 	started     time.Time
 	finished    time.Time
 	wrote       time.Time
+	// ended is when each succeeded unit finished, and calPts the
+	// summaries kept for live calibration (calibrate.go).
+	ended   map[int]time.Time
+	calPts  []calPoint
+	learned bool
 }
 
 func newMem() *jobMem {
 	return &jobMem{succeeded: map[int]bool{}, failed: map[int]bool{}, attempts: map[int]int{},
 		millis: map[int]int64{}, launched: map[int]time.Time{}, nodeFails: map[string]int{}, blacklist: map[string]bool{},
 		resume: map[int]string{}, yieldAsked: map[int]time.Time{}, preemptions: map[int]int{},
-		out: newOutput(), foldedPod: map[types.UID]bool{}}
+		out: newOutput(), foldedPod: map[types.UID]bool{}, ended: map[int]time.Time{}}
 }
 
 // yieldRecord is one yield of a checkpointing unit.
@@ -293,9 +302,13 @@ func (q *Queue) Tick(ctx context.Context) error {
 
 	poolInfo := q.pools(ctx, pools.Items, nodes.Items, pods.Items, crs.Items)
 	nsProject := map[string]string{}
+	q.shareHist = map[string]bool{}
 	for _, p := range projects.Items {
 		for _, ns := range p.Spec.Namespaces {
 			nsProject[ns] = p.Name
+		}
+		if w := p.Spec.Work; w != nil && w.ShareHistory == "aggregate" {
+			q.shareHist[p.Name] = true
 		}
 	}
 	podsByJob := map[string][]*corev1.Pod{}
@@ -381,10 +394,13 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				delete(m.succeeded, i)
 				delete(m.failed, i)
 				delete(m.millis, i)
+				delete(m.ended, i)
 				m.attempts[i] = 0
 			}
 			m.requeued = token
 			m.finished = time.Time{}
+			// Moments planned before the requeue did not foresee it.
+			m.calPts, m.learned = nil, true
 		}
 	}
 	// Nodes a person allowed again leave the automatic blacklist.
@@ -462,6 +478,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			if !m.succeeded[idx] {
 				m.succeeded[idx] = true
 				m.millis[idx] = runMillis(p, now)
+				m.ended[idx] = finishOf(p, now)
 			}
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed:
@@ -530,7 +547,9 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 // summarizes the remaining work.
 func (q *Queue) estimate(v *view, now time.Time) {
 	plan := v.mem.plan
-	e := estimate.New(plan.Estimate)
+	cfg := plan.Estimate
+	cfg.Calibration = q.cal.forJob(v.project, v.job.Spec.Class, q.shareHist[v.project])
+	e := estimate.New(cfg)
 	if plan.Prior != nil {
 		for _, u := range plan.Units {
 			e.SetPrior(u.Key, *plan.Prior)
@@ -568,6 +587,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		s.TPath = math.Max(s.TPath, rem)
 	}
 	v.sum, v.est = s, e
+	v.mem.notePoint(now, len(v.mem.millis), len(plan.Units), s)
 }
 
 // snapshot builds the policy's input.

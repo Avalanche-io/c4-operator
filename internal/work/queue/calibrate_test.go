@@ -1,0 +1,119 @@
+package queue
+
+import (
+	"context"
+	"math"
+	"testing"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/Avalanche-io/c4-operator/work/estimate"
+)
+
+func TestRemainingAfter(t *testing.T) {
+	t0 := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	ends := map[int]time.Time{0: t0.Add(60 * time.Second), 1: t0.Add(120 * time.Second), 2: t0.Add(200 * time.Second)}
+	millis := map[int]int64{0: 60000, 1: 60000, 2: 100000}
+	slots := func(i int) int { return map[int]int{2: 2}[i] } // unit 2 is a gang of two
+	cases := []struct {
+		at   time.Duration
+		want float64
+	}{
+		{0, 60 + 60 + 2*100},
+		{90 * time.Second, 30 + 2*100}, // unit 1 half done, unit 2 not started
+		{150 * time.Second, 2 * 50},    // unit 2 half done
+		{300 * time.Second, 0},
+	}
+	for _, c := range cases {
+		got, ok := remainingAfter(t0.Add(c.at), ends, millis, slots)
+		if !ok || math.Abs(got-c.want) > 1e-9 {
+			t.Errorf("after %v: %v %v, want %v", c.at, got, ok, c.want)
+		}
+	}
+	delete(ends, 1)
+	if _, ok := remainingAfter(t0, ends, millis, slots); ok {
+		t.Error("an unknown end time must make the moment unusable")
+	}
+}
+
+func TestKeepPoints(t *testing.T) {
+	m := newMem()
+	now := time.Date(2026, 10, 18, 9, 0, 0, 0, time.UTC)
+	for f := 0; f < 640; f++ {
+		m.notePoint(now, f, 640, estimate.Summary{W: 1})
+		m.notePoint(now, f, 640, estimate.Summary{W: 2}) // once per count
+	}
+	if len(m.calPts) != 34+30 { // 0..33, then every 20th from 40 to 620
+		t.Fatalf("kept %d moments", len(m.calPts))
+	}
+	for _, p := range m.calPts {
+		if p.sum.W != 1 {
+			t.Fatal("a second summary at the same count replaced the first")
+		}
+	}
+	if len(m.calPts) > calPointsMax {
+		t.Fatalf("over the cap: %d", len(m.calPts))
+	}
+}
+
+func TestCalibrationSharing(t *testing.T) {
+	var c calibrations
+	st := estimate.Stratum{Sampled: 1}
+	c.add("a", "render", false, st, 1)
+	if c.forJob("a", "render", true).Fallback != nil {
+		t.Fatal("a farm calibration exists with no project sharing")
+	}
+	if len(c.farm) != 0 {
+		t.Fatal("a project that does not share added to the farm")
+	}
+	c.add("b", "render", true, st, 1)
+	c.add("c", "render", true, st, 1)
+	if c.forJob("b", "render", true).Fallback != nil {
+		t.Fatal("farm calibration consulted with two projects")
+	}
+	c.add("d", "render", true, st, 1)
+	if c.forJob("b", "render", true).Fallback == nil {
+		t.Fatal("farm calibration not consulted with three projects")
+	}
+	if c.forJob("a", "render", false).Fallback != nil {
+		t.Fatal("a project that does not share reads the farm calibration")
+	}
+	if c.forJob("b", "ci", true).Fallback != nil {
+		t.Fatal("farm calibration crossed classes")
+	}
+}
+
+// A job run to success leaves scores in its project's calibration, and
+// a job whose units take what was declared scores near zero at its start.
+func TestSucceededJobCalibrates(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 2, 2)
+	ctx := context.Background()
+	j := job(ns, "sh020", "render", "cpu-"+ns, map[string]string{"frames": "1001-1008", "estimateSeconds": "60"}, now.Add(time.Hour))
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20 && get(t, ns, "sh020").Status.Phase != "Succeeded"; i++ {
+		tick(t, q)
+		*now = now.Add(60 * time.Second)
+		for _, p := range unitPods(t, ns, "sh020") {
+			if p.Status.Phase == "" || p.Status.Phase == corev1.PodPending {
+				finish(t, &p, corev1.PodSucceeded, *now, 60*time.Second, nil)
+			}
+		}
+	}
+	tick(t, q)
+	if ph := get(t, ns, "sh020").Status.Phase; ph != "Succeeded" {
+		t.Fatalf("job did not finish: %s", ph)
+	}
+	cal := q.cal.forJob("namespace/"+ns, "render", false)
+	all := estimate.Stratum{Sampled: 0, Measured: -1, Open: -1}
+	if cal.Count(all) == 0 {
+		t.Fatal("no score at the job's start")
+	}
+	cal.Min = 1
+	x, ok := cal.Quantile(all, 0.5)
+	if !ok || math.Abs(x) > 1 {
+		t.Fatalf("score at the start %v %v, want near 0 (units took what was declared)", x, ok)
+	}
+}

@@ -160,3 +160,25 @@ func TestPlusAddsCalibratedPercentiles(t *testing.T) {
 		t.Fatalf("%+v", c)
 	}
 }
+
+func TestCalibrationFallback(t *testing.T) {
+	own, farm := NewCalibration(0), NewCalibration(0)
+	own.Min, farm.Min = 5, 5
+	st := Stratum{Sampled: 2}
+	for i := range 5 {
+		farm.Add(st, float64(i))
+	}
+	if _, ok := own.Quantile(st, 0.9); ok {
+		t.Fatal("empty calibration answered without a fallback")
+	}
+	own.Fallback = farm
+	if x, ok := own.Quantile(st, 0.9); !ok || x != 4 {
+		t.Fatalf("fallback quantile %v %v, want 4 true", x, ok)
+	}
+	for range 5 {
+		own.Add(st, 10)
+	}
+	if x, _ := own.Quantile(st, 0.9); x != 10 {
+		t.Fatalf("own scores should win once it has Min: got %v", x)
+	}
+}
