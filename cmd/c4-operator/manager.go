@@ -28,9 +28,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/controller"
 	"github.com/Avalanche-io/c4-operator/internal/hud"
-	"github.com/Avalanche-io/c4-operator/internal/hud/api"
 	hudserver "github.com/Avalanche-io/c4-operator/internal/hud/server"
 	"github.com/Avalanche-io/c4-operator/internal/project"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
@@ -38,7 +38,7 @@ import (
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
 	"github.com/Avalanche-io/c4-operator/internal/work/kindsim"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // unitPods selects pods the work queue created.

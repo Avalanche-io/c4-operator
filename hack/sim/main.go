@@ -1,6 +1,6 @@
 // Command sim replays a synthetic week of studio work (render, CI and ML)
 // under several scheduling policies, calling the production policy code in
-// internal/work/sched, and runs a second experiment on remaining-time
+// work/sched, and runs a second experiment on remaining-time
 // estimates under sequential and binary frame order. It writes
 // hack/sim/out/results.md and CSVs next to it.
 //

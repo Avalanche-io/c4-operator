@@ -2,7 +2,7 @@
 
 Reproduce with `go run ./hack/sim` from the repository root (seeds 1, 2, 3, 4, 5; 40 binary-order trials per cell). Built with go1.26.7. Every number below is produced by that command; nothing is edited by hand except the discussion at the end, which is kept in `hack/sim/discussion.md`.
 
-The simulator calls the production policy code (`internal/work/sched.Decide`) and the estimator (`internal/work/estimate`) on snapshots it builds, as the controller will. Baselines are in the same package with the same signature.
+The simulator calls the production policy code (`work/sched.Decide`) and the estimator (`work/estimate`) on snapshots it builds, as the controller will. Baselines are in the same package with the same signature.
 
 ## Results
 

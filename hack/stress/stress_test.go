@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // TestQuickGrid runs the quick grid (the CI grid of `make stress-quick`)
@@ -110,7 +110,7 @@ func TestSpecExport(t *testing.T) {
 
 // Reproducers of scheduling bugs. Each is the smallest snapshot found
 // that shows the bug, and is skipped until its fix lands in
-// internal/work/sched; remove the skipRepro line with the fix.
+// work/sched; remove the skipRepro line with the fix.
 // STRESS_REPRO=1 runs them anyway (they fail while the bug is there).
 
 func skipRepro(t *testing.T, why string) {

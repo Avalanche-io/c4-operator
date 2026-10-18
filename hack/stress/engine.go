@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // The engine is a discrete-event simulation of a generated farm, in the

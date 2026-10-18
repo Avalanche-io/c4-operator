@@ -6,7 +6,7 @@ import (
 	"math/rand/v2"
 	"sort"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/order"
+	"github.com/Avalanche-io/c4-operator/work/order"
 )
 
 // params is every workload parameter. results.md prints them all.

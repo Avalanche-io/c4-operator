@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // A variant is a metamorphic transformation of a point's workload: the

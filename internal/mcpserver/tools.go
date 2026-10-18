@@ -11,7 +11,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
 // Version is the server's version, reported to clients.

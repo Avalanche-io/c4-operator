@@ -13,7 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
 // The book (GET /book) is read on demand, never watched: Kubernetes Events

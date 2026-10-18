@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
 var t0 = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC) // a Monday

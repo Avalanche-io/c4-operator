@@ -13,7 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
-	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
 // Unit is one unit of a job's plan.

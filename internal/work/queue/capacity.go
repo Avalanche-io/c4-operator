@@ -14,7 +14,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // capacity writes the policy's burst decisions as CapacityRequests: one

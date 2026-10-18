@@ -3,7 +3,7 @@
 The HUD web app (`internal/hud/web`) reads this API and nothing else. The real
 backend (`internal/hud/server`, run by the manager) and the mock
 (`hack/hudmock`) both implement it, from the same Go types
-(`internal/hud/api`). The MCP server (`internal/mcpserver`) is a client of it. DESIGN.md section 10 describes the HUD; this file is the wire
+(`hud/api`). The MCP server (`internal/mcpserver`) is a client of it. DESIGN.md section 10 describes the HUD; this file is the wire
 contract.
 
 All paths are under `/api/v1`. Responses are JSON unless noted.

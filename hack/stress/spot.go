@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // Spot capacity as each provider sells it today. A spot point (Provider

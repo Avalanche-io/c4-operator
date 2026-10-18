@@ -9,7 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
-	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 

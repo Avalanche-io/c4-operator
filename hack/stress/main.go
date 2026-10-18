@@ -1,4 +1,4 @@
-// Command stress runs the scheduling policy in internal/work/sched over a
+// Command stress runs the scheduling policy in work/sched over a
 // seeded sample of farms and workloads (a Latin hypercube over farm
 // scale, load, deadlines, durations, DAG shape, quotas, arrivals, burst
 // economics, faults, nudges and training gangs, plus hand-picked

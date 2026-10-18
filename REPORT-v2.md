@@ -64,7 +64,7 @@ The one difference from Scion: Scion made source control server-side; this mirro
 
 ### P5: the work system and the HUD
 
-The queue (`internal/work/queue`) runs the scheduling policy (`internal/work/sched`, a pure function) every two seconds over WorkJobs, Pools, Projects and its unit pods. Slots are an extended resource on pool nodes, so kube-scheduler places units as the queue counts them.
+The queue (`internal/work/queue`) runs the scheduling policy (`work/sched`, a pure function) every two seconds over WorkJobs, Pools, Projects and its unit pods. Slots are an extended resource on pool nodes, so kube-scheduler places units as the queue counts them.
 
 On the test farm (16 cpu slots, 8 GPU slots, up to 8 burst slots on spot nodes that a simulated capacity provider brings up after a 20 s delay), seven jobs from two shows:
 

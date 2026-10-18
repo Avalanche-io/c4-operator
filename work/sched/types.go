@@ -17,7 +17,7 @@ package sched
 import (
 	"time"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
 // Snapshot is everything a decision looks at.

@@ -1,6 +1,6 @@
 // Package queue is the work system's controller (DESIGN.md section 10.2):
 // every tick it reads pools, projects, jobs and unit pods, asks the
-// scheduling policy (internal/work/sched) what to release, preempt and
+// scheduling policy (work/sched) what to release, preempt and
 // request, and carries that out. Units become pods only when they can
 // run; kube-scheduler places them.
 package queue
@@ -27,9 +27,9 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
-	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
-	"github.com/Avalanche-io/c4-operator/internal/work/order"
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/order"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // SlotResource is the extended resource each pool node advertises, one per

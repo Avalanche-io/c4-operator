@@ -13,7 +13,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
 // fakeHUD serves a fixed farm and records control requests.

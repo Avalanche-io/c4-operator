@@ -20,8 +20,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
-	"github.com/Avalanche-io/c4-operator/internal/work/order"
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/order"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 var k8s client.Client

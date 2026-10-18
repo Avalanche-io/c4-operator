@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // The invariants. Each is checked on every decision of the policy under

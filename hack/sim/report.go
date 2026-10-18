@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 //go:embed discussion.md
@@ -101,7 +101,7 @@ func writeReport(dir string, p params, seeds []uint64, pols []policySpec, res ma
 	b.WriteString("# Work scheduling simulation\n\n")
 	fmt.Fprintf(&b, "Reproduce with `go run ./hack/sim` from the repository root (seeds %s; %d binary-order trials per cell). ", strings.Join(seedStr, ", "), orderTrials(ord))
 	fmt.Fprintf(&b, "Built with %s. Every number below is produced by that command; nothing is edited by hand except the discussion at the end, which is kept in `hack/sim/discussion.md`.\n\n", runtime.Version())
-	b.WriteString("The simulator calls the production policy code (`internal/work/sched.Decide`) and the estimator (`internal/work/estimate`) on snapshots it builds, as the controller will. Baselines are in the same package with the same signature.\n\n")
+	b.WriteString("The simulator calls the production policy code (`work/sched.Decide`) and the estimator (`work/estimate`) on snapshots it builds, as the controller will. Baselines are in the same package with the same signature.\n\n")
 
 	var mainPols, abl []policySpec
 	for _, pol := range pols {

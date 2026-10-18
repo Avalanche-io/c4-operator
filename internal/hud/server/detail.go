@@ -18,10 +18,10 @@ import (
 	"github.com/Avalanche-io/c4"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
-	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
-	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
-	"github.com/Avalanche-io/c4-operator/internal/work/order"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/order"
 )
 
 // job finds a job the viewer may see; nil answers 404 (not 403, so a

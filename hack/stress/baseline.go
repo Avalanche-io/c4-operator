@@ -3,7 +3,7 @@ package main
 import (
 	"sort"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/sched"
+	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
 // Baselines with sched.Policy's signature that sched does not have. Both

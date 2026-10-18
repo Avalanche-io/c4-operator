@@ -5,7 +5,7 @@ import (
 	"math"
 	"math/rand/v2"
 
-	"github.com/Avalanche-io/c4-operator/internal/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
 // history stands in for what a farm learns from earlier weeks: per class

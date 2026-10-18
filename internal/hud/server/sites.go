@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/Avalanche-io/c4-operator/internal/hud/api"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
 // LoadSites reads the farm's sites for the HUD's map (--hud-sites): a JSON
