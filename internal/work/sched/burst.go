@@ -274,8 +274,12 @@ func slotList(sg *BurstSuggestion) string {
 }
 
 func dollars(x float64) string {
-	if x >= 100 {
+	switch {
+	case x >= 100:
 		return fmt.Sprintf("$%.0f", math.Round(x/10)*10)
+	case x > 0 && x < 1:
+		// Cents, so a small lateness cost never reads as $0.
+		return fmt.Sprintf("$%.2f", math.Max(x, 0.01))
 	}
 	return fmt.Sprintf("$%.0f", math.Round(x))
 }

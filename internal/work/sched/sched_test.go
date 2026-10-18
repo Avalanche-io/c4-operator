@@ -753,3 +753,22 @@ func TestEvictedJobIsLateAtItsShare(t *testing.T) {
 		t.Fatalf("a with no share: burst %+v", ja.Burst)
 	}
 }
+
+// TestLateOnItsOwnIsPricedLate (found by hack/stress): one running unit
+// with W90 1.9h and a 1.3h critical path, due in 3.1h, on one attainable
+// slot. Under TailAware it is late on its own (W90/A > T - t_path), and
+// its planned finish must say so: it used to be max(W90/A, t_path), before
+// the deadline, so the job was at risk with LateBy 0 and an ETA before its
+// deadline.
+func TestLateOnItsOwnIsPricedLate(t *testing.T) {
+	j := job("one", "p", 0, 0, 3*time.Hour+8*time.Minute)
+	j.Runnable, j.RunnableTotal = nil, 0
+	j.Estimate = estimate.Summary{W: 4574, W90: 6756, TPath: 4574}
+	j.Running = map[string]int{"cpu": 1}
+	j.RunningUnits = []RunningUnit{{ID: "one/0", Pool: "cpu", Slots: 1, Started: t0.Add(-time.Hour)}}
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "cpu", Slots: 2, Used: 1}}, Jobs: []Job{j}}
+	st := Decide(s, &State{}, DefaultConfig()).Jobs["one"]
+	if st.AtRisk && (st.LateBy <= 0 || !st.ETA90.After(j.Deadline)) {
+		t.Fatalf("at risk with LateBy %v and ETA90 %v against deadline %v", st.LateBy, st.ETA90, j.Deadline)
+	}
+}

@@ -339,8 +339,11 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 				before += x.W90
 			}
 		}
-		finish := math.Max(a.fluidFinish(m.jobCtx, before+m.W90, C), math.Max(div(m.W90, m.cap), m.tpath))
-		m.finish90 = finish
+		// Its own finish with all its attainable slots carries the same
+		// tail as the test that made it late on its own (W90/A > T -
+		// t_path under TailAware), so a job late on its own is late in
+		// its finish too, never on time with LateBy 0.
+		finish := math.Max(a.fluidFinish(m.jobCtx, before+m.W90, C), a.fluidFinish(m.jobCtx, m.W90, m.cap))
 		m.finish50 = finish
 		// A member evicted to make the on-time set fit (the largest one,
 		// not always the latest) can finish by its deadline when inserted
@@ -351,11 +354,12 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		// no burst for it could ever be requested without approval.
 		late, deficit := finish, math.Max(before+m.W90-C*t, m.W90-m.cap*t)
 		if m.share > 0 {
-			late = math.Max(late, math.Max(div(m.W90, m.share), m.tpath))
+			late = math.Max(late, a.fluidFinish(m.jobCtx, m.W90, m.share))
 		} else {
 			late = math.Max(late, a.fluidFinish(m.jobCtx, planned+m.W90, C))
 		}
 		deficit = math.Max(deficit, m.W90-m.share*t)
+		m.finish90 = late
 		m.lateBy = secs(math.Max(0, late-m.T))
 		m.horizon = t
 		m.deficit = deficit
