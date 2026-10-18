@@ -113,11 +113,20 @@ bundle of eight members with at most five running. Setting `suspend: true`
 on the bundle yields every running member at its next turn boundary, and
 clearing it brings them back.
 
-The runner writes pod status and its own annotations, which the cluster's
-node daemon policy (`config/policy/node-writes.yaml`) does not cover. On a
-local farm it runs with the farm's kubeconfig. A shared cluster needs a
-service account and a policy for it that mirror the node daemon's: only
-pods on its own node.
+The runner signs in as its machine's own service account,
+`c4-hosts/<node>`, named for its Node (`--kubeconfig` with the account's
+token, issued by the farm admin). `config/rbac/host-runner.yaml` and
+`config/policy/host-runner.yaml` limit that account:
+- its own Node: created only with the host-runner taint, then only its
+  slot limit, capacity reason and status;
+- its own Lease;
+- pods bound to it: status and its two annotations;
+- bindings to itself only.
+
+Keep the host-runner taint on agent pools, so only agent pods select these
+nodes. Under a hard power line, `--hard-stop-after` stops a member that
+has not reached a turn boundary that long after the queue asked it to
+yield, losing its turn in flight.
 
 ## Capacity under a power cap, and the bundle's clock
 

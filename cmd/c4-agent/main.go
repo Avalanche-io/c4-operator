@@ -299,6 +299,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	every := fs.Duration("every", 5*time.Second, "how often to check pods and sessions")
 	yieldTimeout := fs.Duration("yield-timeout", time.Minute, "how long one yield waits for a busy member before trying again")
 	hardStop := fs.Duration("hard-stop-after", 0, "stop a member mid-turn if it has not reached a turn boundary this long after a yield request (0: wait for the boundary)")
+	kubeconfig := fs.String("kubeconfig", "", "the runner's kubeconfig: the service account c4-hosts/<node> the farm admin issued for this machine (default: $KUBECONFIG or ~/.kube/config)")
 	slotsFile := fs.String("slots-file", "", "a file whose first line is the slots to offer now (and, after a space, why), written by a power reader; missing or unreadable means --slots")
 	var lbls multi
 	fs.Var(&lbls, "label", "a Node label K=V for the agent pool's nodeSelector (default c4.avalanche.io/host=<node>)")
@@ -315,6 +316,9 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	}
 	if len(set) == 0 {
 		set["c4.avalanche.io/host"] = *node
+	}
+	if *kubeconfig != "" {
+		os.Setenv("KUBECONFIG", *kubeconfig)
 	}
 	cfg, err := ctrlconfig.GetConfig()
 	if err != nil {
