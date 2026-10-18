@@ -802,3 +802,58 @@ func TestLateOnItsOwnIsPricedLate(t *testing.T) {
 		t.Fatalf("at risk with LateBy %v and ETA90 %v against deadline %v", st.LateBy, st.ETA90, j.Deadline)
 	}
 }
+
+// TestGuardUnitIsAFloorNotAReservation: a unit the starvation guard
+// started may be preempted, whatever work it loses, by a job that will
+// miss its deadline without the slot; an ordinary unit in its place is
+// protected by MaxLostWork. After its guard unit is preempted, the job's
+// next guard start waits StarvationDeferMax.
+func TestGuardUnitIsAFloorNotAReservation(t *testing.T) {
+	cfg := DefaultConfig()
+	idle := job("idle", "p", 5, 5, 36*time.Hour)
+	idle.LastRunning = t0.Add(-2*time.Hour - time.Minute)
+	var st State
+	d := Decide(Snapshot{Now: t0, Pools: []Pool{cpu(1)}, Jobs: []Job{idle}}, &st, cfg)
+	if count(d, "idle") != 1 || d.Dispatch[0].Tier != TierStarvation {
+		t.Fatalf("guard start: %+v", d.Dispatch)
+	}
+	// An hour later the guard's unit has an hour of work in it, and a job
+	// due in 50 minutes needs the only slot.
+	now := t0.Add(time.Hour)
+	running := func(j Job) Job {
+		j.Runnable, j.RunnableTotal = j.Runnable[1:], j.RunnableTotal-1
+		j.Running = map[string]int{"cpu": 1}
+		j.RunningUnits = []RunningUnit{{ID: "idle/0", Pool: "cpu", Slots: 1, Started: t0}}
+		j.LastRunning = now
+		return j
+	}
+	urgent := job("urgent", "q", 2, 0.5, 0)
+	urgent.Deadline = now.Add(50 * time.Minute)
+	urgent.Estimate = estimate.Summary{W: 1800, W90: 1800, TPath: 900}
+	urgent.Submitted, urgent.Ready, urgent.LastRunning = now, now, now
+	s := Snapshot{Now: now, Pools: []Pool{{Name: "cpu", Slots: 1, Used: 1}}, Jobs: []Job{running(idle), urgent}}
+	d = Decide(s, &st, cfg)
+	if len(d.Preempt) != 1 || d.Preempt[0].Unit != "idle/0" || d.Preempt[0].Reason != ReasonGuard || d.Preempt[0].For != "urgent" {
+		t.Fatalf("guard unit not yielded to the urgent job: %+v", d.Preempt)
+	}
+	// The same unit, started by the deadline tier instead: MaxLostWork
+	// protects it.
+	d = Decide(s, &State{}, cfg)
+	for _, p := range d.Preempt {
+		if p.Unit == "idle/0" {
+			t.Fatalf("an ordinary unit with an hour of work was preempted: %+v", p)
+		}
+	}
+	// Its guard unit preempted, idle is not restarted by the guard for
+	// StarvationDeferMax, even once it could not wait.
+	idle2 := job("idle", "p", 5, 5, 36*time.Hour)
+	idle2.LastRunning = now.Add(-31 * time.Minute)
+	idle2.Deadline = now.Add(90 * time.Minute) // little slack: urgent for the guard
+	later := now.Add(31 * time.Minute)
+	d = Decide(Snapshot{Now: later, Pools: []Pool{cpu(1)}, Jobs: []Job{idle2}}, &st, cfg)
+	for _, x := range d.Dispatch {
+		if x.Tier == TierStarvation {
+			t.Fatalf("guard restarted the job within StarvationDeferMax of its preemption: %+v", d.Dispatch)
+		}
+	}
+}

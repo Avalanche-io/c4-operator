@@ -116,6 +116,19 @@ func newAlloc(s *Snapshot, st *State, cfg Config, quotas bool) *alloc {
 		a.jobs = append(a.jobs, jc)
 		a.byID[j.ID] = jc
 	}
+	// Guard bookkeeping: units the guard started stay marked while they
+	// run; a job whose guard unit was preempted waits a full
+	// StarvationDeferMax for its next guard start.
+	for id := range st.guard {
+		if !running[id] {
+			delete(st.guard, id)
+		}
+	}
+	for id, at := range st.guardHit {
+		if s.Now.Sub(at) >= cfg.StarvationDeferMax {
+			delete(st.guardHit, id)
+		}
+	}
 	// Preemptions still in flight count toward the job they were for.
 	for id, pp := range st.pending {
 		if !running[id] {
@@ -253,6 +266,9 @@ func (a *alloc) release(jc *jobCtx, tier Tier, ownOnly bool, only *poolState) bo
 	}
 	jc.running += k
 	jc.next++
+	if tier == TierStarvation {
+		a.st.guard[u.ID] = a.now
+	}
 	a.out.Dispatch = append(a.out.Dispatch, Dispatch{Job: jc.j.ID, Unit: u.ID, Pool: ps.p.Name, Slots: k, Tier: tier})
 	return true
 }
@@ -340,6 +356,10 @@ func (a *alloc) preemptUnit(victim *jobCtx, ru RunningUnit, reason PreemptReason
 		Reason: reason, For: forJob, Yield: yield, LostWork: lost,
 	})
 	a.st.pending[ru.ID] = pendingPreempt{job: victim.j.ID, forJob: forJob, pool: ru.Pool, slots: ru.Slots, at: a.now}
+	if reason == ReasonGuard {
+		a.st.guardHit[victim.j.ID] = a.now
+		delete(a.st.guard, ru.ID)
+	}
 	a.st.preemptLog[ru.Pool] = append(a.st.preemptLog[ru.Pool], a.now)
 }
 

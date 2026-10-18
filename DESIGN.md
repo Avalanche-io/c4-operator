@@ -1449,9 +1449,20 @@ infeasible ones in order of smallest remaining work, which minimizes the
 number of late jobs. The infeasible state is what the HUD and the capacity
 hooks act on.
 
-**Starvation guard.** A job with no running unit for 30 minutes gets one
-slot regardless of order, so far-deadline work keeps progressing and keeps
-its estimate fresh.
+**Starvation guard.** A job with ready work and no running unit for 30
+minutes gets one unit regardless of order, so far-deadline work keeps
+progressing and keeps its estimate fresh. A job with more than 2 hours of
+slack lets the deadline tier go first, and is served right after it, until
+it has starved for 2 hours (`StarvationDeferMax`); after that it goes first
+like any other starving job, so no job waits longer than that while
+capacity frees. A guard start is a floor on progress, not a reservation: a
+unit the guard started may be preempted, whatever work it would lose, by a
+job that will miss its deadline without that slot (on time in the plan but
+short of its required slots, or already late in it), and the job whose
+guard unit was preempted waits a full 2 hours for its next guard start, so
+the two cannot trade the slot. Ordinary units keep the protections of
+section 10.13. The work lost to guard preemptions is reported separately
+(`guard-unit` preemptions).
 
 **Nudges, not priorities.** Manual priorities are gone. People get bounded
 overrides:

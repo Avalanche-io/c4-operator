@@ -217,6 +217,9 @@ func (a *alloc) starvation(first bool) {
 		if waited < a.cfg.StarvationAfter {
 			continue
 		}
+		if _, hit := a.st.guardHit[jc.j.ID]; hit {
+			continue // its guard unit was preempted: a full StarvationDeferMax first
+		}
 		if a.canWait(jc, waited) == first {
 			continue
 		}

@@ -182,6 +182,11 @@ const (
 	ReasonFeasibility PreemptReason = "restore-feasibility"
 	ReasonHoldStop    PreemptReason = "hold-stop"
 	ReasonWrangler    PreemptReason = "wrangler-suspend"
+	// ReasonGuard: a unit the starvation guard started, stopped for a
+	// job that will miss its deadline without the slot. A guard start is
+	// a floor on progress, not a reservation: such a unit may lose more
+	// than MaxLostWork.
+	ReasonGuard PreemptReason = "guard-unit"
 )
 
 // Preempt stops one running unit. With Yield set the unit is asked to stop
@@ -329,6 +334,8 @@ type State struct {
 	preemptLog map[string][]time.Time    // by pool
 	surplus    map[string]time.Time      // by burst pool: idle since
 	manual     manualState
+	guard      map[string]time.Time // units the starvation guard started, by unit ID
+	guardHit   map[string]time.Time // jobs whose guard unit was preempted, and when
 }
 
 type pendingPreempt struct {
@@ -354,6 +361,12 @@ func (st *State) init() {
 	}
 	if st.manual.bumped == nil {
 		st.manual.bumped = map[string]bool{}
+	}
+	if st.guard == nil {
+		st.guard = map[string]time.Time{}
+	}
+	if st.guardHit == nil {
+		st.guardHit = map[string]time.Time{}
 	}
 }
 
