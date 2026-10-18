@@ -19,6 +19,7 @@ var invariants = []struct{ name, what string }{
 	{"starvation-over-deadline", "the starvation guard does not give the last free slot of a pool to a job with more than PreemptSlack of slack while a job on time in the plan needs it"},
 	{"work-conservation", "no slot is left idle while ready work that may use it waits, unless a gang holds it, a borrowing limit forbids it, or it is held for another project's guaranteed deadline need"},
 	{"blocked-rank", "a job whose units all wait on upstream work is never ranked ahead of a job with ready work"},
+	{"held-rank", "a held job (it releases nothing) is never ranked ahead of a job with ready work"},
 	{"blocked-dispatch", "only runnable units are dispatched"},
 	{"overfill", "no pool is given more units than it has free slots"},
 	{"hold", "a held job gets no units; a hold-stopped job's running units are all stopped"},
@@ -30,6 +31,7 @@ var invariants = []struct{ name, what string }{
 	{"burst-uneconomic", "an automatic burst closes the deadline and costs less than the lateness it prevents"},
 	{"burst-budget", "automatic bursts stay within each project's remaining daily budget"},
 	{"burst-unjustified", "a burst pool's request grows only by automatically approved slots, and never past its limit"},
+	{"lend-then-reclaim", "a pool's free slots are not lent to a borrowing project in the same decision that preempts a borrower to restore another project's nominal quota"},
 	{"churn-unit", "a unit is preempted at most MaxPreemptionsPerUnit times"},
 	{"churn-pool", "a pool sees at most PreemptPerWindow preemptions per PreemptWindow"},
 	{"churn-pingpong", "two jobs never take slots back and forth within an hour"},
@@ -79,7 +81,7 @@ func (v violation) String() string {
 func clock(t float64) string {
 	d := int(t / day)
 	h := math.Mod(t, day) / hour
-	return fmt.Sprintf("day %d %02d:%02d", d, int(h), int(math.Mod(t, hour)/minute))
+	return fmt.Sprintf("day %d %02d:%02d:%02d", d, int(h), int(math.Mod(t, hour)/minute), int(math.Mod(t, minute)))
 }
 
 type predRec struct {
@@ -358,6 +360,7 @@ func (c *checker) decision(s sched.Snapshot, d sched.Decisions) {
 	c.checkRank(v)
 	c.checkHolds(v)
 	c.checkQuotas(v)
+	c.checkLendReclaim(v)
 	c.checkPlan(v)
 	c.checkBursts(v)
 	c.recordPredictions(v)
@@ -511,6 +514,16 @@ func (c *checker) checkRank(v *view) {
 	if bj != "" && rj != "" && bestBlocked < worstReady {
 		c.violate("blocked-rank", bj, fmt.Sprintf("blocked, ranked %d, ahead of %s with ready work at rank %d", bestBlocked, rj, worstReady))
 	}
+	bestHeld, hj := math.MaxInt, ""
+	for i := range v.s.Jobs {
+		j := &v.s.Jobs[i]
+		if st, ok := v.d.Jobs[j.ID]; ok && st.Rank > 0 && (j.Hold || j.HoldStop) && st.Rank < bestHeld {
+			bestHeld, hj = st.Rank, j.ID
+		}
+	}
+	if hj != "" && rj != "" && bestHeld < worstReady {
+		c.violate("held-rank", hj, fmt.Sprintf("on hold, ranked %d, ahead of %s with ready work at rank %d", bestHeld, rj, worstReady))
+	}
 }
 
 func (c *checker) checkHolds(v *view) {
@@ -570,6 +583,40 @@ func (c *checker) checkQuotas(v *view) {
 				return
 			}
 		}
+	}
+}
+
+// checkLendReclaim flags a decision that lends a pool's slots to a
+// project above its nominal quota and also preempts in that pool to
+// reclaim nominal quota for another project: the lent slot is what the
+// reclaim had to take back.
+func (c *checker) checkLendReclaim(v *view) {
+	reclaim := map[string]sched.Preempt{}
+	for _, x := range v.d.Preempt {
+		if x.Reason == sched.ReasonReclaim {
+			reclaim[x.Pool] = x
+		}
+	}
+	if len(reclaim) == 0 {
+		return
+	}
+	for _, x := range v.d.Dispatch {
+		rc, ok := reclaim[x.Pool]
+		if !ok || !v.hasQuota[x.Pool] {
+			continue
+		}
+		u := c.e.byID[x.Unit]
+		if u == nil {
+			continue
+		}
+		proj := u.j.spec.project
+		q := quotaOf(v.projects[proj], x.Pool)
+		if v.useAfter[proj][x.Pool] <= q.Nominal {
+			continue
+		}
+		c.violate("lend-then-reclaim", x.Job, fmt.Sprintf("%s lent a slot of %s (%s tier, %s at %d of nominal %d) in the decision that preempts %s for %s to restore its nominal quota",
+			x.Job, x.Pool, x.Tier, proj, v.useAfter[proj][x.Pool], q.Nominal, rc.Unit, rc.For))
+		return
 	}
 }
 
@@ -672,20 +719,23 @@ func (c *checker) requested(x sched.Preempt) {
 	if x.For != "" {
 		c.incoming[x.Unit] = x.For
 	}
+	// Times as sched sees them (time.Time, nanoseconds), so the window's
+	// edge falls where its own does.
+	at := c.e.at(now)
 	ts := append(c.poolTS[x.Pool], now)
 	keep := ts[:0]
 	for _, t := range ts {
-		if now-t < c.cfg.PreemptWindow.Seconds() {
+		if at.Sub(c.e.at(t)) < c.cfg.PreemptWindow {
 			keep = append(keep, t)
 		}
 	}
 	c.poolTS[x.Pool] = keep
 	if len(keep) > c.cfg.PreemptPerWindow {
-		var at []string
+		var when []string
 		for _, t := range keep {
-			at = append(at, clock(t)[6:])
+			when = append(when, clock(t)[6:])
 		}
-		c.violate("churn-pool", x.Pool, fmt.Sprintf("%d preemptions in %s (limit %d) at %s", len(keep), c.cfg.PreemptWindow, c.cfg.PreemptPerWindow, strings.Join(at, " ")))
+		c.violate("churn-pool", x.Pool, fmt.Sprintf("%d preemptions in %s (limit %d) at %s", len(keep), c.cfg.PreemptWindow, c.cfg.PreemptPerWindow, strings.Join(when, " ")))
 	}
 	if x.For == "" {
 		return
