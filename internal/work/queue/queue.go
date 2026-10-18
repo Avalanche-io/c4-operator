@@ -871,9 +871,16 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		}
 		env = append(env, corev1.EnvVar{Name: "C4_PODINFO", Value: "/etc/c4/podinfo/annotations"})
 	}
-	resumed := false
+	resumed, output := false, false
 	for i, in := range j.Spec.Inputs {
 		name := fmt.Sprintf("c4-input-%d", i)
+		if !in.ReadOnly && !output {
+			// C4_OUTPUT is the first writable input: where the unit writes
+			// what is captured, .c4/progress and preview/<frame> among it.
+			// The same input resumes from a yielded attempt's view.
+			env = append(env, corev1.EnvVar{Name: "C4_OUTPUT", Value: in.MountPath})
+			output = true
+		}
 		if in.FromJob != "" {
 			in.Materialization = fromJobName(j.Name, in.FromJob)
 		}

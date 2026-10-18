@@ -354,3 +354,30 @@ func envOf(c corev1.Container, name string) string {
 	}
 	return ""
 }
+
+// C4_OUTPUT names the first writable input; it is absent when every input
+// is read-only.
+func TestOutputEnv(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 2)
+	ctx := context.Background()
+	rw := job(ns, "sh050", "render", "cpu-"+ns, map[string]string{"frames": "1-1", "estimateSeconds": "60"}, now.Add(time.Hour))
+	rw.Spec.Inputs = []c4v1.WorkInput{{Materialization: "plates", MountPath: "/plates", ReadOnly: true},
+		{Materialization: "work", MountPath: "/work"}, {Materialization: "more", MountPath: "/more"}}
+	ro := job(ns, "sh051", "render", "cpu-"+ns, map[string]string{"frames": "1-1", "estimateSeconds": "60"}, now.Add(time.Hour))
+	ro.Spec.Inputs = []c4v1.WorkInput{{Materialization: "plates", MountPath: "/plates", ReadOnly: true}}
+	for _, j := range []*c4v1.WorkJob{rw, ro} {
+		if err := k8s.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tick(t, q)
+	for name, want := range map[string]string{"sh050": "/work", "sh051": ""} {
+		pods := unitPods(t, ns, name)
+		if len(pods) != 1 {
+			t.Fatalf("%s: %d pods", name, len(pods))
+		}
+		if got := envOf(pods[0].Spec.Containers[0], "C4_OUTPUT"); got != want {
+			t.Errorf("%s: C4_OUTPUT %q, want %q", name, got, want)
+		}
+	}
+}
