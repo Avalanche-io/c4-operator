@@ -428,6 +428,9 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 			late = math.Max(late, a.fluidFinish(m.jobCtx, planned+m.W90, C))
 		}
 		deficit = math.Max(deficit, m.W90-m.share*t)
+		// A job the plan makes late finishes after its deadline, by at
+		// least a second, so its ETA and its lateness agree.
+		late = math.Max(late, m.T+1)
 		m.finish90 = late
 		m.lateBy = secs(math.Max(0, late-m.T))
 		m.horizon = t

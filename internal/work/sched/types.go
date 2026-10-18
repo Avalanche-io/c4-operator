@@ -160,6 +160,7 @@ type Tier string
 const (
 	TierStarvation Tier = "starvation"
 	TierNeed       Tier = "deadline-need"
+	TierGuarantee  Tier = "nominal-guarantee"
 	TierBoost      Tier = "boost"
 	TierInfo       Tier = "information"
 	TierFair       Tier = "surplus"

@@ -21,10 +21,11 @@ import (
 //     first by (running+incoming)/R; ratios in the same TieBand bucket go
 //     to the project with lower fair-share usage, then to the older job.
 //     Jobs late in the plan follow in order of smallest remaining work.
-//     Releases inside each project's nominal quota go before those
-//     that borrow. Then starving jobs that could wait (step 0), and the
-//     guarantee: projects below their nominal quota with deadline demand
-//     get units from free slots, inside that quota.
+//     Releases inside each project's nominal quota go first; then the
+//     guarantee (projects below their nominal quota with deadline demand
+//     get units from free slots, inside that quota, and a guaranteed gang
+//     that does not fit holds its pool); then releases that borrow; then
+//     starving jobs that could wait (step 0).
 //  2. Boost: the extra slots of a boosted job (R*(boost-1)), from its own
 //     project's nominal quota first, then from lendable capacity.
 //  3. Information: unevaluated generators and coarse binary-order units,
@@ -42,9 +43,10 @@ func Decide(s Snapshot, st *State, cfg Config) Decisions {
 	a.plan()
 	a.holdStop()
 	a.starvation(true)
-	a.need()
-	a.starvation(false)
+	a.needPass(true)
 	a.guarantee()
+	a.needPass(false)
+	a.starvation(false)
 	a.boost()
 	a.info()
 	a.fair()
@@ -293,18 +295,13 @@ func (jc *jobCtx) needSlots(r float64) int {
 	return int(math.Ceil(r-1e-9)) - (jc.running + jc.incoming)
 }
 
-// need runs the deadline tier twice: first only releases inside each
-// project's nominal quota, then those that borrow. A borrowing release
-// passes admit's hold-back for other projects' guaranteed demand when it
-// is made, but a release inside a nominal quota later in the same call
-// does not check it; serving nominal quota first keeps a slot from being
-// lent and then reclaimed from the borrower in the same decision.
-func (a *alloc) need() {
-	for _, ownOnly := range []bool{true, false} {
-		a.needPass(ownOnly)
-	}
-}
-
+// needPass is the deadline tier. Decide runs it twice: first only
+// releases inside each project's nominal quota, then (after the
+// guarantee) those that borrow. A borrowing release passes admit's
+// hold-back for other projects' guaranteed demand when it is made, but a
+// release inside a nominal quota later in the same call does not check
+// it; serving nominal quota first keeps a slot from being lent and then
+// reclaimed from the borrower in the same decision.
 func (a *alloc) needPass(ownOnly bool) {
 	h := &needHeap{a: a}
 	var infeasible []*jobCtx
@@ -335,10 +332,13 @@ func (a *alloc) needPass(ownOnly bool) {
 
 // guarantee serves, from free slots, the deadline demand of projects below
 // their nominal quota: the demand admit() holds slots back for. Without
-// it those slots could go to the information or surplus tiers of a third
-// project inside its own quota, and reclaim() would then preempt a
-// borrower for the guaranteed project in the same decision. Projects go
-// in order of fair-share usage, their jobs by least slack.
+// it those slots could go to borrowers or to the information or surplus
+// tiers of a third project inside its own quota, and reclaim() would then
+// preempt a borrower for the guaranteed project in the same decision.
+// A guaranteed gang that does not fit holds its pool's free slots, as the
+// starvation guard's gangs do, so they are not lent while reclaim makes
+// room for it. Projects go in order of fair-share usage, their jobs by
+// least slack.
 func (a *alloc) guarantee() {
 	if !a.quotas {
 		return
@@ -370,7 +370,10 @@ func (a *alloc) guarantee() {
 			}
 			sort.SliceStable(js, func(i, j int) bool { return js[i].slack < js[j].slack })
 			for _, jc := range js {
-				for pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && a.release(jc, TierFair, true, ps) {
+				for pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && a.release(jc, TierGuarantee, true, ps) {
+				}
+				if pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && jc.R > 0 && a.holdForGang(jc) {
+					break
 				}
 			}
 		}
