@@ -638,8 +638,11 @@ func (r *report) writeTrailing(p pf) {
 		if pt.Nodes <= 4 {
 			why = append(why, "a farm of a few slots")
 		}
-		if a.GuardPreemptions > 0 || pt.UnitMin*pt.HeavyMult*math.Exp(pt.Spread) > 120 {
-			why = append(why, "long units started by the starvation guard")
+		if a.GuardLostSlotHours > 0.1*math.Max(a.LostSlotHours, 1e-9) {
+			why = append(why, fmt.Sprintf("guard units taken back (%.0f%% of the work lost)", 100*a.GuardLostSlotHours/a.LostSlotHours))
+		}
+		if pt.UnitMin*math.Exp(2*pt.Spread) > 120 {
+			why = append(why, "long, heavy-tailed units")
 		}
 		if pt.Depth >= 3 {
 			why = append(why, "deep pipelines with staged deadlines")
