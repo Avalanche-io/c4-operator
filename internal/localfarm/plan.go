@@ -157,8 +157,12 @@ func meta(name string, extra ...any) obj {
 
 // Site is the farm's one site, for the HUD's map.
 func Site(o Options) []byte {
-	b, _ := json.Marshal([]obj{{"name": Region, "label": "This machine", "region": Region, "lat": o.Lat, "lon": o.Lon,
-		"kind": "onprem", "localities": []string{Zone}}})
+	site := obj{"name": Region, "label": "This machine", "region": Region, "lat": o.Lat, "lon": o.Lon,
+		"kind": "onprem", "localities": []string{Zone}}
+	if o.TZ != "" {
+		site["tz"] = o.TZ
+	}
+	b, _ := json.Marshal([]obj{site})
 	return b
 }
 

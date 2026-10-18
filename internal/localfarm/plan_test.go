@@ -87,7 +87,7 @@ func TestFarmObjects(t *testing.T) {
 		t.Fatalf("owned %d slots, burst %d: the guides say 6 and 4", slots, burst)
 	}
 	var site []map[string]any
-	if err := json.Unmarshal(Site(Options{Lat: 40.68, Lon: -73.94}), &site); err != nil || site[0]["label"] != "This machine" {
+	if err := json.Unmarshal(Site(Options{Lat: 40.68, Lon: -73.94, TZ: "America/New_York"}), &site); err != nil || site[0]["label"] != "This machine" || site[0]["tz"] != "America/New_York" {
 		t.Fatalf("site %v %v", site, err)
 	}
 }
