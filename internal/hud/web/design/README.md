@@ -78,8 +78,8 @@ var(--ground))`, exactly what a 48% alpha composites to), so the same rule
 reads on black and on white. On the dark field it lands within ΔE 1.1 of
 the dim tints Joshua approved (#276639, #294b80, #824e22, #77251e, #593652).
 
-**The translation rule: one set of rules, two schemes** (light: *pending
-Joshua's approval*). The light scheme inverts fills and lines: white
+**The translation rule: one set of rules, two schemes** (light: approved by Joshua on
+2026-10-18, next to the dark scheme's approval). The light scheme inverts fills and lines: white
 ground, black ink, the same hues.
 
 - *Ground, ink and lines.* The light ramp mirrors the dark one in CIELAB
