@@ -263,15 +263,14 @@ func TestReproHeldRank(t *testing.T) {
 	}
 }
 
-// Found by the stress grid: free slots are lent to a borrowing project in
-// the same decision that preempts a borrower to restore another project's
-// nominal quota. admit() holds back the guaranteed project's unmet
+// Regression, found by the stress grid: free slots were lent to a
+// borrowing project in the same decision that preempted a borrower to
+// restore another project's nominal quota. admit() holds back the guaranteed project's unmet
 // deadline demand only against borrowers; a release inside another
 // project's nominal quota (here the surplus tier's, by least slack) takes
 // the held-back slot, the guaranteed project's own job is never served
 // from free capacity, and reclaim() preempts a borrower for it.
 func TestReproLendThenReclaim(t *testing.T) {
-	skipRepro(t, "sched bug lend-then-reclaim (found by hack/stress): free slots go to borrowers and nominal holders while reclaim preempts for a guaranteed project; awaiting a fix in internal/work/sched")
 	a := rjob("a", "A", 5, 4*3600, 600, 30*time.Hour)  // guaranteed (nominal 1, none used), plenty of slack
 	b := rjob("b", "B", 10, 8*3600, 600, 2*time.Hour)  // borrower with a tight deadline
 	d := rjob("d", "B", 5, 10*3600, 600, 40*time.Hour) // borrower with slack: the victim

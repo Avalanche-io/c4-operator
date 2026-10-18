@@ -48,11 +48,7 @@ var invariants = []struct{ name, what string }{
 // ones this grid found. The grid reports them, the Go test logs them
 // instead of failing, and each has a skipped reproducer in stress_test.go.
 // Remove an entry when its fix lands.
-var knownBugs = map[string]string{
-	"lend-then-reclaim": "admit() in alloc.go holds free slots back for another project's unmet nominal demand only against borrowers; a release inside " +
-		"a third project's nominal quota takes the held-back slot, the guaranteed project is never served from free capacity, and reclaim() preempts a " +
-		"borrower for it in the same decision, so the slots lent to borrowers are taken back at once and the preempted work is lost (found by this grid)",
-}
+var knownBugs = map[string]string{}
 
 type violation struct {
 	Inv    string

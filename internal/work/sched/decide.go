@@ -21,6 +21,10 @@ import (
 //     first by (running+incoming)/R; ratios in the same TieBand bucket go
 //     to the project with lower fair-share usage, then to the older job.
 //     Jobs late in the plan follow in order of smallest remaining work.
+//     Releases inside each project's nominal quota go before those
+//     that borrow. Then starving jobs that could wait (step 0), and the
+//     guarantee: projects below their nominal quota with deadline demand
+//     get units from free slots, inside that quota.
 //  2. Boost: the extra slots of a boosted job (R*(boost-1)), from its own
 //     project's nominal quota first, then from lendable capacity.
 //  3. Information: unevaluated generators and coarse binary-order units,
@@ -40,6 +44,7 @@ func Decide(s Snapshot, st *State, cfg Config) Decisions {
 	a.starvation(true)
 	a.need()
 	a.starvation(false)
+	a.guarantee()
 	a.boost()
 	a.info()
 	a.fair()
@@ -288,7 +293,19 @@ func (jc *jobCtx) needSlots(r float64) int {
 	return int(math.Ceil(r-1e-9)) - (jc.running + jc.incoming)
 }
 
+// need runs the deadline tier twice: first only releases inside each
+// project's nominal quota, then those that borrow. A borrowing release
+// passes admit's hold-back for other projects' guaranteed demand when it
+// is made, but a release inside a nominal quota later in the same call
+// does not check it; serving nominal quota first keeps a slot from being
+// lent and then reclaimed from the borrower in the same decision.
 func (a *alloc) need() {
+	for _, ownOnly := range []bool{true, false} {
+		a.needPass(ownOnly)
+	}
+}
+
+func (a *alloc) needPass(ownOnly bool) {
 	h := &needHeap{a: a}
 	var infeasible []*jobCtx
 	for _, jc := range a.jobs {
@@ -304,14 +321,58 @@ func (a *alloc) need() {
 	heap.Init(h)
 	for h.Len() > 0 {
 		jc := heap.Pop(h).(*jobCtx)
-		if jc.needSlots(jc.R) <= 0 || !a.release(jc, TierNeed, false, nil) {
+		if jc.needSlots(jc.R) <= 0 || !a.release(jc, TierNeed, ownOnly, nil) {
 			continue
 		}
 		heap.Push(h, jc)
 	}
 	sort.SliceStable(infeasible, func(i, j int) bool { return infeasible[i].W < infeasible[j].W })
 	for _, jc := range infeasible {
-		for jc.needSlots(jc.R) > 0 && a.release(jc, TierNeed, false, nil) {
+		for jc.needSlots(jc.R) > 0 && a.release(jc, TierNeed, ownOnly, nil) {
+		}
+	}
+}
+
+// guarantee serves, from free slots, the deadline demand of projects below
+// their nominal quota: the demand admit() holds slots back for. Without
+// it those slots could go to the information or surplus tiers of a third
+// project inside its own quota, and reclaim() would then preempt a
+// borrower for the guaranteed project in the same decision. Projects go
+// in order of fair-share usage, their jobs by least slack.
+func (a *alloc) guarantee() {
+	if !a.quotas {
+		return
+	}
+	names := make([]string, 0, len(a.projects))
+	for n := range a.projects {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	for _, ps := range a.poolList {
+		if !ps.hasQuota {
+			continue
+		}
+		pool := ps.p.Name
+		prs := make([]*projState, 0, len(names))
+		for _, n := range names {
+			pr := a.projects[n]
+			if pr.demand[pool] > 0 && pr.usage[pool] < a.quota(n, pool).Nominal {
+				prs = append(prs, pr)
+			}
+		}
+		sort.SliceStable(prs, func(i, j int) bool { return a.fairKey(prs[i], ps) < a.fairKey(prs[j], ps) })
+		for _, pr := range prs {
+			var js []*jobCtx
+			for _, jc := range a.jobs {
+				if jc.proj == pr && jc.canRelease() && allows(jc, pool) {
+					js = append(js, jc)
+				}
+			}
+			sort.SliceStable(js, func(i, j int) bool { return js[i].slack < js[j].slack })
+			for _, jc := range js {
+				for pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && a.release(jc, TierFair, true, ps) {
+				}
+			}
 		}
 	}
 }
