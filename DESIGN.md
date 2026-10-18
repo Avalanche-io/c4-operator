@@ -1687,6 +1687,25 @@ Burst decisions are cost-aware:
   has lasted ten minutes, and nodes are released by the autoscaler's own
   consolidation, never by the queue.
 
+**Staging (experimental).** A pool at another site can serve a job once
+the job's inputs are there. The caller lists, per pool, the ways to get
+them there (`Job.Sources`): move the missing bytes over a link (same zone,
+inter-region, internet, private interconnect, shipment), recompute them
+from inputs the site has (exact processes, validated ones where the
+consumer accepts it), or reuse an identical output. Each source carries its
+bytes, link, latency and full price (egress, ingress or processing fees,
+outputs back). Links are shared capacity (`Snapshot.Links` with the bytes
+already committed), so a transfer waits behind the ones before it. A job at
+risk where its inputs are gets the cheapest way that restores its
+deadline, across staging (the other site's spare slots under its own
+deadlines) and burst, under the same budget and lateness rules. A burst pool
+at another site provisions while the inputs move. Units run only where the
+inputs are, and a job a stage saves reports the plan with it. What a
+subset of pools plans excludes the slots that jobs staged there hold.
+Known limit: the spare is what the other site's current plan leaves, so a
+site whose own work arrives after a stage can find it holding slots that
+work needs.
+
 **Pre-warm.** A CapacityRequest lists the views its jobs will mount. The node
 daemon on a node joining that pool fetches those layers before it labels its
 Node `c4.avalanche.io/cache-warm=true`. The queue releases units to burst
