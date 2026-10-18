@@ -1,5 +1,6 @@
 # Releases are cut by pushing a tag (vX.Y.Z); .github/workflows/release.yaml
-# runs GoReleaser, which builds the CLI for Linux and macOS, the multi-arch
+# runs GoReleaser, which builds the CLIs (c4-operator for Linux and macOS,
+# c4-farm for Linux, macOS and Windows), the multi-arch
 # image on GHCR, the install manifest, and a draft GitHub release to review
 # before publishing. `make release-snapshot` runs the same locally and
 # publishes nothing.
@@ -21,7 +22,22 @@ builds:
   flags: [-trimpath]
   ldflags: ["-s -w -X main.version={{ .Tag }}"]
 
+- id: c4-farm
+  main: ./cmd/c4-farm
+  binary: c4-farm
+  env: [CGO_ENABLED=0]
+  goos: [linux, darwin, windows]
+  goarch: [amd64, arm64]
+  flags: [-trimpath]
+  ldflags: ["-s -w -X main.version={{ .Tag }}"]
+
 archives:
+- id: c4-farm
+  ids: [c4-farm]
+  formats: [tar.gz]
+  format_overrides: [{goos: windows, formats: [zip]}]
+  name_template: "c4-farm_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  files: [LICENSE, NOTICE, skills/c4-farm/*]
 - id: c4-operator
   ids: [c4-operator]
   formats: [tar.gz]
