@@ -4,8 +4,8 @@ The render queue, reimagined around content identity, deadlines, provenance
 and agents. c4-operator turns a Kubernetes cluster into one farm for
 rendering, CI and machine learning, where every tree a pod reads or writes
 is a C4 view: a directory tree in which each file is named by its C4 ID
-(SMPTE ST 2114, in production use since before the standard), the SHA-512
-of its bytes. Each object leaves the store
+(standardized as SMPTE ST 2114, and in production use since before the
+standard), the SHA-512 of its bytes. Each object leaves the store
 about once however many pods read it, work is ordered by deadlines instead
 of priorities, every output is a version, every step is signed by whoever
 did it, and agents have the same controls as people.
@@ -216,10 +216,8 @@ hack/sim/              the scheduling simulation
 ## Relation to C4, SMPTE ST 2114 and Scion
 
 A C4 ID is a SHA-512 digest encoded as a 90-character string that starts with
-`c4`, standardized in SMPTE ST 2114:2017. C4 IDs named production media for
-years before the standard; they were presented at the SMPTE Annual Technical
-Conference in 2015, the reference code has been public since July 2015, and
-they were on the NAB main stage in 2016. Because the ID is derived from the
+`c4`, standardized as SMPTE ST 2114:2017, and in production use since before
+the standard. Because the ID is derived from the
 bytes, any holder of the bytes can check them. The operator imports the
 [c4 Go module](https://github.com/Avalanche-io/c4) for IDs, c4m and its
 stores, and reads and writes stores the c4 CLI uses.
