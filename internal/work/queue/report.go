@@ -210,6 +210,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		}
 		if st.Phase == "Succeeded" {
 			q.learn(v)
+			q.learnFinish(v)
 		}
 		st.Finished = &metav1.Time{Time: m.finished.Truncate(time.Second)}
 		// The queue seals the job: a signed record of its output and of the
@@ -242,7 +243,11 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	// What a person is shown: the calibrated band with half the tail
 	// (forecast.Display), not the scheduler's conservative finish.
-	if b := forecast.Display(now, v.sum, js.ETA50, js.ETA90); !b.IsZero() {
+	raw := forecast.Display(now, v.sum, js.ETA50, js.ETA90)
+	if m := v.mem; m.plan != nil {
+		m.noteFinish(now, len(m.millis), len(m.plan.Units), raw.P50)
+	}
+	if b := q.shown(v, now, raw); !b.IsZero() {
 		t := func(x time.Time) *metav1.Time { return &metav1.Time{Time: x.Truncate(time.Second)} }
 		e.ETA50, e.ETA80, e.ETA90, e.ETA95 = t(b.P50), t(b.P80), t(b.P90), t(b.P95)
 		e.RemainingSeconds = int64(b.P50.Sub(now).Seconds())

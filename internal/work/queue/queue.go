@@ -72,6 +72,7 @@ type Queue struct {
 	// cal holds live calibrations, shareHist the projects that share
 	// theirs (calibrate.go).
 	cal       calibrations
+	fcal      finishCals
 	shareHist map[string]bool
 	// policies are the projects' deadline policies by project and class.
 	policies map[string]map[string]forecast.Policy
@@ -80,6 +81,7 @@ type Queue struct {
 	lastSnap sched.Snapshot
 	lastDec  sched.Decisions
 	lastPol  map[string]forecast.Policy
+	lastAdj  map[string]func(time.Time, forecast.Band) forecast.Band
 }
 
 // NeedLeaderElection makes the queue run on one replica only.
@@ -159,6 +161,10 @@ type jobMem struct {
 	learned bool
 	// sugg is the job's suggested deadline (suggest.go).
 	sugg *suggestMem
+	// finPts are the medians kept for live finish calibration.
+	finPts     []finishPoint
+	finLast    int
+	finLearned bool
 }
 
 func newMem() *jobMem {
@@ -353,10 +359,14 @@ func (q *Queue) Tick(ctx context.Context) error {
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
 	dec := q.Policy(snap, &q.st, q.Cfg)
 	pol := make(map[string]forecast.Policy, len(views))
+	adj := make(map[string]func(time.Time, forecast.Band) forecast.Band, len(views))
 	for _, v := range views {
 		pol[v.key] = q.policyFor(v)
+		if a := q.adjustFor(v); a != nil {
+			adj[v.key] = a
+		}
 	}
-	q.lastSnap, q.lastDec, q.lastPol = snap, dec, pol
+	q.lastSnap, q.lastDec, q.lastPol, q.lastAdj = snap, dec, pol, adj
 	q.suggest(ctx, now, snap, dec, views)
 	q.act(ctx, now, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)
@@ -418,6 +428,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			m.finished = time.Time{}
 			// Moments planned before the requeue did not foresee it.
 			m.calPts, m.learned = nil, true
+			m.finPts, m.finLearned = nil, true
 		}
 	}
 	// Nodes a person allowed again leave the automatic blacklist.
@@ -649,36 +660,42 @@ func (q *Queue) snapshot(now time.Time, pools map[string]*pool, projects []c4v1.
 		if v.mem.plan == nil || v.mem.planErr != nil || v.unschedulable != "" || isFinished(v) {
 			continue
 		}
-		plan := v.mem.plan
-		j := sched.Job{
-			ID: v.key, Project: v.project, Class: v.job.Spec.Class,
-			Submitted: v.job.CreationTimestamp.Time, Ready: v.mem.readyAt,
-			Deadline: v.obj.Deadline, RequiredRate: v.obj.Rate,
-			Pools: v.pools, MaxParallel: int(v.job.Spec.MaxParallel),
-			SlotsPerUnit: plan.Units[0].Slots, Running: map[string]int{},
-			Estimate: v.sum, Hold: v.job.Spec.Nudge.Hold || v.job.Spec.Nudge.HoldStop, HoldStop: v.job.Spec.Nudge.HoldStop,
-			Boost: floatOr(v.job.Spec.Nudge.Boost, 0), LastRunning: v.mem.lastRun,
-			Preemptible: v.driver.Preemptible(), Checkpoints: v.driver.Checkpoints(),
-		}
-		if v.blocked {
-			j.Blocked = len(v.runnable)
-		} else {
-			j.RunnableTotal = len(v.runnable)
-			k := min(len(v.runnable), free/max(1, j.SlotsPerUnit)+1)
-			for _, idx := range v.runnable[:k] {
-				u := plan.Units[idx]
-				j.Runnable = append(j.Runnable, sched.UnitRef{ID: unitID(v.key, idx), Info: u.Info, Slots: u.Slots})
-			}
-		}
-		for idx, r := range v.running {
-			j.Running[r.pool] += r.slots
-			j.RunningUnits = append(j.RunningUnits, sched.RunningUnit{ID: unitID(v.key, idx), Pool: r.pool,
-				Slots: r.slots, Started: r.started, Preemptions: 0})
-		}
-		sort.Slice(j.RunningUnits, func(a, b int) bool { return j.RunningUnits[a].ID < j.RunningUnits[b].ID })
-		s.Jobs = append(s.Jobs, j)
+		s.Jobs = append(s.Jobs, schedJob(v, free))
 	}
 	return s
+}
+
+// schedJob is a job as the policy sees it; free is the slots free in the
+// farm, which bounds how many runnable units are listed.
+func schedJob(v *view, free int) sched.Job {
+	plan := v.mem.plan
+	j := sched.Job{
+		ID: v.key, Project: v.project, Class: v.job.Spec.Class,
+		Submitted: v.job.CreationTimestamp.Time, Ready: v.mem.readyAt,
+		Deadline: v.obj.Deadline, RequiredRate: v.obj.Rate,
+		Pools: v.pools, MaxParallel: int(v.job.Spec.MaxParallel),
+		SlotsPerUnit: plan.Units[0].Slots, Running: map[string]int{},
+		Estimate: v.sum, Hold: v.job.Spec.Nudge.Hold || v.job.Spec.Nudge.HoldStop, HoldStop: v.job.Spec.Nudge.HoldStop,
+		Boost: floatOr(v.job.Spec.Nudge.Boost, 0), LastRunning: v.mem.lastRun,
+		Preemptible: v.driver.Preemptible(), Checkpoints: v.driver.Checkpoints(),
+	}
+	if v.blocked {
+		j.Blocked = len(v.runnable)
+	} else {
+		j.RunnableTotal = len(v.runnable)
+		k := min(len(v.runnable), free/max(1, j.SlotsPerUnit)+1)
+		for _, idx := range v.runnable[:k] {
+			u := plan.Units[idx]
+			j.Runnable = append(j.Runnable, sched.UnitRef{ID: unitID(v.key, idx), Info: u.Info, Slots: u.Slots})
+		}
+	}
+	for idx, r := range v.running {
+		j.Running[r.pool] += r.slots
+		j.RunningUnits = append(j.RunningUnits, sched.RunningUnit{ID: unitID(v.key, idx), Pool: r.pool,
+			Slots: r.slots, Started: r.started, Preemptions: 0})
+	}
+	sort.Slice(j.RunningUnits, func(a, b int) bool { return j.RunningUnits[a].ID < j.RunningUnits[b].ID })
+	return j
 }
 
 func isFinished(v *view) bool {

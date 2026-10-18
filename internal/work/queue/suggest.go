@@ -129,11 +129,13 @@ var weekdays = map[string]time.Weekday{"sun": time.Sunday, "mon": time.Monday, "
 
 // policyFor returns the deadline policy of a job: its project's for its
 // class, else the class's.
-func (q *Queue) policyFor(v *view) forecast.Policy {
-	if pp, ok := q.policies[v.project][v.job.Spec.Class]; ok {
+func (q *Queue) policyFor(v *view) forecast.Policy { return q.policyForJob(v.project, v.job) }
+
+func (q *Queue) policyForJob(project string, j *c4v1.WorkJob) forecast.Policy {
+	if pp, ok := q.policies[project][j.Spec.Class]; ok {
 		return pp
 	}
-	return classPolicy(v.job)
+	return classPolicy(j)
 }
 
 // loadPolicies reads every project's deadline policies.
@@ -203,7 +205,7 @@ func (q *Queue) suggest(ctx context.Context, now time.Time, snap sched.Snapshot,
 		sg.policy = p
 		finished, total := len(m.millis), len(m.plan.Units)
 		js := dec.Jobs[v.key]
-		band := forecast.Display(now, v.sum, js.ETA50, js.ETA90)
+		band := q.shown(v, now, forecast.Display(now, v.sum, js.ETA50, js.ETA90))
 		info := forecast.InfoPoint(finished) && finished > sg.lastInfo
 		ev := forecast.Event{Now: now, Finished: finished, Total: total, Band: band, Candidate: sg.s.Deadline}
 		switch {
@@ -246,14 +248,22 @@ func (q *Queue) suggest(ctx context.Context, now time.Time, snap sched.Snapshot,
 // candidate is the policy's deadline for a job now, and the band it was
 // computed with. It is zero when the job has no forecast.
 func (q *Queue) candidate(now time.Time, snap sched.Snapshot, v *view, p forecast.Policy) (time.Time, forecast.Band) {
-	submit, ready := v.job.CreationTimestamp.Time, v.mem.readyAt
+	return candidateIn(q.Policy, q.Cfg, now, snap, v.key, v.job.CreationTimestamp.Time, v.mem.readyAt, p, q.adjustFor(v))
+}
+
+// candidateIn is the policy's deadline for job key of snap: for an
+// achievable policy, the earliest deadline by which it finishes at the
+// quantile without making a job that is on time late.
+func candidateIn(policy sched.Policy, cfg sched.Config, now time.Time, snap sched.Snapshot, key string, submit, ready time.Time,
+	p forecast.Policy, adjust func(time.Time, forecast.Band) forecast.Band) (time.Time, forecast.Band) {
 	if p.Kind != forecast.Achievable {
 		return p.Earliest(now, now, submit, ready), forecast.Band{}
 	}
-	w := newWhatIf(q.Policy, q.Cfg, snap, v.key)
+	w := newWhatIf(policy, cfg, snap, key)
 	if w == nil {
 		return time.Time{}, forecast.Band{}
 	}
+	w.adjust = adjust
 	hi := now.Add(whatIfHorizon)
 	base := w.run(hi, 0)
 	band := w.band(base)

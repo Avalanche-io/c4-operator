@@ -1380,12 +1380,29 @@ quarter of the time to it has passed. A settled suggestion never moves;
 only a person moves a deadline. Every value is signed into the book.
 `work/forecast` holds the rules; the queue applies them.
 
-**What a person is shown.** `status.estimate.eta50` to `eta95` are the
-plan's finish for the calibrated percentiles of the remaining work, with
-half the critical path as the last wave's tail. The scheduler's own finish
-adds the whole critical path, which is the right margin for deciding who
-is late and what to buy, and run against isolated synthetic jobs it was about a quarter late as a
-median.
+**What a person is shown.** `status.estimate.eta50` to `eta95` start from
+the plan's finish for the calibrated percentiles of the remaining work, with
+half the critical path as the last wave's tail, and never sooner than now
+plus the whole critical path. The scheduler's own finish adds the whole
+critical path, which is the right margin for deciding who is late and what
+to buy. The plan assumes each job gets its planned share, and under
+contention that is optimistic: in `hack/sim` the band covered 54/61/65/68%
+of finishes at P50/P80/P90/P95 with the work calibrated. So the band is
+also calibrated on the finish (`forecast.FinishCalibration`). While a job
+runs, the queue keeps the uncalibrated median at up to 64 moments: each new
+finished count, or hourly. When the job succeeds, each moment's log ratio
+of actual remaining time to that median becomes a score, kept per project
+and class and by stage (nothing finished, under a quarter, under three
+quarters, the rest). With 100 scores, bands are shown at those quantiles;
+in `hack/sim` that gave 50/79/89/94%. Sharing follows `shareHistory`, as
+for the work calibration. The suggestion search and the deadline-options
+readout use the same calibrated band.
+
+**Dry runs.** `Queue.DryRun` plans a job that does not exist yet against
+the farm as the last tick left it: its class's plan, its estimate with the
+project's calibrations, the deadline it would get (suggested, or its own),
+and the band it would be shown. It writes and signs nothing, and serves a
+submission dialog's preview.
 
 **Deadline options.** Before a person sets a time, the queue says what it
 would take (`GET /jobs/{ns}/{name}/deadline-options`, `c4_deadline_options`),

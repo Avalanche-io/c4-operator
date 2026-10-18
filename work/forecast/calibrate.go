@@ -108,6 +108,22 @@ func (c *FinishCalibration) Apply(k FinishKey, now time.Time, b Band) Band {
 	return out
 }
 
+// Covers reports whether Apply would calibrate a band for k: k or its
+// class's AnyStage key holds at least Min scores.
+func (c *FinishCalibration) Covers(k FinishKey) bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, key := range []FinishKey{k, {k.Class, AnyStage}} {
+		if r := c.rings[key]; r != nil && len(r.v) >= max(1, c.Min) {
+			return true
+		}
+	}
+	return false
+}
+
 // Count returns how many scores a key holds.
 func (c *FinishCalibration) Count(k FinishKey) int {
 	c.mu.Lock()

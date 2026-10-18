@@ -116,7 +116,7 @@ func (q *Queue) DeadlineOptions(job string, at []time.Time, sees func(project st
 	// snapshot is rebuilt every tick, never changed in place, and each
 	// what-if copies the jobs it changes.
 	q.mu.Lock()
-	snap, pol, policy, cfg := q.lastSnap, q.lastPol[job], q.Policy, q.Cfg
+	snap, pol, policy, cfg, adj := q.lastSnap, q.lastPol[job], q.Policy, q.Cfg, q.lastAdj[job]
 	q.mu.Unlock()
 	if snap.Now.IsZero() || policy == nil {
 		return nil, ErrNoPlan
@@ -125,6 +125,7 @@ func (q *Queue) DeadlineOptions(job string, at []time.Time, sees func(project st
 	if w == nil {
 		return nil, ErrNotPlanned
 	}
+	w.adjust = adj
 	if pol.Quantile <= 0 {
 		pol = forecast.DefaultPolicy()
 	}
@@ -201,6 +202,8 @@ type whatIf struct {
 	i       int
 	id      string
 	project map[string]string // job ID to project
+	// adjust finish-calibrates the job's band (nil: as displayed).
+	adjust func(time.Time, forecast.Band) forecast.Band
 }
 
 // newWhatIf returns nil when the job is not in the snapshot.
@@ -234,7 +237,11 @@ func (w *whatIf) run(d time.Time, boost float64) sched.Decisions {
 // band is the job's display band in a run.
 func (w *whatIf) band(r sched.Decisions) forecast.Band {
 	js := r.Jobs[w.id]
-	return forecast.Display(w.snap.Now, w.snap.Jobs[w.i].Estimate, js.ETA50, js.ETA90)
+	b := forecast.Display(w.snap.Now, w.snap.Jobs[w.i].Estimate, js.ETA50, js.ETA90)
+	if w.adjust != nil {
+		b = w.adjust(w.snap.Now, b)
+	}
+	return b
 }
 
 // onTime lists the other jobs on time in a run.

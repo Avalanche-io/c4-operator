@@ -5,6 +5,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/forecast"
 )
 
 // Live calibration (estimate.Calibration). While a job runs, the queue
@@ -153,4 +154,120 @@ func (q *Queue) learn(v *view) {
 		}
 		q.cal.add(v.project, v.job.Spec.Class, share, p.sum.Stratum, estimate.Score(p.sum, actual))
 	}
+}
+
+// Live finish calibration (forecast.FinishCalibration). The band a person
+// is shown comes from the plan, which assumes each job gets its planned
+// share; under contention that is optimistic, and calibrating W alone
+// does not fix it (hack/sim out/eta.md). So the queue keeps, while a job
+// runs, the uncalibrated median it would show at a bounded set of
+// moments, and when the job succeeds scores each against the actual
+// finish. Bands for jobs of the same project and class are then shown
+// calibrated. Sharing follows the same rule as the W calibration.
+
+// finishPointsMax bounds the moments kept per job; finishEvery spaces
+// them when the finished count does not move.
+const (
+	finishPointsMax = 64
+	finishEvery     = time.Hour
+)
+
+type finishPoint struct {
+	at     time.Time
+	rawP50 time.Time
+	stage  int8
+}
+
+type finishCals struct {
+	own    map[[2]string]*forecast.FinishCalibration
+	farm   map[string]*forecast.FinishCalibration
+	farmBy map[string]map[string]bool
+}
+
+func (c *finishCals) init() {
+	if c.own == nil {
+		c.own = map[[2]string]*forecast.FinishCalibration{}
+		c.farm = map[string]*forecast.FinishCalibration{}
+		c.farmBy = map[string]map[string]bool{}
+	}
+}
+
+// adjust returns the function that calibrates a band for a job of project
+// and class at stage: its project's calibration when it covers the key,
+// else the farm's for projects that share, else none.
+func (c *finishCals) adjust(project, class string, share bool, stage int8) func(time.Time, forecast.Band) forecast.Band {
+	c.init()
+	k := forecast.FinishKey{Class: class, Stage: stage}
+	if own := c.own[[2]string{project, class}]; own.Covers(k) {
+		return func(now time.Time, b forecast.Band) forecast.Band { return own.Apply(k, now, b) }
+	}
+	if f := c.farm[class]; share && len(c.farmBy[class]) >= farmMinProjects && f.Covers(k) {
+		return func(now time.Time, b forecast.Band) forecast.Band { return f.Apply(k, now, b) }
+	}
+	return nil
+}
+
+func (c *finishCals) add(project, class string, share bool, k forecast.FinishKey, score float64) {
+	c.init()
+	own := c.own[[2]string{project, class}]
+	if own == nil {
+		own = forecast.NewFinishCalibration(calCapacity)
+		c.own[[2]string{project, class}] = own
+	}
+	own.Add(k, score)
+	if !share {
+		return
+	}
+	f := c.farm[class]
+	if f == nil {
+		f = forecast.NewFinishCalibration(calCapacity)
+		c.farm[class] = f
+		c.farmBy[class] = map[string]bool{}
+	}
+	f.Add(k, score)
+	c.farmBy[class][project] = true
+}
+
+// noteFinish keeps the uncalibrated median shown now, at each new
+// finished count or after finishEvery.
+func (m *jobMem) noteFinish(now time.Time, finished, total int, rawP50 time.Time) {
+	if rawP50.IsZero() || len(m.finPts) >= finishPointsMax || finished >= total {
+		return
+	}
+	if n := len(m.finPts); n > 0 && finished <= m.finLast && now.Sub(m.finPts[n-1].at) < finishEvery {
+		return
+	}
+	m.finLast = finished
+	m.finPts = append(m.finPts, finishPoint{at: now, rawP50: rawP50, stage: forecast.StageOf(finished, total)})
+}
+
+// learnFinish scores a succeeded job's kept medians against its finish.
+func (q *Queue) learnFinish(v *view) {
+	m := v.mem
+	if m.finLearned || m.finished.IsZero() {
+		return
+	}
+	m.finLearned = true
+	share := q.shareHist[v.project]
+	for _, p := range m.finPts {
+		q.fcal.add(v.project, v.job.Spec.Class, share, forecast.FinishKey{Class: v.job.Spec.Class, Stage: p.stage},
+			forecast.FinishScore(p.at, p.rawP50, m.finished))
+	}
+}
+
+// shown is the band a person is shown for a job: the display band,
+// finish-calibrated when its project and class have the scores.
+func (q *Queue) shown(v *view, now time.Time, raw forecast.Band) forecast.Band {
+	if adj := q.adjustFor(v); adj != nil {
+		return adj(now, raw)
+	}
+	return raw
+}
+
+func (q *Queue) adjustFor(v *view) func(time.Time, forecast.Band) forecast.Band {
+	total := 0
+	if v.mem.plan != nil {
+		total = len(v.mem.plan.Units)
+	}
+	return q.fcal.adjust(v.project, v.job.Spec.Class, q.shareHist[v.project], forecast.StageOf(len(v.mem.millis), total))
 }

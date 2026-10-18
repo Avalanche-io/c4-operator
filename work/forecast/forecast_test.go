@@ -253,6 +253,9 @@ func TestFinishCalibration(t *testing.T) {
 	if got := c.Apply(FinishKey{Class: "render", Stage: 3}, now, b); !near(got.P50, 1.5) {
 		t.Fatal("a stage with no scores did not fall back to its class")
 	}
+	if !c.Covers(k) || !c.Covers(FinishKey{Class: "render", Stage: 3}) || c.Covers(FinishKey{Class: "ci"}) || (*FinishCalibration)(nil).Covers(k) {
+		t.Fatal("Covers")
+	}
 	if StageOf(0, 10) != 0 || StageOf(2, 10) != 1 || StageOf(5, 10) != 2 || StageOf(8, 10) != 3 {
 		t.Fatal("stages")
 	}
