@@ -69,6 +69,7 @@ test-linux:
 build:
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/c4-operator ./cmd/c4-operator
 	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/c4-farm ./cmd/c4-farm
+	CGO_ENABLED=0 go build -trimpath -ldflags="$(LDFLAGS)" -o bin/c4-agent ./cmd/c4-agent
 
 # The image is assembled from a binary cross-compiled on the host: Go builds
 # for any architecture without emulation, and the image needs no toolchain.
