@@ -496,7 +496,7 @@ func TestBurstSmallestThatCloses(t *testing.T) {
 	if math.Abs(js.Burst.Cost-cost) > 1e-6 {
 		t.Fatalf("cost %v want %v", js.Burst.Cost, cost)
 	}
-	msg := fmt.Sprintf("sh040-fx-v003 will miss Mon 22:00 UTC by about 7h at current capacity. +%d gpu-spot slots closes it (est. $%.0f).", want, cost)
+	msg := fmt.Sprintf("sh040-fx-v003 will miss Mon 22:00 UTC by about 7h at current capacity. %d more gpu-spot slots close it (about $%.0f).", want, cost)
 	if js.Message != msg {
 		t.Fatalf("message\n got %q\nwant %q", js.Message, msg)
 	}
@@ -523,7 +523,7 @@ func TestBurstSpillsToPricierAndSkipsSlowPools(t *testing.T) {
 	if b.Slots["gpu-spot"] != 2 || b.Slots["gpu-od"] < 1 || !b.Closes {
 		t.Fatalf("%+v", b)
 	}
-	if !strings.Contains(d.Jobs["sh040-fx-v003"].Message, "+2 gpu-spot and +") {
+	if !strings.Contains(d.Jobs["sh040-fx-v003"].Message, "2 more gpu-spot and ") {
 		t.Fatalf("%q", d.Jobs["sh040-fx-v003"].Message)
 	}
 	// Deadline in 6 minutes: spot (8m) is too slow, on-demand (5m) is not
@@ -948,7 +948,7 @@ func TestBurstForMarginIsLabelled(t *testing.T) {
 	if js.Burst == nil || !js.Burst.Margin || !js.Burst.Auto || js.Burst.Slots["gpu-spot"] != 1 {
 		t.Fatalf("burst %+v", js.Burst)
 	}
-	msg := "m is on track for Mon 16:45 UTC: ETA Mon 16:30 UTC, slack 45m. +1 gpu-spot slots adds margin against estimate uncertainty (est. $0.51)."
+	msg := "m is on track for Mon 16:45 UTC: ETA Mon 16:30 UTC, slack 45m. 1 more gpu-spot slot adds margin against estimate uncertainty (about $0.51)."
 	if js.Message != msg {
 		t.Fatalf("message\n got %q\nwant %q", js.Message, msg)
 	}
@@ -1029,7 +1029,7 @@ func TestAfterPropagatesDeadlines(t *testing.T) {
 	if !ls.Deadline.Equal(t0.Add(9*time.Hour)) || ls.DeadlineFor != "comp" {
 		t.Fatalf("light deadline %v for %q, want %v for comp", ls.Deadline, ls.DeadlineFor, t0.Add(9*time.Hour))
 	}
-	if !strings.Contains(ls.Message, "(for comp)") {
+	if !strings.Contains(ls.Message, "on track for the deadline of comp, ") {
 		t.Fatalf("message %q does not name comp", ls.Message)
 	}
 	if ls.Required <= 0 || tierCount(d, "light", TierNeed) == 0 {
@@ -1124,7 +1124,7 @@ func TestMessageTimesAreLocalWithUTC(t *testing.T) {
 	if msg := d.Jobs["b"].Message; !strings.Contains(msg, "on track for Mon 18:00 PDT (Tue 01:00 UTC)") {
 		t.Fatalf("message %q", msg)
 	}
-	if msg := d.Jobs["a"].Message; !strings.Contains(msg, "on track for Mon 17:00 PDT (Tue 00:00 UTC) (for b)") {
+	if msg := d.Jobs["a"].Message; !strings.Contains(msg, "on track for the deadline of b, Mon 17:00 PDT (Tue 00:00 UTC)") {
 		t.Fatalf("message %q", msg)
 	}
 	if st := d.Jobs["b"]; !st.Deadline.Equal(t0.Add(13*time.Hour)) || st.Deadline.Location() != time.UTC {

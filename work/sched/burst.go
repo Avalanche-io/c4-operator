@@ -271,20 +271,26 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 	case !jc.hasDeadline:
 		return ""
 	}
-	dl := forecast.Clock(jc.deadline, a.cfg.Loc)
+	// A deadline set by a dependent job names it: "the deadline of
+	// sh0220-comp, Fri 07:30 PDT (14:30 UTC)". dl is the phrase, dlc the
+	// same with a closing comma where a clause follows it.
+	own := forecast.Clock(jc.deadline, a.cfg.Loc)
+	dl, dlc, past, due := own, own, "its deadline "+own, own
 	if jc.deadlineFor != "" {
-		dl += " (for " + jc.deadlineFor + ")"
+		dl = "the deadline of " + shortID(jc.deadlineFor, id) + ", " + own
+		dlc, past = dl+",", dl+","
+		due = own + ", the deadline of " + shortID(jc.deadlineFor, id)
 	}
 	v := jc.view()
 	if jc.noPool {
-		return fmt.Sprintf("%s cannot run: no pool can run it (none of %s is in the farm); due %s.", id, strings.Join(jc.j.Pools, ", "), dl)
+		return fmt.Sprintf("%s cannot run: no pool can run it (none of %s is in the farm); due %s.", id, strings.Join(jc.j.Pools, ", "), due)
 	}
 	if jc.T <= 0 {
 		more := "with no capacity planned for it"
 		if v.finish90 > 0 && !math.IsInf(v.finish90, 1) {
 			more = fmt.Sprintf("about %s more at current capacity", human(secs(v.finish90)))
 		}
-		return fmt.Sprintf("%s is past its deadline %s by %s; %s.", id, dl, human(secs(-jc.T)), more)
+		return fmt.Sprintf("%s is past %s by %s; %s.", id, past, human(secs(-jc.T)), more)
 	}
 	sg := jc.burst
 	if !v.atRisk {
@@ -300,10 +306,10 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 			verb := "add"
 			if !sg.Auto {
 				verb = "would add"
-			} else if len(sg.Slots) == 1 {
+			} else if slotCount(sg.Slots) == 1 {
 				verb = "adds"
 			}
-			fmt.Fprintf(&b, " %s %s margin against estimate uncertainty (est. %s).", slotList(sg), verb, dollars(sg.Cost))
+			fmt.Fprintf(&b, " %s %s margin against estimate uncertainty (about %s).", slotList(sg), verb, dollars(sg.Cost))
 			if !sg.Auto {
 				fmt.Fprintf(&b, " Needs approval: %s.", sg.Why)
 			}
@@ -314,7 +320,7 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 	if math.IsInf(v.finish90, 1) {
 		fmt.Fprintf(&b, "%s will miss %s: no capacity is planned for it.", id, dl)
 	} else {
-		fmt.Fprintf(&b, "%s will miss %s by about %s at current capacity.", id, dl, human(v.lateBy))
+		fmt.Fprintf(&b, "%s will miss %s by about %s at current capacity.", id, dlc, human(v.lateBy))
 	}
 	switch {
 	case sg == nil:
@@ -322,7 +328,7 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 			b.WriteString(" It cannot finish in time even with all the capacity its pools and quota allow.")
 		}
 	case sg.Closes:
-		fmt.Fprintf(&b, " %s %s it (est. %s).", slotList(sg), closesVerb(sg.Slots), dollars(sg.Cost))
+		fmt.Fprintf(&b, " %s %s it (about %s).", slotList(sg), closesVerb(sg.Slots), dollars(sg.Cost))
 		if !sg.Auto {
 			fmt.Fprintf(&b, " Needs approval: %s.", sg.Why)
 		}
@@ -332,19 +338,42 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 	return b.String()
 }
 
+// closesVerb agrees with slotList's subject: one slot closes, more close.
 func closesVerb(m map[string]int) string {
-	if len(m) == 1 {
+	if slotCount(m) == 1 {
 		return "closes"
 	}
 	return "close"
 }
 
+// slotList is a burst in words: "1 more gpu-spot slot", "3 more gpu-spot
+// slots", "2 more gpu-spot and 1 more gpu slots".
 func slotList(sg *BurstSuggestion) string {
 	parts := make([]string, len(sg.Order))
 	for i, n := range sg.Order {
-		parts[i] = fmt.Sprintf("+%d %s", sg.Slots[n], n)
+		parts[i] = fmt.Sprintf("%d more %s", sg.Slots[n], n)
+	}
+	if slotCount(sg.Slots) == 1 {
+		return parts[0] + " slot"
 	}
 	return strings.Join(parts, " and ") + " slots"
+}
+
+func slotCount(m map[string]int) int {
+	n := 0
+	for _, x := range m {
+		n += x
+	}
+	return n
+}
+
+// shortID is a job ID as another job's message names it: without the
+// namespace when both are in the same one.
+func shortID(other, self string) string {
+	if i := strings.Index(other, "/"); i > 0 && strings.HasPrefix(self, other[:i+1]) {
+		return other[i+1:]
+	}
+	return other
 }
 
 func dollars(x float64) string {

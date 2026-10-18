@@ -1631,7 +1631,7 @@ message in production's terms:
 
 ```
 sh040-fx-v003 will miss Fri 18:00 by about 3h at current capacity.
-+40 gpu-spot slots closes it (est. $410).
+40 more gpu-spot slots close it (about $410).
 ```
 
 The added slots are the smallest burst that restores feasibility, taking
