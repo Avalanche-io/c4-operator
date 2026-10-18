@@ -136,7 +136,10 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		}
 		if p := running[i]; p != nil {
 			e["node"] = p.Spec.NodeName
-			if p.Status.StartTime != nil {
+			if f, ok := m.metrics.nodes[p.Spec.NodeName].first("c4_task_progress", "namespace", p.Namespace, "pod", p.Name); ok {
+				// the unit's own progress line (.c4/progress), read by its node
+				progress[strconv.Itoa(i)] = map[string]any{"fraction": round3(math.Min(0.99, f)), "measured": true}
+			} else if p.Status.StartTime != nil {
 				el := m.at.Sub(p.Status.StartTime.Time).Seconds()
 				pred := est.Predict(u.Key, u.Pos).Mean
 				progress[strconv.Itoa(i)] = map[string]any{"fraction": round3(math.Min(0.99, el/math.Max(1, pred))), "measured": false}

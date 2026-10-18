@@ -168,6 +168,27 @@ type sample struct {
 	value  float64
 }
 
+// first is the value of the first sample of name whose labels include all
+// of want, and whether there is one.
+func (ss series) first(name string, want ...string) (float64, bool) {
+	for _, s := range ss {
+		if s.name != name {
+			continue
+		}
+		ok := true
+		for i := 0; i+1 < len(want); i += 2 {
+			if s.labels[want[i]] != want[i+1] {
+				ok = false
+				break
+			}
+		}
+		if ok {
+			return s.value, true
+		}
+	}
+	return 0, false
+}
+
 // sum adds up the samples of name whose labels include all of want.
 func (ss series) sum(name string, want ...string) float64 {
 	t := 0.0

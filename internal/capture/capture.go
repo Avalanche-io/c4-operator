@@ -13,6 +13,7 @@ package capture
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -74,6 +75,9 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	var edits []view.Edit
 	var files []overlay.Entry
 	for _, e := range entries {
+		if IsControl(e.Path) {
+			continue
+		}
 		switch e.Kind {
 		case overlay.Whiteout:
 			edits = append(edits, view.Edit{Path: e.Path})
@@ -145,6 +149,16 @@ func Run(ctx context.Context, in Input) (*Result, error) {
 	}
 	res.Duration = time.Since(start)
 	return res, nil
+}
+
+// ControlDir is where a unit talks to the farm while it runs (its
+// progress line); it is never part of the unit's output.
+const ControlDir = ".c4/"
+
+// IsControl reports whether an upper path is in the control directory at
+// the volume's root.
+func IsControl(p string) bool {
+	return p == ControlDir || p == ".c4" || strings.HasPrefix(p, ControlDir)
 }
 
 func hashAll(files []overlay.Entry, workers int) ([]c4.ID, error) {
