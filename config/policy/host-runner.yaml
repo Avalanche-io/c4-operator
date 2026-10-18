@@ -1,0 +1,126 @@
+# What a host runner may write (config/rbac/host-runner.yaml grants the
+# verbs; these policies narrow them). A runner signs in as the service
+# account c4-hosts/<node> and may touch only:
+#
+# - its own Node: create it once with the host-runner taint; afterwards
+#   change only the labels c4.avalanche.io/slot-limit and the annotation
+#   c4.avalanche.io/capacity-reason (its power-driven capacity), and its
+#   status (heartbeat conditions, pods capacity);
+# - its own Lease in kube-node-lease;
+# - pods bound to its Node: their status, and the annotations
+#   c4.avalanche.io/output-checkpoint and output-epoch; and bindings of
+#   pods to its Node.
+#
+# A Binding names only its target, so these policies cannot see which pod
+# is bound. Grant pods/binding only where agent pods run, or keep the host
+# runner's taint on every agent pool so nothing else selects these nodes.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-host-runner-nodes
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: [v1]
+      operations: [CREATE, UPDATE]
+      resources: [nodes, nodes/status]
+  matchConditions:
+  - name: is-host-runner
+    expression: "request.userInfo.username.startsWith('system:serviceaccount:c4-hosts:')"
+  variables:
+  - name: host
+    expression: "request.userInfo.username.substring(31)"
+  - name: sub
+    expression: "has(request.subResource) ? request.subResource : ''"
+  - name: before
+    expression: "request.operation == 'CREATE' || !has(oldObject.metadata.labels) ? {} : oldObject.metadata.labels"
+  - name: after
+    expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
+  - name: annBefore
+    expression: "request.operation == 'CREATE' || !has(oldObject.metadata.annotations) ? {} : oldObject.metadata.annotations"
+  - name: annAfter
+    expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
+  validations:
+  - expression: "object.metadata.name == variables.host"
+    message: a host runner may only write the Node named for its service account
+  - expression: >-
+      request.operation != 'CREATE' ||
+      (has(object.spec.taints) && object.spec.taints.exists(t, t.key == 'c4.avalanche.io/host-runner' && t.effect == 'NoSchedule'))
+    message: a host runner's Node is created with the c4.avalanche.io/host-runner taint
+  - expression: >-
+      request.operation == 'CREATE' || variables.sub == 'status' || (
+        object.spec == oldObject.spec &&
+        variables.after.all(k, k == 'c4.avalanche.io/slot-limit' || (k in variables.before && variables.before[k] == variables.after[k])) &&
+        variables.before.all(k, k == 'c4.avalanche.io/slot-limit' || k in variables.after) &&
+        variables.annAfter.all(k, k == 'c4.avalanche.io/capacity-reason' || (k in variables.annBefore && variables.annBefore[k] == variables.annAfter[k])) &&
+        variables.annBefore.all(k, k == 'c4.avalanche.io/capacity-reason' || k in variables.annAfter))
+    message: after registering, a host runner may change only its slot-limit label, its capacity-reason annotation and its status
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-host-runner-nodes
+spec:
+  policyName: c4-host-runner-nodes
+  validationActions: [Deny]
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-host-runner-pods
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: [v1]
+      operations: [UPDATE]
+      resources: [pods, pods/status]
+    - apiGroups: [""]
+      apiVersions: [v1]
+      operations: [CREATE]
+      resources: [pods/binding]
+    - apiGroups: [coordination.k8s.io]
+      apiVersions: [v1]
+      operations: [CREATE, UPDATE]
+      resources: [leases]
+  matchConditions:
+  - name: is-host-runner
+    expression: "request.userInfo.username.startsWith('system:serviceaccount:c4-hosts:')"
+  variables:
+  - name: host
+    expression: "request.userInfo.username.substring(31)"
+  - name: sub
+    expression: "has(request.subResource) ? request.subResource : ''"
+  - name: before
+    expression: "request.resource.resource != 'pods' || !has(oldObject.metadata.annotations) ? {} : oldObject.metadata.annotations"
+  - name: after
+    expression: "request.resource.resource != 'pods' || !has(object.metadata.annotations) ? {} : object.metadata.annotations"
+  - name: mine
+    expression: "['c4.avalanche.io/output-checkpoint', 'c4.avalanche.io/output-epoch']"
+  validations:
+  - expression: "request.resource.resource != 'leases' || (request.namespace == 'kube-node-lease' && object.metadata.name == variables.host)"
+    message: a host runner may only write its own Lease in kube-node-lease
+  - expression: "variables.sub != 'binding' || object.target.name == variables.host"
+    message: a host runner may only bind pods to its own Node
+  - expression: >-
+      request.resource.resource != 'pods' || variables.sub == 'binding' ||
+      (has(oldObject.spec.nodeName) && oldObject.spec.nodeName == variables.host)
+    message: a host runner may only write to pods bound to its own Node
+  - expression: >-
+      request.resource.resource != 'pods' || variables.sub != '' || (
+        object.spec == oldObject.spec &&
+        (has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}) &&
+        variables.after.all(k, k in variables.mine || (k in variables.before && variables.before[k] == variables.after[k])) &&
+        variables.before.all(k, k in variables.mine || k in variables.after))
+    message: a host runner may change only a pod's status and its output-checkpoint and output-epoch annotations
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-host-runner-pods
+spec:
+  policyName: c4-host-runner-pods
+  validationActions: [Deny]

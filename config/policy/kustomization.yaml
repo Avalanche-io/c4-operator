@@ -1,3 +1,4 @@
 resources:
 - node-writes.yaml
 - workjob-owner.yaml
+- host-runner.yaml

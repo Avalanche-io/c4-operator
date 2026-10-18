@@ -1,0 +1,58 @@
+# Host runners: `c4 farm agent --runner` (or `c4-agent runner`) on a
+# person's own machine, running the members of their agent bundles. Each
+# machine signs in as its own service account in c4-hosts, named for the
+# machine's Node (c4-hosts/abyss for the Node abyss). The c4-host-runner
+# admission policies (config/policy/host-runner.yaml) narrow what RBAC
+# grants here to that one Node, its Lease, and the pods bound to it.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: c4-hosts
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-host-runner
+rules:
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [get, list, watch, create, patch]
+- apiGroups: [""]
+  resources: [nodes/status]
+  verbs: [patch]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch, patch]
+- apiGroups: [""]
+  resources: [pods/status]
+  verbs: [patch]
+- apiGroups: [""]
+  resources: [pods/binding]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-host-runner
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-host-runner}
+subjects:
+- {kind: Group, apiGroup: rbac.authorization.k8s.io, name: "system:serviceaccounts:c4-hosts"}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-host-runner
+  namespace: kube-node-lease
+rules:
+- apiGroups: [coordination.k8s.io]
+  resources: [leases]
+  verbs: [get, create, update, patch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-host-runner
+  namespace: kube-node-lease
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-host-runner}
+subjects:
+- {kind: Group, apiGroup: rbac.authorization.k8s.io, name: "system:serviceaccounts:c4-hosts"}
