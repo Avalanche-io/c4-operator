@@ -56,6 +56,7 @@ type Vars struct {
 	Dir      string // the asset's folder under the mount, with a trailing slash, or ""
 	Stem     string // its base name without extension, e.g. sm0140
 	Seq      string // a frame's sequence pattern: sm0140.1001.exr gives sm0140.#.exr
+	SeqF     string // the same as a printf pattern: sm0140.%04d.exr
 	Shot     string
 	Mount    string
 	Renderer string
@@ -69,7 +70,7 @@ var types = map[string]JobType{
 		Renderers: map[string]string{"cycles": "Cycles", "karma-xpu": "BRAY_HdKarmaXPU", "karma-cpu": "BRAY_HdKarma",
 			"prman": "HdPrmanLoaderRendererPlugin", "arnold": "HdArnoldRendererPlugin", "vray": "HdVRayRendererPlugin"},
 		Script: `mkdir -p {{.Mount}}/render
-usdrecord --renderer {{.Renderer}} --frames "$C4_FRAME_START:$C4_FRAME_END" \
+usdrecord --disableGpu --renderer {{.Renderer}} --frames "$C4_FRAME_START:$C4_FRAME_END" \
   --imageWidth {{index .Set "width"}} {{.Mount}}/{{.Asset}} {{.Mount}}/render/{{.Stem}}.####.exr
 for f in $(seq "$C4_FRAME_START" "$C4_FRAME_END"); do
   c4-unit preview "{{.Mount}}/render/{{.Stem}}.$f.exr" "$f"
@@ -135,7 +136,7 @@ c4-test --shard "$C4_SHARD" --shards "$C4_SHARDS" --target "$C4_TARGET" --junit 
 		Set: map[string]string{"task": "depth", "model": "depth-anything-v2-small"},
 		Script: `mkdir -p {{.Mount}}/{{index .Set "task"}}
 c4-infer --task {{index .Set "task"}} --model {{index .Set "model"}} \
-  --in '{{.Mount}}/{{.Asset}}' --out '{{.Mount}}/{{index .Set "task"}}/{{.Shot}}.%04d.exr' \
+  --in '{{.Mount}}/{{.Dir}}{{.SeqF}}' --out '{{.Mount}}/{{index .Set "task"}}/{{.Shot}}.%04d.exr' \
   --frames "$C4_FRAME_START-$C4_FRAME_END"
 for f in $(seq "$C4_FRAME_START" "$C4_FRAME_END"); do
   c4-unit preview "{{.Mount}}/{{index .Set "task"}}/{{.Shot}}.$f.exr" "$f"
@@ -173,7 +174,10 @@ type Options struct {
 	Pools    []string
 	Renderer string
 	Image    string // overrides the type's image
-	Set      map[string]string
+	// AssetIsDir says the asset is a folder (of frames, a repository, a
+	// dataset) rather than a file.
+	AssetIsDir bool
+	Set        map[string]string
 }
 
 // Spec builds the job's WorkJob spec, before inputs and deadline.
@@ -233,19 +237,28 @@ func (t JobType) Spec(o Options) (c4v1.WorkJobSpec, error) {
 		return c4v1.WorkJobSpec{}, fmt.Errorf("%s takes no --renderer", t.Name)
 	}
 	stem := strings.TrimSuffix(path.Base(o.Asset), path.Ext(o.Asset))
+	if o.AssetIsDir {
+		stem = path.Base(o.Asset)
+	}
 	shot := o.Shot
 	if shot == "" {
 		shot = stem
 	}
 	dir := path.Dir(o.Asset) + "/"
-	if dir == "./" {
+	if o.AssetIsDir {
+		dir = o.Asset + "/"
+	}
+	if dir == "./" || dir == "/" {
 		dir = ""
 	}
 	seq := path.Base(o.Asset)
-	if m := frameFile.FindStringSubmatch(seq); m != nil {
+	if o.AssetIsDir {
+		seq = shot + ".#.exr" // a folder of frames named for the shot
+	} else if m := frameFile.FindStringSubmatch(seq); m != nil {
 		seq = m[1] + ".#" + m[3]
 	}
-	v := Vars{Asset: o.Asset, Dir: dir, Stem: stem, Seq: seq, Shot: shot, Mount: t.Mount, Renderer: renderer, Set: set}
+	seqF := strings.Replace(seq, "#", "%04d", 1)
+	v := Vars{Asset: o.Asset, Dir: dir, Stem: stem, Seq: seq, SeqF: seqF, Shot: shot, Mount: t.Mount, Renderer: renderer, Set: set}
 	// a --set value may itself use the vars ({{.Stem}})
 	for k, val := range set {
 		if strings.Contains(val, "{{") {

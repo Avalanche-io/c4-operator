@@ -94,9 +94,6 @@ func FindRoot(asset, root string) (string, string, error) {
 	if err != nil || strings.HasPrefix(rel, "..") {
 		return "", "", fmt.Errorf("%s is not inside %s", asset, root)
 	}
-	if info.IsDir() {
-		rel = "."
-	}
 	return root, filepath.ToSlash(rel), nil
 }
 
@@ -237,6 +234,9 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	}
 	opt := a.Options
 	opt.Asset, opt.Shot = rel, a.Shot
+	if info, err := os.Stat(a.Asset); err == nil && info.IsDir() {
+		opt.AssetIsDir = true
+	}
 	if a.Template == "" {
 		if spec, err = t.Spec(opt); err != nil {
 			return nil, err

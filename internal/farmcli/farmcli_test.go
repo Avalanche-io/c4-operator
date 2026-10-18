@@ -97,7 +97,19 @@ func TestTypes(t *testing.T) {
 	if err != nil || spec.Params["chunk"] != "120" || spec.Params["order"] != "sequential" {
 		t.Fatalf("sim: one unit over the range: %v %v", spec.Params, err)
 	}
+	inf, _ := LookupType("infer")
+	spec, _ = inf.Spec(Options{Asset: "plates/sm0140", AssetIsDir: true, Frames: "1001-1048"})
+	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, "--in '/show/plates/sm0140/sm0140.%04d.exr'") || !strings.Contains(a, "/show/depth/sm0140.%04d.exr") {
+		t.Fatalf("infer on a folder of plates:\n%s", a)
+	}
+	if !strings.Contains(args, "usdrecord --disableGpu") {
+		t.Fatalf("render without --disableGpu:\n%s", args)
+	}
 	tr, _ := LookupType("transcode")
+	spec, _ = tr.Spec(Options{Asset: "plates/sm0140", AssetIsDir: true, Frames: "1001-1048"})
+	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, "'/show/plates/sm0140/sm0140.#.exr'") {
+		t.Fatalf("transcode on a folder of plates:\n%s", a)
+	}
 	spec, err = tr.Spec(Options{Asset: "plates/sm0140.1001.exr", Shot: "sm0140", Frames: "1001-1048", Set: map[string]string{"codec": "dnxhr-hqx"}})
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +172,11 @@ func TestFindRoot(t *testing.T) {
 	}
 	root, rel, err = FindRoot(filepath.Join(dir, "sm0140"), filepath.Join(dir, "sm0140"))
 	if err != nil || rel != "." {
-		t.Fatalf("a folder asset: %s %s %v", root, rel, err)
+		t.Fatalf("a folder asset that is its root: %s %s %v", root, rel, err)
+	}
+	root, rel, err = FindRoot(filepath.Join(dir, "sm0140", "lights"), "")
+	if err != nil || root != dir || rel != "sm0140/lights" {
+		t.Fatalf("a folder asset inside a project: %s %s %v", root, rel, err)
 	}
 	if _, _, err := FindRoot(filepath.Join(dir, "sm0140", "sm0140.usda"), filepath.Join(dir, "sm0140", "lights")); err == nil {
 		t.Fatal("an asset outside its root was accepted")
