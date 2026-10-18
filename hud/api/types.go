@@ -10,7 +10,14 @@ type Viewer struct {
 	User     string   `json:"user"`
 	Projects []string `json:"projects"`
 	All      bool     `json:"allProjects"`
+	// Role picks the viewer's starting detail level: artist, supervisor,
+	// producer, wrangler, farm-admin, facilities or pipeline-td. Empty:
+	// the HUD guesses from All (wrangler) or not (artist).
+	Role string `json:"role,omitempty"`
 }
+
+// Roles a viewer can have (Viewer.Role).
+var Roles = []string{"artist", "supervisor", "producer", "wrangler", "farm-admin", "facilities", "pipeline-td"}
 
 // Sees reports whether the viewer may see a project's jobs and objects.
 func (v *Viewer) Sees(project string) bool {
@@ -148,6 +155,15 @@ type Counts struct {
 	Succeeded   int `json:"succeeded"`
 	Failed      int `json:"failed"`
 	Held        int `json:"held"`
+	// The phases a person is shown (each unit in exactly one count):
+	// Preflight preparing to run; Running the first attempt working,
+	// Retrying a later one; Backoff a failed attempt waiting for its
+	// retry; Egress done, output still moving; Accepted failed and
+	// accepted by a person.
+	Preflight int `json:"preflight,omitempty"`
+	Backoff   int `json:"backoff,omitempty"`
+	Egress    int `json:"egress,omitempty"`
+	Accepted  int `json:"accepted,omitempty"`
 }
 
 type States struct {
@@ -158,6 +174,10 @@ type States struct {
 	Retrying    string `json:"retrying"`
 	Succeeded   string `json:"succeeded"`
 	Failed      string `json:"failed"`
+	Preflight   string `json:"preflight,omitempty"`
+	Backoff     string `json:"backoff,omitempty"`
+	Egress      string `json:"egress,omitempty"`
+	Accepted    string `json:"accepted,omitempty"`
 }
 
 type Objective struct {
@@ -279,6 +299,9 @@ type Estimate struct {
 	EtaP95 *time.Time `json:"etaP95,omitempty"`
 	// Calibrated says the band comes from finished jobs' outcomes.
 	Calibrated bool `json:"calibrated"`
+	// Risk is the deadline risk a person is shown: none, atRisk,
+	// willMiss or missed (WorkEstimate.Risk).
+	Risk string `json:"risk,omitempty"`
 }
 
 type Input struct {
@@ -314,6 +337,30 @@ type Job struct {
 	Shot string `json:"shot,omitempty"`
 	// Work is the job's progress weighted by work, in slot-seconds.
 	Work Work `json:"work"`
+	// NeedsPerson is set while the job waits on a person.
+	NeedsPerson *NeedsPerson `json:"needsPerson,omitempty"`
+	// Acks are the standing acknowledgements of failed units.
+	Acks []Ack `json:"acks,omitempty"`
+}
+
+// NeedsPerson says why a job waits on a person, and since when.
+type NeedsPerson struct {
+	// Reason is failed, stuck, approval, quota or permission.
+	Reason  string    `json:"reason"`
+	Message string    `json:"message"`
+	Since   time.Time `json:"since"`
+}
+
+// Ack is a person taking failed units (acknowledge, or assign to
+// Assignee) or accepting them as they are (accept).
+type Ack struct {
+	Kind     string    `json:"kind"`
+	Units    string    `json:"units"`
+	Actor    string    `json:"actor"`
+	Assignee string    `json:"assignee,omitempty"`
+	Note     string    `json:"note,omitempty"`
+	At       time.Time `json:"at"`
+	Record   string    `json:"record,omitempty"`
 }
 
 // Work is a job's work done, in flight and left, in slot-seconds. With
@@ -325,6 +372,12 @@ type Work struct {
 	RemainingSlotSeconds        float64 `json:"remainingSlotSeconds"`
 	P90RemainingSlotSeconds     float64 `json:"p90RemainingSlotSeconds"`
 	Basis                       string  `json:"basis"` // estimate or units
+	// DoneFraction is the share of the job's work done, counting units
+	// whose output is still moving; DeliveredFraction counts only units
+	// whose output is added and recorded. Both are monotonic: the highest
+	// seen for the job, lowered only when finished units are requeued.
+	DoneFraction      *float64 `json:"doneFraction,omitempty"`
+	DeliveredFraction *float64 `json:"deliveredFraction,omitempty"`
 }
 
 // Work bases.

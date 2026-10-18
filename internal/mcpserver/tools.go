@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"fmt"
+	"math"
 	"net/url"
 	"sort"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
@@ -19,7 +21,7 @@ var Version = "dev"
 
 // Instructions are sent to clients when they connect.
 const Instructions = `This server operates a render, CI and ML farm on Kubernetes, the same farm the HUD shows. Jobs are named namespace/name.
-Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in with c4_submit_job (dry_run first). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
+Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in with c4_submit_job (dry_run first). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), or take or accept them (c4_acknowledge_units). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
 Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. Costs: c4_approve_capacity provisions paid burst capacity.`
 
 func boolPtr(b bool) *bool { return &b }
@@ -94,6 +96,8 @@ func Tools(c *Client) []Tool {
 			idempotent, c.moveToNextSession),
 		tool("c4_requeue_units", "Requeue units", "Run units of a job again, discarding their previous results: a unit set like \"0-9,14\".",
 			destructive, c.requeue),
+		tool("c4_acknowledge_units", "Take, assign or accept failed units", "Say a person has failed units in hand so the farm stops asking: acknowledge (you take them), assign (to assignee), or accept (the failure stands; the units count as done, so nothing waits on them). Recorded with who and when, and signed in the book. A requeue clears it. Units is a set like \"14\" or \"0-9,14\"; only failed units are taken.",
+			idempotent, c.acknowledge),
 		tool("c4_avoid_node", "Avoid or allow a node for a job", "Keep a job's units off a node (a bad worker for that job), or allow it again.",
 			idempotent, c.avoidNode),
 		tool("c4_disable_node", "Disable or enable a node", "Take a node out of service for the whole farm (running units finish) or put it back.",
@@ -157,6 +161,9 @@ func atRisk(j api.Job) bool {
 	if j.Phase == "Succeeded" || j.Phase == "Failed" || j.Objective.Deadline == nil {
 		return false
 	}
+	if r := j.Estimate.Risk; r != "" {
+		return r != c4v1.RiskNone
+	}
 	return !j.Estimate.Feasible || j.Estimate.SlackSeconds < 0
 }
 
@@ -187,6 +194,20 @@ type JobRow struct {
 	Held         bool    `json:"held,omitempty"`
 	Boost        float64 `json:"boost,omitempty"`
 	Shot         string  `json:"shot,omitempty"`
+	// Risk is none, atRisk, willMiss or missed.
+	Risk        string       `json:"risk,omitempty" jsonschema:"deadline risk: none, atRisk (projected late, still fixable), willMiss (late even with every slot it can get) or missed"`
+	Moving      int          `json:"moving,omitempty" jsonschema:"units done whose output is still moving (not yet counted in done)"`
+	Failed      int          `json:"failed,omitempty" jsonschema:"units failed after their retries that nobody has accepted"`
+	Accepted    int          `json:"accepted,omitempty" jsonschema:"failed units a person accepted as they are"`
+	DonePct     float64      `json:"donePercent,omitempty" jsonschema:"share of the work done, never decreasing"`
+	NeedsPerson *NeedsPerson `json:"needsPerson,omitempty" jsonschema:"set while the job waits on a person: why and since when"`
+}
+
+// NeedsPerson says why a job waits on a person.
+type NeedsPerson struct {
+	Reason  string `json:"reason" jsonschema:"failed, stuck, approval, quota or permission"`
+	Message string `json:"message"`
+	Since   string `json:"since"`
 }
 
 type ListJobsOut struct {
@@ -202,6 +223,14 @@ func row(j api.Job) JobRow {
 		Feasible: j.Estimate.Feasible, Message: j.Estimate.Message, Held: j.Nudge.Hold, Shot: j.Shot}
 	if j.Nudge.Boost > 1 {
 		r.Boost = j.Nudge.Boost
+	}
+	r.Running += j.Units.Retrying + j.Units.Preflight
+	r.Risk, r.Moving, r.Failed, r.Accepted = j.Estimate.Risk, j.Units.Egress, j.Units.Failed, j.Units.Accepted
+	if f := j.Work.DoneFraction; f != nil {
+		r.DonePct = math.Round(*f*1000) / 10
+	}
+	if np := j.NeedsPerson; np != nil {
+		r.NeedsPerson = &NeedsPerson{Reason: np.Reason, Message: np.Message, Since: np.Since.Format(time.RFC3339)}
 	}
 	if j.Objective.Deadline != nil {
 		r.Deadline = j.Objective.Deadline.Format(time.RFC3339)
@@ -256,7 +285,7 @@ func (r JobRef) path() (string, error) {
 type GetJobIn struct {
 	JobRef
 	IncludeUnits bool   `json:"include_units,omitempty" jsonschema:"also list units (at most 500)"`
-	UnitState    string `json:"unit_state,omitempty" jsonschema:"with include_units, only units in this state (queued, running, retrying, succeeded, failed, held, blocked)"`
+	UnitState    string `json:"unit_state,omitempty" jsonschema:"with include_units, only units in this state (queued, blocked, held, preflight, running, retrying, backoff, egress, succeeded, failed, accepted)"`
 }
 
 type UnitRow struct {
@@ -603,6 +632,29 @@ func (c *Client) requeue(ctx context.Context, _ *mcp.CallToolRequest, in Requeue
 		return nil, Done{}, err
 	}
 	return c.control(ctx, p+"/requeue", map[string]any{"units": in.Units})
+}
+
+type AckIn struct {
+	JobRef
+	Units    string `json:"units" jsonschema:"a unit set, for example 14 or 0-9,14"`
+	Kind     string `json:"kind,omitempty" jsonschema:"acknowledge (default), assign or accept"`
+	Assignee string `json:"assignee,omitempty" jsonschema:"with assign, who has them"`
+	Note     string `json:"note,omitempty" jsonschema:"why, for the book"`
+}
+
+func (c *Client) acknowledge(ctx context.Context, _ *mcp.CallToolRequest, in AckIn) (*mcp.CallToolResult, Done, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, Done{}, err
+	}
+	body := map[string]any{"units": in.Units, "kind": in.Kind}
+	if in.Assignee != "" {
+		body["assignee"] = in.Assignee
+	}
+	if in.Note != "" {
+		body["note"] = in.Note
+	}
+	return c.control(ctx, p+"/ack", body)
 }
 
 type AvoidIn struct {

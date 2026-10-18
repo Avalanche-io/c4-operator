@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -45,7 +46,7 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 		snap.Pools = append(snap.Pools, ap)
 	}
 	for _, j := range m.jobs {
-		snap.Farm.QueuedUnits += int(j.job.Status.Units.Queued + j.job.Status.Units.Retrying)
+		snap.Farm.QueuedUnits += int(j.job.Status.Units.Queued + j.job.Status.Units.Backoff)
 	}
 	snap.Farm.UnitsPerHour, snap.Farm.FailuresLastHour = m.unitsHour, m.failsHour
 	mat, fetched := m.metrics.bytes("")
@@ -211,10 +212,19 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	}
 	u := st.Units
 	aj.Units = api.Counts{Total: int(u.Total), Queued: int(u.Queued), Blocked: int(u.Blocked), Running: int(u.Running),
-		Retrying: int(u.Retrying), Succeeded: int(u.Succeeded), Failed: int(u.Failed), Held: int(u.Held)}
+		Retrying: int(u.Retrying), Succeeded: int(u.Succeeded), Failed: int(u.Failed), Held: int(u.Held),
+		Preflight: int(u.Preflight), Backoff: int(u.Backoff), Egress: int(u.Egress), Accepted: int(u.Accepted)}
 	us := st.UnitStates
 	aj.UnitStates = api.States{Queued: us["queued"], Blocked: us["blocked"], Running: us["running"], Retrying: us["retrying"],
-		Succeeded: us["succeeded"], Failed: us["failed"]}
+		Succeeded: us["succeeded"], Failed: us["failed"], Preflight: us["preflight"], Backoff: us["backoff"],
+		Egress: us["egress"], Accepted: us["accepted"]}
+	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNeedsPerson); c != nil && c.Status == metav1.ConditionTrue {
+		aj.NeedsPerson = &api.NeedsPerson{Reason: strings.ToLower(c.Reason), Message: c.Message, Since: c.LastTransitionTime.Time.UTC()}
+	}
+	for _, a := range st.Acks {
+		aj.Acks = append(aj.Acks, api.Ack{Kind: a.Kind, Units: a.Units, Actor: a.Actor, Assignee: a.Assignee, Note: a.Note,
+			At: a.At.Time.UTC(), Record: a.Record})
+	}
 	if r.plan != nil && aj.Units.Total == 0 {
 		// Not yet seen by the queue: every unit is queued.
 		aj.Units.Total, aj.Units.Queued = len(r.plan.Units), len(r.plan.Units)
@@ -247,6 +257,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		}
 		aj.Estimate.EtaP80, aj.Estimate.EtaP95 = s.timePtr(e.ETA80), s.timePtr(e.ETA95)
 		aj.Estimate.Calibrated = e.Calibrated
+		aj.Estimate.Risk = e.Risk
 		for _, h := range e.HeavyRegions {
 			aj.HeavyRegions = append(aj.HeavyRegions, api.Heavy{From: int(h.From), To: int(h.To), Factor: num(h.Factor)})
 		}
@@ -265,6 +276,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 			aj.Estimate.Feasible = !f.After(st.Deadline.Time)
 		}
 	}
+	aj.Estimate.Risk = shownRisk(m.at, st, aj.Estimate.Risk)
 	if st.Phase == "Held" && aj.Estimate.Message == "" {
 		aj.Estimate.Message = j.Namespace + "/" + j.Name + " is held: no new units are released."
 	}
@@ -503,4 +515,19 @@ func (s *Server) timePtr(t *metav1.Time) *time.Time {
 	}
 	v := t.Time.UTC()
 	return &v
+}
+
+// shownRisk is Estimate.Risk: the queue's, made current by the clock (a
+// deadline that passed while the job runs is missed now, not at the next
+// status write), and none once the job has finished.
+func shownRisk(now time.Time, st *c4v1.WorkJobStatus, queued string) string {
+	switch {
+	case st.Finished != nil || st.Deadline == nil:
+		return c4v1.RiskNone
+	case now.After(st.Deadline.Time):
+		return c4v1.RiskMissed
+	case queued == "":
+		return c4v1.RiskNone
+	}
+	return queued
 }

@@ -20,6 +20,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 	"github.com/Avalanche-io/c4-operator/work/order"
 )
@@ -98,17 +99,22 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 	states := unitStateMap(&rec.job.Status, n)
 	attempts := parseAttempts(rec.job.Status.Attempts)
 	running := map[int]*corev1.Pod{}
+	finished := map[int]*corev1.Pod{} // succeeded pods, for units whose output still moves
 	for i := range m.pods {
 		p := &m.pods[i]
 		if p.Namespace != rec.job.Namespace || p.Labels[c4v1.LabelJob] != rec.job.Name {
 			continue
 		}
-		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
-			continue
-		}
 		u, _ := strconv.Atoi(p.Labels[c4v1.LabelUnit])
-		running[u] = p
+		switch p.Status.Phase {
+		case corev1.PodSucceeded:
+			finished[u] = p
+		case corev1.PodFailed:
+		default:
+			running[u] = p
+		}
 	}
+	acks := unitAcks(&rec.job.Status)
 	held := rec.job.Spec.Nudge.Hold || rec.job.Spec.Nudge.HoldStop
 	est := estimatorFor(rec)
 	var works []api.UnitWork
@@ -134,7 +140,21 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if works != nil {
 			e["work"] = works[i]
 		}
-		if p := running[i]; p != nil {
+		if a, ok := acks[i]; ok && (st == "failed" || st == "accepted") {
+			if st == "accepted" || a.Kind == c4v1.AckAccept {
+				e["accepted"] = a
+			} else {
+				e["ack"] = a
+			}
+		}
+		if p := finished[i]; p != nil && st == "egress" {
+			e["egress"] = queue.EgressOf(p)
+			e["node"] = p.Spec.NodeName
+		}
+		if p := running[i]; p != nil && st == "preflight" {
+			e["node"] = p.Spec.NodeName
+			e["preflight"] = queue.PreflightOf(p)
+		} else if p != nil {
 			e["node"] = p.Spec.NodeName
 			if f, ok := m.metrics.nodes[p.Spec.NodeName].first("c4_task_progress", "namespace", p.Namespace, "pod", p.Name); ok {
 				// the unit's own progress line (.c4/progress), read by its node
@@ -273,7 +293,7 @@ func unitStateMap(st *c4v1.WorkJobStatus, n int) []string {
 	for i := range out {
 		out[i] = "queued"
 	}
-	for _, name := range []string{"blocked", "retrying", "running", "failed", "succeeded"} {
+	for _, name := range []string{"blocked", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "succeeded"} {
 		idx, _ := order.DecodeSet(st.UnitStates[name])
 		for _, i := range idx {
 			if i >= 0 && i < n {
@@ -581,4 +601,16 @@ func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"from": from.String(), "to": to.String(), "changes": changes,
 		"counts": counts, "bytesAddedOrModified": bytesAdded, "truncated": truncated,
 		"seconds": round3(time.Since(start).Seconds())})
+}
+
+// unitAcks is the standing acknowledgement of each failed unit.
+func unitAcks(st *c4v1.WorkJobStatus) map[int]api.Ack {
+	out := map[int]api.Ack{}
+	for _, a := range st.Acks {
+		idx, _ := order.DecodeSet(a.Units)
+		for _, i := range idx {
+			out[i] = api.Ack{Kind: a.Kind, Actor: a.Actor, Assignee: a.Assignee, Note: a.Note, At: a.At.Time.UTC(), Record: a.Record}
+		}
+	}
+	return out
 }

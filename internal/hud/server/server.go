@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -76,7 +77,9 @@ type Server struct {
 	// previewCache indexes preview proxies by output view.
 	previewCache map[string]map[int]string
 	trusted      trustSet
-	keysUntil    time.Time
+	// marks are each job's highest done and delivered shares (work.go).
+	marks     map[string]progressMark
+	keysUntil time.Time
 }
 
 // Queue is what the HUD asks the work queue (*queue.Queue).
@@ -115,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/views/{project}/{id}/files", s.handleViewFiles)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/nudge", s.handleNudge)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/requeue", s.handleRequeue)
+	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/ack", s.handleAck)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/blacklist", s.handleBlacklist)
 	mux.HandleFunc("POST /api/v1/nodes/{name}/disable", s.handleDisable)
 	mux.HandleFunc("POST /api/v1/capacity/{pool}/approve", s.handleApprove)
@@ -201,7 +205,7 @@ func (s *Server) access(ctx context.Context, user string, groups []string) (*api
 	}
 	m := s.m
 	s.mu.Unlock()
-	v := &api.Viewer{User: user, Projects: []string{}, All: true}
+	v := &api.Viewer{User: user, Projects: []string{}, All: true, Role: RoleOf(groups)}
 	if m != nil {
 		for _, p := range m.projects {
 			ok := false
@@ -342,11 +346,27 @@ func (s *Server) expand(v *api.Viewer) *api.Viewer {
 	if !v.All || len(v.Projects) > 0 {
 		return v
 	}
-	out := &api.Viewer{User: v.User, All: true, Projects: []string{}}
+	out := &api.Viewer{User: v.User, All: true, Projects: []string{}, Role: v.Role}
 	if m := s.current(); m != nil {
 		for _, p := range m.projects {
 			out.Projects = append(out.Projects, p.Name)
 		}
 	}
 	return out
+}
+
+// RoleOf is a viewer's role from their groups: a group named
+// c4:role:<role> or c4-role-<role>, for a role in api.Roles. The first
+// match wins; none leaves the role empty and the HUD guesses.
+func RoleOf(groups []string) string {
+	for _, g := range groups {
+		r, ok := strings.CutPrefix(g, "c4:role:")
+		if !ok {
+			r, ok = strings.CutPrefix(g, "c4-role-")
+		}
+		if ok && slices.Contains(api.Roles, r) {
+			return r
+		}
+	}
+	return ""
 }

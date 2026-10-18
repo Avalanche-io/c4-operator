@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -77,7 +78,7 @@ func runManager(args []string) error {
 	policy := fs.String("work-policy", "objective", "scheduling policy: objective, edf, fifo")
 	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process: kind-sim (tests), or empty for an external provider")
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
-	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name=project|project;... (* for all projects)")
+	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name[@role]=project|project;... (* for all projects; a name that is a role, such as wrangler, has that role)")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
 	hudSites := fs.String("hud-sites", "", "JSON file of the farm's sites (name, label, region, lat, lon, kind onprem or cloud, localities) for the HUD's map; nodes join a site by their topology.kubernetes.io/region label")
 	farmTZ := fs.String("tz", "UTC", "the farm's time zone, for times the queue and the HUD show")
@@ -247,7 +248,13 @@ func parseViewers(s string) (map[string]*api.Viewer, error) {
 		if !ok || name == "" {
 			return nil, fmt.Errorf("--hud-dev-viewers %q: want name=project|project;...", s)
 		}
-		v := &api.Viewer{User: name, Projects: []string{}}
+		// name@role=projects gives the viewer a role; a name that is a
+		// role (wrangler, artist) has that role.
+		name, role, _ := strings.Cut(name, "@")
+		if role == "" && slices.Contains(api.Roles, name) {
+			role = name
+		}
+		v := &api.Viewer{User: name, Projects: []string{}, Role: role}
 		if projects == "*" {
 			v.All = true
 		} else {

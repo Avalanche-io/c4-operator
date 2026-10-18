@@ -116,6 +116,7 @@ func (s *Server) collect(ctx context.Context) error {
 	for _, rec := range m.jobs {
 		rec.work, rec.hasWork = jobWork(m, rec), true
 	}
+	s.steady(m)
 	if prev == nil || m.at.Sub(prev.metrics.at) >= 5*time.Second {
 		m.metrics = s.scrape(ctx)
 	} else {

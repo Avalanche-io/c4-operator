@@ -303,6 +303,112 @@ func (s *Server) handleRequeue(w http.ResponseWriter, r *http.Request) {
 	s.finishJobControl(w, r, v, rec, j, patch, before, "requeue", "requeue", map[string]any{"units": order.EncodeSet(idx)}, "Requeued", msg)
 }
 
+// handleAck is POST /jobs/{ns}/{name}/ack: a person takes failed units
+// (acknowledge, or assign to someone), or accepts them as they are
+// (accept). The queue carries it out and records who and when in
+// status.acks; accepted units no longer hold the job back.
+func (s *Server) handleAck(w http.ResponseWriter, r *http.Request) {
+	_, rec, v := s.job(w, r)
+	if rec == nil {
+		return
+	}
+	var body struct {
+		Units    json.RawMessage `json:"units"`
+		Kind     string          `json:"kind"`
+		Assignee string          `json:"assignee"`
+		Note     string          `json:"note"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, "body: %v", err)
+		return
+	}
+	switch body.Kind {
+	case "":
+		body.Kind = c4v1.AckAcknowledge
+	case c4v1.AckAcknowledge, c4v1.AckAccept:
+	case c4v1.AckAssign:
+		if body.Assignee == "" {
+			fail(w, http.StatusBadRequest, "assign: name the assignee")
+			return
+		}
+	default:
+		fail(w, http.StatusBadRequest, "kind: acknowledge, assign or accept")
+		return
+	}
+	var set string
+	var arr []int
+	if err := json.Unmarshal(body.Units, &set); err != nil {
+		if err := json.Unmarshal(body.Units, &arr); err != nil {
+			fail(w, http.StatusBadRequest, "units: a unit set string or an array of indexes")
+			return
+		}
+		set = order.EncodeSet(arr)
+	}
+	idx, err := order.DecodeSet(set)
+	if err != nil || len(idx) == 0 {
+		fail(w, http.StatusBadRequest, "units: %v", err)
+		return
+	}
+	failed, _ := order.DecodeSet(rec.job.Status.UnitStates["failed"])
+	isFailed := map[int]bool{}
+	for _, i := range failed {
+		isFailed[i] = true
+	}
+	var take []int
+	for _, i := range idx {
+		if isFailed[i] {
+			take = append(take, i)
+		}
+	}
+	if len(take) == 0 {
+		fail(w, http.StatusConflict, "none of units %s has failed", order.EncodeSet(idx))
+		return
+	}
+	ctx := r.Context()
+	if err := s.authorize(ctx, r, v, rec.job.Namespace, "patch", "workjobs", rec.job.Name); err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
+	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
+	if err != nil {
+		fail(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
+	if j.Annotations == nil {
+		j.Annotations = map[string]string{}
+	}
+	var reqs []c4v1.WorkAckRequest
+	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationAcks]), &reqs)
+	now := time.Now()
+	units := order.EncodeSet(take)
+	reqs = append(reqs, c4v1.WorkAckRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Kind: body.Kind, Units: units,
+		Actor: actorOf(r, v), Assignee: body.Assignee, Note: body.Note, At: metav1.Time{Time: now.UTC().Truncate(time.Second)}})
+	if len(reqs) > 16 {
+		reqs = reqs[len(reqs)-16:]
+	}
+	b, _ := json.Marshal(reqs)
+	j.Annotations[c4v1.AnnotationAcks] = string(b)
+	var msg string
+	switch body.Kind {
+	case c4v1.AckAccept:
+		msg = fmt.Sprintf("%s: %d failed units accepted as they are", j.Name, len(take))
+	case c4v1.AckAssign:
+		msg = fmt.Sprintf("%s: %d failed units assigned to %s", j.Name, len(take), body.Assignee)
+	default:
+		msg = fmt.Sprintf("%s: %d failed units taken by %s", j.Name, len(take), v.User)
+	}
+	change := map[string]any{"units": units, "kind": body.Kind}
+	if body.Assignee != "" {
+		change["assignee"] = body.Assignee
+	}
+	if body.Note != "" {
+		change["note"] = body.Note
+	}
+	s.finishJobControl(w, r, v, rec, j, patch, before, body.Kind, body.Kind, change, "Acknowledged", msg)
+}
+
 func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
 	_, rec, v := s.job(w, r)
 	if rec == nil {
