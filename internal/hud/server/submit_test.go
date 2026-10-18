@@ -158,14 +158,14 @@ func TestSubmit(t *testing.T) {
 	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1001-1048", "order": "binary"},
 		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
 	view := c4.Identify(strings.NewReader("a tree")).String()
-	req := api.SubmitRequest{Project: "show-a", Type: "render", Shot: "sm0140", Spec: spec,
+	req := api.SubmitRequest{Project: "show-a", Type: "render", Stage: "light", Shot: "sm0140", Spec: spec,
 		Inputs: []api.SubmitInput{{View: view, MountPath: "/show"}}, DryRun: true}
 
 	var out api.SubmitResponse
 	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", req, &out); code != 200 || !out.DryRun || out.Estimate == nil || out.Estimate.Units != 48 {
 		t.Fatalf("dry run: %d %+v", code, out)
 	}
-	if out.Name != "sm0140-render-v001" || out.Namespace != "show-a" {
+	if out.Name != "sm0140-light-v001" || out.Namespace != "show-a" {
 		t.Fatalf("name %s/%s", out.Namespace, out.Name)
 	}
 	if planned.Spec.DeadlineMode != "Suggested" || planned.Annotations[c4v1.AnnotationOwner] != "maya" {
@@ -181,7 +181,7 @@ func TestSubmit(t *testing.T) {
 		t.Fatalf("submit: %d %+v", code, out)
 	}
 	var job c4v1.WorkJob
-	if err := s.Client.Get(context.Background(), types.NamespacedName{Namespace: "show-a", Name: "sm0140-render-v001"}, &job); err != nil {
+	if err := s.Client.Get(context.Background(), types.NamespacedName{Namespace: "show-a", Name: "sm0140-light-v001"}, &job); err != nil {
 		t.Fatal(err)
 	}
 	if job.Annotations[c4v1.AnnotationOwner] != "maya" || job.Annotations[c4v1.AnnotationSubmittedVia] != "hud" ||
@@ -200,7 +200,7 @@ func TestSubmit(t *testing.T) {
 	}
 
 	// the same name again conflicts; another project is not visible
-	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Name: "sm0140-render-v001", Spec: spec}, nil); code != http.StatusConflict {
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Name: "sm0140-light-v001", Spec: spec}, nil); code != http.StatusConflict {
 		t.Fatalf("duplicate: %d", code)
 	}
 	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-b", Spec: spec}, nil); code != http.StatusNotFound {

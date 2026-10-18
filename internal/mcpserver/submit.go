@@ -25,8 +25,9 @@ type SubmitInput struct {
 
 type SubmitIn struct {
 	Project  string            `json:"project,omitempty" jsonschema:"the project; may be omitted when you see only one"`
-	Name     string            `json:"name,omitempty" jsonschema:"the job's name; default <shot>-<type>-vNNN, the next version"`
+	Name     string            `json:"name,omitempty" jsonschema:"the job's name; default <shot>-<stage>-vNNN, the next version"`
 	Type     string            `json:"type,omitempty" jsonschema:"the job type it is (render, usd, sim, comp, transcode, ci, lora, infer, agent)"`
+	Stage    string            `json:"stage,omitempty" jsonschema:"the pipeline stage (light, layout, fx, comp, review, train), the middle of the default name"`
 	Shot     string            `json:"shot,omitempty" jsonschema:"the shot it belongs to, for example sm0140"`
 	Class    string            `json:"class" jsonschema:"render (a frame range), ci (test shards) or ml (a training run)"`
 	Params   map[string]string `json:"params,omitempty" jsonschema:"the class's parameters: render frames (1001-1048), chunk, order (binary); ci shards, target; ml ranks, steps, checkpointEvery"`
@@ -83,7 +84,7 @@ func (c *Client) submitJob(ctx context.Context, _ *mcp.CallToolRequest, in Submi
 	if err != nil {
 		return nil, SubmitOut{}, err
 	}
-	req := api.SubmitRequest{Project: in.Project, Name: in.Name, Type: in.Type, Shot: in.Shot, Spec: raw, DryRun: in.DryRun}
+	req := api.SubmitRequest{Project: in.Project, Name: in.Name, Type: in.Type, Stage: in.Stage, Shot: in.Shot, Spec: raw, DryRun: in.DryRun}
 	for _, x := range in.Inputs {
 		req.Inputs = append(req.Inputs, api.SubmitInput{View: x.View, FromJob: x.FromJob, MountPath: x.MountPath, ReadOnly: x.ReadOnly})
 	}

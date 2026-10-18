@@ -59,12 +59,15 @@ type SubmitRequest struct {
 	// Project, the job goes in the project's first namespace.
 	Project   string `json:"project,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
-	// Name of the job; empty makes <shot>-<type>-vNNN, one version past
+	// Name of the job; empty makes <shot>-<stage>-vNNN, one version past
 	// the latest such job.
 	Name string `json:"name,omitempty"`
 	// Type is the prebuilt job type it came from (render, usd, comp, ...).
 	Type string `json:"type,omitempty"`
-	Shot string `json:"shot,omitempty"`
+	// Stage is the pipeline stage the job is (light, layout, fx, comp,
+	// review, train, ...), the middle of its default name; default Type.
+	Stage string `json:"stage,omitempty"`
+	Shot  string `json:"shot,omitempty"`
 	// Spec is the WorkJob's spec (c4.avalanche.io/v1alpha1 WorkJobSpec)
 	// as JSON. Its inputs may name Materializations already in the
 	// namespace; Inputs below add views and jobs.

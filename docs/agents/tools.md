@@ -644,7 +644,7 @@ Input:
       ]
     },
     "name": {
-      "description": "the job's name; default \u003cshot\u003e-\u003ctype\u003e-vNNN, the next version",
+      "description": "the job's name; default \u003cshot\u003e-\u003cstage\u003e-vNNN, the next version",
       "type": "string"
     },
     "params": {
@@ -677,6 +677,10 @@ Input:
     },
     "shot": {
       "description": "the shot it belongs to, for example sm0140",
+      "type": "string"
+    },
+    "stage": {
+      "description": "the pipeline stage (light, layout, fx, comp, review, train), the middle of the default name",
       "type": "string"
     },
     "type": {

@@ -556,7 +556,7 @@ from `GET /objects/{project}/{c4id}`. This is what `c4 farm get` reads.
 ### POST /jobs
 
 ```
-{ project? | namespace?, name?, type?, shot?, spec, inputs?: [ { view? | fromJob?, mountPath, readOnly? } ],
+{ project? | namespace?, name?, type?, stage?, shot?, spec, inputs?: [ { view? | fromJob?, mountPath, readOnly? } ],
   aiUsage?, dryRun? }
 ->
 { ok, dryRun?, namespace, name, project, link, message, materializations?,
@@ -567,7 +567,7 @@ from `GET /objects/{project}/{c4id}`. This is what `c4 farm get` reads.
 ```
 
 `spec` is a WorkJob spec (`c4.avalanche.io/v1alpha1`). The HUD names the
-job `<shot>-<type>-vNNN` when `name` is empty, one version past the latest
+job `<shot>-<stage>-vNNN` (stage defaults to type) when `name` is empty, one version past the latest
 such job in the namespace; makes a Materialization for each input view
 (named from the view's ID, so the same view is one Materialization);
 adds `fromJob` inputs to `dependsOn`; sets the deadline mode to `Suggested`

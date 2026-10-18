@@ -396,10 +396,10 @@ func (s *Server) handleViewFiles(w http.ResponseWriter, r *http.Request) {
 
 var versionSuffix = regexp.MustCompile(`-v(\d+)$`)
 
-// nextName is <shot>-<type>-vNNN, one version past the latest job of that
-// shot and type in the namespace.
-func nextName(m *model, ns, shot, typ string) string {
-	base := strings.Trim(strings.ToLower(shot+"-"+typ), "-")
+// nextName is <shot>-<stage>-vNNN, one version past the latest job of
+// that shot and stage in the namespace.
+func nextName(m *model, ns, shot, stage string) string {
+	base := strings.Trim(strings.ToLower(shot+"-"+stage), "-")
 	if base == "" {
 		base = "job"
 	}
@@ -464,7 +464,11 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	spec.Template = jobspec.Restrict(spec.Template)
 	name := body.Name
 	if name == "" {
-		name = nextName(m, ns, body.Shot, body.Type)
+		stage := body.Stage
+		if stage == "" {
+			stage = body.Type
+		}
+		name = nextName(m, ns, body.Shot, stage)
 	}
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
 		fail(w, http.StatusBadRequest, "name %q: %s", name, strings.Join(errs, "; "))
