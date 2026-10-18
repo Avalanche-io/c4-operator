@@ -302,3 +302,23 @@ func TestReproLendThenReclaim(t *testing.T) {
 		t.Fatalf("lent %d slots to the borrower and preempted %d of its units for A in the same decision", lent, reclaimed)
 	}
 }
+
+// Regression, found by the stress grid (metamorphic-capacity): the plan's capacity was
+// every slot of the pool group, also slots no project planned in it may
+// use under its borrowing limit. Two jobs of a project limited to one slot
+// each fit on their own, together need 1.6 slots, and the plan, counting
+// both slots of the pool, reports both on time: nothing is at risk and no
+// burst is sized, while one of them will be late. Doubling the pool made
+// more jobs late at that grid point (16 of 18 against 12), because the
+// plan stopped seeing the shortfall.
+func TestReproPlanIgnoresBorrowingLimit(t *testing.T) {
+	x := rjob("x", "p", 20, 0.8*4*3600, 0, 4*time.Hour)
+	y := rjob("y", "p", 20, 0.8*4*3600, 0, 4*time.Hour)
+	s := sched.Snapshot{Now: t0r, Pools: []sched.Pool{{Name: "cpu", Slots: 2}},
+		Projects: []sched.Project{{Name: "p", Quotas: map[string]sched.Quota{"cpu": {Nominal: 0, BorrowingLimit: 1}}}},
+		Jobs:     []sched.Job{x, y}}
+	d := sched.Decide(s, &sched.State{}, sched.DefaultConfig())
+	if !d.Jobs["x"].AtRisk && !d.Jobs["y"].AtRisk {
+		t.Fatalf("1.6 slots of work for a project limited to 1 slot, and neither job is at risk: %s / %s", d.Jobs["x"].Message, d.Jobs["y"].Message)
+	}
+}

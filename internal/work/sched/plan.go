@@ -101,11 +101,50 @@ func (a *alloc) groups() ([][]groupMember, map[string]float64) {
 		}
 		byRoot[root] = append(byRoot[root], groupMember{jobCtx: jc, root: root, cap: a.attainable(jc, true)})
 	}
+	// A group's capacity is also bounded by what the projects planned in
+	// it may use: a project with a borrowing limit cannot hold more than
+	// its nominal quota plus the limit of a quota pool, however large
+	// the pool. Planning with slots no planned project may use reports
+	// work on time that will be late.
 	out := make([][]groupMember, 0, len(roots))
 	for _, r := range roots {
-		out = append(out, byRoot[r])
+		g := byRoot[r]
+		usable := 0.0
+		seen := map[*projState]bool{}
+		for _, m := range g {
+			pr := m.proj
+			if seen[pr] {
+				continue
+			}
+			seen[pr] = true
+			for _, ps := range a.poolList {
+				if find(ps.p.Name) != r {
+					continue
+				}
+				usable += a.usable(pr, ps)
+			}
+		}
+		capacity[r] = math.Min(capacity[r], usable)
+		out = append(out, g)
 	}
 	return out, capacity
+}
+
+// usable is how many of a pool's planned slots (ready, plus burst slots
+// already requested) a project may hold under its quota.
+func (a *alloc) usable(pr *projState, ps *poolState) float64 {
+	c := float64(ps.p.Slots)
+	if ps.p.Burst != nil {
+		c += float64(max(0, ps.p.Burst.Requested-ps.p.Burst.Provisioned))
+	}
+	if !a.quotas || !ps.hasQuota {
+		return c
+	}
+	q := a.quota(pr.p.Name, ps.p.Name)
+	if q.BorrowingLimit < 0 {
+		return c
+	}
+	return math.Min(c, float64(q.Nominal+q.BorrowingLimit))
 }
 
 // effective is the time by which a job's work must be done for its last
