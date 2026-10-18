@@ -13,8 +13,8 @@ Mean ± standard deviation across seeds. A render deadline is missed when the jo
 | manual          | 43.0 ± 20.5             | 13.9 ± 6.1 | 107.8 ± 71.2  | 8.9 ± 0.1  | 17.3 ± 1.3 | 9.0 ± 1.3        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 20.1 ± 5.3 | 0 ± 0     |
 | fifo            | 46.6 ± 25.0             | 15.0 ± 7.7 | 140.3 ± 113.3 | 8.9 ± 0.1  | 17.1 ± 1.2 | 8.9 ± 1.3        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9 | 0 ± 0     |
 | edf             | 24.4 ± 8.8              | 7.9 ± 2.5  | 60.1 ± 37.2   | 8.9 ± 0.1  | 17.2 ± 1.3 | 9.1 ± 1.4        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9 | 0 ± 0     |
-| objective       | 24.0 ± 9.7              | 7.8 ± 2.9  | 61.8 ± 37.1   | 8.8 ± 0.1  | 15.5 ± 0.7 | 5.7 ± 0.8        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.5 ± 7.6 | 0 ± 0     |
-| objective+burst | 21.2 ± 9.1              | 6.9 ± 2.8  | 51.2 ± 32.0   | 8.8 ± 0.1  | 15.4 ± 0.5 | 5.5 ± 0.7        | 45.7 ± 5.9 | 34.3 ± 3.7 | 17.3 ± 0.3 | 1935 ± 332   | 23.2 ± 7.7 | 481 ± 284 |
+| objective       | 24.0 ± 9.7              | 7.8 ± 2.9  | 61.8 ± 37.2   | 8.8 ± 0.1  | 15.5 ± 0.6 | 5.7 ± 0.6        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.3 ± 7.4 | 0 ± 0     |
+| objective+burst | 21.0 ± 8.9              | 6.8 ± 2.7  | 50.8 ± 31.8   | 8.8 ± 0.1  | 15.3 ± 0.7 | 5.4 ± 1.0        | 45.7 ± 5.9 | 34.2 ± 3.5 | 17.3 ± 0.3 | 1935 ± 332   | 23.6 ± 7.8 | 486 ± 289 |
 
 Render jobs with deadlines per week: 305 on average. The spread across seeds is large because each seed is a different week (job counts, shot lengths, where heavy shots land); compare policies within a seed, below.
 
@@ -28,11 +28,11 @@ Difference from EDF on the same week (policy minus EDF): mean ± standard deviat
 | -------------------------------- | ----------- | ------------ | ------------ | ------------------------------------------ |
 | manual                           | 18.6 ± 13.1 | 47.6 ± 47.4  | 0.1 ± 0.1    | 0 / 0 / 5                                  |
 | fifo                             | 22.2 ± 18.4 | 80.1 ± 86.1  | -0.1 ± 0.1   | 0 / 0 / 5                                  |
-| objective                        | -0.4 ± 5.2  | 1.7 ± 9.3    | -1.7 ± 0.8   | 2 / 0 / 3                                  |
-| objective+burst                  | -3.2 ± 7.4  | -9.0 ± 14.7  | -1.8 ± 1.0   | 4 / 0 / 1                                  |
-| objective, no information tier   | -1.0 ± 4.8  | 1.4 ± 9.5    | -1.7 ± 0.9   | 2 / 0 / 3                                  |
-| objective, fair-share surplus    | -0.8 ± 3.8  | -0.8 ± 8.2   | -1.7 ± 0.8   | 3 / 0 / 2                                  |
-| objective, DESIGN 9.9 as written | 13.6 ± 13.8 | 17.7 ± 28.9  | -0.0 ± 1.7   | 1 / 0 / 4                                  |
+| objective                        | -0.4 ± 5.2  | 1.7 ± 9.5    | -1.6 ± 0.8   | 2 / 0 / 3                                  |
+| objective+burst                  | -3.4 ± 7.6  | -9.3 ± 14.8  | -1.8 ± 0.9   | 4 / 0 / 1                                  |
+| objective, no information tier   | -0.6 ± 5.1  | 1.6 ± 9.8    | -1.7 ± 1.0   | 2 / 0 / 3                                  |
+| objective, fair-share surplus    | -1.0 ± 3.7  | -1.1 ± 7.6   | -1.7 ± 0.8   | 3 / 0 / 2                                  |
+| objective, DESIGN 9.9 as written | 13.6 ± 13.8 | 17.7 ± 28.9  | 0.1 ± 1.8    | 1 / 0 / 4                                  |
 
 ### By job kind
 
@@ -43,11 +43,11 @@ Missed deadlines and late hours per kind. ML runs carry a deadline of submission
 | manual                           | 16.6 ± 10.5 of 106 | 74.2 ± 59.3    | 26.0 ± 14.0 of 186 | 32.7 ± 18.3    | 0.4 ± 0.5 of 13 | 0.9 ± 1.7       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | fifo                             | 12.6 ± 7.8 of 106  | 53.1 ± 34.7    | 33.8 ± 20.0 of 186 | 85.6 ± 79.8    | 0.2 ± 0.4 of 13 | 1.6 ± 3.6       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | edf                              | 8.6 ± 5.1 of 106   | 34.0 ± 25.4    | 14.8 ± 4.0 of 186  | 19.6 ± 8.9     | 1.0 ± 1.0 of 13 | 6.6 ± 6.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective                        | 8.4 ± 4.0 of 106   | 35.5 ± 25.1    | 14.6 ± 5.1 of 186  | 20.7 ± 10.6    | 1.0 ± 1.0 of 13 | 5.6 ± 5.2       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective+burst                  | 6.2 ± 3.0 of 106   | 26.7 ± 20.2    | 14.2 ± 5.5 of 186  | 19.8 ± 10.1    | 0.8 ± 0.8 of 13 | 4.7 ± 4.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective, no information tier   | 8.2 ± 4.0 of 106   | 35.3 ± 25.3    | 14.2 ± 4.6 of 186  | 20.6 ± 10.7    | 1.0 ± 1.0 of 13 | 5.6 ± 5.2       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective, fair-share surplus    | 7.8 ± 3.3 of 106   | 32.6 ± 25.3    | 14.6 ± 4.7 of 186  | 21.2 ± 11.6    | 1.2 ± 1.3 of 13 | 5.6 ± 5.2       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective, DESIGN 9.9 as written | 18.2 ± 13.1 of 106 | 48.7 ± 42.8    | 18.4 ± 8.2 of 186  | 23.8 ± 14.2    | 1.4 ± 1.7 of 13 | 5.3 ± 5.0       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective                        | 8.4 ± 4.0 of 106   | 35.2 ± 24.9    | 14.6 ± 5.1 of 186  | 20.9 ± 10.7    | 1.0 ± 1.0 of 13 | 5.7 ± 5.3       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective+burst                  | 6.2 ± 3.0 of 106   | 26.4 ± 19.9    | 14.0 ± 5.3 of 186  | 19.8 ± 10.2    | 0.8 ± 0.8 of 13 | 4.5 ± 4.2       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective, no information tier   | 8.4 ± 4.0 of 106   | 35.2 ± 25.0    | 14.4 ± 4.6 of 186  | 20.9 ± 10.4    | 1.0 ± 1.0 of 13 | 5.6 ± 5.2       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective, fair-share surplus    | 8.0 ± 3.6 of 106   | 32.4 ± 25.0    | 14.4 ± 4.3 of 186  | 21.3 ± 11.5    | 1.0 ± 1.0 of 13 | 5.4 ± 5.0       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective, DESIGN 9.9 as written | 18.2 ± 13.1 of 106 | 48.7 ± 42.9    | 18.4 ± 8.2 of 186  | 23.9 ± 14.2    | 1.4 ± 1.7 of 13 | 5.3 ± 5.0       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 
 ### By show
 
@@ -58,10 +58,10 @@ Late hours of each show's render jobs (fairness across projects).
 | manual                           | 27.5 ± 18.8  | 44.9 ± 35.4  | 35.4 ± 32.4  |
 | fifo                             | 62.3 ± 48.3  | 47.2 ± 35.7  | 30.9 ± 34.2  |
 | edf                              | 23.0 ± 17.8  | 26.4 ± 18.5  | 10.7 ± 10.5  |
-| objective                        | 25.5 ± 19.2  | 21.5 ± 18.4  | 14.8 ± 14.7  |
-| objective+burst                  | 20.1 ± 21.0  | 20.6 ± 16.8  | 10.5 ± 8.5   |
-| objective, no information tier   | 25.2 ± 19.3  | 21.4 ± 18.8  | 14.9 ± 15.0  |
-| objective, fair-share surplus    | 24.1 ± 19.6  | 21.2 ± 19.2  | 14.2 ± 14.2  |
+| objective                        | 25.4 ± 19.2  | 21.5 ± 18.6  | 15.0 ± 14.9  |
+| objective+burst                  | 20.0 ± 21.0  | 20.8 ± 17.4  | 10.0 ± 7.9   |
+| objective, no information tier   | 25.2 ± 19.3  | 21.5 ± 18.6  | 15.0 ± 15.0  |
+| objective, fair-share surplus    | 24.0 ± 19.6  | 21.3 ± 19.5  | 13.7 ± 13.4  |
 | objective, DESIGN 9.9 as written | 31.7 ± 22.5  | 27.5 ± 27.1  | 18.6 ± 19.4  |
 
 ### Preemption, lost work and burst
@@ -73,11 +73,11 @@ Preemptions counts units stopped (yields and kills). Lost CPU hours include task
 | manual                           | 7 ± 1       | wrangler-suspend 7                                         | 198 ± 37   | 378 ± 95        | 2.3 ± 0.9     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
 | fifo                             | 0 ± 0       | none                                                       | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
 | edf                              | 0 ± 0       | none                                                       | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
-| objective                        | 567 ± 63    | guard-unit 6, reclaim-nominal 260, restore-feasibility 301 | 217 ± 31   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.2 ± 2.2               |
-| objective+burst                  | 583 ± 73    | guard-unit 7, reclaim-nominal 265, restore-feasibility 311 | 216 ± 31   | 378 ± 95        | 0.4 ± 0.4     | 759 ± 433        | 481 ± 284 | 0.0 ± 0.0               |
-| objective, no information tier   | 578 ± 56    | guard-unit 7, reclaim-nominal 253, restore-feasibility 319 | 216 ± 33   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.4 ± 1.5               |
-| objective, fair-share surplus    | 518 ± 79    | guard-unit 7, reclaim-nominal 218, restore-feasibility 293 | 214 ± 32   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 5.0 ± 2.0               |
-| objective, DESIGN 9.9 as written | 597 ± 87    | reclaim-nominal 209, restore-feasibility 388               | 219 ± 34   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 54.4 ± 31.2             |
+| objective                        | 566 ± 62    | guard-unit 7, reclaim-nominal 255, restore-feasibility 304 | 217 ± 32   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.2 ± 2.2               |
+| objective+burst                  | 572 ± 60    | guard-unit 6, reclaim-nominal 263, restore-feasibility 302 | 217 ± 32   | 378 ± 95        | 0.4 ± 0.4     | 764 ± 436        | 486 ± 289 | 0.0 ± 0.0               |
+| objective, no information tier   | 581 ± 59    | guard-unit 7, reclaim-nominal 250, restore-feasibility 324 | 216 ± 33   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.2 ± 1.3               |
+| objective, fair-share surplus    | 515 ± 80    | guard-unit 6, reclaim-nominal 217, restore-feasibility 292 | 212 ± 30   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 5.0 ± 2.0               |
+| objective, DESIGN 9.9 as written | 598 ± 85    | reclaim-nominal 211, restore-feasibility 387               | 219 ± 33   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 54.4 ± 31.2             |
 
 ### Ablations
 
@@ -85,22 +85,22 @@ The objective policy with parts of DESIGN.md section 9.9 restored as written (se
 
 | policy                           | render deadlines missed | missed %   | late hours  | CI p50 min | CI p95 min | CI over 15 min % | util cpu % | util gpu % | util ci %  | useful GPU h | lost GPU h | burst $ |
 | -------------------------------- | ----------------------- | ---------- | ----------- | ---------- | ---------- | ---------------- | ---------- | ---------- | ---------- | ------------ | ---------- | ------- |
-| objective                        | 24.0 ± 9.7              | 7.8 ± 2.9  | 61.8 ± 37.1 | 8.8 ± 0.1  | 15.5 ± 0.7 | 5.7 ± 0.8        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.5 ± 7.6 | 0 ± 0   |
-| objective, no information tier   | 23.4 ± 9.2              | 7.6 ± 2.7  | 61.5 ± 37.5 | 8.8 ± 0.1  | 15.5 ± 0.8 | 5.7 ± 1.0        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.2 ± 6.3 | 0 ± 0   |
-| objective, fair-share surplus    | 23.6 ± 9.0              | 7.6 ± 2.6  | 59.4 ± 39.0 | 8.8 ± 0.1  | 15.5 ± 0.7 | 5.6 ± 1.0        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.4 ± 6.6 | 0 ± 0   |
-| objective, DESIGN 9.9 as written | 38.0 ± 21.0             | 12.2 ± 6.2 | 77.8 ± 58.0 | 8.8 ± 0.1  | 17.2 ± 1.2 | 8.9 ± 1.9        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 24.2 ± 6.3 | 0 ± 0   |
+| objective                        | 24.0 ± 9.7              | 7.8 ± 2.9  | 61.8 ± 37.2 | 8.8 ± 0.1  | 15.5 ± 0.6 | 5.7 ± 0.6        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.3 ± 7.4 | 0 ± 0   |
+| objective, no information tier   | 23.8 ± 9.2              | 7.7 ± 2.7  | 61.8 ± 37.0 | 8.8 ± 0.1  | 15.5 ± 0.8 | 5.7 ± 1.1        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.0 ± 6.7 | 0 ± 0   |
+| objective, fair-share surplus    | 23.4 ± 8.6              | 7.6 ± 2.5  | 59.1 ± 38.3 | 8.8 ± 0.1  | 15.4 ± 0.7 | 5.6 ± 0.9        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.4 ± 6.8 | 0 ± 0   |
+| objective, DESIGN 9.9 as written | 38.0 ± 21.0             | 12.2 ± 6.2 | 77.8 ± 58.0 | 8.8 ± 0.1  | 17.3 ± 1.2 | 9.0 ± 2.0        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 24.1 ± 6.2 | 0 ± 0   |
 
 ## Sensitivity: half the GPUs
 
 The main farm's GPU pool runs at about a third of capacity, so ML runs and GPU renders rarely contend there. This scenario replays the same weeks (same seeds, same jobs) with 16 owned GPUs instead of 32 and every GPU quota halved. Everything else is unchanged.
 
-| policy          | render missed | render late h  | GPU render missed | GPU render late h | ML missed | util gpu %  | ML useful GPU h | ML lost GPU h | lost GPU h | preemptions | burst $   |
-| --------------- | ------------- | -------------- | ----------------- | ----------------- | --------- | ----------- | --------------- | ------------- | ---------- | ----------- | --------- |
-| manual          | 68.8 ± 23.7   | 476.3 ± 596.1  | 28.6 ± 23.7       | 375.5 ± 621.8     | 5.4 ± 7.9 | 72.7 ± 12.3 | 378 ± 95        | 3.8 ± 2.7     | 21.8 ± 3.7 | 10 ± 6      | 0 ± 0     |
-| fifo            | 82.0 ± 30.0   | 610.0 ± 645.9  | 39.8 ± 15.9       | 480.0 ± 694.0     | 2.2 ± 4.9 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9 | 0 ± 0       | 0 ± 0     |
-| edf             | 49.2 ± 18.8   | 381.6 ± 574.9  | 27.6 ± 19.9       | 328.5 ± 591.0     | 4.4 ± 8.8 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9 | 0 ± 0       | 0 ± 0     |
-| objective       | 48.8 ± 28.4   | 822.6 ± 1162.6 | 26.6 ± 21.5       | 766.0 ± 1134.1    | 0.8 ± 1.8 | 70.1 ± 12.6 | 378 ± 95        | 2.1 ± 0.8     | 22.9 ± 5.4 | 516 ± 77    | 0 ± 0     |
-| objective+burst | 22.0 ± 8.6    | 52.8 ± 31.6    | 1.4 ± 1.1         | 2.5 ± 4.7         | 0.0 ± 0.0 | 49.4 ± 4.4  | 378 ± 95        | 1.8 ± 1.2     | 25.5 ± 6.2 | 552 ± 50    | 978 ± 393 |
+| policy          | render missed | render late h | GPU render missed | GPU render late h | ML missed | util gpu %  | ML useful GPU h | ML lost GPU h | lost GPU h | preemptions | burst $   |
+| --------------- | ------------- | ------------- | ----------------- | ----------------- | --------- | ----------- | --------------- | ------------- | ---------- | ----------- | --------- |
+| manual          | 68.8 ± 23.7   | 476.3 ± 596.1 | 28.6 ± 23.7       | 375.5 ± 621.8     | 5.4 ± 7.9 | 72.7 ± 12.3 | 378 ± 95        | 3.8 ± 2.7     | 21.8 ± 3.7 | 10 ± 6      | 0 ± 0     |
+| fifo            | 82.0 ± 30.0   | 610.0 ± 645.9 | 39.8 ± 15.9       | 480.0 ± 694.0     | 2.2 ± 4.9 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9 | 0 ± 0       | 0 ± 0     |
+| edf             | 49.2 ± 18.8   | 381.6 ± 574.9 | 27.6 ± 19.9       | 328.5 ± 591.0     | 4.4 ± 8.8 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9 | 0 ± 0       | 0 ± 0     |
+| objective       | 39.0 ± 10.4   | 258.9 ± 260.8 | 16.6 ± 7.3        | 204.1 ± 277.9     | 0.6 ± 1.3 | 72.6 ± 12.0 | 378 ± 95        | 2.3 ± 0.8     | 23.1 ± 5.7 | 516 ± 64    | 0 ± 0     |
+| objective+burst | 22.0 ± 8.6    | 51.9 ± 30.4   | 1.4 ± 1.1         | 2.6 ± 4.7         | 0.0 ± 0.0 | 49.8 ± 4.9  | 378 ± 95        | 1.7 ± 1.2     | 25.2 ± 6.0 | 541 ± 56    | 976 ± 406 |
 
 ## Binary against sequential order
 
@@ -422,20 +422,20 @@ CalTrials: 200
 
 ### Summary
 
-- On render deadlines the objective policy without burst ties EDF: per seed, 0.6 ± 5.1 fewer missed deadlines and 1.7 ± 8.9 more late hours, with fewer late hours than EDF on 2 of 5 seeds. It does not beat EDF there. Both are far ahead of FIFO and of the Manual baseline (about 19 to 23 fewer missed deadlines a week).
-- With burst, the objective policy has fewer late hours than EDF on 4 of 5 seeds (9.6 ± 15.4 fewer per week, and 3.6 ± 7.7 fewer missed deadlines) for $487 ± 281 a week of cloud capacity, with no burst waiting for a person's approval. At the projects' lateness prices ($300 to $600 an hour) the hours saved are worth several times the spend, but the per-seed spread is wide.
-- CI is where the policy helps without spending: p95 time to green falls from 17.2 to 15.4 minutes, and pipelines over the 15-minute SLO from 9.1% to 5.6%. Turning the information tier off (builds that discover shards are released ahead of other pipelines' spare shards) changes little now (15.5 minutes, 5.7%).
+- On render deadlines the objective policy without burst ties EDF: per seed, 0.4 ± 5.2 fewer missed deadlines and 1.7 ± 9.5 more late hours, with fewer late hours than EDF on 2 of 5 seeds. It does not beat EDF there. Both are far ahead of FIFO and of the Manual baseline (about 19 to 23 fewer missed deadlines a week).
+- With burst, the objective policy has fewer late hours than EDF on 4 of 5 seeds (9.3 ± 14.8 fewer per week, and 3.4 ± 7.6 fewer missed deadlines) for $486 ± 289 a week of cloud capacity, with no burst waiting for a person's approval. At the projects' lateness prices ($300 to $600 an hour) the hours saved are worth several times the spend, but the per-seed spread is wide.
+- CI is where the policy helps without spending: p95 time to green falls from 17.2 to 15.5 minutes, and pipelines over the 15-minute SLO from 9.1% to 5.7%. Turning the information tier off (builds that discover shards are released ahead of other pipelines' spare shards) changes little now (15.5 minutes, 5.7%).
 - DESIGN.md section 9.9 as written does clearly worse than EDF: 13.6 ± 13.8 more missed deadlines a week. The policy that was measured differs from it in the ways listed below, each one found by tracing a specific late job in this simulator. DESIGN.md has not been updated to match; it should be.
-- When GPUs are scarce (the half-GPU scenario), the objective policy meets ML deadlines that EDF and Manual miss (0.8 against 4.4 and 5.4 a week) by having training runs yield at checkpoints, but without burst its render late hours are much higher than EDF's (828 against 382). With burst it cuts GPU render late hours from 770 to 2.6 a week for about $965.
+- When GPUs are scarce (the half-GPU scenario), the objective policy meets ML deadlines that EDF and Manual miss (0.6 against 4.4 and 5.4 a week) by having training runs yield at checkpoints, and without burst it also misses fewer render deadlines than EDF (39.0 against 49.2 a week) with fewer render late hours (259 against 382), though the late hours are dominated by one or two weeks. With burst it cuts GPU render late hours from 204 to 2.6 a week for about $976.
 - Binary order flags heavy regions much earlier than sequential order (median at 8 to 15 percent of the render against 30 to 46 percent) and keeps the remaining-time error lower for most of the render. It costs makespan when shots have heavy regions (6 to 13 percent longer on average at 3x to 8x), and its slack estimate settles near the end of the render later than sequential order's.
 
 ### How the measured policy differs from DESIGN.md 9.9, and why
 
 1. **Required slots are planned per pool group, not per job.** DESIGN.md sets R = W90/T for each job on its own. That treats every job as if the farm's future were its alone. On Wednesday night of seed 1 the Friday deliveries each claimed a steady share of the farm while that night's dailies needed all of it, and because no single job looked infeasible against the whole pool, the overload rule never fired: water-filling by running/R spread the shortage over every job and all of them finished slightly late. The measured policy plans each group of pools as one earliest-deadline-first fluid schedule, uses Moore-Hodgson to pick the set of jobs that can all be on time (the classic algorithm that minimizes the number of late jobs, which is what the overload rule asks for), and sets each job's R to what that schedule gives it now. A job due on Friday gets R = 0 on Wednesday night if it is on time after the dailies finish. The ablation "DESIGN 9.9 as written" keeps the per-job rule.
 2. **R leaves room for the last wave.** With R = W90/T a job holding exactly R slots starts its longest units too late (list scheduling finishes within W/R plus the longest unit). R is computed against T minus the critical path. In seed 1 this alone cut dailies misses from 20 to 9 before the change above.
-3. **Spare capacity goes by least planned slack, with fair share as the tiebreaker.** DESIGN.md gives spare capacity to projects by fair share first. The project's requirements say "the jobs most at risk get capacity first, with fair share across projects as the tiebreaker", and that is what was built. The difference is small here (ablation: fair share first had 2.1 fewer late hours, within the seed spread).
+3. **Spare capacity goes by least planned slack, with fair share as the tiebreaker.** DESIGN.md gives spare capacity to projects by fair share first. The project's requirements say "the jobs most at risk get capacity first, with fair share across projects as the tiebreaker", and that is what was built. The difference is small here (ablation: fair share first had 2.7 fewer late hours, within the seed spread).
 4. **Quota is held back only for deadline need.** An earlier version reserved a project's unused nominal quota whenever it had runnable work, so a show's Friday deliveries blocked another show's urgent dailies from borrowing. Kueue lends all unused quota and takes it back by preemption; the measured policy holds back only what a project needs now for jobs below their required rate.
-5. **Preemption moves allocations toward the plan and never kills more than 15 minutes of work.** A victim must still hold its planned share, rounded up to whole slots, without the unit; the job gaining slots must be at least a whole slot short of min(R, share); and a unit that would lose more than 15 minutes (time since its last checkpoint plus restore cost) is not a victim. The one-slot band between the two rules keeps two jobs from taking a unit back and forth: before it, jobs whose shares were fractions of a slot traded one slot on every decision, and on seed 1 the policy lost about 330 CPU hours more than EDF to killed frames. It preempts about 580 units a week; lost CPU hours are 217 against EDF's 184, and lost GPU hours 23 against 18, out of about 1,935 useful GPU hours.
+5. **Preemption moves allocations toward the plan and never kills more than 15 minutes of work.** A victim must still hold its planned share, rounded up to whole slots, without the unit; the job gaining slots must be at least a whole slot short of min(R, share); and a unit that would lose more than 15 minutes (time since its last checkpoint plus restore cost) is not a victim. The one-slot band between the two rules keeps two jobs from taking a unit back and forth: before it, jobs whose shares were fractions of a slot traded one slot on every decision, and on seed 1 the policy lost about 330 CPU hours more than EDF to killed frames. It preempts about 570 units a week; lost CPU hours are 217 against EDF's 184, and lost GPU hours 23 against 18, out of about 1,935 useful GPU hours.
 6. **Estimator.** A key with no completed unit in the job now uses history for that key before the job's median over other keys: a beauty pass just revealed by a generator was being predicted from 45-second generator evaluations, putting a 150 slot-hour job at 2 slot-hours. Running units that have run longer than their prediction are entered as censored observations (duration at least elapsed, assumed 1.25 times elapsed, the same overrun rule DESIGN.md uses for a running unit's remainder). Without this, binary order sampled frames inside an 8x region within minutes, but the estimator learned nothing until those 4.6-hour frames finished.
 
 The simulation also caught a nondeterminism bug: summing region errors over a Go map made results differ in the last digit between runs, enough to flip decisions. Two full runs now produce byte-identical CSVs.
@@ -443,7 +443,7 @@ The simulation also caught a nondeterminism bug: summing region errors over a Go
 ### Where a baseline does as well or better, and why
 
 - **EDF on render deadlines.** On this workload the binding constraint is the nightly crunch, where most work shares one deadline (08:00), and earliest deadline first already serves it in the right order. The objective policy adds quotas, preemption and fair-share tie-breaking, which cost a little work and do not change the order much. The by-show table shows no fairness gain from quotas either: EDF's late hours per show are as even as the objective policy's.
-- **EDF under GPU overload, on late hours.** Moore-Hodgson minimizes the number of late jobs. When it must drop jobs it drops the largest, and those wait until capacity frees, so the late hours of the few dropped jobs grow. In the half-GPU scenario the objective policy missed 50.0 deadlines against EDF's 49.2 and accumulated 828 late hours against 382. A rule that weighs lateness (hours or cost) rather than count would trade differently; the overload rule in DESIGN.md chooses the count.
+- **EDF under GPU overload, on late hours (no longer).** The objective policy trailed EDF here until two fixes found by the stress grid (`hack/stress`): a training gang larger than its project's GPU quota had free GPUs held back for it that it could never use, and a gang starving for a slot drained the pool before the deadline tier, stopping deadline renders for hours. Now a gang that cannot fit its project's guarantee holds nothing back, and a starving gang drains the pool only after deadline work is served. Moore-Hodgson still minimizes the number of late jobs rather than late hours, so the few jobs it drops can still be very late in a heavy week.
 - **Lost work.** EDF, FIFO and Manual preempt almost nothing, so they lose only what failures lose.
 - **Manual** is a competent wrangler with Deadline-style static priorities: deliveries above dailies above previews. Those priorities put Friday deliveries ahead of the dailies on Wednesday and Thursday nights, and the two-hourly review cannot recover a job that fell behind early in the night. That, not a straw-man rule set, is why it trails EDF.
 
