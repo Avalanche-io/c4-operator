@@ -28,6 +28,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
+	"github.com/Avalanche-io/c4-operator/work/forecast"
 	"github.com/Avalanche-io/c4-operator/work/order"
 	"github.com/Avalanche-io/c4-operator/work/sched"
 )
@@ -72,6 +73,8 @@ type Queue struct {
 	// theirs (calibrate.go).
 	cal       calibrations
 	shareHist map[string]bool
+	// policies are the projects' deadline policies by project and class.
+	policies map[string]map[string]forecast.Policy
 	// Last decisions, for the HUD.
 	lastSnap sched.Snapshot
 	lastDec  sched.Decisions
@@ -152,6 +155,8 @@ type jobMem struct {
 	ended   map[int]time.Time
 	calPts  []calPoint
 	learned bool
+	// sugg is the job's suggested deadline (suggest.go).
+	sugg *suggestMem
 }
 
 func newMem() *jobMem {
@@ -198,6 +203,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		m.yields = append(m.yields, yieldRecord{Unit: int(y.Unit), At: y.At.Time, Reason: y.Reason, View: y.View})
 	}
 	m.preemptBase = int(st.Preemptions)
+	m.sugg = loadSuggestion(st.Suggestion)
 	for _, d := range st.Decisions {
 		m.decisions = append(m.decisions, decisionRecord{Unit: int(d.Unit), At: d.At.Time, Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record})
 	}
@@ -253,6 +259,9 @@ type view struct {
 	pools []string
 	sum   estimate.Summary
 	est   *estimate.Estimator
+	// source is where the effective deadline comes from: spec,
+	// suggested or class.
+	source string
 }
 
 type runInfo struct {
@@ -311,6 +320,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 			q.shareHist[p.Name] = true
 		}
 	}
+	q.loadPolicies(projects.Items)
 	podsByJob := map[string][]*corev1.Pod{}
 	for i := range pods.Items {
 		p := &pods.Items[i]
@@ -341,6 +351,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
 	dec := q.Policy(snap, &q.st, q.Cfg)
 	q.lastSnap, q.lastDec = snap, dec
+	q.suggest(ctx, now, snap, dec, views)
 	q.act(ctx, now, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
@@ -524,6 +535,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		}
 	}
 	v.obj = d.Objective(j, m.readyAt)
+	q.applySuggestion(v)
 	if len(v.running) > 0 {
 		m.lastRun = now
 		if m.started.IsZero() {

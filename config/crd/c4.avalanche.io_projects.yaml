@@ -177,6 +177,70 @@ spec:
                       BurstBudgetPerDay caps automatic burst spending, in the pools'
                       currency.
                     type: string
+                  deadlinePolicies:
+                    description: |-
+                      DeadlinePolicies override the class's deadline policy for this
+                      project's jobs, one per class.
+                    items:
+                      description: |-
+                        DeadlinePolicy chooses the deadlines the farm suggests for a class's
+                        jobs that have none of their own.
+                      properties:
+                        class:
+                          description: Class is the work class the policy applies
+                            to.
+                          type: string
+                        kind:
+                          description: |-
+                            Kind: achievable (the earliest time the job can finish at Quantile
+                            without making another job late, rounded up), sessions (the next of
+                            a calendar of review sessions; a job not expected to make it keeps
+                            it and is offered the following one), or turnaround (submission
+                            plus Turnaround).
+                          enum:
+                          - achievable
+                          - sessions
+                          - turnaround
+                          type: string
+                        maxRevisions:
+                          description: |-
+                            MaxRevisions caps how often a suggestion moves before it settles
+                            (default 2).
+                          format: int32
+                          type: integer
+                        minLead:
+                          type: string
+                        quantile:
+                          description: |-
+                            Quantile is the finish percentile a suggestion must meet, "0.8" by
+                            default ("0.9" suits deliveries).
+                          type: string
+                        round:
+                          description: Round ("15m") and MinLead ("15m") shape achievable
+                            deadlines.
+                          type: string
+                        sessions:
+                          description: |-
+                            Sessions are times of day, "HH:MM", in TimeZone, on Weekdays
+                            ("Mon".."Sun"; every day when empty).
+                          items:
+                            type: string
+                          type: array
+                        timeZone:
+                          description: TimeZone is an IANA zone name (default UTC).
+                          type: string
+                        turnaround:
+                          description: Turnaround is a duration ("24h") for kind turnaround.
+                          type: string
+                        weekdays:
+                          items:
+                            type: string
+                          type: array
+                      required:
+                      - class
+                      - kind
+                      type: object
+                    type: array
                   fairShareWeight:
                     description: FairShareWeight scales the project's share of free
                       capacity.

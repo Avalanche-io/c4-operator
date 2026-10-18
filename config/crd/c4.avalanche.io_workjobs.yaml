@@ -84,6 +84,21 @@ spec:
                   ready, or a default turnaround).
                 format: date-time
                 type: string
+              deadlineMode:
+                description: |-
+                  DeadlineMode says who owns the deadline. Pinned: Deadline, set by a
+                  person or a tool (the default when Deadline is set). Suggested: the
+                  farm suggests one from the deadline policy (the project's, else the
+                  class's), the job's estimate and the first units' measurements; it
+                  revises the suggestion at most a few times and then settles it, and
+                  never moves a settled one (the default when Deadline is not set and
+                  the policy is not a latency SLO). Tracking: production tracking
+                  writes Deadline; the farm never suggests one.
+                enum:
+                - Pinned
+                - Suggested
+                - Tracking
+                type: string
               dependsOn:
                 description: DependsOn names jobs in this namespace that must succeed
                   first.
@@ -252,6 +267,11 @@ spec:
                 description: Deadline is the effective deadline.
                 format: date-time
                 type: string
+              deadlineSource:
+                description: |-
+                  DeadlineSource says where Deadline comes from: spec (Pinned or
+                  Tracking), suggested, or class (the class's objective).
+                type: string
               decisions:
                 description: |-
                   Decisions lists the most recent preemptions and yields the queue
@@ -295,10 +315,27 @@ spec:
                     type: boolean
                   attainableSlots:
                     type: string
+                  calibrated:
+                    description: |-
+                      Calibrated says the percentiles come from finished jobs' outcomes
+                      (live calibration), not from the estimator's own spread.
+                    type: boolean
                   eta50:
+                    description: |-
+                      ETA50 and ETA90 are the finish a person is shown, at 50 and 90%:
+                      the plan's finish with the calibrated percentiles of the remaining
+                      work, and half the critical path as the last wave's tail (the
+                      scheduler's own, more conservative finish is what it decides on).
+                    format: date-time
+                    type: string
+                  eta80:
+                    description: ETA80 and ETA95 complete the band.
                     format: date-time
                     type: string
                   eta90:
+                    format: date-time
+                    type: string
+                  eta95:
                     format: date-time
                     type: string
                   feasible:
@@ -430,6 +467,69 @@ spec:
                 description: Started and Finished bound the job's run.
                 format: date-time
                 type: string
+              suggestion:
+                description: Suggestion is the farm's suggested deadline and how it
+                  got there.
+                properties:
+                  deadline:
+                    format: date-time
+                    type: string
+                  history:
+                    description: History lists every value the suggestion took, oldest
+                      first.
+                    items:
+                      description: WorkSuggestionRevision is one value a suggestion
+                        took.
+                      properties:
+                        at:
+                          format: date-time
+                          type: string
+                        deadline:
+                          format: date-time
+                          type: string
+                        record:
+                          description: Record is the C4 ID of the queue's signed record
+                            of it.
+                          type: string
+                        unitsMeasured:
+                          description: UnitsMeasured is how many units had finished.
+                          format: int32
+                          type: integer
+                      required:
+                      - at
+                      - deadline
+                      - unitsMeasured
+                      type: object
+                    type: array
+                  maxRevisions:
+                    format: int32
+                    type: integer
+                  nextSession:
+                    description: |-
+                      NextSession, for a sessions policy whose deadline the job is not
+                      expected to make at Quantile, is the following session: the
+                      one-click alternative.
+                    format: date-time
+                    type: string
+                  policy:
+                    description: |-
+                      Policy names the deadline policy kind (achievable, sessions,
+                      turnaround) and Quantile the finish percentile it meets.
+                    type: string
+                  quantile:
+                    type: string
+                  revisions:
+                    format: int32
+                    type: integer
+                  state:
+                    description: State is Estimating, Settling or Settled.
+                    type: string
+                required:
+                - deadline
+                - policy
+                - quantile
+                - state
+                type: object
               unitMillis:
                 description: |-
                   UnitMillis is each finished unit's run time in milliseconds, by

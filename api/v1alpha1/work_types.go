@@ -48,6 +48,18 @@ type WorkJobSpec struct {
 	// +optional
 	Deadline *metav1.Time `json:"deadline,omitempty"`
 
+	// DeadlineMode says who owns the deadline. Pinned: Deadline, set by a
+	// person or a tool (the default when Deadline is set). Suggested: the
+	// farm suggests one from the deadline policy (the project's, else the
+	// class's), the job's estimate and the first units' measurements; it
+	// revises the suggestion at most a few times and then settles it, and
+	// never moves a settled one (the default when Deadline is not set and
+	// the policy is not a latency SLO). Tracking: production tracking
+	// writes Deadline; the farm never suggests one.
+	// +kubebuilder:validation:Enum=Pinned;Suggested;Tracking
+	// +optional
+	DeadlineMode string `json:"deadlineMode,omitempty"`
+
 	// Pools the job's units may run in. Empty means the class's defaults.
 	// +optional
 	Pools []string `json:"pools,omitempty"`
@@ -161,6 +173,13 @@ type WorkJobStatus struct {
 	// Deadline is the effective deadline.
 	// +optional
 	Deadline *metav1.Time `json:"deadline,omitempty"`
+	// DeadlineSource says where Deadline comes from: spec (Pinned or
+	// Tracking), suggested, or class (the class's objective).
+	// +optional
+	DeadlineSource string `json:"deadlineSource,omitempty"`
+	// Suggestion is the farm's suggested deadline and how it got there.
+	// +optional
+	Suggestion *WorkSuggestion `json:"suggestion,omitempty"`
 	// Rank is the job's position in dispatch order (1 is next).
 	// +optional
 	Rank int32 `json:"rank,omitempty"`
@@ -198,6 +217,43 @@ type WorkJobStatus struct {
 	// +listType=map
 	// +listMapKey=type
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// WorkSuggestion is a suggested deadline: set from the deadline policy
+// and the estimate, revised only when the first units narrow the estimate,
+// at most MaxRevisions times, then Settled. A settled suggestion never
+// moves; a person can still set a deadline.
+type WorkSuggestion struct {
+	Deadline metav1.Time `json:"deadline"`
+	// State is Estimating, Settling or Settled.
+	State string `json:"state"`
+	// Policy names the deadline policy kind (achievable, sessions,
+	// turnaround) and Quantile the finish percentile it meets.
+	Policy   string `json:"policy"`
+	Quantile string `json:"quantile"`
+	// +optional
+	Revisions int32 `json:"revisions,omitempty"`
+	// +optional
+	MaxRevisions int32 `json:"maxRevisions,omitempty"`
+	// History lists every value the suggestion took, oldest first.
+	// +optional
+	History []WorkSuggestionRevision `json:"history,omitempty"`
+	// NextSession, for a sessions policy whose deadline the job is not
+	// expected to make at Quantile, is the following session: the
+	// one-click alternative.
+	// +optional
+	NextSession *metav1.Time `json:"nextSession,omitempty"`
+}
+
+// WorkSuggestionRevision is one value a suggestion took.
+type WorkSuggestionRevision struct {
+	At       metav1.Time `json:"at"`
+	Deadline metav1.Time `json:"deadline"`
+	// UnitsMeasured is how many units had finished.
+	UnitsMeasured int32 `json:"unitsMeasured"`
+	// Record is the C4 ID of the queue's signed record of it.
+	// +optional
+	Record string `json:"record,omitempty"`
 }
 
 // WorkOutput is a job's output.
@@ -277,10 +333,23 @@ type WorkEstimate struct {
 	SlackSeconds        int64  `json:"slackSeconds,omitempty"`
 	Feasible            bool   `json:"feasible,omitempty"`
 	AtRisk              bool   `json:"atRisk,omitempty"`
+	// ETA50 and ETA90 are the finish a person is shown, at 50 and 90%:
+	// the plan's finish with the calibrated percentiles of the remaining
+	// work, and half the critical path as the last wave's tail (the
+	// scheduler's own, more conservative finish is what it decides on).
 	// +optional
 	ETA50 *metav1.Time `json:"eta50,omitempty"`
 	// +optional
 	ETA90 *metav1.Time `json:"eta90,omitempty"`
+	// ETA80 and ETA95 complete the band.
+	// +optional
+	ETA80 *metav1.Time `json:"eta80,omitempty"`
+	// +optional
+	ETA95 *metav1.Time `json:"eta95,omitempty"`
+	// Calibrated says the percentiles come from finished jobs' outcomes
+	// (live calibration), not from the estimator's own spread.
+	// +optional
+	Calibrated bool `json:"calibrated,omitempty"`
 	// +optional
 	Message string `json:"message,omitempty"`
 	// HeavyRegions are axis ranges well above the job's median cost.

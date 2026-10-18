@@ -1352,6 +1352,41 @@ needs 4 hours gives its render inputs Friday 14:00, and their sim inputs
 earlier still. A job waiting on dependencies is not runnable, but its
 upstream jobs see its pressure.
 
+**Suggested deadlines.** Nobody can pick a sensible deadline without some
+sense of when a job can be done, so a job with no deadline of its own gets
+one from the farm (`spec.deadlineMode: Suggested`, the default without
+`spec.deadline`; `Pinned` and `Tracking` leave it to a person or to
+production tracking). The deadline policy is the project's for the job's
+class (`spec.work.deadlinePolicies`), else the class's:
+
+- `achievable` (render and ML by default): the earliest time, rounded up to
+  the quarter hour, by which the job finishes at the policy's quantile
+  (80% by default, 90% suits deliveries) without making any job that is on
+  time now late. The queue finds it by running the policy on copies of the
+  farm with the job's deadline moved (a bisection, a dozen policy runs, at
+  most two jobs a tick).
+- `sessions`: the next of a calendar of review sessions (dailies at 08:00
+  and 14:00). A job not expected to make it keeps it, and its status
+  offers the following session (`status.suggestion.nextSession`), one
+  click away.
+- `turnaround`: submission plus a duration, the old default.
+
+An achievable suggestion is revised only at binary order's information
+points (1, 3, 5, 9, 17, 33 units finished), only when the move exceeds
+max(10% of the time left, 15 minutes), and only when the finish band has
+narrowed by 20% since the value it replaces. It is revised at most twice,
+and it settles after the second revision, after 33 units, or once a
+quarter of the time to it has passed. A settled suggestion never moves;
+only a person moves a deadline. Every value is signed into the book.
+`work/forecast` holds the rules; the queue applies them.
+
+**What a person is shown.** `status.estimate.eta50` to `eta95` are the
+plan's finish for the calibrated percentiles of the remaining work, with
+half the critical path as the last wave's tail. The scheduler's own finish
+adds the whole critical path, which is the right margin for deciding who
+is late and what to buy, and run against isolated synthetic jobs it was about a quarter late as a
+median.
+
 **Latency SLOs feed back.** If a class's measured p95 over the last hour is
 under target, its effective deadlines relax toward the target. If it is over,
 they tighten. CI then takes no more of the farm than its SLO needs.

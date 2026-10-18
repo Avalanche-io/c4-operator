@@ -15,6 +15,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/work/forecast"
 	"github.com/Avalanche-io/c4-operator/work/order"
 	"github.com/Avalanche-io/c4-operator/work/sched"
 )
@@ -183,6 +184,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	if !v.obj.Deadline.IsZero() {
 		st.Deadline = &metav1.Time{Time: v.obj.Deadline}
 	}
+	st.DeadlineSource = v.source
+	st.Suggestion = suggestionStatus(m.sugg)
 	if !m.started.IsZero() {
 		st.Started = &metav1.Time{Time: m.started.Truncate(time.Second)}
 	}
@@ -237,14 +240,15 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	if js.AtRisk || !js.Feasible {
 		e.Message = js.Message
 	}
-	if !js.ETA50.IsZero() {
-		e.ETA50 = &metav1.Time{Time: js.ETA50.Truncate(time.Second)}
-		e.RemainingSeconds = int64(js.ETA50.Sub(now).Seconds())
+	// What a person is shown: the calibrated band with half the tail
+	// (forecast.Display), not the scheduler's conservative finish.
+	if b := forecast.Display(now, v.sum, js.ETA50, js.ETA90); !b.IsZero() {
+		t := func(x time.Time) *metav1.Time { return &metav1.Time{Time: x.Truncate(time.Second)} }
+		e.ETA50, e.ETA80, e.ETA90, e.ETA95 = t(b.P50), t(b.P80), t(b.P90), t(b.P95)
+		e.RemainingSeconds = int64(b.P50.Sub(now).Seconds())
+		e.P90RemainingSeconds = int64(b.P90.Sub(now).Seconds())
 	}
-	if !js.ETA90.IsZero() {
-		e.ETA90 = &metav1.Time{Time: js.ETA90.Truncate(time.Second)}
-		e.P90RemainingSeconds = int64(js.ETA90.Sub(now).Seconds())
-	}
+	e.Calibrated = v.sum.Calibrated
 	e.HeavyRegions = q.heavy(v)
 	st.Estimate = e
 	return st

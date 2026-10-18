@@ -160,6 +160,49 @@ type ProjectWork struct {
 	// +kubebuilder:validation:Enum=none;aggregate
 	// +optional
 	ShareHistory string `json:"shareHistory,omitempty"`
+	// DeadlinePolicies override the class's deadline policy for this
+	// project's jobs, one per class.
+	// +optional
+	DeadlinePolicies []DeadlinePolicy `json:"deadlinePolicies,omitempty"`
+}
+
+// DeadlinePolicy chooses the deadlines the farm suggests for a class's
+// jobs that have none of their own.
+type DeadlinePolicy struct {
+	// Class is the work class the policy applies to.
+	Class string `json:"class"`
+	// Kind: achievable (the earliest time the job can finish at Quantile
+	// without making another job late, rounded up), sessions (the next of
+	// a calendar of review sessions; a job not expected to make it keeps
+	// it and is offered the following one), or turnaround (submission
+	// plus Turnaround).
+	// +kubebuilder:validation:Enum=achievable;sessions;turnaround
+	Kind string `json:"kind"`
+	// Sessions are times of day, "HH:MM", in TimeZone, on Weekdays
+	// ("Mon".."Sun"; every day when empty).
+	// +optional
+	Sessions []string `json:"sessions,omitempty"`
+	// +optional
+	Weekdays []string `json:"weekdays,omitempty"`
+	// TimeZone is an IANA zone name (default UTC).
+	// +optional
+	TimeZone string `json:"timeZone,omitempty"`
+	// Turnaround is a duration ("24h") for kind turnaround.
+	// +optional
+	Turnaround string `json:"turnaround,omitempty"`
+	// Quantile is the finish percentile a suggestion must meet, "0.8" by
+	// default ("0.9" suits deliveries).
+	// +optional
+	Quantile string `json:"quantile,omitempty"`
+	// Round ("15m") and MinLead ("15m") shape achievable deadlines.
+	// +optional
+	Round string `json:"round,omitempty"`
+	// +optional
+	MinLead string `json:"minLead,omitempty"`
+	// MaxRevisions caps how often a suggestion moves before it settles
+	// (default 2).
+	// +optional
+	MaxRevisions *int32 `json:"maxRevisions,omitempty"`
 }
 
 // Quota is a project's entitlement in one pool.
