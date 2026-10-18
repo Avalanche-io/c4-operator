@@ -639,6 +639,17 @@ func agentSummary(m *model, rec *jobRec) map[string]any {
 	for _, mem := range b.Spec.Members {
 		kinds[mem.Name] = mem.Kind
 	}
+	// The current run of each member, from its unit pod.
+	started := map[int]time.Time{}
+	for i := range m.pods {
+		p := &m.pods[i]
+		if p.Namespace != j.Namespace || p.Labels[c4v1.LabelJob] != j.Name || p.Status.StartTime == nil || p.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		if idx, err := strconv.Atoi(p.Labels[c4v1.LabelUnit]); err == nil {
+			started[idx] = p.Status.StartTime.Time
+		}
+	}
 	running := 0
 	var members []any
 	for i, ms := range b.Status.Members {
@@ -654,6 +665,11 @@ func agentSummary(m *model, rec *jobRec) map[string]any {
 		if cp := checkpointOf(ms.Checkpoint); cp != nil {
 			e["checkpoint"] = cp
 		}
+		runs := []any{}
+		if t, ok := started[i]; ok {
+			runs = append(runs, map[string]any{"from": t.UTC()})
+		}
+		e["runs"] = runs
 		members = append(members, e)
 	}
 	if members != nil {
