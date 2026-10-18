@@ -29,11 +29,17 @@ import (
 // LateCostPerHour times LateBy. Otherwise it is reported for approval.
 // Partial bursts that only reduce lateness are reported, never requested.
 //
+// Candidates, D, T and the lateness cost come from the plan with its
+// margin (the critical path counted twice, see planFluid). A job on time
+// under Graham's bound but late with the margin gets a burst marked
+// Margin: it buys margin against estimate uncertainty, and its message
+// and capacity request say so.
+//
 // Each burst pool's request is its current request plus approved
 // additions. It shrinks only after the pool has had idle provisioned
 // slots for ScaleDownAfter, and then by the idle count.
 func (a *alloc) burst() {
-	promised := map[string]int{}
+	promised, margin := map[string]int{}, map[string]int{}
 	budget := map[string]float64{}
 	for name, pr := range a.projects {
 		budget[name] = pr.p.BurstBudgetLeft
@@ -55,7 +61,9 @@ func (a *alloc) burst() {
 		if sg == nil {
 			continue
 		}
+		sg.Margin = !jc.view().atRisk
 		lateCost := jc.proj.p.LateCostPerHour * jc.lateBy.Hours()
+		sg.LateCost = lateCost
 		switch {
 		case !a.cfg.Burst:
 			sg.Why = "burst requests are disabled"
@@ -70,6 +78,9 @@ func (a *alloc) burst() {
 			budget[jc.proj.p.Name] -= sg.Cost
 			for pool, n := range sg.Slots {
 				promised[pool] += n
+				if sg.Margin {
+					margin[pool] += n
+				}
 			}
 		}
 		jc.burst = sg
@@ -87,6 +98,12 @@ func (a *alloc) burst() {
 		req := b.Requested + promised[name]
 		reason := "steady"
 		switch {
+		case promised[name] > 0 && margin[name] == promised[name]:
+			delete(a.st.surplus, name)
+			reason = fmt.Sprintf("+%d as margin against estimate uncertainty", promised[name])
+		case promised[name] > 0 && margin[name] > 0:
+			delete(a.st.surplus, name)
+			reason = fmt.Sprintf("+%d for jobs at risk, %d of them as margin against estimate uncertainty", promised[name], margin[name])
 		case promised[name] > 0:
 			delete(a.st.surplus, name)
 			reason = fmt.Sprintf("+%d for jobs at risk", promised[name])
@@ -220,12 +237,13 @@ func (a *alloc) report() {
 		st.Share = jc.share
 		st.Slack = jc.slack
 		st.Feasible = jc.feasible
-		st.AtRisk = jc.atRisk
-		st.LateBy = jc.lateBy
+		v := jc.view()
+		st.AtRisk = v.atRisk
+		st.LateBy = v.lateBy
 		st.Burst = jc.burst
-		if jc.hasDeadline && jc.finish90 > 0 && !math.IsInf(jc.finish90, 1) {
-			st.ETA50 = a.now.Add(secs(jc.finish50))
-			st.ETA90 = a.now.Add(secs(jc.finish90))
+		if jc.hasDeadline && v.finish90 > 0 && !math.IsInf(v.finish90, 1) {
+			st.ETA50 = a.now.Add(secs(v.finish50))
+			st.ETA90 = a.now.Add(secs(v.finish90))
 		}
 		st.Message = a.message(jc, st)
 		a.out.Jobs[jc.j.ID] = st
@@ -245,29 +263,47 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		return ""
 	}
 	dl := jc.j.Deadline.Format("Mon 15:04")
+	v := jc.view()
 	if jc.noPool {
 		return fmt.Sprintf("%s cannot run: no pool can run it (none of %s is in the farm); due %s.", id, strings.Join(jc.j.Pools, ", "), dl)
 	}
 	if jc.T <= 0 {
 		more := "with no capacity planned for it"
-		if jc.finish90 > 0 && !math.IsInf(jc.finish90, 1) {
-			more = fmt.Sprintf("about %s more at current capacity", human(secs(jc.finish90)))
+		if v.finish90 > 0 && !math.IsInf(v.finish90, 1) {
+			more = fmt.Sprintf("about %s more at current capacity", human(secs(v.finish90)))
 		}
 		return fmt.Sprintf("%s is past its deadline %s by %s; %s.", id, dl, human(secs(-jc.T)), more)
 	}
-	if !jc.atRisk {
+	sg := jc.burst
+	if !v.atRisk {
+		var b strings.Builder
 		if st.ETA90.IsZero() {
-			return fmt.Sprintf("%s is on track for %s.", id, dl)
+			fmt.Fprintf(&b, "%s is on track for %s.", id, dl)
+		} else {
+			fmt.Fprintf(&b, "%s is on track for %s: ETA %s, slack %s.", id, dl, st.ETA90.Format("Mon 15:04"), human(jc.slack))
 		}
-		return fmt.Sprintf("%s is on track for %s: ETA %s, slack %s.", id, dl, st.ETA90.Format("Mon 15:04"), human(jc.slack))
+		// A burst for a job on track is margin against estimate
+		// uncertainty (see burst); say so rather than leave it unexplained.
+		if sg != nil && sg.Closes && a.cfg.Burst {
+			verb := "add"
+			if !sg.Auto {
+				verb = "would add"
+			} else if len(sg.Slots) == 1 {
+				verb = "adds"
+			}
+			fmt.Fprintf(&b, " %s %s margin against estimate uncertainty (est. %s).", slotList(sg), verb, dollars(sg.Cost))
+			if !sg.Auto {
+				fmt.Fprintf(&b, " Needs approval: %s.", sg.Why)
+			}
+		}
+		return b.String()
 	}
 	var b strings.Builder
-	if math.IsInf(jc.finish90, 1) {
+	if math.IsInf(v.finish90, 1) {
 		fmt.Fprintf(&b, "%s will miss %s: no capacity is planned for it.", id, dl)
 	} else {
-		fmt.Fprintf(&b, "%s will miss %s by about %s at current capacity.", id, dl, human(jc.lateBy))
+		fmt.Fprintf(&b, "%s will miss %s by about %s at current capacity.", id, dl, human(v.lateBy))
 	}
-	sg := jc.burst
 	switch {
 	case sg == nil:
 		if !jc.feasible {

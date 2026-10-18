@@ -63,6 +63,7 @@ func (a *alloc) planNoPool() {
 		jc.share = 0
 		jc.finish50, jc.finish90 = math.Inf(1), math.Inf(1)
 		jc.lateBy = secs(bigSeconds)
+		jc.shown = nil
 	}
 }
 
@@ -288,6 +289,14 @@ func spreadSurplus(g []groupMember, C float64) {
 // A job's planned finish is its fluid EDF completion at full capacity,
 // (cumulative W90 to it)/C, plus t_path when TailAware; a late job's
 // lateness is measured the same way, as if it were inserted in order.
+// These figures count the critical path twice (its work is in W90 and
+// in t_path), and that margin is kept on purpose: the on-time set, the
+// deadline tier's order, the burst deficit and its pricing all use it,
+// because W90 under-covers heavy shots and the double count stands in
+// for that until the estimator is calibrated. What a job reports (AtRisk,
+// LateBy, ETA, message) uses Graham's bound instead (see shown), so a job
+// the margin alone makes late reads as on track, and a burst for it says
+// it is margin against estimate uncertainty.
 func (a *alloc) planFluid(g []groupMember, C float64) {
 	var dl []groupMember
 	for _, m := range g {
@@ -385,57 +394,94 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		rest -= x
 	}
 	spreadSurplus(dl, math.Max(0, rest))
-	// Planned finish, risk and shortfall.
-	cum, cum50 := 0.0, 0.0
+	// Planned finish, risk and shortfall, with the margin; shown is the
+	// same plan under Graham's bound.
+	cum, cum50, gcum, gcum50 := 0.0, 0.0, 0.0, 0.0
 	for _, m := range set {
 		m.planOK = true
 		cum += m.W90
 		cum50 += m.W
 		m.finish90 = a.fluidFinish(m.jobCtx, cum, C)
 		m.finish50 = a.fluidFinish(m.jobCtx, cum50, C)
+		gcum += a.preTail(m.jobCtx, m.W90)
+		gcum50 += a.preTail(m.jobCtx, m.W)
+		m.shown = &shownPlan{finish50: a.fluidFinish(m.jobCtx, gcum50, C), finish90: a.fluidFinish(m.jobCtx, gcum, C)}
 	}
-	planned := 0.0
+	planned, gplanned := 0.0, 0.0
 	for _, x := range set {
 		planned += x.W90
+		gplanned += a.preTail(x.jobCtx, x.W90)
 	}
 	for _, m := range late {
 		m.planOK = false
 		m.atRisk = true
 		t := eff(m)
-		before := 0.0
+		before, gbefore := 0.0, 0.0
 		for _, x := range set {
 			if eff(x) <= t {
 				before += x.W90
+				gbefore += a.preTail(x.jobCtx, x.W90)
 			}
 		}
-		// Its own finish with all its attainable slots carries the same
-		// tail as the test that made it late on its own (W90/A > T -
-		// t_path under TailAware), so a job late on its own is late in
-		// its finish too, never on time with LateBy 0.
-		finish := math.Max(a.fluidFinish(m.jobCtx, before+m.W90, C), a.fluidFinish(m.jobCtx, m.W90, m.cap))
+		finish, late := a.lateFinish(m, m.W90, before, planned, C)
 		m.finish50 = finish
-		// A member evicted to make the on-time set fit (the largest one,
-		// not always the latest) can finish by its deadline when inserted
-		// alone in deadline order, yet the plan runs it only at its share:
-		// it is late by at least what that share leaves, and that shortfall
-		// is what a burst must cover. With no share it runs after the whole
-		// on-time set. Without this floor its lateness was priced at $0 and
-		// no burst for it could ever be requested without approval.
-		late, deficit := finish, math.Max(before+m.W90-C*t, m.W90-m.cap*t)
-		if m.share > 0 {
-			late = math.Max(late, a.fluidFinish(m.jobCtx, m.W90, m.share))
-		} else {
-			late = math.Max(late, a.fluidFinish(m.jobCtx, planned+m.W90, C))
-		}
-		deficit = math.Max(deficit, m.W90-m.share*t)
 		// A job the plan makes late finishes after its deadline, by at
 		// least a second, so its ETA and its lateness agree.
 		late = math.Max(late, m.T+1)
 		m.finish90 = late
 		m.lateBy = secs(math.Max(0, late-m.T))
 		m.horizon = t
-		m.deficit = deficit
+		m.deficit = math.Max(math.Max(before+m.W90-C*t, m.W90-m.cap*t), m.W90-m.share*t)
+		// Under Graham's bound the job may be on time: then the margin
+		// alone makes it late, and any burst for it is that margin.
+		w := a.preTail(m.jobCtx, m.W90)
+		gfinish, glate := a.lateFinish(m, w, gbefore, gplanned, C)
+		s := &shownPlan{finish50: gfinish, finish90: glate}
+		if glate > m.T {
+			s.atRisk = true
+			s.finish90 = math.Max(glate, m.T+1)
+			s.lateBy = secs(s.finish90 - m.T)
+		}
+		m.shown = s
 	}
+}
+
+// lateFinish is a late job's finish with all its attainable slots
+// (inserted in deadline order after before) and its finish in the plan,
+// for w, the work it must do before its tail. The first carries the same
+// tail as the test that made it late on its own (W90/A > T - t_path
+// under TailAware), so a job late on its own is late in its finish too,
+// never on time with LateBy 0. A member evicted to make the on-time set
+// fit (the largest one, not always the latest) can finish by its
+// deadline when inserted alone in deadline order, yet the plan runs it
+// only at its share: it is late by at least what that share leaves, and
+// that shortfall is what a burst must cover. With no share it runs after
+// the whole on-time set (planned). Without this floor its lateness was
+// priced at $0 and no burst for it could ever be requested without
+// approval.
+func (a *alloc) lateFinish(m groupMember, w, before, planned, C float64) (finish, late float64) {
+	finish = math.Max(a.fluidFinish(m.jobCtx, before+w, C), a.fluidFinish(m.jobCtx, w, m.cap))
+	late = finish
+	if m.share > 0 {
+		late = math.Max(late, a.fluidFinish(m.jobCtx, w, m.share))
+	} else {
+		late = math.Max(late, a.fluidFinish(m.jobCtx, planned+w, C))
+	}
+	return finish, late
+}
+
+// preTail is the part of work w a job must finish before its critical
+// path's last stretch: w less the critical path's own work (t_path times
+// the slots of the units on it) under TailAware, else w. List scheduling
+// on A slots finishes within (W - k*t_path)/A + t_path (Graham's bound);
+// using W there counts the critical path twice, so a single two-hour unit
+// due in three hours on a free slot is planned to finish in four. Only
+// what a job reports uses it (see planFluid).
+func (a *alloc) preTail(jc *jobCtx, w float64) float64 {
+	if !a.cfg.TailAware {
+		return w
+	}
+	return math.Max(0, w-float64(jc.slots)*jc.tpath)
 }
 
 func (a *alloc) fluidFinish(jc *jobCtx, cum, C float64) float64 {

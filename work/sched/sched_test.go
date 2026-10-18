@@ -902,3 +902,39 @@ func TestStarvingGangDrainsAfterDeadlineTier(t *testing.T) {
 		t.Fatalf("the starving gang's drain kept the urgent job from the free GPUs: %+v", d.Dispatch)
 	}
 }
+
+// A job on time under Graham's bound but late with the plan's margin (the
+// critical path counted twice) reports on track, and the burst the margin
+// buys says it is margin against estimate uncertainty, in the message and
+// in the capacity request. 8 one-hour units, critical path 1h, on 2 slots
+// due in 4h45m: (8-1)/2 + 1 = 4h30m under Graham's bound; 8/2 + 1 = 5h
+// with the margin, 0.5 slot-hours short.
+func TestBurstForMarginIsLabelled(t *testing.T) {
+	j := job("m", "showA", 8, 8, 4*time.Hour+45*time.Minute)
+	j.Estimate.TPath = 3600
+	j.Pools = []string{"gpu", "gpu-spot"}
+	s := Snapshot{Now: t0,
+		Pools: []Pool{
+			{Name: "gpu", Slots: 2},
+			{Name: "gpu-spot", CostPerSlotHour: 0.8, Burst: &Burst{MaxSlots: 64, Provisioning: 8 * time.Minute, CostPerSlotHour: 0.8}},
+		},
+		Projects: []Project{{Name: "showA", BurstBudgetLeft: 500, LateCostPerHour: 300}},
+		Jobs:     []Job{j}}
+	d := Decide(s, &State{}, DefaultConfig())
+	js := d.Jobs["m"]
+	if js.AtRisk || js.LateBy != 0 || !js.ETA90.Equal(t0.Add(4*time.Hour+30*time.Minute)) {
+		t.Fatalf("at risk %v, late by %s, ETA %s", js.AtRisk, js.LateBy, js.ETA90)
+	}
+	if js.Burst == nil || !js.Burst.Margin || !js.Burst.Auto || js.Burst.Slots["gpu-spot"] != 1 {
+		t.Fatalf("burst %+v", js.Burst)
+	}
+	msg := "m is on track for Mon 16:45: ETA Mon 16:30, slack 45m. +1 gpu-spot slots adds margin against estimate uncertainty (est. $0.51)."
+	if js.Message != msg {
+		t.Fatalf("message\n got %q\nwant %q", js.Message, msg)
+	}
+	for _, c := range d.Capacity {
+		if c.Pool == "gpu-spot" && c.Reason != "+1 as margin against estimate uncertainty" {
+			t.Fatalf("capacity %+v", c)
+		}
+	}
+}

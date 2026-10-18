@@ -81,10 +81,14 @@ func (q *Queue) capacity(ctx context.Context, now time.Time, dec sched.Decisions
 		if b.Auto || !b.Closes {
 			continue
 		}
+		why := b.Why
+		if b.Margin {
+			why = "margin against estimate uncertainty; " + why
+		}
 		for pool, n := range b.Slots {
 			name := pool + "-approve-" + shortHash(b.Job)
 			wanted[name] = true
-			spec := c4v1.CapacityRequestSpec{Pool: pool, Slots: int32(n), Reason: b.Why, Jobs: []string{b.Job},
+			spec := c4v1.CapacityRequestSpec{Pool: pool, Slots: int32(n), Reason: why, Jobs: []string{b.Job},
 				EstimatedCost: fmt.Sprintf("%.2f", b.Cost)}
 			if old := byName[name]; old != nil {
 				spec.Approved = old.Spec.Approved

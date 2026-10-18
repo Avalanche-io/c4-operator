@@ -28,7 +28,8 @@ var invariants = []struct{ name, what string }{
 	{"lateness-unpriced", "a job planned late has LateBy > 0, so its lateness has a cost"},
 	{"eta-inconsistent", "a job at risk has an ETA after its deadline; a job on track has one before it"},
 	{"past-due-on-track", "an unfinished job past its deadline is reported at risk"},
-	{"burst-uneconomic", "an automatic burst closes the deadline and costs less than the lateness it prevents"},
+	{"burst-uneconomic", "an automatic burst closes the deadline and costs less than the lateness it prevents (for a burst bought as margin against estimate uncertainty, the lateness the margin plans)"},
+	{"burst-label", "a burst is marked as margin against estimate uncertainty exactly when its job reports on track"},
 	{"burst-budget", "automatic bursts stay within each project's remaining daily budget"},
 	{"burst-unjustified", "a burst pool's request grows only by automatically approved slots, and never past its limit"},
 	{"guard-preempt", "only a unit the starvation guard started is preempted as a guard unit"},
@@ -768,12 +769,18 @@ func (c *checker) checkBursts(v *view) {
 	spent := map[string]float64{}
 	auto := map[string]int{}
 	for _, b := range v.d.Bursts {
+		if b.Margin == v.d.Jobs[b.Job].AtRisk {
+			c.violate("burst-label", b.Job, fmt.Sprintf("margin %v, at risk %v", b.Margin, v.d.Jobs[b.Job].AtRisk))
+		}
 		if !b.Auto {
 			continue
 		}
 		pr := v.projects[b.Project]
 		st := v.d.Jobs[b.Job]
 		late := lateCostOf(pr) * st.LateBy.Hours()
+		if b.Margin {
+			late = b.LateCost
+		}
 		switch {
 		case !b.Closes:
 			c.violate("burst-uneconomic", b.Job, "auto burst that does not close the deadline")

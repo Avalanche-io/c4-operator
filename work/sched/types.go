@@ -222,6 +222,14 @@ type BurstSuggestion struct {
 	Auto bool
 	// Why explains a suggestion that needs approval.
 	Why string
+	// Margin says the job is on time under Graham's bound and late only
+	// with the plan's margin (the critical path counted twice): the burst
+	// is margin against estimate uncertainty.
+	Margin bool
+	// LateCost is the lateness cost the burst prevents, LateCostPerHour
+	// times the job's lateness in the plan with its margin; for a Margin
+	// burst that lateness is above the job's reported LateBy of 0.
+	LateCost float64
 }
 
 // JobState is a job's objective state.

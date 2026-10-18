@@ -66,6 +66,25 @@ type jobCtx struct {
 	group                int     // 0 feasible with need, 1 infeasible with need, 2 other, 3 can use no slot
 	noPool               bool    // none of its pools is in the snapshot
 	burst                *BurstSuggestion
+	// shown is what the job reports when it differs from the plan's own
+	// figures above (planFluid); nil means it reports those.
+	shown *shownPlan
+}
+
+// shownPlan is a job's risk, lateness and planned finish as it reports
+// them, under Graham's bound.
+type shownPlan struct {
+	atRisk             bool
+	lateBy             time.Duration
+	finish50, finish90 float64
+}
+
+// view is what the job reports.
+func (jc *jobCtx) view() shownPlan {
+	if jc.shown != nil {
+		return *jc.shown
+	}
+	return shownPlan{atRisk: jc.atRisk, lateBy: jc.lateBy, finish50: jc.finish50, finish90: jc.finish90}
 }
 
 func newAlloc(s *Snapshot, st *State, cfg Config, quotas bool) *alloc {
