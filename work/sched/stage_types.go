@@ -63,9 +63,12 @@ type Stage struct {
 	// pool's spare slots the plan counts on.
 	Delay time.Duration
 	Slots int
-	// Cost is Source.Cost plus a recompute's work at the pool's price,
-	// plus the job's work moved there at the pool's price.
-	Cost float64
+	// Cost is MoveCost plus RunCost: MoveCost is Source.Cost (the bytes
+	// and fees), RunCost a recompute's work and the job's work moved there,
+	// at the pool's price. For a stage that goes with a burst (to a burst
+	// pool at another site) the burst carries the run cost, and Cost is the
+	// move alone.
+	Cost, MoveCost, RunCost float64
 	// Closes says the stage restores the job's deadline.
 	Closes, Auto bool
 	Why          string

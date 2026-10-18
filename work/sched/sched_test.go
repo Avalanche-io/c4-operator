@@ -1259,7 +1259,7 @@ func TestStageToAnotherSite(t *testing.T) {
 		t.Fatalf("stage %+v", st)
 	}
 	js := d.Jobs["x"]
-	if js.Stage == nil || !strings.Contains(js.Message, "Staging its inputs to van via interconnect (+15m) closes it (about $20).") {
+	if js.Stage == nil || !strings.Contains(js.Message, "is on track for Mon 16:00 UTC") || !strings.Contains(js.Message, "It runs at van once its inputs arrive via interconnect in 15m (about $20 to move).") {
 		t.Fatalf("message %q", js.Message)
 	}
 	for _, x := range d.Dispatch {
@@ -1304,7 +1304,31 @@ func TestStagingUnderWay(t *testing.T) {
 	s.Jobs[0].Sources["van"] = []Source{{Via: "staging", Latency: 10 * time.Minute}}
 	d := Decide(s, &State{}, DefaultConfig())
 	js := d.Jobs["x"]
-	if len(d.Stage) != 0 || len(d.Bursts) != 0 || js.Stage == nil || !strings.Contains(js.Message, "its inputs arriving at van in 10m") {
+	if len(d.Stage) != 0 || len(d.Bursts) != 0 || js.Stage == nil || !strings.Contains(js.Message, "It runs at van once its inputs arrive, in 10m.") {
 		t.Fatalf("stages %+v bursts %+v: %s", d.Stage, d.Bursts, js.Message)
+	}
+}
+
+// A burst pool at another site provisions while the job's inputs move
+// there: the burst carries the move, and an approved burst stages it.
+// Before, the pool was neither burstable (its inputs were not there) nor
+// stageable (it had no slots until provisioned), and nothing helped.
+func TestRemoteBurstPoolStagesWithTheBurst(t *testing.T) {
+	j := job("x", "p", 60, 60, 4*time.Hour)
+	j.Pools = []string{"lon", "aws-spot"}
+	j.Sources = map[string][]Source{"aws-spot": {{Via: "move", Channel: "interconnect", Link: "lon-aws", Bytes: 1e11, Cost: 5}}}
+	s := Snapshot{Now: t0,
+		Pools: []Pool{{Name: "lon", Slots: 10},
+			{Name: "aws-spot", CostPerSlotHour: 0.5, Burst: &Burst{MaxSlots: 50, Provisioning: 10 * time.Minute, CostPerSlotHour: 0.5}}},
+		Projects: []Project{{Name: "p", BurstBudgetLeft: 500, LateCostPerHour: 300}},
+		Links:    []Link{{Name: "lon-aws", BytesPerSecond: 1.25e9}},
+		Jobs:     []Job{j}}
+	d := Decide(s, &State{}, DefaultConfig())
+	b := d.Jobs["x"].Burst
+	if b == nil || !b.Auto || b.Slots["aws-spot"] == 0 || len(b.Stages) != 1 {
+		t.Fatalf("burst %+v", b)
+	}
+	if len(d.Stage) != 1 || d.Stage[0].Pool != "aws-spot" || !d.Stage[0].Auto || d.Stage[0].MoveCost != 5 {
+		t.Fatalf("stages %+v", d.Stage)
 	}
 }

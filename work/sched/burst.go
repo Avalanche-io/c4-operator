@@ -82,6 +82,14 @@ func (a *alloc) burst() {
 		default:
 			sg.Auto = true
 			budget[jc.proj.p.Name] -= sg.Cost
+			for i := range sg.Stages {
+				st := &sg.Stages[i]
+				st.Auto, st.LateCost = true, lateCost
+				a.commitStage(st)
+				if st.Source.Via != "staging" {
+					a.out.Stage = append(a.out.Stage, *st)
+				}
+			}
 			for pool, n := range sg.Slots {
 				promised[pool] += n
 				if sg.Margin {
@@ -147,6 +155,23 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 			pools = append(pools, ps)
 		}
 	}
+	// A burst pool at another site provisions while the job's inputs move
+	// there (remoteBurst): usable after the longer of the two, and the
+	// move is part of the burst's cost.
+	moves := map[string]Source{}
+	moveDelay := map[string]float64{}
+	if !a.cfg.NoStage {
+		for _, name := range jc.remote {
+			ps := a.pools[name]
+			if ps == nil || ps.p.Burst == nil {
+				continue
+			}
+			if src, d, ok := a.cheapestSource(jc, name, jc.horizon); ok {
+				moves[name], moveDelay[name] = src, d.Seconds()
+				pools = append(pools, ps)
+			}
+		}
+	}
 	if len(pools) == 0 {
 		return nil
 	}
@@ -176,6 +201,10 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 		}
 		b := ps.p.Burst
 		d := b.Provisioning.Seconds()
+		src, far := moves[ps.p.Name]
+		if far {
+			d = math.Max(d, moveDelay[ps.p.Name])
+		}
 		if d >= T {
 			slow++
 			continue
@@ -192,6 +221,15 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 		}
 		take := math.Min(left, float64(x)*per)
 		sg.Cost += b.CostPerSlotHour / 3600 * (float64(x)*d + take)
+		if far {
+			move := src.Cost
+			if src.Via == "staging" {
+				move = 0
+			}
+			sg.Cost += move
+			sg.Stages = append(sg.Stages, Stage{Job: jc.j.ID, Project: jc.proj.p.Name, Pool: ps.p.Name, Source: src,
+				Delay: secs(moveDelay[ps.p.Name]), Slots: x, MoveCost: move, Cost: move, Closes: true})
+		}
 		sg.Slots[ps.p.Name] += x
 		sg.Order = append(sg.Order, ps.p.Name)
 		left -= take
@@ -303,7 +341,22 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		if st.ETA90.IsZero() {
 			fmt.Fprintf(&b, "%s is on track for %s.", id, dl)
 		} else {
-			fmt.Fprintf(&b, "%s is on track for %s: ETA %s, slack %s.", id, dl, forecast.Clock(st.ETA90, a.cfg.Loc), human(jc.slack))
+			slack := jc.slack
+			if jc.stage != nil {
+				slack = secs(jc.T - v.finish90)
+			}
+			fmt.Fprintf(&b, "%s is on track for %s: ETA %s, slack %s.", id, dl, forecast.Clock(st.ETA90, a.cfg.Loc), human(slack))
+		}
+		if s := jc.stage; s != nil {
+			via := ""
+			if s.Source.Channel != "" {
+				via = " via " + s.Source.Channel
+			}
+			if s.Source.Via == "staging" {
+				fmt.Fprintf(&b, " It runs at %s once its inputs arrive, in %s.", s.Pool, human(s.Delay))
+			} else {
+				fmt.Fprintf(&b, " It runs at %s once its inputs arrive%s in %s (%s).", s.Pool, via, human(s.Delay), stageCost(s))
+			}
 		}
 		// A burst for a job on track is margin against estimate
 		// uncertainty (see burst); say so rather than leave it unexplained.
@@ -334,9 +387,9 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		case st.Source.Via == "staging":
 			fmt.Fprintf(&b, " With %s it can finish there in time.", stageWords(st))
 		case st.Auto:
-			fmt.Fprintf(&b, " %s closes it (about %s).", capitalize(stageWords(st)), dollars(st.Cost))
+			fmt.Fprintf(&b, " %s, closes it (%s).", capitalize(stageWords(st)), stageCost(st))
 		default:
-			fmt.Fprintf(&b, " %s would close it (about %s). Needs approval: %s.", capitalize(stageWords(st)), dollars(st.Cost), st.Why)
+			fmt.Fprintf(&b, " %s, would close it (%s). Needs approval: %s.", capitalize(stageWords(st)), stageCost(st), st.Why)
 		}
 	case sg == nil:
 		if !jc.feasible {

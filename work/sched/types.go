@@ -257,6 +257,10 @@ type BurstSuggestion struct {
 	// times the job's lateness in the plan with its margin; for a Margin
 	// burst that lateness is above the job's reported LateBy of 0.
 	LateCost float64
+	// Stages are the moves of the job's inputs to the burst pools in it
+	// that are at another site (Job.Sources): each provisions while its
+	// move runs. They are in Decisions.Stage when the burst is approved.
+	Stages []Stage
 }
 
 // JobState is a job's objective state.

@@ -97,16 +97,44 @@ func (a *alloc) sizeStage(jc *jobCtx, deficit float64) *Stage {
 				continue
 			}
 			price := ps.p.CostPerSlotHour / 3600
-			cost := src.Cost + price*need
+			move, run := src.Cost, price*need
 			if src.Via == "staging" {
-				cost = 0
+				move, run = 0, 0
 			}
+			cost := move + run
 			if best == nil || cost < best.Cost || cost == best.Cost && d < best.Delay {
-				best = &Stage{Job: jc.j.ID, Project: jc.j.Project, Pool: name, Source: src, Delay: d, Slots: x, Cost: cost, Closes: true}
+				best = &Stage{Job: jc.j.ID, Project: jc.j.Project, Pool: name, Source: src, Delay: d, Slots: x,
+					Cost: cost, MoveCost: move, RunCost: run, Closes: true}
 			}
 		}
 	}
 	return best
+}
+
+// cheapestSource is the job's cheapest source to pool that arrives
+// before horizon (a "staging" one first: it is free), with its delay.
+func (a *alloc) cheapestSource(jc *jobCtx, pool string, horizon float64) (Source, time.Duration, bool) {
+	var best Source
+	var bd time.Duration
+	found := false
+	for _, src := range jc.j.Sources[pool] {
+		d, ok := a.delay(src)
+		if !ok || d.Seconds() >= horizon {
+			continue
+		}
+		c := src.Cost
+		if src.Via == "staging" {
+			c = -1
+		}
+		bc := best.Cost
+		if best.Via == "staging" {
+			bc = -1
+		}
+		if !found || c < bc || c == bc && d < bd {
+			best, bd, found = src, d, true
+		}
+	}
+	return best, bd, found
 }
 
 // commitStage counts an approved stage's bytes on its link and its slots
@@ -119,7 +147,7 @@ func (a *alloc) commitStage(sg *Stage) {
 }
 
 // stageWords is a stage in a sentence: "staging its inputs to lon-cpu via
-// interconnect (+40m)".
+// interconnect, arriving in 40m".
 func stageWords(sg *Stage) string {
 	how := "staging its inputs to " + sg.Pool
 	switch sg.Source.Via {
@@ -133,7 +161,7 @@ func stageWords(sg *Stage) string {
 	if sg.Source.Channel != "" {
 		how += " via " + sg.Source.Channel
 	}
-	return fmt.Sprintf("%s (+%s)", how, human(sg.Delay))
+	return how + ", arriving in " + human(sg.Delay)
 }
 
 // chooseStage stages the job's inputs instead of bursting when a stage
@@ -155,6 +183,7 @@ func (a *alloc) chooseStage(jc *jobCtx, deficit, lateCost float64, sg *BurstSugg
 		st.Auto = true
 		a.commitStage(st)
 		jc.stage = st
+		a.showStaged(jc, st)
 		return true
 	}
 	left := budget[jc.proj.p.Name]
@@ -171,6 +200,7 @@ func (a *alloc) chooseStage(jc *jobCtx, deficit, lateCost float64, sg *BurstSugg
 	case st.Auto && (!burstAuto || st.Cost < sg.Cost):
 		budget[jc.proj.p.Name] -= st.Cost
 		a.commitStage(st)
+		a.showStaged(jc, st)
 	case !st.Auto && (sg == nil || !sg.Closes):
 	default:
 		return false
@@ -185,4 +215,34 @@ func capitalize(s string) string {
 		return s
 	}
 	return strings.ToUpper(s[:1]) + s[1:]
+}
+
+// showStaged makes what a job reports the plan with its stage: it holds
+// its share where its inputs are until they arrive, then that plus the
+// stage's slots, so a job the stage saves reads on track with the ETA it
+// will have, not the lateness of the plan without it.
+func (a *alloc) showStaged(jc *jobCtx, st *Stage) {
+	d := st.Delay.Seconds()
+	rate := jc.share + float64(st.Slots)
+	finish := func(w float64) float64 {
+		f := d + math.Max(0, w-jc.share*d)/math.Max(rate, 1e-9)
+		if a.cfg.TailAware {
+			return f + jc.tpath
+		}
+		return math.Max(f, jc.tpath)
+	}
+	f50, f90 := finish(jc.W), finish(a.preTail(jc, jc.W90))
+	if f90 > jc.T {
+		return // the stage closes the planned deficit, not the reported one
+	}
+	jc.shown = &shownPlan{finish50: f50, finish90: f90}
+}
+
+// stageCost is a stage's price in words, the move and the run apart:
+// "about $1 to move its inputs, $90 to run there".
+func stageCost(st *Stage) string {
+	if st.RunCost <= 0 {
+		return "about " + dollars(st.MoveCost) + " to move"
+	}
+	return "about " + dollars(st.MoveCost) + " to move, " + dollars(st.RunCost) + " to run there"
 }
