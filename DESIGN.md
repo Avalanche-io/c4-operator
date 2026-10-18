@@ -8,8 +8,9 @@ in `REPORT-v2.md`.
 This is The Cinema Content Creation Cloud, C4 for short (cccc.io). Its
 identifiers, C4 IDs (standardized as SMPTE ST 2114, and in production use
 since before the standard), name every file and tree by its content, and
-they are what everything here is built on. This operator is the cloud part of the name: a production farm whose data, caches,
-work and records are all addressed by those identifiers.
+they are what everything here is built on. This operator is the cloud
+part of the name: a production farm whose data, caches, work and records
+are all addressed by those identifiers.
 
 ## Goals
 
@@ -74,11 +75,11 @@ than 10 KB, and where outputs (rendered frames) dominate writes. Section 8.2
 applies it back to source code through `oss/c4git`.
 
 What C4 brings to that architecture: the trees are C4 views, every file
-and tree named by its C4 ID (standardized as SMPTE ST 2114, and in production use
-since before the standard) and described as c4m, so the same names hold in any c4 store
-and tool outside the farm; and peer fetch by rendezvous hashing inside a
-locality, so a node's cache misses go to its neighbours before the
-regional tier.
+and tree named by its C4 ID (standardized as SMPTE ST 2114, and in
+production use since before the standard) and described as c4m, so the
+same names hold in any c4 store and tool outside the farm; and peer fetch
+by rendezvous hashing inside a locality, so a node's cache misses go to
+its neighbours before the regional tier.
 
 ## 1. Trust model
 
