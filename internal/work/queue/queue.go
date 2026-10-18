@@ -152,16 +152,16 @@ type jobMem struct {
 	// accepted are failed units a person accepted (also in failed);
 	// acks the standing acknowledgements, acked the last request's token
 	// (states.go).
-	accepted    map[int]bool
-	acks        []*ackRecord
-	acked       string
-	decisions   []decisionRecord
-	jobRecord   string
-	lastRun     time.Time
-	readyAt     time.Time
-	started     time.Time
-	finished    time.Time
-	wrote       time.Time
+	accepted  map[int]bool
+	acks      []*ackRecord
+	acked     string
+	decisions []decisionRecord
+	jobRecord string
+	lastRun   time.Time
+	readyAt   time.Time
+	started   time.Time
+	finished  time.Time
+	wrote     time.Time
 	// ended is when each succeeded unit finished, and calPts the
 	// summaries kept for live calibration (calibrate.go).
 	ended   map[int]time.Time
