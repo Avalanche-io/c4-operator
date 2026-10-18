@@ -310,6 +310,12 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 func (s *Server) nodeSummary(m *model, n *corev1.Node, pool *c4v1.Pool, visible map[string]bool) api.Node {
 	an := api.Node{Name: n.Name, Pool: pool.Name, Locality: n.Labels[c4v1.LabelLocality], Zone: n.Labels[corev1.LabelTopologyZone],
 		Region: n.Labels[corev1.LabelTopologyRegion], Slots: int(max(1, pool.Spec.SlotsPerNode))}
+	if v, ok := n.Labels[c4v1.LabelSlotLimit]; ok {
+		if lim, err := strconv.Atoi(v); err == nil && lim >= 0 && lim < an.Slots {
+			an.Capped, an.ShapeSlots, an.Slots = true, an.Slots, lim
+			an.CapacityReason = n.Annotations[c4v1.AnnotationCapacityReason]
+		}
+	}
 	for _, p := range m.pods {
 		if p.Spec.NodeName != n.Name || p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
 			continue

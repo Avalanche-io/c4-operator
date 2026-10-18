@@ -85,7 +85,8 @@ The farm at a glance. Also delivered by the event stream.
                 workerHours: [ { pool, class, hours } ], gpuHours } ],
   jobs: [ JobSummary ],
   nodes: [ { name, pool, locality, zone?, region?, state, slots, used, failuresLastHour, suspect,
-             cacheBytes, cacheHitRate, running?: [ { job, unit, slots } ] } ],
+             cacheBytes, cacheHitRate, running?: [ { job, unit, slots } ],
+             capped?, shapeSlots?, capacityReason? } ],
   sites?: [ { name, label, region, lat, lon, kind, localities[], tz? } ],
   tiers: { tiers: [ { name, hitRate, requestsIn, upstreamRequests, bytesServed, shedRate, inflightFills } ],
            fanIn: { requesters, nodeRequests, peerRequests, regionalRequests, storeRequests },
@@ -97,6 +98,12 @@ The farm at a glance. Also delivered by the event stream.
            productionWindows: [ { project, name, from, to, active } ] }
 }
 ```
+
+A node is `capped` when a limit lowered it below its pool's shape: a host
+runner's power cap, through the node's `c4.avalanche.io/slot-limit` label.
+`slots` is then what it offers now, `shapeSlots` what its pool gives it, and
+`capacityReason` says why in plain words ("battery 21% and falling on a
+45 W adapter"). The HUD draws the unusable slots as blocked.
 
 | field                     | meaning                                                                                                                |
 | ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |

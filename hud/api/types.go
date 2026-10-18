@@ -474,6 +474,13 @@ type Node struct {
 	// /region labels; Region joins the node to a Site.
 	Zone   string `json:"zone,omitempty"`
 	Region string `json:"region,omitempty"`
+	// Capped says a limit (a host runner's power cap, the node's
+	// c4.avalanche.io/slot-limit label) lowered the node below its pool's
+	// shape: Slots is what it offers now, ShapeSlots what its pool gives
+	// it, and CapacityReason says why in plain words.
+	Capped         bool   `json:"capped,omitempty"`
+	ShapeSlots     int    `json:"shapeSlots,omitempty"`
+	CapacityReason string `json:"capacityReason,omitempty"`
 }
 
 type Running struct {

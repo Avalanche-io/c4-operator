@@ -402,3 +402,26 @@ func TestAgentSummaryInDetail(t *testing.T) {
 		t.Fatalf("held member state %v", st)
 	}
 }
+
+func TestCappedNodeInSnapshot(t *testing.T) {
+	s := farm(t)
+	s.m.nodes[0].Labels[c4v1.LabelSlotLimit] = "1"
+	s.m.nodes[0].Annotations = map[string]string{c4v1.AnnotationCapacityReason: "battery 21% and falling on a 45 W adapter"}
+	var snap map[string]any
+	if code := get(t, s, "/api/v1/snapshot?as=wrangler", &snap); code != 200 {
+		t.Fatalf("snapshot: %d", code)
+	}
+	for _, x := range snap["nodes"].([]any) {
+		n := x.(map[string]any)
+		switch n["name"] {
+		case "w1":
+			if n["capped"] != true || n["slots"] != 1.0 || n["shapeSlots"] != 4.0 || n["capacityReason"] == "" {
+				t.Fatalf("capped node %v", n)
+			}
+		case "w2":
+			if _, ok := n["capped"]; ok {
+				t.Fatalf("uncapped node %v", n)
+			}
+		}
+	}
+}
