@@ -21,12 +21,18 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
+	"github.com/Avalanche-io/c4-operator/internal/localfarm"
 	"github.com/Avalanche-io/c4-operator/internal/mcpserver"
 )
 
 var version = "dev"
 
 const usage = `c4 farm: submit work to a C4 farm, watch it, and take its output home.
+
+The local farm
+  up [--as ROLE]           make a farm on this machine in Docker and open its HUD
+  down                     delete the local farm
+  status                   the local farm's nodes, slots and sign-ins
 
 Farms
   use FARM                 switch the current farm
@@ -442,8 +448,96 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		o := farmcli.Out{W: stdout, Clock: farmcli.Clock{UTC: cm.utc}}
 		return farmcli.GetSamples(ctx, o, farmcli.SamplesArgs{Set: set, Version: version, Dir: *dir, From: *from})
 
-	case "up", "down", "status", "machine", "image", "power":
-		return fmt.Errorf("%s is part of the local farm installer, which is not in this build yet; to use a farm that is already running, `c4 farm login http://127.0.0.1:30080 --as artist`", cmd)
+	case "up":
+		as := fs.String("as", "artist", "the role to open the HUD as: artist, supervisor, wrangler, admin, facilities or td")
+		plan := fs.Bool("plan", false, "print the cluster config and the objects, and change nothing")
+		install := fs.String("install", "", "the operator's install manifest (default this release's)")
+		archive := fs.String("image-archive", "", "an operator image archive to load into the cluster (a development build)")
+		image := fs.String("image", "", "the operator image the cluster runs, with --image-archive")
+		noOpen := fs.Bool("no-open", false, "don't open the HUD")
+		if _, err := parse(fs, rest); err != nil {
+			return err
+		}
+		v, err := localfarm.LookupViewer(*as)
+		if err != nil {
+			return err
+		}
+		tz := localfarm.LocalTZ()
+		lat, lon := localfarm.Place(tz)
+		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image},
+			Install: *install, Version: version, ImageArchive: *archive, Log: stdout}
+		if *plan {
+			fmt.Fprintf(stdout, "%s---\n%s", localfarm.KindConfig(o.Options), localfarm.YAML(localfarm.Farm(o.Options)))
+			fmt.Fprintf(stdout, "---\n# manager arguments added: %s\n", strings.Join(localfarm.ManagerArgs(o.Options), " "))
+			return nil
+		}
+		if err := localfarm.CheckDocker(ctx); err != nil {
+			return err
+		}
+		if err := localfarm.Up(ctx, o); err != nil {
+			return err
+		}
+		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: fmt.Sprintf("http://127.0.0.1:%d", localfarm.HUDPort), As: v.Name, Project: localfarm.Project, Local: true}
+		cfg.Current = localfarm.Name
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
+		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
+		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.Link(v))
+		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)\n")
+		if *noOpen {
+			return nil
+		}
+		return openURL(localfarm.Link(v))
+
+	case "down":
+		if _, err := parse(fs, rest); err != nil {
+			return err
+		}
+		if err := localfarm.Down(localfarm.Name); err != nil {
+			return err
+		}
+		delete(cfg.Farms, localfarm.Name)
+		if cfg.Current == localfarm.Name {
+			cfg.Current = ""
+		}
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "the local farm is gone\n")
+		return nil
+
+	case "status":
+		if _, err := parse(fs, rest); err != nil {
+			return err
+		}
+		have, err := localfarm.Exists(localfarm.Name)
+		if err != nil {
+			return err
+		}
+		if !have {
+			fmt.Fprintf(stdout, "no local farm; `c4 farm up` makes one\n")
+			return nil
+		}
+		c, err := farmcli.NewClient(farmcli.Farm{HUD: fmt.Sprintf("http://127.0.0.1:%d", localfarm.HUDPort), As: "wrangler"})
+		if err != nil {
+			return err
+		}
+		s, err := farmcli.Snapshot(ctx, c)
+		if err != nil {
+			fmt.Fprintf(stdout, "cluster   %s is running; the HUD does not answer yet: %v\n", localfarm.Name, err)
+			return nil
+		}
+		fmt.Fprintf(stdout, "farm      %s   %d nodes · %d of %d slots in use · %d units waiting\n", localfarm.Name, len(s.Nodes), s.Farm.SlotsUsed, s.Farm.SlotsTotal, s.Farm.QueuedUnits)
+		fmt.Fprintf(stdout, "HUD       http://127.0.0.1:%d\n", localfarm.HUDPort)
+		for _, v := range localfarm.Viewers {
+			fmt.Fprintf(stdout, "  %-10s %s\n", v.Name, localfarm.Link(v))
+		}
+		return nil
+
+	case "machine", "image", "agent":
+		return fmt.Errorf("%s is not in this build yet; `c4 farm up` makes a local farm, and `c4 farm login HUD-URL` signs in to a running one", cmd)
 	}
 	var names []string
 	for _, l := range strings.Split(usage, "\n") {
