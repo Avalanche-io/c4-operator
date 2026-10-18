@@ -1214,3 +1214,19 @@ func TestShrunkPoolSparesJobsAtRisk(t *testing.T) {
 		t.Fatalf("shed %v, want the gang and not the job at risk", got)
 	}
 }
+
+// A subset's capacity excludes what planned jobs outside it hold in its
+// pools: v may use lon and van and holds 8 of lon's 10 slots; l may use
+// only lon and needs 6 slots for its 5 hours (30 slot-hours). Planned on
+// all of lon, l read on time; on the 2 slots v leaves it is at risk.
+func TestSubsetExcludesSlotsHeldByOthers(t *testing.T) {
+	v := job("v", "p", 40, 60, 10*time.Hour)
+	v.Pools = []string{"lon", "van"}
+	v.RunningUnits, v.Running = runningUnits("v", "lon", 8, t0)
+	l := job("l", "p", 30, 30, 5*time.Hour)
+	l.Pools = []string{"lon"}
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "lon", Slots: 10, Used: 8}, {Name: "van", Slots: 10}}, Jobs: []Job{v, l}}
+	if st := Decide(s, &State{}, DefaultConfig()).Jobs["l"]; !st.AtRisk {
+		t.Fatalf("l on track with 2 of lon's slots free: %s", st.Message)
+	}
+}

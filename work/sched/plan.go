@@ -587,6 +587,7 @@ func (a *alloc) planSubsets(g []groupMember) {
 		}
 		var sub []groupMember
 		projects := map[*projState]bool{}
+		held := 0.0
 		for _, m := range g {
 			inside := true
 			for _, p := range poolsOf(m.jobCtx) {
@@ -595,6 +596,15 @@ func (a *alloc) planSubsets(g []groupMember) {
 			if inside {
 				sub = append(sub, m)
 				projects[m.proj] = true
+				continue
+			}
+			// Slots that planned jobs outside the subset hold in its pools
+			// are not the subset's: a job with other pools (a light that may
+			// spill, or that staged its inputs here) keeps them while it runs.
+			for name, n := range m.j.Running {
+				if in[name] {
+					held += float64(n)
+				}
 			}
 		}
 		C, usable := 0.0, 0.0
@@ -611,7 +621,7 @@ func (a *alloc) planSubsets(g []groupMember) {
 				usable += a.usable(pr, ps)
 			}
 		}
-		C = math.Min(C, usable)
+		C = math.Max(0, math.Min(C, usable)-held)
 		saved := make([]planState, len(sub))
 		for i, m := range sub {
 			saved[i] = m.planState()
