@@ -189,7 +189,7 @@ func (e *Estimator) stratum(queued []Unit, run []RunningUnit) Stratum {
 	base := map[string]float64{}
 	typical := map[string]float64{}
 	for k, t := range e.tracks {
-		if len(t.obs) == 0 {
+		if len(t.obs) == 0 || isRatioKey(k) {
 			continue
 		}
 		b, f := baseAndTypical(t, hf)

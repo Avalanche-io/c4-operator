@@ -1471,6 +1471,18 @@ historical failure rate instead, so a broken change fails fast).
   region's median, else the job's median, else a prior from the project's
   history for that class key, else the class default. Each class picks its
   key: pass for render, test target for CI, steps and step time for ML.
+- **The previous version of the shot.** A job labeled with a shot
+  (`c4.avalanche.io/shot`) is estimated from the durations of the last job
+  of that shot in its project to have succeeded, frame by frame and pass by
+  pass. That previous version's per-frame time is the prior, heavy regions
+  included, with a shared spread of 30%. What is interpolated between
+  measured frames is then the ratio of this version to the last one, so the
+  estimate follows this version as frames land, locally too: a new heavy
+  stretch shows as a ratio spike between its neighbors. The queue builds
+  these profiles from the WorkJobs it already sees, so they survive a
+  restart. They never cross projects. In the eta-deadlines evidence
+  (synthetic), this prior put the estimate at submission within 12% of
+  the actual run, against 65% for farm-wide history.
 - **Heavy regions.** A region whose interpolated cost exceeds three times
   the job median is flagged ("frames 1100-1150 run 3.4x the median, hero
   FX") as soon as one of its frames is measured. Under sequential order the

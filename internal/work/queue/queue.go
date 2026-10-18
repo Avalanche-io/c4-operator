@@ -74,6 +74,9 @@ type Queue struct {
 	cal       calibrations
 	fcal      finishCals
 	shareHist map[string]bool
+	// profiles are the latest finished job's durations per project, shot,
+	// class and unit key (history.go).
+	profiles map[profileKey]*shotProfile
 	// Progress, when set, holds the progress running units report
 	// (progress.go); without it units are estimated from elapsed time.
 	Progress *ProgressCache
@@ -173,6 +176,8 @@ type jobMem struct {
 	// sugg is the job's suggested deadline (suggest.go).
 	sugg *suggestMem
 	// finPts are the medians kept for live finish calibration.
+	// profiled: the job's durations are in the shot history.
+	profiled   bool
 	finPts     []finishPoint
 	finLast    int
 	finLearned bool
@@ -364,6 +369,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 		v := q.observe(ctx, j, podsByJob[j.Namespace+"/"+j.Name], phases, nsProject, poolInfo, now)
 		if v != nil {
 			views = append(views, v)
+			q.noteProfiles(v)
 		}
 	}
 	for uid := range q.jobs {
@@ -604,6 +610,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	cfg := plan.Estimate
 	cfg.Calibration = q.cal.forJob(v.project, v.job.Spec.Class, q.shareHist[v.project])
 	e := estimate.New(cfg)
+	q.useProfiles(v, e)
 	if plan.Prior != nil {
 		for _, u := range plan.Units {
 			e.SetPrior(u.Key, *plan.Prior)

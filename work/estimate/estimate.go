@@ -42,6 +42,7 @@ package estimate
 import (
 	"math"
 	"sort"
+	"strings"
 )
 
 // Prior is a duration distribution in seconds.
@@ -80,6 +81,9 @@ type Config struct {
 	NoLocality bool
 	// Default is the class default per unit.
 	Default Prior
+	// ProfileRelSD is how much a version's durations differ from an
+	// earlier version's, relative (SetProfile); 0.3 by default.
+	ProfileRelSD float64
 	// ProgressRelSD is the relative spread of a remainder computed from a
 	// unit's reported progress at half done (RemainderAt).
 	ProgressRelSD float64
@@ -99,6 +103,7 @@ func DefaultConfig() Config {
 		ShrinkK:       3,
 		Default:       Prior{Mean: 600, SD: 600},
 		ProgressRelSD: 0.2,
+		ProfileRelSD:  0.3,
 	}
 }
 
@@ -112,10 +117,13 @@ const (
 	JobMedian
 	History
 	ClassDefault
+	// Profile: the same position in an earlier version of the job, scaled
+	// by how this version compares where both were measured (SetProfile).
+	Profile
 )
 
 func (s Source) String() string {
-	return [...]string{"measured", "interpolated", "one-sided", "job-median", "history", "class-default"}[s]
+	return [...]string{"measured", "interpolated", "one-sided", "job-median", "history", "class-default", "profile"}[s]
 }
 
 // Pred is one unit's predicted duration in seconds.
@@ -266,6 +274,9 @@ type Estimator struct {
 	fan       map[string]*fanout
 	all       []float64 // every observed duration, sorted lazily
 	allOK     bool
+	// profiles holds, per key, an earlier version's durations by
+	// position (SetProfile).
+	profiles map[string]map[int]float64
 }
 
 // New returns an estimator for one job.
@@ -276,7 +287,40 @@ func New(cfg Config) *Estimator {
 		priors:    map[string]Prior{},
 		genPriors: map[string]GenPrior{},
 		fan:       map[string]*fanout{},
+		profiles:  map[string]map[int]float64{},
 	}
+}
+
+// ratioKey is the internal track of a profiled key's ratios of measured
+// to profiled duration.
+func ratioKey(key string) string { return "\x00ratio/" + key }
+
+func isRatioKey(key string) bool { return strings.HasPrefix(key, "\x00ratio/") }
+
+// SetProfile gives key an earlier version's durations by position: the
+// previous render of the same shot and pass, say. It must be called
+// before Observe.
+//
+// A position with a profile is predicted as its profiled duration times
+// a ratio, and the ratio is what the estimator interpolates: each
+// measured unit contributes measured/profiled at its position, and an
+// unmeasured position takes the ratio between its measured neighbors.
+// Before any unit of this version is measured the ratio is 1, with a
+// shared spread of Config.ProfileRelSD (how much versions differ). So the
+// profile's shape, heavy regions included, is the prior. As units land,
+// the ratio follows this version, locally too: a new heavy region shows as
+// a ratio spike that interpolation spreads between its neighbors.
+// Positions the profile lacks are predicted as before.
+func (e *Estimator) SetProfile(key string, byPos map[int]float64) {
+	if len(byPos) == 0 {
+		return
+	}
+	e.profiles[key] = byPos
+	rel := e.cfg.ProfileRelSD
+	if rel <= 0 {
+		rel = 0.3
+	}
+	e.priors[ratioKey(key)] = Prior{Mean: 1, SD: rel}
 }
 
 // SetPrior records the history prior for a class key.
@@ -287,6 +331,15 @@ func (e *Estimator) SetGenPrior(genKey string, p GenPrior) { e.genPriors[genKey]
 
 // Observe records a completed unit's duration in seconds of wall time.
 func (e *Estimator) Observe(key string, pos int, dur float64) {
+	if d := e.profiles[key][pos]; d > 0 {
+		rk := ratioKey(key)
+		rt := e.tracks[rk]
+		if rt == nil {
+			rt = &track{}
+			e.tracks[rk] = rt
+		}
+		rt.add(pos, dur/d)
+	}
 	t := e.tracks[key]
 	if t == nil {
 		t = &track{}
@@ -344,6 +397,14 @@ func (e *Estimator) relSD(t *track) float64 {
 
 // Predict returns the predicted duration of the unit of key at pos.
 func (e *Estimator) Predict(key string, pos int) Pred {
+	if d := e.profiles[key][pos]; d > 0 {
+		r := e.Predict(ratioKey(key), pos)
+		src := r.Source
+		if src == History {
+			src = Profile
+		}
+		return Pred{Mean: d * r.Mean, SDCorr: d * r.SDCorr, SDInd: d * r.SDInd, Source: src, Region: r.Region}
+	}
 	t := e.tracks[key]
 	if t == nil || len(t.view()) == 0 {
 		return e.fallback(key)

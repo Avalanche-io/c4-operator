@@ -9,6 +9,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
@@ -167,5 +168,41 @@ func TestQueueUsesReportedProgress(t *testing.T) {
 	with := get(t, ns, "ml001").Status.Estimate.RemainingWork
 	if with < 3*3600 || with <= 2*without {
 		t.Fatalf("remaining work %ds with 20%% reported after an hour, %ds without", with, without)
+	}
+}
+
+// The next version of a shot is estimated from the last one's durations.
+func TestShotHistoryIsThePrior(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 2, 2)
+	ctx := context.Background()
+	v1 := job(ns, "sh100-v001", "render", "cpu-"+ns, map[string]string{"frames": "1001-1008", "estimateSeconds": "60"}, now.Add(time.Hour))
+	v1.Labels = map[string]string{c4v1.LabelShot: "sh100"}
+	if err := k8s.Create(ctx, v1); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 20 && get(t, ns, "sh100-v001").Status.Phase != "Succeeded"; i++ {
+		tick(t, q)
+		*now = now.Add(5 * time.Minute)
+		for _, p := range unitPods(t, ns, "sh100-v001") {
+			if p.Status.Phase == "" || p.Status.Phase == corev1.PodPending {
+				finish(t, &p, corev1.PodSucceeded, *now, 4*time.Minute, nil) // 240 s, four times the declared 60
+			}
+		}
+	}
+	tick(t, q)
+	v2 := job(ns, "sh100-v002", "render", "cpu-"+ns, map[string]string{"frames": "1001-1008", "estimateSeconds": "60"}, now.Add(time.Hour))
+	v2.Labels = map[string]string{c4v1.LabelShot: "sh100"}
+	other := job(ns, "sh200-v001", "render", "cpu-"+ns, map[string]string{"frames": "1001-1008", "estimateSeconds": "60"}, now.Add(time.Hour))
+	other.Labels = map[string]string{c4v1.LabelShot: "sh200"}
+	for _, j := range []*c4v1.WorkJob{v2, other} {
+		if err := k8s.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tick(t, q)
+	w2 := get(t, ns, "sh100-v002").Status.Estimate.RemainingWork
+	wo := get(t, ns, "sh200-v001").Status.Estimate.RemainingWork
+	if w2 < 7*240 || wo > 8*60+1 {
+		t.Fatalf("remaining work: next version %ds (want about %d from the last one), another shot %ds (want %d from its declaration)", w2, 8*240, wo, 8*60)
 	}
 }

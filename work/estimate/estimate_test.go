@@ -314,3 +314,49 @@ func TestRemainderBlendsWithinPrediction(t *testing.T) {
 		t.Fatalf("blend %.2fh not between progress %.2fh and prior %.2fh", got/hour, prog/hour, prior/hour)
 	}
 }
+
+// An earlier version's profile is the prior, shape and heavy region
+// included; measured units scale it, locally where they differ.
+func TestProfile(t *testing.T) {
+	e := New(DefaultConfig())
+	prof := map[int]float64{}
+	for pos := range 100 {
+		prof[pos] = 600
+		if pos >= 40 && pos < 50 {
+			prof[pos] = 3000 // last version's heavy region
+		}
+	}
+	e.SetProfile("beauty", prof)
+	if p := e.Predict("beauty", 45); p.Mean != 3000 || p.Source != Profile {
+		t.Fatalf("before any unit: %+v, want the profile's 3000", p)
+	}
+	if p := e.Predict("beauty", 5); p.Mean != 600 || p.SDCorr != 0.3*600 {
+		t.Fatalf("before any unit: %+v", p)
+	}
+	// This version is twice as slow where measured, plain and heavy alike.
+	for _, pos := range []int{0, 25, 45, 75, 99} {
+		e.Observe("beauty", pos, 2*prof[pos])
+	}
+	for _, pos := range []int{10, 44, 60} {
+		if p := e.Predict("beauty", pos); math.Abs(p.Mean-2*prof[pos]) > 1e-6 {
+			t.Fatalf("pos %d: %v, want %v", pos, p.Mean, 2*prof[pos])
+		}
+	}
+	// A new heavy stretch around 85 that the profile does not have shows
+	// as a ratio spike, spread between its measured neighbors.
+	e.Observe("beauty", 87, 10*prof[87])
+	if p := e.Predict("beauty", 85); p.Mean <= 2*prof[85] {
+		t.Fatalf("pos 85 near a new heavy unit: %v", p.Mean)
+	}
+	// Ratios do not enter the job median or the stratum's measurements.
+	if m := e.Median("beauty"); m < 1000 {
+		t.Fatalf("median %v", m)
+	}
+	if st := e.stratum(nil, nil); st.Measured > 4 {
+		t.Fatalf("stratum read the ratio track: %+v", st)
+	}
+	// Positions the profile lacks are predicted as before.
+	if p := e.Predict("other", 3); p.Source == Profile {
+		t.Fatal("a key without a profile used one")
+	}
+}
