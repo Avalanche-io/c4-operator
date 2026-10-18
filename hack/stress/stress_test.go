@@ -327,3 +327,31 @@ func TestReproPlanIgnoresBorrowingLimit(t *testing.T) {
 		t.Fatalf("1.6 slots of work for a project limited to 1 slot, and neither job is at risk: %s / %s", d.Jobs["x"].Message, d.Jobs["y"].Message)
 	}
 }
+
+// Regression, found by the spot grid: a gang that does not fit in its
+// owned pool (the other units there leave too few free slots) gets a
+// planned share equal to its gang, so sizeBurst, which capped the burst
+// at the job's units less its share, had no room left and reported "no
+// burst capacity is left" while the burst pool could run the whole gang.
+func TestReproGangBurstRoom(t *testing.T) {
+	g := rjob("train", "p", 1, 4*3*3600, 3*3600, 3*time.Hour+30*time.Minute)
+	g.Pools, g.SlotsPerUnit = []string{"gpu", "gpu-burst"}, 4
+	g.Runnable[0].Slots = 4
+	other := rjob("other", "q", 6, 6*6*3600, 6*3600, 30*time.Hour)
+	other.Pools = []string{"gpu"}
+	other.Running = map[string]int{"gpu": 6}
+	for i := range 6 {
+		other.RunningUnits = append(other.RunningUnits, sched.RunningUnit{ID: fmt.Sprintf("other/r%d", i), Pool: "gpu", Slots: 1, Started: t0r.Add(-20 * time.Minute)})
+	}
+	s := sched.Snapshot{Now: t0r,
+		Pools: []sched.Pool{{Name: "gpu", Slots: 8, Used: 6}, {Name: "gpu-burst", CostPerSlotHour: 2,
+			Burst: &sched.Burst{MaxSlots: 8, Provisioning: 5 * time.Minute, CostPerSlotHour: 2}}},
+		Projects: []sched.Project{{Name: "p", BurstBudgetLeft: 1000, LateCostPerHour: 500}, {Name: "q"}},
+		Jobs:     []sched.Job{g, other}}
+	d := sched.Decide(s, &sched.State{}, sched.DefaultConfig())
+	st := d.Jobs["train"]
+	t.Logf("%+v", st)
+	if st.AtRisk && (st.Burst == nil || st.Burst.Slots["gpu-burst"] < 4) {
+		t.Fatalf("the gang is at risk and no burst of a whole gang is sized: %s", st.Message)
+	}
+}

@@ -139,6 +139,11 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 	if jc.j.Unevaluated == 0 {
 		units := jc.j.RunnableTotal + jc.j.Blocked + len(jc.j.RunningUnits)
 		room = math.Min(room, float64(units*jc.slots)-jc.share)
+		// A gang that fits in none of its pools now holds no part of its
+		// share: the burst may have to carry the whole gang.
+		if k := a.waitingGang(jc); k > 0 {
+			room = math.Max(room, float64(k))
+		}
 	}
 	slow := 0
 	added := 0.0
@@ -184,6 +189,24 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 		sg.Why = fmt.Sprintf("the most burst available still leaves it about %s late", human(rest))
 	}
 	return sg
+}
+
+// waitingGang returns the size of the job's next unit if it is a gang
+// that fits in none of its pools' free slots now, else 0.
+func (a *alloc) waitingGang(jc *jobCtx) int {
+	if jc.next >= len(jc.j.Runnable) {
+		return 0
+	}
+	k := jc.unitSlots(jc.j.Runnable[jc.next])
+	if k <= 1 {
+		return 0
+	}
+	for _, name := range jc.j.Pools {
+		if ps := a.pools[name]; ps != nil && ps.free >= k {
+			return 0
+		}
+	}
+	return k
 }
 
 // report fills JobState for every job, with a message in production's
