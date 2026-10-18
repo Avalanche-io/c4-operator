@@ -82,7 +82,7 @@ The history was audited on 2026-10-16 (60 commits, branches `mvp` and `v2`;
 - Every commit is by "Joshua Kolden <joshua@avalanche.io>".
 - One internal working note from the development sessions,
   `HANDOFF-v2.md`, is in the history from its introduction (be24446) to
-  24cbb8e. It was not written for publication. The public history was made
+  157703c. It was not written for publication. The public history was made
   with option B on 2026-10-16, so the note is in no published commit.
 
 Options:
@@ -97,7 +97,7 @@ Options:
   git filter-repo --invert-paths --path HANDOFF-v2.md --refs main
   ```
   Commits from be24446 on get new IDs. Three IDs that the docs cite
-  (`hack/e2e/out/results.md`, `REPORT-v2.md`: 1f0a287, e8b101b, 83ca7f2) are
+  (`hack/e2e/out/results.md`, `REPORT-v2.md`: 1f0a287, afd7741, 46ea151) are
   then updated from `.git/filter-repo/commit-map` in one more commit. The
   story of the work, 60 one-line commits, is kept.
 - **C. One squashed commit.** The simplest public history; the commit

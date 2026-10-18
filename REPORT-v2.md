@@ -166,7 +166,7 @@ Also next: a `NEXT.md` giving each item above its purpose, the need it serves, i
 - Tests: the controllers and the queue run against a real API server (envtest); overlay, layer and capture tests run privileged in a Linux container (`make test-linux`); tier tests pass under `-race`; `go vet ./...` and `go test ./...` are clean at the merge of `v2-followup`, built against the pinned c4 pseudo-version with no `replace`.
 - The MVP's weaknesses are gone: no hostPath for pods, no cluster-wide Secret read (credentials are Secrets in `c4-system`, read through a namespaced Role), node daemons may change only their own pods' output annotations (a ValidatingAdmissionPolicy), and tiers authenticate every request.
 - Found and fixed along the way: yields were lost when the queue restarted (now kept in status), records were written for refused descriptions (now only after the preflight), and the view record size of directories holding symlinks.
-- P1 to P3 ran on earlier builds of the branch; P4 to P7 on one build (83ca7f2). The symlink fix between them changes the view IDs of trees with symlinks in subdirectories and no measured quantity.
+- P1 to P3 ran on earlier builds of the branch; P4 to P7 on one build (46ea151). The symlink fix between them changes the view IDs of trees with symlinks in subdirectories and no measured quantity.
 - Changes proposed for c4, c4d, c4git and c4-containers are listed in `PROGRESS.md`; none of those repositories was modified.
 
 ## Decisions for Joshua
