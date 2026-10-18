@@ -650,7 +650,7 @@ func (c *checker) checkPlan(v *view) {
 	}
 	for _, b := range v.d.Bursts {
 		pr := v.projects[b.Project]
-		if !b.Auto && strings.Contains(b.Why, "($0 at") && lateCostOf(pr) > 0 && !bad["lateness-unpriced"] {
+		if !b.Auto && strings.Contains(b.Why, "($0 at") && lateCostOf(pr) > 0 && v.d.Jobs[b.Job].LateBy <= 0 && !bad["lateness-unpriced"] {
 			bad["lateness-unpriced"] = true
 			c.violate("lateness-unpriced", b.Job, "approval asked: "+b.Why)
 		}
