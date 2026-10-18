@@ -26,6 +26,8 @@ type Snapshot struct {
 	Pools    []Pool
 	Projects []Project
 	Jobs     []Job
+	// Links are the paths staging moves inputs over (Job.Sources).
+	Links []Link
 }
 
 // Pool is a named set of slots.
@@ -123,6 +125,11 @@ type Job struct {
 	// Checkpoints says whether the job's units checkpoint and can yield at
 	// a checkpoint boundary when asked, instead of being killed.
 	Checkpoints bool
+	// Sources (experimental) lists, by pool, the ways to get the job's
+	// inputs to that pool's site. A pool with no entry has them; units are
+	// released only into such pools. A pool with an empty list cannot get
+	// them. See Source and Decisions.Stage.
+	Sources map[string][]Source
 
 	// Inputs used only by the Manual baseline: the static priority set at
 	// submission, and what a person reads in a render manager (units done
@@ -164,7 +171,10 @@ type Decisions struct {
 	Capacity []CapacityRequest
 	// Bursts lists every burst suggestion, approved automatically or not.
 	Bursts []BurstSuggestion
-	Jobs   map[string]JobState
+	// Stage lists moves of jobs' inputs to another site's pool, approved
+	// automatically or not (see Stage).
+	Stage []Stage
+	Jobs  map[string]JobState
 }
 
 // Tier says why a unit was released.
@@ -281,6 +291,9 @@ type JobState struct {
 	// StartAfter is when a job waiting on upstream jobs can start: their
 	// latest planned finish at p90. Zero when it can start now.
 	StartAfter time.Time
+	// Stage is the move of its inputs to another site that serves its
+	// deadline, approved, under way or needing approval; nil if none.
+	Stage *Stage
 }
 
 // Config holds policy settings. DefaultConfig returns DESIGN.md's values.
@@ -312,6 +325,9 @@ type Config struct {
 	ScaleDownAfter time.Duration
 	// Burst enables capacity requests.
 	Burst bool
+	// NoStage turns staging off (Job.Sources, Decisions.Stage): jobs run
+	// only where their inputs are.
+	NoStage bool
 	// MinRemaining floors the time left when computing R for a job at or
 	// near its deadline.
 	MinRemaining time.Duration

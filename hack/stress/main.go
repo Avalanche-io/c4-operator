@@ -41,6 +41,7 @@ func main() {
 	spotPoint := flag.Bool("spot", false, "with -point: run the spot policies on it")
 	perfOnly := flag.String("perf", "", "only measure Decide at these farm sizes (comma-separated node counts)")
 	flag.BoolVar(&calibratedW90, "calibrated", false, "calibrate W90 from finished jobs (estimate.Calibration), as the queue does live")
+	flag.BoolVar(&noStage, "no-stage", false, "with links, never stage inputs to another site (sched Config.NoStage)")
 	flag.Parse()
 	// The runs allocate many short-lived snapshots; a larger heap target
 	// spends less of the grid's time collecting them.
@@ -150,6 +151,9 @@ func runPoint(enc string, seed uint64, v, specOut string, workers int) int {
 		r := res.Runs[name]
 		fmt.Printf("  %-16s shots %4d/%-4d late %6.1fh | on time %4d/%-4d (%s)  late %6.1fh  burst $%-8.0f util %4.0f%%  preempt %4d  decisions %5d (mean %s)\n",
 			name, r.FinalOnTime, r.FinalDue, r.FinalLateHours, r.OnTime, r.DueJobs, pct(r.onTimePct()), r.LateHours, r.BurstCost, 100*r.Util, r.Preemptions, r.Decides, r.DecideMean.Round(time.Microsecond))
+		if r.Stages+r.StageApprovals > 0 {
+			fmt.Printf("  %-16s stages %d ($%.0f), %d more needing approval\n", "", r.Stages, r.StageCost, r.StageApprovals)
+		}
 		if r.W90Moments > 0 {
 			fmt.Printf("  %-16s W90 covers %.0f%% of %d moments; calibrated at %d, covering %.0f%%\n", "", 100*float64(r.W90Covered)/float64(r.W90Moments), r.W90Moments,
 				r.W90CalMoments, 100*float64(r.W90CalCovered)/math.Max(1, float64(r.W90CalMoments)))

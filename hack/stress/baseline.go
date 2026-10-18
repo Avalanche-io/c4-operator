@@ -129,6 +129,7 @@ type greedyState struct {
 }
 
 func newGreedy(s sched.Snapshot) *greedyState {
+	s = localPools(s)
 	g := &greedyState{s: s, free: map[string]int{}, slots: map[string]int{}, cost: map[string]float64{}, blocked: map[string]bool{}}
 	g.out.Jobs = map[string]sched.JobState{}
 	for _, p := range s.Pools {
@@ -189,13 +190,13 @@ func (g *greedyState) release(gj *gjob) int {
 
 func greedy(s sched.Snapshot, js []*sched.Job) sched.Decisions {
 	g := newGreedy(s)
-	by := map[*sched.Job]*gjob{}
+	by := map[string]*gjob{}
 	for _, gj := range g.jobs {
-		by[gj.j] = gj
+		by[gj.j.ID] = gj
 	}
 	var ord []*gjob
 	for _, j := range js {
-		gj := by[j]
+		gj := by[j.ID]
 		ord = append(ord, gj)
 		for g.release(gj) > 0 {
 		}

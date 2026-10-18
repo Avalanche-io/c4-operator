@@ -98,6 +98,8 @@ type jobSpec struct {
 	final          bool // the last stage of its shot (or a job alone): its deadline is the shot's
 	shot           int
 	deadlineFactor float64
+	site           int     // its project's home site, where its inputs are
+	inBytes        float64 // inputs to stage to another site (Links)
 }
 
 type workload struct {
@@ -107,6 +109,7 @@ type workload struct {
 	projects []projectDef
 	jobs     []*jobSpec
 	horizon  float64
+	links    []linkDef
 }
 
 // build generates the farm and the work of a grid point. Every random draw
@@ -246,6 +249,9 @@ func build(pt Point, seed uint64) *workload {
 		drain = 1
 	}
 	w.horizon = math.Max(last, pt.Days*day) + drain*day
+	if pt.Links > 0 && sites > 1 {
+		w.links = buildLinks(sites)
+	}
 	return w
 }
 
@@ -403,6 +409,10 @@ func (g *gen) newJob(pd projectDef, kind, class string, at float64, level int) *
 		spread: g.pt.Spread, failRate: g.pt.FailRate, preemptible: true, shot: g.shots,
 		priority: 50 + 10*(len(g.w.projects)-pd.rank) + 5*level,
 	}
+	js.site = pd.site
+	if g.links() && class == "cpu" {
+		js.inBytes = g.lognorm(math.Max(g.pt.InputGB, 1)*1e9, 0.5)
+	}
 	g.w.jobs = append(g.w.jobs, js)
 	return js
 }
@@ -420,6 +430,14 @@ func (g *gen) poolsFor(pd projectDef, class string) []string {
 		if p.class == "cpu" && p.site == pd.site {
 			out = append(out, p.name)
 		}
+	}
+	if g.links() {
+		for _, p := range g.w.pools {
+			if p.class == "cpu" && p.site != pd.site && p.burst == nil {
+				out = append(out, p.name)
+			}
+		}
+		return out
 	}
 	if g.pt.Spill > 0 && g.r.Float64() < g.pt.Spill {
 		next := fmt.Sprintf("cpu-s%d", (pd.site+1)%sites)
@@ -568,3 +586,6 @@ func (g *gen) hugeJob(work float64) {
 	js.makespan = math.Max(js.makespan, js.work/par)
 	g.setDue(js, g.pt.Tightness*js.makespan, false, g.pt.Tightness)
 }
+
+// links reports whether sites are joined by priced links (links.go).
+func (g *gen) links() bool { return g.pt.Links > 0 && g.pt.Sites > 1 }

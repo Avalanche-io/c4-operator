@@ -30,10 +30,14 @@ var invariants = []struct{ name, what string }{
 	{"past-due-on-track", "an unfinished job past its deadline is reported at risk"},
 	{"burst-uneconomic", "an automatic burst closes the deadline and costs less than the lateness it prevents (for a burst bought as margin against estimate uncertainty, the lateness the margin plans)"},
 	{"burst-label", "a burst is marked as margin against estimate uncertainty exactly when its job reports on track"},
-	{"burst-budget", "automatic bursts stay within each project's remaining daily budget"},
 	{"capacity-shed", "a pool over its slots (a capacity shrink) has at least the excess stopped or yielding, beyond what non-preemptible units hold"},
 	{"capacity-overshed", "shedding stops no unit the other shed units would have covered the excess without"},
 	{"capacity-order", "a job at risk is not shed while preemptible jobs on time with more than PreemptSlack of slack keep running in the pool with slots enough to cover the excess"},
+	{"burst-budget", "automatic bursts and stages stay within each project's remaining daily budget"},
+	{"stage-misses", "a stage's transfer delay alone never makes its job miss while another pool or source would have made it"},
+	{"stage-dispatch", "no unit runs at a site its job's inputs have not reached"},
+	{"stage-invalid", "a stage names a known link and a site that does not have and is not getting the job's inputs"},
+	{"stage-delay", "the delay a stage expects is what its link delivers, behind what is already committed to it"},
 	{"burst-unjustified", "a burst pool's request grows only by automatically approved slots, and never past its limit"},
 	{"guard-preempt", "only a unit the starvation guard started is preempted as a guard unit"},
 	{"lend-then-reclaim", "a pool's free slots are not lent to a borrowing project in the same decision that preempts a borrower to restore another project's nominal quota"},
@@ -122,6 +126,8 @@ type view struct {
 }
 
 func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
+	// As sched does: a job runs only where its inputs are (Job.Sources).
+	s = localPools(s)
 	v := &view{s: s, d: d, pools: map[string]*sched.Pool{}, projects: map[string]*sched.Project{}, hasQuota: map[string]bool{},
 		freeBefore: map[string]int{}, freeAfter: map[string]int{}, useBefore: map[string]map[string]int{},
 		useAfter: map[string]map[string]int{}, useStarve: map[string]map[string]int{}, useNeed: map[string]map[string]int{}, sent: map[string]int{}, sentTier: map[string]sched.Tier{},
@@ -814,6 +820,17 @@ func (c *checker) checkBursts(v *view) {
 			auto[pool] += n
 		}
 	}
+	// Stages spend the same budget, and a stage's delay never makes the
+	// job miss by itself when it had another way to run.
+	for _, st := range v.d.Stage {
+		if st.Auto {
+			spent[st.Project] += st.Cost
+			if st.Cost >= st.LateCost {
+				c.violate("burst-uneconomic", st.Job, fmt.Sprintf("auto stage costs $%.2f, lateness prevented $%.2f", st.Cost, st.LateCost))
+			}
+		}
+		c.checkStageDelay(v, st)
+	}
 	for name, x := range spent {
 		if left := v.projects[name].BurstBudgetLeft; x > left+1e-6 {
 			c.violate("burst-budget", name, fmt.Sprintf("auto bursts of $%.2f with $%.2f of budget left", x, left))
@@ -1019,16 +1036,20 @@ type runResult struct {
 	// With -calibrated: estimate moments of finished jobs, those whose W90
 	// covered the true remaining work, and the same for calibrated W90s.
 	W90Moments, W90Covered, W90CalMoments, W90CalCovered int
-	LateHours, LateDollars                               float64
-	BurstCost                                            float64
-	Util                                                 float64
-	Dispatches, Preemptions, FaultKills                  int
-	Reclaims, Nudges                                     int
-	AutoBursts, Approvals                                int
-	UsefulSlotHours, LostSlotHours                       float64
-	Decides                                              int
-	DecideMean, DecideMax                                time.Duration
-	MaxStarve                                            time.Duration // longest wait of a ready job with nothing running
+	// Links: stages approved (and their cost), stages that would close a
+	// deadline but need approval.
+	Stages, StageApprovals              int
+	StageCost                           float64
+	LateHours, LateDollars              float64
+	BurstCost                           float64
+	Util                                float64
+	Dispatches, Preemptions, FaultKills int
+	Reclaims, Nudges                    int
+	AutoBursts, Approvals               int
+	UsefulSlotHours, LostSlotHours      float64
+	Decides                             int
+	DecideMean, DecideMax               time.Duration
+	MaxStarve                           time.Duration // longest wait of a ready job with nothing running
 	// Spot: interruptions (and those caused by a maximum price), units
 	// killed by one, saves (a checkpoint or a move on a warning), work
 	// lost by unit length, units judged too risky for spot and those moved

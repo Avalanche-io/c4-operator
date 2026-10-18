@@ -102,6 +102,10 @@ type Point struct {
 	// CapShrink is how often per day an owned pool's ready slots drop for a
 	// while without killing anything, as under a power cap (capacity.go).
 	CapShrink float64
+	// Links (1) prices the paths between sites (links.go): a CPU job may
+	// use every site's owned CPUs once its inputs, InputGB on average, are
+	// staged there; Spill does not apply.
+	Links, InputGB float64
 }
 
 type dim struct {
@@ -167,6 +171,8 @@ var dims = []dim{
 	{name: "ckptWrite", f: func(p *Point) *float64 { return &p.CkptWrite }},
 	// Appended last: the draws of every dimension above stay the same.
 	{name: "capShrink", lo: 0, hi: 3, zero: 0.3, f: func(p *Point) *float64 { return &p.CapShrink }},
+	{name: "links", lo: 0, hi: 2, integ: true, f: func(p *Point) *float64 { return &p.Links }},
+	{name: "inputGB", lo: 10, hi: 3000, log: true, f: func(p *Point) *float64 { return &p.InputGB }},
 }
 
 var arrivalNames = []string{"steady", "dailies", "crunch", "sun"}
@@ -296,6 +302,18 @@ func corners() []Point {
 	// work running over the line until it is shed.
 	add("power-cap", func(p *Point) {
 		p.CapShrink, p.MLShare, p.Load, p.Tightness, p.CkptMin = 3, 0.5, 1.2, 1.5, 15
+	})
+	// multi-site-spill with priced links instead of free spill: the
+	// overloaded site's jobs can stage their inputs to the others.
+	add("priced-links", func(p *Point) {
+		p.Sites, p.Links, p.InputGB, p.Load, p.Tightness, p.Projects = 3, 1, 300, 1.5, 1.2, 3
+		p.BurstFrac, p.BurstBudget, p.LateCost = 1, 1, 800
+	})
+	// Heavy inputs and little burst: the slow channels cannot help in
+	// time, and a stage competes with bursting.
+	add("priced-links-heavy", func(p *Point) {
+		p.Sites, p.Links, p.InputGB, p.Load, p.Tightness, p.Projects = 4, 1, 3000, 1.5, 1.2, 4
+		p.BurstFrac, p.BurstBudget, p.LateCost = 0.3, 1, 800
 	})
 	add("dag-overnight-flat", func(p *Point) {
 		p.Depth, p.Width, p.FlatDue, p.Load, p.Tightness, p.SlackSpread = 4, 3, 1, 1.4, 1.5, 0.2

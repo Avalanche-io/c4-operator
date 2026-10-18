@@ -2,6 +2,7 @@ package sched
 
 import (
 	"math"
+	"slices"
 	"sort"
 	"time"
 )
@@ -22,7 +23,15 @@ type alloc struct {
 	// gangsWaiting: starving gangs from the guard's first pass that did
 	// not fit; they hold their pool after the deadline tier.
 	gangsWaiting []*jobCtx
-	out          Decisions
+	// Staging (stage.go): links by name; bytes and pool slots promised to
+	// stages this decision; each planned pool group's capacity and
+	// required slots, by pool.
+	links      map[string]*Link
+	linkBytes  map[string]float64
+	stageSlots map[string]int
+	poolGroupC map[string]float64
+	poolGroupR map[string]float64
+	out        Decisions
 }
 
 type poolState struct {
@@ -78,6 +87,11 @@ type jobCtx struct {
 	// figures above (planFluid); nil means it reports those.
 	shown  *shownPlan
 	groupC float64 // the planning capacity of its pool group
+	// remote lists the pools in the snapshot that the job may use once its
+	// inputs are staged there (Job.Sources); its Pools in the alloc's copy
+	// of the snapshot are only those that have them.
+	remote []string
+	stage  *Stage
 }
 
 // shownPlan is a job's risk, lateness and planned finish as it reports
@@ -105,6 +119,19 @@ func newAlloc(s *Snapshot, st *State, cfg Config, quotas bool) *alloc {
 		byID:     map[string]*jobCtx{},
 	}
 	a.out.Jobs = map[string]JobState{}
+	a.links, a.linkBytes, a.stageSlots = map[string]*Link{}, map[string]float64{}, map[string]int{}
+	for i := range s.Links {
+		a.links[s.Links[i].Name] = &s.Links[i]
+	}
+	// A job with Sources runs only where its inputs are: the alloc works on
+	// its own copy of the jobs, with Pools cut to those, so the caller's
+	// snapshot is never written.
+	for i := range s.Jobs {
+		if len(s.Jobs[i].Sources) > 0 {
+			s.Jobs = slices.Clone(s.Jobs)
+			break
+		}
+	}
 	for i := range s.Pools {
 		p := &s.Pools[i]
 		ps := &poolState{p: p, free: max(0, p.Slots-p.Used)}
@@ -137,6 +164,17 @@ func newAlloc(s *Snapshot, st *State, cfg Config, quotas bool) *alloc {
 			a.projects[j.Project] = pr
 		}
 		jc := &jobCtx{j: j, proj: pr, slots: max(1, j.SlotsPerUnit)}
+		if len(j.Sources) > 0 {
+			var here []string
+			for _, name := range j.Pools {
+				if _, far := j.Sources[name]; !far {
+					here = append(here, name)
+				} else if a.pools[name] != nil {
+					jc.remote = append(jc.remote, name)
+				}
+			}
+			j.Pools = here
+		}
 		for pool, n := range j.Running {
 			pr.usage[pool] += n
 			jc.running += n

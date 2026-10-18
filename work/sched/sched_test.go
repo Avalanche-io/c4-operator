@@ -1230,3 +1230,81 @@ func TestSubsetExcludesSlotsHeldByOthers(t *testing.T) {
 		t.Fatalf("l on track with 2 of lon's slots free: %s", st.Message)
 	}
 }
+
+// twoSites: a job at lon (10 slots) with 60 slot-hours due in 4h; van
+// has 20 idle slots and is reached over a 10 Gb/s interconnect or the
+// internet at 1 Gb/s, each carrying a terabyte of inputs.
+func twoSites(committed float64) Snapshot {
+	j := job("x", "p", 60, 60, 4*time.Hour)
+	j.Pools = []string{"lon", "van"}
+	j.Sources = map[string][]Source{"van": {
+		{Via: "move", Channel: "interconnect", Link: "lon-van", Bytes: 1e12, Cost: 20},
+		{Via: "move", Channel: "internet", Link: "inet", Bytes: 1e12, Cost: 90},
+	}}
+	return Snapshot{Now: t0,
+		Pools:    []Pool{{Name: "lon", Slots: 10}, {Name: "van", Slots: 20}},
+		Projects: []Project{{Name: "p", BurstBudgetLeft: 500, LateCostPerHour: 300}},
+		Links:    []Link{{Name: "lon-van", BytesPerSecond: 1.25e9, Committed: committed}, {Name: "inet", BytesPerSecond: 1.25e8}},
+		Jobs:     []Job{j}}
+}
+
+func TestStageToAnotherSite(t *testing.T) {
+	s := twoSites(0)
+	d := Decide(s, &State{}, DefaultConfig())
+	if len(d.Stage) != 1 {
+		t.Fatalf("stages %+v", d.Stage)
+	}
+	st := d.Stage[0]
+	if st.Pool != "van" || st.Source.Channel != "interconnect" || !st.Auto || !st.Closes || st.Cost != 20 || st.Delay != 800*time.Second || st.Slots != 6 {
+		t.Fatalf("stage %+v", st)
+	}
+	js := d.Jobs["x"]
+	if js.Stage == nil || !strings.Contains(js.Message, "Staging its inputs to van via interconnect (+15m) closes it (est. $20).") {
+		t.Fatalf("message %q", js.Message)
+	}
+	for _, x := range d.Dispatch {
+		if x.Pool != "lon" {
+			t.Fatalf("dispatched into %s before its inputs are there", x.Pool)
+		}
+	}
+	if len(s.Jobs[0].Pools) != 2 {
+		t.Fatalf("the caller's snapshot was written: %v", s.Jobs[0].Pools)
+	}
+}
+
+// Bytes already committed to the interconnect make it too slow: the
+// internet is the cheapest source that still closes.
+func TestStageWaitsBehindCommittedBytes(t *testing.T) {
+	d := Decide(twoSites(2e13), &State{}, DefaultConfig())
+	if len(d.Stage) != 1 || d.Stage[0].Source.Channel != "internet" || d.Stage[0].Slots != 12 {
+		t.Fatalf("stages %+v", d.Stage)
+	}
+}
+
+// Two jobs staging over one link share it: the second waits behind the
+// first's terabyte.
+func TestStagesShareALink(t *testing.T) {
+	s := twoSites(0)
+	y := s.Jobs[0]
+	y.ID = "y"
+	y.Runnable = units("y", 60)
+	y.Deadline = t0.Add(5 * time.Hour)
+	s.Pools[1].Slots = 40
+	s.Jobs = append(s.Jobs, y)
+	d := Decide(s, &State{}, DefaultConfig())
+	if len(d.Stage) != 2 || d.Stage[1].Delay != 2*d.Stage[0].Delay {
+		t.Fatalf("stages %+v", d.Stage)
+	}
+}
+
+// An in-progress stage that closes the deadline is not staged again and
+// no burst is bought for it.
+func TestStagingUnderWay(t *testing.T) {
+	s := twoSites(0)
+	s.Jobs[0].Sources["van"] = []Source{{Via: "staging", Latency: 10 * time.Minute}}
+	d := Decide(s, &State{}, DefaultConfig())
+	js := d.Jobs["x"]
+	if len(d.Stage) != 0 || len(d.Bursts) != 0 || js.Stage == nil || !strings.Contains(js.Message, "its inputs arriving at van in 10m") {
+		t.Fatalf("stages %+v bursts %+v: %s", d.Stage, d.Bursts, js.Message)
+	}
+}

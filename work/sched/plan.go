@@ -34,6 +34,7 @@ func (a *alloc) plan() {
 		}
 		a.planFluid(g, capacity[g[0].root])
 		a.planSubsets(g)
+		a.notePlan(g, capacity[g[0].root])
 	}
 	a.planNoPool()
 	a.startAfterUpstream()

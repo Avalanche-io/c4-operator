@@ -40,6 +40,21 @@ type BurstOffer struct {
 	NeedsApproval bool    `json:"needsApproval"`
 }
 
+// MoveOffer (experimental) is a move of a job's inputs to another site's
+// pool that restores its deadline (sched.Stage): how (via move,
+// recompute or reuse; staging when under way), over which channel, what
+// it costs and how long until the job can start there.
+type MoveOffer struct {
+	Pool          string  `json:"pool"`
+	Via           string  `json:"via"`
+	Channel       string  `json:"channel,omitempty"`
+	Cost          float64 `json:"cost"`
+	DelaySeconds  float64 `json:"delaySeconds"`
+	Slots         int     `json:"slots"`
+	NeedsApproval bool    `json:"needsApproval"`
+	Why           string  `json:"why,omitempty"`
+}
+
 type Snapshot struct {
 	Now      time.Time  `json:"now"`
 	Viewer   *Viewer    `json:"viewer"`
@@ -302,6 +317,7 @@ type Estimate struct {
 	Feasible        bool        `json:"feasible"`
 	Message         string      `json:"message,omitempty"`
 	Burst           *BurstOffer `json:"burst,omitempty"`
+	Move            *MoveOffer  `json:"move,omitempty"`
 	// EtaP80 and EtaP95 complete the band etaP50 and etaP90 begin.
 	EtaP80 *time.Time `json:"etaP80,omitempty"`
 	EtaP95 *time.Time `json:"etaP95,omitempty"`

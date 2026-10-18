@@ -87,7 +87,9 @@ type job struct {
 	sum         estimate.Summary
 	sumAt       float64
 	dirty       bool
-	calAt       float64 // when its estimate was last scored (-calibrated)
+	calAt       float64         // when its estimate was last scored (-calibrated)
+	staged      map[int]bool    // sites its inputs have reached (Links)
+	staging     map[int]float64 // sites its inputs are on the way to, and when they arrive
 }
 
 func (j *job) live() bool { return j.arrived && j.finish < 0 }
@@ -143,6 +145,7 @@ const (
 	evPrice
 	evShrink   // a pool's slots drop (capacity.go)
 	evUnshrink // and come back
+	evStaged   // a job's inputs arrive at another site (links.go)
 )
 
 type event struct {
@@ -189,37 +192,42 @@ type policy struct {
 }
 
 type engine struct {
-	w      *workload
-	pol    policy
-	cfg    sched.Config
-	st     sched.State
-	now    float64
-	q      evHeap
-	seq    int
-	jobs   []*job
-	active []*job
-	pools  []*pool
-	byName map[string]*pool
-	byID   map[string]*unit
-	spent  map[string]float64
-	budget map[string]float64
-	day    int
-	decAt  float64
-	lastD  float64
-	left   int
-	ck     *checker
-	hash   uint64
-	res    *runResult
-	lat    []time.Duration
-	cal    map[string]*estimate.Calibration // by job kind, with -calibrated
-	calQs  map[string]map[estimate.Stratum]calQ
+	w        *workload
+	pol      policy
+	cfg      sched.Config
+	st       sched.State
+	now      float64
+	q        evHeap
+	seq      int
+	jobs     []*job
+	active   []*job
+	pools    []*pool
+	byName   map[string]*pool
+	byID     map[string]*unit
+	spent    map[string]float64
+	budget   map[string]float64
+	day      int
+	decAt    float64
+	lastD    float64
+	left     int
+	ck       *checker
+	hash     uint64
+	res      *runResult
+	lat      []time.Duration
+	cal      map[string]*estimate.Calibration // by job kind, with -calibrated
+	calQs    map[string]map[estimate.Stratum]calQ
+	linkRuns []*linkRun // Links (links.go)
+	linkBy   map[string]*linkRun
+	poolSite map[string]int
 }
 
 func newEngine(w *workload, pol policy, check bool) *engine {
 	e := &engine{w: w, pol: pol, cfg: sched.DefaultConfig(), byName: map[string]*pool{}, byID: map[string]*unit{},
 		spent: map[string]float64{}, budget: map[string]float64{}, decAt: -1, lastD: -coalesce}
 	e.cfg.Burst = pol.burst
+	e.cfg.NoStage = noStage
 	e.initCalibration()
+	e.initLinks()
 	if pol.tweak != nil {
 		pol.tweak(&e.cfg)
 	}
@@ -245,7 +253,8 @@ func newEngine(w *workload, pol policy, check bool) *engine {
 	}
 	byIdx := map[*jobSpec]*job{}
 	for _, js := range w.jobs {
-		j := &job{spec: js, runSlots: map[string]int{}, finish: -1, lastRunning: -1, ready: -1, dirty: true, due: js.due, boost: 1}
+		j := &job{spec: js, runSlots: map[string]int{}, finish: -1, lastRunning: -1, ready: -1, dirty: true, due: js.due, boost: 1,
+			staged: map[int]bool{}, staging: map[int]float64{}}
 		for k := range js.units {
 			us := &js.units[k]
 			u := &unit{spec: us, j: j, idx: k, id: fmt.Sprintf("%s/%d", js.id, k)}
@@ -364,6 +373,8 @@ func (e *engine) run() *runResult {
 			e.shrink(ev.p, ev.attempt)
 		case evUnshrink:
 			e.unshrink(ev.p)
+		case evStaged:
+			e.staged(ev.j, ev.n)
 		case evUnnudge:
 			ev.j.hold, ev.j.stop = false, false
 			ev.j.dirty = true
@@ -751,6 +762,7 @@ func (e *engine) snapshot() sched.Snapshot {
 	for _, j := range e.active {
 		s.Jobs = append(s.Jobs, e.jobSnap(j, now, free))
 	}
+	s.Links = e.linkSnaps()
 	return s
 }
 
@@ -783,6 +795,7 @@ func (e *engine) jobSnap(j *job, now time.Time, free map[string]int) sched.Job {
 	if js.hasDue {
 		sj.Deadline = e.at(j.due)
 	}
+	sj.Sources = e.sources(j)
 	// As the queue does: the jobs it still waits on (sched.Job.After).
 	for _, u := range j.upstream {
 		if u.done < len(u.units) {
@@ -903,6 +916,9 @@ func (e *engine) decide() {
 		case !allowed(u.j.spec.pools, x.Pool):
 			e.violate("dispatch-invalid", x.Job, fmt.Sprintf("dispatched %s into %s, which the job may not use", x.Unit, x.Pool))
 			continue
+		case e.far(u.j, x.Pool):
+			e.violate("stage-dispatch", x.Job, fmt.Sprintf("dispatched %s into %s before its inputs are at that site", x.Unit, x.Pool))
+			continue
 		case u.j.hold || u.j.stop:
 			e.violate("hold", x.Job, fmt.Sprintf("dispatched %s while the job is on hold", x.Unit))
 		}
@@ -944,6 +960,7 @@ func (e *engine) decide() {
 			e.stopAs(u, evFail, true)
 		}
 	}
+	e.stage(d)
 	for _, b := range d.Bursts {
 		if b.Auto {
 			e.spent[b.Project] += b.Cost

@@ -59,12 +59,16 @@ func (a *alloc) burst() {
 		return cands[i].j.ID < cands[j].j.ID
 	})
 	for _, jc := range cands {
+		deficit, lateBy := jc.deficit, jc.lateBy
+		lateCost := jc.proj.p.LateCostPerHour * lateBy.Hours()
 		sg := a.sizeBurst(jc, promised)
+		if a.chooseStage(jc, deficit, lateCost, sg, budget) {
+			continue
+		}
 		if sg == nil {
 			continue
 		}
 		sg.Margin = !jc.view().atRisk
-		lateCost := jc.proj.p.LateCostPerHour * jc.lateBy.Hours()
 		sg.LateCost = lateCost
 		switch {
 		case !a.cfg.Burst:
@@ -244,6 +248,7 @@ func (a *alloc) report() {
 		st.AtRisk = v.atRisk
 		st.LateBy = v.lateBy
 		st.Burst = jc.burst
+		st.Stage = jc.stage
 		if jc.hasDeadline {
 			st.Deadline, st.DeadlineFor = jc.deadline, jc.deadlineFor
 		}
@@ -323,6 +328,16 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		fmt.Fprintf(&b, "%s will miss %s by about %s at current capacity.", id, dlc, human(v.lateBy))
 	}
 	switch {
+	case jc.stage != nil:
+		st := jc.stage
+		switch {
+		case st.Source.Via == "staging":
+			fmt.Fprintf(&b, " With %s it can finish there in time.", stageWords(st))
+		case st.Auto:
+			fmt.Fprintf(&b, " %s closes it (est. %s).", capitalize(stageWords(st)), dollars(st.Cost))
+		default:
+			fmt.Fprintf(&b, " %s would close it (est. %s). Needs approval: %s.", capitalize(stageWords(st)), dollars(st.Cost), st.Why)
+		}
 	case sg == nil:
 		if !jc.feasible {
 			b.WriteString(" It cannot finish in time even with all the capacity its pools and quota allow.")
