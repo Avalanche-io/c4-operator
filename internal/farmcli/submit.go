@@ -282,7 +282,12 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	req := api.SubmitRequest{Project: a.Project, Name: a.Name, Type: t.Name, Stage: stage, Shot: shot, Spec: raw,
 		Inputs: []api.SubmitInput{{View: v.ID.String(), MountPath: t.Mount}}, AIUsage: t.AIUsage, DryRun: true}
 	for _, j := range a.After {
-		req.Inputs = append(req.Inputs, api.SubmitInput{FromJob: j, MountPath: "/in/" + j, ReadOnly: true})
+		// one upstream job is at /in; several are at /in/<job>
+		mp := "/in"
+		if len(a.After) > 1 {
+			mp = "/in/" + j
+		}
+		req.Inputs = append(req.Inputs, api.SubmitInput{FromJob: j, MountPath: mp, ReadOnly: true})
 	}
 	var plan api.SubmitResponse
 	planErr := c.Do(ctx, "POST", "/jobs", req, &plan)

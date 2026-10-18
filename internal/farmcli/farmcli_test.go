@@ -114,6 +114,10 @@ func TestTypes(t *testing.T) {
 	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, `nuke -x -F "$C4_FRAME_START-$C4_FRAME_END" /show/sm0140/comp.nk`) {
 		t.Fatalf("comp with Nuke:\n%s", a)
 	}
+	spec, _ = comp.Spec(Options{Asset: "sm0140/comp.nk", Shot: "sm0140", Frames: "1001-1048", Set: map[string]string{"engine": "nuke"}})
+	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, "nuke -x") {
+		t.Fatalf("engine=nuke:\n%s", a)
+	}
 	spec, _ = comp.Spec(Options{Asset: "sm0140/comp.sh", Shot: "sm0140", Frames: "1001-1048"})
 	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, "sh /show/sm0140/comp.sh") {
 		t.Fatalf("comp with OIIO:\n%s", a)
@@ -122,9 +126,23 @@ func TestTypes(t *testing.T) {
 		t.Fatal("an unknown --set was accepted")
 	}
 	lora, _ := LookupType("lora")
-	spec, _ = lora.Spec(Options{Asset: "."})
-	if spec.Class != "ml" || spec.Pools[0] != "gpu" || spec.Template.Spec.Containers[0].WorkingDir != "/work" {
-		t.Fatalf("lora %+v", spec)
+	spec, err = lora.Spec(Options{Asset: "frames", Set: map[string]string{"steps": "400", "base": "models/tiny-sd"}})
+	if err != nil || spec.Class != "ml" || spec.Pools[0] != "gpu" || spec.Template.Spec.Containers[0].WorkingDir != "/work" ||
+		spec.Params["steps"] != "400" || !strings.Contains(spec.Template.Spec.Containers[0].Args[0], "--data /work/frames") {
+		t.Fatalf("lora %+v %v", spec, err)
+	}
+	ci, _ := LookupType("ci")
+	if spec, err = ci.Spec(Options{Asset: ".", Set: map[string]string{"shards": "8"}}); err != nil || spec.Params["shards"] != "8" {
+		t.Fatalf("ci shards: %v %v", spec.Params, err)
+	}
+	usd, _ := LookupType("usd")
+	spec, _ = usd.Spec(Options{Asset: "sm0140/layout.usda", Set: map[string]string{"validate": "false"}})
+	if strings.Contains(spec.Template.Spec.Containers[0].Args[0], "usdchecker") {
+		t.Fatal("validate=false still checks")
+	}
+	spec, _ = sim.Spec(Options{Asset: "sm0220_fx/fog.hip", Frames: "1001-1120", Set: map[string]string{"node": "/obj/fog/filecache1"}})
+	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, "hython") || !strings.Contains(a, "hou.node('/obj/fog/filecache1')") {
+		t.Fatalf("sim with Houdini:\n%s", a)
 	}
 	if _, err := LookupType("blender"); err == nil {
 		t.Fatal("an unknown type was found")

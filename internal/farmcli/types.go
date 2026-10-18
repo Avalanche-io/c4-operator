@@ -77,26 +77,32 @@ done`, Set: map[string]string{"width": "1920"}},
 	"usd": {Name: "usd", Stage: "layout", Class: "render", Image: "usd", Pools: []string{"cpu"}, Mount: "/show",
 		Summary: "flatten a USD stage into one layer and check it",
 		Params:  map[string]string{"frames": "1", "order": "sequential"},
+		Set:     map[string]string{"validate": "true"},
 		Script: `mkdir -p {{.Mount}}/flat
 usdcat --flatten {{.Mount}}/{{.Asset}} -o {{.Mount}}/flat/{{.Stem}}.flat.usda
-usdchecker {{.Mount}}/flat/{{.Stem}}.flat.usda | tee {{.Mount}}/flat/usdchecker.txt`},
+{{if eq (index .Set "validate") "true"}}usdchecker {{.Mount}}/flat/{{.Stem}}.flat.usda | tee {{.Mount}}/flat/usdchecker.txt{{end}}`},
 	"sim": {Name: "sim", Stage: "fx", Class: "render", Image: "sim", Pools: []string{"cpu"}, Mount: "/show",
-		Summary: "bake a fluid sim to OpenVDB caches, the whole range in one unit",
+		Summary: "bake a fluid sim to OpenVDB caches, the whole range in one unit (Blender Mantaflow, or Houdini for a .hip)",
 		Frames:  true, Order: "sequential", Chunk: "all",
-		Set: map[string]string{"domain": "FogDomain"},
-		Script: `blender -b {{.Mount}}/{{.Asset}} --python-expr "
+		Set: map[string]string{"domain": "FogDomain", "node": "/obj/fog/filecache1"},
+		Script: `{{if hasSuffix .Asset ".hip"}}hython -c "
+import hou, os
+hou.hipFile.load('{{.Mount}}/{{.Asset}}')
+hou.node('{{index .Set "node"}}').render(frame_range=(int(os.environ['C4_FRAME_START']), int(os.environ['C4_FRAME_END'])))
+"{{else}}blender -b {{.Mount}}/{{.Asset}} --python-expr "
 import bpy, os
 s = bpy.context.scene
 s.frame_start, s.frame_end = int(os.environ['C4_FRAME_START']), int(os.environ['C4_FRAME_END'])
 d = bpy.data.objects['{{index .Set "domain"}}'].modifiers['Fluid'].domain_settings
-d.cache_directory, d.cache_data_format = '{{.Mount}}/cache', 'OPENVDB'
+d.cache_directory, d.cache_data_format = '{{.Mount}}/{{.Dir}}cache', 'OPENVDB'
 bpy.ops.fluid.bake_all()
-"`},
+"{{end}}`},
 	"comp": {Name: "comp", Stage: "comp", Class: "render", Image: "oiio", Pools: []string{"cpu"}, Mount: "/show",
 		Summary: "composite frames: a Nuke script (.nk, on farms with Nuke), or an OpenImageIO script on any farm",
 		Frames:  true, Order: "binary", Chunk: "4",
+		Set: map[string]string{"engine": "auto"},
 		Script: `mkdir -p {{.Mount}}/comp
-{{if hasSuffix .Asset ".nk"}}nuke -x -F "$C4_FRAME_START-$C4_FRAME_END" {{.Mount}}/{{.Asset}}{{else}}sh {{.Mount}}/{{.Asset}}{{end}}
+{{if or (eq (index .Set "engine") "nuke") (and (eq (index .Set "engine") "auto") (hasSuffix .Asset ".nk"))}}nuke -x -F "$C4_FRAME_START-$C4_FRAME_END" {{.Mount}}/{{.Asset}}{{else}}sh {{.Mount}}/{{.Asset}}{{end}}
 for f in $(seq "$C4_FRAME_START" "$C4_FRAME_END"); do
   c4-unit preview "{{.Mount}}/comp/{{.Shot}}.$f.exr" "$f"
 done`},
@@ -121,7 +127,7 @@ c4-test --shard "$C4_SHARD" --shards "$C4_SHARDS" --target "$C4_TARGET" --junit 
 	"lora": {Name: "lora", Stage: "train", Class: "ml", Image: "train", Pools: []string{"gpu"}, Mount: "/work", WorkDir: "/work",
 		Summary: "fine-tune a LoRA (low-rank adapter) on a folder of captioned frames, with checkpoints",
 		Params:  map[string]string{"ranks": "1", "steps": "400", "checkpointEvery": "50"},
-		Set:     map[string]string{"base": "models/tiny-sd", "data": "frames", "rank": "16"},
+		Set:     map[string]string{"base": "models/tiny-sd", "data": "{{.Asset}}", "rank": "16"},
 		Script:  `c4-train-lora --base /work/{{index .Set "base"}} --data /work/{{index .Set "data"}} --out /work/out --rank {{index .Set "rank"}}`},
 	"infer": {Name: "infer", Stage: "depth", Class: "render", Image: "infer", Pools: []string{"cpu"}, Mount: "/show",
 		Summary: "run a model over every frame (depth, matte or upscale), with its AI use declared",
@@ -181,8 +187,19 @@ func (t JobType) Spec(o Options) (c4v1.WorkJobSpec, error) {
 		set[k] = v
 	}
 	for k, v := range o.Set {
+		if _, ok := t.Params[k]; ok {
+			params[k] = v // a class parameter: shards, steps, checkpointEvery, ...
+			continue
+		}
 		if _, ok := t.Set[k]; !ok {
-			return c4v1.WorkJobSpec{}, fmt.Errorf("%s takes no --set %s (it reads: %s)", t.Name, k, keys(t.Set))
+			all := map[string]string{}
+			for x := range t.Set {
+				all[x] = ""
+			}
+			for x := range t.Params {
+				all[x] = ""
+			}
+			return c4v1.WorkJobSpec{}, fmt.Errorf("%s takes no --set %s (it reads: %s)", t.Name, k, keys(all))
 		}
 		set[k] = v
 	}
