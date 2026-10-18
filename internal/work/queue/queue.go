@@ -540,7 +540,11 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			if reason := p.Annotations[c4v1.AnnotationYield]; reason != "" && !m.succeeded[idx] {
 				// A unit that yielded at a checkpoint: its captured view is
 				// where the next attempt resumes. Not a failure, not done.
-				if tree := p.Annotations[c4v1.AnnotationOutputTree]; tree != "" && m.resume[idx] != tree {
+				tree := p.Annotations[c4v1.AnnotationOutputTree]
+				if _, ok := d.(class.Resumer); ok {
+					tree = p.Annotations[c4v1.AnnotationOutputCheckpoint]
+				}
+				if tree != "" && m.resume[idx] != tree {
 					m.resume[idx] = tree
 					m.yields = append(m.yields, yieldRecord{Unit: idx, At: finishOf(p, now), Reason: reason, View: tree})
 				}
@@ -790,7 +794,8 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			}
 			continue
 		}
-		if view := v.mem.resume[idx]; view != "" {
+		if _, byCheckpoint := v.driver.(class.Resumer); !byCheckpoint && v.mem.resume[idx] != "" {
+			view := v.mem.resume[idx]
 			ready, err := q.ensureResume(ctx, v.job, idx, view)
 			if err != nil {
 				q.Log.Error(err, "resume materialization", "job", key, "unit", idx)
@@ -866,12 +871,18 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			delete(v.mem.yieldAsked, idx)
 		}
 	}
-	// Hold-stop: stop every running unit of the job.
+	// Hold-stop: stop every running unit of the job. A unit of a class
+	// that checkpoints was asked to yield above and is left to do so (the
+	// ten-minute rule still stops one that does not), so its work since its
+	// last checkpoint is kept (DESIGN 10.13).
 	for _, v := range views {
 		if !v.job.Spec.Nudge.HoldStop {
 			continue
 		}
 		for idx, pod := range v.pods {
+			if _, asked := v.mem.yieldAsked[idx]; asked && v.driver.Checkpoints() {
+				continue
+			}
 			if v.mem.attempts[idx] > 0 {
 				v.mem.attempts[idx]--
 			}
@@ -966,6 +977,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 			pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
 				corev1.VolumeMount{Name: name, MountPath: in.MountPath, ReadOnly: in.ReadOnly})
 		}
+	}
+	if r, ok := v.driver.(class.Resumer); ok && v.mem.resume[idx] != "" {
+		env = append(env, r.ResumeEnv(v.mem.resume[idx])...)
 	}
 	for c := range pod.Spec.Containers {
 		pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, env...)

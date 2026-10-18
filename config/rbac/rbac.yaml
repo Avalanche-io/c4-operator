@@ -95,6 +95,35 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-queue
 subjects:
 - {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
+# Agent bundles (in the manager): each AgentBundle owns one WorkJob of class
+# agent, whose units are the bundle's members; the controller writes it and
+# reports the members from its unit pods.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-agent-bundles
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [agentbundles]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [agentbundles/status]
+  verbs: [get, update, patch]
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs]
+  verbs: [get, list, watch, create, update, patch]
+- apiGroups: [""]
+  resources: [pods]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-agent-bundles
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-agent-bundles}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
 # HUD (in the manager): reads unit pod logs and events, scrapes the node
 # daemons' and regional replicas' metrics, authenticates viewers
 # (TokenReview), checks each viewer's access and each control's write

@@ -4,3 +4,4 @@ resources:
 - c4.avalanche.io_workjobs.yaml
 - c4.avalanche.io_pools.yaml
 - c4.avalanche.io_capacityrequests.yaml
+- c4.avalanche.io_agentbundles.yaml

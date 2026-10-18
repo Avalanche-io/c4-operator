@@ -75,3 +75,46 @@ and before its tools run, needs more from the harness, and comes later.
 Claude Code writes its transcript asynchronously, so a checkpoint waits
 until the file stops growing (up to three seconds), and always ends at the
 last complete line.
+
+## Bundles on the farm: the host runner
+
+An `AgentBundle` names a team of members, how many may run at once, its
+deadline and its pools. The operator turns it into one WorkJob of class
+`agent`, with one unit per member. The queue schedules those units like
+any others that checkpoint:
+- it releases members up to the bundle's cap;
+- it asks a running member to yield when the bundle is suspended or the
+  slots are needed;
+- it releases the member again later, with the checkpoint it yielded at.
+
+`c4-agent runner` is the other half, on the machine where the members'
+sessions live. It is a host runner.
+
+- It registers a Node for the machine, labeled `c4.avalanche.io/host=<node>`
+  and tainted `c4.avalanche.io/host-runner` so only agent pods land there.
+  It keeps the Node and its Lease fresh.
+- It binds member pods whose nodeSelector matches the Node. When a pod
+  starts, it resumes the member's session with `c4-agent resume` (never a
+  fresh one; a running member is adopted, not resumed twice). Then it
+  reports the pod Running, with the member's epoch.
+- When the queue asks a member to yield, it waits for the end of the
+  member's turn, checkpoints, stops the session, and reports the pod
+  Succeeded with the checkpoint (`c4.avalanche.io/output-checkpoint`).
+  The queue records it as the member's resume point.
+- After a restart of the machine, a new runner finds the pods still
+  Running and their sessions stopped, and resumes each one from its last
+  turn.
+
+The sessions run as the machine's own Claude Code sessions, under their
+holder's own sign-in, so no credential leaves the machine.
+
+`config/samples/agent-bundle/team.yaml` has a Pool for a runner and a
+bundle of eight members with at most five running. Setting `suspend: true`
+on the bundle yields every running member at its next turn boundary, and
+clearing it brings them back.
+
+The runner writes pod status and its own annotations, which the cluster's
+node daemon policy (`config/policy/node-writes.yaml`) does not cover. On a
+local farm it runs with the farm's kubeconfig. A shared cluster needs a
+service account and a policy for it that mirror the node daemon's: only
+pods on its own node.

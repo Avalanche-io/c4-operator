@@ -12,6 +12,7 @@
 //	c4-agent verify NAME
 //	c4-agent log NAME [-n 10]
 //	c4-agent hooks
+//	c4-agent runner [--node NAME] [--slots N] [--label K=V]...
 //
 // State lives in $C4_AGENT_HOME (default ~/.c4/agents). The claude binary is
 // $C4_AGENT_CLAUDE, else claude on PATH.
@@ -30,6 +31,12 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"k8s.io/apimachinery/pkg/runtime"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/agent"
 )
 
@@ -214,6 +221,8 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 			}
 			fmt.Fprintf(out, "#%d\t%s\t%s\tepoch %d\t%d bytes\t%s\t%s\t%s\n", cp.Seq, cp.At.Local().Format("Jan 2 15:04:05"), cp.Event, cp.Epoch, cp.Offset, short(cp.Head), ws, cp.Note)
 		}
+	case "runner":
+		return runRunner(ctx, h, fs, args, out)
 	case "hooks":
 		exe, err := os.Executable()
 		if err != nil {
@@ -271,7 +280,56 @@ const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
   verify NAME          check the checkpoint chain against the transcript
   log NAME [-n N]      recent checkpoints
   hooks                print the settings fragment that installs the Stop hook
+  runner [--node N] [--slots N] [--label K=V]... [--every 5s] [--yield-timeout 1m]
+                       run this machine's members for the farm's queue (a host
+                       runner: a Node for the machine, member pods bound to it)
 
 State: $C4_AGENT_HOME (default ~/.c4/agents). claude: $C4_AGENT_CLAUDE or claude on PATH.
 Exit codes: 3 running or already has a session, 4 a copy was started, 5 still busy.
 `
+
+// runRunner runs the host runner against the cluster in the current
+// kubeconfig.
+func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []string, out io.Writer) error {
+	host, _ := os.Hostname()
+	host = strings.ToLower(strings.Split(host, ".")[0])
+	node := fs.String("node", "c4-host-"+host, "the machine's Node name")
+	slots := fs.Int("slots", 4, "members that may run here at once")
+	every := fs.Duration("every", 5*time.Second, "how often to check pods and sessions")
+	yieldTimeout := fs.Duration("yield-timeout", time.Minute, "how long one yield waits for a busy member before trying again")
+	var lbls multi
+	fs.Var(&lbls, "label", "a Node label K=V for the agent pool's nodeSelector (default c4.avalanche.io/host=<node>)")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	set := map[string]string{}
+	for _, l := range lbls {
+		k, v, ok := strings.Cut(l, "=")
+		if !ok || k == "" {
+			return fmt.Errorf("--label %q: want K=V", l)
+		}
+		set[k] = v
+	}
+	if len(set) == 0 {
+		set["c4.avalanche.io/host"] = *node
+	}
+	cfg, err := ctrlconfig.GetConfig()
+	if err != nil {
+		return err
+	}
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return err
+	}
+	if err := c4v1.AddToScheme(scheme); err != nil {
+		return err
+	}
+	cl, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return err
+	}
+	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Slots: *slots, YieldTimeout: *yieldTimeout,
+		Logf: func(f string, a ...any) { fmt.Fprintf(out, time.Now().Format("15:04:05 ")+f+"\n", a...) }}
+	fmt.Fprintf(out, "runner %s: %d slots, labels %v\n", *node, *slots, set)
+	return r.Run(ctx, *every)
+}

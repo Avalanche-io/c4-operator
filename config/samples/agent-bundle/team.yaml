@@ -1,0 +1,37 @@
+# An agent bundle on one machine's host runner (docs/agents/c4-agent.md).
+#
+# On the machine: register each member with c4-agent, then run
+#   c4-agent runner --node c4-host-abyss --slots 5
+# The runner registers the Node c4-host-abyss, labeled
+# c4.avalanche.io/host=c4-host-abyss and tainted so only agent pods land on
+# it. The Pool below selects it.
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Pool
+metadata:
+  name: agent
+spec:
+  nodeSelector: {c4.avalanche.io/host: c4-host-abyss}
+  slotsPerNode: 5
+  tolerations:
+  - {key: c4.avalanche.io/host-runner, operator: Exists, effect: NoSchedule}
+---
+apiVersion: c4.avalanche.io/v1alpha1
+kind: AgentBundle
+metadata:
+  name: c4-team
+  namespace: default
+spec:
+  # At most five members run at once; the queue parks the rest at a turn
+  # boundary and brings them back as room frees.
+  maxRunning: 5
+  pools: [agent]
+  members:
+  - {name: hud-scenarios}
+  - {name: sched-stress}
+  - {name: onboarding}
+  - {name: agent-jobs}
+  - {name: prov-graph}
+  - {name: eta-deadlines}
+  - {name: hud-intro}
+  - {name: talk-prep}
+  # suspend: true   # every running member yields at its next turn boundary

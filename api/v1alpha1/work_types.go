@@ -24,6 +24,14 @@ const (
 	AnnotationAllowNodes = "c4.avalanche.io/allow-nodes"
 	// AnnotationYield asks a unit to stop at its next checkpoint boundary.
 	AnnotationYield = "c4.avalanche.io/yield"
+	// AnnotationOutputCheckpoint on a unit pod that yielded names where the
+	// next attempt resumes, for classes whose state is not a captured view:
+	// an agent member's turn checkpoint ("<session>#<seq>:<head>"). Written
+	// by whatever ran the unit (the node daemon, or a host runner).
+	AnnotationOutputCheckpoint = "c4.avalanche.io/output-checkpoint"
+	// AnnotationOutputEpoch on an agent member's pod is the member's lease
+	// number as its runner last resumed it.
+	AnnotationOutputEpoch = "c4.avalanche.io/output-epoch"
 	// AnnotationOwner on a WorkJob is the user who submitted it, set at
 	// admission from the request's user (or, for jobs the HUD creates for
 	// a signed-in viewer, by the HUD) and never changed afterwards.
@@ -59,8 +67,8 @@ const (
 // objective, where it may run, its inputs and outputs, and the pod each
 // unit runs.
 type WorkJobSpec struct {
-	// Class names the work class: render, ci or ml.
-	// +kubebuilder:validation:Enum=render;ci;ml
+	// Class names the work class: render, ci, ml or agent.
+	// +kubebuilder:validation:Enum=render;ci;ml;agent
 	Class string `json:"class"`
 
 	// Params are the class's parameters, for example frames and chunk for

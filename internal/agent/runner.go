@@ -1,0 +1,369 @@
+package agent
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strconv"
+	"time"
+
+	coordv1 "k8s.io/api/coordination/v1"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+)
+
+// TaintHostRunner keeps ordinary pods off a host runner's node; the agent
+// pool's tolerations admit member pods.
+const TaintHostRunner = "c4.avalanche.io/host-runner"
+
+// Runner is the host runner (FIRST-SLICE step 2): it runs the members of
+// agent bundles as the machine's own Claude Code sessions, under the
+// holder's own sign-in, and plays the kubelet's part for their unit pods.
+//
+// It registers a Node for the machine, binds member pods that select it,
+// resumes each member's session by its session ID when its pod starts,
+// yields it at a turn boundary when the queue asks, and reports the pod's
+// phase. The queue schedules members exactly as it schedules any unit
+// that checkpoints. After a restart of the machine, pods that were running
+// find their sessions stopped, and the runner resumes them: the restart of
+// 2026-10-18, done by the farm.
+type Runner struct {
+	Client  client.Client
+	Harness *Harness
+	// Node is the name of the machine's Node.
+	Node string
+	// Labels are put on the Node; the agent pool's nodeSelector matches
+	// them.
+	Labels map[string]string
+	// Slots is how many members may run here at once.
+	Slots int
+	// YieldTimeout bounds one wait for a busy member to finish its turn;
+	// the runner tries again on the next tick.
+	YieldTimeout time.Duration
+	// Now is the clock.
+	Now func() time.Time
+	// Logf reports what the runner does.
+	Logf func(format string, args ...any)
+
+	seen map[types.UID]bool
+}
+
+func (r *Runner) logf(format string, args ...any) {
+	if r.Logf != nil {
+		r.Logf(format, args...)
+	}
+}
+
+func (r *Runner) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
+}
+
+// Run ticks until ctx ends.
+func (r *Runner) Run(ctx context.Context, every time.Duration) error {
+	for {
+		if err := r.Tick(ctx); err != nil {
+			r.logf("tick: %v", err)
+		}
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-time.After(every):
+		}
+	}
+}
+
+// Tick does one round: the node's heartbeat, binding, and each pod.
+func (r *Runner) Tick(ctx context.Context) error {
+	if r.seen == nil {
+		r.seen = map[types.UID]bool{}
+	}
+	if err := r.heartbeat(ctx); err != nil {
+		return fmt.Errorf("node %s: %w", r.Node, err)
+	}
+	var pods corev1.PodList
+	if err := r.Client.List(ctx, &pods, client.HasLabels{c4v1.LabelJob}); err != nil {
+		return err
+	}
+	sel := labels.SelectorFromSet(r.Labels)
+	for i := range pods.Items {
+		p := &pods.Items[i]
+		if p.Spec.NodeName == "" && p.Status.Phase == corev1.PodPending && p.DeletionTimestamp == nil &&
+			sel.Matches(labels.Set(p.Spec.NodeSelector)) && memberOf(p) != "" {
+			if err := r.bind(ctx, p); err != nil {
+				r.logf("bind %s/%s: %v", p.Namespace, p.Name, err)
+			}
+			continue
+		}
+		if p.Spec.NodeName != r.Node {
+			continue
+		}
+		if err := r.handle(ctx, p); err != nil {
+			r.logf("%s/%s: %v", p.Namespace, p.Name, err)
+		}
+	}
+	return nil
+}
+
+// memberOf is the member a unit pod runs, from its environment.
+func memberOf(p *corev1.Pod) string {
+	for _, c := range p.Spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == "C4_AGENT_MEMBER" {
+				return e.Value
+			}
+		}
+	}
+	return ""
+}
+
+func (r *Runner) bind(ctx context.Context, p *corev1.Pod) error {
+	b := &corev1.Binding{ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace},
+		Target: corev1.ObjectReference{Kind: "Node", Name: r.Node}}
+	if err := r.Client.SubResource("binding").Create(ctx, p, b); err != nil {
+		return err
+	}
+	r.logf("bound %s/%s (member %s)", p.Namespace, p.Name, memberOf(p))
+	return nil
+}
+
+func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
+	first := !r.seen[p.UID]
+	r.seen[p.UID] = true
+	if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+		return nil
+	}
+	name := memberOf(p)
+	if name == "" {
+		return r.finish(ctx, p, corev1.PodFailed, "NotAMember", "the pod names no agent member (C4_AGENT_MEMBER)", 1)
+	}
+	m, err := r.Harness.Store.Get(name)
+	if errors.Is(err, ErrNoMember) {
+		return r.finish(ctx, p, corev1.PodFailed, "MemberNotRegistered",
+			fmt.Sprintf("member %s is not registered with c4-agent on %s", name, r.Node), 1)
+	}
+	if err != nil {
+		return err
+	}
+	if p.DeletionTimestamp != nil {
+		return r.deleted(ctx, p, m)
+	}
+	if p.Annotations[c4v1.AnnotationYield] != "" {
+		return r.yield(ctx, p, m)
+	}
+	live, _, err := r.Harness.live(ctx, m)
+	if err != nil {
+		return err
+	}
+	switch {
+	case p.Status.Phase == corev1.PodPending:
+		if !live {
+			res, err := r.Harness.Resume(ctx, name, "")
+			if errors.Is(err, ErrForked) {
+				return r.finish(ctx, p, corev1.PodFailed, "CopyStarted", err.Error(), 4)
+			}
+			if err != nil {
+				return err
+			}
+			m = res.Member
+			r.logf("resumed %s (session %s, epoch %d)", m.Name, m.Session, m.Epoch)
+		}
+		return r.running(ctx, p, m)
+	case !live && first:
+		// The runner restarted and finds the member's session stopped: the
+		// machine was restarted. Resume it from its last turn.
+		res, err := r.Harness.Resume(ctx, name, "")
+		if errors.Is(err, ErrForked) {
+			return r.finish(ctx, p, corev1.PodFailed, "CopyStarted", err.Error(), 4)
+		}
+		if err != nil {
+			return err
+		}
+		r.logf("recovered %s after a restart (epoch %d)", name, res.Member.Epoch)
+		return r.annotateEpoch(ctx, p, res.Member)
+	case !live:
+		// The session ended on its own: the member finished.
+		cp, err := r.Harness.Store.Last(name)
+		if err != nil {
+			return err
+		}
+		if cp != nil {
+			if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputCheckpoint: point(m, cp)}); err != nil {
+				return err
+			}
+		}
+		return r.finish(ctx, p, corev1.PodSucceeded, "Completed", "the member's session ended", 0)
+	}
+	return nil
+}
+
+func point(m *Member, cp *Checkpoint) string {
+	return m.Session + "#" + strconv.Itoa(cp.Seq) + ":" + cp.Head
+}
+
+func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
+	res, err := r.Harness.Yield(ctx, m.Name, r.YieldTimeout)
+	if errors.Is(err, ErrBusy) {
+		r.logf("%s still busy; will try again", m.Name)
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	cp := res.Checkpoint
+	if cp == nil {
+		if cp, err = r.Harness.Store.Last(m.Name); err != nil {
+			return err
+		}
+	}
+	if cp != nil {
+		if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputCheckpoint: point(m, cp)}); err != nil {
+			return err
+		}
+	}
+	r.logf("yielded %s (%s)", m.Name, p.Annotations[c4v1.AnnotationYield])
+	return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "yielded at a turn boundary: "+p.Annotations[c4v1.AnnotationYield], 0)
+}
+
+// deleted handles a pod the queue stopped without a yield: the member
+// still stops at a turn boundary if it reaches one in time, and the pod
+// is then removed.
+func (r *Runner) deleted(ctx context.Context, p *corev1.Pod, m *Member) error {
+	if _, err := r.Harness.Yield(ctx, m.Name, r.YieldTimeout); err != nil && !errors.Is(err, ErrBusy) {
+		return err
+	}
+	zero := int64(0)
+	err := r.Client.Delete(ctx, p, &client.DeleteOptions{GracePeriodSeconds: &zero})
+	return client.IgnoreNotFound(err)
+}
+
+func (r *Runner) annotateEpoch(ctx context.Context, p *corev1.Pod, m *Member) error {
+	return r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputEpoch: strconv.Itoa(m.Epoch)})
+}
+
+func (r *Runner) annotate(ctx context.Context, p *corev1.Pod, ann map[string]string) error {
+	orig := p.DeepCopy()
+	if p.Annotations == nil {
+		p.Annotations = map[string]string{}
+	}
+	for k, v := range ann {
+		p.Annotations[k] = v
+	}
+	return r.Client.Patch(ctx, p, client.MergeFrom(orig))
+}
+
+func (r *Runner) running(ctx context.Context, p *corev1.Pod, m *Member) error {
+	if err := r.annotateEpoch(ctx, p, m); err != nil {
+		return err
+	}
+	now := metav1.NewTime(r.now())
+	orig := p.DeepCopy()
+	p.Status.Phase = corev1.PodRunning
+	p.Status.StartTime = &now
+	p.Status.Conditions = podConditions(corev1.ConditionTrue, now)
+	p.Status.ContainerStatuses = containerStatuses(p, corev1.ContainerState{Running: &corev1.ContainerStateRunning{StartedAt: now}}, true)
+	return r.Client.Status().Patch(ctx, p, client.MergeFrom(orig))
+}
+
+func (r *Runner) finish(ctx context.Context, p *corev1.Pod, phase corev1.PodPhase, reason, msg string, code int32) error {
+	now := metav1.NewTime(r.now())
+	started := now
+	if p.Status.StartTime != nil {
+		started = *p.Status.StartTime
+	}
+	orig := p.DeepCopy()
+	p.Status.Phase, p.Status.Reason, p.Status.Message = phase, reason, msg
+	if p.Status.StartTime == nil {
+		p.Status.StartTime = &now
+	}
+	p.Status.Conditions = podConditions(corev1.ConditionFalse, now)
+	p.Status.ContainerStatuses = containerStatuses(p, corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{
+		ExitCode: code, Reason: reason, Message: msg, StartedAt: started, FinishedAt: now}}, false)
+	return r.Client.Status().Patch(ctx, p, client.MergeFrom(orig))
+}
+
+func podConditions(ready corev1.ConditionStatus, at metav1.Time) []corev1.PodCondition {
+	return []corev1.PodCondition{
+		{Type: corev1.PodScheduled, Status: corev1.ConditionTrue, LastTransitionTime: at},
+		{Type: corev1.PodInitialized, Status: corev1.ConditionTrue, LastTransitionTime: at},
+		{Type: corev1.ContainersReady, Status: ready, LastTransitionTime: at},
+		{Type: corev1.PodReady, Status: ready, LastTransitionTime: at},
+	}
+}
+
+func containerStatuses(p *corev1.Pod, state corev1.ContainerState, ready bool) []corev1.ContainerStatus {
+	var out []corev1.ContainerStatus
+	for _, c := range p.Spec.Containers {
+		out = append(out, corev1.ContainerStatus{Name: c.Name, Image: c.Image, ImageID: "host-runner://" + c.Image,
+			Ready: ready, State: state})
+	}
+	return out
+}
+
+// heartbeat creates or refreshes the machine's Node and its Lease, so the
+// cluster sees it Ready and keeps scheduling to it.
+func (r *Runner) heartbeat(ctx context.Context) error {
+	now := metav1.NewTime(r.now())
+	var n corev1.Node
+	err := r.Client.Get(ctx, types.NamespacedName{Name: r.Node}, &n)
+	if apierrors.IsNotFound(err) {
+		n = corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: r.Node, Labels: map[string]string{}},
+			Spec: corev1.NodeSpec{Taints: []corev1.Taint{{Key: TaintHostRunner, Value: "true", Effect: corev1.TaintEffectNoSchedule}}}}
+		for k, v := range r.Labels {
+			n.Labels[k] = v
+		}
+		n.Labels["kubernetes.io/hostname"] = r.Node
+		if err := r.Client.Create(ctx, &n); err != nil {
+			return err
+		}
+		r.logf("registered node %s", r.Node)
+	} else if err != nil {
+		return err
+	}
+	orig := n.DeepCopy()
+	if n.Status.Capacity == nil {
+		n.Status.Capacity = corev1.ResourceList{}
+	}
+	if n.Status.Allocatable == nil {
+		n.Status.Allocatable = corev1.ResourceList{}
+	}
+	pods := resource.MustParse(strconv.Itoa(max(r.Slots, 1) * 4))
+	n.Status.Capacity[corev1.ResourcePods], n.Status.Allocatable[corev1.ResourcePods] = pods, pods
+	n.Status.Conditions = []corev1.NodeCondition{{Type: corev1.NodeReady, Status: corev1.ConditionTrue,
+		Reason: "HostRunnerReady", Message: "c4-agent runner is up", LastHeartbeatTime: now, LastTransitionTime: now}}
+	if err := r.Client.Status().Patch(ctx, &n, client.MergeFrom(orig)); err != nil {
+		return err
+	}
+	return r.renewLease(ctx, now)
+}
+
+func (r *Runner) renewLease(ctx context.Context, now metav1.Time) error {
+	micro := metav1.NewMicroTime(now.Time)
+	secs := int32(40)
+	var l coordv1.Lease
+	err := r.Client.Get(ctx, types.NamespacedName{Namespace: corev1.NamespaceNodeLease, Name: r.Node}, &l)
+	if apierrors.IsNotFound(err) {
+		l = coordv1.Lease{ObjectMeta: metav1.ObjectMeta{Namespace: corev1.NamespaceNodeLease, Name: r.Node},
+			Spec: coordv1.LeaseSpec{HolderIdentity: &r.Node, LeaseDurationSeconds: &secs, RenewTime: &micro}}
+		err = r.Client.Create(ctx, &l)
+		if apierrors.IsNotFound(err) {
+			return nil // no node-lease namespace (a bare API server, as in tests)
+		}
+		return err
+	}
+	if err != nil {
+		return err
+	}
+	orig := l.DeepCopy()
+	l.Spec.RenewTime = &micro
+	return r.Client.Patch(ctx, &l, client.MergeFrom(orig))
+}

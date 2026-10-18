@@ -140,6 +140,9 @@ func runManager(args []string) error {
 		Signer: sig.controller, Roots: sig.pool}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if err := (&controller.AgentBundleReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	var q *queue.Queue
 	stores := func(ctx context.Context, name string) (*storeurl.Sharded, error) {
 		p, err := reg.Get(ctx, name)

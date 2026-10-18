@@ -1,0 +1,229 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: agentbundles.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: AgentBundle
+    listKind: AgentBundleList
+    plural: agentbundles
+    shortNames:
+    - ab
+    singular: agentbundle
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .spec.maxRunning
+      name: Max
+      type: integer
+    - jsonPath: .spec.suspend
+      name: Suspend
+      type: boolean
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          AgentBundle is a team of agents the farm schedules, suspends and resumes
+          as one.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              AgentBundleSpec declares a bundle of agents that the farm schedules as
+              one: its members, how many may run at once, its deadline and where it
+              runs (proposals/agent-jobs, section 2).
+            properties:
+              deadline:
+                description: Deadline is the bundle's real-time deadline.
+                format: date-time
+                type: string
+              maxRunning:
+                description: 'MaxRunning caps the members running at once (0: no cap).'
+                format: int32
+                type: integer
+              members:
+                description: Members, in the order the bundle's lead wants them run.
+                items:
+                  description: |-
+                    AgentMemberSpec is one member of an agent bundle: a Claude Code session
+                    that a runner resumes by its session ID.
+                  properties:
+                    kind:
+                      default: resident
+                      description: Kind is resident (lives as long as the bundle)
+                        or task (has one job).
+                      enum:
+                      - resident
+                      - task
+                      type: string
+                    name:
+                      description: |-
+                        Name is the member's name in the bundle and in the runner's
+                        registry (c4-agent register --name).
+                      pattern: ^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$
+                      type: string
+                    prompt:
+                      description: |-
+                        Prompt is given to the member as its next turn when a runner resumes
+                        it after a yield. Empty resumes it without a new turn.
+                      type: string
+                  required:
+                  - name
+                  type: object
+                minItems: 1
+                type: array
+                x-kubernetes-list-map-keys:
+                - name
+                x-kubernetes-list-type: map
+              pools:
+                description: |-
+                  Pools the members may run in. Empty means the agent class's default,
+                  pool agent.
+                items:
+                  type: string
+                type: array
+              suspend:
+                description: |-
+                  Suspend asks every running member to yield at its next turn boundary
+                  and releases none until it is cleared.
+                type: boolean
+            required:
+            - members
+            type: object
+          status:
+            description: AgentBundleStatus reports the bundle.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+                x-kubernetes-list-map-keys:
+                - type
+                x-kubernetes-list-type: map
+              job:
+                description: Job is the WorkJob that holds the members' units.
+                type: string
+              members:
+                description: Members, in spec order.
+                items:
+                  description: AgentMemberStatus is what the farm knows of one member.
+                  properties:
+                    attempts:
+                      description: Attempts counts the times the member was started
+                        or resumed.
+                      format: int32
+                      type: integer
+                    checkpoint:
+                      description: |-
+                        Checkpoint is where the member resumes next
+                        ("<session>#<seq>:<head>").
+                      type: string
+                    epoch:
+                      description: Epoch is the member's lease number as its runner
+                        last resumed it.
+                      type: string
+                    name:
+                      type: string
+                    node:
+                      description: Node is where the member runs or last ran.
+                      type: string
+                    state:
+                      description: |-
+                        State is running, yielding (asked to stop at its next turn
+                        boundary), parked (saved, not running), queued or failed.
+                      type: string
+                  required:
+                  - name
+                  - state
+                  type: object
+                type: array
+              observedGeneration:
+                format: int64
+                type: integer
+              phase:
+                description: Phase is Running, Suspending, Suspended or Pending.
+                type: string
+            type: object
+        type: object
+        x-kubernetes-validations:
+        - message: an AgentBundle name is at most 50 characters (it names its WorkJob)
+          rule: self.metadata.name.size() <= 50
+    served: true
+    storage: true
+    subresources:
+      status: {}

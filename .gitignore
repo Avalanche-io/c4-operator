@@ -7,3 +7,4 @@ hack/e2e/out/*
 cover.out
 dist/
 hack/stress/out/
+/c4-agent

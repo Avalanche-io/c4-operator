@@ -71,11 +71,12 @@ spec:
                   type: string
                 type: array
               class:
-                description: 'Class names the work class: render, ci or ml.'
+                description: 'Class names the work class: render, ci, ml or agent.'
                 enum:
                 - render
                 - ci
                 - ml
+                - agent
                 type: string
               deadline:
                 description: |-

@@ -84,6 +84,14 @@ type Driver interface {
 	Lens() string
 }
 
+// Resumer is implemented by classes whose units resume from a checkpoint
+// their runner reports (AnnotationOutputCheckpoint), not from a captured
+// view: an agent member resumes its own session. The queue then mounts no
+// resume Materialization, and adds ResumeEnv to the next attempt.
+type Resumer interface {
+	ResumeEnv(point string) []corev1.EnvVar
+}
+
 var drivers = map[string]Driver{}
 
 func register(d Driver) { drivers[d.Name()] = d }
