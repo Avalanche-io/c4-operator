@@ -496,7 +496,7 @@ func TestBurstSmallestThatCloses(t *testing.T) {
 	if math.Abs(js.Burst.Cost-cost) > 1e-6 {
 		t.Fatalf("cost %v want %v", js.Burst.Cost, cost)
 	}
-	msg := fmt.Sprintf("sh040-fx-v003 will miss Mon 22:00 by about 7h at current capacity. +%d gpu-spot slots closes it (est. $%.0f).", want, cost)
+	msg := fmt.Sprintf("sh040-fx-v003 will miss Mon 22:00 UTC by about 7h at current capacity. +%d gpu-spot slots closes it (est. $%.0f).", want, cost)
 	if js.Message != msg {
 		t.Fatalf("message\n got %q\nwant %q", js.Message, msg)
 	}
@@ -948,7 +948,7 @@ func TestBurstForMarginIsLabelled(t *testing.T) {
 	if js.Burst == nil || !js.Burst.Margin || !js.Burst.Auto || js.Burst.Slots["gpu-spot"] != 1 {
 		t.Fatalf("burst %+v", js.Burst)
 	}
-	msg := "m is on track for Mon 16:45: ETA Mon 16:30, slack 45m. +1 gpu-spot slots adds margin against estimate uncertainty (est. $0.51)."
+	msg := "m is on track for Mon 16:45 UTC: ETA Mon 16:30 UTC, slack 45m. +1 gpu-spot slots adds margin against estimate uncertainty (est. $0.51)."
 	if js.Message != msg {
 		t.Fatalf("message\n got %q\nwant %q", js.Message, msg)
 	}
@@ -1105,4 +1105,29 @@ func tierCount(d Decisions, jobID string, tier Tier) int {
 		}
 	}
 	return n
+}
+
+// TestMessageTimesAreLocalWithUTC: with Config.Loc set, times in messages
+// read in the farm's zone with UTC alongside (forecast.Clock); the
+// effective deadline a dependent sets reads the same way.
+func TestMessageTimesAreLocalWithUTC(t *testing.T) {
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Skip(err)
+	}
+	cfg := DefaultConfig()
+	cfg.Loc = la
+	a := job("a", "p", 10, 1, 0)
+	b := waitingJob("b", 10, 10, 13*time.Hour, "a")
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{a, b}}
+	d := Decide(s, &State{}, cfg)
+	if msg := d.Jobs["b"].Message; !strings.Contains(msg, "on track for Mon 18:00 PDT (Tue 01:00 UTC)") {
+		t.Fatalf("message %q", msg)
+	}
+	if msg := d.Jobs["a"].Message; !strings.Contains(msg, "on track for Mon 17:00 PDT (Tue 00:00 UTC) (for b)") {
+		t.Fatalf("message %q", msg)
+	}
+	if st := d.Jobs["b"]; !st.Deadline.Equal(t0.Add(13*time.Hour)) || st.Deadline.Location() != time.UTC {
+		t.Fatalf("Deadline field %v, want the time.Time unchanged", st.Deadline)
+	}
 }

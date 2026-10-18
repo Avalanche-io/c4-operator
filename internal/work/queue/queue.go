@@ -397,7 +397,11 @@ func (q *Queue) Tick(ctx context.Context) error {
 	}
 
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
-	dec := q.Policy(snap, &q.st, q.Cfg)
+	cfg := q.Cfg
+	if cfg.Loc == nil {
+		cfg.Loc = q.Loc
+	}
+	dec := q.Policy(snap, &q.st, cfg)
 	pol := make(map[string]forecast.Policy, len(views))
 	adj := make(map[string]func(time.Time, forecast.Band) forecast.Band, len(views))
 	for _, v := range views {

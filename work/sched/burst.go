@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/work/forecast"
 )
 
 // burst implements the cost-aware capacity decisions of DESIGN.md section
@@ -115,7 +117,7 @@ func (a *alloc) burst() {
 				break
 			}
 			if a.now.Sub(since) < a.cfg.ScaleDownAfter {
-				reason = fmt.Sprintf("%d idle since %s", ps.free, since.Format("15:04"))
+				reason = fmt.Sprintf("%d idle since %s", ps.free, forecast.Clock(since, a.cfg.Loc))
 				break
 			}
 			req = max(0, b.Requested-ps.free)
@@ -269,7 +271,7 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 	case !jc.hasDeadline:
 		return ""
 	}
-	dl := jc.deadline.Format("Mon 15:04")
+	dl := forecast.Clock(jc.deadline, a.cfg.Loc)
 	if jc.deadlineFor != "" {
 		dl += " (for " + jc.deadlineFor + ")"
 	}
@@ -290,7 +292,7 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		if st.ETA90.IsZero() {
 			fmt.Fprintf(&b, "%s is on track for %s.", id, dl)
 		} else {
-			fmt.Fprintf(&b, "%s is on track for %s: ETA %s, slack %s.", id, dl, st.ETA90.Format("Mon 15:04"), human(jc.slack))
+			fmt.Fprintf(&b, "%s is on track for %s: ETA %s, slack %s.", id, dl, forecast.Clock(st.ETA90, a.cfg.Loc), human(jc.slack))
 		}
 		// A burst for a job on track is margin against estimate
 		// uncertainty (see burst); say so rather than leave it unexplained.

@@ -335,6 +335,10 @@ type Config struct {
 	WranglerMargin     time.Duration
 	WranglerUnbump     time.Duration
 	WranglerStartAlarm time.Duration
+	// Loc is the farm's time zone. Times in messages and reasons read in
+	// it with UTC alongside, "Thu 08:00 PDT (15:00 UTC)" (forecast.Clock);
+	// nil reads UTC. Times in fields stay time.Time.
+	Loc *time.Location
 }
 
 // DefaultConfig returns the settings named in DESIGN.md.
