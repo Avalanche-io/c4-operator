@@ -135,10 +135,9 @@ func rjob(id, proj string, n int, w90, tpath float64, due time.Duration) sched.J
 	return j
 }
 
-// Known (scenarios branch): a job whose units all wait on an upstream job
-// has (running+incoming)/R = 0 and is ranked first.
+// Regression (fixed in 917dd3f): a job whose units all wait on an
+// upstream job had (running+incoming)/R = 0 and was ranked first.
 func TestReproBlockedRank(t *testing.T) {
-	skipRepro(t, "known bug blocked-rank: rank() orders blocked jobs first; the fix is on the scenarios branch")
 	ready := rjob("ready", "p", 10, 10*3600, 600, 6*time.Hour)
 	blocked := rjob("blocked", "p", 0, 10*3600, 600, 8*time.Hour)
 	blocked.Runnable, blocked.RunnableTotal, blocked.Blocked = nil, 0, 10
@@ -149,12 +148,11 @@ func TestReproBlockedRank(t *testing.T) {
 	}
 }
 
-// Known (scenarios branch): Moore-Hodgson evicts the largest job, which
-// at its own EDF position would finish before its deadline, so it is at
-// risk with LateBy 0, its lateness is priced at $0, and a burst that
-// closes it waits for approval.
+// Regression (fixed in 3f4ac76 and 3f5d0ce): Moore-Hodgson evicted the
+// largest job, which at its own EDF position would finish before its
+// deadline, so it was at risk with LateBy 0, its lateness priced at $0,
+// and a burst that closes it waited for approval.
 func TestReproLatenessUnpriced(t *testing.T) {
-	skipRepro(t, "known bug lateness-unpriced: planFluid gives an evicted job lateBy 0; the fix is on the scenarios branch")
 	a := rjob("a", "p", 60, 60*3600, 0, 10*time.Hour)
 	b := rjob("b", "p", 50, 50*3600, 0, 10*time.Hour+30*time.Minute)
 	a.Pools = []string{"cpu", "cpu-burst"}
@@ -241,5 +239,66 @@ func TestReproStarvationOverDeadline(t *testing.T) {
 			t.Fatalf("the only slot went to a job with %s of slack (%s tier) while %q is due in 50 minutes: %s",
 				d.Jobs["idle"].Slack.Round(time.Hour), x.Tier, "urgent", d.Jobs["urgent"].Message)
 		}
+	}
+}
+
+// Found by the stress grid: a held job releases nothing but has R > 0, so
+// rank() sorted it with the jobs that need slots, ahead of ready work.
+func TestReproHeldRank(t *testing.T) {
+	skipRepro(t, "sched bug held-rank (found by hack/stress): rank() places held jobs among jobs that can use slots; awaiting a fix in internal/work/sched")
+	ready := rjob("ready", "p", 10, 10*3600, 600, 0) // no deadline: R = 0
+	ready.Running = map[string]int{"cpu": 2}
+	held := rjob("held", "p", 10, 10*3600, 600, 4*time.Hour)
+	held.Hold = true
+	s := sched.Snapshot{Now: t0r, Pools: []sched.Pool{{Name: "cpu", Slots: 2, Used: 2}}, Jobs: []sched.Job{ready, held}}
+	d := sched.Decide(s, &sched.State{}, sched.DefaultConfig())
+	if d.Jobs["held"].Rank < d.Jobs["ready"].Rank {
+		t.Fatalf("held job ranked %d, ahead of the ready job at %d", d.Jobs["held"].Rank, d.Jobs["ready"].Rank)
+	}
+}
+
+// Found by the stress grid: free slots are lent to a borrowing project in
+// the same decision that preempts a borrower to restore another project's
+// nominal quota. admit() holds back the guaranteed project's unmet
+// deadline demand only against borrowers; a release inside another
+// project's nominal quota (here the surplus tier's, by least slack) takes
+// the held-back slot, the guaranteed project's own job is never served
+// from free capacity, and reclaim() preempts a borrower for it.
+func TestReproLendThenReclaim(t *testing.T) {
+	skipRepro(t, "sched bug lend-then-reclaim (found by hack/stress): free slots go to borrowers and nominal holders while reclaim preempts for a guaranteed project; awaiting a fix in internal/work/sched")
+	a := rjob("a", "A", 5, 4*3600, 600, 30*time.Hour)  // guaranteed (nominal 1, none used), plenty of slack
+	b := rjob("b", "B", 10, 8*3600, 600, 2*time.Hour)  // borrower with a tight deadline
+	d := rjob("d", "B", 5, 10*3600, 600, 40*time.Hour) // borrower with slack: the victim
+	d.Running = map[string]int{"cpu": 2}
+	for i := range 2 {
+		d.RunningUnits = append(d.RunningUnits, sched.RunningUnit{ID: fmt.Sprintf("d/r%d", i), Pool: "cpu", Slots: 1, Started: t0r.Add(-time.Minute)})
+	}
+	// c runs inside its nominal quota and already holds what its deadline
+	// needs (no unmet demand), with less slack than a.
+	c := rjob("c", "C", 5, 2*3600, 600, 6*time.Hour)
+	c.Running = map[string]int{"cpu": 1}
+	c.RunningUnits = []sched.RunningUnit{{ID: "c/r", Pool: "cpu", Slots: 1, Started: t0r.Add(-time.Minute)}}
+	s := sched.Snapshot{Now: t0r, Pools: []sched.Pool{{Name: "cpu", Slots: 6, Used: 3}},
+		Projects: []sched.Project{
+			{Name: "A", Quotas: map[string]sched.Quota{"cpu": {Nominal: 1, BorrowingLimit: -1}}},
+			{Name: "B", Quotas: map[string]sched.Quota{"cpu": {Nominal: 0, BorrowingLimit: -1}}},
+			{Name: "C", Quotas: map[string]sched.Quota{"cpu": {Nominal: 2, BorrowingLimit: -1}}},
+		},
+		Jobs: []sched.Job{a, b, c, d}}
+	dec := sched.Decide(s, &sched.State{}, sched.DefaultConfig())
+	lent, reclaimed := 0, 0
+	for _, x := range dec.Dispatch {
+		if x.Job == "b" || x.Job == "d" {
+			lent++
+		}
+	}
+	for _, x := range dec.Preempt {
+		if x.Reason == sched.ReasonReclaim {
+			reclaimed++
+		}
+	}
+	t.Logf("dispatch %+v preempt %+v", dec.Dispatch, dec.Preempt)
+	if lent > 0 && reclaimed > 0 {
+		t.Fatalf("lent %d slots to the borrower and preempted %d of its units for A in the same decision", lent, reclaimed)
 	}
 }

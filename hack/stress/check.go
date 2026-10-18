@@ -49,11 +49,11 @@ var invariants = []struct{ name, what string }{
 // instead of failing, and each has a skipped reproducer in stress_test.go.
 // Remove an entry when its fix lands.
 var knownBugs = map[string]string{
-	"blocked-rank": "rank() in decide.go sorts jobs with R>0 by (running+incoming)/R; a job whose units all wait upstream has ratio 0 and sorts first " +
-		"(found by hud-scenarios; the fix is on the scenarios branch)",
-	"lateness-unpriced": "planFluid in plan.go: a job Moore-Hodgson evicts from the on-time set takes its lateness from its own EDF position, which can end " +
-		"before its deadline, so lateBy is 0, the lateness it would cost is $0, and auto-burst never fires for it (found by hud-scenarios; the fix is on the scenarios branch)",
-	"eta-inconsistent": "the same cause as lateness-unpriced: an evicted job's ETA90 is its own EDF position, before its deadline, while AtRisk is true",
+	"held-rank": "rank() in decide.go groups jobs by R > 0; a held job keeps the R its deadline gives it although it releases nothing, so it ranks " +
+		"ahead of ready jobs without a deadline need (found by this grid, reported by the lead)",
+	"lend-then-reclaim": "admit() in alloc.go holds free slots back for another project's unmet nominal demand only against borrowers; a release inside " +
+		"a third project's nominal quota takes the held-back slot, the guaranteed project is never served from free capacity, and reclaim() preempts a " +
+		"borrower for it in the same decision, so the slots lent to borrowers are taken back at once and the preempted work is lost (found by this grid)",
 	"churn-pingpong": "take() in preempt.go checks aboveShare (running - outgoing > share) and then removes a whole unit, so a victim holding ceil(share) slots " +
 		"drops below its fractional share; the deadline tier rounds R up (needSlots), so a job released to ceil(share) is at once a victim, and two jobs whose " +
 		"shares are each under a slot take one slot back and forth on every decision, losing the work each time. Suggested fix: take a unit only if " +
