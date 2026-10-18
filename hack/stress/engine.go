@@ -107,6 +107,7 @@ type pool struct {
 	last      float64
 	reclaims  int
 	price     float64 // current price per slot-hour (spot pools move)
+	capped    int     // slots taken away by a capacity shrink (capacity.go)
 }
 
 func (p *pool) meter(now float64) {
@@ -139,6 +140,8 @@ const (
 	evSignal
 	evKill
 	evPrice
+	evShrink   // a pool's slots drop (capacity.go)
+	evUnshrink // and come back
 )
 
 type event struct {
@@ -225,6 +228,7 @@ func newEngine(w *workload, pol policy, check bool) *engine {
 		e.pools = append(e.pools, p)
 		e.byName[pd.name] = p
 		e.scheduleFaults(p)
+		e.scheduleShrinks(p)
 		if pd.burst != nil && pd.burst.interrupt > 0 {
 			e.nextReclaim(p, 0, 0)
 		}
@@ -352,6 +356,10 @@ func (e *engine) run() *runResult {
 			e.kill(ev.p, ev.u, ev.attempt)
 		case evPrice:
 			e.priceStep(ev.p, ev.attempt)
+		case evShrink:
+			e.shrink(ev.p, ev.attempt)
+		case evUnshrink:
+			e.unshrink(ev.p)
 		case evUnnudge:
 			ev.j.hold, ev.j.stop = false, false
 			ev.j.dirty = true

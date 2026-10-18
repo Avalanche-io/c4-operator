@@ -42,6 +42,7 @@ func Decide(s Snapshot, st *State, cfg Config) Decisions {
 	a.needDemand()
 	a.plan()
 	a.holdStop()
+	a.shed()
 	a.starvation(true)
 	a.needPass(true)
 	a.guarantee()

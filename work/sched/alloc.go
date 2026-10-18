@@ -425,7 +425,9 @@ func (a *alloc) preemptUnit(victim *jobCtx, ru RunningUnit, reason PreemptReason
 	if forJob != "" {
 		a.st.took[[2]string{victim.j.ID, forJob}] = a.now
 	}
-	a.st.preemptLog[ru.Pool] = append(a.st.preemptLog[ru.Pool], a.now)
+	if reason != ReasonCapacity {
+		a.st.preemptLog[ru.Pool] = append(a.st.preemptLog[ru.Pool], a.now)
+	}
 }
 
 // lostWork is the work a preemption throws away: time since the unit's

@@ -31,6 +31,9 @@ var invariants = []struct{ name, what string }{
 	{"burst-uneconomic", "an automatic burst closes the deadline and costs less than the lateness it prevents (for a burst bought as margin against estimate uncertainty, the lateness the margin plans)"},
 	{"burst-label", "a burst is marked as margin against estimate uncertainty exactly when its job reports on track"},
 	{"burst-budget", "automatic bursts stay within each project's remaining daily budget"},
+	{"capacity-shed", "a pool over its slots (a capacity shrink) has at least the excess stopped or yielding, beyond what non-preemptible units hold"},
+	{"capacity-overshed", "shedding stops no unit the other shed units would have covered the excess without"},
+	{"capacity-order", "a job at risk is not shed while a preemptible job with more than PreemptSlack of slack keeps running in the pool"},
 	{"burst-unjustified", "a burst pool's request grows only by automatically approved slots, and never past its limit"},
 	{"guard-preempt", "only a unit the starvation guard started is preempted as a guard unit"},
 	{"lend-then-reclaim", "a pool's free slots are not lent to a borrowing project in the same decision that preempts a borrower to restore another project's nominal quota"},
@@ -304,6 +307,7 @@ func (c *checker) decision(s sched.Snapshot, d sched.Decisions) {
 	e := c.e
 	v := c.newView(s, d)
 	c.cur = v
+	c.checkCapacity(v)
 	for id := range c.asked {
 		if u := e.byID[id]; u == nil || u.state != stRunning {
 			delete(c.asked, id)
@@ -840,7 +844,7 @@ func (c *checker) requested(x sched.Preempt) {
 	if x.Reason == sched.ReasonGuard {
 		c.guardHit[x.Job] = c.e.now
 	}
-	if x.Reason == sched.ReasonHoldStop || x.Reason == sched.ReasonWrangler {
+	if x.Reason == sched.ReasonHoldStop || x.Reason == sched.ReasonWrangler || x.Reason == sched.ReasonCapacity {
 		return
 	}
 	now := c.e.now
@@ -902,7 +906,7 @@ type transfer struct {
 // stopped is called when a preemption takes effect (a kill, or a yield
 // at a checkpoint): a unit faulted before its yield was not preempted.
 func (c *checker) stopped(x sched.Preempt) {
-	if x.Reason == sched.ReasonHoldStop || x.Reason == sched.ReasonWrangler {
+	if x.Reason == sched.ReasonHoldStop || x.Reason == sched.ReasonWrangler || x.Reason == sched.ReasonCapacity {
 		return
 	}
 	c.byUnit[x.Unit]++
@@ -1011,6 +1015,7 @@ type runResult struct {
 	// (what a person waits for), whatever the earlier stages' deadlines.
 	FinalDue, FinalOnTime               int
 	FinalLateHours                      float64
+	Shrinks                             int // capacity shrinks (capacity.go)
 	LateHours, LateDollars              float64
 	BurstCost                           float64
 	Util                                float64

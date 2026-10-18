@@ -88,6 +88,7 @@ func Manual(s Snapshot, st *State, cfg Config) Decisions {
 func baseline(s *Snapshot, st *State, cfg Config, less func(a *alloc, x, y *jobCtx) bool, wrangler bool) Decisions {
 	a := newAlloc(s, st, cfg, false)
 	a.holdStop()
+	a.shed()
 	review := false
 	if wrangler {
 		review = a.wrangle()

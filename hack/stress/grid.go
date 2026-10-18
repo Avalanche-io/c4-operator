@@ -99,6 +99,9 @@ type Point struct {
 	// lights may run on another site's nodes), which links the sites'
 	// pools into one planning group.
 	Sites, Spill float64
+	// CapShrink is how often per day an owned pool's ready slots drop for a
+	// while without killing anything, as under a power cap (capacity.go).
+	CapShrink float64
 }
 
 type dim struct {
@@ -162,6 +165,8 @@ var dims = []dim{
 	{name: "evict", integ: true, f: func(p *Point) *float64 { return &p.Evict }},
 	{name: "rebalance", f: func(p *Point) *float64 { return &p.Rebalance }},
 	{name: "ckptWrite", f: func(p *Point) *float64 { return &p.CkptWrite }},
+	// Appended last: the draws of every dimension above stay the same.
+	{name: "capShrink", lo: 0, hi: 3, zero: 0.3, f: func(p *Point) *float64 { return &p.CapShrink }},
 }
 
 var arrivalNames = []string{"steady", "dailies", "crunch", "sun"}
@@ -285,6 +290,12 @@ func corners() []Point {
 	add("multi-site-spill", func(p *Point) {
 		p.Sites, p.Spill, p.Load, p.Tightness, p.Projects = 3, 0.4, 1.5, 1.2, 3
 		p.BurstFrac, p.BurstBudget, p.LateCost = 1, 1, 800
+	})
+	// Power caps: owned pools drop to a quarter to three quarters of
+	// their slots three times a day, mostly checkpointing ML and agent-like
+	// work running over the line until it is shed.
+	add("power-cap", func(p *Point) {
+		p.CapShrink, p.MLShare, p.Load, p.Tightness, p.CkptMin = 3, 0.5, 1.2, 1.5, 15
 	})
 	add("dag-overnight-flat", func(p *Point) {
 		p.Depth, p.Width, p.FlatDue, p.Load, p.Tightness, p.SlackSpread = 4, 3, 1, 1.4, 1.5, 0.2

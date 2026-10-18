@@ -200,6 +200,10 @@ const (
 	// a floor on progress, not a reservation: such a unit may lose more
 	// than MaxLostWork.
 	ReasonGuard PreemptReason = "guard-unit"
+	// ReasonCapacity: the pool shrank below what runs in it (a node's slots
+	// lowered under a power cap, say); the excess is shed, least valuable
+	// first, outside the per-pool rate limit.
+	ReasonCapacity PreemptReason = "capacity-shrink"
 )
 
 // Preempt stops one running unit. With Yield set the unit is asked to stop

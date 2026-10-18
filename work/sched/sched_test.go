@@ -1131,3 +1131,66 @@ func TestMessageTimesAreLocalWithUTC(t *testing.T) {
 		t.Fatalf("Deadline field %v, want the time.Time unchanged", st.Deadline)
 	}
 }
+
+// shrunk: cpu lowered to 4 slots with 6 in use: free (no deadline, 3
+// units) and tight (due soon, 3 units).
+func shrunk() Snapshot {
+	free := job("free", "p", 2, 4, 0)
+	free.RunningUnits, free.Running = runningUnits("free", "cpu", 3, t0.Add(-time.Hour))
+	tight := job("tight", "p", 2, 6, 3*time.Hour)
+	tight.RunningUnits, tight.Running = runningUnits("tight", "cpu", 3, t0.Add(-time.Hour))
+	return Snapshot{Now: t0, Pools: []Pool{{Name: "cpu", Slots: 4, Used: 6}}, Jobs: []Job{tight, free}}
+}
+
+func capacityPreempts(d Decisions) map[string]int {
+	out := map[string]int{}
+	for _, p := range d.Preempt {
+		if p.Reason == ReasonCapacity {
+			out[p.Job] += p.Slots
+		}
+	}
+	return out
+}
+
+func TestShrunkPoolShedsLeastValuableFirst(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.PreemptPerWindow = 0 // shedding is outside the rate limit
+	st := &State{}
+	d := Decide(shrunk(), st, cfg)
+	if got := capacityPreempts(d); got["free"] != 2 || got["tight"] != 0 || len(got) != 1 {
+		t.Fatalf("shed %v, want 2 slots of free", got)
+	}
+	for _, x := range d.Dispatch {
+		t.Fatalf("dispatched %+v into a pool over its slots", x)
+	}
+	// The units being stopped count: the next decision sheds nothing more.
+	if got := capacityPreempts(Decide(shrunk(), st, cfg)); len(got) != 0 {
+		t.Fatalf("shed again: %v", got)
+	}
+}
+
+func TestShrunkPoolCheckpointersYield(t *testing.T) {
+	s := shrunk()
+	s.Jobs[1].Checkpoints = true
+	for _, p := range Decide(s, &State{}, DefaultConfig()).Preempt {
+		if p.Reason == ReasonCapacity && !p.Yield {
+			t.Fatalf("a checkpointing unit was killed: %+v", p)
+		}
+	}
+}
+
+// The fewest slots that cover the excess: with 2 over, a 4-slot gang of
+// the job with most slack and a 1-slot unit of another, shedding the
+// 1-slot unit is not enough, so the gang goes and the 1-slot unit stays.
+func TestShrunkPoolShedsNoMoreThanNeeded(t *testing.T) {
+	gang := job("gang", "p", 0, 8, 0)
+	gang.SlotsPerUnit = 4
+	gang.RunningUnits = []RunningUnit{{ID: "gang/0", Pool: "cpu", Slots: 4, Started: t0.Add(-time.Hour)}}
+	gang.Running = map[string]int{"cpu": 4}
+	one := job("one", "p", 0, 1, 20*time.Hour)
+	one.RunningUnits, one.Running = runningUnits("one", "cpu", 1, t0)
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "cpu", Slots: 3, Used: 5}}, Jobs: []Job{gang, one}}
+	if got := capacityPreempts(Decide(s, &State{}, DefaultConfig())); got["gang"] != 4 || got["one"] != 0 {
+		t.Fatalf("shed %v, want only the gang", got)
+	}
+}
