@@ -255,7 +255,8 @@ func (w *whatIf) run(d time.Time, boost float64) sched.Decisions {
 // band is the job's display band in a run.
 func (w *whatIf) band(r sched.Decisions) forecast.Band {
 	js := r.Jobs[w.id]
-	b := forecast.Display(w.snap.Now, w.snap.Jobs[w.i].Estimate, js.ETA50, js.ETA90)
+	j := w.snap.Jobs[w.i]
+	b := forecast.Display(w.snap.Now, j.Estimate, js.ETA50, js.ETA90, forecast.Tail(j.SlotsPerUnit, js.GroupSlots))
 	if w.adjust != nil {
 		b = w.adjust(w.snap.Now, b)
 	}

@@ -274,7 +274,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	// What a person is shown: the calibrated band with half the tail
 	// (forecast.Display), not the scheduler's conservative finish.
-	raw := forecast.Display(now, v.sum, js.ETA50, js.ETA90)
+	raw := forecast.Display(now, v.sum, js.ETA50, js.ETA90, forecast.Tail(v.mem.plan.Units[0].Slots, js.GroupSlots))
 	if m := v.mem; m.plan != nil {
 		m.noteFinish(now, len(m.millis), len(m.plan.Units), raw.P50)
 	}

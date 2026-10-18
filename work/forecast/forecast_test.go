@@ -93,7 +93,7 @@ func TestDisplay(t *testing.T) {
 	s := estimate.Summary{W: 36000, W90: 72000, TPath: 3600, Calibrated: true,
 		W50: 40000, W80: 60000, W95: 90000}
 	eta50, eta90 := at("2026-10-21 12:00"), at("2026-10-21 14:00") // 36000 slot-s per 2h
-	b := Display(now, s, eta50, eta90)
+	b := Display(now, s, eta50, eta90, 1)
 	// P50: W50 is 4000 slot-s past W, 1/9 of the way to W90: 12:13:20,
 	// less half the 1h tail.
 	want := at("2026-10-21 11:43").Add(20 * time.Second)
@@ -106,11 +106,11 @@ func TestDisplay(t *testing.T) {
 	if !(b.P50.Before(b.P80) && b.P80.Before(b.P90) && b.P90.Before(b.P95)) {
 		t.Errorf("band not ordered: %+v", b)
 	}
-	if !Display(now, s, time.Time{}, time.Time{}).IsZero() {
+	if !Display(now, s, time.Time{}, time.Time{}, 1).IsZero() {
 		t.Errorf("no ETA, want no band")
 	}
 	// Never earlier than now plus the critical path.
-	b = Display(now, estimate.Summary{W: 10, W90: 20, W50: 10, W80: 15, W95: 25, TPath: 7200}, now.Add(time.Minute), now.Add(2*time.Minute))
+	b = Display(now, estimate.Summary{W: 10, W90: 20, W50: 10, W80: 15, W95: 25, TPath: 7200}, now.Add(time.Minute), now.Add(2*time.Minute), 1)
 	if b.P50.Before(now.Add(2 * time.Hour)) {
 		t.Errorf("P50 %s before now + the critical path", b.P50.In(la).Format("15:04"))
 	}
@@ -281,5 +281,26 @@ func TestClock(t *testing.T) {
 	}
 	if got := Clock(time.Date(2026, 10, 23, 3, 0, 0, 0, time.UTC), la); got != "Thu 20:00 PDT (Fri 03:00 UTC)" {
 		t.Errorf("across midnight: %q", got)
+	}
+}
+
+func TestDisplayGrahamTail(t *testing.T) {
+	now := at("2026-10-21 10:00")
+	s := estimate.Summary{W: 36000, W90: 36000, W50: 36000, W80: 36000, W95: 36000, TPath: 3600}
+	eta := at("2026-10-21 14:00")
+	// Full tail counted: take back half of it.
+	if b := Display(now, s, eta, eta, 1); !b.P50.Equal(at("2026-10-21 13:30")) {
+		t.Fatalf("full tail: %s", b.P50.Format("15:04"))
+	}
+	// Graham on 4 slots for 1-slot units: 3/4 of the tail counted.
+	tail := Tail(1, 4)
+	if tail != 0.75 {
+		t.Fatalf("Tail(1, 4) = %v", tail)
+	}
+	if b := Display(now, s, eta, eta, tail); !b.P50.Equal(at("2026-10-21 13:45")) {
+		t.Fatalf("Graham tail: %s", b.P50.Format("15:04"))
+	}
+	if Tail(2, 0) != 1 || Tail(8, 4) != 0 {
+		t.Fatal("Tail edge cases")
 	}
 }

@@ -206,7 +206,7 @@ func (q *Queue) suggest(ctx context.Context, now time.Time, snap sched.Snapshot,
 		sg.policy = p
 		finished, total := len(m.millis), len(m.plan.Units)
 		js := dec.Jobs[v.key]
-		band := q.shown(v, now, forecast.Display(now, v.sum, js.ETA50, js.ETA90))
+		band := q.shown(v, now, forecast.Display(now, v.sum, js.ETA50, js.ETA90, forecast.Tail(v.mem.plan.Units[0].Slots, js.GroupSlots)))
 		info := forecast.InfoPoint(finished) && finished > sg.lastInfo
 		ev := forecast.Event{Now: now, Finished: finished, Total: total, Band: band, Candidate: sg.s.Deadline}
 		switch {

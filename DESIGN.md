@@ -1392,7 +1392,7 @@ half the critical path as the last wave's tail, and never sooner than now
 plus the whole critical path. The scheduler's own finish adds the whole
 critical path, which is the right margin for deciding who is late and what
 to buy. The plan assumes each job gets its planned share, and under
-contention that is optimistic: in `hack/sim` the band covered 54/61/65/68%
+contention that is optimistic: in `hack/sim` the band covered 49/56/60/64%
 of finishes at P50/P80/P90/P95 with the work calibrated. So the band is
 also calibrated on the finish (`forecast.FinishCalibration`). While a job
 runs, the queue keeps the uncalibrated median at up to 64 moments: each new

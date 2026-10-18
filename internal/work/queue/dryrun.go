@@ -120,7 +120,7 @@ func (q *Queue) DryRun(ctx context.Context, job *c4v1.WorkJob, project string) (
 	var st sched.State
 	dec := policy(snap, &st, cfg)
 	js := dec.Jobs[key]
-	out.Band = forecast.Display(now, v.sum, js.ETA50, js.ETA90)
+	out.Band = forecast.Display(now, v.sum, js.ETA50, js.ETA90, forecast.Tail(plan.Units[0].Slots, js.GroupSlots))
 	if adjust != nil {
 		out.Band = adjust(now, out.Band)
 	}

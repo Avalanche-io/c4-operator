@@ -19,56 +19,56 @@ workload,arm,seed,kind,jobs,missed,late_h,suggested,at_risk_moves,tightened,poli
 "main workload","guess: previews and ML due an hour after submission",4,ml,18,18,66.978,0,0,0,0,1,1.708,0,0.000,3109.03
 "main workload","guess: previews and ML due an hour after submission",5,preview,206,82,118.998,0,0,0,0,6,20.886,2,3.746,3009.42
 "main workload","guess: previews and ML due an hour after submission",5,ml,22,22,112.174,0,0,0,0,6,20.886,2,3.746,3009.42
-"main workload","suggested at 0.8, set once",1,preview,170,18,20.035,170,0,0,2368,1,2.608,0,0.000,5403.62
-"main workload","suggested at 0.8, set once",1,ml,17,0,0.000,17,0,0,238,1,2.608,0,0.000,5403.62
-"main workload","suggested at 0.8, set once",2,preview,192,28,41.789,192,0,0,2688,5,35.397,0,0.000,4393.98
-"main workload","suggested at 0.8, set once",2,ml,25,0,0.000,25,0,0,350,5,35.397,0,0.000,4393.98
-"main workload","suggested at 0.8, set once",3,preview,186,23,31.060,186,0,0,2604,4,7.537,0,0.000,4193.23
-"main workload","suggested at 0.8, set once",3,ml,26,0,0.000,26,0,0,364,4,7.537,0,0.000,4193.23
-"main workload","suggested at 0.8, set once",4,preview,177,26,25.470,177,0,0,2478,2,3.097,0,0.000,2904.10
-"main workload","suggested at 0.8, set once",4,ml,18,0,0.000,18,0,0,252,2,3.097,0,0.000,2904.10
-"main workload","suggested at 0.8, set once",5,preview,206,36,66.041,206,0,0,2884,5,19.720,2,2.914,3279.96
-"main workload","suggested at 0.8, set once",5,ml,22,0,0.000,22,0,0,308,5,19.720,2,2.914,3279.96
-"main workload","generous at 0.95, set once",1,preview,170,6,9.487,170,0,0,2380,2,3.003,0,0.000,4873.39
-"main workload","generous at 0.95, set once",1,ml,17,0,0.000,17,0,0,238,2,3.003,0,0.000,4873.39
-"main workload","generous at 0.95, set once",2,preview,192,10,19.551,192,0,0,2688,4,34.685,0,0.000,4546.27
-"main workload","generous at 0.95, set once",2,ml,25,0,0.000,25,0,0,350,4,34.685,0,0.000,4546.27
-"main workload","generous at 0.95, set once",3,preview,186,6,18.127,186,0,0,2604,4,7.393,0,0.000,4034.83
-"main workload","generous at 0.95, set once",3,ml,26,0,0.000,26,0,0,364,4,7.393,0,0.000,4034.83
-"main workload","generous at 0.95, set once",4,preview,177,6,4.437,177,0,0,2478,2,1.725,0,0.000,2978.79
-"main workload","generous at 0.95, set once",4,ml,18,0,0.000,18,0,0,252,2,1.725,0,0.000,2978.79
-"main workload","generous at 0.95, set once",5,preview,206,16,32.424,206,0,0,2884,6,22.663,2,4.441,2840.99
-"main workload","generous at 0.95, set once",5,ml,22,0,0.000,22,0,0,308,6,22.663,2,4.441,2840.99
-"main workload","generous at 0.98, set once",1,preview,170,5,5.157,170,0,0,2380,1,1.097,0,0.000,5077.89
-"main workload","generous at 0.98, set once",1,ml,17,0,0.000,17,0,0,238,1,1.097,0,0.000,5077.89
-"main workload","generous at 0.98, set once",2,preview,192,8,12.801,192,0,0,2688,4,34.011,0,0.000,5369.55
-"main workload","generous at 0.98, set once",2,ml,25,0,0.000,25,0,0,350,4,34.011,0,0.000,5369.55
-"main workload","generous at 0.98, set once",3,preview,186,3,14.342,186,0,0,2604,4,7.803,0,0.000,3219.04
-"main workload","generous at 0.98, set once",3,ml,26,0,0.000,26,0,0,364,4,7.803,0,0.000,3219.04
-"main workload","generous at 0.98, set once",4,preview,177,2,1.461,177,0,0,2478,2,2.075,0,0.000,2795.22
-"main workload","generous at 0.98, set once",4,ml,18,0,0.000,18,0,0,252,2,2.075,0,0.000,2795.22
-"main workload","generous at 0.98, set once",5,preview,206,10,17.598,206,0,0,2884,6,21.313,2,3.316,3161.78
-"main workload","generous at 0.98, set once",5,ml,22,0,0.000,22,0,0,308,6,21.313,2,3.316,3161.78
-"main workload","generous at 0.95, moved later only when at risk",1,preview,170,2,4.712,170,110,0,5053,1,2.620,0,0.000,5054.40
-"main workload","generous at 0.95, moved later only when at risk",1,ml,17,0,0.000,17,0,0,238,1,2.620,0,0.000,5054.40
-"main workload","generous at 0.95, moved later only when at risk",2,preview,192,2,1.794,192,150,0,6179,4,34.139,0,0.000,4538.62
-"main workload","generous at 0.95, moved later only when at risk",2,ml,25,0,0.000,25,0,0,350,4,34.139,0,0.000,4538.62
-"main workload","generous at 0.95, moved later only when at risk",3,preview,186,0,0.000,186,135,0,5857,4,7.320,0,0.000,4087.96
-"main workload","generous at 0.95, moved later only when at risk",3,ml,26,0,0.000,26,0,0,364,4,7.320,0,0.000,4087.96
-"main workload","generous at 0.95, moved later only when at risk",4,preview,177,1,0.375,177,136,0,5713,2,2.052,0,0.000,2712.28
-"main workload","generous at 0.95, moved later only when at risk",4,ml,18,0,0.000,18,0,0,252,2,2.052,0,0.000,2712.28
-"main workload","generous at 0.95, moved later only when at risk",5,preview,206,4,4.645,206,188,0,6584,7,22.249,2,3.857,2834.03
-"main workload","generous at 0.95, moved later only when at risk",5,ml,22,0,0.000,22,0,0,308,7,22.249,2,3.857,2834.03
-"main workload","generous at 0.95, user tightens to the next session",1,preview,170,6,9.485,170,0,0,2550,2,3.059,0,0.000,4784.00
-"main workload","generous at 0.95, user tightens to the next session",1,ml,17,0,0.000,17,0,3,255,2,3.059,0,0.000,4784.00
-"main workload","generous at 0.95, user tightens to the next session",2,preview,192,10,19.561,192,0,0,2880,4,33.989,0,0.000,4654.77
-"main workload","generous at 0.95, user tightens to the next session",2,ml,25,0,0.000,25,0,2,375,4,33.989,0,0.000,4654.77
-"main workload","generous at 0.95, user tightens to the next session",3,preview,186,6,18.127,186,0,0,2790,4,7.549,0,0.000,3941.59
-"main workload","generous at 0.95, user tightens to the next session",3,ml,26,0,0.000,26,0,3,390,4,7.549,0,0.000,3941.59
-"main workload","generous at 0.95, user tightens to the next session",4,preview,177,6,4.437,177,0,0,2655,2,1.725,0,0.000,2978.79
-"main workload","generous at 0.95, user tightens to the next session",4,ml,18,0,0.000,18,0,0,270,2,1.725,0,0.000,2978.79
-"main workload","generous at 0.95, user tightens to the next session",5,preview,206,16,32.193,206,0,1,3090,6,22.423,2,4.511,2735.45
-"main workload","generous at 0.95, user tightens to the next session",5,ml,22,0,0.000,22,0,5,330,6,22.423,2,4.511,2735.45
+"main workload","suggested at 0.8, set once",1,preview,170,17,19.593,170,0,0,2368,1,1.092,0,0.000,5118.72
+"main workload","suggested at 0.8, set once",1,ml,17,0,0.000,17,0,0,238,1,1.092,0,0.000,5118.72
+"main workload","suggested at 0.8, set once",2,preview,192,27,41.422,192,0,0,2688,3,34.372,0,0.000,4735.27
+"main workload","suggested at 0.8, set once",2,ml,25,1,0.198,25,0,0,350,3,34.372,0,0.000,4735.27
+"main workload","suggested at 0.8, set once",3,preview,186,24,31.554,186,0,0,2604,4,7.575,0,0.000,3579.89
+"main workload","suggested at 0.8, set once",3,ml,26,2,0.299,26,0,0,364,4,7.575,0,0.000,3579.89
+"main workload","suggested at 0.8, set once",4,preview,177,26,25.544,177,0,0,2478,2,3.032,0,0.000,2857.55
+"main workload","suggested at 0.8, set once",4,ml,18,2,0.667,18,0,0,252,2,3.032,0,0.000,2857.55
+"main workload","suggested at 0.8, set once",5,preview,206,38,66.497,206,0,0,2884,6,22.445,2,4.452,2865.39
+"main workload","suggested at 0.8, set once",5,ml,22,1,0.150,22,0,0,308,6,22.445,2,4.452,2865.39
+"main workload","generous at 0.95, set once",1,preview,170,6,9.485,170,0,0,2380,1,2.626,0,0.000,5023.12
+"main workload","generous at 0.95, set once",1,ml,17,0,0.000,17,0,0,238,1,2.626,0,0.000,5023.12
+"main workload","generous at 0.95, set once",2,preview,192,10,19.806,192,0,0,2688,4,34.310,0,0.000,4851.29
+"main workload","generous at 0.95, set once",2,ml,25,0,0.000,25,0,0,350,4,34.310,0,0.000,4851.29
+"main workload","generous at 0.95, set once",3,preview,186,6,18.122,186,0,0,2604,4,7.379,0,0.000,3885.26
+"main workload","generous at 0.95, set once",3,ml,26,0,0.000,26,0,0,364,4,7.379,0,0.000,3885.26
+"main workload","generous at 0.95, set once",4,preview,177,6,4.444,177,0,0,2478,2,1.725,0,0.000,3007.58
+"main workload","generous at 0.95, set once",4,ml,18,0,0.000,18,0,0,252,2,1.725,0,0.000,3007.58
+"main workload","generous at 0.95, set once",5,preview,206,17,32.094,206,0,0,2884,6,20.894,2,2.788,3345.60
+"main workload","generous at 0.95, set once",5,ml,22,0,0.000,22,0,0,308,6,20.894,2,2.788,3345.60
+"main workload","generous at 0.98, set once",1,preview,170,5,5.147,170,0,0,2380,1,1.097,0,0.000,5037.04
+"main workload","generous at 0.98, set once",1,ml,17,0,0.000,17,0,0,238,1,1.097,0,0.000,5037.04
+"main workload","generous at 0.98, set once",2,preview,192,8,12.794,192,0,0,2688,5,34.898,0,0.000,4102.73
+"main workload","generous at 0.98, set once",2,ml,25,0,0.000,25,0,0,350,5,34.898,0,0.000,4102.73
+"main workload","generous at 0.98, set once",3,preview,186,3,14.342,186,0,0,2604,4,7.483,0,0.000,3410.15
+"main workload","generous at 0.98, set once",3,ml,26,0,0.000,26,0,0,364,4,7.483,0,0.000,3410.15
+"main workload","generous at 0.98, set once",4,preview,177,2,1.461,177,0,0,2478,2,2.075,0,0.000,2791.69
+"main workload","generous at 0.98, set once",4,ml,18,0,0.000,18,0,0,252,2,2.075,0,0.000,2791.69
+"main workload","generous at 0.98, set once",5,preview,206,10,18.112,206,0,0,2884,6,22.561,2,4.451,2905.07
+"main workload","generous at 0.98, set once",5,ml,22,0,0.000,22,0,0,308,6,22.561,2,4.451,2905.07
+"main workload","generous at 0.95, moved later only when at risk",1,preview,170,2,4.713,170,111,0,4943,2,1.193,0,0.000,4837.71
+"main workload","generous at 0.95, moved later only when at risk",1,ml,17,0,0.000,17,0,0,238,2,1.193,0,0.000,4837.71
+"main workload","generous at 0.95, moved later only when at risk",2,preview,192,2,1.796,192,162,0,6065,4,34.248,0,0.000,4693.22
+"main workload","generous at 0.95, moved later only when at risk",2,ml,25,0,0.000,25,0,0,350,4,34.248,0,0.000,4693.22
+"main workload","generous at 0.95, moved later only when at risk",3,preview,186,0,0.000,186,132,0,5667,4,7.520,0,0.000,4016.12
+"main workload","generous at 0.95, moved later only when at risk",3,ml,26,0,0.000,26,0,0,364,4,7.520,0,0.000,4016.12
+"main workload","generous at 0.95, moved later only when at risk",4,preview,177,1,0.375,177,143,0,5655,2,2.334,0,0.000,2716.01
+"main workload","generous at 0.95, moved later only when at risk",4,ml,18,0,0.000,18,0,0,252,2,2.334,0,0.000,2716.01
+"main workload","generous at 0.95, moved later only when at risk",5,preview,206,3,4.346,206,193,0,6457,7,26.067,2,5.180,2553.24
+"main workload","generous at 0.95, moved later only when at risk",5,ml,22,0,0.000,22,0,0,308,7,26.067,2,5.180,2553.24
+"main workload","generous at 0.95, user tightens to the next session",1,preview,170,6,9.485,170,0,0,2550,1,2.619,0,0.000,4999.71
+"main workload","generous at 0.95, user tightens to the next session",1,ml,17,0,0.000,17,0,1,255,1,2.619,0,0.000,4999.71
+"main workload","generous at 0.95, user tightens to the next session",2,preview,192,10,19.803,192,0,1,2880,4,34.311,0,0.000,4814.96
+"main workload","generous at 0.95, user tightens to the next session",2,ml,25,0,0.000,25,0,0,375,4,34.311,0,0.000,4814.96
+"main workload","generous at 0.95, user tightens to the next session",3,preview,186,6,18.124,186,0,2,2790,4,7.379,0,0.000,3846.46
+"main workload","generous at 0.95, user tightens to the next session",3,ml,26,0,0.000,26,0,3,390,4,7.379,0,0.000,3846.46
+"main workload","generous at 0.95, user tightens to the next session",4,preview,177,6,4.444,177,0,0,2655,2,1.725,0,0.000,3007.58
+"main workload","generous at 0.95, user tightens to the next session",4,ml,18,0,0.000,18,0,0,270,2,1.725,0,0.000,3007.58
+"main workload","generous at 0.95, user tightens to the next session",5,preview,206,17,32.063,206,0,1,3090,6,21.029,2,2.788,3278.10
+"main workload","generous at 0.95, user tightens to the next session",5,ml,22,0,0.000,22,0,1,330,6,21.029,2,2.788,3278.10
 "contention","workload deadlines, W and finish calibrated",1,preview,363,171,809.788,0,0,0,0,10,38.651,0,0.000,7181.65
 "contention","workload deadlines, W and finish calibrated",1,ml,25,0,0.000,0,0,0,0,10,38.651,0,0.000,7181.65
 "contention","workload deadlines, W and finish calibrated",2,preview,337,156,937.055,0,0,0,0,4,11.104,1,20.511,7417.97
@@ -89,53 +89,53 @@ workload,arm,seed,kind,jobs,missed,late_h,suggested,at_risk_moves,tightened,poli
 "contention","guess: previews and ML due an hour after submission",4,ml,25,25,128.636,0,0,0,0,5,27.053,0,0.000,6857.12
 "contention","guess: previews and ML due an hour after submission",5,preview,345,299,1509.022,0,0,0,0,10,108.627,0,0.000,6815.91
 "contention","guess: previews and ML due an hour after submission",5,ml,25,25,125.173,0,0,0,0,10,108.627,0,0.000,6815.91
-"contention","suggested at 0.8, set once",1,preview,363,53,179.175,363,0,0,5082,6,13.652,0,0.000,11920.95
-"contention","suggested at 0.8, set once",1,ml,25,0,0.000,25,0,0,350,6,13.652,0,0.000,11920.95
-"contention","suggested at 0.8, set once",2,preview,337,63,340.606,337,0,0,4718,2,2.340,1,19.829,8968.69
-"contention","suggested at 0.8, set once",2,ml,30,0,0.000,30,0,0,420,2,2.340,1,19.829,8968.69
-"contention","suggested at 0.8, set once",3,preview,340,45,149.291,340,0,0,4760,1,9.454,0,0.000,9431.31
-"contention","suggested at 0.8, set once",3,ml,22,0,0.000,22,0,0,308,1,9.454,0,0.000,9431.31
-"contention","suggested at 0.8, set once",4,preview,364,71,279.736,364,0,0,5096,4,18.719,0,0.000,9254.09
-"contention","suggested at 0.8, set once",4,ml,25,0,0.000,25,0,0,350,4,18.719,0,0.000,9254.09
-"contention","suggested at 0.8, set once",5,preview,345,50,271.401,345,0,0,4830,9,96.906,0,0.000,11298.01
-"contention","suggested at 0.8, set once",5,ml,25,0,0.000,25,0,0,350,9,96.906,0,0.000,11298.01
-"contention","generous at 0.95, set once",1,preview,363,3,22.875,363,0,0,5082,8,27.454,0,0.000,8689.84
-"contention","generous at 0.95, set once",1,ml,25,0,0.000,25,0,0,350,8,27.454,0,0.000,8689.84
-"contention","generous at 0.95, set once",2,preview,337,4,16.419,337,0,0,4718,4,9.021,1,19.711,9299.87
-"contention","generous at 0.95, set once",2,ml,30,0,0.000,30,0,0,420,4,9.021,1,19.711,9299.87
-"contention","generous at 0.95, set once",3,preview,340,3,28.815,340,0,0,4760,2,10.922,0,0.000,7091.62
-"contention","generous at 0.95, set once",3,ml,22,0,0.000,22,0,0,308,2,10.922,0,0.000,7091.62
-"contention","generous at 0.95, set once",4,preview,364,4,7.027,364,0,0,5096,5,22.403,0,0.000,8540.91
-"contention","generous at 0.95, set once",4,ml,25,0,0.000,25,0,0,350,5,22.403,0,0.000,8540.91
-"contention","generous at 0.95, set once",5,preview,345,7,61.054,345,0,0,4830,9,106.556,0,0.000,9494.66
-"contention","generous at 0.95, set once",5,ml,25,0,0.000,25,0,0,350,9,106.556,0,0.000,9494.66
-"contention","generous at 0.98, set once",1,preview,363,1,17.109,363,0,0,5082,6,21.958,0,0.000,6427.90
-"contention","generous at 0.98, set once",1,ml,25,0,0.000,25,0,0,350,6,21.958,0,0.000,6427.90
-"contention","generous at 0.98, set once",2,preview,337,4,10.622,337,0,0,4718,2,1.422,1,20.108,9289.82
-"contention","generous at 0.98, set once",2,ml,30,0,0.000,30,0,0,420,2,1.422,1,20.108,9289.82
-"contention","generous at 0.98, set once",3,preview,340,2,22.774,340,0,0,4760,3,12.897,0,0.000,6519.80
-"contention","generous at 0.98, set once",3,ml,22,0,0.000,22,0,0,308,3,12.897,0,0.000,6519.80
-"contention","generous at 0.98, set once",4,preview,364,2,1.973,364,0,0,5096,4,20.353,0,0.000,6857.71
-"contention","generous at 0.98, set once",4,ml,25,0,0.000,25,0,0,350,4,20.353,0,0.000,6857.71
-"contention","generous at 0.98, set once",5,preview,345,4,51.068,345,0,0,4808,9,94.369,0,0.000,7641.18
-"contention","generous at 0.98, set once",5,ml,25,0,0.000,25,0,0,350,9,94.369,0,0.000,7641.18
-"contention","generous at 0.95, moved later only when at risk",1,preview,363,1,16.609,363,71,0,8312,6,19.140,0,0.000,9226.48
-"contention","generous at 0.95, moved later only when at risk",1,ml,25,0,0.000,25,0,0,350,6,19.140,0,0.000,9226.48
-"contention","generous at 0.95, moved later only when at risk",2,preview,337,2,4.545,337,100,0,8211,4,10.902,1,19.718,9480.77
-"contention","generous at 0.95, moved later only when at risk",2,ml,30,0,0.000,30,0,0,420,4,10.902,1,19.718,9480.77
-"contention","generous at 0.95, moved later only when at risk",3,preview,340,2,21.016,340,96,0,8077,4,13.612,0,0.000,6519.32
-"contention","generous at 0.95, moved later only when at risk",3,ml,22,0,0.000,22,0,0,308,4,13.612,0,0.000,6519.32
-"contention","generous at 0.95, moved later only when at risk",4,preview,364,0,0.000,364,84,0,8376,3,14.201,0,0.000,8763.88
-"contention","generous at 0.95, moved later only when at risk",4,ml,25,0,0.000,25,0,0,350,3,14.201,0,0.000,8763.88
-"contention","generous at 0.95, moved later only when at risk",5,preview,345,3,44.749,345,107,0,8568,9,102.531,0,0.000,9955.79
-"contention","generous at 0.95, moved later only when at risk",5,ml,25,0,0.000,25,0,0,350,9,102.531,0,0.000,9955.79
-"contention","generous at 0.95, user tightens to the next session",1,preview,363,12,53.147,363,0,224,5445,10,40.401,0,0.000,7828.82
-"contention","generous at 0.95, user tightens to the next session",1,ml,25,0,0.000,25,0,0,375,10,40.401,0,0.000,7828.82
-"contention","generous at 0.95, user tightens to the next session",2,preview,337,9,36.183,337,0,182,5055,5,9.350,1,18.088,9788.44
-"contention","generous at 0.95, user tightens to the next session",2,ml,30,0,0.000,30,0,1,450,5,9.350,1,18.088,9788.44
-"contention","generous at 0.95, user tightens to the next session",3,preview,340,4,29.690,340,0,208,5100,5,12.107,0,0.000,6977.17
-"contention","generous at 0.95, user tightens to the next session",3,ml,22,0,0.000,22,0,1,330,5,12.107,0,0.000,6977.17
-"contention","generous at 0.95, user tightens to the next session",4,preview,364,6,34.128,364,0,200,5460,3,17.886,0,0.000,10551.50
-"contention","generous at 0.95, user tightens to the next session",4,ml,25,0,0.000,25,0,3,375,3,17.886,0,0.000,10551.50
-"contention","generous at 0.95, user tightens to the next session",5,preview,345,9,75.792,345,0,208,5175,12,110.982,0,0.000,10389.20
-"contention","generous at 0.95, user tightens to the next session",5,ml,25,0,0.000,25,0,5,375,12,110.982,0,0.000,10389.20
+"contention","suggested at 0.8, set once",1,preview,363,45,161.172,363,0,0,5082,6,11.816,0,0.000,10882.97
+"contention","suggested at 0.8, set once",1,ml,25,0,0.000,25,0,0,350,6,11.816,0,0.000,10882.97
+"contention","suggested at 0.8, set once",2,preview,337,60,288.316,337,0,0,4718,2,3.158,1,19.704,10896.70
+"contention","suggested at 0.8, set once",2,ml,30,0,0.000,30,0,0,420,2,3.158,1,19.704,10896.70
+"contention","suggested at 0.8, set once",3,preview,340,47,155.729,340,0,0,4760,1,7.743,0,0.000,9715.70
+"contention","suggested at 0.8, set once",3,ml,22,0,0.000,22,0,0,308,1,7.743,0,0.000,9715.70
+"contention","suggested at 0.8, set once",4,preview,364,68,302.579,364,0,0,5096,4,15.909,0,0.000,8598.42
+"contention","suggested at 0.8, set once",4,ml,25,1,0.246,25,0,0,350,4,15.909,0,0.000,8598.42
+"contention","suggested at 0.8, set once",5,preview,345,62,380.959,345,0,0,4830,10,100.497,0,0.000,9592.58
+"contention","suggested at 0.8, set once",5,ml,25,1,0.458,25,0,0,350,10,100.497,0,0.000,9592.58
+"contention","generous at 0.95, set once",1,preview,363,2,20.662,363,0,0,5082,8,18.518,0,0.000,9385.13
+"contention","generous at 0.95, set once",1,ml,25,0,0.000,25,0,0,350,8,18.518,0,0.000,9385.13
+"contention","generous at 0.95, set once",2,preview,337,5,30.356,337,0,0,4685,6,41.863,1,19.596,10331.16
+"contention","generous at 0.95, set once",2,ml,30,0,0.000,30,0,0,420,6,41.863,1,19.596,10331.16
+"contention","generous at 0.95, set once",3,preview,340,3,27.137,340,0,0,4760,4,15.398,0,0.000,6803.73
+"contention","generous at 0.95, set once",3,ml,22,0,0.000,22,0,0,308,4,15.398,0,0.000,6803.73
+"contention","generous at 0.95, set once",4,preview,364,4,4.369,364,0,0,5096,3,14.739,0,0.000,8914.63
+"contention","generous at 0.95, set once",4,ml,25,0,0.000,25,0,0,350,3,14.739,0,0.000,8914.63
+"contention","generous at 0.95, set once",5,preview,345,6,63.640,345,0,0,4830,11,116.036,0,0.000,10160.29
+"contention","generous at 0.95, set once",5,ml,25,0,0.000,25,0,0,350,11,116.036,0,0.000,10160.29
+"contention","generous at 0.98, set once",1,preview,363,2,18.660,363,0,0,5082,6,15.364,0,0.000,7388.99
+"contention","generous at 0.98, set once",1,ml,25,0,0.000,25,0,0,350,6,15.364,0,0.000,7388.99
+"contention","generous at 0.98, set once",2,preview,337,3,4.226,337,0,0,4707,1,1.464,1,20.002,8095.95
+"contention","generous at 0.98, set once",2,ml,30,0,0.000,30,0,0,420,1,1.464,1,20.002,8095.95
+"contention","generous at 0.98, set once",3,preview,340,2,21.768,340,0,0,4760,3,11.897,0,0.000,5916.04
+"contention","generous at 0.98, set once",3,ml,22,0,0.000,22,0,0,308,3,11.897,0,0.000,5916.04
+"contention","generous at 0.98, set once",4,preview,364,1,1.590,364,0,0,5096,3,19.488,0,0.000,6866.30
+"contention","generous at 0.98, set once",4,ml,25,0,0.000,25,0,0,350,3,19.488,0,0.000,6866.30
+"contention","generous at 0.98, set once",5,preview,345,3,41.351,345,0,0,4808,8,91.800,0,0.000,8464.70
+"contention","generous at 0.98, set once",5,ml,25,0,0.000,25,0,0,350,8,91.800,0,0.000,8464.70
+"contention","generous at 0.95, moved later only when at risk",1,preview,363,1,16.608,363,76,0,8347,8,21.838,0,0.000,9503.92
+"contention","generous at 0.95, moved later only when at risk",1,ml,25,0,0.000,25,0,0,350,8,21.838,0,0.000,9503.92
+"contention","generous at 0.95, moved later only when at risk",2,preview,337,2,4.901,337,91,0,8111,4,9.076,1,20.028,9613.28
+"contention","generous at 0.95, moved later only when at risk",2,ml,30,0,0.000,30,0,0,420,4,9.076,1,20.028,9613.28
+"contention","generous at 0.95, moved later only when at risk",3,preview,340,2,18.035,340,96,0,7954,3,12.300,0,0.000,6290.63
+"contention","generous at 0.95, moved later only when at risk",3,ml,22,0,0.000,22,0,0,308,3,12.300,0,0.000,6290.63
+"contention","generous at 0.95, moved later only when at risk",4,preview,364,0,0.000,364,78,0,8050,3,14.407,0,0.000,9072.59
+"contention","generous at 0.95, moved later only when at risk",4,ml,25,0,0.000,25,0,0,350,3,14.407,0,0.000,9072.59
+"contention","generous at 0.95, moved later only when at risk",5,preview,345,2,43.736,345,95,0,8456,12,115.945,0,0.000,9194.59
+"contention","generous at 0.95, moved later only when at risk",5,ml,25,0,0.000,25,0,0,350,12,115.945,0,0.000,9194.59
+"contention","generous at 0.95, user tightens to the next session",1,preview,363,9,43.440,363,0,224,5445,9,28.404,0,0.000,9227.04
+"contention","generous at 0.95, user tightens to the next session",1,ml,25,0,0.000,25,0,3,375,9,28.404,0,0.000,9227.04
+"contention","generous at 0.95, user tightens to the next session",2,preview,337,7,28.908,337,0,181,5055,4,9.667,1,17.749,9914.26
+"contention","generous at 0.95, user tightens to the next session",2,ml,30,0,0.000,30,0,5,450,4,9.667,1,17.749,9914.26
+"contention","generous at 0.95, user tightens to the next session",3,preview,340,6,28.841,340,0,206,5100,4,10.557,0,0.000,7388.53
+"contention","generous at 0.95, user tightens to the next session",3,ml,22,0,0.000,22,0,4,330,4,10.557,0,0.000,7388.53
+"contention","generous at 0.95, user tightens to the next session",4,preview,364,7,33.829,364,0,196,5460,4,15.652,0,0.000,10532.23
+"contention","generous at 0.95, user tightens to the next session",4,ml,25,0,0.000,25,0,5,375,4,15.652,0,0.000,10532.23
+"contention","generous at 0.95, user tightens to the next session",5,preview,345,8,77.068,345,0,211,5175,12,126.093,0,0.000,9291.61
+"contention","generous at 0.95, user tightens to the next session",5,ml,25,0,0.000,25,0,5,375,12,126.093,0,0.000,9291.61

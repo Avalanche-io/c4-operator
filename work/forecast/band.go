@@ -1,6 +1,7 @@
 package forecast
 
 import (
+	"math"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/work/estimate"
@@ -47,24 +48,27 @@ func (b Band) Width(start time.Time) float64 {
 // shown.
 //
 // The scheduler's ETA50 and ETA90 are its planned finishes for the job's
-// W and W90 (sched reads Summary.W and Summary.W90), with the critical
-// path tPath added once as a tail (TailAware). That tail is the right
-// margin for deciding who is late and what burst to buy; as the finish
-// shown to a person it runs late (eta-deadlines evidence F9: W/P + t_path
-// was 26% late as a median, W/P + t_path/2 unbiased). Display therefore:
+// W and W90 (sched reads Summary.W and Summary.W90), with a share tail of
+// the critical path t_path added as the last wave: under Graham's bound
+// (sched's ETAs since its tail hybrid) that share is 1 - k/C, k the job's
+// slots per unit and C its pool group's planning capacity (Tail). As the
+// finish shown to a person the whole tail runs late (eta-deadlines
+// evidence F9: W/P + t_path was 26% late as a median, W/P + t_path/2
+// unbiased). Display therefore:
 //
 //  1. places each calibrated percentile Wq on the line through (W, ETA50)
 //     and (W90, ETA90), so the band follows the calibrated percentiles
 //     and the plan's rate for this job alike;
-//  2. takes back half the tail, s.TPath/2, but never ends before now
-//     plus the whole critical path: every remaining unit must finish, so
+//  2. replaces the tail the scheduler added (tail*TPath) with half the
+//     critical path, but never ends before now plus the whole critical
+//     path: every remaining unit must finish, so
 //     a job whose units all run in one wave (a CI pipeline, a short
 //     preview) finishes no sooner than its longest unit, however small
 //     W/C is. (hack/sim's ETA experiment found the half-tail floor
 //     halved such jobs' remaining time.)
 //
 // It returns the zero Band when the scheduler gave no ETA.
-func Display(now time.Time, s estimate.Summary, eta50, eta90 time.Time) Band {
+func Display(now time.Time, s estimate.Summary, eta50, eta90 time.Time, tail float64) Band {
 	if eta50.IsZero() {
 		return Band{}
 	}
@@ -77,9 +81,9 @@ func Display(now time.Time, s estimate.Summary, eta50, eta90 time.Time) Band {
 			f := (w - s.W) / (s.W90 - s.W)
 			t = eta50.Add(time.Duration(f * float64(eta90.Sub(eta50))))
 		}
-		half := time.Duration(s.TPath / 2 * float64(time.Second))
-		t = t.Add(-half)
-		if floor := now.Add(2 * half); t.Before(floor) {
+		path := time.Duration(s.TPath * float64(time.Second))
+		t = t.Add(-time.Duration(tail*float64(path)) + path/2)
+		if floor := now.Add(path); t.Before(floor) {
 			t = floor
 		}
 		return t
@@ -102,4 +106,15 @@ func Display(now time.Time, s estimate.Summary, eta50, eta90 time.Time) Band {
 		b.P95 = b.P90
 	}
 	return b
+}
+
+// Tail is the share of the critical path the scheduler's ETAs include
+// as the last wave: 1 - k/C under Graham's bound, k the job's slots per
+// unit and C its pool group's planning capacity (sched.JobState
+// .GroupSlots); 1 when C is unknown (0).
+func Tail(slotsPerUnit int, groupSlots float64) float64 {
+	if groupSlots <= 0 {
+		return 1
+	}
+	return math.Max(0, 1-float64(max(1, slotsPerUnit))/groupSlots)
 }

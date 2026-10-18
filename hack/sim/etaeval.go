@@ -263,7 +263,7 @@ func (a *etaArm) show(s sched.Snapshot, i int, d sched.Decisions) forecast.Band 
 	sj := s.Jobs[i]
 	key := forecast.FinishKey{Class: sj.Class, Stage: forecast.StageOf(sj.UnitsDone, sj.UnitsDone+sj.RunnableTotal+sj.Blocked+len(sj.RunningUnits))}
 	js := d.Jobs[sj.ID]
-	return a.fcal.Apply(key, s.Now, forecast.Display(s.Now, sj.Estimate, js.ETA50, js.ETA90))
+	return a.fcal.Apply(key, s.Now, forecast.Display(s.Now, sj.Estimate, js.ETA50, js.ETA90, forecast.Tail(sj.SlotsPerUnit, js.GroupSlots)))
 }
 
 // shown is job i's band under its current deadline: one policy run.
@@ -336,7 +336,7 @@ func (a *etaArm) afterDecide(e *engine, s sched.Snapshot, d sched.Decisions) {
 			continue
 		}
 		js := d.Jobs[sj.ID]
-		b := forecast.Display(now, sj.Estimate, js.ETA50, js.ETA90)
+		b := forecast.Display(now, sj.Estimate, js.ETA50, js.ETA90, forecast.Tail(sj.SlotsPerUnit, js.GroupSlots))
 		if b.IsZero() {
 			continue
 		}
