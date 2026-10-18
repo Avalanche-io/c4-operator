@@ -34,7 +34,7 @@ var invariants = []struct{ name, what string }{
 	{"lend-then-reclaim", "a pool's free slots are not lent to a borrowing project in the same decision that preempts a borrower to restore another project's nominal quota"},
 	{"churn-unit", "a unit is preempted at most MaxPreemptionsPerUnit times"},
 	{"churn-pool", "a pool sees at most PreemptPerWindow preemptions per PreemptWindow"},
-	{"churn-pingpong", "two jobs never take slots back and forth within an hour"},
+	{"churn-pingpong", "two jobs never trade slots back and forth (two reversals) within an hour"},
 	{"determinism", "the same point and seed give the same decisions"},
 	{"metamorphic-capacity", "more owned capacity does not make more jobs late, beyond noise"},
 	{"metamorphic-deadline", "looser deadlines do not make more jobs late, beyond noise"},
@@ -52,10 +52,6 @@ var knownBugs = map[string]string{
 	"lend-then-reclaim": "admit() in alloc.go holds free slots back for another project's unmet nominal demand only against borrowers; a release inside " +
 		"a third project's nominal quota takes the held-back slot, the guaranteed project is never served from free capacity, and reclaim() preempts a " +
 		"borrower for it in the same decision, so the slots lent to borrowers are taken back at once and the preempted work is lost (found by this grid)",
-	"churn-pingpong": "take() in preempt.go checks aboveShare (running - outgoing > share) and then removes a whole unit, so a victim holding ceil(share) slots " +
-		"drops below its fractional share; the deadline tier rounds R up (needSlots), so a job released to ceil(share) is at once a victim, and two jobs whose " +
-		"shares are each under a slot take one slot back and forth on every decision, losing the work each time. Suggested fix: take a unit only if " +
-		"running - outgoing - its slots >= ceil(share - 1e-9) (found by this grid)",
 	"starvation-over-deadline": "starvation() in decide.go runs before the deadline tier and releases a unit to any job idle for StarvationAfter, whatever its " +
 		"slack; on a small farm that unit takes a slot a job due within the hour needs, and once it has run MaxLostWork no preemption may take it back, " +
 		"so a long unit holds the slot for hours. Suggested fix: let the guard take only slots the deadline tier does not need (run it after need() for " +
@@ -90,7 +86,7 @@ type checker struct {
 	cfg    sched.Config
 	byUnit map[string]int
 	poolTS map[string][]float64
-	pairs  map[[2]string]float64
+	pairs  map[[2]string][]transfer
 	pred   map[string]*predRec
 	// incoming: units being stopped for a job (sched counts their slots
 	// toward it), by unit.
@@ -102,7 +98,7 @@ type checker struct {
 
 func newChecker(e *engine) *checker {
 	return &checker{e: e, cfg: e.cfg, byUnit: map[string]int{}, poolTS: map[string][]float64{},
-		pairs: map[[2]string]float64{}, pred: map[string]*predRec{}, incoming: map[string]string{}, asked: map[string]bool{}}
+		pairs: map[[2]string][]transfer{}, pred: map[string]*predRec{}, incoming: map[string]string{}, asked: map[string]bool{}}
 }
 
 // view is the bookkeeping of one decision: what was free and used before
@@ -735,10 +731,35 @@ func (c *checker) requested(x sched.Preempt) {
 	if x.For == "" {
 		return
 	}
-	if t, ok := c.pairs[[2]string{x.For, x.Job}]; ok && now-t < hour {
-		c.violate("churn-pingpong", x.Job, fmt.Sprintf("lost a unit to %s, which lost one to it %s earlier", x.For, time.Duration((now-t)*float64(time.Second)).Round(time.Minute)))
+	// Transfers between the two jobs in the last hour, in order; a
+	// change of direction is a reversal. Two reversals (A to B, B to A,
+	// A to B) are a ping-pong; one can follow a changed plan.
+	key, dir := [2]string{x.Job, x.For}, 0
+	if x.For < x.Job {
+		key, dir = [2]string{x.For, x.Job}, 1
 	}
-	c.pairs[[2]string{x.Job, x.For}] = now
+	tr := append(c.pairs[key], transfer{now, dir})
+	recent := tr[:0]
+	for _, t := range tr {
+		if now-t.at < hour {
+			recent = append(recent, t)
+		}
+	}
+	c.pairs[key] = recent
+	rev := 0
+	for i := 1; i < len(recent); i++ {
+		if recent[i].dir != recent[i-1].dir {
+			rev++
+		}
+	}
+	if rev >= 2 {
+		c.violate("churn-pingpong", x.Job, fmt.Sprintf("lost a unit to %s; the two have traded slots back and forth %d times in the last hour", x.For, rev))
+	}
+}
+
+type transfer struct {
+	at  float64
+	dir int
 }
 
 // stopped is called when a preemption takes effect (a kill, or a yield

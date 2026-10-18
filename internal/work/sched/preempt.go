@@ -14,21 +14,21 @@ import (
 //     below their required rate there, takes slots back from projects
 //     borrowing above their nominal;
 //   - feasibility: a job that is on time in the plan, is late at what it
-//     holds (max(W90/held, t_path) > T), and holds fewer than
-//     min(R, planned share) slots takes slots up to that number, from its
-//     own project's other jobs or from borrowers.
+//     holds (max(W90/held, t_path) > T), and holds at least a whole slot
+//     fewer than min(R, planned share) takes slots up to that number
+//     rounded down, from its own project's other jobs or from borrowers.
 //
 // A victim unit belongs to a preemptible job with slack above
-// PreemptSlack that holds more slots than its planned share (counting
-// units already being stopped), has been preempted fewer than
+// PreemptSlack that still holds its planned share, rounded up, without
+// the unit (counting units already being stopped), has been preempted fewer than
 // MaxPreemptionsPerUnit times, would lose at most MaxLostWork, and is
 // chosen by least lost work. Each pool
 // allows at most PreemptPerWindow preemptions per PreemptWindow.
 //
 // The share conditions keep preemption a correction toward the plan:
-// victims are never taken below their share and candidates never above
-// theirs, so two jobs cannot take units back and forth. A gang is taken
-// whole, so a gang job may drop below its share. Slots being freed are
+// victims are never taken below their share rounded up to whole slots
+// (what the deadline tier releases to) and candidates never above theirs,
+// so two jobs cannot take units back and forth. Slots being freed are
 // remembered in State, so later calls do not preempt again for the same
 // need.
 func (a *alloc) preempt() {
@@ -63,21 +63,25 @@ func (a *alloc) victimLoss(jc *jobCtx, ru RunningUnit) time.Duration {
 	return a.lostWork(ru)
 }
 
-// aboveShare reports whether the job holds more slots than its planned
-// share, not counting units already being stopped.
-func (jc *jobCtx) aboveShare() bool {
-	return float64(jc.running-jc.outgoing) > jc.share+1e-9
+// canGive reports whether the job may lose a unit of k slots and still
+// hold its planned share rounded up to whole slots, not counting units
+// already being stopped. The deadline tier releases up to ceil(R) (see
+// needSlots), so a job at ceil(share) holds what the plan gives it; taking
+// a unit from it would leave it below its share, and two jobs whose shares
+// are fractions of a slot would take one slot back and forth.
+func (jc *jobCtx) canGive(k int) bool {
+	return jc.running-jc.outgoing-k >= int(math.Ceil(jc.share-1e-9))
 }
 
 // victims lists eligible running units in pool, least lost work first.
 func (a *alloc) victims(pool string, ok func(*jobCtx) bool) []victim {
 	var out []victim
 	for _, jc := range a.jobs {
-		if !jc.j.Preemptible || jc.slack <= a.cfg.PreemptSlack || !jc.aboveShare() || !ok(jc) {
+		if !jc.j.Preemptible || jc.slack <= a.cfg.PreemptSlack || !ok(jc) {
 			continue
 		}
 		for _, ru := range jc.j.RunningUnits {
-			if ru.Pool != pool || ru.Preemptions >= a.cfg.MaxPreemptionsPerUnit {
+			if ru.Pool != pool || ru.Preemptions >= a.cfg.MaxPreemptionsPerUnit || !jc.canGive(ru.Slots) {
 				continue
 			}
 			if a.cfg.MaxLostWork > 0 && a.victimLoss(jc, ru) > a.cfg.MaxLostWork {
@@ -108,7 +112,7 @@ func (a *alloc) take(pool string, vs []victim, want int, reason PreemptReason, f
 		if freed >= want || a.budget(pool) <= 0 {
 			break
 		}
-		if !v.jc.aboveShare() || !still(v) {
+		if !v.jc.canGive(v.ru.Slots) || !still(v) {
 			continue
 		}
 		if _, pending := a.st.pending[v.ru.ID]; pending {
@@ -176,8 +180,14 @@ func (a *alloc) restoreFeasibility() {
 		if !jc.hasDeadline || !jc.planOK || !jc.canRelease() || jc.T <= 0 {
 			continue
 		}
+		// A candidate is short of its plan by at least a whole slot.
+		// Victims keep their share rounded up (canGive); candidates take
+		// it rounded down, so a job planned for a fraction of a slot
+		// waits for one to free instead of taking it from another, and
+		// the one-slot band between the two keeps units from going back
+		// and forth.
 		have := float64(jc.running + jc.incoming)
-		if have >= math.Min(jc.R, jc.share) || math.Max(div(jc.W90, have), jc.tpath) <= jc.T {
+		if have+1 > math.Min(jc.R, jc.share)+1e-9 || math.Max(div(jc.W90, have), jc.tpath) <= jc.T {
 			continue
 		}
 		cands = append(cands, jc)
@@ -185,7 +195,7 @@ func (a *alloc) restoreFeasibility() {
 	sort.SliceStable(cands, func(i, j int) bool { return cands[i].ratio() < cands[j].ratio() })
 	for _, jc := range cands {
 		// Enough to be on time, and no more than the plan gives it.
-		want := int(math.Ceil(math.Min(jc.R, jc.share)-1e-9)) - (jc.running + jc.incoming)
+		want := int(math.Floor(math.Min(jc.R, jc.share)+1e-9)) - (jc.running + jc.incoming)
 		// A gang needs room for all of it.
 		want = max(want, jc.unitSlots(jc.j.Runnable[jc.next]))
 		for _, pool := range jc.j.Pools {

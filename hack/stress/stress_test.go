@@ -169,16 +169,15 @@ func TestReproLatenessUnpriced(t *testing.T) {
 	}
 }
 
-// Found by the stress grid: preemption takes a whole unit from a victim
-// whose running slots are above its fractional planned share, leaving it
-// below that share, so two jobs with shares under one slot each take the
+// Regression, found by the stress grid: preemption took a whole unit from
+// a victim whose running slots were above its fractional planned share,
+// leaving it below that share, so two jobs with shares under one slot each take the
 // slot back and forth. The deadline tier rounds R up (needSlots uses
 // ceil) while aboveShare compares running slots with the unrounded share,
 // so a job released up to ceil(share) is at once a victim. On a one-slot
 // farm the two jobs below preempt each other on every decision and throw
 // the work away each time; in the grid it is the churn-pingpong finding.
 func TestReproPreemptPingPong(t *testing.T) {
-	skipRepro(t, "sched bug churn-pingpong (found by hack/stress): a victim is taken below its fractional share; awaiting a fix in internal/work/sched")
 	cfg := sched.DefaultConfig()
 	mk := func(runA bool) sched.Snapshot {
 		a := rjob("a", "p", 4, 10383, 2238, 8*time.Hour)
