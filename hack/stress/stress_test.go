@@ -199,20 +199,28 @@ func TestReproPreemptPingPong(t *testing.T) {
 	}
 }
 
-// Found by the stress grid: a job none of whose pools is in the snapshot
-// (a pool removed, renamed, or not yet created) is left out of the plan,
-// so it is never reported at risk, not even past its deadline, and no
-// burst is ever sized for it. Its message says "no capacity planned" but
-// AtRisk is false, so the HUD shows it on track.
+// Regression, found by the stress grid: a job none of whose pools is in
+// the snapshot (a pool removed, renamed, or not yet created) was left out
+// of the plan, so it was never reported at risk, not even past its
+// deadline, and the HUD showed it on track. It is at risk, late without
+// bound, and its message says no pool can run it.
 func TestReproUnplannedJobOnTrack(t *testing.T) {
-	skipRepro(t, "sched bug past-due-on-track (found by hack/stress): plan() skips jobs with no known pool; awaiting a fix in internal/work/sched")
 	j := rjob("orphan", "p", 5, 5*3600, 600, 0)
 	j.Deadline = t0r.Add(-time.Hour)
 	j.Pools = []string{"gpu"}
 	s := sched.Snapshot{Now: t0r, Pools: []sched.Pool{{Name: "cpu", Slots: 4}}, Jobs: []sched.Job{j}}
 	d := sched.Decide(s, &sched.State{}, sched.DefaultConfig())
-	if st := d.Jobs["orphan"]; !st.AtRisk {
-		t.Fatalf("past its deadline with no usable pool, AtRisk false (%q)", st.Message)
+	st := d.Jobs["orphan"]
+	if !st.AtRisk || st.LateBy <= 0 {
+		t.Fatalf("past its deadline with no usable pool: AtRisk %v, LateBy %v (%q)", st.AtRisk, st.LateBy, st.Message)
+	}
+	if !strings.Contains(st.Message, "no pool can run it") {
+		t.Fatalf("the message does not say why: %q", st.Message)
+	}
+	// Not yet due: at risk as well, since no capacity can be planned.
+	s.Jobs[0].Deadline = t0r.Add(5 * time.Hour)
+	if st := sched.Decide(s, &sched.State{}, sched.DefaultConfig()).Jobs["orphan"]; !st.AtRisk {
+		t.Fatalf("due in 5h with no usable pool, AtRisk false (%q)", st.Message)
 	}
 }
 

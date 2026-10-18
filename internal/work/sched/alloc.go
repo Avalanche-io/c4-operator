@@ -60,7 +60,8 @@ type jobCtx struct {
 	lateBy               time.Duration
 	finish50, finish90   float64 // planned finish, seconds from now
 	horizon, deficit     float64 // what a burst must cover: slot-seconds short by horizon
-	group                int     // 0 feasible with need, 1 infeasible with need, 2 other
+	group                int     // 0 feasible with need, 1 infeasible with need, 2 other, 3 can use no slot
+	noPool               bool    // none of its pools is in the snapshot
 	burst                *BurstSuggestion
 }
 

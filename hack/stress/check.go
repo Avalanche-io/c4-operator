@@ -60,9 +60,6 @@ var knownBugs = map[string]string{
 		"slack; on a small farm that unit takes a slot a job due within the hour needs, and once it has run MaxLostWork no preemption may take it back, " +
 		"so a long unit holds the slot for hours. Suggested fix: let the guard take only slots the deadline tier does not need (run it after need() for " +
 		"jobs with slack above PreemptSlack), or make guard-released units preemptible regardless of MaxLostWork (found by this grid)",
-	"past-due-on-track": "groups() in plan.go plans only jobs with at least one pool in the snapshot; a job none of whose pools exists gets no plan, so AtRisk " +
-		"stays false even past its deadline, LateBy is 0 and no burst is sized for it. Suggested fix: mark such deadline jobs at risk (planOK false, lateBy " +
-		"the time to the deadline's end of remaining work at zero capacity, or past it) (found by this grid)",
 }
 
 type violation struct {

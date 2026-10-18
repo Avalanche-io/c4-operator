@@ -31,8 +31,38 @@ func (a *alloc) plan() {
 		}
 		a.planFluid(g, capacity[g[0].root])
 	}
+	a.planNoPool()
 	for _, jc := range a.jobs {
 		jc.Rb = jc.R * clamp(jc.j.Boost, 1, 2)
+	}
+}
+
+// planNoPool marks a deadline job none of whose pools is in the snapshot
+// (a pool removed or renamed, or not created yet): no capacity can be
+// planned for it, so it is at risk and late without bound, and its
+// message says why. Without this it was left out of the plan and read as
+// on track, even past its deadline.
+func (a *alloc) planNoPool() {
+	for _, jc := range a.jobs {
+		if !jc.hasDeadline || jc.j.Hold || jc.j.HoldStop || jc.W90 <= 0 {
+			continue
+		}
+		known := false
+		for _, name := range jc.j.Pools {
+			if a.pools[name] != nil {
+				known = true
+				break
+			}
+		}
+		if known {
+			continue
+		}
+		jc.noPool = true
+		jc.planOK = false
+		jc.atRisk = true
+		jc.share = 0
+		jc.finish50, jc.finish90 = math.Inf(1), math.Inf(1)
+		jc.lateBy = secs(bigSeconds)
 	}
 }
 

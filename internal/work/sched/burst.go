@@ -222,6 +222,9 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		return ""
 	}
 	dl := jc.j.Deadline.Format("Mon 15:04")
+	if jc.noPool {
+		return fmt.Sprintf("%s cannot run: no pool can run it (none of %s is in the farm); due %s.", id, strings.Join(jc.j.Pools, ", "), dl)
+	}
 	if jc.T <= 0 {
 		more := "with no capacity planned for it"
 		if jc.finish90 > 0 && !math.IsInf(jc.finish90, 1) {
