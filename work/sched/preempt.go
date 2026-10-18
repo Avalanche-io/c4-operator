@@ -133,6 +133,12 @@ func (a *alloc) take(pool string, vs []victim, want int, reason PreemptReason, f
 		if _, pending := a.st.pending[v.ru.ID]; pending {
 			continue
 		}
+		// A job does not take a unit back, within the hour, from the job
+		// that took one from it: two plans that flip as estimates move
+		// would otherwise trade a slot.
+		if _, back := a.st.took[[2]string{forJob, v.jc.j.ID}]; back && forJob != "" {
+			continue
+		}
 		r := reason
 		if _, guard := a.st.guard[v.ru.ID]; guard && reason == ReasonFeasibility {
 			r = ReasonGuard

@@ -334,8 +334,9 @@ type State struct {
 	preemptLog map[string][]time.Time    // by pool
 	surplus    map[string]time.Time      // by burst pool: idle since
 	manual     manualState
-	guard      map[string]time.Time // units the starvation guard started, by unit ID
-	guardHit   map[string]time.Time // jobs whose guard unit was preempted, and when
+	guard      map[string]time.Time    // units the starvation guard started, by unit ID
+	guardHit   map[string]time.Time    // jobs whose guard unit was preempted, and when
+	took       map[[2]string]time.Time // [victim job, job it was for]: last preemption between them
 }
 
 type pendingPreempt struct {
@@ -367,6 +368,9 @@ func (st *State) init() {
 	}
 	if st.guardHit == nil {
 		st.guardHit = map[string]time.Time{}
+	}
+	if st.took == nil {
+		st.took = map[[2]string]time.Time{}
 	}
 }
 

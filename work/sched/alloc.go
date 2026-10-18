@@ -129,6 +129,11 @@ func newAlloc(s *Snapshot, st *State, cfg Config, quotas bool) *alloc {
 			delete(st.guardHit, id)
 		}
 	}
+	for k, at := range st.took {
+		if s.Now.Sub(at) >= time.Hour {
+			delete(st.took, k)
+		}
+	}
 	// Preemptions still in flight count toward the job they were for.
 	for id, pp := range st.pending {
 		if !running[id] {
@@ -359,6 +364,9 @@ func (a *alloc) preemptUnit(victim *jobCtx, ru RunningUnit, reason PreemptReason
 	if reason == ReasonGuard {
 		a.st.guardHit[victim.j.ID] = a.now
 		delete(a.st.guard, ru.ID)
+	}
+	if forJob != "" {
+		a.st.took[[2]string{victim.j.ID, forJob}] = a.now
 	}
 	a.st.preemptLog[ru.Pool] = append(a.st.preemptLog[ru.Pool], a.now)
 }
