@@ -75,9 +75,11 @@ type Queue struct {
 	shareHist map[string]bool
 	// policies are the projects' deadline policies by project and class.
 	policies map[string]map[string]forecast.Policy
-	// Last decisions, for the HUD.
+	// Last decisions, for the HUD, and each job's deadline policy then
+	// (DeadlineOptions).
 	lastSnap sched.Snapshot
 	lastDec  sched.Decisions
+	lastPol  map[string]forecast.Policy
 }
 
 // NeedLeaderElection makes the queue run on one replica only.
@@ -350,7 +352,11 @@ func (q *Queue) Tick(ctx context.Context) error {
 
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
 	dec := q.Policy(snap, &q.st, q.Cfg)
-	q.lastSnap, q.lastDec = snap, dec
+	pol := make(map[string]forecast.Policy, len(views))
+	for _, v := range views {
+		pol[v.key] = q.policyFor(v)
+	}
+	q.lastSnap, q.lastDec, q.lastPol = snap, dec, pol
 	q.suggest(ctx, now, snap, dec, views)
 	q.act(ctx, now, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)

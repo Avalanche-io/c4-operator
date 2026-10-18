@@ -250,51 +250,17 @@ func (q *Queue) candidate(now time.Time, snap sched.Snapshot, v *view, p forecas
 	if p.Kind != forecast.Achievable {
 		return p.Earliest(now, now, submit, ready), forecast.Band{}
 	}
-	i := -1
-	for k := range snap.Jobs {
-		if snap.Jobs[k].ID == v.key {
-			i = k
-			break
-		}
-	}
-	if i < 0 {
+	w := newWhatIf(q.Policy, q.Cfg, snap, v.key)
+	if w == nil {
 		return time.Time{}, forecast.Band{}
 	}
-	run := func(d time.Time) sched.Decisions {
-		s2 := snap
-		s2.Jobs = append([]sched.Job(nil), snap.Jobs...)
-		s2.Jobs[i].Deadline = d
-		var st sched.State
-		return q.Policy(s2, &st, q.Cfg)
-	}
 	hi := now.Add(whatIfHorizon)
-	base := run(hi)
-	bj := base.Jobs[v.key]
-	band := forecast.Display(now, v.sum, bj.ETA50, bj.ETA90)
+	base := w.run(hi, 0)
+	band := w.band(base)
 	if band.IsZero() {
 		return time.Time{}, band
 	}
-	var onTime []string
-	for id, js := range base.Jobs {
-		if id != v.key && js.Feasible && !js.AtRisk {
-			onTime = append(onTime, id)
-		}
-	}
-	ok := func(d time.Time) bool {
-		r := run(d)
-		js := r.Jobs[v.key]
-		b := forecast.Display(now, v.sum, js.ETA50, js.ETA90)
-		if b.IsZero() || b.At(p.Quantile).After(d) {
-			return false
-		}
-		for _, id := range onTime {
-			if r.Jobs[id].AtRisk {
-				return false
-			}
-		}
-		return true
-	}
-	d := forecast.FirstAchievable(now.Add(p.MinLead), hi, whatIfTolerance, ok)
+	d := w.achievable(p.Quantile, w.onTime(base), now.Add(p.MinLead), hi)
 	if d.Equal(hi) {
 		// Not achievable within the horizon without making another job
 		// late: suggest the finish at the quantile with no deadline
