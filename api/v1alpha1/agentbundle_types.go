@@ -7,6 +7,40 @@ import (
 // LabelAgentMember names the bundle member a unit pod runs.
 const LabelAgentMember = "c4.avalanche.io/agent-member"
 
+// LabelSlotLimit on a Node lowers the slots it offers below its Pool's
+// SlotsPerNode (never above): a host runner sets it from its power
+// headroom, and 0 takes the node out of service without draining it. (It
+// is not c4.avalanche.io/slots, which is the extended resource units
+// request.)
+const LabelSlotLimit = "c4.avalanche.io/slot-limit"
+
+// AnnotationCapacityReason on a Node says why its slots are lowered, in
+// plain words ("power: 38 of 40 W, battery 48% on a 39 W adapter").
+const AnnotationCapacityReason = "c4.avalanche.io/capacity-reason"
+
+// AgentClock is a bundle's virtual clock (proposals/agent-jobs, section 3):
+// it runs while the bundle runs and stops while it is suspended, so a
+// suspension is invisible to the members' timers. Real deadlines stay real.
+type AgentClock struct {
+	// Start is when the bundle first ran.
+	// +optional
+	Start *metav1.Time `json:"start,omitempty"`
+	// SuspendedSeconds is the total time the bundle has spent suspended,
+	// not counting a suspension still in progress.
+	// +optional
+	SuspendedSeconds int64 `json:"suspendedSeconds,omitempty"`
+	// SuspendedSince is set while the bundle is suspended.
+	// +optional
+	SuspendedSince *metav1.Time `json:"suspendedSince,omitempty"`
+	// VirtualNow is the bundle's time as of the last status write: Start
+	// plus the real time since, less every suspension.
+	// +optional
+	VirtualNow *metav1.Time `json:"virtualNow,omitempty"`
+	// DriftSeconds is how far the bundle's time trails the real clock.
+	// +optional
+	DriftSeconds int64 `json:"driftSeconds,omitempty"`
+}
+
 // AgentMemberSpec is one member of an agent bundle: a Claude Code session
 // that a runner resumes by its session ID.
 type AgentMemberSpec struct {
@@ -84,6 +118,9 @@ type AgentBundleStatus struct {
 	// Members, in spec order.
 	// +optional
 	Members []AgentMemberStatus `json:"members,omitempty"`
+	// Clock is the bundle's virtual clock.
+	// +optional
+	Clock AgentClock `json:"clock,omitempty"`
 	// +optional
 	// +listType=map
 	// +listMapKey=type
@@ -99,6 +136,7 @@ type AgentBundleStatus struct {
 // +kubebuilder:printcolumn:name="Phase",type=string,JSONPath=`.status.phase`
 // +kubebuilder:printcolumn:name="Max",type=integer,JSONPath=`.spec.maxRunning`
 // +kubebuilder:printcolumn:name="Suspend",type=boolean,JSONPath=`.spec.suspend`
+// +kubebuilder:printcolumn:name="Drift",type=integer,JSONPath=`.status.clock.driftSeconds`
 type AgentBundle struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`

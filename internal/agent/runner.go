@@ -44,6 +44,17 @@ type Runner struct {
 	Labels map[string]string
 	// Slots is how many members may run here at once.
 	Slots int
+	// Capacity, when set, lowers the slots the node offers below Slots,
+	// for example from the machine's power headroom; reason says why in
+	// plain words. The runner writes it as the node's c4.avalanche.io/slot-limit
+	// label, and the queue sheds or holds work to fit. It never raises the
+	// node above Slots.
+	Capacity func() (slots int, reason string)
+	// RaiseAfter is how long a higher capacity must hold before the node
+	// offers it (default 60 s), so a reading near a threshold never flaps
+	// the node. A lower capacity applies at once: over a power line, the
+	// machine sheds work now.
+	RaiseAfter time.Duration
 	// YieldTimeout bounds one wait for a busy member to finish its turn;
 	// the runner tries again on the next tick.
 	YieldTimeout time.Duration
@@ -53,6 +64,9 @@ type Runner struct {
 	Logf func(format string, args ...any)
 
 	seen map[types.UID]bool
+	// rising is a higher capacity waiting out RaiseAfter, and since when.
+	rising      int
+	risingSince time.Time
 }
 
 func (r *Runner) logf(format string, args ...any) {
@@ -329,6 +343,9 @@ func (r *Runner) heartbeat(ctx context.Context) error {
 	} else if err != nil {
 		return err
 	}
+	if err := r.capacity(ctx, &n); err != nil {
+		return err
+	}
 	orig := n.DeepCopy()
 	if n.Status.Capacity == nil {
 		n.Status.Capacity = corev1.ResourceList{}
@@ -344,6 +361,55 @@ func (r *Runner) heartbeat(ctx context.Context) error {
 		return err
 	}
 	return r.renewLease(ctx, now)
+}
+
+// capacity writes the node's slot label and its reason from Capacity.
+func (r *Runner) capacity(ctx context.Context, n *corev1.Node) error {
+	slots, reason := r.Slots, ""
+	if r.Capacity != nil {
+		slots, reason = r.Capacity()
+		slots = max(0, min(slots, r.Slots))
+	}
+	if have, err := strconv.Atoi(n.Labels[c4v1.LabelSlotLimit]); err == nil && slots > have {
+		// Raise only once the higher value has held for RaiseAfter.
+		hold := r.RaiseAfter
+		if hold == 0 {
+			hold = time.Minute
+		}
+		if r.rising != slots {
+			r.rising, r.risingSince = slots, r.now()
+		}
+		if r.now().Sub(r.risingSince) < hold {
+			slots = have
+			reason = n.Annotations[c4v1.AnnotationCapacityReason]
+		}
+	} else {
+		r.rising = 0
+	}
+	want := strconv.Itoa(slots)
+	if n.Labels[c4v1.LabelSlotLimit] == want && n.Annotations[c4v1.AnnotationCapacityReason] == reason {
+		return nil
+	}
+	orig := n.DeepCopy()
+	if n.Labels == nil {
+		n.Labels = map[string]string{}
+	}
+	if n.Annotations == nil {
+		n.Annotations = map[string]string{}
+	}
+	n.Labels[c4v1.LabelSlotLimit] = want
+	if reason == "" {
+		delete(n.Annotations, c4v1.AnnotationCapacityReason)
+	} else {
+		n.Annotations[c4v1.AnnotationCapacityReason] = reason
+	}
+	if err := r.Client.Patch(ctx, n, client.MergeFrom(orig)); err != nil {
+		return err
+	}
+	if before := orig.Labels[c4v1.LabelSlotLimit]; before != want {
+		r.logf("capacity %s -> %s slots %s", before, want, reason)
+	}
+	return nil
 }
 
 func (r *Runner) renewLease(ctx context.Context, now metav1.Time) error {

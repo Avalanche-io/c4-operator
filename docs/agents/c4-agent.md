@@ -118,3 +118,28 @@ node daemon policy (`config/policy/node-writes.yaml`) does not cover. On a
 local farm it runs with the farm's kubeconfig. A shared cluster needs a
 service account and a policy for it that mirror the node daemon's: only
 pods on its own node.
+
+## Capacity under a power cap, and the bundle's clock
+
+The runner can lower the slots its machine offers, for example from the
+power headroom on a weak charger:
+- `c4-agent runner --slots-file <path>` reads one line, `N [why]`, written
+  by any power reader. `c4 farm agent`'s power duty will drive it
+  directly.
+- The runner writes the node's `c4.avalanche.io/slot-limit` label and puts
+  the reason in `c4.avalanche.io/capacity-reason`. The queue counts the
+  node at that many slots, never more than its Pool's `slotsPerNode`.
+- A lower value applies at once; a higher one only after it has held for a
+  minute, so a reading near a threshold never flaps the node.
+- With fewer slots, the queue releases no new member. Shedding the
+  members already running down to the new limit is the scheduler's change
+  that follows (proposed to its owner).
+
+Each AgentBundle keeps a virtual clock in `status.clock`:
+- it starts the first time the bundle runs;
+- it stops while the bundle is Suspended, and continues from where it
+  stopped when the bundle resumes;
+- `virtualNow` is the bundle's time and `driftSeconds` how far it trails
+  the real clock.
+
+Members don't read it yet; that comes with the bundle's mailbox.

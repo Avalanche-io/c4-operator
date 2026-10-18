@@ -26,6 +26,9 @@ spec:
     - jsonPath: .spec.suspend
       name: Suspend
       type: boolean
+    - jsonPath: .status.clock.driftSeconds
+      name: Drift
+      type: integer
     name: v1alpha1
     schema:
       openAPIV3Schema:
@@ -116,6 +119,35 @@ spec:
           status:
             description: AgentBundleStatus reports the bundle.
             properties:
+              clock:
+                description: Clock is the bundle's virtual clock.
+                properties:
+                  driftSeconds:
+                    description: DriftSeconds is how far the bundle's time trails
+                      the real clock.
+                    format: int64
+                    type: integer
+                  start:
+                    description: Start is when the bundle first ran.
+                    format: date-time
+                    type: string
+                  suspendedSeconds:
+                    description: |-
+                      SuspendedSeconds is the total time the bundle has spent suspended,
+                      not counting a suspension still in progress.
+                    format: int64
+                    type: integer
+                  suspendedSince:
+                    description: SuspendedSince is set while the bundle is suspended.
+                    format: date-time
+                    type: string
+                  virtualNow:
+                    description: |-
+                      VirtualNow is the bundle's time as of the last status write: Start
+                      plus the real time since, less every suspension.
+                    format: date-time
+                    type: string
+                type: object
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

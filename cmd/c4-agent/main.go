@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"text/tabwriter"
 	"time"
@@ -297,6 +298,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	slots := fs.Int("slots", 4, "members that may run here at once")
 	every := fs.Duration("every", 5*time.Second, "how often to check pods and sessions")
 	yieldTimeout := fs.Duration("yield-timeout", time.Minute, "how long one yield waits for a busy member before trying again")
+	slotsFile := fs.String("slots-file", "", "a file whose first line is the slots to offer now (and, after a space, why), written by a power reader; missing or unreadable means --slots")
 	var lbls multi
 	fs.Var(&lbls, "label", "a Node label K=V for the agent pool's nodeSelector (default c4.avalanche.io/host=<node>)")
 	if err := fs.Parse(args); err != nil {
@@ -330,6 +332,25 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	}
 	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Slots: *slots, YieldTimeout: *yieldTimeout,
 		Logf: func(f string, a ...any) { fmt.Fprintf(out, time.Now().Format("15:04:05 ")+f+"\n", a...) }}
+	if *slotsFile != "" {
+		r.Capacity = func() (int, string) { return readSlotsFile(*slotsFile, *slots) }
+	}
 	fmt.Fprintf(out, "runner %s: %d slots, labels %v\n", *node, *slots, set)
 	return r.Run(ctx, *every)
+}
+
+// readSlotsFile reads "N [reason...]" from path; anything unreadable gives
+// def and no reason.
+func readSlotsFile(path string, def int) (int, string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return def, ""
+	}
+	line, _, _ := strings.Cut(strings.TrimSpace(string(data)), "\n")
+	num, reason, _ := strings.Cut(line, " ")
+	n, err := strconv.Atoi(num)
+	if err != nil {
+		return def, ""
+	}
+	return n, strings.TrimSpace(reason)
 }

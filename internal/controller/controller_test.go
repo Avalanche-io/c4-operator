@@ -536,3 +536,28 @@ func TestResolutionRecords(t *testing.T) {
 		}
 	})
 }
+
+func TestAdvanceClock(t *testing.T) {
+	t0 := time.Date(2026, 10, 17, 22, 0, 0, 0, time.UTC)
+	var c c4v1.AgentClock
+	if c = advanceClock(c, "Pending", t0); c.Start != nil {
+		t.Fatal("the clock started before the bundle ran")
+	}
+	c = advanceClock(c, "Running", t0)
+	c = advanceClock(c, "Running", t0.Add(55*time.Minute))
+	if !c.VirtualNow.Time.Equal(t0.Add(55*time.Minute)) || c.DriftSeconds != 0 {
+		t.Fatalf("running: %+v", c)
+	}
+	// Suspended overnight: the bundle's time stops.
+	c = advanceClock(c, "Suspended", t0.Add(time.Hour))
+	c = advanceClock(c, "Suspended", t0.Add(10*time.Hour+30*time.Minute))
+	if !c.VirtualNow.Time.Equal(t0.Add(time.Hour)) || c.DriftSeconds != int64((9*time.Hour+30*time.Minute).Seconds()) {
+		t.Fatalf("suspended: virtual %v drift %d", c.VirtualNow, c.DriftSeconds)
+	}
+	// Resumed: it continues from where it stopped, without a jump.
+	c = advanceClock(c, "Running", t0.Add(10*time.Hour+30*time.Minute))
+	c = advanceClock(c, "Running", t0.Add(11*time.Hour))
+	if !c.VirtualNow.Time.Equal(t0.Add(90*time.Minute)) || c.SuspendedSince != nil {
+		t.Fatalf("resumed: %+v", c)
+	}
+}

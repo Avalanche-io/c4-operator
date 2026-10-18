@@ -289,3 +289,62 @@ func TestBundleOnHostRunner(t *testing.T) {
 		}
 	}
 }
+
+// TestRunnerCapacity: a power reader lowers the runner's node at once, and
+// raises it only after the higher value has held for RaiseAfter.
+func TestRunnerCapacity(t *testing.T) {
+	if k8s == nil {
+		t.Skip("no envtest binaries (make envtest)")
+	}
+	ctx := context.Background()
+	host := fmt.Sprintf("cap-%d", time.Now().UnixNano()%1e9)
+	t.Cleanup(func() { k8s.Delete(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: host}}) })
+	clock := time.Date(2026, 10, 17, 22, 55, 0, 0, time.UTC)
+	slots, reason := 5, ""
+	h := agent.New(&agent.Store{Dir: t.TempDir()}, &fake{active: map[string]bool{}})
+	r := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: map[string]string{"c4.avalanche.io/host": host}, Slots: 5,
+		Capacity: func() (int, string) { return slots, reason }, RaiseAfter: time.Minute,
+		Now: func() time.Time { return clock }, Logf: t.Logf}
+	limit := func() (string, string) {
+		t.Helper()
+		var n corev1.Node
+		if err := k8s.Get(ctx, types.NamespacedName{Name: host}, &n); err != nil {
+			t.Fatal(err)
+		}
+		return n.Labels[c4v1.LabelSlotLimit], n.Annotations[c4v1.AnnotationCapacityReason]
+	}
+	tickAt := func(d time.Duration) {
+		t.Helper()
+		clock = clock.Add(d)
+		if err := r.Tick(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tickAt(0)
+	if l, _ := limit(); l != "5" {
+		t.Fatalf("limit %q, want 5", l)
+	}
+	// 22:55, the battery falls on a 45 W adapter: down to 2 at once.
+	slots, reason = 2, "power: 47 of 40 W, battery 21% on a 45 W adapter"
+	tickAt(5 * time.Second)
+	if l, why := limit(); l != "2" || why != reason {
+		t.Fatalf("limit %q (%q), want 2 at once", l, why)
+	}
+	// A reading that flickers back up does not raise it until it holds.
+	slots, reason = 4, ""
+	tickAt(30 * time.Second)
+	if l, _ := limit(); l != "2" {
+		t.Fatalf("raised to %s after 30 s", l)
+	}
+	tickAt(60 * time.Second)
+	if l, why := limit(); l != "4" || why != "" {
+		t.Fatalf("limit %q (%q) after 60 s at 4, want 4", l, why)
+	}
+	// Never above the runner's own slots.
+	slots = 9
+	tickAt(2 * time.Minute)
+	tickAt(2 * time.Minute)
+	if l, _ := limit(); l != "5" {
+		t.Fatalf("limit %q, want 5 (the runner's slots)", l)
+	}
+}

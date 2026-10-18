@@ -27,6 +27,15 @@ import (
 // resumes the member's session for each attempt.
 type AgentBundleReconciler struct {
 	client.Client
+	// Now is the clock (tests replace it).
+	Now func() time.Time
+}
+
+func (r *AgentBundleReconciler) now() time.Time {
+	if r.Now != nil {
+		return r.Now()
+	}
+	return time.Now()
 }
 
 // Reconcile brings one bundle's WorkJob in line with its spec and writes
@@ -46,6 +55,7 @@ func (r *AgentBundleReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 	orig := b.DeepCopy()
 	b.Status = bundleStatus(&b, job, pods.Items)
+	b.Status.Clock = advanceClock(orig.Status.Clock, b.Status.Phase, r.now())
 	if err := r.Status().Patch(ctx, &b, client.MergeFrom(orig)); err != nil {
 		return ctrl.Result{}, err
 	}
@@ -180,6 +190,35 @@ func bundleStatus(b *c4v1.AgentBundle, j *c4v1.WorkJob, pods []corev1.Pod) c4v1.
 	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue,
 		Reason: "JobReconciled", Message: "the bundle's WorkJob " + j.Name + " follows its spec", ObservedGeneration: b.Generation})
 	return st
+}
+
+// advanceClock moves a bundle's virtual clock to now. The clock starts the
+// first time the bundle runs, stops when it becomes Suspended, and
+// resumes, without jumping, when it leaves that phase.
+func advanceClock(c c4v1.AgentClock, phase string, now time.Time) c4v1.AgentClock {
+	if c.Start == nil {
+		if phase != "Running" && phase != "Suspending" {
+			return c
+		}
+		t := metav1.NewTime(now)
+		c.Start = &t
+	}
+	switch {
+	case phase == "Suspended" && c.SuspendedSince == nil:
+		t := metav1.NewTime(now)
+		c.SuspendedSince = &t
+	case phase != "Suspended" && c.SuspendedSince != nil:
+		c.SuspendedSeconds += int64(now.Sub(c.SuspendedSince.Time).Seconds())
+		c.SuspendedSince = nil
+	}
+	suspended := time.Duration(c.SuspendedSeconds) * time.Second
+	if c.SuspendedSince != nil {
+		suspended += now.Sub(c.SuspendedSince.Time)
+	}
+	v := metav1.NewTime(now.Add(-suspended).Truncate(time.Second))
+	c.VirtualNow = &v
+	c.DriftSeconds = int64(suspended.Seconds())
+	return c
 }
 
 func parseInt32(s string) (int32, error) {

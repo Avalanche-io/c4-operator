@@ -49,12 +49,13 @@ func (q *Queue) pools(ctx context.Context, list []c4v1.Pool, nodes []corev1.Node
 			if !ready(node) || node.Spec.Unschedulable {
 				continue
 			}
+			n := nodeSlots(node, p.perNode)
 			p.nodes = append(p.nodes, node.Name)
-			q.advertise(ctx, node, p.perNode)
+			p.slots += n
+			q.advertise(ctx, node, n)
 		}
 		sort.Strings(p.nodes)
 		sort.Strings(p.spare)
-		p.slots = len(p.nodes) * p.perNode
 		out[ps.Name] = p
 	}
 	for i := range pods {
@@ -91,6 +92,21 @@ func (q *Queue) pools(ctx context.Context, list []c4v1.Pool, nodes []corev1.Node
 		}
 	}
 	return out
+}
+
+// nodeSlots is a node's slots: its pool's SlotsPerNode, lowered by the
+// node's c4.avalanche.io/slot-limit label when it has one (a host runner under
+// a power cap). The label never raises a node above its pool's shape.
+func nodeSlots(node *corev1.Node, perNode int) int {
+	v, ok := node.Labels[c4v1.LabelSlotLimit]
+	if !ok {
+		return perNode
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return perNode
+	}
+	return min(n, perNode)
 }
 
 // advertise sets the node's slot capacity, the way a device plugin would

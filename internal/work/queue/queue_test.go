@@ -418,3 +418,56 @@ func TestDependsOnPropagatesDeadline(t *testing.T) {
 		t.Fatalf("comp released %d units before light succeeded", n)
 	}
 }
+
+// A node's slot-limit label lowers what it offers (a host runner under a
+// power cap), never raises it, and 0 offers nothing.
+func TestNodeSlotLimit(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 2, 2)
+	ctx := context.Background()
+	setLimit := func(node, v string) {
+		t.Helper()
+		var n corev1.Node
+		if err := k8s.Get(ctx, types.NamespacedName{Name: node}, &n); err != nil {
+			t.Fatal(err)
+		}
+		patch := client.MergeFrom(n.DeepCopy())
+		if v == "" {
+			delete(n.Labels, c4v1.LabelSlotLimit)
+		} else {
+			n.Labels[c4v1.LabelSlotLimit] = v
+		}
+		if err := k8s.Patch(ctx, &n, patch); err != nil {
+			t.Fatal(err)
+		}
+	}
+	n0, n1 := ns+"-cpu-0", ns+"-cpu-1"
+	setLimit(n0, "1")
+	setLimit(n1, "9") // above the pool's shape: no effect
+	j := job(ns, "lim", "render", "cpu-"+ns, map[string]string{"frames": "1-8", "estimateSeconds": "60"}, now.Add(time.Hour))
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if n := len(unitPods(t, ns, "lim")); n != 3 {
+		t.Fatalf("released %d units, want 3 (1 + 2 slots)", n)
+	}
+	var p c4v1.Pool
+	if err := k8s.Get(ctx, types.NamespacedName{Name: "cpu-" + ns}, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Status.Slots != 3 {
+		t.Fatalf("pool slots %d, want 3", p.Status.Slots)
+	}
+	var node corev1.Node
+	k8s.Get(ctx, types.NamespacedName{Name: n0}, &node)
+	if q := node.Status.Capacity[SlotResource]; q.Value() != 1 {
+		t.Fatalf("node %s advertises %v slots, want 1", n0, q.Value())
+	}
+	setLimit(n0, "0")
+	setLimit(n1, "0")
+	tick(t, q)
+	k8s.Get(ctx, types.NamespacedName{Name: "cpu-" + ns}, &p)
+	if p.Status.Slots != 0 {
+		t.Fatalf("pool slots %d after both limits went to 0", p.Status.Slots)
+	}
+}
