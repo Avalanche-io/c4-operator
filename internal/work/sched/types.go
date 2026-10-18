@@ -240,6 +240,10 @@ type JobState struct {
 // Config holds policy settings. DefaultConfig returns DESIGN.md's values.
 type Config struct {
 	StarvationAfter time.Duration // 30m
+	// StarvationDeferMax: a starving job with more than PreemptSlack of
+	// slack lets the deadline tier go first until it has starved this
+	// long (0: always, while it has the slack).
+	StarvationDeferMax time.Duration // 2h
 	// TieBand: deadline ratios in the same band (0.1 wide) tie.
 	TieBand float64
 	// InfoUnitsPerJob caps how many information units one job may release
@@ -295,6 +299,7 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		StarvationAfter:       30 * time.Minute,
+		StarvationDeferMax:    2 * time.Hour,
 		TieBand:               0.10,
 		InfoUnitsPerJob:       0,
 		PreemptSlack:          2 * time.Hour,

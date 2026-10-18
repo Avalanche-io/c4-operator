@@ -13,7 +13,9 @@ import (
 //
 //  0. Hold-stop preemptions, then the starvation guard: a job with no
 //     running unit for StarvationAfter gets one unit (a gang that does not
-//     fit reserves its pool's free slots instead).
+//     fit reserves its pool's free slots instead). A starving job with
+//     more than PreemptSlack of slack is served right after the deadline
+//     tier instead, until it has starved for StarvationDeferMax.
 //  1. Deadline need: jobs below their required slots R (see plan.go for
 //     how R is computed), jobs on time in the plan first, most behind
 //     first by (running+incoming)/R; ratios in the same TieBand bucket go
@@ -35,8 +37,9 @@ func Decide(s Snapshot, st *State, cfg Config) Decisions {
 	a.needDemand()
 	a.plan()
 	a.holdStop()
-	a.starvation()
+	a.starvation(true)
 	a.need()
+	a.starvation(false)
 	a.boost()
 	a.info()
 	a.fair()
@@ -182,7 +185,13 @@ func waterfill(w, caps []float64, C float64) []float64 {
 	return x
 }
 
-func (a *alloc) starvation() {
+// starvation runs twice: before the deadline tier for starving jobs that
+// cannot wait (first), and after it for the rest. A starving job can wait
+// for the deadline tier when it has more than PreemptSlack of slack and
+// has starved for less than StarvationDeferMax, so the guard does not
+// give a job due in days the slot a job due within the hour needs, and no
+// job waits past StarvationDeferMax however busy the deadline tier is.
+func (a *alloc) starvation(first bool) {
 	var starving []*jobCtx
 	since := func(jc *jobCtx) time.Time {
 		switch {
@@ -197,9 +206,14 @@ func (a *alloc) starvation() {
 		if !jc.canRelease() || jc.running+jc.incoming > 0 || len(jc.j.RunningUnits) > 0 {
 			continue
 		}
-		if a.now.Sub(since(jc)) >= a.cfg.StarvationAfter {
-			starving = append(starving, jc)
+		waited := a.now.Sub(since(jc))
+		if waited < a.cfg.StarvationAfter {
+			continue
 		}
+		if a.canWait(jc, waited) == first {
+			continue
+		}
+		starving = append(starving, jc)
 	}
 	sort.SliceStable(starving, func(i, j int) bool { return since(starving[i]).Before(since(starving[j])) })
 	for _, jc := range starving {
@@ -208,6 +222,15 @@ func (a *alloc) starvation() {
 		}
 		a.holdForGang(jc)
 	}
+}
+
+// canWait reports whether a starving job may let the deadline tier go
+// first.
+func (a *alloc) canWait(jc *jobCtx, waited time.Duration) bool {
+	if a.cfg.StarvationDeferMax > 0 && waited >= a.cfg.StarvationDeferMax {
+		return false
+	}
+	return jc.slack > a.cfg.PreemptSlack
 }
 
 // needHeap orders feasible jobs for the deadline tier.

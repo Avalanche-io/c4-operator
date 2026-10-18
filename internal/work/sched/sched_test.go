@@ -324,13 +324,16 @@ func TestGangNeedsRoomForAll(t *testing.T) {
 	if count(d, "train") != 0 || count(d, "gpurender") != 3 {
 		t.Fatalf("train=%d render=%d", count(d, "train"), count(d, "gpurender"))
 	}
-	// Starving for 30 minutes: the gang still does not fit, so the pool's
-	// free slots are held for it instead of going to the render.
+	// Starving for 30 minutes with two days of slack: the render's
+	// deadline need (one slot) goes first, then the gang, which still
+	// does not fit, holds the pool's other free slots.
 	s.Now = t0.Add(31 * time.Minute)
 	d = Decide(s, &State{}, DefaultConfig())
-	if count(d, "train") != 0 || count(d, "gpurender") != 0 {
+	if count(d, "train") != 0 || count(d, "gpurender") != 1 {
 		t.Fatalf("held: train=%d render=%d", count(d, "train"), count(d, "gpurender"))
 	}
+	// Starving for StarvationDeferMax: the gang goes first and fits.
+	s.Now = t0.Add(2*time.Hour + time.Minute)
 	s.Pools[0].Used = 4
 	d = Decide(s, &State{}, DefaultConfig())
 	if count(d, "train") != 4 || d.Dispatch[0].Tier != TierStarvation {
@@ -339,18 +342,45 @@ func TestGangNeedsRoomForAll(t *testing.T) {
 }
 
 func TestStarvationGuard(t *testing.T) {
-	// far has no objective; near takes the whole pool by need.
+	// far has no objective; near takes the whole pool by need. far has
+	// all the slack in the world, so the deadline tier goes first: it is
+	// served by the guard only once it has starved StarvationDeferMax.
 	near := job("near", "p", 100, 100, 10*time.Hour)
 	far := job("far", "p", 100, 1, 0)
 	far.LastRunning = t0.Add(-31 * time.Minute)
 	s := Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{near, far}}
+	if d := Decide(s, &State{}, DefaultConfig()); count(d, "far") != 0 {
+		t.Fatalf("far took a slot near needs: %+v", d.Dispatch)
+	}
+	s.Jobs[1].LastRunning = t0.Add(-2*time.Hour - time.Minute)
 	d := Decide(s, &State{}, DefaultConfig())
 	if count(d, "far") != 1 || d.Dispatch[0].Job != "far" || d.Dispatch[0].Tier != TierStarvation {
 		t.Fatalf("%+v", d.Dispatch)
 	}
+	// With slots left after the deadline tier, far gets one at 30 minutes.
+	s.Pools[0] = cpu(20)
+	s.Jobs[1].LastRunning = t0.Add(-31 * time.Minute)
+	d = Decide(s, &State{}, DefaultConfig())
+	got := false
+	for _, x := range d.Dispatch {
+		got = got || x.Job == "far" && x.Tier == TierStarvation
+	}
+	if !got {
+		t.Fatalf("far not served after the deadline tier: %+v", d.Dispatch)
+	}
 	s.Jobs[1].LastRunning = t0.Add(-29 * time.Minute)
-	if count(Decide(s, &State{}, DefaultConfig()), "far") != 0 {
-		t.Fatal("guard fired early")
+	for _, x := range Decide(s, &State{}, DefaultConfig()).Dispatch {
+		if x.Tier == TierStarvation {
+			t.Fatal("guard fired early")
+		}
+	}
+	// A starving job with little slack still goes before the deadline tier.
+	soon := job("soon", "p", 100, 1, 90*time.Minute)
+	soon.LastRunning = t0.Add(-31 * time.Minute)
+	s = Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{near, soon}}
+	d = Decide(s, &State{}, DefaultConfig())
+	if d.Dispatch[0].Job != "soon" || d.Dispatch[0].Tier != TierStarvation {
+		t.Fatalf("soon: %+v", d.Dispatch)
 	}
 }
 

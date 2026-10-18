@@ -15,7 +15,7 @@ import (
 // test (or at the end of a run), against the snapshot it saw and the
 // engine's true state.
 var invariants = []struct{ name, what string }{
-	{"starvation", "a job with ready work and nothing running for 30 minutes gets the next free slot it may use"},
+	{"starvation", "a job with ready work and nothing running for 30 minutes gets the next free slot it may use (after the deadline tier if it has more than PreemptSlack of slack, until it has waited StarvationDeferMax)"},
 	{"starvation-over-deadline", "the starvation guard does not give the last free slot of a pool to a job with more than PreemptSlack of slack while a job on time in the plan needs it"},
 	{"work-conservation", "no slot is left idle while ready work that may use it waits, unless a gang holds it, a borrowing limit forbids it, or it is held for another project's guaranteed deadline need"},
 	{"blocked-rank", "a job whose units all wait on upstream work is never ranked ahead of a job with ready work"},
@@ -52,10 +52,6 @@ var knownBugs = map[string]string{
 	"lend-then-reclaim": "admit() in alloc.go holds free slots back for another project's unmet nominal demand only against borrowers; a release inside " +
 		"a third project's nominal quota takes the held-back slot, the guaranteed project is never served from free capacity, and reclaim() preempts a " +
 		"borrower for it in the same decision, so the slots lent to borrowers are taken back at once and the preempted work is lost (found by this grid)",
-	"starvation-over-deadline": "starvation() in decide.go runs before the deadline tier and releases a unit to any job idle for StarvationAfter, whatever its " +
-		"slack; on a small farm that unit takes a slot a job due within the hour needs, and once it has run MaxLostWork no preemption may take it back, " +
-		"so a long unit holds the slot for hours. Suggested fix: let the guard take only slots the deadline tier does not need (run it after need() for " +
-		"jobs with slack above PreemptSlack), or make guard-released units preemptible regardless of MaxLostWork (found by this grid)",
 }
 
 type violation struct {
@@ -114,6 +110,7 @@ type view struct {
 	useBefore  map[string]map[string]int // project, pool
 	useAfter   map[string]map[string]int
 	useStarve  map[string]map[string]int // before plus the starvation tier's dispatches
+	useNeed    map[string]map[string]int // before plus the starvation and deadline tiers'
 	sent       map[string]int            // units dispatched per job
 	sentTier   map[string]sched.Tier
 	byPoolTier map[string]map[sched.Tier]int
@@ -125,7 +122,7 @@ type view struct {
 func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 	v := &view{s: s, d: d, pools: map[string]*sched.Pool{}, projects: map[string]*sched.Project{}, hasQuota: map[string]bool{},
 		freeBefore: map[string]int{}, freeAfter: map[string]int{}, useBefore: map[string]map[string]int{},
-		useAfter: map[string]map[string]int{}, useStarve: map[string]map[string]int{}, sent: map[string]int{}, sentTier: map[string]sched.Tier{},
+		useAfter: map[string]map[string]int{}, useStarve: map[string]map[string]int{}, useNeed: map[string]map[string]int{}, sent: map[string]int{}, sentTier: map[string]sched.Tier{},
 		byPoolTier: map[string]map[sched.Tier]int{}, demand: map[string]map[string]int{}, gangHeld: map[string]bool{}}
 	for i := range s.Pools {
 		p := &s.Pools[i]
@@ -140,6 +137,7 @@ func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 		v.useBefore[pr.Name] = map[string]int{}
 		v.useAfter[pr.Name] = map[string]int{}
 		v.useStarve[pr.Name] = map[string]int{}
+		v.useNeed[pr.Name] = map[string]int{}
 		v.demand[pr.Name] = map[string]int{}
 		for pool, q := range pr.Quotas {
 			if v.pools[pool] != nil && (q.Nominal > 0 || q.BorrowingLimit >= 0) {
@@ -155,6 +153,7 @@ func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 			v.useBefore[j.Project][pool] += n
 			v.useAfter[j.Project][pool] += n
 			v.useStarve[j.Project][pool] += n
+			v.useNeed[j.Project][pool] += n
 		}
 	}
 	// Deadline demand as sched computes it before planning: R = W90 over
@@ -195,6 +194,9 @@ func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 		v.useAfter[j.Project][x.Pool] += x.Slots
 		if x.Tier == sched.TierStarvation {
 			v.useStarve[j.Project][x.Pool] += x.Slots
+		}
+		if x.Tier == sched.TierStarvation || x.Tier == sched.TierNeed {
+			v.useNeed[j.Project][x.Pool] += x.Slots
 		}
 		v.sent[x.Job]++
 		if _, ok := v.sentTier[x.Job]; !ok {
@@ -393,6 +395,24 @@ func (c *checker) dump(v *view, job, detail string) {
 	}
 }
 
+func (c *checker) snapJob(v *view, id string) *sched.Job {
+	for i := range v.s.Jobs {
+		if v.s.Jobs[i].ID == id {
+			return &v.s.Jobs[i]
+		}
+	}
+	return nil
+}
+
+// canWait mirrors sched's deferral of the guard for a starving job.
+func (c *checker) canWait(v *view, j *sched.Job) bool {
+	w := v.s.Now.Sub(since(j))
+	if c.cfg.StarvationDeferMax > 0 && w >= c.cfg.StarvationDeferMax {
+		return false
+	}
+	return v.d.Jobs[j.ID].Slack > c.cfg.PreemptSlack
+}
+
 func (c *checker) checkStarvation(v *view, starving map[string]bool) {
 	for i := range v.s.Jobs {
 		j := &v.s.Jobs[i]
@@ -417,7 +437,20 @@ func (c *checker) checkStarvation(v *view, starving map[string]bool) {
 			if !ok {
 				continue
 			}
+			// A starving job with slack above PreemptSlack lets the
+			// deadline tier go first, until it has starved
+			// StarvationDeferMax.
 			taken := v.freeBefore[pool] - v.freeAfter[pool] - v.byPoolTier[pool][sched.TierStarvation]
+			if c.canWait(v, j) {
+				taken -= v.byPoolTier[pool][sched.TierNeed]
+				room -= v.byPoolTier[pool][sched.TierNeed]
+				if room < k {
+					continue
+				}
+				if ok, _ := v.admitsWith(j.Project, pool, k, v.useNeed, v.demand0, room); !ok {
+					continue
+				}
+			}
 			if v.freeAfter[pool] >= k || taken > 0 {
 				c.violate("starvation", j.ID, fmt.Sprintf("waited %s with ready work; %s had %d free slots, %d went to non-starving jobs",
 					v.s.Now.Sub(since(j)).Round(time.Minute), pool, v.freeBefore[pool], taken))
@@ -438,13 +471,45 @@ func (c *checker) checkGuard(v *view) {
 		if st := v.d.Jobs[x.Job]; st.Slack <= c.cfg.PreemptSlack {
 			continue
 		}
+		// Past StarvationDeferMax the guard goes first by design.
+		if sj := c.snapJob(v, x.Job); sj == nil || !c.canWait(v, sj) {
+			continue
+		}
+		// Slots the deferred guard (jobs that could wait) took here.
+		guard := 0
+		for _, y := range v.d.Dispatch {
+			if y.Tier != sched.TierStarvation || y.Pool != x.Pool {
+				continue
+			}
+			yj := c.snapJob(v, y.Job)
+			if yj == nil || !c.canWait(v, yj) || v.d.Jobs[y.Job].Slack <= c.cfg.PreemptSlack {
+				continue
+			}
+			// A unit inside its project's nominal quota is that
+			// project's guarantee, which a borrower's deadline does not
+			// outrank.
+			if v.hasQuota[y.Pool] && v.useAfter[yj.Project][y.Pool] <= quotaOf(v.projects[yj.Project], y.Pool).Nominal {
+				continue
+			}
+			guard += y.Slots
+		}
 		for i := range v.s.Jobs {
 			j := &v.s.Jobs[i]
 			st := v.d.Jobs[j.ID]
 			if j.Deadline.IsZero() || st.AtRisk || j.Hold || j.HoldStop || len(j.Runnable) <= v.sent[j.ID] || !allowed(j.Pools, x.Pool) {
 				continue
 			}
-			if have := running(j) + v.sent[j.ID]; float64(have) < st.Required-1e-9 {
+			// Only if its next unit would have fit in what the guard
+			// took, within its project's borrowing limit.
+			k := unitSlots(j, j.Runnable[v.sent[j.ID]])
+			if k > guard+v.freeAfter[x.Pool] {
+				continue
+			}
+			if q := quotaOf(v.projects[j.Project], x.Pool); v.hasQuota[x.Pool] && q.BorrowingLimit >= 0 && v.useAfter[j.Project][x.Pool]+k-q.Nominal > q.BorrowingLimit {
+				continue
+			}
+			// Short by at least a whole slot (the band preemption uses).
+			if have := running(j) + v.sent[j.ID]; float64(have)+1 <= st.Required+1e-9 {
 				c.violate("starvation-over-deadline", x.Job, fmt.Sprintf("guard gave the last slot of %s to %s (slack %s) while %s, due %s, holds %d of the %.1f slots it needs",
 					x.Pool, x.Job, v.d.Jobs[x.Job].Slack.Round(time.Hour), j.ID, j.Deadline.Format("Mon 15:04"), have, st.Required))
 				return

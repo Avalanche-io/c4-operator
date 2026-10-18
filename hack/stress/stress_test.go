@@ -223,10 +223,10 @@ func TestReproUnplannedJobOnTrack(t *testing.T) {
 	}
 }
 
-// Found by the stress grid (the worst loss to a baseline): the starvation
-// guard runs before the deadline tier and gives a free slot to any job
-// idle for 30 minutes, however much slack it has, while a job due within
-// the hour waits. On a small farm the guard's unit then holds the slot:
+// Regression, found by the stress grid (the worst loss to a baseline): the
+// starvation guard ran before the deadline tier and gave a free slot to
+// any job idle for 30 minutes, however much slack it had, while a job due
+// within the hour waited. On a small farm the guard's unit then holds the slot:
 // once it has run MaxLostWork (15 minutes) no preemption may take it, and
 // a long unit keeps it for hours. In the grid, point g002 of the quick
 // grid (three nodes, deep pipelines) finishes 11 of 33 deadline jobs on
@@ -235,7 +235,6 @@ func TestReproUnplannedJobOnTrack(t *testing.T) {
 // them each time until one of their units (ten hours long) got past the
 // lost-work cap.
 func TestReproStarvationOverDeadline(t *testing.T) {
-	skipRepro(t, "sched design bug starvation-over-deadline (found by hack/stress): the guard serves a job with 36h of slack before one due in an hour; awaiting a decision in internal/work/sched")
 	idle := rjob("idle", "p", 5, 5*3600, 3600, 36*time.Hour)
 	idle.LastRunning = t0r.Add(-31 * time.Minute)
 	urgent := rjob("urgent", "p", 2, 1800, 900, 50*time.Minute)
