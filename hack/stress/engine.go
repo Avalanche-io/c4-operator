@@ -660,6 +660,12 @@ func (e *engine) fault(p *pool, n, k int) {
 	}
 	p.down[n] = true
 	p.slots -= spn
+	// A node lost during a capacity shrink takes what it lacks from the
+	// shrink (capacity.go), so slots never go below zero.
+	if p.slots < 0 {
+		p.capped += p.slots
+		p.slots = 0
+	}
 	for p.used > p.slots && len(p.running) > 0 {
 		e.stopAs(p.running[len(p.running)-1], evFail, false)
 		e.res.FaultKills++

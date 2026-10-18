@@ -33,7 +33,7 @@ var invariants = []struct{ name, what string }{
 	{"burst-budget", "automatic bursts stay within each project's remaining daily budget"},
 	{"capacity-shed", "a pool over its slots (a capacity shrink) has at least the excess stopped or yielding, beyond what non-preemptible units hold"},
 	{"capacity-overshed", "shedding stops no unit the other shed units would have covered the excess without"},
-	{"capacity-order", "a job at risk is not shed while a preemptible job with more than PreemptSlack of slack keeps running in the pool"},
+	{"capacity-order", "a job at risk is not shed while preemptible jobs on time with more than PreemptSlack of slack keep running in the pool with slots enough to cover the excess"},
 	{"burst-unjustified", "a burst pool's request grows only by automatically approved slots, and never past its limit"},
 	{"guard-preempt", "only a unit the starvation guard started is preempted as a guard unit"},
 	{"lend-then-reclaim", "a pool's free slots are not lent to a borrowing project in the same decision that preempts a borrower to restore another project's nominal quota"},

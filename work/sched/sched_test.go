@@ -1194,3 +1194,23 @@ func TestShrunkPoolShedsNoMoreThanNeeded(t *testing.T) {
 		t.Fatalf("shed %v, want only the gang", got)
 	}
 }
+
+// A job at risk keeps its unit while jobs on time can cover the excess,
+// even with a larger unit: 3 over, a 4-slot gang of a job with no
+// deadline and a 1-slot unit of a job at risk; the gang goes.
+func TestShrunkPoolSparesJobsAtRisk(t *testing.T) {
+	gang := job("gang", "p", 0, 8, 0)
+	gang.SlotsPerUnit = 4
+	gang.RunningUnits = []RunningUnit{{ID: "gang/0", Pool: "cpu", Slots: 4, Started: t0.Add(-time.Hour)}}
+	gang.Running = map[string]int{"cpu": 4}
+	late := job("late", "p", 0, 30, 2*time.Hour)
+	late.RunningUnits, late.Running = runningUnits("late", "cpu", 1, t0)
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "cpu", Slots: 2, Used: 5}}, Jobs: []Job{gang, late}}
+	d := Decide(s, &State{}, DefaultConfig())
+	if !d.Jobs["late"].AtRisk {
+		t.Fatalf("late is not at risk: %s", d.Jobs["late"].Message)
+	}
+	if got := capacityPreempts(d); got["gang"] != 4 || got["late"] != 0 {
+		t.Fatalf("shed %v, want the gang and not the job at risk", got)
+	}
+}

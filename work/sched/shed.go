@@ -8,8 +8,11 @@ import "sort"
 // less its slots and less the slots of units already being stopped there
 // (State.pending: a yield in progress counts once).
 //
-// The least valuable units go first: most slack (a job with no deadline
-// before any with one, a job at risk last), then least lost work (a
+// The least valuable units go first: jobs on time in what they report
+// before jobs at risk (slack is what a job could do with all its
+// attainable slots, so a job at risk in the plan can have more of it than
+// one on time), then most slack (a job with no deadline before any with
+// one), then least lost work (a
 // checkpointing unit yields at its next checkpoint and loses only its
 // restore cost), then ID. The fewest slots that cover the excess are
 // shed: units that fit what is left are taken in that order; if the rest
@@ -46,6 +49,9 @@ func (a *alloc) shed() {
 		}
 		sort.SliceStable(vs, func(i, j int) bool {
 			x, y := vs[i], vs[j]
+			if rx, ry := x.jc.view().atRisk, y.jc.view().atRisk; rx != ry {
+				return ry
+			}
 			if x.jc.slack != y.jc.slack {
 				return x.jc.slack > y.jc.slack
 			}
@@ -54,7 +60,22 @@ func (a *alloc) shed() {
 			}
 			return x.ru.ID < y.ru.ID
 		})
-		for _, v := range pickShed(vs, excess) {
+		// Jobs on time cover the excess first, a larger unit of theirs
+		// before any unit of a job at risk; only what they cannot cover is
+		// shed from jobs at risk.
+		var calm, risky []victim
+		for _, v := range vs {
+			if v.jc.view().atRisk {
+				risky = append(risky, v)
+			} else {
+				calm = append(calm, v)
+			}
+		}
+		take := pickShed(calm, excess)
+		if got := victimSlots(take); got < excess {
+			take = append(take, pickShed(risky, excess-got)...)
+		}
+		for _, v := range take {
 			a.preemptUnit(v.jc, v.ru, ReasonCapacity, "")
 			v.jc.outgoing += v.ru.Slots
 			v.jc.proj.usage[name] -= v.ru.Slots
@@ -63,7 +84,7 @@ func (a *alloc) shed() {
 }
 
 // pickShed chooses from vs (least valuable first) the units to shed for
-// excess slots: those that fit what is left, in order; then, if that is
+// excess slots (all of vs when they cannot cover it): those that fit what is left, in order; then, if that is
 // not enough, the first unit of the rest, giving back the most valuable of
 // those already chosen that are no longer needed.
 func pickShed(vs []victim, excess int) []victim {
@@ -93,4 +114,12 @@ func pickShed(vs []victim, excess int) []victim {
 		}
 	}
 	return take
+}
+
+func victimSlots(vs []victim) int {
+	n := 0
+	for _, v := range vs {
+		n += v.ru.Slots
+	}
+	return n
 }

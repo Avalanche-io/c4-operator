@@ -57,15 +57,22 @@ func (e *engine) unshrink(p *pool) {
 // sched asks to stop at least the excess, beyond what is already being
 // stopped and what non-preemptible units hold (capacity-shed); it sheds no
 // unit it could have kept (capacity-overshed); and it does not shed a job
-// at risk while a preemptible job with slack above PreemptSlack keeps
-// running in the pool (capacity-order).
+// at risk while preemptible jobs on time with slack above PreemptSlack
+// keep running in the pool with enough slots to cover the excess
+// (capacity-order).
 func (c *checker) checkCapacity(v *view) {
 	shed := map[string][]sched.Preempt{}
-	stopNow := map[string]int{}
+	// stopNow is every unit this decision stops; before is what was
+	// already stopping when the shed ran (hold-stops come before it,
+	// reclaim and feasibility after).
+	stopNow, before := map[string]int{}, map[string]int{}
 	for _, x := range v.d.Preempt {
 		stopNow[x.Pool] += x.Slots
-		if x.Reason == sched.ReasonCapacity {
+		switch x.Reason {
+		case sched.ReasonCapacity:
 			shed[x.Pool] = append(shed[x.Pool], x)
+		case sched.ReasonHoldStop:
+			before[x.Pool] += x.Slots
 		}
 	}
 	for _, p := range v.s.Pools {
@@ -74,7 +81,8 @@ func (c *checker) checkCapacity(v *view) {
 			continue
 		}
 		yielding, fixed := 0, 0
-		keep := map[string]bool{} // jobs with slack still running in the pool
+		keep := map[string]bool{} // jobs on time with slack still running in the pool
+		keepSlots := 0
 		gone := map[string]bool{}
 		for _, x := range v.d.Preempt {
 			gone[x.Unit] = true
@@ -93,23 +101,32 @@ func (c *checker) checkCapacity(v *view) {
 					// Asked to stop in an earlier decision: yielding at its
 					// next checkpoint, or ending before it.
 					yielding += ru.Slots
-				case !gone[ru.ID] && st.Slack > c.cfg.PreemptSlack:
+				case !gone[ru.ID] && !st.AtRisk && st.Slack > c.cfg.PreemptSlack:
 					keep[j.ID] = true
+					keepSlots += ru.Slots
 				}
 			}
 		}
 		if over > yielding+stopNow[p.Name]+fixed {
 			c.violate("capacity-shed", p.Name, fmt.Sprintf("%d slots over (%d used of %d) with %d being stopped, %d stopped now and %d not preemptible", over, p.Used, p.Slots, yielding, stopNow[p.Name], fixed))
 		}
-		need := over - yielding - (stopNow[p.Name] - slotsOf(shed[p.Name]))
+		need := over - yielding - before[p.Name]
 		for _, x := range shed[p.Name] {
 			if slotsOf(shed[p.Name])-x.Slots >= need {
 				c.violate("capacity-overshed", x.Job, fmt.Sprintf("shed %s (%d slots) from %s though the other shed units cover the %d over", x.Unit, x.Slots, p.Name, need))
 				break
 			}
 		}
+		// A job at risk may be shed when the units of jobs on time with
+		// slack could not have covered the excess without it.
+		calm := 0
 		for _, x := range shed[p.Name] {
 			if !v.d.Jobs[x.Job].AtRisk {
+				calm += x.Slots
+			}
+		}
+		for _, x := range shed[p.Name] {
+			if !v.d.Jobs[x.Job].AtRisk || calm+keepSlots < need {
 				continue
 			}
 			for id := range keep {
