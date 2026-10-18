@@ -56,6 +56,14 @@ type Server struct {
 	// Sites place the farm's nodes on the HUD's map (--hud-sites); nil
 	// leaves the map out.
 	Sites []api.Site
+	// DryRun plans jobs before they are submitted (POST /jobs); nil
+	// answers dry runs with 503.
+	DryRun DryRunFunc
+	// MaxObjectBytes caps one uploaded object (default 64 GiB), and
+	// SpoolDir is where uploads are held while they are identified
+	// (default the system's temporary directory).
+	MaxObjectBytes int64
+	SpoolDir       string
 
 	mu      sync.RWMutex
 	m       *model
@@ -98,6 +106,11 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/views/{project}/diff", s.handleDiff)
 	mux.HandleFunc("GET /api/v1/trace/{ns}/{name}", s.handleTrace)
 	mux.HandleFunc("GET /api/v1/custody/{ns}/{name}", s.handleCustody)
+	mux.HandleFunc("POST /api/v1/jobs", s.handleSubmit)
+	mux.HandleFunc("POST /api/v1/objects/{project}/missing", s.handleMissing)
+	mux.HandleFunc("PUT /api/v1/objects/{project}/{id}", s.handlePutObject)
+	mux.HandleFunc("POST /api/v1/views/{project}", s.handlePostView)
+	mux.HandleFunc("GET /api/v1/views/{project}/{id}/files", s.handleViewFiles)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/nudge", s.handleNudge)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/requeue", s.handleRequeue)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/blacklist", s.handleBlacklist)
