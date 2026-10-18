@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -309,6 +310,32 @@ func TestKebab(t *testing.T) {
 	for in, want := range map[string]string{"NodeNotReady": "node-not-ready", "Nudged": "nudged", "OOMKilling": "oom-killing", "": ""} {
 		if got := kebab(in); got != want {
 			t.Errorf("kebab(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// The HUD API writes every time in UTC; the browser shows local time.
+func TestWireTimesAreUTC(t *testing.T) {
+	s := farm(t)
+	s.Loc, _ = time.LoadLocation("America/Los_Angeles")
+	offset := regexp.MustCompile(`"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(\.\d+)?[+-]\d\d:\d\d"`)
+	for _, path := range []string{"/api/v1/snapshot?as=wrangler", "/api/v1/book?as=wrangler"} {
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("%s: %d", path, w.Code)
+		}
+		if m := offset.FindString(w.Body.String()); m != "" {
+			t.Errorf("%s writes a time with an offset: %s", path, m)
+		}
+	}
+	var snap api.Snapshot
+	get(t, s, "/api/v1/snapshot?as=wrangler", &snap)
+	for _, j := range snap.Jobs {
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/jobs/"+j.Namespace+"/"+j.Name+"?as=wrangler", nil))
+		if m := offset.FindString(w.Body.String()); m != "" {
+			t.Errorf("job %s/%s writes a time with an offset: %s", j.Namespace, j.Name, m)
 		}
 	}
 }

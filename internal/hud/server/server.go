@@ -42,7 +42,9 @@ type Server struct {
 	Queue  Queue                // burst spend and deadline options (optional)
 	Stores queue.StoreFunc      // project stores, for previews and objects
 	Web    fs.FS                // the web app
-	Loc    *time.Location       // the farm's time zone
+	// Loc is the farm's time zone, for times inside sentences the HUD
+	// writes (control confirmations). Every time field on the wire is UTC.
+	Loc *time.Location
 	// DevViewers enables ?as= with these viewers (tests and demos only).
 	DevViewers map[string]*api.Viewer
 	// TrustProxy reads X-Forwarded-User and X-Forwarded-Groups from an

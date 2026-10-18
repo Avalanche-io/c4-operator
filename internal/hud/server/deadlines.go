@@ -53,11 +53,11 @@ func (s *Server) handleDeadlineOptions(w http.ResponseWriter, r *http.Request) {
 
 // deadlineOptions is the queue's readout as the API reports it.
 func (s *Server) deadlineOptions(o *queue.Options) api.DeadlineOptions {
-	out := api.DeadlineOptions{Job: o.Job, Now: o.Now.In(s.Loc), Policy: string(o.Policy), Quantile: o.Quantile,
+	out := api.DeadlineOptions{Job: o.Job, Now: o.Now.UTC(), Policy: string(o.Policy), Quantile: o.Quantile,
 		Deadline: s.optTime(o.Deadline), Band: s.band(o.Band), Achievable: s.optTime(o.Achievable),
-		Floor: o.Floor.In(s.Loc), FloorWhy: o.FloorWhy, Options: []api.DeadlineOption{}}
+		Floor: o.Floor.UTC(), FloorWhy: o.FloorWhy, Options: []api.DeadlineOption{}}
 	for _, x := range o.Options {
-		ao := api.DeadlineOption{At: x.At.In(s.Loc), Label: x.Label, Band: s.band(x.Band), Meets: x.Meets, OnTime: x.OnTime, Boost: x.Boost,
+		ao := api.DeadlineOption{At: x.At.UTC(), Label: x.Label, Band: s.band(x.Band), Meets: x.Meets, OnTime: x.OnTime, Boost: x.Boost,
 			Displaces: x.Displaces, Displaced: x.Displaced, Unnamed: x.Unnamed, Floor: s.optTime(x.Floor), FloorWhy: x.FloorWhy}
 		if ao.Displaced == nil {
 			ao.Displaced = []string{}
@@ -74,13 +74,13 @@ func (s *Server) band(b forecast.Band) *api.Band {
 	if b.IsZero() {
 		return nil
 	}
-	return &api.Band{P50: b.P50.In(s.Loc), P80: b.P80.In(s.Loc), P90: b.P90.In(s.Loc), P95: b.P95.In(s.Loc)}
+	return &api.Band{P50: b.P50.UTC(), P80: b.P80.UTC(), P90: b.P90.UTC(), P95: b.P95.UTC()}
 }
 
 func (s *Server) optTime(t time.Time) *time.Time {
 	if t.IsZero() {
 		return nil
 	}
-	t = t.In(s.Loc)
+	t = t.UTC()
 	return &t
 }

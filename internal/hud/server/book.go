@@ -117,7 +117,7 @@ func (s *Server) book(ctx context.Context, m *model, v *api.Viewer, only *jobRec
 		if cr.Spec.EstimatedCost != "" {
 			msg += fmt.Sprintf(" (est. $%s)", cr.Spec.EstimatedCost)
 		}
-		add(bookItem{project: proj, e: api.BookEntry{At: cr.CreationTimestamp.Time.In(s.Loc), Actor: "component/queue", Signer: api.SignerQueue,
+		add(bookItem{project: proj, e: api.BookEntry{At: cr.CreationTimestamp.Time.UTC(), Actor: "component/queue", Signer: api.SignerQueue,
 			Kind: "capacity-requested", Object: api.BookObject{Type: "capacity", Pool: cr.Spec.Pool, Job: job}, Message: msg}})
 	}
 
@@ -199,7 +199,7 @@ func (s *Server) statusEntries(rec *jobRec) []bookItem {
 	job := api.BookObject{Type: "job", Job: rec.key}
 	var out []bookItem
 	item := func(at time.Time, actor, signer, kind string, obj api.BookObject, record, msg string) {
-		out = append(out, bookItem{project: rec.project, e: api.BookEntry{At: at.In(s.Loc), Actor: actor, Signer: signer, Kind: kind,
+		out = append(out, bookItem{project: rec.project, e: api.BookEntry{At: at.UTC(), Actor: actor, Signer: signer, Kind: kind,
 			Object: obj, Message: msg, Record: record}})
 	}
 	if st.Started != nil {
@@ -273,7 +273,7 @@ func (s *Server) eventEntry(ev corev1.Event, obj api.BookObject) api.BookEntry {
 	if at.IsZero() {
 		at = ev.CreationTimestamp.Time
 	}
-	e := api.BookEntry{At: at.In(s.Loc), Object: obj, Message: ev.Message, Kind: kebab(ev.Reason)}
+	e := api.BookEntry{At: at.UTC(), Object: obj, Message: ev.Message, Kind: kebab(ev.Reason)}
 	comp := ev.Source.Component
 	if comp == "" {
 		comp = ev.ReportingController

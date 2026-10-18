@@ -141,7 +141,7 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 			ac.PrewarmViews = []string{}
 		}
 		if cr.Spec.Until != nil {
-			ac.Until = cr.Spec.Until.Time.In(s.Loc)
+			ac.Until = cr.Spec.Until.Time.UTC()
 		}
 		if ac.State == "" {
 			ac.State = "Provisioning"
@@ -189,7 +189,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	st := &j.Status
 	aj := api.Job{Namespace: j.Namespace, Name: j.Name, Project: r.project, Class: j.Spec.Class, Driver: j.Spec.Class,
 		Owner: j.Annotations["c4.avalanche.io/owner"], Phase: st.Phase, Order: st.Order, Rank: int(st.Rank),
-		Pools: j.Spec.Pools, DependsOn: []string{}, CreatedAt: j.CreationTimestamp.Time.In(s.Loc),
+		Pools: j.Spec.Pools, DependsOn: []string{}, CreatedAt: j.CreationTimestamp.Time.UTC(),
 		Nudge:     api.Nudge{Hold: j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop, Boost: num(j.Spec.Nudge.Boost)},
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}
 	aj.Shot = j.Labels[LabelShot]
@@ -229,7 +229,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		}
 	}
 	if st.Deadline != nil {
-		d := st.Deadline.Time.In(s.Loc)
+		d := st.Deadline.Time.UTC()
 		aj.Objective.Deadline = &d
 	}
 	aj.Objective.Source = st.DeadlineSource
@@ -240,10 +240,10 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 			RequiredSlots: round1(num(e.RequiredSlots)), AttainableSlots: round1(num(e.AttainableSlots)),
 			RunningSlots: int(e.RunningSlots), SlackSeconds: float64(e.SlackSeconds), Feasible: e.Feasible, Message: e.Message}
 		if e.ETA50 != nil {
-			aj.Estimate.EtaP50 = e.ETA50.Time.In(s.Loc)
+			aj.Estimate.EtaP50 = e.ETA50.Time.UTC()
 		}
 		if e.ETA90 != nil {
-			aj.Estimate.EtaP90 = e.ETA90.Time.In(s.Loc)
+			aj.Estimate.EtaP90 = e.ETA90.Time.UTC()
 		}
 		aj.Estimate.EtaP80, aj.Estimate.EtaP95 = s.timePtr(e.ETA80), s.timePtr(e.ETA95)
 		aj.Estimate.Calibrated = e.Calibrated
@@ -256,7 +256,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	}
 	if st.Finished != nil {
 		// A finished job's "ETA" is when it finished.
-		f := st.Finished.Time.In(s.Loc)
+		f := st.Finished.Time.UTC()
 		aj.Estimate.EtaP50, aj.Estimate.EtaP90 = f, f
 		aj.Estimate.EtaP80, aj.Estimate.EtaP95 = &f, &f
 		aj.Estimate.RemainingSeconds, aj.Estimate.P90RemainingSeconds = 0, 0
@@ -486,11 +486,11 @@ func (s *Server) suggestion(sg *c4v1.WorkSuggestion) *api.Suggestion {
 		return nil
 	}
 	q, _ := strconv.ParseFloat(sg.Quantile, 64)
-	out := &api.Suggestion{Deadline: sg.Deadline.Time.In(s.Loc), State: sg.State, Policy: sg.Policy, Quantile: q,
+	out := &api.Suggestion{Deadline: sg.Deadline.Time.UTC(), State: sg.State, Policy: sg.Policy, Quantile: q,
 		Revisions: int(sg.Revisions), MaxRevisions: int(sg.MaxRevisions), NextSession: s.timePtr(sg.NextSession),
 		History: []api.SuggestionRevision{}, AtRisk: sg.AtRisk}
 	for _, h := range sg.History {
-		out.History = append(out.History, api.SuggestionRevision{At: h.At.Time.In(s.Loc), Deadline: h.Deadline.Time.In(s.Loc),
+		out.History = append(out.History, api.SuggestionRevision{At: h.At.Time.UTC(), Deadline: h.Deadline.Time.UTC(),
 			UnitsMeasured: int(h.UnitsMeasured), Record: h.Record, Reason: h.Reason})
 	}
 	return out
@@ -501,6 +501,6 @@ func (s *Server) timePtr(t *metav1.Time) *time.Time {
 	if t == nil || t.IsZero() {
 		return nil
 	}
-	v := t.Time.In(s.Loc)
+	v := t.Time.UTC()
 	return &v
 }

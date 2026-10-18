@@ -10,10 +10,15 @@ All paths are under `/api/v1`. Responses are JSON unless noted.
 
 ## Conventions
 
-- **Times** are RFC 3339 strings in the farm's own offset, for example
-  `2026-10-23T11:36:24-07:00`. The HUD shows every time in that offset (taken
-  from `snapshot.now`), whatever the browser's time zone, so a wall display and
-  a laptop agree.
+- **Times** are RFC 3339 strings in UTC, for example
+  `2026-10-23T18:36:24Z`. A farm can span time zones; the system runs on
+  UTC and the presentation normalizes. The HUD shows each time in the
+  viewer's local time (the browser's zone, or `?tz=` for captures), with
+  UTC smaller beside it where a time is the subject (clocks, the time base,
+  deadline labels); a site shows its own local time where it is the
+  subject. Sentences the server writes (estimate messages, control
+  confirmations) give times in the farm's zone with UTC beside them; the
+  HUD reads structured time fields, never times inside sentences.
 - **Durations** are numbers of seconds.
 - **Bytes** are numbers of bytes.
 - **Unit sets** are run-length index strings: `"0-99,102,140-141"`. The empty

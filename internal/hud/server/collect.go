@@ -56,7 +56,7 @@ type jobRec struct {
 
 // collect reads the farm. Metrics are scraped every fifth call.
 func (s *Server) collect(ctx context.Context) error {
-	m := &model{at: time.Now().In(s.Loc), byKey: map[string]*jobRec{}, nsProject: map[string]string{}}
+	m := &model{at: time.Now().UTC(), byKey: map[string]*jobRec{}, nsProject: map[string]string{}}
 	var (
 		jobs     c4v1.WorkJobList
 		pools    c4v1.PoolList

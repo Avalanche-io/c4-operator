@@ -205,8 +205,8 @@ func (s *Server) classSummary(m *model, rec *jobRec) map[string]any {
 		ranks, _ := strconv.Atoi(j.Spec.Params["ranks"])
 		var ckpts, yields []map[string]any
 		for _, y := range j.Status.Yields {
-			ckpts = append(ckpts, map[string]any{"view": y.View, "step": 0, "at": y.At.Time.In(s.Loc), "bytesNew": 0, "bytesDeduped": 0})
-			yields = append(yields, map[string]any{"at": y.At.Time.In(s.Loc), "reason": y.Reason})
+			ckpts = append(ckpts, map[string]any{"view": y.View, "step": 0, "at": y.At.Time.UTC(), "bytesNew": 0, "bytesDeduped": 0})
+			yields = append(yields, map[string]any{"at": y.At.Time.UTC(), "reason": y.Reason})
 		}
 		if ckpts == nil {
 			ckpts = []map[string]any{}
@@ -350,7 +350,7 @@ func (s *Server) handleUnit(w http.ResponseWriter, r *http.Request) {
 	if pod != nil {
 		att := map[string]any{"n": pod.Annotations[c4v1.AnnotationAttempt], "node": pod.Spec.NodeName}
 		if pod.Status.StartTime != nil {
-			att["start"] = pod.Status.StartTime.Time.In(s.Loc)
+			att["start"] = pod.Status.StartTime.Time.UTC()
 			out["durationSeconds"] = math.Round(m.at.Sub(pod.Status.StartTime.Time).Seconds())
 		}
 		out["attempts"] = []map[string]any{att}
@@ -371,7 +371,7 @@ func (s *Server) handleUnit(w http.ResponseWriter, r *http.Request) {
 					if at.IsZero() {
 						at = e.EventTime.Time
 					}
-					list = append(list, map[string]any{"type": e.Type, "reason": e.Reason, "message": e.Message, "at": at.In(s.Loc)})
+					list = append(list, map[string]any{"type": e.Type, "reason": e.Reason, "message": e.Message, "at": at.UTC()})
 				}
 				sort.Slice(list, func(a, b int) bool { return list[a]["at"].(time.Time).Before(list[b]["at"].(time.Time)) })
 				if list != nil {
@@ -511,12 +511,12 @@ func (s *Server) handleGraph(w http.ResponseWriter, r *http.Request) {
 		}
 		if e := j.Status.Estimate; e != nil {
 			if e.ETA90 != nil {
-				n["etaP90"] = e.ETA90.Time.In(s.Loc)
+				n["etaP90"] = e.ETA90.Time.UTC()
 			}
 			n["slackSeconds"] = e.SlackSeconds
 		}
 		if j.Status.Deadline != nil {
-			n["deadline"] = j.Status.Deadline.Time.In(s.Loc)
+			n["deadline"] = j.Status.Deadline.Time.UTC()
 		}
 		nodes = append(nodes, n)
 		for _, d := range j.Spec.DependsOn {
