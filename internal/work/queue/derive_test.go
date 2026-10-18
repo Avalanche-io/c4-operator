@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -148,5 +149,32 @@ func TestUnsealedExactIsValidated(t *testing.T) {
 	d := get(t, ns, "sh302").Status.Derivation
 	if d == nil || d.Class != "validated" || d.Why == "" {
 		t.Fatalf("unsealed: %+v", d)
+	}
+}
+
+// A project's derivations travel in its saved calibrations object and come
+// back with the verification they earned.
+func TestDerivationsPersist(t *testing.T) {
+	q := &Queue{}
+	b := q.book("show-a")
+	for range 3 {
+		b.Record(process.Run{Key: process.Key{Process: "p", Inputs: "i"}, Program: "g", Declared: process.Exact, Sealed: true, Output: "o", Work: 60})
+	}
+	js, err := json.Marshal(q.calRecordOf("show-a", time.Unix(0, 0)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rec calRecord
+	if err := json.Unmarshal(js, &rec); err != nil {
+		t.Fatal(err)
+	}
+	q2 := &Queue{}
+	q2.restoreProject(&rec)
+	c, v := q2.book("show-a").Class("g")
+	if c != process.Exact || !v {
+		t.Fatalf("restored class %s verified=%v", c, v)
+	}
+	if q2.book("show-b").Len() != 0 {
+		t.Fatal("another project got the record")
 	}
 }

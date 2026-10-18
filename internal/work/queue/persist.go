@@ -23,6 +23,7 @@ import (
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 	"github.com/Avalanche-io/c4-operator/work/forecast"
+	"github.com/Avalanche-io/c4-operator/work/process"
 )
 
 // Calibrations survive a restart (calibrate.go). Every calSaveEvery, when
@@ -60,6 +61,9 @@ type calRecord struct {
 	// Saved is when the object was written.
 	Saved   time.Time                   `json:"saved"`
 	Classes map[string]classCalibration `json:"classes"`
+	// Derivations is the project's record of derivations (derive.go), so
+	// the verification it has earned survives a restart. Experimental.
+	Derivations *process.BookSnapshot `json:"derivations,omitempty"`
 }
 
 // classCalibration is one class's calibrations: of the remaining work
@@ -172,6 +176,9 @@ func (q *Queue) restoreProject(rec *calRecord) {
 		q.cal.own = map[[2]string]*estimate.Calibration{}
 	}
 	q.fcal.init()
+	if rec.Derivations != nil && q.book(rec.Project).Len() == 0 {
+		q.books[rec.Project] = process.RestoreBook(*rec.Derivations)
+	}
 	for class, cc := range rec.Classes {
 		k := [2]string{rec.Project, class}
 		if cc.Work != nil {
@@ -355,6 +362,10 @@ func (q *Queue) calRecordOf(project string, now time.Time) calRecord {
 			cc.Finish = &s
 			rec.Classes[k[1]] = cc
 		}
+	}
+	if b := q.books[project]; b != nil && b.Len() > 0 {
+		s := b.Snapshot()
+		rec.Derivations = &s
 	}
 	return rec
 }

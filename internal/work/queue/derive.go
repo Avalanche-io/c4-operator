@@ -245,6 +245,7 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 	slots := max(1, u.Slots)
 	q.book(v.project).Record(process.Run{Key: process.Key{Process: proc, Inputs: in}, Program: program, Inputs: inputs, Declared: declared,
 		Sealed: sealed, Output: out, Work: float64(ms) / 1000 * float64(slots), Duration: float64(ms) / 1000, At: finishOf(p, time.Now())})
+	q.calp.touch(v.project)
 	m := v.mem
 	m.proc, m.unsealedWhy = program, why
 }
