@@ -1673,6 +1673,16 @@ Burst decisions are cost-aware:
   burst budget and below the lateness it prevents, priced at the project's
   `lateCostPerHour`. Otherwise the HUD shows the option and its price, and a
   person approves it.
+- Bursts are sized from a plan with a margin: the critical path's work is
+  counted in W90 and again as the job's tail. What a job reports (at risk,
+  late by, ETA) uses Graham's bound without the double count, so a burst the
+  margin alone buys is labelled as margin against estimate uncertainty. The
+  margin stays even when W90 is calibrated. With W90 calibrated to 90% coverage
+  in the stress grid (`hack/stress -calibrated`), sizing bursts from Graham's
+  bound instead saved $2.5k of burst against about $63k more lateness at the
+  projects' own prices: the overrun tail a calibrated 90th percentile leaves
+  still costs more than the margin. Every margin burst passes the same
+  economic rule, priced from the lateness the margin plans.
 - Scale-down uses hysteresis: a request shrinks only after a pool's surplus
   has lasted ten minutes, and nodes are released by the autoscaler's own
   consolidation, never by the queue.

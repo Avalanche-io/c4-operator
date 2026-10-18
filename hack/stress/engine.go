@@ -87,6 +87,7 @@ type job struct {
 	sum         estimate.Summary
 	sumAt       float64
 	dirty       bool
+	calAt       float64 // when its estimate was last scored (-calibrated)
 }
 
 func (j *job) live() bool { return j.arrived && j.finish < 0 }
@@ -210,12 +211,15 @@ type engine struct {
 	hash   uint64
 	res    *runResult
 	lat    []time.Duration
+	cal    map[string]*estimate.Calibration // by job kind, with -calibrated
+	calQs  map[string]map[estimate.Stratum]calQ
 }
 
 func newEngine(w *workload, pol policy, check bool) *engine {
 	e := &engine{w: w, pol: pol, cfg: sched.DefaultConfig(), byName: map[string]*pool{}, byID: map[string]*unit{},
 		spent: map[string]float64{}, budget: map[string]float64{}, decAt: -1, lastD: -coalesce}
 	e.cfg.Burst = pol.burst
+	e.initCalibration()
 	if pol.tweak != nil {
 		pol.tweak(&e.cfg)
 	}
@@ -859,6 +863,7 @@ func (e *engine) estimate(j *job) estimate.Summary {
 	s.Sigma = math.Sqrt(v)
 	s.W90 = s.W + 1.28*s.Sigma
 	s.Unevaluated = j.uneval
+	e.calibrate(j, &s)
 	j.sum, j.sumAt, j.dirty = s, e.now, false
 	return s
 }

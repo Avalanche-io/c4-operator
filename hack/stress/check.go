@@ -1013,19 +1013,22 @@ type runResult struct {
 	Jobs, DueJobs, OnTime, Late, Unfinished int
 	// Shots: the last stage of each shot against the shot's deadline
 	// (what a person waits for), whatever the earlier stages' deadlines.
-	FinalDue, FinalOnTime               int
-	FinalLateHours                      float64
-	Shrinks                             int // capacity shrinks (capacity.go)
-	LateHours, LateDollars              float64
-	BurstCost                           float64
-	Util                                float64
-	Dispatches, Preemptions, FaultKills int
-	Reclaims, Nudges                    int
-	AutoBursts, Approvals               int
-	UsefulSlotHours, LostSlotHours      float64
-	Decides                             int
-	DecideMean, DecideMax               time.Duration
-	MaxStarve                           time.Duration // longest wait of a ready job with nothing running
+	FinalDue, FinalOnTime int
+	FinalLateHours        float64
+	Shrinks               int // capacity shrinks (capacity.go)
+	// With -calibrated: estimate moments of finished jobs, those whose W90
+	// covered the true remaining work, and the same for calibrated W90s.
+	W90Moments, W90Covered, W90CalMoments, W90CalCovered int
+	LateHours, LateDollars                               float64
+	BurstCost                                            float64
+	Util                                                 float64
+	Dispatches, Preemptions, FaultKills                  int
+	Reclaims, Nudges                                     int
+	AutoBursts, Approvals                                int
+	UsefulSlotHours, LostSlotHours                       float64
+	Decides                                              int
+	DecideMean, DecideMax                                time.Duration
+	MaxStarve                                            time.Duration // longest wait of a ready job with nothing running
 	// Spot: interruptions (and those caused by a maximum price), units
 	// killed by one, saves (a checkpoint or a move on a warning), work
 	// lost by unit length, units judged too risky for spot and those moved
