@@ -34,6 +34,7 @@ Farms
   whoami                   who the farm sees you as, and your projects
 
 Work
+  samples get [SET]        download the sample shots and repositories to ~/c4-samples
   types                    the prebuilt job types
   submit TYPE ASSET        plan a job, show the estimate, and submit it
   ls                       the queue, in run order (--mine, --at-risk, --all)
@@ -424,7 +425,24 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		mcpserver.Version = version
 		return mcpserver.New(&mcpserver.Client{Base: c.Base, Token: c.Token, As: c.As, Agent: *agent}).Run(ctx, &mcp.StdioTransport{})
 
-	case "up", "down", "status", "machine", "image", "samples", "power":
+	case "samples":
+		from := fs.String("from", "", "a local sample archive instead of the release's")
+		dir := fs.String("dir", "", "where to unpack (default ~/c4-samples)")
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		if len(pos) == 0 || pos[0] != "get" {
+			return errors.New("usage: c4 farm samples get [SET] [--dir DIR] [--from ARCHIVE]")
+		}
+		set := ""
+		if len(pos) > 1 {
+			set = pos[1]
+		}
+		o := farmcli.Out{W: stdout, Clock: farmcli.Clock{UTC: cm.utc}}
+		return farmcli.GetSamples(ctx, o, farmcli.SamplesArgs{Set: set, Version: version, Dir: *dir, From: *from})
+
+	case "up", "down", "status", "machine", "image", "power":
 		return fmt.Errorf("%s is part of the local farm installer, which is not in this build yet; to use a farm that is already running, `c4 farm login http://127.0.0.1:30080 --as artist`", cmd)
 	}
 	var names []string
