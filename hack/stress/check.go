@@ -31,6 +31,7 @@ var invariants = []struct{ name, what string }{
 	{"burst-uneconomic", "an automatic burst closes the deadline and costs less than the lateness it prevents"},
 	{"burst-budget", "automatic bursts stay within each project's remaining daily budget"},
 	{"burst-unjustified", "a burst pool's request grows only by automatically approved slots, and never past its limit"},
+	{"guard-preempt", "only a unit the starvation guard started is preempted as a guard unit"},
 	{"lend-then-reclaim", "a pool's free slots are not lent to a borrowing project in the same decision that preempts a borrower to restore another project's nominal quota"},
 	{"churn-unit", "a unit is preempted at most MaxPreemptionsPerUnit times"},
 	{"churn-pool", "a pool sees at most PreemptPerWindow preemptions per PreemptWindow"},
@@ -84,13 +85,14 @@ type checker struct {
 	// toward it), by unit.
 	incoming map[string]string
 	asked    map[string]bool // units sched asked to stop, while they run
+	guardHit map[string]float64 // jobs whose guard unit was preempted, and when
 	cur      *view
 	dumped   bool
 }
 
 func newChecker(e *engine) *checker {
 	return &checker{e: e, cfg: e.cfg, byUnit: map[string]int{}, poolTS: map[string][]float64{},
-		pairs: map[[2]string][]transfer{}, pred: map[string]*predRec{}, incoming: map[string]string{}, asked: map[string]bool{}}
+		pairs: map[[2]string][]transfer{}, pred: map[string]*predRec{}, incoming: map[string]string{}, asked: map[string]bool{}, guardHit: map[string]float64{}}
 }
 
 // view is the bookkeeping of one decision: what was free and used before
@@ -312,6 +314,11 @@ func (c *checker) decision(s sched.Snapshot, d sched.Decisions) {
 	for i := range s.Jobs {
 		j := &s.Jobs[i]
 		if j.Hold || j.HoldStop || len(j.Runnable) == 0 || running(j) > 0 || len(j.RunningUnits) > 0 || inc[j.ID] {
+			continue
+		}
+		// After its guard unit is preempted, the job waits a full
+		// StarvationDeferMax for the guard.
+		if at, ok := c.guardHit[j.ID]; ok && c.e.now-at < c.cfg.StarvationDeferMax.Seconds() {
 			continue
 		}
 		if w := s.Now.Sub(since(j)); w >= c.cfg.StarvationAfter {
@@ -805,6 +812,9 @@ func (c *checker) checkBursts(v *view) {
 // pool counts what it emits, so the window and ping-pong checks do too.
 func (c *checker) requested(x sched.Preempt) {
 	c.asked[x.Unit] = true
+	if x.Reason == sched.ReasonGuard {
+		c.guardHit[x.Job] = c.e.now
+	}
 	if x.Reason == sched.ReasonHoldStop || x.Reason == sched.ReasonWrangler {
 		return
 	}
@@ -990,10 +1000,14 @@ type runResult struct {
 	SpotLostSlotHours                                           float64
 	SpotLostByLen                                               [4]float64
 	SpotRiskyUnits, SpotMoved                                   int
-	MaxStarveJob                                                string
-	Hash                                                        uint64
-	End                                                         float64
-	Pred                                                        predStats
+	// Units the starvation guard started and a job at risk took back, and
+	// the work they lost (sched's LostWork times slots).
+	GuardPreemptions   int
+	GuardLostSlotHours float64
+	MaxStarveJob       string
+	Hash               uint64
+	End                float64
+	Pred               predStats
 
 	Why      map[string]int // reasons bursts that would close a deadline needed approval
 	Counts   map[string]int

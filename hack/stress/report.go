@@ -250,6 +250,15 @@ func (r *report) writeComparison(p pf) {
 			s.late, s.lateUSD, s.burst, 100*s.util/n, s.preemp, wl)
 	}
 	p("\n")
+	gp, gl, lost := 0, 0.0, 0.0
+	for _, pr := range r.Results {
+		if run := pr.Runs[mainPolicy]; run != nil {
+			gp += run.GuardPreemptions
+			gl += run.GuardLostSlotHours
+			lost += run.LostSlotHours
+		}
+	}
+	p("Units the starvation guard started and a job at risk of missing its deadline took back (`objective+burst`): %d, losing %.0f slot-hours of work, %.1f%% of all work the policy lost.\n\n", gp, gl, 100*gl/math.Max(lost, 1e-9))
 	r.writeRegions(p)
 	r.writeLosses(p)
 }

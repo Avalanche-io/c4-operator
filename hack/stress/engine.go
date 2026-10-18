@@ -59,6 +59,7 @@ type unit struct {
 	yieldAt     float64
 	pre         sched.Preempt // the preemption it is yielding to
 	noticeKept  float64       // progress a checkpoint on an interruption notice saved
+	byGuard     bool          // the starvation guard started its current attempt
 }
 
 type job struct {
@@ -880,6 +881,7 @@ func (e *engine) decide() {
 		}
 		fmt.Fprintf(h, "|d%s@%s", x.Unit, x.Pool)
 		e.start(u, p)
+		u.byGuard = x.Tier == sched.TierStarvation
 		e.res.Dispatches++
 	}
 	for _, x := range d.Preempt {
@@ -890,6 +892,13 @@ func (e *engine) decide() {
 		fmt.Fprintf(h, "|p%s", x.Unit)
 		if e.ck != nil {
 			e.ck.requested(x)
+		}
+		if x.Reason == sched.ReasonGuard {
+			if !u.byGuard {
+				e.violate("guard-preempt", x.Job, fmt.Sprintf("%s preempted as a guard unit but started by another tier", x.Unit))
+			}
+			e.res.GuardPreemptions++
+			e.res.GuardLostSlotHours += x.LostWork.Hours() * float64(u.spec.slots)
 		}
 		if x.Yield && u.j.spec.ml != nil {
 			ml := u.j.spec.ml
