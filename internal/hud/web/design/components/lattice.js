@@ -82,7 +82,7 @@ export function latticeSVG(snap, pool, o = {}) {
   // labels under a project's bracket when its opening row segment is wide enough
   const lw = (s) => s.length * 5.4 + 6;
   const labelRow = new Map();
-  const label = (r) => `${r.project} ${f.num(r.used)} of ${f.num(r.nominal)} nominal${r.used > r.nominal ? `, ${f.num(r.used - r.nominal)} borrowed` : ''}`;
+  const label = (r) => `${r.project} ${f.num(r.used)} of ${f.num(r.nominal)} guaranteed${r.used > r.nominal ? `, ${f.num(r.used - r.nominal)} borrowed` : ''}`;
   const legend = [];
   let lastEnd = new Map();
   for (const r of M.runs) {
@@ -103,7 +103,7 @@ export function latticeSVG(snap, pool, o = {}) {
   const tipOf = (cl) => {
     const unit = M.per > 1 ? `${M.per} slots` : 'slot';
     switch (cl.kind) {
-      case 'mine': return `${pool.name} · ${cl.project} | running ${M.per > 1 ? `${M.per} slots of ` : ''}${cl.project}’s units | ${cl.borrowed ? `borrowed past its nominal ${cl.run.nominal}; the lender takes it back by preemption when it needs it` : `within its nominal quota of ${cl.run.nominal}`}`;
+      case 'mine': return `${pool.name} · ${cl.project} | running ${M.per > 1 ? `${M.per} slots of ` : ''}${cl.project}’s units | ${cl.borrowed ? `borrowed past its guaranteed ${cl.run.nominal}; the lender takes it back by preemption when it needs it` : `within its guaranteed share of ${cl.run.nominal}`}`;
       case 'other': return `${pool.name} · another project | ${unit} in use | other projects are shown only as a total`;
       case 'idle': return `${pool.name} · idle ${unit} | ${f.money(pool.costPerSlotHour, true)} per slot-hour`;
       case 'prov': return `${pool.name} · provisioning | +${cl.req.slots} slots on their way | ${cl.req.reason || ''}`;
@@ -116,7 +116,7 @@ export function latticeSVG(snap, pool, o = {}) {
     const [x, yy] = pos(i);
     let g;
     if (cl.kind === 'mine') {
-      g = `<rect x="${x}" y="${yy}" width="${c}" height="${c}" fill="${T.runBody}"/><rect x="${x}" y="${yy}" width="${c}" height="${Math.max(1.5, c * 0.14)}" fill="${T.run}"/>`;
+      g = `<rect x="${x}" y="${yy}" width="${c}" height="${c}" fill="${T.run}"/>`;
       if (cl.borrowed) { const nn = Math.max(3, Math.round(c * 0.38)); g += `<path d="M${x + c - nn} ${yy} h${nn} v${nn} z" fill="${T.field}"/>`; }
     } else if (cl.kind === 'other') g = `<rect x="${x}" y="${yy}" width="${c}" height="${c}" fill="${T.g[13]}"/>`;
     else if (cl.kind === 'idle') g = `<rect x="${x + 0.5}" y="${yy + 0.5}" width="${c - 1}" height="${c - 1}" fill="${T.g[4]}" stroke="${T.g[12]}"/>`;
@@ -254,7 +254,7 @@ export class LatticeNodes {
         } else {
           const hm = cell * fm, ho = cell * fo;
           if (ho) { g.fillStyle = T.g[13]; g.fillRect(x, yy + cell - ho, cell, ho); }
-          if (hm) { g.fillStyle = T.runBody; g.fillRect(x, yy + cell - ho - hm, cell, hm); g.fillStyle = T.run; g.fillRect(x, yy + cell - ho - hm, cell, Math.min(1.5, hm)); }
+          if (hm) { g.fillStyle = T.run; g.fillRect(x, yy + cell - ho - hm, cell, hm); g.fillStyle = T.run; g.fillRect(x, yy + cell - ho - hm, cell, Math.min(1.5, hm)); }
         }
         if (n.state === 'warming' || n.state === 'unprovisioned') { g.strokeStyle = T.g[14]; g.setLineDash([2, 1]); g.strokeRect(x + 0.5, yy + 0.5, cell - 1, cell - 1); g.setLineDash([]); }
         if (n.suspect) { g.strokeStyle = T.temp; g.lineWidth = 1.5; g.strokeRect(x + 0.75, yy + 0.75, cell - 1.5, cell - 1.5); g.lineWidth = 1; }

@@ -68,8 +68,8 @@ function curve(p, need, extra) {
   need.forEach((v, hr) => {
     d += ` L${x(hr)} ${y(v)} L${x(hr + 1)} ${y(v)}`;
     if (v > cap) {
-      over.push(s('rect', { x: x(hr), y: y(v), width: x(1), height: y(cap) - y(v), fill: 'var(--fail)', 'fill-opacity': 0.28 }));
-      over.push(s('line', { x1: x(hr), x2: x(hr + 1), y1: y(v), y2: y(v), stroke: 'var(--fail)', 'stroke-width': 1.5, 'stroke-dasharray': '3 2', 'vector-effect': 'non-scaling-stroke' }));
+      over.push(s('rect', { x: x(hr), y: y(v), width: x(1), height: y(cap) - y(v), fill: 'var(--risk)', 'fill-opacity': 0.28 }));
+      over.push(s('line', { x1: x(hr), x2: x(hr + 1), y1: y(v), y2: y(v), stroke: 'var(--risk)', 'stroke-width': 1.5, 'stroke-dasharray': '3 2', 'vector-effect': 'non-scaling-stroke' }));
     }
   });
   d += ` L${W} ${y(0)} Z`;
@@ -165,7 +165,7 @@ export default {
           snap.usage ? tcell('Cluster-hours', snap.usage.clusterHours.toFixed(1), 'today, farm-wide') : null,
           tcell('Burst in flight', f.num(fm.burstSlots), fm.burstSlots ? `${f.money(fm.burstCostPerHour, true)} per hour` : 'none'),
           tcell('Awaiting approval', pendingCaps.length ? h('span', { class: 'pencil' }, `+${f.num(pendingCaps.reduce((a, c) => a + c.slots, 0))}`) : '0', pendingCaps.length ? `est. ${f.money(pendingCaps.reduce((a, c) => a + c.estCost, 0))}` : 'no requests'),
-          tcell('Short, next 48 h', h('span', { class: shortPools.length ? 't-fail' : '' }, shortPools.length ? shortPools.map((p) => p.name).join(', ') : 'none'), shortPools.length ? 'need above capacity' : 'capacity covers the deadlines'),
+          tcell('Short, next 48 h', h('span', { class: shortPools.length ? 't-risk' : '' }, shortPools.length ? shortPools.map((p) => p.name).join(', ') : 'none'), shortPools.length ? 'need above capacity' : 'capacity covers the deadlines'),
           tcell('Bytes avoided', f.bytes(fm.bytesAvoided), 'today, savings only'))),
       h('div', { class: 'neat' },
       h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('pools') }, 'pools'), ': the slots being priced'),
@@ -220,7 +220,7 @@ export default {
           h('p', { class: 'dim' }, 'No capacity requests.')),
       h('div', { class: 'vsec' },
         h('header', null, h('h2', null, 'Slots needed, next 48 hours'),
-          h('span', { class: 'dim' }, 'Grey: slots the deadlines need. Ink line: capacity. Red pencil: need above capacity. Dashed: capacity with the what-if.')),
+          h('span', { class: 'dim' }, 'Grey: slots the deadlines need. Solid line: capacity. Orchid: need above capacity. Dashed: capacity with the what-if.')),
         h('div', { class: 'cols' }, snap.pools.map((p) => curve(p, Array.from(need.get(p.name)), p.name === st.pool ? add : 0)))),
       burstPools.length ? h('div', { class: 'vsec' },
         h('header', null, h('h2', null, 'What if')),
@@ -235,6 +235,6 @@ export default {
         fixes.length ? h('table', { class: 'vt', style: { maxWidth: '720px' } },
           h('tbody', null, fixes.map((x) => h('tr', { 'data-key': key(x.j) },
             h('td', null, x.j.name), h('td', { class: 'num' }, `needs +${x.need}`),
-            h('td', { class: 'num' }, x.ok ? h('span', { class: 'ink' }, 'feasible') : h('span', { class: 't-fail pencil' }, `misses by ${f.dur(-x.j.estimate.slackSeconds)}`)))))) : null) : null));
+            h('td', { class: 'num' }, x.ok ? h('span', { class: 'ink' }, 'feasible') : h('span', { class: 't-risk pencil' }, `misses by ${f.dur(-x.j.estimate.slackSeconds)}`)))))) : null) : null));
   },
 };

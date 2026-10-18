@@ -8,7 +8,7 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { own } from '../../design/components/live.js';
-import { glance } from '../../design/components/core.js';
+import { glance, inFlight } from '../../design/components/core.js';
 import { buildSheet } from '../../design/components/stack.js';
 import { bookList } from '../../design/components/ledger.js';
 import { lensFor } from '../lenses/index.js';
@@ -91,30 +91,31 @@ function tcell(label, val, sub, cls = '') {
   return h('div', { class: 'cell' }, h('span', { class: 'lab' }, label), h('span', { class: 'val ' + cls }, val), sub ? h('span', { class: 'sub' }, sub) : null);
 }
 
-function titleBlock(j) {
+function titleBlock(j, level = 5) {
   const e = j.estimate, o = j.objective, w = j.work;
-  const done = glance(j, j).done;
+  const gl = glance(j, j);
+  const done = gl.done;
   const late = Number.isFinite(e.slackSeconds) && e.slackSeconds < 0 && j.phase !== 'Succeeded';
   const src = o.from ? `from ${f.jobName(o.from)}` : o.type === 'latency' ? `ready + ${f.dur(o.latencyTargetSeconds)}` : o.deadline ? 'set on the job' : 'no objective';
   return h('div', { class: 'titleblock' },
     tcell('Deadline', o.deadline ? f.clock(o.deadline) : '–', src),
     tcell('ETA p50 · p90', j.phase === 'Succeeded' ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' }, `${f.clock(e.etaP50, false)} · ${f.clock(e.etaP90, false)}`),
       j.units.unevaluated ? `${j.units.unevaluated} generators to expand` : 'projected', ''),
-    tcell('Slack', o.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-fail pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', e.feasible ? 'feasible at current capacity' : 'will miss at current capacity', late ? 'late' : ''),
-    tcell('Done', `${Math.round(done * 100)}%`, glance(j, j).basis === 'steps' ? `by steps · ${f.num(j.classSummary.step)} of ${f.num(j.classSummary.totalSteps)}` : w && w.basis === 'estimate' ? `by work · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)} units` : `by units · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)}`),
-    tcell('Slots', h('span', null, h('span', { class: 't-run' }, String(e.runningSlots)), h('small', null, ` of ${(+e.requiredSlots).toFixed(1)} needed`)), `can get ${e.attainableSlots}`),
-    j.output ? tcell('Output view', h('span', { title: j.output.view, style: { fontSize: '15px' } }, f.gridRef(j.output.view)), `${f.num(j.output.changesets)} changesets folded in`) : null);
+    tcell('Slack', o.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', e.feasible ? 'on track at current capacity' : 'will miss at current capacity', late ? 'late' : ''),
+    tcell('Done', `${Math.round(done * 100)}%`, (Math.abs(gl.delivered - gl.done) > 0.005 ? `delivered ${Math.round(gl.delivered * 100)}% · ` : '') + (gl.basis === 'steps' ? `by steps · ${f.num(j.classSummary.step)} of ${f.num(j.classSummary.totalSteps)}` : w && w.basis === 'estimate' ? `by work · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)} units` : `by units · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)}`)),
+    level < 4 ? null : tcell('Slots', h('span', null, h('span', { class: 't-run' }, String(e.runningSlots)), h('small', null, ` of ${(+e.requiredSlots).toFixed(1)} needed`)), `can get ${e.attainableSlots}`),
+    j.output && level >= 5 ? tcell('Output view', h('span', { title: j.output.view, style: { fontSize: '15px' } }, f.gridRef(j.output.view)), `${f.num(j.output.changesets)} changesets in`) : null);
 }
 
 function controls(j, k) {
   const held = j.nudge.hold;
-  const dl = j.objective.deadline ? j.objective.deadline.slice(0, 16) : '';
+  const dl = j.objective.deadline ? f.inputValue(j.objective.deadline) : '';
   return h('div', { class: 'panel', 'data-key': 'ctl' },
     h('header', null, h('h2', null, 'Controls'), h('span', { class: 'dim mono', style: { fontSize: '10px' } }, 'each one is signed by the HUD, for you')),
     h('div', { class: 'body controls' },
       held ? h('button', { class: 'btn', 'data-action': 'release', 'data-job': k }, 'Release job')
         : h('button', { class: 'btn', 'data-action': 'hold', 'data-job': k, title: 'Release no new units; running units finish' }, 'Hold job'),
-      !held && j.units.running + j.units.retrying > 0 ? h('button', { class: 'btn', 'data-action': 'holdstop', 'data-job': k }, 'Hold and stop') : null,
+      !held && inFlight(j.units) > 0 ? h('button', { class: 'btn', 'data-action': 'holdstop', 'data-job': k }, 'Hold and stop') : null,
       h('span', { class: 'seg' }, [1, 1.25, 1.5, 2].map((b) => h('button', { class: 'btn small', 'data-action': 'boost', 'data-job': k, 'data-value': String(b), 'aria-pressed': Math.abs(j.nudge.boost - b) < 0.01 ? 'true' : 'false' }, `×${b}`))),
       h('input', { type: 'datetime-local', id: 'deadline-input', value: dl, 'data-key': 'dl-' + k, 'aria-label': 'Deadline' }),
       h('button', { class: 'btn small', 'data-action': 'deadline', 'data-job': k, 'data-input': 'deadline-input' }, 'Set deadline'),
@@ -124,13 +125,15 @@ function controls(j, k) {
 
 function unitCard(ctx, j) {
   if (!st.sel) return h('div', { class: 'panel', 'data-key': 'unit-hint' }, h('header', null, h('h2', null, 'Unit')),
-    h('div', { class: 'body dim' }, 'Hover any block for what it is; select a unit for its attempts, node, log, record and output. Click a batch or the shot to collapse or open it; the fold mark on a stage folds everything upstream into each frame.'));
+    h('div', { class: 'body dim' }, ctx.level >= 3
+      ? 'Hover any block for what it is; select a unit for its attempts, node, log, record and output. Click a batch or the shot to collapse or open it; the fold mark on a stage folds everything upstream into each frame.'
+      : 'Hover a frame for what it is; select one for its attempts, the node it ran on, its log and why it failed.'));
   const u = st.unit;
   if (!u) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body dim' }, 'Reading the unit…'));
   if (u.error) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body t-fail' }, u.error));
   const last = u.attempts[u.attempts.length - 1];
   const node = last && last.node;
-  const chip = { failed: 'red', retrying: 'temp', running: 'run', succeeded: 'green' }[u.state] || '';
+  const chip = { failed: 'red', accepted: 'red', retrying: 'temp', backoff: 'temp', running: 'run', preflight: 'run', succeeded: 'green', egress: 'green' }[u.state] || '';
   const k = st.sel.job;
   return h('div', { class: 'panel', 'data-key': 'unit', role: 'region', 'aria-label': `Unit ${u.label}` },
     h('header', null, h('h2', null, u.label), h('span', { class: 'chip ' + chip }, u.state), h('span', { class: 'dim mono', style: { fontSize: '10px', marginLeft: 'auto' } }, f.jobName(k))),
@@ -164,7 +167,7 @@ function edges(ctx, j, keys) {
   const shots = [...new Set(ctx.snap.jobs.filter((x) => x.project === j.project && x.shot).map((x) => x.shot))].sort();
   const si = shots.indexOf(j.shot);
   const link = (key) => h('a', { href: ctx.href(`job/${key}`) }, f.jobName(key));
-  const shotLink = (s) => { const x = ctx.snap.jobs.find((y) => y.shot === s && y.project === j.project); return x ? h('a', { href: ctx.href(`job/${keyOf(x)}`) }, `sheet ${s}`) : s; };
+  const shotLink = (s) => { const x = ctx.snap.jobs.find((y) => y.shot === s && y.project === j.project); return x ? h('a', { href: ctx.href(`job/${keyOf(x)}`) }, `shot ${s}`) : s; };
   return [
     h('div', { class: 'edge w' }, '◂ ', up.length ? up.map((x, i) => [i ? ' · ' : '', link(x)]) : inputs.length ? `inputs ${inputs.join(' · ')}` : 'no upstream'),
     h('div', { class: 'edge e' }, down.length ? down.map((x, i) => [i ? ' · ' : '', link(x)]) : 'to the client', ' ▸'),
@@ -184,7 +187,7 @@ export default {
     const detail = st.details.get(k);
     if (!summary && !detail) {
       return h('section', { class: 'sheet' }, h('div', { class: 'sheethead' }, h('div', null, h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm')), h('h1', null, name || 'Job'),
-        h('p', { class: 'dim' }, st.err ? `No job named ${name} in your projects.` : 'Reading the sheet…'))));
+        h('p', { class: 'dim' }, st.err ? `No job named ${name} in your projects.` : 'Reading the job…'))));
     }
     const j = detail ? { ...detail, ...(summary || {}) } : summary;
     if (detail && summary) j.unitStates = detail.unitStates;
@@ -197,8 +200,10 @@ export default {
       const u = d.unitList.find((x) => x.label.startsWith(String(frame)));
       if (u) { st.sel = { job: k, i: u.i }; ctx.refresh(); }
     };
-    const keys = st.sheetKeys || [k];
-    const details = keys.map((x) => st.details.get(x)).filter(Boolean).map((d) => ({ ...d, ...(ctx.job(keyOf(d)) || {}), unitStates: d.unitStates }));
+    const L = ctx.level;
+    const keys = L >= 3 ? (st.sheetKeys || [k]) : [k];
+    const details = keys.map((x) => st.details.get(x)).filter(Boolean).map((d) => ({ ...d, ...(ctx.job(keyOf(d)) || {}), unitStates: d.unitStates }))
+      .map((d) => (L >= 2 ? d : { ...d, riskUnits: '', objective: {}, estimate: { ...(d.estimate || {}), feasible: true } }));
     const sheetTitle = j.shot ? `${j.shot}` : j.name;
     let anchor = k;
     {
@@ -212,42 +217,44 @@ export default {
     if (ctx.route.q && ctx.route.q.reads === '1') for (const d of readers) st.lineB.add(keyOf(d));
     const deadline = j.objective && j.objective.deadline ? Date.parse(j.objective.deadline) : null;
     const g = glance(j, detail);
-    const main = detail && !(sheet && sheet.cost) ? lens.main(ctx, j, st) : [];
-    const side = detail ? lens.side(ctx, j, st) : [];
+    // CI and ML have their own views at level 5; below it every job opens to its units
+    const ownView = cls && (cls.lens === 'ci' || cls.lens === 'ml');
+    const main = detail && !(sheet && sheet.cost) && (ownView ? L >= 5 : L >= 3) ? lens.main(ctx, j, st) : [];
+    const side = detail && (ownView ? L >= 5 : true) ? lens.side(ctx, j, st) : [];
     const late = j.estimate.slackSeconds < 0 && j.phase !== 'Succeeded';
     return h('section', { class: 'sheet', 'data-key': 'sheet-' + k, 'aria-label': `Sheet ${sheetTitle}` },
       h('div', { class: 'sheethead' },
         h('div', null,
-          h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${j.project} / `, j.shot ? `sheet ${j.shot} / ` : '', j.namespace),
+          h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${j.project} / `, j.shot ? `shot ${j.shot} / ` : '', j.namespace),
           h('h1', null, j.name),
-          h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 ? ` · #${j.rank} in dispatch order` : ''}`)),
-        titleBlock(j)),
-      j.estimate.message ? h('div', { class: 'warn' + (late || j.phase === 'Failed' ? ' red' : ''), style: { marginBottom: '12px' }, role: 'status' },
-        h('span', { class: late ? 't-fail' : '' }, j.estimate.message), burstButton(j)) : null,
+          h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 && L >= 2 ? ` · #${j.rank} in run order` : ''}`)),
+        L >= 2 ? titleBlock(j, L) : null),
+      j.estimate.message && L >= 2 ? h('div', { class: 'warn' + (j.phase === 'Failed' ? ' red' : late ? ' risk' : ''), style: { marginBottom: '12px' }, role: 'status' },
+        h('span', { class: j.phase === 'Failed' ? 't-fail' : late ? 't-risk' : '' }, j.estimate.message), L >= 4 ? burstButton(j) : null) : null,
       h('div', { class: 'neat', style: { padding: '14px' } },
-        edges(ctx, j, keys),
+        L >= 3 ? edges(ctx, j, keys) : null,
         h('div', { class: 'layout-job' },
           h('div', { style: { width: '250px' } },
-            own('pylon', 'pylon:' + k, { glance: g, w: 250, h: 470, mode: 'full', title: j.name.toUpperCase() }),
-            h('div', { class: 'legend', style: { marginTop: '14px', flexDirection: 'column', alignItems: 'flex-start' } }, legend())),
+            L >= 2 ? own('pylon', 'pylon:' + k, { glance: g, w: 250, h: 470, mode: 'full', title: j.name.toUpperCase() }) : null,
+            h('div', { class: 'legend', style: { marginTop: '14px', flexDirection: 'column', alignItems: 'flex-start' } }, legend(L))),
           h('div', { class: 'wellbox', 'data-key': 'stackbox' },
             h('div', { class: 'tools' },
-              h('span', { class: 'lab' }, `Sheet ${sheetTitle}`),
-              h('span', { class: 'dim mono', style: { fontSize: '10px' } }, sheet ? `${sheet.cols.length} stages · ${f.num(sheet.N)} rows · ${sheet.batchFromData ? 'batches from the job script' : `${sheet.batch} frames per batch`}` : ''),
+              h('span', { class: 'lab' }, L >= 3 ? `Shot ${sheetTitle}` : `Job ${j.name}`),
+              h('span', { class: 'dim mono', style: { fontSize: '10px' } }, sheet ? (L >= 3 ? `${sheet.cols.length} stages · ${f.num(sheet.N)} rows · ${sheet.batchFromData ? 'batches from the job script' : `${sheet.batch} frames per batch`}` : `${f.num(j.units.total)} units · ${orderText(j.order)}`) : ''),
               h('span', { style: { marginLeft: 'auto' } }),
               h('button', { class: 'btn small', 'data-stack': 'zoom-', title: 'Smaller boxes (-)' }, '−'),
               h('button', { class: 'btn small', 'data-stack': 'zoom+', title: 'Bigger boxes (+)' }, '+'),
-              h('label', null, h('input', { type: 'checkbox', 'data-stack': 'lineA', checked: st.lineA ? true : false }), 'other inputs'),
-              readers.map((d) => h('label', { 'data-key': 'lb-' + keyOf(d) }, h('input', { type: 'checkbox', 'data-stack': 'lineB', 'data-job': keyOf(d), checked: st.lineB.has(keyOf(d)) ? true : false }), `reads · ${d.name.replace(/^sh\d+-/, '')}`)),
-              h('label', null, h('input', { type: 'checkbox', 'data-stack': 'contours', checked: st.contours ? true : false }), 'time lines')),
-            sheet ? own('stack', 'stack:' + k, { sheet, view: { deadline, sel: st.sel, box: st.box, lineA: st.lineA, lineB: st.lineB, contours: st.contours, ...(ctx.route.q && ctx.route.q.collapse === 'shot' ? { shotCollapsed: true } : {}) } }) : h('div', { class: 'body dim' }, 'Reading the sheet…'),
-            j.output ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset folded into its chain' },
+              L < 3 ? null : h('label', null, h('input', { type: 'checkbox', 'data-stack': 'lineA', checked: st.lineA ? true : false }), 'other inputs'),
+              (L < 3 ? [] : readers).map((d) => h('label', { 'data-key': 'lb-' + keyOf(d) }, h('input', { type: 'checkbox', 'data-stack': 'lineB', 'data-job': keyOf(d), checked: st.lineB.has(keyOf(d)) ? true : false }), `reads · ${d.name.replace(/^sh\d+-/, '')}`)),
+              L < 3 ? null : h('label', null, h('input', { type: 'checkbox', 'data-stack': 'contours', checked: st.contours ? true : false }), 'time lines')),
+            sheet ? own('stack', 'stack:' + k + (L >= 3 ? '' : ':flat'), { sheet, view: { flat: L < 3, deadline, sel: st.sel, box: st.box, lineA: L >= 3 && st.lineA, lineB: L >= 3 ? st.lineB : new Set(), contours: L >= 3 && st.contours, ...(ctx.route.q && ctx.route.q.collapse === 'shot' ? { shotCollapsed: true } : {}) } }) : h('div', { class: 'body dim' }, 'Reading the job…'),
+            j.output && L >= 5 ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset added to its chain' },
               h('b', null, f.gridRef(j.output.view)), `${String(j.output.changesets).padStart(4, '0')}+00`, h('span', { class: 'dimmer' }, j.output.view)) : null),
           h('div', null,
             unitCard(ctx, j),
             side,
-            controls(j, k),
-            st.book && st.book.entries ? h('div', { class: 'panel', 'data-key': 'book' },
+            L >= 2 ? controls(j, k) : null,
+            st.book && st.book.entries && L >= 5 ? h('div', { class: 'panel', 'data-key': 'book' },
               h('header', null, h('h2', null, 'The book'), h('span', { class: 'dim mono', style: { fontSize: '10px' } }, 'append only · signed by whoever acted')),
               h('div', { class: 'body' }, bookList(st.book.entries.slice(-16)))) : null))),
       main.length ? h('div', { style: { marginTop: '14px' } }, main) : null);
@@ -278,18 +285,25 @@ export default {
   },
 };
 
-function legend() {
+function legend(level = 5) {
   const sw = (fill, extra = '') => h('i', { style: { display: 'inline-block', width: '14px', height: '10px', background: fill, boxShadow: extra } });
   return [
-    h('span', null, sw('var(--done)'), 'done'),
-    h('span', null, sw('var(--done-settled)'), 'done, a finished upstream'),
-    h('span', null, sw('linear-gradient(var(--run-body) 45%, var(--run) 45% 55%, var(--done) 55%)', 'inset 0 0 0 1px var(--run)'), 'running: green rises inside'),
-    h('span', null, sw('var(--run-body)', 'inset 0 0 0 1.5px var(--temp)'), 'retrying, temporary'),
-    h('span', null, sw('var(--fail)'), 'failed'),
-    h('span', null, sw('var(--g09)', 'inset 2px 0 0 0 var(--fail)'), 'projected late (pencil)'),
-    h('span', null, sw('var(--g09)'), 'waiting'),
-    h('span', null, sw('repeating-linear-gradient(45deg, var(--g09) 0 3px, var(--g12) 3px 4px)'), 'blocked'),
-    h('span', null, sw('var(--g08)', 'inset 0 0 0 1px var(--g13)'), 'not yet evaluated'),
-    h('span', null, sw('transparent', 'inset 0 0 0 1px var(--g12)'), 'expected'),
-  ];
+    [1, h('span', null, sw('var(--done)'), 'done: committed')],
+    [1, h('span', null, sw('linear-gradient(var(--done-pale) 40%, var(--done) 40%)'), 'done, output still moving')],
+    [1, h('span', null, sw('linear-gradient(var(--g09) 45%, var(--run) 45%)', 'inset 0 0 0 1px var(--run)'), 'rendering: blue rising')],
+    [1, h('span', null, sw('var(--run-pale)', 'inset 0 0 0 1px var(--run)'), 'preparing to render')],
+    [1, h('span', null, sw('linear-gradient(var(--g09) 45%, var(--run) 45%)', 'inset 0 0 0 1.5px var(--temp)'), 'retrying')],
+    [1, h('span', null, sw('var(--temp-pale)', 'inset 0 0 0 1px var(--temp)'), 'retry scheduled')],
+    [1, h('span', null, sw('linear-gradient(225deg, var(--paper) 0 4px, var(--fail) 4px)'), 'failed: needs you')],
+    [1, h('span', null, sw('var(--fail-pale)', 'inset 0 0 0 1px var(--paper)'), 'failed, taken or accepted: nobody needs to act')],
+    [2, h('span', null, sw('var(--risk-pale)', 'inset 2px 0 0 0 var(--risk)'), 'at risk: projected late')],
+    [2, h('span', null, sw('repeating-linear-gradient(45deg, var(--risk-pale) 0 2px, var(--risk) 2px 4px)'), 'will miss at any capacity')],
+    [2, h('span', null, sw('var(--g09)', 'inset 3px 0 0 0 var(--risk)'), 'missed the deadline')],
+    [2, h('span', null, h('span', { class: 'ink mono', style: { fontSize: '10px', minWidth: '30px' } }, '14:56'), 'measured: solid')],
+    [2, h('span', null, h('span', { class: 'pencil mono', style: { fontSize: '10px', minWidth: '30px' } }, '14:58'), 'estimated: lighter, dashed')],
+    [1, h('span', null, sw('var(--g09)'), 'waiting')],
+    [3, h('span', null, sw('repeating-linear-gradient(45deg, var(--g09) 0 3px, var(--g12) 3px 4px)'), 'blocked')],
+    [3, h('span', null, sw('var(--g08)', 'inset 0 0 0 1px var(--g13)'), 'not expanded yet')],
+    [3, h('span', null, sw('transparent', 'inset 0 0 0 1px var(--g12)'), 'expected')],
+  ].filter(([n]) => level >= n).map(([, el]) => el);
 }

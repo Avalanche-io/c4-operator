@@ -4,7 +4,7 @@
 
 .qsheet .sheethead h1 { font-size: 40px; letter-spacing: -.005em; }
 .qsheet .sheethead .meta { max-width: 640px; }
-.qsheet .titleblock .val.late { color: var(--fail); }
+.qsheet .titleblock .val.late { color: var(--risk); }
 
 /* ---- the collar band: decisions and shots ---------------------------- */
 .qcollar { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--gutter); margin-bottom: 14px; }
@@ -18,14 +18,14 @@
 }
 .q-shot:hover { text-decoration: none; outline-color: var(--g15); }
 .q-shot.sel { outline: 1.5px solid var(--paper); }
-.q-shot.late { outline: var(--hair) dashed var(--fail); }
-.q-shot.late.sel { outline: 1.5px solid var(--paper); box-shadow: inset 0 0 0 1px var(--fail); }
-.q-shot.fin { opacity: .62; }
+.q-shot.late { outline: var(--hair) dashed var(--risk); }
+.q-shot.late.sel { outline: 1.5px solid var(--paper); box-shadow: inset 0 0 0 1px var(--risk); }
+.q-shot.fin .sname, .q-shot.fin .sslack { color: var(--ink-3); }
 .q-shot .spy { grid-row: 1 / span 3; align-self: center; line-height: 0; }
 .q-shot .sname { font: 600 13px/1.1 var(--sans); letter-spacing: .08em; text-transform: uppercase; color: var(--paper); }
 .q-shot .sslack { font: 400 13px/1.1 var(--mono); color: var(--ink-2); text-align: right; }
 .q-shot .ssub, .shot .sdel { grid-column: 2 / span 2; font: 400 10px/1.3 var(--mono); color: var(--ink-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.q-shot .sdel.t-fail { color: var(--fail); }
+.q-shot .sdel.t-risk { color: var(--risk); }
 
 /* ---- decisions waiting on the viewer ---------------------------------- */
 .qdecide { display: grid; gap: var(--gutter); align-content: start; }
@@ -81,7 +81,7 @@
 .qname { min-width: 0; }
 .qname .jn { font: 500 14.5px/1.2 var(--sans); color: var(--paper); letter-spacing: .01em; }
 .qname .jn::after { content: ""; position: absolute; inset: 0; z-index: 0; }
-.qr.late .qname .jn { color: var(--fail); }
+.qr.late .qname .jn { color: var(--risk); }
 .qmeta { display: flex; flex-wrap: wrap; gap: 2px 9px; align-items: baseline; margin-top: 4px; font: 400 10.5px/1.3 var(--mono); color: var(--ink-3); }
 .qmeta .chip { font-size: 8.5px; padding: 2px 4px; }
 .q-ph.held { color: var(--g16); }
@@ -96,9 +96,9 @@
 .qdatum { line-height: 0; }
 .qslack { text-align: right; font: 300 20px/1 var(--mono); color: var(--ink-2); }
 .qslack small { display: block; margin-top: 4px; font: 400 9.5px/1 var(--mono); color: var(--ink-4); letter-spacing: .02em; }
-.qslack.late { color: var(--fail); }
-.qslack.late .pencil { color: var(--fail); text-decoration-color: rgba(238, 65, 54, .55); }
-.qslack.late small { color: var(--fail); opacity: .8; }
+.qslack.late { color: var(--risk); }
+.qslack.late .pencil { color: var(--risk); text-decoration-color: rgba(178, 105, 163, .6); }
+.qslack.late small { color: var(--risk); opacity: .85; }
 .qslack.none { color: var(--ink-4); }
 .qact { display: flex; justify-content: flex-end; gap: 6px; position: relative; z-index: 1; }
 .btn.request { display: inline-flex; gap: 10px; align-items: baseline; background: transparent; border: var(--hair) dashed var(--g15); color: var(--ink); padding: 8px 10px; }
@@ -115,12 +115,12 @@
 .qdatum, .datumhead { background-image: linear-gradient(90deg, transparent calc(var(--datum) - .5px), var(--g13) calc(var(--datum) - .5px), var(--g13) calc(var(--datum) + .5px), transparent calc(var(--datum) + .5px)); }
 .qr .qdatum { align-self: stretch; display: flex; align-items: center; margin: -5px 0; }
 
-/* finished jobs: settled, quieter */
+/* finished jobs: quieter text, the same colors (done is always the same green) */
 .qdiv { display: flex; gap: 14px; align-items: baseline; padding: 14px 0 6px; border-bottom: var(--hair) solid var(--rule-2); }
 .qdiv .sub { font: 400 10px/1 var(--mono); color: var(--ink-4); }
-.qlist.fin .qr { min-height: 44px; opacity: .58; }
-.qlist.fin .qr:hover { opacity: 1; }
-.qlist.fin .qname .jn { font-size: 13px; color: var(--ink); }
+.qlist.fin .qr { min-height: 44px; }
+.qlist.fin .qname .jn { font-size: 13px; color: var(--ink-2); }
+.qlist.fin .qmeta, .qlist.fin .qdue, .qlist.fin .qshot, .qlist.fin .cap { color: var(--ink-4); }
 .qlist.fin .qpy { transform: scale(.8); transform-origin: left center; }
 
 @media (max-width: 1500px) {

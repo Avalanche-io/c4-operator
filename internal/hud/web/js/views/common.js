@@ -72,7 +72,7 @@ export function lane(j, { tall = false } = {}) {
     kids.push(s('rect', { x: `${xd}%`, y: mid - 12, width: 2, height: 24, fill: dl < 0 ? 'var(--bar-red)' : 'var(--ink)', transform: 'translate(-1 0)' }));
     kids.push(s('text', {
       x: `${xd}%`, y: mid - 14, 'text-anchor': xd > 88 ? 'end' : xd < 6 ? 'start' : 'middle',
-      style: { font: '10px var(--mono)', 'font-stretch': '75%', fill: dl < 0 ? 'var(--t-red)' : 'var(--ink)' },
+      style: { font: '10px var(--mono)', 'font-stretch': '75%', fill: dl < 0 ? 'var(--risk)' : 'var(--ink)' },
     }, dl < 0 ? `due ${f.clock(j.objective.deadline)}, passed` : f.clock(j.objective.deadline)));
   }
   if (tall) {

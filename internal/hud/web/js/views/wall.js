@@ -12,6 +12,7 @@ import { get, staticMode } from '../api.js';
 import { own } from '../../design/components/live.js';
 import { sweep, channelOf, samples, useHistory } from '../../design/components/timebase.js';
 import { shotsOf, shotKeyFn, shotGlance } from '../../design/components/dispatch.js';
+import { inFlight, retries } from '../../design/components/core.js';
 
 const keyOf = (j) => `${j.namespace}/${j.name}`;
 const fin = (j) => j.phase === 'Succeeded';
@@ -89,7 +90,7 @@ function shotCard(g, hi, k) {
   return h('div', { class: `wshot${g.late ? ' late' : ''}${hi ? ' hi' : ''}`, 'data-key': 'ws:' + g.key, role: 'listitem' },
     own('pylon', 'wsp:' + g.key, { glance: gl, w: Math.round(40 * k), h: Math.round(96 * k), mode: 'mini' }, { class: 'wspy' }),
     h('div', { class: 'wst' }, h('b', null, title.toUpperCase()), flow ? h('span', null, ` · ${flow}`) : null),
-    h('div', { class: 'wss' + (late ? ' t-fail' : '') }, sub),
+    h('div', { class: 'wss' + (late ? ' t-risk' : '') }, sub),
     h('div', { class: 'wsn' }, h('span', { class: 'big' }, String(Math.round(gl.done * 100))), h('span', { class: 'pc' }, '%'),
       gl.par > 0 ? h('span', { class: 'run' }, `${pr < 1 ? '<1' : pr}% run`) : null),
     h('div', { class: 'wsu' }, `${f.num(g.jobs.reduce((a, j) => a + j.units.succeeded, 0))} of ${f.num(u.total)} units${gl.basis === 'units' ? ', fill by units' : ', fill by work'}`));
@@ -114,17 +115,19 @@ function clocks(ctx, s, groups) {
   const sk = shotKeyFn(jobs);
   const deliveries = new Set(groups.filter((g) => g.kind === 'shot').flatMap((g) => g.deliveries || []).map(keyOf));
   const items = [];
+  const cx = (iso) => (f.utc(iso) ? `<span class="cx">${f.utc(iso)}</span>` : '');
+  const due = (iso) => `due ${f.clock(iso, false)}${cx(iso)}`;
   const nice = (j) => j.name.replace(/^[a-z]+-(?=delivery)/, '').replace(/-/g, ' ');
   for (const j of jobs.filter((x) => deliveries.has(keyOf(x)) && !fin(x)).sort((a, b) => Date.parse(a.objective.deadline) - Date.parse(b.objective.deadline))) {
     if (!j.objective.deadline) continue;
     const r = late(j) ? rootOf(j) : null;
-    items.push({ kind: 'tminus', target: Date.parse(j.objective.deadline), late: late(j), label: `${nice(j)} · due ${f.clock(j.objective.deadline, false)}`,
+    items.push({ kind: 'tminus', target: Date.parse(j.objective.deadline), late: late(j), label: `${nice(j)} · ${due(j.objective.deadline)}`,
       sub: late(j) ? `p90 ${f.clock(j.estimate.etaP90, false)} · <b>late ${f.dur(-j.estimate.slackSeconds)}</b>${r ? ` through ${sk(r) || r.name}` : ''}` : `p90 ${f.clock(j.estimate.etaP90, false)} · slack ${f.signed(j.estimate.slackSeconds)}` });
   }
   const roots = jobs.filter((j) => late(j) && !deliveries.has(keyOf(j)) && !upstreamLate(j));
   for (const j of roots) {
     const b = j.estimate.burst;
-    items.push({ kind: 'tminus', target: Date.parse(j.objective.deadline), late: true, label: `${j.name} · due ${f.clock(j.objective.deadline, false)}`,
+    items.push({ kind: 'tminus', target: Date.parse(j.objective.deadline), late: true, label: `${j.name} · ${due(j.objective.deadline)}`,
       sub: `<b>late ${f.dur(-j.estimate.slackSeconds)}</b>${b ? ` · +${b.slots} ${b.pool} closes it, ${f.money(b.cost)}${b.needsApproval ? ' · awaiting you' : ''}` : ` · p90 ${f.clock(j.estimate.etaP90, false)}`}` });
   }
   const used = new Set(items.map((c) => c.label));
@@ -132,16 +135,16 @@ function clocks(ctx, s, groups) {
     .sort((a, b) => Date.parse(a.objective.deadline) - Date.parse(b.objective.deadline));
   for (const j of next) {
     if (items.length >= 3) break;
-    const label = `${j.name} · due ${f.clock(j.objective.deadline, false)}`;
+    const label = `${j.name} · ${due(j.objective.deadline)}`;
     if (used.has(label)) continue;
     items.push({ kind: 'tminus', target: Date.parse(j.objective.deadline), late: false, label,
       sub: `slack ${f.signed(j.estimate.slackSeconds)}${j.units.unevaluated ? ` · ${f.num(j.units.unevaluated)} generators to expand` : ` · p90 ${f.clock(j.estimate.etaP90, false)}`}` });
   }
   const shown = items.slice(0, 3);
   const win = ((s.usage && s.usage.productionWindows) || []).find((w) => w.active);
-  if (win) shown.push({ kind: 'day', from: Date.parse(win.from), label: `${win.project} window · mission day`, sub: `${win.name.toLowerCase()} · to ${f.dateLine(win.to)}` });
+  if (win) shown.push({ kind: 'day', from: Date.parse(win.from), label: `${win.project} window · production day`, sub: `${win.name.toLowerCase()} · to ${f.dateLine(win.to)}` });
   const fm = s.farm;
-  const retrying = jobs.reduce((a, j) => a + j.units.retrying, 0);
+  const retrying = jobs.reduce((a, j) => a + retries(j.units), 0);
   const failed = jobs.reduce((a, j) => a + j.units.failed, 0);
   const suspect = (s.nodes || []).filter((n) => n.suspect).map((n) => n.name);
   shown.push({ kind: 'slots', label: 'working now', value: `<span class="t-run">${fm.slotsUsed}</span><small> / ${fm.slotsTotal} slots</small>`,
@@ -177,7 +180,7 @@ export default {
     const horizon = Math.max(1, Math.min(48, Number(q.horizon) || 4)) * 3600;
     const book = st.book && st.book.entries ? st.book.entries : null;
     return h('section', { class: 'wall', 'data-key': 'wall', 'aria-label': 'The wall: every job against its deadline' },
-      own('clocks', 'w:clocks', { items: clocks(ctx, s, groups) }, { class: 'wclocks', role: 'group', 'aria-label': 'Mission clocks' }),
+      own('clocks', 'w:clocks', { items: clocks(ctx, s, groups) }, { class: 'wclocks', role: 'group', 'aria-label': 'Deadline clocks' }),
       own('timebase', 'w:tb', { channels, now: Date.parse(s.now), horizon, scope }, { class: 'wscope' }),
       h('div', { class: 'wband wstrobe' },
         own('strobe', 'w:strobe', { detail: st.strobe && sj && keyOf(st.strobe) === keyOf(sj) ? { ...st.strobe, unitStates: st.strobe.unitStates } : null, title: sj ? sj.name : '' }, { class: 'wstrobe-c' })),

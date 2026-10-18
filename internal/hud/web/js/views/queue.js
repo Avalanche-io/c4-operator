@@ -9,7 +9,7 @@
 import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { own } from '../../design/components/live.js';
-import { glance } from '../../design/components/core.js';
+import { glance, inFlight, retries } from '../../design/components/core.js';
 import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
 import { classChip, orderText, failedUnits, empty } from './common.js';
@@ -55,7 +55,7 @@ function holdMark() {
 function phase(j) {
   if (j.phase === 'Held') return h('span', { class: 'q-ph held' }, holdMark(), 'held');
   if (j.phase === 'Failed') return h('span', { class: 'q-ph t-fail' }, 'failed');
-  if (j.phase === 'Running' && j.units.retrying) return h('span', { class: 'q-ph' }, h('span', { class: 't-run' }, 'running'), h('span', { class: 't-temp' }, ` · ${j.units.retrying} retrying`));
+  if (j.phase === 'Running' && retries(j.units)) return h('span', { class: 'q-ph' }, h('span', { class: 't-run' }, 'running'), h('span', { class: 't-temp' }, ` · ${retries(j.units)} retrying`));
   if (j.phase === 'Running') return h('span', { class: 'q-ph t-run' }, 'running');
   if (j.phase === 'Succeeded') return h('span', { class: 'q-ph t-done' }, 'done');
   return h('span', { class: 'q-ph' }, j.phase.toLowerCase());
@@ -75,14 +75,14 @@ function row(ctx, j, multiProject, sk) {
   const passed = dl && Date.parse(dl) < f.now() && !fin;
   const capt = fin ? `${f.num(u.succeeded)} done` : [
     `${f.num(u.succeeded)}/${f.num(u.total)}`,
-    u.running + u.retrying ? h('span', { class: 't-run' }, `${u.running + u.retrying} run`) : null,
-    u.retrying ? h('span', { class: 't-temp' }, `${u.retrying} retry`) : null,
+    inFlight(u) ? h('span', { class: 't-run' }, `${inFlight(u)} run`) : null,
+    retries(u) ? h('span', { class: 't-temp' }, `${retries(u)} retry`) : null,
     u.failed ? h('span', { class: 't-fail' }, `${u.failed} failed`) : null,
     u.unevaluated ? `${f.num(u.unevaluated)} to expand` : null,
   ].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]));
   const b = e.burst;
   const act = [];
-  if (!fin && b && b.needsApproval) {
+  if (!fin && b && b.needsApproval && ctx.level >= 4) {
     act.push(h('button', { class: 'btn request', 'data-action': 'approve', 'data-pool': b.pool, title: `Approve the pending request: ${b.slots} ${b.pool} slots for ${j.name}` },
       h('span', null, `+${b.slots} ${b.pool}`), h('b', null, f.money(b.cost))));
   } else if (j.phase === 'Held') {
@@ -91,9 +91,9 @@ function row(ctx, j, multiProject, sk) {
     act.push(h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': failedUnits(j) }, `Requeue ${u.failed} failed`));
   }
   const dueCell = dl ? h('div', { class: 'qdue' },
-    h('span', { class: 'ink' + (passed ? ' t-fail' : '') }, f.clock(dl)),
+    h('span', { class: 'ink' + (passed ? ' t-risk' : '') }, f.clock(dl)),
     fin ? h('span', { class: 'sub' }, `done ${f.clock(e.etaP90, false)}`)
-      : h('span', { class: 'sub' }, 'p90 ', h('span', { class: 'pencil' + (late ? ' t-fail' : '') }, f.clock(e.etaP90, false))))
+      : h('span', { class: 'sub' }, 'p90 ', h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, f.clock(e.etaP90, false))))
     : h('div', { class: 'qdue' }, h('span', { class: 'dimmer' }, '–'), h('span', { class: 'sub' }, fin ? `done ${f.clock(e.etaP90, false)}` : 'no deadline'));
   const slack = dl && !fin && Number.isFinite(e.slackSeconds)
     ? h('div', { class: 'qslack' + (late ? ' late' : '') }, h('span', { class: late && !passed ? 'pencil' : '' }, f.signed(e.slackSeconds)), h('small', null, late ? (passed ? 'past due' : 'projected late') : 'slack'))
@@ -109,7 +109,7 @@ function row(ctx, j, multiProject, sk) {
         multiProject ? h('span', { class: 'dimmer' }, j.project) : null,
         h('span', { class: 'dimmer' }, orderText(j.order)),
         j.blacklist && j.blacklist.length ? h('span', { class: 't-temp', title: 'Nodes this job will not use' }, `avoids ${j.blacklist.join(', ')}`) : null)),
-    h('div', { class: 'qshot' }, shot ? h('a', { href: qhref(ctx, { ...ctx.route.q, shot }), class: 'shotref', title: `Only sheet ${shot}` }, shot) : h('span', { class: 'dimmer' }, '–')),
+    h('div', { class: 'qshot' }, shot ? h('a', { href: qhref(ctx, { ...ctx.route.q, shot }), class: 'shotref', title: `Only shot ${shot}` }, shot) : h('span', { class: 'dimmer' }, '–')),
     h('div', { class: 'qstrip' },
       raw('div', { class: 'strip', 'data-key': 'strip' }, strip.svg),
       h('div', { class: 'cap' }, capt, j.work && j.work.basis === 'estimate' ? null : h('span', { class: 'dimmer' }, ' · by units'))),
@@ -128,7 +128,7 @@ function head() {
     h('span', { class: 'lab' }, 'Batches'),
     h('span', { class: 'lab' }, 'Deadline · p90'),
     h('div', { class: 'datumhead' },
-      h('span', { class: 'lab' }, 'Datum'),
+      h('span', { class: 'lab' }, 'Deadline line'),
       DATUM_TICKS.map(([sec, l]) => h('span', { class: 'tk' + (sec === 0 ? ' zero' : ''), style: { left: `${(datumX(sec) * 100).toFixed(2)}%` } }, l))),
     h('span', { class: 'lab', style: { textAlign: 'right' } }, 'Slack'),
     h('span'));
@@ -147,9 +147,9 @@ function shotsBand(ctx, shots, cur) {
       return h('a', { class: `q-shot${s.late ? ' late' : ''}${s.open ? '' : ' fin'}${cur === s.key ? ' sel' : ''}`, href: qhref(ctx, { ...ctx.route.q, shot: cur === s.key ? '' : s.key }), 'data-key': 'sh:' + s.key, role: 'listitem', 'aria-current': cur === s.key ? 'true' : false },
         own('pylon', 'qshot:' + s.key, { glance: g, w: 24, h: 40, mode: 'mini' }, { class: 'spy' }),
         h('span', { class: 'sname' }, s.key),
-        h('span', { class: 'sslack' + (s.late ? ' t-fail' : '') }, s.open ? f.signed(sl) : 'done'),
+        h('span', { class: 'sslack' + (s.late ? ' t-risk' : '') }, s.open ? f.signed(sl) : 'done'),
         h('span', { class: 'ssub' }, `${s.project} · ${s.jobs.length} job${s.jobs.length > 1 ? 's' : ''} · ${Math.round(g.done * 100)}%${g.basis === 'units' ? ' by units' : ''}`),
-        dlv.length ? h('span', { class: 'sdel' + (dlv.some(isLate) ? ' t-fail' : '') }, `▸ ${dlv.map((d) => `${d.name.replace(/^[a-z]+-/, '')} ${f.clock(d.objective.deadline, false)}`).join(' · ')}`) : h('span', { class: 'sdel dimmer' }, g.deadline ? `due ${f.clock(g.deadline)}` : ''));
+        dlv.length ? h('span', { class: 'sdel' + (dlv.some(isLate) ? ' t-risk' : '') }, `▸ ${dlv.map((d) => `${d.name.replace(/^[a-z]+-/, '')} ${f.clock(d.objective.deadline, false)}`).join(' · ')}`) : h('span', { class: 'sdel dimmer' }, g.deadline ? `due ${f.clock(g.deadline)}` : ''));
     }));
 }
 
@@ -179,7 +179,7 @@ function decisionCard(ctx, d, i, n) {
     h('div', { class: 'dct' }, h('b', null, `+${d.slots} ${d.pool} slots`), h('span', null, ' for ', h('a', { href: ctx.href(`job/${j.namespace}/${j.name}`) }, j.name))),
     h('p', { class: 'dcp' },
       'Without them it finishes ', h('span', { class: 'pencil' }, `≈${f.clock(e.etaP90, false)}`), ', ',
-      lateBy > 0 ? h('span', { class: 't-fail' }, `about ${f.dur(lateBy)} past`) : 'inside', ` its ${f.clock(dl, false)} deadline`,
+      lateBy > 0 ? h('span', { class: 't-risk' }, `about ${f.dur(lateBy)} past`) : 'inside', ` its ${f.clock(dl, false)} deadline`,
       down.length ? [', and ', down.map((x, q) => [q ? ' and ' : '', h('b', null, x.name), ` (${x.owner ? x.owner + ', ' : ''}${f.clock(x.objective.deadline, false)})`]), ' slips with it'] : null,
       '. With them, the farm expects it ', h('span', { class: 'pencil' }, 'on time'), '.'),
     h('div', { class: 'dcb' },
@@ -194,18 +194,71 @@ function decisionCard(ctx, d, i, n) {
         h('div', null,
           h('div', { class: 'mono' }, `approve +${d.slots} ${d.pool} · est. ${f.money(d.cost)}${d.over ? ` · ${f.money(d.over)} over budget` : ''}`),
           h('div', { class: 'dim' }, 'signs as ', h('b', null, s.user), ' via the HUD'))),
-      h('div', { class: 'entry quiet' }, seal('hud', { open: true, title: 'an agent signs with the same seal' }),
-        h('div', { class: 'dim' }, s.agent ? 'A person approving gets the same seal, named.' : ['An agent approving gets the same seal, named: ', h('span', { class: 'mono' }, `agent/… for ${s.user}`), '.']))),
+      h('div', { class: 'entry quiet' }, seal('hud', { open: true, title: 'an agent signs the same way' }),
+        h('div', { class: 'dim' }, s.agent ? 'A person approving signs the same way, by name.' : ['An agent approving signs the same way, by name: ', h('span', { class: 'mono' }, `agent/… for ${s.user}`), '.']))),
     h('div', { class: 'dcbtn' },
       h('button', { class: 'btn primary', 'data-action': 'approve', 'data-pool': d.pool }, `Approve · est. ${f.money(d.cost)}`),
       h('button', { class: 'btn', 'data-qdismiss': k }, 'Not now')),
     h('p', { class: 'dcfoot' }, `Not now leaves the request pending; the late projection stands.`));
 }
 
+
+// ------------------------------------------------------------ levels 0 and 1
+
+// simple: the queue as a print queue. Each job: a gauge, percent done and how
+// many units, time left and when it will be ready, when it is due. An
+// artist sees their own jobs; finished ones below a rule.
+const unitWord = (j) => (j.class === 'ci' || /ci/.test(j.class) ? 'shards' : j.class === 'media' ? 'units' : j.class === 'ml' || /ml/.test(j.class) ? 'steps' : 'frames');
+function simpleRow(ctx, j, rank) {
+  const g = { ...glance(j), risk: 0, slack: NaN, feasible: true }, u = j.units, e = j.estimate, fin = j.phase === 'Succeeded';
+  const late = false; // deadline risk arrives at level 2
+  const dl = j.objective && j.objective.deadline;
+  const waiting = !fin && !inFlight(u) && !retries(u) && !u.succeeded && j.phase !== 'Running';
+  return h('div', { class: `sq-row${fin ? ' fin' : ''}${late ? ' late' : ''}`, 'data-key': 'sq:' + keyOf(j), role: 'listitem' },
+    h('div', { class: 'qrank' }, rank ? String(rank) : ''),
+    own('pylon', 'sqpy:' + keyOf(j), { glance: g, w: 30, h: 46, mode: 'mini' }, { class: 'qpy' }),
+    h('div', { class: 'qname' },
+      h('a', { class: 'jn', href: ctx.href(`job/${j.namespace}/${j.name}`) }, j.name),
+      h('div', { class: 'qmeta' }, classChip(j, ctx.cls(j.class)), phase(j), j.owner ? h('span', null, j.owner) : null)),
+    h('div', { class: 'stack2' },
+      h('span', { class: 'big' }, `${Math.round(g.done * 100)}%`),
+      h('span', { class: 'sub' }, fin ? `${f.num(u.total)} ${unitWord(j)}, all done` : `${f.num(u.succeeded)} of ${f.num(u.total)} ${unitWord(j)}`,
+        inFlight(u) ? [' · ', h('span', { class: 't-run' }, `${inFlight(u)} running`)] : null,
+        u.failed ? [' · ', h('span', { class: 't-fail' }, `${u.failed} failed`)] : null)),
+    h('div', { class: 'stack2' },
+      fin ? [h('span', { class: 'bigs' }, 'done'), h('span', { class: 'sub' }, `finished ${f.clock(e.etaP90, false)}`)]
+        : waiting && j.phase === 'Blocked' ? [h('span', { class: 'bigs' }, '\u2013'), h('span', { class: 'sub' }, 'waits for another job')]
+          : [h('span', { class: 'bigs' }, f.approx(e.remainingSeconds)), h('span', { class: 'sub' }, 'ready ', h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, `~${f.clock(e.etaP50, false)}`))]),
+    h('div', { class: 'stack2' },
+      h('span', { class: 'big' + (late ? ' t-risk' : '') }, dl ? f.clock(dl, false) : '\u2013'),
+      h('span', { class: 'sub' }, fin ? 'was due' : dl ? (late ? 'due; projected late' : 'due') : 'no deadline')));
+}
+
+function simple(ctx) {
+  const s = ctx.snap, v = s.viewer || {};
+  let jobs = v.allProjects ? s.jobs : s.jobs.filter((j) => j.owner === v.user);
+  if (!jobs.length) jobs = s.jobs;
+  const open = jobs.filter((j) => j.phase !== 'Succeeded').sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
+  const fin = jobs.filter((j) => j.phase === 'Succeeded');
+  return h('section', { class: 'sheet qsheet', 'data-key': 'farm-simple', 'aria-labelledby': 'qtitle' },
+    h('div', { class: 'sheethead' },
+      h('div', null,
+        h('div', { class: 'crumbs' }, `Farm / ${v.allProjects ? 'all projects' : (v.projects || []).join(' \u00b7 ')}${v.allProjects ? '' : ' / ' + (v.user || '')}`),
+        h('h1', { id: 'qtitle' }, v.allProjects ? 'The farm' : 'My jobs'),
+        h('div', { class: 'meta' }, `${open.length} job${open.length === 1 ? '' : 's'} working or waiting, in the order the farm will run them. Deadlines set the order; nobody sets priorities.`))),
+    h('div', { class: 'neat qneat' },
+      h('div', { class: 'sq-row head', 'aria-hidden': 'true' },
+        ['#', '', 'Job', 'Progress', 'Ready by', 'Due'].map((x) => h('span', { class: 'lab' }, x))),
+      h('div', { role: 'list', 'aria-label': 'Jobs in run order' }, open.map((j, i) => simpleRow(ctx, j, i + 1))),
+      fin.length ? h('div', { class: 'qdiv' }, h('span', { class: 'lab' }, `Finished \u00b7 ${fin.length}`), h('span', { class: 'sub' }, 'kept while later jobs still read their output')) : null,
+      fin.length ? h('div', { role: 'list', 'aria-label': 'Finished jobs' }, fin.slice(0, 12).map((j) => simpleRow(ctx, j, 0))) : null));
+}
+
 // ------------------------------------------------------------ the sheet
 
 export default {
   render(ctx) {
+    if (ctx.level < 2) return simple(ctx);
     const s = ctx.snap;
     const q = ctx.route.q;
     const flt = q.class || 'all';
@@ -229,34 +282,34 @@ export default {
     return h('section', { class: 'sheet qsheet', 'data-key': 'farm', 'aria-labelledby': 'qtitle' },
       h('div', { class: 'sheethead' },
         h('div', null,
-          h('div', { class: 'crumbs' }, `Farm / ${s.viewer.allProjects ? 'all projects' : s.viewer.projects.join(' · ')} / dispatch order`),
+          h('div', { class: 'crumbs' }, `Farm / ${s.viewer.allProjects ? 'all projects' : s.viewer.projects.join(' · ')} / run order`),
           h('h1', { id: 'qtitle' }, 'The farm'),
-          h('div', { class: 'meta' }, `${allOpen.length} jobs working or waiting, in dispatch order. Each job's deadline and estimate set the order; nobody sets priorities.`)),
+          h('div', { class: 'meta' }, `${allOpen.length} jobs working or waiting, in run order. Each job's deadline and estimate set the order; nobody sets priorities.`)),
         h('div', { class: 'titleblock' },
-          h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Datum'), h('span', { class: 'val' }, f.clockSec(s.now)), h('span', { class: 'sub' }, `${f.dateLine(s.now)} · ${f.offsetLabel()}`)),
+          h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Now'), h('span', { class: 'val' }, f.clockSec(s.now)), h('span', { class: 'sub' }, `${f.dateLine(s.now)} · ${f.offsetLabel()}`)),
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'On time'), h('span', { class: 'val' }, String(withDl.length - late.length), h('small', null, `of ${withDl.length}`)), h('span', { class: 'sub' }, 'with a deadline')),
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Projected late'), h('span', { class: 'val' + (late.length ? ' late' : '') }, String(late.length)), h('span', { class: 'sub' }, late.length ? `worst ${f.signed(Math.min(...late.map((j) => j.estimate.slackSeconds)))}` : 'every deadline holds')),
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Awaiting you'), h('span', { class: 'val' }, String(decisions.length)), h('span', { class: 'sub' }, decisions.length ? `burst, est. ${f.money(decisions.reduce((a, d) => a + d.cost, 0))}` : 'no decisions')),
-          win ? h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Mission day'), h('span', { class: 'val' }, `D${mday}`), h('span', { class: 'sub' }, `${win.name.toLowerCase()} · to ${f.dateLine(win.to)}`)) : null)),
-      h('div', { class: 'qcollar' + (shown.length ? ' has-dc' : '') },
-        shown.length ? h('div', { class: 'qdecide' }, shown.map((d, i) => decisionCard(ctx, d, i, shown.length))) : null,
-        shotsBand(ctx, shots, shotF)),
-      h('div', { class: 'qtools' },
+          win ? h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Production day'), h('span', { class: 'val' }, `day ${mday}`), h('span', { class: 'sub' }, `${win.name.toLowerCase()} · to ${f.dateLine(win.to)}`)) : null)),
+      h('div', { class: 'qcollar' + (shown.length && ctx.level >= 4 ? ' has-dc' : '') },
+        shown.length && ctx.level >= 4 ? h('div', { class: 'qdecide' }, shown.map((d, i) => decisionCard(ctx, d, i, shown.length))) : null,
+        ctx.level >= 3 ? shotsBand(ctx, shots, shotF) : null),
+      ctx.level < 3 ? null : h('div', { class: 'qtools' },
         h('div', { class: 'filters', role: 'group', 'aria-label': 'Filter by work class' },
           h('span', { class: 'lab' }, 'Show'),
           h('span', { class: 'seg' }, FILTERS.map(([k, label]) => h('a', {
             class: 'btn small', href: qhref(ctx, { ...q, class: k }), 'aria-pressed': flt === k ? 'true' : 'false',
           }, `${label} ${counts[k]}`)))),
-        shotF ? h('a', { class: 'btn small', href: qhref(ctx, { ...q, shot: '' }), 'aria-pressed': 'true', title: 'Show every shot' }, `Sheet ${shotF} ×`) : null,
-        h('span', { class: 'scale mono' }, 'scale · 1 row = 1 job · batches of 24 frames (render) · slack on a log datum, −6h to +3d')),
+        shotF ? h('a', { class: 'btn small', href: qhref(ctx, { ...q, shot: '' }), 'aria-pressed': 'true', title: 'Show every shot' }, `Shot ${shotF} ×`) : null,
+        h('span', { class: 'scale mono' }, 'scale · 1 row = 1 job · batches of 24 frames (render) · slack against the deadline, −6h to +3d, log scale')),
       h('div', { class: 'neat qneat' },
-        h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('pools') }, 'pools'), ' · capacity feeding the queue'),
-        h('div', { class: 'edge e' }, h('a', { href: ctx.href('graph') }, 'graph'), ' · deliveries to the client ▸'),
-        h('div', { class: 'edge s' }, '▾ ', h('a', { href: ctx.href('wall') }, 'the wall'), ' · ', h('a', { href: ctx.href('cost') }, 'cost')),
+        ctx.level >= 4 ? h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('pools') }, 'pools'), ' · capacity feeding the queue') : null,
+        ctx.level >= 3 ? h('div', { class: 'edge e' }, h('a', { href: ctx.href('graph') }, 'graph'), ' · deliveries to the client ▸') : null,
+        ctx.level >= 5 ? h('div', { class: 'edge s' }, '▾ ', h('a', { href: ctx.href('wall') }, 'the wall'), ' · ', h('a', { href: ctx.href('cost') }, 'cost')) : null,
         h('div', { class: 'qtable', style: { '--datum': `${(DATUM_X * 100).toFixed(2)}%` } },
           head(),
-          jobs.length ? h('div', { class: 'qlist', role: 'list', 'aria-label': 'Jobs in dispatch order' }, open.map((j) => row(ctx, j, multiProject, sk))) : empty('No jobs match this filter.'),
-          fin.length ? h('div', { class: 'qdiv' }, h('span', { class: 'lab' }, `Finished · ${fin.length}`), h('span', { class: 'sub' }, 'settled; kept while they still feed the sheet')) : null,
+          jobs.length ? h('div', { class: 'qlist', role: 'list', 'aria-label': 'Jobs in run order' }, open.map((j) => row(ctx, j, multiProject, sk))) : empty('No jobs match this filter.'),
+          fin.length ? h('div', { class: 'qdiv' }, h('span', { class: 'lab' }, `Finished · ${fin.length}`), h('span', { class: 'sub' }, 'kept while later jobs still read their output')) : null,
           fin.length ? h('div', { class: 'qlist fin', role: 'list', 'aria-label': 'Finished jobs' }, fin.map((j) => row(ctx, j, multiProject, sk))) : null)));
   },
 

@@ -7,6 +7,7 @@ import '../design/components/pylon.js';
 import '../design/components/stack.js';
 import { subscribe, post, get, as, staticMode } from './api.js';
 import * as f from './fmt.js';
+import * as lv from './level.js';
 import queue from './views/queue.js';
 import job from './views/job.js';
 import pools from './views/pools.js';
@@ -19,21 +20,22 @@ import graph from './views/graph.js';
 import cost from './views/cost.js';
 
 const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine };
+// each view and the detail level it arrives at (docs/intro/ladder.md)
 const NAV = [
-  ['queue', 'Queue'],
-  ['pools', 'Pools'],
-  ['map', 'Map'],
-  ['tiers', 'Tiers'],
-  ['graph', 'Graph'],
-  ['cost', 'Cost'],
-  ['wall', 'Wall'],
+  ['queue', 'Queue', 3],
+  ['pools', 'Pools', 4],
+  ['map', 'Map', 4],
+  ['tiers', 'Tiers', 5],
+  ['graph', 'Graph', 3],
+  ['cost', 'Cost', 4],
+  ['wall', 'Wall', 5],
 ];
 
 if (staticMode || new URLSearchParams(location.search).get('motion') === 'off') {
   document.documentElement.dataset.motion = 'off';
 }
 
-const state = { snap: null, status: staticMode ? 'static' : 'connecting', route: null, current: null };
+const state = { snap: null, status: staticMode ? 'static' : 'connecting', route: null, current: null, level: { level: 5, source: 'role', mine: 5 } };
 
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '');
@@ -51,6 +53,8 @@ export function href(hash) {
 const ctx = {
   get snap() { return state.snap; },
   get route() { return state.route; },
+  // the detail level this view draws at: a job opens at level 1 or above
+  get level() { return state.route && state.route.name === 'job' ? Math.max(1, state.level.level) : state.level.level; },
   href,
   go(hash) { location.hash = '#/' + hash; },
   refresh: () => render(),
@@ -71,18 +75,52 @@ function topBar() {
   const role = v ? (v.allProjects ? 'wrangler' : 'artist') : '';
   const other = role === 'wrangler' ? 'artist' : 'wrangler';
   return h('header', { class: 'top' },
-    h('a', { class: 'brand', href: href('queue'), 'aria-label': 'c4 HUD, the farm sheet' },
+    h('a', { class: 'brand', href: href('queue'), 'aria-label': 'c4 HUD, the queue' },
       h('span', { class: 'tick', 'aria-hidden': 'true' }),
       h('span', { class: 'wordmark' }, 'C4', h('b', null, 'HUD'))),
     h('div', { class: 'clock' },
-      h('span', { class: 'num' }, s ? f.clockSec(s.now) : '--:--:--'),
+      h('span', { class: 'num' }, s ? f.clockSec(s.now) : '--:--:--', s && f.utc(s.now) ? h('span', { class: 'cx', title: 'UTC' }, f.utc(s.now)) : null),
       h('span', { class: 'lab' }, s ? `${f.dateLine(s.now)} \u00b7 ${f.offsetLabel()}` : '')),
     h('nav', { class: 'views', 'aria-label': 'Views' },
-      NAV.map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
+      NAV.filter(([k, , n]) => state.level.level >= n || (state.route && state.route.name === k)).map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
+    detail(),
     h('div', { class: 'who' },
       h('span', { class: 'live', 'data-state': state.status, title: `Updates: ${state.status}` }),
       v ? h('span', null, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
       v ? h('a', { href: viewAs(other) }, `View as ${other}`) : null));
+}
+
+// detail: the level switch. Six cells and the level's name; a cell sets
+// the viewer's own level. [ and ] step down and up.
+function detail() {
+  const L = state.level, cur = lv.LEVELS[L.level];
+  return h('div', { class: 'detail', role: 'group', 'aria-label': `Detail level ${L.level}, ${cur.name}` },
+    h('span', { class: 'lab' }, 'Detail'),
+    h('span', { class: 'cells' }, lv.LEVELS.map((x) => h('button', {
+      class: 'cell-l' + (x.n <= L.level ? ' on' : '') + (x.n === L.level ? ' cur' : ''), 'data-level': String(x.n),
+      title: `${x.n} · ${x.name}: ${x.q}`, 'aria-pressed': x.n === L.level ? 'true' : 'false',
+    }))),
+    h('span', { class: 'lvname' }, `${L.level} · ${cur.name}`));
+}
+
+// offerBar: one "show me more" offer, or the note that a link set the level
+function offerBar() {
+  const s = state.snap, v = s && s.viewer, L = state.level;
+  // static pages (fixtures, screenshots) show the level they were given, no offers
+  if (!s || staticMode) return h('div', { class: 'offerbar', hidden: true });
+  if (L.source === 'link' && L.level !== L.mine) {
+    return h('div', { class: 'offerbar note', role: 'status' },
+      h('span', { class: 'msg' }, `Showing level ${L.level}, ${lv.LEVELS[L.level].name}, from this link. Your level is ${L.mine}, ${lv.LEVELS[L.mine].name}.`),
+      h('button', { class: 'btn small', 'data-offer': 'keep' }, `Keep ${L.level}`),
+      h('button', { class: 'btn small', 'data-offer': 'back' }, `Back to ${L.mine}`));
+  }
+  const o = lv.offer(s, state.route, L.level, v);
+  if (!o) return h('div', { class: 'offerbar', hidden: true });
+  return h('div', { class: 'offerbar', role: 'status' },
+    h('i', { class: 'mark', 'aria-hidden': 'true' }),
+    h('span', { class: 'pt' }, h('span', { class: 'lab' }, o.title), h('span', { class: 'msg' }, o.msg)),
+    h('button', { class: 'btn primary small', 'data-offer': 'yes', 'data-level': String(o.level) }, o.yes),
+    h('button', { class: 'btn small', 'data-offer': 'notnow', 'data-level': String(o.level) }, 'Not now'));
 }
 
 function slate() {
@@ -120,17 +158,24 @@ function slate() {
 let lastView = null;
 function render() {
   const route = state.route;
+  state.level = lv.current(state.snap && state.snap.viewer);
+  document.documentElement.dataset.level = String(ctx.level);
+  if (route.name === 'job' && state.snap) lv.opened(ctx.job(route.parts.slice(0, 2).join('/')));
+
   const bare = route.name === 'wall' || route.name === 'widget';
   document.documentElement.dataset.scale = route.name === 'wall' ? 'wall' : route.name === 'widget' ? 'widget' : 'desk';
   document.getElementById('top').hidden = bare;
   document.getElementById('slate').hidden = bare;
   // an artist's queue is their own shots
-  const mineView = route.name === 'queue' && state.snap && state.snap.viewer && !state.snap.viewer.allProjects;
+  const mineView = route.name === 'queue' && state.snap && state.snap.viewer && !state.snap.viewer.allProjects && ctx.level >= 2;
   const view = mineView ? VIEWS.mine : VIEWS[route.name];
   if (lastView && lastView !== view && lastView.leave) lastView.leave();
   lastView = view;
   morphInto(document.getElementById('top'), topBar());
   morphInto(document.getElementById('slate'), slate());
+  document.getElementById('slate').hidden = bare || ctx.level < 4;
+  morphInto(document.getElementById('offer'), offerBar());
+  document.getElementById('offer').hidden = bare;
   const main = document.getElementById('main');
   if (!state.snap) return;
   let el;
@@ -144,6 +189,10 @@ function render() {
   morph(main, wrap);
   hydrate(main);
   if (view.after) view.after(ctx, main);
+  // ?notes=[{"target":"css selector","term":"slack","side":"below"}...]: callouts
+  // over the page, for tutorial screenshots and tours (design/components/callouts.js)
+  const notes = new URLSearchParams(location.search).get('notes');
+  if (notes) import('../design/components/callouts.js').then((m) => { try { m.overlay(JSON.parse(notes)); } catch (e) { console.error('notes:', e.message); } });
 }
 
 function morphInto(host, el) {
@@ -170,7 +219,7 @@ const ACTIONS = {
   deadline: (d) => {
     const input = document.getElementById(d.input);
     if (!input || !input.value) throw new Error('Pick a date and time first.');
-    return [`/jobs/${d.job}/nudge`, { deadline: farmTime(input.value) }];
+    return [`/jobs/${d.job}/nudge`, { deadline: f.fromInput(input.value) }];
   },
   requeue: (d) => [`/jobs/${d.job}/requeue`, { units: d.units }],
   blacklist: (d) => [`/jobs/${d.job}/blacklist`, { node: d.node }],
@@ -179,12 +228,6 @@ const ACTIONS = {
   enable: (d) => [`/nodes/${d.node}/disable`, { disabled: false }],
   approve: (d) => [`/capacity/${d.pool}/approve`, {}],
 };
-
-// farmTime turns a datetime-local value into RFC 3339 in the farm's offset.
-function farmTime(v) {
-  const m = /([+-]\d\d:\d\d)$/.exec(state.snap.now);
-  return `${v.length === 16 ? v + ':00' : v}${m ? m[1] : 'Z'}`;
-}
 
 document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-action]');
@@ -203,6 +246,30 @@ document.addEventListener('click', async (e) => {
   } finally {
     b.disabled = false;
   }
+});
+
+// the level switch, the offers and the [ ] keys
+document.addEventListener('click', (e) => {
+  const v = state.snap && state.snap.viewer;
+  const cell = e.target.closest('.detail [data-level]');
+  if (cell) { e.preventDefault(); lv.choose(v, Number(cell.dataset.level)); render(); return; }
+  const b = e.target.closest('[data-offer]');
+  if (!b) return;
+  e.preventDefault();
+  const what = b.dataset.offer;
+  if (what === 'yes') lv.choose(v, Number(b.dataset.level));
+  else if (what === 'notnow') lv.notNow(v, Number(b.dataset.level));
+  else if (what === 'keep') lv.keep(v);
+  else if (what === 'back') lv.choose(v, state.level.mine);
+  render();
+});
+document.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
+  if (e.key !== '[' && e.key !== ']') return;
+  const n = state.level.level + (e.key === ']' ? 1 : -1);
+  if (n < 0 || n > lv.MAX) return;
+  lv.choose(state.snap && state.snap.viewer, n);
+  render();
 });
 
 document.addEventListener('hud:refresh', () => render());

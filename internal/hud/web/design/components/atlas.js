@@ -192,7 +192,7 @@ export function atlasSVG(snap, o = {}) {
     const R = ringsSVG(T, g, cx, cy, { r0: 13, sw: 5, gap: 3.5 });
     s += R.svg;
     const pend = g.rings.filter((q) => q.pend);
-    placed.push({ x: cx, y: cy, r: R.r, label: (g.site.label || g.site.name).toUpperCase(), sub: siteSub(g), sub2: pend.length ? `+${pend.reduce((a, q) => a + q.pend, 0)} requested · est. ${f.money(pend.reduce((a, q) => a + q.cost, 0))} · awaiting approval` : `${g.nodes.length} nodes · ${g.site.kind === 'onprem' ? 'machine room' : 'cloud region'} · ${g.site.region}` });
+    placed.push({ x: cx, y: cy, r: R.r, label: (g.site.label || g.site.name).toUpperCase(), sub: siteSub(g), sub2: pend.length ? `+${pend.reduce((a, q) => a + q.pend, 0)} requested · est. ${f.money(pend.reduce((a, q) => a + q.cost, 0))} · awaiting approval` : `${g.nodes.length} nodes · ${g.site.kind === 'onprem' ? 'machine room' : 'cloud region'} · ${g.site.region}${f.siteClock(f.now(), g.site.tz) ? ' · ' + f.siteClock(f.now(), g.site.tz) : ''}` });
   }
   s += labels(T, placed, w, h);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(`Map: ${M.compute.length} sites with nodes${store ? ', the project stores in ' + store.region : ''}`)}">${s}</svg>`;
@@ -306,7 +306,7 @@ export function siteScaleSVG(snap, g, o = {}) {
       let cells = '';
       for (let i = 0; i < n.slots; i++) {
         const cx = x + (i % perRow) * step, cy = yy + Math.floor(i / perRow) * step;
-        if (i < S.mine.length) cells += `<rect x="${cx}" y="${cy}" width="${c}" height="${c}" fill="${T.runBody}"/><rect x="${cx}" y="${cy}" width="${c}" height="1.5" fill="${T.run}"/>`;
+        if (i < S.mine.length) cells += `<rect x="${cx}" y="${cy}" width="${c}" height="${c}" fill="${T.run}"/><rect x="${cx}" y="${cy}" width="${c}" height="1.5" fill="${T.run}"/>`;
         else if (i < S.mine.length + S.other) cells += `<rect x="${cx}" y="${cy}" width="${c}" height="${c}" fill="${T.g[13]}"/>`;
         else cells += `<rect x="${cx + 0.5}" y="${cy + 0.5}" width="${c - 1}" height="${c - 1}" fill="none" stroke="${n.state === 'notReady' ? T.fail : T.g[12]}"/>`;
       }

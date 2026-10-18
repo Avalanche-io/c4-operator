@@ -12,7 +12,7 @@ function stageCell(p, scale, current) {
   const w = (v) => `${Math.max(0, Math.min(100, (v / scale) * 100)).toFixed(1)}%`;
   const runCol = { passed: 'var(--u-done)', failed: 'var(--bar-red)', running: 'url(#ci-stripe)' }[p.state];
   const runBg = { passed: 'var(--u-done)', failed: 'var(--bar-red)' }[p.state] ||
-    (p.state === 'running' ? 'linear-gradient(90deg, var(--done) 0 45%, var(--run) 45% 47%, var(--run-body) 47%)' : 'transparent');
+    (p.state === 'running' ? 'linear-gradient(90deg, var(--run) 0 45%, var(--g09) 45%)' : 'transparent');
   void runCol;
   const label = p.state === 'blocked' ? 'waiting on the stage before' : `waited ${f.dur(p.queueWaitSeconds)}, ran ${f.dur(p.runSeconds)}`;
   return h('td', { title: label, class: current ? 'cur' : null },
@@ -28,7 +28,7 @@ function stageCell(p, scale, current) {
 function ttgChart(t) {
   const max = Math.max(t.targetP95 * 1.5, ...t.samples, 60);
   const x = (v) => `${(v / max) * 100}%`;
-  const dots = t.samples.map((v, i) => s('circle', { cx: x(v), cy: 16 + ((i * 37) % 17), r: 2.6, fill: v > t.targetP95 ? 'var(--fail)' : 'var(--ink-2)' }));
+  const dots = t.samples.map((v, i) => s('circle', { cx: x(v), cy: 16 + ((i * 37) % 17), r: 2.6, fill: v > t.targetP95 ? 'var(--risk)' : 'var(--ink-2)' }));
   const tick = (v, lab, dash, col) => [
     s('line', { x1: x(v), x2: x(v), y1: 4, y2: 40, stroke: col, 'stroke-width': dash ? 1 : 2, 'stroke-dasharray': dash ? '3 2' : null }),
     s('text', { x: x(v), y: 52, 'text-anchor': 'middle' }, lab),
@@ -39,7 +39,7 @@ function ttgChart(t) {
     tick(t.targetP50, `target p50 ${f.dur(t.targetP50)}`, true, 'var(--ink-3)'),
     tick(t.targetP95, `target p95 ${f.dur(t.targetP95)}`, true, 'var(--ink-3)'),
     s('line', { x1: x(t.p50), x2: x(t.p50), y1: 6, y2: 40, stroke: 'var(--ink)', 'stroke-width': 2 }),
-    s('line', { x1: x(t.p95), x2: x(t.p95), y1: 6, y2: 40, stroke: t.p95 > t.targetP95 ? 'var(--fail)' : 'var(--ink)', 'stroke-width': 2 }),
+    s('line', { x1: x(t.p95), x2: x(t.p95), y1: 6, y2: 40, stroke: t.p95 > t.targetP95 ? 'var(--risk)' : 'var(--ink)', 'stroke-width': 2 }),
     s('text', { x: x(t.p50), y: 4, dy: -2, 'text-anchor': 'middle', style: { fill: 'var(--ink)' } }, 'p50'),
     s('text', { x: x(t.p95), y: 4, dy: -2, 'text-anchor': 'middle', style: { fill: 'var(--ink)' } }, 'p95'));
 }
@@ -71,7 +71,7 @@ export function ciLens(ctx, job) {
                 h('span', { class: 'dimmer' }, c.author),
                 h('div', { style: { fontSize: '12px' } }, c.title)),
               STAGES.map(([k]) => stageCell(by[k], scale, false)),
-              h('td', { class: 'r num' }, integ && integ.timeToGreenSeconds ? h('span', { class: integ.timeToGreenSeconds > ttg.targetP95 ? 't-fail' : '' }, f.dur(integ.timeToGreenSeconds)) :
+              h('td', { class: 'r num' }, integ && integ.timeToGreenSeconds ? h('span', { class: integ.timeToGreenSeconds > ttg.targetP95 ? 't-risk' : '' }, f.dur(integ.timeToGreenSeconds)) :
                 c.pipelines.some((p) => p.state === 'failed') ? h('span', { class: 't-red' }, 'red') : h('span', { class: 'dimmer' }, 'pending')));
           }))))),
     h('div', { class: 'cols' },

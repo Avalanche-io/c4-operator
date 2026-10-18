@@ -14,7 +14,7 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { own } from '../../design/components/live.js';
-import { tok, glance } from '../../design/components/core.js';
+import { tok, glance, inFlight, retries } from '../../design/components/core.js';
 import { drawAgg } from '../../design/components/stack.js';
 import { ranges } from '../../design/components/rle.js';
 
@@ -112,7 +112,7 @@ function neighbours(ctx, k, j, graph) {
     const late = o.phase !== 'Succeeded' && Number.isFinite(o.estimate.slackSeconds) && o.estimate.slackSeconds < 0;
     if (o.phase === 'Succeeded') return [h('i', { class: 'sq settled' }), `${name} · done ${f.clock(o.estimate.etaP90, false)}`];
     const what = dir === 'down' ? (o.phase === 'Blocked' ? 'waits' : o.phase.toLowerCase()) : o.phase.toLowerCase();
-    return [`${name} · ${what}`, late ? h('span', { class: 't-fail' }, ` · ≈${f.dur(-o.estimate.slackSeconds)} late`) : null];
+    return [`${name} · ${what}`, late ? h('span', { class: 't-risk' }, ` · ≈${f.dur(-o.estimate.slackSeconds)} late`) : null];
   };
   const inputs = (j.inputs || []).filter((x) => x.materialization && !x.fromJob).map((x) => x.materialization);
   return {
@@ -174,7 +174,7 @@ export function widgetSheet(ctx, k, j, d, graph, compact) {
   const e = j.estimate;
   const done = j.phase === 'Succeeded';
   const late = !done && Number.isFinite(e.slackSeconds) && e.slackSeconds < 0 && !!(j.objective && j.objective.deadline);
-  const trouble = j.units.retrying > 0;
+  const trouble = retries(j.units) > 0;
   const B = d ? bandsOf(j, compact ? 8 : 12) : null;
   const nb = neighbours(ctx, k, j, graph);
   const dl = j.objective && j.objective.deadline;
@@ -194,8 +194,8 @@ export function widgetSheet(ctx, k, j, d, graph, compact) {
     compact ? null : h('div', { class: 'wg-edge r' }, h('span', null, nb.down)),
     h('div', { class: 'wg-sheet' + (late ? ' late' : '') },
       h('div', { class: 'wg-collar' },
-        h('a', { class: 'nm', href: sheetHref, target: '_blank', rel: 'noopener', title: 'Open the job’s sheet' }, j.name, compact || !j.owner ? null : h('span', null, ` · ${j.owner}`)),
-        h('span', { class: 'mt' }, compact ? datum.slice(0, 5) : `DATUM ${datum}`)),
+        h('a', { class: 'nm', href: sheetHref, target: '_blank', rel: 'noopener', title: 'Open the job view' }, j.name, compact || !j.owner ? null : h('span', null, ` · ${j.owner}`)),
+        h('span', { class: 'mt' }, compact ? datum.slice(0, 5) : `DEADLINE ${datum}`)),
       h('div', { class: 'wg-body' },
         pyl,
         h('div', { class: 'nums' },
@@ -207,9 +207,9 @@ export function widgetSheet(ctx, k, j, d, graph, compact) {
             : j.phase === 'Held' ? h('div', { class: 'r2' }, h('span', { class: 'eta' }, 'held'), h('span', { class: 'sm pencil' }, `released now ≈${f.clock(e.etaP90, false)}`))
             : h('div', { class: 'r2' }, h('span', { class: 'eta pencil' + (late ? ' rpen' : '') }, f.approx(e.remainingSeconds)), compact ? null : h('span', { class: 'sm pencil' }, `p90 ${f.dur(e.p90RemainingSeconds)}`)),
           h('div', { class: 'r3' }, dl ? h('span', { class: 'ink' }, `due ${f.clock(dl, false)}`) : h('span', { class: 'dimmer' }, 'no deadline'), slack),
-          late && !compact && (j.units.failed || j.units.retrying) ? h('div', { class: 'r3 small' },
+          late && !compact && (j.units.failed || retries(j.units)) ? h('div', { class: 'r3 small' },
             j.units.failed ? h('span', { class: 't-fail' }, `${j.units.failed} failed${firstFail ? ` · ${firstFail}` : ''}`) : h('span'),
-            j.units.retrying ? h('span', { class: 't-temp' }, `${j.units.retrying} retrying${retr ? ` · ${retr.label}` : ''}`) : null) : null)),
+            retries(j.units) ? h('span', { class: 't-temp' }, `${retries(j.units)} retrying${retr ? ` · ${retr.label}` : ''}`) : null) : null)),
       B ? h('div', { class: 'wg-strip' },
         compact ? null : h('div', { class: 'h' }, h('span', null, B.unit === 'frames' ? `${B.from} to ${B.to} · ${B.bands.length} bands` : `${B.bands.length} ${B.bands.length === 1 ? 'group' : 'groups'}`, j.units.unevaluated ? ` · ${j.units.unevaluated} not yet expanded` : ''), h('span', null, j.shot ? `shot ${j.shot}` : '')),
         h('canvas', { class: 'wg-stripcv', 'data-key': 'strip-' + k, 'data-h': compact ? 16 : 24, role: 'img', 'aria-label': `${B.bands.length} bands: ${B.bands.map((b) => b.label).join(', ')}` })) : h('div', { class: 'wg-strip dimmer' }, 'reading the batches…'),

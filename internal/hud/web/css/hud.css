@@ -23,7 +23,7 @@
   --rule-soft: var(--rule-2);
   --label: var(--sans);
   --u-uneval: var(--g12); --u-queued: var(--g09); --u-hatch: var(--g12);
-  --u-done: var(--done); --u-done-deep: var(--done-settled);
+  --u-done: var(--done); --u-done-deep: var(--done);
   --u-on-done: var(--g01); --u-on-queued: var(--g16); --u-on-uneval: var(--g03);
   --bar-gray: var(--g17); --bar-green: var(--done); --bar-red: var(--fail);
   --bar-yellow: var(--temp); --bar-cyan: var(--paper); --bar-magenta: var(--g16); --bar-blue: var(--g15);
@@ -52,6 +52,8 @@ a:hover { text-decoration: underline; text-decoration-color: var(--g13); text-un
 .t-run { color: var(--run); }
 .t-temp, .t-yellow { color: var(--temp); }
 .t-fail, .t-red { color: var(--fail); }
+.t-risk { color: var(--risk); }
+.pencil.t-risk { text-decoration-color: rgba(178, 105, 163, .6); }
 .t-done, .t-green { color: var(--done); }
 .t-magenta, .t-blue { color: var(--g16); }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
@@ -74,6 +76,9 @@ h3 { font-weight: 600; font-size: var(--t-body); }
 .clock { display: flex; flex-direction: column; justify-content: center; padding: 0 18px; border-right: var(--hair) solid var(--rule-1); }
 .clock .num { font: 400 16px/1 var(--mono); color: var(--paper); }
 .clock .lab { margin-top: 4px; font-size: 8.5px; }
+/* the UTC complication: the same instant in UTC, small and dim beside a local clock */
+.cx { font: 400 9.5px/1 var(--mono); color: var(--ink-4); letter-spacing: .02em; margin-left: 7px; white-space: nowrap; }
+.clock .num .cx { font-size: 10px; vertical-align: 2px; }
 nav.views { display: flex; align-items: stretch; }
 nav.views a { display: flex; align-items: center; padding: 0 14px; font: 600 10.5px/1 var(--sans); letter-spacing: .16em; text-transform: uppercase; color: var(--ink-3); border-bottom: 2px solid transparent; }
 nav.views a:hover { color: var(--ink); text-decoration: none; }
@@ -116,7 +121,7 @@ main:focus { outline: none; }
 .titleblock { margin-left: auto; display: flex; gap: 0; border: var(--hair) solid var(--rule-2); background: var(--plate); }
 .titleblock .cell { border-right: var(--hair) solid var(--rule-1); }
 .titleblock .cell:last-child { border-right: 0; }
-.titleblock .val.late { color: var(--fail); }
+.titleblock .val.late { color: var(--risk); }
 .edge { position: absolute; font: 400 var(--t-micro)/1.2 var(--mono); color: var(--ink-4); letter-spacing: .06em; white-space: nowrap; }
 .edge a { color: var(--ink-3); }
 .edge a:hover { color: var(--paper); }
@@ -176,12 +181,14 @@ input[type="datetime-local"] { background: var(--well); color: var(--ink); borde
 .controls { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chip { display: inline-block; font: 600 9px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; padding: 3px 5px; border: var(--hair) solid var(--g13); color: var(--ink-2); }
 .chip.red { border-color: var(--fail); color: var(--fail); }
+.chip.risk { border-color: var(--risk); color: var(--risk); }
 .chip.temp, .chip.flag { border-color: var(--temp); color: var(--temp); }
 .chip.run, .chip.blue { border-color: var(--run); color: var(--run); }
 .chip.green { border-color: var(--done); color: var(--done); }
 .chip.mag { border-color: var(--g16); color: var(--g16); }
 .warn { display: flex; gap: 8px; align-items: baseline; padding: 8px 10px; border-left: 2px solid var(--g15); background: var(--plate); }
 .warn.red { border-left-color: var(--fail); }
+.warn.risk { border-left-color: var(--risk); }
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 400 10px/1.2 var(--sans); color: var(--ink-3); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend svg { flex: none; }
@@ -213,3 +220,38 @@ input[type="datetime-local"] { background: var(--well); color: var(--ink); borde
 /* ---- the wall: data-scale="wall" on <html> ---------------------------- */
 [data-scale="wall"] body { background: var(--g00); }
 [data-scale="wall"] .top, [data-scale="wall"] .slate { display: none; }
+
+/* ---- detail levels (js/level.js, docs/intro/ladder.md) ---------------- */
+.detail { display: flex; align-items: center; gap: 9px; padding: 0 14px; border-left: var(--hair) solid var(--rule-1); margin-left: auto; }
+.detail + .who { margin-left: 0; }
+.detail .cells { display: inline-flex; gap: 3px; }
+.detail .cell-l { width: 13px; height: 13px; padding: 0; border: 1px solid var(--g14); background: var(--well); cursor: pointer; }
+.detail .cell-l.on { background: var(--g16); border-color: var(--g16); }
+.detail .cell-l.cur { background: var(--paper); border-color: var(--paper); }
+.detail .cell-l:hover { border-color: var(--paper); }
+.detail .lvname { font: 600 10px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--paper); min-width: 70px; }
+#offer:empty, #offer[hidden] { display: none; }
+.offerbar { display: flex; align-items: center; gap: 14px; margin: 14px var(--collar) 0; padding: 10px 14px; background: var(--plate); outline: var(--hair) dashed var(--g15); }
+.offerbar[hidden] { display: none; }
+.offerbar .mark { width: 9px; height: 9px; border: 1.2px solid var(--paper); transform: rotate(45deg); flex: none; margin: 0 2px; }
+.offerbar .pt { display: flex; flex-direction: column; gap: 4px; margin-right: auto; }
+.offerbar .lab { color: var(--paper); }
+.offerbar .msg { font: 400 12.5px/1.35 var(--sans); color: var(--ink); }
+.offerbar.note .msg { margin-right: auto; }
+
+/* the queue below level 3: no shot or batch columns */
+html[data-level="2"] .qr { grid-template-columns: 22px 30px minmax(220px, 1fr) 104px minmax(200px, 1.25fr) 76px 150px; }
+html[data-level="2"] .qr .qshot, html[data-level="2"] .qr .qstrip,
+html[data-level="2"] .qhead > :nth-child(4), html[data-level="2"] .qhead > :nth-child(5) { display: none; }
+
+/* the simple queue (levels 0 and 1) */
+.sq-row { display: grid; align-items: center; column-gap: 16px; min-height: 60px; padding: 6px 0; border-bottom: var(--hair) solid var(--rule-0);
+  grid-template-columns: 22px 30px minmax(240px, 1fr) 230px 210px 150px; }
+.sq-row.head { min-height: 0; padding: 8px 0 6px; border-bottom: var(--hair) solid var(--rule-2); }
+.sq-row .jn { font: 500 15px/1.2 var(--sans); color: var(--paper); }
+.sq-row.late .jn { color: var(--risk); }
+.sq-row .stack2 { display: flex; flex-direction: column; gap: 5px; }
+.sq-row .big { font: 300 21px/1 var(--mono); color: var(--paper); }
+.sq-row .bigs { font: 400 20px/1 var(--sans); color: var(--paper); }
+.sq-row .sub { font: 400 11px/1.2 var(--mono); color: var(--ink-3); }
+.sq-row.fin .jn, .sq-row.fin .big, .sq-row.fin .bigs { color: var(--ink-3); }

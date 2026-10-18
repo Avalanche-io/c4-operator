@@ -35,14 +35,24 @@
   --g18: #b7b9b9; /* ink: primary labels and traces */
   --g19: #dbdddd; /* paper: the brightest mark, selection */
 
-  /* State: four colors and nothing else. */
-  --done: #3dc86a;        /* completed progress, the fill */
-  --done-settled: #2a7a47;/* a finished upstream job, one step down */
-  --run: #4b93ff;         /* running now: the leading edge, the running share */
-  --run-body: #1b3460;    /* the body of a running unit */
-  --temp: #ff9433;        /* temporary trouble: retrying, backoff, suspect node */
-  --temp-body: #4a2c12;
-  --fail: #ee4136;        /* failure and missed deadline; dashed = projected late */
+  /* State: a hue per family, and its intensity is the phase. Full
+     strength is the action itself; the pale (a dim tint: OKLCH chroma
+     x0.55, lightness x0.62) is the phase before or after it. Every phase
+     also has a shape, so no state rests on color alone (README). */
+  --done: #3dc86a;        /* committed: folded into the output and verified */
+  --done-pale: #276639;   /* done, output still moving: capture, upload, verify (egress) */
+  --run: #4b93ff;         /* rendering now, at the top edge of the green */
+  --run-pale: #294b80;    /* preflight: staging inputs, cache fetch, image, license */
+  --temp: #ff9433;        /* temporary error the farm is handling: a retry running */
+  --temp-pale: #824e22;   /* backoff: a retry scheduled */
+  --fail: #ee4136;        /* needs a person: failed after retries, stuck, approval, blocked */
+  --fail-pale: #77251e;   /* acknowledged or assigned */
+  --risk: #b269a3;        /* deadline: will miss (hatched), missed (solid) */
+  --risk-pale: #593652;   /* deadline: at risk, projected late (dashed) */
+  /* retired names, kept as aliases for older views and lenses */
+  --done-settled: var(--done);
+  --run-body: var(--run-pale);
+  --temp-body: var(--temp-pale);
 
   /* Roles */
   --void: var(--g00);

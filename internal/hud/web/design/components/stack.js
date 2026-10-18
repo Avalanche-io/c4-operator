@@ -38,9 +38,13 @@ function unitsOf(d) {
   const risk = new Set();
   for (const [a, b] of ranges(d.riskUnits || '')) for (let i = a; i <= b; i++) risk.add(i);
   const settled = d.phase === 'Succeeded';
+  // the deadline: projected late (risk), late at any capacity (willMiss), passed (missed)
+  const dl = d.objective && d.objective.deadline ? Date.parse(d.objective.deadline) : NaN;
+  const missed = !settled && dl < f.now();
+  const willMiss = !!(d.estimate && d.estimate.feasible === false);
   const mk = (u) => ({
     ...u, state: st.get(u.i) || u.state, fraction: prog[u.i] ? prog[u.i].fraction : null, measured: prog[u.i] ? prog[u.i].measured : null,
-    risk: risk.has(u.i) || !!u.risk, settled, job: `${d.namespace}/${d.name}`, jobName: d.name,
+    risk: risk.has(u.i) || !!u.risk, missed, willMiss, settled, job: `${d.namespace}/${d.name}`, jobName: d.name,
     yielded: d.phase === 'Yielded',
   });
   if (d.unitList && d.unitList.length) return d.unitList.map(mk);
@@ -220,7 +224,7 @@ export function layout(sheet, v) {
   for (let k = 0; k < NB; k++) {
     const a = k * sheet.batch, z = Math.min(sheet.N, (k + 1) * sheet.batch) - 1;
     const isSel = v.sel && sheet.cols.some((c) => c.job === v.sel.job && c.cells.some((x) => x.u.i === v.sel.i && x.a >= a && x.a <= z));
-    if (auto ? (sheet.N > 120 && !attention(sheet, a, z) && !isSel) : v.collapsed.has(k)) collapsed.add(k);
+    if (!v.flat && (auto ? (sheet.N > 120 && !attention(sheet, a, z) && !isSel) : v.collapsed.has(k))) collapsed.add(k);
   }
   const up = Math.max(0, Math.min(v.upstream || 0, sheet.cols.length - 1));
   const folded = sheet.cols.slice(0, up).filter((c) => c.perRow);
@@ -233,10 +237,13 @@ export function layout(sheet, v) {
   const xs = [];
   let x = labelW;
   const pushCol = (k, w, col) => { xs.push({ k, x, w, col }); x += w + gap; };
-  pushCol('shot', cw.shot);
-  pushCol('batch', cw.batch);
+  // flat (detail levels below 3): the job's own units only, no shot or batch column
+  if (v.flat) { xs.push({ k: 'shot', x, w: 0 }); xs.push({ k: 'batch', x, w: 0 }); } else {
+    pushCol('shot', cw.shot);
+    pushCol('batch', cw.batch);
+  }
   if (folded.length) pushCol('frame', cw.frame);
-  const costW = sheet.cost ? Math.min(180, Math.max(90, W * 0.12)) : 0;
+  const costW = sheet.cost && !v.flat ? Math.min(180, Math.max(90, W * 0.12)) : 0;
   const rest = W - x - 8 - (costW ? costW + gap * 2 : 0);
   const perRowCols = visCols.filter((c) => c.perRow).length, spanCols = visCols.length - perRowCols;
   const unit = Math.max(b * 1.4, Math.min(b * 7, (rest - gap * visCols.length) / Math.max(1, perRowCols * 1.6 + spanCols)));
@@ -280,7 +287,7 @@ function rectsOf(sheet, L) {
     return out;
   }
   const yTop = L.head, yBot = L.bands.length ? L.bands[L.bands.length - 1].y + L.bands[L.bands.length - 1].h : L.head;
-  out.push({ key: 'shot', kind: 'agg', thin: true, x: sx.x, y: yTop, w: sx.w, h: yBot - yTop, units: unitsIn(sheet, 0, sheet.N - 1, (c) => c.perRow), toggle: L.b >= 7 ? '-' : null, label: null, vlabel: sheet.title, hit: { type: 'shot' } });
+  if (sx.w > 0) out.push({ key: 'shot', kind: 'agg', thin: true, x: sx.x, y: yTop, w: sx.w, h: yBot - yTop, units: unitsIn(sheet, 0, sheet.N - 1, (c) => c.perRow), toggle: L.b >= 7 ? '-' : null, label: null, vlabel: sheet.title, hit: { type: 'shot' } });
   const lastPerRow = [...L.xs].reverse().find((c) => c.k === 'frame' || (c.col && c.col.perRow));
   for (const band of L.bands) {
     const bu = sheet.batchUnits ? sheet.batchUnits[band.k] : null;
@@ -288,7 +295,7 @@ function rectsOf(sheet, L) {
     if (band.collapsed) {
       out.push({ key: 'b' + band.k, kind: 'agg', x: bx.x, y: band.y, w: lastPerRow.x + lastPerRow.w - bx.x, h: band.h, units: unitsIn(sheet, band.a, band.z, (c) => c.perRow), label: lab, toggle: '+', hit: { type: 'batch', k: band.k }, gen: bu });
     } else {
-      out.push({ key: 'b' + band.k, kind: 'agg', thin: true, x: bx.x, y: band.y, w: bx.w, h: band.h, units: unitsIn(sheet, band.a, band.z, (c) => c.perRow), toggle: L.b >= 7 ? '-' : null, hit: { type: 'batch', k: band.k }, gen: bu });
+      if (bx.w > 0) out.push({ key: 'b' + band.k, kind: 'agg', thin: true, x: bx.x, y: band.y, w: bx.w, h: band.h, units: unitsIn(sheet, band.a, band.z, (c) => c.perRow), toggle: L.b >= 7 ? '-' : null, hit: { type: 'batch', k: band.k }, gen: bu });
       for (let r = band.a; r <= band.z; r++) {
         const row = L.rows[r];
         if (!row) continue;
@@ -338,29 +345,58 @@ export function drawUnit(g, T, it, t, glowAt) {
     for (let yy = y + 1; yy < y + h; yy += 3) for (let xx = x + 1 + ((yy - y) % 6 ? 0 : 1.5); xx < x + w; xx += 3) g.fillRect(xx, yy, 1, 1);
     g.strokeStyle = T.g[13]; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   } else if (st === 'succeeded') {
-    g.fillStyle = u.settled ? T.settled : T.done; g.fillRect(x, y, w, h);
+    // committed: folded into the output and verified; a finished upstream job is the same green
+    g.fillStyle = T.done; g.fillRect(x, y, w, h);
+  } else if (st === 'egress') {
+    // rendered, still moving: pale green, solid green rising as bytes commit
+    g.fillStyle = T.donePale; g.fillRect(x, y, w, h);
+    const fc = Math.max(0, Math.min(1, u.fraction || 0));
+    g.fillStyle = T.done; g.fillRect(x, y + h - h * fc, w, h * fc);
+  } else if (st === 'accepted' || (st === 'failed' && u.accepted)) {
+    // a failure resolved by accepting the bad frames: pale red with a check; nobody has to act
+    g.fillStyle = T.failPale; g.fillRect(x, y, w, h);
+    if (h >= 7 && w >= 10) { const k = Math.min(h, w) * 0.22, cx = x + w / 2, cy = y + h / 2; g.strokeStyle = T.paper; g.lineWidth = 1.5; g.beginPath(); g.moveTo(cx - k, cy); g.lineTo(cx - k * 0.25, cy + k * 0.75); g.lineTo(cx + k * 1.2, cy - k); g.stroke(); g.lineWidth = 1; }
   } else if (st === 'failed') {
-    g.fillStyle = T.fail; g.fillRect(x, y, w, h);
-  } else if (st === 'running' || st === 'retrying') {
-    const fr = Math.max(0.04, Math.min(1, it.fill != null ? it.fill : (u.fraction == null ? 0.3 : u.fraction)));
-    if (h < 6) {
-      // too thin for a vertical fill: green grows sideways with a blue leading edge; a retry is solid orange
-      g.fillStyle = st === 'retrying' ? T.temp : T.runBody; g.fillRect(x, y, w, h);
-      if (st !== 'retrying') { g.fillStyle = T.done; g.fillRect(x, y, w * fr, h); g.fillStyle = T.run; g.fillRect(x + w * fr, y, 2, h); }
+    if (u.ack) {
+      // acknowledged: pale red with the seal of whoever took it
+      g.fillStyle = T.failPale; g.fillRect(x, y, w, h);
+      if (h >= 8 && w >= 8) { g.strokeStyle = T.paper; g.lineWidth = 1.2; g.beginPath(); g.arc(x + w / 2, y + h / 2, Math.min(h, w) * 0.22, 0, Math.PI * 2); g.stroke(); g.lineWidth = 1; }
     } else {
-      g.fillStyle = T.runBody; g.fillRect(x, y, w, h);
+      // needs a person: solid red with a white corner flag
+      g.fillStyle = T.fail; g.fillRect(x, y, w, h);
+      if (h >= 6 && w >= 8) { const k = Math.min(7, h * 0.6, w * 0.4); g.fillStyle = T.paper; g.beginPath(); g.moveTo(x + w, y); g.lineTo(x + w - k, y); g.lineTo(x + w, y + k); g.closePath(); g.fill(); }
+    }
+  } else if (st === 'preflight') {
+    // preparing to render: pale blue with a blue outline, nothing rising yet
+    g.fillStyle = T.runPale; g.fillRect(x, y, w, h);
+    if (h >= 4) { g.strokeStyle = T.run; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); }
+  } else if (st === 'backoff') {
+    // a retry scheduled: pale orange with a dashed orange outline
+    g.fillStyle = T.tempPale; g.fillRect(x, y, w, h);
+    if (h >= 4) { g.strokeStyle = T.temp; g.lineWidth = 1.4; g.setLineDash([3, 2]); g.strokeRect(x + 0.7, y + 0.7, w - 1.4, h - 1.4); g.setLineDash([]); g.lineWidth = 1; }
+  } else if (st === 'running' || st === 'retrying') {
+    // rendering: bright blue rising from the bottom as the unit renders (its
+    // frontier advancing), grey above for what is not rendered yet. Green is
+    // only for finished work, pale green only for output still moving.
+    const fr = Math.max(0.04, Math.min(1, it.fill != null ? it.fill : (u.fraction == null ? 0.3 : u.fraction)));
+    const edge = st === 'retrying' ? T.temp : T.run;
+    g.fillStyle = T.g[9]; g.fillRect(x, y, w, h);
+    const breathe = reducedMotion() ? 1 : 0.85 + 0.15 * Math.sin(t / 420 + x * 0.01);
+    if (h < 6) {
+      // too thin for a vertical fill: the blue grows sideways
+      g.globalAlpha = breathe; g.fillStyle = T.run; g.fillRect(x, y, w * fr, h); g.globalAlpha = 1;
+      if (st === 'retrying') { g.fillStyle = T.temp; g.fillRect(x + w * fr, y, Math.max(2, w * 0.04), h); }
+    } else {
       const fh = h * fr;
+      g.globalAlpha = breathe; g.fillStyle = T.run; g.fillRect(x, y + h - fh, w, fh); g.globalAlpha = 1;
       if (u.measured === false) {
+        // elapsed over the estimate, not measured progress: striped
         g.save(); g.beginPath(); g.rect(x, y + h - fh, w, fh); g.clip();
-        g.fillStyle = T.done; g.fillRect(x, y + h - fh, w, fh);
-        g.strokeStyle = T.field; g.globalAlpha = 0.55; g.lineWidth = 1.4;
+        g.strokeStyle = T.field; g.globalAlpha = 0.5; g.lineWidth = 1.4;
         g.beginPath(); for (let k = -h; k < w + h; k += 4) { g.moveTo(x + k, y + h); g.lineTo(x + k + h, y); } g.stroke();
         g.restore();
-      } else { g.fillStyle = T.done; g.fillRect(x, y + h - fh, w, fh); }
-      // the leading edge breathes while the unit works
-      const breathe = reducedMotion() ? 1 : 0.7 + 0.3 * Math.sin(t / 420 + x * 0.01);
-      g.globalAlpha = breathe; g.fillStyle = T.run; g.fillRect(x, y + h - fh - Math.min(2, h * 0.12), w, Math.min(2, h * 0.12)); g.globalAlpha = 1;
-      g.strokeStyle = st === 'retrying' ? T.temp : T.run; g.lineWidth = st === 'retrying' ? 1.4 : 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); g.lineWidth = 1;
+      }
+      g.strokeStyle = edge; g.lineWidth = st === 'retrying' ? 1.6 : 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); g.lineWidth = 1;
     }
   } else {
     g.fillStyle = T.g[9]; g.fillRect(x, y, w, h);
@@ -368,15 +404,29 @@ export function drawUnit(g, T, it, t, glowAt) {
       g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); g.strokeStyle = T.g[12]; g.beginPath();
       for (let k = -h; k < w + h; k += 5) { g.moveTo(x + k, y); g.lineTo(x + k + h, y + h); } g.stroke(); g.restore();
     }
-    // a yielded run keeps the fraction its latest checkpoint saved
-    if (u.fraction > 0 && st !== 'blocked') { g.fillStyle = T.settled; g.fillRect(x, y + h - h * Math.min(1, u.fraction), w, h * Math.min(1, u.fraction)); }
+    // a yielded run keeps the fraction its latest checkpoint saved: finished work, green
+    if (u.fraction > 0 && st !== 'blocked') { g.fillStyle = T.done; g.fillRect(x, y + h - h * Math.min(1, u.fraction), w, h * Math.min(1, u.fraction)); }
     if (st === 'held' && h >= 6 && w >= 8) { g.fillStyle = T.g[16]; g.fillRect(x + w / 2 - 2.5, y + h / 2 - 3, 1.5, 6); g.fillRect(x + w / 2 + 1, y + h / 2 - 3, 1.5, 6); }
   }
   // earlier failed attempts of a unit still going: orange notches
-  const prior = (u.attempts || 0) - (st === 'running' || st === 'retrying' || st === 'succeeded' ? 1 : 0);
+  const prior = (u.attempts || 0) - (st === 'running' || st === 'retrying' || st === 'succeeded' || st === 'egress' ? 1 : 0);
   if (st !== 'failed' && !u.yielded && h >= 4) { g.fillStyle = T.temp; for (let k = 0; k < Math.min(prior, 3); k++) g.fillRect(x + w - 3, y + 1 + k * 3.5, 3, 2.2); }
-  // projected late: a red pencil tick
-  if (u.risk && st !== 'succeeded' && st !== 'failed') { g.strokeStyle = T.fail; g.lineWidth = 1.5; g.setLineDash([2, 1.5]); g.beginPath(); g.moveTo(x + 1, y + 1); g.lineTo(x + 1, y + h - 1); g.stroke(); g.setLineDash([]); g.lineWidth = 1; }
+  // the deadline, for waiting work projected after it: a dashed orchid tick
+  // at risk; a sparse orchid hatch when it will miss at any capacity; a solid
+  // tick once the deadline has passed. (The job's gauge, strip and deadline
+  // line carry the strong fills; a sheet of cells stays readable.)
+  if (u.risk && (st === 'queued' || st === 'blocked' || st === 'held' || st === 'unevaluated' || st === 'backoff')) {
+    if (u.missed) { g.fillStyle = T.risk; g.fillRect(x, y, Math.min(3, w), h); }
+    else if (u.willMiss) {
+      g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); g.globalAlpha = 0.8;
+      g.strokeStyle = T.risk; g.lineWidth = 1; g.beginPath(); for (let k = -h; k < w + h; k += 7) { g.moveTo(x + k, y + h); g.lineTo(x + k + h, y); } g.stroke(); g.restore();
+      g.fillStyle = T.risk; g.fillRect(x, y, Math.min(2, w), h);
+    } else {
+      g.strokeStyle = T.risk; g.lineWidth = 1.6; g.setLineDash([2, 1.5]); g.beginPath(); g.moveTo(x + 1, y + 1); g.lineTo(x + 1, y + h - 1); g.stroke(); g.setLineDash([]); g.lineWidth = 1;
+    }
+  } else if (u.risk && st !== 'succeeded' && st !== 'failed') {
+    g.strokeStyle = T.risk; g.lineWidth = 1.6; g.setLineDash(u.missed ? [] : [2, 1.5]); g.beginPath(); g.moveTo(x + 1, y + 1); g.lineTo(x + 1, y + h - 1); g.stroke(); g.setLineDash([]); g.lineWidth = 1;
+  }
   // persistence: a unit that just finished glows and settles over a minute
   if (st === 'succeeded' && glowAt) {
     const age = (performance.now() - glowAt) / 60000;
@@ -393,9 +443,8 @@ export function drawAgg(g, T, it) {
   if (a.uneval && !it.thin) { g.fillStyle = T.g[8]; g.fillRect(x, y, w, h * a.uneval / Math.max(1, a.n)); }
   g.fillStyle = T.done; g.fillRect(x, y + h - hd, gw, hd);
   if (hr) {
-    g.fillStyle = T.runBody; g.fillRect(x, y + h - hd - hr, gw, hr);
-    g.fillStyle = T.done; g.fillRect(x, y + h - hd - h * a.fRunSpent, gw, h * a.fRunSpent);
-    g.fillStyle = T.run; g.fillRect(x, y + h - hd - hr, gw, Math.min(2, hr));
+    // the work in flight: bright blue at the top of the green
+    g.fillStyle = T.run; g.fillRect(x, y + h - hd - hr, gw, hr);
   }
   if (!it.small) { g.strokeStyle = T.g[13]; for (const q of [0.25, 0.5, 0.75]) { g.beginPath(); g.moveTo(x, y + h * (1 - q) + 0.5); g.lineTo(x + Math.min(6, w * 0.15), y + h * (1 - q) + 0.5); g.stroke(); } }
   g.strokeStyle = T.g[13]; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
@@ -403,9 +452,9 @@ export function drawAgg(g, T, it) {
   if (a.retrying) { g.fillStyle = T.temp; g.fillRect(mx, y + 2, 4, Math.min(10, h * 0.35)); mx -= 6; }
   if (a.failed) { g.fillStyle = T.fail; g.fillRect(mx, y + 2, 4, Math.min(10, h * 0.35)); }
   if (a.risk) {
-    g.strokeStyle = T.fail; g.setLineDash(h >= 20 ? [3, 2] : [2, 1.5]);
+    g.strokeStyle = T.risk; g.lineWidth = 1.4; g.setLineDash(a.missed ? [] : h >= 20 ? [3, 2] : [2, 1.5]);
     if (h >= 20) g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); else { g.lineWidth = 1.5; g.beginPath(); g.moveTo(x + 1, y + 1); g.lineTo(x + 1, y + h - 1); g.stroke(); g.lineWidth = 1; }
-    g.setLineDash([]);
+    g.setLineDash([]); g.lineWidth = 1;
   }
   const tx0 = x + (it.toggle ? 18 : 8);
   if (it.label && w >= 70 && h >= 14) {
@@ -605,7 +654,7 @@ export class Stack {
     for (const c of S.cost.values()) max = Math.max(max, c.seconds || c.high || c.estimate || 0);
     if (L.head > 8) {
       g.font = `600 9px ${T.sans}`; g.fillStyle = T.ink2; g.textBaseline = 'alphabetic'; g.fillText('COST / FRAME', x0, 11);
-      g.font = `400 8px ${T.mono}`; g.fillStyle = T.ink4; g.fillText(`ink measured · pencil estimated · max ${f.dur(max)}`, x0, 22);
+      g.font = `400 8px ${T.mono}`; g.fillStyle = T.ink4; g.fillText(`solid measured · light estimated · max ${f.dur(max)}`, x0, 22);
     }
     for (let r = 0; r < S.N; r++) {
       const row = L.rows[r], c = S.cost.get(r);
@@ -644,7 +693,7 @@ export class Stack {
         g.beginPath(); g.moveTo(c.x + c.w, ey); g.lineTo(xe, ey); g.stroke(); g.lineWidth = 1;
         g.fillStyle = T.ink; g.beginPath(); g.arc(c.x + c.w, ey, 2.5, 0, Math.PI * 2); g.fill();
         g.font = `400 9px ${T.mono}`; g.textAlign = 'right'; g.textBaseline = 'bottom';
-        g.fillStyle = late ? T.fail : T.ink2;
+        g.fillStyle = late ? T.risk : T.ink2;
         g.fillText(`${e.dir === 'in' ? 'also needs' : 'feeds'} ${f.jobName(e.dir === 'in' ? e.from : e.to)}${Number.isFinite(e.slack) ? ' ' + f.signed(e.slack) : ''}`, xe, ey - 2);
         g.textAlign = 'left';
         k++;
@@ -719,7 +768,7 @@ export class Stack {
         const x = sum / n;
         if (!on) { g.moveTo(x, pts[0].y); on = true; } else g.lineTo(x, pts[0].y);
       });
-      if (dl2) { g.strokeStyle = T.fail; g.setLineDash([4, 3]); g.lineWidth = 1.4; } else { g.strokeStyle = T.g[14]; g.setLineDash([1, 3]); g.lineWidth = 1; }
+      if (dl2) { g.strokeStyle = T.risk; g.setLineDash([4, 3]); g.lineWidth = 1.4; } else { g.strokeStyle = T.g[14]; g.setLineDash([1, 3]); g.lineWidth = 1; }
       g.stroke(); g.setLineDash([]); g.lineWidth = 1;
     };
     for (const lev of levels) draw(lev, false);
@@ -759,17 +808,17 @@ export class Stack {
       const what = it.hit.type === 'shot' ? `${this.sheet.title} · the shot` : it.hit.type === 'batch' ? `batch ${it.label || ''}` : `frame ${this.sheet.start + it.hit.r * this.sheet.step} · upstream`;
       return `<b>${f.esc ? f.esc(what) : what}</b><br>${Math.round(a.fDone * 100)}% done ${a.basis === 'units' ? '(by units)' : '(by work)'} · ${a.n} units`
         + `${a.running ? `<br><span class="t-run">${a.running} running</span>` : ''}${a.retrying ? ` · <span class="t-temp">${a.retrying} retrying</span>` : ''}${a.failed ? ` · <span class="t-fail">${a.failed} failed</span>` : ''}`
-        + `${a.risk ? `<br><span class="t-fail pencil">${a.risk} projected after the deadline</span>` : ''}`
+        + `${a.risk ? `<br><span class="t-risk pencil">${a.risk} projected after the deadline</span>` : ''}`
         + `${it.gen ? `<br><span class="dim">generator ${it.gen.label || it.gen.i} · ${it.gen.state}</span>` : it.hit.type === 'batch' && !this.sheet.batchFromData ? `<br><span class="dim">${this.sheet.batch} frames, a display grouping</span>` : ''}`
         + `<br><span class="dim">${it.toggle === '+' ? 'click or Enter expands' : 'click collapses'}</span>`;
     }
     const u = it.u;
-    const st = u.state === 'retrying' ? '<span class="t-temp">retrying</span>' : u.state === 'running' ? '<span class="t-run">running</span>' : u.state === 'failed' ? '<span class="t-fail">failed</span>' : u.state;
+    const st = u.state === 'retrying' ? '<span class="t-temp">retrying</span>' : u.state === 'running' ? '<span class="t-run">running</span>' : u.state === 'failed' ? (u.ack ? '<span class="t-fail">failed, taken</span>' : '<span class="t-fail">failed: needs you</span>') : u.state;
     return `<b>${u.label || u.i} · ${u.jobName}</b><br>${st}${u.fraction != null && (u.state === 'running' || u.state === 'retrying') ? ` ${Math.round(u.fraction * 100)}% <span class="dim">${u.measured === false ? 'estimated' : 'measured'}</span>` : ''}`
       + `<br><span class="dim">attempt</span> ${u.attempts || 0}${u.node ? ` <span class="dim">on</span> ${u.node}` : ''}`
       + `${u.work ? `<br><span class="dim">work</span> ${f.dur(u.work.spent || 0)} of ${f.dur(u.work.expected || 0)} slot-time` : ''}`
       + `${u.eta && u.state !== 'succeeded' ? `<br><span class="dim">projected</span> <span class="pencil">${f.clock(u.eta, false)}</span>` : ''}`
-      + `${u.risk ? '<br><span class="t-fail pencil">projected after the deadline</span>' : ''}`
+      + `${u.risk ? `<br><span class="t-risk${u.missed ? '' : ' pencil'}">${u.missed ? 'after the deadline, which has passed' : u.willMiss ? 'will miss the deadline at any capacity' : 'projected after the deadline'}</span>` : ''}`
       + `${u.reads ? `<br><span class="dim">reads</span> ${u.reads.map((r) => `${f.jobName(r.job)} ${r.units}`).join(', ')}` : ''}`;
   }
 

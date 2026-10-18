@@ -8,6 +8,7 @@
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
+import { inFlight } from '../../design/components/core.js';
 
 const st = { data: null, now: null, busy: false };
 document.addEventListener('hud:changed', () => { st.now = null; });
@@ -111,10 +112,10 @@ function layout(data) {
 function nodeBox(ctx, n, p) {
   const j = ctx.job(n.id);
   const done = j ? j.units.succeeded / Math.max(1, j.units.total) : n.phase === 'Succeeded' ? 1 : 0;
-  const run = j ? (j.units.running + j.units.retrying) / Math.max(1, j.units.total) : 0;
+  const run = j ? (inFlight(j.units)) / Math.max(1, j.units.total) : 0;
   const late = n.slackSeconds !== undefined && n.slackSeconds < 0 && n.phase !== 'Succeeded';
   const name = f.jobName(n.id);
-  const phaseCol = { Failed: 'var(--fail)', Held: 'var(--g16)', Succeeded: 'var(--done-settled)', Running: 'var(--run)' }[n.phase] || 'var(--ink-3)';
+  const phaseCol = { Failed: 'var(--fail)', Held: 'var(--g16)', Succeeded: 'var(--done)', Running: 'var(--run)' }[n.phase] || 'var(--ink-3)';
   return s('a', { href: ctx.href(`job/${n.id}`), 'data-key': n.id, class: 'gnode' + (n.critical ? ' crit' : '') },
     s('g', { class: 'gnode' + (n.critical ? ' crit' : ''), transform: `translate(${p.x} ${p.y})` },
       s('title', null, `${name}: ${n.phase}`),
@@ -125,9 +126,9 @@ function nodeBox(ctx, n, p) {
       s('text', { x: 10, y: 36, class: 'm', style: { fill: phaseCol } }, n.phase),
       n.deadline ? s('text', { x: BW - 10, y: 36, 'text-anchor': 'end', class: 'm' }, `due ${f.clock(n.deadline)}`) : null,
       n.etaP90 ? s('text', { x: 10, y: 52, class: 'm' }, `p90 ${f.clock(n.etaP90)}`) : s('text', { x: 10, y: 52, class: 'm' }, 'finished'),
-      n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? s('text', { x: BW - 10, y: 52, 'text-anchor': 'end', class: 'm', style: { fill: late ? 'var(--fail)' : 'var(--pencil)' } }, `slack ${f.signed(n.slackSeconds)}`) : null,
+      n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? s('text', { x: BW - 10, y: 52, 'text-anchor': 'end', class: 'm', style: { fill: late ? 'var(--risk)' : 'var(--pencil)' } }, `slack ${f.signed(n.slackSeconds)}`) : null,
       s('rect', { x: 0, y: BH - 4, width: BW, height: 4, fill: 'var(--g09)' }),
-      s('rect', { x: 0, y: BH - 4, width: BW * done, height: 4, fill: n.phase === 'Succeeded' ? 'var(--done-settled)' : 'var(--done)' }),
+      s('rect', { x: 0, y: BH - 4, width: BW * done, height: 4, fill: 'var(--done)' }),
       run > 0 ? s('rect', { x: BW * done, y: BH - 4, width: Math.max(2, BW * run), height: 4, fill: 'var(--run)' }) : null));
 }
 
@@ -151,7 +152,7 @@ export default {
       h('div', { class: 'titleblock' },
         tcell('Jobs', f.num(nodes.length), `${f.num(data ? data.edges.length : 0)} dependencies`),
         tcell('Critical path', f.num(crit.length), 'jobs that finish last'),
-        tcell('Projected late', h('span', { class: lateN.length ? 't-fail' : '' }, f.num(lateN.length)), lateN.length ? 'red pencil: past the deadline' : 'all on time')));
+        tcell('Projected late', h('span', { class: lateN.length ? 't-risk' : '' }, f.num(lateN.length)), lateN.length ? 'projected past the deadline' : 'all on time')));
     if (!data) return h('section', { class: 'sheet vgraph' }, head, h('p', { class: 'dim' }, 'Reading the graph…'));
     const L = layout(data);
     const byId = new Map(data.nodes.map((n) => [n.id, n]));
@@ -173,7 +174,7 @@ export default {
     const singles = L.single.map((id) => byId.get(id));
     return h('section', { class: 'sheet vgraph', 'data-key': 'graph', 'aria-label': 'Dependencies' }, head,
       h('div', { class: 'neat' },
-      h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('queue') }, 'queue'), ': the same jobs in dispatch order'),
+      h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('queue') }, 'queue'), ': the same jobs in run order'),
       h('div', { class: 'edge e' }, h('a', { href: ctx.href('cost') }, 'cost'), ': what the late chains need ▸'),
       h('div', { class: 'vgwell' },
         s('svg', { width: Math.max(L.width + 10, 600), height: L.height, viewBox: `-2 0 ${Math.max(L.width + 10, 600)} ${L.height}`, style: { width: `${Math.max(L.width + 10, 600)}px`, maxWidth: 'none' }, role: 'group', 'aria-label': 'Dependency graph' },
@@ -195,6 +196,6 @@ export default {
           h('td', null, h('a', { href: ctx.href(`job/${n.id}`) }, f.jobName(n.id))),
           h('td', { class: 'mono dim' }, n.class), h('td', { class: 'dim' }, n.phase),
           h('td', { class: 'num' }, n.deadline ? `due ${f.clock(n.deadline)}` : ''),
-          h('td', { class: 'num r ' + (n.slackSeconds < 0 && n.phase !== 'Succeeded' ? 't-fail pencil' : 'pencil') }, n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? `slack ${f.signed(n.slackSeconds)}` : '')))))) : null));
+          h('td', { class: 'num r ' + (n.slackSeconds < 0 && n.phase !== 'Succeeded' ? 't-risk pencil' : 'pencil') }, n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? `slack ${f.signed(n.slackSeconds)}` : '')))))) : null));
   },
 };

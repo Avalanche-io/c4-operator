@@ -79,7 +79,7 @@ export default {
           burst.length ? tcell('Burst', h('span', null, f.num(burst.reduce((a, p) => a + p.burst.provisioned, 0)), h('small', null, ` of ${f.num(burst.reduce((a, p) => a + p.burst.maxSlots, 0))}`)),
             pend.length ? `+${pend.reduce((a, c) => a + c.slots, 0)} awaiting approval` : 'none requested') : null,
           tcell('Store reads', `${f.num(fi.storeRequests)}`, 'per minute'),
-          tcell('Fan-in', ratio ? h('span', null, h('small', null, '1 : '), f.num(ratio)) : '–', 'store reads per node request'))),
+          tcell('Served per fetch', ratio ? h('span', null, h('small', null, '1 : '), f.num(ratio)) : '–', 'store reads per node request'))),
       h('div', { class: 'neat' },
         h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('pools') }, 'pools'), ': what these slots are'),
         h('div', { class: 'edge e' }, h('a', { href: ctx.href('tiers') }, 'cache tiers'), ' in detail ▸'),
@@ -98,7 +98,7 @@ export default {
               h('span', null, h('i', { class: 'k store' }), 'the project stores'))),
           h('div', { class: 'map-side' },
             h('div', { class: 'blk' },
-              h('div', { class: 'mblk-h' }, h('h2', null, 'Fan-in'), h('span', null, 'requests per minute entering each tier')),
+              h('div', { class: 'mblk-h' }, h('h2', null, 'Requests per tier'), h('span', null, 'requests per minute entering each tier (fan-in)')),
               ratio ? h('div', { class: 'ratio-line' }, h('b', null, '1'), ' store read per ', h('b', null, f.num(ratio)), ' node requests') : null,
               svgHost('funnel', funnelSVG(snap, { w: Math.min(side, 600) })),
               h('div', { class: 'note' }, 'Each tier answers most of what reaches it and forwards only its misses. Bars are on a log scale.')),
@@ -106,7 +106,7 @@ export default {
             scaleGroups.map((g) => h('div', { class: 'blk', 'data-key': 'ss-' + g.site.name },
               h('div', { class: 'mblk-h' },
                 h('h2', null, g.site.label || g.site.name),
-                h('span', null, `${g.nodes.length} nodes · ${poolSum(g.rings).join(' · ')}`)),
+                h('span', null, `${g.nodes.length} nodes · ${poolSum(g.rings).join(' · ')}${f.siteClock(f.now(), g.site.tz) ? ` · ${f.siteClock(f.now(), g.site.tz)} there` : ''}`)),
               svgHost('ss-svg-' + g.site.name, siteScaleSVG(snap, g, { w: Math.min(side, 600) }))))))));
   },
 };

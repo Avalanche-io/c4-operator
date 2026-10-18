@@ -16,10 +16,10 @@
 .wg-edge span { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; font: 400 8px/14px var(--mono); color: var(--ink-4); letter-spacing: .04em; max-height: 100%; overflow: hidden; text-overflow: ellipsis; }
 .wg-edge.r span { transform: none; }
 .wg-edge .sq { display: inline-block; width: 6px; height: 6px; margin: 0 0 4px; vertical-align: middle; }
-.wg-edge .sq.settled { background: var(--done-settled); }
+.wg-edge .sq.settled { background: var(--done); }
 
 .wg-sheet { background: var(--field); border: var(--hair) solid var(--g10); }
-.wg-sheet.late { border: 1px dashed var(--fail); }
+.wg-sheet.late { border: 1px dashed var(--risk); }
 .wg-collar { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; padding: 6px 9px 5px; border-bottom: var(--hair) solid var(--rule-2); }
 .wg-collar.bot { border-bottom: 0; border-top: var(--hair) solid var(--rule-2); padding: 5px 9px 6px; }
 .wg-collar .nm { font: 600 10px/1.1 var(--sans); letter-spacing: .1em; text-transform: uppercase; color: var(--ink); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -45,7 +45,7 @@
 .wg .r3 { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 9px; font: 400 11px/1 var(--mono); white-space: nowrap; }
 .wg .r3.small { margin-top: 7px; font-size: 10px; }
 .wg .ink { color: var(--ink); }
-.wg .rpen, .wg .pencil.rpen { color: var(--fail); text-decoration: underline dashed var(--fail); text-underline-offset: 3px; }
+.wg .rpen, .wg .pencil.rpen { color: var(--risk); text-decoration: underline dashed var(--risk); text-underline-offset: 3px; }
 
 .wg-strip { padding: 8px 9px 6px; font: 400 var(--t-tiny)/1.2 var(--mono); }
 .wg-strip .h { display: flex; justify-content: space-between; gap: 8px; font: 400 8px/1 var(--mono); color: var(--ink-4); margin-bottom: 4px; white-space: nowrap; }

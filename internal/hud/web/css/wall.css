@@ -18,10 +18,12 @@
 .wclocks .k { font: 600 calc(11.5 * var(--k))/1 var(--sans); letter-spacing: .16em; color: var(--g15); text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wclocks .v { font: 300 calc(50 * var(--k))/1 var(--mono); letter-spacing: -.02em; margin-top: calc(10 * var(--k)); color: var(--paper); white-space: nowrap; }
 .wclocks .v small { font-size: calc(22 * var(--k)); color: var(--g15); letter-spacing: 0; }
+.wclocks .k .kz { float: right; margin-left: calc(10 * var(--k)); }
+.wclocks .k .cx { font: 400 calc(10.5 * var(--k))/1 var(--mono); color: var(--g14); margin-left: calc(8 * var(--k)); letter-spacing: 0; text-transform: none; }
 .wclocks .s { font: 400 calc(12.5 * var(--k))/1.3 var(--mono); color: var(--g15); margin-top: calc(8 * var(--k)); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wclocks .s b { font-weight: 500; color: var(--ink); }
 .wclocks .late { background: linear-gradient(90deg, rgba(238, 65, 54, .08), transparent 72%); }
-.wclocks .late .v, .wclocks .late .s b { color: var(--fail); }
+.wclocks .late .v, .wclocks .late .s b { color: var(--risk); }
 .wclocks .ck.slots { border-right: 0; }
 
 /* ---- the scope ---------------------------------------------------------- */
@@ -39,9 +41,9 @@
 
 .wcards { display: grid; grid-template-columns: repeat(auto-fill, minmax(calc(236 * var(--k)), 1fr)); grid-auto-rows: calc(98 * var(--k)); gap: calc(14 * var(--k)); padding: calc(12 * var(--k)) 0; overflow: hidden; }
 .wshot { position: relative; display: grid; grid-template-columns: calc(40 * var(--k)) minmax(0, 1fr); grid-template-rows: auto auto 1fr auto; column-gap: calc(12 * var(--k)); background: var(--g03); outline: calc(1 * var(--k)) solid var(--g07); padding-right: calc(10 * var(--k)); min-width: 0; }
-.wshot.late { outline: calc(1.5 * var(--k)) dashed var(--fail); }
+.wshot.late { outline: calc(1.5 * var(--k)) dashed var(--risk); }
 .wshot.hi { outline: calc(2 * var(--k)) solid var(--paper); background: var(--g05); }
-.wshot.late.hi { box-shadow: inset 0 0 0 calc(2 * var(--k)) var(--fail); }
+.wshot.late.hi { box-shadow: inset 0 0 0 calc(2 * var(--k)) var(--risk); }
 .wshot .wspy { grid-row: 1 / span 4; line-height: 0; align-self: end; }
 .wshot .wst { margin-top: calc(10 * var(--k)); font: 400 calc(12 * var(--k))/1.1 var(--sans); color: var(--g16); letter-spacing: .04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .wshot .wst b { font-weight: 600; color: var(--ink); letter-spacing: .08em; }

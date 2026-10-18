@@ -8,7 +8,7 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { own } from '../../design/components/live.js';
-import { glance } from '../../design/components/core.js';
+import { glance, inFlight, retries } from '../../design/components/core.js';
 import { buildSheet } from '../../design/components/stack.js';
 import { phaseText } from './common.js';
 
@@ -79,17 +79,17 @@ function card(ctx, j) {
     h('div', { class: 'mbody' },
       own('pylon', `mpylon:${k}`, { glance: g, w: 180, h: 250, mode: 'compact' }, { class: 'mpylon' }),
       h('div', { class: 'mstack' },
-        h('div', { class: 'mst-h' }, h('span', { class: 'lab' }, j.shot ? `sheet ${j.shot}` : 'sheet'),
-          h('span', null, sheet ? `${sheet.cols.length} stages · ${NB} batches of ${sheet.batch} ${sheet.axisKind === 'frame' ? 'frames' : 'rows'}` : 'reading the sheet…')),
+        h('div', { class: 'mst-h' }, h('span', { class: 'lab' }, j.shot ? `shot ${j.shot}` : 'sheet'),
+          h('span', null, sheet ? `${sheet.cols.length} stages · ${NB} batches of ${sheet.batch} ${sheet.axisKind === 'frame' ? 'frames' : 'rows'}` : 'reading the job…')),
         sheet ? own('stack', `mstack:${k}`, { sheet, view }) : h('div', { class: 'mst-wait' }),
         j.output ? h('div', { class: 'edgecode', title: `output view ${j.output.view}` }, h('b', null, f.gridRef(j.output.view)), `${String(j.output.changesets).padStart(4, '0')}+00`, h('span', { class: 'dimmer' }, j.output.view)) : null),
       h('div', { class: 'mtb' },
         tcell('Deadline', dl ? f.clock(dl) : '–', j.objective && j.objective.from ? `from ${f.jobName(j.objective.from)}` : dl ? 'set on the job' : 'no objective'),
-        tcell('Slack', dl && !done ? h('span', { class: late ? 't-fail pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', late ? 'projected late' : done ? 'done' : e.feasible ? 'on time at current capacity' : 'will miss at current capacity'),
+        tcell('Slack', dl && !done ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', late ? 'projected late' : done ? 'done' : e.feasible ? 'on time at current capacity' : 'will miss at current capacity'),
         tcell('Done', h('span', null, `${Math.round(g.done * 100)}`, h('small', null, '%')), par ? h('span', { class: 't-run' }, `${par}% running now`) : j.phase === 'Held' ? 'held' : 'nothing running'),
-        tcell(done ? 'Finished' : 'About', done ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' + (late ? ' t-fail' : '') }, f.approx(e.remainingSeconds)), done ? '' : `p90 ${f.clock(e.etaP90, false)}`),
+        tcell(done ? 'Finished' : 'About', done ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, f.approx(e.remainingSeconds)), done ? '' : `p90 ${f.clock(e.etaP90, false)}`),
         late && e.burst ? h('div', { class: 'mfix' }, `+${e.burst.slots} ${e.burst.pool} slots closes it · `, h('span', { class: 'pencil' }, `est. ${f.money(e.burst.cost)}`), e.burst.needsApproval ? ' · awaiting approval' : '') : null,
-        !late && j.units.retrying ? h('div', { class: 'mnote t-temp' }, `${j.units.retrying} retrying`) : null,
+        !late && retries(j.units) ? h('div', { class: 'mnote t-temp' }, `${retries(j.units)} retrying`) : null,
         j.units.failed ? h('div', { class: 'mnote t-fail' }, `${j.units.failed} failed: needs a requeue`) : null)));
 }
 
@@ -103,7 +103,7 @@ function row(ctx, j) {
     h('span', { class: 'n' }, j.name, j.owner ? h('small', null, ` ${j.owner}`) : null),
     h('span', { class: 'm' }, `${Math.round(g.done * 100)}%`, g.par ? h('span', { class: 't-run' }, ` ${Math.round(g.par * 100)}% running`) : null),
     h('span', { class: 'm' }, phaseText(j)),
-    h('span', { class: 'm r' }, j.objective && j.objective.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-fail pencil' : 'pencil' }, `slack ${f.signed(e.slackSeconds)}`) : ''));
+    h('span', { class: 'm r' }, j.objective && j.objective.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, `slack ${f.signed(e.slackSeconds)}`) : ''));
 }
 
 export default {
@@ -122,15 +122,15 @@ export default {
         h('div', null,
           h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${snap.viewer.projects.join(', ')} / ${me}`),
           h('h1', null, own_ ? 'My shots' : 'Shots in your projects'),
-          h('div', { class: 'meta' }, own_ ? `${mine.length} job${mine.length > 1 ? 's' : ''} you own · in dispatch order · each opens as a side widget for your second screen` : `you own no jobs right now; these are your projects' active jobs`)),
+          h('div', { class: 'meta' }, own_ ? `${mine.length} job${mine.length > 1 ? 's' : ''} you own · in run order · each opens as a side widget for your second screen` : `you own no jobs right now; these are your projects' active jobs`)),
         h('div', { class: 'titleblock' },
           tcell('Yours', f.num(mine.length), `${active.length} active`),
-          tcell('Late', h('span', { class: late.length ? 't-fail' : '' }, f.num(late.length)), late.length ? 'projected past the deadline' : 'all on time'),
-          tcell('Running now', h('span', { class: 't-run' }, f.num(mine.reduce((a, j) => a + j.units.running + j.units.retrying, 0))), 'of your units'),
+          tcell('Late', h('span', { class: late.length ? 't-risk' : '' }, f.num(late.length)), late.length ? 'projected past the deadline' : 'all on time'),
+          tcell('Running now', h('span', { class: 't-run' }, f.num(mine.reduce((a, j) => a + inFlight(j.units), 0))), 'of your units'),
           tcell('Other projects', f.num(snap.farm.otherProjectsSlots), 'slots, shown only as a total'))),
       h('div', { class: 'mlist' }, mine.map((j) => card(ctx, j))),
       rest.length ? h('div', { class: 'mrest' },
-        h('div', { class: 'mrest-h' }, h('h2', null, `Also in ${snap.viewer.projects.join(', ')}`), h('span', null, `${rest.length} jobs · in dispatch order`)),
+        h('div', { class: 'mrest-h' }, h('h2', null, `Also in ${snap.viewer.projects.join(', ')}`), h('span', null, `${rest.length} jobs · in run order`)),
         rest.map((j) => row(ctx, j))) : null);
   },
 };

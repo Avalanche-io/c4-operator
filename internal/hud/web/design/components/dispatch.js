@@ -16,7 +16,7 @@
 //
 // SVG is returned as strings, one element per row; the views wrap them.
 
-import { tok, glance, esc } from './core.js';
+import { tok, glance, esc, steady, inFlight, retries } from './core.js';
 import * as f from './fmt.js';
 import { ranges } from './rle.js';
 
@@ -66,6 +66,7 @@ export function batchStrip(j, o = {}) {
   const settled = done(j);
   const held = j.nudge && j.nudge.hold;
   const late = !settled && Number.isFinite(j.estimate.slackSeconds) && j.estimate.slackSeconds < 0;
+  const willMiss = late && j.estimate.feasible === false;
   const h = H - 4;
   let s = '';
   cells.forEach((c, k) => {
@@ -73,23 +74,24 @@ export function batchStrip(j, o = {}) {
     s += `<rect x="${x.toFixed(2)}" y="0" width="${cw.toFixed(2)}" height="${h}" fill="${T.g[9]}"/>`;
     if (!c.n) { s += `<rect x="${(x + 0.5).toFixed(2)}" y=".5" width="${Math.max(0, cw - 1).toFixed(2)}" height="${h - 1}" fill="none" stroke="${T.g[11]}" stroke-dasharray="2 2"/>`; return; }
     const y = (share) => h * share;
-    const hd = y(c.succeeded / c.n), hr = y((c.running + c.retrying) / c.n), hu = y(c.unevaluated / c.n);
+    const hd = y(c.succeeded / c.n), hr = y((inFlight(c)) / c.n), hu = y(c.unevaluated / c.n);
     if (hu) s += `<rect x="${x.toFixed(2)}" y="0" width="${cw.toFixed(2)}" height="${hu.toFixed(2)}" fill="${T.g[8]}"/>`;
-    if (hd) s += `<rect x="${x.toFixed(2)}" y="${(h - hd).toFixed(2)}" width="${cw.toFixed(2)}" height="${hd.toFixed(2)}" fill="${settled ? T.settled : T.done}"/>`;
+    if (hd) s += `<rect x="${x.toFixed(2)}" y="${(h - hd).toFixed(2)}" width="${cw.toFixed(2)}" height="${hd.toFixed(2)}" fill="${T.done}"/>`;
     if (hr) {
-      s += `<rect x="${x.toFixed(2)}" y="${(h - hd - hr).toFixed(2)}" width="${cw.toFixed(2)}" height="${hr.toFixed(2)}" fill="${T.runBody}"/>`;
+      s += `<rect x="${x.toFixed(2)}" y="${(h - hd - hr).toFixed(2)}" width="${cw.toFixed(2)}" height="${hr.toFixed(2)}" fill="${T.run}"/>`;
       s += `<rect x="${x.toFixed(2)}" y="${(h - hd - hr).toFixed(2)}" width="${cw.toFixed(2)}" height="1.5" fill="${T.run}"/>`;
     }
     if (c.failed) s += `<rect x="${(x + cw - Math.min(3, cw)).toFixed(2)}" y="0" width="${Math.min(3, cw).toFixed(2)}" height="${Math.max(3, y(c.failed / c.n)).toFixed(2)}" fill="${T.fail}"/>`;
     if (c.retrying) s += `<rect x="${(x + cw - Math.min(3, cw) - (c.failed ? Math.min(4, cw) : 0)).toFixed(2)}" y="0" width="${Math.min(3, cw).toFixed(2)}" height="${Math.max(3, y(c.retrying / c.n)).toFixed(2)}" fill="${T.temp}"/>`;
-    // projected late: a red pencil rule under every batch that still has work waiting
-    if (late && c.waiting + c.unevaluated > 0) s += `<line x1="${x.toFixed(2)}" x2="${(x + cw).toFixed(2)}" y1="${H - 1}" y2="${H - 1}" stroke="${T.fail}" stroke-width="1.5" stroke-dasharray="2 1.5"/>`;
+    // the deadline, under every batch that still has work waiting: a dashed
+    // orchid rule at risk, a solid one when it will miss at any capacity
+    if (late && c.waiting + c.unevaluated > 0) s += `<line x1="${x.toFixed(2)}" x2="${(x + cw).toFixed(2)}" y1="${H - 1}" y2="${H - 1}" stroke="${T.risk}" stroke-width="${willMiss ? 2.2 : 1.5}"${willMiss ? '' : ' stroke-dasharray="2 1.5"'}/>`;
   });
   if (held) {
     const hx = W - 9;
     s += `<rect x="${hx - 3}" y="${h / 2 - 6}" width="12" height="12" fill="${T.field}"/><rect x="${hx}" y="${h / 2 - 4}" width="1.5" height="8" fill="${T.g[16]}"/><rect x="${hx + 4}" y="${h / 2 - 4}" width="1.5" height="8" fill="${T.g[16]}"/>`;
   }
-  const label = `${j.units.succeeded} of ${j.units.total} units done in batches of ${size}${j.units.running + j.units.retrying ? `, ${j.units.running + j.units.retrying} running` : ''}${j.units.retrying ? `, ${j.units.retrying} retrying` : ''}${j.units.failed ? `, ${j.units.failed} failed` : ''}`;
+  const label = `${j.units.succeeded} of ${j.units.total} units done in batches of ${size}${inFlight(j.units) ? `, ${inFlight(j.units)} running` : ''}${retries(j.units) ? `, ${retries(j.units)} retrying` : ''}${j.units.failed ? `, ${j.units.failed} failed` : ''}`;
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${s}</svg>`, size, cells: cells.length };
 }
 
@@ -107,6 +109,7 @@ export function datumX(sec) {
 }
 export const DATUM_TICKS = [[-4 * 3600, '−4h'], [-3600, '−1h'], [-900, '−15m'], [0, '0'], [900, '+15m'], [3600, '+1h'], [4 * 3600, '+4h'], [86400, '+1d'], [3 * 86400, '+3d']];
 
+let datumSeq = 0;
 export function datumBar(j, o = {}) {
   const T = tok();
   const H = o.h || 22;
@@ -120,14 +123,19 @@ export function datumBar(j, o = {}) {
     const a = Math.min(x0, x1), w = Math.max(0.6, Math.abs(x1 - x0));
     const passed = Date.parse(j.objective.deadline) < f.now();
     if (sl < 0) {
-      // depth below the datum: red pencil while projected, red ink once the deadline has passed
-      s += passed ? `<rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="${T.fail}"/>`
-        : `<rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="${T.fail}" fill-opacity=".16"/><rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="none" stroke="${T.fail}" stroke-dasharray="3 2"/>`;
+      // depth below the deadline line: a pale orchid box with a dashed edge
+      // while projected, hatched when it will miss at any capacity, solid once
+      // the deadline has passed
+      const id = 'dl' + (++datumSeq);
+      s += passed ? `<rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="${T.risk}"/>`
+        : e.feasible === false
+          ? `<defs><pattern id="${id}" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="${T.riskPale}"/><rect width="2" height="5" fill="${T.risk}"/></pattern></defs><rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="url(#${id})" stroke="${T.risk}" stroke-width="1.2"/>`
+          : `<rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="${T.riskPale}"/><rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="none" stroke="${T.risk}" stroke-dasharray="3 2"/>`;
     } else {
       s += `<rect x="${a}%" y="${H / 2 - 3}" width="${w}%" height="6" fill="${T.g[12]}"/><rect x="${x1}%" y="${H / 2 - 5}" width="1.5" height="10" fill="${T.g[16]}"/>`;
     }
   } else if (done(j)) {
-    s += `<rect x="${DATUM_X * 100 - 0.4}%" y="${H / 2 - 3}" width="6" height="6" fill="${T.settled}"/>`;
+    s += `<rect x="${DATUM_X * 100 - 0.4}%" y="${H / 2 - 3}" width="6" height="6" fill="${T.done}"/>`;
   }
   const label = has ? `slack ${f.signed(e.slackSeconds)}` : done(j) ? 'finished' : 'no deadline';
   return `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="${H}" role="img" aria-label="${esc(label)}">${s}</svg>`;
@@ -153,13 +161,13 @@ export function shotGlance(jobs) {
   let units = 0, par = 0, retry = 0, fail = 0, riskW = 0;
   for (const j of live) {
     const u = j.units, w = j.work;
-    units += u.total; par += u.running + u.retrying; retry += u.retrying; fail += u.failed;
+    units += u.total; par += inFlight(u); retry += retries(u); fail += u.failed;
     let jt, jd, jr, js;
     if (byWork) {
       jt = w.doneSlotSeconds + w.runningSlotSeconds + w.remainingSlotSeconds;
       jd = w.doneSlotSeconds; js = w.runningSlotSeconds; jr = w.runningSlotSeconds + (w.runningRemainingSlotSeconds || 0);
     } else {
-      jt = u.total; jd = u.succeeded; jr = u.running + u.retrying; js = jr * 0.5;
+      jt = u.total; jd = u.succeeded; jr = inFlight(u); js = jr * 0.5;
     }
     total += jt; dn += jd; run += jr; runSpent += js;
     if (!done(j) && j.estimate && j.estimate.slackSeconds < 0) riskW += Math.max(0, jt - jd - jr) * 0.5;
@@ -169,7 +177,7 @@ export function shotGlance(jobs) {
   const last = jobs.reduce((m, j) => (j.objective && j.objective.deadline && (!m || Date.parse(j.objective.deadline) > Date.parse(m.objective.deadline)) ? j : m), null);
   const eta = Math.max(0, ...open.map((j) => j.estimate.remainingSeconds || 0));
   const p90 = Math.max(0, ...open.map((j) => j.estimate.p90RemainingSeconds || 0));
-  return {
+  return steady('shot:' + jobs.map((j) => j.name).sort().join('|'), {
     name: '', basis: byWork ? 'estimate' : 'units',
     done: total ? dn / total : 0, run: total ? run / total : 0, runSpent: total ? runSpent / total : 0,
     par: units ? par / units : 0, retry: units ? retry / units : 0, fail: units ? fail / units : 0, risk: total ? riskW / total : 0,
@@ -178,7 +186,7 @@ export function shotGlance(jobs) {
     deadline: last ? Date.parse(last.objective.deadline) : null,
     phase: open.length ? 'Running' : 'Succeeded',
     units: { total: units, running: par, retrying: retry, failed: fail },
-  };
+  }, jobs.reduce((n, j) => n + ((j.units && j.units.succeeded) || 0), 0));
 }
 
 // shotsOf groups jobs by shot, in the order of each shot's most urgent job,

@@ -245,13 +245,13 @@ export class TimeBase {
       // label
       const ly = y0 + laneH * 0.5;
       g.fillStyle = T.g[14]; g.font = mono(10); g.fillText(`CH${p2(i + 1)}`, 14 * k, ly - 1 * k);
-      g.fillStyle = c.late ? T.fail : c.fin ? T.ink3 : c.hi ? T.paper : T.ink; g.font = sans(15, 500);
+      g.fillStyle = c.late ? T.risk : c.fin ? T.ink3 : c.hi ? T.paper : T.ink; g.font = sans(15, 500);
       clip(g, c.name, 56 * k, ly - 1 * k, labelW - 66 * k);
       g.fillStyle = T.g[15]; g.font = mono(10.5);
       clip(g, c.sub, 56 * k, ly + 14 * k, labelW - 66 * k);
       // persistence: the trace fades with age; step-ups (captures) settle as dots
       const S = samples(c.key).filter((p) => p.t > now - HIST_MS - 60000 && p.t <= now);
-      const trace = c.fin ? T.settled : T.done;
+      const trace = T.done;
       if (S.length) {
         g.setLineDash([1 * k, 3 * k]); g.strokeStyle = T.g[10];
         g.beginPath(); g.moveTo(x0, Y(S[0].v)); g.lineTo(X(S[0].t), Y(S[0].v)); g.stroke(); g.setLineDash([]);
@@ -292,39 +292,48 @@ export class TimeBase {
         const fr = (xd - xNow) / Math.max(1, xe - xNow);
         const ym = Y(cur.v) + (ye - Y(cur.v)) * Math.max(0, fr);
         g.strokeStyle = T.g[15]; g.beginPath(); g.moveTo(xNow, Y(cur.v)); g.lineTo(Math.max(xNow, xd), ym); g.stroke();
-        g.strokeStyle = T.fail; g.beginPath(); g.moveTo(Math.max(xNow, xd), ym); g.lineTo(xe, ye); g.stroke();
+        g.strokeStyle = T.risk; g.beginPath(); g.moveTo(Math.max(xNow, xd), ym); g.lineTo(xe, ye); g.stroke();
       } else {
         g.strokeStyle = T.g[15]; g.beginPath(); g.moveTo(xNow, Y(cur.v)); g.lineTo(xe, ye); g.stroke();
       }
       g.setLineDash([]); g.lineWidth = Math.max(1, k);
       if (etaIn) {
         const xp = fx(c.p90);
-        g.fillStyle = late ? T.fail : T.g[16];
+        g.fillStyle = late ? T.risk : T.g[16];
         g.fillRect(xe, yt - 2.5 * k, Math.max(3 * k, xp - xe), 5 * k);
       }
       // the trigger: the deadline, a hard mark across the channel
       if (c.deadline && c.deadline <= now + HZ) {
         const passed = c.deadline < now;
         const xx = Math.round(xd);
-        g.fillStyle = late || passed ? T.fail : T.g[18];
+        g.fillStyle = late || passed ? T.risk : T.g[18];
         g.fillRect(xx - 1 * k, y0 + 4 * k, 2 * k, laneH - 8 * k);
         g.beginPath(); g.moveTo(xx, y0 + 6 * k); g.lineTo(xx - 5 * k, y0); g.lineTo(xx + 5 * k, y0); g.closePath(); g.fill();
-        g.font = mono(10.5); g.fillStyle = late || passed ? T.fail : T.g[16];
+        g.font = mono(10.5); g.fillStyle = late || passed ? T.risk : T.g[16];
         const lab = `${f.clock(c.deadline, false)} ${Number.isFinite(c.slack) ? f.signed(c.slack) : ''}`;
-        const lw = g.measureText(lab).width;
-        g.fillText(lab, xx + 7 * k + lw > x2 ? xx - 7 * k - lw : xx + 7 * k, y0 + Math.min(laneH - 9 * k, 27 * k));
+        const z = f.utc(c.deadline);
+        const lw0 = g.measureText(lab).width;
+        g.font = mono(8.5);
+        const zw = z ? g.measureText(z).width + 6 * k : 0;
+        const lw = lw0 + zw;
+        const lx = xx + 7 * k + lw > x2 ? xx - 7 * k - lw : xx + 7 * k, ly = y0 + Math.min(laneH - 9 * k, 27 * k);
+        g.font = mono(10.5);
+        g.fillText(lab, lx, ly);
+        if (z) { g.font = mono(8.5); g.fillStyle = late || passed ? T.risk : T.g[14]; g.globalAlpha = late || passed ? 0.7 : 1; g.fillText(z, lx + lw0 + 6 * k, ly); g.globalAlpha = 1; }
       } else if (c.deadline) {
         // beyond the horizon: an arrow at the edge names it
         const ym = y0 + laneH / 2;
         g.fillStyle = T.g[15];
         g.beginPath(); g.moveTo(x2 + 6 * k, ym - 7 * k); g.lineTo(x2 + 18 * k, ym); g.lineTo(x2 + 6 * k, ym + 7 * k); g.closePath(); g.fill();
         g.font = mono(11.5); g.fillStyle = T.g[16]; g.fillText(f.clock(c.deadline), x2 + 26 * k, ym + 1 * k);
+        const zw = g.measureText(f.clock(c.deadline)).width;
+        if (f.utc(c.deadline)) { g.font = mono(8.5); g.fillStyle = T.g[14]; g.fillText(f.utc(c.deadline), x2 + 26 * k + zw + 6 * k, ym + 1 * k); }
         g.font = mono(10); g.fillStyle = T.g[13]; g.fillText(tminusAt(c.deadline, now), x2 + 26 * k, ym + 14 * k);
       }
     });
     if (more > 0) {
       g.font = mono(10.5); g.fillStyle = T.g[14];
-      g.fillText(`+${more} more in dispatch order`, 14 * k, H - bot + 18 * k);
+      g.fillText(`+${more} more in run order`, 14 * k, H - bot + 18 * k);
     }
     // the sweep: a bright now line with a faint phosphor wash behind it
     const grad = g.createLinearGradient(xNow - 28 * k, 0, xNow, 0);
@@ -332,8 +341,12 @@ export class TimeBase {
     g.fillStyle = grad; g.fillRect(xNow - 28 * k, top, 28 * k, H - top - bot);
     g.fillStyle = T.paper; g.fillRect(xNow - 0.75 * k, top - 16 * k, 1.5 * k, H - top - bot + 18 * k);
     g.font = mono(13, 500); g.textAlign = 'center';
-    g.fillText(`NOW ${f.clockSec(new Date(now).toISOString())}`, xNow, top - 22 * k);
+    const nowLab = `NOW ${f.clockSec(now)}`;
+    g.fillText(nowLab, xNow, top - 22 * k);
     g.textAlign = 'left';
+    // the UTC complication, small beside the local time
+    const nowW = g.measureText(nowLab).width;
+    if (f.utc(now)) { g.font = mono(10); g.fillStyle = T.g[14]; g.fillText(f.utc(now), xNow + nowW / 2 + 7 * k, top - 22 * k); }
     g.strokeStyle = T.g[10]; g.beginPath(); g.moveTo(Math.round(x2) + 0.5, top); g.lineTo(Math.round(x2) + 0.5, H - bot); g.stroke();
     g.font = mono(10); g.fillStyle = T.g[14]; g.fillText('beyond the horizon', x2 + 8 * k, top - 8 * k);
     g.textAlign = 'center'; g.fillText(`${MINUS}15m`, x0, H - bot + 18 * k); g.textAlign = 'left';
@@ -357,8 +370,9 @@ export class Clocks {
     const sig = JSON.stringify(items.map((c) => [c.label, c.sub, c.late, c.kind, c.value]));
     if (sig !== this.sig) {
       this.sig = sig;
-      this.el.innerHTML = items.map((c) => `<div class="ck${c.late ? ' late' : ''}${c.kind === 'slots' ? ' slots' : ''}"><div class="k">${c.label}</div><div class="v"></div><div class="s">${c.sub}</div></div>`).join('');
+      this.el.innerHTML = items.map((c) => `<div class="ck${c.late ? ' late' : ''}${c.kind === 'slots' ? ' slots' : ''}"><div class="k">${c.kind === 'day' ? '<span class="cx kz"></span>' : ''}${c.label}</div><div class="v"></div><div class="s">${c.sub}</div></div>`).join('');
       this.vals = [...this.el.querySelectorAll('.v')];
+      this.kz = [...this.el.querySelectorAll('.ck')].map((n) => n.querySelector('.kz'));
       this.last = [];
     }
     this.draw();
@@ -369,9 +383,14 @@ export class Clocks {
     this.items.forEach((c, i) => {
       let v;
       if (c.kind === 'tminus') v = tminusAt(c.target, now);
-      else if (c.kind === 'day') v = `D${Math.floor((now - c.from) / 864e5) + 1} ${f.clock(now, false)}`;
+      else if (c.kind === 'day') v = `day ${Math.floor((now - c.from) / 864e5) + 1} ${f.clock(now, false)}`;
       else v = c.value;
-      if (this.last[i] !== v) { this.last[i] = v; if (this.vals[i]) { if (c.kind === 'slots') this.vals[i].innerHTML = v; else this.vals[i].textContent = v; } }
+      if (this.last[i] !== v) {
+        this.last[i] = v;
+        if (this.vals[i]) { if (c.kind === 'slots') this.vals[i].innerHTML = v; else this.vals[i].textContent = v; }
+        // the day clock's UTC complication rides at the right of its label
+        if (this.kz && this.kz[i]) this.kz[i].textContent = f.utc(now);
+      }
     });
   }
 }
@@ -441,7 +460,7 @@ export class Strobe {
     if (fr) this.prev = new Map(fr.units.map((u) => [u.i, u.s]));
     this.fr = fr;
     const every = fr && fr.level >= 0 ? `complete to 1/${2 ** fr.level}` : 'the ends still due';
-    this.cap.innerHTML = `<div class="k">Strobe · ${title || ''}</div>`
+    this.cap.innerHTML = `<div class="k">Frames · ${title || ''}</div>`
       + (fr ? `<div class="s">${fr.lit} of ${fr.n} frames lit; ${every}</div><div class="s"><span class="t-run">blue running</span> · <span class="t-temp">orange retrying</span> · <span class="t-fail">red failed</span></div>` : '<div class="s">no binary-order render in flight</div>');
     this.cv.setAttribute('aria-label', fr ? `${title}: ${fr.lit} of ${fr.n} frames rendered, ${every}` : 'no render in flight');
     this.draw();
@@ -461,11 +480,11 @@ export class Strobe {
       const tick = l >= 12 ? 3 * k : Math.max(4 * k, (28 - l * 3.5) * k);
       g.fillStyle = l <= fr.level ? T.g[18] : l <= 3 ? T.g[15] : l <= 6 ? T.g[13] : T.g[10];
       g.fillRect(Math.round(x + cw / 2), rt - tick, Math.max(1, k), tick);
-      const fill = u.s === 'succeeded' ? T.g[17] : u.s === 'running' ? T.run : u.s === 'retrying' ? T.temp : u.s === 'failed' ? T.fail : u.s === 'unevaluated' ? T.g[6] : T.g[8];
+      const fill = u.s === 'succeeded' ? T.done : u.s === 'running' ? T.run : u.s === 'retrying' ? T.temp : u.s === 'failed' ? T.fail : u.s === 'unevaluated' ? T.g[6] : T.g[8];
       const gap = cw > 3 ? Math.max(0.6, cw * 0.12) : 0;
       g.fillStyle = fill; g.fillRect(x + gap / 2, y, Math.max(0.6, cw - gap), h);
       if (u.s === 'succeeded') { g.fillStyle = T.done; g.fillRect(x + gap / 2, y + h - 3 * k, Math.max(0.6, cw - gap), 3 * k); }
-      if (u.s === 'running' && cw > 2) { g.fillStyle = T.runBody; g.fillRect(x + gap / 2, y, Math.max(0.6, cw - gap), h * 0.5); }
+      if (u.s === 'running' && cw > 2) { g.fillStyle = T.run; g.fillRect(x + gap / 2, y, Math.max(0.6, cw - gap), h * 0.5); }
       // a frame that just landed glows and settles over a minute
       const t0 = this.glow.get(u.i);
       if (t0 && !reducedMotion()) {
@@ -488,7 +507,7 @@ const SEALS = {
   hud: (g, x, y, s) => { g.beginPath(); g.arc(x, y, s * 0.42, 0, Math.PI * 2); g.stroke(); },
   tri: (g, x, y, s) => { g.beginPath(); g.moveTo(x - s * 0.45, y + s * 0.4); g.lineTo(x + s * 0.45, y + s * 0.4); g.lineTo(x, y - s * 0.45); g.closePath(); g.fill(); },
 };
-const TONE = { failed: 'fail', retry: 'temp', retrying: 'temp', backoff: 'temp', suspect: 'temp', blacklist: 'temp', late: 'fail' };
+const TONE = { failed: 'fail', retry: 'temp', retrying: 'temp', backoff: 'temp', suspect: 'temp', blacklist: 'temp', late: 'risk' };
 
 // The book as a ticker: entries enter from the right, newest last, and the
 // line cycles through the latest entries; new ones join the cycle as they
@@ -565,7 +584,7 @@ export class Ticker {
       SEALS[sg](g, x + 4 * k, y - fs * 0.34, 10 * k); x += 16 * k;
       g.font = `400 ${fs}px ${T.mono}`;
       const tone = TONE[q.e.kind];
-      g.fillStyle = tone === 'fail' ? T.fail : tone === 'temp' ? T.temp : T.g[16];
+      g.fillStyle = tone === 'fail' ? T.fail : tone === 'risk' ? T.risk : tone === 'temp' ? T.temp : T.g[16];
       g.fillText(tx.msg, x, y); x += g.measureText(tx.msg).width + 8 * k;
       g.font = `400 ${fs * 0.85}px ${T.mono}`; g.fillStyle = T.g[13];
       g.fillText(tx.who, x, y); x += g.measureText(tx.who).width + 14 * k;

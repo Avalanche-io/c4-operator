@@ -1,0 +1,43 @@
+/* CALLOUTS: the shared annotation style for the intro, the tutorial
+   screenshots and the in-product tours (callouts.js, docs/intro/callouts.md).
+   Sizes are for 1x; the page's own scale or zoom enlarges them. */
+
+/* Callouts: an annotation layer over the HUD. White lines, a little heavier
+   than the HUD's own, and a faint violet cast in the plate's fill: the one
+   hue the HUD never uses for state, kept to a tint. Shared with the
+   tutorials' callouts; see docs/intro/callouts.md. */
+:root { --note: var(--paper); --note-bg: rgba(22, 17, 33, .96); --note-dim: var(--g15); --note-num: var(--ink-2); }
+.c-ann { position: absolute; left: 0; top: 0; z-index: 30; pointer-events: none; overflow: visible; }
+.c-ann .ret { fill: none; stroke: var(--note); stroke-width: 2.6; stroke-linecap: square; }
+.c-ann .lead { fill: none; stroke: var(--note); stroke-width: 1.8; }
+.c-ann .dot { fill: var(--note); }
+.c-ann .click { fill: none; stroke: var(--note); stroke-width: 2; }
+.c-plates { position: absolute; inset: 0; z-index: 31; pointer-events: none; }
+.c-plate { position: absolute; left: 0; top: 0; padding: 11px 16px 13px 16px; background: var(--note-bg); border: 1.5px solid var(--note); border-left-width: 4px; box-shadow: 0 6px 24px rgba(0, 0, 0, .55); }
+.c-plate .hd { display: flex; align-items: center; gap: 10px; }
+.c-plate .num { font: 500 11px/1 var(--mono); color: var(--note-num); letter-spacing: .06em; }
+.c-plate .term { font: 600 19px/1.15 var(--sans); letter-spacing: .13em; color: var(--paper); white-space: nowrap; }
+.c-plate .def { margin-top: 7px; font: 500 15.5px/1.38 var(--sans); color: var(--g19); }
+.c-plate .marks { position: absolute; inset: -7px; pointer-events: none;
+  background:
+    linear-gradient(var(--note-dim), var(--note-dim)) 0 0 / 8px 1.5px no-repeat, linear-gradient(var(--note-dim), var(--note-dim)) 0 0 / 1.5px 8px no-repeat,
+    linear-gradient(var(--note-dim), var(--note-dim)) 100% 0 / 8px 1.5px no-repeat, linear-gradient(var(--note-dim), var(--note-dim)) 100% 0 / 1.5px 8px no-repeat,
+    linear-gradient(var(--note-dim), var(--note-dim)) 0 100% / 8px 1.5px no-repeat, linear-gradient(var(--note-dim), var(--note-dim)) 0 100% / 1.5px 8px no-repeat,
+    linear-gradient(var(--note-dim), var(--note-dim)) 100% 100% / 8px 1.5px no-repeat, linear-gradient(var(--note-dim), var(--note-dim)) 100% 100% / 1.5px 8px no-repeat; }
+
+/* swatches for color terms: the state grammar (design/README.md) */
+.c-plate .sw, .sw { display: inline-block; width: 10px; height: 10px; flex: none; }
+.sw-done { background: var(--done); }
+.sw-run { background: linear-gradient(var(--g09) 0 45%, var(--run) 45%); }
+.sw-temp { background: var(--temp); }
+.sw-fail { background: linear-gradient(225deg, var(--paper) 0 3px, var(--fail) 3px); }
+.sw-risk { background: var(--risk-pale); outline: 1.5px dashed var(--risk); outline-offset: -1.5px; }
+.sw-moving { background: linear-gradient(var(--done-pale) 40%, var(--done) 40%); }
+.sw-preflight { background: var(--run-pale); outline: 1px solid var(--run); outline-offset: -1px; }
+.sw-backoff { background: var(--temp-pale); outline: 1px dashed var(--temp); outline-offset: -1px; }
+.sw-taken { background: var(--fail-pale); }
+.sw-accepted { background: var(--fail-pale); box-shadow: inset 0 0 0 1px var(--paper); }
+.sw-willmiss { background: repeating-linear-gradient(45deg, var(--risk-pale) 0 2px, var(--risk) 2px 4px); }
+.sw-missed { background: var(--g09); box-shadow: inset 3px 0 0 var(--risk); }
+.sw-est { width: auto; height: auto; font: 400 10px/1 var(--mono); color: var(--pencil); text-decoration: underline dashed var(--g12); text-underline-offset: 2px; }
+.sw-est::before { content: "~14:58"; }

@@ -1,53 +1,185 @@
-// Formatting in the farm's own clock. Times arrive as RFC 3339 with the
-// farm's offset; the HUD shows them in that offset, whatever the browser's
-// time zone, so a wall display and a laptop agree.
+// Formatting in the viewer's clock. The farm runs UTC internally and the
+// HUD API sends every time as RFC 3339 in UTC ("Z"); nothing here reads an
+// offset from a time string. The presentation layer shows times in the
+// viewer's zone: the browser's own, or ?tz=<IANA zone> on the link
+// (captures pin one so they come out the same on any machine). utc() is the small UTC complication shown beside the local
+// time on the clocks; siteClock() formats in a site's own zone where a site
+// is the subject.
 
-let offsetMin = 0;
 let nowMs = Date.now();
 
 const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const MINUS = '−';
 
+const p2 = (n) => String(n).padStart(2, '0');
+
+// ------------------------------------------------------------ the zone
+
+function validZone(z) {
+  try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch { return false; }
+}
+
+function browserZone() {
+  try { return Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'; } catch { return 'UTC'; }
+}
+
+function linkZone() {
+  try {
+    const z = new URLSearchParams(globalThis.location ? globalThis.location.search : '').get('tz');
+    return z && validZone(z) ? z : '';
+  } catch { return ''; }
+}
+
+let zone = linkZone() || browserZone();
+
+// setZone sets the presentation zone (an IANA name); an empty or unknown
+// zone falls back to the link's, then the browser's.
+export function setZone(z) {
+  zone = z && validZone(z) ? z : linkZone() || browserZone();
+  return zone;
+}
+export const tz = () => zone;
+
+// offsets are read from Intl once per zone and quarter hour
+const offFmt = new Map();
+const offMemo = new Map();
+function offsetAt(t, z = zone) {
+  const key = `${z}|${Math.floor(t / 9e5)}`;
+  let o = offMemo.get(key);
+  if (o !== undefined) return o;
+  let F = offFmt.get(z);
+  if (!F) {
+    F = new Intl.DateTimeFormat('en-US', { timeZone: z, hourCycle: 'h23', year: 'numeric', month: 'numeric', day: 'numeric', hour: 'numeric', minute: 'numeric', second: 'numeric' });
+    offFmt.set(z, F);
+  }
+  const P = {};
+  for (const x of F.formatToParts(t)) P[x.type] = x.value;
+  const wall = Date.UTC(+P.year, +P.month - 1, +P.day, +P.hour % 24, +P.minute, +P.second);
+  o = Math.round((wall - Math.floor(t / 1000) * 1000) / 60000);
+  if (offMemo.size > 4000) offMemo.clear();
+  offMemo.set(key, o);
+  return o;
+}
+
+// wall returns a Date whose UTC fields read as the wall clock in zone z.
+function wall(t, z = zone) {
+  return new Date(t + offsetAt(t, z) * 60000);
+}
+
+function utcLabel(off) {
+  if (!off) return 'UTC';
+  const a = Math.abs(off);
+  return `UTC${off < 0 ? MINUS : '+'}${Math.floor(a / 60)}${a % 60 ? ':' + p2(a % 60) : ''}`;
+}
+
+// a zone's short name: PDT, EDT, BST, AEDT; UTC±h where no locale names it
+const abbrFmt = new Map();
+function abbrAt(t, z) {
+  for (const loc of ['en-US', 'en-GB', 'en-AU']) {
+    const key = loc + '|' + z;
+    let F = abbrFmt.get(key);
+    if (!F) { F = new Intl.DateTimeFormat(loc, { timeZone: z, timeZoneName: 'short' }); abbrFmt.set(key, F); }
+    const p = F.formatToParts(t).find((x) => x.type === 'timeZoneName');
+    if (p && !/^(GMT|UTC)[+−-]/.test(p.value)) return p.value;
+  }
+  return utcLabel(offsetAt(t, z));
+}
+
+// ------------------------------------------------------------ the clock
+
+// setClock sets now from the snapshot's time.
 export function setClock(iso) {
-  const m = /([+-])(\d\d):(\d\d)$/.exec(iso || '');
-  offsetMin = m ? (m[1] === '-' ? -1 : 1) * (Number(m[2]) * 60 + Number(m[3])) : 0;
   nowMs = Date.parse(iso);
 }
 
 export const now = () => nowMs;
 export const ms = (iso) => (iso ? Date.parse(iso) : NaN);
+const at = (iso) => (typeof iso === 'number' ? iso : ms(iso));
 
-function local(t) {
-  return new Date(t + offsetMin * 60000);
-}
+function hm(d) { return `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`; }
 
-const p2 = (n) => String(n).padStart(2, '0');
-
+// clock: 14:20, or Thu 14:20 with the day, in the viewer's zone.
 export function clock(iso, withDay = true) {
-  const t = typeof iso === 'number' ? iso : ms(iso);
+  const t = at(iso);
   if (!Number.isFinite(t)) return '';
-  const d = local(t);
-  const hm = `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}`;
-  if (!withDay) return hm;
-  const today = local(nowMs).getUTCDate() === d.getUTCDate() && Math.abs(t - nowMs) < 864e5;
-  return today ? `${DAYS[d.getUTCDay()]} ${hm}` : `${DAYS[d.getUTCDay()]} ${hm}`;
+  const d = wall(t);
+  return withDay ? `${DAYS[d.getUTCDay()]} ${hm(d)}` : hm(d);
 }
 
 export function clockSec(iso) {
-  const d = local(ms(iso));
-  return `${p2(d.getUTCHours())}:${p2(d.getUTCMinutes())}:${p2(d.getUTCSeconds())}`;
+  const t = at(iso);
+  if (!Number.isFinite(t)) return '';
+  const d = wall(t);
+  return `${hm(d)}:${p2(d.getUTCSeconds())}`;
 }
 
 export function dateLine(iso) {
-  const d = local(ms(iso));
+  const t = at(iso);
+  if (!Number.isFinite(t)) return '';
+  const d = wall(t);
   return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]}`;
 }
 
-export function offsetLabel() {
-  const sign = offsetMin < 0 ? MINUS : '+';
-  const a = Math.abs(offsetMin);
-  return `UTC${sign}${p2(Math.floor(a / 60))}:${p2(a % 60)}`;
+// inputStamp is a time the way a US browser's date-time field shows it, in
+// the viewer's zone: 10/22/2026, 03:00 PM.
+export function inputStamp(iso) {
+  const t = at(iso);
+  if (!Number.isFinite(t)) return '';
+  const d = wall(t);
+  const h = d.getUTCHours();
+  return `${p2(d.getUTCMonth() + 1)}/${p2(d.getUTCDate())}/${d.getUTCFullYear()}, ${p2(h % 12 || 12)}:${p2(d.getUTCMinutes())} ${h < 12 ? 'AM' : 'PM'}`;
+}
+
+// zoneAbbr names the viewer's zone at an instant (now by default): PDT.
+export function zoneAbbr(iso) {
+  const t = iso === undefined ? nowMs : at(iso);
+  return abbrAt(Number.isFinite(t) ? t : Date.now(), zone);
+}
+
+// offsetLabel names the viewer's zone for the clock's caption: PDT.
+export function offsetLabel(iso) {
+  return zoneAbbr(iso);
+}
+
+// utc is the complication: the same instant in UTC, small, beside the local
+// time on the clocks: 21:20Z, or 21:20:31Z with seconds. Empty when the
+// viewer's zone is UTC at that instant, where it would only repeat itself.
+export function utc(iso, sec = false) {
+  const t = at(iso);
+  if (!Number.isFinite(t) || offsetAt(t) === 0) return '';
+  const d = new Date(t);
+  return `${hm(d)}${sec ? ':' + p2(d.getUTCSeconds()) : ''}Z`;
+}
+
+// siteClock formats in a site's own zone, for where a site is the subject:
+// 05:20 BST. Empty when the site names no zone or an unknown one.
+export function siteClock(iso, siteZone, withDay = false) {
+  const t = at(iso);
+  if (!Number.isFinite(t) || !siteZone || !validZone(siteZone)) return '';
+  const d = wall(t, siteZone);
+  return `${withDay ? DAYS[d.getUTCDay()] + ' ' : ''}${hm(d)} ${abbrAt(t, siteZone)}`;
+}
+
+// inputValue is a time as a datetime-local field holds it, in the viewer's
+// zone: 2026-10-22T15:00.
+export function inputValue(iso) {
+  const t = at(iso);
+  if (!Number.isFinite(t)) return '';
+  const d = wall(t);
+  return `${d.getUTCFullYear()}-${p2(d.getUTCMonth() + 1)}-${p2(d.getUTCDate())}T${hm(d)}`;
+}
+
+// fromInput reads a datetime-local value as the viewer's wall clock and
+// returns the instant as RFC 3339 in UTC, the way the API takes times:
+// 2026-10-22T22:00:00Z. Empty when the value does not parse.
+export function fromInput(v) {
+  const m = /^(\d{4})-(\d\d)-(\d\d)T(\d\d):(\d\d)(?::(\d\d))?/.exec(v || '');
+  if (!m) return '';
+  const guess = Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0));
+  let t = guess - offsetAt(guess) * 60000;
+  t = guess - offsetAt(t) * 60000; // once more, across a change of offset
+  return new Date(t).toISOString().replace(/\.\d{3}Z$/, 'Z');
 }
 
 // dur formats seconds as 45s, 12m, 2h05, 3d 4h.

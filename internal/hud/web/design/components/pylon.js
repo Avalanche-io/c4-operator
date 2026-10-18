@@ -2,14 +2,17 @@
 // moving, how soon. A pro reads the rest: slack, the p50 to p90 band, the
 // deadline, slots needed against slots the job can get.
 //
-// The column fills green bottom-up for work done (by slot-seconds where the
-// estimate exists, else by units, and says which). Above it a blue band is
-// the work in flight, with green rising inside it for the part already
-// spent. An orange notch on the edge is the share retrying; red from the top
-// is failed; a dashed red hatch is waiting work projected after the
-// deadline. A readout rides the fill level. On the right, a square-root time
-// tape: the p50 tick and p90 bar in pencil, the deadline bug in ink; both
-// turn red when the p90 lands after the deadline, and the slack is the gap.
+// The column fills green bottom-up for committed work (by slot-seconds where
+// the estimate exists, else by units, and says which); the share shown never
+// goes down (core.js steady). Above it the work in flight, the bright blue
+// band of rendering, at the frontier of the green. An
+// orange notch on the edge is the share retrying; red from the top is
+// failed, which needs a person; orchid is waiting work projected after the
+// deadline: pale with a dashed edge at risk, hatched when it will miss at
+// any capacity, solid once the deadline has passed. A readout rides the fill
+// level. On the right, a square-root time tape: the p50 tick and p90 bar
+// (estimates), the deadline bug; both turn orchid when the p90 lands after
+// the deadline, and the slack is the gap.
 // Under it, the slot scale: running slots (blue), slots needed (chevron),
 // slots the job can get (bracket).
 //
@@ -37,7 +40,7 @@ export function pylonSVG(g, o = {}) {
   const tx = mini ? W - 2 : W - Math.round(W * (full ? 0.18 : 0.08));
   const y = (p) => bot - ch * Math.max(0, Math.min(1, p));
   const late = Number.isFinite(g.slack) && g.slack < 0;
-  let s = `<defs><pattern id="${id}-rk" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="${T.g[9]}"/><rect width="1.3" height="5" fill="${T.fail}"/></pattern>`
+  let s = `<defs><pattern id="${id}-rk" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="${T.g[9]}"/><rect width="${g.feasible === false ? 2.2 : 1.3}" height="5" fill="${T.risk}"/></pattern>`
     + `<pattern id="${id}-un" width="3" height="3" patternUnits="userSpaceOnUse"><rect width="3" height="3" fill="${T.g[9]}"/><rect width="1" height="1" fill="${T.g[13]}"/></pattern></defs>`;
   if (o.title) s += `<text x="${colX}" y="${pad + fs * 1.4}" fill="${T.ink}" font-size="${fs * 1.2}" font-family="${T.sans}" font-weight="600" letter-spacing=".08em">${esc(o.title)}</text>`;
   // column and its inner graticule
@@ -48,16 +51,23 @@ export function pylonSVG(g, o = {}) {
     s += `<line x1="${colX - (major ? 8 : 4)}" x2="${colX - 1}" y1="${yy}" y2="${yy}" stroke="${T.g[major ? 10 : 8]}"/>`;
     if (major && full) s += `<text x="${colX - 11}" y="${yy + fs * 0.32}" fill="${T.g[13]}" font-size="${fs * 0.75}" text-anchor="end" font-family="${T.mono}">${k * 5}</text>`;
   }
-  // failed from the top, then waiting work projected after the deadline (red pencil)
+  // failed from the top (needs a person), then waiting work projected after
+  // the deadline: pale with a dashed edge at risk, hatched when it will miss
+  // at any capacity, solid once the deadline has passed
   if (g.fail > 0) s += `<rect x="${colX}" y="${top}" width="${colW}" height="${Math.max(2, ch * g.fail)}" fill="${T.fail}"/>`;
-  if (g.risk > 0) s += `<rect x="${colX}" y="${top + ch * (g.fail || 0)}" width="${colW}" height="${Math.max(0, ch * Math.min(g.risk, 1 - g.done - g.run - (g.fail || 0)))}" fill="url(#${id}-rk)"/>`;
-  // done, then the work in flight: blue body, green rising inside, blue edge
+  if (g.risk > 0) {
+    const ry = top + ch * (g.fail || 0), rh = Math.max(0, ch * Math.min(g.risk, 1 - g.done - g.run - (g.fail || 0)));
+    const passed = g.deadline && g.deadline < f.now();
+    if (passed) s += `<rect x="${colX}" y="${ry}" width="${colW}" height="${rh}" fill="${T.risk}"/>`;
+    else if (g.feasible === false) s += `<rect x="${colX}" y="${ry}" width="${colW}" height="${rh}" fill="url(#${id}-rk)"/>`;
+    else s += `<rect x="${colX}" y="${ry}" width="${colW}" height="${rh}" fill="${T.riskPale}"/><rect x="${colX + 0.75}" y="${ry + 0.75}" width="${colW - 1.5}" height="${Math.max(0, rh - 1.5)}" fill="none" stroke="${T.risk}" stroke-width="1.5" stroke-dasharray="3 2"/>`;
+  }
+  // committed green, then the work in flight: the bright blue band of
+  // rendering at the top of the green
   const r0 = g.done, r1 = Math.min(1, g.done + g.run);
   s += `<rect x="${colX}" y="${y(r0)}" width="${colW}" height="${ch * r0}" fill="${T.done}"/>`;
   if (g.run > 0) {
-    s += `<rect x="${colX}" y="${y(r1)}" width="${colW}" height="${ch * (r1 - r0)}" fill="${T.runBody}"/>`;
-    s += `<rect x="${colX}" y="${y(r0 + g.runSpent)}" width="${colW}" height="${ch * g.runSpent}" fill="${T.done}" fill-opacity=".85"/>`;
-    s += `<rect x="${colX}" y="${y(r1)}" width="${colW}" height="${Math.max(1.5, mini ? 1.5 : 2)}" fill="${T.run}"/>`;
+    s += `<rect x="${colX}" y="${y(r1)}" width="${colW}" height="${ch * (r1 - r0)}" fill="${T.run}"/>`;
   }
   if (g.retry > 0) s += `<rect x="${colX + colW - 4}" y="${y(r1)}" width="4" height="${Math.max(3, ch * g.retry)}" fill="${T.temp}"/>`;
   s += `<rect x="${colX + 0.5}" y="${top + 0.5}" width="${colW - 1}" height="${ch - 1}" fill="none" stroke="${T.g[10]}"/>`;
@@ -91,17 +101,19 @@ export function pylonSVG(g, o = {}) {
     s += `<line x1="${tx}" x2="${tx + 4}" y1="${ty(sec)}" y2="${ty(sec)}" stroke="${T.g[10]}"/>`;
     if (full) s += `<text x="${tx + 7}" y="${ty(sec) + fs * 0.3}" fill="${T.g[13]}" font-size="${fs * 0.75}" font-family="${T.mono}">${l}</text>`;
   }
-  const etaC = late ? T.fail : T.pencil;
+  const etaC = late ? T.risk : T.pencil;
   if (g.phase !== 'Succeeded') {
     s += `<rect x="${tx - 5}" y="${ty(p90)}" width="5" height="${Math.max(2, ty(eta) - ty(p90))}" fill="${etaC}"/>`;
     s += `<line x1="${tx - (mini ? 6 : 14)}" x2="${tx}" y1="${ty(eta)}" y2="${ty(eta)}" stroke="${etaC}" stroke-width="2"/>`;
   }
   if (g.deadline) {
     const dy = ty(dl);
-    s += `<line x1="${tx + 1.5}" x2="${tx + 1.5}" y1="${Math.min(dy, ty(p90))}" y2="${Math.max(dy, ty(p90))}" stroke="${late ? T.fail : T.g[13]}" stroke-width="3" stroke-dasharray="${late ? '2 2' : 'none'}"/>`;
-    s += `<path d="M${tx} ${dy} l${mini ? 5 : 9} -${mini ? 4 : 6} v${mini ? 8 : 12} z" fill="${late ? T.fail : T.ink}"/>`;
-    if (!mini) s += `<text x="${tx + 11}" y="${dy - 8}" fill="${late ? T.fail : T.ink}" font-size="${fs * 0.9}" font-family="${T.mono}">${f.clock(g.deadline, false)}</text>`;
-    if (full && Number.isFinite(g.slack)) s += `<text x="${tx + 11}" y="${dy + fs * 0.9}" fill="${late ? T.fail : T.pencil}" font-size="${fs * 0.85}" font-family="${T.mono}">slack ${f.signed(g.slack)}</text>`;
+    s += `<line x1="${tx + 1.5}" x2="${tx + 1.5}" y1="${Math.min(dy, ty(p90))}" y2="${Math.max(dy, ty(p90))}" stroke="${late ? T.risk : T.g[13]}" stroke-width="3" stroke-dasharray="${late ? '2 2' : 'none'}"/>`;
+    s += `<path d="M${tx} ${dy} l${mini ? 5 : 9} -${mini ? 4 : 6} v${mini ? 8 : 12} z" fill="${late ? T.risk : T.ink}"/>`;
+    if (!mini) s += `<text x="${tx + 11}" y="${dy - 8}" fill="${late ? T.risk : T.ink}" font-size="${fs * 0.9}" font-family="${T.mono}">${f.clock(g.deadline, false)}</text>`;
+    // the UTC complication, small, on its own line above the deadline time
+    if (!mini && f.utc(g.deadline) && dy - 8 - fs * 1.6 > 0) s += `<text x="${tx + 11}" y="${(dy - 8 - fs * 0.95).toFixed(1)}" fill="${late ? T.risk : T.g[14]}"${late ? ' fill-opacity="0.7"' : ''} font-size="${(fs * 0.68).toFixed(1)}" font-family="${T.mono}">${f.utc(g.deadline)}</text>`;
+    if (full && Number.isFinite(g.slack)) s += `<text x="${tx + 11}" y="${dy + fs * 0.9}" fill="${late ? T.risk : T.pencil}" font-size="${fs * 0.85}" font-family="${T.mono}">slack ${f.signed(g.slack)}</text>`;
   }
   if (!mini && g.phase !== 'Succeeded' && Number.isFinite(g.eta)) {
     s += `<text x="${tx - 18}" y="${ty(eta) + fs * 0.45}" fill="${T.ink}" font-size="${fs * (full ? 1.7 : 1.3)}" text-anchor="end" font-family="${T.sans}" font-weight="500">${f.approx(eta)}</text>`;
@@ -114,7 +126,7 @@ export function pylonSVG(g, o = {}) {
     s += `<line x1="${sx}" x2="${sx + sw}" y1="${sy}" y2="${sy}" stroke="${T.g[8]}"/>`;
     for (let k = 0; k < Math.min(g.slots, 400); k++) s += `<rect x="${X(k) + 0.5}" y="${sy - 6}" width="${Math.max(1, X(1) - X(0) - 1)}" height="6" fill="${T.run}" fill-opacity=".85"/>`;
     s += `<path d="M${X(g.att)} ${sy - 10} v15 h-4" fill="none" stroke="${T.ink}"/>`;
-    s += `<path d="M${X(g.req)} ${sy + 2} l-4 7 h8 z" fill="${g.req > g.att + 0.01 ? T.fail : T.pencil}"/>`;
+    s += `<path d="M${X(g.req)} ${sy + 2} l-4 7 h8 z" fill="${g.req > g.att + 0.01 ? T.risk : T.pencil}"/>`;
     s += `<text x="${sx}" y="${sy + fs * 1.9}" fill="${T.ink3}" font-size="${fs * 0.85}" font-family="${T.mono}">slots · ${g.slots} running · ${(+g.req).toFixed(1)} needed · ${Math.round(g.att)} can get</text>`;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(ariaOf(g))}">${s}</svg>`;

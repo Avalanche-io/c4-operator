@@ -28,7 +28,7 @@ export const ink = (text) => el('span', { class: 'ink' }, text);
 export const pencil = (text, title) => el('span', { class: 'pencil', title: title || 'an estimate, redrawn as the farm changes' }, text);
 
 // kinds whose subject is temporary trouble or failure, for the entry's tone
-const TONE = { failed: 't-fail', 'retry': 't-temp', retrying: 't-temp', backoff: 't-temp', suspect: 't-temp', yield: '', late: 't-fail' };
+const TONE = { failed: 't-fail', 'retry': 't-temp', retrying: 't-temp', backoff: 't-temp', suspect: 't-temp', yield: '', late: 't-risk' };
 
 export function bookList(entries) {
   return el('div', { class: 'book', role: 'log', 'aria-label': 'The book: entries, newest last' },
