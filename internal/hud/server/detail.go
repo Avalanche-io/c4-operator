@@ -643,10 +643,13 @@ func agentSummary(m *model, rec *jobRec) map[string]any {
 		if e["state"] == "running" || e["state"] == "yielding" {
 			running++
 		}
-		for k, v := range map[string]string{"node": ms.Node, "epoch": ms.Epoch, "checkpoint": ms.Checkpoint} {
+		for k, v := range map[string]string{"node": ms.Node, "epoch": ms.Epoch} {
 			if v != "" {
 				e[k] = v
 			}
+		}
+		if cp := checkpointOf(ms.Checkpoint); cp != nil {
+			e["checkpoint"] = cp
 		}
 		members = append(members, e)
 	}
@@ -700,6 +703,23 @@ func memberState(b *c4v1.AgentBundle, ms c4v1.AgentMemberStatus) string {
 		return "held"
 	}
 	return "waiting"
+}
+
+// checkpointOf splits a member's resume point, "<session>#<seq>:<id>", into
+// its parts, so the HUD never parses one: { session, seq, id }, where id is
+// the bare C4 ID the mark draws. It returns nil for an empty or malformed
+// point.
+func checkpointOf(p string) map[string]any {
+	session, rest, ok := strings.Cut(p, "#")
+	if !ok {
+		return nil
+	}
+	seq, id, ok := strings.Cut(rest, ":")
+	n, err := strconv.Atoi(seq)
+	if !ok || err != nil || session == "" || id == "" {
+		return nil
+	}
+	return map[string]any{"session": session, "seq": n, "id": id}
 }
 
 func orDefault(s, def string) string {

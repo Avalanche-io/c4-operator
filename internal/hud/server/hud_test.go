@@ -384,7 +384,8 @@ func TestAgentSummaryInDetail(t *testing.T) {
 	if m0["state"] != "running" || m0["epoch"] != "3" || m0["kind"] != "resident" {
 		t.Fatalf("member 0 %v", m0)
 	}
-	if m1["state"] != "suspended" || m1["checkpoint"] != "s#7:c4abc" || m1["kind"] != "task" {
+	cp, _ := m1["checkpoint"].(map[string]any)
+	if m1["state"] != "suspended" || cp["session"] != "s" || cp["seq"] != 7.0 || cp["id"] != "c4abc" || m1["kind"] != "task" {
 		t.Fatalf("member 1 %v", m1)
 	}
 	c := cs["clock"].(map[string]any)

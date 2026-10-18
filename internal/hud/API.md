@@ -341,7 +341,7 @@ fraction its latest checkpoint saved.
   the job's units):
   ```
   { bundle, cap?, running,
-    members: [ { name, unit, kind, state, node?, epoch?, checkpoint? } ],
+    members: [ { name, unit, kind, state, node?, epoch?, checkpoint?: { session, seq, id } } ],
     clock: { start?, virtualNow?, suspendedSince?, driftSeconds },
     suspended: [ { from, to? } ] }
   ```
@@ -350,7 +350,8 @@ fraction its latest checkpoint saved.
   turn boundary, and it resumes from `checkpoint`); `held` (a person
   suspended the bundle); `waiting` (not started); `done`; or `failed`.
   `epoch` is the member's lease number, and `checkpoint` is where it
-  resumes (`<session>#<seq>:<head>`, a C4 ID after the colon). `clock` is
+  resumes: its Claude Code session, the checkpoint's sequence number, and
+  `id`, the bare C4 ID of the transcript chain's head at that turn. `clock` is
   the bundle's time: it stops while the bundle is suspended.
   `virtualNow` is its value at the last status write, and `driftSeconds`
   is how far it trails the real clock. `suspended` lists the recent

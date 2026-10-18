@@ -182,13 +182,24 @@ func bundleStatus(b *c4v1.AgentBundle, j *c4v1.WorkJob, pods []corev1.Pod) c4v1.
 		}
 		st.Members = append(st.Members, ms)
 	}
+	saved := 0
+	for _, ms := range st.Members {
+		if ms.State == "parked" {
+			saved++
+		}
+	}
 	switch {
 	case b.Spec.Suspend && running+yielding > 0:
 		st.Phase = "Suspending"
 	case b.Spec.Suspend:
 		st.Phase = "Suspended"
-	case running > 0:
+	case running+yielding > 0:
 		st.Phase = "Running"
+	case saved > 0:
+		// Every member that ran was stopped at a turn boundary by the
+		// queue (capacity, a power cap): the bundle is suspended, and its
+		// clock stops until a member runs again.
+		st.Phase = "Suspended"
 	default:
 		st.Phase = "Pending"
 	}
