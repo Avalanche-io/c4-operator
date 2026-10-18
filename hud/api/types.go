@@ -67,6 +67,9 @@ type Site struct {
 	Lon        float64  `json:"lon"`
 	Kind       string   `json:"kind"` // onprem or cloud
 	Localities []string `json:"localities"`
+	// TZ is the site's time zone, an IANA name (America/New_York), so a
+	// site's clock can show its local time; empty shows the viewer's.
+	TZ string `json:"tz,omitempty"`
 }
 
 // Usage is metered use. Billing is by cluster-hours, container-hours or

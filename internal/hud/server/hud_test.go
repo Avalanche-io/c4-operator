@@ -293,11 +293,16 @@ func TestZonesAndSites(t *testing.T) {
 
 	dir := t.TempDir()
 	good := filepath.Join(dir, "sites.json")
-	os.WriteFile(good, []byte(`[{"name":"burbank","region":"burbank","lat":34.18,"lon":-118.31,"kind":"onprem","localities":["rack r1"]},
+	os.WriteFile(good, []byte(`[{"name":"burbank","region":"burbank","lat":34.18,"lon":-118.31,"kind":"onprem","localities":["rack r1"],"tz":"America/Los_Angeles"},
 		{"name":"aws-us-west-2","region":"us-west-2","lat":45.8,"lon":-119.7,"kind":"cloud"}]`), 0o600)
 	sites, err := LoadSites(good)
-	if err != nil || len(sites) != 2 || sites[1].Label != "aws-us-west-2" || sites[1].Localities == nil {
+	if err != nil || len(sites) != 2 || sites[1].Label != "aws-us-west-2" || sites[1].Localities == nil || sites[0].TZ != "America/Los_Angeles" {
 		t.Fatalf("LoadSites: %+v %v", sites, err)
+	}
+	badTZ := filepath.Join(dir, "badtz.json")
+	os.WriteFile(badTZ, []byte(`[{"name":"x","region":"x","kind":"onprem","tz":"Pacific/Atlantis"}]`), 0o600)
+	if _, err := LoadSites(badTZ); err == nil {
+		t.Error("a site in no real time zone loaded")
 	}
 	bad := filepath.Join(dir, "bad.json")
 	os.WriteFile(bad, []byte(`[{"name":"x","region":"x","kind":"moon"}]`), 0o600)

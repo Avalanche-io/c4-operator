@@ -86,7 +86,7 @@ The farm at a glance. Also delivered by the event stream.
   jobs: [ JobSummary ],
   nodes: [ { name, pool, locality, zone?, region?, state, slots, used, failuresLastHour, suspect,
              cacheBytes, cacheHitRate, running?: [ { job, unit, slots } ] } ],
-  sites?: [ { name, label, region, lat, lon, kind, localities[] } ],
+  sites?: [ { name, label, region, lat, lon, kind, localities[], tz? } ],
   tiers: { tiers: [ { name, hitRate, requestsIn, upstreamRequests, bytesServed, shedRate, inflightFills } ],
            fanIn: { requesters, nodeRequests, peerRequests, regionalRequests, storeRequests },
            publishP50, publishP95, captureP50 },
@@ -113,6 +113,7 @@ The farm at a glance. Also delivered by the event stream.
 | `sites[].kind`            | `onprem` (a studio machine room) or `cloud` (a provider region)                                                        |
 | `sites[].localities`      | the `nodes[].locality` values at the site (racks, zones), in display order                                             |
 | `sites[].lat`, `.lon`     | the site's position in degrees, WGS 84                                                                                 |
+| `sites[].tz`              | the site's time zone, an IANA name (`America/New_York`), so its clock shows its local time; absent shows the viewer's  |
 | `tiers.tiers[].name`      | `node`, `peer`, `regional`, `store`, in fetch order                                                                    |
 | `tiers.fanIn`             | requests per minute entering each tier; each tier forwards only its misses                                             |
 | `capacity[].state`        | `PendingApproval`, `Provisioning`, `Provisioned`                                                                       |
