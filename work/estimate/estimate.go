@@ -80,6 +80,10 @@ type Config struct {
 	NoLocality bool
 	// Default is the class default per unit.
 	Default Prior
+	// Calibration, when set, supplies conformal percentiles of W (see
+	// Calibration). It is shared, not copied, by every estimator of the
+	// class.
+	Calibration *Calibration
 }
 
 // DefaultConfig returns the settings in DESIGN.md section 9.8.

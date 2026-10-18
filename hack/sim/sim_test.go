@@ -136,13 +136,13 @@ func TestOrderArmsOnAHeavyShot(t *testing.T) {
 			break // a region in the middle, away from the first frames
 		}
 	}
-	b := runArm(p, prior, s, "binary")
-	q := runArm(p, prior, s, "sequential")
+	b := runArm(p, prior, s, "binary", nil)
+	q := runArm(p, prior, s, "sequential", nil)
 	if b.FlagAt < 0 || q.FlagAt < 0 || b.FlagAt >= q.FlagAt {
 		t.Fatalf("binary flagged at %.2f, sequential at %.2f", b.FlagAt, q.FlagAt)
 	}
-	if len(b.AbsErr) != p.GridPoints || len(b.Covered) != p.GridPoints {
-		t.Fatalf("grid %d %d", len(b.AbsErr), len(b.Covered))
+	if len(b.AbsErr) != p.GridPoints || len(b.Pts) != p.GridPoints {
+		t.Fatalf("grid %d %d", len(b.AbsErr), len(b.Pts))
 	}
 	// Both list schedules respect the lower bounds: total work over the
 	// slots, and the longest frame.

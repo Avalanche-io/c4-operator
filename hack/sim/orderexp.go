@@ -45,6 +45,7 @@ type orderParams struct {
 	Seed         uint64
 	HeavyFactor  float64
 	PriorSamples int
+	CalTrials    int // history shots per (frames, multiplier) for the W calibration
 }
 
 func defaultOrderParams(trials int) orderParams {
@@ -53,7 +54,7 @@ func defaultOrderParams(trials int) orderParams {
 		BaseMin: 20, JobSigma: 0.4, FrameSigma: 0.2, TrendAmp: 0.15,
 		HeavyLenLo: 0.08, HeavyLenHi: 0.25, Trials: trials,
 		SlackFrac: 0.5, SettleFrac: 0.1, GridPoints: 99, Seed: 0xB1A5, HeavyFactor: 3,
-		PriorSamples: 20000,
+		PriorSamples: 20000, CalTrials: 200,
 	}
 }
 
@@ -67,11 +68,24 @@ type trialArm struct {
 	Makespan  float64   // seconds
 	AbsErr    []float64 // per grid point, |est-true|/true remaining time
 	SignedErr []float64
-	Covered   []bool  // true remaining work <= W90 (estimator arms)
-	FlagAt    float64 // fraction of makespan when the true heavy region is first flagged; -1 never
-	FalseFlag bool    // a region not overlapping the true one was flagged at some grid point
-	SettleAt  float64 // fraction of makespan
-	InBand    float64 // share of grid moments with slack error within the band
+	Pts       []orderPoint // per grid point (estimator arms)
+	FlagAt    float64      // fraction of makespan when the true heavy region is first flagged; -1 never
+	FalseFlag bool         // a region not overlapping the true one was flagged at some grid point
+	SettleAt  float64      // fraction of makespan
+	InBand    float64      // share of grid moments with slack error within the band
+}
+
+// orderPoint is the W90 check at one grid point.
+type orderPoint struct {
+	Done    float64 // share of frames finished
+	Stratum estimate.Stratum
+	Score   float64 // calibration score against the true remaining work
+	// Observable is false for a heavy shot until a frame of its heavy
+	// region has finished: before that, nothing the estimator sees
+	// differs between a 3x and an 8x region.
+	Observable bool
+	AsBuilt    bool // true remaining work <= W + Z*Sigma
+	Covered    bool // true remaining work <= the calibrated W90 (as built without a calibration)
 }
 
 type orderResults struct {
@@ -118,24 +132,49 @@ func orderPrior(p orderParams) estimate.Prior {
 	return a.prior()
 }
 
-func runOrderExperiment(trials int) *orderResults {
-	p := defaultOrderParams(trials)
-	prior := orderPrior(p)
-	type task struct {
-		n     int
-		mult  float64
-		trial int
-		s     shot
-	}
-	var tasks []task
-	r := rand.New(rand.NewPCG(p.Seed, 3))
+type orderTask struct {
+	n     int
+	mult  float64
+	trial int
+	s     shot
+}
+
+func orderTasks(r *rand.Rand, p orderParams, trials int) []orderTask {
+	var tasks []orderTask
 	for _, n := range p.Frames {
 		for _, m := range p.Mults {
-			for t := 0; t < p.Trials; t++ {
-				tasks = append(tasks, task{n, m, t, makeShot(r, p, n, m)})
+			for t := 0; t < trials; t++ {
+				tasks = append(tasks, orderTask{n, m, t, makeShot(r, p, n, m)})
 			}
 		}
 	}
+	return tasks
+}
+
+func runOrderExperiment(trials int) *orderResults {
+	p := defaultOrderParams(trials)
+	prior := orderPrior(p)
+	// The calibration is built first, from shots drawn like the
+	// experiment's but from the history seed: the finished jobs a farm
+	// would have. The estimator arms are calibrated separately, as two
+	// classes would be.
+	hist := orderTasks(rand.New(rand.NewPCG(historySeed, 4)), p, p.CalTrials)
+	cals := map[string]*estimate.Calibration{}
+	for _, row := range runOrderTasks(p, prior, hist, []string{"binary", "sequential"}, nil) {
+		c := cals[row.Arm]
+		if c == nil {
+			c = estimate.NewCalibration(0)
+			cals[row.Arm] = c
+		}
+		for _, pt := range row.Pts {
+			c.Add(pt.Stratum, pt.Score)
+		}
+	}
+	tasks := orderTasks(rand.New(rand.NewPCG(p.Seed, 3)), p, p.Trials)
+	return &orderResults{P: p, Rows: runOrderTasks(p, prior, tasks, orderArms, cals)}
+}
+
+func runOrderTasks(p orderParams, prior estimate.Prior, tasks []orderTask, arms []string, cals map[string]*estimate.Calibration) []trialArm {
 	out := make([][]trialArm, len(tasks))
 	var wg sync.WaitGroup
 	ch := make(chan int)
@@ -145,8 +184,8 @@ func runOrderExperiment(trials int) *orderResults {
 			defer wg.Done()
 			for i := range ch {
 				t := tasks[i]
-				for _, arm := range orderArms {
-					ta := runArm(p, prior, t.s, arm)
+				for _, arm := range arms {
+					ta := runArm(p, prior, t.s, arm, cals[arm])
 					ta.N, ta.Mult, ta.Trial = t.n, t.mult, t.trial
 					out[i] = append(out[i], ta)
 				}
@@ -158,11 +197,11 @@ func runOrderExperiment(trials int) *orderResults {
 	}
 	close(ch)
 	wg.Wait()
-	res := &orderResults{P: p}
+	var rows []trialArm
 	for _, o := range out {
-		res.Rows = append(res.Rows, o...)
+		rows = append(rows, o...)
 	}
-	return res
+	return rows
 }
 
 // schedule list-schedules the shot on P slots in the given order and
@@ -186,7 +225,7 @@ func schedule(dur []float64, ord []int, slots int) (start, end []float64) {
 	return start, end
 }
 
-func runArm(p orderParams, prior estimate.Prior, s shot, arm string) trialArm {
+func runArm(p orderParams, prior estimate.Prior, s shot, arm string, cal *estimate.Calibration) trialArm {
 	n := len(s.dur)
 	kind := order.Sequential
 	if arm == "binary" {
@@ -202,6 +241,7 @@ func runArm(p orderParams, prior estimate.Prior, s shot, arm string) trialArm {
 	cfg := estimate.DefaultConfig()
 	cfg.HeavyFactor = p.HeavyFactor
 	cfg.Default = prior
+	cfg.Calibration = cal
 	// Frames by completion time, to feed the estimator incrementally.
 	byEnd := make([]int, n)
 	for i := range byEnd {
@@ -224,11 +264,15 @@ func runArm(p orderParams, prior estimate.Prior, s shot, arm string) trialArm {
 		var run []estimate.RunningUnit
 		trueWork := 0.0
 		sumDone, nDone := 0.0, 0
+		heavyDone := 0
 		for f := 0; f < n; f++ {
 			switch {
 			case end[f] <= t:
 				sumDone += s.dur[f]
 				nDone++
+				if f >= s.heavyLo && f <= s.heavyHi {
+					heavyDone++
+				}
 			case start[f] <= t:
 				run = append(run, estimate.RunningUnit{Unit: estimate.Unit{Key: "f", Pos: f}, Elapsed: t - start[f]})
 				trueWork += end[f] - t
@@ -268,7 +312,14 @@ func runArm(p orderParams, prior estimate.Prior, s shot, arm string) trialArm {
 				path = math.Max(path, rem)
 			}
 			remEst = math.Max(sum.W/float64(p.Slots), path)
-			ta.Covered = append(ta.Covered, trueWork <= sum.W90)
+			ta.Pts = append(ta.Pts, orderPoint{
+				Done:       float64(nDone) / float64(n),
+				Stratum:    sum.Stratum,
+				Score:      estimate.Score(sum, trueWork),
+				Observable: s.heavyLo < 0 || heavyDone > 0,
+				AsBuilt:    trueWork <= sum.W+cfg.Z*sum.Sigma,
+				Covered:    trueWork <= sum.W90,
+			})
 			for _, h := range est.Heavy("f", n) {
 				overlaps := s.heavyLo >= 0 && h.Lo <= s.heavyHi && h.Hi >= s.heavyLo
 				if overlaps && ta.FlagAt < 0 {

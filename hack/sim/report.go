@@ -428,25 +428,7 @@ func writeOrderSection(b *strings.Builder, o *orderResults) {
 	}
 	table(b, []string{"multiplier", "mean ratio", "median", "p90", "binary more than 5% longer"}, rows)
 
-	b.WriteString("### Calibration of W90\n\nShare of moments at which the true remaining work was at or below the estimator's W90. A calibrated 90th percentile would cover about 90%.\n\n")
-	rows = nil
-	for _, m := range p.Mults {
-		r := []string{fmt.Sprintf("%.0fx", m)}
-		for _, arm := range []string{"binary", "sequential"} {
-			n, k := 0, 0
-			for _, c := range orderCells(o, arm, func(x float64) bool { return x == m }) {
-				for _, v := range c.Covered {
-					n++
-					if v {
-						k++
-					}
-				}
-			}
-			r = append(r, fmt.Sprintf("%.0f%%", 100*float64(k)/float64(max(1, n))))
-		}
-		rows = append(rows, r)
-	}
-	table(b, []string{"multiplier", "binary", "sequential"}, rows)
+	writeCalibrationSection(b, o)
 }
 
 func writeParams(b *strings.Builder, p params, o *orderResults) {
@@ -587,6 +569,9 @@ func writeCSVs(dir string, p params, pols []policySpec, res map[string][]*runRes
 			f := float64(g+1) / float64(o.P.GridPoints+1)
 			errs = append(errs, []string{strconv.Itoa(k.n), ff(k.mult), k.arm, ff(f), strconv.FormatFloat(v[0]/v[2], 'f', 4, 64), strconv.FormatFloat(v[1]/v[2], 'f', 4, 64), strconv.Itoa(int(v[2]))})
 		}
+	}
+	if err := write("order_coverage.csv", []string{"arm", "mult", "finished_band", "observable", "moments", "covered_as_built", "covered_calibrated"}, coverageRows(o)); err != nil {
+		return err
 	}
 	if err := write("order_trials.csv", []string{"frames", "mult", "trial", "arm", "makespan_h", "flag_at", "false_flag", "settle_at", "in_band_share"}, trials); err != nil {
 		return err

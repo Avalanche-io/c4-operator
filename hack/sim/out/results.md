@@ -13,8 +13,8 @@ Mean ± standard deviation across seeds. A render deadline is missed when the jo
 | manual          | 43.0 ± 20.5             | 13.9 ± 6.1 | 107.8 ± 71.2  | 8.9 ± 0.1  | 17.3 ± 1.3 | 9.0 ± 1.3        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 20.1 ± 5.3 | 0 ± 0     |
 | fifo            | 46.6 ± 25.0             | 15.0 ± 7.7 | 140.3 ± 113.3 | 8.9 ± 0.1  | 17.1 ± 1.2 | 8.9 ± 1.3        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9 | 0 ± 0     |
 | edf             | 24.4 ± 8.8              | 7.9 ± 2.5  | 60.1 ± 37.2   | 8.9 ± 0.1  | 17.2 ± 1.3 | 9.1 ± 1.4        | 47.1 ± 6.1 | 36.3 ± 6.2 | 17.3 ± 0.3 | 1935 ± 332   | 18.0 ± 4.9 | 0 ± 0     |
-| objective       | 23.8 ± 9.7              | 7.7 ± 2.9  | 61.8 ± 37.3   | 8.8 ± 0.1  | 15.4 ± 0.6 | 5.6 ± 0.8        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.3 ± 7.7 | 0 ± 0     |
-| objective+burst | 20.8 ± 8.7              | 6.8 ± 2.7  | 50.5 ± 31.3   | 8.8 ± 0.1  | 15.4 ± 0.5 | 5.6 ± 0.7        | 45.7 ± 5.9 | 34.2 ± 3.7 | 17.3 ± 0.3 | 1935 ± 332   | 23.5 ± 7.4 | 487 ± 281 |
+| objective       | 24.0 ± 9.7              | 7.8 ± 2.9  | 61.8 ± 37.1   | 8.8 ± 0.1  | 15.5 ± 0.7 | 5.7 ± 0.8        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.5 ± 7.6 | 0 ± 0     |
+| objective+burst | 21.2 ± 9.1              | 6.9 ± 2.8  | 51.2 ± 32.0   | 8.8 ± 0.1  | 15.4 ± 0.5 | 5.5 ± 0.7        | 45.7 ± 5.9 | 34.3 ± 3.7 | 17.3 ± 0.3 | 1935 ± 332   | 23.2 ± 7.7 | 481 ± 284 |
 
 Render jobs with deadlines per week: 305 on average. The spread across seeds is large because each seed is a different week (job counts, shot lengths, where heavy shots land); compare policies within a seed, below.
 
@@ -28,10 +28,10 @@ Difference from EDF on the same week (policy minus EDF): mean ± standard deviat
 | -------------------------------- | ----------- | ------------ | ------------ | ------------------------------------------ |
 | manual                           | 18.6 ± 13.1 | 47.6 ± 47.4  | 0.1 ± 0.1    | 0 / 0 / 5                                  |
 | fifo                             | 22.2 ± 18.4 | 80.1 ± 86.1  | -0.1 ± 0.1   | 0 / 0 / 5                                  |
-| objective                        | -0.6 ± 5.1  | 1.7 ± 8.9    | -1.7 ± 1.0   | 2 / 0 / 3                                  |
-| objective+burst                  | -3.6 ± 7.7  | -9.6 ± 15.4  | -1.8 ± 1.0   | 4 / 0 / 1                                  |
-| objective, no information tier   | -0.4 ± 5.0  | 1.1 ± 9.3    | -1.6 ± 0.8   | 2 / 0 / 3                                  |
-| objective, fair-share surplus    | -0.4 ± 4.0  | -0.5 ± 8.1   | -1.7 ± 0.7   | 3 / 0 / 2                                  |
+| objective                        | -0.4 ± 5.2  | 1.7 ± 9.3    | -1.7 ± 0.8   | 2 / 0 / 3                                  |
+| objective+burst                  | -3.2 ± 7.4  | -9.0 ± 14.7  | -1.8 ± 1.0   | 4 / 0 / 1                                  |
+| objective, no information tier   | -1.0 ± 4.8  | 1.4 ± 9.5    | -1.7 ± 0.9   | 2 / 0 / 3                                  |
+| objective, fair-share surplus    | -0.8 ± 3.8  | -0.8 ± 8.2   | -1.7 ± 0.8   | 3 / 0 / 2                                  |
 | objective, DESIGN 9.9 as written | 13.6 ± 13.8 | 17.7 ± 28.9  | -0.0 ± 1.7   | 1 / 0 / 4                                  |
 
 ### By job kind
@@ -43,10 +43,10 @@ Missed deadlines and late hours per kind. ML runs carry a deadline of submission
 | manual                           | 16.6 ± 10.5 of 106 | 74.2 ± 59.3    | 26.0 ± 14.0 of 186 | 32.7 ± 18.3    | 0.4 ± 0.5 of 13 | 0.9 ± 1.7       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | fifo                             | 12.6 ± 7.8 of 106  | 53.1 ± 34.7    | 33.8 ± 20.0 of 186 | 85.6 ± 79.8    | 0.2 ± 0.4 of 13 | 1.6 ± 3.6       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | edf                              | 8.6 ± 5.1 of 106   | 34.0 ± 25.4    | 14.8 ± 4.0 of 186  | 19.6 ± 8.9     | 1.0 ± 1.0 of 13 | 6.6 ± 6.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective                        | 8.2 ± 4.0 of 106   | 35.5 ± 25.2    | 14.6 ± 5.1 of 186  | 20.8 ± 10.7    | 1.0 ± 1.0 of 13 | 5.5 ± 5.1       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective+burst                  | 6.2 ± 3.0 of 106   | 26.7 ± 20.1    | 13.8 ± 5.1 of 186  | 19.7 ± 10.1    | 0.8 ± 0.8 of 13 | 4.2 ± 4.3       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective, no information tier   | 8.2 ± 4.0 of 106   | 35.3 ± 25.2    | 14.6 ± 5.2 of 186  | 20.5 ± 10.7    | 1.2 ± 1.3 of 13 | 5.5 ± 5.1       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
-| objective, fair-share surplus    | 7.8 ± 3.3 of 106   | 32.7 ± 25.9    | 15.0 ± 4.7 of 186  | 21.3 ± 11.8    | 1.2 ± 1.3 of 13 | 5.6 ± 5.3       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective                        | 8.4 ± 4.0 of 106   | 35.5 ± 25.1    | 14.6 ± 5.1 of 186  | 20.7 ± 10.6    | 1.0 ± 1.0 of 13 | 5.6 ± 5.2       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective+burst                  | 6.2 ± 3.0 of 106   | 26.7 ± 20.2    | 14.2 ± 5.5 of 186  | 19.8 ± 10.1    | 0.8 ± 0.8 of 13 | 4.7 ± 4.4       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective, no information tier   | 8.2 ± 4.0 of 106   | 35.3 ± 25.3    | 14.2 ± 4.6 of 186  | 20.6 ± 10.7    | 1.0 ± 1.0 of 13 | 5.6 ± 5.2       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
+| objective, fair-share surplus    | 7.8 ± 3.3 of 106   | 32.6 ± 25.3    | 14.6 ± 4.7 of 186  | 21.2 ± 11.6    | 1.2 ± 1.3 of 13 | 5.6 ± 5.2       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 | objective, DESIGN 9.9 as written | 18.2 ± 13.1 of 106 | 48.7 ± 42.8    | 18.4 ± 8.2 of 186  | 23.8 ± 14.2    | 1.4 ± 1.7 of 13 | 5.3 ± 5.0       | 0.0 ± 0.0 of 22 | 0.0 ± 0.0 |
 
 ### By show
@@ -58,26 +58,26 @@ Late hours of each show's render jobs (fairness across projects).
 | manual                           | 27.5 ± 18.8  | 44.9 ± 35.4  | 35.4 ± 32.4  |
 | fifo                             | 62.3 ± 48.3  | 47.2 ± 35.7  | 30.9 ± 34.2  |
 | edf                              | 23.0 ± 17.8  | 26.4 ± 18.5  | 10.7 ± 10.5  |
-| objective                        | 25.5 ± 19.4  | 21.4 ± 18.3  | 14.9 ± 14.9  |
-| objective+burst                  | 19.7 ± 21.3  | 20.6 ± 16.7  | 10.3 ± 8.3   |
-| objective, no information tier   | 25.2 ± 19.2  | 21.6 ± 19.2  | 14.5 ± 14.4  |
-| objective, fair-share surplus    | 24.0 ± 19.7  | 21.4 ± 19.7  | 14.3 ± 13.8  |
+| objective                        | 25.5 ± 19.2  | 21.5 ± 18.4  | 14.8 ± 14.7  |
+| objective+burst                  | 20.1 ± 21.0  | 20.6 ± 16.8  | 10.5 ± 8.5   |
+| objective, no information tier   | 25.2 ± 19.3  | 21.4 ± 18.8  | 14.9 ± 15.0  |
+| objective, fair-share surplus    | 24.1 ± 19.6  | 21.2 ± 19.2  | 14.2 ± 14.2  |
 | objective, DESIGN 9.9 as written | 31.7 ± 22.5  | 27.5 ± 27.1  | 18.6 ± 19.4  |
 
 ### Preemption, lost work and burst
 
 Preemptions counts units stopped (yields and kills). Lost CPU hours include task failures, which every policy suffers alike (failures are drawn per unit and attempt from the seed, not from the policy). Bursts needing approval counts distinct jobs for which the policy found a burst that would restore the deadline but was over the project's budget or cost more than the lateness it prevents; the simulation never approves those.
 
-| policy                           | preemptions | by reason (mean)                             | lost CPU h | ML useful GPU h | ML lost GPU h | burst slot-hours | burst $   | bursts needing approval |
-| -------------------------------- | ----------- | -------------------------------------------- | ---------- | --------------- | ------------- | ---------------- | --------- | ----------------------- |
-| manual                           | 7 ± 1       | wrangler-suspend 7                           | 198 ± 37   | 378 ± 95        | 2.3 ± 0.9     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
-| fifo                             | 0 ± 0       | none                                         | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
-| edf                              | 0 ± 0       | none                                         | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
-| objective                        | 563 ± 59    | reclaim-nominal 251, restore-feasibility 311 | 217 ± 30   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.0 ± 2.1               |
-| objective+burst                  | 578 ± 66    | reclaim-nominal 268, restore-feasibility 311 | 215 ± 28   | 378 ± 95        | 0.4 ± 0.4     | 767 ± 430        | 487 ± 281 | 0.0 ± 0.0               |
-| objective, no information tier   | 586 ± 73    | reclaim-nominal 260, restore-feasibility 326 | 216 ± 31   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.4 ± 1.5               |
-| objective, fair-share surplus    | 526 ± 84    | reclaim-nominal 225, restore-feasibility 301 | 214 ± 32   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 5.0 ± 2.0               |
-| objective, DESIGN 9.9 as written | 597 ± 87    | reclaim-nominal 209, restore-feasibility 388 | 219 ± 34   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 54.4 ± 31.2             |
+| policy                           | preemptions | by reason (mean)                                           | lost CPU h | ML useful GPU h | ML lost GPU h | burst slot-hours | burst $   | bursts needing approval |
+| -------------------------------- | ----------- | ---------------------------------------------------------- | ---------- | --------------- | ------------- | ---------------- | --------- | ----------------------- |
+| manual                           | 7 ± 1       | wrangler-suspend 7                                         | 198 ± 37   | 378 ± 95        | 2.3 ± 0.9     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
+| fifo                             | 0 ± 0       | none                                                       | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
+| edf                              | 0 ± 0       | none                                                       | 184 ± 22   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 0.0 ± 0.0               |
+| objective                        | 567 ± 63    | guard-unit 6, reclaim-nominal 260, restore-feasibility 301 | 217 ± 31   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.2 ± 2.2               |
+| objective+burst                  | 583 ± 73    | guard-unit 7, reclaim-nominal 265, restore-feasibility 311 | 216 ± 31   | 378 ± 95        | 0.4 ± 0.4     | 759 ± 433        | 481 ± 284 | 0.0 ± 0.0               |
+| objective, no information tier   | 578 ± 56    | guard-unit 7, reclaim-nominal 253, restore-feasibility 319 | 216 ± 33   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 4.4 ± 1.5               |
+| objective, fair-share surplus    | 518 ± 79    | guard-unit 7, reclaim-nominal 218, restore-feasibility 293 | 214 ± 32   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 5.0 ± 2.0               |
+| objective, DESIGN 9.9 as written | 597 ± 87    | reclaim-nominal 209, restore-feasibility 388               | 219 ± 34   | 378 ± 95        | 0.4 ± 0.4     | 0 ± 0            | 0 ± 0     | 54.4 ± 31.2             |
 
 ### Ablations
 
@@ -85,9 +85,9 @@ The objective policy with parts of DESIGN.md section 9.9 restored as written (se
 
 | policy                           | render deadlines missed | missed %   | late hours  | CI p50 min | CI p95 min | CI over 15 min % | util cpu % | util gpu % | util ci %  | useful GPU h | lost GPU h | burst $ |
 | -------------------------------- | ----------------------- | ---------- | ----------- | ---------- | ---------- | ---------------- | ---------- | ---------- | ---------- | ------------ | ---------- | ------- |
-| objective                        | 23.8 ± 9.7              | 7.7 ± 2.9  | 61.8 ± 37.3 | 8.8 ± 0.1  | 15.4 ± 0.6 | 5.6 ± 0.8        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.3 ± 7.7 | 0 ± 0   |
-| objective, no information tier   | 24.0 ± 10.2             | 7.8 ± 3.0  | 61.3 ± 37.4 | 8.8 ± 0.1  | 15.5 ± 0.9 | 5.7 ± 1.1        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.3 ± 6.2 | 0 ± 0   |
-| objective, fair-share surplus    | 24.0 ± 9.0              | 7.8 ± 2.6  | 59.7 ± 39.5 | 8.8 ± 0.1  | 15.5 ± 0.8 | 5.6 ± 0.9        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.3 ± 6.7 | 0 ± 0   |
+| objective                        | 24.0 ± 9.7              | 7.8 ± 2.9  | 61.8 ± 37.1 | 8.8 ± 0.1  | 15.5 ± 0.7 | 5.7 ± 0.8        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.5 ± 7.6 | 0 ± 0   |
+| objective, no information tier   | 23.4 ± 9.2              | 7.6 ± 2.7  | 61.5 ± 37.5 | 8.8 ± 0.1  | 15.5 ± 0.8 | 5.7 ± 1.0        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.2 ± 6.3 | 0 ± 0   |
+| objective, fair-share surplus    | 23.6 ± 9.0              | 7.6 ± 2.6  | 59.4 ± 39.0 | 8.8 ± 0.1  | 15.5 ± 0.7 | 5.6 ± 1.0        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 23.4 ± 6.6 | 0 ± 0   |
 | objective, DESIGN 9.9 as written | 38.0 ± 21.0             | 12.2 ± 6.2 | 77.8 ± 58.0 | 8.8 ± 0.1  | 17.2 ± 1.2 | 8.9 ± 1.9        | 47.2 ± 6.1 | 36.4 ± 6.3 | 17.3 ± 0.3 | 1935 ± 332   | 24.2 ± 6.3 | 0 ± 0   |
 
 ## Sensitivity: half the GPUs
@@ -99,8 +99,8 @@ The main farm's GPU pool runs at about a third of capacity, so ML runs and GPU r
 | manual          | 68.8 ± 23.7   | 476.3 ± 596.1  | 28.6 ± 23.7       | 375.5 ± 621.8     | 5.4 ± 7.9 | 72.7 ± 12.3 | 378 ± 95        | 3.8 ± 2.7     | 21.8 ± 3.7 | 10 ± 6      | 0 ± 0     |
 | fifo            | 82.0 ± 30.0   | 610.0 ± 645.9  | 39.8 ± 15.9       | 480.0 ± 694.0     | 2.2 ± 4.9 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9 | 0 ± 0       | 0 ± 0     |
 | edf             | 49.2 ± 18.8   | 381.6 ± 574.9  | 27.6 ± 19.9       | 328.5 ± 591.0     | 4.4 ± 8.8 | 72.6 ± 12.3 | 378 ± 95        | 0.4 ± 0.4     | 18.0 ± 4.9 | 0 ± 0       | 0 ± 0     |
-| objective       | 50.0 ± 29.4   | 827.5 ± 1179.9 | 27.6 ± 21.4       | 770.1 ± 1150.9    | 0.8 ± 1.8 | 70.2 ± 12.5 | 378 ± 95        | 2.2 ± 1.0     | 22.9 ± 5.4 | 494 ± 55    | 0 ± 0     |
-| objective+burst | 22.2 ± 8.1    | 52.8 ± 31.4    | 1.6 ± 1.5         | 2.6 ± 4.7         | 0.0 ± 0.0 | 49.6 ± 4.5  | 378 ± 95        | 1.4 ± 0.9     | 24.6 ± 5.6 | 523 ± 34    | 965 ± 410 |
+| objective       | 48.8 ± 28.4   | 822.6 ± 1162.6 | 26.6 ± 21.5       | 766.0 ± 1134.1    | 0.8 ± 1.8 | 70.1 ± 12.6 | 378 ± 95        | 2.1 ± 0.8     | 22.9 ± 5.4 | 516 ± 77    | 0 ± 0     |
+| objective+burst | 22.0 ± 8.6    | 52.8 ± 31.6    | 1.4 ± 1.1         | 2.5 ± 4.7         | 0.0 ± 0.0 | 49.4 ± 4.4  | 378 ± 95        | 1.8 ± 1.2     | 25.5 ± 6.2 | 552 ± 50    | 978 ± 393 |
 
 ## Binary against sequential order
 
@@ -168,15 +168,108 @@ The order also changes when the shot finishes on a fixed number of slots. Binary
 
 ### Calibration of W90
 
-Share of moments at which the true remaining work was at or below the estimator's W90. A calibrated 90th percentile would cover about 90%.
+Share of moments at which the true remaining work was at or below W90. A calibrated 90th percentile covers about 90%; the pass band is 87 to 93%. As built, W90 is W + 1.28 Sigma. Calibrated, it is W plus the conformal 90% quantile of scores from finished shots in the same stratum (`estimate.Calibration`): 200 history shots per frame count and multiplier, drawn like the experiment's from a separate seed, with the same mix of multipliers. Strata are what the estimator sees: the share of frames finished, the heavy multiple measured on finished frames, and a running frame that has outlasted it.
 
-| multiplier | binary | sequential |
-| ---------- | ------ | ---------- |
-| 1x         | 88%    | 90%        |
-| 2x         | 85%    | 83%        |
-| 3x         | 83%    | 72%        |
-| 5x         | 71%    | 70%        |
-| 8x         | 68%    | 65%        |
+| multiplier | binary, as built | binary, calibrated | sequential, as built | sequential, calibrated |
+| ---------- | ---------------- | ------------------ | -------------------- | ---------------------- |
+| 1x         | 88%              | 92%                | 90%                  | 99%                    |
+| 2x         | 85%              | 92%                | 83%                  | 96%                    |
+| 3x         | 83%              | 93%                | 72%                  | 92%                    |
+| 5x         | 71%              | 89%                | 70%                  | 86%                    |
+| 8x         | 68%              | 85%                | 65%                  | 76%                    |
+
+Binary order, by the share of frames finished: calibrated (as built), and the number of moments.
+
+| multiplier | whole render      | under 1/16        | 1/16 to 1/4       | 1/4 to 1/2       | 1/2 to 3/4       | 3/4 on           |
+| ---------- | ----------------- | ----------------- | ----------------- | ---------------- | ---------------- | ---------------- |
+| 1x         | 92% (88%) n=11880 | 100% (88%) n=1042 | 100% (93%) n=2128 | 90% (91%) n=2853 | 87% (88%) n=2863 | 89% (82%) n=2994 |
+| 2x         | 92% (85%) n=11880 | 99% (69%) n=974   | 97% (88%) n=2073  | 92% (91%) n=2782 | 91% (90%) n=2790 | 89% (80%) n=3261 |
+| 3x         | 93% (83%) n=11880 | 97% (41%) n=854   | 94% (75%) n=2040  | 92% (92%) n=2696 | 93% (92%) n=2704 | 91% (85%) n=3586 |
+| 5x         | 89% (71%) n=11880 | 83% (28%) n=654   | 88% (48%) n=1880  | 90% (76%) n=2609 | 88% (85%) n=2588 | 90% (77%) n=4149 |
+| 8x         | 85% (68%) n=11880 | 53% (12%) n=474   | 67% (29%) n=1689  | 87% (68%) n=2554 | 89% (81%) n=2523 | 91% (80%) n=4640 |
+
+Binary order, moments at which the multiple is observable: every moment of a plain shot, and the moments of a heavy shot after a frame of its heavy region has finished.
+
+| multiplier | whole render      | under 1/16        | 1/16 to 1/4       | 1/4 to 1/2       | 1/2 to 3/4       | 3/4 on           |
+| ---------- | ----------------- | ----------------- | ----------------- | ---------------- | ---------------- | ---------------- |
+| 1x         | 92% (88%) n=11880 | 100% (88%) n=1042 | 100% (93%) n=2128 | 90% (91%) n=2853 | 87% (88%) n=2863 | 89% (82%) n=2994 |
+| 2x         | 92% (88%) n=10715 | 100% (92%) n=128  | 97% (93%) n=1754  | 92% (91%) n=2782 | 91% (90%) n=2790 | 89% (80%) n=3261 |
+| 3x         | 92% (90%) n=10363 | 100% (97%) n=33   | 96% (95%) n=1359  | 92% (92%) n=2681 | 93% (92%) n=2704 | 91% (85%) n=3586 |
+| 5x         | 89% (83%) n=9966  | 100% (50%) n=2    | 92% (93%) n=909   | 89% (85%) n=2320 | 88% (85%) n=2586 | 90% (77%) n=4149 |
+| 8x         | 90% (84%) n=9523  |                   | 77% (82%) n=600   | 90% (90%) n=1915 | 90% (86%) n=2376 | 91% (80%) n=4632 |
+
+Binary order, the other moments: a heavy shot whose heavy frames are all still running or queued. Until one finishes, a 3x, a 5x and an 8x region produce the same observations (the same plain frames finish at the same times, and the heavy frames have run equally long), while the 8x shot has roughly twice the remaining work of the 3x one. No W90 computed from those observations can cover both at 87 to 93%; calibration covers 90% of the mix.
+
+| multiplier | whole render     | under 1/16      | 1/16 to 1/4     | 1/4 to 1/2      | 1/2 to 3/4     | 3/4 on      |
+| ---------- | ---------------- | --------------- | --------------- | --------------- | -------------- | ----------- |
+| 1x         |                  |                 |                 |                 |                |             |
+| 2x         | 98% (65%) n=1165 | 99% (66%) n=846 | 96% (65%) n=319 |                 |                |             |
+| 3x         | 94% (38%) n=1517 | 97% (39%) n=821 | 92% (35%) n=681 | 100% (87%) n=15 |                |             |
+| 5x         | 86% (13%) n=1914 | 83% (27%) n=652 | 85% (5%) n=971  | 96% (5%) n=289  | 0% (0%) n=2    |             |
+| 8x         | 65% (3%) n=2357  | 53% (12%) n=474 | 62% (0%) n=1089 | 78% (2%) n=639  | 77% (0%) n=147 | 0% (0%) n=8 |
+
+Binary order, by stratum (what the estimator sees), strata with at least 300 moments; 4179 moments fall in smaller strata.
+
+| share finished / heavy multiple measured / running frame past it | moments | as built | calibrated |
+| ---------------------------------------------------------------- | ------- | -------- | ---------- |
+| under 1/16 / measured none / running past it none                | 3419    | 57%      | 90%        |
+| under 1/16 / measured none / running past it 1.5-3x              | 549     | 40%      | 92%        |
+| 1/16 to 1/4 / measured none / running past it none               | 2736    | 78%      | 90%        |
+| 1/16 to 1/4 / measured none / running past it 1.5-3x             | 2512    | 47%      | 89%        |
+| 1/16 to 1/4 / measured none / running past it 3-6x               | 902     | 13%      | 91%        |
+| 1/16 to 1/4 / measured mild / running past it none               | 433     | 93%      | 91%        |
+| 1/16 to 1/4 / measured mild / running past it 1.5-3x             | 316     | 97%      | 95%        |
+| 1/16 to 1/4 / measured 3-3.75x / running past it none            | 721     | 96%      | 94%        |
+| 1/16 to 1/4 / measured 3-3.75x / running past it 3-6x            | 431     | 92%      | 90%        |
+| 1/16 to 1/4 / measured 3.75-4.7x / running past it 3-6x          | 429     | 93%      | 93%        |
+| 1/4 to 1/2 / measured none / running past it none                | 2729    | 90%      | 88%        |
+| 1/4 to 1/2 / measured none / running past it 1.5-3x              | 688     | 81%      | 88%        |
+| 1/4 to 1/2 / measured none / running past it 3-6x                | 838     | 11%      | 88%        |
+| 1/4 to 1/2 / measured mild / running past it none                | 997     | 91%      | 90%        |
+| 1/4 to 1/2 / measured mild / running past it 1.5-3x              | 577     | 91%      | 92%        |
+| 1/4 to 1/2 / measured 3-3.75x / running past it none             | 2124    | 93%      | 93%        |
+| 1/4 to 1/2 / measured 3-3.75x / running past it 3-6x             | 860     | 88%      | 88%        |
+| 1/4 to 1/2 / measured 3.75-4.7x / running past it none           | 356     | 87%      | 88%        |
+| 1/4 to 1/2 / measured 3.75-4.7x / running past it 3-6x           | 848     | 80%      | 86%        |
+| 1/4 to 1/2 / measured 4.7-5.9x / running past it 3-6x            | 515     | 91%      | 92%        |
+| 1/4 to 1/2 / measured 4.7-5.9x / running past it 6x+             | 449     | 90%      | 90%        |
+| 1/4 to 1/2 / measured 5.9-7.3x / running past it 6x+             | 541     | 88%      | 94%        |
+| 1/4 to 1/2 / measured 7.3-9.2x / running past it 6x+             | 925     | 96%      | 94%        |
+| 1/2 to 3/4 / measured none / running past it none                | 2601    | 88%      | 87%        |
+| 1/2 to 3/4 / measured none / running past it 1.5-3x              | 326     | 88%      | 87%        |
+| 1/2 to 3/4 / measured mild / running past it none                | 979     | 89%      | 91%        |
+| 1/2 to 3/4 / measured mild / running past it 1.5-3x              | 500     | 85%      | 89%        |
+| 1/2 to 3/4 / measured 3-3.75x / running past it none             | 2643    | 91%      | 92%        |
+| 1/2 to 3/4 / measured 3-3.75x / running past it 3-6x             | 843     | 92%      | 91%        |
+| 1/2 to 3/4 / measured 3.75-4.7x / running past it none           | 471     | 87%      | 89%        |
+| 1/2 to 3/4 / measured 3.75-4.7x / running past it 3-6x           | 908     | 82%      | 87%        |
+| 1/2 to 3/4 / measured 4.7-5.9x / running past it none            | 336     | 87%      | 88%        |
+| 1/2 to 3/4 / measured 4.7-5.9x / running past it 3-6x            | 596     | 85%      | 91%        |
+| 1/2 to 3/4 / measured 4.7-5.9x / running past it 6x+             | 484     | 87%      | 89%        |
+| 1/2 to 3/4 / measured 5.9-7.3x / running past it 6x+             | 657     | 81%      | 88%        |
+| 1/2 to 3/4 / measured 7.3-9.2x / running past it 6x+             | 1124    | 91%      | 95%        |
+| 3/4 on / measured none / running past it none                    | 2733    | 82%      | 89%        |
+| 3/4 on / measured mild / running past it none                    | 972     | 81%      | 91%        |
+| 3/4 on / measured mild / running past it 1.5-3x                  | 476     | 78%      | 84%        |
+| 3/4 on / measured 3-3.75x / running past it none                 | 3614    | 81%      | 89%        |
+| 3/4 on / measured 3-3.75x / running past it 3-6x                 | 1179    | 87%      | 91%        |
+| 3/4 on / measured 3.75-4.7x / running past it none               | 664     | 79%      | 90%        |
+| 3/4 on / measured 3.75-4.7x / running past it 3-6x               | 1322    | 72%      | 88%        |
+| 3/4 on / measured 4.7-5.9x / running past it none                | 456     | 73%      | 89%        |
+| 3/4 on / measured 4.7-5.9x / running past it 3-6x                | 958     | 79%      | 92%        |
+| 3/4 on / measured 4.7-5.9x / running past it 6x+                 | 809     | 89%      | 94%        |
+| 3/4 on / measured 5.9-7.3x / running past it none                | 312     | 77%      | 87%        |
+| 3/4 on / measured 5.9-7.3x / running past it 6x+                 | 1167    | 79%      | 90%        |
+| 3/4 on / measured 7.3-9.2x / running past it none                | 428     | 81%      | 94%        |
+| 3/4 on / measured 7.3-9.2x / running past it 6x+                 | 2289    | 81%      | 93%        |
+| 3/4 on / measured 9.2x+ / running past it 6x+                    | 479     | 87%      | 93%        |
+
+Acceptance (binary, calibrated). Standard errors cluster the moments by trial.
+
+- Strata the estimator can see, with at least 300 moments, covered at 87 to 93% or within two standard errors of 90%: 46 of 51 (two standard errors leave about 1 in 20 out by chance). fail: 1/16 to 1/4 / measured mild / running past it 1.5-3x 94.9% (se 2.4); 1/16 to 1/4 / measured 3-3.75x / running past it none 94.3% (se 1.9); 1/4 to 1/2 / measured 5.9-7.3x / running past it 6x+ 94.3% (se 1.9); 1/4 to 1/2 / measured 7.3-9.2x / running past it 6x+ 94.5% (se 2.0); 1/2 to 3/4 / measured 7.3-9.2x / running past it 6x+ 94.8% (se 2.3).
+- Plain, 3x, 5x and 8x at 87 to 93%, observable moments, every band from 1/4 finished on: pass.
+- The same from 1/16 finished on: fail: 1x 1/16 to 1/4 99.8% (se 0.2); 3x 1/16 to 1/4 95.7% (se 1.3); 8x 1/16 to 1/4 77.3% (se 3.7).
+- As first written, every band and every moment, including those at which the multiple cannot be observed: fail: 1x under 1/16 99.7% (se 0.2); 1x 1/16 to 1/4 99.8% (se 0.2); 3x under 1/16 96.7% (se 0.7); 3x 1/16 to 1/4 94.4% (se 1.0); 5x under 1/16 83.2% (se 1.5); 8x under 1/16 53.4% (se 2.3); 8x 1/16 to 1/4 67.2% (se 2.8); 8x 1/4 to 1/2 86.8% (se 1.9).
 
 ## Every parameter
 
@@ -322,6 +415,7 @@ GridPoints: 99
 Seed: 45477
 HeavyFactor: 3
 PriorSamples: 20000
+CalTrials: 200
 ```
 
 ## Discussion
@@ -360,7 +454,7 @@ The simulation also caught a nondeterminism bug: summing region errors over a Go
 - **Sequential with the estimator is worse than the plain mean in heavy shots.** Once sequential order enters a heavy region, the estimator's one-sided rule (median of the three nearest frames) assumes the rest of the shot is as heavy as the last frames, which overestimates by 54% on average at 8x. The plain mean dilutes the heavy frames instead. This is a weakness of the one-sided fallback, visible only in sequential order.
 - **Makespan.** Binary order leaves frames from everywhere in the shot, heavy ones included, to its finest levels, so the last wave on a fixed slot count can hold long frames that start late. Binary renders were longer than sequential ones by 6%, 11% and 13% on average at 3x, 5x and 8x (no difference on plain shots). Starting the longest known frames of each level first would likely recover most of this; it was not tried.
 - **Settling.** For heavy shots the binary estimate settles inside the 10% band later in the render, or not at all before the end, more often than sequential (at 8x: 54% of trials settle before the end against 68%). Near the end, heavy frames still running make the remainder lumpy under binary order, while sequential order has left its heavy region behind.
-- **Calibration.** W90 covered the true remaining work 88% of the time on plain shots, close to the intended 90%, but only 68% to 83% on shots with a heavy region of 3x or more. The error bars are too narrow when part of the cost has not been sampled yet.
+- **Calibration.** As built (W + 1.28 Sigma), W90 covered the true remaining work 88% of the time on plain shots, close to the intended 90%, but only 68% to 83% on shots with a heavy region of 3x or more: the error bars are too narrow when part of the cost has not been sampled yet. Calibrated against history shots in strata the estimator can see (`estimate.Calibration`), binary-order W90 covers 87 to 93% for plain, 3x, 5x and 8x shots in every band from a quarter of the frames finished on, once a frame of the heavy region has finished. Before that, a 3x and an 8x region look the same to any estimator, and calibration covers 90% of the mix: plain and 3x shots are over-covered and 8x shots under-covered in the first quarter of the frames. Sequential order reveals a heavy region only when it reaches it, so the same strata calibrate it less well (75% at 8x).
 - Both orders underestimate remaining time by about 8% on plain shots: max(W/P, t_path) leaves out the tail of a list schedule, the same effect item 2 above corrects for in R.
 
 ### What the simulation does not show

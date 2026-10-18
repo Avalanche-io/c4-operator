@@ -33,18 +33,28 @@ type RunningUnit struct {
 	Elapsed float64 // seconds since this attempt started
 }
 
-// Summary is a job's remaining work. W, Sigma and W90 are slot-seconds;
-// TPath is seconds and is filled in by the caller from CriticalPath,
-// because only the class knows the unit graph.
+// Summary is a job's remaining work. W, Sigma and the percentiles W50 to
+// W95 are slot-seconds; TPath is seconds and is filled in by the caller
+// from CriticalPath, because only the class knows the unit graph.
+//
+// W is the region model's expectation. The percentiles are calibrated
+// (see Calibration) when the estimator's Config has a Calibration with
+// enough scores for the job's Stratum, and Calibrated says so; otherwise
+// they are W plus the normal quantile times Sigma, with W90 using Config.Z.
 type Summary struct {
 	W, Sigma, W90 float64
+	W50, W80, W95 float64
 	TPath         float64
 	Queued        int
 	Running       int
 	Unevaluated   int
+	Stratum       Stratum
+	Calibrated    bool
 }
 
-// Plus combines two independent summaries.
+// Plus combines two independent summaries. Calibrated percentiles add
+// (a conservative combination: it assumes the two are comonotone);
+// uncalibrated ones are recomputed from the combined Sigma.
 func (s Summary) Plus(o Summary) Summary {
 	r := Summary{
 		W:           s.W + o.W,
@@ -54,8 +64,41 @@ func (s Summary) Plus(o Summary) Summary {
 		Running:     s.Running + o.Running,
 		Unevaluated: s.Unevaluated + o.Unevaluated,
 	}
-	r.W90 = r.W + 1.28*r.Sigma
+	if s.Calibrated && o.Calibrated {
+		r.W50, r.W80, r.W90, r.W95 = s.W50+o.W50, s.W80+o.W80, s.W90+o.W90, s.W95+o.W95
+		r.Calibrated = true
+		return r
+	}
+	r.normal(1.28)
 	return r
+}
+
+// normal sets the percentiles from W and Sigma as a normal distribution.
+func (s *Summary) normal(z90 float64) {
+	s.W50 = s.W
+	s.W80 = s.W + 0.8416*s.Sigma
+	s.W90 = s.W + z90*s.Sigma
+	s.W95 = s.W + 1.6449*s.Sigma
+}
+
+// calibrate sets the percentiles from c's scores for the summary's
+// stratum, and reports whether it could.
+func (s *Summary) calibrate(c *Calibration) bool {
+	if c == nil {
+		return false
+	}
+	sc := Scale(*s)
+	var w [4]float64
+	for i, q := range []float64{0.5, 0.8, 0.9, 0.95} {
+		x, ok := c.Quantile(s.Stratum, q)
+		if !ok {
+			return false
+		}
+		w[i] = math.Max(0, s.W+x*sc)
+	}
+	s.W50, s.W80, s.W90, s.W95 = w[0], w[1], w[2], w[3]
+	s.Calibrated = true
+	return true
 }
 
 // Remainder is the expected remaining duration (seconds) of a running
@@ -71,9 +114,10 @@ func (e *Estimator) Remainder(p Pred, done, elapsed float64) (float64, float64) 
 	return rem, p.SD() * rem / p.Mean
 }
 
-// Summarize computes W, its spread and W90 over queued and running units,
-// including the expected work of unexpanded generators. It first calls
-// SetRunning with the running units.
+// Summarize computes W, its spread and its percentiles over queued and
+// running units, including the expected work of unexpanded generators.
+// It first calls SetRunning with the running units. The percentiles are
+// calibrated when Config.Calibration covers the job's stratum.
 //
 // Variance: queued units use the region model in the package comment.
 // Running units are independent of each other and of the regions. For G
@@ -138,7 +182,10 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		v += corr[r] * corr[r]
 	}
 	s.Sigma = math.Sqrt(v)
-	s.W90 = s.W + e.z()*s.Sigma
+	s.Stratum = e.stratum(queued, run)
+	if !s.calibrate(e.cfg.Calibration) {
+		s.normal(e.z())
+	}
 	return s
 }
 
