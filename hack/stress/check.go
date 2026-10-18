@@ -343,6 +343,36 @@ func (c *checker) decision(s sched.Snapshot, d sched.Decisions) {
 			v.gangHeld[target.Name] = true
 		}
 	}
+	// A gang of a project below its nominal quota with deadline demand,
+	// that fits nowhere, holds the largest pool it fits in (the
+	// guarantee's hold).
+	for i := range s.Jobs {
+		j := &s.Jobs[i]
+		if v.sent[j.ID] >= len(j.Runnable) || j.Hold || j.HoldStop || v.d.Jobs[j.ID].Required <= 0 {
+			continue
+		}
+		k := unitSlots(j, j.Runnable[v.sent[j.ID]])
+		if k <= 1 {
+			continue
+		}
+		var target *sched.Pool
+		for _, name := range j.Pools {
+			p := v.pools[name]
+			if p == nil || p.Slots < k || !v.hasQuota[name] {
+				continue
+			}
+			q := quotaOf(v.projects[j.Project], name)
+			if v.useBefore[j.Project][name] >= q.Nominal || v.demand0[j.Project][name] <= 0 {
+				continue
+			}
+			if target == nil || p.Slots > target.Slots {
+				target = p
+			}
+		}
+		if target != nil {
+			v.gangHeld[target.Name] = true
+		}
+	}
 	c.checkStarvation(v, starving)
 	c.checkGuard(v)
 	c.checkConservation(v)
@@ -438,8 +468,9 @@ func (c *checker) checkStarvation(v *view, starving map[string]bool) {
 			// StarvationDeferMax.
 			taken := v.freeBefore[pool] - v.freeAfter[pool] - v.byPoolTier[pool][sched.TierStarvation]
 			if c.canWait(v, j) {
-				taken -= v.byPoolTier[pool][sched.TierNeed]
-				room -= v.byPoolTier[pool][sched.TierNeed]
+				ahead := v.byPoolTier[pool][sched.TierNeed] + v.byPoolTier[pool][sched.TierGuarantee]
+				taken -= ahead
+				room -= ahead
 				if room < k {
 					continue
 				}

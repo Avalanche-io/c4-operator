@@ -355,3 +355,21 @@ func TestReproGangBurstRoom(t *testing.T) {
 		t.Fatalf("the gang is at risk and no burst of a whole gang is sized: %s", st.Message)
 	}
 }
+
+// Found by the stress grid, for a decision (it changes R for every job):
+// under TailAware a job's work must be done by T - t_path, as if its
+// critical path came after all of its work, so the critical path is
+// counted twice. A single two-hour unit due in three hours, with its slot
+// free, is planned to finish at W/A + t_path = 4h and reported at risk;
+// it finishes at 2h. Graham's bound for list scheduling counts the
+// critical path's own work once: finish <= (W - t_path*k)/A + t_path,
+// with k the slots of the units on the path.
+func TestReproTailDoubleCount(t *testing.T) {
+	skipRepro(t, "sched modeling issue tail-double-count (found by hack/stress): TailAware plans W/A + t_path; proposed (W - t_path*k)/A + t_path; awaiting a decision")
+	j := rjob("one", "p", 1, 2*3600, 2*3600, 3*time.Hour)
+	s := sched.Snapshot{Now: t0r, Pools: []sched.Pool{{Name: "cpu", Slots: 4}}, Jobs: []sched.Job{j}}
+	st := sched.Decide(s, &sched.State{}, sched.DefaultConfig()).Jobs["one"]
+	if st.AtRisk {
+		t.Fatalf("a 2h unit due in 3h on a free slot is at risk: %s", st.Message)
+	}
+}
