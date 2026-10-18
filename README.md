@@ -42,40 +42,35 @@ C4 is the short form of The Cinema Content Creation Cloud
 **Status: v0.1.** The API (`c4.avalanche.io/v1alpha1`) may change before
 1.0.
 
-![A shot's sheet in the HUD: one row per frame, the work flowing right from sim to delivery, batches collapsed to their aggregate where nothing needs attention](docs/hud/job-render-binary-order.png)
+![A shot's sheet in the HUD: one row per frame, the work flowing right from sim to delivery, batches collapsed to their aggregate where nothing needs attention](docs/images/hud-job-render-binary-order.webp)
 
 ## Results (end-to-end suite)
 
 [REPORT-v2.md](REPORT-v2.md) has every measurement and its method.
 
-| what                    | result                                                                                                                                                                                                     |
-| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| store load as pods grow | 64 pods reading one 28-object shot cost the store 42 GETs through the tiers (1.5 per object), against 224 when each node reads for itself and 1,792 when each pod does                                     |
-| mounts                  | a warm mount in 2 ms; a cold one in 80 ms at the median, mostly from a peer in the same zone (0.8 to 1.0 s when nothing in the zone held the bytes); the next version as a delta layer                     |
-| failure                 | a regional cache replica killed mid-transfer: all 32 pods finished, 7 transfers resumed from their offsets at another replica, none fell through to the store                                              |
-| isolation               | nine attempts by one project to read another's data refused; a revoked vendor grant took effect 0.1 s later                                                                                                |
-| monorepo CI             | 401 commits imported in 5.4 s; 16 test shards per change mount the next commit as a 3-file delta in 16 ms; which files changed between two commits in 13 to 221 ms, identical to `git diff`                |
+| what                    | result                                                                                                                                                                                                                                                                                                          |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| store load as pods grow | 64 pods reading one 28-object shot cost the store 42 GETs through the tiers (1.5 per object), against 224 when each node reads for itself and 1,792 when each pod does                                                                                                                                          |
+| mounts                  | a warm mount in 2 ms; a cold one in 80 ms at the median, mostly from a peer in the same zone (0.8 to 1.0 s when nothing in the zone held the bytes); the next version as a delta layer                                                                                                                          |
+| failure                 | a regional cache replica killed mid-transfer: all 32 pods finished, 7 transfers resumed from their offsets at another replica, none fell through to the store                                                                                                                                                   |
+| isolation               | nine attempts by one project to read another's data refused; a revoked vendor grant took effect 0.1 s later                                                                                                                                                                                                     |
+| monorepo CI             | 401 commits imported in 5.4 s; 16 test shards per change mount the next commit as a 3-file delta in 16 ms; which files changed between two commits in 13 to 221 ms, identical to `git diff`                                                                                                                     |
 | deadlines               | 6 of 7 jobs met their deadlines on a contended farm while a training run yielded its GPUs at a checkpoint and resumed; in a five-week simulation, deadline ordering missed about 44% fewer render deadlines than manual priorities (as plain EDF does), and 52% fewer with burst capacity for about $487 a week |
-| provenance              | a frame of a model-assisted denoise traces to the render it read, with the declared model, oversight and consent; changing one field of a stored record breaks its signature                               |
-| agents                  | an MCP client answered all 10 questions of the evaluation set from the live farm, each call in under 10 ms                                                                                                 |
+| provenance              | a frame of a model-assisted denoise traces to the render it read, with the declared model, oversight and consent; changing one field of a stored record breaks its signature                                                                                                                                    |
+| agents                  | an MCP client answered all 10 questions of the evaluation set from the live farm, each call in under 10 ms                                                                                                                                                                                                      |
 
 How this compares with Anthropic's Scion, operation by operation, and
 where C4 goes further, is in
 [REPORT-v2.md](REPORT-v2.md#comparison-with-scion).
 
-<p>
-<img src="docs/hud/wall.png" alt="The wall: every job a channel sweeping toward its deadline, mission clocks for the deliveries, the shots collapsed to their aggregate" width="49%">
-<img src="docs/hud/queue.png" alt="The farm sheet: dispatch order with each job's gauge, batches and slack, and the burst decision with its price" width="49%">
-</p>
+![The queue: every job in run order with its progress, batches and slack, and the burst decision with its price](docs/images/hud-queue.webp)
 
-More screenshots: [docs/hud](docs/hud) (a synthetic farm: pools, the map,
-the side widget, the phone, the class lenses) and [docs/hud/live](docs/hud/live)
-(the end-to-end farm). The design system and its thesis are in
-[internal/hud/web/design](internal/hud/web/design).
-
-Walkthroughs: [docs/tutorials](docs/tutorials) steps through five farms
-scheduled by the operator's own policy, from one artist's home lab to a
-facility of four rooms on four continents, at the moments worth stopping at.
+The HUD's documentation, its walkthroughs (five farms scheduled by the
+operator's own policy, from one artist's home lab to a facility of four
+rooms on four continents), its screenshots and the synthetic farm that
+drives them live in the companion repository
+[c4-hud](https://github.com/Avalanche-io/c4-hud), which becomes the
+documentation site. The operator embeds and serves the HUD itself.
 
 ## Quickstart
 
@@ -161,9 +156,6 @@ make test           # unit tests, and controllers and the queue against a real A
 make test-linux     # overlay, layer and capture tests in a privileged Linux container
 make verify         # gofmt, vet, generated code and CRDs in step, manifests render
 go run ./hack/sim   # the scheduling simulation
-go run ./hack/hudmock   # the HUD against a synthetic farm, no cluster
-go run ./hack/hudmock --scenario examples/farms/large.yaml   # a farm from a spec, scheduled by the policy
-make tutorials      # docs/tutorials from every farm in examples/farms
 ```
 
 The end-to-end phases run on an eight-worker kind cluster:
@@ -218,8 +210,6 @@ internal/gitimport/    git history -> views, changesets, chains
 config/                kustomize: default (local images), release (GHCR), samples
 hack/e2e/              the end-to-end suite: cluster setup and phase scripts
 hack/sim/              the scheduling simulation
-hack/hudmock/          a synthetic farm behind the HUD API; spec-driven farms scheduled by the policy
-examples/farms/        farm and scenario specs, from a home lab to a global facility
 ```
 
 ## Relation to C4, SMPTE ST 2114 and Scion

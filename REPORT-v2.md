@@ -23,7 +23,7 @@ Headline results:
 | P2 tiers               | done                         | `hack/e2e/p2.sh`                                                                      |
 | P3 isolation           | done                         | `hack/e2e/p3.sh`, `internal/controller` envtest                                       |
 | P4 monorepo CI         | done                         | `hack/e2e/p4.sh`, `hack/e2e/monorepo/run.sh`                                          |
-| P5 work system and HUD | done, next steps below       | `hack/e2e/p5.sh`, `go run ./hack/sim`, `internal/work/queue` envtest, `docs/hud/live` |
+| P5 work system and HUD | done, next steps below       | `hack/e2e/p5.sh`, `go run ./hack/sim`, `internal/work/queue` envtest, c4-hud `docs/hud/live` |
 | P6 agent interface     | done, next steps below       | `hack/e2e/p6.sh`, `internal/mcpserver` tests                                          |
 | P7 provenance          | done, next steps below       | `hack/e2e/p7.sh`, `internal/provenance` tests                                         |
 
@@ -219,7 +219,7 @@ To add to the plan: (1) in the v1.1 re-scope, keep `c4m.IsJournal` exported (or 
 | design                                        | `DESIGN.md`                                                                           |
 | measured results                              | `hack/e2e/out/results.md`, `hack/e2e/monorepo/RESULTS.md`, `hack/sim/out/results.md`  |
 | phase scripts                                 | `hack/e2e/p1.sh` to `p7.sh` (after `hack/e2e/up.sh`)                                  |
-| HUD screenshots                               | `docs/hud/live`, `docs/hud`                                                           |
+| HUD screenshots                               | the c4-hud repository (`docs/hud/live`, `docs/hud`)                                   |
 | agent docs                                    | `docs/agents/tools.md`, `docs/agents/eval.xml`, `skills/c4-farm/SKILL.md`, `llms.txt` |
 | research briefs                               | `docs/research/provenance.md`, `docs/research/ecosystem.md`                           |
 | branches, blockers, proposals, open questions | `PROGRESS.md`                                                                         |

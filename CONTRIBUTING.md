@@ -16,7 +16,8 @@ make test-linux   # overlay, layer and capture tests in a privileged Linux conta
 
 `hack/e2e/up.sh` brings up the eight-worker kind cluster the phase scripts
 (`hack/e2e/p1.sh` to `p7.sh`) run on; see the README. The HUD runs against a
-synthetic farm with no cluster: `go run ./hack/hudmock`.
+synthetic farm with no cluster: the mock that serves it lives in
+[c4-hud](https://github.com/Avalanche-io/c4-hud).
 
 To work against a local checkout of the c4 module, use an uncommitted
 `go.work` (`go work init . ../c4`) rather than a `replace` in `go.mod`.

@@ -11,7 +11,7 @@ import (
 
 // A Point is one farm and one workload of the stress grid. Every field is
 // a number so that a point can be sampled, encoded on a command line and
-// read back. Names follow the scenario spec in hack/hudmock (spec.go)
+// read back. Names follow the scenario spec in c4-hud's cmd/hudmock (spec.go)
 // where the two overlap, so a point can be written out as a scenario
 // (see spec.go here).
 type Point struct {

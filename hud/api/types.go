@@ -1,6 +1,6 @@
 // Package api is the HUD's wire contract (internal/hud/API.md) as Go
 // types, shared by the real backend (internal/hud/server) and the mock
-// (hack/hudmock), so the two cannot drift apart.
+// (cmd/hudmock in the c4-hud repository), so the two cannot drift apart.
 package api
 
 import "time"

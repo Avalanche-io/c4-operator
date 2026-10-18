@@ -81,11 +81,11 @@ ES modules with no build step, shared by the HUD (`../js`) and the previews.
 Each file in `previews/` is one card: its opening line is
 `<!-- @dsCard group="…" -->`, so the set can be synced to a claude.ai/design
 design-system project with `/design-sync`. The previews read
-`fixtures/` (frozen from `hack/hudmock`) when present, else the live API of
+`fixtures/` (frozen from c4-hud's `cmd/hudmock`) when present, else the live API of
 whatever serves them. With the mock running:
 
 ```sh
-go run ./hack/hudmock --freeze 50m
+go run ./cmd/hudmock --freeze 50m   # in c4-hud
 open http://127.0.0.1:8740/design/previews/stack-sheet.html
 ```
 

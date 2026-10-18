@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Screenshots of the HUD serving the live e2e cluster (P5), into
-# docs/hud/live/. Each shot loads one snapshot (static=1), so it shows the
+# docs/hud/live/ of the c4-hud checkout beside this one (HUD_SHOTS_OUT
+# overrides). Each shot loads one snapshot (static=1), so it shows the
 # farm at the moment it is taken.
 #
 #   hack/e2e/hud-shots.sh PREFIX shot...     shots: queue job:NS/NAME pools map tiers cost graph artist wall widget:NS/NAME
@@ -10,7 +11,7 @@
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-out="$root/docs/hud/live"
+out="${HUD_SHOTS_OUT:-$root/../c4-hud/docs/hud/live}"
 base="${HUD_URL:-http://127.0.0.1:30080}/"
 mkdir -p "$out"
 chrome="${CHROME:-}"

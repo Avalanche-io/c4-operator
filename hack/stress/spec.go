@@ -8,9 +8,9 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// The scenario spec of hack/hudmock (spec.go there), as far as a grid
+// The scenario spec of c4-hud's cmd/hudmock (spec.go there), as far as a grid
 // point fills it. The types mirror that file's JSON names, so the YAML
-// written here loads with hudmock's LoadSpec. A grid point is a
+// written here loads with c4-hud's LoadSpec. A grid point is a
 // statistical description, so the mapping is approximate where hudmock
 // has a richer model: every shot becomes one pipeline whose stages are
 // the point's DAG levels, and the point's arrival pattern becomes

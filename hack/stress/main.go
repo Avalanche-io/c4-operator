@@ -32,7 +32,7 @@ func main() {
 	point := flag.String("point", "", "run one point (encoded name=value list or a corner's name) and print its violations")
 	seed := flag.Uint64("seed", 1, "workload seed for -point")
 	variantF := flag.String("variant", "", "with -point: also run this metamorphic variant (capacity, deadline, budget)")
-	specOut := flag.String("spec", "", "with -point: write the point as a hack/hudmock scenario spec to this file")
+	specOut := flag.String("spec", "", "with -point: write the point as a c4-hud's cmd/hudmock scenario spec to this file")
 	noBase := flag.Bool("no-baselines", false, "skip the baseline policies")
 	noPerf := flag.Bool("no-perf", false, "skip the Decide latency sweep")
 	spotN := flag.Int("spot-n", 0, "spot grid points (default 48, quick 12; see spot.go)")
