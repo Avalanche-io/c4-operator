@@ -131,6 +131,8 @@ spec:
                     description: Start is when the bundle first ran.
                     format: date-time
                     type: string
+                  suspendedBy:
+                    type: string
                   suspendedSeconds:
                     description: |-
                       SuspendedSeconds is the total time the bundle has spent suspended,
@@ -138,7 +140,9 @@ spec:
                     format: int64
                     type: integer
                   suspendedSince:
-                    description: SuspendedSince is set while the bundle is suspended.
+                    description: |-
+                      SuspendedSince is set while the bundle is suspended or held, and
+                      SuspendedBy says who stopped it: queue or person.
                     format: date-time
                     type: string
                   suspensions:
@@ -149,6 +153,9 @@ spec:
                       description: AgentSuspension is one interval a bundle spent
                         suspended.
                       properties:
+                        by:
+                          description: By is queue or person.
+                          type: string
                         from:
                           format: date-time
                           type: string
@@ -156,6 +163,7 @@ spec:
                           format: date-time
                           type: string
                       required:
+                      - by
                       - from
                       - to
                       type: object
@@ -267,7 +275,11 @@ spec:
                 format: int64
                 type: integer
               phase:
-                description: Phase is Running, Suspending, Suspended or Pending.
+                description: |-
+                  Phase is Running; Holding or Held (a person suspended the bundle,
+                  spec.suspend, and a person resumes it); Suspended (the queue stopped
+                  every member that ran at a turn boundary, and resumes them itself);
+                  or Pending.
                 type: string
             type: object
         type: object

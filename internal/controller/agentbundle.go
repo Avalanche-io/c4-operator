@@ -190,9 +190,9 @@ func bundleStatus(b *c4v1.AgentBundle, j *c4v1.WorkJob, pods []corev1.Pod) c4v1.
 	}
 	switch {
 	case b.Spec.Suspend && running+yielding > 0:
-		st.Phase = "Suspending"
+		st.Phase = "Holding"
 	case b.Spec.Suspend:
-		st.Phase = "Suspended"
+		st.Phase = "Held"
 	case running+yielding > 0:
 		st.Phase = "Running"
 	case saved > 0:
@@ -209,27 +209,37 @@ func bundleStatus(b *c4v1.AgentBundle, j *c4v1.WorkJob, pods []corev1.Pod) c4v1.
 }
 
 // advanceClock moves a bundle's virtual clock to now. The clock starts the
-// first time the bundle runs, stops when it becomes Suspended, and
-// resumes, without jumping, when it leaves that phase.
+// first time the bundle runs, stops when it becomes Suspended (by the
+// queue) or Held (by a person), and resumes, without jumping, when it runs
+// again.
 func advanceClock(c c4v1.AgentClock, phase string, now time.Time) c4v1.AgentClock {
 	if c.Start == nil {
-		if phase != "Running" && phase != "Suspending" {
+		if phase != "Running" && phase != "Holding" {
 			return c
 		}
 		t := metav1.NewTime(now)
 		c.Start = &t
 	}
+	stopped := phase == "Suspended" || phase == "Held"
+	by := "queue"
+	if phase == "Held" {
+		by = "person"
+	}
 	switch {
-	case phase == "Suspended" && c.SuspendedSince == nil:
+	case stopped && c.SuspendedSince != nil && c.SuspendedBy != by:
+		// Held after the queue had stopped it, or the reverse: one gap,
+		// whose cause is the latest.
+		c.SuspendedBy = by
+	case stopped && c.SuspendedSince == nil:
 		t := metav1.NewTime(now)
-		c.SuspendedSince = &t
-	case phase != "Suspended" && c.SuspendedSince != nil:
+		c.SuspendedSince, c.SuspendedBy = &t, by
+	case !stopped && c.SuspendedSince != nil:
 		c.SuspendedSeconds += int64(now.Sub(c.SuspendedSince.Time).Seconds())
-		c.Suspensions = append(c.Suspensions, c4v1.AgentSuspension{From: *c.SuspendedSince, To: metav1.NewTime(now)})
+		c.Suspensions = append(c.Suspensions, c4v1.AgentSuspension{From: *c.SuspendedSince, To: metav1.NewTime(now), By: c.SuspendedBy})
 		if n := len(c.Suspensions); n > 16 {
 			c.Suspensions = append([]c4v1.AgentSuspension(nil), c.Suspensions[n-16:]...)
 		}
-		c.SuspendedSince = nil
+		c.SuspendedSince, c.SuspendedBy = nil, ""
 	}
 	suspended := time.Duration(c.SuspendedSeconds) * time.Second
 	if c.SuspendedSince != nil {

@@ -548,9 +548,12 @@ func TestAdvanceClock(t *testing.T) {
 	if !c.VirtualNow.Time.Equal(t0.Add(55*time.Minute)) || c.DriftSeconds != 0 {
 		t.Fatalf("running: %+v", c)
 	}
-	// Suspended overnight: the bundle's time stops.
-	c = advanceClock(c, "Suspended", t0.Add(time.Hour))
-	c = advanceClock(c, "Suspended", t0.Add(10*time.Hour+30*time.Minute))
+	// Held overnight by a person: the bundle's time stops.
+	c = advanceClock(c, "Held", t0.Add(time.Hour))
+	c = advanceClock(c, "Held", t0.Add(10*time.Hour+30*time.Minute))
+	if c.SuspendedBy != "person" {
+		t.Fatalf("suspended by %q", c.SuspendedBy)
+	}
 	if !c.VirtualNow.Time.Equal(t0.Add(time.Hour)) || c.DriftSeconds != int64((9*time.Hour+30*time.Minute).Seconds()) {
 		t.Fatalf("suspended: virtual %v drift %d", c.VirtualNow, c.DriftSeconds)
 	}
@@ -560,7 +563,20 @@ func TestAdvanceClock(t *testing.T) {
 	if !c.VirtualNow.Time.Equal(t0.Add(90*time.Minute)) || c.SuspendedSince != nil {
 		t.Fatalf("resumed: %+v", c)
 	}
-	if len(c.Suspensions) != 1 || !c.Suspensions[0].From.Time.Equal(t0.Add(time.Hour)) || !c.Suspensions[0].To.Time.Equal(t0.Add(10*time.Hour+30*time.Minute)) {
+	if len(c.Suspensions) != 1 || c.Suspensions[0].By != "person" || !c.Suspensions[0].From.Time.Equal(t0.Add(time.Hour)) || !c.Suspensions[0].To.Time.Equal(t0.Add(10*time.Hour+30*time.Minute)) {
 		t.Fatalf("suspensions %+v", c.Suspensions)
+	}
+}
+
+func TestAdvanceClockQueueSuspension(t *testing.T) {
+	t0 := time.Date(2026, 10, 17, 22, 55, 0, 0, time.UTC)
+	c := advanceClock(c4v1.AgentClock{}, "Running", t0)
+	c = advanceClock(c, "Suspended", t0.Add(time.Minute))
+	if c.SuspendedBy != "queue" {
+		t.Fatalf("by %q", c.SuspendedBy)
+	}
+	c = advanceClock(c, "Running", t0.Add(time.Hour))
+	if len(c.Suspensions) != 1 || c.Suspensions[0].By != "queue" || c.DriftSeconds != 59*60 {
+		t.Fatalf("%+v", c)
 	}
 }

@@ -29,9 +29,12 @@ type AgentClock struct {
 	// not counting a suspension still in progress.
 	// +optional
 	SuspendedSeconds int64 `json:"suspendedSeconds,omitempty"`
-	// SuspendedSince is set while the bundle is suspended.
+	// SuspendedSince is set while the bundle is suspended or held, and
+	// SuspendedBy says who stopped it: queue or person.
 	// +optional
 	SuspendedSince *metav1.Time `json:"suspendedSince,omitempty"`
+	// +optional
+	SuspendedBy string `json:"suspendedBy,omitempty"`
 	// VirtualNow is the bundle's time as of the last status write: Start
 	// plus the real time since, less every suspension.
 	// +optional
@@ -49,6 +52,8 @@ type AgentClock struct {
 type AgentSuspension struct {
 	From metav1.Time `json:"from"`
 	To   metav1.Time `json:"to"`
+	// By is queue or person.
+	By string `json:"by"`
 }
 
 // AgentMemberSpec is one member of an agent bundle: a Claude Code session
@@ -119,7 +124,10 @@ type AgentMemberStatus struct {
 type AgentBundleStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Phase is Running, Suspending, Suspended or Pending.
+	// Phase is Running; Holding or Held (a person suspended the bundle,
+	// spec.suspend, and a person resumes it); Suspended (the queue stopped
+	// every member that ran at a turn boundary, and resumes them itself);
+	// or Pending.
 	// +optional
 	Phase string `json:"phase,omitempty"`
 	// Job is the WorkJob that holds the members' units.

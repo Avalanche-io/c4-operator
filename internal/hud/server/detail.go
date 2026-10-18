@@ -628,9 +628,12 @@ func agentSummary(m *model, rec *jobRec) map[string]any {
 			b = &m.bundles[i]
 		}
 	}
-	out := map[string]any{"bundle": name, "members": []any{}, "suspended": []any{}, "clock": map[string]any{"driftSeconds": 0}}
+	out := map[string]any{"bundle": name, "phase": "Pending", "members": []any{}, "suspended": []any{}, "clock": map[string]any{"driftSeconds": 0}}
 	if b == nil {
 		return out
+	}
+	if b.Status.Phase != "" {
+		out["phase"] = b.Status.Phase
 	}
 	kinds := map[string]string{}
 	for _, mem := range b.Spec.Members {
@@ -669,15 +672,15 @@ func agentSummary(m *model, rec *jobRec) map[string]any {
 		clock["virtualNow"] = c.VirtualNow.Time.UTC()
 	}
 	if c.SuspendedSince != nil {
-		clock["suspendedSince"] = c.SuspendedSince.Time.UTC()
+		clock["suspendedSince"], clock["suspendedBy"] = c.SuspendedSince.Time.UTC(), c.SuspendedBy
 	}
 	out["clock"] = clock
 	var sus []any
 	for _, x := range c.Suspensions {
-		sus = append(sus, map[string]any{"from": x.From.Time.UTC(), "to": x.To.Time.UTC()})
+		sus = append(sus, map[string]any{"from": x.From.Time.UTC(), "to": x.To.Time.UTC(), "by": x.By})
 	}
 	if c.SuspendedSince != nil {
-		sus = append(sus, map[string]any{"from": c.SuspendedSince.Time.UTC()})
+		sus = append(sus, map[string]any{"from": c.SuspendedSince.Time.UTC(), "by": c.SuspendedBy})
 	}
 	if sus != nil {
 		out["suspended"] = sus

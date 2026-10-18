@@ -225,8 +225,8 @@ func TestBundleOnHostRunner(t *testing.T) {
 		t.Fatalf("%d stops, want 2", len(fk.stops))
 	}
 	st := reconcile().Status
-	if st.Phase != "Suspended" {
-		t.Fatalf("phase %s, want Suspended", st.Phase)
+	if st.Phase != "Held" || st.Clock.SuspendedBy != "person" {
+		t.Fatalf("phase %s by %q, want Held by a person", st.Phase, st.Clock.SuspendedBy)
 	}
 	parked := 0
 	for _, m := range st.Members {

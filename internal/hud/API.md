@@ -340,10 +340,10 @@ fraction its latest checkpoint saved.
 - **agent**: the bundle that owns the job (an AgentBundle; its members are
   the job's units):
   ```
-  { bundle, cap?, running,
+  { bundle, phase, cap?, running,
     members: [ { name, unit, kind, state, node?, epoch?, checkpoint?: { session, seq, id } } ],
-    clock: { start?, virtualNow?, suspendedSince?, driftSeconds },
-    suspended: [ { from, to? } ] }
+    clock: { start?, virtualNow?, suspendedSince?, suspendedBy?, driftSeconds },
+    suspended: [ { from, to?, by } ] }
   ```
   `kind` is `resident` or `task`. `state` is `running`; `yielding` (asked to
   stop at its next turn boundary); `suspended` (the queue stopped it at a
@@ -356,7 +356,10 @@ fraction its latest checkpoint saved.
   `virtualNow` is its value at the last status write, and `driftSeconds`
   is how far it trails the real clock. `suspended` lists the recent
   suspended intervals, oldest first; the last has no `to` while the bundle
-  is still suspended. `cap` is the bundle's limit on members running at
+  is still suspended. `by` is `queue` (the farm stopped every member at a
+  turn boundary, and resumes them itself) or `person` (someone suspended
+  the bundle, and a person resumes it). `phase` is `Running`, `Holding` or
+  `Held` (by a person), `Suspended` (by the queue), or `Pending`. `cap` is the bundle's limit on members running at
   once.
 
 ## GET /jobs/{ns}/{name}/units/{i}
