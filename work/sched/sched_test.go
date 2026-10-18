@@ -423,6 +423,26 @@ func TestHoldAndBoost(t *testing.T) {
 	}
 }
 
+// A job whose expansion script is running has no other units yet. The
+// estimator counts the running generator as unevaluated; the job's
+// attainable slots must not be capped at the one slot the script holds,
+// or 600 slot-hours due in 10 hours read as 25 days late.
+func TestRunningGeneratorIsNotCappedByUnits(t *testing.T) {
+	j := job("x", "p", 0, 600, 10*time.Hour)
+	j.MaxParallel = 600
+	j.Estimate.Unevaluated = 1
+	j.Running = map[string]int{"cpu": 1}
+	j.RunningUnits = []RunningUnit{{ID: "x/gen", Pool: "cpu", Slots: 1, Started: t0}}
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(200)}, Jobs: []Job{j}}
+	st := Decide(s, &State{}, DefaultConfig()).Jobs["x"]
+	if st.Attainable != 200 || !st.Feasible || st.AtRisk {
+		t.Fatalf("attainable %v feasible %v at risk %v: %s", st.Attainable, st.Feasible, st.AtRisk, st.Message)
+	}
+	if eta := st.ETA90.Sub(t0); eta > 4*time.Hour {
+		t.Fatalf("ETA90 in %v, want about 3h: %s", eta, st.Message)
+	}
+}
+
 func TestInformationTier(t *testing.T) {
 	// a is planned first (earlier deadline) and g is on time after it, so
 	// only a has a need now; the leftover goes first to g's generators,

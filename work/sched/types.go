@@ -96,7 +96,10 @@ type Job struct {
 	RunnableTotal int
 	// Blocked counts units that exist but wait on dependencies.
 	Blocked int
-	// Unevaluated counts generators not yet expanded.
+	// Unevaluated counts generators not yet expanded, queued or running;
+	// the larger of it and Estimate.Unevaluated is used. While any remain
+	// the job may still grow, so its attainable slots are not capped by
+	// the units it has now.
 	Unevaluated int
 	Estimate    estimate.Summary
 	// Nudges.

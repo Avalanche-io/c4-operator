@@ -153,7 +153,7 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 	if jc.j.MaxParallel > 0 {
 		room = float64(jc.j.MaxParallel) - jc.share
 	}
-	if jc.j.Unevaluated == 0 {
+	if !jc.expanding() {
 		units := jc.j.RunnableTotal + jc.j.Blocked + len(jc.j.RunningUnits)
 		room = math.Min(room, float64(units*jc.slots)-jc.share)
 		// A gang that fits in none of its pools now holds no part of its

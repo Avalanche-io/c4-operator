@@ -112,11 +112,18 @@ func (a *alloc) attainable(jc *jobCtx, planned bool) float64 {
 	if jc.j.MaxParallel > 0 {
 		total = math.Min(total, float64(jc.j.MaxParallel))
 	}
-	if jc.j.Unevaluated == 0 {
+	if !jc.expanding() {
 		units := jc.j.RunnableTotal + jc.j.Blocked + len(jc.j.RunningUnits)
 		total = math.Min(total, float64(units*jc.slots))
 	}
 	return total
+}
+
+// expanding reports whether the job has generators not yet expanded, by
+// its own count or the estimator's (which includes running generators: a
+// job whose expansion script is running has no other units yet).
+func (jc *jobCtx) expanding() bool {
+	return jc.j.Unevaluated > 0 || jc.j.Estimate.Unevaluated > 0
 }
 
 func (a *alloc) objectives() {
