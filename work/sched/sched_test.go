@@ -1259,7 +1259,7 @@ func TestStageToAnotherSite(t *testing.T) {
 		t.Fatalf("stage %+v", st)
 	}
 	js := d.Jobs["x"]
-	if js.Stage == nil || !strings.Contains(js.Message, "Staging its inputs to van via interconnect (+15m) closes it (est. $20).") {
+	if js.Stage == nil || !strings.Contains(js.Message, "Staging its inputs to van via interconnect (+15m) closes it (about $20).") {
 		t.Fatalf("message %q", js.Message)
 	}
 	for _, x := range d.Dispatch {

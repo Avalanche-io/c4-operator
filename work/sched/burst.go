@@ -334,9 +334,9 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		case st.Source.Via == "staging":
 			fmt.Fprintf(&b, " With %s it can finish there in time.", stageWords(st))
 		case st.Auto:
-			fmt.Fprintf(&b, " %s closes it (est. %s).", capitalize(stageWords(st)), dollars(st.Cost))
+			fmt.Fprintf(&b, " %s closes it (about %s).", capitalize(stageWords(st)), dollars(st.Cost))
 		default:
-			fmt.Fprintf(&b, " %s would close it (est. %s). Needs approval: %s.", capitalize(stageWords(st)), dollars(st.Cost), st.Why)
+			fmt.Fprintf(&b, " %s would close it (about %s). Needs approval: %s.", capitalize(stageWords(st)), dollars(st.Cost), st.Why)
 		}
 	case sg == nil:
 		if !jc.feasible {
