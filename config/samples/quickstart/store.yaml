@@ -1,43 +1,76 @@
-# A one-shard store for the quickstart: MinIO on the control plane, reached
-# by the cluster at minio.c4-store:9000 and by this machine at
-# 127.0.0.1:30900, with a bucket named quickstart. The credentials are for
-# a local trial only.
+# A one-shard store for the quickstart: Garage on the control plane,
+# reached by the cluster at garage.c4-store:3900 and by this machine at
+# 127.0.0.1:30900, with a bucket named quickstart. The key and secrets are
+# for a local trial only. Garage key IDs are GK and 24 hex digits, and
+# secrets 64 hex digits.
 apiVersion: v1
 kind: Namespace
 metadata:
   name: c4-store
 ---
+apiVersion: v1
+kind: ConfigMap
+metadata: {name: garage, namespace: c4-store}
+data:
+  garage.toml: |
+    metadata_dir = "/var/lib/garage/meta"
+    data_dir = "/var/lib/garage/data"
+    db_engine = "sqlite"
+    replication_factor = 1
+    rpc_bind_addr = "[::]:3901"
+    rpc_secret = "c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4"
+
+    [s3_api]
+    s3_region = "us-east-1"
+    api_bind_addr = "[::]:3900"
+
+    [admin]
+    api_bind_addr = "[::]:3903"
+    admin_token = "quickstart-admin"
+---
 apiVersion: apps/v1
 kind: Deployment
-metadata: {name: minio, namespace: c4-store}
+metadata: {name: garage, namespace: c4-store}
 spec:
   replicas: 1
-  selector: {matchLabels: {app: minio}}
+  selector: {matchLabels: {app: garage}}
   template:
-    metadata: {labels: {app: minio}}
+    metadata: {labels: {app: garage}}
     spec:
       nodeSelector: {node-role.kubernetes.io/control-plane: ""}
       tolerations: [{operator: Exists}]
       containers:
-      - name: minio
-        image: minio/minio:latest
-        args: [server, /data]
-        env:
-        - {name: MINIO_ROOT_USER, value: quickstart}
-        - {name: MINIO_ROOT_PASSWORD, value: quickstart-secret}
-        ports: [{containerPort: 9000}]
-        readinessProbe: {httpGet: {path: /minio/health/ready, port: 9000}}
-        volumeMounts: [{name: data, mountPath: /data}]
-      volumes: [{name: data, emptyDir: {}}]
+      - name: garage
+        image: dxflrs/garage:v2.4.1
+        ports: [{containerPort: 3900}, {containerPort: 3903}]
+        readinessProbe: {httpGet: {path: /health, port: 3903}}
+        volumeMounts:
+        - {name: config, mountPath: /etc/garage.toml, subPath: garage.toml}
+        - {name: data, mountPath: /var/lib/garage}
+      volumes:
+      - {name: config, configMap: {name: garage}}
+      - {name: data, emptyDir: {}}
 ---
 apiVersion: v1
 kind: Service
-metadata: {name: minio, namespace: c4-store}
+metadata: {name: garage, namespace: c4-store}
+spec:
+  # /health fails until the layout is applied, and the setup Job applies
+  # it through this Service, so it must route to a pod that is not ready.
+  publishNotReadyAddresses: true
+  selector: {app: garage}
+  ports:
+  - {name: admin, port: 3903, targetPort: 3903}
+---
+apiVersion: v1
+kind: Service
+metadata: {name: garage-s3, namespace: c4-store}
 spec:
   type: NodePort
-  selector: {app: minio}
-  ports: [{port: 9000, targetPort: 9000, nodePort: 30900}]
+  selector: {app: garage}
+  ports: [{name: s3, port: 3900, targetPort: 3900, nodePort: 30900}]
 ---
+# One node, one zone; then the quickstart key and bucket.
 apiVersion: batch/v1
 kind: Job
 metadata: {name: bucket, namespace: c4-store}
@@ -47,9 +80,26 @@ spec:
     spec:
       restartPolicy: OnFailure
       containers:
-      - name: mc
-        image: minio/mc:latest
-        command: [sh, -c]
+      - name: setup
+        image: alpine:3.22
+        env:
+        - {name: ADMIN, value: "http://garage.c4-store:3903"}
+        - {name: TOKEN, value: quickstart-admin}
+        - {name: KEY_ID, value: GKc4c4c4c4c4c4c4c4c4c4c4c4}
+        - {name: SECRET, value: c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4}
+        command: [sh, -euc]
         args:
-        - until mc alias set q http://minio.c4-store:9000 quickstart quickstart-secret; do sleep 2; done;
-          mc mb --ignore-existing q/quickstart
+        - |
+          apk add -q --no-cache curl jq
+          api() { curl -sf -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' "$ADMIN/v2/$1" ${2:+-d "$2"}; }
+          until api GetClusterStatus >/dev/null; do sleep 2; done
+          node=$(api GetClusterStatus | jq -r '.nodes[0].id')
+          if [ "$(api GetClusterLayout | jq '.roles | length')" = 0 ]; then
+            api UpdateClusterLayout "{\"roles\":[{\"id\":\"$node\",\"zone\":\"local\",\"capacity\":10000000000,\"tags\":[]}]}" >/dev/null
+            ver=$(api GetClusterLayout | jq '.version + 1')
+            api ApplyClusterLayout "{\"version\":$ver}" >/dev/null
+          fi
+          api "GetKeyInfo?id=$KEY_ID" >/dev/null || api ImportKey "{\"accessKeyId\":\"$KEY_ID\",\"secretAccessKey\":\"$SECRET\",\"name\":\"quickstart\"}" >/dev/null
+          bucket=$(api "GetBucketInfo?globalAlias=quickstart" | jq -r .id) || bucket=$(api CreateBucket '{"globalAlias":"quickstart"}' | jq -r .id)
+          api AllowBucketKey "{\"bucketId\":\"$bucket\",\"accessKeyId\":\"$KEY_ID\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":true}}" >/dev/null
+          echo "bucket quickstart ready"

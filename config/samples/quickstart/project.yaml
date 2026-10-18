@@ -20,7 +20,7 @@ spec:
     access: Tiered
     credentialsSecretRef: {name: quickstart-store}
     shards:
-    - {name: s0, url: "s3://quickstart/c4/?endpoint=http://minio.c4-store:9000"}
+    - {name: s0, url: "s3://quickstart/c4/?endpoint=http://garage-s3.c4-store:3900"}
 ---
 apiVersion: c4.avalanche.io/v1alpha1
 kind: Pool

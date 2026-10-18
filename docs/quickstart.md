@@ -41,19 +41,23 @@ The images come from `ghcr.io/avalanche-io/c4-operator`.
 kubectl apply -f config/samples/quickstart/store.yaml
 kubectl -n c4-store wait --for=condition=complete job/bucket --timeout=300s
 kubectl -n c4-system create secret generic quickstart-store \
-  --from-literal=AWS_ACCESS_KEY_ID=quickstart --from-literal=AWS_SECRET_ACCESS_KEY=quickstart-secret
+  --from-literal=AWS_ACCESS_KEY_ID=GKc4c4c4c4c4c4c4c4c4c4c4c4 \
+  --from-literal=AWS_SECRET_ACCESS_KEY=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4
 kubectl apply -f config/samples/quickstart/project.yaml
 ```
 
-The store is one MinIO with a bucket named `quickstart`; the project `demo`
-owns the namespace `demo` and reads and writes that store.
+The store is one [Garage](https://garagehq.deuxfleurs.fr) node with a
+bucket named `quickstart`; the project `demo` owns the namespace `demo`
+and reads and writes that store. Garage key IDs are `GK` and 24 hex digits,
+and secrets 64 hex digits; these are for a local trial only.
 
 ## 5. Put a tree in the store
 
 ```sh
 mkdir -p shot/plates
 for f in 1001 1002 1003 1004; do head -c 1048576 /dev/urandom > shot/plates/sh010.$f.exr; done
-export AWS_ACCESS_KEY_ID=quickstart AWS_SECRET_ACCESS_KEY=quickstart-secret
+export AWS_ACCESS_KEY_ID=GKc4c4c4c4c4c4c4c4c4c4c4c4
+export AWS_SECRET_ACCESS_KEY=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4
 VIEW=$(c4-operator ingest -q --shard 's0=s3://quickstart/c4/?endpoint=http://127.0.0.1:30900' shot)
 echo "$VIEW"
 ```
@@ -137,13 +141,16 @@ manager accept a development viewer:
 
 ```sh
 kubectl -n c4-system patch deploy c4-manager --type=json \
-  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--hud-dev-viewers=me=*"}]'
+  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--hud-dev-viewers=wrangler=*;artist=demo"}]'
 kubectl -n c4-system rollout status deploy/c4-manager
-open "http://127.0.0.1:30080/?as=me"      # or xdg-open, or paste it into a browser
+open "http://127.0.0.1:30080/?as=wrangler"      # or xdg-open, or paste it into a browser
 ```
 
+`wrangler` sees every project; `artist` sees only `demo`, and the top
+bar's **View as** switches between them.
+
 The queue releases the job's units in binary order (1001, 1024, 1012, ...)
-two slots per node, folds each unit's captured frames into the job's output
+two slots per node, adds each unit's captured frames to the job's output
 view, and shows its estimate converge as frames finish. Set a deadline and
 watch the queue plan for it:
 
@@ -154,7 +161,7 @@ kubectl -n demo patch workjob sh010-comp-v001 --type=merge -p "{\"spec\":{\"dead
 ## 8. Ask an agent
 
 ```sh
-claude mcp add c4-farm -- c4-operator mcp --hud http://127.0.0.1:30080 --as me
+claude mcp add c4-farm -- c4-operator mcp --hud http://127.0.0.1:30080 --as wrangler
 ```
 
 Then ask, for example, "which frames of sh010-comp-v001 are done, and will
