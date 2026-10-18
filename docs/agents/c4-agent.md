@@ -7,8 +7,10 @@ before any cluster is involved. It does four things:
 - **Records each member**: its name, its Claude Code session ID, the
   directory it runs in, and the configuration directory its sign-in lives
   in.
-- **Saves a checkpoint at the end of every turn.** Claude Code's Stop hook
-  calls `c4-agent checkpoint --hook`. Each checkpoint names the session's
+- **Saves a checkpoint at the end of every turn.** Claude Code's Stop hook,
+  installed in `settings.json` (see Installing the hook), calls
+  `c4-agent checkpoint --hook`. It also saves one at every yield and
+  resume, hook or not. Each checkpoint names the session's
   transcript up to its last complete line, as a hash chain of C4 IDs, and
   records the working tree (the git commit and a C4 ID of everything
   uncommitted).
@@ -70,17 +72,23 @@ when the CLI started a copy, 5 when a member is still busy.
 
 ## Installing the hook
 
-`c4-agent hooks` prints a settings fragment with one Stop hook. There are
-two ways to use it. Neither changes how Claude Code itself is installed.
+`c4-agent hooks` prints a settings fragment with one Stop hook. Per-turn
+checkpoints need it in the configuration directory's `settings.json`: add
+the fragment's `Stop` entry there. Sessions that are not members are
+ignored by the hook. This does not change how Claude Code itself is
+installed.
 
-- **Per member**, with no change to any settings file: save the fragment to
-  a file and give it with `--settings` when the session first starts.
-  Whether a background session keeps hooks given that way across a
-  resume with no flags is what `proposals/agent-jobs/c4-agent-recheck.sh`
-  checks. If it does not, use the next route.
-- **For every session** under a configuration directory: add the fragment's
-  `Stop` entry to that directory's `settings.json`. Sessions that are not
-  members are ignored by the hook.
+Giving the fragment with `--settings` instead does not work for members.
+Measured with Claude Code 2.1.302: hooks given that way do not carry into a
+background resume with no flags, which is the only resume that continues
+a session rather than starting a copy, so the hook never runs on a resumed
+member.
+
+Without the hook, `c4-agent` still saves a checkpoint when it yields a
+member and before it resumes one, and one live copy, resume by session ID
+and the hash chain all hold. What is lost is the checkpoint at the end of
+each turn in between, so a hard stop can lose every turn since the last
+yield or resume.
 
 ## The turn boundary
 
