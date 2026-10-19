@@ -1,0 +1,26 @@
+# The project lets c4-sync read its Tracker's Secrets, by name, in its own
+# namespace, and nothing else.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-sync-widgets
+  namespace: work
+rules:
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [widgets-github-token, widgets-github-webhook]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-sync-widgets
+  namespace: work
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: c4-sync-widgets
+subjects:
+- kind: ServiceAccount
+  name: c4-sync
+  namespace: c4-system

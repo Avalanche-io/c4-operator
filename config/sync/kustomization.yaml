@@ -1,0 +1,18 @@
+# c4-sync, experimental (proposals/integrations ADAPTER.md). Not part of
+# config/default. Install its two CRDs first:
+#
+#   kubectl apply -f config/crd/c4.avalanche.io_trackers.yaml \
+#                 -f config/crd/c4.avalanche.io_trackerlinks.yaml
+#   kubectl apply -k config/sync
+#
+# Then, in each project namespace that syncs with a tracker, a Role that
+# lets c4-sync read that Tracker's credential Secrets by name
+# (config/samples/tracker-github), and the Tracker itself.
+namespace: c4-system
+resources:
+- rbac.yaml
+- deployment.yaml
+images:
+- name: c4-sync
+  newName: c4-sync
+  newTag: dev

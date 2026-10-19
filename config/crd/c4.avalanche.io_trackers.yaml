@@ -1,0 +1,483 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: trackers.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: Tracker
+    listKind: TrackerList
+    plural: trackers
+    singular: tracker
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.kind
+      name: Kind
+      type: string
+    - jsonPath: .status.conditions[?(@.type=="Ready")].status
+      name: Ready
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Tracker is one connection to one tracker site, scoped to what one
+          project syncs with it.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: TrackerSpec says which tracker, how to reach it, and what
+              crosses.
+            properties:
+              credential:
+                description: |-
+                  Credential is where the tracker credential is. It is a Secret in
+                  this namespace, materialized by a credential lease (integrations
+                  GAPS 8); c4-sync rereads it on every use, so rotation needs no
+                  restart.
+                properties:
+                  lease:
+                    description: Lease names the CredentialLease that maintains the
+                      Secret (designed).
+                    type: string
+                  secret:
+                    description: Secret holds the token today.
+                    properties:
+                      key:
+                        type: string
+                      name:
+                        type: string
+                    required:
+                    - key
+                    - name
+                    type: object
+                required:
+                - secret
+                type: object
+              endpoint:
+                description: |-
+                  Endpoint is the tracker's API base URL; empty means the adapter's
+                  public default (https://api.github.com for github).
+                type: string
+              events:
+                description: Events sets how changes are noticed.
+                properties:
+                  mode:
+                    description: |-
+                      Mode is webhook (pushed deliveries are hints, with polling under
+                      them), eventlog or poll.
+                    enum:
+                    - webhook
+                    - eventlog
+                    - poll
+                    type: string
+                  pollSeconds:
+                    description: PollSeconds between polls for changes. Default 60.
+                    format: int32
+                    type: integer
+                  resyncSeconds:
+                    description: ResyncSeconds between full reconciles of every link.
+                      Default 900.
+                    format: int32
+                    type: integer
+                type: object
+              intake:
+                description: Intake says which tracker entities become C4 work.
+                items:
+                  description: TrackerIntake is one rule for tracker entities that
+                    become C4 work.
+                  properties:
+                    as:
+                      description: |-
+                        As is job (the entity becomes a WorkJob) or milestone (it becomes a
+                        Milestone that jobs roll up to; needs integrations GAPS 1).
+                      enum:
+                      - job
+                      - milestone
+                      type: string
+                    deadline:
+                      description: Deadline says where the deadline comes from.
+                      properties:
+                        dateOnlyAt:
+                          description: |-
+                            DateOnlyAt is the local time ("18:00") a due date that carries no
+                            time of day means, in TZ (integrations GAPS 10). Without it such a
+                            due date is not guessed at: the job gets a suggested deadline.
+                          type: string
+                        field:
+                          description: |-
+                            Field names the due date (github: milestone.due_on). Empty uses the
+                            adapter's default.
+                          type: string
+                        tz:
+                          description: TZ is an IANA zone for DateOnlyAt.
+                          type: string
+                      type: object
+                    job:
+                      description: |-
+                        Job is the WorkJob spec a matched entity is submitted with. Its
+                        deadline and deadline mode are set from Deadline.
+                      properties:
+                        avoidNodes:
+                          description: |-
+                            AvoidNodes are nodes a person took out of this job's use; the queue
+                            adds nodes that failed its units NodeErrorLimit times.
+                          items:
+                            type: string
+                          type: array
+                        class:
+                          description: 'Class names the work class: render, ci, ml,
+                            agent or graph.'
+                          enum:
+                          - render
+                          - ci
+                          - ml
+                          - agent
+                          - graph
+                          type: string
+                        deadline:
+                          description: |-
+                            Deadline is the job's own deadline. Without one, the class's
+                            objective applies (a latency target from the time the job became
+                            ready, or a default turnaround).
+                          format: date-time
+                          type: string
+                        deadlineMode:
+                          description: |-
+                            DeadlineMode says who owns the deadline. Pinned: Deadline, set by a
+                            person or a tool (the default when Deadline is set). Suggested: the
+                            farm suggests one from the deadline policy (the project's, else the
+                            class's), the job's estimate and the first units' measurements; it
+                            revises the suggestion at most a few times and then settles it, and
+                            never moves a settled one (the default when Deadline is not set and
+                            the policy is not a latency SLO). Tracking: production tracking
+                            writes Deadline; the farm never suggests one.
+                          enum:
+                          - Pinned
+                          - Suggested
+                          - Tracking
+                          type: string
+                        dependsOn:
+                          description: DependsOn names jobs in this namespace that
+                            must succeed first.
+                          items:
+                            type: string
+                          type: array
+                        inputs:
+                          description: Inputs are C4 views mounted into every unit.
+                          items:
+                            description: |-
+                              WorkInput mounts a view into every unit: a Materialization, or the
+                              output view of another job in the namespace.
+                            properties:
+                              fromJob:
+                                description: |-
+                                  FromJob mounts the output view of that job (in this namespace) once
+                                  it has succeeded. List it in dependsOn too.
+                                type: string
+                              materialization:
+                                description: Materialization in the job's namespace.
+                                type: string
+                              mountPath:
+                                description: MountPath in every container of the unit.
+                                type: string
+                              readOnly:
+                                description: ReadOnly mounts without capture.
+                                type: boolean
+                            required:
+                            - mountPath
+                            type: object
+                          type: array
+                        maxParallel:
+                          description: 'MaxParallel caps the job''s running units
+                            (0: no cap).'
+                          format: int32
+                          type: integer
+                        measure:
+                          description: |-
+                            Measure is the job's own measure of done (PRIMITIVES Q12): a number a
+                            unit reports (.c4/measure.json, c4-unit measure), such as rules
+                            sited of 379, shown as the job's progress.
+                          properties:
+                            name:
+                              description: Name is what is counted ("rules sited").
+                              type: string
+                            of:
+                              description: Of is the target; a reading may carry its
+                                own.
+                              format: int64
+                              type: integer
+                            required:
+                              description: |-
+                                Required: the job is done only when the measure reaches its target.
+                                With its units finished short of it, the job needs a person.
+                              type: boolean
+                          required:
+                          - name
+                          type: object
+                        nodeErrorLimit:
+                          default: 3
+                          description: |-
+                            NodeErrorLimit blacklists a node for this job after this many unit
+                            failures on it.
+                          format: int32
+                          type: integer
+                        nudge:
+                          description: Nudge holds or boosts the job. There are no
+                            priorities.
+                          properties:
+                            boost:
+                              description: |-
+                                Boost multiplies the job's required slots, from 1 to 2, drawn from
+                                its own project's quota first.
+                              pattern: ^(1(\.[0-9]+)?|2(\.0+)?)$
+                              type: string
+                            hold:
+                              description: Hold releases no new units; running units
+                                finish.
+                              type: boolean
+                            holdStop:
+                              description: HoldStop holds and stops running units.
+                              type: boolean
+                          type: object
+                        params:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            Params are the class's parameters, for example frames and chunk for
+                            render, shards for ci, steps for ml.
+                          type: object
+                        pools:
+                          description: Pools the job's units may run in. Empty means
+                            the class's defaults.
+                          items:
+                            type: string
+                          type: array
+                        retries:
+                          default: 2
+                          description: Retries per unit after the first attempt.
+                          format: int32
+                          type: integer
+                        template:
+                          description: |-
+                            Template is the pod every unit runs. The queue adds the unit's
+                            environment (C4_UNIT, and the class's variables), the pool's node
+                            selector and tolerations, and the input volumes. The API server
+                            validates it when the queue creates each pod; the CRD does not
+                            repeat the pod schema (it would exceed what kubectl apply can carry).
+                          type: object
+                          x-kubernetes-preserve-unknown-fields: true
+                      required:
+                      - class
+                      - template
+                      type: object
+                    match:
+                      description: Match selects entities.
+                      properties:
+                        labels:
+                          description: Labels the entity must all carry.
+                          items:
+                            type: string
+                          type: array
+                        state:
+                          description: State is open (default), closed or all.
+                          type: string
+                        type:
+                          description: 'Type is the entity type (github: Issue).'
+                          type: string
+                      required:
+                      - type
+                      type: object
+                    review:
+                      description: Review opens a wait for a person once the work
+                        is up for review.
+                      properties:
+                        wait:
+                          description: |-
+                            Wait is the name of the job's wait unit the tracker's decision
+                            serves (a unit of the job's plan with wait.server set).
+                          type: string
+                      required:
+                      - wait
+                      type: object
+                  required:
+                  - as
+                  - match
+                  type: object
+                type: array
+              kind:
+                description: |-
+                  Kind names the adapter: github (built); flow, ftrack, kitsu, ayon,
+                  gitlab, jira, linear, mlflow (designed).
+                type: string
+              owner:
+                description: Owner is the party whose tracker this is (ownership MODEL
+                  3.1).
+                type: string
+              people:
+                additionalProperties:
+                  type: string
+                description: |-
+                  People maps tracker users to C4 people. Roles still come from the
+                  studio's groups, never from the tracker.
+                type: object
+              rate:
+                description: |-
+                  Rate bounds c4-sync's own requests to the tracker, well under the
+                  tracker's published limit.
+                properties:
+                  burst:
+                    description: Burst requests at once. Default 10.
+                    format: int32
+                    type: integer
+                  perSecond:
+                    description: PerSecond requests on average. Default 1.
+                    type: string
+                type: object
+              scope:
+                additionalProperties:
+                  type: string
+                description: 'Scope is the adapter''s own filter: for github, repo:
+                  owner/name.'
+                type: object
+              statusOut:
+                description: StatusOut says how C4 states are written back.
+                properties:
+                  checkName:
+                    description: CheckName names the check run (github). Default "C4".
+                    type: string
+                  commitStatus:
+                    description: CommitStatus also writes a commit status (github).
+                    type: boolean
+                  fieldSeconds:
+                    description: |-
+                      FieldSeconds is the least time between writes that only move a
+                      continuous value (the ETA). Default 300.
+                    format: int32
+                    type: integer
+                type: object
+              verdictsIn:
+                additionalProperties:
+                  type: string
+                description: |-
+                  VerdictsIn maps the tracker's native decisions (for github:
+                  APPROVED, CHANGES_REQUESTED, or a check-run action identifier) to
+                  what C4 decides. Empty uses the adapter's defaults.
+                type: object
+              webhookSecret:
+                description: WebhookSecret verifies deliveries the tracker pushes,
+                  when it does.
+                properties:
+                  key:
+                    type: string
+                  name:
+                    type: string
+                required:
+                - key
+                - name
+                type: object
+            required:
+            - credential
+            - kind
+            type: object
+          status:
+            description: TrackerStatus is what c4-sync last saw of the connection.
+            properties:
+              conditions:
+                items:
+                  description: Condition contains details for one aspect of the current
+                    state of this API Resource.
+                  properties:
+                    lastTransitionTime:
+                      description: |-
+                        lastTransitionTime is the last time the condition transitioned from one status to another.
+                        This should be when the underlying condition changed.  If that is not known, then using the time when the API field changed is acceptable.
+                      format: date-time
+                      type: string
+                    message:
+                      description: |-
+                        message is a human readable message indicating details about the transition.
+                        This may be an empty string.
+                      maxLength: 32768
+                      type: string
+                    observedGeneration:
+                      description: |-
+                        observedGeneration represents the .metadata.generation that the condition was set based upon.
+                        For instance, if .metadata.generation is currently 12, but the .status.conditions[x].observedGeneration is 9, the condition is out of date
+                        with respect to the current state of the instance.
+                      format: int64
+                      minimum: 0
+                      type: integer
+                    reason:
+                      description: |-
+                        reason contains a programmatic identifier indicating the reason for the condition's last transition.
+                        Producers of specific condition types may define expected values and meanings for this field,
+                        and whether the values are considered a guaranteed API.
+                        The value should be a CamelCase string.
+                        This field may not be empty.
+                      maxLength: 1024
+                      minLength: 1
+                      pattern: ^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$
+                      type: string
+                    status:
+                      description: status of the condition, one of True, False, Unknown.
+                      enum:
+                      - "True"
+                      - "False"
+                      - Unknown
+                      type: string
+                    type:
+                      description: type of condition in CamelCase or in foo.example.com/CamelCase.
+                      maxLength: 316
+                      pattern: ^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              cursor:
+                description: Cursor is the adapter's own change cursor, opaque to
+                  the loop.
+                type: string
+              lastResync:
+                format: date-time
+                type: string
+              links:
+                description: Links counts the TrackerLinks of this Tracker.
+                format: int32
+                type: integer
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

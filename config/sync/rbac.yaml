@@ -1,0 +1,37 @@
+# c4-sync reads Trackers and keeps TrackerLinks. It reads no Secret here:
+# each project grants it its own Tracker's credential Secrets by name, in
+# its own namespace (config/samples/tracker-github/role.yaml). It changes
+# jobs only through the HUD API, as its own identity, so the HUD checks
+# and books every change.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: c4-sync
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-sync
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [trackers]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [trackerlinks]
+  verbs: [get, list, watch, create]
+- apiGroups: [c4.avalanche.io]
+  resources: [trackers/status, trackerlinks/status]
+  verbs: [get, patch, update]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-sync
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: c4-sync
+subjects:
+- kind: ServiceAccount
+  name: c4-sync
+  namespace: c4-system

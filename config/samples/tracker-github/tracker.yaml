@@ -1,0 +1,40 @@
+# A GitHub repository syncing with a project (experimental: c4-sync).
+# Issues labeled c4:agent become agent jobs whose deadline is the issue's
+# milestone due date; the pull request that names the job (C4-Job: ns/name,
+# or a closing keyword for the issue) carries a check run and a commit
+# status with the job's work state; its reviews serve the job's review
+# wait. c4-sync never approves or merges anything.
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Tracker
+metadata:
+  name: widgets
+  namespace: work
+  annotations:
+    # c4-sync's own login, so its own deliveries are dropped as echoes.
+    c4.avalanche.io/tracker-self: c4-sync[bot]
+spec:
+  kind: github
+  scope: {repo: acme/widgets}
+  credential:
+    # A short-lived installation token, kept current in this Secret by the
+    # credential lease that holds the GitHub App's key (integrations GAPS 8).
+    lease: widgets-github-app
+    secret: {name: widgets-github-token, key: token}
+  webhookSecret: {name: widgets-github-webhook, key: secret}
+  events: {mode: webhook, pollSeconds: 60, resyncSeconds: 900}
+  rate: {perSecond: "1", burst: 10}
+  people:
+    dana-reyes: dana
+  intake:
+  - match: {type: Issue, labels: ["c4:agent"]}
+    as: job
+    review: {wait: review}
+    job:
+      class: agent
+      params: {bundle: port}
+      template:
+        spec:
+          containers:
+          - name: agent
+            image: ghcr.io/avalanche-io/c4-agent:dev
+  statusOut: {checkName: C4, commitStatus: true, fieldSeconds: 300}

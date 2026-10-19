@@ -1,0 +1,221 @@
+// Package tracker is what c4-sync's loop knows about any tracker
+// (proposals/integrations ADAPTER.md section 9): one interface of eleven
+// methods, and the few normalized types it speaks. The loop never switches
+// on an adapter's kind; everything tracker-specific is in the adapter and
+// in the Tracker object's configuration.
+package tracker
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"sort"
+	"sync"
+	"time"
+)
+
+// Ref names one entity in one tracker.
+type Ref struct {
+	Type string // Issue, PullRequest, CheckRun, Comment, Review...
+	ID   string
+	URL  string
+}
+
+func (r Ref) String() string { return r.Type + "/" + r.ID }
+
+// Item is one entity, normalized just enough for the loop.
+type Item struct {
+	Ref       Ref
+	Parent    *Ref // the repository, the shot, the experiment
+	Title     string
+	Body      string
+	Due       *Due
+	Status    Status
+	Assignees []Person
+	Labels    []string
+	Fields    map[string]string // adapter fields by native name (a PR's head SHA)
+	UpdatedAt time.Time
+	Version   string // etag, revision or updatedAt: for conditional writes
+}
+
+// Due is a due date as the tracker holds it.
+type Due struct {
+	At       time.Time
+	DateOnly bool // the tracker stores a date and no time of day
+}
+
+// Status is a native status with the category the loop reasons about.
+type Status struct {
+	Native   string // "open", "In Progress", "CHANGES_REQUESTED"
+	Category string // planned, ready, active, review, rework, done, omitted
+}
+
+// Person is a tracker user.
+type Person struct {
+	ID    string // the tracker's stable id or login
+	Name  string
+	Email string
+}
+
+// Decision is a reviewer's judgment read from the tracker.
+type Decision struct {
+	On       Ref // what was judged: the PR, the version, the run
+	Source   Ref // the review, status change, action or score carrying it
+	By       Person
+	Native   string // the tracker's own word: APPROVED, CHANGES_REQUESTED, rework
+	Body     string // the review text and its inline comments
+	At       time.Time
+	Evidence []byte // the raw entity or delivery, kept for the record
+}
+
+// Output is what C4 publishes for a finished job.
+type Output struct {
+	Name    string
+	View    string // the output view's C4 ID
+	Record  string // the job record's C4 ID
+	Custody string // the provenance view's URL
+	Summary string
+}
+
+// Note is a comment to add, or to edit in place.
+type Note struct {
+	Body    string
+	Replace *Ref // edit this comment rather than add one
+}
+
+// Write is one change the loop wants made, with its idempotency key.
+type Write struct {
+	On     Ref               // the entity written to, or that a new one hangs off
+	Kind   string            // the adapter's write kind: status, check, comment
+	Fields map[string]string // native field names
+	Note   *Note
+	Key    string // stable across retries: the adapter forwards or probes it
+}
+
+// Query selects entities for List.
+type Query struct {
+	Type   string
+	Labels []string
+	State  string // open, closed, all
+	Text   string // a marker the entity's body must contain
+}
+
+// Delivery is one pushed event, verified and parsed.
+type Delivery struct {
+	ID        string
+	Refs      []Ref      // entities to reconcile
+	Decisions []Decision // decisions carried only by the delivery itself
+	Self      bool       // made by the adapter's own identity: an echo
+}
+
+// Capabilities says what the tracker offers, so the loop adapts without
+// knowing which tracker it is.
+type Capabilities struct {
+	EventLog          bool
+	Webhooks          bool
+	IdempotencyKeys   bool
+	EditableComments  bool
+	CustomFields      bool
+	DateOnlyDue       bool
+	ConditionalWrites bool
+}
+
+// Adapter is one tracker family.
+type Adapter interface {
+	Kind() string
+	Capabilities() Capabilities
+
+	// Reading.
+	Get(ctx context.Context, ref Ref) (Item, error)
+	List(ctx context.Context, q Query, page string) (items []Item, next string, err error)
+	Changes(ctx context.Context, cursor string) (refs []Ref, next string, err error)
+	Decisions(ctx context.Context, on Ref, since time.Time) ([]Decision, error)
+
+	// Receive verifies and parses one pushed delivery. Adapters whose
+	// tracker does not push return ErrUnsupported.
+	Receive(r *http.Request) (Delivery, error)
+
+	// Writing. Every call carries its key; Probe answers "did this
+	// already happen?" for trackers that take no idempotency key.
+	Apply(ctx context.Context, w Write) (Ref, error)
+	Publish(ctx context.Context, on Ref, out Output, key string) (Ref, error)
+	Probe(ctx context.Context, w Write) (done bool, ref Ref, err error)
+
+	// People.
+	Person(ctx context.Context, id string) (Person, error)
+}
+
+// ErrUnsupported is what an adapter returns for a method its tracker has
+// no counterpart for.
+var ErrUnsupported = errors.New("tracker: not supported by this tracker")
+
+// ErrNotFound is an entity the tracker does not have, or will not show.
+var ErrNotFound = errors.New("tracker: not found")
+
+// ErrBadSignature is a delivery whose signature does not verify.
+var ErrBadSignature = errors.New("tracker: delivery signature does not verify")
+
+// RateLimited is a refusal for rate; Until is when to try again.
+type RateLimited struct {
+	Until time.Time
+	Msg   string
+}
+
+func (e *RateLimited) Error() string {
+	return fmt.Sprintf("tracker: rate limited until %s: %s", e.Until.UTC().Format(time.RFC3339), e.Msg)
+}
+
+// Config is what an adapter is built from: the Tracker object's spec,
+// resolved.
+type Config struct {
+	Endpoint string
+	Scope    map[string]string
+	// Token returns the current credential; it is called for every
+	// request, so a rotated lease takes effect at once.
+	Token func(ctx context.Context) (string, error)
+	// WebhookSecret returns the delivery-signing secret, if any.
+	WebhookSecret func(ctx context.Context) ([]byte, error)
+	// Self is the adapter's own identity in the tracker, for echoes.
+	Self       string
+	HTTPClient *http.Client
+	Now        func() time.Time
+}
+
+// Factory builds an adapter.
+type Factory func(Config) (Adapter, error)
+
+var (
+	regMu    sync.Mutex
+	registry = map[string]Factory{}
+)
+
+// Register makes an adapter available by kind.
+func Register(kind string, f Factory) {
+	regMu.Lock()
+	defer regMu.Unlock()
+	registry[kind] = f
+}
+
+// New builds the adapter for kind.
+func New(kind string, c Config) (Adapter, error) {
+	regMu.Lock()
+	f, ok := registry[kind]
+	regMu.Unlock()
+	if !ok {
+		return nil, fmt.Errorf("tracker: no adapter for kind %q (have %v)", kind, Kinds())
+	}
+	return f(c)
+}
+
+// Kinds lists the registered adapters.
+func Kinds() []string {
+	regMu.Lock()
+	defer regMu.Unlock()
+	out := make([]string, 0, len(registry))
+	for k := range registry {
+		out = append(out, k)
+	}
+	sort.Strings(out)
+	return out
+}
