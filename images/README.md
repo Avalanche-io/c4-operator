@@ -85,7 +85,7 @@ power to spare, then smoke-test each type on the local farm with one frame
 2. **usd**: `usdcat --flatten`, `usdchecker` and `usdzip` run from
    `/opt/usd/bin` with the system Python 3.13.
 3. **oiio and media**: `oiiotool --colorconfig ocio://studio-config-latest
-   --colorconfiginfo` lists ACES2065-1 and the "ACES 1.0 - SDR Video" view.
+   --colorconfiginfo` lists ACES2065-1 and the "ACES 2.0 - SDR 100 nits (Rec.709)" view (studio-config-latest is the ACES 2.0 studio config).
    FFmpeg encodes one frame each of ProRes 422 HQ, ProRes 4444 and DNxHR
    HQX.
 4. **sim**: the snapshot date resolves, and

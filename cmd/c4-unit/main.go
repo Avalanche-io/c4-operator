@@ -683,7 +683,7 @@ func preview(e env, src, dst string, width int) error {
 	}
 	tmp := dst + ".tmp.png"
 	cmd := exec.Command(tool, src, "--colorconfig", "ocio://studio-config-latest",
-		"--ociodisplay", "sRGB - Display", "ACES 1.0 - SDR Video",
+		"--ociodisplay", "sRGB - Display", "ACES 2.0 - SDR 100 nits (Rec.709)",
 		"--resize", fmt.Sprintf("%dx0", width), "-d", "uint8", "-o", tmp)
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

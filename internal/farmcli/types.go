@@ -114,7 +114,7 @@ done`},
 		Script: `mkdir -p {{.Mount}}/review /tmp/f
 oiiotool --frames "$C4_FRAME_START-$C4_FRAME_END" '{{.Mount}}/{{.Dir}}{{index .Set "frames"}}' \
   --colorconfig ocio://studio-config-latest --iscolorspace ACES2065-1 \
-  --ociodisplay "Rec.1886 Rec.709 - Display" "ACES 1.0 - SDR Video" \
+  --ociodisplay "Rec.1886 Rec.709 - Display" "ACES 2.0 - SDR 100 nits (Rec.709)" \
   -d uint16 -o /tmp/f/f.#.tif
 ffmpeg -loglevel error -framerate {{index .Set "fps"}} -start_number "$C4_FRAME_START" -i /tmp/f/f.%04d.tif \
   {{codecArgs (index .Set "codec")}} {{.Mount}}/review/{{.Shot}}_review.mov
