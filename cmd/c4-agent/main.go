@@ -19,6 +19,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -67,9 +68,16 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	cmd, rest := args[0], args[1:]
 	if cmd == "checkpoint" && len(rest) > 0 && rest[0] == "--hook" {
 		// A hook must never fail or block the agent: report and exit 0.
-		if _, err := h.Hook(ctx, stdin); err != nil {
+		input, err := io.ReadAll(io.LimitReader(stdin, 1<<20))
+		if err != nil {
+			fmt.Fprintln(stderr, "c4-agent hook:", err)
+			return 0
+		}
+		cp, err := h.Hook(ctx, bytes.NewReader(input))
+		if err != nil {
 			fmt.Fprintln(stderr, "c4-agent hook:", err)
 		}
+		hookSafepoint(ctx, input, cp, stdout, stderr)
 		return 0
 	}
 	if err := dispatch(ctx, h, cmd, rest, stdout); err != nil {

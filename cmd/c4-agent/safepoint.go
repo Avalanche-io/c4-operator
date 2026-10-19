@@ -1,0 +1,79 @@
+package main
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/agent"
+)
+
+// stopCode is c4-unit safepoint's exit status when the farm asked the unit
+// to stop.
+const stopCode = 10
+
+// hookSafepoint runs after the Stop hook's checkpoint when the session runs
+// inside a farm unit (the queue sets $C4_PODINFO on every unit pod). The end
+// of a turn is the unit's safe point: it announces it with
+// `c4-unit safepoint --checkpoint REF`, and when the farm asked the unit to
+// stop, it tells Claude Code to end the session here by printing
+// {"continue": false} on stdout (which takes precedence over any other
+// hook asking to continue). Outside a unit, or without c4-unit on the PATH,
+// it does nothing. It never fails the hook.
+func hookSafepoint(ctx context.Context, input []byte, cp *agent.Checkpoint, stdout, stderr io.Writer) {
+	if os.Getenv("C4_PODINFO") == "" {
+		return
+	}
+	bin := os.Getenv("C4_UNIT_BIN")
+	if bin == "" {
+		var err error
+		if bin, err = exec.LookPath("c4-unit"); err != nil {
+			fmt.Fprintln(stderr, "c4-agent hook: in a farm unit but c4-unit is not on the PATH; no safe point announced")
+			return
+		}
+	}
+	ref := safepointRef(input, cp)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	args := []string{"safepoint"}
+	if ref != "" {
+		args = append(args, "--checkpoint", ref)
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stderr = stderr
+	err := cmd.Run()
+	var exit *exec.ExitError
+	switch {
+	case err == nil:
+		return
+	case errors.As(err, &exit) && exit.ExitCode() == stopCode:
+		out, _ := json.Marshal(map[string]any{
+			"continue":   false,
+			"stopReason": "The farm asked this unit to stop at its safe point; the turn is saved.",
+		})
+		fmt.Fprintln(stdout, string(out))
+	default:
+		fmt.Fprintln(stderr, "c4-agent hook: c4-unit safepoint:", err)
+	}
+}
+
+// safepointRef names the turn the safe point is at: the member's checkpoint
+// as <session>#<seq>:<head> (the form the HUD reads), or, for a session that
+// is not a member, its session ID.
+func safepointRef(input []byte, cp *agent.Checkpoint) string {
+	if cp != nil {
+		return fmt.Sprintf("%s#%d:%s", cp.Session, cp.Seq, cp.Head)
+	}
+	var in struct {
+		SessionID string `json:"session_id"`
+	}
+	if json.Unmarshal(input, &in) == nil {
+		return in.SessionID
+	}
+	return ""
+}

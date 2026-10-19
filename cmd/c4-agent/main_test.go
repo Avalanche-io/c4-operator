@@ -183,3 +183,71 @@ func TestReorder(t *testing.T) {
 }
 
 func readFile(p string) string { b, _ := os.ReadFile(p); return string(b) }
+
+// fakeUnit stands in for c4-unit: it records its arguments and exits with
+// $FAKE_UNIT_CODE (10 is "stop").
+const fakeUnit = `#!/bin/sh
+echo "$@" >> "$FAKE_UNIT_LOG"
+exit "${FAKE_UNIT_CODE:-0}"
+`
+
+// In a farm unit the Stop hook announces the turn's end as a safe point,
+// for a member (with its checkpoint as the ref) and for a session that is
+// not one (with its session ID); when the farm asks the unit to stop, the
+// hook tells Claude Code to end the session. Outside a unit it announces
+// nothing, and the hook always exits 0.
+func TestHookSafepoint(t *testing.T) {
+	_, work := setup(t)
+	root := t.TempDir()
+	unit, log := filepath.Join(root, "c4-unit"), filepath.Join(root, "unit.log")
+	if err := os.WriteFile(unit, []byte(fakeUnit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("C4_UNIT_BIN", unit)
+	t.Setenv("FAKE_UNIT_LOG", log)
+	if code, _, e := runCLI(t, "", "register", "--name", "lead", "--session", sid, "--cwd", work); code != 0 {
+		t.Fatalf("register: %d %s", code, e)
+	}
+	member := `{"session_id":"` + sid + `","hook_event_name":"Stop"}`
+	stranger := `{"session_id":"99999999-0000-0000-0000-000000000000","hook_event_name":"Stop"}`
+
+	// outside a unit: no safe point
+	if code, out, _ := runCLI(t, member, "checkpoint", "--hook"); code != 0 || out != "" {
+		t.Fatalf("outside a unit: %d %q", code, out)
+	}
+	if _, err := os.Stat(log); err == nil {
+		t.Fatal("c4-unit ran outside a unit")
+	}
+
+	t.Setenv("C4_PODINFO", filepath.Join(root, "annotations"))
+	// a member: continue
+	if code, out, _ := runCLI(t, member, "checkpoint", "--hook"); code != 0 || out != "" {
+		t.Fatalf("member, continue: %d %q", code, out)
+	}
+	// not a member, asked to stop
+	t.Setenv("FAKE_UNIT_CODE", "10")
+	code, out, _ := runCLI(t, stranger, "checkpoint", "--hook")
+	if code != 0 || !strings.Contains(out, `"continue":false`) {
+		t.Fatalf("stop: %d %q", code, out)
+	}
+	// c4-unit failing otherwise never fails the hook
+	t.Setenv("FAKE_UNIT_CODE", "1")
+	if code, out, _ := runCLI(t, stranger, "checkpoint", "--hook"); code != 0 || out != "" {
+		t.Fatalf("c4-unit error: %d %q", code, out)
+	}
+
+	b, err := os.ReadFile(log)
+	if err != nil {
+		t.Fatal(err)
+	}
+	calls := strings.Split(strings.TrimSpace(string(b)), "\n")
+	if len(calls) != 3 {
+		t.Fatalf("calls %q", calls)
+	}
+	if !strings.HasPrefix(calls[0], "safepoint --checkpoint "+sid+"#") || !strings.Contains(calls[0], ":c4") {
+		t.Fatalf("member ref %q", calls[0])
+	}
+	if calls[1] != "safepoint --checkpoint 99999999-0000-0000-0000-000000000000" {
+		t.Fatalf("stranger ref %q", calls[1])
+	}
+}

@@ -224,7 +224,8 @@ type hookInput struct {
 // Hook handles a Claude Code Stop hook: it checkpoints the member the
 // session belongs to. A session that is not a member is ignored, so the
 // hook is harmless in sessions the harness does not manage. It returns the
-// checkpoint, or nil when there was nothing to do.
+// member's latest checkpoint (the one it saved, or the previous one when the
+// turn added nothing), or nil for a session that is not a member.
 func (h *Harness) Hook(ctx context.Context, r io.Reader) (*Checkpoint, error) {
 	var in hookInput
 	if err := json.NewDecoder(io.LimitReader(r, 1<<20)).Decode(&in); err != nil {
@@ -261,8 +262,10 @@ func (h *Harness) Hook(ctx context.Context, r io.Reader) (*Checkpoint, error) {
 			return nil, err
 		}
 	}
-	cp, changed, err := h.checkpointLocked(ctx, m, "stop")
-	if err != nil || !changed {
+	// The latest checkpoint, new or (when the turn added nothing) the
+	// previous one: the turn's end is a safe point either way.
+	cp, _, err := h.checkpointLocked(ctx, m, "stop")
+	if err != nil {
 		return nil, err
 	}
 	return cp, nil
