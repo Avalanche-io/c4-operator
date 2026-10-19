@@ -247,3 +247,32 @@ func (d *docStore) PutBytes(ctx context.Context, project string, id c4.ID, data 
 	d.docs[id.String()] = data
 	return nil
 }
+
+// A session that cannot become the block's member (here its transcript
+// never appears) is stopped, so the next attempt does not leave it running.
+func TestBlockStartFailureStopsSession(t *testing.T) {
+	cfg := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfg)
+	cli := &noTranscriptCLI{blockCLI{dir: cfg, state: map[string]string{}, cwd: map[string]string{}, prompts: map[string][]string{}, flags: map[string][]string{}}}
+	h := agent.New(&agent.Store{Dir: t.TempDir()}, cli)
+	_, err := h.Start(context.Background(), agent.StartOptions{Name: "b", Cwd: t.TempDir(), Prompt: "x", TranscriptWait: 50 * time.Millisecond})
+	if err == nil || len(cli.stops) != 1 {
+		t.Fatalf("err %v, stops %v", err, cli.stops)
+	}
+	if _, err := h.Store.Get("b"); err == nil {
+		t.Fatal("a member was registered for a session that never wrote a transcript")
+	}
+}
+
+// noTranscriptCLI starts sessions that never write a transcript.
+type noTranscriptCLI struct{ blockCLI }
+
+func (f *noTranscriptCLI) Start(ctx context.Context, configDir, dir string, flags []string, prompt string) (string, error) {
+	id, err := f.blockCLI.Start(ctx, configDir, dir, flags, prompt)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for s := range f.state {
+		os.Remove(f.transcript(s))
+	}
+	return id, err
+}

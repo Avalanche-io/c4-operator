@@ -532,3 +532,23 @@ func TestSealWorkspaceGit(t *testing.T) {
 		t.Fatalf("outside a repo: %+v", n)
 	}
 }
+
+// Start ends the flags with "--", so a prompt after a flag that takes any
+// number of values (--allowedTools) is the prompt, not one more value.
+func TestCLIStartEndsFlags(t *testing.T) {
+	dir := t.TempDir()
+	log := filepath.Join(dir, "args")
+	bin := filepath.Join(dir, "claude")
+	script := "#!/bin/sh\nfor a in \"$@\"; do echo \"$a\"; done > " + log + "\necho 'backgrounded · 0123abcd · b'\n"
+	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	c := &CLI{Path: bin}
+	if _, err := c.Start(context.Background(), "", dir, []string{"--allowedTools", "Read", "Bash(go:*)"}, "do the task"); err != nil {
+		t.Fatal(err)
+	}
+	b, _ := os.ReadFile(log)
+	if got := strings.Split(strings.TrimSpace(string(b)), "\n"); strings.Join(got, "|") != "--bg|--allowedTools|Read|Bash(go:*)|--|do the task" {
+		t.Fatalf("args %q", got)
+	}
+}

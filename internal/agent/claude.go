@@ -164,13 +164,17 @@ type Starter interface {
 	Start(ctx context.Context, configDir, dir string, flags []string, prompt string) (string, error)
 }
 
-// Start runs `claude --bg [flags] <prompt>`. The CLI keeps the flags with
+// Start runs `claude --bg [flags] -- <prompt>`. The "--" ends the flags:
+// --allowedTools takes any number of values, and without it a prompt after
+// the tools is read as one more tool, and the session starts idle with no
+// task ("send a prompt to start"). (Resume must not use "--": with it,
+// `claude --bg --resume <id>` starts a copy.) The CLI keeps the flags with
 // the session: `claude --bg --resume <id>` with none wakes it with the same
 // permission mode, tools and settings (Claude Code 2.1.303: "woke session
 // with its saved options"). dir must be a folder the CLI trusts; a
 // background session refuses an untrusted one.
 func (c *CLI) Start(ctx context.Context, configDir, dir string, flags []string, prompt string) (string, error) {
-	args := append(append([]string{"--bg"}, flags...), prompt)
+	args := append(append(append([]string{"--bg"}, flags...), "--"), prompt)
 	out, err := c.run(ctx, configDir, dir, args...)
 	if err != nil {
 		return "", err

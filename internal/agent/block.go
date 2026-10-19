@@ -115,8 +115,17 @@ func (h *Harness) Start(ctx context.Context, o StartOptions) (*Member, error) {
 	}
 	session := h.fullID(ctx, o.ConfigDir, id)
 	if !ValidSession(session) {
+		h.Claude.Stop(ctx, o.ConfigDir, id)
 		return nil, fmt.Errorf("member %s: the CLI printed %q, and no running session has that ID", o.Name, id)
 	}
+	// a session that cannot become the member must not run on: the next
+	// attempt would start another
+	registered := false
+	defer func() {
+		if !registered {
+			h.Claude.Stop(ctx, o.ConfigDir, session)
+		}
+	}()
 	m := &Member{Name: o.Name, Session: session, Cwd: o.Cwd, ConfigDir: o.ConfigDir, Flags: o.Flags, Block: true, Registered: h.Now().UTC()}
 	wait := o.TranscriptWait
 	if wait <= 0 {
@@ -140,6 +149,7 @@ func (h *Harness) Start(ctx context.Context, o StartOptions) (*Member, error) {
 	if err := h.Store.Put(m); err != nil {
 		return nil, err
 	}
+	registered = true
 	if _, _, err := h.checkpointLocked(ctx, m, "register"); err != nil {
 		return nil, err
 	}
