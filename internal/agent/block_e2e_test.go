@@ -41,9 +41,9 @@ func (f *blockCLI) Active(ctx context.Context, configDir string, all bool) ([]ag
 	defer f.mu.Unlock()
 	var out []agent.Active
 	for s, st := range f.state {
-		status := "busy"
-		if st == "done" {
-			status = "idle"
+		status := "idle" // done, or blocked: the CLI's "idle blocked" when a task gave up
+		if st == "working" {
+			status = "busy"
 		}
 		out = append(out, agent.Active{SessionID: s, Status: status, State: st, Kind: "background", Pid: 1})
 	}
@@ -187,7 +187,8 @@ func TestBlockOnHostRunner(t *testing.T) {
 		t.Error("the unit's own task did not win over the job's")
 	}
 	flags := strings.Join(cli.flags[session], " ")
-	for _, want := range []string{"--permission-mode dontAsk", "--settings", "/bin/c4-agent checkpoint --hook", "Bash(git:*)", "-n default.practice-1.count"} {
+	for _, want := range []string{"--restricted", "--strict-mcp-config", "--permission-mode dontAsk", "--settings", "/bin/c4-agent checkpoint --hook",
+		"--tools Read Edit Write Glob Grep Bash --allowedTools", "Bash(git:*)", "-n default.practice-1.count"} {
 		if !strings.Contains(flags, want) {
 			t.Errorf("flags lack %q: %s", want, flags)
 		}
@@ -229,6 +230,18 @@ func TestBlockOnHostRunner(t *testing.T) {
 	tick()
 	if p := get(second); p.Status.Phase != corev1.PodSucceeded || p.Annotations[c4v1.AnnotationOutputVerdict] == "" {
 		t.Fatalf("rework done: %s, verdict %q", p.Status.Phase, p.Annotations[c4v1.AnnotationOutputVerdict])
+	}
+
+	// a block that gives up: its turn ends with the CLI reporting it blocked
+	third := pod("count-a3", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "Again."})
+	tick()
+	endTurn(session, nil)
+	cli.mu.Lock()
+	cli.state[session] = "blocked"
+	cli.mu.Unlock()
+	tick()
+	if p := get(third); p.Status.Phase != corev1.PodFailed || p.Status.Reason != "BlockGaveUp" {
+		t.Fatalf("gave up: %s %s", p.Status.Phase, p.Status.Reason)
 	}
 }
 

@@ -217,11 +217,18 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 	if err != nil {
 		return err
 	}
-	// A block ends when its task does: stop its idle session, and finish
-	// the pod below as a member whose session ended on its own.
-	if live && m.Block && p.Status.Phase == corev1.PodRunning && act.Done() && r.turnSince(m, p) {
+	// A block's attempt ends with its turn: stop its idle session. A task
+	// it finished ends the pod below as a member whose session ended on its
+	// own; one it gave up on (the CLI reports it blocked, not done) fails
+	// the attempt, for the job's retries or a person.
+	if live && m.Block && p.Status.Phase == corev1.PodRunning && act.Idle() && act.State != "working" && r.turnSince(m, p) {
 		if err := r.Harness.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
 			return err
+		}
+		if !act.Done() {
+			r.logf("%s: ended its turn without finishing its task (%s); stopped its session", m.Name, act.State)
+			return r.finish(ctx, p, corev1.PodFailed, "BlockGaveUp",
+				fmt.Sprintf("the block ended its turn without finishing its task (the CLI reports it %s); its transcript says why", act.State), 1)
 		}
 		r.logf("%s: its task is done; stopped its session", m.Name)
 		live = false

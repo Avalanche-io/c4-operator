@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -156,20 +157,36 @@ func (h *Harness) Start(ctx context.Context, o StartOptions) (*Member, error) {
 	return m, nil
 }
 
-// blockFlags are the flags a block's session starts with: its name, a
-// permission mode that never stops to ask (a tool the job did not allow is
-// refused, not prompted for), the job's tools, its model, and the Stop
-// hook that checkpoints every turn and answers the farm's safe points.
+// blockFlags are the flags a block's session starts with:
+//   - its name;
+//   - restricted mode, with no MCP servers: none of the machine's user,
+//     project or local settings, CLAUDE.md, connectors or MCP servers reach
+//     a block, and its file tools stay in its working folders (Claude Code
+//     2.1.303: --restricted ignores the settings files but keeps
+//     --settings; --strict-mcp-config drops MCP servers and connectors);
+//   - the job's tools (--tools turns them on in restricted mode,
+//     --allowedTools lets them run) and a permission mode that never stops
+//     to ask: a tool the job did not allow is refused, not prompted for;
+//   - its model, and the Stop hook that checkpoints every turn and answers
+//     the farm's safe points.
 func (r *Runner) blockFlags(p *corev1.Pod, name string) ([]string, error) {
 	hook, err := HookSettingsCommand(r.HookCommand)
 	if err != nil {
 		return nil, err
 	}
-	flags := []string{"-n", name, "--permission-mode", "dontAsk", "--settings", string(hook)}
+	flags := []string{"-n", name, "--restricted", "--strict-mcp-config", "--permission-mode", "dontAsk", "--settings", string(hook)}
 	tools := podEnv(p, EnvBlockTools)
 	if tools == "" {
 		tools = DefaultBlockTools
 	}
+	var names []string
+	for _, t := range strings.Fields(tools) {
+		n, _, _ := strings.Cut(t, "(")
+		if !slices.Contains(names, n) {
+			names = append(names, n)
+		}
+	}
+	flags = append(append(flags, "--tools"), names...)
 	flags = append(flags, "--allowedTools")
 	flags = append(flags, strings.Fields(tools)...)
 	if model := podEnv(p, EnvBlockModel); model != "" {
@@ -210,6 +227,7 @@ func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	if repo := podEnv(p, EnvBlockRepo); repo != "" {
 		fmt.Fprintf(&b, "- The project's repository: %s. Do your work there.\n", repo)
 	}
+	b.WriteString("- Run each shell command on its own: no cd, no &&, ; or pipes. Use absolute paths, git -C <dir> and go -C <dir>; only the commands you were allowed run, and a compound one is refused.\n")
 	fmt.Fprintf(&b, "- This attempt's output directory: %s. Control documents go in %s/.c4/:\n", u.Out, u.Out)
 	b.WriteString("  - a generator writes its expansion document (version 1) to expand.json there;\n")
 	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n\n")
