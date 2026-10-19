@@ -247,6 +247,19 @@ func TestBlockOnHostRunner(t *testing.T) {
 		t.Fatalf("gave up: %s %s", p.Status.Phase, p.Status.Reason)
 	}
 
+	// the block's own word decides: it wrote done, though the CLI read its
+	// last message as blocked
+	said := pod("count-a3b", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "Once more."})
+	tick()
+	endTurn(session, map[string]string{"done": "Count is case-insensitive; nothing was left to do."})
+	cli.mu.Lock()
+	cli.state[session] = "blocked"
+	cli.mu.Unlock()
+	tick()
+	if p := get(said); p.Status.Phase != corev1.PodSucceeded || p.Status.Reason != "Completed" {
+		t.Fatalf("done by its own word: %s %s", p.Status.Phase, p.Status.Reason)
+	}
+
 	// a block in parts: a part done with a note of the next wakes the same
 	// session for it, in the same attempt, and the last part ends the pod
 	parts := pod("count-a4", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "In two parts."})

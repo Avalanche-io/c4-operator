@@ -205,7 +205,7 @@ func blockPrompt(p *corev1.Pod, u UnitDirs) string {
 		podEnv(p, "C4_UNIT_NAME"), p.Namespace, p.Labels[c4v1.LabelJob])
 	fmt.Fprintf(&b, "Your task:\n%s\n\n", strings.TrimSpace(podEnv(p, EnvBlockPrompt)))
 	b.WriteString(whereThingsAre(p, u))
-	b.WriteString("When the task is done, reply with a one-line summary and stop.")
+	b.WriteString("When the task is done, write a one-line summary of it to done in that .c4/ directory, reply with the same line, and stop.")
 	return b.String()
 }
 
@@ -219,7 +219,7 @@ func reworkPrompt(p *corev1.Pod, u UnitDirs) string {
 		b.WriteString("The farm resumed your block where it stopped. Carry on with your task.\n\n")
 	}
 	b.WriteString(whereThingsAre(p, u))
-	b.WriteString("This attempt has a new output directory: write its control documents there, not in the old one. When the task is done, reply with a one-line summary and stop.")
+	b.WriteString("This attempt has a new output directory: write its control documents there, not in the old one. When the task is done (or if it already was), write a one-line summary of it to done in that .c4/ directory, reply with the same line, and stop.")
 	return b.String()
 }
 
@@ -233,7 +233,7 @@ func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	fmt.Fprintf(&b, "- This attempt's output directory: %s. Control documents go in %s/.c4/:\n", u.Out, u.Out)
 	b.WriteString("  - a generator writes its expansion document (version 1) to expand.json there;\n")
 	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n")
-	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note.\n\n")
+	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note (to withdraw one, write the file empty).\n\n")
 	return b.String()
 }
 
@@ -295,7 +295,8 @@ func (r *Runner) turnSince(m *Member, p *corev1.Pod) bool {
 }
 
 // takeMore reads and removes a block's note of its next part
-// (<out>/.c4/more): a part is done and the task goes on.
+// (<out>/.c4/more): a part is done and the task goes on. An empty note is
+// one the block withdrew.
 func takeMore(u UnitDirs) (string, bool) {
 	path := filepath.Join(u.Out, ".c4", "more")
 	b, err := os.ReadFile(path)
@@ -304,16 +305,23 @@ func takeMore(u UnitDirs) (string, bool) {
 	}
 	os.Remove(path)
 	note := strings.TrimSpace(string(b))
-	if note == "" {
-		note = "the next part of your task"
-	}
-	return note, true
+	return note, note != ""
+}
+
+// takeDone reports whether a block said its task is done
+// (<out>/.c4/done, its one-line summary). The block's own word decides,
+// not the CLI's reading of its last message: that reads a finished task
+// whose summary mentions a problem, or that found nothing left to do, as
+// blocked (Claude Code 2.1.303).
+func takeDone(u UnitDirs) bool {
+	b, err := os.ReadFile(filepath.Join(u.Out, ".c4", "done"))
+	return err == nil && strings.TrimSpace(string(b)) != ""
 }
 
 // partPrompt wakes a block for the next part of its task, in the same
 // attempt.
 func partPrompt(note string, u UnitDirs) string {
-	return fmt.Sprintf("Go on with the next part of your task: %s\n\nThe output directory is still %s. When that part is done, write the note for the one after it to %s/.c4/more and end your turn, or, if it was the last, write no note, reply with a one-line summary and stop.", note, u.Out, u.Out)
+	return fmt.Sprintf("Go on with the next part of your task: %s\n\nThe output directory is still %s. When that part is done, write the note for the one after it to %s/.c4/more and end your turn; if it was the last, write no note, write a one-line summary of the whole task to %s/.c4/done, reply with the same line, and stop.", note, u.Out, u.Out, u.Out)
 }
 
 // blockYield decides a block's yield by its safe point. A block is asked
