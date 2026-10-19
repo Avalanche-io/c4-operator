@@ -24,6 +24,7 @@ var controlDocs = []struct {
 	{"expand.json", c4v1.AnnotationOutputExpand},
 	{"verdict.json", c4v1.AnnotationOutputVerdict},
 	{"measure.json", c4v1.AnnotationOutputMeasure},
+	{"usage.json", c4v1.AnnotationOutputUsage},
 }
 
 // maxControlDoc bounds a control document, in bytes.

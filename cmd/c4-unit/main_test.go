@@ -194,3 +194,37 @@ func TestMeasure(t *testing.T) {
 		}
 	}
 }
+
+func TestUsageAdds(t *testing.T) {
+	out := t.TempDir()
+	e := vars(map[string]string{"C4_OUTPUT": out})
+	for _, args := range [][]string{
+		{"usage", "--model", "opus", "--input", "1000", "--output", "200", "--cost", "0.5", "--cost-source", "price-table"},
+		{"usage", "--model", "opus", "--input", "500", "--output", "100", "--cache-read", "4000", "--cost", "0.25"},
+		{"usage", "--model", "haiku", "--input", "300"},
+	} {
+		if c, err := run(args, nil, e); c != 0 || err != nil {
+			t.Fatal(c, err)
+		}
+	}
+	b, _ := os.ReadFile(filepath.Join(out, ".c4", "usage.json"))
+	var u struct {
+		Models []struct {
+			Model                                      string
+			InputTokens, OutputTokens, CacheReadTokens int64
+			CostUSD                                    *float64
+		}
+		CostSource string
+	}
+	if err := json.Unmarshal(b, &u); err != nil || len(u.Models) != 2 || u.CostSource != "price-table" {
+		t.Fatalf("usage %s %v", b, err)
+	}
+	o, h := u.Models[0], u.Models[1]
+	if o.Model != "opus" || o.InputTokens != 1500 || o.OutputTokens != 300 || o.CacheReadTokens != 4000 || o.CostUSD == nil || *o.CostUSD != 0.75 ||
+		h.Model != "haiku" || h.InputTokens != 300 || h.CostUSD != nil {
+		t.Fatalf("usage %s", b)
+	}
+	if c, _ := run([]string{"usage", "--input", "5"}, nil, e); c != 2 {
+		t.Fatal("usage without a model accepted")
+	}
+}

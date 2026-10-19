@@ -184,6 +184,20 @@ type Project struct {
 	GPUHours          float64          `json:"gpuHours"`
 }
 
+// Spend is a job's spend so far: slot time at its pools' rates and model
+// tokens at the prices its model units reported, in US dollars, and the
+// model units' share of it (LLM-OR-PROCEDURE 6.2).
+type Spend struct {
+	ModelUnits         int     `json:"modelUnits"`
+	ProceduralUnits    int     `json:"proceduralUnits"`
+	ModelTokens        int64   `json:"modelTokens"`
+	UnpricedTokens     int64   `json:"unpricedTokens,omitempty"`
+	TokenCost          float64 `json:"tokenCost"`
+	ModelSlotCost      float64 `json:"modelSlotCost"`
+	ProceduralSlotCost float64 `json:"proceduralSlotCost"`
+	ModelShare         float64 `json:"modelShare"`
+}
+
 // Measure is a job's own measure of done: value of the target, from the
 // latest reading a unit reported.
 type Measure struct {
@@ -411,6 +425,8 @@ type Job struct {
 	NeedsPerson *NeedsPerson `json:"needsPerson,omitempty"`
 	// Measure is the job's own measure of done, when it declares one.
 	Measure *Measure `json:"measure,omitempty"`
+	// Spend splits what the job cost between procedural and model units.
+	Spend *Spend `json:"spend,omitempty"`
 	// Acks are the standing acknowledgements of failed units.
 	Acks []Ack `json:"acks,omitempty"`
 	// Waits are what the job waits for: its wait units (a ruling, an

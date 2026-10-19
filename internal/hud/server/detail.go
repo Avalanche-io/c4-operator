@@ -157,6 +157,12 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if u.Gate != "" {
 			e["gate"] = u.Gate
 		}
+		if rec.driver != nil {
+			e["kind"] = class.KindOf(rec.driver, u)
+		}
+		if us, ok := rec.job.Status.ModelUsage[strconv.Itoa(i)]; ok {
+			e["usage"] = us
+		}
 		if len(u.Claims) > 0 {
 			var on []string
 			for _, c := range u.Claims {

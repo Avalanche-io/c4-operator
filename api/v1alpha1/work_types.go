@@ -60,6 +60,10 @@ const (
 	// AnnotationOutputMeasure on a finished unit pod is the C4 ID of the
 	// measure reading it wrote (.c4/measure.json), stored at capture.
 	AnnotationOutputMeasure = "c4.avalanche.io/output-measure"
+	// AnnotationOutputUsage on a finished model unit's pod is the C4 ID of
+	// its model usage (.c4/usage.json: tokens and their cost), stored at
+	// capture.
+	AnnotationOutputUsage = "c4.avalanche.io/output-usage"
 	// FinalizerUnit is on every unit pod, so a pod deleted while it runs
 	// (a drain, an eviction, a preemption) stays readable until the queue
 	// has recorded how it ended.
@@ -346,6 +350,14 @@ type WorkJobStatus struct {
 	// Measure is the latest reading of the job's measure of done.
 	// +optional
 	Measure *WorkMeasure `json:"measure,omitempty"`
+	// Spend is what the job's units cost so far, split between
+	// procedural and model units (LLM-OR-PROCEDURE 6.2).
+	// +optional
+	Spend *WorkSpend `json:"spend,omitempty"`
+	// ModelUsage maps each model unit's index to its token use and cost
+	// over all its attempts.
+	// +optional
+	ModelUsage map[string]WorkUnitUsage `json:"modelUsage,omitempty"`
 	// Interruptions lists the most recent attempts the farm stopped (a
 	// drain, an eviction, a preemption, a node going away): they spent no
 	// retry and run again. Interrupted counts them all.
@@ -504,6 +516,77 @@ type WorkExpansion struct {
 	// generator failed.
 	// +optional
 	Error string `json:"error,omitempty"`
+}
+
+// WorkSpend is a job's spend: slot time priced at its pools' rates, and
+// model tokens at the prices its model units reported. Dollar amounts are
+// decimal strings.
+type WorkSpend struct {
+	// ModelUnits and ProceduralUnits count the units of each kind that
+	// have run.
+	// +optional
+	ModelUnits int32 `json:"modelUnits,omitempty"`
+	// +optional
+	ProceduralUnits int32 `json:"proceduralUnits,omitempty"`
+	// ModelTokens is every token model units used (input, output and
+	// cache reads), and UnpricedTokens those no price came with (they
+	// are not in TokenCost).
+	// +optional
+	ModelTokens int64 `json:"modelTokens,omitempty"`
+	// +optional
+	UnpricedTokens int64 `json:"unpricedTokens,omitempty"`
+	// TokenCost is what those tokens cost; ModelSlotCost and
+	// ProceduralSlotCost the slot time of each kind.
+	// +optional
+	TokenCost string `json:"tokenCost,omitempty"`
+	// +optional
+	ModelSlotCost string `json:"modelSlotCost,omitempty"`
+	// +optional
+	ProceduralSlotCost string `json:"proceduralSlotCost,omitempty"`
+	// ModelShare is model units' part of the job's spend, 0 to 1.
+	// +optional
+	ModelShare string `json:"modelShare,omitempty"`
+}
+
+// WorkUnitUsage is one model unit's use of models over its attempts:
+// totals, and each model's.
+type WorkUnitUsage struct {
+	// +optional
+	InputTokens int64 `json:"inputTokens,omitempty"`
+	// +optional
+	OutputTokens int64 `json:"outputTokens,omitempty"`
+	// +optional
+	CacheReadTokens int64 `json:"cacheReadTokens,omitempty"`
+	// +optional
+	UnpricedTokens int64 `json:"unpricedTokens,omitempty"`
+	// Cost of the priced tokens, and SlotCost of the unit's slot time,
+	// decimal strings in US dollars.
+	// +optional
+	Cost string `json:"cost,omitempty"`
+	// +optional
+	SlotCost string `json:"slotCost,omitempty"`
+	// CostSource says where the price came from (a metering proxy, a
+	// price table).
+	// +optional
+	CostSource string `json:"costSource,omitempty"`
+	// +optional
+	Models []WorkModelTokens `json:"models,omitempty"`
+}
+
+// WorkModelTokens is one model's tokens in a unit.
+type WorkModelTokens struct {
+	Model string `json:"model"`
+	// +optional
+	InputTokens int64 `json:"inputTokens,omitempty"`
+	// +optional
+	OutputTokens int64 `json:"outputTokens,omitempty"`
+	// +optional
+	CacheReadTokens int64 `json:"cacheReadTokens,omitempty"`
+	// +optional
+	UnpricedTokens int64 `json:"unpricedTokens,omitempty"`
+	// Cost of its priced tokens; absent when none were priced.
+	// +optional
+	Cost string `json:"cost,omitempty"`
 }
 
 // WorkMeasureSpec declares a job's measure of done.

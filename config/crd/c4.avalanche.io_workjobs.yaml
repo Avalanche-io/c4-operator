@@ -689,6 +689,67 @@ spec:
                 - unit
                 - value
                 type: object
+              modelUsage:
+                additionalProperties:
+                  description: |-
+                    WorkUnitUsage is one model unit's use of models over its attempts:
+                    totals, and each model's.
+                  properties:
+                    cacheReadTokens:
+                      format: int64
+                      type: integer
+                    cost:
+                      description: |-
+                        Cost of the priced tokens, and SlotCost of the unit's slot time,
+                        decimal strings in US dollars.
+                      type: string
+                    costSource:
+                      description: |-
+                        CostSource says where the price came from (a metering proxy, a
+                        price table).
+                      type: string
+                    inputTokens:
+                      format: int64
+                      type: integer
+                    models:
+                      items:
+                        description: WorkModelTokens is one model's tokens in a unit.
+                        properties:
+                          cacheReadTokens:
+                            format: int64
+                            type: integer
+                          cost:
+                            description: Cost of its priced tokens; absent when none
+                              were priced.
+                            type: string
+                          inputTokens:
+                            format: int64
+                            type: integer
+                          model:
+                            type: string
+                          outputTokens:
+                            format: int64
+                            type: integer
+                          unpricedTokens:
+                            format: int64
+                            type: integer
+                        required:
+                        - model
+                        type: object
+                      type: array
+                    outputTokens:
+                      format: int64
+                      type: integer
+                    slotCost:
+                      type: string
+                    unpricedTokens:
+                      format: int64
+                      type: integer
+                  type: object
+                description: |-
+                  ModelUsage maps each model unit's index to its token use and cost
+                  over all its attempts.
+                type: object
               observedGeneration:
                 format: int64
                 type: integer
@@ -833,6 +894,44 @@ spec:
                 description: |-
                   Reviews maps the index of each unit a verdict did more than pass
                   (reworked, escalated, accepted with a note) to what it decided last.
+                type: object
+              spend:
+                description: |-
+                  Spend is what the job's units cost so far, split between
+                  procedural and model units (LLM-OR-PROCEDURE 6.2).
+                properties:
+                  modelShare:
+                    description: ModelShare is model units' part of the job's spend,
+                      0 to 1.
+                    type: string
+                  modelSlotCost:
+                    type: string
+                  modelTokens:
+                    description: |-
+                      ModelTokens is every token model units used (input, output and
+                      cache reads), and UnpricedTokens those no price came with (they
+                      are not in TokenCost).
+                    format: int64
+                    type: integer
+                  modelUnits:
+                    description: |-
+                      ModelUnits and ProceduralUnits count the units of each kind that
+                      have run.
+                    format: int32
+                    type: integer
+                  proceduralSlotCost:
+                    type: string
+                  proceduralUnits:
+                    format: int32
+                    type: integer
+                  tokenCost:
+                    description: |-
+                      TokenCost is what those tokens cost; ModelSlotCost and
+                      ProceduralSlotCost the slot time of each kind.
+                    type: string
+                  unpricedTokens:
+                    format: int64
+                    type: integer
                 type: object
               started:
                 description: Started and Finished bound the job's run.

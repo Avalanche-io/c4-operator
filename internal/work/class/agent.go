@@ -30,6 +30,9 @@ func (agent) Preemptible() bool { return true }
 func (agent) Checkpoints() bool { return true }
 func (agent) Lens() string      { return "agent" }
 
+// A member's turns are a model's work.
+func (agent) UnitKind() string { return KindModel }
+
 // A member stops at the end of its turn, which the Stop hook checkpoints.
 func (agent) CheckpointTime(job *c4v1.WorkJob) time.Duration { return 3 * time.Minute }
 

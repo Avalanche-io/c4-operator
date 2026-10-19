@@ -420,3 +420,43 @@ func TestEdgesThatCloseACycleAreRefused(t *testing.T) {
 		t.Fatalf("expansions %+v", got.Status.Expansions)
 	}
 }
+
+// Procedural and model units: each attempt's slot time is priced at its
+// pool's rate, a model unit's reported tokens at their price, and the
+// job's model share of spend is what its model units cost over all.
+func TestSpendByKind(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "kinds", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "impl", "kind": "model"}, {"name": "check", "after": ["impl"]}]}`)
+	finish(t, podOfUnit(t, ns, "kinds", 0), corev1.PodSucceeded, *now, 30*time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	usage := putDoc(t, st, `{"models": [{"model": "claude-opus-5-5", "inputTokens": 120000, "outputTokens": 8000, "cacheReadTokens": 90000, "costUSD": 1.92},
+		{"model": "claude-haiku-5-5", "inputTokens": 2000}], "costSource": "metering-proxy"}`)
+	finish(t, podOfUnit(t, ns, "kinds", 1), corev1.PodSucceeded, *now, 30*time.Minute, map[string]string{c4v1.AnnotationOutputUsage: usage})
+	tick(t, q)
+	finish(t, podOfUnit(t, ns, "kinds", 2), corev1.PodSucceeded, *now, 30*time.Minute, nil)
+	tick(t, q)
+	check := func(when string) {
+		t.Helper()
+		got := get(t, ns, "kinds")
+		sp := got.Status.Spend
+		// Three units ran: root and check procedural, impl a model unit.
+		// Each ran half an hour on one slot at $0.40 a slot-hour.
+		if sp == nil || sp.ModelUnits != 1 || sp.ProceduralUnits != 2 || sp.ModelTokens != 220000 || sp.UnpricedTokens != 2000 || sp.TokenCost != "1.9200" ||
+			sp.ModelSlotCost != "0.2000" || sp.ProceduralSlotCost != "0.4000" || sp.ModelShare != "0.841" {
+			t.Fatalf("%s: spend %+v", when, sp)
+		}
+		if u := got.Status.ModelUsage["1"]; len(u.Models) != 2 || u.Models[1].Model != "claude-opus-5-5" || u.InputTokens != 122000 || u.Cost != "1.9200" ||
+			u.Models[0].Cost != "" || u.CostSource != "metering-proxy" || u.SlotCost != "0.2000" {
+			t.Fatalf("%s: usage %+v", when, got.Status.ModelUsage)
+		}
+	}
+	check("after the run")
+	q = &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
+	tick(t, q)
+	check("after a restart")
+}

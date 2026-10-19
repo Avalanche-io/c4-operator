@@ -174,6 +174,12 @@ type jobMem struct {
 	gateSince map[int]time.Time
 	// measure is the latest reading of the job's measure (measure.go).
 	measure *c4v1.WorkMeasure
+	// spend is each unit's spend since the queue started, spentPod the
+	// pods counted, and spendBase and usageBase what status recorded
+	// before (spend.go).
+	spend    map[int]*unitSpend
+	spentPod map[types.UID]bool
+	procBase float64
 	// verdicts are the verdicts carried out, and reviews what they last
 	// decided per unit (verdict.go).
 	verdicts []verdictRec
@@ -318,6 +324,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		x := *st.Measure
 		m.measure = &x
 	}
+	m.loadSpend(st)
 	for _, g := range st.Gates {
 		if g.Position > 0 && g.Since != nil {
 			if m.gateSince == nil {
@@ -675,6 +682,10 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				v.finishing[idx] = true
 				continue
 			}
+			if !q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6) {
+				v.finishing[idx] = true
+				continue
+			}
 			if reason := p.Annotations[c4v1.AnnotationYield]; reason != "" && !m.succeeded[idx] {
 				// A unit that yielded at a checkpoint: its captured view is
 				// where the next attempt resumes. Not a failure, not done.
@@ -755,12 +766,15 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed && interruptedBy(p) != "":
 			// The farm stopped it: no retry spent, no mark on the node.
+			// What it ran still cost.
+			q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6)
 			if !m.failed[idx] && !m.succeeded[idx] && !m.foldedPod[p.UID] {
 				m.interrupted(idx, p, interruptedBy(p), now)
 				m.foldedPod[p.UID] = true
 			}
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed:
+			q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6)
 			if !m.failed[idx] && !m.succeeded[idx] && attemptOf(p) >= m.attempts[idx] {
 				if n := p.Spec.NodeName; n != "" {
 					m.nodeFails[n]++

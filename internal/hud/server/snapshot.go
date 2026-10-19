@@ -222,6 +222,11 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		Succeeded: us["succeeded"], Failed: us["failed"], Preflight: us["preflight"], Backoff: us["backoff"],
 		Egress: us["egress"], Accepted: us["accepted"], Waits: us["waits"],
 		Unevaluated: us["planned"], Planned: us["planned"], Flagged: us["flagged"], Locked: us["locked"]}
+	if sp := st.Spend; sp != nil {
+		f := func(x string) float64 { v, _ := strconv.ParseFloat(x, 64); return v }
+		aj.Spend = &api.Spend{ModelUnits: int(sp.ModelUnits), ProceduralUnits: int(sp.ProceduralUnits), ModelTokens: sp.ModelTokens, UnpricedTokens: sp.UnpricedTokens,
+			TokenCost: f(sp.TokenCost), ModelSlotCost: f(sp.ModelSlotCost), ProceduralSlotCost: f(sp.ProceduralSlotCost), ModelShare: f(sp.ModelShare)}
+	}
 	if ms := st.Measure; ms != nil {
 		aj.Measure = &api.Measure{Name: ms.Name, Value: ms.Value, Of: ms.Of, Done: ms.Done, Detail: ms.Detail,
 			Required: j.Spec.Measure != nil && j.Spec.Measure.Required}

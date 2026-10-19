@@ -63,6 +63,9 @@ type Unit struct {
 	// Claims are what the unit writes, with a mode (claims.go): its
 	// holds as exclusive claims, and the document's claims.
 	Claims []Claim
+	// Kind is procedural or model (LLM-OR-PROCEDURE 6.2), from the
+	// document; empty takes the class's (UnitKinder), else procedural.
+	Kind string
 	// Gate names the gate the unit passes (a unit of kind gate): a
 	// resource of one slot shared by the jobs of a namespace, taken first
 	// come, first served (the queue's gates.go).
@@ -150,6 +153,29 @@ type Resumer interface {
 // cadence of safe points).
 type Checkpointer interface {
 	CheckpointTime(job *c4v1.WorkJob) time.Duration
+}
+
+// Unit kinds.
+const (
+	KindProcedural = "procedural"
+	KindModel      = "model"
+)
+
+// UnitKinder is implemented by classes whose units are model units by
+// default: an agent member's turns are a model's.
+type UnitKinder interface {
+	UnitKind() string
+}
+
+// KindOf is unit u's kind in class d.
+func KindOf(d Driver, u Unit) string {
+	if u.Kind != "" {
+		return u.Kind
+	}
+	if k, ok := d.(UnitKinder); ok {
+		return k.UnitKind()
+	}
+	return KindProcedural
 }
 
 // Mover is implemented by classes whose units the queue may move at a

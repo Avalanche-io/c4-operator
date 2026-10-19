@@ -11,6 +11,9 @@
 //	c4-unit measure [--of N] [--name WHAT] [--detail TEXT] VALUE
 //	                                report the job's measure of done (361 of 379
 //	                                rules sited), as .c4/measure.json
+//	c4-unit usage --model M [--input N] [--output N] [--cache-read N] [--cost USD] [--cost-source S]
+//	                                add a model call's tokens and cost to the
+//	                                unit's .c4/usage.json (a model unit's spend)
 //	c4-unit resume-dir              print the writable mount if this attempt resumes
 //	c4-unit output                  print the writable mount
 //
@@ -92,6 +95,12 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	of := fs.Int64("of", 0, "with measure: the target (default the job's)")
 	name := fs.String("name", "", "with measure: what is counted (default the job's)")
 	detail := fs.String("detail", "", "with measure: a line of detail for the record")
+	model := fs.String("model", "", "with usage: the model called")
+	input := fs.Int64("input", 0, "with usage: input tokens")
+	outTokens := fs.Int64("output", 0, "with usage: output tokens")
+	cacheRead := fs.Int64("cache-read", 0, "with usage: input tokens read from a cache")
+	cost := fs.Float64("cost", -1, "with usage: the call's cost in US dollars, if known")
+	costSource := fs.String("cost-source", "", "with usage: where the price came from (a metering proxy, a price table)")
 	if len(args) == 0 {
 		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | resume-dir | output")
 	}
@@ -141,6 +150,15 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		}
 		doc, _ := json.Marshal(map[string]any{"value": n, "of": *of, "name": *name, "detail": *detail})
 		return code(writeAtomic(filepath.Join(out, ".c4", "measure.json"), append(doc, '\n')))
+	case "usage":
+		if *input < 0 || *outTokens < 0 || *cacheRead < 0 || *model == "" {
+			return 2, errors.New("usage: --model, and tokens of 0 or more")
+		}
+		out, err := output(e, *dir)
+		if err != nil {
+			return 1, err
+		}
+		return code(addUsage(filepath.Join(out, ".c4", "usage.json"), *model, *input, *outTokens, *cacheRead, *cost, *costSource))
 	case "safepoint":
 		out, err := output(e, *dir)
 		if err != nil {
@@ -490,4 +508,50 @@ func writeAtomic(p string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp, p)
+}
+
+// addUsage adds one model call to the unit's usage file, under its model:
+// the attempt's totals, read by the queue when the unit ends. cost < 0 is
+// a call with no price known; source says where prices came from.
+func addUsage(path, model string, input, output, cacheRead int64, cost float64, source string) error {
+	type use struct {
+		Model           string   `json:"model"`
+		InputTokens     int64    `json:"inputTokens"`
+		OutputTokens    int64    `json:"outputTokens"`
+		CacheReadTokens int64    `json:"cacheReadTokens,omitempty"`
+		CostUSD         *float64 `json:"costUSD,omitempty"`
+	}
+	var u struct {
+		Models     []use  `json:"models"`
+		CostSource string `json:"costSource,omitempty"`
+	}
+	if b, err := os.ReadFile(path); err == nil {
+		json.Unmarshal(b, &u)
+	}
+	i := -1
+	for k := range u.Models {
+		if u.Models[k].Model == model {
+			i = k
+		}
+	}
+	if i < 0 {
+		u.Models = append(u.Models, use{Model: model})
+		i = len(u.Models) - 1
+	}
+	m := &u.Models[i]
+	m.InputTokens += input
+	m.OutputTokens += output
+	m.CacheReadTokens += cacheRead
+	if cost >= 0 {
+		c := cost
+		if m.CostUSD != nil {
+			c += *m.CostUSD
+		}
+		m.CostUSD = &c
+	}
+	if source != "" {
+		u.CostSource = source
+	}
+	b, _ := json.Marshal(u)
+	return writeAtomic(path, append(b, '\n'))
 }

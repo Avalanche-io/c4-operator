@@ -65,6 +65,17 @@ def measure(value, of=None, name=None, detail=None):
     _run(*args, str(value))
 
 
+def usage(model, input_tokens=0, output_tokens=0, cache_read_tokens=0, cost_usd=None, cost_source=None):
+    """Add a model call's tokens, and its cost if known, to the unit's spend."""
+    args = ["usage", "--model", model, "--input", str(input_tokens), "--output", str(output_tokens),
+            "--cache-read", str(cache_read_tokens)]
+    if cost_usd is not None:
+        args += ["--cost", repr(float(cost_usd))]
+    if cost_source:
+        args += ["--cost-source", cost_source]
+    _run(*args)
+
+
 def output():
     """The unit's writable mount."""
     return _run("output").stdout.strip()

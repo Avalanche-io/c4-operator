@@ -1436,6 +1436,25 @@ and a sweep planner that spawns trials are all generators.
     line, fixtures are excluded by glob, a marker naming its own owner is
     no edge, and what cannot be read is listed. Ra's `Pending{…}` markers
     are the motivating case: the pattern is the job's, not c4's.
+- **Procedural and model units** (LLM-OR-PROCEDURE 6.2 and 7.2). Every
+  unit is `procedural` or `model`: the document's `kind`, else its class's
+  (agent members are model units), else procedural.
+  - **Slot spend.** Each ended attempt, failed and interrupted ones
+    included, adds its slot time at its pool's rate to its unit.
+  - **Token spend.** A model unit also reports the tokens it used, per
+    model, in `.c4/usage.json` (`c4-unit usage --model M --input N
+    --output N [--cache-read N] [--cost USD] [--cost-source S]`, stored at
+    capture as `c4.avalanche.io/output-usage`). The cost is optional, with
+    its source named, because the price is known to a metering proxy or a
+    price table rather than to the session.
+  - **What status shows.** `status.spend` has the units of each kind, model
+    tokens and the unpriced ones, token cost, each kind's slot cost and the
+    model share of spend. `status.modelUsage` has each model unit's tokens
+    by model. The HUD's job summary shows `spend`, and its unit list
+    `kind` and `usage`.
+  - **Not built yet:** caching procedural units by their inputs' C4 IDs,
+    and flagging a model unit whose output a procedural check could have
+    produced.
 - **The job's measure of done** (Q12; LLM-OR-PROCEDURE 7.2 item 3). A job
   declares what it counts: `spec.measure: {name: "rules sited", of: 379,
   required: true}`. A unit, usually a procedural one re-run after each

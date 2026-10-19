@@ -111,6 +111,7 @@ type DocUnit struct {
 	Holds   []string          `json:"holds,omitempty"`
 	Claims  []DocClaim        `json:"claims,omitempty"`
 	Gate    string            `json:"gate,omitempty"`
+	Kind    string            `json:"kind,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
 	Cites   json.RawMessage   `json:"cites,omitempty"`
 	// Wait makes the unit a wait for a person, a party or a clock.
@@ -258,6 +259,12 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 				return nil, fmt.Errorf("unit %s: %w", du.Name, err)
 			}
 			u.Claims = append(u.Claims, c)
+		}
+		switch du.Kind {
+		case "", KindProcedural, KindModel:
+			u.Kind = du.Kind
+		default:
+			return nil, fmt.Errorf("unit %s: kind %q, want procedural or model", du.Name, du.Kind)
 		}
 		if du.Work < 0 || du.WorkSD < 0 {
 			return nil, fmt.Errorf("unit %s: negative work", du.Name)
