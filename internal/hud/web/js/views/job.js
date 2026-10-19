@@ -371,5 +371,7 @@ function legend(level = 5) {
     [2, h('span', null, h('span', { class: 'ink mono', style: { fontSize: '10px', minWidth: '30px' } }, '14:56'), 'measured: solid')],
     [2, h('span', null, h('span', { class: 'pencil mono', style: { fontSize: '10px', minWidth: '30px' } }, '14:58'), 'estimated: lighter, dashed')],
     [3, h('span', null, sw('radial-gradient(var(--g13) 0.6px, transparent 0.8px) 0 0 / 3px 3px, var(--g08)', 'inset 0 0 0 1px var(--g12)'), 'expected: work that will exist')],
+    [3, h('span', null, h('i', { style: { display: 'inline-block', width: '5px', height: '14px', background: HATCH, margin: '0 4.5px' } }), 'gate: a wait or a check between stages, as long as the rows it holds')],
+    [3, h('span', null, h('i', { style: { display: 'inline-block', width: '14px', height: '0', borderTop: '1.5px solid var(--temp)', position: 'relative' } }), 'rework: from the check back to the frame it sent back')],
   ].filter(([n]) => level >= n).map(([, el]) => el);
 }

@@ -174,6 +174,15 @@ back), **tick** (checked), **reuse** (reused), **flag** (needs you),
 cell's hue: interrupted is never orange (the unit did nothing wrong), a
 machine's wait is never red (no person must act), a check is never green.
 
+**Gates** (level 3, INTEGRATE 4.4): a stage of waits or of checks is a gate,
+a narrow column between the stages it sits between. Each of its blocks spans
+the rows it holds: a wait the units blocked on it (`edges`, `blockedOn`), a
+check the frames it read or judged (`edges`, `review.by`); blocks that hold
+the same rows sit side by side. A block takes its unit's drawing (a wait for
+a thing hatched with the clock, a person's wait red or pale red, a check its
+state). While a rework is under way, an orange arrow runs from the check
+that sent the frame back to the frame (stack.js, paintOverlays).
+
 **Agent bundle members** take the same words: rendering is `--run`;
 queued is `--g09` flat; a member the queue stopped for capacity waits for
 capacity: hatched with the clock mark and the checkpoint mark (a small ink

@@ -7,7 +7,11 @@
 // row. No line runs from a container to what it contains. Lines are an
 // overlay for what grouping cannot say: A, a dependency on a job outside
 // the sheet (on by default); B, a unit that reads other rows (off by
-// default, per job).
+// default, per job). Gates (INTEGRATE 4.4, level 3): a stage of waits or of
+// reviews is a narrow column between the stages it sits between, each of its
+// cells spanning the rows it holds (the units blocked on a wait, the frames a
+// review read), and a rework is an orange arrow from the review that sent a
+// frame back to the frame.
 //
 // Any container collapses to one block whose fill is the aggregate of
 // everything inside it and upstream of it, by work where the estimate
@@ -78,6 +82,35 @@ function groupEdges(d, byI) {
     if (a && b && a.group !== b.group) e.add(a.group + '>' + b.group);
   }
   return e;
+}
+
+// gateOf says whether a group of a job is a gate: every unit a wait ('wait'),
+// or every unit a review ('review': named as some unit's review.by, or a
+// group named for a check). A gate is drawn narrow, between the stages.
+function gateOf(d, g, members) {
+  if (!members.length) return null;
+  const waits = new Set((d.waits || []).map((w) => w.unit));
+  // a wait not yet open reads as blocked, so the group's name counts too
+  if (members.every((u) => waits.has(u.i) || u.state === 'waits') || /^(waits?|gates?)$/i.test(g.key || '')) return 'wait';
+  const by = new Set((d.unitList || []).filter((u) => u.review && u.review.by != null).map((u) => u.review.by));
+  if (members.every((u) => by.has(u.i)) || /^(qc|review|check)/i.test(g.key || '')) return 'review';
+  return null;
+}
+
+// heldRows: the rows a gate cell holds, from the unit graph: for a wait, the
+// units after it (blocked on it); for a review, the units it reads and the
+// units it judged. Null when the graph says nothing, so the cell keeps its
+// even share of the rows.
+function heldRows(d, gate, u, byI, N) {
+  const rel = new Set();
+  for (const e of d.edges || []) {
+    if (gate === 'wait' && e.from === u.i) rel.add(e.to);
+    if (gate === 'review' && e.to === u.i) rel.add(e.from);
+  }
+  if (gate === 'review') for (const x of d.unitList || []) if (x.review && x.review.by === u.i) rel.add(x.i);
+  if (gate === 'wait' && u.name) for (const x of d.unitList || []) if (x.blockedOn === u.name) rel.add(x.i);
+  const rows = [...rel].map((i) => byI.get(i)).filter((x) => x && x.pos != null && x.pos >= 0 && x.pos < N).map((x) => x.pos);
+  return rows.length ? [Math.min(...rows), Math.max(...rows)] : null;
 }
 
 // buildSheet lays a shot's jobs (details, in flow order) onto rows.
@@ -153,8 +186,9 @@ export function buildSheet({ key, title, details, anchor, graph, jobs }) {
       const short = d.name.replace(/^sh\d+-|^ep\d+-/, '').replace(/-v\d+$/, '').replace(/-wk\d+$/, '');
       // many parallel groups (a wedge of variants) are named by their short keys
       const label = gs.length === 1 && d !== A ? short : lanes.map((x) => (gs.length > 8 ? x.key : x.label || x.key)).join(' / ');
+      const gate = lanes.length === 1 ? gateOf(d, g, members0) : null;
       const col = { key: jobKey + ':' + lanes.map((x) => x.key).join('+'), job: jobKey, jobName: d.name, phase: d.phase, label,
-        lanes: lanes.length, perRow: n === N, cells: [], generator: !!g.generator, settled: d.phase === 'Succeeded' };
+        lanes: lanes.length, perRow: n === N, cells: [], generator: !!g.generator, settled: d.phase === 'Succeeded', gate };
       if (n === N) {
         // a unit per row: position on the axis is the row
         const posMap = new Map();
@@ -172,7 +206,22 @@ export function buildSheet({ key, title, details, anchor, graph, jobs }) {
         // fewer units than rows: each spans the rows it covers, in order
         const members = us.filter((u) => u.group === g.key).sort((a, b) => a.pos - b.pos || a.i - b.i);
         const per = N / Math.max(1, members.length);
-        members.forEach((u, k) => col.cells.push({ a: Math.floor(k * per), z: Math.max(Math.floor(k * per), Math.floor((k + 1) * per) - 1), lane: 0, lanes: 1, u, span: true }));
+        members.forEach((u, k) => {
+          const held = gate ? heldRows(d, gate, u, bi, N) : null;
+          const [a, z] = held || [Math.floor(k * per), Math.max(Math.floor(k * per), Math.floor((k + 1) * per) - 1)];
+          col.cells.push({ a, z, lane: 0, lanes: 1, u, span: true, gate });
+        });
+        // gate cells may hold the same rows (a wait that holds everything and
+        // one that holds nothing yet): they sit side by side in lanes
+        if (gate) {
+          const ends = [];
+          for (const c of [...col.cells].sort((x, y) => x.a - y.a)) {
+            let l = ends.findIndex((e) => e < c.a);
+            if (l < 0) { l = ends.length; ends.push(c.z); } else ends[l] = c.z;
+            c.lane = l;
+          }
+          for (const c of col.cells) c.lanes = Math.max(1, ends.length);
+        }
       }
       for (const c of col.cells) if (c.u.reads) sheet.reads.push({ col: col.key, cell: c });
       cols.push(col);
@@ -261,7 +310,8 @@ export function layout(sheet, v) {
   const rest = W - x - 8 - (costW ? costW + gap * 2 : 0);
   const perRowCols = visCols.filter((c) => c.perRow).length, spanCols = visCols.length - perRowCols;
   const unit = Math.max(b * 1.4, Math.min(b * 7, (rest - gap * visCols.length) / Math.max(1, perRowCols * 1.6 + spanCols)));
-  for (const c of visCols) pushCol(c.key, Math.round(Math.min(c.perRow ? 150 : 90, c.perRow ? unit * 1.6 : unit)), c);
+  // a gate is a narrow column between the stages it sits between
+  for (const c of visCols) pushCol(c.key, c.gate ? Math.round(Math.max(b * 2.6, 24)) : Math.round(Math.min(c.perRow ? 150 : 90, c.perRow ? unit * 1.6 : unit)), c);
   const costX = costW ? x + gap : 0;
   // rows
   const lanesAt = new Array(sheet.N).fill(1);
@@ -342,7 +392,8 @@ function rectsOf(sheet, L) {
     for (const cell of c.col.cells) {
       const y0 = yAt(cell.a, false), y1 = yAt(cell.z, true);
       if (y0 === null || y1 === null) continue;
-      out.push({ key: c.k + '#' + cell.u.i, kind: 'unit', span: true, x: c.x, y: y0, w: c.w, h: y1 - y0, u: cell.u, hit: { type: 'unit', job: c.col.job, i: cell.u.i } });
+      const lw = (c.w - (cell.lanes - 1) * 2) / cell.lanes;
+      out.push({ key: c.k + '#' + cell.u.i, kind: 'unit', span: true, x: c.x + cell.lane * (lw + 2), y: y0, w: lw, h: y1 - y0, u: cell.u, hit: { type: 'unit', job: c.col.job, i: cell.u.i } });
     }
   }
   return out;
@@ -651,12 +702,13 @@ export class Stack {
     if (L.head > 8) {
       g.textBaseline = 'alphabetic';
       for (const c of L.xs) {
-        const lab = c.k === 'shot' ? 'SHOT' : c.k === 'batch' ? (this.sheet.batchFromData ? 'BATCH' : 'BATCH') : c.k === 'frame' ? 'UPSTREAM' : c.col.label.toUpperCase();
+        // a gate is narrow: its header is a short word, its stage's name on hover
+        const lab = c.k === 'shot' ? 'SHOT' : c.k === 'batch' ? (this.sheet.batchFromData ? 'BATCH' : 'BATCH') : c.k === 'frame' ? 'UPSTREAM' : c.col.gate ? (c.col.gate === 'wait' ? 'WAIT' : 'QC') : c.col.label.toUpperCase();
         if (c.w + L.gap < 20) continue;
         g.font = `600 9px ${T.sans}`; g.fillStyle = T.ink2;
         clipText(g, lab, c.x, 11, c.w + L.gap - 2);
         g.font = `400 8px ${T.mono}`; g.fillStyle = T.ink4;
-        const sub = c.k === 'shot' ? (this.sheet.shotUnit ? 'generator' : 'sheet') : c.k === 'batch' ? (this.sheet.batchFromData ? 'generator' : `${this.sheet.batch} per batch`) : c.k === 'frame' ? 'aggregate' : c.col.jobName.replace(/^sh\d+-/, '');
+        const sub = c.k === 'shot' ? (this.sheet.shotUnit ? 'generator' : 'sheet') : c.k === 'batch' ? (this.sheet.batchFromData ? 'generator' : `${this.sheet.batch} per batch`) : c.k === 'frame' ? 'aggregate' : c.col.gate ? 'gate' : c.col.jobName.replace(/^sh\d+-/, '');
         clipText(g, sub, c.x, 22, c.w + L.gap - 2);
         if (c.col && c.col.perRow && c.w >= 18) { // fold-upstream control: folds this column and everything left of it
           const fx = c.x + c.w - 9, fy = 25;
@@ -767,6 +819,23 @@ export class Stack {
           g.stroke();
         }
       }
+    }
+    // rework: an orange arrow from the review that sent a frame back to the
+    // frame, while the rework is under way (level 3 and up)
+    if (!this.view.flat) {
+      const at = new Map();
+      for (const it of this.items) if (it.kind === 'unit' && it.u) at.set(it.u.job + '#' + it.u.i, it);
+      g.strokeStyle = T.temp; g.fillStyle = T.temp; g.lineWidth = 1.2;
+      for (const it of this.items) {
+        const r = it.kind === 'unit' && it.u && it.u.review;
+        if (!r || r.do !== 'rework' || r.by == null || ['succeeded', 'egress', 'accepted'].includes(it.u.state)) continue;
+        const q = at.get(it.u.job + '#' + r.by);
+        if (!q || q.x <= it.x) continue;
+        const y = it.y + it.h / 2, x0 = q.x - 1, x1 = it.x + it.w + 2;
+        g.beginPath(); g.moveTo(x0, y); g.lineTo(x1 + 4, y); g.stroke();
+        g.beginPath(); g.moveTo(x1, y); g.lineTo(x1 + 5, y - 3); g.lineTo(x1 + 5, y + 3); g.closePath(); g.fill();
+      }
+      g.lineWidth = 1;
     }
     // contours: projected finish lines across the rows, and the deadline datum
     if (this.view.contours && this.view.deadline) this.paintContours(g, T);

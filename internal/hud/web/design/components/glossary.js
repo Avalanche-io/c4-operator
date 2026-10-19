@@ -65,6 +65,7 @@ export const TERMS = {
   checked: { term: 'Checked', def: 'A check passed: a small tick. The frame keeps the color of its state; a check never takes a color.', swatch: 'checked' },
   reused: { term: 'Reused', def: 'The same inputs ran before, so the output was reused instead of rendered again: done, with the reuse mark.', swatch: 'reused' },
   mayuse: { term: 'May use', def: 'The pools a job may run in, in the order it falls back: gpu, then gpu-spot.' },
+  gate: { term: 'Gate', def: 'A wait or a check that sits between stages: a narrow column whose block spans the rows it holds. A check that sends a frame back draws an orange arrow to it.' },
 };
 export const TERM_ORDER = Object.keys(TERMS);
 export const numberOf = (k) => (TERM_ORDER.indexOf(k) + 1) || null;
