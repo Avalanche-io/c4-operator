@@ -1411,8 +1411,16 @@ and a sweep planner that spawns trials are all generators.
   - **Status.** `verdicts` lists the most recent verdicts with their
     counts. `reviews` holds each unit's last non-pass outcome, its passes
     and its standing override.
-  - **Not built yet:** the estimate does not price expected rework before
-    a verdict.
+  - **Expected rework is priced.** Each review key learns its rework rate
+    from the verdicts its units wrote in the job, like a generator key's
+    fan-out: units reworked over units judged, shrunk toward a prior (the
+    review unit's `reworkRate` param, else the job's) with a pseudo-count
+    of 2. A review that has not run yet adds, for each unit it will judge,
+    the passes it may still send back (r, r², up to maxPasses less the
+    unit's passes so far) as tentative work, and its own rerun with the
+    chance that anything is reworked. The same chains lengthen the critical
+    path. A key with no verdicts and no prior adds nothing (a document
+    marks a review in advance with `params.review`).
 - **Waits** (PRIMITIVES Q6; the HUD word is "waits for"). A wait is a
   unit served by something other than a slot. A document's unit carries
   `wait: {server, ask?, expect?, choices?}`, and `server` says what serves

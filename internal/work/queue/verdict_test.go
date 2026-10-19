@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -14,6 +15,8 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
 // reviewJob starts a graph job whose root expands into the units of
@@ -232,5 +235,53 @@ func TestVerdictRefused(t *testing.T) {
 	got := get(t, ns, "bad1")
 	if len(got.Status.Verdicts) != 1 || !strings.Contains(got.Status.Verdicts[0].Error, "plan") || !slices.Equal(states(t, got, "failed"), []int{2}) || len(got.Status.Reviews) != 0 {
 		t.Fatalf("%+v %v %v", got.Status.Verdicts, got.Status.UnitStates, got.Status.Reviews)
+	}
+}
+
+// A review key's rework rate, learned from its verdicts, prices the
+// passes its pending review may still send back, and its own rerun.
+func TestExpectedRework(t *testing.T) {
+	cfg := estimate.DefaultConfig()
+	cfg.Default = estimate.Prior{Mean: 100, SD: 10}
+	e := estimate.New(cfg)
+	plan := &class.Plan{Units: []class.Unit{
+		{Index: 0, Name: "f1", Key: "frame", Slots: 1},
+		{Index: 1, Name: "f2", Key: "frame", Pos: 1, Slots: 1},
+		{Index: 2, Name: "qc", Key: "qc", Slots: 1, After: []int{0, 1}},
+	}}
+	m := newMem()
+	m.plan = plan
+	v := &view{job: &c4v1.WorkJob{}, mem: m}
+	if extra, _ := expectedRework(v, e); len(extra) != 0 {
+		t.Fatalf("no verdicts, no prior: %+v", extra)
+	}
+	// The first pass reworked f1 and passed f2: r = (1+0)/(2+2) = 0.25.
+	m.verdicts = []verdictRec{{WorkVerdict: c4v1.WorkVerdict{Unit: 2, Reworked: 1, Passed: 1}}}
+	m.reviews = map[int]*c4v1.WorkReview{0: {Do: "rework", By: 2, Passes: 1}}
+	m.succeeded[1] = true
+	extra, path := expectedRework(v, e)
+	var exists []float64
+	for _, x := range extra {
+		exists = append(exists, x.Exists)
+	}
+	// f1 has one pass left (r), f2 two (r, r²), and qc reruns if either is
+	// sent back: 1 - 0.75².
+	want := []float64{0.25, 0.25, 0.0625, 1 - 0.75*0.75}
+	if len(exists) != len(want) {
+		t.Fatalf("extra %v", exists)
+	}
+	for i := range want {
+		if math.Abs(exists[i]-want[i]) > 1e-9 {
+			t.Fatalf("extra %v, want %v", exists, want)
+		}
+	}
+	if got := path[2]; math.Abs(got-(31.25+43.75)) > 1e-6 {
+		t.Fatalf("critical path through qc +%v, want 75", got)
+	}
+	// Before any verdict, a review its document marks, with a prior.
+	m.verdicts, m.reviews = nil, nil
+	plan.Units[2].Params = map[string]string{"review": "true", "reworkRate": "0.5"}
+	if extra, _ := expectedRework(v, e); len(extra) != 2+2+1 || extra[0].Exists != 0.5 || extra[4].Exists != 0.75 {
+		t.Fatalf("prior: %+v", extra)
 	}
 }

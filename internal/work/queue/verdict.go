@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -20,6 +21,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
 // Verdicts (PRIMITIVES Q4, Q5). A review unit judges the units it runs
@@ -557,4 +559,84 @@ func reviewStatus(m *jobMem) map[string]c4v1.WorkReview {
 		out[strconv.Itoa(i)] = *r
 	}
 	return out
+}
+
+// Expected rework (PRIMITIVES Q5: the ETA prices rework before it
+// happens). Each review key learns its rework rate from the verdicts its
+// units wrote in this job, like a generator key's fan-out: the units
+// reworked over the units judged, shrunk toward a prior (the review unit's
+// reworkRate param from its document, else the job's, else none) with a
+// pseudo-count of reworkShrink. A review that has not run yet adds, for
+// each unit it will judge, the further passes it may send back: r, r²...
+// up to maxPasses less the unit's passes so far, each as tentative work
+// (estimate.Unit.Exists); and its own rerun, with the chance that it
+// reworks anything. The same chains lengthen the critical path. A key
+// with no verdicts and no prior adds nothing.
+const reworkShrink = 2.0
+
+// expectedRework is the tentative work a job's pending reviews may send
+// back, and how much each review lengthens the chain through it.
+func expectedRework(v *view, e *estimate.Estimator) ([]estimate.Unit, map[int]float64) {
+	m, plan := v.mem, v.mem.plan
+	seen := map[string][2]float64{} // reworked, judged
+	for _, x := range m.verdicts {
+		if x.Error != "" || int(x.Unit) >= len(plan.Units) {
+			continue
+		}
+		k := plan.Units[x.Unit].Key
+		r := seen[k]
+		r[0] += float64(x.Reworked)
+		r[1] += float64(x.Passed + x.Reworked + x.Escalated + x.Accepted)
+		seen[k] = r
+	}
+	var extra []estimate.Unit
+	path := map[int]float64{}
+	for i, u := range plan.Units {
+		if m.succeeded[i] || m.failed[i] || len(u.After) == 0 || isWait(plan, i) {
+			continue
+		}
+		obs, learned := seen[u.Key]
+		prior, err := strconv.ParseFloat(u.Params["reworkRate"], 64)
+		if err != nil {
+			prior, err = strconv.ParseFloat(v.job.Spec.Params["reworkRate"], 64)
+		}
+		hasPrior := err == nil && prior > 0
+		if !learned && !(hasPrior && u.Params["review"] == "true") {
+			continue
+		}
+		if !hasPrior {
+			prior = 0
+		}
+		r := min((obs[0]+reworkShrink*prior)/(obs[1]+reworkShrink), 0.95)
+		if r <= 0 {
+			continue
+		}
+		pNone, longest := 1.0, 0.0
+		for _, a := range u.After {
+			if a < 0 || a >= len(plan.Units) || m.failed[a] {
+				continue
+			}
+			ju := plan.Units[a]
+			passes := 0
+			if rv := m.reviews[a]; rv != nil {
+				passes = int(rv.Passes)
+			}
+			if passes >= defaultMaxPasses {
+				continue
+			}
+			p, chain := 1.0, 0.0
+			for k := passes; k < defaultMaxPasses; k++ {
+				p *= r
+				extra = append(extra, estimate.Unit{Key: ju.Key, Pos: ju.Pos, Slots: ju.Slots, Exists: p})
+				chain += p * e.Predict(ju.Key, ju.Pos).Mean
+			}
+			longest = math.Max(longest, chain)
+			pNone *= 1 - r
+		}
+		if pAny := 1 - pNone; pAny > 0 {
+			extra = append(extra, estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots, Exists: pAny})
+			path[i] = longest + pAny*e.Predict(u.Key, u.Pos).Mean
+		}
+	}
+	return extra, path
 }

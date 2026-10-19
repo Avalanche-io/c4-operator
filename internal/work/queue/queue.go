@@ -848,6 +848,8 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		}
 		run = append(run, ru)
 	}
+	reworkUnits, reworkPath := expectedRework(v, e)
+	queued = append(queued, reworkUnits...)
 	s := e.Summarize(queued, run)
 	// The critical path is the longest chain of remaining work through
 	// the unit graph; without edges, the longest single remaining unit.
@@ -875,6 +877,11 @@ func (q *Queue) estimate(v *view, now time.Time) {
 			progress, _ = q.Progress.Get(pod.Namespace, pod.Name, now)
 		}
 		rem[idx], _ = e.RemainderAt(e.Predict(u.Key, u.Pos), 0, math.Max(0, now.Sub(r.started).Seconds()), progress)
+	}
+	for idx, d := range reworkPath {
+		if _, ok := rem[idx]; ok {
+			rem[idx] += d
+		}
 	}
 	s.TPath = criticalPath(plan, v.mem, rem, func(key string) float64 { return e.Generator(key).Longest })
 	v.sum, v.est = s, e
