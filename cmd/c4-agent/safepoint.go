@@ -8,6 +8,9 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/agent"
@@ -38,13 +41,21 @@ const safepointWait = 8 * time.Second
 // PATH, it does nothing. It never fails the hook.
 func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agent.Checkpoint, stdout, stderr io.Writer) {
 	var env []string
+	out := os.Getenv("C4_OUTPUT")
 	if os.Getenv("C4_PODINFO") == "" {
 		dir := unitDirOf(h, input)
 		if dir == "" {
 			return
 		}
 		u := agent.UnitDirsAt(dir)
+		out = u.Out
 		env = append(os.Environ(), "C4_OUTPUT="+u.Out, "C4_CONTROL="+u.Control, "C4_PODINFO="+u.PodInfo)
+	}
+	// the turn's tokens first: a stop at this safe point ends the session
+	if out != "" {
+		if err := hookUsage(h, input, cp, out); err != nil {
+			fmt.Fprintln(stderr, "c4-agent hook: usage:", err)
+		}
 	}
 	bin := os.Getenv("C4_UNIT_BIN")
 	if bin == "" {
@@ -95,6 +106,63 @@ func safepointRef(input []byte, cp *agent.Checkpoint) string {
 		return in.SessionID
 	}
 	return ""
+}
+
+// hookUsage writes the attempt's token use so far to the unit's
+// .c4/usage.json, per model (the queue's model spend; c4-unit usage's
+// shape), totalled from the session's transcript. The attempt starts where
+// the checkpoint it resumed from ends, recorded in .c4/usage.from at its
+// first turn, so a resumed member's earlier attempts are not counted
+// again. The file is rewritten whole each turn, so a hook that runs twice
+// counts nothing twice; for a member session the hook owns it.
+func hookUsage(h *agent.Harness, input []byte, cp *agent.Checkpoint, out string) error {
+	var in struct {
+		SessionID      string `json:"session_id"`
+		TranscriptPath string `json:"transcript_path"`
+	}
+	if err := json.Unmarshal(input, &in); err != nil {
+		return nil
+	}
+	m, _ := h.Store.BySession(in.SessionID)
+	if in.TranscriptPath == "" && m != nil {
+		in.TranscriptPath = m.Transcript
+	}
+	if in.TranscriptPath == "" {
+		return nil
+	}
+	dir := filepath.Join(out, ".c4")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return err
+	}
+	fromFile := filepath.Join(dir, "usage.from")
+	var from int64
+	if b, err := os.ReadFile(fromFile); err == nil {
+		from, _ = strconv.ParseInt(strings.TrimSpace(string(b)), 10, 64)
+	} else {
+		if m != nil && cp != nil {
+			from = h.Store.AttemptStart(m.Name, cp)
+		}
+		if err := os.WriteFile(fromFile, []byte(strconv.FormatInt(from, 10)+"\n"), 0o644); err != nil {
+			return err
+		}
+	}
+	var to int64
+	if cp != nil {
+		to = cp.Offset
+	}
+	d, err := agent.TranscriptUsage(in.TranscriptPath, from, to)
+	if err != nil {
+		return err
+	}
+	b, err := json.MarshalIndent(d, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := filepath.Join(dir, ".usage.json.tmp")
+	if err := os.WriteFile(tmp, append(b, '\n'), 0o644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filepath.Join(dir, "usage.json"))
 }
 
 // unitDirOf is the unit directory a host runner recorded for the session's

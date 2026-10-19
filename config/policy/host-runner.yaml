@@ -11,7 +11,7 @@
 #   c4.avalanche.io/output-checkpoint, output-epoch, output-expand (a
 #   generator member's expansion document), output-verdict (a review
 #   member's verdict), output-measure (a member's measure of the job's
-#   done) and safepoint (the safe point it relays, as the node
+#   done), output-usage (a model member's token use) and safepoint (the safe point it relays, as the node
 #   daemon does); and bindings of pods to its Node.
 #
 # A Binding names only its target, so these policies cannot see which pod
@@ -102,7 +102,7 @@ spec:
   - name: after
     expression: "request.resource.resource != 'pods' || !has(object.metadata.annotations) ? {} : object.metadata.annotations"
   - name: mine
-    expression: "['c4.avalanche.io/output-checkpoint', 'c4.avalanche.io/output-epoch', 'c4.avalanche.io/output-expand', 'c4.avalanche.io/output-verdict', 'c4.avalanche.io/output-measure', 'c4.avalanche.io/safepoint']"
+    expression: "['c4.avalanche.io/output-checkpoint', 'c4.avalanche.io/output-epoch', 'c4.avalanche.io/output-expand', 'c4.avalanche.io/output-verdict', 'c4.avalanche.io/output-measure', 'c4.avalanche.io/output-usage', 'c4.avalanche.io/safepoint']"
   validations:
   - expression: "request.resource.resource != 'leases' || (request.namespace == 'kube-node-lease' && object.metadata.name == variables.host)"
     message: a host runner may only write its own Lease in kube-node-lease
@@ -118,7 +118,7 @@ spec:
         (has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}) &&
         variables.after.all(k, k in variables.mine || (k in variables.before && variables.before[k] == variables.after[k])) &&
         variables.before.all(k, k in variables.mine || k in variables.after))
-    message: a host runner may change only a pod's status and its output-checkpoint, output-epoch, output-expand, output-verdict, output-measure and safepoint annotations
+    message: a host runner may change only a pod's status and its output-checkpoint, output-epoch, output-expand, output-verdict, output-measure, output-usage and safepoint annotations
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

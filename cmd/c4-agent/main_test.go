@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -294,5 +296,57 @@ func TestHookSafepointHostUnit(t *testing.T) {
 	want := "out=" + u.Out + " control=" + u.Control + " podinfo=" + u.PodInfo + " safepoint --checkpoint " + sid + "#"
 	if !strings.HasPrefix(string(b), want) {
 		t.Fatalf("c4-unit called with %q, want prefix %q", b, want)
+	}
+}
+
+// In a unit, the Stop hook writes the attempt's token use to the unit's
+// .c4/usage.json, per model, from the transcript: rewritten whole each
+// turn, from where the attempt began.
+func TestHookUsage(t *testing.T) {
+	_, work := setup(t)
+	root := t.TempDir()
+	unit := filepath.Join(root, "c4-unit")
+	if err := os.WriteFile(unit, []byte(fakeUnit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "out")
+	t.Setenv("C4_UNIT_BIN", unit)
+	t.Setenv("FAKE_UNIT_LOG", filepath.Join(root, "unit.log"))
+	t.Setenv("C4_PODINFO", filepath.Join(root, "annotations"))
+	t.Setenv("C4_OUTPUT", out)
+	if code, _, e := runCLI(t, "", "register", "--name", "lead", "--session", sid, "--cwd", work); code != 0 {
+		t.Fatalf("register: %d %s", code, e)
+	}
+	tr := filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "projects", agent.ProjectSlug(work), sid+".jsonl")
+	add := func(id string, outTokens int) {
+		f, err := os.OpenFile(tr, os.O_APPEND|os.O_WRONLY, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		fmt.Fprintf(f, `{"type":"assistant","message":{"id":%q,"model":"claude-opus-5-5","usage":{"input_tokens":2,"output_tokens":%d,"cache_read_input_tokens":100,"cache_creation_input_tokens":50}}}`+"\n", id, outTokens)
+		f.Close()
+	}
+	read := func() agent.UsageDoc {
+		var d agent.UsageDoc
+		b, err := os.ReadFile(filepath.Join(out, ".c4", "usage.json"))
+		if err != nil || json.Unmarshal(b, &d) != nil {
+			t.Fatalf("usage.json: %v %s", err, b)
+		}
+		return d
+	}
+	hook := `{"session_id":"` + sid + `","transcript_path":"` + tr + `","hook_event_name":"Stop"}`
+	add("a", 300)
+	if code, _, e := runCLI(t, hook, "checkpoint", "--hook"); code != 0 {
+		t.Fatalf("hook: %d %s", code, e)
+	}
+	if d := read(); len(d.Models) != 1 || d.Models[0].OutputTokens != 300 || d.Models[0].CacheWriteTokens != 50 {
+		t.Fatalf("first turn %+v", d)
+	}
+	add("b", 200)
+	add("b", 200) // the same message, written twice
+	runCLI(t, hook, "checkpoint", "--hook")
+	runCLI(t, hook, "checkpoint", "--hook") // a hook that runs twice
+	if d := read(); d.Models[0].OutputTokens != 500 || d.Models[0].InputTokens != 4 {
+		t.Fatalf("two turns %+v", d)
 	}
 }

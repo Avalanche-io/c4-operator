@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -211,6 +212,18 @@ func TestHostControlDocs(t *testing.T) {
 	if mid := c4.Identify(bytes.NewReader(measure)); getPod(t, c).Annotations[c4v1.AnnotationOutputMeasure] != mid.String() {
 		t.Fatalf("output-measure %q, want %s", getPod(t, c).Annotations[c4v1.AnnotationOutputMeasure], mid)
 	}
+
+	// and a model member's token use
+	usage := []byte(`{"models":[{"model":"opus","inputTokens":4,"outputTokens":500}]}`)
+	if err := os.WriteFile(filepath.Join(u.Out, ".c4", "usage.json"), usage, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.storeControlDocs(ctx, p, m, u); err != nil {
+		t.Fatal(err)
+	}
+	if uid := c4.Identify(bytes.NewReader(usage)); getPod(t, c).Annotations[c4v1.AnnotationOutputUsage] != uid.String() {
+		t.Fatalf("output-usage %q, want %s", getPod(t, c).Annotations[c4v1.AnnotationOutputUsage], uid)
+	}
 }
 
 // A pod the queue deletes (a disruption) keeps its finalizer until the
@@ -231,5 +244,34 @@ func TestHostDeletedPodYieldsFirst(t *testing.T) {
 	got := getPod(t, c)
 	if got.Status.Phase != corev1.PodSucceeded || got.Status.Reason != "Yielded" || !strings.Contains(got.Status.Message, "deleted") {
 		t.Fatalf("pod %s %s %q", got.Status.Phase, got.Status.Reason, got.Status.Message)
+	}
+}
+
+// A transcript's token use, per model: a message written as several lines
+// counts once, other lines are skipped, and only the bytes in range count.
+func TestTranscriptUsage(t *testing.T) {
+	turn := func(id, model string, in, out, read, write int) string {
+		return fmt.Sprintf(`{"type":"assistant","message":{"id":%q,"model":%q,"usage":{"input_tokens":%d,"output_tokens":%d,"cache_read_input_tokens":%d,"cache_creation_input_tokens":%d}}}`+"\n", id, model, in, out, read, write)
+	}
+	first := `{"type":"user","message":{"content":"go"}}` + "\n" + turn("m1", "opus", 2, 200, 1000, 500) + turn("m1", "opus", 2, 200, 1000, 500) + turn("m2", "haiku", 10, 20, 0, 0)
+	second := turn("m3", "opus", 3, 100, 2000, 0) + "not json\n"
+	path := filepath.Join(t.TempDir(), "s.jsonl")
+	if err := os.WriteFile(path, []byte(first+second), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	all, err := TranscriptUsage(path, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(all.Models) != 2 || all.Models[0].Model != "haiku" || all.Models[1] != (ModelUsage{Model: "opus", InputTokens: 5, OutputTokens: 300, CacheReadTokens: 3000, CacheWriteTokens: 500}) {
+		t.Fatalf("all %+v", all.Models)
+	}
+	part, _ := TranscriptUsage(path, int64(len(first)), 0)
+	if len(part.Models) != 1 || part.Models[0].OutputTokens != 100 {
+		t.Fatalf("from the second turn %+v", part.Models)
+	}
+	head, _ := TranscriptUsage(path, 0, int64(len(first)))
+	if head.Models[1].OutputTokens != 200 {
+		t.Fatalf("up to the first turn's end %+v", head.Models)
 	}
 }

@@ -115,6 +115,19 @@ turn saved. Outside a unit, or without `c4-unit` on the PATH
 (`$C4_UNIT_BIN` overrides it), the hook does what it always did, and it
 still always exits 0.
 
+**The turn's tokens.** Inside a unit the hook also writes the attempt's
+token use so far to the unit's `.c4/usage.json`, before the safe point, so
+a stop there loses nothing. It totals the session's transcript per model:
+input, output, cache reads and cache writes, each API message counted once
+(the transcript repeats one message over several lines). The attempt
+starts where the checkpoint it resumed from ends, recorded in
+`.c4/usage.from` at its first turn, so a resumed member's earlier attempts
+are not counted again. The file is rewritten whole each turn; for a member
+session the hook owns it. It sets no cost: a session knows tokens, and the
+price comes from the metering proxy or a price table. The node daemon (or
+the host runner) stores it as `c4.avalanche.io/output-usage`, and the queue
+counts it in the job's model spend.
+
 ## Bundles on the farm: the host runner
 
 An `AgentBundle` names a team of members, how many may run at once, its
@@ -159,8 +172,9 @@ token, issued by the farm admin). `config/rbac/host-runner.yaml` and
 - its own Node: created only with the host-runner taint, then only its
   slot limit, capacity reason and status;
 - its own Lease;
-- pods bound to it: status and five annotations (output-checkpoint,
-  output-epoch, output-expand, output-verdict, safepoint);
+- pods bound to it: status and seven annotations (output-checkpoint,
+  output-epoch, output-expand, output-verdict, output-measure,
+  output-usage, safepoint);
 - bindings to itself only.
 
 Keep the host-runner taint on agent pools, so only agent pods select these
