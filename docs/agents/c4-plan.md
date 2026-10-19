@@ -38,7 +38,7 @@ the queue may ignore:
 
 - `group`: the row it belongs to (`chapter 2`, `phase A`);
 - `holds`: the paths it writes;
-- `params`: plan facts (`rules`, `status`, `sha`, `charter`, `model`, `refute`, `filler`, `runOrder`, `wave`, `target`);
+- `params`: plan facts (`rules`, `status`, `sha`, `charter`, `model`, `refute`, `filler`, `runOrder`, `wave`, `target`, and `origin`: `plan` for a lane in the plan from the start, `follow-on` for one chartered later from another lane's need);
 - `cites`: for each edge, `{after, file, line, text}`.
 
 ## What it could not read

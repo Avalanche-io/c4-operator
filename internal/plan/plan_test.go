@@ -106,6 +106,14 @@ func TestLaneFacts(t *testing.T) {
 	if p.Unit("C9.9") != nil {
 		t.Error("C9.9 is not in the plan")
 	}
+	// origin: lanes owning whole families, the waves and the M2 column were
+	// planned; the rest came later
+	for n, want := range map[string]string{"C1.1": "plan", "C2.3": "plan", "A0": "plan", "B3": "plan", "M2-1": "plan",
+		"C1.0": "follow-on", "F1": "follow-on", "A1": "plan"} {
+		if got := p.Unit(n).Params["origin"]; got != want {
+			t.Errorf("%s origin %q, want %q", n, got, want)
+		}
+	}
 }
 
 // What the importer could not read, or read with an assumption, is a note.

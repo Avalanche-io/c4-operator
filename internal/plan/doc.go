@@ -48,7 +48,8 @@ type Unit struct {
 	// Holds are the paths the block writes (a lane's grants).
 	Holds []string `json:"holds,omitempty"`
 	// Params are facts from the plan: rules, model, refute, status, sha,
-	// charter, filler, runOrder.
+	// charter, filler, runOrder, origin (plan: in the plan from the start;
+	// follow-on: chartered later from another lane's need).
 	Params map[string]string `json:"params,omitempty"`
 	// Cites says where each edge in After came from.
 	Cites []Cite `json:"cites,omitempty"`

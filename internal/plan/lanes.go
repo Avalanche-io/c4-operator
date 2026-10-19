@@ -59,6 +59,13 @@ func ImportLanes(dir, milestone string) (*Plan, error) {
 		return nil, err
 	}
 	r.resolve()
+	// every other lane came from a later need: a register row, a lane's
+	// follow-on, a lane chartered because another needed it
+	for _, n := range p.order {
+		if u := p.units[n]; u.Params["origin"] == "" {
+			u.Params["origin"] = "follow-on"
+		}
+	}
 	return p, nil
 }
 
@@ -153,10 +160,16 @@ func (r *reader) laneTable(file string, ls []line, m2 bool) {
 		}
 		// a six-column lane row: chapter, lane, section, families, rules, M2
 		if len(c) >= 6 && cell == c[1] {
-			for _, fm := range familyRe.FindAllStringSubmatch(clean(c[3]), -1) {
+			fms := familyRe.FindAllStringSubmatch(clean(c[3]), -1)
+			for _, fm := range fms {
 				if _, ok := r.fams[fm[1]]; !ok {
 					r.fams[fm[1]] = name
 				}
+			}
+			// a lane that owns whole families was in the plan from the
+			// start; one that names single rules came from a later need
+			if len(fms) > 0 {
+				u.Params["origin"] = "plan"
 			}
 			if n, ok := leadingInt(clean(c[4])); ok {
 				u.Params["rules"] = strconv.Itoa(n)
@@ -174,6 +187,7 @@ func (r *reader) m2Cell(file string, n int, chapter, cell string) {
 	}
 	u := r.p.unit(name, chapter)
 	u.Params["target"] = "metal"
+	u.Params["origin"] = "plan"
 	list = strings.TrimSpace(list)
 	after, ok := strings.CutPrefix(list, "after")
 	if !ok {
@@ -418,6 +432,7 @@ func (r *reader) waves(file string, ls []line) {
 				continue
 			}
 			u := r.p.unit(tk.name, group)
+			u.Params["origin"] = "plan"
 			if wave != "" {
 				u.Params["wave"] = wave
 			}
