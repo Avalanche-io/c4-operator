@@ -47,6 +47,8 @@ type Source struct {
 	// Class is the process's class as the derivation record sees it
 	// ("exact", "validated"); experimental, reported only.
 	Class string
+	// View is the input a recompute rebuilds (its view ID).
+	View string
 }
 
 // Stage moves a job's inputs to a pool at another site so the job can

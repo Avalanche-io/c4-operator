@@ -104,6 +104,11 @@ type Queue struct {
 	books        map[string]*process.Book
 	digests      map[string]string
 	lastPlatform map[string]string
+	// sites is each pool's site at the last tick (recompute.go). derivMu
+	// guards it and the books map: the Placement reads both during a tick,
+	// which holds mu.
+	sites   map[string]string
+	derivMu sync.Mutex
 	// Progress, when set, holds the progress running units report
 	// (progress.go); without it units are estimated from elapsed time.
 	Progress *ProgressCache
@@ -477,6 +482,13 @@ func (q *Queue) Tick(ctx context.Context) error {
 	}
 
 	poolInfo := q.pools(ctx, pools.Items, nodes.Items, pods.Items, crs.Items)
+	sites := map[string]string{}
+	for name, p := range poolInfo {
+		sites[name] = p.site
+	}
+	q.derivMu.Lock()
+	q.sites = sites
+	q.derivMu.Unlock()
 	nsProject := map[string]string{}
 	q.shareHist = map[string]bool{}
 	for _, p := range projects.Items {

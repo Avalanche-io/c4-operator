@@ -303,7 +303,7 @@ const minRepeats = 3
 const candidatesKept = 16
 
 func (q *Queue) proceduralCandidates(ctx context.Context, v *view) []c4v1.WorkProceduralCandidate {
-	b := q.books[v.project]
+	b := q.bookOf(v.project)
 	m := v.mem
 	if b == nil || b.Len() == 0 || v.driver == nil || m.plan == nil {
 		return nil

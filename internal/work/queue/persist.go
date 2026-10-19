@@ -180,7 +180,7 @@ func (q *Queue) restoreProject(rec *calRecord) {
 	}
 	q.fcal.init()
 	if rec.Derivations != nil && q.book(rec.Project).Len() == 0 {
-		q.books[rec.Project] = process.RestoreBook(*rec.Derivations)
+		q.setBook(rec.Project, process.RestoreBook(*rec.Derivations))
 	}
 	for class, ds := range rec.Durations {
 		// The stored window first, then what ran since the start.
@@ -380,7 +380,7 @@ func (q *Queue) calRecordOf(project string, now time.Time) calRecord {
 			rec.Classes[k[1]] = cc
 		}
 	}
-	if b := q.books[project]; b != nil && b.Len() > 0 {
+	if b := q.bookOf(project); b != nil && b.Len() > 0 {
 		s := b.Snapshot()
 		rec.Derivations = &s
 	}

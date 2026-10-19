@@ -696,6 +696,14 @@ staging): it accepts a validated recompute of an input in place of moving
 it to another site. A validated recompute's output differs from the
 recorded one, so only the consuming job may choose it; exact recomputes and
 identical outputs need no consent, and volatile ones are never offered.
+Only exact recomputes are carried out so far: a validated one would also
+need the job's input pointed at its output, so it is not offered yet.
+
+A recompute runs as a WorkJob labeled `c4.avalanche.io/recompute: "true"`,
+named `rc-` and a hash of the computation and site, in the producing job's
+namespace. `c4.avalanche.io/recompute-of` names the job and unit it reruns
+(`namespace/name#index`); `c4.avalanche.io/recompute-unit` keeps its plan
+to that unit, and is the queue's to set.
 
 ## Changes from the first draft of the contract
 

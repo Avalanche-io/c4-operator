@@ -321,7 +321,7 @@ func addStaging(mgr ctrl.Manager, q *queue.Queue, stores func(context.Context, s
 	}
 	reg := &placement.Regional{Topo: tp, Client: &http.Client{Timeout: 30 * time.Second}, Token: token}
 	p := &placement.Provider{Topo: tp, Views: placement.StoreViews{Stores: stores}, Holdings: reg, Warmer: reg,
-		Cost: q.RecomputeCost, Log: ctrl.Log.WithName("placement")}
+		Cost: q.RecomputeCost, Recomputer: q, Log: ctrl.Log.WithName("placement")}
 	q.Placement = p
 	return mgr.Add(manager.RunnableFunc(func(ctx context.Context) error {
 		p.Run(ctx, 15*time.Second)

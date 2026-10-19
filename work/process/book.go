@@ -57,9 +57,18 @@ type Run struct {
 	Output    string
 	Changeset string
 	Record    string
+	// Producer names the unit that ran: its job (namespace/name) and the
+	// unit's index in the job's plan. A recompute reruns that unit.
+	Producer Producer
 	// Work is slot-seconds (run time times slots); Duration seconds.
 	Work, Duration float64
 	At             time.Time
+}
+
+// Producer is the unit that ran a computation.
+type Producer struct {
+	Job  string `json:"job"`
+	Unit int    `json:"unit"`
 }
 
 // Cost is what getting an output by recomputing it costs, from the
@@ -122,6 +131,9 @@ type entry struct {
 	// and the task record of the run that first wrote it, for reuse.
 	Changesets map[string]string `json:"changesets,omitempty"`
 	Records    map[string]string `json:"records,omitempty"`
+	// Producer is the unit that last ran the computation, the one a
+	// recompute reruns (the latest, being the likeliest to still exist).
+	Producer *Producer `json:"producer,omitempty"`
 }
 
 type procRecord struct {
@@ -233,6 +245,10 @@ func (b *Book) Record(r Run) {
 	if r.At.After(e.Last) {
 		e.Last = r.At
 	}
+	if r.Producer.Job != "" {
+		pr := r.Producer
+		e.Producer = &pr
+	}
 	p.Work.add(r.Work)
 	p.Duration.add(r.Duration)
 	b.byOutput[r.Output] = r.Key
@@ -309,6 +325,17 @@ func (b *Book) ProducedBy(output string) (Key, string, []Input, bool) {
 	}
 	e := b.entries[k]
 	return k, e.Program, append([]Input(nil), e.Inputs...), true
+}
+
+// ProducerOf returns the unit that last ran k.
+func (b *Book) ProducerOf(k Key) (Producer, bool) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	e := b.entries[k]
+	if e == nil || e.Producer == nil {
+		return Producer{}, false
+	}
+	return *e.Producer, true
 }
 
 // Recompute returns what recomputing k costs: from k's own runs when it

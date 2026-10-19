@@ -2018,11 +2018,22 @@ The queue gets these from a Placement (`--staging`, off by default;
   (`--warm-bytes-per-day`, `--warm-bytes-per-second`; off at 0), and
   records each request.
 - **Recomputing** an input at the target site is offered from the
-  derivation records' cost (`Queue.RecomputeCost`) for exact processes,
-  for validated ones only to a job that accepts them
-  (`c4.avalanche.io/accept-validated`), and never for volatile ones; it
-  waits for an actuator that runs the producing work at the site, so it is
-  not offered yet.
+  derivation records' cost (`Queue.RecomputeCost`) for exact processes: a
+  fresh run writes the same bytes, so the site then holds the input the job
+  names. Staging a recompute moves what the site lacks of the
+  computation's own inputs and the job's other inputs, then runs the unit
+  that produced the input there: a WorkJob made from the producing job's
+  spec (class, parameters, pod template), planned as that one unit
+  (`c4.avalanche.io/recompute-unit`), reading the views it read pinned by
+  ID, in the producing job's pools at the site, due when the stage needs
+  it. The record names the unit that last ran each computation; a unit an
+  expansion added, or one reading other units' outputs, is not rerun. A
+  rerun that writes the same output verifies the process; one that writes
+  something else demotes it to validated, and the job's input is moved
+  instead. Validated processes are not offered yet, even to a job that
+  accepts them (`c4.avalanche.io/accept-validated`): their output differs,
+  and the job's input would have to be pointed at it. Volatile ones never
+  are.
 
 **Pre-warm.** A CapacityRequest lists the views its jobs will mount. The node
 daemon on a node joining that pool fetches those layers before it labels its

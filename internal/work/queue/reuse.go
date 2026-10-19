@@ -35,7 +35,7 @@ import (
 // reuseUnits reuses what it can among v's runnable units, and reports
 // whether it reused any.
 func (q *Queue) reuseUnits(ctx context.Context, v *view, now time.Time) bool {
-	b := q.books[v.project]
+	b := q.bookOf(v.project)
 	if b == nil || b.Len() == 0 || v.driver == nil || v.blocked {
 		return false
 	}

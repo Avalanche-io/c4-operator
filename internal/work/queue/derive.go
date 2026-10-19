@@ -172,8 +172,10 @@ func (q *Queue) inputViews(ctx context.Context, j *c4v1.WorkJob) ([]process.Inpu
 	return out, true
 }
 
-// book is a project's record of derivations.
+// book is a project's record of derivations, made if it has none.
 func (q *Queue) book(project string) *process.Book {
+	q.derivMu.Lock()
+	defer q.derivMu.Unlock()
 	if q.books == nil {
 		q.books = map[string]*process.Book{}
 	}
@@ -183,6 +185,23 @@ func (q *Queue) book(project string) *process.Book {
 		q.books[project] = b
 	}
 	return b
+}
+
+// bookOf is a project's record of derivations, nil if it has none.
+func (q *Queue) bookOf(project string) *process.Book {
+	q.derivMu.Lock()
+	defer q.derivMu.Unlock()
+	return q.books[project]
+}
+
+// setBook replaces a project's record of derivations.
+func (q *Queue) setBook(project string, b *process.Book) {
+	q.derivMu.Lock()
+	defer q.derivMu.Unlock()
+	if q.books == nil {
+		q.books = map[string]*process.Book{}
+	}
+	q.books[project] = b
 }
 
 // recordDerivation adds a unit that succeeded to its project's book. A
@@ -243,9 +262,15 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 	}
 	declared := process.ParseClass(v.job.Annotations[AnnotationDerivationClass])
 	slots := max(1, u.Slots)
+	var producer process.Producer
+	if v.job.Annotations[AnnotationRecomputeUnit] == "" {
+		// A recompute's run is evidence, but the job it reran stays the
+		// one to rerun: it is the job a person keeps.
+		producer = process.Producer{Job: v.job.Namespace + "/" + v.job.Name, Unit: idx}
+	}
 	q.book(v.project).Record(process.Run{Key: process.Key{Process: proc, Inputs: in}, Program: program, Inputs: inputs, Declared: declared,
 		Sealed: sealed, Output: out, Changeset: p.Annotations[c4v1.AnnotationOutputChangeset], Record: p.Annotations[c4v1.AnnotationOutputProvenance],
-		Work: float64(ms) / 1000 * float64(slots), Duration: float64(ms) / 1000, At: finishOf(p, time.Now())})
+		Producer: producer, Work: float64(ms) / 1000 * float64(slots), Duration: float64(ms) / 1000, At: finishOf(p, time.Now())})
 	q.calp.touch(v.project)
 	m := v.mem
 	m.proc, m.unsealedWhy = program, why
@@ -265,7 +290,7 @@ func perUnit(u class.Unit) map[string]bool {
 // derivation ran before in its project, what it took then. It overrides
 // the shot history's profile at those positions.
 func (q *Queue) useDerivations(ctx context.Context, v *view, byKey map[string]map[int]float64) {
-	b := q.books[v.project]
+	b := q.bookOf(v.project)
 	if b == nil || b.Len() == 0 {
 		return
 	}
@@ -309,7 +334,7 @@ func (q *Queue) derivationStatus(v *view) *c4v1.WorkDerivation {
 	if m.proc == "" {
 		return nil
 	}
-	b := q.books[v.project]
+	b := q.bookOf(v.project)
 	if b == nil {
 		return nil
 	}
@@ -330,9 +355,7 @@ func (q *Queue) derivationStatus(v *view) *c4v1.WorkDerivation {
 // derivation is not recorded. Reuse is withheld for the share of
 // opportunities sampled for verification; u is the caller's uniform draw.
 func (q *Queue) RecomputeCost(project, output string, u float64) (process.Key, []process.Input, process.Cost, bool) {
-	q.mu.Lock()
-	b := q.books[project]
-	q.mu.Unlock()
+	b := q.bookOf(project)
 	if b == nil {
 		return process.Key{}, nil, process.Cost{}, false
 	}

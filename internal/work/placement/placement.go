@@ -14,9 +14,11 @@
 // first come first served on each link (a ledger of committed bytes), and
 // is carried out by asking the target site's regional replicas to fetch the
 // objects (POST /warm). Recomputing an input at the target site is offered
-// only with a Recomputer, which runs the producing work there: exact
-// processes always, validated ones only for a job that accepts them,
-// volatile ones never.
+// only with a Recomputer, which runs the producing work there, and only
+// for exact processes: they write the input the job names. A validated
+// recompute writes a different output, which a job that accepts it could
+// read only if the queue pointed its input at that output; it does not
+// yet, so validated ones are not offered either (volatile ones never are).
 package placement
 
 import (
@@ -62,7 +64,7 @@ type RecomputeCost func(project, output string, u float64) (process.Key, []proce
 
 // Recomputer runs the work that produces an output at a site.
 type Recomputer interface {
-	Recompute(ctx context.Context, project string, key process.Key, inputs []process.Input, site string) error
+	Recompute(ctx context.Context, project string, key process.Key, inputs []process.Input, site string, by time.Time) error
 }
 
 // Provider implements the queue's Placement.
@@ -249,7 +251,9 @@ func (p *Provider) recomputes(project string, inputs []process.Input, site, orig
 	var out []sched.Source
 	for i, in := range inputs {
 		_, cin, cost, ok := p.Cost(project, in.View, 1)
-		if !ok || !(cost.Class == process.Exact || cost.Class == process.Validated && accept) {
+		// accept will admit validated processes once the queue can point
+		// the job's input at a recompute's output (see the package doc).
+		if !ok || cost.Class != process.Exact {
 			continue
 		}
 		views := viewsOf(cin)
@@ -266,7 +270,7 @@ func (p *Provider) recomputes(project string, inputs []process.Input, site, orig
 		for _, l := range p.Topo.Between(origin, site) {
 			out = append(out, sched.Source{Via: "recompute", Channel: l.Channel, Link: l.Name, Bytes: bytes,
 				Latency: l.Latency(), Cost: l.Cost(bytes, bytes*p.outShare()), Work: cost.W90,
-				Longest: time.Duration(cost.Longest * float64(time.Second)), Class: string(cost.Class)})
+				Longest: time.Duration(cost.Longest * float64(time.Second)), Class: string(cost.Class), View: in.View})
 		}
 	}
 	return out
@@ -286,47 +290,111 @@ func (p *Provider) Links() []sched.Link {
 	return out
 }
 
-// Stage moves what site lacks of the inputs over the stage's link: it
-// asks the site's tiers to fetch the objects, commits their bytes to the
-// link behind what is already committed, and counts them as on their way
-// until they land.
+// Stage carries out an approved stage. A move asks the site's tiers to
+// fetch what the site lacks of the inputs over the stage's link, commits
+// their bytes to the link behind what is already committed, and counts
+// them as on their way until they land. A recompute is stageRecompute.
 func (p *Provider) Stage(ctx context.Context, project string, inputs []process.Input, site string, st sched.Stage) error {
+	if st.Source.Via == "recompute" {
+		return p.stageRecompute(ctx, project, inputs, site, st)
+	}
 	p.mu.Lock()
 	p.init()
 	objs, _, ok := p.lacking(project, viewsOf(inputs), site)
-	var link *topology.Link
-	for i := range p.Topo.Links {
-		if p.Topo.Links[i].Name == st.Source.Link {
-			link = &p.Topo.Links[i]
-		}
-	}
+	link := p.link(st.Source.Link)
 	p.mu.Unlock()
 	if !ok || len(objs) == 0 || link == nil {
 		return nil
-	}
-	if st.Source.Via == "recompute" {
-		return nil // a Recomputer stage: not carried out by this provider yet
 	}
 	if err := p.Warmer.Warm(ctx, site, project, objs); err != nil {
 		return err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	now := p.now()
-	start := p.busy[link.Name]
-	if start.Before(now) {
-		start = now
+	p.commit(link, site, objs, time.Time{})
+	return nil
+}
+
+// stageRecompute rebuilds the input the stage names (Source.View) at
+// site, as recomputes priced it: it moves what the site lacks of that
+// computation's own inputs and of the job's other inputs, then has the
+// Recomputer run the computation there, due when the stage's delay ends.
+// The rebuilt input's objects count as on their way until then, so the
+// job reads as staging and is not staged again.
+func (p *Provider) stageRecompute(ctx context.Context, project string, inputs []process.Input, site string, st sched.Stage) error {
+	if p.Cost == nil || p.Recomputer == nil {
+		return nil
 	}
-	done := start.Add(time.Duration(size(objs) / link.BytesPerSecond() * float64(time.Second)))
-	p.busy[link.Name] = done
-	land := done.Add(link.Latency())
+	key, cin, _, ok := p.Cost(project, st.Source.View, 1)
+	if !ok {
+		return nil
+	}
+	views := viewsOf(cin)
+	for _, in := range inputs {
+		if in.View != st.Source.View {
+			views = append(views, in.View)
+		}
+	}
+	p.mu.Lock()
+	p.init()
+	objs, _, known := p.lacking(project, views, site)
+	link := p.link(st.Source.Link)
+	p.mu.Unlock()
+	if !known || link == nil {
+		return nil
+	}
+	if len(objs) > 0 {
+		if err := p.Warmer.Warm(ctx, site, project, objs); err != nil {
+			return err
+		}
+		p.mu.Lock()
+		p.commit(link, site, objs, time.Time{})
+		p.mu.Unlock()
+	}
+	due := p.now().Add(st.Delay)
+	if err := p.Recomputer.Recompute(ctx, project, key, cin, site, due); err != nil {
+		return err
+	}
+	out, err := p.objectsOf(ctx, project, st.Source.View)
+	if err != nil {
+		return err
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.commit(nil, site, out, due)
+	return nil
+}
+
+// link is the topology's link of that name.
+func (p *Provider) link(name string) *topology.Link {
+	for i := range p.Topo.Links {
+		if p.Topo.Links[i].Name == name {
+			return &p.Topo.Links[i]
+		}
+	}
+	return nil
+}
+
+// commit counts objs as on their way to site: over link, behind what is
+// committed to it, landing after its latency; or, with no link, landing
+// at land.
+func (p *Provider) commit(link *topology.Link, site string, objs []Object, land time.Time) {
+	if link != nil {
+		now := p.now()
+		start := p.busy[link.Name]
+		if start.Before(now) {
+			start = now
+		}
+		done := start.Add(time.Duration(size(objs) / link.BytesPerSecond() * float64(time.Second)))
+		p.busy[link.Name] = done
+		land = done.Add(link.Latency())
+	}
 	if p.coming[site] == nil {
 		p.coming[site] = map[c4.ID]time.Time{}
 	}
 	for _, o := range objs {
 		p.coming[site][o.ID] = land
 	}
-	return nil
 }
 
 // Refresh learns what sites lack for the views the queue asked about, and

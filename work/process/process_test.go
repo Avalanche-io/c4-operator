@@ -158,3 +158,31 @@ func TestProgramPoolsEvidenceAcrossUnits(t *testing.T) {
 		t.Fatalf("two frames re-run once each: %s %v", c, v)
 	}
 }
+
+// The record names the unit that last ran a computation, the one a
+// recompute reruns; a run with no producer (a recompute's) leaves it, and
+// it survives a snapshot.
+func TestBookProducer(t *testing.T) {
+	var b Book
+	k := Key{"p", "i"}
+	if _, ok := b.ProducerOf(k); ok {
+		t.Fatal("a producer before any run")
+	}
+	r := run("p", "i", "o", 100, Exact, true)
+	r.Producer = Producer{Job: "show/sh010", Unit: 3}
+	b.Record(r)
+	r.Producer = Producer{Job: "show/sh011", Unit: 0}
+	b.Record(r)
+	b.Record(run("p", "i", "o", 100, Exact, true))
+	if pr, ok := b.ProducerOf(k); !ok || pr != (Producer{Job: "show/sh011", Unit: 0}) {
+		t.Fatalf("producer %+v %v", pr, ok)
+	}
+	js, _ := json.Marshal(b.Snapshot())
+	var s BookSnapshot
+	if err := json.Unmarshal(js, &s); err != nil {
+		t.Fatal(err)
+	}
+	if pr, ok := RestoreBook(s).ProducerOf(k); !ok || pr.Job != "show/sh011" {
+		t.Fatalf("restored producer %+v %v", pr, ok)
+	}
+}

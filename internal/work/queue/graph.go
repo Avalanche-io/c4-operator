@@ -59,6 +59,9 @@ func (e errLoading) Error() string { return "loading expansion documents: " + e.
 func (q *Queue) planJob(ctx context.Context, v *view) (*class.Plan, error) {
 	m, j := v.mem, v.job
 	p, err := v.driver.Plan(j)
+	if err == nil {
+		p, err = recomputeUnit(j, p)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -135,20 +135,32 @@ func TestStageWarmsAndCommits(t *testing.T) {
 	}
 }
 
-type fakeRecomputer struct{}
+type recomputeCall struct {
+	project string
+	key     process.Key
+	inputs  []process.Input
+	site    string
+	by      time.Time
+}
 
-func (fakeRecomputer) Recompute(context.Context, string, process.Key, []process.Input, string) error {
+type fakeRecomputer struct{ calls *[]recomputeCall }
+
+func (f fakeRecomputer) Recompute(_ context.Context, project string, key process.Key, inputs []process.Input, site string, by time.Time) error {
+	if f.calls != nil {
+		*f.calls = append(*f.calls, recomputeCall{project, key, inputs, site, by})
+	}
 	return nil
 }
 
-// Recompute is offered for exact processes, for validated ones only to a
-// job that accepts them, and never for volatile ones.
+// Recompute is offered for exact processes only: not for validated ones
+// even to a job that accepts them (its input would still name the recorded
+// output), and never for volatile ones.
 func TestRecomputeOffers(t *testing.T) {
 	for _, c := range []struct {
 		class  process.Class
 		accept bool
 		want   bool
-	}{{process.Exact, false, true}, {process.Validated, false, false}, {process.Validated, true, true}, {process.Volatile, true, false}} {
+	}{{process.Exact, false, true}, {process.Validated, false, false}, {process.Validated, true, false}, {process.Volatile, true, false}} {
 		p, _, _, _ := provider(t)
 		p.Recomputer = fakeRecomputer{}
 		p.Cost = func(_, output string, _ float64) (process.Key, []process.Input, process.Cost, bool) {
@@ -173,6 +185,48 @@ func TestRecomputeOffers(t *testing.T) {
 		if got != c.want {
 			t.Fatalf("%s accept=%v: recompute offered %v", c.class, c.accept, got)
 		}
+	}
+}
+
+// A recompute stage moves what van lacks of the computation's inputs and
+// the job's other inputs (the plate), has the Recomputer rebuild fx at van
+// due when the stage's delay ends, and counts fx's objects as on their way
+// until then: the job reads as staging, not as lacking fx.
+func TestStageRecompute(t *testing.T) {
+	p, _, w, c := provider(t)
+	var calls []recomputeCall
+	p.Recomputer = fakeRecomputer{&calls}
+	key := process.Key{Process: "render-fx", Inputs: "plates"}
+	p.Cost = func(_, output string, _ float64) (process.Key, []process.Input, process.Cost, bool) {
+		if output != "fx" {
+			return process.Key{}, nil, process.Cost{}, false
+		}
+		return key, []process.Input{{Mount: "/in", View: "plates"}}, process.Cost{W90: 3600, Longest: 600, Class: process.Exact}, true
+	}
+	p.Sources("show", inputs, "van", false)
+	p.Refresh(context.Background())
+	var src sched.Source
+	for _, s := range p.Sources("show", inputs, "van", false) {
+		if s.Via == "recompute" {
+			src = s
+		}
+	}
+	if src.View != "fx" {
+		t.Fatalf("recompute source %+v", src)
+	}
+	if err := p.Stage(context.Background(), "show", inputs, "van", sched.Stage{Source: src, Delay: 20 * time.Minute}); err != nil {
+		t.Fatal(err)
+	}
+	if len(w.calls) != 1 || len(w.calls[0]) != 1 || w.calls[0][0].ID != plate.ID {
+		t.Fatalf("warm calls %+v, want the plate alone", w.calls)
+	}
+	due := c.t.Add(20 * time.Minute)
+	if len(calls) != 1 || calls[0].key != key || calls[0].site != "van" || !calls[0].by.Equal(due) || len(calls[0].inputs) != 1 || calls[0].inputs[0].View != "plates" {
+		t.Fatalf("recompute calls %+v", calls)
+	}
+	s := p.Sources("show", inputs, "van", false)
+	if len(s) != 1 || s[0].Via != "staging" || s[0].Latency != 20*time.Minute {
+		t.Fatalf("while recomputing: %+v", s)
 	}
 }
 
