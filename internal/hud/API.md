@@ -314,6 +314,7 @@ A JobSummary with these fields added:
 | `unitList[].usage`     | a model unit's use of models over its attempts: `{ inputTokens, outputTokens, cacheReadTokens?, unpricedTokens?, cost, slotCost, costSource?, models: [ { model, inputTokens, outputTokens, cacheReadTokens?, unpricedTokens?, cost? } ] }`                                                                                                                                                              |
 | `unitList[].lockedBy`  | for a `locked` unit, the unit of its job holding what it claims: `{ unit, name, on }` ("locked by <name>"), `on` the claim it waits for                                                                                                                                                                                                                                                                  |
 | `holds`                | each unit holding claims that others wait on: `{ holder, name, on, waiting: [ { unit, name, on } ] }`, the waiting line in dispatch order                                                                                                                                                                                                                                                                |
+| `inputSubstitutes`     | inputs the job's units read, at a site, as a validated recompute's output: `[ { mount, view, substitute, site, recompute } ]` (`view` as the job names it, `substitute` what was read)                                                                                                                                                                                                                   |
 | `procedural`           | model units whose work a procedure might do: run at least three times on the same inputs, they wrote the same bytes every time: `[ { unit, name, runs, why } ]`, a report for a person                                                                                                                                                                                                                   |
 | `unitList[].gate`      | the gate a unit of kind gate passes (a one-slot resource shared by the namespace's jobs, first come, first served); while it waits, `lockedBy` is `{ gate, position, holder?, expectStart? }`, `holder` as `job#unit`                                                                                                                                                                                    |
 | `unitList[].exists`    | the probability a tentative unit runs, below 1 only; its expected work is weighted by it                                                                                                                                                                                                                                                                                                                 |
@@ -697,14 +698,21 @@ staging): it accepts a validated recompute of an input in place of moving
 it to another site. A validated recompute's output differs from the
 recorded one, so only the consuming job may choose it; exact recomputes and
 identical outputs need no consent, and volatile ones are never offered.
-Only exact recomputes are carried out so far: a validated one would also
-need the job's input pointed at its output, so it is not offered yet.
+At that site the queue points the job at the recompute's output (input
+substitution): its unit mounts the output through a Materialization the
+job owns, its pod says what it read in place of what
+(`c4.avalanche.io/input-substitutes`), the job's derivation record takes
+the input it read, and status lists it (`inputSubstitutes`). The job's spec,
+its Materializations and other jobs are not changed, and elsewhere it reads
+its inputs as named.
 
 A recompute runs as a WorkJob labeled `c4.avalanche.io/recompute: "true"`,
 named `rc-` and a hash of the computation and site, in the producing job's
 namespace. `c4.avalanche.io/recompute-of` names the job and unit it reruns
 (`namespace/name#index`); `c4.avalanche.io/recompute-unit` keeps its plan
-to that unit, and is the queue's to set.
+to that unit, and is the queue's to set; `c4.avalanche.io/recompute-view`
+and `-site` name the input it rebuilds and where, and the queue sets
+`c4.avalanche.io/recompute-output` to the view its unit wrote.
 
 ## Changes from the first draft of the contract
 

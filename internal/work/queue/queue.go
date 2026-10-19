@@ -107,7 +107,9 @@ type Queue struct {
 	// sites is each pool's site at the last tick (recompute.go). derivMu
 	// guards it and the books map: the Placement reads both during a tick,
 	// which holds mu.
-	sites   map[string]string
+	sites map[string]string
+	// subs are the input substitutes by project, site and view.
+	subs    map[string]map[string]map[string]substitute
 	derivMu sync.Mutex
 	// Progress, when set, holds the progress running units report
 	// (progress.go); without it units are estimated from elapsed time.
@@ -191,6 +193,9 @@ type jobMem struct {
 	spend               map[int]*unitSpend
 	spentPod            map[types.UID]bool
 	procBase, procHours float64
+	// substituted are the input substitutes its units read, by mount and
+	// site (substitute.go).
+	substituted map[string]c4v1.WorkInputSubstitute
 	// verdicts are the verdicts carried out, and reviews what they last
 	// decided per unit (verdict.go).
 	verdicts []verdictRec
@@ -336,6 +341,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		m.measure = &x
 	}
 	m.loadSpend(st)
+	m.loadSubstitutes(st)
 	for _, i := range decode(st.Reused) {
 		if m.reused == nil {
 			m.reused = map[int]string{}
@@ -416,6 +422,9 @@ type view struct {
 	// sources are the ways to get its inputs to pools at other sites
 	// (placement.go), by pool.
 	sources map[string][]sched.Source
+	// subs are the input substitutes it reads at each site, by input
+	// index (substitute.go).
+	subs map[string]map[int]substitute
 	// safe is each running unit's last safe point (safepoint.go).
 	safe map[int]Safepoint
 	// waiting are units blocked on units of their own job, and stuck
@@ -502,6 +511,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.loadCalibrations(ctx)
 	q.loadPolicies(projects.Items)
 	q.approvals = approvals(crs.Items)
+	q.noteSubstitutes(jobs.Items, nsProject)
 	podsByJob := map[string][]*corev1.Pod{}
 	for i := range pods.Items {
 		p := &pods.Items[i]
@@ -1385,6 +1395,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 				corev1.VolumeMount{Name: name, MountPath: in.MountPath, ReadOnly: true})
 		}
 	}
+	substitutePod(v, pod, p.site)
 	if w := v.mem.rework(idx); w != nil {
 		applyRework(pod, j.Name, idx, w)
 	}

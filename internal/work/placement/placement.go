@@ -14,11 +14,11 @@
 // first come first served on each link (a ledger of committed bytes), and
 // is carried out by asking the target site's regional replicas to fetch the
 // objects (POST /warm). Recomputing an input at the target site is offered
-// only with a Recomputer, which runs the producing work there, and only
-// for exact processes: they write the input the job names. A validated
-// recompute writes a different output, which a job that accepts it could
-// read only if the queue pointed its input at that output; it does not
-// yet, so validated ones are not offered either (volatile ones never are).
+// only with a Recomputer, which runs the producing work there: for exact
+// processes, which write the input the job names, and for validated ones
+// to a job that accepts them, which the queue then points at the
+// recompute's output at that site (input substitution); never for
+// volatile ones.
 package placement
 
 import (
@@ -64,7 +64,8 @@ type RecomputeCost func(project, output string, u float64) (process.Key, []proce
 
 // Recomputer runs the work that produces an output at a site.
 type Recomputer interface {
-	Recompute(ctx context.Context, project string, key process.Key, inputs []process.Input, site string, by time.Time) error
+	// view is the input it rebuilds; by is when the stage needs it.
+	Recompute(ctx context.Context, project string, key process.Key, inputs []process.Input, site, view string, by time.Time) error
 }
 
 // Provider implements the queue's Placement.
@@ -91,6 +92,11 @@ type Provider struct {
 	objects map[string][]Object            // by project/view; views are immutable
 	coming  map[string]map[c4.ID]time.Time // by site: objects on their way and when they land
 	busy    map[string]time.Time           // by link: when it has moved what is committed to it
+	// rebuilding is, by site, the views a recompute is rebuilding there
+	// and when it is due: its output's objects are not known until it
+	// has run (a validated one writes other bytes), so the view itself
+	// counts as on its way.
+	rebuilding map[string]map[string]time.Time
 }
 
 type lackKey struct{ site, project, view string }
@@ -125,6 +131,7 @@ func (p *Provider) init() {
 	if p.lack == nil {
 		p.lack, p.want = map[lackKey]*lackEntry{}, map[lackKey]bool{}
 		p.objects, p.coming, p.busy = map[string][]Object{}, map[string]map[c4.ID]time.Time{}, map[string]time.Time{}
+		p.rebuilding = map[string]map[string]time.Time{}
 	}
 }
 
@@ -160,13 +167,25 @@ func (p *Provider) missing(project, view, site string) ([]Object, bool) {
 }
 
 // lacking is what site lacks of views, less what is on its way, and when
-// the last of what is on its way lands (zero: nothing is).
+// the last of what is on its way lands (zero: nothing is). A view a
+// recompute is rebuilding at site is on its way until the recompute is
+// due.
 func (p *Provider) lacking(project string, views []string, site string) (objs []Object, landing time.Time, ok bool) {
 	seen := map[c4.ID]bool{}
 	coming := p.coming[site]
+	var rest []string
+	for _, v := range views {
+		if due, on := p.rebuilding[site][v]; on {
+			if due.After(landing) {
+				landing = due
+			}
+			continue
+		}
+		rest = append(rest, v)
+	}
 	// Every view is asked about, so one Refresh learns them all.
 	ok = true
-	for _, v := range views {
+	for _, v := range rest {
 		if _, known := p.missing(project, v, site); !known {
 			ok = false
 		}
@@ -174,7 +193,7 @@ func (p *Provider) lacking(project string, views []string, site string) (objs []
 	if !ok {
 		return nil, time.Time{}, false
 	}
-	for _, v := range views {
+	for _, v := range rest {
 		m, _ := p.missing(project, v, site)
 		for _, o := range m {
 			if seen[o.ID] {
@@ -251,9 +270,7 @@ func (p *Provider) recomputes(project string, inputs []process.Input, site, orig
 	var out []sched.Source
 	for i, in := range inputs {
 		_, cin, cost, ok := p.Cost(project, in.View, 1)
-		// accept will admit validated processes once the queue can point
-		// the job's input at a recompute's output (see the package doc).
-		if !ok || cost.Class != process.Exact {
+		if !ok || !(cost.Class == process.Exact || cost.Class == process.Validated && accept) {
 			continue
 		}
 		views := viewsOf(cin)
@@ -319,8 +336,8 @@ func (p *Provider) Stage(ctx context.Context, project string, inputs []process.I
 // site, as recomputes priced it: it moves what the site lacks of that
 // computation's own inputs and of the job's other inputs, then has the
 // Recomputer run the computation there, due when the stage's delay ends.
-// The rebuilt input's objects count as on their way until then, so the
-// job reads as staging and is not staged again.
+// The rebuilt input counts as on its way until then, so the job reads as
+// staging and is not staged again.
 func (p *Provider) stageRecompute(ctx context.Context, project string, inputs []process.Input, site string, st sched.Stage) error {
 	if p.Cost == nil || p.Recomputer == nil {
 		return nil
@@ -352,16 +369,15 @@ func (p *Provider) stageRecompute(ctx context.Context, project string, inputs []
 		p.mu.Unlock()
 	}
 	due := p.now().Add(st.Delay)
-	if err := p.Recomputer.Recompute(ctx, project, key, cin, site, due); err != nil {
-		return err
-	}
-	out, err := p.objectsOf(ctx, project, st.Source.View)
-	if err != nil {
+	if err := p.Recomputer.Recompute(ctx, project, key, cin, site, st.Source.View, due); err != nil {
 		return err
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.commit(nil, site, out, due)
+	if p.rebuilding[site] == nil {
+		p.rebuilding[site] = map[string]time.Time{}
+	}
+	p.rebuilding[site][st.Source.View] = due
 	return nil
 }
 
@@ -416,6 +432,16 @@ func (p *Provider) Refresh(ctx context.Context) {
 		}
 		if len(m) == 0 {
 			delete(p.coming, site)
+		}
+	}
+	for site, m := range p.rebuilding {
+		for view, due := range m {
+			if now.After(due.Add(p.ttl())) {
+				delete(m, view)
+			}
+		}
+		if len(m) == 0 {
+			delete(p.rebuilding, site)
 		}
 	}
 	p.mu.Unlock()

@@ -624,6 +624,35 @@ spec:
                   - holder
                   type: object
                 type: array
+              inputSubstitutes:
+                description: |-
+                  InputSubstitutes are the inputs the job's units read a validated
+                  recompute's output in place of, at a site (experimental, staging;
+                  AnnotationAcceptValidated).
+                items:
+                  description: |-
+                    WorkInputSubstitute is an input the job's units read, at Site, as the
+                    output of the recompute Recompute: View is the input as the job names
+                    it, Substitute the view they read instead.
+                  properties:
+                    mount:
+                      type: string
+                    recompute:
+                      type: string
+                    site:
+                      type: string
+                    substitute:
+                      type: string
+                    view:
+                      type: string
+                  required:
+                  - mount
+                  - recompute
+                  - site
+                  - substitute
+                  - view
+                  type: object
+                type: array
               interrupted:
                 format: int32
                 type: integer

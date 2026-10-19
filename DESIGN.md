@@ -2039,11 +2039,23 @@ The queue gets these from a Placement (`--staging`, off by default;
   it. The record names the unit that last ran each computation; a unit an
   expansion added, or one reading other units' outputs, is not rerun. A
   rerun that writes the same output verifies the process; one that writes
-  something else demotes it to validated, and the job's input is moved
-  instead. Validated processes are not offered yet, even to a job that
-  accepts them (`c4.avalanche.io/accept-validated`): their output differs,
-  and the job's input would have to be pointed at it. Volatile ones never
-  are.
+  something else demotes it to validated. A validated recompute is
+  offered only to a job that accepts one
+  (`c4.avalanche.io/accept-validated`), since it writes other bytes than
+  the input the job names; volatile ones never are.
+- **Input substitution.** At a site where a recompute rebuilt one of its
+  inputs as another view, an accepting job reads that view instead: the
+  queue keeps, per project, site and view, the outputs of the recompute
+  jobs that succeeded, and a unit placed in a pool there mounts the
+  substitute through a Materialization the job owns. The pod records what
+  it read in place of what, the derivation record takes the inputs the
+  unit actually read (the C4 way: what was read, not what was named), and
+  status lists the substitutions. The job's spec, its Materializations and
+  other jobs never change, and elsewhere it reads its inputs as named.
+  While a recompute runs, the view it rebuilds counts as on its way, so
+  the job reads as staging; its output's IDs are known only once it has
+  run. An exact recompute that wrote other bytes substitutes the same
+  way for an accepting job; for any other job the input is moved.
 
 **Pre-warm.** A CapacityRequest lists the views its jobs will mount. The node
 daemon on a node joining that pool fetches those layers before it labels its

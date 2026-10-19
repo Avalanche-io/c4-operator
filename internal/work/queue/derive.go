@@ -220,6 +220,7 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 			}
 		}
 	}
+	q.noteRecomputeOutput(ctx, v, out)
 	for _, s := range p.Status.ContainerStatuses {
 		if _, d, ok := strings.Cut(s.ImageID, "@"); ok {
 			if q.digests == nil {
@@ -253,6 +254,8 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 	if !ok {
 		return
 	}
+	// What the unit read: a substitute it mounted in place of an input.
+	inputs = readInputs(p, inputs)
 	in, ok := process.InputsID(inputs)
 	if !ok {
 		return

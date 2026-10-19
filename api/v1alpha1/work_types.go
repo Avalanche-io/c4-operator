@@ -278,6 +278,11 @@ type WorkJobStatus struct {
 	// will change with C4's derivation-record design.
 	// +optional
 	Derivation *WorkDerivation `json:"derivation,omitempty"`
+	// InputSubstitutes are the inputs the job's units read a validated
+	// recompute's output in place of, at a site (experimental, staging;
+	// AnnotationAcceptValidated).
+	// +optional
+	InputSubstitutes []WorkInputSubstitute `json:"inputSubstitutes,omitempty"`
 	// Procedural lists model units whose work a procedure might do: run
 	// again on the same inputs, they wrote the same bytes every time
 	// (LLM-OR-PROCEDURE 6.1). A report, for a person to weigh.
@@ -591,6 +596,17 @@ type WorkSpend struct {
 	ProceduralSlotHours string `json:"proceduralSlotHours,omitempty"`
 	// +optional
 	ModelWorkShare string `json:"modelWorkShare,omitempty"`
+}
+
+// WorkInputSubstitute is an input the job's units read, at Site, as the
+// output of the recompute Recompute: View is the input as the job names
+// it, Substitute the view they read instead.
+type WorkInputSubstitute struct {
+	Mount      string `json:"mount"`
+	View       string `json:"view"`
+	Substitute string `json:"substitute"`
+	Site       string `json:"site"`
+	Recompute  string `json:"recompute"`
 }
 
 // WorkUnitUsage is one model unit's use of models over its attempts:

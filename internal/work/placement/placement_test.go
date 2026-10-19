@@ -140,27 +140,28 @@ type recomputeCall struct {
 	key     process.Key
 	inputs  []process.Input
 	site    string
+	view    string
 	by      time.Time
 }
 
 type fakeRecomputer struct{ calls *[]recomputeCall }
 
-func (f fakeRecomputer) Recompute(_ context.Context, project string, key process.Key, inputs []process.Input, site string, by time.Time) error {
+func (f fakeRecomputer) Recompute(_ context.Context, project string, key process.Key, inputs []process.Input, site, view string, by time.Time) error {
 	if f.calls != nil {
-		*f.calls = append(*f.calls, recomputeCall{project, key, inputs, site, by})
+		*f.calls = append(*f.calls, recomputeCall{project, key, inputs, site, view, by})
 	}
 	return nil
 }
 
-// Recompute is offered for exact processes only: not for validated ones
-// even to a job that accepts them (its input would still name the recorded
+// Recompute is offered for exact processes, for validated ones only to a
+// job that accepts them (the queue points its input at the recompute's
 // output), and never for volatile ones.
 func TestRecomputeOffers(t *testing.T) {
 	for _, c := range []struct {
 		class  process.Class
 		accept bool
 		want   bool
-	}{{process.Exact, false, true}, {process.Validated, false, false}, {process.Validated, true, false}, {process.Volatile, true, false}} {
+	}{{process.Exact, false, true}, {process.Validated, false, false}, {process.Validated, true, true}, {process.Volatile, true, false}} {
 		p, _, _, _ := provider(t)
 		p.Recomputer = fakeRecomputer{}
 		p.Cost = func(_, output string, _ float64) (process.Key, []process.Input, process.Cost, bool) {
@@ -190,7 +191,7 @@ func TestRecomputeOffers(t *testing.T) {
 
 // A recompute stage moves what van lacks of the computation's inputs and
 // the job's other inputs (the plate), has the Recomputer rebuild fx at van
-// due when the stage's delay ends, and counts fx's objects as on their way
+// due when the stage's delay ends, and counts fx as on its way
 // until then: the job reads as staging, not as lacking fx.
 func TestStageRecompute(t *testing.T) {
 	p, _, w, c := provider(t)
@@ -221,7 +222,7 @@ func TestStageRecompute(t *testing.T) {
 		t.Fatalf("warm calls %+v, want the plate alone", w.calls)
 	}
 	due := c.t.Add(20 * time.Minute)
-	if len(calls) != 1 || calls[0].key != key || calls[0].site != "van" || !calls[0].by.Equal(due) || len(calls[0].inputs) != 1 || calls[0].inputs[0].View != "plates" {
+	if len(calls) != 1 || calls[0].key != key || calls[0].site != "van" || calls[0].view != "fx" || !calls[0].by.Equal(due) || len(calls[0].inputs) != 1 || calls[0].inputs[0].View != "plates" {
 		t.Fatalf("recompute calls %+v", calls)
 	}
 	s := p.Sources("show", inputs, "van", false)

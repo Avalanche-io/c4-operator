@@ -57,10 +57,11 @@ const LabelRecompute = "c4.avalanche.io/recompute"
 // errNotRerunnable is a recompute the record cannot carry out.
 var errNotRerunnable = errors.New("recompute")
 
-// Recompute starts a recompute of key's computation at site, due by.
+// Recompute starts a recompute of key's computation at site, rebuilding
+// view, due by.
 // It is idempotent: a recompute of the same computation at the same site
 // that exists already is left as it is.
-func (q *Queue) Recompute(ctx context.Context, project string, key process.Key, inputs []process.Input, site string, by time.Time) error {
+func (q *Queue) Recompute(ctx context.Context, project string, key process.Key, inputs []process.Input, site, view string, by time.Time) error {
 	b := q.bookOf(project)
 	if b == nil {
 		return fmt.Errorf("%w: project %s has no derivation record", errNotRerunnable, project)
@@ -100,7 +101,7 @@ func (q *Queue) Recompute(ctx context.Context, project string, key process.Key, 
 		return fmt.Errorf("%w: no pool of %s is at %s", errNotRerunnable, pr.Job, site)
 	}
 
-	j := recomputeJob(&src, pr.Unit, key, inputs, site, pools, by)
+	j := recomputeJob(&src, pr.Unit, key, inputs, site, view, pools, by)
 	switch err := q.Client.Create(ctx, j); {
 	case apierrors.IsAlreadyExists(err):
 		return nil
@@ -117,7 +118,7 @@ func (q *Queue) Recompute(ctx context.Context, project string, key process.Key, 
 }
 
 // recomputeJob is the WorkJob that reruns src's unit idx at site.
-func recomputeJob(src *c4v1.WorkJob, idx int, key process.Key, inputs []process.Input, site string, pools []string, by time.Time) *c4v1.WorkJob {
+func recomputeJob(src *c4v1.WorkJob, idx int, key process.Key, inputs []process.Input, site, view string, pools []string, by time.Time) *c4v1.WorkJob {
 	h := sha256.Sum256([]byte(key.Process + "\x00" + key.Inputs + "\x00" + site))
 	name := "rc-" + hex.EncodeToString(h[:])[:16]
 	readOnly := map[string]bool{}
@@ -131,6 +132,8 @@ func recomputeJob(src *c4v1.WorkJob, idx int, key process.Key, inputs []process.
 			Annotations: map[string]string{
 				AnnotationRecomputeUnit: strconv.Itoa(idx),
 				AnnotationRecomputeOf:   fmt.Sprintf("%s/%s#%d", src.Namespace, src.Name, idx),
+				AnnotationRecomputeView: view,
+				AnnotationRecomputeSite: site,
 			}},
 		Spec: c4v1.WorkJobSpec{Class: src.Spec.Class, Params: src.Spec.Params, Deadline: &deadline,
 			DeadlineMode: "Pinned", Pools: pools, Retries: src.Spec.Retries, NodeErrorLimit: src.Spec.NodeErrorLimit,

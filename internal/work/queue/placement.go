@@ -55,7 +55,9 @@ func (q *Queue) placeJobs(ctx context.Context, views []*view, pools map[string]*
 			if p == nil || p.site == "" {
 				continue
 			}
-			if srcs := q.Placement.Sources(v.project, inputs, p.site, accept); srcs != nil {
+			// At a site holding a substitute for an input, the job reads
+			// that (substitute.go).
+			if srcs := q.Placement.Sources(v.project, q.substitute(ctx, v, inputs, p.site), p.site, accept); srcs != nil {
 				if v.sources == nil {
 					v.sources = map[string][]sched.Source{}
 				}

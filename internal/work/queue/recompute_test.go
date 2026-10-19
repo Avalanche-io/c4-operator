@@ -48,14 +48,14 @@ func TestRecomputeRerunsTheProducingUnit(t *testing.T) {
 	}
 	pool := "cpu-" + ns
 	by := now.Add(40 * time.Minute)
-	if err := q.Recompute(ctx, project, key, inputs, "van", by); !errors.Is(err, errNotRerunnable) {
+	if err := q.Recompute(ctx, project, key, inputs, "van", "c4fxb", by); !errors.Is(err, errNotRerunnable) {
 		t.Fatalf("no pool at van: %v", err)
 	}
 	q.derivMu.Lock()
 	q.sites = map[string]string{pool: "van"}
 	q.derivMu.Unlock()
 	for range 2 { // the second finds it made
-		if err := q.Recompute(ctx, project, key, inputs, "van", by); err != nil {
+		if err := q.Recompute(ctx, project, key, inputs, "van", "c4fxb", by); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -156,7 +156,7 @@ func (r *reentrantPlacement) Site(*c4v1.Pool, []string) string { return "van" }
 func (r *reentrantPlacement) Sources(project string, in []process.Input, site string, _ bool) []sched.Source {
 	r.calls++
 	r.q.RecomputeCost(r.project, "c4fxb", 0.5)
-	if err := r.q.Recompute(context.Background(), r.project, r.key, r.inputs, site, time.Now().Add(time.Hour)); err != nil {
+	if err := r.q.Recompute(context.Background(), r.project, r.key, r.inputs, site, "c4fxb", time.Now().Add(time.Hour)); err != nil {
 		panic(err)
 	}
 	return nil

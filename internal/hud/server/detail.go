@@ -108,6 +108,10 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 	if hs := rec.job.Status.Holds; len(hs) > 0 {
 		out["holds"] = hs
 	}
+	if is := rec.job.Status.InputSubstitutes; len(is) > 0 {
+		// inputs read, at a site, as a validated recompute's output
+		out["inputSubstitutes"] = is
+	}
 	if is := rec.job.Status.Interruptions; len(is) > 0 {
 		out["interruptions"] = is
 		out["interrupted"] = rec.job.Status.Interrupted
