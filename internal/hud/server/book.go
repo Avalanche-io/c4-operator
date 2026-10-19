@@ -223,6 +223,14 @@ func (s *Server) statusEntries(rec *jobRec) []bookItem {
 		}
 		item(d.At.Time, "component/queue", api.SignerQueue, d.Kind, api.BookObject{Type: "unit", Job: rec.key, Unit: &u}, d.Record, msg)
 	}
+	for _, x := range st.Interruptions {
+		u := int(x.Unit)
+		msg := fmt.Sprintf("unit %d interrupted (%s): it spent no retry and runs again", u, x.Reason)
+		if x.Node != "" {
+			msg += "; it ran on " + x.Node
+		}
+		item(x.At.Time, "component/queue", api.SignerQueue, "interrupted", api.BookObject{Type: "unit", Job: rec.key, Unit: &u}, "", msg)
+	}
 	for _, y := range st.Yields {
 		u := int(y.Unit)
 		msg := fmt.Sprintf("unit %d yielded at a checkpoint: %s", u, y.Reason)

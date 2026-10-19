@@ -108,3 +108,47 @@ func TestInterruptedAttempts(t *testing.T) {
 		t.Fatalf("deleted: %+v", got.Status.Interruptions)
 	}
 }
+
+// A yield gives its attempt back, like an interruption: a unit that
+// yields twice runs its next attempt as attempt 1, with no failed
+// attempt counted, and it is never in backoff or retrying.
+func TestYieldIsNotAnAttempt(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 1)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "sh071", "ml", "cpu-"+ns, map[string]string{"estimateSeconds": "3600", "ranks": "1"}, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	for round := 0; round < 2; round++ {
+		if round > 0 {
+			// The next attempt resumes from the view the yield saved.
+			var m c4v1.Materialization
+			if err := k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: resumeName("sh071", 0)}, &m); err != nil {
+				t.Fatal(err)
+			}
+			m.Status.Phase, m.Status.ObservedGeneration = c4v1.PhaseReady, m.Generation
+			if err := k8s.Status().Update(ctx, &m); err != nil {
+				t.Fatal(err)
+			}
+			tick(t, q)
+		}
+		pods := unitPods(t, ns, "sh071")
+		if len(pods) != 1 || pods[0].Annotations[c4v1.AnnotationAttempt] != "1" {
+			t.Fatalf("round %d: pods %+v", round, pods)
+		}
+		p := &pods[0]
+		patch := client.MergeFrom(p.DeepCopy())
+		p.Annotations[c4v1.AnnotationYield] = "reclaim-nominal"
+		if err := k8s.Patch(ctx, p, patch); err != nil {
+			t.Fatal(err)
+		}
+		*now = now.Add(10 * time.Minute)
+		finish(t, p, corev1.PodSucceeded, *now, 10*time.Minute, map[string]string{c4v1.AnnotationOutputTree: viewID(fmt.Sprintf("ckpt-%d", round))})
+		tick(t, q)
+		got := get(t, ns, "sh071")
+		if got.Status.Attempts != "" || got.Status.Units.Backoff != 0 || got.Status.Units.Retrying != 0 || len(got.Status.Yields) != round+1 {
+			t.Fatalf("round %d: attempts %q, units %+v, yields %d", round, got.Status.Attempts, got.Status.Units, len(got.Status.Yields))
+		}
+		tick(t, q)
+	}
+}
