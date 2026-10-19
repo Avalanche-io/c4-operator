@@ -92,6 +92,9 @@ type Queue struct {
 	fcal      finishCals
 	shareHist map[string]bool
 	calp      calPersist
+	// durations are recent unit run times by project and class, the
+	// prior for work with no history of its own (classprior.go).
+	durations map[string]classDurations
 	// profiles are the latest finished job's durations per project, shot,
 	// class and unit key (history.go).
 	profiles map[profileKey]*shotProfile
@@ -759,6 +762,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			if !m.succeeded[idx] {
 				m.succeeded[idx] = true
 				m.millis[idx] = runMillis(p, now)
+				q.noteDuration(v.project, v.job.Spec.Class, float64(m.millis[idx])/1000)
 				m.ended[idx] = finishOf(p, now)
 				if tree := p.Annotations[c4v1.AnnotationOutputTree]; tree != "" {
 					m.unitOut[idx] = tree
@@ -872,6 +876,18 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		}
 	}
 	unitPriors(e, plan, hasPrior)
+	if plan.Prior == nil && len(byKey) == 0 {
+		// No guess from the job and no shot history: what the class's
+		// units took in the project, rather than the class default.
+		if p, ok := q.classPrior(v.project, v.job.Spec.Class); ok {
+			for _, u := range plan.Units {
+				if !hasPrior[u.Key] {
+					e.SetPrior(u.Key, p)
+					hasPrior[u.Key] = true
+				}
+			}
+		}
+	}
 	noteExpansions(e, plan, v.mem)
 	idxs := make([]int, 0, len(v.mem.millis))
 	for i := range v.mem.millis {

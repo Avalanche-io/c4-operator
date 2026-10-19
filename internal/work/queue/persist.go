@@ -64,6 +64,9 @@ type calRecord struct {
 	// Derivations is the project's record of derivations (derive.go), so
 	// the verification it has earned survives a restart. Experimental.
 	Derivations *process.BookSnapshot `json:"derivations,omitempty"`
+	// Durations are the project's recent unit run times by class, in
+	// seconds (classprior.go).
+	Durations map[string][]float64 `json:"durations,omitempty"`
 }
 
 // classCalibration is one class's calibrations: of the remaining work
@@ -178,6 +181,20 @@ func (q *Queue) restoreProject(rec *calRecord) {
 	q.fcal.init()
 	if rec.Derivations != nil && q.book(rec.Project).Len() == 0 {
 		q.books[rec.Project] = process.RestoreBook(*rec.Derivations)
+	}
+	for class, ds := range rec.Durations {
+		// The stored window first, then what ran since the start.
+		if q.durations == nil {
+			q.durations = map[string]classDurations{}
+		}
+		if q.durations[rec.Project] == nil {
+			q.durations[rec.Project] = classDurations{}
+		}
+		w := append(append([]float64(nil), ds...), q.durations[rec.Project][class]...)
+		if len(w) > classDurKept {
+			w = w[len(w)-classDurKept:]
+		}
+		q.durations[rec.Project][class] = w
 	}
 	for class, cc := range rec.Classes {
 		k := [2]string{rec.Project, class}
@@ -366,6 +383,12 @@ func (q *Queue) calRecordOf(project string, now time.Time) calRecord {
 	if b := q.books[project]; b != nil && b.Len() > 0 {
 		s := b.Snapshot()
 		rec.Derivations = &s
+	}
+	if d := q.durations[project]; len(d) > 0 {
+		rec.Durations = map[string][]float64{}
+		for class, w := range d {
+			rec.Durations[class] = append([]float64(nil), w...)
+		}
 	}
 	return rec
 }

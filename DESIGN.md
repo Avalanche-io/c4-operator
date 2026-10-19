@@ -1699,6 +1699,15 @@ historical failure rate instead, so a broken change fails fast).
   region's median, else the job's median, else a prior from the project's
   history for that class key, else the class default. Each class picks its
   key: pass for render, test target for CI, steps and step time for ML.
+  For a job with no `estimateSeconds`, no shot profile and no derivation of
+  its units, the project's history is the class's recent units in the
+  project: the median of their last 256 run times, with a robust spread
+  (the median absolute deviation as a standard deviation, at least a
+  quarter of the median), else those of projects that share history in
+  aggregate. The window is saved with the project's calibrations. The
+  class default (render ten minutes a frame) is left for a farm that has
+  run nothing of the class. Before this, a quickstart `c4 farm submit` of
+  eight frames was estimated ready 25 minutes after it was done.
 - **The previous version of the shot.** A job labeled with a shot
   (`c4.avalanche.io/shot`) is estimated from the durations of the last job
   of that shot in its project to have succeeded, frame by frame and pass by

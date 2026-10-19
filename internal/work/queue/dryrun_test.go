@@ -130,3 +130,35 @@ func TestSucceededJobCalibratesFinish(t *testing.T) {
 		t.Fatal("no finish scores after the job succeeded")
 	}
 }
+
+// With no history of its own and no estimateSeconds, a job starts from
+// what its class's units took in its project, not from the class default:
+// after a render job of six-second frames, a new one is estimated at six
+// seconds a frame, where the default says ten minutes.
+func TestDryRunFromClassHistory(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	ctx := context.Background()
+	tick(t, q)
+	draft := job(ns, "sh500", "render", "cpu-"+ns, map[string]string{"frames": "1-8"}, now.Add(4*time.Hour))
+	before, err := q.DryRun(ctx, draft, "namespace/"+ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if before.Estimate.W < 8*500 {
+		t.Fatalf("with no history: W %v, want the class default (about 8 x 600)", before.Estimate.W)
+	}
+	if err := k8s.Create(ctx, job(ns, "sh499", "render", "cpu-"+ns, map[string]string{"frames": "1-4"}, now.Add(4*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	runAll(t, q, now, ns, "sh499", 6*time.Second, func(i int) string { return "" })
+	after, err := q.DryRun(ctx, draft, "namespace/"+ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if after.Estimate.W < 8*4 || after.Estimate.W > 8*10 {
+		t.Fatalf("after six-second frames: W %v, want about 8 x 6", after.Estimate.W)
+	}
+	if !after.Band.At(0.5).Before(before.Band.At(0.5)) {
+		t.Fatalf("the band did not come in: %v then %v", before.Band.At(0.5), after.Band.At(0.5))
+	}
+}
