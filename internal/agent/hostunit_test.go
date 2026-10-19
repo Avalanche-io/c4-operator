@@ -200,3 +200,24 @@ func TestHostControlDocs(t *testing.T) {
 		t.Fatalf("output-verdict %q, want %s; output-expand %q", pod.Annotations[c4v1.AnnotationOutputVerdict], vid, pod.Annotations[c4v1.AnnotationOutputExpand])
 	}
 }
+
+// A pod the queue deletes (a disruption) keeps its finalizer until the
+// queue records it: the runner stops the member at a turn boundary and
+// gives the pod its phase, Yielded with its checkpoint, before deleting it.
+func TestHostDeletedPodYieldsFirst(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	e.register("lead", sess)
+	p := hostPod()
+	now := metav1.Now()
+	p.DeletionTimestamp, p.Finalizers = &now, []string{"c4.avalanche.io/unit"}
+	r, c := hostRunner(t, e, p)
+	r.seen[p.UID] = true
+	if err := r.handle(ctx, getPod(t, c)); err != nil {
+		t.Fatal(err)
+	}
+	got := getPod(t, c)
+	if got.Status.Phase != corev1.PodSucceeded || got.Status.Reason != "Yielded" || !strings.Contains(got.Status.Message, "deleted") {
+		t.Fatalf("pod %s %s %q", got.Status.Phase, got.Status.Reason, got.Status.Message)
+	}
+}

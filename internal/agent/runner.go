@@ -268,6 +268,10 @@ func point(m *Member, cp *Checkpoint) string {
 }
 
 func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
+	why := p.Annotations[c4v1.AnnotationYield]
+	if why == "" {
+		why = "the pod was deleted"
+	}
 	if _, ok := r.asked[p.UID]; !ok {
 		r.asked[p.UID] = r.now()
 	}
@@ -283,9 +287,9 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 					return err
 				}
 			}
-			r.logf("stopped %s mid-turn after %s waiting for a turn boundary (%s)", m.Name, r.HardStopAfter, p.Annotations[c4v1.AnnotationYield])
+			r.logf("stopped %s mid-turn after %s waiting for a turn boundary (%s)", m.Name, r.HardStopAfter, why)
 			return r.finish(ctx, p, corev1.PodSucceeded, "StoppedMidTurn",
-				"stopped mid-turn after waiting "+r.HardStopAfter.String()+" for a turn boundary: "+p.Annotations[c4v1.AnnotationYield], 0)
+				"stopped mid-turn after waiting "+r.HardStopAfter.String()+" for a turn boundary: "+why, 0)
 		}
 		r.logf("%s still busy; will try again", m.Name)
 		return nil
@@ -304,16 +308,25 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 			return err
 		}
 	}
-	r.logf("yielded %s (%s)", m.Name, p.Annotations[c4v1.AnnotationYield])
-	return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "yielded at a turn boundary: "+p.Annotations[c4v1.AnnotationYield], 0)
+	r.logf("yielded %s (%s)", m.Name, why)
+	return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "yielded at a turn boundary: "+why, 0)
 }
 
-// deleted handles a pod the queue stopped without a yield: the member
-// still stops at a turn boundary if it reaches one in time, and the pod
-// is then removed.
+// deleted handles a pod the queue deleted without a yield (a disruption,
+// a hard stop): the member stops at a turn boundary, its pod is given its
+// phase (Yielded with its checkpoint, as a yield is), and only then is the
+// pod removed. The unit-pod finalizer keeps a deleting pod until the queue
+// has recorded how it ended, so while the member is still mid-turn the
+// runner tries again next tick; the farm's stop also reaches it at its
+// next safe point (the decision relay).
 func (r *Runner) deleted(ctx context.Context, p *corev1.Pod, m *Member) error {
-	if _, err := r.Harness.Yield(ctx, m.Name, r.YieldTimeout); err != nil && !errors.Is(err, ErrBusy) {
-		return err
+	if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
+		if err := r.yield(ctx, p, m); err != nil {
+			return err
+		}
+		if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
+			return nil // still mid-turn
+		}
 	}
 	zero := int64(0)
 	err := r.Client.Delete(ctx, p, &client.DeleteOptions{GracePeriodSeconds: &zero})
