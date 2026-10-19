@@ -21,7 +21,7 @@ var Version = "dev"
 
 // Instructions are sent to clients when they connect.
 const Instructions = `This server operates a render, CI and ML farm on Kubernetes, the same farm the HUD shows. Jobs are named namespace/name.
-Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in with c4_submit_job (dry_run first). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), or take or accept them (c4_acknowledge_units). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
+Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in with c4_submit_job (dry_run first). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), take or accept them (c4_acknowledge_units), or decide what waits for a person, a ruling or an escalated unit (c4_decide). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
 Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. Costs: c4_approve_capacity provisions paid burst capacity.`
 
 func boolPtr(b bool) *bool { return &b }
@@ -98,6 +98,8 @@ func Tools(c *Client) []Tool {
 			destructive, c.requeue),
 		tool("c4_acknowledge_units", "Take, assign or accept failed units", "Say a person has failed units in hand so the farm stops asking: acknowledge (you take them), assign (to assignee), or accept (the failure stands; the units count as done, so nothing waits on them). Recorded with who and when, and signed in the book. A requeue clears it. Units is a set like \"14\" or \"0-9,14\"; only failed units are taken.",
 			idempotent, c.acknowledge),
+		tool("c4_decide", "Decide what waits for a person", "Decide a job's wait for a person (a ruling, an approval, an outside party's answer): do is approve, one of the wait's choices, or fail. Or decide a unit a review escalated: accept (it stands), rework (it runs again) or fail. The job's waits, and whether each holds up work, are in c4_job_detail. Signed and recorded in the book.",
+			idempotent, c.decide),
 		tool("c4_avoid_node", "Avoid or allow a node for a job", "Keep a job's units off a node (a bad worker for that job), or allow it again.",
 			idempotent, c.avoidNode),
 		tool("c4_disable_node", "Disable or enable a node", "Take a node out of service for the whole farm (running units finish) or put it back.",
@@ -659,6 +661,25 @@ func (c *Client) acknowledge(ctx context.Context, _ *mcp.CallToolRequest, in Ack
 		body["note"] = in.Note
 	}
 	return c.control(ctx, p+"/ack", body)
+}
+
+type DecideIn struct {
+	JobRef
+	Unit string `json:"unit" jsonschema:"the waiting unit's name or index"`
+	Do   string `json:"do" jsonschema:"approve, one of the wait's choices, or fail; for an escalated unit accept, rework or fail"`
+	Note string `json:"note,omitempty" jsonschema:"why, for the book"`
+}
+
+func (c *Client) decide(ctx context.Context, _ *mcp.CallToolRequest, in DecideIn) (*mcp.CallToolResult, Done, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, Done{}, err
+	}
+	body := map[string]any{"unit": in.Unit, "do": in.Do}
+	if in.Note != "" {
+		body["note"] = in.Note
+	}
+	return c.control(ctx, p+"/decide", body)
 }
 
 type AvoidIn struct {

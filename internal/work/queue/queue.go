@@ -200,6 +200,9 @@ type jobMem struct {
 	acks      []*ackRecord
 	acked     string
 	decisions []decisionRecord
+	// waits are the job's wait units and escalated units, open and
+	// decided (wait.go).
+	waits     *waitMem
 	jobRecord string
 	lastRun   time.Time
 	readyAt   time.Time
@@ -264,6 +267,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	}
 	m.requeued = st.Requeued
 	m.loadAcks(st)
+	m.loadWaits(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
 		m.yields = append(m.yields, yieldRecord{Unit: int(y.Unit), At: y.At.Time, Reason: y.Reason, View: y.View})
@@ -370,9 +374,12 @@ type view struct {
 	// waiting are units blocked on units of their own job, and stuck
 	// those that wait on a failed one (graph.go); planWait says why the
 	// unit table could not be rebuilt yet.
-	waiting  []int
-	stuck    map[int]bool
-	planWait string
+	waiting []int
+	stuck   map[int]bool
+	// openWaits are the wait units whose units are done, waiting for
+	// their decision (wait.go).
+	openWaits map[int]bool
+	planWait  string
 }
 
 type runInfo struct {
@@ -562,6 +569,8 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	}
 	// People taking or accepting failed units.
 	applyAcks(j, m, len(plan.Units))
+	// People deciding what waits for them (wait.go).
+	applyDecides(j, m, now)
 	// Nodes a person allowed again leave the automatic blacklist.
 	for _, n := range strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",") {
 		if n = strings.TrimSpace(n); n != "" && m.blacklist[n] {
@@ -769,6 +778,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		}
 	}
 	v.runnable, v.waiting, v.stuck = unitWaits(plan, m, v)
+	q.serveWaits(v, now)
 	q.estimate(v, now)
 	return v
 }
@@ -818,7 +828,8 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		queued = append(queued, unit(idx))
 	}
 	for _, idx := range v.waiting {
-		if !v.stuck[idx] {
+		// a wait unit holds no slot: its time is on the critical path only
+		if !v.stuck[idx] && !isWait(plan, idx) {
 			queued = append(queued, unit(idx))
 		}
 	}
@@ -841,7 +852,13 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		if !v.stuck[idx] {
 			u := plan.Units[idx]
 			rem[idx] = e.Predict(u.Key, u.Pos).Mean
+			if isWait(plan, idx) {
+				rem[idx] = waitRemaining(plan, v.mem, idx, now)
+			}
 		}
+	}
+	for idx := range v.openWaits {
+		rem[idx] = waitRemaining(plan, v.mem, idx, now)
 	}
 	for idx, r := range v.running {
 		u := plan.Units[idx]

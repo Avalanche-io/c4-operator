@@ -166,3 +166,78 @@ func TestAckControl(t *testing.T) {
 		t.Fatal("unit 9 is not in the detail")
 	}
 }
+
+// A person decides a wait: the HUD signs the decision and writes it as a
+// request the queue carries out; the job's summary shows its waits, a
+// blocking one as needing the person. A decision on nothing open, an
+// unknown choice, and the wrong kind for an escalated unit are refused.
+func TestDecideControl(t *testing.T) {
+	s := farm(t)
+	ctx := context.Background()
+	rec := s.m.byKey["show-a/sh040-light-v007"]
+	since := metav1.NewTime(time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC))
+	rec.job.Status.UnitStates = map[string]string{"succeeded": "0-7", "waits": "8", "blocked": "9"}
+	rec.job.Status.Waits = []c4v1.WorkWait{
+		{Unit: 8, Name: "ruling", Server: "person:owner", Ask: "split the chapter?", Choices: []string{"split", "keep"}, Since: &since, ExpectSeconds: 46080, Blocking: true},
+		{Unit: 7, Name: "f7", Server: "person:lead", Escalated: true, Since: &since},
+	}
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c4v1.AddToScheme(scheme)
+	s.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(rec.job.DeepCopy()).Build()
+	post := func(body string) (int, string) {
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/show-a/sh040-light-v007/decide?as=wrangler", strings.NewReader(body)))
+		return w.Code, w.Body.String()
+	}
+	for body, want := range map[string]int{
+		`{"unit": "nothing", "do": "approve"}`: http.StatusConflict,
+		`{"unit": "ruling", "do": "approve"}`:  http.StatusBadRequest, // not one of its choices
+		`{"unit": "f7", "do": "approve"}`:      http.StatusBadRequest, // escalated: accept, rework or fail
+		`{"unit": "ruling"}`:                   http.StatusBadRequest,
+	} {
+		if code, out := post(body); code != want {
+			t.Errorf("%s: %d %s, want %d", body, code, out, want)
+		}
+	}
+	if code, out := post(`{"unit": "ruling", "do": "split", "note": "two lanes"}`); code != http.StatusOK {
+		t.Fatalf("decide: %d %s", code, out)
+	}
+	if code, out := post(`{"unit": 7, "do": "rework"}`); code != http.StatusOK {
+		t.Fatalf("decide escalated: %d %s", code, out)
+	}
+	var live c4v1.WorkJob
+	if err := s.Client.Get(ctx, client.ObjectKey{Namespace: "show-a", Name: "sh040-light-v007"}, &live); err != nil {
+		t.Fatal(err)
+	}
+	var reqs []c4v1.WorkDecideRequest
+	if err := json.Unmarshal([]byte(live.Annotations[c4v1.AnnotationDecide]), &reqs); err != nil || len(reqs) != 2 {
+		t.Fatalf("requests: %v %s", err, live.Annotations[c4v1.AnnotationDecide])
+	}
+	if reqs[0].Unit != "ruling" || reqs[0].Do != "split" || reqs[0].Actor != "dana" || reqs[0].Note != "two lanes" || reqs[1].Unit != "f7" || reqs[1].Do != "rework" {
+		t.Fatalf("requests: %+v", reqs)
+	}
+
+	var snap api.Snapshot
+	get(t, s, "/api/v1/snapshot?as=wrangler", &snap)
+	for _, j := range snap.Jobs {
+		if j.Name != "sh040-light-v007" {
+			continue
+		}
+		if len(j.Waits) != 2 || !j.Waits[0].NeedsYou || j.Waits[0].WaitsFor != "person:owner" || !j.Waits[1].NeedsYou || !j.Waits[1].Escalated || j.UnitStates.Waits != "8" {
+			t.Fatalf("summary waits %+v, states %+v", j.Waits, j.UnitStates)
+		}
+	}
+	var detail struct {
+		UnitList []struct {
+			I     int    `json:"i"`
+			State string `json:"state"`
+		} `json:"unitList"`
+	}
+	get(t, s, "/api/v1/jobs/show-a/sh040-light-v007?as=wrangler", &detail)
+	for _, u := range detail.UnitList {
+		if u.I == 8 && u.State != "waits" {
+			t.Fatalf("unit 8 is %s, want waits", u.State)
+		}
+	}
+}

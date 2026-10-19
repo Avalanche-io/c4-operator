@@ -182,6 +182,8 @@ type Counts struct {
 	Backoff   int `json:"backoff,omitempty"`
 	Egress    int `json:"egress,omitempty"`
 	Accepted  int `json:"accepted,omitempty"`
+	// Waits counts wait units waiting for their decision ("waits for").
+	Waits int `json:"waits,omitempty"`
 }
 
 type States struct {
@@ -196,6 +198,7 @@ type States struct {
 	Backoff     string `json:"backoff,omitempty"`
 	Egress      string `json:"egress,omitempty"`
 	Accepted    string `json:"accepted,omitempty"`
+	Waits       string `json:"waits,omitempty"`
 }
 
 type Objective struct {
@@ -365,6 +368,10 @@ type Job struct {
 	NeedsPerson *NeedsPerson `json:"needsPerson,omitempty"`
 	// Acks are the standing acknowledgements of failed units.
 	Acks []Ack `json:"acks,omitempty"`
+	// Waits are what the job waits for: its wait units (a ruling, an
+	// approval, an outside party, a clock) and units a review escalated,
+	// open and decided.
+	Waits []Wait `json:"waits,omitempty"`
 }
 
 // NeedsPerson says why a job waits on a person, and since when.
@@ -537,4 +544,31 @@ type Capacity struct {
 	EstCost      float64   `json:"estCost"`
 	State        string    `json:"state"`
 	PrewarmViews []string  `json:"prewarmViews"`
+}
+
+// Wait is one thing a job waits for (PRIMITIVES Q6; the HUD word is
+// "waits for"). A person's open wait that holds up work needs them (red);
+// one that holds up nothing yet is pale.
+type Wait struct {
+	Unit int    `json:"unit"`
+	Name string `json:"name,omitempty"`
+	// WaitsFor is person:<id>, party:<name> or clock:<time>.
+	WaitsFor  string     `json:"waitsFor"`
+	Ask       string     `json:"ask,omitempty"`
+	Choices   []string   `json:"choices,omitempty"`
+	Escalated bool       `json:"escalated,omitempty"`
+	Since     *time.Time `json:"since,omitempty"`
+	// ExpectSeconds is the expected wait in all, from the server's measured
+	// decisions, else the unit's own figure.
+	ExpectSeconds int64 `json:"expectSeconds,omitempty"`
+	Blocking      bool  `json:"blocking,omitempty"`
+	// NeedsYou: a person's open wait that holds up work, or a unit a
+	// review escalated to them.
+	NeedsYou bool `json:"needsYou,omitempty"`
+	// Decision, once made.
+	Do     string     `json:"do,omitempty"`
+	Note   string     `json:"note,omitempty"`
+	Actor  string     `json:"actor,omitempty"`
+	At     *time.Time `json:"at,omitempty"`
+	Record string     `json:"record,omitempty"`
 }

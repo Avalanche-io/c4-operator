@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -93,6 +94,50 @@ type DocUnit struct {
 	Holds   []string          `json:"holds,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
 	Cites   json.RawMessage   `json:"cites,omitempty"`
+	// Wait makes the unit a wait for a person, a party or a clock.
+	Wait *DocWait `json:"wait,omitempty"`
+}
+
+// DocWait is a wait unit's server: person:<id>, party:<name> or
+// clock:<RFC 3339 time>; predicate:<unit> is designed, not built.
+type DocWait struct {
+	Server  string   `json:"server"`
+	Ask     string   `json:"ask,omitempty"`
+	Expect  float64  `json:"expect,omitempty"` // seconds
+	Choices []string `json:"choices,omitempty"`
+}
+
+// docWait checks a document's wait and turns it into the unit's.
+func docWait(name string, w *DocWait, planned bool) (*Wait, error) {
+	if planned {
+		return nil, fmt.Errorf("unit %s is both a wait and planned (a generator)", name)
+	}
+	if w.Expect < 0 {
+		return nil, fmt.Errorf("unit %s: negative expect", name)
+	}
+	kind, who, _ := strings.Cut(w.Server, ":")
+	out := &Wait{Server: w.Server, Ask: w.Ask, Expect: w.Expect, Choices: w.Choices}
+	switch {
+	case who == "":
+		return nil, fmt.Errorf("unit %s waits for %q: want person:<id>, party:<name> or clock:<time>", name, w.Server)
+	case kind == "person" || kind == "party":
+	case kind == "clock":
+		t, err := time.Parse(time.RFC3339, who)
+		if err != nil {
+			return nil, fmt.Errorf("unit %s waits for a clock at %q: %v", name, who, err)
+		}
+		out.At = t
+	case kind == "predicate":
+		return nil, fmt.Errorf("unit %s waits for a predicate: predicate waits are designed, not built", name)
+	default:
+		return nil, fmt.Errorf("unit %s waits for %q: want person:<id>, party:<name> or clock:<time>", name, w.Server)
+	}
+	for _, c := range w.Choices {
+		if c == "" || c == "fail" {
+			return nil, fmt.Errorf("unit %s: a choice may not be empty or fail", name)
+		}
+	}
+	return out, nil
 }
 
 // DocInput is a fromUnit input.
@@ -177,6 +222,13 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 		}
 		if du.Work < 0 || du.WorkSD < 0 {
 			return nil, fmt.Errorf("unit %s: negative work", du.Name)
+		}
+		if du.Wait != nil {
+			w, err := docWait(du.Name, du.Wait, du.Planned)
+			if err != nil {
+				return nil, err
+			}
+			u.Wait = w
 		}
 		for _, a := range du.After {
 			j, ok := resolve(a)

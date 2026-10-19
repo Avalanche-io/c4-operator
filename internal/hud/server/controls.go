@@ -575,3 +575,115 @@ func jsonMap(v any) (map[string]any, error) {
 	var out map[string]any
 	return out, json.Unmarshal(b, &out)
 }
+
+// handleDecide is POST /jobs/{ns}/{name}/decide: a person decides what
+// waits for them (PRIMITIVES Q6): a wait unit (a ruling, an approval, an
+// outside party's answer: do approve, one of its choices, or fail), or a
+// unit a review escalated (do accept, rework or fail). The decision is
+// signed first; its record's C4 ID goes with the request, so the queue's
+// status.waits names it.
+func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
+	_, rec, v := s.job(w, r)
+	if rec == nil {
+		return
+	}
+	var body struct {
+		Unit json.RawMessage `json:"unit"`
+		Do   string          `json:"do"`
+		Note string          `json:"note"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, "body: %v", err)
+		return
+	}
+	var ref string
+	if err := json.Unmarshal(body.Unit, &ref); err != nil {
+		var n int
+		if err := json.Unmarshal(body.Unit, &n); err != nil {
+			fail(w, http.StatusBadRequest, "unit: a unit's name or index")
+			return
+		}
+		ref = strconv.Itoa(n)
+	}
+	var wait *c4v1.WorkWait
+	for i := range rec.job.Status.Waits {
+		ww := &rec.job.Status.Waits[i]
+		if ww.Do == "" && (ww.Name == ref || strconv.Itoa(int(ww.Unit)) == ref) {
+			wait = ww
+		}
+	}
+	if wait == nil {
+		fail(w, http.StatusConflict, "nothing open waits for a decision as unit %q", ref)
+		return
+	}
+	switch {
+	case body.Do == "":
+		fail(w, http.StatusBadRequest, "do: the decision")
+		return
+	case wait.Escalated && body.Do != "accept" && body.Do != "rework" && body.Do != "fail":
+		fail(w, http.StatusBadRequest, "do: accept, rework or fail, for a unit a review escalated")
+		return
+	case !wait.Escalated && len(wait.Choices) > 0 && body.Do != "fail" && !slices.Contains(wait.Choices, body.Do):
+		fail(w, http.StatusBadRequest, "do: one of %s, or fail", strings.Join(wait.Choices, ", "))
+		return
+	}
+	ctx := r.Context()
+	if err := s.authorize(ctx, r, v, rec.job.Namespace, "patch", "workjobs", rec.job.Name); err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
+	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
+	if err != nil {
+		fail(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
+	if j.Annotations == nil {
+		j.Annotations = map[string]string{}
+	}
+	now := time.Now()
+	unit := wait.Name
+	if unit == "" {
+		unit = strconv.Itoa(int(wait.Unit))
+	}
+	change := map[string]any{"unit": unit, "do": body.Do, "waitsFor": wait.Server}
+	if body.Note != "" {
+		change["note"] = body.Note
+	}
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "decide", change)
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
+	var reqs []c4v1.WorkDecideRequest
+	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationDecide]), &reqs)
+	reqs = append(reqs, c4v1.WorkDecideRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Do: body.Do,
+		Note: body.Note, Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
+	if len(reqs) > 16 {
+		reqs = reqs[len(reqs)-16:]
+	}
+	b, _ := json.Marshal(reqs)
+	j.Annotations[c4v1.AnnotationDecide] = string(b)
+	if err := s.Client.Patch(ctx, j, patch); err != nil {
+		fail(w, http.StatusConflict, "%v", err)
+		return
+	}
+	msg := fmt.Sprintf("%s: %s decided %s (%s)", j.Name, unit, body.Do, strings.TrimPrefix(wait.Server, "person:"))
+	note := msg
+	if id != "" {
+		note += "; record " + shortID(id)
+	}
+	if via(r) == "mcp" {
+		note += "; via MCP"
+	}
+	s.record(ctx, j, "WorkJob", v.User, "Decided", note, bookNote{actor: actorOf(r, v), kind: "decide", record: id})
+	m := s.current()
+	rec2 := *rec
+	rec2.job = *j
+	out := map[string]any{"ok": true, "message": msg, "job": s.jobSummary(m, &rec2)}
+	if id != "" {
+		out["record"] = id
+	}
+	writeJSON(w, http.StatusOK, out)
+}

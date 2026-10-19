@@ -84,6 +84,12 @@ const (
 	// The queue carries out each request once (status.acked) and records
 	// it in status.acks.
 	AnnotationAcks = "c4.avalanche.io/acks"
+	// AnnotationDecide on a WorkJob carries people's decisions on what
+	// waits for them: its wait units (a ruling, an approval, an outside
+	// party's answer) and units a review escalated. A JSON list of
+	// WorkDecideRequest; the queue carries out each once, in token order
+	// (status.decided), and records it in status.waits.
+	AnnotationDecide = "c4.avalanche.io/decide"
 	// AnnotationPreflight on a unit pod reports the step it is preparing
 	// before the work starts: JSON {"step": "stage" | "fetch" | "image" |
 	// "license", "bytes": n, "of": n}. The node daemon and the class
@@ -311,6 +317,14 @@ type WorkJobStatus struct {
 	// accepted which failed units, and when. A requeue clears a unit's.
 	// +optional
 	Acks []WorkAck `json:"acks,omitempty"`
+	// Decided is the token of the last decision carried out
+	// (AnnotationDecide).
+	// +optional
+	Decided string `json:"decided,omitempty"`
+	// Waits are the job's waits, open and decided: its wait units, and
+	// units a review escalated to a person.
+	// +optional
+	Waits []WorkWait `json:"waits,omitempty"`
 	// Preemptions counts units stopped or asked to yield to make room.
 	// +optional
 	Preemptions int32 `json:"preemptions,omitempty"`
@@ -582,7 +596,9 @@ type UnitCounts struct {
 	Planned int32 `json:"planned,omitempty"`
 	// Flagged counts units a review escalated to a person.
 	// +optional
-	Flagged   int32 `json:"flagged,omitempty"`
+	Flagged int32 `json:"flagged,omitempty"`
+	// Waits counts wait units waiting for their decision.
+	Waits     int32 `json:"waits,omitempty"`
 	Queued    int32 `json:"queued,omitempty"`
 	Blocked   int32 `json:"blocked,omitempty"`
 	Preflight int32 `json:"preflight,omitempty"`
@@ -630,6 +646,9 @@ const (
 	// NeedsReview: a review unit escalated units to a person (they are
 	// flagged): requeue or accept them.
 	NeedsReview = "Review"
+	// NeedsDecision: a wait for a person (a ruling, an approval) holds up
+	// work that could otherwise run: decide it.
+	NeedsDecision = "Decision"
 	// NeedsQuota and NeedsPermission are reserved for a project's quota
 	// and an access block.
 	NeedsQuota      = "Quota"
@@ -652,6 +671,67 @@ type WorkAckRequest struct {
 	Note string      `json:"note,omitempty"`
 	At   metav1.Time `json:"at"`
 	// Record is the C4 ID of the signed control record.
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkDecideRequest is one decision in AnnotationDecide.
+type WorkDecideRequest struct {
+	// Token makes each request distinct; requests are carried out in
+	// token order (base-36 nanoseconds).
+	Token string `json:"token"`
+	// Unit is the unit decided, by name or index.
+	Unit string `json:"unit"`
+	// Do is the decision. On a wait unit: anything but fail completes it
+	// (approve, or one of its choices); fail fails it. On a unit a review
+	// escalated: accept (it stands), rework (it runs again) or fail.
+	Do string `json:"do"`
+	// +optional
+	Note  string      `json:"note,omitempty"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// Record is the C4 ID of the signed decision record.
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkWait is a unit that waits for someone or something: a person, an
+// outside party, or a clock. It holds no slot.
+type WorkWait struct {
+	Unit int32 `json:"unit"`
+	// +optional
+	Name string `json:"name,omitempty"`
+	// Server is who or what it waits for: person:<id>, party:<name> or
+	// clock:<time>.
+	Server string `json:"server"`
+	// +optional
+	Ask string `json:"ask,omitempty"`
+	// Choices are the decisions that complete it, besides fail (none: any).
+	// +optional
+	Choices []string `json:"choices,omitempty"`
+	// Escalated: the unit is one a review escalated, waiting for a
+	// person's decision on it.
+	// +optional
+	Escalated bool `json:"escalated,omitempty"`
+	// Since is when it opened: every unit it runs after was done.
+	// +optional
+	Since *metav1.Time `json:"since,omitempty"`
+	// ExpectSeconds is how long it is expected to wait in all, from the
+	// server's measured decisions in this job, else the unit's own figure.
+	// +optional
+	ExpectSeconds int64 `json:"expectSeconds,omitempty"`
+	// Blocking: unfinished work waits on it.
+	// +optional
+	Blocking bool `json:"blocking,omitempty"`
+	// The decision, once made.
+	// +optional
+	Do string `json:"do,omitempty"`
+	// +optional
+	Note string `json:"note,omitempty"`
+	// +optional
+	Actor string `json:"actor,omitempty"`
+	// +optional
+	At *metav1.Time `json:"at,omitempty"`
 	// +optional
 	Record string `json:"record,omitempty"`
 }

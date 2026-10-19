@@ -60,6 +60,24 @@ type Unit struct {
 	Group  string
 	Holds  []string
 	Params map[string]string
+	// Wait makes the unit a wait (PRIMITIVES Q6): it holds no slot and
+	// creates no pod; it completes on a signed decision, or at its time.
+	Wait *Wait
+}
+
+// Wait is what a wait unit waits for.
+type Wait struct {
+	// Server is person:<id>, party:<name> or clock:<RFC 3339 time>.
+	Server string
+	// Ask is the question, in plain words.
+	Ask string
+	// Expect is the expected wait in seconds, before the job has measured
+	// the server's own decisions (0: the queue's default).
+	Expect float64
+	// Choices, when set, are the decisions that complete it, besides fail.
+	Choices []string
+	// At is a clock wait's time.
+	At time.Time
 }
 
 // Axis describes the job's unit axis for the HUD.

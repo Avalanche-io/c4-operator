@@ -213,13 +213,29 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	u := st.Units
 	aj.Units = api.Counts{Total: int(u.Total), Queued: int(u.Queued), Blocked: int(u.Blocked), Running: int(u.Running),
 		Retrying: int(u.Retrying), Succeeded: int(u.Succeeded), Failed: int(u.Failed), Held: int(u.Held),
-		Preflight: int(u.Preflight), Backoff: int(u.Backoff), Egress: int(u.Egress), Accepted: int(u.Accepted)}
+		Preflight: int(u.Preflight), Backoff: int(u.Backoff), Egress: int(u.Egress), Accepted: int(u.Accepted), Waits: int(u.Waits)}
 	us := st.UnitStates
 	aj.UnitStates = api.States{Queued: us["queued"], Blocked: us["blocked"], Running: us["running"], Retrying: us["retrying"],
 		Succeeded: us["succeeded"], Failed: us["failed"], Preflight: us["preflight"], Backoff: us["backoff"],
-		Egress: us["egress"], Accepted: us["accepted"]}
+		Egress: us["egress"], Accepted: us["accepted"], Waits: us["waits"]}
 	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNeedsPerson); c != nil && c.Status == metav1.ConditionTrue {
 		aj.NeedsPerson = &api.NeedsPerson{Reason: strings.ToLower(c.Reason), Message: c.Message, Since: c.LastTransitionTime.Time.UTC()}
+	}
+	for _, w := range st.Waits {
+		aw := api.Wait{Unit: int(w.Unit), Name: w.Name, WaitsFor: w.Server, Ask: w.Ask, Choices: w.Choices, Escalated: w.Escalated,
+			ExpectSeconds: w.ExpectSeconds, Blocking: w.Blocking, Do: w.Do, Note: w.Note, Actor: w.Actor, Record: w.Record}
+		// a person's open wait that holds up work needs them; an escalated
+		// unit always does (it is flagged)
+		aw.NeedsYou = w.Do == "" && strings.HasPrefix(w.Server, "person:") && (w.Blocking || w.Escalated)
+		if w.Since != nil {
+			t := w.Since.Time.UTC()
+			aw.Since = &t
+		}
+		if w.At != nil {
+			t := w.At.Time.UTC()
+			aw.At = &t
+		}
+		aj.Waits = append(aj.Waits, aw)
 	}
 	for _, a := range st.Acks {
 		aj.Acks = append(aj.Acks, api.Ack{Kind: a.Kind, Units: a.Units, Actor: a.Actor, Assignee: a.Assignee, Note: a.Note,

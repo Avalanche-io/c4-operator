@@ -309,6 +309,11 @@ spec:
                   DeadlineSource says where Deadline comes from: spec (Pinned or
                   Tracking), suggested, or class (the class's objective).
                 type: string
+              decided:
+                description: |-
+                  Decided is the token of the last decision carried out
+                  (AnnotationDecide).
+                type: string
               decisions:
                 description: |-
                   Decisions lists the most recent preemptions and yields the queue
@@ -857,6 +862,10 @@ spec:
                   total:
                     format: int32
                     type: integer
+                  waits:
+                    description: Waits counts wait units waiting for their decision.
+                    format: int32
+                    type: integer
                 type: object
               verdicts:
                 description: |-
@@ -917,6 +926,69 @@ spec:
                   - at
                   - attempt
                   - document
+                  - unit
+                  type: object
+                type: array
+              waits:
+                description: |-
+                  Waits are the job's waits, open and decided: its wait units, and
+                  units a review escalated to a person.
+                items:
+                  description: |-
+                    WorkWait is a unit that waits for someone or something: a person, an
+                    outside party, or a clock. It holds no slot.
+                  properties:
+                    actor:
+                      type: string
+                    ask:
+                      type: string
+                    at:
+                      format: date-time
+                      type: string
+                    blocking:
+                      description: 'Blocking: unfinished work waits on it.'
+                      type: boolean
+                    choices:
+                      description: 'Choices are the decisions that complete it, besides
+                        fail (none: any).'
+                      items:
+                        type: string
+                      type: array
+                    do:
+                      description: The decision, once made.
+                      type: string
+                    escalated:
+                      description: |-
+                        Escalated: the unit is one a review escalated, waiting for a
+                        person's decision on it.
+                      type: boolean
+                    expectSeconds:
+                      description: |-
+                        ExpectSeconds is how long it is expected to wait in all, from the
+                        server's measured decisions in this job, else the unit's own figure.
+                      format: int64
+                      type: integer
+                    name:
+                      type: string
+                    note:
+                      type: string
+                    record:
+                      type: string
+                    server:
+                      description: |-
+                        Server is who or what it waits for: person:<id>, party:<name> or
+                        clock:<time>.
+                      type: string
+                    since:
+                      description: 'Since is when it opened: every unit it runs after
+                        was done.'
+                      format: date-time
+                      type: string
+                    unit:
+                      format: int32
+                      type: integer
+                  required:
+                  - server
                   - unit
                   type: object
                 type: array

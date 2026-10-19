@@ -1413,6 +1413,39 @@ and a sweep planner that spawns trials are all generators.
     and its standing override.
   - **Not built yet:** the estimate does not price expected rework before
     a verdict.
+- **Waits** (PRIMITIVES Q6; the HUD word is "waits for"). A wait is a
+  unit served by something other than a slot. A document's unit carries
+  `wait: {server, ask?, expect?, choices?}`, and `server` says what serves
+  it: `person:<id>`, `party:<name>` or `clock:<RFC 3339 time>`.
+  `predicate:<unit>` is designed and refused until it is built.
+  - **No pod.** A wait creates no pod, holds no slot, and is never handed
+    to the policy as runnable. Once every unit it runs after is done, it
+    is open (`unitStates.waits`, `units.waits`).
+  - **Decisions.** A person's or a party's wait completes on a decision:
+    `POST /jobs/{ns}/{name}/decide` or MCP `c4_decide`, signed first,
+    then written as a request in `c4.avalanche.io/decide` that the queue
+    carries out once, in token order. `do` is `approve`, one of the
+    wait's `choices`, or `fail`, which fails it. A clock's wait completes
+    at its time.
+  - **Estimate.** A wait adds its expected time to the critical path and
+    nothing to slot-seconds. The expected time is the median of the
+    job's decided waits for the same server, else the unit's `expect`,
+    else 12.8 hours, the median of Ra's owner rulings. A person is never
+    late in the queue's terms: the ETA moves, the slack shows it.
+  - **Needs you.** An open wait for a person that holds up unfinished
+    work sets NeedsPerson `Decision`, naming who. An open one that holds
+    up nothing yet is not a block.
+  - **Escalations are waits.** A unit a verdict escalated is a wait for
+    the person in `to`, with no change to the plan. A decision on it is
+    `accept` (it stands), `rework` (it runs again) or `fail`. Ra's third
+    send-back, `onExhausted: escalate:lead`, is the lead's ruling,
+    decided the same way.
+  - **Status.** `waits` lists the job's waits, open and decided, and
+    `decided` holds the last decision's token.
+  - **Scheduling gates are not used.** c4 creates a unit's pod only when
+    the unit may run (10.2), so a wait has no pod to gate. A gate is set
+    only at creation, and anyone who can update the pod may lift it, so
+    it would not be a lock either.
 
 ### 10.7 Objectives: every SLO becomes a deadline or a rate
 

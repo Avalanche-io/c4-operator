@@ -264,7 +264,10 @@ func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagge
 	case waiting > 0:
 		reason, msg = c4v1.NeedsFailed, fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", waiting)
 	case flagged > 0:
-		reason, msg = c4v1.NeedsReview, fmt.Sprintf("a review escalated %d units%s; requeue, take or accept them", flagged, escalatedTo(v.mem))
+		reason, msg = c4v1.NeedsReview, fmt.Sprintf("a review escalated %d units%s; decide, requeue, take or accept them", flagged, escalatedTo(v.mem))
+	case personWaitsBlockingN(v.mem) > 0:
+		n, who := personWaitsBlocking(v.mem)
+		reason, msg = c4v1.NeedsDecision, fmt.Sprintf("%d %s for %s's decision, and work waits on %s", n, plural(n, "unit waits", "units wait"), strings.Join(who, ", "), plural(n, "it", "them"))
 	case v.mem.planErr != nil || v.mem.plan == nil:
 		reason, msg = c4v1.NeedsStuck, "the job has no plan; fix its parameters"
 	case v.unschedulable != "":
