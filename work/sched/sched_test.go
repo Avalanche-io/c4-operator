@@ -904,6 +904,48 @@ func TestUnfittableGangHoldsNothingBack(t *testing.T) {
 	}
 }
 
+// TestGuaranteeHoldsOnlyItsPool: a gang of a project below its nominal
+// GPU quota, with deadline need, fits in neither the full GPU pool nor
+// the burst pool's one free slot. The guarantee holds the GPU pool, where
+// reclaim makes room for it; it does not block the larger burst pool,
+// which no quota covers, so that pool's free slot is backfilled rather
+// than left idle (the stress grid's work-conservation finding at g033).
+func TestGuaranteeHoldsOnlyItsPool(t *testing.T) {
+	ml := job("train", "rnd", 1, 20, 12*time.Hour)
+	ml.Pools, ml.SlotsPerUnit = []string{"gpu", "gpu-burst"}, 2
+	ml.Runnable[0].Slots = 2
+	ml.Estimate = estimate.Summary{W: 2 * 10 * 3600, W90: 2 * 10 * 3600, TPath: 10 * 3600}
+	other := job("other", "rnd", 0, 1, 48*time.Hour)
+	other.Pools = []string{"gpu"}
+	other.RunningUnits, other.Running = runningUnits("other", "gpu", 2, t0.Add(-time.Hour))
+	render := job("render", "show", 100, 20, 48*time.Hour)
+	render.Pools = []string{"gpu", "gpu-burst"}
+	gpuRun, _ := runningUnits("render", "gpu", 6, t0.Add(-time.Hour))
+	burstRun, _ := runningUnits("render-b", "gpu-burst", 11, t0.Add(-time.Hour))
+	render.RunningUnits = append(gpuRun, burstRun...)
+	render.Running = map[string]int{"gpu": 6, "gpu-burst": 11}
+	s := Snapshot{Now: t0,
+		Pools: []Pool{
+			{Name: "gpu", Slots: 8, Used: 8},
+			{Name: "gpu-burst", Slots: 12, Used: 11, CostPerSlotHour: 3},
+		},
+		Projects: []Project{
+			{Name: "rnd", Quotas: map[string]Quota{"gpu": {Nominal: 6, BorrowingLimit: -1}}},
+			{Name: "show", Quotas: map[string]Quota{"gpu": {Nominal: 2, BorrowingLimit: -1}}},
+		},
+		Jobs: []Job{ml, other, render}}
+	d := Decide(s, &State{}, DefaultConfig())
+	burst := 0
+	for _, x := range d.Dispatch {
+		if x.Pool == "gpu-burst" {
+			burst += x.Slots
+		}
+	}
+	if burst != 1 {
+		t.Fatalf("%d slots of the burst pool's 1 free slot were used; the guarantee held a pool it does not guarantee: %+v", burst, d.Dispatch)
+	}
+}
+
 // TestStarvingGangDrainsAfterDeadlineTier: a gang starving past
 // StarvationDeferMax that does not fit holds its pool only after the
 // deadline tier: a job due within hours still gets the free slots it
@@ -1212,6 +1254,74 @@ func TestShrunkPoolSparesJobsAtRisk(t *testing.T) {
 	}
 	if got := capacityPreempts(d); got["gang"] != 4 || got["late"] != 0 {
 		t.Fatalf("shed %v, want the gang and not the job at risk", got)
+	}
+}
+
+// Units of jobs on time go back when a larger unit of a job at risk has to
+// be shed anyway: 3 over, a 1-slot unit with no deadline and a 4-slot gang
+// of a job at risk. The 1-slot unit cannot cover it, the gang covers it
+// alone, and stopping both would shed 5 slots for 3 (stress g028, seed 2).
+func TestShrunkPoolGivesBackAcrossRisk(t *testing.T) {
+	free := job("free", "p", 0, 4, 0)
+	free.RunningUnits, free.Running = runningUnits("free", "cpu", 1, t0)
+	late := job("late", "p", 0, 30, 2*time.Hour)
+	late.SlotsPerUnit = 4
+	late.RunningUnits = []RunningUnit{{ID: "late/0", Pool: "cpu", Slots: 4, Started: t0.Add(-time.Hour)}}
+	late.Running = map[string]int{"cpu": 4}
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "cpu", Slots: 2, Used: 5}}, Jobs: []Job{free, late}}
+	d := Decide(s, &State{}, DefaultConfig())
+	if !d.Jobs["late"].AtRisk {
+		t.Fatalf("late is not at risk: %s", d.Jobs["late"].Message)
+	}
+	if got := capacityPreempts(d); got["late"] != 4 || got["free"] != 0 {
+		t.Fatalf("shed %v, want only the gang", got)
+	}
+}
+
+// Reclaim waits for a gang the plan does not need now, and takes room for
+// all of one it does. p is at 3 of nominal 5 with a 2-slot gang waiting
+// and a demand of 1; q borrows the rest of a full pool. With no required
+// slots now (R 0) the guarantee does not hold the pool for the gang, so a
+// slot taken back would be lent again (stress g022 and, once reclaim took
+// a gang's whole room, g030, seed 2): nothing is reclaimed. With R > 0
+// both slots are taken back, not the one the demand counts.
+func TestReclaimForGangs(t *testing.T) {
+	run := func(r float64) int {
+		t.Helper()
+		g := job("g", "p", 1, 2, 3*time.Hour)
+		g.SlotsPerUnit = 2
+		g.Runnable[0].Slots = 2
+		held := job("held", "p", 0, 8, 0)
+		held.RunningUnits, held.Running = runningUnits("held", "gpu", 3, t0.Add(-time.Hour))
+		b := job("b", "q", 0, 50, 0)
+		b.RunningUnits, b.Running = runningUnits("b", "gpu", 7, t0.Add(-5*time.Minute))
+		for _, x := range []*Job{&g, &held, &b} {
+			x.Pools = []string{"gpu"}
+		}
+		s := Snapshot{Now: t0, Pools: []Pool{{Name: "gpu", Slots: 10, Used: 10}},
+			Projects: []Project{
+				{Name: "p", Quotas: map[string]Quota{"gpu": {Nominal: 5, BorrowingLimit: -1}}},
+				{Name: "q", Quotas: map[string]Quota{"gpu": {Nominal: 1, BorrowingLimit: -1}}},
+			},
+			Jobs: []Job{g, held, b}}
+		a := newAlloc(&s, &State{}, DefaultConfig(), true)
+		a.projects["p"].demand["gpu"] = 1
+		a.byID["g"].R = r
+		a.byID["b"].slack = 48 * time.Hour
+		a.reclaim()
+		n := 0
+		for _, x := range a.out.Preempt {
+			if x.Reason == ReasonReclaim {
+				n += x.Slots
+			}
+		}
+		return n
+	}
+	if n := run(0); n != 0 {
+		t.Fatalf("reclaimed %d slots for a gang that can wait", n)
+	}
+	if n := run(1); n != 2 {
+		t.Fatalf("reclaimed %d slots for the gang, want 2", n)
 	}
 }
 

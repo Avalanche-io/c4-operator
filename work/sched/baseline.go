@@ -99,7 +99,7 @@ func baseline(s *Snapshot, st *State, cfg Config, less func(a *alloc, x, y *jobC
 		for jc.canRelease() && a.release(jc, TierBaseline, false, nil) {
 		}
 		if jc.canRelease() {
-			a.holdForGang(jc)
+			a.holdForGang(jc, nil)
 		}
 	}
 	if review {

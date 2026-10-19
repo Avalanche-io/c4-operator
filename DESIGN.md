@@ -1876,7 +1876,10 @@ overrides:
   are guaranteed when the pool is contended. Unused nominal slots are lent to
   others up to their borrowing limit. When the owner needs them back, the
   scheduler reclaims them by preempting the borrower's least valuable units
-  (section 10.13).
+  (section 10.13). For a gang it reclaims only when the plan needs the
+  gang now, and then room for all of it up to the quota left: a gang that
+  can wait does not hold its pool, so part of its room taken back would be
+  lent again.
 - **Gangs** are accounted as one unit with the sum of their members' slots.
   The queue releases a gang only when its pool has room for all of it. The
   co-placement itself (all members bound together, in one rack or fabric

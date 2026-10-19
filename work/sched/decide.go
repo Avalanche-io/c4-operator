@@ -299,7 +299,7 @@ func (a *alloc) starvation(first bool) {
 			a.gangsWaiting = append(a.gangsWaiting, jc)
 			continue
 		}
-		a.holdForGang(jc)
+		a.holdForGang(jc, nil)
 	}
 }
 
@@ -444,7 +444,7 @@ func (a *alloc) guarantee() {
 			for _, jc := range js {
 				for pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && a.release(jc, TierGuarantee, true, ps) {
 				}
-				if pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && jc.R > 0 && a.guaranteeFits(jc, ps) && a.holdForGang(jc) {
+				if pr.demand[pool] > 0 && pr.usage[pool] < a.quota(pr.p.Name, pool).Nominal && jc.R > 0 && a.guaranteeFits(jc, ps) && a.holdForGang(jc, ps) {
 					break
 				}
 			}

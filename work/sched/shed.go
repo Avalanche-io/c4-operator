@@ -17,7 +17,8 @@ import "sort"
 // restore cost), then ID. The fewest slots that cover the excess are
 // shed: units that fit what is left are taken in that order; if the rest
 // needs a larger unit, the most valuable-to-keep of the smaller ones
-// taken are given back as long as the excess stays covered. Only
+// taken are given back as long as the excess stays covered (units of jobs
+// on time too, when the rest is a unit of a job at risk). Only
 // preemptible jobs' units are shed; what non-preemptible units hold
 // stays over until they finish.
 //
@@ -73,7 +74,10 @@ func (a *alloc) shed() {
 		}
 		take := pickShed(calm, excess)
 		if got := victimSlots(take); got < excess {
-			take = append(take, pickShed(risky, excess-got)...)
+			// A larger unit at risk can cover what units on time were
+			// taken for: those go back, as in pickShed.
+			more := pickShed(risky, excess-got)
+			take = append(giveBack(take, got+victimSlots(more)-excess), more...)
 		}
 		for _, v := range take {
 			a.preemptUnit(v.jc, v.ru, ReasonCapacity, "")
@@ -104,12 +108,15 @@ func pickShed(vs []victim, excess int) []victim {
 	if left <= 0 || len(rest) == 0 {
 		return take
 	}
-	take = append(take, rest[0])
-	freed := excess - left + rest[0].ru.Slots
-	// Give back the most valuable (last chosen) while still covered.
-	for i := len(take) - 2; i >= 0; i-- {
-		if freed-take[i].ru.Slots >= excess {
-			freed -= take[i].ru.Slots
+	return append(giveBack(take, rest[0].ru.Slots-left), rest[0])
+}
+
+// giveBack drops from take (least valuable first) the most valuable units
+// whose slots fit in spare, the slots shed beyond the excess.
+func giveBack(take []victim, spare int) []victim {
+	for i := len(take) - 1; i >= 0 && spare > 0; i-- {
+		if take[i].ru.Slots <= spare {
+			spare -= take[i].ru.Slots
 			take = append(take[:i], take[i+1:]...)
 		}
 	}

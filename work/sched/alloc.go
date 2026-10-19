@@ -375,8 +375,12 @@ func (a *alloc) release(jc *jobCtx, tier Tier, ownOnly bool, only *poolState) bo
 
 // holdForGang reports whether the job's next unit is a gang that fits in
 // none of its pools right now, and if so blocks the largest of them so its
-// free slots accumulate for the gang instead of being backfilled.
-func (a *alloc) holdForGang(jc *jobCtx) bool {
+// free slots accumulate for the gang instead of being backfilled. only,
+// when set, is the one pool it may block: the guarantee holds the pool it
+// guarantees, where reclaim makes room for the gang, not a larger pool of
+// the job's (a burst pool, say) where no quota is reclaimed and the held
+// slots would only sit idle.
+func (a *alloc) holdForGang(jc *jobCtx, only *poolState) bool {
 	if !jc.canRelease() {
 		return false
 	}
@@ -392,6 +396,9 @@ func (a *alloc) holdForGang(jc *jobCtx) bool {
 		}
 		if ps.free >= k {
 			return false // it fits somewhere; not blocked by size
+		}
+		if only != nil && ps != only {
+			continue
 		}
 		if target == nil || ps.p.Slots > target.p.Slots {
 			target = ps

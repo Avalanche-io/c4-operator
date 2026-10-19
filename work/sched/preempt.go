@@ -12,7 +12,8 @@ import (
 //
 //   - reclaim: a project below its nominal quota in a pool, with jobs
 //     below their required rate there, takes slots back from projects
-//     borrowing above their nominal;
+//     borrowing above their nominal; for a gang only when the plan
+//     needs it now, and then room for all of it (up to the quota left);
 //   - feasibility: a job that is on time in the plan, is late at what it
 //     holds (max(W90/held, t_path) > T), and holds fewer than
 //     min(R, planned share) takes slots up to that number rounded down,
@@ -172,12 +173,27 @@ func (a *alloc) reclaim() {
 					continue
 				}
 				incoming += jc.incoming
-				if jc.canRelease() && allows(jc, pool) && (forJob == nil || jc.slack < forJob.slack) {
+				if !jc.canRelease() || !allows(jc, pool) {
+					continue
+				}
+				// A gang the plan does not need now waits: the guarantee
+				// holds a pool only for a gang with R > 0, so part of a
+				// gang's room taken back for any other would be lent
+				// again in the next decision.
+				if jc.unitSlots(jc.j.Runnable[jc.next]) > 1 && jc.R <= 0 {
+					continue
+				}
+				if forJob == nil || jc.slack < forJob.slack {
 					forJob = jc
 				}
 			}
-			want := min(q.Nominal-pr.usage[pool], pr.demand[pool]) - incoming - ps.free
-			if want <= 0 || forJob == nil {
+			if forJob == nil || pr.demand[pool] <= 0 {
+				continue
+			}
+			// A gang needs room for all of it.
+			need := max(pr.demand[pool], forJob.unitSlots(forJob.j.Runnable[forJob.next]))
+			want := min(q.Nominal-pr.usage[pool], need) - incoming - ps.free
+			if want <= 0 {
 				continue
 			}
 			borrowing := func(p *projState) bool {

@@ -40,7 +40,7 @@ var invariants = []struct{ name, what string }{
 	{"stage-delay", "the delay a stage expects is what its link delivers, behind what is already committed to it"},
 	{"burst-unjustified", "a burst pool's request grows only by automatically approved slots, and never past its limit"},
 	{"guard-preempt", "only a unit the starvation guard started is preempted as a guard unit"},
-	{"lend-then-reclaim", "a pool's free slots are not lent to a borrowing project in the same decision that preempts a borrower to restore another project's nominal quota"},
+	{"lend-then-reclaim", "a pool's free slots are not lent to a borrowing project (a starvation-guard start is not a lend) in the same decision that preempts a borrower to restore another project's nominal quota"},
 	{"churn-unit", "a unit is preempted at most MaxPreemptionsPerUnit times"},
 	{"churn-pool", "a pool sees at most PreemptPerWindow preemptions per PreemptWindow"},
 	{"churn-pingpong", "two jobs never trade slots back and forth (two reversals) within an hour"},
@@ -116,7 +116,7 @@ type view struct {
 	useBefore  map[string]map[string]int // project, pool
 	useAfter   map[string]map[string]int
 	useStarve  map[string]map[string]int // before plus the starvation tier's dispatches
-	useNeed    map[string]map[string]int // before plus the starvation and deadline tiers'
+	useNeed    map[string]map[string]int // before plus the starvation, deadline and guarantee tiers'
 	sent       map[string]int            // units dispatched per job
 	sentTier   map[string]sched.Tier
 	byPoolTier map[string]map[sched.Tier]int
@@ -165,14 +165,22 @@ func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 		}
 	}
 	// Deadline demand as sched computes it before planning: R = W90 over
-	// the time left (less the critical path), not the planned R.
+	// the time left (less the critical path), not the planned R. Slots
+	// being freed for a job by earlier preemptions count toward it, as
+	// sched counts them (incoming).
+	incoming := map[string]int{}
+	for id, forJob := range c.incoming {
+		if u := c.e.byID[id]; u != nil && u.state == stRunning {
+			incoming[forJob] += u.spec.slots
+		}
+	}
 	for i := range s.Jobs {
 		j := &s.Jobs[i]
 		r := c.perJobR(s, d, j)
 		if j.Hold || j.HoldStop || r <= 0 {
 			continue
 		}
-		running := 0
+		running := incoming[j.ID]
 		for _, n := range j.Running {
 			running += n
 		}
@@ -203,7 +211,16 @@ func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 		if x.Tier == sched.TierStarvation {
 			v.useStarve[j.Project][x.Pool] += x.Slots
 		}
-		if x.Tier == sched.TierStarvation || x.Tier == sched.TierNeed {
+		// The guarantee tier runs between the deadline passes, before the
+		// guard serves a starving job that could wait (Decide), and
+		// checkStarvation already counts its slots as gone ahead. Leaving
+		// its units out of the use a deferred job is admitted against
+		// made the check think a project still had nominal quota the
+		// guarantee had just given to another of its jobs, and flag a
+		// job as starved of a slot its project could no longer take
+		// (past a borrowing limit, or held for another project's
+		// guaranteed need).
+		if x.Tier == sched.TierStarvation || x.Tier == sched.TierNeed || x.Tier == sched.TierGuarantee {
 			v.useNeed[j.Project][x.Pool] += x.Slots
 		}
 		v.sent[x.Job]++
@@ -430,9 +447,13 @@ func (c *checker) dump(v *view, job, detail string) {
 	}
 	for _, j := range v.s.Jobs {
 		st := v.d.Jobs[j.ID]
-		fmt.Fprintf(w, "job %s %-4s pools %v run %v runnable %d/%d blocked %d hold %v/%v due %s since %s sent %d | R %.2f share %.2f risk %v late %s rank %d W90 %.0f tpath %.0f | %s\n",
-			j.ID, j.Project, j.Pools, j.Running, len(j.Runnable), j.RunnableTotal, j.Blocked, j.Hold, j.HoldStop, j.Deadline.Format("Mon 15:04"),
-			v.s.Now.Sub(since(&j)).Round(time.Minute), v.sent[j.ID], st.Required, st.Share, st.AtRisk, st.LateBy.Round(time.Minute), st.Rank, j.Estimate.W90, j.Estimate.TPath, st.Message)
+		next := max(1, j.SlotsPerUnit)
+		if len(j.Runnable) > 0 && j.Runnable[0].Slots > 0 {
+			next = j.Runnable[0].Slots
+		}
+		fmt.Fprintf(w, "job %s %-4s pools %v run %v runnable %d/%d (next %d slots) blocked %d hold %v/%v due %s since %s sent %d | R0 %.2f R %.2f share %.2f risk %v late %s rank %d W90 %.0f tpath %.0f | %s\n",
+			j.ID, j.Project, j.Pools, j.Running, len(j.Runnable), j.RunnableTotal, next, j.Blocked, j.Hold, j.HoldStop, j.Deadline.Format("Mon 15:04"),
+			v.s.Now.Sub(since(&j)).Round(time.Minute), v.sent[j.ID], c.perJobR(v.s, v.d, &j), st.Required, st.Share, st.AtRisk, st.LateBy.Round(time.Minute), st.Rank, j.Estimate.W90, j.Estimate.TPath, st.Message)
 	}
 	for _, x := range v.d.Dispatch {
 		fmt.Fprintf(w, "dispatch %s %s %s %d %s\n", x.Job, x.Unit, x.Pool, x.Slots, x.Tier)
@@ -706,7 +727,10 @@ func (c *checker) checkQuotas(v *view) {
 // checkLendReclaim flags a decision that lends a pool's slots to a
 // project above its nominal quota and also preempts in that pool to
 // reclaim nominal quota for another project: the lent slot is what the
-// reclaim had to take back.
+// reclaim had to take back. A starvation-guard start is not a lend: the
+// guard gives a job one unit regardless of quota order (DESIGN.md 10.9),
+// so a borrower's guard unit and a reclaim for another project can share
+// a decision by design.
 func (c *checker) checkLendReclaim(v *view) {
 	reclaim := map[string]sched.Preempt{}
 	for _, x := range v.d.Preempt {
@@ -719,7 +743,7 @@ func (c *checker) checkLendReclaim(v *view) {
 	}
 	for _, x := range v.d.Dispatch {
 		rc, ok := reclaim[x.Pool]
-		if !ok || !v.hasQuota[x.Pool] {
+		if !ok || !v.hasQuota[x.Pool] || x.Tier == sched.TierStarvation {
 			continue
 		}
 		u := c.e.byID[x.Unit]
