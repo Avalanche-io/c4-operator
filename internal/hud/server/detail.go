@@ -20,6 +20,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 	"github.com/Avalanche-io/c4-operator/work/order"
@@ -94,7 +95,12 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 	case "ml":
 		groupKey, groupLabel = "ranks", "ranks"
 	}
-	out["groups"] = []map[string]any{{"key": groupKey, "label": groupLabel, "units": "0-" + strconv.Itoa(n-1)}}
+	groups, unitGroup := unitGroups(plan, groupKey, groupLabel)
+	out["groups"] = groups
+	if n <= 5000 {
+		out["edges"] = unitEdges(plan)
+	}
+	out["expansions"] = expansionList(&rec.job.Status)
 
 	states := unitStateMap(&rec.job.Status, n)
 	attempts := parseAttempts(rec.job.Status.Attempts)
@@ -135,8 +141,17 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if held && st == "queued" {
 			st = "held"
 		}
-		e := map[string]any{"i": i, "label": u.Label, "state": st, "attempts": max(attempts[i], boolInt(st != "queued" && st != "held" && st != "blocked")),
-			"group": groupKey, "pos": u.Pos}
+		e := map[string]any{"i": i, "label": u.Label, "state": st, "attempts": max(attempts[i], boolInt(st != "queued" && st != "held" && st != "blocked" && st != "planned")),
+			"group": unitGroup[i], "pos": u.Pos}
+		if u.Name != "" {
+			e["name"] = u.Name
+		}
+		if u.Depth > 0 {
+			e["parent"] = u.Parent
+		}
+		if u.Exists > 0 && u.Exists < 1 {
+			e["exists"] = u.Exists
+		}
 		if works != nil {
 			e["work"] = works[i]
 		}
@@ -324,7 +339,7 @@ func unitStateMap(st *c4v1.WorkJobStatus, n int) []string {
 	for i := range out {
 		out[i] = "queued"
 	}
-	for _, name := range []string{"blocked", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "succeeded"} {
+	for _, name := range []string{"planned", "blocked", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "succeeded"} {
 		idx, _ := order.DecodeSet(st.UnitStates[name])
 		for _, i := range idx {
 			if i >= 0 && i < n {
@@ -775,4 +790,83 @@ func orDefault(s, def string) string {
 		return def
 	}
 	return s
+}
+
+// unitGroups is the job's rows: the groups the units' documents name
+// (an expansion's group field), in first-seen order, and one row of the
+// class's kind for the rest. A group made by one generator's expansion
+// names it as generator and its group as parent.
+func unitGroups(plan *class.Plan, key, label string) ([]map[string]any, []string) {
+	of := make([]string, len(plan.Units))
+	members := map[string][]int{}
+	var order []string
+	for i, u := range plan.Units {
+		g := u.Group
+		if g == "" {
+			g = key
+		}
+		of[i] = g
+		if _, ok := members[g]; !ok {
+			order = append(order, g)
+		}
+		members[g] = append(members[g], i)
+	}
+	var out []map[string]any
+	for _, g := range order {
+		x := map[string]any{"key": g, "label": g, "units": order2set(members[g])}
+		if g == key {
+			x["label"] = label
+		}
+		gens := map[int]bool{}
+		for _, i := range members[g] {
+			if u := plan.Units[i]; u.Depth > 0 {
+				gens[u.Parent] = true
+			}
+		}
+		if len(gens) == 1 {
+			for p := range gens {
+				x["generator"] = p
+				if pg := of[p]; pg != g {
+					x["parent"] = pg
+				}
+			}
+		}
+		out = append(out, x)
+	}
+	return out, of
+}
+
+func order2set(idx []int) string { return order.EncodeSet(idx) }
+
+// unitEdges is the job's unit-level dependencies.
+func unitEdges(plan *class.Plan) []map[string]any {
+	out := []map[string]any{}
+	for _, u := range plan.Units {
+		for _, a := range u.After {
+			out = append(out, map[string]any{"from": a, "to": u.Index})
+		}
+	}
+	return out
+}
+
+// expansionList is the generators evaluated, for the HUD to animate.
+func expansionList(st *c4v1.WorkJobStatus) []map[string]any {
+	out := []map[string]any{}
+	for _, x := range st.Expansions {
+		e := map[string]any{"generator": x.Unit, "at": x.At.Time.UTC(), "document": x.Document}
+		if x.Units > 0 {
+			idx := make([]int, x.Units)
+			for k := range idx {
+				idx[k] = int(x.First) + k
+			}
+			e["children"] = order.EncodeSet(idx)
+		} else {
+			e["children"] = ""
+		}
+		if x.Error != "" {
+			e["error"] = x.Error
+		}
+		out = append(out, e)
+	}
+	return out
 }

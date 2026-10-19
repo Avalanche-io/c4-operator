@@ -426,6 +426,10 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 	d.Log.Info("captured", "pod", vol.Namespace+"/"+vol.Pod, "output", res.Output.String(),
 		"changeset", changeset, "added", res.Added, "modified", res.Modified, "deleted", res.Deleted,
 		"uploaded", res.Uploaded, "reused", res.Reused, "seconds", time.Since(start).Seconds())
+	docs, err := storeControlDocs(ctx, d.sink(pc), p.Name, upper)
+	if err != nil {
+		return fmt.Errorf("capture %s/%s: %w", vol.Namespace, vol.Pod, err)
+	}
 	record := ""
 	if d.Cfg.Signer != nil && !res.Changeset.IsNil() {
 		id, err := d.signRecord(ctx, pc, vol, res, start)
@@ -439,13 +443,13 @@ func (d *Daemon) runCapture(ctx context.Context, vol *Volume) error {
 			record = id.String()
 		}
 	}
-	return d.annotate(ctx, vol, res, record)
+	return d.annotate(ctx, vol, res, record, docs)
 }
 
 // annotate records a capture on its pod. The node daemon's admission
 // policy lets it change only c4.avalanche.io/output-*, preflight and
 // egress annotations, and only on pods bound to its own node.
-func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result, record string) error {
+func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result, record string, docs map[string]string) error {
 	var pod corev1.Pod
 	err := d.Kube.Get(ctx, types.NamespacedName{Namespace: vol.Namespace, Name: vol.Pod}, &pod)
 	if apierrors.IsNotFound(err) {
@@ -468,6 +472,9 @@ func (d *Daemon) annotate(ctx context.Context, vol *Volume, res *capture.Result,
 	}
 	if record != "" {
 		ann[c4v1.AnnotationOutputProvenance] = record
+	}
+	for k, id := range docs {
+		ann[k] = id
 	}
 	patch := map[string]any{"metadata": map[string]any{"annotations": ann}}
 	data, _ := json.Marshal(patch)

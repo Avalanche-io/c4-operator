@@ -1348,6 +1348,39 @@ and a sweep planner that spawns trials are all generators.
 - **Order.** Unevaluated generators carry information the scheduler needs,
   so a job's generators are evaluated ahead of its concrete units of equal
   standing (section 10.9), the same reasoning as sampling frames early.
+- **Built.** The controller carries out the file form; the chunk form is not
+  built yet.
+  - At capture the node daemon stores `.c4/expand.json` (the control
+    directory is never part of the output) and names it on the pod
+    (`c4.avalanche.io/output-expand`). When the generator succeeds, the queue
+    reads the document, `class.Expand` turns it into units (a class may
+    override the plain reading, `class.ExpandDocument`), and their indexes
+    follow the table's last.
+  - The document, version 1, gives each unit a `name`, a `label` and a
+    `key`; `after` (names in the document or already in the job); a `work`
+    prior with `workSD`; `exists`; `planned` (itself a generator); `env`;
+    `inputs` (`fromUnit` mounts a unit's captured output read-only, and is
+    also an edge); and `slots`. The document's `dependents` is `"all"` or a
+    list of names. `group`, `holds`, `params` and `cites` are carried for
+    the HUD, for claims and for the record. A document with a bad version,
+    a name used twice, an edge to a name the job lacks, a cycle, or nesting
+    deeper than `maxExpandDepth` (4) is refused whole: the generator fails
+    and the refusal is listed.
+  - Each expansion is signed (decision/v1, kind `expand`, naming the
+    document) and listed in status `expansions`, so a restart replays the
+    same documents from the store to the same table.
+  - A unit runs once every unit in its `after` has succeeded or been
+    accepted. Until then it is `blocked`, and a generator that has not run
+    is `planned`. A unit waiting on a failed one is stuck, and counts with it
+    when the job's phase is decided.
+  - The estimate carries unevaluated generators as the fan-out model
+    (section 10.8) and weights tentative work by `exists`. The critical
+    path runs through the unit graph.
+  - The table is bounded at 50,000 units; the store-backed table of
+    section 10.5 is not built.
+  - The `graph` class is a job whose plan is one generator (a plan
+    importer, test discovery, a sweep planner); its units run the job's
+    template, told apart by `$C4_UNIT_NAME` and their `env`.
 
 ### 10.7 Objectives: every SLO becomes a deadline or a rate
 

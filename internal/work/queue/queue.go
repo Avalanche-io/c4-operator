@@ -7,6 +7,7 @@ package queue
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -152,20 +153,27 @@ func (q *Queue) Start(ctx context.Context) error {
 // jobMem is what the queue knows about a job beyond its pods. It is
 // written to status every tick and rebuilt from status on start.
 type jobMem struct {
-	plan      *class.Plan
-	planGen   int64
-	planErr   error
-	succeeded map[int]bool
-	failed    map[int]bool
-	attempts  map[int]int // attempts made, including the running one
-	millis    map[int]int64
-	out       *output
-	foldedPod map[types.UID]bool
-	outLoad   string // the stored chain to load before the next fold
-	outIndex  string // the stored provenance index to load before the next fold
-	launched  map[int]time.Time
-	nodeFails map[string]int
-	blacklist map[string]bool
+	key     string // namespace/name
+	plan    *class.Plan
+	planGen int64
+	planErr error
+	// expansions are the generators evaluated, in order; docs caches
+	// their documents; unitOut is each succeeded unit's captured output
+	// view, for units that read it (graph.go).
+	expansions []expansionRec
+	docs       map[string][]byte
+	unitOut    map[int]string
+	succeeded  map[int]bool
+	failed     map[int]bool
+	attempts   map[int]int // attempts made, including the running one
+	millis     map[int]int64
+	out        *output
+	foldedPod  map[types.UID]bool
+	outLoad    string // the stored chain to load before the next fold
+	outIndex   string // the stored provenance index to load before the next fold
+	launched   map[int]time.Time
+	nodeFails  map[string]int
+	blacklist  map[string]bool
 	// resume holds, per unit, the view a yielded attempt captured: the
 	// next attempt mounts it and continues from its checkpoint.
 	resume map[int]string
@@ -213,7 +221,7 @@ func newMem() *jobMem {
 	return &jobMem{succeeded: map[int]bool{}, failed: map[int]bool{}, accepted: map[int]bool{}, attempts: map[int]int{},
 		millis: map[int]int64{}, launched: map[int]time.Time{}, nodeFails: map[string]int{}, blacklist: map[string]bool{},
 		resume: map[int]string{}, yieldAsked: map[int]time.Time{}, preemptions: map[int]int{},
-		out: newOutput(), foldedPod: map[types.UID]bool{}, ended: map[int]time.Time{}}
+		out: newOutput(), foldedPod: map[types.UID]bool{}, ended: map[int]time.Time{}, unitOut: map[int]string{}}
 }
 
 // yieldRecord is one yield of a checkpointing unit.
@@ -271,6 +279,15 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 			m.resume[i] = view
 		}
 	}
+	for _, x := range st.Expansions {
+		m.expansions = append(m.expansions, expansionRec{Unit: int(x.Unit), First: int(x.First), Units: int(x.Units),
+			Doc: x.Document, Record: x.Record, Error: x.Error, At: x.At.Time})
+	}
+	for k, view := range st.UnitOutputs {
+		if i, err := strconv.Atoi(k); err == nil {
+			m.unitOut[i] = view
+		}
+	}
 	for _, n := range st.Blacklist {
 		if !slices.Contains(spec.AvoidNodes, n) {
 			m.blacklist[n] = true
@@ -323,6 +340,12 @@ type view struct {
 	sources map[string][]sched.Source
 	// safe is each running unit's last safe point (safepoint.go).
 	safe map[int]Safepoint
+	// waiting are units blocked on units of their own job, and stuck
+	// those that wait on a failed one (graph.go); planWait says why the
+	// unit table could not be rebuilt yet.
+	waiting  []int
+	stuck    map[int]bool
+	planWait string
 }
 
 type runInfo struct {
@@ -463,9 +486,22 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		return v
 	}
 	v.driver = d
+	m.key = v.key
 	if m.plan == nil || m.planGen != j.Generation {
-		m.plan, m.planErr = d.Plan(j)
-		m.planGen = j.Generation
+		p, err := q.planJob(ctx, v)
+		var loading errLoading
+		switch {
+		case errors.As(err, &loading):
+			// The store did not give back an expansion document yet: keep
+			// the table as it was, or wait for one.
+			v.planWait = loading.Error()
+			q.Log.Error(err, "plan", "job", v.key)
+			if m.plan == nil {
+				return v
+			}
+		default:
+			m.plan, m.planErr, m.planGen = p, err, j.Generation
+		}
 	}
 	if m.planErr != nil {
 		return v
@@ -575,10 +611,27 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				v.done = append(v.done, p)
 				continue
 			}
+			if !m.succeeded[idx] && !m.failed[idx] && plan.Units[idx].Generator && !m.expanded(idx) {
+				ok, refused := q.expand(ctx, v, idx, p, now)
+				if !ok {
+					v.finishing[idx] = true
+					continue
+				}
+				if refused {
+					// A document the queue refused adds nothing: the
+					// generator failed, and a person must act.
+					m.failed[idx] = true
+					v.done = append(v.done, p)
+					continue
+				}
+			}
 			if !m.succeeded[idx] {
 				m.succeeded[idx] = true
 				m.millis[idx] = runMillis(p, now)
 				m.ended[idx] = finishOf(p, now)
+				if tree := p.Annotations[c4v1.AnnotationOutputTree]; tree != "" {
+					m.unitOut[idx] = tree
+				}
 				q.recordDerivation(ctx, v, idx, p, m.millis[idx])
 			}
 			v.done = append(v.done, p)
@@ -639,15 +692,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			m.started = now
 		}
 	}
-	for _, idx := range plan.Order {
-		if m.succeeded[idx] || m.failed[idx] || v.finishing[idx] {
-			continue
-		}
-		if _, ok := v.running[idx]; ok {
-			continue
-		}
-		v.runnable = append(v.runnable, idx)
-	}
+	v.runnable, v.waiting, v.stuck = unitWaits(plan, m, v)
 	q.estimate(v, now)
 	return v
 }
@@ -664,12 +709,16 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	for key, byPos := range byKey {
 		e.SetProfile(key, byPos)
 	}
+	hasPrior := map[string]bool{}
 	if plan.Prior != nil {
 		for _, u := range plan.Units {
 			e.SetPrior(u.Key, *plan.Prior)
+			hasPrior[u.Key] = true
 			break
 		}
 	}
+	unitPriors(e, plan, hasPrior)
+	noteExpansions(e, plan, v.mem)
 	idxs := make([]int, 0, len(v.mem.millis))
 	for i := range v.mem.millis {
 		idxs = append(idxs, i)
@@ -681,29 +730,52 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	}
 	var queued []estimate.Unit
 	var run []estimate.RunningUnit
-	for _, idx := range v.runnable {
+	unit := func(idx int) estimate.Unit {
 		u := plan.Units[idx]
-		queued = append(queued, estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots})
+		eu := estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots, Exists: u.Exists}
+		if u.Generator && !v.mem.expanded(idx) {
+			eu.Gen = u.Key
+		}
+		return eu
+	}
+	for _, idx := range v.runnable {
+		queued = append(queued, unit(idx))
+	}
+	for _, idx := range v.waiting {
+		if !v.stuck[idx] {
+			queued = append(queued, unit(idx))
+		}
 	}
 	for idx, r := range v.running {
-		u := plan.Units[idx]
-		ru := estimate.RunningUnit{Unit: estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots},
-			Elapsed: math.Max(0, now.Sub(r.started).Seconds())}
+		ru := estimate.RunningUnit{Unit: unit(idx), Elapsed: math.Max(0, now.Sub(r.started).Seconds())}
 		if pod := v.pods[idx]; pod != nil {
 			ru.Progress, _ = q.Progress.Get(pod.Namespace, pod.Name, now)
 		}
 		run = append(run, ru)
 	}
 	s := e.Summarize(queued, run)
-	// No unit depends on another within these classes, so the critical
-	// path is the longest single remaining unit.
-	for _, qu := range queued {
-		s.TPath = math.Max(s.TPath, e.Predict(qu.Key, qu.Pos).Mean)
+	// The critical path is the longest chain of remaining work through
+	// the unit graph; without edges, the longest single remaining unit.
+	rem := map[int]float64{}
+	for _, idx := range v.runnable {
+		u := plan.Units[idx]
+		rem[idx] = e.Predict(u.Key, u.Pos).Mean
 	}
-	for _, ru := range run {
-		rem, _ := e.RemainderAt(e.Predict(ru.Key, ru.Pos), 0, ru.Elapsed, ru.Progress)
-		s.TPath = math.Max(s.TPath, rem)
+	for _, idx := range v.waiting {
+		if !v.stuck[idx] {
+			u := plan.Units[idx]
+			rem[idx] = e.Predict(u.Key, u.Pos).Mean
+		}
 	}
+	for idx, r := range v.running {
+		u := plan.Units[idx]
+		var progress float64
+		if pod := v.pods[idx]; pod != nil {
+			progress, _ = q.Progress.Get(pod.Namespace, pod.Name, now)
+		}
+		rem[idx], _ = e.RemainderAt(e.Predict(u.Key, u.Pos), 0, math.Max(0, now.Sub(r.started).Seconds()), progress)
+	}
+	s.TPath = criticalPath(plan, v.mem, rem, func(key string) float64 { return e.Generator(key).Longest })
 	v.sum, v.est = s, e
 	v.mem.notePoint(now, len(v.mem.millis), len(plan.Units), s)
 }
@@ -775,8 +847,9 @@ func schedJob(v *view, free int) sched.Job {
 	// sched propagates deadlines up the dependency graph and starts a
 	// waiting job no earlier than its upstream jobs finish (sched.Job.After).
 	j.After = v.after
+	j.Blocked = len(v.waiting) - len(v.stuck)
 	if v.blocked {
-		j.Blocked = len(v.runnable)
+		j.Blocked += len(v.runnable)
 	} else {
 		j.RunnableTotal = len(v.runnable)
 		k := min(len(v.runnable), free/max(1, j.SlotsPerUnit)+1)
@@ -802,7 +875,7 @@ func schedJob(v *view, free int) sched.Job {
 
 func isFinished(v *view) bool {
 	plan := v.mem.plan
-	return plan != nil && len(v.mem.succeeded)+len(v.mem.failed) >= len(plan.Units) && len(v.running) == 0
+	return plan != nil && len(v.mem.succeeded)+len(v.mem.failed)+len(v.stuck) >= len(plan.Units) && len(v.running) == 0
 }
 
 // act creates pods for dispatched units and stops preempted ones.
@@ -846,6 +919,16 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			ready, err := q.ensureResume(ctx, v.job, idx, view)
 			if err != nil {
 				q.Log.Error(err, "resume materialization", "job", key, "unit", idx)
+				continue
+			}
+			if !ready {
+				continue
+			}
+		}
+		if len(v.mem.plan.Units[idx].Inputs) > 0 {
+			ready, err := q.ensureUnitInputs(ctx, v, idx)
+			if err != nil {
+				q.Log.Error(err, "unit input", "job", key, "unit", idx)
 				continue
 			}
 			if !ready {
@@ -1041,6 +1124,17 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		for c := range pod.Spec.Containers {
 			pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
 				corev1.VolumeMount{Name: name, MountPath: in.MountPath, ReadOnly: in.ReadOnly})
+		}
+	}
+	for k, in := range u.Inputs {
+		// Another unit's output, read-only (graph.go).
+		name, ro := fmt.Sprintf("c4-unit-input-%d", k), true
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: name, VolumeSource: corev1.VolumeSource{
+			CSI: &corev1.CSIVolumeSource{Driver: c4v1.DriverName, ReadOnly: &ro,
+				VolumeAttributes: map[string]string{c4v1.VolumeAttrMaterialization: unitInputName(j.Name, in.From), c4v1.VolumeAttrClass: j.Spec.Class}}}})
+		for c := range pod.Spec.Containers {
+			pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
+				corev1.VolumeMount{Name: name, MountPath: in.MountPath, ReadOnly: true})
 		}
 	}
 	if r, ok := v.driver.(class.Resumer); ok && v.mem.resume[idx] != "" {

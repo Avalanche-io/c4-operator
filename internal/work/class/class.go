@@ -33,6 +33,33 @@ type Unit struct {
 	Info bool
 	// Env is added to every container of the unit's pod.
 	Env []corev1.EnvVar
+
+	// The unit graph (DESIGN 10.6). Name names the unit within the job,
+	// for edges and inputs; the class may leave it empty. After lists the
+	// units that must succeed first, by index.
+	Name  string
+	After []int
+	// Generator: when the unit succeeds, the expansion document it wrote
+	// adds units under it. Until it has run it is planned.
+	Generator bool
+	// Exists is the probability the unit runs (0 means 1). It weights the
+	// unit's expected work; the unit still runs when its turn comes.
+	Exists float64
+	// Parent is the generator whose expansion added the unit, and Depth
+	// how deeply nested it is; at Depth 0 the class planned it and Parent
+	// means nothing.
+	Parent, Depth int
+	// Inputs mount other units' captured output views; each is also in
+	// After.
+	Inputs []UnitInput
+	// Work and WorkSD are a prior for the unit's work in slot-seconds (0:
+	// none), from the document that added it.
+	Work, WorkSD float64
+	// Group (the HUD row), Holds (paths the unit writes, for claims) and
+	// Params (facts from its plan) are carried from the document.
+	Group  string
+	Holds  []string
+	Params map[string]string
 }
 
 // Axis describes the job's unit axis for the HUD.

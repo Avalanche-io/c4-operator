@@ -1,0 +1,101 @@
+package class
+
+import (
+	"slices"
+	"strings"
+	"testing"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+)
+
+func graphJob(params map[string]string) *c4v1.WorkJob {
+	return &c4v1.WorkJob{Spec: c4v1.WorkJobSpec{Class: "graph", Params: params}}
+}
+
+// A generator's document becomes children after it, with sibling edges,
+// fromUnit inputs (also edges), and the generator's dependents rewired.
+func TestExpandDocument(t *testing.T) {
+	d, err := Lookup("graph")
+	if err != nil {
+		t.Fatal(err)
+	}
+	job := graphJob(nil)
+	p, err := d.Plan(job)
+	if err != nil || len(p.Units) != 1 || !p.Units[0].Generator || p.Units[0].Name != "plan" {
+		t.Fatalf("plan %+v %v", p, err)
+	}
+	// A unit planned after the root (as a class may), to see it rewired.
+	p.Units = append(p.Units, Unit{Index: 1, Name: "report", After: []int{0}, Slots: 1})
+	p.Order = append(p.Order, 1)
+	doc := `{"version": 1, "dependents": "all", "units": [
+		{"name": "deep", "work": 600, "group": "layers"},
+		{"name": "beauty", "after": ["deep"], "inputs": [{"fromUnit": "deep", "mountPath": "/deep"}], "env": {"PASS": "beauty"}},
+		{"name": "C3.2", "planned": true, "exists": 0.5, "key": "lane"}]}`
+	x, err := Expand(d, job, p.Units[0], []byte(doc), p.Names(), len(p.Units))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(x.Units) != 3 || x.Units[0].Index != 2 || x.Units[1].Name != "beauty" {
+		t.Fatalf("children %+v", x.Units)
+	}
+	beauty := x.Units[1]
+	if !slices.Equal(beauty.After, []int{2}) || len(beauty.Inputs) != 1 || beauty.Inputs[0].From != 2 || beauty.Parent != 0 || beauty.Depth != 1 {
+		t.Fatalf("beauty %+v", beauty)
+	}
+	if beauty.Env[0].Name != "C4_UNIT_NAME" || beauty.Env[0].Value != "beauty" || beauty.Env[1].Name != "PASS" {
+		t.Fatalf("env %+v", beauty.Env)
+	}
+	if lane := x.Units[2]; !lane.Generator || lane.Exists != 0.5 || lane.Key != "lane" {
+		t.Fatalf("planned %+v", lane)
+	}
+	if x.Units[0].Key != "graph/child" || x.Units[0].Exists != 1 || x.Units[0].Work != 600 || x.Units[0].Group != "layers" {
+		t.Fatalf("defaults %+v", x.Units[0])
+	}
+	p.Apply(0, x)
+	if len(p.Units) != 5 || !slices.Equal(p.Units[1].After, []int{0, 2, 3, 4}) {
+		t.Fatalf("after apply: %d units, report after %v", len(p.Units), p.Units[1].After)
+	}
+	if !slices.Equal(p.Order, []int{0, 1, 4, 2, 3}) {
+		t.Fatalf("order %v: generators first among the children", p.Order)
+	}
+
+	// dependents names a subset.
+	q, _ := d.Plan(job)
+	q.Units = append(q.Units, Unit{Index: 1, Name: "report", After: []int{0}})
+	x, err = Expand(d, job, q.Units[0], []byte(`{"version":1,"units":[{"name":"a"},{"name":"b"}],"dependents":["b"]}`), q.Names(), 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.Apply(0, x)
+	if !slices.Equal(q.Units[1].After, []int{0, 3}) {
+		t.Fatalf("subset dependents: %v", q.Units[1].After)
+	}
+}
+
+func TestExpandDocumentRefuses(t *testing.T) {
+	d, _ := Lookup("graph")
+	job := graphJob(map[string]string{"maxExpandDepth": "2"})
+	p, _ := d.Plan(job)
+	gen := p.Units[0]
+	for doc, want := range map[string]string{
+		`{"version": 2, "units": []}`:                                                             "version",
+		`{"version": 1, "units": [{"label": "x"}]}`:                                               "no name",
+		`{"version": 1, "units": [{"name": "a"}, {"name": "a"}]}`:                                 "twice",
+		`{"version": 1, "units": [{"name": "plan"}]}`:                                             "already",
+		`{"version": 1, "units": [{"name": "a", "after": ["zz"]}]}`:                               "not in the job",
+		`{"version": 1, "units": [{"name": "a", "after": ["b"]}, {"name": "b", "after": ["a"]}]}`: "cycle",
+		`{"version": 1, "units": [{"name": "a", "exists": 2}]}`:                                   "exists",
+		`{"version": 1, "units": [{"name": "a", "inputs": [{"fromUnit": "plan"}]}]}`:              "mountPath",
+		`{"version": 1, "units": [{"name": "a"}], "dependents": ["b"]}`:                           "dependents",
+		`not json`: "expansion document",
+	} {
+		if _, err := Expand(d, job, gen, []byte(doc), p.Names(), 1); err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", doc, err, want)
+		}
+	}
+	deep := gen
+	deep.Depth = 2
+	if _, err := Expand(d, job, deep, []byte(`{"version":1,"units":[{"name":"a"}]}`), p.Names(), 1); err == nil || !strings.Contains(err.Error(), "nests") {
+		t.Fatalf("depth: %v", err)
+	}
+}

@@ -95,7 +95,9 @@ func (s *Server) collect(ctx context.Context) error {
 		}
 		if d, err := class.Lookup(j.Spec.Class); err == nil {
 			rec.driver = d
-			if old := prevPlan(prev, rec.key, j.Generation); old != nil {
+			if p, _ := s.planOf(rec.key); p != nil {
+				rec.plan = p
+			} else if old := prevPlan(prev, rec.key, j.Generation); old != nil {
 				rec.plan = old
 			} else {
 				rec.plan, rec.planErr = d.Plan(&j)
@@ -516,4 +518,13 @@ func safepointReadings(fm farmMetrics) map[[2]string]queue.Safepoint {
 		}
 	}
 	return out
+}
+
+// planOf is the queue's unit table for a job, if the HUD runs with the
+// queue.
+func (s *Server) planOf(key string) (*class.Plan, int64) {
+	if s.Plans == nil {
+		return nil, 0
+	}
+	return s.Plans(key)
 }

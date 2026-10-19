@@ -228,6 +228,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		srv.DryRun = hudserver.QueueDryRun(q)
 		srv.Progress = q.Progress
 		srv.Safepoints = q.Safepoints
+		srv.Plans = q.PlanOf
 	}
 	if dev != "" {
 		srv.DevViewers, err = parseViewers(dev)

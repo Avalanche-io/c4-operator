@@ -360,3 +360,17 @@ func TestProfile(t *testing.T) {
 		t.Fatal("a key without a profile used one")
 	}
 }
+
+// Tentative work counts at its probability of existing: a unit and a
+// planned generator that may not run add exists times their work.
+func TestExistsWeightsWork(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Default = Prior{Mean: 100, SD: 10}
+	e := New(cfg)
+	e.SetGenPrior("lane", GenPrior{Children: Prior{Mean: 1, SD: 1}, Work: Prior{Mean: 1000, SD: 100}, Longest: Prior{Mean: 1000, SD: 100}})
+	sure := e.Summarize([]Unit{{Key: "k"}, {Key: "lane", Gen: "lane"}}, nil)
+	half := e.Summarize([]Unit{{Key: "k", Exists: 0.5}, {Key: "lane", Gen: "lane", Exists: 0.5}}, nil)
+	if !near(sure.W, 1200, 1e-6) || !near(half.W, 600, 1e-6) || half.Unevaluated != 1 {
+		t.Fatalf("W %v and %v (unevaluated %d)", sure.W, half.W, half.Unevaluated)
+	}
+}

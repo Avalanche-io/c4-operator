@@ -71,12 +71,14 @@ spec:
                   type: string
                 type: array
               class:
-                description: 'Class names the work class: render, ci, ml or agent.'
+                description: 'Class names the work class: render, ci, ml, agent or
+                  graph.'
                 enum:
                 - render
                 - ci
                 - ml
                 - agent
+                - graph
                 type: string
               deadline:
                 description: |-
@@ -477,6 +479,49 @@ spec:
                     format: int64
                     type: integer
                 type: object
+              expansions:
+                description: |-
+                  Expansions lists every generator unit evaluated, in the order its
+                  children were added: the unit table is the class's plan with these
+                  applied, so a restart rebuilds it from the documents in the store
+                  (DESIGN 10.6).
+                items:
+                  description: |-
+                    WorkExpansion is one generator's evaluation: its expansion document
+                    added Units children, indexes First to First+Units-1.
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    document:
+                      description: Document is the C4 ID of the expansion document.
+                      type: string
+                    error:
+                      description: |-
+                        Error says why the document was refused; it added no units and the
+                        generator failed.
+                      type: string
+                    first:
+                      format: int32
+                      type: integer
+                    record:
+                      description: Record is the C4 ID of the queue's signed expansion
+                        record.
+                      type: string
+                    unit:
+                      format: int32
+                      type: integer
+                    units:
+                      format: int32
+                      type: integer
+                  required:
+                  - at
+                  - document
+                  - first
+                  - unit
+                  - units
+                  type: object
+                type: array
               finished:
                 format: date-time
                 type: string
@@ -637,6 +682,13 @@ spec:
                   format: int64
                   type: integer
                 type: array
+              unitOutputs:
+                additionalProperties:
+                  type: string
+                description: |-
+                  UnitOutputs maps the index of a unit another unit reads (fromUnit)
+                  to its captured output view.
+                type: object
               unitStates:
                 additionalProperties:
                   type: string
@@ -670,6 +722,11 @@ spec:
                     format: int32
                     type: integer
                   held:
+                    format: int32
+                    type: integer
+                  planned:
+                    description: Planned counts generators not yet evaluated (DESIGN
+                      10.6).
                     format: int32
                     type: integer
                   preflight:

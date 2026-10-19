@@ -18,6 +18,9 @@ type Unit struct {
 	// Its own evaluation is predicted from Key and Pos like any unit; its
 	// eventual children are predicted from the fan-out model.
 	Gen string
+	// Exists is the probability the unit runs at all (tentative work); it
+	// scales the unit's expected work and its children's. 0 means 1.
+	Exists float64
 }
 
 func (u Unit) slots() float64 {
@@ -25,6 +28,13 @@ func (u Unit) slots() float64 {
 		return 1
 	}
 	return float64(u.Slots)
+}
+
+func (u Unit) exists() float64 {
+	if u.Exists <= 0 || u.Exists > 1 {
+		return 1
+	}
+	return u.Exists
 }
 
 // RunningUnit is a unit that is running now.
@@ -179,6 +189,7 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 	var regions []RegionID
 	var indVar float64
 	gens := map[string]int{}
+	genW := map[string]float64{} // generators of a key, weighted by exists
 	var genKeys []string
 	for _, u := range queued {
 		p := e.Predict(u.Key, u.Pos)
@@ -186,7 +197,7 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		if rem < 0.1*p.Mean {
 			rem = 0.1 * p.Mean
 		}
-		f := rem / p.Mean * u.slots()
+		f := rem / p.Mean * u.slots() * u.exists()
 		s.W += p.Mean * f
 		if _, ok := corr[p.Region]; !ok {
 			regions = append(regions, p.Region)
@@ -199,6 +210,7 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 				genKeys = append(genKeys, u.Gen)
 			}
 			gens[u.Gen]++
+			genW[u.Gen] += u.exists()
 		}
 	}
 	for _, r := range run {
@@ -212,12 +224,13 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 				genKeys = append(genKeys, r.Gen)
 			}
 			gens[r.Gen]++
+			genW[r.Gen]++
 		}
 	}
 	for _, k := range genKeys {
 		n := gens[k]
 		g := e.Generator(k)
-		G := float64(n)
+		G := genW[k]
 		s.W += G * g.Mean
 		indVar += G*g.PerSD*g.PerSD + (G*g.MeanSD)*(G*g.MeanSD)
 		s.Unevaluated += n

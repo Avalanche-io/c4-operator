@@ -79,6 +79,14 @@ func withoutEstimate(st c4v1.WorkJobStatus) c4v1.WorkJobStatus {
 func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJobStatus {
 	st := c4v1.WorkJobStatus{ObservedGeneration: v.job.Generation, Conditions: v.job.Status.Conditions}
 	m := v.mem
+	if v.planWait != "" && m.plan == nil {
+		// The unit table waits on the store (graph.go): keep the last
+		// status, and say so.
+		st = *v.job.Status.DeepCopy()
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Planned", Status: metav1.ConditionUnknown,
+			Reason: "LoadingExpansions", Message: v.planWait, ObservedGeneration: v.job.Generation})
+		return st
+	}
 	if m.planErr != nil || m.plan == nil {
 		st.Phase = "Failed"
 		msg := "no plan"
@@ -100,11 +108,21 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	n := len(m.plan.Units)
 	st.Order = strings.ToLower(m.plan.OrderName)
 	// Each unit is in one state. Units holding a slot are preflight,
-	// running, retrying or egress; between attempts, backoff.
-	var succ, egress, fail, accepted, pre, run, retry, backoff, queued []int
+	// running, retrying or egress; between attempts, backoff. A generator
+	// that has not run is planned; a unit waiting on others of the job is
+	// blocked (graph.go).
+	isWaiting := map[int]bool{}
+	for _, i := range v.waiting {
+		isWaiting[i] = true
+	}
+	var succ, egress, fail, accepted, pre, run, retry, backoff, queued, planned, blockedU []int
 	for i := 0; i < n; i++ {
 		_, running := v.running[i]
 		switch {
+		case !running && !m.succeeded[i] && !m.failed[i] && !v.finishing[i] && m.attempts[i] == 0 && m.plan.Units[i].Generator && !m.expanded(i):
+			planned = append(planned, i)
+		case isWaiting[i]:
+			blockedU = append(blockedU, i)
 		case m.succeeded[i]:
 			succ = append(succ, i)
 		case m.accepted[i]:
@@ -128,22 +146,24 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	held := v.job.Spec.Nudge.Hold || v.job.Spec.Nudge.HoldStop
 	st.Units = c4v1.UnitCounts{Total: int32(n), Succeeded: int32(len(succ)), Egress: int32(len(egress)),
 		Failed: int32(len(fail)), Accepted: int32(len(accepted)), Preflight: int32(len(pre)),
-		Running: int32(len(run)), Retrying: int32(len(retry)), Backoff: int32(len(backoff)), Queued: int32(len(queued))}
+		Running: int32(len(run)), Retrying: int32(len(retry)), Backoff: int32(len(backoff)), Queued: int32(len(queued)),
+		Planned: int32(len(planned)), Blocked: int32(len(blockedU))}
 	switch {
 	case v.blocked:
-		st.Units.Blocked, st.Units.Queued, st.Units.Backoff = int32(len(queued)+len(backoff)), 0, 0
+		st.Units.Blocked, st.Units.Queued, st.Units.Backoff = int32(len(queued)+len(backoff)+len(blockedU)), 0, 0
 	case held:
 		st.Units.Held, st.Units.Queued = int32(len(queued)), 0
 	}
 	st.UnitStates = map[string]string{}
 	for name, set := range map[string][]int{"succeeded": succ, "egress": egress, "failed": fail, "accepted": accepted,
-		"preflight": pre, "running": run, "retrying": retry, "backoff": backoff, "queued": queued} {
+		"preflight": pre, "running": run, "retrying": retry, "backoff": backoff, "queued": queued,
+		"planned": planned, "blocked": blockedU} {
 		if len(set) > 0 {
 			st.UnitStates[name] = order.EncodeSet(set)
 		}
 	}
 	if v.blocked && len(queued)+len(backoff) > 0 {
-		st.UnitStates["blocked"] = order.EncodeSet(slices.Sorted(slices.Values(append(append([]int{}, queued...), backoff...))))
+		st.UnitStates["blocked"] = order.EncodeSet(slices.Sorted(slices.Values(append(append(append([]int{}, queued...), backoff...), blockedU...))))
 		delete(st.UnitStates, "queued")
 		delete(st.UnitStates, "backoff")
 	}
@@ -199,6 +219,15 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		st.Decisions = append(st.Decisions, c4v1.WorkDecision{Unit: int32(d.Unit), At: metav1.Time{Time: d.At.Truncate(time.Second)},
 			Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record})
 	}
+	st.Expansions = expansionStatus(m.expansions)
+	for i := range readers(m.plan) {
+		if view := m.unitOut[i]; view != "" {
+			if st.UnitOutputs == nil {
+				st.UnitOutputs = map[string]string{}
+			}
+			st.UnitOutputs[strconv.Itoa(i)] = view
+		}
+	}
 	for _, y := range m.yields[max(0, len(m.yields)-8):] {
 		st.Yields = append(st.Yields, c4v1.WorkYield{Unit: int32(y.Unit), At: metav1.Time{Time: y.At.Truncate(time.Second)}, Reason: y.Reason, View: y.View})
 	}
@@ -225,7 +254,9 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	switch {
 	case len(succ)+len(accepted) == n:
 		st.Phase = "Succeeded"
-	case len(succ)+len(accepted)+len(fail) == n && active == 0:
+	case len(succ)+len(accepted)+len(fail)+len(v.stuck) == n && active == 0:
+		// Units waiting on a failed one count with it: they cannot run
+		// until a person acts.
 		st.Phase = "Failed"
 	case v.blocked:
 		st.Phase = "Blocked"

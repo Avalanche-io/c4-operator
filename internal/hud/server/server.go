@@ -33,6 +33,7 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
@@ -47,8 +48,12 @@ type Server struct {
 	// Safepoints, when set, receives units' safe points from each scrape,
 	// for the queue's soft stops and the unit list.
 	Safepoints *queue.SafepointCache
-	Stores     queue.StoreFunc // project stores, for previews and objects
-	Web        fs.FS           // the web app
+	// Plans, when set, returns a job's unit table as the queue has it,
+	// expansions included (queue.Queue.PlanOf); without it the HUD plans
+	// jobs from their class alone.
+	Plans  func(key string) (*class.Plan, int64)
+	Stores queue.StoreFunc // project stores, for previews and objects
+	Web    fs.FS           // the web app
 	// Loc is the farm's time zone, for times inside sentences the HUD
 	// writes (control confirmations). Every time field on the wire is UTC.
 	Loc *time.Location

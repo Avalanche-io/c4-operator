@@ -49,6 +49,10 @@ const (
 	// AnnotationOutputEpoch on an agent member's pod is the member's lease
 	// number as its runner last resumed it.
 	AnnotationOutputEpoch = "c4.avalanche.io/output-epoch"
+	// AnnotationOutputExpand on a generator unit's finished pod is the C4
+	// ID of the expansion document it wrote (.c4/expand.json), stored by
+	// the node daemon at capture (DESIGN 10.6).
+	AnnotationOutputExpand = "c4.avalanche.io/output-expand"
 	// AnnotationOwner on a WorkJob is the user who submitted it, set at
 	// admission from the request's user (or, for jobs the HUD creates for
 	// a signed-in viewer, by the HUD) and never changed afterwards.
@@ -90,8 +94,8 @@ const (
 // objective, where it may run, its inputs and outputs, and the pod each
 // unit runs.
 type WorkJobSpec struct {
-	// Class names the work class: render, ci, ml or agent.
-	// +kubebuilder:validation:Enum=render;ci;ml;agent
+	// Class names the work class: render, ci, ml, agent or graph.
+	// +kubebuilder:validation:Enum=render;ci;ml;agent;graph
 	Class string `json:"class"`
 
 	// Params are the class's parameters, for example frames and chunk for
@@ -270,6 +274,16 @@ type WorkJobStatus struct {
 	// decided for this job's units, each with its signed decision record.
 	// +optional
 	Decisions []WorkDecision `json:"decisions,omitempty"`
+	// Expansions lists every generator unit evaluated, in the order its
+	// children were added: the unit table is the class's plan with these
+	// applied, so a restart rebuilds it from the documents in the store
+	// (DESIGN 10.6).
+	// +optional
+	Expansions []WorkExpansion `json:"expansions,omitempty"`
+	// UnitOutputs maps the index of a unit another unit reads (fromUnit)
+	// to its captured output view.
+	// +optional
+	UnitOutputs map[string]string `json:"unitOutputs,omitempty"`
 	// Requeued is the token of the last requeue request carried out.
 	// +optional
 	Requeued string `json:"requeued,omitempty"`
@@ -419,9 +433,30 @@ type WorkDecision struct {
 	Record string `json:"record,omitempty"`
 }
 
+// WorkExpansion is one generator's evaluation: its expansion document
+// added Units children, indexes First to First+Units-1.
+type WorkExpansion struct {
+	Unit int32 `json:"unit"`
+	// Document is the C4 ID of the expansion document.
+	Document string      `json:"document"`
+	First    int32       `json:"first"`
+	Units    int32       `json:"units"`
+	At       metav1.Time `json:"at"`
+	// Record is the C4 ID of the queue's signed expansion record.
+	// +optional
+	Record string `json:"record,omitempty"`
+	// Error says why the document was refused; it added no units and the
+	// generator failed.
+	// +optional
+	Error string `json:"error,omitempty"`
+}
+
 // UnitCounts counts a job's units by state.
 type UnitCounts struct {
-	Total     int32 `json:"total,omitempty"`
+	Total int32 `json:"total,omitempty"`
+	// Planned counts generators not yet evaluated (DESIGN 10.6).
+	// +optional
+	Planned   int32 `json:"planned,omitempty"`
 	Queued    int32 `json:"queued,omitempty"`
 	Blocked   int32 `json:"blocked,omitempty"`
 	Preflight int32 `json:"preflight,omitempty"`
