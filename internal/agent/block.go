@@ -174,7 +174,11 @@ func (h *Harness) Start(ctx context.Context, o StartOptions) (*Member, error) {
 //   - its model, and the Stop hook that checkpoints every turn and answers
 //     the farm's safe points.
 func (r *Runner) blockFlags(p *corev1.Pod, name string) ([]string, error) {
-	hook, err := HookSettingsCommand(r.HookCommand)
+	return blockFlagsFor(p, name, r.HookCommand)
+}
+
+func blockFlagsFor(p *corev1.Pod, name, hookCommand string) ([]string, error) {
+	hook, err := HookSettingsCommand(hookCommand)
 	if err != nil {
 		return nil, err
 	}

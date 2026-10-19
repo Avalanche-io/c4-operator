@@ -13,6 +13,7 @@
 //	c4-agent log NAME [-n 10]
 //	c4-agent hooks
 //	c4-agent runner [--node NAME] [--slots N] [--label K=V]...
+//	c4-agent block-pod [--cwd DIR]
 //
 // State lives in $C4_AGENT_HOME (default ~/.c4/agents). The claude binary is
 // $C4_AGENT_CLAUDE, else claude on PATH.
@@ -31,6 +32,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
@@ -82,6 +84,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		hookSafepoint(ctx, h, input, cp, stdout, stderr)
 		return 0
+	}
+	if cmd == "block-pod" {
+		return runBlockPod(ctx, rest, stderr)
 	}
 	if err := dispatch(ctx, h, cmd, rest, stdout); err != nil {
 		fmt.Fprintln(stderr, "c4-agent:", err)
@@ -398,6 +403,43 @@ func readSlotsFile(path string, def int) (int, string) {
 		return def, ""
 	}
 	return n, strings.TrimSpace(reason)
+}
+
+// runBlockPod runs a block as a unit pod's command: one attempt, its
+// session in the unit's output view ($C4_OUTPUT), the holder's Claude Code
+// store as CLAUDE_CONFIG_DIR. It ignores SIGTERM, so a pod the farm
+// deletes mid-turn finishes the turn within its grace period; a stop
+// comes at a safe point, through the Stop hook.
+func runBlockPod(ctx context.Context, args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("block-pod", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	cwd := fs.String("cwd", "/private/tmp", "the folder the session runs in; the same on every machine the session moves to")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	out, cfg := os.Getenv("C4_OUTPUT"), os.Getenv("CLAUDE_CONFIG_DIR")
+	if out == "" || cfg == "" {
+		fmt.Fprintln(stderr, "c4-agent block-pod: needs $C4_OUTPUT (a writable input) and $CLAUDE_CONFIG_DIR (the holder's store)")
+		return 2
+	}
+	signal.Ignore(syscall.SIGTERM)
+	os.Setenv("C4_AGENT_HOME", filepath.Join(out, agent.SessionDir, "agents"))
+	hook, err := blockHookCommand()
+	if err != nil {
+		fmt.Fprintln(stderr, "c4-agent block-pod:", err)
+		return 1
+	}
+	claude := os.Getenv("C4_AGENT_CLAUDE")
+	if claude == "" {
+		claude = "claude"
+	}
+	b := &agent.PodBlock{Out: out, ConfigDir: cfg, Cwd: *cwd, Claude: claude, HookCommand: hook, Env: os.Getenv,
+		Logf: func(format string, args ...any) { fmt.Fprintf(stderr, "c4-agent block-pod: "+format+"\n", args...) }}
+	code, err := b.Run(ctx)
+	if err != nil {
+		fmt.Fprintln(stderr, "c4-agent block-pod:", err)
+	}
+	return code
 }
 
 // blockHookCommand is the Stop hook block sessions run: this binary's
