@@ -3,8 +3,10 @@
 # c4.intake=true (the project backend plugin, `mlflow run --backend c4`)
 # become ML jobs; a run's c4.deadline tag (RFC 3339) is the deadline.
 # The run shows the job's work states and c4.* tags; each output is
-# registered as a model version from the run, source c4://<view>, tagged
-# with its C4 ID. Setting the production alias, or the c4.review tag
+# registered as a model version from the run, source c4:///<view>, tagged
+# with its C4 ID (read it with the c4 artifact plugin, integrations/
+# mlflow-c4). Runs mlflow run --backend c4 submitted carry c4.job and are
+# adopted, not submitted again. Setting the production alias, or the c4.review tag
 # (with c4.note), is the decision on the promote wait.
 #
 # MLflow records no author for an alias or tag, so registry decisions are

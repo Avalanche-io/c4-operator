@@ -136,3 +136,21 @@ func TestRunWrites(t *testing.T) {
 		t.Fatal("an empty value is not written")
 	}
 }
+
+// The fake refuses what a real server refuses (measured against MLflow
+// 3.17.1, integrations/mlflow-c4/tests/test_server.py), so publishing with
+// a prefix that leaves the path empty fails here as it would there.
+func TestEmptyPathSourceRefused(t *testing.T) {
+	s := server(t)
+	run := s.AddRun("7", "a", "RUNNING", nil)
+	c := tracker.Config{Endpoint: s.URL, Scope: map[string]string{"experiment": "7", "model": "denoiser", "user": s.User, "source_prefix": "c4://"},
+		Token: func(context.Context) (string, error) { return s.Password, nil }}
+	a, err := mlflow.New(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := a.Publish(context.Background(), tracker.Ref{Type: "Run", ID: run}, tracker.Output{View: "c4v"}, "k"); err == nil ||
+		!strings.Contains(err.Error(), "Invalid model version source") {
+		t.Fatalf("c4://<view> should be refused, got %v", err)
+	}
+}

@@ -458,10 +458,26 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 			spec.Deadline = &metav1.Time{Time: *due}
 			spec.DeadlineMode = "Tracking"
 		}
-		got, err := s.Farm.Submit(ctx, farm.JobRequest{Namespace: jr.Namespace, Name: jr.Name, Spec: spec,
-			Tracker: t.Name, TrackerRef: t.Name + "/" + it.Ref.String()})
-		if err != nil {
-			return fmt.Errorf("submitting %s for %s: %w", jr, it.Ref, err)
+		var got farm.JobRef
+		if it.Job != "" {
+			// The entity names a job a client already submitted: adopt it.
+			ns, name, ok := strings.Cut(it.Job, "/")
+			if !ok || ns != t.Namespace || name == "" {
+				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "ForeignJob",
+					fmt.Sprintf("%s names job %q, which is not in this Tracker's namespace %s", it.Ref, it.Job, t.Namespace))
+				return nil
+			}
+			if _, err := s.Farm.Job(ctx, farm.JobRef{Namespace: ns, Name: name}); err != nil {
+				return fmt.Errorf("adopting %s for %s: %w", it.Job, it.Ref, err)
+			}
+			got = farm.JobRef{Namespace: ns, Name: name}
+		} else {
+			var err error
+			got, err = s.Farm.Submit(ctx, farm.JobRequest{Namespace: jr.Namespace, Name: jr.Name, Spec: spec,
+				Tracker: t.Name, TrackerRef: t.Name + "/" + it.Ref.String()})
+			if err != nil {
+				return fmt.Errorf("submitting %s for %s: %w", jr, it.Ref, err)
+			}
 		}
 		l = &c4v1.TrackerLink{
 			ObjectMeta: metav1.ObjectMeta{Namespace: t.Namespace, Name: LinkName(t.Name, it.Ref),

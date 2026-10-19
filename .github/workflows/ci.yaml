@@ -61,3 +61,16 @@ jobs:
       with:
         version: "~> v2"
         args: build --snapshot --clean
+
+  mlflow-plugin:
+    name: mlflow-c4 plugins (Python, with a local MLflow server)
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.13"
+    - run: pip install -e 'integrations/mlflow-c4[test]'
+    - run: python -m pytest integrations/mlflow-c4
+      env:
+        MLFLOW_DISABLE_AGENT_HINT: "1"

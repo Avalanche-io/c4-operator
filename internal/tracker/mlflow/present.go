@@ -22,8 +22,9 @@ var runStatus = map[string]string{
 
 // Present shows a link's state on its run: the status, when the state has
 // one (the Tracker's statusOut.states may override), and the c4.* tags:
-// the state, the job link, why a person is needed, and the ETA on its own
-// clock. The approve alias is never written: approval is the registry's.
+// the state, the job (c4.job, <namespace>/<name>, the tag intake adopts by)
+// and its HUD link (c4.job_url), why a person is needed, and the ETA on
+// its own clock. The approve alias is never written: approval is the registry's.
 func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracker.FieldWrite {
 	if s.Ref.Type != "Run" {
 		return nil
@@ -40,7 +41,8 @@ func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracke
 	if why == "" {
 		why = "-" // a tag cannot be emptied by an empty write; "-" clears the reason
 	}
-	fields := map[string]string{"status": status, "c4.state": s.State, "c4.job": s.JobURL, "c4.why": why, "c4.eta": eta}
+	fields := map[string]string{"status": status, "c4.state": s.State, "c4.job": s.Job, "c4.job_url": s.JobURL,
+		"c4.why": why, "c4.eta": eta}
 	return []tracker.FieldWrite{{
 		Field: "run", Value: s.State + "|" + status + "|" + why, Continuous: eta,
 		Build: func(tracker.Written) tracker.Write {

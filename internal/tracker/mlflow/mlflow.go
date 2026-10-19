@@ -12,8 +12,10 @@
 //     FINISHED, FAILED: MLflow's own enum) and tags c4.state, c4.eta,
 //     c4.job, c4.why;
 //   - publishes each output as a model version of the registered model,
-//     source c4://<view> (or the prefix the scope names), tagged with the
-//     output view's C4 ID, the job and the provenance link;
+//     source c4:///<view> (or the prefix the scope names), tagged with the
+//     output view's C4 ID, the job and the provenance link. A server
+//     refuses c4://<view>, whose path is empty, and accepts c4:///<view>
+//     (measured against MLflow 3.17.1: integrations/mlflow-c4);
 //   - reads decisions back from the registry: the approve alias (default
 //     production) pointing at the version, or a review tag (default
 //     c4.review: approve, rework or accept, with c4.note as its text).
@@ -83,7 +85,7 @@ func New(c tracker.Config) (*Adapter, error) {
 	}
 	a := &Adapter{c: c, base: base, experiment: c.Scope["experiment"], model: c.Scope["model"], user: c.Scope["user"],
 		approveAlias: or(c.Scope["approve_alias"], "production"), reviewTag: or(c.Scope["review_tag"], "c4.review"),
-		sourcePrefix: or(c.Scope["source_prefix"], "c4://"), noteTag: "c4.note", hc: c.HTTPClient, now: c.Now}
+		sourcePrefix: or(c.Scope["source_prefix"], "c4:///"), noteTag: "c4.note", hc: c.HTTPClient, now: c.Now}
 	if a.hc == nil {
 		a.hc = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -226,6 +228,7 @@ func (a *Adapter) runItem(r run) tracker.Item {
 		Status: tracker.Status{Native: r.Info.Status},
 		Fields: tg,
 	}
+	it.Job = tg["c4.job"]
 	if d := tg["c4.deadline"]; d != "" {
 		if t, err := time.Parse(time.RFC3339, d); err == nil {
 			it.Due = &tracker.Due{At: t.UTC()}
@@ -474,9 +477,9 @@ func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, erro
 // run already tagged with the view's C4 ID is the one a crash left: it is
 // returned, not registered again. MLflow's own artifact store records no
 // digest (tools/mlflow.md), so the C4 ID is the version's content
-// identity. Whether a server without a c4 artifact-repository plugin
-// accepts the c4:// scheme as a source is unverified; source_prefix can
-// name another.
+// identity. The server stores the source without resolving its scheme;
+// clients read it with the c4 artifact-repository plugin
+// (integrations/mlflow-c4).
 func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Output, key string) (tracker.Ref, error) {
 	if on.Type != "Run" {
 		return tracker.Ref{}, fmt.Errorf("mlflow: Publish on %s: %w", on.Type, tracker.ErrUnsupported)
@@ -499,7 +502,7 @@ func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Outpu
 	in := map[string]any{
 		"name": a.model, "source": a.sourcePrefix + out.View, "run_id": on.ID,
 		"description": out.Summary,
-		"tags":        []tag{{"c4.id", out.View}, {"c4.job", out.JobURL}, {"c4.custody", out.Custody}, {"c4.key", key}},
+		"tags":        []tag{{"c4.id", out.View}, {"c4.job", out.Name}, {"c4.job_url", out.JobURL}, {"c4.custody", out.Custody}, {"c4.key", key}},
 	}
 	var res struct {
 		MV modelVersion `json:"model_version"`

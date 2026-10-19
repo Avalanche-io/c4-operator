@@ -18,7 +18,9 @@
 // Webhook deliveries are signed as the self-hosting webhook guide
 // documents: X-MLflow-Signature: v1,<base64 HMAC-SHA256 of
 // "<delivery id>.<timestamp>.<body>">, with X-MLflow-Timestamp and
-// X-MLflow-Delivery-Id. The guide gives no payload for alias events, so
+// X-MLflow-Delivery-Id. Model-version sources are checked as a real
+// server checks them: an empty or relative path is refused. The guide
+// gives no payload for alias events, so
 // Payload's data fields are the guide's tag-event fields (name, version).
 package mlflowtest
 
@@ -32,6 +34,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"regexp"
 	"sort"
 	"strconv"
@@ -313,6 +316,11 @@ func (s *Server) route(r *http.Request, body []byte) (any, *apiErr) {
 		name := str("name")
 		if _, ok := s.versions[name]; !ok {
 			return nil, nf("Registered Model with name=" + name)
+		}
+		// As MLflow 3.17.1's server does (measured, integrations/mlflow-c4):
+		// a source whose path is empty, or relative, is refused.
+		if u, err := url.Parse(str("source")); err != nil || u.Scheme != "" && (strings.Trim(u.Path, "/") == "" || strings.Contains(u.Path, "..")) {
+			return nil, &apiErr{400, "INVALID_PARAMETER_VALUE", "Invalid model version source: '" + str("source") + "'."}
 		}
 		v := &ModelVersion{Name: name, Version: strconv.Itoa(len(s.versions[name]) + 1), Source: str("source"),
 			RunID: str("run_id"), Description: str("description"), Status: "READY", Created: s.ms(), Updated: s.ms(),

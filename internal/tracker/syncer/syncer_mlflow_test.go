@@ -17,6 +17,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
+	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm/farmtest"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/mlflow"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/mlflow/mlflowtest"
@@ -138,7 +139,7 @@ func TestMLflowPromoteLoop(t *testing.T) {
 	e.pass()
 	r := e.ml.GetRun(e.run)
 	if r.Status != "RUNNING" || r.Tags["c4.state"] != "running" || r.Tags["c4.eta"] != eta.UTC().Format(time.RFC3339) ||
-		!strings.Contains(r.Tags["c4.job"], "#/job/work/"+e.jobName()) {
+		r.Tags["c4.job"] != ns+"/"+e.jobName() || !strings.Contains(r.Tags["c4.job_url"], "#/job/work/"+e.jobName()) {
 		t.Fatalf("run: %+v", r)
 	}
 	w := len(e.ml.Writes())
@@ -153,7 +154,7 @@ func TestMLflowPromoteLoop(t *testing.T) {
 	e.farm.OpenWait(ns, e.jobName(), "promote", "party:ml-leads", "rework")
 	e.pass()
 	vs := e.ml.Versions("denoiser")
-	if len(vs) != 1 || vs[0].Source != "c4://c4Checkpoint1" || vs[0].RunID != e.run || vs[0].Tags["c4.id"] != "c4Checkpoint1" ||
+	if len(vs) != 1 || vs[0].Source != "c4:///c4Checkpoint1" || vs[0].RunID != e.run || vs[0].Tags["c4.id"] != "c4Checkpoint1" ||
 		vs[0].Tags["c4.custody"] == "" {
 		t.Fatalf("versions: %+v", vs)
 	}
@@ -253,3 +254,35 @@ func TestMLflowRegistryCannotServeAPersonsWait(t *testing.T) {
 }
 
 func trackerRef(typ, id string) tracker.Ref { return tracker.Ref{Type: typ, ID: id} }
+
+// A run that names its own job (mlflow run --backend c4 submitted it and
+// tagged c4.job) is adopted: linked to that job, nothing submitted.
+func TestMLflowAdoptsTheJobARunNames(t *testing.T) {
+	e := setupML(t, "")
+	ref, err := e.farm.Submit(context.Background(), farmJobRequest(ns, "main-v001"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	run := e.ml.AddRun("7", "from the plugin", "SCHEDULED", map[string]string{"c4.intake": "true", "c4.job": ns + "/" + ref.Name})
+	foreign := e.ml.AddRun("7", "other namespace", "SCHEDULED", map[string]string{"c4.intake": "true", "c4.job": "elsewhere/x"})
+	e.pass()
+	var l c4v1.TrackerLink
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: syncer.LinkName("ml", trackerRef("Run", run))}, &l); err != nil {
+		t.Fatal(err)
+	}
+	if l.Spec.Target.WorkJob != "main-v001" {
+		t.Fatalf("adopted: %+v", l.Spec.Target)
+	}
+	for _, s := range e.farm.Submitted {
+		if strings.Contains(s.TrackerRef, run) || strings.Contains(s.TrackerRef, foreign) {
+			t.Fatalf("a run that names its job was submitted again: %+v", s)
+		}
+	}
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: syncer.LinkName("ml", trackerRef("Run", foreign))}, &l); err == nil {
+		t.Fatal("a run naming another namespace's job was linked")
+	}
+}
+
+func farmJobRequest(namespace, name string) farm.JobRequest {
+	return farm.JobRequest{Namespace: namespace, Name: name, Spec: c4v1.WorkJobSpec{Class: "ml"}}
+}

@@ -37,6 +37,10 @@ type Item struct {
 	Fields    map[string]string // adapter fields by native name (a PR's head SHA)
 	UpdatedAt time.Time
 	Version   string // etag, revision or updatedAt: for conditional writes
+	// Job is a C4 job the entity already names as its own
+	// (<namespace>/<name>): one a client submitted itself, such as
+	// mlflow run --backend c4. Intake adopts it instead of submitting one.
+	Job string
 }
 
 // Due is a due date as the tracker holds it.
