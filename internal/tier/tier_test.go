@@ -284,10 +284,19 @@ func TestShedsBeyondTheFillLimit(t *testing.T) {
 		objects[i] = randomBytes(200_000)
 		ids[i] = c4.Identify(bytes.NewReader(objects[i]))
 	}
+	// The first two fills hold their slots at the gate; the third source is
+	// ungated, so if it is not shed the test fails instead of hanging.
+	srcs := make([]*fakeSource, 3)
+	for i := range srcs {
+		srcs[i] = &fakeSource{name: "r", kind: "regional", auth: true, data: objects[i]}
+		if i < 2 {
+			srcs[i].gate = gate
+		}
+	}
 	h := newHarness(t, fill.Limits{Fills: 2}, func(_ string, id c4.ID) []Source {
 		for i := range ids {
 			if ids[i] == id {
-				return []Source{&fakeSource{name: "r", kind: "regional", auth: true, data: objects[i], gate: gate}}
+				return []Source{srcs[i]}
 			}
 		}
 		return nil
@@ -303,7 +312,14 @@ func TestShedsBeyondTheFillLimit(t *testing.T) {
 			}
 		}(ids[i])
 	}
-	time.Sleep(100 * time.Millisecond)
+	// Wait until both fills hold their slots (a fixed sleep raced under load).
+	deadline := time.Now().Add(10 * time.Second)
+	for srcs[0].calls.Load() == 0 || srcs[1].calls.Load() == 0 {
+		if time.Now().After(deadline) {
+			t.Fatal("the first two fills never started")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
 	resp, _ := h.get(t, ids[2], 0)
 	if resp.StatusCode != http.StatusServiceUnavailable || resp.Header.Get("Retry-After") == "" {
 		t.Fatalf("third fill: status %d, Retry-After %q; want 503 with Retry-After", resp.StatusCode, resp.Header.Get("Retry-After"))
