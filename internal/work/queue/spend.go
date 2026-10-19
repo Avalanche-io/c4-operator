@@ -13,6 +13,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/work/process"
 )
 
 // Spend, procedural and model (LLM-OR-PROCEDURE 6.2). Every unit is
@@ -230,4 +231,56 @@ func (m *jobMem) loadSpend(st *c4v1.WorkJobStatus) {
 		}
 		m.spend[i] = s
 	}
+}
+
+// Model work a procedure could do (LLM-OR-PROCEDURE 6.1: "an LLM unit
+// should never be asked to produce a fact a procedural unit can
+// compute"). A light report, not a decision: a model unit whose same
+// computation (process and input views) ran at least minRepeats times and
+// wrote the same bytes every time behaved as a pure function of its
+// inputs, which a procedure could compute, cheaper and checkably. It is
+// listed with the evidence; reworking the job is a person's call.
+const minRepeats = 3
+
+// candidatesKept bounds status.procedural.
+const candidatesKept = 16
+
+func (q *Queue) proceduralCandidates(ctx context.Context, v *view) []c4v1.WorkProceduralCandidate {
+	b := q.books[v.project]
+	m := v.mem
+	if b == nil || b.Len() == 0 || v.driver == nil || m.plan == nil {
+		return nil
+	}
+	var inID string
+	resolved := false
+	var out []c4v1.WorkProceduralCandidate
+	for i, u := range m.plan.Units {
+		if !m.succeeded[i] || class.KindOf(v.driver, u) != class.KindModel {
+			continue
+		}
+		proc, ok := process.ProcessID(unitContainers(v.job, u, q.digests), q.lastPlatform[v.key])
+		if !ok {
+			continue
+		}
+		if !resolved {
+			resolved = true
+			inputs, ok := q.inputViews(ctx, v.job)
+			if !ok {
+				return nil
+			}
+			if inID, ok = process.InputsID(inputs); !ok {
+				return nil
+			}
+		}
+		runs, outputs := b.Repeats(process.Key{Process: proc, Inputs: inID})
+		if runs < minRepeats || outputs != 1 {
+			continue
+		}
+		out = append(out, c4v1.WorkProceduralCandidate{Unit: int32(i), Name: unitName(m.plan, i), Runs: int32(runs),
+			Why: fmt.Sprintf("run %d times on the same inputs, it wrote the same bytes every time: a procedure may do this work", runs)})
+		if len(out) == candidatesKept {
+			break
+		}
+	}
+	return out
 }

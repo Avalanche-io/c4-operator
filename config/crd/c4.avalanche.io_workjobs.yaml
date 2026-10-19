@@ -804,6 +804,35 @@ spec:
                   make room.
                 format: int32
                 type: integer
+              procedural:
+                description: |-
+                  Procedural lists model units whose work a procedure might do: run
+                  again on the same inputs, they wrote the same bytes every time
+                  (LLM-OR-PROCEDURE 6.1). A report, for a person to weigh.
+                items:
+                  description: |-
+                    WorkProceduralCandidate is a model unit that behaved like a function of
+                    its inputs.
+                  properties:
+                    name:
+                      type: string
+                    runs:
+                      description: |-
+                        Runs of the same computation (process and input views), all of
+                        which wrote one output.
+                      format: int32
+                      type: integer
+                    unit:
+                      format: int32
+                      type: integer
+                    why:
+                      type: string
+                  required:
+                  - runs
+                  - unit
+                  - why
+                  type: object
+                type: array
               rank:
                 description: Rank is the job's position in dispatch order (1 is next).
                 format: int32

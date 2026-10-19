@@ -278,6 +278,11 @@ type WorkJobStatus struct {
 	// will change with C4's derivation-record design.
 	// +optional
 	Derivation *WorkDerivation `json:"derivation,omitempty"`
+	// Procedural lists model units whose work a procedure might do: run
+	// again on the same inputs, they wrote the same bytes every time
+	// (LLM-OR-PROCEDURE 6.1). A report, for a person to weigh.
+	// +optional
+	Procedural []WorkProceduralCandidate `json:"procedural,omitempty"`
 	// Rank is the job's position in dispatch order (1 is next).
 	// +optional
 	Rank int32 `json:"rank,omitempty"`
@@ -592,6 +597,17 @@ type WorkModelTokens struct {
 	// Cost of its priced tokens; absent when none were priced.
 	// +optional
 	Cost string `json:"cost,omitempty"`
+}
+
+// WorkProceduralCandidate is a model unit that behaved like a function of
+// its inputs.
+type WorkProceduralCandidate struct {
+	Unit int32  `json:"unit"`
+	Name string `json:"name,omitempty"`
+	// Runs of the same computation (process and input views), all of
+	// which wrote one output.
+	Runs int32  `json:"runs"`
+	Why  string `json:"why"`
 }
 
 // WorkMeasureSpec declares a job's measure of done.

@@ -101,6 +101,10 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		out["edges"] = unitEdges(plan)
 	}
 	out["expansions"] = expansionList(&rec.job.Status)
+	if pc := rec.job.Status.Procedural; len(pc) > 0 {
+		// model units that behaved as functions of their inputs
+		out["procedural"] = pc
+	}
 	if hs := rec.job.Status.Holds; len(hs) > 0 {
 		out["holds"] = hs
 	}

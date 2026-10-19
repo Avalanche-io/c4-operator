@@ -1469,8 +1469,13 @@ and a sweep planner that spawns trials are all generators.
     - **Not reused:** model units, generators, gates, and units whose run
       the key does not fully describe (inputs from other units, a rework's
       changes, a resumed attempt).
-  - **Not built yet:** flagging a model unit whose output a procedural
-    check could have produced.
+  - **Model work a procedure could do** is reported, not decided. A model
+    unit whose same computation (process and input views) ran at least
+    three times and wrote the same bytes every time behaved as a pure
+    function of its inputs. It is listed in status `procedural` (and the
+    HUD's job detail) with the evidence, for a person to weigh: a
+    procedure would do it cheaper and checkably. It needs the unit's runs
+    in the book: pinned images and resolved input views.
 - **The job's measure of done** (Q12; LLM-OR-PROCEDURE 7.2 item 3). A job
   declares what it counts: `spec.measure: {name: "rules sited", of: 379,
   required: true}`. A unit, usually a procedural one re-run after each

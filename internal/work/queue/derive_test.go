@@ -15,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	"github.com/Avalanche-io/c4-operator/work/process"
 )
 
@@ -221,5 +222,47 @@ func TestExactVerifiedWorkIsReused(t *testing.T) {
 	tick(t, q)
 	if n := len(unitPods(t, ns, "sh400-v4")); n == 0 {
 		t.Fatal("an undeclared job reused output")
+	}
+}
+
+// A model unit that, run again on the same inputs, writes the same bytes
+// every time is reported as work a procedure might do.
+func TestModelWorkAProcedureCouldDo(t *testing.T) {
+	ns, q, now := derivationFarm(t, true)
+	ctx := context.Background()
+	st, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: t.TempDir()}}, storeurl.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	q.Stores = func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "summarize", "kind": "model"}, {"name": "draft", "kind": "model"}]}`)
+	run := func(name string, draft string) *c4v1.WorkJob {
+		t.Helper()
+		j := job(ns, name, "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))
+		j.Spec.Template.Spec.Containers[0].Image = pinned
+		j.Spec.Inputs = []c4v1.WorkInput{{Materialization: "plates", MountPath: "/plates", ReadOnly: true}}
+		if err := k8s.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+		tick(t, q)
+		*now = now.Add(time.Minute)
+		finish(t, podOfUnit(t, ns, name, 0), corev1.PodSucceeded, *now, time.Minute,
+			map[string]string{c4v1.AnnotationOutputExpand: doc, c4v1.AnnotationOutputTree: viewID("plan")})
+		tick(t, q)
+		*now = now.Add(time.Minute)
+		finish(t, podOfUnit(t, ns, name, 1), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputTree: viewID("the same summary")})
+		finish(t, podOfUnit(t, ns, name, 2), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputTree: viewID(draft)})
+		tick(t, q)
+		tick(t, q)
+		return get(t, ns, name)
+	}
+	run("notes-1", "draft one")
+	if got := run("notes-2", "draft two"); len(got.Status.Procedural) != 0 {
+		t.Fatalf("two runs are not enough: %+v", got.Status.Procedural)
+	}
+	got := run("notes-3", "draft three")
+	// summarize wrote the same bytes three times; draft never did.
+	if len(got.Status.Procedural) != 1 || got.Status.Procedural[0].Name != "summarize" || got.Status.Procedural[0].Runs != 3 {
+		t.Fatalf("%s: %+v", got.Status.Phase, got.Status.Procedural)
 	}
 }

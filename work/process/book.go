@@ -357,6 +357,21 @@ func (b *Book) Recompute(k Key, program string) (Cost, bool) {
 	return c, true
 }
 
+// Repeats returns how many times computation k ran and how many distinct
+// outputs those runs wrote.
+func (b *Book) Repeats(k Key) (runs, outputs int) {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	e := b.entries[k]
+	if e == nil {
+		return 0, 0
+	}
+	for _, n := range e.Outputs {
+		runs += n
+	}
+	return runs, len(e.Outputs)
+}
+
 // Reuse is an output that can stand in for running its computation
 // again: the view, the changes that made it, and the record of the run
 // that wrote it.
