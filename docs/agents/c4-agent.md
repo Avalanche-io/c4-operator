@@ -212,6 +212,59 @@ token), and `--store-project` (else the runner reads the Project listing
 the pod's namespace). Without a store, the runner says so, and the queue
 adds nothing under the generator.
 
+## Blocks: a plan job's units as fresh sessions
+
+A plan job (class `graph`, its units from an expansion document) runs on a
+host as **blocks**: each unit is its own Claude Code session, which the
+runner starts for the unit's first attempt and resumes by its session ID
+for every later one. This is the builder driver of proposals agent-jobs
+10.14. `c4-agent runner --blocks-cwd DIR` turns it on.
+
+| variable          | set by                   | what                                                         |
+| ----------------- | ------------------------ | ------------------------------------------------------------ |
+| `C4_AGENT_BLOCK`  | the job's template       | `1`: the pod is a block                                      |
+| `C4_BLOCK_PROMPT` | the template, or a unit's `env` in its document (the unit's wins) | the block's task                |
+| `C4_BLOCK_REPO`   | the template             | the project's working tree on the host                       |
+| `C4_BLOCK_TOOLS`  | the template             | the tools it may use, space separated (default `Read Edit Write Glob Grep Bash(git:*) Bash(go:*)`) |
+| `C4_BLOCK_MODEL`  | the template or a unit   | the model, when not the CLI's default                        |
+| `C4_BLOCK_REWORK` | a verdict's `with.env`   | a reworked attempt: what the review asks                     |
+
+- **The member** is `<namespace>.<job>.<unit>`, registered when its session
+  starts, and marked a block.
+- **The first attempt** starts `claude --bg` in `--blocks-cwd` with the
+  block's task, its repository, its unit's output directory and the rules
+  for its commands as the first prompt. The flags are kept by the CLI with
+  the session:
+  - `--restricted --strict-mcp-config`: none of the machine's user,
+    project or local settings, CLAUDE.md, connectors or MCP servers reach a
+    block, and its file tools stay in its working folders;
+  - `--tools` and `--allowedTools` from `C4_BLOCK_TOOLS`, under
+    `--permission-mode dontAsk`, so a tool the job did not allow is refused,
+    never prompted for;
+  - `--settings` with the Stop hook (this binary's `checkpoint --hook`,
+    with its agents home and `c4-unit`).
+- **A later attempt** (a rework, a yield) wakes the same session by its ID,
+  with what the review asks (`C4_BLOCK_REWORK`) or that the farm resumed
+  it, and the attempt's new output directory.
+- **An attempt ends with its turn.** When the CLI reports the session idle
+  after a turn this attempt saved, the runner stops it. A task it finished
+  (`done`) ends the pod **Completed**, with its control documents from its
+  own output directory only (block sessions share their folder, so the
+  folder's `.c4/` never counts). A task it gave up on (`blocked`) fails the
+  attempt (**BlockGaveUp**), for the job's retries or a person.
+- **A session that cannot become the member** (its transcript never
+  appears) is stopped, so a retry never leaves one running.
+
+What the host needs:
+- `--blocks-cwd` must be a folder the claude CLI trusts **exactly** (a
+  background session refuses an untrusted folder, and trust is not
+  inherited by subfolders). Keep the repository, `--units-dir` and the
+  tools' binaries under it, so the file tools can reach them.
+- The commands a block runs must match `C4_BLOCK_TOOLS` whole: the prompt
+  asks for one command at a time, absolute paths, `git -C` and `go -C`.
+- The account the sessions run as still shows in their context (its
+  email); restricted mode removes everything else of the machine's.
+
 ## Capacity under a power cap, and the bundle's clock
 
 The runner can lower the slots its machine offers, for example from the
