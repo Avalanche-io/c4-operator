@@ -67,6 +67,14 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [capacityrequests]
   verbs: [create, update, patch, delete]
+# Burst through Cluster Autoscaler (--capacity-provider provisioning-request):
+# ProvisioningRequests and their PodTemplates, in the operator's namespace.
+- apiGroups: [autoscaling.x-k8s.io]
+  resources: [provisioningrequests]
+  verbs: [get, list, watch, create, delete]
+- apiGroups: [""]
+  resources: [podtemplates]
+  verbs: [get, list, watch, create]
 # Unit pods run at the c4-unit PriorityClass when it exists.
 - apiGroups: [scheduling.k8s.io]
   resources: [priorityclasses]

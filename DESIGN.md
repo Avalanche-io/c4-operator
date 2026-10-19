@@ -1760,6 +1760,27 @@ Actuators turn them into the platform's own APIs:
 | `keda`               | exports `c4_capacity_requested_slots{pool}` and `c4_work_required_slots{pool}` for a KEDA ScaledObject                                                                 |
 | `kind-sim`           | the e2e stand-in: provisioning removes a `c4.avalanche.io/unprovisioned` taint from pre-created nodes after the pool's delay                                           |
 
+The `cluster-autoscaler` actuator is built (`--capacity-provider
+provisioning-request`, `internal/work/provreq`), for burst pools whose
+provider is `provisioning-request`.
+
+- **Shape.** A pool's slots are counted in nodes. Its PodTemplate is one
+  token pod per node (required anti-affinity on the hostname), with the
+  pool's node selector and tolerations, so `count` means nodes whatever
+  their size.
+- **Per decision.** Each burst decision (each generation of the pool's
+  CapacityRequest) gets fresh requests, because the spec is immutable and a
+  booking lasts ten minutes. First `check-capacity` asks whether existing
+  nodes have the room; if they do, it is booked and the queue's units take
+  it. If not, `best-effort-atomic-scale-up` adds them, with
+  `ValidUntilSeconds` four provisioning delays.
+- **Rounds.** A booking that expires, a scale-up that fails or capacity
+  that is revoked while the pool is still short starts a new round after a
+  minute. Requests the pool no longer needs are deleted. The
+  CapacityRequest's status says where it stands.
+- **kind-sim** runs alongside it unchanged; each actuator acts only on the
+  pools that name it.
+
 Burst decisions are cost-aware:
 
 - A burst is considered when a job is infeasible on current capacity and the

@@ -39,6 +39,7 @@ import (
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
 	"github.com/Avalanche-io/c4-operator/internal/work/kindsim"
 	"github.com/Avalanche-io/c4-operator/internal/work/placement"
+	"github.com/Avalanche-io/c4-operator/internal/work/provreq"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 	"github.com/Avalanche-io/c4-operator/work/sched"
 	"github.com/Avalanche-io/c4-operator/work/topology"
@@ -79,7 +80,7 @@ func runManager(args []string) error {
 	tick := fs.Duration("work-tick", 2*time.Second, "work queue decision period")
 	unitPriority := fs.String("unit-priority-class", "c4-unit", "PriorityClass for unit pods (preemptionPolicy Never: only c4 preempts them); empty sets none")
 	policy := fs.String("work-policy", "objective", "scheduling policy: objective, edf, fifo")
-	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process: kind-sim (tests), or empty for an external provider")
+	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process, comma-separated: kind-sim (tests), provisioning-request (Cluster Autoscaler); empty for an external provider")
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name[@role]=project|project;... (* for all projects; a name that is a role, such as wrangler, has that role)")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
@@ -193,8 +194,20 @@ func runManager(args []string) error {
 			return err
 		}
 	}
-	if *provider == "kind-sim" {
-		if err := mgr.Add(&kindsim.Actuator{Client: mgr.GetClient(), Log: ctrl.Log.WithName("kind-sim")}); err != nil {
+	for _, p := range strings.Split(*provider, ",") {
+		// Each actuator acts only on the burst pools that name it.
+		var r manager.Runnable
+		switch strings.TrimSpace(p) {
+		case "":
+			continue
+		case "kind-sim":
+			r = &kindsim.Actuator{Client: mgr.GetClient(), Log: ctrl.Log.WithName("kind-sim")}
+		case provreq.Provider:
+			r = &provreq.Actuator{Client: mgr.GetClient(), Log: ctrl.Log.WithName("provisioning-request"), Namespace: *namespace}
+		default:
+			return fmt.Errorf("--capacity-provider %q: want kind-sim or provisioning-request", p)
+		}
+		if err := mgr.Add(r); err != nil {
 			return err
 		}
 	}
