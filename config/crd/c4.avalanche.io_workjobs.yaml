@@ -698,6 +698,9 @@ spec:
                     cacheReadTokens:
                       format: int64
                       type: integer
+                    cacheWriteTokens:
+                      format: int64
+                      type: integer
                     cost:
                       description: |-
                         Cost of the priced tokens, and SlotCost of the unit's slot time,
@@ -707,6 +710,10 @@ spec:
                       description: |-
                         CostSource says where the price came from (a metering proxy, a
                         price table).
+                      type: string
+                    estimatedCost:
+                      description: EstimatedCost is the unpriced tokens at published
+                        rates.
                       type: string
                     inputTokens:
                       format: int64
@@ -718,9 +725,17 @@ spec:
                           cacheReadTokens:
                             format: int64
                             type: integer
+                          cacheWriteTokens:
+                            format: int64
+                            type: integer
                           cost:
                             description: Cost of its priced tokens; absent when none
                               were priced.
+                            type: string
+                          estimatedCost:
+                            description: |-
+                              EstimatedCost is its unpriced tokens at its published rates;
+                              Unpriceable says the model's rates are not known.
                             type: string
                           inputTokens:
                             format: int64
@@ -730,7 +745,15 @@ spec:
                           outputTokens:
                             format: int64
                             type: integer
+                          unpriceable:
+                            type: boolean
                           unpricedTokens:
+                            format: int64
+                            type: integer
+                          unpricedWeightedTokens:
+                            format: int64
+                            type: integer
+                          weightedTokens:
                             format: int64
                             type: integer
                         required:
@@ -743,6 +766,12 @@ spec:
                     slotCost:
                       type: string
                     unpricedTokens:
+                      format: int64
+                      type: integer
+                    unpricedWeightedTokens:
+                      format: int64
+                      type: integer
+                    weightedTokens:
                       format: int64
                       type: integer
                   type: object
@@ -935,17 +964,34 @@ spec:
                   Spend is what the job's units cost so far, split between
                   procedural and model units (LLM-OR-PROCEDURE 6.2).
                 properties:
+                  cacheReadTokens:
+                    format: int64
+                    type: integer
+                  cacheWriteTokens:
+                    format: int64
+                    type: integer
+                  estimatedTokenCost:
+                    type: string
+                  inputTokens:
+                    format: int64
+                    type: integer
                   modelShare:
-                    description: ModelShare is model units' part of the job's spend,
-                      0 to 1.
+                    description: |-
+                      ModelShare is model units' part of the job's spend, 0 to 1, with
+                      unpriced tokens at their estimate. ModelShareBasis says how it was
+                      reached: priced (every token came with a price), estimated (some at
+                      published rates), or partial (some tokens are of a model with no
+                      known price, and are left out).
+                    type: string
+                  modelShareBasis:
                     type: string
                   modelSlotCost:
                     type: string
                   modelTokens:
                     description: |-
-                      ModelTokens is every token model units used (input, output and
-                      cache reads), and UnpricedTokens those no price came with (they
-                      are not in TokenCost).
+                      ModelTokens is every token model units used, raw (input, output,
+                      cache reads and writes), and UnpricedTokens those no price came
+                      with. The classes are counted apart below: they are priced apart.
                     format: int64
                     type: integer
                   modelUnits:
@@ -954,6 +1000,9 @@ spec:
                       have run.
                     format: int32
                     type: integer
+                  outputTokens:
+                    format: int64
+                    type: integer
                   proceduralSlotCost:
                     type: string
                   proceduralUnits:
@@ -961,10 +1010,22 @@ spec:
                     type: integer
                   tokenCost:
                     description: |-
-                      TokenCost is what those tokens cost; ModelSlotCost and
-                      ProceduralSlotCost the slot time of each kind.
+                      TokenCost is what the priced tokens cost, as reported;
+                      EstimatedTokenCost what the unpriced ones would at their models'
+                      published rates. ModelSlotCost and ProceduralSlotCost are the slot
+                      time of each kind.
                     type: string
                   unpricedTokens:
+                    format: int64
+                    type: integer
+                  unpricedWeightedTokens:
+                    format: int64
+                    type: integer
+                  weightedTokens:
+                    description: |-
+                      WeightedTokens are the model tokens in input-equivalents (work/tokens:
+                      output 5, cache writes 1.25, cache reads 0.1 or the model's rate),
+                      and UnpricedWeightedTokens the unpriced ones.
                     format: int64
                     type: integer
                 type: object

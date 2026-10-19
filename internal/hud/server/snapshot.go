@@ -225,7 +225,10 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	if sp := st.Spend; sp != nil {
 		f := func(x string) float64 { v, _ := strconv.ParseFloat(x, 64); return v }
 		aj.Spend = &api.Spend{ModelUnits: int(sp.ModelUnits), ProceduralUnits: int(sp.ProceduralUnits), ModelTokens: sp.ModelTokens, UnpricedTokens: sp.UnpricedTokens,
-			TokenCost: f(sp.TokenCost), ModelSlotCost: f(sp.ModelSlotCost), ProceduralSlotCost: f(sp.ProceduralSlotCost), ModelShare: f(sp.ModelShare)}
+			InputTokens: sp.InputTokens, OutputTokens: sp.OutputTokens, CacheReadTokens: sp.CacheReadTokens, CacheWriteTokens: sp.CacheWriteTokens,
+			WeightedTokens: sp.WeightedTokens, UnpricedWeightedTokens: sp.UnpricedWeightedTokens, EstimatedTokenCost: f(sp.EstimatedTokenCost),
+			ModelShareBasis: sp.ModelShareBasis,
+			TokenCost:       f(sp.TokenCost), ModelSlotCost: f(sp.ModelSlotCost), ProceduralSlotCost: f(sp.ProceduralSlotCost), ModelShare: f(sp.ModelShare)}
 	}
 	if ms := st.Measure; ms != nil {
 		aj.Measure = &api.Measure{Name: ms.Name, Value: ms.Value, Of: ms.Of, Done: ms.Done, Detail: ms.Detail,

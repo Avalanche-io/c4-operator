@@ -538,24 +538,49 @@ type WorkSpend struct {
 	ModelUnits int32 `json:"modelUnits,omitempty"`
 	// +optional
 	ProceduralUnits int32 `json:"proceduralUnits,omitempty"`
-	// ModelTokens is every token model units used (input, output and
-	// cache reads), and UnpricedTokens those no price came with (they
-	// are not in TokenCost).
+	// ModelTokens is every token model units used, raw (input, output,
+	// cache reads and writes), and UnpricedTokens those no price came
+	// with. The classes are counted apart below: they are priced apart.
 	// +optional
 	ModelTokens int64 `json:"modelTokens,omitempty"`
 	// +optional
 	UnpricedTokens int64 `json:"unpricedTokens,omitempty"`
-	// TokenCost is what those tokens cost; ModelSlotCost and
-	// ProceduralSlotCost the slot time of each kind.
+	// +optional
+	InputTokens int64 `json:"inputTokens,omitempty"`
+	// +optional
+	OutputTokens int64 `json:"outputTokens,omitempty"`
+	// +optional
+	CacheReadTokens int64 `json:"cacheReadTokens,omitempty"`
+	// +optional
+	CacheWriteTokens int64 `json:"cacheWriteTokens,omitempty"`
+	// WeightedTokens are the model tokens in input-equivalents (work/tokens:
+	// output 5, cache writes 1.25, cache reads 0.1 or the model's rate),
+	// and UnpricedWeightedTokens the unpriced ones.
+	// +optional
+	WeightedTokens int64 `json:"weightedTokens,omitempty"`
+	// +optional
+	UnpricedWeightedTokens int64 `json:"unpricedWeightedTokens,omitempty"`
+	// TokenCost is what the priced tokens cost, as reported;
+	// EstimatedTokenCost what the unpriced ones would at their models'
+	// published rates. ModelSlotCost and ProceduralSlotCost are the slot
+	// time of each kind.
 	// +optional
 	TokenCost string `json:"tokenCost,omitempty"`
+	// +optional
+	EstimatedTokenCost string `json:"estimatedTokenCost,omitempty"`
 	// +optional
 	ModelSlotCost string `json:"modelSlotCost,omitempty"`
 	// +optional
 	ProceduralSlotCost string `json:"proceduralSlotCost,omitempty"`
-	// ModelShare is model units' part of the job's spend, 0 to 1.
+	// ModelShare is model units' part of the job's spend, 0 to 1, with
+	// unpriced tokens at their estimate. ModelShareBasis says how it was
+	// reached: priced (every token came with a price), estimated (some at
+	// published rates), or partial (some tokens are of a model with no
+	// known price, and are left out).
 	// +optional
 	ModelShare string `json:"modelShare,omitempty"`
+	// +optional
+	ModelShareBasis string `json:"modelShareBasis,omitempty"`
 }
 
 // WorkUnitUsage is one model unit's use of models over its attempts:
@@ -568,7 +593,16 @@ type WorkUnitUsage struct {
 	// +optional
 	CacheReadTokens int64 `json:"cacheReadTokens,omitempty"`
 	// +optional
+	CacheWriteTokens int64 `json:"cacheWriteTokens,omitempty"`
+	// +optional
 	UnpricedTokens int64 `json:"unpricedTokens,omitempty"`
+	// +optional
+	WeightedTokens int64 `json:"weightedTokens,omitempty"`
+	// +optional
+	UnpricedWeightedTokens int64 `json:"unpricedWeightedTokens,omitempty"`
+	// EstimatedCost is the unpriced tokens at published rates.
+	// +optional
+	EstimatedCost string `json:"estimatedCost,omitempty"`
 	// Cost of the priced tokens, and SlotCost of the unit's slot time,
 	// decimal strings in US dollars.
 	// +optional
@@ -593,7 +627,19 @@ type WorkModelTokens struct {
 	// +optional
 	CacheReadTokens int64 `json:"cacheReadTokens,omitempty"`
 	// +optional
+	CacheWriteTokens int64 `json:"cacheWriteTokens,omitempty"`
+	// +optional
 	UnpricedTokens int64 `json:"unpricedTokens,omitempty"`
+	// +optional
+	WeightedTokens int64 `json:"weightedTokens,omitempty"`
+	// +optional
+	UnpricedWeightedTokens int64 `json:"unpricedWeightedTokens,omitempty"`
+	// EstimatedCost is its unpriced tokens at its published rates;
+	// Unpriceable says the model's rates are not known.
+	// +optional
+	EstimatedCost string `json:"estimatedCost,omitempty"`
+	// +optional
+	Unpriceable bool `json:"unpriceable,omitempty"`
 	// Cost of its priced tokens; absent when none were priced.
 	// +optional
 	Cost string `json:"cost,omitempty"`

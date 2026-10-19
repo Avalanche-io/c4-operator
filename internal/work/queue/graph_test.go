@@ -447,7 +447,8 @@ func TestSpendByKind(t *testing.T) {
 		// Three units ran: root and check procedural, impl a model unit.
 		// Each ran half an hour on one slot at $0.40 a slot-hour.
 		if sp == nil || sp.ModelUnits != 1 || sp.ProceduralUnits != 2 || sp.ModelTokens != 220000 || sp.UnpricedTokens != 2000 || sp.TokenCost != "1.9200" ||
-			sp.ModelSlotCost != "0.2000" || sp.ProceduralSlotCost != "0.4000" || sp.ModelShare != "0.841" {
+			sp.ModelSlotCost != "0.2000" || sp.ProceduralSlotCost != "0.4000" || sp.ModelShare != "0.841" ||
+			sp.EstimatedTokenCost != "0.0002" || sp.ModelShareBasis != "estimated" || sp.CacheReadTokens != 90000 || sp.InputTokens != 122000 {
 			t.Fatalf("%s: spend %+v", when, sp)
 		}
 		if u := got.Status.ModelUsage["1"]; len(u.Models) != 2 || u.Models[1].Model != "claude-opus-5-5" || u.InputTokens != 122000 || u.Cost != "1.9200" ||
@@ -459,4 +460,37 @@ func TestSpendByKind(t *testing.T) {
 	q = &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
 	tick(t, q)
 	check("after a restart")
+}
+
+// Cache reads are weighed by what they cost, not counted at full weight:
+// a session that reads its context from the cache, priced by nobody,
+// comes to its published price, and a model with no known price leaves
+// the share partial.
+func TestUnpricedCacheReadsAreWeighted(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "agent", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "lane", "kind": "model"}, {"name": "other", "kind": "model"}]}`)
+	finish(t, podOfUnit(t, ns, "agent", 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	// agent-jobs' measured session, on Sonnet 5.5 at $2 a million input.
+	usage := putDoc(t, st, `{"models": [{"model": "claude-sonnet-5-5", "inputTokens": 2112, "outputTokens": 1060000,
+		"cacheReadTokens": 514000000, "cacheWriteTokens": 9233}]}`)
+	finish(t, podOfUnit(t, ns, "agent", 1), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputUsage: usage})
+	tick(t, q)
+	sp := get(t, ns, "agent").Status.Spend
+	// weighted: 2112 + 5 x 1,060,000 + 1.25 x 9,233 + 0.1 x 514,000,000 = 56,713,653
+	if sp.ModelTokens != 515071345 || sp.CacheReadTokens != 514000000 || sp.CacheWriteTokens != 9233 ||
+		sp.WeightedTokens != 56713653 || sp.UnpricedWeightedTokens != 56713653 || sp.EstimatedTokenCost != "113.4273" || sp.ModelShareBasis != "estimated" {
+		t.Fatalf("spend %+v", sp)
+	}
+	other := putDoc(t, st, `{"models": [{"model": "some-other-model", "inputTokens": 1000}]}`)
+	finish(t, podOfUnit(t, ns, "agent", 2), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputUsage: other})
+	tick(t, q)
+	if sp := get(t, ns, "agent").Status.Spend; sp.ModelShareBasis != "partial" || sp.EstimatedTokenCost != "113.4273" {
+		t.Fatalf("with an unknown model: %+v", sp)
+	}
 }

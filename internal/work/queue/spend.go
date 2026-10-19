@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 
@@ -14,6 +15,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/work/process"
+	"github.com/Avalanche-io/c4-operator/work/tokens"
 )
 
 // Spend, procedural and model (LLM-OR-PROCEDURE 6.2). Every unit is
@@ -35,11 +37,12 @@ import (
 // that should be mechanical is what the HUD can flag.
 
 type modelUse struct {
-	Model           string   `json:"model"`
-	InputTokens     int64    `json:"inputTokens"`
-	OutputTokens    int64    `json:"outputTokens"`
-	CacheReadTokens int64    `json:"cacheReadTokens"`
-	CostUSD         *float64 `json:"costUSD,omitempty"`
+	Model            string   `json:"model"`
+	InputTokens      int64    `json:"inputTokens"`
+	OutputTokens     int64    `json:"outputTokens"`
+	CacheReadTokens  int64    `json:"cacheReadTokens"`
+	CacheWriteTokens int64    `json:"cacheWriteTokens"`
+	CostUSD          *float64 `json:"costUSD,omitempty"`
 }
 
 type usageDoc struct {
@@ -48,12 +51,20 @@ type usageDoc struct {
 	CostSource string     `json:"costSource"`
 }
 
-func (m modelUse) tokens() int64 { return m.InputTokens + m.OutputTokens + m.CacheReadTokens }
+func (m modelUse) counts() tokens.Counts {
+	return tokens.Counts{Input: m.InputTokens, Output: m.OutputTokens, CacheRead: m.CacheReadTokens, CacheWrite: m.CacheWriteTokens}
+}
 
-// tokenUse is one model's tokens in a unit, and what the priced ones cost.
+// tokenUse is one model's tokens in a unit by class; what the priced ones
+// cost; and the unpriced ones raw, weighted (work/tokens), and at the
+// model's published rates when the model is known (unknown says one is
+// not).
 type tokenUse struct {
-	in, out, cache, unpriced int64
-	cost                     float64
+	tokens.Counts
+	cost               float64
+	unpriced           int64
+	unpricedW, estCost float64
+	unknown            bool
 }
 
 // unitSpend is one unit's spend over its attempts.
@@ -64,7 +75,8 @@ type unitSpend struct {
 }
 
 func (s *unitSpend) add(u modelUse) {
-	if u.tokens() == 0 && u.CostUSD == nil {
+	c := u.counts()
+	if c.Raw() == 0 && u.CostUSD == nil {
 		return
 	}
 	if s.models == nil {
@@ -75,13 +87,20 @@ func (s *unitSpend) add(u modelUse) {
 		t = &tokenUse{}
 		s.models[u.Model] = t
 	}
-	t.in += u.InputTokens
-	t.out += u.OutputTokens
-	t.cache += u.CacheReadTokens
+	t.Input += c.Input
+	t.Output += c.Output
+	t.CacheRead += c.CacheRead
+	t.CacheWrite += c.CacheWrite
 	if u.CostUSD != nil {
 		t.cost += *u.CostUSD
+		return
+	}
+	t.unpriced += c.Raw()
+	t.unpricedW += tokens.Weighted(u.Model, c)
+	if est, ok := tokens.Estimate(u.Model, c); ok {
+		t.estCost += est
 	} else {
-		t.unpriced += u.tokens()
+		t.unknown = true
 	}
 }
 
@@ -159,8 +178,10 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 		}
 	}
 	proc := m.procBase
-	var tokens, unpriced int64
-	var tokenCost, modelSlot float64
+	var all tokens.Counts
+	var raw, unpriced int64
+	var weighted, unpricedW, tokenCost, estCost, modelSlot float64
+	unknown := false
 	usage := map[string]c4v1.WorkUnitUsage{}
 	for idx, s := range m.spend {
 		if !isModel(idx) {
@@ -174,33 +195,68 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 			names = append(names, name)
 		}
 		sort.Strings(names)
-		cost := 0.0
+		cost, est, w, uw := 0.0, 0.0, 0.0, 0.0
 		for _, name := range names {
 			t := s.models[name]
-			u.InputTokens += t.in
-			u.OutputTokens += t.out
-			u.CacheReadTokens += t.cache
+			u.InputTokens += t.Input
+			u.OutputTokens += t.Output
+			u.CacheReadTokens += t.CacheRead
+			u.CacheWriteTokens += t.CacheWrite
 			u.UnpricedTokens += t.unpriced
 			cost += t.cost
-			mt := c4v1.WorkModelTokens{Model: name, InputTokens: t.in, OutputTokens: t.out, CacheReadTokens: t.cache, UnpricedTokens: t.unpriced}
+			est += t.estCost
+			tw := tokens.Weighted(name, t.Counts)
+			w += tw
+			uw += t.unpricedW
+			unknown = unknown || t.unknown
+			mt := c4v1.WorkModelTokens{Model: name, InputTokens: t.Input, OutputTokens: t.Output, CacheReadTokens: t.CacheRead,
+				CacheWriteTokens: t.CacheWrite, WeightedTokens: int64(math.Round(tw)), UnpricedTokens: t.unpriced,
+				UnpricedWeightedTokens: int64(math.Round(t.unpricedW)), Unpriceable: t.unknown}
 			if t.cost > 0 || t.unpriced == 0 {
 				mt.Cost = money(t.cost)
 			}
+			if t.estCost > 0 {
+				mt.EstimatedCost = money(t.estCost)
+			}
 			u.Models = append(u.Models, mt)
+			all.Input += t.Input
+			all.Output += t.Output
+			all.CacheRead += t.CacheRead
+			all.CacheWrite += t.CacheWrite
 		}
 		u.Cost = money(cost)
-		tokens += u.InputTokens + u.OutputTokens + u.CacheReadTokens
+		if est > 0 {
+			u.EstimatedCost = money(est)
+		}
+		u.WeightedTokens, u.UnpricedWeightedTokens = int64(math.Round(w)), int64(math.Round(uw))
+		raw += u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheWriteTokens
 		unpriced += u.UnpricedTokens
+		weighted += w
+		unpricedW += uw
 		tokenCost += cost
+		estCost += est
 		usage[strconv.Itoa(idx)] = u
 	}
-	total := tokenCost + modelSlot + proc
+	// The model share counts reported costs, and for tokens no price came
+	// with, their estimate at the model's published rates; a model it
+	// cannot price leaves the share partial.
+	basis := "priced"
+	switch {
+	case unknown:
+		basis = "partial"
+	case unpriced > 0:
+		basis = "estimated"
+	}
+	total := tokenCost + estCost + modelSlot + proc
 	share := 0.0
 	if total > 0 {
-		share = (tokenCost + modelSlot) / total
+		share = (tokenCost + estCost + modelSlot) / total
 	}
-	out := &c4v1.WorkSpend{ModelUnits: int32(mu), ProceduralUnits: int32(pu), ModelTokens: tokens, UnpricedTokens: unpriced,
-		TokenCost: money(tokenCost), ModelSlotCost: money(modelSlot), ProceduralSlotCost: money(proc), ModelShare: fmt.Sprintf("%.3f", share)}
+	out := &c4v1.WorkSpend{ModelUnits: int32(mu), ProceduralUnits: int32(pu), ModelTokens: raw, UnpricedTokens: unpriced,
+		InputTokens: all.Input, OutputTokens: all.Output, CacheReadTokens: all.CacheRead, CacheWriteTokens: all.CacheWrite,
+		WeightedTokens: int64(math.Round(weighted)), UnpricedWeightedTokens: int64(math.Round(unpricedW)),
+		TokenCost: money(tokenCost), EstimatedTokenCost: money(estCost), ModelSlotCost: money(modelSlot), ProceduralSlotCost: money(proc),
+		ModelShare: fmt.Sprintf("%.3f", share), ModelShareBasis: basis}
 	if len(usage) == 0 {
 		usage = nil
 	}
@@ -223,8 +279,9 @@ func (m *jobMem) loadSpend(st *c4v1.WorkJobStatus) {
 		}
 		s := &unitSpend{slotCost: f(u.SlotCost), costSource: u.CostSource, models: map[string]*tokenUse{}}
 		for _, mt := range u.Models {
-			s.models[mt.Model] = &tokenUse{in: mt.InputTokens, out: mt.OutputTokens, cache: mt.CacheReadTokens,
-				unpriced: mt.UnpricedTokens, cost: f(mt.Cost)}
+			s.models[mt.Model] = &tokenUse{Counts: tokens.Counts{Input: mt.InputTokens, Output: mt.OutputTokens, CacheRead: mt.CacheReadTokens,
+				CacheWrite: mt.CacheWriteTokens}, unpriced: mt.UnpricedTokens, unpricedW: float64(mt.UnpricedWeightedTokens),
+				cost: f(mt.Cost), estCost: f(mt.EstimatedCost), unknown: mt.Unpriceable}
 		}
 		if m.spend == nil {
 			m.spend = map[int]*unitSpend{}

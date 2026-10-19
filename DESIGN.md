@@ -1447,9 +1447,34 @@ and a sweep planner that spawns trials are all generators.
     capture as `c4.avalanche.io/output-usage`). The cost is optional, with
     its source named, because the price is known to a metering proxy or a
     price table rather than to the session.
-  - **What status shows.** `status.spend` has the units of each kind, model
-    tokens and the unpriced ones, token cost, each kind's slot cost and the
-    model share of spend. `status.modelUsage` has each model unit's tokens
+  - **Token classes are weighed by what they cost** (`work/tokens`).
+    Relative to a model's base input price, Anthropic's published rates
+    (platform.claude.com/docs/en/about-claude/pricing and
+    .../build-with-claude/prompt-caching, as of 2026-10-06) put output at 5,
+    a cache write at 1.25 (5-minute lifetime; 2 for an hour), and a cache
+    read at 0.1. The cache read is 0.05 on Claude Opus 5.5 and 0.025 on
+    Claude Fable 5.1 and Claude Mythos 5.1.
+    - **Weighted tokens.** They are the input-equivalent sum. Usage does not
+      say a write's lifetime, so writes are weighed at the 5-minute rate.
+    - **Why it matters.** It keeps an agent session honest, since its cache
+      reads dwarf everything else: one measured session read 514M cached
+      tokens against 1.06M output. Raw, that is 515M tokens; weighted it is
+      56.7M input-equivalents, about $113 on Claude Sonnet 5.5 rather than
+      $1,030.
+    - **Estimated cost.** Tokens that came with no price are estimated at
+      the model's published input price times their weight (a dated table
+      of current Claude models). A model the table does not know is left
+      out, and the share says so.
+  - **What status shows.** `status.spend` has:
+    - the units of each kind;
+    - the raw token classes (input, output, cache reads, cache writes) and
+      their weighted total;
+    - the unpriced tokens, raw and weighted;
+    - the reported token cost and the estimate for unpriced tokens;
+    - each kind's slot cost;
+    - the model share of spend, with its basis: `priced`, `estimated` (some
+      at published rates) or `partial` (some of a model with no known
+      price, left out). `status.modelUsage` has each model unit's tokens
     by model. The HUD's job summary shows `spend`, and its unit list
     `kind` and `usage`.
   - **Reuse** is C4-native memoization, which Argo's string-keyed one

@@ -188,14 +188,25 @@ type Project struct {
 // tokens at the prices its model units reported, in US dollars, and the
 // model units' share of it (LLM-OR-PROCEDURE 6.2).
 type Spend struct {
-	ModelUnits         int     `json:"modelUnits"`
-	ProceduralUnits    int     `json:"proceduralUnits"`
-	ModelTokens        int64   `json:"modelTokens"`
-	UnpricedTokens     int64   `json:"unpricedTokens,omitempty"`
-	TokenCost          float64 `json:"tokenCost"`
-	ModelSlotCost      float64 `json:"modelSlotCost"`
-	ProceduralSlotCost float64 `json:"proceduralSlotCost"`
-	ModelShare         float64 `json:"modelShare"`
+	ModelUnits      int   `json:"modelUnits"`
+	ProceduralUnits int   `json:"proceduralUnits"`
+	ModelTokens     int64 `json:"modelTokens"`
+	UnpricedTokens  int64 `json:"unpricedTokens,omitempty"`
+	// The token classes, raw, and model tokens weighted by price
+	// (input-equivalents); a dollar of output is not a dollar of cache
+	// reads.
+	InputTokens            int64   `json:"inputTokens,omitempty"`
+	OutputTokens           int64   `json:"outputTokens,omitempty"`
+	CacheReadTokens        int64   `json:"cacheReadTokens,omitempty"`
+	CacheWriteTokens       int64   `json:"cacheWriteTokens,omitempty"`
+	WeightedTokens         int64   `json:"weightedTokens,omitempty"`
+	UnpricedWeightedTokens int64   `json:"unpricedWeightedTokens,omitempty"`
+	EstimatedTokenCost     float64 `json:"estimatedTokenCost,omitempty"`
+	ModelShareBasis        string  `json:"modelShareBasis,omitempty"`
+	TokenCost              float64 `json:"tokenCost"`
+	ModelSlotCost          float64 `json:"modelSlotCost"`
+	ProceduralSlotCost     float64 `json:"proceduralSlotCost"`
+	ModelShare             float64 `json:"modelShare"`
 }
 
 // Measure is a job's own measure of done: value of the target, from the

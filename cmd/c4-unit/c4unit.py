@@ -65,10 +65,11 @@ def measure(value, of=None, name=None, detail=None):
     _run(*args, str(value))
 
 
-def usage(model, input_tokens=0, output_tokens=0, cache_read_tokens=0, cost_usd=None, cost_source=None):
+def usage(model, input_tokens=0, output_tokens=0, cache_read_tokens=0, cost_usd=None, cost_source=None,
+          cache_write_tokens=0):
     """Add a model call's tokens, and its cost if known, to the unit's spend."""
     args = ["usage", "--model", model, "--input", str(input_tokens), "--output", str(output_tokens),
-            "--cache-read", str(cache_read_tokens)]
+            "--cache-read", str(cache_read_tokens), "--cache-write", str(cache_write_tokens)]
     if cost_usd is not None:
         args += ["--cost", repr(float(cost_usd))]
     if cost_source:
