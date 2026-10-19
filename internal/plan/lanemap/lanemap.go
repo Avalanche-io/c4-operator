@@ -12,8 +12,8 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/plan"
 )
 
-// Import reads a plan written as a lane map: the layout Ra's plan uses
-// (docs/plan: LANES.md, a milestone file such as M1.md, and charters/).
+// Import reads a plan written as a lane map: a plan directory holding
+// LANES.md, a milestone file such as M1.md, and charters/.
 // milestone selects the charters and the milestone file ("M1").
 //
 // What it reads, each edge citing its sentence:

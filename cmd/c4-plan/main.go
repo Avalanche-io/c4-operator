@@ -11,7 +11,7 @@
 //     blocks (internal/plan.File). This is the format to keep a plan in;
 //   - a directory (format "lanemap"): a plan written as prose in the
 //     lane-map layout (LANES.md, the milestone's file, charters/), read by
-//     sentence patterns. Ra's plan is one such plan.
+//     sentence patterns.
 //
 // EXTRA.yaml lists edges and waits a person adds where a plan states an
 // order in words no adapter reads, each citing the plan:

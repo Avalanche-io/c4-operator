@@ -23,7 +23,7 @@ and nothing about any one project. A plan reaches it through an adapter:
 | format    | `PLAN` is   | for                                                                                         |
 | --------- | ----------- | ------------------------------------------------------------------------------------------- |
 | `file`    | a file      | a plan written as data: the format to keep a plan in                                        |
-| `lanemap` | a directory | a plan written as prose in the lane-map layout, read by sentence patterns (one example: Ra) |
+| `lanemap` | a directory | a plan written as prose in the lane-map layout, read by sentence patterns |
 
 Without `--format`, a file is read as `file` and a directory as `lanemap`.
 Another layout is another adapter: it calls `plan.New`, `Block`, `Edge` and
