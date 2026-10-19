@@ -263,6 +263,8 @@ func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagge
 	switch {
 	case waiting > 0:
 		reason, msg = c4v1.NeedsFailed, fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", waiting)
+	case v.measureShort != "":
+		reason, msg = c4v1.NeedsMeasure, v.measureShort
 	case flagged > 0:
 		reason, msg = c4v1.NeedsReview, fmt.Sprintf("a review escalated %d units%s; decide, requeue, take or accept them", flagged, escalatedTo(v.mem))
 	case personWaitsBlockingN(v.mem) > 0:

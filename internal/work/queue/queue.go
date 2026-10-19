@@ -172,6 +172,8 @@ type jobMem struct {
 	unitOut    map[int]string
 	// gateSince is when each unit waiting for a gate joined its line.
 	gateSince map[int]time.Time
+	// measure is the latest reading of the job's measure (measure.go).
+	measure *c4v1.WorkMeasure
 	// verdicts are the verdicts carried out, and reviews what they last
 	// decided per unit (verdict.go).
 	verdicts []verdictRec
@@ -312,6 +314,10 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		m.interruptions = append(m.interruptions, interruptRec{Unit: int(x.Unit), At: x.At.Time, Reason: x.Reason, Node: x.Node})
 	}
 	m.interruptCount = int(st.Interrupted)
+	if st.Measure != nil && st.Measure.Unit >= 0 && st.Measure.Document != "" {
+		x := *st.Measure
+		m.measure = &x
+	}
 	for _, g := range st.Gates {
 		if g.Position > 0 && g.Since != nil {
 			if m.gateSince == nil {
@@ -401,6 +407,9 @@ type view struct {
 	// or for a gate, and gates the job's units at gates (gates.go).
 	locked map[int]lockInfo
 	gates  []c4v1.WorkGateEntry
+	// measureShort says how a finished job falls short of its required
+	// measure (measure.go).
+	measureShort string
 }
 
 type runInfo struct {
@@ -689,6 +698,11 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				v.finishing[idx] = true
 				continue
 			}
+			mid, mdoc, ok := q.measureOf(ctx, v, p)
+			if !ok {
+				v.finishing[idx] = true
+				continue
+			}
 			if !m.succeeded[idx] && !m.failed[idx] && plan.Units[idx].Generator && !m.expanded(idx) {
 				ok, refused := q.expand(ctx, v, idx, p, now)
 				if !ok {
@@ -702,6 +716,9 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 					v.done = append(v.done, p)
 					continue
 				}
+			}
+			if mid != "" && !m.succeeded[idx] {
+				q.noteMeasure(v, idx, mid, mdoc, finishOf(p, now))
 			}
 			rerun := false
 			if vid != "" && !m.succeeded[idx] && !m.failed[idx] {

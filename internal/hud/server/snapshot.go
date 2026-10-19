@@ -222,6 +222,13 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		Succeeded: us["succeeded"], Failed: us["failed"], Preflight: us["preflight"], Backoff: us["backoff"],
 		Egress: us["egress"], Accepted: us["accepted"], Waits: us["waits"],
 		Unevaluated: us["planned"], Planned: us["planned"], Flagged: us["flagged"], Locked: us["locked"]}
+	if ms := st.Measure; ms != nil {
+		aj.Measure = &api.Measure{Name: ms.Name, Value: ms.Value, Of: ms.Of, Done: ms.Done, Detail: ms.Detail,
+			Required: j.Spec.Measure != nil && j.Spec.Measure.Required}
+		if ms.At != nil {
+			aj.Measure.At = ms.At.Time.UTC()
+		}
+	}
 	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNeedsPerson); c != nil && c.Status == metav1.ConditionTrue {
 		aj.NeedsPerson = &api.NeedsPerson{Reason: strings.ToLower(c.Reason), Message: c.Message, Since: c.LastTransitionTime.Time.UTC()}
 	}

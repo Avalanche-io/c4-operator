@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"image"
 	"image/color"
@@ -170,5 +171,26 @@ func TestSafepoint(t *testing.T) {
 	buf.Reset()
 	if c, _ := run([]string{"safepoint"}, &buf, vars(map[string]string{"C4_OUTPUT": out})); c != 0 || buf.String() != "continue [no decision channel]\n" {
 		t.Fatalf("no farm: %d %q", c, buf.String())
+	}
+}
+
+func TestMeasure(t *testing.T) {
+	out := t.TempDir()
+	e := vars(map[string]string{"C4_OUTPUT": out})
+	if c, err := run([]string{"measure", "--of", "379", "--name", "rules sited", "--detail", "18 pending", "361"}, nil, e); c != 0 || err != nil {
+		t.Fatal(c, err)
+	}
+	b, _ := os.ReadFile(filepath.Join(out, ".c4", "measure.json"))
+	var got struct {
+		Value, Of    int64
+		Name, Detail string
+	}
+	if err := json.Unmarshal(b, &got); err != nil || got.Value != 361 || got.Of != 379 || got.Name != "rules sited" || got.Detail != "18 pending" {
+		t.Fatalf("measure %s %v", b, err)
+	}
+	for _, bad := range [][]string{{"measure"}, {"measure", "-3"}, {"measure", "lots"}} {
+		if c, _ := run(bad, nil, e); c != 2 {
+			t.Errorf("%v accepted", bad)
+		}
 	}
 }

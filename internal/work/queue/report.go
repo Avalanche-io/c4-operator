@@ -203,6 +203,12 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			flaggedWaiting++
 		}
 	}
+	st.Measure = measureStatus(v)
+	short := measureShort(v, st.Measure)
+	v.measureShort = ""
+	if short && len(succ)+len(accepted) == n && len(pre)+len(run)+len(retry)+len(egress) == 0 {
+		v.measureShort = measureMessage(st.Measure)
+	}
 	needsPerson(&st, v, q.approvals[v.key], waiting, flaggedWaiting, v.job.Generation)
 	active := len(pre) + len(run) + len(retry) + len(egress)
 	var att []string
@@ -279,6 +285,9 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 
 	// Accepted units count as done: nothing waits on them.
 	switch {
+	case len(succ)+len(accepted) == n && short && active == 0:
+		// Every unit finished, short of the measure the job requires.
+		st.Phase = "Failed"
 	case len(succ)+len(accepted) == n:
 		st.Phase = "Succeeded"
 	case len(succ)+len(accepted)+len(fail)+len(flag)+len(v.stuck) == n && active == 0:

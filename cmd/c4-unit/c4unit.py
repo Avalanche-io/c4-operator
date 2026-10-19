@@ -52,6 +52,19 @@ def safepoint(checkpoint=None, wait=None):
     return r.returncode == 10
 
 
+def measure(value, of=None, name=None, detail=None):
+    """Report the job's measure of done: value of the target (of, else the
+    job's), such as 361 of 379 rules sited."""
+    args = ["measure"]
+    if of is not None:
+        args += ["--of", str(of)]
+    if name:
+        args += ["--name", name]
+    if detail:
+        args += ["--detail", detail]
+    _run(*args, str(value))
+
+
 def output():
     """The unit's writable mount."""
     return _run("output").stdout.strip()

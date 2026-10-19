@@ -8,6 +8,9 @@
 //	c4-unit safepoint [--checkpoint REF] [--wait 20s]
 //	                                at a safe point, ask the farm whether to stop
 //	                                here: exit 10 (and print "stop") or 0 ("continue")
+//	c4-unit measure [--of N] [--name WHAT] [--detail TEXT] VALUE
+//	                                report the job's measure of done (361 of 379
+//	                                rules sited), as .c4/measure.json
 //	c4-unit resume-dir              print the writable mount if this attempt resumes
 //	c4-unit output                  print the writable mount
 //
@@ -86,6 +89,9 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	width := fs.Int("width", 960, "preview width in pixels")
 	checkpoint := fs.String("checkpoint", "", "with safepoint: what the unit saved there (a step, a path, a session turn), for the record")
 	wait := fs.Duration("wait", 20*time.Second, "with safepoint: how long to wait for the farm's decision before falling back on its last request")
+	of := fs.Int64("of", 0, "with measure: the target (default the job's)")
+	name := fs.String("name", "", "with measure: what is counted (default the job's)")
+	detail := fs.String("detail", "", "with measure: a line of detail for the record")
 	if len(args) == 0 {
 		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | resume-dir | output")
 	}
@@ -121,6 +127,20 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 			return 1, err
 		}
 		return code(preview(e, pos[0], filepath.Join(out, "preview", strconv.Itoa(frame)+".png"), *width))
+	case "measure":
+		if len(pos) != 1 {
+			return 2, errors.New("usage: c4-unit measure [--of N] [--name WHAT] VALUE")
+		}
+		n, err := strconv.ParseInt(pos[0], 10, 64)
+		if err != nil || n < 0 || *of < 0 {
+			return 2, fmt.Errorf("measure %q: a whole number, 0 or more", pos[0])
+		}
+		out, err := output(e, *dir)
+		if err != nil {
+			return 1, err
+		}
+		doc, _ := json.Marshal(map[string]any{"value": n, "of": *of, "name": *name, "detail": *detail})
+		return code(writeAtomic(filepath.Join(out, ".c4", "measure.json"), append(doc, '\n')))
 	case "safepoint":
 		out, err := output(e, *dir)
 		if err != nil {

@@ -57,6 +57,9 @@ const (
 	// of the verdict it wrote (.c4/verdict.json), stored by the node daemon
 	// at capture.
 	AnnotationOutputVerdict = "c4.avalanche.io/output-verdict"
+	// AnnotationOutputMeasure on a finished unit pod is the C4 ID of the
+	// measure reading it wrote (.c4/measure.json), stored at capture.
+	AnnotationOutputMeasure = "c4.avalanche.io/output-measure"
 	// FinalizerUnit is on every unit pod, so a pod deleted while it runs
 	// (a drain, an eviction, a preemption) stays readable until the queue
 	// has recorded how it ended.
@@ -139,6 +142,11 @@ type WorkJobSpec struct {
 	// +optional
 	Pools []string `json:"pools,omitempty"`
 
+	// Measure is the job's own measure of done (PRIMITIVES Q12): a number a
+	// unit reports (.c4/measure.json, c4-unit measure), such as rules
+	// sited of 379, shown as the job's progress.
+	// +optional
+	Measure *WorkMeasureSpec `json:"measure,omitempty"`
 	// DependsOn names jobs in this namespace that must succeed first.
 	// +optional
 	DependsOn []string `json:"dependsOn,omitempty"`
@@ -335,6 +343,9 @@ type WorkJobStatus struct {
 	// Gates lists the job's units at a gate: holding it, or in its line.
 	// +optional
 	Gates []WorkGateEntry `json:"gates,omitempty"`
+	// Measure is the latest reading of the job's measure of done.
+	// +optional
+	Measure *WorkMeasure `json:"measure,omitempty"`
 	// Interruptions lists the most recent attempts the farm stopped (a
 	// drain, an eviction, a preemption, a node going away): they spent no
 	// retry and run again. Interrupted counts them all.
@@ -493,6 +504,37 @@ type WorkExpansion struct {
 	// generator failed.
 	// +optional
 	Error string `json:"error,omitempty"`
+}
+
+// WorkMeasureSpec declares a job's measure of done.
+type WorkMeasureSpec struct {
+	// Name is what is counted ("rules sited").
+	Name string `json:"name"`
+	// Of is the target; a reading may carry its own.
+	// +optional
+	Of *int64 `json:"of,omitempty"`
+	// Required: the job is done only when the measure reaches its target.
+	// With its units finished short of it, the job needs a person.
+	// +optional
+	Required bool `json:"required,omitempty"`
+}
+
+// WorkMeasure is the latest reading of a job's measure.
+type WorkMeasure struct {
+	Name  string `json:"name,omitempty"`
+	Value int64  `json:"value"`
+	// +optional
+	Of int64 `json:"of,omitempty"`
+	// Done: the value reached the target.
+	Done bool `json:"done"`
+	// At is when the reading was taken (absent before the first).
+	// +optional
+	At *metav1.Time `json:"at,omitempty"`
+	// Unit is the unit that reported it, and Document the reading's C4 ID.
+	Unit     int32  `json:"unit"`
+	Document string `json:"document,omitempty"`
+	// +optional
+	Detail string `json:"detail,omitempty"`
 }
 
 // WorkGateEntry is a unit at a gate: the holder (position 0) or a unit
@@ -691,6 +733,9 @@ const (
 	// NeedsReview: a review unit escalated units to a person (they are
 	// flagged): requeue or accept them.
 	NeedsReview = "Review"
+	// NeedsMeasure: the job's units finished short of its required
+	// measure.
+	NeedsMeasure = "Measure"
 	// NeedsDecision: a wait for a person (a ruling, an approval) holds up
 	// work that could otherwise run: decide it.
 	NeedsDecision = "Decision"

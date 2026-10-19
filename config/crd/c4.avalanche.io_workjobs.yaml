@@ -137,6 +137,27 @@ spec:
                 description: 'MaxParallel caps the job''s running units (0: no cap).'
                 format: int32
                 type: integer
+              measure:
+                description: |-
+                  Measure is the job's own measure of done (PRIMITIVES Q12): a number a
+                  unit reports (.c4/measure.json, c4-unit measure), such as rules
+                  sited of 379, shown as the job's progress.
+                properties:
+                  name:
+                    description: Name is what is counted ("rules sited").
+                    type: string
+                  of:
+                    description: Of is the target; a reading may carry its own.
+                    format: int64
+                    type: integer
+                  required:
+                    description: |-
+                      Required: the job is done only when the measure reaches its target.
+                      With its units finished short of it, the job needs a person.
+                    type: boolean
+                required:
+                - name
+                type: object
               nodeErrorLimit:
                 default: 3
                 description: |-
@@ -634,6 +655,40 @@ spec:
                   - unit
                   type: object
                 type: array
+              measure:
+                description: Measure is the latest reading of the job's measure of
+                  done.
+                properties:
+                  at:
+                    description: At is when the reading was taken (absent before the
+                      first).
+                    format: date-time
+                    type: string
+                  detail:
+                    type: string
+                  document:
+                    type: string
+                  done:
+                    description: 'Done: the value reached the target.'
+                    type: boolean
+                  name:
+                    type: string
+                  of:
+                    format: int64
+                    type: integer
+                  unit:
+                    description: Unit is the unit that reported it, and Document the
+                      reading's C4 ID.
+                    format: int32
+                    type: integer
+                  value:
+                    format: int64
+                    type: integer
+                required:
+                - done
+                - unit
+                - value
+                type: object
               observedGeneration:
                 format: int64
                 type: integer

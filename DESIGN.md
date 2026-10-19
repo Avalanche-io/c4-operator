@@ -1404,20 +1404,34 @@ and a sweep planner that spawns trials are all generators.
   - **Scope.** Claims are scoped to the job. A gate is shared across a
     namespace's jobs.
 - **Gates** (Q9; LLM-OR-PROCEDURE 7.2 item 4). A unit of kind gate
-  (\`gate: "merge"\`) passes a resource of one slot shared by every job in its
+  (`gate: "merge"`) passes a resource of one slot shared by every job in its
   namespace: a project's merge gate, its signing step, its one DI suite.
   - **First come, first served.** Units ready to pass queue in the order
     they became ready. While the gate is held, or another unit is ahead,
-    a unit is \`locked\`, with its place in line, the holder and when it is
+    a unit is `locked`, with its place in line, the holder and when it is
     expected to pass (the holder's remaining work plus the predicted work
     of those ahead). Only the head may start when the gate is free, and
     only one unit passes per tick.
-  - **Where the line shows.** Each job's status \`gates\` lists its units at
+  - **Where the line shows.** Each job's status `gates` lists its units at
     gates. Join times survive a restart, so the order does too. The HUD
-    snapshot's \`gates\` gathers each gate's holder and line across jobs,
-    and a waiting unit's \`lockedBy\` names its gate and position.
+    snapshot's `gates` gathers each gate's holder and line across jobs,
+    and a waiting unit's `lockedBy` names its gate and position.
   - **No new scheduling.** A gate unit still needs a slot in its pool; the
     gate only decides which waiting unit may take one.
+- **The job's measure of done** (Q12; LLM-OR-PROCEDURE 7.2 item 3). A job
+  declares what it counts: `spec.measure: {name: "rules sited", of: 379,
+  required: true}`. A unit, usually a procedural one re-run after each
+  merge that reads a manifest, reports a reading with `c4-unit measure
+  --of 379 361` (`.c4/measure.json`, stored at capture as
+  `c4.avalanche.io/output-measure`).
+  - **Shown as progress.** The latest reading by finish time is the job's
+    `status.measure` (`{name, value, of, done, at, unit, document,
+    detail}`), and the HUD's job summary shows it as the job's progress.
+  - **A completion predicate.** A required measure decides when the job is
+    done: the job succeeds only once the value reaches the target. With its
+    units finished short of it, the job fails and needs a person
+    (NeedsPerson `Measure`: "its units finished at 361 of 379 rules
+    sited").
 - **Verdicts.** A review unit judges the units it runs after and writes its
   judgment as `.c4/verdict.json`. The node daemon stores it at capture, as
   `c4.avalanche.io/output-verdict`. When the review succeeds the queue

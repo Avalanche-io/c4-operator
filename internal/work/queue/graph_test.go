@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"slices"
 	"sort"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/Avalanche-io/c4"
@@ -316,5 +318,50 @@ func TestGateIsFirstComeFirstServed(t *testing.T) {
 	a = get(t, ns, "lane-a")
 	if len(a.Status.Gates) != 1 || a.Status.Gates[0].Name != "a2" || a.Status.Gates[0].Position != 1 || a.Status.Gates[0].Holder != ns+"/lane-b#b1" {
 		t.Fatalf("after a restart: %+v", a.Status.Gates)
+	}
+}
+
+// A job's measure of done comes from a unit's reading. Required, it is a
+// completion predicate: a job whose units finished short of it fails and
+// needs a person; one that reached it succeeds.
+func TestMeasureOfDone(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	of := int64(379)
+	for _, name := range []string{"short", "met"} {
+		j := job(ns, name, "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))
+		j.Spec.Measure = &c4v1.WorkMeasureSpec{Name: "rules sited", Of: &of, Required: true}
+		if err := k8s.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tick(t, q)
+	if m := get(t, ns, "short").Status.Measure; m == nil || m.Name != "rules sited" || m.Of != 379 || m.Done {
+		t.Fatalf("before any reading: %+v", m)
+	}
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "lane"}, {"name": "count", "after": ["lane"]}]}`)
+	for _, name := range []string{"short", "met"} {
+		finish(t, podOfUnit(t, ns, name, 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	}
+	tick(t, q)
+	for _, name := range []string{"short", "met"} {
+		finish(t, podOfUnit(t, ns, name, 1), corev1.PodSucceeded, *now, time.Minute, nil)
+	}
+	tick(t, q)
+	*now = now.Add(time.Minute)
+	for name, value := range map[string]int{"short": 361, "met": 379} {
+		reading := putDoc(t, st, fmt.Sprintf(`{"value": %d, "detail": "%d pending"}`, value, 379-value))
+		finish(t, podOfUnit(t, ns, name, 2), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputMeasure: reading})
+	}
+	tick(t, q)
+	tick(t, q)
+	short, met := get(t, ns, "short"), get(t, ns, "met")
+	c := meta.FindStatusCondition(short.Status.Conditions, c4v1.ConditionNeedsPerson)
+	if short.Status.Phase != "Failed" || short.Status.Measure.Value != 361 || short.Status.Measure.Done || c == nil || c.Reason != c4v1.NeedsMeasure ||
+		!strings.Contains(c.Message, "361 of 379 rules sited") {
+		t.Fatalf("short: %s %+v %+v", short.Status.Phase, short.Status.Measure, c)
+	}
+	if met.Status.Phase != "Succeeded" || !met.Status.Measure.Done || met.Status.Measure.Unit != 2 {
+		t.Fatalf("met: %s %+v", met.Status.Phase, met.Status.Measure)
 	}
 }

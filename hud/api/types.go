@@ -184,6 +184,19 @@ type Project struct {
 	GPUHours          float64          `json:"gpuHours"`
 }
 
+// Measure is a job's own measure of done: value of the target, from the
+// latest reading a unit reported.
+type Measure struct {
+	Name   string    `json:"name,omitempty"`
+	Value  int64     `json:"value"`
+	Of     int64     `json:"of,omitempty"`
+	Done   bool      `json:"done"`
+	At     time.Time `json:"at,omitempty"`
+	Detail string    `json:"detail,omitempty"`
+	// Required: the job is done only when the measure is.
+	Required bool `json:"required,omitempty"`
+}
+
 type Counts struct {
 	Total       int `json:"total"`
 	Unevaluated int `json:"unevaluated"`
@@ -396,6 +409,8 @@ type Job struct {
 	Work Work `json:"work"`
 	// NeedsPerson is set while the job waits on a person.
 	NeedsPerson *NeedsPerson `json:"needsPerson,omitempty"`
+	// Measure is the job's own measure of done, when it declares one.
+	Measure *Measure `json:"measure,omitempty"`
 	// Acks are the standing acknowledgements of failed units.
 	Acks []Ack `json:"acks,omitempty"`
 	// Waits are what the job waits for: its wait units (a ruling, an
