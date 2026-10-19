@@ -18,6 +18,9 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/c4-unit ./cmd/c4-u
 
 FROM ${DEBIAN}
 ARG TORCH=2.14.1
+# torchvision must come from the same index as torch: timm needs it, and the
+# PyPI build is compiled against PyPI's torch, not this one
+ARG TORCHVISION=0.29.1
 ARG TORCH_INDEX=https://download.pytorch.org/whl/cpu
 ARG TRANSFORMERS=5.20.1
 ARG OIIO=3.2.1.3
@@ -25,7 +28,7 @@ RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \
  && rm -rf /var/lib/apt/lists/* \
  && python3 -m venv /opt/venv \
- && /opt/venv/bin/pip install --no-cache-dir --index-url "${TORCH_INDEX}" "torch==${TORCH}" \
+ && /opt/venv/bin/pip install --no-cache-dir --index-url "${TORCH_INDEX}" "torch==${TORCH}" "torchvision==${TORCHVISION}" \
  && /opt/venv/bin/pip install --no-cache-dir "transformers==${TRANSFORMERS}" "OpenImageIO==${OIIO}" \
       pillow timm einops kornia \
  && useradd --uid 65532 --user-group --create-home --home-dir /home/c4 --shell /usr/sbin/nologin c4
