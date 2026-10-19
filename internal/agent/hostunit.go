@@ -187,14 +187,16 @@ type relayState struct {
 
 // controlDocs are the documents a member leaves for the farm, as a pod
 // leaves them in its .c4/ (node/control.go): a generator's expansion
-// document and a review unit's verdict.
+// document, a review unit's verdict, and a measure of the job's done.
 var controlDocs = []struct{ file, what, annotation string }{
 	{"expand.json", "expansion document", c4v1.AnnotationOutputExpand},
 	{"verdict.json", "verdict", c4v1.AnnotationOutputVerdict},
+	{"measure.json", "measure", c4v1.AnnotationOutputMeasure},
 }
 
 // storeControlDocs stores the control documents a member wrote and names
-// them on the pod (c4.avalanche.io/output-expand, output-verdict), as the
+// them on the pod (c4.avalanche.io/output-expand, output-verdict,
+// output-measure), as the
 // node daemon does at capture. The member writes each to its unit's
 // out/.c4/ or, when it cannot see $C4_OUTPUT, to .c4/ in its working
 // directory. Without a store a document cannot reach the queue: the runner

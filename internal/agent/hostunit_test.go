@@ -199,6 +199,18 @@ func TestHostControlDocs(t *testing.T) {
 	if pod.Annotations[c4v1.AnnotationOutputVerdict] != vid.String() || pod.Annotations[c4v1.AnnotationOutputExpand] != want.String() {
 		t.Fatalf("output-verdict %q, want %s; output-expand %q", pod.Annotations[c4v1.AnnotationOutputVerdict], vid, pod.Annotations[c4v1.AnnotationOutputExpand])
 	}
+
+	// and a measure of the job's done
+	measure := []byte(`{"value":12,"of":40,"name":"functions ported"}`)
+	if err := os.WriteFile(filepath.Join(u.Out, ".c4", "measure.json"), measure, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.storeControlDocs(ctx, p, m, u); err != nil {
+		t.Fatal(err)
+	}
+	if mid := c4.Identify(bytes.NewReader(measure)); getPod(t, c).Annotations[c4v1.AnnotationOutputMeasure] != mid.String() {
+		t.Fatalf("output-measure %q, want %s", getPod(t, c).Annotations[c4v1.AnnotationOutputMeasure], mid)
+	}
 }
 
 // A pod the queue deletes (a disruption) keeps its finalizer until the

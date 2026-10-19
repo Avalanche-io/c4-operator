@@ -42,8 +42,12 @@ type Unit struct {
 	Slots   int
 	// Group is the row the block belongs to.
 	Group string
-	// Holds are the paths or keys the block writes (10.4).
-	Holds []string
+	// Holds are the paths or keys the block writes (10.4): exclusive
+	// claims. Claims are claims with a mode; Gate names the one-slot gate
+	// the block passes.
+	Holds  []string
+	Claims []class.DocClaim
+	Gate   string
 	// Params are facts from the plan, carried to the queue as they are.
 	Params map[string]string
 	// Cites says where each edge in After came from.
@@ -142,7 +146,7 @@ func (p *Plan) Doc() (*class.Doc, error) {
 		exists := u.Exists
 		du := class.DocUnit{Name: u.Name, Label: u.Label, Key: u.Key, After: slices.Sorted(slices.Values(u.After)),
 			Work: u.Work, WorkSD: u.WorkSD, Exists: &exists, Planned: u.Planned, Env: u.Env, Inputs: u.Inputs,
-			Slots: u.Slots, Group: u.Group, Holds: slices.Compact(slices.Sorted(slices.Values(u.Holds))), Wait: u.Wait}
+			Slots: u.Slots, Group: u.Group, Holds: slices.Compact(slices.Sorted(slices.Values(u.Holds))), Claims: u.Claims, Gate: u.Gate, Wait: u.Wait}
 		if len(du.Holds) == 0 {
 			du.Holds = nil
 		}

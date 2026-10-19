@@ -98,3 +98,35 @@ func TestDocIsWhatTheQueueTakes(t *testing.T) {
 		t.Fatalf("doc: %v", err)
 	}
 }
+
+// A plan file's claims and gate reach the queue as written, and a claim the
+// queue would refuse is refused here.
+func TestClaimsAndGate(t *testing.T) {
+	f := &File{Version: 1, Blocks: []FileBlock{
+		{Name: "a", Holds: []string{"src/a"}, Claims: []class.DocClaim{{On: "db/test", Mode: "shared"}}},
+		{Name: "a-merge", After: []string{"a"}, Planned: new(bool), Gate: "main"},
+	}}
+	p, err := FromFile(f, "x.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := p.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := JSON(d)
+	x, err := class.ExpandDocument(&c4v1.WorkJob{}, class.Unit{Name: "root", Key: "graph", Generator: true}, b, map[string]int{"root": 0}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(x.Units[0].Claims) != 2 || x.Units[1].Gate != "main" {
+		t.Fatalf("the queue reads claims %+v, gate %q", x.Units[0].Claims, x.Units[1].Gate)
+	}
+	f.Blocks[0].Claims[0].Mode = "sometimes"
+	if p, err = FromFile(f, "x.yaml"); err == nil {
+		_, err = p.Doc()
+	}
+	if err == nil || !strings.Contains(err.Error(), "refuse") {
+		t.Fatalf("a bad claim mode: %v", err)
+	}
+}

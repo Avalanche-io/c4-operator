@@ -50,6 +50,10 @@ blocks:
     before: [text/tokens]
 ```
 
+- `holds` are paths or keys the block writes, exclusive claims; `claims`
+  are `{on, mode}` with mode `exclusive` (the default) or `shared`; `gate`
+  names the one-slot gate the block passes (a merge). The queue enforces
+  all three.
 - `before` lists blocks that run after this one, written where the reason is
   (a wait before what it holds up). A wait with no `group` takes the row of
   the first block in its `before`.
@@ -69,7 +73,7 @@ names none), `after`, `exists`, `planned`, `slots`, and four optional fields
 the queue may ignore:
 
 - `group`: the row it belongs to;
-- `holds`: the paths or keys it writes;
+- `holds`, `claims` and `gate`: what it writes, what it shares, the gate it passes;
 - `params`: plan facts, carried as they are;
 - `cites`: for each edge, `{after, file, line, text}`.
 

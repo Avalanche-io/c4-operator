@@ -51,6 +51,8 @@ type FileBlock struct {
 	Inputs  []class.DocInput  `json:"inputs,omitempty"`
 	Slots   int               `json:"slots,omitempty"`
 	Holds   []string          `json:"holds,omitempty"`
+	Claims  []class.DocClaim  `json:"claims,omitempty"`
+	Gate    string            `json:"gate,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
 	Wait    *class.DocWait    `json:"wait,omitempty"`
 	// Before lists blocks that run after this one: the same edges as their
@@ -102,7 +104,7 @@ func FromFile(f *File, file string) (*Plan, error) {
 		if fb.Slots > 0 {
 			u.Slots = fb.Slots
 		}
-		u.Work, u.WorkSD, u.Env, u.Inputs, u.Holds = fb.Work, fb.WorkSD, fb.Env, fb.Inputs, fb.Holds
+		u.Work, u.WorkSD, u.Env, u.Inputs, u.Holds, u.Claims, u.Gate = fb.Work, fb.WorkSD, fb.Env, fb.Inputs, fb.Holds, fb.Claims, fb.Gate
 		for k, v := range fb.Params {
 			u.Params[k] = v
 		}
