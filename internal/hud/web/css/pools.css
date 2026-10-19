@@ -35,6 +35,8 @@
 .sw.mine.notch { background: linear-gradient(225deg, var(--field) 0 4px, var(--run) 4px); }
 .sw.other, .ncard .s.other { background: var(--g13); }
 .sw.idle, .ncard .s.idle { background: var(--g04); box-shadow: inset 0 0 0 1px var(--g12); }
+/* capped: the blocked hatch, grey; a node's slot limit holds these back */
+.sw.capped, .ncard .s.capped { background: repeating-linear-gradient(45deg, var(--g12) 0 1px, var(--g09) 1px 3.5px); }
 .sw.pending { box-shadow: none; border: 1px dashed var(--g15); }
 .sw.headroom { border: 1px dotted var(--g13); transform: scale(.7); }
 .sw.suspect { border: 1.5px solid var(--temp); }
@@ -64,6 +66,7 @@
 .ncard .s { width: 14px; height: 14px; }
 .ncard a.s:hover, .ncard i.s:hover { outline: 1px solid var(--paper); text-decoration: none; }
 .ncard .nrow { display: flex; justify-content: space-between; gap: 8px; }
+.ncard .ncap { color: var(--ink-2); font-family: var(--sans); }
 .ncard .nrow b { font-weight: 400; color: var(--paper); }
 .ncache { position: relative; height: 15px; background: var(--g05); }
 .ncache i { position: absolute; left: 0; top: 0; bottom: 0; background: var(--g09); box-shadow: inset 0 -2px 0 var(--g16); }

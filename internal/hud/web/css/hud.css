@@ -131,6 +131,8 @@ main:focus { outline: none; }
 .edge.s { bottom: calc(-1 * var(--collar) + 8px); left: 50%; transform: translateX(-50%); }
 .idstrip { font: 400 var(--t-micro)/1 var(--mono); color: var(--g13); letter-spacing: .14em; white-space: nowrap; overflow: hidden; }
 .layout-job { display: grid; grid-template-columns: auto minmax(0, 1fr) 340px; gap: var(--gutter); align-items: start; }
+/* a plan job: its lens is the picture; the unit card, controls and book in one column */
+.layout-job.plan { grid-template-columns: minmax(0, 520px); }
 .wellbox { background: var(--well); outline: var(--hair) solid var(--rule-2); position: relative; }
 .wellbox > header, .panel > header { display: flex; align-items: baseline; gap: 10px; padding: 9px 12px 7px; border-bottom: var(--hair) solid var(--rule-1); }
 .wellbox > .body, .panel > .body { padding: 10px 12px; }
@@ -192,6 +194,7 @@ input[type="datetime-local"] { background: var(--well); color: var(--ink); borde
 .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 400 10px/1.2 var(--sans); color: var(--ink-3); }
 .legend span { display: inline-flex; align-items: center; gap: 6px; }
 .legend svg { flex: none; }
+.legend i { flex: none; display: inline-block; width: 14px; height: 9px; box-sizing: border-box; }
 .toast { position: fixed; right: 18px; bottom: 18px; z-index: 50; background: var(--plate-2); border: var(--hair) solid var(--g15); padding: 10px 14px; font: 400 12px var(--mono); max-width: 520px; }
 .toast.err { border-color: var(--fail); color: var(--fail-text); }
 

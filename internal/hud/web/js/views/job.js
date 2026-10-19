@@ -13,6 +13,9 @@ import { buildSheet } from '../../design/components/stack.js';
 import { bookList } from '../../design/components/ledger.js';
 import { lensFor } from '../lenses/index.js';
 import { classChip, phaseText, orderText, burstButton, failedUnits, personMark } from './common.js';
+import { c4idEl } from '../../design/components/c4id.js';
+import { unitWords, how } from '../../design/components/words.js';
+import { markSVG } from '../../design/components/marks.js';
 
 const st = {
   key: null, details: new Map(), graph: null, book: null, lastNow: null, fetching: false,
@@ -20,7 +23,7 @@ const st = {
   lineB: new Set(), contours: true, lineA: true, box: 10,
 };
 
-document.addEventListener('hud:changed', () => { st.lastNow = null; st.unitNow = null; });
+document.addEventListener('hud:changed', () => { st.lastNow = null; st.unitNow = null; st.unit0Now = null; });
 document.addEventListener('stack:select', (e) => {
   const { job, i } = e.detail;
   if (!st.key) return;
@@ -81,10 +84,20 @@ function ensure(ctx, k) {
       .then((u) => { if (st.unitFor === want) { st.unit = u; ctx.refresh(); } })
       .catch((e) => { st.unit = { error: e.message }; ctx.refresh(); });
   }
+  // a lens that needs unit 0 (ML: rank 0's attempts draw the runs) gets it
+  const j = (ctx.snap.jobs || []).find((x) => keyOf(x) === k);
+  const cls = j && ctx.cls(j.class);
+  const lens = lensFor(cls ? cls.lens : 'frames');
+  if (lens.needs && lens.needs(j).unit0 && (st.unit0For !== k || st.unit0Now !== now)) {
+    if (st.unit0For !== k) st.unit0 = null;
+    st.unit0For = k;
+    st.unit0Now = now;
+    get(`/jobs/${k}/units/0`).then((u) => { if (st.unit0For === k) { st.unit0 = u; ctx.refresh(); } }, () => {});
+  }
 }
 
 function reset(k) {
-  Object.assign(st, { key: k, details: new Map(), book: null, lastNow: null, sel: null, unit: null, unitFor: null, unitNow: null, err: null, sheetKeys: null });
+  Object.assign(st, { key: k, details: new Map(), book: null, lastNow: null, sel: null, unit: null, unitFor: null, unitNow: null, unit0: null, unit0For: null, unit0Now: null, err: null, sheetKeys: null });
 }
 
 function tcell(label, val, sub, cls = '') {
@@ -99,12 +112,13 @@ function titleBlock(j, level = 5) {
   const src = o.from ? `from ${f.jobName(o.from)}` : o.type === 'latency' ? `ready + ${f.dur(o.latencyTargetSeconds)}` : o.deadline ? 'set on the job' : 'no objective';
   return h('div', { class: 'titleblock' },
     tcell('Deadline', o.deadline ? f.clock(o.deadline) : '–', src),
-    tcell('ETA p50 · p90', j.phase === 'Succeeded' ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' }, `${f.clock(e.etaP50, false)} · ${f.clock(e.etaP90, false)}`),
-      j.units.unevaluated ? `${j.units.unevaluated} generators to expand` : 'projected', ''),
-    tcell('Slack', o.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', e.feasible ? 'on track at current capacity' : 'will miss at current capacity', late ? 'late' : ''),
+    e.noEta && j.phase !== 'Succeeded' ? tcell('ETA p50 · p90', '–', e.noEta)
+      : tcell('ETA p50 · p90', j.phase === 'Succeeded' ? f.when(e.etaP90) : h('span', { class: 'pencil' }, `${f.when(e.etaP50)} · ${f.when(e.etaP90)}`),
+        j.units.unevaluated ? `${j.units.unevaluated} generators to expand` : 'projected', ''),
+    tcell('Slack', o.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', !o.deadline ? 'no deadline' : e.feasible ? 'on track at current capacity' : 'will miss at current capacity', late ? 'late' : ''),
     tcell('Done', `${Math.round(done * 100)}%`, (Math.abs(gl.delivered - gl.done) > 0.005 ? `delivered ${Math.round(gl.delivered * 100)}% · ` : '') + (gl.basis === 'steps' ? `by steps · ${f.num(j.classSummary.step)} of ${f.num(j.classSummary.totalSteps)}` : w && w.basis === 'estimate' ? `by work · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)} units` : `by units · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)}`)),
-    level < 4 ? null : tcell('Slots', h('span', null, h('span', { class: 't-run' }, String(e.runningSlots)), h('small', null, ` of ${(+e.requiredSlots).toFixed(1)} needed`)), `can get ${e.attainableSlots}`),
-    j.output && level >= 5 ? tcell('Output view', h('span', { title: j.output.view, style: { fontSize: '15px' } }, f.gridRef(j.output.view)), `${f.num(j.output.changesets)} changesets in`) : null);
+    level < 4 ? null : tcell('Slots', h('span', null, h('span', { class: 't-run' }, String(e.runningSlots)), +e.requiredSlots > 0 ? h('small', null, ` of ${(+e.requiredSlots).toFixed(1)} needed`) : h('small', null, ' running')), `can get ${e.attainableSlots}`),
+    j.output && level >= 5 ? tcell('Output view', h('span', { style: { fontSize: '15px' } }, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${f.num(j.output.changesets)} changesets in`) : null);
 }
 
 function controls(j, k) {
@@ -123,29 +137,60 @@ function controls(j, k) {
       (j.blacklist || []).map((n) => h('button', { class: 'btn small', 'data-action': 'unblacklist', 'data-job': k, 'data-node': n, title: 'Blacklisted for this job' }, h('span', { class: 't-temp' }, n), ' allow again'))));
 }
 
+// cardUnit: the selected unit with what the job detail knows of it: its
+// wait, its review, its interruptions, a soft stop
+function cardUnit(u, d) {
+  if (!d) return u;
+  const row = (d.unitList || []).find((x) => x.i === u.i) || {};
+  const wait = [...(d.waits || [])].reverse().find((w) => w.unit === u.i) || null;
+  const intr = (d.interruptions || []).filter((x) => x.unit === u.i);
+  return { ...row, ...u, state: u.state || row.state, wait, interruptions: intr.length ? intr : null };
+}
+
+const CHIP = { 't-fail': 'red', 't-temp': 'temp', 't-run': 'run', 't-done': 'green' };
+
+// stoppedByFarm: an attempt that ended where and when the farm interrupted
+// the unit (the job detail's interruptions)
+function stoppedByFarm(u, a) {
+  if (!a.end || !u.interruptions) return false;
+  const end = Date.parse(a.end);
+  return u.interruptions.some((x) => x.node === a.node && Math.abs(Date.parse(x.at) - end) < 180e3);
+}
+
 function unitCard(ctx, j) {
+  const cls = ctx.cls(j.class);
+  const lens = cls ? cls.lens : 'frames';
   if (!st.sel) return h('div', { class: 'panel', 'data-key': 'unit-hint' }, h('header', null, h('h2', null, 'Unit')),
-    h('div', { class: 'body dim' }, ctx.level >= 3
-      ? 'Hover any block for what it is; select a unit for its attempts, node, log, record and output. Click a batch or the shot to collapse or open it; the collapse mark on a stage collapses everything upstream into each frame.'
-      : 'Hover a frame for what it is; select one for its attempts, the node it ran on, its log and why it failed.'));
-  const u = st.unit;
-  if (!u) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body dim' }, 'Reading the unit…'));
-  if (u.error) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body t-fail' }, u.error));
+    h('div', { class: 'body dim' }, lens === 'plan'
+      ? 'Hover a lane for what it is; select one for its steps, attempts, log and output.'
+      : ctx.level >= 3
+        ? 'Hover any block for what it is; select a unit for its attempts, node, log, record and output. Click a batch or the shot to collapse or open it; the collapse mark on a stage collapses everything upstream into each frame.'
+        : 'Hover a frame for what it is; select one for its attempts, the node it ran on, its log and why it needs you.'));
+  const raw = st.unit;
+  if (!raw) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body dim' }, 'Reading the unit…'));
+  if (raw.error) return h('div', { class: 'panel', 'data-key': 'unit' }, h('div', { class: 'body t-fail' }, raw.error));
+  const k = st.sel.job;
+  const u = cardUnit(raw, st.details.get(k));
   const last = u.attempts[u.attempts.length - 1];
   const node = last && last.node;
-  const chip = { failed: 'red', accepted: 'red', retrying: 'temp', backoff: 'temp', running: 'run', preflight: 'run', succeeded: 'green', egress: 'green' }[u.state] || '';
-  const k = st.sel.job;
+  const wd = unitWords(u);
   return h('div', { class: 'panel', 'data-key': 'unit', role: 'region', 'aria-label': `Unit ${u.label}` },
-    h('header', null, h('h2', null, u.label), h('span', { class: 'chip ' + chip }, u.state), h('span', { class: 'dim mono', style: { fontSize: '10px', marginLeft: 'auto' } }, f.jobName(k))),
+    h('header', null, h('h2', null, u.label), h('span', { class: 'chip ' + (CHIP[wd.cls] || '') }, wd.word), h('span', { class: 'dim mono', style: { fontSize: '10px', marginLeft: 'auto' } }, f.jobName(k))),
     h('div', { class: 'body' },
+      wd.why ? h('div', { class: 'why', style: { fontSize: '12px', marginBottom: '6px' } }, wd.why) : null,
       h('div', { class: 'mono', style: { fontSize: '11px', lineHeight: '1.6' } },
         h('div', null, h('span', { class: 'dim' }, 'node '), node || '–'),
         h('div', null, h('span', { class: 'dim' }, 'duration '), u.durationSeconds !== undefined ? `${f.dur(u.durationSeconds)} ` : '', h('span', { class: 'pencil' }, `est. ${f.dur(u.estimateSeconds)}`)),
-        u.outputChangeset ? h('div', { title: u.outputChangeset }, h('span', { class: 'dim' }, 'output '), f.gridRef(u.outputChangeset)) : null,
-        u.expandedInto ? h('div', null, h('span', { class: 'dim' }, 'expanded into '), `units ${u.expandedInto}`) : null),
+        u.outputChangeset ? h('div', null, h('span', { class: 'dim' }, 'output '), c4idEl(u.outputChangeset, { tail: 4, label: 'output changeset' })) : null,
+        u.expandedInto ? h('div', null, h('span', { class: 'dim' }, 'expanded into '), `units ${u.expandedInto}`) : null,
+        ctx.level >= 5 ? h('div', { class: 'dim', style: { fontSize: '10px' } }, h('span', null, 'how '), how(u)) : null),
       h('div', { class: 'book', style: { marginTop: '8px' } }, u.attempts.map((a) => h('div', { class: 'e', 'data-key': 'a' + a.n },
         h('span', { class: 'seq' }, `#${a.n}`), h('span', { class: 'at' }, f.clockSec(a.start).slice(0, 5)), h('i', { class: 'seal node' + (a.end ? '' : ' open') }),
-        h('span', { class: 'msg' + (a.exitCode ? ' t-temp' : '') }, `${a.node}${a.end ? (a.exitCode ? ` exit ${a.exitCode}` : ' captured') : ' running'}`),
+        // an attempt the farm stopped (an interruption) is not a failure: grey,
+        // "interrupted", its exit code only at level 5
+        stoppedByFarm(u, a)
+          ? h('span', { class: 'msg dim' }, `${a.node} interrupted${ctx.level >= 5 && a.exitCode ? ` (exit ${a.exitCode})` : ''}`)
+          : h('span', { class: 'msg' + (a.exitCode ? ' t-temp' : '') }, `${a.node}${a.end ? (a.exitCode ? ` exit ${a.exitCode}` : ' captured') : ' running'}`),
         a.reason ? h('span', { class: 'who' }, a.reason) : null))),
       u.provenance ? h('div', { class: 'mono', style: { fontSize: '10.5px', marginTop: '8px' } },
         h('span', { class: 'seal node' }), ' ', u.provenance.verified ? 'record verifies' : h('span', { class: 't-fail' }, 'record does not verify'),
@@ -217,8 +262,9 @@ export default {
     if (ctx.route.q && ctx.route.q.reads === '1') for (const d of readers) st.lineB.add(keyOf(d));
     const deadline = j.objective && j.objective.deadline ? Date.parse(j.objective.deadline) : null;
     const g = glance(j, detail);
-    // CI and ML have their own views at level 5; below it every job opens to its units
-    const ownView = cls && (cls.lens === 'ci' || cls.lens === 'ml');
+    // CI, ML and agent bundles have their own views at level 5; below it every job opens to its units
+    const ownView = cls && (cls.lens === 'ci' || cls.lens === 'ml' || cls.lens === 'agent' || cls.lens === 'plan');
+    const planJob = cls && cls.lens === 'plan';
     const main = detail && !(sheet && sheet.cost) && (ownView ? L >= 5 : L >= 3) ? lens.main(ctx, j, st) : [];
     const side = detail && (ownView ? L >= 5 : true) ? lens.side(ctx, j, st) : [];
     const late = j.estimate.slackSeconds < 0 && j.phase !== 'Succeeded';
@@ -234,11 +280,12 @@ export default {
       main.length && ownView ? h('div', { style: { marginBottom: '14px' } }, main) : null,
       h('div', { class: 'neat', style: { padding: '14px' } },
         L >= 3 ? edges(ctx, j, keys) : null,
-        h('div', { class: 'layout-job' },
-          h('div', { style: { width: '250px' } },
+        h('div', { class: 'layout-job' + (planJob ? ' plan' : '') },
+          // a plan job's lens is its picture: no render pylon or shot stack
+          planJob ? null : h('div', { style: { width: '250px' } },
             L >= 2 ? own('pylon', 'pylon:' + k, { glance: g, w: 250, h: 470, mode: 'full', title: j.name.toUpperCase() }) : null,
             h('div', { class: 'legend', style: { marginTop: '14px', flexDirection: 'column', alignItems: 'flex-start' } }, legend(L))),
-          h('div', { class: 'wellbox', 'data-key': 'stackbox' },
+          planJob ? null : h('div', { class: 'wellbox', 'data-key': 'stackbox' },
             h('div', { class: 'tools' },
               h('span', { class: 'lab' }, L >= 3 ? `Shot ${sheetTitle}` : `Job ${j.name}`),
               h('span', { class: 'dim mono', style: { fontSize: '10px' } }, sheet ? (L >= 3 ? `${sheet.cols.length} stages · ${f.num(sheet.N)} rows · ${sheet.batchFromData ? 'batches from the job script' : `${sheet.batch} frames per batch`}` : `${f.num(j.units.total)} units · ${orderText(j.order)}`) : ''),
@@ -250,7 +297,7 @@ export default {
               L < 3 ? null : h('label', null, h('input', { type: 'checkbox', 'data-stack': 'contours', checked: st.contours ? true : false }), 'time lines')),
             sheet ? own('stack', 'stack:' + k + (L >= 3 ? '' : ':flat'), { sheet, view: { flat: L < 3, deadline, sel: st.sel, box: st.box, lineA: L >= 3 && st.lineA, lineB: L >= 3 ? st.lineB : new Set(), contours: L >= 3 && st.contours, ...(ctx.route.q && ctx.route.q.collapse === 'shot' ? { shotCollapsed: true } : {}) } }) : h('div', { class: 'body dim' }, 'Reading the job…'),
             j.output && L >= 5 ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset added to its chain' },
-              h('b', null, f.gridRef(j.output.view)), `${String(j.output.changesets).padStart(4, '0')}+00`, h('span', { class: 'dimmer' }, j.output.view)) : null),
+              h('b', null, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${String(j.output.changesets).padStart(4, '0')}+00`) : null),
           h('div', null,
             unitCard(ctx, j),
             side,
@@ -289,24 +336,40 @@ export default {
 };
 
 function legend(level = 5) {
-  const sw = (fill, extra = '') => h('i', { style: { display: 'inline-block', width: '14px', height: '10px', background: fill, boxShadow: extra } });
+  // a swatch in the cell's drawing; a mark sits in its corner, as on a cell
+  const HATCH = 'repeating-linear-gradient(45deg, var(--g09) 0 3px, var(--g12) 3px 4px)';
+  const sw = (fill, extra = '', mark = null, ink = 'var(--g17)') => {
+    const i = h('i', { style: { position: 'relative', display: 'inline-block', width: '14px', height: '10px', background: fill, boxShadow: extra } });
+    if (mark) i.innerHTML = `<span style="position:absolute;right:0;top:0;line-height:0;color:${ink}">${markSVG(mark, { size: 7 })}</span>`;
+    return i;
+  };
+  const RISE = 'linear-gradient(var(--g09) 45%, var(--run) 45%)';
+  const notch = (c) => `linear-gradient(${c}, ${c}) right 1px top 1px / 3px 2px no-repeat, var(--g09)`;
   return [
-    [1, h('span', null, sw('var(--done)'), 'done: committed')],
-    [1, h('span', null, sw('linear-gradient(var(--done-pale) 40%, var(--done) 40%)'), 'done, output still moving')],
-    [1, h('span', null, sw('linear-gradient(var(--g09) 45%, var(--run) 45%)', 'inset 0 0 0 1px var(--run)'), 'rendering: blue rising')],
-    [1, h('span', null, sw('var(--run-pale)', 'inset 0 0 0 1px var(--run)'), 'preparing to render')],
-    [1, h('span', null, sw('linear-gradient(var(--g09) 45%, var(--run) 45%)', 'inset 0 0 0 1.5px var(--temp)'), 'retrying')],
-    [1, h('span', null, sw('var(--temp-pale)', 'inset 0 0 0 1px var(--temp)'), 'retry scheduled')],
-    [1, h('span', null, sw('linear-gradient(225deg, var(--paper) 0 4px, var(--fail) 4px)'), 'failed: needs you')],
-    [1, h('span', null, sw('var(--fail-pale)', 'inset 0 0 0 1px var(--paper)'), 'failed, taken or accepted: nobody needs to act')],
+    [1, h('span', null, sw('var(--g09)'), 'queued')],
+    [1, h('span', null, sw(HATCH), 'blocked on: earlier work or an input')],
+    [1, h('span', null, sw(HATCH, '', 'clock'), 'waits for: capacity, a license, a time')],
+    [1, h('span', null, sw('var(--g09)', '', 'pause'), 'held: a person paused it')],
+    [1, h('span', null, sw(HATCH, '', 'lock'), 'locked by another unit')],
+    [1, h('span', null, sw(notch('var(--g15)')), 'interrupted: the farm stopped it; it runs again')],
+    [1, h('span', null, sw('var(--run-pale)', 'inset 0 0 0 1px var(--run)'), 'preparing')],
+    [1, h('span', null, sw(RISE, 'inset 0 0 0 1px var(--run)'), 'rendering')],
+    [1, h('span', null, sw(RISE, 'inset 0 0 0 1px var(--run)', 'pause', 'var(--paper)'), 'yielding: stops at its next safe point')],
+    [1, h('span', null, sw('var(--temp-pale)', 'inset 0 0 0 1px var(--temp)'), 'backoff: a retry is scheduled')],
+    [1, h('span', null, sw(RISE, 'inset 0 0 0 1.5px var(--temp)'), 'retrying')],
+    [1, h('span', null, sw('var(--temp-pale)', 'inset 0 0 0 1px var(--temp)', 'rework', 'var(--temp)'), 'rework: a check sent it back')],
+    [1, h('span', null, sw('linear-gradient(var(--done-pale) 40%, var(--done) 40%)'), 'moving: output still moving')],
+    [1, h('span', null, sw('var(--done)'), 'done')],
+    [1, h('span', null, sw('var(--done)', '', 'tick', 'var(--field)'), 'checked: a check passed')],
+    [1, h('span', null, sw('linear-gradient(225deg, var(--paper) 0 4px, var(--fail) 4px)'), 'needs you')],
+    [1, h('span', null, sw('var(--fail-pale)'), 'waits for someone: holds up nothing yet')],
+    [1, h('span', null, sw('var(--fail-pale)', '', 'seal', 'var(--paper)'), 'acknowledged: someone has it')],
+    [1, h('span', null, sw('var(--fail-pale)', '', 'check', 'var(--paper)'), 'accepted: no one needs to act')],
     [2, h('span', null, sw('var(--risk-pale)', 'inset 2px 0 0 0 var(--risk)'), 'at risk: projected late')],
     [2, h('span', null, sw('repeating-linear-gradient(45deg, var(--risk-pale) 0 2px, var(--risk) 2px 4px)'), 'will miss at any capacity')],
     [2, h('span', null, sw('var(--g09)', 'inset 3px 0 0 0 var(--risk)'), 'missed the deadline')],
     [2, h('span', null, h('span', { class: 'ink mono', style: { fontSize: '10px', minWidth: '30px' } }, '14:56'), 'measured: solid')],
     [2, h('span', null, h('span', { class: 'pencil mono', style: { fontSize: '10px', minWidth: '30px' } }, '14:58'), 'estimated: lighter, dashed')],
-    [1, h('span', null, sw('var(--g09)'), 'waiting')],
-    [3, h('span', null, sw('repeating-linear-gradient(45deg, var(--g09) 0 3px, var(--g12) 3px 4px)'), 'blocked')],
-    [3, h('span', null, sw('var(--g08)', 'inset 0 0 0 1px var(--g13)'), 'not expanded yet')],
-    [3, h('span', null, sw('transparent', 'inset 0 0 0 1px var(--g12)'), 'expected')],
+    [3, h('span', null, sw('radial-gradient(var(--g13) 0.6px, transparent 0.8px) 0 0 / 3px 3px, var(--g08)', 'inset 0 0 0 1px var(--g12)'), 'expected: work that will exist')],
   ].filter(([n]) => level >= n).map(([, el]) => el);
 }

@@ -12,7 +12,7 @@
 // notes) places finished callouts on any page.
 
 import { esc } from './core.js';
-import { TERMS, numberOf } from './glossary.js';
+import { TERMS, numberOf, swatchHTML } from './glossary.js';
 
 const NS = 'http://www.w3.org/2000/svg';
 const svgEl = (tag, parent, attrs = {}) => { const n = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); parent.appendChild(n); return n; };
@@ -40,7 +40,7 @@ export function build(svg, host, k) {
   const plate = document.createElement('div');
   plate.className = 'c-plate';
   plate.innerHTML = `<div class="hd">${T.num ? `<span class="num">T${String(T.num).padStart(2, '0')}</span>` : ''}`
-    + `${T.swatch ? `<i class="sw sw-${esc(T.swatch)}"></i>` : ''}<span class="term"></span></div>`
+    + `${swatchHTML(T.swatch)}<span class="term"></span></div>`
     + `<div class="def">${esc(T.def || '')}</div><i class="marks"></i>`;
   host.appendChild(plate);
   return { g, ret, lead, dot, plate, termEl: plate.querySelector('.term'), defEl: plate.querySelector('.def'), text: String(T.term || '').toUpperCase() };

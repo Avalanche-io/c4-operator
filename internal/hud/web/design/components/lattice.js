@@ -8,8 +8,11 @@
 //   an idle slot                 a grey outline
 //   borrowed past nominal quota  the cell's corner notched
 //   requested burst              a dashed outline; the price and the approve control sit under the pool
-//   provisioning                 a dashed outline with a dot: nodes on their way
+//   expected (provisioning)      a dashed outline with a dot: nodes on their way
 //   burst headroom               dotted: what the provider can still give
+//   capped                       grey hatched: slots a node's power cap (its
+//                                slot limit) holds back, with the reason as
+//                                text under the pool
 //
 // Under each project's run a bracket shows its nominal quota, with a tick
 // where the nominal share ends and borrowing begins.
@@ -28,7 +31,8 @@ import { register } from './live.js';
 
 // poolCells lists one entry per slot (or per `per` slots in a large pool)
 // in display order: each project in scope by name, other projects, idle,
-// then burst: provisioning, requested, headroom.
+// capped (lost to a node's slot limit), then burst: expected (provisioning),
+// requested, headroom.
 export function poolCells(snap, pool, o = {}) {
   const max = o.maxCells || 640;
   const runs = [];
@@ -48,7 +52,16 @@ export function poolCells(snap, pool, o = {}) {
   const nProv = provisioning.reduce((a, c) => a + c.slots, 0);
   const b = pool.burst;
   const headroom = b ? Math.max(0, b.maxSlots - b.provisioned - nPend - nProv) : 0;
-  const total = pool.slots + nPend + nProv + headroom;
+  // A capped node offers fewer slots than its pool's shape; the difference
+  // is drawn after idle, hatched, so the pool reads at its full shape. Right
+  // after a cap drops, units can still run past it until they stop at the
+  // end of their turns: those stay running cells, and `over` counts them.
+  const capNodes = (snap.nodes || []).filter((nd) => nd.pool === pool.name && nd.capped);
+  const capped = capNodes.reduce((a, nd) => a + Math.max(0, (nd.shapeSlots || nd.slots) - Math.max(nd.slots, nd.used || 0)), 0);
+  const capHeld = capNodes.reduce((a, nd) => a + Math.max(0, (nd.shapeSlots || nd.slots) - nd.slots), 0);
+  const over = capNodes.reduce((a, nd) => a + Math.max(0, (nd.used || 0) - nd.slots), 0);
+  const capReasons = [...new Set(capNodes.map((nd) => nd.capacityReason).filter(Boolean))];
+  const total = Math.max(pool.slots, pool.used) + capped + nPend + nProv + headroom;
   const per = total > max ? Math.ceil(total / max) : 1;
   const n = (x) => (per === 1 ? x : Math.ceil(x / per));
   const cells = [];
@@ -61,10 +74,11 @@ export function poolCells(snap, pool, o = {}) {
   }
   for (let k = 0; k < n(other); k++) cells.push({ kind: 'other' });
   for (let k = 0; k < n(idle); k++) cells.push({ kind: 'idle' });
+  for (let k = 0; k < n(capped); k++) cells.push({ kind: 'capped' });
   for (const c of provisioning) for (let k = 0; k < n(c.slots); k++) cells.push({ kind: 'prov', req: c });
   for (const c of pending) for (let k = 0; k < n(c.slots); k++) cells.push({ kind: 'pending', req: c });
   for (let k = 0; k < n(headroom); k++) cells.push({ kind: 'headroom' });
-  return { cells, runs, per, other, idle, pending, provisioning, headroom, nPend, nProv, burst: b };
+  return { cells, runs, per, other, idle, capped, capHeld, over, capNodes, capReasons, pending, provisioning, headroom, nPend, nProv, burst: b };
 }
 
 // ---------------------------------------------------------------- regularized view
@@ -98,7 +112,12 @@ export function latticeSVG(snap, pool, o = {}) {
   const rowY = [];
   let y = 0;
   for (let k = 0; k < nRows; k++) { rowY.push(y); y += step + 6 + (rowsWithLabel.has(k) ? 12 : 0); }
-  const H = y + (legend.length ? 14 * legend.length : 0);
+  // A capped pool says why under its cells, in plain text: one line per
+  // reason (or one line when no reason was given).
+  const capLines = M.capHeld ? (M.capReasons.length ? M.capReasons : ['']).map((r) =>
+    `${f.num(M.capHeld)} ${M.capHeld === 1 ? 'slot' : 'slots'} capped${M.capNodes.length > 1 ? ` on ${f.num(M.capNodes.length)} nodes` : ''}${r ? `: ${r}` : ''}`) : [];
+  if (M.over) capLines.push(`${f.num(M.over)} still running past the cap, each stopping at the end of its turn`);
+  const H = y + 14 * (legend.length + capLines.length);
   const pos = (i) => [(i % perRow) * step, rowY[Math.floor(i / perRow)]];
   const tipOf = (cl) => {
     const unit = M.per > 1 ? `${M.per} slots` : 'slot';
@@ -106,8 +125,9 @@ export function latticeSVG(snap, pool, o = {}) {
       case 'mine': return `${pool.name} · ${cl.project} | running ${M.per > 1 ? `${M.per} slots of ` : ''}${cl.project}’s units | ${cl.borrowed ? `borrowed past its guaranteed ${cl.run.nominal}; the lender takes it back by preemption when it needs it` : `within its guaranteed share of ${cl.run.nominal}`}`;
       case 'other': return `${pool.name} · another project | ${unit} in use | other projects are shown only as a total`;
       case 'idle': return `${pool.name} · idle ${unit} | ${f.money(pool.costPerSlotHour, true)} per slot-hour`;
-      case 'prov': return `${pool.name} · provisioning | +${cl.req.slots} slots on their way | ${cl.req.reason || ''}`;
-      case 'pending': return `${pool.name} · requested, awaiting approval | +${cl.req.slots} slots · est. ${f.money(cl.req.estCost)} | ${cl.req.reason || ''}`;
+      case 'prov': return `${pool.name} · expected | +${cl.req.slots} slots on their way | ${cl.req.reason || ''}`;
+      case 'capped': return `${pool.name} · capped ${unit} | a node’s slot limit takes it away${M.capReasons.length ? ` | ${M.capReasons.join('; ')}` : ''} | the node offers it again when the limit rises`;
+      case 'pending': return `${pool.name} · requested, waits for approval | +${cl.req.slots} slots · est. ${f.money(cl.req.estCost)} | ${cl.req.reason || ''}`;
       default: return `${pool.name} · burst headroom | the provider can give ${f.num(M.headroom)} more slots | about ${f.dur(M.burst ? M.burst.provisioningSeconds : 0)} to provision at ${f.money(M.burst ? M.burst.costPerSlotHour : pool.costPerSlotHour, true)} per slot-hour`;
     }
   };
@@ -121,7 +141,11 @@ export function latticeSVG(snap, pool, o = {}) {
     } else if (cl.kind === 'other') g = `<rect x="${x}" y="${yy}" width="${c}" height="${c}" fill="${T.g[13]}"/>`;
     else if (cl.kind === 'idle') g = `<rect x="${x + 0.5}" y="${yy + 0.5}" width="${c - 1}" height="${c - 1}" fill="${T.g[4]}" stroke="${T.g[12]}"/>`;
     else if (cl.kind === 'prov') g = `<rect x="${x + 0.5}" y="${yy + 0.5}" width="${c - 1}" height="${c - 1}" fill="none" stroke="${T.g[14]}" stroke-dasharray="3 2"/><rect x="${x + c / 2 - 1}" y="${yy + c / 2 - 1}" width="2" height="2" fill="${T.g[15]}"/>`;
-    else if (cl.kind === 'pending') g = `<rect x="${x + 0.5}" y="${yy + 0.5}" width="${c - 1}" height="${c - 1}" fill="none" stroke="${T.g[15]}" stroke-dasharray="3 2"/>`;
+    else if (cl.kind === 'capped') {
+      g = `<rect x="${x}" y="${yy}" width="${c}" height="${c}" fill="${T.g[9]}"/><path d="`;
+      for (let k = -c; k < c; k += 5) g += `M${x + Math.max(0, k)} ${yy + Math.max(0, -k)} L${x + Math.min(c, k + c)} ${yy + Math.min(c, c - k)} `;
+      g += `" stroke="${T.g[12]}" fill="none"/>`;
+    } else if (cl.kind === 'pending') g = `<rect x="${x + 0.5}" y="${yy + 0.5}" width="${c - 1}" height="${c - 1}" fill="none" stroke="${T.g[15]}" stroke-dasharray="3 2"/>`;
     else g = `<rect x="${x + 2.5}" y="${yy + 2.5}" width="${c - 5}" height="${c - 5}" fill="none" stroke="${T.g[13]}" stroke-dasharray="1 2"/>`;
     s += `<g data-tip="${esc(tipOf(cl))}">${g}</g>`;
   });
@@ -143,20 +167,25 @@ export function latticeSVG(snap, pool, o = {}) {
     }
   }
   legend.forEach((r, k) => { s += `<text x="0" y="${y + 10 + k * 14}" fill="${T.ink3}" font-size="9.5" font-family='${T.mono}'><tspan fill="${T.g[15]}">⌐ </tspan>${esc(label(r))}</text>`; });
+  capLines.forEach((t, k) => { s += `<text x="0" y="${y + 10 + (legend.length + k) * 14}" fill="${T.ink2}" font-size="9.5" font-family='${T.mono}'>${esc(t)}</text>`; });
   const W = Math.min(o.width, perRow * step);
-  const aria = `${pool.name}: ${pool.used} of ${pool.slots} slots in use${M.nPend ? `, ${M.nPend} requested` : ''}${M.headroom ? `, ${M.headroom} burst headroom` : ''}`;
+  const aria = `${pool.name}: ${pool.used} of ${pool.slots} slots in use${capLines.length ? `, ${capLines.join('; ')}` : ''}${M.nPend ? `, ${M.nPend} requested` : ''}${M.headroom ? `, ${M.headroom} burst headroom` : ''}`;
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(aria)}">${s}</svg>`, h: H, w: W, model: M };
 }
 
 // ---------------------------------------------------------------- nodes
 
 // nodeSlots splits a node's slots: the viewer's running units (with what
-// they run), other projects, idle.
+// they run), other projects, idle, and capped (its pool's shape less what a
+// slot limit lets it offer now).
 export function nodeSlots(n) {
   const mine = [];
   for (const r of n.running || []) for (let k = 0; k < (r.slots || 1); k++) mine.push(r);
   const other = Math.max(0, (n.used || 0) - mine.length);
-  return { mine, other, idle: Math.max(0, n.slots - mine.length - other) };
+  // right after a cap drops, units still running past it count as `over`
+  const capped = n.capped ? Math.max(0, (n.shapeSlots || n.slots) - Math.max(n.slots, n.used || 0)) : 0;
+  const over = n.capped ? Math.max(0, (n.used || 0) - n.slots) : 0;
+  return { mine, other, idle: Math.max(0, n.slots - mine.length - other), capped, over };
 }
 
 // exception rank: 0 is an ordinary node; higher sorts later
@@ -177,6 +206,8 @@ export function nodeTip(n) {
   return [
     `${n.name} · ${n.state}${n.suspect ? ' · suspect' : ''}`,
     `${n.used} of ${n.slots} slots${s.other ? ` · ${s.other} other projects` : ''}`,
+    ...(n.capped ? [`capped at ${n.slots} of ${n.shapeSlots}${n.capacityReason ? ` · ${n.capacityReason}` : ''}`] : []),
+    ...(s.over ? [`${s.over} still running past the cap, stopping at the end of their turns`] : []),
     `${n.failuresLastHour} failed in the last hour`,
     `cache ${f.bytes(n.cacheBytes)} · ${f.pct(n.cacheHitRate)} hit`,
     `${n.zone || n.locality || ''}${n.region ? ' · ' + n.region : ''}`,
@@ -237,18 +268,28 @@ export class LatticeNodes {
     for (const b of blocks) {
       const used = b.ns.reduce((a, n) => a + n.used, 0), slots = b.ns.reduce((a, n) => a + n.slots, 0);
       const exc = b.ns.filter((n) => nodeRank(n) >= 2).length;
+      const caps = b.ns.filter((n) => n.capped);
+      const capWhy = [...new Set(caps.map((n) => n.capacityReason).filter(Boolean))];
       g.font = `600 11px ${T.sans}`; g.fillStyle = T.ink; g.textBaseline = 'alphabetic';
       g.fillText(b.p.name.toUpperCase().split('').join(String.fromCharCode(8202)), 0, b.y - 8);
       const tw = g.measureText(b.p.name.toUpperCase()).width + 24;
       g.font = `400 10px ${T.mono}`; g.fillStyle = T.ink3;
-      const sub = `${f.num(b.ns.length)} nodes · ${f.num(used)} of ${f.num(slots)} slots · ${f.pct(used / Math.max(1, slots), 0)}${exc ? ` · ${f.num(exc)} need a look, at the end` : ''}`;
+      const sub = `${f.count(b.ns.length, 'node')} · ${f.num(used)} of ${f.num(slots)} slots · ${f.pct(used / Math.max(1, slots), 0)}${caps.length ? ` · ${f.num(caps.length)} capped${capWhy.length ? `: ${capWhy.join('; ')}` : ''}` : ''}${exc ? ` · ${f.num(exc)} need a look, at the end` : ''}`;
       g.fillText(sub, tw, b.y - 8);
       aria.push(`${b.p.name}: ${b.ns.length} nodes, ${used} of ${slots} slots`);
       b.ns.forEach((n, k) => {
         const x = (k % perRow) * step, yy = b.y + Math.floor(k / perRow) * step;
         const s = nodeSlots(n);
-        const fm = s.mine.length / Math.max(1, n.slots), fo = s.other / Math.max(1, n.slots);
+        const D = Math.max(1, n.slots + s.over + s.capped);
+        const fm = s.mine.length / D, fo = s.other / D;
         g.fillStyle = T.g[5]; g.fillRect(x, yy, cell, cell);
+        if (s.capped) {
+          // the capped share, hatched grey across the top of the cell
+          const hc = Math.max(2, cell * (s.capped / D));
+          g.fillStyle = T.g[9]; g.fillRect(x, yy, cell, hc);
+          g.save(); g.beginPath(); g.rect(x, yy, cell, hc); g.clip(); g.strokeStyle = T.g[12]; g.beginPath();
+          for (let k = -hc; k < cell + hc; k += 4) { g.moveTo(x + k, yy); g.lineTo(x + k + hc, yy + hc); } g.stroke(); g.restore();
+        }
         if (n.state === 'disabled') {
           g.strokeStyle = T.g[14]; g.beginPath(); g.moveTo(x + 1, yy + 1); g.lineTo(x + cell - 1, yy + cell - 1); g.moveTo(x + cell - 1, yy + 1); g.lineTo(x + 1, yy + cell - 1); g.stroke();
         } else {

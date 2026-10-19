@@ -74,7 +74,7 @@ function poolBlock(ctx, p, width) {
       M.other ? h('span', null, `${f.num(M.other)} in use by other projects`) : null,
       b ? h('span', null, `burst ${f.num(b.provisioned)} of ${f.num(b.maxSlots)} up · `, h('span', { class: 'pencil' }, `≈${f.dur(b.provisioningSeconds)}`), ` to add more · ${f.money(b.costPerSlotHour, true)}/slot-h`) : null),
     M.provisioning.map((c, k) => h('div', { class: 'lat-req prov', 'data-key': 'prov' + k },
-      h('span', null, `+${c.slots} ${p.name} slots provisioning`, c.jobs && c.jobs.length ? [' for ', jobsOf(c)] : null))),
+      h('span', null, `+${c.slots} ${p.name} slots expected`, c.jobs && c.jobs.length ? [' for ', jobsOf(c)] : null))),
     M.pending.map((c, k) => h('div', { class: 'lat-req', 'data-key': 'req' + k },
       h('div', { class: 'what' },
         h('b', null, `+${c.slots} ${p.name} slots`), c.jobs && c.jobs.length ? [' for ', jobsOf(c)] : null,
@@ -89,6 +89,7 @@ function slotCells(ctx, n) {
   s.mine.forEach((r, k) => out.push(h('a', { class: 's mine', href: ctx.href(`job/${r.job}/unit/${r.unit}`), 'data-key': 'm' + k, 'data-tip': `${n.name} · slot ${k + 1} of ${n.slots} | ${f.jobName(r.job)} · unit ${r.unit}${r.slots > 1 ? ` · holds ${r.slots} slots` : ''} | click opens the unit` })));
   for (let k = 0; k < s.other; k++) out.push(h('i', { class: 's other', 'data-tip': `${n.name} · slot ${s.mine.length + k + 1} of ${n.slots} | another project’s unit | shown only as a total` }));
   for (let k = 0; k < s.idle; k++) out.push(h('i', { class: 's idle', 'data-tip': `${n.name} · slot ${s.mine.length + s.other + k + 1} of ${n.slots} | ${n.state === 'disabled' ? 'disabled: no new units start' : n.state === 'notReady' ? 'not ready' : 'idle'}` }));
+  for (let k = 0; k < s.capped; k++) out.push(h('i', { class: 's capped', 'data-tip': `${n.name} · capped slot ${n.shapeSlots - s.capped + k + 1} of ${n.shapeSlots} | the node’s slot limit takes it away${n.capacityReason ? ` | ${n.capacityReason}` : ''} | offered again when the limit rises` }));
   return out;
 }
 
@@ -103,10 +104,12 @@ function nodeCard(ctx, n, bl) {
       h('span', { class: 'nn' }, n.name),
       n.suspect ? h('span', { class: 'chip temp', title: 'Node faults across two or more jobs in the last hour' }, 'suspect') : null,
       h('span', { class: 'chip ' + (stateCls || '') }, n.state === 'notReady' ? 'not ready' : n.state)),
-    h('div', { class: 'nslots', role: 'img', 'aria-label': `${n.used} of ${n.slots} slots in use` }, slotCells(ctx, n)),
+    h('div', { class: 'nslots', role: 'img', 'aria-label': `${n.used} of ${n.slots} slots in use${n.capped ? `, capped at ${n.slots} of ${n.shapeSlots}` : ''}` }, slotCells(ctx, n)),
     h('div', { class: 'nrow' },
       h('span', null, h('b', null, `${n.used}`), `/${n.slots} slots`, s.other ? h('span', { class: 'dimmer' }, ` · ${s.other} other`) : null),
       h('span', { class: n.failuresLastHour ? 't-fail' : 'dimmer' }, `${n.failuresLastHour} failed/h`)),
+    n.capped ? h('div', { class: 'ncap' }, `capped at ${n.slots} of ${n.shapeSlots}${n.capacityReason ? `: ${n.capacityReason}` : ''}`,
+      s.over ? h('span', { class: 'dimmer' }, ` · ${s.over} still running past the cap, each stopping at the end of its turn`) : null) : null,
     off ? h('div', { class: 'nrow dimmer' }, 'no cache yet') : h('div', { class: 'ncache', 'data-tip': `${n.name} · cache | ${f.bytes(n.cacheBytes)} held | ${f.pct(n.cacheHitRate)} of reads answered on the node` },
       h('i', { style: { width: `${(n.cacheHitRate * 100).toFixed(1)}%` } }),
       h('span', null, `cache ${f.bytes(n.cacheBytes)} · ${f.pct(n.cacheHitRate)} hit`)),
@@ -137,7 +140,7 @@ function physical(ctx, bl) {
       g.site && g.site.kind ? h('span', { class: 'sk' }, g.site.kind === 'onprem' ? 'machine room' : 'cloud region') : null,
       g.site && g.site.region ? h('span', { class: 'sk' }, g.site.region) : null,
       g.site && f.siteClock(f.now(), g.site.tz) ? h('span', { class: 'sk mono', title: `local time at ${g.site.label || g.site.name}` }, f.siteClock(f.now(), g.site.tz)) : null,
-      h('span', { class: 'sk r' }, g.nodes.length ? `${g.nodes.length} nodes · ${f.num(g.nodes.reduce((a, n) => a + n.used, 0))} of ${f.num(g.nodes.reduce((a, n) => a + n.slots, 0))} slots` : 'no nodes: the project stores')),
+      h('span', { class: 'sk r' }, g.nodes.length ? `${f.count(g.nodes.length, 'node')} · ${f.num(g.nodes.reduce((a, n) => a + n.used, 0))} of ${f.num(g.nodes.reduce((a, n) => a + n.slots, 0))} slots` : 'no nodes: the project stores')),
     g.locs.map((l) => h('div', { class: 'prack', 'data-key': 'loc-' + l.name },
       h('div', { class: 'prack-h' }, h('span', { class: 'lab' }, l.name), h('span', { class: 'dimmer mono' }, [...new Set(l.nodes.map((n) => n.pool))].join(' · '))),
       h('div', { class: 'ncards' }, l.nodes.slice().sort((a, b) => nodeRank(a) - nodeRank(b)).map((n) => nodeCard(ctx, n, bl.get(n.name) || [])))))));
@@ -167,12 +170,12 @@ export default {
         h('div', null,
           h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ' / pools'),
           h('h1', null, 'Pools'),
-          h('div', { class: 'meta' }, `${f.num(fm.slotsTotal)} slots in ${snap.pools.length} pools · ${f.num(snap.nodes.length)} nodes${sites.length ? ` at ${sites.length} site${sites.length > 1 ? 's' : ''}` : ''} · ${v.allProjects ? 'all projects' : `your projects: ${v.projects.join(', ')}; others as totals`}`)),
+          h('div', { class: 'meta' }, `${f.count(fm.slotsTotal, 'slot')} in ${f.count(snap.pools.length, 'pool')} · ${f.count(snap.nodes.length, 'node')}${sites.length ? ` at ${sites.length} site${sites.length > 1 ? 's' : ''}` : ''} · ${v.allProjects ? 'all projects' : `your projects: ${v.projects.join(', ')}; others as totals`}`)),
         h('div', { class: 'titleblock' },
-          tcell('Slots in use', h('span', null, f.num(fm.slotsUsed), h('small', null, ` of ${f.num(fm.slotsTotal)}`)), `${f.num(fm.slotsTotal - fm.slotsUsed)} idle`),
+          tcell('Slots in use', h('span', null, f.num(fm.slotsUsed), h('small', null, ` of ${f.num(fm.slotsTotal)}`)), fm.slotsUsed > fm.slotsTotal ? `${f.num(fm.slotsUsed - fm.slotsTotal)} over the cap, stopping` : `${f.num(fm.slotsTotal - fm.slotsUsed)} idle`),
           tcell('Borrowed', f.num(borrowed), 'past guaranteed shares'),
           burstMax ? tcell('Burst', h('span', null, f.num(burstUp), h('small', null, ` of ${f.num(burstMax)}`)), `${f.money(fm.burstCostPerHour, true)} per hour`) : null,
-          pending.length ? tcell('Requested', h('span', { class: 'pencil' }, `+${f.num(pending.reduce((a, c) => a + c.slots, 0))}`), `est. ${f.money(pending.reduce((a, c) => a + c.estCost, 0))} · awaiting approval`) : null,
+          pending.length ? tcell('Requested', h('span', { class: 'pencil' }, `+${f.num(pending.reduce((a, c) => a + c.slots, 0))}`), `est. ${f.money(pending.reduce((a, c) => a + c.estCost, 0))} · waits for approval`) : null,
           tcell('Nodes to look at', h('span', { class: suspect.length ? 't-temp' : notReady.length ? 't-fail' : '' }, f.num(suspect.length + notReady.length)),
             [suspect.length ? `${suspect.length} suspect` : null, notReady.length ? `${notReady.length} not ready` : null].filter(Boolean).join(' · ') || 'none'),
           tcell('Failures', h('span', { class: fm.failuresLastHour ? 't-fail' : '' }, f.num(fm.failuresLastHour)), 'in the last hour'),
@@ -199,6 +202,7 @@ function key() {
     h('span', null, sw('mine'), 'running your units'),
     h('span', null, sw('other'), 'another project'),
     h('span', null, sw('idle'), 'idle'),
+    h('span', null, sw('capped'), 'capped: a node’s slot limit takes it away, the reason beside it'),
     h('span', null, sw('mine notch'), 'borrowed past guaranteed'),
     h('span', null, sw('pending'), 'requested, with its price'),
     h('span', null, sw('headroom'), 'burst headroom'),

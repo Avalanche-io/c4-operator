@@ -1,0 +1,16 @@
+/* The HUD's theme for the c4-mark package (design/vendor/c4-mark/c4mark.css):
+   its custom properties set to the HUD's ink tokens. Ink only: a C4 ID is
+   verification metadata, never a state hue (design/README.md). */
+@import url("../vendor/c4-mark/c4mark.css");
+:root, [data-scheme] {
+  --c4-mark-ink: var(--ink-2);
+  --c4-mark-ink-hover: var(--paper);
+  --c4-mark-focus: var(--paper);
+  --c4-mark-pop-bg: var(--plate-2);
+  --c4-mark-pop-ink: var(--ink);
+  --c4-mark-pop-line: var(--neat);
+  --c4-mark-mono: var(--mono);
+}
+.c4-mark-pop .c4-mark-copy { font-family: var(--sans); background: var(--plate); border-color: var(--ink-3); }
+.c4-mark-pop .c4-mark-ok { font-family: var(--sans); color: var(--paper); }
+.c4-mark-invalid { opacity: 1; color: var(--ink-3); }

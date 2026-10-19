@@ -127,7 +127,7 @@ export function pylonSVG(g, o = {}) {
     for (let k = 0; k < Math.min(g.slots, 400); k++) s += `<rect x="${X(k) + 0.5}" y="${sy - 6}" width="${Math.max(1, X(1) - X(0) - 1)}" height="6" fill="${T.run}" fill-opacity=".85"/>`;
     s += `<path d="M${X(g.att)} ${sy - 10} v15 h-4" fill="none" stroke="${T.ink}"/>`;
     s += `<path d="M${X(g.req)} ${sy + 2} l-4 7 h8 z" fill="${g.req > g.att + 0.01 ? T.risk : T.pencil}"/>`;
-    s += `<text x="${sx}" y="${sy + fs * 1.9}" fill="${T.ink3}" font-size="${fs * 0.85}" font-family="${T.mono}">slots · ${g.slots} running · ${(+g.req).toFixed(1)} needed · ${Math.round(g.att)} can get</text>`;
+    s += `<text x="${sx}" y="${sy + fs * 1.9}" fill="${T.ink3}" font-size="${fs * 0.85}" font-family="${T.mono}">slots · ${g.slots} running${+g.req > 0 ? ` · ${(+g.req).toFixed(1)} needed` : ''} · ${Math.round(g.att)} can get</text>`;
   }
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(ariaOf(g))}">${s}</svg>`;
 }

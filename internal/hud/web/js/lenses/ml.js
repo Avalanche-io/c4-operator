@@ -3,6 +3,7 @@
 
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
+import { c4idEl } from '../../design/components/c4id.js';
 
 export function mlLens(ctx, job, rank0) {
   const cs = job.classSummary || {};
@@ -19,14 +20,16 @@ export function mlLens(ctx, job, rank0) {
   const laneY = (r) => 30 + r * 16;
   for (let r = 0; r < ranks; r++) {
     rows.push(s('text', { x: -8, y: laneY(r) + 9, 'text-anchor': 'end' }, `rank ${r}`));
-    for (const a of atts) {
+    for (const [ai, a] of atts.entries()) {
       const a0 = f.ms(a.start);
       const a1 = a.end ? f.ms(a.end) : now;
       const failed = a.exitCode && a.exitCode !== 0;
       // Work up to the last checkpoint survived; after it, a failure loses it.
       const saved = failed ? Math.max(a0, ...cks.map((c) => f.ms(c.at)).filter((t) => t >= a0 && t <= a1)) : a1;
       rows.push(s('rect', { x: x(a0), y: laneY(r), width: wx(a0, saved), height: 11, fill: 'var(--u-done)' }));
-      if (failed) rows.push(s('rect', { x: x(saved), y: laneY(r), width: wx(saved, a1), height: 11, fill: 'var(--bar-red)' }));
+      // lost work an attempt after it restarted is failed but settled: pale
+      // red, nobody needs to act; red only for a last attempt that failed
+      if (failed) rows.push(s('rect', { x: x(saved), y: laneY(r), width: wx(saved, a1), height: 11, fill: ai < atts.length - 1 ? 'var(--fail-pale)' : 'var(--bar-red)' }));
     }
     for (const y of ys) {
       const y0 = f.ms(y.at);
@@ -54,35 +57,36 @@ export function mlLens(ctx, job, rank0) {
       h('header', null, h('h2', null, 'GPU hours'), h('span', { class: 'dim' }, `Useful: work that survived in a checkpoint. Lost: work redone after a failure, and restore time.`)),
       h('div', { class: 'figs' },
         h('div', { class: 'fig' }, h('div', { class: 'lab' }, 'Useful'), h('div', { class: 'val' }, `${cs.usefulGpuHours.toFixed(1)} h`)),
-        h('div', { class: 'fig' }, h('div', { class: 'lab' }, 'Lost'), h('div', { class: 'val t-red' }, `${cs.lostGpuHours.toFixed(2)} h`)),
+        h('div', { class: 'fig' }, h('div', { class: 'lab' }, 'Lost'), h('div', { class: job.phase === 'Failed' ? 'val t-red' : 'val' }, `${cs.lostGpuHours.toFixed(2)} h`)),
         h('div', { class: 'fig' }, h('div', { class: 'lab' }, 'Steps'), h('div', { class: 'val' }, `${f.num(cs.step)} / ${f.num(cs.totalSteps)}`)),
         h('div', { class: 'fig' }, h('div', { class: 'lab' }, 'Wrapped'), h('div', { class: 'val' }, `${cs.wrapped}, ${ranks} ranks`))),
       h('div', { style: { display: 'flex', height: '8px', background: 'var(--well)' }, 'aria-hidden': 'true' },
         h('i', { style: { width: `${(cs.usefulGpuHours / total) * 100}%`, background: 'var(--u-done)' } }),
-        h('i', { style: { width: `${(cs.lostGpuHours / total) * 100}%`, background: 'var(--bar-red)' } }))),
+        h('i', { style: { width: `${(cs.lostGpuHours / total) * 100}%`, background: job.phase === 'Failed' ? 'var(--bar-red)' : 'var(--fail-pale)' } }))),
     h('div', { class: 'panel', 'data-key': 'ml-tl' },
-      h('header', null, h('h2', null, 'Checkpoints and yields'), h('span', { class: 'dim' }, 'Squares are checkpoints (each a C4 view); magenta outlines are time yielded to other work.')),
+      h('header', null, h('h2', null, 'Checkpoints and yields'), h('span', { class: 'dim' }, 'Squares are checkpoints (each a C4 view); grey outlines are time yielded to other work.')),
       h('div', { class: 'well', style: { paddingTop: '16px' } }, timeline),
       h('div', { class: 'legend' },
-        h('span', null, h('i', { class: 'lg-done' }), 'ran'),
-        h('span', null, h('i', { class: 'lg-failed' }), 'lost: after the last checkpoint of a failed attempt'),
-        h('span', null, h('i', { class: 'lg-held' }), 'yielded'),
+        h('span', null, h('i', { style: { background: 'var(--u-done)' } }), 'ran'),
+        h('span', null, h('i', { style: { background: 'var(--fail-pale)' } }), 'lost: after the last checkpoint of a failed attempt, since restarted'),
+        job.phase === 'Failed' ? h('span', null, h('i', { style: { background: 'var(--bar-red)' } }), 'lost in the last attempt: needs you') : null,
+        h('span', null, h('i', { style: { border: '1.5px solid var(--bar-magenta)' } }), 'yielded'),
         h('span', null, h('i', { style: { background: 'transparent', outline: '1px dashed var(--ink-3)', outlineOffset: '-1px' } }), 'remaining, at p90'))),
-    h('div', { class: 'cols' },
+    h('div', { class: 'lens-cols' },
       h('div', { class: 'panel', 'data-key': 'ml-yields' },
         h('header', null, h('h2', null, 'Yields')),
-        ys.length ? h('table', { class: 't' },
+        ys.length ? h('table', { class: 'vt' },
           h('thead', null, h('tr', null, h('th', null, 'Yielded'), h('th', null, 'Resumed'), h('th', null, 'Why'))),
           h('tbody', null, ys.map((y, i) => h('tr', { 'data-key': 'y' + i },
             h('td', { class: 'num' }, f.clock(y.at)),
-            h('td', { class: 'num' }, y.resumedAt ? f.clock(y.resumedAt) : h('span', { class: 't-magenta' }, 'waiting')),
+            h('td', { class: 'num' }, y.resumedAt ? f.clock(y.resumedAt) : h('span', { class: 't-magenta' }, 'queued')),
             h('td', { style: { fontSize: '12px' } }, y.reason))))) : h('p', { class: 'dim' }, 'This run has not yielded.')),
       h('div', { class: 'panel', 'data-key': 'ml-views' },
         h('header', null, h('h2', null, 'Reproducible from')),
-        h('dl', { class: 'kv' },
-          h('dt', null, 'Dataset view'), h('dd', { class: 'mono', title: cs.datasetView }, f.shortId(cs.datasetView)),
-          h('dt', null, 'Code view'), h('dd', { class: 'mono', title: cs.codeView }, f.shortId(cs.codeView)),
-          lastCk ? [h('dt', null, 'Latest checkpoint'), h('dd', { class: 'mono', title: lastCk.view }, `${f.shortId(lastCk.view)}  step ${lastCk.step}`)] : null,
+        h('dl', { class: 'vkv' },
+          h('dt', null, 'Dataset view'), h('dd', null, c4idEl(cs.datasetView, { tail: 4, label: 'dataset view' })),
+          h('dt', null, 'Code view'), h('dd', null, c4idEl(cs.codeView, { tail: 4, label: 'code view' })),
+          lastCk ? [h('dt', null, 'Latest checkpoint'), h('dd', null, c4idEl(lastCk.view, { tail: 4, label: 'checkpoint view' }), `  step ${lastCk.step}`)] : null,
           lastCk ? [h('dt', null, 'Stored per checkpoint'), h('dd', null, `${f.bytes(lastCk.bytesNew)} new; ${f.bytes(lastCk.bytesDeduped)} already in the store`)] : null))),
   ];
 }

@@ -20,6 +20,10 @@ import { tok, agg, reducedMotion } from './core.js';
 import * as f from './fmt.js';
 import { ranges } from './rle.js';
 import { register, tween, ms } from './live.js';
+import { drawMark } from './marks.js';
+import { unitWords } from './words.js';
+
+const esc = (x) => String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
 // ---------------------------------------------------------------- model
 
@@ -29,6 +33,10 @@ const stateOf = (detail) => {
   if (detail.nudge && detail.nudge.hold) for (const [i, k] of m) if (k === 'queued') m.set(i, 'held');
   return m;
 };
+
+// unitState: the operator's state word, with the HUD's older names folded in
+// (unevaluated is the operator's planned: expected work).
+export const unitState = (s) => (s === 'unevaluated' ? 'planned' : s);
 
 // units of a job detail: from unitList, or laid out from groups when the
 // list is omitted (very large jobs): the k-th member of a group is at k.
@@ -41,11 +49,17 @@ function unitsOf(d) {
   // the deadline: projected late (risk), late at any capacity (willMiss), passed (missed)
   const dl = d.objective && d.objective.deadline ? Date.parse(d.objective.deadline) : NaN;
   const missed = !settled && dl < f.now();
-  const willMiss = !!(d.estimate && d.estimate.feasible === false);
+  const e = d.estimate || {};
+  const willMiss = e.risk ? e.risk === 'willMiss' : e.feasible === false;
+  // what each unit waits for (the latest wait naming it), and how often the
+  // farm interrupted it
+  const waitOf = new Map(), intr = new Map();
+  for (const w of d.waits || []) waitOf.set(w.unit, w);
+  for (const x of d.interruptions || []) intr.set(x.unit, (intr.get(x.unit) || []).concat(x));
   const mk = (u) => ({
-    ...u, state: st.get(u.i) || u.state, fraction: prog[u.i] ? prog[u.i].fraction : null, measured: prog[u.i] ? prog[u.i].measured : null,
+    ...u, state: unitState(st.get(u.i) || u.state), fraction: prog[u.i] ? prog[u.i].fraction : null, measured: prog[u.i] ? prog[u.i].measured : null,
     risk: risk.has(u.i) || !!u.risk, missed, willMiss, settled, job: `${d.namespace}/${d.name}`, jobName: d.name,
-    yielded: d.phase === 'Yielded',
+    yielded: d.phase === 'Yielded', wait: waitOf.get(u.i) || null, interruptions: intr.get(u.i) || null,
   });
   if (d.unitList && d.unitList.length) return d.unitList.map(mk);
   const out = [];
@@ -339,11 +353,27 @@ export function drawUnit(g, T, it, t, glowAt) {
   if (w <= 0 || h <= 0) return;
   const st = u.state;
   if (it.ghost || st === 'ghost') { g.strokeStyle = T.g[12]; g.setLineDash([2, 2]); g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); g.setLineDash([]); return; }
-  if (st === 'unevaluated') {
+  // what the unit waits for, when it waits: a person (needs you when it
+  // holds up work, pale red when not) or a thing (grey, hatched, a clock)
+  const wt = st === 'waits' ? u.wait : null;
+  const person = !!(wt && /^person:/.test(wt.waitsFor || ''));
+  const needsYou = st === 'flagged' || (st === 'failed' && !u.ack && !u.accepted) || (wt && (wt.needsYou || (person && wt.blocking)));
+  const rework = !!(u.review && u.review.do === 'rework') && st !== 'succeeded' && st !== 'egress' && st !== 'accepted';
+  const mk = Math.min(9, Math.floor(Math.min(w, h) * 0.6));
+  const corner = (kind, color) => { if (mk >= 6 && w >= 10) drawMark(g, kind, x + w - mk - 1.5, y + 1.5, mk, color); };
+  if (st === 'planned') {
+    // expected: work that will exist but does not yet, stippled with a dashed edge
     g.fillStyle = T.g[8]; g.fillRect(x, y, w, h);
     g.fillStyle = T.g[13];
     for (let yy = y + 1; yy < y + h; yy += 3) for (let xx = x + 1 + ((yy - y) % 6 ? 0 : 1.5); xx < x + w; xx += 3) g.fillRect(xx, yy, 1, 1);
-    g.strokeStyle = T.g[13]; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
+    g.strokeStyle = T.g[12]; g.setLineDash([2, 2]); g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); g.setLineDash([]);
+  } else if (needsYou) {
+    // needs you: solid red with a white corner flag
+    g.fillStyle = T.fail; g.fillRect(x, y, w, h);
+    if (h >= 6 && w >= 8) { const k = Math.min(7, h * 0.6, w * 0.4); g.fillStyle = T.paper; g.beginPath(); g.moveTo(x + w, y); g.lineTo(x + w - k, y); g.lineTo(x + w, y + k); g.closePath(); g.fill(); }
+  } else if (wt && person) {
+    // a person's open decision that holds up nothing yet: pale red
+    g.fillStyle = T.failPale; g.fillRect(x, y, w, h);
   } else if (st === 'succeeded') {
     // committed: folded into the output and verified; a finished upstream job is the same green
     g.fillStyle = T.done; g.fillRect(x, y, w, h);
@@ -357,15 +387,9 @@ export function drawUnit(g, T, it, t, glowAt) {
     g.fillStyle = T.failPale; g.fillRect(x, y, w, h);
     if (h >= 7 && w >= 10) { const k = Math.min(h, w) * 0.22, cx = x + w / 2, cy = y + h / 2; g.strokeStyle = T.paper; g.lineWidth = 1.5; g.beginPath(); g.moveTo(cx - k, cy); g.lineTo(cx - k * 0.25, cy + k * 0.75); g.lineTo(cx + k * 1.2, cy - k); g.stroke(); g.lineWidth = 1; }
   } else if (st === 'failed') {
-    if (u.ack) {
-      // acknowledged: pale red with the seal of whoever took it
-      g.fillStyle = T.failPale; g.fillRect(x, y, w, h);
-      if (h >= 8 && w >= 8) { g.strokeStyle = T.paper; g.lineWidth = 1.2; g.beginPath(); g.arc(x + w / 2, y + h / 2, Math.min(h, w) * 0.22, 0, Math.PI * 2); g.stroke(); g.lineWidth = 1; }
-    } else {
-      // needs a person: solid red with a white corner flag
-      g.fillStyle = T.fail; g.fillRect(x, y, w, h);
-      if (h >= 6 && w >= 8) { const k = Math.min(7, h * 0.6, w * 0.4); g.fillStyle = T.paper; g.beginPath(); g.moveTo(x + w, y); g.lineTo(x + w - k, y); g.lineTo(x + w, y + k); g.closePath(); g.fill(); }
-    }
+    // acknowledged: pale red with the seal of whoever took it
+    g.fillStyle = T.failPale; g.fillRect(x, y, w, h);
+    if (h >= 8 && w >= 8) { g.strokeStyle = T.paper; g.lineWidth = 1.2; g.beginPath(); g.arc(x + w / 2, y + h / 2, Math.min(h, w) * 0.22, 0, Math.PI * 2); g.stroke(); g.lineWidth = 1; }
   } else if (st === 'preflight') {
     // preparing to render: pale blue with a blue outline, nothing rising yet
     g.fillStyle = T.runPale; g.fillRect(x, y, w, h);
@@ -379,13 +403,14 @@ export function drawUnit(g, T, it, t, glowAt) {
     // frontier advancing), grey above for what is not rendered yet. Green is
     // only for finished work, pale green only for output still moving.
     const fr = Math.max(0.04, Math.min(1, it.fill != null ? it.fill : (u.fraction == null ? 0.3 : u.fraction)));
-    const edge = st === 'retrying' ? T.temp : T.run;
+    const orange = st === 'retrying' || rework;
+    const edge = orange ? T.temp : T.run;
     g.fillStyle = T.g[9]; g.fillRect(x, y, w, h);
     const breathe = reducedMotion() ? 1 : 0.85 + 0.15 * Math.sin(t / 420 + x * 0.01);
     if (h < 6) {
       // too thin for a vertical fill: the blue grows sideways
       g.globalAlpha = breathe; g.fillStyle = T.run; g.fillRect(x, y, w * fr, h); g.globalAlpha = 1;
-      if (st === 'retrying') { g.fillStyle = T.temp; g.fillRect(x + w * fr, y, Math.max(2, w * 0.04), h); }
+      if (orange) { g.fillStyle = T.temp; g.fillRect(x + w * fr, y, Math.max(2, w * 0.04), h); }
     } else {
       const fh = h * fr;
       g.globalAlpha = breathe; g.fillStyle = T.run; g.fillRect(x, y + h - fh, w, fh); g.globalAlpha = 1;
@@ -396,26 +421,40 @@ export function drawUnit(g, T, it, t, glowAt) {
         g.beginPath(); for (let k = -h; k < w + h; k += 4) { g.moveTo(x + k, y + h); g.lineTo(x + k + h, y); } g.stroke();
         g.restore();
       }
-      g.strokeStyle = edge; g.lineWidth = st === 'retrying' ? 1.6 : 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); g.lineWidth = 1;
+      g.strokeStyle = edge; g.lineWidth = orange ? 1.6 : 1; g.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1); g.lineWidth = 1;
     }
+    // yielding: asked to stop at its next safe point
+    if (u.stopping) corner('pause', T.paper);
   } else {
     g.fillStyle = T.g[9]; g.fillRect(x, y, w, h);
-    if (st === 'blocked') {
+    const hatched = st === 'blocked' || st === 'waits' || st === 'locked' || u.locked;
+    if (hatched) {
       g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); g.strokeStyle = T.g[12]; g.beginPath();
       for (let k = -h; k < w + h; k += 5) { g.moveTo(x + k, y); g.lineTo(x + k + h, y + h); } g.stroke(); g.restore();
     }
     // a yielded run keeps the fraction its latest checkpoint saved: finished work, green
-    if (u.fraction > 0 && st !== 'blocked') { g.fillStyle = T.done; g.fillRect(x, y + h - h * Math.min(1, u.fraction), w, h * Math.min(1, u.fraction)); }
-    if (st === 'held' && h >= 6 && w >= 8) { g.fillStyle = T.g[16]; g.fillRect(x + w / 2 - 2.5, y + h / 2 - 3, 1.5, 6); g.fillRect(x + w / 2 + 1, y + h / 2 - 3, 1.5, 6); }
+    if (st === 'waits') corner('clock', T.g[17]);
+    else if (st === 'locked' || u.locked) corner('lock', T.g[17]);
+    if (u.fraction > 0 && !hatched) { g.fillStyle = T.done; g.fillRect(x, y + h - h * Math.min(1, u.fraction), w, h * Math.min(1, u.fraction)); }
+    // held: a person paused it; the pause mark, centred (yielding's sits in the corner, on blue)
+    if (st === 'held' && h >= 6 && w >= 8) { const k = Math.min(8, h - 2, w - 2); drawMark(g, 'pause', x + (w - k) / 2, y + (h - k) / 2, k, T.g[16]); }
   }
   // earlier failed attempts of a unit still going: orange notches
   const prior = (u.attempts || 0) - (st === 'running' || st === 'retrying' || st === 'succeeded' || st === 'egress' ? 1 : 0);
-  if (st !== 'failed' && !u.yielded && h >= 4) { g.fillStyle = T.temp; for (let k = 0; k < Math.min(prior, 3); k++) g.fillRect(x + w - 3, y + 1 + k * 3.5, 3, 2.2); }
+  const nf = st !== 'failed' && !u.yielded && h >= 4 ? Math.min(prior, 3) : 0;
+  if (nf) { g.fillStyle = T.temp; for (let k = 0; k < nf; k++) g.fillRect(x + w - 3, y + 1 + k * 3.5, 3, 2.2); }
+  // interrupted: stopped by the farm, not its fault; a grey notch each, never orange
+  const ni = u.interruptions && h >= 4 ? Math.min(u.interruptions.length, 3 - nf) : 0;
+  if (ni > 0 && st !== 'succeeded') { g.fillStyle = T.g[15]; for (let k = 0; k < ni; k++) g.fillRect(x + w - 3, y + 1 + (nf + k) * 3.5, 3, 2.2); }
+  // ink marks: a check sent it back (rework), a check passed (checked), reused
+  if (rework && st !== 'running' && st !== 'retrying') corner('rework', T.temp);
+  else if (u.review && u.review.do === 'pass') corner('tick', st === 'succeeded' ? T.field : T.paper);
+  else if (u.reused && st === 'succeeded') corner('reuse', T.field);
   // the deadline, for waiting work projected after it: a dashed orchid tick
   // at risk; a sparse orchid hatch when it will miss at any capacity; a solid
   // tick once the deadline has passed. (The job's gauge, strip and deadline
   // line carry the strong fills; a sheet of cells stays readable.)
-  if (u.risk && (st === 'queued' || st === 'blocked' || st === 'held' || st === 'unevaluated' || st === 'backoff')) {
+  if (u.risk && (st === 'queued' || st === 'blocked' || st === 'held' || st === 'planned' || st === 'waits' || st === 'backoff')) {
     if (u.missed) { g.fillStyle = T.risk; g.fillRect(x, y, Math.min(3, w), h); }
     else if (u.willMiss) {
       g.save(); g.beginPath(); g.rect(x, y, w, h); g.clip(); g.globalAlpha = 0.8;
@@ -813,7 +852,8 @@ export class Stack {
         + `<br><span class="dim">${it.toggle === '+' ? 'click or Enter expands' : 'click collapses'}</span>`;
     }
     const u = it.u;
-    const st = u.state === 'retrying' ? '<span class="t-temp">retrying</span>' : u.state === 'running' ? '<span class="t-run">running</span>' : u.state === 'failed' ? (u.ack ? '<span class="t-fail">failed, taken</span>' : '<span class="t-fail">failed: needs you</span>') : u.state;
+    const wd = unitWords(u);
+    const st = `<span class="${wd.cls}">${esc(wd.word)}</span>${wd.why ? ` <span class="dim">${esc(wd.why)}</span>` : ''}`;
     return `<b>${u.label || u.i} · ${u.jobName}</b><br>${st}${u.fraction != null && (u.state === 'running' || u.state === 'retrying') ? ` ${Math.round(u.fraction * 100)}% <span class="dim">${u.measured === false ? 'estimated' : 'measured'}</span>` : ''}`
       + `<br><span class="dim">attempt</span> ${u.attempts || 0}${u.node ? ` <span class="dim">on</span> ${u.node}` : ''}`
       + `${u.work ? `<br><span class="dim">work</span> ${f.dur(u.work.spent || 0)} of ${f.dur(u.work.expected || 0)} slot-time` : ''}`

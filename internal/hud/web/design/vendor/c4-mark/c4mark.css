@@ -1,0 +1,29 @@
+/* c4-mark: themable through custom properties; nothing here assumes a
+   palette. Set them on :root, or on any container.
+     --c4-mark-ink         the mark's color (default: the text's)
+     --c4-mark-ink-hover   on hover, focus and copy
+     --c4-mark-focus       the focus ring
+     --c4-mark-pop-bg, --c4-mark-pop-ink, --c4-mark-pop-line   the popover
+     --c4-mark-mono        the popover's and the tail's typeface
+   Ink only: the mark carries no meaning in color. */
+c4-id { display: inline; }
+.c4-mark { display: inline-flex; align-items: center; gap: .3em; vertical-align: -0.14em; line-height: 1; white-space: nowrap; cursor: pointer;
+  color: var(--c4-mark-ink, currentColor); border-radius: 2px; -webkit-tap-highlight-color: transparent; }
+.c4-mark:hover, .c4-mark:focus-visible, .c4-mark.c4-mark-copied { color: var(--c4-mark-ink-hover, var(--c4-mark-ink, currentColor)); }
+.c4-mark:focus-visible { outline: 1.5px solid var(--c4-mark-focus, currentColor); outline-offset: 2px; }
+.c4-mark svg { flex: none; display: block; }
+.c4-mark-art { display: inline-flex; }
+.c4-mark .c4-mark-bare { display: none; }
+.c4-mark.c4-mark-small .c4-mark-full { display: none; }
+.c4-mark.c4-mark-small .c4-mark-bare { display: inline-flex; }
+.c4-mark-tail { font: 400 .9em/1 var(--c4-mark-mono, ui-monospace, monospace); letter-spacing: .02em; }
+.c4-mark-invalid { opacity: .7; }
+
+.c4-mark-pop { position: absolute; z-index: 1000; display: flex; align-items: center; gap: 10px; padding: 6px 10px; white-space: nowrap;
+  background: var(--c4-mark-pop-bg, Canvas); color: var(--c4-mark-pop-ink, CanvasText); border: 1px solid var(--c4-mark-pop-line, GrayText);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, .3); font: 400 12px/1.2 var(--c4-mark-mono, ui-monospace, monospace); }
+.c4-mark-pop[hidden] { display: none; }
+.c4-mark-pop .c4-mark-copy { display: none; font: 600 10px/1 system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase;
+  color: inherit; background: transparent; border: 1px solid currentColor; padding: 5px 8px; cursor: pointer; }
+.c4-mark-pop.touch .c4-mark-copy { display: inline-block; }
+.c4-mark-pop .c4-mark-ok { font: 600 10px/1 system-ui, sans-serif; letter-spacing: .1em; text-transform: uppercase; }

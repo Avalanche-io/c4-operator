@@ -77,7 +77,7 @@ export default {
           tcell('Nodes', f.num(snap.nodes.length), `${f.num(snap.farm.slotsTotal)} slots`),
           tcell('In use', h('span', null, f.num(snap.farm.slotsUsed), h('small', null, ` of ${f.num(snap.farm.slotsTotal)}`)), snap.viewer.allProjects ? 'all projects' : `${f.num(snap.farm.otherProjectsSlots)} other projects`),
           burst.length ? tcell('Burst', h('span', null, f.num(burst.reduce((a, p) => a + p.burst.provisioned, 0)), h('small', null, ` of ${f.num(burst.reduce((a, p) => a + p.burst.maxSlots, 0))}`)),
-            pend.length ? `+${pend.reduce((a, c) => a + c.slots, 0)} awaiting approval` : 'none requested') : null,
+            pend.length ? `+${pend.reduce((a, c) => a + c.slots, 0)} waits for approval` : 'none requested') : null,
           tcell('Store reads', `${f.num(fi.storeRequests)}`, 'per minute'),
           tcell('Served per fetch', ratio ? h('span', null, h('small', null, '1 : '), f.num(ratio)) : '–', 'store reads per node request'))),
       h('div', { class: 'neat' },
@@ -92,7 +92,7 @@ export default {
               h('span', null, h('i', { class: 'k lit' }), 'slots in use'),
               h('span', null, h('i', { class: 'k run' }), 'running your units'),
               h('span', null, h('i', { class: 'k track' }), 'idle'),
-              h('span', null, h('i', { class: 'k pend' }), 'requested, awaiting approval'),
+              h('span', null, h('i', { class: 'k pend' }), 'requested, waits for approval'),
               h('span', null, h('i', { class: 'k head' }), 'burst headroom'),
               h('span', null, h('i', { class: 'k flow' }), 'bytes from the store, width by slots'),
               h('span', null, h('i', { class: 'k store' }), 'the project stores'))),
@@ -106,7 +106,7 @@ export default {
             scaleGroups.map((g) => h('div', { class: 'blk', 'data-key': 'ss-' + g.site.name },
               h('div', { class: 'mblk-h' },
                 h('h2', null, g.site.label || g.site.name),
-                h('span', null, `${g.nodes.length} nodes · ${poolSum(g.rings).join(' · ')}${f.siteClock(f.now(), g.site.tz) ? ` · ${f.siteClock(f.now(), g.site.tz)} there` : ''}`)),
+                h('span', null, `${f.count(g.nodes.length, 'node')} · ${poolSum(g.rings).join(' · ')}${f.siteClock(f.now(), g.site.tz) ? ` · ${f.siteClock(f.now(), g.site.tz)} there` : ''}`)),
               svgHost('ss-svg-' + g.site.name, siteScaleSVG(snap, g, { w: Math.min(side, 600) }))))))));
   },
 };

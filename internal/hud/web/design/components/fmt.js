@@ -139,12 +139,27 @@ function shown(d, sec = false) {
   return `${h % 12 || 12}:${p2(d.getUTCMinutes())}${s} ${h < 12 ? 'AM' : 'PM'}`;
 }
 
-// clock: 14:20, or Thu 14:20 with the day, in the viewer's zone.
+// clock: 14:20, or Thu 14:20 with the day, in the viewer's zone. A day
+// name alone is ambiguous beyond the coming week, so a time more than six
+// days from now carries its date: Tue 20 Oct 09:00.
+const WEEK = 6 * 86400e3;
 export function clock(iso, withDay = true) {
   const t = at(iso);
   if (!Number.isFinite(t)) return '';
   const d = wall(t);
-  return withDay ? `${DAYS[d.getUTCDay()]} ${shown(d)}` : shown(d);
+  if (!withDay) return shown(d);
+  if (Math.abs(t - nowMs) > WEEK) return `${DAYS[d.getUTCDay()]} ${d.getUTCDate()} ${MONTHS[d.getUTCMonth()]} ${shown(d)}`;
+  return `${DAYS[d.getUTCDay()]} ${shown(d)}`;
+}
+
+// when: the time alone on today's date (the viewer's), else as clock() with
+// the day: an ETA on another day never reads as today's.
+export function when(iso) {
+  const t = at(iso);
+  if (!Number.isFinite(t)) return '';
+  const a = wall(t), b = wall(nowMs);
+  const today = a.getUTCFullYear() === b.getUTCFullYear() && a.getUTCMonth() === b.getUTCMonth() && a.getUTCDate() === b.getUTCDate();
+  return today ? shown(a) : clock(t);
 }
 
 export function clockSec(iso) {
@@ -242,6 +257,11 @@ export function signed(sec) {
   if (!Number.isFinite(sec)) return '';
   if (Math.abs(sec) < 30) return '0m';
   return (sec < 0 ? MINUS : '+') + dur(sec);
+}
+
+// count: a number and its noun, singular or plural: 1 pool, 3 nodes
+export function count(n, one, many = one + 's') {
+  return `${num(n)} ${n === 1 ? one : many}`;
 }
 
 export function num(n) {

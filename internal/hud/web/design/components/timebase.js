@@ -113,7 +113,7 @@ export function channelOf(j, o = {}) {
   const e = j.estimate || {};
   const dl = j.objective && j.objective.deadline ? Date.parse(j.objective.deadline) : null;
   const fin = j.phase === 'Succeeded';
-  const extra = { Yielded: ' · yielded', Blocked: ' · blocked', Held: ' · held', Failed: ' · failed', Queued: ' · queued' }[j.phase] || '';
+  const extra = { Yielded: ' · queued', Blocked: ' · blocked on', Held: ' · held', Failed: ' · needs you', Queued: ' · queued' }[j.phase] || '';
   return {
     key: `${j.namespace}/${j.name}`, name: j.name,
     sub: `${Math.round(g.done * 100)}%${g.basis === 'units' ? ' by units' : ''}${extra} · ${j.class} · ${ORDER[j.order] || j.order}`,

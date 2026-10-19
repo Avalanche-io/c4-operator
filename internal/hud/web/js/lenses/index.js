@@ -11,6 +11,8 @@
 import { costStrip, wireCostStrip, updateCostStrip, Player, playerPanel } from './render.js';
 import { ciLens } from './ci.js';
 import { mlLens } from './ml.js';
+import { agentLens } from './agent.js';
+import { planLens } from './plan.js';
 
 const lenses = new Map();
 export function register(name, lens) { lenses.set(name, lens); }
@@ -48,5 +50,15 @@ register('ci', {
 register('ml', {
   needs: () => ({ unit0: true }),
   main: (ctx, job, st) => mlLens(ctx, job, st.unit0),
+  side: () => [],
+});
+
+register('agent', {
+  main: (ctx, job) => agentLens(ctx, job),
+  side: () => [],
+});
+
+register('plan', {
+  main: (ctx, job) => planLens(ctx, job),
   side: () => [],
 });

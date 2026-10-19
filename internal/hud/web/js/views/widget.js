@@ -17,6 +17,7 @@ import { own } from '../../design/components/live.js';
 import { tok, glance, inFlight, retries } from '../../design/components/core.js';
 import { drawAgg } from '../../design/components/stack.js';
 import { ranges } from '../../design/components/rle.js';
+import { jobWords } from '../../design/components/words.js';
 
 const st = { key: null, detail: null, graph: null, now: null, busy: false, err: null };
 document.addEventListener('hud:changed', () => { st.now = null; });
@@ -111,7 +112,8 @@ function neighbours(ctx, k, j, graph) {
     if (!o) return [name];
     const late = o.phase !== 'Succeeded' && Number.isFinite(o.estimate.slackSeconds) && o.estimate.slackSeconds < 0;
     if (o.phase === 'Succeeded') return [h('i', { class: 'sq settled' }), `${name} · done ${f.clock(o.estimate.etaP90, false)}`];
-    const what = dir === 'down' ? (o.phase === 'Blocked' ? 'waits' : o.phase.toLowerCase()) : o.phase.toLowerCase();
+    const w = jobWords(o);
+    const what = dir === 'down' && o.phase === 'Blocked' ? 'blocked on this job' : w.why ? `${w.word} ${w.why}` : w.word;
     return [`${name} · ${what}`, late ? h('span', { class: 't-risk' }, ` · ≈${f.dur(-o.estimate.slackSeconds)} late`) : null];
   };
   const inputs = (j.inputs || []).filter((x) => x.materialization && !x.fromJob).map((x) => x.materialization);
@@ -131,7 +133,7 @@ function fixBlock(ctx, j) {
   const pending = (ctx.snap.capacity || []).some((c) => c.pool === b.pool && c.state === 'PendingApproval');
   return h('div', { class: 'wg-fix', 'data-key': 'wg-fix' },
     h('div', { class: 'a' }, h('span', null, `+${b.slots} ${b.pool} slots closes it`), h('span', { class: 'p pencil' }, `est. ${f.money(b.cost)}`)),
-    h('div', { class: 'b' }, b.needsApproval ? 'awaiting approval' : 'within the burst budget; the queue asks for it',
+    h('div', { class: 'b' }, b.needsApproval ? 'waits for approval' : 'within the burst budget; the queue asks for it',
       p ? ` · ${p.name} burst today ${f.money(p.burstSpendToday)} of ${f.money(p.burstBudgetPerDay)}` : '',
       p && b.needsApproval ? `; approved, ${f.money(after)}${over ? `, ${f.money(over)} over` : ''}` : ''),
     b.needsApproval && pending ? h('button', { class: 'btn', 'data-action': 'approve', 'data-pool': b.pool }, `Approve · est. ${f.money(b.cost)}`) : null);

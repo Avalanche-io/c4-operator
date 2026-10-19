@@ -10,6 +10,7 @@
 //   bookList(entries)      the book: sequence, time, seal, entry, actor
 
 import * as f from './fmt.js';
+import { c4idEl } from './c4id.js';
 
 function el(tag, attrs, ...kids) {
   const e = document.createElement(tag);
@@ -37,5 +38,5 @@ export function bookList(entries) {
       el('span', { class: 'at' + (e.approx ? ' pencil' : '') }, e.approx ? '<' + f.clock(e.at, false) : f.clockSec(e.at)),
       seal(e.signer, { open: !!e.open }),
       el('span', { class: 'msg ' + (TONE[e.kind] || '') }, e.message),
-      el('span', { class: 'who' }, `${e.actor || ''}${e.signer ? ' · ' + e.signer : ''}${e.record ? ' · ' + f.gridRef(e.record) : ''}`))));
+      el('span', { class: 'who' }, `${e.actor || ''}${e.signer ? ' · ' + e.signer : ''}`, e.record ? [' · ', c4idEl(e.record, { label: 'signed record' })] : null))));
 }

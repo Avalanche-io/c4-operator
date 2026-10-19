@@ -9,6 +9,7 @@ import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { inFlight } from '../../design/components/core.js';
+import { c4idSVGEl } from '../../design/components/c4id.js';
 
 const st = { data: null, now: null, busy: false };
 document.addEventListener('hud:changed', () => { st.now = null; });
@@ -168,7 +169,8 @@ export default {
       return [
         s('path', { class: 'e' + (crit ? ' crit' : ''), d: `M${x1} ${y1} C${mx} ${y1} ${mx} ${y2} ${x2 - 4} ${y2}`, 'data-key': `${e.from}>${e.to}` }),
         s('path', { d: `M${x2 - 6} ${y2 - 4} L${x2} ${y2} L${x2 - 6} ${y2 + 4}`, fill: 'none', stroke: crit ? 'var(--ink)' : 'var(--g13)', 'stroke-width': crit ? 2 : 1.2 }),
-        e.view ? s('text', { x: mx, y: (y1 + y2) / 2 - 5, 'text-anchor': 'middle', class: 'm', style: { 'font-size': '9px', fill: 'var(--ink-3)' } }, f.shortId(e.view).slice(0, 9)) : null,
+        // the view the edge carries, as the C4 mark
+        e.view ? c4idSVGEl(e.view, mx - 6, (y1 + y2) / 2 - 17, 12, { label: 'view carried' }) : null,
       ];
     });
     const singles = L.single.map((id) => byId.get(id));
@@ -181,8 +183,8 @@ export default {
           edges, data.nodes.filter((n) => L.pos.has(n.id)).map((n) => nodeBox(ctx, n, L.pos.get(n.id))))),
       h('div', { class: 'legend vlegend' },
         h('span', null, h('i', { class: 'lg crit' }), 'critical path: the inputs that finish last'),
-        h('span', null, h('i', { class: 'lg dep' }), 'dependency; the label is the C4 view that flows along it'),
-        h('span', null, h('i', { class: 'lg late' }), 'projected late (red pencil)'),
+        h('span', null, h('i', { class: 'lg dep' }), 'dependency; the mark on it is the view that flows along it (hover to read, click to copy)'),
+        h('span', null, h('i', { class: 'lg late' }), 'projected late (orchid, dashed)'),
         h('span', null, h('i', { class: 'lg failed' }), 'failed'),
         h('span', null, h('i', { class: 'lg bar' }), 'units done, and running now')),
       L.finished.length ? h('div', { class: 'vsec', style: { marginTop: '22px' } },

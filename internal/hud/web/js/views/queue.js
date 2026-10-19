@@ -13,6 +13,7 @@ import { glance, inFlight, retries } from '../../design/components/core.js';
 import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
 import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
+import { jobWords, tempWords } from '../../design/components/words.js';
 
 const FILTERS = [['all', 'All'], ['render', 'Render'], ['ci', 'CI'], ['ml', 'ML'], ['other', 'Sim and media']];
 
@@ -54,11 +55,12 @@ function holdMark() {
 
 function phase(j) {
   if (j.phase === 'Held') return h('span', { class: 'q-ph held' }, holdMark(), 'held');
-  if (j.phase === 'Failed') return h('span', { class: 'q-ph t-fail' }, 'failed');
-  if (j.phase === 'Running' && retries(j.units)) return h('span', { class: 'q-ph' }, h('span', { class: 't-run' }, 'running'), h('span', { class: 't-temp' }, ` · ${retries(j.units)} retrying`));
-  if (j.phase === 'Running') return h('span', { class: 'q-ph t-run' }, 'running');
+  if (j.phase === 'Failed') return h('span', { class: 'q-ph t-fail' }, 'needs you');
+  if (j.phase === 'Running' && retries(j.units)) return h('span', { class: 'q-ph' }, h('span', { class: 't-run' }, 'rendering'), h('span', { class: 't-temp' }, ` · ${tempWords(j.units)}`));
+  if (j.phase === 'Running') return h('span', { class: 'q-ph t-run' }, 'rendering');
   if (j.phase === 'Succeeded') return h('span', { class: 'q-ph t-done' }, 'done');
-  return h('span', { class: 'q-ph' }, j.phase.toLowerCase());
+  const w = jobWords(j);
+  return h('span', { class: 'q-ph ' + w.cls }, w.why ? `${w.word} ${w.why}` : w.word);
 }
 
 // ------------------------------------------------------------ rows
@@ -75,10 +77,10 @@ function row(ctx, j, multiProject, sk) {
   const passed = dl && Date.parse(dl) < f.now() && !fin;
   const capt = fin ? `${f.num(u.succeeded)} done` : [
     `${f.num(u.succeeded)}/${f.num(u.total)}`,
-    inFlight(u) ? h('span', { class: 't-run' }, `${inFlight(u)} run`) : null,
-    retries(u) ? h('span', { class: 't-temp' }, `${retries(u)} retry`) : null,
-    u.failed ? h('span', { class: 't-fail' }, `${u.failed} failed`) : null,
-    u.unevaluated ? `${f.num(u.unevaluated)} to expand` : null,
+    inFlight(u) ? h('span', { class: 't-run' }, `${inFlight(u)} rendering`) : null,
+    retries(u) ? h('span', { class: 't-temp' }, tempWords(u)) : null,
+    u.failed ? h('span', { class: 't-fail' }, `${u.failed} ${u.failed === 1 ? 'needs' : 'need'} you`) : null,
+    u.unevaluated || u.planned ? `${f.num(u.unevaluated || u.planned)} expected` : null,
   ].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]));
   const b = e.burst;
   const act = [];
@@ -241,11 +243,11 @@ function simpleRow(ctx, j, rank) {
     h('div', { class: 'stack2' },
       h('span', { class: 'big' }, `${Math.round(g.done * 100)}%`),
       h('span', { class: 'sub' }, fin ? `${f.num(u.total)} ${unitWord(j)}, all done` : `${f.num(u.succeeded)} of ${f.num(u.total)} ${unitWord(j)}`,
-        inFlight(u) ? [' · ', h('span', { class: 't-run' }, `${inFlight(u)} running`)] : null,
-        u.failed ? [' · ', h('span', { class: 't-fail' }, `${u.failed} failed`)] : null)),
+        inFlight(u) ? [' · ', h('span', { class: 't-run' }, `${inFlight(u)} rendering`)] : null,
+        u.failed ? [' · ', h('span', { class: 't-fail' }, `${u.failed} ${u.failed === 1 ? 'needs' : 'need'} you`)] : null)),
     h('div', { class: 'stack2' },
       fin ? [h('span', { class: 'bigs' }, 'done'), h('span', { class: 'sub' }, `finished ${f.clock(e.etaP90, false)}`)]
-        : waiting && j.phase === 'Blocked' ? [h('span', { class: 'bigs' }, '\u2013'), h('span', { class: 'sub' }, 'waits for another job')]
+        : waiting && j.phase === 'Blocked' ? [h('span', { class: 'bigs' }, '\u2013'), h('span', { class: 'sub' }, `blocked on ${jobWords(j).why}`)]
           : [h('span', { class: 'bigs' }, f.approx(e.remainingSeconds)), h('span', { class: 'sub' }, 'ready ', h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, `~${f.clock(e.etaP50, false)}`))]),
     h('div', { class: 'stack2' },
       h('span', { class: 'big' + (late ? ' t-risk' : '') }, dl ? f.clock(dl, false) : '\u2013'),

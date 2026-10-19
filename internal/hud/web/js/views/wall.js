@@ -76,7 +76,7 @@ function groupSub(g) {
   const proj = g.project || (g.jobs[0] && g.jobs[0].project);
   if (g.late) return [`${proj} · late ${f.dur(-gl.slack)}`, true];
   if (held) return [`${proj} · held`, false];
-  if (yielded) return [`${proj} · yielded`, false];
+  if (yielded) return [`${proj} · queued`, false];
   if (Number.isFinite(gl.slack) && gl.slack < 6 * 3600) return [`${proj} · ${f.signed(gl.slack)}`, false];
   return [`${proj}${gl.deadline ? ` · due ${f.clock(gl.deadline)}` : ''}`, false];
 }

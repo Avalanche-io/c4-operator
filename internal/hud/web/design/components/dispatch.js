@@ -16,7 +16,7 @@
 //
 // SVG is returned as strings, one element per row; the views wrap them.
 
-import { tok, glance, esc, steady, inFlight, retries } from './core.js';
+import { tok, glance, esc, steady, inFlight, retries, willMiss as willMissOf } from './core.js';
 import * as f from './fmt.js';
 import { ranges } from './rle.js';
 
@@ -25,7 +25,9 @@ const done = (j) => j.phase === 'Succeeded';
 
 // ------------------------------------------------------------ batch strip
 
-const STATES = ['succeeded', 'running', 'retrying', 'failed', 'unevaluated', 'queued', 'blocked'];
+const STATES = ['succeeded', 'running', 'retrying', 'failed', 'flagged', 'unevaluated', 'planned', 'queued', 'blocked', 'waits'];
+// the strip's slot for each state: flagged needs a person like failed, planned is expected work
+const SLOT = { queued: 'waiting', blocked: 'waiting', waits: 'waiting', flagged: 'failed', planned: 'unevaluated' };
 
 // batchSize: frames per display batch for a render job (24, a second of
 // screen time), else whatever keeps the strip under `max` cells.
@@ -42,8 +44,13 @@ export function buckets(j, size) {
   for (const k of STATES) for (const [, b] of ranges((j.unitStates || {})[k])) max = Math.max(max, b);
   const n = Math.max(1, Math.ceil((max + 1) / size));
   const out = Array.from({ length: n }, () => ({ n: 0, succeeded: 0, running: 0, retrying: 0, failed: 0, unevaluated: 0, waiting: 0 }));
+  // the operator sends planned and, for older clients, the same set as
+  // unevaluated: count it once
+  const us = j.unitStates || {};
+  const skip = us.unevaluated && us.planned ? 'planned' : null;
   for (const k of STATES) {
-    const slot = k === 'queued' || k === 'blocked' ? 'waiting' : k;
+    if (k === skip) continue;
+    const slot = SLOT[k] || k;
     for (const [a, b] of ranges((j.unitStates || {})[k])) {
       for (let c = Math.floor(a / size); c <= Math.floor(b / size); c++) {
         const lo = Math.max(a, c * size), hi = Math.min(b, c * size + size - 1);
@@ -66,7 +73,7 @@ export function batchStrip(j, o = {}) {
   const settled = done(j);
   const held = j.nudge && j.nudge.hold;
   const late = !settled && Number.isFinite(j.estimate.slackSeconds) && j.estimate.slackSeconds < 0;
-  const willMiss = late && j.estimate.feasible === false;
+  const willMiss = late && willMissOf(j.estimate);
   const h = H - 4;
   let s = '';
   cells.forEach((c, k) => {
@@ -128,7 +135,7 @@ export function datumBar(j, o = {}) {
       // the deadline has passed
       const id = 'dl' + (++datumSeq);
       s += passed ? `<rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="${T.risk}"/>`
-        : e.feasible === false
+        : willMissOf(e)
           ? `<defs><pattern id="${id}" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><rect width="5" height="5" fill="${T.riskPale}"/><rect width="2" height="5" fill="${T.risk}"/></pattern></defs><rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="url(#${id})" stroke="${T.risk}" stroke-width="1.2"/>`
           : `<rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="${T.riskPale}"/><rect x="${a}%" y="${H / 2 - 4}" width="${w}%" height="8" fill="none" stroke="${T.risk}" stroke-dasharray="3 2"/>`;
     } else {

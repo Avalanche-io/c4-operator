@@ -2,7 +2,7 @@
 // billed), per pool capacity and burst, spend against budget, the
 // required-slots curve for the next 48 hours against capacity, and a
 // what-if for burst. A sheet: need above capacity is red pencil (a
-// projected shortfall), a request awaiting approval is dashed grey with its
+// projected shortfall), a request that waits for approval is dashed grey with its
 // price, burst capacity is grey like any other slot.
 
 import { h, s } from '../dom.js';
@@ -219,7 +219,7 @@ export default {
             h('td', { class: 'mono' }, c.pool), h('td', { class: 'r num' }, `+${c.slots}`),
             h('td', { style: { fontSize: '12px' } }, c.reason), h('td', { class: 'num' }, f.clock(c.until)),
             h('td', { class: 'r num' }, f.money(c.estCost)), h('td', { class: 'num dim' }, `${(c.prewarmViews || []).length} views`),
-            h('td', null, h('span', { class: 'chip' + (c.state === 'PendingApproval' ? ' pend' : '') }, c.state === 'PendingApproval' ? 'awaiting approval' : c.state.toLowerCase())),
+            h('td', null, h('span', { class: 'chip' + (c.state === 'PendingApproval' ? ' pend' : '') }, c.state === 'PendingApproval' ? 'waits for approval' : c.state === 'Provisioning' ? 'expected' : c.state.toLowerCase())),
             h('td', { class: 'r' }, c.state === 'PendingApproval' ? h('button', { class: 'btn primary small', 'data-action': 'approve', 'data-pool': c.pool }, `Approve burst, ${f.money(c.estCost)}`) : null))))) :
           h('p', { class: 'dim' }, 'No capacity requests.')),
       h('div', { class: 'vsec' },

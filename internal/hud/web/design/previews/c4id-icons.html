@@ -1,0 +1,64 @@
+<!-- @dsCard group="Components" -->
+<!doctype html>
+<html lang="en" data-scheme="dark"><head><meta charset="utf-8"><title>The C4 ID mark</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="stylesheet" href="_preview.css">
+<link rel="stylesheet" href="../components/c4id.css">
+<style>
+  body { max-width: 1500px; }
+  h2 { font: 600 11px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); margin: 36px 0 12px; }
+  p.lead { font: 400 15px/1.5 var(--sans); color: var(--ink); max-width: 1000px; margin: 0 0 10px; }
+  p.rule { font: 400 13px/1.5 var(--sans); color: var(--ink-2); max-width: 1000px; border-left: 3px solid var(--paper); padding: 8px 14px; background: var(--plate); }
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  .stack { display: grid; gap: 18px; }
+  .pair > .panel + .panel, .stack > .panel + .panel, .demo > .panel + .panel { margin-top: 0; }
+  .panel { background: var(--field); color: var(--ink); border: 1px solid var(--neat); padding: 16px 18px 20px; margin: 0; }
+  .panel h3 { font: 600 11px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 12px; }
+  .panel p, .panel li { font: 400 13.5px/1.55 var(--sans); color: var(--ink-2); max-width: 1100px; }
+  .panel b { color: var(--ink); }
+  table.c { border-collapse: collapse; width: 100%; font-size: 13px; }
+  table.c th { font: 600 9.5px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); text-align: left; padding: 6px 12px 6px 0; border-bottom: 1px solid var(--rule-2); }
+  table.c td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--rule-1); vertical-align: middle; color: var(--ink); }
+  table.c td.n { font: 600 11px/1.3 var(--sans); letter-spacing: .06em; color: var(--ink-2); }
+  .inl { font: 400 13px/1.5 var(--sans); color: var(--ink-2); }
+  table.odds { border-collapse: collapse; font: 400 12.5px/1.3 var(--mono); margin: 8px 0 12px; }
+  table.odds th, table.odds td { padding: 5px 16px 5px 0; border-bottom: 1px solid var(--rule-1); text-align: left; color: var(--ink-2); }
+  table.odds th { font: 600 9.5px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+  table.cmp { border-collapse: collapse; font: 400 12px/1 var(--mono); }
+  table.cmp td, table.cmp th { padding: 6px 16px 6px 0; border-bottom: 1px solid var(--rule-1); color: var(--ink-2); white-space: nowrap; text-align: left; }
+  table.cmp th { font: 600 9px/1.2 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+  table.cmp td.truth { font: 400 11.5px/1.2 var(--sans); color: var(--ink-3); }
+  table.cmp .s20 { font-size: 20px; }
+  .demo { display: grid; grid-template-columns: 1.2fr 1fr; gap: 18px; }
+  .demo textarea { width: 100%; height: 64px; background: var(--well); color: var(--ink); border: 1px solid var(--rule-2); font: 400 12px/1.4 var(--mono); padding: 8px; }
+  .kbd { font: 500 11px/1 var(--mono); border: 1px solid var(--ink-3); padding: 1px 5px; border-radius: 3px; }
+</style></head>
+<body>
+<div class="pv-h"><h1>The C4 ID mark</h1></div>
+<p class="lead">A C4 ID is 90 characters; shown raw it is noise. A small mark stands in for it: c4 in the corner brackets the callouts lock on with (Joshua's pick, F). Hover or focus it to read the ID, click it or press <span class="kbd">Enter</span> to copy it. Where people check that IDs match, the expanded mark adds one to three glyphs drawn from the ID's digest (Joshua's pick, the 5 × 5 mirrored grid). It all comes from the <b>c4-mark</b> package (<span class="mono" id="ver"></span>), which the HUD vendors.</p>
+<p class="rule"><b>Ink only.</b> An ID is verification metadata, not a state, so the mark never takes a state hue (design/README.md). It takes the text's ink and brightens on hover and focus; the package's colors are custom properties the HUD sets to its tokens.</p>
+
+<h2>The bare mark, and the expanded mark at 12, 16 and 24 px</h2>
+<div class="pair" id="sizes"></div>
+
+<h2>Between the glyphs: tiles, one field, or a hairline</h2>
+<div class="stack" id="gaps"></div>
+
+<h2>Which bits, and the odds</h2>
+<div class="panel" id="bits" style="margin-bottom:18px"></div>
+
+<h2>Reading an ID as text: the tail, not the head</h2>
+<div class="panel" id="text" style="margin-bottom:18px"></div>
+
+<h2>Ten IDs side by side: which match?</h2>
+<div class="stack" id="compare"></div>
+
+<h2>Where the expanded mark would appear</h2>
+<div class="panel" id="where"></div>
+
+<h2>Behavior: try it (the HUD's marks and the package's &lt;c4-id&gt; element)</h2>
+<div class="demo" id="demo"></div>
+
+<script type="module" src="c4id-icons.js"></script>
+</body>
+</html>

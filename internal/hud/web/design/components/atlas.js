@@ -1,7 +1,7 @@
 // ATLAS: capacity on the map. Each site is a set of concentric rings, one
 // per pool: the ring is the pool's slots at the site, the lit arc is slots
 // in use, blue only for the share running your units, a dashed arc a
-// request awaiting approval and a dotted arc the burst headroom the
+// request waits for approval and a dotted arc the burst headroom the
 // provider can still give. The store region is a diamond; arcs carry bytes
 // from it to the sites, and the tiers' fan-in says how few of the nodes'
 // reads ever reach it. Land is a dot matrix from Natural Earth (land.js).
@@ -112,7 +112,7 @@ export function ringsSVG(T, g, cx, cy, o = {}) {
   for (const q of g.rings) {
     const whole = q.slots + q.pend + q.head || 1;
     const fr = (v) => v / whole;
-    const tip = `${g.site.label || g.site.name} · ${q.pool.name} | ${q.used} of ${q.slots} slots in use${q.mine ? `, ${q.mine} running your units` : ''}${q.pend ? ` | +${q.pend} requested · est. ${f.money(q.cost)} · awaiting approval` : ''}${q.head ? ` | ${q.head} more the provider can give` : ''}`;
+    const tip = `${g.site.label || g.site.name} · ${q.pool.name} | ${q.used} of ${q.slots} slots in use${q.mine ? `, ${q.mine} running your units` : ''}${q.pend ? ` | +${q.pend} requested · est. ${f.money(q.cost)} · waits for approval` : ''}${q.head ? ` | ${q.head} more the provider can give` : ''}`;
     s += `<g data-tip="${esc(tip)}">`;
     s += `<path d="${arc(cx, cy, r, 0, fr(q.slots))}" fill="none" stroke="${T.g[9]}" stroke-width="${sw}"/>`;
     if (q.used) s += `<path d="${arc(cx, cy, r, 0, fr(q.used))}" fill="none" stroke="${T.g[16]}" stroke-width="${sw}"/>`;
@@ -192,7 +192,7 @@ export function atlasSVG(snap, o = {}) {
     const R = ringsSVG(T, g, cx, cy, { r0: 13, sw: 5, gap: 3.5 });
     s += R.svg;
     const pend = g.rings.filter((q) => q.pend);
-    placed.push({ x: cx, y: cy, r: R.r, label: (g.site.label || g.site.name).toUpperCase(), sub: siteSub(g), sub2: pend.length ? `+${pend.reduce((a, q) => a + q.pend, 0)} requested · est. ${f.money(pend.reduce((a, q) => a + q.cost, 0))} · awaiting approval` : `${g.nodes.length} nodes · ${g.site.kind === 'onprem' ? 'machine room' : 'cloud region'} · ${g.site.region}${f.siteClock(f.now(), g.site.tz) ? ' · ' + f.siteClock(f.now(), g.site.tz) : ''}` });
+    placed.push({ x: cx, y: cy, r: R.r, label: (g.site.label || g.site.name).toUpperCase(), sub: siteSub(g), sub2: pend.length ? `+${pend.reduce((a, q) => a + q.pend, 0)} requested · est. ${f.money(pend.reduce((a, q) => a + q.cost, 0))} · waits for approval` : `${g.nodes.length} nodes · ${g.site.kind === 'onprem' ? 'machine room' : 'cloud region'} · ${g.site.region}${f.siteClock(f.now(), g.site.tz) ? ' · ' + f.siteClock(f.now(), g.site.tz) : ''}` });
   }
   s += labels(T, placed, w, h);
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(`Map: ${M.compute.length} sites with nodes${store ? ', the project stores in ' + store.region : ''}`)}">${s}</svg>`;

@@ -34,10 +34,22 @@ export function objectURL(url) {
   return withViewer(url);
 }
 
+// loadFonts loads every face the stylesheets declare and records how many
+// loaded as <html data-fonts="loaded/declared">. The faces use font-display:
+// block, so text in a face still loading is invisible; a static page
+// (fixtures, screenshots) draws only once they are in, and the capture
+// check reads the count.
+function loadFonts() {
+  const faces = [...document.fonts];
+  return Promise.allSettled(faces.map((ff) => ff.load())).then((rs) => {
+    document.documentElement.dataset.fonts = `${rs.filter((r) => r.status === 'fulfilled').length}/${faces.length}`;
+  });
+}
+
 // subscribe delivers snapshots: from the event stream, or once in static mode.
 export function subscribe(onSnapshot, onStatus) {
   if (staticMode) {
-    get('/snapshot').then(onSnapshot, (e) => onStatus('error', e.message));
+    loadFonts().then(() => get('/snapshot')).then(onSnapshot, (e) => onStatus('error', e.message));
     return;
   }
   let es;

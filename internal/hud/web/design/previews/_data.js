@@ -1,4 +1,5 @@
-// Data for the component previews: the captured fixtures (design/fixtures,
+// Data for the component previews: the captured fixtures (make fixtures writes
+// them to build/fixtures/design; hudmock serves them at design/fixtures,
 // frozen from hack/hudmock) when present, else the live HUD API of whatever
 // serves this page (the mock, or a real manager in development mode).
 import * as f from '../components/fmt.js';

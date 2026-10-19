@@ -10,6 +10,7 @@ import { subscribe, post, get, as, staticMode } from './api.js';
 import * as f from './fmt.js';
 import * as lv from './level.js';
 import * as prefs from './prefs.js';
+import { installC4ID } from '../design/components/c4id.js';
 import queue from './views/queue.js';
 import job from './views/job.js';
 import pools from './views/pools.js';
@@ -56,6 +57,8 @@ function applyScheme(v) {
   setScheme(v);
 }
 applyPrefs();
+// every C4 ID is a mark: hover or focus shows it, click or Enter copies it
+installC4ID(document);
 
 function parseRoute() {
   const raw = location.hash.replace(/^#\/?/, '');
@@ -234,7 +237,9 @@ function slate() {
   return h('div', { class: 'slate', role: 'region', 'aria-label': 'Farm at a glance' },
     h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Slots in use'),
       h('span', { class: 'val' }, f.num(fm.slotsUsed), h('small', null, `of ${f.num(total)}`)),
-      h('span', { class: 'meter', style: { width: '150px' }, 'aria-hidden': 'true' }, seg)),
+      h('span', { class: 'meter', style: { width: '150px' }, 'aria-hidden': 'true' }, seg),
+      // right after a cap drops, units still running past it until their turns end
+      fm.slotsUsed > total ? h('span', { class: 'sub' }, `${f.num(fm.slotsUsed - total)} over the cap, stopping`) : null),
     fm.otherProjectsSlots || !s.viewer.allProjects ? h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Other projects'),
       h('span', { class: 'val' }, f.num(fm.otherProjectsSlots), h('small', null, 'slots')),
       h('span', { class: 'sub' }, 'shown only as a total')) : null,
@@ -245,7 +250,8 @@ function slate() {
     h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Burst in flight'),
       h('span', { class: 'val' + (fm.burstSlots ? ' t-blue' : '') }, f.num(fm.burstSlots), h('small', null, 'slots')),
       h('span', { class: 'sub' }, fm.burstSlots ? `${f.money(fm.burstCostPerHour, true)} per hour` : 'none')),
-    h('div', { class: 'cell head' }, h('span', { class: 'lab' }, 'Savings: bytes avoided today'),
+    // bytes avoided mean something only on a farm that mounts data
+    !fm.bytesMaterialized ? null : h('div', { class: 'cell head' }, h('span', { class: 'lab' }, 'Savings: bytes avoided today'),
       h('span', { class: 'val' }, f.bytes(fm.bytesAvoided)),
       h('span', { class: 'ratio', 'aria-hidden': 'true' }, h('i', { style: { width: `${(avoidedFrac * 100).toFixed(2)}%` } })),
       h('span', { class: 'sub' }, `of ${f.bytes(fm.bytesMaterialized)} mounted; ${f.bytes(fm.bytesFetchedFromStore)} came from the store`)));

@@ -120,7 +120,7 @@ export function offer(snap, route, level, viewer) {
   } else if (level === 2) {
     for (const s of seen.values()) if (s.size >= 3) { o = { title: 'These jobs are one shot', msg: 'Level 3 shows a shot’s jobs side by side, in the order the work flows.', yes: 'Show shots' }; break; }
   } else if (level === 3) {
-    if (open.some((j) => j.estimate && j.estimate.burst && j.estimate.burst.needsApproval)) o = { title: 'More capacity?', msg: 'A burst is waiting for approval. Level 4 shows the farm’s slots and what more would cost.', yes: 'Show the farm' };
+    if (open.some((j) => j.estimate && j.estimate.burst && j.estimate.burst.needsApproval)) o = { title: 'More capacity?', msg: 'A burst waits for approval. Level 4 shows the farm’s slots and what more would cost.', yes: 'Show the farm' };
   } else if (level === 4) {
     if (route.name === 'job') { const j = snap.jobs.find((x) => `${x.namespace}/${x.name}` === route.parts.slice(0, 2).join('/')); if (j && j.output) o = { title: 'Where did this come from?', msg: 'Level 5 shows each output by its C4 ID and every step signed in the book.', yes: 'Show everything' }; }
   }

@@ -4,6 +4,7 @@
 
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
+import { c4idEl } from '../../design/components/c4id.js';
 
 const STAGES = [['build', 'Build'], ['test', 'Test shards'], ['integration', 'Integration'], ['speculative', 'Land']];
 
@@ -14,13 +15,13 @@ function stageCell(p, scale, current) {
   const runBg = { passed: 'var(--u-done)', failed: 'var(--bar-red)' }[p.state] ||
     (p.state === 'running' ? 'linear-gradient(90deg, var(--run) 0 45%, var(--g09) 45%)' : 'transparent');
   void runCol;
-  const label = p.state === 'blocked' ? 'waiting on the stage before' : `waited ${f.dur(p.queueWaitSeconds)}, ran ${f.dur(p.runSeconds)}`;
+  const label = p.state === 'blocked' ? 'blocked on the stage before' : `waited ${f.dur(p.queueWaitSeconds)}, ran ${f.dur(p.runSeconds)}`;
   return h('td', { title: label, class: current ? 'cur' : null },
     h('div', { style: { display: 'flex', height: '10px', background: 'var(--well)' }, 'aria-hidden': 'true' },
       h('i', { style: { width: w(p.queueWaitSeconds), background: 'repeating-linear-gradient(135deg, var(--u-queued) 0 3px, var(--u-hatch) 3px 5px)' } }),
       h('i', { style: { width: w(p.runSeconds), background: runBg } })),
     h('div', { class: 'num', style: { fontSize: '10.5px', marginTop: '3px', display: 'flex', justifyContent: 'space-between', gap: '6px' } },
-      h('span', { class: 'dim' }, p.state === 'blocked' ? 'blocked' : `${f.dur(p.queueWaitSeconds)} / ${f.dur(p.runSeconds)}`),
+      h('span', { class: 'dim' }, p.state === 'blocked' ? 'blocked on' : `${f.dur(p.queueWaitSeconds)} / ${f.dur(p.runSeconds)}`),
       p.checkoutSeconds ? h('span', { class: p.cacheOutcome === 'cold' ? 'ink' : 'dimmer' }, `${p.checkoutSeconds.toFixed(1)}s ${p.cacheOutcome}`) : null),
     h('span', { class: 'sr' }, label));
 }
@@ -33,7 +34,7 @@ function ttgChart(t) {
     s('line', { x1: x(v), x2: x(v), y1: 4, y2: 40, stroke: col, 'stroke-width': dash ? 1 : 2, 'stroke-dasharray': dash ? '3 2' : null }),
     s('text', { x: x(v), y: 52, 'text-anchor': 'middle' }, lab),
   ];
-  return s('svg', { class: 'chart', style: { height: '58px' }, role: 'img', 'aria-label': `Time to green: p50 ${f.dur(t.p50)}, p95 ${f.dur(t.p95)}; targets ${f.dur(t.targetP50)} and ${f.dur(t.targetP95)}` },
+  return s('svg', { class: 'chart', style: { display: 'block', width: '100%', height: '58px' }, role: 'img', 'aria-label': `Time to green: p50 ${f.dur(t.p50)}, p95 ${f.dur(t.p95)}; targets ${f.dur(t.targetP50)} and ${f.dur(t.targetP95)}` },
     s('line', { x1: 0, x2: '100%', y1: 40, y2: 40, class: 'axis' }),
     dots,
     tick(t.targetP50, `target p50 ${f.dur(t.targetP50)}`, true, 'var(--ink-3)'),
@@ -59,7 +60,7 @@ export function ciLens(ctx, job) {
     h('div', { class: 'panel', 'data-key': 'ci-changes' },
       h('header', null, h('h2', null, 'Changes'), h('span', { class: 'dim' }, 'Each bar: queue wait (hatched), then run time. Then checkout time and how the cache answered.')),
       h('div', { style: { overflowX: 'auto' } },
-        h('table', { class: 't ci' },
+        h('table', { class: 'vt ci' },
           h('thead', null, h('tr', null, h('th', null, 'Change'), STAGES.map(([, l]) => h('th', { style: { minWidth: '120px' } }, l)), h('th', { class: 'r' }, 'Time to green'))),
           h('tbody', null, changes.map((c) => {
             const by = Object.fromEntries(c.pipelines.map((p) => [p.stage, p]));
@@ -72,41 +73,41 @@ export function ciLens(ctx, job) {
                 h('div', { style: { fontSize: '12px' } }, c.title)),
               STAGES.map(([k]) => stageCell(by[k], scale, false)),
               h('td', { class: 'r num' }, integ && integ.timeToGreenSeconds ? h('span', { class: integ.timeToGreenSeconds > ttg.targetP95 ? 't-risk' : '' }, f.dur(integ.timeToGreenSeconds)) :
-                c.pipelines.some((p) => p.state === 'failed') ? h('span', { class: 't-red' }, 'red') : h('span', { class: 'dimmer' }, 'pending')));
+                c.pipelines.some((p) => p.state === 'failed') ? h('span', { class: 't-red' }, 'red') : h('span', { class: 'dimmer' }, 'queued')));
           }))))),
-    h('div', { class: 'cols' },
+    h('div', { class: 'lens-cols' },
       h('div', { class: 'panel', 'data-key': 'ci-ttg' },
         h('header', null, h('h2', null, 'Time to green'), h('span', { class: 'num dim' }, `p50 ${f.dur(ttg.p50)} · p95 ${f.dur(ttg.p95)} · ${ttg.samples.length} changes`)),
-        h('div', { class: 'well' }, ttgChart(ttg)),
+        h('div', { class: 'well', style: { padding: '18px 16px 6px' } }, ttgChart(ttg)),
         h('p', { class: 'dim', style: { fontSize: '12px', margin: '6px 0 0' } },
           ttg.p95 <= ttg.targetP95 ? `Inside the p95 target, so CI deadlines relax toward it and CI takes no more of the farm than it needs.` :
             `Over the p95 target, so CI deadlines tighten until it recovers.`)),
       h('div', { class: 'panel', 'data-key': 'ci-flaky' },
         h('header', null, h('h2', null, 'Flaky targets'), h('span', { class: 'dim' }, 'failed, then passed, on the same input view')),
-        flaky.length ? h('table', { class: 't' },
+        flaky.length ? h('table', { class: 'vt' },
           h('thead', null, h('tr', null, h('th', null, 'Target'), h('th', null, 'Flips'), h('th', { class: 'r' }, 'Last seen'))),
           h('tbody', null, flaky.map((x) => h('tr', { 'data-key': x.target },
-            h('td', { class: 'mono', style: { fontSize: '11px' } }, x.target, h('div', { class: 'dimmer', style: { fontSize: '10px' } }, `${x.views.length} view${x.views.length > 1 ? 's' : ''}, latest ${f.shortId(x.views[x.views.length - 1])}`)),
+            h('td', { class: 'mono', style: { fontSize: '11px' } }, x.target, h('div', { class: 'dimmer', style: { fontSize: '10px' } }, `${x.views.length} view${x.views.length > 1 ? 's' : ''}, latest `, c4idEl(x.views[x.views.length - 1], { label: 'latest view' }))),
             h('td', { style: { width: '34%' } }, h('div', { style: { display: 'flex', alignItems: 'center', gap: '6px' } },
               h('i', { style: { display: 'block', height: '8px', width: `${(x.flips / maxFlips) * 100}%`, background: 'var(--bar-yellow)' } }),
               h('span', { class: 'num' }, String(x.flips)))),
             h('td', { class: 'r num dim' }, f.clock(x.lastSeen)))))) : h('p', { class: 'dim' }, 'No flaky targets seen.'))),
-    h('div', { class: 'cols' },
+    h('div', { class: 'lens-cols' },
       h('div', { class: 'panel', 'data-key': 'ci-mq' },
         h('header', null, h('h2', null, 'Merge queue')),
         h('div', { class: 'figs' },
           fig('Depth', String(mq.depth)), fig('Wait p50', f.dur(mq.p50WaitSeconds)), fig('Wait p95', f.dur(mq.p95WaitSeconds)),
           fig('Ejected', f.pct(mq.ejectRate, 0)), fig('Merges per hour', String(mq.mergesPerHour))),
-        h('table', { class: 't' },
+        h('table', { class: 'vt' },
           h('thead', null, h('tr', null, h('th', null, 'Pos'), h('th', null, 'Change'), h('th', null, 'State'), h('th', null, 'Speculative base'))),
           h('tbody', null, mq.entries.map((e) => h('tr', { 'data-key': e.change },
             h('td', { class: 'num' }, e.position ? String(e.position) : '–'),
             h('td', { class: 'mono' }, e.change),
             h('td', null, h('span', { class: 'chip ' + ({ merged: 'green', ejected: 'red', testing: '' }[e.state] || '') }, e.state)),
-            h('td', { class: 'mono dim', title: e.speculativeBase }, f.shortId(e.speculativeBase))))))),
+            h('td', { class: 'dim' }, c4idEl(e.speculativeBase, { tail: 4, label: 'speculative base' }))))))),
       h('div', { class: 'panel', 'data-key': 'ci-pools' },
         h('header', null, h('h2', null, 'Runner pools')),
-        (cs.runnerPools || []).map((p) => h('div', { 'data-key': p.pool, style: { marginBottom: '10px' } },
+        (cs.runnerPools || []).map((p) => h('div', { class: 'lens-pad', 'data-key': p.pool },
           h('div', { class: 'nrow' }, h('span', { class: 'mono' }, p.pool), h('span', { class: 'num' }, `${p.used} of ${p.slots} slots`)),
           h('div', { class: 'slots' }, Array.from({ length: p.slots }, (_, i) => h('i', { class: i < p.used ? 'on' : '' }))))))),
   ];

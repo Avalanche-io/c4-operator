@@ -2,6 +2,7 @@
 
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
+import { jobWords, who } from '../../design/components/words.js';
 
 export const key = (j) => `${j.namespace}/${j.name}`;
 
@@ -92,15 +93,20 @@ export function classChip(j, cls) {
   return h('span', { class: 'chip', title: `class ${j.class}` }, text);
 }
 
+// phaseText: the job's state in the vocabulary ("blocked on comp", "waits
+// for license-nuke"); the native phase only in the title, for level 5.
 export function phaseText(j) {
-  const cls = { Failed: 't-red', Held: 't-magenta', Yielded: 'dim', Succeeded: 'settled' }[j.phase] || '';
-  return h('span', { class: cls }, j.phase);
+  const w = jobWords(j);
+  return h('span', { class: w.cls, title: `phase ${j.phase}` }, w.why ? `${w.word} ${w.why}` : w.word);
 }
 
-// personMark: a job waiting on a person (needsPerson) in red with a white
-// flag, or failures someone has taken in pale red with their seal: the
+// personMark: a job that needs a person (needsPerson) in red with a white
+// flag, or failures someone acknowledged in pale red with their seal: the
 // state is still true, with the context that a person has it in hand.
-const NEEDS = { failed: (j) => `${j.units.failed} failed`, stuck: () => 'stuck', approval: () => 'approve burst', quota: () => 'over quota', permission: () => 'no permission' };
+const NEEDS = {
+  failed: (j) => `${j.units.failed} failed`, stuck: () => 'stuck', approval: () => 'approve burst', quota: () => 'no slots it may use',
+  permission: () => 'no permission', review: () => 'a check escalated it', decision: (j) => { const w = (j.waits || []).find((x) => x.needsYou && !x.do); return w ? `${who(w.waitsFor)} to decide` : 'a decision'; },
+};
 export function personMark(j) {
   const np = j.needsPerson;
   if (np) {
@@ -110,8 +116,8 @@ export function personMark(j) {
   const taken = (j.acks || []).filter((a) => a.kind !== 'accept');
   if (j.units.failed && taken.length) {
     const a = taken[taken.length - 1];
-    const who = a.kind === 'assign' && a.assignee ? a.assignee : a.actor;
-    return h('span', { class: 'taken', title: `${a.kind === 'assign' ? 'assigned to' : 'taken by'} ${who} at ${f.clock(a.at)}${a.note ? ': ' + a.note : ''}` }, h('i', { class: 'seal', 'aria-hidden': 'true' }), `taken · ${who}`);
+    const by = a.kind === 'assign' && a.assignee ? a.assignee : a.actor;
+    return h('span', { class: 'taken', title: `${a.kind === 'assign' ? 'assigned to' : 'acknowledged by'} ${by} at ${f.clock(a.at)}${a.note ? ': ' + a.note : ''}` }, h('i', { class: 'seal', 'aria-hidden': 'true' }), `acknowledged · ${by}`);
   }
   return null;
 }
@@ -121,11 +127,11 @@ export function slackCell(j) {
   if (j.phase === 'Succeeded') return h('div', { class: 'slack dimmer' }, '–', h('small', null, 'done'));
   if (!j.objective.deadline) return h('div', { class: 'slack dimmer' }, '–', h('small', null, 'no deadline'));
   const neg = e.slackSeconds < 0;
-  return h('div', { class: 'slack' + (neg ? ' t-yellow' : '') }, f.signed(e.slackSeconds), h('small', null, 'slack'));
+  return h('div', { class: 'slack' + (neg ? ' t-risk' : '') }, f.signed(e.slackSeconds), h('small', null, 'slack'));
 }
 
 export function orderText(o) {
-  return { binary: 'binary order', sequential: 'in order', reverse: 'reverse order', 'failure-rate': 'likely failures first', gang: 'all ranks together' }[o] || o;
+  return { binary: 'binary order', sequential: 'in order', reverse: 'reverse order', 'failure-rate': 'likely failures first', gang: 'together' }[o] || o;
 }
 
 export function burstButton(j) {

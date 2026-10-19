@@ -83,6 +83,22 @@
 .vt .hbar { display: inline-block; width: 90px; height: 6px; background: var(--g09); }
 .vt .hbar i { display: block; height: 100%; background: var(--g17); }
 
+/* a lens's lower panels (ML, CI): side by side where they fit; a key-value list */
+.lens-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr)); gap: var(--gutter); margin-top: var(--gutter); }
+.lens-cols > .panel + .panel { margin-top: 0; }
+.vkv { display: grid; grid-template-columns: max-content 1fr; gap: 8px 16px; margin: 0; padding: 4px 8px; font: 400 var(--t-small)/1.35 var(--mono); color: var(--ink-2); }
+.vkv dt { font: 600 var(--t-tiny)/1.6 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-3); }
+.vkv dd { margin: 0; color: var(--ink); }
+.lens-cols .panel > p, .lens-pad { padding: 8px 12px; }
+.lens-cols .nrow { display: flex; justify-content: space-between; gap: 8px; font: 400 var(--t-small)/1.35 var(--mono); color: var(--ink-2); }
+.lens-cols .slots { display: flex; flex-wrap: wrap; gap: 2px; margin-top: 6px; }
+.lens-cols .slots i { width: 10px; height: 10px; background: var(--g09); }
+.lens-cols .slots i.on { background: var(--run); }
+/* a lens's SVG charts: labels in the tertiary ink, axes on the rule */
+svg.chart { overflow: visible; }
+svg.chart text { fill: var(--ink-3); font: 400 10px/1 var(--mono); }
+svg.chart .axis { stroke: var(--rule-2); }
+
 /* graph */
 .vgwell { background: var(--well); outline: var(--hair) solid var(--rule-2); overflow-x: auto; padding: 16px; }
 .vgraph .gnode .box { fill: var(--plate); stroke: var(--g11); stroke-width: 1; }

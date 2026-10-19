@@ -118,26 +118,92 @@ recompute decisions are shown as the choice it made ("reused output, exact
 verified", "recomputed locally"), never as good or bad. Red stays for a
 record that does not verify: that one needs a person.
 
-| family          | phase          | token           | shape                                                      |
-| --------------- | -------------- | --------------- | ---------------------------------------------------------- |
-| not started     | ready          | `--g09`         | flat                                                       |
-|                 | blocked        | `--g09` `--g12` | hatched                                                    |
-|                 | held           | `--g09` `--g16` | two bars                                                   |
-| working         | preflight      | `--run-pale`    | blue outline, nothing rising                               |
-|                 | rendering      | `--run`         | bright blue rising as it renders, grey above, blue outline |
-| done            | moving         | `--done-pale`   | solid green rising inside as bytes commit                  |
-|                 | committed      | `--done`        | solid; a finished upstream job is the same green           |
-| temporary error | backoff        | `--temp-pale`   | dashed orange outline, a notch per earlier attempt         |
-|                 | retrying       | `--temp`        | rendering, with an orange outline and notches              |
-| needs a person  | unacknowledged | `--fail`        | solid, a white corner flag                                 |
-|                 | acknowledged   | `--fail-pale`   | the seal of whoever took it                                |
-|                 | accepted       | `--fail-pale`   | a check: bad frames accepted, nothing blocked              |
-| deadline        | at risk        | `--risk-pale`   | a dashed orchid edge or tick                               |
-|                 | will miss      | `--risk`        | hatched                                                    |
-|                 | missed         | `--risk`        | solid                                                      |
+### One vocabulary
 
-Red is only for what needs a person: a failure after retries, a stuck job,
-an approval waiting, a quota or permission block. Lateness is orchid.
+A wrangler learns one word per idea, and every surface uses it: the HUD's
+cells, legends, cards and book, the glossary, the intro, the tutorials and
+the site (c4 `proposals/queue-primitives/INTEGRATE.md` 4.2). The words are
+render words: an agent, CI or ML job's units are frames too, and rendering
+is a unit at work in any class. Native names (Kubernetes, Kueue, the
+operator's own enum values such as `preflight` or `PreemptionByScheduler`)
+appear only at level 5, in the unit card's "how" line.
+
+| family          | term                | what it means                                                             | token           | drawing                                                                  | from the API                                            | level |
+| --------------- | ------------------- | ------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------ | ------------------------------------------------------- | ----- |
+| not started     | queued              | ready to run; waits for a slot                                            | `--g09`         | flat                                                                     | `queued`                                                | 1     |
+|                 | blocked on *x*      | waits for other work or an input to exist                                 | `--g09` `--g12` | hatched; *x* as text                                                     | `blocked`, `edges`, the job's `dependsOn`               | 1     |
+|                 | waits for *a thing* | a check or decision outside the job: capacity, a license, a party, a time | `--g09` `--g12` | hatched, with the clock mark; what and when as text                      | `waits`, `waits[]` with `party:` or `clock:`            | 1     |
+|                 | held                | a person paused it                                                        | `--g09` `--g16` | two bars                                                                 | `held`, `nudge.hold`                                    | 1     |
+|                 | locked by *x*       | another unit holds something this one needs to write                      | `--g09` `--g12` | hatched, with the lock mark; the line as text                            | the plan gate (no operator field yet)                   | 1     |
+|                 | together            | these units start and stop as one                                         | their one state | one outline around the gang's cells                                      | `order: gang`                                           | 4     |
+|                 | reserved            | slots set aside for work that will start soon                             | `--g15`         | a dotted outline on the slots, pools view only                           | (no operator field yet)                                 | 4     |
+|                 | expected            | work or capacity that will exist but does not yet                         | `--g08` `--g12` | dashed outline, stippled                                                 | `planned`, `exists` < 1, generators, provisioning nodes | 3     |
+| working         | preparing           | placed, getting ready: inputs, cache, image, license                      | `--run-pale`    | blue outline, nothing rising; the step on hover                          | `preflight`                                             | 1     |
+|                 | rendering           | at work                                                                   | `--run`         | bright blue rising, grey above, blue outline                             | `running`                                               | 1     |
+|                 | yielding            | asked to stop at its next safe point; it resumes where it left off        | `--run`         | rendering, with the pause mark; the safe point and the reason as text    | `stopping`, `safepoint.next`                            | 1     |
+| done            | moving              | rendered, output still moving                                             | `--done-pale`   | solid green rising inside as bytes commit                                | `egress`                                                | 1     |
+|                 | done                | committed and named                                                       | `--done`        | solid; a finished upstream job is the same green                         | `succeeded`                                             | 1     |
+|                 | checked             | a check passed                                                            | its state's     | the tick mark, in ink; never a hue                                       | `review.do: pass`                                       | 1     |
+|                 | reused              | the same inputs ran before; the output was reused                         | `--done`        | the reuse mark, in ink                                                   | (derivation records; no operator field yet)             | 1     |
+| the farm's      | interrupted         | stopped by the farm, not by its own fault; it runs again                  | `--g09`         | queued, with a grey notch per interruption; the minutes lost as text     | `interruptions[]`                                       | 1     |
+| temporary error | backoff             | it failed; a retry is scheduled                                           | `--temp-pale`   | dashed orange outline, an orange notch per earlier failed attempt        | `backoff`                                               | 1     |
+|                 | retrying            | it failed and runs again                                                  | `--temp`        | rendering, with an orange outline and notches                            | `retrying`                                              | 1     |
+|                 | rework              | a check found a problem; it runs again with a change                      | `--temp`        | as backoff or retrying, with the rework mark; the check's reason as text | `review.do: rework`                                     | 1     |
+| needs a person  | needs you           | a person must act                                                         | `--fail`        | solid, a white corner flag; who and why as text                          | `failed`, `flagged`, `waits[].needsYou`, `needsPerson`  | 0     |
+|                 | waits for *someone* | a person's decision that holds up nothing yet                             | `--fail-pale`   | the person's name as text                                                | `waits[]` with `person:`, not blocking                  | 1     |
+|                 | acknowledged        | someone has it                                                            | `--fail-pale`   | the seal of whoever took it                                              | `ack`                                                   | 1     |
+|                 | accepted            | the bad frames were accepted; no one needs to act                         | `--fail-pale`   | a check; the note on hover                                               | `accepted`, `review.do: accept`                         | 1     |
+| deadline        | at risk             | projected after the deadline, still fixable                               | `--risk-pale`   | a dashed orchid edge or tick                                             | `estimate.risk: atRisk`                                 | 0     |
+|                 | will miss           | late even with every slot it may use                                      | `--risk`        | hatched                                                                  | `willMiss`                                              | 0     |
+|                 | missed              | the deadline passed                                                       | `--risk`        | solid                                                                    | `missed`                                                | 0     |
+
+Capacity takes no hue: **guaranteed**, **borrowed** and **lent** are a
+project's slots (its own, taken from another, given to another), a **pool**
+is a kind of slot, and **may use** is the order a job falls back through
+pools; all appear at level 4, in the pools view and on the unit card. A
+budget, a token meter or a power cap is capacity too, shown like slots with
+its reason as text, never as a state: a capped node's lost slots are
+hatched, "capped: battery 21%", and the word is capped, not held or blocked.
+
+The marks are ink, drawn by `marks.js` in one shape everywhere (cells,
+legends, glossary swatches, lenses): **clock** (waits for a thing),
+**lock** (locked by), **pause** (yielding), **notch** (an earlier attempt:
+orange when it failed, grey when interrupted), **rework** (a check sent it
+back), **tick** (checked), **reuse** (reused), **flag** (needs you),
+**seal** (acknowledged), **check** (accepted). A mark never changes the
+cell's hue: interrupted is never orange (the unit did nothing wrong), a
+machine's wait is never red (no person must act), a check is never green.
+
+**Agent bundle members** take the same words: rendering is `--run`;
+queued is `--g09` flat; a member the queue stopped for capacity waits for
+capacity: hatched with the clock mark and the checkpoint mark (a small ink
+square at the turn it resumes from); held by a person is the two-bar hold
+mark; done is `--done`, and a failed member needs you. A member stopping at
+the end of its turn is yielding: `--run` with the pause mark, the reason as
+text. A stopped interval is a gap on the bundle-time ruler and a `--g06`
+band across the rows: neutral grey, one step off the well, drawn under the
+member strips. A capped node's lost slots are hatched, with the reason as
+text. Right after a cap drops, units still rendering past it stay `--run`
+until they stop at the end of their turns; the text counts them, and the
+pool keeps its full shape in cells.
+
+**Plan lanes** (a plan job's lens, one cell per lane) take the same words:
+a lane in the plan not yet chartered is expected (dashed outline,
+stippled); a chartered lane waiting for a slot is queued, `--g09` flat; one
+blocked on the lanes it follows is hatched, with those lanes as text; a
+lane at work (its charter, phases, refutation or merge) is rendering, with
+its steps as a strip inside the cell; merged is done. A lane a refuter sent
+back is rework: rendering with an orange outline and a rework mark per
+pass, the reason as text. A wait (a ruling, a review) is a cell in its row:
+a person's open wait that holds up work needs you; one that holds up
+nothing yet is pale red with the person's name; a wait for an outside
+party is hatched with the clock mark, never red; a decided one is done. A
+lane whose merge waits for the gate (one merge at a time) is locked by it:
+hatched with the lock mark, the line's length as text.
+
+Red is only for what needs a person: a failure after its retries, a check
+that escalated, a stuck job, a decision or approval that holds up work, a
+permission block. Lateness is orchid.
 Everything else is grey: selection is a paper outline, and burst capacity
 is ordinary slots (blue while running). The percent done never goes down
 (`core.js` `steady`): a growing estimate shows in the time to done and the

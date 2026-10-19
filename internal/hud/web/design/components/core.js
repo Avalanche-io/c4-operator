@@ -93,8 +93,8 @@ export function agg(units) {
       case 'succeeded': a.done += w; break;
       case 'retrying': a.retrying++; // falls through: a retry is running
       case 'running': a.running++; a.runAll += w; a.runSpent += Math.min(w, spent); break;
-      case 'failed': a.failed++; break;
-      case 'unevaluated': a.uneval++; a.waiting += w; break;
+      case 'failed': case 'flagged': a.failed++; break;
+      case 'planned': case 'unevaluated': a.uneval++; a.waiting += w; break;
       default: a.waiting += w;
     }
     if (u.risk && u.state !== 'succeeded' && u.state !== 'failed') a.risk++;
@@ -114,9 +114,15 @@ export const inFlight = (u) => (u.running || 0) + (u.retrying || 0) + (u.preflig
 export const retries = (u) => (u.retrying || 0) + (u.backoff || 0);
 
 // fromJob builds the same aggregate from a JobSummary's counts and work.
+// willMiss: late even with every slot it may use. The operator's
+// estimate.risk says so directly; older snapshots only had feasible.
+export const willMiss = (e) => !!e && (e.risk ? e.risk === 'willMiss' : e.feasible === false);
+// atRisk: any deadline risk the operator reports (at risk, will miss, missed)
+export const atRisk = (e) => !!e && (e.risk ? e.risk !== 'none' : e.feasible === false);
+
 export function aggJob(j) {
   const u = j.units, w = j.work;
-  const a = { n: u.total, running: inFlight(u), retrying: retries(u), failed: u.failed, uneval: u.unevaluated, risk: j.estimate && !j.estimate.feasible ? 1 : 0 };
+  const a = { n: u.total, running: inFlight(u), retrying: retries(u), failed: u.failed, uneval: u.unevaluated, risk: atRisk(j.estimate) ? 1 : 0 };
   if (w && (w.doneSlotSeconds + w.runningSlotSeconds + w.remainingSlotSeconds) > 0) {
     const total = w.doneSlotSeconds + w.runningSlotSeconds + w.remainingSlotSeconds;
     a.basis = w.basis || 'estimate';
@@ -149,7 +155,7 @@ export function glance(j, detail) {
     retry: j.units.total ? retries(j.units) / j.units.total : 0,
     fail: j.units.total ? j.units.failed / j.units.total : 0,
     risk: 0,
-    eta: e.remainingSeconds, p90: e.p90RemainingSeconds, slack: e.slackSeconds, feasible: e.feasible !== false,
+    eta: e.remainingSeconds, p90: e.p90RemainingSeconds, slack: e.slackSeconds, feasible: !willMiss(e),
     req: e.requiredSlots || 0, att: e.attainableSlots || 0, slots: e.runningSlots || 0,
     deadline: j.objective && j.objective.deadline ? Date.parse(j.objective.deadline) : null,
     phase: j.phase,
