@@ -81,6 +81,12 @@ type Runner struct {
 	// that lists the pod's namespace.
 	Docs        DocStore
 	DocsProject string
+	// Views and ViewSrc store and read units' output views (a regional
+	// replica): a block's session leaves the host as its yield's
+	// output-tree and comes back as its next attempt's C4_RESUME_VIEW, so it
+	// can move between this host and a unit pod.
+	Views   ViewStore
+	ViewSrc ViewSource
 
 	seen map[types.UID]bool
 	// relays is each pod's safe-point relay.
@@ -88,7 +94,9 @@ type Runner struct {
 	// parts are blocks' next parts, by pod, to wake them for; since is
 	// when a block's session was last woken in its attempt
 	parts map[types.UID]string
-	since map[types.UID]time.Time
+	// fetched are the pods whose resume view was fetched here
+	fetched map[types.UID]bool
+	since   map[types.UID]time.Time
 	// asked is when the runner first saw each pod's yield request.
 	asked map[types.UID]time.Time
 	// rising is a higher capacity waiting out RaiseAfter, and since when.
@@ -130,6 +138,7 @@ func (r *Runner) Tick(ctx context.Context) error {
 		r.asked = map[types.UID]time.Time{}
 		r.relays = map[types.UID]*relayState{}
 		r.parts = map[types.UID]string{}
+		r.fetched = map[types.UID]bool{}
 		r.since = map[types.UID]time.Time{}
 	}
 	if err := r.heartbeat(ctx); err != nil {
@@ -194,6 +203,9 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 	name := memberOf(p)
 	if name == "" {
 		return r.finish(ctx, p, corev1.PodFailed, "NotAMember", "the pod names no agent member (C4_AGENT_MEMBER)", 1)
+	}
+	if err := r.resumeFromView(ctx, p, name); err != nil {
+		return err
 	}
 	m, err := r.Harness.Store.Get(name)
 	if errors.Is(err, ErrNoMember) && isBlock(p) && p.Status.Phase == corev1.PodPending && p.DeletionTimestamp == nil {
@@ -328,6 +340,9 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		// member yielded there, with its turn saved, and resumes later.
 		if st := r.relays[p.UID]; st != nil && st.stopped {
 			r.logf("%s stopped at a safe point (%s)", m.Name, st.why)
+			if err := r.saveSession(ctx, p, m); err != nil {
+				return err
+			}
 			return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "stopped at a safe point: "+st.why, 0)
 		}
 		// The session ended on its own: the member finished. A generator
@@ -387,6 +402,9 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 		}
 	}
 	r.logf("yielded %s (%s)", m.Name, why)
+	if err := r.saveSession(ctx, p, m); err != nil {
+		return err
+	}
 	return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "yielded at a turn boundary: "+why, 0)
 }
 

@@ -376,8 +376,9 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 				return strings.TrimSpace(string(b))
 			}
 		}
-		r.Docs = &tier.Uploader{Candidates: func(string, c4.ID) []*tier.HTTPSource { return []*tier.HTTPSource{src} },
+		up := &tier.Uploader{Candidates: func(string, c4.ID) []*tier.HTTPSource { return []*tier.HTTPSource{src} },
 			Breakers: tier.NewBreakers(), Backoff: tier.Backoff{Base: 200 * time.Millisecond, Max: 5 * time.Second}, Client: http.DefaultClient, Rounds: 3}
+		r.Docs, r.Views, r.ViewSrc = up, up, src
 	}
 	fmt.Fprintf(out, "runner %s: %d slots, labels %v\n", *node, *slots, set)
 	return r.Run(ctx, *every)

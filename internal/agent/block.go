@@ -14,6 +14,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 
+	"github.com/Avalanche-io/c4"
+
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
@@ -349,4 +351,77 @@ func (r *Runner) blockYield(ctx context.Context, p *corev1.Pod, m *Member) (wait
 		return true, nil // the farm has not answered yet
 	}
 	return false, nil
+}
+
+// saveSession leaves a yielding block's session in its unit's output view:
+// the session exported into its out/, the directory stored as a view, and
+// named in c4.avalanche.io/output-tree, so the queue mounts it for the next
+// attempt (C4_RESUME_VIEW) on whichever machine that runs.
+func (r *Runner) saveSession(ctx context.Context, p *corev1.Pod, m *Member) error {
+	if !m.Block || r.Views == nil {
+		return nil
+	}
+	u := UnitDirsAt(r.unitRoot(p))
+	if err := ExportSession(r.Harness.Store, m, u.Out); err != nil {
+		return fmt.Errorf("%s: export the session: %w", m.Name, err)
+	}
+	project, err := r.projectOf(ctx, p.Namespace)
+	if err != nil {
+		return err
+	}
+	id, err := CaptureView(ctx, r.Views, project, u.Out)
+	if err != nil {
+		return fmt.Errorf("%s: store the session's view: %w", m.Name, err)
+	}
+	r.logf("%s: its session left as view %s", m.Name, id)
+	return r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputTree: id.String()})
+}
+
+// resumeFromView brings a block's session here for an attempt the queue
+// resumes from a view (C4_RESUME_VIEW): the view is fetched into the unit's
+// out/, and the session in it imported, rewritten for this host, before the
+// runner resumes it by its ID. It may have run anywhere since it was last
+// here, in a unit pod or on another host: the view is its history.
+func (r *Runner) resumeFromView(ctx context.Context, p *corev1.Pod, name string) error {
+	id := podEnv(p, "C4_RESUME_VIEW")
+	if !isBlock(p) || id == "" || p.Status.Phase != corev1.PodPending || p.DeletionTimestamp != nil || r.ViewSrc == nil || r.fetched[p.UID] {
+		return nil
+	}
+	vid, err := c4.Parse(id)
+	if err != nil {
+		return r.finish(ctx, p, corev1.PodFailed, "BadResumeView", fmt.Sprintf("C4_RESUME_VIEW %q: %v", id, err), 1)
+	}
+	u := UnitDirsAt(r.unitRoot(p))
+	project, err := r.projectOf(ctx, p.Namespace)
+	if err != nil {
+		return err
+	}
+	if err := FetchView(ctx, r.ViewSrc, project, vid, u.Out); err != nil {
+		return fmt.Errorf("%s: fetch the resume view %s: %w", name, id, err)
+	}
+	r.fetched[p.UID] = true
+	si, err := ReadSessionInfo(u.Out)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil // a view with no session: the block starts fresh
+	}
+	if err != nil {
+		return err
+	}
+	if si.Member != name {
+		return r.finish(ctx, p, corev1.PodFailed, "WrongSession", fmt.Sprintf("the resume view holds %s's session, not %s's", si.Member, name), 1)
+	}
+	m, err := r.Harness.ImportSession(ctx, u.Out, "")
+	if err != nil {
+		return err
+	}
+	// this host's own flags for it, should the CLI not know the session
+	if m.Flags, err = r.blockFlags(p, name); err != nil {
+		return err
+	}
+	m.Block = true
+	if err := r.Harness.Store.Put(m); err != nil {
+		return err
+	}
+	r.logf("%s: brought its session %s here from view %s", name, m.Session, id)
+	return nil
 }
