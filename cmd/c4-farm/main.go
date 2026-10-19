@@ -30,7 +30,7 @@ var version = "dev"
 const usage = `c4 farm: submit work to a C4 farm, watch it, and take its output home.
 
 The local farm
-  up [--as ROLE]           make a farm on this machine in Docker and open its HUD
+  up [--as ROLE]           make a farm on this machine in Docker and open its HUD (--port N if 30080 is taken)
   down                     delete the local farm
   status                   the local farm's nodes, slots and sign-ins
 
@@ -455,6 +455,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		archive := fs.String("image-archive", "", "an operator image archive to load into the cluster (a development build)")
 		image := fs.String("image", "", "the operator image the cluster runs, with --image-archive")
 		noOpen := fs.Bool("no-open", false, "don't open the HUD")
+		port := fs.Int("port", localfarm.HUDPort, "the HUD's port on this machine")
+		storePort := fs.Int("store-port", localfarm.StorePort, "the store's port on this machine")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
@@ -464,7 +466,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		tz := localfarm.LocalTZ()
 		lat, lon := localfarm.Place(tz)
-		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image},
+		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort},
 			Install: *install, Version: version, ImageArchive: *archive, Log: stdout}
 		if *plan {
 			fmt.Fprintf(stdout, "%s---\n%s", localfarm.KindConfig(o.Options), localfarm.YAML(localfarm.Farm(o.Options)))
@@ -477,19 +479,19 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := localfarm.Up(ctx, o); err != nil {
 			return err
 		}
-		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: fmt.Sprintf("http://127.0.0.1:%d", localfarm.HUDPort), As: v.Name, Project: localfarm.Project, Local: true}
+		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true}
 		cfg.Current = localfarm.Name
 		if err := cfg.Save(); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
 		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
-		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.Link(v))
+		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.Link(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)\n")
 		if *noOpen {
 			return nil
 		}
-		return openURL(localfarm.Link(v))
+		return openURL(localfarm.Link(o.HUD(), v))
 
 	case "down":
 		if _, err := parse(fs, rest); err != nil {
@@ -520,7 +522,12 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			fmt.Fprintf(stdout, "no local farm; `c4 farm up` makes one\n")
 			return nil
 		}
-		c, err := farmcli.NewClient(farmcli.Farm{HUD: fmt.Sprintf("http://127.0.0.1:%d", localfarm.HUDPort), As: "wrangler"})
+		// The HUD is where up put it.
+		hud := localfarm.Options{}.HUD()
+		if f, ok := cfg.Farms[localfarm.Name]; ok && f.HUD != "" {
+			hud = f.HUD
+		}
+		c, err := farmcli.NewClient(farmcli.Farm{HUD: hud, As: "wrangler"})
 		if err != nil {
 			return err
 		}
@@ -530,9 +537,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return nil
 		}
 		fmt.Fprintf(stdout, "farm      %s   %d nodes · %d of %d slots in use · %d units waiting\n", localfarm.Name, len(s.Nodes), s.Farm.SlotsUsed, s.Farm.SlotsTotal, s.Farm.QueuedUnits)
-		fmt.Fprintf(stdout, "HUD       http://127.0.0.1:%d\n", localfarm.HUDPort)
+		fmt.Fprintf(stdout, "HUD       %s\n", hud)
 		for _, v := range localfarm.Viewers {
-			fmt.Fprintf(stdout, "  %-10s %s\n", v.Name, localfarm.Link(v))
+			fmt.Fprintf(stdout, "  %-10s %s\n", v.Name, localfarm.Link(hud, v))
 		}
 		return nil
 

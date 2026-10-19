@@ -22,6 +22,8 @@ const (
 	Project   = "saltmarsh"
 	Zone      = "local-a"
 	Region    = "local"
+	// HUDPort and StorePort are the NodePorts inside the cluster, and by
+	// default the ports on this machine too.
 	HUDPort   = 30080
 	StorePort = 30900
 )
@@ -81,6 +83,22 @@ type Options struct {
 	TZ string
 	// Lat and Lon place "This machine" on the map.
 	Lat, Lon float64
+	// HUDHostPort and StoreHostPort are the HUD's and the store's ports on
+	// 127.0.0.1 (default HUDPort and StorePort), for a machine where another
+	// cluster already holds those.
+	HUDHostPort, StoreHostPort int
+}
+
+// HUD is the HUD's address on this machine.
+func (o Options) HUD() string {
+	return fmt.Sprintf("http://127.0.0.1:%d", or(o.HUDHostPort, HUDPort))
+}
+
+func or(port, def int) int {
+	if port == 0 {
+		return def
+	}
+	return port
 }
 
 func (o Options) name() string {
@@ -110,8 +128,8 @@ func KindConfig(o Options) []byte {
 	var b strings.Builder
 	fmt.Fprintf(&b, "# c4 farm up: the local farm %s.\nkind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: %s\nnodes:\n", o.name(), o.name())
 	fmt.Fprintf(&b, "- role: control-plane\n  image: %s\n  extraPortMappings:\n", NodeImage)
-	fmt.Fprintf(&b, "  - {containerPort: %d, hostPort: %d, listenAddress: 127.0.0.1}   # the store\n", StorePort, StorePort)
-	fmt.Fprintf(&b, "  - {containerPort: %d, hostPort: %d, listenAddress: 127.0.0.1}   # the HUD\n", HUDPort, HUDPort)
+	fmt.Fprintf(&b, "  - {containerPort: %d, hostPort: %d, listenAddress: 127.0.0.1}   # the store\n", StorePort, or(o.StoreHostPort, StorePort))
+	fmt.Fprintf(&b, "  - {containerPort: %d, hostPort: %d, listenAddress: 127.0.0.1}   # the HUD\n", HUDPort, or(o.HUDHostPort, HUDPort))
 	for _, n := range nodes {
 		fmt.Fprintf(&b, "- role: worker   # %s\n  image: %s\n", n.comment, NodeImage)
 		fmt.Fprintf(&b, "  labels: {topology.kubernetes.io/zone: %s, topology.kubernetes.io/region: %s, c4.avalanche.io/pool: %s}\n", Zone, Region, n.pool)
@@ -253,7 +271,7 @@ func YAML(objs []obj) []byte {
 	return []byte(b.String())
 }
 
-// Link is the HUD address for a viewer at its role's level.
-func Link(v Viewer) string {
-	return fmt.Sprintf("http://127.0.0.1:%d/?as=%s&level=%d", HUDPort, v.Name, v.Level)
+// Link is the address on the HUD at hud for a viewer at its role's level.
+func Link(hud string, v Viewer) string {
+	return fmt.Sprintf("%s/?as=%s&level=%d", hud, v.Name, v.Level)
 }

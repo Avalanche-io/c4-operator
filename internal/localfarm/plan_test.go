@@ -41,6 +41,16 @@ func TestKindConfig(t *testing.T) {
 			t.Errorf("port %d open beyond this machine", m.HostPort)
 		}
 	}
+	if err := yaml.UnmarshalStrict(KindConfig(Options{HUDHostPort: 30180, StoreHostPort: 30920}), &c); err != nil {
+		t.Fatal(err)
+	}
+	ports := map[int32]int32{}
+	for _, m := range c.Nodes[0].ExtraPortMappings {
+		ports[m.ContainerPort] = m.HostPort
+	}
+	if ports[HUDPort] != 30180 || ports[StorePort] != 30920 {
+		t.Fatalf("host ports %v", ports)
+	}
 }
 
 func TestFarmObjects(t *testing.T) {
@@ -97,7 +107,7 @@ func TestViewersAndManager(t *testing.T) {
 		t.Fatalf("viewers %s", got)
 	}
 	v, err := LookupViewer("pipeline-td")
-	if err != nil || v.Name != "td" || Link(v) != "http://127.0.0.1:30080/?as=td&level=5" {
+	if err != nil || v.Name != "td" || Link((Options{}).HUD(), v) != "http://127.0.0.1:30080/?as=td&level=5" || (Options{HUDHostPort: 30180}).HUD() != "http://127.0.0.1:30180" {
 		t.Fatalf("td %+v %v", v, err)
 	}
 	if _, err := LookupViewer("director"); err == nil {

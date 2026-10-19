@@ -169,7 +169,7 @@ func Up(ctx context.Context, o UpOptions) error {
 			return err
 		}
 	}
-	return waitHUD(ctx, 2*time.Minute)
+	return waitHUD(ctx, o.HUD(), 2*time.Minute)
 }
 
 // Down deletes the local farm.
@@ -305,8 +305,8 @@ func waitJob(ctx context.Context, c client.Client, ns, name string, limit time.D
 	})
 }
 
-func waitHUD(ctx context.Context, limit time.Duration) error {
-	u := fmt.Sprintf("http://127.0.0.1:%d/api/v1/snapshot?as=wrangler", HUDPort)
+func waitHUD(ctx context.Context, hud string, limit time.Duration) error {
+	u := hud + "/api/v1/snapshot?as=wrangler"
 	return poll(ctx, limit, "the HUD", func() (bool, error) {
 		resp, err := http.Get(u)
 		if err != nil {
