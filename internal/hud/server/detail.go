@@ -103,6 +103,7 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 	out["expansions"] = expansionList(&rec.job.Status)
 	if is := rec.job.Status.Interruptions; len(is) > 0 {
 		out["interruptions"] = is
+		out["interrupted"] = rec.job.Status.Interrupted
 	}
 
 	states := unitStateMap(&rec.job.Status, n)
@@ -148,6 +149,19 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 			"group": unitGroup[i], "pos": u.Pos}
 		if u.Name != "" {
 			e["name"] = u.Name
+		}
+		if st == "blocked" {
+			// what it waits on first, for "blocked on <x>"
+			for _, a := range u.After {
+				if a >= 0 && a < n && states[a] != "succeeded" && states[a] != "accepted" {
+					on := plan.Units[a].Name
+					if on == "" {
+						on = plan.Units[a].Label
+					}
+					e["blockedOn"] = on
+					break
+				}
+			}
 		}
 		if u.Depth > 0 {
 			e["parent"] = u.Parent

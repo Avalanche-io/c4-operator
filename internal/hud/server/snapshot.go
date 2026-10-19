@@ -213,11 +213,13 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	u := st.Units
 	aj.Units = api.Counts{Total: int(u.Total), Queued: int(u.Queued), Blocked: int(u.Blocked), Running: int(u.Running),
 		Retrying: int(u.Retrying), Succeeded: int(u.Succeeded), Failed: int(u.Failed), Held: int(u.Held),
-		Preflight: int(u.Preflight), Backoff: int(u.Backoff), Egress: int(u.Egress), Accepted: int(u.Accepted), Waits: int(u.Waits)}
+		Preflight: int(u.Preflight), Backoff: int(u.Backoff), Egress: int(u.Egress), Accepted: int(u.Accepted), Waits: int(u.Waits),
+		Unevaluated: int(u.Planned), Planned: int(u.Planned), Flagged: int(u.Flagged)}
 	us := st.UnitStates
 	aj.UnitStates = api.States{Queued: us["queued"], Blocked: us["blocked"], Running: us["running"], Retrying: us["retrying"],
 		Succeeded: us["succeeded"], Failed: us["failed"], Preflight: us["preflight"], Backoff: us["backoff"],
-		Egress: us["egress"], Accepted: us["accepted"], Waits: us["waits"]}
+		Egress: us["egress"], Accepted: us["accepted"], Waits: us["waits"],
+		Unevaluated: us["planned"], Planned: us["planned"], Flagged: us["flagged"]}
 	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNeedsPerson); c != nil && c.Status == metav1.ConditionTrue {
 		aj.NeedsPerson = &api.NeedsPerson{Reason: strings.ToLower(c.Reason), Message: c.Message, Since: c.LastTransitionTime.Time.UTC()}
 	}

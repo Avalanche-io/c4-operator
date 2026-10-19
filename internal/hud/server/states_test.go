@@ -241,3 +241,56 @@ func TestDecideControl(t *testing.T) {
 		}
 	}
 }
+
+// Job summaries carry planned (also unevaluated) and flagged counts and
+// sets, so they survive when unitList is omitted; a blocked unit names
+// the first unit it waits on; interruptions come with their count.
+func TestPlannedFlaggedBlockedOn(t *testing.T) {
+	s := farm(t)
+	rec := s.m.byKey["show-a/sh040-light-v007"]
+	rec.job.Status.UnitStates = map[string]string{"succeeded": "0-2,4,6-7", "planned": "3", "flagged": "5", "running": "8", "blocked": "9"}
+	rec.job.Status.Units = c4v1.UnitCounts{Total: 10, Succeeded: 6, Planned: 1, Flagged: 1, Running: 1, Blocked: 1}
+	rec.job.Status.Interruptions = []c4v1.WorkInterruption{{Unit: 2, Reason: "EvictionByEvictionAPI"}}
+	rec.job.Status.Interrupted = 3
+	rec.plan.Units[8].Name = "deep"
+	rec.plan.Units[9].After = []int{0, 8}
+	var snap api.Snapshot
+	get(t, s, "/api/v1/snapshot?as=wrangler", &snap)
+	var found bool
+	for _, j := range snap.Jobs {
+		if j.Name != "sh040-light-v007" {
+			continue
+		}
+		found = true
+		if j.Units.Planned != 1 || j.Units.Unevaluated != 1 || j.Units.Flagged != 1 || j.UnitStates.Planned != "3" || j.UnitStates.Unevaluated != "3" || j.UnitStates.Flagged != "5" {
+			t.Fatalf("counts %+v states %+v", j.Units, j.UnitStates)
+		}
+	}
+	if !found {
+		t.Fatal("job not in the snapshot")
+	}
+	var detail struct {
+		Interrupted int `json:"interrupted"`
+		UnitList    []struct {
+			I         int    `json:"i"`
+			State     string `json:"state"`
+			BlockedOn string `json:"blockedOn"`
+		} `json:"unitList"`
+	}
+	get(t, s, "/api/v1/jobs/show-a/sh040-light-v007?as=wrangler", &detail)
+	if detail.Interrupted != 3 {
+		t.Fatalf("interrupted %d", detail.Interrupted)
+	}
+	for _, u := range detail.UnitList {
+		switch u.I {
+		case 9:
+			if u.State != "blocked" || u.BlockedOn != "deep" {
+				t.Fatalf("unit 9: %+v", u)
+			}
+		case 3, 5:
+			if want := map[int]string{3: "planned", 5: "flagged"}[u.I]; u.State != want {
+				t.Fatalf("unit %d is %s, want %s", u.I, u.State, want)
+			}
+		}
+	}
+}

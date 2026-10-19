@@ -184,6 +184,10 @@ type Counts struct {
 	Accepted  int `json:"accepted,omitempty"`
 	// Waits counts wait units waiting for their decision ("waits for").
 	Waits int `json:"waits,omitempty"`
+	// Planned counts generators not evaluated yet (also Unevaluated, the
+	// older name), Flagged units a review escalated to a person.
+	Planned int `json:"planned,omitempty"`
+	Flagged int `json:"flagged,omitempty"`
 }
 
 type States struct {
@@ -199,6 +203,8 @@ type States struct {
 	Egress      string `json:"egress,omitempty"`
 	Accepted    string `json:"accepted,omitempty"`
 	Waits       string `json:"waits,omitempty"`
+	Planned     string `json:"planned,omitempty"`
+	Flagged     string `json:"flagged,omitempty"`
 }
 
 type Objective struct {
