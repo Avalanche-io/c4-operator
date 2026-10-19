@@ -199,6 +199,11 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 	if errors.Is(err, ErrNoMember) && isBlock(p) && p.Status.Phase == corev1.PodPending && p.DeletionTimestamp == nil {
 		return r.startBlock(ctx, p, name)
 	}
+	if errors.Is(err, ErrNoMember) && isBlock(p) && p.DeletionTimestamp != nil {
+		// a block withdrawn before its session started: let it go
+		zero := int64(0)
+		return client.IgnoreNotFound(r.Client.Delete(ctx, p, &client.DeleteOptions{GracePeriodSeconds: &zero}))
+	}
 	if errors.Is(err, ErrNoMember) {
 		return r.finish(ctx, p, corev1.PodFailed, "MemberNotRegistered",
 			fmt.Sprintf("member %s is not registered with c4-agent on %s", name, r.Node), 1)
