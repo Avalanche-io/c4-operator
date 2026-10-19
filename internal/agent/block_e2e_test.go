@@ -42,8 +42,11 @@ func (f *blockCLI) Active(ctx context.Context, configDir string, all bool) ([]ag
 	var out []agent.Active
 	for s, st := range f.state {
 		status := "idle" // done, or blocked: the CLI's "idle blocked" when a task gave up
-		if st == "working" {
+		switch st {
+		case "working":
 			status = "busy"
+		case "idle-working": // a part ended with more to come: "idle working"
+			st = "working"
 		}
 		out = append(out, agent.Active{SessionID: s, Status: status, State: st, Kind: "background", Pid: 1})
 	}
@@ -250,6 +253,9 @@ func TestBlockOnHostRunner(t *testing.T) {
 	tick()
 	m4, _ := h.Store.Get("default.practice-1.count")
 	endTurn(session, map[string]string{"more": "part 2: the tests"})
+	cli.mu.Lock()
+	cli.state[session] = "idle-working" // the CLI: idle, its task still working
+	cli.mu.Unlock()
 	tick()
 	if p := get(parts); p.Status.Phase != corev1.PodRunning {
 		t.Fatalf("after part 1: %s", p.Status.Phase)

@@ -239,8 +239,10 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 	// do (.c4/more) wakes it again for the next part, in this attempt. A
 	// task it finished ends the pod below as a member whose session ended
 	// on its own; one it gave up on (the CLI reports it blocked, not done)
-	// fails the attempt, for the job's retries or a person.
-	if live && m.Block && p.Status.Phase == corev1.PodRunning && act.Idle() && act.State != "working" && r.turnSince(m, p) {
+	// fails the attempt, for the job's retries or a person. (The CLI's
+	// state at a turn's end says how the model left its task: done,
+	// blocked, or working when it ended a part with more to come.)
+	if live && m.Block && p.Status.Phase == corev1.PodRunning && act.Idle() && r.turnSince(m, p) {
 		if err := r.Harness.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
 			return err
 		}
@@ -257,7 +259,7 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		case !act.Done():
 			r.logf("%s: ended its turn without finishing its task (%s); stopped its session", m.Name, act.State)
 			return r.finish(ctx, p, corev1.PodFailed, "BlockGaveUp",
-				fmt.Sprintf("the block ended its turn without finishing its task (the CLI reports it %s); its transcript says why", act.State), 1)
+				fmt.Sprintf("the block ended its turn without finishing its task or noting a next part (the CLI reports it %s); its transcript says why", act.State), 1)
 		default:
 			r.logf("%s: its task is done; stopped its session", m.Name)
 		}
