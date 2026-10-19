@@ -457,6 +457,7 @@ bpy.ops.wm.save_as_mainfile(filepath=out)
 def pipeline_tools(out):
     d = os.path.join(out, "pipeline-tools")
     write(os.path.join(d, "README.md"), "Petrel & Finch's pipeline tools: shot names, frame ranges and review-movie names.\nThe tests run in eight shards on the farm (`c4 farm submit ci . --set shards=8`).\n")
+    write(os.path.join(d, "pyproject.toml"), '[project]\nname = "pftools"\nversion = "0.1.0"\n\n[tool.pytest.ini_options]\npythonpath = ["."]\ntestpaths = ["tests"]\n')
     write(os.path.join(d, "pftools", "__init__.py"), "")
     write(os.path.join(d, "pftools", "shots.py"), '''"""Shot names and frame ranges, as Petrel & Finch writes them."""
 import re
