@@ -319,6 +319,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	store := fs.String("store", "", "a regional store replica (http://host:port) to store generator members' expansion documents in, so the queue can read them; without it a generator member adds nothing")
 	storeToken := fs.String("store-token-file", "", "a file holding the bearer token for --store")
 	storeProject := fs.String("store-project", "", "the project to store documents in (default: the Project listing the pod's namespace)")
+	blocksCwd := fs.String("blocks-cwd", "", "run plan jobs' blocks (pods with C4_AGENT_BLOCK=1), each a fresh session started in this folder, which the claude CLI must trust; without it the runner runs registered members only")
 	var lbls multi
 	fs.Var(&lbls, "label", "a Node label K=V for the agent pool's nodeSelector (default c4.avalanche.io/host=<node>)")
 	if err := fs.Parse(args); err != nil {
@@ -355,6 +356,13 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	}
 	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Slots: *slots, YieldTimeout: *yieldTimeout, HardStopAfter: *hardStop,
 		Logf: func(f string, a ...any) { fmt.Fprintf(out, time.Now().Format("15:04:05 ")+f+"\n", a...) }}
+	if *blocksCwd != "" {
+		hook, err := blockHookCommand()
+		if err != nil {
+			return err
+		}
+		r.BlocksCwd, r.HookCommand = *blocksCwd, hook
+	}
 	if *slotsFile != "" {
 		r.Capacity = func() (int, string) { return readSlotsFile(*slotsFile, *slots) }
 	}
@@ -390,3 +398,26 @@ func readSlotsFile(path string, def int) (int, string) {
 	}
 	return n, strings.TrimSpace(reason)
 }
+
+// blockHookCommand is the Stop hook block sessions run: this binary's
+// checkpoint --hook, with the runner's agents home and c4-unit, since a
+// background session's hooks need not see the runner's environment.
+func blockHookCommand() (string, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return "", err
+	}
+	var env []string
+	for _, k := range []string{"C4_AGENT_HOME", "C4_UNIT_BIN", "C4_AGENT_CLAUDE"} {
+		if v := os.Getenv(k); v != "" {
+			env = append(env, k+"="+shellQuote(v))
+		}
+	}
+	if len(env) == 0 {
+		return shellQuote(exe) + " checkpoint --hook", nil
+	}
+	return "env " + strings.Join(env, " ") + " " + shellQuote(exe) + " checkpoint --hook", nil
+}
+
+// shellQuote quotes s for a POSIX shell.
+func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }

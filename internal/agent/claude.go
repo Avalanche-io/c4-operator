@@ -18,14 +18,21 @@ type Active struct {
 	SessionID string `json:"sessionId"`
 	Name      string `json:"name"`
 	Status    string `json:"status"` // idle or busy
-	Kind      string `json:"kind"`   // interactive or background
-	Pid       int    `json:"pid"`
-	Cwd       string `json:"cwd"`
+	// State is the background session's task state: working, or done
+	// once the task it was started or woken with has ended.
+	State string `json:"state,omitempty"`
+	Kind  string `json:"kind"` // interactive or background
+	Pid   int    `json:"pid"`
+	Cwd   string `json:"cwd"`
 }
 
 // Idle reports whether the session is waiting for input: at a turn
 // boundary.
 func (a Active) Idle() bool { return a.Status == "idle" }
+
+// Done reports whether a background session's task has ended: it is idle
+// with nothing left to do (claude agents' state "done").
+func (a Active) Done() bool { return a.Idle() && a.State == "done" }
 
 // Claude is the part of the `claude` CLI the harness uses.
 //
@@ -149,6 +156,28 @@ func printedID(out string) (string, error) {
 	return "", fmt.Errorf("claude --bg --resume printed no session ID: %q", truncate([]byte(out), 200))
 }
 
+// Starter starts a fresh background session. The CLI does; a fake may not.
+type Starter interface {
+	// Start runs a new session in the background, in dir, with flags and a
+	// first prompt, and returns the ID the CLI printed: a short ID, or a
+	// full one.
+	Start(ctx context.Context, configDir, dir string, flags []string, prompt string) (string, error)
+}
+
+// Start runs `claude --bg [flags] <prompt>`. The CLI keeps the flags with
+// the session: `claude --bg --resume <id>` with none wakes it with the same
+// permission mode, tools and settings (Claude Code 2.1.303: "woke session
+// with its saved options"). dir must be a folder the CLI trusts; a
+// background session refuses an untrusted one.
+func (c *CLI) Start(ctx context.Context, configDir, dir string, flags []string, prompt string) (string, error) {
+	args := append(append([]string{"--bg"}, flags...), prompt)
+	out, err := c.run(ctx, configDir, dir, args...)
+	if err != nil {
+		return "", err
+	}
+	return printedID(string(out))
+}
+
 // Stop runs `claude stop <short id>`; the CLI does not match full IDs.
 func (c *CLI) Stop(ctx context.Context, configDir, session string) error {
 	_, err := c.run(ctx, configDir, "", "stop", ShortID(session))
@@ -162,10 +191,15 @@ func truncate(b []byte, n int) string {
 	return string(b)
 }
 
-// ConfigDirOrDefault returns dir, or ~/.claude when it is empty.
+// ConfigDirOrDefault returns dir, or the CLI's default when it is empty:
+// $CLAUDE_CONFIG_DIR, else ~/.claude.
 func ConfigDirOrDefault(dir string) (string, error) {
 	if dir != "" {
 		return dir, nil
+	}
+	// the CLI's own default: its environment's config dir, else ~/.claude
+	if env := os.Getenv("CLAUDE_CONFIG_DIR"); env != "" {
+		return env, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {

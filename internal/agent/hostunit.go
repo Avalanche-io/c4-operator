@@ -206,7 +206,12 @@ var controlDocs = []struct{ file, what, annotation string }{
 func (r *Runner) storeControlDocs(ctx context.Context, p *corev1.Pod, m *Member, u UnitDirs) error {
 	ann := map[string]string{}
 	for _, cd := range controlDocs {
-		data, from, err := readControlDoc(cd.file, u.Out, m.Cwd)
+		dirs := []string{u.Out, m.Cwd}
+		if m.Block {
+			// block sessions share their folder: only the unit's own counts
+			dirs = dirs[:1]
+		}
+		data, from, err := readControlDoc(cd.file, dirs...)
 		if err != nil {
 			return err
 		}

@@ -50,6 +50,9 @@ type Member struct {
 	// a host runner (out/, control/, podinfo), so the Stop hook can answer
 	// the farm's safe points from inside the session.
 	UnitDir string `json:"unitDir,omitempty"`
+	// Block marks a block's member: a fresh session the runner started for
+	// a plan job's unit, which ends when its task does.
+	Block bool `json:"block,omitempty"`
 	// Previous lists the sessions of earlier phases, oldest first.
 	Previous []string `json:"previous,omitempty"`
 	// Registered is when the member was first registered.

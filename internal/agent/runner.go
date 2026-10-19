@@ -67,6 +67,11 @@ type Runner struct {
 	Now func() time.Time
 	// Logf reports what the runner does.
 	Logf func(format string, args ...any)
+	// BlocksCwd is the folder block sessions run in: one the claude CLI
+	// trusts (a background session refuses another); their work is in the
+	// job's repository (C4_BLOCK_REPO). HookCommand is the Stop hook their
+	// sessions run (c4-agent checkpoint --hook, with its environment).
+	BlocksCwd, HookCommand string
 	// UnitsDir holds each running unit's directory (default the agents
 	// home's units/): its output root, control directory and podinfo.
 	UnitsDir string
@@ -148,7 +153,8 @@ func (r *Runner) Tick(ctx context.Context) error {
 	return nil
 }
 
-// memberOf is the member a unit pod runs, from its environment.
+// memberOf is the member a unit pod runs, from its environment: the one
+// it names, or a block's own.
 func memberOf(p *corev1.Pod) string {
 	for _, c := range p.Spec.Containers {
 		for _, e := range c.Env {
@@ -156,6 +162,9 @@ func memberOf(p *corev1.Pod) string {
 				return e.Value
 			}
 		}
+	}
+	if isBlock(p) {
+		return blockMember(p)
 	}
 	return ""
 }
@@ -181,6 +190,9 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		return r.finish(ctx, p, corev1.PodFailed, "NotAMember", "the pod names no agent member (C4_AGENT_MEMBER)", 1)
 	}
 	m, err := r.Harness.Store.Get(name)
+	if errors.Is(err, ErrNoMember) && isBlock(p) && p.Status.Phase == corev1.PodPending && p.DeletionTimestamp == nil {
+		return r.startBlock(ctx, p, name)
+	}
 	if errors.Is(err, ErrNoMember) {
 		return r.finish(ctx, p, corev1.PodFailed, "MemberNotRegistered",
 			fmt.Sprintf("member %s is not registered with c4-agent on %s", name, r.Node), 1)
@@ -201,9 +213,18 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		}
 		return r.yield(ctx, p, m)
 	}
-	live, _, err := r.Harness.live(ctx, m)
+	live, act, err := r.Harness.live(ctx, m)
 	if err != nil {
 		return err
+	}
+	// A block ends when its task does: stop its idle session, and finish
+	// the pod below as a member whose session ended on its own.
+	if live && m.Block && p.Status.Phase == corev1.PodRunning && act.Done() && r.turnSince(m, p) {
+		if err := r.Harness.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
+			return err
+		}
+		r.logf("%s: its task is done; stopped its session", m.Name)
+		live = false
 	}
 	if live {
 		if err := r.relay(ctx, p, u); err != nil {
@@ -213,7 +234,11 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 	switch {
 	case p.Status.Phase == corev1.PodPending:
 		if !live {
-			res, err := r.Harness.Resume(ctx, name, "")
+			prompt := ""
+			if m.Block {
+				prompt = reworkPrompt(p, u)
+			}
+			res, err := r.Harness.Resume(ctx, name, prompt)
 			if errors.Is(err, ErrForked) {
 				return r.finish(ctx, p, corev1.PodFailed, "CopyStarted", err.Error(), 4)
 			}
@@ -227,7 +252,11 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 	case !live && first:
 		// The runner restarted and finds the member's session stopped: the
 		// machine was restarted. Resume it from its last turn.
-		res, err := r.Harness.Resume(ctx, name, "")
+		prompt := ""
+		if m.Block {
+			prompt = reworkPrompt(p, u)
+		}
+		res, err := r.Harness.Resume(ctx, name, prompt)
 		if errors.Is(err, ErrForked) {
 			return r.finish(ctx, p, corev1.PodFailed, "CopyStarted", err.Error(), 4)
 		}
