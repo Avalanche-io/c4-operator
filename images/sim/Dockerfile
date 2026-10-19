@@ -3,14 +3,14 @@
 #
 # Why Debian sid: Mantaflow writes OpenVDB only when Blender is built with
 # it. Debian 13 and forky build Blender with OpenVDB on amd64 alone, and
-# blender.org publishes Linux builds for x64 alone; sid's Blender 5.2.2 is
+# blender.org publishes Linux builds for x64 alone; sid's Blender 5.2.2 (snapshot 2026-10-15; the 10-05 one has 5.0.1) is
 # built with OpenVDB on amd64 and arm64. The packages come from a dated
 # snapshot of the archive, so a rebuild installs exactly the same ones.
 #
 # Houdini sims use the studio's own image (houdini.Dockerfile, built from
 # its installer and licensed through hserver); the job template is the same.
 
-ARG SNAPSHOT=20261005T000000Z
+ARG SNAPSHOT=20261015T000000Z
 ARG DEBIAN=debian:sid-20261005-slim
 ARG GO=golang:1.26.9-trixie
 
@@ -24,7 +24,7 @@ FROM ${DEBIAN}
 ARG SNAPSHOT
 ARG OIIO=3.2.1.3
 RUN rm -f /etc/apt/sources.list.d/debian.sources \
- && echo "deb [check-valid-until=no] https://snapshot.debian.org/archive/debian/${SNAPSHOT} sid main" > /etc/apt/sources.list \
+ && echo "deb [check-valid-until=no] http://snapshot.debian.org/archive/debian/${SNAPSHOT} sid main" > /etc/apt/sources.list \
  && apt-get update \
  && apt-get install -y --no-install-recommends blender python3 python3-venv ca-certificates \
  && rm -rf /var/lib/apt/lists/* \

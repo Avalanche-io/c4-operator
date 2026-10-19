@@ -437,7 +437,7 @@ ds.resolution_max = 96
 ds.cache_data_format = "OPENVDB"
 ds.cache_type = "ALL"
 ds.cache_frame_start, ds.cache_frame_end = 1001, 1120
-bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 0.3))
+bpy.ops.mesh.primitive_plane_add(size=1, location=(0, 0, 1.0))  # inside the domain (z 0.75 to 2.25)
 src = bpy.context.object
 src.name = "FogSource"
 src.scale = (10, 4, 1)
@@ -447,6 +447,7 @@ f.flow_settings.flow_type = "SMOKE"
 f.flow_settings.flow_behavior = "INFLOW"
 f.flow_settings.smoke_color = (0.8, 0.8, 0.85)
 f.flow_settings.temperature = -0.2
+bpy.context.view_layer.objects.active = dom  # baking works on the active domain
 bpy.ops.wm.save_as_mainfile(filepath=out)
 ''')
     write(os.path.join(d, "README.md"), "Saltmarsh sm0220: marsh fog. `fog.blend` is built from `fog_setup.py` by\n`hack/samples/build.sh`; a Houdini studio uses `fog.hip` with a File Cache node at\n`/obj/fog/filecache1` instead.\n")

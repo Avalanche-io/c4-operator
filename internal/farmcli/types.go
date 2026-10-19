@@ -94,8 +94,11 @@ hou.node('{{index .Set "node"}}').render(frame_range=(int(os.environ['C4_FRAME_S
 import bpy, os
 s = bpy.context.scene
 s.frame_start, s.frame_end = int(os.environ['C4_FRAME_START']), int(os.environ['C4_FRAME_END'])
-d = bpy.data.objects['{{index .Set "domain"}}'].modifiers['Fluid'].domain_settings
+dom = bpy.data.objects['{{index .Set "domain"}}']
+bpy.context.view_layer.objects.active = dom
+d = dom.modifiers['Fluid'].domain_settings
 d.cache_directory, d.cache_data_format = '{{.Mount}}/{{.Dir}}cache', 'OPENVDB'
+d.cache_frame_start, d.cache_frame_end = s.frame_start, s.frame_end
 bpy.ops.fluid.bake_all()
 "{{end}}`},
 	"comp": {Name: "comp", Stage: "comp", Class: "render", Image: "oiio", Pools: []string{"cpu"}, Mount: "/show",
