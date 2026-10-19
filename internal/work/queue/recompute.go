@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sort"
@@ -11,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -38,13 +40,17 @@ import (
 // mismatch, which demotes the process to validated, and the consumer's
 // input is moved or staged again as the site still lacks it.
 //
-// Only a unit the class plans can be rerun: a unit an expansion added,
-// or one that reads other units' outputs, is refused (its inputs are not
-// all in the record).
+// The unit is taken from the producing job's plan as the queue holds it,
+// expansions included, so a unit an expansion added reruns too; the
+// recompute carries its definition (AnnotationRecomputeUnit). A unit that
+// read other units' outputs has them in the record as inputs (their
+// views, at the mounts it read them at), pinned like the job's inputs.
 
-// AnnotationRecomputeUnit on a WorkJob makes it a recompute of one unit
-// of its plan, by index: the queue plans that unit alone. Recompute sets
-// it; a person does not.
+// AnnotationRecomputeUnit on a WorkJob makes it a recompute of one unit:
+// the queue plans that unit alone. Its value is the unit's definition
+// (JSON: name, label, key, position, slots, does, environment, work), or,
+// as first written, its index in the class's plan. Recompute sets it; a
+// person does not.
 const AnnotationRecomputeUnit = "c4.avalanche.io/recompute-unit"
 
 // AnnotationRecomputeOf names the job and unit a recompute reruns
@@ -82,15 +88,9 @@ func (q *Queue) Recompute(ctx context.Context, project string, key process.Key, 
 	if err != nil {
 		return err
 	}
-	plan, err := d.Plan(&src)
+	u, err := q.producingUnit(&src, d, pr.Unit)
 	if err != nil {
 		return err
-	}
-	if pr.Unit < 0 || pr.Unit >= len(plan.Units) {
-		return fmt.Errorf("%w: unit %d of %s was added by an expansion", errNotRerunnable, pr.Unit, pr.Job)
-	}
-	if len(plan.Units[pr.Unit].Inputs) > 0 {
-		return fmt.Errorf("%w: unit %d of %s reads other units' outputs", errNotRerunnable, pr.Unit, pr.Job)
 	}
 	pools := src.Spec.Pools
 	if len(pools) == 0 {
@@ -101,7 +101,7 @@ func (q *Queue) Recompute(ctx context.Context, project string, key process.Key, 
 		return fmt.Errorf("%w: no pool of %s is at %s", errNotRerunnable, pr.Job, site)
 	}
 
-	j := recomputeJob(&src, pr.Unit, key, inputs, site, view, pools, by)
+	j := recomputeJob(&src, pr.Unit, u, key, inputs, site, view, pools, by)
 	switch err := q.Client.Create(ctx, j); {
 	case apierrors.IsAlreadyExists(err):
 		return nil
@@ -117,20 +117,55 @@ func (q *Queue) Recompute(ctx context.Context, project string, key process.Key, 
 	return nil
 }
 
-// recomputeJob is the WorkJob that reruns src's unit idx at site.
-func recomputeJob(src *c4v1.WorkJob, idx int, key process.Key, inputs []process.Input, site, view string, pools []string, by time.Time) *c4v1.WorkJob {
+// producingUnit is unit idx of src: from the plan the queue holds for
+// it, expansions included, else from its class's plan.
+func (q *Queue) producingUnit(src *c4v1.WorkJob, d class.Driver, idx int) (class.Unit, error) {
+	if m := q.jobs[src.UID]; m != nil && m.plan != nil && idx >= 0 && idx < len(m.plan.Units) {
+		return m.plan.Units[idx], nil
+	}
+	plan, err := d.Plan(src)
+	if err != nil {
+		return class.Unit{}, err
+	}
+	if idx < 0 || idx >= len(plan.Units) {
+		return class.Unit{}, fmt.Errorf("%w: unit %d of %s/%s is not in its plan yet", errNotRerunnable, idx, src.Namespace, src.Name)
+	}
+	return plan.Units[idx], nil
+}
+
+// recomputeSpec is the unit a recompute runs (AnnotationRecomputeUnit).
+type recomputeSpec struct {
+	Name   string          `json:"name,omitempty"`
+	Label  string          `json:"label"`
+	Key    string          `json:"key,omitempty"`
+	Pos    int             `json:"pos,omitempty"`
+	Slots  int             `json:"slots,omitempty"`
+	Does   string          `json:"does,omitempty"`
+	Env    []corev1.EnvVar `json:"env,omitempty"`
+	Work   float64         `json:"work,omitempty"`
+	WorkSD float64         `json:"workSD,omitempty"`
+}
+
+// recomputeJob is the WorkJob that reruns src's unit idx, u, at site.
+func recomputeJob(src *c4v1.WorkJob, idx int, u class.Unit, key process.Key, inputs []process.Input, site, view string, pools []string, by time.Time) *c4v1.WorkJob {
 	h := sha256.Sum256([]byte(key.Process + "\x00" + key.Inputs + "\x00" + site))
 	name := "rc-" + hex.EncodeToString(h[:])[:16]
+	// An input the job does not list is another unit's output, read-only.
 	readOnly := map[string]bool{}
+	for _, in := range inputs {
+		readOnly[in.Mount] = true
+	}
 	for _, in := range src.Spec.Inputs {
 		readOnly[in.MountPath] = in.ReadOnly
 	}
+	spec, _ := json.Marshal(recomputeSpec{Name: u.Name, Label: u.Label, Key: u.Key, Pos: u.Pos, Slots: u.Slots, Does: u.Does,
+		Env: u.Env, Work: u.Work, WorkSD: u.WorkSD})
 	deadline := metav1.NewTime(by)
 	j := &c4v1.WorkJob{
 		ObjectMeta: metav1.ObjectMeta{Namespace: src.Namespace, Name: name,
 			Labels: map[string]string{LabelRecompute: "true"},
 			Annotations: map[string]string{
-				AnnotationRecomputeUnit: strconv.Itoa(idx),
+				AnnotationRecomputeUnit: string(spec),
 				AnnotationRecomputeOf:   fmt.Sprintf("%s/%s#%d", src.Namespace, src.Name, idx),
 				AnnotationRecomputeView: view,
 				AnnotationRecomputeSite: site,
@@ -172,11 +207,20 @@ func recomputeUnit(j *c4v1.WorkJob, p *class.Plan) (*class.Plan, error) {
 	if !ok {
 		return p, nil
 	}
-	idx, err := strconv.Atoi(s)
-	if err != nil || idx < 0 || idx >= len(p.Units) {
-		return nil, fmt.Errorf("%s %q: the plan has %d units", AnnotationRecomputeUnit, s, len(p.Units))
+	var u class.Unit
+	if idx, err := strconv.Atoi(s); err == nil {
+		if idx < 0 || idx >= len(p.Units) {
+			return nil, fmt.Errorf("%s %q: the plan has %d units", AnnotationRecomputeUnit, s, len(p.Units))
+		}
+		u = p.Units[idx]
+	} else {
+		var rs recomputeSpec
+		if err := json.Unmarshal([]byte(s), &rs); err != nil || rs.Label == "" {
+			return nil, fmt.Errorf("%s: not a unit: %q", AnnotationRecomputeUnit, s)
+		}
+		u = class.Unit{Name: rs.Name, Label: rs.Label, Key: rs.Key, Pos: rs.Pos, Slots: max(1, rs.Slots), Does: rs.Does,
+			Env: rs.Env, Work: rs.Work, WorkSD: rs.WorkSD, Exists: 1}
 	}
-	u := p.Units[idx]
 	u.Index, u.After, u.Inputs, u.Generator, u.Parent, u.Depth = 0, nil, nil, false, 0, 0
 	p.Units, p.Order = []class.Unit{u}, []int{0}
 	return p, nil

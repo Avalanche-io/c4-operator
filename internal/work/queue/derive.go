@@ -254,8 +254,12 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 	if !ok {
 		return
 	}
-	// What the unit read: a substitute it mounted in place of an input.
+	// What the unit read: a substitute it mounted in place of an input,
+	// and other units' outputs.
 	inputs = readInputs(p, inputs)
+	if inputs, ok = withUnitInputs(v.mem, u, inputs); !ok {
+		return
+	}
 	in, ok := process.InputsID(inputs)
 	if !ok {
 		return
@@ -279,6 +283,24 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 	m.proc, m.unsealedWhy = program, why
 }
 
+// withUnitInputs adds to a job's inputs the outputs of other units unit u
+// reads, at the mounts it reads them at; it reports false while one of
+// them is not known.
+func withUnitInputs(m *jobMem, u class.Unit, inputs []process.Input) ([]process.Input, bool) {
+	if len(u.Inputs) == 0 {
+		return inputs, true
+	}
+	out := append([]process.Input(nil), inputs...)
+	for _, in := range u.Inputs {
+		view := m.unitOut[in.From]
+		if view == "" {
+			return nil, false
+		}
+		out = append(out, process.Input{Mount: in.MountPath, View: view})
+	}
+	return out, true
+}
+
 // perUnit are the environment variables that tell one unit of a job from
 // another: the class driver's per-unit variables and the unit's label.
 func perUnit(u class.Unit) map[string]bool {
@@ -299,6 +321,7 @@ func (q *Queue) useDerivations(ctx context.Context, v *view, byKey map[string]ma
 	}
 	plan := v.mem.plan
 	var inID string
+	var base []process.Input
 	resolved := false
 	for _, u := range plan.Units {
 		cs := unitContainers(v.job, u, q.digests)
@@ -312,15 +335,24 @@ func (q *Queue) useDerivations(ctx context.Context, v *view, byKey map[string]ma
 		}
 		if !resolved {
 			resolved = true
-			inputs, ok := q.inputViews(ctx, v.job)
-			if !ok {
+			if base, ok = q.inputViews(ctx, v.job); !ok {
 				return
 			}
-			if inID, ok = process.InputsID(inputs); !ok {
+			if inID, ok = process.InputsID(base); !ok {
 				return
 			}
 		}
-		cost, ok := b.Recompute(process.Key{Process: proc, Inputs: inID}, program)
+		id := inID
+		if len(u.Inputs) > 0 {
+			in, ok := withUnitInputs(v.mem, u, base)
+			if !ok {
+				continue
+			}
+			if id, ok = process.InputsID(in); !ok {
+				continue
+			}
+		}
+		cost, ok := b.Recompute(process.Key{Process: proc, Inputs: id}, program)
 		if !ok || cost.Basis != "exact" || cost.Work.Mean <= 0 {
 			continue
 		}

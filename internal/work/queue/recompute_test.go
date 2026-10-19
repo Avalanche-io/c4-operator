@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/Avalanche-io/c4"
@@ -75,7 +76,7 @@ func TestRecomputeRerunsTheProducingUnit(t *testing.T) {
 	switch {
 	case rc == nil:
 		t.Fatal("no recompute job")
-	case rc.Annotations[AnnotationRecomputeUnit] != "1" || rc.Annotations[AnnotationRecomputeOf] != ns+"/sh310#1":
+	case !strings.Contains(rc.Annotations[AnnotationRecomputeUnit], `"label":"1002"`) || rc.Annotations[AnnotationRecomputeOf] != ns+"/sh310#1":
 		t.Fatalf("annotations %v", rc.Annotations)
 	case rc.Annotations[AnnotationDerivationClass] != "exact":
 		t.Fatal("the declared class did not carry over")
@@ -166,4 +167,75 @@ func (r *reentrantPlacement) Links() []sched.Link { return nil }
 
 func (r *reentrantPlacement) Stage(context.Context, string, []process.Input, string, sched.Stage) error {
 	return nil
+}
+
+// A unit an expansion added, reading another unit's output, reruns too:
+// its record has that output as an input, at the mount it read it at, and
+// the recompute carries the unit's definition from the job's plan, so it
+// plans that one unit with the same process and reads every input pinned.
+func TestRecomputeAcrossUnits(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	j := job(ns, "port", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))
+	j.Annotations = map[string]string{AnnotationDerivationClass: "exact"}
+	j.Spec.Template.Spec.Containers[0].Image = pinned
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "deep", "env": {"LAYER": "deep"}},
+	  {"name": "beauty", "after": ["deep"], "env": {"LAYER": "beauty"}, "inputs": [{"fromUnit": "deep", "mountPath": "/deep"}]}]}`)
+	finish(t, podOfUnit(t, ns, "port", 0), corev1.PodSucceeded, *now, time.Minute,
+		map[string]string{c4v1.AnnotationOutputTree: viewID("root"), c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	finish(t, podOfUnit(t, ns, "port", 1), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputTree: viewID("deep")})
+	tick(t, q)
+	readyMaterialization(t, ns, unitInputName("port", 1), viewID("deep"))
+	tick(t, q)
+	finish(t, podOfUnit(t, ns, "port", 2), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputTree: viewID("beauty")})
+	tick(t, q)
+
+	project := "namespace/" + ns
+	key, inputs, _, ok := q.RecomputeCost(project, viewID("beauty"), 0.5)
+	if !ok || len(inputs) != 1 || inputs[0] != (process.Input{Mount: "/deep", View: viewID("deep")}) {
+		t.Fatalf("beauty's record: inputs %v %v", inputs, ok)
+	}
+	q.derivMu.Lock()
+	q.sites = map[string]string{"cpu-" + ns: "van"}
+	q.derivMu.Unlock()
+	if err := q.Recompute(ctx, project, key, inputs, "van", viewID("beauty"), now.Add(time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	var l c4v1.WorkJobList
+	if err := k8s.List(ctx, &l); err != nil {
+		t.Fatal(err)
+	}
+	var rc *c4v1.WorkJob
+	for i := range l.Items {
+		if x := &l.Items[i]; x.Namespace == ns && x.Labels[LabelRecompute] == "true" {
+			rc = x
+		}
+	}
+	if rc == nil || rc.Annotations[AnnotationRecomputeOf] != ns+"/port#2" || len(rc.Spec.Inputs) != 1 ||
+		rc.Spec.Inputs[0].MountPath != "/deep" || !rc.Spec.Inputs[0].ReadOnly {
+		t.Fatalf("recompute %+v", rc)
+	}
+	readyMaterialization(t, ns, rc.Spec.Inputs[0].Materialization, viewID("deep"))
+	tick(t, q)
+	v := q.jobs[get(t, ns, rc.Name).UID]
+	if v == nil || v.plan == nil || len(v.plan.Units) != 1 || v.plan.Units[0].Label != "beauty" {
+		t.Fatalf("recompute plan %+v", v)
+	}
+	if p, ok := process.ProcessID(unitContainers(get(t, ns, rc.Name), v.plan.Units[0], q.digests), ""); !ok || p != key.Process {
+		t.Fatalf("recompute process %s, recorded %s", p, key.Process)
+	}
+	pods := unitPods(t, ns, rc.Name)
+	if len(pods) != 1 {
+		t.Fatalf("%d recompute pods", len(pods))
+	}
+	finish(t, &pods[0], corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputTree: viewID("beauty")})
+	tick(t, q)
+	if d := get(t, ns, rc.Name).Status.Derivation; d == nil || d.Matched != 1 || d.Mismatched != 0 {
+		t.Fatalf("the rerun did not match the record: %+v", d)
+	}
 }

@@ -2036,8 +2036,12 @@ The queue gets these from a Placement (`--staging`, off by default;
   spec (class, parameters, pod template), planned as that one unit
   (`c4.avalanche.io/recompute-unit`), reading the views it read pinned by
   ID, in the producing job's pools at the site, due when the stage needs
-  it. The record names the unit that last ran each computation; a unit an
-  expansion added, or one reading other units' outputs, is not rerun. A
+  it. The record names the unit that last ran each computation; the
+  recompute takes that unit from the job's plan as the queue holds it,
+  expansions included, and carries its definition. A unit's inputs in the
+  record are the views it read: the job's, and other units' outputs at
+  the mounts it read them at, so a unit downstream in a job's graph
+  reruns with those pinned like the rest. A
   rerun that writes the same output verifies the process; one that writes
   something else demotes it to validated. A validated recompute is
   offered only to a job that accepts one

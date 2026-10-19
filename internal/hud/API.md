@@ -710,7 +710,9 @@ A recompute runs as a WorkJob labeled `c4.avalanche.io/recompute: "true"`,
 named `rc-` and a hash of the computation and site, in the producing job's
 namespace. `c4.avalanche.io/recompute-of` names the job and unit it reruns
 (`namespace/name#index`); `c4.avalanche.io/recompute-unit` keeps its plan
-to that unit, and is the queue's to set; `c4.avalanche.io/recompute-view`
+to that unit (its definition from the producing job's plan: JSON name,
+label, key, position, slots, does, environment and work; an index into the
+class's plan in recomputes made before), and is the queue's to set; `c4.avalanche.io/recompute-view`
 and `-site` name the input it rebuilds and where, and the queue sets
 `c4.avalanche.io/recompute-output` to the view its unit wrote.
 
