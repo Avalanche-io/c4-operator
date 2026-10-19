@@ -64,6 +64,9 @@ type Cite struct {
 	File  string `json:"file"`
 	Line  int    `json:"line"`
 	Text  string `json:"text"`
+	// By says who read the edge from the text when no adapter did: a
+	// person's (or an agent's) reading of prose, for someone to check.
+	By string `json:"by,omitempty"`
 }
 
 // Note is something an adapter read and could not turn into a block or an
@@ -226,6 +229,9 @@ type Extra struct {
 	File  string   `json:"file"`
 	Line  int      `json:"line"`
 	Text  string   `json:"text"`
+	// By names who read the order from the text (an edge no adapter read
+	// is a reading of prose); it goes into each edge's citation.
+	By string `json:"by,omitempty"`
 	// Wait, with Before, adds a wait block named Block (a ruling, a
 	// review): the blocks in Before run after it. It takes the row and the
 	// origin of the first of them.
@@ -237,7 +243,7 @@ type Extra struct {
 // the plan does not list.
 func (p *Plan) AddExtras(xs []Extra) {
 	for _, x := range xs {
-		c := Cite{File: x.File, Line: x.Line, Text: x.Text}
+		c := Cite{File: x.File, Line: x.Line, Text: x.Text, By: x.By}
 		if x.Wait != nil {
 			p.addWait(x, c)
 			continue

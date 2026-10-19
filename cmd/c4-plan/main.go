@@ -74,6 +74,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	format := fs.String("format", "", "file (a plan written as data) or lanemap (a lane-map directory); default: by whether PLAN is a file or a directory")
 	milestone := fs.String("milestone", "M1", "lanemap: the milestone whose charters and file to read")
 	extra := fs.String("extra", "", "a YAML list of edges and waits a person adds, each citing the plan")
+	extraBy := fs.String("extra-by", "", "who read the --extra entries from the plan's prose, for those that do not say (their citations' by)")
 	out := fs.String("o", "", "write the document here (default stdout)")
 	notes := fs.String("notes", "", "write what could not be read here (default stderr)")
 	owners := fs.String("owners", "", "import: also write the paths blocks hold, each to its block (c4-edges -owners)")
@@ -106,6 +107,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		var xs []plan.Extra
 		if err := yaml.Unmarshal(b, &xs); err != nil {
 			return fail(fmt.Errorf("%s: %w", *extra, err))
+		}
+		for i := range xs {
+			if xs[i].By == "" {
+				xs[i].By = *extraBy
+			}
 		}
 		p.AddExtras(xs)
 	}

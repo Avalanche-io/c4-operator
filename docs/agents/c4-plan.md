@@ -110,6 +110,11 @@ the orders no pattern reads with `--extra`, a YAML list citing the plan:
 - {block: C2.1, after: [F1], file: LANES.md, line: 193, text: "no lane from C2.1 onward starts until the foundation lane is chartered and merged"}
 ```
 
+An entry may say who read it (`by`), and `--extra-by NAME` gives that for
+every entry that does not. It goes into each edge's citation, so an edge a
+person or an agent read from prose stays marked as a reading, for someone to
+check, apart from the edges the adapter read itself.
+
 A cycle in the edges is an error that names the blocks on it.
 
 ## Waits

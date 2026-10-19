@@ -182,3 +182,16 @@ func TestOwners(t *testing.T) {
 		t.Errorf("a shared path: %v %v", o["text/scan"], notes)
 	}
 }
+
+// A person's added edge says who read it, in its citation.
+func TestExtraBy(t *testing.T) {
+	p := read(t)
+	p.AddExtras([]Extra{{Block: "io/files", After: []string{"text/units"}, File: "PLAN.md", Line: 4, Text: "files sizes buffers in units", By: "a reading of prose"}})
+	u := p.Unit("io/files")
+	if i := slices.IndexFunc(u.Cites, func(c Cite) bool { return c.After == "text/units" }); i < 0 || u.Cites[i].By != "a reading of prose" {
+		t.Fatalf("cites %+v", u.Cites)
+	}
+	if i := slices.IndexFunc(u.Cites, func(c Cite) bool { return c.After == "io/paths" }); i < 0 || u.Cites[i].By != "" {
+		t.Fatalf("a file's own edge says who read it: %+v", u.Cites)
+	}
+}
