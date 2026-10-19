@@ -25,6 +25,8 @@ COPY cmd/c4-unit ./cmd/c4-unit
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/c4-unit ./cmd/c4-unit
 
 FROM ${DEBIAN} AS build
+# JOBS caps the compile's parallel jobs (default: every CPU)
+ARG JOBS
 ARG USD=v26.08
 ARG OSD=v3_7_0
 ARG CYCLES=v5.2.0
@@ -38,7 +40,7 @@ RUN git clone --depth 1 --branch ${OSD} https://github.com/PixarAnimationStudios
  && cmake -S /src/osd -B /build/osd -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/usd \
       -DNO_EXAMPLES=ON -DNO_TUTORIALS=ON -DNO_REGRESSION=ON -DNO_DOC=ON -DNO_OMP=ON -DNO_CUDA=ON \
       -DNO_OPENCL=ON -DNO_GLFW=ON -DNO_PTEX=ON -DNO_TBB=OFF -DNO_OPENGL=ON -DNO_METAL=ON -DNO_DX=ON \
- && cmake --build /build/osd -j"$(nproc)" --target install
+ && cmake --build /build/osd -j"${JOBS:-$(nproc)}" --target install
 # OpenUSD with imaging, usdImaging, Python and the usdrecord tool
 RUN git clone --depth 1 --branch ${USD} https://github.com/PixarAnimationStudios/OpenUSD.git /src/usd \
  && cmake -S /src/usd -B /build/usd -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/usd \
@@ -48,7 +50,7 @@ RUN git clone --depth 1 --branch ${USD} https://github.com/PixarAnimationStudios
       -DPXR_BUILD_OPENIMAGEIO_PLUGIN=OFF -DPXR_BUILD_OPENCOLORIO_PLUGIN=OFF -DPXR_ENABLE_MATERIALX_SUPPORT=OFF \
       -DPXR_ENABLE_VULKAN_SUPPORT=OFF -DPXR_BUILD_EXAMPLES=OFF -DPXR_BUILD_TUTORIALS=OFF -DPXR_BUILD_TESTS=OFF \
       -DPXR_BUILD_DOCUMENTATION=OFF \
- && cmake --build /build/usd -j"$(nproc)" --target install
+ && cmake --build /build/usd -j"${JOBS:-$(nproc)}" --target install
 # Cycles' Hydra render delegate, against that OpenUSD
 RUN git clone --depth 1 --branch ${CYCLES} https://projects.blender.org/blender/cycles.git /src/cycles \
  && cmake -S /src/cycles -B /build/cycles -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/cycles \
@@ -58,10 +60,12 @@ RUN git clone --depth 1 --branch ${CYCLES} https://projects.blender.org/blender/
       -DWITH_CYCLES_OPENVDB=OFF -DWITH_CYCLES_NANOVDB=OFF -DWITH_CYCLES_ALEMBIC=OFF \
       -DWITH_CYCLES_DEVICE_CUDA=OFF -DWITH_CYCLES_DEVICE_OPTIX=OFF -DWITH_CYCLES_DEVICE_HIP=OFF \
       -DWITH_CYCLES_DEVICE_ONEAPI=OFF -DWITH_CYCLES_DEVICE_METAL=OFF \
- && cmake --build /build/cycles -j"$(nproc)" --target install \
+ && cmake --build /build/cycles -j"${JOBS:-$(nproc)}" --target install \
  && find /opt/cycles -name plugInfo.json -print
 
 FROM ${DEBIAN}
+# JOBS caps the compile's parallel jobs (default: every CPU)
+ARG JOBS
 ARG OIIO=3.2.1.3
 RUN apt-get update \
  && apt-get install -y --no-install-recommends python3 python3-venv ca-certificates \

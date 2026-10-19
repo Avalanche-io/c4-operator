@@ -125,12 +125,13 @@ images:
 # The prebuilt job images, for every platform in PLATFORMS, from the
 # repository root (each copies cmd/c4-unit). Without PUSH=1 each is written
 # to bin/ as an OCI archive; with PUSH=1 it goes to
-# $(REGISTRY)/c4-job-<name>:$(VERSION). JOB_IMAGES=oiio builds one.
+# $(REGISTRY)/c4-job-<name>:$(VERSION). JOB_IMAGES=oiio builds one; JOBS=2 caps
+# the compiles (usd, hydra) at two parallel jobs.
 job-images:
 	@mkdir -p bin
 	@for i in $(JOB_IMAGES); do \
 	  echo "build c4-job-$$i ($(PLATFORMS))"; \
-	  docker buildx build --platform $(PLATFORMS) -f images/$$i/Dockerfile \
+	  docker buildx build --platform $(PLATFORMS) -f images/$$i/Dockerfile $(if $(JOBS),--build-arg JOBS=$(JOBS)) \
 	    -t $(REGISTRY)/c4-job-$$i:$(VERSION) \
 	    --label org.opencontainers.image.version=$(VERSION) \
 	    --label org.opencontainers.image.revision=$$(git rev-parse HEAD) \

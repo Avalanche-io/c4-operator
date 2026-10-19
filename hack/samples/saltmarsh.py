@@ -146,7 +146,7 @@ def Xform "World"
 
 def Xform "marsh"
 {{
-    def Mesh "ground"
+    def Mesh "ground" (prepend apiSchemas = ["MaterialBindingAPI"])
     {{
         int[] faceVertexCounts = [{", ".join(map(str, counts))}]
         int[] faceVertexIndices = [{", ".join(map(str, idx))}]
@@ -155,7 +155,7 @@ def Xform "marsh"
         rel material:binding = </marsh/looks/mud>
     }}
 
-    def Mesh "water"
+    def Mesh "water" (prepend apiSchemas = ["MaterialBindingAPI"])
     {{
         int[] faceVertexCounts = [4]
         int[] faceVertexIndices = [0, 1, 2, 3]
@@ -252,14 +252,14 @@ def Xform "heron"
     }}
     uniform token[] xformOpOrder = ["xformOp:translate"]
 
-    def Sphere "body"
+    def Sphere "body" (prepend apiSchemas = ["MaterialBindingAPI"])
     {{
         double radius = 0.28
         float3 xformOp:scale = (1.6, 0.8, 0.8)
         uniform token[] xformOpOrder = ["xformOp:scale"]
         rel material:binding = </heron/looks/feathers>
     }}
-    def Capsule "neck"
+    def Capsule "neck" (prepend apiSchemas = ["MaterialBindingAPI"])
     {{
         double height = 0.5
         double radius = 0.05
@@ -275,7 +275,7 @@ def Xform "heron"
                 {samples(beat, lambda a: f"({a:.2f}, 0, 0)")}
         }}
         uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
-        def Cube "wing"
+        def Cube "wing" (prepend apiSchemas = ["MaterialBindingAPI"])
         {{
             double size = 1
             float3 xformOp:scale = (0.6, 0.02, 0.9)
@@ -290,7 +290,7 @@ def Xform "heron"
                 {samples(beat, lambda a: f"({-a:.2f}, 0, 0)")}
         }}
         uniform token[] xformOpOrder = ["xformOp:rotateXYZ"]
-        def Cube "wing"
+        def Cube "wing" (prepend apiSchemas = ["MaterialBindingAPI"])
         {{
             double size = 1
             float3 xformOp:scale = (0.6, 0.02, 0.9)

@@ -15,6 +15,8 @@ COPY cmd/c4-unit ./cmd/c4-unit
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/c4-unit ./cmd/c4-unit
 
 FROM ${DEBIAN} AS build
+# JOBS caps the compile's parallel jobs (default: every CPU)
+ARG JOBS
 ARG USD=v26.08
 RUN apt-get update \
  && apt-get install -y --no-install-recommends build-essential cmake git ca-certificates \
@@ -25,11 +27,11 @@ RUN cmake -S /src/usd -B /build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFI
       -DPXR_ENABLE_PYTHON_SUPPORT=ON -DPXR_BUILD_IMAGING=OFF -DPXR_BUILD_USD_IMAGING=OFF \
       -DPXR_BUILD_USDVIEW=OFF -DPXR_BUILD_EXAMPLES=OFF -DPXR_BUILD_TUTORIALS=OFF -DPXR_BUILD_TESTS=OFF \
       -DPXR_BUILD_DOCUMENTATION=OFF -DPXR_ENABLE_MATERIALX_SUPPORT=OFF \
- && cmake --build /build -j"$(nproc)" --target install
+ && cmake --build /build -j"${JOBS:-$(nproc)}" --target install
 
 FROM ${DEBIAN}
 RUN apt-get update \
- && apt-get install -y --no-install-recommends python3 libtbb12 zlib1g \
+ && apt-get install -y --no-install-recommends python3 libpython3.13 libtbb12 zlib1g \
  && rm -rf /var/lib/apt/lists/* \
  && useradd --uid 65532 --user-group --create-home --home-dir /home/c4 --shell /usr/sbin/nologin c4
 COPY --from=build /opt/usd /opt/usd
