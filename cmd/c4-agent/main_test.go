@@ -251,3 +251,48 @@ func TestHookSafepoint(t *testing.T) {
 		t.Fatalf("stranger ref %q", calls[1])
 	}
 }
+
+// fakeUnitEnv logs the unit paths c4-unit was given.
+const fakeUnitEnv = `#!/bin/sh
+echo "out=$C4_OUTPUT control=$C4_CONTROL podinfo=$C4_PODINFO $*" >> "$FAKE_UNIT_LOG"
+exit "${FAKE_UNIT_CODE:-0}"
+`
+
+// A member a host runner runs has no $C4_PODINFO: the hook finds the unit
+// directory the runner recorded on the member and points c4-unit there; a
+// stop decision ends the session the same way.
+func TestHookSafepointHostUnit(t *testing.T) {
+	_, work := setup(t)
+	root := t.TempDir()
+	unit, log := filepath.Join(root, "c4-unit"), filepath.Join(root, "unit.log")
+	if err := os.WriteFile(unit, []byte(fakeUnitEnv), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("C4_UNIT_BIN", unit)
+	t.Setenv("FAKE_UNIT_LOG", log)
+	t.Setenv("C4_PODINFO", "")
+	if code, _, e := runCLI(t, "", "register", "--name", "lead", "--session", sid, "--cwd", work); code != 0 {
+		t.Fatalf("register: %d %s", code, e)
+	}
+	st := &agent.Store{Dir: os.Getenv("C4_AGENT_HOME")}
+	m, err := st.Get("lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := filepath.Join(root, "units", "pod-uid-1")
+	m.UnitDir = dir
+	if err := st.Put(m); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("FAKE_UNIT_CODE", "10")
+	code, out, _ := runCLI(t, `{"session_id":"`+sid+`","hook_event_name":"Stop"}`, "checkpoint", "--hook")
+	if code != 0 || !strings.Contains(out, `"continue":false`) {
+		t.Fatalf("stop: %d %q", code, out)
+	}
+	b, _ := os.ReadFile(log)
+	u := agent.UnitDirsAt(dir)
+	want := "out=" + u.Out + " control=" + u.Control + " podinfo=" + u.PodInfo + " safepoint --checkpoint " + sid + "#"
+	if !strings.HasPrefix(string(b), want) {
+		t.Fatalf("c4-unit called with %q, want prefix %q", b, want)
+	}
+}

@@ -261,6 +261,14 @@ func TestHostRunnerWrites(t *testing.T) {
 	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/output-checkpoint":"c4abc","c4.avalanche.io/output-epoch":"3"}}}`); err != nil {
 		t.Errorf("checkpoint annotations on its pod: %v", err)
 	}
+	// the safe point it relays, and a generator's expansion document
+	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/safepoint":"{\"seq\":1}","c4.avalanche.io/output-expand":"c4abc"}}}`); err != nil {
+		t.Fatalf("the runner relays a safe point and names a document on its pod: %v", err)
+	}
+	// but not the queue's answer
+	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/safepoint-decision":"{\"seq\":1,\"do\":\"continue\"}"}}}`); err == nil {
+		t.Fatal("the runner wrote the queue's safe-point decision")
+	}
 	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/owner":"someone"}}}`); err == nil {
 		t.Error("the runner set another annotation")
 	}

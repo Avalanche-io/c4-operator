@@ -25,6 +25,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -33,6 +34,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/Avalanche-io/c4"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -40,6 +42,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/agent"
+	"github.com/Avalanche-io/c4-operator/internal/tier"
 )
 
 func main() {
@@ -77,7 +80,7 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		if err != nil {
 			fmt.Fprintln(stderr, "c4-agent hook:", err)
 		}
-		hookSafepoint(ctx, input, cp, stdout, stderr)
+		hookSafepoint(ctx, h, input, cp, stdout, stderr)
 		return 0
 	}
 	if err := dispatch(ctx, h, cmd, rest, stdout); err != nil {
@@ -312,6 +315,10 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	hardStop := fs.Duration("hard-stop-after", 0, "stop a member mid-turn if it has not reached a turn boundary this long after a yield request (0: wait for the boundary)")
 	kubeconfig := fs.String("kubeconfig", "", "the runner's kubeconfig: the service account c4-hosts/<node> the farm admin issued for this machine (default: $KUBECONFIG or ~/.kube/config)")
 	slotsFile := fs.String("slots-file", "", "a file whose first line is the slots to offer now (and, after a space, why), written by a power reader; missing or unreadable means --slots")
+	unitsDir := fs.String("units-dir", "", "where each running unit's directory lives (its output root, control directory and podinfo; default the agents home's units/)")
+	store := fs.String("store", "", "a regional store replica (http://host:port) to store generator members' expansion documents in, so the queue can read them; without it a generator member adds nothing")
+	storeToken := fs.String("store-token-file", "", "a file holding the bearer token for --store")
+	storeProject := fs.String("store-project", "", "the project to store documents in (default: the Project listing the pod's namespace)")
 	var lbls multi
 	fs.Var(&lbls, "label", "a Node label K=V for the agent pool's nodeSelector (default c4.avalanche.io/host=<node>)")
 	if err := fs.Parse(args); err != nil {
@@ -350,6 +357,19 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		Logf: func(f string, a ...any) { fmt.Fprintf(out, time.Now().Format("15:04:05 ")+f+"\n", a...) }}
 	if *slotsFile != "" {
 		r.Capacity = func() (int, string) { return readSlotsFile(*slotsFile, *slots) }
+	}
+	r.UnitsDir, r.DocsProject = *unitsDir, *storeProject
+	if *store != "" {
+		src := &tier.HTTPSource{SourceName: "store", SourceKind: "regional", Base: strings.TrimRight(*store, "/"), Client: http.DefaultClient}
+		if *storeToken != "" {
+			path := *storeToken
+			src.Token = func() string {
+				b, _ := os.ReadFile(path)
+				return strings.TrimSpace(string(b))
+			}
+		}
+		r.Docs = &tier.Uploader{Candidates: func(string, c4.ID) []*tier.HTTPSource { return []*tier.HTTPSource{src} },
+			Breakers: tier.NewBreakers(), Backoff: tier.Backoff{Base: 200 * time.Millisecond, Max: 5 * time.Second}, Client: http.DefaultClient, Rounds: 3}
 	}
 	fmt.Fprintf(out, "runner %s: %d slots, labels %v\n", *node, *slots, set)
 	return r.Run(ctx, *every)

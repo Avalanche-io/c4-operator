@@ -29,12 +29,22 @@ const safepointWait = 8 * time.Second
 // {"continue": false} on stdout (which takes precedence over any other
 // hook asking to continue). The safe point is a decision point: c4-unit
 // waits up to safepointWait for the farm's answer, then falls back on the
-// last request it can see, well inside the hook's own timeout. Outside a
-// unit, or without c4-unit on the PATH, it does nothing. It never fails
-// the hook.
-func hookSafepoint(ctx context.Context, input []byte, cp *agent.Checkpoint, stdout, stderr io.Writer) {
+// last request it can see, well inside the hook's own timeout.
+//
+// A member a host runner runs has no pod sandbox: the runner keeps its unit
+// directory (output root, control directory, podinfo) and names it on the
+// member record, so the hook points c4-unit there instead of relying on
+// the session's environment. Outside a unit, or without c4-unit on the
+// PATH, it does nothing. It never fails the hook.
+func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agent.Checkpoint, stdout, stderr io.Writer) {
+	var env []string
 	if os.Getenv("C4_PODINFO") == "" {
-		return
+		dir := unitDirOf(h, input)
+		if dir == "" {
+			return
+		}
+		u := agent.UnitDirsAt(dir)
+		env = append(os.Environ(), "C4_OUTPUT="+u.Out, "C4_CONTROL="+u.Control, "C4_PODINFO="+u.PodInfo)
 	}
 	bin := os.Getenv("C4_UNIT_BIN")
 	if bin == "" {
@@ -54,6 +64,7 @@ func hookSafepoint(ctx context.Context, input []byte, cp *agent.Checkpoint, stdo
 	args = append(args, "--wait", safepointWait.String())
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stderr = stderr
+	cmd.Env = env // nil: the hook's own environment
 	err := cmd.Run()
 	var exit *exec.ExitError
 	switch {
@@ -84,4 +95,20 @@ func safepointRef(input []byte, cp *agent.Checkpoint) string {
 		return in.SessionID
 	}
 	return ""
+}
+
+// unitDirOf is the unit directory a host runner recorded for the session's
+// member, or "".
+func unitDirOf(h *agent.Harness, input []byte) string {
+	var in struct {
+		SessionID string `json:"session_id"`
+	}
+	if h == nil || json.Unmarshal(input, &in) != nil || in.SessionID == "" {
+		return ""
+	}
+	m, err := h.Store.BySession(in.SessionID)
+	if err != nil {
+		return ""
+	}
+	return m.UnitDir
 }

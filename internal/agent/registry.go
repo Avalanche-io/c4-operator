@@ -46,6 +46,10 @@ type Member struct {
 	// Phase counts deliberate new sessions for this member (a new phase is a
 	// new agent, started on purpose; never in place of a live one).
 	Phase int `json:"phase"`
+	// UnitDir is the unit directory of the farm unit the member runs as on
+	// a host runner (out/, control/, podinfo), so the Stop hook can answer
+	// the farm's safe points from inside the session.
+	UnitDir string `json:"unitDir,omitempty"`
 	// Previous lists the sessions of earlier phases, oldest first.
 	Previous []string `json:"previous,omitempty"`
 	// Registered is when the member was first registered.

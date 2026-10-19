@@ -67,8 +67,19 @@ type Runner struct {
 	Now func() time.Time
 	// Logf reports what the runner does.
 	Logf func(format string, args ...any)
+	// UnitsDir holds each running unit's directory (default the agents
+	// home's units/): its output root, control directory and podinfo.
+	UnitsDir string
+	// Docs, when set, stores a generator member's expansion document so
+	// the queue can read it (c4.avalanche.io/output-expand); DocsProject
+	// names the project to store it in, else the runner reads the Project
+	// that lists the pod's namespace.
+	Docs        DocStore
+	DocsProject string
 
 	seen map[types.UID]bool
+	// relays is each pod's safe-point relay.
+	relays map[types.UID]*relayState
 	// asked is when the runner first saw each pod's yield request.
 	asked map[types.UID]time.Time
 	// rising is a higher capacity waiting out RaiseAfter, and since when.
@@ -108,6 +119,7 @@ func (r *Runner) Tick(ctx context.Context) error {
 	if r.seen == nil {
 		r.seen = map[types.UID]bool{}
 		r.asked = map[types.UID]time.Time{}
+		r.relays = map[types.UID]*relayState{}
 	}
 	if err := r.heartbeat(ctx); err != nil {
 		return fmt.Errorf("node %s: %w", r.Node, err)
@@ -179,12 +191,24 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 	if p.DeletionTimestamp != nil {
 		return r.deleted(ctx, p, m)
 	}
+	u, err := r.prepareUnit(p, m)
+	if err != nil {
+		return err
+	}
 	if p.Annotations[c4v1.AnnotationYield] != "" {
+		if err := r.relay(ctx, p, u); err != nil {
+			r.logf("%s: safe points: %v", m.Name, err)
+		}
 		return r.yield(ctx, p, m)
 	}
 	live, _, err := r.Harness.live(ctx, m)
 	if err != nil {
 		return err
+	}
+	if live {
+		if err := r.relay(ctx, p, u); err != nil {
+			r.logf("%s: safe points: %v", m.Name, err)
+		}
 	}
 	switch {
 	case p.Status.Phase == corev1.PodPending:
@@ -213,7 +237,6 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		r.logf("recovered %s after a restart (epoch %d)", name, res.Member.Epoch)
 		return r.annotateEpoch(ctx, p, res.Member)
 	case !live:
-		// The session ended on its own: the member finished.
 		cp, err := r.Harness.Store.Last(name)
 		if err != nil {
 			return err
@@ -222,6 +245,17 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 			if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputCheckpoint: point(m, cp)}); err != nil {
 				return err
 			}
+		}
+		// The session ended after the farm said stop at a safe point: the
+		// member yielded there, with its turn saved, and resumes later.
+		if st := r.relays[p.UID]; st != nil && st.stopped {
+			r.logf("%s stopped at a safe point (%s)", m.Name, st.why)
+			return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "stopped at a safe point: "+st.why, 0)
+		}
+		// The session ended on its own: the member finished. A generator
+		// member leaves its expansion document for the queue.
+		if err := r.storeExpand(ctx, p, m, u); err != nil {
+			return err
 		}
 		return r.finish(ctx, p, corev1.PodSucceeded, "Completed", "the member's session ended", 0)
 	}

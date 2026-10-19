@@ -1,0 +1,253 @@
+package agent
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"io"
+	"os"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/Avalanche-io/c4"
+	corev1 "k8s.io/api/core/v1"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+)
+
+// A unit run on the host has no pod sandbox, so the runner gives it what
+// the node daemon gives a pod: a unit directory with
+//
+//	out/        the unit's output root ($C4_OUTPUT): c4-unit writes
+//	            .c4/safepoint there, and a generator .c4/expand.json
+//	control/    $C4_CONTROL: the runner writes safepoint.decision here
+//	podinfo     $C4_PODINFO: the pod's annotations, as the downward API
+//	            writes them (key="value" lines)
+//
+// The member record names the directory (Member.UnitDir), so the Stop
+// hook, which runs inside the session, finds it without relying on the
+// session's environment.
+
+// DocStore stores a small document in a project's store under its C4 ID.
+// A tier uploader fits (tier.Uploader.PutBytes).
+type DocStore interface {
+	PutBytes(ctx context.Context, project string, id c4.ID, data []byte) error
+}
+
+// maxDoc bounds a control document, as the node daemon does.
+const maxDoc = 16 << 20
+
+// UnitDirs are the paths of a unit directory.
+type UnitDirs struct{ Root, Out, Control, PodInfo string }
+
+// UnitDirsAt names the unit directory under root.
+func UnitDirsAt(root string) UnitDirs {
+	return UnitDirs{Root: root, Out: filepath.Join(root, "out"), Control: filepath.Join(root, "control"), PodInfo: filepath.Join(root, "podinfo")}
+}
+
+func (r *Runner) unitRoot(p *corev1.Pod) string {
+	base := r.UnitsDir
+	if base == "" {
+		base = filepath.Join(r.Harness.Store.Dir, "units")
+	}
+	return filepath.Join(base, string(p.UID))
+}
+
+// prepareUnit makes the pod's unit directory and records it on the member.
+func (r *Runner) prepareUnit(p *corev1.Pod, m *Member) (UnitDirs, error) {
+	u := UnitDirsAt(r.unitRoot(p))
+	for _, d := range []string{filepath.Join(u.Out, ".c4"), u.Control} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			return u, err
+		}
+	}
+	if m.UnitDir != u.Root {
+		unlock, err := r.Harness.Store.Lock(m.Name)
+		if err != nil {
+			return u, err
+		}
+		defer unlock()
+		cur, err := r.Harness.Store.Get(m.Name)
+		if err != nil {
+			return u, err
+		}
+		cur.UnitDir = u.Root
+		if err := r.Harness.Store.Put(cur); err != nil {
+			return u, err
+		}
+		m.UnitDir = u.Root
+	}
+	return u, nil
+}
+
+// writePodInfo writes the pod's annotations as the downward API does.
+func writePodInfo(path string, ann map[string]string) error {
+	keys := make([]string, 0, len(ann))
+	for k := range ann {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var b strings.Builder
+	for _, k := range keys {
+		fmt.Fprintf(&b, "%s=%s\n", k, strconv.Quote(ann[k]))
+	}
+	return writeAtomic(path, []byte(b.String()))
+}
+
+// hostSafepoint is a unit's .c4/safepoint, in the form c4-unit writes it
+// and the node daemon reads it ("seq N", "at TIME", "checkpoint REF").
+type hostSafepoint struct {
+	Seq        int       `json:"seq"`
+	At         time.Time `json:"at"`
+	Checkpoint string    `json:"checkpoint,omitempty"`
+}
+
+func readSafepoint(out string) (hostSafepoint, bool) {
+	b, err := os.ReadFile(filepath.Join(out, ".c4", "safepoint"))
+	if err != nil || len(b) > 4096 {
+		return hostSafepoint{}, false
+	}
+	var sp hostSafepoint
+	for _, l := range strings.Split(string(b), "\n") {
+		k, v, _ := strings.Cut(strings.TrimSpace(l), " ")
+		switch k {
+		case "seq":
+			sp.Seq, _ = strconv.Atoi(v)
+		case "at":
+			sp.At, _ = time.Parse(time.RFC3339Nano, v)
+		case "checkpoint":
+			sp.Checkpoint = v
+		}
+	}
+	if sp.Seq <= 0 || sp.At.IsZero() {
+		return hostSafepoint{}, false
+	}
+	return sp, true
+}
+
+// hostDecision is the queue's answer at a safe point, the
+// c4.avalanche.io/safepoint-decision annotation and the file c4-unit reads.
+type hostDecision struct {
+	Seq int       `json:"seq"`
+	Do  string    `json:"do"`
+	Why string    `json:"why,omitempty"`
+	At  time.Time `json:"at"`
+}
+
+// relay does for a host unit what the node daemon does for a pod: the
+// pod's annotations go to the unit's podinfo file, a new safe point goes
+// to the pod's c4.avalanche.io/safepoint annotation, and the queue's
+// answer goes to the unit's control/safepoint.decision. It notes a stop
+// decision, so the session ending after it is a yield, not the member's
+// end.
+func (r *Runner) relay(ctx context.Context, p *corev1.Pod, u UnitDirs) error {
+	if err := writePodInfo(u.PodInfo, p.Annotations); err != nil {
+		return err
+	}
+	st := r.relays[p.UID]
+	if st == nil {
+		st = &relayState{}
+		r.relays[p.UID] = st
+	}
+	if sp, ok := readSafepoint(u.Out); ok && sp.Seq > st.asked {
+		note, _ := json.Marshal(sp)
+		if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationSafepoint: string(note)}); err != nil {
+			return err
+		}
+		st.asked = sp.Seq
+	}
+	if st.asked <= st.answered {
+		return nil
+	}
+	var d hostDecision
+	if json.Unmarshal([]byte(p.Annotations[c4v1.AnnotationSafepointDecision]), &d) != nil || d.Seq != st.asked {
+		return nil
+	}
+	b, _ := json.Marshal(d)
+	if err := writeAtomic(filepath.Join(u.Control, "safepoint.decision"), b); err != nil {
+		return err
+	}
+	st.answered = d.Seq
+	st.stopped = d.Do == "stop"
+	if st.stopped {
+		st.why = d.Why
+	}
+	return nil
+}
+
+type relayState struct {
+	asked, answered int
+	stopped         bool
+	why             string
+}
+
+// storeExpand stores the expansion document a generator member wrote and
+// names it on the pod (c4.avalanche.io/output-expand), as the node daemon
+// does at capture. The member writes it to its unit's out/.c4/expand.json
+// or, when it cannot see $C4_OUTPUT, to .c4/expand.json in its working
+// directory. Without a store the document cannot reach the queue: the
+// runner says so and the generator adds nothing.
+func (r *Runner) storeExpand(ctx context.Context, p *corev1.Pod, m *Member, u UnitDirs) error {
+	var data []byte
+	var from string
+	for _, path := range []string{filepath.Join(u.Out, ".c4", "expand.json"), filepath.Join(m.Cwd, ".c4", "expand.json")} {
+		f, err := os.Open(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		data, err = io.ReadAll(io.LimitReader(f, maxDoc+1))
+		f.Close()
+		if err != nil {
+			return err
+		}
+		from = path
+		break
+	}
+	if from == "" {
+		return nil
+	}
+	if len(data) > maxDoc {
+		return fmt.Errorf("%s is over %d bytes", from, maxDoc)
+	}
+	if r.Docs == nil {
+		r.logf("%s wrote an expansion document (%s), but this runner has no store (--store); the queue will add nothing under it", m.Name, from)
+		return nil
+	}
+	project, err := r.projectOf(ctx, p.Namespace)
+	if err != nil {
+		return err
+	}
+	id := c4.Identify(bytes.NewReader(data))
+	if err := r.Docs.PutBytes(ctx, project, id, data); err != nil {
+		return fmt.Errorf("store %s: %w", from, err)
+	}
+	r.logf("%s: stored its expansion document %s (%s)", m.Name, id, from)
+	return r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputExpand: id.String()})
+}
+
+// projectOf is the project that owns namespace ns, as the queue reads it:
+// DocsProject when the runner is told, else the Project listing ns.
+func (r *Runner) projectOf(ctx context.Context, ns string) (string, error) {
+	if r.DocsProject != "" {
+		return r.DocsProject, nil
+	}
+	var ps c4v1.ProjectList
+	if err := r.Client.List(ctx, &ps); err != nil {
+		return "", fmt.Errorf("the project of namespace %s: %w (set --store-project)", ns, err)
+	}
+	for _, p := range ps.Items {
+		for _, x := range p.Spec.Namespaces {
+			if x == ns {
+				return p.Name, nil
+			}
+		}
+	}
+	return "namespace/" + ns, nil
+}

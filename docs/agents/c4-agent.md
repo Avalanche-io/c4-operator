@@ -45,30 +45,30 @@ member.
 
 ## Commands
 
-| command                                   | does                                                                                          |
-| ----------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `c4-agent find --agent-name NAME`         | lists sessions whose transcript names that agent, newest first                                |
-| `c4-agent register --name N --session ID` | adds a member (`--cwd`, `--config-dir`, `--flag` for resume flags, `--new-phase`)             |
-| `c4-agent ls`                             | every member: busy, idle (at a turn boundary) or stopped, with its epoch and last checkpoint  |
-| `c4-agent resume NAME [PROMPT]`           | continues a stopped member's session in the background; refused while it runs (exit 3)       |
+| command                                   | does                                                                                                                               |
+| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `c4-agent find --agent-name NAME`         | lists sessions whose transcript names that agent, newest first                                                                     |
+| `c4-agent register --name N --session ID` | adds a member (`--cwd`, `--config-dir`, `--flag` for resume flags, `--new-phase`)                                                  |
+| `c4-agent ls`                             | every member: busy, idle (at a turn boundary) or stopped, with its epoch and last checkpoint                                       |
+| `c4-agent resume NAME [PROMPT]`           | continues a stopped member's session in the background; refused while it runs (exit 3)                                             |
 | `c4-agent yield NAME [--timeout 10m]`     | stops a member at its next turn boundary, after a checkpoint; a busy member is left running if it does not finish in time (exit 5) |
-| `c4-agent checkpoint NAME`                | saves a checkpoint now                                                                        |
-| `c4-agent checkpoint --hook`              | the Stop hook: saves the turn that just ended; ignores sessions that are not members; always exits 0 |
-| `c4-agent verify NAME`                    | checks the checkpoint chain against the transcript                                            |
-| `c4-agent log NAME [-n 10]`               | recent checkpoints                                                                            |
-| `c4-agent hooks`                          | prints the settings fragment that installs the Stop hook                                      |
+| `c4-agent checkpoint NAME`                | saves a checkpoint now                                                                                                             |
+| `c4-agent checkpoint --hook`              | the Stop hook: saves the turn that just ended; ignores sessions that are not members; always exits 0                               |
+| `c4-agent verify NAME`                    | checks the checkpoint chain against the transcript                                                                                 |
+| `c4-agent log NAME [-n 10]`               | recent checkpoints                                                                                                                 |
+| `c4-agent hooks`                          | prints the settings fragment that installs the Stop hook                                                                           |
 
 Exit codes: 3 when the member is running (or already has a session), 4
 when the CLI started a copy, 5 when a member is still busy.
 
 ## Environment
 
-| variable             | meaning                                                                                     |
-| -------------------- | ------------------------------------------------------------------------------------------- |
-| `C4_AGENT_HOME`      | where members and checkpoints are kept (default `~/.c4/agents`)                             |
-| `C4_AGENT_CLAUDE`    | the `claude` binary (default `claude` on `PATH`)                                            |
+| variable             | meaning                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `C4_AGENT_HOME`      | where members and checkpoints are kept (default `~/.c4/agents`)                                                           |
+| `C4_AGENT_CLAUDE`    | the `claude` binary (default `claude` on `PATH`)                                                                          |
 | `C4_AGENT_WORKSPACE` | `git`, `view` (a C4 view of the whole tree; exact but costly on large trees) or `none`; default `git` inside a repository |
-| `CLAUDE_CONFIG_DIR`  | the default `--config-dir` for `register` and `find`                                        |
+| `CLAUDE_CONFIG_DIR`  | the default `--config-dir` for `register` and `find`                                                                      |
 
 ## Installing the hook
 
@@ -159,13 +159,42 @@ token, issued by the farm admin). `config/rbac/host-runner.yaml` and
 - its own Node: created only with the host-runner taint, then only its
   slot limit, capacity reason and status;
 - its own Lease;
-- pods bound to it: status and its two annotations;
+- pods bound to it: status and four annotations (output-checkpoint,
+  output-epoch, output-expand, safepoint);
 - bindings to itself only.
 
 Keep the host-runner taint on agent pools, so only agent pods select these
 nodes. Under a hard power line, `--hard-stop-after` stops a member that
 has not reached a turn boundary that long after the queue asked it to
 yield, losing its turn in flight.
+
+**Safe points on the host.** A member run here has no pod sandbox, so the
+runner keeps a unit directory for each pod it runs, under `--units-dir`
+(default the agents home's `units/<pod UID>/`), and names it on the
+member:
+
+| path       | what                                                                         |
+| ---------- | ---------------------------------------------------------------------------- |
+| `out/`     | the unit's output root (`$C4_OUTPUT`): `c4-unit` writes `.c4/safepoint` here |
+| `control/` | `$C4_CONTROL`: the runner writes the queue's `safepoint.decision` here       |
+| `podinfo`  | `$C4_PODINFO`: the pod's annotations, as the downward API writes them        |
+
+The Stop hook reads the directory from the member record, so it does not
+depend on the session's environment. The runner relays as the node daemon
+does: each new safe point becomes the pod's `c4.avalanche.io/safepoint`
+annotation, and the queue's `c4.avalanche.io/safepoint-decision` comes back
+to `control/safepoint.decision`. When the decision is stop, the hook ends
+the session at that turn, and the runner reports the pod **Yielded** with
+its checkpoint, not finished.
+
+**A generator member** leaves its expansion document at
+`out/.c4/expand.json`, or at `.c4/expand.json` in its working directory.
+When its session ends, the runner stores the document and names it on the
+pod (`c4.avalanche.io/output-expand`) for the queue to expand. That needs
+`--store` (a regional store replica), `--store-token-file` (its bearer
+token), and `--store-project` (else the runner reads the Project listing
+the pod's namespace). Without a store, the runner says so, and the queue
+adds nothing under the generator.
 
 ## Capacity under a power cap, and the bundle's clock
 
