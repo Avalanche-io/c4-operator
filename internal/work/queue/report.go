@@ -243,6 +243,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	st.Expansions = expansionStatus(m.expansions)
 	st.Holds = holdsStatus(v)
+	st.Gates = v.gates
 	st.Verdicts = verdictStatus(m)
 	st.Reviews = reviewStatus(m)
 	for i := range readers(m.plan) {

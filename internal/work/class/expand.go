@@ -95,6 +95,7 @@ type DocUnit struct {
 	Group   string            `json:"group,omitempty"`
 	Holds   []string          `json:"holds,omitempty"`
 	Claims  []DocClaim        `json:"claims,omitempty"`
+	Gate    string            `json:"gate,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
 	Cites   json.RawMessage   `json:"cites,omitempty"`
 	// Wait makes the unit a wait for a person, a party or a clock.
@@ -213,7 +214,7 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 	for i, du := range d.Units {
 		u := Unit{Index: first + i, Name: du.Name, Label: du.Label, Key: du.Key, Pos: i, Slots: du.Slots,
 			Generator: du.Planned, Exists: 1, Parent: gen.Index, Depth: gen.Depth + 1,
-			Work: du.Work, WorkSD: du.WorkSD, Group: du.Group, Holds: du.Holds, Params: du.Params}
+			Work: du.Work, WorkSD: du.WorkSD, Group: du.Group, Holds: du.Holds, Params: du.Params, Gate: du.Gate}
 		if u.Label == "" {
 			u.Label = du.Name
 		}

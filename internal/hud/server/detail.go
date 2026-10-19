@@ -154,6 +154,9 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if u.Name != "" {
 			e["name"] = u.Name
 		}
+		if u.Gate != "" {
+			e["gate"] = u.Gate
+		}
 		if len(u.Claims) > 0 {
 			var on []string
 			for _, c := range u.Claims {
@@ -246,6 +249,21 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 			}
 		}
 		list = append(list, e)
+	}
+	for _, g := range rec.job.Status.Gates {
+		// "waiting for the merge gate, 2nd in line, ~14:20"
+		e := lockedBy[int(g.Unit)]
+		if g.Position == 0 || e == nil {
+			continue
+		}
+		x := map[string]any{"gate": g.Gate, "position": g.Position}
+		if g.Holder != "" {
+			x["holder"] = g.Holder
+		}
+		if g.ExpectStart != nil {
+			x["expectStart"] = g.ExpectStart.Time.UTC()
+		}
+		e["lockedBy"] = x
 	}
 	for _, h := range rec.job.Status.Holds {
 		// "locked by <holder>", and on what

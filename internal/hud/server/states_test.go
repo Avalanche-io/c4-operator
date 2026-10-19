@@ -294,3 +294,38 @@ func TestPlannedFlaggedBlockedOn(t *testing.T) {
 		}
 	}
 }
+
+// The snapshot lists each gate with its holder and its line, first come
+// first served, across jobs; a waiting unit says what it waits for.
+func TestSnapshotGates(t *testing.T) {
+	s := farm(t)
+	rec := s.m.byKey["show-a/sh040-light-v007"]
+	t0 := metav1.NewTime(time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC))
+	t1 := metav1.NewTime(t0.Add(time.Minute))
+	at := metav1.NewTime(t0.Add(20 * time.Minute))
+	rec.job.Status.UnitStates = map[string]string{"succeeded": "0-6", "running": "7", "locked": "8-9"}
+	rec.job.Status.Gates = []c4v1.WorkGateEntry{
+		{Gate: "merge", Unit: 7, Name: "m7", Position: 0},
+		{Gate: "merge", Unit: 9, Name: "m9", Position: 2, Since: &t1, Holder: "show-a/sh040-light-v007#m7", ExpectStart: &at},
+		{Gate: "merge", Unit: 8, Name: "m8", Position: 1, Since: &t0, Holder: "show-a/sh040-light-v007#m7", ExpectStart: &t1},
+	}
+	var snap api.Snapshot
+	get(t, s, "/api/v1/snapshot?as=wrangler", &snap)
+	if len(snap.Gates) != 1 || snap.Gates[0].Name != "merge" || snap.Gates[0].Holder == nil || snap.Gates[0].Holder.Name != "m7" ||
+		len(snap.Gates[0].Waiting) != 2 || snap.Gates[0].Waiting[0].Name != "m8" {
+		t.Fatalf("gates %+v", snap.Gates)
+	}
+	var detail struct {
+		UnitList []struct {
+			I        int            `json:"i"`
+			State    string         `json:"state"`
+			LockedBy map[string]any `json:"lockedBy"`
+		} `json:"unitList"`
+	}
+	get(t, s, "/api/v1/jobs/show-a/sh040-light-v007?as=wrangler", &detail)
+	for _, u := range detail.UnitList {
+		if u.I == 9 && (u.State != "locked" || u.LockedBy["gate"] != "merge" || u.LockedBy["position"] != float64(2)) {
+			t.Fatalf("unit 9: %+v", u)
+		}
+	}
+}

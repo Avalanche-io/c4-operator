@@ -530,6 +530,41 @@ spec:
               finished:
                 format: date-time
                 type: string
+              gates:
+                description: 'Gates lists the job''s units at a gate: holding it,
+                  or in its line.'
+                items:
+                  description: |-
+                    WorkGateEntry is a unit at a gate: the holder (position 0) or a unit
+                    waiting in line (1 is next).
+                  properties:
+                    expectStart:
+                      description: ExpectStart is when the unit is expected to pass.
+                      format: date-time
+                      type: string
+                    gate:
+                      type: string
+                    holder:
+                      description: Holder is who holds the gate now, as job#unit.
+                      type: string
+                    name:
+                      type: string
+                    position:
+                      format: int32
+                      type: integer
+                    since:
+                      description: Since is when the unit joined the line.
+                      format: date-time
+                      type: string
+                    unit:
+                      format: int32
+                      type: integer
+                  required:
+                  - gate
+                  - position
+                  - unit
+                  type: object
+                type: array
               holds:
                 description: |-
                   Holds lists each unit holding claims that others wait on, with its

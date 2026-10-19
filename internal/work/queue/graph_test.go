@@ -258,3 +258,63 @@ func TestHoldsSerializeSharedFiles(t *testing.T) {
 		t.Fatalf("after A: pods %v, states %v, holds %+v", podUnits(unitPods(t, ns, "lanes")), got.Status.UnitStates, got.Status.Holds)
 	}
 }
+
+// A merge gate is a one-slot resource shared by a namespace's jobs, taken
+// first come, first served: the unit that became ready first passes next,
+// whatever its job, and the others wait locked, in line, with when they
+// are expected to pass.
+func TestGateIsFirstComeFirstServed(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	for _, name := range []string{"lane-a", "lane-b"} {
+		if err := k8s.Create(ctx, job(ns, name, "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tick(t, q)
+	expand := func(job, doc string) {
+		t.Helper()
+		finish(t, podOfUnit(t, ns, job, 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: putDoc(t, st, doc)})
+		tick(t, q)
+		tick(t, q)
+	}
+	expand("lane-a", `{"version": 1, "units": [{"name": "a1", "gate": "merge", "work": 600}, {"name": "w"}, {"name": "a2", "gate": "merge", "after": ["w"], "work": 600}]}`)
+	if p := podUnits(unitPods(t, ns, "lane-a")); !slices.Contains(p, 1) || !slices.Contains(p, 2) {
+		t.Fatalf("lane-a runs %v, want a1 and w", p)
+	}
+	*now = now.Add(time.Minute)
+	expand("lane-b", `{"version": 1, "units": [{"name": "b1", "gate": "merge", "work": 600}]}`)
+	*now = now.Add(time.Minute)
+	finish(t, podOfUnit(t, ns, "lane-a", 2), corev1.PodSucceeded, *now, time.Minute, nil) // w done: a2 joins the line
+	tick(t, q)
+	tick(t, q)
+
+	b, a := get(t, ns, "lane-b"), get(t, ns, "lane-a")
+	if !slices.Equal(states(t, b, "locked"), []int{1}) || len(b.Status.Gates) != 1 || b.Status.Gates[0].Position != 1 || b.Status.Gates[0].Holder != ns+"/lane-a#a1" {
+		t.Fatalf("lane-b: %v %+v", b.Status.UnitStates, b.Status.Gates)
+	}
+	var a2 *c4v1.WorkGateEntry
+	for i, g := range a.Status.Gates {
+		if g.Name == "a2" {
+			a2 = &a.Status.Gates[i]
+		}
+	}
+	if a2 == nil || a2.Position != 2 || a2.ExpectStart == nil || !a2.ExpectStart.After(b.Status.Gates[0].ExpectStart.Time) {
+		t.Fatalf("lane-a gates %+v", a.Status.Gates)
+	}
+
+	// a1 passes: b1, first in line, is next, not lane-a's own a2.
+	*now = now.Add(10 * time.Minute)
+	finish(t, podOfUnit(t, ns, "lane-a", 1), corev1.PodSucceeded, *now, 10*time.Minute, nil)
+	tick(t, q)
+	if !slices.Contains(podUnits(unitPods(t, ns, "lane-b")), 1) || slices.Contains(podUnits(unitPods(t, ns, "lane-a")), 3) {
+		t.Fatalf("after a1: lane-b %v, lane-a %v", podUnits(unitPods(t, ns, "lane-b")), podUnits(unitPods(t, ns, "lane-a")))
+	}
+	// The line survives a restart.
+	q = &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
+	tick(t, q)
+	a = get(t, ns, "lane-a")
+	if len(a.Status.Gates) != 1 || a.Status.Gates[0].Name != "a2" || a.Status.Gates[0].Position != 1 || a.Status.Gates[0].Holder != ns+"/lane-b#b1" {
+		t.Fatalf("after a restart: %+v", a.Status.Gates)
+	}
+}

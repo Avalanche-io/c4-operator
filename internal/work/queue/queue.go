@@ -170,6 +170,8 @@ type jobMem struct {
 	expansions []expansionRec
 	docs       map[string][]byte
 	unitOut    map[int]string
+	// gateSince is when each unit waiting for a gate joined its line.
+	gateSince map[int]time.Time
 	// verdicts are the verdicts carried out, and reviews what they last
 	// decided per unit (verdict.go).
 	verdicts []verdictRec
@@ -310,6 +312,14 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		m.interruptions = append(m.interruptions, interruptRec{Unit: int(x.Unit), At: x.At.Time, Reason: x.Reason, Node: x.Node})
 	}
 	m.interruptCount = int(st.Interrupted)
+	for _, g := range st.Gates {
+		if g.Position > 0 && g.Since != nil {
+			if m.gateSince == nil {
+				m.gateSince = map[int]time.Time{}
+			}
+			m.gateSince[int(g.Unit)] = g.Since.Time
+		}
+	}
 	for _, x := range st.Verdicts {
 		m.verdicts = append(m.verdicts, verdictRec{WorkVerdict: x, pod: x.Pod})
 	}
@@ -387,8 +397,10 @@ type view struct {
 	// their decision (wait.go).
 	openWaits map[int]bool
 	planWait  string
-	// locked are units waiting for a holder of what they claim (holds.go).
+	// locked are units waiting for a holder of what they claim (holds.go)
+	// or for a gate, and gates the job's units at gates (gates.go).
 	locked map[int]lockInfo
+	gates  []c4v1.WorkGateEntry
 }
 
 type runInfo struct {
@@ -478,6 +490,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 		}
 	}
 
+	q.applyGates(views, now)
 	q.placeJobs(ctx, views, poolInfo)
 	q.noteSafepoints(views, now)
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
@@ -1022,7 +1035,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		if !ok || v == nil || p == nil {
 			continue
 		}
-		if !guard.admit(v, idx) {
+		if !guard.admitGate(v, idx) || !guard.admit(v, idx) {
 			// Its claims conflict with a unit started this tick: it waits.
 			continue
 		}

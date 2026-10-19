@@ -63,6 +63,10 @@ type Unit struct {
 	// Claims are what the unit writes, with a mode (claims.go): its
 	// holds as exclusive claims, and the document's claims.
 	Claims []Claim
+	// Gate names the gate the unit passes (a unit of kind gate): a
+	// resource of one slot shared by the jobs of a namespace, taken first
+	// come, first served (the queue's gates.go).
+	Gate string
 	// Wait makes the unit a wait (PRIMITIVES Q6): it holds no slot and
 	// creates no pod; it completes on a signed decision, or at its time.
 	Wait *Wait

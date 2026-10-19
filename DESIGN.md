@@ -1401,8 +1401,23 @@ and a sweep planner that spawns trials are all generators.
   - **No deadlock.** A unit takes its claims when it starts and waits for
     nothing while it holds them (its edges were met before it started), so
     claims cannot deadlock and need no cycle check.
-  - **Scope.** Claims are scoped to the job. A merge gate shared across a
-    project's jobs is the next item, gates.
+  - **Scope.** Claims are scoped to the job. A gate is shared across a
+    namespace's jobs.
+- **Gates** (Q9; LLM-OR-PROCEDURE 7.2 item 4). A unit of kind gate
+  (\`gate: "merge"\`) passes a resource of one slot shared by every job in its
+  namespace: a project's merge gate, its signing step, its one DI suite.
+  - **First come, first served.** Units ready to pass queue in the order
+    they became ready. While the gate is held, or another unit is ahead,
+    a unit is \`locked\`, with its place in line, the holder and when it is
+    expected to pass (the holder's remaining work plus the predicted work
+    of those ahead). Only the head may start when the gate is free, and
+    only one unit passes per tick.
+  - **Where the line shows.** Each job's status \`gates\` lists its units at
+    gates. Join times survive a restart, so the order does too. The HUD
+    snapshot's \`gates\` gathers each gate's holder and line across jobs,
+    and a waiting unit's \`lockedBy\` names its gate and position.
+  - **No new scheduling.** A gate unit still needs a slot in its pool; the
+    gate only decides which waiting unit may take one.
 - **Verdicts.** A review unit judges the units it runs after and writes its
   judgment as `.c4/verdict.json`. The node daemon stores it at capture, as
   `c4.avalanche.io/output-verdict`. When the review succeeds the queue

@@ -332,6 +332,9 @@ type WorkJobStatus struct {
 	// waiting line in dispatch order.
 	// +optional
 	Holds []WorkHold `json:"holds,omitempty"`
+	// Gates lists the job's units at a gate: holding it, or in its line.
+	// +optional
+	Gates []WorkGateEntry `json:"gates,omitempty"`
 	// Interruptions lists the most recent attempts the farm stopped (a
 	// drain, an eviction, a preemption, a node going away): they spent no
 	// retry and run again. Interrupted counts them all.
@@ -490,6 +493,24 @@ type WorkExpansion struct {
 	// generator failed.
 	// +optional
 	Error string `json:"error,omitempty"`
+}
+
+// WorkGateEntry is a unit at a gate: the holder (position 0) or a unit
+// waiting in line (1 is next).
+type WorkGateEntry struct {
+	Gate     string `json:"gate"`
+	Unit     int32  `json:"unit"`
+	Name     string `json:"name,omitempty"`
+	Position int32  `json:"position"`
+	// Since is when the unit joined the line.
+	// +optional
+	Since *metav1.Time `json:"since,omitempty"`
+	// Holder is who holds the gate now, as job#unit.
+	// +optional
+	Holder string `json:"holder,omitempty"`
+	// ExpectStart is when the unit is expected to pass.
+	// +optional
+	ExpectStart *metav1.Time `json:"expectStart,omitempty"`
 }
 
 // WorkHold is a unit holding claims, and the units locked behind it.

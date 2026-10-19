@@ -69,6 +69,27 @@ type Snapshot struct {
 	Usage    Usage      `json:"usage"`
 	// Sites place nodes on a map; omitted when the farm declares none.
 	Sites []Site `json:"sites,omitempty"`
+	// Gates are the one-slot resources a project's jobs pass first come,
+	// first served (a merge gate), each with its holder and line.
+	Gates []Gate `json:"gates,omitempty"`
+}
+
+// Gate is a gate and the units at it.
+type Gate struct {
+	Namespace string     `json:"namespace"`
+	Name      string     `json:"name"`
+	Holder    *GateUnit  `json:"holder,omitempty"`
+	Waiting   []GateUnit `json:"waiting"`
+}
+
+// GateUnit is a unit at a gate: its job, index and name, when it joined
+// the line, and when it is expected to pass.
+type GateUnit struct {
+	Job         string     `json:"job"`
+	Unit        int        `json:"unit"`
+	Name        string     `json:"name,omitempty"`
+	Since       *time.Time `json:"since,omitempty"`
+	ExpectStart *time.Time `json:"expectStart,omitempty"`
 }
 
 // Site is a place the farm's nodes run: a studio machine room or a cloud

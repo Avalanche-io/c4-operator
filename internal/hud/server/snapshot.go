@@ -122,7 +122,9 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 			aj.Rank = rank
 		}
 		snap.Jobs = append(snap.Jobs, aj)
+		addGates(snap, j)
 	}
+	sortGates(snap)
 
 	// Nodes of the pools: shared infrastructure, listed for everyone.
 	for _, n := range m.nodes {
@@ -587,4 +589,54 @@ func noETA(m *model, j *c4v1.WorkJob, hasDeadline bool, running int) string {
 		return "no deadline, so none projected"
 	}
 	return "no estimate yet"
+}
+
+// addGates adds a job's units at gates to the farm's gates.
+func addGates(snap *api.Snapshot, j *jobRec) {
+	for _, e := range j.job.Status.Gates {
+		var g *api.Gate
+		for i := range snap.Gates {
+			if snap.Gates[i].Namespace == j.job.Namespace && snap.Gates[i].Name == e.Gate {
+				g = &snap.Gates[i]
+			}
+		}
+		if g == nil {
+			snap.Gates = append(snap.Gates, api.Gate{Namespace: j.job.Namespace, Name: e.Gate, Waiting: []api.GateUnit{}})
+			g = &snap.Gates[len(snap.Gates)-1]
+		}
+		u := api.GateUnit{Job: j.key, Unit: int(e.Unit), Name: e.Name}
+		if e.Since != nil {
+			t := e.Since.Time.UTC()
+			u.Since = &t
+		}
+		if e.ExpectStart != nil {
+			t := e.ExpectStart.Time.UTC()
+			u.ExpectStart = &t
+		}
+		if e.Position == 0 {
+			g.Holder = &u
+			continue
+		}
+		g.Waiting = append(g.Waiting, u)
+	}
+}
+
+// sortGates orders gates by name and each line first come, first served.
+func sortGates(snap *api.Snapshot) {
+	sort.Slice(snap.Gates, func(a, b int) bool {
+		x, y := snap.Gates[a], snap.Gates[b]
+		if x.Namespace != y.Namespace {
+			return x.Namespace < y.Namespace
+		}
+		return x.Name < y.Name
+	})
+	for _, g := range snap.Gates {
+		sort.SliceStable(g.Waiting, func(a, b int) bool {
+			x, y := g.Waiting[a], g.Waiting[b]
+			if x.Since == nil || y.Since == nil {
+				return y.Since == nil && x.Since != nil
+			}
+			return x.Since.Before(*y.Since)
+		})
+	}
 }

@@ -88,6 +88,7 @@ The farm at a glance. Also delivered by the event stream.
              cacheBytes, cacheHitRate, running?: [ { job, unit, slots } ],
              capped?, shapeSlots?, capacityReason? } ],
   sites?: [ { name, label, region, lat, lon, kind, localities[], tz? } ],
+  gates?: [ { namespace, name, holder?: { job, unit, name?, since?, expectStart? }, waiting: [ ... ] } ],
   tiers: { tiers: [ { name, hitRate, requestsIn, upstreamRequests, bytesServed, shedRate, inflightFills } ],
            fanIn: { requesters, nodeRequests, peerRequests, regionalRequests, storeRequests },
            publishP50, publishP95, captureP50 },
@@ -105,31 +106,32 @@ runner's power cap, through the node's `c4.avalanche.io/slot-limit` label.
 `capacityReason` says why in plain words ("battery 21% and falling on a
 45 W adapter"). The HUD draws the unusable slots as blocked.
 
-| field                     | meaning                                                                                                                |
-| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| `farm.slotsTotal`         | slots on ready nodes, including disabled ones (they still hold running units)                                          |
-| `farm.bytesAvoided`       | `bytesMaterialized - bytesFetchedFromStore`, today (DESIGN 11.1); the savings proof, shown as savings and never billed |
-| `classes[].slo.type`      | `deadline`, `latency` or `throughput`                                                                                  |
-| `classes[].lens`          | the name of the HUD lens module for the class (`render`, `ci`, `ml`; anything else gets the generic lens)              |
-| `nodes[].state`           | `idle`, `busy`, `disabled`, `notReady`, `unprovisioned`, `warming`                                                     |
-| `nodes[].suspect`         | node faults across two or more jobs in the last hour; test and job failures do not count                               |
-| `nodes[].zone`            | the node's `topology.kubernetes.io/zone` label (an on-prem farm labels racks or rooms here)                            |
-| `nodes[].region`          | the node's `topology.kubernetes.io/region` label; it joins the node to a site                                          |
-| `sites`                   | where the farm's nodes are, for the map; omitted when none are declared, and the HUD then shows sites and racks only   |
-| `sites[].region`          | the region the site's nodes carry in `nodes[].region`                                                                  |
-| `sites[].kind`            | `onprem` (a studio machine room) or `cloud` (a provider region)                                                        |
-| `sites[].localities`      | the `nodes[].locality` values at the site (racks, zones), in display order                                             |
-| `sites[].lat`, `.lon`     | the site's position in degrees, WGS 84                                                                                 |
-| `sites[].tz`              | the site's time zone, an IANA name (`America/New_York`), so its clock shows its local time; absent shows the viewer's  |
-| `tiers.tiers[].name`      | `node`, `peer`, `regional`, `store`, in fetch order                                                                    |
-| `tiers.fanIn`             | requests per minute entering each tier; each tier forwards only its misses                                             |
-| `capacity[].state`        | `PendingApproval`, `Provisioning`, `Provisioned`                                                                       |
-| `capacity[].prewarmViews` | views the new nodes fetch before units land on them                                                                    |
-| `usage`                   | metered use today: what billing is based on. Billing is never by bytes                                                 |
-| `usage.clusterHours`      | hours the installation has run today (farm-wide, shown to every viewer)                                                |
-| `usage.containerHours`    | pod run time per project and pool, not weighted by slots; only the viewer's projects                                   |
-| `usage.gpuHours`          | GPU-hours per project; only the viewer's projects                                                                      |
-| `usage.productionWindows` | declared fixed-fee periods (for example "Show A production window, Oct 1 to Dec 20"); `active` if `now` is inside it   |
+| field                     | meaning                                                                                                                                                                                            |
+| ------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `farm.slotsTotal`         | slots on ready nodes, including disabled ones (they still hold running units)                                                                                                                      |
+| `farm.bytesAvoided`       | `bytesMaterialized - bytesFetchedFromStore`, today (DESIGN 11.1); the savings proof, shown as savings and never billed                                                                             |
+| `classes[].slo.type`      | `deadline`, `latency` or `throughput`                                                                                                                                                              |
+| `classes[].lens`          | the name of the HUD lens module for the class (`render`, `ci`, `ml`; anything else gets the generic lens)                                                                                          |
+| `nodes[].state`           | `idle`, `busy`, `disabled`, `notReady`, `unprovisioned`, `warming`                                                                                                                                 |
+| `nodes[].suspect`         | node faults across two or more jobs in the last hour; test and job failures do not count                                                                                                           |
+| `nodes[].zone`            | the node's `topology.kubernetes.io/zone` label (an on-prem farm labels racks or rooms here)                                                                                                        |
+| `nodes[].region`          | the node's `topology.kubernetes.io/region` label; it joins the node to a site                                                                                                                      |
+| `gates`                   | each gate (a one-slot resource a namespace's jobs pass first come, first served, such as a merge gate): its holder and its line in order, each with when it joined and when it is expected to pass |
+| `sites`                   | where the farm's nodes are, for the map; omitted when none are declared, and the HUD then shows sites and racks only                                                                               |
+| `sites[].region`          | the region the site's nodes carry in `nodes[].region`                                                                                                                                              |
+| `sites[].kind`            | `onprem` (a studio machine room) or `cloud` (a provider region)                                                                                                                                    |
+| `sites[].localities`      | the `nodes[].locality` values at the site (racks, zones), in display order                                                                                                                         |
+| `sites[].lat`, `.lon`     | the site's position in degrees, WGS 84                                                                                                                                                             |
+| `sites[].tz`              | the site's time zone, an IANA name (`America/New_York`), so its clock shows its local time; absent shows the viewer's                                                                              |
+| `tiers.tiers[].name`      | `node`, `peer`, `regional`, `store`, in fetch order                                                                                                                                                |
+| `tiers.fanIn`             | requests per minute entering each tier; each tier forwards only its misses                                                                                                                         |
+| `capacity[].state`        | `PendingApproval`, `Provisioning`, `Provisioned`                                                                                                                                                   |
+| `capacity[].prewarmViews` | views the new nodes fetch before units land on them                                                                                                                                                |
+| `usage`                   | metered use today: what billing is based on. Billing is never by bytes                                                                                                                             |
+| `usage.clusterHours`      | hours the installation has run today (farm-wide, shown to every viewer)                                                                                                                            |
+| `usage.containerHours`    | pod run time per project and pool, not weighted by slots; only the viewer's projects                                                                                                               |
+| `usage.gpuHours`          | GPU-hours per project; only the viewer's projects                                                                                                                                                  |
+| `usage.productionWindows` | declared fixed-fee periods (for example "Show A production window, Oct 1 to Dec 20"); `active` if `now` is inside it                                                                               |
 
 `jobs` is in dispatch order, and `rank` is the position in that order within
 the viewer's scope (1 is next).
@@ -306,6 +308,7 @@ A JobSummary with these fields added:
 | `unitList[].claims`    | what the unit claims (paths or resources it writes): its holds and claims                                                                                                                                                                                                                                                                                                                                |
 | `unitList[].lockedBy`  | for a `locked` unit, the unit of its job holding what it claims: `{ unit, name, on }` ("locked by <name>"), `on` the claim it waits for                                                                                                                                                                                                                                                                  |
 | `holds`                | each unit holding claims that others wait on: `{ holder, name, on, waiting: [ { unit, name, on } ] }`, the waiting line in dispatch order                                                                                                                                                                                                                                                                |
+| `unitList[].gate`      | the gate a unit of kind gate passes (a one-slot resource shared by the namespace's jobs, first come, first served); while it waits, `lockedBy` is `{ gate, position, holder?, expectStart? }`, `holder` as `job#unit`                                                                                                                                                                                    |
 | `unitList[].exists`    | the probability a tentative unit runs, below 1 only; its expected work is weighted by it                                                                                                                                                                                                                                                                                                                 |
 | `unitList[].work`      | the unit's work in slot-seconds: `spent` so far and `expected` in total (below)                                                                                                                                                                                                                                                                                                                          |
 | `unitList[].reads`     | units of other jobs this unit reads, when that is not simply the same frame (a temporal comp reads frames n-1 to n+1); `units` is a unit set of that job                                                                                                                                                                                                                                                 |

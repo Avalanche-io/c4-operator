@@ -22,9 +22,14 @@ const holdsKept = 32
 
 // lockInfo says what holds a locked unit up.
 type lockInfo struct {
-	by    int
+	by    int    // the holder, in the job; -1 for a gate
 	on    string // the holder's claim
 	claim string // the locked unit's
+	// A gate's farm-wide name, its holder (job#unit) and the unit's place
+	// in its line (gates.go).
+	gate     string
+	holder   string
+	position int
 }
 
 // holding are the units of a job that hold their claims now.
@@ -101,7 +106,9 @@ func holdsStatus(v *view) []c4v1.WorkHold {
 	}
 	byHolder := map[int][]int{}
 	for idx, l := range v.locked {
-		byHolder[l.by] = append(byHolder[l.by], idx)
+		if l.gate == "" {
+			byHolder[l.by] = append(byHolder[l.by], idx)
+		}
 	}
 	var holders []int
 	for h := range byHolder {
