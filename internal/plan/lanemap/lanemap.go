@@ -1,4 +1,4 @@
-package plan
+package lanemap
 
 import (
 	"fmt"
@@ -8,9 +8,11 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+
+	"github.com/Avalanche-io/c4-operator/internal/plan"
 )
 
-// ImportLanes reads a plan written as a lane map: the layout Ra's plan uses
+// Import reads a plan written as a lane map: the layout Ra's plan uses
 // (docs/plan: LANES.md, a milestone file such as M1.md, and charters/).
 // milestone selects the charters and the milestone file ("M1").
 //
@@ -28,8 +30,8 @@ import (
 //   - each charter: model, refutation and the paths it is granted (holds).
 //
 // Anything with ordering words that it could not read is a Note.
-func ImportLanes(dir, milestone string) (*Plan, error) {
-	p := newPlan()
+func Import(dir, milestone string) (*plan.Plan, error) {
+	p := plan.New()
 	lanesPath := filepath.Join(dir, "LANES.md")
 	ls, err := readLines(lanesPath)
 	if err != nil {
@@ -61,8 +63,8 @@ func ImportLanes(dir, milestone string) (*Plan, error) {
 	r.resolve()
 	// every other lane came from a later need: a register row, a lane's
 	// follow-on, a lane chartered because another needed it
-	for _, n := range p.order {
-		if u := p.units[n]; u.Params["origin"] == "" {
+	for _, n := range p.Names() {
+		if u := p.Unit(n); u.Params["origin"] == "" {
 			u.Params["origin"] = "follow-on"
 		}
 	}
@@ -70,7 +72,7 @@ func ImportLanes(dir, milestone string) (*Plan, error) {
 }
 
 type reader struct {
-	p    *Plan
+	p    *plan.Plan
 	dir  string
 	fams map[string]string // rule family → owning lane
 	// pending edges, resolved once every lane is known
@@ -83,7 +85,7 @@ type reader struct {
 
 type pendingEdge struct {
 	block, dep string
-	cite       Cite
+	cite       plan.Cite
 }
 
 var (
@@ -125,7 +127,7 @@ func (r *reader) laneTable(file string, ls []line, m2 bool) {
 		// "deferred to M2" is about a part of the lane
 		if strings.Contains(t, "DEFERRED TO M2") && !strings.HasPrefix(name, "M2-") {
 			if !m2 {
-				r.p.note(file, l.n, clip(t), "deferred to M2: left out of this milestone")
+				r.p.Note(file, l.n, clip(t), "deferred to M2: left out of this milestone")
 			}
 			continue
 		}
@@ -142,7 +144,7 @@ func (r *reader) laneTable(file string, ls []line, m2 bool) {
 		if strings.HasPrefix(name, "M2-") {
 			group = "chapter " + strings.TrimPrefix(name, "M2-")
 		}
-		u := r.p.unit(name, group)
+		u := r.lane(name, group)
 		rest := cell[m[1]:]
 		if s := slugRe.FindStringSubmatch(rest); s != nil {
 			u.Label = name + " " + s[1]
@@ -185,7 +187,7 @@ func (r *reader) m2Cell(file string, n int, chapter, cell string) {
 	if !ok || !strings.HasPrefix(name, "M2-") {
 		return
 	}
-	u := r.p.unit(name, chapter)
+	u := r.lane(name, chapter)
 	u.Params["target"] = "metal"
 	u.Params["origin"] = "plan"
 	list = strings.TrimSpace(list)
@@ -194,7 +196,7 @@ func (r *reader) m2Cell(file string, n int, chapter, cell string) {
 		return
 	}
 	for _, d := range r.lanesIn(after) {
-		r.edges = append(r.edges, pendingEdge{name, d, Cite{File: file, Line: n, Text: cell}})
+		r.edges = append(r.edges, pendingEdge{name, d, plan.Cite{File: file, Line: n, Text: cell}})
 	}
 }
 
@@ -239,14 +241,14 @@ func (r *reader) prose(file string, ls []line, notes bool) {
 		if strings.Contains(s.text, "as fillers") {
 			before, _, _ := strings.Cut(s.text, "as fillers")
 			for _, t := range tokens(before) {
-				if u := r.p.units[t.name]; u != nil {
+				if u := r.p.Unit(t.name); u != nil {
 					u.Params["filler"] = "true"
 				}
 			}
 			matched = true
 		}
 		if notes && !matched && orderingWords.MatchString(s.text) && len(r.lanesIn(s.text))+len(r.familyLanes(s.text)) >= 2 {
-			r.p.note(file, s.n, clip(s.text), "ordering words and lane names, but no pattern the importer reads")
+			r.p.Note(file, s.n, clip(s.text), "ordering words and lane names, but no pattern the importer reads")
 		}
 	}
 }
@@ -284,11 +286,11 @@ func (r *reader) clause(file string, n int, sent, cl string) bool {
 		}
 		for _, b := range blocks {
 			for _, d := range deps {
-				r.edges = append(r.edges, pendingEdge{b, d, Cite{File: file, Line: n, Text: clip(sent)}})
+				r.edges = append(r.edges, pendingEdge{b, d, plan.Cite{File: file, Line: n, Text: clip(sent)}})
 			}
 		}
 		for _, cr := range r.chapterRefs {
-			r.p.note(file, n, clip(sent), cr+"; check that the plan meant all of them")
+			r.p.Note(file, n, clip(sent), cr+"; check that the plan meant all of them")
 		}
 		return true
 	}
@@ -329,7 +331,7 @@ func (r *reader) lanesIn(s string) []string {
 		if isChapterRef(t.name) {
 			ch, _ := strconv.Atoi(t.name[1:])
 			var got []string
-			for _, n := range r.p.order {
+			for _, n := range r.p.Names() {
 				if chapterOf(n) == ch && strings.HasPrefix(n, "C") {
 					add(n)
 					got = append(got, n)
@@ -360,7 +362,7 @@ func (r *reader) between(a, b string) []string {
 		return nil
 	}
 	var out []string
-	for _, n := range r.p.order {
+	for _, n := range r.p.Names() {
 		if chapterOf(n) != ca {
 			continue
 		}
@@ -388,7 +390,7 @@ func (r *reader) runOrder(ls []line) {
 			continue
 		}
 		for _, tk := range tokens(clean(t)) {
-			u := r.p.units[tk.name]
+			u := r.p.Unit(tk.name)
 			if u == nil || u.Params["runOrder"] != "" {
 				continue
 			}
@@ -431,7 +433,7 @@ func (r *reader) waves(file string, ls []line) {
 			if isChapterRef(tk.name) {
 				continue
 			}
-			u := r.p.unit(tk.name, group)
+			u := r.lane(tk.name, group)
 			u.Params["origin"] = "plan"
 			if wave != "" {
 				u.Params["wave"] = wave
@@ -445,7 +447,7 @@ func (r *reader) waves(file string, ls []line) {
 				continue
 			}
 			for _, d := range r.lanesIn(inner[i:]) {
-				r.edges = append(r.edges, pendingEdge{block, d, Cite{File: file, Line: l.n, Text: clip(t)}})
+				r.edges = append(r.edges, pendingEdge{block, d, plan.Cite{File: file, Line: l.n, Text: clip(t)}})
 			}
 		}
 		// "B1, then B2, with B3 in parallel with B2 once B1 lands"
@@ -453,14 +455,14 @@ func (r *reader) waves(file string, ls []line) {
 			if a, b, ok := strings.Cut(cl, ", then "); ok {
 				as, bs := r.lanesIn(lastClause(a)), r.lanesIn(b)
 				if len(as) > 0 && len(bs) > 0 {
-					r.edges = append(r.edges, pendingEdge{bs[0], as[len(as)-1], Cite{File: file, Line: l.n, Text: clip(t)}})
+					r.edges = append(r.edges, pendingEdge{bs[0], as[len(as)-1], plan.Cite{File: file, Line: l.n, Text: clip(t)}})
 				}
 			}
 			if a, b, ok := strings.Cut(cl, " once "); ok {
 				as, bs := r.lanesIn(a), r.lanesIn(b)
 				if len(as) > 0 && len(bs) > 0 {
 					for _, d := range bs {
-						r.edges = append(r.edges, pendingEdge{as[0], d, Cite{File: file, Line: l.n, Text: clip(t)}})
+						r.edges = append(r.edges, pendingEdge{as[0], d, plan.Cite{File: file, Line: l.n, Text: clip(t)}})
 					}
 				}
 			}
@@ -505,7 +507,7 @@ func (r *reader) charters(dir, milestone string) error {
 		} else {
 			continue
 		}
-		u := r.p.unit(lane, groupOf(lane))
+		u := r.lane(lane, groupOf(lane))
 		u.Params["charter"] = "charters/" + f
 		ls, err := readLines(filepath.Join(dir, f))
 		if err != nil {
@@ -551,12 +553,12 @@ func (r *reader) charters(dir, milestone string) error {
 func (r *reader) resolve() {
 	for _, e := range r.edges {
 		switch {
-		case r.p.units[e.block] == nil:
-			r.p.note(e.cite.File, e.cite.Line, e.cite.Text, fmt.Sprintf("names %s, which the plan does not list", e.block))
-		case r.p.units[e.dep] == nil:
-			r.p.note(e.cite.File, e.cite.Line, e.cite.Text, fmt.Sprintf("names %s, which the plan does not list", e.dep))
+		case r.p.Unit(e.block) == nil:
+			r.p.Note(e.cite.File, e.cite.Line, e.cite.Text, fmt.Sprintf("names %s, which the plan does not list", e.block))
+		case r.p.Unit(e.dep) == nil:
+			r.p.Note(e.cite.File, e.cite.Line, e.cite.Text, fmt.Sprintf("names %s, which the plan does not list", e.dep))
 		default:
-			r.p.edge(e.block, e.dep, e.cite)
+			r.p.Edge(e.block, e.dep, e.cite)
 		}
 	}
 }
@@ -594,4 +596,32 @@ func clip(s string) string {
 		return string(r[:279]) + "…"
 	}
 	return s
+}
+
+// lane returns the block for a lane, keyed by its kind (keyOf) when new.
+func (r *reader) lane(name, group string) *plan.Unit {
+	u := r.p.Block(name, group)
+	if u.Key == plan.DefaultKey {
+		u.Key = keyOf(name)
+	}
+	return u
+}
+
+// keyOf is the estimator key for a lane in this layout: lanes of one kind
+// (infrastructure, front end, foundation, chapter, the M2 targets) share
+// history.
+func keyOf(name string) string {
+	switch {
+	case strings.HasPrefix(name, "M2-"):
+		return "metal-lane"
+	case strings.HasPrefix(name, "C"):
+		return "lane"
+	case strings.HasPrefix(name, "A"):
+		return "infra-lane"
+	case strings.HasPrefix(name, "B"):
+		return "frontend-lane"
+	case strings.HasPrefix(name, "F"):
+		return "foundation-lane"
+	}
+	return "lane"
 }

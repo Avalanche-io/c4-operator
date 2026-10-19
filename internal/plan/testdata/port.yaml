@@ -1,0 +1,28 @@
+# A synthetic plan written as data: a text library ported module by module
+# to a new language, in the order of its import graph. Nothing here is from
+# a real project.
+version: 1
+blocks:
+  - {name: text/scan, group: leaves, key: module, holds: [text/scan], params: {size: "14", origin: plan}}
+  - {name: text/units, group: leaves, key: module, holds: [text/units], params: {size: "6", origin: plan}}
+  - {name: io/paths, group: leaves, key: module, holds: [io/paths], params: {size: "9", origin: plan}}
+  - name: text/tokens
+    group: core
+    key: module
+    after: [text/scan, text/units]
+    why: {text/scan: "tokens imports scan", text/units: "tokens imports units"}
+    holds: [text/tokens]
+    params: {size: "21", origin: plan}
+  - {name: text/format, group: core, key: module, after: [text/scan], holds: [text/format], params: {size: "17", origin: plan}}
+  - {name: io/files, group: core, key: module, after: [io/paths], holds: [io/files], params: {size: "11", origin: plan}}
+  - {name: api/document, group: api, key: module, after: [text/tokens, text/format, io/files], holds: [api/document], params: {size: "30", origin: plan}}
+  - {name: api/render, group: api, key: module, after: [text/format], holds: [api/render], params: {size: "12", origin: plan}}
+  - {name: cli/main, group: cli, key: module, after: [api/document, api/render], holds: [cli/main], params: {size: "5", origin: plan}}
+  - name: api-break
+    wait: {server: "person:owner", ask: "keep the old open() signature, or break it?", expect: 7200}
+    before: [api/document]
+    why: {api/document: "the differential suite cannot pass both ways"}
+  - name: upstream-review
+    wait: {server: "party:upstream", ask: "do the maintainers accept the new render API?", expect: 86400}
+    after: [api/render]
+    before: [cli/main]

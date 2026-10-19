@@ -15,7 +15,7 @@ func TestImport(t *testing.T) {
 	dir := t.TempDir()
 	out, notes := filepath.Join(dir, "plan.json"), filepath.Join(dir, "notes.json")
 	var so, se bytes.Buffer
-	if code := run([]string{"import", "-o", out, "--notes", notes, "../../internal/plan/testdata/lanes"}, &so, &se); code != 0 {
+	if code := run([]string{"import", "-o", out, "--notes", notes, "../../internal/plan/lanemap/testdata"}, &so, &se); code != 0 {
 		t.Fatalf("import: %d %s", code, se.String())
 	}
 	if !strings.Contains(so.String(), "blocks,") || !strings.Contains(so.String(), "chapter 1") {
@@ -38,7 +38,23 @@ func TestImport(t *testing.T) {
 	}
 	so.Reset()
 	se.Reset()
-	if code := run([]string{"import", "--extra", extra, "-o", out, "../../internal/plan/testdata/lanes"}, &so, &se); code != 1 || !strings.Contains(se.String(), "cycle") {
+	if code := run([]string{"import", "--extra", extra, "-o", out, "../../internal/plan/lanemap/testdata"}, &so, &se); code != 1 || !strings.Contains(se.String(), "cycle") {
 		t.Fatalf("cycle: %d %s", code, se.String())
+	}
+}
+
+// A plan written as data goes through the same command, chosen because the
+// argument is a file.
+func TestImportFile(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "plan.json")
+	var so, se bytes.Buffer
+	if code := run([]string{"import", "-o", out, "../../internal/plan/testdata/port.yaml"}, &so, &se); code != 0 {
+		t.Fatalf("import: %d %s", code, se.String())
+	}
+	if !strings.HasPrefix(so.String(), "11 blocks, ") || !strings.Contains(so.String(), "0 notes") || !strings.Contains(so.String(), "leaves") {
+		t.Errorf("summary %q", so.String())
+	}
+	if code := run([]string{"import", "--format", "lanemap", "-o", out, "../../internal/plan/testdata/port.yaml"}, &so, &se); code != 1 {
+		t.Errorf("a file read as a lane map: %d", code)
 	}
 }
