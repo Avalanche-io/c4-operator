@@ -16,11 +16,13 @@ import (
 // Documents a unit leaves for the farm in its control directory (.c4/),
 // which capture never includes in its output. At capture the daemon
 // stores each one present in the project's store and names it on the pod,
-// where the queue reads it (DESIGN 10.6: the expansion document).
+// where the queue reads it: the expansion document (DESIGN 10.6) and a
+// review unit's verdict.
 var controlDocs = []struct {
 	file, annotation string
 }{
 	{"expand.json", c4v1.AnnotationOutputExpand},
+	{"verdict.json", c4v1.AnnotationOutputVerdict},
 }
 
 // maxControlDoc bounds a control document, in bytes.

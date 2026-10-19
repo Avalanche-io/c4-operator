@@ -141,7 +141,7 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if held && st == "queued" {
 			st = "held"
 		}
-		e := map[string]any{"i": i, "label": u.Label, "state": st, "attempts": max(attempts[i], boolInt(st != "queued" && st != "held" && st != "blocked" && st != "planned")),
+		e := map[string]any{"i": i, "label": u.Label, "state": st, "attempts": max(attempts[i], boolInt(st != "queued" && st != "held" && st != "blocked" && st != "planned" && st != "flagged")),
 			"group": unitGroup[i], "pos": u.Pos}
 		if u.Name != "" {
 			e["name"] = u.Name
@@ -151,6 +151,11 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		}
 		if u.Exists > 0 && u.Exists < 1 {
 			e["exists"] = u.Exists
+		}
+		if r, ok := rec.job.Status.Reviews[strconv.Itoa(i)]; ok {
+			// What a review last decided: reworked (with its passes),
+			// escalated to someone (flagged), or accepted with a note.
+			e["review"] = r
 		}
 		if works != nil {
 			e["work"] = works[i]
@@ -339,7 +344,7 @@ func unitStateMap(st *c4v1.WorkJobStatus, n int) []string {
 	for i := range out {
 		out[i] = "queued"
 	}
-	for _, name := range []string{"planned", "blocked", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "succeeded"} {
+	for _, name := range []string{"planned", "blocked", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "succeeded"} {
 		idx, _ := order.DecodeSet(st.UnitStates[name])
 		for _, i := range idx {
 			if i >= 0 && i < n {

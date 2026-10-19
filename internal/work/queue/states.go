@@ -3,6 +3,7 @@ package queue
 import (
 	"encoding/json"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -257,11 +258,13 @@ func shownSlack(v *view, js sched.JobState, e *c4v1.WorkEstimate) (int64, bool) 
 }
 
 // needsPerson sets or clears the NeedsPerson condition.
-func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting int, gen int64) {
+func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagged int, gen int64) {
 	reason, msg := "", ""
 	switch {
 	case waiting > 0:
 		reason, msg = c4v1.NeedsFailed, fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", waiting)
+	case flagged > 0:
+		reason, msg = c4v1.NeedsReview, fmt.Sprintf("a review escalated %d units%s; requeue, take or accept them", flagged, escalatedTo(v.mem))
 	case v.mem.planErr != nil || v.mem.plan == nil:
 		reason, msg = c4v1.NeedsStuck, "the job has no plan; fix its parameters"
 	case v.unschedulable != "":
@@ -291,4 +294,19 @@ func approvals(crs []c4v1.CapacityRequest) map[string]bool {
 		}
 	}
 	return out
+}
+
+// escalatedTo names who flagged units wait for, as " to lead" or "".
+func escalatedTo(m *jobMem) string {
+	var to []string
+	for i, r := range m.reviews {
+		if m.flagged(i) && r.To != "" && !slices.Contains(to, r.To) {
+			to = append(to, r.To)
+		}
+	}
+	if len(to) == 0 {
+		return ""
+	}
+	sort.Strings(to)
+	return " to " + strings.Join(to, ", ")
 }

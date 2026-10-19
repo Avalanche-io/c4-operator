@@ -1381,6 +1381,38 @@ and a sweep planner that spawns trials are all generators.
   - The `graph` class is a job whose plan is one generator (a plan
     importer, test discovery, a sweep planner); its units run the job's
     template, told apart by `$C4_UNIT_NAME` and their `env`.
+- **Verdicts.** A review unit judges the units it runs after and writes its
+  judgment as `.c4/verdict.json`. The node daemon stores it at capture, as
+  `c4.avalanche.io/output-verdict`. When the review succeeds the queue
+  carries the verdict out, once per pod, and signs it (decision/v1, kind
+  `verdict`): the review's record, the document, and each judged unit's
+  output and outcome. Render QC, CI flaky reruns and agent refutation are
+  the same primitive with different checks.
+  - **Naming units.** The verdict names units by name, label, a label
+    range (`1101-1102`) or `#index`. Only units the review runs after may
+    be judged, and `pass: rest` passes the others.
+  - **rework** runs the named units again with `with`: nodes to avoid,
+    the only pool to use, the first container's memory or image, env, and
+    views to mount (a counterexample, a note). The next attempt starts from
+    the unit's last output view, as a yield resumes, unless `fresh` is set.
+    The review then runs again after them. A unit reworked `maxPasses`
+    times (default 2) gets `onExhausted` instead: `escalate[:who]`,
+    `accept` or `fail`.
+  - **escalate** flags the units for a person (NeedsPerson `Review`,
+    naming who). The queue treats them as failed units, so requeue, take
+    and accept work on them unchanged. The review that flagged them does
+    not wait on them when it runs again.
+  - **accept** lets the units stand, with the note recorded.
+  - **expand** adds units under the review, as a generator's expansion
+    does.
+  - **Refusal.** A verdict that judges a unit the review does not run
+    after, judges one twice, or carries a bad override or expansion is
+    refused whole, and the review fails.
+  - **Status.** `verdicts` lists the most recent verdicts with their
+    counts. `reviews` holds each unit's last non-pass outcome, its passes
+    and its standing override.
+  - **Not built yet:** the estimate does not price expected rework before
+    a verdict.
 
 ### 10.7 Objectives: every SLO becomes a deadline or a rate
 

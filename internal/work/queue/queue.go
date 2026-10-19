@@ -163,17 +163,21 @@ type jobMem struct {
 	expansions []expansionRec
 	docs       map[string][]byte
 	unitOut    map[int]string
-	succeeded  map[int]bool
-	failed     map[int]bool
-	attempts   map[int]int // attempts made, including the running one
-	millis     map[int]int64
-	out        *output
-	foldedPod  map[types.UID]bool
-	outLoad    string // the stored chain to load before the next fold
-	outIndex   string // the stored provenance index to load before the next fold
-	launched   map[int]time.Time
-	nodeFails  map[string]int
-	blacklist  map[string]bool
+	// verdicts are the verdicts carried out, and reviews what they last
+	// decided per unit (verdict.go).
+	verdicts  []verdictRec
+	reviews   map[int]*c4v1.WorkReview
+	succeeded map[int]bool
+	failed    map[int]bool
+	attempts  map[int]int // attempts made, including the running one
+	millis    map[int]int64
+	out       *output
+	foldedPod map[types.UID]bool
+	outLoad   string // the stored chain to load before the next fold
+	outIndex  string // the stored provenance index to load before the next fold
+	launched  map[int]time.Time
+	nodeFails map[string]int
+	blacklist map[string]bool
 	// resume holds, per unit, the view a yielded attempt captured: the
 	// next attempt mounts it and continues from its checkpoint.
 	resume map[int]string
@@ -287,6 +291,22 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		if i, err := strconv.Atoi(k); err == nil {
 			m.unitOut[i] = view
 		}
+	}
+	for _, x := range st.Verdicts {
+		m.verdicts = append(m.verdicts, verdictRec{WorkVerdict: x, pod: x.Pod})
+	}
+	for k, r := range st.Reviews {
+		if i, err := strconv.Atoi(k); err == nil {
+			if m.reviews == nil {
+				m.reviews = map[int]*c4v1.WorkReview{}
+			}
+			r := r
+			m.reviews[i] = &r
+		}
+	}
+	// Units a review escalated wait for a person as failed units do.
+	for _, i := range decode(st.UnitStates["flagged"]) {
+		m.failed[i] = true
 	}
 	for _, n := range st.Blacklist {
 		if !slices.Contains(spec.AvoidNodes, n) {
@@ -611,6 +631,11 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				v.done = append(v.done, p)
 				continue
 			}
+			vid, vdoc, ok := q.verdictOf(ctx, v, p)
+			if !ok {
+				v.finishing[idx] = true
+				continue
+			}
 			if !m.succeeded[idx] && !m.failed[idx] && plan.Units[idx].Generator && !m.expanded(idx) {
 				ok, refused := q.expand(ctx, v, idx, p, now)
 				if !ok {
@@ -625,6 +650,22 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 					continue
 				}
 			}
+			rerun := false
+			if vid != "" && !m.succeeded[idx] && !m.failed[idx] {
+				ok, refused, again := q.carryOut(ctx, v, idx, p, vid, vdoc, now)
+				if !ok {
+					v.finishing[idx] = true
+					continue
+				}
+				if refused {
+					// A verdict the queue refused does nothing: the review
+					// failed, and a person must act.
+					m.failed[idx] = true
+					v.done = append(v.done, p)
+					continue
+				}
+				rerun = again
+			}
 			if !m.succeeded[idx] {
 				m.succeeded[idx] = true
 				m.millis[idx] = runMillis(p, now)
@@ -633,6 +674,13 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 					m.unitOut[idx] = tree
 				}
 				q.recordDerivation(ctx, v, idx, p, m.millis[idx])
+			}
+			if rerun {
+				// It reworked units: the review runs again after them.
+				delete(m.succeeded, idx)
+				delete(m.millis, idx)
+				delete(m.ended, idx)
+				m.attempts[idx] = 0
 			}
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed:
@@ -925,6 +973,27 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 				continue
 			}
 		}
+		w := v.mem.rework(idx)
+		if w != nil && w.Pool != "" && d.Pool != w.Pool {
+			// A rework names the only pool the unit may use.
+			p2 := pools[w.Pool]
+			if p2 == nil || room[w.Pool] < d.Slots {
+				continue
+			}
+			room[w.Pool] -= d.Slots
+			room[d.Pool] += d.Slots
+			p = p2
+		}
+		if w != nil && len(w.Inputs) > 0 {
+			ready, err := q.ensureReworkInputs(ctx, v, idx, w)
+			if err != nil {
+				q.Log.Error(err, "rework input", "job", key, "unit", idx)
+				continue
+			}
+			if !ready {
+				continue
+			}
+		}
 		if len(v.mem.plan.Units[idx].Inputs) > 0 {
 			ready, err := q.ensureUnitInputs(ctx, v, idx)
 			if err != nil {
@@ -1136,6 +1205,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 			pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
 				corev1.VolumeMount{Name: name, MountPath: in.MountPath, ReadOnly: true})
 		}
+	}
+	if w := v.mem.rework(idx); w != nil {
+		applyRework(pod, j.Name, idx, w)
 	}
 	if r, ok := v.driver.(class.Resumer); ok && v.mem.resume[idx] != "" {
 		env = append(env, r.ResumeEnv(v.mem.resume[idx])...)

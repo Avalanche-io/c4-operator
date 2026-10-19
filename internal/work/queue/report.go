@@ -115,7 +115,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	for _, i := range v.waiting {
 		isWaiting[i] = true
 	}
-	var succ, egress, fail, accepted, pre, run, retry, backoff, queued, planned, blockedU []int
+	var succ, egress, fail, flag, accepted, pre, run, retry, backoff, queued, planned, blockedU []int
 	for i := 0; i < n; i++ {
 		_, running := v.running[i]
 		switch {
@@ -127,6 +127,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			succ = append(succ, i)
 		case m.accepted[i]:
 			accepted = append(accepted, i)
+		case m.flagged(i):
+			flag = append(flag, i)
 		case m.failed[i]:
 			fail = append(fail, i)
 		case v.finishing[i]:
@@ -147,7 +149,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.Units = c4v1.UnitCounts{Total: int32(n), Succeeded: int32(len(succ)), Egress: int32(len(egress)),
 		Failed: int32(len(fail)), Accepted: int32(len(accepted)), Preflight: int32(len(pre)),
 		Running: int32(len(run)), Retrying: int32(len(retry)), Backoff: int32(len(backoff)), Queued: int32(len(queued)),
-		Planned: int32(len(planned)), Blocked: int32(len(blockedU))}
+		Planned: int32(len(planned)), Blocked: int32(len(blockedU)), Flagged: int32(len(flag))}
 	switch {
 	case v.blocked:
 		st.Units.Blocked, st.Units.Queued, st.Units.Backoff = int32(len(queued)+len(backoff)+len(blockedU)), 0, 0
@@ -157,7 +159,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.UnitStates = map[string]string{}
 	for name, set := range map[string][]int{"succeeded": succ, "egress": egress, "failed": fail, "accepted": accepted,
 		"preflight": pre, "running": run, "retrying": retry, "backoff": backoff, "queued": queued,
-		"planned": planned, "blocked": blockedU} {
+		"planned": planned, "blocked": blockedU, "flagged": flag} {
 		if len(set) > 0 {
 			st.UnitStates[name] = order.EncodeSet(set)
 		}
@@ -181,7 +183,13 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			waiting++
 		}
 	}
-	needsPerson(&st, v, q.approvals[v.key], waiting, v.job.Generation)
+	flaggedWaiting := 0
+	for _, i := range flag {
+		if !taken[i] {
+			flaggedWaiting++
+		}
+	}
+	needsPerson(&st, v, q.approvals[v.key], waiting, flaggedWaiting, v.job.Generation)
 	active := len(pre) + len(run) + len(retry) + len(egress)
 	var att []string
 	for i := 0; i < n; i++ {
@@ -220,6 +228,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record})
 	}
 	st.Expansions = expansionStatus(m.expansions)
+	st.Verdicts = verdictStatus(m)
+	st.Reviews = reviewStatus(m)
 	for i := range readers(m.plan) {
 		if view := m.unitOut[i]; view != "" {
 			if st.UnitOutputs == nil {
@@ -254,7 +264,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	switch {
 	case len(succ)+len(accepted) == n:
 		st.Phase = "Succeeded"
-	case len(succ)+len(accepted)+len(fail)+len(v.stuck) == n && active == 0:
+	case len(succ)+len(accepted)+len(fail)+len(flag)+len(v.stuck) == n && active == 0:
 		// Units waiting on a failed one count with it: they cannot run
 		// until a person acts.
 		st.Phase = "Failed"

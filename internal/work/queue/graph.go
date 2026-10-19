@@ -136,22 +136,41 @@ func (q *Queue) expand(ctx context.Context, v *view, idx int, p *corev1.Pod, now
 			q.Log.Error(err, "expansion document", "job", v.key, "unit", idx)
 			return false, false
 		}
-		x.Doc = id
-		ex, err := class.Expand(v.driver, v.job, m.plan.Units[idx], doc, m.plan.Names(), x.First)
-		if err == nil && x.First+len(ex.Units) > class.MaxUnits {
-			err = fmt.Errorf("the expansion would make %d units, over %d", x.First+len(ex.Units), class.MaxUnits)
-		}
-		if err != nil {
-			x.Error = err.Error()
-		} else {
-			m.plan.Apply(idx, ex)
-			x.Units = len(ex.Units)
-		}
+		return true, q.expandWith(ctx, v, idx, id, doc, now).Error != ""
 	}
 	x.Record = q.recordExpansion(ctx, v, x, now)
 	m.expansions = append(m.expansions, x)
-	q.Log.Info("expanded", "job", v.key, "unit", idx, "units", x.Units, "document", x.Doc, "error", x.Error)
-	return true, x.Error != ""
+	return true, false
+}
+
+// checkExpansion is what document doc would add under unit gen, or why it
+// cannot.
+func checkExpansion(v *view, gen int, doc []byte) (*class.Expansion, error) {
+	m := v.mem
+	first := len(m.plan.Units)
+	ex, err := class.Expand(v.driver, v.job, m.plan.Units[gen], doc, m.plan.Names(), first)
+	if err == nil && first+len(ex.Units) > class.MaxUnits {
+		err = fmt.Errorf("the expansion would make %d units, over %d", first+len(ex.Units), class.MaxUnits)
+	}
+	return ex, err
+}
+
+// expandWith adds document doc (stored as id) under unit gen, signs and
+// lists the expansion, and returns it; its Error is set if the document
+// was refused, and then nothing was added.
+func (q *Queue) expandWith(ctx context.Context, v *view, gen int, id string, doc []byte, now time.Time) expansionRec {
+	m := v.mem
+	x := expansionRec{Unit: gen, First: len(m.plan.Units), At: now, Doc: id}
+	if ex, err := checkExpansion(v, gen, doc); err != nil {
+		x.Error = err.Error()
+	} else {
+		m.plan.Apply(gen, ex)
+		x.Units = len(ex.Units)
+	}
+	x.Record = q.recordExpansion(ctx, v, x, now)
+	m.expansions = append(m.expansions, x)
+	q.Log.Info("expanded", "job", v.key, "unit", gen, "units", x.Units, "document", x.Doc, "error", x.Error)
+	return x
 }
 
 // recordExpansion signs an expansion: the generator, its document and
@@ -214,7 +233,7 @@ func unitWaits(plan *class.Plan, m *jobMem, v *view) (runnable, blocked []int, s
 		}
 		memo[i] = 2 // the graph is acyclic; this only stops a bad table looping
 		for _, a := range plan.Units[i].After {
-			if a < 0 || a >= len(plan.Units) || m.done(a) {
+			if a < 0 || a >= len(plan.Units) || !m.waitsOn(i, a) {
 				continue
 			}
 			if m.failed[a] || isStuck(a) {
@@ -233,7 +252,7 @@ func unitWaits(plan *class.Plan, m *jobMem, v *view) (runnable, blocked []int, s
 		}
 		ready := true
 		for _, a := range plan.Units[idx].After {
-			if a >= 0 && a < len(plan.Units) && !m.done(a) {
+			if a >= 0 && a < len(plan.Units) && m.waitsOn(idx, a) {
 				ready = false
 				break
 			}
@@ -273,7 +292,7 @@ func criticalPath(plan *class.Plan, m *jobMem, rem map[int]float64, genLongest f
 		}
 		longest := 0.0
 		for _, a := range u.After {
-			if a >= 0 && a < len(plan.Units) && !m.done(a) {
+			if a >= 0 && a < len(plan.Units) && m.waitsOn(i, a) {
 				longest = math.Max(longest, path(a))
 			}
 		}

@@ -595,6 +595,81 @@ spec:
                   captured; the next attempt mounts that view and continues from its
                   checkpoint.
                 type: object
+              reviews:
+                additionalProperties:
+                  description: WorkReview is what reviews last decided for one unit.
+                  properties:
+                    by:
+                      description: By is the review unit's index.
+                      format: int32
+                      type: integer
+                    do:
+                      description: Do is rework, escalate or accept.
+                      type: string
+                    note:
+                      description: Note is an accepted unit's note.
+                      type: string
+                    passes:
+                      description: Passes counts the unit's reworks.
+                      format: int32
+                      type: integer
+                    to:
+                      description: To is who an escalated unit waits for.
+                      type: string
+                    why:
+                      type: string
+                    with:
+                      description: With is the rework's change to the unit's next
+                        attempts.
+                      properties:
+                        avoidNodes:
+                          items:
+                            type: string
+                          type: array
+                        env:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        fresh:
+                          description: Fresh starts from the job's inputs, not from
+                            the unit's last output.
+                          type: boolean
+                        image:
+                          description: Image replaces the first container's image.
+                          type: string
+                        inputs:
+                          description: Inputs are views mounted read-only (a counterexample,
+                            a note).
+                          items:
+                            description: WorkReworkInput is a view a reworked unit
+                              mounts.
+                            properties:
+                              mountPath:
+                                type: string
+                              view:
+                                pattern: ^c4[1-9A-HJ-NP-Za-km-z]{88}$
+                                type: string
+                            required:
+                            - mountPath
+                            - view
+                            type: object
+                          type: array
+                        memory:
+                          description: Memory is the first container's memory request
+                            and limit.
+                          type: string
+                        pool:
+                          description: Pool is the only pool the unit may run in.
+                          type: string
+                      type: object
+                  required:
+                  - by
+                  - do
+                  type: object
+                description: |-
+                  Reviews maps the index of each unit a verdict did more than pass
+                  (reworked, escalated, accepted with a note) to what it decided last.
+                type: object
               started:
                 description: Started and Finished bound the job's run.
                 format: date-time
@@ -721,6 +796,10 @@ spec:
                   failed:
                     format: int32
                     type: integer
+                  flagged:
+                    description: Flagged counts units a review escalated to a person.
+                    format: int32
+                    type: integer
                   held:
                     format: int32
                     type: integer
@@ -748,6 +827,68 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              verdicts:
+                description: |-
+                  Verdicts lists the most recent verdicts review units wrote, each
+                  carried out once.
+                items:
+                  description: |-
+                    WorkVerdict is one verdict a review unit wrote, carried out once for
+                    that unit and attempt.
+                  properties:
+                    accepted:
+                      format: int32
+                      type: integer
+                    at:
+                      format: date-time
+                      type: string
+                    attempt:
+                      format: int32
+                      type: integer
+                    document:
+                      description: Document is the C4 ID of the verdict document.
+                      type: string
+                    error:
+                      description: |-
+                        Error says why the verdict was refused: nothing was done, and the
+                        review unit failed.
+                      type: string
+                    escalated:
+                      format: int32
+                      type: integer
+                    expanded:
+                      format: int32
+                      type: integer
+                    passed:
+                      description: Counts of the judged units by what was done.
+                      format: int32
+                      type: integer
+                    pod:
+                      description: 'Pod is the review pod''s UID: a pod''s verdict
+                        is carried out once.'
+                      type: string
+                    record:
+                      description: Record is the C4 ID of the queue's signed verdict
+                        record.
+                      type: string
+                    reworked:
+                      format: int32
+                      type: integer
+                    unit:
+                      format: int32
+                      type: integer
+                    verdict:
+                      description: |-
+                        Verdict is the document's summary word: pass, rework, mixed,
+                        escalate, flaky...
+                      type: string
+                  required:
+                  - at
+                  - attempt
+                  - document
+                  - unit
+                  type: object
+                type: array
               yields:
                 description: Yields lists the most recent yields of checkpointing
                   units.

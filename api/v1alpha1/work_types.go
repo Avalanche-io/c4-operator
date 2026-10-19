@@ -53,6 +53,10 @@ const (
 	// ID of the expansion document it wrote (.c4/expand.json), stored by
 	// the node daemon at capture (DESIGN 10.6).
 	AnnotationOutputExpand = "c4.avalanche.io/output-expand"
+	// AnnotationOutputVerdict on a review unit's finished pod is the C4 ID
+	// of the verdict it wrote (.c4/verdict.json), stored by the node daemon
+	// at capture.
+	AnnotationOutputVerdict = "c4.avalanche.io/output-verdict"
 	// AnnotationOwner on a WorkJob is the user who submitted it, set at
 	// admission from the request's user (or, for jobs the HUD creates for
 	// a signed-in viewer, by the HUD) and never changed afterwards.
@@ -284,6 +288,14 @@ type WorkJobStatus struct {
 	// to its captured output view.
 	// +optional
 	UnitOutputs map[string]string `json:"unitOutputs,omitempty"`
+	// Verdicts lists the most recent verdicts review units wrote, each
+	// carried out once.
+	// +optional
+	Verdicts []WorkVerdict `json:"verdicts,omitempty"`
+	// Reviews maps the index of each unit a verdict did more than pass
+	// (reworked, escalated, accepted with a note) to what it decided last.
+	// +optional
+	Reviews map[string]WorkReview `json:"reviews,omitempty"`
 	// Requeued is the token of the last requeue request carried out.
 	// +optional
 	Requeued string `json:"requeued,omitempty"`
@@ -451,12 +463,103 @@ type WorkExpansion struct {
 	Error string `json:"error,omitempty"`
 }
 
+// WorkVerdict is one verdict a review unit wrote, carried out once for
+// that unit and attempt.
+type WorkVerdict struct {
+	Unit    int32 `json:"unit"`
+	Attempt int32 `json:"attempt"`
+	// Pod is the review pod's UID: a pod's verdict is carried out once.
+	// +optional
+	Pod string `json:"pod,omitempty"`
+	// Document is the C4 ID of the verdict document.
+	Document string `json:"document"`
+	// Verdict is the document's summary word: pass, rework, mixed,
+	// escalate, flaky...
+	// +optional
+	Verdict string      `json:"verdict,omitempty"`
+	At      metav1.Time `json:"at"`
+	// Counts of the judged units by what was done.
+	// +optional
+	Passed int32 `json:"passed,omitempty"`
+	// +optional
+	Reworked int32 `json:"reworked,omitempty"`
+	// +optional
+	Escalated int32 `json:"escalated,omitempty"`
+	// +optional
+	Accepted int32 `json:"accepted,omitempty"`
+	// +optional
+	Expanded int32 `json:"expanded,omitempty"`
+	// Record is the C4 ID of the queue's signed verdict record.
+	// +optional
+	Record string `json:"record,omitempty"`
+	// Error says why the verdict was refused: nothing was done, and the
+	// review unit failed.
+	// +optional
+	Error string `json:"error,omitempty"`
+}
+
+// WorkReview is what reviews last decided for one unit.
+type WorkReview struct {
+	// Do is rework, escalate or accept.
+	Do string `json:"do"`
+	// +optional
+	Why string `json:"why,omitempty"`
+	// Note is an accepted unit's note.
+	// +optional
+	Note string `json:"note,omitempty"`
+	// To is who an escalated unit waits for.
+	// +optional
+	To string `json:"to,omitempty"`
+	// By is the review unit's index.
+	By int32 `json:"by"`
+	// Passes counts the unit's reworks.
+	// +optional
+	Passes int32 `json:"passes,omitempty"`
+	// With is the rework's change to the unit's next attempts.
+	// +optional
+	With *WorkRework `json:"with,omitempty"`
+}
+
+// WorkRework changes a reworked unit's next attempts: what makes a rework
+// more than a retry.
+type WorkRework struct {
+	// +optional
+	AvoidNodes []string `json:"avoidNodes,omitempty"`
+	// Pool is the only pool the unit may run in.
+	// +optional
+	Pool string `json:"pool,omitempty"`
+	// Memory is the first container's memory request and limit.
+	// +optional
+	Memory string `json:"memory,omitempty"`
+	// Image replaces the first container's image.
+	// +optional
+	Image string `json:"image,omitempty"`
+	// +optional
+	Env map[string]string `json:"env,omitempty"`
+	// Inputs are views mounted read-only (a counterexample, a note).
+	// +optional
+	Inputs []WorkReworkInput `json:"inputs,omitempty"`
+	// Fresh starts from the job's inputs, not from the unit's last output.
+	// +optional
+	Fresh bool `json:"fresh,omitempty"`
+}
+
+// WorkReworkInput is a view a reworked unit mounts.
+type WorkReworkInput struct {
+	// +kubebuilder:validation:Pattern=`^c4[1-9A-HJ-NP-Za-km-z]{88}$`
+	View      string `json:"view"`
+	MountPath string `json:"mountPath"`
+}
+
 // UnitCounts counts a job's units by state.
 type UnitCounts struct {
 	Total int32 `json:"total,omitempty"`
 	// Planned counts generators not yet evaluated (DESIGN 10.6).
 	// +optional
-	Planned   int32 `json:"planned,omitempty"`
+	Planned int32 `json:"planned,omitempty"`
+	// Flagged counts units a review escalated to a person.
+	// +optional
+	Flagged   int32 `json:"flagged,omitempty"`
 	Queued    int32 `json:"queued,omitempty"`
 	Blocked   int32 `json:"blocked,omitempty"`
 	Preflight int32 `json:"preflight,omitempty"`
@@ -501,6 +604,9 @@ const (
 	// NeedsApproval: capacity that would restore the deadline waits for
 	// a person's approval.
 	NeedsApproval = "Approval"
+	// NeedsReview: a review unit escalated units to a person (they are
+	// flagged): requeue or accept them.
+	NeedsReview = "Review"
 	// NeedsQuota and NeedsPermission are reserved for a project's quota
 	// and an access block.
 	NeedsQuota      = "Quota"
