@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -306,5 +307,67 @@ func TestAttemptStartBlock(t *testing.T) {
 		if got := s.AttemptStart(name, &Checkpoint{Seq: 3, Session: "s"}); got != 9000 {
 			t.Errorf("block %v, later attempt: from %d", block, got)
 		}
+	}
+}
+
+// What an attempt reasoned with, from its transcript: the model that wrote
+// most of its output, every effort level it ran at (the last one in
+// force), its thinking mode, and the tools of the session's latest prompt
+// snapshot, though that came before the attempt began; MCP servers are
+// read from the tools' names.
+func TestTranscriptReasoning(t *testing.T) {
+	snapshot := `{"type":"attachment","attachment":{"type":"prompt_snapshot","tools":[{"name":"Read"},{"name":"Edit"},{"name":"mcp__docs__read"},{"name":"mcp__docs__write"},{"name":"mcp__git__log"}]}}` + "\n"
+	turn := func(id, model, effort string, out int) string {
+		return `{"type":"api-request","params":{"model":"` + model + `","thinking":{"type":"adaptive"}}}` + "\n" +
+			fmt.Sprintf(`{"type":"assistant","effort":%q,"message":{"id":%q,"model":%q,"usage":{"input_tokens":1,"output_tokens":%d}}}`+"\n", effort, id, model, out)
+	}
+	before := snapshot + turn("a", "claude-haiku-5-5", "low", 999)
+	path := filepath.Join(t.TempDir(), "t.jsonl")
+	if err := os.WriteFile(path, []byte(before+turn("b", "claude-opus-5-5", "medium", 400)+turn("c", "claude-haiku-5-5", "high", 100)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	d, err := TranscriptUsage(path, int64(len(before)), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := d.Reasoning
+	if r == nil || r.Does != "model" || r.Model != "claude-opus-5-5" || r.Effort != "high" || r.Thinking != "adaptive" {
+		t.Fatalf("reasoning %+v", r)
+	}
+	if strings.Join(r.Models, " ") != "claude-haiku-5-5 claude-opus-5-5" || strings.Join(r.Efforts, " ") != "medium high" {
+		t.Fatalf("models %v, efforts %v", r.Models, r.Efforts)
+	}
+	if len(r.ToolNames) != 5 || strings.Join(r.MCPServers, " ") != "docs git" {
+		t.Fatalf("tools %v, MCP servers %v", r.ToolNames, r.MCPServers)
+	}
+	// one model at one effort: no lists
+	one, _ := TranscriptUsage(path, 0, int64(len(before)))
+	if one.Reasoning.Models != nil || one.Reasoning.Efforts != nil || one.Reasoning.Effort != "low" {
+		t.Fatalf("one turn %+v", one.Reasoning)
+	}
+}
+
+// A block declares its effort (a flag its session starts with) and the
+// name of its tool profile.
+func TestBlockEffortAndProfile(t *testing.T) {
+	p := hostPod()
+	c := &p.Spec.Containers[0]
+	if blockProfile(p) != "default" {
+		t.Fatalf("profile %q without tools", blockProfile(p))
+	}
+	c.Env = append(c.Env, corev1.EnvVar{Name: EnvBlockTools, Value: "Read"})
+	if blockProfile(p) != "custom" {
+		t.Fatalf("profile %q with tools", blockProfile(p))
+	}
+	c.Env = append(c.Env, corev1.EnvVar{Name: EnvBlockProfile, Value: "read-only"}, corev1.EnvVar{Name: EnvBlockEffort, Value: "high"})
+	if blockProfile(p) != "read-only" {
+		t.Fatalf("profile %q", blockProfile(p))
+	}
+	flags, err := blockFlagsFor(p, "practice.j.u", "true")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if i := slices.Index(flags, "--effort"); i < 0 || flags[i+1] != "high" {
+		t.Fatalf("flags %v", flags)
 	}
 }

@@ -349,4 +349,7 @@ func TestHookUsage(t *testing.T) {
 	if d := read(); d.Models[0].OutputTokens != 500 || d.Models[0].InputTokens != 4 {
 		t.Fatalf("two turns %+v", d)
 	}
+	if r := read().Reasoning; r == nil || r.Does != "model" || r.Model != "claude-opus-5-5" {
+		t.Fatalf("reasoning %+v", r)
+	}
 }

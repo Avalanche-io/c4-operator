@@ -36,15 +36,30 @@ import (
 //	C4_BLOCK_REPO            the project's working tree on this host
 //	C4_BLOCK_TOOLS           the tools it may use without asking, space separated
 //	C4_BLOCK_MODEL           the model, when not the CLI's default
+//	C4_BLOCK_EFFORT          the effort level (low, medium, high, xhigh, max), when not the CLI's default
+//	C4_BLOCK_PROFILE         the name of its tool profile, for its usage.json (default: "default" without C4_BLOCK_TOOLS, else "custom")
 //	C4_BLOCK_REWORK          a reworked attempt: what the review asks (a verdict's with.env)
 const (
-	EnvBlock       = "C4_AGENT_BLOCK"
-	EnvBlockPrompt = "C4_BLOCK_PROMPT"
-	EnvBlockRepo   = "C4_BLOCK_REPO"
-	EnvBlockTools  = "C4_BLOCK_TOOLS"
-	EnvBlockModel  = "C4_BLOCK_MODEL"
-	EnvBlockRework = "C4_BLOCK_REWORK"
+	EnvBlock        = "C4_AGENT_BLOCK"
+	EnvBlockPrompt  = "C4_BLOCK_PROMPT"
+	EnvBlockRepo    = "C4_BLOCK_REPO"
+	EnvBlockTools   = "C4_BLOCK_TOOLS"
+	EnvBlockModel   = "C4_BLOCK_MODEL"
+	EnvBlockEffort  = "C4_BLOCK_EFFORT"
+	EnvBlockProfile = "C4_BLOCK_PROFILE"
+	EnvBlockRework  = "C4_BLOCK_REWORK"
 )
+
+// blockProfile is the name of a block's tool profile.
+func blockProfile(p *corev1.Pod) string {
+	switch {
+	case podEnv(p, EnvBlockProfile) != "":
+		return podEnv(p, EnvBlockProfile)
+	case podEnv(p, EnvBlockTools) == "":
+		return "default"
+	}
+	return "custom"
+}
 
 // DefaultBlockTools are the tools a block may use when its job names none:
 // reading and editing files, and git and go commands.
@@ -199,6 +214,9 @@ func blockFlagsFor(p *corev1.Pod, name, hookCommand string) ([]string, error) {
 	flags = append(flags, strings.Fields(tools)...)
 	if model := podEnv(p, EnvBlockModel); model != "" {
 		flags = append(flags, "--model", model)
+	}
+	if effort := podEnv(p, EnvBlockEffort); effort != "" {
+		flags = append(flags, "--effort", effort)
 	}
 	return flags, nil
 }

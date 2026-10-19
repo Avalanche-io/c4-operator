@@ -57,7 +57,8 @@ func (r *Runner) unitRoot(p *corev1.Pod) string {
 	return filepath.Join(base, string(p.UID))
 }
 
-// prepareUnit makes the pod's unit directory and records it on the member.
+// prepareUnit makes the pod's unit directory and records it on the member,
+// with the tool profile a block's attempt declares.
 func (r *Runner) prepareUnit(p *corev1.Pod, m *Member) (UnitDirs, error) {
 	u := UnitDirsAt(r.unitRoot(p))
 	for _, d := range []string{filepath.Join(u.Out, ".c4"), u.Control} {
@@ -65,7 +66,11 @@ func (r *Runner) prepareUnit(p *corev1.Pod, m *Member) (UnitDirs, error) {
 			return u, err
 		}
 	}
-	if m.UnitDir != u.Root {
+	profile := ""
+	if m.Block {
+		profile = blockProfile(p)
+	}
+	if m.UnitDir != u.Root || m.Profile != profile {
 		unlock, err := r.Harness.Store.Lock(m.Name)
 		if err != nil {
 			return u, err
@@ -75,11 +80,11 @@ func (r *Runner) prepareUnit(p *corev1.Pod, m *Member) (UnitDirs, error) {
 		if err != nil {
 			return u, err
 		}
-		cur.UnitDir = u.Root
+		cur.UnitDir, cur.Profile = u.Root, profile
 		if err := r.Harness.Store.Put(cur); err != nil {
 			return u, err
 		}
-		m.UnitDir = u.Root
+		m.UnitDir, m.Profile = u.Root, profile
 	}
 	return u, nil
 }

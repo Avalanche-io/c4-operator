@@ -128,6 +128,30 @@ price comes from the metering proxy or a price table. The node daemon (or
 the host runner) stores it as `c4.avalanche.io/output-usage`, and the queue
 counts it in the job's model spend.
 
+**What the attempt reasoned with.** The same file says what the attempt
+reasoned with, as its transcript records it: the observed side of a unit's
+declared `reasoning` (`does`, `model`, `effort`, `tools`).
+
+```json
+"reasoning": {
+  "does": "model",
+  "model": "claude-opus-5-5",
+  "effort": "medium",
+  "thinking": "adaptive",
+  "tools": "custom",
+  "toolNames": ["Edit", "EndConversation", "Glob", "Grep", "Read", "Write"]
+}
+```
+
+- `model` is the model that wrote most of the attempt's output, and
+  `models` lists every model, when it used more than one.
+- `effort` is the effort level at its last turn, and `efforts` lists
+  every level it ran at, when there was more than one.
+- `thinking` is the thinking mode it asked for.
+- `tools` is the name of the profile a block declares (`C4_BLOCK_PROFILE`),
+  `toolNames` the tools the session offered the model, and `mcpServers`
+  the MCP servers among them (from `mcp__<server>__` names).
+
 ## Bundles on the farm: the host runner
 
 An `AgentBundle` names a team of members, how many may run at once, its
@@ -220,14 +244,16 @@ runner starts for the unit's first attempt and resumes by its session ID
 for every later one. This is the builder driver of proposals agent-jobs
 10.14. `c4-agent runner --blocks-cwd DIR` turns it on.
 
-| variable          | set by                   | what                                                         |
-| ----------------- | ------------------------ | ------------------------------------------------------------ |
-| `C4_AGENT_BLOCK`  | the job's template       | `1`: the pod is a block                                      |
-| `C4_BLOCK_PROMPT` | the template, or a unit's `env` in its document (the unit's wins) | the block's task                |
-| `C4_BLOCK_REPO`   | the template             | the project's working tree on the host                       |
-| `C4_BLOCK_TOOLS`  | the template             | the tools it may use, space separated (default `Read Edit Write Glob Grep Bash(git:*) Bash(go:*)`) |
-| `C4_BLOCK_MODEL`  | the template or a unit   | the model, when not the CLI's default                        |
-| `C4_BLOCK_REWORK` | a verdict's `with.env`   | a reworked attempt: what the review asks                     |
+| variable           | set by                                                            | what                                                                                                        |
+| ------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `C4_AGENT_BLOCK`   | the job's template                                                | `1`: the pod is a block                                                                                     |
+| `C4_BLOCK_PROMPT`  | the template, or a unit's `env` in its document (the unit's wins) | the block's task                                                                                            |
+| `C4_BLOCK_REPO`    | the template                                                      | the project's working tree on the host                                                                      |
+| `C4_BLOCK_TOOLS`   | the template                                                      | the tools it may use, space separated (default `Read Edit Write Glob Grep Bash(git:*) Bash(go:*)`)          |
+| `C4_BLOCK_MODEL`   | the template or a unit                                            | the model, when not the CLI's default                                                                       |
+| `C4_BLOCK_EFFORT`  | the template or a unit                                            | the effort level (`--effort`: low, medium, high, xhigh, max), when not the CLI's default                    |
+| `C4_BLOCK_PROFILE` | the template or a unit                                            | the name of its tool profile, reported in usage.json (default `default`, or `custom` with `C4_BLOCK_TOOLS`) |
+| `C4_BLOCK_REWORK`  | a verdict's `with.env`                                            | a reworked attempt: what the review asks                                                                    |
 
 - **The member** is `<namespace>.<job>.<unit>`, registered when its session
   starts, and marked a block.

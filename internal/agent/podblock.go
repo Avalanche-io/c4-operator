@@ -97,6 +97,7 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 			return 1, err
 		}
 		m.Epoch++
+		m.Profile = blockProfile(p)
 		if err := st.Put(m); err != nil {
 			return 1, err
 		}
@@ -107,7 +108,7 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 		}
 	} else if errors.Is(err, os.ErrNotExist) {
 		session := newSessionID()
-		m = &Member{Name: name, Session: session, Cwd: b.Cwd, ConfigDir: b.ConfigDir, Flags: flags, Block: true, Registered: time.Now().UTC()}
+		m = &Member{Name: name, Session: session, Cwd: b.Cwd, ConfigDir: b.ConfigDir, Flags: flags, Block: true, Profile: blockProfile(p), Registered: time.Now().UTC()}
 		b.logf("started %s (session %s)", name, session)
 		register := func(exited <-chan struct{}) error { return b.register(ctx, h, m, exited) }
 		if err := b.claude(ctx, append(append([]string{"-p", "--session-id", session}, flags...), "--", blockPrompt(p, u)), register); err != nil {

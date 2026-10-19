@@ -110,7 +110,8 @@ func safepointRef(input []byte, cp *agent.Checkpoint) string {
 
 // hookUsage writes the attempt's token use so far to the unit's
 // .c4/usage.json, per model (the queue's model spend; c4-unit usage's
-// shape), totalled from the session's transcript. The attempt starts where
+// shape), totalled from the session's transcript, with what it reasoned
+// with (models, effort, thinking, tools; the member's declared profile). The attempt starts where
 // the checkpoint it resumed from ends, recorded in .c4/usage.from at its
 // first turn, so a resumed member's earlier attempts are not counted
 // again. The file is rewritten whole each turn, so a hook that runs twice
@@ -153,6 +154,9 @@ func hookUsage(h *agent.Harness, input []byte, cp *agent.Checkpoint, out string)
 	d, err := agent.TranscriptUsage(in.TranscriptPath, from, to)
 	if err != nil {
 		return err
+	}
+	if m != nil && d.Reasoning != nil {
+		d.Reasoning.Tools = m.Profile
 	}
 	b, err := json.MarshalIndent(d, "", "  ")
 	if err != nil {
