@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"syscall"
+	"time"
 )
 
 // Active is one running Claude Code session, as `claude agents --json`
@@ -183,9 +185,46 @@ func (c *CLI) Start(ctx context.Context, configDir, dir string, flags []string, 
 }
 
 // Stop runs `claude stop <short id>`; the CLI does not match full IDs.
+//
+// It returns once the session's process has exited, not when the CLI
+// says it is stopped: the process takes a moment to go (about a second),
+// and a resume in that moment finds the session still running and starts
+// a copy (Claude Code 2.1.303, seen once in a run of parts).
 func (c *CLI) Stop(ctx context.Context, configDir, session string) error {
-	_, err := c.run(ctx, configDir, "", "stop", ShortID(session))
-	return err
+	pid := 0
+	if as, err := c.Active(ctx, configDir, false); err == nil {
+		for _, a := range as {
+			if strings.EqualFold(a.SessionID, session) {
+				pid = a.Pid
+			}
+		}
+	}
+	if _, err := c.run(ctx, configDir, "", "stop", ShortID(session)); err != nil {
+		return err
+	}
+	return waitExit(ctx, pid, stopWait)
+}
+
+// stopWait bounds the wait for a stopped session's process to exit.
+const stopWait = 15 * time.Second
+
+// waitExit waits until process pid is gone (pid 0: nothing to wait for).
+func waitExit(ctx context.Context, pid int, limit time.Duration) error {
+	if pid <= 0 {
+		return nil
+	}
+	deadline := time.Now().Add(limit)
+	for syscall.Kill(pid, 0) == nil {
+		if time.Now().After(deadline) {
+			return fmt.Errorf("process %d still running %s after its session was stopped", pid, limit)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+	return nil
 }
 
 func truncate(b []byte, n int) string {
