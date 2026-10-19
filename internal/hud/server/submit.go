@@ -97,6 +97,21 @@ func (s *Server) writerStore(w http.ResponseWriter, r *http.Request) (*api.Viewe
 		fail(w, http.StatusServiceUnavailable, "the HUD is still reading the farm")
 		return nil, nil, ""
 	}
+	if host, ok := strings.CutPrefix(v.User, HostAccountPrefix); ok {
+		// A host runner stores its units' documents and session views as
+		// its own account, for exactly the projects whose units it runs.
+		project := r.PathValue("project")
+		if !hostRuns(m, host, project) {
+			fail(w, http.StatusForbidden, "host %s runs no unit of project %s", host, project)
+			return nil, nil, ""
+		}
+		st, err := s.Stores(r.Context(), project)
+		if err != nil || st == nil {
+			fail(w, http.StatusServiceUnavailable, "the project's store is not available: %v", err)
+			return nil, nil, ""
+		}
+		return v, st, project
+	}
 	project, ns, err := s.project(m, v, r.PathValue("project"), "")
 	if err != nil || s.Stores == nil {
 		fail(w, http.StatusNotFound, "no project %s", r.PathValue("project"))
@@ -112,6 +127,25 @@ func (s *Server) writerStore(w http.ResponseWriter, r *http.Request) (*api.Viewe
 		return nil, nil, ""
 	}
 	return v, st, project
+}
+
+// HostAccountPrefix names host runners' service accounts:
+// c4-hosts/<node> (config/rbac/host-runner.yaml).
+const HostAccountPrefix = "system:serviceaccount:c4-hosts:"
+
+// hostRuns reports whether a unit pod of project is bound to node, the
+// host runner's own: the only projects a host may write objects for.
+func hostRuns(m *model, node, project string) bool {
+	if node == "" || project == "" {
+		return false
+	}
+	for i := range m.pods {
+		p := &m.pods[i]
+		if p.Spec.NodeName == node && m.nsProject[p.Namespace] == project {
+			return true
+		}
+	}
+	return false
 }
 
 // missing returns the IDs the store lacks, in input order.

@@ -251,3 +251,31 @@ func writeFile(t *testing.T, dir, rel string, b []byte) {
 		t.Fatal(err)
 	}
 }
+
+// A host runner (c4-hosts/<node>) writes objects as itself, only for
+// projects with a unit pod bound to its node.
+func TestHostUploadsForItsOwnUnits(t *testing.T) {
+	s := submitFarm(t)
+	// farm(): show-a has units on w1 and w2; show-b one on w2
+	s.DevViewers["host-w1"] = &api.Viewer{User: HostAccountPrefix + "w1", Projects: []string{}}
+	s.DevViewers["host-w9"] = &api.Viewer{User: HostAccountPrefix + "w9", Projects: []string{}}
+	doc := []byte(`{"done": 3, "of": 5}`)
+	id := c4.Identify(bytes.NewReader(doc)).String()
+	if code := call(t, s, http.MethodPut, "/api/v1/objects/show-a/"+id+"?as=host-w1", doc, nil); code != 200 {
+		t.Fatalf("w1 storing for show-a, whose unit it runs: %d", code)
+	}
+	var miss api.MissingResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/objects/show-a/missing?as=host-w1", api.MissingRequest{IDs: []string{id}}, &miss); code != 200 || len(miss.Missing) != 0 {
+		t.Fatalf("missing as the host: %d %v", code, miss.Missing)
+	}
+	if code := call(t, s, http.MethodPut, "/api/v1/objects/show-b/"+id+"?as=host-w1", doc, nil); code != http.StatusForbidden {
+		t.Fatalf("w1 storing for show-b, which runs nothing on it: %d", code)
+	}
+	if code := call(t, s, http.MethodPut, "/api/v1/objects/show-a/"+id+"?as=host-w9", doc, nil); code != http.StatusForbidden {
+		t.Fatalf("a host with no units storing: %d", code)
+	}
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render"})
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=host-w1", api.SubmitRequest{Project: "show-a", Spec: spec}, nil); code == http.StatusCreated {
+		t.Fatal("a host account submitted a job")
+	}
+}

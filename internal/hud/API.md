@@ -624,6 +624,11 @@ HUD's service account; the bytes go through the manager's own store access,
 so no store credential leaves the cluster. `{project}` is a project the
 viewer sees; anything else is `404`.
 
+A host runner, signed in as its own service account `c4-hosts/<node>`, may
+call the three object and view writes below for a project only while a unit
+pod of that project is bound to its Node (`403` otherwise). That is how it
+stores its units' control documents and session views; it cannot submit.
+
 ### POST /objects/{project}/missing
 
 ```
