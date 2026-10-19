@@ -30,7 +30,9 @@ record "## P7: provenance, a signer per entity ($(date -u +%Y-%m-%dT%H:%MZ), bui
 record ""
 
 farm_manager
-k apply -f "$ROOT/hack/e2e/hud.yaml" >/dev/null
+# P5's pools and quotas, so P7 also runs on a farm P5 never ran on
+k apply -f "$ROOT/hack/e2e/work.yaml" -f "$ROOT/hack/e2e/hud.yaml" >/dev/null
+k patch project show-a --type=merge -p '{"spec":{"work":{"quotas":[{"pool":"cpu","nominal":8,"borrowingLimit":8},{"pool":"gpu","nominal":4,"borrowingLimit":4},{"pool":"spot","nominal":0,"borrowingLimit":8}]}}}' >/dev/null
 log "the certificate issuer"
 until [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SIGNER/v1/certificate")" = 401 ]; do sleep 1; done
 k -n c4-system get configmap c4-provenance -o jsonpath='{.data.ca\.crt}' >"$OUT/p7-roots.pem"
