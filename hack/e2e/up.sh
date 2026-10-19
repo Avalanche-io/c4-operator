@@ -12,7 +12,12 @@ if [ "${FRESH:-}" = 1 ]; then
 fi
 log "cluster"
 if ! "$KIND" get clusters | grep -qx "$CLUSTER"; then
-  "$KIND" create cluster --name "$CLUSTER" --config "$ROOT/hack/e2e/kind.yaml" --wait 120s
+  # the host ports, moved by E2E_PORT_OFFSET (lib.sh)
+  cfg=$(mktemp)
+  awk -v po="$PO" '{ if (match($0, /hostPort: [0-9]+/)) { p = substr($0, RSTART + 10, RLENGTH - 10); sub(/hostPort: [0-9]+/, "hostPort: " (p + po)) } print }' \
+    "$ROOT/hack/e2e/kind.yaml" >"$cfg"
+  "$KIND" create cluster --name "$CLUSTER" --config "$cfg" --wait 120s
+  rm -f "$cfg"
 fi
 
 log "images"
@@ -29,7 +34,7 @@ done
 log "store: three MinIO shards"
 k apply -f "$ROOT/hack/e2e/minio.yaml" >/dev/null
 for i in 0 1 2; do k -n c4-store rollout status "deploy/minio-$i" --timeout=180s >/dev/null; done
-for i in 0 1 2; do until curl -sf "http://127.0.0.1:3090$i/minio/health/ready" >/dev/null; do sleep 1; done; done
+for i in 0 1 2; do until curl -sf "http://127.0.0.1:$(s3port "$i")/minio/health/ready" >/dev/null; do sleep 1; done; done
 mc_run 'for i in 0 1 2; do for b in show-a show-b herd-tiered herd-direct mono; do mc mb --ignore-existing m$i/$b >/dev/null; done; done; echo buckets ready'
 
 log "operator"

@@ -4,6 +4,16 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 CLUSTER=${CLUSTER:-c4-operator-e2e}
 CTX=kind-$CLUSTER
+# E2E_PORT_OFFSET moves every port the farm publishes on this machine (the
+# HUD, the signer, the three MinIO shards), so a second e2e cluster can run
+# beside another. A multiple of 10; 0 keeps 30080, 30081 and 30900-30902.
+PO=${E2E_PORT_OFFSET:-0}
+if [ $((PO % 10)) -ne 0 ]; then echo "E2E_PORT_OFFSET must be a multiple of 10" >&2; exit 2; fi
+HUD_PORT=$((30080 + PO))
+SIGNER_PORT=$((30081 + PO))
+s3port() { echo $((30900 + $1 + PO)); }
+# an endpoint pattern for tools that add the shard index (0, 1, 2)
+S3_ENDPOINT_FMT="http://127.0.0.1:$(((30900 + PO) / 10))%s"
 OUT=$ROOT/hack/e2e/out
 # The commit the binaries and images were built from, for the results.
 BUILD=$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)
@@ -30,7 +40,7 @@ shard_args() {
   local bucket=$1 where=$2 i
   for i in 0 1 2; do
     if [ "$where" = host ]; then
-      printf -- '--shard s%d=s3://%s/c4/?endpoint=http://127.0.0.1:3090%d ' "$i" "$bucket" "$i"
+      printf -- '--shard s%d=s3://%s/c4/?endpoint=http://127.0.0.1:%d ' "$i" "$bucket" "$(s3port "$i")"
     else
       printf -- '--shard s%d=s3://%s/c4/?endpoint=http://minio-%d.c4-store:9000 ' "$i" "$bucket" "$i"
     fi
@@ -69,7 +79,7 @@ mc_run() {
 store_gets() {
   local total=0 i n
   for i in 0 1 2; do
-    n=$(curl -sf "http://127.0.0.1:3090$i/minio/v2/metrics/cluster" |
+    n=$(curl -sf "http://127.0.0.1:$(s3port "$i")/minio/v2/metrics/cluster" |
       awk '/^minio_s3_requests_total\{/ && /api="getobject"/ {s+=$NF} END {printf "%d", s}')
     total=$((total + ${n:-0}))
   done
@@ -197,7 +207,7 @@ store_gets_settled() { settled store_gets; }
 bucket_requests() {
   local i g=0 h=0 line
   for i in 0 1 2; do
-    line=$(curl -sf "http://127.0.0.1:3090$i/minio/v2/metrics/bucket" |
+    line=$(curl -sf "http://127.0.0.1:$(s3port "$i")/minio/v2/metrics/bucket" |
       awk -v b="bucket=\"$1\"" '
         /^minio_bucket_requests_total\{/ && index($0, b) && /api="getobject"/ { g += $NF }
         /^minio_bucket_requests_total\{/ && index($0, b) && /api="headobject"/ { h += $NF }
@@ -251,5 +261,5 @@ farm_manager() {
     k -n c4-system patch deploy c4-manager --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args\",\"value\":$want}]" >/dev/null
   fi
   k -n c4-system rollout status deploy/c4-manager --timeout=180s >/dev/null
-  until curl -sf "http://127.0.0.1:30080/api/v1/snapshot?as=wrangler" >/dev/null; do sleep 1; done
+  until curl -sf "http://127.0.0.1:$HUD_PORT/api/v1/snapshot?as=wrangler" >/dev/null; do sleep 1; done
 }

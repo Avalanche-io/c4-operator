@@ -90,7 +90,7 @@ spec:
 EOF
   mat_view "$ns" p5-show >/dev/null
 done
-until curl -sf http://127.0.0.1:30080/api/v1/snapshot >/dev/null; do sleep 1; done
+until curl -sf "http://127.0.0.1:$HUD_PORT/api/v1/snapshot" >/dev/null; do sleep 1; done
 
 log "t=0: renders, a CI change and two training runs"
 T0=$(now)
@@ -160,6 +160,6 @@ jobs_csv >"$OUT/p5-jobs.csv"
 k -n show-b get workjob train-denoise train-upres -o json >"$OUT/p5-ml.json"
 sort -u "$OUT/p5-resume-raw.txt" | sed -E 's#^\[pod/([a-z-]+)-u[0-9]+-[a-z0-9]+/[a-z]+\] #\1: #' >"$OUT/p5-resume.txt"
 k -n show-a get workjob sh010-comp-v003 -o json >"$OUT/p5-sh010.json"
-curl -s 'http://127.0.0.1:30080/api/v1/snapshot?as=wrangler' >"$OUT/p5-snapshot.json"
+curl -s "http://127.0.0.1:$HUD_PORT/api/v1/snapshot?as=wrangler" >"$OUT/p5-snapshot.json"
 python3 -I "$ROOT/hack/e2e/p5report.py" "$OUT" "$T0" "$WALL" | while IFS= read -r line; do record "$line"; done
 echo "P5 PASS"

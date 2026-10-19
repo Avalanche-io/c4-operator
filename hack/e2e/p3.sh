@@ -182,12 +182,12 @@ record "Projects \`iso-a\` and \`iso-b\` are Strict, each with its own bucket an
 record ""
 
 log "1. the stores"
-out_b=$(AWS_ACCESS_KEY_ID=iso-b AWS_SECRET_ACCESS_KEY=iso-b-e2e-secret "$TOOL" s3get --list "$OUT/p3-sh900.objects" --bucket iso-a --endpoint-fmt 'http://127.0.0.1:3090%s' 2>&1 || true)
+out_b=$(AWS_ACCESS_KEY_ID=iso-b AWS_SECRET_ACCESS_KEY=iso-b-e2e-secret "$TOOL" s3get --list "$OUT/p3-sh900.objects" --bucket iso-a --endpoint-fmt "$S3_ENDPOINT_FMT" 2>&1 || true)
 case "$out_b" in
   *403* | *AccessDenied* | *"Access Denied"*) ;;
   *) fail "iso-b's credentials read iso-a's bucket: $out_b" ;;
 esac
-AWS_ACCESS_KEY_ID=iso-a AWS_SECRET_ACCESS_KEY=iso-a-e2e-secret "$TOOL" s3get --list "$OUT/p3-sh900.objects" --bucket iso-a --endpoint-fmt 'http://127.0.0.1:3090%s' >/dev/null ||
+AWS_ACCESS_KEY_ID=iso-a AWS_SECRET_ACCESS_KEY=iso-a-e2e-secret "$TOOL" s3get --list "$OUT/p3-sh900.objects" --bucket iso-a --endpoint-fmt "$S3_ENDPOINT_FMT" >/dev/null ||
   fail "iso-a cannot read its own bucket"
 
 log "2. by ID and by hand-written c4m"

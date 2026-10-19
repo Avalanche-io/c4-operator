@@ -9,7 +9,7 @@
 source "$(dirname "$0")/lib.sh"
 
 REPO=${REPO:-/tmp/c4-monorepo-e2e/repo}
-HUD=http://127.0.0.1:30080/api/v1
+HUD=http://127.0.0.1:$HUD_PORT/api/v1
 export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 [ -x "$ROOT/bin/c4git" ] || GOBIN=$ROOT/bin go install github.com/Avalanche-io/c4git/cmd/c4git@latest
 if [ ! -d "$REPO" ]; then

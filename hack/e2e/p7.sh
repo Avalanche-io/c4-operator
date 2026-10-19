@@ -14,8 +14,8 @@
 #   hack/e2e/p7.sh        (after hack/e2e/up.sh; P5 leaves the pools set up)
 source "$(dirname "$0")/lib.sh"
 
-HUD=http://127.0.0.1:30080/api/v1
-SIGNER=http://127.0.0.1:30081
+HUD=http://127.0.0.1:$HUD_PORT/api/v1
+SIGNER=http://127.0.0.1:$SIGNER_PORT
 go build -o "$ROOT/bin/mcpcheck" "$ROOT/hack/e2e/mcpcheck"
 get() { # PATH: GET from the HUD as the wrangler
   local sep='?'
@@ -148,7 +148,7 @@ k -n show-a wait --for=jsonpath='{.status.phase}'=Succeeded workjob/sh050-render
 until [ -n "$(k -n show-a get workjob sh050-render-v002 -o jsonpath='{.status.output.record}')" ]; do sleep 1; done
 
 log "an agent releases the denoise through MCP"
-"$ROOT/bin/mcpcheck" --server "$OP mcp --hud http://127.0.0.1:30080 --as wrangler" \
+"$ROOT/bin/mcpcheck" --server "$OP mcp --hud http://127.0.0.1:$HUD_PORT --as wrangler" \
   'c4_hold_job {"namespace": "show-a", "name": "sh050-denoise-v002", "hold": false}' >"$OUT/p7-mcp-release.jsonl"
 CONTROL=$(k -n show-a get workjob sh050-denoise-v002 -o jsonpath='{.metadata.annotations.c4\.avalanche\.io/control-records}')
 [ -n "$CONTROL" ] || fail "the release through MCP left no control record"
@@ -202,7 +202,7 @@ while IFS= read -r line; do record "$line"; done <"$OUT/p7-custody.md"
 record ""
 
 log "the same verdict through MCP"
-"$ROOT/bin/mcpcheck" --server "$OP mcp --hud http://127.0.0.1:30080 --as wrangler" \
+"$ROOT/bin/mcpcheck" --server "$OP mcp --hud http://127.0.0.1:$HUD_PORT --as wrangler" \
   "c4_verify_custody {\"namespace\": \"show-a\", \"name\": \"sh050-denoise-v002\", \"path\": \"$FRAME\"}" >"$OUT/p7-mcp.jsonl"
 python3 -I - "$OUT/p7-mcp.jsonl" <<'PY2' | while IFS= read -r line; do record "$line"; done
 import json, sys
