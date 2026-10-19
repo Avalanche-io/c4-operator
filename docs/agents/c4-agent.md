@@ -246,12 +246,30 @@ for every later one. This is the builder driver of proposals agent-jobs
 - **A later attempt** (a rework, a yield) wakes the same session by its ID,
   with what the review asks (`C4_BLOCK_REWORK`) or that the farm resumed
   it, and the attempt's new output directory.
-- **An attempt ends with its turn.** When the CLI reports the session idle
-  after a turn this attempt saved, the runner stops it. A task it finished
-  (`done`) ends the pod **Completed**, with its control documents from its
-  own output directory only (block sessions share their folder, so the
-  folder's `.c4/` never counts). A task it gave up on (`blocked`) fails the
-  attempt (**BlockGaveUp**), for the job's retries or a person.
+- **A turn's end is a safe point.** When the CLI reports the session idle
+  after a turn this attempt saved, the runner stops it, and then:
+  - if the farm answered **stop** at that safe point, the pod **Yields**
+    with its checkpoint, and the next attempt resumes the session by ID;
+  - if the block wrote a note of its **next part** (`.c4/more`; an empty
+    note is withdrawn), the runner wakes the same session for that part, in
+    the same attempt, so every part's end is a safe point and a turn
+    boundary;
+  - if the block wrote **`.c4/done`** (its one-line summary), or the CLI
+    reports it `done`, the pod is **Completed**. Its control documents come
+    from its own output directory only; block sessions share their folder,
+    so the folder's `.c4/` never counts. The block's own word decides: the
+    CLI's state is a reading of its last message, which can call a finished
+    task blocked;
+  - otherwise it gave up, and the attempt fails (**BlockGaveUp**), for the
+    job's retries or a person.
+- **A yield waits for the farm's decision.** A block asked to yield (a
+  hold-stop, a preemption, or its pod's deletion, which the farm treats as
+  a drain) is left to reach its next safe point without blocking the
+  runner. There, a stop yields it, and a continue (the stop no longer
+  holds) lets it go on. A pod the farm is deleting is finished by the
+  runner, as a kubelet would when its grace ends: the host's role may
+  delete pods, and its policy only its own pods the farm is already
+  deleting. A block withdrawn before its session started is let go.
 - **A session that cannot become the member** (its transcript never
   appears) is stopped, so a retry never leaves one running.
 
