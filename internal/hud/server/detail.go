@@ -172,7 +172,7 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 			e["reused"] = true
 		}
 		if rec.driver != nil {
-			e["kind"] = class.KindOf(rec.driver, u)
+			e["does"] = class.DoesOf(rec.driver, u)
 		}
 		if us, ok := rec.job.Status.ModelUsage[strconv.Itoa(i)]; ok {
 			e["usage"] = us

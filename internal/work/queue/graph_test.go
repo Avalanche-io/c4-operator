@@ -431,7 +431,7 @@ func TestSpendByKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	tick(t, q)
-	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "impl", "kind": "model"}, {"name": "check", "after": ["impl"]}]}`)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "impl", "does": "model"}, {"name": "check", "after": ["impl"]}]}`)
 	finish(t, podOfUnit(t, ns, "kinds", 0), corev1.PodSucceeded, *now, 30*time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
 	tick(t, q)
 	usage := putDoc(t, st, `{"models": [{"model": "claude-opus-5-5", "inputTokens": 120000, "outputTokens": 8000, "cacheReadTokens": 90000, "costUSD": 1.92},
@@ -451,8 +451,13 @@ func TestSpendByKind(t *testing.T) {
 			sp.EstimatedTokenCost != "0.0002" || sp.ModelShareBasis != "estimated" || sp.CacheReadTokens != 90000 || sp.InputTokens != 122000 {
 			t.Fatalf("%s: spend %+v", when, sp)
 		}
+		// Of the slot time, models did a third (half an hour of an hour
+		// and a half), though most of the cost.
+		if sp.ModelSlotHours != "0.5000" || sp.ProceduralSlotHours != "1.0000" || sp.ModelWorkShare != "0.333" {
+			t.Fatalf("%s: slot hours %s and %s, work share %s", when, sp.ModelSlotHours, sp.ProceduralSlotHours, sp.ModelWorkShare)
+		}
 		if u := got.Status.ModelUsage["1"]; len(u.Models) != 2 || u.Models[1].Model != "claude-opus-5-5" || u.InputTokens != 122000 || u.Cost != "1.9200" ||
-			u.Models[0].Cost != "" || u.CostSource != "metering-proxy" || u.SlotCost != "0.2000" {
+			u.Models[0].Cost != "" || u.CostSource != "metering-proxy" || u.SlotCost != "0.2000" || u.SlotHours != "0.5000" {
 			t.Fatalf("%s: usage %+v", when, got.Status.ModelUsage)
 		}
 	}

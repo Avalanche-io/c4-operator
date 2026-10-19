@@ -102,3 +102,44 @@ func TestExpandDocumentRefuses(t *testing.T) {
 		t.Fatalf("depth: %v", err)
 	}
 }
+
+// does says what does a unit's work. A document may give it, or the older
+// kind (procedural or model); both must agree. The graph root is a
+// procedure unless rootDoes says it is a model (a generator reading a plan
+// from prose); an agent member is a model by class.
+func TestDoes(t *testing.T) {
+	d, _ := Lookup("graph")
+	p, err := d.Plan(graphJob(map[string]string{"rootDoes": "model"}))
+	if err != nil || DoesOf(d, p.Units[0]) != DoesModel {
+		t.Fatalf("model root: %+v %v", p, err)
+	}
+	if p, _ := d.Plan(graphJob(nil)); DoesOf(d, p.Units[0]) != DoesProcedure {
+		t.Fatal("the root is a procedure by default")
+	}
+	if _, err := d.Plan(graphJob(map[string]string{"rootDoes": "llm"})); err == nil {
+		t.Fatal("rootDoes llm accepted")
+	}
+	root := Unit{Name: "plan", Key: "graph", Generator: true}
+	doc := `{"version": 1, "units": [{"name": "a", "does": "model"}, {"name": "b", "kind": "model"},
+	  {"name": "c", "kind": "procedural"}, {"name": "d"}]}`
+	x, err := ExpandDocument(graphJob(nil), root, []byte(doc), map[string]int{"plan": 0}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got []string
+	for _, u := range x.Units {
+		got = append(got, DoesOf(d, u))
+	}
+	if want := []string{"model", "model", "procedure", "procedure"}; !slices.Equal(got, want) {
+		t.Fatalf("does %v, want %v", got, want)
+	}
+	for _, bad := range []string{`{"name": "a", "does": "model", "kind": "procedural"}`, `{"name": "a", "does": "human"}`} {
+		if _, err := ExpandDocument(graphJob(nil), root, []byte(`{"version": 1, "units": [`+bad+`]}`), map[string]int{"plan": 0}, 1); err == nil {
+			t.Fatalf("accepted %s", bad)
+		}
+	}
+	a, _ := Lookup("agent")
+	if DoesOf(a, Unit{}) != DoesModel {
+		t.Fatal("an agent member is a model unit")
+	}
+}

@@ -765,6 +765,11 @@ spec:
                       type: integer
                     slotCost:
                       type: string
+                    slotHours:
+                      description: |-
+                        SlotHours is the unit's slot time over its attempts, a decimal
+                        string.
+                      type: string
                     unpricedTokens:
                       format: int64
                       type: integer
@@ -987,6 +992,13 @@ spec:
                     type: string
                   modelSlotCost:
                     type: string
+                  modelSlotHours:
+                    description: |-
+                      ModelSlotHours and ProceduralSlotHours are the slot time each kind
+                      of unit ran (hours times slots, every attempt), decimal strings, and
+                      ModelWorkShare the model units' part of it, 0 to 1: the share of the
+                      work models did, whatever it cost (ModelShare is of the spend).
+                    type: string
                   modelTokens:
                     description: |-
                       ModelTokens is every token model units used, raw (input, output,
@@ -1000,10 +1012,14 @@ spec:
                       have run.
                     format: int32
                     type: integer
+                  modelWorkShare:
+                    type: string
                   outputTokens:
                     format: int64
                     type: integer
                   proceduralSlotCost:
+                    type: string
+                  proceduralSlotHours:
                     type: string
                   proceduralUnits:
                     format: int32

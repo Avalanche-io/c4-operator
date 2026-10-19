@@ -581,6 +581,16 @@ type WorkSpend struct {
 	ModelShare string `json:"modelShare,omitempty"`
 	// +optional
 	ModelShareBasis string `json:"modelShareBasis,omitempty"`
+	// ModelSlotHours and ProceduralSlotHours are the slot time each kind
+	// of unit ran (hours times slots, every attempt), decimal strings, and
+	// ModelWorkShare the model units' part of it, 0 to 1: the share of the
+	// work models did, whatever it cost (ModelShare is of the spend).
+	// +optional
+	ModelSlotHours string `json:"modelSlotHours,omitempty"`
+	// +optional
+	ProceduralSlotHours string `json:"proceduralSlotHours,omitempty"`
+	// +optional
+	ModelWorkShare string `json:"modelWorkShare,omitempty"`
 }
 
 // WorkUnitUsage is one model unit's use of models over its attempts:
@@ -609,6 +619,10 @@ type WorkUnitUsage struct {
 	Cost string `json:"cost,omitempty"`
 	// +optional
 	SlotCost string `json:"slotCost,omitempty"`
+	// SlotHours is the unit's slot time over its attempts, a decimal
+	// string.
+	// +optional
+	SlotHours string `json:"slotHours,omitempty"`
 	// CostSource says where the price came from (a metering proxy, a
 	// price table).
 	// +optional

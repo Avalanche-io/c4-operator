@@ -48,7 +48,7 @@ func (q *Queue) reuseUnits(ctx context.Context, v *view, now time.Time) bool {
 	resolved, reused := false, false
 	for _, idx := range v.runnable {
 		u := plan.Units[idx]
-		if class.KindOf(v.driver, u) != class.KindProcedural || u.Generator || u.Gate != "" || len(u.Inputs) > 0 ||
+		if class.DoesOf(v.driver, u) != class.DoesProcedure || u.Generator || u.Gate != "" || len(u.Inputs) > 0 ||
 			m.rework(idx) != nil || m.resume[idx] != "" || isWait(plan, idx) {
 			continue
 		}

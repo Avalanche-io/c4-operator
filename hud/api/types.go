@@ -441,6 +441,10 @@ type Job struct {
 	Measure *Measure `json:"measure,omitempty"`
 	// Spend splits what the job cost between procedural and model units.
 	Spend *Spend `json:"spend,omitempty"`
+	// ModelShare is the share of the job's work (slot time, every attempt)
+	// that model units did, 0 to 1; absent before any unit ran. Spend's
+	// ModelShare is their share of the cost.
+	ModelShare *float64 `json:"modelShare,omitempty"`
 	// Acks are the standing acknowledgements of failed units.
 	Acks []Ack `json:"acks,omitempty"`
 	// Waits are what the job waits for: its wait units (a ruling, an

@@ -229,6 +229,10 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 			WeightedTokens: sp.WeightedTokens, UnpricedWeightedTokens: sp.UnpricedWeightedTokens, EstimatedTokenCost: f(sp.EstimatedTokenCost),
 			ModelShareBasis: sp.ModelShareBasis,
 			TokenCost:       f(sp.TokenCost), ModelSlotCost: f(sp.ModelSlotCost), ProceduralSlotCost: f(sp.ProceduralSlotCost), ModelShare: f(sp.ModelShare)}
+		if sp.ModelWorkShare != "" {
+			ms := f(sp.ModelWorkShare)
+			aj.ModelShare = &ms
+		}
 	}
 	if ms := st.Measure; ms != nil {
 		aj.Measure = &api.Measure{Name: ms.Name, Value: ms.Value, Of: ms.Of, Done: ms.Done, Detail: ms.Detail,

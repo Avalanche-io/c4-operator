@@ -53,9 +53,11 @@ type FileBlock struct {
 	Holds   []string          `json:"holds,omitempty"`
 	Claims  []class.DocClaim  `json:"claims,omitempty"`
 	Gate    string            `json:"gate,omitempty"`
-	Kind    string            `json:"kind,omitempty"`
+	Does    string            `json:"does,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
 	Wait    *class.DocWait    `json:"wait,omitempty"`
+	// Kind is the older spelling of Does (procedural or model).
+	Kind string `json:"kind,omitempty"`
 	// Before lists blocks that run after this one: the same edges as their
 	// After, written where the reason is (a wait before what it holds up).
 	Before []string `json:"before,omitempty"`
@@ -105,7 +107,11 @@ func FromFile(f *File, file string) (*Plan, error) {
 		if fb.Slots > 0 {
 			u.Slots = fb.Slots
 		}
-		u.Work, u.WorkSD, u.Env, u.Inputs, u.Holds, u.Claims, u.Gate, u.Kind = fb.Work, fb.WorkSD, fb.Env, fb.Inputs, fb.Holds, fb.Claims, fb.Gate, fb.Kind
+		does, err := class.ParseDoes(fb.Does, fb.Kind)
+		if err != nil {
+			return nil, fmt.Errorf("%s: block %s: %w", file, fb.Name, err)
+		}
+		u.Work, u.WorkSD, u.Env, u.Inputs, u.Holds, u.Claims, u.Gate, u.Does = fb.Work, fb.WorkSD, fb.Env, fb.Inputs, fb.Holds, fb.Claims, fb.Gate, does
 		for k, v := range fb.Params {
 			u.Params[k] = v
 		}

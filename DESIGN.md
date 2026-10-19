@@ -1436,9 +1436,19 @@ and a sweep planner that spawns trials are all generators.
     line, fixtures are excluded by glob, a marker naming its own owner is
     no edge, and what cannot be read is listed. Ra's `Pending{…}` markers
     are the motivating case: the pattern is the job's, not c4's.
-- **Procedural and model units** (LLM-OR-PROCEDURE 6.2 and 7.2). Every
-  unit is `procedural` or `model`: the document's `kind`, else its class's
-  (agent members are model units), else procedural.
+- **Procedural and model units** (LLM-OR-PROCEDURE 6.2 and 7.2). What
+  does each unit's work is `model` or `procedure`: the expansion
+  document's `does`, else its class's (agent members are model units),
+  else a procedure. A graph job's root, its generator, is a procedure
+  unless the job's `rootDoes: model` says a model reads its plan from
+  prose. `kind: procedural|model` is the older spelling of `does`, still
+  read (a unit giving both must agree); c4-plan files take `does` too.
+  - **Work share.** Each ended attempt also adds its slot time (hours
+    times slots) to its unit, and status gives the model units' share of
+    it (`spend.modelWorkShare`): how much of the work models did, which
+    the HUD's job summary shows as `modelShare` ("models did N% of the
+    work"). `spend.modelShare` stays the model units' share of the
+    cost.
   - **Slot spend.** Each ended attempt, failed and interrupted ones
     included, adds its slot time at its pool's rate to its unit.
   - **Token spend.** A model unit also reports the tokens it used, per

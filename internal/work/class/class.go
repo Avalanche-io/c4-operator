@@ -63,9 +63,10 @@ type Unit struct {
 	// Claims are what the unit writes, with a mode (claims.go): its
 	// holds as exclusive claims, and the document's claims.
 	Claims []Claim
-	// Kind is procedural or model (LLM-OR-PROCEDURE 6.2), from the
-	// document; empty takes the class's (UnitKinder), else procedural.
-	Kind string
+	// Does says what does the unit's work: a model or a procedure
+	// (LLM-OR-PROCEDURE 6.2), from the document's does; empty takes the
+	// class's (Doer), else procedure.
+	Does string
 	// Gate names the gate the unit passes (a unit of kind gate): a
 	// resource of one slot shared by the jobs of a namespace, taken first
 	// come, first served (the queue's gates.go).
@@ -155,27 +156,55 @@ type Checkpointer interface {
 	CheckpointTime(job *c4v1.WorkJob) time.Duration
 }
 
-// Unit kinds.
+// What does a unit's work.
 const (
-	KindProcedural = "procedural"
-	KindModel      = "model"
+	DoesProcedure = "procedure"
+	DoesModel     = "model"
 )
 
-// UnitKinder is implemented by classes whose units are model units by
-// default: an agent member's turns are a model's.
-type UnitKinder interface {
-	UnitKind() string
+// Doer is implemented by classes whose units are model units by default:
+// an agent member's turns are a model's.
+type Doer interface {
+	UnitDoes() string
 }
 
-// KindOf is unit u's kind in class d.
-func KindOf(d Driver, u Unit) string {
-	if u.Kind != "" {
-		return u.Kind
+// DoesOf is what does unit u's work in class d.
+func DoesOf(d Driver, u Unit) string {
+	if u.Does != "" {
+		return u.Does
 	}
-	if k, ok := d.(UnitKinder); ok {
-		return k.UnitKind()
+	if k, ok := d.(Doer); ok {
+		return k.UnitDoes()
 	}
-	return KindProcedural
+	return DoesProcedure
+}
+
+// ParseDoes reads a document's does, model or procedure. kind is the
+// older spelling of the same field (procedural or model, before does was
+// agreed with c4-plan); a document giving both must agree.
+func ParseDoes(does, kind string) (string, error) {
+	switch does {
+	case "", DoesModel, DoesProcedure:
+	default:
+		return "", fmt.Errorf("does %q, want model or procedure", does)
+	}
+	var old string
+	switch kind {
+	case "":
+	case "procedural":
+		old = DoesProcedure
+	case "model":
+		old = DoesModel
+	default:
+		return "", fmt.Errorf("kind %q, want procedural or model (or does: model or procedure)", kind)
+	}
+	if does != "" && old != "" && does != old {
+		return "", fmt.Errorf("does %q and kind %q disagree", does, kind)
+	}
+	if does == "" {
+		does = old
+	}
+	return does, nil
 }
 
 // Mover is implemented by classes whose units the queue may move at a

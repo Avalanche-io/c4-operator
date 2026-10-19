@@ -188,9 +188,9 @@ type jobMem struct {
 	// spend is each unit's spend since the queue started, spentPod the
 	// pods counted, and spendBase and usageBase what status recorded
 	// before (spend.go).
-	spend    map[int]*unitSpend
-	spentPod map[types.UID]bool
-	procBase float64
+	spend               map[int]*unitSpend
+	spentPod            map[types.UID]bool
+	procBase, procHours float64
 	// verdicts are the verdicts carried out, and reviews what they last
 	// decided per unit (verdict.go).
 	verdicts []verdictRec

@@ -19,7 +19,7 @@ import (
 )
 
 // Spend, procedural and model (LLM-OR-PROCEDURE 6.2). Every unit is
-// procedural or model (class.KindOf: the document's kind, else the
+// a procedure's or a model's (class.DoesOf: the document's does, else the
 // class's; agent members are model units). Each ended attempt adds its
 // slot time, priced at its pool's rate, to its unit; a model unit's
 // attempt also adds the tokens it reported in .c4/usage.json (c4-unit
@@ -71,6 +71,7 @@ type tokenUse struct {
 type unitSpend struct {
 	models     map[string]*tokenUse
 	slotCost   float64
+	slotHours  float64
 	costSource string
 }
 
@@ -142,6 +143,11 @@ func (q *Queue) noteSpend(ctx context.Context, v *view, idx int, p *corev1.Pod, 
 		}
 		s.slotCost += hours * float64(slots) * rate
 	}
+	slots := 1
+	if idx < len(m.plan.Units) {
+		slots = max(1, m.plan.Units[idx].Slots)
+	}
+	s.slotHours += hours * float64(slots)
 	s.add(doc.modelUse)
 	for _, u := range doc.Models {
 		s.add(u)
@@ -159,11 +165,11 @@ func (q *Queue) noteSpend(ctx context.Context, v *view, idx int, p *corev1.Pod, 
 // spendStatus is the job's spend and its model units' usage.
 func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 	m := v.mem
-	if len(m.spend) == 0 && m.procBase == 0 {
+	if len(m.spend) == 0 && m.procBase == 0 && m.procHours == 0 {
 		return nil, nil
 	}
 	isModel := func(i int) bool {
-		return i < len(m.plan.Units) && v.driver != nil && class.KindOf(v.driver, m.plan.Units[i]) == class.KindModel
+		return i < len(m.plan.Units) && v.driver != nil && class.DoesOf(v.driver, m.plan.Units[i]) == class.DoesModel
 	}
 	// The units of each kind that have run.
 	mu, pu := 0, 0
@@ -177,7 +183,7 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 			pu++
 		}
 	}
-	proc := m.procBase
+	proc, procHours, modelHours := m.procBase, m.procHours, 0.0
 	var all tokens.Counts
 	var raw, unpriced int64
 	var weighted, unpricedW, tokenCost, estCost, modelSlot float64
@@ -186,10 +192,12 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 	for idx, s := range m.spend {
 		if !isModel(idx) {
 			proc += s.slotCost
+			procHours += s.slotHours
 			continue
 		}
 		modelSlot += s.slotCost
-		u := c4v1.WorkUnitUsage{SlotCost: money(s.slotCost), CostSource: s.costSource}
+		modelHours += s.slotHours
+		u := c4v1.WorkUnitUsage{SlotCost: money(s.slotCost), SlotHours: hours(s.slotHours), CostSource: s.costSource}
 		var names []string
 		for name := range s.models {
 			names = append(names, name)
@@ -256,7 +264,11 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 		InputTokens: all.Input, OutputTokens: all.Output, CacheReadTokens: all.CacheRead, CacheWriteTokens: all.CacheWrite,
 		WeightedTokens: int64(math.Round(weighted)), UnpricedWeightedTokens: int64(math.Round(unpricedW)),
 		TokenCost: money(tokenCost), EstimatedTokenCost: money(estCost), ModelSlotCost: money(modelSlot), ProceduralSlotCost: money(proc),
-		ModelShare: fmt.Sprintf("%.3f", share), ModelShareBasis: basis}
+		ModelShare: fmt.Sprintf("%.3f", share), ModelShareBasis: basis,
+		ModelSlotHours: hours(modelHours), ProceduralSlotHours: hours(procHours)}
+	if t := modelHours + procHours; t > 0 {
+		out.ModelWorkShare = fmt.Sprintf("%.3f", modelHours/t)
+	}
 	if len(usage) == 0 {
 		usage = nil
 	}
@@ -265,19 +277,21 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 
 func money(x float64) string { return fmt.Sprintf("%.4f", x) }
 
+func hours(x float64) string { return fmt.Sprintf("%.4f", x) }
+
 // loadSpend restores what status recorded: each model unit's use, and
 // the procedural units' slot cost as a total.
 func (m *jobMem) loadSpend(st *c4v1.WorkJobStatus) {
 	f := func(x string) float64 { v, _ := strconv.ParseFloat(x, 64); return v }
 	if s := st.Spend; s != nil {
-		m.procBase = f(s.ProceduralSlotCost)
+		m.procBase, m.procHours = f(s.ProceduralSlotCost), f(s.ProceduralSlotHours)
 	}
 	for k, u := range st.ModelUsage {
 		i, err := strconv.Atoi(k)
 		if err != nil {
 			continue
 		}
-		s := &unitSpend{slotCost: f(u.SlotCost), costSource: u.CostSource, models: map[string]*tokenUse{}}
+		s := &unitSpend{slotCost: f(u.SlotCost), slotHours: f(u.SlotHours), costSource: u.CostSource, models: map[string]*tokenUse{}}
 		for _, mt := range u.Models {
 			s.models[mt.Model] = &tokenUse{Counts: tokens.Counts{Input: mt.InputTokens, Output: mt.OutputTokens, CacheRead: mt.CacheReadTokens,
 				CacheWrite: mt.CacheWriteTokens}, unpriced: mt.UnpricedTokens, unpricedW: float64(mt.UnpricedWeightedTokens),
@@ -312,7 +326,7 @@ func (q *Queue) proceduralCandidates(ctx context.Context, v *view) []c4v1.WorkPr
 	resolved := false
 	var out []c4v1.WorkProceduralCandidate
 	for i, u := range m.plan.Units {
-		if !m.succeeded[i] || class.KindOf(v.driver, u) != class.KindModel {
+		if !m.succeeded[i] || class.DoesOf(v.driver, u) != class.DoesModel {
 			continue
 		}
 		proc, ok := process.ProcessID(unitContainers(v.job, u, q.digests), q.lastPlatform[v.key])
