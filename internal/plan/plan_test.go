@@ -104,7 +104,7 @@ func TestDocIsWhatTheQueueTakes(t *testing.T) {
 func TestClaimsAndGate(t *testing.T) {
 	f := &File{Version: 1, Blocks: []FileBlock{
 		{Name: "a", Holds: []string{"src/a"}, Claims: []class.DocClaim{{On: "db/test", Mode: "shared"}}},
-		{Name: "a-merge", After: []string{"a"}, Planned: new(bool), Gate: "main"},
+		{Name: "a-merge", After: []string{"a"}, Planned: new(bool), Gate: "main", Kind: "procedural"},
 	}}
 	p, err := FromFile(f, "x.yaml")
 	if err != nil {
@@ -119,7 +119,7 @@ func TestClaimsAndGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(x.Units[0].Claims) != 2 || x.Units[1].Gate != "main" {
+	if len(x.Units[0].Claims) != 2 || x.Units[1].Gate != "main" || x.Units[1].Kind != "procedural" {
 		t.Fatalf("the queue reads claims %+v, gate %q", x.Units[0].Claims, x.Units[1].Gate)
 	}
 	f.Blocks[0].Claims[0].Mode = "sometimes"

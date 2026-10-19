@@ -247,4 +247,3 @@ func (d *docStore) PutBytes(ctx context.Context, project string, id c4.ID, data 
 	d.docs[id.String()] = data
 	return nil
 }
-

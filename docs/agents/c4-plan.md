@@ -51,7 +51,8 @@ blocks:
     before: [text/tokens]
 ```
 
-- `holds` are paths or keys the block writes, exclusive claims; `claims`
+- `kind` says what does the block: `model` or `procedural`. `holds` are paths
+  or keys the block writes, exclusive claims; `claims`
   are `{on, mode}` with mode `exclusive` (the default) or `shared`; `gate`
   names the one-slot gate the block passes (a merge). The queue enforces
   all three.
