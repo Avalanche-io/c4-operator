@@ -275,3 +275,30 @@ func TestTranscriptUsage(t *testing.T) {
 		t.Fatalf("up to the first turn's end %+v", head.Models)
 	}
 }
+
+// A block's first attempt counts its tokens from the start of its session,
+// not from where registration found the transcript; a member registered
+// into a running session counts from its registration.
+func TestAttemptStartBlock(t *testing.T) {
+	s := &Store{Dir: t.TempDir()}
+	for _, block := range []bool{true, false} {
+		name := fmt.Sprintf("m-%v", block)
+		if err := s.Put(&Member{Name: name, Session: "s", Block: block}); err != nil {
+			t.Fatal(err)
+		}
+		s.appendLog(name, Checkpoint{Seq: 1, Event: "register", Session: "s", Offset: 4000})
+		s.appendLog(name, Checkpoint{Seq: 2, Event: "stop", Session: "s", Offset: 9000})
+		cp := Checkpoint{Seq: 2, Session: "s"}
+		want := int64(4000)
+		if block {
+			want = 0
+		}
+		if got := s.AttemptStart(name, &cp); got != want {
+			t.Errorf("block %v: from %d, want %d", block, got, want)
+		}
+		// a later attempt counts from where the last one stopped
+		if got := s.AttemptStart(name, &Checkpoint{Seq: 3, Session: "s"}); got != 9000 {
+			t.Errorf("block %v, later attempt: from %d", block, got)
+		}
+	}
+}

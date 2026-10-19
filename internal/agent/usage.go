@@ -99,17 +99,27 @@ func TranscriptUsage(path string, from, to int64) (*UsageDoc, error) {
 // AttemptStart is where this attempt's turns begin in the member's
 // transcript: the offset of the checkpoint before cp in the same session
 // (the one the attempt resumed from), or 0 when cp starts its session's
-// chain.
+// chain. A block's session starts with its first attempt, so that attempt
+// counts from 0, not from where its registration happened to find the
+// transcript (the model may already have answered by then).
 func (s *Store) AttemptStart(name string, cp *Checkpoint) int64 {
 	cps, err := s.readLog(name)
 	if err != nil || cp == nil {
 		return 0
 	}
-	var from int64
-	for _, c := range cps {
+	var prev *Checkpoint
+	for i, c := range cps {
 		if c.Session == cp.Session && c.Seq < cp.Seq {
-			from = c.Offset
+			prev = &cps[i]
 		}
 	}
-	return from
+	if prev == nil {
+		return 0
+	}
+	if prev.Event == "register" {
+		if m, err := s.Get(name); err == nil && m.Block {
+			return 0
+		}
+	}
+	return prev.Offset
 }
