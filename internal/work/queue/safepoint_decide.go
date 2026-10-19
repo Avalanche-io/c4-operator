@@ -324,3 +324,36 @@ func (q *Queue) graceFor(v *view) time.Duration {
 	}
 	return min(max(g, minGrace), maxGrace)
 }
+
+// AnnotationDoNotDisrupt is Karpenter's pod annotation: a Go duration
+// protects the pod's node from consolidation and drift for that long
+// after the pod starts (not from expiry, spot interruption or deletion).
+const AnnotationDoNotDisrupt = "karpenter.sh/do-not-disrupt"
+
+// doNotDisruptAfter is the shortest predicted run worth protecting.
+const doNotDisruptAfter = 15 * time.Minute
+
+// doNotDisrupt is how long a unit's node should not be disrupted for: the
+// unit's predicted run plus two standard deviations, rounded up to the
+// minute, when the unit cannot stop at a safe point (its class does not
+// checkpoint and its job has shown none) and would lose at least
+// doNotDisruptAfter of work; 0 otherwise.
+func (q *Queue) doNotDisrupt(v *view, idx int) time.Duration {
+	if v.driver.Checkpoints() || v.est == nil {
+		return 0
+	}
+	var names []string
+	for _, p := range v.pods {
+		names = append(names, p.Name)
+	}
+	if len(v.safe) > 0 || q.Safepoints.Cadence(v.job.Namespace, names) > 0 {
+		return 0
+	}
+	u := v.mem.plan.Units[idx]
+	pr := v.est.Predict(u.Key, u.Pos)
+	run := time.Duration((pr.Mean + 2*pr.SD()) * float64(time.Second))
+	if time.Duration(pr.Mean*float64(time.Second)) < doNotDisruptAfter {
+		return 0
+	}
+	return min(run.Truncate(time.Minute)+time.Minute, 24*time.Hour)
+}

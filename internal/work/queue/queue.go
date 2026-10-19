@@ -1162,6 +1162,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 			pod.Spec.TerminationGracePeriodSeconds = &s
 		}
 	}
+	if d := q.doNotDisrupt(v, idx); d > 0 && pod.Annotations[AnnotationDoNotDisrupt] == "" {
+		pod.Annotations[AnnotationDoNotDisrupt] = d.String()
+	}
 	if pod.Spec.NodeSelector == nil {
 		pod.Spec.NodeSelector = map[string]string{}
 	}

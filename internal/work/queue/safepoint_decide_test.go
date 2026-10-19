@@ -287,3 +287,29 @@ func TestCheckpointClassGrace(t *testing.T) {
 		}
 	}
 }
+
+// Long units that cannot stop at a safe point ask Karpenter not to
+// disrupt their node for about as long as they run; short ones, and
+// units that checkpoint, do not.
+func TestDoNotDisruptLongUnits(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	ctx := context.Background()
+	for name, params := range map[string]map[string]string{
+		"long":  {"frames": "1-1", "estimateSeconds": "1800"},
+		"short": {"frames": "1-1", "estimateSeconds": "600"},
+	} {
+		if err := k8s.Create(ctx, job(ns, name, "render", "cpu-"+ns, params, now.Add(8*time.Hour))); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := k8s.Create(ctx, job(ns, "train", "ml", "cpu-"+ns, map[string]string{"estimateSeconds": "7200"}, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	for name, want := range map[string]string{"long": "1h1m0s", "short": "", "train": ""} {
+		pods := unitPods(t, ns, name)
+		if len(pods) != 1 || pods[0].Annotations[AnnotationDoNotDisrupt] != want {
+			t.Fatalf("%s: %d pods, do-not-disrupt %q, want %q", name, len(pods), pods[0].Annotations[AnnotationDoNotDisrupt], want)
+		}
+	}
+}

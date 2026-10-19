@@ -1873,6 +1873,14 @@ through the tiers instead of from the store.
     its pod is marked as yielded (`disruption`), so its exit resumes, with
     the decision signed. A unit that never reaches one is killed at the end
     of its grace and counted as interrupted (section 10.14).
+  - **Units that cannot stop softly are protected instead.** A unit whose
+    class does not checkpoint, in a job that has shown no safe points,
+    with a predicted run of 15 minutes or more, carries Karpenter's
+    `karpenter.sh/do-not-disrupt` annotation with a duration: its
+    prediction plus two standard deviations, rounded up to the minute and
+    at most a day. Karpenter then keeps its node out of consolidation and
+    drift for that long after the pod starts. Expiry, spot interruption and
+    deletion still happen; those attempts are interrupted.
   - If no answer arrives in time (the controller is unreachable), the unit
     falls back on the last request it sees through its downward API file:
     it stops only if a stop is still pending. The hard stop at the
