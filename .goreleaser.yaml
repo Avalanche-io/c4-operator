@@ -1,6 +1,6 @@
 # Releases are cut by pushing a tag (vX.Y.Z); .github/workflows/release.yaml
-# runs GoReleaser, which builds the CLIs (c4-operator for Linux and macOS,
-# c4-farm for Linux, macOS and Windows), the multi-arch
+# runs GoReleaser, which builds the CLIs (c4-operator and c4-agent, the host
+# runner, for Linux and macOS; c4-farm for Linux, macOS and Windows), the multi-arch
 # image on GHCR, the install manifest, and a draft GitHub release to review
 # before publishing. `make release-snapshot` runs the same locally and
 # publishes nothing.
@@ -31,6 +31,15 @@ builds:
   flags: [-trimpath]
   ldflags: ["-s -w -X main.version={{ .Tag }}"]
 
+- id: c4-agent
+  main: ./cmd/c4-agent
+  binary: c4-agent
+  env: [CGO_ENABLED=0]
+  goos: [linux, darwin]
+  goarch: [amd64, arm64]
+  flags: [-trimpath]
+  ldflags: ["-s -w"]
+
 - id: c4-unit
   main: ./cmd/c4-unit
   binary: c4-unit
@@ -41,6 +50,11 @@ builds:
   ldflags: ["-s -w"]
 
 archives:
+- id: c4-agent
+  ids: [c4-agent]
+  formats: [tar.gz]
+  name_template: "c4-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  files: [LICENSE, NOTICE]
 - id: c4-unit
   ids: [c4-unit]
   formats: [tar.gz]
