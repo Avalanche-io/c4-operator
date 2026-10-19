@@ -21,11 +21,11 @@ Needs Python 3.10 or later and MLflow 3.3 or later (tested with MLflow
 
 Configure the HUD in the environment:
 
-| variable                                | meaning                                                         |
-| --------------------------------------- | --------------------------------------------------------------- |
-| `C4_HUD`                                | the HUD's URL, for example `https://c4.example.com`             |
-| `C4_HUD_TOKEN` or `C4_HUD_TOKEN_FILE`   | your bearer token (the file is reread on every request)         |
-| `C4_PROJECT`                            | the C4 project whose store holds the views                      |
+| variable                              | meaning                                                 |
+| ------------------------------------- | ------------------------------------------------------- |
+| `C4_HUD`                              | the HUD's URL, for example `https://c4.example.com`     |
+| `C4_HUD_TOKEN` or `C4_HUD_TOKEN_FILE` | your bearer token (the file is reread on every request) |
+| `C4_PROJECT`                          | the C4 project whose store holds the views              |
 
 ## Run a project on the farm
 
@@ -84,14 +84,14 @@ Measured on 2026-10-19 against MLflow 3.17.1 (`mlflow server`, SQLite
 store, localhost), with and without this plugin installed in the server's
 environment; `tests/test_server.py` repeats the measurement:
 
-| source                      | server                       |
-| --------------------------- | ---------------------------- |
-| `c4://<view>`               | refused: the path is empty   |
-| `c4://<view>/`              | refused: the path is empty   |
-| `c4:///<view>`              | accepted                     |
-| `c4:///<view>/model`        | accepted                     |
-| `c4://<view>/model`         | accepted                     |
-| `c4://<view>/model` + run   | accepted                     |
+| source                    | server                     |
+| ------------------------- | -------------------------- |
+| `c4://<view>`             | refused: the path is empty |
+| `c4://<view>/`            | refused: the path is empty |
+| `c4:///<view>`            | accepted                   |
+| `c4:///<view>/model`      | accepted                   |
+| `c4://<view>/model`       | accepted                   |
+| `c4://<view>/model` + run | accepted                   |
 
 The server stores a source without resolving its scheme, so the plugin is
 not needed on the server to register a version; the results were the same

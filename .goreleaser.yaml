@@ -1,7 +1,8 @@
 # Releases are cut by pushing a tag (vX.Y.Z); .github/workflows/release.yaml
 # runs GoReleaser, which builds the CLIs (c4-operator and c4-agent, the host
-# runner, for Linux and macOS; c4-farm for Linux, macOS and Windows), the multi-arch
-# image on GHCR, the install manifest, and a draft GitHub release to review
+# runner, for Linux and macOS; c4-farm for Linux, macOS and Windows; c4-sync,
+# the tracker sync, experimental, for Linux and macOS), the multi-arch images
+# on GHCR, the install manifests, and a draft GitHub release to review
 # before publishing. `make release-snapshot` runs the same locally and
 # publishes nothing.
 version: 2
@@ -11,6 +12,7 @@ before:
   hooks:
   - go mod verify
   - make install-yaml VERSION={{ .Tag }}
+  - make sync-yaml VERSION={{ .Tag }}
 
 builds:
 - id: c4-operator
@@ -40,6 +42,15 @@ builds:
   flags: [-trimpath]
   ldflags: ["-s -w"]
 
+- id: c4-sync
+  main: ./cmd/c4-sync
+  binary: c4-sync
+  env: [CGO_ENABLED=0]
+  goos: [linux, darwin]
+  goarch: [amd64, arm64]
+  flags: [-trimpath]
+  ldflags: ["-s -w -X main.version={{ .Tag }}"]
+
 - id: c4-unit
   main: ./cmd/c4-unit
   binary: c4-unit
@@ -66,6 +77,11 @@ archives:
   format_overrides: [{goos: windows, formats: [zip]}]
   name_template: "c4-farm_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   files: [LICENSE, NOTICE, skills/c4-farm/*]
+- id: c4-sync
+  ids: [c4-sync]
+  formats: [tar.gz]
+  name_template: "c4-sync_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+  files: [LICENSE, NOTICE, docs/c4-sync.md]
 - id: c4-operator
   ids: [c4-operator]
   formats: [tar.gz]
@@ -93,6 +109,22 @@ dockers_v2:
     org.opencontainers.image.version: "{{ .Tag }}"
     org.opencontainers.image.revision: "{{ .FullCommit }}"
 
+# c4-sync's own image (experimental): it holds tracker credentials the
+# operator never sees, so it is not in the operator's image.
+- id: c4-sync
+  ids: [c4-sync]
+  dockerfile: Dockerfile.c4-sync
+  images: [ghcr.io/avalanche-io/c4-sync]
+  tags: ["{{ .Tag }}"]
+  platforms: [linux/amd64, linux/arm64]
+  labels:
+    org.opencontainers.image.title: c4-sync
+    org.opencontainers.image.description: "C4's tracker sync: GitHub, Flow Production Tracking and MLflow (experimental)"
+    org.opencontainers.image.source: https://github.com/Avalanche-io/c4-operator
+    org.opencontainers.image.licenses: Apache-2.0
+    org.opencontainers.image.version: "{{ .Tag }}"
+    org.opencontainers.image.revision: "{{ .FullCommit }}"
+
 changelog:
   use: git
   sort: asc
@@ -103,6 +135,8 @@ release:
   prerelease: auto
   extra_files:
   - glob: bin/install.yaml
+  - glob: bin/c4-sync.yaml
   footer: |
     Install: `kubectl apply -f https://github.com/Avalanche-io/c4-operator/releases/download/{{ .Tag }}/install.yaml`
     Image: `ghcr.io/avalanche-io/c4-operator:{{ .Tag }}`
+    Tracker sync (experimental): `kubectl apply -f https://github.com/Avalanche-io/c4-operator/releases/download/{{ .Tag }}/c4-sync.yaml`, image `ghcr.io/avalanche-io/c4-sync:{{ .Tag }}`

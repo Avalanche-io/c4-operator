@@ -173,3 +173,8 @@ make install-yaml REGISTRY=registry.example.com/you VERSION=v0.1.0   # bin/insta
 `make images` cross-compiles each platform's binary and builds one
 multi-arch image with buildx; without `PUSH=1` it writes an OCI archive to
 `bin/` instead of pushing.
+
+## Tracker sync (experimental)
+
+To keep GitHub, Flow Production Tracking or MLflow in step with the farm,
+install c4-sync from the release's `c4-sync.yaml`: see [c4-sync](c4-sync.md).

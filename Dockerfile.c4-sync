@@ -1,0 +1,11 @@
+# c4-sync's image (experimental): the tracker sync loop alone, separate from
+# the operator's image because it holds tracker credentials the operator
+# never sees (proposals/integrations ADAPTER.md section 2). GoReleaser
+# places each platform's binary at $TARGETPLATFORM/c4-sync in the build
+# context; `make image-sync` does the same under bin/sync-context.
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETPLATFORM
+COPY ${TARGETPLATFORM}/c4-sync /c4-sync
+USER 65532:65532
+EXPOSE 8090
+ENTRYPOINT ["/c4-sync"]

@@ -16,7 +16,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 comma := ,
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync sync-yaml install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -77,6 +77,24 @@ build:
 image:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o bin/linux_$(ARCH)/c4-operator ./cmd/c4-operator
 	docker build --build-arg TARGETARCH=$(ARCH) -t $(IMG) .
+
+# c4-sync's image for this machine's architecture (experimental; its own
+# image, Dockerfile.c4-sync). SYNC_IMG names it.
+SYNC_IMG ?= c4-sync:dev
+image-sync:
+	@mkdir -p bin/sync-context/linux/$(ARCH)
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o bin/sync-context/linux/$(ARCH)/c4-sync ./cmd/c4-sync
+	docker build -f Dockerfile.c4-sync --build-arg TARGETPLATFORM=linux/$(ARCH) -t $(SYNC_IMG) bin/sync-context
+
+# c4-sync's install manifest of a release: its two CRDs and config/sync,
+# with the release's c4-sync image.
+SYNC_RELEASE_IMG ?= $(REGISTRY)/c4-sync:$(VERSION)
+sync-yaml:
+	@mkdir -p bin
+	{ cat config/crd/c4.avalanche.io_trackers.yaml; echo ---; cat config/crd/c4.avalanche.io_trackerlinks.yaml; echo ---; \
+	  kubectl kustomize config/sync | sed 's#image: c4-sync:dev#image: $(SYNC_RELEASE_IMG)#'; } > bin/c4-sync.yaml
+	@grep -q 'image: $(SYNC_RELEASE_IMG)' bin/c4-sync.yaml || { echo "sync-yaml: the image was not set"; exit 1; }
+	@echo bin/c4-sync.yaml uses $(SYNC_RELEASE_IMG)
 
 # The release image for every platform in PLATFORMS, in one buildx build.
 # The Dockerfile only copies the binary, so no platform is emulated.
