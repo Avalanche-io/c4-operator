@@ -81,6 +81,7 @@ func (a *Adapter) Capabilities() tracker.Capabilities {
 	return tracker.Capabilities{
 		Webhooks:         true,
 		EditableComments: true,
+		ReviewHeads:      true,
 		// GitHub takes no idempotency key on writes: Probe stands in.
 		// Milestone due_on is a timestamp; whether GitHub keeps a time of
 		// day for it is unverified (tools/github.md), so an intake rule
@@ -344,7 +345,7 @@ func pullItem(p ghPull) tracker.Item {
 		Status:    tracker.Status{Native: p.State, Category: category(p.State)},
 		UpdatedAt: p.UpdatedAt,
 		Version:   p.UpdatedAt.UTC().Format(time.RFC3339Nano),
-		Fields:    map[string]string{"head_sha": p.Head.SHA, "author": p.User.Login},
+		Fields:    map[string]string{"head": p.Head.SHA, "head_sha": p.Head.SHA, "author": p.User.Login},
 	}
 }
 

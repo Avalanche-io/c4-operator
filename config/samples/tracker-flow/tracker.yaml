@@ -1,0 +1,60 @@
+# A Flow Production Tracking project syncing with a show (experimental:
+# c4-sync). Ready lighting Tasks become render jobs whose deadline is
+# 14:00 Los Angeles time on the Task's due date (Flow stores dates without
+# times). Work states go to the Task: its status from the map below, the
+# ETA and job link in two custom fields the site admin creates. Each
+# render publishes a Version in pending review carrying its output view's
+# C4 ID; the supervisor's status change and notes on the Version come back
+# as the dailies decision. A rework makes the next version, which follows
+# the last with the note as its input. c4-sync never sets an approval.
+#
+# Status codes are this sample site's; read your site's with the schema
+# (Flow lets admins rename every status) and map them here.
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Tracker
+metadata:
+  name: saltmarsh-flow
+  namespace: saltmarsh
+spec:
+  kind: flow
+  endpoint: https://saltmarsh.shotgrid.autodesk.com
+  scope:
+    project: "122"
+    # The API script, in its own narrow permission group restricted to
+    # this project; its key is in the Secret below.
+    script: c4-sync
+    review_status: rev
+    id_field: sg_c4_id
+    eta_field: sg_c4_eta
+    link_field: sg_c4_link
+  credential:
+    lease: saltmarsh-flow-script
+    secret: {name: saltmarsh-flow-script, key: key}
+  webhookSecret: {name: saltmarsh-flow-webhook, key: token}
+  events: {mode: eventlog, pollSeconds: 60, resyncSeconds: 900}
+  rate: {perSecond: "2", burst: 10}
+  people:
+    dana: dana
+  intake:
+  - match:
+      type: Task
+      fields: {sg_status_list: rdy, step.Step.short_name: LGT}
+    as: job
+    deadline: {dateOnlyAt: "14:00", tz: America/Los_Angeles}
+    review: {wait: dailies}
+    rework: nextVersion
+    job:
+      class: render
+      params: {frames: "1001-1240", chunk: "4"}
+      template:
+        spec:
+          containers:
+          - name: render
+            image: ghcr.io/avalanche-io/c4-job-karma:dev
+  statusOut:
+    states: {running: ip, rework: ip, in-review: rev, needs-person: hld}
+    fieldSeconds: 300
+  verdictsIn:
+    status:apr: approve
+    status:fix: rework
+    status:cbb: accept

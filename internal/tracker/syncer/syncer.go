@@ -71,13 +71,14 @@ type Syncer struct {
 // conn is the live state of one Tracker: its adapter and rate bucket, and
 // what events have marked for a look.
 type conn struct {
-	gen     int64
-	adapter tracker.Adapter
-	limiter *limiter
-	until   time.Time // rate limited until
-	dirty   map[string]bool
-	pending []tracker.Decision // decisions carried only by deliveries
-	resync  time.Time
+	gen       int64
+	adapter   tracker.Adapter
+	presenter tracker.Presenter
+	limiter   *limiter
+	until     time.Time // rate limited until
+	dirty     map[string]bool
+	pending   []tracker.Decision // decisions carried only by deliveries
+	resync    time.Time
 }
 
 func (s *Syncer) now() time.Time {
@@ -128,8 +129,12 @@ func (s *Syncer) conn(t *c4v1.Tracker) (*conn, error) {
 	if err != nil {
 		return nil, err
 	}
+	p, ok := a.(tracker.Presenter)
+	if !ok {
+		return nil, fmt.Errorf("adapter %s does not present states", t.Spec.Kind)
+	}
 	old := s.conns[key(t)]
-	c := &conn{gen: t.Generation, adapter: a, limiter: lim, dirty: map[string]bool{}}
+	c := &conn{gen: t.Generation, adapter: a, presenter: p, limiter: lim, dirty: map[string]bool{}}
 	if old != nil {
 		c.dirty, c.pending, c.until = old.dirty, old.pending, old.until
 	}
@@ -221,13 +226,38 @@ func (s *Syncer) pass(ctx context.Context, t *c4v1.Tracker, c *conn) error {
 	}
 	s.mu.Unlock()
 
-	if err := s.intake(ctx, t, c, links); err != nil {
+	seen, err := s.intake(ctx, t, c, links)
+	if err != nil {
 		return err
 	}
 	if links, err = s.links(ctx, t); err != nil {
 		return err
 	}
-	if err := s.discoverReviews(ctx, t, c, links, resync); err != nil {
+	// An entity that changed but no longer matches its intake rule (its
+	// status moved on) still has its due date followed.
+	s.mu.Lock()
+	changed := map[string]bool{}
+	for k := range c.dirty {
+		changed[k] = true
+	}
+	s.mu.Unlock()
+	for _, l := range links {
+		ref := tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID}
+		if seen[l.Name] || !(changed[ref.String()] || resync) || int(l.Spec.Intake) >= len(t.Spec.Intake) {
+			continue
+		}
+		it, err := c.adapter.Get(ctx, ref)
+		if errors.Is(err, tracker.ErrNotFound) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if err := s.followDue(ctx, l, t.Spec.Intake[l.Spec.Intake], it); err != nil {
+			return err
+		}
+	}
+	if err := s.findReviews(ctx, t, c, links); err != nil {
 		return err
 	}
 	// Least slack first, so a tight job's decision is never stuck behind
@@ -331,7 +361,10 @@ func dns(s string) string {
 	return s
 }
 
-func (s *Syncer) intake(ctx context.Context, t *c4v1.Tracker, c *conn, links []*c4v1.TrackerLink) error {
+// intake makes jobs and links for matching entities, and returns the
+// links whose entity it saw.
+func (s *Syncer) intake(ctx context.Context, t *c4v1.Tracker, c *conn, links []*c4v1.TrackerLink) (map[string]bool, error) {
+	seen := map[string]bool{}
 	byName := map[string]*c4v1.TrackerLink{}
 	for _, l := range links {
 		byName[l.Name] = l
@@ -339,13 +372,16 @@ func (s *Syncer) intake(ctx context.Context, t *c4v1.Tracker, c *conn, links []*
 	for i, rule := range t.Spec.Intake {
 		page := ""
 		for {
-			items, next, err := c.adapter.List(ctx, tracker.Query{Type: rule.Match.Type, Labels: rule.Match.Labels, State: rule.Match.State}, page)
+			items, next, err := c.adapter.List(ctx, tracker.Query{Type: rule.Match.Type, Labels: rule.Match.Labels,
+				State: rule.Match.State, Fields: rule.Match.Fields}, page)
 			if err != nil {
-				return err
+				return nil, err
 			}
 			for _, it := range items {
-				if err := s.intakeItem(ctx, t, i, rule, it, byName[LinkName(t.Name, it.Ref)]); err != nil {
-					return err
+				name := LinkName(t.Name, it.Ref)
+				seen[name] = true
+				if err := s.intakeItem(ctx, t, i, rule, it, byName[name]); err != nil {
+					return nil, err
 				}
 			}
 			if next == "" {
@@ -354,7 +390,7 @@ func (s *Syncer) intake(ctx context.Context, t *c4v1.Tracker, c *conn, links []*
 			page = next
 		}
 	}
-	return nil
+	return seen, nil
 }
 
 // Deadline turns a tracker due date into a deadline. A date with no time
@@ -442,12 +478,18 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 		}
 		return nil
 	}
-	// The link exists: a moved due date moves the job's deadline, while
-	// the job still follows tracking. A person who pinned another time in
-	// the HUD wins; the link says so instead.
-	if due == nil {
-		return nil
+	return s.followDue(ctx, l, rule, it)
+}
+
+// followDue moves a link's job deadline when the tracker's due date moved,
+// while the job still follows tracking. A person who pinned another time
+// in the HUD wins; the link says so instead.
+func (s *Syncer) followDue(ctx context.Context, l *c4v1.TrackerLink, rule c4v1.TrackerIntake, it tracker.Item) error {
+	due, _, err := Deadline(it.Due, rule.Deadline)
+	if err != nil || due == nil || l.Spec.Target.WorkJob == "" {
+		return err
 	}
+	jr := farm.JobRef{Namespace: l.Namespace, Name: l.Spec.Target.WorkJob}
 	j, err := s.Farm.Job(ctx, jr)
 	if err != nil || j == nil {
 		return nil
@@ -465,66 +507,76 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 	return s.Farm.SetDeadline(ctx, jr, *due)
 }
 
-// --- reviews: what is under review for each link ---
+// --- what is under review ---
 
-// closing matches GitHub-style closing keywords; markerFor is the line a
-// change names its job with.
-var closing = regexp.MustCompile(`(?i)\b(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)\b`)
-
-func markerFor(ns, job string) string { return "C4-Job: " + ns + "/" + job }
-
-func (s *Syncer) discoverReviews(ctx context.Context, t *c4v1.Tracker, c *conn, links []*c4v1.TrackerLink, resync bool) error {
-	var need []*c4v1.TrackerLink
+// findReviews asks the adapter, when it finds reviews (GitHub's pull
+// requests), what is under review for links that have nothing yet.
+func (s *Syncer) findReviews(ctx context.Context, t *c4v1.Tracker, c *conn, links []*c4v1.TrackerLink) error {
+	f, ok := c.adapter.(tracker.ReviewFinder)
+	if !ok {
+		return nil
+	}
+	var need []tracker.LinkState
+	byLink := map[string]*c4v1.TrackerLink{}
 	for _, l := range links {
-		if l.Status.Review == nil && l.Spec.Ref.Type == "Issue" && l.Spec.Target.WorkJob != "" {
-			need = append(need, l)
+		if l.Status.Review == nil && l.Spec.Target.WorkJob != "" {
+			ls := s.baseState(l)
+			need = append(need, ls)
+			byLink[ls.Link] = l
 		}
 	}
 	if len(need) == 0 {
 		return nil
 	}
-	_ = resync // every pass looks while some link has no review: one list call
-	page := ""
-	var prs []tracker.Item
-	for {
-		items, next, err := c.adapter.List(ctx, tracker.Query{Type: "PullRequest", State: "open"}, page)
-		if errors.Is(err, tracker.ErrUnsupported) {
-			return nil
-		}
-		if err != nil {
-			return err
-		}
-		prs = append(prs, items...)
-		if next == "" {
-			break
-		}
-		page = next
+	found, err := f.FindReviews(ctx, need)
+	if err != nil {
+		return err
 	}
-	for _, l := range need {
-		for _, pr := range prs {
-			if !mentions(pr.Body, l) {
-				continue
-			}
-			ref := c4v1.TrackerRef{Type: pr.Ref.Type, ID: pr.Ref.ID, URL: pr.Ref.URL}
-			if err := s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.Review = &ref }); err != nil {
-				return err
-			}
-			break
+	for k, r := range found {
+		ref := c4v1.TrackerRef{Type: r.Type, ID: r.ID, URL: r.URL}
+		if err := s.patchLinkStatus(ctx, byLink[k], func(st *c4v1.TrackerLinkStatus) { st.Review = &ref }); err != nil {
+			return err
 		}
 	}
 	return nil
 }
 
-func mentions(body string, l *c4v1.TrackerLink) bool {
-	if strings.Contains(body, markerFor(l.Namespace, l.Spec.Target.WorkJob)) {
-		return true
+// baseState is what a link says about itself, before its job is read.
+func (s *Syncer) baseState(l *c4v1.TrackerLink) tracker.LinkState {
+	jr := farm.JobRef{Namespace: l.Namespace, Name: l.Spec.Target.WorkJob}
+	ls := tracker.LinkState{
+		Link:       l.Namespace + "/" + l.Name,
+		Ref:        tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL},
+		ReviewHead: l.Status.ReviewHead,
+		Job:        jr.String(),
+		JobURL:     s.Farm.JobURL(jr),
 	}
-	for _, m := range closing.FindAllStringSubmatch(body, -1) {
-		if m[1] == l.Spec.Ref.ID {
-			return true
-		}
+	if r := l.Status.Review; r != nil {
+		ls.Review = &tracker.Ref{Type: r.Type, ID: r.ID, URL: r.URL}
 	}
-	return false
+	return ls
+}
+
+// linkState is the link and its job's summary, as an adapter presents it.
+func (s *Syncer) linkState(l *c4v1.TrackerLink, sum Summary) tracker.LinkState {
+	ls := s.baseState(l)
+	ls.State, ls.Words, ls.Title, ls.Why = sum.State, sum.Words(), sum.Title(), sum.Why
+	ls.Active, ls.ETA, ls.AtRisk, ls.Deadline = sum.Active(), sum.ETA, sum.AtRisk(), sum.Deadline
+	ls.DeadlineSource = deadlineSource(sum)
+	if w := sum.Wait; w != nil {
+		ls.Wait = &tracker.WaitState{Server: w.WaitsFor, Choices: w.Choices, Escalated: w.Escalated}
+	}
+	return ls
+}
+
+func deadlineSource(s Summary) string {
+	switch {
+	case s.Mode == "Tracking":
+		return "from the tracker"
+	case s.Source == "suggested":
+		return "suggested by the farm"
+	}
+	return "set in C4"
 }
 
 // --- one link ---
@@ -539,22 +591,27 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 		s.setLinkCond(ctx, l, CondSynced, metav1.ConditionFalse, "JobGone", "the job "+l.Spec.Target.WorkJob+" is not in the farm")
 		return nil
 	}
-	jr := farm.JobRef{Namespace: l.Namespace, Name: l.Spec.Target.WorkJob}
-	review := ""
+	var rule c4v1.TrackerIntake
 	if int(l.Spec.Intake) < len(t.Spec.Intake) {
-		if r := t.Spec.Intake[l.Spec.Intake].Review; r != nil {
-			review = r.Wait
-		}
+		rule = t.Spec.Intake[l.Spec.Intake]
 	}
+	review := ""
+	if rule.Review != nil {
+		review = rule.Review.Wait
+	}
+	jr := farm.JobRef{Namespace: l.Namespace, Name: l.Spec.Target.WorkJob}
 	sum := Summarize(j, review, reworking(l))
 
 	// Decisions first: a decision relayed now changes what is written.
 	if sum.Wait != nil {
-		relayed, err := s.relay(ctx, t, c, l, j, jr, sum.Wait)
+		do, err := s.relay(ctx, t, c, l, j, jr, sum.Wait)
 		if err != nil {
 			return err
 		}
-		if relayed {
+		if do == "rework" && rule.Rework == "nextVersion" {
+			return s.nextVersion(ctx, t, l, j, rule)
+		}
+		if do != "" {
 			if j, err = s.Farm.Job(ctx, jr); err != nil {
 				return err
 			}
@@ -564,14 +621,47 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 			sum = Summarize(j, review, reworking(l))
 		}
 	}
-	if err := s.statusOut(ctx, t, c, l, jr, sum, fresh); err != nil {
+	// Publish before presenting: a published review entity (a Flow
+	// Version) is what the presentation then points at.
+	if err := s.publish(ctx, c, l, jr, sum); err != nil {
 		return err
 	}
-	if err := s.publish(ctx, t, c, l, j, jr, sum); err != nil {
+	if err := s.reviewHead(ctx, c, l, fresh); err != nil {
 		return err
+	}
+	ls := s.linkState(l, sum)
+	cfg := tracker.PresentConfig{States: t.Spec.StatusOut.States, CheckName: t.Spec.StatusOut.CheckName,
+		CommitStatus: t.Spec.StatusOut.CommitStatus}
+	now, every := s.now(), seconds(t.Spec.StatusOut.FieldSeconds, 300)
+	for _, fw := range c.presenter.Present(ls, cfg) {
+		if err := s.write(ctx, c, l, fw.Field, fw.Value, fw.Continuous, every, now, fw.Build); err != nil {
+			return err
+		}
+	}
+	if l.Status.State != sum.State {
+		if err := s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.State = sum.State }); err != nil {
+			return err
+		}
 	}
 	s.setLinkCond(ctx, l, CondSynced, metav1.ConditionTrue, "Synced", "")
 	return nil
+}
+
+// reviewHead reads the head of what is under review again when it may
+// have changed, for adapters whose reviews have heads.
+func (s *Syncer) reviewHead(ctx context.Context, c *conn, l *c4v1.TrackerLink, fresh bool) error {
+	if l.Status.Review == nil || !c.adapter.Capabilities().ReviewHeads || (!fresh && l.Status.ReviewHead != "") {
+		return nil
+	}
+	it, err := c.adapter.Get(ctx, tracker.Ref{Type: l.Status.Review.Type, ID: l.Status.Review.ID})
+	if err != nil {
+		return err
+	}
+	head := it.Fields["head"]
+	if head == l.Status.ReviewHead {
+		return nil
+	}
+	return s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.ReviewHead = head })
 }
 
 // reworking: the last decision relayed for this link was a rework.
@@ -607,7 +697,7 @@ func verdictFor(t *c4v1.Tracker, native string) string {
 // relay sends the newest decision not yet relayed to the open wait. Older
 // unrelayed decisions are superseded by it: a reviewer who requested
 // changes and then approved has approved.
-func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, w *api.Wait) (bool, error) {
+func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, w *api.Wait) (string, error) {
 	var cands []tracker.Decision
 	if l.Status.Review != nil {
 		// Reviews already relayed (or refused) are not read again.
@@ -619,7 +709,7 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 		}
 		ds, err := c.adapter.Decisions(ctx, tracker.Ref{Type: l.Status.Review.Type, ID: l.Status.Review.ID, URL: l.Status.Review.URL}, since)
 		if err != nil && !errors.Is(err, tracker.ErrUnsupported) {
-			return false, err
+			return "", err
 		}
 		cands = append(cands, ds...)
 	}
@@ -651,9 +741,10 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 		}
 	}
 	if pick == nil {
-		return false, nil
+		return "", nil
 	}
-	rec := c4v1.TrackerDecision{Source: pick.Source.String(), By: pick.By.ID, Unit: unitRef(w), At: metav1.NewTime(pick.At)}
+	rec := c4v1.TrackerDecision{Source: pick.Source.String(), By: pick.By.ID, Unit: unitRef(w), At: metav1.NewTime(pick.At),
+		Note: clip(pick.Body, 4096)}
 	do := verdictFor(t, pick.Native)
 	if w.Escalated && do == "approve" {
 		do = "accept" // an escalated unit is accepted, not approved
@@ -662,11 +753,11 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 	person, reason := s.authorize(t, w, pick.By)
 	if reason != "" {
 		rec.Error = reason
-		return false, s.recordDecision(ctx, l, rec)
+		return "", s.recordDecision(ctx, l, rec)
 	}
 	if !allowed(w, do) {
 		rec.Error = fmt.Sprintf("the wait does not take %q (choices: %s)", do, strings.Join(append([]string{"approve"}, w.Choices...), ", "))
-		return false, s.recordDecision(ctx, l, rec)
+		return "", s.recordDecision(ctx, l, rec)
 	}
 	err := s.Farm.Decide(ctx, jr, farm.Relay{
 		Project: j.Project, Unit: rec.Unit, Do: do, Note: pick.Body,
@@ -675,12 +766,12 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 	})
 	if errors.Is(err, farm.ErrNotOpen) {
 		rec.Error = err.Error()
-		return false, s.recordDecision(ctx, l, rec)
+		return "", s.recordDecision(ctx, l, rec)
 	}
 	if err != nil {
-		return false, err
+		return "", err
 	}
-	return true, s.recordDecision(ctx, l, rec)
+	return do, s.recordDecision(ctx, l, rec)
 }
 
 func unitRef(w *api.Wait) string {
@@ -745,95 +836,11 @@ const maxDecisions = 50
 
 // --- status out ---
 
-func (s *Syncer) statusOut(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.TrackerLink, jr farm.JobRef, sum Summary, fresh bool) error {
-	now := s.now()
-	every := seconds(t.Spec.StatusOut.FieldSeconds, 300)
-	link := s.Farm.JobURL(jr)
-	// The issue's one comment, edited in place.
-	body := commentBody(jr, link, sum, l)
-	if err := s.write(ctx, c, l, "comment", sum.Key(), etaKey(sum), every, now, func(prev c4v1.TrackerWritten) tracker.Write {
-		w := tracker.Write{On: tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID}, Kind: "comment",
-			Note: &tracker.Note{Body: body}, Key: writeKey(l, "comment", "")}
-		if prev.Ref != "" {
-			w.Note.Replace = &tracker.Ref{Type: "Comment", ID: prev.Ref}
-		}
-		return w
-	}); err != nil {
-		return err
-	}
-	if l.Status.Review == nil {
-		return nil
-	}
-	sha := l.Status.ReviewHead
-	if fresh || sha == "" {
-		pr, err := c.adapter.Get(ctx, tracker.Ref{Type: l.Status.Review.Type, ID: l.Status.Review.ID})
-		if err != nil {
-			return err
-		}
-		if head := pr.Fields["head_sha"]; head != sha {
-			sha = head
-			if err := s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.ReviewHead = head }); err != nil {
-				return err
-			}
-		}
-	}
-	if sha == "" {
-		return nil
-	}
-	name := t.Spec.StatusOut.CheckName
-	if name == "" {
-		name = "C4"
-	}
-	status, conclusion := checkState(sum)
-	fields := map[string]string{
-		"name": name, "head_sha": sha, "status": status, "conclusion": conclusion,
-		"title": sum.Title(), "summary": checkSummary(jr, link, sum),
-		"details_url": link, "external_id": jr.String(),
-	}
-	if sum.Wait != nil {
-		fields["actions"] = actions(sum.Wait)
-	} else {
-		fields["actions"] = ""
-	}
-	checkKey := sum.Key() + "|" + sha
-	if err := s.write(ctx, c, l, "check", checkKey, etaKey(sum), every, now, func(prev c4v1.TrackerWritten) tracker.Write {
-		f := map[string]string{}
-		for k, v := range fields {
-			f[k] = v
-		}
-		// A run that is completed is not reopened: a new run takes over,
-		// as a re-run does. A new head commit gets a new run too.
-		if prev.Ref != "" && strings.HasSuffix(stateOf(prev.Value), "|"+sha) && !completed(prev.Value) {
-			f["id"] = prev.Ref
-		}
-		return tracker.Write{On: tracker.Ref{Type: "Commit", ID: sha}, Kind: "check", Fields: f,
-			Key: writeKey(l, "check", checkKey)}
-	}); err != nil {
-		return err
-	}
-	if !t.Spec.StatusOut.CommitStatus {
-		return nil
-	}
-	state := map[bool]string{true: "pending", false: ""}[sum.Active()]
-	switch sum.State {
-	case StateDone, StateDoneAccepted:
-		state = "success"
-	case StateNeedsPerson, StateFailed:
-		state = "failure"
-	}
-	ctxName := "c4/" + jr.Name
-	desc := sum.Words()
-	return s.write(ctx, c, l, "status", sum.Key()+"|"+sha, "", 0, now, func(c4v1.TrackerWritten) tracker.Write {
-		return tracker.Write{On: tracker.Ref{Type: "Commit", ID: sha}, Kind: "status",
-			Fields: map[string]string{"sha": sha, "state": state, "context": ctxName, "description": desc, "target_url": link}}
-	})
-}
-
 // write makes one field's write when its value changed, or when only its
 // continuous part changed and every has passed. The previous write's
 // fingerprint and the tracker entity it made are kept in the link.
 func (s *Syncer) write(ctx context.Context, c *conn, l *c4v1.TrackerLink, field, value, cont string, every time.Duration, now time.Time,
-	build func(prev c4v1.TrackerWritten) tracker.Write) error {
+	build func(prev tracker.Written) tracker.Write) error {
 	prev := l.Status.Written[field]
 	full := value + "#" + cont
 	switch {
@@ -842,7 +849,7 @@ func (s *Syncer) write(ctx context.Context, c *conn, l *c4v1.TrackerLink, field,
 	case stateOf(prev.Value) == value && (every == 0 || now.Sub(prev.At.Time) < every):
 		return nil // only the ETA moved, and not long ago
 	}
-	w := build(prev)
+	w := build(tracker.Written{Value: prev.Value, Ref: prev.Ref})
 	if w.Key != "" {
 		done, ref, err := c.adapter.Probe(ctx, w)
 		if err != nil {
@@ -868,138 +875,111 @@ func stateOf(v string) string {
 	return s
 }
 
-func completed(v string) bool {
-	st := strings.SplitN(stateOf(v), "|", 2)[0]
-	return st == StateDone || st == StateDoneAccepted || st == StateFailed || st == StateNeedsPerson
-}
-
 func (s *Syncer) remember(ctx context.Context, l *c4v1.TrackerLink, field, value, ref string, now time.Time) error {
 	return s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) {
 		if st.Written == nil {
 			st.Written = map[string]c4v1.TrackerWritten{}
 		}
 		st.Written[field] = c4v1.TrackerWritten{Value: value, Ref: ref, At: metav1.NewTime(now)}
-		if field == "comment" {
-			st.State = strings.SplitN(stateOf(value), "|", 2)[0]
-		}
 	})
-}
-
-// writeKey is the idempotency key of a write: the link, the field and
-// what it writes. A crash between a write and remembering it is found by
-// the adapter's probe under the same key.
-func writeKey(l *c4v1.TrackerLink, field, value string) string {
-	h := sha256.Sum256([]byte(l.Namespace + "/" + l.Name + "/" + field + "/" + value))
-	return hex.EncodeToString(h[:12])
-}
-
-func etaKey(s Summary) string {
-	if s.ETA == nil || !s.Active() {
-		return ""
-	}
-	return s.ETA.UTC().Format(time.RFC3339)
-}
-
-// checkState maps a summary state to a check run's status and conclusion:
-// work states only. done is the farm's work finished; the approval that
-// may follow is GitHub's own review.
-func checkState(s Summary) (status, conclusion string) {
-	switch s.State {
-	case StateQueued, StateHeld:
-		return "queued", ""
-	case StateRunning, StateRework, StateInReview:
-		return "in_progress", ""
-	case StateNeedsPerson:
-		return "completed", "action_required"
-	case StateFailed:
-		return "completed", "failure"
-	case StateDone, StateDoneAccepted:
-		return "completed", "success"
-	}
-	return "queued", ""
-}
-
-// actions are the check run's buttons for an open wait: GitHub allows
-// three.
-func actions(w *api.Wait) string {
-	if w.Escalated {
-		return "accept=Accept;rework=Rework"
-	}
-	parts := []string{"approve=Approve"}
-	for _, c := range w.Choices {
-		if c != "approve" && len(parts) < 3 {
-			parts = append(parts, c+"="+strings.ToUpper(c[:1])+c[1:])
-		}
-	}
-	return strings.Join(parts, ";")
-}
-
-func checkSummary(jr farm.JobRef, link string, s Summary) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "C4 job [%s](%s): %s.", jr, link, s.Words())
-	if s.Deadline != nil {
-		fmt.Fprintf(&b, "\n\nDeadline %s (%s).", s.Deadline.UTC().Format("Mon 2 Jan 15:04 UTC"), deadlineSource(s))
-	}
-	if s.ETA != nil && s.Active() {
-		fmt.Fprintf(&b, " Expected by %s.", s.ETA.UTC().Format("Mon 2 Jan 15:04 UTC"))
-	}
-	if s.Why != "" {
-		fmt.Fprintf(&b, "\n\n%s", s.Why)
-	}
-	if s.Wait != nil {
-		b.WriteString("\n\nReview this pull request (approve, or request changes) to decide; C4 reads the review.")
-	}
-	return b.String()
-}
-
-func deadlineSource(s Summary) string {
-	if s.Mode == "Tracking" {
-		return "from the tracker"
-	}
-	if s.Source == "suggested" {
-		return "suggested by the farm"
-	}
-	return "set in C4"
-}
-
-func commentBody(jr farm.JobRef, link string, s Summary, l *c4v1.TrackerLink) string {
-	var b strings.Builder
-	fmt.Fprintf(&b, "**C4:** %s\n\n", s.Title())
-	fmt.Fprintf(&b, "Job [%s](%s)", jr, link)
-	if s.Deadline != nil {
-		fmt.Fprintf(&b, ", deadline %s (%s)", s.Deadline.UTC().Format("Mon 2 Jan 15:04 UTC"), deadlineSource(s))
-	}
-	b.WriteString(".")
-	if s.Why != "" {
-		fmt.Fprintf(&b, "\n\n%s", s.Why)
-	}
-	if l.Status.Review == nil && l.Spec.Ref.Type == "Issue" {
-		fmt.Fprintf(&b, "\n\nA pull request for this work names it with `%s` or a closing keyword for #%s.", markerFor(jr.Namespace, jr.Name), l.Spec.Ref.ID)
-	}
-	return b.String()
 }
 
 // --- outputs out ---
 
-func (s *Syncer) publish(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, sum Summary) error {
-	if sum.State != StateDone && sum.State != StateDoneAccepted || sum.Output == "" {
+// publish puts the job's output in the tracker once there is one to look
+// at: when its review wait opens, or when it is done. Each output view is
+// published once. Where publishing makes the entity people review (a Flow
+// Version), that becomes the link's review.
+func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr farm.JobRef, sum Summary) error {
+	if sum.Output == "" || (sum.State != StateInReview && sum.State != StateDone && sum.State != StateDoneAccepted) {
 		return nil
 	}
 	if prev := l.Status.Written["publish"]; prev.Value == sum.Output {
 		return nil
 	}
-	on := tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID}
-	if r := l.Status.Review; r != nil {
+	on := tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL}
+	forReview := c.adapter.Capabilities().PublishForReview
+	if r := l.Status.Review; r != nil && !forReview {
 		on = tracker.Ref{Type: r.Type, ID: r.ID}
 	}
-	out := tracker.Output{Name: jr.String(), View: sum.Output,
-		Custody: strings.TrimSuffix(s.Farm.JobURL(jr), "/") + "/provenance",
-		Summary: sum.Words() + "."}
-	ref, err := c.adapter.Publish(ctx, on, out, writeKey(l, "publish", sum.Output))
+	url := s.Farm.JobURL(jr)
+	out := tracker.Output{Name: jr.String(), Version: len(l.Status.Versions) + 1, JobURL: url, View: sum.Output,
+		Custody: strings.TrimSuffix(url, "/") + "/provenance", Summary: sum.Words() + "."}
+	ref, err := c.adapter.Publish(ctx, on, out, tracker.WriteKey(l.Namespace+"/"+l.Name, "publish", sum.Output))
 	if err != nil {
 		return err
 	}
-	return s.remember(ctx, l, "publish", sum.Output, ref.ID, s.now())
+	if err := s.remember(ctx, l, "publish", sum.Output, ref.ID, s.now()); err != nil {
+		return err
+	}
+	if forReview {
+		r := c4v1.TrackerRef{Type: ref.Type, ID: ref.ID, URL: ref.URL}
+		return s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.Review, st.ReviewHead = &r, "" })
+	}
+	return nil
+}
+
+// nextVersion answers a rework the media way (integrations LAUNCH 3.1): a
+// new job follows the one reviewed, with the reviewer's note as an input
+// view, and the link moves to it. The tracker counts versions, so the next
+// output publishes as the next version.
+func (s *Syncer) nextVersion(ctx context.Context, t *c4v1.Tracker, l *c4v1.TrackerLink, j *api.Job, rule c4v1.TrackerIntake) error {
+	if rule.Job == nil {
+		return fmt.Errorf("intake %d: nextVersion needs a job spec", l.Spec.Intake)
+	}
+	prev := l.Spec.Target.WorkJob
+	n := len(l.Status.Versions) + 2
+	base := JobName(t.Name, tracker.Ref{ID: l.Spec.Ref.ID})
+	name := dns(fmt.Sprintf("%s-v%03d", base, n))
+	note := lastDecisionNote(l)
+	var inputs []api.SubmitInput
+	if note != "" {
+		view, err := s.Farm.StoreView(ctx, j.Project, map[string][]byte{"note.md": []byte(note)})
+		if err != nil {
+			return fmt.Errorf("storing the note for %s: %w", name, err)
+		}
+		inputs = append(inputs, api.SubmitInput{View: view, MountPath: NoteMount, ReadOnly: true})
+	}
+	spec := *rule.Job.DeepCopy()
+	spec.Deadline, spec.DeadlineMode = nil, ""
+	if d := j.Objective.Deadline; d != nil {
+		spec.Deadline = &metav1.Time{Time: *d}
+		spec.DeadlineMode = j.Objective.Mode
+	}
+	if _, err := s.Farm.Submit(ctx, farm.JobRequest{Namespace: l.Namespace, Name: name, Spec: spec, Inputs: inputs,
+		Follows: prev, Tracker: t.Name, TrackerRef: t.Name + "/" + l.Spec.Ref.Type + "/" + l.Spec.Ref.ID}); err != nil {
+		return fmt.Errorf("submitting %s after %s: %w", name, prev, err)
+	}
+	before := l.DeepCopy()
+	l.Spec.Target.WorkJob = name
+	if err := s.Client.Patch(ctx, l, client.MergeFrom(before)); err != nil {
+		return err
+	}
+	return s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) {
+		st.Versions = append(st.Versions, prev)
+		st.Review, st.ReviewHead, st.State = nil, "", StateQueued
+	})
+}
+
+func clip(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	r := []rune(s[:n])
+	return string(r[:len(r)-1])
+}
+
+// NoteMount is where a next version reads the note it answers.
+const NoteMount = "/c4/notes"
+
+// lastDecisionNote is the text of the decision just relayed.
+func lastDecisionNote(l *c4v1.TrackerLink) string {
+	for i := len(l.Status.Decisions) - 1; i >= 0; i-- {
+		if d := l.Status.Decisions[i]; d.Error == "" {
+			return d.Note
+		}
+	}
+	return ""
 }
 
 // --- status writes to the API ---

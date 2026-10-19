@@ -136,6 +136,13 @@ type TrackerIntake struct {
 	// Review opens a wait for a person once the work is up for review.
 	// +optional
 	Review *TrackerReview `json:"review,omitempty"`
+	// Rework is what a rework decision does: inPlace (default: the job's
+	// units run again, as in CI and agent work) or nextVersion (a new job
+	// follows this one with the note as an input, as v008 follows v007 in
+	// media; integrations GAPS 6).
+	// +kubebuilder:validation:Enum=inPlace;nextVersion
+	// +optional
+	Rework string `json:"rework,omitempty"`
 }
 
 // TrackerMatch selects tracker entities.
@@ -148,6 +155,10 @@ type TrackerMatch struct {
 	// State is open (default), closed or all.
 	// +optional
 	State string `json:"state,omitempty"`
+	// Fields are equality filters in the tracker's own field names
+	// (flow: {sg_status_list: rdy, step.Step.short_name: LGT}).
+	// +optional
+	Fields map[string]string `json:"fields,omitempty"`
 }
 
 // TrackerDeadline says how a tracker due date becomes a C4 deadline.
@@ -185,6 +196,13 @@ type TrackerStatusOut struct {
 	// continuous value (the ETA). Default 300.
 	// +optional
 	FieldSeconds int32 `json:"fieldSeconds,omitempty"`
+	// States maps C4 summary states (queued, running, needs-person,
+	// in-review, rework, held, failed) to the tracker's own status, for
+	// trackers whose statuses differ per site (flow: running: ip). A state
+	// not listed is not written. done is never written: approval is the
+	// tracker's (integrations MAPPING section 2).
+	// +optional
+	States map[string]string `json:"states,omitempty"`
 }
 
 // TrackerStatus is what c4-sync last saw of the connection.
@@ -267,6 +285,10 @@ type TrackerLinkStatus struct {
 	// (github: the pull request).
 	// +optional
 	Review *TrackerRef `json:"review,omitempty"`
+	// Versions are the jobs this link served before its current one,
+	// oldest first (a rework that made a next version).
+	// +optional
+	Versions []string `json:"versions,omitempty"`
 	// ReviewHead is the head commit of the entity under review as last
 	// read; it is read again only when the tracker reports a change, or
 	// at a resync.
@@ -303,7 +325,11 @@ type TrackerDecision struct {
 	// Do is what C4 was asked to decide.
 	Do string `json:"do"`
 	// Unit is the wait it served.
-	Unit string      `json:"unit"`
+	Unit string `json:"unit"`
+	// Note is the decision's text (a reviewer's note), up to 4 KiB; the
+	// whole of it is in the evidence C4 stored.
+	// +optional
+	Note string      `json:"note,omitempty"`
 	At   metav1.Time `json:"at"`
 	// Error says why it was not relayed.
 	// +optional

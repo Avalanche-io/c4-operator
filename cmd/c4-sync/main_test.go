@@ -46,3 +46,19 @@ func TestSampleTracker(t *testing.T) {
 		t.Fatalf("sample: %+v", tr.Spec)
 	}
 }
+
+func TestSampleFlowTracker(t *testing.T) {
+	b, err := os.ReadFile("../../config/samples/tracker-flow/tracker.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tr c4v1.Tracker
+	if err := yaml.UnmarshalStrict(b, &tr); err != nil {
+		t.Fatal(err)
+	}
+	in := tr.Spec.Intake[0]
+	if tr.Spec.Kind != "flow" || in.Rework != "nextVersion" || in.Match.Fields["sg_status_list"] != "rdy" ||
+		tr.Spec.StatusOut.States["in-review"] != "rev" || tr.Spec.VerdictsIn["status:fix"] != "rework" {
+		t.Fatalf("sample: %+v", tr.Spec)
+	}
+}

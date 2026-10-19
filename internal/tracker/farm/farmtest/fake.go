@@ -24,6 +24,7 @@ type Farm struct {
 	Relays     []farm.Relay
 	Deadlines  []time.Time
 	Milestones []farm.Milestone
+	Views      map[string]map[string][]byte
 	// MilestonesBuilt makes EnsureMilestone succeed; by default it answers
 	// ErrNotBuilt, as the operator does today.
 	MilestonesBuilt bool
@@ -121,6 +122,18 @@ func (f *Farm) Decide(_ context.Context, j farm.JobRef, r farm.Relay) error {
 		job.NeedsPerson = nil
 	}
 	return nil
+}
+
+// StoreView records the files and returns a made-up view ID.
+func (f *Farm) StoreView(_ context.Context, project string, files map[string][]byte) (string, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Views == nil {
+		f.Views = map[string]map[string][]byte{}
+	}
+	id := fmt.Sprintf("c4view%03d", len(f.Views)+1)
+	f.Views[id] = files
+	return id, nil
 }
 
 func (f *Farm) EnsureMilestone(_ context.Context, m farm.Milestone) error {

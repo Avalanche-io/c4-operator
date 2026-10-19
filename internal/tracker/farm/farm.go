@@ -17,6 +17,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 
@@ -39,6 +40,13 @@ type JobRequest struct {
 	// the operator takes it; until then the TrackerLink holds the mapping.
 	TrackerRef string
 	Tracker    string
+	// Inputs are views the job mounts besides its spec's (a note it
+	// answers).
+	Inputs []api.SubmitInput
+	// Follows is the job this one is the next version of (GAPS 6). The
+	// operator has no field for it yet; the HUD client books it in the
+	// job's name only, and the TrackerLink keeps the chain.
+	Follows string
 }
 
 // Relay is a decision made in a tracker, relayed to a wait (GAPS 3).
@@ -76,6 +84,9 @@ type Farm interface {
 	SetDeadline(ctx context.Context, j JobRef, at time.Time) error
 	// Decide relays a tracker decision to an open wait.
 	Decide(ctx context.Context, j JobRef, r Relay) error
+	// StoreView stores files in the project's store as a view and returns
+	// its C4 ID.
+	StoreView(ctx context.Context, project string, files map[string][]byte) (string, error)
 	// EnsureMilestone creates or updates a Milestone (GAPS 1).
 	EnsureMilestone(ctx context.Context, m Milestone) error
 	// JobURL is the job's page in the HUD, for links written to trackers.
@@ -178,7 +189,7 @@ func (h *HUD) Submit(ctx context.Context, r JobRequest) (JobRef, error) {
 	if err != nil {
 		return JobRef{}, err
 	}
-	in := api.SubmitRequest{Namespace: r.Namespace, Name: r.Name, Type: "tracker", Spec: spec}
+	in := api.SubmitRequest{Namespace: r.Namespace, Name: r.Name, Type: "tracker", Spec: spec, Inputs: r.Inputs}
 	var out api.SubmitResponse
 	err = h.doJSON(ctx, http.MethodPost, "/jobs", in, &out)
 	var ae *APIError
@@ -253,6 +264,30 @@ func RelayNote(r Relay, evidence string) string {
 	}
 	b.WriteString(".")
 	return b.String()
+}
+
+// StoreView puts each file's bytes in the project's store, then records
+// the tree (PUT /objects, POST /views; API.md "Submitting").
+func (h *HUD) StoreView(ctx context.Context, project string, files map[string][]byte) (string, error) {
+	paths := make([]string, 0, len(files))
+	for p := range files {
+		paths = append(paths, p)
+	}
+	sort.Strings(paths)
+	req := api.ViewRequest{}
+	for _, p := range paths {
+		b := files[p]
+		id := c4.Identify(bytes.NewReader(b)).String()
+		if err := h.do(ctx, http.MethodPut, "/objects/"+url.PathEscape(project)+"/"+id, "application/octet-stream", b, nil); err != nil {
+			return "", err
+		}
+		req.Files = append(req.Files, api.ViewFile{Path: p, ID: id, Size: int64(len(b))})
+	}
+	var out api.ViewResponse
+	if err := h.doJSON(ctx, http.MethodPost, "/views/"+url.PathEscape(project), req, &out); err != nil {
+		return "", err
+	}
+	return out.View, nil
 }
 
 func (h *HUD) EnsureMilestone(context.Context, Milestone) error { return ErrNotBuilt }

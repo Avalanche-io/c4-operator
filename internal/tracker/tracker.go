@@ -72,6 +72,8 @@ type Decision struct {
 // Output is what C4 publishes for a finished job.
 type Output struct {
 	Name    string
+	Version int // 1 for the link's first job, 2 for the job that followed it...
+	JobURL  string
 	View    string // the output view's C4 ID
 	Record  string // the job record's C4 ID
 	Custody string // the provenance view's URL
@@ -99,6 +101,8 @@ type Query struct {
 	Labels []string
 	State  string // open, closed, all
 	Text   string // a marker the entity's body must contain
+	// Fields are equality filters in the tracker's own field names.
+	Fields map[string]string
 }
 
 // Delivery is one pushed event, verified and parsed.
@@ -119,6 +123,12 @@ type Capabilities struct {
 	CustomFields      bool
 	DateOnlyDue       bool
 	ConditionalWrites bool
+	// ReviewHeads: what is under review has head commits, read again when
+	// it changes (a pull request), and status goes on the head.
+	ReviewHeads bool
+	// PublishForReview: Publish makes the entity people review (a Flow
+	// Version), which becomes the link's review.
+	PublishForReview bool
 }
 
 // Adapter is one tracker family.

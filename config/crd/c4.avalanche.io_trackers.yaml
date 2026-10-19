@@ -297,6 +297,13 @@ spec:
                     match:
                       description: Match selects entities.
                       properties:
+                        fields:
+                          additionalProperties:
+                            type: string
+                          description: |-
+                            Fields are equality filters in the tracker's own field names
+                            (flow: {sg_status_list: rdy, step.Step.short_name: LGT}).
+                          type: object
                         labels:
                           description: Labels the entity must all carry.
                           items:
@@ -323,6 +330,16 @@ spec:
                       required:
                       - wait
                       type: object
+                    rework:
+                      description: |-
+                        Rework is what a rework decision does: inPlace (default: the job's
+                        units run again, as in CI and agent work) or nextVersion (a new job
+                        follows this one with the note as an input, as v008 follows v007 in
+                        media; integrations GAPS 6).
+                      enum:
+                      - inPlace
+                      - nextVersion
+                      type: string
                   required:
                   - as
                   - match
@@ -378,6 +395,16 @@ spec:
                       continuous value (the ETA). Default 300.
                     format: int32
                     type: integer
+                  states:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      States maps C4 summary states (queued, running, needs-person,
+                      in-review, rework, held, failed) to the tracker's own status, for
+                      trackers whose statuses differ per site (flow: running: ip). A state
+                      not listed is not written. done is never written: approval is the
+                      tracker's (integrations MAPPING section 2).
+                    type: object
                 type: object
               verdictsIn:
                 additionalProperties:
