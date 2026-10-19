@@ -2,6 +2,8 @@ package plan
 
 import (
 	"encoding/json"
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"slices"
 	"strings"
 	"testing"
@@ -199,5 +201,40 @@ func TestExtrasAndCycles(t *testing.T) {
 	_, err := p.Doc()
 	if err == nil || !strings.Contains(err.Error(), "cycle") || !strings.Contains(err.Error(), "C2.1") || !strings.Contains(err.Error(), "C4.1") {
 		t.Fatalf("cycle: %v", err)
+	}
+}
+
+// A wait block from a person's extras: a ruling before the lanes it holds
+// up, in the first one's row, with its origin; it is no generator.
+func TestExtraWait(t *testing.T) {
+	p := load(t)
+	p.AddExtras([]Extra{{Block: "R1", Before: []string{"C2.3", "C4.1"}, File: "LANES.md", Line: 3, Text: "the owner ruled",
+		Wait: &Wait{Server: "person:owner", Ask: "conversions first?", Expect: 46080}}})
+	r := p.Unit("R1")
+	if r == nil || r.Wait == nil || r.Planned || r.Group != "chapter 2" || r.Params["origin"] != "plan" || r.Key != "wait" {
+		t.Fatalf("R1 %+v", r)
+	}
+	for _, n := range []string{"C2.3", "C4.1"} {
+		if !slices.Contains(p.Unit(n).After, "R1") {
+			t.Errorf("%s does not run after the ruling: %v", n, p.Unit(n).After)
+		}
+	}
+	d, err := p.Doc()
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := d.JSON()
+	if !strings.Contains(string(b), `"server": "person:owner"`) {
+		t.Fatalf("the document carries no wait: %s", b)
+	}
+	// the queue takes the document as it is
+	x, err := class.ExpandDocument(&c4v1.WorkJob{}, class.Unit{Name: "root", Key: "graph", Generator: true}, b, map[string]int{"root": 0}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, u := range x.Units {
+		if u.Name == "R1" && (u.Wait == nil || u.Wait.Server != "person:owner" || u.Generator) {
+			t.Fatalf("the queue reads R1 as %+v", u)
+		}
 	}
 }

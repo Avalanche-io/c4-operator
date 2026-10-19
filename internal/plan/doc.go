@@ -53,6 +53,18 @@ type Unit struct {
 	Params map[string]string `json:"params,omitempty"`
 	// Cites says where each edge in After came from.
 	Cites []Cite `json:"cites,omitempty"`
+	// Wait makes the block a wait (a ruling, a review by an outside
+	// party): no slot, completed by a decision. Planned is false for it.
+	Wait *Wait `json:"wait,omitempty"`
+}
+
+// Wait is what a wait block waits for, as the queue's expansion document
+// takes it: server person:<id>, party:<name> or clock:<time>.
+type Wait struct {
+	Server  string   `json:"server"`
+	Ask     string   `json:"ask,omitempty"`
+	Expect  float64  `json:"expect,omitempty"` // seconds
+	Choices []string `json:"choices,omitempty"`
 }
 
 // Cite is the sentence an edge came from.
@@ -204,6 +216,11 @@ type Extra struct {
 	File  string   `json:"file"`
 	Line  int      `json:"line"`
 	Text  string   `json:"text"`
+	// Wait, with Before, adds a wait block named Block (a ruling, a
+	// review): the lanes in Before run after it. It takes the row and the
+	// origin of the first of them.
+	Wait   *Wait    `json:"wait,omitempty"`
+	Before []string `json:"before,omitempty"`
 }
 
 // AddExtras adds a person's edges, noting any that name a lane the plan
@@ -211,6 +228,10 @@ type Extra struct {
 func (p *Plan) AddExtras(xs []Extra) {
 	for _, x := range xs {
 		c := Cite{File: x.File, Line: x.Line, Text: x.Text}
+		if x.Wait != nil {
+			p.addWait(x, c)
+			continue
+		}
 		for _, d := range x.After {
 			switch {
 			case p.units[x.Block] == nil:
@@ -221,6 +242,43 @@ func (p *Plan) AddExtras(xs []Extra) {
 				p.edge(x.Block, d, c)
 			}
 		}
+	}
+}
+
+// addWait adds a wait block before the lanes it holds up.
+func (p *Plan) addWait(x Extra, c Cite) {
+	var first *Unit
+	for _, b := range x.Before {
+		if u := p.units[b]; u != nil && first == nil {
+			first = u
+		}
+	}
+	switch {
+	case x.Block == "" || p.units[x.Block] != nil:
+		p.note(x.File, x.Line, x.Text, "a wait needs a name of its own: "+x.Block)
+		return
+	case first == nil:
+		p.note(x.File, x.Line, x.Text, "a wait holds up no lane the plan lists: "+x.Block)
+		return
+	}
+	u := p.unit(x.Block, first.Group)
+	u.Planned, u.Key, u.Wait = false, "wait", x.Wait
+	u.Label = x.Block
+	u.Params["origin"] = first.Params["origin"]
+	if x.Wait.Ask != "" {
+		u.Label = x.Block + ": " + x.Wait.Ask
+	}
+	for _, d := range x.After {
+		if p.units[d] != nil {
+			p.edge(x.Block, d, c)
+		}
+	}
+	for _, b := range x.Before {
+		if p.units[b] == nil {
+			p.note(x.File, x.Line, x.Text, "a wait holds up "+b+", which the plan does not list")
+			continue
+		}
+		p.edge(b, x.Block, c)
 	}
 }
 

@@ -55,3 +55,19 @@ person adds those with `--extra`, a YAML list citing the plan the same way:
 ```
 
 A cycle in the edges is an error that names the blocks on it.
+
+## Rulings and reviews as waits
+
+A plan also holds up lanes for decisions: an owner's ruling, an oracle's
+review. An `--extra` entry with `wait` adds one as a **wait block** (DESIGN
+10.6, waits): no slot, completed by a signed decision. The lanes in `before`
+run after it, and it takes the row and origin of the first of them:
+
+```yaml
+- {block: R-owner-item-85, before: [C7.6], file: LANES.md, line: 104, text: "ERR-17's refusal for three facts of the program's environment (L290, owner item 85)",
+   wait: {server: "person:owner", ask: "owner item 85", expect: 46080}}
+```
+
+`server` is `person:<id>`, `party:<name>` or `clock:<time>`. `expect` is
+the expected wait in seconds, used until the job has measured that
+server's own decisions.
