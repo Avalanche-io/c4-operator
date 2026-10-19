@@ -61,7 +61,7 @@ func (a *alloc) burst() {
 	for _, jc := range cands {
 		deficit, lateBy := jc.deficit, jc.lateBy
 		lateCost := jc.proj.p.LateCostPerHour * lateBy.Hours()
-		sg := a.sizeBurst(jc, promised)
+		sg := a.sizeBurst(jc, promised, deficit, 0)
 		if a.chooseStage(jc, deficit, lateCost, sg, budget) {
 			continue
 		}
@@ -100,6 +100,7 @@ func (a *alloc) burst() {
 		jc.burst = sg
 		a.out.Bursts = append(a.out.Bursts, *sg)
 	}
+	a.topUpBursts(cands, promised, margin, budget)
 	if !a.cfg.Burst {
 		return
 	}
@@ -143,7 +144,7 @@ func (a *alloc) burst() {
 	}
 }
 
-func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion {
+func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int, deficit float64, used int) *BurstSuggestion {
 	sg := &BurstSuggestion{Job: jc.j.ID, Project: jc.proj.p.Name, Slots: map[string]int{}}
 	if jc.tpath > jc.T {
 		sg.Why = fmt.Sprintf("its critical path alone (%s) runs past the deadline", human(secs(jc.tpath)))
@@ -178,7 +179,7 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 	sort.SliceStable(pools, func(i, j int) bool {
 		return pools[i].p.Burst.CostPerSlotHour < pools[j].p.Burst.CostPerSlotHour
 	})
-	left := jc.deficit
+	left := deficit
 	T := jc.horizon
 	room := math.Inf(1)
 	if jc.j.MaxParallel > 0 {
@@ -193,6 +194,7 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int) *BurstSuggestion 
 			room = math.Max(room, float64(k))
 		}
 	}
+	room -= float64(used)
 	slow := 0
 	added := 0.0
 	for _, ps := range pools {
@@ -468,5 +470,60 @@ func human(d time.Duration) string {
 		return fmt.Sprintf("%.0fh", math.Round(d.Hours()))
 	default:
 		return fmt.Sprintf("%.0f days", math.Round(d.Hours()/24))
+	}
+}
+
+// topUpBursts sizes requested bursts to the shortfall the job's merged
+// plan implies, with what budget and burst slots are left once every job
+// has its planned burst.
+//
+// A job confined to a subset of its group's pools takes the more
+// pessimistic of the group's plan and the subset's (planSubsets): the
+// riskier plan's shortfall, but the smaller share of the two. That
+// shortfall was computed at the riskier plan's share, so at the merged
+// share the job needs more: W90 - share x horizon. Sizing every burst on
+// it buys bursts that close less often, and so are not bought at all;
+// sizing a job's burst on it first takes budget and slots from the jobs
+// after it. So a requested burst is topped up afterwards, from what is
+// left, and only when the top-up covers the rest of that shortfall and
+// the whole burst still costs less than the lateness it prevents.
+func (a *alloc) topUpBursts(cands []*jobCtx, promised, margin map[string]int, budget map[string]float64) {
+	if !a.cfg.Burst {
+		return
+	}
+	for _, jc := range cands {
+		sg := jc.burst
+		if sg == nil || !sg.Auto {
+			continue
+		}
+		extra := math.Max(jc.deficit, jc.W90-jc.share*jc.horizon) - jc.deficit
+		if extra <= 1e-6 {
+			continue
+		}
+		used := 0
+		for _, n := range sg.Slots {
+			used += n
+		}
+		up := a.sizeBurst(jc, promised, extra, used)
+		if up == nil || !up.Closes || len(up.Stages) > 0 || up.Cost > budget[jc.proj.p.Name] || sg.Cost+up.Cost >= sg.LateCost {
+			continue
+		}
+		budget[jc.proj.p.Name] -= up.Cost
+		sg.Cost += up.Cost
+		for pool, n := range up.Slots {
+			if _, ok := sg.Slots[pool]; !ok {
+				sg.Order = append(sg.Order, pool)
+			}
+			sg.Slots[pool] += n
+			promised[pool] += n
+			if sg.Margin {
+				margin[pool] += n
+			}
+		}
+		for i := range a.out.Bursts {
+			if a.out.Bursts[i].Job == sg.Job {
+				a.out.Bursts[i] = *sg
+			}
+		}
 	}
 }

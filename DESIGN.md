@@ -1953,6 +1953,20 @@ Burst decisions are cost-aware:
   projects' own prices: the overrun tail a calibrated 90th percentile leaves
   still costs more than the margin. Every margin burst passes the same
   economic rule, priced from the lateness the margin plans.
+- **Bursts are topped up from what is left.** A job confined to a subset of
+  its group's pools takes the more pessimistic of the two plans: the riskier
+  plan's shortfall, but the smaller share. At that smaller share it needs
+  more, `W90 - share x horizon`.
+  - Sizing every burst on the larger shortfall makes bursts close less
+    often, so fewer are bought. Sizing on it in deadline order takes budget
+    and burst slots from the jobs after.
+  - So every job first gets the burst its plan sizes. Then each requested
+    burst is topped up toward the larger shortfall, from the budget and
+    slots left. The top-up is made only when it covers the rest of that
+    shortfall and the whole burst still costs less than the lateness it
+    prevents.
+  - On the global tutorial farm, jobs late at London's 08:00 went 11 -> 3.
+    The reduced stress grid was flat (the PROGRESS row has the numbers).
 - Scale-down uses hysteresis: a request shrinks only after a pool's surplus
   has lasted ten minutes, and nodes are released by the autoscaler's own
   consolidation, never by the queue.
