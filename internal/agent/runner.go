@@ -253,8 +253,9 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 			return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "stopped at a safe point: "+st.why, 0)
 		}
 		// The session ended on its own: the member finished. A generator
-		// member leaves its expansion document for the queue.
-		if err := r.storeExpand(ctx, p, m, u); err != nil {
+		// member leaves its expansion document for the queue, a review
+		// member its verdict.
+		if err := r.storeControlDocs(ctx, p, m, u); err != nil {
 			return err
 		}
 		return r.finish(ctx, p, corev1.PodSucceeded, "Completed", "the member's session ended", 0)

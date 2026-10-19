@@ -159,8 +159,8 @@ token, issued by the farm admin). `config/rbac/host-runner.yaml` and
 - its own Node: created only with the host-runner taint, then only its
   slot limit, capacity reason and status;
 - its own Lease;
-- pods bound to it: status and four annotations (output-checkpoint,
-  output-epoch, output-expand, safepoint);
+- pods bound to it: status and five annotations (output-checkpoint,
+  output-epoch, output-expand, output-verdict, safepoint);
 - bindings to itself only.
 
 Keep the host-runner taint on agent pools, so only agent pods select these
@@ -190,7 +190,9 @@ its checkpoint, not finished.
 **A generator member** leaves its expansion document at
 `out/.c4/expand.json`, or at `.c4/expand.json` in its working directory.
 When its session ends, the runner stores the document and names it on the
-pod (`c4.avalanche.io/output-expand`) for the queue to expand. That needs
+pod (`c4.avalanche.io/output-expand`) for the queue to expand. A review
+member's verdict (`.c4/verdict.json`) goes the same way, named in
+`c4.avalanche.io/output-verdict`. That needs
 `--store` (a regional store replica), `--store-token-file` (its bearer
 token), and `--store-project` (else the runner reads the Project listing
 the pod's namespace). Without a store, the runner says so, and the queue

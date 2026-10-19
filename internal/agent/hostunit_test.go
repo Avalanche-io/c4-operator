@@ -139,10 +139,11 @@ func TestHostSafepointRelay(t *testing.T) {
 	}
 }
 
-// A generator member's expansion document is stored and named on its pod
+// A generator member's expansion document, and a review member's verdict,
+// are stored and named on its pod
 // when its session ends, as the node daemon does at capture; without a
 // store the runner adds nothing.
-func TestHostStoreExpand(t *testing.T) {
+func TestHostControlDocs(t *testing.T) {
 	ctx := context.Background()
 	e := newEnv(t)
 	m := e.register("lead", sess)
@@ -160,7 +161,7 @@ func TestHostStoreExpand(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := r.storeExpand(ctx, p, m, u); err != nil {
+	if err := r.storeControlDocs(ctx, p, m, u); err != nil {
 		t.Fatal(err)
 	}
 	if getPod(t, c).Annotations[c4v1.AnnotationOutputExpand] != "" {
@@ -174,7 +175,7 @@ func TestHostStoreExpand(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(u.Out, ".c4", "expand.json"), inOut, 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := r.storeExpand(ctx, p, m, u); err != nil {
+	if err := r.storeControlDocs(ctx, p, m, u); err != nil {
 		t.Fatal(err)
 	}
 	want := c4.Identify(bytes.NewReader(inOut))
@@ -183,5 +184,19 @@ func TestHostStoreExpand(t *testing.T) {
 	}
 	if got := getPod(t, c).Annotations[c4v1.AnnotationOutputExpand]; got != want.String() {
 		t.Fatalf("output-expand %q, want %s", got, want)
+	}
+
+	// a review member's verdict, the same way
+	verdict := []byte(`{"version":1,"verdict":"rework","items":[{"units":["C3.2/phase-2"],"do":"rework","why":"counterexample"}]}`)
+	if err := os.WriteFile(filepath.Join(u.Out, ".c4", "verdict.json"), verdict, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.storeControlDocs(ctx, p, m, u); err != nil {
+		t.Fatal(err)
+	}
+	vid := c4.Identify(bytes.NewReader(verdict))
+	pod := getPod(t, c)
+	if pod.Annotations[c4v1.AnnotationOutputVerdict] != vid.String() || pod.Annotations[c4v1.AnnotationOutputExpand] != want.String() {
+		t.Fatalf("output-verdict %q, want %s; output-expand %q", pod.Annotations[c4v1.AnnotationOutputVerdict], vid, pod.Annotations[c4v1.AnnotationOutputExpand])
 	}
 }

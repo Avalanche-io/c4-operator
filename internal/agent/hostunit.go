@@ -185,51 +185,73 @@ type relayState struct {
 	why             string
 }
 
-// storeExpand stores the expansion document a generator member wrote and
-// names it on the pod (c4.avalanche.io/output-expand), as the node daemon
-// does at capture. The member writes it to its unit's out/.c4/expand.json
-// or, when it cannot see $C4_OUTPUT, to .c4/expand.json in its working
-// directory. Without a store the document cannot reach the queue: the
-// runner says so and the generator adds nothing.
-func (r *Runner) storeExpand(ctx context.Context, p *corev1.Pod, m *Member, u UnitDirs) error {
-	var data []byte
-	var from string
-	for _, path := range []string{filepath.Join(u.Out, ".c4", "expand.json"), filepath.Join(m.Cwd, ".c4", "expand.json")} {
+// controlDocs are the documents a member leaves for the farm, as a pod
+// leaves them in its .c4/ (node/control.go): a generator's expansion
+// document and a review unit's verdict.
+var controlDocs = []struct{ file, what, annotation string }{
+	{"expand.json", "expansion document", c4v1.AnnotationOutputExpand},
+	{"verdict.json", "verdict", c4v1.AnnotationOutputVerdict},
+}
+
+// storeControlDocs stores the control documents a member wrote and names
+// them on the pod (c4.avalanche.io/output-expand, output-verdict), as the
+// node daemon does at capture. The member writes each to its unit's
+// out/.c4/ or, when it cannot see $C4_OUTPUT, to .c4/ in its working
+// directory. Without a store a document cannot reach the queue: the runner
+// says so, and the queue acts on none.
+func (r *Runner) storeControlDocs(ctx context.Context, p *corev1.Pod, m *Member, u UnitDirs) error {
+	ann := map[string]string{}
+	for _, cd := range controlDocs {
+		data, from, err := readControlDoc(cd.file, u.Out, m.Cwd)
+		if err != nil {
+			return err
+		}
+		if from == "" {
+			continue
+		}
+		if r.Docs == nil {
+			r.logf("%s wrote a %s (%s), but this runner has no store (--store); the queue will not see it", m.Name, cd.what, from)
+			continue
+		}
+		project, err := r.projectOf(ctx, p.Namespace)
+		if err != nil {
+			return err
+		}
+		id := c4.Identify(bytes.NewReader(data))
+		if err := r.Docs.PutBytes(ctx, project, id, data); err != nil {
+			return fmt.Errorf("store %s: %w", from, err)
+		}
+		r.logf("%s: stored its %s %s (%s)", m.Name, cd.what, id, from)
+		ann[cd.annotation] = id.String()
+	}
+	if len(ann) == 0 {
+		return nil
+	}
+	return r.annotate(ctx, p, ann)
+}
+
+// readControlDoc reads .c4/<file> from the first of dirs that has it.
+func readControlDoc(file string, dirs ...string) (data []byte, from string, err error) {
+	for _, d := range dirs {
+		path := filepath.Join(d, ".c4", file)
 		f, err := os.Open(path)
 		if os.IsNotExist(err) {
 			continue
 		}
 		if err != nil {
-			return err
+			return nil, "", err
 		}
 		data, err = io.ReadAll(io.LimitReader(f, maxDoc+1))
 		f.Close()
 		if err != nil {
-			return err
+			return nil, "", err
 		}
-		from = path
-		break
+		if len(data) > maxDoc {
+			return nil, "", fmt.Errorf("%s is over %d bytes", path, maxDoc)
+		}
+		return data, path, nil
 	}
-	if from == "" {
-		return nil
-	}
-	if len(data) > maxDoc {
-		return fmt.Errorf("%s is over %d bytes", from, maxDoc)
-	}
-	if r.Docs == nil {
-		r.logf("%s wrote an expansion document (%s), but this runner has no store (--store); the queue will add nothing under it", m.Name, from)
-		return nil
-	}
-	project, err := r.projectOf(ctx, p.Namespace)
-	if err != nil {
-		return err
-	}
-	id := c4.Identify(bytes.NewReader(data))
-	if err := r.Docs.PutBytes(ctx, project, id, data); err != nil {
-		return fmt.Errorf("store %s: %w", from, err)
-	}
-	r.logf("%s: stored its expansion document %s (%s)", m.Name, id, from)
-	return r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputExpand: id.String()})
+	return nil, "", nil
 }
 
 // projectOf is the project that owns namespace ns, as the queue reads it:
