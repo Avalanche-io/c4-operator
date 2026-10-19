@@ -1,0 +1,46 @@
+# An MLflow experiment and registered model syncing with a project
+# (experimental: c4-sync). Runs a client creates SCHEDULED and tagged
+# c4.intake=true (the project backend plugin, `mlflow run --backend c4`)
+# become ML jobs; a run's c4.deadline tag (RFC 3339) is the deadline.
+# The run shows the job's work states and c4.* tags; each output is
+# registered as a model version from the run, source c4://<view>, tagged
+# with its C4 ID. Setting the production alias, or the c4.review tag
+# (with c4.note), is the decision on the promote wait.
+#
+# MLflow records no author for an alias or tag, so registry decisions are
+# attributed to "mlflow-registry", mapped below to the party the wait is
+# for; who may set the alias is the registry's own MANAGE permission.
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Tracker
+metadata:
+  name: denoiser
+  namespace: ml
+spec:
+  kind: mlflow
+  endpoint: https://mlflow.example.com
+  scope: {experiment: "7", model: denoiser, user: c4-sync, approve_alias: production, review_tag: c4.review}
+  credential:
+    lease: denoiser-mlflow
+    secret: {name: denoiser-mlflow, key: password}
+  webhookSecret: {name: denoiser-mlflow-webhook, key: secret}
+  events: {mode: poll, pollSeconds: 60, resyncSeconds: 900}
+  people:
+    mlflow-registry: ml-leads
+  intake:
+  - match:
+      type: Run
+      fields: {status: SCHEDULED, c4.intake: "true"}
+    as: job
+    review: {wait: promote}
+    job:
+      class: ml
+      params: {steps: "20000"}
+      template:
+        spec:
+          containers:
+          - name: train
+            image: ghcr.io/avalanche-io/c4-job-train:dev
+  verdictsIn:
+    alias:production: approve
+    tag:rework: rework
+    tag:accept: accept

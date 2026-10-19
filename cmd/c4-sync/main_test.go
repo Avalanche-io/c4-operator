@@ -25,7 +25,7 @@ func TestParse(t *testing.T) {
 		t.Fatal("a 1s interval should be refused")
 	}
 	out.Reset()
-	if _, err := parse([]string{"--version"}, &out); err != errVersion || !strings.Contains(out.String(), "github") {
+	if _, err := parse([]string{"--version"}, &out); err != errVersion || !strings.Contains(out.String(), "flow, github, mlflow") {
 		t.Fatalf("version: %v %q", err, out.String())
 	}
 }
@@ -59,6 +59,20 @@ func TestSampleFlowTracker(t *testing.T) {
 	in := tr.Spec.Intake[0]
 	if tr.Spec.Kind != "flow" || in.Rework != "nextVersion" || in.Match.Fields["sg_status_list"] != "rdy" ||
 		tr.Spec.StatusOut.States["in-review"] != "rev" || tr.Spec.VerdictsIn["status:fix"] != "rework" {
+		t.Fatalf("sample: %+v", tr.Spec)
+	}
+}
+
+func TestSampleMLflowTracker(t *testing.T) {
+	b, err := os.ReadFile("../../config/samples/tracker-mlflow/tracker.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tr c4v1.Tracker
+	if err := yaml.UnmarshalStrict(b, &tr); err != nil {
+		t.Fatal(err)
+	}
+	if tr.Spec.Kind != "mlflow" || tr.Spec.People["mlflow-registry"] != "ml-leads" || tr.Spec.Intake[0].Match.Fields["status"] != "SCHEDULED" {
 		t.Fatalf("sample: %+v", tr.Spec)
 	}
 }
