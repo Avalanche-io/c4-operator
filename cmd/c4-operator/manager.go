@@ -77,6 +77,7 @@ func runManager(args []string) error {
 	retry := fs.Duration("retry", time.Minute, "recheck interval for Materializations that failed for a reason that may heal")
 	work := fs.Bool("work", true, "run the work queue (WorkJobs, Pools, CapacityRequests)")
 	tick := fs.Duration("work-tick", 2*time.Second, "work queue decision period")
+	unitPriority := fs.String("unit-priority-class", "c4-unit", "PriorityClass for unit pods (preemptionPolicy Never: only c4 preempts them); empty sets none")
 	policy := fs.String("work-policy", "objective", "scheduling policy: objective, edf, fifo")
 	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process: kind-sim (tests), or empty for an external provider")
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
@@ -172,7 +173,7 @@ func runManager(args []string) error {
 			// Units' reported progress, filled by the HUD's scrape of the
 			// node daemons (without the HUD, units are estimated from
 			// elapsed time alone).
-			Progress: &queue.ProgressCache{}, Safepoints: &queue.SafepointCache{}}
+			Progress: &queue.ProgressCache{}, Safepoints: &queue.SafepointCache{}, PriorityClass: *unitPriority}
 		if err := mgr.Add(q); err != nil {
 			return err
 		}

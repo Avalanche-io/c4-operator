@@ -1,0 +1,14 @@
+# Every c4 unit pod runs at this priority (the queue sets it unless a job's
+# template names its own). preemptionPolicy Never: kube-scheduler never
+# preempts other pods to place a c4 unit, so c4 alone decides which units
+# stop, by the work stopping them loses (DESIGN 10.13). The value sits
+# above ordinary workloads (0), so they cannot preempt c4 units either,
+# and far below the cluster's system classes, which keep their precedence.
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: c4-unit
+value: 1000
+globalDefault: false
+preemptionPolicy: Never
+description: c4 work units; c4-operator decides their preemption.

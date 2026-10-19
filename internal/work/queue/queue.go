@@ -19,6 +19,7 @@ import (
 
 	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -75,6 +76,12 @@ type Queue struct {
 	// Stores opens a project's store, to fold unit changesets into job
 	// outputs. Without it, outputs are not folded.
 	Stores StoreFunc
+	// PriorityClass, when it names a PriorityClass that exists, is set on
+	// unit pods whose template names none (config/manager: c4-unit, with
+	// preemptionPolicy Never, so only the queue preempts units).
+	PriorityClass string
+	pcReady       bool
+	pcMissing     bool // logged once
 	// Namespace is the operator's namespace, where the queue keeps the
 	// pointers to each project's saved calibrations (persist.go). Empty,
 	// or without Stores, calibrations are not saved.
@@ -487,6 +494,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	}
 	q.lastSnap, q.lastDec, q.lastPol, q.lastAdj = snap, dec, pol, adj
 	q.suggest(ctx, now, snap, dec, views)
+	q.checkPriorityClass(ctx)
 	q.act(ctx, now, dec, views, poolInfo)
 	q.decideSafepoints(ctx, now, dec, views)
 	q.stage(ctx, dec, views, poolInfo)
@@ -1173,6 +1181,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob",
 		Name: j.Name, UID: j.UID, Controller: &t, BlockOwnerDeletion: &t}}
 	pod.Spec.RestartPolicy = corev1.RestartPolicyNever
+	if pod.Spec.PriorityClassName == "" && q.pcReady {
+		pod.Spec.PriorityClassName = q.PriorityClass
+	}
 	if pod.Spec.TerminationGracePeriodSeconds == nil {
 		if g := q.graceFor(v); g > 0 {
 			s := int64(g / time.Second)
@@ -1550,4 +1561,22 @@ func (q *Queue) ensureFromJobs(ctx context.Context, v *view, byKey map[string]*v
 		}
 	}
 	return true, nil
+}
+
+// checkPriorityClass notes whether the unit PriorityClass exists: a pod
+// naming one that does not is refused at admission.
+func (q *Queue) checkPriorityClass(ctx context.Context) {
+	q.pcReady = false
+	if q.PriorityClass == "" {
+		return
+	}
+	var pc schedulingv1.PriorityClass
+	if err := q.Client.Get(ctx, types.NamespacedName{Name: q.PriorityClass}, &pc); err != nil {
+		if !q.pcMissing {
+			q.Log.Info("unit PriorityClass not usable; unit pods get none", "priorityClass", q.PriorityClass, "err", err.Error())
+			q.pcMissing = true
+		}
+		return
+	}
+	q.pcReady, q.pcMissing = true, false
 }

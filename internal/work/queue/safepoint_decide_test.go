@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	schedulingv1 "k8s.io/api/scheduling/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -311,5 +312,34 @@ func TestDoNotDisruptLongUnits(t *testing.T) {
 		if len(pods) != 1 || pods[0].Annotations[AnnotationDoNotDisrupt] != want {
 			t.Fatalf("%s: %d pods, do-not-disrupt %q, want %q", name, len(pods), pods[0].Annotations[AnnotationDoNotDisrupt], want)
 		}
+	}
+}
+
+// Unit pods run at the c4 PriorityClass (preemptionPolicy Never) once it
+// exists, and at none before: a pod naming a missing class is refused.
+func TestUnitPriorityClass(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	ctx := context.Background()
+	q.PriorityClass = "c4-unit-" + ns
+	if err := k8s.Create(ctx, job(ns, "a", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if p := unitPods(t, ns, "a"); len(p) != 1 || p[0].Spec.PriorityClassName != "" {
+		t.Fatalf("before the class exists: %v", p)
+	}
+	never := corev1.PreemptNever
+	pc := &schedulingv1.PriorityClass{ObjectMeta: metav1.ObjectMeta{Name: q.PriorityClass}, Value: 1000, PreemptionPolicy: &never}
+	if err := k8s.Create(ctx, pc); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { k8s.Delete(ctx, pc) })
+	if err := k8s.Create(ctx, job(ns, "b", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	p := unitPods(t, ns, "b")
+	if len(p) != 1 || p[0].Spec.PriorityClassName != q.PriorityClass || p[0].Spec.PreemptionPolicy == nil || *p[0].Spec.PreemptionPolicy != corev1.PreemptNever {
+		t.Fatalf("with the class: %+v", p)
 	}
 }

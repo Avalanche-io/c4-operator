@@ -67,6 +67,10 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [capacityrequests]
   verbs: [create, update, patch, delete]
+# Unit pods run at the c4-unit PriorityClass when it exists.
+- apiGroups: [scheduling.k8s.io]
+  resources: [priorityclasses]
+  verbs: [get, list, watch]
 # Resumed units mount the view their last attempt captured, through a
 # Materialization the queue owns in the job's namespace.
 - apiGroups: [c4.avalanche.io]

@@ -1862,6 +1862,13 @@ through the tiers instead of from the store.
   slots to an urgent render and resumes from the step it saved.
 - Units that do not checkpoint (render frames) are stopped and run again;
   victims are chosen to lose the least work.
+- **Only c4 preempts units.** Unit pods run at the `c4-unit`
+  PriorityClass (config/manager; `--unit-priority-class`), unless a job's
+  template names its own: value 1000, `preemptionPolicy: Never`.
+  kube-scheduler never preempts other pods to place a unit, ordinary
+  workloads (priority 0) cannot preempt units, and system classes keep
+  their precedence. The queue sets the class only while it exists, since a
+  pod naming a missing class is refused.
 - **Safe points** make the two directions meet. A unit announces each moment
   it could stop and lose nothing it wants kept, whatever its class: the end
   of an agent turn, a frame or chunk boundary, a training checkpoint, a CI
