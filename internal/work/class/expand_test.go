@@ -88,6 +88,9 @@ func TestExpandDocumentRefuses(t *testing.T) {
 		`{"version": 1, "units": [{"name": "a", "inputs": [{"fromUnit": "plan"}]}]}`:              "mountPath",
 		`{"version": 1, "units": [{"name": "a"}], "dependents": ["b"]}`:                           "dependents",
 		`not json`: "expansion document",
+		`{"version": 1, "units": [], "edges": [{"from": "zz", "to": "plan"}]}`:                                         "an edge from zz",
+		`{"version": 1, "units": [], "edges": [{"from": "plan", "to": "plan"}]}`:                                       "itself",
+		`{"version": 1, "units": [{"name": "a"}, {"name": "b", "after": ["a"]}], "edges": [{"from": "b", "to": "a"}]}`: "cycle",
 	} {
 		if _, err := Expand(d, job, gen, []byte(doc), p.Names(), 1); err == nil || !strings.Contains(err.Error(), want) {
 			t.Errorf("%s: %v, want %q", doc, err, want)

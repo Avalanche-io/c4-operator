@@ -1418,6 +1418,24 @@ and a sweep planner that spawns trials are all generators.
     and a waiting unit's `lockedBy` names its gate and position.
   - **No new scheduling.** A gate unit still needs a slot in its pool; the
     gate only decides which waiting unit may take one.
+- **Edge sources** (LLM-OR-PROCEDURE 5 and 7.2 item 2). Expansion v1's
+  `edges: [{from, to, cite?}]` add orderings between units already in the
+  job (or in the document): `to` runs after `from`.
+  - **Edges alone.** A document of edges with no units is valid, so a
+    procedural unit re-run after each merge keeps the job's graph in step
+    with its code.
+  - **Effect.** An edge takes effect on a unit that has not started; one
+    that is running or done is not stopped.
+  - **Refusal.** Edges that would close a cycle anywhere in the job are
+    refused whole, like any bad document.
+  - **Sources are plugins** (`internal/edges`, run by `c4-edges`). `marker`
+    reads a tree with a regular expression whose `from` group names the
+    unit waited on; the waiting unit is the pattern's `to` group, else the
+    owner of the file (the unit claiming its path, from `-owners`), else
+    `-to`. `json` reads a list a tool wrote. Each edge cites its file and
+    line, fixtures are excluded by glob, a marker naming its own owner is
+    no edge, and what cannot be read is listed. Ra's `Pending{…}` markers
+    are the motivating case: the pattern is the job's, not c4's.
 - **The job's measure of done** (Q12; LLM-OR-PROCEDURE 7.2 item 3). A job
   declares what it counts: `spec.measure: {name: "rules sited", of: 379,
   required: true}`. A unit, usually a procedural one re-run after each

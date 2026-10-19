@@ -365,3 +365,58 @@ func TestMeasureOfDone(t *testing.T) {
 		t.Fatalf("met: %s %+v", met.Status.Phase, met.Status.Measure)
 	}
 }
+
+// An edge source re-run in the job adds orderings between units already
+// in it: a document of edges alone. A unit not yet started waits on its
+// new edge; edges that would close a cycle are refused.
+func TestEdgesFromASource(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "edges", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "scan", "planned": true}, {"name": "A"},
+		{"name": "B", "after": ["scan"]}, {"name": "C", "after": ["scan"]}]}`)
+	finish(t, podOfUnit(t, ns, "edges", 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	// The scan finds that B waits on A (a Pending marker in B's code).
+	found := putDoc(t, st, `{"version": 1, "units": [], "edges": [{"from": "A", "to": "B", "cite": {"file": "src/b.go", "line": 12}}]}`)
+	finish(t, podOfUnit(t, ns, "edges", 1), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: found})
+	tick(t, q)
+	tick(t, q)
+	got := get(t, ns, "edges")
+	units := podUnits(unitPods(t, ns, "edges"))
+	if !slices.Contains(units, 2) || !slices.Contains(units, 4) || slices.Contains(units, 3) || !slices.Equal(states(t, got, "blocked"), []int{3}) {
+		t.Fatalf("running %v, states %v", units, got.Status.UnitStates)
+	}
+	plan, _ := q.PlanOf(ns + "/edges")
+	if !slices.Equal(plan.Units[3].After, []int{1, 2}) {
+		t.Fatalf("B after %v", plan.Units[3].After)
+	}
+	// A restart replays the edges.
+	q = &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
+	tick(t, q)
+	if plan, _ := q.PlanOf(ns + "/edges"); !slices.Equal(plan.Units[3].After, []int{1, 2}) {
+		t.Fatalf("after a restart B after %v", plan.Units[3].After)
+	}
+}
+
+func TestEdgesThatCloseACycleAreRefused(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "loop", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "scan", "planned": true}, {"name": "A", "after": ["scan"]}, {"name": "B", "after": ["A"]}]}`)
+	finish(t, podOfUnit(t, ns, "loop", 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	bad := putDoc(t, st, `{"version": 1, "units": [], "edges": [{"from": "B", "to": "A"}]}`)
+	finish(t, podOfUnit(t, ns, "loop", 1), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: bad})
+	tick(t, q)
+	got := get(t, ns, "loop")
+	if n := len(got.Status.Expansions); n != 2 || !strings.Contains(got.Status.Expansions[1].Error, "cycle") {
+		t.Fatalf("expansions %+v", got.Status.Expansions)
+	}
+}

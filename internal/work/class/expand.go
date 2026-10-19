@@ -70,6 +70,9 @@ type Expander interface {
 type Expansion struct {
 	Units      []Unit
 	Dependents []int
+	// Edges are added between units of the job: [from, to], to running
+	// after from (the document's edges).
+	Edges [][2]int
 }
 
 // Doc is an expansion document, version 1.
@@ -77,6 +80,18 @@ type Doc struct {
 	Version    int             `json:"version"`
 	Units      []DocUnit       `json:"units"`
 	Dependents json.RawMessage `json:"dependents,omitempty"`
+	// Edges add orderings between units already in the job or in this
+	// document: to runs after from. An edge source (c4-edges) re-run
+	// after each merge writes a document of edges alone, so the job's
+	// graph follows its code.
+	Edges []DocEdge `json:"edges,omitempty"`
+}
+
+// DocEdge is one ordering: To runs after From, with where it was read.
+type DocEdge struct {
+	From string          `json:"from"`
+	To   string          `json:"to"`
+	Cite json.RawMessage `json:"cite,omitempty"`
 }
 
 // DocUnit is one unit of an expansion document.
@@ -294,6 +309,23 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 		}
 		x.Units = append(x.Units, u)
 	}
+	for _, e := range d.Edges {
+		f, ok1 := resolve(e.From)
+		t, ok2 := resolve(e.To)
+		switch {
+		case !ok1:
+			return nil, fmt.Errorf("an edge from %s, which is not in the job", e.From)
+		case !ok2:
+			return nil, fmt.Errorf("an edge to %s, which is not in the job", e.To)
+		case f == t:
+			return nil, fmt.Errorf("an edge from %s to itself", e.From)
+		}
+		x.Edges = append(x.Edges, [2]int{f, t})
+		if t >= first && !slices.Contains(x.Units[t-first].After, f) {
+			x.Units[t-first].After = append(x.Units[t-first].After, f)
+			sort.Ints(x.Units[t-first].After)
+		}
+	}
 	if cyc := cycle(x.Units, first); cyc != nil {
 		return nil, fmt.Errorf("the document's edges form a cycle: %v", cyc)
 	}
@@ -453,7 +485,16 @@ func (p *Plan) Apply(gen int, x *Expansion) {
 		}
 		sort.Ints(u.After)
 	}
+	for _, e := range x.Edges {
+		if u := &p.Units[e[1]]; !slices.Contains(u.After, e[0]) {
+			u.After = append(u.After, e[0])
+			sort.Ints(u.After)
+		}
+	}
 }
+
+// Cycle returns the names on one cycle the plan's edges form, or nil.
+func (p *Plan) Cycle() []string { return cycle(p.Units, 0) }
 
 // Clone copies a plan deeply enough for Apply.
 func (p *Plan) Clone() *Plan {

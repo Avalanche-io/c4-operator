@@ -152,6 +152,15 @@ func checkExpansion(v *view, gen int, doc []byte) (*class.Expansion, error) {
 	if err == nil && first+len(ex.Units) > class.MaxUnits {
 		err = fmt.Errorf("the expansion would make %d units, over %d", first+len(ex.Units), class.MaxUnits)
 	}
+	if err == nil && len(ex.Edges) > 0 {
+		// Edges between units already in the job can close a cycle the
+		// document alone cannot show.
+		c := m.plan.Clone()
+		c.Apply(gen, ex)
+		if cyc := c.Cycle(); cyc != nil {
+			err = fmt.Errorf("the expansion's edges would form a cycle: %v", cyc)
+		}
+	}
 	return ex, err
 }
 
