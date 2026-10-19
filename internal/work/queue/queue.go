@@ -165,19 +165,22 @@ type jobMem struct {
 	unitOut    map[int]string
 	// verdicts are the verdicts carried out, and reviews what they last
 	// decided per unit (verdict.go).
-	verdicts  []verdictRec
-	reviews   map[int]*c4v1.WorkReview
-	succeeded map[int]bool
-	failed    map[int]bool
-	attempts  map[int]int // attempts made, including the running one
-	millis    map[int]int64
-	out       *output
-	foldedPod map[types.UID]bool
-	outLoad   string // the stored chain to load before the next fold
-	outIndex  string // the stored provenance index to load before the next fold
-	launched  map[int]time.Time
-	nodeFails map[string]int
-	blacklist map[string]bool
+	verdicts []verdictRec
+	reviews  map[int]*c4v1.WorkReview
+	// interruptions are attempts the farm stopped (interrupt.go).
+	interruptions  []interruptRec
+	interruptCount int
+	succeeded      map[int]bool
+	failed         map[int]bool
+	attempts       map[int]int // attempts made, including the running one
+	millis         map[int]int64
+	out            *output
+	foldedPod      map[types.UID]bool
+	outLoad        string // the stored chain to load before the next fold
+	outIndex       string // the stored provenance index to load before the next fold
+	launched       map[int]time.Time
+	nodeFails      map[string]int
+	blacklist      map[string]bool
 	// resume holds, per unit, the view a yielded attempt captured: the
 	// next attempt mounts it and continues from its checkpoint.
 	resume map[int]string
@@ -292,6 +295,10 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 			m.unitOut[i] = view
 		}
 	}
+	for _, x := range st.Interruptions {
+		m.interruptions = append(m.interruptions, interruptRec{Unit: int(x.Unit), At: x.At.Time, Reason: x.Reason, Node: x.Node})
+	}
+	m.interruptCount = int(st.Interrupted)
 	for _, x := range st.Verdicts {
 		m.verdicts = append(m.verdicts, verdictRec{WorkVerdict: x, pod: x.Pod})
 	}
@@ -600,7 +607,18 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		delete(m.launched, idx)
 		slots := plan.Units[idx].Slots
 		switch {
-		case p.DeletionTimestamp != nil:
+		case p.DeletionTimestamp != nil && p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed:
+			if letGo(p, now) {
+				// Deleted before it was placed, or its node is gone: it
+				// will not end on its own, and nothing ran to record.
+				if err := q.release(ctx, p); err != nil {
+					q.Log.Error(err, "release unit pod", "pod", p.Name)
+				}
+				if attemptOf(p) == m.attempts[idx] && m.attempts[idx] > 0 && p.Spec.NodeName == "" {
+					m.attempts[idx]--
+				}
+				continue
+			}
 			v.running[idx] = runInfo{pool: p.Labels[c4v1.LabelPool], slots: slots, started: startOf(p), node: p.Spec.NodeName}
 		case p.Status.Phase == corev1.PodSucceeded:
 			if capture && p.Annotations[c4v1.AnnotationOutputTree] == "" && now.Sub(finishOf(p, now)) < q.CaptureWait {
@@ -681,6 +699,13 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				delete(m.millis, idx)
 				delete(m.ended, idx)
 				m.attempts[idx] = 0
+			}
+			v.done = append(v.done, p)
+		case p.Status.Phase == corev1.PodFailed && interruptedBy(p) != "":
+			// The farm stopped it: no retry spent, no mark on the node.
+			if !m.failed[idx] && !m.succeeded[idx] && !m.foldedPod[p.UID] {
+				m.interrupted(idx, p, interruptedBy(p), now)
+				m.foldedPod[p.UID] = true
 			}
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed:
@@ -1124,6 +1149,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		pod.Annotations[c4v1.AnnotationAIUsage] = ai
 	}
 	t := true
+	pod.Finalizers = append(pod.Finalizers, c4v1.FinalizerUnit)
 	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob",
 		Name: j.Name, UID: j.UID, Controller: &t, BlockOwnerDeletion: &t}}
 	pod.Spec.RestartPolicy = corev1.RestartPolicyNever

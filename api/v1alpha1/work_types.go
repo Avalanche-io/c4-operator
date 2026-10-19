@@ -57,6 +57,10 @@ const (
 	// of the verdict it wrote (.c4/verdict.json), stored by the node daemon
 	// at capture.
 	AnnotationOutputVerdict = "c4.avalanche.io/output-verdict"
+	// FinalizerUnit is on every unit pod, so a pod deleted while it runs
+	// (a drain, an eviction, a preemption) stays readable until the queue
+	// has recorded how it ended.
+	FinalizerUnit = "c4.avalanche.io/unit"
 	// AnnotationOwner on a WorkJob is the user who submitted it, set at
 	// admission from the request's user (or, for jobs the HUD creates for
 	// a signed-in viewer, by the HUD) and never changed afterwards.
@@ -310,6 +314,13 @@ type WorkJobStatus struct {
 	// Preemptions counts units stopped or asked to yield to make room.
 	// +optional
 	Preemptions int32 `json:"preemptions,omitempty"`
+	// Interruptions lists the most recent attempts the farm stopped (a
+	// drain, an eviction, a preemption, a node going away): they spent no
+	// retry and run again. Interrupted counts them all.
+	// +optional
+	Interruptions []WorkInterruption `json:"interruptions,omitempty"`
+	// +optional
+	Interrupted int32 `json:"interrupted,omitempty"`
 	// Started and Finished bound the job's run.
 	// +optional
 	Started *metav1.Time `json:"started,omitempty"`
@@ -461,6 +472,18 @@ type WorkExpansion struct {
 	// generator failed.
 	// +optional
 	Error string `json:"error,omitempty"`
+}
+
+// WorkInterruption is one attempt the farm stopped.
+type WorkInterruption struct {
+	Unit int32       `json:"unit"`
+	At   metav1.Time `json:"at"`
+	// Reason is the pod's DisruptionTarget reason (PreemptionByScheduler,
+	// EvictionByEvictionAPI, DeletionByTaintManager, TerminationByKubelet,
+	// DeletionByPodGC), or Deleted.
+	Reason string `json:"reason"`
+	// +optional
+	Node string `json:"node,omitempty"`
 }
 
 // WorkVerdict is one verdict a review unit wrote, carried out once for

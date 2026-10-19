@@ -61,6 +61,13 @@ func (q *Queue) report(ctx context.Context, now time.Time, dec sched.Decisions, 
 
 func (q *Queue) cleanup(ctx context.Context, v *view) {
 	for _, p := range v.done {
+		if err := q.release(ctx, p); err != nil {
+			q.Log.V(1).Info("release finished unit pod", "pod", p.Name, "err", err.Error())
+			continue
+		}
+		if p.DeletionTimestamp != nil {
+			continue
+		}
 		if err := q.Client.Delete(ctx, p); err != nil && !apierrors.IsNotFound(err) {
 			q.Log.V(1).Info("delete finished unit pod", "pod", p.Name, "err", err.Error())
 		}
@@ -241,6 +248,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	for _, y := range m.yields[max(0, len(m.yields)-8):] {
 		st.Yields = append(st.Yields, c4v1.WorkYield{Unit: int32(y.Unit), At: metav1.Time{Time: y.At.Truncate(time.Second)}, Reason: y.Reason, View: y.View})
 	}
+	st.Interruptions, st.Interrupted = interruptStatus(m)
 	st.Preemptions = int32(m.preemptBase)
 	for _, n := range m.preemptions {
 		st.Preemptions += int32(n)

@@ -525,6 +525,37 @@ spec:
               finished:
                 format: date-time
                 type: string
+              interrupted:
+                format: int32
+                type: integer
+              interruptions:
+                description: |-
+                  Interruptions lists the most recent attempts the farm stopped (a
+                  drain, an eviction, a preemption, a node going away): they spent no
+                  retry and run again. Interrupted counts them all.
+                items:
+                  description: WorkInterruption is one attempt the farm stopped.
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    node:
+                      type: string
+                    reason:
+                      description: |-
+                        Reason is the pod's DisruptionTarget reason (PreemptionByScheduler,
+                        EvictionByEvictionAPI, DeletionByTaintManager, TerminationByKubelet,
+                        DeletionByPodGC), or Deleted.
+                      type: string
+                    unit:
+                      format: int32
+                      type: integer
+                  required:
+                  - at
+                  - reason
+                  - unit
+                  type: object
+                type: array
               observedGeneration:
                 format: int64
                 type: integer

@@ -101,6 +101,9 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		out["edges"] = unitEdges(plan)
 	}
 	out["expansions"] = expansionList(&rec.job.Status)
+	if is := rec.job.Status.Interruptions; len(is) > 0 {
+		out["interruptions"] = is
+	}
 
 	states := unitStateMap(&rec.job.Status, n)
 	attempts := parseAttempts(rec.job.Status.Attempts)

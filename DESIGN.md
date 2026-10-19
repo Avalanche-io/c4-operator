@@ -1929,6 +1929,16 @@ field and the record will change with it.
   from the HUD.
 - A node that fails units across several jobs and projects is flagged as
   suspect, which usually means bad hardware rather than a bad job.
+- **Interrupted is not failed.** An attempt the farm stopped is
+  interrupted. It spends no retry, marks no node, and runs again. That
+  covers the pod's `DisruptionTarget` condition (scheduler preemption, an
+  Eviction API call such as a drain, a NoExecute taint, the kubelet's
+  node-pressure eviction or graceful shutdown, PodGC) and a pod deleted
+  while it ran. Every unit pod carries the `c4.avalanche.io/unit`
+  finalizer, so a deleted pod stays readable, holding its slot, until it
+  ends and the queue has recorded it with what its node captured. A pod
+  deleted before it was placed, or whose node never ends it, is let go.
+  Status lists the latest interruptions with their reasons and counts them.
 
 ### 10.15 Render class
 
