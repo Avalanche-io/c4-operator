@@ -17,14 +17,21 @@ import (
 // to stop.
 const stopCode = 10
 
+// safepointWait is how long c4-unit waits for the farm's decision (the
+// queue answers within a few seconds); the hook gives it this and a margin.
+const safepointWait = 8 * time.Second
+
 // hookSafepoint runs after the Stop hook's checkpoint when the session runs
 // inside a farm unit (the queue sets $C4_PODINFO on every unit pod). The end
 // of a turn is the unit's safe point: it announces it with
 // `c4-unit safepoint --checkpoint REF`, and when the farm asked the unit to
 // stop, it tells Claude Code to end the session here by printing
 // {"continue": false} on stdout (which takes precedence over any other
-// hook asking to continue). Outside a unit, or without c4-unit on the PATH,
-// it does nothing. It never fails the hook.
+// hook asking to continue). The safe point is a decision point: c4-unit
+// waits up to safepointWait for the farm's answer, then falls back on the
+// last request it can see, well inside the hook's own timeout. Outside a
+// unit, or without c4-unit on the PATH, it does nothing. It never fails
+// the hook.
 func hookSafepoint(ctx context.Context, input []byte, cp *agent.Checkpoint, stdout, stderr io.Writer) {
 	if os.Getenv("C4_PODINFO") == "" {
 		return
@@ -38,12 +45,13 @@ func hookSafepoint(ctx context.Context, input []byte, cp *agent.Checkpoint, stdo
 		}
 	}
 	ref := safepointRef(input, cp)
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 2*safepointWait)
 	defer cancel()
 	args := []string{"safepoint"}
 	if ref != "" {
 		args = append(args, "--checkpoint", ref)
 	}
+	args = append(args, "--wait", safepointWait.String())
 	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Stderr = stderr
 	err := cmd.Run()
@@ -54,7 +62,7 @@ func hookSafepoint(ctx context.Context, input []byte, cp *agent.Checkpoint, stdo
 	case errors.As(err, &exit) && exit.ExitCode() == stopCode:
 		out, _ := json.Marshal(map[string]any{
 			"continue":   false,
-			"stopReason": "The farm asked this unit to stop at its safe point; the turn is saved.",
+			"stopReason": "The farm decided this unit stops at its safe point; the turn is saved.",
 		})
 		fmt.Fprintln(stdout, string(out))
 	default:

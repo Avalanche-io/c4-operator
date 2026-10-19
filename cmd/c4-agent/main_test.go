@@ -247,7 +247,7 @@ func TestHookSafepoint(t *testing.T) {
 	if !strings.HasPrefix(calls[0], "safepoint --checkpoint "+sid+"#") || !strings.Contains(calls[0], ":c4") {
 		t.Fatalf("member ref %q", calls[0])
 	}
-	if calls[1] != "safepoint --checkpoint 99999999-0000-0000-0000-000000000000" {
+	if calls[1] != "safepoint --checkpoint 99999999-0000-0000-0000-000000000000 --wait 8s" {
 		t.Fatalf("stranger ref %q", calls[1])
 	}
 }

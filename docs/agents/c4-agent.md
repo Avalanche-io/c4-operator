@@ -105,8 +105,11 @@ last complete line.
 farm unit (the queue sets `$C4_PODINFO` on every unit pod), the Stop hook
 also calls `c4-unit safepoint --checkpoint <session>#<seq>:<head>` after
 saving the turn (the session ID alone for a session that is not a member).
-That tells the farm how often the agent reaches a safe point. When the farm
-has asked the unit to stop, `c4-unit` exits 10 and the hook prints
+That tells the farm how often the agent reaches a safe point, and asks it
+whether to stop there: a stop asked earlier is reconsidered then, and
+dropped if its reason has passed. `c4-unit` waits up to eight seconds for
+the answer (`--wait 8s`), and without one falls back on the last request
+it sees. When the answer is stop, `c4-unit` exits 10 and the hook prints
 `{"continue": false, ...}`, so Claude Code ends the session there, with the
 turn saved. Outside a unit, or without `c4-unit` on the PATH
 (`$C4_UNIT_BIN` overrides it), the hook does what it always did, and it
