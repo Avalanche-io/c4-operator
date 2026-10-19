@@ -182,6 +182,10 @@ func TestCaptureMatchesTheMountedTree(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The unit's control folder (its progress line) is written after the
+	// tree is taken, and must not reach the output.
+	os.MkdirAll(m(".c4"), 0o777)
+	os.WriteFile(m(".c4/progress"), []byte("0.5\n"), 0o644)
 	if err := overlay.Unmount(mnt); err != nil {
 		t.Fatal(err)
 	}
