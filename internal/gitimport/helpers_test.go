@@ -94,6 +94,12 @@ func newRepo(t *testing.T) *repo {
 		"GIT_AUTHOR_DATE=2026-10-16T00:00:00Z", "GIT_COMMITTER_DATE=2026-10-16T00:00:00Z",
 	)
 	r.git("init", "-q", "-b", "main", r.dir)
+	// git commit starts a detached `git maintenance run --auto`, which
+	// repacks and deletes loose objects while the test goes on writing
+	// commits and the importer reads them; under load a reader then fails
+	// with "Could not read <sha>" or "bad tree object HEAD".
+	r.git("config", "maintenance.auto", "false")
+	r.git("config", "gc.auto", "0")
 	clean, smudge := filterCommands(t)
 	r.filter = clean
 	r.git("config", "filter.c4.clean", clean)
