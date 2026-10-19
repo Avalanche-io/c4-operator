@@ -101,6 +101,9 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		out["edges"] = unitEdges(plan)
 	}
 	out["expansions"] = expansionList(&rec.job.Status)
+	if hs := rec.job.Status.Holds; len(hs) > 0 {
+		out["holds"] = hs
+	}
 	if is := rec.job.Status.Interruptions; len(is) > 0 {
 		out["interruptions"] = is
 		out["interrupted"] = rec.job.Status.Interrupted
@@ -139,16 +142,27 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		out["work"] = w
 	}
 	list := make([]map[string]any, 0, n)
+	lockedBy := map[int]map[string]any{}
 	progress := map[string]any{}
 	for i, u := range plan.Units {
 		st := states[i]
 		if held && st == "queued" {
 			st = "held"
 		}
-		e := map[string]any{"i": i, "label": u.Label, "state": st, "attempts": max(attempts[i], boolInt(st != "queued" && st != "held" && st != "blocked" && st != "planned" && st != "flagged" && st != "waits")),
+		e := map[string]any{"i": i, "label": u.Label, "state": st, "attempts": max(attempts[i], boolInt(st != "queued" && st != "held" && st != "blocked" && st != "planned" && st != "flagged" && st != "waits" && st != "locked")),
 			"group": unitGroup[i], "pos": u.Pos}
 		if u.Name != "" {
 			e["name"] = u.Name
+		}
+		if len(u.Claims) > 0 {
+			var on []string
+			for _, c := range u.Claims {
+				on = append(on, c.On)
+			}
+			e["claims"] = on
+		}
+		if st == "locked" {
+			lockedBy[i] = e
 		}
 		if st == "blocked" {
 			// what it waits on first, for "blocked on <x>"
@@ -232,6 +246,14 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 			}
 		}
 		list = append(list, e)
+	}
+	for _, h := range rec.job.Status.Holds {
+		// "locked by <holder>", and on what
+		for _, w := range h.Waiting {
+			if e := lockedBy[int(w.Unit)]; e != nil {
+				e["lockedBy"] = map[string]any{"unit": h.Holder, "name": h.Name, "on": w.On}
+			}
+		}
 	}
 	if n <= 5000 {
 		out["unitList"] = list
@@ -361,7 +383,7 @@ func unitStateMap(st *c4v1.WorkJobStatus, n int) []string {
 	for i := range out {
 		out[i] = "queued"
 	}
-	for _, name := range []string{"planned", "blocked", "waits", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "succeeded"} {
+	for _, name := range []string{"planned", "blocked", "locked", "waits", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "succeeded"} {
 		idx, _ := order.DecodeSet(st.UnitStates[name])
 		for _, i := range idx {
 			if i >= 0 && i < n {

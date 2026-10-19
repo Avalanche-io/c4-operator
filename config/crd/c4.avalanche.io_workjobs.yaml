@@ -530,6 +530,44 @@ spec:
               finished:
                 format: date-time
                 type: string
+              holds:
+                description: |-
+                  Holds lists each unit holding claims that others wait on, with its
+                  waiting line in dispatch order.
+                items:
+                  description: WorkHold is a unit holding claims, and the units locked
+                    behind it.
+                  properties:
+                    holder:
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    "on":
+                      description: On are the holder's claims.
+                      items:
+                        type: string
+                      type: array
+                    waiting:
+                      items:
+                        description: WorkHoldWaiter is a unit locked behind a holder,
+                          and its claim.
+                        properties:
+                          name:
+                            type: string
+                          "on":
+                            type: string
+                          unit:
+                            format: int32
+                            type: integer
+                        required:
+                        - unit
+                        type: object
+                      type: array
+                  required:
+                  - holder
+                  type: object
+                type: array
               interrupted:
                 format: int32
                 type: integer
@@ -837,6 +875,12 @@ spec:
                     format: int32
                     type: integer
                   held:
+                    format: int32
+                    type: integer
+                  locked:
+                    description: |-
+                      Locked counts units waiting for a unit of the job that holds what
+                      they claim.
                     format: int32
                     type: integer
                   planned:

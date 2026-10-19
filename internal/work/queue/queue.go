@@ -387,6 +387,8 @@ type view struct {
 	// their decision (wait.go).
 	openWaits map[int]bool
 	planWait  string
+	// locked are units waiting for a holder of what they claim (holds.go).
+	locked map[int]lockInfo
 }
 
 type runInfo struct {
@@ -787,6 +789,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	}
 	v.runnable, v.waiting, v.stuck = unitWaits(plan, m, v)
 	q.serveWaits(v, now)
+	applyHolds(v)
 	q.estimate(v, now)
 	return v
 }
@@ -835,6 +838,9 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	for _, idx := range v.runnable {
 		queued = append(queued, unit(idx))
 	}
+	for idx := range v.locked {
+		queued = append(queued, unit(idx))
+	}
 	for _, idx := range v.waiting {
 		// a wait unit holds no slot: its time is on the critical path only
 		if !v.stuck[idx] && !isWait(plan, idx) {
@@ -855,6 +861,10 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	// the unit graph; without edges, the longest single remaining unit.
 	rem := map[int]float64{}
 	for _, idx := range v.runnable {
+		u := plan.Units[idx]
+		rem[idx] = e.Predict(u.Key, u.Pos).Mean
+	}
+	for idx := range v.locked {
 		u := plan.Units[idx]
 		rem[idx] = e.Predict(u.Key, u.Pos).Mean
 	}
@@ -884,6 +894,11 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		}
 	}
 	s.TPath = criticalPath(plan, v.mem, rem, func(key string) float64 { return e.Generator(key).Longest })
+	if len(rem) <= 2000 {
+		// Units that must take turns for what they claim run one after
+		// another.
+		s.TPath = math.Max(s.TPath, holdChains(plan, rem))
+	}
 	v.sum, v.est = s, e
 	v.mem.notePoint(now, len(v.mem.millis), len(plan.Units), s)
 }
@@ -955,7 +970,7 @@ func schedJob(v *view, free int) sched.Job {
 	// sched propagates deadlines up the dependency graph and starts a
 	// waiting job no earlier than its upstream jobs finish (sched.Job.After).
 	j.After = v.after
-	j.Blocked = len(v.waiting) - len(v.stuck)
+	j.Blocked = len(v.waiting) - len(v.stuck) + len(v.locked)
 	if v.blocked {
 		j.Blocked += len(v.runnable)
 	} else {
@@ -999,11 +1014,16 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 	for _, d := range dec.Dispatch {
 		room[d.Pool] -= d.Slots
 	}
+	guard := claimGuard{}
 	for _, d := range dec.Dispatch {
 		key, idx, ok := parseUnitID(d.Unit)
 		v := byKey[key]
 		p := pools[d.Pool]
 		if !ok || v == nil || p == nil {
+			continue
+		}
+		if !guard.admit(v, idx) {
+			// Its claims conflict with a unit started this tick: it waits.
 			continue
 		}
 		if to := v.mem.moveTo[idx]; to != "" {

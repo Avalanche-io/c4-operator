@@ -122,6 +122,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	for _, i := range v.waiting {
 		isWaiting[i] = true
 	}
+	var lockedU []int
 	var succ, egress, fail, flag, accepted, pre, run, retry, backoff, queued, planned, blockedU, waits []int
 	for i := 0; i < n; i++ {
 		_, running := v.running[i]
@@ -130,6 +131,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			planned = append(planned, i)
 		case v.openWaits[i]:
 			waits = append(waits, i) // waits for someone or something (wait.go)
+		case hasLock(v, i):
+			lockedU = append(lockedU, i)
 		case isWaiting[i]:
 			blockedU = append(blockedU, i)
 		case m.succeeded[i]:
@@ -158,7 +161,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.Units = c4v1.UnitCounts{Total: int32(n), Succeeded: int32(len(succ)), Egress: int32(len(egress)),
 		Failed: int32(len(fail)), Accepted: int32(len(accepted)), Preflight: int32(len(pre)),
 		Running: int32(len(run)), Retrying: int32(len(retry)), Backoff: int32(len(backoff)), Queued: int32(len(queued)),
-		Planned: int32(len(planned)), Blocked: int32(len(blockedU)), Flagged: int32(len(flag)), Waits: int32(len(waits))}
+		Planned: int32(len(planned)), Blocked: int32(len(blockedU)), Flagged: int32(len(flag)), Waits: int32(len(waits)),
+		Locked: int32(len(lockedU))}
 	switch {
 	case v.blocked:
 		st.Units.Blocked, st.Units.Queued, st.Units.Backoff = int32(len(queued)+len(backoff)+len(blockedU)), 0, 0
@@ -168,7 +172,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.UnitStates = map[string]string{}
 	for name, set := range map[string][]int{"succeeded": succ, "egress": egress, "failed": fail, "accepted": accepted,
 		"preflight": pre, "running": run, "retrying": retry, "backoff": backoff, "queued": queued,
-		"planned": planned, "blocked": blockedU, "flagged": flag, "waits": waits} {
+		"planned": planned, "blocked": blockedU, "flagged": flag, "waits": waits, "locked": lockedU} {
 		if len(set) > 0 {
 			st.UnitStates[name] = order.EncodeSet(set)
 		}
@@ -238,6 +242,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record})
 	}
 	st.Expansions = expansionStatus(m.expansions)
+	st.Holds = holdsStatus(v)
 	st.Verdicts = verdictStatus(m)
 	st.Reviews = reviewStatus(m)
 	for i := range readers(m.plan) {

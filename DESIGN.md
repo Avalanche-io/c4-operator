@@ -1361,8 +1361,9 @@ and a sweep planner that spawns trials are all generators.
     prior with `workSD`; `exists`; `planned` (itself a generator); `env`;
     `inputs` (`fromUnit` mounts a unit's captured output read-only, and is
     also an edge); and `slots`. The document's `dependents` is `"all"` or a
-    list of names. `group`, `holds`, `params` and `cites` are carried for
-    the HUD, for claims and for the record. A document with a bad version,
+    list of names. `holds` and `claims` are the unit's claims (below);
+    `group`, `params` and `cites` are carried for the HUD and for the
+    record. A document with a bad version,
     a name used twice, an edge to a name the job lacks, a cycle, or nesting
     deeper than `maxExpandDepth` (4) is refused whole: the generator fails
     and the refusal is listed.
@@ -1381,6 +1382,27 @@ and a sweep planner that spawns trials are all generators.
   - The `graph` class is a job whose plan is one generator (a plan
     importer, test discovery, a sweep planner); its units run the job's
     template, told apart by `$C4_UNIT_NAME` and their `env`.
+- **Holds and claims** (PRIMITIVES Q8, Q9). A unit's `holds` (paths it
+  writes) and `claims` (`{on, mode}`) are what it claims.
+  - **Overlap.** A path claim covers everything under it (`src/net/` and
+    `src/net/conn.go` overlap, `src/net` and `src/netx` do not); a name
+    with a scheme (`db:fixtures`) is a resource and overlaps only itself.
+    Two `shared` claims never conflict; an `exclusive` one (the default,
+    and every hold) conflicts with any claim it overlaps.
+  - **Locking.** A unit whose claims conflict with a unit of its job that
+    is running, or whose output is still being captured, is `locked` by
+    it. Units released in one tick are checked against each other in the
+    policy's order. This is Ra's P-21 rule, that lanes sharing a file run
+    in sequence, as a scheduling fact.
+  - **The visible queue.** Status `holds` lists each holder with its
+    claims and the units locked behind it, in dispatch order. The HUD's
+    unit list says `lockedBy` and each unit's `claims`. Units that must
+    take turns form a chain on the critical path.
+  - **No deadlock.** A unit takes its claims when it starts and waits for
+    nothing while it holds them (its edges were met before it started), so
+    claims cannot deadlock and need no cycle check.
+  - **Scope.** Claims are scoped to the job. A merge gate shared across a
+    project's jobs is the next item, gates.
 - **Verdicts.** A review unit judges the units it runs after and writes its
   judgment as `.c4/verdict.json`. The node daemon stores it at capture, as
   `c4.avalanche.io/output-verdict`. When the review succeeds the queue

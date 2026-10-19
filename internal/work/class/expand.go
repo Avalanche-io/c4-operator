@@ -37,9 +37,11 @@ import (
 //
 // Children inherit the generator's dependents: whatever waited on the
 // generator now waits on its children, all of them or the subset
-// dependents names. group, holds, params and cites are carried for the
-// HUD, for claims (a later primitive) and for the record; cites are kept
-// in the stored document, which the expansion record names.
+// dependents names. holds (paths the unit writes) and claims ({on, mode}:
+// exclusive or shared, on a path or a named resource) are its claims
+// (claims.go). group, params and cites are carried for the HUD and the
+// record; cites are kept in the stored document, which the expansion
+// record names.
 
 // MaxExpandDepth is how deep expansion may nest unless a job says
 // otherwise (param maxExpandDepth).
@@ -92,6 +94,7 @@ type DocUnit struct {
 	Slots   int               `json:"slots,omitempty"`
 	Group   string            `json:"group,omitempty"`
 	Holds   []string          `json:"holds,omitempty"`
+	Claims  []DocClaim        `json:"claims,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
 	Cites   json.RawMessage   `json:"cites,omitempty"`
 	// Wait makes the unit a wait for a person, a party or a clock.
@@ -138,6 +141,12 @@ func docWait(name string, w *DocWait, planned bool) (*Wait, error) {
 		}
 	}
 	return out, nil
+}
+
+// DocClaim is a claim with its mode (exclusive, the default, or shared).
+type DocClaim struct {
+	On   string `json:"on"`
+	Mode string `json:"mode,omitempty"`
 }
 
 // DocInput is a fromUnit input.
@@ -219,6 +228,20 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 				return nil, fmt.Errorf("unit %s: exists %v, want 0 to 1", du.Name, *du.Exists)
 			}
 			u.Exists = *du.Exists
+		}
+		for _, h := range du.Holds {
+			c, err := ParseClaim(h, ClaimExclusive)
+			if err != nil {
+				return nil, fmt.Errorf("unit %s: %w", du.Name, err)
+			}
+			u.Claims = append(u.Claims, c)
+		}
+		for _, dc := range du.Claims {
+			c, err := ParseClaim(dc.On, dc.Mode)
+			if err != nil {
+				return nil, fmt.Errorf("unit %s: %w", du.Name, err)
+			}
+			u.Claims = append(u.Claims, c)
 		}
 		if du.Work < 0 || du.WorkSD < 0 {
 			return nil, fmt.Errorf("unit %s: negative work", du.Name)

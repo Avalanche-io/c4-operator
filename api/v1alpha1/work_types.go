@@ -328,6 +328,10 @@ type WorkJobStatus struct {
 	// Preemptions counts units stopped or asked to yield to make room.
 	// +optional
 	Preemptions int32 `json:"preemptions,omitempty"`
+	// Holds lists each unit holding claims that others wait on, with its
+	// waiting line in dispatch order.
+	// +optional
+	Holds []WorkHold `json:"holds,omitempty"`
 	// Interruptions lists the most recent attempts the farm stopped (a
 	// drain, an eviction, a preemption, a node going away): they spent no
 	// retry and run again. Interrupted counts them all.
@@ -488,6 +492,22 @@ type WorkExpansion struct {
 	Error string `json:"error,omitempty"`
 }
 
+// WorkHold is a unit holding claims, and the units locked behind it.
+type WorkHold struct {
+	Holder int32  `json:"holder"`
+	Name   string `json:"name,omitempty"`
+	// On are the holder's claims.
+	On      []string         `json:"on,omitempty"`
+	Waiting []WorkHoldWaiter `json:"waiting,omitempty"`
+}
+
+// WorkHoldWaiter is a unit locked behind a holder, and its claim.
+type WorkHoldWaiter struct {
+	Unit int32  `json:"unit"`
+	Name string `json:"name,omitempty"`
+	On   string `json:"on,omitempty"`
+}
+
 // WorkInterruption is one attempt the farm stopped.
 type WorkInterruption struct {
 	Unit int32       `json:"unit"`
@@ -597,6 +617,10 @@ type UnitCounts struct {
 	// Flagged counts units a review escalated to a person.
 	// +optional
 	Flagged int32 `json:"flagged,omitempty"`
+	// Locked counts units waiting for a unit of the job that holds what
+	// they claim.
+	// +optional
+	Locked int32 `json:"locked,omitempty"`
 	// Waits counts wait units waiting for their decision.
 	Waits     int32 `json:"waits,omitempty"`
 	Queued    int32 `json:"queued,omitempty"`

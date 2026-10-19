@@ -188,6 +188,8 @@ type Counts struct {
 	// older name), Flagged units a review escalated to a person.
 	Planned int `json:"planned,omitempty"`
 	Flagged int `json:"flagged,omitempty"`
+	// Locked counts units waiting for a unit that holds what they claim.
+	Locked int `json:"locked,omitempty"`
 }
 
 type States struct {
@@ -205,6 +207,7 @@ type States struct {
 	Waits       string `json:"waits,omitempty"`
 	Planned     string `json:"planned,omitempty"`
 	Flagged     string `json:"flagged,omitempty"`
+	Locked      string `json:"locked,omitempty"`
 }
 
 type Objective struct {

@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"slices"
+	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -201,5 +202,59 @@ func TestGraphStuckOnFailedUnit(t *testing.T) {
 	got := get(t, ns, "plan3")
 	if got.Status.Phase != "Failed" || !slices.Equal(states(t, got, "blocked"), []int{2, 3}) || !slices.Equal(states(t, got, "failed"), []int{1}) {
 		t.Fatalf("%s %v", got.Status.Phase, got.Status.UnitStates)
+	}
+}
+
+// Ra's P-21 rule as holds: lanes that share a file run in sequence. Lane
+// B claims a file under a directory lane A holds, so it is locked by A
+// until A ends, while lane C, sharing nothing, runs beside A; a shared
+// claim (readers) does not lock another shared one.
+func TestHoldsSerializeSharedFiles(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "lanes", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [
+		{"name": "A", "holds": ["src/shared/", "src/a.go"], "work": 600},
+		{"name": "B", "holds": ["src/shared/util.go"], "work": 600},
+		{"name": "C", "holds": ["src/c.go"], "work": 600},
+		{"name": "R1", "claims": [{"on": "db:fixtures", "mode": "shared"}]},
+		{"name": "R2", "claims": [{"on": "db:fixtures", "mode": "shared"}]}]}`)
+	finish(t, podOfUnit(t, ns, "lanes", 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	tick(t, q)
+	tick(t, q)
+	got := get(t, ns, "lanes")
+	running := podUnits(unitPods(t, ns, "lanes"))
+	sort.Ints(running)
+	// A (1), C (3), R1 (4) and R2 (5) run; B (2) waits for A.
+	if !slices.Equal(running, []int{1, 3, 4, 5}) || !slices.Equal(states(t, got, "locked"), []int{2}) || got.Status.Units.Locked != 1 {
+		t.Fatalf("running %v, states %v", running, got.Status.UnitStates)
+	}
+	if len(got.Status.Holds) != 1 || got.Status.Holds[0].Name != "A" || len(got.Status.Holds[0].Waiting) != 1 ||
+		got.Status.Holds[0].Waiting[0].Name != "B" || got.Status.Holds[0].Waiting[0].On != "src/shared/util.go" {
+		t.Fatalf("holds %+v", got.Status.Holds)
+	}
+	// The two lanes that share a file are a chain on the critical path:
+	// at least A's and B's work.
+	plan, _ := q.PlanOf(ns + "/lanes")
+	if plan == nil || len(plan.Units[2].Claims) != 1 || plan.Units[2].Claims[0].Mode != "exclusive" {
+		t.Fatalf("claims %+v", plan)
+	}
+	for _, sj := range q.lastSnap.Jobs {
+		if sj.ID == ns+"/lanes" && sj.Estimate.TPath < 1150 {
+			t.Fatalf("critical path %v, want A then B", sj.Estimate.TPath)
+		}
+	}
+
+	// A ends: B runs.
+	*now = now.Add(10 * time.Minute)
+	finish(t, podOfUnit(t, ns, "lanes", 1), corev1.PodSucceeded, *now, 10*time.Minute, nil)
+	tick(t, q)
+	got = get(t, ns, "lanes")
+	if !slices.Contains(podUnits(unitPods(t, ns, "lanes")), 2) || len(got.Status.Holds) != 0 || len(states(t, got, "locked")) != 0 {
+		t.Fatalf("after A: pods %v, states %v, holds %+v", podUnits(unitPods(t, ns, "lanes")), got.Status.UnitStates, got.Status.Holds)
 	}
 }
