@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -10,6 +11,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/Avalanche-io/c4"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
@@ -200,5 +203,87 @@ func TestSafepointMovesToCheaperPool(t *testing.T) {
 			where = append(where, p.Name+"@"+p.Labels[c4v1.LabelPool])
 		}
 		t.Fatalf("the next attempt is not in %s: %v", cheap.Name, where)
+	}
+}
+
+// SIGTERM is a yield (INTEGRATE 3.1). A unit's grace comes from its job's
+// learned cadence of safe points; a pod being deleted (a drain, an
+// eviction) is told to stop at its next safe point, and its exit is a
+// yield the next attempt resumes from.
+func TestSafepointDrainIsAYield(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 2)
+	ctx := context.Background()
+	q.Safepoints = &SafepointCache{}
+	j := job(ns, "sh090", "render", "cpu-"+ns, map[string]string{"frames": "1-4", "estimateSeconds": "600"}, now.Add(4*time.Hour))
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	pods := unitPods(t, ns, "sh090")
+	if len(pods) != 2 || pods[0].Spec.TerminationGracePeriodSeconds != nil && *pods[0].Spec.TerminationGracePeriodSeconds != 30 {
+		t.Fatalf("pods %d, grace before any safe point %v", len(pods), pods[0].Spec.TerminationGracePeriodSeconds)
+	}
+	// The first unit reaches a safe point every minute.
+	q.Safepoints.Observe(*now, map[[2]string]Safepoint{{ns, pods[0].Name}: {Seq: 1, At: *now}})
+	q.Safepoints.Observe(now.Add(2*time.Minute), map[[2]string]Safepoint{{ns, pods[0].Name}: {Seq: 3, At: now.Add(2 * time.Minute)}})
+	*now = now.Add(2 * time.Minute)
+	finish(t, &pods[1], corev1.PodSucceeded, *now, time.Minute, nil)
+	tick(t, q)
+	var next *corev1.Pod
+	for _, p := range unitPods(t, ns, "sh090") {
+		if p.Name != pods[0].Name && p.Name != pods[1].Name {
+			next = &p
+		}
+	}
+	if next == nil || next.Spec.TerminationGracePeriodSeconds == nil || *next.Spec.TerminationGracePeriodSeconds != 120 {
+		t.Fatalf("the next unit's grace: %v", next)
+	}
+
+	// The node drains: the first unit is told to stop at its next safe
+	// point, and its stop is a yield.
+	p0 := &pods[0]
+	bind(t, p0, ns+"-cpu-0")
+	if err := k8s.Delete(ctx, p0); err != nil {
+		t.Fatal(err)
+	}
+	atSafepoint(t, p0, 4, *now)
+	tick(t, q)
+	d, p0 := answerOf(t, p0)
+	if d.Seq != 4 || d.Do != "stop" || !strings.Contains(d.Why, "deleted") || p0.Annotations[c4v1.AnnotationYield] != yieldDrain {
+		t.Fatalf("drain decision %+v %v", d, p0.Annotations)
+	}
+	mem := q.jobs[j.UID]
+	if n := len(mem.decisions); n == 0 || mem.decisions[n-1].Kind != "safepoint-stop" {
+		t.Fatalf("decisions %+v", mem.decisions)
+	}
+	*now = now.Add(time.Minute)
+	finish(t, p0, corev1.PodSucceeded, *now, 3*time.Minute, map[string]string{c4v1.AnnotationOutputTree: c4.Identify(strings.NewReader("sh090-u0")).String()})
+	tick(t, q)
+	got := get(t, ns, "sh090")
+	if n := len(got.Status.Yields); n == 0 || got.Status.Yields[n-1].Reason != yieldDrain || got.Status.Yields[n-1].Unit != int32(unitOf(*p0)) {
+		t.Fatalf("yields %+v", got.Status.Yields)
+	}
+	if s := states(t, got, "succeeded"); slices.Contains(s, unitOf(*p0)) {
+		t.Fatalf("a drained unit counted as done: %v", got.Status.UnitStates)
+	}
+}
+
+// A checkpointing class gives its units the time to reach a checkpoint.
+func TestCheckpointClassGrace(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 2)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "train1", "ml", "cpu-"+ns, map[string]string{"estimateSeconds": "3600"}, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	j := job(ns, "train2", "ml", "cpu-"+ns, map[string]string{"estimateSeconds": "3600", "checkpointSeconds": "90"}, now.Add(8*time.Hour))
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	for name, want := range map[string]int64{"train1": 300, "train2": 90} {
+		pods := unitPods(t, ns, name)
+		if len(pods) != 1 || pods[0].Spec.TerminationGracePeriodSeconds == nil || *pods[0].Spec.TerminationGracePeriodSeconds != want {
+			t.Fatalf("%s: grace %v, want %d", name, pods, want)
+		}
 	}
 }

@@ -159,6 +159,10 @@ func (ml) Lens() string      { return "ml" }
 // cheaper pool at one.
 func (ml) MovesAtSafepoints() bool { return true }
 
+// A training run saves at its next checkpoint boundary; five minutes
+// unless the job says (checkpointSeconds).
+func (ml) CheckpointTime(job *c4v1.WorkJob) time.Duration { return 5 * time.Minute }
+
 func (ml) Plan(job *c4v1.WorkJob) (*Plan, error) {
 	ranks, err := intParam(job, "ranks", 1, 1, 64)
 	if err != nil {

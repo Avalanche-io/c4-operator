@@ -119,6 +119,14 @@ type Resumer interface {
 	ResumeEnv(point string) []corev1.EnvVar
 }
 
+// Checkpointer is implemented by classes whose units checkpoint: how long
+// one needs, from SIGTERM, to reach its next checkpoint and save. The
+// queue sets the units' grace period from it (when the job has no learned
+// cadence of safe points).
+type Checkpointer interface {
+	CheckpointTime(job *c4v1.WorkJob) time.Duration
+}
+
 // Mover is implemented by classes whose units the queue may move at a
 // safe point without being asked to stop: the unit stops there and its
 // next attempt runs in a cheaper pool the job may use. A class opts in

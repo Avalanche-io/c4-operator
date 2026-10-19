@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -42,8 +43,10 @@ import (
 // a restart, until the unit gets there).
 
 const (
-	// yieldMove is the yield reason of a unit moved at a safe point.
-	yieldMove = "move"
+	// yieldMove is the yield reason of a unit moved at a safe point, and
+	// yieldDrain of one whose pod was being deleted.
+	yieldMove  = "move"
+	yieldDrain = "disruption"
 	// nearlyDone is the progress past which a unit asked to stop for
 	// another job continues: stopping it would lose more than it frees.
 	nearlyDone = 0.9
@@ -94,6 +97,7 @@ type spChoice struct {
 	reason        sched.PreemptReason
 	forJob        string
 	move          string // the pool the unit moves to
+	drain         bool   // the pod is being deleted
 }
 
 // safepointChoice decides for one running unit as things stand. free is
@@ -101,6 +105,12 @@ type spChoice struct {
 // slot-hour.
 func (q *Queue) safepointChoice(v *view, idx int, pod *corev1.Pod, ri runInfo, dec sched.Decisions, free map[string]int, cost map[string]float64, now time.Time) spChoice {
 	unit := unitID(v.key, idx)
+	if pod.DeletionTimestamp != nil {
+		// SIGTERM is a yield: the pod is being drained, evicted or
+		// deleted, and its grace runs. It stops at this safe point, and
+		// the next attempt resumes from what it saved.
+		return spChoice{do: "stop", why: drainWhy(pod), next: "stop", drain: true}
+	}
 	switch y := pod.Annotations[c4v1.AnnotationYield]; {
 	case y == yieldMove:
 		return spChoice{do: "stop", why: "moving to another pool", next: "stop"}
@@ -178,7 +188,7 @@ func (q *Queue) decideSafepoints(ctx context.Context, now time.Time, dec sched.D
 	for _, v := range views {
 		for idx, pod := range v.pods {
 			ri, running := v.running[idx]
-			if !running || pod.DeletionTimestamp != nil {
+			if !running {
 				continue
 			}
 			n, at := podSafepoint(pod)
@@ -217,6 +227,10 @@ func (q *Queue) answerSafepoint(ctx context.Context, v *view, idx int, pod *core
 		pod.Annotations[c4v1.AnnotationYield] = yieldMove
 		pod.Annotations[c4v1.AnnotationYieldBy] = now.Add(yieldGrace).UTC().Format(time.RFC3339)
 	}
+	if c.drain && pod.Annotations[c4v1.AnnotationYield] == "" {
+		// So its exit is a yield, not the unit's end.
+		pod.Annotations[c4v1.AnnotationYield] = yieldDrain
+	}
 	if err := q.Client.Patch(ctx, pod, patch); err != nil {
 		q.Log.Error(err, "safe point decision", "job", v.key, "unit", idx)
 		return
@@ -240,6 +254,9 @@ func (q *Queue) answerSafepoint(ctx context.Context, v *view, idx int, pod *core
 		q.st.CancelPreempt(unitID(v.key, idx))
 		extra["asked"] = string(c.reason)
 		q.recordDecision(ctx, v, idx, "safepoint-continue", c.why, c.forJob, now, extra)
+	case c.drain:
+		extra["asked"] = yieldDrain
+		q.recordDecision(ctx, v, idx, "safepoint-stop", c.why, "", now, extra)
 	case c.asked:
 		extra["asked"] = string(c.reason)
 		q.recordDecision(ctx, v, idx, "safepoint-stop", c.why, c.forJob, now, extra)
@@ -266,4 +283,44 @@ func SafepointNextOf(p *corev1.Pod) (string, map[string]any) {
 func PodSafepointOf(p *corev1.Pod) (Safepoint, bool) {
 	n, ok := podSafepoint(p)
 	return Safepoint{Seq: n.Seq, At: n.At}, ok
+}
+
+// drainWhy says why a deleting pod stops.
+func drainWhy(p *corev1.Pod) string {
+	for _, c := range p.Status.Conditions {
+		if c.Type == corev1.DisruptionTarget && c.Status == corev1.ConditionTrue && c.Reason != "" {
+			return "the farm is stopping this pod (" + c.Reason + ")"
+		}
+	}
+	return "the pod is being deleted"
+}
+
+// Grace (INTEGRATE 3.1: SIGTERM is a yield). Every voluntary disruption
+// sends SIGTERM and waits the pod's grace period, so a unit's grace is the
+// time it needs to reach a safe point and save: the job's learned cadence
+// between safe points, with half again and the decision wait added; else
+// the job's checkpointSeconds; else its class's checkpoint time. Bounded
+// so a drain cannot stall on it.
+const (
+	minGrace = 30 * time.Second
+	maxGrace = 15 * time.Minute
+)
+
+func (q *Queue) graceFor(v *view) time.Duration {
+	var g time.Duration
+	var names []string
+	for _, p := range v.pods {
+		names = append(names, p.Name)
+	}
+	if every := q.Safepoints.Cadence(v.job.Namespace, names); every > 0 {
+		g = every*3/2 + 30*time.Second
+	} else if s, err := strconv.Atoi(v.job.Spec.Params["checkpointSeconds"]); err == nil && s > 0 {
+		g = time.Duration(s) * time.Second
+	} else if c, ok := v.driver.(class.Checkpointer); ok {
+		g = c.CheckpointTime(v.job)
+	}
+	if g <= 0 {
+		return 0
+	}
+	return min(max(g, minGrace), maxGrace)
 }

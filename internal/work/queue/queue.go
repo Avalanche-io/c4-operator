@@ -619,6 +619,9 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				}
 				continue
 			}
+			// Still running on its node, inside its grace: at its next
+			// safe point it is told to stop (safepoint_decide.go).
+			v.pods[idx] = p
 			v.running[idx] = runInfo{pool: p.Labels[c4v1.LabelPool], slots: slots, started: startOf(p), node: p.Spec.NodeName}
 		case p.Status.Phase == corev1.PodSucceeded:
 			if capture && p.Annotations[c4v1.AnnotationOutputTree] == "" && now.Sub(finishOf(p, now)) < q.CaptureWait {
@@ -1153,6 +1156,12 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob",
 		Name: j.Name, UID: j.UID, Controller: &t, BlockOwnerDeletion: &t}}
 	pod.Spec.RestartPolicy = corev1.RestartPolicyNever
+	if pod.Spec.TerminationGracePeriodSeconds == nil {
+		if g := q.graceFor(v); g > 0 {
+			s := int64(g / time.Second)
+			pod.Spec.TerminationGracePeriodSeconds = &s
+		}
+	}
 	if pod.Spec.NodeSelector == nil {
 		pod.Spec.NodeSelector = map[string]string{}
 	}

@@ -1862,6 +1862,17 @@ through the tiers instead of from the store.
     (decision/v1: `safepoint-stop`, `safepoint-continue`, `safepoint-move`,
     with the safe point, why, and the stop it answers); a plain continue is
     not.
+  - **SIGTERM is a yield.** Every voluntary disruption (a Karpenter or
+    `kubectl drain`, an eviction, a spot notice, a node shutdown) sends
+    SIGTERM and waits the pod's grace period. The queue sets the grace
+    when the template does not: the job's learned cadence between safe
+    points, plus half again and 30 seconds for the decision; else the job's
+    `checkpointSeconds`; else the class's checkpoint time (ml five minutes,
+    agent three). It is bounded to 30 seconds to 15 minutes. A unit at a
+    safe point while its pod is being deleted is told to stop there, and
+    its pod is marked as yielded (`disruption`), so its exit resumes, with
+    the decision signed. A unit that never reaches one is killed at the end
+    of its grace and counted as interrupted (section 10.14).
   - If no answer arrives in time (the controller is unreachable), the unit
     falls back on the last request it sees through its downward API file:
     it stops only if a stop is still pending. The hard stop at the
