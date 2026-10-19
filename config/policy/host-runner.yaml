@@ -127,9 +127,10 @@ spec:
       request.operation == 'DELETE' || request.resource.resource != 'pods' || variables.sub != '' || (
         object.spec == oldObject.spec &&
         (has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}) &&
-        variables.after.all(k, k in variables.mine || (k in variables.before && variables.before[k] == variables.after[k])) &&
+        variables.after.all(k, k in variables.mine || (k in variables.before && variables.before[k] == variables.after[k]) ||
+          (k == 'c4.avalanche.io/yield' && !(k in variables.before) && variables.after[k] == 'disruption' && has(oldObject.metadata.deletionTimestamp))) &&
         variables.before.all(k, k in variables.mine || k in variables.after))
-    message: a host runner may change only a pod's status and its output-checkpoint, output-epoch, output-expand, output-verdict, output-measure, output-usage, output-tree and safepoint annotations
+    message: a host runner may change only a pod's status and its output-checkpoint, output-epoch, output-expand, output-verdict, output-measure, output-usage, output-tree and safepoint annotations, and mark a pod the farm is deleting as yielded (yield: disruption)
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

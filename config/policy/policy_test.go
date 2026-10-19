@@ -319,6 +319,17 @@ func TestHostRunnerWrites(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// the queue's drain mark, only on a pod the farm is deleting, and no
+	// other yield
+	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/yield":"disruption"}}}`); err == nil {
+		t.Error("the runner marked a pod the farm is not deleting as drained")
+	}
+	if err := patch(laptop, ownPod, `{"metadata":{"annotations":{"c4.avalanche.io/yield":"reclaim"}}}`); err == nil {
+		t.Error("the runner wrote a yield other than the drain mark")
+	}
+	if err := patch(laptop, ownPod, `{"metadata":{"annotations":{"c4.avalanche.io/yield":"disruption"}}}`); err != nil {
+		t.Errorf("the drain mark on its pod the farm is deleting: %v", err)
+	}
 	if err := del(ownPod); err != nil {
 		t.Errorf("finishing the deletion of its own pod: %v", err)
 	}

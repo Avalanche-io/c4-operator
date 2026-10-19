@@ -381,6 +381,9 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 				}
 			}
 			r.logf("stopped %s mid-turn after %s waiting for a turn boundary (%s)", m.Name, r.HardStopAfter, why)
+			if err := r.markDrained(ctx, p); err != nil {
+				return err
+			}
 			return r.finish(ctx, p, corev1.PodSucceeded, "StoppedMidTurn",
 				"stopped mid-turn after waiting "+r.HardStopAfter.String()+" for a turn boundary: "+why, 0)
 		}
@@ -405,7 +408,25 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 	if err := r.saveSession(ctx, p, m); err != nil {
 		return err
 	}
+	if err := r.markDrained(ctx, p); err != nil {
+		return err
+	}
 	return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "yielded at a turn boundary: "+why, 0)
+}
+
+// yieldDisruption is the queue's mark on a drained pod (work/queue's
+// yieldDrain): it reads a pod that ends with it as yielded, not done.
+const yieldDisruption = "disruption"
+
+// markDrained marks a pod the farm deleted, and that yields before the
+// farm answered a safe point (a member idle between parts stops at once),
+// the way the queue marks a drain, so its end is a yield: the next attempt
+// resumes it. The host policy allows this mark only on a deleting pod.
+func (r *Runner) markDrained(ctx context.Context, p *corev1.Pod) error {
+	if p.DeletionTimestamp == nil || p.Annotations[c4v1.AnnotationYield] != "" {
+		return nil
+	}
+	return r.annotate(ctx, p, map[string]string{c4v1.AnnotationYield: yieldDisruption})
 }
 
 // deleted handles a pod the queue deleted without a yield (a disruption,
