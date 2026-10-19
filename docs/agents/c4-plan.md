@@ -8,7 +8,8 @@ order, each expanded later into its own steps (builders, checks, reviews, a
 merge).
 
 ```sh
-c4-plan import [--format file|lanemap] [--milestone M1] [--extra EXTRA.yaml] [-o plan.json] [--notes notes.json] PLAN
+c4-plan import [--format file|lanemap] [--milestone M1] [--extra EXTRA.yaml] [-o plan.json] [--notes notes.json] [--owners owners.json] PLAN
+c4-plan edges --since plan.json [--since edges-1.json …] [--format …] [--extra …] [-o edges.json] [--notes notes.json] PLAN
 ```
 
 It only reads `PLAN`. The output is the queue's own format, and the command
@@ -76,6 +77,27 @@ the queue may ignore:
 - `holds`, `claims` and `gate`: what it writes, what it shares, the gate it passes;
 - `params`: plan facts, carried as they are;
 - `cites`: for each edge, `{after, file, line, text}`.
+
+## After a merge: edges alone
+
+A merge can change the plan: a new sentence, a new line in a plan file.
+`c4-plan edges` re-reads it for the job already running it and writes a
+document of **edges alone** (expansion v1 `edges: [{from, to, cite}]`;
+DESIGN 10.6, edge sources): every ordering between the job's blocks that
+the job does not have yet, each citing where it was read. `--since` is the
+document the job was created from, then each edges document written since,
+in order. A procedural unit re-run after each merge writes the result to
+`.c4/expand.json`, and the job's graph follows its plan.
+
+Edges are only added. A block the plan now lists that the job does not
+have needs an expansion of its own (a new plan version), and an ordering
+the job has that the plan no longer states needs a person: both are notes.
+An ordering that would close a cycle is an error.
+
+`import --owners` also writes the paths blocks hold, each to its block (a
+path two blocks hold is a note). `c4-edges -owners` takes that file, so a
+marker in code (a pending edge naming the block it waits on) is an edge
+from that block to the block that owns the file.
 
 ## What it could not read
 

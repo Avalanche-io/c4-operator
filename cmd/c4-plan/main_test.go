@@ -58,3 +58,43 @@ func TestImportFile(t *testing.T) {
 		t.Errorf("a file read as a lane map: %d", code)
 	}
 }
+
+// edges after a merge: the plan file gains an ordering, and the command
+// writes it alone against the job's document; folded in with a second
+// --since, nothing is new. import --owners writes the held paths.
+func TestEdgesCommand(t *testing.T) {
+	dir := t.TempDir()
+	prev, owners := filepath.Join(dir, "prev.json"), filepath.Join(dir, "owners.json")
+	var so, se bytes.Buffer
+	if code := run([]string{"import", "-o", prev, "--owners", owners, "../../internal/plan/testdata/port.yaml"}, &so, &se); code != 0 {
+		t.Fatalf("import: %d %s", code, se.String())
+	}
+	if b, _ := os.ReadFile(owners); !strings.Contains(string(b), `"text/scan": "text/scan"`) {
+		t.Errorf("owners %s", b)
+	}
+	src, _ := os.ReadFile("../../internal/plan/testdata/port.yaml")
+	next := filepath.Join(dir, "next.yaml")
+	if err := os.WriteFile(next, []byte(strings.Replace(string(src), "{name: io/files, group: core, key: module, after: [io/paths]", "{name: io/files, group: core, key: module, after: [io/paths, text/units]", 1)), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	edges := filepath.Join(dir, "edges.json")
+	so.Reset()
+	se.Reset()
+	if code := run([]string{"edges", "--since", prev, "-o", edges, next}, &so, &se); code != 0 {
+		t.Fatalf("edges: %d %s", code, se.String())
+	}
+	if !strings.HasPrefix(so.String(), "1 new edges") {
+		t.Errorf("summary %q", so.String())
+	}
+	b, _ := os.ReadFile(edges)
+	if !strings.Contains(string(b), `"from": "text/units"`) || !strings.Contains(string(b), `"to": "io/files"`) || strings.Contains(string(b), `"name"`) {
+		t.Errorf("edges %s", b)
+	}
+	so.Reset()
+	if code := run([]string{"edges", "--since", prev, "--since", edges, "-o", filepath.Join(dir, "again.json"), next}, &so, &se); code != 0 || !strings.HasPrefix(so.String(), "0 new edges") {
+		t.Errorf("again: %d %q %s", code, so.String(), se.String())
+	}
+	if code := run([]string{"edges", next}, &so, &se); code != 2 {
+		t.Errorf("edges without --since: %d", code)
+	}
+}
