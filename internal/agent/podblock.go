@@ -109,7 +109,7 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 		session := newSessionID()
 		m = &Member{Name: name, Session: session, Cwd: b.Cwd, ConfigDir: b.ConfigDir, Flags: flags, Block: true, Registered: time.Now().UTC()}
 		b.logf("started %s (session %s)", name, session)
-		register := func() error { return b.register(ctx, h, m) }
+		register := func(exited <-chan struct{}) error { return b.register(ctx, h, m, exited) }
 		if err := b.claude(ctx, append(append([]string{"-p", "--session-id", session}, flags...), "--", blockPrompt(p, u)), register); err != nil {
 			return 1, err
 		}
@@ -141,21 +141,24 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 }
 
 // register records the new session's member once its transcript appears,
-// so the Stop hook finds it at the turn's end.
-func (b *PodBlock) register(ctx context.Context, h *Harness, m *Member) error {
+// so the Stop hook finds it at the turn's end. A claude that exits without
+// one (not signed in, say) leaves nothing to register.
+func (b *PodBlock) register(ctx context.Context, h *Harness, m *Member, exited <-chan struct{}) error {
 	deadline := time.Now().Add(60 * time.Second)
-	for {
+	for last := false; ; {
 		tr, err := FindTranscript(m.ConfigDir, m.Cwd, m.Session)
 		if err == nil {
 			m.Transcript = tr
 			break
 		}
-		if time.Now().After(deadline) {
+		if last || time.Now().After(deadline) {
 			return fmt.Errorf("session %s: its transcript did not appear: %w", m.Session, err)
 		}
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
+		case <-exited:
+			last = true
 		case <-time.After(200 * time.Millisecond):
 		}
 	}
@@ -173,8 +176,8 @@ func (b *PodBlock) register(ctx context.Context, h *Harness, m *Member) error {
 
 // claude runs one print-mode invocation in the session's folder, the
 // holder's store as its config dir, and waits for it. while, when set, runs
-// once the process has started.
-func (b *PodBlock) claude(ctx context.Context, args []string, while func() error) error {
+// once the process has started; exited closes when it ends.
+func (b *PodBlock) claude(ctx context.Context, args []string, while func(exited <-chan struct{}) error) error {
 	if err := os.MkdirAll(b.Cwd, 0o755); err != nil {
 		return err
 	}
@@ -185,11 +188,13 @@ func (b *PodBlock) claude(ctx context.Context, args []string, while func() error
 	if err := cmd.Start(); err != nil {
 		return err
 	}
+	exited, done := make(chan struct{}), make(chan error, 1)
+	go func() { done <- cmd.Wait(); close(exited) }()
 	var werr error
 	if while != nil {
-		werr = while()
+		werr = while(exited)
 	}
-	err := cmd.Wait()
+	err := <-done
 	if werr != nil {
 		return werr
 	}
