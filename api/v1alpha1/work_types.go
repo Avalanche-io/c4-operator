@@ -30,6 +30,17 @@ const (
 	// has not stopped by then is stopped (the hard stop), losing what it
 	// did since its last safe point.
 	AnnotationYieldBy = "c4.avalanche.io/yield-by"
+	// AnnotationSafepoint on a running unit's pod is the last safe point
+	// it reached and asked a decision for, written by the node daemon:
+	// {"seq", "at", "checkpoint"?} (JSON).
+	AnnotationSafepoint = "c4.avalanche.io/safepoint"
+	// AnnotationSafepointDecision is the queue's answer at that safe point:
+	// {"seq", "do": "stop" | "continue", "why", "at"} (JSON). The node
+	// daemon passes it to the waiting unit (c4-unit safepoint).
+	AnnotationSafepointDecision = "c4.avalanche.io/safepoint-decision"
+	// AnnotationSafepointNext is what the queue would decide at the unit's
+	// next safe point as things stand: stop, continue or undecided.
+	AnnotationSafepointNext = "c4.avalanche.io/safepoint-next"
 	// AnnotationOutputCheckpoint on a unit pod that yielded names where the
 	// next attempt resumes, for classes whose state is not a captured view:
 	// an agent member's turn checkpoint ("<session>#<seq>:<head>"). Written

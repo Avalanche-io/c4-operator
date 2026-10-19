@@ -85,8 +85,9 @@ func (d *Daemon) progressOnce(shown map[[2]string]bool) map[[2]string]bool {
 // Safepoint is the last safe point a unit announced (c4-unit safepoint):
 // its number and when.
 type Safepoint struct {
-	Seq int
-	At  time.Time
+	Seq        int
+	At         time.Time
+	Checkpoint string
 }
 
 // ReadSafepoint reads a running unit's .c4/safepoint ("seq N", "at TIME"
@@ -110,6 +111,8 @@ func ReadSafepoint(upper string) (Safepoint, bool) {
 			sp.Seq, _ = strconv.Atoi(v)
 		case "at":
 			sp.At, _ = time.Parse(time.RFC3339Nano, v)
+		case "checkpoint":
+			sp.Checkpoint = v
 		}
 	}
 	if sp.Seq <= 0 || sp.At.IsZero() {

@@ -1770,17 +1770,46 @@ through the tiers instead of from the store.
   test file. `c4-unit safepoint [--checkpoint REF]` writes `.c4/safepoint`
   (its number, the time, what was saved), the node daemon reports the last
   one with the unit's progress, and the queue learns how often each unit
-  reaches them. If a soft stop is pending at that moment, the command says
-  `stop` (exit status 10) and the unit exits there; capture keeps what it
-  wrote and the next attempt resumes from it, as for a yield. The soft stop
-  is the yield annotation, with its reason, and `c4.avalanche.io/yield-by`,
-  its deadline; the hard stop at the deadline remains the fallback. A unit
-  that reports safe points is therefore stopped softly, not killed, and
-  what stopping it loses is the time since its last safe point, which the
-  scheduler uses to choose victims. The HUD shows each unit's last safe
-  point and cadence, and for a unit asked to stop, when its next safe point
-  is expected and its deadline. An agent's Claude Code session announces
-  one at each turn's end from a Stop hook.
+  reaches them.
+- **Arriving at a safe point is a decision point**, not an automatic stop.
+  The command asks, and waits briefly (`--wait`, 20 s) for the answer: the
+  node daemon sets the pod's `c4.avalanche.io/safepoint` annotation, the
+  queue decides on its next tick and answers in
+  `c4.avalanche.io/safepoint-decision`, and the daemon writes the answer
+  into the pod's control directory (`$C4_CONTROL`, an emptyDir it reaches
+  through kubelet's pods directory). `stop` (exit status 10): the unit
+  exits there, capture keeps what it wrote, and the next attempt resumes
+  from it, as for a yield. `continue` (0): it goes on.
+  - A soft stop asked earlier (the yield annotation, with its reason, and
+    `c4.avalanche.io/yield-by`, its deadline) is advisory. At the safe point
+    the scheduler reconsiders it: a hold-stop holds while the job is on
+    hold; a capacity shrink while the pool is still over its slots; a stop
+    for another job while that job still waits for slots, is still at
+    risk, and the pool has no free slots for it. A unit asked to stop for
+    another job that is nearly done (90%) goes on: stopping it would lose
+    more than it frees. A stop that no longer holds is cancelled.
+  - With no stop pending, the queue may move the unit if its class allows
+    it (render and ml): a pool the job may use costing at most three
+    quarters as much per slot-hour, with room now, for a unit with at
+    least 20 minutes left and a job not at risk. The answer is stop, and
+    the next attempt is released into that pool.
+  - Each stop, each cancelled stop and each move is signed in the book
+    (decision/v1: `safepoint-stop`, `safepoint-continue`, `safepoint-move`,
+    with the safe point, why, and the stop it answers); a plain continue is
+    not.
+  - If no answer arrives in time (the controller is unreachable), the unit
+    falls back on the last request it sees through its downward API file:
+    it stops only if a stop is still pending. The hard stop at the
+    deadline remains the fallback for a unit that never reaches one.
+  - A unit that reports safe points is therefore stopped softly, not
+    killed, and what stopping it loses is the time since its last safe
+    point, which the scheduler uses to choose victims. The HUD shows each
+    unit's last safe point and cadence, what the queue would decide at the
+    next one as things stand (`c4.avalanche.io/safepoint-next`: stop,
+    continue, or undecided), its last decision, and for a unit asked to
+    stop, when its next safe point is expected and its deadline. An
+    agent's Claude Code session reaches one at each turn's end, from a
+    Stop hook.
 - A gang is preempted whole: the queue asks it to yield and suspends the
   wrapped object once it has checkpointed (section 10.17). Members are never
   evicted one by one.

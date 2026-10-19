@@ -133,12 +133,21 @@ func (q *Queue) safepointOf(v *view, idx int) (Safepoint, bool) {
 }
 
 // noteSafepoints records each running unit's last safe point on its view,
-// for the policy's snapshot.
-func (q *Queue) noteSafepoints(views []*view) {
+// for the policy's snapshot. A safe point the node daemon set on the pod
+// (asking for a decision) is newer than the last scrape's.
+func (q *Queue) noteSafepoints(views []*view, now time.Time) {
 	for _, v := range views {
 		v.safe = nil
 		for idx := range v.running {
-			if sp, ok := q.safepointOf(v, idx); ok {
+			sp, ok := q.safepointOf(v, idx)
+			if n, at := podSafepoint(v.pods[idx]); at && (!ok || n.Seq > sp.Seq) {
+				pod := v.pods[idx]
+				q.Safepoints.Observe(now, map[[2]string]Safepoint{{pod.Namespace, pod.Name}: {Seq: n.Seq, At: n.At}})
+				if sp, ok = q.safepointOf(v, idx); !ok {
+					sp, ok = Safepoint{Seq: n.Seq, At: n.At}, true
+				}
+			}
+			if ok {
 				if v.safe == nil {
 					v.safe = map[int]Safepoint{}
 				}

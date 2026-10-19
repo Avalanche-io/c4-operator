@@ -455,7 +455,7 @@ func (a *alloc) preemptUnit(victim *jobCtx, ru RunningUnit, reason PreemptReason
 		Job: victim.j.ID, Unit: ru.ID, Pool: ru.Pool, Slots: ru.Slots,
 		Reason: reason, For: forJob, Yield: yield, LostWork: lost,
 	})
-	a.st.pending[ru.ID] = pendingPreempt{job: victim.j.ID, forJob: forJob, pool: ru.Pool, slots: ru.Slots, at: a.now}
+	a.st.pending[ru.ID] = pendingPreempt{job: victim.j.ID, forJob: forJob, pool: ru.Pool, slots: ru.Slots, at: a.now, reason: reason}
 	if reason == ReasonGuard {
 		a.st.guardHit[victim.j.ID] = a.now
 		delete(a.st.guard, ru.ID)

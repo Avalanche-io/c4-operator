@@ -5,9 +5,9 @@
 //	c4-unit progress 0.4            write the unit's progress (0 to 1)
 //	c4-unit preview IMAGE FRAME     write preview/FRAME.png for the HUD's player
 //	c4-unit yield-requested         exit 0 if the farm asked this unit to yield
-//	c4-unit safepoint [--checkpoint REF]
-//	                                announce a safe point; exit 10 (and print
-//	                                "stop") if the farm asked the unit to stop
+//	c4-unit safepoint [--checkpoint REF] [--wait 20s]
+//	                                at a safe point, ask the farm whether to stop
+//	                                here: exit 10 (and print "stop") or 0 ("continue")
 //	c4-unit resume-dir              print the writable mount if this attempt resumes
 //	c4-unit output                  print the writable mount
 //
@@ -16,19 +16,24 @@
 //
 // A safe point is a moment the unit could stop and lose nothing it wants
 // kept: the end of an agent turn, a frame or chunk boundary, a training
-// checkpoint. Announcing each one tells the farm how often the unit
-// reaches them (so it can choose which unit to stop and say when it will
-// stop), and is where a soft stop the farm asked for takes effect:
+// checkpoint. Arriving at one is a decision point: the unit asks, and the
+// farm decides then whether it stops there or goes on.
 //
 //	c4-unit safepoint --checkpoint step-4000; [ $? -eq 10 ] && exit 0
 //
-// The farm's soft stop (the c4.avalanche.io/yield annotation, with its
-// deadline in c4.avalanche.io/yield-by) is seen through the pod's downward
-// API file, $C4_PODINFO; after the deadline the unit is stopped anyway.
+// The request goes through the node daemon to the queue, and the answer
+// comes back in $C4_CONTROL/safepoint.decision, within --wait. A soft stop
+// the farm asked for earlier (the c4.avalanche.io/yield annotation, with
+// its deadline in c4.avalanche.io/yield-by) is advisory: if capacity has
+// returned or stopping is no longer worth it, the answer is continue. Only
+// when no answer arrives in time does the command fall back on that
+// request, seen through $C4_PODINFO: stop if one is still pending. After a
+// soft stop's deadline the unit is stopped anyway.
 package main
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -65,6 +70,7 @@ type env struct {
 	mountinfo string // path of the mount table
 	oiiotool  string // the converter for EXR and TIFF
 	now       func() time.Time
+	sleep     func(time.Duration)
 }
 
 func (e env) get(k string) string {
@@ -79,6 +85,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	dir := fs.String("dir", "", "the unit's writable mount (default $C4_OUTPUT, or found from the mounts)")
 	width := fs.Int("width", 960, "preview width in pixels")
 	checkpoint := fs.String("checkpoint", "", "with safepoint: what the unit saved there (a step, a path, a session turn), for the record")
+	wait := fs.Duration("wait", 20*time.Second, "with safepoint: how long to wait for the farm's decision before falling back on its last request")
 	if len(args) == 0 {
 		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | resume-dir | output")
 	}
@@ -119,18 +126,32 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		if err != nil {
 			return 1, err
 		}
-		if err := safepoint(e, filepath.Join(out, ".c4", "safepoint"), *checkpoint); err != nil {
+		seq, err := safepoint(e, filepath.Join(out, ".c4", "safepoint"), *checkpoint)
+		if err != nil {
 			return 1, err
+		}
+		if d, ok := awaitDecision(e, seq, *wait); ok {
+			if d.Do == "stop" {
+				fmt.Fprintln(stdout, "stop"+suffix(d.Why))
+				return stopCode, nil
+			}
+			fmt.Fprintln(stdout, "continue"+suffix(d.Why))
+			return 0, nil
+		}
+		// No answer in time: the last request the farm made stands.
+		note := " [no decision in " + wait.String() + "]"
+		if e.get("C4_CONTROL") == "" {
+			note = " [no decision channel]"
 		}
 		stop, err := softStop(e)
 		if err != nil {
 			return 1, err
 		}
 		if stop.asked {
-			fmt.Fprintln(stdout, stop.String())
+			fmt.Fprintln(stdout, stop.String()+note)
 			return stopCode, nil
 		}
-		fmt.Fprintln(stdout, "continue")
+		fmt.Fprintln(stdout, "continue"+note)
 		return 0, nil
 	case "yield-requested":
 		asked, err := yieldRequested(e)
@@ -289,10 +310,53 @@ func softStop(e env) (stopRequest, error) {
 	return s, nil
 }
 
+// decision is the farm's answer at a safe point
+// ($C4_CONTROL/safepoint.decision, written by the node daemon).
+type decision struct {
+	Seq int    `json:"seq"`
+	Do  string `json:"do"`
+	Why string `json:"why"`
+}
+
+func suffix(why string) string {
+	if why == "" {
+		return ""
+	}
+	return ": " + why
+}
+
+// awaitDecision waits up to wait for the farm's answer to safe point seq.
+func awaitDecision(e env, seq int, wait time.Duration) (decision, bool) {
+	dir := e.get("C4_CONTROL")
+	if dir == "" || wait <= 0 {
+		return decision{}, false
+	}
+	now, sleep := time.Now, time.Sleep
+	if e.now != nil {
+		now = e.now
+	}
+	if e.sleep != nil {
+		sleep = e.sleep
+	}
+	until := now().Add(wait)
+	for {
+		if b, err := os.ReadFile(filepath.Join(dir, "safepoint.decision")); err == nil {
+			var d decision
+			if json.Unmarshal(b, &d) == nil && d.Seq == seq && (d.Do == "stop" || d.Do == "continue") {
+				return d, true
+			}
+		}
+		if !now().Before(until) {
+			return decision{}, false
+		}
+		sleep(200 * time.Millisecond)
+	}
+}
+
 // safepoint records a safe point in path: its sequence number (one past
-// the last), the time, and what was saved there. The node daemon reports
-// it to the farm.
-func safepoint(e env, path, checkpoint string) error {
+// the last), the time, and what was saved there, and returns the number.
+// The node daemon asks the farm for a decision on it.
+func safepoint(e env, path, checkpoint string) (int, error) {
 	seq := 1
 	if b, err := os.ReadFile(path); err == nil {
 		for _, l := range strings.Split(string(b), "\n") {
@@ -312,7 +376,7 @@ func safepoint(e env, path, checkpoint string) error {
 	if checkpoint != "" {
 		fmt.Fprintf(&b, "checkpoint %s\n", strings.ReplaceAll(checkpoint, "\n", " "))
 	}
-	return writeAtomic(path, []byte(b.String()))
+	return seq, writeAtomic(path, []byte(b.String()))
 }
 
 // preview writes a PNG preview of an image. PNG and JPEG are converted

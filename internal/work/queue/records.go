@@ -23,7 +23,7 @@ import (
 type decisionRecord struct {
 	Unit   int
 	At     time.Time
-	Kind   string // yield or stop
+	Kind   string // yield, stop, safepoint-stop, safepoint-continue or safepoint-move
 	Reason string
 	For    string
 	Record string
@@ -59,12 +59,18 @@ func (q *Queue) storeRecord(ctx context.Context, v *view, rec []byte) (string, e
 	return id.String(), nil
 }
 
-// recordDecision signs a preemption or yield and remembers it.
-func (q *Queue) recordDecision(ctx context.Context, v *view, idx int, kind, reason, forJob string, now time.Time) {
+// recordDecision signs a preemption, a yield or a decision at a safe point
+// and remembers it; extra adds to the signed predicate.
+func (q *Queue) recordDecision(ctx context.Context, v *view, idx int, kind, reason, forJob string, now time.Time, extra ...map[string]any) {
 	d := decisionRecord{Unit: idx, At: now, Kind: kind, Reason: reason, For: forJob}
 	if q.Signer != nil {
 		pred := map[string]any{"decision": kind, "job": v.key, "unit": idx, "reason": reason, "for": forJob,
 			"policy": q.PolicyName, "at": now.UTC().Format(time.RFC3339)}
+		for _, x := range extra {
+			for k, val := range x {
+				pred[k] = val
+			}
+		}
 		rec, err := provenance.SignStatement(ctx, q.Signer, provenance.PredicateDecision, []provenance.Subject{jobSubject(v.job)}, pred, now)
 		if err == nil {
 			d.Record, err = q.storeRecord(ctx, v, rec)

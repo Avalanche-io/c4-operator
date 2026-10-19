@@ -170,7 +170,10 @@ type jobMem struct {
 	// next attempt mounts it and continues from its checkpoint.
 	resume map[int]string
 	// yieldAsked is when a unit was asked to yield.
-	yieldAsked  map[int]time.Time
+	yieldAsked map[int]time.Time
+	// moveTo is the pool a unit moved at a safe point runs in next
+	// (safepoint_decide.go).
+	moveTo      map[int]string
 	preemptions map[int]int
 	preemptBase int // preemptions counted before the last restart
 	yields      []yieldRecord
@@ -410,7 +413,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	}
 
 	q.placeJobs(ctx, views, poolInfo)
-	q.noteSafepoints(views)
+	q.noteSafepoints(views, now)
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
 	cfg := q.Cfg
 	if cfg.Loc == nil {
@@ -428,6 +431,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.lastSnap, q.lastDec, q.lastPol, q.lastAdj = snap, dec, pol, adj
 	q.suggest(ctx, now, snap, dec, views)
 	q.act(ctx, now, dec, views, poolInfo)
+	q.decideSafepoints(ctx, now, dec, views)
 	q.stage(ctx, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
@@ -807,12 +811,29 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 	for _, v := range views {
 		byKey[v.key] = v
 	}
+	room := map[string]int{}
+	for n, p := range pools {
+		room[n] = p.slots - p.used
+	}
+	for _, d := range dec.Dispatch {
+		room[d.Pool] -= d.Slots
+	}
 	for _, d := range dec.Dispatch {
 		key, idx, ok := parseUnitID(d.Unit)
 		v := byKey[key]
 		p := pools[d.Pool]
 		if !ok || v == nil || p == nil {
 			continue
+		}
+		if to := v.mem.moveTo[idx]; to != "" {
+			// Moved at its safe point: it runs in the cheaper pool if
+			// that still has room.
+			delete(v.mem.moveTo, idx)
+			if p2 := pools[to]; p2 != nil && room[to] >= d.Slots {
+				room[to] -= d.Slots
+				room[d.Pool] += d.Slots
+				p = p2
+			}
 		}
 		if ok, err := q.ensureFromJobs(ctx, v, byKey); err != nil || !ok {
 			if err != nil {
@@ -984,6 +1005,15 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 				corev1.VolumeMount{Name: "c4-podinfo", MountPath: "/etc/c4/podinfo", ReadOnly: true})
 		}
 		env = append(env, corev1.EnvVar{Name: "C4_PODINFO", Value: "/etc/c4/podinfo/annotations"})
+		// The control directory, where the node daemon writes the farm's
+		// answer at each safe point (safepoint_decide.go).
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "c4-control",
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}})
+		for c := range pod.Spec.Containers {
+			pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
+				corev1.VolumeMount{Name: "c4-control", MountPath: "/etc/c4/control", ReadOnly: true})
+		}
+		env = append(env, corev1.EnvVar{Name: "C4_CONTROL", Value: "/etc/c4/control"})
 	}
 	resumed, output := false, false
 	for i, in := range j.Spec.Inputs {

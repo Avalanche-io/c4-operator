@@ -407,11 +407,24 @@ type pendingPreempt struct {
 	job, forJob, pool string
 	slots             int
 	at                time.Time
+	reason            PreemptReason
 }
 
 type manualState struct {
 	lastCheck time.Time
 	bumped    map[string]bool
+}
+
+// CancelPreempt forgets a pending preemption of a unit: the unit was
+// asked to stop softly, reached a safe point, and the caller let it
+// continue (the stop was no longer needed). It reports whether one was
+// pending.
+func (st *State) CancelPreempt(unit string) bool {
+	if _, ok := st.pending[unit]; !ok {
+		return false
+	}
+	delete(st.pending, unit)
+	return true
 }
 
 func (st *State) init() {

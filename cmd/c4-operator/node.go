@@ -150,5 +150,6 @@ func runNode(args []string) error {
 	}()
 	go d.RunGC(ctx)
 	go d.RunProgress(ctx, 2*time.Second)
+	go d.RunSafepoints(ctx, 500*time.Millisecond)
 	return d.ServeCSI(ctx, *csiSocket)
 }

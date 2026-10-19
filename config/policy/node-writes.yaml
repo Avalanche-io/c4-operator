@@ -26,7 +26,7 @@ spec:
   - name: after
     expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
   - name: mine
-    expression: "['c4.avalanche.io/preflight', 'c4.avalanche.io/egress']"
+    expression: "['c4.avalanche.io/preflight', 'c4.avalanche.io/egress', 'c4.avalanche.io/safepoint']"
   validations:
   - expression: >-
       'authentication.kubernetes.io/node-name' in request.userInfo.extra &&

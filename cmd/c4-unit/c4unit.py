@@ -37,11 +37,15 @@ def yield_requested():
     return _run("yield-requested", check=False).returncode == 0
 
 
-def safepoint(checkpoint=None):
-    """Announce a safe point, a moment the unit could stop and lose nothing
-    it wants kept. True when the farm has asked the unit to stop: exit
-    there, and the next attempt resumes from what it wrote."""
+def safepoint(checkpoint=None, wait=None):
+    """At a safe point, a moment the unit could stop and lose nothing it
+    wants kept, ask the farm whether to stop there. True when the answer is
+    stop: exit there, and the next attempt resumes from what it wrote.
+    wait (seconds, default 20) is how long to wait for the answer before
+    falling back on the farm's last request."""
     args = ["safepoint"] + (["--checkpoint", checkpoint] if checkpoint else [])
+    if wait is not None:
+        args += ["--wait", f"{wait}s"]
     r = _run(*args, check=False)
     if r.returncode not in (0, 10):
         raise subprocess.CalledProcessError(r.returncode, [_BIN, *args], r.stdout, r.stderr)

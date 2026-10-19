@@ -31,6 +31,10 @@ func (render) Preemptible() bool { return true }
 func (render) Checkpoints() bool { return false }
 func (render) Lens() string      { return "render" }
 
+// A render unit's safe points are frame boundaries: the frames it wrote
+// are captured, so moving it loses nothing but its restore.
+func (render) MovesAtSafepoints() bool { return true }
+
 func (render) Plan(job *c4v1.WorkJob) (*Plan, error) {
 	frames, err := order.ParseFrames(param(job, "frames", ""))
 	if err != nil {
@@ -150,6 +154,10 @@ func (ml) Pools() []string   { return []string{"gpu"} }
 func (ml) Preemptible() bool { return true }
 func (ml) Checkpoints() bool { return true }
 func (ml) Lens() string      { return "ml" }
+
+// A training unit resumes from its checkpoint, so it may move to a
+// cheaper pool at one.
+func (ml) MovesAtSafepoints() bool { return true }
 
 func (ml) Plan(job *c4v1.WorkJob) (*Plan, error) {
 	ranks, err := intParam(job, "ranks", 1, 1, 64)

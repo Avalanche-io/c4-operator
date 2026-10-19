@@ -92,6 +92,14 @@ type Resumer interface {
 	ResumeEnv(point string) []corev1.EnvVar
 }
 
+// Mover is implemented by classes whose units the queue may move at a
+// safe point without being asked to stop: the unit stops there and its
+// next attempt runs in a cheaper pool the job may use. A class opts in
+// when resuming elsewhere costs little next to what the move saves.
+type Mover interface {
+	MovesAtSafepoints() bool
+}
+
 var drivers = map[string]Driver{}
 
 func register(d Driver) { drivers[d.Name()] = d }

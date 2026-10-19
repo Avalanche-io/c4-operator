@@ -63,6 +63,9 @@ type Config struct {
 	Signer *provenance.Signer
 	// Version names this build in task records.
 	Version string
+	// PodsDir is kubelet's pods directory, where the daemon reaches a
+	// unit's control emptyDir (default /var/lib/kubelet/pods).
+	PodsDir string
 }
 
 // Daemon serves one node.

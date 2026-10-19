@@ -157,10 +157,19 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		} else if p != nil {
 			e["node"] = p.Spec.NodeName
 			sp, safe := s.Safepoints.Get(p.Namespace, p.Name)
+			if n, ok := queue.PodSafepointOf(p); ok && (!safe || n.Seq > sp.Seq) {
+				sp.Seq, sp.At, safe = n.Seq, n.At, true
+			}
 			if safe {
-				x := map[string]any{"seq": sp.Seq, "at": sp.At}
+				// The next safe point is a decision: what the queue would
+				// decide there as things stand, and what it decided last.
+				next, last := queue.SafepointNextOf(p)
+				x := map[string]any{"seq": sp.Seq, "at": sp.At, "next": next}
 				if sp.Every > 0 {
 					x["everySeconds"] = math.Round(sp.Every.Seconds())
+				}
+				if last != nil {
+					x["decision"] = last
 				}
 				e["safepoint"] = x
 			}

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func vars(m map[string]string) env {
@@ -123,33 +125,50 @@ func TestOutputFromMounts(t *testing.T) {
 	}
 }
 
-// Each safe point is numbered and timed in .c4/safepoint; the command says
-// continue until the farm asks for a soft stop, then stop, with its reason
-// and deadline, and exit status 10.
+// Each safe point is numbered and timed in .c4/safepoint. The unit then
+// waits for the farm's decision on it; a pending soft stop is advisory,
+// and is followed only when no decision arrives in time.
 func TestSafepoint(t *testing.T) {
-	out := t.TempDir()
+	out, ctl := t.TempDir(), t.TempDir()
 	info := filepath.Join(t.TempDir(), "annotations")
-	os.WriteFile(info, []byte("c4.avalanche.io/attempt=\"1\"\n"), 0o644)
-	e := vars(map[string]string{"C4_OUTPUT": out, "C4_PODINFO": info})
-	var buf bytes.Buffer
-	if c, err := run([]string{"safepoint"}, &buf, e); c != 0 || err != nil || buf.String() != "continue\n" {
-		t.Fatalf("first safe point: %d %v %q", c, err, buf.String())
+	os.WriteFile(info, []byte("c4.avalanche.io/yield=\"reclaim-nominal\"\nc4.avalanche.io/yield-by=\"2026-10-19T20:10:00Z\"\n"), 0o644)
+	clock := time.Date(2026, 10, 19, 20, 0, 0, 0, time.UTC)
+	e := vars(map[string]string{"C4_OUTPUT": out, "C4_PODINFO": info, "C4_CONTROL": ctl})
+	e.now = func() time.Time { return clock }
+	e.sleep = func(d time.Duration) { clock = clock.Add(d) }
+	decide := func(seq int, do, why string) {
+		os.WriteFile(filepath.Join(ctl, "safepoint.decision"), []byte(fmt.Sprintf(`{"seq":%d,"do":%q,"why":%q}`, seq, do, why)), 0o644)
 	}
-	buf.Reset()
-	if c, _ := run([]string{"safepoint", "--checkpoint", "step-4000"}, &buf, e); c != 0 {
-		t.Fatalf("second safe point: %d", c)
+	var buf bytes.Buffer
+	// The farm says continue, though a soft stop was asked for: capacity
+	// came back.
+	decide(1, "continue", "gw010-light no longer needs the slots")
+	if c, err := run([]string{"safepoint", "--checkpoint", "step-100"}, &buf, e); c != 0 || err != nil || buf.String() != "continue: gw010-light no longer needs the slots\n" {
+		t.Fatalf("continue decision: %d %v %q", c, err, buf.String())
 	}
 	b, _ := os.ReadFile(filepath.Join(out, ".c4", "safepoint"))
-	if !strings.HasPrefix(string(b), "seq 2\nat ") || !strings.HasSuffix(string(b), "checkpoint step-4000\n") {
+	if !strings.HasPrefix(string(b), "seq 1\nat ") || !strings.HasSuffix(string(b), "checkpoint step-100\n") {
 		t.Fatalf("safepoint file %q", b)
 	}
-	os.WriteFile(info, []byte("c4.avalanche.io/yield=\"reclaim-nominal\"\nc4.avalanche.io/yield-by=\"2026-10-19T20:10:00Z\"\n"), 0o644)
+	// The farm says stop.
+	decide(2, "stop", "reclaim-nominal for gw010-light")
 	buf.Reset()
-	c, err := run([]string{"safepoint"}, &buf, e)
-	if c != stopCode || err != nil || buf.String() != "stop: reclaim-nominal (by 2026-10-19T20:10:00Z)\n" {
-		t.Fatalf("under a soft stop: %d %v %q", c, err, buf.String())
+	if c, _ := run([]string{"safepoint"}, &buf, e); c != stopCode || buf.String() != "stop: reclaim-nominal for gw010-light\n" {
+		t.Fatalf("stop decision: %d %q", c, buf.String())
 	}
-	if b, _ := os.ReadFile(filepath.Join(out, ".c4", "safepoint")); !strings.HasPrefix(string(b), "seq 3\n") {
-		t.Fatalf("the stopping safe point is recorded too: %q", b)
+	// No decision for safe point 3 within the wait (the file still holds
+	// the answer to 2): the pending soft stop stands.
+	buf.Reset()
+	start := clock
+	if c, _ := run([]string{"safepoint", "--wait", "5s"}, &buf, e); c != stopCode || !strings.HasPrefix(buf.String(), "stop: reclaim-nominal (by 2026-10-19T20:10:00Z) [no decision in 5s]") {
+		t.Fatalf("fallback: %d %q", c, buf.String())
+	}
+	if clock.Sub(start) < 5*time.Second {
+		t.Fatalf("waited %v, not the 5s asked", clock.Sub(start))
+	}
+	// Without a control directory, nor a pending stop: continue at once.
+	buf.Reset()
+	if c, _ := run([]string{"safepoint"}, &buf, vars(map[string]string{"C4_OUTPUT": out})); c != 0 || buf.String() != "continue [no decision channel]\n" {
+		t.Fatalf("no farm: %d %q", c, buf.String())
 	}
 }
