@@ -59,7 +59,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "host-runner.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "host-runner.yaml", "lease-mounts.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -354,5 +354,69 @@ func TestHostRunnerWrites(t *testing.T) {
 	}
 	if err := lc.Create(ctx, lease("w1")); err == nil {
 		t.Error("the runner made another node's Lease")
+	}
+}
+
+// TestLeaseMounts checks who may mount a credential lease's Secret: only
+// the work queue (the manager's account), as a Secret volume; nobody puts
+// one in an environment variable or a projected volume.
+func TestLeaseMounts(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "practice"}})
+	// the manager's account, with the rights to create pods
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-pods"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	manager, err := client.New(mc, client.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	pod := func(edit func(*corev1.Pod)) *corev1.Pod {
+		n++
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "practice", Name: fmt.Sprintf("unit-%d", n)},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "block", Image: "x"}}}}
+		edit(p)
+		return p
+	}
+	withLease := func(p *corev1.Pod) {
+		p.Spec.Volumes = []corev1.Volume{{Name: "lease", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "c4-lease-joshua-claude"}}}}
+		p.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "lease", MountPath: "/etc/c4/lease", ReadOnly: true}}
+	}
+	eventually(t, "a person's pod with a lease refused", func() error {
+		if err := admin.Create(ctx, pod(withLease)); err == nil {
+			return errNotYet
+		}
+		return nil
+	})
+	if err := manager.Create(ctx, pod(withLease)); err != nil {
+		t.Errorf("the queue's unit pod with its lease: %v", err)
+	}
+	if err := admin.Create(ctx, pod(func(*corev1.Pod) {})); err != nil {
+		t.Errorf("a pod with no lease: %v", err)
+	}
+	env := func(p *corev1.Pod) {
+		p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "T", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
+			LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-joshua-claude"}, Key: ".credentials.json"}}}}
+	}
+	if err := manager.Create(ctx, pod(env)); err == nil {
+		t.Error("a lease went into an environment variable")
+	}
+	envFrom := func(p *corev1.Pod) {
+		p.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-joshua-claude"}}}}
+	}
+	if err := manager.Create(ctx, pod(envFrom)); err == nil {
+		t.Error("a lease went into the environment")
+	}
+	projected := func(p *corev1.Pod) {
+		p.Spec.Volumes = []corev1.Volume{{Name: "all", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
+			Sources: []corev1.VolumeProjection{{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-joshua-claude"}}}}}}}}
+	}
+	if err := manager.Create(ctx, pod(projected)); err == nil {
+		t.Error("a lease was projected")
 	}
 }

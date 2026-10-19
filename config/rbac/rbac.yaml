@@ -136,6 +136,34 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-agent
 subjects:
 - {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
+# Credential leases (in the manager): the controller keeps a lease's state
+# and deletes its Secret when the lease lapses or the farm does not allow
+# its mode. It never reads a lease's Secret: delete is its only verb on
+# Secrets (the holder's agent writes them). The work queue reads leases to
+# decide which unit pods may mount one.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-credential-leases
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [credentialleases]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [credentialleases/status]
+  verbs: [get, update, patch]
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-credential-leases
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-credential-leases}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
 # HUD (in the manager): reads unit pod logs and events, scrapes the node
 # daemons' and regional replicas' metrics, authenticates viewers
 # (TokenReview), checks each viewer's access and each control's write

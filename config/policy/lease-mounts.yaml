@@ -1,0 +1,50 @@
+# A credential lease's Secret (c4-lease-<lease>) reaches only its holder's
+# own unit pods: only the work queue (the manager's account) creates pods
+# that mount one, and it does so only for jobs the lease serves, in the
+# lease's pools, while it is active (internal/work/queue/lease.go). Nobody
+# puts one in an environment variable or a projected volume.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-lease-mounts
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: [v1]
+      operations: [CREATE, UPDATE]
+      resources: [pods]
+  variables:
+  - name: lease
+    expression: "'c4-lease-'"
+  - name: volumes
+    expression: "has(object.spec.volumes) ? object.spec.volumes : []"
+  - name: containers
+    expression: >-
+      (has(object.spec.containers) ? object.spec.containers : []) +
+      (has(object.spec.initContainers) ? object.spec.initContainers : [])
+  - name: mounts
+    expression: >-
+      variables.volumes.exists(v, has(v.secret) && has(v.secret.secretName) && v.secret.secretName.startsWith(variables.lease))
+  validations:
+  - expression: >-
+      !variables.mounts || request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
+    message: only the work queue creates pods that mount a credential lease's Secret
+  - expression: >-
+      !variables.volumes.exists(v, has(v.projected) && has(v.projected.sources) &&
+        v.projected.sources.exists(s, has(s.secret) && has(s.secret.name) && s.secret.name.startsWith(variables.lease)))
+    message: a credential lease's Secret is mounted as a Secret volume only, never projected
+  - expression: >-
+      !variables.containers.exists(c,
+        (has(c.env) && c.env.exists(e, has(e.valueFrom) && has(e.valueFrom.secretKeyRef) && e.valueFrom.secretKeyRef.name.startsWith(variables.lease))) ||
+        (has(c.envFrom) && c.envFrom.exists(e, has(e.secretRef) && e.secretRef.name.startsWith(variables.lease))))
+    message: a credential lease's Secret never goes into an environment variable
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-lease-mounts
+spec:
+  policyName: c4-lease-mounts
+  validationActions: [Deny]

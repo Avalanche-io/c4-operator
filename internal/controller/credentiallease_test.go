@@ -1,0 +1,97 @@
+package controller
+
+import (
+	"context"
+	"fmt"
+	"testing"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
+	ctrl "sigs.k8s.io/controller-runtime"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+)
+
+// A lease keeps its Secret while it lasts and wakes when it ends; at its
+// end, or when the farm does not use its mode, the controller deletes the
+// Secret (without reading it) and says why.
+func TestCredentialLeaseEnds(t *testing.T) {
+	ctx := context.Background()
+	ns := fmt.Sprintf("lease-%d", time.Now().UnixNano()%1e9)
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	lease := func(name string, expires time.Time) *c4v1.CredentialLease {
+		l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}, Spec: c4v1.CredentialLeaseSpec{
+			Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"joshua"}},
+			Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"blocks"}},
+			TTL: metav1.Duration{Duration: 24 * time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
+		if err := k8s.Create(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+		exp := metav1.NewTime(expires)
+		l.Status = c4v1.CredentialLeaseStatus{State: c4v1.LeaseActive, ExpiresAt: &exp}
+		if err := k8s.Status().Update(ctx, l); err != nil {
+			t.Fatal(err)
+		}
+		sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: l.SecretName()},
+			Data: map[string][]byte{c4v1.LeaseCredentialKey: []byte(`{"claudeAiOauth":{}}`)}}
+		if err := k8s.Create(ctx, sec); err != nil {
+			t.Fatal(err)
+		}
+		return l
+	}
+	// reconcile until the cache has the lease as written, then report
+	reconcile := func(r *CredentialLeaseReconciler, l *c4v1.CredentialLease, want string) ctrl.Result {
+		t.Helper()
+		var res ctrl.Result
+		for end := time.Now().Add(10 * time.Second); ; time.Sleep(100 * time.Millisecond) {
+			var err error
+			res, err = r.Reconcile(ctx, ctrl.Request{NamespacedName: types.NamespacedName{Namespace: ns, Name: l.Name}})
+			if err != nil {
+				t.Fatal(err)
+			}
+			var got c4v1.CredentialLease
+			if k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: l.Name}, &got) == nil && got.Status.State == want {
+				return res
+			}
+			if time.Now().After(end) {
+				t.Fatalf("lease %s: state %q, want %q", l.Name, got.Status.State, want)
+			}
+		}
+	}
+	secretGone := func(l *c4v1.CredentialLease) bool {
+		for end := time.Now().Add(10 * time.Second); time.Now().Before(end); time.Sleep(100 * time.Millisecond) {
+			err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: l.SecretName()}, &corev1.Secret{})
+			if apierrors.IsNotFound(err) {
+				return true
+			}
+		}
+		return false
+	}
+	r := &CredentialLeaseReconciler{Client: k8s, HolderTransfer: true, Now: func() time.Time { return now }}
+
+	live := lease("live", now.Add(time.Hour))
+	if res := reconcile(r, live, c4v1.LeaseActive); res.RequeueAfter < 59*time.Minute || res.RequeueAfter > 61*time.Minute {
+		t.Fatalf("a live lease wakes after %s, not at its end", res.RequeueAfter)
+	}
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: live.SecretName()}, &corev1.Secret{}); err != nil {
+		t.Fatalf("a live lease lost its Secret: %v", err)
+	}
+
+	lapsed := lease("lapsed", now.Add(-time.Minute))
+	reconcile(r, lapsed, c4v1.LeaseExpired)
+	if !secretGone(lapsed) {
+		t.Fatal("a lapsed lease kept its Secret")
+	}
+
+	off := &CredentialLeaseReconciler{Client: k8s, Now: r.Now}
+	reconcile(off, live, c4v1.LeaseRevoked)
+	if !secretGone(live) {
+		t.Fatal("a holder-transfer lease kept its Secret on a farm that does not use the mode")
+	}
+}

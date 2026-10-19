@@ -91,6 +91,7 @@ func runManager(args []string) error {
 	tierToken := fs.String("tier-token-file", "/var/run/secrets/c4-tier/token", "with --staging: the operator's service account token (audience c4-tier) for the sites' regional replicas")
 	signingNS := fs.String("signing-namespace", "c4-signing", "namespace of the farm's signing CA, readable only by the manager (empty turns signing off)")
 	signerAddr := fs.String("signer-addr", ":8092", "certificate issuer listen address, for node daemons and importers")
+	holderTransfer := fs.String("holder-transfer", "disallow", "holder-transfer credential leases, a holder's own sign-in materialized for the holder's own unit pods: allow or disallow")
 	fs.Parse(args)
 
 	ctrl.SetLogger(zap.New())
@@ -150,6 +151,12 @@ func runManager(args []string) error {
 	if err := (&controller.AgentBundleReconciler{Client: mgr.GetClient()}).SetupWithManager(mgr); err != nil {
 		return err
 	}
+	if *holderTransfer != "allow" && *holderTransfer != "disallow" {
+		return fmt.Errorf("--holder-transfer: %q, want allow or disallow", *holderTransfer)
+	}
+	if err := (&controller.CredentialLeaseReconciler{Client: mgr.GetClient(), HolderTransfer: *holderTransfer == "allow"}).SetupWithManager(mgr); err != nil {
+		return err
+	}
 	var q *queue.Queue
 	stores := func(ctx context.Context, name string) (*storeurl.Sharded, error) {
 		p, err := reg.Get(ctx, name)
@@ -175,7 +182,8 @@ func runManager(args []string) error {
 			// Units' reported progress, filled by the HUD's scrape of the
 			// node daemons (without the HUD, units are estimated from
 			// elapsed time alone).
-			Progress: &queue.ProgressCache{}, Safepoints: &queue.SafepointCache{}, PriorityClass: *unitPriority}
+			Progress: &queue.ProgressCache{}, Safepoints: &queue.SafepointCache{}, PriorityClass: *unitPriority,
+			HolderTransfer: *holderTransfer == "allow"}
 		if err := mgr.Add(q); err != nil {
 			return err
 		}

@@ -80,8 +80,11 @@ type Queue struct {
 	// unit pods whose template names none (config/manager: c4-unit, with
 	// preemptionPolicy Never, so only the queue preempts units).
 	PriorityClass string
-	pcReady       bool
-	pcMissing     bool // logged once
+	// HolderTransfer is the farm's switch for holder-transfer credential
+	// leases (lease.go).
+	HolderTransfer bool
+	pcReady        bool
+	pcMissing      bool // logged once
 	// Namespace is the operator's namespace, where the queue keeps the
 	// pointers to each project's saved calibrations (persist.go). Empty,
 	// or without Stores, calibrations are not saved.
@@ -1303,8 +1306,13 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 				continue
 			}
 		}
+		if ok, why := q.leaseReady(ctx, v.job, p.spec.Name, now); !ok {
+			q.Log.V(1).Info("waiting for a credential lease", "job", key, "unit", idx, "pool", p.spec.Name, "why", why)
+			continue
+		}
 		v.mem.attempts[idx]++
 		pod := q.podFor(v, idx, v.mem.attempts[idx], p)
+		q.leaseOutside(ctx, pod, p.spec.Name)
 		if err := q.Client.Create(ctx, pod); err != nil {
 			v.mem.attempts[idx]--
 			q.Log.Error(err, "create unit pod", "job", key, "unit", idx)
@@ -1418,6 +1426,10 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		pod.Annotations = map[string]string{}
 	}
 	pod.Annotations[c4v1.AnnotationAttempt] = strconv.Itoa(attempt)
+	if owner := j.Annotations[c4v1.AnnotationOwner]; owner != "" {
+		// whose unit it is: a credential lease serves only its holder's
+		pod.Annotations[c4v1.AnnotationOwner] = owner
+	}
 	if ai := j.Annotations[c4v1.AnnotationAIUsage]; ai != "" {
 		// Task records carry the job's declared use of models.
 		pod.Annotations[c4v1.AnnotationAIUsage] = ai
