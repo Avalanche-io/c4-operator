@@ -52,8 +52,11 @@ type Run struct {
 	Declared Class
 	Sealed   bool
 	// Output is the C4 ID of the view the unit wrote (its input view
-	// with its changes applied).
-	Output string
+	// with its changes applied), Changeset the C4 ID of those changes
+	// (empty when it changed nothing), and Record its signed task record.
+	Output    string
+	Changeset string
+	Record    string
 	// Work is slot-seconds (run time times slots); Duration seconds.
 	Work, Duration float64
 	At             time.Time
@@ -115,6 +118,10 @@ type entry struct {
 	Duration stats          `json:"duration"`
 	Outputs  map[string]int `json:"outputs"`
 	Last     time.Time      `json:"last"`
+	// Changesets and Records are, per output, the changes that made it
+	// and the task record of the run that first wrote it, for reuse.
+	Changesets map[string]string `json:"changesets,omitempty"`
+	Records    map[string]string `json:"records,omitempty"`
 }
 
 type procRecord struct {
@@ -215,6 +222,12 @@ func (b *Book) Record(r Run) {
 		}
 	}
 	e.Outputs[r.Output]++
+	if _, ok := e.Changesets[r.Output]; !ok {
+		if e.Changesets == nil {
+			e.Changesets, e.Records = map[string]string{}, map[string]string{}
+		}
+		e.Changesets[r.Output], e.Records[r.Output] = r.Changeset, r.Record
+	}
 	e.Work.add(r.Work)
 	e.Duration.add(r.Duration)
 	if r.At.After(e.Last) {
@@ -342,6 +355,35 @@ func (b *Book) Recompute(k Key, program string) (Cost, bool) {
 	c.W90 = work.Mean + 1.2816*sd
 	c.Longest = dur.Mean
 	return c, true
+}
+
+// Reuse is an output that can stand in for running its computation
+// again: the view, the changes that made it, and the record of the run
+// that wrote it.
+type Reuse struct {
+	Output, Changeset, Record string
+}
+
+// ReuseOf returns an existing output of computation k, when its program
+// is exact and verified by re-runs and every run of k wrote that one
+// output (Recompute's Reuse), with what folding it needs. It reports
+// false otherwise, and for an output recorded before changesets were.
+func (b *Book) ReuseOf(k Key, program string) (Reuse, bool) {
+	c, ok := b.Recompute(k, program)
+	if !ok || c.Reuse == "" {
+		return Reuse{}, false
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	e := b.entries[k]
+	if e == nil {
+		return Reuse{}, false
+	}
+	cs, known := e.Changesets[c.Reuse]
+	if !known {
+		return Reuse{}, false
+	}
+	return Reuse{Output: c.Reuse, Changeset: cs, Record: e.Records[c.Reuse]}, true
 }
 
 // NeedsVerification reports whether a reuse opportunity for an exact,

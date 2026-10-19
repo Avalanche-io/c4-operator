@@ -1452,9 +1452,25 @@ and a sweep planner that spawns trials are all generators.
     model share of spend. `status.modelUsage` has each model unit's tokens
     by model. The HUD's job summary shows `spend`, and its unit list
     `kind` and `usage`.
-  - **Not built yet:** caching procedural units by their inputs' C4 IDs,
-    and flagging a model unit whose output a procedural check could have
-    produced.
+  - **Reuse** is C4-native memoization, which Argo's string-keyed one
+    cannot be.
+    - **What is reused.** A procedural unit ready to run reuses an earlier
+      run's output when the same computation ran before in its project:
+      the same process (images by digest, command, arguments, environment,
+      platform) on the same input views. Its program must be exact
+      (declared, sealed) and verified by re-runs that wrote the same bytes,
+      and its job must itself declare exact.
+    - **What happens.** The earlier changeset is folded into the job's
+      output with that run's task record. The unit succeeds without a pod,
+      the reuse is signed (decision/v1, kind `reuse`), and status and the
+      HUD mark it `reused`.
+    - **Verification.** A share of reuse opportunities (the book's
+      `VerifyRate`, 5%) runs anyway, so the declaration stays falsifiable.
+    - **Not reused:** model units, generators, gates, and units whose run
+      the key does not fully describe (inputs from other units, a rework's
+      changes, a resumed attempt).
+  - **Not built yet:** flagging a model unit whose output a procedural
+    check could have produced.
 - **The job's measure of done** (Q12; LLM-OR-PROCEDURE 7.2 item 3). A job
   declares what it counts: `spec.measure: {name: "rules sited", of: 379,
   required: true}`. A unit, usually a procedural one re-run after each

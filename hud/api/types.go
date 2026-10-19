@@ -238,6 +238,9 @@ type Counts struct {
 	Flagged int `json:"flagged,omitempty"`
 	// Locked counts units waiting for a unit that holds what they claim.
 	Locked int `json:"locked,omitempty"`
+	// Reused counts succeeded units that ran nothing: an earlier run of
+	// the same computation gave their output (also in Succeeded).
+	Reused int `json:"reused,omitempty"`
 }
 
 type States struct {

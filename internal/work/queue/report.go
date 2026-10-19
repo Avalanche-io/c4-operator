@@ -204,6 +204,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		}
 	}
 	st.Measure = measureStatus(v)
+	st.Reused, st.Units.Reused = reusedStatus(m)
 	st.Spend, st.ModelUsage = spendStatus(v)
 	short := measureShort(v, st.Measure)
 	v.measureShort = ""

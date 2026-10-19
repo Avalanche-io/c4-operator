@@ -26,6 +26,12 @@ func (b *Book) Snapshot() BookSnapshot {
 		for o, n := range e.Outputs {
 			cp.Outputs[o] = n
 		}
+		if e.Changesets != nil {
+			cp.Changesets, cp.Records = map[string]string{}, map[string]string{}
+			for o, c := range e.Changesets {
+				cp.Changesets[o], cp.Records[o] = c, e.Records[o]
+			}
+		}
 		s.Entries = append(s.Entries, snapEntry{Key: k, Entry: &cp})
 	}
 	for k, p := range b.procs {

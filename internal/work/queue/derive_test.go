@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -122,7 +123,10 @@ func TestDerivationVerifiedThenDemoted(t *testing.T) {
 	if _, _, c, _ := q.RecomputeCost("namespace/"+ns, "c4outa", 0.01); c.Reuse != "" {
 		t.Fatal("a sampled verification still offered reuse")
 	}
-	// A third run of the same work is estimated from the first two.
+	// A third run of the same work is estimated from the first two. It is
+	// a sampled verification (every reuse opportunity is, here), so it
+	// runs instead of reusing.
+	q.book("namespace/" + ns).VerifyRate = 1
 	if err := k8s.Create(ctx, exactJob(ns, "sh301-v3", *now)); err != nil {
 		t.Fatal(err)
 	}
@@ -176,5 +180,46 @@ func TestDerivationsPersist(t *testing.T) {
 	}
 	if q2.book("show-b").Len() != 0 {
 		t.Fatal("another project got the record")
+	}
+}
+
+// A procedural unit whose computation ran before, exact and verified,
+// reuses that output: the third run of the same work starts no pods,
+// succeeds, and says its units were reused.
+func TestExactVerifiedWorkIsReused(t *testing.T) {
+	ns, q, now := derivationFarm(t, true)
+	ctx := context.Background()
+	q.book("namespace/" + ns).VerifyRate = 1e-12 // no sampled re-run in this test
+	same := func(i int) string { return c4.Identify(strings.NewReader(fmt.Sprintf("frame-%d", i))).String() }
+	for _, name := range []string{"sh400-v1", "sh400-v2"} {
+		if err := k8s.Create(ctx, exactJob(ns, name, *now)); err != nil {
+			t.Fatal(err)
+		}
+		runAll(t, q, now, ns, name, 5*time.Minute, same)
+	}
+	if d := get(t, ns, "sh400-v2").Status.Derivation; d == nil || !d.Verified {
+		t.Fatalf("not verified: %+v", d)
+	}
+	if err := k8s.Create(ctx, exactJob(ns, "sh400-v3", *now)); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	tick(t, q)
+	got := get(t, ns, "sh400-v3")
+	if got.Status.Phase != "Succeeded" || got.Status.Units.Reused != 2 || got.Status.Reused != "0-1" || len(unitPods(t, ns, "sh400-v3")) != 0 {
+		t.Fatalf("v3: %s reused %d %q, pods %d", got.Status.Phase, got.Status.Units.Reused, got.Status.Reused, len(unitPods(t, ns, "sh400-v3")))
+	}
+	if n := len(got.Status.Decisions); n == 0 || got.Status.Decisions[n-1].Kind != "reuse" {
+		t.Fatalf("decisions %+v", got.Status.Decisions)
+	}
+	// A job that is not declared exact runs its units.
+	j := exactJob(ns, "sh400-v4", *now)
+	delete(j.Annotations, AnnotationDerivationClass)
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if n := len(unitPods(t, ns, "sh400-v4")); n == 0 {
+		t.Fatal("an undeclared job reused output")
 	}
 }

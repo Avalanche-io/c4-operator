@@ -174,6 +174,9 @@ type jobMem struct {
 	gateSince map[int]time.Time
 	// measure is the latest reading of the job's measure (measure.go).
 	measure *c4v1.WorkMeasure
+	// reused are units that succeeded by reusing an earlier run's output
+	// (reuse.go), with that output.
+	reused map[int]string
 	// spend is each unit's spend since the queue started, spentPod the
 	// pods counted, and spendBase and usageBase what status recorded
 	// before (spend.go).
@@ -325,6 +328,12 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		m.measure = &x
 	}
 	m.loadSpend(st)
+	for _, i := range decode(st.Reused) {
+		if m.reused == nil {
+			m.reused = map[int]string{}
+		}
+		m.reused[i] = m.unitOut[i]
+	}
 	for _, g := range st.Gates {
 		if g.Position > 0 && g.Since != nil {
 			if m.gateSince == nil {
@@ -832,6 +841,10 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		}
 	}
 	v.runnable, v.waiting, v.stuck = unitWaits(plan, m, v)
+	if q.reuseUnits(ctx, v, now) {
+		// Units that waited on a reused one may run now.
+		v.runnable, v.waiting, v.stuck = unitWaits(plan, m, v)
+	}
 	q.serveWaits(v, now)
 	applyHolds(v)
 	q.estimate(v, now)
@@ -1559,6 +1572,20 @@ func (q *Queue) foldPod(ctx context.Context, v *view, p *corev1.Pod, idx int) bo
 	if cs == "" || m.foldedPod[p.UID] || q.Stores == nil {
 		return true
 	}
+	if !q.foldChangeset(ctx, v, idx, cs, p.Annotations[c4v1.AnnotationOutputProvenance]) {
+		return false
+	}
+	m.foldedPod[p.UID] = true
+	return true
+}
+
+// foldChangeset folds one changeset of unit idx, with its task record,
+// into the job's output. It reports false when it must be tried again.
+func (q *Queue) foldChangeset(ctx context.Context, v *view, idx int, cs, record string) bool {
+	m := v.mem
+	if cs == "" || q.Stores == nil {
+		return true
+	}
 	if q.folds >= maxFoldsPerTick {
 		return false
 	}
@@ -1570,7 +1597,6 @@ func (q *Queue) foldPod(ctx context.Context, v *view, p *corev1.Pod, idx int) bo
 	}
 	if st == nil {
 		// A namespace without a Project has no store to fold into.
-		m.foldedPod[p.UID] = true
 		return true
 	}
 	if m.outLoad != "" {
@@ -1587,11 +1613,10 @@ func (q *Queue) foldPod(ctx context.Context, v *view, p *corev1.Pod, idx int) bo
 		}
 		m.outIndex = ""
 	}
-	if err := q.fold(ctx, st, m.out, idx, cs, p.Annotations[c4v1.AnnotationOutputProvenance]); err != nil {
+	if err := q.fold(ctx, st, m.out, idx, cs, record); err != nil {
 		q.Log.Error(err, "fold", "job", v.key, "unit", idx)
 		return false
 	}
-	m.foldedPod[p.UID] = true
 	return true
 }
 

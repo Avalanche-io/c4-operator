@@ -142,6 +142,12 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		out["work"] = w
 	}
 	list := make([]map[string]any, 0, n)
+	reused := map[int]bool{}
+	if idx, err := order.DecodeSet(rec.job.Status.Reused); err == nil {
+		for _, i := range idx {
+			reused[i] = true
+		}
+	}
 	lockedBy := map[int]map[string]any{}
 	progress := map[string]any{}
 	for i, u := range plan.Units {
@@ -156,6 +162,10 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		}
 		if u.Gate != "" {
 			e["gate"] = u.Gate
+		}
+		if reused[i] && st == "succeeded" {
+			// a mark, not a state: committed green with the reuse mark
+			e["reused"] = true
 		}
 		if rec.driver != nil {
 			e["kind"] = class.KindOf(rec.driver, u)

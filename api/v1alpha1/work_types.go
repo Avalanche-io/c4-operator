@@ -350,6 +350,11 @@ type WorkJobStatus struct {
 	// Measure is the latest reading of the job's measure of done.
 	// +optional
 	Measure *WorkMeasure `json:"measure,omitempty"`
+	// Reused is the set of succeeded units that ran nothing: an earlier
+	// run of the same computation (process and input views), exact and
+	// verified, gave their output.
+	// +optional
+	Reused string `json:"reused,omitempty"`
 	// Spend is what the job's units cost so far, split between
 	// procedural and model units (LLM-OR-PROCEDURE 6.2).
 	// +optional
@@ -767,6 +772,10 @@ type UnitCounts struct {
 	// they claim.
 	// +optional
 	Locked int32 `json:"locked,omitempty"`
+	// Reused counts succeeded units whose output an earlier run gave
+	// (also counted in Succeeded).
+	// +optional
+	Reused int32 `json:"reused,omitempty"`
 	// Waits counts wait units waiting for their decision.
 	Waits     int32 `json:"waits,omitempty"`
 	Queued    int32 `json:"queued,omitempty"`
