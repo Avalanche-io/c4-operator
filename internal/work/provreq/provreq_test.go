@@ -111,7 +111,9 @@ func TestProvisioningRequestRounds(t *testing.T) {
 	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Date(2026, 10, 19, 9, 0, 0, 0, time.UTC)
+	// The fake clock starts at the real time: the requests carry real
+	// creation timestamps, which the backoff compares against.
+	now := time.Now().UTC().Truncate(time.Second)
 	a := &Actuator{Client: k8s, Log: logr.Discard(), Namespace: ns, Now: func() time.Time { return now }}
 	lbl := map[string]string{"pool": ns + "-spot"}
 	pool := &c4v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: ns + "-spot"}, Spec: c4v1.PoolSpec{NodeSelector: lbl, SlotsPerNode: 4,
