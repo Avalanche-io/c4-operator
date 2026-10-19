@@ -156,6 +156,26 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 			e["preflight"] = queue.PreflightOf(p)
 		} else if p != nil {
 			e["node"] = p.Spec.NodeName
+			sp, safe := s.Safepoints.Get(p.Namespace, p.Name)
+			if safe {
+				x := map[string]any{"seq": sp.Seq, "at": sp.At}
+				if sp.Every > 0 {
+					x["everySeconds"] = math.Round(sp.Every.Seconds())
+				}
+				e["safepoint"] = x
+			}
+			if reason := p.Annotations[c4v1.AnnotationYield]; reason != "" {
+				// A soft stop: the unit stops at its next safe point, or at
+				// the deadline.
+				x := map[string]any{"reason": reason}
+				if by, err := time.Parse(time.RFC3339, p.Annotations[c4v1.AnnotationYieldBy]); err == nil {
+					x["by"] = by.UTC()
+				}
+				if next := sp.Next(); safe && !next.IsZero() {
+					x["nextSafepoint"] = next.UTC()
+				}
+				e["stopping"] = x
+			}
 			if f, ok := m.metrics.nodes[p.Spec.NodeName].first("c4_task_progress", "namespace", p.Namespace, "pod", p.Name); ok {
 				// the unit's own progress line (.c4/progress), read by its node
 				progress[strconv.Itoa(i)] = map[string]any{"fraction": round3(math.Min(0.99, f)), "measured": true}

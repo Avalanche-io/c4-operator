@@ -80,10 +80,12 @@ var (
 	NodeRecords      = counter("c4_node_task_records_total", "Task records made at capture, by result (signed, error).", "project", "result")
 	NodeMaterialized = counter("c4_node_materialized_bytes_total",
 		"Bytes of the views mounted into pods (each mount counts its view's full size). Less what the store sent, it is the bytes the tiers avoided.", "project")
-	NodeEvictions    = counter("c4_node_evictions_total", "Evicted objects and layers.", "kind")
-	NodeHashedBytes  = counter("c4_node_hashed_bytes_total", "Bytes hashed by the node, by reason (capture, verify-fill). The read path hashes nothing.", "reason")
-	NodePrewarm      = counter("c4_node_prewarm_total", "Views pre-warmed for capacity requests.", "result")
-	NodeTaskProgress = gauge("c4_task_progress", "Progress a running unit reports in .c4/progress (0 to 1).", "namespace", "pod")
+	NodeEvictions         = counter("c4_node_evictions_total", "Evicted objects and layers.", "kind")
+	NodeHashedBytes       = counter("c4_node_hashed_bytes_total", "Bytes hashed by the node, by reason (capture, verify-fill). The read path hashes nothing.", "reason")
+	NodePrewarm           = counter("c4_node_prewarm_total", "Views pre-warmed for capacity requests.", "result")
+	NodeTaskProgress      = gauge("c4_task_progress", "Progress a running unit reports in .c4/progress (0 to 1).", "namespace", "pod")
+	NodeTaskSafepoint     = gauge("c4_task_safepoint_seq", "The number of the last safe point a running unit announced in .c4/safepoint.", "namespace", "pod")
+	NodeTaskSafepointTime = gauge("c4_task_safepoint_time_seconds", "When a running unit announced its last safe point (Unix seconds).", "namespace", "pod")
 )
 
 // Handler serves the registry.

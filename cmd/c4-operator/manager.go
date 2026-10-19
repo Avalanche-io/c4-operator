@@ -172,7 +172,7 @@ func runManager(args []string) error {
 			// Units' reported progress, filled by the HUD's scrape of the
 			// node daemons (without the HUD, units are estimated from
 			// elapsed time alone).
-			Progress: &queue.ProgressCache{}}
+			Progress: &queue.ProgressCache{}, Safepoints: &queue.SafepointCache{}}
 		if err := mgr.Add(q); err != nil {
 			return err
 		}
@@ -227,6 +227,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		srv.Queue = q
 		srv.DryRun = hudserver.QueueDryRun(q)
 		srv.Progress = q.Progress
+		srv.Safepoints = q.Safepoints
 	}
 	if dev != "" {
 		srv.DevViewers, err = parseViewers(dev)

@@ -33,9 +33,10 @@ func ReadProgress(upper string) (float64, bool) {
 	return min(1, max(0, v)), true
 }
 
-// RunProgress publishes the progress every running unit reports, as the
-// c4_task_progress gauge by namespace and pod, until ctx ends. The HUD
-// reads it from the node's metrics.
+// RunProgress publishes the progress and the last safe point every running
+// unit reports, as the c4_task_progress and c4_task_safepoint_* gauges by
+// namespace and pod, until ctx ends. The HUD reads them from the node's
+// metrics and passes them to the queue.
 func (d *Daemon) RunProgress(ctx context.Context, every time.Duration) {
 	if every <= 0 {
 		every = 2 * time.Second
@@ -60,18 +61,59 @@ func (d *Daemon) progressOnce(shown map[[2]string]bool) map[[2]string]bool {
 			continue
 		}
 		upper, _ := d.volumeDirs(v.Partition, v.ID)
-		f, ok := ReadProgress(upper)
-		if !ok {
-			continue
-		}
 		k := [2]string{v.Namespace, v.Pod}
-		metrics.NodeTaskProgress.WithLabelValues(k[0], k[1]).Set(f)
-		now[k] = true
+		if f, ok := ReadProgress(upper); ok {
+			metrics.NodeTaskProgress.WithLabelValues(k[0], k[1]).Set(f)
+			now[k] = true
+		}
+		if sp, ok := ReadSafepoint(upper); ok {
+			metrics.NodeTaskSafepoint.WithLabelValues(k[0], k[1]).Set(float64(sp.Seq))
+			metrics.NodeTaskSafepointTime.WithLabelValues(k[0], k[1]).Set(float64(sp.At.UnixMilli()) / 1000)
+			now[k] = true
+		}
 	}
 	for k := range shown {
 		if !now[k] {
 			metrics.NodeTaskProgress.DeleteLabelValues(k[0], k[1])
+			metrics.NodeTaskSafepoint.DeleteLabelValues(k[0], k[1])
+			metrics.NodeTaskSafepointTime.DeleteLabelValues(k[0], k[1])
 		}
 	}
 	return now
+}
+
+// Safepoint is the last safe point a unit announced (c4-unit safepoint):
+// its number and when.
+type Safepoint struct {
+	Seq int
+	At  time.Time
+}
+
+// ReadSafepoint reads a running unit's .c4/safepoint ("seq N", "at TIME"
+// lines) at the root of its writable volume's upper directory. ok is false
+// when the unit announced none.
+func ReadSafepoint(upper string) (Safepoint, bool) {
+	f, err := os.Open(filepath.Join(upper, ".c4", "safepoint"))
+	if err != nil {
+		return Safepoint{}, false
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, 4096))
+	if err != nil {
+		return Safepoint{}, false
+	}
+	var sp Safepoint
+	for _, l := range strings.Split(string(b), "\n") {
+		k, v, _ := strings.Cut(strings.TrimSpace(l), " ")
+		switch k {
+		case "seq":
+			sp.Seq, _ = strconv.Atoi(v)
+		case "at":
+			sp.At, _ = time.Parse(time.RFC3339Nano, v)
+		}
+	}
+	if sp.Seq <= 0 || sp.At.IsZero() {
+		return Safepoint{}, false
+	}
+	return sp, true
 }

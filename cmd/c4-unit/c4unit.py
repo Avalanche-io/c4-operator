@@ -5,6 +5,9 @@
     c4unit.preview("/show/render/sm0140.1024.exr", 1024)
     if c4unit.yield_requested():
         save_checkpoint(c4unit.output()); raise SystemExit(0)
+    # at each safe point (a frame done, a checkpoint saved, a turn ended):
+    if c4unit.safepoint(checkpoint="step-4000"):
+        raise SystemExit(0)          # the farm asked the unit to stop here
     start = c4unit.resume_dir()      # None on a first attempt
 
 Every C4 job image installs this module and the c4-unit binary it calls.
@@ -32,6 +35,17 @@ def preview(image, frame, width=960):
 def yield_requested():
     """True when the farm has asked this unit to stop at its next checkpoint."""
     return _run("yield-requested", check=False).returncode == 0
+
+
+def safepoint(checkpoint=None):
+    """Announce a safe point, a moment the unit could stop and lose nothing
+    it wants kept. True when the farm has asked the unit to stop: exit
+    there, and the next attempt resumes from what it wrote."""
+    args = ["safepoint"] + (["--checkpoint", checkpoint] if checkpoint else [])
+    r = _run(*args, check=False)
+    if r.returncode not in (0, 10):
+        raise subprocess.CalledProcessError(r.returncode, [_BIN, *args], r.stdout, r.stderr)
+    return r.returncode == 10
 
 
 def output():

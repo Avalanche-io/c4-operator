@@ -22,8 +22,14 @@ const (
 	// AnnotationAllowNodes on a WorkJob lists nodes (comma-separated) to
 	// take off the job's automatic blacklist.
 	AnnotationAllowNodes = "c4.avalanche.io/allow-nodes"
-	// AnnotationYield asks a unit to stop at its next checkpoint boundary.
+	// AnnotationYield asks a unit to stop at its next safe point (a
+	// checkpoint, a frame or chunk boundary, the end of an agent turn): a
+	// soft stop. Its value is the reason.
 	AnnotationYield = "c4.avalanche.io/yield"
+	// AnnotationYieldBy is the soft stop's deadline (RFC 3339): a unit that
+	// has not stopped by then is stopped (the hard stop), losing what it
+	// did since its last safe point.
+	AnnotationYieldBy = "c4.avalanche.io/yield-by"
 	// AnnotationOutputCheckpoint on a unit pod that yielded names where the
 	// next attempt resumes, for classes whose state is not a captured view:
 	// an agent member's turn checkpoint ("<session>#<seq>:<head>"). Written

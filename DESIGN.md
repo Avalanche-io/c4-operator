@@ -1764,6 +1764,23 @@ through the tiers instead of from the store.
   slots to an urgent render and resumes from the step it saved.
 - Units that do not checkpoint (render frames) are stopped and run again;
   victims are chosen to lose the least work.
+- **Safe points** make the two directions meet. A unit announces each moment
+  it could stop and lose nothing it wants kept, whatever its class: the end
+  of an agent turn, a frame or chunk boundary, a training checkpoint, a CI
+  test file. `c4-unit safepoint [--checkpoint REF]` writes `.c4/safepoint`
+  (its number, the time, what was saved), the node daemon reports the last
+  one with the unit's progress, and the queue learns how often each unit
+  reaches them. If a soft stop is pending at that moment, the command says
+  `stop` (exit status 10) and the unit exits there; capture keeps what it
+  wrote and the next attempt resumes from it, as for a yield. The soft stop
+  is the yield annotation, with its reason, and `c4.avalanche.io/yield-by`,
+  its deadline; the hard stop at the deadline remains the fallback. A unit
+  that reports safe points is therefore stopped softly, not killed, and
+  what stopping it loses is the time since its last safe point, which the
+  scheduler uses to choose victims. The HUD shows each unit's last safe
+  point and cadence, and for a unit asked to stop, when its next safe point
+  is expected and its deadline. An agent's Claude Code session announces
+  one at each turn's end from a Stop hook.
 - A gang is preempted whole: the queue asks it to yield and suspends the
   wrapped object once it has checkpointed (section 10.17). Members are never
   evicted one by one.

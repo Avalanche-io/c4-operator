@@ -96,6 +96,10 @@ type Queue struct {
 	// Progress, when set, holds the progress running units report
 	// (progress.go); without it units are estimated from elapsed time.
 	Progress *ProgressCache
+	// Safepoints, when set, holds the safe points running units announce
+	// (safepoint.go), filled like Progress: a unit that reports them may be
+	// stopped softly, at its next one.
+	Safepoints *SafepointCache
 	// policies are the projects' deadline policies by project and class.
 	policies map[string]map[string]forecast.Policy
 	// Last decisions, for the HUD, and each job's deadline policy then
@@ -314,6 +318,8 @@ type view struct {
 	// sources are the ways to get its inputs to pools at other sites
 	// (placement.go), by pool.
 	sources map[string][]sched.Source
+	// safe is each running unit's last safe point (safepoint.go).
+	safe map[int]Safepoint
 }
 
 type runInfo struct {
@@ -404,6 +410,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	}
 
 	q.placeJobs(ctx, views, poolInfo)
+	q.noteSafepoints(views)
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
 	cfg := q.Cfg
 	if cfg.Loc == nil {
@@ -776,8 +783,14 @@ func schedJob(v *view, free int) sched.Job {
 	}
 	for idx, r := range v.running {
 		j.Running[r.pool] += r.slots
-		j.RunningUnits = append(j.RunningUnits, sched.RunningUnit{ID: unitID(v.key, idx), Pool: r.pool,
-			Slots: r.slots, Started: r.started, Preemptions: 0})
+		ru := sched.RunningUnit{ID: unitID(v.key, idx), Pool: r.pool, Slots: r.slots, Started: r.started, Preemptions: 0}
+		// What stopping a unit now loses is the work since its last safe
+		// point; a unit that reports them can be asked to stop at the next.
+		if sp, ok := v.safe[idx]; ok {
+			ru.LastCheckpoint = sp.At
+			j.Checkpoints = true
+		}
+		j.RunningUnits = append(j.RunningUnits, ru)
 	}
 	sort.Slice(j.RunningUnits, func(a, b int) bool { return j.RunningUnits[a].ID < j.RunningUnits[b].ID })
 	return j
@@ -839,10 +852,14 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			continue
 		}
 		v.mem.preemptions[idx]++
-		if pr.Yield && v.driver.Checkpoints() {
-			// Ask the unit to stop at its next checkpoint: it sees the
-			// annotation through its downward API volume, saves, and
-			// exits; capture keeps what it saved.
+		_, safe := q.safepointOf(v, idx)
+		if pr.Yield && (v.driver.Checkpoints() || safe) {
+			// A soft stop: ask the unit to stop at its next safe point (a
+			// checkpoint, a frame or chunk boundary, the end of a turn).
+			// It sees the request through its downward API volume, with
+			// the reason and the deadline; c4-unit safepoint tells it to
+			// stop there, capture keeps what it saved, and after the
+			// deadline the hard stop below ends it anyway.
 			if _, asked := v.mem.yieldAsked[idx]; asked {
 				continue
 			}
@@ -851,6 +868,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 				pod.Annotations = map[string]string{}
 			}
 			pod.Annotations[c4v1.AnnotationYield] = string(pr.Reason)
+			pod.Annotations[c4v1.AnnotationYieldBy] = now.Add(yieldGrace).UTC().Format(time.RFC3339)
 			if err := q.Client.Patch(ctx, pod, patch); err != nil {
 				q.Log.Error(err, "ask to yield", "job", key, "unit", idx)
 				continue
@@ -872,10 +890,10 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		q.recordDecision(ctx, v, idx, "stop", string(pr.Reason), pr.For, now)
 		q.Log.Info("preempted", "job", key, "unit", idx, "reason", pr.Reason, "for", pr.For)
 	}
-	// A unit asked to yield that has not within ten minutes is stopped.
+	// A unit asked to yield that has not by its deadline is stopped.
 	for _, v := range views {
 		for idx, at := range v.mem.yieldAsked {
-			if now.Sub(at) < 10*time.Minute {
+			if now.Sub(at) < yieldGrace {
 				continue
 			}
 			if pod := v.pods[idx]; pod != nil {
@@ -884,16 +902,18 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			delete(v.mem.yieldAsked, idx)
 		}
 	}
-	// Hold-stop: stop every running unit of the job. A unit of a class
-	// that checkpoints was asked to yield above and is left to do so (the
-	// ten-minute rule still stops one that does not), so its work since its
-	// last checkpoint is kept (DESIGN 10.13).
+	// Hold-stop: stop every running unit of the job. A unit asked above to
+	// stop softly (its class checkpoints, or it announces safe points) is
+	// left to stop at its next safe point (the deadline still stops one
+	// that does not), so its work since its last safe point is kept
+	// (DESIGN 10.13).
 	for _, v := range views {
 		if !v.job.Spec.Nudge.HoldStop {
 			continue
 		}
 		for idx, pod := range v.pods {
-			if _, asked := v.mem.yieldAsked[idx]; asked && v.driver.Checkpoints() {
+			_, safe := v.safe[idx]
+			if _, asked := v.mem.yieldAsked[idx]; asked && (v.driver.Checkpoints() || safe) {
 				continue
 			}
 			if v.mem.attempts[idx] > 0 {
@@ -953,7 +973,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		{Name: "C4_JOB", Value: j.Name}, {Name: "C4_UNIT", Value: strconv.Itoa(idx)},
 		{Name: "C4_ATTEMPT", Value: strconv.Itoa(attempt)}, {Name: "C4_UNIT_LABEL", Value: u.Label},
 	}, u.Env...)
-	if v.driver.Checkpoints() {
+	// Every unit sees its pod's annotations, so any unit that announces
+	// safe points (c4-unit safepoint) sees a soft stop.
+	{
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "c4-podinfo", VolumeSource: corev1.VolumeSource{
 			DownwardAPI: &corev1.DownwardAPIVolumeSource{Items: []corev1.DownwardAPIVolumeFile{
 				{Path: "annotations", FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.annotations"}}}}}})

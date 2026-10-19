@@ -122,3 +122,34 @@ func TestOutputFromMounts(t *testing.T) {
 		t.Fatalf("unescape %q", got)
 	}
 }
+
+// Each safe point is numbered and timed in .c4/safepoint; the command says
+// continue until the farm asks for a soft stop, then stop, with its reason
+// and deadline, and exit status 10.
+func TestSafepoint(t *testing.T) {
+	out := t.TempDir()
+	info := filepath.Join(t.TempDir(), "annotations")
+	os.WriteFile(info, []byte("c4.avalanche.io/attempt=\"1\"\n"), 0o644)
+	e := vars(map[string]string{"C4_OUTPUT": out, "C4_PODINFO": info})
+	var buf bytes.Buffer
+	if c, err := run([]string{"safepoint"}, &buf, e); c != 0 || err != nil || buf.String() != "continue\n" {
+		t.Fatalf("first safe point: %d %v %q", c, err, buf.String())
+	}
+	buf.Reset()
+	if c, _ := run([]string{"safepoint", "--checkpoint", "step-4000"}, &buf, e); c != 0 {
+		t.Fatalf("second safe point: %d", c)
+	}
+	b, _ := os.ReadFile(filepath.Join(out, ".c4", "safepoint"))
+	if !strings.HasPrefix(string(b), "seq 2\nat ") || !strings.HasSuffix(string(b), "checkpoint step-4000\n") {
+		t.Fatalf("safepoint file %q", b)
+	}
+	os.WriteFile(info, []byte("c4.avalanche.io/yield=\"reclaim-nominal\"\nc4.avalanche.io/yield-by=\"2026-10-19T20:10:00Z\"\n"), 0o644)
+	buf.Reset()
+	c, err := run([]string{"safepoint"}, &buf, e)
+	if c != stopCode || err != nil || buf.String() != "stop: reclaim-nominal (by 2026-10-19T20:10:00Z)\n" {
+		t.Fatalf("under a soft stop: %d %v %q", c, err, buf.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, ".c4", "safepoint")); !strings.HasPrefix(string(b), "seq 3\n") {
+		t.Fatalf("the stopping safe point is recorded too: %q", b)
+	}
+}

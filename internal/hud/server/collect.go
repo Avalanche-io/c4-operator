@@ -19,6 +19,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
 // model is the farm as of one collection: everything a snapshot needs,
@@ -124,6 +125,7 @@ func (s *Server) collect(ctx context.Context) error {
 		if s.Progress != nil {
 			s.Progress.Set(m.metrics.at, progressReadings(m.metrics))
 		}
+		s.Safepoints.Observe(m.metrics.at, safepointReadings(m.metrics))
 	} else {
 		m.metrics = prev.metrics
 	}
@@ -484,6 +486,33 @@ func progressReadings(fm farmMetrics) map[[2]string]float64 {
 				continue
 			}
 			out[[2]string{x.labels["namespace"], x.labels["pod"]}] = x.value
+		}
+	}
+	return out
+}
+
+// safepointReadings is every unit's last safe point in a scrape, by
+// namespace and pod (queue.SafepointCache).
+func safepointReadings(fm farmMetrics) map[[2]string]queue.Safepoint {
+	out := map[[2]string]queue.Safepoint{}
+	for _, ss := range fm.nodes {
+		for _, x := range ss {
+			k := [2]string{x.labels["namespace"], x.labels["pod"]}
+			switch x.name {
+			case "c4_task_safepoint_seq":
+				sp := out[k]
+				sp.Seq = int(x.value)
+				out[k] = sp
+			case "c4_task_safepoint_time_seconds":
+				sp := out[k]
+				sp.At = time.UnixMilli(int64(x.value * 1000)).UTC()
+				out[k] = sp
+			}
+		}
+	}
+	for k, sp := range out {
+		if sp.Seq <= 0 || sp.At.IsZero() {
+			delete(out, k)
 		}
 	}
 	return out

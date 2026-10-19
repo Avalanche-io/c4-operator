@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestReadProgress(t *testing.T) {
@@ -24,5 +25,22 @@ func TestReadProgress(t *testing.T) {
 		if _, ok := ReadProgress(upper); ok {
 			t.Errorf("%q read as progress", bad)
 		}
+	}
+}
+
+func TestReadSafepoint(t *testing.T) {
+	upper := t.TempDir()
+	if _, ok := ReadSafepoint(upper); ok {
+		t.Fatal("a safe point without a file")
+	}
+	os.MkdirAll(filepath.Join(upper, ".c4"), 0o755)
+	os.WriteFile(filepath.Join(upper, ".c4", "safepoint"), []byte("seq 7\nat 2026-10-19T20:01:02.5Z\ncheckpoint step-700\n"), 0o644)
+	sp, ok := ReadSafepoint(upper)
+	if !ok || sp.Seq != 7 || !sp.At.Equal(time.Date(2026, 10, 19, 20, 1, 2, 5e8, time.UTC)) {
+		t.Fatalf("%+v %v", sp, ok)
+	}
+	os.WriteFile(filepath.Join(upper, ".c4", "safepoint"), []byte("garbage\n"), 0o644)
+	if _, ok := ReadSafepoint(upper); ok {
+		t.Fatal("a malformed safe point read")
 	}
 }

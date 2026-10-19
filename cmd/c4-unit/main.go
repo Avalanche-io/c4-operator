@@ -5,11 +5,26 @@
 //	c4-unit progress 0.4            write the unit's progress (0 to 1)
 //	c4-unit preview IMAGE FRAME     write preview/FRAME.png for the HUD's player
 //	c4-unit yield-requested         exit 0 if the farm asked this unit to yield
+//	c4-unit safepoint [--checkpoint REF]
+//	                                announce a safe point; exit 10 (and print
+//	                                "stop") if the farm asked the unit to stop
 //	c4-unit resume-dir              print the writable mount if this attempt resumes
 //	c4-unit output                  print the writable mount
 //
 // The writable mount is $C4_OUTPUT, else --dir, else the one writable C4
 // view found in the container's mounts.
+//
+// A safe point is a moment the unit could stop and lose nothing it wants
+// kept: the end of an agent turn, a frame or chunk boundary, a training
+// checkpoint. Announcing each one tells the farm how often the unit
+// reaches them (so it can choose which unit to stop and say when it will
+// stop), and is where a soft stop the farm asked for takes effect:
+//
+//	c4-unit safepoint --checkpoint step-4000; [ $? -eq 10 ] && exit 0
+//
+// The farm's soft stop (the c4.avalanche.io/yield annotation, with its
+// deadline in c4.avalanche.io/yield-by) is seen through the pod's downward
+// API file, $C4_PODINFO; after the deadline the unit is stopped anyway.
 package main
 
 import (
@@ -26,9 +41,15 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
-const yieldAnnotation = "c4.avalanche.io/yield"
+const (
+	yieldAnnotation   = "c4.avalanche.io/yield"
+	yieldByAnnotation = "c4.avalanche.io/yield-by"
+	// stopCode is safepoint's exit status when the unit should stop.
+	stopCode = 10
+)
 
 func main() {
 	code, err := run(os.Args[1:], os.Stdout, env{})
@@ -43,6 +64,7 @@ type env struct {
 	getenv    func(string) string
 	mountinfo string // path of the mount table
 	oiiotool  string // the converter for EXR and TIFF
+	now       func() time.Time
 }
 
 func (e env) get(k string) string {
@@ -56,8 +78,9 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	fs := flag.NewFlagSet("c4-unit", flag.ContinueOnError)
 	dir := fs.String("dir", "", "the unit's writable mount (default $C4_OUTPUT, or found from the mounts)")
 	width := fs.Int("width", 960, "preview width in pixels")
+	checkpoint := fs.String("checkpoint", "", "with safepoint: what the unit saved there (a step, a path, a session turn), for the record")
 	if len(args) == 0 {
-		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | resume-dir | output")
+		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | resume-dir | output")
 	}
 	cmd := args[0]
 	if err := fs.Parse(args[1:]); err != nil {
@@ -91,6 +114,24 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 			return 1, err
 		}
 		return code(preview(e, pos[0], filepath.Join(out, "preview", strconv.Itoa(frame)+".png"), *width))
+	case "safepoint":
+		out, err := output(e, *dir)
+		if err != nil {
+			return 1, err
+		}
+		if err := safepoint(e, filepath.Join(out, ".c4", "safepoint"), *checkpoint); err != nil {
+			return 1, err
+		}
+		stop, err := softStop(e)
+		if err != nil {
+			return 1, err
+		}
+		if stop.asked {
+			fmt.Fprintln(stdout, stop.String())
+			return stopCode, nil
+		}
+		fmt.Fprintln(stdout, "continue")
+		return 0, nil
 	case "yield-requested":
 		asked, err := yieldRequested(e)
 		if err != nil {
@@ -118,7 +159,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		fmt.Fprintln(stdout, out)
 		return 0, nil
 	}
-	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, resume-dir or output", cmd)
+	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, resume-dir or output", cmd)
 }
 
 func code(err error) (int, error) {
@@ -195,22 +236,83 @@ func unescape(s string) string {
 	return b.String()
 }
 
-// yieldRequested reads the pod's annotations from the downward API file.
+// yieldRequested reports whether the farm asked the unit to stop.
 func yieldRequested(e env) (bool, error) {
+	s, err := softStop(e)
+	return s.asked, err
+}
+
+// stopRequest is the farm's soft stop, from the pod's annotations.
+type stopRequest struct {
+	asked      bool
+	reason, by string
+}
+
+func (s stopRequest) String() string {
+	out := "stop"
+	if s.reason != "" {
+		out += ": " + s.reason
+	}
+	if s.by != "" {
+		out += " (by " + s.by + ")"
+	}
+	return out
+}
+
+// softStop reads the pod's annotations from the downward API file
+// (key="value" lines).
+func softStop(e env) (stopRequest, error) {
 	p := e.get("C4_PODINFO")
 	if p == "" {
-		return false, nil // only checkpointing (ml) units are asked to yield
+		return stopRequest{}, nil
 	}
 	data, err := os.ReadFile(p)
 	if err != nil {
-		return false, err
+		return stopRequest{}, err
 	}
+	var s stopRequest
 	for _, l := range strings.Split(string(data), "\n") {
-		if k, _, ok := strings.Cut(l, "="); ok && strings.TrimSpace(k) == yieldAnnotation {
-			return true, nil
+		k, v, ok := strings.Cut(l, "=")
+		if !ok {
+			continue
+		}
+		if u, err := strconv.Unquote(strings.TrimSpace(v)); err == nil {
+			v = u
+		}
+		switch strings.TrimSpace(k) {
+		case yieldAnnotation:
+			s.asked, s.reason = true, v
+		case yieldByAnnotation:
+			s.by = v
 		}
 	}
-	return false, nil
+	return s, nil
+}
+
+// safepoint records a safe point in path: its sequence number (one past
+// the last), the time, and what was saved there. The node daemon reports
+// it to the farm.
+func safepoint(e env, path, checkpoint string) error {
+	seq := 1
+	if b, err := os.ReadFile(path); err == nil {
+		for _, l := range strings.Split(string(b), "\n") {
+			if v, ok := strings.CutPrefix(l, "seq "); ok {
+				if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil {
+					seq = n + 1
+				}
+			}
+		}
+	}
+	at := time.Now()
+	if e.now != nil {
+		at = e.now()
+	}
+	var b strings.Builder
+	fmt.Fprintf(&b, "seq %d\nat %s\n", seq, at.UTC().Format(time.RFC3339Nano))
+	if checkpoint != "" {
+		fmt.Fprintf(&b, "checkpoint %s\n", strings.ReplaceAll(checkpoint, "\n", " "))
+	}
+	return writeAtomic(path, []byte(b.String()))
 }
 
 // preview writes a PNG preview of an image. PNG and JPEG are converted
