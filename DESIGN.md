@@ -1555,16 +1555,30 @@ and a sweep planner that spawns trials are all generators.
   - **Status.** `verdicts` lists the most recent verdicts with their
     counts. `reviews` holds each unit's last non-pass outcome, its passes
     and its standing override.
-  - **Expected rework is priced.** Each review key learns its rework rate
-    from the verdicts its units wrote in the job, like a generator key's
-    fan-out: units reworked over units judged, shrunk toward a prior (the
-    review unit's `reworkRate` param, else the job's) with a pseudo-count
-    of 2. A review that has not run yet adds, for each unit it will judge,
-    the passes it may still send back (r, r², up to maxPasses less the
-    unit's passes so far) as tentative work, and its own rerun with the
-    chance that anything is reworked. The same chains lengthen the critical
-    path. A key with no verdicts and no prior adds nothing (a document
-    marks a review in advance with `params.review`).
+  - **Expected rework is priced from the start.** A review is a unit its
+    document marks (`params.review`), or one whose key has written
+    verdicts in the project. Its rework rate is learned per project, class
+    and review key across jobs (saved with the project's calibrations):
+    units reworked over units judged, shrunk toward a prior (the review
+    unit's `reworkRate` param, else the job's, else 0.3) with a
+    pseudo-count of 2, so the first job of a kind carries rework in its
+    p50 and p90 before any verdict. A review that has not run yet adds,
+    for each unit it will judge, the passes it may still send back (r, r²,
+    up to maxPasses less the unit's passes so far) as tentative work, and
+    its own rerun with the chance that anything is reworked; a review that
+    has run judges again only what it sent back. The same chains lengthen
+    the critical path.
+  - **A rework costs what reruns cost.** A rework resumes from the unit's
+    last output, so it is priced as a resumed unit: the share of a first
+    pass that reruns of its key take, learned per project, class and key
+    (a rerun's run time over the unit's first pass), shrunk toward one half.
+    Expected reworks, reworked units waiting to run and reviews running
+    again are all priced that way, and a unit's key learns only from its
+    first pass. On agent-jobs' library-port run, replayed through the
+    queue (TestReplayLibraryPort), the p90's mean error from five minutes in
+    fell from 16 minutes to 7, its shortfall before the first verdict from
+    20 minutes to 11, and its jump at that verdict from 89 minutes above
+    the finish to 18.
 - **Waits** (PRIMITIVES Q6; the HUD word is "waits for"). A wait is a
   unit served by something other than a slot. A document's unit carries
   `wait: {server, ask?, expect?, choices?}`, and `server` says what serves

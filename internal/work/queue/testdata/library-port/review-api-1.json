@@ -1,0 +1,27 @@
+{
+ "version": 1,
+ "verdict": "rework",
+ "items": [
+  {
+   "units": [
+    "port/bisect"
+   ],
+   "do": "rework",
+   "why": "BisectRightRange/BisectLeftRange (and so InsortRightRange/InsortLeftRange) panic on bad input: an explicit panic for lo "
+  },
+  {
+   "units": [
+    "port/colorsys"
+   ],
+   "do": "rework",
+   "why": "RGBToHLS, RGBToHSV (via div/hue) and HSVToRGB panic on bad input: division by zero for out-of-range components, and infi"
+  },
+  {
+   "units": [
+    "port/fnmatch"
+   ],
+   "do": "rework",
+   "why": "The exported names stutter (fnmatch.Fnmatch, fnmatch.FnmatchCase), and the argument order (name, pat) is the reverse of "
+  }
+ ]
+}

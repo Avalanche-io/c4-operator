@@ -239,7 +239,8 @@ func TestVerdictRefused(t *testing.T) {
 }
 
 // A review key's rework rate, learned from its verdicts, prices the
-// passes its pending review may still send back, and its own rerun.
+// passes its pending review may still send back, and its own rerun, each
+// at what a rerun of its key costs (half a pass before history).
 func TestExpectedRework(t *testing.T) {
 	cfg := estimate.DefaultConfig()
 	cfg.Default = estimate.Prior{Mean: 100, SD: 10}
@@ -251,37 +252,75 @@ func TestExpectedRework(t *testing.T) {
 	}}
 	m := newMem()
 	m.plan = plan
-	v := &view{job: &c4v1.WorkJob{}, mem: m}
-	if extra, _ := expectedRework(v, e); len(extra) != 0 {
-		t.Fatalf("no verdicts, no prior: %+v", extra)
+	q := &Queue{}
+	v := &view{job: &c4v1.WorkJob{Spec: c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"reworkRate": "0"}}}, mem: m, project: "p"}
+	if extra, _ := q.expectedRework(v, e); len(extra) != 0 {
+		t.Fatalf("no verdicts, not marked: %+v", extra)
 	}
-	// The first pass reworked f1 and passed f2: r = (1+0)/(2+2) = 0.25.
+	// The first pass reworked f1 and passed f2: r = (1+0)/(2+2) = 0.25
+	// with the job's prior of 0.
 	m.verdicts = []verdictRec{{WorkVerdict: c4v1.WorkVerdict{Unit: 2, Reworked: 1, Passed: 1}}}
 	m.reviews = map[int]*c4v1.WorkReview{0: {Do: "rework", By: 2, Passes: 1}}
 	m.succeeded[1] = true
-	extra, path := expectedRework(v, e)
-	var exists []float64
+	extra, path := q.expectedRework(v, e)
+	var exists, done []float64
 	for _, x := range extra {
-		exists = append(exists, x.Exists)
+		exists, done = append(exists, x.Exists), append(done, x.Done)
 	}
-	// f1 has one pass left (r), f2 two (r, r²), and qc reruns if either is
-	// sent back: 1 - 0.75².
-	want := []float64{0.25, 0.25, 0.0625, 1 - 0.75*0.75}
+	// f1 has one pass left (r); qc, having passed f2, judges only f1 again,
+	// and reruns if it sends it back: r. Each is half a pass: 50 of 100
+	// already done.
+	want := []float64{0.25, 0.25}
 	if len(exists) != len(want) {
 		t.Fatalf("extra %v", exists)
 	}
 	for i := range want {
-		if math.Abs(exists[i]-want[i]) > 1e-9 {
-			t.Fatalf("extra %v, want %v", exists, want)
+		if math.Abs(exists[i]-want[i]) > 1e-9 || done[i] != 50 {
+			t.Fatalf("extra %v done %v, want %v and 50", exists, done, want)
 		}
 	}
-	if got := path[2]; math.Abs(got-(31.25+43.75)) > 1e-6 {
-		t.Fatalf("critical path through qc +%v, want 75", got)
+	// Half passes: f1's 0.25x50, then qc's rerun 0.25x50.
+	if got := path[2]; math.Abs(got-25) > 1e-6 {
+		t.Fatalf("critical path through qc +%v, want 25", got)
 	}
-	// Before any verdict, a review its document marks, with a prior.
+	// Before any verdict, a review its document marks: its prior, else
+	// the default.
 	m.verdicts, m.reviews = nil, nil
 	plan.Units[2].Params = map[string]string{"review": "true", "reworkRate": "0.5"}
-	if extra, _ := expectedRework(v, e); len(extra) != 2+2+1 || extra[0].Exists != 0.5 || extra[4].Exists != 0.75 {
+	if extra, _ := q.expectedRework(v, e); len(extra) != 2+2+1 || extra[0].Exists != 0.5 || extra[4].Exists != 0.75 {
 		t.Fatalf("prior: %+v", extra)
+	}
+	plan.Units[2].Params = map[string]string{"review": "true"}
+	v.job.Spec.Params = nil
+	if extra, _ := q.expectedRework(v, e); len(extra) != 5 || math.Abs(extra[0].Exists-reworkDefault) > 1e-9 {
+		t.Fatalf("default: %+v", extra)
+	}
+}
+
+// The project's history carries a review key's rate and what its reruns
+// cost to the next job of the class, unmarked: qc reworked 3 of 4 before,
+// and frame reruns took a fifth of a pass.
+func TestReworkHistory(t *testing.T) {
+	cfg := estimate.DefaultConfig()
+	cfg.Default = estimate.Prior{Mean: 100, SD: 10}
+	e := estimate.New(cfg)
+	q := &Queue{}
+	q.noteVerdict("p", "render", "qc", 3, 4)
+	for range 4 {
+		q.noteRerun("p", "render", "frame", 0.2)
+	}
+	m := newMem()
+	m.plan = &class.Plan{Units: []class.Unit{{Index: 0, Key: "frame", Slots: 1}, {Index: 1, Key: "qc", Slots: 1, After: []int{0}}}}
+	v := &view{job: &c4v1.WorkJob{Spec: c4v1.WorkJobSpec{Class: "render"}}, mem: m, project: "p"}
+	extra, _ := q.expectedRework(v, e)
+	// r = (3 + 2x0.3)/(4 + 2) = 0.6; a frame rerun (4x0.2 + 2x0.5)/(4 + 2) = 0.3 of a pass.
+	if len(extra) != 3 || math.Abs(extra[0].Exists-0.6) > 1e-9 || math.Abs(extra[0].Done-70) > 1e-9 {
+		t.Fatalf("from history: %+v", extra)
+	}
+	// Saved with the calibrations and restored.
+	r := &Queue{}
+	r.restoreRework("p", q.savedRework("p"))
+	if got := r.reworkOf("p", "render", "qc"); got.Judged != 4 || got.Reworked != 3 || r.reworkFrac("p", "render", "frame") != q.reworkFrac("p", "render", "frame") {
+		t.Fatalf("restored %+v", got)
 	}
 }

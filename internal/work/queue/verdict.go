@@ -195,6 +195,10 @@ func (q *Queue) carryOut(ctx context.Context, v *view, idx int, p *corev1.Pod, i
 	}
 	rec.Record = q.recordVerdict(ctx, v, rec, acts, p, now)
 	m.verdicts = append(m.verdicts, rec)
+	if rec.Error == "" && idx < len(m.plan.Units) {
+		q.noteVerdict(v.project, v.job.Spec.Class, m.plan.Units[idx].Key, int(rec.Reworked),
+			int(rec.Passed+rec.Reworked+rec.Escalated+rec.Accepted))
+	}
 	q.Log.Info("verdict", "job", v.key, "unit", idx, "verdict", rec.Verdict, "passed", rec.Passed, "reworked", rec.Reworked,
 		"escalated", rec.Escalated, "accepted", rec.Accepted, "expanded", rec.Expanded, "error", rec.Error)
 	return true, rec.Error != "", rerun
@@ -562,27 +566,34 @@ func reviewStatus(m *jobMem) map[string]c4v1.WorkReview {
 }
 
 // Expected rework (PRIMITIVES Q5: the ETA prices rework before it
-// happens). Each review key learns its rework rate from the verdicts its
-// units wrote in this job, like a generator key's fan-out: the units
-// reworked over the units judged, shrunk toward a prior (the review unit's
-// reworkRate param from its document, else the job's, else none) with a
-// pseudo-count of reworkShrink. A review that has not run yet adds, for
-// each unit it will judge, the further passes it may send back: r, r²...
-// up to maxPasses less the unit's passes so far, each as tentative work
-// (estimate.Unit.Exists); and its own rerun, with the chance that it
-// reworks anything. The same chains lengthen the critical path. A key
-// with no verdicts and no prior adds nothing.
+// happens). A review is a unit its document marks (params.review), or one
+// whose key has written verdicts in the project (rework.go: history across
+// jobs, by class and key) or in this job. Its rework rate is the units its
+// key reworked over the units it judged, shrunk toward a prior (the
+// review unit's reworkRate param from its document, else the job's, else
+// reworkDefault) with a pseudo-count of reworkShrink, so p50 and p90 carry
+// rework from the start. A review that has not run yet adds, for each unit
+// it will judge, the further passes it may send back: r, r²... up to
+// maxPasses less the unit's passes so far (once it has judged, only for
+// the units it sent back), each as tentative work
+// (estimate.Unit.Exists) at what a rerun of that key costs (reworkFrac:
+// a rework resumes from the unit's last output, so it is priced as a
+// resumed unit); and its own rerun, with the chance that it reworks
+// anything. The same chains lengthen the critical path.
 const reworkShrink = 2.0
 
 // expectedRework is the tentative work a job's pending reviews may send
 // back, and how much each review lengthens the chain through it.
-func expectedRework(v *view, e *estimate.Estimator) ([]estimate.Unit, map[int]float64) {
+func (q *Queue) expectedRework(v *view, e *estimate.Estimator) ([]estimate.Unit, map[int]float64) {
 	m, plan := v.mem, v.mem.plan
+	class := v.job.Spec.Class
 	seen := map[string][2]float64{} // reworked, judged
+	ran := map[int]bool{}           // reviews that have judged
 	for _, x := range m.verdicts {
 		if x.Error != "" || int(x.Unit) >= len(plan.Units) {
 			continue
 		}
+		ran[int(x.Unit)] = true
 		k := plan.Units[x.Unit].Key
 		r := seen[k]
 		r[0] += float64(x.Reworked)
@@ -596,16 +607,21 @@ func expectedRework(v *view, e *estimate.Estimator) ([]estimate.Unit, map[int]fl
 			continue
 		}
 		obs, learned := seen[u.Key]
+		// The project's history includes this job's verdicts once they
+		// are carried out; the job's own count stands in when the history
+		// was lost (a restart before it was saved).
+		if h := q.reworkOf(v.project, class, u.Key); h.Judged >= obs[1] {
+			obs, learned = [2]float64{h.Reworked, h.Judged}, learned || h.Judged > 0
+		}
+		if !learned && u.Params["review"] != "true" {
+			continue
+		}
 		prior, err := strconv.ParseFloat(u.Params["reworkRate"], 64)
 		if err != nil {
 			prior, err = strconv.ParseFloat(v.job.Spec.Params["reworkRate"], 64)
 		}
-		hasPrior := err == nil && prior > 0
-		if !learned && !(hasPrior && u.Params["review"] == "true") {
-			continue
-		}
-		if !hasPrior {
-			prior = 0
+		if err != nil || prior < 0 {
+			prior = reworkDefault
 		}
 		r := min((obs[0]+reworkShrink*prior)/(obs[1]+reworkShrink), 0.95)
 		if r <= 0 {
@@ -618,24 +634,32 @@ func expectedRework(v *view, e *estimate.Estimator) ([]estimate.Unit, map[int]fl
 			}
 			ju := plan.Units[a]
 			passes := 0
-			if rv := m.reviews[a]; rv != nil {
+			rv := m.reviews[a]
+			if rv != nil {
 				passes = int(rv.Passes)
+			}
+			if ran[i] && (rv == nil || rv.By != int32(i) || rv.Do != "rework") {
+				// A review running again judges again what it sent back;
+				// what it passed or accepted stands.
+				continue
 			}
 			if passes >= defaultMaxPasses {
 				continue
 			}
 			p, chain := 1.0, 0.0
+			mean, frac := e.Predict(ju.Key, ju.Pos).Mean, q.reworkFrac(v.project, class, ju.Key)
 			for k := passes; k < defaultMaxPasses; k++ {
 				p *= r
-				extra = append(extra, estimate.Unit{Key: ju.Key, Pos: ju.Pos, Slots: ju.Slots, Exists: p})
-				chain += p * e.Predict(ju.Key, ju.Pos).Mean
+				extra = append(extra, estimate.Unit{Key: ju.Key, Pos: ju.Pos, Slots: ju.Slots, Exists: p, Done: max(0, 1-frac) * mean})
+				chain += p * frac * mean
 			}
 			longest = math.Max(longest, chain)
 			pNone *= 1 - r
 		}
 		if pAny := 1 - pNone; pAny > 0 {
-			extra = append(extra, estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots, Exists: pAny})
-			path[i] = longest + pAny*e.Predict(u.Key, u.Pos).Mean
+			mean, frac := e.Predict(u.Key, u.Pos).Mean, q.reworkFrac(v.project, class, u.Key)
+			extra = append(extra, estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots, Exists: pAny, Done: max(0, 1-frac) * mean})
+			path[i] = longest + pAny*frac*mean
 		}
 	}
 	return extra, path

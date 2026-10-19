@@ -1,0 +1,124 @@
+{
+ "version": 1,
+ "units": [
+  {
+   "name": "port/bisect",
+   "label": "port bisect",
+   "key": "porter",
+   "kind": "model",
+   "group": "ports",
+   "after": [
+    "scaffold"
+   ],
+   "work": 320,
+   "holds": [
+    "bisect"
+   ],
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   }
+  },
+  {
+   "name": "port/colorsys",
+   "label": "port colorsys",
+   "key": "porter",
+   "kind": "model",
+   "group": "ports",
+   "after": [
+    "scaffold"
+   ],
+   "work": 656,
+   "holds": [
+    "colorsys"
+   ],
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   }
+  },
+  {
+   "name": "port/fnmatch",
+   "label": "port fnmatch",
+   "key": "porter",
+   "kind": "model",
+   "group": "ports",
+   "after": [
+    "scaffold"
+   ],
+   "work": 732,
+   "holds": [
+    "fnmatch"
+   ],
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   }
+  },
+  {
+   "name": "port/shlex",
+   "label": "port shlex",
+   "key": "porter",
+   "kind": "model",
+   "group": "ports",
+   "after": [
+    "scaffold"
+   ],
+   "work": 1400,
+   "holds": [
+    "shlex"
+   ],
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   }
+  },
+  {
+   "name": "port/textwrap",
+   "label": "port textwrap",
+   "key": "porter",
+   "kind": "model",
+   "group": "ports",
+   "after": [
+    "scaffold"
+   ],
+   "work": 1944,
+   "holds": [
+    "textwrap"
+   ],
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   }
+  },
+  {
+   "name": "review/api",
+   "label": "review api",
+   "key": "reviewer",
+   "kind": "model",
+   "group": "review",
+   "after": [
+    "port/bisect",
+    "port/colorsys",
+    "port/fnmatch",
+    "port/shlex",
+    "port/textwrap"
+   ],
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   }
+  },
+  {
+   "name": "review/diff",
+   "label": "review diff",
+   "key": "reviewer",
+   "kind": "model",
+   "group": "review",
+   "after": [
+    "port/bisect",
+    "port/colorsys",
+    "port/fnmatch",
+    "port/shlex",
+    "port/textwrap"
+   ],
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   }
+  }
+ ]
+}

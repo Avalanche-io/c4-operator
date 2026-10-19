@@ -95,6 +95,8 @@ type Queue struct {
 	// durations are recent unit run times by project and class, the
 	// prior for work with no history of its own (classprior.go).
 	durations map[string]classDurations
+	// rework is each project's review and rerun history (rework.go).
+	rework map[string]map[string]*reworkStat
 	// profiles are the latest finished job's durations per project, shot,
 	// class and unit key (history.go).
 	profiles map[profileKey]*shotProfile
@@ -193,6 +195,9 @@ type jobMem struct {
 	spend               map[int]*unitSpend
 	spentPod            map[types.UID]bool
 	procBase, procHours float64
+	// firstMillis is each unit's first pass run time, to price its reruns
+	// (rework.go).
+	firstMillis map[int]int64
 	// substituted are the input substitutes its units read, by mount and
 	// site (substitute.go).
 	substituted map[string]c4v1.WorkInputSubstitute
@@ -786,6 +791,18 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				m.succeeded[idx] = true
 				m.millis[idx] = runMillis(p, now)
 				q.noteDuration(v.project, v.job.Spec.Class, float64(m.millis[idx])/1000)
+				if idx < len(m.plan.Units) {
+					// A rerun (a rework, or a review after one) against the
+					// unit's first pass: what reruns of its key cost.
+					if first := m.firstMillis[idx]; first > 0 {
+						q.noteRerun(v.project, v.job.Spec.Class, m.plan.Units[idx].Key, float64(m.millis[idx])/float64(first))
+					} else if m.millis[idx] > 0 {
+						if m.firstMillis == nil {
+							m.firstMillis = map[int]int64{}
+						}
+						m.firstMillis[idx] = m.millis[idx]
+					}
+				}
 				m.ended[idx] = finishOf(p, now)
 				if tree := p.Annotations[c4v1.AnnotationOutputTree]; tree != "" {
 					m.unitOut[idx] = tree
@@ -912,20 +929,42 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		}
 	}
 	noteExpansions(e, plan, v.mem)
-	idxs := make([]int, 0, len(v.mem.millis))
-	for i := range v.mem.millis {
+	// A unit's key learns from its first pass: a rerun (a rework, which
+	// resumes from the unit's last output) is priced apart (rework.go),
+	// and a unit sent back keeps the pass it ran.
+	took := map[int]int64{}
+	for i, ms := range v.mem.millis {
+		took[i] = ms
+	}
+	for i, ms := range v.mem.firstMillis {
+		if i < len(plan.Units) {
+			took[i] = ms
+		}
+	}
+	idxs := make([]int, 0, len(took))
+	for i := range took {
 		idxs = append(idxs, i)
 	}
 	sort.Ints(idxs)
 	for _, i := range idxs {
 		u := plan.Units[i]
-		e.Observe(u.Key, u.Pos, float64(v.mem.millis[i])/1000)
+		e.Observe(u.Key, u.Pos, float64(took[i])/1000)
 	}
 	var queued []estimate.Unit
 	var run []estimate.RunningUnit
+	// A unit running again after a pass (a rework, a review after one)
+	// resumes from its last output: what is left is what reruns of its
+	// key take (rework.go), counted as work retained.
+	retained := func(idx int) float64 {
+		u := plan.Units[idx]
+		if v.mem.firstMillis[idx] <= 0 {
+			return 0
+		}
+		return max(0, 1-q.reworkFrac(v.project, v.job.Spec.Class, u.Key)) * e.Predict(u.Key, u.Pos).Mean
+	}
 	unit := func(idx int) estimate.Unit {
 		u := plan.Units[idx]
-		eu := estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots, Exists: u.Exists}
+		eu := estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots, Exists: u.Exists, Done: retained(idx)}
 		if u.Generator && !v.mem.expanded(idx) {
 			eu.Gen = u.Key
 		}
@@ -950,7 +989,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		}
 		run = append(run, ru)
 	}
-	reworkUnits, reworkPath := expectedRework(v, e)
+	reworkUnits, reworkPath := q.expectedRework(v, e)
 	queued = append(queued, reworkUnits...)
 	s := e.Summarize(queued, run)
 	// The critical path is the longest chain of remaining work through
@@ -958,11 +997,11 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	rem := map[int]float64{}
 	for _, idx := range v.runnable {
 		u := plan.Units[idx]
-		rem[idx] = e.Predict(u.Key, u.Pos).Mean
+		rem[idx] = e.Predict(u.Key, u.Pos).Mean - retained(idx)
 	}
 	for idx := range v.locked {
 		u := plan.Units[idx]
-		rem[idx] = e.Predict(u.Key, u.Pos).Mean
+		rem[idx] = e.Predict(u.Key, u.Pos).Mean - retained(idx)
 	}
 	for _, idx := range v.waiting {
 		if !v.stuck[idx] {
@@ -982,7 +1021,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		if pod := v.pods[idx]; pod != nil {
 			progress, _ = q.Progress.Get(pod.Namespace, pod.Name, now)
 		}
-		rem[idx], _ = e.RemainderAt(e.Predict(u.Key, u.Pos), 0, math.Max(0, now.Sub(r.started).Seconds()), progress)
+		rem[idx], _ = e.RemainderAt(e.Predict(u.Key, u.Pos), retained(idx), math.Max(0, now.Sub(r.started).Seconds()), progress)
 	}
 	for idx, d := range reworkPath {
 		if _, ok := rem[idx]; ok {

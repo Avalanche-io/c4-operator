@@ -67,6 +67,9 @@ type calRecord struct {
 	// Durations are the project's recent unit run times by class, in
 	// seconds (classprior.go).
 	Durations map[string][]float64 `json:"durations,omitempty"`
+	// Rework is the project's review and rerun history by class and key
+	// (rework.go).
+	Rework map[string]reworkStat `json:"rework,omitempty"`
 }
 
 // classCalibration is one class's calibrations: of the remaining work
@@ -182,6 +185,7 @@ func (q *Queue) restoreProject(rec *calRecord) {
 	if rec.Derivations != nil && q.book(rec.Project).Len() == 0 {
 		q.setBook(rec.Project, process.RestoreBook(*rec.Derivations))
 	}
+	q.restoreRework(rec.Project, rec.Rework)
 	for class, ds := range rec.Durations {
 		// The stored window first, then what ran since the start.
 		if q.durations == nil {
@@ -384,6 +388,7 @@ func (q *Queue) calRecordOf(project string, now time.Time) calRecord {
 		s := b.Snapshot()
 		rec.Derivations = &s
 	}
+	rec.Rework = q.savedRework(project)
 	if d := q.durations[project]; len(d) > 0 {
 		rec.Durations = map[string][]float64{}
 		for class, w := range d {

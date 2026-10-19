@@ -1,0 +1,57 @@
+{
+ "version": 1,
+ "units": [
+  {
+   "name": "scaffold",
+   "label": "scaffold",
+   "key": "builder",
+   "exists": 1,
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   },
+   "slots": 1,
+   "group": "setup",
+   "holds": [
+    "README.md",
+    "go.mod",
+    "internal/pytest"
+   ],
+   "kind": "model"
+  },
+  {
+   "name": "survey",
+   "label": "survey",
+   "key": "generator",
+   "after": [
+    "scaffold"
+   ],
+   "exists": 1,
+   "planned": true,
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   },
+   "slots": 1,
+   "group": "setup",
+   "kind": "model"
+  },
+  {
+   "name": "docs",
+   "label": "docs",
+   "key": "builder",
+   "after": [
+    "survey"
+   ],
+   "exists": 1,
+   "env": {
+    "C4_BLOCK_PROMPT": "(the block's task: see the run write-up)"
+   },
+   "slots": 1,
+   "group": "finish",
+   "holds": [
+    "README.md"
+   ],
+   "kind": "model"
+  }
+ ],
+ "dependents": "all"
+}

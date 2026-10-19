@@ -1,0 +1,13 @@
+{
+ "version": 1,
+ "verdict": "rework",
+ "items": [
+  {
+   "units": [
+    "port/bisect"
+   ],
+   "do": "rework",
+   "why": "Python's bisect (the C _bisect that bisect.py imports) treats hi == -1 as 'hi omitted', i.e. len(a); the Go Range functi"
+  }
+ ]
+}
