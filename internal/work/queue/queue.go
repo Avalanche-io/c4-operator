@@ -524,6 +524,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 			q.noteProfiles(v)
 		}
 	}
+	q.releaseOrphans(ctx, podsByJob, phases)
 	for uid := range q.jobs {
 		if !seen[uid] {
 			delete(q.jobs, uid)

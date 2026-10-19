@@ -152,3 +152,35 @@ func TestYieldIsNotAnAttempt(t *testing.T) {
 		tick(t, q)
 	}
 }
+
+// A deleted job's unit pods, being deleted with it, are let go: there is
+// no job left to record how they ended, and the finalizer would hold them
+// terminating (agent-jobs' runs: removed by hand three times). Its other
+// pods are untouched until they are deleted.
+func TestDeletedJobsPodsAreReleased(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 2, 2)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "gone", "render", "cpu-"+ns, map[string]string{"frames": "1-2"}, now.Add(time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	pods := unitPods(t, ns, "gone")
+	if len(pods) != 2 || !slices.Contains(pods[0].Finalizers, c4v1.FinalizerUnit) {
+		t.Fatalf("pods %d, finalizers %v", len(pods), pods[0].Finalizers)
+	}
+	if err := k8s.Delete(ctx, get(t, ns, "gone")); err != nil {
+		t.Fatal(err)
+	}
+	// The garbage collector deletes the first; envtest runs none.
+	if err := k8s.Delete(ctx, &pods[0]); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	var p corev1.Pod
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(&pods[0]), &p); !apierrors.IsNotFound(err) {
+		t.Fatalf("the deleted pod is still there (finalizers %v): %v", p.Finalizers, err)
+	}
+	if err := k8s.Get(ctx, client.ObjectKeyFromObject(&pods[1]), &p); err != nil || !slices.Contains(p.Finalizers, c4v1.FinalizerUnit) {
+		t.Fatalf("the pod not being deleted lost its finalizer: %v %v", p.Finalizers, err)
+	}
+}

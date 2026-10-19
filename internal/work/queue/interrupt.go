@@ -95,6 +95,26 @@ func (q *Queue) release(ctx context.Context, p *corev1.Pod) error {
 	return nil
 }
 
+// releaseOrphans lets go of the unit pods of jobs that are gone: deleted
+// with their job (the garbage collector deletes them), they have no job
+// left to record how they ended, and the finalizer would hold them
+// terminating for good.
+func (q *Queue) releaseOrphans(ctx context.Context, podsByJob map[string][]*corev1.Pod, jobs map[string]string) {
+	for key, ps := range podsByJob {
+		if _, ok := jobs[key]; ok {
+			continue
+		}
+		for _, p := range ps {
+			if p.DeletionTimestamp == nil {
+				continue
+			}
+			if err := q.release(ctx, p); err != nil {
+				q.Log.Error(err, "release a deleted job's unit pod", "pod", p.Namespace+"/"+p.Name)
+			}
+		}
+	}
+}
+
 func interruptStatus(m *jobMem) ([]c4v1.WorkInterruption, int32) {
 	var out []c4v1.WorkInterruption
 	for _, x := range m.interruptions[max(0, len(m.interruptions)-interruptKept):] {
