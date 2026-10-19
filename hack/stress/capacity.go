@@ -87,6 +87,28 @@ func (c *checker) checkCapacity(v *view) {
 		for _, x := range v.d.Preempt {
 			gone[x.Unit] = true
 		}
+		// A job reported on track only by a stage or burst this decision
+		// plans, or a stage under way (its capacity elsewhere), was at risk when the shed ran,
+		// before stages and bursts are chosen: it is not one the shed
+		// should have taken first.
+		elsewhere := map[string]bool{}
+		for _, x := range v.d.Stage {
+			elsewhere[x.Job] = true
+		}
+		for _, x := range v.d.Bursts {
+			if x.Closes {
+				elsewhere[x.Job] = true
+			}
+		}
+		for i := range v.s.Jobs {
+			for _, srcs := range v.s.Jobs[i].Sources {
+				for _, src := range srcs {
+					if src.Via == "staging" { // a stage under way, approved earlier
+						elsewhere[v.s.Jobs[i].ID] = true
+					}
+				}
+			}
+		}
 		for i := range v.s.Jobs {
 			j := &v.s.Jobs[i]
 			st := v.d.Jobs[j.ID]
@@ -101,7 +123,7 @@ func (c *checker) checkCapacity(v *view) {
 					// Asked to stop in an earlier decision: yielding at its
 					// next checkpoint, or ending before it.
 					yielding += ru.Slots
-				case !gone[ru.ID] && !st.AtRisk && st.Slack > c.cfg.PreemptSlack:
+				case !gone[ru.ID] && !st.AtRisk && st.Slack > c.cfg.PreemptSlack && !elsewhere[j.ID]:
 					keep[j.ID] = true
 					keepSlots += ru.Slots
 				}

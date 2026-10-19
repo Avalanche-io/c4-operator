@@ -120,8 +120,9 @@ type view struct {
 	sent       map[string]int            // units dispatched per job
 	sentTier   map[string]sched.Tier
 	byPoolTier map[string]map[sched.Tier]int
-	demand     map[string]map[string]int // after the decision
-	demand0    map[string]map[string]int // before it
+	demand     map[string]map[string]int  // after the decision
+	waitsOnly  map[string]map[string]bool // project, pool: all its demand is gangs with planned R 0 (sched's admit)
+	demand0    map[string]map[string]int  // before it
 	gangHeld   map[string]bool
 }
 
@@ -188,8 +189,22 @@ func (c *checker) newView(s sched.Snapshot, d sched.Decisions) *view {
 		if need <= 0 {
 			continue
 		}
+		k := max(1, j.SlotsPerUnit)
+		if len(j.Runnable) > 0 && j.Runnable[0].Slots > 0 {
+			k = j.Runnable[0].Slots
+		}
+		waits := k > 1 && d.Jobs[j.ID].Required <= 0
 		for _, pool := range j.Pools {
 			if p := v.pools[pool]; p != nil {
+				if v.waitsOnly == nil {
+					v.waitsOnly = map[string]map[string]bool{}
+				}
+				if v.waitsOnly[j.Project] == nil {
+					v.waitsOnly[j.Project] = map[string]bool{}
+				}
+				if w, seen := v.waitsOnly[j.Project][pool]; !seen || w {
+					v.waitsOnly[j.Project][pool] = waits
+				}
 				v.demand[j.Project][pool] += min(need, p.Slots)
 			}
 		}
@@ -291,6 +306,9 @@ func (v *view) admitsWith(project, pool string, k int, use, demand map[string]ma
 			continue
 		}
 		oq := quotaOf(pr, pool)
+		if v.waitsOnly[name][pool] {
+			continue // gangs the plan does not need now are not held for (sched's admit)
+		}
 		if unmet := min(oq.Nominal-use[name][pool], demand[name][pool]); unmet > 0 {
 			reserve += unmet
 		}
@@ -352,7 +370,9 @@ func (c *checker) decision(s sched.Snapshot, d sched.Decisions) {
 		}
 		// After its guard unit is preempted, the job waits a full
 		// StarvationDeferMax for the guard.
-		if at, ok := c.guardHit[j.ID]; ok && c.e.now-at < c.cfg.StarvationDeferMax.Seconds() {
+		// Measured as sched does, between the two times its snapshots
+		// carried (float seconds round either way at the boundary).
+		if at, ok := c.guardHit[j.ID]; ok && c.e.at(c.e.now).Sub(c.e.at(at)) < c.cfg.StarvationDeferMax {
 			continue
 		}
 		if w := s.Now.Sub(since(j)); w >= c.cfg.StarvationAfter {

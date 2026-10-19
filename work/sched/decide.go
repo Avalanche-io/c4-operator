@@ -32,7 +32,9 @@ import (
 //     round robin over jobs by least slack.
 //  4. Surplus: per pool, cheapest first, one unit at a time, by least
 //     planned slack with fair share as the tiebreaker (or, with
-//     SurplusFairShare, by fair share first as DESIGN.md 9.9 has it).
+//     SurplusFairShare, by fair share first as DESIGN.md 9.9 has it);
+//     swept once more when a release in one pool lifted what kept a job
+//     out of an earlier one.
 //  5. Preemption (section 9.13) to reclaim nominal quota and to restore
 //     feasibility.
 //  6. Burst (section 9.12), when enabled.
@@ -41,6 +43,7 @@ func Decide(s Snapshot, st *State, cfg Config) Decisions {
 	a.objectives()
 	a.needDemand()
 	a.plan()
+	a.noteWaiting()
 	a.holdStop()
 	a.shed()
 	a.starvation(true)
@@ -526,6 +529,21 @@ func (a *alloc) fair() {
 		band = 3600
 	}
 	key := func(jc *jobCtx) float64 { return math.Floor(a.planSlack(jc) / band) }
+	// A release in one pool can lift what kept a job out of an earlier
+	// one (admit's hold-back for another project's guaranteed need, which
+	// the release met elsewhere): when a sweep both refused and released,
+	// the pools with free slots are swept once more.
+	for sweep := 0; sweep < 2; sweep++ {
+		if !a.fairSweep(js, key) {
+			break
+		}
+	}
+}
+
+// fairSweep fills each pool's free slots once, as fair describes; it
+// reports whether it both refused a job and released a unit.
+func (a *alloc) fairSweep(js []*jobCtx, key func(*jobCtx) float64) bool {
+	refused, released := false, false
 	for _, ps := range a.poolList {
 		out := map[*jobCtx]bool{}
 		for ps.free > 0 && !ps.blocked {
@@ -548,9 +566,13 @@ func (a *alloc) fair() {
 			}
 			if !a.release(best, TierFair, false, ps) {
 				out[best] = true
+				refused = true
+				continue
 			}
+			released = true
 		}
 	}
+	return refused && released
 }
 
 // planSlack is a job's deadline less its planned finish, in seconds.

@@ -1903,7 +1903,9 @@ overrides:
   (section 10.13). For a gang it reclaims only when the plan needs the
   gang now, and then room for all of it up to the quota left: a gang that
   can wait does not hold its pool, so part of its room taken back would be
-  lent again.
+  lent again. By the same rule, a borrower is not held back for another
+  project's need that is only such gangs: the held slots would go to the
+  next starving job while a job on time in its plan waited.
 - **Gangs** are accounted as one unit with the sum of their members' slots.
   The queue releases a gang only when its pool has room for all of it. The
   co-placement itself (all members bound together, in one rack or fabric

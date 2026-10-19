@@ -49,6 +49,11 @@ type projState struct {
 	// demand is the project's unmet deadline need per pool: slots its
 	// jobs need to reach their required rate and could start now.
 	demand map[string]int
+	// demandJobs are, per pool, the jobs whose need is in demand, and
+	// waitsOnly says, after the plan, that all of them are gangs the plan
+	// does not need now (noteWaiting).
+	demandJobs map[string][]*jobCtx
+	waitsOnly  map[string]bool
 }
 
 type jobCtx struct {
@@ -233,6 +238,34 @@ func (a *alloc) needDemand() {
 		for _, pool := range jc.j.Pools {
 			if ps := a.pools[pool]; ps != nil && a.guaranteeFits(jc, ps) {
 				jc.proj.demand[pool] += min(need, ps.p.Slots)
+				if jc.proj.demandJobs == nil {
+					jc.proj.demandJobs = map[string][]*jobCtx{}
+				}
+				jc.proj.demandJobs[pool] = append(jc.proj.demandJobs[pool], jc)
+			}
+		}
+	}
+}
+
+// noteWaiting marks, after the plan, each project's pools where all of its
+// demand is gangs the plan does not need now (R 0): the guarantee does
+// not hold a pool for them and reclaim waits for them (preempt.go), so
+// admit holds nothing back for them either.
+func (a *alloc) noteWaiting() {
+	for _, pr := range a.projects {
+		for pool, js := range pr.demandJobs {
+			all := len(js) > 0
+			for _, jc := range js {
+				if !jc.canRelease() || jc.unitSlots(jc.j.Runnable[jc.next]) <= 1 || jc.R > 0 {
+					all = false
+					break
+				}
+			}
+			if all {
+				if pr.waitsOnly == nil {
+					pr.waitsOnly = map[string]bool{}
+				}
+				pr.waitsOnly[pool] = true
 			}
 		}
 	}
@@ -296,12 +329,18 @@ func (a *alloc) admit(pr *projState, ps *poolState, k int, ownOnly bool) bool {
 	// quota and reclaims it later by preemption; holding back only what is
 	// needed for deadlines now avoids lending slots that would be taken
 	// back within minutes, without holding quota for work that has slack.
+	// Need that is only gangs the plan does not need now is not held for,
+	// as reclaim does not take slots back for it: held, the slots would go
+	// to whoever starves next while a job on time in its plan waits.
 	reserve := 0
 	for _, other := range a.projects {
 		if other == pr {
 			continue
 		}
 		oq := a.quota(other.p.Name, name)
+		if other.waitsOnly[name] {
+			continue
+		}
 		unmet := min(oq.Nominal-other.usage[name], other.demand[name])
 		if unmet > 0 {
 			reserve += unmet
