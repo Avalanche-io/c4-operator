@@ -243,6 +243,91 @@ func TestBlockOnHostRunner(t *testing.T) {
 	if p := get(third); p.Status.Phase != corev1.PodFailed || p.Status.Reason != "BlockGaveUp" {
 		t.Fatalf("gave up: %s %s", p.Status.Phase, p.Status.Reason)
 	}
+
+	// a block in parts: a part done with a note of the next wakes the same
+	// session for it, in the same attempt, and the last part ends the pod
+	parts := pod("count-a4", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "In two parts."})
+	tick()
+	m4, _ := h.Store.Get("default.practice-1.count")
+	endTurn(session, map[string]string{"more": "part 2: the tests"})
+	tick()
+	if p := get(parts); p.Status.Phase != corev1.PodRunning {
+		t.Fatalf("after part 1: %s", p.Status.Phase)
+	}
+	tick()
+	n := len(cli.prompts[session])
+	if last := cli.prompts[session][n-1]; !strings.Contains(last, "part 2: the tests") || !strings.Contains(last, m4.UnitDir) {
+		t.Fatalf("part prompt:\n%s", last)
+	}
+	tick() // its old turn must not end the new part
+	if p := get(parts); p.Status.Phase != corev1.PodRunning {
+		t.Fatalf("the old turn ended the new part: %s", p.Status.Phase)
+	}
+	endTurn(session, nil)
+	tick()
+	if p := get(parts); p.Status.Phase != corev1.PodSucceeded || p.Status.Reason != "Completed" {
+		t.Fatalf("after the last part: %s %s", p.Status.Phase, p.Status.Reason)
+	}
+
+	// a stop at a part's safe point: the farm's decision yields the pod,
+	// with the part's note left for its session, and nothing more starts
+	stopAt := pod("count-a5", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "Two more parts."})
+	tick()
+	m5, _ := h.Store.Get("default.practice-1.count")
+	out := filepath.Join(m5.UnitDir, "out")
+	os.WriteFile(filepath.Join(out, ".c4", "safepoint"), []byte("seq 1\nat "+time.Now().UTC().Format(time.RFC3339Nano)+"\ncheckpoint x\n"), 0o644)
+	tick() // the runner relays the safe point
+	q := get(stopAt)
+	q.Annotations[c4v1.AnnotationSafepointDecision] = `{"seq":1,"do":"stop","why":"the job is on hold-stop"}`
+	if err := k8s.Update(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	tick() // and the decision back
+	before := len(cli.prompts[session])
+	endTurn(session, map[string]string{"more": "part 3"})
+	tick()
+	tick()
+	if p := get(stopAt); p.Status.Phase != corev1.PodSucceeded || p.Status.Reason != "Yielded" || p.Annotations[c4v1.AnnotationOutputCheckpoint] == "" {
+		t.Fatalf("stopped at a safe point: %s %s, checkpoint %q", p.Status.Phase, p.Status.Reason, p.Annotations[c4v1.AnnotationOutputCheckpoint])
+	}
+	if len(cli.prompts[session]) != before {
+		t.Fatal("the runner woke a block the farm stopped")
+	}
+
+	// a stop asked and then cancelled: the pod is asked to yield while the
+	// block works, the farm answers continue at its safe point (the reason
+	// passed), and the block goes on to its next part instead of yielding
+	asked := pod("count-a6", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "Two parts again."})
+	tick()
+	m6, _ := h.Store.Get("default.practice-1.count")
+	q = get(asked)
+	q.Annotations[c4v1.AnnotationYield] = "hold"
+	if err := k8s.Update(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	tick() // working: the runner waits, and does not block
+	if p := get(asked); p.Status.Phase != corev1.PodRunning {
+		t.Fatalf("yielded while working: %s", p.Status.Phase)
+	}
+	out = filepath.Join(m6.UnitDir, "out")
+	os.WriteFile(filepath.Join(out, ".c4", "safepoint"), []byte("seq 1\nat "+time.Now().UTC().Format(time.RFC3339Nano)+"\ncheckpoint y\n"), 0o644)
+	endTurn(session, map[string]string{"more": "part 2"})
+	tick() // at its safe point, unanswered: it waits
+	if p := get(asked); p.Status.Phase != corev1.PodRunning {
+		t.Fatalf("yielded before the farm answered: %s", p.Status.Phase)
+	}
+	q = get(asked)
+	q.Annotations[c4v1.AnnotationSafepointDecision] = `{"seq":1,"do":"continue","why":"the stop is no longer pending"}`
+	delete(q.Annotations, c4v1.AnnotationYield)
+	if err := k8s.Update(ctx, q); err != nil {
+		t.Fatal(err)
+	}
+	before = len(cli.prompts[session])
+	tick()
+	tick()
+	if p := get(asked); p.Status.Phase != corev1.PodRunning || len(cli.prompts[session]) != before+1 || !strings.Contains(cli.prompts[session][before], "part 2") {
+		t.Fatalf("after continue: %s, prompts %d -> %d", p.Status.Phase, before, len(cli.prompts[session]))
+	}
 }
 
 // docStore keeps the documents a runner stores.

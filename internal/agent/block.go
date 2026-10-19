@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -230,7 +232,8 @@ func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	b.WriteString("- Run each shell command on its own: no cd, no &&, ; or pipes. Use absolute paths, git -C <dir> and go -C <dir>; only the commands you were allowed run, and a compound one is refused.\n")
 	fmt.Fprintf(&b, "- This attempt's output directory: %s. Control documents go in %s/.c4/:\n", u.Out, u.Out)
 	b.WriteString("  - a generator writes its expansion document (version 1) to expand.json there;\n")
-	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n\n")
+	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n")
+	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note.\n\n")
 	return b.String()
 }
 
@@ -282,8 +285,60 @@ func (r *Runner) turnSince(m *Member, p *corev1.Pod) bool {
 	if err != nil || cp == nil || cp.Event != "stop" {
 		return false
 	}
+	if t, ok := r.since[p.UID]; ok && cp.At.Before(t) {
+		return false // the turn before this part
+	}
 	if p.Status.StartTime == nil {
 		return true
 	}
 	return !cp.At.Before(p.Status.StartTime.Time)
+}
+
+// takeMore reads and removes a block's note of its next part
+// (<out>/.c4/more): a part is done and the task goes on.
+func takeMore(u UnitDirs) (string, bool) {
+	path := filepath.Join(u.Out, ".c4", "more")
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return "", false
+	}
+	os.Remove(path)
+	note := strings.TrimSpace(string(b))
+	if note == "" {
+		note = "the next part of your task"
+	}
+	return note, true
+}
+
+// partPrompt wakes a block for the next part of its task, in the same
+// attempt.
+func partPrompt(note string, u UnitDirs) string {
+	return fmt.Sprintf("Go on with the next part of your task: %s\n\nThe output directory is still %s. When that part is done, write the note for the one after it to %s/.c4/more and end your turn, or, if it was the last, write no note, reply with a one-line summary and stop.", note, u.Out, u.Out)
+}
+
+// blockYield decides a block's yield by its safe point. A block is asked
+// to yield (c4.avalanche.io/yield) by a hold-stop, a preemption or its
+// pod's deletion; the farm decides at the block's next safe point, the end
+// of its turn, and may cancel the stop there (its reason passed). So a
+// working block is left to reach it, without blocking the runner's tick;
+// a block at its safe point waits for the farm's answer; a stop yields it
+// (the session stopped at that turn, the pod Yielded with its checkpoint),
+// and a continue lets it go on (wait false). A block that announces no
+// safe points yields at its turn's end.
+func (r *Runner) blockYield(ctx context.Context, p *corev1.Pod, m *Member) (wait bool, err error) {
+	live, act, err := r.Harness.live(ctx, m)
+	if err != nil {
+		return true, err
+	}
+	if live && !act.Idle() {
+		return true, nil
+	}
+	st := r.relays[p.UID]
+	switch {
+	case !live || st == nil || st.asked == 0 || st.stopped:
+		return true, r.yield(ctx, p, m)
+	case st.answered < st.asked:
+		return true, nil // the farm has not answered yet
+	}
+	return false, nil
 }

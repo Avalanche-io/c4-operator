@@ -293,6 +293,39 @@ func TestHostRunnerWrites(t *testing.T) {
 		t.Errorf("binding to itself: %v", err)
 	}
 
+	// it finishes the deletion of its pod the farm is deleting, and
+	// deletes nothing else
+	zero := int64(0)
+	del := func(p *corev1.Pod) error {
+		return laptop.Delete(ctx, p, &client.DeleteOptions{GracePeriodSeconds: &zero})
+	}
+	held := func(name, node string) *corev1.Pod {
+		p := pod(name, node)
+		p.Finalizers = []string{"c4.avalanche.io/unit"}
+		if err := admin.Update(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() {
+			admin.Patch(ctx, p, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"finalizers":null}}`)))
+		})
+		return p
+	}
+	if err := del(onMe); err == nil {
+		t.Error("the runner deleted its pod the farm is not deleting")
+	}
+	ownPod, otherPod := held("member-2", "laptop-1"), held("render-4", "w1")
+	for _, p := range []*corev1.Pod{ownPod, otherPod} {
+		if err := admin.Delete(ctx, p); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := del(ownPod); err != nil {
+		t.Errorf("finishing the deletion of its own pod: %v", err)
+	}
+	if err := del(otherPod); err == nil {
+		t.Error("the runner deleted another node's pod")
+	}
+
 	// its Lease, and not another's
 	micro := metav1.NewMicroTime(time.Now())
 	lease := func(name string) *coordv1.Lease {

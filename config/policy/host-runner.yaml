@@ -11,8 +11,11 @@
 #   c4.avalanche.io/output-checkpoint, output-epoch, output-expand (a
 #   generator member's expansion document), output-verdict (a review
 #   member's verdict), output-measure (a member's measure of the job's
-#   done), output-usage (a model member's token use) and safepoint (the safe point it relays, as the node
-#   daemon does); and bindings of pods to its Node.
+#   done), output-usage (a model member's token use) and safepoint (the
+#   safe point it relays, as the node daemon does); and finishing the
+#   deletion of one the farm is already deleting, as a kubelet does when a
+#   pod's grace ends;
+# - bindings of pods to its Node.
 #
 # A Binding names only its target, so these policies cannot see which pod
 # is bound. Grant pods/binding only where agent pods run, or keep the host
@@ -83,6 +86,10 @@ spec:
       resources: [pods, pods/status]
     - apiGroups: [""]
       apiVersions: [v1]
+      operations: [DELETE]
+      resources: [pods]
+    - apiGroups: [""]
+      apiVersions: [v1]
       operations: [CREATE]
       resources: [pods/binding]
     - apiGroups: [coordination.k8s.io]
@@ -100,7 +107,7 @@ spec:
   - name: before
     expression: "request.resource.resource != 'pods' || !has(oldObject.metadata.annotations) ? {} : oldObject.metadata.annotations"
   - name: after
-    expression: "request.resource.resource != 'pods' || !has(object.metadata.annotations) ? {} : object.metadata.annotations"
+    expression: "request.operation == 'DELETE' || request.resource.resource != 'pods' || !has(object.metadata.annotations) ? {} : object.metadata.annotations"
   - name: mine
     expression: "['c4.avalanche.io/output-checkpoint', 'c4.avalanche.io/output-epoch', 'c4.avalanche.io/output-expand', 'c4.avalanche.io/output-verdict', 'c4.avalanche.io/output-measure', 'c4.avalanche.io/output-usage', 'c4.avalanche.io/safepoint']"
   validations:
@@ -112,8 +119,10 @@ spec:
       request.resource.resource != 'pods' || variables.sub == 'binding' ||
       (has(oldObject.spec.nodeName) && oldObject.spec.nodeName == variables.host)
     message: a host runner may only write to pods bound to its own Node
+  - expression: "request.operation != 'DELETE' || has(oldObject.metadata.deletionTimestamp)"
+    message: a host runner may only finish deleting a pod the farm is already deleting
   - expression: >-
-      request.resource.resource != 'pods' || variables.sub != '' || (
+      request.operation == 'DELETE' || request.resource.resource != 'pods' || variables.sub != '' || (
         object.spec == oldObject.spec &&
         (has(object.metadata.labels) ? object.metadata.labels : {}) == (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {}) &&
         variables.after.all(k, k in variables.mine || (k in variables.before && variables.before[k] == variables.after[k])) &&

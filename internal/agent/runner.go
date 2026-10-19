@@ -85,6 +85,10 @@ type Runner struct {
 	seen map[types.UID]bool
 	// relays is each pod's safe-point relay.
 	relays map[types.UID]*relayState
+	// parts are blocks' next parts, by pod, to wake them for; since is
+	// when a block's session was last woken in its attempt
+	parts map[types.UID]string
+	since map[types.UID]time.Time
 	// asked is when the runner first saw each pod's yield request.
 	asked map[types.UID]time.Time
 	// rising is a higher capacity waiting out RaiseAfter, and since when.
@@ -125,6 +129,8 @@ func (r *Runner) Tick(ctx context.Context) error {
 		r.seen = map[types.UID]bool{}
 		r.asked = map[types.UID]time.Time{}
 		r.relays = map[types.UID]*relayState{}
+		r.parts = map[types.UID]string{}
+		r.since = map[types.UID]time.Time{}
 	}
 	if err := r.heartbeat(ctx); err != nil {
 		return fmt.Errorf("node %s: %w", r.Node, err)
@@ -211,32 +217,61 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		if err := r.relay(ctx, p, u); err != nil {
 			r.logf("%s: safe points: %v", m.Name, err)
 		}
-		return r.yield(ctx, p, m)
+		if !m.Block {
+			return r.yield(ctx, p, m)
+		}
+		if wait, err := r.blockYield(ctx, p, m); wait || err != nil {
+			return err
+		}
+		// the farm answered continue at the block's safe point: go on
 	}
 	live, act, err := r.Harness.live(ctx, m)
 	if err != nil {
 		return err
 	}
-	// A block's attempt ends with its turn: stop its idle session. A task
-	// it finished ends the pod below as a member whose session ended on its
-	// own; one it gave up on (the CLI reports it blocked, not done) fails
-	// the attempt, for the job's retries or a person.
-	if live && m.Block && p.Status.Phase == corev1.PodRunning && act.Idle() && act.State != "working" && r.turnSince(m, p) {
-		if err := r.Harness.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
-			return err
-		}
-		if !act.Done() {
-			r.logf("%s: ended its turn without finishing its task (%s); stopped its session", m.Name, act.State)
-			return r.finish(ctx, p, corev1.PodFailed, "BlockGaveUp",
-				fmt.Sprintf("the block ended its turn without finishing its task (the CLI reports it %s); its transcript says why", act.State), 1)
-		}
-		r.logf("%s: its task is done; stopped its session", m.Name)
-		live = false
-	}
 	if live {
 		if err := r.relay(ctx, p, u); err != nil {
 			r.logf("%s: safe points: %v", m.Name, err)
 		}
+	}
+	// A block's turn ends at a safe point: stop its idle session. If the
+	// farm said stop there, the pod yields below. A part done with more to
+	// do (.c4/more) wakes it again for the next part, in this attempt. A
+	// task it finished ends the pod below as a member whose session ended
+	// on its own; one it gave up on (the CLI reports it blocked, not done)
+	// fails the attempt, for the job's retries or a person.
+	if live && m.Block && p.Status.Phase == corev1.PodRunning && act.Idle() && act.State != "working" && r.turnSince(m, p) {
+		if err := r.Harness.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
+			return err
+		}
+		live = false
+		stopped := r.relays[p.UID] != nil && r.relays[p.UID].stopped
+		switch note, more := takeMore(u); {
+		case stopped:
+			// its session knows the part it noted; the next attempt resumes it
+			_ = note
+			r.logf("%s: the farm said stop at this safe point; stopped its session", m.Name)
+		case more:
+			r.parts[p.UID] = note
+			r.logf("%s: a part is done; next: %s", m.Name, note)
+		case !act.Done():
+			r.logf("%s: ended its turn without finishing its task (%s); stopped its session", m.Name, act.State)
+			return r.finish(ctx, p, corev1.PodFailed, "BlockGaveUp",
+				fmt.Sprintf("the block ended its turn without finishing its task (the CLI reports it %s); its transcript says why", act.State), 1)
+		default:
+			r.logf("%s: its task is done; stopped its session", m.Name)
+		}
+	}
+	// the next part, in this attempt: wake the block's session by its ID
+	if !live && m.Block && p.Status.Phase == corev1.PodRunning && r.parts[p.UID] != "" && !(r.relays[p.UID] != nil && r.relays[p.UID].stopped) {
+		note := r.parts[p.UID]
+		if _, err := r.Harness.Resume(ctx, name, partPrompt(note, u)); err != nil {
+			return err
+		}
+		delete(r.parts, p.UID)
+		r.since[p.UID] = r.now()
+		r.logf("%s: woke for its next part", m.Name)
+		return nil
 	}
 	switch {
 	case p.Status.Phase == corev1.PodPending:
@@ -357,7 +392,24 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 // next safe point (the decision relay).
 func (r *Runner) deleted(ctx context.Context, p *corev1.Pod, m *Member) error {
 	if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
-		if err := r.yield(ctx, p, m); err != nil {
+		if m.Block {
+			// a block yields at its next safe point, where the farm
+			// answers stop for a pod being deleted (its grace is the wait)
+			u, err := r.prepareUnit(p, m)
+			if err != nil {
+				return err
+			}
+			if err := r.relay(ctx, p, u); err != nil {
+				r.logf("%s: safe points: %v", m.Name, err)
+			}
+			if wait, err := r.blockYield(ctx, p, m); err != nil {
+				return err
+			} else if !wait {
+				if err := r.yield(ctx, p, m); err != nil {
+					return err
+				}
+			}
+		} else if err := r.yield(ctx, p, m); err != nil {
 			return err
 		}
 		if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {

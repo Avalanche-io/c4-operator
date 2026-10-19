@@ -22,7 +22,9 @@ rules:
   verbs: [patch]
 - apiGroups: [""]
   resources: [pods]
-  verbs: [get, list, watch, patch]
+  # delete: finishing the deletion of a pod the farm is deleting (the
+  # policy allows nothing else), as a kubelet does when its grace ends
+  verbs: [get, list, watch, patch, delete]
 - apiGroups: [""]
   resources: [pods/status]
   verbs: [patch]
