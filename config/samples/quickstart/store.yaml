@@ -100,6 +100,11 @@ spec:
             api ApplyClusterLayout "{\"version\":$ver}" >/dev/null
           fi
           api "GetKeyInfo?id=$KEY_ID" >/dev/null || api ImportKey "{\"accessKeyId\":\"$KEY_ID\",\"secretAccessKey\":\"$SECRET\",\"name\":\"quickstart\"}" >/dev/null
-          bucket=$(api "GetBucketInfo?globalAlias=quickstart" | jq -r .id) || bucket=$(api CreateBucket '{"globalAlias":"quickstart"}' | jq -r .id)
+          if info=$(api "GetBucketInfo?globalAlias=quickstart"); then
+            bucket=$(echo "$info" | jq -r .id)
+          else
+            bucket=$(api CreateBucket '{"globalAlias":"quickstart"}' | jq -r .id)
+          fi
+          test -n "$bucket"
           api AllowBucketKey "{\"bucketId\":\"$bucket\",\"accessKeyId\":\"$KEY_ID\",\"permissions\":{\"read\":true,\"write\":true,\"owner\":true}}" >/dev/null
           echo "bucket quickstart ready"
