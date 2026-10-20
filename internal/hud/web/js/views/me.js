@@ -24,8 +24,7 @@ function load(ctx) {
   if (st.busy || st.at === ctx.snap.now) return;
   st.busy = true;
   st.at = ctx.snap.now;
-  // each on its own: a farm that does not list its trackers still shows
-  // the grants you gave
+  // each on its own, so one that fails leaves the other readable
   const grants = get('/grants').then((g) => { st.grants = g.grants || []; st.err = null; }, (e) => { st.err = e.message; });
   const trackers = get('/trackers').then((t) => { st.trackers = t.trackers || []; st.terr = null; }, (e) => { st.terr = e.message; });
   Promise.all([grants, trackers]).finally(() => { st.busy = false; ctx.refresh(); });
@@ -110,7 +109,7 @@ export default {
           : mine.length ? mine.map((g) => grantRow(ctx, g)) : h('p', { class: 'dim' }, 'None. No tracker submits work for you.')),
       h('div', { class: 'vsec', 'data-key': 'trackers' },
         h('header', null, h('h2', null, 'Trackers in your projects')),
-        st.terr && st.trackers == null ? h('p', { class: 'dim' }, 'This farm does not list its trackers here yet. Until it does, give a grant from a terminal: c4 farm grant TRACKER.')
+        st.terr && st.trackers == null ? h('p', { class: 'warn red' }, st.terr)
           : st.trackers == null ? h('p', { class: 'dim' }, 'Reading…')
           : st.trackers.length ? h('div', { class: 'ggrid' }, st.trackers.map((t) => trackerCard(ctx, t))) : h('p', { class: 'dim' }, 'Your projects have no trackers connected.')));
   },
