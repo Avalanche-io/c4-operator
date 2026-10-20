@@ -130,6 +130,7 @@ class Draft:
                            if r.name in ticked or (r.name not in old and r.enabled)]
         self._selection = h.selection()
         self._camera = h.camera()
+        self._host_signature = h.signature()
         if hasattr(self, "form"):
             self.form.refresh(self._derive)
         else:
@@ -137,7 +138,19 @@ class Draft:
 
     # --- derived values -----------------------------------------------------
 
-    def _derive(self, source: str, renderable: Optional[Renderable] = None) -> Any:
+    def _derive(self, source: str, name: str = "", renderable: Optional[Renderable] = None) -> Any:
+        """A derived field's value: the renderable's own (by the parameter's
+        name, then by its ``from``), else the scene's. Without a renderable,
+        the first ticked one stands for the form."""
+        r = renderable
+        if r is None:
+            picked = self.picked()
+            r = picked[0] if picked else None
+        if r is not None and r.values:
+            if name and name in r.values:
+                return r.values[name]
+            if source in r.values:
+                return r.values[source]
         if source == "scene.file":
             return self.scene_file or None
         if source in ("scene.frames", "shot.frames"):
@@ -172,7 +185,7 @@ class Draft:
             "due": self.due, "frames": self.frames, "note": self.note, "size": self.size, "root": self.root,
             "ticked": sorted(self.ticked), "form": {f.name: [f.value, f.linked] for f in self.form.fields},
             "renderables": [[r.name, r.frames, r.outputs, r.reads] for r in self.renderables],
-            "scene": [self.scene_file, stamp],
+            "scene": [self.scene_file, stamp, getattr(self, "_host_signature", "")],
         }
         return json.dumps(state, sort_keys=True, default=str)
 
@@ -262,7 +275,7 @@ def prepare(draft: Draft) -> Prepared:
         override = {}
         for p in tool.params:
             if p.source and draft.form.field(p.name).linked:
-                v = draft._derive(p.source, r)
+                v = draft._derive(p.source, p.name, r)
                 if v is not None:
                     override[p.name] = v
         values = draft.form.values(override)

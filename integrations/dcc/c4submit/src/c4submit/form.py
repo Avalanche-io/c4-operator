@@ -13,6 +13,7 @@ same fields, defaults, links and errors.
   defaults, plus every derived value, so a saved file stays small.
 """
 
+import inspect
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from c4submit.tool import Param, Tool
@@ -20,8 +21,19 @@ from c4submit.tool import Param, Tool
 DRAWN = ("artist", "advanced")
 
 # Where a field's derived value comes from: a function of the parameter's
-# ``from`` that returns a value, or None when the scene has none.
-Derive = Callable[[str], Any]
+# ``from`` (and, if it takes it, the parameter's name) that returns a value,
+# or None when the scene has none.
+Derive = Callable[..., Any]
+
+
+def _positional(fn: Callable) -> int:
+    try:
+        ps = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return 1
+    if any(p.kind == p.VAR_POSITIONAL for p in ps):
+        return 2
+    return sum(1 for p in ps if p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD))
 
 
 class Field:
@@ -104,10 +116,13 @@ class Form:
         return [(g, by[g]) for g in order]
 
     def refresh(self, derive: Derive) -> None:
-        """Re-read every derived value from the scene."""
+        """Re-read every derived value from the scene. ``derive`` takes the
+        parameter's ``from``, and its name too when it accepts two
+        arguments (a renderable may give one parameter its own value)."""
+        both = _positional(derive) >= 2
         for f in self.fields:
             if f.param.source:
-                f.derived = derive(f.param.source)
+                f.derived = derive(f.param.source, f.name) if both else derive(f.param.source)
 
     def set(self, name: str, value: Any) -> str:
         """Types a value into a field, unlinking it; returns its error."""

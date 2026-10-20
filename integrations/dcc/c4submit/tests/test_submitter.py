@@ -337,3 +337,32 @@ def test_a_host_reads_range_and_renderables_together(tmp_path, farm):
     host.read = lambda: calls.append(1) or ("1-10", [Renderable("Write_x")])
     d = draft_for(host, farm)
     assert calls == [1] and d.scene_frames == "1-10" and [r.name for r in d.renderables] == ["Write_x"]
+
+
+def test_a_renderable_gives_fields_its_own_values(tmp_path):
+    blender = {"c4": "tool/1", "name": "blender-render", "kind": "frames", "runs": {"image": "x", "command": ["x"]},
+               "params": [
+                   {"name": "blend", "type": "PATH", "from": "scene.file",
+                    "userInterface": {"fileFilters": [{"patterns": ["*.blend"]}]}},
+                   {"name": "scene", "type": "STRING", "from": "scene.renderables"},
+                   {"name": "view_layer", "type": "STRING", "from": "scene.renderables"},
+                   {"name": "camera", "type": "STRING", "default": "", "from": "scene.camera"}]}
+    host = FakeHost(scene=write(str(tmp_path / "sh010.blend")), env={"C4_ROOT": str(tmp_path), "C4_SHOT": "sh010"},
+                    renderables=[Renderable("sh010/bg", key="bg", values={"scene": "sh010", "view_layer": "bg"}),
+                                 Renderable("sh010/fg", key="fg", values={"scene": "sh010", "view_layer": "fg",
+                                                                          "scene.camera": "closeCam"})])
+    d = Draft(host, Tool(blender))
+    assert d.form.field("view_layer").value == "bg", "the first ticked one stands for the form"
+    jobs = prepare(d).doc["jobs"]
+    assert jobs["comp-bg"]["with"] == {"blend": "sh010.blend", "scene": "sh010", "view_layer": "bg"}
+    assert jobs["comp-fg"]["with"] == {"blend": "sh010.blend", "scene": "sh010", "view_layer": "fg", "camera": "closeCam"}
+
+
+def test_the_hosts_own_state_makes_a_check_stale(tmp_path, farm, nocache):
+    host = comp_scene(tmp_path)
+    d = draft_for(host, farm)
+    c = Submitter(farm, cache=nocache).check(prepare(d))
+    assert not c.stale()
+    host.modified = True          # an edit only the application knows of
+    d.refresh()                   # the panel refreshes on the main thread
+    assert c.stale()

@@ -80,7 +80,21 @@ A studio sets these in its launcher, as it does for other pipeline tools.
 
 A panel is a `c4submit.host.Host` (what the scene is: its file, frame
 range, renderables and the files it reads) and a way to draw
-`c4submit.form.Form` in the application's own widgets. Everything else
+`c4submit.form.Form` in the application's own widgets. A host may also:
+
+- give a renderable its own `key` (the job's key) and `values` for the
+  tool's derived fields, by parameter name (`{"view_layer": "bg"}`) or by
+  where a field comes from (`{"scene.camera": "shotCam"}`);
+- read its range and renderables in one pass (`read()`), when reading is
+  costly;
+- say what only it knows a check depends on (`signature()`: the scene's
+  path and unsaved state by default), so a changed scene makes the last
+  check stale;
+- set `writes_scene` when it writes the scene for every submission (a USD
+  stage from a LOP network);
+- tag a file with the renderables that read it (`Dependency.renderables`:
+  `None` when unknown, so every job carries it).
+ Everything else
 (collection, IDs, the check, the summary, uploads, the file) is
 `c4submit`'s. `c4submit.testing` has a fake farm (in memory, and over HTTP)
 and a fake host for tests. The next DCCs, in the order the research

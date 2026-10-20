@@ -10,7 +10,7 @@ uploads and the farm's answers can run on a worker thread.
 import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Mapping, Optional, Tuple
+from typing import Any, Dict, List, Mapping, Optional, Tuple
 
 
 @dataclass
@@ -25,6 +25,10 @@ class Renderable:
     enabled: bool = True               # ticked by default
     note: str = ""                     # why it is disabled, or anything the panel should say
     key: str = ""                      # the name its job key is made from, when not ``name`` (mantra1 for /out/mantra1)
+    # Its own values for the tool's derived fields: by parameter name
+    # ({"view_layer": "bg"}) or by where a field comes from
+    # ({"scene.camera": "shotCam"}); the name wins when both are given.
+    values: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -72,6 +76,16 @@ class Host:
 
     def renderables(self) -> List[Renderable]:
         return []
+
+    def signature(self) -> str:
+        """What only the application knows that a check depends on: the
+        scene's path (it changes with Save As) and whether it has unsaved
+        edits. Read on the main thread when the draft refreshes. A host
+        that writes its scene for each submission gives only the path: the
+        file it writes is stamped by its size and time already."""
+        if self.writes_scene:
+            return self.scene_file()
+        return f"{self.scene_file()}|{self.is_modified()}"
 
     def read(self) -> Tuple[str, List[Renderable]]:
         """The scene's frame range and its renderables, read together.
