@@ -99,7 +99,10 @@ Each Tracker says:
   never submits the job as its own instead. `c4 farm grants --tracker
   <ns>/<tracker>` shows who has granted it; `c4 farm revoke` takes a grant
   back. Without `for`, the jobs are c4-sync's;
-- `review.wait`: the job's wait that the tracker's decision serves;
+- `review.wait`: the job's wait that the tracker's decision serves. With
+  `job.review` (the job's own final review, `@review`, after all its
+  work), leave it out: the tracker serves that one, and the job is done
+  only once it is decided there;
 - `rework`: `inPlace` reruns units, the CI, agent and ML way;
   `nextVersion` makes v002 follow v001 with the note as an input view,
   the media way;

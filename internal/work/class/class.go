@@ -112,6 +112,9 @@ type Plan struct {
 	Order     []int
 	OrderName string
 	Axis      Axis
+	// reviewAt is 1 + the index of the job's final review unit (Review),
+	// 0 for none.
+	reviewAt int
 	// Estimator settings and a prior for the job's key.
 	Estimate estimate.Config
 	Prior    *estimate.Prior

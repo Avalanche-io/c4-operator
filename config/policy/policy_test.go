@@ -182,6 +182,11 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"nudge":{"hold":true}}}`))); err != nil {
 		t.Errorf("an ordinary change was refused: %v", err)
 	}
+	// A job's review is set when it is created (GAPS 7): added later, it
+	// would not fit the plan the queue has replayed.
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"review":{"server":"person:noor"}}}`))); err == nil {
+		t.Error("a review was added to a running job")
+	}
 }
 
 // TestSubmitGrantsOnlyFromTheHUD: a person's grant to a Tracker is written

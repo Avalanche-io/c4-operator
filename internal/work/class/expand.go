@@ -248,6 +248,9 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 		if _, dup := at[u.Name]; dup {
 			return nil, fmt.Errorf("unit %s is named twice", u.Name)
 		}
+		if prefix+u.Name == ReviewName {
+			return nil, fmt.Errorf("unit %s is the job's review, which no document names", ReviewName)
+		}
 		if _, taken := names[prefix+u.Name]; taken {
 			return nil, fmt.Errorf("unit %s is already in the job", prefix+u.Name)
 		}
@@ -256,6 +259,9 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 	resolve := func(name string) (int, bool) {
 		if i, ok := at[name]; ok {
 			return i, true
+		}
+		if name == ReviewName {
+			return 0, false // the job's review comes after everything; nothing waits on it
 		}
 		i, ok := names[name]
 		return i, ok
@@ -553,6 +559,13 @@ func (p *Plan) Names() map[string]int {
 // names.
 func (p *Plan) Apply(gen int, x *Expansion) {
 	p.Units = append(p.Units, x.Units...)
+	// The job's review comes after everything, whatever the document's
+	// dependents say.
+	if r, ok := p.Review(); ok {
+		for _, u := range x.Units {
+			p.Units[r].After = append(p.Units[r].After, u.Index)
+		}
+	}
 	for _, u := range x.Units {
 		if u.Generator {
 			p.Order = append(p.Order, u.Index)

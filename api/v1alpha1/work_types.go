@@ -193,6 +193,14 @@ type WorkJobSpec struct {
 	// +optional
 	Follows string `json:"follows,omitempty"`
 
+	// Review is a person's (or party's) review of the whole job's work:
+	// a final wait, unit "@review", after every other unit, including
+	// those expansions add later, so the job is Succeeded only once it is
+	// decided ("done means approved", integrations GAPS 7). Any choice but
+	// fail completes it; fail fails the job. Set at creation only.
+	// +optional
+	Review *WorkReviewSpec `json:"review,omitempty"`
+
 	// Inputs are C4 views mounted into every unit.
 	// +optional
 	Inputs []WorkInput `json:"inputs,omitempty"`
@@ -1225,6 +1233,23 @@ type WorkRounds struct {
 	ExpectSeconds int64 `json:"expectSeconds,omitempty"`
 }
 
+// WorkReviewSpec is the final review of a job's work.
+type WorkReviewSpec struct {
+	// Server is who reviews: person:<id> or party:<name>.
+	// +kubebuilder:validation:Pattern=`^(person|party):.+$`
+	Server string `json:"server"`
+	// Ask is what the reviewer is asked.
+	// +optional
+	Ask string `json:"ask,omitempty"`
+	// Choices are the decisions it takes besides fail; empty, approve.
+	// +optional
+	Choices []string `json:"choices,omitempty"`
+	// ExpectSeconds is how long the review is expected to take, until the
+	// farm has measured the reviewer's decisions.
+	// +optional
+	ExpectSeconds int64 `json:"expectSeconds,omitempty"`
+}
+
 // WorkWait is a unit that waits for someone or something: a person, an
 // outside party, or a clock. It holds no slot.
 type WorkWait struct {
@@ -1352,6 +1377,7 @@ type HeavyRegion struct {
 // WorkJob is a job in the farm's queue.
 // +kubebuilder:object:root=true
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 50",message="a WorkJob name is at most 50 characters (it labels and prefixes its unit pods)"
+// +kubebuilder:validation:XValidation:rule="has(self.spec.review) == has(oldSelf.spec.review) && (!has(self.spec.review) || self.spec.review == oldSelf.spec.review)",message="a job's review is set when it is created"
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=wj
 // +kubebuilder:printcolumn:name="Class",type=string,JSONPath=`.spec.class`

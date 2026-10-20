@@ -62,6 +62,9 @@ func (q *Queue) planJob(ctx context.Context, v *view) (*class.Plan, error) {
 	if err == nil {
 		p, err = recomputeUnit(j, p)
 	}
+	if err == nil {
+		p, err = class.WithReview(j, p)
+	}
 	if err != nil {
 		return nil, err
 	}

@@ -43,6 +43,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
 // Condition types on Tracker and TrackerLink.
@@ -691,8 +692,12 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 		rule = t.Spec.Intake[l.Spec.Intake]
 	}
 	review := ""
-	if rule.Review != nil {
+	switch {
+	case rule.Review != nil:
 		review = rule.Review.Wait
+	case rule.Job != nil && rule.Job.Review != nil:
+		// The job's own review (spec.review) is the one the tracker serves.
+		review = class.ReviewName
 	}
 	jr := farm.JobRef{Namespace: l.Namespace, Name: l.Spec.Target.WorkJob}
 	// A rework relayed for this job whose next version was not made (a

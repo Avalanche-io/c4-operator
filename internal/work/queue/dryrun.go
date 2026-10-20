@@ -52,6 +52,9 @@ func (q *Queue) DryRun(ctx context.Context, job *c4v1.WorkJob, project string) (
 		return out, fmt.Errorf("%w: %v", ErrInvalidJob, err)
 	}
 	plan, err := d.Plan(job)
+	if err == nil {
+		plan, err = class.WithReview(job, plan)
+	}
 	if err != nil {
 		return out, fmt.Errorf("%w: %v", ErrInvalidJob, err)
 	}

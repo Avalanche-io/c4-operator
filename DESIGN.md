@@ -1726,6 +1726,17 @@ and a sweep planner that spawns trials are all generators.
     holds up mount it with a `fromUnit` input, as they would a unit's
     view; `waits[].view` shows it. A unit may read only a wait that
     replies, and a clock cannot reply.
+  - **The job's review** (`spec.review: {server, ask?, choices?,
+    expectSeconds?}`, integrations GAPS 7). A final wait, unit `@review`,
+    after every other unit, including those an expansion adds later
+    (`Plan.Apply` joins each to it, whatever the document's dependents
+    say), so the job is Succeeded only once it is decided: done means
+    approved, as a tracker means it. Any choice but `fail` completes it;
+    `fail` fails the job. No document names it or waits on it. It counts as
+    blocking, so the job needs the reviewer once its work is done. A
+    requeue reopens it, so an earlier approval passes nothing new. It is
+    set when the job is created, since the queue replays the plan's
+    expansions against it.
   - **Opened by a unit.** A running unit that needs someone (an approval
     of a tool call, an answer, an edited plan) asks at a safe point:
     `c4-unit wait --server person:<id> [--ask] [--choices] [--reply]

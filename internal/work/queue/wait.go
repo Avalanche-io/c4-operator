@@ -359,6 +359,10 @@ func blockingWait(plan *class.Plan, m *jobMem, i int) bool {
 	if m.blockOpen(i) {
 		return !m.done(i) && !m.failed[i]
 	}
+	// The job's review holds up the job itself, though no unit follows it.
+	if r, ok := plan.Review(); ok && r == i {
+		return !m.done(i) && !m.failed[i]
+	}
 	for j, u := range plan.Units {
 		if m.done(j) || m.failed[j] {
 			continue

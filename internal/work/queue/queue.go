@@ -705,6 +705,15 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				m.forgetAcks(i)
 				m.attempts[i] = 0
 			}
+			// Work run again is reviewed again: the job's review reopens,
+			// so an earlier approval does not pass the new work.
+			if r, ok := plan.Review(); ok && len(decode(set)) > 0 {
+				delete(m.succeeded, r)
+				delete(m.failed, r)
+				delete(m.millis, r)
+				delete(m.ended, r)
+				delete(m.waitRecs().recs, r)
+			}
 			m.requeued = token
 			m.finished = time.Time{}
 			// Moments planned before the requeue did not foresee it.
