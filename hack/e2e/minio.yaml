@@ -16,7 +16,7 @@ spec:
   template:
     metadata: {labels: {app: minio, shard: "0"}}
     spec:
-      nodeSelector: {kubernetes.io/hostname: c4-operator-e2e-control-plane}
+      nodeSelector: {node-role.kubernetes.io/control-plane: ""}
       tolerations: [{operator: Exists}]
       containers:
       - name: minio
@@ -49,7 +49,7 @@ spec:
   template:
     metadata: {labels: {app: minio, shard: "1"}}
     spec:
-      nodeSelector: {kubernetes.io/hostname: c4-operator-e2e-control-plane}
+      nodeSelector: {node-role.kubernetes.io/control-plane: ""}
       tolerations: [{operator: Exists}]
       containers:
       - name: minio
@@ -82,7 +82,7 @@ spec:
   template:
     metadata: {labels: {app: minio, shard: "2"}}
     spec:
-      nodeSelector: {kubernetes.io/hostname: c4-operator-e2e-control-plane}
+      nodeSelector: {node-role.kubernetes.io/control-plane: ""}
       tolerations: [{operator: Exists}]
       containers:
       - name: minio

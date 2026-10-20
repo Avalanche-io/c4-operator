@@ -261,5 +261,9 @@ farm_manager() {
     k -n c4-system patch deploy c4-manager --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args\",\"value\":$want}]" >/dev/null
   fi
   k -n c4-system rollout status deploy/c4-manager --timeout=180s >/dev/null
-  until curl -sf "http://127.0.0.1:$HUD_PORT/api/v1/snapshot?as=wrangler" >/dev/null; do sleep 1; done
+  local end=$((SECONDS + 180))
+  until curl -sf "http://127.0.0.1:$HUD_PORT/api/v1/snapshot?as=wrangler" >/dev/null; do
+    [ $SECONDS -lt $end ] || { echo "the HUD did not answer on 127.0.0.1:$HUD_PORT in 180s (is hud.yaml applied?)" >&2; return 1; }
+    sleep 1
+  done
 }

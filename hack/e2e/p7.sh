@@ -29,12 +29,17 @@ record ""
 record "## P7: provenance, a signer per entity ($(date -u +%Y-%m-%dT%H:%MZ), build $BUILD)"
 record ""
 
-farm_manager
-# P5's pools and quotas, so P7 also runs on a farm P5 never ran on
+# P5's pools, quotas and the HUD's NodePorts (farm_manager waits on the
+# HUD through them), so P7 also runs on a farm P5 never ran on
 k apply -f "$ROOT/hack/e2e/work.yaml" -f "$ROOT/hack/e2e/hud.yaml" >/dev/null
+farm_manager
 k patch project show-a --type=merge -p '{"spec":{"work":{"quotas":[{"pool":"cpu","nominal":8,"borrowingLimit":8},{"pool":"gpu","nominal":4,"borrowingLimit":4},{"pool":"spot","nominal":0,"borrowingLimit":8}]}}}' >/dev/null
 log "the certificate issuer"
-until [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SIGNER/v1/certificate")" = 401 ]; do sleep 1; done
+end=$((SECONDS + 180))
+until [ "$(curl -s -o /dev/null -w '%{http_code}' -X POST "$SIGNER/v1/certificate")" = 401 ]; do
+  [ $SECONDS -lt $end ] || { echo "the signer did not answer on $SIGNER in 180s" >&2; exit 1; }
+  sleep 1
+done
 k -n c4-system get configmap c4-provenance -o jsonpath='{.data.ca\.crt}' >"$OUT/p7-roots.pem"
 k -n c4-system get configmap c4-provenance -o json | python3 -I -c '
 import json,sys
@@ -160,8 +165,11 @@ until [ -n "$(k -n show-a get workjob sh050-denoise-v002 -o jsonpath='{.status.o
 
 log "the chain of custody"
 FRAME=renders/sh050-denoised/sh050-denoised.1004.exr
-for i in $(seq 1 30); do
-  get "custody/show-a/sh050-denoise-v002?path=$FRAME" >"$OUT/p7-custody.json" && break
+# until the queue has signed the denoise's end (its record carries the
+# HUD's control record), at most a minute
+for i in $(seq 1 60); do
+  get "custody/show-a/sh050-denoise-v002?path=$FRAME" >"$OUT/p7-custody.json" &&
+    ! grep -q 'has not ended' "$OUT/p7-custody.json" && break
   sleep 1
 done
 get "trace/show-a/sh050-denoise-v002?path=$FRAME" >"$OUT/p7-trace-denoise.json"
