@@ -40,5 +40,5 @@ ARCHIVE="$OUT/c4-samples-$VERSION.tar.gz"
 tar -C "$STAGE" --sort=name --owner=0 --group=0 --numeric-owner --mtime='2026-10-01 00:00Z' \
   -czf "$ARCHIVE" saltmarsh pipeline-tools lora-saltmarsh deadline 2>/dev/null ||
   (cd "$STAGE" && COPYFILE_DISABLE=1 tar -czf "$ARCHIVE" saltmarsh pipeline-tools lora-saltmarsh deadline)
-c4 id "$ARCHIVE" | awk '{print $1}' > "$ARCHIVE.c4"
+c4 -x < "$ARCHIVE" > "$ARCHIVE.c4"  # the bare ID (c4 id prints a c4m line)
 echo "$ARCHIVE $(cat "$ARCHIVE.c4")"
