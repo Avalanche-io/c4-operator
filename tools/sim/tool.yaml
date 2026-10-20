@@ -1,0 +1,39 @@
+c4: tool/1
+name: sim
+title: Fluid sim bake
+summary: Bakes a fluid sim to OpenVDB caches, the whole range in one unit, with Blender's Mantaflow (a .blend) or Houdini (a .hip, on farms with a Houdini image).
+kind: frames
+runs:
+  image: c4/job-sim
+  command: [bash, "{{Tool.Dir}}/sim.sh", "{{Param.scene}}", "{{Param.domain}}", "{{Param.node}}"]
+frames: {chunk: all, order: sequential}
+params:
+- name: scene
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The scene. A .blend bakes its fluid domain with Mantaflow; a .hip renders a File Cache node with hython; a .py is run by Blender to build the .blend first. The cache goes to cache/ beside the scene.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Scene, fileFilters: [{label: Blender, patterns: ["*.blend"]}, {label: Houdini, patterns: ["*.hip", "*.hipnc", "*.hiplc"]}, {label: Blender script, patterns: ["*.py"]}]}
+- name: domain
+  type: STRING
+  default: FogDomain
+  minLength: 1
+  description: For a Blender scene, the object with the Fluid domain modifier.
+  show: advanced
+  userInterface: {control: LINE_EDIT, label: Fluid domain (Blender)}
+- name: node
+  type: STRING
+  default: /obj/fog/filecache1
+  minLength: 1
+  description: For a Houdini scene, the File Cache (or any ROP) node to render over the frames.
+  show: advanced
+  userInterface: {control: LINE_EDIT, label: Cache node (Houdini)}
+writes: ["**/cache/"]
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1003
+  with: {scene: fx/fog_setup.py}
+  expect: [fx/cache/data/fluid_data_1001.vdb, fx/cache/data/fluid_data_1003.vdb]
