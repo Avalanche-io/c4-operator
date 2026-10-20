@@ -78,8 +78,8 @@ func TestFarmCLIAgainstTheHUD(t *testing.T) {
 		job.Spec.Deadline == nil || !job.Spec.Deadline.Time.Equal(time.Date(2026, 10, 24, 1, 0, 0, 0, time.UTC)) {
 		t.Fatalf("job: view %s (want %s), owner %q, deadline %v", mat.Spec.Source.ID, want, job.Annotations[c4v1.AnnotationOwner], job.Spec.Deadline)
 	}
-	if args := job.Spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(args, "usdrecord --disableGpu --renderer Cycles") ||
-		!strings.Contains(args, "/show/sm0140/sm0140.usda /show/render/sm0140.####.exr") {
+	if args := job.Spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(args, "set -- --disableGpu --renderer Cycles") ||
+		!strings.Contains(args, `usdrecord "$@" /show/sm0140/sm0140.usda /show/render/sm0140.####.exr`) {
 		t.Fatalf("script:\n%s", args)
 	}
 
