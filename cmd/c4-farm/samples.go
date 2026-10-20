@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,6 +58,9 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 	fmt.Fprintf(stdout, "projects  %s\n", line)
 	for _, name := range p.Projects {
 		if b, ok := sc.Budgets[name]; ok {
+			if v, err := strconv.ParseFloat(b, 64); err == nil {
+				b = fmt.Sprintf("%.2f", v)
+			}
 			fmt.Fprintf(stdout, "budget    %s may rent $%s of burst capacity today on its own\n", name, b)
 		}
 	}
