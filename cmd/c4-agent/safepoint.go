@@ -72,34 +72,18 @@ func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agen
 	if ref != "" {
 		args = append(args, "--checkpoint", ref)
 	}
-	// a turn that wrote a question for a person opens a wait at this safe
-	// point instead (c4-unit wait)
-	ask, askErr := takeAsk(out)
-	if askErr != nil {
-		askRefused(out, askErr.Error(), stderr)
-	}
-	if ask != nil {
-		args = ask.args(ref)
-	}
 	args = append(args, "--wait", safepointWait.String())
-	var said strings.Builder
 	cmd := exec.CommandContext(ctx, bin, args...)
-	cmd.Stdout, cmd.Stderr = &said, stderr
+	cmd.Stderr = stderr
 	cmd.Env = env // nil: the hook's own environment
 	err := cmd.Run()
 	var exit *exec.ExitError
 	switch {
 	case errors.As(err, &exit) && exit.ExitCode() == stopCode:
-		why := "The farm decided this unit stops at its safe point; the turn is saved."
-		if ask != nil {
-			why = "Your question went to " + ask.Server + "; the block stops here and resumes with the answer."
-		}
-		out, _ := json.Marshal(map[string]any{"continue": false, "stopReason": why})
+		out, _ := json.Marshal(map[string]any{"continue": false,
+			"stopReason": "The farm decided this unit stops at its safe point; the turn is saved."})
 		fmt.Fprintln(stdout, string(out))
 		return // its messages wait for the attempt that resumes it
-	case ask != nil:
-		// the farm did not open the wait: the block decides for itself
-		askRefused(out, strings.TrimSpace(said.String()), stderr)
 	case err != nil:
 		fmt.Fprintln(stderr, "c4-agent hook: c4-unit safepoint:", err)
 	}
@@ -126,87 +110,6 @@ func hookSteer(ctx context.Context, bin string, env []string, stdout, stderr io.
 			"\nTake them into account and carry on with your task, then end your turn as before.",
 	})
 	fmt.Fprintln(stdout, string(out))
-}
-
-// blockAsk is a block's question for a person, which it writes to its
-// unit's .c4/ask.json and ends its turn: the Stop hook opens a wait for it
-// at that safe point (c4-unit wait), the farm stops the block there, and
-// it resumes with the decision ($C4_DECISION, the reply at $C4_REPLY).
-type blockAsk struct {
-	Ask     string   `json:"ask"`
-	Choices []string `json:"choices,omitempty"`
-	// Reply asks for content as well as a decision.
-	Reply bool `json:"reply,omitempty"`
-	// Server is who decides: person:<id> (default person:owner, the job's
-	// owner), party:<name> or clock:<time>.
-	Server string `json:"server,omitempty"`
-	// Expect is how long the answer is expected to take, as a duration.
-	Expect string `json:"expect,omitempty"`
-}
-
-// takeAsk reads and consumes out's .c4/ask.json (renamed to ask.sent, so a
-// hook that runs twice asks once); nil when there is none.
-func takeAsk(out string) (*blockAsk, error) {
-	if out == "" {
-		return nil, nil
-	}
-	path := filepath.Join(out, ".c4", "ask.json")
-	b, err := os.ReadFile(path)
-	if errors.Is(err, os.ErrNotExist) {
-		return nil, nil
-	}
-	if err != nil {
-		return nil, err
-	}
-	os.Rename(path, filepath.Join(out, ".c4", "ask.sent"))
-	var a blockAsk
-	dec := json.NewDecoder(strings.NewReader(string(b)))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&a); err != nil {
-		return nil, fmt.Errorf("ask.json: %v", err)
-	}
-	if strings.TrimSpace(a.Ask) == "" {
-		return nil, errors.New("ask.json: no question in ask")
-	}
-	if a.Server == "" {
-		a.Server = "person:owner"
-	}
-	if !strings.Contains(a.Server, ":") {
-		return nil, fmt.Errorf("ask.json: server %q is not person:<id>, party:<name> or clock:<time>", a.Server)
-	}
-	if a.Expect != "" {
-		if _, err := time.ParseDuration(a.Expect); err != nil {
-			return nil, fmt.Errorf("ask.json: expect %q is not a duration", a.Expect)
-		}
-	}
-	return &a, nil
-}
-
-func (a *blockAsk) args(ref string) []string {
-	args := []string{"wait", "--server", a.Server, "--ask", a.Ask}
-	if len(a.Choices) > 0 {
-		args = append(args, "--choices", strings.Join(a.Choices, ","))
-	}
-	if a.Reply {
-		args = append(args, "--reply")
-	}
-	if a.Expect != "" {
-		args = append(args, "--expect", a.Expect)
-	}
-	if ref != "" {
-		args = append(args, "--checkpoint", ref)
-	}
-	return args
-}
-
-// askRefused tells a block its question was not put to anyone, as the note
-// of its next part, so the runner wakes it to decide for itself.
-func askRefused(out, why string, stderr io.Writer) {
-	fmt.Fprintln(stderr, "c4-agent hook: the question was not asked:", why)
-	note := "Your question was not put to anyone (" + why + "). Decide it yourself, say in your output what you decided and why, and carry on with your task."
-	if err := os.WriteFile(filepath.Join(out, ".c4", "more"), []byte(note+"\n"), 0o644); err != nil {
-		fmt.Fprintln(stderr, "c4-agent hook:", err)
-	}
 }
 
 // safepointRef names the turn the safe point is at: the member's checkpoint

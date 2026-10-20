@@ -260,7 +260,7 @@ func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	b.WriteString("  - a generator writes its expansion document (version 1) to expand.json there;\n")
 	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n")
 	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note (to withdraw one, write the file empty).\n")
-	b.WriteString(`- If you cannot go on without a person's decision, ask for it: write ask.json in that .c4/ directory, {"ask": "your question, on its own", "choices": ["a", "b"], "reply": false}, and end your turn. Choices are optional; "reply": true asks for files as well. The farm stops your block until the job's owner answers, then wakes you with the answer. Ask only what you cannot reasonably decide yourself.` + "\n\n")
+	b.WriteString("- Act on your brief: decide everything it leaves to you, and never ask for confirmation of what it says. If it lacks information only a person could give, do not guess: say exactly what is missing in your reply, write no done, and end your turn. That stops this block as an error the pipeline must fix.\n\n")
 	return b.String()
 }
 

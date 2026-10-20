@@ -309,28 +309,14 @@ What the host needs:
 - The account the sessions run as still shows in their context (its
   email); restricted mode removes everything else of the machine's.
 
-### A block asks a person
+### Acting on the brief, and questions
 
-A block that cannot go on without a person's decision asks for one. It
-writes `ask.json` in its unit's `.c4/` and ends its turn:
-
-```json
-{"ask": "Port the C extension too?", "choices": ["yes", "no"], "reply": false, "expect": "2h"}
-```
-
-| field     | meaning                                                                         |
-| --------- | ------------------------------------------------------------------------------- |
-| `ask`     | the question, on its own                                                        |
-| `choices` | the answers to choose from (optional)                                           |
-| `reply`   | `true` asks for files as well as a decision                                     |
-| `server`  | who decides: `person:<id>` (default `person:owner`, the job's owner), `party:<name>` or `clock:<time>` |
-| `expect`  | how long the answer is expected to take, as a duration                          |
-
-At that safe point the Stop hook runs `c4-unit wait` instead of
-`c4-unit safepoint`, and consumes the file, so a question is asked once.
-- **The farm opens the wait.** The block stops there and gives up its slot, and its pod yields (reason `wait`).
-- **When the person decides,** the next attempt resumes the session by its ID. The resume prompt says who decided what, with their note. It also says where the reply's files are: `$C4_REPLY` in a pod, or on a host the runner fetches the reply view into the unit directory's `reply/`.
-- **The farm doesn't open the wait, or the file is malformed.** The hook writes the reason as the block's next-part note, and the block is woken to decide for itself.
+A block acts on its brief. It decides everything the brief leaves to it,
+and never asks for confirmation of what the brief says, as a renderer
+renders the light it was given.
+- **Information only a person could give.** If the brief lacks it, the block says what is missing in its reply and ends its turn without `done`. The attempt then fails as an error the pipeline must fix: supply the information (a rework) and retry, and the block resumes by its ID.
+- **A person who decides on purpose,** such as a creative approval gate, is a step in the job's graph: a wait or a review that a person decides. The block resumed after it hears the decision (`$C4_DECISION`), with the reply's files at `$C4_REPLY`, or fetched into the host unit's `reply/`.
+- **Coming:** questions between agents (a block asks its lead, a peer or a reviewer for a fact it lacks, keeping its slot while an agent answers), and missing information as a `NeedsInformation` incident that is not retried. See proposals/agent-jobs ASKS.md.
 
 ### Steering a running block
 
