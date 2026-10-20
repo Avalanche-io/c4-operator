@@ -25,7 +25,7 @@ func TestParse(t *testing.T) {
 		t.Fatal("a 1s interval should be refused")
 	}
 	out.Reset()
-	if _, err := parse([]string{"--version"}, &out); err != errVersion || !strings.Contains(out.String(), "flow, github, mlflow") {
+	if _, err := parse([]string{"--version"}, &out); err != errVersion || !strings.Contains(out.String(), "flow, github, kitsu, mlflow") {
 		t.Fatalf("version: %v %q", err, out.String())
 	}
 }

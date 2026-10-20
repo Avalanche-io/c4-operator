@@ -995,6 +995,11 @@ func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, erro
 		if err != nil || cur == st.ID {
 			return tracker.Ref{}, err
 		}
+		// A done Task is the supervisor's approval: c4-sync never moves
+		// it, whatever the job does after.
+		if now, err := a.statusID(ctx, cur); err != nil || now.IsDone {
+			return tracker.Ref{}, err
+		}
 		body := ""
 		if w.Note != nil {
 			body = w.Note.Body

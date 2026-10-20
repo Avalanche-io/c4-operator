@@ -8,7 +8,7 @@
 //	c4-sync --hud http://c4-hud.c4-system --hud-token-file /var/run/c4-sync/token
 //
 // Deliveries are received at /webhooks/{namespace}/{tracker} on --listen;
-// /healthz answers ok. Adapters built in: flow, github, mlflow.
+// /healthz answers ok. Adapters built in: flow, github, kitsu, mlflow.
 package main
 
 import (
@@ -33,6 +33,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/flow"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/github"
+	_ "github.com/Avalanche-io/c4-operator/internal/tracker/kitsu"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/mlflow"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/syncer"
 )

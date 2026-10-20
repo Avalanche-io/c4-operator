@@ -391,3 +391,15 @@ func TestDecisions(t *testing.T) {
 		t.Fatalf("since: %+v", ds)
 	}
 }
+
+// A done Task is the supervisor's approval: no status write moves it.
+func TestDoneIsNeverMoved(t *testing.T) {
+	sh := newShow(t)
+	a := sh.adapter(t, nil)
+	sh.site.Comment(sh.dana, sh.task, "done", "Approved.")
+	ref, err := a.Apply(context.Background(), tracker.Write{On: tracker.Ref{Type: "Task", ID: sh.task}, Kind: "status",
+		Fields: map[string]string{"flag": "is_wip"}, Key: "k", Note: &tracker.Note{Body: "C4: running"}})
+	if err != nil || ref.ID != "" || sh.site.StatusOf(sh.task) != "done" || len(sh.site.Comments(sh.task)) != 1 {
+		t.Fatalf("moved a done task: %v %v %s", ref, err, sh.site.StatusOf(sh.task))
+	}
+}
