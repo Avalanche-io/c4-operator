@@ -8,9 +8,10 @@ Configuration, in order: explicit arguments, then the environment:
 - ``C4_HUD_TOKEN`` or ``C4_HUD_TOKEN_FILE``: the artist's bearer token (the
   file is read on every request, so a rotated token takes effect).
 
-The routes for submissions, tools and projects are not built yet; their
-shapes here are the ones proposed for them on 2026-10-20, and change with
-what lands.
+The tools routes are the farm's (``GET /tools/{project}`` and
+``/tools/{project}/{tool}``). Submissions and projects are not built yet;
+their shapes here are the ones proposed for them on 2026-10-20, and change
+with what lands.
 """
 
 import json
@@ -150,12 +151,14 @@ class Farm:
             raise
 
     def tools(self, project: str) -> List[dict]:
-        """The tools published to the project: ``[{name, title, summary, kind, version, id}]``."""
+        """The tools the project may use, at the versions in use:
+        ``[{name, title, summary, kind, version, view, image, scope}]``."""
         out = self._slice1(f"/tools/{q(project)}", "tools")
         return out.get("tools", out) if isinstance(out, dict) else out
 
     def tool(self, project: str, name: str) -> dict:
-        """One tool, with its parameters: ``{name, version, id, tool: {...tool.yaml}}``."""
+        """One tool at the version in use, with ``params``, ``frames`` and
+        ``needs`` as its ``tool.yaml`` writes them."""
         return self._slice1(f"/tools/{q(project)}/{q(name)}", f"the tool {name}")
 
     def project(self, project: str) -> Optional[dict]:

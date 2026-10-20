@@ -156,14 +156,16 @@ class Param:
 
 class Tool:
     """A tool's definition. ``d`` is ``tool.yaml`` as JSON, or the farm's
-    answer for one tool (``{name, version, id, tool: {...}}``)."""
+    answer for one tool (``GET /tools/{project}/{tool}``: the version in
+    use, its tree as ``view``, and ``params``, ``frames`` and ``needs`` as
+    ``tool.yaml`` writes them)."""
 
     def __init__(self, d: dict):
         body = d.get("tool") if isinstance(d.get("tool"), dict) else d
         self.raw = body
         self.name: str = body.get("name") or d.get("name", "")
         self.version: str = str(d.get("version", body.get("version", "")) or "")
-        self.id: str = d.get("id", "")
+        self.id: str = d.get("view") or d.get("id", "")   # the version's tree
         self.title: str = body.get("title") or self.name
         self.summary: str = body.get("summary", "")
         self.kind: str = body.get("kind", "once")

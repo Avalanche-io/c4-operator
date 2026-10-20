@@ -152,9 +152,14 @@ class FakeFarm:
     def tools(self, project: str) -> List[dict]:
         self.calls.append(("tools", project))
         self._need_slice1()
-        return [{"name": t["name"], "title": t.get("title", ""), "summary": t.get("summary", ""),
-                 "kind": t["kind"], "version": "v1", "id": identify(json.dumps(t, sort_keys=True))}
-                for t in self.tools_by.values()]
+        return [self._summary(t) for t in self.tools_by.values()]
+
+    @staticmethod
+    def _summary(t: dict) -> dict:
+        # GET /tools/{project}'s ToolSummary.
+        return {"name": t["name"], "title": t.get("title", ""), "summary": t.get("summary", ""), "kind": t["kind"],
+                "version": "v1", "view": identify(json.dumps(t, sort_keys=True)),
+                "image": (t.get("runs") or {}).get("image", ""), "scope": "project"}
 
     def tool(self, project: str, name: str) -> dict:
         self.calls.append(("tool", project, name))
@@ -162,7 +167,15 @@ class FakeFarm:
         if name not in self.tools_by:
             raise NotOnFarm(404, f"no tool {name}")
         t = self.tools_by[name]
-        return {"name": name, "version": "v1", "id": identify(json.dumps(t, sort_keys=True)), "tool": t}
+        # GET /tools/{project}/{tool}'s ToolDetail: the summary, with params,
+        # frames and needs as tool.yaml writes them.
+        out = self._summary(t)
+        out.update({"params": t.get("params") or [], "paramSchema": {"type": "object"},
+                    "test": {"job": f"{name}-test-v1", "state": "ok"}})
+        for k in ("frames", "needs"):
+            if k in t:
+                out[k] = t[k]
+        return out
 
     def project(self, project: str) -> Optional[dict]:
         self.calls.append(("project", project))
