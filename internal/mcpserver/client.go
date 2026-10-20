@@ -37,6 +37,9 @@ type Client struct {
 type APIError struct {
 	Status int
 	Msg    string
+	// Body is the answer as sent, for answers that carry more than an
+	// error (a refused submission's errors).
+	Body []byte
 }
 
 func (e *APIError) Error() string { return e.Msg }
@@ -96,7 +99,7 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 			Error string `json:"error"`
 		}
 		_ = json.Unmarshal(data, &e)
-		return &APIError{Status: resp.StatusCode, Msg: advise(resp.StatusCode, path, e.Error)}
+		return &APIError{Status: resp.StatusCode, Msg: advise(resp.StatusCode, path, e.Error), Body: data}
 	}
 	if out == nil {
 		return nil

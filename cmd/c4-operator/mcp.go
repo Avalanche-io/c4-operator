@@ -75,7 +75,7 @@ func runMCP(args []string) error {
 // see.
 func toolsMarkdown(w io.Writer) error {
 	ctx := context.Background()
-	srv := mcpserver.New(&mcpserver.Client{Base: "http://unused"})
+	srv := mcpserver.New(&mcpserver.Client{}) // no HUD: the fixed tools only, not a farm's c4_run_<tool>
 	ct, st := mcp.NewInMemoryTransports()
 	if _, err := srv.Connect(ctx, st, nil); err != nil {
 		return err

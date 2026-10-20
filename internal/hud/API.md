@@ -695,7 +695,7 @@ the updated JobSummary; `node` the updated node. Errors are `4xx` with
 
 ## Submitting
 
-What `c4 farm submit` calls, and MCP's `c4_submit_job` wraps. Each write
+What `c4 farm submit` calls: objects, views and jobs. MCP's `c4_submit_job` and `c4_run_<tool>` submit through `POST /submissions` instead. Each write
 is checked like a control (a SubjectAccessReview for creating
 materializations, or workjobs, in the project's namespace) and made with the
 HUD's service account; the bytes go through the manager's own store access,

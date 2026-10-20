@@ -3,7 +3,7 @@ package server
 // Submitting work through the HUD: objects into a project's store, a tree
 // of them recorded as a view, and a WorkJob (with the Materializations of
 // its input views) created for the signed-in viewer. These are the calls
-// `c4 farm submit` makes and MCP's c4_submit_job wraps. Each is checked
+// `c4 farm submit` makes; MCP submits through POST /submissions. Each is checked
 // against the viewer's Kubernetes permissions like every control, and the
 // bytes go through the manager's own store access, so no store credential
 // leaves the cluster.

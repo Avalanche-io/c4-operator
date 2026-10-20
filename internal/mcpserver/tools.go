@@ -21,7 +21,7 @@ var Version = "dev"
 
 // Instructions are sent to clients when they connect.
 const Instructions = `This server operates a render, CI and ML farm on Kubernetes, the same farm the HUD shows. Jobs are named namespace/name.
-Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in with c4_submit_job (dry_run first). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), take or accept them (c4_acknowledge_units), or decide what waits for a person, a ruling or an escalated unit (c4_decide). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
+Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in through a published tool: c4_list_tools, c4_describe_tool, then c4_run_<tool> for one job or c4_submit_job for a submission of several (dry_run first, either way). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), take or accept them (c4_acknowledge_units), or decide what waits for a person, a ruling or an escalated unit (c4_decide). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
 Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. Costs: c4_approve_capacity provisions paid burst capacity.`
 
 func boolPtr(b bool) *bool { return &b }
@@ -38,6 +38,13 @@ func New(c *Client) *mcp.Server {
 	for _, t := range Tools(c) {
 		t.add(s)
 	}
+	// Each published tool is its own tool too (authoring.go), when the
+	// server has a HUD to ask.
+	if c != nil && c.Base != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		c.addRunTools(ctx, s)
+		cancel()
+	}
 	return s
 }
 
@@ -46,6 +53,13 @@ func New(c *Client) *mcp.Server {
 type Tool struct {
 	Def *mcp.Tool
 	add func(*mcp.Server)
+}
+
+// withSchema gives a tool its input schema instead of the one inferred
+// from its input type.
+func (t Tool) withSchema(s any) Tool {
+	t.Def.InputSchema = s
+	return t
 }
 
 func tool[In, Out any](name, title, desc string, ann *mcp.ToolAnnotations, h mcp.ToolHandlerFor[In, Out]) Tool {
@@ -108,8 +122,14 @@ func Tools(c *Client) []Tool {
 			idempotent, c.avoidNode),
 		tool("c4_disable_node", "Disable or enable a node", "Take a node out of service for the whole farm (running units finish) or put it back.",
 			idempotent, c.disableNode),
-		tool("c4_submit_job", "Submit a job", "Submit a render, CI or training job: the class and its parameters, the image each unit runs, input views or upstream jobs, and an optional deadline (omit it and the farm suggests one). Call with dry_run first: it returns the estimate (units, ETA p50 and p90, slack, on track or not) and creates nothing; show it to the person, then submit. The job is owned by the person you act for.",
-			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.submitJob),
+		tool("c4_list_tools", "List tools", "The tools published to your projects: each one's name, title, summary, kind (frames, once, shards, train, agent), version and scope, and the c4_run_<tool> that runs it. Work goes in through a tool: pick one here, read its parameters with c4_describe_tool, then submit.",
+			readOnly, c.listTools),
+		tool("c4_describe_tool", "Describe a tool", "One published tool: its parameters as its tool.yaml writes them and as the JSON Schema of a submission's with, its frames, its needs, its test on the farm and its versions.",
+			readOnly, c.describeTool),
+		tool("c4_publish_tool", "Publish a tool", "Publish a tool folder (a tree with tool.yaml at its root, already uploaded to the project's store) to a project, or to every project with farm. The farm checks tool.yaml, pins its image by digest into tool.lock and runs its test as a job; the version is offered only once that test passes, so poll c4_describe_tool with the version. Call with dry_run first to see the errors or the tool.lock.",
+			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.publishTool),
+		tool("c4_submit_job", "Submit a submission", "Submit a submission (c4: submit/1): a project, a shot, when it is due, the tree it works on, and jobs by key, each a published tool with its frames and with, following others with after. Give it as an object (submission) or as YAML (submission_yaml). Call with dry_run first: it returns each job's estimate (units, ETA p50 and p90, slack, on track or not), or the errors at their paths with the fix, and creates nothing; show it to the person, then submit. explain adds what each job lowers to. The jobs are owned by the person you act for. For one tool, c4_run_<tool> writes the submission for you.",
+			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.submitJob).withSchema(submitSchema()),
 		tool("c4_get_capacity_forecast", "Capacity forecast", "What the farm's forecast jobs (work a tracker expects, from a bid or a schedule, not yet submitted) would need among the real work, as of the last forecast pass: burst slots per pool with the forecasts and as planned now, what the difference would cost an hour, and the real jobs the forecast work would put at more risk. Nothing is requested for a forecast; use it to plan capacity and budget before the work arrives.",
 			readOnly, c.capacityForecast),
 		tool("c4_approve_capacity", "Approve burst capacity", "Approve the burst capacity request waiting in a pool. This provisions paid capacity; check c4_capacity_and_cost first for its cost and the jobs it is for.",

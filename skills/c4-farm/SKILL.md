@@ -33,13 +33,19 @@ show a shot's whole chain (sim, FX, comp, transcode).
 
 ## Submitting work
 
-`c4_submit_job` puts a new job in the queue for the person you act for: the class
-(`render` with `frames`, `ci` with `shards`, `ml` with `steps`), the image each unit
-runs, its inputs (a view's C4 ID, or `from_job` for an upstream job's output) and,
-if they gave one, a deadline. Always call it with `dry_run: true` first and tell the
-person what the farm expects (units, ready p50 and p90, slack, on track or not);
-submit only when they agree. Without a deadline the farm suggests one. The job is
-owned by the person, and the book records that you submitted it for them.
+Work goes in through a published tool. `c4_list_tools` lists the tools in the
+person's projects, and `c4_describe_tool` gives one's parameters, frames and needs.
+`c4_run_<tool>` submits one job of a tool: its `with` (the parameters), `frames`
+for a frames tool, the `shot`, when it is `due` (a milestone, a time, a date or
+`suggested`, never a priority) and the `tree` it works on (a view's C4 ID, or
+`job:<name>` for an earlier job's output). `c4_submit_job` takes a whole
+submission (`c4: submit/1`, as an object or as YAML) for several jobs that follow
+each other. Always call either with `dry_run: true` first and tell the person what
+the farm expects (units, ready p50 and p90, slack, on track or not), or what it
+refused and how to fix it; submit only when they agree. The jobs are owned by the
+person, and the book records that you submitted them for them. `c4_publish_tool`
+publishes a tool folder already in the project's store; the farm tests it, and
+offers the version only once the test passes.
 
 ## Changing what happens
 

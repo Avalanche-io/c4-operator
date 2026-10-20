@@ -23,6 +23,8 @@ type fakeHUD struct {
 	mu    sync.Mutex
 	posts []string
 	auth  []string
+	// tools serves two published tools and POST /submissions.
+	tools bool
 }
 
 func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -80,6 +82,55 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Message: "sm0140-render-v001: planned, not submitted",
 			Estimate: &api.SubmitEstimate{Units: 48, ETA50: &eta, ETA90: &eta, Deadline: &due, DeadlineSource: "suggested",
 				SlackSeconds: 10800, Feasible: true}})
+	case f.tools && r.Method == "GET" && r.URL.Path == "/api/v1/tools/show-a":
+		json.NewEncoder(w).Encode(api.ToolListResponse{Tools: []api.ToolSummary{
+			{Name: "proxies", Title: "Proxies and previews", Summary: "Half-size sRGB JPEGs of an EXR plate sequence.", Kind: "frames", Version: "v4", View: "c4proxies", Scope: "project"},
+			{Name: "movie", Title: "Review movie", Summary: "A review movie of the proxies.", Kind: "once", Version: "v1", View: "c4movie", Scope: "farm"}}})
+	case f.tools && r.Method == "GET" && r.URL.Path == "/api/v1/tools/show-a/proxies":
+		json.NewEncoder(w).Encode(api.ToolDetail{ToolSummary: api.ToolSummary{Name: "proxies", Title: "Proxies and previews",
+			Summary: "Half-size sRGB JPEGs of an EXR plate sequence.", Kind: "frames", Version: r.URL.Query().Get("version") + "v4", Scope: "project"},
+			Params: json.RawMessage(`[{"name":"plates","type":"PATH"},{"name":"width","type":"INT","default":960}]`),
+			ParamSchema: map[string]any{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "additionalProperties": false,
+				"properties": map[string]any{"plates": map[string]any{"type": "string"}, "width": map[string]any{"type": "integer", "default": 960}},
+				"required":   []string{"plates"}},
+			Test: &api.ToolTestState{State: "ok", Job: "show-a/proxies-test-v4"}})
+	case f.tools && r.Method == "GET" && r.URL.Path == "/api/v1/tools/show-a/movie":
+		json.NewEncoder(w).Encode(api.ToolDetail{ToolSummary: api.ToolSummary{Name: "movie", Title: "Review movie", Kind: "once", Version: "v1", Scope: "farm"},
+			Params:      json.RawMessage(`[{"name":"range","type":"RANGE_EXPR"}]`),
+			ParamSchema: map[string]any{"type": "object", "properties": map[string]any{"range": map[string]any{"type": "string"}}}})
+	case f.tools && r.Method == "POST" && r.URL.Path == "/api/v1/tools/show-a":
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.posts = append(f.posts, r.URL.Path+" "+string(body))
+		f.mu.Unlock()
+		if strings.Contains(string(body), "c4bad") {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			json.NewEncoder(w).Encode(api.ToolPublishResponse{Errors: []api.FieldError{{Path: "runs.image", Message: "image is required", Fix: "name the image the tool runs"}}})
+			return
+		}
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(api.ToolPublishResponse{OK: true, Tool: "proxies", Version: "v5", View: "c4proxies5",
+			Image: "ghcr.io/avalanche-io/c4-runtime-oiio@sha256:ab12", Scope: "project", Test: &api.ToolTestState{Job: "show-a/proxies-test-v5", State: "running"}})
+	case f.tools && r.Method == "POST" && r.URL.Path == "/api/v1/submissions":
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.posts = append(f.posts, r.URL.Path+" "+string(body))
+		f.mu.Unlock()
+		if strings.Contains(string(body), "karmah") {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "errors": []api.FieldError{{Path: "jobs.light.tool", Message: `no tool "karmah" in show-a`,
+				Fix: `did you mean "karma"? c4 farm tools lists them`}}})
+			return
+		}
+		var req struct {
+			DryRun bool `json:"dryRun"`
+		}
+		json.Unmarshal(body, &req)
+		eta := due.Add(-2 * time.Hour)
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "dryRun": req.DryRun, "submission": "c4sub",
+			"jobs": []map[string]any{{"key": "proxies", "namespace": "show-a", "name": "sm0140-proxies-v001", "tool": "proxies", "version": "v4",
+				"what": "48 frames in 12 units", "estimate": api.SubmitEstimate{Units: 12, ETA50: &eta, ETA90: &eta, Deadline: &due, Feasible: true}}},
+			"explain": "sm0140-proxies-v001  WorkJob show-a/sm0140-proxies-v001"})
 	case r.Method == "GET" && r.URL.Path == "/api/v1/grants":
 		f.mu.Lock()
 		f.posts = append(f.posts, "GET "+r.URL.String())
@@ -179,7 +230,7 @@ func TestToolsAreNamedAndAnnotated(t *testing.T) {
 		}
 		readOnly := strings.HasPrefix(tl.Name, "c4_list") || strings.HasPrefix(tl.Name, "c4_get") || tl.Name == "c4_farm_status" ||
 			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book" ||
-			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options"
+			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool"
 		if tl.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %s: readOnlyHint %v", tl.Name, tl.Annotations.ReadOnlyHint)
 		}
@@ -367,24 +418,109 @@ func TestDeadlineModeAndNextSession(t *testing.T) {
 	}
 }
 
-func TestSubmitJobDryRun(t *testing.T) {
-	hud := &fakeHUD{}
+// c4_submit_job takes a submission, as an object or as YAML (its jobs in
+// the order written), and passes a refusal's errors through.
+func TestSubmitSubmission(t *testing.T) {
+	hud := &fakeHUD{tools: true}
 	cs := session(t, hud, "tok-noor")
-	res, out := call(t, cs, "c4_submit_job", map[string]any{"project": "show-a", "type": "render", "shot": "sm0140", "class": "render",
-		"params": map[string]any{"frames": "1001-1048"}, "image": "ghcr.io/avalanche-io/c4-job-hydra:v0.1.0",
-		"inputs": []any{map[string]any{"view": "c4abc", "mount_path": "/show"}}, "dry_run": true})
-	if res.IsError || out["job"] != "show-a/sm0140-render-v001" || out["submitted"] != false || out["onTrack"] != true || out["units"] != float64(48) {
+	res, out := call(t, cs, "c4_submit_job", map[string]any{"dry_run": true, "explain": true,
+		"submission": map[string]any{"c4": "submit/1", "project": "show-a", "shot": "sm0140",
+			"jobs": map[string]any{"proxies": map[string]any{"tool": "proxies", "frames": "1001-1048", "with": map[string]any{"plates": "plates/sm0140.####.exr"}}}}})
+	jobs, _ := out["jobs"].([]any)
+	if res.IsError || out["ok"] != true || out["submitted"] != false || len(jobs) != 1 || out["explain"] == "" {
 		t.Fatalf("dry run: %v %q", out, text(res))
+	}
+	if j := asMap(jobs[0]); j["job"] != "show-a/sm0140-proxies-v001" || j["onTrack"] != true || j["units"] != float64(12) {
+		t.Fatalf("job %v", j)
+	}
+	yaml := "c4: submit/1\nproject: show-a\njobs:\n  zcomp: {tool: proxies, frames: 1001-1048}\n  alight: {tool: proxies, frames: 1001-1048}\n"
+	if res, _ := call(t, cs, "c4_submit_job", map[string]any{"submission_yaml": yaml}); res.IsError {
+		t.Fatalf("by YAML: %q", text(res))
+	}
+	_, out = call(t, cs, "c4_submit_job", map[string]any{"submission": map[string]any{"c4": "submit/1", "project": "show-a",
+		"jobs": map[string]any{"light": map[string]any{"tool": "karmah"}}}})
+	errs, _ := out["errors"].([]any)
+	if out["ok"] != false || len(errs) != 1 || asMap(errs[0])["path"] != "jobs.light.tool" || asMap(errs[0])["fix"] == "" {
+		t.Fatalf("refused: %v", out)
 	}
 	hud.mu.Lock()
 	defer hud.mu.Unlock()
-	if len(hud.posts) != 1 || !strings.Contains(hud.posts[0], `"dryRun":true`) || !strings.Contains(hud.posts[0], `"runAsNonRoot":true`) ||
-		!strings.Contains(hud.posts[0], `"view":"c4abc"`) {
+	if len(hud.posts) != 3 || !strings.Contains(hud.posts[0], `"dryRun":true`) || !strings.Contains(hud.posts[0], `"explain":true`) {
 		t.Fatalf("posts %v", hud.posts)
 	}
-	res, _ = call(t, cs, "c4_submit_job", map[string]any{"class": "render", "image": "x", "env": map[string]any{"C4_UNIT": "1"}})
-	if !res.IsError {
-		t.Fatal("a C4_ variable was accepted")
+	// YAML keeps the jobs in the order written
+	if p := hud.posts[1]; strings.Index(p, "zcomp") > strings.Index(p, "alight") || strings.Index(p, "zcomp") < 0 {
+		t.Fatalf("by YAML, the jobs' order: %s", p)
+	}
+	if res, _ := call(t, cs, "c4_submit_job", map[string]any{}); !res.IsError {
+		t.Fatal("an empty submission was accepted")
+	}
+}
+
+// The published tools: listed, described, published, and each its own
+// c4_run_<tool>, which submits a one-job submission.
+func TestToolTools(t *testing.T) {
+	hud := &fakeHUD{tools: true}
+	cs := session(t, hud, "tok-noor")
+	_, out := call(t, cs, "c4_list_tools", map[string]any{})
+	tools, _ := out["tools"].([]any)
+	if len(tools) != 2 || asMap(tools[0])["name"] != "proxies" || asMap(tools[0])["project"] != "show-a" || asMap(tools[0])["run"] != "c4_run_proxies" {
+		t.Fatalf("list %v", out)
+	}
+	_, out = call(t, cs, "c4_describe_tool", map[string]any{"tool": "proxies"})
+	if out["project"] != "show-a" || out["kind"] != "frames" || asMap(out["paramSchema"])["type"] != "object" {
+		t.Fatalf("describe %v", out)
+	}
+	res, out := call(t, cs, "c4_publish_tool", map[string]any{"view": "c4folder"})
+	if res.IsError || out["ok"] != true || out["version"] != "v5" || !strings.Contains(out["message"].(string), "only once the test passes") {
+		t.Fatalf("publish %v %q", out, text(res))
+	}
+	_, out = call(t, cs, "c4_publish_tool", map[string]any{"view": "c4bad"})
+	if errs, _ := out["errors"].([]any); out["ok"] != false || len(errs) != 1 || asMap(errs[0])["path"] != "runs.image" {
+		t.Fatalf("refused publish %v", out)
+	}
+
+	lt, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byName := map[string]*mcp.Tool{}
+	for _, tl := range lt.Tools {
+		byName[tl.Name] = tl
+	}
+	if len(lt.Tools) != len(Tools(nil))+2 || byName["c4_run_proxies"] == nil || byName["c4_run_movie"] == nil {
+		t.Fatalf("%d tools; run tools %v %v", len(lt.Tools), byName["c4_run_proxies"], byName["c4_run_movie"])
+	}
+	b, _ := json.Marshal(byName["c4_run_proxies"].InputSchema)
+	var sch map[string]any
+	json.Unmarshal(b, &sch)
+	props := asMap(sch["properties"])
+	with := asMap(props["with"])
+	if asMap(asMap(with["properties"])["plates"])["type"] != "string" || props["frames"] == nil || props["project"] != nil ||
+		!strings.Contains(fmt.Sprint(sch["required"]), "frames") || !strings.Contains(byName["c4_run_proxies"].Description, "Half-size sRGB") {
+		t.Fatalf("c4_run_proxies schema %s, description %q", b, byName["c4_run_proxies"].Description)
+	}
+	b, _ = json.Marshal(byName["c4_run_movie"].InputSchema)
+	if !strings.Contains(string(b), `"frames"`) {
+		t.Fatalf("a once tool with a RANGE_EXPR takes frames: %s", b)
+	}
+
+	res, out = call(t, cs, "c4_run_proxies", map[string]any{"shot": "sm0140", "frames": "1001-1048", "due": "dailies",
+		"with": map[string]any{"plates": "plates/sm0140.####.exr"}, "dry_run": true})
+	if res.IsError || out["ok"] != true {
+		t.Fatalf("run: %v %q", out, text(res))
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	last := hud.posts[len(hud.posts)-1]
+	var sent struct {
+		Submission json.RawMessage `json:"submission"`
+		DryRun     bool            `json:"dryRun"`
+	}
+	json.Unmarshal([]byte(strings.TrimPrefix(last, "/api/v1/submissions ")), &sent)
+	want := `{"c4":"submit/1","project":"show-a","shot":"sm0140","due":"dailies","jobs":{"proxies":{"tool":"proxies@v4","frames":"1001-1048","with":{"plates":"plates/sm0140.####.exr"}}}}`
+	if string(sent.Submission) != want || !sent.DryRun {
+		t.Fatalf("the run tool's submission\n got %s\nwant %s", sent.Submission, want)
 	}
 }
 
