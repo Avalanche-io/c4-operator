@@ -26,7 +26,7 @@ spec:
   - name: after
     expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
   - name: mine
-    expression: "['c4.avalanche.io/preflight', 'c4.avalanche.io/egress', 'c4.avalanche.io/safepoint']"
+    expression: "['c4.avalanche.io/preflight', 'c4.avalanche.io/egress', 'c4.avalanche.io/safepoint', 'c4.avalanche.io/asks', 'c4.avalanche.io/answers', 'c4.avalanche.io/steer-seen']"
   validations:
   - expression: >-
       'authentication.kubernetes.io/node-name' in request.userInfo.extra &&
@@ -36,7 +36,7 @@ spec:
       variables.after.all(k, k.startsWith('c4.avalanche.io/output-') || k in variables.mine ||
         (k in variables.before && variables.before[k] == variables.after[k])) &&
       variables.before.all(k, k.startsWith('c4.avalanche.io/output-') || k in variables.mine || k in variables.after)
-    message: the c4 node daemon may only change c4.avalanche.io/output-*, preflight and egress annotations
+    message: the c4 node daemon may only change c4.avalanche.io/output-*, preflight, egress, safepoint, asks, answers and steer-seen annotations
   - expression: >-
       (has(object.metadata.labels) ? object.metadata.labels : {}) ==
       (has(oldObject.metadata.labels) ? oldObject.metadata.labels : {})

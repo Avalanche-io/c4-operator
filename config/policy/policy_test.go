@@ -154,7 +154,10 @@ func TestNodeDaemonWrites(t *testing.T) {
 	enforced(t, "c4-node-writes", func(try int) error {
 		return annotate(mine, "example.com/other", fmt.Sprint(try))
 	})
-	for _, k := range []string{c4v1.AnnotationOutputTree, c4v1.AnnotationPreflight, c4v1.AnnotationEgress} {
+	// the unit's notes the daemon relays: its questions and answers, and
+	// how far it read its messages
+	for _, k := range []string{c4v1.AnnotationOutputTree, c4v1.AnnotationPreflight, c4v1.AnnotationEgress,
+		c4v1.AnnotationAsks, c4v1.AnnotationAnswers, c4v1.AnnotationSteerSeen} {
 		if err := annotate(mine, k, "v"); err != nil {
 			t.Errorf("%s on its own node's pod: %v", k, err)
 		}
@@ -327,7 +330,7 @@ func TestHostRunnerWrites(t *testing.T) {
 		t.Errorf("checkpoint annotations on its pod: %v", err)
 	}
 	// the safe point it relays, and a generator's expansion document
-	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/safepoint":"{\"seq\":1}","c4.avalanche.io/output-expand":"c4abc","c4.avalanche.io/output-verdict":"c4def","c4.avalanche.io/output-measure":"c4fed","c4.avalanche.io/output-usage":"c4bee","c4.avalanche.io/output-tree":"c4cab"}}}`); err != nil {
+	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/safepoint":"{\"seq\":1}","c4.avalanche.io/output-expand":"c4abc","c4.avalanche.io/output-verdict":"c4def","c4.avalanche.io/output-measure":"c4fed","c4.avalanche.io/output-usage":"c4bee","c4.avalanche.io/output-tree":"c4cab","c4.avalanche.io/asks":"[]","c4.avalanche.io/answers":"[]","c4.avalanche.io/steer-seen":"1"}}}`); err != nil {
 		t.Fatalf("the runner relays a safe point and names its documents on its pod: %v", err)
 	}
 	// but not the queue's answer

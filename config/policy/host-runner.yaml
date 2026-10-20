@@ -111,7 +111,7 @@ spec:
   - name: after
     expression: "request.operation == 'DELETE' || request.resource.resource != 'pods' || !has(object.metadata.annotations) ? {} : object.metadata.annotations"
   - name: mine
-    expression: "['c4.avalanche.io/output-checkpoint', 'c4.avalanche.io/output-epoch', 'c4.avalanche.io/output-expand', 'c4.avalanche.io/output-verdict', 'c4.avalanche.io/output-measure', 'c4.avalanche.io/output-usage', 'c4.avalanche.io/output-tree', 'c4.avalanche.io/safepoint']"
+    expression: "['c4.avalanche.io/output-checkpoint', 'c4.avalanche.io/output-epoch', 'c4.avalanche.io/output-expand', 'c4.avalanche.io/output-verdict', 'c4.avalanche.io/output-measure', 'c4.avalanche.io/output-usage', 'c4.avalanche.io/output-tree', 'c4.avalanche.io/safepoint', 'c4.avalanche.io/asks', 'c4.avalanche.io/answers', 'c4.avalanche.io/steer-seen']"
   validations:
   - expression: "request.resource.resource != 'leases' || (request.namespace == 'kube-node-lease' && object.metadata.name == variables.host)"
     message: a host runner may only write its own Lease in kube-node-lease
@@ -130,7 +130,7 @@ spec:
         variables.after.all(k, k in variables.mine || (k in variables.before && variables.before[k] == variables.after[k]) ||
           (k == 'c4.avalanche.io/yield' && !(k in variables.before) && variables.after[k] == 'disruption' && has(oldObject.metadata.deletionTimestamp))) &&
         variables.before.all(k, k in variables.mine || k in variables.after))
-    message: a host runner may change only a pod's status and its output-checkpoint, output-epoch, output-expand, output-verdict, output-measure, output-usage, output-tree and safepoint annotations, and mark a pod the farm is deleting as drained
+    message: a host runner may change only a pod's status and its output-checkpoint, output-epoch, output-expand, output-verdict, output-measure, output-usage, output-tree, safepoint, asks, answers and steer-seen annotations, and mark a pod the farm is deleting as drained
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
