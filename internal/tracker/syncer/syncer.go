@@ -1137,7 +1137,8 @@ var DefaultVerdicts = map[string]string{
 }
 
 // verdictFor is the C4 decision for a tracker's native word: the Tracker's
-// verdictsIn, else the adapter's own default, else DefaultVerdicts.
+// verdictsIn, else the adapter's own default (tracker.Verdicter), else, for
+// adapters without one, DefaultVerdicts: those are GitHub's words.
 func verdictFor(t *c4v1.Tracker, a tracker.Adapter, native string) string {
 	if v, ok := t.Spec.VerdictsIn[native]; ok {
 		return v

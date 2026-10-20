@@ -362,6 +362,7 @@ func TestPublish(t *testing.T) {
 // flags give the default verdicts.
 func TestDecisions(t *testing.T) {
 	sh := newShow(t)
+	sh.site.AddStatus(kitsutest.Status{Name: "Could Be Better", ShortName: "cbb", IsDone: true})
 	ck := time.Date(2026, 10, 20, 10, 0, 0, 0, time.UTC)
 	sh.site.SetClock(func() time.Time { return ck })
 	a := sh.adapter(t, map[string]string{"review_status": "wfa"})
@@ -384,7 +385,7 @@ func TestDecisions(t *testing.T) {
 		ds[0].Body != "Fill light too hot, 1040 to 1060.\nKeep the rim as is.\n> And warmer." || len(ds[0].Evidence) == 0 {
 		t.Fatalf("decisions: %+v", ds)
 	}
-	if a.Verdict("status:retake") != "rework" || a.Verdict("status:done") != "approve" || a.Verdict("status:wip") != "" || a.Verdict("x") != "" {
+	if a.Verdict("status:retake") != "rework" || a.Verdict("status:done") != "approve" || a.Verdict("status:cbb") != "approve" || a.Verdict("status:wip") != "" || a.Verdict("x") != "" {
 		t.Fatal("verdicts by flag")
 	}
 	if ds, _ := a.Decisions(ctx, on, ck); len(ds) != 0 {
