@@ -66,3 +66,26 @@ func TestProjectObjects(t *testing.T) {
 		t.Error("Saltmarsh moved in the store")
 	}
 }
+
+// The farm's registry: every node's containerd reads per-registry hosts
+// files, the manager pins from the registry without TLS, and a development
+// farm's own images come from it.
+func TestRegistry(t *testing.T) {
+	if cfg := string(KindConfig(Options{})); !strings.Contains(cfg, `config_path = "/etc/containerd/certs.d"`) {
+		t.Errorf("no containerd patch in\n%s", cfg)
+	}
+	args := strings.Join(ManagerArgs(Options{}), " ")
+	if !strings.Contains(args, "--hud-plain-registries="+RegistryInFarm) || strings.Contains(args, "--hud-image-registry") {
+		t.Errorf("a release farm: %s", args)
+	}
+	args = strings.Join(ManagerArgs(Options{LocalImages: true}), " ")
+	if !strings.Contains(args, "--hud-image-registry="+RegistryInFarm) || !strings.Contains(args, "--hud-image-tag=dev") {
+		t.Errorf("a development farm: %s", args)
+	}
+	for in, want := range map[string]string{"c4-job-hydra:dev": "c4-job-hydra:dev", "ghcr.io/avalanche-io/c4-runtime-oiio:v0.1.0": "c4-runtime-oiio:v0.1.0",
+		"thumbs": "thumbs:latest", "registry.example/team/nuke:16@sha256:ab": "nuke:16"} {
+		if got := localName(in); got != want {
+			t.Errorf("%s: %s, want %s", in, got, want)
+		}
+	}
+}

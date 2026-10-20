@@ -34,6 +34,7 @@ The local farm
   up [--as ROLE]           make a farm on this machine in Docker and open its HUD (--port N if 30080 is taken)
   down                     delete the local farm
   status                   the local farm's nodes, slots and sign-ins
+  image load IMAGE...      push images from this machine's Docker into the local farm's registry
 
 Farms
   use FARM                 switch the current farm
@@ -548,6 +549,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		noOpen := fs.Bool("no-open", false, "don't open the HUD")
 		port := fs.Int("port", localfarm.HUDPort, "the HUD's port on this machine")
 		storePort := fs.Int("store-port", localfarm.StorePort, "the store's port on this machine")
+		registryPort := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
@@ -557,7 +559,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		tz := localfarm.LocalTZ()
 		lat, lon := localfarm.Place(tz)
-		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort},
+		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort,
+			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != ""},
 			Install: *install, Version: version, ImageArchive: *archive, Log: stdout}
 		if *plan {
 			fmt.Fprintf(stdout, "%s---\n%s", localfarm.KindConfig(o.Options), localfarm.YAML(localfarm.Farm(o.Options)))
@@ -634,7 +637,22 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		return nil
 
-	case "machine", "image", "agent":
+	case "image":
+		rp := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		if len(pos) < 2 || pos[0] != "load" {
+			return errors.New("usage: c4 farm image load IMAGE... (push images from this machine's Docker into the local farm's registry)")
+		}
+		names, err := localfarm.LoadImages(ctx, *rp, pos[1:])
+		for i, n := range names {
+			fmt.Fprintf(stdout, "loaded    %s as %s\n", pos[1+i], n)
+		}
+		return err
+
+	case "machine", "agent":
 		return fmt.Errorf("%s is not in this build yet; `c4 farm up` makes a local farm, and `c4 farm login HUD-URL` signs in to a running one", cmd)
 	}
 	var names []string

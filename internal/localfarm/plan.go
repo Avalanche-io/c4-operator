@@ -86,6 +86,13 @@ type Options struct {
 	// 127.0.0.1 (default HUDPort and StorePort), for a machine where another
 	// cluster already holds those.
 	HUDHostPort, StoreHostPort int
+	// RegistryHostPort is the farm's registry on 127.0.0.1 (default
+	// RegistryPort), where c4 farm image load pushes.
+	RegistryHostPort int
+	// LocalImages says the farm runs a development build: a tool's
+	// c4/<name> is c4-<name>:dev in the farm's registry, not the release's
+	// image on ghcr.io.
+	LocalImages bool
 }
 
 // HUD is the HUD's address on this machine.
@@ -125,7 +132,9 @@ var nodes = []node{
 // KindConfig is the cluster's kind configuration.
 func KindConfig(o Options) []byte {
 	var b strings.Builder
-	fmt.Fprintf(&b, "# c4 farm up: the local farm %s.\nkind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: %s\nnodes:\n", o.name(), o.name())
+	fmt.Fprintf(&b, "# c4 farm up: the local farm %s.\nkind: Cluster\napiVersion: kind.x-k8s.io/v1alpha4\nname: %s\n", o.name(), o.name())
+	// every node pulls the farm registry's images by name (registry.go)
+	fmt.Fprintf(&b, "containerdConfigPatches:\n- |-\n%s\nnodes:\n", indentLines(registryPatch, "  "))
 	fmt.Fprintf(&b, "- role: control-plane\n  image: %s\n  extraPortMappings:\n", NodeImage)
 	fmt.Fprintf(&b, "  - {containerPort: %d, hostPort: %d, listenAddress: 127.0.0.1}   # the store\n", StorePort, or(o.StoreHostPort, StorePort))
 	fmt.Fprintf(&b, "  - {containerPort: %d, hostPort: %d, listenAddress: 127.0.0.1}   # the HUD\n", HUDPort, or(o.HUDHostPort, HUDPort))
@@ -256,7 +265,17 @@ func ManagerArgs(o Options) []string {
 	if o.TZ != "" {
 		args = append(args, "--tz="+o.TZ)
 	}
+	// the farm's registry is pinned from without TLS; a development farm's
+	// own images (c4/<name>) are in it, at dev
+	args = append(args, "--hud-plain-registries="+RegistryInFarm)
+	if o.LocalImages {
+		args = append(args, "--hud-image-registry="+RegistryInFarm, "--hud-image-tag=dev")
+	}
 	return args
+}
+
+func indentLines(s, by string) string {
+	return by + strings.ReplaceAll(s, "\n", "\n"+by)
 }
 
 // ManagerPatch is the strategic merge patch for the manager Deployment:
@@ -266,7 +285,8 @@ func ManagerPatch(o Options, args []string) []byte {
 	keep := []string{}
 	for _, a := range args {
 		drop := false
-		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz="} {
+		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz=", "--hud-plain-registries=",
+			"--hud-image-registry=", "--hud-image-tag="} {
 			if strings.HasPrefix(a, f) {
 				drop = true
 			}

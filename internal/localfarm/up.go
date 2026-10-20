@@ -102,6 +102,20 @@ func Up(ctx context.Context, o UpOptions) error {
 			return fmt.Errorf("creating the cluster: %w", err)
 		}
 	}
+	// the farm's registry, which every node pulls from by name
+	if err := ensureRegistry(ctx, or(o.RegistryHostPort, RegistryPort)); err != nil {
+		return err
+	}
+	all, err := p.ListInternalNodes(name)
+	if err != nil {
+		return err
+	}
+	for _, n := range all {
+		if err := registryHosts(ctx, n.String()); err != nil {
+			return err
+		}
+	}
+	o.logf("registry  %s, at 127.0.0.1:%d (c4 farm image load pushes to it)\n", RegistryInFarm, or(o.RegistryHostPort, RegistryPort))
 	if o.ImageArchive != "" {
 		o.logf("image     loading %s\n", filepath.Base(o.ImageArchive))
 		ns, err := p.ListInternalNodes(name)
@@ -238,7 +252,14 @@ func Down(name string) error {
 	if name == "" {
 		name = Name
 	}
-	return cluster.NewProvider().Delete(name, "")
+	if err := cluster.NewProvider().Delete(name, ""); err != nil {
+		return err
+	}
+	// and its registry, with the images pushed to it
+	if out, err := docker(context.Background(), "rm", "-f", RegistryName); err != nil && !strings.Contains(out, "No such container") {
+		return err
+	}
+	return nil
 }
 
 // installManifest is the operator's install.yaml: a file, or the release's.

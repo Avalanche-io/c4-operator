@@ -231,8 +231,10 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 		t, err := LookupTool(ctx, c, a.Project, a.Type, "")
 		switch {
 		case err == nil:
-			_, err := SubmitTool(ctx, c, o, t, a)
-			return nil, err
+			// a farm with tools but no submissions yet runs the types below
+			if _, err := SubmitTool(ctx, c, o, t, a); !notFound(err) {
+				return nil, err
+			}
 		case !notFound(err):
 			return nil, err
 		}
