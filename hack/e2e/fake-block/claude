@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""A stand-in for Claude Code in print mode, for live runs of the asks rework
+without model spend. It does what c4-agent block-pod needs of `claude -p`:
+it keeps the session's transcript where Claude Code would, acts on its turn
+by the unit's role ($C4_UNIT_NAME) and what the prompt says, and at each
+turn's end runs the Stop hook from --settings, as Claude Code does. A hook
+answering {"decision": "block", "reason": ...} is a new turn with the reason
+as its prompt; {"continue": false} ends the session.
+
+Roles (the unit's name):
+  root     writes the job's expansion document ($FAKE_EXPAND) and is done
+  plan     an answerer: works in parts ($FAKE_PART_SECONDS each, $FAKE_PARTS
+           parts) and answers questions that reach it
+  slow     the same, with long parts, so it answers late
+  port     asks unit:plan, then is done when the answer comes
+  slowask  asks unit:slow, then is done when the answer comes
+  late     asks unit:plan once plan has finished, then is done
+  docs     reports missing information, then is done once it is supplied
+"""
+import json, os, re, subprocess, sys, time
+
+args = sys.argv[1:]
+session, settings, prompt = None, None, ""
+i = 0
+while i < len(args):
+    a = args[i]
+    if a in ("--session-id", "--resume"):
+        session = args[i + 1]; i += 2; continue
+    if a == "--settings":
+        settings = json.loads(args[i + 1]); i += 2; continue
+    if a == "--":
+        prompt = " ".join(args[i + 1:]); break
+    i += 1
+
+role = os.environ.get("C4_UNIT_NAME", "")
+out = os.environ.get("C4_OUTPUT", "")
+c4 = os.path.join(out, ".c4")
+cwd = os.getcwd()
+slug = re.sub(r"[^A-Za-z0-9-]", "-", cwd)
+tdir = os.path.join(os.environ["CLAUDE_CONFIG_DIR"], "projects", slug)
+os.makedirs(tdir, exist_ok=True)
+transcript = os.path.join(tdir, session + ".jsonl")
+turns = 0
+
+
+def say(text):
+    global turns
+    turns += 1
+    with open(transcript, "a") as f:
+        f.write(json.dumps({"type": "assistant", "message": {"id": "%s-%d-%f" % (session, turns, time.time()),
+                            "model": "fake-block", "usage": {"input_tokens": 1, "output_tokens": len(text)},
+                            "content": [{"type": "text", "text": text}]}}) + "\n")
+    print(text, flush=True)
+
+
+def put(name, doc):
+    with open(os.path.join(c4, name), "w") as f:
+        f.write(doc if isinstance(doc, str) else json.dumps(doc))
+
+
+def note(line):
+    with open(os.path.join(out, "notes.md"), "a") as f:
+        f.write(line + "\n")
+
+
+def parts_done():
+    try:
+        return int(open(os.path.join(out, "parts")).read())
+    except Exception:
+        return 0
+
+
+def answer_questions(text):
+    # a question delivered by the hook: answer each from what we know
+    ids = re.findall(r'\{"ask": "([^"]+)", "answer"', text)
+    for qid in ids:
+        put("answer.json", {"ask": qid, "answer": "the lexer package owns the tokenizer (from %s)" % role})
+        say("answered %s" % qid)
+        hook()  # each answer goes at its own turn's end
+    return bool(ids)
+
+
+def turn(text):
+    """One turn of work on prompt text."""
+    if answer_questions(text):
+        return
+    if "Other units of this job asked you questions" in text:
+        say("woken to answer; the questions arrive at this turn's end")
+        return
+    if role == "root":
+        put("expand.json", os.environ["FAKE_EXPAND"])
+        put("done", "the plan is written\n")
+        say("wrote the expansion document")
+    elif role in ("plan", "slow"):
+        n = parts_done() + 1
+        open(os.path.join(out, "parts"), "w").write(str(n))
+        time.sleep(float(os.environ.get("FAKE_PART_SECONDS", "10")))
+        note("%s part %d" % (role, n))
+        if n < int(os.environ.get("FAKE_PARTS", "4")):
+            put("more", "part %d\n" % (n + 1))
+            say("part %d done" % n)
+        else:
+            put("done", "%s finished its parts\n" % role)
+            say("%s done" % role)
+    elif role in ("port", "slowask", "late"):
+        if "answered" in text or "No answer" in text or "could not be answered" in text:
+            note("%s got: %s" % (role, text.strip().splitlines()[0] if text.strip() else ""))
+            put("done", "%s used the answer\n" % role)
+            say("%s done with the answer" % role)
+        else:
+            to = {"port": "unit:plan", "slowask": "unit:slow", "late": "unit:plan"}[role]
+            put("ask.json", {"to": to, "ask": "Which module owns the tokenizer after the split?"})
+            say("%s asked %s" % (role, to))
+    elif role == "docs":
+        if "Here it is:" in text:
+            note("docs got: " + text.split("Here it is:", 1)[1].strip().splitlines()[0])
+            put("done", "docs written with the supplied frame rate\n")
+            say("docs done")
+        else:
+            put("needs.json", {"needs": "the delivery frame rate", "why": "the brief gives 24 and 25"})
+            say("docs needs information")
+    else:
+        put("done", "nothing to do\n")
+        say("done")
+
+
+def hook():
+    """Run the Stop hook as Claude Code does; return its decision."""
+    if not settings:
+        return {}
+    cmd = settings["hooks"]["Stop"][0]["hooks"][0]["command"]
+    inp = json.dumps({"session_id": session, "transcript_path": transcript, "cwd": cwd, "hook_event_name": "Stop"})
+    r = subprocess.run(["sh", "-c", cmd], input=inp, capture_output=True, text=True, timeout=60)
+    if r.stderr:
+        sys.stderr.write(r.stderr)
+    try:
+        return json.loads(r.stdout.strip().splitlines()[-1]) if r.stdout.strip() else {}
+    except Exception:
+        return {}
+
+
+text = prompt
+for _ in range(20):
+    turn(text)
+    d = hook()
+    if d.get("continue") is False:
+        break
+    if d.get("decision") == "block":
+        text = d.get("reason", "")
+        continue
+    break

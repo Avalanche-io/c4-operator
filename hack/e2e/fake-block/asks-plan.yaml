@@ -1,0 +1,23 @@
+version: 1
+blocks:
+  # answers port's question within its hold, and later wakes to answer late's
+  - name: plan
+    reasoning: {does: model}
+    env: {FAKE_PARTS: "6", FAKE_PART_SECONDS: "8"}
+  # asks plan, which is running
+  - name: port
+    reasoning: {does: model}
+  # reports missing information
+  - name: docs
+    reasoning: {does: model}
+  # answers slowask's question only after slowask's hold
+  - name: slow
+    reasoning: {does: model}
+    env: {FAKE_PARTS: "2", FAKE_PART_SECONDS: "45"}
+  - name: slowask
+    reasoning: {does: model}
+    env: {C4_ASK_HOLD: "20s"}
+  # asks plan once plan has finished
+  - name: late
+    reasoning: {does: model}
+    after: [plan]
