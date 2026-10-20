@@ -2282,6 +2282,16 @@ Burst decisions are cost-aware:
   priced so reports no earlier a finish than that allows. Shares and bursts are
   unchanged: gw010 on one GPU slot, behind a training unit with three
   hours left, reports itself late instead of on time on two.
+- **A job waiting on others reports from when it can start.** The fluid
+  plan places waiting work as though it could run now: when a busy group
+  overflows, a job it moves out of the on-time set is left the share that
+  remains now, a trickle. A job that cannot run until its upstream jobs
+  finish does not run at that share; it reports its finish as their
+  latest planned finish plus its own duration, and no earlier than its
+  place in deadline order behind the on-time work, and is at risk only
+  when that passes its deadline. Its share and bursts are the plan's.
+  Before, a seven-minute comp whose light finished in an hour read 39 hours
+  late. A job's message gives its slack against the finish it shows.
 - **Bursts are topped up from what is left.** A job confined to a subset of
   its group's pools takes the more pessimistic of the two plans: the riskier
   plan's shortfall, but the smaller share. At that smaller share it needs

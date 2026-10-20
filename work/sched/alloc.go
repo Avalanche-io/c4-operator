@@ -84,10 +84,16 @@ type jobCtx struct {
 	atRisk                 bool
 	lateBy                 time.Duration
 	finish50, finish90     float64 // planned finish, seconds from now
-	horizon, deficit       float64 // what a burst must cover: slot-seconds short by horizon
-	group                  int     // 0 feasible with need, 1 infeasible with need, 2 other, 3 can use no slot
-	noPool                 bool    // none of its pools is in the snapshot
-	burst                  *BurstSuggestion
+	// in50 and in90 are the finish in deadline order behind the on-time
+	// work ahead of it, at all the group's capacity, and gin50, gin90 the
+	// same under Graham's bound: a late job's finish without the share
+	// left to it now, which is what a job still waiting will not run at
+	// (startAfterUpstream). For an on-time job, its planned finish.
+	in50, in90, gin50, gin90 float64
+	horizon, deficit         float64 // what a burst must cover: slot-seconds short by horizon
+	group                    int     // 0 feasible with need, 1 infeasible with need, 2 other, 3 can use no slot
+	noPool                   bool    // none of its pools is in the snapshot
+	burst                    *BurstSuggestion
 	// shown is what the job reports when it differs from the plan's own
 	// figures above (planFluid); nil means it reports those.
 	shown  *shownPlan

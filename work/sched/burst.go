@@ -353,10 +353,11 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		if st.ETA90.IsZero() {
 			fmt.Fprintf(&b, "%s is on track for %s.", id, dl)
 		} else {
-			slack := jc.slack
-			if jc.stage != nil {
-				slack = secs(jc.T - v.finish90)
-			}
+			// The slack against the finish it shows, as the ETA beside it:
+			// jc.slack is at all attainable capacity (Feasible's question),
+			// and read "slack 12h" beside an ETA half an hour from the
+			// deadline.
+			slack := secs(jc.T - v.finish90)
 			fmt.Fprintf(&b, "%s is on track for %s: ETA %s, slack %s.", id, dl, forecast.Clock(st.ETA90, a.cfg.Loc), human(slack))
 		}
 		if s := jc.stage; s != nil {

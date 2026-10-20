@@ -990,7 +990,9 @@ func TestBurstForMarginIsLabelled(t *testing.T) {
 	if js.Burst == nil || !js.Burst.Margin || !js.Burst.Auto || js.Burst.Slots["gpu-spot"] != 1 {
 		t.Fatalf("burst %+v", js.Burst)
 	}
-	msg := "m is on track for Mon 16:45 UTC: ETA Mon 16:30 UTC, slack 45m. 1 more gpu-spot slot adds margin against estimate uncertainty (about $0.51)."
+	// slack against the ETA shown beside it (the deadline less it), not at
+	// all attainable capacity
+	msg := "m is on track for Mon 16:45 UTC: ETA Mon 16:30 UTC, slack 15m. 1 more gpu-spot slot adds margin against estimate uncertainty (about $0.51)."
 	if js.Message != msg {
 		t.Fatalf("message\n got %q\nwant %q", js.Message, msg)
 	}
@@ -1481,5 +1483,29 @@ func TestBurstForAnExpandingJob(t *testing.T) {
 	b := Decide(s, &State{}, DefaultConfig()).Jobs["gen"].Burst
 	if b == nil || b.Slots["spot"] <= 0 {
 		t.Fatalf("burst for an expanding job: %+v", b)
+	}
+}
+
+// A waiting job is reported from when it can start, not from the share
+// the plan leaves it now (global's London morning: a seven-minute comp
+// read 39 h late behind a light finishing in an hour). Nine small jobs
+// and the comp overflow the group by the comp's deadline; the comp, the
+// largest, leaves the on-time set and is left 0.2 slots now, which would
+// take it 15 h. It cannot run now anyway: it runs after its light, in
+// deadline order behind the small jobs, a little past its deadline.
+func TestWaitingJobFinishFromItsStart(t *testing.T) {
+	jobs := []Job{job("light", "p", 4, 0.5, 2*time.Hour)}
+	for i := 0; i < 9; i++ {
+		jobs = append(jobs, job(fmt.Sprintf("f%d", i), "p", 2, 1, 150*time.Minute))
+	}
+	jobs = append(jobs, waitingJob("comp", 8, 3, 3*time.Hour, "light"))
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(4)}, Jobs: jobs}
+	d := Decide(s, &State{}, DefaultConfig())
+	l, c := d.Jobs["light"], d.Jobs["comp"]
+	if l.AtRisk || c.Share > 0.5 {
+		t.Fatalf("the setup: light %+v, comp share %.2f", l, c.Share)
+	}
+	if c.ETA90.Before(l.ETA90) || c.ETA90.After(t0.Add(4*time.Hour)) {
+		t.Fatalf("comp ETA90 %s (light %s): %+v", c.ETA90.Sub(t0), l.ETA90.Sub(t0), c)
 	}
 }

@@ -416,6 +416,7 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		gcum += a.preTail(m.jobCtx, m.W90)
 		gcum50 += a.preTail(m.jobCtx, m.W)
 		m.shown = &shownPlan{finish50: a.fluidFinish(m.jobCtx, gcum50, C), finish90: a.fluidFinish(m.jobCtx, gcum, C)}
+		m.in50, m.in90, m.gin50, m.gin90 = m.finish50, m.finish90, m.shown.finish50, m.shown.finish90
 	}
 	planned, gplanned := 0.0, 0.0
 	for _, x := range set {
@@ -435,6 +436,7 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		}
 		finish, late := a.lateFinish(m, m.W90, before, planned, C)
 		m.finish50 = finish
+		m.in50, m.in90 = finish, finish
 		// A job the plan makes late finishes after its deadline, by at
 		// least a second, so its ETA and its lateness agree.
 		late = math.Max(late, m.T+1)
@@ -446,6 +448,7 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		// alone makes it late, and any burst for it is that margin.
 		w := a.preTail(m.jobCtx, m.W90)
 		gfinish, glate := a.lateFinish(m, w, gbefore, gplanned, C)
+		m.gin50, m.gin90 = gfinish, gfinish
 		s := &shownPlan{finish50: gfinish, finish90: glate}
 		if glate > m.T {
 			s.atRisk = true
@@ -510,17 +513,20 @@ type planState struct {
 	planOK, atRisk                       bool
 	lateBy                               time.Duration
 	finish50, finish90, horizon, deficit float64
+	in50, in90, gin50, gin90             float64
 	shown                                *shownPlan
 }
 
 func (jc *jobCtx) planState() planState {
 	return planState{R: jc.R, share: jc.share, groupC: jc.groupC, planOK: jc.planOK, atRisk: jc.atRisk, lateBy: jc.lateBy,
-		finish50: jc.finish50, finish90: jc.finish90, horizon: jc.horizon, deficit: jc.deficit, shown: jc.shown}
+		finish50: jc.finish50, finish90: jc.finish90, horizon: jc.horizon, deficit: jc.deficit, shown: jc.shown,
+		in50: jc.in50, in90: jc.in90, gin50: jc.gin50, gin90: jc.gin90}
 }
 
 func (jc *jobCtx) setPlanState(p planState) {
 	jc.R, jc.share, jc.groupC, jc.planOK, jc.atRisk, jc.lateBy = p.R, p.share, p.groupC, p.planOK, p.atRisk, p.lateBy
 	jc.finish50, jc.finish90, jc.horizon, jc.deficit, jc.shown = p.finish50, p.finish90, p.horizon, p.deficit, p.shown
+	jc.in50, jc.in90, jc.gin50, jc.gin90 = p.in50, p.in90, p.gin50, p.gin90
 }
 
 // planSubsets plans, inside a pool group, every set of pools some job may
@@ -638,6 +644,8 @@ func (a *alloc) planSubsets(g []groupMember) {
 			if r.shown != nil && r.shown.atRisk && (cur.shown == nil || !cur.shown.atRisk || r.shown.lateBy > cur.shown.lateBy) {
 				cur.shown = r.shown
 			}
+			cur.in50, cur.in90 = math.Max(cur.in50, r.in50), math.Max(cur.in90, r.in90)
+			cur.gin50, cur.gin90 = math.Max(cur.gin50, r.gin50), math.Max(cur.gin90, r.gin90)
 			cur.R = math.Max(cur.R, r.R)
 			cur.share = math.Min(cur.share, r.share)
 			cur.groupC = math.Min(cur.groupC, r.groupC)
@@ -695,15 +703,20 @@ func (a *alloc) startAfterUpstream() {
 			moved = true
 			jc.startAfter, jc.startShown = s90, g90
 			jc.setPlanState(e.base)
+			// It cannot run before its upstream jobs finish: its finish is
+			// that start and its own duration, and no earlier than its place
+			// in deadline order behind the on-time work. Not the share the
+			// plan leaves it now, as though it could run now: a seven-minute
+			// comp given a trickle of a busy group read 39 h late behind a
+			// light finishing in an hour. Its share and bursts are the plan's.
 			d50, d90 := math.Max(div(jc.W, jc.A), jc.tpath), jc.duration()
-			f50, f90 := math.Max(e.base.finish50, s50+d50), math.Max(e.base.finish90, s90+d90)
+			f50, f90 := math.Max(e.base.in50, s50+d50), math.Max(e.base.in90, s90+d90)
 			jc.finish50, jc.finish90 = f50, f90
-			if f90 > jc.T {
-				jc.atRisk = true
+			jc.atRisk, jc.lateBy = f90 > jc.T, 0
+			if jc.atRisk {
 				jc.lateBy = secs(math.Min(f90, bigSeconds) - jc.T)
 			}
-			gs := e.gs
-			gs.finish50, gs.finish90 = math.Max(gs.finish50, g50+d50), math.Max(gs.finish90, g90+d90)
+			gs := shownPlan{finish50: math.Max(e.base.gin50, g50+d50), finish90: math.Max(e.base.gin90, g90+d90)}
 			if gs.finish90 > jc.T {
 				gs.atRisk = true
 				gs.lateBy = secs(math.Min(gs.finish90, bigSeconds) - jc.T)
