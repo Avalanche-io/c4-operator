@@ -82,7 +82,8 @@ type Unit struct {
 
 // Wait is what a wait unit waits for.
 type Wait struct {
-	// Server is person:<id>, party:<name> or clock:<RFC 3339 time>.
+	// Server is person:<id>, party:<name>, unit:<name> (another unit of
+	// the job answers it) or clock:<RFC 3339 time>.
 	Server string
 	// Ask is the question, in plain words.
 	Ask string

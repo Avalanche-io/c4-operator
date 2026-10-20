@@ -330,6 +330,9 @@ func waitExpect(plan *class.Plan, m *jobMem, i int) float64 {
 	if own > 0 {
 		return own
 	}
+	if strings.HasPrefix(server, "unit:") {
+		return unitWaitExpect // an agent answers in minutes
+	}
 	return defaultWaitExpect
 }
 

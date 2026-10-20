@@ -313,3 +313,38 @@ func TestNeeds(t *testing.T) {
 		t.Fatalf("no --what: %d", c)
 	}
 }
+
+// A unit asks another for a fact (numbered, in .c4/asks) and answers one
+// asked of it (.c4/answers); the node daemon relays both.
+func TestAskAndAnswer(t *testing.T) {
+	out := t.TempDir()
+	e := vars(map[string]string{"C4_OUTPUT": out, "C4_UNIT": "3"})
+	e.now = func() time.Time { return time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC) }
+	var buf bytes.Buffer
+	if c, err := run([]string{"ask", "--to", "unit:plan", "--ask", "Which module owns the tokenizer?"}, &buf, e); c != 0 || err != nil || buf.String() != "3#1\n" {
+		t.Fatalf("ask: %d %v %q", c, err, buf.String())
+	}
+	buf.Reset()
+	run([]string{"ask", "--ask", "And the lexer?"}, &buf, e)
+	if buf.String() != "3#2\n" {
+		t.Fatalf("second ask %q", buf.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(out, ".c4", "asks"))
+	if string(b) != `[{"ask":"Which module owns the tokenizer?","at":"2026-10-20T09:00:00Z","seq":1,"to":"unit:plan"},{"ask":"And the lexer?","at":"2026-10-20T09:00:00Z","seq":2,"to":""}]` {
+		t.Fatalf("asks %s", b)
+	}
+	if c, _ := run([]string{"ask", "--to", "person:dana", "--ask", "x"}, &buf, e); c != 2 {
+		t.Fatalf("a person as answerer: %d", c)
+	}
+	if c, err := run([]string{"answer", "--ask", "5#1", "--answer", "tokenize/"}, &buf, e); c != 0 || err != nil {
+		t.Fatalf("answer: %d %v", c, err)
+	}
+	run([]string{"answer", "--ask", "5#2", "--cannot", "not mine"}, &buf, e)
+	b, _ = os.ReadFile(filepath.Join(out, ".c4", "answers"))
+	if !strings.Contains(string(b), `"answer":"tokenize/"`) || !strings.Contains(string(b), `"cannot":"not mine"`) {
+		t.Fatalf("answers %s", b)
+	}
+	if c, _ := run([]string{"answer", "--ask", "5#3", "--answer", "a", "--cannot", "b"}, &buf, e); c != 2 {
+		t.Fatalf("answer and cannot: %d", c)
+	}
+}

@@ -16,6 +16,12 @@
 //	c4-unit steer [--json]          print the messages sent to this unit since it
 //	                                last read them (a person steering it while it
 //	                                runs), and note them read; exit 1 if none
+//	c4-unit ask --to unit:NAME --ask TEXT
+//	                                ask another unit of the job for a fact this one
+//	                                lacks; prints the question's id. The answer
+//	                                comes as a steering message (c4-unit steer)
+//	c4-unit answer --ask ID (--answer TEXT | --cannot WHY)
+//	                                answer a question another unit asked this one
 //	c4-unit needs --what TEXT [--why TEXT]
 //	                                stop: the brief lacks information only a person
 //	                                could give (exit 12); the unit runs again, with
@@ -121,10 +127,13 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	checkpoint := fs.String("checkpoint", "", "with safepoint: what the unit saved there (a step, a path, a session turn), for the record")
 	wait := fs.Duration("wait", 20*time.Second, "with safepoint or wait: how long to wait for the farm's decision before falling back on its last request")
 	server := fs.String("server", "", "with wait: who decides: person:<id>, party:<name> or clock:<RFC 3339 time>")
-	ask := fs.String("ask", "", "with wait: the question")
+	ask := fs.String("ask", "", "with wait or ask: the question; with answer: the question's id")
 	choices := fs.String("choices", "", "with wait: the decisions that resume the unit besides approve, comma-separated (fail always may)")
 	reply := fs.Bool("reply", false, "with wait: the decision carries content, mounted at $C4_REPLY when the unit resumes")
 	expect := fs.Duration("expect", 0, "with wait: how long the decision is expected to take")
+	to := fs.String("to", "", "with ask: who answers, unit:<name> (default: the job's answerer)")
+	answerText := fs.String("answer", "", "with answer: the answer")
+	cannot := fs.String("cannot", "", "with answer: why this unit cannot answer")
 	what := fs.String("what", "", "with needs: the information the brief lacks")
 	why := fs.String("why", "", "with needs: why it is needed, or why the brief does not settle it")
 	asJSON := fs.Bool("json", false, "with steer: print each message as a line of JSON {seq, at, actor, text}")
@@ -283,6 +292,38 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 			return 1, nil
 		}
 		return 0, nil
+	case "ask":
+		if strings.TrimSpace(*ask) == "" || *to != "" && !strings.HasPrefix(*to, "unit:") {
+			return 2, errors.New("usage: c4-unit ask [--to unit:<name>] --ask TEXT")
+		}
+		out, err := output(e, *dir)
+		if err != nil {
+			return 1, err
+		}
+		seq, err := appendNote(filepath.Join(out, ".c4", "asks"), map[string]any{"to": *to, "ask": strings.TrimSpace(*ask)}, e)
+		if err != nil {
+			return 1, err
+		}
+		fmt.Fprintf(stdout, "%s#%d\n", e.get("C4_UNIT"), seq)
+		return 0, nil
+	case "answer":
+		if *ask == "" || (*answerText == "") == (*cannot == "") {
+			return 2, errors.New("usage: c4-unit answer --ask ID (--answer TEXT | --cannot WHY)")
+		}
+		out, err := output(e, *dir)
+		if err != nil {
+			return 1, err
+		}
+		note := map[string]any{"ask": *ask}
+		if *answerText != "" {
+			note["answer"] = *answerText
+		} else {
+			note["cannot"] = *cannot
+		}
+		if _, err := appendNote(filepath.Join(out, ".c4", "answers"), note, e); err != nil {
+			return 1, err
+		}
+		return 0, nil
 	case "needs":
 		if strings.TrimSpace(*what) == "" {
 			return 2, errors.New("usage: c4-unit needs --what TEXT [--why TEXT]")
@@ -335,7 +376,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		fmt.Fprintln(stdout, out)
 		return 0, nil
 	}
-	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, wait, steer, needs, decision, resume-dir or output", cmd)
+	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, wait, steer, ask, answer, needs, decision, resume-dir or output", cmd)
 }
 
 func code(err error) (int, error) {
@@ -508,6 +549,29 @@ func awaitDecision(e env, seq int, wait time.Duration) (decision, bool) {
 	}
 }
 
+// appendNote adds a note, numbered one past the last and timed, to a JSON
+// list file the node daemon relays to the farm (.c4/asks, .c4/answers),
+// and returns its number.
+func appendNote(path string, note map[string]any, e env) (int, error) {
+	var notes []map[string]any
+	if b, err := os.ReadFile(path); err == nil {
+		if err := json.Unmarshal(b, &notes); err != nil {
+			return 0, fmt.Errorf("%s: %w", path, err)
+		}
+	}
+	at := time.Now()
+	if e.now != nil {
+		at = e.now()
+	}
+	note["seq"], note["at"] = len(notes)+1, at.UTC().Format(time.RFC3339)
+	notes = append(notes, note)
+	b, err := json.Marshal(notes)
+	if err != nil {
+		return 0, err
+	}
+	return len(notes), writeAtomic(path, b)
+}
+
 // steerMsg is a message to the unit ($C4_CONTROL/steer, written by the
 // node daemon).
 type steerMsg struct {
@@ -515,6 +579,9 @@ type steerMsg struct {
 	At    time.Time `json:"at"`
 	Actor string    `json:"actor,omitempty"`
 	Text  string    `json:"text"`
+	// Ask is a question to this unit, Answer one to a question it asked.
+	Ask    json.RawMessage `json:"ask,omitempty"`
+	Answer json.RawMessage `json:"answer,omitempty"`
 }
 
 // steer prints the messages after the last one read (out/.c4/steer-seen),

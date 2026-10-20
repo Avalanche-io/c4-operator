@@ -258,6 +258,48 @@ spec:
                   - units
                   type: object
                 type: array
+              asks:
+                description: |-
+                  Asks are the latest questions the job's units asked one another,
+                  and their answers.
+                items:
+                  description: |-
+                    WorkAsk is a question one unit asked another (c4-unit ask), or a wait
+                    unit asked the unit that serves it (Wait).
+                  properties:
+                    answer:
+                      description: Answer, or Cannot and why, once answered.
+                      type: string
+                    answered:
+                      format: date-time
+                      type: string
+                    at:
+                      format: date-time
+                      type: string
+                    cannot:
+                      type: string
+                    from:
+                      format: int32
+                      type: integer
+                    id:
+                      description: ID is <asker unit>#<n>, or w<wait unit>.
+                      type: string
+                    text:
+                      type: string
+                    to:
+                      description: To is the answering unit; -1 when none could.
+                      format: int32
+                      type: integer
+                    wait:
+                      type: boolean
+                  required:
+                  - at
+                  - from
+                  - id
+                  - text
+                  - to
+                  type: object
+                type: array
               attempts:
                 description: |-
                   Attempts per unit index, for units tried more than once

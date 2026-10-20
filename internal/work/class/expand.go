@@ -152,8 +152,10 @@ func docWait(name string, w *DocWait, planned bool) (*Wait, error) {
 	out := &Wait{Server: w.Server, Ask: w.Ask, Expect: w.Expect, Choices: w.Choices, Reply: w.Reply}
 	switch {
 	case who == "":
-		return nil, fmt.Errorf("unit %s waits for %q: want person:<id>, party:<name> or clock:<time>", name, w.Server)
-	case kind == "person" || kind == "party":
+		return nil, fmt.Errorf("unit %s waits for %q: want person:<id>, party:<name>, unit:<name> or clock:<time>", name, w.Server)
+	case kind == "unit" && w.Reply:
+		return nil, fmt.Errorf("unit %s waits for a unit's answer, which is text: it takes no reply", name)
+	case kind == "person" || kind == "party" || kind == "unit":
 	case kind == "clock":
 		t, err := time.Parse(time.RFC3339, who)
 		if err != nil {
@@ -166,7 +168,7 @@ func docWait(name string, w *DocWait, planned bool) (*Wait, error) {
 	case kind == "predicate":
 		return nil, fmt.Errorf("unit %s waits for a predicate: predicate waits are designed, not built", name)
 	default:
-		return nil, fmt.Errorf("unit %s waits for %q: want person:<id>, party:<name> or clock:<time>", name, w.Server)
+		return nil, fmt.Errorf("unit %s waits for %q: want person:<id>, party:<name>, unit:<name> or clock:<time>", name, w.Server)
 	}
 	for _, c := range w.Choices {
 		if c == "" || c == "fail" {

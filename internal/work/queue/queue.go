@@ -260,8 +260,10 @@ type jobMem struct {
 	toolsWait string
 	// needs are what units stopped for, and supplied the last supply's
 	// token (needs.go).
-	needs     map[int]*needsRec
-	supplied  string
+	needs    map[int]*needsRec
+	supplied string
+	// asks are the questions units asked one another (asks.go).
+	asks      []*askRec
 	acks      []*ackRecord
 	acked     string
 	decisions []decisionRecord
@@ -342,6 +344,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.loadWaits(st)
 	m.loadSteers(st)
 	m.loadNeeds(st)
+	m.loadAsks(st)
 	m.loadLoops(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
@@ -611,6 +614,9 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.checkPriorityClass(ctx)
 	q.act(ctx, now, dec, views, poolInfo)
 	q.decideSafepoints(ctx, now, dec, views)
+	for _, v := range views {
+		q.routeAsks(ctx, v, now)
+	}
 	q.deliverSteers(ctx, now, views)
 	q.stage(ctx, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)

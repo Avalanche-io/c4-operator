@@ -214,6 +214,19 @@ func (r *Runner) relaySteer(ctx context.Context, p *corev1.Pod, u UnitDirs, st *
 		}
 		st.read = n
 	}
+	for file, key := range node.UnitNotes {
+		b, ok := node.ReadUnitNote(u.Out, file)
+		if !ok || b == st.notes[file] {
+			continue
+		}
+		if err := r.annotate(ctx, p, map[string]string{key: b}); err != nil {
+			return err
+		}
+		if st.notes == nil {
+			st.notes = map[string]string{}
+		}
+		st.notes[file] = b
+	}
 	return nil
 }
 
@@ -225,6 +238,8 @@ type relayState struct {
 	// far the unit said it read them.
 	steer string
 	read  int
+	// notes are the unit's .c4/asks and .c4/answers last relayed.
+	notes map[string]string
 }
 
 // controlDocs are the documents a member leaves for the farm, as a pod

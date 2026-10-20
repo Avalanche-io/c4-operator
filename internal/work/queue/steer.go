@@ -36,14 +36,20 @@ type steerRec struct {
 	at        time.Time
 	delivered time.Time
 	seen      bool
+	// ask and answer mark a question to the unit, or an answer to one it
+	// asked (asks.go).
+	ask    *askRef
+	answer *answerRef
 }
 
 // unitSteer is a message as the unit's pod carries it.
 type unitSteer struct {
-	Seq   int       `json:"seq"`
-	At    time.Time `json:"at"`
-	Actor string    `json:"actor,omitempty"`
-	Text  string    `json:"text"`
+	Seq    int        `json:"seq"`
+	At     time.Time  `json:"at"`
+	Actor  string     `json:"actor,omitempty"`
+	Text   string     `json:"text"`
+	Ask    *askRef    `json:"ask,omitempty"`
+	Answer *answerRef `json:"answer,omitempty"`
 }
 
 // applySteers carries out the job's new messages, in token order, each
@@ -100,7 +106,7 @@ func steerAnnotation(msgs []*steerRec) string {
 	}
 	out := make([]unitSteer, len(msgs))
 	for k, s := range msgs {
-		out[k] = unitSteer{Seq: s.seq, At: s.at.UTC(), Actor: s.actor, Text: s.text}
+		out[k] = unitSteer{Seq: s.seq, At: s.at.UTC(), Actor: s.actor, Text: s.text, Ask: s.ask, Answer: s.answer}
 	}
 	b, _ := json.Marshal(out)
 	return string(b)

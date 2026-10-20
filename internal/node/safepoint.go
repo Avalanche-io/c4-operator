@@ -62,6 +62,8 @@ type spRelay struct {
 	steer   string
 	read    int
 	steerAt time.Time
+	// notes are the unit's .c4/asks and .c4/answers last relayed.
+	notes map[string]string
 }
 
 // steerEvery is how often the daemon reads a pod for new messages.
@@ -168,6 +170,32 @@ func (d *Daemon) relaySteer(ctx context.Context, ns, name, uid, upper string, r 
 	if n, ok := ReadSteerSeen(upper); ok && n > r.read && d.setPodNote(ctx, ns, name, uid, c4v1.AnnotationSteerSeen, n) {
 		r.read = n
 	}
+	for file, key := range UnitNotes {
+		b, ok := ReadUnitNote(upper, file)
+		if !ok || b == r.notes[file] {
+			continue
+		}
+		if d.setPodNote(ctx, ns, name, uid, key, json.RawMessage(b)) {
+			if r.notes == nil {
+				r.notes = map[string]string{}
+			}
+			r.notes[file] = b
+		}
+	}
+}
+
+// UnitNotes are the lists a unit writes in its .c4/ for the farm, and the
+// pod annotation each is relayed as.
+var UnitNotes = map[string]string{"asks": c4v1.AnnotationAsks, "answers": c4v1.AnnotationAnswers}
+
+// ReadUnitNote reads one of a unit's lists (.c4/asks, .c4/answers): a
+// JSON array of at most 64 KiB.
+func ReadUnitNote(out, file string) (string, bool) {
+	b, err := os.ReadFile(filepath.Join(out, ".c4", file))
+	if err != nil || len(b) > 64<<10 || !json.Valid(b) || len(b) == 0 || b[0] != '[' {
+		return "", false
+	}
+	return string(b), true
 }
 
 // ReadSteerSeen reads how far a unit read its messages (.c4/steer-seen,

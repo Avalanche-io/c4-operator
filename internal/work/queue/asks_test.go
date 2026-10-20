@@ -1,0 +1,113 @@
+package queue
+
+import (
+	"context"
+	"slices"
+	"strings"
+	"testing"
+	"time"
+
+	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+)
+
+// notePod sets one of a unit pod's relayed lists, as the node daemon does.
+func notePod(t *testing.T, ns, job string, idx int, key, value string) {
+	t.Helper()
+	p := podOfUnit(t, ns, job, idx)
+	patch := client.MergeFrom(p.DeepCopy())
+	p.Annotations[key] = value
+	if err := k8s.Patch(context.Background(), p, patch); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func steerAsk(ss []unitSteer, id string) bool {
+	for _, s := range ss {
+		if s.Ask != nil && s.Ask.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func steerAnswer(ss []unitSteer, id string) *unitSteer {
+	for k := range ss {
+		if s := &ss[k]; s.Answer != nil && s.Answer.ID == id {
+			return s
+		}
+	}
+	return nil
+}
+
+// Units ask one another: a question reaches its answerer as a steering
+// message, the answer reaches the asker the same way, and an answer also
+// decides a wait the answering unit serves, so the work after it runs. A
+// question nobody can answer, or one that would wait in a cycle, is
+// answered cannot at once.
+func TestUnitsAskUnits(t *testing.T) {
+	ns, q, _ := graphJob(t, "asked", func(time.Time) string {
+		return `{"name": "lead"}, {"name": "worker"},
+		{"name": "gate", "wait": {"server": "unit:lead", "ask": "is the API frozen?"}},
+		{"name": "ship", "after": ["gate"]}`
+	}, 24*time.Hour)
+	// units: 1 lead, 2 worker, 3 gate, 4 ship
+	tick(t, q)
+	if got := podSteers(t, ns, "asked", 1); !steerAsk(got, "w3") {
+		t.Fatalf("the gate's question did not reach lead: %+v", got)
+	}
+
+	notePod(t, ns, "asked", 2, c4v1.AnnotationAsks, `[{"seq": 1, "to": "unit:lead", "ask": "Which module owns the tokenizer?"},
+		{"seq": 2, "to": "unit:nobody", "ask": "What is the frame rate?"}]`)
+	tick(t, q)
+	if got := podSteers(t, ns, "asked", 1); !steerAsk(got, "2#1") {
+		t.Fatalf("worker's question did not reach lead: %+v", got)
+	}
+	if a := steerAnswer(podSteers(t, ns, "asked", 2), "2#2"); a == nil || !a.Answer.Cannot || !strings.Contains(a.Text, "no unit nobody") {
+		t.Fatalf("an unanswerable question: %+v", a)
+	}
+
+	// lead answers both; then asks worker, which still waits on it: a cycle.
+	notePod(t, ns, "asked", 2, c4v1.AnnotationAsks, `[{"seq": 1, "to": "unit:lead", "ask": "Which module owns the tokenizer?"},
+		{"seq": 2, "to": "unit:nobody", "ask": "What is the frame rate?"}, {"seq": 3, "to": "unit:lead", "ask": "And the lexer?"}]`)
+	tick(t, q)
+	notePod(t, ns, "asked", 1, c4v1.AnnotationAnswers, `[{"seq": 1, "ask": "2#1", "answer": "tokenize/"}, {"seq": 2, "ask": "w3", "answer": "yes, frozen"}]`)
+	notePod(t, ns, "asked", 1, c4v1.AnnotationAsks, `[{"seq": 1, "to": "unit:worker", "ask": "Are you done?"}]`)
+	tick(t, q)
+	tick(t, q)
+	if a := steerAnswer(podSteers(t, ns, "asked", 2), "2#1"); a == nil || a.Answer.Cannot || !strings.Contains(a.Text, "tokenize/") || a.Actor != "lead" {
+		t.Fatalf("worker's answer: %+v", a)
+	}
+	if a := steerAnswer(podSteers(t, ns, "asked", 1), "1#1"); a == nil || !a.Answer.Cannot || !strings.Contains(a.Text, "waits on an answer") {
+		t.Fatalf("a cycle: %+v", a)
+	}
+	got := get(t, ns, "asked")
+	if !slices.Contains(states(t, got, "succeeded"), 3) || !hasPod(t, ns, "asked", 4) {
+		t.Fatalf("the gate: states %v", got.Status.UnitStates)
+	}
+	var w3, q21 *c4v1.WorkAsk
+	for k := range got.Status.Asks {
+		switch a := &got.Status.Asks[k]; a.ID {
+		case "w3":
+			w3 = a
+		case "2#1":
+			q21 = a
+		}
+	}
+	if w3 == nil || !w3.Wait || w3.Answer != "yes, frozen" || q21 == nil || q21.To != 1 || q21.Answer != "tokenize/" || q21.Answered == nil {
+		t.Fatalf("asks %+v", got.Status.Asks)
+	}
+	for _, w := range got.Status.Waits {
+		if w.Unit == 3 && (w.Do != "answer" || w.Note != "yes, frozen" || w.Actor != "unit:lead") {
+			t.Fatalf("the gate's wait %+v", w)
+		}
+	}
+	// A restart keeps the questions, and routes none again.
+	n := len(get(t, ns, "asked").Status.Asks)
+	q = &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
+	tick(t, q)
+	if m := len(get(t, ns, "asked").Status.Asks); m != n {
+		t.Fatalf("after a restart: %d asks, was %d", m, n)
+	}
+}

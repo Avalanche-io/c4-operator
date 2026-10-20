@@ -110,6 +110,13 @@ const (
 	// AnnotationSteerSeen on a unit pod is the number of the last message
 	// its unit read, relayed from the unit's .c4/steer-seen.
 	AnnotationSteerSeen = "c4.avalanche.io/steer-seen"
+	// AnnotationAsks on a unit pod is the questions its unit asked other
+	// units (c4-unit ask), and AnnotationAnswers the answers it gave
+	// (c4-unit answer): JSON lists relayed by the node daemon (or the host
+	// runner) from the unit's .c4/asks and .c4/answers. The queue routes
+	// each to the unit it is for, as a steering message.
+	AnnotationAsks    = "c4.avalanche.io/asks"
+	AnnotationAnswers = "c4.avalanche.io/answers"
 	// AnnotationSupply on a WorkJob carries information people supply to
 	// units that stopped for it (NeedsInformation): a JSON list of
 	// WorkSupplyRequest. The queue carries out each once, in token order
@@ -357,6 +364,10 @@ type WorkJobStatus struct {
 	// (reworked, escalated, accepted with a note) to what it decided last.
 	// +optional
 	Reviews map[string]WorkReview `json:"reviews,omitempty"`
+	// Asks are the latest questions the job's units asked one another,
+	// and their answers.
+	// +optional
+	Asks []WorkAsk `json:"asks,omitempty"`
 	// Needs holds, by unit index, what each unit that stopped for
 	// information its brief lacked asked for (NeedsInformation).
 	// +optional
@@ -1081,6 +1092,27 @@ const (
 	NeedsInformation = "NeedsInformation"
 	NeedsExitCode    = 12
 )
+
+// WorkAsk is a question one unit asked another (c4-unit ask), or a wait
+// unit asked the unit that serves it (Wait).
+type WorkAsk struct {
+	// ID is <asker unit>#<n>, or w<wait unit>.
+	ID   string `json:"id"`
+	From int32  `json:"from"`
+	// To is the answering unit; -1 when none could.
+	To   int32       `json:"to"`
+	Text string      `json:"text"`
+	At   metav1.Time `json:"at"`
+	// Answer, or Cannot and why, once answered.
+	// +optional
+	Answer string `json:"answer,omitempty"`
+	// +optional
+	Cannot string `json:"cannot,omitempty"`
+	// +optional
+	Answered *metav1.Time `json:"answered,omitempty"`
+	// +optional
+	Wait bool `json:"wait,omitempty"`
+}
 
 // WorkNeeds is what a unit stopped for.
 type WorkNeeds struct {
