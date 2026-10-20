@@ -1467,3 +1467,19 @@ func TestNotBeforeDelaysTheFinish(t *testing.T) {
 		t.Fatalf("a past NotBefore moved the plan: ETA90 %v (was %v), start after %v", past.ETA90, now.ETA90, past.StartAfter)
 	}
 }
+
+// A job still expanding (a generator not yet run) may use any number of
+// slots, so its room is unbounded: it is offered burst slots. With room
+// +Inf converted to an int, amd64 got MinInt64 and offered none.
+func TestBurstForAnExpandingJob(t *testing.T) {
+	j := job("gen", "p", 1, 40, 6*time.Hour)
+	j.Pools = []string{"cpu", "spot"}
+	j.Estimate.Unevaluated = 1
+	spot := Pool{Name: "spot", Burst: &Burst{MaxSlots: 8, Provisioning: 5 * time.Minute, CostPerSlotHour: 1}}
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(4), spot}, Jobs: []Job{j},
+		Projects: []Project{{Name: "p", Weight: 1, BurstBudgetLeft: 1000, LateCostPerHour: 500}}}
+	b := Decide(s, &State{}, DefaultConfig()).Jobs["gen"].Burst
+	if b == nil || b.Slots["spot"] <= 0 {
+		t.Fatalf("burst for an expanding job: %+v", b)
+	}
+}

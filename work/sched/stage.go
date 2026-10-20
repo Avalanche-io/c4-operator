@@ -92,10 +92,10 @@ func (a *alloc) sizeStage(jc *jobCtx, deficit float64) *Stage {
 			if src.Via == "recompute" {
 				need += src.Work
 			}
-			x := int(math.Ceil(need / per))
-			if float64(x) > spare {
+			if math.Ceil(need/per) > spare {
 				continue
 			}
+			x := int(math.Ceil(need / per))
 			price := ps.p.CostPerSlotHour / 3600
 			move, run := src.Cost, price*need
 			if src.Via == "staging" {

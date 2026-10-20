@@ -216,8 +216,7 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int, deficit float64, 
 			continue
 		}
 		per := T - d
-		x := int(math.Ceil(left / per))
-		x = min(x, avail, int(room))
+		x := min(atMost(math.Ceil(left/per), avail), atMost(room, avail))
 		if x <= 0 {
 			continue
 		}
@@ -252,6 +251,17 @@ func (a *alloc) sizeBurst(jc *jobCtx, promised map[string]int, deficit float64, 
 		sg.Why = fmt.Sprintf("the most burst available still leaves it about %s late", human(rest))
 	}
 	return sg
+}
+
+// atMost is x as an int, at most hi. A float above every int (room is
+// +Inf for a job still expanding) converts by architecture: MaxInt64 on
+// arm64, MinInt64 on amd64, where such a job was offered no burst. So it
+// is compared before it is converted.
+func atMost(x float64, hi int) int {
+	if !(x < float64(hi)) {
+		return hi
+	}
+	return int(x)
 }
 
 // waitingGang returns the size of the job's next unit if it is a gang
