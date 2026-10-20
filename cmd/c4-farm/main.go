@@ -20,6 +20,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
 	"github.com/Avalanche-io/c4-operator/internal/localfarm"
 	"github.com/Avalanche-io/c4-operator/internal/mcpserver"
@@ -52,6 +53,11 @@ Work
   boost JOB N              ask for N times the slots its deadline needs (1 to 2)
   requeue JOB UNITS        run units again ("14", "0-9,14")
   get JOB|VIEW [PATH...] DIR   write a job's output under DIR, checking every C4 ID
+
+Trackers
+  grant TRACKER            let a tracker submit work for you (--pools, --classes, --until 30d)
+  grants [--tracker NS/T]  your grants, or who has granted a tracker
+  revoke NS/GRANT          take a grant back
 
 Agents
   mcp                      serve the farm's tools to an agent over stdio
@@ -350,6 +356,48 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		return farmcli.Deadline(ctx, c, o, project, pos[0], strings.Join(pos[1:], " "))
 
+	case "grant":
+		pools := fs.String("pools", "", "only jobs in these pools (comma-separated)")
+		classes := fs.String("classes", "", "only jobs of these classes (comma-separated)")
+		until := fs.String("until", "", "when it ends: an RFC 3339 time or a span like 30d (default 30d, at most 90d)")
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		if err := need(pos, 1, "TRACKER [--pools a,b] [--classes graph] [--until 30d]"); err != nil {
+			return err
+		}
+		c, _, o, project, err := connect()
+		if err != nil {
+			return err
+		}
+		return farmcli.Grant(ctx, c, o, project, api.GrantRequest{Tracker: pos[0], Pools: list(*pools), Classes: list(*classes), Until: *until})
+
+	case "grants":
+		tracker := fs.String("tracker", "", "who has granted this tracker (namespace/name)")
+		if _, err := parse(fs, rest); err != nil {
+			return err
+		}
+		c, _, o, _, err := connect()
+		if err != nil {
+			return err
+		}
+		return farmcli.Grants(ctx, c, o, *tracker)
+
+	case "revoke":
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		if err := need(pos, 1, "NAMESPACE/GRANT"); err != nil {
+			return err
+		}
+		c, _, o, _, err := connect()
+		if err != nil {
+			return err
+		}
+		return farmcli.Revoke(ctx, c, o, pos[0])
+
 	case "hold", "release":
 		stopRunning := fs.Bool("stop", false, "also stop the units running now")
 		pos, err := parse(fs, rest)
@@ -568,4 +616,15 @@ func openURL(u string) error {
 		cmd = exec.Command("xdg-open", u)
 	}
 	return cmd.Start()
+}
+
+// list splits a comma-separated flag; empty is none.
+func list(s string) []string {
+	var out []string
+	for _, p := range strings.Split(s, ",") {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -1,10 +1,12 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +20,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/farmcli"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
@@ -230,5 +233,40 @@ func TestSubmitForUnderAGrant(t *testing.T) {
 	var list c4v1.WorkJobList
 	if err := s.Client.List(context.Background(), &list); err != nil || len(list.Items) != 1 {
 		t.Fatalf("jobs: %d %v", len(list.Items), err)
+	}
+}
+
+// TestGrantCLI drives `c4 farm grant`, `grants` and `revoke` against the
+// real HUD handler.
+func TestGrantCLI(t *testing.T) {
+	s := grantFarm(t)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	c := &farmcli.Client{Base: ts.URL, As: "artist", HTTP: ts.Client()}
+	var out bytes.Buffer
+	o := farmcli.Out{W: &out, Clock: farmcli.Clock{UTC: true}}
+	ctx := context.Background()
+	if err := farmcli.Grant(ctx, c, o, "show-a", api.GrantRequest{Tracker: "github", Pools: []string{"cpu"}, Until: "7d"}); err != nil {
+		t.Fatalf("grant: %v\n%s", err, out.String())
+	}
+	name := c4v1.SubmitGrantName("github", "maya")
+	if got := out.String(); !strings.Contains(got, "maya lets tracker github submit work for them (in cpu)") ||
+		!strings.Contains(got, "c4 farm revoke show-a/"+name) {
+		t.Fatalf("grant said:\n%s", got)
+	}
+	out.Reset()
+	if err := farmcli.Grants(ctx, c, o, ""); err != nil || !strings.Contains(out.String(), "maya") || !strings.Contains(out.String(), "(pools cpu)") {
+		t.Fatalf("grants: %v\n%s", err, out.String())
+	}
+	out.Reset()
+	if err := farmcli.Revoke(ctx, c, o, "show-a/"+name); err != nil || !strings.Contains(out.String(), "maya revoked the grant") {
+		t.Fatalf("revoke: %v\n%s", err, out.String())
+	}
+	out.Reset()
+	if err := farmcli.Grants(ctx, c, o, "show-a/github"); err != nil || !strings.Contains(out.String(), "maya revoked the grant from maya to tracker github") {
+		t.Fatalf("grants after revoking: %v\n%s", err, out.String())
+	}
+	if err := farmcli.Revoke(ctx, c, o, "github"); err == nil {
+		t.Fatal("revoke takes namespace/name")
 	}
 }

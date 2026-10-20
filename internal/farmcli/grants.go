@@ -1,0 +1,76 @@
+package farmcli
+
+import (
+	"context"
+	"fmt"
+	"net/url"
+	"strings"
+
+	"github.com/Avalanche-io/c4-operator/hud/api"
+)
+
+// Grant lets a tracker submit work for you (integrations GAPS 17): jobs
+// it makes from your issues or tasks are yours, so what is yours (a lease
+// of your own sign-in) serves them. Granting again renews it.
+func Grant(ctx context.Context, c *Client, o Out, project string, req api.GrantRequest) error {
+	if req.Project == "" && req.Namespace == "" {
+		req.Project = project
+	}
+	var r api.GrantResponse
+	if err := c.Do(ctx, "POST", "/grants", req, &r); err != nil {
+		return err
+	}
+	o.printf("%s\n", r.Message)
+	o.printf("  revoke with: c4 farm revoke %s/%s\n", r.Grant.Namespace, r.Grant.Name)
+	return nil
+}
+
+// Grants lists your grants, or with tracker (namespace/name) who has
+// granted that tracker.
+func Grants(ctx context.Context, c *Client, o Out, tracker string) error {
+	p := "/grants"
+	if tracker != "" {
+		p += "?" + url.Values{"tracker": {tracker}}.Encode()
+	}
+	var l api.GrantList
+	if err := c.Do(ctx, "GET", p, nil, &l); err != nil {
+		return err
+	}
+	if len(l.Grants) == 0 {
+		o.printf("no grants\n")
+		return nil
+	}
+	for _, g := range l.Grants {
+		state := "until " + o.Clock.At(g.Until)
+		if !g.Active {
+			state = g.Why
+		}
+		var scope []string
+		if len(g.Pools) > 0 {
+			scope = append(scope, "pools "+strings.Join(g.Pools, ","))
+		}
+		if len(g.Classes) > 0 {
+			scope = append(scope, "classes "+strings.Join(g.Classes, ","))
+		}
+		o.printf("%-32s %-10s → tracker %-12s %s", g.Namespace+"/"+g.Name, g.Person, g.Tracker, state)
+		if len(scope) > 0 {
+			o.printf(" (%s)", strings.Join(scope, "; "))
+		}
+		o.printf("\n")
+	}
+	return nil
+}
+
+// Revoke takes a grant back: yours, or any in a project you administer.
+func Revoke(ctx context.Context, c *Client, o Out, ref string) error {
+	ns, name, ok := strings.Cut(ref, "/")
+	if !ok || ns == "" || name == "" {
+		return fmt.Errorf("name the grant as namespace/name (c4 farm grants lists them)")
+	}
+	var r api.GrantResponse
+	if err := c.Do(ctx, "DELETE", "/grants/"+url.PathEscape(ns)+"/"+url.PathEscape(name), nil, &r); err != nil {
+		return err
+	}
+	o.printf("%s\n", r.Message)
+	return nil
+}

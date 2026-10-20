@@ -3,6 +3,7 @@ package mcpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -78,6 +79,17 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Message: "sm0140-render-v001: planned, not submitted",
 			Estimate: &api.SubmitEstimate{Units: 48, ETA50: &eta, ETA90: &eta, Deadline: &due, DeadlineSource: "suggested",
 				SlackSeconds: 10800, Feasible: true}})
+	case r.Method == "GET" && r.URL.Path == "/api/v1/grants":
+		f.mu.Lock()
+		f.posts = append(f.posts, "GET "+r.URL.String())
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(api.GrantList{Grants: []api.Grant{{Namespace: "show-a", Name: "github-ab12", Person: "maya", Tracker: "github",
+			Until: due, Record: "c4grant", Active: true}}})
+	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/v1/grants/"):
+		f.mu.Lock()
+		f.posts = append(f.posts, "DELETE "+r.URL.Path)
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "message": "maya revoked the grant from maya to tracker github"})
 	case r.Method == "POST":
 		body, _ := io.ReadAll(r.Body)
 		f.mu.Lock()
@@ -365,5 +377,43 @@ func TestNoETAIsNotATime(t *testing.T) {
 	r = row(api.Job{Name: "push", Estimate: api.Estimate{EtaP50: now, EtaP90: now}})
 	if r.EtaP90 == "" || r.NoETA != "" {
 		t.Fatalf("a job with an ETA reports it: etaP90 %q, noEta %q", r.EtaP90, r.NoETA)
+	}
+}
+
+// A grant is the caller's own, through the HUD: given, listed, revoked.
+func TestGrantTools(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "tok-maya")
+	res, out := call(t, cs, "c4_grant", map[string]any{"project": "show-a", "tracker": "github", "pools": []string{"cpu"}, "until": "14d"})
+	if res.IsError {
+		t.Fatalf("grant: %v %q", out, text(res))
+	}
+	res, out = call(t, cs, "c4_list_grants", map[string]any{"tracker": "show-a/github"})
+	if gs, _ := out["grants"].([]any); res.IsError || len(gs) != 1 {
+		t.Fatalf("list: %v %q", out, text(res))
+	}
+	res, out = call(t, cs, "c4_revoke_grant", map[string]any{"namespace": "show-a", "name": "github-ab12"})
+	if res.IsError || !strings.Contains(fmt.Sprint(out["message"]), "revoked") {
+		t.Fatalf("revoke: %v %q", out, text(res))
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	want := []string{
+		`/api/v1/grants {"project":"show-a","tracker":"github","pools":["cpu"],"until":"14d"}`,
+		"GET /api/v1/grants?tracker=show-a%2Fgithub",
+		"DELETE /api/v1/grants/show-a/github-ab12",
+	}
+	if len(hud.posts) != len(want) {
+		t.Fatalf("requests %v", hud.posts)
+	}
+	for i, w := range want {
+		if hud.posts[i] != w {
+			t.Errorf("request %d: %s, want %s", i, hud.posts[i], w)
+		}
+	}
+	for _, a := range hud.auth {
+		if a != "Bearer tok-maya" {
+			t.Fatalf("a request went to the HUD as %q", a)
+		}
 	}
 }

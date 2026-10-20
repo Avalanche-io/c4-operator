@@ -112,6 +112,12 @@ func Tools(c *Client) []Tool {
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.submitJob),
 		tool("c4_approve_capacity", "Approve burst capacity", "Approve the burst capacity request waiting in a pool. This provisions paid capacity; check c4_capacity_and_cost first for its cost and the jobs it is for.",
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.approveCapacity),
+		tool("c4_grant", "Let a tracker submit work for you", "Let a production tracker's sync (a Tracker: GitHub, Flow, ...) submit work for the person you act for, so jobs it makes from their issues or tasks are theirs and what is theirs (a lease of their own sign-in) serves them. Only when that person asks: the grant is theirs, signed and recorded in the book. Optionally limit it to pools and job classes; it ends at until (30d by default, at most 90d). Granting again renews it.",
+			idempotent, c.grant),
+		tool("c4_list_grants", "List grants", "Grants to trackers: by default the person you act for's own, or with tracker (namespace/name) who has let that tracker submit for them. Each shows its pools, classes, end, record, and whether it serves now and why not.",
+			readOnly, c.listGrants),
+		tool("c4_revoke_grant", "Revoke a grant", "Take back a grant to a tracker: the tracker submits nothing more for that person, and units of their jobs not yet started do not get their lease. Units running now finish. The person who gave it, or a project admin, revokes it; recorded in the book.",
+			destructive, c.revokeGrant),
 	}
 }
 
@@ -816,4 +822,58 @@ func (c *Client) readBook(ctx context.Context, _ *mcp.CallToolRequest, in BookIn
 		b.Entries = []api.BookEntry{}
 	}
 	return nil, b, nil
+}
+
+type GrantIn struct {
+	Project   string   `json:"project,omitempty" jsonschema:"the project the tracker is in (one you can see may be left out)"`
+	Namespace string   `json:"namespace,omitempty" jsonschema:"or the namespace the tracker is in"`
+	Tracker   string   `json:"tracker" jsonschema:"the tracker's name"`
+	Pools     []string `json:"pools,omitempty" jsonschema:"only jobs in these pools"`
+	Classes   []string `json:"classes,omitempty" jsonschema:"only jobs of these classes"`
+	Until     string   `json:"until,omitempty" jsonschema:"when it ends: an RFC 3339 time or a span like 30d (default 30d, at most 90d)"`
+}
+
+func (c *Client) grant(ctx context.Context, _ *mcp.CallToolRequest, in GrantIn) (*mcp.CallToolResult, Done, error) {
+	return c.control(ctx, "/grants", api.GrantRequest{Project: in.Project, Namespace: in.Namespace, Tracker: in.Tracker,
+		Pools: in.Pools, Classes: in.Classes, Until: in.Until})
+}
+
+type ListGrantsIn struct {
+	Tracker string `json:"tracker,omitempty" jsonschema:"namespace/name: who has granted this tracker"`
+	Person  string `json:"person,omitempty" jsonschema:"another person's grants, in projects you can see"`
+}
+
+func (c *Client) listGrants(ctx context.Context, _ *mcp.CallToolRequest, in ListGrantsIn) (*mcp.CallToolResult, api.GrantList, error) {
+	q := url.Values{}
+	if in.Tracker != "" {
+		q.Set("tracker", in.Tracker)
+	}
+	if in.Person != "" {
+		q.Set("person", in.Person)
+	}
+	p := "/grants"
+	if len(q) > 0 {
+		p += "?" + q.Encode()
+	}
+	var out api.GrantList
+	err := c.do(ctx, "GET", p, nil, &out)
+	return nil, out, err
+}
+
+type RevokeGrantIn struct {
+	Namespace string `json:"namespace" jsonschema:"the grant's namespace (from c4_list_grants)"`
+	Name      string `json:"name" jsonschema:"the grant's name (from c4_list_grants)"`
+}
+
+func (c *Client) revokeGrant(ctx context.Context, _ *mcp.CallToolRequest, in RevokeGrantIn) (*mcp.CallToolResult, Done, error) {
+	if in.Namespace == "" || in.Name == "" {
+		return nil, Done{}, fmt.Errorf("name the grant: namespace and name, from c4_list_grants")
+	}
+	var r struct {
+		Message string `json:"message"`
+	}
+	if err := c.do(ctx, "DELETE", "/grants/"+url.PathEscape(in.Namespace)+"/"+url.PathEscape(in.Name), nil, &r); err != nil {
+		return nil, Done{}, err
+	}
+	return nil, Done{Message: r.Message}, nil
 }
