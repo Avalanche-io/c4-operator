@@ -2909,7 +2909,7 @@ Events record which user an agent acted for.
 ### 13.2 MCP server
 
 **As built** (`internal/mcpserver`, on the official Go SDK v1.8.0, which
-speaks MCP 2026-07-28): twenty-nine tools, every one a call to the HUD API.
+speaks MCP 2026-07-28): thirty tools, every one a call to the HUD API.
 
 | group   | built                                                                                                                                                                                                                                                                                                   | annotations                           |
 | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
