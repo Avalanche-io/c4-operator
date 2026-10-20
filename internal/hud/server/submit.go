@@ -223,8 +223,8 @@ func (s *Server) handleMissing(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body api.MissingRequest
-	if err := decodeBody(r, &body); err != nil {
-		fail(w, http.StatusBadRequest, "body: %v", err)
+	if err := decodeBodyUpTo(r, &body, listBody); err != nil {
+		failBody(w, err)
 		return
 	}
 	if len(body.IDs) > maxListIDs {
@@ -315,8 +315,8 @@ func (s *Server) handlePostView(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body api.ViewRequest
-	if err := decodeBody(r, &body); err != nil {
-		fail(w, http.StatusBadRequest, "body: %v", err)
+	if err := decodeBodyUpTo(r, &body, viewBody); err != nil {
+		failBody(w, err)
 		return
 	}
 	if n := len(body.Files) + len(body.Dirs) + len(body.Links); n == 0 || n > maxViewFiles {

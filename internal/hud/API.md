@@ -646,7 +646,7 @@ stores its units' control documents and session views; it cannot submit.
 ```
 
 The IDs the project's store lacks, in the order given, without duplicates.
-At most 100,000 per request.
+At most 100,000 per request (a body up to 16 MiB); `413` for more.
 
 ### PUT /objects/{project}/{c4id}
 
@@ -661,7 +661,7 @@ holds bytes under the wrong name. `200 { ok, id, stored, bytes? }`;
 { files: [ { path, id, size, exec? } ], dirs?: [ path/ ], links?: [ { path, target } ] }  ->  { view, files, bytes }
 ```
 
-Records a tree of stored objects as a view: its directory records go into
+A body up to 512 MiB (`413` past it). Records a tree of stored objects as a view: its directory records go into
 the store and `view` is the tree's C4 ID, the same ID `c4-operator tree-id`
 gives the directory on disk. Paths are clean, relative and slash-separated.
 `dirs` are the tree's empty directories (any other directory is implied by

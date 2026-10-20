@@ -53,9 +53,32 @@ func (s *Server) authorize(ctx context.Context, r *http.Request, v *api.Viewer, 
 	return nil
 }
 
-func decodeBody(r *http.Request, into any) error {
-	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, 1<<16))
+// Request bodies: a control's is small; an object list's and a view's are
+// as large as their counts allow (maxListIDs IDs of about 93 bytes of
+// JSON each; maxViewFiles entries with their paths).
+const (
+	controlBody = 1 << 16
+	listBody    = 16 << 20
+	viewBody    = 512 << 20
+)
+
+func decodeBody(r *http.Request, into any) error { return decodeBodyUpTo(r, into, controlBody) }
+
+// decodeBodyUpTo reads a JSON body of at most limit bytes.
+func decodeBodyUpTo(r *http.Request, into any, limit int64) error {
+	dec := json.NewDecoder(http.MaxBytesReader(nil, r.Body, limit))
 	return dec.Decode(into)
+}
+
+// failBody answers a body that could not be read: 413 when it was too
+// large, else 400.
+func failBody(w http.ResponseWriter, err error) {
+	var big *http.MaxBytesError
+	if errors.As(err, &big) {
+		fail(w, http.StatusRequestEntityTooLarge, "body over %d bytes", big.Limit)
+		return
+	}
+	fail(w, http.StatusBadRequest, "body: %v", err)
 }
 
 // liveJob reads the job from the API, for a write.

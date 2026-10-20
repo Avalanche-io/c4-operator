@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -383,5 +384,36 @@ func TestSubmitForAnotherPersonIsRefused(t *testing.T) {
 	var job c4v1.WorkJob
 	if err := s.Client.Get(context.Background(), types.NamespacedName{Namespace: "show-a", Name: "for-dana"}, &job); err == nil {
 		t.Fatal("a job was created for another person without their grant")
+	}
+}
+
+// An object list as large as the API allows, 100,000 IDs, is read whole
+// (c4 farm sends 50,000 at a time); one over it is refused by count, and
+// a body over the list limit with 413.
+func TestMissingTakesAFullList(t *testing.T) {
+	s := submitFarm(t)
+	ids := make([]string, maxListIDs)
+	for i := range ids {
+		ids[i] = c4.Identify(strings.NewReader(fmt.Sprintf("frame %d", i))).String()
+	}
+	var miss api.MissingResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/objects/show-a/missing?as=artist", api.MissingRequest{IDs: ids}, &miss); code != 200 || len(miss.Missing) != maxListIDs {
+		t.Fatalf("%d IDs: %d, %d missing", len(ids), code, len(miss.Missing))
+	}
+	if code := call(t, s, http.MethodPost, "/api/v1/objects/show-a/missing?as=artist", api.MissingRequest{IDs: append(ids, ids[0])}, nil); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("%d IDs: %d", len(ids)+1, code)
+	}
+	big := []byte(`{"ids": ["` + strings.Repeat("x", listBody) + `"]}`)
+	if code := call(t, s, http.MethodPost, "/api/v1/objects/show-a/missing?as=artist", big, nil); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("a body over %d bytes: %d", listBody, code)
+	}
+	// A view of 20,000 files, well past the control limit, is read too.
+	var files []api.ViewFile
+	for i := 0; i < 20000; i++ {
+		files = append(files, api.ViewFile{Path: fmt.Sprintf("frames/sh040.%05d.exr", i), ID: ids[i], Size: 1})
+	}
+	var vr api.ViewResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/views/show-a?as=artist", api.ViewRequest{Files: files}, &vr); code != http.StatusConflict || len(vr.Missing) != 20000 {
+		t.Fatalf("a view of 20,000 files: %d, %d missing", code, len(vr.Missing))
 	}
 }
