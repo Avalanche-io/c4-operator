@@ -32,9 +32,9 @@ type retireTry struct {
 }
 
 // retireForecast deletes forecast f, replaced by job by, and books it as
-// replaced. A forecast gone already is not an error and is not booked
-// again.
-func (s *Server) retireForecast(ctx context.Context, f *c4v1.WorkJob, by, user, actor string) error {
+// replaced, with the replacement's signed record when there is one. A
+// forecast gone already is not an error and is not booked again.
+func (s *Server) retireForecast(ctx context.Context, f *c4v1.WorkJob, by, user, actor, record string) error {
 	err := s.Client.Delete(ctx, f, client.Preconditions{UID: &f.UID})
 	if apierrors.IsNotFound(err) {
 		return nil
@@ -42,8 +42,11 @@ func (s *Server) retireForecast(ctx context.Context, f *c4v1.WorkJob, by, user, 
 	if err != nil {
 		return err
 	}
-	s.record(ctx, f, "WorkJob", user, "Replaced", fmt.Sprintf("%s: replaced by %s", f.Name, by),
-		bookNote{actor: actor, kind: "replaced"})
+	msg := fmt.Sprintf("%s: replaced by %s", f.Name, by)
+	if record != "" {
+		msg += "; record " + shortID(record)
+	}
+	s.record(ctx, f, "WorkJob", user, "Replaced", msg, bookNote{actor: actor, kind: "replaced", record: record})
 	return nil
 }
 
@@ -72,7 +75,7 @@ func (s *Server) sweepReplaced(ctx context.Context, now time.Time) {
 			continue
 		}
 		owner := rec.job.Annotations[c4v1.AnnotationOwner]
-		err := s.retireForecast(ctx, f.job.DeepCopy(), rec.job.Name, owner, owner)
+		err := s.retireForecast(ctx, f.job.DeepCopy(), rec.job.Name, owner, owner, "")
 		if err == nil {
 			delete(s.retire, key)
 			delete(pending, key)

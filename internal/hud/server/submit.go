@@ -33,9 +33,11 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/jobspec"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
 // DryRunFunc plans a job that does not exist yet and returns what the
@@ -696,6 +698,16 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		job.Annotations[c4v1.AnnotationSubmittedVia] = c4v1.SyncDevViewer
 		job.Annotations[c4v1.AnnotationGrant] = grantRef(g)
 	}
+	replaceWhy := ""
+	if replaced != nil {
+		// Only one who could have made the forecast replaces it.
+		why, err := s.mayRetire(ctx, v, replaced, grant)
+		if err != nil {
+			fail(w, http.StatusForbidden, "replaces %q: %v", replaced.Name, err)
+			return
+		}
+		replaceWhy = why
+	}
 	if body.Type != "" {
 		if errs := validation.IsValidLabelValue(body.Type); len(errs) > 0 {
 			fail(w, http.StatusBadRequest, "type %q: %s", body.Type, strings.Join(errs, "; "))
@@ -745,6 +757,20 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		out.EstimateError = estErr.Error()
 	}
 
+	replaceRecord := ""
+	if replaced != nil {
+		// Signed first: the replacement deletes the forecast.
+		pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
+			Authorization: s.authorization("create", "workjobs", ns, "") + "; " + replaceWhy, Action: "replace",
+			Target: "workjob:" + ns + "/" + replaced.Name, Change: map[string]any{"replacedBy": name, "forecast": replaced.Spec.Forecast}}
+		id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target,
+			Digest: map[string]string{"sha256": queue.SpecDigest(replaced)}}, pred)
+		if err != nil {
+			fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+			return
+		}
+		replaceRecord = id
+	}
 	for _, mt := range mats {
 		if err := s.Client.Create(ctx, mt); err != nil && !apierrors.IsAlreadyExists(err) {
 			fail(w, http.StatusConflict, "materialization %s: %v", mt.Name, err)
@@ -772,7 +798,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		// The forecast's work is this job now (GAPS 9). A delete that
 		// fails here is tried again until the forecast is gone
 		// (sweepReplaced): the job names it.
-		if err := s.retireForecast(ctx, replaced, name, v.User, actorOf(r, v)); err != nil {
+		if err := s.retireForecast(ctx, replaced, name, v.User, actorOf(r, v), replaceRecord); err != nil {
 			s.Log.Error(err, "delete the replaced forecast; will try again", "job", ns+"/"+replaced.Name)
 		}
 	}

@@ -1,6 +1,8 @@
 package server
 
 import (
+	"cmp"
+	"context"
 	"fmt"
 	"net/http"
 	"regexp"
@@ -9,8 +11,10 @@ import (
 
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
@@ -129,7 +133,12 @@ func (s *Server) handleWithdraw(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "%s is a real job: only a forecast is withdrawn", j.Name)
 		return
 	}
-	authz := s.authorization("delete", "workjobs", j.Namespace, j.Name)
+	why, err := s.mayRetire(ctx, v, j, nil)
+	if err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
+	authz := s.authorization("delete", "workjobs", j.Namespace, j.Name) + "; " + why
 	id, err := s.controlJob(ctx, r, v, rec, j, queue.SpecDigest(j), "withdraw", body, func(p *controlPredicate) { p.Authorization = authz })
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
@@ -153,4 +162,41 @@ func (s *Server) handleWithdraw(w http.ResponseWriter, r *http.Request) {
 		out["record"] = id
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// mayRetire says whether v may replace or withdraw forecast f: only one
+// who could have made it. That is its owner; the sync for the Tracker it
+// came from; or the sync submitting under a grant from its owner (grant,
+// for a replacement made under one; otherwise any grant of the owner's in
+// the namespace that serves now). It returns which, in words, for the
+// control record.
+func (s *Server) mayRetire(ctx context.Context, v *api.Viewer, f *c4v1.WorkJob, grant *c4v1.SubmitGrant) (string, error) {
+	owner := f.Annotations[c4v1.AnnotationOwner]
+	if owner != "" && v.User == owner {
+		return "the forecast's owner", nil
+	}
+	if s.isSync(v) {
+		if tr := f.Labels[c4v1.LabelTracker]; tr != "" {
+			var t c4v1.Tracker
+			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: f.Namespace, Name: tr}, &t); err == nil {
+				return "the sync for its tracker " + tr, nil
+			}
+		}
+		if owner != "" && grant != nil && grant.Spec.Person == owner {
+			return fmt.Sprintf("under %s's grant to tracker %s", owner, grant.Spec.Tracker), nil
+		}
+		if owner != "" && grant == nil {
+			var gs c4v1.SubmitGrantList
+			if err := s.Client.List(ctx, &gs, client.InNamespace(f.Namespace)); err == nil {
+				now := time.Now()
+				for i := range gs.Items {
+					if g := &gs.Items[i]; g.Spec.Person == owner && g.Lapsed(now) == "" {
+						return fmt.Sprintf("under %s's grant to tracker %s", owner, g.Spec.Tracker), nil
+					}
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf("only the owner of %s (%s), the sync for the tracker it came from, or a sync holding the owner's grant may replace or withdraw it",
+		f.Name, cmp.Or(owner, "none recorded"))
 }
