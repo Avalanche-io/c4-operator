@@ -10,6 +10,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/tracker"
 )
 
 func TestParse(t *testing.T) {
@@ -74,5 +75,24 @@ func TestSampleMLflowTracker(t *testing.T) {
 	}
 	if tr.Spec.Kind != "mlflow" || tr.Spec.People["mlflow-registry"] != "ml-leads" || tr.Spec.Intake[0].Match.Fields["status"] != "SCHEDULED" {
 		t.Fatalf("sample: %+v", tr.Spec)
+	}
+}
+
+func TestSampleKitsuTracker(t *testing.T) {
+	b, err := os.ReadFile("../../config/samples/tracker-kitsu/tracker.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tr c4v1.Tracker
+	if err := yaml.UnmarshalStrict(b, &tr); err != nil {
+		t.Fatal(err)
+	}
+	in, fc := tr.Spec.Intake[0], tr.Spec.Intake[1]
+	if tr.Spec.Kind != "kitsu" || in.Rework != "nextVersion" || in.Match.Fields["task_status"] != "ready" ||
+		fc.As != "forecast" || fc.Forecast.Field != "estimation" || len(tr.Spec.StatusOut.States) != 0 || len(tr.Spec.VerdictsIn) != 0 {
+		t.Fatalf("sample: %+v", tr.Spec)
+	}
+	if _, err := tracker.New(tr.Spec.Kind, tracker.Config{Endpoint: tr.Spec.Endpoint, Scope: tr.Spec.Scope}); err != nil {
+		t.Fatal(err)
 	}
 }

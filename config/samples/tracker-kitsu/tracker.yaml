@@ -1,0 +1,75 @@
+# A Kitsu production syncing with a show (experimental: c4-sync). Ready
+# lighting tasks on shots become render jobs whose deadline is 14:00 Los
+# Angeles time on the task's due date (Kitsu's date picker sets a date).
+# Work states go to the task as comments that carry its status, since
+# Kitsu changes a status only by a comment: work in progress while the
+# render runs, waiting for approval once it is published. The ETA and the
+# job link go to the task's data. Each render is published as a comment
+# in review carrying its output view's C4 ID, with a still of it as the
+# comment's preview, a new revision. The supervisor's retake or done on
+# the task comes back as the dailies decision; a retake makes the next
+# version, which follows the last with her notes as its input. c4-sync
+# never sets a done status.
+#
+# The credential is a Kitsu bot's API token. An admin creates the bot
+# (People, then Bots, or POST /api/data/persons with is_bot), gives it the
+# manager role and an expiry date, and adds it to the production's team.
+# Regenerating the token revokes the old one.
+#
+# Statuses and verdicts are read from Kitsu's flags, so this Tracker names
+# none. Name them only to override: statusOut.states {needs-person: hold}
+# for a studio hold status, or verdictsIn {status:cbb: accept} for a
+# "could be better" status that counts as done.
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Tracker
+metadata:
+  name: saltmarsh-kitsu
+  namespace: saltmarsh
+spec:
+  kind: kitsu
+  endpoint: https://saltmarsh.cg-wire.com
+  scope:
+    project: Saltmarsh
+    # Task data keys; add Task metadata descriptors with these names for
+    # Kitsu to show them.
+    eta_field: c4_eta
+    link_field: c4_link
+  credential:
+    lease: saltmarsh-kitsu-bot
+    secret: {name: saltmarsh-kitsu-bot, key: token}
+  # Kitsu pushes events only over Socket.IO, with no replay: c4-sync reads
+  # its event log instead.
+  events: {mode: eventlog, pollSeconds: 30, resyncSeconds: 900}
+  # Kitsu publishes no request limit.
+  rate: {perSecond: "3", burst: 10}
+  people:
+    dana@saltmarsh.example: dana
+  intake:
+  - match:
+      type: Task
+      fields: {task_type: Lighting, task_status: ready, entity.type: Shot}
+    as: job
+    deadline: {dateOnlyAt: "14:00", timeZone: America/Los_Angeles}
+    review: {wait: dailies}
+    rework: nextVersion
+    job:
+      class: render
+      params: {frames: "1001-1240", chunk: "4"}
+      template:
+        spec:
+          containers:
+          - name: render
+            image: ghcr.io/avalanche-io/c4-job-karma:dev
+  # A shot not yet turned over is a forecast, sized by the task's
+  # estimation in minutes: 0.05 slot-hours a minute.
+  - match:
+      type: Task
+      fields: {task_type: Lighting, task_status: todo, entity.type: Shot}
+    as: forecast
+    forecast: {field: estimation, perUnit: "0.05", unitHours: "1"}
+    deadline: {dateOnlyAt: "14:00", timeZone: America/Los_Angeles}
+    job:
+      class: render
+      params: {frames: "1001-1240"}
+  statusOut:
+    fieldSeconds: 300

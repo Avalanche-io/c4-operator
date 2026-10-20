@@ -2,30 +2,31 @@
 
 c4-sync keeps a tracker and the farm in step, so nobody retypes work
 between them. A tracker entity (a GitHub issue, a Flow Production Tracking
-Task, an MLflow run) becomes a C4 job with the tracker's due date as its
-deadline. The job's work states go back to the tracker, and the job's
-output is published there with its C4 ID. When a person approves or asks
-for changes in the tracker, c4-sync relays that decision to the job's
+Task, a Kitsu task, an MLflow run) becomes a C4 job with the tracker's due
+date as its deadline. The job's work states go back to the tracker, and the
+job's output is published there with its C4 ID. When a person approves or
+asks for changes in the tracker, c4-sync relays that decision to the job's
 review wait.
 
 c4-sync is **experimental**. Its two resources, `Tracker` and `TrackerLink`
 (`c4.avalanche.io/v1alpha1`), are not part of the operator's install and
 may change. Its place in the design is DESIGN.md section 15.2.
 
-| tracker                  | `kind`   | work in                             | review out                                             | decisions back                          |
-| ------------------------ | -------- | ----------------------------------- | ------------------------------------------------------ | --------------------------------------- |
-| GitHub                   | `github` | labeled issues; milestone `due_on`  | one comment; a check run per commit; commit statuses   | pull request reviews; check-run buttons |
-| Flow Production Tracking | `flow`   | Tasks by field; `due_date` (a date) | Task status and two fields; a Version per output       | Version status changes and Notes        |
-| MLflow                   | `mlflow` | scheduled runs; `c4.deadline` tag   | run status and `c4.*` tags; a model version per output | the approve alias; a review tag         |
+| tracker                  | `kind`   | work in                                             | review out                                                           | decisions back                                   |
+| ------------------------ | -------- | --------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------ |
+| GitHub                   | `github` | labeled issues; milestone `due_on`                  | one comment; a check run per commit; commit statuses                 | pull request reviews; check-run buttons          |
+| Flow Production Tracking | `flow`   | Tasks by field; `due_date` (a date)                 | Task status and two fields; a Version per output                     | Version status changes and Notes                 |
+| Kitsu                    | `kitsu`  | tasks by type, status and shot; `due_date` (a date) | comments carrying the task's status; task data; a preview per output | a person's comment moving the task out of review |
+| MLflow                   | `mlflow` | scheduled runs; `c4.deadline` tag                   | run status and `c4.*` tags; a model version per output               | the approve alias; a review tag                  |
 
 ## What it writes, and what it never writes
 
 c4-sync writes **work states only**: queued, running, waiting for review,
 reworking, needs a person, failed, done. It never writes a judgment. It
-never approves, merges, sets a Flow Version's approved status, or sets an
-MLflow alias. Approval stays with the person who approves, in the tracker.
-It changes no status when only the ETA moves, and it writes one cause per
-failure group, not one per frame.
+never approves, merges, sets a Flow Version's approved status, moves a Kitsu
+task to done or out of it, or sets an MLflow alias. Approval stays with the
+person who approves, in the tracker. It changes no status when only the ETA
+moves, and it writes one cause per failure group, not one per frame.
 
 It changes jobs only through the HUD API, as its own identity
 (`X-C4-Agent: c4-sync`), so the HUD authorizes, signs and books each
@@ -91,13 +92,18 @@ namespace:
    - GitHub: a GitHub App installation token, which lasts an hour.
    - Flow: the API script's key. Give the script its own permission group,
      limited to the project.
+   - Kitsu: a bot's API token. An admin creates the bot, gives it the
+     manager role (Kitsu lets managers set any status and read the event
+     log), an expiry date, and a place in the production's team.
+     Regenerating the token revokes the old one.
    - MLflow: the password of a basic-auth user with EDIT on the experiment.
      It needs MANAGE only if c4-sync should create model versions under an
      admin-only model.
 2. **A Role letting c4-sync read those Secrets by name**, and nothing else.
    See `config/samples/tracker-github/role.yaml`.
 3. **The Tracker.** Start from a sample:
-   `config/samples/tracker-github`, `tracker-flow` or `tracker-mlflow`.
+   `config/samples/tracker-github`, `tracker-flow`, `tracker-kitsu` or
+   `tracker-mlflow`.
 
 Each Tracker says:
 - `intake`: which entities become jobs, and from what job spec;
@@ -141,9 +147,15 @@ Each Tracker says:
   `nextVersion` makes v002 follow v001 with the note as an input view,
   the media way;
 - `statusOut.states`: your site's own status codes (Flow lets admins rename
-  every status);
-- `verdictsIn`: which tracker decisions mean approve, rework or accept;
-- `people`: tracker users mapped to C4 people.
+  every status). Kitsu needs none: its statuses carry flags, and c4-sync
+  moves a task to the one flagged work in progress while the job runs and
+  to the one flagged for review when it publishes; name a status only to
+  override that, or to give a needed person a status of their own;
+- `verdictsIn`: which tracker decisions mean approve, rework or accept.
+  For Kitsu, a status flagged done approves and one flagged retake asks for
+  rework; name a status (`status:cbb: accept`) to override its flag;
+- `people`: tracker users mapped to C4 people: GitHub and Flow logins,
+  Kitsu emails.
 
 **People.** A person's wait (`person:dana`) is served only by the tracker
 user `people` maps to `dana`. Anyone else's decision is refused and
@@ -170,9 +182,10 @@ attempt retried) are not posted.
 **Assignments.** When someone assigns failed units to a person in C4
 (`c4 farm`'s acknowledge with an assignee, the HUD, MCP
 `c4_acknowledge_units`), c4-sync tells that person where they work: an
-@-mention on the GitHub issue, or a Note on the Flow Task addressed to them,
-so the tracker notifies them. It does this once per assignment, for a person
-`people` maps to a tracker user. Anyone else stays assigned in C4 only, and
+@-mention on the GitHub issue, a Note on the Flow Task addressed to them, or
+a comment on the Kitsu task that mentions them, so the tracker notifies
+them. It does this once per assignment, for a person `people` maps to a
+tracker user. Anyone else stays assigned in C4 only, and
 the link's `Assigned` condition says so.
 
 ## Webhooks
@@ -188,7 +201,8 @@ delivery is verified:
 Deliveries are only hints. c4-sync also polls the tracker (`events.pollSeconds`)
 and reconciles every link (`events.resyncSeconds`), so a lost delivery
 costs time, never correctness. Flow is read from its event log, which it
-can replay from any entry.
+can replay from any entry. Kitsu pushes nothing c4-sync can verify or
+replay (its live events are Socket.IO), so c4-sync reads its event log.
 
 ## Watching it
 
@@ -224,6 +238,46 @@ An MLflow server refuses a `c4://<view>` source whose path is empty, and
 accepts `c4:///<view>`. That is why c4-sync publishes the second form.
 See integrations/mlflow-c4/README.md.
 
+## Kitsu
+
+Kitsu changes a task's status only by a comment that carries it, so every
+status c4-sync writes is a short comment ("C4: running, ETA Thu 14:20"
+and the job's link), posted only when the state changes and never when
+the task already has that status. A **done** task is the supervisor's
+approval: c4-sync never moves a task out of a done status, whatever the
+job does afterwards.
+
+- **Matching.** Intake rules match tasks in Kitsu's own words:
+  `task_type` (a task type's name), `task_status` (a status's short name),
+  `entity.type` (`Shot`, `Sequence`, or an asset type such as `Prop`),
+  `entity.name`, `sequence` and `episode`. Any other key is a task column,
+  compared as Kitsu compares it. Milestones can cover `entity.name` (the
+  shot) and `task_type`.
+- **Publishing.** Each output is a comment that moves the task to review,
+  carrying the output view's C4 ID, the job and its provenance, with a
+  still of the output (the middle frame's preview proxy) as the comment's
+  preview: a new revision, which Kitsu plays in review and playlists. A
+  publish interrupted between the comment and the upload is finished on
+  the next pass, so no revision is left processing.
+- **Decisions.** A person's comment that moves the task out of review is
+  the decision. Its text, with the notes and replies written on the task
+  since the review opened, is the decision's note, and with
+  `rework: nextVersion` the next version's input.
+- **The ETA and link** go to the task's data under `scope.eta_field` and
+  `scope.link_field`. Kitsu shows them where a production manager adds
+  Task metadata descriptors with those names.
+- **Bids.** A task's `estimation` is in minutes; a forecast rule sizes by
+  it (`forecast: {field: estimation, perUnit: "0.05"}`).
+- **Text.** Kitsu posts a comment again on a shot's other tasks when it
+  says `#all` or `#<task type>`; c4-sync's comments never do (a number
+  sign before a letter is written full width). A mention is
+  `@First Last` followed by a space, which c4-sync writes from the email
+  in `people`.
+- **Checking a server.** `KITSU_LIVE=<url> KITSU_LIVE_ADMIN=<email>:<password>
+  go test -run TestLive ./internal/tracker/kitsu/` runs the adapter against
+  a throwaway Kitsu (CGWire's `cgwire/cgwire` image runs one locally). It
+  makes a production of its own there; never point it at a studio's.
+
 ## Limits
 
 - Experimental API. The jobs c4-sync submits carry their tracker
@@ -235,4 +289,4 @@ See integrations/mlflow-c4/README.md.
   `people`.
 - One c4-sync replica: there is no leader election yet.
 - Tracker request limits are those each vendor publishes (GitHub's), or a
-  conservative default (`rate`) where none are published (Flow).
+  conservative default (`rate`) where none are published (Flow, Kitsu).
