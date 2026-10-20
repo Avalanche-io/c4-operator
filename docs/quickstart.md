@@ -12,12 +12,13 @@ You need Docker Desktop running, with at least 6 GB of memory and 4 CPUs
 ## 1. Install `c4 farm`
 
 ```sh
-brew install avalanche-io/tap/c4-farm
+brew install avalanche-io/tap/c4
 ```
 
-This installs `c4-farm`, or take a binary for your machine from the
-[release page](https://github.com/Avalanche-io/c4-operator/releases). If you
-have the `c4` command, `c4 farm` runs it too; this guide writes it that way.
+This installs the `c4` command and its farm tools; `c4 farm` runs
+`c4-farm`. Or take a `c4-farm` binary for your machine from the
+[release page](https://github.com/Avalanche-io/c4-operator/releases) and
+write `c4-farm` wherever this guide writes `c4 farm`.
 
 ## 2. Start the farm
 
