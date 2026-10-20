@@ -1,0 +1,61 @@
+c4: tool/1
+name: lora
+title: LoRA fine-tune
+summary: Fine-tunes a LoRA (low-rank adapter) for a text-to-image model on a folder of captioned frames, with checkpoints it resumes from.
+kind: train
+runs:
+  image: c4/job-train
+  command: [bash, "{{Tool.Dir}}/lora.sh", "{{Param.data}}", "{{Param.base}}", "{{Param.rank}}"]
+  workdir: "{{Job.Tree}}"
+params:
+- name: data
+  type: PATH
+  objectType: DIRECTORY
+  dataFlow: IN
+  description: The training frames, each image with a caption in a .txt of the same name, or one caption for all in captions.txt.
+  show: artist
+  userInterface: {control: CHOOSE_DIRECTORY, label: Training frames}
+- name: base
+  type: STRING
+  default: models/tiny-sd
+  minLength: 1
+  description: The base model, a diffusers model folder in the job's tree or a Hugging Face model ID.
+  show: artist
+  userInterface: {control: LINE_EDIT, label: Base model}
+- name: rank
+  type: INT
+  default: 16
+  minValue: 1
+  maxValue: 256
+  description: The adapter's rank. Higher learns more and makes a bigger adapter.
+  show: advanced
+  userInterface: {control: SPIN_BOX, label: Rank}
+- name: steps
+  type: INT
+  default: 400
+  minValue: 1
+  description: How many training steps the run takes.
+  show: artist
+  userInterface: {control: SPIN_BOX, label: Steps, singleStepDelta: 50}
+- name: checkpointEvery
+  type: INT
+  default: 50
+  minValue: 1
+  description: Save a checkpoint every this many steps. A run that is moved or yields resumes from its last one.
+  show: advanced
+  userInterface: {control: SPIN_BOX, label: Checkpoint every, singleStepDelta: 10}
+- name: ranks
+  type: INT
+  default: 1
+  minValue: 1
+  maxValue: 64
+  description: How many slots the run holds together, as one gang.
+  show: wrangler
+  affectsOutput: false
+  userInterface: {control: SPIN_BOX, label: Ranks}
+writes: [out/]
+reuse: never
+test:
+  tree: test/
+  with: {data: frames, base: hf-internal-testing/tiny-stable-diffusion-pipe, rank: 4, steps: 2, checkpointEvery: 1}
+  expect: [out/latest, out/checkpoint-2/adapter.safetensors]
