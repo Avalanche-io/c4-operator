@@ -167,9 +167,12 @@ def test_open_check_submit(tmp_path, monkeypatch):
     assert bf.state.saves == 1, "the farm reads the saved file, so Check saves it"
     assert c.checked.ok, c.checked.errors
     text = c.summary_text()
-    assert "sh010-render-bg-v001   Blender render · 48 frames · 12 units" in text
-    assert "sh010-render-fg-v001   Blender render · 48 frames · 12 units" in text
-    assert re.search(r"estimate\s+ready", text) and "dailies · slack" in text
+    # The farm's own words for each job and its estimate are c4submit's to
+    # test; here, that both jobs are listed with their frames and the slack.
+    heads = [ln for ln in text.splitlines() if ln.startswith("sh010-render-")]
+    assert [h.split()[0] for h in heads] == ["sh010-render-bg-v001", "sh010-render-fg-v001"]
+    assert all("48 frames" in h for h in heads)
+    assert "slack" in text
     assert f"{LIGHTING_FILES} found from sh010_lighting_v003.blend" in text and f"{LIGHTING_FILES} to upload" in text
     assert text.endswith("Ready: press Submit to send it to the farm.")
     assert fake.calls[-1][0] == "check" and not fake.store

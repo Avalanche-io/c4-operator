@@ -123,8 +123,8 @@ Run the whole list in **Blender 4.2 LTS** and **Blender 4.5 LTS**.
    `progress_end` work while the operator is modal.
 2. **Expect** the summary: "To fix" is absent. It lists 72 files found from
    `sh010_lighting_v003.blend` and 72 to upload, `sh010-render-bg-v001`
-   and `sh010-render-fg-v001`, each "Blender render · 48 frames · 12 units"
-   with an estimate and, with Dailies picked, "dailies · slack". It ends
+   and `sh010-render-fg-v001`, each with its 48 frames and an estimate and,
+   with Dailies picked, the slack against Dailies. It ends
    "Ready: press Submit to send it to the farm."
    **[guess]** in reading the file:
    - `bpy.utils.blend_paths(absolute=True)` lists a sequence by its first
@@ -165,7 +165,7 @@ Run the whole list in **Blender 4.2 LTS** and **Blender 4.5 LTS**.
    Opening another file while it runs may be refused while the operator is
    modal; that is acceptable.
 5. Tick `sh010_comp / comp`, Check. **Expect:** three jobs, and
-   `sh010-render-comp-v001` shows "after render-bg, render-fg". Untick bg
+   `sh010-render-comp-v001` comes after the bg and fg jobs. Untick bg
    and fg, Check. **Expect:** an error on `sh010_render` saying the render's
    files are missing, with its fix on the line under it.
 
