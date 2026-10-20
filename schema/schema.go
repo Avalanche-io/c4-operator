@@ -31,11 +31,13 @@ var tool []byte
 //go:embed fixtures
 var fixtures embed.FS
 
-// Submit is the JSON Schema of a submission, as GET /schema/submit serves it.
-func Submit() []byte { return slices.Clone(submit) }
+// SubmitSchema is the JSON Schema of a submission, as GET /schema/submit
+// serves it.
+func SubmitSchema() []byte { return slices.Clone(submit) }
 
-// Tool is the JSON Schema of a tool definition, as GET /schema/tool serves it.
-func Tool() []byte { return slices.Clone(tool) }
+// ToolSchema is the JSON Schema of a tool definition, as GET /schema/tool
+// serves it.
+func ToolSchema() []byte { return slices.Clone(tool) }
 
 // Fixtures is the fixture tree: farm.yaml (the farm the checks run against),
 // submit/pass, submit/fail, tool/pass (one folder per tool) and tool/fail.

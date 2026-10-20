@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cccc.io/schema/lock-1.schema.json",
+  "title": "C4 tool lock (c4: lock/1)",
+  "description": "tool.lock, at the root of a published tool's tree: each image the tool names (runs.image and every sidecar's), as written in tool.yaml, pinned by digest. Publishing writes it; the lowering and the tool runner read it. It is part of the tree, so the tool's ID covers the exact images.",
+  "type": "object",
+  "required": ["c4", "images"],
+  "additionalProperties": false,
+  "properties": {
+    "c4": {"const": "lock/1"},
+    "images": {
+      "type": "object",
+      "propertyNames": {"type": "string", "minLength": 1},
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[^@\\s]+@sha256:[0-9a-f]{64}$",
+        "description": "<registry>/<repository>@sha256:<digest>"
+      }
+    }
+  }
+}

@@ -21,7 +21,10 @@ wraps a tool writes Kubernetes objects:
 | `fixtures/submit/fail/`      | submissions that must be refused, each with `<case>.expect.json`                             |
 | `fixtures/tool/pass/<tool>/` | every worked tool, the snippets wrapped whole, and the tools the submissions name            |
 | `fixtures/tool/fail/`        | tools that must be refused, each with `<case>.expect.json`                                   |
-| `schema.go`                  | the embedded schemas and fixtures: `Submit()`, `Tool()`, `Fixtures()`, `Cases()`             |
+| `lock-1.schema.json`         | JSON Schema for `tool.lock` (`c4: lock/1`): each image a tool names, pinned by digest        |
+| `types.go`                   | `Submission`, `Tool`, `Lock` and their parts, as the lowering, the runner and the CLI read them |
+| `parse.go`                   | `ParseSubmission`, `ParseTool`, `ParseLock`, `ToJSON`: the shape checked, errors in the farm's words |
+| `schema.go`                  | the embedded schemas and fixtures: `SubmitSchema()`, `ToolSchema()`, `LockSchema()`, `Fixtures()`, `Cases()` |
 
 ## Two checkers, one set of answers
 
@@ -39,10 +42,15 @@ Each `expect.json` says which one refuses the case (`by: schema` or
   "fix": "jobs follow jobs by their key in the file; did you mean \"comp\"?"}]}
 ```
 
-Paths are dotted, with list indexes in brackets (`params[1].type`). The farm
-reports a `by: schema` case in the same words, not in the validator's.
+Paths are dotted, with list indexes in brackets (`params[1].type`).
+`ParseSubmission` and `ParseTool` give every `by: schema` error in exactly
+these words (every error, sorted by path), so the farm, the runner and the
+CLI refuse a document alike. They read YAML or JSON, keep jobs in the order
+written, keep dates as the text written, and refuse a key written twice.
 
-`go test ./schema` checks that every passing fixture validates, that every
+`go test ./schema` checks that every passing fixture validates and parses,
+that the parsers give each `by: schema` case's errors word for word and
+agree with a full JSON Schema validator on every case, that every
 `by: schema` case is refused for the reason it names (`schemaMentions`), that
 every `by: check` case passes the schema (so it really needs the farm), and
 that every tool a passing submission names is published in `farm.yaml`. The
