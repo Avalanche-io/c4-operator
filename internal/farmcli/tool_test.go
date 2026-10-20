@@ -87,14 +87,25 @@ test:
 `)
 	_, err := ReadTool(dir)
 	var te *ToolError
-	if !asToolError(err, &te) {
+	if !asToolError(err, &te) || len(te.Errors) == 0 {
 		t.Fatalf("not a ToolError: %v", err)
 	}
-	got := strings.Join(te.Problems, "\n")
-	for _, want := range []string{"c4: is \"tool/2\"", "name: \"Proxies\"", "kind: \"batch\"", "runs: needs an image", "params[1].name", "test.with.height"} {
-		if !strings.Contains(got, want) {
-			t.Errorf("no %q in\n%s", want, got)
+	paths := map[string]bool{}
+	for _, e := range te.Errors {
+		paths[e.Path] = true
+		if e.Message == "" {
+			t.Errorf("%s: no message", e.Path)
 		}
+	}
+	for _, want := range []string{"c4", "name", "kind"} {
+		if !paths[want] {
+			t.Errorf("no error at %s in %v", want, te.Errors)
+		}
+	}
+	// a test that sets a parameter the tool lacks, in a file otherwise fine
+	dir = writeTool(t, strings.Replace(proxiesYAML, "with: {plates: plates/test.$F4.exr}", "with: {plates: plates/test.$F4.exr, height: 2}", 1))
+	if _, err := ReadTool(dir); !asToolError(err, &te) || te.Errors[0].Path != "test.with.height" {
+		t.Errorf("test.with.height: %v", err)
 	}
 }
 
@@ -109,15 +120,15 @@ func TestToolUnitsAndParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	units, err := tool.testUnits("1001-1010,1020")
+	units, err := testUnits(tool, "1001-1010,1020")
 	if err != nil || len(units) != 3 || units[0] != (testUnit{"0", 1001, 1008}) || units[1] != (testUnit{"1", 1009, 1010}) || units[2] != (testUnit{"2", 1020, 1020}) {
 		t.Fatalf("units %+v %v", units, err)
 	}
-	params, err := tool.paramValues("/show", tool.Test.With, map[string]any{"width": "480"})
+	params, err := paramValues(tool, "/show", tool.Test.With, map[string]any{"width": "480"})
 	if err != nil || params["plates"] != "/show/plates/test.$F4.exr" || params["width"] != "480" {
 		t.Fatalf("params %v %v", params, err)
 	}
-	if _, err := tool.paramValues("/show", map[string]any{"colour": 1}); err == nil {
+	if _, err := paramValues(tool, "/show", map[string]any{"colour": 1}); err == nil {
 		t.Error("a parameter the tool lacks was accepted")
 	}
 	env, _ := paramEnv(map[string]any{"plates": "/show/p.exr", "width": 960})
@@ -215,24 +226,24 @@ func (h *toolsHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		json.NewEncoder(w).Encode(api.ViewResponse{View: c4view.FromNode(root).ID.String()})
 	case r.Method == http.MethodGet && p == "/tools/saltmarsh":
-		json.NewEncoder(w).Encode(map[string]any{"tools": []PublishedTool{
+		json.NewEncoder(w).Encode(api.ToolListResponse{Tools: []api.ToolSummary{
 			{Name: "render", Kind: "frames", Version: "v1", Title: "Render a USD stage", Scope: "farm"},
-			{Name: "proxies", Kind: "frames", Version: "v3", Title: "Proxies and previews"}}})
+			{Name: "proxies", Kind: "frames", Version: "v3", Title: "Proxies and previews", Scope: "project"}}})
 	case r.Method == http.MethodGet && strings.HasPrefix(p, "/tools/saltmarsh/proxies"):
 		h.polls++
 		state := "running"
 		if h.polls >= 2 {
 			state = "ok"
 		}
-		json.NewEncoder(w).Encode(PublishedTool{Name: "proxies", Version: "v4", Kind: "frames", Title: "Proxies and previews",
-			Params:  []ToolParam{{Name: "plates", Type: "PATH", DataFlow: "IN"}, {Name: "width", Type: "INT", Default: 960}},
-			Publish: &PublishState{Job: "saltmarsh/proxies-test-v4", State: state, Seconds: 6}})
+		json.NewEncoder(w).Encode(api.ToolDetail{ToolSummary: api.ToolSummary{Name: "proxies", Version: "v4", Kind: "frames", Title: "Proxies and previews"},
+			Params: json.RawMessage(`[{"name": "plates", "type": "PATH", "dataFlow": "IN"}, {"name": "width", "type": "INT", "default": 960}]`),
+			Test:   &api.ToolTestState{Job: "saltmarsh/proxies-test-v4", State: state, Seconds: 6}})
 	case r.Method == http.MethodPost && p == "/tools/saltmarsh":
 		var req map[string]any
 		json.NewDecoder(r.Body).Decode(&req)
 		h.publishes = append(h.publishes, req)
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "tool": "proxies", "version": "v4", "view": req["view"],
-			"image": "ghcr.io/avalanche-io/c4-runtime-oiio@sha256:91f2", "test": PublishState{Job: "saltmarsh/proxies-test-v4", State: "running"}})
+			"image": "ghcr.io/avalanche-io/c4-runtime-oiio@sha256:91f2", "test": api.ToolTestState{Job: "saltmarsh/proxies-test-v4", State: "running"}})
 	case r.Method == http.MethodPost && p == "/submissions":
 		var req map[string]any
 		json.NewDecoder(r.Body).Decode(&req)
@@ -240,7 +251,7 @@ func (h *toolsHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		doc := req["submission"].(map[string]any)
 		if doc["shot"] == "bad" {
 			w.WriteHeader(http.StatusUnprocessableEntity)
-			json.NewEncoder(w).Encode(map[string]any{"ok": false, "errors": []FieldError{{Path: "jobs.movie.after",
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "errors": []api.FieldError{{Path: "jobs.movie.after",
 				Message: `no job "comp-v4" in this submission`, Fix: `jobs follow jobs by their key in the file; did you mean "comp"?`}}})
 			return
 		}

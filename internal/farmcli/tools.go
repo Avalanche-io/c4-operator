@@ -21,41 +21,22 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
-// PublishedTool is a tool as the farm lists it (GET /tools/{project}).
-type PublishedTool struct {
-	Name    string `json:"name"`
-	Title   string `json:"title"`
-	Summary string `json:"summary"`
-	Kind    string `json:"kind"`
-	Version string `json:"version"`
-	View    string `json:"view"`
-	Scope   string `json:"scope"` // project or farm
-	Image   string `json:"image"`
-	// Params and Test are given for one tool (GET /tools/{project}/{tool}).
-	Params []ToolParam `json:"params,omitempty"`
-	Test   *ToolTest   `json:"test,omitempty"`
-	// Publish is the version's publishing: its test job and its state.
-	Publish *PublishState `json:"publish,omitempty"`
+// toolParams are a published tool's parameters, as its tool.yaml wrote them.
+func toolParams(d *api.ToolDetail) ([]schema.Param, error) {
+	if len(d.Params) == 0 {
+		return nil, nil
+	}
+	var ps []schema.Param
+	if err := json.Unmarshal(d.Params, &ps); err != nil {
+		return nil, fmt.Errorf("the farm's parameters for %s: %w", d.Name, err)
+	}
+	return ps, nil
 }
 
-// PublishState is a version's test run on the farm.
-type PublishState struct {
-	Job     string `json:"job"`
-	State   string `json:"state"` // running, ok or failed
-	Seconds int    `json:"seconds,omitempty"`
-	Reason  string `json:"reason,omitempty"`
-}
-
-// FieldError is a problem with a field of a file, and how to fix it.
-type FieldError struct {
-	Path    string `json:"path"`
-	Message string `json:"message"`
-	Fix     string `json:"fix,omitempty"`
-}
-
-func printFieldErrors(o Out, errs []FieldError) error {
+func printFieldErrors(o Out, errs []api.FieldError) error {
 	for _, e := range errs {
 		o.printf("  %s: %s\n", e.Path, e.Message)
 		if e.Fix != "" {
@@ -67,9 +48,7 @@ func printFieldErrors(o Out, errs []FieldError) error {
 
 // ListTools prints the tools a project can submit.
 func ListTools(ctx context.Context, c *Client, o Out, project string) error {
-	var r struct {
-		Tools []PublishedTool `json:"tools"`
-	}
+	var r api.ToolListResponse
 	if err := c.Do(ctx, "GET", "/tools/"+project, nil, &r); err != nil {
 		return err
 	}
@@ -93,12 +72,12 @@ func ListTools(ctx context.Context, c *Client, o Out, project string) error {
 }
 
 // LookupTool reads one published tool.
-func LookupTool(ctx context.Context, c *Client, project, name, version string) (*PublishedTool, error) {
+func LookupTool(ctx context.Context, c *Client, project, name, version string) (*api.ToolDetail, error) {
 	p := "/tools/" + project + "/" + url.PathEscape(name)
 	if version != "" {
 		p += "?version=" + url.QueryEscape(version)
 	}
-	var t PublishedTool
+	var t api.ToolDetail
 	if err := c.Do(ctx, "GET", p, nil, &t); err != nil {
 		return nil, err
 	}
@@ -119,7 +98,11 @@ func ShowTool(ctx context.Context, c *Client, o Out, project, name string) error
 	if t.Image != "" {
 		o.printf("image     %s\n", t.Image)
 	}
-	for i, p := range t.Params {
+	params, err := toolParams(t)
+	if err != nil {
+		return err
+	}
+	for i, p := range params {
 		head := "params"
 		if i > 0 {
 			head = ""
@@ -143,6 +126,9 @@ type PublishArgs struct {
 	Wait time.Duration
 	// Poll is how often the test's state is read (default 2s).
 	Poll time.Duration
+	// TestedIn publishes one of a release's own tools as tested in that
+	// release, running no test on the farm (c4 farm up, as the farm admin).
+	TestedIn string
 }
 
 // PublishTool uploads a tool's folder (only what the farm lacks), asks the
@@ -167,16 +153,8 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 	if err := recordView(ctx, c, a.Project, v); err != nil {
 		return err
 	}
-	var r struct {
-		OK      bool          `json:"ok"`
-		Errors  []FieldError  `json:"errors,omitempty"`
-		Tool    string        `json:"tool"`
-		Version string        `json:"version"`
-		View    string        `json:"view"`
-		Image   string        `json:"image"`
-		Test    *PublishState `json:"test,omitempty"`
-	}
-	req := map[string]any{"view": v.ID.String(), "farm": a.Farm, "dryRun": a.DryRun}
+	var r api.ToolPublishResponse
+	req := api.ToolPublishRequest{View: v.ID.String(), Farm: a.Farm, DryRun: a.DryRun, TestedIn: a.TestedIn}
 	if err := doChecked(ctx, c, "POST", "/tools/"+a.Project, req, &r); err != nil {
 		return err
 	}
@@ -205,7 +183,7 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 }
 
 // waitPublish follows a version's test run on the farm until it ends.
-func waitPublish(ctx context.Context, c *Client, o Out, a PublishArgs, name, version string, st *PublishState) (*PublishState, error) {
+func waitPublish(ctx context.Context, c *Client, o Out, a PublishArgs, name, version string, st *api.ToolTestState) (*api.ToolTestState, error) {
 	wait, poll := a.Wait, a.Poll
 	if wait <= 0 {
 		wait = 15 * time.Minute
@@ -228,10 +206,10 @@ func waitPublish(ctx context.Context, c *Client, o Out, a PublishArgs, name, ver
 		if err != nil {
 			return nil, err
 		}
-		if t.Publish == nil {
+		if t.Test == nil {
 			return nil, errors.New("the farm says nothing of this version's test")
 		}
-		st = t.Publish
+		st = t.Test
 	}
 	if st.State == "ok" {
 		o.printf("                   ok in %ds\n", st.Seconds)
@@ -267,11 +245,11 @@ type submissionJob struct {
 }
 
 type submissionResponse struct {
-	OK         bool            `json:"ok"`
-	Errors     []FieldError    `json:"errors,omitempty"`
-	Submission string          `json:"submission"`
-	Jobs       []submissionJob `json:"jobs"`
-	Explain    string          `json:"explain,omitempty"`
+	OK         bool             `json:"ok"`
+	Errors     []api.FieldError `json:"errors,omitempty"`
+	Submission string           `json:"submission"`
+	Jobs       []submissionJob  `json:"jobs"`
+	Explain    string           `json:"explain,omitempty"`
 }
 
 // SubmitFile sends a submission (c4: submit/1): a local tree is uploaded
@@ -416,7 +394,7 @@ func doChecked(ctx context.Context, c *Client, method, path string, in, out any)
 // SubmitTool is `c4 farm submit TOOL ASSET` over a published tool: a
 // submission of one job, whose tree is the asset's folder (as FindRoot
 // finds it) and whose first input path parameter is the asset.
-func SubmitTool(ctx context.Context, c *Client, o Out, t *PublishedTool, a SubmitArgs) (*submissionResponse, error) {
+func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a SubmitArgs) (*submissionResponse, error) {
 	switch {
 	case a.Name != "":
 		return nil, errors.New("--name: a tool's job is named <shot>-<stage>-vNNN; set --shot or --stage instead")
@@ -441,10 +419,14 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *PublishedTool, a Submi
 	if pattern != "" {
 		rel = path.Join(filepath.ToSlash(rel), pattern)
 	}
+	params, err := toolParams(t)
+	if err != nil {
+		return nil, err
+	}
 	with := map[string]any{}
 	known := map[string]bool{}
 	asset := ""
-	for _, p := range t.Params {
+	for _, p := range params {
 		known[p.Name] = true
 		if asset == "" && p.Type == "PATH" && p.DataFlow != "OUT" {
 			asset = p.Name

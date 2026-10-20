@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
 
@@ -35,6 +36,9 @@ func NewTool(o Out, dir, kind string) error {
 	o.printf("next      edit %s/tool.yaml and %s/%s.sh, then: c4 farm tool test %s\n", dir, dir, name, dir)
 	return nil
 }
+
+// toolNameRE is a tool's name: lowercase letters, digits and -.
+var toolNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
 
 type toolTemplateFile struct {
 	path, body string

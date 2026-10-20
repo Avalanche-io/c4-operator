@@ -9,154 +9,84 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 
-	"sigs.k8s.io/yaml"
-
+	"github.com/Avalanche-io/c4-operator/schema"
 	"github.com/Avalanche-io/c4-operator/work/order"
 )
 
-// ToolFile is what the CLI reads of a tool.yaml (c4: tool/1, the
-// authoring proposal's TOOL.md). The farm reads the whole file strictly
-// against the tool schema when it is published; the CLI reads what it
-// needs to test a tool and to fill in a submission.
-type ToolFile struct {
-	C4      string      `json:"c4"`
-	Name    string      `json:"name"`
-	Title   string      `json:"title"`
-	Summary string      `json:"summary"`
-	Kind    string      `json:"kind"`
-	Runs    ToolRuns    `json:"runs"`
-	Frames  *ToolFrames `json:"frames,omitempty"`
-	Params  []ToolParam `json:"params,omitempty"`
-	Test    *ToolTest   `json:"test,omitempty"`
-}
-
-// ToolRuns is where a tool runs. Slice 1 runs container tools only.
-type ToolRuns struct {
-	Image string          `json:"image,omitempty"`
-	Host  json.RawMessage `json:"host,omitempty"`
-}
-
-// ToolFrames are a frames tool's defaults.
-type ToolFrames struct {
-	Chunk int    `json:"chunk,omitempty"`
-	Order string `json:"order,omitempty"`
-}
-
-// ToolParam is one of a tool's parameters (an OpenJD job parameter
-// definition), as far as the CLI needs it.
-type ToolParam struct {
-	Name       string `json:"name"`
-	Type       string `json:"type"`
-	Default    any    `json:"default,omitempty"`
-	ObjectType string `json:"objectType,omitempty"`
-	DataFlow   string `json:"dataFlow,omitempty"`
-}
-
-// ToolTest is a tool's test: a tree, frames, parameters and the files it
-// must leave.
-type ToolTest struct {
-	Tree   string         `json:"tree"`
-	Frames string         `json:"frames,omitempty"`
-	With   map[string]any `json:"with,omitempty"`
-	Expect []string       `json:"expect,omitempty"`
-}
-
-var (
-	toolNameRE = regexp.MustCompile(`^[a-z][a-z0-9-]*$`)
-	toolKinds  = map[string]bool{"frames": true, "once": true, "shards": true, "generator": true, "check": true, "agent": true, "train": true}
-)
-
-// ReadTool reads and checks dir/tool.yaml: the fields the CLI relies on.
-// Every problem is reported, each with its field.
-func ReadTool(dir string) (*ToolFile, error) {
+// ReadTool reads dir/tool.yaml as the farm reads it (c4: tool/1, strictly,
+// through the schema package), so `c4 farm tool test` refuses exactly
+// what publishing would, each problem with its field and its fix.
+func ReadTool(dir string) (*schema.Tool, error) {
 	data, err := os.ReadFile(filepath.Join(dir, "tool.yaml"))
 	if err != nil {
 		return nil, fmt.Errorf("%s has no tool.yaml (c4 farm tool new makes one)", dir)
 	}
-	var t ToolFile
-	if err := yaml.Unmarshal(data, &t); err != nil {
-		return nil, fmt.Errorf("tool.yaml: %w", err)
-	}
-	var probs []string
-	bad := func(field, format string, a ...any) { probs = append(probs, field+": "+fmt.Sprintf(format, a...)) }
-	if t.C4 != "tool/1" {
-		bad("c4", "is %q; a tool says c4: tool/1", t.C4)
-	}
-	if !toolNameRE.MatchString(t.Name) {
-		bad("name", "%q: lowercase letters, digits and -, starting with a letter", t.Name)
-	}
-	if !toolKinds[t.Kind] {
-		bad("kind", "%q: one of frames, once, shards, generator, check, agent, train", t.Kind)
-	}
-	if t.Runs.Image == "" && len(t.Runs.Host) == 0 {
-		bad("runs", "needs an image (or a host)")
-	}
-	seen := map[string]bool{}
-	for i, p := range t.Params {
-		if p.Name == "" || seen[p.Name] {
-			bad(fmt.Sprintf("params[%d].name", i), "%q is empty or used twice", p.Name)
-		}
-		seen[p.Name] = true
+	t, errs := schema.ParseTool(data)
+	if len(errs) > 0 {
+		return t, &ToolError{Errors: errs}
 	}
 	if t.Test != nil {
+		var probs []schema.Error
 		for k := range t.Test.With {
-			if !seen[k] {
-				bad("test.with."+k, "the tool has no parameter %q", k)
+			if t.Param(k) == nil {
+				probs = append(probs, schema.Error{Path: "test.with." + k, Message: fmt.Sprintf("the tool has no parameter %q", k),
+					Fix: "name one of the tool's params, or add it to params"})
 			}
 		}
 		if t.Kind == "frames" && t.Test.Frames == "" {
-			bad("test.frames", "a frames tool's test names its frames, for example 1001-1002")
+			probs = append(probs, schema.Error{Path: "test.frames", Message: "a frames tool's test names its frames",
+				Fix: "add frames: 1001-1002 (or the frames the test tree holds)"})
+		}
+		if len(probs) > 0 {
+			return t, &ToolError{Errors: probs}
 		}
 	}
-	if len(probs) > 0 {
-		return &t, &ToolError{Problems: probs}
-	}
-	return &t, nil
+	return t, nil
 }
 
 // ToolError lists what is wrong with a tool.yaml.
-type ToolError struct{ Problems []string }
+type ToolError struct{ Errors []schema.Error }
 
 func (e *ToolError) Error() string {
-	return "tool.yaml:\n  " + strings.Join(e.Problems, "\n  ")
+	var b strings.Builder
+	b.WriteString("tool.yaml:")
+	for _, x := range e.Errors {
+		fmt.Fprintf(&b, "\n  %s: %s", x.Path, x.Message)
+		if x.Fix != "" {
+			fmt.Fprintf(&b, "\n    %s", x.Fix)
+		}
+	}
+	return b.String()
 }
 
-// ResolveImage turns a tool's image into one Docker can pull: the farm's
-// short names (c4/runtime-oiio, c4/job-hydra) are its own images,
-// ghcr.io/avalanche-io/c4-runtime-oiio at this release.
-func ResolveImage(ref string) string {
-	if rest, ok := strings.CutPrefix(ref, "c4/"); ok {
-		return ImageRepo + "/c4-" + rest + ":" + ImageTag
-	}
-	return ref
-}
+// ResolveImage turns a tool's image into one Docker can pull, by the
+// farm's rule: c4/runtime-oiio is ghcr.io/avalanche-io/c4-runtime-oiio at
+// this release.
+func ResolveImage(ref string) string { return schema.ImageRef(ref, ImageTag) }
 
 // paramValues are a unit's parameters: the tool's defaults, then the
 // test's, then the person's; a PATH becomes absolute under the tree.
-func (t *ToolFile) paramValues(tree string, with ...map[string]any) (map[string]any, error) {
+func paramValues(t *schema.Tool, tree string, with ...map[string]any) (map[string]any, error) {
 	out := map[string]any{}
-	types := map[string]ToolParam{}
 	for _, p := range t.Params {
-		types[p.Name] = p
 		if p.Default != nil {
 			out[p.Name] = p.Default
 		}
 	}
 	for _, w := range with {
 		for k, v := range w {
-			if _, ok := types[k]; !ok {
+			if t.Param(k) == nil {
 				return nil, fmt.Errorf("%s has no parameter %q", t.Name, k)
 			}
 			out[k] = v
 		}
 	}
 	for k, v := range out {
-		if types[k].Type == "PATH" {
+		if t.Param(k).Type == "PATH" {
 			if s, ok := v.(string); ok && s != "" && !filepath.IsAbs(s) {
 				out[k] = tree + "/" + strings.TrimPrefix(s, "./")
 			}
@@ -165,7 +95,8 @@ func (t *ToolFile) paramValues(tree string, with ...map[string]any) (map[string]
 	return out, nil
 }
 
-// paramEnv is C4_PARAMS and C4_PARAM_<NAME>, as the farm sets them.
+// paramEnv is C4_PARAMS and C4_PARAM_<NAME>, as the farm sets them:
+// scalars as strings, lists and objects as JSON.
 func paramEnv(params map[string]any) ([]string, error) {
 	b, err := json.Marshal(params)
 	if err != nil {
@@ -195,11 +126,11 @@ type testUnit struct {
 	start, end int
 }
 
-// testUnits splits the test's frames into the tool's chunks; a tool
-// without frames runs one unit.
-func (t *ToolFile) testUnits(frames string) ([]testUnit, error) {
+// testUnits splits the test's frames into the tool's chunks (chunk: all is
+// one unit over them); a tool without frames runs one unit, which the farm
+// gives the single frame 1.
+func testUnits(t *schema.Tool, frames string) ([]testUnit, error) {
 	if t.Kind != "frames" {
-		// one unit, as the farm runs it: the single frame "1"
 		return []testUnit{{label: "0", start: 1, end: 1}}, nil
 	}
 	fs, err := order.ParseFrames(frames)
@@ -207,8 +138,13 @@ func (t *ToolFile) testUnits(frames string) ([]testUnit, error) {
 		return nil, fmt.Errorf("frames %q: %w", frames, err)
 	}
 	chunk := 1
-	if t.Frames != nil && t.Frames.Chunk > 0 {
-		chunk = t.Frames.Chunk
+	if t.Frames != nil && t.Frames.Chunk != nil {
+		switch {
+		case t.Frames.Chunk.All:
+			chunk = len(fs)
+		case t.Frames.Chunk.N > 0:
+			chunk = t.Frames.Chunk.N
+		}
 	}
 	var out []testUnit
 	for i := 0; i < len(fs); {
@@ -270,11 +206,11 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 	if a.Log != "" {
 		return replayLog(ctx, o, docker, image, dir, a.Log)
 	}
-	frames := t.Test.Frames
+	frames := string(t.Test.Frames)
 	if a.Frames != "" {
 		frames = a.Frames
 	}
-	units, err := t.testUnits(frames)
+	units, err := testUnits(t, string(frames))
 	if err != nil {
 		return err
 	}
@@ -282,7 +218,7 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 	for k, v := range a.With {
 		with[k] = v
 	}
-	params, err := t.paramValues("/show", t.Test.With, with)
+	params, err := paramValues(t, "/show", t.Test.With, with)
 	if err != nil {
 		return err
 	}
@@ -373,7 +309,7 @@ func replayLog(ctx context.Context, o Out, docker, image, dir, log string) error
 	return cmd.Run()
 }
 
-func unitFrames(t *ToolFile, units []testUnit) string {
+func unitFrames(t *schema.Tool, units []testUnit) string {
 	if t.Kind != "frames" {
 		return "1 run"
 	}
