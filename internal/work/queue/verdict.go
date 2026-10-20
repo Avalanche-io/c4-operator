@@ -1,7 +1,6 @@
 package queue
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -209,8 +208,7 @@ func (q *Queue) carryOut(ctx context.Context, v *view, idx int, p *corev1.Pod, i
 func (q *Queue) judge(ctx context.Context, v *view, idx int, doc []byte) ([]action, []byte, verdictDoc, error) {
 	m := v.mem
 	var d verdictDoc
-	dec := json.NewDecoder(bytes.NewReader(doc))
-	if err := dec.Decode(&d); err != nil {
+	if err := class.Strict(doc, &d); err != nil {
 		return nil, nil, d, fmt.Errorf("verdict document: %w", err)
 	}
 	if d.Version != 1 {

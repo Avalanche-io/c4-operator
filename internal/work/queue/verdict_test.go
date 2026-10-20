@@ -236,6 +236,17 @@ func TestVerdictRefused(t *testing.T) {
 	if len(got.Status.Verdicts) != 1 || !strings.Contains(got.Status.Verdicts[0].Error, "plan") || !slices.Equal(states(t, got, "failed"), []int{2}) || len(got.Status.Reviews) != 0 {
 		t.Fatalf("%+v %v %v", got.Status.Verdicts, got.Status.UnitStates, got.Status.Reviews)
 	}
+	// A field the format does not have is refused, by name.
+	ns, q, now, put = reviewJob(t, "bad2", []string{"a:a"})
+	finishUnit(t, now, ns, "bad2", 1, nil)
+	tick(t, q)
+	finishUnit(t, now, ns, "bad2", 2, map[string]string{c4v1.AnnotationOutputVerdict: put(`{"version": 1, "items": [
+		{"units": ["a"], "do": "accept", "score": 0.8}]}`)})
+	tick(t, q)
+	got = get(t, ns, "bad2")
+	if len(got.Status.Verdicts) != 1 || !strings.Contains(got.Status.Verdicts[0].Error, `unknown field "score"`) || !slices.Equal(states(t, got, "failed"), []int{2}) {
+		t.Fatalf("unknown field: %+v %v", got.Status.Verdicts, got.Status.UnitStates)
+	}
 }
 
 // A review key's rework rate, learned from its verdicts, prices the

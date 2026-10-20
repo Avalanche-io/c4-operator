@@ -1,7 +1,6 @@
 package plan
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -180,7 +179,5 @@ func readStrict(b []byte, f *File) error {
 	if err != nil {
 		return err
 	}
-	dec := json.NewDecoder(bytes.NewReader(j))
-	dec.DisallowUnknownFields()
-	return dec.Decode(f)
+	return class.Strict(j, f)
 }

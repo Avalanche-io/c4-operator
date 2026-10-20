@@ -659,6 +659,10 @@ type WorkUnitUsage struct {
 	// runner observed it (c4-unit usage, c4-agent's Stop hook).
 	// +optional
 	Reasoning *WorkReasoning `json:"reasoning,omitempty"`
+	// UsageError says why an attempt's usage document was refused (an
+	// unknown field, say): its tokens are not counted.
+	// +optional
+	UsageError string `json:"usageError,omitempty"`
 }
 
 // WorkReasoning is what an attempt reasoned with: the model (and every

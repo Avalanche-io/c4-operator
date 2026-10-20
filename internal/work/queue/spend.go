@@ -1,9 +1,7 @@
 package queue
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -76,6 +74,7 @@ type unitSpend struct {
 	slotHours  float64
 	costSource string
 	reasoning  *c4v1.WorkReasoning // the latest attempt's, as observed
+	usageErr   string              // why an attempt's usage document was refused
 }
 
 func (s *unitSpend) add(u modelUse) {
@@ -117,14 +116,17 @@ func (q *Queue) noteSpend(ctx context.Context, v *view, idx int, p *corev1.Pod, 
 		return true
 	}
 	var doc usageDoc
+	usageErr := ""
 	if id := p.Annotations[c4v1.AnnotationOutputUsage]; id != "" {
 		b, err := q.expansionDoc(ctx, v.project, m, id)
 		if err != nil {
 			q.Log.Error(err, "usage document", "job", v.key, "pod", p.Name)
 			return false
 		}
-		if err := json.NewDecoder(bytes.NewReader(b)).Decode(&doc); err != nil {
-			q.Log.Info("usage document unreadable", "job", v.key, "pod", p.Name, "err", err.Error())
+		if err := class.Strict(b, &doc); err != nil {
+			// Its tokens are not counted: status says so, not just a log.
+			q.Log.Error(err, "usage document refused", "job", v.key, "pod", p.Name)
+			doc, usageErr = usageDoc{}, err.Error()
 		}
 	}
 	if m.spend == nil {
@@ -160,6 +162,9 @@ func (q *Queue) noteSpend(ctx context.Context, v *view, idx int, p *corev1.Pod, 
 	}
 	if doc.Reasoning != nil {
 		s.reasoning = doc.Reasoning
+	}
+	if usageErr != "" {
+		s.usageErr = usageErr
 	}
 	if m.spentPod == nil {
 		m.spentPod = map[types.UID]bool{}
@@ -203,7 +208,7 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 		}
 		modelSlot += s.slotCost
 		modelHours += s.slotHours
-		u := c4v1.WorkUnitUsage{SlotCost: money(s.slotCost), SlotHours: hours(s.slotHours), CostSource: s.costSource, Reasoning: s.reasoning}
+		u := c4v1.WorkUnitUsage{SlotCost: money(s.slotCost), SlotHours: hours(s.slotHours), CostSource: s.costSource, Reasoning: s.reasoning, UsageError: s.usageErr}
 		var names []string
 		for name := range s.models {
 			names = append(names, name)
@@ -297,7 +302,7 @@ func (m *jobMem) loadSpend(st *c4v1.WorkJobStatus) {
 		if err != nil {
 			continue
 		}
-		s := &unitSpend{slotCost: f(u.SlotCost), slotHours: f(u.SlotHours), costSource: u.CostSource, reasoning: u.Reasoning, models: map[string]*tokenUse{}}
+		s := &unitSpend{slotCost: f(u.SlotCost), slotHours: f(u.SlotHours), costSource: u.CostSource, reasoning: u.Reasoning, usageErr: u.UsageError, models: map[string]*tokenUse{}}
 		for _, mt := range u.Models {
 			s.models[mt.Model] = &tokenUse{Counts: tokens.Counts{Input: mt.InputTokens, Output: mt.OutputTokens, CacheRead: mt.CacheReadTokens,
 				CacheWrite: mt.CacheWriteTokens}, unpriced: mt.UnpricedTokens, unpricedW: float64(mt.UnpricedWeightedTokens),

@@ -1324,6 +1324,13 @@ and a sweep planner that spawns trials are all generators.
   concrete units and edges attached under it, and the generator becomes
   *expanded*. Expansion may nest (a generator may emit generators), bounded
   in depth and in total units per job.
+- **Strict documents.** Expansion documents, verdicts, usage documents and
+  c4-plan files are read strictly: a field the format does not have is an
+  error naming it (a renamed one says where it went, such as `does` now
+  `reasoning.does`), so an old or misspelled document fails loudly instead
+  of being misread. A refused expansion or verdict fails its unit; a
+  refused usage document leaves the unit's tokens uncounted and says why in
+  `status.modelUsage[i].usageError`.
 - **Transport.** The evaluation writes its expansion document into its own
   C4 volume (`.c4/expand.json`, the Tractor 1.7 file form). Capture stores it
   like any output, and the controller reads it from the store by path. Long

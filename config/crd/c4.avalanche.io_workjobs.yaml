@@ -847,6 +847,11 @@ spec:
                     unpricedWeightedTokens:
                       format: int64
                       type: integer
+                    usageError:
+                      description: |-
+                        UsageError says why an attempt's usage document was refused (an
+                        unknown field, say): its tokens are not counted.
+                      type: string
                     weightedTokens:
                       format: int64
                       type: integer

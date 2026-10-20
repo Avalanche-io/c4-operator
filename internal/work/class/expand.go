@@ -194,8 +194,7 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 		return nil, fmt.Errorf("expansion document of %d bytes, over %d", len(doc), MaxExpandDoc)
 	}
 	var d Doc
-	dec := json.NewDecoder(bytes.NewReader(doc))
-	if err := dec.Decode(&d); err != nil {
+	if err := Strict(doc, &d); err != nil {
 		return nil, fmt.Errorf("expansion document: %w", err)
 	}
 	if d.Version != 1 {

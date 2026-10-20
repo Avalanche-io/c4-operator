@@ -143,3 +143,20 @@ func TestReasoning(t *testing.T) {
 		t.Fatal("an agent member is a model unit")
 	}
 }
+
+// Documents are read strictly: an unknown field is an error naming it,
+// and a renamed one says where it went.
+func TestStrictDocuments(t *testing.T) {
+	root := Unit{Name: "plan", Key: "graph", Generator: true}
+	for doc, want := range map[string]string{
+		`{"version": 1, "units": [{"name": "a", "does": "model"}]}`:     `unknown field "does": it is now reasoning.does`,
+		`{"version": 1, "units": [{"name": "a", "kind": "model"}]}`:     `unknown field "kind": it is now reasoning.does (model or procedure)`,
+		`{"version": 1, "units": [{"name": "a", "afterr": ["b"]}]}`:     `unknown field "afterr"`,
+		`{"version": 1, "units": [{"name": "a"}], "dependants": "all"}`: `unknown field "dependants"`,
+	} {
+		_, err := ExpandDocument(graphJob(nil), root, []byte(doc), map[string]int{"plan": 0}, 1)
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s: %v, want %q", doc, err, want)
+		}
+	}
+}
