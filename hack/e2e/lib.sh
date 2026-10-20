@@ -32,6 +32,16 @@ k() { kubectl --context "$CTX" "$@"; }
 now() { perl -MTime::HiRes=time -e 'printf "%.3f\n", time'; }
 log() { printf '\n== %s\n' "$*" >&2; }
 fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# built_from: the commit the checkout would build, -dirty with changes to
+# what is built (hack/e2e/redeploy.sh stamps the manager with it).
+built_from() {
+  local v
+  v=$(git -C "$ROOT" rev-parse --short=12 HEAD)
+  [ -n "$(git -C "$ROOT" status --porcelain -- . ":!hack/demo/out" ":!hack/e2e/out")" ] && v=$v-dirty
+  echo "$v"
+}
+
 record() { printf '%s\n' "$*" | tee -a "$RESULTS"; }
 since() { perl -e "printf '%.2f', $(now) - $1"; }
 

@@ -33,6 +33,8 @@ if ! out=$(k apply -k "$ROOT/config/default" 2>&1); then
   sleep 5
   quiet k apply -k "$ROOT/config/default"
 fi
+# What it was built from, for a demo to check it runs this checkout.
+quiet k -n c4-system annotate deploy c4-manager --overwrite "c4.avalanche.io/built-from=$(built_from)"
 quiet k -n c4-system rollout restart deploy/c4-manager deploy/c4-regional deploy/c4-egress ds/c4-node
 quiet k -n c4-system rollout status deploy/c4-manager --timeout=180s
 quiet k -n c4-system rollout status deploy/c4-regional --timeout=180s

@@ -147,8 +147,27 @@ demo_start() {
   rm -rf "$SHOTS/diagnose"
   power_ok
   k cluster-info >/dev/null 2>&1 || fail "no cluster $CTX: hack/e2e/up.sh makes one"
+  demo_current
   docker image inspect "$ORACLE" >/dev/null 2>&1 || fail "$ORACLE is not built here: make job-images (c4-onboarding) builds it"
   trap teardown EXIT
+}
+
+# demo_current: the cluster's operator is built from this checkout
+# (hack/e2e/redeploy.sh stamps it). A stale one lacks what the demo shows,
+# such as the TrackerLink journal c4-sync keeps or the HUD's controls.
+# REDEPLOY=1 redeploys it first. The cluster is shared: book it in
+# .handoff/E2E-CLUSTER.md before either.
+demo_current() {
+  local want have
+  want=$(built_from)
+  have=$(k -n c4-system get deploy c4-manager -o jsonpath='{.metadata.annotations.c4\.avalanche\.io/built-from}' 2>/dev/null)
+  [ "$have" = "$want" ] && return
+  if [ "${REDEPLOY:-}" = 1 ]; then
+    log "redeploying the operator from $want (the cluster ran ${have:-an unstamped build})"
+    "$ROOT/hack/e2e/redeploy.sh" >/dev/null || fail "hack/e2e/redeploy.sh failed"
+    return
+  fi
+  fail "the cluster's operator is ${have:-unstamped}, not this checkout ($want): REDEPLOY=1 $0 redeploys it first (book the cluster), or run hack/e2e/redeploy.sh"
 }
 
 # --- up -------------------------------------------------------------------

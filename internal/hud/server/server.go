@@ -152,6 +152,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/grants", s.handleGrants)
 	mux.HandleFunc("DELETE /api/v1/grants/{ns}/{name}", s.handleRevoke)
 	mux.HandleFunc("GET /api/v1/trackers", s.handleTrackers)
+	mux.HandleFunc("GET /api/v1/held", s.handleHeld)
+	mux.HandleFunc("POST /api/v1/held/{ns}/{link}/{field}", s.handleConfirm)
 	files := http.FileServer(http.FS(s.Web))
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")

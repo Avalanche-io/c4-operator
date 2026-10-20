@@ -101,3 +101,35 @@ func TestUnguardedWriteHeld(t *testing.T) {
 		t.Fatalf("the next comment: %+v", w)
 	}
 }
+
+// A person says a held write did not happen (the HUD clears its value and
+// state, keeping the entity it was on): the next pass writes it again,
+// once.
+func TestDeniedWriteWrittenAgain(t *testing.T) {
+	e := setup(t, func(tr *c4v1.Tracker) { tr.Spec.Kind = "github-lossy" })
+	ctx := context.Background()
+	loseAnswers.Store(true)
+	t.Cleanup(func() { loseAnswers.Store(false) })
+	if err := e.sync.Sync(ctx, e.tracker()); err == nil {
+		t.Fatal("a lost answer is an error for the pass")
+	}
+	loseAnswers.Store(false)
+	e.pass()
+	l := e.link()
+	if w := l.Status.Written["comment"]; w.State != "unconfirmed" {
+		t.Fatalf("held: %+v", w)
+	}
+	before := l.DeepCopy()
+	l.Status.Written["comment"] = c4v1.TrackerWritten{Ref: l.Status.Written["comment"].Ref, At: l.Status.Written["comment"].At}
+	if err := e.k8s.Status().Patch(ctx, l, client.MergeFrom(before)); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	e.pass()
+	if n := len(e.gh.Comments(7)); n != 2 {
+		t.Fatalf("%d comments: a write a person said did not happen is written again, once", n)
+	}
+	if w := e.link().Status.Written["comment"]; w.State != "" || w.Value == "" {
+		t.Fatalf("written: %+v", w)
+	}
+}

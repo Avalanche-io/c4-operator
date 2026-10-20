@@ -42,8 +42,11 @@ three things, as the adapter allows for that write:
 - looks for it first, by the key marker that a new comment or Note
   carries, and sends it only if it is not there;
 - holds it as `unconfirmed`, when nothing can tell whether it happened. The
-  link then shows `Unconfirmed`, and a person confirms the write; it is
-  never sent twice on a guess.
+  link then shows `Unconfirmed`. The HUD lists the write on the job, on
+  the Tracker and on its owner's own page, and MCP lists it with
+  `c4_list_held_writes`. A person looks in the tracker and says whether
+  it happened (`c4_confirm_write`, or the HUD). It is never sent twice
+  on a guess.
 
 A write the tracker refused (a 4xx) is known not to have happened and is
 tried fresh. c4-sync looks for a write only after an interruption, or

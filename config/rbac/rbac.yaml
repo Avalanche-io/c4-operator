@@ -197,6 +197,14 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [trackers]
   verbs: [get, list, watch]
+# Held tracker writes (GAPS 11): the HUD lists them and records a person's
+# answer for one in its TrackerLink's status.
+- apiGroups: [c4.avalanche.io]
+  resources: [trackerlinks]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [trackerlinks/status]
+  verbs: [get, patch]
 # Submitting for a signed-in viewer (POST /api/v1/jobs), after a
 # SubjectAccessReview says the viewer may create the same objects.
 - apiGroups: [c4.avalanche.io]

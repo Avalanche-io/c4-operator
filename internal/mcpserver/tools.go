@@ -116,6 +116,10 @@ func Tools(c *Client) []Tool {
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.approveCapacity),
 		tool("c4_grant", "Let a tracker submit work for you", "Let a production tracker's sync (a Tracker: GitHub, Flow, ...) submit work for the person you act for, so jobs it makes from their issues or tasks are theirs and what is theirs (a lease of their own sign-in) serves them. Only when that person asks: the grant is theirs, signed and recorded in the book. Optionally limit it to pools and job classes; it ends at until (30d by default, at most 90d). Granting again renews it.",
 			idempotent, c.grant),
+		tool("c4_list_held_writes", "List held tracker writes", "Writes to a production tracker (a comment, a status) that were interrupted where nothing can tell whether they happened, so they are held: never sent again on a guess. Each names the tracker entity (with its URL), the job, what it said and since when, and whether it is yours to confirm. Filter by job (namespace/name) or mine. Look in the tracker, then answer with c4_confirm_write.",
+			readOnly, c.listHeld),
+		tool("c4_confirm_write", "Confirm a held tracker write", "Say whether a held tracker write happened, after looking in the tracker: happened true and it is taken as written; false and it is written again on the sync's next pass (so say false only when it is not there, or it is made twice). The job's owner, or one allowed to change the job, answers; signed and recorded in the book.",
+			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.confirmWrite),
 		tool("c4_list_trackers", "List trackers", "The trackers (GitHub, Flow, ...) in the projects you can see: what each connects to, what it turns into jobs, whether it is connected and why not, how many people have let it submit work for them, and the person you act for's own grant to it. Use it to find the tracker to name in c4_grant.",
 			readOnly, c.listTrackers),
 		tool("c4_list_grants", "List grants", "Grants to trackers: by default the person you act for's own, or with tracker (namespace/name) who has let that tracker submit for them. Each shows its pools, classes, end, record, and whether it serves now and why not.",
@@ -891,5 +895,42 @@ func (c *Client) listTrackers(ctx context.Context, _ *mcp.CallToolRequest, _ Emp
 func (c *Client) capacityForecast(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, api.CapacityForecast, error) {
 	var out api.CapacityForecast
 	err := c.do(ctx, "GET", "/capacity/forecast", nil, &out)
+	return nil, out, err
+}
+
+type ListHeldIn struct {
+	Job  string `json:"job,omitempty" jsonschema:"namespace/name: one job's held writes"`
+	Mine bool   `json:"mine,omitempty" jsonschema:"only writes for jobs you own"`
+}
+
+func (c *Client) listHeld(ctx context.Context, _ *mcp.CallToolRequest, in ListHeldIn) (*mcp.CallToolResult, api.HeldList, error) {
+	q := url.Values{}
+	if in.Job != "" {
+		q.Set("job", in.Job)
+	}
+	if in.Mine {
+		q.Set("mine", "1")
+	}
+	p := "/held"
+	if len(q) > 0 {
+		p += "?" + q.Encode()
+	}
+	var out api.HeldList
+	err := c.do(ctx, "GET", p, nil, &out)
+	return nil, out, err
+}
+
+type ConfirmWriteIn struct {
+	Namespace string `json:"namespace" jsonschema:"the held write's namespace (from c4_list_held_writes)"`
+	Link      string `json:"link" jsonschema:"the held write's link (from c4_list_held_writes)"`
+	Field     string `json:"field" jsonschema:"the held write's field (from c4_list_held_writes)"`
+	Happened  bool   `json:"happened" jsonschema:"whether the write is there in the tracker"`
+	Note      string `json:"note,omitempty" jsonschema:"what you saw, for the record"`
+}
+
+func (c *Client) confirmWrite(ctx context.Context, _ *mcp.CallToolRequest, in ConfirmWriteIn) (*mcp.CallToolResult, Done, error) {
+	var out Done
+	err := c.do(ctx, "POST", "/held/"+url.PathEscape(in.Namespace)+"/"+url.PathEscape(in.Link)+"/"+url.PathEscape(in.Field),
+		api.ConfirmRequest{Happened: &in.Happened, Note: in.Note}, &out)
 	return nil, out, err
 }

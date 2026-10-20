@@ -92,6 +92,13 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 		json.NewEncoder(w).Encode(api.CapacityForecast{At: &due, Jobs: []string{"show-a/sh050-light-forecast"},
 			Bursts: []api.ForecastBurst{{Pool: "cpu", Slots: 12, Live: 4, CostPerSlotHour: 0.5, ExtraCostPerHour: 4}}, Worse: []api.ForecastRisk{}})
+	case r.Method == "GET" && r.URL.Path == "/api/v1/held":
+		f.mu.Lock()
+		f.posts = append(f.posts, "GET "+r.URL.String())
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(api.HeldList{Held: []api.HeldWrite{{Namespace: "show-a", Link: "gh-issue-7", Field: "comment", Tracker: "gh",
+			Kind: "github", Entity: api.HeldEntity{Type: "Issue", ID: "7"}, Job: "show-a/gh-7", Owner: "maya", Since: due,
+			Says: "the GitHub comment on Issue 7, saying running", Yours: true}}})
 	case r.Method == "GET" && r.URL.Path == "/api/v1/trackers":
 		f.mu.Lock()
 		f.posts = append(f.posts, "GET "+r.URL.String())
@@ -449,5 +456,25 @@ func TestCapacityForecastTool(t *testing.T) {
 	defer hud.mu.Unlock()
 	if !slices.Equal(hud.posts, []string{"GET /api/v1/capacity/forecast"}) {
 		t.Fatalf("requests %v", hud.posts)
+	}
+}
+
+// A held tracker write, found and answered through the HUD.
+func TestHeldWriteTools(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "tok-maya")
+	res, out := call(t, cs, "c4_list_held_writes", map[string]any{"mine": true})
+	if hs, _ := out["held"].([]any); res.IsError || len(hs) != 1 {
+		t.Fatalf("held: %v %q", out, text(res))
+	}
+	res, _ = call(t, cs, "c4_confirm_write", map[string]any{"namespace": "show-a", "link": "gh-issue-7", "field": "comment", "happened": false, "note": "not on the issue"})
+	if res.IsError {
+		t.Fatalf("confirm: %q", text(res))
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	want := []string{"GET /api/v1/held?mine=1", `/api/v1/held/show-a/gh-issue-7/comment {"happened":false,"note":"not on the issue"}`}
+	if !slices.Equal(hud.posts, want) {
+		t.Fatalf("requests %q, want %q", hud.posts, want)
 	}
 }
