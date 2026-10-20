@@ -974,13 +974,21 @@ spec:
                       format: int32
                       type: integer
                     do:
-                      description: Do is rework, escalate or accept.
+                      description: Do is pass, rework, escalate, accept, fail or supersede.
                       type: string
                     note:
                       description: Note is an accepted unit's note.
                       type: string
                     passes:
                       description: Passes counts the unit's reworks.
+                      format: int32
+                      type: integer
+                    score:
+                      description: |-
+                        Score is the unit's score (a decimal) from the last verdict that
+                        scored it, and Scored how many verdicts have.
+                      type: string
+                    scored:
                       format: int32
                       type: integer
                     to:
@@ -1342,6 +1350,12 @@ spec:
                   succeeded:
                     format: int32
                     type: integer
+                  superseded:
+                    description: |-
+                      Superseded units ended because a review chose others: done, not
+                      accepted, and out of the job's output.
+                    format: int32
+                    type: integer
                   total:
                     format: int32
                     type: integer
@@ -1395,6 +1409,14 @@ spec:
                         record.
                       type: string
                     reworked:
+                      format: int32
+                      type: integer
+                    select:
+                      description: |-
+                        Select is the verdict's selection rule over the scores it judged:
+                        "top 2", "threshold 0.8", "ucb 1.4 top 1".
+                      type: string
+                    superseded:
                       format: int32
                       type: integer
                     unit:

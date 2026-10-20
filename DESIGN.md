@@ -1595,12 +1595,37 @@ and a sweep planner that spawns trials are all generators.
   - **accept** lets the units stand, with the note recorded.
   - **expand** adds units under the review, as a generator's expansion
     does.
+  - **One format.** Scores, selection and supersede are optional fields
+    of the same document (version 1, read strictly), not a second version
+    (agent-catalog G-scored-verdict, G-supersede).
+  - **score** is a number per judged unit, on its item. Higher is better
+    unless the review unit's params say `scoreOrder: asc`. A later verdict
+    may score a unit again (a backup in a tree search). The last score
+    stands, and every one is in the signed record.
+  - **select** chooses among the passing units with a score, this
+    verdict's or the one standing: `{top: k}`, `{threshold: x}`, or
+    `{ucb: c, top?: k}`. UCB ranks by the score plus c times sqrt(ln N / n),
+    n being how many verdicts scored the unit and N their sum. The chosen
+    pass; the rest are superseded.
+  - **supersede** ends units because others were chosen. It may name the
+    units the review judges, or its unfinished siblings, so alternatives
+    still running stop: their pods are deleted, no retry is spent and
+    nothing is failed. A superseded unit is done, not accepted (state
+    `superseded`): nothing waits on it, it costs no more, and its
+    changesets leave the job's output. The output is refolded from its
+    fold log, kept in the provenance index, without them: a new chain,
+    each section again sealed by the view it makes. The superseded
+    output's chain stays in the store. Pricing what early superseding
+    saves, per key, is not built: a superseded unit's remaining work
+    simply leaves the estimate.
   - **Refusal.** A verdict that judges a unit the review does not run
-    after, judges one twice, or carries a bad override or expansion is
-    refused whole, and the review fails.
+    after, judges one twice, supersedes a unit it may not, or carries a
+    bad override, selection or expansion is refused whole, and the review
+    fails.
   - **Status.** `verdicts` lists the most recent verdicts with their
-    counts. `reviews` holds each unit's last non-pass outcome, its passes
-    and its standing override.
+    counts (`superseded` among them) and selection rule. `reviews` holds
+    each unit's last outcome beyond a plain pass, its passes, its standing
+    override, and its score.
   - **Expected rework is priced from the start.** A review is a unit its
     document marks (`params.review`), or one whose key has written
     verdicts in the project. Its rework rate is learned per project, class

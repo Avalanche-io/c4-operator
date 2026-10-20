@@ -158,6 +158,13 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 	}
 	lockedBy := map[int]map[string]any{}
 	progress := map[string]any{}
+	// A review's selection rule, from its last verdict that had one.
+	selects := map[int]string{}
+	for _, vd := range rec.job.Status.Verdicts {
+		if vd.Select != "" {
+			selects[int(vd.Unit)] = vd.Select
+		}
+	}
 	for i, u := range plan.Units {
 		st := states[i]
 		if held && st == "queued" {
@@ -203,7 +210,7 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if st == "blocked" {
 			// what it waits on first, for "blocked on <x>"
 			for _, a := range u.After {
-				if a >= 0 && a < n && states[a] != "succeeded" && states[a] != "accepted" {
+				if a >= 0 && a < n && states[a] != "succeeded" && states[a] != "accepted" && states[a] != "superseded" {
 					on := plan.Units[a].Name
 					if on == "" {
 						on = plan.Units[a].Label
@@ -221,8 +228,12 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		}
 		if r, ok := rec.job.Status.Reviews[strconv.Itoa(i)]; ok {
 			// What a review last decided: reworked (with its passes),
-			// escalated to someone (flagged), or accepted with a note.
+			// escalated to someone (flagged), accepted with a note, or
+			// superseded; and the unit's score.
 			e["review"] = r
+		}
+		if sel, ok := selects[i]; ok {
+			e["select"] = sel
 		}
 		if works != nil {
 			e["work"] = works[i]
@@ -434,7 +445,7 @@ func unitStateMap(st *c4v1.WorkJobStatus, n int) []string {
 	for i := range out {
 		out[i] = "queued"
 	}
-	for _, name := range []string{"planned", "blocked", "locked", "waits", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "succeeded"} {
+	for _, name := range []string{"planned", "blocked", "locked", "waits", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "superseded", "succeeded"} {
 		idx, _ := order.DecodeSet(st.UnitStates[name])
 		for _, i := range idx {
 			if i >= 0 && i < n {

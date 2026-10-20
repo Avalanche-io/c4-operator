@@ -38,6 +38,17 @@ type output struct {
 	units   map[int]string // unit -> its latest task record
 	index   c4.ID
 	dirty   bool
+	// folds is every fold in order, kept in the index, so the output can
+	// be rebuilt without some units' changesets (refoldOutput).
+	folds []Fold
+}
+
+// Fold is one fold of a job's output: the unit, its changeset and its task
+// record.
+type Fold struct {
+	Unit      int    `json:"unit"`
+	Changeset string `json:"changeset"`
+	Record    string `json:"record,omitempty"`
 }
 
 func newOutput() *output {
@@ -50,6 +61,7 @@ type Index struct {
 	Output  string            `json:"output"`
 	Records map[string]string `json:"records"` // path -> task record ID
 	Units   map[int]string    `json:"units"`   // unit -> its latest task record ID
+	Folds   []Fold            `json:"folds,omitempty"`
 }
 
 // saveIndex stores the provenance index when it changed.
@@ -57,7 +69,7 @@ func (o *output) saveIndex(ctx context.Context, st *storeurl.Sharded, job string
 	if !o.dirty {
 		return nil
 	}
-	b, err := json.Marshal(Index{Job: job, Output: o.view.String(), Records: o.records, Units: o.units})
+	b, err := json.Marshal(Index{Job: job, Output: o.view.String(), Records: o.records, Units: o.units, Folds: o.folds})
 	if err != nil {
 		return err
 	}
@@ -89,6 +101,7 @@ func (o *output) loadIndex(st *storeurl.Sharded, id string) error {
 	if ix.Units != nil {
 		o.units = ix.Units
 	}
+	o.folds = ix.Folds
 	o.index = pid
 	return nil
 }
@@ -175,6 +188,83 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx i
 	o.view, o.id = cur, chainID
 	o.folded[idx]++
 	o.count++
+	o.folds = append(o.folds, Fold{Unit: idx, Changeset: csID, Record: record})
+	o.dirty = true
+	return nil
+}
+
+// refoldOutput rebuilds the job's output from its fold log without the
+// changesets of its superseded units: a new chain, each section again
+// sealed by the view it makes. It reports false when it must be tried
+// again (the store is unreachable).
+func (q *Queue) refoldOutput(ctx context.Context, v *view) bool {
+	m := v.mem
+	if q.Stores == nil {
+		return true
+	}
+	st, err := q.Stores(ctx, v.project)
+	if err != nil {
+		q.Log.Error(err, "open store for refold", "job", v.key)
+		return false
+	}
+	if st == nil {
+		return true
+	}
+	if err := q.loadOutput(st, v); err != nil {
+		q.Log.Error(err, "load output", "job", v.key)
+		return false
+	}
+	drop := false
+	for _, f := range m.out.folds {
+		drop = drop || m.superseded[f.Unit]
+	}
+	if !drop {
+		return true
+	}
+	o := newOutput()
+	for _, f := range m.out.folds {
+		if m.superseded[f.Unit] {
+			continue
+		}
+		if err := q.fold(ctx, st, o, f.Unit, f.Changeset, f.Record); err != nil {
+			q.Log.Error(err, "refold", "job", v.key, "unit", f.Unit)
+			return false
+		}
+	}
+	if o.view.IsNil() && len(m.out.chain) > 0 {
+		// Every fold was superseded: the output is the job's input view.
+		ch, err := c4view.ReadChain(m.out.chain)
+		if err != nil {
+			q.Log.Error(err, "refold", "job", v.key)
+			return false
+		}
+		o.view, o.chain = ch.Base, []byte(ch.Base.String()+"\n")
+		if o.id, err = st.PutBytes(ctx, o.chain); err != nil {
+			q.Log.Error(err, "refold", "job", v.key)
+			return false
+		}
+	}
+	q.Log.Info("refolded", "job", v.key, "from", m.out.view.String(), "to", o.view.String(), "folds", len(o.folds))
+	o.dirty = true
+	m.out = o
+	return true
+}
+
+// loadOutput restores the output's chain and index after a restart, once.
+func (q *Queue) loadOutput(st *storeurl.Sharded, v *view) error {
+	m := v.mem
+	if m.outLoad != "" {
+		if err := m.out.load(st, m.outLoad); err != nil {
+			return err
+		}
+		m.outLoad = ""
+	}
+	if m.outIndex != "" {
+		if err := m.out.loadIndex(st, m.outIndex); err != nil {
+			return err
+		}
+		m.outIndex = ""
+	}
 	return nil
 }
 

@@ -836,6 +836,12 @@ type WorkVerdict struct {
 	Accepted int32 `json:"accepted,omitempty"`
 	// +optional
 	Expanded int32 `json:"expanded,omitempty"`
+	// +optional
+	Superseded int32 `json:"superseded,omitempty"`
+	// Select is the verdict's selection rule over the scores it judged:
+	// "top 2", "threshold 0.8", "ucb 1.4 top 1".
+	// +optional
+	Select string `json:"select,omitempty"`
 	// Record is the C4 ID of the queue's signed verdict record.
 	// +optional
 	Record string `json:"record,omitempty"`
@@ -847,7 +853,7 @@ type WorkVerdict struct {
 
 // WorkReview is what reviews last decided for one unit.
 type WorkReview struct {
-	// Do is rework, escalate or accept.
+	// Do is pass, rework, escalate, accept, fail or supersede.
 	Do string `json:"do"`
 	// +optional
 	Why string `json:"why,omitempty"`
@@ -865,6 +871,12 @@ type WorkReview struct {
 	// With is the rework's change to the unit's next attempts.
 	// +optional
 	With *WorkRework `json:"with,omitempty"`
+	// Score is the unit's score (a decimal) from the last verdict that
+	// scored it, and Scored how many verdicts have.
+	// +optional
+	Score string `json:"score,omitempty"`
+	// +optional
+	Scored int32 `json:"scored,omitempty"`
 }
 
 // WorkRework changes a reworked unit's next attempts: what makes a rework
@@ -928,6 +940,9 @@ type UnitCounts struct {
 	Failed    int32 `json:"failed,omitempty"`
 	Accepted  int32 `json:"accepted,omitempty"`
 	Held      int32 `json:"held,omitempty"`
+	// Superseded units ended because a review chose others: done, not
+	// accepted, and out of the job's output.
+	Superseded int32 `json:"superseded,omitempty"`
 }
 
 // Ack kinds.

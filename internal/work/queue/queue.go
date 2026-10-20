@@ -240,10 +240,14 @@ type jobMem struct {
 	// accepted are failed units a person accepted (also in failed);
 	// acks the standing acknowledgements, acked the last request's token
 	// (states.go).
-	accepted  map[int]bool
-	acks      []*ackRecord
-	acked     string
-	decisions []decisionRecord
+	accepted map[int]bool
+	// superseded units ended because a review chose others (verdict.go);
+	// refold says the output still holds their changesets.
+	superseded map[int]bool
+	refold     bool
+	acks       []*ackRecord
+	acked      string
+	decisions  []decisionRecord
 	// waits are the job's wait units and escalated units, open and
 	// decided (wait.go).
 	waits *waitMem
@@ -275,7 +279,7 @@ type jobMem struct {
 }
 
 func newMem() *jobMem {
-	return &jobMem{succeeded: map[int]bool{}, failed: map[int]bool{}, accepted: map[int]bool{}, attempts: map[int]int{},
+	return &jobMem{succeeded: map[int]bool{}, failed: map[int]bool{}, accepted: map[int]bool{}, superseded: map[int]bool{}, attempts: map[int]int{},
 		millis: map[int]int64{}, launched: map[int]time.Time{}, nodeFails: map[string]int{}, blacklist: map[string]bool{},
 		resume: map[int]string{}, yieldAsked: map[int]time.Time{}, preemptions: map[int]int{},
 		out: newOutput(), foldedPod: map[types.UID]bool{}, ended: map[int]time.Time{}, unitOut: map[int]string{}}
@@ -295,6 +299,10 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	}
 	for _, i := range decode(st.UnitStates["failed"]) {
 		m.failed[i] = true
+	}
+	for _, i := range decode(st.UnitStates["superseded"]) {
+		m.superseded[i] = true
+		m.refold = true // the same view again if it was refolded
 	}
 	for _, pair := range strings.Split(st.Attempts, ",") {
 		i, n, ok := strings.Cut(pair, ":")
@@ -710,6 +718,23 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			continue
 		}
 		delete(m.launched, idx)
+		if m.superseded[idx] {
+			// A review chose others: the pod is stopped and whatever it
+			// did is dropped (verdict.go).
+			switch {
+			case p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed:
+				v.done = append(v.done, p)
+			case p.DeletionTimestamp == nil:
+				if err := q.Client.Delete(ctx, p); err != nil && !apierrors.IsNotFound(err) {
+					q.Log.Error(err, "stop a superseded unit", "pod", p.Name)
+				}
+			case letGo(p, now):
+				if err := q.release(ctx, p); err != nil {
+					q.Log.Error(err, "release unit pod", "pod", p.Name)
+				}
+			}
+			continue
+		}
 		slots := plan.Units[idx].Slots
 		switch {
 		case p.DeletionTimestamp != nil && p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed:
@@ -908,6 +933,9 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		if m.started.IsZero() {
 			m.started = now
 		}
+	}
+	if m.refold && q.refoldOutput(ctx, v) {
+		m.refold = false
 	}
 	v.runnable, v.waiting, v.stuck = unitWaits(plan, m, v)
 	if q.reuseUnits(ctx, v, now) {
@@ -1737,19 +1765,9 @@ func (q *Queue) foldChangeset(ctx context.Context, v *view, idx int, cs, record 
 		// A namespace without a Project has no store to fold into.
 		return true
 	}
-	if m.outLoad != "" {
-		if err := m.out.load(st, m.outLoad); err != nil {
-			q.Log.Error(err, "load output chain", "job", v.key)
-			return false
-		}
-		m.outLoad = ""
-	}
-	if m.outIndex != "" {
-		if err := m.out.loadIndex(st, m.outIndex); err != nil {
-			q.Log.Error(err, "load provenance index", "job", v.key)
-			return false
-		}
-		m.outIndex = ""
+	if err := q.loadOutput(st, v); err != nil {
+		q.Log.Error(err, "load output", "job", v.key)
+		return false
 	}
 	if err := q.fold(ctx, st, m.out, idx, cs, record); err != nil {
 		q.Log.Error(err, "fold", "job", v.key, "unit", idx)

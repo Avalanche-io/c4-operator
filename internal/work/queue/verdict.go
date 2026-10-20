@@ -36,8 +36,11 @@ import (
 //	              "env": {}, "inputs": [{"view": "c4...", "mountPath": "/note"}], "fresh": false}},
 //	    {"units": ["1088"], "do": "escalate", "to": "lighting-lead", "why": "flicker"},
 //	    {"units": ["1010"], "do": "accept", "note": "firefly, paint in comp"},
+//	    {"units": ["a3"], "do": "pass", "score": 0.82},
+//	    {"units": ["a4"], "do": "supersede", "why": "a3 is better"},
 //	    {"do": "expand", "expand": { an expansion document (DESIGN 10.6) }}],
-//	  "pass": "rest", "maxPasses": 2, "onExhausted": "escalate:lead" }
+//	  "pass": "rest", "maxPasses": 2, "onExhausted": "escalate:lead",
+//	  "select": {"top": 1} }        // or {"threshold": 0.8}, {"ucb": 1.4, "top": 1}
 //
 // A unit is named by its name, its label, a range of labels ("1101-1102",
 // every unit between the two in the table) or its index ("#12"), and only
@@ -58,6 +61,20 @@ import (
 //   - accept lets the units stand, with the note recorded.
 //   - expand adds units under the review unit, as a generator's
 //     expansion does.
+//   - score is a number per judged unit, higher better unless the review
+//     unit's params say scoreOrder: asc. A later verdict may score a unit
+//     again (a backup in a tree search): the last score stands, and every
+//     one is in the signed record.
+//   - select chooses among the passing units with a score (this verdict's,
+//     else the one standing): the top k, those at or past a threshold, or
+//     the top k (1) by UCB, score plus c times sqrt(ln N / n), n being how
+//     many verdicts scored the unit and N their sum over the candidates.
+//     The chosen pass; the rest are superseded.
+//   - supersede ends units because others were chosen: judged units, or
+//     the review's unfinished siblings (alternatives still running stop,
+//     with no retry spent and nothing failed). A superseded unit is done,
+//     not accepted: nothing waits on it, and its changesets leave the job's
+//     output, which is refolded without them.
 //
 // A verdict that names a unit the review does not run after, names a
 // unit twice, or carries a bad override or expansion is refused whole:
@@ -75,6 +92,48 @@ type verdictDoc struct {
 	Pass        string        `json:"pass"`
 	MaxPasses   *int          `json:"maxPasses"`
 	OnExhausted string        `json:"onExhausted"`
+	Select      *selectRule   `json:"select"`
+}
+
+// selectRule chooses among scored units: Top, Threshold, or UCB with Top.
+type selectRule struct {
+	Top       *int     `json:"top"`
+	Threshold *float64 `json:"threshold"`
+	UCB       *float64 `json:"ucb"`
+}
+
+// String names the rule, for the record and the HUD.
+func (r *selectRule) String() string {
+	switch {
+	case r == nil:
+		return ""
+	case r.UCB != nil:
+		return fmt.Sprintf("ucb %s top %d", strconv.FormatFloat(*r.UCB, 'f', -1, 64), r.k())
+	case r.Threshold != nil:
+		return "threshold " + strconv.FormatFloat(*r.Threshold, 'f', -1, 64)
+	}
+	return fmt.Sprintf("top %d", r.k())
+}
+
+func (r *selectRule) k() int {
+	if r.Top == nil {
+		return 1
+	}
+	return *r.Top
+}
+
+func (r *selectRule) check() error {
+	switch {
+	case r.UCB == nil && r.Threshold == nil && r.Top == nil:
+		return fmt.Errorf("select: want top, threshold or ucb")
+	case r.Threshold != nil && (r.Top != nil || r.UCB != nil):
+		return fmt.Errorf("select: a threshold stands alone")
+	case r.Top != nil && *r.Top < 1:
+		return fmt.Errorf("select: top %d, want 1 or more", *r.Top)
+	case r.UCB != nil && (*r.UCB < 0 || math.IsNaN(*r.UCB)):
+		return fmt.Errorf("select: ucb %v, want 0 or more", *r.UCB)
+	}
+	return nil
 }
 
 type verdictItem struct {
@@ -85,6 +144,7 @@ type verdictItem struct {
 	Note   string           `json:"note"`
 	With   *c4v1.WorkRework `json:"with"`
 	Expand json.RawMessage  `json:"expand"`
+	Score  *float64         `json:"score"`
 }
 
 // action is one judged unit's outcome.
@@ -95,6 +155,7 @@ type action struct {
 	note      string
 	with      *c4v1.WorkRework
 	exhausted bool
+	score     *float64
 }
 
 // verdictDone reports whether the verdict of review pod uid was carried
@@ -160,7 +221,7 @@ func (q *Queue) carryOut(ctx context.Context, v *view, idx int, p *corev1.Pod, i
 	if err != nil {
 		rec.Error = err.Error()
 	}
-	rec.Verdict = d.Verdict
+	rec.Verdict, rec.Select = d.Verdict, d.Select.String()
 	var expandID string
 	if err == nil && expand != nil {
 		if expandID, err = q.storeDoc(ctx, v, expand); err != nil {
@@ -184,6 +245,8 @@ func (q *Queue) carryOut(ctx context.Context, v *view, idx int, p *corev1.Pod, i
 				rec.Escalated++
 			case "accept":
 				rec.Accepted++
+			case "supersede":
+				rec.Superseded++
 			}
 		}
 		if expand != nil {
@@ -196,7 +259,7 @@ func (q *Queue) carryOut(ctx context.Context, v *view, idx int, p *corev1.Pod, i
 	m.verdicts = append(m.verdicts, rec)
 	if rec.Error == "" && idx < len(m.plan.Units) {
 		q.noteVerdict(v.project, v.job.Spec.Class, m.plan.Units[idx].Key, int(rec.Reworked),
-			int(rec.Passed+rec.Reworked+rec.Escalated+rec.Accepted))
+			int(rec.Passed+rec.Reworked+rec.Escalated+rec.Accepted+rec.Superseded))
 	}
 	q.Log.Info("verdict", "job", v.key, "unit", idx, "verdict", rec.Verdict, "passed", rec.Passed, "reworked", rec.Reworked,
 		"escalated", rec.Escalated, "accepted", rec.Accepted, "expanded", rec.Expanded, "error", rec.Error)
@@ -247,9 +310,16 @@ func (q *Queue) judge(ctx context.Context, v *view, idx int, doc []byte) ([]acti
 			}
 			expand = it.Expand
 			continue
-		case "pass", "rework", "escalate", "accept":
+		case "pass", "rework", "escalate", "accept", "supersede":
 		default:
-			return nil, nil, d, fmt.Errorf("do %q: want pass, rework, escalate, accept or expand", it.Do)
+			return nil, nil, d, fmt.Errorf("do %q: want pass, rework, escalate, accept, supersede or expand", it.Do)
+		}
+		if it.Score != nil && (math.IsNaN(*it.Score) || math.IsInf(*it.Score, 0)) {
+			return nil, nil, d, fmt.Errorf("score %v", *it.Score)
+		}
+		among := judged
+		if it.Do == "supersede" {
+			among = supersedable(m, idx)
 		}
 		if it.With != nil {
 			if err := checkRework(v, it.With); err != nil {
@@ -257,7 +327,7 @@ func (q *Queue) judge(ctx context.Context, v *view, idx int, doc []byte) ([]acti
 			}
 		}
 		for _, ref := range it.Units {
-			units, err := resolveUnits(m.plan, judged, ref, roundPrefix(m.plan, idx))
+			units, err := resolveUnits(m.plan, among, ref, roundPrefix(m.plan, idx))
 			if err != nil {
 				return nil, nil, d, err
 			}
@@ -266,7 +336,7 @@ func (q *Queue) judge(ctx context.Context, v *view, idx int, doc []byte) ([]acti
 					return nil, nil, d, fmt.Errorf("the verdict judges unit %d twice", u)
 				}
 				seen[u] = true
-				a := action{unit: u, do: it.Do, why: it.Why, to: it.To, note: it.Note, with: it.With}
+				a := action{unit: u, do: it.Do, why: it.Why, to: it.To, note: it.Note, with: it.With, score: it.Score}
 				if a.do == "rework" {
 					if r := m.reviews[u]; r != nil && int(r.Passes) >= maxPasses {
 						a.do, a.to, a.exhausted = exhaustDo, exhaustTo, true
@@ -289,8 +359,97 @@ func (q *Queue) judge(ctx context.Context, v *view, idx int, doc []byte) ([]acti
 	} else if d.Pass != "none" {
 		return nil, nil, d, fmt.Errorf("pass %q: want rest or none", d.Pass)
 	}
+	if d.Select != nil {
+		if err := d.Select.check(); err != nil {
+			return nil, nil, d, err
+		}
+		selectAmong(m, acts, d.Select, m.plan.Units[idx].Params["scoreOrder"] == "asc")
+	}
 	sort.SliceStable(acts, func(a, b int) bool { return acts[a].unit < acts[b].unit })
 	return acts, expand, d, nil
+}
+
+// supersedable are the units review idx may supersede: those it judges,
+// and its unfinished siblings (alternatives still running).
+func supersedable(m *jobMem, idx int) []int {
+	plan := m.plan
+	out := slices.Clone(plan.Units[idx].After)
+	r := plan.Units[idx]
+	for i, u := range plan.Units {
+		if i == idx || u.Depth != r.Depth || u.Parent != r.Parent || slices.Contains(out, i) || m.done(i) || m.failed[i] {
+			continue
+		}
+		if slices.Contains(u.After, idx) {
+			continue // it runs after the review
+		}
+		out = append(out, i)
+	}
+	return out
+}
+
+// selectAmong applies rule to the passing units with a score: the chosen
+// pass, the rest become supersede.
+func selectAmong(m *jobMem, acts []action, rule *selectRule, asc bool) {
+	type cand struct {
+		at    int
+		score float64
+		n     float64
+	}
+	var cs []cand
+	total := 0.0
+	for k, a := range acts {
+		if a.do != "pass" {
+			continue
+		}
+		s, n, ok := scoreOf(m, a)
+		if !ok {
+			continue
+		}
+		if asc {
+			s = -s
+		}
+		cs = append(cs, cand{at: k, score: s, n: n})
+		total += n
+	}
+	value := func(c cand) float64 {
+		if rule.UCB == nil {
+			return c.score
+		}
+		return c.score + *rule.UCB*math.Sqrt(math.Log(max(total, 1))/c.n)
+	}
+	sort.SliceStable(cs, func(a, b int) bool { return value(cs[a]) > value(cs[b]) })
+	for rank, c := range cs {
+		keep := rank < rule.k()
+		if rule.Threshold != nil {
+			t := *rule.Threshold
+			if asc {
+				t = -t
+			}
+			keep = c.score >= t
+		}
+		if !keep {
+			acts[c.at].do, acts[c.at].why = "supersede", "not selected: "+rule.String()
+		}
+	}
+}
+
+// scoreOf is a passing unit's score for selection (this verdict's, else
+// the one standing) and how many verdicts scored it, this one included.
+func scoreOf(m *jobMem, a action) (float64, float64, bool) {
+	prev := m.reviews[a.unit]
+	n := 0.0
+	if prev != nil {
+		n = float64(prev.Scored)
+	}
+	if a.score != nil {
+		return *a.score, n + 1, true
+	}
+	if prev != nil && prev.Score != "" {
+		if s, err := strconv.ParseFloat(prev.Score, 64); err == nil {
+			return s, max(n, 1), true
+		}
+	}
+	return 0, 0, false
 }
 
 // resolveUnits finds the judged units ref names: a name, a label, a range
@@ -363,16 +522,27 @@ func (q *Queue) apply(v *view, idx int, a action) {
 	prev := m.reviews[a.unit]
 	r := &c4v1.WorkReview{Do: a.do, Why: a.why, Note: a.note, To: a.to, By: int32(idx)}
 	if prev != nil {
-		r.Passes = prev.Passes
+		r.Passes, r.Score, r.Scored = prev.Passes, prev.Score, prev.Scored
+	}
+	if a.score != nil {
+		r.Score, r.Scored = strconv.FormatFloat(*a.score, 'f', -1, 64), r.Scored+1
 	}
 	switch a.do {
 	case "pass":
-		if prev != nil && prev.Do == "rework" {
-			// A rework that now passes: its record stays, as passed.
+		if prev != nil && prev.Do == "rework" || a.score != nil {
+			// A rework that now passes: its record stays, as passed. A
+			// scored unit keeps its score.
 			r.Do, r.With = "pass", nil
 			m.reviews[a.unit] = r
 		}
 		return
+	case "supersede":
+		// Done, not accepted; its pod, if any, is stopped, and its
+		// changesets leave the output (observe, refoldOutput).
+		m.superseded[a.unit] = true
+		delete(m.succeeded, a.unit)
+		delete(m.failed, a.unit)
+		m.refold = true
 	case "rework":
 		r.Passes++
 		r.With = a.with
@@ -435,6 +605,9 @@ func (q *Queue) recordVerdict(ctx context.Context, v *view, rec verdictRec, acts
 		if out := v.mem.unitOut[a.unit]; out != "" {
 			o["output"] = out
 		}
+		if a.score != nil {
+			o["score"] = *a.score
+		}
 		for k, s := range map[string]string{"why": a.why, "to": a.to, "note": a.note} {
 			if s != "" {
 				o[k] = s
@@ -449,7 +622,7 @@ func (q *Queue) recordVerdict(ctx context.Context, v *view, rec verdictRec, acts
 		outcomes = append(outcomes, o)
 	}
 	pred := map[string]any{"decision": "verdict", "job": v.key, "unit": rec.Unit, "attempt": rec.Attempt,
-		"document": rec.Document, "verdict": rec.Verdict, "outcomes": outcomes,
+		"document": rec.Document, "verdict": rec.Verdict, "select": rec.Select, "outcomes": outcomes,
 		"policy": q.PolicyName, "at": now.UTC().Format(time.RFC3339)}
 	if r := p.Annotations[c4v1.AnnotationOutputProvenance]; r != "" {
 		pred["review"] = r

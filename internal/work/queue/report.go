@@ -123,10 +123,12 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		isWaiting[i] = true
 	}
 	var lockedU []int
-	var succ, egress, fail, flag, accepted, pre, run, retry, backoff, queued, planned, blockedU, waits []int
+	var succ, egress, fail, flag, accepted, pre, run, retry, backoff, queued, planned, blockedU, waits, superseded []int
 	for i := 0; i < n; i++ {
 		_, running := v.running[i]
 		switch {
+		case m.superseded[i]:
+			superseded = append(superseded, i)
 		case !running && !m.succeeded[i] && !m.failed[i] && !v.finishing[i] && m.attempts[i] == 0 && m.plan.Units[i].Generator && !m.expanded(i):
 			planned = append(planned, i)
 		case v.openWaits[i]:
@@ -162,7 +164,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		Failed: int32(len(fail)), Accepted: int32(len(accepted)), Preflight: int32(len(pre)),
 		Running: int32(len(run)), Retrying: int32(len(retry)), Backoff: int32(len(backoff)), Queued: int32(len(queued)),
 		Planned: int32(len(planned)), Blocked: int32(len(blockedU)), Flagged: int32(len(flag)), Waits: int32(len(waits)),
-		Locked: int32(len(lockedU))}
+		Locked: int32(len(lockedU)), Superseded: int32(len(superseded))}
 	switch {
 	case v.blocked:
 		st.Units.Blocked, st.Units.Queued, st.Units.Backoff = int32(len(queued)+len(backoff)+len(blockedU)), 0, 0
@@ -172,7 +174,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.UnitStates = map[string]string{}
 	for name, set := range map[string][]int{"succeeded": succ, "egress": egress, "failed": fail, "accepted": accepted,
 		"preflight": pre, "running": run, "retrying": retry, "backoff": backoff, "queued": queued,
-		"planned": planned, "blocked": blockedU, "flagged": flag, "waits": waits, "locked": lockedU} {
+		"planned": planned, "blocked": blockedU, "flagged": flag, "waits": waits, "locked": lockedU, "superseded": superseded} {
 		if len(set) > 0 {
 			st.UnitStates[name] = order.EncodeSet(set)
 		}
@@ -288,14 +290,15 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		st.Started = &metav1.Time{Time: m.started.Truncate(time.Second)}
 	}
 
-	// Accepted units count as done: nothing waits on them.
+	// Accepted and superseded units count as done: nothing waits on them.
+	finished := len(succ) + len(accepted) + len(superseded)
 	switch {
-	case len(succ)+len(accepted) == n && short && active == 0:
+	case finished == n && short && active == 0:
 		// Every unit finished, short of the measure the job requires.
 		st.Phase = "Failed"
-	case len(succ)+len(accepted) == n:
+	case finished == n:
 		st.Phase = "Succeeded"
-	case len(succ)+len(accepted)+len(fail)+len(flag)+len(v.stuck) == n && active == 0:
+	case finished+len(fail)+len(flag)+len(v.stuck) == n && active == 0:
 		// Units waiting on a failed one count with it: they cannot run
 		// until a person acts.
 		st.Phase = "Failed"

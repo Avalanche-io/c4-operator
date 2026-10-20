@@ -266,6 +266,9 @@ func unitWorks(m *model, r *jobRec, states []string, e *estimate.Estimator) ([]a
 		var w api.UnitWork
 		el, running := started[i]
 		switch {
+		case states[i] == "superseded":
+			// a review chose others: what it spent, and no more
+			w.Spent, w.Expected = measured*sl, measured*sl
 		case states[i] == "succeeded" && measured > 0:
 			w.Spent, w.Expected = measured*sl, measured*sl
 		case states[i] == "egress" && moving[i] > 0:

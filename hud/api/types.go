@@ -290,6 +290,9 @@ type Counts struct {
 	// Reused counts succeeded units that ran nothing: an earlier run of
 	// the same computation gave their output (also in Succeeded).
 	Reused int `json:"reused,omitempty"`
+	// Superseded counts units a review ended because it chose others:
+	// done, not accepted, out of the job's output.
+	Superseded int `json:"superseded,omitempty"`
 }
 
 type States struct {
@@ -308,6 +311,7 @@ type States struct {
 	Planned     string `json:"planned,omitempty"`
 	Flagged     string `json:"flagged,omitempty"`
 	Locked      string `json:"locked,omitempty"`
+	Superseded  string `json:"superseded,omitempty"`
 }
 
 type Objective struct {

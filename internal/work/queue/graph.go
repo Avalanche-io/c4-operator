@@ -224,7 +224,7 @@ func expansionStatus(xs []expansionRec) []c4v1.WorkExpansion {
 
 // done reports whether unit i no longer holds anything up: it succeeded,
 // or failed and a person accepted it.
-func (m *jobMem) done(i int) bool { return m.succeeded[i] || m.accepted[i] }
+func (m *jobMem) done(i int) bool { return m.succeeded[i] || m.accepted[i] || m.superseded[i] }
 
 // unitWaits sorts the job's unfinished units that are not running into
 // runnable ones, in dispatch order, and blocked ones (waiting on a unit of
@@ -256,7 +256,7 @@ func unitWaits(plan *class.Plan, m *jobMem, v *view) (runnable, blocked []int, s
 		return false
 	}
 	for _, idx := range plan.Order {
-		if m.succeeded[idx] || m.failed[idx] || v.finishing[idx] {
+		if m.succeeded[idx] || m.failed[idx] || m.superseded[idx] || v.finishing[idx] {
 			continue
 		}
 		if _, ok := v.running[idx]; ok {

@@ -241,10 +241,10 @@ func TestVerdictRefused(t *testing.T) {
 	finishUnit(t, now, ns, "bad2", 1, nil)
 	tick(t, q)
 	finishUnit(t, now, ns, "bad2", 2, map[string]string{c4v1.AnnotationOutputVerdict: put(`{"version": 1, "items": [
-		{"units": ["a"], "do": "accept", "score": 0.8}]}`)})
+		{"units": ["a"], "do": "accept", "rank": 1}]}`)})
 	tick(t, q)
 	got = get(t, ns, "bad2")
-	if len(got.Status.Verdicts) != 1 || !strings.Contains(got.Status.Verdicts[0].Error, `unknown field "score"`) || !slices.Equal(states(t, got, "failed"), []int{2}) {
+	if len(got.Status.Verdicts) != 1 || !strings.Contains(got.Status.Verdicts[0].Error, `unknown field "rank"`) || !slices.Equal(states(t, got, "failed"), []int{2}) {
 		t.Fatalf("unknown field: %+v %v", got.Status.Verdicts, got.Status.UnitStates)
 	}
 }
