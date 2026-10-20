@@ -368,7 +368,7 @@ Root {{
 }}
 Read {{
  inputs 0
- file /in/render/sm0140.####.exr
+ file /show/render/sm0140.####.exr
  first {first}
  last {last}
  colorspace "ACES - ACEScg"
@@ -388,12 +388,14 @@ Write {{
 ''')
     write(os.path.join(shot, "comp.sh"), '''#!/bin/sh
 # sm0140's comp as OpenImageIO: the render, graded a little warmer for dusk.
-# The farm runs it in each unit with C4_FRAME_START and C4_FRAME_END set.
+# The farm runs it in each unit with C4_FRAME_START and C4_FRAME_END set,
+# in the job's tree (C4_TREE), which holds the render.
 set -eu
-mkdir -p /show/comp
+tree=${C4_TREE:-/show}
+mkdir -p "$tree/comp"
 for f in $(seq "$C4_FRAME_START" "$C4_FRAME_END"); do
-  oiiotool "/in/render/sm0140.$f.exr" --mulc 1.08,1.04,0.98,1 --powc 0.96,0.96,0.96,1 \\
-    -d half -o "/show/comp/sm0140.$f.exr"
+  oiiotool "$tree/render/sm0140.$f.exr" --mulc 1.08,1.04,0.98,1 --powc 0.96,0.96,0.96,1 \\
+    -d half -o "$tree/comp/sm0140.$f.exr"
 done
 ''')
     os.chmod(os.path.join(shot, "comp.sh"), 0o755)

@@ -64,72 +64,32 @@ docker run --rm --user 65532:65532 -v /tmp/t:/show -v "$PWD/tools/render:/etc/c4
   `c4-farm` for `c4 farm up`, and Go embeds no folder holding its own
   `go.mod`; `ci.sh` still runs a repository's Go tests.
 
-## Open questions for c4-authoring
+## Decided with c4-authoring (2026-10-20)
 
-1. **Image names.** `runs.image` is `c4/job-<name>`, after TOOL.md's
-   `c4/runtime-oiio`. Something must map it to
-   `ghcr.io/avalanche-io/c4-job-<name>:<version>` (and `c4-job-<name>:dev`
-   on a local farm) before publishing pins the digest.
-2. **A whole range in one unit.** The `sim` type's chunk was `all`: one unit
-   over the job's frames, because a sim cannot start mid-range. `frames.chunk`
-   is a number, so `sim` says 1000, the render class's largest chunk; a sim
-   longer than 1000 frames would split and the second unit would start cold.
-   It needs `chunk: all` or an equivalent.
-3. **Class parameters.** The classes read params of their own: render's
-   `pass`, ci's `shards` and `target`, ml's `steps`, `checkpointEvery` and
-   `ranks`. These tools declare them as ordinary parameters with the same
-   names, and assume the lowering passes a parameter whose name the class
-   reads to the class as well as to `C4_PARAM_*`. That is how `ci` takes its
-   shard count, and how `lora`'s steps reach `C4_STEPS`. TOOL.md section 9
-   maps only `frames` to class params. `lora.sh` falls back to
-   `C4_PARAM_STEPS` and `C4_PARAM_CHECKPOINTEVERY` where the class's
-   variables are absent, as under `c4 farm tool test`.
-4. **Frames for a `once` tool.** A `once` job lowers with frames `"1"`
-   (SUBMIT.md 7.1), so `transcode` takes its frames as a `RANGE_EXPR`
-   parameter named `range` (`from: shot.frames`). It is not named `frames`,
-   to keep clear of a submission's own `frames`. `c4 farm submit transcode
-   ... --frames` would have to fill it.
-5. **`needs`.** The Go types requested no resources, and the lowering
-   writes requests and limits, so any number set here becomes a ceiling
-   that throttles a render or kills a sim that runs unlimited today. Only
-   `transcode` declares something (`scratch` for its intermediate TIFFs).
-   cpu and memory wait for measured runs on the local farm.
-6. **Network.** `infer` and `lora` download model weights from Hugging Face
-   on first use, and the `lora` and `infer` tests do too. Units are unsealed
-   today, but tool/1 is sealed by default and slice 1 refuses
-   `needs.network`, so neither declares it. Before tools are sealed they
-   need a named service (`huggingface`) that `c4 farm up` defines, or the
-   weights in the tool's tree (TOOL.md 7.3) or a cache. `ci` on a real
-   repository needs a module or package proxy for the same reason; its test
-   repository has no dependencies.
-7. **How values arrive.** These scripts assume a `BOOL` arrives as `true` or
-   `false` (`usd.sh` also accepts `1` and `yes`), and that
-   `{{Job.Shot}}` with no shot either drops its argument or passes `""`:
-   `transcode` and `infer` take it last and handle both.
-8. **`previews` and `writes` cannot follow a parameter.** `infer` writes to
-   `depth/`, `matte/` or `upscale/` by its `task`, so `previews` names
-   `depth/` and the other passes reach the preview only through their
-   `c4_frame` paths. `sim` writes its cache beside the scene, so its `writes`
-   is a glob, `**/cache/`; TOOL.md shows globs only in `previews`.
-9. **A default that depends on another parameter.** `infer`'s model should
-   follow its task (birefnet for a matte). TOOL.md has no way to say so, and
-   `aiUsage` takes `{{Param.model}}` as given, so the model stays explicit
-   and the script refuses a mismatch.
-10. **Studio images for licensed branches.** `comp`'s Nuke branch and `sim`'s
-    Houdini branch need images with Nuke or Houdini, and tool/1 has no
-    per-submission image (the Go types' `--image`). A studio copies the
-    folder and changes `runs.image`. The scripts fail with a reason when
-    the program is missing.
-11. **The samples' comp scripts.** `hack/samples` writes `comp.sh` and
-    `comp.nk` reading `/in/render/` and writing `/show/comp/`. With one tree
-    per job there is no `/in`: they should read `render/` in the tree.
-12. **SUBMIT.md 5.1's movie.** Its `transcode` job gives `{codec, view,
-    slate}` and no plates or range. This `transcode` needs `plates` and
-    `range`, has no slate, and "ACES 1.0 - SDR Video" is not a view in
-    `ocio://studio-config-latest` (its Rec.709 views are listed in
-    `allowedValues`). The example and this tool should agree.
-13. **Reuse.** `ci` says `never`: its JUnit files record times, so no two
-    runs write the same bytes, and real repositories have flaky tests (the
-    sample has one on purpose, left out of this test tree). `sim` says
-    `exact`, though a threaded Mantaflow bake may not repeat bit for bit; the
-    farm's re-run sampling would show it.
+The format's open points these folders raised, as c4-authoring settled them
+(TOOL.md and the schema follow):
+
+- **Images:** `c4/<name>[:tag]` is `ghcr.io/avalanche-io/c4-<name>`, at the
+  tag written or else the farm's release (`schema.ImageRef`); a local farm
+  uses what `c4 farm image load` put there.
+- **A whole range in one unit:** `frames: {chunk: all}`, which `sim` uses.
+- **Class parameters:** a parameter named `pass` (frames), `shards`,
+  `target` or `latencyTarget` (shards), or `ranks`, `steps` or
+  `checkpointEvery` (train) reaches the class as well as `C4_PARAM_*`.
+- **Frames for a `once` tool:** a submission's `frames` fills the tool's
+  `RANGE_EXPR` parameter whose `from` is `shot.frames`, as `transcode`'s
+  `range`.
+- **`needs`:** declared only from a measured run; a guess is a ceiling.
+- **Network:** `c4 farm up` defines `huggingface`, `pypi` and `goproxy`;
+  weights in the tool's tree are preferred where a tool can carry them.
+- **`writes` and `previews`** take globs and parameters, as `sim`'s
+  `**/cache/` and `infer`'s `{{Param.task}}/`.
+- **Values:** a `BOOL` is `true` or `false`; an argument that is one format
+  string with an empty value is dropped.
+- **A default that depends on another parameter** is not in tool/1:
+  `infer` keeps its model explicit and refuses a mismatch.
+- **Studio images:** a studio copies a folder, changes `runs.image` and
+  publishes the copy as its own tool.
+- **Reuse:** `ci` and `lora` `never`, the rest `exact`.
+- **At `c4 farm up`:** these folders publish farm-wide with their test
+  marked as run in the release they shipped in.

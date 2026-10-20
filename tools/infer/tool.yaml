@@ -30,8 +30,8 @@ params:
   description: The model, a short name (depth-anything-v2-small for depth, birefnet for matte, swin2sr-x2 for upscale) or a Hugging Face model ID. Weights download on first use.
   show: advanced
   userInterface: {control: LINE_EDIT, label: Model}
-writes: [depth/, matte/, upscale/]
-previews: "depth/*.$F4.exr"
+writes: ["{{Param.task}}/"]
+previews: "{{Param.task}}/*.$F4.exr"
 aiUsage:
   generated: generated
   model: "{{Param.model}}"

@@ -6,7 +6,7 @@ kind: frames
 runs:
   image: c4/job-sim
   command: [bash, "{{Tool.Dir}}/sim.sh", "{{Param.scene}}", "{{Param.domain}}", "{{Param.node}}"]
-frames: {chunk: 1000, order: sequential}
+frames: {chunk: all, order: sequential}
 params:
 - name: scene
   type: PATH
