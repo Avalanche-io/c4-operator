@@ -39,9 +39,13 @@ type ToolProfileSpec struct {
 	Egress []ToolEgress `json:"egress,omitempty"`
 }
 
-// ToolEgress is one destination a profile allows: an address block or a
-// cluster service, optionally on some ports.
+// ToolEgress is one destination a profile allows: a host, an address
+// block or a cluster service, optionally on some ports. Hosts are reached
+// through the farm's egress proxy; the others directly.
 type ToolEgress struct {
+	// Host is a host name, or *.domain for the names under domain.
+	// +optional
+	Host string `json:"host,omitempty"`
 	// CIDR is an address block, as 203.0.113.0/24.
 	// +optional
 	CIDR string `json:"cidr,omitempty"`
