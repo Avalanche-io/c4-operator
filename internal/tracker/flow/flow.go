@@ -641,7 +641,7 @@ func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, erro
 			return tracker.Ref{}, err
 		}
 		return w.On, nil
-	case "note", "mention":
+	case "note", "mention", "comment":
 		if w.Note == nil || w.Note.Body == "" {
 			return tracker.Ref{}, errors.New("flow: note without content")
 		}
@@ -753,7 +753,7 @@ func VersionCode(entity, step, task string, n int) string {
 // Probe finds a Note already written under w.Key. Field updates need no
 // probe: writing the same values again changes nothing.
 func (a *Adapter) Probe(ctx context.Context, w tracker.Write) (bool, tracker.Ref, error) {
-	if (w.Kind != "note" && w.Kind != "mention") || w.Key == "" || w.Note == nil || w.Note.Replace != nil {
+	if (w.Kind != "note" && w.Kind != "mention" && w.Kind != "comment") || w.Key == "" || w.Note == nil || w.Note.Replace != nil {
 		return false, tracker.Ref{}, nil
 	}
 	id, _ := strconv.Atoi(w.On.ID)

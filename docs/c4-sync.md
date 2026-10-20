@@ -118,6 +118,14 @@ cannot grant farm access. MLflow records no author for an alias or a tag.
 Its decisions are attributed to `mlflow-registry`, which you map to a
 party (`party:ml-leads`), and a person's wait refuses them.
 
+**Causes.** For each cause a person must act on (units that failed
+after their retries, a review's escalation, information a brief lacked),
+c4-sync keeps one comment on the issue or Task: what it is ("exit 137
+OOMKilled"), how many attempts, which units and nodes, and what the farm did.
+It edits that comment in place as the cause grows, so the tracker carries one
+item per cause, not one per failure. Causes the farm handled on its own (an
+attempt retried) are not posted.
+
 **Assignments.** When someone assigns failed units to a person in C4
 (`c4 farm`'s acknowledge with an assignee, the HUD, MCP
 `c4_acknowledge_units`), c4-sync tells that person where they work: an

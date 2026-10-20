@@ -673,3 +673,39 @@ func TestAssignmentMentionsThePerson(t *testing.T) {
 		}
 	}
 }
+
+// One comment per cause a person must act on, edited in place as the
+// cause grows; a cause the farm handled (retried only) is not posted.
+func TestCauseCommentsOnePerCause(t *testing.T) {
+	e := setup(t)
+	e.pass()
+	at := e.clock.now()
+	oom := api.Cause{Kind: "exit", Key: "exit:137:OOMKilled", Title: "exit 137 OOMKilled", Units: "0-1", Count: 2,
+		Nodes: []string{"node-3"}, Did: []string{"retried", "failed"}, First: at, Last: at}
+	e.job(func(j *api.Job) {
+		j.Phase = "Running"
+		j.Causes = []api.Cause{oom, {Kind: "exit", Key: "exit:143:Error", Title: "exit 143", Units: "4", Count: 1, Did: []string{"retried"}, Last: at}}
+	})
+	e.pass()
+	causes := func() []string {
+		var out []string
+		for _, c := range e.gh.Comments(7) {
+			if strings.HasPrefix(c.Body, "C4 cause on") {
+				out = append(out, c.Body)
+			}
+		}
+		return out
+	}
+	got := causes()
+	if len(got) != 1 || !strings.Contains(got[0], "C4 cause on work/gh-7: exit 137 OOMKilled. 2 attempts, units 0-1, on node-3. The farm retried, then failed.") {
+		t.Fatalf("cause comments: %q", got)
+	}
+	e.job(func(j *api.Job) {
+		j.Causes[0].Units, j.Causes[0].Count, j.Causes[0].Did = "0-2", 3, []string{"retried", "failed", "blacklisted"}
+	})
+	e.clock.add(time.Minute)
+	e.pass()
+	if got = causes(); len(got) != 1 || !strings.Contains(got[0], "3 attempts, units 0-2") || !strings.Contains(got[0], "then blacklisted") {
+		t.Fatalf("after the cause grew: %q", got)
+	}
+}

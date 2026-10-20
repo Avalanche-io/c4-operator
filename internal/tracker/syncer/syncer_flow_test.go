@@ -542,3 +542,25 @@ func TestFlowAssignmentAddressesTheNote(t *testing.T) {
 		t.Fatalf("note: %+v", found[0].Fields)
 	}
 }
+
+// In Flow a cause is a Note on the Task, its subject the cause.
+func TestFlowCauseNote(t *testing.T) {
+	e := setupFlow(t)
+	e.pass()
+	job := "flow-" + strconv.Itoa(e.task.ID)
+	e.job(job, func(j *api.Job) {
+		j.Phase = "Running"
+		j.Causes = []api.Cause{{Kind: "verdict", Key: "verdict:escalate:tables changed", Title: "review: escalate: tables changed", Units: "1001",
+			Count: 1, Did: []string{"escalated"}, To: "dana"}}
+	})
+	e.pass()
+	var found int
+	for _, n := range e.site.All("Note") {
+		if n.Fields["subject"] == "C4: review: escalate: tables changed" && strings.Contains(fmt.Sprint(n.Fields["content"]), "Escalated to dana") {
+			found++
+		}
+	}
+	if found != 1 {
+		t.Fatalf("cause notes: %d", found)
+	}
+}

@@ -749,6 +749,9 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	if err := s.mirrorAssignments(ctx, c, t, l, j, jr, now); err != nil {
 		return err
 	}
+	if err := s.mirrorCauses(ctx, c, l, j, jr, now); err != nil {
+		return err
+	}
 	if l.Status.State != sum.State {
 		if err := s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.State = sum.State }); err != nil {
 			return err
@@ -796,6 +799,55 @@ func (s *Syncer) mirrorAssignments(ctx context.Context, c *conn, t *c4v1.Tracker
 		}
 	}
 	return nil
+}
+
+// mirrorCauses keeps one comment per cause a person must act on (units
+// failed for good, escalated, or held for information; integrations GAPS
+// 4) on the entity, edited in place as the cause grows: a tracker reads
+// one item per cause, not one per failure.
+func (s *Syncer) mirrorCauses(ctx context.Context, c *conn, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, now time.Time) error {
+	if !c.adapter.Capabilities().EditableComments {
+		return nil
+	}
+	on := tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL}
+	for _, cs := range j.Causes {
+		if !slices.ContainsFunc(cs.Did, func(d string) bool { return d == "failed" || d == "escalated" || d == "held" }) {
+			continue
+		}
+		field := "cause/" + tracker.WriteKey(jr.String(), cs.Key, "")[:12]
+		body := causeComment(cs, jr, s.Farm.JobURL(jr))
+		key := tracker.WriteKey(l.Namespace+"/"+l.Name, field, "")
+		if err := s.write(ctx, c, l, field, body, "", 0, now, func(prev tracker.Written) tracker.Write {
+			n := &tracker.Note{Body: body}
+			if prev.Ref != "" {
+				n.Replace = &tracker.Ref{Type: "Comment", ID: prev.Ref}
+			}
+			return tracker.Write{On: on, Kind: "comment", Fields: map[string]string{"subject": "C4: " + cs.Title}, Note: n, Key: key}
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// causeComment is a cause as a tracker comment.
+func causeComment(c api.Cause, jr farm.JobRef, url string) string {
+	attempts := "attempt"
+	if c.Count != 1 {
+		attempts += "s"
+	}
+	b := fmt.Sprintf("C4 cause on %s: %s. %d %s, units %s", jr, c.Title, c.Count, attempts, c.Units)
+	if len(c.Nodes) > 0 {
+		b += ", on " + strings.Join(c.Nodes, ", ")
+	}
+	b += "."
+	if len(c.Did) > 0 {
+		b += " The farm " + strings.Join(c.Did, ", then ") + "."
+	}
+	if c.To != "" {
+		b += " Escalated to " + c.To + "."
+	}
+	return b + " " + url
 }
 
 // trackerUser is the tracker user the Tracker's people map makes person,
