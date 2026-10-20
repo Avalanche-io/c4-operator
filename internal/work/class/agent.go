@@ -14,8 +14,8 @@ import (
 
 func init() { register(agent{}) }
 
-// agent: one unit per member of an agent bundle (proposals/agent-jobs,
-// FIRST-SLICE step 2). A member is a Claude Code session that a runner
+// agent: one unit per member of an agent bundle (docs/agents/c4-agent.md,
+// "Bundles on the farm"). A member is a Claude Code session that a runner
 // resumes by its session ID, so its units checkpoint at every turn and
 // yield at a turn boundary, and the next attempt resumes the same session
 // from the checkpoint its runner reports.

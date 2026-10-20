@@ -81,10 +81,10 @@ func TestLateJobTimeSlices(t *testing.T) {
 	}
 }
 
-// c4-onboarding's evening: a render holding one of two GPU slots would be
-// late on one (about 128 min of work, 75 min to its deadline); a training
-// run that checkpoints holds the other for hours. The training run is
-// asked to yield its slot at its next safe point.
+// An evening on the onboarding farm: a render holding one of two GPU slots
+// would be late on one (about 128 min of work, 75 min to its deadline); a
+// training run that checkpoints holds the other for hours. The training run
+// is asked to yield its slot at its next safe point.
 func TestTrainingYieldsToALateRender(t *testing.T) {
 	render := job("gw010", "show", 59, 59*140.0/3600, 75*time.Minute)
 	render.Pools = []string{"gpu"}
@@ -103,7 +103,7 @@ func TestTrainingYieldsToALateRender(t *testing.T) {
 	}
 }
 
-// c4-onboarding's evening run: the training run is asked to yield for
+// That evening's run: the training run is asked to yield for
 // gw010, and at its safe point the stop holds. Priced on the plan's share
 // (the slot this stop frees), gw010 looks on time and the stop withdrew
 // itself at every safe point; on the one slot it holds without it, 52

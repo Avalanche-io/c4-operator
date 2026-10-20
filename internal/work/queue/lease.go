@@ -73,11 +73,11 @@ func (q *Queue) leaseReady(ctx context.Context, j *c4v1.WorkJob, pool string, no
 }
 
 // grantServes says why a job a tracker submitted for a person (under the
-// person's grant, integrations GAPS 17) may no longer have their lease in
-// pool: the grant is gone, revoked or ended, or does not cover the pool or
-// the job's class. "" for a job submitted otherwise, or while it serves. A
-// unit already running finishes its attempt, as when a lease lapses; the
-// next is not released.
+// person's grant, internal/hud/API.md, Grants) may no longer have their
+// lease in pool: the grant is gone, revoked or ended, or does not cover the
+// pool or the job's class. "" for a job submitted otherwise, or while it
+// serves. A unit already running finishes its attempt, as when a lease
+// lapses; the next is not released.
 func (q *Queue) grantServes(ctx context.Context, j *c4v1.WorkJob, pool string, now time.Time) string {
 	if j.Annotations[c4v1.AnnotationGrant] == "" {
 		return ""

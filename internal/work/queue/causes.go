@@ -1,6 +1,6 @@
 package queue
 
-// Cause groups (integrations GAPS 4). A job's failures and flags, grouped
+// Cause groups (DESIGN.md 10.14, Causes). A job's failures and flags, grouped
 // by a cause the queue has the facts for: a unit's exit (code, the
 // container's reason, the first line of its message), a node that failed
 // the job's units up to its limit, a review's reason, information a brief

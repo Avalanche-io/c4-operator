@@ -1,9 +1,9 @@
 package queue
 
-// The transition log (integrations GAPS 5): every change of a job's
-// status the queue writes, numbered farm-wide in the order the queue
-// wrote them, kept durably, so a client that was away (c4-sync after an
-// outage) reads what it missed, in order, from GET /book?since=<seq>.
+// The transition log (internal/hud/API.md, GET /book?since): every change
+// of a job's status the queue writes, numbered farm-wide in the order the
+// queue wrote them, kept durably, so a client that was away (c4-sync after
+// an outage) reads what it missed, in order, from GET /book?since=<seq>.
 //
 // The queue is the one writer: it is leader-elected and carries out every
 // job control. Each tick it diffs each job's status before and after and

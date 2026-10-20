@@ -14,16 +14,16 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// Questions between units (agent-jobs ASKS.md; Joshua: "the thing
-// answering may be an agent not a human"). A unit that lacks a fact
-// another unit of its job has asks it (c4-unit ask --to unit:<name>); the
-// node daemon relays the unit's questions and answers as pod annotations
-// (AnnotationAsks, AnnotationAnswers), and the queue routes each, as a
-// steering message, to the unit it is for. The answerer is the question's
-// unit, else the job's answerer param. A question is answered at once with
-// cannot when there is no answerer, the answerer has finished, it waits on
-// the asker (a cycle), or the asker has maxAsks (3) questions open. An
-// answer also decides a wait served by the answering unit (server
+// Questions between units (DESIGN.md 10.6, Agents answer agents; Joshua:
+// "the thing answering may be an agent not a human"). A unit that lacks a
+// fact another unit of its job has asks it (c4-unit ask --to unit:<name>);
+// the node daemon relays the unit's questions and answers as pod
+// annotations (AnnotationAsks, AnnotationAnswers), and the queue routes
+// each, as a steering message, to the unit it is for. The answerer is the
+// question's unit, else the job's answerer param. A question is answered at
+// once with cannot when there is no answerer, the answerer has finished, it
+// waits on the asker (a cycle), or the asker has maxAsks (3) questions
+// open. An answer also decides a wait served by the answering unit (server
 // unit:<name>): a block that gave up its slot to wait for it resumes with
 // it, and a wait unit of the graph completes. Every question and answer is
 // in the book.

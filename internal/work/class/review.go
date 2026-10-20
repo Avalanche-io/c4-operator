@@ -7,8 +7,9 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// ReviewName is the job's final review unit (spec.review, integrations
-// GAPS 7). No expansion document may name it, so nothing waits on it.
+// ReviewName is the job's final review unit (spec.review, DESIGN.md
+// 10.6, The job's review). No expansion document may name it, so nothing
+// waits on it.
 const ReviewName = "@review"
 
 // Review returns the index of the job's final review unit.

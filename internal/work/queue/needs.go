@@ -15,7 +15,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
-// Missing information (agent-jobs ASKS.md; Joshua: "something that
+// Missing information (DESIGN.md 10.6; Joshua: "something that
 // requires higher level information is a work stopping error condition").
 // A unit whose brief lacks information only a person could give stops with
 // NeedsInformation: its container exits NeedsExitCode with the information

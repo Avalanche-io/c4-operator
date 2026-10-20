@@ -13,7 +13,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// The job's measure of done (PRIMITIVES Q12; LLM-OR-PROCEDURE 7.2 item 3).
+// The job's measure of done (DESIGN.md 10.6).
 // A job declares what it counts (spec.measure: "rules sited", of 379), and
 // a unit, usually a procedural one re-run after each merge, reports a
 // reading in .c4/measure.json (c4-unit measure):

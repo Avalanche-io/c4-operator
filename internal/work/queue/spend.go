@@ -16,14 +16,14 @@ import (
 	"github.com/Avalanche-io/c4-operator/work/tokens"
 )
 
-// Spend, procedural and model (LLM-OR-PROCEDURE 6.2). Every unit is
-// a procedure's or a model's (class.DoesOf: the document's reasoning.does, else the
-// class's; agent members are model units). Each ended attempt adds its
-// slot time, priced at its pool's rate, to its unit; a model unit's
-// attempt also adds the tokens it reported in .c4/usage.json (c4-unit
-// usage; stored at capture as c4.avalanche.io/output-usage), per model,
-// with a cost when whoever wrote it knows the price, and where the price
-// came from:
+// Spend, procedural and model (DESIGN.md 10.6, Procedural and model units).
+// Every unit is a procedure's or a model's (class.DoesOf: the document's
+// reasoning.does, else the class's; agent members are model units). Each
+// ended attempt adds its slot time, priced at its pool's rate, to its unit;
+// a model unit's attempt also adds the tokens it reported in .c4/usage.json
+// (c4-unit usage; stored at capture as c4.avalanche.io/output-usage), per
+// model, with a cost when whoever wrote it knows the price, and where the
+// price came from:
 //
 //	{"models": [{"model": "...", "inputTokens": 120000, "outputTokens": 8000,
 //	             "cacheReadTokens": 90000, "costUSD": 1.92}],
@@ -315,10 +315,10 @@ func (m *jobMem) loadSpend(st *c4v1.WorkJobStatus) {
 	}
 }
 
-// Model work a procedure could do (LLM-OR-PROCEDURE 6.1: "an LLM unit
-// should never be asked to produce a fact a procedural unit can
-// compute"). A light report, not a decision: a model unit whose same
-// computation (process and input views) ran at least minRepeats times and
+// Model work a procedure could do (DESIGN.md 10.6): a model unit should
+// never be asked to produce a fact a procedural unit can compute. A light
+// report, not a decision: a model unit whose same computation (process and
+// input views) ran at least minRepeats times and
 // wrote the same bytes every time behaved as a pure function of its
 // inputs, which a procedure could compute, cheaper and checkably. It is
 // listed with the evidence; reworking the job is a person's call.

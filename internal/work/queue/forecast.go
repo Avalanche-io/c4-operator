@@ -1,14 +1,14 @@
 package queue
 
-// Forecast jobs (integrations GAPS 9). A job with spec.forecast exists
-// only as a forecast: work a tracker expects (a shot not yet turned over,
-// its bid days) that the farm should plan for. The queue observes and
-// estimates it but never releases it: it is left out of the live
-// decision, so it creates no pods, reserves no quota or fair share, moves
-// no real job's ETA and buys no burst capacity; the release loop refuses
-// one besides. Nothing a person or a unit does to a real job applies to
-// it (no reuse, no review, no waits), and nothing suggests its deadline,
-// learns from it or seals it.
+// Forecast jobs (DESIGN.md 10.12, Forecast jobs). A job with spec.forecast
+// exists only as a forecast: work a tracker expects (a shot not yet turned
+// over, its bid days) that the farm should plan for. The queue observes and
+// estimates it but never releases it: it is left out of the live decision,
+// so it creates no pods, reserves no quota or fair share, moves no real
+// job's ETA and buys no burst capacity; the release loop refuses one
+// besides. Nothing a person or a unit does to a real job applies to it (no
+// reuse, no review, no waits), and nothing suggests its deadline, learns
+// from it or seals it.
 //
 // After the live pass, at most every forecastEvery or when the forecast
 // jobs change, a forecast pass plans the farm again with them added, as

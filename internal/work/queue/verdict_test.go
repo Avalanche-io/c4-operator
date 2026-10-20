@@ -64,7 +64,7 @@ func review(t *testing.T, ns, name string, idx int) c4v1.WorkReview {
 	return r
 }
 
-// Render QC, the lead example (PRIMITIVES section 5): a QC unit after four
+// Render QC, the lead example of a review: a QC unit after four
 // frames reworks two (one on other nodes with more memory), escalates one
 // and accepts one with a note. The reworked frames run again with the
 // verdict's changes, the QC unit runs again after them without waiting on

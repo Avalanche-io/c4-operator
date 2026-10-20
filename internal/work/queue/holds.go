@@ -8,14 +8,14 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
-// Holds (PRIMITIVES Q8, Q9). A unit whose claims (class.Claim: its holds
-// and claims) conflict with a unit of its job that is running, or whose
-// output is still being captured, is locked: it waits, "locked by" the
-// holder, whatever its other readiness. Units released in one tick are
-// checked against each other in the policy's order, so two conflicting
-// units never start together. Each holder's waiting line, in dispatch
-// order, is in status (holds), and units that must take turns form a
-// chain on the critical path.
+// Holds (DESIGN.md 10.6, Holds and claims). A unit whose claims
+// (class.Claim: its holds and claims) conflict with a unit of its job that
+// is running, or whose output is still being captured, is locked: it waits,
+// "locked by" the holder, whatever its other readiness. Units released in
+// one tick are checked against each other in the policy's order, so two
+// conflicting units never start together. Each holder's waiting line, in
+// dispatch order, is in status (holds), and units that must take turns form
+// a chain on the critical path.
 
 // holdsKept bounds status.holds.
 const holdsKept = 32

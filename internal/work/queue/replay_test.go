@@ -16,11 +16,10 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 )
 
-// The library-port run (agent-jobs, 2026-10-19: proposals/agent-jobs/
-// RUN-2026-10-19-second-round.md), replayed through the queue on one
-// slot: its expansion documents and verdicts (testdata/library-port, the
-// block prompts left out) and each block's attempts as they ran. The
-// queue's ETA is sampled every minute.
+// The library-port run (an agent run of 2026-10-19), replayed through the
+// queue on one slot: its expansion documents and verdicts
+// (testdata/library-port, the block prompts left out) and each block's
+// attempts as they ran. The queue's ETA is sampled every minute.
 var portAttempts = map[string][]float64{ // seconds
 	"plan": {22}, "scaffold": {32}, "survey": {53},
 	"port/bisect": {101, 69, 53}, "port/colorsys": {164, 95}, "port/fnmatch": {284, 90},

@@ -8,7 +8,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// Rounds: a bounded loop over a subgraph (agent-catalog G-rounds). A
+// Rounds: a bounded loop over a subgraph (DESIGN.md 10.6, Rounds). A
 // generator that declares rounds: {max, until?} runs its loop as rounds
 // of siblings, not as nesting, so maxExpandDepth limits nesting only and a
 // fifty-round loop is one level deep:

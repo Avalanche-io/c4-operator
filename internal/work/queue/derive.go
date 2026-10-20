@@ -18,7 +18,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/work/process"
 )
 
-// Derivations (work/process; proposal eta-deadlines section 13). Every
+// Derivations (work/process; DESIGN.md 10.13, Derivations). Every
 // unit that succeeds cleanly is a derivation: its process (images,
 // command, parameters, platform) and the views it mounted, giving the
 // view it wrote, with what it cost. The queue keeps one book per project
@@ -385,9 +385,9 @@ func (q *Queue) derivationStatus(v *view) *c4v1.WorkDerivation {
 
 // RecomputeCost is what recomputing an output would cost in its project,
 // from the record: for the scheduler's choice between moving an output,
-// recomputing it, and reusing an identical one (proposals/THREADS.md,
-// "Recompute is a transfer channel"). It reports false when the output's
-// derivation is not recorded. Reuse is withheld for the share of
+// recomputing it, and reusing an identical one: recomputing is one more
+// way to bring an output to where it is needed. It reports false when the
+// output's derivation is not recorded. Reuse is withheld for the share of
 // opportunities sampled for verification; u is the caller's uniform draw.
 func (q *Queue) RecomputeCost(project, output string, u float64) (process.Key, []process.Input, process.Cost, bool) {
 	b := q.bookOf(project)

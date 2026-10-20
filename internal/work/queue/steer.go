@@ -15,7 +15,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// Steering (agent-catalog G-steer): a message to a unit while it runs,
+// Steering (DESIGN.md 10.6): a message to a unit while it runs,
 // without ending it. A person sends it through the HUD or MCP (signed, as
 // a request in AnnotationSteer); the queue numbers it for its unit and
 // puts every message the unit has not read on the unit's pod

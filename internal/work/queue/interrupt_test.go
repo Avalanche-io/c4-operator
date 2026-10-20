@@ -157,8 +157,8 @@ func TestYieldIsNotAnAttempt(t *testing.T) {
 
 // A deleted job's unit pods, being deleted with it, are let go: there is
 // no job left to record how they ended, and the finalizer would hold them
-// terminating (agent-jobs' runs: removed by hand three times). Its other
-// pods are untouched until they are deleted.
+// terminating (in early agent runs they were removed by hand three times).
+// Its other pods are untouched until they are deleted.
 func TestDeletedJobsPodsAreReleased(t *testing.T) {
 	ns, q, now := farm(t, "cpu", 2, 2)
 	ctx := context.Background()

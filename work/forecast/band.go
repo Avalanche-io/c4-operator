@@ -52,8 +52,8 @@ func (b Band) Width(start time.Time) float64 {
 // the critical path t_path added as the last wave: under Graham's bound
 // (sched's ETAs since its tail hybrid) that share is 1 - k/C, k the job's
 // slots per unit and C its pool group's planning capacity (Tail). As the
-// finish shown to a person the whole tail runs late (eta-deadlines
-// evidence F9: W/P + t_path was 26% late as a median, W/P + t_path/2
+// finish shown to a person the whole tail runs late (in synthetic
+// evidence W/P + t_path was 26% late as a median, W/P + t_path/2
 // unbiased). Display therefore:
 //
 //  1. places each calibrated percentile Wq on the line through (W, ETA50)

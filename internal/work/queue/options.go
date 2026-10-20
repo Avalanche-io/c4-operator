@@ -11,7 +11,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
-// Deadline options (proposal eta-deadlines section 2): for a job and a
+// Deadline options (DESIGN.md 10.7): for a job and a
 // candidate deadline D, what D would take. Each answer comes from what-if
 // runs of the policy on a copy of the queue's last snapshot, the same way
 // the achievable suggestion is found:

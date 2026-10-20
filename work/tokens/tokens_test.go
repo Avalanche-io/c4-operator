@@ -6,7 +6,7 @@ import (
 )
 
 func TestWeighted(t *testing.T) {
-	// The session agent-jobs measured: cache reads dwarf the rest.
+	// A measured agent session: cache reads dwarf the rest.
 	c := Counts{Input: 2112, Output: 1060000, CacheRead: 514000000, CacheWrite: 9233}
 	w := Weighted("claude-sonnet-5-5", c)
 	want := 2112 + 5*1060000.0 + 1.25*9233 + 0.1*514000000

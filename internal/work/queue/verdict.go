@@ -23,7 +23,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
-// Verdicts (PRIMITIVES Q4, Q5). A review unit judges the units it runs
+// Verdicts (DESIGN.md 10.6). A review unit judges the units it runs
 // after, and writes its judgment as .c4/verdict.json; the node daemon
 // stores it at capture (c4.avalanche.io/output-verdict). When the review
 // unit succeeds the queue carries the verdict out, once for that pod, and
@@ -750,21 +750,21 @@ func reviewStatus(m *jobMem) map[string]c4v1.WorkReview {
 	return out
 }
 
-// Expected rework (PRIMITIVES Q5: the ETA prices rework before it
-// happens). A review is a unit its document marks (params.review), or one
-// whose key has written verdicts in the project (rework.go: history across
-// jobs, by class and key) or in this job. Its rework rate is the units its
-// key reworked over the units it judged, shrunk toward a prior (the
-// review unit's reworkRate param from its document, else the job's, else
-// reworkDefault) with a pseudo-count of reworkShrink, so p50 and p90 carry
-// rework from the start. A review that has not run yet adds, for each unit
-// it will judge, the further passes it may send back: r, r²... up to
-// maxPasses less the unit's passes so far (once it has judged, only for
-// the units it sent back), each as tentative work
-// (estimate.Unit.Exists) at what a rerun of that key costs (reworkFrac:
-// a rework resumes from the unit's last output, so it is priced as a
-// resumed unit); and its own rerun, with the chance that it reworks
-// anything. The same chains lengthen the critical path.
+// Expected rework (DESIGN.md 10.6, Expected rework is priced from the
+// start: the ETA prices rework before it happens). A review is a unit its
+// document marks (params.review), or one whose key has written verdicts in
+// the project (rework.go: history across jobs, by class and key) or in this
+// job. Its rework rate is the units its key reworked over the units it
+// judged, shrunk toward a prior (the review unit's reworkRate param from
+// its document, else the job's, else reworkDefault) with a pseudo-count of
+// reworkShrink, so p50 and p90 carry rework from the start. A review that
+// has not run yet adds, for each unit it will judge, the further passes it
+// may send back: r, r²... up to maxPasses less the unit's passes so far
+// (once it has judged, only for the units it sent back), each as tentative
+// work (estimate.Unit.Exists) at what a rerun of that key costs
+// (reworkFrac: a rework resumes from the unit's last output, so it is
+// priced as a resumed unit); and its own rerun, with the chance that it
+// reworks anything. The same chains lengthen the critical path.
 const reworkShrink = 2.0
 
 // expectedRework is the tentative work a job's pending reviews may send

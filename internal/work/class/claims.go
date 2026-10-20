@@ -6,9 +6,9 @@ import (
 	"strings"
 )
 
-// Claims (PRIMITIVES Q8): what a unit will write, a path or a named
-// resource, with a mode. The queue never runs two units of a job whose
-// claims conflict: Ra's P-21 rule, that lanes sharing a file run in
+// Claims (DESIGN.md 10.6, Holds and claims): what a unit will write, a path
+// or a named resource, with a mode. The queue never runs two units of a job
+// whose claims conflict: Ra's P-21 rule, that lanes sharing a file run in
 // sequence, as a scheduling fact rather than a lead's chore.
 //
 // A claim on a path covers everything under it: "src/net/" and

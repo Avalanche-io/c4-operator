@@ -10,7 +10,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// Gates (PRIMITIVES Q9; LLM-OR-PROCEDURE 7.2 item 4). A gate is a
+// Gates (DESIGN.md 10.6). A gate is a
 // resource of one slot shared by every job in a namespace: a project's
 // merge gate, its signing step, its one DI suite. A unit of kind gate
 // names it (class.Unit.Gate). Units ready to pass a gate queue first come,

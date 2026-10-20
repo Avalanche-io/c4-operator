@@ -30,8 +30,9 @@
 // process ID.
 //
 // Experimental: the record format and the class rules will change with
-// C4's derivation-record design, which this is helping to shape
-// (proposals/eta-deadlines/DERIVATION-LESSONS.md).
+// C4's derivation-record design (the c4 repository's
+// design/derivation-records.md); what this package records helps to shape
+// that design.
 //
 // The package is pure. The queue records every succeeded unit
 // (Book.Record); the scheduler asks the Book.

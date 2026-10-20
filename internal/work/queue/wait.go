@@ -16,7 +16,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
-// Waits (PRIMITIVES Q6). A wait is a unit served by something other than a
+// Waits (DESIGN.md 10.6). A wait is a unit served by something other than a
 // slot: a person, an outside party, or a clock. It creates no pod and holds
 // no capacity. Once every unit it runs after is done it is open; a person's
 // or a party's wait completes on a signed decision (AnnotationDecide,

@@ -73,7 +73,7 @@ type Unit struct {
 	// resource of one slot shared by the jobs of a namespace, taken first
 	// come, first served (the queue's gates.go).
 	Gate string
-	// Wait makes the unit a wait (PRIMITIVES Q6): it holds no slot and
+	// Wait makes the unit a wait (DESIGN.md 10.6, Waits): it holds no slot and
 	// creates no pod; it completes on a signed decision, or at its time.
 	Wait *Wait
 	// Rounds makes a generator one round of a bounded loop (rounds.go).
@@ -178,9 +178,10 @@ type Doer interface {
 	UnitDoes() string
 }
 
-// Reasoning is what a unit reasons with (LLM-OR-PROCEDURE 6.2): Does is
-// model or procedure; Model the model, Effort its effort level (low,
-// medium, high, xhigh, max), Tools the tool's name. All optional.
+// Reasoning is what a unit reasons with (DESIGN.md 10.6, Procedural and
+// model units): Does is model or procedure; Model the model, Effort its
+// effort level (low, medium, high, xhigh, max), Tools the tool's name. All
+// optional.
 type Reasoning struct {
 	Does   string `json:"does,omitempty"`
 	Model  string `json:"model,omitempty"`

@@ -8,19 +8,18 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// Shot history (proposal eta-deadlines section 1.3). The best prior for a
-// render is the previous version of the same shot: in the stage 1
-// evidence its per-frame durations put the estimate at submission within
-// 12% of the truth, against 65% for farm-wide history. The queue keeps,
-// per project, shot, stage and job type (labels LabelStage and
-// LabelJobType), class and unit key (render pass), the durations of the
-// most recently finished job of that shot by axis value (frame), and
-// gives them to the next job of the same shot and stage as a profile
-// (estimate.SetProfile). The profiles come from WorkJobs the queue
-// already sees, so they survive a restart without storage of their own;
-// a deleted job's profile lasts until the queue restarts. History never
-// crosses projects, and a shot's depth pass is never its lighting's
-// previous version.
+// Shot history (DESIGN.md 10.8, The previous version of the shot). The best
+// prior for a render is the previous version of the same shot: in the stage
+// 1 evidence its per-frame durations put the estimate at submission within
+// 12% of the truth, against 65% for farm-wide history. The queue keeps, per
+// project, shot, stage and job type (labels LabelStage and LabelJobType),
+// class and unit key (render pass), the durations of the most recently
+// finished job of that shot by axis value (frame), and gives them to the
+// next job of the same shot and stage as a profile (estimate.SetProfile).
+// The profiles come from WorkJobs the queue already sees, so they survive a
+// restart without storage of their own; a deleted job's profile lasts until
+// the queue restarts. History never crosses projects, and a shot's depth
+// pass is never its lighting's previous version.
 
 // maxProfiles bounds the profiles kept; the oldest go first.
 const maxProfiles = 10000

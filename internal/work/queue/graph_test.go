@@ -483,7 +483,7 @@ func TestUnpricedCacheReadsAreWeighted(t *testing.T) {
 	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "lane", "reasoning": {"does": "model"}}, {"name": "other", "reasoning": {"does": "model"}}]}`)
 	finish(t, podOfUnit(t, ns, "agent", 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
 	tick(t, q)
-	// agent-jobs' measured session, on Sonnet 5.5 at $2 a million input.
+	// A measured agent session, on Sonnet 5.5 at $2 a million input.
 	usage := putDoc(t, st, `{"models": [{"model": "claude-sonnet-5-5", "inputTokens": 2112, "outputTokens": 1060000,
 		"cacheReadTokens": 514000000, "cacheWriteTokens": 9233}]}`)
 	finish(t, podOfUnit(t, ns, "agent", 1), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputUsage: usage})
