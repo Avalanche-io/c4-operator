@@ -61,10 +61,11 @@ a renewal reaches the running session.
 ```yaml
 template:
   spec:
+    securityContext: {runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: {type: RuntimeDefault}}
     containers:
     - name: block
-      image: c4-block
-      command: [c4-agent, block-pod]
+      image: c4-block:dev   # images/block, make image-block
+      securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
       env:
       - {name: CLAUDE_CONFIG_DIR, value: /claude}
       - {name: C4_LEASE_DIR, value: /etc/c4/lease}

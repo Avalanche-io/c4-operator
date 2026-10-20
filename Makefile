@@ -16,7 +16,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 comma := ,
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync sync-yaml demo-dailies demo-github install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -85,6 +85,15 @@ image-sync:
 	@mkdir -p bin/sync-context/linux/$(ARCH)
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o bin/sync-context/linux/$(ARCH)/c4-sync ./cmd/c4-sync
 	docker build -f Dockerfile.c4-sync --build-arg TARGETPLATFORM=linux/$(ARCH) -t $(SYNC_IMG) bin/sync-context
+
+# A block's image for this machine's architecture (images/block): Claude
+# Code, bash and git, with linux c4-agent and c4-unit. BLOCK_IMG names it.
+BLOCK_IMG ?= c4-block:dev
+image-block:
+	@mkdir -p bin/block-context
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o bin/block-context/c4-agent ./cmd/c4-agent
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o bin/block-context/c4-unit ./cmd/c4-unit
+	docker build -f images/block/Dockerfile -t $(BLOCK_IMG) bin/block-context
 
 # c4-sync's install manifest of a release: its two CRDs and config/sync,
 # with the release's c4-sync image.

@@ -377,7 +377,22 @@ one live copy only. On a host the runner stores the view and names it in
 
 **The sign-in in a pod** comes from a credential lease (credential-leases.md). `$C4_LEASE_DIR` names the mount, and `block-pod` links the pod's Claude Code store to it.
 
-**The image** is Claude Code with bash and git, plus c4-agent and c4-unit for the Stop hook. It holds no credential.
+**The image** is `images/block/Dockerfile`, built with `make image-block` (`BLOCK_IMG`, default `c4-block:dev`): Claude Code with bash and git, plus c4-agent and c4-unit for the Stop hook. It holds no credential. It runs as uid 65532 and fits PodSecurity `restricted`:
+
+```yaml
+securityContext:              # the pod's
+  runAsNonRoot: true
+  runAsUser: 65532
+  runAsGroup: 65532
+  fsGroup: 65532
+  seccompProfile: {type: RuntimeDefault}
+containers:
+- name: block
+  image: c4-block:dev
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities: {drop: [ALL]}
+```
 
 A run on the e2e cluster moved one session from a host to a pod and back, at safe points:
 - a ten-part block;
