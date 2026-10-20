@@ -225,6 +225,18 @@ func recordView(ctx context.Context, c *Client, project string, v *view.View) er
 // Submit plans a job from a type and an asset, shows the plan, and on
 // confirmation uploads what the farm lacks and submits it.
 func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitResponse, error) {
+	// a tool published to the project runs as a submission; the farm's
+	// prebuilt types below are the fallback for a farm without tools
+	if a.Template == "" {
+		t, err := LookupTool(ctx, c, a.Project, a.Type, "")
+		switch {
+		case err == nil:
+			_, err := SubmitTool(ctx, c, o, t, a)
+			return nil, err
+		case !notFound(err):
+			return nil, err
+		}
+	}
 	var spec c4v1.WorkJobSpec
 	var t JobType
 	switch {

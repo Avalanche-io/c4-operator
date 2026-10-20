@@ -3,6 +3,8 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -112,5 +114,21 @@ func TestFarmCLIAgainstTheHUD(t *testing.T) {
 	farmcli.Get(context.Background(), c, o, farmcli.GetArgs{Project: "show-a", Ref: mat.Spec.Source.ID, Paths: []string{"sm0140/tex"}, Dir: home})
 	if !strings.Contains(out.String(), "0 files · 0 B · every ID checked · 1 already here") {
 		t.Fatalf("second get: %s", out.String())
+	}
+}
+
+// An API call the HUD lacks answers 404 in JSON, not the web page, so
+// `c4 farm submit TYPE` on a farm without tools falls back to the types.
+func TestUnknownAPICallIsJSON404(t *testing.T) {
+	ts := httptest.NewServer(submitFarm(t).Handler())
+	defer ts.Close()
+	resp, err := ts.Client().Get(ts.URL + "/api/v1/no-such-call/x?as=artist")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var body map[string]string
+	if resp.StatusCode != http.StatusNotFound || json.NewDecoder(resp.Body).Decode(&body) != nil || body["error"] == "" {
+		t.Fatalf("%d %v", resp.StatusCode, body)
 	}
 }

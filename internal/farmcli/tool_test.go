@@ -224,7 +224,9 @@ func (h *toolsHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if h.polls >= 2 {
 			state = "ok"
 		}
-		json.NewEncoder(w).Encode(PublishedTool{Name: "proxies", Version: "v4", Publish: &PublishState{Job: "saltmarsh/proxies-test-v4", State: state, Seconds: 6}})
+		json.NewEncoder(w).Encode(PublishedTool{Name: "proxies", Version: "v4", Kind: "frames", Title: "Proxies and previews",
+			Params:  []ToolParam{{Name: "plates", Type: "PATH", DataFlow: "IN"}, {Name: "width", Type: "INT", Default: 960}},
+			Publish: &PublishState{Job: "saltmarsh/proxies-test-v4", State: state, Seconds: 6}})
 	case r.Method == http.MethodPost && p == "/tools/saltmarsh":
 		var req map[string]any
 		json.NewDecoder(r.Body).Decode(&req)
@@ -307,5 +309,38 @@ func TestToolsPublishAndSubmitAgainstTheHUD(t *testing.T) {
 	}
 	if _, err := SubmitFile(ctx, c, Out{W: &out}, SubmitFileArgs{Path: writeTool(t, proxiesYAML) + "/tool.yaml"}); err == nil {
 		t.Error("a tool.yaml was sent as a submission")
+	}
+}
+
+func TestSubmitTypedOverAPublishedTool(t *testing.T) {
+	hud := &toolsHUD{}
+	srv := httptest.NewServer(hud)
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "plates"), 0o755)
+	os.WriteFile(filepath.Join(dir, "plates", "sm0140.1001.exr"), []byte("plate"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".c4project"), nil, 0o644)
+	var out bytes.Buffer
+	a := SubmitArgs{Type: "proxies", Asset: filepath.Join(dir, "plates", "sm0140.$F4.exr"), Project: "saltmarsh", Deadline: "+3h",
+		Options: Options{Frames: "1001-1048", Set: map[string]string{"width": "480"}}, Yes: true}
+	if _, err := Submit(context.Background(), c, Out{W: &out}, a); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if len(hud.submissions) != 2 {
+		t.Fatalf("submissions %v", hud.submissions)
+	}
+	doc := hud.submissions[0]["submission"].(map[string]any)
+	job := doc["jobs"].(map[string]any)["proxies"].(map[string]any)
+	with := job["with"].(map[string]any)
+	if doc["shot"] != "sm0140" || doc["due"] != "+3h" || job["tool"] != "proxies" || job["frames"] != "1001-1048" ||
+		with["plates"] != "plates/sm0140.$F4.exr" || with["width"] != "480" || !strings.HasPrefix(doc["tree"].(string), "c4") {
+		t.Errorf("submission %v", doc)
+	}
+	for _, bad := range []SubmitArgs{{Type: "proxies", Asset: a.Asset, Project: "saltmarsh", Options: Options{Set: map[string]string{"colour": "x"}}},
+		{Type: "proxies", Asset: a.Asset, Project: "saltmarsh", Options: Options{Image: "mine:dev"}}} {
+		if _, err := Submit(context.Background(), c, Out{W: io.Discard}, bad); err == nil {
+			t.Errorf("%+v accepted", bad.Options)
+		}
 	}
 }

@@ -8,7 +8,9 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -291,6 +293,13 @@ func SubmitFile(ctx context.Context, c *Client, o Out, a SubmitFileArgs) (*submi
 	if doc["c4"] != "submit/1" {
 		return nil, fmt.Errorf("%s: c4 is %v; a submission says c4: submit/1", a.Path, doc["c4"])
 	}
+	return submitDoc(ctx, c, o, doc, filepath.Dir(a.Path), a)
+}
+
+// submitDoc sends a submission document: a folder tree (relative to base)
+// is uploaded and named by its ID, the farm plans it, and on confirmation
+// it is submitted.
+func submitDoc(ctx context.Context, c *Client, o Out, doc map[string]any, base string, a SubmitFileArgs) (*submissionResponse, error) {
 	project, _ := doc["project"].(string)
 	if project == "" {
 		project = a.Project
@@ -302,7 +311,7 @@ func SubmitFile(ctx context.Context, c *Client, o Out, a SubmitFileArgs) (*submi
 	if tree, ok := doc["tree"].(string); ok && localTree(tree) {
 		dir := tree
 		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(filepath.Dir(a.Path), dir)
+			dir = filepath.Join(base, dir)
 		}
 		id, sent, err := putTree(ctx, c, project, dir)
 		if err != nil {
@@ -402,4 +411,93 @@ func doChecked(ctx context.Context, c *Client, method, path string, in, out any)
 		return nil
 	}
 	return err
+}
+
+// SubmitTool is `c4 farm submit TOOL ASSET` over a published tool: a
+// submission of one job, whose tree is the asset's folder (as FindRoot
+// finds it) and whose first input path parameter is the asset.
+func SubmitTool(ctx context.Context, c *Client, o Out, t *PublishedTool, a SubmitArgs) (*submissionResponse, error) {
+	switch {
+	case a.Name != "":
+		return nil, errors.New("--name: a tool's job is named <shot>-<stage>-vNNN; set --shot or --stage instead")
+	case len(a.After) > 0:
+		return nil, errors.New("--after: write a submission file, whose jobs follow each other with after:")
+	case a.Options.Image != "":
+		return nil, errors.New("--image: a tool runs the image it was published with; publish a new version to change it")
+	}
+	if a.Asset == "" {
+		return nil, fmt.Errorf("give the asset %s reads: a file or folder on this machine", t.Name)
+	}
+	// a frame sequence (sm0140.$F4.exr) is no file: its folder is found,
+	// and the pattern is the parameter
+	target, pattern := a.Asset, ""
+	if _, err := os.Stat(a.Asset); err != nil && frameToken.MatchString(filepath.Base(a.Asset)) {
+		target, pattern = filepath.Dir(a.Asset), filepath.Base(a.Asset)
+	}
+	root, rel, err := FindRoot(target, a.Root)
+	if err != nil {
+		return nil, err
+	}
+	if pattern != "" {
+		rel = path.Join(filepath.ToSlash(rel), pattern)
+	}
+	with := map[string]any{}
+	known := map[string]bool{}
+	asset := ""
+	for _, p := range t.Params {
+		known[p.Name] = true
+		if asset == "" && p.Type == "PATH" && p.DataFlow != "OUT" {
+			asset = p.Name
+		}
+	}
+	if asset == "" {
+		return nil, fmt.Errorf("%s takes no path, so it has nothing to do with %s", t.Name, a.Asset)
+	}
+	with[asset] = filepath.ToSlash(rel)
+	for k, v := range a.Options.Set {
+		if !known[k] {
+			return nil, fmt.Errorf("%s has no parameter %q (c4 farm tool show %s lists them)", t.Name, k, t.Name)
+		}
+		with[k] = v
+	}
+	if r := a.Options.Renderer; r != "" {
+		if !known["renderer"] {
+			return nil, fmt.Errorf("--renderer: %s takes no renderer", t.Name)
+		}
+		with["renderer"] = strings.ToLower(r)
+	}
+	key := a.Stage
+	if key == "" {
+		key = t.Name
+	}
+	job := map[string]any{"tool": t.Name, "with": with}
+	if a.Options.Frames != "" {
+		job["frames"] = a.Options.Frames
+	}
+	if len(a.Options.Pools) > 0 {
+		job["pools"] = a.Options.Pools
+	}
+	shot := a.Shot
+	if shot == "" && rel != "." {
+		shot = strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
+		shot, _, _ = strings.Cut(shot, ".") // sm0140.$F4.exr names the shot sm0140
+	}
+	doc := map[string]any{"c4": "submit/1", "project": a.Project, "tree": root, "jobs": map[string]any{key: job}}
+	if shot != "" {
+		doc["shot"] = shot
+	}
+	if a.Deadline != "" {
+		doc["due"] = a.Deadline
+	}
+	return submitDoc(ctx, c, o, doc, "", SubmitFileArgs{Project: a.Project, DryRun: a.DryRun, Yes: a.Yes})
+}
+
+// frameToken is where a sequence path puts the frame number: $F4, <F4>,
+// %04d or #, the forms husk and Houdini accept.
+var frameToken = regexp.MustCompile(`\$F\d|<F\d>|%0\dd|#`)
+
+// notFound is the farm answering 404: no such tool, or a farm without tools.
+func notFound(err error) bool {
+	var ae *APIError
+	return errors.As(err, &ae) && ae.Status == http.StatusNotFound
 }

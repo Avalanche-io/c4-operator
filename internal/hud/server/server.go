@@ -190,6 +190,13 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/trackers", s.handleTrackers)
 	mux.HandleFunc("GET /api/v1/held", s.handleHeld)
 	mux.HandleFunc("POST /api/v1/held/{ns}/{link}/{field}", s.handleConfirm)
+	// an API path with no route is a 404 in JSON, never the web page, so a
+	// client can tell "no such call" from an answer
+	for _, m := range []string{"GET", "POST", "PUT", "PATCH", "DELETE"} { // GET serves HEAD too
+		mux.HandleFunc(m+" /api/", func(w http.ResponseWriter, r *http.Request) {
+			fail(w, http.StatusNotFound, "no API call %s %s", r.Method, r.URL.Path)
+		})
+	}
 	files := http.FileServer(http.FS(s.Web))
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
