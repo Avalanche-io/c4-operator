@@ -18,6 +18,7 @@ import (
 	"github.com/Avalanche-io/c4"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/needs"
 )
 
 // Blocks: the builder driver (proposals agent-jobs 10.14 step 4). A plan
@@ -241,7 +242,12 @@ func reworkPrompt(p *corev1.Pod, u UnitDirs) string {
 	if ids := strings.TrimSpace(podEnv(p, "C4_ANSWER_ONLY")); ids != "" {
 		return answerOnlyPrompt(ids, u)
 	}
+	if recheck(p) {
+		return recheckPrompt(p, u)
+	}
 	if s := suppliedText(p); s != "" {
+		b.WriteString(s)
+	} else if s := withdrawnText(p); s != "" {
 		b.WriteString(s)
 	} else if why := strings.TrimSpace(podEnv(p, EnvBlockRework)); why != "" {
 		fmt.Fprintf(&b, "A review sent your block back. It asks:\n%s\n\nFix that, and only that.\n\n", why)
@@ -267,7 +273,7 @@ func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n")
 	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note (to withdraw one, write the file empty).\n")
 	b.WriteString(`- If you lack a fact another unit of this job has (the plan's lead, a peer's interface, a reviewer's criterion), ask it: write ask.json in that .c4/ directory, {"to": "unit:<its name>", "ask": "the question, on its own"} (without "to" it goes to the job's answerer), and end your turn. You keep your place and are woken with the answer. Questions to you arrive as messages, with how to answer them.` + "\n")
-	b.WriteString(`- Act on your brief: decide everything it leaves to you, and never ask for confirmation of what it says. If it lacks information only a person could give, do not guess: write needs.json in that .c4/ directory, {"needs": "exactly what is missing", "why": "why the brief does not settle it"}, and end your turn. That stops this block as an error the pipeline must fix; once the information is supplied, you resume with it.` + "\n\n")
+	b.WriteString(`- Act on your brief: decide everything it leaves to you, and never ask for confirmation of what it says. If it lacks information only a person could give, do not guess: write needs.json in that .c4/ directory, {"needs": "exactly what is missing", "why": "why the brief does not settle it", "about": ["unit:<a peer whose work may settle it>", "path:<where in the tree it would land>"]} (about is optional), and end your turn. That stops this block as an error the pipeline must fix; once the information is supplied, you resume with it, and when work it is about lands you are asked whether it still applies.` + "\n\n")
 	return b.String()
 }
 
@@ -378,8 +384,9 @@ func takeNeeds(u UnitDirs) (msg string, ok bool, err error) {
 	}
 	os.Remove(path)
 	var n struct {
-		Needs string `json:"needs"`
-		Why   string `json:"why,omitempty"`
+		Needs string   `json:"needs"`
+		Why   string   `json:"why,omitempty"`
+		About []string `json:"about,omitempty"`
 	}
 	dec := json.NewDecoder(strings.NewReader(string(b)))
 	dec.DisallowUnknownFields()
@@ -389,11 +396,11 @@ func takeNeeds(u UnitDirs) (msg string, ok bool, err error) {
 	if strings.TrimSpace(n.Needs) == "" {
 		return "", true, errors.New("needs.json: nothing in needs")
 	}
-	msg = strings.TrimSpace(n.Needs)
-	if why := strings.TrimSpace(n.Why); why != "" {
-		msg += "\nwhy: " + why
+	about, err := needs.About(n.About)
+	if err != nil {
+		return "", true, fmt.Errorf("needs.json: %v", err)
 	}
-	return msg, true, nil
+	return needs.Message(n.Needs, n.Why, about), true, nil
 }
 
 // answerOnlyPrompt wakes a finished block to answer questions other units

@@ -330,10 +330,16 @@ What the host needs:
 A block acts on its brief. It decides everything the brief leaves to it,
 and never asks for confirmation of what the brief says, as a renderer
 renders the light it was given.
-- **Information only a person could give.** If the brief lacks it, the block writes `.c4/needs.json` (`{"needs": "what is missing", "why": "why the brief does not settle it"}`) and ends its turn. That is a work-stopping error, not a question:
+- **Information only a person could give.** If the brief lacks it, the block writes `.c4/needs.json` (`{"needs": "what is missing", "why": "why the brief does not settle it", "about": ["unit:schema", "path:plates/"]}`, `about` optional) and ends its turn. That is a work-stopping error, not a question:
   - **The attempt fails with `NeedsInformation`,** and the text is its message. On a host that is the pod's reason; in a pod, `block-pod` exits 12 with the text as its termination message, as `c4-unit needs` does.
   - **It is not retried.** It shows as an incident, with its checkpoint and its session's view kept.
   - **When someone supplies the information** (HUD or MCP `c4_supply`), the unit runs again and resumes the same session. The prompt says what it reported missing (`$C4_NEEDED`) and what was supplied (`$C4_SUPPLIED`).
+  - **It can heal.** Often another block is building the very thing that makes the question moot. `about` names that work: `unit:<name>` (a unit of the job), `path:<prefix>` (where it would land in the tree; a bare value is a path) or `job:<namespace>/<name>`. Its message carries it as an `about:` line.
+    - **A re-check:** when that work lands, the farm runs a short extra attempt of the block (`$C4_RECHECK=1`, with `$C4_NEEDED` and what landed in `$C4_RECHECK_WHY`). It resumes the session for one turn, told only to decide whether the question still applies.
+    - **Withdrawn:** the block writes `.c4/withdraw` (`{"why": "what settled it"}`, or `c4-unit withdraw --why` from a script), and the attempt ends with exit 0 and the why as its message.
+    - **Still needed:** `needs.json` again ends it with the new text. A turn that decides nothing, or that runs past `$C4_RECHECK_SECONDS` (default 300), ends still needed with the text it had.
+    - **Nothing else changes:** the re-check spends no retry, and the runner ends it at that one turn's end, so it cannot drift into the task.
+    - **After a withdrawal,** the unit runs again, and its prompt says what it asked and why the question was withdrawn (`$C4_WITHDRAWN`).
 - **A person who decides on purpose,** such as a creative approval gate, is a step in the job's graph: a wait or a review that a person decides. The block resumed after it hears the decision (`$C4_DECISION`), with the reply's files at `$C4_REPLY`, or fetched into the host unit's `reply/`.
 - **Questions between agents.** A block that lacks a fact another unit of its job has asks it. It writes `.c4/ask.json` (`{"to": "unit:<name>", "ask": "..."}`; without `to`, the job's `answerer`) and ends its turn.
   - **Asking:** the Stop hook puts the question to the farm (`c4-unit ask`) and records it open in `.c4/asking`.

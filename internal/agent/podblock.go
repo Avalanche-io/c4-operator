@@ -119,10 +119,17 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 		}
 		b.logf("resumed %s (session %s, epoch %d) from its view", m.Name, m.Session, m.Epoch)
 		prompt = reworkPrompt(p, u)
+		if recheck(p) {
+			return b.recheck(ctx, m, u, append(append([]string{"-p", "--resume", m.Session}, flags...), "--", prompt), recheckLimit(p))
+		}
 		if err := b.claude(ctx, append(append([]string{"-p", "--resume", m.Session}, flags...), "--", prompt), nil); err != nil {
 			return 1, err
 		}
 	} else if errors.Is(err, os.ErrNotExist) {
+		if recheck(p) {
+			b.logf("%s: a re-check with no session in its view: still needed", name)
+			return b.needsInformation(&Member{Name: name}, neededText(p))
+		}
 		session := newSessionID()
 		m = &Member{Name: name, Session: session, Cwd: b.Cwd, ConfigDir: b.ConfigDir, Flags: flags, Block: true, Profile: blockProfile(p), Registered: time.Now().UTC()}
 		b.logf("started %s (session %s)", name, session)
@@ -249,14 +256,18 @@ func (b *PodBlock) holdForAnswer(ctx context.Context, p *corev1.Pod, u UnitDirs,
 // the farm (c4-unit needs does the same).
 func (b *PodBlock) needsInformation(m *Member, msg string) (int, error) {
 	b.logf("%s: needs information: %s", m.Name, strings.ReplaceAll(msg, "\n", "; "))
-	path := b.Env("C4_TERMINATION_LOG")
-	if path == "" {
-		path = "/dev/termination-log"
-	}
-	if err := os.WriteFile(path, []byte(msg), 0o644); err != nil {
+	if err := os.WriteFile(b.terminationLog(), []byte(msg), 0o644); err != nil {
 		return 1, err
 	}
 	return PodBlockNeedsInformation, nil
+}
+
+// terminationLog is where the farm reads the container's message.
+func (b *PodBlock) terminationLog() string {
+	if path := b.Env("C4_TERMINATION_LOG"); path != "" {
+		return path
+	}
+	return "/dev/termination-log"
 }
 
 // register records the new session's member once its transcript appears,

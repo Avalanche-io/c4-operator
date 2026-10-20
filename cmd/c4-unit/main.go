@@ -25,10 +25,15 @@
 //	                                comes as a steering message (c4-unit steer)
 //	c4-unit answer --ask ID (--answer TEXT | --cannot WHY)
 //	                                answer a question another unit asked this one
-//	c4-unit needs --what TEXT [--why TEXT]
+//	c4-unit needs --what TEXT [--why TEXT] [--about path:P|unit:U|job:NS/J]...
 //	                                stop: the brief lacks information only a person
 //	                                could give (exit 12); the unit runs again, with
-//	                                it in $C4_SUPPLIED, once someone supplies it
+//	                                it in $C4_SUPPLIED, once someone supplies it;
+//	                                when work it is --about lands, the farm asks
+//	                                it to re-check ($C4_RECHECK, $C4_NEEDED)
+//	c4-unit withdraw --why TEXT     in a re-check: the question no longer applies
+//	                                (exit 0); the unit runs again with the why in
+//	                                $C4_WITHDRAWN
 //	c4-unit decision                print the decision this attempt resumed with
 //	                                (JSON: seq, do, note, actor, at, view, reply),
 //	                                exit 1 if none
@@ -87,6 +92,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/needs"
 )
 
 const (
@@ -146,7 +153,9 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	answerText := fs.String("answer", "", "with answer: the answer")
 	cannot := fs.String("cannot", "", "with answer: why this unit cannot answer")
 	what := fs.String("what", "", "with needs: the information the brief lacks")
-	why := fs.String("why", "", "with needs: why it is needed, or why the brief does not settle it")
+	why := fs.String("why", "", "with needs: why it is needed, or why the brief does not settle it; with withdraw: what settled the question")
+	var about aboutFlag
+	fs.Var(&about, "about", "with needs: work whose landing may settle it, so the farm asks this unit to re-check: path:<in the tree>, unit:<name> or job:<namespace>/<name>; repeat for more")
 	asJSON := fs.Bool("json", false, "with steer: print each message as a line of JSON {seq, at, actor, text}")
 	of := fs.Int64("of", 0, "with measure: the target (default the job's)")
 	name := fs.String("name", "", "with measure: what is counted (default the job's)")
@@ -342,22 +351,41 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		return 0, nil
 	case "needs":
 		if strings.TrimSpace(*what) == "" {
-			return 2, errors.New("usage: c4-unit needs --what TEXT [--why TEXT]")
+			return 2, errors.New("usage: c4-unit needs --what TEXT [--why TEXT] [--about path:P|unit:U|job:NS/J]...")
 		}
-		msg := strings.TrimSpace(*what)
-		if *why != "" {
-			msg += "\nwhy: " + strings.TrimSpace(*why)
+		ab, err := needs.About(about)
+		if err != nil {
+			return 2, err
 		}
+		msg := needs.Message(*what, *why, ab)
 		// The container's termination message is how the farm learns it.
-		path := e.get("C4_TERMINATION_LOG")
-		if path == "" {
-			path = "/dev/termination-log"
-		}
-		if err := os.WriteFile(path, []byte(msg), 0o644); err != nil {
+		if err := os.WriteFile(terminationLog(e), []byte(msg), 0o644); err != nil {
 			return 1, err
 		}
 		fmt.Fprintln(stdout, "needs: "+strings.ReplaceAll(msg, "\n", "; "))
 		return needsCode, nil
+	case "withdraw":
+		if strings.TrimSpace(*why) == "" {
+			return 2, errors.New("usage: c4-unit withdraw --why TEXT")
+		}
+		if e.get("C4_RECHECK") != "1" {
+			return 2, errors.New("only a re-check withdraws a question (C4_RECHECK is not set)")
+		}
+		out, err := output(e, *dir)
+		if err != nil {
+			return 1, err
+		}
+		w := strings.TrimSpace(*why)
+		doc, _ := json.Marshal(map[string]string{"why": w})
+		if err := writeAtomic(filepath.Join(out, ".c4", "withdraw"), append(doc, '\n')); err != nil {
+			return 1, err
+		}
+		// the farm reads the why as the re-check's termination message
+		if err := os.WriteFile(terminationLog(e), []byte(w), 0o644); err != nil {
+			return 1, err
+		}
+		fmt.Fprintln(stdout, "withdrawn: "+w)
+		return 0, nil
 	case "decision":
 		d := e.get("C4_DECISION")
 		if d == "" {
@@ -392,8 +420,22 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		fmt.Fprintln(stdout, out)
 		return 0, nil
 	}
-	return 2, fmt.Errorf("no command %q: run, progress, preview, yield-requested, safepoint, wait, steer, ask, answer, needs, decision, resume-dir or output", cmd)
+	return 2, fmt.Errorf("no command %q: run, withdraw, progress, preview, yield-requested, safepoint, wait, steer, ask, answer, needs, decision, resume-dir or output", cmd)
 }
+
+// terminationLog is where the farm reads the container's message.
+func terminationLog(e env) string {
+	if p := e.get("C4_TERMINATION_LOG"); p != "" {
+		return p
+	}
+	return "/dev/termination-log"
+}
+
+// aboutFlag is a repeatable --about.
+type aboutFlag []string
+
+func (a *aboutFlag) String() string     { return strings.Join(*a, ",") }
+func (a *aboutFlag) Set(v string) error { *a = append(*a, v); return nil }
 
 func code(err error) (int, error) {
 	if err != nil {

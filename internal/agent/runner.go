@@ -296,6 +296,15 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 			r.logf("%s: safe points: %v", m.Name, err)
 		}
 	}
+	// a re-check past its time: stop it there, still needed
+	if live && m.Block && recheck(p) && p.Status.Phase == corev1.PodRunning && p.Status.StartTime != nil &&
+		r.now().Sub(p.Status.StartTime.Time) > recheckLimit(p) {
+		if err := r.Harness.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
+			return err
+		}
+		r.logf("%s: its re-check ran past %s: still needed", m.Name, recheckLimit(p))
+		return r.needsInformation(ctx, p, m, neededText(p))
+	}
 	// A block's turn ends at a safe point: stop its idle session. If the
 	// farm said stop there, the pod yields below. A part done with more to
 	// do (.c4/more) wakes it again for the next part, in this attempt. A
@@ -309,6 +318,10 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 			return err
 		}
 		live = false
+		// a re-check decides only: withdrawn, or still needed
+		if recheck(p) {
+			return r.recheckDone(ctx, p, m, u)
+		}
 		// missing information first: it stops the block whatever the farm
 		// said at the safe point
 		if msg, ok, err := takeNeeds(u); ok {

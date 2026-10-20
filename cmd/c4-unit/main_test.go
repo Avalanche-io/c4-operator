@@ -348,3 +348,39 @@ func TestAskAndAnswer(t *testing.T) {
 		t.Fatalf("answer and cannot: %d", c)
 	}
 }
+
+// A question names the work whose landing may settle it; a re-check, and
+// only a re-check, withdraws it, with the why as the termination message.
+func TestNeedsAboutAndWithdraw(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "termination-log")
+	out := t.TempDir()
+	m := map[string]string{"C4_TERMINATION_LOG": log, "C4_OUTPUT": out}
+	e := vars(m)
+	var buf bytes.Buffer
+	c, err := run([]string{"needs", "--what", "the delivery frame rate", "--about", "unit:schema", "--about", "plates/"}, &buf, e)
+	if c != needsCode || err != nil {
+		t.Fatalf("needs: %d %v", c, err)
+	}
+	if b, _ := os.ReadFile(log); string(b) != "the delivery frame rate\nabout: unit:schema, path:plates/" {
+		t.Fatalf("termination message %q", b)
+	}
+	if c, _ := run([]string{"needs", "--what", "x", "--about", "shot:sm0140"}, &buf, e); c != 2 {
+		t.Fatalf("an about of no kind: %d", c)
+	}
+	if c, err := run([]string{"withdraw", "--why", "schema fixes 24 fps"}, &buf, e); c != 2 || err == nil || !strings.Contains(err.Error(), "only a re-check") {
+		t.Fatalf("withdraw outside a re-check: %d %v", c, err)
+	}
+	m["C4_RECHECK"] = "1"
+	if c, err := run([]string{"withdraw", "--why", "schema fixes 24 fps"}, &buf, e); c != 0 || err != nil {
+		t.Fatalf("withdraw: %d %v", c, err)
+	}
+	if b, _ := os.ReadFile(log); string(b) != "schema fixes 24 fps" {
+		t.Fatalf("termination message %q", b)
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, ".c4", "withdraw")); string(b) != `{"why":"schema fixes 24 fps"}`+"\n" {
+		t.Fatalf(".c4/withdraw %q", b)
+	}
+	if c, _ := run([]string{"withdraw"}, &buf, e); c != 2 {
+		t.Fatalf("withdraw with no why: %d", c)
+	}
+}
