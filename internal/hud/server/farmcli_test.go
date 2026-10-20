@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // TestFarmCLIAgainstTheHUD drives `c4 farm submit` and `get` against the
@@ -183,5 +185,53 @@ func TestFarmCLIPublishesATool(t *testing.T) {
 	out.Reset()
 	if err := farmcli.ShowTool(ctx, c, farmcli.Out{W: &out}, "show-a", "notes"); err != nil || !strings.Contains(out.String(), "--set width=int (default 960)") {
 		t.Errorf("tool show: %v\n%s", err, out.String())
+	}
+}
+
+// c4 farm submit FILE against the real submissions handler: the folder
+// beside the file is uploaded and named by its ID, the farm plans the
+// jobs in the order written, and they are created with the folder as the
+// submission's root.
+func TestFarmCLISubmitsAFile(t *testing.T) {
+	s := submissionFarm(t)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	c := &farmcli.Client{Base: ts.URL, As: "artist", HTTP: ts.Client()}
+	dir := t.TempDir()
+	b, err := fs.ReadFile(schema.Fixtures(), "submit/pass/proxies-movie.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, dir, "submit.yaml", []byte(strings.Replace(string(b), "project: saltmarsh", "project: show-a", 1)))
+	writeFile(t, dir, "plates/sm0140.1001.exr", []byte("plate"))
+	ctx := context.Background()
+	var out bytes.Buffer
+	plan, err := farmcli.SubmitFile(ctx, c, farmcli.Out{W: &out}, farmcli.SubmitFileArgs{Path: filepath.Join(dir, "submit.yaml"), DryRun: true})
+	if err != nil || len(plan.Jobs) != 2 || plan.Jobs[0].Name != "sm0140-proxies-v001" || plan.Jobs[1].Name != "sm0140-movie-v001" {
+		t.Fatalf("plan %+v %v\n%s", plan, err, out.String())
+	}
+	if !strings.Contains(out.String(), "uploaded  2 files from .") || !strings.Contains(out.String(), "sm0140-movie-v001     ") || !strings.Contains(out.String(), "note      ") {
+		t.Errorf("plan output:\n%s", out.String())
+	}
+	out.Reset()
+	done, err := farmcli.SubmitFile(ctx, c, farmcli.Out{W: &out}, farmcli.SubmitFileArgs{Path: filepath.Join(dir, "submit.yaml"), Yes: true})
+	if err != nil || len(done.Jobs) != 2 {
+		t.Fatalf("submit %+v %v\n%s", done, err, out.String())
+	}
+	if !strings.Contains(out.String(), "queued    show-a/sm0140-proxies-v001\nqueued    show-a/sm0140-movie-v001\n") {
+		t.Errorf("submit output:\n%s", out.String())
+	}
+	var movie c4v1.WorkJob
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "sm0140-movie-v001"}, &movie); err != nil {
+		t.Fatal(err)
+	}
+	root := ""
+	for _, e := range movie.Spec.Template.Spec.Containers[0].Env {
+		if e.Name == "C4_SOURCE_ROOTS" {
+			root = e.Value
+		}
+	}
+	if !strings.Contains(root, `"path":"`+filepath.ToSlash(dir)+`"`) {
+		t.Errorf("C4_SOURCE_ROOTS %q, want the folder %s", root, dir)
 	}
 }
