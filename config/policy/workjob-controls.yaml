@@ -1,7 +1,7 @@
 # The controls people and agents give a running job (requeue, allow
-# nodes, acknowledge, decide, steer, supply, accept a validated input) are
-# annotations on the WorkJob that the queue carries out with the actor
-# they name. Only the manager's account writes them: the HUD (and MCP,
+# nodes, acknowledge, decide, steer, supply or withdraw a unit's question,
+# accept a validated input) are annotations on the WorkJob that the queue
+# carries out with the actor they name. Only the manager's account writes them: the HUD (and MCP,
 # through it) checks who may give each control, signs it and books it, so
 # it is the one place a control enters the farm. Anyone else with patch on
 # a WorkJob could otherwise decide a person's wait as any actor, unsigned.
@@ -29,7 +29,7 @@ spec:
     expression: >-
       ['c4.avalanche.io/requeue', 'c4.avalanche.io/allow-nodes', 'c4.avalanche.io/acks',
        'c4.avalanche.io/decide', 'c4.avalanche.io/steer', 'c4.avalanche.io/supply',
-       'c4.avalanche.io/accept-validated']
+       'c4.avalanche.io/accept-validated', 'c4.avalanche.io/withdraw-needs']
   validations:
   - expression: >-
       variables.controls.all(k,

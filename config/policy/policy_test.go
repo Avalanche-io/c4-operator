@@ -563,10 +563,10 @@ func TestOnlyTheQueueMakesUnitPods(t *testing.T) {
 	}
 }
 
-// TestControlsOnlyFromTheHUD: a job's controls (decide, supply, steer,
-// requeue and the rest) are written only by the manager's account, the HUD,
-// which checks who may give each and signs it; a cluster admin patching
-// one directly is refused, and other annotations are untouched.
+// TestControlsOnlyFromTheHUD: a job's controls (decide, supply, withdraw,
+// steer, requeue and the rest) are written only by the manager's account,
+// the HUD, which checks who may give each and signs it; a cluster admin
+// patching one directly is refused, and other annotations are untouched.
 func TestControlsOnlyFromTheHUD(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
@@ -597,13 +597,16 @@ func TestControlsOnlyFromTheHUD(t *testing.T) {
 	enforced(t, "c4-workjob-controls", func(try int) error {
 		return patch(admin, c4v1.AnnotationDecide, fmt.Sprintf(`{"token":"t%d"}`, try))
 	})
-	for _, k := range []string{c4v1.AnnotationSupply, c4v1.AnnotationSteer, c4v1.AnnotationRequeue, c4v1.AnnotationAcks, c4v1.AnnotationAllowNodes, c4v1.AnnotationAcceptValidated} {
+	for _, k := range []string{c4v1.AnnotationSupply, c4v1.AnnotationSteer, c4v1.AnnotationRequeue, c4v1.AnnotationAcks, c4v1.AnnotationAllowNodes, c4v1.AnnotationAcceptValidated, c4v1.AnnotationWithdrawNeeds} {
 		if err := patch(admin, k, "x"); err == nil {
 			t.Errorf("%s written directly", k)
 		}
 	}
 	if err := patch(hud, c4v1.AnnotationDecide, `{"token":"hud"}`); err != nil {
 		t.Errorf("the HUD's decide: %v", err)
+	}
+	if err := patch(hud, c4v1.AnnotationWithdrawNeeds, `[{"token":"hud"}]`); err != nil {
+		t.Errorf("the HUD's withdrawal: %v", err)
 	}
 	if err := patch(admin, "example.com/note", "fine"); err != nil {
 		t.Errorf("another annotation: %v", err)
