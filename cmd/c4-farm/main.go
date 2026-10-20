@@ -45,6 +45,14 @@ Work
   samples load [NAME]      load a guide's scenario onto the local farm (no NAME lists them)
   types                    the prebuilt job types
   submit TYPE ASSET        plan a job, show the estimate, and submit it
+  submit FILE              send a submission (c4: submit/1): its plan and estimate first (--dry-run, --explain)
+
+Tools
+  tools                    the tools you can submit
+  tool new KIND DIR        start a tool: a folder with a tool.yaml, a script and a test (frames or once)
+  tool test DIR            check a tool and run its test here, in Docker (--frames, --with K=V, --keep, --log FILE)
+  tool publish DIR         store a tool, test it on the farm, offer it to the project (--farm: every project)
+  tool show NAME           a published tool and its parameters
   ls                       the queue, in run order (--mine, --at-risk, --all)
   watch JOB                the job's progress, deadline and slack as they change
   open JOB                 open the job view in the HUD (--widget for the side widget)
@@ -255,8 +263,23 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		fs.Var(&after, "after", "wait for this job and mount its output (repeatable)")
 		fs.BoolVar(&a.DryRun, "dry-run", false, "show the plan and change nothing")
 		fs.BoolVar(&a.Yes, "yes", false, "don't ask before submitting")
+		explain := fs.Bool("explain", false, "with a submission file: show what each job becomes on the farm, and change nothing")
 		pos, err := parse(fs, rest)
 		if err != nil {
+			return err
+		}
+		if len(pos) == 1 && a.Template == "" && submissionFile(pos[0]) {
+			c, f, o, project, err := connect()
+			if err != nil {
+				return err
+			}
+			if project == "" {
+				project = f.Project
+			}
+			if a.Yes {
+				o.In = nil
+			}
+			_, err = farmcli.SubmitFile(ctx, c, o, farmcli.SubmitFileArgs{Path: pos[0], Project: project, DryRun: a.DryRun, Explain: *explain, Yes: a.Yes})
 			return err
 		}
 		switch {
@@ -292,6 +315,22 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		_, err = farmcli.Submit(ctx, c, o, a)
 		return err
+
+	case "tools":
+		if _, err := parse(fs, rest); err != nil {
+			return err
+		}
+		c, f, o, project, err := connect()
+		if err != nil {
+			return err
+		}
+		if project, err = farmcli.ResolveProject(ctx, c, project, f.Project); err != nil {
+			return err
+		}
+		return farmcli.ListTools(ctx, c, o, project)
+
+	case "tool":
+		return toolCommand(ctx, fs, rest, stdout, connect)
 
 	case "ls":
 		var a farmcli.LsArgs
