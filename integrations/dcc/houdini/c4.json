@@ -1,0 +1,8 @@
+{
+    "env": [
+        {"C4_DCC": "$HOUDINI_PACKAGE_PATH/.."},
+        {"PYTHONPATH": {"value": "$C4_DCC/houdini/python", "method": "prepend"}},
+        {"PYTHONPATH": {"value": "$C4_DCC/c4submit/src", "method": "prepend"}}
+    ],
+    "hpath": "$C4_DCC/houdini"
+}

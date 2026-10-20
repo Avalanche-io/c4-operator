@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<shelfDocument>
+  <!-- The C4 shelf: places a C4 Render LOP after the selected LOP, or a
+       C4 Submit ROP after the selected ROPs. Uses the HDAs when
+       otls/c4.hda is built, else a null with the same parameters. -->
+  <toolshelf name="c4" label="C4">
+    <memberTool name="c4_render"/>
+    <memberTool name="c4_submit"/>
+  </toolshelf>
+
+  <tool name="c4_render" label="C4 Render" icon="LOP_usdrender_rop">
+    <helpText><![CDATA[Render the selected stage on the farm.]]></helpText>
+    <script scriptType="python"><![CDATA[from c4_houdini import nodes
+nodes.place("lop")]]></script>
+  </tool>
+
+  <tool name="c4_submit" label="C4 Submit" icon="ROP_subnet">
+    <helpText><![CDATA[Render the selected ROPs on the farm.]]></helpText>
+    <script scriptType="python"><![CDATA[from c4_houdini import nodes
+nodes.place("rop")]]></script>
+  </tool>
+</shelfDocument>
