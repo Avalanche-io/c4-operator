@@ -31,6 +31,7 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/config/samples/quickstart"
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
+	"github.com/Avalanche-io/c4-operator/schema"
 	"github.com/Avalanche-io/c4-operator/tools"
 )
 
@@ -179,7 +180,7 @@ func Up(ctx context.Context, o UpOptions) error {
 			return err
 		}
 	}
-	if err := waitHUD(ctx, o.HUD(), 2*time.Minute); err != nil {
+	if err := waitHUD(ctx, o.HUD(), 5*time.Minute); err != nil {
 		return err
 	}
 	return publishTools(ctx, o)
@@ -200,7 +201,7 @@ func publishTools(ctx context.Context, o UpOptions) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	var done, left []string
+	var done, left, unloaded, images []string
 	for _, name := range tools.Names {
 		f, err := tools.Folder(name)
 		if err != nil {
@@ -217,13 +218,27 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			if why == "" {
 				why = err.Error()
 			}
-			left = append(left, name+" ("+strings.ReplaceAll(why, "\n", " ")+")")
+			if strings.Contains(why, "cannot be pinned") {
+				// its image is not in the farm's registry yet
+				unloaded = append(unloaded, name)
+				if t, err := farmcli.ReadTool(dir); err == nil {
+					img := localName(schema.ImageRef(t.Runs.Image, "dev"))
+					if !slices.Contains(images, img) {
+						images = append(images, img)
+					}
+				}
+				continue
+			}
+			left = append(left, name+" ("+strings.Join(strings.Fields(why), " ")+")")
 			continue
 		}
 		done = append(done, name)
 	}
 	if len(done) > 0 {
 		o.logf("tools     %s, for every project\n", strings.Join(done, ", "))
+	}
+	if len(unloaded) > 0 {
+		o.logf("tools     %s wait for their images: c4 farm image load %s, then c4 farm up\n", strings.Join(unloaded, ", "), strings.Join(images, " "))
 	}
 	for _, l := range left {
 		o.logf("tools     not published: %s\n", l)
