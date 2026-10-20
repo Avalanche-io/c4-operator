@@ -19,16 +19,6 @@ import { incidents, incidentOf } from '../../design/components/incidents.js';
 
 const keyOf = (j) => `${j.namespace}/${j.name}`;
 
-// the book, read once per snapshot, for the farm's own events
-let book = [], bookAt = null;
-export function readBook(ctx) {
-  if (bookAt !== ctx.snap.now) {
-    bookAt = ctx.snap.now;
-    get('/book?limit=600').then((b) => { book = b.entries || []; ctx.refresh(); }, () => {});
-  }
-  return book;
-}
-
 // ------------------------------------------------------------ root items
 
 export function rootCard(ctx, it) {
@@ -95,7 +85,7 @@ export const mine1 = {
     let jobs = s.jobs.filter((j) => j.owner === v.user || waitsForMe(j));
     const own = jobs.length > 0;
     if (!own) jobs = s.jobs.filter((j) => (v.projects || []).includes(j.project));
-    const items = incidents({ ...s, jobs }, readBook(ctx)).filter((x) => x.sev === 'needs');
+    const items = incidents(s, jobs).filter((x) => x.sev === 'needs');
     const open = jobs.filter((j) => j.phase !== 'Succeeded').sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
     return h('section', { class: 'd1', 'data-key': 'd1-mine' },
       h('h1', null, own ? 'My jobs' : 'Jobs in your projects'),
@@ -110,7 +100,7 @@ export const mine1 = {
 export const farm1 = {
   render(ctx) {
     const s = ctx.snap;
-    const items = incidents(s, readBook(ctx));
+    const items = incidents(s);
     const open = s.jobs.filter((j) => j.phase !== 'Succeeded').sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
     const late = open.filter((j) => (j.estimate || {}).slackSeconds < 0);
     const list = (late.length ? late : open).slice(0, 8);
@@ -148,7 +138,7 @@ export const job1 = {
     const fin = j.phase === 'Succeeded', late = !fin && e.slackSeconds < 0;
     const dl = j.objective && j.objective.deadline;
     const w = jobWords(j);
-    const items = incidents({ ...ctx.snap, jobs: [j] }, []).filter((x) => x.sev === 'needs');
+    const items = incidents(ctx.snap, [j]).filter((x) => x.sev === 'needs');
     const by = new Map();
     for (const u of (d && d.unitList) || []) {
       if (!by.has(u.group)) by.set(u.group, { n: 0, done: 0, run: 0, label: ((d.groups || []).find((x) => x.key === u.group) || {}).label || u.group });
@@ -178,7 +168,7 @@ export const job1 = {
 export const pools1 = {
   render(ctx) {
     const s = ctx.snap;
-    const items = incidents(s, readBook(ctx));
+    const items = incidents(s);
     return h('section', { class: 'd1', 'data-key': 'd1-pools' },
       h('h1', null, 'Capacity'),
       h('p', { class: 'd1-sub' }, `${f.num(s.farm.slotsUsed)} of ${f.num(s.farm.slotsTotal)} slots in use`),

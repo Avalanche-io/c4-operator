@@ -60,8 +60,14 @@ function unitsOf(d) {
   const waitOf = new Map(), intr = new Map();
   for (const w of d.waits || []) waitOf.set(w.unit, w);
   for (const x of d.interruptions || []) intr.set(x.unit, (intr.get(x.unit) || []).concat(x));
+  // an open wait (asked, not yet decided) is a wait, whatever the unit's own
+  // state still says (a wait unit reads unevaluated until it is decided)
+  const shownState = (u) => {
+    const s = unitState(st.get(u.i) || u.state), w = waitOf.get(u.i);
+    return w && !w.do && w.since && (s === 'planned' || s === 'queued' || s === 'blocked') ? 'waits' : s;
+  };
   const mk = (u) => ({
-    ...u, state: unitState(st.get(u.i) || u.state), fraction: prog[u.i] ? prog[u.i].fraction : null, measured: prog[u.i] ? prog[u.i].measured : null,
+    ...u, state: shownState(u), fraction: prog[u.i] ? prog[u.i].fraction : null, measured: prog[u.i] ? prog[u.i].measured : null,
     risk: risk.has(u.i) || !!u.risk, missed, willMiss, settled, job: `${d.namespace}/${d.name}`, jobName: d.name,
     yielded: d.phase === 'Yielded', wait: waitOf.get(u.i) || null, interruptions: intr.get(u.i) || null,
   });

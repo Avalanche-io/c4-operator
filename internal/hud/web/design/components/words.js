@@ -111,12 +111,18 @@ export function tempWords(u) {
 
 // reasoningWords: what a unit reasons with, in words, by level (level.js):
 // at 2 a model (and which) or a procedure; at 3 also its effort and tools.
+// What it declares comes first; what its latest attempt reported
+// (observed) fills a gap, and at level 3 says where the run differed.
 // Metadata, not state. Null when the unit does not say.
 export function reasoningWords(r, level = 3) {
   if (!r || !r.does) return null;
   if (r.does === 'procedure') return 'a procedure: a command, no model';
-  const parts = [r.model ? `a model, ${r.model}` : 'a model (which one is not reported)'];
-  if (level >= 3 && r.effort) parts.push(`effort ${r.effort}`);
+  const o = r.observed || {};
+  const ran = o.model || (o.models || []).join(', ');
+  const ranAt = o.effort || (o.efforts || []).join(', ');
+  const parts = [r.model ? `a model, ${r.model}` : ran ? `a model, ${ran} (as its run reported)` : 'a model (which one is not reported)'];
+  if (level >= 3 && r.model && ran && ran !== r.model) parts.push(`ran on ${ran}`);
+  if (level >= 3 && (r.effort || ranAt)) parts.push(`effort ${r.effort || ranAt}${r.effort && ranAt && ranAt !== r.effort ? ` (ran at ${ranAt})` : ''}`);
   if (level >= 3 && r.tools) parts.push(`tools ${r.tools}`);
   return parts.join(' · ');
 }

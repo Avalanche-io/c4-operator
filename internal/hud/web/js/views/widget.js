@@ -18,6 +18,7 @@ import { tok, glance, inFlight, retries } from '../../design/components/core.js'
 import { drawAgg } from '../../design/components/stack.js';
 import { ranges } from '../../design/components/rle.js';
 import { jobWords } from '../../design/components/words.js';
+import { deadlineSource } from './common.js';
 
 const st = { key: null, detail: null, graph: null, now: null, busy: false, err: null };
 document.addEventListener('hud:changed', () => { st.now = null; });
@@ -219,5 +220,5 @@ export function widgetSheet(ctx, k, j, d, graph, compact) {
       late && compact && e.burst ? h('div', { class: 'wg-fixc' }, h('span', null, `+${e.burst.slots} ${e.burst.pool} closes it`), h('span', { class: 'pencil' }, `est. ${f.money(e.burst.cost)}`)) : null,
       compact ? null : h('div', { class: 'wg-collar bot' },
         h('span', { class: 'mt' }, B && B.per ? `1 band = ${B.per} frames · ${basis}` : basis),
-        h('span', { class: 'mt' }, j.objective && j.objective.from ? `deadline: from ${f.jobName(j.objective.from)}` : dl ? 'deadline: set on the job' : ''))));
+        h('span', { class: 'mt' }, dl || (j.objective && j.objective.from) ? `deadline: ${deadlineSource(j.objective)}` : ''))));
 }

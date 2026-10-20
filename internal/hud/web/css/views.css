@@ -150,3 +150,21 @@ canvas[data-player] { background: var(--g02); }
 .player .badge { position: absolute; left: 8px; top: 8px; padding: 3px 6px; font-size: 11px; background: color-mix(in srgb, var(--void) 60%, transparent); }
 .pbar { display: flex; gap: 10px; align-items: center; margin-top: 8px; }
 .pbar .strip { display: block; flex: 1; min-width: 0; height: 10px; }
+
+/* Your page (views/me.js): the trackers that submit work for you */
+.who .me-link { color: inherit; text-decoration: none; }
+.who .me-link:hover .mono, .who .me-link:focus-visible .mono { text-decoration: underline; }
+.me .grow { display: flex; align-items: center; gap: 16px; padding: 10px 14px; background: var(--plate); outline: var(--hair) solid var(--rule-2); margin-bottom: 8px; }
+.me .grow.off { opacity: .62; }
+.me .gmain { flex: 1; font: 400 14px/1.4 var(--sans); }
+.me .gline { margin-top: 2px; color: var(--ink-2); }
+.me .ggrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: var(--gutter); }
+.me .ggrid .panel + .panel { margin-top: 0; }
+.me .gcard .body p { margin: 0 0 8px; font: 400 13px/1.45 var(--sans); }
+.me .gform { display: flex; flex-direction: column; gap: 8px; margin-top: 6px; }
+.me .gfield { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font: 400 12.5px/1.3 var(--sans); }
+.me .gfield > .lab { min-width: 60px; }
+.me .gopts { display: inline-flex; flex-wrap: wrap; gap: 4px 10px; }
+.me .gopts label { display: inline-flex; align-items: center; gap: 4px; }
+.me .gform .btn { align-self: flex-start; }
+.me .gintro { font: 400 13.5px/1.5 var(--sans); color: var(--ink-2); max-width: 760px; margin: 0 0 12px; }

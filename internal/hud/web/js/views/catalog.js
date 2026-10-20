@@ -1,5 +1,5 @@
-// Catalogue: the published designs for agent work (c4 proposals/agent-
-// catalog, CATALOG-HUD 2), read from the export the farm serves
+// Catalogue: the published designs for agent work, read from the export
+// the farm serves
 // (/api/v1/catalog, catalog.json). A design is a structure with its
 // sources; what runs is a version of it; what the catalogue learns from is
 // runs (ratings come only from signed run records, and there are none yet).

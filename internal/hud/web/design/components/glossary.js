@@ -68,6 +68,7 @@ export const TERMS = {
   gate: { term: 'Gate', def: 'A wait or a check that sits between stages: a narrow column whose block spans the rows it holds. A check that sends a frame back draws an orange arrow to it.' },
   level: { term: 'Level', def: 'How much the HUD shows and offers you: 1 for day one, 2 for a working day, 3 for everything. Choose any time; anything deeper is one click away, and nothing is locked.' },
   reasoning: { term: 'Reasons with', def: 'What a step runs on: a model (which one, at what effort, with which tools) or a procedure, a command with no model. A small mark in ink; it is not a state and takes no color.', swatch: 'reasoning' },
+  grant: { term: 'Grant', def: 'Your permission for a tracker, such as GitHub or Flow, to submit work for you: the jobs it makes from your issues or tasks are yours. It ends on the date you choose, at most 90 days out, and you can revoke it any time.' },
 };
 export const TERM_ORDER = Object.keys(TERMS);
 export const numberOf = (k) => (TERM_ORDER.indexOf(k) + 1) || null;

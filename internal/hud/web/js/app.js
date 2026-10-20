@@ -6,7 +6,7 @@ import { hydrate } from '../design/components/live.js';
 import { setScheme } from '../design/scheme.js';
 import '../design/components/pylon.js';
 import '../design/components/stack.js';
-import { subscribe, post, get, as, staticMode, objectURL } from './api.js';
+import { subscribe, post, del, get, as, staticMode, objectURL } from './api.js';
 import * as f from './fmt.js';
 import * as md from './mode.js';
 import * as lvl from './level.js';
@@ -25,8 +25,9 @@ import tiers from './views/tiers.js';
 import graph from './views/graph.js';
 import cost from './views/cost.js';
 import catalog from './views/catalog.js';
+import yourPage from './views/me.js';
 
-const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog };
+const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage };
 // each view and the mode it arrives at (docs/intro/ladder.md)
 // [view, label, mode, level]: a tab shows from that mode, at that level
 const NAV = [
@@ -119,7 +120,7 @@ function topBar() {
     detail(),
     h('div', { class: 'who' },
       h('span', { class: 'live', 'data-state': state.status, title: `Updates: ${state.status}` }),
-      v ? h('span', null, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
+      v ? h('a', { class: 'me-link', href: href('me'), title: 'Your page: the trackers that submit work for you' }, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
       v ? h('a', { href: viewAs(other) }, `View as ${other}`) : null,
       h('button', { class: 'prefs-btn', 'data-prefs': 'open', 'aria-expanded': state.sheet ? 'true' : 'false', title: 'Preferences' }, 'Preferences')));
 }
@@ -314,7 +315,7 @@ function render() {
   document.documentElement.dataset.level = String(ctx.level);
   // the peripheral cue: a steady red edge on the top bar while anything
   // needs a person, on every page and in every mode (incidents.js)
-  if (state.snap) document.documentElement.dataset.needs = needsCount(incidents(state.snap, [])) > 0 ? '1' : '0';
+  if (state.snap) document.documentElement.dataset.needs = needsCount(incidents(state.snap)) > 0 ? '1' : '0';
   // reaching for expert detail at level 2 counts toward the one offer of 3
   if (state.snap && state.level.level === 2 && lastRoute !== location.hash && (ctx.mode >= 5 || ['tiers', 'wall', 'cost'].includes(route.name))) lvl.used(state.snap.viewer, 'expert');
   lastRoute = location.hash;
@@ -392,6 +393,14 @@ const ACTIONS = {
   disable: (d) => [`/nodes/${d.node}/disable`, { disabled: true }],
   enable: (d) => [`/nodes/${d.node}/disable`, { disabled: false }],
   approve: (d) => [`/capacity/${d.pool}/approve`, {}],
+  // a grant: the form's limits (level 2), else any work for 30 days
+  grant: (d) => {
+    const form = d.form && document.getElementById(d.form);
+    const ticked = (name) => (form ? [...form.querySelectorAll(`input[name="${name}"]:checked`)].map((x) => x.value) : []);
+    const until = (form && form.querySelector('select[name="until"]')) ? form.querySelector('select[name="until"]').value : d.until || '30d';
+    return ['/grants', { namespace: d.ns, tracker: d.tracker, classes: ticked('class'), pools: ticked('pool'), until }];
+  },
+  revoke: (d) => [`/grants/${d.grant}`, null, 'DELETE'],
 };
 
 document.addEventListener('click', async (e) => {
@@ -401,9 +410,9 @@ document.addEventListener('click', async (e) => {
   const fn = ACTIONS[b.dataset.action];
   if (!fn) return;
   try {
-    const [path, body] = fn(b.dataset);
+    const [path, body, method] = fn(b.dataset);
     b.disabled = true;
-    const r = await post(path, body);
+    const r = method === 'DELETE' ? await del(path) : await post(path, body);
     toast(r.message || 'Done.');
     document.dispatchEvent(new CustomEvent('hud:changed'));
   } catch (err) {

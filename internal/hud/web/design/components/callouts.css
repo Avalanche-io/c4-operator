@@ -1,11 +1,11 @@
 /* CALLOUTS: the shared annotation style for the intro, the tutorial
-   screenshots and the in-product tours (callouts.js, docs/intro/callouts.md).
+   screenshots and the in-product tours (callouts.js).
    Sizes are for 1x; the page's own scale or zoom enlarges them. */
 
 /* Callouts: an annotation layer over the HUD. White lines, a little heavier
    than the HUD's own, and a faint violet cast in the plate's fill: the one
    hue the HUD never uses for state, kept to a tint. Shared with the
-   tutorials' callouts; see docs/intro/callouts.md. */
+   tutorials' callouts. */
 :root, [data-scheme] { --note: var(--paper); --note-bg: color-mix(in srgb, var(--note-tint) 96%, transparent); --note-dim: var(--g15); --note-num: var(--ink-2); }
 .c-ann { position: absolute; left: 0; top: 0; z-index: 30; pointer-events: none; overflow: visible; }
 .c-ann .ret { fill: none; stroke: var(--note); stroke-width: 2.6; stroke-linecap: square; }

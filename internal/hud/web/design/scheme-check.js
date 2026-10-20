@@ -6,7 +6,7 @@
 import { contrast, deltaE, simulate } from './color.js';
 import { derive, SCHEMES, HUES, ROLES, NON_TEXT, TEXT_HUE, CELL_SURFACES, APPROVED_PALES, RAMP, TEXT, TEXT_ON } from './scheme-rules.js';
 
-// docs/intro/c4-hud-changes.md 2.11: every pale and full pair at least ΔE 18
+// The rule: every pale and full pair at least ΔE 18
 // under the three simulations, every pale at least 11 from the field and
 // the wall's field. On white the light scheme cannot keep all of 18 at one
 // opacity: the floor it holds is PALE_FULL_FLOOR, and each phase also has a

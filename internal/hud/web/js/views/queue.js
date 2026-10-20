@@ -15,7 +15,7 @@ import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn,
 import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
 import { jobWords, tempWords } from '../../design/components/words.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
-import { roots, readBook } from './day1.js';
+import { roots } from './day1.js';
 
 // the root items of this snapshot (incidents.js), read once per render
 let ITEMS = [];
@@ -305,7 +305,7 @@ function simple(ctx) {
 
 export default {
   render(ctx) {
-    ITEMS = incidents(ctx.snap, readBook(ctx));
+    ITEMS = incidents(ctx.snap);
     if (ctx.mode < 2) return simple(ctx);
     const s = ctx.snap;
     const q = ctx.route.q;

@@ -12,7 +12,7 @@ import { glance, inFlight } from '../../design/components/core.js';
 import { buildSheet } from '../../design/components/stack.js';
 import { bookList } from '../../design/components/ledger.js';
 import { lensFor } from '../lenses/index.js';
-import { classChip, phaseText, orderText, burstButton, failedUnits, personMark } from './common.js';
+import { classChip, phaseText, orderText, burstButton, failedUnits, personMark, deadlineSource } from './common.js';
 import { c4idEl } from '../../design/components/c4id.js';
 import { unitWords, how, reasoningWords } from '../../design/components/words.js';
 import { markSVG, markEl } from '../../design/components/marks.js';
@@ -110,7 +110,7 @@ function titleBlock(j, mode = 5) {
   const gl = glance(j, j);
   const done = gl.done;
   const late = Number.isFinite(e.slackSeconds) && e.slackSeconds < 0 && j.phase !== 'Succeeded';
-  const src = o.from ? `from ${f.jobName(o.from)}` : o.type === 'latency' ? `ready + ${f.dur(o.latencyTargetSeconds)}` : o.deadline ? 'set on the job' : 'no objective';
+  const src = deadlineSource(o);
   return h('div', { class: 'titleblock' },
     tcell('Deadline', o.deadline ? f.clock(o.deadline) : '–', src),
     e.noEta && j.phase !== 'Succeeded' ? tcell('ETA p50 · p90', '–', e.noEta)

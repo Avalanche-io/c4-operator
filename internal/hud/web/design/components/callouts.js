@@ -1,5 +1,5 @@
 // CALLOUTS: the shared annotation layer for the intro, the tutorial
-// screenshots and later the in-product tours (docs/intro/callouts.md).
+// screenshots and later the in-product tours.
 //
 // A reticle of four corner brackets locks on the thing being named, a leader
 // with one 45-degree knee runs to a plate, and the plate carries the term's

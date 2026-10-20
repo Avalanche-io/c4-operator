@@ -10,7 +10,7 @@ import { get } from '../api.js';
 import { own } from '../../design/components/live.js';
 import { glance, inFlight, retries } from '../../design/components/core.js';
 import { buildSheet } from '../../design/components/stack.js';
-import { phaseText } from './common.js';
+import { phaseText, deadlineSource } from './common.js';
 import { c4idEl } from '../../design/components/c4id.js';
 import { tempWords } from '../../design/components/words.js';
 
@@ -90,7 +90,7 @@ function card(ctx, j) {
         sheet ? own('stack', `mstack:${k}${M >= 3 ? '' : ':flat'}`, { sheet, view }) : h('div', { class: 'mst-wait' }),
         j.output && M >= 5 && ctx.level >= 3 ? h('div', { class: 'edgecode' }, h('b', null, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${String(j.output.changesets).padStart(4, '0')}+00`) : null),
       h('div', { class: 'mtb' },
-        tcell('Deadline', dl ? f.clock(dl) : '–', j.objective && j.objective.from ? `from ${f.jobName(j.objective.from)}` : dl ? 'set on the job' : 'no objective'),
+        tcell('Deadline', dl ? f.clock(dl) : '–', deadlineSource(j.objective)),
         tcell('Slack', dl && !done ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', late ? 'projected late' : done ? 'done' : e.feasible ? 'on time at current capacity' : 'will miss at current capacity'),
         tcell('Done', h('span', null, `${Math.round(g.done * 100)}`, h('small', null, '%')), par ? h('span', { class: 't-run' }, `${par}% running now`) : j.phase === 'Held' ? 'held' : 'nothing running'),
         tcell(done ? 'Finished' : 'About', done ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, f.approx(e.remainingSeconds)), done ? '' : `p90 ${f.clock(e.etaP90, false)}`),

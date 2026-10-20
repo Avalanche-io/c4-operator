@@ -122,7 +122,7 @@ record that does not verify: that one needs a person.
 
 A wrangler learns one word per idea, and every surface uses it: the HUD's
 cells, legends, cards and book, the glossary, the intro, the tutorials and
-the site (c4 `proposals/queue-primitives/INTEGRATE.md` 4.2). The words are
+the site. The words are
 render words: an agent, CI or ML job's units are frames too, and rendering
 is a unit at work in any class. Native names (Kubernetes, Kueue, the
 operator's own enum values such as `preflight` or `PreemptionByScheduler`)

@@ -1,6 +1,5 @@
 // Levels: how much the HUD shows and offers the person using it, in any
-// mode (mode.js), view and role. Approved by Joshua (2026-10-19; c4
-// proposals/hud-proficiency).
+// mode (mode.js), view and role (docs/intro/levels.md).
 //
 //   1 Day one   one row per job: its state in a word, one bar, ready by and
 //               due; what needs you first, as root causes with their steps

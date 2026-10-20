@@ -30,6 +30,13 @@ export async function post(path, body) {
   return out;
 }
 
+export async function del(path) {
+  const r = await fetch(withViewer('/api/v1' + path), { method: 'DELETE', headers: { Accept: 'application/json' } });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `${r.status} ${r.statusText}`);
+  return out;
+}
+
 export function objectURL(url) {
   return withViewer(url);
 }

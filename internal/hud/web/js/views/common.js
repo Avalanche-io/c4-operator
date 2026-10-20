@@ -148,3 +148,17 @@ export function failedUnits(j) {
 export function empty(text) {
   return h('p', { class: 'dim', style: { padding: '24px 0' } }, text);
 }
+
+// deadlineSource: where a job's deadline comes from, in words: another job,
+// tracking, a milestone, the farm's suggestion, the class, or the job
+export function deadlineSource(o) {
+  if (!o) return 'no objective';
+  if (o.from) return `from ${f.jobName(o.from)}`;
+  if (o.type === 'latency') return `ready + ${f.dur(o.latencyTargetSeconds)}`;
+  if (!o.deadline) return 'no objective';
+  if (o.mode === 'Tracking') return 'from tracking';
+  if (o.source === 'milestone') return o.milestone ? `from milestone ${o.milestone}` : 'from a milestone';
+  if (o.source === 'suggested' || o.mode === 'Suggested') return 'suggested by the farm';
+  if (o.source === 'class') return 'the class’s objective';
+  return 'set on the job';
+}
