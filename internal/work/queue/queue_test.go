@@ -279,6 +279,9 @@ func TestYieldedUnitResumesFromItsCapturedView(t *testing.T) {
 	if envOf(pods[0].Spec.Containers[0], "C4_PODINFO") == "" {
 		t.Fatal("a checkpointing unit has no downward API file to see a yield request")
 	}
+	if e := envVar(pods[0].Spec.Containers[0], "C4_NODE"); e == nil || e.ValueFrom == nil || e.ValueFrom.FieldRef == nil || e.ValueFrom.FieldRef.FieldPath != "spec.nodeName" {
+		t.Fatalf("a unit is not told its node through the downward API: %+v", e)
+	}
 	// The unit yields: it saved a checkpoint, and capture made a view.
 	const saved = "c45ZQpdqHMDeGu6tLjk8jmz9XJ2E8Bw7D5Kyxv4Kx3j8bWDE5WgtQ6vqvPXR4ofJXWhSWMLWHmNHx1QgGWy2Bgp6aR"
 	*now = now.Add(time.Minute)
@@ -360,6 +363,15 @@ func envOf(c corev1.Container, name string) string {
 		}
 	}
 	return ""
+}
+
+func envVar(c corev1.Container, name string) *corev1.EnvVar {
+	for i := range c.Env {
+		if c.Env[i].Name == name {
+			return &c.Env[i]
+		}
+	}
+	return nil
 }
 
 // C4_OUTPUT names the first writable input; it is absent when every input

@@ -1751,6 +1751,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 				corev1.VolumeMount{Name: "c4-podinfo", MountPath: "/etc/c4/podinfo", ReadOnly: true})
 		}
 		env = append(env, corev1.EnvVar{Name: "C4_PODINFO", Value: "/etc/c4/podinfo/annotations"})
+		// The node it runs on, so a tool's log can name it for a wrangler.
+		env = append(env, corev1.EnvVar{Name: "C4_NODE", ValueFrom: &corev1.EnvVarSource{
+			FieldRef: &corev1.ObjectFieldSelector{FieldPath: "spec.nodeName"}}})
 		// The control directory, where the node daemon writes the farm's
 		// answer at each safe point (safepoint_decide.go).
 		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "c4-control",
