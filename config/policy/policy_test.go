@@ -59,7 +59,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "host-pods.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "host-pods.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -560,5 +560,58 @@ func TestOnlyTheQueueMakesUnitPods(t *testing.T) {
 	unit.OwnerReferences = nil
 	if err := admin.Patch(ctx, unit, orphan); err != nil {
 		t.Errorf("dropping the reference: %v", err)
+	}
+}
+
+// TestControlsOnlyFromTheHUD: a job's controls (decide, supply, steer,
+// requeue and the rest) are written only by the manager's account, the HUD,
+// which checks who may give each and signs it; a cluster admin patching
+// one directly is refused, and other annotations are untouched.
+func TestControlsOnlyFromTheHUD(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	s := runtime.NewScheme()
+	c4v1.AddToScheme(s)
+	hud, err := client.New(mc, client.Options{Scheme: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(name string, anno map[string]string) *c4v1.WorkJob {
+		return &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: name, Annotations: anno},
+			Spec: c4v1.WorkJobSpec{Class: "render", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
+	}
+	j := mk("sm0140-light-v001", nil)
+	if err := admin.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	patch := func(c client.Client, k, v string) error {
+		return c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"annotations":{%q:%q}}}`, k, v))))
+	}
+	enforced(t, "c4-workjob-controls", func(try int) error {
+		return patch(admin, c4v1.AnnotationDecide, fmt.Sprintf(`{"token":"t%d"}`, try))
+	})
+	for _, k := range []string{c4v1.AnnotationSupply, c4v1.AnnotationSteer, c4v1.AnnotationRequeue, c4v1.AnnotationAcks, c4v1.AnnotationAllowNodes, c4v1.AnnotationAcceptValidated} {
+		if err := patch(admin, k, "x"); err == nil {
+			t.Errorf("%s written directly", k)
+		}
+	}
+	if err := patch(hud, c4v1.AnnotationDecide, `{"token":"hud"}`); err != nil {
+		t.Errorf("the HUD's decide: %v", err)
+	}
+	if err := patch(admin, "example.com/note", "fine"); err != nil {
+		t.Errorf("another annotation: %v", err)
+	}
+	if err := admin.Create(ctx, mk("sm0140-light-v002", map[string]string{c4v1.AnnotationRequeue: "t:1"})); err == nil {
+		t.Error("a job created with a control by someone other than the HUD")
+	}
+	if err := hud.Create(ctx, mk("sm0140-light-v003", map[string]string{c4v1.AnnotationRequeue: "t:1"})); err != nil {
+		t.Errorf("the HUD creating a job with a control: %v", err)
 	}
 }

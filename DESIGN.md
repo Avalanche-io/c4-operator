@@ -646,6 +646,14 @@ credentials.
   `c4.avalanche.io/output-*` annotations, only on pods bound to its own node
   (from the token's `authentication.kubernetes.io/node-name`), and only the
   `c4.avalanche.io/` labels of its own Node.
+- **A job's controls.** Requeue, allowing nodes again, acknowledging,
+  deciding, steering, supplying and accepting a validated input are
+  annotations on the WorkJob that the queue carries out with the actor they
+  name. Only the manager's account may add, change or remove them, on
+  create or update (`config/policy/workjob-controls.yaml`). The HUD, and MCP
+  and `c4 farm` through it, is therefore the one place a control enters the
+  farm: it checks who may give it, signs it and books it. Patch rights on a
+  WorkJob alone cannot decide a person's wait.
 
 ### 6.3 Strict mode: no shared caches
 

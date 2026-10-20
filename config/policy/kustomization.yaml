@@ -1,6 +1,7 @@
 resources:
 - node-writes.yaml
 - workjob-owner.yaml
+- workjob-controls.yaml
 - host-runner.yaml
 - lease-mounts.yaml
 - submit-grants.yaml
