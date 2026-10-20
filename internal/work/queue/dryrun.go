@@ -51,9 +51,20 @@ func (q *Queue) DryRun(ctx context.Context, job *c4v1.WorkJob, project string) (
 	if err != nil {
 		return out, fmt.Errorf("%w: %v", ErrInvalidJob, err)
 	}
-	plan, err := d.Plan(job)
-	if err == nil {
-		plan, err = class.WithReview(job, plan)
+	var plan *class.Plan
+	switch f := job.Spec.Forecast; {
+	case f != nil && f.SlotHours != "":
+		// A forecast is planned as the forecast pass plans it
+		// (forecast.go).
+		plan, err = forecastPlan(job)
+	case f != nil:
+		if plan, err = d.Plan(job); err == nil {
+			forecastUnits(plan, f)
+		}
+	default:
+		if plan, err = d.Plan(job); err == nil {
+			plan, err = class.WithReview(job, plan)
+		}
 	}
 	if err != nil {
 		return out, fmt.Errorf("%w: %v", ErrInvalidJob, err)
@@ -85,6 +96,8 @@ func (q *Queue) DryRun(ctx context.Context, job *c4v1.WorkJob, project string) (
 		v.pools = d.Pools()
 	}
 	v.runnable = append([]int(nil), plan.Order...)
+	// A forecast waits for its work to come: planned, never released.
+	v.blocked = isForecast(draft)
 	q.estimate(v, now)
 	v.obj = d.Objective(draft, now)
 	pol := q.policyForJob(project, draft)
@@ -96,7 +109,11 @@ func (q *Queue) DryRun(ctx context.Context, job *c4v1.WorkJob, project string) (
 	for _, p := range snap.Pools {
 		free += max(0, p.Slots-p.Used)
 	}
-	snap.Jobs = append(append([]sched.Job(nil), snap.Jobs...), schedJob(v, free))
+	sj := schedJob(v, free)
+	if f := draft.Spec.Forecast; f != nil && f.Start != nil {
+		sj.NotBefore = f.Start.Time
+	}
+	snap.Jobs = append(append([]sched.Job(nil), snap.Jobs...), sj)
 	i := len(snap.Jobs) - 1
 
 	out.Units, out.Estimate = len(plan.Units), v.sum
@@ -104,7 +121,7 @@ func (q *Queue) DryRun(ctx context.Context, job *c4v1.WorkJob, project string) (
 	if draft.Spec.Deadline != nil {
 		out.DeadlineSource = "spec"
 	}
-	if md == modeSuggested {
+	if md == modeSuggested && !isForecast(draft) {
 		c, band := candidateIn(policy, cfg, now, snap, key, now, now, pol, adjust)
 		if !c.IsZero() {
 			out.Deadline, out.DeadlineSource = c, "suggested"

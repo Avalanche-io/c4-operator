@@ -436,7 +436,18 @@ func (s *Syncer) links(ctx context.Context, t *c4v1.Tracker) ([]*c4v1.TrackerLin
 // earlier one made.
 func LinkName(tr string, r tracker.Ref) string { return dns(tr + "-" + r.Type + "-" + r.ID) }
 
-func JobName(tr string, r tracker.Ref) string { return dns(tr + "-" + r.ID) }
+func JobName(tr string, r tracker.Ref) string { return jobDNS(tr + "-" + r.ID) }
+
+// jobDNS is dns within a WorkJob name's 50 characters (its unit pods are
+// named after it).
+func jobDNS(s string) string {
+	s = dns(s)
+	if len(s) > 50 {
+		h := sha256.Sum256([]byte(s))
+		s = strings.TrimRight(s[:39], "-") + "-" + hex.EncodeToString(h[:])[:10]
+	}
+	return s
+}
 
 var nonDNS = regexp.MustCompile(`[^a-z0-9-]+`)
 
@@ -543,7 +554,7 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 	}
 	jr := farm.JobRef{Namespace: t.Namespace, Name: JobName(t.Name, it.Ref)}
 	if rule.As == "forecast" {
-		jr.Name = dns(jr.Name + "-forecast")
+		jr.Name = jobDNS(jr.Name + "-forecast")
 	}
 	replaces := ""
 	if l != nil && rule.As == "job" && l.Spec.Intake != int32(idx) && int(l.Spec.Intake) < len(t.Spec.Intake) &&

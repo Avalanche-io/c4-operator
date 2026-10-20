@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -54,6 +55,17 @@ func TestDryRun(t *testing.T) {
 	pinned.Spec.Deadline = busy.Spec.Deadline
 	if dr, err := q.DryRun(ctx, pinned, "namespace/"+ns); err != nil || dr.DeadlineSource != "spec" || dr.Suggestion != nil {
 		t.Fatalf("pinned dry run %+v %v", dr, err)
+	}
+
+	// A forecast is planned as the forecast pass plans it: its slot-hours,
+	// not the class's plan, waiting until its start, and no suggested
+	// deadline.
+	fc := job(ns, "sh050-forecast", "render", "cpu-"+ns, nil, now.Add(48*time.Hour))
+	start := metav1.NewTime(now.Add(40 * time.Hour))
+	fc.Spec.Forecast = &c4v1.WorkForecast{SlotHours: "8", UnitHours: "1", Start: &start}
+	if dr, err := q.DryRun(ctx, fc, "namespace/"+ns); err != nil || dr.Units != 1 || dr.Suggestion != nil ||
+		dr.Estimate.W < 7*3600 || dr.Estimate.W > 9*3600 || dr.Band.P50.Before(start.Time) {
+		t.Fatalf("a forecast's dry run %+v %v", dr, err)
 	}
 
 	// Nothing was written: one job, and its pods only.

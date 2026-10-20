@@ -528,8 +528,12 @@ func TestNames(t *testing.T) {
 		t.Fatal(n)
 	}
 	long := syncer.JobName(strings.Repeat("tracker", 20), tracker.Ref{ID: strconv.Itoa(123456)})
-	if len(long) > 63 || strings.HasSuffix(long, "-") {
+	// within a WorkJob name's 50 characters, and distinct
+	if len(long) > 50 || strings.HasSuffix(long, "-") {
 		t.Fatalf("job name %q", long)
+	}
+	if other := syncer.JobName(strings.Repeat("tracker", 20), tracker.Ref{ID: "123457"}); other == long {
+		t.Fatalf("two entities, one job name %q", long)
 	}
 }
 
