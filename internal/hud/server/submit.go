@@ -533,26 +533,42 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "body: %v", err)
 		return
 	}
+	out, code, err := s.createJob(r, v, m, body, createOpts{})
+	if err != nil {
+		fail(w, code, "%s", err.Error())
+		return
+	}
+	writeJSON(w, code, out)
+}
+
+// createOpts are what a caller inside the HUD gives a job that a POST
+// /jobs request does not carry: a submission's lowering (authoring) adds
+// its annotations (the submission, the derivation class) and labels (the
+// milestone).
+type createOpts struct {
+	Annotations, Labels map[string]string
+}
+
+// createJob checks and creates a job from a POST /jobs request for viewer
+// v, or plans it (body.DryRun), as handleSubmit and the submissions
+// endpoint do. code is the HTTP status, with err the refusal's message.
+func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.SubmitRequest, o createOpts) (api.SubmitResponse, int, error) {
 	project, ns, err := s.project(m, v, body.Project, body.Namespace)
 	if err != nil {
-		fail(w, http.StatusNotFound, "%v", err)
-		return
+		return api.SubmitResponse{}, http.StatusNotFound, fmt.Errorf("%v", err)
 	}
 	var spec c4v1.WorkJobSpec
 	if len(body.Spec) > 0 {
 		if err := class.Strict(body.Spec, &spec); err != nil {
-			fail(w, http.StatusBadRequest, "spec: %v", err)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("spec: %v", err)
 		}
 	}
 	if spec.Class == "" {
-		fail(w, http.StatusBadRequest, "spec.class is required: render, ci or ml")
-		return
+		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("spec.class is required: render, ci or ml")
 	}
 	if len(spec.Template.Spec.Containers) == 0 && spec.Forecast == nil {
 		// A forecast never runs: it needs no image yet.
-		fail(w, http.StatusBadRequest, "spec.template needs a container: the image each unit runs")
-		return
+		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("spec.template needs a container: the image each unit runs")
 	}
 	spec.Template = jobspec.Restrict(spec.Template)
 	name := body.Name
@@ -564,30 +580,25 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		name = nextName(m, ns, body.Shot, stage)
 	}
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
-		fail(w, http.StatusBadRequest, "name %q: %s", name, strings.Join(errs, "; "))
-		return
+		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("name %q: %s", name, strings.Join(errs, "; "))
 	}
 	ctx := r.Context()
 	if err := s.authorize(ctx, r, v, ns, "create", "workjobs", ""); err != nil {
-		fail(w, http.StatusForbidden, "%v", err)
-		return
+		return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%v", err)
 	}
 
 	// input views become Materializations, one per view
 	var mats []*c4v1.Materialization
 	for _, in := range body.Inputs {
 		if in.MountPath == "" || !path.IsAbs(in.MountPath) || path.Clean(in.MountPath) != in.MountPath {
-			fail(w, http.StatusBadRequest, "input mountPath %q must be a clean absolute path", in.MountPath)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("input mountPath %q must be a clean absolute path", in.MountPath)
 		}
 		switch {
 		case in.View != "" && in.FromJob != "":
-			fail(w, http.StatusBadRequest, "an input is a view or a job, not both")
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("an input is a view or a job, not both")
 		case in.View != "":
 			if _, err := c4.Parse(in.View); err != nil {
-				fail(w, http.StatusBadRequest, "input view %q is not a C4 ID", in.View)
-				return
+				return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("input view %q is not a C4 ID", in.View)
 			}
 			mn := inputMaterialization(in.View)
 			mats = append(mats, &c4v1.Materialization{
@@ -600,32 +611,27 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 				spec.DependsOn = append(spec.DependsOn, in.FromJob)
 			}
 		default:
-			fail(w, http.StatusBadRequest, "an input needs a view or a fromJob")
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("an input needs a view or a fromJob")
 		}
 	}
 	if len(mats) > 0 {
 		if err := s.authorize(ctx, r, v, ns, "create", "materializations", ""); err != nil {
-			fail(w, http.StatusForbidden, "%v", err)
-			return
+			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%v", err)
 		}
 	}
 	if body.Due != "" {
 		t, err := s.dueOn(ctx, project, body.Due)
 		if err != nil {
-			fail(w, http.StatusBadRequest, "due: %v", err)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("due: %v", err)
 		}
 		spec.Deadline = &metav1.Time{Time: t}
 	}
 	if body.Follows != "" {
 		if errs := validation.IsDNS1123Subdomain(body.Follows); len(errs) > 0 {
-			fail(w, http.StatusBadRequest, "follows %q: %s", body.Follows, strings.Join(errs, "; "))
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("follows %q: %s", body.Follows, strings.Join(errs, "; "))
 		}
 		if _, err := s.liveJob(ctx, ns, body.Follows); err != nil {
-			fail(w, http.StatusBadRequest, "follows %q: no such job in %s", body.Follows, ns)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("follows %q: no such job in %s", body.Follows, ns)
 		}
 		spec.Follows = body.Follows
 	}
@@ -634,14 +640,11 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		f, err := s.liveJob(ctx, ns, body.Replaces)
 		switch {
 		case err != nil:
-			fail(w, http.StatusBadRequest, "replaces %q: no such job in %s", body.Replaces, ns)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("replaces %q: no such job in %s", body.Replaces, ns)
 		case f.Spec.Forecast == nil:
-			fail(w, http.StatusBadRequest, "replaces %q: it is a real job, not a forecast", body.Replaces)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("replaces %q: it is a real job, not a forecast", body.Replaces)
 		case spec.Forecast != nil:
-			fail(w, http.StatusBadRequest, "replaces %q: a forecast replaces nothing; a real job replaces a forecast", body.Replaces)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("replaces %q: a forecast replaces nothing; a real job replaces a forecast", body.Replaces)
 		}
 		replaced = f
 	}
@@ -660,20 +663,17 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	if body.Shot != "" {
 		if errs := validation.IsValidLabelValue(body.Shot); len(errs) > 0 {
-			fail(w, http.StatusBadRequest, "shot %q: %s", body.Shot, strings.Join(errs, "; "))
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("shot %q: %s", body.Shot, strings.Join(errs, "; "))
 		}
 		job.Labels[c4v1.LabelShot] = body.Shot
 	}
 	if body.TrackerRef != "" {
 		tracker, rest, ok := strings.Cut(body.TrackerRef, "/")
 		if !ok || !strings.Contains(rest, "/") || strings.HasPrefix(rest, "/") || strings.HasSuffix(rest, "/") {
-			fail(w, http.StatusBadRequest, "trackerRef %q: want <tracker>/<type>/<id>", body.TrackerRef)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("trackerRef %q: want <tracker>/<type>/<id>", body.TrackerRef)
 		}
 		if errs := validation.IsValidLabelValue(tracker); len(errs) > 0 || tracker == "" {
-			fail(w, http.StatusBadRequest, "trackerRef %q: tracker %q: %s", body.TrackerRef, tracker, strings.Join(errs, "; "))
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("trackerRef %q: tracker %q: %s", body.TrackerRef, tracker, strings.Join(errs, "; "))
 		}
 		job.Annotations[c4v1.AnnotationTrackerRef] = body.TrackerRef
 		job.Labels[c4v1.LabelTracker] = tracker
@@ -690,8 +690,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			if errors.As(err, &ge) {
 				code = ge.code
 			}
-			fail(w, code, "for %s: %v", body.For, err)
-			return
+			return api.SubmitResponse{}, code, fmt.Errorf("for %s: %v", body.For, err)
 		}
 		grant = g
 		job.Annotations[c4v1.AnnotationOwner] = body.For
@@ -703,30 +702,32 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		// Only one who could have made the forecast replaces it.
 		why, err := s.mayRetire(ctx, v, replaced, grant)
 		if err != nil {
-			fail(w, http.StatusForbidden, "replaces %q: %v", replaced.Name, err)
-			return
+			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("replaces %q: %v", replaced.Name, err)
 		}
 		replaceWhy = why
 	}
 	if body.Type != "" {
 		if errs := validation.IsValidLabelValue(body.Type); len(errs) > 0 {
-			fail(w, http.StatusBadRequest, "type %q: %s", body.Type, strings.Join(errs, "; "))
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("type %q: %s", body.Type, strings.Join(errs, "; "))
 		}
 		job.Labels[c4v1.LabelJobType] = body.Type
 	}
 	if body.Stage != "" {
 		if errs := validation.IsValidLabelValue(body.Stage); len(errs) > 0 {
-			fail(w, http.StatusBadRequest, "stage %q: %s", body.Stage, strings.Join(errs, "; "))
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("stage %q: %s", body.Stage, strings.Join(errs, "; "))
 		}
 		job.Labels[c4v1.LabelStage] = body.Stage
+	}
+	for k, val := range o.Labels {
+		job.Labels[k] = val
+	}
+	for k, val := range o.Annotations {
+		job.Annotations[k] = val
 	}
 	if body.AIUsage != nil {
 		raw, err := json.Marshal(body.AIUsage)
 		if err != nil {
-			fail(w, http.StatusBadRequest, "aiUsage: %v", err)
-			return
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("aiUsage: %v", err)
 		}
 		job.Annotations[c4v1.AnnotationAIUsage] = string(raw)
 	}
@@ -746,12 +747,10 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(estErr, ErrNotPlanned) {
 				code = http.StatusServiceUnavailable
 			}
-			fail(w, code, "%v", estErr)
-			return
+			return api.SubmitResponse{}, code, fmt.Errorf("%v", estErr)
 		}
 		out.Message = name + ": planned, not submitted"
-		writeJSON(w, http.StatusOK, out)
-		return
+		return out, http.StatusOK, nil
 	}
 	if estErr != nil {
 		out.EstimateError = estErr.Error()
@@ -766,15 +765,13 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target,
 			Digest: map[string]string{"sha256": queue.SpecDigest(replaced)}}, pred)
 		if err != nil {
-			fail(w, http.StatusServiceUnavailable, "control record: %v", err)
-			return
+			return api.SubmitResponse{}, http.StatusServiceUnavailable, fmt.Errorf("control record: %v", err)
 		}
 		replaceRecord = id
 	}
 	for _, mt := range mats {
 		if err := s.Client.Create(ctx, mt); err != nil && !apierrors.IsAlreadyExists(err) {
-			fail(w, http.StatusConflict, "materialization %s: %v", mt.Name, err)
-			return
+			return api.SubmitResponse{}, http.StatusConflict, fmt.Errorf("materialization %s: %v", mt.Name, err)
 		}
 	}
 	if err := s.Client.Create(ctx, job); err != nil {
@@ -782,8 +779,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		if !apierrors.IsAlreadyExists(err) {
 			code = http.StatusBadRequest
 		}
-		fail(w, code, "%v", err)
-		return
+		return api.SubmitResponse{}, code, fmt.Errorf("%v", err)
 	}
 	msg := fmt.Sprintf("%s: submitted, %s, %d input view%s", name, spec.Class, len(mats), plural(len(mats)))
 	if grant != nil {
@@ -803,7 +799,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out.Message = msg
-	writeJSON(w, http.StatusCreated, out)
+	return out, http.StatusCreated, nil
 }
 
 func (s *Server) dryRun(ctx context.Context, job *c4v1.WorkJob, project string) (*api.SubmitEstimate, error) {
