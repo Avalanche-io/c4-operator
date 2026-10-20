@@ -13,6 +13,8 @@ import (
 	"sort"
 	"sync"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/effect"
 )
 
 // Ref names one entity in one tracker.
@@ -165,10 +167,14 @@ type Adapter interface {
 	Receive(r *http.Request) (Delivery, error)
 
 	// Writing. Every call carries its key; Probe answers "did this
-	// already happen?" for trackers that take no idempotency key.
+	// already happen?" for trackers that take no idempotency key. Guard
+	// says how a write is kept from happening twice (internal/effect):
+	// the loop journals each write and, after an interrupted one, sends
+	// it again only as its guard allows. Publish keeps itself once.
 	Apply(ctx context.Context, w Write) (Ref, error)
 	Publish(ctx context.Context, on Ref, out Output, key string) (Ref, error)
 	Probe(ctx context.Context, w Write) (done bool, ref Ref, err error)
+	Guard(w Write) effect.Guard
 
 	// People.
 	Person(ctx context.Context, id string) (Person, error)
@@ -180,6 +186,18 @@ var ErrUnsupported = errors.New("tracker: not supported by this tracker")
 
 // ErrNotFound is an entity the tracker does not have, or will not show.
 var ErrNotFound = errors.New("tracker: not found")
+
+// ErrRefused is a request the tracker answered and declined (a 4xx other
+// than a rate limit): nothing was done.
+var ErrRefused = errors.New("tracker: refused")
+
+// Definite says err means a write did not happen: the tracker answered
+// and refused it, has no such entity, cannot take it, or asked to wait.
+// Any other error (a timeout, a 5xx) may have followed the write.
+func Definite(err error) bool {
+	var rl *RateLimited
+	return errors.Is(err, ErrRefused) || errors.Is(err, ErrNotFound) || errors.Is(err, ErrUnsupported) || errors.As(err, &rl)
+}
 
 // ErrBadSignature is a delivery whose signature does not verify.
 var ErrBadSignature = errors.New("tracker: delivery signature does not verify")

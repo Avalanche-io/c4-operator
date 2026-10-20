@@ -40,6 +40,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Avalanche-io/c4-operator/internal/effect"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 )
 
@@ -255,6 +256,8 @@ func (a *Adapter) do(ctx context.Context, method, path, ctype string, in, out an
 				wait = time.Duration(n) * time.Second
 			}
 			return &tracker.RateLimited{Until: a.now().Add(wait), Msg: errText(resp.Status, data)}
+		case resp.StatusCode >= 400 && resp.StatusCode < 500:
+			return fmt.Errorf("flow: %s %s: %s: %w", method, path, errText(resp.Status, data), tracker.ErrRefused)
 		case resp.StatusCode >= 300:
 			return fmt.Errorf("flow: %s %s: %s", method, path, errText(resp.Status, data))
 		}
@@ -757,6 +760,23 @@ func VersionCode(entity, step, task string, n int) string {
 
 // Probe finds a Note already written under w.Key. Field updates need no
 // probe: writing the same values again changes nothing.
+// Guard: a field update and a Note edited in place are the same write
+// sent again; a new Note carries the key's line, which Probe finds.
+func (a *Adapter) Guard(w tracker.Write) effect.Guard {
+	switch w.Kind {
+	case "update":
+		return effect.Idempotent
+	case "note", "mention", "comment":
+		if w.Note != nil && w.Note.Replace != nil {
+			return effect.Idempotent
+		}
+		if w.Key != "" {
+			return effect.Probed
+		}
+	}
+	return effect.Unguarded
+}
+
 func (a *Adapter) Probe(ctx context.Context, w tracker.Write) (bool, tracker.Ref, error) {
 	if (w.Kind != "note" && w.Kind != "mention" && w.Kind != "comment") || w.Key == "" || w.Note == nil || w.Note.Replace != nil {
 		return false, tracker.Ref{}, nil

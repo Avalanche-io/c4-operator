@@ -41,6 +41,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/effect"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
@@ -53,6 +54,10 @@ const (
 	CondSynced      = "Synced"
 	CondDiverged    = "Diverged"
 	CondIntake      = "Intake"
+	// CondUnconfirmed on a TrackerLink: a write to the tracker was
+	// interrupted, and nothing can tell whether it happened; it is held
+	// for a person (integrations GAPS 11).
+	CondUnconfirmed = "Unconfirmed"
 )
 
 // Syncer runs passes over Trackers.
@@ -1278,37 +1283,107 @@ const maxDecisions = 50
 // --- status out ---
 
 // write makes one field's write when its value changed, or when only its
-// continuous part changed and every has passed. The previous write's
-// fingerprint and the tracker entity it made are kept in the link.
+// continuous part changed and every has passed. The write goes through
+// the effect journal (internal/effect, integrations GAPS 11), which is the
+// link's status.written: the intent is kept before it is sent, so a write
+// interrupted by a crash or a lost answer is probed, sent again, or held
+// for a person, as the adapter's guard for it allows, and never made twice
+// on a guess. The previous write's fingerprint and the tracker entity it
+// made are kept there too.
 func (s *Syncer) write(ctx context.Context, c *conn, l *c4v1.TrackerLink, field, value, cont string, every time.Duration, now time.Time,
 	build func(prev tracker.Written) tracker.Write) error {
 	prev := l.Status.Written[field]
 	full := value + "#" + cont
 	switch {
-	case prev.Value == full:
+	case prev.Value == full && prev.State == "":
 		return nil
-	case stateOf(prev.Value) == value && (every == 0 || now.Sub(prev.At.Time) < every):
+	case prev.State == "" && stateOf(prev.Value) == value && (every == 0 || now.Sub(prev.At.Time) < every):
 		return nil // only the ETA moved, and not long ago
 	}
 	w := build(tracker.Written{Value: prev.Value, Ref: prev.Ref})
-	if w.Key != "" {
-		done, ref, err := c.adapter.Probe(ctx, w)
-		if err != nil {
-			return err
+	_, err := effect.Do(ctx, &linkJournal{s: s, l: l, field: field, was: prev}, effect.Call{
+		Key: field, Intent: full, Guard: c.adapter.Guard(w), Definite: tracker.Definite,
+		Send: func(ctx context.Context) (string, error) {
+			ref, err := c.adapter.Apply(ctx, w)
+			if err != nil {
+				return "", err
+			}
+			if ref.ID == "" {
+				return prev.Ref, nil
+			}
+			return ref.ID, nil
+		},
+		Probe: func(ctx context.Context) (bool, string, error) {
+			done, ref, err := c.adapter.Probe(ctx, w)
+			return done, ref.ID, err
+		},
+	}, now)
+	var held *effect.HeldError
+	if errors.As(err, &held) {
+		s.setLinkCond(ctx, l, CondUnconfirmed, metav1.ConditionTrue, "Held",
+			fmt.Sprintf("the %s write was interrupted, and %s cannot tell whether it happened: a person confirms it", field, c.adapter.Kind()))
+		return nil
+	}
+	if err == nil {
+		if cond := meta.FindStatusCondition(l.Status.Conditions, CondUnconfirmed); cond != nil && cond.Status == metav1.ConditionTrue && !anyHeld(l) {
+			s.setLinkCond(ctx, l, CondUnconfirmed, metav1.ConditionFalse, "Confirmed", "")
 		}
-		if done {
-			return s.remember(ctx, l, field, full, ref.ID, now)
+	}
+	return err
+}
+
+func anyHeld(l *c4v1.TrackerLink) bool {
+	for _, w := range l.Status.Written {
+		if w.State == string(effect.Unconfirmed) {
+			return true
 		}
 	}
-	ref, err := c.adapter.Apply(ctx, w)
-	if err != nil {
-		return err
+	return false
+}
+
+// linkJournal is the effect journal for one field of a link: its
+// status.written entry. was is the entry as the write began; Drop puts a
+// written one back (a refused write leaves the last one standing), or
+// keeps only its entity.
+type linkJournal struct {
+	s     *Syncer
+	l     *c4v1.TrackerLink
+	field string
+	was   c4v1.TrackerWritten
+}
+
+func (j *linkJournal) Load(_ context.Context, key string) (effect.Entry, bool, error) {
+	w, ok := j.l.Status.Written[key]
+	st := effect.Done
+	if w.State != "" {
+		st = effect.State(w.State)
 	}
-	id := ref.ID
-	if id == "" {
-		id = prev.Ref
+	return effect.Entry{Key: key, Intent: w.Value, State: st, Ref: w.Ref, At: w.At.Time}, ok, nil
+}
+
+func (j *linkJournal) Save(ctx context.Context, e effect.Entry) error {
+	w := c4v1.TrackerWritten{Value: e.Intent, Ref: e.Ref, At: metav1.NewTime(e.At)}
+	if e.State != effect.Done {
+		w.State = string(e.State)
 	}
-	return s.remember(ctx, l, field, full, id, now)
+	return j.put(ctx, e.Key, w)
+}
+
+func (j *linkJournal) Drop(ctx context.Context, key string) error {
+	w := j.was
+	if w.State != "" {
+		w = c4v1.TrackerWritten{Ref: w.Ref, At: w.At}
+	}
+	return j.put(ctx, key, w)
+}
+
+func (j *linkJournal) put(ctx context.Context, key string, w c4v1.TrackerWritten) error {
+	return j.s.patchLinkStatus(ctx, j.l, func(st *c4v1.TrackerLinkStatus) {
+		if st.Written == nil {
+			st.Written = map[string]c4v1.TrackerWritten{}
+		}
+		st.Written[key] = w
+	})
 }
 
 func stateOf(v string) string {

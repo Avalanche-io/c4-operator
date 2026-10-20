@@ -379,6 +379,13 @@ type TrackerWritten struct {
 	// +optional
 	Ref string      `json:"ref,omitempty"`
 	At  metav1.Time `json:"at"`
+	// State is sending while the write is journaled and not yet answered
+	// (an interruption leaves it so), and unconfirmed when it was
+	// interrupted and nothing can tell whether it happened: it is held
+	// for a person (integrations GAPS 11). Empty: written.
+	// +kubebuilder:validation:Enum=sending;unconfirmed
+	// +optional
+	State string `json:"state,omitempty"`
 }
 
 // TrackerDecision is one tracker decision relayed to C4.

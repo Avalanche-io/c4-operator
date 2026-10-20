@@ -26,6 +26,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Avalanche-io/c4-operator/internal/effect"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 )
 
@@ -181,6 +182,9 @@ func (a *Adapter) classify(resp *http.Response, msg string) error {
 		if resp.StatusCode == http.StatusTooManyRequests || strings.Contains(strings.ToLower(msg), "rate limit") {
 			return &tracker.RateLimited{Until: a.now().Add(time.Minute), Msg: msg}
 		}
+	}
+	if resp.StatusCode >= 400 && resp.StatusCode < 500 {
+		return fmt.Errorf("github: %s: %s: %w", resp.Status, msg, tracker.ErrRefused)
 	}
 	return fmt.Errorf("github: %s: %s", resp.Status, msg)
 }
@@ -750,6 +754,30 @@ func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Outpu
 // Probe looks for a write already made under w.Key: a comment or check
 // run carrying the key's marker, or a commit status with the same context,
 // state and description as the newest one.
+// Guard: an edit, a check-run update and a commit status are the same
+// write sent again; a new comment or check run carries the key's marker,
+// which Probe finds.
+func (a *Adapter) Guard(w tracker.Write) effect.Guard {
+	switch w.Kind {
+	case "status":
+		return effect.Idempotent
+	case "check":
+		if w.Fields["id"] != "" {
+			return effect.Idempotent
+		}
+	case "comment", "mention":
+		if w.Note != nil && w.Note.Replace != nil {
+			return effect.Idempotent
+		}
+	default:
+		return effect.Unguarded
+	}
+	if w.Key == "" {
+		return effect.Unguarded
+	}
+	return effect.Probed
+}
+
 func (a *Adapter) Probe(ctx context.Context, w tracker.Write) (bool, tracker.Ref, error) {
 	switch w.Kind {
 	case "comment", "mention":

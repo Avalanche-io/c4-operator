@@ -50,6 +50,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Avalanche-io/c4-operator/internal/effect"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 )
 
@@ -514,6 +515,14 @@ func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Outpu
 }
 
 // Probe: run status and tag writes are idempotent by themselves.
+// Guard: a run's status and tags are set, the same write sent again.
+func (a *Adapter) Guard(w tracker.Write) effect.Guard {
+	if w.Kind == "run" {
+		return effect.Idempotent
+	}
+	return effect.Unguarded
+}
+
 func (a *Adapter) Probe(context.Context, tracker.Write) (bool, tracker.Ref, error) {
 	return false, tracker.Ref{}, nil
 }

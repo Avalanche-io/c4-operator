@@ -33,6 +33,23 @@ change like a person's. A decision it relays names the tracker, the
 entity that carries it, and the reviewer in its note. The decision's raw
 evidence is stored by C4 ID in the project's store.
 
+Each tracker write is made once (`internal/effect`). c4-sync keeps the
+write in the link's `status.written` before it sends it, so a crash or a
+lost answer leaves it marked `sending`. The next pass then does one of
+three things, as the adapter allows for that write:
+- sends it again, when sending it twice changes nothing (setting a field,
+  editing a comment, updating a check run);
+- looks for it first, by the key marker that a new comment or Note
+  carries, and sends it only if it is not there;
+- holds it as `unconfirmed`, when nothing can tell whether it happened. The
+  link then shows `Unconfirmed`, and a person confirms the write; it is
+  never sent twice on a guess.
+
+A write the tracker refused (a 4xx) is known not to have happened and is
+tried fresh. c4-sync looks for a write only after an interruption, or
+once when the link has no record of the field (its status was lost), not
+before every write.
+
 ## Install
 
 From a release (one manifest with the two CRDs, RBAC, the Deployment and
@@ -186,7 +203,9 @@ risk. A TrackerLink's status shows:
 - each relayed or refused decision, with the reason;
 - the previous versions;
 - `Diverged`, when a person pinned another deadline in the HUD (the person
-  wins).
+  wins);
+- `Unconfirmed`, when a write was interrupted and nothing can tell whether
+  it happened (above).
 
 ## MLflow projects on the farm
 

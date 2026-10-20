@@ -435,6 +435,29 @@ func TestNoDuplicateAfterLostRecord(t *testing.T) {
 	}
 }
 
+// A crash after the comment was journaled and sent, before its answer was
+// kept: the next pass probes, finds it, and does not post it again. Writes
+// the journal vouches for are not probed.
+func TestNoDuplicateAfterInterruptedWrite(t *testing.T) {
+	e := setup(t)
+	e.pass()
+	l := e.link()
+	before := l.DeepCopy()
+	w := l.Status.Written["comment"]
+	w.State, w.Ref = "sending", ""
+	l.Status.Written["comment"] = w
+	if err := e.k8s.Status().Patch(context.Background(), l, client.MergeFrom(before)); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	if n := len(e.gh.Comments(7)); n != 1 {
+		t.Fatalf("%d comments after an interrupted write, want 1", n)
+	}
+	if got := e.link().Status.Written["comment"]; got.Ref == "" || got.State != "" {
+		t.Fatalf("the probe should recover the comment and mark it written: %+v", got)
+	}
+}
+
 // Rate limited: the pass stops, the Tracker says until when, and nothing
 // is called again before then.
 func TestRateLimited(t *testing.T) {
