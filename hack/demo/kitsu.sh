@@ -21,8 +21,9 @@
 #      never set a done status.
 #
 # KITSU_SITE (default http://127.0.0.1:8091) and KITSU_ADMIN (the site's
-# admin, EMAIL:PASSWORD) name the server; without a container named
-# kitsu-local the demo starts one, and removes it at the end.
+# admin, EMAIL:PASSWORD) name the server; a stopped container named
+# kitsu-local is started and stopped again after; without one the demo
+# runs one, and removes it at the end.
 DEMO_NAME=kitsu FAKE=kitsuctl FAKE_ARGS='[]' FAKE_PORT=${KS_PORT:-18082}
 source "$(dirname "$0")/lib.sh"
 KSITE=${KITSU_SITE:-http://127.0.0.1:8091}
@@ -35,6 +36,7 @@ down() {
   lib_down
   if had kitsu-connected; then docker network disconnect kind kitsu-local >/dev/null 2>&1; fi
   if had kitsu-started; then docker rm -f kitsu-local >/dev/null 2>&1; fi
+  if had kitsu-woken; then docker stop kitsu-local >/dev/null 2>&1; fi
 }
 
 demo_start "$@"
@@ -46,6 +48,9 @@ kitsu_site() {
   if ! docker inspect kitsu-local >/dev/null 2>&1; then
     docker run -d --name kitsu-local -p 127.0.0.1:8091:80 -e MAIL_CHECK_DELIVERABILITY=false "$KIMG" >/dev/null
     note kitsu-started
+  elif [ "$(docker inspect -f '{{.State.Running}}' kitsu-local)" != true ]; then
+    docker start kitsu-local >/dev/null
+    note kitsu-woken
   fi
   if [ -z "$(docker inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' kitsu-local)" ]; then
     docker network connect kind kitsu-local
