@@ -139,11 +139,12 @@ func TestAgentIssuesRenewsRevokes(t *testing.T) {
 	if strings.Contains(secret(), refresh) {
 		t.Fatal("the refresh token left the machine")
 	}
+	// The Secret is written before the lease's status, so wait for both.
 	var l c4v1.CredentialLease
-	c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "joshua-claude"}, &l)
-	if l.Status.State != c4v1.LeaseActive || l.Status.ExpiresAt == nil {
-		t.Fatalf("lease %+v", l.Status)
-	}
+	waitFor("the lease to be active", func() bool {
+		return c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "joshua-claude"}, &l) == nil &&
+			l.Status.State == c4v1.LeaseActive && l.Status.ExpiresAt != nil
+	})
 
 	// the holder's Claude Code refreshes: the agent copies the new token
 	src.set(signIn("sk-ant-oat01-second", time.Now().Add(2*time.Hour)))
