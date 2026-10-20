@@ -511,6 +511,9 @@ func orderedObject(b []byte) ([]string, []json.RawMessage, error) {
 // ghcr.io/avalanche-io/c4-<name>, at the tag written, else release. Any
 // other name is returned as written. Publishing resolves the result to a
 // digest for tool.lock.
+// ImageRegistry is where the farm's own images (c4/<name>) live.
+const ImageRegistry = "ghcr.io/avalanche-io/"
+
 func ImageRef(written, release string) string {
 	rest, ok := strings.CutPrefix(written, "c4/")
 	if !ok || rest == "" {
@@ -520,5 +523,5 @@ func ImageRef(written, release string) string {
 	if !tagged {
 		tag = release
 	}
-	return "ghcr.io/avalanche-io/c4-" + name + ":" + tag
+	return ImageRegistry + "c4-" + name + ":" + tag
 }
