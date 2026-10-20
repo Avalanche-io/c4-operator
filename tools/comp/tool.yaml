@@ -1,0 +1,34 @@
+c4: tool/1
+name: comp
+title: Composite
+summary: Composites frames with a Nuke script (.nk, on farms with a Nuke image) or with an OpenImageIO shell script on any farm.
+kind: frames
+runs:
+  image: c4/job-oiio
+  command: [bash, "{{Tool.Dir}}/comp.sh", "{{Param.script}}", "{{Param.engine}}"]
+  workdir: "{{Job.Tree}}"
+frames: {chunk: 4, order: binary}
+params:
+- name: script
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The comp. A Nuke script renders its Write nodes; a shell script runs with C4_FRAME_START, C4_FRAME_END and C4_TREE set, from the job's tree. Either writes comp/<shot>.<frame>.exr.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Comp script, fileFilters: [{label: Nuke, patterns: ["*.nk"]}, {label: OpenImageIO script, patterns: ["*.sh"]}]}
+- name: engine
+  type: STRING
+  default: auto
+  allowedValues: [auto, nuke, oiio]
+  description: What runs the script. auto runs a .nk with Nuke and anything else with sh.
+  show: advanced
+  userInterface: {control: DROPDOWN_LIST, label: Engine}
+writes: [comp/]
+previews: "comp/*.$F4.exr"
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1002
+  with: {script: comp.sh}
+  expect: [comp/test.1001.exr, comp/test.1002.exr]
