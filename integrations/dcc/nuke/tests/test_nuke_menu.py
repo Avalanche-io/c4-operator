@@ -5,7 +5,7 @@ import runpy
 import sys
 
 import fakenuke as nk
-from scripts import comp_script
+from nuke_scripts import comp_script
 from c4submit.testing import FakeFarm, SALTMARSH
 
 MENU = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "menu.py")

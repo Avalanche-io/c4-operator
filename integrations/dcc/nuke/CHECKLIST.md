@@ -18,7 +18,7 @@ terminal, and an otherwise normal start.
 1. Put `integrations/dcc/nuke` on `NUKE_PATH`. Leave `integrations/dcc/c4submit`
    beside it, as it is in the repository.
 2. Build a show folder (for example `/tmp/show`) with the comp from
-   `tests/scripts.py`: 48 plate frames `plates/sm0140.1001.exr`…, 48 light
+   `tests/nuke_scripts.py`: 48 plate frames `plates/sm0140.1001.exr`…, 48 light
    renders `render/light/sm0140_beauty.1001.exr`…, and `luts/show.cube`. Any
    small EXRs will do.
 3. Run a farm that answers. Without a real HUD, use c4submit's fake farm over

@@ -4,7 +4,7 @@ import os
 
 import fakenuke as nk
 from c4submit.testing import write
-from scripts import comp_script
+from nuke_scripts import comp_script
 
 from c4_nuke.host import NukeHost, ocio_search_dirs
 

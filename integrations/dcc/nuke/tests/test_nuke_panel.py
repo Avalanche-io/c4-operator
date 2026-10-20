@@ -10,7 +10,7 @@ from c4submit import yamlio
 from c4submit.form import Form
 from c4submit.testing import KARMA, NUKE_COMP, SALTMARSH, FakeFarm
 from c4submit.tool import Tool
-from scripts import comp_script
+from nuke_scripts import comp_script
 
 from c4_nuke import panel
 from c4_nuke.panel import EACH_WRITE, STALE, SUGGESTED, TYPED, form_specs, knob_kind
