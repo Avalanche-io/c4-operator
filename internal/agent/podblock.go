@@ -71,9 +71,9 @@ func (b *PodBlock) pod() *corev1.Pod {
 		k, v, _ := strings.Cut(kv, "=")
 		env = append(env, corev1.EnvVar{Name: k, Value: v})
 	}
-	ns := "default"
-	if raw, err := os.ReadFile("/var/run/secrets/kubernetes.io/serviceaccount/namespace"); err == nil {
-		ns = strings.TrimSpace(string(raw))
+	ns := b.Env("C4_NAMESPACE") // a unit pod holds no service-account token
+	if ns == "" {
+		ns = "default"
 	}
 	return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Labels: map[string]string{c4v1.LabelJob: b.Env("C4_JOB")}},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "block", Env: env}}}}

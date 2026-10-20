@@ -471,3 +471,27 @@ func TestNodeSlotLimit(t *testing.T) {
 		t.Fatalf("pool slots %d after both limits went to 0", p.Status.Slots)
 	}
 }
+
+// A unit pod holds no Kubernetes API token, whatever its template says,
+// and knows its namespace from its environment.
+func TestUnitHoldsNoToken(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 2)
+	j := job(ns, "notoken", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(time.Hour))
+	yes := true
+	j.Spec.Template.Spec.AutomountServiceAccountToken = &yes
+	if err := k8s.Create(context.Background(), j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	pods := unitPods(t, ns, "notoken")
+	if len(pods) != 1 {
+		t.Fatalf("%d pods", len(pods))
+	}
+	p := pods[0]
+	if a := p.Spec.AutomountServiceAccountToken; a == nil || *a {
+		t.Fatalf("automountServiceAccountToken %v", a)
+	}
+	if envOf(p.Spec.Containers[0], "C4_NAMESPACE") != ns {
+		t.Fatalf("C4_NAMESPACE %q", envOf(p.Spec.Containers[0], "C4_NAMESPACE"))
+	}
+}

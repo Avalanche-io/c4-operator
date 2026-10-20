@@ -1448,6 +1448,11 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	pod.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob",
 		Name: j.Name, UID: j.UID, Controller: &t, BlockOwnerDeletion: &t}}
 	pod.Spec.RestartPolicy = corev1.RestartPolicyNever
+	// A unit holds no Kubernetes API token: it reaches the farm only
+	// through what the queue gives it (its control directory, its pod's
+	// annotations, and the HUD with a token a tool profile grants).
+	noToken := false
+	pod.Spec.AutomountServiceAccountToken = &noToken
 	if pod.Spec.PriorityClassName == "" && q.pcReady {
 		pod.Spec.PriorityClassName = q.PriorityClass
 	}
@@ -1476,7 +1481,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		pod.Spec.Affinity = notOnNodes(pod.Spec.Affinity, bad)
 	}
 	env := append([]corev1.EnvVar{
-		{Name: "C4_JOB", Value: j.Name}, {Name: "C4_UNIT", Value: strconv.Itoa(idx)},
+		{Name: "C4_JOB", Value: j.Name}, {Name: "C4_NAMESPACE", Value: j.Namespace}, {Name: "C4_UNIT", Value: strconv.Itoa(idx)},
 		{Name: "C4_ATTEMPT", Value: strconv.Itoa(attempt)}, {Name: "C4_UNIT_LABEL", Value: u.Label},
 	}, u.Env...)
 	// Every unit sees its pod's annotations, so any unit that announces

@@ -1165,7 +1165,7 @@ advertises devices), and every unit pod requests its unit's slots, so
 kube-scheduler places units by slot exactly as the queue counts them. A unit
 pod has a generated name, an owner reference to its job, the pool's node
 selector and tolerations, the job's inputs as C4 CSI volumes, and the unit's
-environment (`C4_FRAMES`, `C4_SHARD`, `C4_STEPS`..., and `C4_OUTPUT`, the mount path of the first writable input, where the unit writes what is captured). Finished pods are
+environment (`C4_JOB`, `C4_NAMESPACE`, `C4_UNIT`, `C4_FRAMES`, `C4_SHARD`, `C4_STEPS`..., and `C4_OUTPUT`, the mount path of the first writable input, where the unit writes what is captured). A unit pod holds no Kubernetes API token (`automountServiceAccountToken: false`, whatever its template says): it reaches the farm through its control directory, its pod's annotations, and the HUD with a token its tool profile grants. Finished pods are
 deleted only after the status that records them is written, so a restart
 loses no unit. The manager caches only unit pods (a label selector), not
 every pod in the cluster.
