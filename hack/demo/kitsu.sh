@@ -22,7 +22,7 @@
 #
 # KITSU_SITE (default http://127.0.0.1:8091) and KITSU_ADMIN (the site's
 # admin, EMAIL:PASSWORD) name the server; without a container named
-# c4-kitsu the demo starts one, and removes it at the end.
+# kitsu-local the demo starts one, and removes it at the end.
 DEMO_NAME=kitsu FAKE=kitsuctl FAKE_ARGS='[]' FAKE_PORT=${KS_PORT:-18082}
 source "$(dirname "$0")/lib.sh"
 KSITE=${KITSU_SITE:-http://127.0.0.1:8091}
@@ -33,8 +33,8 @@ KS=$ROOT/bin/kitsuctl
 eval "lib_$(declare -f down)"
 down() {
   lib_down
-  if had kitsu-connected; then docker network disconnect kind c4-kitsu >/dev/null 2>&1; fi
-  if had kitsu-started; then docker rm -f c4-kitsu >/dev/null 2>&1; fi
+  if had kitsu-connected; then docker network disconnect kind kitsu-local >/dev/null 2>&1; fi
+  if had kitsu-started; then docker rm -f kitsu-local >/dev/null 2>&1; fi
 }
 
 demo_start "$@"
@@ -43,15 +43,15 @@ demo_start "$@"
 # reaches it; KIP is its address there.
 kitsu_site() {
   log "Kitsu: $KSITE, on the kind network"
-  if ! docker inspect c4-kitsu >/dev/null 2>&1; then
-    docker run -d --name c4-kitsu -p 127.0.0.1:8091:80 -e MAIL_CHECK_DELIVERABILITY=false "$KIMG" >/dev/null
+  if ! docker inspect kitsu-local >/dev/null 2>&1; then
+    docker run -d --name kitsu-local -p 127.0.0.1:8091:80 -e MAIL_CHECK_DELIVERABILITY=false "$KIMG" >/dev/null
     note kitsu-started
   fi
-  if [ -z "$(docker inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' c4-kitsu)" ]; then
-    docker network connect kind c4-kitsu
+  if [ -z "$(docker inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' kitsu-local)" ]; then
+    docker network connect kind kitsu-local
     note kitsu-connected
   fi
-  KIP=$(docker inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' c4-kitsu)
+  KIP=$(docker inspect -f '{{with index .NetworkSettings.Networks "kind"}}{{.IPAddress}}{{end}}' kitsu-local)
   wait_until "Kitsu's API on $KSITE" 300 curl -sf "$KSITE/api"
   wait_until "Kitsu from the cluster's node, at $KIP" 60 docker exec "$NODE" curl -sf "http://$KIP/api"
 }

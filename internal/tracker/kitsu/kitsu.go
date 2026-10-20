@@ -1,7 +1,6 @@
 // Package kitsu is c4-sync's Kitsu adapter (CGWire's open-source
-// production tracker; proposals/integrations tools/kitsu.md). It speaks
-// the REST API of Kitsu's server, Zou, through the routes the Gazu client
-// documents, as a bot: a Kitsu Person with is_bot set, whose API token is
+// production tracker). It speaks the REST API of Kitsu's server, Zou,
+// through the routes the Gazu client documents, as a bot: a Kitsu Person with is_bot set, whose API token is
 // the credential, used as the bearer.
 //
 // What it does in Kitsu:
@@ -516,7 +515,7 @@ func (a *Adapter) item(ctx context.Context, t task, p place) (tracker.Item, erro
 	if d, err := time.Parse(timeLayout, t.DueDate); err == nil {
 		it.Due = &tracker.Due{At: d, DateOnly: d.Hour() == 0 && d.Minute() == 0 && d.Second() == 0}
 	}
-	// The bid, in minutes: a forecast's size (GAPS 9).
+	// The bid, in minutes: what sizes a forecast (DESIGN.md, forecast jobs).
 	if t.Estimation > 0 {
 		it.Fields["estimation"] = strconv.FormatFloat(t.Estimation, 'f', -1, 64)
 	}

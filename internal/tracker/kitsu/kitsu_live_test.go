@@ -21,7 +21,7 @@ import (
 // server, never a studio's. It seeds its own production with the admin's
 // sign-in, so each run is separate.
 //
-//	docker run -d --name c4-kitsu -p 127.0.0.1:8091:80 -e MAIL_CHECK_DELIVERABILITY=false cgwire/cgwire:1.0.73
+//	docker run -d --name kitsu-local -p 127.0.0.1:8091:80 -e MAIL_CHECK_DELIVERABILITY=false cgwire/cgwire:1.0.73
 //	KITSU_LIVE=http://127.0.0.1:8091 KITSU_LIVE_ADMIN=admin@example.com:mysecretpassword go test -run TestLive ./internal/tracker/kitsu/
 func TestLive(t *testing.T) {
 	site, admin := os.Getenv("KITSU_LIVE"), os.Getenv("KITSU_LIVE_ADMIN")
