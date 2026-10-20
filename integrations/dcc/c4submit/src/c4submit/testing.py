@@ -44,7 +44,8 @@ NUKE_COMP = {
         {"name": "threads", "type": "INT", "default": 0, "minValue": 0, "maxValue": 128, "show": "advanced",
          "affectsOutput": False},
     ],
-    "needs": {"cpu": 4, "memory": "16G", "licences": {"foundry/nuke_r": 1}},
+    # No licences: the farm refuses tools that need them until it counts seats.
+    "needs": {"cpu": 4, "memory": "16G"},
     "reuse": "exact",
 }
 
@@ -66,7 +67,7 @@ KARMA = {
          "allowedValues": ["BRAY_HdKarmaXPU", "BRAY_HdKarma"],
          "userInterface": {"control": "DROPDOWN_LIST", "label": "Engine"}},
     ],
-    "needs": {"cpu": 8, "memory": "64G", "gpu": 1, "gpuMemory": "24G", "licences": {"sesi/karma": 1},
+    "needs": {"cpu": 8, "memory": "64G", "gpu": 1, "gpuMemory": "24G",
               "sizes": {"heavy": {"memory": "128G", "gpuMemory": "48G"}}},
     "reuse": "exact",
 }
@@ -192,6 +193,9 @@ class FakeFarm:
                                              "c4 farm tools lists the tools you can use"))
                 continue
             tool = Tool(self.tools_by[name])
+            if tool.licences:
+                errs.append(submission.error(f"jobs.{key}.tool", f"{name} needs licences ({', '.join(sorted(tool.licences))}), "
+                                             "which this farm cannot count yet", "use a version of the tool that declares none for now"))
             for pname, v in (job.get("with") or {}).items():
                 p = tool.param(pname)
                 if p is None:
@@ -208,48 +212,69 @@ class FakeFarm:
                                              "sizes: " + ", ".join(tool.sizes) if tool.sizes else ""))
         return errs
 
-    def _answer(self, doc: dict) -> dict:
+    def _answer(self, doc: dict, dry_run: bool) -> dict:
+        """POST /submissions' answer, in the farm's shape: per job its key,
+        name, tool and version, what it is in a line, and its estimate (in a
+        dry run, a job that follows another has none yet: estimateError);
+        the submission's estimate as a whole."""
         errs = submission.check(doc) + self._tool_errors(doc)
         if errs:
-            return {"ok": False, "errors": errs, "estimate": None}
+            return {"ok": False, "errors": errs}
         due_at, source = None, "suggested"
         proj = self.projects.get(doc.get("project", ""), {})
         due = doc.get("due", "suggested")
         for m in proj.get("milestones", []):
             if m["name"] == due:
-                due_at, source = m["at"], f"milestone {due}"
-        jobs, finish = [], self.now
+                due_at, source = m["at"], "spec"
+        stamp = lambda t: t.isoformat().replace("+00:00", "Z")  # noqa: E731
+        jobs, finish, names = [], self.now, {}
+        for key, job in doc["jobs"].items():
+            v = self.versions.get(f"{doc.get('shot')}-{key}", 0) + 1
+            names[key] = f"{doc.get('shot')}-{key}-v{v:03d}"
         for key, job in doc["jobs"].items():
             name = job["tool"].split("@")[0]
             tool = Tool(self.tools_by[name])
             n = len(framelib.parse(job["frames"])) if job.get("frames") else 1
             chunk = tool.frames_defaults.get("chunk", 1) if tool.takes_frames else n
             units = -(-n // chunk)
-            finish = finish + timedelta(minutes=2 * units)
-            v = self.versions.get(f"{doc.get('shot')}-{key}", 0) + 1
-            est = {"eta50": finish.isoformat().replace("+00:00", "Z"),
-                   "eta90": (finish + timedelta(minutes=units)).isoformat().replace("+00:00", "Z")}
-            if due_at:
-                est.update({"due": due_at, "dueSource": source,
-                            "slackSeconds": int((datetime.fromisoformat(due_at.replace("Z", "+00:00"))
-                                                 - (finish + timedelta(minutes=units))).total_seconds())})
-            out = {"key": key, "name": f"{doc.get('shot')}-{key}-v{v:03d}", "tool": f"{name}@v1", "units": units,
-                   "estimate": est}
-            if tool.licences:
-                out["licences"] = [{"pool": k.split("/")[0], "feature": k.split("/")[1], "perUnit": c,
-                                    "free": 6, "total": 12} for k, c in tool.licences.items()]
+            after = job.get("after")
+            after = [after] if isinstance(after, str) else list(after or [])
+            what = (f"{n} frames in {units} units" if tool.takes_frames else "1 unit")
+            if after:
+                what += ", after " + ", ".join(names[a] for a in after)
+            out = {"key": key, "namespace": doc.get("project", ""), "name": names[key], "tool": name,
+                   "version": "v1", "what": what, "link": f"/jobs/{doc.get('project', '')}/{names[key]}"}
+            if after:
+                out["after"] = [names[a] for a in after]
+            if dry_run and after:
+                out["estimateError"] = f"it follows {names[after[0]]}, which does not exist until this is submitted"
+            else:
+                finish = finish + timedelta(minutes=2 * units)
+                eta90 = finish + timedelta(minutes=units)
+                est = {"units": units, "eta50": stamp(finish), "eta90": stamp(eta90), "feasible": True, "atRisk": False,
+                       "deadlineSource": source, "slackSeconds": 0}
+                if due_at:
+                    est.update({"deadline": due_at, "slackSeconds": int(
+                        (datetime.fromisoformat(due_at.replace("Z", "+00:00")) - eta90).total_seconds())})
+                out["estimate"] = est
             jobs.append(out)
-        ans = {"ok": True, "jobs": jobs, "estimate": dict(jobs[-1]["estimate"]), "warnings": []}
-        tree = doc.get("tree", "")
-        if tree.startswith("c4") and tree not in self.views:
-            ans["treeStored"] = False   # as proposed: a dry run takes a tree not uploaded yet
+        ests = [j["estimate"] for j in jobs if j.get("estimate")]
+        ans = {"ok": True, "jobs": jobs, "warnings": []}
+        if dry_run:
+            ans["dryRun"] = True
+        if ests:
+            last = max(ests, key=lambda e: e["eta90"])
+            ans["estimate"] = {"eta50": last["eta50"], "eta90": last["eta90"], "slackSeconds": min(e["slackSeconds"] for e in ests),
+                               "feasible": True, "atRisk": False, "jobs": len(ests)}
+            if due_at:
+                ans["estimate"]["deadline"] = due_at
         return ans
 
     def check(self, doc: dict, explain: bool = False) -> dict:
         self.calls.append(("check", json.loads(json.dumps(doc))))
         if not self.serves_submissions:
             raise NotOnFarm(404, "this farm does not take submissions yet (POST /submissions)")
-        return self._answer(doc)
+        return self._answer(doc, True)
 
     def submit(self, doc: dict) -> dict:
         self.calls.append(("submit", json.loads(json.dumps(doc))))
@@ -259,7 +284,7 @@ class FakeFarm:
         if tree.startswith("c4") and tree not in self.views:
             return {"ok": False, "errors": [submission.error("tree", f"no tree {tree} in the project's store",
                                                              "upload it first")]}
-        ans = self._answer(doc)
+        ans = self._answer(doc, False)
         if ans["ok"]:
             for j in ans["jobs"]:
                 k = f"{doc.get('shot')}-{j['key']}"
@@ -318,9 +343,9 @@ class _Handler(BaseHTTPRequestHandler):
                 req = json.loads(self._body())
                 if req.get("dryRun"):
                     ans = f.check(req["submission"], req.get("explain", False))
-                    return self._send(200 if ans.get("ok") else 400, ans)
+                    return self._send(200 if ans.get("ok") else 422, ans)
                 ans = f.submit(req["submission"])
-                return self._send(201 if ans.get("ok") else 400, ans)
+                return self._send(201 if ans.get("ok") else 422, ans)
         except FarmError as e:
             return self._send(e.status or 500, e.body if isinstance(e.body, dict) else {"error": e.message})
         return self._send(404, {"error": "not found"})

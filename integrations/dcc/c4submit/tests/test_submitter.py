@@ -75,11 +75,12 @@ def test_two_writes_become_two_jobs_with_after(tmp_path, farm, nocache):
 
     lines = summary.lines(c, now=NOW)
     heads = [ln.text for ln in lines if ln.label == ""]
-    assert heads[0].startswith("sm0140-comp-bg-v001   Nuke comp · 48 frames · 12 units")
-    assert "after comp-bg" in heads[1]
+    assert heads[0] == "sm0140-comp-bg-v001   Nuke comp · 48 frames in 12 units"
+    assert heads[1] == "sm0140-comp-main-v001   Nuke comp · 48 frames in 12 units, after sm0140-comp-bg-v001"
     dues = [ln for ln in lines if ln.label == "due"]
-    assert dues and "dailies" in dues[0].text and "slack" in dues[0].text
-    assert any(ln.label == "licences" and "6 of 12 seats free now" in ln.text for ln in lines)
+    assert dues and "Dailies, Thu 18:00" in dues[0].text and "slack" in dues[0].text
+    # The second follows the first, which does not exist in a dry run: no estimate for it yet.
+    assert [ln.level for ln in lines if ln.label == "estimate" and ln.job == "comp-main"] == ["warn"]
     files = [ln.text for ln in lines if ln.label == "files"][0]
     assert files.startswith("98 found from sm0140_comp_v004.nk") and "98 to upload" in files
 

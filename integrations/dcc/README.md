@@ -89,12 +89,14 @@ Render Queue executor).
 
 ## Status
 
-Built against the design before the farm's routes exist: `POST
-/submissions`, `GET /tools/{project}` and `GET /projects/{project}` are
-slice 1 of the plan, and their shapes here are the ones proposed to the
-farm's owners. A farm without them still lets a panel collect, check the
-file locally and save it; Submit needs them. A panel's local check
-refuses what the schema refuses (`schema/`), in the same words, and its
-tests run the schema's fixtures. A panel writes `root` (where the tree's
-top is on the artist's machine, for path mapping) only when it differs
-from the project's root path.
+A panel uses the farm's routes as API.md gives them: `GET /tools` and
+`/tools/{project}/{tool}` for the form, `GET /projects/{project}` for
+"Needed by" and the project's root path, `POST /submissions` (with
+`dryRun`) for the check and the submit. A farm without them still lets a
+panel collect, check the file locally and save it (with `C4_TOOL_PATH` for
+the form); Submit needs them. A panel's local check refuses what the schema
+refuses (`schema/`), in the same words, and its tests run the schema's
+fixtures. A panel writes `root` (where the tree's top is on the artist's
+machine, for path mapping) only when it differs from the project's root
+path. Until the farm counts licence seats, it refuses tools that declare
+licences, and the summary shows seats only once the farm reports them.

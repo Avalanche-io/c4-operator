@@ -11,11 +11,13 @@ level (``ok``, ``warn``, ``error``) so a panel can colour it.
 """
 
 import os
+import re
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from c4submit import frames as framelib
+from c4submit import submission
 from c4submit.submitter import Checked
 
 
@@ -66,7 +68,19 @@ def size(n: int) -> str:
     return f"{n} bytes"
 
 
-def _estimate_lines(est: dict, key: str, now: Optional[datetime]) -> List[Line]:
+def _due_label(due: Any, milestones: Dict[str, str]) -> str:
+    """What a due is called: a milestone by its label, the farm's
+    suggestion, or nothing for a time the artist typed."""
+    if not isinstance(due, str) or not due or due == "suggested":
+        return "suggested by the farm"
+    if due in milestones:
+        return milestones[due]
+    if submission.due_problem(due) == "" and re.fullmatch(r"[a-z][a-z0-9-]*", due):
+        return due.replace("-", " ")
+    return ""
+
+
+def _estimate_lines(est: dict, key: str, now: Optional[datetime], label: str = "") -> List[Line]:
     out = []
     eta50, eta90 = parse_time(est.get("eta50", "")), parse_time(est.get("eta90", ""))
     if eta50:
@@ -74,15 +88,9 @@ def _estimate_lines(est: dict, key: str, now: Optional[datetime]) -> List[Line]:
         if eta90:
             text += f", p90 {clock(eta90, now, utc=False)}"
         out.append(Line("estimate", text, job=key))
-    due = parse_time(est.get("due") or est.get("deadline") or "")
+    due = parse_time(est.get("deadline") or est.get("due") or "")
     if due:
-        src = est.get("dueSource") or est.get("deadlineSource") or ""
-        if src.startswith("milestone "):
-            src = src[len("milestone "):].replace("-", " ")
-        elif src in ("suggested",):
-            src = "suggested by the farm"
-        else:
-            src = ""
+        src = label
         slack = est.get("slackSeconds")
         text = clock(due, now) + (f" · {src}" if src else "")
         level = "ok"
@@ -113,6 +121,8 @@ def lines(checked: Checked, now: Optional[datetime] = None, errors: bool = True)
         out.append(Line("warning", w, "warn"))
     d = checked.prepared.draft
     ans = checked.answer or {}
+    milestones = {m.get("name", ""): m.get("label") or m.get("name", "").replace("-", " ")
+                  for m in (d.project_info.get("milestones") or [])}
     farm_jobs = {j.get("key") or "": j for j in ans.get("jobs") or []}
     farm_list = list(ans.get("jobs") or [])
     col = checked.collection
@@ -126,15 +136,18 @@ def lines(checked: Checked, now: Optional[datetime] = None, errors: bool = True)
         fj = farm_jobs.get(key) or (farm_list[i] if i < len(farm_list) else {})
         name = fj.get("name") or f"{checked.doc.get('shot', '')}-{key}".strip("-")
         head = [d.tool.title]
-        if job.get("frames"):
+        if fj.get("what"):
+            # The farm says what the job is in a line: frames, units, what it follows.
+            head.append(fj["what"])
+        elif job.get("frames"):
             try:
                 n = len(framelib.parse(job["frames"]))
                 head.append(f"{n:,} frame{'s' if n != 1 else ''}")
             except ValueError:
                 head.append(str(job["frames"]))
-        if fj.get("units"):
+        if fj.get("units") and not fj.get("what"):
             head.append(f"{fj['units']:,} units" + (f" ({fj['expected']})" if fj.get("expected") else ""))
-        if job.get("after"):
+        if job.get("after") and not fj.get("what"):
             after = job["after"] if isinstance(job["after"], list) else [job["after"]]
             head.append("after " + ", ".join(after))
         out.append(Line("", f"{name}   " + " · ".join(head), job=key))
@@ -143,11 +156,16 @@ def lines(checked: Checked, now: Optional[datetime] = None, errors: bool = True)
             per = lic.get("perUnit", 1)
             text = f"{lic.get('pool')}/{lic.get('feature')}, {per} per unit" + (f" · {seats}" if seats else "")
             out.append(Line("licences", text, "warn" if lic.get("free", 1) == 0 else "ok", job=key))
+        label = _due_label(job.get("due", checked.doc.get("due")), milestones)
         est = fj.get("estimate") or (ans.get("estimate") if len(checked.doc.get("jobs", {})) == 1 else None)
         if est:
-            out += _estimate_lines(est, key, now)
+            out += _estimate_lines(est, key, now, label)
+        elif fj.get("estimateError"):
+            out.append(Line("estimate", fj["estimateError"], "warn", job=key))
     if ans.get("estimate") and len(checked.doc.get("jobs", {})) > 1 and not all(j.get("estimate") for j in farm_list):
-        out += _estimate_lines(ans["estimate"], "", now)
+        # The whole submission: the latest finish against the earliest due.
+        whole = _estimate_lines(ans["estimate"], "", now, _due_label(checked.doc.get("due"), milestones))
+        out += [Line("all jobs" if ln.label == "estimate" else ln.label, ln.text, ln.level) for ln in whole]
     return out
 
 

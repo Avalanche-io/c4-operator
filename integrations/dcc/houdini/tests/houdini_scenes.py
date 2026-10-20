@@ -26,7 +26,7 @@ HOUDINI_ROP = {
         {"name": "verbose", "type": "BOOL", "default": False, "show": "advanced",
          "userInterface": {"label": "Verbose log"}},
     ],
-    "needs": {"cpu": 16, "memory": "64G", "licences": {"sesi/houdini_engine": 1}},
+    "needs": {"cpu": 16, "memory": "64G"},  # no licences: the farm cannot count seats yet
     "reuse": "exact",
 }
 

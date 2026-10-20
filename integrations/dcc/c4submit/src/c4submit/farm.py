@@ -8,10 +8,10 @@ Configuration, in order: explicit arguments, then the environment:
 - ``C4_HUD_TOKEN`` or ``C4_HUD_TOKEN_FILE``: the artist's bearer token (the
   file is read on every request, so a rotated token takes effect).
 
-The tools routes are the farm's (``GET /tools/{project}`` and
-``/tools/{project}/{tool}``). Submissions and projects are not built yet;
-their shapes here are the ones proposed for them on 2026-10-20, and change
-with what lands.
+The routes are API.md's: ``GET /tools/{project}`` and
+``/tools/{project}/{tool}``, ``GET /projects/{project}``, and ``POST
+/submissions`` (a refusal is ``422`` with its errors, which ``check`` and
+``submit`` return as an answer, not an exception).
 """
 
 import json

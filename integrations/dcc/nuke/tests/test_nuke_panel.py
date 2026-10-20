@@ -127,8 +127,8 @@ def test_open_check_submit(tmp_path, farm):
     assert p.checked.ok, p.checked.errors
     text = value(p, "c4_summary")
     assert "sm0140-comp-bg-v001   Nuke comp · 48 frames" in text
-    assert "after comp-bg" in text
-    assert re.search(r"estimate\s+ready", text) and "dailies · slack" in text
+    assert "after sm0140-comp-bg-v001" in text
+    assert re.search(r"estimate\s+ready", text) and "Dailies, Thu 18:00 · slack" in text
     assert "98 found from sm0140_comp_v004.nk" in text and "98 to upload" in text
     assert text.endswith("Ready: press Submit to send it to the farm.")
     assert farm.calls[-1][0] == "check" and not farm.store

@@ -46,10 +46,9 @@ def test_lighting_check_then_submit(tmp_path, monkeypatch):
     node.parm("c4_check").pressButton()
     text = summary(node)
     assert text.startswith("  files      6 found from sm0220_c4render1.usd"), text
-    assert "6 to upload" in text and "\nsm0220-light-v001   Karma render · 48 frames · 48 units\n" in text
-    assert "licences   sesi/karma, 1 per unit · 6 of 12 seats free now" in text
+    assert "6 to upload" in text and "\nsm0220-light-v001   Karma render · 48 frames in 48 units\n" in text
     assert "estimate   ready" in text
-    assert "due" in text and "client review · slack" in text
+    assert "due" in text and "Client review, Fri 10:00 · slack" in text
     assert not fake.jobs and not fake.store, "a check submits and uploads nothing"
     assert hou.rendered[-1]["source"] == "/stage/karmarendersettings"
     assert hou.rendered[-1]["frames"] == (1001, 1048, 1)
@@ -111,7 +110,7 @@ def test_rop_jobs_follow_the_rop_graph(tmp_path, monkeypatch):
     assert "sm0140/fx/tex/wood.1001.rat" in files and "sm0140/fx/tex/wood.1002.rat" in files
     assert "assets/env/env.abc" in files and "otls/studio_tools.hda" in files and "sm0140/fx/sm0140_fx_v002.hip" in files
     text = summary(submit)
-    assert "after render-sim" in text and "dailies · slack" in text
+    assert "after sm0140-render-sim-v001" in text and "Dailies, Thu 18:00 · slack" in text
     assert "bypassed" not in text and "old_version.bgeo.sc: no such file" in text, "a bypassed node's file is a warning"
 
     hou.ui.answers = [SUBMIT]
