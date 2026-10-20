@@ -112,7 +112,7 @@ func TestSubmitIsIdempotent(t *testing.T) {
 	f := client(h)
 	due := metav1.NewTime(time.Date(2026, 11, 2, 17, 0, 0, 0, time.UTC))
 	req := farm.JobRequest{Namespace: "work", Name: "gh-7-v002", Spec: c4v1.WorkJobSpec{Class: "agent", Deadline: &due, DeadlineMode: "Tracking"},
-		TrackerRef: "gh/Issue/7", Follows: "gh-7"}
+		TrackerRef: "gh/Issue/7", Follows: "gh-7", For: "dana"}
 	for i := 0; i < 2; i++ {
 		ref, err := f.Submit(context.Background(), req)
 		if err != nil || ref != (farm.JobRef{Namespace: "work", Name: "gh-7-v002"}) {
@@ -122,8 +122,9 @@ func TestSubmitIsIdempotent(t *testing.T) {
 	if h.agent[0] != "c4-sync" {
 		t.Fatalf("X-C4-Agent: %q", h.agent[0])
 	}
-	// The job carries the entity it was made for and the version it follows.
-	if s := h.submits[0]; s.TrackerRef != "gh/Issue/7" || s.Follows != "gh-7" || s.Type != "tracker" {
+	// The job carries the entity it was made for, the version it follows,
+	// and the person it is for.
+	if s := h.submits[0]; s.TrackerRef != "gh/Issue/7" || s.Follows != "gh-7" || s.For != "dana" || s.Type != "tracker" {
 		t.Fatalf("submitted: %+v", s)
 	}
 }

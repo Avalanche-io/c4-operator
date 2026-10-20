@@ -142,6 +142,14 @@ type TrackerIntake struct {
 	// jobs c4-sync makes. Flow: {c4.avalanche.io/shot: entity.name}.
 	// +optional
 	Covers map[string]string `json:"covers,omitempty"`
+	// For says whose work the jobs are: the person the farm records as
+	// their owner, so what is bound to that person (a lease of their
+	// sign-in) serves them. The person must have let this Tracker submit
+	// for them (a grant, integrations GAPS 17); without one nothing is
+	// submitted, never c4-sync's own job instead. Empty: the jobs are
+	// c4-sync's.
+	// +optional
+	For *TrackerFor `json:"for,omitempty"`
 	// Rework is what a rework decision does: inPlace (default: the job's
 	// units run again, as in CI and agent work) or nextVersion (a new job
 	// follows this one with the note as an input, as v008 follows v007 in
@@ -149,6 +157,18 @@ type TrackerIntake struct {
 	// +kubebuilder:validation:Enum=inPlace;nextVersion
 	// +optional
 	Rework string `json:"rework,omitempty"`
+}
+
+// TrackerFor names whose work an intake rule's jobs are: one person, or
+// the entity's assignee.
+type TrackerFor struct {
+	// Person is a C4 person.
+	// +optional
+	Person string `json:"person,omitempty"`
+	// Assignee takes the entity's first assignee that People maps to a C4
+	// person.
+	// +optional
+	Assignee bool `json:"assignee,omitempty"`
 }
 
 // TrackerMatch selects tracker entities.

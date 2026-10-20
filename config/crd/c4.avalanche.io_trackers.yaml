@@ -148,6 +148,24 @@ spec:
                             UTC).
                           type: string
                       type: object
+                    for:
+                      description: |-
+                        For says whose work the jobs are: the person the farm records as
+                        their owner, so what is bound to that person (a lease of their
+                        sign-in) serves them. The person must have let this Tracker submit
+                        for them (a grant, integrations GAPS 17); without one nothing is
+                        submitted, never c4-sync's own job instead. Empty: the jobs are
+                        c4-sync's.
+                      properties:
+                        assignee:
+                          description: |-
+                            Assignee takes the entity's first assignee that People maps to a C4
+                            person.
+                          type: boolean
+                        person:
+                          description: Person is a C4 person.
+                          type: string
+                      type: object
                     job:
                       description: |-
                         Job is the WorkJob spec a matched entity is submitted with. Its

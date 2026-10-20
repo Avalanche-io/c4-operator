@@ -102,6 +102,10 @@ type SubmitRequest struct {
 	// day the project's due-time convention gives (18:00 UTC when it has
 	// none), or as an RFC 3339 time. It pins spec.deadline.
 	Due string `json:"due,omitempty"`
+	// For is the person the job is submitted for, by a tracker's sync
+	// identity under the grant that person gave the Tracker TrackerRef
+	// names: the person owns the job (integrations GAPS 17).
+	For string `json:"for,omitempty"`
 }
 
 // SubmitEstimate is what the farm expects of a job before it runs.

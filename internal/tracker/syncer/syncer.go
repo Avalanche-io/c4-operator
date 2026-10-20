@@ -476,11 +476,23 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 			}
 			got = farm.JobRef{Namespace: ns, Name: name}
 		} else {
+			person, why := forPerson(t, rule, it)
+			if why != "" {
+				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "NoPerson", why)
+				return nil
+			}
 			var err error
 			got, err = s.Farm.Submit(ctx, farm.JobRequest{Namespace: jr.Namespace, Name: jr.Name, Spec: spec,
-				TrackerRef: t.Name + "/" + it.Ref.String()})
+				TrackerRef: t.Name + "/" + it.Ref.String(), For: person})
+			if refused(err) {
+				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "NoGrant", noGrant(person, err))
+				return nil
+			}
 			if err != nil {
 				return fmt.Errorf("submitting %s for %s: %w", jr, it.Ref, err)
+			}
+			if person != "" {
+				s.clearTrackerCond(ctx, t, CondIntake, "NoGrant", "Granted", person+" lets this tracker submit work for them")
 			}
 		}
 		l = &c4v1.TrackerLink{
@@ -499,6 +511,36 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 		return nil
 	}
 	return s.followDue(ctx, l, rule, it)
+}
+
+// forPerson is whom an intake rule's job is for: "" for c4-sync's own
+// work, else a C4 person; why says why no person could be named.
+func forPerson(t *c4v1.Tracker, rule c4v1.TrackerIntake, it tracker.Item) (person, why string) {
+	switch f := rule.For; {
+	case f == nil:
+		return "", ""
+	case f.Person != "":
+		return f.Person, ""
+	case f.Assignee:
+		for _, a := range it.Assignees {
+			if p := t.Spec.People[a.ID]; p != "" {
+				return p, ""
+			}
+		}
+		return "", fmt.Sprintf("%s has no assignee that people maps to a C4 person, so there is no one to submit it for", it.Ref)
+	}
+	return "", "intake for names neither a person nor the assignee"
+}
+
+// refused is the HUD declining to submit for a person: no grant (403),
+// or a HUD that does not take grants (501).
+func refused(err error) bool {
+	var ae *farm.APIError
+	return errors.As(err, &ae) && (ae.Status == http.StatusForbidden || ae.Status == http.StatusNotImplemented)
+}
+
+func noGrant(person string, err error) string {
+	return fmt.Sprintf("%s has not let this tracker submit work for them; they can grant it on the Tracker's page in the HUD (%v)", person, err)
 }
 
 // ensureMilestone keeps the entity's Milestone: its due date, covering
@@ -1009,8 +1051,17 @@ func (s *Syncer) nextVersion(ctx context.Context, t *c4v1.Tracker, l *c4v1.Track
 		spec.Deadline = &metav1.Time{Time: *d}
 		spec.DeadlineMode = j.Objective.Mode
 	}
-	if _, err := s.Farm.Submit(ctx, farm.JobRequest{Namespace: l.Namespace, Name: name, Spec: spec, Inputs: inputs,
-		Follows: prev, TrackerRef: t.Name + "/" + l.Spec.Ref.Type + "/" + l.Spec.Ref.ID}); err != nil {
+	person := ""
+	if rule.For != nil {
+		person = j.Owner // the next version is for whom the last one was
+	}
+	_, err := s.Farm.Submit(ctx, farm.JobRequest{Namespace: l.Namespace, Name: name, Spec: spec, Inputs: inputs,
+		Follows: prev, TrackerRef: t.Name + "/" + l.Spec.Ref.Type + "/" + l.Spec.Ref.ID, For: person})
+	if refused(err) {
+		s.setLinkCond(ctx, l, "Version", metav1.ConditionFalse, "NoGrant", noGrant(person, err))
+		return nil
+	}
+	if err != nil {
 		return fmt.Errorf("submitting %s after %s: %w", name, prev, err)
 	}
 	before := l.DeepCopy()
@@ -1079,6 +1130,14 @@ func (s *Syncer) patchTrackerStatus(ctx context.Context, t *c4v1.Tracker, f func
 	before := t.DeepCopy()
 	f(&t.Status)
 	return s.Client.Status().Patch(ctx, t, client.MergeFrom(before))
+}
+
+// clearTrackerCond sets the condition true only when it is false for
+// reason was: what was wrong is now right.
+func (s *Syncer) clearTrackerCond(ctx context.Context, t *c4v1.Tracker, typ, was, reason, msg string) {
+	if c := meta.FindStatusCondition(t.Status.Conditions, typ); c != nil && c.Status == metav1.ConditionFalse && c.Reason == was {
+		s.setTrackerCond(ctx, t, typ, metav1.ConditionTrue, reason, msg)
+	}
 }
 
 func (s *Syncer) setTrackerCond(ctx context.Context, t *c4v1.Tracker, typ string, st metav1.ConditionStatus, reason, msg string) {

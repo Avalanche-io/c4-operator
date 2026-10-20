@@ -89,6 +89,14 @@ Each Tracker says:
   submits them, for example `covers: {c4.avalanche.io/shot: entity.name}`
   for a Flow Task's shot. Those jobs take its due date unless they have
   their own;
+- `for`: whose work the jobs are, `{person: dana}` or `{assignee: true}`
+  (the entity's assignee, through `people`). The person owns the job, so
+  what is theirs serves it, such as a lease of their own sign-in. They must
+  first let the Tracker submit for them, which they do as themselves, not
+  in the Tracker. Until then nothing is submitted and the Tracker shows
+  `NoGrant`; c4-sync never submits the job as its own instead. (The grant
+  is designed in proposals/integrations GAPS 17; this HUD refuses `for`
+  until it takes grants.) Without `for`, the jobs are c4-sync's;
 - `review.wait`: the job's wait that the tracker's decision serves;
 - `rework`: `inPlace` reruns units, the CI, agent and ML way;
   `nextVersion` makes v002 follow v001 with the note as an input view,

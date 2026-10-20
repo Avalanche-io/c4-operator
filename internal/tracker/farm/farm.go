@@ -42,6 +42,11 @@ type JobRequest struct {
 	// Follows is the job this one is the next version of (spec.follows,
 	// in its record too), so lineage links the versions.
 	Follows string
+	// For is the person the job is for, who owns it, under the grant they
+	// gave the Tracker (integrations GAPS 17); "" makes it c4-sync's own.
+	// The HUD refuses it without a grant (403), or when it takes none
+	// (501): never c4-sync's own job instead.
+	For string
 }
 
 // Relay is a decision made in a tracker, relayed to a wait (GAPS 3).
@@ -189,7 +194,7 @@ func (h *HUD) Submit(ctx context.Context, r JobRequest) (JobRef, error) {
 		return JobRef{}, err
 	}
 	in := api.SubmitRequest{Namespace: r.Namespace, Name: r.Name, Type: "tracker", Spec: spec, Inputs: r.Inputs,
-		TrackerRef: r.TrackerRef, Follows: r.Follows}
+		TrackerRef: r.TrackerRef, Follows: r.Follows, For: r.For}
 	var out api.SubmitResponse
 	err = h.doJSON(ctx, http.MethodPost, "/jobs", in, &out)
 	var ae *APIError

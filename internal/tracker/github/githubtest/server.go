@@ -302,6 +302,15 @@ func (s *Server) AddIssue(number int, title string, labels []string, due *time.T
 	return is
 }
 
+// Assign adds an assignee to an issue, as a person does.
+func (s *Server) Assign(number int, login string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	is := s.issues[number]
+	is.Assignees = append(is.Assignees, s.users[login])
+	is.UpdatedAt = s.now()
+}
+
 // SetMilestoneDue moves the due date of every issue's milestone 1.
 func (s *Server) SetMilestoneDue(due time.Time) {
 	s.mu.Lock()

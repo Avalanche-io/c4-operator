@@ -157,6 +157,16 @@ func TestFlowDailiesLoop(t *testing.T) {
 	e := setupFlow(t)
 	tid := strconv.Itoa(e.task.ID)
 	first := "flow-" + tid
+	// The work is the producer's, under the grant she gave the Tracker.
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	tr.Spec.Intake[0].For = &c4v1.TrackerFor{Person: "pat"}
+	if err := e.k8s.Update(context.Background(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	e.farm.Grants = map[string]bool{"pat": true}
 
 	// 1. The ready lighting Task becomes a render job; its date becomes
 	// 14:00 Los Angeles time on that date.
@@ -269,7 +279,7 @@ func TestFlowDailiesLoop(t *testing.T) {
 		t.Fatalf("submitted: %d", len(e.farm.Submitted))
 	}
 	second := e.farm.Submitted[1]
-	if second.Name != first+"-v002" || second.Follows != first || len(second.Inputs) != 1 ||
+	if second.Name != first+"-v002" || second.Follows != first || second.For != "pat" || len(second.Inputs) != 1 ||
 		second.Inputs[0].MountPath != syncer.NoteMount || !second.Spec.Deadline.Time.Equal(want) || second.Spec.DeadlineMode != "Tracking" {
 		t.Fatalf("v002 job: %+v", second)
 	}

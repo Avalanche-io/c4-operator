@@ -6,6 +6,7 @@ package farmtest
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"slices"
 	"strconv"
 	"sync"
@@ -24,6 +25,9 @@ type Farm struct {
 	Relays    []farm.Relay
 	Deadlines []time.Time
 	Views     map[string]map[string][]byte
+	// Grants are the people who let the tracker submit for them; a
+	// submission for anyone else is refused 403, as the HUD refuses it.
+	Grants map[string]bool
 }
 
 // New makes an empty farm.
@@ -38,9 +42,16 @@ func (f *Farm) Submit(_ context.Context, r farm.JobRequest) (farm.JobRef, error)
 	if _, ok := f.jobs[k(ref)]; ok {
 		return ref, nil
 	}
+	if r.For != "" && !f.Grants[r.For] {
+		return farm.JobRef{}, &farm.APIError{Status: http.StatusForbidden, Msg: "no grant from " + r.For + " for tracker " + r.TrackerRef}
+	}
 	f.Submitted = append(f.Submitted, r)
+	owner := "c4-sync"
+	if r.For != "" {
+		owner = r.For
+	}
 	j := &api.Job{Namespace: r.Namespace, Name: r.Name, Project: "proj", Class: r.Spec.Class, Phase: "Queued",
-		CreatedAt: f.Now()}
+		Owner: owner, CreatedAt: f.Now()}
 	j.Objective.Type = "Deadline"
 	j.Objective.Mode = r.Spec.DeadlineMode
 	if r.Spec.Deadline != nil {

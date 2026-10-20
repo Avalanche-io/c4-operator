@@ -684,7 +684,7 @@ makes a link only when its target stays inside the folder it writes to.
 
 ```
 { project? | namespace?, name?, type?, stage?, shot?, spec, inputs?: [ { view? | fromJob?, mountPath, readOnly? } ],
-  aiUsage?, trackerRef?, follows?, due?, dryRun? }
+  aiUsage?, trackerRef?, follows?, due?, for?, dryRun? }
 ->
 { ok, dryRun?, namespace, name, project, link, message, materializations?,
   estimate?: { units, work50, work90, eta50?, eta80?, eta90?, eta95?, deadline?, deadlineSource,
@@ -709,6 +709,10 @@ the job in the namespace this one is the next version of (`spec.follows`,
 in the record too); it must exist. `due` pins the deadline: an RFC 3339 time,
 or a date (`2026-10-23`) at the project's due time (Project
 `spec.work.dueTime: { at: "HH:MM", timeZone }`, 18:00 UTC without one).
+`for` names the person a tracker's sync identity submits the job for,
+under the grant that person gave the Tracker (integrations GAPS 17); the
+person would own it. Grants are not taken yet, so `for` is refused `501`,
+never created as the caller's own job.
 
 `estimate` is what the queue expects of the job against the farm as it last
 planned it. `slackSeconds` is the deadline less `eta90` (`eta95` for a

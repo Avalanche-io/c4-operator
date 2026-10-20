@@ -21,6 +21,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
+	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm/farmtest"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/github"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/github/githubtest"
@@ -588,5 +589,47 @@ func TestApproveOnlyWhenTheWaitOffersIt(t *testing.T) {
 	}
 	if acts := e.lastCheck("abc").Actions; len(acts) != 1 || acts[0].Identifier != "rework" {
 		t.Fatalf("the check run offers only what the wait takes: %+v", acts)
+	}
+}
+
+// An intake rule whose work is for a person submits only under that
+// person's grant: without one the Tracker says so and nothing is
+// submitted, never c4-sync's own job instead; with one the job is theirs.
+func TestSubmitForAPersonNeedsTheirGrant(t *testing.T) {
+	e := setup(t, func(tr *c4v1.Tracker) { tr.Spec.Intake[0].For = &c4v1.TrackerFor{Assignee: true} })
+	intake := func() *metav1.Condition {
+		return meta.FindStatusCondition(e.tracker().Status.Conditions, syncer.CondIntake)
+	}
+	e.pass()
+	if c := intake(); c == nil || c.Reason != "NoPerson" || len(e.farm.Submitted) != 0 {
+		t.Fatalf("no assignee: %+v, %d submitted", c, len(e.farm.Submitted))
+	}
+
+	e.gh.Assign(7, "mallory") // not one of the Tracker's people
+	e.clock.add(time.Minute)
+	e.pass()
+	if c := intake(); c == nil || c.Reason != "NoPerson" || len(e.farm.Submitted) != 0 {
+		t.Fatalf("unmapped assignee: %+v, %d submitted", c, len(e.farm.Submitted))
+	}
+
+	e.gh.Assign(7, "dana")
+	e.clock.add(time.Minute)
+	e.pass()
+	if c := intake(); c == nil || c.Reason != "NoGrant" || !strings.Contains(c.Message, "dana has not let this tracker") || len(e.farm.Submitted) != 0 {
+		t.Fatalf("no grant: %+v, %d submitted", c, len(e.farm.Submitted))
+	}
+
+	e.farm.Grants = map[string]bool{"dana": true}
+	e.clock.add(time.Minute)
+	e.pass()
+	if len(e.farm.Submitted) != 1 || e.farm.Submitted[0].For != "dana" {
+		t.Fatalf("granted: %+v", e.farm.Submitted)
+	}
+	j, err := e.farm.Job(context.Background(), farm.JobRef{Namespace: ns, Name: "gh-7"})
+	if err != nil || j.Owner != "dana" {
+		t.Fatalf("the job is dana's: %+v %v", j, err)
+	}
+	if c := intake(); c == nil || c.Status != metav1.ConditionTrue || c.Reason != "Granted" {
+		t.Fatalf("condition after the grant: %+v", c)
 	}
 }

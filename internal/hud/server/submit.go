@@ -523,6 +523,13 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "body: %v", err)
 		return
 	}
+	if body.For != "" {
+		// Work for another person needs the grant they gave the tracker
+		// (integrations GAPS 17), which the HUD does not take yet: refused,
+		// never submitted as the caller's own instead.
+		fail(w, http.StatusNotImplemented, "for %q: submitting for another person needs their grant to the tracker, which this HUD does not take yet", body.For)
+		return
+	}
 	project, ns, err := s.project(m, v, body.Project, body.Namespace)
 	if err != nil {
 		fail(w, http.StatusNotFound, "%v", err)
