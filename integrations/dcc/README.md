@@ -1,0 +1,98 @@
+# DCC submitters
+
+Submit to a C4 farm from inside the application you work in, the way you
+submit to any render queue: pick what to render, check the frames, say when
+it is needed, see when it will be ready, press Submit. No terminal, and no
+Kubernetes anywhere.
+
+| folder      | what                                                                                   |
+| ----------- | -------------------------------------------------------------------------------------- |
+| `c4submit/` | the shared Python library every panel uses (standard library only, Python 3.9 and up) |
+| `nuke/`     | the Nuke panel: each Write node is a job                                               |
+| `houdini/`  | the Solaris C4 Render LOP and the C4 Submit ROP                                        |
+
+Each panel has a `README.md` (install and use) and a `CHECKLIST.md` (what to
+check by hand in the real application). Their tests run against fakes of
+each application's Python API, so CI needs no licences:
+
+```sh
+pip install pytest pyyaml
+python -m pytest integrations/dcc
+```
+
+## What a panel does
+
+The design is `proposals/authoring` (SUBMIT.md for the file a panel writes,
+TOOL.md section 6 for the forms). In short:
+
+1. **The form comes from the tool.** A published tool's parameters (Open
+   Job Description's parameter definitions, plus C4's `show` and `from`)
+   draw the panel's fields. A field with `from: scene.file`,
+   `scene.renderables`, `scene.frames` or `scene.selection` is filled in
+   from the open scene and shows a link toggle; typing into it unlinks it.
+   A panel offers the tools that take the open scene's kind of file.
+2. **"Needed by", never priority.** The choices are the project's
+   milestones (tonight's dailies, Friday's client review), the farm's
+   suggestion, or a typed time (`fri 18:00`, `+3h`).
+3. **Collect.** The panel lists every file the scene reads (Reads, USD
+   layers and references, textures with `<UDIM>`, `$F4` and `####`
+   sequences) under the project folder (`C4_ROOT`), names each by its C4
+   ID, and computes the ID of the tree they make, exactly as the farm will
+   (`c4-operator tree-id`). IDs are cached by path, size and time, so a
+   second submission of the same shot hashes only what changed.
+4. **Check.** It asks the farm which files it lacks and asks it to check the
+   submission (`POST /submissions` with `dryRun`). Nothing is created or
+   uploaded. The panel shows what will run, the estimate and the slack
+   against the due time, licence seats, and every error with its fix:
+
+   ```
+     files      98 found from sm0140_comp_v004.nk · 6.2 GB · 12 to upload (240 MB)
+   sm0140-comp-bg-v004   Nuke comp · 48 frames · 12 units
+     licences   foundry/nuke_r, 1 per unit · 6 of 12 seats free now
+     estimate   ready 16:20 PDT (23:20 UTC), p90 16:31 PDT
+     due        18:00 PDT (01:00 UTC) · dailies · slack 1h 29m
+   sm0140-comp-main-v004   Nuke comp · 48 frames · 12 units · after comp-bg
+     ...
+   ```
+
+5. **Submit.** It uploads only what the farm lacks, records the tree
+   (checking the farm names it as the panel did) and submits. The farm
+   makes one job per job in the file.
+6. **Show file / Save file.** The submission is a small YAML file
+   (`c4: submit/1`), the same one `c4 farm submit FILE` takes, so a panel's
+   submission can be kept, diffed and sent again by a script or an agent.
+
+## Configuration
+
+| variable                              | meaning                                                                                       |
+| ------------------------------------- | --------------------------------------------------------------------------------------------- |
+| `C4_HUD`                              | the farm's HUD URL                                                                            |
+| `C4_HUD_TOKEN_FILE` or `C4_HUD_TOKEN` | your sign-in token (the file is reread on every request)                                      |
+| `C4_PROJECT`                          | the project                                                                                   |
+| `C4_ROOT`                             | the folder on this machine that is the top of the project's tree (the farm mounts it as `/show` or the project's root path); default the project's root path when it exists here |
+| `C4_SHOT`, or `SHOT`                  | the shot                                                                                      |
+| `C4_SHOT_PATTERN`                     | a regular expression with a `shot` group, matched against the scene's path, when no variable names the shot |
+| `C4SUBMIT_CACHE`                      | where file IDs are cached (default `~/.cache/c4submit/ids.json`)                              |
+
+A studio sets these in its launcher, as it does for other pipeline tools.
+
+## Writing a panel for another DCC
+
+A panel is a `c4submit.host.Host` (what the scene is: its file, frame
+range, renderables and the files it reads) and a way to draw
+`c4submit.form.Form` in the application's own widgets. Everything else
+(collection, IDs, the check, the summary, uploads, the file) is
+`c4submit`'s. `c4submit.testing` has a fake farm (in memory, and over HTTP)
+and a fake host for tests. The next DCCs, in the order the research
+recommends: Maya, Blender, Katana (through its FarmAPI), Unreal (a Movie
+Render Queue executor).
+
+## Status
+
+Built against the design before the farm's routes exist: `POST
+/submissions`, `GET /tools/{project}` and `GET /projects/{project}` are
+slice 1 of the plan, and their shapes here are the ones proposed to the
+farm's owners. A farm without them still lets a panel collect, check the
+file locally and save it; Submit needs them. The submission's `root`
+field (where the tree's top is on the submitter's machine, for path
+mapping) is proposed and not yet in `submit/1`.

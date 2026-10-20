@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "c4submit"
 version = "0.1.0"
 description = "Submit to a C4 farm from inside a DCC: the shared library under the Nuke, Houdini and other panels"
-readme = "../README.md"
+readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.9"
 dependencies = []

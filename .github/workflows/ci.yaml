@@ -82,3 +82,18 @@ jobs:
     - run: python -m pytest integrations/mlflow-c4
       env:
         MLFLOW_DISABLE_AGENT_HINT: "1"
+
+  dcc-submitters:
+    name: DCC submitters (c4submit and the panels, against fakes of each application)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 3.9 is the oldest a supported DCC embeds (Nuke 14); 3.11 is Houdini 20.5 and 21, Maya 2025, Blender 4.
+        python-version: ["3.9", "3.11", "3.13"]
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-python@v5
+      with:
+        python-version: ${{ matrix.python-version }}
+    - run: pip install pytest pyyaml
+    - run: python -m pytest integrations/dcc
