@@ -461,6 +461,11 @@ func transitions(job, project string, before, after *c4v1.WorkJobStatus, now tim
 		}
 		u := d.Unit
 		add("decision", &u, d.At.Time, "queue", d.Kind, d.Record, d.Kind+": "+d.Reason, k)
+		for _, p := range d.Policy {
+			last := &out[len(out)-1]
+			last.Policy = append(last.Policy, api.PolicyUse{Key: p.Key, Value: p.Value,
+				From: api.PolicyFrom{Scope: p.From.Scope, Ref: p.From.Ref, SetBy: p.From.SetBy, Record: p.From.Record}})
+		}
 	}
 	yk := map[string]bool{}
 	for _, y := range before.Yields {
@@ -495,11 +500,22 @@ func transitions(job, project string, before, after *c4v1.WorkJobStatus, now tim
 		n, o := after.Needs[k], before.Needs[k]
 		i, _ := strconv.Atoi(k)
 		u := int32(i)
-		if o.Text == "" || !o.At.Equal(&n.At) {
+		raised := o.Text == "" || !o.At.Equal(&n.At)
+		if raised {
 			add("needs", &u, n.At.Time, "", "", n.Record, "needs information: "+n.Text, n.At.UTC().Format(time.RFC3339))
 		}
-		if n.Supplied != "" && o.Supplied == "" {
-			add("supplied", &u, now, n.By, "", "", "supplied by "+or(n.By, "someone"), n.At.UTC().Format(time.RFC3339))
+		if n.PressingAt != nil && (raised || o.PressingAt == nil) {
+			add("pressing", &u, n.PressingAt.Time, "", "", "", "pressing: "+n.PressingWhy, n.At.UTC().Format(time.RFC3339))
+		}
+		if n.Supplied != "" && (raised || o.Supplied == "") {
+			at := now
+			if n.SuppliedAt != nil {
+				at = n.SuppliedAt.Time
+			}
+			add("supplied", &u, at, n.By, "", n.SuppliedRecord, "supplied by "+or(n.By, "someone"), n.At.UTC().Format(time.RFC3339))
+		}
+		if w := n.Withdrawn; w != nil && (raised || o.Withdrawn == nil) {
+			add("needs-withdrawn", &u, w.At.Time, w.By, "", w.Record, "withdrawn by "+w.By+": "+w.Why, n.At.UTC().Format(time.RFC3339))
 		}
 	}
 	ck := map[string]int32{}

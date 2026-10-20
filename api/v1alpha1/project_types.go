@@ -190,6 +190,35 @@ type ProjectWork struct {
 	// trackers keep dates): 18:00 UTC when unset.
 	// +optional
 	DueTime *DueTime `json:"dueTime,omitempty"`
+	// Escalation sets, for the project's jobs, when a unit's question to
+	// a person turns pressing and how its block may re-check it (the
+	// farm's defaults otherwise; a job may only tighten them).
+	// +optional
+	Escalation *ProjectEscalation `json:"escalation,omitempty"`
+}
+
+// ProjectEscalation is a project's escalation thresholds.
+type ProjectEscalation struct {
+	// PressAfter: an escalation open this long is pressing (2h).
+	// +optional
+	PressAfter *metav1.Duration `json:"pressAfter,omitempty"`
+	// PressMargin: an escalation is pressing this long before the time an
+	// answer can come with the job still on time (15m).
+	// +optional
+	PressMargin *metav1.Duration `json:"pressMargin,omitempty"`
+	// +optional
+	Recheck *ProjectRecheck `json:"recheck,omitempty"`
+}
+
+// ProjectRecheck is how often a block may re-check its question.
+type ProjectRecheck struct {
+	// Max re-checks of one question (5).
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	Max *int32 `json:"max,omitempty"`
+	// MinInterval between two re-checks (10m).
+	// +optional
+	MinInterval *metav1.Duration `json:"minInterval,omitempty"`
 }
 
 // DueTime is the project's convention for date-only due dates.

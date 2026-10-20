@@ -197,25 +197,44 @@ func incidents(m *model, v *api.Viewer, jobs []api.Job) []api.Incident {
 		case "needsinformation":
 			// A unit's brief lacked information only a person could give:
 			// a work-stopping error, fixed by supplying it.
+			// Its severity follows the questions: at risk while raised,
+			// urgent once one is pressing; gone once supplied or withdrawn.
 			var open []api.Needs
+			severity := "warning"
 			for _, n := range first.Needs {
-				if n.Supplied == "" {
+				if n.Supplied == "" && n.Withdrawn == nil {
 					open = append(open, n)
+					if n.State == "pressing" {
+						severity = "urgent"
+					}
 				}
 			}
 			detail := g.cause
 			units := ""
 			if len(open) > 0 {
-				detail = open[0].Text
-				if open[0].Why != "" {
-					detail += " (" + open[0].Why + ")"
+				n := open[0]
+				for _, o := range open {
+					if o.State == "pressing" {
+						n = o
+						break
+					}
 				}
-				units = strconv.Itoa(open[0].Unit)
+				detail = n.Text
+				if n.Why != "" {
+					detail += " (" + n.Why + ")"
+				}
+				if n.PressingWhy != "" {
+					detail += "; pressing: " + n.PressingWhy
+				}
+				units = strconv.Itoa(n.Unit)
 			}
 			out = append(out, api.Incident{ID: g.reason + ":" + key(first), NeedsYou: true, Title: first.Name + " needs information its brief lacked",
-				Detail: detail, Count: max(len(open), 1), CountOf: "question", Jobs: keys, Since: since, State: "open", Checklist: []api.IncidentStep{
+				Detail: detail, Count: max(len(open), 1), CountOf: "question", Jobs: keys, Since: since, State: "open", Severity: severity,
+				Checklist: []api.IncidentStep{
 					{Label: "See what it was doing", Act: "Open", Href: "job/" + key(first)},
 					{Label: "Supply the information; the unit resumes where it stopped", Act: "Supply", Action: "supply", Job: key(first), Units: units},
+					{Label: "Or, if the question no longer applies, withdraw it; the unit runs on without an answer", Act: "Withdraw",
+						Action: "withdraw-needs", Job: key(first), Units: units},
 				}})
 		default:
 			out = append(out, api.Incident{ID: g.reason + ":" + key(first), NeedsYou: true, Title: first.Name + " needs you", Detail: g.cause,

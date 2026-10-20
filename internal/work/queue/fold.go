@@ -41,6 +41,9 @@ type output struct {
 	// folds is every fold in order, kept in the index, so the output can
 	// be rebuilt without some units' changesets (refoldOutput).
 	folds []Fold
+	// fresh are the paths folded this tick, for the questions about them
+	// (escalate.go).
+	fresh []freshPath
 }
 
 // Fold is one fold of a job's output: the unit, its changeset and its task
@@ -158,6 +161,7 @@ func (q *Queue) fold(ctx context.Context, st *storeurl.Sharded, o *output, idx i
 				o.conflicts = append(o.conflicts, fmt.Sprintf("%s written by units %d and %d", p, w, idx))
 			}
 			o.writer[p] = idx
+			o.fresh = append(o.fresh, freshPath{unit: idx, path: p})
 			if record != "" {
 				o.records[p] = record
 				o.dirty = true
@@ -246,6 +250,7 @@ func (q *Queue) refoldOutput(ctx context.Context, v *view) bool {
 	}
 	q.Log.Info("refolded", "job", v.key, "from", m.out.view.String(), "to", o.view.String(), "folds", len(o.folds))
 	o.dirty = true
+	o.fresh = nil // written before, not news
 	m.out = o
 	return true
 }

@@ -141,6 +141,18 @@ const (
 	// (status.supplied): the unit runs again with the text in
 	// $C4_SUPPLIED, resuming where it stopped.
 	AnnotationSupply = "c4.avalanche.io/supply"
+	// AnnotationWithdrawNeeds on a WorkJob carries the lead's withdrawals
+	// of units' questions (NeedsInformation): a JSON list of
+	// WorkWithdrawRequest, carried out once each in token order
+	// (status.withdrawn). The unit runs again without an answer, with the
+	// reason in $C4_WITHDRAWN.
+	AnnotationWithdrawNeeds = "c4.avalanche.io/withdraw-needs"
+	// AnnotationRecheck on a unit pod says it is an extra attempt of a unit
+	// that stopped for information, started only to re-check its question
+	// ($C4_RECHECK): the value is why. Exit 0 withdraws the question, with
+	// the termination message as the why; exit NeedsExitCode keeps it.
+	// Nothing it writes is kept, and no retry is spent.
+	AnnotationRecheck = "c4.avalanche.io/recheck"
 	// AnnotationPreflight on a unit pod reports the step it is preparing
 	// before the work starts: JSON {"step": "stage" | "fetch" | "image" |
 	// "license", "bytes": n, "of": n}. The node daemon and the class
@@ -414,6 +426,10 @@ type WorkJobStatus struct {
 	// (AnnotationSupply).
 	// +optional
 	Supplied string `json:"supplied,omitempty"`
+	// Withdrawn is the token of the last withdrawal carried out
+	// (AnnotationWithdrawNeeds).
+	// +optional
+	Withdrawn string `json:"withdrawn,omitempty"`
 	// Requeued is the token of the last requeue request carried out.
 	// +optional
 	Requeued string `json:"requeued,omitempty"`
@@ -619,6 +635,31 @@ type WorkDecision struct {
 	// +optional
 	For string `json:"for,omitempty"`
 	// Record is the C4 ID of the queue's signed decision record.
+	// +optional
+	Record string `json:"record,omitempty"`
+	// Policy are the policy values that decided it, and where each came
+	// from.
+	// +optional
+	Policy []WorkPolicyUse `json:"policy,omitempty"`
+}
+
+// WorkPolicyUse is a policy value that decided something: its key, its
+// value, and where it came from (the farm's default, the job's Project,
+// the job).
+type WorkPolicyUse struct {
+	Key   string         `json:"key"`
+	Value string         `json:"value"`
+	From  WorkPolicyFrom `json:"from"`
+}
+
+// WorkPolicyFrom is where a policy value came from.
+type WorkPolicyFrom struct {
+	// Scope is farm, project, job or unit.
+	Scope string `json:"scope"`
+	// +optional
+	Ref string `json:"ref,omitempty"`
+	// +optional
+	SetBy string `json:"setBy,omitempty"`
 	// +optional
 	Record string `json:"record,omitempty"`
 }
@@ -1190,6 +1231,10 @@ type WorkAsk struct {
 	Answered *metav1.Time `json:"answered,omitempty"`
 	// +optional
 	Wait bool `json:"wait,omitempty"`
+	// Needs: the question a unit stopped for (NeedsInformation), put to
+	// the job's answerer; its answer supplies it.
+	// +optional
+	Needs bool `json:"needs,omitempty"`
 }
 
 // WorkNeeds is what a unit stopped for.
@@ -1202,12 +1247,76 @@ type WorkNeeds struct {
 	// Record is the C4 ID of the signed record.
 	// +optional
 	Record string `json:"record,omitempty"`
-	// Supplied is the information a person supplied, and By who; the
-	// unit then runs again.
+	// Supplied is the information a person (or the job's answerer)
+	// supplied, By who and SuppliedAt when; the unit then runs again.
 	// +optional
 	Supplied string `json:"supplied,omitempty"`
 	// +optional
 	By string `json:"by,omitempty"`
+	// +optional
+	SuppliedAt *metav1.Time `json:"suppliedAt,omitempty"`
+	// +optional
+	SuppliedRecord string `json:"suppliedRecord,omitempty"`
+	// State is raised (the unit stopped; the rest of the job runs on),
+	// pressing (the same, now urgent), supplied or withdrawn.
+	// +kubebuilder:validation:Enum=raised;pressing;supplied;withdrawn
+	// +optional
+	State string `json:"state,omitempty"`
+	// AnswerBy is the latest time an answer can come with the job still on
+	// time: its effective deadline less the work that waits on the unit.
+	// +optional
+	AnswerBy *metav1.Time `json:"answerBy,omitempty"`
+	// PressingAt is when it turned pressing, and PressingWhy why, in
+	// words.
+	// +optional
+	PressingAt *metav1.Time `json:"pressingAt,omitempty"`
+	// +optional
+	PressingWhy string `json:"pressingWhy,omitempty"`
+	// About is what the question is about, so work landing there re-checks
+	// it: path:<prefix> in the job's tree, unit:<name>, job:<ns>/<name>.
+	// +optional
+	About []string `json:"about,omitempty"`
+	// Rechecks are the block's re-checks of its question.
+	// +optional
+	Rechecks *WorkRechecks `json:"rechecks,omitempty"`
+	// Withdrawn says who withdrew the question (the block on a re-check,
+	// the lead) and why; the unit runs again without an answer.
+	// +optional
+	Withdrawn *WorkWithdrawal `json:"withdrawn,omitempty"`
+}
+
+// WorkRechecks are a block's re-checks of its question: how many ran, the
+// most allowed, the last, and whether one is running.
+type WorkRechecks struct {
+	Done int32 `json:"done"`
+	Max  int32 `json:"max"`
+	// +optional
+	LastAt *metav1.Time `json:"lastAt,omitempty"`
+	// LastWhy is what started the last one.
+	// +optional
+	LastWhy string `json:"lastWhy,omitempty"`
+	// +optional
+	InFlight bool `json:"inFlight,omitempty"`
+}
+
+// WorkWithdrawal is a question withdrawn.
+type WorkWithdrawal struct {
+	By  string      `json:"by"`
+	Why string      `json:"why"`
+	At  metav1.Time `json:"at"`
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkWithdrawRequest is the lead's withdrawal of a unit's question.
+type WorkWithdrawRequest struct {
+	Token string      `json:"token"`
+	Unit  string      `json:"unit"`
+	Why   string      `json:"why"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// +optional
+	Record string `json:"record,omitempty"`
 }
 
 // WorkSupplyRequest supplies the information a unit stopped for.

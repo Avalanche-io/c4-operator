@@ -257,7 +257,8 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		if err != nil {
 			continue
 		}
-		an := api.Needs{Unit: i, Text: n.Text, Why: n.Why, At: n.At.Time.UTC(), Record: n.Record, Supplied: n.Supplied, By: n.By}
+		an := needsOf(n)
+		an.Unit = i
 		if r.plan != nil && i < len(r.plan.Units) {
 			an.Name = r.plan.Units[i].Name
 		}
@@ -709,4 +710,34 @@ func sortGates(snap *api.Snapshot) {
 			return x.Since.Before(*y.Since)
 		})
 	}
+}
+
+// needsOf is a unit's question as the snapshot shows it (Job.Needs).
+func needsOf(n c4v1.WorkNeeds) api.Needs {
+	at := func(t *metav1.Time) *time.Time {
+		if t == nil {
+			return nil
+		}
+		u := t.Time.UTC()
+		return &u
+	}
+	state := n.State
+	switch {
+	case state != "":
+	case n.Supplied != "":
+		state = "supplied"
+	default:
+		state = "raised"
+	}
+	an := api.Needs{Text: n.Text, Why: n.Why, At: n.At.Time.UTC(), Record: n.Record, State: state, RaisedAt: n.At.Time.UTC(),
+		AnswerBy: at(n.AnswerBy), PressingAt: at(n.PressingAt), PressingWhy: n.PressingWhy, About: n.About,
+		Supplied: n.Supplied, By: n.By, SuppliedAt: at(n.SuppliedAt), SuppliedRecord: n.SuppliedRecord}
+	if r := n.Rechecks; r != nil {
+		an.Rechecks = &api.NeedsRechecks{Done: int(r.Done), Max: int(r.Max), UsedUp: r.Done >= r.Max, LastAt: at(r.LastAt),
+			LastWhy: r.LastWhy, InFlight: r.InFlight}
+	}
+	if w := n.Withdrawn; w != nil {
+		an.Withdrawn = &api.NeedsWithdrawn{By: w.By, Why: w.Why, At: w.At.Time.UTC(), Record: w.Record}
+	}
+	return an
 }

@@ -27,6 +27,8 @@ type decisionRecord struct {
 	Reason string
 	For    string
 	Record string
+	// Policy are the policy values that decided it (escalate.go).
+	Policy []c4v1.WorkPolicyUse
 }
 
 // SpecDigest names a job's spec as it is now: the SHA-256 of its JSON.

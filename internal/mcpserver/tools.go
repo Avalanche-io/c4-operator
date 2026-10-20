@@ -118,6 +118,8 @@ func Tools(c *Client) []Tool {
 			idempotent, c.steer),
 		tool("c4_supply", "Supply what a unit stopped for", "Give a unit that stopped because its brief lacked information only a person could give (needsPerson reason needsinformation; the question is in c4_job_detail's needs) what it asked for. It runs again, resuming where it stopped, with the text. Signed and recorded in the book.",
 			idempotent, c.supply),
+		tool("c4_withdraw_needs", "Withdraw a unit's question", "Withdraw the question a unit stopped for (needsPerson reason needsinformation; c4_job_detail's needs) once it no longer applies, with why. The unit runs again without an answer, told why. Supplied or withdrawn questions take none. Signed and recorded in the book.",
+			idempotent, c.withdrawNeeds),
 		tool("c4_avoid_node", "Avoid or allow a node for a job", "Keep a job's units off a node (a bad worker for that job), or allow it again.",
 			idempotent, c.avoidNode),
 		tool("c4_disable_node", "Disable or enable a node", "Take a node out of service for the whole farm (running units finish) or put it back.",
@@ -752,6 +754,20 @@ func (c *Client) supply(ctx context.Context, _ *mcp.CallToolRequest, in SupplyIn
 		return nil, Done{}, err
 	}
 	return c.control(ctx, p+"/supply", map[string]any{"unit": in.Unit, "text": in.Text})
+}
+
+type WithdrawNeedsIn struct {
+	JobRef
+	Unit string `json:"unit" jsonschema:"the unit's name or index"`
+	Why  string `json:"why" jsonschema:"why the question no longer applies"`
+}
+
+func (c *Client) withdrawNeeds(ctx context.Context, _ *mcp.CallToolRequest, in WithdrawNeedsIn) (*mcp.CallToolResult, Done, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, Done{}, err
+	}
+	return c.control(ctx, p+"/needs/"+url.PathEscape(in.Unit)+"/withdraw", map[string]any{"why": in.Why})
 }
 
 type AvoidIn struct {

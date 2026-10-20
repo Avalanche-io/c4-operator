@@ -107,7 +107,9 @@ type Incident struct {
 	Since   time.Time `json:"since"`
 	// State is open, or acknowledged once every job in it has someone on
 	// it (its failed units taken or assigned).
-	State     string         `json:"state"`
+	State string `json:"state"`
+	// Severity, when set, grades it: warning (at risk) or urgent.
+	Severity  string         `json:"severity,omitempty"`
 	Checklist []IncidentStep `json:"checklist"`
 }
 
@@ -545,17 +547,52 @@ type Ask struct {
 	Wait     bool       `json:"wait,omitempty"`
 }
 
-// Needs is what a unit stopped for (NeedsInformation): a work-stopping
-// error in the pipeline, fixed by supplying it.
+// Needs is what a unit stopped for (NeedsInformation): an error in the
+// pipeline that can heal. State is raised (the rest of the job runs on),
+// pressing (now urgent, PressingWhy says why), supplied (Supplied is the
+// text, By who, at SuppliedAt) or withdrawn (Withdrawn). RaisedAt is At;
+// AnswerBy is the latest an answer can come with the job on time.
 type Needs struct {
-	Unit     int       `json:"unit"`
-	Name     string    `json:"name,omitempty"`
-	Text     string    `json:"text"`
-	Why      string    `json:"why,omitempty"`
-	At       time.Time `json:"at"`
-	Record   string    `json:"record,omitempty"`
-	Supplied string    `json:"supplied,omitempty"`
-	By       string    `json:"by,omitempty"`
+	Unit           int             `json:"unit"`
+	Name           string          `json:"name,omitempty"`
+	Text           string          `json:"text"`
+	Why            string          `json:"why,omitempty"`
+	At             time.Time       `json:"at"`
+	Record         string          `json:"record,omitempty"`
+	State          string          `json:"state"`
+	RaisedAt       time.Time       `json:"raisedAt"`
+	AnswerBy       *time.Time      `json:"answerBy,omitempty"`
+	PressingAt     *time.Time      `json:"pressingAt,omitempty"`
+	PressingWhy    string          `json:"pressingWhy,omitempty"`
+	About          []string        `json:"about,omitempty"`
+	Rechecks       *NeedsRechecks  `json:"rechecks,omitempty"`
+	Supplied       string          `json:"supplied,omitempty"`
+	By             string          `json:"by,omitempty"`
+	SuppliedAt     *time.Time      `json:"suppliedAt,omitempty"`
+	SuppliedRecord string          `json:"suppliedRecord,omitempty"`
+	Withdrawn      *NeedsWithdrawn `json:"withdrawn,omitempty"`
+}
+
+// NeedsRechecks are a block's re-checks of its question: how many ran, the
+// most allowed (UsedUp once they have all run: it waits for a person), the
+// last and why, and whether one runs now. Only units whose reasoning is a
+// model re-check.
+type NeedsRechecks struct {
+	Done     int        `json:"done"`
+	Max      int        `json:"max"`
+	UsedUp   bool       `json:"usedUp,omitempty"`
+	LastAt   *time.Time `json:"lastAt,omitempty"`
+	LastWhy  string     `json:"lastWhy,omitempty"`
+	InFlight bool       `json:"inFlight"`
+}
+
+// NeedsWithdrawn says who withdrew a question (the block on a re-check,
+// unit:<ns>/<job>/<unit>, or the lead) and why.
+type NeedsWithdrawn struct {
+	By     string    `json:"by"`
+	Why    string    `json:"why"`
+	At     time.Time `json:"at"`
+	Record string    `json:"record,omitempty"`
 }
 
 // Steer is a message sent to a unit while it runs: delivered once it

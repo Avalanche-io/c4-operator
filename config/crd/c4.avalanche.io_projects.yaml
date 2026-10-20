@@ -266,6 +266,35 @@ spec:
                     required:
                     - at
                     type: object
+                  escalation:
+                    description: |-
+                      Escalation sets, for the project's jobs, when a unit's question to
+                      a person turns pressing and how its block may re-check it (the
+                      farm's defaults otherwise; a job may only tighten them).
+                    properties:
+                      pressAfter:
+                        description: 'PressAfter: an escalation open this long is
+                          pressing (2h).'
+                        type: string
+                      pressMargin:
+                        description: |-
+                          PressMargin: an escalation is pressing this long before the time an
+                          answer can come with the job still on time (15m).
+                        type: string
+                      recheck:
+                        description: ProjectRecheck is how often a block may re-check
+                          its question.
+                        properties:
+                          max:
+                            description: Max re-checks of one question (5).
+                            format: int32
+                            minimum: 0
+                            type: integer
+                          minInterval:
+                            description: MinInterval between two re-checks (10m).
+                            type: string
+                        type: object
+                    type: object
                   fairShareWeight:
                     description: FairShareWeight scales the project's share of free
                       capacity.

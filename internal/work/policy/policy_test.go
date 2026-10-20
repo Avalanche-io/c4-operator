@@ -1,0 +1,62 @@
+package policy
+
+import (
+	"testing"
+	"time"
+
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+)
+
+// Values read the farm's default, then the Project, then the job, which
+// may only tighten: a looser or malformed job value is ignored. Each says
+// where it came from.
+func TestValue(t *testing.T) {
+	job := func(params map[string]string) *c4v1.WorkJob {
+		return &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show", Name: "sh010"}, Spec: c4v1.WorkJobSpec{Params: params}}
+	}
+	max := int32(4)
+	proj := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{
+		Escalation: &c4v1.ProjectEscalation{PressAfter: &metav1.Duration{Duration: time.Hour},
+			Recheck: &c4v1.ProjectRecheck{Max: &max}}}}}
+
+	cases := []struct {
+		name         string
+		job          *c4v1.WorkJob
+		project      *c4v1.Project
+		key          string
+		value, scope string
+	}{
+		{"farm", nil, nil, PressAfter, "2h", "farm"},
+		{"farm margin", job(nil), proj, PressMargin, "15m", "farm"},
+		{"project", job(nil), proj, PressAfter, "1h", "project"},
+		{"job tightens", job(map[string]string{PressAfter: "30m"}), proj, PressAfter, "30m", "job"},
+		{"job loosens", job(map[string]string{PressAfter: "3h"}), proj, PressAfter, "1h", "project"},
+		{"longer margin", job(map[string]string{PressMargin: "1h"}), nil, PressMargin, "1h", "job"},
+		{"shorter margin", job(map[string]string{PressMargin: "5m"}), nil, PressMargin, "15m", "farm"},
+		{"fewer rechecks", job(map[string]string{RecheckMax: "1"}), proj, RecheckMax, "1", "job"},
+		{"more rechecks", job(map[string]string{RecheckMax: "9"}), proj, RecheckMax, "4", "project"},
+		{"malformed", job(map[string]string{RecheckMinInterval: "soon"}), nil, RecheckMinInterval, "10m", "farm"},
+		{"asks by its old name", job(map[string]string{"maxAsks": "2"}), nil, AsksMax, "2", "job"},
+		{"no zero asks", job(map[string]string{"maxAsks": "0"}), nil, AsksMax, "3", "farm"},
+		{"answers", job(map[string]string{"answerer": "lead, sup"}), nil, Answers, "lead, sup", "job"},
+	}
+	for _, c := range cases {
+		v, from := Value(c.job, c.project, -1, c.key)
+		if v != c.value || from.Scope != c.scope {
+			t.Errorf("%s: %s = %q from %s, want %q from %s", c.name, c.key, v, from.Scope, c.value, c.scope)
+		}
+	}
+	if l, u := List(job(map[string]string{"answerer": "lead, sup"}), nil, -1, Answers); len(l) != 2 || l[1] != "sup" || u.From.Ref != "show/sh010" {
+		t.Fatalf("list %v %+v", l, u)
+	}
+	d, u := Duration(nil, proj, -1, PressAfter)
+	rec := Record(u)
+	if d != time.Hour || len(rec) != 1 || rec[0]["key"] != PressAfter || rec[0]["from"].(map[string]any)["ref"] != "show" {
+		t.Fatalf("duration %s, record %v", d, rec)
+	}
+	if w := Work(u); len(w) != 1 || w[0].From.Scope != "project" || w[0].Value != "1h" {
+		t.Fatalf("work %+v", w)
+	}
+}

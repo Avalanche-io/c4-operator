@@ -1030,3 +1030,97 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// handleWithdrawNeeds withdraws the question a unit stopped for
+// (NeedsInformation) once it no longer applies, with why: signed, then
+// written as a request in c4.avalanche.io/withdraw-needs that the queue
+// carries out once. The unit runs again without an answer, with the why in
+// $C4_WITHDRAWN. The same rights as supplying it.
+func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
+	_, rec, v := s.job(w, r)
+	if rec == nil {
+		return
+	}
+	var body struct {
+		Why string `json:"why"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		failBody(w, err)
+		return
+	}
+	if strings.TrimSpace(body.Why) == "" {
+		fail(w, http.StatusBadRequest, "why: why the question no longer applies")
+		return
+	}
+	if rec.plan == nil {
+		fail(w, http.StatusConflict, "the job has no units yet")
+		return
+	}
+	ref := r.PathValue("unit")
+	idx := -1
+	for i, u := range rec.plan.Units {
+		if u.Name != "" && u.Name == ref {
+			idx = i
+		}
+	}
+	if n, err := strconv.Atoi(ref); idx < 0 && err == nil && n >= 0 && n < len(rec.plan.Units) {
+		idx = n
+	}
+	need, ok := rec.job.Status.Needs[strconv.Itoa(idx)]
+	if idx < 0 || !ok || need.Supplied != "" || need.Withdrawn != nil || unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx] != "failed" {
+		fail(w, http.StatusConflict, "unit %q has no open question", ref)
+		return
+	}
+	ctx := r.Context()
+	if err := s.authorize(ctx, r, v, rec.job.Namespace, "patch", "workjobs", rec.job.Name); err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
+	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
+	if err != nil {
+		fail(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
+	if j.Annotations == nil {
+		j.Annotations = map[string]string{}
+	}
+	now := time.Now()
+	unit := rec.plan.Units[idx].Name
+	if unit == "" {
+		unit = strconv.Itoa(idx)
+	}
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "withdraw-needs", map[string]any{"unit": unit, "needed": need.Text, "why": body.Why})
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
+	var reqs []c4v1.WorkWithdrawRequest
+	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationWithdrawNeeds]), &reqs)
+	reqs = append(reqs, c4v1.WorkWithdrawRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Why: body.Why,
+		Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
+	if len(reqs) > 16 {
+		reqs = reqs[len(reqs)-16:]
+	}
+	b, _ := json.Marshal(reqs)
+	j.Annotations[c4v1.AnnotationWithdrawNeeds] = string(b)
+	if err := s.Client.Patch(ctx, j, patch); err != nil {
+		fail(w, http.StatusConflict, "%v", err)
+		return
+	}
+	msg := fmt.Sprintf("%s: %s's question is withdrawn and it runs again without an answer", j.Name, unit)
+	note := msg
+	if id != "" {
+		note += "; record " + shortID(id)
+	}
+	if via(r) == "mcp" {
+		note += "; via MCP"
+	}
+	s.record(ctx, j, "WorkJob", v.User, "Withdrawn", note, bookNote{actor: actorOf(r, v), kind: "withdraw-needs", record: id})
+	out := map[string]any{"ok": true, "message": msg}
+	if id != "" {
+		out["record"] = id
+	}
+	writeJSON(w, http.StatusOK, out)
+}

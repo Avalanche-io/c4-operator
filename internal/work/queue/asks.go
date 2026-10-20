@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 )
 
 // Questions between units (DESIGN.md 10.6, Agents answer agents; Joshua:
@@ -22,7 +23,7 @@ import (
 // each, as a steering message, to the unit it is for. The answerer is the
 // question's unit, else the job's answerer param. A question is answered at
 // once with cannot when there is no answerer, the answerer has finished, it
-// waits on the asker (a cycle), or the asker has maxAsks (3) questions
+// waits on the asker (a cycle), or the asker has asks.max (3) questions
 // open. An answer also decides a wait served by the answering unit (server
 // unit:<name>): a block that gave up its slot to wait for it resumes with
 // it, and a wait unit of the graph completes. Every question and answer is
@@ -35,9 +36,10 @@ import (
 // writes leave the unit as it was. One that ends without answering answers
 // cannot.
 
+// How many questions a unit may have open is policy asks.max (3), and who
+// answers them policy answers (internal/work/policy).
 const (
-	defaultMaxAsks = 3
-	maxAsksKept    = 64
+	maxAsksKept = 64
 	// unitWaitExpect is a wait for a unit's answer before any is measured.
 	unitWaitExpect = 600
 )
@@ -52,6 +54,9 @@ type askRec struct {
 	answeredAt time.Time
 	// wait: the question of a wait unit (from) served by a unit (to).
 	wait bool
+	// needs: the question a unit stopped for, put to the job's answerer;
+	// its answer supplies it (escalate.go).
+	needs bool
 }
 
 func (a *askRec) open() bool { return a.answeredAt.IsZero() }
@@ -99,34 +104,20 @@ func (m *jobMem) steerTo(i int, actor, text string, at time.Time, ask *askRef, a
 	}
 }
 
-// answerer is who answers a question unit idx asks of to, or why none can.
-func (v *view) answerer(idx int, to string) (int, string) {
+// answerer is who answers a question unit idx asks of to, or why none can:
+// the unit named, else the first of the job's answerers (policy answers)
+// that can. refusedBy is the policy value that refused it, if one did.
+func (v *view) answerer(q *Queue, idx int, to string) (j int, why string, refusedBy []policy.Use) {
 	m := v.mem
-	name := strings.TrimPrefix(to, "unit:")
+	proj := q.projectOf(v)
+	names := []string{strings.TrimPrefix(to, "unit:")}
 	if to == "" {
-		name = strings.TrimSpace(v.job.Spec.Params["answerer"])
+		names, _ = policy.List(v.job, proj, idx, policy.Answers)
 	}
-	if name == "" {
-		return -1, "no answerer: ask with --to unit:<name>, or give the job an answerer"
+	if len(names) == 0 || names[0] == "" {
+		return -1, "no answerer: ask with --to unit:<name>, or give the job an answerer", nil
 	}
-	j, ok := m.plan.Names()[name]
-	switch {
-	case !ok:
-		return -1, "no unit " + name + " in the job"
-	case j == idx:
-		return -1, "a unit does not answer itself"
-	case m.failed[j] || m.superseded[j]:
-		return -1, name + " has failed"
-	}
-	for _, a := range m.asks {
-		if a.open() && a.from == j && a.to == idx {
-			return -1, name + " waits on an answer from this unit"
-		}
-	}
-	limit := defaultMaxAsks
-	if n, err := strconv.Atoi(v.job.Spec.Params["maxAsks"]); err == nil && n > 0 {
-		limit = n
-	}
+	limit, lu := policy.Int(v.job, proj, idx, policy.AsksMax)
 	open := 0
 	for _, a := range m.asks {
 		if a.open() && a.from == idx && !a.wait {
@@ -134,18 +125,46 @@ func (v *view) answerer(idx int, to string) (int, string) {
 		}
 	}
 	if open >= limit {
-		return -1, fmt.Sprintf("%d questions are open, the most a unit may have (maxAsks)", open)
+		return -1, fmt.Sprintf("%d questions are open, the most a unit may have (asks.max, %s)", open, lu.From), []policy.Use{lu}
 	}
-	return j, ""
+	first := ""
+	for _, name := range names {
+		if why := v.canAnswer(idx, name); why != "" {
+			first = or(first, why)
+			continue
+		}
+		return m.plan.Names()[name], "", nil
+	}
+	return -1, first, nil
+}
+
+// canAnswer is why unit name cannot answer unit idx's question, if not.
+func (v *view) canAnswer(idx int, name string) string {
+	m := v.mem
+	j, ok := m.plan.Names()[name]
+	switch {
+	case !ok:
+		return "no unit " + name + " in the job"
+	case j == idx:
+		return "a unit does not answer itself"
+	case m.failed[j] || m.superseded[j]:
+		return name + " has failed"
+	}
+	for _, a := range m.asks {
+		if a.open() && a.from == j && a.to == idx {
+			return name + " waits on an answer from this unit"
+		}
+	}
+	return ""
 }
 
 // ask records a question and routes it: to its answerer, or back to the
 // asker as cannot.
 func (q *Queue) ask(ctx context.Context, v *view, a *askRec, to string, now time.Time) {
 	m := v.mem
-	j, why := v.answerer(a.from, to)
+	j, why, refusedBy := v.answerer(q, a.from, to)
 	if a.wait {
-		j, why = a.to, ""
+		j, why, refusedBy = a.to, "", nil
 	}
 	a.to = j
 	m.asks = append(m.asks, a)
@@ -156,14 +175,20 @@ func (q *Queue) ask(ctx context.Context, v *view, a *askRec, to string, now time
 	if j >= 0 {
 		extra["to"] = nameOf(m, j)
 	}
-	q.recordDecision(ctx, v, a.from, "ask", a.text, "", now, extra)
+	if a.needs {
+		extra["needs"] = true
+	}
+	q.recordPolicyDecision(ctx, v, a.from, "ask", a.text, now, refusedBy, extra)
 	if why != "" {
 		q.answer(ctx, v, a, "", why, now)
 		return
 	}
 	from := nameOf(m, a.from)
-	m.steerTo(j, from, fmt.Sprintf("question %s from %s: %s\n(answer with: c4-unit answer --ask %s --answer TEXT, or --cannot WHY)", a.id, from, a.text, a.id),
-		now, &askRef{ID: a.id, From: from}, nil)
+	asked := "question %s from %s: %s\n(answer with: c4-unit answer --ask %s --answer TEXT, or --cannot WHY)"
+	if a.needs {
+		asked = "question %s from %s, which stopped for it: %s\n(answer with: c4-unit answer --ask %s --answer TEXT, or --cannot WHY)"
+	}
+	m.steerTo(j, from, fmt.Sprintf(asked, a.id, from, a.text, a.id), now, &askRef{ID: a.id, From: from}, nil)
 }
 
 // answer records an answer to a question and takes it to the asker: a
@@ -190,6 +215,14 @@ func (q *Queue) answer(ctx context.Context, v *view, a *askRec, text, cannot str
 		}
 	}
 	if a.wait {
+		return
+	}
+	if a.needs {
+		// The asker stopped for it: an answer supplies it, by the
+		// answering unit (needs.go); cannot leaves it to a person.
+		if text != "" && cannot == "" && m.openNeeds(a.from) {
+			q.supplyNeeds(ctx, v, a.from, text, "unit:"+v.key+"/"+by, "", now)
+		}
 		return
 	}
 	m.steerTo(a.from, by, fmt.Sprintf("answer to %s from %s: %s", a.id, by, note), now, nil, &answerRef{ID: a.id, From: by, Cannot: cannot != ""})
@@ -310,7 +343,7 @@ func askStatus(m *jobMem) []c4v1.WorkAsk {
 	var out []c4v1.WorkAsk
 	for _, a := range m.asks {
 		w := c4v1.WorkAsk{ID: a.id, From: int32(a.from), To: int32(a.to), Text: a.text, At: metav1.Time{Time: a.at.Truncate(time.Second)},
-			Answer: a.answer, Cannot: a.cannot, Wait: a.wait}
+			Answer: a.answer, Cannot: a.cannot, Wait: a.wait, Needs: a.needs}
 		if !a.answeredAt.IsZero() {
 			w.Answered = &metav1.Time{Time: a.answeredAt.Truncate(time.Second)}
 		}
@@ -322,7 +355,7 @@ func askStatus(m *jobMem) []c4v1.WorkAsk {
 // loadAsks rebuilds the questions from status.
 func (m *jobMem) loadAsks(st *c4v1.WorkJobStatus) {
 	for _, w := range st.Asks {
-		a := &askRec{id: w.ID, from: int(w.From), to: int(w.To), text: w.Text, at: w.At.Time, answer: w.Answer, cannot: w.Cannot, wait: w.Wait}
+		a := &askRec{id: w.ID, from: int(w.From), to: int(w.To), text: w.Text, at: w.At.Time, answer: w.Answer, cannot: w.Cannot, wait: w.Wait, needs: w.Needs}
 		if w.Answered != nil {
 			a.answeredAt = w.Answered.Time
 		}

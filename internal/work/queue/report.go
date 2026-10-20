@@ -208,7 +208,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.Decided, st.Waits = m.waitRecs().decided, waitStatus(m, now)
 	st.Rounds = roundsStatus(m.plan, m, v.roundsExp)
 	st.Steered, st.Steers = m.steered, steerStatus(m)
-	st.Supplied, st.Needs = m.supplied, needsStatus(m)
+	st.Supplied, st.Withdrawn, st.Needs = m.supplied, m.withdrawn, needsStatus(m)
 	st.Asks = askStatus(m)
 	taken := map[int]bool{}
 	for _, a := range st.Acks {
@@ -273,7 +273,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	for _, d := range m.decisions[max(0, len(m.decisions)-16):] {
 		st.Decisions = append(st.Decisions, c4v1.WorkDecision{Unit: int32(d.Unit), At: metav1.Time{Time: d.At.Truncate(time.Second)},
-			Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record})
+			Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record, Policy: d.Policy})
 	}
 	st.Expansions = expansionStatus(m.expansions)
 	st.Holds = holdsStatus(v)

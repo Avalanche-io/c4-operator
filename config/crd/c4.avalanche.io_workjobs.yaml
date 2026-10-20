@@ -358,6 +358,11 @@ spec:
                     id:
                       description: ID is <asker unit>#<n>, or w<wait unit>.
                       type: string
+                    needs:
+                      description: |-
+                        Needs: the question a unit stopped for (NeedsInformation), put to
+                        the job's answerer; its answer supplies it.
+                      type: boolean
                     text:
                       type: string
                     to:
@@ -549,6 +554,42 @@ spec:
                       description: Kind is yield (stop at the next checkpoint) or
                         stop.
                       type: string
+                    policy:
+                      description: |-
+                        Policy are the policy values that decided it, and where each came
+                        from.
+                      items:
+                        description: |-
+                          WorkPolicyUse is a policy value that decided something: its key, its
+                          value, and where it came from (the farm's default, the job's Project,
+                          the job).
+                        properties:
+                          from:
+                            description: WorkPolicyFrom is where a policy value came
+                              from.
+                            properties:
+                              record:
+                                type: string
+                              ref:
+                                type: string
+                              scope:
+                                description: Scope is farm, project, job or unit.
+                                type: string
+                              setBy:
+                                type: string
+                            required:
+                            - scope
+                            type: object
+                          key:
+                            type: string
+                          value:
+                            type: string
+                        required:
+                        - from
+                        - key
+                        - value
+                        type: object
+                      type: array
                     reason:
                       type: string
                     record:
@@ -1052,18 +1093,75 @@ spec:
                 additionalProperties:
                   description: WorkNeeds is what a unit stopped for.
                   properties:
+                    about:
+                      description: |-
+                        About is what the question is about, so work landing there re-checks
+                        it: path:<prefix> in the job's tree, unit:<name>, job:<ns>/<name>.
+                      items:
+                        type: string
+                      type: array
+                    answerBy:
+                      description: |-
+                        AnswerBy is the latest time an answer can come with the job still on
+                        time: its effective deadline less the work that waits on the unit.
+                      format: date-time
+                      type: string
                     at:
                       format: date-time
                       type: string
                     by:
                       type: string
+                    pressingAt:
+                      description: |-
+                        PressingAt is when it turned pressing, and PressingWhy why, in
+                        words.
+                      format: date-time
+                      type: string
+                    pressingWhy:
+                      type: string
+                    rechecks:
+                      description: Rechecks are the block's re-checks of its question.
+                      properties:
+                        done:
+                          format: int32
+                          type: integer
+                        inFlight:
+                          type: boolean
+                        lastAt:
+                          format: date-time
+                          type: string
+                        lastWhy:
+                          description: LastWhy is what started the last one.
+                          type: string
+                        max:
+                          format: int32
+                          type: integer
+                      required:
+                      - done
+                      - max
+                      type: object
                     record:
                       description: Record is the C4 ID of the signed record.
                       type: string
+                    state:
+                      description: |-
+                        State is raised (the unit stopped; the rest of the job runs on),
+                        pressing (the same, now urgent), supplied or withdrawn.
+                      enum:
+                      - raised
+                      - pressing
+                      - supplied
+                      - withdrawn
+                      type: string
                     supplied:
                       description: |-
-                        Supplied is the information a person supplied, and By who; the
-                        unit then runs again.
+                        Supplied is the information a person (or the job's answerer)
+                        supplied, By who and SuppliedAt when; the unit then runs again.
+                      type: string
+                    suppliedAt:
+                      format: date-time
+                      type: string
+                    suppliedRecord:
                       type: string
                     text:
                       description: Text is the information it needs, and Why why it
@@ -1071,6 +1169,25 @@ spec:
                       type: string
                     why:
                       type: string
+                    withdrawn:
+                      description: |-
+                        Withdrawn says who withdrew the question (the block on a re-check,
+                        the lead) and why; the unit runs again without an answer.
+                      properties:
+                        at:
+                          format: date-time
+                          type: string
+                        by:
+                          type: string
+                        record:
+                          type: string
+                        why:
+                          type: string
+                      required:
+                      - at
+                      - by
+                      - why
+                      type: object
                   required:
                   - at
                   - text
@@ -1791,6 +1908,11 @@ spec:
                   - unit
                   type: object
                 type: array
+              withdrawn:
+                description: |-
+                  Withdrawn is the token of the last withdrawal carried out
+                  (AnnotationWithdrawNeeds).
+                type: string
               yields:
                 description: Yields lists the most recent yields of checkpointing
                   units.

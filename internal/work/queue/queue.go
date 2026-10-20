@@ -153,6 +153,9 @@ type Queue struct {
 	lastAdj  map[string]func(time.Time, forecast.Band) forecast.Band
 	// approvals are the jobs a capacity request waits on a person for.
 	approvals map[string]bool
+	// projectObjs are the Projects by name at the last tick, for their
+	// policy values (escalate.go).
+	projectObjs map[string]*c4v1.Project
 }
 
 // NeedLeaderElection makes the queue run on one replica only.
@@ -275,10 +278,11 @@ type jobMem struct {
 	unitFailed map[int]map[string]bool
 	// toolsWait says why a unit waits for its tool (tools.go).
 	toolsWait string
-	// needs are what units stopped for, and supplied the last supply's
-	// token (needs.go).
-	needs    map[int]*needsRec
-	supplied string
+	// needs are what units stopped for, and supplied and withdrawn the
+	// last supply's and withdrawal's tokens (needs.go).
+	needs     map[int]*needsRec
+	supplied  string
+	withdrawn string
 	// asks are the questions units asked one another, and woken the ones
 	// a finished answerer was woken for (asks.go).
 	asks      []*askRec
@@ -373,7 +377,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.preemptBase = int(st.Preemptions)
 	m.sugg = loadSuggestion(st.Suggestion)
 	for _, d := range st.Decisions {
-		m.decisions = append(m.decisions, decisionRecord{Unit: int(d.Unit), At: d.At.Time, Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record})
+		m.decisions = append(m.decisions, decisionRecord{Unit: int(d.Unit), At: d.At.Time, Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record, Policy: d.Policy})
 	}
 	if st.Output != nil {
 		m.jobRecord = st.Output.Record
@@ -508,6 +512,11 @@ type view struct {
 	// waking are the finished units released this tick only to answer
 	// questions, with the questions' ids (asks.go).
 	waking map[int][]string
+	// rechecking are the units released this tick only to re-check their
+	// questions, with why, and checking those whose re-check runs
+	// (escalate.go).
+	rechecking map[int]string
+	checking   map[int]bool
 	// roundsExp is what the queue expects of each loop's remaining rounds,
 	// by first generator (rounds.go).
 	roundsExp map[int]roundsExp
@@ -580,6 +589,10 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.derivMu.Unlock()
 	nsProject := map[string]string{}
 	q.shareHist = map[string]bool{}
+	q.projectObjs = map[string]*c4v1.Project{}
+	for i := range projects.Items {
+		q.projectObjs[projects.Items[i].Name] = &projects.Items[i]
+	}
 	for _, p := range projects.Items {
 		for _, ns := range p.Spec.Namespaces {
 			nsProject[ns] = p.Name
@@ -755,8 +768,10 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	applyDecides(j, m, now)
 	// People steering units while they run (steer.go).
 	applySteers(j, m)
-	// People supplying what units stopped for (needs.go).
-	applySupplies(j, m)
+	// People supplying what units stopped for, or withdrawing the
+	// questions (needs.go).
+	q.applySupplies(ctx, v, now)
+	q.applyWithdraws(ctx, v, now)
 	// Nodes a person allowed again leave the automatic blacklist.
 	for _, n := range strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",") {
 		if n = strings.TrimSpace(n); n != "" && m.blacklist[n] {
@@ -819,6 +834,30 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 					q.Log.Error(err, "release unit pod", "pod", p.Name)
 				}
 			default:
+				v.pods[idx] = p
+				v.running[idx] = runInfo{pool: p.Labels[c4v1.LabelPool], slots: plan.Units[idx].Slots, started: startOf(p), node: p.Spec.NodeName}
+			}
+			continue
+		}
+		if p.Annotations[c4v1.AnnotationRecheck] != "" {
+			// A unit re-checking its question: its end decides only that,
+			// and nothing it wrote is kept (escalate.go).
+			switch {
+			case p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed:
+				if !m.foldedPod[p.UID] {
+					q.endRecheck(ctx, v, idx, p, now)
+					m.foldedPod[p.UID] = true
+				}
+				v.done = append(v.done, p)
+			case p.DeletionTimestamp != nil && letGo(p, now):
+				if err := q.release(ctx, p); err != nil {
+					q.Log.Error(err, "release unit pod", "pod", p.Name)
+				}
+			default:
+				if v.checking == nil {
+					v.checking = map[int]bool{}
+				}
+				v.checking[idx] = true
 				v.pods[idx] = p
 				v.running[idx] = runInfo{pool: p.Labels[c4v1.LabelPool], slots: plan.Units[idx].Slots, started: startOf(p), node: p.Spec.NodeName}
 			}
@@ -1086,6 +1125,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	q.serveWaits(v, now)
 	applyHolds(v)
 	q.estimate(v, now)
+	q.escalate(ctx, v, phases, now)
 	return v
 }
 
@@ -1351,7 +1391,8 @@ func schedJob(v *view, free int) sched.Job {
 
 func isFinished(v *view) bool {
 	plan := v.mem.plan
-	return plan != nil && len(v.mem.succeeded)+len(v.mem.failed)+len(v.stuck) >= len(plan.Units) && len(v.running) == 0
+	// A question re-checked keeps it in the policy's view (escalate.go).
+	return plan != nil && len(v.mem.succeeded)+len(v.mem.failed)+len(v.stuck) >= len(plan.Units) && len(v.running) == 0 && len(v.rechecking) == 0
 }
 
 // act creates pods for dispatched units and stops preempted ones.
@@ -1484,6 +1525,11 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			}
 			q.recordDecision(ctx, v, idx, "wake", "to answer "+strings.Join(ids, ", "), "", now)
 		}
+		recheck := v.rechecking[idx]
+		if recheck != "" {
+			// Released only to re-check its question (escalate.go).
+			recheckPod(pod, v.mem.needs[idx], recheck)
+		}
 		if tools != nil {
 			applyTools(pod, v.job.Name, tools, q.proxyURL(), q.hudURL())
 		}
@@ -1494,6 +1540,9 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			continue
 		}
 		v.mem.launched[idx] = now
+		if recheck != "" {
+			q.startedRecheck(ctx, v, idx, recheck, now)
+		}
 		q.Log.Info("released", "job", key, "unit", idx, "pool", d.Pool, "tier", d.Tier)
 	}
 	for _, pr := range dec.Preempt {

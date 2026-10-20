@@ -268,6 +268,12 @@ func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagge
 		if len(open) > 1 {
 			msg = fmt.Sprintf("%d units need information the brief lacked, first: %s", len(open), v.mem.needs[open[0]].text)
 		}
+		for _, i := range open {
+			if n := v.mem.needs[i]; n.state == needsPressing {
+				msg += "; pressing: " + n.pressingWhy
+				break
+			}
+		}
 	case waiting > 0:
 		reason, msg = c4v1.NeedsFailed, fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", waiting)
 	case v.measureShort != "":

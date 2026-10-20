@@ -1812,6 +1812,52 @@ and a sweep planner that spawns trials are all generators.
     - **Supplying it** (`POST /jobs/{ns}/{name}/supply {unit, text}`, MCP
       `c4_supply`, signed) runs the unit again, resuming where it stopped,
       with the text in `$C4_SUPPLIED` and what it asked in `$C4_NEEDED`.
+    - **It is an error that can heal,** graded by state
+      (`status.needs[i].state`): `raised` when the unit stops, `pressing`
+      once urgent, then `supplied` or `withdrawn`, both final. Each step
+      is a signed decision (`needs-raised`, `needs-pressing`,
+      `needs-supplied`, `needs-withdrawn`, with who and why) and in the
+      book; the incident is at risk while raised, urgent once pressing,
+      and gone once settled.
+    - **Pressing, by pressure:** `answerBy` is the job's effective
+      deadline (a dependent job's, when earlier) less the work from the
+      unit to the job's end, the unit's own and the longest chain after
+      it as the estimator prices them now. It is pressing from `answerBy`
+      less `escalation.pressMargin` (15m), with a reason such as "blocks
+      comp, then deliver; sm0140 misses dailies (18:00) unless answered
+      by 17:20", or once open `escalation.pressAfter` (2h), "unanswered
+      for 2h".
+    - **The job's answerer** (policy `answers`, the units named in the
+      job's `answerer` param, in order) is asked the question when it is
+      raised, as units ask units below. Its answer supplies it, by
+      `unit:<ns>/<job>/<unit>`; a person may still supply it first.
+    - **The block re-checks** when work lands that may settle it, on
+      events, never a clock: a unit it waits on or reads succeeds, a unit
+      it names in `about` (the termination message's last line, `about:
+      unit:schema, path:schema/, job:plates`; a bare value is a path)
+      changes its output, a path it names is written, the unit table
+      grows, or a job it names or reads from finishes. Only units whose
+      reasoning is a model re-check. A re-check is an extra attempt, as a
+      wake is: `c4.avalanche.io/recheck`, `$C4_RECHECK=1`,
+      `$C4_NEEDED`, `$C4_RECHECK_WHY` and `$C4_RECHECK_SECONDS` (300),
+      mounting the inputs and resume view as they are now. Exit 0
+      withdraws the question, its termination message (plain or
+      `{"why"}`) the why; exit 12 keeps it, with its new text; anything
+      else keeps it. No retry is spent and nothing it writes is kept. One
+      at a time, one per `escalation.recheck.minInterval` (10m), at most
+      `escalation.recheck.max` (5); then it waits for a person.
+    - **The lead withdraws it** (`POST
+      /jobs/{ns}/{name}/needs/{unit}/withdraw {why}`, MCP
+      `c4_withdraw_needs`, signed, the rights of supply). Withdrawn, the
+      unit runs again without an answer, with the why in
+      `$C4_WITHDRAWN`.
+    - **The values are policy** (`internal/work/policy`), read in one
+      place: the farm's default, then the Project's
+      `spec.work.escalation`, then the job's params, which may only
+      tighten them (a shorter pressAfter; a longer pressMargin or
+      minInterval; a lower recheck.max or asks.max). A decision a value
+      made names it, its value and where it came from (`policy: [{key,
+      value, from}]`) in its record and its book entry.
     - **A person answering on purpose** (a creative approval) is a step
       in the graph: a wait or a verdict, decided as above.
   - **Agents answer agents** (Joshua). A unit that
