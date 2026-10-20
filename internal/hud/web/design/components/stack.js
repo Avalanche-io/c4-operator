@@ -22,7 +22,7 @@
 
 import { tok, agg, reducedMotion } from './core.js';
 import * as f from './fmt.js';
-import { ranges } from './rle.js';
+import { ranges, toArray, encode } from './rle.js';
 import { register, tween, ms } from './live.js';
 import { drawMark } from './marks.js';
 import { unitWords } from './words.js';
@@ -146,8 +146,23 @@ function rankRows(d) {
   return { ...d, groups: [{ key: 'rows', label, units }], unitList: list.length ? list : d.unitList };
 }
 
+// reviewApart: a job's final review (the unit @review, spec.review) is a
+// wait after all its work, not one more frame: it comes out of the group it
+// was counted in (at the last frame's position) into its own, which the
+// sheet draws as a gate at the end of the job, holding every row
+function reviewApart(d) {
+  const r = (d.unitList || []).find((u) => u.name === '@review');
+  if (!r) return d;
+  const groups = (d.groups || []).map((g) => {
+    const idx = toArray(g.units || '');
+    return idx.includes(r.i) ? { ...g, units: encode(idx.filter((i) => i !== r.i)) } : g;
+  }).filter((g) => g.units);
+  groups.push({ key: 'review', label: 'review', units: String(r.i) });
+  return { ...d, groups, unitList: d.unitList.map((u) => (u === r ? { ...u, group: 'review', pos: 0 } : u)) };
+}
+
 export function buildSheet({ key, title, details, anchor, graph, jobs }) {
-  details = details.map(rankRows);
+  details = details.map(rankRows).map(reviewApart);
   const A = details.find((d) => `${d.namespace}/${d.name}` === anchor) || details[0];
   const aUnits = unitsOf(A);
   // rows: the anchor's widest group (frames for render, shards for CI, ranks for ML)

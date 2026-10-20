@@ -168,3 +168,13 @@ canvas[data-player] { background: var(--g02); }
 .me .gopts label { display: inline-flex; align-items: center; gap: 4px; }
 .me .gform .btn { align-self: flex-start; }
 .me .gintro { font: 400 13.5px/1.5 var(--sans); color: var(--ink-2); max-width: 760px; margin: 0 0 12px; }
+
+/* Held tracker writes (views/held.js): a person checks the tracker and says */
+.heldsec { margin: 0 0 16px; }
+.heldsec h2 { font: 600 11px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 8px; }
+.heldsec > p { font: 400 13px/1.45 var(--sans); max-width: 760px; margin: 0 0 8px; }
+.heldw { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; padding: 10px 12px; background: var(--plate); outline: var(--hair) solid var(--rule-2); box-shadow: inset 3px 0 0 var(--fail-pale); margin-bottom: 8px; }
+.heldw .hbody { flex: 1 1 320px; min-width: 0; }
+.heldw .ht { font: 400 13.5px/1.4 var(--sans); color: var(--paper); }
+.heldw .hd { font: 400 12px/1.4 var(--sans); color: var(--ink-2); margin-top: 3px; }
+.heldw .hact { display: flex; flex-wrap: wrap; gap: 6px; }

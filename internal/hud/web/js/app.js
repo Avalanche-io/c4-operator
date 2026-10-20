@@ -401,6 +401,8 @@ const ACTIONS = {
     return ['/grants', { namespace: d.ns, tracker: d.tracker, classes: ticked('class'), pools: ticked('pool'), until }];
   },
   revoke: (d) => [`/grants/${d.grant}`, null, 'DELETE'],
+  // a held tracker write: whether it reached the tracker
+  held: (d) => [`/held/${d.ns}/${d.link}/${d.field}`, { happened: d.happened === 'true' }],
 };
 
 document.addEventListener('click', async (e) => {

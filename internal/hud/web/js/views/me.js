@@ -16,6 +16,7 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { c4idEl } from '../../design/components/c4id.js';
+import { heldSection } from './held.js';
 
 const st = { trackers: null, grants: null, who: new Map(), err: null, terr: null, busy: false, at: null };
 document.addEventListener('hud:changed', () => { st.at = null; st.who.clear(); });
@@ -87,6 +88,7 @@ function trackerCard(ctx, t) {
       (t.syncs || []).length ? h('p', { class: 'dim' }, `Turns into jobs: ${t.syncs.join('; ')}.`) : null,
       t.ready ? null : h('p', { class: 't-fail' }, `Not connected: ${t.why}. A grant to it does nothing until it is.`),
       mine ? h('p', null, `It can submit ${scope(mine)} for you until ${day(mine.until)}.`) : h('p', { class: 'dim' }, 'It does not submit work for you.'),
+      ctx.level >= 2 ? heldSection(ctx, `tracker=${encodeURIComponent(`${t.namespace}/${t.name}`)}`, { title: null, only: (w) => !w.yours }) : null,
       people ? h('p', { class: 'dim' }, people.length ? `People it submits for: ${people.map((g) => g.person).join(', ')}.` : 'Nobody has let it submit work for them yet.') : null,
       giveForm(ctx, t, !!mine)));
 }
@@ -102,6 +104,7 @@ export default {
         h('h1', null, v.user || 'You'),
         h('div', { class: 'meta vmeta' }, `${v.role || ''}${v.role ? ' · ' : ''}${v.allProjects ? 'all projects' : (v.projects || []).join(', ')}`))),
       st.err ? h('p', { class: 'warn red' }, st.err) : null,
+      heldSection(ctx, 'mine=1', { title: 'Writes for you to check', intro: 'A write to a tracker was interrupted, and C4 can’t tell whether it reached the tracker. It holds it, neither sending it again nor dropping it, until you look and say.' }),
       h('div', { class: 'vsec', 'data-key': 'grants' },
         h('header', null, h('h2', null, 'Trackers that submit work for you')),
         h('p', { class: 'gintro' }, 'A tracker turns issues and tasks into jobs. Letting it submit work for you makes the jobs it makes from yours your own, run with your access. It always ends, and you can take it back any time.'),

@@ -17,6 +17,7 @@ import { c4idEl } from '../../design/components/c4id.js';
 import { unitWords, how, reasoningWords } from '../../design/components/words.js';
 import { markSVG, markEl } from '../../design/components/marks.js';
 import { planSheet } from '../../design/components/plansheet.js';
+import { heldSection } from './held.js';
 
 const st = {
   key: null, details: new Map(), graph: null, book: null, lastNow: null, fetching: false,
@@ -315,6 +316,7 @@ export default {
             j.output && L >= 5 && ctx.level >= 3 ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset added to its chain' },
               h('b', null, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${String(j.output.changesets).padStart(4, '0')}+00`) : null),
           h('div', null,
+            ctx.level >= 2 ? heldSection(ctx, `job=${encodeURIComponent(k)}`, { title: 'A tracker write to check', job: false }) : null,
             unitCard(ctx, j),
             side,
             L >= 2 ? controls(j, k) : null,
