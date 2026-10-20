@@ -1,4 +1,4 @@
-"""The submission (``c4: submit/1``, SUBMIT.md): what a panel writes and
+"""The submission (``c4: submit/1``): what a panel writes and
 sends. This module checks a document locally the way the farm does, so a
 panel can point at a mistake before anything is sent. The farm's check
 (``POST /submissions`` with ``dryRun``) is the authority; this one only
@@ -89,7 +89,7 @@ def check(doc: Any) -> List[Dict[str, str]]:
     for k in doc:
         if k not in TOP:
             hint = _did_you_mean(k, TOP)
-            errs.append(error(k, f'submit/1 has no field "{k}"', hint or "remove it; SUBMIT.md section 3 lists the fields"))
+            errs.append(error(k, f'submit/1 has no field "{k}"', hint or "remove it; GET /schema/submit lists the fields"))
     if "due" in doc:
         p = due_problem(doc["due"])
         if p:
@@ -112,7 +112,7 @@ def check(doc: Any) -> List[Dict[str, str]]:
         for k in job:
             if k not in JOB:
                 hint = _did_you_mean(k, JOB)
-                errs.append(error(f"{base}.{k}", f'a job has no field "{k}"', hint or "remove it; SUBMIT.md section 4 lists a job's fields"))
+                errs.append(error(f"{base}.{k}", f'a job has no field "{k}"', hint or "remove it; GET /schema/submit lists a job's fields"))
         if "tool" not in job and "plan" not in job:
             errs.append(error(base, "a job names its tool", "add tool: and the tool's name"))
         elif "tool" in job and not (isinstance(job["tool"], str) and _TOOL.match(job["tool"])):

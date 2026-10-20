@@ -1,4 +1,4 @@
-"""A published tool as a front end sees it (``c4: tool/1``, TOOL.md): its
+"""A published tool as a front end sees it (``c4: tool/1``): its
 name, kind and parameters. Parameters are Open Job Description parameter
 definitions, field for field, plus C4's ``show``, ``from`` and
 ``affectsOutput``; this module reads them and checks values against them.

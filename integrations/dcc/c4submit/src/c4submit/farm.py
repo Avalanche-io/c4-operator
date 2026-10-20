@@ -8,9 +8,9 @@ Configuration, in order: explicit arguments, then the environment:
 - ``C4_HUD_TOKEN`` or ``C4_HUD_TOKEN_FILE``: the artist's bearer token (the
   file is read on every request, so a rotated token takes effect).
 
-The routes for submissions, tools and projects are slice 1's (PLAN.md
-items 1.3 and 1.4); their shapes here are the ones proposed to c4-sched
-on 2026-10-20 and change with what lands.
+The routes for submissions, tools and projects are not built yet; their
+shapes here are the ones proposed for them on 2026-10-20, and change with
+what lands.
 """
 
 import json

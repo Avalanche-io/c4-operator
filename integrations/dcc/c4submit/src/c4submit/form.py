@@ -1,7 +1,7 @@
-"""The submit form a tool's parameters draw, without a toolkit (TOOL.md
-section 6). A panel draws each field in its own widgets (Qt, Houdini
-parameters, Nuke knobs) and reads and writes values through this model,
-so every DCC shows the same fields, defaults, links and errors.
+"""The submit form a tool's parameters draw, without a toolkit. A panel
+draws each field in its own widgets (Qt, Houdini parameters, Nuke knobs)
+and reads and writes values through this model, so every DCC shows the
+same fields, defaults, links and errors.
 
 - ``show: artist`` fields are drawn; ``advanced`` ones are drawn folded;
   ``wrangler`` and ``hidden`` are not drawn in a DCC (the HUD shows

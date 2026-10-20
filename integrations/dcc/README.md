@@ -22,8 +22,7 @@ python -m pytest integrations/dcc
 
 ## What a panel does
 
-The design is `proposals/authoring` (SUBMIT.md for the file a panel writes,
-TOOL.md section 6 for the forms). In short:
+In short:
 
 1. **The form comes from the tool.** A published tool's parameters (Open
    Job Description's parameter definitions, plus C4's `show` and `from`)

@@ -1,5 +1,5 @@
 """The submission and tool formats as a front end reads and writes them:
-the examples in SUBMIT.md pass, mistakes come back as path, message and
+the format's own examples pass, mistakes come back as path, message and
 fix, YAML round-trips, and a tool's parameters draw a form."""
 
 import glob
@@ -14,7 +14,7 @@ from c4submit.testing import KARMA, NUKE_COMP
 from c4submit.tool import Tool
 
 HERE = os.path.dirname(__file__)
-# c4-authoring's fixtures (slice 1 item 1.1), when they have landed.
+# The schema's passing fixtures (schema/fixtures), once they are in the repository.
 SCHEMA_PASS = os.path.join(HERE, "..", "..", "..", "..", "schema", "fixtures", "submit", "pass")
 
 
@@ -37,7 +37,7 @@ def _comp():
 
 
 def test_after_names_a_key_with_a_suggestion():
-    # SUBMIT.md 5.1: the agent typed comp-v4 for comp.
+    # An agent typed comp-v4 for the key comp.
     doc = _comp()
     doc["jobs"]["movie"]["after"] = "comp-v4"
     assert submission.check(doc) == [{

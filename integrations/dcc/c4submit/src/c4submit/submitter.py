@@ -471,7 +471,7 @@ def save(checked: Checked, path: str) -> str:
 
 
 def default_filename(checked: Checked) -> str:
-    """``<shot>-<first job>.yaml``, as SUBMIT.md names its examples."""
+    """``<shot>-<first job>.yaml``, as the format's examples are named."""
     doc = checked.doc
     first = next(iter(doc.get("jobs") or {"job": None}))
     return f"{doc.get('shot') or 'submission'}-{first}.yaml"

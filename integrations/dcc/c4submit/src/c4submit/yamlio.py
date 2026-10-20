@@ -3,7 +3,7 @@ standard library: Nuke, Houdini, Maya and Blender do not all ship PyYAML.
 
 The writer covers what a submission holds (maps, lists, strings, numbers,
 booleans and null). Short maps of scalars are written inline, as the
-examples in SUBMIT.md are (``with: {stage: sm0140.usda}``). Reading takes
+submission format's own examples are (``with: {stage: sm0140.usda}``). Reading takes
 JSON, or YAML when PyYAML is importable.
 """
 

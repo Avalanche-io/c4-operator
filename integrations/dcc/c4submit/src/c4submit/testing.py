@@ -1,7 +1,7 @@
 """Fakes for testing c4submit and the DCC panels without a farm or a DCC.
 
 - ``FakeFarm``: the farm in memory, with the same methods as ``Farm``. Its
-  check answers the way SUBMIT.md sections 5.1 and 5.2 show, until
+  check answers the way the submission format's examples show, until
   ``POST /submissions`` is built and its answers can be recorded.
 - ``serve(farm)``: the same farm over HTTP on localhost, so ``Farm`` itself
   (urllib, streaming uploads, refusals) is tested end to end.

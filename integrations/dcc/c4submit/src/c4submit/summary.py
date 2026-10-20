@@ -1,4 +1,4 @@
-"""What a panel shows before Submit, from a check (TOOL.md section 7.2):
+"""What a panel shows before Submit, from a check:
 
     sm0220-light-v004   Karma render · 240 frames · Karma XPU
       files      1,284 found from sm0220.usda · 6.2 GB · 214 to upload
