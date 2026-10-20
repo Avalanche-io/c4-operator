@@ -2,6 +2,9 @@
 // of the unit contract a script would otherwise spell out: progress, frame
 // previews, yielding at a checkpoint, and resuming.
 //
+//	c4-unit run                     run the tool in $C4_TOOLS/tool.yaml with the
+//	                                parameters in $C4_PARAMS: progress, previews,
+//	                                stalls and .c4/outcome from what it prints (run.go)
 //	c4-unit progress 0.4            write the unit's progress (0 to 1)
 //	c4-unit preview IMAGE FRAME     write preview/FRAME.png for the HUD's player
 //	c4-unit yield-requested         exit 0 if the farm asked this unit to yield
@@ -111,6 +114,14 @@ type env struct {
 	oiiotool  string // the converter for EXR and TIFF
 	now       func() time.Time
 	sleep     func(time.Duration)
+
+	// for run
+	environ   func() []string  // the environment the tool starts from
+	stderr    io.Writer        // the runner's own messages
+	signals   <-chan os.Signal // forwarded to the tool (default SIGTERM, SIGINT)
+	minuteLen time.Duration    // a stall's minute
+	stopGrace time.Duration    // SIGTERM to SIGKILL
+	pollEvery time.Duration    // how often the tree is read for frames
 }
 
 func (e env) get(k string) string {
@@ -148,7 +159,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	cost := fs.Float64("cost", -1, "with usage: the call's cost in US dollars, if known")
 	costSource := fs.String("cost-source", "", "with usage: where the price came from (a metering proxy, a price table)")
 	if len(args) == 0 {
-		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | wait --server S | steer [--json] | decision | resume-dir | output")
+		return 2, errors.New("usage: c4-unit run | progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | wait --server S | steer [--json] | decision | resume-dir | output")
 	}
 	cmd := args[0]
 	if err := fs.Parse(args[1:]); err != nil {
@@ -156,6 +167,11 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	}
 	pos := fs.Args()
 	switch cmd {
+	case "run":
+		if len(pos) != 0 {
+			return 2, errors.New("usage: c4-unit run (the tool is $C4_TOOLS/tool.yaml, its parameters $C4_PARAMS)")
+		}
+		return runTool(e, stdout, e.errOut())
 	case "progress":
 		if len(pos) != 1 {
 			return 2, errors.New("usage: c4-unit progress N (0 to 1)")
@@ -376,7 +392,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		fmt.Fprintln(stdout, out)
 		return 0, nil
 	}
-	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, wait, steer, ask, answer, needs, decision, resume-dir or output", cmd)
+	return 2, fmt.Errorf("no command %q: run, progress, preview, yield-requested, safepoint, wait, steer, ask, answer, needs, decision, resume-dir or output", cmd)
 }
 
 func code(err error) (int, error) {
