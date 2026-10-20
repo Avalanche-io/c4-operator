@@ -39,6 +39,16 @@ func TestReadSafepoint(t *testing.T) {
 	if !ok || sp.Seq != 7 || !sp.At.Equal(time.Date(2026, 10, 19, 20, 1, 2, 5e8, time.UTC)) {
 		t.Fatalf("%+v %v", sp, ok)
 	}
+	// A safe point that asks for a wait (c4-unit wait) carries it as JSON;
+	// a line that is not JSON is dropped.
+	os.WriteFile(filepath.Join(upper, ".c4", "safepoint"), []byte("seq 8\nat 2026-10-19T20:01:02.5Z\nwait {\"server\":\"person:owner\"}\n"), 0o644)
+	if sp, ok := ReadSafepoint(upper); !ok || string(sp.Wait) != `{"server":"person:owner"}` {
+		t.Fatalf("a wait: %+v %v", sp, ok)
+	}
+	os.WriteFile(filepath.Join(upper, ".c4", "safepoint"), []byte("seq 9\nat 2026-10-19T20:01:02.5Z\nwait {server\n"), 0o644)
+	if sp, ok := ReadSafepoint(upper); !ok || sp.Wait != nil {
+		t.Fatalf("a malformed wait: %+v %v", sp, ok)
+	}
 	os.WriteFile(filepath.Join(upper, ".c4", "safepoint"), []byte("garbage\n"), 0o644)
 	if _, ok := ReadSafepoint(upper); ok {
 		t.Fatal("a malformed safe point read")

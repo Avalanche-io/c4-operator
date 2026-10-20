@@ -47,6 +47,9 @@ const (
 	// yieldDrain of one whose pod was being deleted.
 	yieldMove  = "move"
 	yieldDrain = "disruption"
+	// yieldWait is the yield reason of a unit that stopped for a wait it
+	// opened (c4-unit wait).
+	yieldWait = "wait"
 	// nearlyDone is the progress past which a unit asked to stop for
 	// another job continues: stopping it would lose more than it frees.
 	nearlyDone = 0.9
@@ -60,9 +63,10 @@ const (
 // spNote and spDecision are the safepoint and safepoint-decision
 // annotations' values (node.SafepointNote and node.SafepointDecision).
 type spNote struct {
-	Seq        int       `json:"seq"`
-	At         time.Time `json:"at"`
-	Checkpoint string    `json:"checkpoint,omitempty"`
+	Seq        int             `json:"seq"`
+	At         time.Time       `json:"at"`
+	Checkpoint string          `json:"checkpoint,omitempty"`
+	Wait       json.RawMessage `json:"wait,omitempty"` // c4-unit wait
 }
 
 type spDecision struct {
@@ -98,6 +102,8 @@ type spChoice struct {
 	forJob        string
 	move          string // the pool the unit moves to
 	drain         bool   // the pod is being deleted
+	// wait is the wait the unit asked for and stops for.
+	wait *class.Wait
 }
 
 // safepointChoice decides for one running unit as things stand. free is
@@ -195,8 +201,12 @@ func (q *Queue) decideSafepoints(ctx context.Context, now time.Time, dec sched.D
 			if _, known := v.safe[idx]; !at && !known {
 				continue // it announces no safe points
 			}
-			c := q.safepointChoice(v, idx, pod, ri, dec, free, cost, now)
 			last, _ := podDecision(pod)
+			if at && n.Seq > last.Seq && len(n.Wait) > 0 {
+				q.answerSafepoint(ctx, v, idx, pod, n, waitChoice(v, idx, n), free, now)
+				continue
+			}
+			c := q.safepointChoice(v, idx, pod, ri, dec, free, cost, now)
 			if !at || n.Seq <= last.Seq {
 				if pod.Annotations[c4v1.AnnotationSafepointNext] != c.next {
 					patch := client.MergeFrom(pod.DeepCopy())
@@ -208,6 +218,21 @@ func (q *Queue) decideSafepoints(ctx context.Context, now time.Time, dec sched.D
 			q.answerSafepoint(ctx, v, idx, pod, n, c, free, now)
 		}
 	}
+}
+
+// waitChoice answers a safe point that asks for a wait (c4-unit wait):
+// stop, the wait opening for the unit, or continue when the wait is
+// refused, saying why.
+func waitChoice(v *view, idx int, n spNote) spChoice {
+	name := v.mem.plan.Units[idx].Name
+	if name == "" {
+		name = strconv.Itoa(idx)
+	}
+	w, err := class.AskedWait(name, n.Wait)
+	if err != nil {
+		return spChoice{do: "continue", why: err.Error(), next: "continue"}
+	}
+	return spChoice{do: "stop", why: "waits for " + w.Server, next: "stop", wait: w}
 }
 
 // answerSafepoint writes the decision at safe point n and acts on it.
@@ -227,6 +252,11 @@ func (q *Queue) answerSafepoint(ctx context.Context, v *view, idx int, pod *core
 		pod.Annotations[c4v1.AnnotationYield] = yieldMove
 		pod.Annotations[c4v1.AnnotationYieldBy] = now.Add(yieldGrace).UTC().Format(time.RFC3339)
 	}
+	if c.wait != nil {
+		// Its exit is a yield: it resumes once the wait is decided.
+		pod.Annotations[c4v1.AnnotationYield] = yieldWait
+		pod.Annotations[c4v1.AnnotationYieldBy] = now.Add(yieldGrace).UTC().Format(time.RFC3339)
+	}
 	if c.drain && pod.Annotations[c4v1.AnnotationYield] == "" {
 		// So its exit is a yield, not the unit's end.
 		pod.Annotations[c4v1.AnnotationYield] = yieldDrain
@@ -240,6 +270,15 @@ func (q *Queue) answerSafepoint(ctx context.Context, v *view, idx int, pod *core
 		extra["checkpoint"] = n.Checkpoint
 	}
 	switch {
+	case c.wait != nil:
+		v.mem.yieldAsked[idx] = now
+		v.mem.waitRecs().recs[idx] = &waitRec{since: now, server: c.wait.Server, block: true, seq: n.Seq,
+			ask: c.wait.Ask, choices: c.wait.Choices, reply: c.wait.Reply, expect: c.wait.Expect}
+		extra["server"] = c.wait.Server
+		if c.wait.Ask != "" {
+			extra["ask"] = c.wait.Ask
+		}
+		q.recordDecision(ctx, v, idx, "safepoint-wait", c.why, "", now, extra)
 	case c.move != "":
 		v.mem.yieldAsked[idx] = now
 		if v.mem.moveTo == nil {

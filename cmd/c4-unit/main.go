@@ -8,6 +8,14 @@
 //	c4-unit safepoint [--checkpoint REF] [--wait 20s]
 //	                                at a safe point, ask the farm whether to stop
 //	                                here: exit 10 (and print "stop") or 0 ("continue")
+//	c4-unit wait --server person:ID [--ask TEXT] [--choices a,b] [--reply]
+//	             [--expect 2h] [--checkpoint REF] [--wait 20s]
+//	                                at a safe point, ask a person (or a party, or a
+//	                                clock) and stop until they decide: exit 10
+//	                                ("waits") to stop; 1 if the farm refused
+//	c4-unit decision                print the decision this attempt resumed with
+//	                                (JSON: seq, do, note, actor, at, view, reply),
+//	                                exit 1 if none
 //	c4-unit measure [--of N] [--name WHAT] [--detail TEXT] VALUE
 //	                                report the job's measure of done (361 of 379
 //	                                rules sited), as .c4/measure.json
@@ -36,6 +44,15 @@
 // when no answer arrives in time does the command fall back on that
 // request, seen through $C4_PODINFO: stop if one is still pending. After a
 // soft stop's deadline the unit is stopped anyway.
+//
+// A unit that needs someone at a safe point (an approval, an answer, an
+// edited plan) asks with c4-unit wait. The farm stops it there and frees
+// its slot; when the wait is decided, the unit runs again and resumes from
+// what it saved, with the decision in $C4_DECISION and, for a wait with
+// --reply, the reply mounted read-only at $C4_REPLY.
+//
+//	c4-unit wait --server person:owner --ask "split the chapter?" --choices split,keep --checkpoint turn-12
+//	[ $? -eq 10 ] && exit 0
 package main
 
 import (
@@ -92,7 +109,12 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	dir := fs.String("dir", "", "the unit's writable mount (default $C4_OUTPUT, or found from the mounts)")
 	width := fs.Int("width", 960, "preview width in pixels")
 	checkpoint := fs.String("checkpoint", "", "with safepoint: what the unit saved there (a step, a path, a session turn), for the record")
-	wait := fs.Duration("wait", 20*time.Second, "with safepoint: how long to wait for the farm's decision before falling back on its last request")
+	wait := fs.Duration("wait", 20*time.Second, "with safepoint or wait: how long to wait for the farm's decision before falling back on its last request")
+	server := fs.String("server", "", "with wait: who decides: person:<id>, party:<name> or clock:<RFC 3339 time>")
+	ask := fs.String("ask", "", "with wait: the question")
+	choices := fs.String("choices", "", "with wait: the decisions that resume the unit besides approve, comma-separated (fail always may)")
+	reply := fs.Bool("reply", false, "with wait: the decision carries content, mounted at $C4_REPLY when the unit resumes")
+	expect := fs.Duration("expect", 0, "with wait: how long the decision is expected to take")
 	of := fs.Int64("of", 0, "with measure: the target (default the job's)")
 	name := fs.String("name", "", "with measure: what is counted (default the job's)")
 	detail := fs.String("detail", "", "with measure: a line of detail for the record")
@@ -104,7 +126,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	cost := fs.Float64("cost", -1, "with usage: the call's cost in US dollars, if known")
 	costSource := fs.String("cost-source", "", "with usage: where the price came from (a metering proxy, a price table)")
 	if len(args) == 0 {
-		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | resume-dir | output")
+		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | wait --server S | decision | resume-dir | output")
 	}
 	cmd := args[0]
 	if err := fs.Parse(args[1:]); err != nil {
@@ -166,7 +188,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		if err != nil {
 			return 1, err
 		}
-		seq, err := safepoint(e, filepath.Join(out, ".c4", "safepoint"), *checkpoint)
+		seq, err := safepoint(e, filepath.Join(out, ".c4", "safepoint"), *checkpoint, nil)
 		if err != nil {
 			return 1, err
 		}
@@ -192,6 +214,55 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 			return stopCode, nil
 		}
 		fmt.Fprintln(stdout, "continue"+note)
+		return 0, nil
+	case "wait":
+		if !strings.Contains(*server, ":") || *expect < 0 {
+			return 2, errors.New("usage: c4-unit wait --server person:<id>|party:<name>|clock:<time> [--ask TEXT] [--choices a,b] [--reply] [--expect D]")
+		}
+		out, err := output(e, *dir)
+		if err != nil {
+			return 1, err
+		}
+		w := map[string]any{"server": *server}
+		if *ask != "" {
+			w["ask"] = *ask
+		}
+		if *choices != "" {
+			w["choices"] = strings.Split(*choices, ",")
+		}
+		if *reply {
+			w["reply"] = true
+		}
+		if *expect > 0 {
+			w["expect"] = expect.Seconds()
+		}
+		seq, err := safepoint(e, filepath.Join(out, ".c4", "safepoint"), *checkpoint, w)
+		if err != nil {
+			return 1, err
+		}
+		d, ok := awaitDecision(e, seq, *wait)
+		switch {
+		case ok && d.Do == "stop":
+			fmt.Fprintln(stdout, "waits"+suffix(d.Why))
+			return stopCode, nil
+		case ok:
+			// The farm answered continue: it did not open the wait.
+			fmt.Fprintln(stdout, "refused"+suffix(d.Why))
+			return 1, nil
+		case e.get("C4_CONTROL") == "":
+			fmt.Fprintln(stdout, "refused: no decision channel")
+			return 1, nil
+		}
+		// No answer in time. The farm may still open the wait; if it does,
+		// the next safe point stops.
+		fmt.Fprintln(stdout, "no decision in "+wait.String())
+		return 1, nil
+	case "decision":
+		d := e.get("C4_DECISION")
+		if d == "" {
+			return 1, nil
+		}
+		fmt.Fprintln(stdout, d)
 		return 0, nil
 	case "yield-requested":
 		asked, err := yieldRequested(e)
@@ -220,7 +291,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		fmt.Fprintln(stdout, out)
 		return 0, nil
 	}
-	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, resume-dir or output", cmd)
+	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, wait, decision, resume-dir or output", cmd)
 }
 
 func code(err error) (int, error) {
@@ -394,9 +465,10 @@ func awaitDecision(e env, seq int, wait time.Duration) (decision, bool) {
 }
 
 // safepoint records a safe point in path: its sequence number (one past
-// the last), the time, and what was saved there, and returns the number.
-// The node daemon asks the farm for a decision on it.
-func safepoint(e env, path, checkpoint string) (int, error) {
+// the last), the time, what was saved there, and the wait it asks for, if
+// any; and returns the number. The node daemon asks the farm for a
+// decision on it.
+func safepoint(e env, path, checkpoint string, wait map[string]any) (int, error) {
 	seq := 1
 	if b, err := os.ReadFile(path); err == nil {
 		for _, l := range strings.Split(string(b), "\n") {
@@ -415,6 +487,13 @@ func safepoint(e env, path, checkpoint string) (int, error) {
 	fmt.Fprintf(&b, "seq %d\nat %s\n", seq, at.UTC().Format(time.RFC3339Nano))
 	if checkpoint != "" {
 		fmt.Fprintf(&b, "checkpoint %s\n", strings.ReplaceAll(checkpoint, "\n", " "))
+	}
+	if wait != nil {
+		w, err := json.Marshal(wait) // one line: JSON escapes newlines
+		if err != nil {
+			return 0, err
+		}
+		fmt.Fprintf(&b, "wait %s\n", w)
 	}
 	return seq, writeAtomic(path, []byte(b.String()))
 }

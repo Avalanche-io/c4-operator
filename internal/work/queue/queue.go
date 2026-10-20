@@ -997,6 +997,12 @@ func (q *Queue) estimate(v *view, now time.Time) {
 			queued = append(queued, unit(idx))
 		}
 	}
+	for idx := range v.openWaits {
+		// a unit waiting on a wait it opened runs again once decided
+		if !isWait(plan, idx) {
+			queued = append(queued, unit(idx))
+		}
+	}
 	for idx, r := range v.running {
 		ru := estimate.RunningUnit{Unit: unit(idx), Elapsed: math.Max(0, now.Sub(r.started).Seconds())}
 		if pod := v.pods[idx]; pod != nil {
@@ -1029,6 +1035,10 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	}
 	for idx := range v.openWaits {
 		rem[idx] = waitRemaining(plan, v.mem, idx, now)
+		if !isWait(plan, idx) {
+			u := plan.Units[idx]
+			rem[idx] += math.Max(0, e.Predict(u.Key, u.Pos).Mean-retained(idx))
+		}
 	}
 	for idx, r := range v.running {
 		u := plan.Units[idx]
@@ -1218,6 +1228,17 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			ready, err := q.ensureReworkInputs(ctx, v, idx, w)
 			if err != nil {
 				q.Log.Error(err, "rework input", "job", key, "unit", idx)
+				continue
+			}
+			if !ready {
+				continue
+			}
+		}
+		if w := v.mem.blockDecision(idx); w != nil && w.view != "" {
+			// The reply to the wait it opened, mounted at $C4_REPLY.
+			ready, err := q.ensureMaterialization(ctx, v.job, replyName(v.job.Name, idx), w.view, "")
+			if err != nil {
+				q.Log.Error(err, "reply", "job", key, "unit", idx)
 				continue
 			}
 			if !ready {
@@ -1452,6 +1473,9 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	substitutePod(v, pod, p.site)
 	if w := v.mem.rework(idx); w != nil {
 		applyRework(pod, j.Name, idx, w)
+	}
+	if w := v.mem.blockDecision(idx); w != nil {
+		applyDecision(pod, j.Name, idx, w)
 	}
 	if r, ok := v.driver.(class.Resumer); ok && v.mem.resume[idx] != "" {
 		env = append(env, r.ResumeEnv(v.mem.resume[idx])...)

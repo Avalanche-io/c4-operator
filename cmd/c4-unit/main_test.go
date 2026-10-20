@@ -228,3 +228,42 @@ func TestUsageAdds(t *testing.T) {
 		t.Fatal("usage without a model accepted")
 	}
 }
+
+// A unit asks for a wait at a safe point: the wait goes into
+// .c4/safepoint as one line of JSON, and the farm's stop means it waits;
+// a continue means the farm refused it. A resumed attempt reads the
+// decision.
+func TestWait(t *testing.T) {
+	out, ctl := t.TempDir(), t.TempDir()
+	clock := time.Date(2026, 10, 19, 20, 0, 0, 0, time.UTC)
+	e := vars(map[string]string{"C4_OUTPUT": out, "C4_CONTROL": ctl})
+	e.now = func() time.Time { return clock }
+	e.sleep = func(d time.Duration) { clock = clock.Add(d) }
+	os.WriteFile(filepath.Join(ctl, "safepoint.decision"), []byte(`{"seq":1,"do":"stop","why":"waits for person:owner"}`), 0o644)
+	var buf bytes.Buffer
+	c, err := run([]string{"wait", "--server", "person:owner", "--ask", "split the\nchapter?", "--choices", "split,keep", "--reply", "--expect", "2h", "--checkpoint", "turn-12"}, &buf, e)
+	if c != stopCode || err != nil || buf.String() != "waits: waits for person:owner\n" {
+		t.Fatalf("wait: %d %v %q", c, err, buf.String())
+	}
+	b, _ := os.ReadFile(filepath.Join(out, ".c4", "safepoint"))
+	want := "checkpoint turn-12\n" + `wait {"ask":"split the\nchapter?","choices":["split","keep"],"expect":7200,"reply":true,"server":"person:owner"}` + "\n"
+	if !strings.HasPrefix(string(b), "seq 1\nat ") || !strings.HasSuffix(string(b), want) {
+		t.Fatalf("safepoint file %q", b)
+	}
+	os.WriteFile(filepath.Join(ctl, "safepoint.decision"), []byte(`{"seq":2,"do":"continue","why":"unit draft asks for a wait: unknown field"}`), 0o644)
+	buf.Reset()
+	if c, _ := run([]string{"wait", "--server", "person:owner"}, &buf, e); c != 1 || !strings.HasPrefix(buf.String(), "refused: ") {
+		t.Fatalf("refused: %d %q", c, buf.String())
+	}
+	if c, _ := run([]string{"wait", "--ask", "who?"}, &buf, e); c != 2 {
+		t.Fatalf("no server: %d", c)
+	}
+	buf.Reset()
+	if c, _ := run([]string{"decision"}, &buf, e); c != 1 || buf.Len() != 0 {
+		t.Fatalf("no decision: %d %q", c, buf.String())
+	}
+	d := `{"seq":1,"do":"split","actor":"owner"}`
+	if c, _ := run([]string{"decision"}, &buf, vars(map[string]string{"C4_DECISION": d})); c != 0 || buf.String() != d+"\n" {
+		t.Fatalf("decision: %d %q", c, buf.String())
+	}
+}

@@ -31,9 +31,10 @@ const (
 
 // SafepointNote is the c4.avalanche.io/safepoint annotation's value.
 type SafepointNote struct {
-	Seq        int       `json:"seq"`
-	At         time.Time `json:"at"`
-	Checkpoint string    `json:"checkpoint,omitempty"`
+	Seq        int             `json:"seq"`
+	At         time.Time       `json:"at"`
+	Checkpoint string          `json:"checkpoint,omitempty"`
+	Wait       json.RawMessage `json:"wait,omitempty"`
 }
 
 // SafepointDecision is the c4.avalanche.io/safepoint-decision annotation's
@@ -95,7 +96,7 @@ func (d *Daemon) safepointsOnce(ctx context.Context, relays map[string]*spRelay)
 		r.seen = true
 		upper, _ := d.volumeDirs(v.Partition, v.ID)
 		if sp, ok := ReadSafepoint(upper); ok && sp.Seq > r.asked {
-			note := SafepointNote{Seq: sp.Seq, At: sp.At, Checkpoint: sp.Checkpoint}
+			note := SafepointNote{Seq: sp.Seq, At: sp.At, Checkpoint: sp.Checkpoint, Wait: sp.Wait}
 			if d.setPodNote(ctx, v.Namespace, v.Pod, v.PodUID, c4v1.AnnotationSafepoint, note) {
 				r.asked = sp.Seq
 			}

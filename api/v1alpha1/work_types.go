@@ -1059,6 +1059,13 @@ type WorkWait struct {
 	// decided.
 	// +optional
 	Reply bool `json:"reply,omitempty"`
+	// Block says the unit opened the wait for itself at a safe point
+	// (c4-unit wait): it stopped there, and runs again, resuming, once
+	// the wait is decided. Safepoint is the safe point's number.
+	// +optional
+	Block bool `json:"block,omitempty"`
+	// +optional
+	Safepoint int32 `json:"safepoint,omitempty"`
 	// +optional
 	View string `json:"view,omitempty"`
 }

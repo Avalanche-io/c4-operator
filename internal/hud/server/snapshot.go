@@ -248,7 +248,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	for _, w := range st.Waits {
 		aw := api.Wait{Unit: int(w.Unit), Name: w.Name, WaitsFor: w.Server, Ask: w.Ask, Choices: w.Choices, Escalated: w.Escalated,
 			ExpectSeconds: w.ExpectSeconds, Blocking: w.Blocking, Do: w.Do, Note: w.Note, Actor: w.Actor, Record: w.Record,
-			Reply: w.Reply, View: w.View}
+			Reply: w.Reply, View: w.View, Block: w.Block}
 		// a person's open wait that holds up work needs them; an escalated
 		// unit always does (it is flagged)
 		aw.NeedsYou = w.Do == "" && strings.HasPrefix(w.Server, "person:") && (w.Blocking || w.Escalated)

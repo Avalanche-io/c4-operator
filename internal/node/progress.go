@@ -2,6 +2,7 @@ package node
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -88,6 +89,9 @@ type Safepoint struct {
 	Seq        int
 	At         time.Time
 	Checkpoint string
+	// Wait is the wait the unit asks for there (c4-unit wait), as JSON:
+	// it stops and resumes when the wait is decided.
+	Wait json.RawMessage
 }
 
 // ReadSafepoint reads a running unit's .c4/safepoint ("seq N", "at TIME"
@@ -113,6 +117,10 @@ func ReadSafepoint(upper string) (Safepoint, bool) {
 			sp.At, _ = time.Parse(time.RFC3339Nano, v)
 		case "checkpoint":
 			sp.Checkpoint = v
+		case "wait":
+			if json.Valid([]byte(v)) {
+				sp.Wait = json.RawMessage(v)
+			}
 		}
 	}
 	if sp.Seq <= 0 || sp.At.IsZero() {

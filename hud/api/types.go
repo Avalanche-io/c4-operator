@@ -695,4 +695,7 @@ type Wait struct {
 	// decided, mounted by the units the wait holds up.
 	Reply bool   `json:"reply,omitempty"`
 	View  string `json:"view,omitempty"`
+	// Block says the unit opened the wait for itself at a safe point
+	// (c4-unit wait): it runs again, resuming, once decided.
+	Block bool `json:"block,omitempty"`
 }

@@ -1614,6 +1614,24 @@ and a sweep planner that spawns trials are all generators.
     holds up mount it with a `fromUnit` input, as they would a unit's
     view; `waits[].view` shows it. A unit may read only a wait that
     replies, and a clock cannot reply.
+  - **Opened by a unit.** A running unit that needs someone (an approval
+    of a tool call, an answer, an edited plan) asks at a safe point:
+    `c4-unit wait --server person:<id> [--ask] [--choices] [--reply]
+    [--expect] [--checkpoint]` writes the wait into `.c4/safepoint`, and
+    the node daemon (or the host runner) passes it on in the safepoint
+    annotation. The queue checks it as a document's wait and answers
+    `stop` ("waits for person:owner"), or `continue` with the reason when
+    it cannot open it. The unit yields there (yield reason `wait`): its
+    slot is freed, and it stays out of the runnable set, in
+    `unitStates.waits`, while the wait is open, its expected wait plus its
+    remaining work on the critical path. The wait is in `waits` with
+    `block` and the safe point's number, decided like any other; `fail`
+    fails the unit. Decided, the unit runs again and resumes from what it
+    saved, with the decision in `$C4_DECISION` (`{safepoint, do, note,
+    actor, at, view?, reply?}`, `c4-unit decision` prints it) and a reply
+    mounted read-only at `$C4_REPLY` (`/etc/c4/reply`). A unit that ends
+    without stopping withdraws its wait. Each ask is in the book
+    (`safepoint-wait`).
   - **Estimate.** A wait adds its expected time to the critical path and
     nothing to slot-seconds. The expected time is the median of the
     job's decided waits for the same server, else the unit's `expect`,

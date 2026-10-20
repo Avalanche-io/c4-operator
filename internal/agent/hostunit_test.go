@@ -88,14 +88,14 @@ func TestHostSafepointRelay(t *testing.T) {
 		t.Fatalf("member's unit dir %q, want %q", got.UnitDir, u.Root)
 	}
 	at := time.Date(2026, 10, 18, 20, 0, 0, 0, time.UTC)
-	sp := "seq 1\nat " + at.Format(time.RFC3339Nano) + "\ncheckpoint " + sess + "#3:c4abc\n"
+	sp := "seq 1\nat " + at.Format(time.RFC3339Nano) + "\ncheckpoint " + sess + "#3:c4abc\nwait {\"server\":\"person:owner\",\"ask\":\"merge it?\"}\n"
 	if err := os.WriteFile(filepath.Join(u.Out, ".c4", "safepoint"), []byte(sp), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// the same file reads the same as the node daemon reads it
 	ours, ok := readSafepoint(u.Out)
 	theirs, ok2 := node.ReadSafepoint(u.Out)
-	if !ok || !ok2 || ours.Seq != theirs.Seq || !ours.At.Equal(theirs.At) || ours.Checkpoint != theirs.Checkpoint {
+	if !ok || !ok2 || ours.Seq != theirs.Seq || !ours.At.Equal(theirs.At) || ours.Checkpoint != theirs.Checkpoint || string(ours.Wait) != string(theirs.Wait) || ours.Wait == nil {
 		t.Fatalf("safepoint %+v, node reads %+v", ours, theirs)
 	}
 
@@ -104,7 +104,8 @@ func TestHostSafepointRelay(t *testing.T) {
 	}
 	p = getPod(t, c)
 	var note node.SafepointNote
-	if json.Unmarshal([]byte(p.Annotations[c4v1.AnnotationSafepoint]), &note) != nil || note.Seq != 1 || note.Checkpoint != sess+"#3:c4abc" {
+	if json.Unmarshal([]byte(p.Annotations[c4v1.AnnotationSafepoint]), &note) != nil || note.Seq != 1 || note.Checkpoint != sess+"#3:c4abc" ||
+		string(note.Wait) != `{"server":"person:owner","ask":"merge it?"}` {
 		t.Fatalf("safepoint annotation %q", p.Annotations[c4v1.AnnotationSafepoint])
 	}
 	info, _ := os.ReadFile(u.PodInfo)

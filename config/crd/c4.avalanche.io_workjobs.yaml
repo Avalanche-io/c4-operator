@@ -1372,6 +1372,12 @@ spec:
                     at:
                       format: date-time
                       type: string
+                    block:
+                      description: |-
+                        Block says the unit opened the wait for itself at a safe point
+                        (c4-unit wait): it stopped there, and runs again, resuming, once
+                        the wait is decided. Safepoint is the safe point's number.
+                      type: boolean
                     blocking:
                       description: 'Blocking: unfinished work waits on it.'
                       type: boolean
@@ -1406,6 +1412,9 @@ spec:
                         Reply says the decision carries content; View is the reply, once
                         decided.
                       type: boolean
+                    safepoint:
+                      format: int32
+                      type: integer
                     server:
                       description: |-
                         Server is who or what it waits for: person:<id>, party:<name> or

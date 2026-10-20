@@ -2,12 +2,14 @@ package queue
 
 import (
 	"encoding/json"
+	"fmt"
 	"math"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -22,6 +24,11 @@ import (
 // from the server's measured decisions in the job, else the unit's own
 // figure, and counts on the critical path, never as slot-seconds: a person
 // is never late in the queue's terms.
+//
+// A running unit may open a wait for itself at a safe point (c4-unit wait,
+// openBlockWait): it stops there, its slot is freed, and it runs again,
+// resuming from what it saved, once the wait is decided, with the decision
+// in $C4_DECISION and a reply mounted at $C4_REPLY (podFor).
 //
 // A unit a review escalated (verdict.go: failed and flagged) is a wait too,
 // for the person the verdict named: a decision on it accepts it, reworks
@@ -46,6 +53,77 @@ type waitRec struct {
 	at        time.Time
 	record    string
 	view      string // the decision's reply
+	// block: the unit opened the wait for itself at safe point seq, asking
+	// ask, with these choices, for a reply or not, expected to take
+	// expect seconds.
+	block   bool
+	seq     int
+	ask     string
+	choices []string
+	reply   bool
+	expect  float64
+}
+
+// clock is a clock wait's time, for a wait a unit opened.
+func (w *waitRec) clock() (time.Time, bool) {
+	at, ok := strings.CutPrefix(w.server, "clock:")
+	if !ok {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, at)
+	return t, err == nil
+}
+
+// ReplyMount is where a unit resumed after a wait it opened finds the
+// reply ($C4_REPLY).
+const ReplyMount = "/etc/c4/reply"
+
+// replyName is the Materialization a unit mounts the reply to the wait it
+// opened through.
+func replyName(job string, idx int) string { return fmt.Sprintf("%s-reply-u%d", job, idx) }
+
+// blockDecision is the decision on the wait unit i opened for itself, for
+// its next attempt: nil if there is none, or it failed the unit.
+func (m *jobMem) blockDecision(i int) *waitRec {
+	w := m.waitRecs().recs[i]
+	if w == nil || !w.block || !w.done() || w.do == "withdrawn" || w.do == "fail" {
+		return nil
+	}
+	return w
+}
+
+// applyDecision gives a unit's pod the decision on the wait it opened:
+// $C4_DECISION, {safepoint, do, note, actor, at, view, reply}, and the
+// reply mounted read-only at $C4_REPLY.
+func applyDecision(pod *corev1.Pod, job string, idx int, w *waitRec) {
+	d := map[string]any{"safepoint": w.seq, "do": w.do, "actor": w.actor, "at": w.at.UTC().Format(time.RFC3339)}
+	if w.note != "" {
+		d["note"] = w.note
+	}
+	env := []corev1.EnvVar{}
+	if w.view != "" {
+		d["view"], d["reply"] = w.view, ReplyMount
+		env = append(env, corev1.EnvVar{Name: "C4_REPLY", Value: ReplyMount})
+		ro := true
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "c4-reply", VolumeSource: corev1.VolumeSource{
+			CSI: &corev1.CSIVolumeSource{Driver: c4v1.DriverName, ReadOnly: &ro,
+				VolumeAttributes: map[string]string{c4v1.VolumeAttrMaterialization: replyName(job, idx)}}}})
+	}
+	b, _ := json.Marshal(d)
+	env = append(env, corev1.EnvVar{Name: "C4_DECISION", Value: string(b)})
+	for c := range pod.Spec.Containers {
+		pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, env...)
+		if w.view != "" {
+			pod.Spec.Containers[c].VolumeMounts = append(pod.Spec.Containers[c].VolumeMounts,
+				corev1.VolumeMount{Name: "c4-reply", MountPath: ReplyMount, ReadOnly: true})
+		}
+	}
+}
+
+// blockOpen reports whether unit i waits on a wait it opened for itself.
+func (m *jobMem) blockOpen(i int) bool {
+	w := m.waitRecs().recs[i]
+	return w != nil && w.block && !w.done()
 }
 
 func (w *waitRec) done() bool { return w.do != "" }
@@ -71,6 +149,17 @@ func (q *Queue) serveWaits(v *view, now time.Time) {
 	keep := v.runnable[:0]
 	v.openWaits = map[int]bool{}
 	for _, i := range v.runnable {
+		if w := ws.recs[i]; w != nil && w.block && !w.done() {
+			// It stopped at a safe point to ask, and runs again once
+			// decided.
+			if t, ok := w.clock(); ok && !now.Before(t) {
+				w.do, w.actor, w.at = "time", "clock", now
+				keep = append(keep, i)
+				continue
+			}
+			v.openWaits[i] = true
+			continue
+		}
 		if !isWait(plan, i) {
 			keep = append(keep, i)
 			continue
@@ -88,6 +177,12 @@ func (q *Queue) serveWaits(v *view, now time.Time) {
 		v.openWaits[i] = true
 	}
 	v.runnable = keep
+	for i, w := range ws.recs {
+		if w.block && !w.done() && (m.done(i) || m.failed[i]) {
+			// The unit ended without stopping for its wait.
+			w.do, w.actor, w.at = "withdrawn", "unit", now
+		}
+	}
 	for i, r := range m.reviews {
 		if !m.flagged(i) {
 			continue
@@ -133,6 +228,20 @@ func applyDecides(j *c4v1.WorkJob, m *jobMem, now time.Time) {
 			at = now
 		}
 		switch {
+		case m.blockOpen(i) && !m.done(i) && !m.failed[i]:
+			w := ws.recs[i]
+			if len(w.choices) > 0 && r.Do != "fail" && !contains(w.choices, r.Do) {
+				continue
+			}
+			if w.reply && r.Do != "fail" && r.View == "" {
+				continue
+			}
+			w.do, w.note, w.actor, w.at, w.record = r.Do, r.Note, r.Actor, at, r.Record
+			if r.Do == "fail" {
+				m.failed[i] = true
+			} else {
+				w.view = r.View
+			}
 		case isWait(plan, i) && !m.done(i) && !m.failed[i]:
 			w := ws.recs[i]
 			if w == nil {
@@ -206,7 +315,7 @@ func waitExpect(plan *class.Plan, m *jobMem, i int) float64 {
 	if isWait(plan, i) {
 		server, own = plan.Units[i].Wait.Server, plan.Units[i].Wait.Expect
 	} else if w := m.waitRecs().recs[i]; w != nil {
-		server = w.server
+		server, own = w.server, w.expect
 	}
 	var took []float64
 	for _, w := range m.waitRecs().recs {
@@ -229,6 +338,11 @@ func waitRemaining(plan *class.Plan, m *jobMem, i int, now time.Time) float64 {
 	if isWait(plan, i) && !plan.Units[i].Wait.At.IsZero() {
 		return math.Max(0, plan.Units[i].Wait.At.Sub(now).Seconds())
 	}
+	if w := m.waitRecs().recs[i]; w != nil && w.block {
+		if t, ok := w.clock(); ok {
+			return math.Max(0, t.Sub(now).Seconds())
+		}
+	}
 	exp := waitExpect(plan, m, i)
 	if w := m.waitRecs().recs[i]; w != nil && !w.since.IsZero() {
 		return math.Max(0, exp-now.Sub(w.since).Seconds())
@@ -236,8 +350,12 @@ func waitRemaining(plan *class.Plan, m *jobMem, i int, now time.Time) float64 {
 	return exp
 }
 
-// blockingWait reports whether unfinished work waits on unit i.
+// blockingWait reports whether unfinished work waits on unit i: a unit
+// waiting on a wait it opened holds up itself.
 func blockingWait(plan *class.Plan, m *jobMem, i int) bool {
+	if m.blockOpen(i) {
+		return !m.done(i) && !m.failed[i]
+	}
 	for j, u := range plan.Units {
 		if m.done(j) || m.failed[j] {
 			continue
@@ -269,7 +387,9 @@ func waitStatus(m *jobMem, now time.Time) []c4v1.WorkWait {
 		u := plan.Units[i]
 		ww := c4v1.WorkWait{Unit: int32(i), Name: u.Name, Server: w.server, Escalated: w.escalated,
 			Do: w.do, Note: w.note, Actor: w.actor, Record: w.record, View: w.view}
-		if u.Wait != nil {
+		if w.block {
+			ww.Block, ww.Safepoint, ww.Ask, ww.Choices, ww.Reply = true, int32(w.seq), w.ask, w.choices, w.reply
+		} else if u.Wait != nil {
 			ww.Ask, ww.Choices, ww.Reply = u.Wait.Ask, u.Wait.Choices, u.Wait.Reply
 		} else if r := m.reviews[i]; r != nil {
 			ww.Ask = r.Why
@@ -305,6 +425,10 @@ func (m *jobMem) loadWaits(st *c4v1.WorkJobStatus) {
 		}
 		if w.At != nil {
 			r.at = w.At.Time
+		}
+		if w.Block {
+			r.block, r.seq, r.ask, r.choices, r.reply = true, int(w.Safepoint), w.Ask, w.Choices, w.Reply
+			r.expect = float64(w.ExpectSeconds)
 		}
 		ws.recs[int(w.Unit)] = r
 	}

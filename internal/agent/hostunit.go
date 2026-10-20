@@ -99,11 +99,13 @@ func writePodInfo(path string, ann map[string]string) error {
 }
 
 // hostSafepoint is a unit's .c4/safepoint, in the form c4-unit writes it
-// and the node daemon reads it ("seq N", "at TIME", "checkpoint REF").
+// and the node daemon reads it ("seq N", "at TIME", "checkpoint REF",
+// "wait JSON").
 type hostSafepoint struct {
-	Seq        int       `json:"seq"`
-	At         time.Time `json:"at"`
-	Checkpoint string    `json:"checkpoint,omitempty"`
+	Seq        int             `json:"seq"`
+	At         time.Time       `json:"at"`
+	Checkpoint string          `json:"checkpoint,omitempty"`
+	Wait       json.RawMessage `json:"wait,omitempty"`
 }
 
 func readSafepoint(out string) (hostSafepoint, bool) {
@@ -121,6 +123,10 @@ func readSafepoint(out string) (hostSafepoint, bool) {
 			sp.At, _ = time.Parse(time.RFC3339Nano, v)
 		case "checkpoint":
 			sp.Checkpoint = v
+		case "wait":
+			if json.Valid([]byte(v)) {
+				sp.Wait = json.RawMessage(v)
+			}
 		}
 	}
 	if sp.Seq <= 0 || sp.At.IsZero() {

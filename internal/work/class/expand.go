@@ -169,6 +169,16 @@ func docWait(name string, w *DocWait, planned bool) (*Wait, error) {
 	return out, nil
 }
 
+// AskedWait reads the wait a running unit asks for at a safe point
+// (c4-unit wait), checked as a document's wait is.
+func AskedWait(name string, doc []byte) (*Wait, error) {
+	var w DocWait
+	if err := Strict(doc, &w); err != nil {
+		return nil, fmt.Errorf("unit %s asks for a wait: %v", name, err)
+	}
+	return docWait(name, &w, false)
+}
+
 // DocClaim is a claim with its mode (exclusive, the default, or shared).
 type DocClaim struct {
 	On   string `json:"on"`
