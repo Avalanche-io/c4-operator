@@ -1010,7 +1010,7 @@ Records are not yet batched at chain checkpoints (section 2.5).
 - An index (by output file, output view, input view, job, model and dataset)
   is derived data, rebuildable from the records. Today the queue keeps one
   index per job (output file and unit to task record), and the transition
-  log (`GET /book?since`, integrations GAPS 5): job transitions numbered
+  log (`GET /book?since`, internal/hud/API.md): job transitions numbered
   farm-wide by the queue, sealed in each project's store as hash-linked
   segments, the head in ConfigMaps (`c4-work-book` for the number, one
   `c4-work-book-<project>` per project, so none grows with the farm); the
@@ -1394,7 +1394,7 @@ and a sweep planner that spawns trials are all generators.
   - The `graph` class is a job whose plan is one generator (a plan
     importer, test discovery, a sweep planner); its units run the job's
     template, told apart by `$C4_UNIT_NAME` and their `env`.
-- **Rounds** (agent-catalog G-rounds, G-expand-depth): iteration that is
+- **Rounds:** iteration that is
   not spelled as nesting. A generator may be a bounded loop:
   `rounds: {max, until?}` on a planned unit of a document, or the job params
   `rounds` and `roundsUntil` on a graph job's root.
@@ -1427,7 +1427,7 @@ and a sweep planner that spawns trials are all generators.
     round in progress is priced from its own expansion, like any
     generator's. The ETA band widens with the expected rounds, never with
     `max`.
-- **Holds and claims** (PRIMITIVES Q8, Q9). A unit's `holds` (paths it
+- **Holds and claims.** A unit's `holds` (paths it
   writes) and `claims` (`{on, mode}`) are what it claims.
   - **Overlap.** A path claim covers everything under it (`src/net/` and
     `src/net/conn.go` overlap, `src/net` and `src/netx` do not); a name
@@ -1448,7 +1448,7 @@ and a sweep planner that spawns trials are all generators.
     claims cannot deadlock and need no cycle check.
   - **Scope.** Claims are scoped to the job. A gate is shared across a
     namespace's jobs.
-- **Gates** (Q9; LLM-OR-PROCEDURE 7.2 item 4). A unit of kind gate
+- **Gates.** A unit of kind gate
   (`gate: "merge"`) passes a resource of one slot shared by every job in its
   namespace: a project's merge gate, its signing step, its one DI suite.
   - **First come, first served.** Units ready to pass queue in the order
@@ -1463,7 +1463,7 @@ and a sweep planner that spawns trials are all generators.
     and a waiting unit's `lockedBy` names its gate and position.
   - **No new scheduling.** A gate unit still needs a slot in its pool; the
     gate only decides which waiting unit may take one.
-- **Edge sources** (LLM-OR-PROCEDURE 5 and 7.2 item 2). Expansion v1's
+- **Edge sources.** Expansion v1's
   `edges: [{from, to, cite?}]` add orderings between units already in the
   job (or in the document): `to` runs after `from`.
   - **Edges alone.** A document of edges with no units is valid, so a
@@ -1481,7 +1481,7 @@ and a sweep planner that spawns trials are all generators.
     line, fixtures are excluded by glob, a marker naming its own owner is
     no edge, and what cannot be read is listed. Ra's `Pending{…}` markers
     are the motivating case: the pattern is the job's, not c4's.
-- **Procedural and model units** (LLM-OR-PROCEDURE 6.2 and 7.2). A unit
+- **Procedural and model units.** A unit
   declares what it reasons with in its expansion document or plan block:
   `reasoning: {does, model, effort, tools}`, `does` being `model` or
   `procedure`, `effort` one of low, medium, high, xhigh and max, `tools` a
@@ -1494,7 +1494,7 @@ and a sweep planner that spawns trials are all generators.
   document's `reasoning` and is kept for each unit's latest attempt
   (`status.modelUsage[i].reasoning`), so the HUD can show declared and
   observed side by side.
-  - **Tools** (agent-jobs 10.15, agent-catalog G-tool-config).
+  - **Tools.**
     `reasoning.tools` names a Tool, a namespaced resource. The
     queue looks for it in the job's namespace, then in the operator's,
     where the farm's own tools live (`none` ships with the operator).
@@ -1548,10 +1548,10 @@ and a sweep planner that spawns trials are all generators.
         that audience, finds the pod it is bound to, and acts on the
         unit's grant. Every control the unit makes is in the book as
         `unit:<namespace>/<job>/<unit>`.
-    - **Published tools** (authoring slice 1, the HUD's `POST /tools`). A
-      Tool whose view has a `tool.yaml` at its top is a tool in the
-      authoring sense (c4-authoring's TOOL.md): what one unit runs, its
-      parameters and its test. Publishing pins every image it names by
+    - **Published tools** (the HUD's `POST /tools`). A Tool whose view
+      has a `tool.yaml` at its top is a tool in the authoring sense (the
+      tool format, schema/README.md): what one unit runs, its parameters
+      and its test. Publishing pins every image it names by
       digest into `tool.lock` in the tree, records a version (`v<N>`) in
       the Tool's status, and runs the tool's test as a job; `spec.view`
       moves to the version only once its test passes, so a tool whose test
@@ -1629,7 +1629,7 @@ and a sweep planner that spawns trials are all generators.
     HUD's job detail) with the evidence, for a person to weigh: a
     procedure would do it cheaper and checkably. It needs the unit's runs
     in the book: pinned images and resolved input views.
-- **The job's measure of done** (Q12; LLM-OR-PROCEDURE 7.2 item 3). A job
+- **The job's measure of done.** A job
   declares what it counts: `spec.measure: {name: "rules sited", of: 379,
   required: true}`. A unit, usually a procedural one re-run after each
   merge that reads a manifest, reports a reading with `c4-unit measure
@@ -1668,8 +1668,7 @@ and a sweep planner that spawns trials are all generators.
   - **expand** adds units under the review, as a generator's expansion
     does.
   - **One format.** Scores, selection and supersede are optional fields
-    of the same document (version 1, read strictly), not a second version
-    (agent-catalog G-scored-verdict, G-supersede).
+    of the same document (version 1, read strictly), not a second version.
   - **score** is a number per judged unit, on its item. Higher is better
     unless the review unit's params say `scoreOrder: asc`. A later verdict
     may score a unit again (a backup in a tree search). The last score
@@ -1717,12 +1716,12 @@ and a sweep planner that spawns trials are all generators.
     (a rerun's run time over the unit's first pass), shrunk toward one half.
     Expected reworks, reworked units waiting to run and reviews running
     again are all priced that way, and a unit's key learns only from its
-    first pass. On agent-jobs' library-port run, replayed through the
+    first pass. On an agent team's library-port run, replayed through the
     queue (TestReplayLibraryPort), the p90's mean error from five minutes in
     fell from 16 minutes to 7, its shortfall before the first verdict from
     20 minutes to 11, and its jump at that verdict from 89 minutes above
     the finish to 18.
-- **Waits** (PRIMITIVES Q6; the HUD word is "waits for"). A wait is a
+- **Waits** (the HUD word is "waits for"). A wait is a
   unit served by something other than a slot. A document's unit carries
   `wait: {server, ask?, expect?, choices?, reply?}`, and `server` says what serves
   it: `person:<id>`, `party:<name>` or `clock:<RFC 3339 time>`.
@@ -1745,7 +1744,7 @@ and a sweep planner that spawns trials are all generators.
     view; `waits[].view` shows it. A unit may read only a wait that
     replies, and a clock cannot reply.
   - **The job's review** (`spec.review: {server, ask?, choices?,
-    expectSeconds?}`, integrations GAPS 7). A final wait, unit `@review`,
+    expectSeconds?}`). A final wait, unit `@review`,
     after every other unit, including those an expansion adds later
     (`Plan.Apply` joins each to it, whatever the document's dependents
     say), so the job is Succeeded only once it is decided: done means
@@ -1773,8 +1772,8 @@ and a sweep planner that spawns trials are all generators.
     mounted read-only at `$C4_REPLY` (`/etc/c4/reply`). A unit that ends
     without stopping withdraws its wait. Each ask is in the book
     (`safepoint-wait`).
-  - **Missing information is an error, not a question** (Joshua, agent-jobs
-    ASKS.md). A unit acts on its brief and decides what the brief leaves
+  - **Missing information is an error, not a question** (Joshua).
+    A unit acts on its brief and decides what the brief leaves
     to it. When the brief lacks information only a person could give, the
     unit stops with `NeedsInformation`.
     - **Signal:** its container exits 12 with the information as its
@@ -1790,7 +1789,7 @@ and a sweep planner that spawns trials are all generators.
       with the text in `$C4_SUPPLIED` and what it asked in `$C4_NEEDED`.
     - **A person answering on purpose** (a creative approval) is a step
       in the graph: a wait or a verdict, decided as above.
-  - **Agents answer agents** (Joshua; agent-jobs ASKS.md). A unit that
+  - **Agents answer agents** (Joshua). A unit that
     lacks a fact another unit of its job has asks it: `c4-unit ask --to
     unit:<name> --ask TEXT` prints the question's id (`<unit>#<n>`).
     - **Answering:** the answerer replies with `c4-unit answer --ask ID
@@ -1820,7 +1819,7 @@ and a sweep planner that spawns trials are all generators.
       any unit. Its end, and anything it writes, leave the unit as it was.
       One that ends without answering answers `cannot`, and a question
       wakes its answerer once.
-  - **Steering** (agent-catalog G-steer): a message to a unit while it
+  - **Steering:** a message to a unit while it
     runs, without ending it.
     - **Sending:** a person sends it with `POST /jobs/{ns}/{name}/steer
       {unit, text}` or MCP `c4_steer`. It is signed, then written as a
@@ -2032,8 +2031,8 @@ historical failure rate instead, so a broken change fails fast).
   estimate follows this version as frames land, locally too: a new heavy
   stretch shows as a ratio spike between its neighbors. The queue builds
   these profiles from the WorkJobs it already sees, so they survive a
-  restart. They never cross projects. In the eta-deadlines evidence
-  (synthetic), this prior put the estimate at submission within 12% of
+  restart. They never cross projects. In synthetic
+  evidence, this prior put the estimate at submission within 12% of
   the actual run, against 65% for farm-wide history.
 - **Heavy regions.** A region whose interpolated cost exceeds three times
   the job median is flagged ("frames 1100-1150 run 3.4x the median, hero
@@ -2196,7 +2195,7 @@ node-hour times node-hours. The same numbers drive capacity requests.
 
 ### 10.12 Capacity hooks
 
-**Forecast jobs** (integrations GAPS 9). A WorkJob with `spec.forecast:
+**Forecast jobs.** A WorkJob with `spec.forecast:
 {slotHours?, sd?, unitHours?, start?, exists?}` exists only as a
 forecast: work a tracker expects (a shot not yet turned over, its bid)
 that the farm plans for. Its size is given as slot-hours, planned as one
@@ -2568,8 +2567,7 @@ declaration read as validated, recomputed but never reused, and
 `status.derivation` says why. An undeclared program stays volatile however
 often it repeats; its matching re-runs are shown as evidence a person may
 use to declare it. This follows C4's derivation-record design
-(c4/design/derivation-records.md) and feeds its redesign
-(proposals/eta-deadlines/DERIVATION-LESSONS.md); the annotation, the status
+(c4/design/derivation-records.md) and feeds its redesign; the annotation, the status
 field and the record will change with it.
 
 ### 10.14 Failures, retries and blacklists
@@ -2586,7 +2584,7 @@ field and the record will change with it.
   from the HUD.
 - A node that fails units across several jobs and projects is flagged as
   suspect, which usually means bad hardware rather than a bad job.
-- **Causes** (integrations GAPS 4). A job's failures and flags are
+- **Causes.** A job's failures and flags are
   grouped by cause in `status.causes`: a unit's exit (its code, the
   container's reason such as OOMKilled, the first line of its message with
   numbers blurred), a node that failed units up to the job's limit, a
@@ -3079,7 +3077,7 @@ speaks MCP 2026-07-28): thirty tools, every one a call to the HUD API.
 | plan    | `c4_suggest_deadline` (the suggestion, its source and band), `c4_deadline_options` (what candidate deadlines would take, section 10.7)                                                                                                                                                                                                        | read-only, closed-world               |
 | act     | `c4_hold_job`, `c4_boost_job`, `c4_set_deadline` (with `mode`: pin, suggested, tracking), `c4_move_to_next_session`, `c4_avoid_node`, `c4_disable_node`                                                                                                                                                                                       | idempotent, not destructive           |
 | act     | `c4_requeue_units`                                                                                                                                                                                                                                                                                                                            | destructive (discards results)        |
-| grant   | `c4_grant`, `c4_list_grants` (read-only), `c4_revoke_grant` (destructive), `c4_list_trackers` (read-only), `c4_list_held_writes` (read-only), `c4_confirm_write`: a person's leave for a tracker to submit work for them, the trackers to choose from (integrations GAPS 17), and their answer for a tracker write held unconfirmed (GAPS 11) |                                       |
+| grant   | `c4_grant`, `c4_list_grants` (read-only), `c4_revoke_grant` (destructive), `c4_list_trackers` (read-only), `c4_list_held_writes` (read-only), `c4_confirm_write`: a person's leave for a tracker to submit work for them, the trackers to choose from (internal/hud/API.md, Grants), and their answer for a tracker write held unconfirmed (docs/c4-sync.md) |                                       |
 | spend   | `c4_approve_capacity`                                                                                                                                                                                                                                                                                                                         | open-world (provisions paid capacity) |
 
 Errors come back as tool results that say what to do next ("Job names are
