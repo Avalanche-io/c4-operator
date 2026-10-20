@@ -3,7 +3,9 @@ package queue
 import (
 	"context"
 	"fmt"
+	"k8s.io/utils/ptr"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
@@ -182,5 +184,65 @@ func TestDeletedJobsPodsAreReleased(t *testing.T) {
 	}
 	if err := k8s.Get(ctx, client.ObjectKeyFromObject(&pods[1]), &p); err != nil || !slices.Contains(p.Finalizers, c4v1.FinalizerUnit) {
 		t.Fatalf("the pod not being deleted lost its finalizer: %v %v", p.Finalizers, err)
+	}
+}
+
+// A unit's retry goes to another node than the one it failed on; when the
+// farm's own avoidance (its failures, the job's blacklist) would leave it
+// no node, it gives way, so the unit still runs.
+func TestRetryAvoidsTheNodeItFailedOn(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 2, 1)
+	ctx := context.Background()
+	j := job(ns, "flaky", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(4*time.Hour))
+	j.Spec.Retries = ptr.To[int32](3)
+	j.Spec.NodeErrorLimit = 10
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	var nodes corev1.NodeList
+	if err := k8s.List(ctx, &nodes, client.MatchingLabels{"pool": ns + "-cpu"}); err != nil || len(nodes.Items) != 2 {
+		t.Fatalf("nodes %v %v", err, nodes.Items)
+	}
+	a, b := nodes.Items[0].Name, nodes.Items[1].Name
+	p := podOfUnit(t, ns, "flaky", 0)
+	bind(t, p, a)
+	finish(t, p, corev1.PodFailed, *now, time.Minute, nil)
+	tick(t, q)
+	tick(t, q)
+	p = podOfUnit(t, ns, "flaky", 0)
+	if aff := fmt.Sprint(p.Spec.Affinity); !strings.Contains(aff, a) || strings.Contains(aff, b) {
+		t.Fatalf("the retry does not avoid %s: %s", a, aff)
+	}
+	// It fails on the other node too: with both avoided it would run
+	// nowhere, so its own failures give way.
+	bind(t, p, b)
+	finish(t, p, corev1.PodFailed, now.Add(time.Minute), time.Minute, nil)
+	tick(t, q)
+	tick(t, q)
+	p = podOfUnit(t, ns, "flaky", 0)
+	if aff := fmt.Sprint(p.Spec.Affinity); strings.Contains(aff, a) && strings.Contains(aff, b) {
+		t.Fatalf("the unit is kept off every node: %s", aff)
+	}
+}
+
+// retries: 0 means no retries, not the default two.
+func TestNoRetries(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 1)
+	ctx := context.Background()
+	j := job(ns, "once", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(4*time.Hour))
+	j.Spec.Retries = ptr.To[int32](0)
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	if got := get(t, ns, "once"); got.Spec.Retries == nil || *got.Spec.Retries != 0 {
+		t.Fatalf("retries %v", got.Spec.Retries)
+	}
+	tick(t, q)
+	finish(t, podOfUnit(t, ns, "once", 0), corev1.PodFailed, *now, time.Minute, nil)
+	tick(t, q)
+	tick(t, q)
+	if got := get(t, ns, "once"); !slices.Contains(states(t, got, "failed"), 0) || hasPod(t, ns, "once", 0) {
+		t.Fatalf("after one failure: %v", got.Status.UnitStates)
 	}
 }

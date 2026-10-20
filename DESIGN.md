@@ -2476,8 +2476,12 @@ field and the record will change with it.
 
 ### 10.14 Failures, retries and blacklists
 
-- A unit is retried up to `retries` times, never on the node where it last
-  failed.
+- A unit is retried up to `retries` times (2 by default; `0` is none),
+  and its retries keep off the nodes it failed on. When the farm's own
+  avoidance (the unit's failed nodes, then the job's blacklist) would leave
+  it no node of the pool, that gives way, so a unit is never kept off every
+  node by the farm's guesses. Only nodes a person named stay avoided
+  whatever happens.
 - When a node accumulates `nodeErrorLimit` failures for one job, the job
   blacklists it, and later pods carry a node anti-affinity rule. People can
   add a node to a job's blacklist, or disable a node farm-wide (a taint),

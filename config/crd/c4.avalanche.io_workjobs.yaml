@@ -202,7 +202,8 @@ spec:
                 type: array
               retries:
                 default: 2
-                description: Retries per unit after the first attempt.
+                description: 'Retries per unit after the first attempt: 0 for none.
+                  Unset is 2.'
                 format: int32
                 type: integer
               template:

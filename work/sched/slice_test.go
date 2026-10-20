@@ -80,3 +80,25 @@ func TestLateJobTimeSlices(t *testing.T) {
 		t.Fatalf("preempted %+v", d.Preempt)
 	}
 }
+
+// c4-onboarding's evening: a render holding one of two GPU slots would be
+// late on one (about 128 min of work, 75 min to its deadline); a training
+// run that checkpoints holds the other for hours. The training run is
+// asked to yield its slot at its next safe point.
+func TestTrainingYieldsToALateRender(t *testing.T) {
+	render := job("gw010", "show", 59, 59*140.0/3600, 75*time.Minute)
+	render.Pools = []string{"gpu"}
+	render.RunningUnits, render.Running = runningUnits("gw010", "gpu", 1, t0.Add(-2*time.Minute))
+	render.RunningUnits[0].Remaining = 2 * time.Minute
+	train := job("style-train", "show", 0, 4, 0)
+	train.Class, train.Pools = "ml", []string{"gpu"}
+	train.Runnable, train.RunnableTotal = nil, 0
+	train.RunningUnits, train.Running = runningUnits("style-train", "gpu", 1, t0.Add(-20*time.Minute))
+	train.RunningUnits[0].Remaining = 3 * time.Hour
+	train.Checkpoints = true
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "gpu", Slots: 2, Used: 2}}, Jobs: []Job{render, train}}
+	d := Decide(s, &State{}, DefaultConfig())
+	if len(d.Preempt) != 1 || d.Preempt[0].Job != "style-train" || d.Preempt[0].For != "gw010" || !d.Preempt[0].Yield {
+		t.Fatalf("preempted %+v; gw010 %+v", d.Preempt, d.Jobs["gw010"])
+	}
+}

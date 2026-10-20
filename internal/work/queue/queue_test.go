@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"k8s.io/utils/ptr"
 	"os"
 	"path/filepath"
 	"sort"
@@ -94,7 +95,7 @@ func farm(t *testing.T, pool string, nodes, slots int) (string, *Queue, *time.Ti
 
 func job(ns, name, class, pool string, params map[string]string, deadline time.Time) *c4v1.WorkJob {
 	j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}, Spec: c4v1.WorkJobSpec{
-		Class: class, Params: params, Pools: []string{pool}, Retries: 1,
+		Class: class, Params: params, Pools: []string{pool}, Retries: ptr.To[int32](1),
 		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "work", Image: "busybox"}}}}}}
 	if !deadline.IsZero() {
 		j.Spec.Deadline = &metav1.Time{Time: deadline}

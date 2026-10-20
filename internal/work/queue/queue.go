@@ -259,6 +259,10 @@ type jobMem struct {
 	// request's token (steer.go).
 	steers  []*steerRec
 	steered string
+	// unitFailed are the nodes each unit failed on, which its retries
+	// avoid (avoidFor). In memory: after a restart a retry may go back
+	// once.
+	unitFailed map[int]map[string]bool
 	// toolsWait says why a unit waits for its tool profile (tools.go).
 	toolsWait string
 	// needs are what units stopped for, and supplied the last supply's
@@ -743,7 +747,10 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	case plan.Units[0].Slots > widest:
 		v.unschedulable = fmt.Sprintf("a unit needs %d slots and the largest node in pools %v has %d", plan.Units[0].Slots, v.pools, widest)
 	}
-	retries := int(j.Spec.Retries)
+	retries := 2
+	if j.Spec.Retries != nil {
+		retries = int(*j.Spec.Retries)
+	}
 	limit := int(j.Spec.NodeErrorLimit)
 	if limit <= 0 {
 		limit = 3
@@ -941,6 +948,14 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6)
 			if !m.failed[idx] && !m.succeeded[idx] && attemptOf(p) >= m.attempts[idx] {
 				if n := p.Spec.NodeName; n != "" {
+					// Its retries go elsewhere (avoidFor).
+					if m.unitFailed == nil {
+						m.unitFailed = map[int]map[string]bool{}
+					}
+					if m.unitFailed[idx] == nil {
+						m.unitFailed[idx] = map[string]bool{}
+					}
+					m.unitFailed[idx][n] = true
 					m.nodeFails[n]++
 					if m.nodeFails[n] >= limit {
 						m.blacklist[n] = true
@@ -1503,6 +1518,51 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 	}
 }
 
+// avoidFor is the nodes unit idx's pod keeps off in pool p: those a person
+// named (spec.avoidNodes), the job's automatic blacklist, and the nodes the
+// unit itself failed on, so its retries run elsewhere. When that would
+// leave it no node of the pool, the unit's own failures give way first,
+// then the blacklist: a unit is never kept off every node by the farm's
+// guesses, only by a person's choice.
+func avoidFor(v *view, idx int, p *pool) []string {
+	named := map[string]bool{}
+	for _, n := range v.job.Spec.AvoidNodes {
+		named[n] = true
+	}
+	layers := []map[string]bool{named, v.mem.blacklist, v.mem.unitFailed[idx]}
+	open := func(k int) bool {
+		if len(p.nodes) == 0 {
+			return true // nothing to check against (a burst pool not up yet)
+		}
+		for _, n := range p.nodes {
+			out := false
+			for _, l := range layers[:k] {
+				out = out || l[n]
+			}
+			if !out {
+				return true
+			}
+		}
+		return false
+	}
+	k := len(layers)
+	for k > 1 && !open(k) {
+		k--
+	}
+	set := map[string]bool{}
+	for _, l := range layers[:k] {
+		for n := range l {
+			set[n] = true
+		}
+	}
+	var bad []string
+	for n := range set {
+		bad = append(bad, n)
+	}
+	sort.Strings(bad)
+	return bad
+}
+
 // podFor builds a unit's pod from the job's template.
 func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	j := v.job
@@ -1563,12 +1623,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		pod.Spec.NodeSelector[k] = val
 	}
 	pod.Spec.Tolerations = append(pod.Spec.Tolerations, p.spec.Spec.Tolerations...)
-	if len(v.avoid) > 0 {
-		var bad []string
-		for n := range v.avoid {
-			bad = append(bad, n)
-		}
-		sort.Strings(bad)
+	if bad := avoidFor(v, idx, p); len(bad) > 0 {
 		pod.Spec.Affinity = notOnNodes(pod.Spec.Affinity, bad)
 	}
 	env := append([]corev1.EnvVar{

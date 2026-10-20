@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"k8s.io/utils/ptr"
 	"strconv"
 	"strings"
 	"time"
@@ -88,7 +89,7 @@ func JobForBundle(b *c4v1.AgentBundle) *c4v1.WorkJob {
 			Nudge:        c4v1.WorkNudge{Hold: b.Spec.Suspend, HoldStop: b.Spec.Suspend},
 			// A member that fails is tried again on another runner, up to the
 			// default; a yield is never a failure.
-			Retries: 2,
+			Retries: ptr.To[int32](2),
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"c4.avalanche.io/agent-bundle": b.Name}},
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{

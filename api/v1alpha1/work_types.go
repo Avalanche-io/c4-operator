@@ -201,10 +201,10 @@ type WorkJobSpec struct {
 	// +optional
 	Nudge WorkNudge `json:"nudge,omitempty"`
 
-	// Retries per unit after the first attempt.
+	// Retries per unit after the first attempt: 0 for none. Unset is 2.
 	// +kubebuilder:default=2
 	// +optional
-	Retries int32 `json:"retries,omitempty"`
+	Retries *int32 `json:"retries,omitempty"`
 
 	// NodeErrorLimit blacklists a node for this job after this many unit
 	// failures on it.

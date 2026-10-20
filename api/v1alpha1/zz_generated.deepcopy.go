@@ -2245,6 +2245,11 @@ func (in *WorkJobSpec) DeepCopyInto(out *WorkJobSpec) {
 		copy(*out, *in)
 	}
 	out.Nudge = in.Nudge
+	if in.Retries != nil {
+		in, out := &in.Retries, &out.Retries
+		*out = new(int32)
+		**out = **in
+	}
 	if in.AvoidNodes != nil {
 		in, out := &in.AvoidNodes, &out.AvoidNodes
 		*out = make([]string, len(*in))
