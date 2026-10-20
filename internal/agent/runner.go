@@ -297,6 +297,9 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		if !live {
 			prompt := ""
 			if m.Block {
+				if err := r.fetchReply(ctx, p, u); err != nil {
+					return err
+				}
 				prompt = reworkPrompt(p, u)
 			}
 			res, err := r.Harness.Resume(ctx, name, prompt)
@@ -315,6 +318,9 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		// machine was restarted. Resume it from its last turn.
 		prompt := ""
 		if m.Block {
+			if err := r.fetchReply(ctx, p, u); err != nil {
+				return err
+			}
 			prompt = reworkPrompt(p, u)
 		}
 		res, err := r.Harness.Resume(ctx, name, prompt)

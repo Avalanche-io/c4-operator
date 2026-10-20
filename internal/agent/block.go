@@ -239,6 +239,8 @@ func reworkPrompt(p *corev1.Pod, u UnitDirs) string {
 	var b strings.Builder
 	if why := strings.TrimSpace(podEnv(p, EnvBlockRework)); why != "" {
 		fmt.Fprintf(&b, "A review sent your block back. It asks:\n%s\n\nFix that, and only that.\n\n", why)
+	} else if d := decisionText(p, replyDir(p, u)); d != "" {
+		b.WriteString(d)
 	} else {
 		b.WriteString("The farm resumed your block where it stopped. Carry on with your task.\n\n")
 	}
@@ -257,8 +259,88 @@ func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	fmt.Fprintf(&b, "- This attempt's output directory: %s. Control documents go in %s/.c4/:\n", u.Out, u.Out)
 	b.WriteString("  - a generator writes its expansion document (version 1) to expand.json there;\n")
 	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n")
-	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note (to withdraw one, write the file empty).\n\n")
+	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note (to withdraw one, write the file empty).\n")
+	b.WriteString(`- If you cannot go on without a person's decision, ask for it: write ask.json in that .c4/ directory, {"ask": "your question, on its own", "choices": ["a", "b"], "reply": false}, and end your turn. Choices are optional; "reply": true asks for files as well. The farm stops your block until the job's owner answers, then wakes you with the answer. Ask only what you cannot reasonably decide yourself.` + "\n\n")
 	return b.String()
+}
+
+// decisionText is what a person decided on the question a block asked, for
+// the attempt that resumes it ($C4_DECISION), and where the reply's files
+// are; "" when the attempt carries no decision.
+func decisionText(p *corev1.Pod, replyDir string) string {
+	raw := podEnv(p, "C4_DECISION")
+	if raw == "" {
+		return ""
+	}
+	var d struct {
+		Do    string `json:"do"`
+		Note  string `json:"note"`
+		Actor string `json:"actor"`
+		View  string `json:"view"`
+	}
+	if json.Unmarshal([]byte(raw), &d) != nil || d.Do == "" {
+		return ""
+	}
+	var b strings.Builder
+	who := d.Actor
+	if who == "" {
+		who = "a person"
+	}
+	fmt.Fprintf(&b, "%s answered the question you asked: %s.", who, d.Do)
+	if d.Note != "" {
+		fmt.Fprintf(&b, " Their note: %s", d.Note)
+	}
+	if d.View != "" && replyDir != "" {
+		fmt.Fprintf(&b, " Their reply's files are in %s (read-only).", replyDir)
+	}
+	b.WriteString(" Carry on with your task in the light of it.\n\n")
+	return b.String()
+}
+
+// fetchReply brings the reply to a block's question here, for an attempt
+// the farm resumed with a decision whose reply is a view: on a pod it is
+// mounted ($C4_REPLY); on a host it is fetched into the unit directory's
+// reply/, once.
+func (r *Runner) fetchReply(ctx context.Context, p *corev1.Pod, u UnitDirs) error {
+	var d struct {
+		View string `json:"view"`
+	}
+	if json.Unmarshal([]byte(podEnv(p, "C4_DECISION")), &d) != nil || d.View == "" || r.ViewSrc == nil {
+		return nil
+	}
+	dir := filepath.Join(u.Root, "reply")
+	if _, err := os.Stat(dir); err == nil {
+		return nil
+	}
+	id, err := c4.Parse(d.View)
+	if err != nil {
+		return fmt.Errorf("the decision's reply %q: %w", d.View, err)
+	}
+	project, err := r.projectOf(ctx, p.Namespace)
+	if err != nil {
+		return err
+	}
+	tmp := dir + ".partial"
+	os.RemoveAll(tmp)
+	if err := FetchView(ctx, r.ViewSrc, project, id, tmp); err != nil {
+		return fmt.Errorf("the decision's reply %s: %w", d.View, err)
+	}
+	return os.Rename(tmp, dir)
+}
+
+// replyDir is where a resumed block finds the reply to its question: the
+// pod's mount ($C4_REPLY), or on a host the copy the runner fetched into
+// the unit directory.
+func replyDir(p *corev1.Pod, u UnitDirs) string {
+	if d := podEnv(p, "C4_REPLY"); d != "" {
+		if _, err := os.Stat(d); err == nil {
+			return d
+		}
+	}
+	if _, err := os.Stat(filepath.Join(u.Root, "reply")); err == nil {
+		return filepath.Join(u.Root, "reply")
+	}
+	return ""
 }
 
 // HookSettingsCommand is the --settings document that installs the
