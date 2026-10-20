@@ -41,9 +41,15 @@ func TestPlanExpandsAsTheQueueReadsIt(t *testing.T) {
 }
 
 func TestAgentPlanExpandsAsTheQueueReadsIt(t *testing.T) {
+	for _, block := range []string{"", "1"} {
+		t.Run("block="+block, func(t *testing.T) { agentPlan(t, block) })
+	}
+}
+
+func agentPlan(t *testing.T, block string) {
 	out := t.TempDir()
 	cmd := exec.Command("sh", "agent.sh")
-	cmd.Env = append(os.Environ(), "C4_OUTPUT="+out, "C4_UNIT_NAME=plan")
+	cmd.Env = append(os.Environ(), "C4_OUTPUT="+out, "C4_UNIT_NAME=plan", "DEMO_BLOCK="+block)
 	if b, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("agent.sh plan: %v\n%s", err, b)
 	}
@@ -63,5 +69,8 @@ func TestAgentPlanExpandsAsTheQueueReadsIt(t *testing.T) {
 	w := x.Units[1]
 	if w.Name != "review" || w.Wait == nil || len(w.After) != 1 || len(w.Wait.Choices) != 2 {
 		t.Fatalf("the review wait: %+v", w)
+	}
+	if b := x.Units[0]; (block != "") != (b.Reasoning.Does == "model") {
+		t.Fatalf("the build's reasoning, block=%q: %+v", block, b.Reasoning)
 	}
 }

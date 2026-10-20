@@ -23,7 +23,13 @@ HUD=http://127.0.0.1:30080
 ORACLE=${ORACLE:-c4-job-oiio:dev}
 # Development viewers for both demos' projects, so either demo's run keeps
 # the manager's arguments the same.
-DEMO_VIEWERS="wrangler=*;artist=show-a;dana@supervisor=dailies|widgets;c4-sync@wrangler=dailies|widgets"
+DEMO_VIEWERS="wrangler=*;artist=show-a;dana@supervisor=dailies|widgets;c4-sync@wrangler=dailies|widgets;joshua@artist=dailies|widgets"
+# DEMO_BLOCK=1 (the GitHub demo): the agent's work is a real block, Claude
+# Code in the block image, on the sign-in Joshua lends with his own
+# holder-transfer lease, for jobs the Tracker submits for him under his
+# grant. The farm uses holder-transfer for the run only.
+BLOCK_IMG=${BLOCK_IMG:-c4-block:dev}
+LEASE=joshua-claude
 mkdir -p "$SHOTS"
 touch "$STATE"
 note() { printf '%s\n' "$*" >>"$STATE"; }
@@ -120,9 +126,10 @@ down() {
     k -n c4-system rollout status deploy/c4-manager --timeout=180s >/dev/null 2>&1
     rm -f "$SHOTS/.manager-args"
   fi
-  for img in c4-sync:dev "c4-$FAKE:dev"; do
+  for img in c4-sync:dev "c4-$FAKE:dev" ${DEMO_BLOCK:+"$BLOCK_IMG"}; do
     docker exec "$NODE" crictl rmi "docker.io/library/$img" >/dev/null 2>&1
   done
+  [ -n "${DEMO_BLOCK:-}" ] && log "Joshua: stop your c4-agent lease now (Ctrl-C); it deletes the lease's Secret"
   if had oracle-loaded; then docker exec "$NODE" crictl rmi "docker.io/library/$ORACLE" >/dev/null 2>&1; fi
   log "torn down"
 }
@@ -157,7 +164,8 @@ import json, sys
 cur, ours = json.loads(sys.argv[1] or "[\"manager\"]"), sys.argv[2:]
 own = {a.split("=")[0] for a in ours}
 print(json.dumps(cur[:1] + [a for a in cur[1:] if a.split("=")[0] not in own] + ours, separators=(",", ":")))
-' "$cur" --capacity-provider=kind-sim --work-policy=objective "--hud-dev-viewers=$DEMO_VIEWERS" --tz=America/Los_Angeles)
+' "$cur" --capacity-provider=kind-sim --work-policy=objective "--hud-dev-viewers=$DEMO_VIEWERS" --tz=America/Los_Angeles \
+    ${DEMO_BLOCK:+--holder-transfer=allow})
   if [ "$(echo "$cur" | tr -d ' ')" != "$want" ]; then
     printf '%s' "$cur" >"$SHOTS/.manager-args"
     k -n c4-system patch deploy c4-manager --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args\",\"value\":$want}]" >/dev/null
@@ -182,6 +190,38 @@ demo_images() {
   for img in c4-sync:dev "c4-$FAKE:dev" "$ORACLE"; do
     "$KIND" load docker-image "$img" --name "$CLUSTER" --nodes "$NODE" >/dev/null
   done
+  if [ -n "${DEMO_BLOCK:-}" ]; then
+    log "the block image ($BLOCK_IMG): Claude Code, no credential"
+    make -C "$ROOT" image-block BLOCK_IMG="$BLOCK_IMG" >/dev/null
+    "$KIND" load docker-image "$BLOCK_IMG" --name "$CLUSTER" --nodes "$NODE" >/dev/null
+  fi
+}
+
+# demo_lent TRACKER: wait for what only Joshua gives, as himself: his
+# grant to the Tracker and his lease of his sign-in. The demo never gives
+# either for him; it prints what to run and waits.
+demo_lent() {
+  local grant
+  grant=$(python3 -c 'import hashlib,sys; print(sys.argv[1]+"-"+hashlib.sha256(sys.argv[2].encode()).hexdigest()[:10])' "$1" joshua)
+  granted() { [ "$(k -n "$NS" get submitgrant "$grant" -o jsonpath='{.spec.person}/{.spec.revoked.at}' 2>/dev/null)" = "joshua/" ]; }
+  leased() { [ "$(k -n "$NS" get credentiallease "$LEASE" -o jsonpath='{.status.state}' 2>/dev/null)" = active ]; }
+  go build -o "$ROOT/bin/c4-agent" "$ROOT/cmd/c4-agent"
+  go build -o "$ROOT/bin/c4-farm" "$ROOT/cmd/c4-farm"
+  if ! granted || ! leased; then
+    {
+      echo
+      echo "== Joshua: two things only you can do, as yourself, in another terminal =="
+      echo "  1. let tracker $1 submit work for you, for a day:"
+      echo "       $ROOT/bin/c4-farm login $HUD --as joshua --name demo   # once"
+      echo "       $ROOT/bin/c4-farm grant $1 --farm demo --project $DEMO_NAME --pools $DEMO_NAME --until 1d"
+      echo "  2. lend your sign-in to your own jobs in pool $DEMO_NAME (leave it running; Ctrl-C after the demo):"
+      echo "       $ROOT/bin/c4-agent lease --context $CTX --namespace $NS --name $LEASE \\"
+      echo "         --holder joshua --owner joshua --pool $DEMO_NAME --ttl 2h --renew-before 15m --config-dir \$HOME/.claude-b"
+      echo "waiting for both (15 min) ..."
+    } >&2
+  fi
+  wait_until "Joshua's grant to tracker $1" 900 granted
+  wait_until "Joshua's lease $LEASE, active" 900 leased
 }
 
 demo_project() {

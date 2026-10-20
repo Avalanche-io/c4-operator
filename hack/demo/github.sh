@@ -4,9 +4,12 @@
 # kind cluster, and HUD captures of each step. `make demo-github` runs it;
 # hack/demo/lib.sh says what it adds to the cluster and how it cleans up.
 #
-# The agent is a script (hack/demo/scene/agent.sh, and this file for its
-# GitHub actions): a real agent bundle needs model credentials, and this
-# demo is about the tracker loop, not the model.
+# The agent's GitHub actions (opening the pull request, pushing) are this
+# script's. Its work is a script too (hack/demo/scene/agent.sh), or with
+# DEMO_BLOCK=1 a real block: Claude Code in the block image, on the
+# sign-in Joshua lends with his own lease, for jobs the Tracker submits for
+# him under the grant he gives it. The demo never gives either for him: it
+# prints what he runs and waits.
 #
 #   1. a maintainer's issue, labeled c4:agent in a milestone with a due
 #      date, becomes an agent job whose deadline is the milestone's;
@@ -36,6 +39,44 @@ DUE=$(python3 -c 'import datetime as d; t=d.datetime.now(d.timezone.utc)+d.timed
 fkpost /demo/seed "{\"due\":\"$DUE\"}" >/dev/null
 demo_sync github token demo-gh-token
 k -n "$NS" patch secret github --type=merge -p "{\"stringData\":{\"hook\":\"$HOOK_SECRET\"}}" >/dev/null
+# The job the Tracker submits: a script in the oiio image, or a block.
+if [ -n "${DEMO_BLOCK:-}" ]; then
+  FOR="    for: {person: joshua}"
+  RUN="      inputs: [{materialization: agent-scene, mountPath: /private/tmp/c4-out}]
+      template:
+        spec:
+          securityContext: {runAsNonRoot: true, runAsUser: 65532, runAsGroup: 65532, fsGroup: 65532, seccompProfile: {type: RuntimeDefault}}
+          volumes:
+          - {name: claude, emptyDir: {}}
+          - {name: lease, secret: {secretName: c4-lease-$LEASE}}
+          containers:
+          - name: agent
+            image: $BLOCK_IMG
+            imagePullPolicy: IfNotPresent
+            command: [sh, /private/tmp/c4-out/agent.sh]
+            env:
+            - {name: DEMO_BLOCK, value: \"1\"}
+            - {name: CLAUDE_CONFIG_DIR, value: /claude}
+            - {name: C4_LEASE_DIR, value: /etc/c4/lease}
+            volumeMounts:
+            - {name: claude, mountPath: /claude}
+            - {name: lease, mountPath: /etc/c4/lease, readOnly: true}
+            securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}"
+  BUILD_WAIT=900
+else
+  FOR=""
+  RUN="      inputs: [{materialization: agent-scene, mountPath: /show}]
+      template:
+        spec:
+          securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+          containers:
+          - name: agent
+            image: $ORACLE
+            imagePullPolicy: IfNotPresent
+            command: [sh, /show/agent.sh]
+            securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}"
+  BUILD_WAIT=300
+fi
 k apply -f - >/dev/null <<EOF
 apiVersion: c4.avalanche.io/v1alpha1
 kind: Tracker
@@ -57,25 +98,24 @@ spec:
     as: job
     review: {wait: review}
     rework: nextVersion
+$FOR
     job:
       class: graph
       params: {root: plan}
       pools: [$DEMO_NAME]
-      inputs: [{materialization: agent-scene, mountPath: /show}]
-      template:
-        spec:
-          securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
-          containers:
-          - name: agent
-            image: $ORACLE
-            imagePullPolicy: IfNotPresent
-            command: [sh, /show/agent.sh]
-            securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+$RUN
   statusOut:
     commitStatus: true
     fieldSeconds: 30
 EOF
 mark "up" "cluster, project, fake GitHub, c4-sync ready; issue #7 due $DUE"
+if [ -n "${DEMO_BLOCK:-}" ]; then
+  no_grant() { [ "$(k -n "$NS" get tracker github -o jsonpath='{.status.conditions[?(@.type=="Intake")].reason}')" = NoGrant ]; }
+  wait_until "the Tracker to say it has no grant from joshua" 120 no_grant
+  mark "0 no grant" "$(k -n "$NS" get tracker github -o jsonpath='{.status.conditions[?(@.type=="Intake")].message}')"
+  demo_lent github
+  mark "0 lent" "Joshua granted tracker github and lent his sign-in (lease $LEASE, active)"
+fi
 
 # --- run ------------------------------------------------------------------
 
@@ -104,7 +144,7 @@ wait_until "C4's check run on the pull request's head" 120 has_check "$SHA1"
 mark "2 working" "the agent opened PR #$PULL; C4's check run on ${SHA1:0:10}: $(check_title "$SHA1")"
 capture 2-working "$JOB"
 
-wait_until "the review wait of $JOB open" 300 wait_open "$JOB" review
+wait_until "the review wait of $JOB open" "$BUILD_WAIT" wait_open "$JOB" review
 wait_until "the check run to wait for dana" 60 check_says "$SHA1" "Waiting for review by dana"
 mark "3 in review" "the check run waits for review by dana"
 capture 3-review "$JOB"
@@ -115,7 +155,7 @@ wait_until "the review relayed as a rework, and $JOB2 submitted" 120 has_job "$J
 mark "4 review to rework" "dana's changes-requested review became a rework; $JOB2 follows $JOB with the review mounted"
 capture 4-rework "$JOB2"
 
-wait_until "the review wait of $JOB2 open" 300 wait_open "$JOB2" review
+wait_until "the review wait of $JOB2 open" "$BUILD_WAIT" wait_open "$JOB2" review
 SHA2=$(sha v002)
 fkpost /demo/push "{\"number\":$PULL,\"sha\":\"$SHA2\"}" >/dev/null
 wait_until "a new check run on the pushed head, waiting for dana" 120 check_says "$SHA2" "Waiting for review by dana"
@@ -148,5 +188,13 @@ hooks = [x["status"] for x in d["Deliveries"] or []]
 print("github state ok: changes requested then approved, check run success on the new head, output", view[:12], "published; webhooks:", hooks)
 PY
 lineage "$JOB" "$JOB2" "github/Issue/7"
+if [ -n "${DEMO_BLOCK:-}" ]; then
+  for j in "$JOB" "$JOB2"; do
+    o=$(k -n "$NS" get workjob "$j" -o jsonpath='{.metadata.annotations.c4\.avalanche\.io/owner} {.metadata.annotations.c4\.avalanche\.io/grant}')
+    case "$o" in "joshua "?*) ;; *) fail "$j is not Joshua's under his grant: $o" ;; esac
+    k -n "$NS" get workjob "$j" -o jsonpath='{.status.modelUsage}' | grep -q '"models"' || fail "$j's build recorded no model use"
+  done
+  mark "block" "both versions are Joshua's under his grant; their builds ran as blocks on his lent sign-in (model use recorded)"
+fi
 mark "checks" "reviews stand as dana wrote them; check run and status success on ${SHA2:0:10}; output ${VIEW:0:12}… published; $JOB2 follows $JOB, both carry the issue; nothing C4 wrote was a review or a merge"
 log "demo done: $SHOTS"
