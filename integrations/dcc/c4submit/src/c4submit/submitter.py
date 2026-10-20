@@ -201,16 +201,17 @@ class Draft:
     def keys(self) -> Dict[str, Optional[Renderable]]:
         """Job key to renderable, in the scene's order."""
         if not self.per_renderable:
-            return {submission.job_key(self.stage): None}
+            return {submission.job_key(self.stage, limit=submission.key_limit(self.shot)): None}
         picked = self.picked()
         several = len(picked) > 1
+        limit = submission.key_limit(self.shot)
         out: Dict[str, Optional[Renderable]] = {}
         for r in picked:
-            k = submission.job_key(self.stage, r.key or r.name, several)
+            k = submission.job_key(self.stage, r.key or r.name, several, limit)
             base, n = k, 2
             while k in out:
                 sfx = f"-{n}"
-                k, n = base[:40 - len(sfx)].rstrip("-") + sfx, n + 1
+                k, n = base[:limit - len(sfx)].rstrip("-") + sfx, n + 1
             out[k] = r
         return out
 

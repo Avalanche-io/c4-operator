@@ -22,6 +22,8 @@ JOB = ("tool", "frames", "with", "after", "due", "size", "needs", "pools", "prev
        "chunk", "order", "follows", "policy")
 AFTER_HOW = ("frames", "all", "previous")
 
+# A job is named <stem>-<key>-vNNN, and a job's name is at most this long.
+JOB_NAME_MAX = 50
 KEY = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 _TOOL = re.compile(r"^[a-z][a-z0-9-]*(@(v\d+|c4[1-9A-HJ-NP-Za-km-z]{88}))?$")
 _MILESTONE = re.compile(r"^[a-z][a-z0-9-]*$")
@@ -112,8 +114,8 @@ def check(doc: Any) -> List[Dict[str, str]]:
         if not KEY.match(str(key)):
             errs.append(error(base, f'"{key}" is not a job key', "lowercase letters, digits and -, starting with a letter"))
         stem = str(doc.get("name") or doc.get("shot") or "")
-        if stem and len(f"{stem}-{key}-v000") > 63:
-            errs.append(error(base, f'"{stem}-{key}-v001" is longer than a job\'s name may be (63 characters)',
+        if stem and len(f"{stem}-{key}-v000") > JOB_NAME_MAX:
+            errs.append(error(base, f'"{stem}-{key}-v001" is longer than a job\'s name may be ({JOB_NAME_MAX} characters)',
                               "shorten the job's key, or set name: to a shorter stem"))
         if not isinstance(job, dict):
             errs.append(error(base, "a job is a map of fields", "give it at least tool:"))
@@ -214,16 +216,24 @@ def _cycle(jobs: dict) -> List[str]:
     return []
 
 
-def job_key(stage: str, name: str = "", several: bool = False) -> str:
+def job_key(stage: str, name: str = "", several: bool = False, limit: int = 40) -> str:
     """A job's key: the stage alone for one renderable, ``stage-name`` for
     one of several, from a node's name lower-cased with anything outside
-    ``[a-z0-9-]`` made ``-`` (and a leading ``write`` dropped)."""
+    ``[a-z0-9-]`` made ``-`` (and a leading ``write`` dropped), at most
+    ``limit`` characters."""
+    limit = max(1, min(limit, 40))
     stage = _slug(stage) or "render"
     if not several or not name:
-        return stage[:40]
+        return stage[:limit].rstrip("-")
     n = _slug(name)
     n = re.sub(r"^write-?", "", n) or n
-    return f"{stage}-{n}"[:40].rstrip("-") if n else stage
+    return f"{stage}-{n}"[:limit].rstrip("-") if n else stage[:limit].rstrip("-")
+
+
+def key_limit(stem: str) -> int:
+    """How long a job's key may be under a stem, so ``<stem>-<key>-v001``
+    fits a job's name."""
+    return max(1, min(40, JOB_NAME_MAX - len(f"{stem}--v000"))) if stem else 40
 
 
 def _slug(s: str) -> str:

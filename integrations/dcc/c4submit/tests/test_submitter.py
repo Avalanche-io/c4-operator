@@ -303,3 +303,16 @@ def test_cancel_inside_a_big_file(tmp_path):
     with pytest.raises(Interrupted):
         identify_file(big, lambda: asked.append(1) or len(asked) > 1)
     assert len(asked) == 2, "asked between chunks, and stopped at the second"
+
+
+def test_keys_fit_the_job_name_under_a_long_shot(tmp_path):
+    long = "Write_beauty_main_character_hero_pass_left_"
+    host = FakeHost(scene=write(str(tmp_path / "a.nk")), renderables=[Renderable(long + "A"), Renderable(long + "B")],
+                    env={"C4_ROOT": str(tmp_path), "C4_SHOT": "saltmarsh-sq40-sh0140"})
+    d = Draft(host, Tool(FakeFarm().tools_by["nuke-comp"]))
+    keys = list(d.keys())
+    assert len(set(keys)) == 2
+    assert all(len(f"{d.shot}-{k}-v001") <= 50 for k in keys)
+    doc = {"c4": "submit/1", "shot": d.shot, "jobs": {k: {"tool": "nuke-comp"} for k in keys}}
+    from c4submit import submission
+    assert submission.check(doc) == []
