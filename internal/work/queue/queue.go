@@ -248,9 +248,13 @@ type jobMem struct {
 	// refold says the output still holds their changesets.
 	superseded map[int]bool
 	refold     bool
-	acks       []*ackRecord
-	acked      string
-	decisions  []decisionRecord
+	// steers are messages to units while they run, and steered the last
+	// request's token (steer.go).
+	steers    []*steerRec
+	steered   string
+	acks      []*ackRecord
+	acked     string
+	decisions []decisionRecord
 	// waits are the job's wait units and escalated units, open and
 	// decided (wait.go).
 	waits *waitMem
@@ -326,6 +330,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.requeued = st.Requeued
 	m.loadAcks(st)
 	m.loadWaits(st)
+	m.loadSteers(st)
 	m.loadLoops(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
@@ -595,6 +600,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.checkPriorityClass(ctx)
 	q.act(ctx, now, dec, views, poolInfo)
 	q.decideSafepoints(ctx, now, dec, views)
+	q.deliverSteers(ctx, now, views)
 	q.stage(ctx, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
@@ -678,6 +684,8 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	applyAcks(j, m, len(plan.Units))
 	// People deciding what waits for them (wait.go).
 	applyDecides(j, m, now)
+	// People steering units while they run (steer.go).
+	applySteers(j, m)
 	// Nodes a person allowed again leave the automatic blacklist.
 	for _, n := range strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",") {
 		if n = strings.TrimSpace(n); n != "" && m.blacklist[n] {
@@ -1430,6 +1438,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		// whose unit it is: a credential lease serves only its holder's
 		pod.Annotations[c4v1.AnnotationOwner] = owner
 	}
+	steerPod(v.mem, pod, idx, q.Now())
 	if ai := j.Annotations[c4v1.AnnotationAIUsage]; ai != "" {
 		// Task records carry the job's declared use of models.
 		pod.Annotations[c4v1.AnnotationAIUsage] = ai

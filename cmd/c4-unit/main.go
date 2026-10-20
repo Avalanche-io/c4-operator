@@ -13,6 +13,9 @@
 //	                                at a safe point, ask a person (or a party, or a
 //	                                clock) and stop until they decide: exit 10
 //	                                ("waits") to stop; 1 if the farm refused
+//	c4-unit steer [--json]          print the messages sent to this unit since it
+//	                                last read them (a person steering it while it
+//	                                runs), and note them read; exit 1 if none
 //	c4-unit decision                print the decision this attempt resumed with
 //	                                (JSON: seq, do, note, actor, at, view, reply),
 //	                                exit 1 if none
@@ -115,6 +118,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	choices := fs.String("choices", "", "with wait: the decisions that resume the unit besides approve, comma-separated (fail always may)")
 	reply := fs.Bool("reply", false, "with wait: the decision carries content, mounted at $C4_REPLY when the unit resumes")
 	expect := fs.Duration("expect", 0, "with wait: how long the decision is expected to take")
+	asJSON := fs.Bool("json", false, "with steer: print each message as a line of JSON {seq, at, actor, text}")
 	of := fs.Int64("of", 0, "with measure: the target (default the job's)")
 	name := fs.String("name", "", "with measure: what is counted (default the job's)")
 	detail := fs.String("detail", "", "with measure: a line of detail for the record")
@@ -126,7 +130,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	cost := fs.Float64("cost", -1, "with usage: the call's cost in US dollars, if known")
 	costSource := fs.String("cost-source", "", "with usage: where the price came from (a metering proxy, a price table)")
 	if len(args) == 0 {
-		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | wait --server S | decision | resume-dir | output")
+		return 2, errors.New("usage: c4-unit progress N | preview IMAGE FRAME | yield-requested | safepoint [--checkpoint REF] | wait --server S | steer [--json] | decision | resume-dir | output")
 	}
 	cmd := args[0]
 	if err := fs.Parse(args[1:]); err != nil {
@@ -257,6 +261,19 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		// the next safe point stops.
 		fmt.Fprintln(stdout, "no decision in "+wait.String())
 		return 1, nil
+	case "steer":
+		out, err := output(e, *dir)
+		if err != nil {
+			return 1, err
+		}
+		n, err := steer(e, out, stdout, *asJSON)
+		if err != nil {
+			return 1, err
+		}
+		if n == 0 {
+			return 1, nil
+		}
+		return 0, nil
 	case "decision":
 		d := e.get("C4_DECISION")
 		if d == "" {
@@ -291,7 +308,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		fmt.Fprintln(stdout, out)
 		return 0, nil
 	}
-	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, wait, decision, resume-dir or output", cmd)
+	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, wait, steer, decision, resume-dir or output", cmd)
 }
 
 func code(err error) (int, error) {
@@ -462,6 +479,63 @@ func awaitDecision(e env, seq int, wait time.Duration) (decision, bool) {
 		}
 		sleep(200 * time.Millisecond)
 	}
+}
+
+// steerMsg is a message to the unit ($C4_CONTROL/steer, written by the
+// node daemon).
+type steerMsg struct {
+	Seq   int       `json:"seq"`
+	At    time.Time `json:"at"`
+	Actor string    `json:"actor,omitempty"`
+	Text  string    `json:"text"`
+}
+
+// steer prints the messages after the last one read (out/.c4/steer-seen),
+// notes the last as read, and returns how many it printed.
+func steer(e env, out string, w io.Writer, asJSON bool) (int, error) {
+	dir := e.get("C4_CONTROL")
+	if dir == "" {
+		return 0, nil
+	}
+	b, err := os.ReadFile(filepath.Join(dir, "steer"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, nil
+		}
+		return 0, err
+	}
+	var msgs []steerMsg
+	if err := json.Unmarshal(b, &msgs); err != nil {
+		return 0, fmt.Errorf("steer: %w", err)
+	}
+	seenPath := filepath.Join(out, ".c4", "steer-seen")
+	seen := 0
+	if s, err := os.ReadFile(seenPath); err == nil {
+		seen, _ = strconv.Atoi(strings.TrimSpace(string(s)))
+	}
+	n, last := 0, seen
+	for _, m := range msgs {
+		if m.Seq <= seen {
+			continue
+		}
+		if asJSON {
+			line, _ := json.Marshal(m)
+			fmt.Fprintln(w, string(line))
+		} else {
+			who := m.Actor
+			if who == "" {
+				who = "someone"
+			}
+			fmt.Fprintf(w, "%s (%s): %s\n", who, m.At.UTC().Format(time.RFC3339), m.Text)
+		}
+		n, last = n+1, max(last, m.Seq)
+	}
+	if last > seen {
+		if err := writeAtomic(seenPath, []byte(strconv.Itoa(last)+"\n")); err != nil {
+			return n, err
+		}
+	}
+	return n, nil
 }
 
 // safepoint records a safe point in path: its sequence number (one past

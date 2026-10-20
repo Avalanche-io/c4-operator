@@ -17,6 +17,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/node"
 )
 
 // A unit run on the host has no pod sandbox, so the runner gives it what
@@ -164,6 +165,9 @@ func (r *Runner) relay(ctx context.Context, p *corev1.Pod, u UnitDirs) error {
 		st = &relayState{}
 		r.relays[p.UID] = st
 	}
+	if err := r.relaySteer(ctx, p, u, st); err != nil {
+		return err
+	}
 	if sp, ok := readSafepoint(u.Out); ok && sp.Seq > st.asked {
 		note, _ := json.Marshal(sp)
 		if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationSafepoint: string(note)}); err != nil {
@@ -190,10 +194,37 @@ func (r *Runner) relay(ctx context.Context, p *corev1.Pod, u UnitDirs) error {
 	return nil
 }
 
+// relaySteer does for a host unit what the node daemon does for a pod:
+// the unit's unread messages go to control/steer, and how far it read
+// (.c4/steer-seen) to the pod's c4.avalanche.io/steer-seen.
+func (r *Runner) relaySteer(ctx context.Context, p *corev1.Pod, u UnitDirs, st *relayState) error {
+	if s := p.Annotations[c4v1.AnnotationUnitSteer]; s != st.steer {
+		msgs := "[]"
+		if s != "" && json.Valid([]byte(s)) {
+			msgs = s
+		}
+		if err := writeAtomic(filepath.Join(u.Control, "steer"), []byte(msgs)); err != nil {
+			return err
+		}
+		st.steer = s
+	}
+	if n, ok := node.ReadSteerSeen(u.Out); ok && n > st.read {
+		if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationSteerSeen: strconv.Itoa(n)}); err != nil {
+			return err
+		}
+		st.read = n
+	}
+	return nil
+}
+
 type relayState struct {
 	asked, answered int
 	stopped         bool
 	why             string
+	// steer is the messages last written to control/steer, and read how
+	// far the unit said it read them.
+	steer string
+	read  int
 }
 
 // controlDocs are the documents a member leaves for the farm, as a pod

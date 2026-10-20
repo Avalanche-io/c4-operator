@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -22,6 +24,11 @@ import (
 // pod's c4-control emptyDir, through kubelet's pods directory, where the
 // unit reads it as $C4_CONTROL/safepoint.decision. Nothing is written into
 // a mounted overlay.
+//
+// Messages to a running unit go the same way (steering): the queue puts
+// the unit's unread messages on its pod (c4.avalanche.io/unit-steer), the
+// daemon writes them to the control directory as steer, and relays how far
+// the unit read (.c4/steer-seen) back as c4.avalanche.io/steer-seen.
 
 // ControlVolume is the emptyDir every unit pod mounts at ControlMount.
 const (
@@ -49,7 +56,16 @@ type SafepointDecision struct {
 type spRelay struct {
 	asked, answered int
 	seen            bool
+	// steer is the messages last written to the control directory, read
+	// how far the unit said it read, and steerAt when the pod was last
+	// read for them.
+	steer   string
+	read    int
+	steerAt time.Time
 }
+
+// steerEvery is how often the daemon reads a pod for new messages.
+const steerEvery = 2 * time.Second
 
 func (d *Daemon) podsDir() string {
 	if d.Cfg.PodsDir != "" {
@@ -101,6 +117,10 @@ func (d *Daemon) safepointsOnce(ctx context.Context, relays map[string]*spRelay)
 				r.asked = sp.Seq
 			}
 		}
+		if time.Since(r.steerAt) >= steerEvery {
+			r.steerAt = time.Now()
+			d.relaySteer(ctx, v.Namespace, v.Pod, v.PodUID, upper, r)
+		}
 		if r.asked <= r.answered {
 			continue
 		}
@@ -124,6 +144,41 @@ func (d *Daemon) safepointsOnce(ctx context.Context, relays map[string]*spRelay)
 			delete(relays, uid)
 		}
 	}
+}
+
+// relaySteer writes a pod's unread messages to its control directory, and
+// relays how far its unit read them.
+func (d *Daemon) relaySteer(ctx context.Context, ns, name, uid, upper string, r *spRelay) {
+	var pod corev1.Pod
+	if err := d.Kube.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &pod); err != nil || string(pod.UID) != uid {
+		return
+	}
+	if s := pod.Annotations[c4v1.AnnotationUnitSteer]; s != r.steer {
+		msgs := json.RawMessage("[]")
+		if s != "" && json.Valid([]byte(s)) {
+			msgs = json.RawMessage(s)
+		}
+		dir := filepath.Join(d.podsDir(), uid, "volumes", "kubernetes.io~empty-dir", ControlVolume)
+		if err := writeFileAtomic(filepath.Join(dir, "steer"), msgs); err != nil {
+			d.Log.V(1).Info("steer", "pod", ns+"/"+name, "err", err.Error())
+			return
+		}
+		r.steer = s
+	}
+	if n, ok := ReadSteerSeen(upper); ok && n > r.read && d.setPodNote(ctx, ns, name, uid, c4v1.AnnotationSteerSeen, n) {
+		r.read = n
+	}
+}
+
+// ReadSteerSeen reads how far a unit read its messages (.c4/steer-seen,
+// written by c4-unit steer).
+func ReadSteerSeen(out string) (int, bool) {
+	b, err := os.ReadFile(filepath.Join(out, ".c4", "steer-seen"))
+	if err != nil || len(b) > 32 {
+		return 0, false
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(b)))
+	return n, err == nil && n > 0
 }
 
 // setPodNote sets one annotation on a pod, if it is still the pod with uid.

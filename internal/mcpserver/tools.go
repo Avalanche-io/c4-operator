@@ -100,6 +100,8 @@ func Tools(c *Client) []Tool {
 			idempotent, c.acknowledge),
 		tool("c4_decide", "Decide what waits for a person", "Decide a job's wait for a person (a ruling, an approval, an outside party's answer): do is approve, one of the wait's choices, or fail. A wait that asks for a reply (reply in c4_job_detail's waits) takes one with the decision, reply_text or reply_view, which the units it holds up read. Or decide a unit a review escalated: accept (it stands), rework (it runs again) or fail. The job's waits, and whether each holds up work, are in c4_job_detail. Signed and recorded in the book.",
 			idempotent, c.decide),
+		tool("c4_steer", "Send a message to a running unit", "Send a message to one unit of a job while it runs, without stopping it: a change of direction, a hint, a correction. The unit reads it at its next safe point (an agent block at the end of its turn). A unit not running yet gets it when it starts; a finished one takes none. Delivered and read status are in c4_job_detail's steers.",
+			idempotent, c.steer),
 		tool("c4_avoid_node", "Avoid or allow a node for a job", "Keep a job's units off a node (a bad worker for that job), or allow it again.",
 			idempotent, c.avoidNode),
 		tool("c4_disable_node", "Disable or enable a node", "Take a node out of service for the whole farm (running units finish) or put it back.",
@@ -686,6 +688,20 @@ func (c *Client) decide(ctx context.Context, _ *mcp.CallToolRequest, in DecideIn
 		body["reply"] = map[string]string{"text": in.ReplyText, "view": in.ReplyView}
 	}
 	return c.control(ctx, p+"/decide", body)
+}
+
+type SteerIn struct {
+	JobRef
+	Unit string `json:"unit" jsonschema:"the unit's name or index"`
+	Text string `json:"text" jsonschema:"the message, up to 8 KiB"`
+}
+
+func (c *Client) steer(ctx context.Context, _ *mcp.CallToolRequest, in SteerIn) (*mcp.CallToolResult, Done, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, Done{}, err
+	}
+	return c.control(ctx, p+"/steer", map[string]any{"unit": in.Unit, "text": in.Text})
 }
 
 type AvoidIn struct {

@@ -97,6 +97,19 @@ const (
 	// WorkDecideRequest; the queue carries out each once, in token order
 	// (status.decided), and records it in status.waits.
 	AnnotationDecide = "c4.avalanche.io/decide"
+	// AnnotationSteer on a WorkJob carries messages people send to its
+	// units while they run, without ending them: a JSON list of
+	// WorkSteerRequest. The queue carries out each once, in token order
+	// (status.steered), and delivers it to the unit (AnnotationUnitSteer).
+	AnnotationSteer = "c4.avalanche.io/steer"
+	// AnnotationUnitSteer on a unit pod holds the messages its unit has
+	// not read yet: a JSON list of {seq, at, actor, text}. The node daemon
+	// (or the host runner) writes them to the pod's control directory as
+	// steer, where c4-unit steer reads them.
+	AnnotationUnitSteer = "c4.avalanche.io/unit-steer"
+	// AnnotationSteerSeen on a unit pod is the number of the last message
+	// its unit read, relayed from the unit's .c4/steer-seen.
+	AnnotationSteerSeen = "c4.avalanche.io/steer-seen"
 	// AnnotationPreflight on a unit pod reports the step it is preparing
 	// before the work starts: JSON {"step": "stage" | "fetch" | "image" |
 	// "license", "bytes": n, "of": n}. The node daemon and the class
@@ -357,6 +370,14 @@ type WorkJobStatus struct {
 	// units a review escalated to a person.
 	// +optional
 	Waits []WorkWait `json:"waits,omitempty"`
+	// Steered is the token of the last message carried out
+	// (AnnotationSteer).
+	// +optional
+	Steered string `json:"steered,omitempty"`
+	// Steers are the most recent messages sent to the job's units while
+	// they run: delivered, and read.
+	// +optional
+	Steers []WorkSteer `json:"steers,omitempty"`
 	// Rounds lists the job's loops: generators that run as bounded rounds
 	// of siblings.
 	// +optional
@@ -1033,6 +1054,44 @@ type WorkDecideRequest struct {
 	// for one: the wait unit's output, which the units it holds up mount.
 	// +optional
 	View string `json:"view,omitempty"`
+}
+
+// MaxSteerText bounds a message to a running unit, in bytes.
+const MaxSteerText = 8192
+
+// WorkSteerRequest is a message to a unit while it runs (G-steer).
+type WorkSteerRequest struct {
+	// Token makes each request distinct; requests are carried out in
+	// token order (base-36 nanoseconds).
+	Token string `json:"token"`
+	// Unit is the unit, by name or index.
+	Unit  string      `json:"unit"`
+	Text  string      `json:"text"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// Record is the C4 ID of the signed control record.
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkSteer is a message sent to a unit while it runs.
+type WorkSteer struct {
+	Unit int32 `json:"unit"`
+	// +optional
+	Name string `json:"name,omitempty"`
+	// Seq numbers the unit's messages from 1.
+	Seq   int32       `json:"seq"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	Text  string      `json:"text"`
+	// +optional
+	Record string `json:"record,omitempty"`
+	// Delivered is when it reached a pod of the unit; Seen says the unit
+	// read it (c4-unit steer).
+	// +optional
+	Delivered *metav1.Time `json:"delivered,omitempty"`
+	// +optional
+	Seen bool `json:"seen,omitempty"`
 }
 
 // WorkRounds is one of a job's loops: a generator run as bounded rounds of

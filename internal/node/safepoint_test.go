@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -69,5 +70,41 @@ func TestSafepointRelay(t *testing.T) {
 	d.safepointsOnce(ctx, relays)
 	if len(relays) != 0 {
 		t.Fatalf("relays kept: %v", relays)
+	}
+}
+
+// A unit's unread messages go to its control directory, and how far it
+// read them back to its pod.
+func TestSteerRelay(t *testing.T) {
+	c, _ := notePod(t)
+	root, pods := t.TempDir(), t.TempDir()
+	d := &Daemon{Kube: c, Cfg: Config{Root: root, PodsDir: pods}}
+	v := &Volume{ID: "vol-u3", Partition: "p0", Namespace: "saltmarsh", Pod: "sm0140-light-v001-u3-x", PodUID: "u3", Capture: true}
+	os.MkdirAll(d.volDir(), 0o755)
+	if err := d.saveVolume(v); err != nil {
+		t.Fatal(err)
+	}
+	upper, _ := d.volumeDirs(v.Partition, v.ID)
+	os.MkdirAll(filepath.Join(upper, ".c4"), 0o755)
+	control := filepath.Join(pods, "u3", "volumes", "kubernetes.io~empty-dir", ControlVolume)
+	os.MkdirAll(control, 0o755)
+	ctx := context.Background()
+	msgs := `[{"seq":1,"at":"2026-10-22T14:00:00Z","actor":"dana","text":"use the v3 plates"}]`
+	var p corev1.Pod
+	c.Get(ctx, types.NamespacedName{Namespace: "saltmarsh", Name: "sm0140-light-v001-u3-x"}, &p)
+	patch, _ := json.Marshal(map[string]any{"metadata": map[string]any{"annotations": map[string]string{c4v1.AnnotationUnitSteer: msgs}}})
+	if err := c.Patch(ctx, &p, client.RawPatch(types.MergePatchType, patch)); err != nil {
+		t.Fatal(err)
+	}
+	relays := map[string]*spRelay{}
+	d.safepointsOnce(ctx, relays)
+	if b, err := os.ReadFile(filepath.Join(control, "steer")); err != nil || string(b) != msgs {
+		t.Fatalf("steer file %q %v", b, err)
+	}
+	os.WriteFile(filepath.Join(upper, ".c4", "steer-seen"), []byte("1\n"), 0o644)
+	relays["u3"].steerAt = time.Time{}
+	d.safepointsOnce(ctx, relays)
+	if got := annotation(t, c, c4v1.AnnotationSteerSeen); got != "1" {
+		t.Fatalf("steer-seen %q", got)
 	}
 }

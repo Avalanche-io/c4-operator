@@ -117,6 +117,26 @@ func TestHostSafepointRelay(t *testing.T) {
 		t.Fatal("a decision before the queue answered")
 	}
 
+	// A message to the unit goes to control/steer; how far it read, back
+	// to the pod.
+	msgs := `[{"seq":1,"at":"2026-10-18T20:01:00Z","actor":"dana","text":"keep the old signature"}]`
+	if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationUnitSteer: msgs}); err != nil {
+		t.Fatal(err)
+	}
+	if err := r.relay(ctx, getPod(t, c), u); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(u.Control, "steer")); err != nil || string(b) != msgs {
+		t.Fatalf("steer file %q %v", b, err)
+	}
+	os.WriteFile(filepath.Join(u.Out, ".c4", "steer-seen"), []byte("1\n"), 0o644)
+	if err := r.relay(ctx, getPod(t, c), u); err != nil {
+		t.Fatal(err)
+	}
+	if got := getPod(t, c).Annotations[c4v1.AnnotationSteerSeen]; got != "1" {
+		t.Fatalf("steer-seen %q", got)
+	}
+
 	// the queue answers: stop
 	dec, _ := json.Marshal(node.SafepointDecision{Seq: 1, Do: "stop", Why: "capacity: battery low", At: at})
 	if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationSafepointDecision: string(dec)}); err != nil {

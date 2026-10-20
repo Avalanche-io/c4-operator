@@ -1690,6 +1690,26 @@ and a sweep planner that spawns trials are all generators.
     mounted read-only at `$C4_REPLY` (`/etc/c4/reply`). A unit that ends
     without stopping withdraws its wait. Each ask is in the book
     (`safepoint-wait`).
+  - **Steering** (agent-catalog G-steer): a message to a unit while it
+    runs, without ending it.
+    - **Sending:** a person sends it with `POST /jobs/{ns}/{name}/steer
+      {unit, text}` or MCP `c4_steer`. It is signed, then written as a
+      request in `c4.avalanche.io/steer` that the queue carries out once,
+      in token order.
+    - **Delivery:** the queue numbers each message for its unit and puts
+      every message the unit has not read on the unit's pod
+      (`c4.avalanche.io/unit-steer`). The node daemon, or the host runner,
+      writes them to the control directory as `steer`.
+    - **Reading:** the unit reads them at its safe points with `c4-unit
+      steer`, which records how far it read (`.c4/steer-seen`, relayed as
+      `c4.avalanche.io/steer-seen`). The queue then drops what was read
+      from the pod.
+    - **A unit not running** gets its unread messages on its next pod. A
+      unit that has ended takes none.
+    - **Limits:** messages are text, up to 8 KiB, because a running pod
+      cannot mount a new view.
+    - **Status:** `status.steers` lists the latest 64, each delivered and
+      seen.
   - **Estimate.** A wait adds its expected time to the critical path and
     nothing to slot-seconds. The expected time is the median of the
     job's decided waits for the same server, else the unit's `expect`,

@@ -499,6 +499,23 @@ type Job struct {
 	// Rounds are the job's loops: generators run as bounded rounds of
 	// siblings.
 	Rounds []Rounds `json:"rounds,omitempty"`
+	// Steers are the latest messages sent to the job's units while they
+	// run.
+	Steers []Steer `json:"steers,omitempty"`
+}
+
+// Steer is a message sent to a unit while it runs: delivered once it
+// reached a pod of the unit, seen once the unit read it.
+type Steer struct {
+	Unit      int        `json:"unit"`
+	Name      string     `json:"name,omitempty"`
+	Seq       int        `json:"seq"`
+	Actor     string     `json:"actor"`
+	At        time.Time  `json:"at"`
+	Text      string     `json:"text"`
+	Record    string     `json:"record,omitempty"`
+	Delivered *time.Time `json:"delivered,omitempty"`
+	Seen      bool       `json:"seen,omitempty"`
 }
 
 // NeedsPerson says why a job waits on a person, and since when.

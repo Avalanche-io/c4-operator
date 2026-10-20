@@ -1189,6 +1189,52 @@ spec:
                 description: Started and Finished bound the job's run.
                 format: date-time
                 type: string
+              steered:
+                description: |-
+                  Steered is the token of the last message carried out
+                  (AnnotationSteer).
+                type: string
+              steers:
+                description: |-
+                  Steers are the most recent messages sent to the job's units while
+                  they run: delivered, and read.
+                items:
+                  description: WorkSteer is a message sent to a unit while it runs.
+                  properties:
+                    actor:
+                      type: string
+                    at:
+                      format: date-time
+                      type: string
+                    delivered:
+                      description: |-
+                        Delivered is when it reached a pod of the unit; Seen says the unit
+                        read it (c4-unit steer).
+                      format: date-time
+                      type: string
+                    name:
+                      type: string
+                    record:
+                      type: string
+                    seen:
+                      type: boolean
+                    seq:
+                      description: Seq numbers the unit's messages from 1.
+                      format: int32
+                      type: integer
+                    text:
+                      type: string
+                    unit:
+                      format: int32
+                      type: integer
+                  required:
+                  - actor
+                  - at
+                  - seq
+                  - text
+                  - unit
+                  type: object
+                type: array
               suggestion:
                 description: Suggestion is the farm's suggested deadline and how it
                   got there.

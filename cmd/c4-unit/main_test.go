@@ -267,3 +267,31 @@ func TestWait(t *testing.T) {
 		t.Fatalf("decision: %d %q", c, buf.String())
 	}
 }
+
+// A unit reads the messages sent to it while it runs: those after the last
+// it read, each once.
+func TestSteer(t *testing.T) {
+	out, ctl := t.TempDir(), t.TempDir()
+	e := vars(map[string]string{"C4_OUTPUT": out, "C4_CONTROL": ctl})
+	var buf bytes.Buffer
+	if c, err := run([]string{"steer"}, &buf, e); c != 1 || err != nil || buf.Len() != 0 {
+		t.Fatalf("no messages: %d %v %q", c, err, buf.String())
+	}
+	os.WriteFile(filepath.Join(ctl, "steer"), []byte(`[{"seq":1,"at":"2026-10-19T20:00:00Z","actor":"dana","text":"skip the lighting pass"},
+		{"seq":2,"at":"2026-10-19T20:05:00Z","actor":"dana","text":"and use the v3 plates"}]`), 0o644)
+	if c, err := run([]string{"steer"}, &buf, e); c != 0 || err != nil ||
+		buf.String() != "dana (2026-10-19T20:00:00Z): skip the lighting pass\ndana (2026-10-19T20:05:00Z): and use the v3 plates\n" {
+		t.Fatalf("steer: %d %v %q", c, err, buf.String())
+	}
+	if b, _ := os.ReadFile(filepath.Join(out, ".c4", "steer-seen")); string(b) != "2\n" {
+		t.Fatalf("steer-seen %q", b)
+	}
+	buf.Reset()
+	if c, _ := run([]string{"steer"}, &buf, e); c != 1 || buf.Len() != 0 {
+		t.Fatalf("read again: %d %q", c, buf.String())
+	}
+	os.WriteFile(filepath.Join(ctl, "steer"), []byte(`[{"seq":3,"at":"2026-10-19T20:10:00Z","actor":"dana","text":"done?"}]`), 0o644)
+	if c, _ := run([]string{"steer", "--json"}, &buf, e); c != 0 || !strings.HasPrefix(buf.String(), `{"seq":3,`) {
+		t.Fatalf("json: %d %q", c, buf.String())
+	}
+}

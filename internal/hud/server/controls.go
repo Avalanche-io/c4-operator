@@ -759,3 +759,113 @@ func (s *Server) textView(ctx context.Context, project, text string) (string, er
 	}
 	return v.ID.String(), nil
 }
+
+// handleSteer sends a message to a unit while it runs, without ending it
+// (G-steer): signed, then written as a request in c4.avalanche.io/steer
+// that the queue carries out once, delivering it to the unit's pod, where
+// the unit reads it at its next safe point (c4-unit steer). A unit that
+// is not running gets it when it next runs; one that has ended takes none.
+func (s *Server) handleSteer(w http.ResponseWriter, r *http.Request) {
+	_, rec, v := s.job(w, r)
+	if rec == nil {
+		return
+	}
+	var body struct {
+		Unit json.RawMessage `json:"unit"`
+		Text string          `json:"text"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		fail(w, http.StatusBadRequest, "body: %v", err)
+		return
+	}
+	var ref string
+	if err := json.Unmarshal(body.Unit, &ref); err != nil {
+		var n int
+		if err := json.Unmarshal(body.Unit, &n); err != nil {
+			fail(w, http.StatusBadRequest, "unit: a unit's name or index")
+			return
+		}
+		ref = strconv.Itoa(n)
+	}
+	switch {
+	case strings.TrimSpace(body.Text) == "":
+		fail(w, http.StatusBadRequest, "text: the message")
+		return
+	case len(body.Text) > c4v1.MaxSteerText:
+		fail(w, http.StatusBadRequest, "text: %d bytes, over %d", len(body.Text), c4v1.MaxSteerText)
+		return
+	case rec.plan == nil:
+		fail(w, http.StatusConflict, "the job has no units yet")
+		return
+	}
+	idx := -1
+	for i, u := range rec.plan.Units {
+		if u.Name != "" && u.Name == ref {
+			idx = i
+		}
+	}
+	if n, err := strconv.Atoi(ref); idx < 0 && err == nil && n >= 0 && n < len(rec.plan.Units) {
+		idx = n
+	}
+	if idx < 0 {
+		fail(w, http.StatusNotFound, "no unit %q", ref)
+		return
+	}
+	switch st := unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx]; st {
+	case "succeeded", "failed", "accepted", "superseded", "flagged":
+		fail(w, http.StatusConflict, "unit %s has ended (%s): it reads no more messages", ref, st)
+		return
+	}
+	ctx := r.Context()
+	if err := s.authorize(ctx, r, v, rec.job.Namespace, "patch", "workjobs", rec.job.Name); err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
+	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
+	if err != nil {
+		fail(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
+	if j.Annotations == nil {
+		j.Annotations = map[string]string{}
+	}
+	now := time.Now()
+	unit := rec.plan.Units[idx].Name
+	if unit == "" {
+		unit = strconv.Itoa(idx)
+	}
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "steer", map[string]any{"unit": unit, "text": body.Text})
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
+	var reqs []c4v1.WorkSteerRequest
+	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationSteer]), &reqs)
+	reqs = append(reqs, c4v1.WorkSteerRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Text: body.Text,
+		Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
+	if len(reqs) > 16 {
+		reqs = reqs[len(reqs)-16:]
+	}
+	b, _ := json.Marshal(reqs)
+	j.Annotations[c4v1.AnnotationSteer] = string(b)
+	if err := s.Client.Patch(ctx, j, patch); err != nil {
+		fail(w, http.StatusConflict, "%v", err)
+		return
+	}
+	msg := fmt.Sprintf("%s: a message to %s", j.Name, unit)
+	note := msg
+	if id != "" {
+		note += "; record " + shortID(id)
+	}
+	if via(r) == "mcp" {
+		note += "; via MCP"
+	}
+	s.record(ctx, j, "WorkJob", v.User, "Steered", note, bookNote{actor: actorOf(r, v), kind: "steer", record: id})
+	out := map[string]any{"ok": true, "message": msg}
+	if id != "" {
+		out["record"] = id
+	}
+	writeJSON(w, http.StatusOK, out)
+}
