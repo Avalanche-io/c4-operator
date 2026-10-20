@@ -16,10 +16,10 @@ from c4submit.c4id import is_id
 
 FORMAT = "submit/1"
 
-TOP = ("c4", "project", "shot", "name", "due", "tree", "root", "read", "tracker", "for", "note", "jobs")
+TOP = ("c4", "project", "shot", "name", "due", "tree", "root", "read", "tracker", "for", "note", "policy", "jobs")
 JOB = ("tool", "frames", "with", "after", "due", "size", "needs", "pools", "preview", "check", "approve",
        "wait", "answers", "uses", "plan", "each", "over", "combine", "measure", "retries", "maxParallel",
-       "chunk", "order", "follows")
+       "chunk", "order", "follows", "policy")
 AFTER_HOW = ("frames", "all", "previous")
 
 KEY = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
@@ -113,7 +113,7 @@ def check(doc: Any) -> List[Dict[str, str]]:
             errs.append(error(base, f'"{key}" is not a job key', "lowercase letters, digits and -, starting with a letter"))
         stem = str(doc.get("name") or doc.get("shot") or "")
         if stem and len(f"{stem}-{key}-v000") > 63:
-            errs.append(error(base, f"{stem}-{key}-v001 is longer than a job's name may be (63 characters)",
+            errs.append(error(base, f'"{stem}-{key}-v001" is longer than a job\'s name may be (63 characters)',
                               "shorten the job's key, or set name: to a shorter stem"))
         if not isinstance(job, dict):
             errs.append(error(base, "a job is a map of fields", "give it at least tool:"))

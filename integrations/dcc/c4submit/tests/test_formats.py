@@ -178,3 +178,15 @@ def test_job_names_fit_a_label():
     assert [e["path"] for e in submission.check(doc)] == ["jobs.comp-" + "x" * 30]
     doc["name"] = "sm0140"
     assert submission.check(doc) == []
+
+
+SCHEMA_JSON = os.path.join(HERE, "..", "..", "..", "..", "schema", "submit-1.schema.json")
+
+
+@pytest.mark.skipif(not os.path.exists(SCHEMA_JSON), reason="the schema is not beside this checkout")
+def test_fields_are_the_schemas():
+    import json
+    with open(SCHEMA_JSON, encoding="utf-8") as f:
+        s = json.load(f)
+    assert list(submission.TOP) == list(s["properties"])
+    assert list(submission.JOB) == list(s["$defs"]["job"]["properties"])
