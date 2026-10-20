@@ -33,11 +33,13 @@ def same(a: str, b: str) -> bool:
 def relative(root: str, path: str) -> Optional[str]:
     """The path under root, slash-separated, or None when it is outside.
     Windows paths compare without case, as Windows does."""
-    r, p = norm(root).rstrip("/"), norm(path)
-    if not r:
+    if not root:
         return None
+    r, p = norm(root).rstrip("/"), norm(path).rstrip("/")
     fold = is_windows(r) or is_windows(p)
     rr, pp = (r.lower(), p.lower()) if fold else (r, p)
-    if rr == "" or not pp.startswith(rr + "/"):
+    if pp == rr:
+        return "."
+    if not pp.startswith(rr + "/"):
         return None
     return p[len(r) + 1:]

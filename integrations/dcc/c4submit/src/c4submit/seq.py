@@ -8,13 +8,13 @@ import os
 import re
 from typing import Iterable, List, Optional, Tuple
 
-from c4submit.paths import norm
+from c4submit.paths import is_windows, norm
 
 _FRAME = re.compile(
     r"(?P<hash>#+)"
     r"|%(?P<pct>0?\d*)d"
     r"|\$\{F(?P<brace>\d*)\}"
-    r"|\$F(?P<dollar>\d*)(?![A-Za-z_])"
+    r"|\$F(?P<dollar>\d*)(?![A-Za-z0-9_])"   # $F4_x is a variable named F4_x, not a frame
     r"|<F(?P<angle>\d*)>"
 )
 _TILE = re.compile(r"<UDIM>|<udim>|<UVTILE>|<uvtile>|%\(UDIM\)d|_MAPID_|<U>_<V>|<u>_<v>")
@@ -40,9 +40,8 @@ def _pad(m: "re.Match") -> int:
 
 def at_frame(path: str, frame: int) -> str:
     """The path of one frame of a sequence."""
-    def sub(m):
-        return ("-" if frame < 0 else "") + str(abs(frame)).zfill(_pad(m))
-    return _FRAME.sub(sub, path)
+    # As printf pads: the sign counts toward the width (-005 for %04d).
+    return _FRAME.sub(lambda m: "%0*d" % (_pad(m), frame), path)
 
 
 def _pieces(pattern: str):
@@ -91,7 +90,10 @@ def frame_of(pattern: str, path: str) -> Optional[int]:
 
 
 def matches(pattern: str, path: str) -> bool:
-    """Whether a file is one of the pattern's files."""
+    """Whether a file is one of the pattern's files. On Windows, glob joins
+    with backslashes, so both are compared in one spelling."""
+    if is_windows(pattern) or is_windows(path):
+        pattern, path = norm(pattern), norm(path)
     return bool(_regex(pattern).fullmatch(path))
 
 
@@ -123,5 +125,7 @@ def expand(path: str, frames: Optional[Iterable[int]] = None) -> Tuple[List[str]
 
 def canonical(path: str) -> str:
     """One spelling of a sequence path, so ``####``, ``%04d`` and ``$F4``
-    name the same files: tokens as ``<F4>``, slashes forward."""
-    return _FRAME.sub(lambda m: "<F%d>" % _pad(m), norm(path))
+    name the same files: tokens as ``<F4>`` (an unpadded ``#``, ``%d`` and
+    ``$F`` all as ``<F1>``), slashes forward, Windows paths in lower case."""
+    out = _FRAME.sub(lambda m: "<F%d>" % max(_pad(m), 1), norm(path))
+    return out.lower() if is_windows(path) else out

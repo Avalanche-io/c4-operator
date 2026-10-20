@@ -51,7 +51,7 @@ def test_frame_tokens(pattern):
 
 def test_unpadded_and_negative():
     assert seq.at_frame("x.$F.exr", 12) == "x.12.exr"
-    assert seq.at_frame("x.%04d.exr", -3) == "x.-0003.exr"
+    assert seq.at_frame("x.%04d.exr", -3) == "x.-003.exr"
     assert not seq.has_frames("$FOO/x.exr")
     assert seq.at_frame("$FOO/x.$F2.exr", 5) == "$FOO/x.05.exr"
 

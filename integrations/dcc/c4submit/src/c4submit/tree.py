@@ -122,7 +122,8 @@ class _Dir:
     def identify(self) -> Tuple[str, int]:
         """The directory's (ID, size), as its parent lists it."""
         files = sorted(self.files, key=natural_key)
-        dirs = sorted(self.dirs, key=natural_key)
+        # c4m sorts directory names with their trailing "/" ("a/" after "a1/").
+        dirs = sorted(self.dirs, key=lambda n: natural_key(n + "/"))
         lines = [self.files[n].line(n) for n in files]
         sums_null, total, nbytes = False, 0, 0
         for n in files:
@@ -182,6 +183,8 @@ class Tree:
         prev = self._files.get(path)
         if prev and (prev["id"] != cid or prev["size"] != size):
             raise ValueError(f"{path}: added twice with different contents")
+        if path in self._links:
+            raise ValueError(f"{path}: added as a link and as a file")
         self._parent(parts).files[parts[-1]] = _File(cid, size, exec_, None)
         entry = {"path": path, "id": cid, "size": size}
         if exec_:
@@ -191,6 +194,8 @@ class Tree:
     def add_link(self, path: str, target: str) -> None:
         parts = self._split(path)
         _check_name(target)
+        if path in self._files:
+            raise ValueError(f"{path}: added as a file and as a link")
         self._parent(parts).files[parts[-1]] = _File(None, -1, False, target)
         self._links[path] = target
 

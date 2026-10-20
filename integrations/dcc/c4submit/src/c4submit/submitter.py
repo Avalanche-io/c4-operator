@@ -183,7 +183,8 @@ class Draft:
             k = submission.job_key(self.stage, r.name, several)
             base, n = k, 2
             while k in out:
-                k, n = f"{base}-{n}", n + 1
+                sfx = f"-{n}"
+                k, n = base[:40 - len(sfx)].rstrip("-") + sfx, n + 1
             out[k] = r
         return out
 
@@ -347,7 +348,7 @@ class Submitter:
         """Names the tree, asks what the farm lacks and asks the farm to
         check the submission. Creates nothing."""
         col = prepared.collection
-        if not col.errors and col.files:
+        if not col.errors and col.files and col.tree is None:
             collectlib.identify(col, self.cache, progress=self._tick, cancelled=self.cancelled)
         doc = dict(prepared.doc)
         tree_id = col.tree_id() if col.tree is not None and len(col.tree) else ""
@@ -366,7 +367,7 @@ class Submitter:
         try:
             if project and col.files:
                 by_id = {f.id: f for f in col.files.values()}
-                out.missing = self.farm.missing(project, list(by_id))
+                out.missing = [i for i in self.farm.missing(project, list(by_id)) if i in by_id]
                 out.missing_bytes = sum(by_id[i].size for i in out.missing)
             elif not project:
                 out.warnings.append("no project is set, so the farm uses yours; what it lacks is counted when you submit")
@@ -406,8 +407,7 @@ class Submitter:
             self.farm.put_file(project, f.id, f.abs)
             with lock:
                 sent[0] += f.size
-                done = sent[0]
-            self._tick("upload", done, total)
+                self._tick("upload", sent[0], total)
 
         with ThreadPoolExecutor(max_workers=max(1, self.upload_workers)) as ex:
             list(ex.map(put, todo))

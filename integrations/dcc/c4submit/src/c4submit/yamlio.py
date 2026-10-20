@@ -13,7 +13,9 @@ from typing import Any
 
 _PLAIN = re.compile(r"^[A-Za-z0-9_./][A-Za-z0-9_./ :@+()-]*$")
 _RESERVED = {"", "~", "null", "true", "false", "yes", "no", "on", "off", "y", "n"}
-_NUMBER = re.compile(r"^[-+]?(\d[\d_]*)?(\.\d*)?([eE][-+]?\d+)?$|^0[xob]|^[-+]?\.(inf|nan)$", re.I)
+_NUMBER = re.compile(r"^[-+]?(\d[\d_]*)?(\.[\d_]*)?([eE][-+]?\d+)?$|^0[xob]|^[-+]?\.(inf|nan)$", re.I)
+# Characters a YAML reader refuses or changes raw; written as \u escapes.
+_UNSAFE = re.compile("[\x7f-\x9f\u2028\u2029\ufeff\ufffe\uffff\ud800-\udfff]")
 _INLINE_WIDTH = 72
 
 
@@ -22,19 +24,33 @@ def _scalar(v: Any) -> str:
         return "null"
     if isinstance(v, bool):
         return "true" if v else "false"
-    if isinstance(v, (int, float)):
-        return json.dumps(v)
+    if isinstance(v, float):
+        if v != v:
+            return ".nan"
+        if v in (float("inf"), float("-inf")):
+            return ".inf" if v > 0 else "-.inf"
+        s = repr(v)
+        if "e" in s and "." not in s.split("e")[0]:
+            m, e = s.split("e")
+            s = f"{m}.0e{e}"  # a YAML 1.1 float needs a dot
+        return s
+    if isinstance(v, int):
+        return str(v)
     s = str(v)
     if (_PLAIN.match(s) and s.lower() not in _RESERVED and not _NUMBER.match(s)
             and not s.endswith(" ") and ": " not in s and " #" not in s and not s.endswith(":")
-            and not re.match(r"^\d+:\d+|^\d{4}-\d\d?-\d\d?", s)):  # sexagesimal and dates in YAML 1.1
+            and not re.match(r"^[-+]?\d[\d_]*:\d|^\d{4}-\d\d?-\d\d?", s)):  # sexagesimal and dates in YAML 1.1
         return s
-    return json.dumps(s, ensure_ascii=False)
+    return _quote(s)
+
+
+def _quote(s: str) -> str:
+    return _UNSAFE.sub(lambda m: "\\u%04x" % ord(m.group(0)), json.dumps(s, ensure_ascii=False))
 
 
 def _key(k: Any) -> str:
     s = str(k)
-    return s if _PLAIN.match(s) and ":" not in s and s.lower() not in _RESERVED and not _NUMBER.match(s) else json.dumps(s)
+    return s if _PLAIN.match(s) and ":" not in s and s.lower() not in _RESERVED and not _NUMBER.match(s) else _quote(s)
 
 
 def _is_scalar(v: Any) -> bool:
@@ -48,7 +64,7 @@ def _inline(v: Any) -> str:
         return "[" + ", ".join(_inline(x) for x in v) + "]"
     s = _scalar(v)
     # Inside flow collections a plain scalar may not hold these.
-    return json.dumps(str(v), ensure_ascii=False) if not s.startswith('"') and re.search(r"[,\[\]{}]", s) else s
+    return _quote(str(v)) if not s.startswith('"') and re.search(r"[,\[\]{}]", s) else s
 
 
 def _flat(v: Any) -> bool:

@@ -57,8 +57,11 @@ class Farm:
 
     def _bearer(self) -> str:
         if self._token_file:
-            with open(self._token_file, encoding="utf-8") as f:
-                return f.read().strip()
+            try:
+                with open(self._token_file, encoding="utf-8") as f:
+                    return f.read().strip()
+            except OSError as e:
+                raise FarmError(0, f"cannot read the token file {self._token_file}: {e.strerror or e}") from None
         return self._token or ""
 
     def request(self, method: str, path: str, body: Any = None, data: Any = None, length: Optional[int] = None,
@@ -93,10 +96,21 @@ class Farm:
             raise FarmError(e.code, str(msg), parsed) from None
         except urllib.error.URLError as e:
             raise FarmError(0, f"cannot reach {self.base}: {e.reason}") from None
+        except OSError as e:  # a timeout, a reset connection
+            raise FarmError(0, f"lost the connection to {self.base}: {e}") from None
 
     def json(self, method: str, path: str, body: Any = None, query: Optional[dict] = None) -> Any:
         out = self.request(method, path, body=body, query=query)
-        return json.loads(out) if out else None
+        try:
+            return json.loads(out) if out else None
+        except ValueError:
+            raise FarmError(0, f"{self.base} answered {path} with something that is not the farm's JSON "
+                               "(a sign-in page in front of it?)") from None
+
+    def _field(self, out: Any, key: str, path: str) -> Any:
+        if not isinstance(out, dict) or key not in out:
+            raise FarmError(0, f"{self.base} answered {path} without {key!r}")
+        return out[key]
 
     # --- objects and views ----------------------------------------------
 
@@ -104,20 +118,26 @@ class Farm:
         """The IDs the project's store lacks, in the order given."""
         out: List[str] = []
         for i in range(0, len(ids), MISSING_BATCH):
-            out += self.json("POST", f"/objects/{q(project)}/missing", {"ids": ids[i:i + MISSING_BATCH]})["missing"]
+            path = f"/objects/{q(project)}/missing"
+            out += self._field(self.json("POST", path, {"ids": ids[i:i + MISSING_BATCH]}), "missing", path)
         return out
 
     def put_file(self, project: str, cid: str, path: str) -> dict:
         """Uploads one file's bytes, streamed from disk."""
-        size = os.path.getsize(path)
-        with open(path, "rb") as f:
+        try:
+            f = open(path, "rb")
+            size = os.fstat(f.fileno()).st_size
+        except OSError as e:
+            raise FarmError(0, f"cannot read {path}: {e.strerror or e}") from None
+        with f:
             out = self.request("PUT", f"/objects/{q(project)}/{cid}", data=f, length=size,
                                ctype="application/octet-stream")
         return json.loads(out) if out else {}
 
     def post_view(self, project: str, view: dict) -> str:
         """Records a tree of stored objects; returns its ID."""
-        return self.json("POST", f"/views/{q(project)}", view)["view"]
+        path = f"/views/{q(project)}"
+        return self._field(self.json("POST", path, view), "view", path)
 
     # --- what a submitter reads -------------------------------------------
 

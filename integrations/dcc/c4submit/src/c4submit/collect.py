@@ -150,9 +150,13 @@ def gather(root: str, scene_file: str, deps: Iterable[Dependency]) -> Collection
     else:
         add(scene_file, "scene")
     for d in deps:
-        frames = framelib.parse(d.frames) if d.frames and seq.has_frames(d.path) else None
-        found, missing = seq.expand(d.path, frames)
         who = d.node or d.path
+        try:
+            frames = framelib.parse(d.frames) if d.frames and seq.has_frames(d.path) else None
+        except framelib.FrameError as e:
+            col.problems.append(Problem("error", who, f"{d.path}: its frames {d.frames!r} do not read: {e}"))
+            continue
+        found, missing = seq.expand(d.path, frames)
         if not found:
             level = "warning" if d.optional else "error"
             col.problems.append(Problem(level, who, f"{d.path}: no such file" + ("s" if seq.has_frames(d.path) or seq.has_tiles(d.path) else ""),
@@ -191,8 +195,9 @@ def identify(col: Collection, cache: Optional[IDCache] = None, progress: Optiona
         finally:
             with lock:
                 done[0] += 1
-                if progress:
-                    progress("hash", done[0], total)
+                n = done[0]
+            if progress:
+                progress("hash", n, total)
 
     n = workers or min(8, (os.cpu_count() or 2))
     with ThreadPoolExecutor(max_workers=n) as ex:
