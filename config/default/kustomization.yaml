@@ -9,6 +9,7 @@ resources:
 - ../manager
 - ../node
 - ../regional
+- ../egress
 - ../webhook
 - ../policy
 - ../signing

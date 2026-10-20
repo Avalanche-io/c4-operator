@@ -36,6 +36,7 @@ commands:
   tree-id    print the view ID of a directory
   import-git import a git repository's first-parent history into a store
   mcp        serve the farm's tools to agents (MCP, stdio or HTTP)
+  egress-proxy  run the farm's egress proxy for units whose tool profile allows hosts
 `
 
 func main() {
@@ -45,13 +46,14 @@ func main() {
 	}
 	cmd, args := os.Args[1], os.Args[2:]
 	commands := map[string]func([]string) error{
-		"manager":    runManager,
-		"node":       runNode,
-		"regional":   runRegional,
-		"ingest":     runIngest,
-		"tree-id":    runTreeID,
-		"import-git": runImportGit,
-		"mcp":        runMCP,
+		"manager":      runManager,
+		"node":         runNode,
+		"regional":     runRegional,
+		"ingest":       runIngest,
+		"tree-id":      runTreeID,
+		"import-git":   runImportGit,
+		"mcp":          runMCP,
+		"egress-proxy": runEgressProxy,
 	}
 	run, ok := commands[cmd]
 	if !ok {

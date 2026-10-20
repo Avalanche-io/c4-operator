@@ -89,6 +89,10 @@ type Queue struct {
 	// pointers to each project's saved calibrations (persist.go). Empty,
 	// or without Stores, calibrations are not saved.
 	Namespace string
+	// EgressProxy is the farm's egress proxy, [<namespace>/]<service>:<port>
+	// (the operator's namespace by default): units whose tool profile
+	// allows hosts reach them through it (tools.go). Empty: none.
+	EgressProxy string
 	// cal holds live calibrations, shareHist the projects that share
 	// theirs (calibrate.go), calp their persistence (persist.go).
 	cal       calibrations
@@ -1333,7 +1337,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		v.mem.attempts[idx]++
 		pod := q.podFor(v, idx, v.mem.attempts[idx], p)
 		if tools != nil {
-			applyTools(pod, v.job.Name, tools)
+			applyTools(pod, v.job.Name, tools, q.proxyURL())
 		}
 		q.leaseOutside(ctx, pod, p.spec.Name)
 		if err := q.Client.Create(ctx, pod); err != nil {

@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
@@ -94,5 +96,58 @@ func TestToolProfiles(t *testing.T) {
 	}
 	if hasPod(t, ns, "tooled", 4) {
 		t.Fatal("ghost runs without its profile")
+	}
+}
+
+// A profile that allows hosts sends its units through the farm's egress
+// proxy: the policy allows the proxy and DNS, and the pod's HTTPS_PROXY
+// names it. Without a proxy such a unit waits.
+func TestToolProfileHostsGoThroughTheProxy(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	farmNS := ns + "-farm"
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
+		t.Fatal(err)
+	}
+	q.Namespace = farmNS
+	for _, o := range []client.Object{
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-egress"},
+			Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "egress"}, Ports: []corev1.ServicePort{{Port: 3128}}}},
+		&c4v1.ToolProfile{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "search"},
+			Spec: c4v1.ToolProfileSpec{Egress: []c4v1.ToolEgress{{Host: "api.search.example", Ports: []int32{443}}}}},
+	} {
+		if err := k8s.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := k8s.Create(ctx, job(ns, "hosts", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "lookup", "reasoning": {"does": "model", "tools": "search"}}]}`)
+	finishUnit(t, now, ns, "hosts", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	if hasPod(t, ns, "hosts", 1) {
+		t.Fatal("a unit with hosts ran with no egress proxy")
+	}
+	if c := meta.FindStatusCondition(get(t, ns, "hosts").Status.Conditions, "Tools"); c == nil || !strings.Contains(c.Message, "egress proxy") {
+		t.Fatalf("Tools condition %+v", c)
+	}
+	q.EgressProxy = "c4-egress:3128"
+	tick(t, q)
+	p := podOfUnit(t, ns, "hosts", 1)
+	want := "http://c4-egress." + farmNS + ".svc:3128"
+	if envOf(p.Spec.Containers[0], "HTTPS_PROXY") != want || envOf(p.Spec.Containers[0], "https_proxy") != want || envOf(p.Spec.Containers[0], "NO_PROXY") == "" {
+		t.Fatalf("lookup's env %v", p.Spec.Containers[0].Env)
+	}
+	var np networkingv1.NetworkPolicy
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "c4-tools-search"}, &np); err != nil {
+		t.Fatal(err)
+	}
+	e := np.Spec.Egress
+	if len(e) != 2 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "egress" ||
+		e[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != farmNS || e[0].Ports[0].Port.IntValue() != 3128 ||
+		e[1].Ports[0].Port.IntValue() != 53 {
+		t.Fatalf("policy %+v", np.Spec)
 	}
 }

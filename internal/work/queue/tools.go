@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -22,8 +23,11 @@ import (
 // queue finds the profile in the job's namespace, else in the operator's
 // (the farm's defaults), and before it releases the unit makes the view's
 // Materialization and the profile's NetworkPolicy in the job's namespace,
-// which selects the unit pods labelled with the profile. Units without a
-// profile run as before.
+// which selects the unit pods labelled with the profile. Address blocks and
+// cluster services are allowed directly; hosts only through the farm's
+// egress proxy (internal/egress, Queue.EgressProxy), which the policy allows
+// and the unit's HTTPS_PROXY and HTTP_PROXY name. Units without a profile
+// run as before.
 
 // ToolsMount is where a unit's tool profile view is mounted ($C4_TOOLS).
 const ToolsMount = "/etc/c4/tools"
@@ -34,6 +38,55 @@ func toolsName(job, profile string) string { return fmt.Sprintf("%s-tools-%s", j
 
 // toolsPolicyName is the NetworkPolicy of profile name in a namespace.
 func toolsPolicyName(profile string) string { return "c4-tools-" + profile }
+
+// hostRules reports whether a profile allows hosts, reached through the
+// egress proxy.
+func hostRules(p *c4v1.ToolProfile) bool {
+	for _, e := range p.Spec.Egress {
+		if e.Host != "" {
+			return true
+		}
+	}
+	return false
+}
+
+// egressProxy is the farm's egress proxy: its Service's namespace and
+// name, and its port.
+func (q *Queue) egressProxy() (ns, name string, port int32, err error) {
+	ref, ps, ok := strings.Cut(q.EgressProxy, ":")
+	n, perr := strconv.Atoi(ps)
+	if !ok || perr != nil || n <= 0 || n > 65535 || ref == "" {
+		return "", "", 0, fmt.Errorf("egress proxy %q: want [<namespace>/]<service>:<port>", q.EgressProxy)
+	}
+	ns, name, ok = strings.Cut(ref, "/")
+	if !ok {
+		ns, name = q.Namespace, ref
+	}
+	return ns, name, int32(n), nil
+}
+
+// proxyURL is the egress proxy's address for a unit's HTTPS_PROXY.
+func (q *Queue) proxyURL() string {
+	ns, name, port, err := q.egressProxy()
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("http://%s.%s.svc:%d", name, ns, port)
+}
+
+// servicePeer is the pods a cluster service selects, as a policy peer.
+func (q *Queue) servicePeer(ctx context.Context, ns, name string) (networkingv1.NetworkPolicyPeer, error) {
+	var svc corev1.Service
+	if err := q.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &svc); err != nil {
+		return networkingv1.NetworkPolicyPeer{}, fmt.Errorf("service %s/%s: %w", ns, name, err)
+	}
+	if len(svc.Spec.Selector) == 0 {
+		return networkingv1.NetworkPolicyPeer{}, fmt.Errorf("service %s/%s selects no pods", ns, name)
+	}
+	return networkingv1.NetworkPolicyPeer{
+		NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": ns}},
+		PodSelector:       &metav1.LabelSelector{MatchLabels: svc.Spec.Selector}}, nil
+}
 
 // toolProfile finds the profile a unit names: the job's namespace first,
 // then the operator's.
@@ -66,6 +119,9 @@ func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.ToolPro
 	if err != nil {
 		return nil, false, err.Error()
 	}
+	if hostRules(p) && q.EgressProxy == "" {
+		return nil, false, fmt.Sprintf("tool profile %s allows hosts, which need the farm's egress proxy (--egress-proxy)", name)
+	}
 	if p.Spec.View != "" {
 		ready, err := q.ensureMaterialization(ctx, v.job, toolsName(v.job.Name, name), p.Spec.View, "")
 		if err != nil {
@@ -81,8 +137,9 @@ func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.ToolPro
 	return p, true, ""
 }
 
-// toolsPolicy is profile p's NetworkPolicy in namespace ns: egress to what
-// it lists, and with any rule the cluster's DNS; nothing else.
+// toolsPolicy is profile p's NetworkPolicy in namespace ns: egress to the
+// address blocks and services it lists, to the egress proxy if it lists
+// hosts, and with any rule the cluster's DNS; nothing else.
 func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.ToolProfile) (*networkingv1.NetworkPolicy, error) {
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: toolsPolicyName(p.Name),
 		Labels: map[string]string{c4v1.LabelToolProfile: p.Name}},
@@ -95,6 +152,8 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.ToolProfile)
 	for _, e := range p.Spec.Egress {
 		var rule networkingv1.NetworkPolicyEgressRule
 		switch {
+		case e.Host != "":
+			continue // through the proxy, below
 		case e.CIDR != "":
 			rule.To = []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: e.CIDR}}}
 		case e.Service != "":
@@ -102,24 +161,32 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.ToolProfile)
 			if !ok {
 				return nil, fmt.Errorf("service %q: want <namespace>/<name>", e.Service)
 			}
-			var svc corev1.Service
-			if err := q.Client.Get(ctx, types.NamespacedName{Namespace: sns, Name: sname}, &svc); err != nil {
-				return nil, fmt.Errorf("service %s: %w", e.Service, err)
+			peer, err := q.servicePeer(ctx, sns, sname)
+			if err != nil {
+				return nil, err
 			}
-			if len(svc.Spec.Selector) == 0 {
-				return nil, fmt.Errorf("service %s selects no pods", e.Service)
-			}
-			rule.To = []networkingv1.NetworkPolicyPeer{{
-				NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": sns}},
-				PodSelector:       &metav1.LabelSelector{MatchLabels: svc.Spec.Selector}}}
+			rule.To = []networkingv1.NetworkPolicyPeer{peer}
 		default:
-			return nil, fmt.Errorf("an egress rule names no cidr or service")
+			return nil, fmt.Errorf("an egress rule names no host, cidr or service")
 		}
 		for _, port := range e.Ports {
 			pt := intstr.FromInt32(port)
 			rule.Ports = append(rule.Ports, networkingv1.NetworkPolicyPort{Protocol: &tcp, Port: &pt})
 		}
 		np.Spec.Egress = append(np.Spec.Egress, rule)
+	}
+	if hostRules(p) {
+		pns, pname, port, err := q.egressProxy()
+		if err != nil {
+			return nil, err
+		}
+		peer, err := q.servicePeer(ctx, pns, pname)
+		if err != nil {
+			return nil, fmt.Errorf("the egress proxy: %w", err)
+		}
+		pp := intstr.FromInt32(port)
+		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer},
+			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &pp}}})
 	}
 	if len(np.Spec.Egress) > 0 {
 		dns := intstr.FromInt32(53)
@@ -150,12 +217,25 @@ func (q *Queue) ensureToolsPolicy(ctx context.Context, ns string, p *c4v1.ToolPr
 }
 
 // applyTools gives unit pod pod of job its tool profile: the label its
-// NetworkPolicy selects, and the view mounted at $C4_TOOLS.
-func applyTools(pod *corev1.Pod, job string, p *c4v1.ToolProfile) {
+// NetworkPolicy selects, the view mounted at $C4_TOOLS, and for hosts the
+// egress proxy as its HTTPS_PROXY and HTTP_PROXY.
+func applyTools(pod *corev1.Pod, job string, p *c4v1.ToolProfile, proxy string) {
 	if pod.Labels == nil {
 		pod.Labels = map[string]string{}
 	}
 	pod.Labels[c4v1.LabelToolProfile] = p.Name
+	if hostRules(p) && proxy != "" {
+		env := []corev1.EnvVar{}
+		for _, k := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
+			env = append(env, corev1.EnvVar{Name: k, Value: proxy})
+		}
+		for _, k := range []string{"NO_PROXY", "no_proxy"} {
+			env = append(env, corev1.EnvVar{Name: k, Value: "localhost,127.0.0.1,.svc,.cluster.local"})
+		}
+		for c := range pod.Spec.Containers {
+			pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, env...)
+		}
+	}
 	if p.Spec.View == "" {
 		return
 	}

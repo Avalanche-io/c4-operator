@@ -1497,9 +1497,18 @@ and a sweep planner that spawns trials are all generators.
       skills, plugins), a view's C4 ID, mounted read-only at
       `/etc/c4/tools` (`$C4_TOOLS`). The unit's record names it, so a
       unit's record says exactly what it ran with.
-    - **`egress`** is what the unit may reach: address blocks
+    - **`egress`** is what the unit may reach: hosts (`{host, ports?}`,
+      a name or `*.domain` for the names under it), address blocks
       (`{cidr, ports?}`) and cluster services (`{service:
-      <namespace>/<name>, ports?}`). The queue writes the profile's
+      <namespace>/<name>, ports?}`). Hosts go through the farm's egress
+      proxy (`c4-operator egress-proxy`, config/egress; the manager's
+      `--egress-proxy`). The unit's `HTTPS_PROXY` and `HTTP_PROXY` name
+      the proxy, and its policy allows the proxy rather than the hosts.
+      The proxy knows the unit by its pod's address, lets a request
+      through (CONNECT or plain HTTP) only to a host the unit's profile
+      lists, and logs each one it passes or refuses against the job and
+      the unit. It works on any CNI. The fields stay neutral, so a
+      Cilium `toFQDNs` backend could serve them instead. The queue writes the profile's
       NetworkPolicy in the job's namespace (`c4-tools-<profile>`), which
       selects the unit pods labelled `c4.avalanche.io/tool-profile` and
       allows those, plus DNS when there is any rule. A profile with no

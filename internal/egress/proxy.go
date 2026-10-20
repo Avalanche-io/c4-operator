@@ -98,6 +98,15 @@ func target(r *http.Request) (string, int) {
 }
 
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodConnect && r.URL.Host == "" {
+		// Not a proxy request: the readiness probe, or a mistake.
+		if r.URL.Path == "/healthz" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		http.Error(w, "egress: a proxy request names its host", http.StatusBadRequest)
+		return
+	}
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		ip = r.RemoteAddr
