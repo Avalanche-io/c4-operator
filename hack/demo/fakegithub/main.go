@@ -21,6 +21,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -203,7 +204,25 @@ func (d *demo) snapshot() view {
 
 func (d *demo) state(w http.ResponseWriter, _ *http.Request) { reply(w, d.snapshot()) }
 
+// The little markdown c4-sync writes, shown as GitHub shows it: HTML
+// comments (its idempotency keys) hidden; bold, code and links rendered.
+var (
+	mdComment = regexp.MustCompile(`(?s)<!--.*?-->`)
+	mdBold    = regexp.MustCompile(`\*\*([^*]+)\*\*`)
+	mdCode    = regexp.MustCompile("`([^`]+)`")
+	mdLink    = regexp.MustCompile(`\[([^\]]+)\]\((https?://[^)\s]+)\)`)
+)
+
+func markdown(s string) template.HTML {
+	s = template.HTMLEscapeString(strings.TrimSpace(mdComment.ReplaceAllString(s, "")))
+	s = mdBold.ReplaceAllString(s, "<b>$1</b>")
+	s = mdCode.ReplaceAllString(s, "<code>$1</code>")
+	s = mdLink.ReplaceAllString(s, `<a href="$2">$1</a>`)
+	return template.HTML(s)
+}
+
 var pageT = template.Must(template.New("p").Funcs(template.FuncMap{
+	"md": markdown,
 	"concl": func(c *string) string {
 		if c == nil {
 			return ""
@@ -236,15 +255,15 @@ code{font-size:12px} table{border-collapse:collapse;width:100%} td,th{text-align
 <div class=sub>A fake GitHub (a test double from GitHub's published REST shapes, not GitHub), for the C4 agent-work demo. The agent here is a script.</div>
 {{with .Issue}}<div class=card><b>#{{.Number}} {{.Title}}</b> <span class=label>{{range .Labels}}{{.Name}} {{end}}</span>
 <div class=sub>{{.State}} · opened by {{.User.Login}}{{with .Milestone}} · milestone {{.Title}}, due {{due .DueOn}}{{end}}</div>
-{{end}}{{range .Comments}}<div class=c><span class=who>{{.User.Login}}</span>: {{.Body}}</div>{{end}}{{if .Issue}}</div>{{end}}
+{{end}}{{range .Comments}}<div class=c><span class=who>{{.User.Login}}</span>: {{md .Body}}</div>{{end}}{{if .Issue}}</div>{{end}}
 {{range .Pulls}}<div class=card><b>PR #{{.Number}} {{.Title}}</b> <span class=sub>head <code>{{short .Head.SHA}}</code> · by {{.User.Login}}</span>
-<div class=c>{{.Body}}</div>
+<div class=c>{{md .Body}}</div>
 <table><tr><th>check</th><th>status</th><th>conclusion</th><th>title</th></tr>
 {{range .Checks}}<tr><td>{{.Name}}</td><td>{{.Status}}</td><td class="st {{if eq (concl .Conclusion) "success"}}ok{{else if eq (concl .Conclusion) ""}}run{{else}}bad{{end}}">{{concl .Conclusion}}</td><td>{{.Output.Title}}</td></tr>{{end}}
 {{range .Statuses}}<tr><td>{{.Context}}</td><td>status</td><td>{{.State}}</td><td>{{.Description}}</td></tr>{{end}}
 </table>
-{{range .Reviews}}<div class=c><span class=who>{{.User.Login}}</span> <span class="st {{if eq .State "APPROVED"}}ok{{else}}bad{{end}}">{{.State}}</span>: {{.Body}}</div>{{end}}
-{{range .Comments}}<div class=c><span class=who>{{.User.Login}}</span>: {{.Body}}</div>{{end}}
+{{range .Reviews}}<div class=c><span class=who>{{.User.Login}}</span> <span class="st {{if eq .State "APPROVED"}}ok{{else}}bad{{end}}">{{.State}}</span>: {{md .Body}}</div>{{end}}
+{{range .Comments}}<div class=c><span class=who>{{.User.Login}}</span>: {{md .Body}}</div>{{end}}
 </div>{{end}}
 `))
 
