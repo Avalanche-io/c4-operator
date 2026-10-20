@@ -119,7 +119,7 @@ func (f *Farm) Decide(_ context.Context, j farm.JobRef, r farm.Relay) error {
 		return fmt.Errorf("do: one of %v, or fail", w.Choices)
 	}
 	now := f.Now()
-	w.Do, w.Note, w.Actor, w.At = r.Do, farm.RelayNote(r, ""), "agent/c4-sync", &now
+	w.Do, w.Note, w.Actor, w.At = r.Do, r.Note, r.Person+" via tracker "+r.Tracker+" ("+r.By+")", &now
 	f.Relays = append(f.Relays, r)
 	// As the queue does: with no open wait left, nobody is needed.
 	open := false

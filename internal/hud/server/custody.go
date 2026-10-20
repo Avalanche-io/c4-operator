@@ -43,6 +43,15 @@ type controlPredicate struct {
 	Action        string `json:"action"`
 	Target        string `json:"target"`
 	Change        any    `json:"change"`
+	// Custody is how the decision reached the HUD (decide only): direct
+	// (the person signed in), relayed (a tracker's sync read it from a
+	// named tracker, by a person its people map names) or
+	// relayed-unattributed (by a party the tracker names, no person;
+	// integrations GAPS 3 and 16).
+	Custody string `json:"custody,omitempty"`
+	// Relay is where a relayed decision came from: the tracker, the
+	// entity, the tracker user, the C4 person and the evidence's C4 ID.
+	Relay any `json:"relay,omitempty"`
 }
 
 // via names the client: the MCP server says so in X-C4-Client; anything
@@ -101,11 +110,14 @@ func (s *Server) signControl(ctx context.Context, projects []string, subject pro
 // controlJob signs the record of an action on a job and adds it to the
 // job's annotation. j is the job as it will be written; before is its
 // spec digest before the change.
-func (s *Server) controlJob(ctx context.Context, r *http.Request, v *api.Viewer, rec *jobRec, j *c4v1.WorkJob, before, action string, change any) (string, error) {
+func (s *Server) controlJob(ctx context.Context, r *http.Request, v *api.Viewer, rec *jobRec, j *c4v1.WorkJob, before, action string, change any, opts ...func(*controlPredicate)) (string, error) {
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
 		Authorization: s.authorization("patch", "workjobs", j.Namespace, j.Name),
 		Action:        action, Target: "workjob:" + j.Namespace + "/" + j.Name,
 		Change: map[string]any{"request": change, "specBefore": before, "specAfter": queue.SpecDigest(j)}}
+	for _, o := range opts {
+		o(&pred)
+	}
 	subject := provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}
 	id, err := s.signControl(ctx, []string{rec.project}, subject, pred)
 	if err != nil || id == "" {

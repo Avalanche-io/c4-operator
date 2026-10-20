@@ -633,6 +633,10 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 			View string `json:"view"`
 			Text string `json:"text"`
 		} `json:"reply"`
+		// Via is a decision a tracker's sync relays: made in the tracker,
+		// by a tracker user its Tracker's people map names (integrations
+		// GAPS 3).
+		Via *api.Relay `json:"via"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		fail(w, http.StatusBadRequest, "body: %v", err)
@@ -673,6 +677,20 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	if err := s.authorize(ctx, r, v, rec.job.Namespace, "patch", "workjobs", rec.job.Name); err != nil {
 		fail(w, http.StatusForbidden, "%v", err)
 		return
+	}
+	custody, actor := CustodyDirect, actorOf(r, v)
+	if body.Via != nil {
+		grade, who, err := s.relayed(ctx, v, rec, wait, body.Via)
+		if err != nil {
+			var ge *errGrant
+			code := http.StatusForbidden
+			if errors.As(err, &ge) {
+				code = ge.code
+			}
+			fail(w, code, "via: %v", err)
+			return
+		}
+		custody, actor = grade, who
 	}
 	reply := ""
 	switch {
@@ -722,7 +740,16 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		// The signed decision names its reply.
 		change["reply"] = reply
 	}
-	id, err := s.controlJob(ctx, r, v, rec, j, before, "decide", change)
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "decide", change, func(p *controlPredicate) {
+		p.Custody = custody
+		if body.Via != nil {
+			// The decider is the tracker's person; who relayed it, and how
+			// the relay authenticated, is the rest of the record.
+			p.Actor = actor
+			p.Authenticated = "relayed by " + v.User + " (" + s.authenticatedBy(r) + ")"
+			p.Relay = body.Via
+		}
+	})
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
 		return
@@ -730,7 +757,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	var reqs []c4v1.WorkDecideRequest
 	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationDecide]), &reqs)
 	reqs = append(reqs, c4v1.WorkDecideRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Do: body.Do,
-		Note: body.Note, Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id, View: reply})
+		Note: body.Note, Actor: actor, At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id, View: reply})
 	if len(reqs) > 16 {
 		reqs = reqs[len(reqs)-16:]
 	}
@@ -748,7 +775,10 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	if via(r) == "mcp" {
 		note += "; via MCP"
 	}
-	s.record(ctx, j, "WorkJob", v.User, "Decided", note, bookNote{actor: actorOf(r, v), kind: "decide", record: id})
+	if body.Via != nil {
+		note += fmt.Sprintf("; relayed from tracker %s (%s, by @%s, %s)", body.Via.Tracker, body.Via.Source, body.Via.By, custody)
+	}
+	s.record(ctx, j, "WorkJob", v.User, "Decided", note, bookNote{actor: actor, kind: "decide", record: id})
 	m := s.current()
 	rec2 := *rec
 	rec2.job = *j

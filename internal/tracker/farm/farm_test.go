@@ -150,8 +150,11 @@ func TestDecideStoresEvidenceAndRelays(t *testing.T) {
 	if !bytes.Equal(h.objects[id], ev) {
 		t.Fatal("evidence not stored under its C4 ID")
 	}
-	note, _ := h.decided[0]["note"].(string)
-	if h.decided[0]["do"] != "rework" || !strings.HasPrefix(note, "assert the order") || !strings.Contains(note, "Relayed from github Review/12#5 by @dana (dana); evidence "+id) {
+	// The note is the decider's own text; where it came from is `via`,
+	// which the HUD checks and signs (GAPS 3).
+	via, _ := h.decided[0]["via"].(map[string]any)
+	if h.decided[0]["do"] != "rework" || h.decided[0]["note"] != "assert the order" || via["tracker"] != "github" ||
+		via["source"] != "Review/12#5" || via["by"] != "dana" || via["person"] != "dana" || via["evidence"] != id {
 		t.Fatalf("decide body: %v", h.decided[0])
 	}
 	err = f.Decide(context.Background(), farm.JobRef{Namespace: "work", Name: "gh-7"}, farm.Relay{Unit: "other", Do: "approve"})

@@ -166,9 +166,11 @@ See integrations/mlflow-c4/README.md.
 
 - Experimental API. The jobs c4-sync submits carry their tracker
   entity (`c4.avalanche.io/tracker-ref`) and the version they follow
-  (`spec.follows`), both in their records. A relayed decision's custody
-  (who decided, in which tracker) is not a field of the decision record
-  yet (proposals/integrations GAPS 3), so its facts are in its note.
+  (`spec.follows`), both in their records. A decision relayed from a
+  tracker is signed as `relayed` (or `relayed-unattributed`, by a party
+  such as a model registry), naming the tracker, the entity, the tracker
+  user and the stored evidence; the HUD checks it against the Tracker's
+  `people`.
 - One c4-sync replica: there is no leader election yet.
 - Tracker request limits are those each vendor publishes (GitHub's), or a
   conservative default (`rate`) where none are published (Flow).

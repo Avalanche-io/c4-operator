@@ -230,8 +230,9 @@ func (h *HUD) SetDeadline(ctx context.Context, j JobRef, at time.Time) error {
 }
 
 // Decide stores the evidence in the project's store and relays the
-// decision. Until the HUD takes `via` (GAPS 3), the relay's facts go in
-// the note, so the signed control record still carries them.
+// decision with `via` (GAPS 3): the HUD checks the tracker, its people map
+// and the wait, and signs the decision as relayed by c4-sync. The note is
+// the decider's own text.
 func (h *HUD) Decide(ctx context.Context, j JobRef, r Relay) error {
 	evidence := ""
 	if len(r.Evidence) > 0 && r.Project != "" {
@@ -242,9 +243,10 @@ func (h *HUD) Decide(ctx context.Context, j JobRef, r Relay) error {
 		}
 		evidence = id.String()
 	}
-	body := map[string]any{"unit": r.Unit, "do": r.Do, "note": RelayNote(r, evidence)}
+	body := map[string]any{"unit": r.Unit, "do": r.Do, "note": r.Note,
+		"via": api.Relay{Tracker: r.Tracker, Source: r.Source, By: strings.TrimPrefix(r.By, "@"), Person: r.Person, Evidence: evidence}}
 	if r.Reply && r.Do != "fail" {
-		body["reply"] = map[string]string{"text": RelayNote(r, evidence)}
+		body["reply"] = map[string]string{"text": r.Note}
 	}
 	err := h.doJSON(ctx, http.MethodPost, jobPath(j)+"/decide", body, nil)
 	var ae *APIError
@@ -252,25 +254,6 @@ func (h *HUD) Decide(ctx context.Context, j JobRef, r Relay) error {
 		return fmt.Errorf("%w: %s", ErrNotOpen, ae.Msg)
 	}
 	return err
-}
-
-// RelayNote is the decision's note with the relay's facts: who decided,
-// where, and the evidence's C4 ID.
-func RelayNote(r Relay, evidence string) string {
-	var b strings.Builder
-	b.WriteString(strings.TrimSpace(r.Note))
-	if b.Len() > 0 {
-		b.WriteString("\n\n")
-	}
-	fmt.Fprintf(&b, "Relayed from %s %s by %s", r.Tracker, r.Source, r.By)
-	if r.Person != "" {
-		fmt.Fprintf(&b, " (%s)", r.Person)
-	}
-	if evidence != "" {
-		fmt.Fprintf(&b, "; evidence %s", evidence)
-	}
-	b.WriteString(".")
-	return b.String()
 }
 
 // StoreView puts each file's bytes in the project's store, then records
