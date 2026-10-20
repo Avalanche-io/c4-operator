@@ -102,6 +102,10 @@ const (
 	// WorkDecideRequest; the queue carries out each once, in token order
 	// (status.decided), and records it in status.waits.
 	AnnotationDecide = "c4.avalanche.io/decide"
+	// AnnotationReplaces on a real WorkJob names the forecast job in its
+	// namespace it replaced (integrations GAPS 9). The HUD deletes that
+	// forecast when it submits the job, and again until it is gone.
+	AnnotationReplaces = "c4.avalanche.io/replaces"
 	// AnnotationSteer on a WorkJob carries messages people send to its
 	// units while they run, without ending them: a JSON list of
 	// WorkSteerRequest. The queue carries out each once, in token order

@@ -97,6 +97,9 @@ type Server struct {
 	// marks are each job's highest done and delivered shares (work.go).
 	marks     map[string]progressMark
 	keysUntil time.Time
+	// retire is when to try again to delete each replaced forecast a
+	// failed delete left (replace.go); only Start's loop touches it.
+	retire map[string]retireTry
 }
 
 // Queue is what the HUD asks the work queue (*queue.Queue).
@@ -169,6 +172,7 @@ func (s *Server) Start(ctx context.Context) error {
 		if err := s.collect(ctx); err != nil && ctx.Err() == nil {
 			s.Log.Error(err, "collect")
 		}
+		s.sweepReplaced(ctx, time.Now())
 		select {
 		case <-ctx.Done():
 			return nil

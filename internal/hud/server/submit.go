@@ -653,6 +653,9 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			Annotations: map[string]string{c4v1.AnnotationOwner: v.User, c4v1.AnnotationSubmittedVia: submittedVia(r)}},
 		Spec: spec,
 	}
+	if replaced != nil {
+		job.Annotations[c4v1.AnnotationReplaces] = replaced.Name
+	}
 	if body.Shot != "" {
 		if errs := validation.IsValidLabelValue(body.Shot); len(errs) > 0 {
 			fail(w, http.StatusBadRequest, "shot %q: %s", body.Shot, strings.Join(errs, "; "))
@@ -766,12 +769,11 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	s.record(ctx, job, "WorkJob", v.User, "Submitted", note, bookNote{actor: actorOf(r, v), kind: "submit"})
 	if replaced != nil {
-		// The forecast's work is this job now (GAPS 9).
-		if err := s.Client.Delete(ctx, replaced); err != nil && !apierrors.IsNotFound(err) {
-			s.Log.Error(err, "delete the replaced forecast", "job", ns+"/"+replaced.Name)
-		} else {
-			s.record(ctx, replaced, "WorkJob", v.User, "Replaced", fmt.Sprintf("%s: replaced by %s", replaced.Name, name),
-				bookNote{actor: actorOf(r, v), kind: "replaced"})
+		// The forecast's work is this job now (GAPS 9). A delete that
+		// fails here is tried again until the forecast is gone
+		// (sweepReplaced): the job names it.
+		if err := s.retireForecast(ctx, replaced, name, v.User, actorOf(r, v)); err != nil {
+			s.Log.Error(err, "delete the replaced forecast; will try again", "job", ns+"/"+replaced.Name)
 		}
 	}
 	out.Message = msg

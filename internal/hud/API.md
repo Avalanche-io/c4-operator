@@ -788,7 +788,9 @@ revoked or has ended, or it does not cover the job's pools or class;
 `400` without `trackerRef`; `501` on a farm without grants installed.
 `replaces` names a forecast job (`spec.forecast`) in the namespace that
 this real job replaces: once the job is made, the forecast is deleted and
-booked (kind `replaced`). Only a forecast is replaced, and only by a real
+booked (kind `replaced`). The job carries `c4.avalanche.io/replaces`; a
+delete that fails is tried again, with backoff, until the forecast is
+gone (a forecast made after the job is left alone). Only a forecast is replaced, and only by a real
 job (`400` otherwise). A forecast is submitted with no container, since
 it never runs.
 
