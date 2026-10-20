@@ -82,3 +82,15 @@ def test_expand_tiles_and_glob_characters(tmp_path):
             write(str(tmp_path / f"anim/t.{tile}.{f:04d}.tx"))
     found, missing = seq.expand(str(tmp_path / "anim/t.<UDIM>.####.tx"), [1, 2, 3])
     assert len(found) == 4 and missing == [3]
+
+
+def test_maya_and_zbrush_tokens(tmp_path):
+    assert seq.at_frame("r/beauty.<f>.exr", 7) == "r/beauty.7.exr"
+    assert seq.canonical("r/beauty.<f4>.exr") == seq.canonical("r/beauty.####.exr")
+    for u, v in ((0, 0), (1, 0), (0, 1)):
+        write(str(tmp_path / f"tex/skin_u{u}_v{v}.exr"))
+    write(str(tmp_path / "tex/skin_notes.txt"))
+    found, _ = seq.expand(str(tmp_path / "tex/skin_u<U>_v<V>.exr"))
+    assert len(found) == 3
+    write(str(tmp_path / "tex/arnold.1001.tx"))
+    assert len(seq.expand(str(tmp_path / "tex/arnold.<tile>.tx"))[0]) == 1

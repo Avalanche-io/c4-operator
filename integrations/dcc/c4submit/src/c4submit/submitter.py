@@ -118,10 +118,11 @@ class Draft:
         """Re-read the scene: its file, range, renderables and every derived field."""
         h = self.host
         self.scene_file = h.scene_file()
-        self.scene_frames = h.frames()
+        frames, renderables = h.read()
+        self.scene_frames = frames
         old = {r.name: r for r in getattr(self, "renderables", [])}
         ticked = getattr(self, "ticked", None)
-        self.renderables: List[Renderable] = h.renderables()
+        self.renderables: List[Renderable] = renderables
         if ticked is None:
             self.ticked = [r.name for r in self.renderables if r.enabled]
         else:
@@ -178,10 +179,13 @@ class Draft:
     # --- jobs -----------------------------------------------------------
 
     def tick(self, name: str, on: bool = True) -> None:
+        """Ticks a renderable on or off; fields taken from the renderables
+        follow at once (no host call)."""
         if on and name not in self.ticked:
             self.ticked.append(name)
         elif not on and name in self.ticked:
             self.ticked.remove(name)
+        self.form.refresh(self._derive)
 
     def picked(self) -> List[Renderable]:
         return [r for r in self.renderables if r.name in self.ticked]
@@ -319,7 +323,9 @@ def prepare(draft: Draft) -> Prepared:
     # into fields; not what a job in this submission writes for another.
     deps = []
     for d in list(host.dependencies()) + extra:
-        if d.renderables is not None and picked_names and not (set(d.renderables) & picked_names):
+        # None: no one knows which renderables read it, so it goes with every
+        # job. A list (even empty) names them, so it goes only with those ticked.
+        if d.renderables is not None and draft.per_renderable and not (set(d.renderables) & picked_names):
             continue
         if seq.canonical(d.path) in outputs:
             continue

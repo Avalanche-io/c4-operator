@@ -317,3 +317,23 @@ def test_keys_fit_the_job_name_under_a_long_shot(tmp_path):
     doc = {"c4": "submit/1", "shot": d.shot, "jobs": {k: {"tool": "nuke-comp"} for k in keys}}
     from c4submit import submission
     assert submission.check(doc) == []
+
+
+def test_ticking_moves_the_derived_field_and_the_files(tmp_path, farm):
+    host = comp_scene(tmp_path)
+    nobody = write(os.path.join(str(tmp_path), "luts", "unused.cube"))
+    host._deps.append(Dependency(nobody, node="Unused1", renderables=[]))
+    d = draft_for(host, farm)
+    assert d.form.field("write").value == "Write_bg"
+    d.tick("Write_bg", False)
+    assert d.form.field("write").value == "Write_main", "follows the tick without a refresh"
+    col = prepare(d).collection
+    assert "luts/unused.cube" not in col.files, "renderables=[] means no job reads it"
+
+
+def test_a_host_reads_range_and_renderables_together(tmp_path, farm):
+    host = comp_scene(tmp_path)
+    calls = []
+    host.read = lambda: calls.append(1) or ("1-10", [Renderable("Write_x")])
+    d = draft_for(host, farm)
+    assert calls == [1] and d.scene_frames == "1-10" and [r.name for r in d.renderables] == ["Write_x"]

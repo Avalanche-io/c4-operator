@@ -1,7 +1,9 @@
 """File paths that stand for sequences and tiles, in the spellings DCCs
-write them: frames as ``####``, ``%04d``, ``$F4``, ``${F4}`` or ``<F4>``,
-and texture tiles as ``<UDIM>``, ``<UVTILE>``, ``%(UDIM)d``, ``_MAPID_`` or
-``<U>_<V>``. A front end expands them to the files on disk a job reads."""
+write them: frames as ``####``, ``%04d``, ``$F4``, ``${F4}``, ``<F4>`` or
+Maya's ``<f>``, and texture tiles as ``<UDIM>``, ``<UVTILE>``, Arnold's
+``<tile>``, ``%(UDIM)d``, ``_MAPID_``, or ``<U>`` and ``<V>`` apart (ZBrush's
+``_u<U>_v<V>``, Mudbox's ``_u<u>_v<v>``). A front end expands them to the
+files on disk a job reads."""
 
 import glob
 import os
@@ -15,9 +17,9 @@ _FRAME = re.compile(
     r"|%(?P<pct>0?\d*)d"
     r"|\$\{F(?P<brace>\d*)\}"
     r"|\$F(?P<dollar>\d*)(?![A-Za-z0-9_])"   # $F4_x is a variable named F4_x, not a frame
-    r"|<F(?P<angle>\d*)>"
+    r"|<[Ff](?P<angle>\d*)>"
 )
-_TILE = re.compile(r"<UDIM>|<udim>|<UVTILE>|<uvtile>|%\(UDIM\)d|_MAPID_|<U>_<V>|<u>_<v>")
+_TILE = re.compile(r"<UDIM>|<udim>|<UVTILE>|<uvtile>|<tile>|%\(UDIM\)d|_MAPID_|<[Uu]>|<[Vv]>")
 
 
 def has_frames(path: str) -> bool:

@@ -10,7 +10,7 @@ uploads and the farm's answers can run on a worker thread.
 import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Mapping, Optional
+from typing import List, Mapping, Optional, Tuple
 
 
 @dataclass
@@ -33,7 +33,7 @@ class Dependency:
     path: str                          # absolute; may hold frame or tile tokens
     frames: Optional[str] = None       # the frames it is read over, when it is a sequence
     node: str = ""                     # who reads it, for messages
-    renderables: Optional[List[str]] = None   # the renderables that read it; None means every one
+    renderables: Optional[List[str]] = None   # the renderables that read it ([] none of them); None, not known
     optional: bool = False             # missing is a warning, not an error
 
 
@@ -72,6 +72,12 @@ class Host:
 
     def renderables(self) -> List[Renderable]:
         return []
+
+    def read(self) -> Tuple[str, List[Renderable]]:
+        """The scene's frame range and its renderables, read together.
+        A host whose reading is costly (Maya switches render layers to read
+        their overrides) answers both from one pass."""
+        return self.frames(), self.renderables()
 
     def selection(self) -> List[str]:
         """Files the selected nodes read (a Nuke Read's file), absolute."""
