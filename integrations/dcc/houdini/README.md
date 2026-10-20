@@ -29,6 +29,7 @@ Both are drawn from the farm's tool definitions (TOOL.md section 6) and use
    | `C4_PROJECT`                        | the farm project, such as `saltmarsh`                                                              |
    | `C4_ROOT`                           | the folder on this machine that the farm sees as the project's top, such as `/show`                |
    | `C4_SHOT` or `C4_SHOT_PATTERN`      | the shot, or a regular expression with a `shot` group matched against the hip file's path          |
+   | `C4_TOOL_PATH`                      | folders of tool folders, offered when the farm does not list tools yet (draw the form, save files) |
 
 3. Optional: build the HDAs once, with a Houdini licence:
    `hython integrations/dcc/houdini/python/c4_houdini/build_hdas.py`
@@ -66,6 +67,10 @@ The C4 Render node also has **Stage file** (where the stage is written,
    **Needed by**. Press **Submit** to go ahead, **Show file** to see the
    submission, or **Cancel**.
 4. Uploads only the files the farm lacks, then submits.
+
+A check holds until the node, the scene's saved file or the hip file
+changes: Submit, Show file and Save file reuse it, and check again
+otherwise.
 
 **Save file** writes the same submission as a file for
 `c4 farm submit FILE`. Every file must be under `C4_ROOT`; the summary

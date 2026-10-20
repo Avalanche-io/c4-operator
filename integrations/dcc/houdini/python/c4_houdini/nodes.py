@@ -34,7 +34,7 @@ import hou
 
 from c4submit import summary as summarylib
 from c4submit.collect import Cancelled, IDCache
-from c4submit.farm import Farm, FarmError
+from c4submit.farm import Farm, FarmError, NotOnFarm
 from c4submit.form import Field
 from c4submit.submitter import Checked, Draft, Submitted, Submitter, default_filename, prepare, save
 from c4submit.tool import Tool
@@ -359,6 +359,8 @@ class Panel:
         except FarmError as e:
             self.tools, self.project_info = [], None
             self.problem = e.message
+            if isinstance(e, NotOnFarm):
+                self.problem += "; set C4_TOOL_PATH to the studio's tool folders to draw the form and save the file"
         if not project:
             self.problem = "which farm project is this for? Fill in Project, or set C4_PROJECT"
         elif not self.tools and not self.problem:
@@ -571,10 +573,28 @@ class Panel:
         say(self.node, summarylib.text(checked))
         return checked
 
+    def stale(self) -> bool:
+        """Whether the last check no longer shows what Submit would send:
+        there is none, the node or the saved scene changed since
+        (``Draft.signature``), or the hip file has unsaved changes (C4 Submit
+        would save it first; for C4 Render the network may no longer match
+        the stage file written)."""
+        c = self.checked
+        if c is None or self.draft is None or c.prepared.draft is not self.draft:
+            return True
+        if hou.hipFile.hasUnsavedChanges():
+            return True
+        self.read()
+        return c.stale()
+
+    def current(self) -> Optional[Checked]:
+        """The last check while it still holds, else a new one."""
+        return self.checked if not self.stale() else self.check()
+
     def submit(self) -> Optional[Submitted]:
         """Checks, shows the summary with Submit, Show file and Cancel, and
-        submits when asked."""
-        checked = self.check()
+        submits when asked. A check that still holds is not repeated."""
+        checked = self.current()
         if checked is None:
             return None
         text = summarylib.text(checked)
@@ -615,7 +635,7 @@ class Panel:
 
     def show_file(self, checked: Optional[Checked] = None) -> Optional[str]:
         """Shows the submission as a file."""
-        checked = checked or self.check()
+        checked = checked or self.current()
         if checked is None:
             return None
         text = checked.yaml()
@@ -626,9 +646,9 @@ class Panel:
         return text
 
     def save_file(self, path: Optional[str] = None) -> Optional[str]:
-        """Checks, then saves the submission where the artist picks
+        """Checks unless the last check holds, then saves the submission where the artist picks
         (``$HIP/<shot>-<job>.yaml`` by default)."""
-        checked = self.check()
+        checked = self.current()
         if checked is None:
             return None
         default = os.path.join(hou.expandString("$HIP"), default_filename(checked))
@@ -716,7 +736,7 @@ def menu(node, which: str) -> List[str]:
     if which == "tool":
         items = [(t.name, t.title) for t in panel.tools]
     elif which == "due":
-        items = [(c["value"], c["label"]) for c in Submitter().due_choices(panel.project_info)]
+        items = [(c["value"], c["label"]) for c in Submitter.due_choices(panel.project_info)]
     elif which == "renderables":
         rs = d.renderables if d is not None else panel.host.renderables()
         items = [(r.name, (r.label or r.name) + (f"  ({r.note})" if r.note else "")) for r in rs]

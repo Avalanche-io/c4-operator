@@ -155,7 +155,11 @@ one making `/Render/beauty_only`.
     proposing `sm0220-light.yaml` (`hou.ui.selectFile(chooser_mode=
     hou.fileChooserMode.Write, pattern="*.yaml")`); the file saved starts
     `# Saved from houdini by c4submit` and `c4 farm submit` accepts it.
-14. Save the hip, quit, reopen: the C4 Render node keeps its Tool folder
+14. Press Check, then Save file and Show file without changing anything:
+    no progress bar and no new stage file (the check holds). Change a
+    field, or a LOP upstream (the hip then has unsaved changes): Save file
+    checks again first.
+15. Save the hip, quit, reopen: the C4 Render node keeps its Tool folder
     (spare parameters saved with the node) and every value typed; the first
     change re-reads the farm without error.
 
@@ -207,6 +211,11 @@ on disk; and a texture with `<UDIM>` tiles.
 2. Stop the fake farm and press Check on a node made while it ran: the
    summary names the address it cannot reach and says to check C4_HUD and
    the sign-in.
+
+3. Against a farm that does not list tools yet: the summary says to set
+   `C4_TOOL_PATH`. Set it to a folder holding `karma/tool.yaml`, change
+   Project (or reopen): the Tool folder is drawn, Check says the file is
+   checked here only, and Save file writes the submission.
 
 ## 6. Words
 
