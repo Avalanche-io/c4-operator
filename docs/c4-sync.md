@@ -10,7 +10,7 @@ review wait.
 
 c4-sync is **experimental**. Its two resources, `Tracker` and `TrackerLink`
 (`c4.avalanche.io/v1alpha1`), are not part of the operator's install and
-may change. The design is in proposals/integrations (ADAPTER.md, MAPPING.md).
+may change. Its place in the design is DESIGN.md section 15.2.
 
 | tracker                  | `kind`   | work in                             | review out                                             | decisions back                          |
 | ------------------------ | -------- | ----------------------------------- | ------------------------------------------------------ | --------------------------------------- |
@@ -86,7 +86,8 @@ namespace:
 
 1. **The credential, as a Secret.** c4-sync reads it on every use, so a
    rotation takes effect at once. A credential lease keeps it current
-   (proposals/integrations GAPS 8); until leases exist, rotate it yourself.
+   ([credential leases](agents/credential-leases.md)); until a lease holds
+   it, rotate it yourself.
    - GitHub: a GitHub App installation token, which lasts an hour.
    - Flow: the API script's key. Give the script its own permission group,
      limited to the project.

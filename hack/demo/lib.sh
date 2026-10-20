@@ -148,15 +148,15 @@ demo_start() {
   power_ok
   k cluster-info >/dev/null 2>&1 || fail "no cluster $CTX: hack/e2e/up.sh makes one"
   demo_current
-  docker image inspect "$ORACLE" >/dev/null 2>&1 || fail "$ORACLE is not built here: make job-images (c4-onboarding) builds it"
+  docker image inspect "$ORACLE" >/dev/null 2>&1 || fail "$ORACLE is not built here: make job-images builds it"
   trap teardown EXIT
 }
 
 # demo_current: the cluster's operator is built from this checkout
 # (hack/e2e/redeploy.sh stamps it). A stale one lacks what the demo shows,
 # such as the TrackerLink journal c4-sync keeps or the HUD's controls.
-# REDEPLOY=1 redeploys it first. The cluster is shared: book it in
-# .handoff/E2E-CLUSTER.md before either.
+# REDEPLOY=1 redeploys it first. The cluster may be shared: make sure no
+# one else is using it before either.
 demo_current() {
   local want have
   want=$(built_from)

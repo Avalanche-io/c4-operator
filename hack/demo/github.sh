@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The GitHub agent-work demo, live (proposals/integrations LAUNCH 3.2): a
+# The GitHub agent-work demo, live: a
 # fake GitHub repository beside the real operator and c4-sync on the e2e
 # kind cluster, and HUD captures of each step. `make demo-github` runs it;
 # hack/demo/lib.sh says what it adds to the cluster and how it cleans up.

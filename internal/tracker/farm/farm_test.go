@@ -151,7 +151,7 @@ func TestDecideStoresEvidenceAndRelays(t *testing.T) {
 		t.Fatal("evidence not stored under its C4 ID")
 	}
 	// The note is the decider's own text; where it came from is `via`,
-	// which the HUD checks and signs (GAPS 3).
+	// which the HUD checks and signs.
 	via, _ := h.decided[0]["via"].(map[string]any)
 	if h.decided[0]["do"] != "rework" || h.decided[0]["note"] != "assert the order" || via["tracker"] != "github" ||
 		via["source"] != "Review/12#5" || via["by"] != "dana" || via["person"] != "dana" || via["evidence"] != id {

@@ -10,8 +10,8 @@ import (
 // Presenting a link's state is the adapter's: GitHub shows a job as a
 // comment, a check run and a commit status; Flow as a Task status and two
 // fields. The loop decides what the state is and when a write is due; the
-// adapter decides what the write looks like. (ADAPTER.md section 9: the
-// build showed presentation is per tracker, so it moved out of the loop.)
+// adapter decides what the write looks like. Building the adapters showed
+// that presentation is per tracker, so it moved out of the loop.
 
 // LinkState is one link's state as the loop knows it.
 type LinkState struct {
@@ -21,7 +21,7 @@ type LinkState struct {
 	ReviewHead string // its head commit, when it has heads
 	Job        string // the job, namespace/name
 	JobURL     string
-	State      string // a summary state (MAPPING.md section 2)
+	State      string // a summary state (syncer's Summary states)
 	Words      string // the state as a reader sees it
 	Title      string // one line: the state, the ETA, the risk
 	Why        string // why a person is needed, or the job failed

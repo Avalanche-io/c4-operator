@@ -1,6 +1,5 @@
-// Package github is c4-sync's GitHub adapter (proposals/integrations
-// tools/github.md, MAPPING.md 3.3). It speaks GitHub's REST API v3 and
-// verifies webhook deliveries. It writes only work states: check runs,
+// Package github is c4-sync's GitHub adapter (docs/c4-sync.md). It speaks
+// GitHub's REST API v3 and verifies webhook deliveries. It writes only work states: check runs,
 // commit statuses and one comment per link, edited in place. Approvals
 // stay GitHub's; the adapter reads them back as decisions.
 //
@@ -86,7 +85,7 @@ func (a *Adapter) Capabilities() tracker.Capabilities {
 		Mentions:         true,
 		// GitHub takes no idempotency key on writes: Probe stands in.
 		// Milestone due_on is a timestamp; whether GitHub keeps a time of
-		// day for it is unverified (tools/github.md), so an intake rule
+		// day for it is unverified, so an intake rule
 		// may still treat it as a date with dateOnlyAt.
 	}
 }

@@ -1,6 +1,5 @@
 // Package tracker is what c4-sync's loop knows about any tracker
-// (proposals/integrations ADAPTER.md section 9): one interface of eleven
-// methods, and the few normalized types it speaks. The loop never switches
+// (docs/c4-sync.md): one interface of eleven methods, and the few normalized types it speaks. The loop never switches
 // on an adapter's kind; everything tracker-specific is in the adapter and
 // in the Tracker object's configuration.
 package tracker

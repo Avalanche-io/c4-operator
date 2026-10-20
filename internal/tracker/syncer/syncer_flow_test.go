@@ -149,7 +149,7 @@ func (e *flowEnv) scriptVersionWrites() int {
 	return n
 }
 
-// The LAUNCH.md dailies demo, end to end against the fake site: a Task's
+// The Flow dailies demo, end to end against the fake site: a Task's
 // due date becomes the render's deadline; work states go to the Task; the
 // render publishes a Version with its C4 ID; the supervisor's note in Flow
 // comes back as a rework that makes v002, which follows v001 with the note

@@ -10,7 +10,8 @@ import (
 )
 
 // limiter is one Tracker's token bucket: c4-sync's own budget, set well
-// under the tracker's published limit (ADAPTER.md 6.4).
+// under the tracker's published limit, or a conservative default where
+// none is published (docs/c4-sync.md, Limits).
 type limiter struct {
 	l *rate.Limiter
 }

@@ -1,4 +1,4 @@
-# c4-sync, experimental (proposals/integrations ADAPTER.md). Not part of
+# c4-sync, experimental (docs/c4-sync.md). Not part of
 # config/default. Install its two CRDs first:
 #
 #   kubectl apply -f config/crd/c4.avalanche.io_trackers.yaml \

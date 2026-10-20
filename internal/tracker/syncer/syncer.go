@@ -1,5 +1,5 @@
-// Package syncer is c4-sync's loop (proposals/integrations ADAPTER.md
-// section 6). It is level-triggered: each pass reads both sides and makes
+// Package syncer is c4-sync's loop (docs/c4-sync.md). It is
+// level-triggered: each pass reads both sides and makes
 // only the writes that close the difference, so lost events cost latency,
 // never correctness. Events from either side only say where to look first.
 //
@@ -56,7 +56,7 @@ const (
 	CondIntake      = "Intake"
 	// CondUnconfirmed on a TrackerLink: a write to the tracker was
 	// interrupted, and nothing can tell whether it happened; it is held
-	// for a person (integrations GAPS 11).
+	// for a person (internal/hud/API.md, Held tracker writes).
 	CondUnconfirmed = "Unconfirmed"
 )
 
@@ -310,7 +310,7 @@ func (s *Syncer) pass(ctx context.Context, t *c4v1.Tracker, c *conn) error {
 	}
 	s.mu.Unlock()
 	// What changed in the farm since this Tracker last read its log
-	// (GAPS 5), however long it was away.
+	// (internal/hud/API.md, GET /book?since), however long it was away.
 	feed, farmCursor, err := s.readFeed(ctx, t)
 	if err != nil {
 		return err
@@ -915,7 +915,7 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	}
 	if rule.As == "forecast" {
 		// A forecast never runs: nothing to tell the tracker but its date,
-		// which intake follows (GAPS 9).
+		// which intake follows (DESIGN.md 10.12, forecast jobs).
 		s.setLinkCond(ctx, l, CondSynced, metav1.ConditionTrue, "Forecast", "a forecast job; the tracker hears from it once real work replaces it")
 		return nil
 	}
@@ -990,7 +990,7 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 }
 
 // mirrorAssignments tells a person, where they work, when failed units
-// are assigned to them in C4 (integrations GAPS 13): a mention on the
+// are assigned to them in C4 (docs/c4-sync.md, Assignments): a mention on the
 // entity (an @-mention on the issue, a Note addressed to them on the
 // Task), once per assignment. A C4 person the Tracker's people map gives
 // no tracker user stays assigned in C4 only, and the link says so.
@@ -1030,8 +1030,8 @@ func (s *Syncer) mirrorAssignments(ctx context.Context, c *conn, t *c4v1.Tracker
 }
 
 // mirrorCauses keeps one comment per cause a person must act on (units
-// failed for good, escalated, or held for information; integrations GAPS
-// 4) on the entity, edited in place as the cause grows: a tracker reads
+// failed for good, escalated, or held for information; DESIGN.md 10.14,
+// Causes) on the entity, edited in place as the cause grows: a tracker reads
 // one item per cause, not one per failure.
 func (s *Syncer) mirrorCauses(ctx context.Context, c *conn, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, now time.Time) error {
 	if !c.adapter.Capabilities().EditableComments {
@@ -1124,7 +1124,8 @@ func reworking(l *c4v1.TrackerLink) bool {
 
 // --- decisions in ---
 
-// DefaultVerdicts maps GitHub's decisions to C4's (MAPPING.md section 6).
+// DefaultVerdicts maps GitHub's decisions to C4's, for a decision the
+// Tracker's verdictsIn does not name (docs/c4-sync.md).
 // A COMMENTED review decides nothing.
 var DefaultVerdicts = map[string]string{
 	"APPROVED":          "approve",
@@ -1284,7 +1285,8 @@ const maxDecisions = 50
 
 // write makes one field's write when its value changed, or when only its
 // continuous part changed and every has passed. The write goes through
-// the effect journal (internal/effect, integrations GAPS 11), which is the
+// the effect journal (internal/effect; docs/c4-sync.md, "What it writes,
+// and what it never writes"), which is the
 // link's status.written: the intent is kept before it is sent, so a write
 // interrupted by a crash or a lost answer is probed, sent again, or held
 // for a person, as the adapter's guard for it allows, and never made twice
@@ -1438,7 +1440,7 @@ func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr f
 	return nil
 }
 
-// nextVersion answers a rework the media way (integrations LAUNCH 3.1): a
+// nextVersion answers a rework the media way, as Flow's dailies do: a
 // new job follows the one reviewed, with the reviewer's note as an input
 // view, and the link moves to it. The tracker counts versions, so the next
 // output publishes as the next version.

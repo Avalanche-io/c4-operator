@@ -8,7 +8,8 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
-// Summary states (proposals/integrations MAPPING.md section 2). A tracker
+// Summary states, the work states c4-sync writes (docs/c4-sync.md, "What it
+// writes, and what it never writes"). A tracker
 // status changes only when the summary state does; continuous values (the
 // ETA) go to text that notifies no one.
 const (

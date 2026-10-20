@@ -1,7 +1,7 @@
 """A real MLflow server (localhost only) and c4 model-version sources.
 
-The open question from proposals/integrations (LAUNCH 3.3): does a server
-accept c4:// as a model-version source, with and without this plugin?
+The open question: does a server accept c4:// as a model-version source,
+with and without this plugin?
 Measured against MLflow 3.17.1 on 2026-10-19:
 
 - the server stores a model-version source without resolving its scheme,

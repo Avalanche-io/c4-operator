@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The Flow dailies demo, live (proposals/integrations LAUNCH 3.1): a fake
+# The Flow dailies demo, live: a fake
 # Flow Production Tracking site beside the real operator and c4-sync on the
 # e2e kind cluster, a render from the oiio job image, and HUD captures of
 # each step. `make demo-dailies` runs it; hack/demo/lib.sh says what it

@@ -1,9 +1,9 @@
-// Command c4-sync keeps trackers and the farm in step (proposals/
-// integrations ADAPTER.md). It reconciles the experimental Tracker and
-// TrackerLink objects: tracker entities become jobs, job states go back as
-// work states, and decisions people make in the tracker are relayed to the
-// jobs' waits. It talks to the farm only through the HUD API, as its own
-// identity, and to each tracker through that Tracker's adapter.
+// Command c4-sync keeps trackers and the farm in step (docs/c4-sync.md).
+// It reconciles the experimental Tracker and TrackerLink objects: tracker
+// entities become jobs, job states go back as work states, and decisions
+// people make in the tracker are relayed to the jobs' waits. It talks to
+// the farm only through the HUD API, as its own identity, and to each
+// tracker through that Tracker's adapter.
 //
 //	c4-sync --hud http://c4-hud.c4-system --hud-token-file /var/run/c4-sync/token
 //

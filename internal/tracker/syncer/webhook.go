@@ -14,7 +14,8 @@ import (
 )
 
 // deliveries remembers recent delivery ids, so a redelivered event is a
-// no-op (ADAPTER.md 6.3). Bounded: the oldest are forgotten first.
+// no-op: deliveries are only hints, and a tracker may send one twice.
+// Bounded: the oldest are forgotten first.
 type deliveries struct {
 	mu    sync.Mutex
 	ids   map[string]bool

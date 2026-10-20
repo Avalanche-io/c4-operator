@@ -1,8 +1,7 @@
 // Package flow is c4-sync's Autodesk Flow Production Tracking adapter
-// (proposals/integrations tools/flow-production-tracking.md, LAUNCH.md
-// 3.1). It speaks the REST API v1.1 with a script's client credentials
-// and never uses Toolkit, whose licence forbids running it for third
-// parties.
+// (docs/c4-sync.md). It speaks the REST API v1.1 with a script's client
+// credentials and never uses Toolkit, whose licence forbids running it for
+// third parties.
 //
 // What it does in Flow:
 //   - reads Tasks (due_date, a date with no time) as work;
@@ -372,7 +371,8 @@ func (a *Adapter) taskItem(r record) tracker.Item {
 	if s := r.link("step"); s != nil {
 		it.Fields["step"] = s.Name
 	}
-	// The bid, in minutes: a forecast's size (GAPS 9).
+	// The bid, in minutes: a forecast's size (DESIGN.md 10.12, forecast
+	// jobs).
 	var bid float64
 	if json.Unmarshal(r.Attributes["est_in_mins"], &bid) == nil && bid > 0 {
 		it.Fields["est_in_mins"] = strconv.FormatFloat(bid, 'f', -1, 64)

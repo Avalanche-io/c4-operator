@@ -1,12 +1,11 @@
-// Package mlflow is c4-sync's MLflow adapter (proposals/integrations
-// tools/mlflow.md, LAUNCH.md 3.3). It speaks the REST API 2.0 of an
-// MLflow tracking server and model registry.
+// Package mlflow is c4-sync's MLflow adapter (docs/c4-sync.md). It speaks
+// the REST API 2.0 of an MLflow tracking server and model registry.
 //
 // What it does in MLflow:
 //   - reads runs a client created SCHEDULED and tagged c4.intake=true as
 //     work (the project backend plugin, `mlflow run --backend c4`, makes
 //     these); a run's c4.deadline tag (RFC 3339) is its due time. MLflow
-//     has no deadline of its own (tools/mlflow.md), so without the tag
+//     has no deadline of its own, so without the tag
 //     the deadline comes from a Milestone or the farm's suggestion;
 //   - writes work states to the run: its status (SCHEDULED, RUNNING,
 //     FINISHED, FAILED: MLflow's own enum) and tags c4.state, c4.eta,
@@ -168,8 +167,8 @@ func (a *Adapter) do(ctx context.Context, method, path string, q url.Values, in,
 		case resp.StatusCode == http.StatusNotFound || e.Code == "RESOURCE_DOES_NOT_EXIST":
 			return fmt.Errorf("%w: %s", tracker.ErrNotFound, msg)
 		case resp.StatusCode == http.StatusTooManyRequests || e.Code == "REQUEST_LIMIT_EXCEEDED":
-			// Databricks publishes per-endpoint limits (tools/mlflow.md);
-			// open-source MLflow has none.
+			// Databricks publishes per-endpoint limits; open-source MLflow
+			// has none.
 			wait := time.Minute
 			if n, err := strconv.Atoi(resp.Header.Get("Retry-After")); err == nil {
 				wait = time.Duration(n) * time.Second
@@ -477,7 +476,7 @@ func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, erro
 // with source <source_prefix><view> and the C4 tags. A version of this
 // run already tagged with the view's C4 ID is the one a crash left: it is
 // returned, not registered again. MLflow's own artifact store records no
-// digest (tools/mlflow.md), so the C4 ID is the version's content
+// digest, so the C4 ID is the version's content
 // identity. The server stores the source without resolving its scheme;
 // clients read it with the c4 artifact-repository plugin
 // (integrations/mlflow-c4).

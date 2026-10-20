@@ -43,15 +43,18 @@ type JobRequest struct {
 	// in its record too), so lineage links the versions.
 	Follows string
 	// For is the person the job is for, who owns it, under the grant they
-	// gave the Tracker (integrations GAPS 17); "" makes it c4-sync's own.
+	// gave the Tracker (internal/hud/API.md, Grants); "" makes it c4-sync's
+	// own.
 	// The HUD refuses it without a grant (403), or when it takes none
 	// (501): never c4-sync's own job instead.
 	For string
-	// Replaces is the forecast job this real job replaces (GAPS 9).
+	// Replaces is the forecast job this real job replaces (DESIGN.md 10.12,
+	// forecast jobs).
 	Replaces string
 }
 
-// Relay is a decision made in a tracker, relayed to a wait (GAPS 3).
+// Relay is a decision made in a tracker, relayed to a wait
+// (internal/hud/API.md, Relayed decisions).
 type Relay struct {
 	// Project is the job's project, whose store keeps the evidence.
 	Project string
@@ -92,7 +95,8 @@ type Farm interface {
 	StoreView(ctx context.Context, project string, files map[string][]byte) (string, error)
 	// JobURL is the job's page in the HUD, for links written to trackers.
 	JobURL(j JobRef) string
-	// Book reads the farm's transition log after since (GAPS 5); a cursor
+	// Book reads the farm's transition log after since (internal/hud/API.md,
+	// GET /book?since); a cursor
 	// the log no longer reaches is an *ErrGone.
 	Book(ctx context.Context, since int64, limit int) (api.Transitions, error)
 }
@@ -262,7 +266,8 @@ func (h *HUD) Withdraw(ctx context.Context, j JobRef, reason string) error {
 }
 
 // Decide stores the evidence in the project's store and relays the
-// decision with `via` (GAPS 3): the HUD checks the tracker, its people map
+// decision with `via` (internal/hud/API.md, Relayed decisions): the HUD
+// checks the tracker, its people map
 // and the wait, and signs the decision as relayed by c4-sync. The note is
 // the decider's own text.
 func (h *HUD) Decide(ctx context.Context, j JobRef, r Relay) error {

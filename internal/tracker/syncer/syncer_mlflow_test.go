@@ -115,7 +115,7 @@ func (e *mlEnv) link() *c4v1.TrackerLink {
 	return &l
 }
 
-// LAUNCH.md 3.3 against the fake: a scheduled run becomes an ML job with
+// MLflow end to end against the fake: a scheduled run becomes an ML job with
 // its tag's deadline; the run shows the work's states; the output is
 // registered as a model version from the run with its C4 ID; an approver
 // setting the production alias serves the promote wait. C4 never sets the
