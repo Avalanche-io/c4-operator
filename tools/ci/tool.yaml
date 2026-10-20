@@ -1,0 +1,31 @@
+c4: tool/1
+name: ci
+title: Repository tests
+summary: Runs a repository's tests (pytest and Go) in shards, with a JUnit report per shard.
+kind: shards
+runs:
+  image: c4/job-ci
+  command: [bash, "{{Tool.Dir}}/ci.sh", "{{Param.target}}"]
+  workdir: "{{Job.Tree}}"
+params:
+- name: shards
+  type: INT
+  default: 8
+  minValue: 1
+  maxValue: 10000
+  description: How many units the tests are dealt across. Each unit runs one shard.
+  show: artist
+  userInterface: {control: SPIN_BOX, label: Shards}
+- name: target
+  type: STRING
+  default: //...
+  minLength: 1
+  description: The Go packages to test, as //... (everything), //frames/... or ./frames. Python tests always run.
+  show: advanced
+  userInterface: {control: LINE_EDIT, label: Target}
+writes: [results/]
+reuse: never
+test:
+  tree: test/
+  with: {shards: 2}
+  expect: [results/shard-0.py.xml, results/shard-1.py.xml, results/shard-0.go.xml]
