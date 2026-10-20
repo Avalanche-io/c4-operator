@@ -98,8 +98,12 @@ def check(doc: Any) -> List[Dict[str, str]]:
         errs.append(error("root", f'"{doc["root"]}" is not an absolute path',
                           "write the folder the tree came from, as S:/shows/saltmarsh or /Users/noor/shows/saltmarsh"))
     if "for" in doc and isinstance(doc["for"], str) and ":" in doc["for"]:
-        name = doc["for"].split(":", 1)[1]
-        errs.append(error("for", f'"{doc["for"]}": for names a party by its name alone', f"write for: {name}"))
+        kind, name = doc["for"].split(":", 1)
+        if kind in ("person", "org", "organization"):
+            errs.append(error("for", f'"{doc["for"]}": for names a party by its name alone', f"write for: {name}"))
+        else:
+            errs.append(error("for", f'"{doc["for"]}": for names a party, a person or an organization, never a {kind}',
+                              "name the person or organization the work is for"))
     if "due" in doc:
         p = due_problem(doc["due"])
         if p:

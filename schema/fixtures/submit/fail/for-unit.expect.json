@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "for",
+      "message": "\"unit:port/architect\": for names a party, a person or an organization, never a unit",
+      "fix": "name the person or organization the work is for"
+    }
+  ],
+  "schemaMentions": "for"
+}

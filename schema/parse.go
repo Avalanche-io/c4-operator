@@ -694,7 +694,10 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		}
 	case "pattern submit for":
 		if s, _ := v.(string); strings.Contains(s, ":") {
-			_, name, _ := strings.Cut(s, ":")
+			kind, name, _ := strings.Cut(s, ":")
+			if kind != "person" && kind != "org" && kind != "organization" {
+				return fmt.Sprintf("%s: for names a party, a person or an organization, never a %s", quote(v), kind), "name the person or organization the work is for"
+			}
 			return fmt.Sprintf("%s: for names a party by its name alone", quote(v)), "write for: " + name
 		}
 	case "pattern submit root":
