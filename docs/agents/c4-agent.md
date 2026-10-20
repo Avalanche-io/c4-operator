@@ -309,6 +309,48 @@ What the host needs:
 - The account the sessions run as still shows in their context (its
   email); restricted mode removes everything else of the machine's.
 
+## Blocks in containers, and sessions as views
+
+A block can run in a unit pod as well as on a host runner. Its session
+history moves between them as a view.
+
+**The session as a view.** When a block yields, its session leaves in its
+unit's output view, in the folder `c4-session/`:
+
+| path                                                   | what                                   |
+| ------------------------------------------------------ | -------------------------------------- |
+| `c4-session/session.json`                              | the member, its session ID, its folder |
+| `c4-session/transcript.jsonl`                          | the session's transcript               |
+| `c4-session/agents/members/<member>.json`              | the member record                      |
+| `c4-session/agents/members/<member>.checkpoints.jsonl` | its checkpoint chain                   |
+
+The next attempt is resumed from that view (`C4_RESUME_VIEW`), wherever it
+runs.
+- **On a host,** the runner fetches the view into the unit's output root.
+- **In a pod,** the view is mounted there.
+
+Either way, the session is imported for that machine's Claude Code store
+and resumed by its ID. The chain is over the transcript's bytes, not its
+path, so `c4-agent verify` passes on every machine the session has been
+on. An import is refused while the session is running where it arrives:
+one live copy only. On a host the runner stores the view and names it in
+`c4.avalanche.io/output-tree`; in a pod the node daemon captures it.
+
+**`c4-agent block-pod`** is a block as a unit pod's command.
+- It runs each part as one Claude Code invocation in print mode, in `/private/tmp`, so the transcript is filed under the same folder on every machine.
+- The writable input (`$C4_OUTPUT`) is mounted inside that folder, so the block's file tools reach it.
+- It exits 0 when the task is done, 0 when it yields at the farm's stop (the session is already in its view), and 3 when the block gives up.
+- It ignores SIGTERM: a deleted pod finishes its turn, and the farm's stop comes at its safe point.
+
+**The sign-in in a pod** comes from a credential lease (credential-leases.md). `$C4_LEASE_DIR` names the mount, and `block-pod` links the pod's Claude Code store to it.
+
+**The image** is Claude Code with bash and git, plus c4-agent and c4-unit for the Stop hook. It holds no credential.
+
+A run on the e2e cluster moved one session from a host to a pod and back, at safe points:
+- a ten-part block;
+- `c4-agent verify` passed on all 15 checkpoints;
+- no copy was started.
+
 ## Capacity under a power cap, and the bundle's clock
 
 The runner can lower the slots its machine offers, for example from the
