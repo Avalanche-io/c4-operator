@@ -1,0 +1,45 @@
+c4: tool/1
+name: infer
+title: Model pass
+summary: Runs a model over every frame of a plate sequence (a depth pass, a matte, or a 2x upscale) to OpenEXR, with its AI use declared.
+kind: frames
+runs:
+  image: c4/job-infer
+  command: [bash, "{{Tool.Dir}}/infer.sh", "{{Param.plates}}", "{{Param.task}}", "{{Param.model}}", "{{Job.Shot}}"]
+frames: {chunk: 2, order: binary}
+params:
+- name: plates
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The OpenEXR sequence, with $F4 where the frame number goes, as plates/sm0140/sm0140.$F4.exr. A folder of <name>.####.exr frames, or one frame's file, also works.
+  show: artist
+  from: scene.selection
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Plates, fileFilters: [{label: EXR, patterns: ["*.exr"]}]}
+- name: task
+  type: STRING
+  default: depth
+  allowedValues: [depth, matte, upscale]
+  description: What the model makes. Frames go to depth/, matte/ or upscale/, named for the shot.
+  show: artist
+  userInterface: {control: DROPDOWN_LIST, label: Pass}
+- name: model
+  type: STRING
+  default: depth-anything-v2-small
+  minLength: 1
+  description: The model, a short name (depth-anything-v2-small for depth, birefnet for matte, swin2sr-x2 for upscale) or a Hugging Face model ID. Weights download on first use.
+  show: advanced
+  userInterface: {control: LINE_EDIT, label: Model}
+writes: [depth/, matte/, upscale/]
+previews: "depth/*.$F4.exr"
+aiUsage:
+  generated: generated
+  model: "{{Param.model}}"
+  task: "{{Param.task}}"
+  oversight: human_validated
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1002
+  with: {plates: plates/test/test.$F4.exr}
+  expect: [depth/test.1001.exr, depth/test.1002.exr]
