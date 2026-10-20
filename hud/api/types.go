@@ -492,6 +492,9 @@ type Job struct {
 	// approval, an outside party, a clock) and units a review escalated,
 	// open and decided.
 	Waits []Wait `json:"waits,omitempty"`
+	// Rounds are the job's loops: generators run as bounded rounds of
+	// siblings.
+	Rounds []Rounds `json:"rounds,omitempty"`
 }
 
 // NeedsPerson says why a job waits on a person, and since when.
@@ -664,6 +667,31 @@ type Capacity struct {
 	EstCost      float64   `json:"estCost"`
 	State        string    `json:"state"`
 	PrewarmViews []string  `json:"prewarmViews"`
+}
+
+// Rounds is one loop of a job: a generator run as rounds of siblings,
+// round k's units named r<k>/<name>. The HUD draws one row per round in
+// the generator's group ("round 3 of at most 20"), finished rounds folded
+// to one line, the current one open, and the expected rest as one dashed
+// row ("about 1.6 more rounds") carrying ExpectSeconds.
+type Rounds struct {
+	// Unit is the first generator, Name its name.
+	Unit int    `json:"unit"`
+	Name string `json:"name,omitempty"`
+	// Round is the round running or last run, Max the bound, Until the
+	// review whose pass ends the loop.
+	Round int    `json:"round"`
+	Max   int    `json:"max"`
+	Until string `json:"until,omitempty"`
+	// StoppedBy is until, generator, max or failed once the loop ended.
+	StoppedBy string `json:"stoppedBy,omitempty"`
+	// Generators are each round's generator, in round order: round k's
+	// units are the children of Generators[k-1].
+	Generators []int `json:"generators,omitempty"`
+	// ExpectMore is how many more rounds the queue expects, the pending
+	// one included, and ExpectSeconds their time on the critical path.
+	ExpectMore    float64 `json:"expectMore,omitempty"`
+	ExpectSeconds int64   `json:"expectSeconds,omitempty"`
 }
 
 // Wait is one thing a job waits for (PRIMITIVES Q6; the HUD word is

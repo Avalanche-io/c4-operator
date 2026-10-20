@@ -76,6 +76,8 @@ type Unit struct {
 	// Wait makes the unit a wait (PRIMITIVES Q6): it holds no slot and
 	// creates no pod; it completes on a signed decision, or at its time.
 	Wait *Wait
+	// Rounds makes a generator one round of a bounded loop (rounds.go).
+	Rounds *Rounds
 }
 
 // Wait is what a wait unit waits for.

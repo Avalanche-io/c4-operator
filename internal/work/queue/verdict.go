@@ -257,7 +257,7 @@ func (q *Queue) judge(ctx context.Context, v *view, idx int, doc []byte) ([]acti
 			}
 		}
 		for _, ref := range it.Units {
-			units, err := resolveUnits(m.plan, judged, ref)
+			units, err := resolveUnits(m.plan, judged, ref, roundPrefix(m.plan, idx))
 			if err != nil {
 				return nil, nil, d, err
 			}
@@ -294,8 +294,9 @@ func (q *Queue) judge(ctx context.Context, v *view, idx int, doc []byte) ([]acti
 }
 
 // resolveUnits finds the judged units ref names: a name, a label, a range
-// of labels, or #index.
-func resolveUnits(plan *class.Plan, judged []int, ref string) ([]int, error) {
+// of labels, or #index. A review in a round (prefix r<k>/) may name its
+// round's units as their document did.
+func resolveUnits(plan *class.Plan, judged []int, ref, prefix string) ([]int, error) {
 	in := func(i int) bool { return slices.Contains(judged, i) }
 	find := func(s string) (int, bool) {
 		if n, ok := strings.CutPrefix(s, "#"); ok {
@@ -303,7 +304,7 @@ func resolveUnits(plan *class.Plan, judged []int, ref string) ([]int, error) {
 			return i, err == nil && i >= 0 && i < len(plan.Units)
 		}
 		for _, i := range judged {
-			if plan.Units[i].Name == s {
+			if n := plan.Units[i].Name; n == s || prefix != "" && n == prefix+s {
 				return i, true
 			}
 		}

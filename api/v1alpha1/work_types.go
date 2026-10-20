@@ -357,6 +357,10 @@ type WorkJobStatus struct {
 	// units a review escalated to a person.
 	// +optional
 	Waits []WorkWait `json:"waits,omitempty"`
+	// Rounds lists the job's loops: generators that run as bounded rounds
+	// of siblings.
+	// +optional
+	Rounds []WorkRounds `json:"rounds,omitempty"`
 	// Preemptions counts units stopped or asked to yield to make room.
 	// +optional
 	Preemptions int32 `json:"preemptions,omitempty"`
@@ -1014,6 +1018,36 @@ type WorkDecideRequest struct {
 	// for one: the wait unit's output, which the units it holds up mount.
 	// +optional
 	View string `json:"view,omitempty"`
+}
+
+// WorkRounds is one of a job's loops: a generator run as bounded rounds of
+// siblings.
+type WorkRounds struct {
+	// Unit is the loop's first generator, and Name its name: round k's
+	// units are named r<k>/<unit name>.
+	Unit int32  `json:"unit"`
+	Name string `json:"name,omitempty"`
+	// Round is the round running or last run, Max the bound, and Until
+	// the review unit whose pass ends the loop.
+	Round int32 `json:"round"`
+	Max   int32 `json:"max"`
+	// +optional
+	Until string `json:"until,omitempty"`
+	// StoppedBy says why the loop ended: until (its review passed),
+	// generator (it wrote no next round), max, or failed; empty while it
+	// goes on.
+	// +optional
+	StoppedBy string `json:"stoppedBy,omitempty"`
+	// Generators are each round's generator, in round order.
+	// +optional
+	Generators []int32 `json:"generators,omitempty"`
+	// ExpectMore is how many more rounds the queue expects, the pending
+	// one included (a decimal), and ExpectSeconds their duration on the
+	// critical path.
+	// +optional
+	ExpectMore string `json:"expectMore,omitempty"`
+	// +optional
+	ExpectSeconds int64 `json:"expectSeconds,omitempty"`
 }
 
 // WorkWait is a unit that waits for someone or something: a person, an

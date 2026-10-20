@@ -70,6 +70,9 @@ type calRecord struct {
 	// Rework is the project's review and rerun history by class and key
 	// (rework.go).
 	Rework map[string]reworkStat `json:"rework,omitempty"`
+	// Rounds is the project's loop history by class and generator key
+	// (rounds.go).
+	Rounds map[string]roundsStat `json:"rounds,omitempty"`
 }
 
 // classCalibration is one class's calibrations: of the remaining work
@@ -186,6 +189,7 @@ func (q *Queue) restoreProject(rec *calRecord) {
 		q.setBook(rec.Project, process.RestoreBook(*rec.Derivations))
 	}
 	q.restoreRework(rec.Project, rec.Rework)
+	q.restoreRounds(rec.Project, rec.Rounds)
 	for class, ds := range rec.Durations {
 		// The stored window first, then what ran since the start.
 		if q.durations == nil {
@@ -389,6 +393,7 @@ func (q *Queue) calRecordOf(project string, now time.Time) calRecord {
 		rec.Derivations = &s
 	}
 	rec.Rework = q.savedRework(project)
+	rec.Rounds = q.savedRounds(project)
 	if d := q.durations[project]; len(d) > 0 {
 		rec.Durations = map[string][]float64{}
 		for class, w := range d {

@@ -1040,6 +1040,62 @@ spec:
                   Reviews maps the index of each unit a verdict did more than pass
                   (reworked, escalated, accepted with a note) to what it decided last.
                 type: object
+              rounds:
+                description: |-
+                  Rounds lists the job's loops: generators that run as bounded rounds
+                  of siblings.
+                items:
+                  description: |-
+                    WorkRounds is one of a job's loops: a generator run as bounded rounds of
+                    siblings.
+                  properties:
+                    expectMore:
+                      description: |-
+                        ExpectMore is how many more rounds the queue expects, the pending
+                        one included (a decimal), and ExpectSeconds their duration on the
+                        critical path.
+                      type: string
+                    expectSeconds:
+                      format: int64
+                      type: integer
+                    generators:
+                      description: Generators are each round's generator, in round
+                        order.
+                      items:
+                        format: int32
+                        type: integer
+                      type: array
+                    max:
+                      format: int32
+                      type: integer
+                    name:
+                      type: string
+                    round:
+                      description: |-
+                        Round is the round running or last run, Max the bound, and Until
+                        the review unit whose pass ends the loop.
+                      format: int32
+                      type: integer
+                    stoppedBy:
+                      description: |-
+                        StoppedBy says why the loop ended: until (its review passed),
+                        generator (it wrote no next round), max, or failed; empty while it
+                        goes on.
+                      type: string
+                    unit:
+                      description: |-
+                        Unit is the loop's first generator, and Name its name: round k's
+                        units are named r<k>/<unit name>.
+                      format: int32
+                      type: integer
+                    until:
+                      type: string
+                  required:
+                  - max
+                  - round
+                  - unit
+                  type: object
+                type: array
               spend:
                 description: |-
                   Spend is what the job's units cost so far, split between

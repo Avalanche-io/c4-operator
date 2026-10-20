@@ -353,6 +353,9 @@ func noteExpansions(e *estimate.Estimator, plan *class.Plan, m *jobMem) {
 		e.Expanded(key, x.Units)
 		work, longest, all := 0.0, 0.0, true
 		for i := x.First; i < x.First+x.Units && i < len(plan.Units); i++ {
+			if r := plan.Units[i].Rounds; r != nil && r.Round > 1 {
+				continue // the next round's generator: a round of its own
+			}
 			ms, ok := m.millis[i]
 			if !m.succeeded[i] || !ok {
 				all = false

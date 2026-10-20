@@ -32,8 +32,10 @@ import (
 //	      "inputs": [{"fromUnit": "C3.2/charter", "mountPath": "/charter"}],
 //	      "slots": 1,
 //	      "group": "chapter 3", "holds": ["src/net/"],
-//	      "params": {"model": "opus"}, "cites": [...] } ],
-//	  "dependents": "all" }                   // or a list of names
+//	      "params": {"model": "opus"}, "cites": [...],
+//	      "rounds": {"max": 20, "until": "judge"} } ], // a generator's loop (rounds.go)
+//	  "dependents": "all",                    // or a list of names
+//	  "next": true }                          // a round's: add the next round
 //
 // Children inherit the generator's dependents: whatever waited on the
 // generator now waits on its children, all of them or the subset
@@ -80,6 +82,9 @@ type Doc struct {
 	Version    int             `json:"version"`
 	Units      []DocUnit       `json:"units"`
 	Dependents json.RawMessage `json:"dependents,omitempty"`
+	// Next, in a round's document, adds the next round (rounds.go); with
+	// rounds.until set it is the default.
+	Next *bool `json:"next,omitempty"`
 	// Edges add orderings between units already in the job or in this
 	// document: to runs after from. An edge source (c4-edges) re-run
 	// after each merge writes a document of edges alone, so the job's
@@ -118,6 +123,8 @@ type DocUnit struct {
 	Reasoning *Reasoning `json:"reasoning,omitempty"`
 	// Wait makes the unit a wait for a person, a party or a clock.
 	Wait *DocWait `json:"wait,omitempty"`
+	// Rounds makes a planned unit a loop's first round (rounds.go).
+	Rounds *DocRounds `json:"rounds,omitempty"`
 }
 
 // DocWait is a wait unit's server: person:<id>, party:<name> or
@@ -224,6 +231,13 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 	if gen.Depth+1 > maxDepth {
 		return nil, fmt.Errorf("expansion of %s nests %d deep, over the job's %d", gen.Name, gen.Depth+1, maxDepth)
 	}
+	// A round's units are named for their round (rounds.go).
+	prefix := ""
+	if gen.Rounds != nil {
+		prefix = RoundName(gen.Rounds.Round, "")
+	} else if d.Next != nil {
+		return nil, fmt.Errorf("next: %s is not a round's generator", gen.Name)
+	}
 	at := map[string]int{}
 	for i, u := range d.Units {
 		if u.Name == "" {
@@ -232,8 +246,8 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 		if _, dup := at[u.Name]; dup {
 			return nil, fmt.Errorf("unit %s is named twice", u.Name)
 		}
-		if _, taken := names[u.Name]; taken {
-			return nil, fmt.Errorf("unit %s is already in the job", u.Name)
+		if _, taken := names[prefix+u.Name]; taken {
+			return nil, fmt.Errorf("unit %s is already in the job", prefix+u.Name)
 		}
 		at[u.Name] = first + i
 	}
@@ -246,11 +260,11 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 	}
 	x := &Expansion{}
 	for i, du := range d.Units {
-		u := Unit{Index: first + i, Name: du.Name, Label: du.Label, Key: du.Key, Pos: i, Slots: du.Slots,
+		u := Unit{Index: first + i, Name: prefix + du.Name, Label: du.Label, Key: du.Key, Pos: i, Slots: du.Slots,
 			Generator: du.Planned, Exists: 1, Parent: gen.Index, Depth: gen.Depth + 1,
 			Work: du.Work, WorkSD: du.WorkSD, Group: du.Group, Holds: du.Holds, Params: du.Params, Gate: du.Gate}
 		if u.Label == "" {
-			u.Label = du.Name
+			u.Label = u.Name
 		}
 		if u.Key == "" {
 			u.Key = gen.Key + "/child"
@@ -328,9 +342,16 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		u.Env = append(u.Env, env("C4_UNIT_NAME", du.Name))
+		u.Env = append(u.Env, env("C4_UNIT_NAME", u.Name))
 		for _, k := range keys {
 			u.Env = append(u.Env, env(k, du.Env[k]))
+		}
+		if du.Rounds != nil {
+			if err := checkRounds(du.Name, du.Rounds, du.Planned); err != nil {
+				return nil, err
+			}
+			u.Rounds = &Rounds{Max: du.Rounds.Max, Until: du.Rounds.Until, Round: 1, First: u.Index, Base: u.Name}
+			u.Env = roundEnv(u.Env, u.Rounds)
 		}
 		x.Units = append(x.Units, u)
 	}
@@ -380,6 +401,22 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 			}
 			x.Dependents = append(x.Dependents, i)
 		}
+	}
+	if r := gen.Rounds; r != nil && (d.Next == nil && r.Until != "" || d.Next != nil && *d.Next) && r.Round < r.Max {
+		// The next round, after this one's units.
+		if _, ok := at[r.Until]; r.Until != "" && !ok {
+			return nil, fmt.Errorf("round %d of %s has no unit %s (rounds.until)", r.Round, r.Base, r.Until)
+		}
+		var after []int
+		for _, u := range x.Units {
+			after = append(after, u.Index)
+		}
+		n := nextRound(gen, first+len(x.Units), after)
+		if _, taken := names[n.Name]; taken {
+			return nil, fmt.Errorf("round %d's generator %s is already in the job", n.Rounds.Round, n.Name)
+		}
+		x.Units = append(x.Units, n)
+		x.Dependents = append(x.Dependents, n.Index)
 	}
 	return x, nil
 }
@@ -463,13 +500,25 @@ func (graph) Plan(job *c4v1.WorkJob) (*Plan, error) {
 	if err := checkDoes(does); err != nil {
 		return nil, fmt.Errorf("rootDoes: %w", err)
 	}
+	// The root may be a loop's first round (params rounds, roundsUntil).
+	var rounds *Rounds
+	if _, ok := job.Spec.Params["rounds"]; ok {
+		n, err := intParam(job, "rounds", 1, 1, MaxRounds)
+		if err != nil {
+			return nil, err
+		}
+		rounds = &Rounds{Max: n, Until: param(job, "roundsUntil", ""), Round: 1, Base: name}
+	}
 	cfg := estimate.DefaultConfig()
 	cfg.NoLocality = true
 	cfg.Default = estimate.Prior{Mean: 600, SD: 300}
 	p := &Plan{OrderName: string(order.Sequential), Estimate: cfg, Prior: prior, Axis: Axis{Kind: "step"},
 		Units: []Unit{{Index: 0, Name: name, Label: name, Key: key, Slots: 1, Generator: true, Exists: 1, Reasoning: Reasoning{Does: does},
-			Env: []corev1.EnvVar{env("C4_UNIT_NAME", name)}}},
+			Env: []corev1.EnvVar{env("C4_UNIT_NAME", name)}, Rounds: rounds}},
 		Order: []int{0}}
+	if rounds != nil {
+		p.Units[0].Env = roundEnv(p.Units[0].Env, rounds)
+	}
 	return p, nil
 }
 

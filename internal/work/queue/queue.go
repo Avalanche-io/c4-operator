@@ -97,6 +97,9 @@ type Queue struct {
 	durations map[string]classDurations
 	// rework is each project's review and rerun history (rework.go).
 	rework map[string]map[string]*reworkStat
+	// rounds is each project's loop history by class and generator key
+	// (rounds.go).
+	rounds map[string]map[string]*roundsStat
 	// profiles are the latest finished job's durations per project, shot,
 	// class and unit key (history.go).
 	profiles map[profileKey]*shotProfile
@@ -243,13 +246,16 @@ type jobMem struct {
 	decisions []decisionRecord
 	// waits are the job's wait units and escalated units, open and
 	// decided (wait.go).
-	waits     *waitMem
-	jobRecord string
-	lastRun   time.Time
-	readyAt   time.Time
-	started   time.Time
-	finished  time.Time
-	wrote     time.Time
+	waits *waitMem
+	// loopsNoted are the loops (by first generator) whose rounds the
+	// project's history counts (rounds.go).
+	loopsNoted map[int]bool
+	jobRecord  string
+	lastRun    time.Time
+	readyAt    time.Time
+	started    time.Time
+	finished   time.Time
+	wrote      time.Time
 	// ended is when each succeeded unit finished, and calPts the
 	// summaries kept for live calibration (calibrate.go).
 	ended   map[int]time.Time
@@ -309,6 +315,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.requeued = st.Requeued
 	m.loadAcks(st)
 	m.loadWaits(st)
+	m.loadLoops(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
 		m.yields = append(m.yields, yieldRecord{Unit: int(y.Unit), At: y.At.Time, Reason: y.Reason, View: y.View})
@@ -445,6 +452,9 @@ type view struct {
 	// openWaits are the wait units whose units are done, waiting for
 	// their decision (wait.go).
 	openWaits map[int]bool
+	// roundsExp is what the queue expects of each loop's remaining rounds,
+	// by first generator (rounds.go).
+	roundsExp map[int]roundsExp
 	planWait  string
 	// locked are units waiting for a holder of what they claim (holds.go)
 	// or for a gate, and gates the job's units at gates (gates.go).
@@ -904,6 +914,8 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		// Units that waited on a reused one may run now.
 		v.runnable, v.waiting, v.stuck = unitWaits(plan, m, v)
 	}
+	q.serveRounds(ctx, v, now)
+	q.noteLoops(v)
 	q.serveWaits(v, now)
 	applyHolds(v)
 	q.estimate(v, now)
@@ -1012,6 +1024,9 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	}
 	reworkUnits, reworkPath := q.expectedRework(v, e)
 	queued = append(queued, reworkUnits...)
+	roundUnits, roundPath, roundsExp := q.expectedRounds(v, e)
+	queued = append(queued, roundUnits...)
+	v.roundsExp = roundsExp
 	s := e.Summarize(queued, run)
 	// The critical path is the longest chain of remaining work through
 	// the unit graph; without edges, the longest single remaining unit.
@@ -1049,6 +1064,11 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		rem[idx], _ = e.RemainderAt(e.Predict(u.Key, u.Pos), retained(idx), math.Max(0, now.Sub(r.started).Seconds()), progress)
 	}
 	for idx, d := range reworkPath {
+		if _, ok := rem[idx]; ok {
+			rem[idx] += d
+		}
+	}
+	for idx, d := range roundPath {
 		if _, ok := rem[idx]; ok {
 			rem[idx] += d
 		}

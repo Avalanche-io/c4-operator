@@ -1389,6 +1389,39 @@ and a sweep planner that spawns trials are all generators.
   - The `graph` class is a job whose plan is one generator (a plan
     importer, test discovery, a sweep planner); its units run the job's
     template, told apart by `$C4_UNIT_NAME` and their `env`.
+- **Rounds** (agent-catalog G-rounds, G-expand-depth): iteration that is
+  not spelled as nesting. A generator may be a bounded loop:
+  `rounds: {max, until?}` on a planned unit of a document, or the job params
+  `rounds` and `roundsUntil` on a graph job's root.
+  - **Siblings, not children.** Round k's units are named `r<k>/<name>`. A
+    round's document refers to its own units by the names it gave them, and
+    to earlier rounds' by their full names; so may a review of the round in
+    its verdict. A document that says
+    `next: true` adds the next round's generator, `r<k+1>/<name>`, after the
+    round's units, a sibling of the first. So `maxExpandDepth` limits
+    nesting only, and a fifty-round loop is one level deep. Each round's
+    generator carries `$C4_ROUND` and `$C4_ROUND_MAX`.
+  - **Until.** With `until`, `next` is the default and the round must hold
+    that review. When its verdict's summary word is `pass`, the next
+    round's generator does not run: the loop ends there and the generator
+    counts as done (signed, kind `rounds-stop`). At `max` no next round is
+    added.
+  - **Status.** `status.rounds` lists each loop: `{unit, name, round, max,
+    until?, stoppedBy?, generators, expectMore?, expectSeconds?}`.
+    `stoppedBy` is `until`, `generator` (it wrote no next round), `max` or
+    `failed`.
+  - **Pricing.** A loop's continuation is learned per project, class and
+    generator key, across jobs, and saved with the project's calibrations,
+    as rework is. It is the chance a round is followed by another, counting
+    rounds that went on and loops that stopped on their own. Before any
+    history a loop expects `max/2` rounds, or the generator's
+    `expectRounds` param, else the job's. The rounds after the pending one
+    are tentative units: round j is weighted by the continuation to the
+    power j and costs what a round of the key costs. Rounds run one after
+    another, so their weighted durations add to the critical path. The
+    round in progress is priced from its own expansion, like any
+    generator's. The ETA band widens with the expected rounds, never with
+    `max`.
 - **Holds and claims** (PRIMITIVES Q8, Q9). A unit's `holds` (paths it
   writes) and `claims` (`{on, mode}`) are what it claims.
   - **Overlap.** A path claim covers everything under it (`src/net/` and

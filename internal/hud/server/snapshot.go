@@ -245,6 +245,15 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNeedsPerson); c != nil && c.Status == metav1.ConditionTrue {
 		aj.NeedsPerson = &api.NeedsPerson{Reason: strings.ToLower(c.Reason), Message: c.Message, Since: c.LastTransitionTime.Time.UTC()}
 	}
+	for _, r := range st.Rounds {
+		ar := api.Rounds{Unit: int(r.Unit), Name: r.Name, Round: int(r.Round), Max: int(r.Max), Until: r.Until,
+			StoppedBy: r.StoppedBy, ExpectSeconds: r.ExpectSeconds}
+		for _, g := range r.Generators {
+			ar.Generators = append(ar.Generators, int(g))
+		}
+		ar.ExpectMore, _ = strconv.ParseFloat(r.ExpectMore, 64)
+		aj.Rounds = append(aj.Rounds, ar)
+	}
 	for _, w := range st.Waits {
 		aw := api.Wait{Unit: int(w.Unit), Name: w.Name, WaitsFor: w.Server, Ask: w.Ask, Choices: w.Choices, Escalated: w.Escalated,
 			ExpectSeconds: w.ExpectSeconds, Blocking: w.Blocking, Do: w.Do, Note: w.Note, Actor: w.Actor, Record: w.Record,
