@@ -144,7 +144,27 @@
           "propertyNames": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "not": {"pattern": "^C4_"}},
           "additionalProperties": {"type": "string"}
         },
-        "workdir": {"type": "string", "minLength": 1}
+        "workdir": {"type": "string", "minLength": 1},
+        "sidecars": {
+          "type": "array",
+          "description": "Servers that run beside the unit for its whole run, each found at $C4_TOOL_<NAME> (http://localhost:<port>).",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "image", "port"],
+            "properties": {
+              "name": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,30}$"},
+              "image": {"type": "string", "minLength": 1},
+              "args": {"type": "array", "items": {"type": "string"}},
+              "env": {
+                "type": "object",
+                "propertyNames": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]*$", "not": {"pattern": "^C4_"}},
+                "additionalProperties": {"type": "string"}
+              },
+              "port": {"type": "integer", "minimum": 1, "maximum": 65535}
+            }
+          }
+        }
       }
     },
     "needs": {
@@ -156,6 +176,7 @@
         "gpu": {"type": "integer", "minimum": 0},
         "gpuMemory": {"$ref": "#/$defs/size"},
         "scratch": {"$ref": "#/$defs/size"},
+        "farm": {"enum": ["read", "job", "project"], "description": "What a unit may do on the farm itself, through the HUD and MCP: read, job (also act on its own job), project (also submit in its project). Unset, nothing."},
         "licences": {
           "type": "object",
           "description": "Seats per unit, as pool/feature: count.",

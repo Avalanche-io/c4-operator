@@ -9,4 +9,4 @@ runs:
   command: [c4-agent, block-pod]
 params:
 - {name: model, type: STRING, default: claude-opus-5-5}
-needs: {cpu: 2, memory: 4G, network: [model-api]}
+needs: {cpu: 2, memory: 4G, network: [model-api], farm: job}

@@ -13,5 +13,6 @@ needs:
   scratch: 50G
   licences: {sesi/karma: 1}     # LicensePool sesi, feature karma, one seat per unit
   network: [licences]           # what it may reach: nothing by default
+  farm: job                     # what it may do on the farm itself: read, job or project
   sizes:                        # named sizes a submission may choose
     heavy: {memory: 128G, gpuMemory: 48G}

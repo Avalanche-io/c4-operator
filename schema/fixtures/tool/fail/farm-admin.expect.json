@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "needs.farm",
+      "message": "\"admin\" is not a farm access",
+      "fix": "a tool may have read, job or project; administration is a person's"
+    }
+  ],
+  "schemaMentions": "admin"
+}

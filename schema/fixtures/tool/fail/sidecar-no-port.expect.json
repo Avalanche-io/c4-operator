@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "runs.sidecars[0]",
+      "message": "a sidecar needs the port it listens on",
+      "fix": "add port: <the port>; the unit finds it at http://localhost:<port>"
+    }
+  ],
+  "schemaMentions": "port"
+}

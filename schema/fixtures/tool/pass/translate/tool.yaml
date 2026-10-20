@@ -10,4 +10,4 @@ runs:
 params:
 - {name: model, type: STRING, default: claude-opus-5-5}
 - {name: effort, type: STRING, default: high, allowedValues: [low, medium, high, xhigh, max]}
-needs: {cpu: 2, memory: 4G, network: [model-api]}
+needs: {cpu: 2, memory: 4G, network: [model-api], farm: job}
