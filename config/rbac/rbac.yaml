@@ -314,6 +314,12 @@ rules:
   resources: [configmaps]
   resourceNames: [c4-work-calibrations]
   verbs: [get, patch]
+# The transition log's head (internal/work/queue/book.go): updated with its
+# resourceVersion, so a stale leader cannot fork the log.
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [c4-work-book]
+  verbs: [get, update]
 - apiGroups: [""]
   resources: [configmaps]
   verbs: [create]

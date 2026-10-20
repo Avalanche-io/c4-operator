@@ -16,6 +16,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/work/forecast"
 	"github.com/Avalanche-io/c4-operator/work/order"
 	"github.com/Avalanche-io/c4-operator/work/sched"
@@ -29,7 +30,9 @@ const statusEvery = 10 * time.Second
 // status now records. A pod is deleted only after the write succeeds, so a
 // restart never loses a finished unit.
 func (q *Queue) report(ctx context.Context, now time.Time, dec sched.Decisions, views []*view) {
-	for _, v := range views {
+	sts := make([]c4v1.WorkJobStatus, len(views))
+	var ts []api.Transition
+	for i, v := range views {
 		if o := v.mem.out; o != nil && o.dirty && q.Stores != nil {
 			if store, err := q.Stores(ctx, v.project); err == nil && store != nil {
 				if err := o.saveIndex(ctx, store, v.key); err != nil {
@@ -37,7 +40,17 @@ func (q *Queue) report(ctx context.Context, now time.Time, dec sched.Decisions, 
 				}
 			}
 		}
-		st := q.status(now, dec, v)
+		sts[i] = q.status(now, dec, v)
+		ts = append(ts, transitions(v.key, v.project, &v.job.Status, &sts[i], now)...)
+	}
+	// The log first: a change is never in a status without being in it
+	// (book.go).
+	if err := q.appendBook(ctx, ts); err != nil {
+		q.Log.Error(err, "transition log: statuses wait for the next tick")
+		return
+	}
+	for i, v := range views {
+		st := sts[i]
 		old := v.job.Status
 		changed := !reflect.DeepEqual(withoutEstimate(old), withoutEstimate(st))
 		if !changed && now.Sub(v.mem.wrote) < statusEvery {

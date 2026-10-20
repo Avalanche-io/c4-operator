@@ -76,6 +76,8 @@ type Queue struct {
 	// Stores opens a project's store, to fold unit changesets into job
 	// outputs. Without it, outputs are not folded.
 	Stores StoreFunc
+	// tlog is the transition log's head (book.go), read once per leader.
+	tlog *bookLog
 	// PriorityClass, when it names a PriorityClass that exists, is set on
 	// unit pods whose template names none (config/manager: c4-unit, with
 	// preemptionPolicy Never, so only the queue preempts units).
