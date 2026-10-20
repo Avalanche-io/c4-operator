@@ -239,3 +239,30 @@ func TestBookGone(t *testing.T) {
 		t.Fatalf("want ErrGone{11}, got %v", err)
 	}
 }
+
+// Preview reads the job's frames and fetches the middle one that has a
+// proxy; a job with none has no preview.
+func TestPreviewFetchesTheMiddleProxy(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/jobs/work/{name}/preview", func(w http.ResponseWriter, r *http.Request) {
+		frames := []map[string]any{{"frame": 1001}, {"frame": 1002}}
+		if r.PathValue("name") == "sh040" {
+			frames = []map[string]any{{"frame": 1001, "url": "/api/v1/objects/proj/c4a"}, {"frame": 1002},
+				{"frame": 1003, "url": "/api/v1/objects/proj/c4b"}, {"frame": 1004, "url": "/api/v1/objects/proj/c4c"}}
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"fps": 24, "frames": frames})
+	})
+	mux.HandleFunc("GET /api/v1/objects/proj/{id}", func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte("png:" + r.PathValue("id")))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	h := &farm.HUD{Base: srv.URL}
+	name, data, err := h.Preview(context.Background(), farm.JobRef{Namespace: "work", Name: "sh040"})
+	if err != nil || name != "sh040.1003.png" || string(data) != "png:c4b" {
+		t.Fatalf("preview: %q %q %v", name, data, err)
+	}
+	if _, _, err := h.Preview(context.Background(), farm.JobRef{Namespace: "work", Name: "plain"}); !errors.Is(err, farm.ErrNotFound) {
+		t.Fatalf("a job with no proxies: %v", err)
+	}
+}

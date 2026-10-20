@@ -1432,6 +1432,13 @@ func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr f
 	if n := len(l.Status.Versions); n > 0 {
 		out.Follows = farm.JobRef{Namespace: l.Namespace, Name: l.Status.Versions[n-1]}.String()
 	}
+	// A still, where the farm has one: best effort, the output publishes
+	// without it.
+	if name, data, err := s.Farm.Preview(ctx, jr); err == nil && len(data) > 0 {
+		out.Preview = &tracker.Still{Name: name, Data: data}
+	} else if err != nil && !errors.Is(err, farm.ErrNotFound) {
+		s.Log.Error(err, "reading the output's preview; publishing without it", "job", jr.String())
+	}
 	ref, err := c.adapter.Publish(ctx, on, out, tracker.WriteKey(l.Namespace+"/"+l.Name, "publish", sum.Output))
 	if err != nil {
 		return err

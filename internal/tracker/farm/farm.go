@@ -99,6 +99,10 @@ type Farm interface {
 	// GET /book?since); a cursor
 	// the log no longer reaches is an *ErrGone.
 	Book(ctx context.Context, since int64, limit int) (api.Transitions, error)
+	// Preview is a still of the job's output, for trackers that review
+	// one (a Kitsu preview): its file name and bytes; ErrNotFound when
+	// the output has none.
+	Preview(ctx context.Context, j JobRef) (name string, data []byte, err error)
 }
 
 // ErrNotFound is a job the farm does not have, or will not show.
@@ -189,6 +193,10 @@ func (h *HUD) do(ctx context.Context, method, path string, ctype string, body []
 		}
 		_ = json.Unmarshal(data, &e)
 		return &APIError{Status: resp.StatusCode, Msg: e.Error, Body: data}
+	}
+	if raw, ok := out.(*[]byte); ok {
+		*raw = data
+		return nil
 	}
 	if out != nil {
 		return json.Unmarshal(data, out)
@@ -329,6 +337,44 @@ func (h *HUD) Book(ctx context.Context, since int64, limit int) (api.Transitions
 		return out, &ErrGone{Oldest: g.Oldest}
 	}
 	return out, err
+}
+
+// Preview reads the job's frames (GET /jobs/{ns}/{name}/preview) and
+// fetches the middle one's preview proxy, a PNG, from the project's store.
+func (h *HUD) Preview(ctx context.Context, j JobRef) (string, []byte, error) {
+	var p struct {
+		Frames []struct {
+			Frame int    `json:"frame"`
+			URL   string `json:"url"`
+		} `json:"frames"`
+	}
+	err := h.doJSON(ctx, http.MethodGet, jobPath(j)+"/preview", nil, &p)
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
+		return "", nil, ErrNotFound
+	}
+	if err != nil {
+		return "", nil, err
+	}
+	var have []int
+	for i, f := range p.Frames {
+		if f.URL != "" {
+			have = append(have, i)
+		}
+	}
+	if len(have) == 0 {
+		return "", nil, ErrNotFound
+	}
+	f := p.Frames[have[len(have)/2]]
+	path, ok := strings.CutPrefix(f.URL, "/api/v1")
+	if !ok || !strings.HasPrefix(path, "/objects/") {
+		return "", nil, fmt.Errorf("the HUD's preview of %s is not one of its objects: %s", j, f.URL)
+	}
+	var data []byte
+	if err := h.do(ctx, http.MethodGet, path, "", nil, &data); err != nil {
+		return "", nil, err
+	}
+	return fmt.Sprintf("%s.%04d.png", j.Name, f.Frame), data, nil
 }
 
 func (h *HUD) JobURL(j JobRef) string {

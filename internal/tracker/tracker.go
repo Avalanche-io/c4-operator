@@ -83,6 +83,15 @@ type Output struct {
 	Record  string // the job record's C4 ID
 	Custody string // the provenance view's URL
 	Follows string // the job this version follows; "" for the first
+	// Preview is a still of the output for trackers that review one (a
+	// Kitsu preview); nil when the farm has none.
+	Preview *Still
+}
+
+// Still is one image of an output: a frame's preview proxy.
+type Still struct {
+	Name string // a file name with its extension (sh040.1120.png)
+	Data []byte
 }
 
 // Describe says what the output is, and nothing about the job's state:
