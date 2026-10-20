@@ -284,7 +284,8 @@ func (a *alloc) restoreFeasibility() {
 	}
 	// A job the plan already makes late misses its deadline by more for
 	// every slot it lacks: it too may take guard units, up to its planned
-	// share. Ordinary units stay protected from it, as before.
+	// share, and time-slice a checkpointing unit. Ordinary units stay
+	// protected from it, as before.
 	var late []*jobCtx
 	for _, jc := range a.jobs {
 		if jc.hasDeadline && !jc.planOK && jc.canRelease() && float64(jc.running+jc.incoming) < jc.share-1e-9 {
@@ -294,6 +295,8 @@ func (a *alloc) restoreFeasibility() {
 	sort.SliceStable(late, func(i, j int) bool { return late[i].W < late[j].W })
 	for _, jc := range late {
 		a.restoreFrom(jc, int(math.Ceil(jc.share-1e-9)), true)
+		// It misses by less with the slot than waiting for it.
+		a.timeSlice(jc, int(math.Ceil(jc.share-1e-9)))
 	}
 }
 

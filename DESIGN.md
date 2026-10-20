@@ -2334,7 +2334,9 @@ through the tiers instead of from the store.
     yields at its next safe point and loses only its restore cost, and it
     may not take the slot back within the hour. The queue tells the
     policy each running unit's expected time left
-    (`RunningUnit.Remaining`). With no estimate, nothing is sliced.
+    (`RunningUnit.Remaining`). With no estimate, nothing is sliced. A
+    job the plan already makes late slices too, up to its share rounded
+    up: it misses by less with the slot than waiting for it.
 - A unit of a class that checkpoints is asked to yield, not killed. The
   queue sets the annotation `c4.avalanche.io/yield` on its pod; the unit sees
   it through a downward API file (`C4_PODINFO`), saves a checkpoint into its

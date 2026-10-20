@@ -67,3 +67,16 @@ func TestReclaimOnAOneSlotPool(t *testing.T) {
 		t.Fatalf("preempt %+v", p)
 	}
 }
+
+// A job the plan already makes late time-slices too: it misses by less.
+func TestLateJobTimeSlices(t *testing.T) {
+	urgent := job("urgent", "practice", 1, 0.75, 40*time.Minute)
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "cpu", Slots: 1, Used: 1}}, Jobs: []Job{oneBlock(50 * time.Minute), urgent}}
+	d := Decide(s, &State{}, DefaultConfig())
+	if js := d.Jobs["urgent"]; !js.AtRisk {
+		t.Fatalf("urgent is on time in the plan: %+v", js)
+	}
+	if len(d.Preempt) != 1 || d.Preempt[0].For != "urgent" || !d.Preempt[0].Yield {
+		t.Fatalf("preempted %+v", d.Preempt)
+	}
+}
