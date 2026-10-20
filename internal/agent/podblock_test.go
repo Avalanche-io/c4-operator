@@ -27,6 +27,7 @@ mkdir -p "$(dirname "$tr")"
 if [ "$mode" = resume ] && [ ! -f "$tr" ]; then echo "No conversation found with session ID: $sid" >&2; exit 1; fi
 echo '{"type":"assistant","message":{"id":"m","model":"opus","content":[{"type":"text","text":"a turn"}]}}' >> "$tr"
 echo "$mode $sid" >> "$FAKE_LOG"
+if [ -n "$FAKE_NEEDS" ]; then echo "$FAKE_NEEDS" > "$C4_OUTPUT/.c4/needs.json"; exit 0; fi
 if [ "$(wc -l < "$FAKE_LOG")" -eq 1 ]; then echo "part 2" > "$C4_OUTPUT/.c4/more"; else echo "done" > "$C4_OUTPUT/.c4/done"; fi
 `
 
@@ -128,5 +129,35 @@ func TestPodBlockLinksItsLease(t *testing.T) {
 	os.WriteFile(filepath.Join(leaseDir, ".credentials.json"), []byte("renewed"), 0o600)
 	if got, _ := os.ReadFile(filepath.Join(cfg, ".credentials.json")); string(got) != "renewed" {
 		t.Fatalf("the store reads %q", got)
+	}
+}
+
+// A block in a pod that reports missing information ends its attempt with
+// status 12 and the text as the container's termination message; its
+// session is in its view for the attempt that resumes it.
+func TestPodBlockNeedsInformation(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(bin, []byte(fakePrint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd, out, cfg := t.TempDir(), t.TempDir(), t.TempDir()
+	term := filepath.Join(t.TempDir(), "termination-log")
+	t.Setenv("FAKE_SLUG", ProjectSlug(cwd))
+	t.Setenv("FAKE_LOG", filepath.Join(t.TempDir(), "calls"))
+	t.Setenv("FAKE_NEEDS", `{"needs": "the delivery frame rate", "why": "the brief gives 24 and 25"}`)
+	t.Setenv("C4_JOB", "port")
+	t.Setenv("C4_UNIT_NAME", "notes")
+	t.Setenv("C4_OUTPUT", out)
+	t.Setenv("C4_TERMINATION_LOG", term)
+	b := &PodBlock{Out: out, ConfigDir: cfg, Cwd: cwd, Claude: bin, HookCommand: "true", Env: os.Getenv, Logf: t.Logf}
+	code, err := b.Run(context.Background())
+	if err != nil || code != PodBlockNeedsInformation {
+		t.Fatalf("exit %d, %v", code, err)
+	}
+	if got, _ := os.ReadFile(term); string(got) != "the delivery frame rate\nwhy: the brief gives 24 and 25" {
+		t.Fatalf("termination message %q", got)
+	}
+	if _, err := ReadSessionInfo(out); err != nil {
+		t.Fatalf("the session is not in its view: %v", err)
 	}
 }

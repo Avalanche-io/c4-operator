@@ -264,6 +264,14 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 			return err
 		}
 		live = false
+		// missing information first: it stops the block whatever the farm
+		// said at the safe point
+		if msg, ok, err := takeNeeds(u); ok {
+			if err != nil {
+				return r.finish(ctx, p, corev1.PodFailed, "BlockGaveUp", "the block reported missing information, but "+err.Error(), 1)
+			}
+			return r.needsInformation(ctx, p, m, msg)
+		}
 		stopped := r.relays[p.UID] != nil && r.relays[p.UID].stopped
 		switch note, more := takeMore(u); {
 		case stopped:

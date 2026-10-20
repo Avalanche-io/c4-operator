@@ -237,7 +237,9 @@ func blockPrompt(p *corev1.Pod, u UnitDirs) string {
 // asks, or that the farm resumed it, and its new unit directory.
 func reworkPrompt(p *corev1.Pod, u UnitDirs) string {
 	var b strings.Builder
-	if why := strings.TrimSpace(podEnv(p, EnvBlockRework)); why != "" {
+	if s := suppliedText(p); s != "" {
+		b.WriteString(s)
+	} else if why := strings.TrimSpace(podEnv(p, EnvBlockRework)); why != "" {
 		fmt.Fprintf(&b, "A review sent your block back. It asks:\n%s\n\nFix that, and only that.\n\n", why)
 	} else if d := decisionText(p, replyDir(p, u)); d != "" {
 		b.WriteString(d)
@@ -260,8 +262,73 @@ func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	b.WriteString("  - a generator writes its expansion document (version 1) to expand.json there;\n")
 	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n")
 	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note (to withdraw one, write the file empty).\n")
-	b.WriteString("- Act on your brief: decide everything it leaves to you, and never ask for confirmation of what it says. If it lacks information only a person could give, do not guess: say exactly what is missing in your reply, write no done, and end your turn. That stops this block as an error the pipeline must fix.\n\n")
+	b.WriteString(`- Act on your brief: decide everything it leaves to you, and never ask for confirmation of what it says. If it lacks information only a person could give, do not guess: write needs.json in that .c4/ directory, {"needs": "exactly what is missing", "why": "why the brief does not settle it"}, and end your turn. That stops this block as an error the pipeline must fix; once the information is supplied, you resume with it.` + "\n\n")
 	return b.String()
+}
+
+// needsInformation stops a block whose brief lacks information only a
+// person could give: a work-stopping error, not a question. The pod fails
+// with reason NeedsInformation and the text as its message; the queue does
+// not retry it, raises it as an incident, and requeues the unit once the
+// information is supplied. Its checkpoint and its session's view are where
+// that attempt resumes.
+func (r *Runner) needsInformation(ctx context.Context, p *corev1.Pod, m *Member, msg string) error {
+	r.logf("%s: needs information: %s", m.Name, strings.ReplaceAll(msg, "\n", "; "))
+	if cp, err := r.Harness.Store.Last(m.Name); err == nil && cp != nil {
+		if err := r.annotate(ctx, p, map[string]string{c4v1.AnnotationOutputCheckpoint: point(m, cp)}); err != nil {
+			return err
+		}
+	}
+	if err := r.saveSession(ctx, p, m); err != nil {
+		return err
+	}
+	return r.finish(ctx, p, corev1.PodFailed, "NeedsInformation", msg, PodBlockNeedsInformation)
+}
+
+// takeNeeds reads and consumes a block's .c4/needs.json, what its brief
+// lacks: the message the farm records for NeedsInformation (the text, then
+// "\nwhy: " and why, as c4-unit needs writes it). ok is false when there
+// is none; err says why a file is malformed.
+func takeNeeds(u UnitDirs) (msg string, ok bool, err error) {
+	path := filepath.Join(u.Out, ".c4", "needs.json")
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return "", false, nil
+	}
+	if err != nil {
+		return "", true, err
+	}
+	os.Remove(path)
+	var n struct {
+		Needs string `json:"needs"`
+		Why   string `json:"why,omitempty"`
+	}
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&n); err != nil {
+		return "", true, fmt.Errorf("needs.json: %v", err)
+	}
+	if strings.TrimSpace(n.Needs) == "" {
+		return "", true, errors.New("needs.json: nothing in needs")
+	}
+	msg = strings.TrimSpace(n.Needs)
+	if why := strings.TrimSpace(n.Why); why != "" {
+		msg += "\nwhy: " + why
+	}
+	return msg, true, nil
+}
+
+// suppliedText is what was supplied for the information a block reported
+// missing ($C4_NEEDED, $C4_SUPPLIED), for the attempt that resumes it.
+func suppliedText(p *corev1.Pod) string {
+	supplied := strings.TrimSpace(podEnv(p, "C4_SUPPLIED"))
+	if supplied == "" {
+		return ""
+	}
+	if needed := strings.TrimSpace(podEnv(p, "C4_NEEDED")); needed != "" {
+		return fmt.Sprintf("You reported that your brief lacked:\n%s\n\nHere it is:\n%s\n\nCarry on with your task.\n\n", needed, supplied)
+	}
+	return fmt.Sprintf("The information your brief lacked has been supplied:\n%s\n\nCarry on with your task.\n\n", supplied)
 }
 
 // decisionText is what a person decided on the question a block asked, for

@@ -314,9 +314,12 @@ What the host needs:
 A block acts on its brief. It decides everything the brief leaves to it,
 and never asks for confirmation of what the brief says, as a renderer
 renders the light it was given.
-- **Information only a person could give.** If the brief lacks it, the block says what is missing in its reply and ends its turn without `done`. The attempt then fails as an error the pipeline must fix: supply the information (a rework) and retry, and the block resumes by its ID.
+- **Information only a person could give.** If the brief lacks it, the block writes `.c4/needs.json` (`{"needs": "what is missing", "why": "why the brief does not settle it"}`) and ends its turn. That is a work-stopping error, not a question:
+  - **The attempt fails with `NeedsInformation`,** and the text is its message. On a host that is the pod's reason; in a pod, `block-pod` exits 12 with the text as its termination message, as `c4-unit needs` does.
+  - **It is not retried.** It shows as an incident, with its checkpoint and its session's view kept.
+  - **When someone supplies the information** (HUD or MCP `c4_supply`), the unit runs again and resumes the same session. The prompt says what it reported missing (`$C4_NEEDED`) and what was supplied (`$C4_SUPPLIED`).
 - **A person who decides on purpose,** such as a creative approval gate, is a step in the job's graph: a wait or a review that a person decides. The block resumed after it hears the decision (`$C4_DECISION`), with the reply's files at `$C4_REPLY`, or fetched into the host unit's `reply/`.
-- **Coming:** questions between agents (a block asks its lead, a peer or a reviewer for a fact it lacks, keeping its slot while an agent answers), and missing information as a `NeedsInformation` incident that is not retried. See proposals/agent-jobs ASKS.md.
+- **Coming:** questions between agents. A block will ask its lead, a peer or a reviewer for a fact it lacks, keeping its slot while an agent answers. See proposals/agent-jobs ASKS.md.
 
 ### Steering a running block
 

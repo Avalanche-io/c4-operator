@@ -56,6 +56,9 @@ const (
 	PodBlockDone    = 0
 	PodBlockYielded = 0
 	PodBlockGaveUp  = 3
+	// PodBlockNeedsInformation: the brief lacks information only a person
+	// could give (the queue's NeedsInformation; c4-unit needs's status).
+	PodBlockNeedsInformation = 12
 )
 
 func (b *PodBlock) logf(format string, args ...any) {
@@ -128,6 +131,13 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 		if err := ExportSession(st, m, b.Out); err != nil {
 			return 1, err
 		}
+		if msg, ok, err := takeNeeds(u); ok {
+			if err != nil {
+				b.logf("%s: reported missing information, but %v", m.Name, err)
+				return PodBlockGaveUp, nil
+			}
+			return b.needsInformation(m, msg)
+		}
 		if b.stopped(u) {
 			b.logf("%s: the farm said stop at this safe point; it yields with its session in its view", m.Name)
 			return PodBlockYielded, nil
@@ -163,6 +173,21 @@ func (b *PodBlock) linkLease() error {
 	link := filepath.Join(b.ConfigDir, ".credentials.json")
 	os.Remove(link)
 	return os.Symlink(target, link)
+}
+
+// needsInformation ends the attempt for information its brief lacks: the
+// text is the container's termination message, and the status 12 tells
+// the farm (c4-unit needs does the same).
+func (b *PodBlock) needsInformation(m *Member, msg string) (int, error) {
+	b.logf("%s: needs information: %s", m.Name, strings.ReplaceAll(msg, "\n", "; "))
+	path := b.Env("C4_TERMINATION_LOG")
+	if path == "" {
+		path = "/dev/termination-log"
+	}
+	if err := os.WriteFile(path, []byte(msg), 0o644); err != nil {
+		return 1, err
+	}
+	return PodBlockNeedsInformation, nil
 }
 
 // register records the new session's member once its transcript appears,

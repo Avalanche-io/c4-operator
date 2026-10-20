@@ -421,3 +421,63 @@ func TestReworkPromptCarriesTheDecision(t *testing.T) {
 		}
 	}
 }
+
+// A block whose brief lacks information reports it in .c4/needs.json: the
+// host runner fails its pod with reason NeedsInformation and the text as
+// the message (what c4-unit needs writes), with the checkpoint the retry
+// resumes from. A malformed report is refused by name.
+func TestHostNeedsInformation(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	m := e.register("lead", sess)
+	r, c := hostRunner(t, e, hostPod())
+	p := getPod(t, c)
+	u, err := r.prepareUnit(p, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	write := func(doc string) {
+		if err := os.WriteFile(filepath.Join(u.Out, ".c4", "needs.json"), []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write(`{"needs": "the delivery frame rate", "why": "the brief gives 24 and 25"}`)
+	msg, ok, err := takeNeeds(u)
+	if !ok || err != nil || msg != "the delivery frame rate\nwhy: the brief gives 24 and 25" {
+		t.Fatalf("takeNeeds: %q %v %v", msg, ok, err)
+	}
+	if _, ok, _ := takeNeeds(u); ok {
+		t.Fatal("the report was not consumed")
+	}
+	write(`{"question": "a field the format does not have"}`)
+	if _, ok, err := takeNeeds(u); !ok || err == nil || !strings.Contains(err.Error(), "unknown field") {
+		t.Fatalf("malformed: %v %v", ok, err)
+	}
+
+	if err := r.needsInformation(ctx, p, m, msg); err != nil {
+		t.Fatal(err)
+	}
+	got := getPod(t, c)
+	if got.Status.Phase != corev1.PodFailed || got.Status.Reason != "NeedsInformation" || got.Status.Message != msg {
+		t.Fatalf("pod %s %s %q", got.Status.Phase, got.Status.Reason, got.Status.Message)
+	}
+	if got.Annotations[c4v1.AnnotationOutputCheckpoint] == "" {
+		t.Fatal("no checkpoint for the retry to resume from")
+	}
+}
+
+// The attempt that resumes a block after the information was supplied
+// hears what it asked for and what came; that comes before any other
+// reason it was resumed.
+func TestReworkPromptCarriesWhatWasSupplied(t *testing.T) {
+	p := hostPod()
+	c := &p.Spec.Containers[0]
+	c.Env = append(c.Env, corev1.EnvVar{Name: "C4_NEEDED", Value: "the delivery frame rate"},
+		corev1.EnvVar{Name: "C4_SUPPLIED", Value: "24 fps; the 25 was a typo"})
+	got := reworkPrompt(p, UnitDirsAt(t.TempDir()))
+	for _, want := range []string{"your brief lacked:\nthe delivery frame rate", "Here it is:\n24 fps; the 25 was a typo"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("the prompt lacks %q:\n%s", want, got)
+		}
+	}
+}
