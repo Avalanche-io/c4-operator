@@ -2292,6 +2292,15 @@ Burst decisions are cost-aware:
   when that passes its deadline. Its share and bursts are the plan's.
   Before, a seven-minute comp whose light finished in an hour read 39 hours
   late. A job's message gives its slack against the finish it shows.
+- **A job moved out of the on-time set reports what the plan produces**:
+  the earlier of its share held for all its work and what the on-time work
+  leaves it while staying on time (by each time, the group's capacity less
+  the on-time work due by then, at every later deadline too, after the
+  late work served before it), and no earlier than deadline order. Its lateness for buying a burst is still priced at that share
+  for all its work (the floor), so a burst can be bought for it; such a
+  burst is marked `Floor`, its message says "priced at its lateness at the
+  share it has now", and so do the capacity request's reason and the
+  approval request.
 - **Bursts are topped up from what is left.** A job confined to a subset of
   its group's pools takes the more pessimistic of the two plans: the riskier
   plan's shortfall, but the smaller share. At that smaller share it needs

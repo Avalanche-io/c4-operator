@@ -82,8 +82,11 @@ func (q *Queue) capacity(ctx context.Context, now time.Time, dec sched.Decisions
 			continue
 		}
 		why := b.Why
-		if b.Margin {
+		switch {
+		case b.Margin:
 			why = "margin against estimate uncertainty; " + why
+		case b.Floor:
+			why = "priced at the job's lateness at the share it has now; " + why
 		}
 		for pool, n := range b.Slots {
 			name := pool + "-approve-" + shortHash(b.Job)

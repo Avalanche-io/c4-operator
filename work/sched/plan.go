@@ -423,15 +423,26 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		planned += x.W90
 		gplanned += a.preTail(x.jobCtx, x.W90)
 	}
+	// The on-time work by deadline, under Graham's bound at p90 and p50,
+	// for what a late job reports (stealFinish).
+	var dls, gc90, gc50 []float64
+	c90, c50 := 0.0, 0.0
+	for _, x := range set {
+		c90 += a.preTail(x.jobCtx, x.W90)
+		c50 += a.preTail(x.jobCtx, x.W)
+		dls, gc90, gc50 = append(dls, eff(x)), append(gc90, c90), append(gc50, c50)
+	}
+	ahead90, ahead50 := 0.0, 0.0
 	for _, m := range late {
 		m.planOK = false
 		m.atRisk = true
 		t := eff(m)
-		before, gbefore := 0.0, 0.0
+		before, gbefore, gbefore50 := 0.0, 0.0, 0.0
 		for _, x := range set {
 			if eff(x) <= t {
 				before += x.W90
 				gbefore += a.preTail(x.jobCtx, x.W90)
+				gbefore50 += a.preTail(x.jobCtx, x.W)
 			}
 		}
 		finish, late := a.lateFinish(m, m.W90, before, planned, C)
@@ -444,19 +455,74 @@ func (a *alloc) planFluid(g []groupMember, C float64) {
 		m.lateBy = secs(math.Max(0, late-m.T))
 		m.horizon = t
 		m.deficit = math.Max(math.Max(before+m.W90-C*t, m.W90-m.cap*t), m.W90-m.share*t)
-		// Under Graham's bound the job may be on time: then the margin
-		// alone makes it late, and any burst for it is that margin.
+		// Its lateness is priced at the share left to it now for as long as
+		// its work takes (lateFinish's floor), so a burst can be bought for
+		// it. What it reports is what the plan produces: what the on-time
+		// work leaves it while that work stays on time, after the late
+		// work served before it (stealFinish), and no earlier than
+		// deadline order, under Graham's bound, if that is sooner than at
+		// the share it has now for all its work. A trickle left now lasts
+		// only while on-time work due soon needs the rest: a seven-minute
+		// comp left 0.14 slots read 41 h. A burst for it is priced at the
+		// floor, and says so (BurstSuggestion.Floor).
 		w := a.preTail(m.jobCtx, m.W90)
 		gfinish, glate := a.lateFinish(m, w, gbefore, gplanned, C)
-		m.gin50, m.gin90 = gfinish, gfinish
-		s := &shownPlan{finish50: gfinish, finish90: glate}
-		if glate > m.T {
+		w50 := a.preTail(m.jobCtx, m.W)
+		gfinish50, glate50 := a.lateFinish(m, w50, gbefore50, gplanned, C)
+		m.gin50, m.gin90 = gfinish50, gfinish
+		// The earlier of the two ways the plan finishes it (its share held
+		// for all its work, or what the on-time work leaves it), and no
+		// earlier than deadline order.
+		g90 := math.Max(gfinish, math.Min(glate, a.stealFinish(m, w+ahead90, dls, gc90, C)))
+		g50 := math.Min(g90, math.Max(gfinish50, math.Min(glate50, a.stealFinish(m, w50+ahead50, dls, gc50, C))))
+		ahead90, ahead50 = ahead90+w, ahead50+w50
+		s := &shownPlan{finish50: g50, finish90: g90}
+		if g90 > m.T {
 			s.atRisk = true
-			s.finish90 = math.Max(glate, m.T+1)
-			s.lateBy = secs(s.finish90 - m.T)
+			s.lateBy = secs(math.Min(g90, bigSeconds) - m.T)
 		}
 		m.shown = s
 	}
+}
+
+// stealFinish is when the plan finishes w of a late job's work in what
+// the on-time work leaves it: by time t the group has done C*t of work, of
+// which the on-time work due by t (cum, by deadline dls, both in deadline
+// order) must be part, at t and at every later deadline, so the on-time
+// jobs stay on time; the late job runs on at most its attainable slots.
+// The fluid plan paces on-time work to its deadlines and gives late jobs
+// what is left, so this is its finish as it is recomputed: a trickle left
+// now lasts only while on-time work due soon needs the rest.
+func (a *alloc) stealFinish(m groupMember, w float64, dls, cum []float64, C float64) float64 {
+	if w <= 0 {
+		return a.fluidFinish(m.jobCtx, 0, C)
+	}
+	// slack[k] is the least spare work C*d - cum over deadlines k and on.
+	slack := make([]float64, len(dls)+1)
+	slack[len(dls)] = math.Inf(1)
+	for k := len(dls) - 1; k >= 0; k-- {
+		slack[k] = math.Min(slack[k+1], C*dls[k]-cum[k])
+	}
+	t := math.Inf(1)
+	for k := 0; k <= len(dls); k++ {
+		start, before := 0.0, 0.0
+		if k > 0 {
+			start, before = math.Max(0, dls[k-1]), cum[k-1]
+		}
+		if slack[k] < w {
+			continue
+		}
+		x := math.Max(start, div(w+before, C))
+		if k == len(dls) || x < dls[k] {
+			t = x
+			break
+		}
+	}
+	t = math.Max(t, div(w, math.Min(m.cap, C)))
+	if a.cfg.TailAware {
+		return t + m.tpath
+	}
+	return math.Max(t, m.tpath)
 }
 
 // lateFinish is a late job's finish with all its attainable slots

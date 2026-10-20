@@ -1509,3 +1509,33 @@ func TestWaitingJobFinishFromItsStart(t *testing.T) {
 		t.Fatalf("comp ETA90 %s (light %s): %+v", c.ETA90.Sub(t0), l.ETA90.Sub(t0), c)
 	}
 }
+
+// An evicted job reports what the plan produces: the share left to it
+// while the on-time work runs, then all its slots. Nine small jobs and a
+// light fill a 4-slot group; the comp, runnable and the largest, leaves
+// the on-time set with 0.2 slots, which alone would take it 15 h. The
+// on-time work is done at 2.5 h, and the comp then has the group: it
+// reports about 3.1 h, a few minutes late. A burst for it is priced at
+// the 15 h floor, and says so.
+func TestEvictedJobReportsWhatThePlanProduces(t *testing.T) {
+	jobs := []Job{job("light", "p", 4, 0.5, 2*time.Hour)}
+	for i := 0; i < 9; i++ {
+		jobs = append(jobs, job(fmt.Sprintf("f%d", i), "p", 2, 1, 150*time.Minute))
+	}
+	comp := job("comp", "p", 8, 3, 3*time.Hour)
+	comp.Pools = []string{"cpu", "spot"}
+	jobs = append(jobs, comp)
+	spot := Pool{Name: "spot", Burst: &Burst{MaxSlots: 8, Provisioning: 5 * time.Minute, CostPerSlotHour: 0.1}}
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(4), spot}, Jobs: jobs,
+		Projects: []Project{{Name: "p", Weight: 1, BurstBudgetLeft: 100, LateCostPerHour: 100}}}
+	c := Decide(s, &State{}, DefaultConfig()).Jobs["comp"]
+	if c.Share > 0.5 || c.ETA90.Before(t0.Add(3*time.Hour)) || c.ETA90.After(t0.Add(3*time.Hour+20*time.Minute)) || c.LateBy > 20*time.Minute {
+		t.Fatalf("share %.2f, ETA90 %s, late by %s; want about 3.1h", c.Share, c.ETA90.Sub(t0), c.LateBy)
+	}
+	if c.Burst == nil || !c.Burst.Floor || c.Burst.Margin || c.Burst.LateCost < 10*100 {
+		t.Fatalf("burst %+v", c.Burst)
+	}
+	if !strings.Contains(c.Message, "Priced at its lateness at the share it has now") {
+		t.Fatalf("message %q", c.Message)
+	}
+}

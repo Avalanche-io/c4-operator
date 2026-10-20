@@ -35,13 +35,15 @@ import (
 // margin (the critical path counted twice, see planFluid). A job on time
 // under Graham's bound but late with the margin gets a burst marked
 // Margin: it buys margin against estimate uncertainty, and its message
-// and capacity request say so.
+// and capacity request say so. A burst priced at the lateness a job
+// would have at the share the plan leaves it now, above the lateness it
+// reports, is marked Floor, and its message and capacity request say so.
 //
 // Each burst pool's request is its current request plus approved
 // additions. It shrinks only after the pool has had idle provisioned
 // slots for ScaleDownAfter, and then by the idle count.
 func (a *alloc) burst() {
-	promised, margin := map[string]int{}, map[string]int{}
+	promised, margin, floor := map[string]int{}, map[string]int{}, map[string]int{}
 	budget := map[string]float64{}
 	for name, pr := range a.projects {
 		budget[name] = pr.p.BurstBudgetLeft
@@ -69,6 +71,7 @@ func (a *alloc) burst() {
 			continue
 		}
 		sg.Margin = !jc.view().atRisk
+		sg.Floor = !sg.Margin && lateBy > jc.view().lateBy+time.Minute
 		sg.LateCost = lateCost
 		switch {
 		case !a.cfg.Burst:
@@ -92,8 +95,11 @@ func (a *alloc) burst() {
 			}
 			for pool, n := range sg.Slots {
 				promised[pool] += n
-				if sg.Margin {
+				switch {
+				case sg.Margin:
 					margin[pool] += n
+				case sg.Floor:
+					floor[pool] += n
 				}
 			}
 		}
@@ -116,9 +122,18 @@ func (a *alloc) burst() {
 		case promised[name] > 0 && margin[name] == promised[name]:
 			delete(a.st.surplus, name)
 			reason = fmt.Sprintf("+%d as margin against estimate uncertainty", promised[name])
-		case promised[name] > 0 && margin[name] > 0:
+		case promised[name] > 0 && floor[name] == promised[name]:
 			delete(a.st.surplus, name)
-			reason = fmt.Sprintf("+%d for jobs at risk, %d of them as margin against estimate uncertainty", promised[name], margin[name])
+			reason = fmt.Sprintf("+%d for jobs at risk, priced at their lateness at the share they have now", promised[name])
+		case promised[name] > 0 && margin[name]+floor[name] > 0:
+			delete(a.st.surplus, name)
+			reason = fmt.Sprintf("+%d for jobs at risk", promised[name])
+			if margin[name] > 0 {
+				reason += fmt.Sprintf(", %d of them as margin against estimate uncertainty", margin[name])
+			}
+			if floor[name] > 0 {
+				reason += fmt.Sprintf(", %d priced at their lateness at the share they have now", floor[name])
+			}
 		case promised[name] > 0:
 			delete(a.st.surplus, name)
 			reason = fmt.Sprintf("+%d for jobs at risk", promised[name])
@@ -412,6 +427,10 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 		}
 	case sg.Closes:
 		fmt.Fprintf(&b, " %s %s it (about %s).", slotList(sg), closesVerb(sg.Slots), dollars(sg.Cost))
+		if sg.Floor {
+			// Priced at the plan's floor, not at the lateness shown.
+			fmt.Fprintf(&b, " Priced at its lateness at the share it has now, about %s.", human(jc.lateBy))
+		}
 		if !sg.Auto {
 			fmt.Fprintf(&b, " Needs approval: %s.", sg.Why)
 		}

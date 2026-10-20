@@ -261,6 +261,11 @@ type BurstSuggestion struct {
 	// with the plan's margin (the critical path counted twice): the burst
 	// is margin against estimate uncertainty.
 	Margin bool
+	// Floor says the burst's lateness is priced at the share the plan
+	// leaves the job now for all its work (planFluid's floor), above the
+	// lateness it reports (the plan's finish as its on-time work ends):
+	// LateCost is that floor's.
+	Floor bool
 	// LateCost is the lateness cost the burst prevents, LateCostPerHour
 	// times the job's lateness in the plan with its margin; for a Margin
 	// burst that lateness is above the job's reported LateBy of 0.
