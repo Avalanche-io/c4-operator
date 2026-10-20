@@ -11,12 +11,12 @@ manager's `--holder-transfer=allow`, and it is `disallow` by default.
 
 ## How it works
 
-| part                                  | what it does                                                                                                                                                                             |
-| ------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `c4-agent lease` (the holder's agent) | Runs on the holder's machine. It creates the lease and keeps its Secret holding the holder's current short-lived token, renewed before it expires. When it stops, it deletes the Secret. |
-| the CredentialLease controller        | Keeps the lease's state. It deletes the Secret when the lease lapses, or when the farm's switch is off. It never reads the Secret: delete is its only verb on Secrets.                   |
-| the work queue                        | Releases a unit whose template mounts a lease to a pool in the lease's target only while the lease is active and serves the job's owner. In other pools, the pod runs without it.        |
-| `c4-lease-mounts` (admission policy)  | Only the queue creates pods that mount a lease's Secret. No one puts one in an environment variable or a projected volume.                                                               |
+| part                                  | what it does                                                                                                                                                                                                                                                                                                                            |
+| ------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `c4-agent lease` (the holder's agent) | Runs on the holder's machine. It creates the lease and keeps its Secret holding the holder's current short-lived token, renewed before it expires. When it stops, it deletes the Secret.                                                                                                                                                |
+| the CredentialLease controller        | Keeps the lease's state. It deletes the Secret when the lease lapses, or when the farm's switch is off. It never reads the Secret: delete is its only verb on Secrets.                                                                                                                                                                  |
+| the work queue                        | Releases a unit whose template mounts a lease to a pool in the lease's target only while the lease is active and serves the job's owner, and, for a job a tracker submitted for the owner, while the owner's grant to that tracker serves (not revoked or ended, covering the pool and class). In other pools, the pod runs without it. |
+| `c4-lease-mounts` (admission policy)  | Only the queue creates pods that mount a lease's Secret. No one puts one in an environment variable or a projected volume.                                                                                                                                                                                                              |
 
 **The token, and only the token.**
 - The agent reads the holder's sign-in where Claude Code keeps it. On macOS that is the login keychain item `Claude Code-credentials` (suffixed for a config dir other than `~/.claude`). Elsewhere it is `<config dir>/.credentials.json`.
@@ -80,7 +80,14 @@ template:
 
 A unit of this job waits, without a pod, until the lease is active. The
 queue logs why at verbosity 1: the lease is missing, not yet issued, ended,
-not serving the job's owner, or the mode is off.
+not serving the job's owner, the mode is off, or (a job a tracker submitted
+for the owner) the owner's grant to the tracker no longer serves.
+
+**Work a tracker makes for you.** A lease serves only its holder's own
+jobs, and jobs c4-sync makes are its own unless the Tracker submits them
+for you. Let it, as yourself: `c4 farm grant <tracker>` (or MCP
+`c4_grant`). Its jobs from your issues or tasks are then yours and get
+your lease; `c4 farm revoke` takes it back (docs/c4-sync.md, `for`).
 
 ## The lease
 

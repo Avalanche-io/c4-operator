@@ -93,10 +93,12 @@ Each Tracker says:
   (the entity's assignee, through `people`). The person owns the job, so
   what is theirs serves it, such as a lease of their own sign-in. They must
   first let the Tracker submit for them, which they do as themselves, not
-  in the Tracker. Until then nothing is submitted and the Tracker shows
-  `NoGrant`; c4-sync never submits the job as its own instead. (The grant
-  is designed in proposals/integrations GAPS 17; this HUD refuses `for`
-  until it takes grants.) Without `for`, the jobs are c4-sync's;
+  in the Tracker: `c4 farm grant <tracker>` (optionally `--pools`,
+  `--classes`, `--until 30d`), MCP `c4_grant`, or `POST /api/v1/grants`.
+  Until then nothing is submitted and the Tracker shows `NoGrant`; c4-sync
+  never submits the job as its own instead. `c4 farm grants --tracker
+  <ns>/<tracker>` shows who has granted it; `c4 farm revoke` takes a grant
+  back. Without `for`, the jobs are c4-sync's;
 - `review.wait`: the job's wait that the tracker's decision serves;
 - `rework`: `inPlace` reruns units, the CI, agent and ML way;
   `nextVersion` makes v002 follow v001 with the note as an input view,

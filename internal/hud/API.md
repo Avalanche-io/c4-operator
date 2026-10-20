@@ -555,6 +555,7 @@ returned to everyone.
 | `capacity-requested`                                                                                                   | queue              | burst capacity requested for jobs at risk                                                                                                                                                                                                                           |
 | `capacity-approved`                                                                                                    | hud or queue       | a person approved a request over budget, or the queue approved one within it                                                                                                                                                                                        |
 | `provisioned`                                                                                                          | controller         | burst nodes ready                                                                                                                                                                                                                                                   |
+| `grant`, `revoke`                                                                                                      | hud                | a person's grant to a tracker (object type `grant`, `grant: ns/name`), or its revocation                                                                                                                                                                            |
 | `hold`, `release`, `boost`, `deadline`, `requeue`, `disable`, `enable`, `avoid`, `allow`                               | hud                | a person's or agent's control                                                                                                                                                                                                                                       |
 | `ingest`, `import`                                                                                                     | ingest or importer | a view entered the farm                                                                                                                                                                                                                                             |
 | `started`, `finished`                                                                                                  | queue              | a job began running, and its last unit ended                                                                                                                                                                                                                        |
@@ -565,7 +566,7 @@ Kinds are open: a client shows an unknown kind by its `message`.
 In the real backend the book is read on demand, never watched, from these
 sources:
 
-- Kubernetes Events on WorkJobs in the viewer's namespaces, and on
+- Kubernetes Events on WorkJobs and SubmitGrants in the viewer's namespaces, and on
   CapacityRequests and Nodes in the operator's namespace and `default`,
   field-selected by involved object kind (and by name for `job=`). Events
   from the kubelet are signed `node`, from the queue `queue`, from other
@@ -714,10 +715,14 @@ the job in the namespace this one is the next version of (`spec.follows`,
 in the record too); it must exist. `due` pins the deadline: an RFC 3339 time,
 or a date (`2026-10-23`) at the project's due time (Project
 `spec.work.dueTime: { at: "HH:MM", timeZone }`, 18:00 UTC without one).
-`for` names the person a tracker's sync identity submits the job for,
-under the grant that person gave the Tracker (integrations GAPS 17); the
-person would own it. Grants are not taken yet, so `for` is refused `501`,
-never created as the caller's own job.
+`for` names the person a tracker's sync (c4-sync) submits the job for,
+under the grant that person gave the Tracker (see Grants): the person
+owns it, `submitted-via` is `c4-sync`, and `c4.avalanche.io/grant` is the
+grant's record. It is refused, never created as the caller's own job:
+`403` when the caller is not a tracker's sync, `trackerRef` names no
+Tracker in the namespace, the person has no grant to it, the grant was
+revoked or has ended, or it does not cover the job's pools or class;
+`400` without `trackerRef`; `501` on a farm without grants installed.
 
 `estimate` is what the queue expects of the job against the farm as it last
 planned it. `slackSeconds` is the deadline less `eta90` (`eta95` for a
@@ -751,6 +756,30 @@ label, key, position, slots, reasoning, environment and work), and is the
 queue's to set; `c4.avalanche.io/recompute-view`
 and `-site` name the input it rebuilds and where, and the queue sets
 `c4.avalanche.io/recompute-output` to the view its unit wrote.
+
+## Grants
+
+A person lets a Tracker submit work for them (integrations GAPS 17), so
+jobs it makes from their issues or tasks are theirs, and what is theirs
+(a lease of their own sign-in) serves them. A grant is always the
+signed-in person's own, signed as a control record of kind `grant`; the
+HUD is the only writer of one. It ends (`until`); the person, or a
+project admin (one allowed to delete `submitgrants` there), revokes it,
+signed as kind `revoke`, and the grant is kept, marked. Nobody grants for
+someone else, and a tracker's sync cannot grant itself.
+
+| route                        | body or query                                                   | answer                                                                                                                                |
+| ---------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /grants`               | `{ project? \| namespace?, tracker, pools?, classes?, until? }` | `{ ok, message, grant, record }`; `until` is RFC 3339 or a span (`30d`, `72h`), default 30 days, at most 90; granting again renews it |
+| `GET /grants`                | `?tracker={ns}/{name}`, `?person=`                              | `{ grants }`: by default the viewer's own; with `tracker`, who has granted it; only in projects the viewer sees                       |
+| `DELETE /grants/{ns}/{name}` |                                                                 | `{ ok, message, grant, record }`; `409` when revoked already; `403` for anyone but the person or a project admin                      |
+
+A grant is `{ namespace, name, project, person, tracker, pools?, classes?,
+until, record, revoked?: { by, at, record }, active, why? }`; `why` says
+why it does not serve now. The work queue checks it again each time it
+releases a unit that mounts the person's credential lease: a unit running
+when a grant is revoked or ends finishes its attempt, and the next is not
+released.
 
 ## Changes from the first draft of the contract
 

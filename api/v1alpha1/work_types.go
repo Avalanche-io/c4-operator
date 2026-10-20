@@ -79,7 +79,8 @@ const (
 	// identical outputs need no consent; volatile ones are never offered.
 	AnnotationAcceptValidated = "c4.avalanche.io/accept-validated"
 	// AnnotationSubmittedVia says how the job was submitted: hud, mcp,
-	// or api (anything else that wrote the WorkJob directly).
+	// c4-sync (a tracker's, for a person under their grant), or api
+	// (anything else that wrote the WorkJob directly).
 	AnnotationSubmittedVia = "c4.avalanche.io/submitted-via"
 	// LabelShot groups a shot's jobs (the HUD's shot view).
 	LabelShot = "c4.avalanche.io/shot"
