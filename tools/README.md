@@ -64,10 +64,10 @@ docker run --rm --user 65532:65532 -v /tmp/t:/show -v "$PWD/tools/render:/etc/c4
   `c4-farm` for `c4 farm up`, and Go embeds no folder holding its own
   `go.mod`; `ci.sh` still runs a repository's Go tests.
 
-## Decided with c4-authoring (2026-10-20)
+## Decided in the authoring design (2026-10-20)
 
-The format's open points these folders raised, as c4-authoring settled them
-(TOOL.md and the schema follow):
+The format's open points these folders raised, and how they were settled
+(TOOL.md and the schema follow them):
 
 - **Images:** `c4/<name>[:tag]` is `ghcr.io/avalanche-io/c4-<name>`, at the
   tag written or else the farm's release (`schema.ImageRef`); a local farm
