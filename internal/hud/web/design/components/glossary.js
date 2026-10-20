@@ -50,7 +50,7 @@ export const TERMS = {
   bundletime: { term: 'Bundle time', def: 'The bundle\u2019s own clock, a virtual time. It runs while the bundle runs and stops while the bundle waits for capacity or is held, so a pause never looks like lateness to the agents. Deadlines stay on the real clock.' },
   gap: { term: 'Stopped interval', def: 'A stretch of real time when the bundle waited for capacity (the queue resumes it itself) or was held (a person resumes it). Its bundle time does not move.' },
   capped: { term: 'Capped node', def: 'A node offering fewer slots than its pool gives it, because a limit takes the rest away, such as a laptop\u2019s power. The lost slots are grey hatched, and the reason is written beside them. They come back when the limit rises.', swatch: 'capped' },
-  // the one vocabulary (design/README.md; c4 INTEGRATE.md 4.2)
+  // the one vocabulary (design/README.md)
   queued: { term: 'Queued', def: 'Ready to run; it waits for a slot. Flat grey.', swatch: 'queued' },
   blocked: { term: 'Blocked on', def: 'It waits for other work or an input to exist: grey, hatched, with what it is blocked on as text.', swatch: 'blocked' },
   waitsfor: { term: 'Waits for', def: 'A decision or a check outside the job. For a thing (capacity, a license, a party, a time): grey, hatched, with a clock, never red. For a person: pale red, and red when work is blocked on it.', swatch: 'waits' },

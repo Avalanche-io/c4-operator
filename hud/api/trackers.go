@@ -2,7 +2,7 @@ package api
 
 // Tracker is a Tracker as GET /api/v1/trackers lists it: one connection
 // from a project to a tracker site, in words a person reads, so they can
-// choose one to let submit work for them (integrations GAPS 17).
+// choose one to let submit work for them (internal/hud/API.md, Grants).
 type Tracker struct {
 	Namespace string `json:"namespace"`
 	Name      string `json:"name"`

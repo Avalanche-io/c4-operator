@@ -1,7 +1,7 @@
 package server
 
 // GET /book?since=<seq>: the transition log (internal/work/queue/book.go,
-// integrations GAPS 5), for a client that was away to learn what changed,
+// internal/hud/API.md), for a client that was away to learn what changed,
 // in order. Any replica serves it: the queue alone writes the log, and
 // sealed segments never change, so they are cached here by C4 ID.
 

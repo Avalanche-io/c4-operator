@@ -26,7 +26,7 @@ var (
 	forecastChance = regexp.MustCompile(`^(0(\.[0-9]+)?|1(\.0+)?)$`)
 )
 
-// handleResize changes a forecast job's size (integrations GAPS 9): a
+// handleResize changes a forecast job's size (DESIGN.md 10.12): a
 // tracker's sync following a bid, or a person. Only a forecast is
 // resized; a real job's work is its plan.
 func (s *Server) handleResize(w http.ResponseWriter, r *http.Request) {
@@ -104,7 +104,7 @@ func (s *Server) handleResize(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleWithdraw deletes a forecast job whose work is no longer expected
-// (integrations GAPS 9): its tracker's entity left every intake rule (an
+// (DESIGN.md 10.12): its tracker's entity left every intake rule (an
 // omitted shot), or a person withdrew it. It is signed and booked as kind
 // withdrawn. Only a forecast is withdrawn; a real job is held or failed.
 func (s *Server) handleWithdraw(w http.ResponseWriter, r *http.Request) {

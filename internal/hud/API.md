@@ -595,10 +595,10 @@ WorkJob status.
 
 ## GET /book?since={seq}&limit=N
 
-The farm's transition log (integrations GAPS 5): every change of a job's
-status the work queue wrote, numbered farm-wide in the order it wrote
-them, kept durably. A client that was away (c4-sync after an outage) reads
-what it missed, in order, from its cursor.
+The farm's transition log (DESIGN.md 9.2, Storage and use): every change of
+a job's status the work queue wrote, numbered farm-wide in the order it
+wrote them, kept durably. A client that was away (c4-sync after an outage)
+reads what it missed, in order, from its cursor.
 
 ```
 { entries: [ { seq, at, project, job, unit?, kind, actor?, do?, record?, message, key } ], next, more, head }
@@ -645,7 +645,7 @@ HUD does.
 ## GET /capacity/forecast
 
 What the farm's forecast jobs (`spec.forecast`: work a tracker expects
-from a bid or a schedule, not yet submitted; integrations GAPS 9) would
+from a bid or a schedule, not yet submitted; DESIGN.md 10.12) would
 need among the real work, as the queue's last forecast pass planned it.
 Nothing of it is requested or acted on.
 
@@ -684,7 +684,7 @@ the updated JobSummary; `node` the updated node. Errors are `4xx` with
 | `/jobs/{ns}/{name}/nudge`     | `{ hold?, holdStop?, boost?, deadline?, deadlineMode?, nextSession? }` | `hold`: release no new units (`false` releases); `holdStop: true`: hold and stop running units; `boost` 1 to 2; `deadline` RFC 3339 or a date at the project's due time, which pins it unless sent with `deadlineMode: Tracking` (production tracking's date, a pinned job handed back to tracking in one write); `deadlineMode` `Pinned` (alone, pins the deadline the job has now), `Suggested` (alone) or `Tracking`; `nextSession: true` moves the deadline to `objective.suggestion.nextSession` and pins it (`409` when none is offered)                                                                                                                                                                                                                                                                                                                         |
 | `/jobs/{ns}/{name}/ack`       | `{ units, kind?, assignee?, note? }`                                   | a person takes failed units: `kind` is `acknowledge` (default: the viewer has them), `assign` (to `assignee`) or `accept` (the failure stands; they count as done, so nothing waits on them). Only failed units are taken (`409` when none is). Written as a request in the `c4.avalanche.io/acks` annotation that the queue carries out once; it shows in `acks` and the job's book                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `/jobs/{ns}/{name}/decide`    | `{ unit, do, note?, reply?: { view } \| { text }, via? }`              | a person decides what waits for them: a wait unit (`do` is `approve`, one of its `choices`, or `fail`; a wait with `reply` takes one unless `do` is `fail`, a stored view's C4 ID or a text the HUD stores as a view of one file, `reply.md`, which the units it holds up mount; `400` for a reply the wait does not ask for) or a unit a review escalated (`accept`, `rework` or `fail`). `unit` is a name or an index; `409` when nothing open waits as that unit. Signed first, with its custody (`direct`, or for `via` `relayed` / `relayed-unattributed`); written with its record as a request in the `c4.avalanche.io/decide` annotation that the queue carries out once; it shows in `waits` and the job's book. `via: { tracker, source, by, person, evidence? }` is a decision made in a tracker, relayed by its sync (c4-sync only; see Relayed decisions) |
-| `/jobs/{ns}/{name}/steer`     | `{ unit, text }`                                                       | a message to a unit while it runs, without ending it (G-steer): `unit` is a name or an index, `text` up to 8 KiB. Signed first; written as a request in the `c4.avalanche.io/steer` annotation that the queue carries out once, delivering it to the unit's pod, where the unit reads it at its next safe point (`c4-unit steer`). A unit not running yet gets it when it starts; `409` for a unit that has ended. It shows in the job's `steers` (`delivered`, `seen`) and its book                                                                                                                                                                                                                                                                                                                                                                                   |
+| `/jobs/{ns}/{name}/steer`     | `{ unit, text }`                                                       | a message to a unit while it runs, without ending it: `unit` is a name or an index, `text` up to 8 KiB. Signed first; written as a request in the `c4.avalanche.io/steer` annotation that the queue carries out once, delivering it to the unit's pod, where the unit reads it at its next safe point (`c4-unit steer`). A unit not running yet gets it when it starts; `409` for a unit that has ended. It shows in the job's `steers` (`delivered`, `seen`) and its book                                                                                                                                                                                                                                                                                                                                                                                             |
 | `/jobs/{ns}/{name}/supply`    | `{ unit, text }`                                                       | gives a unit that stopped for information its brief lacked (`needs`, NeedsPerson `needsinformation`) what it asked for. Signed first; written as a request in the `c4.avalanche.io/supply` annotation that the queue carries out once: the unit runs again, resuming where it stopped, with the text in `$C4_SUPPLIED`. `409` for a unit that is not waiting for information                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | `/jobs/{ns}/{name}/requeue`   | `{ units }`                                                            | queue the units again; `units` is a unit set string or an array of indexes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `/jobs/{ns}/{name}/forecast`  | `{ slotHours?, sd?, unitHours?, start?, exists? }`                     | resize a forecast job (`spec.forecast`), as its tracker's bid changes: a field sent replaces the job's, `""` clears it (the class's plan or the default stands), a field left out is kept; booked as kind `forecast`. The same size again writes and signs nothing (`message` says unchanged); `409` on a real job, `400` for a size that is not a number                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
@@ -833,8 +833,8 @@ and `-site` name the input it rebuilds and where, and the queue sets
 
 ## Tools
 
-A tool is a folder with a `tool.yaml` (`c4: tool/1`, c4-authoring's
-TOOL.md): what one unit runs, its parameters and its test. Publishing
+A tool is a folder with a `tool.yaml` (`c4: tool/1`, the tool format,
+schema/README.md): what one unit runs, its parameters and its test. Publishing
 stores it as a `Tool` in the project's namespace, or in the operator's for
 the whole farm, and offers it to submissions (`POST /submissions`) and to
 agents (MCP). The schemas are served at `GET /schema/{submit,tool,lock}`.
@@ -922,7 +922,7 @@ HUD is `direct`.
 
 ## Grants
 
-A person lets a Tracker submit work for them (integrations GAPS 17), so
+A person lets a Tracker submit work for them (docs/c4-sync.md, `for`), so
 jobs it makes from their issues or tasks are theirs, and what is theirs
 (a lease of their own sign-in) serves them. A grant is always the
 signed-in person's own, signed as a control record of kind `grant`; the
@@ -959,7 +959,7 @@ installed the list is empty.
 
 ## Held tracker writes
 
-c4-sync makes each write to a tracker once (integrations GAPS 11). A
+c4-sync makes each write to a tracker once (docs/c4-sync.md). A
 write that was interrupted, where nothing the tracker offers can tell
 whether it happened, is **held**. It is neither sent again nor dropped
 until a person looks in the tracker and says which. That person is the

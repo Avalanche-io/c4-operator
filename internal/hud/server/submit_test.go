@@ -334,7 +334,7 @@ func TestHostUploadsForItsOwnUnits(t *testing.T) {
 }
 
 // A submitter names the tracker entity a job is made for, the version it
-// follows, and a date-only due date (integrations GAPS 2, 6, 10, 15).
+// follows, and a date-only due date (DESIGN.md 10.7).
 func TestSubmitTrackerRefFollowsDue(t *testing.T) {
 	s := submitFarm(t)
 	s.DryRun = func(context.Context, *c4v1.WorkJob, string) (api.SubmitEstimate, error) {

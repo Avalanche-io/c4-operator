@@ -104,10 +104,10 @@ type SubmitRequest struct {
 	Due string `json:"due,omitempty"`
 	// For is the person the job is submitted for, by a tracker's sync
 	// identity under the grant that person gave the Tracker TrackerRef
-	// names: the person owns the job (integrations GAPS 17).
+	// names: the person owns the job (internal/hud/API.md, Grants).
 	For string `json:"for,omitempty"`
 	// Replaces names the forecast job in the namespace this real job
-	// replaces (spec.forecast, integrations GAPS 9): it is deleted once
+	// replaces (spec.forecast, DESIGN.md 10.12): it is deleted once
 	// this one is made, and the book says so.
 	Replaces string `json:"replaces,omitempty"`
 }

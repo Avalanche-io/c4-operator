@@ -8,7 +8,7 @@ import (
 )
 
 // handleCapacityForecast is what the farm's forecast jobs would need
-// (integrations GAPS 9): burst slots per pool and the real jobs they
+// (DESIGN.md 10.12, Forecast jobs): burst slots per pool and the real jobs they
 // would make riskier, never requested. Jobs are the viewer's projects';
 // pools are farm-wide.
 func (s *Server) handleCapacityForecast(w http.ResponseWriter, r *http.Request) {

@@ -185,8 +185,8 @@ func TestNudgeDeadlineMode(t *testing.T) {
 		t.Fatalf("pin the deadline it has: %d %v", code, live().Spec.Deadline)
 	}
 	// A pinned job handed back to tracking with the tracker's date, in one
-	// write (integrations GAPS 14); a date alone is at the project's due
-	// time (18:00 in Los Angeles here).
+	// write, setting the deadline and its mode together; a date alone is at
+	// the project's due time (18:00 in Los Angeles here).
 	for i := range s.m.projects {
 		if s.m.projects[i].Name == "show-a" {
 			if s.m.projects[i].Spec.Work == nil {

@@ -681,8 +681,9 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	var grant *c4v1.SubmitGrant
 	if body.For != "" {
 		// Work for another person, by a tracker's sync under the grant the
-		// person gave that tracker (integrations GAPS 17): the person owns
-		// it. Refused otherwise, never created as the caller's own instead.
+		// person gave that tracker (internal/hud/API.md, Grants): the
+		// person owns it. Refused otherwise, never created as the caller's
+		// own instead.
 		g, err := s.grantFor(ctx, v, ns, &body, &spec)
 		if err != nil {
 			code := http.StatusForbidden
@@ -791,7 +792,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 	s.record(ctx, job, "WorkJob", v.User, "Submitted", note, bookNote{actor: actorOf(r, v), kind: "submit"})
 	if replaced != nil {
-		// The forecast's work is this job now (GAPS 9). A delete that
+		// The forecast's work is this job now (DESIGN.md 10.12). A delete that
 		// fails here is tried again until the forecast is gone
 		// (sweepReplaced): the job names it.
 		if err := s.retireForecast(ctx, replaced, name, v.User, actorOf(r, v), replaceRecord); err != nil {

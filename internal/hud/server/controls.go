@@ -612,11 +612,11 @@ func jsonMap(v any) (map[string]any, error) {
 }
 
 // handleDecide is POST /jobs/{ns}/{name}/decide: a person decides what
-// waits for them (PRIMITIVES Q6): a wait unit (a ruling, an approval, an
-// outside party's answer: do approve, one of its choices, or fail), or a
-// unit a review escalated (do accept, rework or fail). The decision is
-// signed first; its record's C4 ID goes with the request, so the queue's
-// status.waits names it.
+// waits for them (DESIGN.md 10.6, Waits): a wait unit (a ruling, an
+// approval, an outside party's answer: do approve, one of its choices, or
+// fail), or a unit a review escalated (do accept, rework or fail). The
+// decision is signed first; its record's C4 ID goes with the request, so
+// the queue's status.waits names it.
 func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	_, rec, v := s.job(w, r)
 	if rec == nil {
@@ -634,8 +634,8 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 			Text string `json:"text"`
 		} `json:"reply"`
 		// Via is a decision a tracker's sync relays: made in the tracker,
-		// by a tracker user its Tracker's people map names (integrations
-		// GAPS 3).
+		// by a tracker user its Tracker's people map names
+		// (internal/hud/API.md, Relayed decisions).
 		Via *api.Relay `json:"via"`
 	}
 	if err := decodeBody(r, &body); err != nil {
@@ -819,10 +819,11 @@ func (s *Server) textView(ctx context.Context, project, text string) (string, er
 }
 
 // handleSteer sends a message to a unit while it runs, without ending it
-// (G-steer): signed, then written as a request in c4.avalanche.io/steer
-// that the queue carries out once, delivering it to the unit's pod, where
-// the unit reads it at its next safe point (c4-unit steer). A unit that
-// is not running gets it when it next runs; one that has ended takes none.
+// (DESIGN.md 10.6, Steering): signed, then written as a request in
+// c4.avalanche.io/steer that the queue carries out once, delivering it to
+// the unit's pod, where the unit reads it at its next safe point (c4-unit
+// steer). A unit that is not running gets it when it next runs; one that
+// has ended takes none.
 func (s *Server) handleSteer(w http.ResponseWriter, r *http.Request) {
 	_, rec, v := s.job(w, r)
 	if rec == nil {

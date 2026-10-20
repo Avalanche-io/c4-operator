@@ -14,8 +14,8 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
-// Incidents: alerting by root cause (proposals/hud-proficiency 6, after
-// FAA AC 25.1322-1 ¶8d and ¶10c). One item per cause, everything it caused
+// Incidents: alerting by root cause (DESIGN.md 10.14, Causes; after FAA
+// AC 25.1322-1 ¶8d and ¶10c). One item per cause, everything it caused
 // folded in, with an ordered checklist that leads to the action:
 //
 //   - failures after their retries, by cause across jobs (the message's
@@ -27,7 +27,7 @@ import (
 //     without spending a retry), and spot machines taken back.
 //
 // The rule is the one c4-hud's incidents.js applied on the client before
-// the server sent them (c4-hud-intro-to-c4-sched.md).
+// the server sent incidents, so the HUD shows the same items either way.
 
 // incidentWindow is how far back machines that stopped reporting count.
 const incidentWindow = time.Hour

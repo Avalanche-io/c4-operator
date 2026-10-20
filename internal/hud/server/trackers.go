@@ -1,9 +1,9 @@
 package server
 
-// The trackers in a person's projects (integrations GAPS 17), so they have
-// one to choose when they let a tracker submit work for them: what each
-// connects to and turns into jobs, in words, whether it is connected, how
-// many people's grants it holds, and the viewer's own.
+// The trackers in a person's projects (internal/hud/API.md, Grants), so
+// they have one to choose when they let a tracker submit work for them:
+// what each connects to and turns into jobs, in words, whether it is
+// connected, how many people's grants it holds, and the viewer's own.
 
 import (
 	"fmt"

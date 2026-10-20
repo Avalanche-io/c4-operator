@@ -47,7 +47,7 @@ type controlPredicate struct {
 	// (the person signed in), relayed (a tracker's sync read it from a
 	// named tracker, by a person its people map names) or
 	// relayed-unattributed (by a party the tracker names, no person;
-	// integrations GAPS 3 and 16).
+	// internal/hud/API.md, Relayed decisions).
 	Custody string `json:"custody,omitempty"`
 	// Relay is where a relayed decision came from: the tracker, the
 	// entity, the tracker user, the C4 person and the evidence's C4 ID.

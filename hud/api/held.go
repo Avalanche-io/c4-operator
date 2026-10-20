@@ -2,10 +2,11 @@ package api
 
 import "time"
 
-// HeldWrite is a write to a tracker that c4-sync holds (integrations GAPS
-// 11): it was interrupted, and nothing the tracker offers can tell whether
-// it happened, so it is neither sent again nor dropped until a person says
-// which. Look in the tracker (Entity's URL) and confirm.
+// HeldWrite is a write to a tracker that c4-sync holds
+// (internal/hud/API.md, Held tracker writes): it was interrupted, and
+// nothing the tracker offers can tell whether it happened, so it is neither
+// sent again nor dropped until a person says which. Look in the tracker
+// (Entity's URL) and confirm.
 type HeldWrite struct {
 	Namespace string `json:"namespace"`
 	Project   string `json:"project"`

@@ -350,7 +350,7 @@ func TestAgentSummaryInDetail(t *testing.T) {
 	now := s.m.at
 	j := c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research",
 		Labels: map[string]string{"c4.avalanche.io/agent-bundle": "research"}, CreationTimestamp: metav1.Time{Time: now.Add(-3 * time.Hour)}},
-		Spec:   c4v1.WorkJobSpec{Class: "agent", Params: map[string]string{"members": "prov-graph,agent-jobs", "bundle": "research"}},
+		Spec:   c4v1.WorkJobSpec{Class: "agent", Params: map[string]string{"members": "provenance,plan-jobs", "bundle": "research"}},
 		Status: c4v1.WorkJobStatus{Phase: "Running", Units: c4v1.UnitCounts{Total: 2, Running: 1, Queued: 1}}}
 	d, err := class.Lookup("agent")
 	if err != nil {
@@ -366,10 +366,10 @@ func TestAgentSummaryInDetail(t *testing.T) {
 	from, to := metav1.NewTime(now.Add(-2*time.Hour)), metav1.NewTime(now.Add(-time.Hour))
 	start, vnow := metav1.NewTime(now.Add(-3*time.Hour)), metav1.NewTime(now.Add(-time.Hour))
 	s.m.bundles = []c4v1.AgentBundle{{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research"},
-		Spec: c4v1.AgentBundleSpec{MaxRunning: 1, Members: []c4v1.AgentMemberSpec{{Name: "prov-graph"}, {Name: "agent-jobs", Kind: "task"}}},
+		Spec: c4v1.AgentBundleSpec{MaxRunning: 1, Members: []c4v1.AgentMemberSpec{{Name: "provenance"}, {Name: "plan-jobs", Kind: "task"}}},
 		Status: c4v1.AgentBundleStatus{Phase: "Running", Members: []c4v1.AgentMemberStatus{
-			{Name: "prov-graph", State: "running", Node: "c4-host-laptop-1", Epoch: "3"},
-			{Name: "agent-jobs", State: "parked", Checkpoint: "s#7:c4abc"}},
+			{Name: "provenance", State: "running", Node: "c4-host-laptop-1", Epoch: "3"},
+			{Name: "plan-jobs", State: "parked", Checkpoint: "s#7:c4abc"}},
 			Clock: c4v1.AgentClock{Start: &start, VirtualNow: &vnow, DriftSeconds: 3600, Suspensions: []c4v1.AgentSuspension{{From: from, To: to}}}}}}
 	var got map[string]any
 	if code := get(t, s, "/api/v1/jobs/show-a/research?as=artist", &got); code != 200 {
@@ -433,7 +433,7 @@ func TestNoETAInSnapshot(t *testing.T) {
 	now := s.m.at
 	j := c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research",
 		Labels: map[string]string{"c4.avalanche.io/agent-bundle": "research"}, CreationTimestamp: metav1.Time{Time: now.Add(-3 * time.Hour)}},
-		Spec: c4v1.WorkJobSpec{Class: "agent", Params: map[string]string{"members": "prov-graph", "bundle": "research"}},
+		Spec: c4v1.WorkJobSpec{Class: "agent", Params: map[string]string{"members": "provenance", "bundle": "research"}},
 		Status: c4v1.WorkJobStatus{Phase: "Running", Units: c4v1.UnitCounts{Total: 1, Queued: 1},
 			Estimate: &c4v1.WorkEstimate{Feasible: true}}}
 	d, err := class.Lookup("agent")

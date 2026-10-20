@@ -56,7 +56,7 @@ func (f *hudFarm) Milestones(ns string) map[string]time.Time {
 
 // People, Roles and Parties: the HUD keeps no directory of them, so nil,
 // which the check takes as not known rather than empty. Approvals and
-// waits are refused at lowering until slice 3 anyway.
+// waits are refused at lowering for now anyway.
 func (f *hudFarm) People() []string  { return nil }
 func (f *hudFarm) Roles() []string   { return nil }
 func (f *hudFarm) Parties() []string { return nil }

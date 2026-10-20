@@ -239,7 +239,7 @@ type Project struct {
 
 // Spend is a job's spend so far: slot time at its pools' rates and model
 // tokens at the prices its model units reported, in US dollars, and the
-// model units' share of it (LLM-OR-PROCEDURE 6.2).
+// model units' share of it (DESIGN.md 10.6, Procedural and model units).
 type Spend struct {
 	ModelUnits      int   `json:"modelUnits"`
 	ProceduralUnits int   `json:"proceduralUnits"`
@@ -501,8 +501,8 @@ type Job struct {
 	Measure *Measure `json:"measure,omitempty"`
 	// Spend splits what the job cost between procedural and model units.
 	Spend *Spend `json:"spend,omitempty"`
-	// Forecast is set on a forecast job (spec.forecast, integrations GAPS
-	// 9): work expected, never run, as it is sized now.
+	// Forecast is set on a forecast job (spec.forecast, DESIGN.md 10.12):
+	// work expected, never run, as it is sized now.
 	Forecast *JobForecast `json:"forecast,omitempty"`
 	// ModelShare is the share of the job's work (slot time, every attempt)
 	// that model units did, 0 to 1; absent before any unit ran. Spend's
@@ -791,8 +791,8 @@ type Rounds struct {
 	ExpectSeconds int64   `json:"expectSeconds,omitempty"`
 }
 
-// Wait is one thing a job waits for (PRIMITIVES Q6; the HUD word is
-// "waits for"). A person's open wait that holds up work needs them (red);
+// Wait is one thing a job waits for (DESIGN.md 10.6, Waits; the HUD word
+// is "waits for"). A person's open wait that holds up work needs them (red);
 // one that holds up nothing yet is pale.
 type Wait struct {
 	Unit int    `json:"unit"`

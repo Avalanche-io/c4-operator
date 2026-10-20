@@ -1,6 +1,6 @@
 package server
 
-// Submit grants (proposals/integrations GAPS 17). A person lets a Tracker
+// Submit grants (internal/hud/API.md, Grants). A person lets a Tracker
 // submit work for them, as themselves: the HUD writes the SubmitGrant, the
 // only writer of one (config/policy/submit-grants.yaml), with a signed
 // control record of kind grant. A tracker's sync then submits with

@@ -28,16 +28,16 @@ import (
 	"github.com/Avalanche-io/c4-operator/schema"
 )
 
-// Tools on the farm (authoring slice 1, item 1.3; TOOL.md sections 5 and
-// 9). Publishing a folder with a tool.yaml checks it, pins its images by
-// digest into tool.lock (so the published tree's ID covers the exact
-// image), records a version, and runs the tool's test as a small job.
-// The version is offered (the Tool's spec.view moves to it) only once its
-// test passes: a tool whose test fails on the farm is not published. A
-// project's tools live in its namespace, the farm's in the operator's;
-// a farm-wide tool's tree is copied into every project's store, and
-// granted where a project reads only granted trees, because a unit mounts
-// only what its own project's store holds (DESIGN 6.2).
+// Tools on the farm (DESIGN.md 10.6, Tools; the format is
+// schema/README.md). Publishing a folder with a tool.yaml checks it, pins
+// its images by digest into tool.lock (so the published tree's ID covers
+// the exact image), records a version, and runs the tool's test as a small
+// job. The version is offered (the Tool's spec.view moves to it) only once
+// its test passes: a tool whose test fails on the farm is not published. A
+// project's tools live in its namespace, the farm's in the operator's; a
+// farm-wide tool's tree is copied into every project's store, and granted
+// where a project reads only granted trees, because a unit mounts only what
+// its own project's store holds (DESIGN 6.2).
 
 const (
 	toolFile = "tool.yaml"

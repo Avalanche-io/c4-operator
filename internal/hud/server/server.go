@@ -77,7 +77,7 @@ type Server struct {
 	// DryRun plans jobs before they are submitted (POST /jobs); nil
 	// answers dry runs with 503.
 	DryRun DryRunFunc
-	// Forecast is the queue's last forecast pass (integrations GAPS 9),
+	// Forecast is the queue's last forecast pass (DESIGN.md 10.12),
 	// unscoped; nil answers GET /capacity/forecast with 503.
 	Forecast func() api.CapacityForecast
 	// MaxObjectBytes caps one uploaded object (default 64 GiB), and

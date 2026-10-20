@@ -2,7 +2,7 @@ package api
 
 import "encoding/json"
 
-// Tools on the farm (authoring slice 1, item 1.3; c4-authoring's TOOL.md):
+// Tools on the farm (DESIGN.md 10.6, Tools; the format is schema/README.md):
 // a tool is a folder with a tool.yaml (c4: tool/1), published into a
 // project or the whole farm, and offered to submissions and agents.
 

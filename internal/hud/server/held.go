@@ -1,11 +1,11 @@
 package server
 
-// Held tracker writes (integrations GAPS 11). c4-sync journals each write
-// to a tracker in its TrackerLink's status.written; a write that was
-// interrupted, where nothing the tracker offers can tell whether it
-// happened, is held (state unconfirmed) and never sent on a guess. A
-// person looks in the tracker and says whether it happened, here: no one
-// edits a TrackerLink by hand.
+// Held tracker writes (internal/hud/API.md; docs/c4-sync.md). c4-sync
+// journals each write to a tracker in its TrackerLink's status.written; a
+// write that was interrupted, where nothing the tracker offers can tell
+// whether it happened, is held (state unconfirmed) and never sent on a
+// guess. A person looks in the tracker and says whether it happened, here:
+// no one edits a TrackerLink by hand.
 
 import (
 	"fmt"

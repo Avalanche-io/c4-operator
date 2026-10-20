@@ -3,7 +3,7 @@ package api
 import "time"
 
 // GrantRequest is POST /api/v1/grants: the signed-in person lets a
-// Tracker submit work for them (integrations GAPS 17). The grant is
+// Tracker submit work for them (internal/hud/API.md, Grants). The grant is
 // always the viewer's own; nobody grants for someone else.
 type GrantRequest struct {
 	// Project or Namespace is where the Tracker is; one project you can

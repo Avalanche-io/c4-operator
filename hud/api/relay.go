@@ -1,9 +1,9 @@
 package api
 
 // Relay is a decision a tracker's sync relays with POST
-// /jobs/{ns}/{name}/decide (`via`, integrations GAPS 3): made in the
-// tracker, by a tracker user the Tracker's people map names. The HUD
-// checks it and signs the decision with its custody: relayed, or
+// /jobs/{ns}/{name}/decide (`via`, internal/hud/API.md, Relayed decisions):
+// made in the tracker, by a tracker user the Tracker's people map names.
+// The HUD checks it and signs the decision with its custody: relayed, or
 // relayed-unattributed when the map names a party, not a person.
 type Relay struct {
 	// Tracker is the Tracker's name, in the job's namespace.

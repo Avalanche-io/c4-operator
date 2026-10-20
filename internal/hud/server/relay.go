@@ -1,6 +1,6 @@
 package server
 
-// Relayed decisions (proposals/integrations GAPS 3 and 16). A person who
+// Relayed decisions (internal/hud/API.md). A person who
 // approves in a tracker never signed in to the HUD; the tracker's sync
 // relays what they decided. The HUD takes it only from the sync, only for
 // a job of that Tracker, and only from a tracker user the Tracker's people

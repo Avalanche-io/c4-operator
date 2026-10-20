@@ -5,7 +5,7 @@ import "time"
 // CapacityForecast answers GET /api/v1/capacity/forecast: what the farm's
 // forecast jobs (spec.forecast, work a tracker expects that is not yet
 // submitted) would need among the real work, as the queue's last forecast
-// pass planned it (integrations GAPS 9). Nothing of it is requested.
+// pass planned it (DESIGN.md 10.12, Forecast jobs). Nothing of it is requested.
 type CapacityForecast struct {
 	// At is the last forecast pass; absent when there has been none (no
 	// forecast jobs).

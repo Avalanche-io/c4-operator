@@ -3,9 +3,10 @@ package api
 import "time"
 
 // Transition is one change of a job the work queue recorded, in the
-// farm-wide order it recorded them (integrations GAPS 5): what a client
-// that was away reads to learn what it missed, in order. Order by Seq,
-// never by At: At is when it happened, Seq when the queue saw it.
+// farm-wide order it recorded them (internal/hud/API.md, GET /book?since):
+// what a client that was away reads to learn what it missed, in order.
+// Order by Seq, never by At: At is when it happened, Seq when the queue saw
+// it.
 type Transition struct {
 	Seq     int64     `json:"seq"`
 	At      time.Time `json:"at"`

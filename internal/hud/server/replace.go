@@ -1,6 +1,6 @@
 package server
 
-// A real job that replaces a forecast (integrations GAPS 9) names it
+// A real job that replaces a forecast (DESIGN.md 10.12) names it
 // (c4.avalanche.io/replaces). The HUD deletes the forecast when it submits
 // the job; a delete that fails then is tried again from the collect loop,
 // with backoff, until the forecast is gone, so a forecast and the real
