@@ -172,3 +172,52 @@ func TestAgentIssuesRenewsRevokes(t *testing.T) {
 	}
 	var _ client.Client = c
 }
+
+// When the farm ends a lease (the controller revokes it: the farm's switch
+// is off), the holder's agent does not issue it again: it stops, with the
+// Secret deleted.
+func TestAgentHonoursTheFarm(t *testing.T) {
+	s := runtime.NewScheme()
+	clientgoscheme.AddToScheme(s)
+	c4v1.AddToScheme(s)
+	c := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&c4v1.CredentialLease{}).Build()
+	src := &memSource{doc: signIn("sk-ant-oat01-first", time.Now().Add(time.Hour))}
+	a := &Agent{Client: c, Namespace: "practice", Name: "joshua-claude", Source: src, Retry: 50 * time.Millisecond,
+		Spec: c4v1.CredentialLeaseSpec{Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"o"}},
+			Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"p"}},
+			TTL: metav1.Duration{Duration: time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
+	done := make(chan error, 1)
+	go func() { done <- a.Run(context.Background()) }()
+	ctx := context.Background()
+	key := types.NamespacedName{Namespace: "practice", Name: "joshua-claude"}
+	var l c4v1.CredentialLease
+	for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if c.Get(ctx, key, &l) == nil && l.Status.State == c4v1.LeaseActive {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatal("the lease never became active")
+		}
+	}
+	// the controller revokes it
+	orig := l.DeepCopy()
+	l.Status.State, l.Status.Message = c4v1.LeaseRevoked, "this farm does not use holder-transfer leases"
+	if err := c.Status().Patch(ctx, &l, client.MergeFrom(orig)); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the agent kept a lease the farm revoked")
+	}
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "practice", Name: "c4-lease-joshua-claude"}, &corev1.Secret{}); err == nil {
+		t.Fatal("the Secret outlived the farm's revocation")
+	}
+	c.Get(ctx, key, &l)
+	if l.Status.State != c4v1.LeaseRevoked {
+		t.Fatalf("state %q", l.Status.State)
+	}
+}

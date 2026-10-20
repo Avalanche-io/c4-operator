@@ -59,27 +59,53 @@ func (a *Agent) Run(ctx context.Context) error {
 		start = a.now()
 	}
 	end := start.Add(a.Spec.TTL.Duration)
+	var next time.Time // when the token is due for renewal
 	for {
-		next, err := a.renew(ctx, l, end)
-		if err != nil {
+		// the farm may have ended the lease (its switch off, a lapse): the
+		// agent does not issue it again
+		if state, why, err := a.farmEnded(ctx, l); err != nil {
 			a.logf("lease %s/%s: %v", a.Namespace, a.Name, err)
-			next = a.now().Add(retry)
+		} else if state != "" {
+			return a.finish(context.WithoutCancel(ctx), l, state, "the farm ended the lease: "+why)
+		}
+		if !a.now().Before(next) {
+			var err error
+			if next, err = a.renew(ctx, l, end); err != nil {
+				a.logf("lease %s/%s: %v", a.Namespace, a.Name, err)
+				next = a.now().Add(retry)
+			}
 		}
 		if !a.now().Before(end) {
 			return a.finish(context.WithoutCancel(ctx), l, c4v1.LeaseExpired, "the lease's TTL ended")
 		}
-		if next.After(end) {
-			next = end
+		// wake for the renewal, the lease's end, or a look at its state
+		wake := a.now().Add(retry)
+		if next.Before(wake) {
+			wake = next
 		}
-		if min := a.now().Add(retry); next.Before(min) {
-			next = min
+		if end.Before(wake) {
+			wake = end
 		}
 		select {
 		case <-ctx.Done():
 			return a.finish(context.WithoutCancel(ctx), l, c4v1.LeaseRevoked, "the holder's agent stopped")
-		case <-time.After(time.Until(next)):
+		case <-time.After(time.Until(wake)):
 		}
 	}
+}
+
+// farmEnded reports the state the farm ended the lease in (revoked or
+// expired, by the controller), or "".
+func (a *Agent) farmEnded(ctx context.Context, l *c4v1.CredentialLease) (string, string, error) {
+	var cur c4v1.CredentialLease
+	if err := a.Client.Get(ctx, types.NamespacedName{Namespace: l.Namespace, Name: l.Name}, &cur); err != nil {
+		return "", "", err
+	}
+	switch cur.Status.State {
+	case c4v1.LeaseRevoked, c4v1.LeaseExpired:
+		return cur.Status.State, cur.Status.Message, nil
+	}
+	return "", "", nil
 }
 
 // ensure creates the lease, or brings an existing one's spec in line.
@@ -91,7 +117,12 @@ func (a *Agent) ensure(ctx context.Context) (*c4v1.CredentialLease, error) {
 			return nil, err
 		}
 		l.Spec = a.Spec
-		err = a.Client.Update(ctx, l)
+		if err = a.Client.Update(ctx, l); err == nil {
+			// a new run of the agent issues the lease afresh
+			orig := l.DeepCopy()
+			l.Status = c4v1.CredentialLeaseStatus{State: c4v1.LeaseRenewing, Message: "the holder's agent started"}
+			err = a.Client.Status().Patch(ctx, l, client.MergeFrom(orig))
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("lease %s/%s: %w", a.Namespace, a.Name, err)
