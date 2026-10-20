@@ -828,6 +828,7 @@ someone else, and a tracker's sync cannot grant itself.
 | `POST /grants`               | `{ project? \| namespace?, tracker, pools?, classes?, until? }` | `{ ok, message, grant, record }`; `until` is RFC 3339 or a span (`30d`, `72h`), default 30 days, at most 90; granting again renews it |
 | `GET /grants`                | `?tracker={ns}/{name}`, `?person=`                              | `{ grants }`: by default the viewer's own; with `tracker`, who has granted it; only in projects the viewer sees                       |
 | `DELETE /grants/{ns}/{name}` |                                                                 | `{ ok, message, grant, record }`; `409` when revoked already; `403` for anyone but the person or a project admin                      |
+| `GET /trackers`              |                                                                 | `{ trackers }`: the Trackers in projects the viewer sees, to choose one to grant                                                      |
 
 A grant is `{ namespace, name, project, person, tracker, pools?, classes?,
 until, record, revoked?: { by, at, record }, active, why? }`; `why` says
@@ -835,6 +836,18 @@ why it does not serve now. The work queue checks it again each time it
 releases a unit that mounts the person's credential lease: a unit running
 when a grant is revoked or ends finishes its attempt, and the next is not
 released.
+
+A tracker is `{ namespace, name, project, kind, site, syncs?, ready, why?,
+granted, mine? }`, in words a person reads: `site` is what it connects to
+(`github.com/petrelfinch/pipeline`, `Flow Production Tracking,
+Saltmarsh`), from its kind, endpoint and scope; `syncs` says what each
+intake rule turns into jobs (`issues labeled render`, `tasks assigned to
+a person, where step.Step.short_name is LGT`), with the tracker's own
+field names; `ready` is c4-sync's Ready condition, false with `why` when
+it failed, has not run yet, or has not resynced in three resync periods;
+`granted` counts the people whose grants to it serve now; `mine` is the
+viewer's own grant to it, active or not. On a farm without Trackers
+installed the list is empty.
 
 ## Changes from the first draft of the contract
 

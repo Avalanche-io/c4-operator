@@ -114,6 +114,8 @@ func Tools(c *Client) []Tool {
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.approveCapacity),
 		tool("c4_grant", "Let a tracker submit work for you", "Let a production tracker's sync (a Tracker: GitHub, Flow, ...) submit work for the person you act for, so jobs it makes from their issues or tasks are theirs and what is theirs (a lease of their own sign-in) serves them. Only when that person asks: the grant is theirs, signed and recorded in the book. Optionally limit it to pools and job classes; it ends at until (30d by default, at most 90d). Granting again renews it.",
 			idempotent, c.grant),
+		tool("c4_list_trackers", "List trackers", "The trackers (GitHub, Flow, ...) in the projects you can see: what each connects to, what it turns into jobs, whether it is connected and why not, how many people have let it submit work for them, and the person you act for's own grant to it. Use it to find the tracker to name in c4_grant.",
+			readOnly, c.listTrackers),
 		tool("c4_list_grants", "List grants", "Grants to trackers: by default the person you act for's own, or with tracker (namespace/name) who has let that tracker submit for them. Each shows its pools, classes, end, record, and whether it serves now and why not.",
 			readOnly, c.listGrants),
 		tool("c4_revoke_grant", "Revoke a grant", "Take back a grant to a tracker: the tracker submits nothing more for that person, and units of their jobs not yet started do not get their lease. Units running now finish. The person who gave it, or a project admin, revokes it; recorded in the book.",
@@ -876,4 +878,10 @@ func (c *Client) revokeGrant(ctx context.Context, _ *mcp.CallToolRequest, in Rev
 		return nil, Done{}, err
 	}
 	return nil, Done{Message: r.Message}, nil
+}
+
+func (c *Client) listTrackers(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, api.TrackerList, error) {
+	var out api.TrackerList
+	err := c.do(ctx, "GET", "/trackers", nil, &out)
+	return nil, out, err
 }

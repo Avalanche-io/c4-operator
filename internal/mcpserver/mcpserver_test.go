@@ -85,6 +85,12 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 		json.NewEncoder(w).Encode(api.GrantList{Grants: []api.Grant{{Namespace: "show-a", Name: "github-ab12", Person: "maya", Tracker: "github",
 			Until: due, Record: "c4grant", Active: true}}})
+	case r.Method == "GET" && r.URL.Path == "/api/v1/trackers":
+		f.mu.Lock()
+		f.posts = append(f.posts, "GET "+r.URL.String())
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(api.TrackerList{Trackers: []api.Tracker{{Namespace: "show-a", Name: "github", Project: "show-a", Kind: "github",
+			Site: "github.com/petrelfinch/pipeline", Syncs: []string{"issues labeled render"}, Ready: true, Granted: 1}}})
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/v1/grants/"):
 		f.mu.Lock()
 		f.posts = append(f.posts, "DELETE "+r.URL.Path)
@@ -388,6 +394,10 @@ func TestGrantTools(t *testing.T) {
 	if res.IsError {
 		t.Fatalf("grant: %v %q", out, text(res))
 	}
+	res, out = call(t, cs, "c4_list_trackers", map[string]any{})
+	if ts, _ := out["trackers"].([]any); res.IsError || len(ts) != 1 {
+		t.Fatalf("trackers: %v %q", out, text(res))
+	}
 	res, out = call(t, cs, "c4_list_grants", map[string]any{"tracker": "show-a/github"})
 	if gs, _ := out["grants"].([]any); res.IsError || len(gs) != 1 {
 		t.Fatalf("list: %v %q", out, text(res))
@@ -400,6 +410,7 @@ func TestGrantTools(t *testing.T) {
 	defer hud.mu.Unlock()
 	want := []string{
 		`/api/v1/grants {"project":"show-a","tracker":"github","pools":["cpu"],"until":"14d"}`,
+		"GET /api/v1/trackers",
 		"GET /api/v1/grants?tracker=show-a%2Fgithub",
 		"DELETE /api/v1/grants/show-a/github-ab12",
 	}
