@@ -11,6 +11,7 @@ import re
 from typing import Any, Dict, List
 
 from c4submit import frames as framelib
+from c4submit import paths
 from c4submit.c4id import is_id
 
 FORMAT = "submit/1"
@@ -84,12 +85,16 @@ def check(doc: Any) -> List[Dict[str, str]]:
     errs: List[Dict[str, str]] = []
     if not isinstance(doc, dict):
         return [error("", "a submission is a map of fields", "start it with c4: submit/1")]
-    if doc.get("c4") != FORMAT:
-        errs.append(error("c4", f'c4 must be "{FORMAT}"' if "c4" in doc else "c4 is missing", f"add c4: {FORMAT} as the first line"))
+    if "c4" not in doc:
+        errs.append(error("c4", "the file has no c4 field, so it is not a submission", f"add c4: {FORMAT} as the first line"))
+    elif doc["c4"] != FORMAT:
+        errs.append(error("c4", f"{doc['c4']} is not a format this farm reads", f"this farm reads {FORMAT}"))
     for k in doc:
         if k not in TOP:
-            hint = _did_you_mean(k, TOP)
-            errs.append(error(k, f'submit/1 has no field "{k}"', hint or "remove it; GET /schema/submit lists the fields"))
+            errs.append(_unknown(k, k, TOP, "a submission"))
+    if "root" in doc and not (isinstance(doc["root"], str) and paths.is_absolute(doc["root"])):
+        errs.append(error("root", f'"{doc["root"]}" is not an absolute path',
+                          "write the folder the tree came from, as S:/shows/saltmarsh or /Users/noor/shows/saltmarsh"))
     if "due" in doc:
         p = due_problem(doc["due"])
         if p:
@@ -111,16 +116,27 @@ def check(doc: Any) -> List[Dict[str, str]]:
             continue
         for k in job:
             if k not in JOB:
-                hint = _did_you_mean(k, JOB)
-                errs.append(error(f"{base}.{k}", f'a job has no field "{k}"', hint or "remove it; GET /schema/submit lists a job's fields"))
+                errs.append(_unknown(f"{base}.{k}", k, JOB, "a job"))
         if "tool" not in job and "plan" not in job:
-            errs.append(error(base, "a job names its tool", "add tool: and the tool's name"))
+            errs.append(error(base, "a job needs a tool, or a plan with each", "add tool: <name>; c4 farm tools lists them"))
         elif "tool" in job and not (isinstance(job["tool"], str) and _TOOL.match(job["tool"])):
             errs.append(error(f"{base}.tool", f'"{job["tool"]}" is not a tool name', "a tool's name, or name@v4, or name@<C4 ID>"))
-        if "frames" in job:
-            p = framelib.check(job["frames"])
-            if p:
-                errs.append(error(f"{base}.frames", p))
+        if "frames" in job and framelib.check(job["frames"]):
+            fr = str(job["frames"])
+            errs.append(error(f"{base}.frames", f'"{fr}" is not a frame list',
+                              f"write a range with a dash: {fr.replace('..', '-')}" if ".." in fr
+                              else "write frames as 1001-1240, 1001-1240:2 or 1001,1050-1100"))
+        needs = job.get("needs")
+        if isinstance(needs, dict) and "licences" in needs:
+            errs.append(error(f"{base}.needs.licences", "licences are the tool's to declare, not a submission's",
+                              "ask the tool's owner to add them to its needs, or choose one of its sizes"))
+        answers = job.get("answers")
+        by = answers.get("by") if isinstance(answers, dict) else None
+        if isinstance(by, str) and by.split(":", 1)[0] in ("person", "party", "role"):
+            errs.append(error(f"{base}.answers.by", "a person is never asked mid-run: questions go to an agent",
+                              "name an agent (lead, tool:<name> or unit:<name>); for a person's decision, add an approve step"))
+        if "combine" in job and "over" not in job:
+            errs.append(error(f"{base}.combine", "combine needs over: the values it combines", "add over:, or remove combine"))
         if "due" in job:
             p = due_problem(job["due"])
             if p:
@@ -138,13 +154,32 @@ def check(doc: Any) -> List[Dict[str, str]]:
                     errs.append(error(f"{base}.after", "a job cannot follow itself"))
                 elif k not in jobs:
                     hint = _did_you_mean(k, [j for j in jobs if j != key])
-                    errs.append(error(f"{base}.after", f'no job "{k}" in this submission',
-                                      "jobs follow jobs by their key in the file" + (f"; {hint}" if hint else "")))
+                    # A key written as a job's versioned name (comp-v4) gets the reason too.
+                    why = "jobs follow jobs by their key in the file" if re.search(r"-v\d+$", k) or not hint else ""
+                    errs.append(error(f"{base}.after", f'no job "{k}" in this submission', "; ".join(x for x in (why, hint) if x)))
     cycle = _cycle(jobs)
     if cycle:
-        errs.append(error(f"jobs.{cycle[0]}.after", "these jobs follow each other in a circle: " + " → ".join(cycle + cycle[:1]),
-                          "one of them has to go first"))
+        names = ", ".join(cycle[:-1]) + " and " + cycle[-1]
+        errs.append(error(f"jobs.{cycle[-1]}.after", f"{names} follow each other, which is a cycle",
+                          "remove one of the two after fields" if len(cycle) == 2 else "remove one of their after fields"))
     return errs
+
+
+# Fields people bring from other queues, each refused with the reason.
+_REFUSED = {
+    "priority": ("{what} has no priority: work is ordered by when it is due",
+                 "say when it is needed with due: a milestone, a time, a date or suggested"),
+    "image": ("a submission names tools, never images",
+              "publish a tool that runs the image (c4 farm tool new), and name it in tool:"),
+}
+
+
+def _unknown(path: str, k: str, fields, what: str) -> Dict[str, str]:
+    if k in _REFUSED:
+        msg, fix = _REFUSED[k]
+        return error(path, msg.format(what=what), fix)
+    hint = _did_you_mean(k, fields)
+    return error(path, f'"{k}" is not a field of {what}', hint or "GET /schema/submit lists the fields")
 
 
 def _cycle(jobs: dict) -> List[str]:

@@ -28,7 +28,29 @@ def _examples():
 def test_examples_pass_the_local_check(path):
     with open(path, encoding="utf-8") as f:
         doc = yaml.safe_load(f)
+    if not (isinstance(doc, dict) and "jobs" in doc):
+        pytest.skip("not a submission (a plan a submission names)")
     assert submission.check(doc) == []
+
+
+SCHEMA_FAIL = os.path.join(HERE, "..", "..", "..", "..", "schema", "fixtures", "submit", "fail")
+
+
+@pytest.mark.parametrize("path", sorted(glob.glob(os.path.join(SCHEMA_FAIL, "*.yaml"))), ids=os.path.basename)
+def test_refusals_match_the_schemas_fixtures(path):
+    """The schema's refusals, word for word: every structural one locally,
+    and those that need the farm (a tool's parameters, the project's
+    milestones) either word for word or left to the farm."""
+    import json
+    with open(path, encoding="utf-8") as f:
+        doc = yaml.safe_load(f)
+    with open(path[:-5] + ".expect.json", encoding="utf-8") as f:
+        want = json.load(f)
+    got = submission.check(doc)
+    if want["by"] == "schema":
+        assert got == want["errors"]
+    else:
+        assert got in ([], want["errors"])
 
 
 def _comp():
@@ -55,9 +77,9 @@ def test_unknown_fields_and_shapes():
     doc["due"] = "next tuesday-ish"
     doc["jobs"]["Movie"] = doc["jobs"].pop("movie")
     errs = {e["path"]: e for e in submission.check(doc)}
-    assert errs["priority"]["message"] == 'submit/1 has no field "priority"'
+    assert errs["priority"]["message"] == "a submission has no priority: work is ordered by when it is due"
     assert errs["jobs.comp.fames"]["fix"] == 'did you mean "frames"?'
-    assert "first frame to its last" in errs["jobs.comp.frames"]["message"]
+    assert errs["jobs.comp.frames"]["message"] == '"1048-1001" is not a frame list'
     assert "due" in errs
     assert errs["jobs.Movie"]["message"] == '"Movie" is not a job key'
 
@@ -67,7 +89,7 @@ def test_cycles_and_self():
                                       "c": {"tool": "t", "after": "c"}}}
     msgs = [e["message"] for e in submission.check(doc)]
     assert "a job cannot follow itself" in msgs
-    assert any(m.startswith("these jobs follow each other in a circle") for m in msgs)
+    assert "a and b follow each other, which is a cycle" in msgs
 
 
 @pytest.mark.parametrize("due", ["dailies", "fri 18:00", "18:00", "+3h", "2026-10-23", "2026-10-24T06:00:00-04:00", "suggested"])

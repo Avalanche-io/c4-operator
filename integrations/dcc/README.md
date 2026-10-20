@@ -93,6 +93,8 @@ Built against the design before the farm's routes exist: `POST
 /submissions`, `GET /tools/{project}` and `GET /projects/{project}` are
 slice 1 of the plan, and their shapes here are the ones proposed to the
 farm's owners. A farm without them still lets a panel collect, check the
-file locally and save it; Submit needs them. The submission's `root`
-field (where the tree's top is on the submitter's machine, for path
-mapping) is proposed and not yet in `submit/1`.
+file locally and save it; Submit needs them. A panel's local check
+refuses what the schema refuses (`schema/`), in the same words, and its
+tests run the schema's fixtures. A panel writes `root` (where the tree's
+top is on the artist's machine, for path mapping) only when it differs
+from the project's root path.
