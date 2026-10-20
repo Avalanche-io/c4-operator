@@ -112,6 +112,12 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	} else {
 		meta.RemoveStatusCondition(&st.Conditions, "Schedulable")
 	}
+	if m.toolsWait != "" {
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Tools", Status: metav1.ConditionFalse,
+			Reason: "Waiting", Message: m.toolsWait, ObservedGeneration: v.job.Generation})
+	} else {
+		meta.RemoveStatusCondition(&st.Conditions, "Tools")
+	}
 	n := len(m.plan.Units)
 	st.Order = strings.ToLower(m.plan.OrderName)
 	// Each unit is in one state. Units holding a slot are preflight,

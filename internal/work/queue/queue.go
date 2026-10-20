@@ -250,8 +250,10 @@ type jobMem struct {
 	refold     bool
 	// steers are messages to units while they run, and steered the last
 	// request's token (steer.go).
-	steers    []*steerRec
-	steered   string
+	steers  []*steerRec
+	steered string
+	// toolsWait says why a unit waits for its tool profile (tools.go).
+	toolsWait string
 	acks      []*ackRecord
 	acked     string
 	decisions []decisionRecord
@@ -1318,8 +1320,21 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			q.Log.V(1).Info("waiting for a credential lease", "job", key, "unit", idx, "pool", p.spec.Name, "why", why)
 			continue
 		}
+		tools, ok, why := q.toolsReady(ctx, v, idx)
+		if !ok {
+			// The job's status says so (condition Tools).
+			v.mem.toolsWait = why
+			q.Log.V(1).Info("waiting for a tool profile", "job", key, "unit", idx, "why", why)
+			continue
+		}
+		if tools != nil {
+			v.mem.toolsWait = ""
+		}
 		v.mem.attempts[idx]++
 		pod := q.podFor(v, idx, v.mem.attempts[idx], p)
+		if tools != nil {
+			applyTools(pod, v.job.Name, tools)
+		}
 		q.leaseOutside(ctx, pod, p.spec.Name)
 		if err := q.Client.Create(ctx, pod); err != nil {
 			v.mem.attempts[idx]--

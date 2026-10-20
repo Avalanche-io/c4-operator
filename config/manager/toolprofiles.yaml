@@ -1,0 +1,10 @@
+# The farm's tool profiles, in the operator's namespace: a unit naming one
+# in reasoning.tools gets it unless its job's namespace has its own of the
+# same name (DESIGN 10.6, tool profiles).
+#
+# none: no configuration and no egress; a unit with it is sealed.
+apiVersion: c4.avalanche.io/v1alpha1
+kind: ToolProfile
+metadata:
+  name: none
+spec: {}

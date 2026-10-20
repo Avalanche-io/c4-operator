@@ -1489,6 +1489,28 @@ and a sweep planner that spawns trials are all generators.
   document's `reasoning` and is kept for each unit's latest attempt
   (`status.modelUsage[i].reasoning`), so the HUD can show declared and
   observed side by side.
+  - **Tool profiles** (agent-jobs 10.15, agent-catalog G-tool-config).
+    `reasoning.tools` names a ToolProfile, a namespaced resource. The
+    queue looks for it in the job's namespace, then in the operator's,
+    where the farm's own profiles live (`none` ships with the operator).
+    - **`view`** is the configuration (MCP server definitions, settings,
+      skills, plugins), a view's C4 ID, mounted read-only at
+      `/etc/c4/tools` (`$C4_TOOLS`). The unit's record names it, so a
+      unit's record says exactly what it ran with.
+    - **`egress`** is what the unit may reach: address blocks
+      (`{cidr, ports?}`) and cluster services (`{service:
+      <namespace>/<name>, ports?}`). The queue writes the profile's
+      NetworkPolicy in the job's namespace (`c4-tools-<profile>`), which
+      selects the unit pods labelled `c4.avalanche.io/tool-profile` and
+      allows those, plus DNS when there is any rule. A profile with no
+      egress allows nothing, so its units are sealed, which the derivation
+      record counts. The owner writes the allow-list.
+    - **Release:** a unit is released once its profile exists, its view's
+      Materialization is Ready, and its policy is written. Until then the
+      job's `Tools` condition says what it waits for. Units that name no
+      profile run as before.
+    - **Tokens:** no unit pod holds a Kubernetes API token (10.2); c4
+      itself is reached through the HUD with a token the profile grants.
   - **Work share.** Each ended attempt also adds its slot time (hours
     times slots) to its unit, and status gives the model units' share of
     it (`spend.modelWorkShare`): how much of the work models did, which

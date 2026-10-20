@@ -1,0 +1,94 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: toolprofiles.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: ToolProfile
+    listKind: ToolProfileList
+    plural: toolprofiles
+    singular: toolprofile
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.view
+      name: View
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          ToolProfile is what a unit works with beyond its image: a configuration
+          (MCP server definitions, settings, skills, plugins) as a view, and what
+          the unit may reach on the network (DESIGN 10.6, tool profiles). A unit
+          names one in its reasoning.tools; the queue looks for it in the job's
+          namespace, then in the operator's, where the farm's defaults live. The
+          view is mounted read-only at $C4_TOOLS, and its C4 ID is in the unit's
+          record, so a unit's record says exactly what it ran with. Egress is an
+          allow-list: a unit with a profile reaches what the profile lists and
+          nothing else, and with none it is sealed.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: ToolProfileSpec is a profile's configuration and egress.
+            properties:
+              egress:
+                description: |-
+                  Egress is what a unit with the profile may reach. With any rule,
+                  the cluster's DNS is reachable too; with none, nothing is.
+                items:
+                  description: |-
+                    ToolEgress is one destination a profile allows: an address block or a
+                    cluster service, optionally on some ports.
+                  properties:
+                    cidr:
+                      description: CIDR is an address block, as 203.0.113.0/24.
+                      type: string
+                    ports:
+                      description: Ports limits the rule to these TCP ports.
+                      items:
+                        format: int32
+                        type: integer
+                      type: array
+                    service:
+                      description: |-
+                        Service is a cluster service, <namespace>/<name>: the pods it
+                        selects.
+                      type: string
+                  type: object
+                type: array
+              view:
+                description: |-
+                  View is the configuration, a view's C4 ID, mounted read-only at
+                  /etc/c4/tools ($C4_TOOLS).
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}
