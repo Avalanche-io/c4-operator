@@ -94,7 +94,7 @@ func setupKitsu(t *testing.T, opts ...func(*fake.ClientBuilder)) *kitsuEnv {
 	fm.Now = ck.now
 	s := &syncer.Syncer{Client: k8s, Farm: fm, Now: ck.now}
 	return &kitsuEnv{t: t, site: site, farm: fm, k8s: k8s, sync: s, clock: ck, bot: bot, dana: dana, artist: artist,
-		shot: shot, task: task, due: due, firstJob: syncer.JobName("kitsu", kref(task))}
+		shot: shot, task: task, due: due, firstJob: syncer.JobName("kitsu", tracker.Item{Ref: kref(task), Name: "sh040 Lighting"})}
 }
 
 func (e *kitsuEnv) tracker() *c4v1.Tracker {

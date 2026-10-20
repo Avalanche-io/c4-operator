@@ -70,7 +70,7 @@ func TestTaskDueIsADate(t *testing.T) {
 		t.Fatal(err)
 	}
 	if it.Due == nil || !it.Due.DateOnly || it.Due.At.Format("2006-01-02") != "2026-10-23" ||
-		it.Fields["entity.name"] != "sh040" || it.Fields["step"] != "LGT" || it.Status.Native != "rdy" {
+		it.Fields["entity.name"] != "sh040" || it.Fields["step"] != "LGT" || it.Status.Native != "rdy" || it.Name != "sh040-LGT" || it.NameUnique {
 		t.Fatalf("item: %+v due %+v", it, it.Due)
 	}
 	if _, err := a.Get(context.Background(), tracker.Ref{Type: "Task", ID: "1"}); !errors.Is(err, tracker.ErrNotFound) {

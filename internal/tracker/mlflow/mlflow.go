@@ -227,6 +227,8 @@ func (a *Adapter) runItem(r run) tracker.Item {
 		Title:  r.Info.RunName,
 		Status: tracker.Status{Native: r.Info.Status},
 		Fields: tg,
+		// MLflow lets run names repeat: the job's name tells them apart.
+		Name: r.Info.RunName,
 	}
 	it.Job = tg["c4.job"]
 	if d := tg["c4.deadline"]; d != "" {

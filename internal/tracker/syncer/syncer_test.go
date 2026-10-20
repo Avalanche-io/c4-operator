@@ -2,6 +2,7 @@ package syncer_test
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -550,12 +551,42 @@ func TestNames(t *testing.T) {
 	if n := syncer.LinkName("gh", tracker.Ref{Type: "Issue", ID: "7"}); n != "gh-issue-7" {
 		t.Fatal(n)
 	}
-	long := syncer.JobName(strings.Repeat("tracker", 20), tracker.Ref{ID: strconv.Itoa(123456)})
+	task := tracker.Ref{Type: "Task", ID: "2f0fd47e-f4ce-4aa3-863f-5b1a24188ad3"}
+	hex := func(r tracker.Ref) string {
+		h := sha256.Sum256([]byte(r.Type + "/" + r.ID))
+		return fmt.Sprintf("%x", h[:3])
+	}
+	for _, c := range []struct {
+		tr   string
+		it   tracker.Item
+		want string
+	}{
+		// A unique handle is the name: GitHub's issue number.
+		{"gh", tracker.Item{Ref: tracker.Ref{Type: "Issue", ID: "7"}, Name: "7", NameUnique: true}, "gh-7"},
+		{"linear", tracker.Item{Ref: tracker.Ref{Type: "Issue", ID: "9c1d"}, Name: "ENG-12", NameUnique: true}, "linear-eng-12"},
+		// One that may repeat is told apart by its ref.
+		{"kitsu", tracker.Item{Ref: task, Name: "sh040 Lighting"}, "kitsu-sh040-lighting-" + hex(task)},
+		// No handle: the ID, as before.
+		{"ml", tracker.Item{Ref: tracker.Ref{Type: "Run", ID: "0a1b"}}, "ml-0a1b"},
+		// A long handle is cut, leaving room for -forecast.
+		{"kitsu", tracker.Item{Ref: task, Name: "a very long environment asset name modeling"}, "kitsu-a-very-long-environment-asse-" + hex(task)},
+		// A Tracker name that leaves no room falls back to the ID's form.
+		{strings.Repeat("tracker", 6), tracker.Item{Ref: task, Name: "sh040"}, ""},
+	} {
+		got := syncer.JobName(c.tr, c.it)
+		if c.want != "" && got != c.want {
+			t.Errorf("%s %+v: %q, want %q", c.tr, c.it.Name, got, c.want)
+		}
+		if len(got) > 41 && c.want != "" || len(got) > 50 || strings.HasSuffix(got, "-") {
+			t.Errorf("%q does not leave room for -forecast within 50", got)
+		}
+	}
+	long := syncer.JobName(strings.Repeat("tracker", 20), tracker.Item{Ref: tracker.Ref{ID: strconv.Itoa(123456)}})
 	// within a WorkJob name's 50 characters, and distinct
 	if len(long) > 50 || strings.HasSuffix(long, "-") {
 		t.Fatalf("job name %q", long)
 	}
-	if other := syncer.JobName(strings.Repeat("tracker", 20), tracker.Ref{ID: "123457"}); other == long {
+	if other := syncer.JobName(strings.Repeat("tracker", 20), tracker.Item{Ref: tracker.Ref{ID: "123457"}}); other == long {
 		t.Fatalf("two entities, one job name %q", long)
 	}
 }

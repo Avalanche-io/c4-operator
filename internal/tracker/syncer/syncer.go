@@ -463,7 +463,47 @@ func (s *Syncer) links(ctx context.Context, t *c4v1.Tracker) ([]*c4v1.TrackerLin
 // earlier one made.
 func LinkName(tr string, r tracker.Ref) string { return dns(tr + "-" + r.Type + "-" + r.ID) }
 
-func JobName(tr string, r tracker.Ref) string { return jobDNS(tr + "-" + r.ID) }
+// jobBase is the longest a job's base name is, so that what is added to
+// it (-forecast, -v002) stays within a WorkJob name's 50 characters.
+const jobBase = 50 - len("-forecast")
+
+// JobName names the job an entity makes by the handle people use for it,
+// so the HUD reads kitsu-sh040-lighting-3f2a1c, not a UUID:
+// <tracker>-<name> when the name is unique in the Tracker's scope (gh-7),
+// <tracker>-<name>-<6 hex of the entity's ref> when it is not, the name
+// cut to fit jobBase; and <tracker>-<id> for an entity with no name. A
+// link keeps the name its job was given (nextVersion builds on it), so a
+// renamed entity renames nothing.
+func JobName(tr string, it tracker.Item) string {
+	name := dns(it.Name)
+	if name == "" {
+		return jobDNS(tr + "-" + it.Ref.ID)
+	}
+	tag := ""
+	if !it.NameUnique {
+		h := sha256.Sum256([]byte(it.Ref.Type + "/" + it.Ref.ID))
+		tag = "-" + hex.EncodeToString(h[:3])
+	}
+	room := jobBase - len(dns(tr)) - 1 - len(tag)
+	if room < 3 {
+		return jobDNS(tr + "-" + it.Ref.ID)
+	}
+	if len(name) > room {
+		name = strings.TrimRight(name[:room], "-")
+	}
+	return dns(tr) + "-" + name + tag
+}
+
+// versionSuffix is what nextVersion adds to a job's base name.
+var versionSuffix = regexp.MustCompile(`-v[0-9]{3,}$`)
+
+// baseName is the name a link's jobs are named after: its first job's.
+func baseName(l *c4v1.TrackerLink) string {
+	if len(l.Status.Versions) > 0 {
+		return l.Status.Versions[0]
+	}
+	return versionSuffix.ReplaceAllString(l.Spec.Target.WorkJob, "")
+}
 
 // jobDNS is dns within a WorkJob name's 50 characters (its unit pods are
 // named after it).
@@ -579,7 +619,7 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 	if rule.Job == nil {
 		return fmt.Errorf("intake %d: as %s needs a job spec", idx, rule.As)
 	}
-	jr := farm.JobRef{Namespace: t.Namespace, Name: JobName(t.Name, it.Ref)}
+	jr := farm.JobRef{Namespace: t.Namespace, Name: JobName(t.Name, it)}
 	if rule.As == "forecast" {
 		jr.Name = jobDNS(jr.Name + "-forecast")
 	}
@@ -1539,8 +1579,8 @@ func (s *Syncer) nextVersion(ctx context.Context, t *c4v1.Tracker, l *c4v1.Track
 	}
 	prev := l.Spec.Target.WorkJob
 	n := len(l.Status.Versions) + 2
-	base := JobName(t.Name, tracker.Ref{ID: l.Spec.Ref.ID})
-	name := dns(fmt.Sprintf("%s-v%03d", base, n))
+	base := baseName(l)
+	name := jobDNS(fmt.Sprintf("%s-v%03d", base, n))
 	note := lastDecisionNote(l)
 	var inputs []api.SubmitInput
 	if note != "" {

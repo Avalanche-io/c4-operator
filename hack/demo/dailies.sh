@@ -76,8 +76,13 @@ versions_are() { [ "$(state_json | jq_py 'print(len(d["versions"] or []))')" = "
 version_id() { state_json | jq_py "print(d['versions'][$1]['id'])"; }
 task_status_is() { [ "$(state_json | jq_py 'print(d["task"]["sg_status_list"])')" = "$1" ]; }
 
-JOB=flow-$TASK
-wait_until "c4-sync to make job $JOB from Task $TASK" 120 has_job "$JOB"
+# The job is named by the shot and the step (flow-sh040-lgt-<6 hex>); the
+# link says which.
+JOB=
+has_link() { JOB=$(k -n "$NS" get trackerlinks -o jsonpath='{.items[0].spec.target.workJob}' 2>/dev/null) && [ -n "$JOB" ]; }
+wait_until "c4-sync to make a job from Task $TASK" 120 has_link
+case "$JOB" in flow-sh040-lgt-*) ;; *) fail "the job is named $JOB, not by its shot and step" ;; esac
+wait_until "job $JOB" 60 has_job "$JOB"
 deadline=$(k -n "$NS" get workjob "$JOB" -o jsonpath='{.spec.deadline} {.spec.deadlineMode}')
 mark "1 intake" "Task $TASK became $JOB, deadline $deadline"
 capture 1-intake "$JOB"

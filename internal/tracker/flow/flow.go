@@ -371,6 +371,9 @@ func (a *Adapter) taskItem(r record) tracker.Item {
 	if s := r.link("step"); s != nil {
 		it.Fields["step"] = s.Name
 	}
+	// The entity and the step, else the task, as Versions are coded
+	// (sh040-lgt): not unique, a shot may have two lighting tasks.
+	it.Name = strings.Trim(it.Fields["entity.name"]+"-"+or(it.Fields["step"], it.Title), "-")
 	// The bid, in minutes: a forecast's size (DESIGN.md 10.12, forecast
 	// jobs).
 	var bid float64

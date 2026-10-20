@@ -138,6 +138,7 @@ capture() {
 JOB=
 has_link() { JOB=$(k -n "$NS" get trackerlinks -o jsonpath='{.items[0].spec.target.workJob}' 2>/dev/null) && [ -n "$JOB" ]; }
 wait_until "c4-sync to make a job from task $TASK" 120 has_link
+case "$JOB" in kitsu-sh040-lighting-*) ;; *) fail "the job is named $JOB, not by its shot and task type" ;; esac
 wait_until "job $JOB" 60 has_job "$JOB"
 deadline=$(k -n "$NS" get workjob "$JOB" -o jsonpath='{.spec.deadline} {.spec.deadlineMode}')
 mark "1 intake" "task $TASK became $JOB, deadline $deadline"

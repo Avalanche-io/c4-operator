@@ -297,6 +297,9 @@ func (is ghIssue) item() tracker.Item {
 		UpdatedAt: is.UpdatedAt,
 		Version:   is.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		Fields:    map[string]string{"author": is.User.Login},
+		// The number: issues and pull requests share them in a repository.
+		Name:       strconv.Itoa(is.Number),
+		NameUnique: true,
 	}
 	for _, l := range is.Labels {
 		it.Labels = append(it.Labels, l.Name)
@@ -350,6 +353,9 @@ func pullItem(p ghPull) tracker.Item {
 		UpdatedAt: p.UpdatedAt,
 		Version:   p.UpdatedAt.UTC().Format(time.RFC3339Nano),
 		Fields:    map[string]string{"head": p.Head.SHA, "head_sha": p.Head.SHA, "author": p.User.Login},
+		// The number, as for an issue.
+		Name:       strconv.Itoa(p.Number),
+		NameUnique: true,
 	}
 }
 

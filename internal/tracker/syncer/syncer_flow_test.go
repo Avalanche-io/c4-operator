@@ -23,6 +23,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/tracker"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm/farmtest"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/flow"
@@ -158,7 +159,7 @@ func (e *flowEnv) scriptVersionWrites() int {
 func TestFlowDailiesLoop(t *testing.T) {
 	e := setupFlow(t)
 	tid := strconv.Itoa(e.task.ID)
-	first := "flow-" + tid
+	first := e.jobName()
 	// The work is the producer's, under the grant she gave the Tracker.
 	var tr c4v1.Tracker
 	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
@@ -341,7 +342,7 @@ func TestFlowDailiesLoop(t *testing.T) {
 func TestFlowDueDateMoves(t *testing.T) {
 	e := setupFlow(t)
 	e.pass()
-	e.job("flow-"+strconv.Itoa(e.task.ID), func(j *api.Job) { j.Phase = "Running" })
+	e.job(e.jobName(), func(j *api.Job) { j.Phase = "Running" })
 	e.pass() // the Task is now ip: intake no longer lists it
 	e.clock.add(time.Minute)
 	newDue := e.due.AddDate(0, 0, 2)
@@ -361,7 +362,7 @@ func TestFlowDueDateMoves(t *testing.T) {
 func TestFlowOnlyTheReviewerDecides(t *testing.T) {
 	e := setupFlow(t)
 	e.pass()
-	job := "flow-" + strconv.Itoa(e.task.ID)
+	job := e.jobName()
 	e.job(job, func(j *api.Job) { j.Phase = "Running"; j.Output = &api.Output{View: "c4v"} })
 	e.farm.OpenWait(ns, job, "dailies", "person:dana", "approve", "rework")
 	e.pass()
@@ -383,7 +384,7 @@ func TestFlowTokenRenewal(t *testing.T) {
 	e := setupFlow(t)
 	e.pass()
 	e.site.ExpireTokens()
-	e.job("flow-"+strconv.Itoa(e.task.ID), func(j *api.Job) { j.Phase = "Running" })
+	e.job(e.jobName(), func(j *api.Job) { j.Phase = "Running" })
 	e.pass()
 	if e.site.Get("Task", e.task.ID)["sg_status_list"] != "ip" {
 		t.Fatal("the pass after expiry did not write")
@@ -413,7 +414,7 @@ func TestFlowNextVersionSurvivesAFailedLinkMove(t *testing.T) {
 			return c.Patch(ctx, o, p, opts...)
 		}})
 	})
-	first := "flow-" + strconv.Itoa(e.task.ID)
+	first := e.jobName()
 	e.pass()
 	e.job(first, func(j *api.Job) { j.Phase = "Running"; j.Output = &api.Output{View: "c4v1"} })
 	e.farm.OpenWait(ns, first, "dailies", "person:dana", "approve", "rework", "accept")
@@ -523,7 +524,7 @@ func TestFlowMilestoneNeedsCovers(t *testing.T) {
 func TestFlowAssignmentAddressesTheNote(t *testing.T) {
 	e := setupFlow(t)
 	e.pass()
-	job := "flow-" + strconv.Itoa(e.task.ID)
+	job := e.jobName()
 	at := e.clock.now()
 	e.job(job, func(j *api.Job) {
 		j.Phase = "Running"
@@ -551,7 +552,7 @@ func TestFlowAssignmentAddressesTheNote(t *testing.T) {
 func TestFlowCauseNote(t *testing.T) {
 	e := setupFlow(t)
 	e.pass()
-	job := "flow-" + strconv.Itoa(e.task.ID)
+	job := e.jobName()
 	e.job(job, func(j *api.Job) {
 		j.Phase = "Running"
 		j.Causes = []api.Cause{{Kind: "verdict", Key: "verdict:escalate:tables changed", Title: "review: escalate: tables changed", Units: "1001",
@@ -589,12 +590,11 @@ func TestFlowForecastThenReal(t *testing.T) {
 		t.Fatal(err)
 	}
 	e.pass()
-	tid := strconv.Itoa(e.task.ID)
 	if len(e.farm.Submitted) != 1 {
 		t.Fatalf("submitted %d", len(e.farm.Submitted))
 	}
 	f := e.farm.Submitted[0]
-	if f.Name != "flow-"+tid+"-forecast" || f.Spec.Forecast == nil || f.Spec.Forecast.SlotHours != "30" || f.Replaces != "" {
+	if f.Name != e.jobName()+"-forecast" || f.Spec.Forecast == nil || f.Spec.Forecast.SlotHours != "30" || f.Replaces != "" {
 		t.Fatalf("the forecast: %+v", f)
 	}
 	if got := e.site.Get("Task", e.task.ID); got["sg_status_list"] != "wtg" || got["sg_c4_eta"] != nil {
@@ -628,7 +628,7 @@ func TestFlowForecastThenReal(t *testing.T) {
 		t.Fatalf("submitted %d", len(e.farm.Submitted))
 	}
 	r := e.farm.Submitted[1]
-	if r.Name != "flow-"+tid || r.Replaces != f.Name || r.Spec.Forecast != nil {
+	if r.Name != e.jobName() || r.Replaces != f.Name || r.Spec.Forecast != nil {
 		t.Fatalf("the real job: %+v", r)
 	}
 	if l := e.link(); l.Spec.Target.WorkJob != r.Name || l.Spec.Intake != 1 {
@@ -690,5 +690,60 @@ func TestFlowForecastWithdrawn(t *testing.T) {
 	}
 	if l := e.link(); l.Spec.Target.WorkJob != name || l.Spec.Intake != 0 {
 		t.Fatalf("link: %+v", l.Spec)
+	}
+}
+
+// jobName is the lighting Task's job: the shot and the step, told apart
+// by the Task's ref.
+func (e *flowEnv) jobName() string {
+	return syncer.JobName("flow", tracker.Item{Ref: tracker.Ref{Type: "Task", ID: strconv.Itoa(e.task.ID)}, Name: "sh040-LGT"})
+}
+
+// A job's name stays with its link: the shot renamed in Flow renames
+// nothing, v002 builds on v001's name; and a link made when jobs were
+// named by ID keeps that form for its next versions.
+func TestFlowNamesStayWithTheLink(t *testing.T) {
+	rework := func(e *flowEnv, first string) string {
+		t.Helper()
+		e.job(first, func(j *api.Job) { j.Phase = "Running"; j.Output = &api.Output{View: "c4v-" + first} })
+		e.farm.OpenWait(ns, first, "dailies", "person:dana", "approve", "rework", "accept")
+		e.pass()
+		e.clock.add(time.Minute)
+		v := e.versions()[len(e.versions())-1]
+		e.site.Set(flowtest.Link{Type: "Version", ID: v.ID}, map[string]any{"sg_status_list": "fix"}, e.dana)
+		e.pass()
+		return e.link().Spec.Target.WorkJob
+	}
+
+	e := setupFlow(t)
+	e.pass()
+	first := e.jobName()
+	if !strings.HasPrefix(first, "flow-sh040-lgt-") || len(e.farm.Submitted) != 1 || e.farm.Submitted[0].Name != first {
+		t.Fatalf("the job: %s, submitted %+v", first, e.farm.Submitted)
+	}
+	shot := e.site.Get("Task", e.task.ID)["entity"].(flowtest.Link)
+	e.site.Set(shot, map[string]any{"code": "sh041"}, e.dana)
+	if got := rework(e, first); got != first+"-v002" {
+		t.Fatalf("v002 is %s, want %s-v002", got, first)
+	}
+
+	// A link from before: its job is named by the Task's ID.
+	old := setupFlow(t)
+	tid := strconv.Itoa(old.task.ID)
+	ctx := context.Background()
+	if _, err := old.farm.Submit(ctx, farm.JobRequest{Namespace: ns, Name: "flow-" + tid, TrackerRef: "flow/Task/" + tid}); err != nil {
+		t.Fatal(err)
+	}
+	l := &c4v1.TrackerLink{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "flow-task-" + tid},
+		Spec: c4v1.TrackerLinkSpec{Tracker: "flow", Ref: c4v1.TrackerRef{Type: "Task", ID: tid}, Target: c4v1.TrackerTarget{WorkJob: "flow-" + tid}}}
+	if err := old.k8s.Create(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	old.pass()
+	if len(old.farm.Submitted) != 1 {
+		t.Fatalf("intake submitted again for a linked Task: %+v", old.farm.Submitted)
+	}
+	if got := rework(old, "flow-"+tid); got != "flow-"+tid+"-v002" {
+		t.Fatalf("an old link's v002 is %s", got)
 	}
 }

@@ -93,7 +93,7 @@ func TestTaskIsWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	if it.Due == nil || !it.Due.DateOnly || it.Due.At.Format("2006-01-02") != "2026-10-23" || it.Title != "sh040 Lighting" ||
-		it.Status.Native != "ready" || it.Status.Category != "ready" || it.Parent == nil || it.Parent.Type != "Shot" {
+		it.Status.Native != "ready" || it.Status.Category != "ready" || it.Parent == nil || it.Parent.Type != "Shot" || it.Name != "sh040 Lighting" || it.NameUnique {
 		t.Fatalf("item: %+v due %+v", it, it.Due)
 	}
 	f := it.Fields

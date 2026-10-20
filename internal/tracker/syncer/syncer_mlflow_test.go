@@ -103,7 +103,9 @@ func (e *mlEnv) pass() {
 	}
 }
 
-func (e *mlEnv) jobName() string { return syncer.JobName("ml", trackerRef("Run", e.run)) }
+func (e *mlEnv) jobName() string {
+	return syncer.JobName("ml", tracker.Item{Ref: trackerRef("Run", e.run), Name: "denoiser-sweep"})
+}
 
 func (e *mlEnv) job(fn func(*api.Job)) { e.farm.Update(ns, e.jobName(), fn) }
 

@@ -38,6 +38,13 @@ type Item struct {
 	Fields    map[string]string // adapter fields by native name (a PR's head SHA)
 	UpdatedAt time.Time
 	Version   string // etag, revision or updatedAt: for conditional writes
+	// Name is the short handle people use for the entity (sh040-lighting,
+	// 7, eng-12), which names the job made from it; "" names it by its ID.
+	// NameUnique says no other entity in the Tracker's scope has it (an
+	// issue number), so the job's name needs nothing added to tell it
+	// apart.
+	Name       string
+	NameUnique bool
 	// Job is a C4 job the entity already names as its own
 	// (<namespace>/<name>): one a client submitted itself, such as
 	// mlflow run --backend c4. Intake adopts it instead of submitting one.

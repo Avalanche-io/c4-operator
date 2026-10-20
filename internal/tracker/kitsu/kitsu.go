@@ -502,6 +502,9 @@ func (a *Adapter) item(ctx context.Context, t task, p place) (tracker.Item, erro
 		Ref:    tracker.Ref{Type: "Task", ID: t.ID, URL: a.TaskURL(t.ProjectID, p.kind, t.ID)},
 		Parent: &tracker.Ref{Type: or(p.kind, "Entity"), ID: t.EntityID},
 		Title:  strings.TrimSpace(p.entity + " " + typ),
+		// The shot and the task type (sh040-lighting): a shot's name may
+		// repeat in another sequence.
+		Name:   strings.TrimSpace(p.entity + " " + typ),
 		Status: tracker.Status{Native: st.ShortName, Category: st.category()},
 		Fields: map[string]string{"task_type": typ, "task_status": st.ShortName, "entity.name": p.entity,
 			"entity.type": p.kind, "sequence": p.sequence, "episode": p.episode, "priority": strconv.Itoa(t.Priority)},

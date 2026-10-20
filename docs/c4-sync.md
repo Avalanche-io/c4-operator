@@ -163,6 +163,14 @@ Each Tracker says:
 - `people`: tracker users mapped to C4 people: GitHub and Flow logins,
   Kitsu and Linear emails.
 
+**Job names.** A job is named by the Tracker and the handle people use for
+its entity, so the HUD reads as the tracker does: `gh-7` for issue 7,
+`flow-sh040-lgt-3f2a1c` for a Flow Task, `kitsu-sh040-lighting-9b04e2` for a
+Kitsu task, an MLflow run by its run name. Where the handle can repeat (a
+shot's name in another sequence), six hex characters of the entity's ID
+tell the jobs apart. A link keeps its job's name, and the next versions
+build on it (`-v002`), so renaming the shot in the tracker renames nothing.
+
 **People.** A person's wait (`person:dana`) is served only by the tracker
 user `people` maps to `dana`. The map is the project's offer: each person
 confirms their own login in the HUD, on their own page (a party's, a
