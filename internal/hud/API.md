@@ -48,7 +48,7 @@ the real backend started with `--hud-dev-viewers` (tests and demos only), take
 `?as=artist` or `?as=wrangler` on any request instead, including the event
 stream and object URLs.
 
-`viewer.role` sets where a new viewer's detail level starts: `artist`,
+`viewer.role` sets the mode and level a new viewer starts at: `artist`,
 `supervisor`, `producer`, `wrangler`, `farm-admin`, `facilities` or
 `pipeline-td`. The real backend reads it from the viewer's groups: a group
 the operator's `--hud-role-groups group=role,...` names (the studio's own

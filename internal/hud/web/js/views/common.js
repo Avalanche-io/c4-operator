@@ -94,7 +94,7 @@ export function classChip(j, cls) {
 }
 
 // phaseText: the job's state in the vocabulary ("blocked on comp", "waits
-// for license-nuke"); the native phase only in the title, for level 5.
+// for license-nuke"); the native phase only in the title, for Full mode.
 export function phaseText(j) {
   const w = jobWords(j);
   return h('span', { class: w.cls, title: `phase ${j.phase}` }, w.why ? `${w.word} ${w.why}` : w.word);

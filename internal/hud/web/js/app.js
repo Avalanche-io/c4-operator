@@ -6,9 +6,12 @@ import { hydrate } from '../design/components/live.js';
 import { setScheme } from '../design/scheme.js';
 import '../design/components/pylon.js';
 import '../design/components/stack.js';
-import { subscribe, post, get, as, staticMode } from './api.js';
+import { subscribe, post, get, as, staticMode, objectURL } from './api.js';
 import * as f from './fmt.js';
-import * as lv from './level.js';
+import * as md from './mode.js';
+import * as lvl from './level.js';
+import { mine1, farm1, job1, pools1 } from './views/day1.js';
+import { incidents, needsCount } from '../design/components/incidents.js';
 import * as prefs from './prefs.js';
 import { installC4ID } from '../design/components/c4id.js';
 import queue from './views/queue.js';
@@ -21,27 +24,30 @@ import mine from './views/mine.js';
 import tiers from './views/tiers.js';
 import graph from './views/graph.js';
 import cost from './views/cost.js';
+import catalog from './views/catalog.js';
 
-const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine };
-// each view and the detail level it arrives at (docs/intro/ladder.md)
+const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog };
+// each view and the mode it arrives at (docs/intro/ladder.md)
+// [view, label, mode, level]: a tab shows from that mode, at that level
 const NAV = [
-  ['queue', 'Queue', 3],
-  ['pools', 'Pools', 4],
-  ['map', 'Map', 4],
-  ['tiers', 'Tiers', 5],
-  ['graph', 'Graph', 3],
-  ['cost', 'Cost', 4],
-  ['wall', 'Wall', 5],
+  ['queue', 'Queue', 3, 1],
+  ['pools', 'Pools', 4, 1],
+  ['map', 'Map', 4, 2],
+  ['tiers', 'Tiers', 5, 3],
+  ['graph', 'Graph', 3, 2],
+  ['cost', 'Cost', 4, 2],
+  ['wall', 'Wall', 5, 3],
+  ['catalog', 'Catalogue', 3, 1],
 ];
 
 if (staticMode || new URLSearchParams(location.search).get('motion') === 'off') {
   document.documentElement.dataset.motion = 'off';
 }
 
-const state = { snap: null, status: staticMode ? 'static' : 'connecting', route: null, current: null, level: { level: 5, source: 'role', mine: 5 }, sheet: false };
+const state = { snap: null, status: staticMode ? 'static' : 'connecting', route: null, current: null, mode: { mode: 5, source: 'role', mine: 5 }, level: { level: 3, source: 'role', mine: 3 }, sheet: false };
 
 // applyPrefs puts the viewer's preferences into effect: the clock, the UTC
-// complication, the zone and the scheme (the level is read where it is
+// complication, the zone and the scheme (the mode is read where it is
 // drawn). A link's ?clock= ?utc= ?tz= ?scheme= win for that page.
 const me = () => (state.snap && state.snap.viewer && state.snap.viewer.user) || '';
 function applyPrefs() {
@@ -76,8 +82,11 @@ export function href(hash) {
 const ctx = {
   get snap() { return state.snap; },
   get route() { return state.route; },
-  // the detail level this view draws at: a job opens at level 1 or above
-  get level() { return state.route && state.route.name === 'job' ? Math.max(1, state.level.level) : state.level.level; },
+  // the mode this view draws at: a job opens at Frames or above
+  get mode() { return state.route && state.route.name === 'job' ? Math.max(1, state.mode.mode) : state.mode.mode; },
+  // the person's level for this view (level.js); a peek (?peek=N on the
+  // route) shows one thing at a higher level without changing theirs
+  get level() { const p = Number(state.route && state.route.q && state.route.q.peek); return Math.max(state.level.level, Number.isFinite(p) ? Math.min(3, p) : 0); },
   href,
   go(hash) { location.hash = '#/' + hash; },
   refresh: () => render(),
@@ -105,7 +114,8 @@ function topBar() {
       h('span', { class: 'num' }, s ? f.clockSec(s.now) : '--:--:--', s && f.utc(s.now) ? h('span', { class: 'cx', title: 'UTC' }, f.utc(s.now)) : null),
       h('span', { class: 'lab' }, s ? `${f.dateLine(s.now)} \u00b7 ${f.offsetLabel()}` : '')),
     h('nav', { class: 'views', 'aria-label': 'Views' },
-      NAV.filter(([k, , n]) => state.level.level >= n || (state.route && state.route.name === k)).map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
+      NAV.filter(([k, , n, l]) => (state.mode.mode >= n && ctx.level >= l && (k !== 'catalog' || state.catalog)) || (state.route && state.route.name === k)).map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
+    levelSwitch(),
     detail(),
     h('div', { class: 'who' },
       h('span', { class: 'live', 'data-state': state.status, title: `Updates: ${state.status}` }),
@@ -136,9 +146,19 @@ function sheet() {
         h('option', { value: '', selected: cur === '' ? 'selected' : null }, `Your browser\u2019s (${browserZone()})`),
         zones.map((z) => h('option', { value: z, selected: z === cur ? 'selected' : null }, z.replace(/_/g, ' '))));
     } else if (key === 'level') {
-      input = h('span', { class: 'pf-levels' },
-        lv.LEVELS.map((L) => h('button', { class: 'btn small' + (cur === L.n ? ' on' : ''), 'data-pref': 'level', 'data-value': String(L.n), title: L.q }, `${L.n} ${L.name}`)),
-        h('button', { class: 'btn small' + (cur == null ? ' on' : ''), 'data-pref': 'level', 'data-value': '' }, `For my role (${lv.roleDefault(state.snap && state.snap.viewer)})`));
+      input = h('span', { class: 'pf-modes' },
+        lvl.LEVELS.map((L) => h('button', { class: 'btn small' + (cur === L.n ? ' on' : ''), 'data-pref': 'level', 'data-value': String(L.n), title: L.q }, `${L.n} ${L.name}`)),
+        h('button', { class: 'btn small' + (cur == null ? ' on' : ''), 'data-pref': 'level', 'data-value': '' }, `For my role (${lvl.roleDefault(state.snap && state.snap.viewer)})`));
+    } else if (key === 'levelByView') {
+      const view = state.route ? (state.route.name === 'workers' ? 'pools' : state.route.name) : 'queue';
+      const own = (cur || {})[view];
+      input = h('span', { class: 'pf-modes' }, h('span', { class: 'dim', style: { marginRight: '6px' } }, `This view (${view}):`),
+        lvl.LEVELS.map((L) => h('button', { class: 'btn small' + (own === L.n ? ' on' : ''), 'data-pref-view': view, 'data-value': String(L.n) }, String(L.n))),
+        h('button', { class: 'btn small' + (own == null ? ' on' : ''), 'data-pref-view': view, 'data-value': '' }, 'Same as everywhere'));
+    } else if (key === 'mode') {
+      input = h('span', { class: 'pf-modes' },
+        md.MODES.map((M) => h('button', { class: 'btn small' + (cur === M.n ? ' on' : ''), 'data-pref': 'mode', 'data-value': String(M.n), title: M.q }, `${M.n} ${M.name}`)),
+        h('button', { class: 'btn small' + (cur == null ? ' on' : ''), 'data-pref': 'mode', 'data-value': '' }, `For my role (${md.roleDefault(state.snap && state.snap.viewer)})`));
     }
     return h('div', { class: 'pf-row' },
       h('label', { class: 'pf-lab', for: 'pref-' + key }, S.label),
@@ -177,8 +197,12 @@ document.addEventListener('click', (e) => {
     render();
     return;
   }
-  const lvb = e.target.closest('.pf-sheet [data-pref="level"]');
-  if (lvb) { e.preventDefault(); setPref('level', lvb.dataset.value === '' ? null : Number(lvb.dataset.value)); }
+  const lb = e.target.closest('.pf-sheet [data-pref="level"]');
+  if (lb) { e.preventDefault(); setPref('level', lb.dataset.value === '' ? null : Number(lb.dataset.value)); return; }
+  const vb = e.target.closest('.pf-sheet [data-pref-view]');
+  if (vb) { e.preventDefault(); lvl.choose(state.snap && state.snap.viewer, vb.dataset.value === '' ? null : Number(vb.dataset.value), vb.dataset.prefView); applyPrefs(); render(); return; }
+  const mb = e.target.closest('.pf-sheet [data-pref="mode"]');
+  if (mb) { e.preventDefault(); setPref('mode', mb.dataset.value === '' ? null : Number(mb.dataset.value)); }
 });
 document.addEventListener('change', (e) => {
   const el = e.target.closest('.pf-sheet [data-pref]');
@@ -189,37 +213,59 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state.sheet) { state.sheet = false; render(); }
 });
 
-// detail: the level switch. Six cells and the level's name; a cell sets
-// the viewer's own level. [ and ] step down and up.
-function detail() {
-  const L = state.level, cur = lv.LEVELS[L.level];
-  return h('div', { class: 'detail', role: 'group', 'aria-label': `Detail level ${L.level}, ${cur.name}` },
-    h('span', { class: 'lab' }, 'Detail'),
-    h('span', { class: 'cells' }, lv.LEVELS.map((x) => h('button', {
+// levelSwitch: the person's level, 1 2 3, always in reach. A cell sets it
+// everywhere; Preferences sets one view apart.
+function levelSwitch() {
+  const L = state.level;
+  const cur = lvl.LEVELS[L.level - 1];
+  return h('div', { class: 'detail levelsw', role: 'group', 'aria-label': `Level ${L.level}, ${cur.name}` },
+    h('span', { class: 'lab' }, 'Level'),
+    h('span', { class: 'cells' }, lvl.LEVELS.map((x) => h('button', {
       class: 'cell-l' + (x.n <= L.level ? ' on' : '') + (x.n === L.level ? ' cur' : ''), 'data-level': String(x.n),
       title: `${x.n} · ${x.name}: ${x.q}`, 'aria-pressed': x.n === L.level ? 'true' : 'false',
     }))),
     h('span', { class: 'lvname' }, `${L.level} · ${cur.name}`));
 }
 
-// offerBar: one "show me more" offer, or the note that a link set the level
+// detail: the mode switch. Six cells and the mode's name; a cell sets the
+// viewer's own mode. [ and ] step down and up.
+function detail() {
+  const M = state.mode, cur = md.MODES[M.mode];
+  return h('div', { class: 'detail', role: 'group', 'aria-label': `Mode ${M.mode}, ${cur.name}` },
+    h('span', { class: 'lab' }, 'Mode'),
+    h('span', { class: 'cells' }, md.MODES.map((x) => h('button', {
+      class: 'cell-l' + (x.n <= M.mode ? ' on' : '') + (x.n === M.mode ? ' cur' : ''), 'data-mode': String(x.n),
+      title: `${x.n} · ${x.name}: ${x.q}`, 'aria-pressed': x.n === M.mode ? 'true' : 'false',
+    }))),
+    h('span', { class: 'lvname' }, `${M.mode} · ${cur.name}`));
+}
+
+// offerBar: one "show me more" offer, or the note that a link set the mode
 function offerBar() {
-  const s = state.snap, v = s && s.viewer, L = state.level;
-  // static pages (fixtures, screenshots) show the level they were given, no offers
+  const s = state.snap, v = s && s.viewer, L = state.mode;
+  // static pages (fixtures, screenshots) show the mode they were given, no offers
   if (!s || staticMode) return h('div', { class: 'offerbar', hidden: true });
-  if (L.source === 'link' && L.level !== L.mine) {
+  if (L.source === 'link' && L.mode !== L.mine) {
     return h('div', { class: 'offerbar note', role: 'status' },
-      h('span', { class: 'msg' }, `Showing level ${L.level}, ${lv.LEVELS[L.level].name}, from this link. Your level is ${L.mine}, ${lv.LEVELS[L.mine].name}.`),
-      h('button', { class: 'btn small', 'data-offer': 'keep' }, `Keep ${L.level}`),
-      h('button', { class: 'btn small', 'data-offer': 'back' }, `Back to ${L.mine}`));
+      h('span', { class: 'msg' }, `Showing ${md.MODES[L.mode].name} mode from this link. Yours is ${md.MODES[L.mine].name}.`),
+      h('button', { class: 'btn small', 'data-offer': 'keep' }, `Keep ${md.MODES[L.mode].name}`),
+      h('button', { class: 'btn small', 'data-offer': 'back' }, `Back to ${md.MODES[L.mine].name}`));
   }
-  const o = lv.offer(s, state.route, L.level, v);
+  const lo = lvl.offer(v, state.level.level);
+  if (lo) {
+    return h('div', { class: 'offerbar', role: 'status' },
+      h('i', { class: 'mark', 'aria-hidden': 'true' }),
+      h('span', { class: 'pt' }, h('span', { class: 'lab' }, lo.title), h('span', { class: 'msg' }, lo.msg)),
+      h('button', { class: 'btn primary small', 'data-offer': 'level-yes', 'data-level-to': String(lo.level) }, lo.yes),
+      h('button', { class: 'btn small', 'data-offer': 'level-no', 'data-level-to': String(lo.level) }, 'No thanks'));
+  }
+  const o = md.offer(s, state.route, L.mode, v);
   if (!o) return h('div', { class: 'offerbar', hidden: true });
   return h('div', { class: 'offerbar', role: 'status' },
     h('i', { class: 'mark', 'aria-hidden': 'true' }),
     h('span', { class: 'pt' }, h('span', { class: 'lab' }, o.title), h('span', { class: 'msg' }, o.msg)),
-    h('button', { class: 'btn primary small', 'data-offer': 'yes', 'data-level': String(o.level) }, o.yes),
-    h('button', { class: 'btn small', 'data-offer': 'notnow', 'data-level': String(o.level) }, 'Not now'));
+    h('button', { class: 'btn primary small', 'data-offer': 'yes', 'data-mode': String(o.mode) }, o.yes),
+    h('button', { class: 'btn small', 'data-offer': 'notnow', 'data-mode': String(o.mode) }, 'No thanks'));
 }
 
 function slate() {
@@ -257,25 +303,40 @@ function slate() {
       h('span', { class: 'sub' }, `of ${f.bytes(fm.bytesMaterialized)} mounted; ${f.bytes(fm.bytesFetchedFromStore)} came from the store`)));
 }
 
-let lastView = null;
+let lastView = null, lastRoute = null;
+// the Catalogue tab shows only on a farm that serves a catalogue of designs
+fetch(objectURL('/api/v1/catalog'), { method: 'HEAD' }).then((r) => { state.catalog = r.ok; if (r.ok && state.snap) render(); }).catch(() => {});
 function render() {
   const route = state.route;
-  state.level = lv.current(state.snap && state.snap.viewer);
+  state.mode = md.current(state.snap && state.snap.viewer);
+  state.level = lvl.current(state.snap && state.snap.viewer, route.name === 'workers' ? 'pools' : route.name);
+  document.documentElement.dataset.mode = String(ctx.mode);
   document.documentElement.dataset.level = String(ctx.level);
-  if (route.name === 'job' && state.snap) lv.opened(ctx.job(route.parts.slice(0, 2).join('/')));
+  // the peripheral cue: a steady red edge on the top bar while anything
+  // needs a person, on every page and in every mode (incidents.js)
+  if (state.snap) document.documentElement.dataset.needs = needsCount(incidents(state.snap, [])) > 0 ? '1' : '0';
+  // reaching for expert detail at level 2 counts toward the one offer of 3
+  if (state.snap && state.level.level === 2 && lastRoute !== location.hash && (ctx.mode >= 5 || ['tiers', 'wall', 'cost'].includes(route.name))) lvl.used(state.snap.viewer, 'expert');
+  lastRoute = location.hash;
+  if (route.name === 'job' && state.snap) md.opened(ctx.job(route.parts.slice(0, 2).join('/')));
 
   const bare = route.name === 'wall' || route.name === 'widget';
   document.documentElement.dataset.scale = route.name === 'wall' ? 'wall' : route.name === 'widget' ? 'widget' : 'desk';
   document.getElementById('top').hidden = bare;
   document.getElementById('slate').hidden = bare;
   // an artist's queue is their own shots
-  const mineView = route.name === 'queue' && state.snap && state.snap.viewer && !state.snap.viewer.allProjects && ctx.level >= 2;
-  const view = mineView ? VIEWS.mine : VIEWS[route.name];
+  const mineView = route.name === 'queue' && state.snap && state.snap.viewer && !state.snap.viewer.allProjects && ctx.mode >= 2;
+  let view = mineView ? VIEWS.mine : VIEWS[route.name];
+  // level 1: the day-one form of the views that have one
+  if (ctx.level === 1 && state.snap) {
+    const D1 = { queue: state.snap.viewer && state.snap.viewer.allProjects ? farm1 : mine1, job: job1, pools: pools1, workers: pools1 };
+    if (D1[route.name]) view = D1[route.name];
+  }
   if (lastView && lastView !== view && lastView.leave) lastView.leave();
   lastView = view;
   morphInto(document.getElementById('top'), topBar());
   morphInto(document.getElementById('slate'), slate());
-  document.getElementById('slate').hidden = bare || ctx.level < 4;
+  document.getElementById('slate').hidden = bare || ctx.mode < 4 || ctx.level < 3;
   morphInto(document.getElementById('offer'), offerBar());
   morphInto(document.getElementById('prefs'), sheet());
   document.getElementById('offer').hidden = bare;
@@ -288,7 +349,7 @@ function render() {
     console.error(e);
     el = h('div', { class: 'err' }, `This view failed to draw: ${e.message}`);
   }
-  const wrap = h('main', { id: 'main', tabindex: '-1', 'data-view': mineView ? 'mine' : route.name }, el);
+  const wrap = h('main', { id: 'main', tabindex: '-1', 'data-view': mineView ? 'mine' : route.name, 'data-level': String(ctx.level) }, el);
   morph(main, wrap);
   hydrate(main);
   if (view.after) view.after(ctx, main);
@@ -325,6 +386,7 @@ const ACTIONS = {
     return [`/jobs/${d.job}/nudge`, { deadline: f.fromInput(input.value) }];
   },
   requeue: (d) => [`/jobs/${d.job}/requeue`, { units: d.units }],
+  accept: (d) => [`/jobs/${d.job}/ack`, { units: d.units, kind: 'accept' }],
   blacklist: (d) => [`/jobs/${d.job}/blacklist`, { node: d.node }],
   unblacklist: (d) => [`/jobs/${d.job}/blacklist`, { node: d.node, remove: true }],
   disable: (d) => [`/nodes/${d.node}/disable`, { disabled: true }],
@@ -351,27 +413,32 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-// the level switch, the offers and the [ ] keys
+// the mode switch, the offers and the [ ] keys
 document.addEventListener('click', (e) => {
   const v = state.snap && state.snap.viewer;
-  const cell = e.target.closest('.detail [data-level]');
-  if (cell) { e.preventDefault(); lv.choose(v, Number(cell.dataset.level)); render(); return; }
+  const lc = e.target.closest('.levelsw [data-level]');
+  if (lc) { e.preventDefault(); lvl.choose(v, Number(lc.dataset.level)); render(); return; }
+  if (e.target.closest('[data-peek]')) lvl.used(v, 'peek');
+  const cell = e.target.closest('.detail [data-mode]');
+  if (cell) { e.preventDefault(); md.choose(v, Number(cell.dataset.mode)); render(); return; }
   const b = e.target.closest('[data-offer]');
   if (!b) return;
   e.preventDefault();
   const what = b.dataset.offer;
-  if (what === 'yes') lv.choose(v, Number(b.dataset.level));
-  else if (what === 'notnow') lv.notNow(v, Number(b.dataset.level));
-  else if (what === 'keep') lv.keep(v);
-  else if (what === 'back') lv.choose(v, state.level.mine);
+  if (what === 'level-yes') { lvl.settle(v, Number(b.dataset.levelTo), 'yes'); lvl.choose(v, Number(b.dataset.levelTo)); }
+  else if (what === 'level-no') lvl.settle(v, Number(b.dataset.levelTo), 'no');
+  else if (what === 'yes') { md.notNow(v, Number(b.dataset.mode)); md.choose(v, Number(b.dataset.mode)); }
+  else if (what === 'notnow') md.notNow(v, Number(b.dataset.mode));
+  else if (what === 'keep') md.keep(v);
+  else if (what === 'back') md.choose(v, state.mode.mine);
   render();
 });
 document.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey || /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)) return;
   if (e.key !== '[' && e.key !== ']') return;
-  const n = state.level.level + (e.key === ']' ? 1 : -1);
-  if (n < 0 || n > lv.MAX) return;
-  lv.choose(state.snap && state.snap.viewer, n);
+  const n = state.mode.mode + (e.key === ']' ? 1 : -1);
+  if (n < 0 || n > md.MAX) return;
+  md.choose(state.snap && state.snap.viewer, n);
   render();
 });
 

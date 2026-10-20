@@ -36,6 +36,7 @@
 .sw-checked, .sw-reused { background: var(--done); }
 .sw-expected { background: radial-gradient(var(--g13) 0.6px, transparent 0.8px) 0 0 / 3px 3px, var(--g08); outline: 1px dashed var(--g12); outline-offset: -1px; }
 .sw-together { background: var(--run); box-shadow: 4px 0 0 var(--run), 0 0 0 1.5px var(--paper); width: 6px; margin-right: 4px; }
+.sw-reasoning { background: var(--g09); }
 .sw-reserved { background: transparent; outline: 1px dotted var(--g15); outline-offset: -1px; }
 .sw-done { background: var(--done); }
 .sw-run { background: linear-gradient(var(--g09) 0 45%, var(--run) 45%); }

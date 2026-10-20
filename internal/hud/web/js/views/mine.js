@@ -62,12 +62,16 @@ function card(ctx, j) {
   const late = !done && dl && Number.isFinite(e.slackSeconds) && e.slackSeconds < 0;
   const keys = shotKeys(ctx.snap, st.graph, j);
   const details = keys.map((x) => st.details.get(x)).filter(Boolean).map((x) => ({ ...x, ...(ctx.job(keyOf(x)) || {}), unitStates: (ctx.job(keyOf(x)) || x).unitStates }));
+  // what each mode adds (mode.js): the shot's other jobs from Shots, burst
+  // prices from Farm, output views from Full
+  const M = ctx.mode;
   let sheet = null;
-  if (details.length && details.some((x) => keyOf(x) === k)) {
-    sheet = buildSheet({ key: `mine:${keys.join('|')}`, title: j.shot || j.name, details, anchor: k, graph: st.graph, jobs: ctx.snap.jobs });
+  const use = M >= 3 ? details : details.filter((x) => keyOf(x) === k);
+  if (use.length && use.some((x) => keyOf(x) === k)) {
+    sheet = buildSheet({ key: `mine:${M >= 3 ? keys.join('|') : k}`, title: M >= 3 ? j.shot || j.name : j.name, details: use, anchor: k, graph: st.graph, jobs: ctx.snap.jobs });
   }
   const NB = sheet ? Math.ceil(sheet.N / sheet.batch) : 0;
-  const view = { box: 8, collapsed: new Set([...Array(NB).keys()]), lineA: false, contours: false, deadline: dl ? Date.parse(dl) : null };
+  const view = { box: 8, flat: M < 3, collapsed: new Set([...Array(NB).keys()]), lineA: false, contours: false, deadline: dl ? Date.parse(dl) : null };
   const par = Math.round(g.par * 100);
   return h('article', { class: 'mjob' + (late ? ' late' : ''), 'data-key': 'mine-' + k, 'aria-label': `${j.name}: ${Math.round(g.done * 100)}% done${late ? ', projected late' : ''}` },
     h('header', { class: 'mcollar' },
@@ -81,16 +85,16 @@ function card(ctx, j) {
     h('div', { class: 'mbody' },
       own('pylon', `mpylon:${k}`, { glance: g, w: 180, h: 250, mode: 'compact' }, { class: 'mpylon' }),
       h('div', { class: 'mstack' },
-        h('div', { class: 'mst-h' }, h('span', { class: 'lab' }, j.shot ? `shot ${j.shot}` : 'job view'),
+        h('div', { class: 'mst-h' }, h('span', { class: 'lab' }, j.shot && M >= 3 ? `shot ${j.shot}` : 'job view'),
           h('span', null, sheet ? `${sheet.cols.length} stages · ${NB} batches of ${sheet.batch} ${sheet.axisKind === 'frame' ? 'frames' : 'rows'}` : 'reading the job…')),
-        sheet ? own('stack', `mstack:${k}`, { sheet, view }) : h('div', { class: 'mst-wait' }),
-        j.output ? h('div', { class: 'edgecode' }, h('b', null, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${String(j.output.changesets).padStart(4, '0')}+00`) : null),
+        sheet ? own('stack', `mstack:${k}${M >= 3 ? '' : ':flat'}`, { sheet, view }) : h('div', { class: 'mst-wait' }),
+        j.output && M >= 5 && ctx.level >= 3 ? h('div', { class: 'edgecode' }, h('b', null, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${String(j.output.changesets).padStart(4, '0')}+00`) : null),
       h('div', { class: 'mtb' },
         tcell('Deadline', dl ? f.clock(dl) : '–', j.objective && j.objective.from ? `from ${f.jobName(j.objective.from)}` : dl ? 'set on the job' : 'no objective'),
         tcell('Slack', dl && !done ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', late ? 'projected late' : done ? 'done' : e.feasible ? 'on time at current capacity' : 'will miss at current capacity'),
         tcell('Done', h('span', null, `${Math.round(g.done * 100)}`, h('small', null, '%')), par ? h('span', { class: 't-run' }, `${par}% running now`) : j.phase === 'Held' ? 'held' : 'nothing running'),
         tcell(done ? 'Finished' : 'About', done ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, f.approx(e.remainingSeconds)), done ? '' : `p90 ${f.clock(e.etaP90, false)}`),
-        late && e.burst ? h('div', { class: 'mfix' }, `+${e.burst.slots} ${e.burst.pool} slots closes it · `, h('span', { class: 'pencil' }, `est. ${f.money(e.burst.cost)}`), e.burst.needsApproval ? ' · waits for approval' : '') : null,
+        late && e.burst && M >= 4 ? h('div', { class: 'mfix' }, `+${e.burst.slots} ${e.burst.pool} slots closes it · `, h('span', { class: 'pencil' }, `est. ${f.money(e.burst.cost)}`), e.burst.needsApproval ? ' · waits for approval' : '') : null,
         !late && retries(j.units) ? h('div', { class: 'mnote t-temp' }, tempWords(j.units)) : null,
         j.units.failed ? h('div', { class: 'mnote t-fail' }, `${j.units.failed} ${j.units.failed === 1 ? 'needs' : 'need'} you: requeue, or accept the bad frames`) : null)));
 }

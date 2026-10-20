@@ -1,0 +1,72 @@
+/* The catalogue of agent designs (web/js/views/catalog.js). Ink and greys;
+   C4 fit is ink (runs today), pale (with a workaround) or grey (not yet):
+   no new hues. */
+
+.catalog .cfilters { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 22px; }
+.catalog .csearch { display: flex; align-items: center; gap: 12px; }
+.catalog .csearch input { flex: 0 1 520px; font: 400 14px/1.3 var(--sans); color: var(--paper); background: var(--well); border: var(--hair) solid var(--g13); padding: 7px 10px; }
+.catalog .cfrow { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px; }
+.catalog .cfrow > .lab { min-width: 110px; }
+.catalog .cf { font: 400 12px/1 var(--sans); color: var(--ink-2); padding: 4px 7px; border: var(--hair) solid var(--rule-2); text-decoration: none; }
+.catalog .cf.on { color: var(--paper); border-color: var(--g16); background: var(--g08); }
+
+.catalog .cgroup { margin-bottom: 26px; }
+.catalog .cgroup h2 { font: 600 11px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); margin: 0 0 10px; }
+.catalog .cgroup h2 .dim { text-transform: none; letter-spacing: 0; font-weight: 400; }
+.catalog .cgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 10px; }
+
+.catalog .ccard { display: flex; flex-direction: column; gap: 6px; padding: 12px 14px; background: var(--plate); border: var(--hair) solid var(--rule-2); color: var(--ink); text-decoration: none; }
+.catalog .ccard:hover, .catalog .ccard:focus-visible { border-color: var(--g15); }
+.catalog .ch { display: flex; align-items: center; gap: 9px; }
+.catalog .cn { font: 500 16px/1.25 var(--sans); color: var(--paper); flex: 1; }
+.catalog .cfam { font: 400 11px/1.2 var(--mono); color: var(--ink-3); }
+.catalog .cs { font: 400 13px/1.45 var(--sans); color: var(--ink-2); margin: 0; }
+.catalog .cline { font: 400 12px/1.4 var(--sans); color: var(--ink-2); }
+.catalog .cline b { font: 600 9.5px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin-right: 8px; }
+.catalog .cmeters { display: flex; flex-wrap: wrap; gap: 4px 14px; font: 400 11.5px/1.3 var(--sans); color: var(--ink-2); }
+.catalog .cmeters i { font-style: normal; font: 600 9px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin-right: 6px; }
+.catalog .cdom { display: flex; flex-wrap: wrap; gap: 4px; }
+.catalog .cfoot { font-size: 10.5px; color: var(--ink-3); }
+.catalog .cpale { color: var(--ink-3); }
+
+.catalog .cfit { flex: none; font: 600 9px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; padding: 3px 6px; border: var(--hair) solid var(--g16); color: var(--paper); }
+.catalog .cfit.cf-work { border-color: var(--g13); color: var(--ink-2); background: var(--g08); }
+.catalog .cfit.cf-missing { border: var(--hair) dashed var(--g13); color: var(--ink-3); }
+
+.catalog .cglyph { flex: none; overflow: visible; }
+.catalog .cglyph .g-on { fill: var(--g13); }
+.catalog .cglyph .g-off { fill: none; stroke: var(--g12); stroke-width: .8; }
+.catalog .cglyph .g-exp { fill: var(--g09); stroke: var(--g13); stroke-width: .8; stroke-dasharray: 1.5 1.5; }
+.catalog .cglyph .g-loop { fill: none; stroke: var(--g14); stroke-width: 1; }
+.catalog h1 .cglyph { margin-right: 14px; vertical-align: middle; }
+
+.catalog .sheethead.chead { display: block; }
+.catalog .chead .titleblock { margin-top: 14px; }
+.catalog .chead .titleblock .val.small { font: 400 15px/1.3 var(--sans); }
+.catalog .csum { font: 400 15px/1.5 var(--sans); color: var(--ink); max-width: 960px; margin: 0 0 18px; }
+.catalog .cdetail { display: grid; grid-template-columns: minmax(0, 1fr) 380px; gap: var(--gutter); align-items: start; }
+.catalog .ccol { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.catalog .cpanel .body h3 { font: 600 9.5px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); margin: 12px 0 6px; }
+.catalog .cpanel .body h3:first-child { margin-top: 0; }
+.catalog .clist { margin: 0; padding-left: 18px; font: 400 13px/1.5 var(--sans); color: var(--ink); }
+.catalog .clist li { margin-bottom: 4px; }
+.catalog .ctable { width: 100%; border-collapse: collapse; font: 400 12.5px/1.4 var(--sans); }
+.catalog .ctable th { text-align: left; font: 600 9px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); padding: 0 10px 6px 0; }
+.catalog .ctable td { padding: 6px 10px 6px 0; border-top: var(--hair) solid var(--rule-1); vertical-align: top; }
+.catalog .cdoes { display: inline-block; line-height: 0; color: var(--g17); vertical-align: -1px; }
+.catalog .cdl { display: grid; grid-template-columns: 110px 1fr; gap: 6px 10px; margin: 0; font: 400 13px/1.45 var(--sans); }
+.catalog .cdl dt { font: 600 9.5px/1.6 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-3); }
+.catalog .cdl dd { margin: 0; }
+.catalog .cver { display: inline-block; width: 12px; line-height: 0; color: var(--ink-2); }
+.catalog .cst { font: 600 8.5px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; padding: 2px 4px; border: var(--hair) solid var(--g13); color: var(--ink-3); }
+.catalog .cst-measured { border-color: var(--g16); color: var(--paper); }
+.catalog .cmer { white-space: pre-wrap; font-size: 11px; color: var(--ink-2); }
+
+.catalog .cgraph { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 14px; padding: 12px 14px; }
+.catalog .cbcard { font: 400 13px/1.45 var(--sans); color: var(--ink); }
+.catalog .cbcard p { margin: 4px 0; }
+.catalog .cbname { display: flex; align-items: center; gap: 6px; font-size: 14px; color: var(--paper); }
+
+@media (max-width: 1100px) {
+  .catalog .cdetail, .catalog .cgraph { grid-template-columns: 1fr; }
+}

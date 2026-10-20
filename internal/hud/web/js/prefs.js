@@ -12,7 +12,8 @@
 // the store then reads the server's copy and writes through to both.
 //
 // A link can carry a preference for that page only, without changing the
-// stored one: ?level=, ?tz=, ?clock=, ?utc=, ?scheme=. Captures pin them.
+// stored one: ?mode=, ?proficiency=, ?tz=, ?clock=, ?utc=, ?scheme=.
+// Captures pin them.
 
 export const VERSION = 1;
 
@@ -25,8 +26,16 @@ export const ZONES = [
 
 export const SCHEMA = {
   level: {
-    group: 'Detail', type: 'int', min: 0, max: 5, default: null, label: 'Detail level',
-    help: 'How much of the HUD you see. Empty: the level for your role.', link: 'level',
+    group: 'Level', type: 'int', min: 1, max: 3, default: null, label: 'Level',
+    help: 'How much the HUD shows and offers: 1 day one, 2 working, 3 everything. Empty: the level for your role.', link: 'proficiency',
+  },
+  levelByView: {
+    group: 'Level', type: 'map', of: { type: 'int', min: 1, max: 3 }, default: null, label: 'Level, by view',
+    help: 'A different level for one view, such as 3 in the job view and 1 everywhere else.',
+  },
+  mode: {
+    group: 'Mode', type: 'int', min: 0, max: 5, default: null, label: 'Mode',
+    help: 'Which question the HUD answers first: Queue, Frames, Time, Shots, Farm or Full. Empty: the mode for your role.', link: 'mode',
   },
   clock: {
     group: 'Time', type: 'enum', values: ['auto', '24', '12'], default: 'auto', label: 'Clock',
@@ -49,7 +58,7 @@ export const SCHEMA = {
   // notifications.
 };
 
-export const GROUPS = ['Detail', 'Time', 'Appearance'];
+export const GROUPS = ['Level', 'Mode', 'Time', 'Appearance'];
 
 function validZone(z) {
   try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch { return false; }
@@ -65,6 +74,16 @@ export function valid(key, v) {
     case 'enum': return S.values.includes(String(v)) ? String(v) : undefined;
     case 'bool': return v === true || v === false ? v : v === 'true' || v === '1' ? true : v === 'false' || v === '0' ? false : undefined;
     case 'zone': return v === '' || (typeof v === 'string' && validZone(v)) ? v : undefined;
+    case 'map': {
+      // a map from a name to a value of type `of`; bad entries are dropped
+      if (typeof v !== 'object' || Array.isArray(v)) return undefined;
+      const out = {};
+      for (const [k, x] of Object.entries(v)) {
+        const n = Number(x);
+        if (/^[a-z][a-z0-9-]*$/.test(k) && Number.isInteger(n) && n >= S.of.min && n <= S.of.max) out[k] = n;
+      }
+      return Object.keys(out).length ? out : null;
+    }
     default: return undefined;
   }
 }
@@ -93,13 +112,6 @@ function load(user) {
   if (loaded && loaded.user === (user || 'anyone')) return loaded;
   const rec = adapter.read(user) || { v: VERSION, values: {} };
   const values = { ...(rec.values || {}) };
-  // before preferences, the detail level lived on its own key
-  if (values.level === undefined && adapter === browserStore) {
-    try {
-      const old = localStorage.getItem(`c4hud:level:${user || 'anyone'}`);
-      if (old != null && valid('level', Number(old)) !== undefined) values.level = Number(old);
-    } catch { /* no storage */ }
-  }
   loaded = { user: user || 'anyone', values };
   return loaded;
 }
@@ -115,9 +127,10 @@ export function effective(user, key) {
   const S = SCHEMA[key];
   if (S && S.link) {
     try {
-      const raw = new URLSearchParams(location.search).get(S.link);
+      const q = new URLSearchParams(location.search);
+      const raw = q.get(S.link);
       if (raw !== null && raw !== '') {
-        const v = valid(key, key === 'level' ? Number(raw) : raw);
+        const v = valid(key, S.type === 'int' ? Number(raw) : raw);
         if (v !== undefined && v !== null) return { value: v, source: 'link' };
       }
     } catch { /* no location: tests */ }

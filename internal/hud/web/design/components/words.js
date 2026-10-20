@@ -2,13 +2,13 @@
 // vocabulary"). A unit's state, its wait, its review and its interruptions
 // read the same in the tooltip, the unit card, the legend and the book.
 // Native names (the operator's enum values, Kubernetes reasons) appear only
-// in how(), shown at level 5.
+// in how(), shown in Full mode.
 //
 //   unitWords(u)        { word, cls, why }: the state in the vocabulary, its
 //                       text class, and the reason or detail as text
 //   who(waitsFor)       a wait's subject in words: "Noor", "license-nuke"
 //   interruptedBy(r)    a native interruption reason in words
-//   how(u)              the level-5 line: what the words stand for natively
+//   how(u)              the Full-mode line: what the words stand for natively
 
 import * as f from './fmt.js';
 
@@ -72,7 +72,7 @@ export function unitWords(u) {
   }
 }
 
-// how: the native names behind the words, for level 5.
+// how: the native names behind the words, for Full mode.
 export function how(u) {
   const out = [`state ${u.state}`];
   if (u.wait) out.push(`wait ${u.wait.waitsFor}${u.wait.escalated ? ' (escalated)' : ''}`);
@@ -83,7 +83,7 @@ export function how(u) {
   return out.join(' · ');
 }
 
-// jobWords: a job's state in one phrase, the level-0 word (INTEGRATE 4.4):
+// jobWords: a job's state in one phrase, the Queue-mode word (INTEGRATE 4.4):
 // "blocked on comp", "waits for license-nuke", "held", "needs you" (the
 // caller's personMark says why), else its phase in the vocabulary.
 const PHASE = { Queued: 'queued', Running: 'rendering', Blocked: 'blocked on', Held: 'held', Yielded: 'queued', Succeeded: 'done', Failed: 'needs you' };
@@ -106,5 +106,17 @@ export function tempWords(u) {
   const parts = [];
   if (u.retrying) parts.push(`${u.retrying} retrying`);
   if (u.backoff) parts.push(`${u.backoff} backoff`);
+  return parts.join(' · ');
+}
+
+// reasoningWords: what a unit reasons with, in words, by level (level.js):
+// at 2 a model (and which) or a procedure; at 3 also its effort and tools.
+// Metadata, not state. Null when the unit does not say.
+export function reasoningWords(r, level = 3) {
+  if (!r || !r.does) return null;
+  if (r.does === 'procedure') return 'a procedure: a command, no model';
+  const parts = [r.model ? `a model, ${r.model}` : 'a model (which one is not reported)'];
+  if (level >= 3 && r.effort) parts.push(`effort ${r.effort}`);
+  if (level >= 3 && r.tools) parts.push(`tools ${r.tools}`);
   return parts.join(' · ');
 }

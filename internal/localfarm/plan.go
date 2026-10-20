@@ -29,21 +29,20 @@ const (
 )
 
 // Viewers are the local sign-ins: one per role the HUD supports, as
-// --hud-dev-viewers takes them (name@role=projects). The HUD opens each at
-// its role's detail level.
+// --hud-dev-viewers takes them (name@role=projects). The HUD opens each in
+// its role's mode and at its role's level.
 var Viewers = []Viewer{
-	{Name: "artist", Role: "artist", Projects: Project, Level: 1},
-	{Name: "supervisor", Role: "supervisor", Projects: Project, Level: 2},
-	{Name: "wrangler", Role: "wrangler", Projects: "*", Level: 3},
-	{Name: "admin", Role: "farm-admin", Projects: "*", Level: 4},
-	{Name: "facilities", Role: "facilities", Projects: "*", Level: 4},
-	{Name: "td", Role: "pipeline-td", Projects: Project, Level: 5},
+	{Name: "artist", Role: "artist", Projects: Project},
+	{Name: "supervisor", Role: "supervisor", Projects: Project},
+	{Name: "wrangler", Role: "wrangler", Projects: "*"},
+	{Name: "admin", Role: "farm-admin", Projects: "*"},
+	{Name: "facilities", Role: "facilities", Projects: "*"},
+	{Name: "td", Role: "pipeline-td", Projects: Project},
 }
 
 // Viewer is one local sign-in.
 type Viewer struct {
 	Name, Role, Projects string
-	Level                int
 }
 
 // LookupViewer finds a sign-in by name or role.
@@ -271,7 +270,8 @@ func YAML(objs []obj) []byte {
 	return []byte(b.String())
 }
 
-// Link is the address on the HUD at hud for a viewer at its role's level.
+// Link is the address on the HUD at hud for a viewer; the HUD starts them
+// in their role's mode and level.
 func Link(hud string, v Viewer) string {
-	return fmt.Sprintf("%s/?as=%s&level=%d", hud, v.Name, v.Level)
+	return fmt.Sprintf("%s/?as=%s", hud, v.Name)
 }

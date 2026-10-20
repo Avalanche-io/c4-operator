@@ -126,9 +126,9 @@ the site (c4 `proposals/queue-primitives/INTEGRATE.md` 4.2). The words are
 render words: an agent, CI or ML job's units are frames too, and rendering
 is a unit at work in any class. Native names (Kubernetes, Kueue, the
 operator's own enum values such as `preflight` or `PreemptionByScheduler`)
-appear only at level 5, in the unit card's "how" line.
+appear only in Full mode (5), in the unit card's "how" line.
 
-| family          | term                | what it means                                                             | token           | drawing                                                                  | from the API                                            | level |
+| family          | term                | what it means                                                             | token           | drawing                                                                  | from the API                                            | mode  |
 | --------------- | ------------------- | ------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------ | ------------------------------------------------------- | ----- |
 | not started     | queued              | ready to run; waits for a slot                                            | `--g09`         | flat                                                                     | `queued`                                                | 1     |
 |                 | blocked on *x*      | waits for other work or an input to exist                                 | `--g09` `--g12` | hatched; *x* as text                                                     | `blocked`, `edges`, the job's `dependsOn`               | 1     |
@@ -160,7 +160,7 @@ appear only at level 5, in the unit card's "how" line.
 Capacity takes no hue: **guaranteed**, **borrowed** and **lent** are a
 project's slots (its own, taken from another, given to another), a **pool**
 is a kind of slot, and **may use** is the order a job falls back through
-pools; all appear at level 4, in the pools view and on the unit card. A
+pools; all appear in Farm mode (4), in the pools view and on the unit card. A
 budget, a token meter or a power cap is capacity too, shown like slots with
 its reason as text, never as a state: a capped node's lost slots are
 hatched, "capped: battery 21%", and the word is capped, not held or blocked.
@@ -174,7 +174,7 @@ back), **tick** (checked), **reuse** (reused), **flag** (needs you),
 cell's hue: interrupted is never orange (the unit did nothing wrong), a
 machine's wait is never red (no person must act), a check is never green.
 
-**Gates** (level 3, INTEGRATE 4.4): a stage of waits or of checks is a gate,
+**Gates** (Shots mode, 3; INTEGRATE 4.4): a stage of waits or of checks is a gate,
 a narrow column between the stages it sits between. Each of its blocks spans
 the rows it holds: a wait the units blocked on it (`edges`, `blockedOn`), a
 check the frames it read or judged (`edges`, `review.by`); blocks that hold
@@ -182,6 +182,18 @@ the same rows sit side by side. A block takes its unit's drawing (a wait for
 a thing hatched with the clock, a person's wait red or pale red, a check its
 state). While a rework is under way, an orange arrow runs from the check
 that sent the frame back to the frame (stack.js, paintOverlays).
+
+**A plan as a render** (from level 2; plansheet.js): a plan job's sheet has
+a row per block, named by its charter, and its step kinds as stages in the
+order work flows (charter, build, check, review, refute, merge). A block
+not expanded yet has expected cells in the stages to come; a block's
+phases in one stage share its cell, left to right. A plan's own checks and
+reviews are stages of each block; only its waits are a gate. From Shots
+mode, a block's dependencies on other blocks are arcs in a gutter between
+the names and the first stage, pointing at the block that waits: every arc
+thin and `--g12`, the selected or hovered block's in `--ink`; at level 3,
+"all dependencies" draws the full set at full weight. Arcs are ink: a
+dependency is structure, not state.
 
 **Agent bundle members** take the same words: rendering is `--run`;
 queued is `--g09` flat; a member the queue stopped for capacity waits for
@@ -196,7 +208,8 @@ text. Right after a cap drops, units still rendering past it stay `--run`
 until they stop at the end of their turns; the text counts them, and the
 pool keeps its full shape in cells.
 
-**Plan lanes** (a plan job's lens, one cell per lane) take the same words:
+**Plan lanes** (a plan job's lens, one cell per lane, under the render in
+Full mode at level 3) take the same words:
 a lane in the plan not yet chartered is expected (dashed outline,
 stippled); a chartered lane waiting for a slot is queued, `--g09` flat; one
 blocked on the lanes it follows is hatched, with those lanes as text; a

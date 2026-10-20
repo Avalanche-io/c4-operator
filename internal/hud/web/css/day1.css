@@ -1,0 +1,74 @@
+/* Level 1, day one (js/level.js, js/views/day1.js): low density, a few
+   obvious actions. One row per job; what needs you first, as root causes
+   with their steps (design/components/incidents.js). */
+
+.d1 { max-width: 1180px; margin: 0 auto; padding: 28px 32px 60px; font-family: var(--sans); }
+.d1 .crumbs { margin-bottom: 10px; }
+.d1 h1 { font: 300 34px/1.1 var(--sans); color: var(--paper); margin: 0 0 6px; }
+.d1 .d1-sub { font: 400 15px/1.4 var(--sans); color: var(--ink-2); margin: 0 0 26px; }
+.d1 h2 { font: 600 12px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); margin: 30px 0 12px; }
+
+.d1-root { display: grid; grid-template-columns: 6px 1fr auto; gap: 0 18px; background: var(--plate); border: 1px solid var(--rule-2); margin-bottom: 12px; }
+.d1-root .bar { background: var(--g13); }
+.d1-root.d1-needs .bar { background: var(--fail); }
+.d1-root.d1-ack .bar { background: var(--fail-pale); }
+.d1-root .body { padding: 16px 0; }
+.d1-root .t { font: 500 18px/1.3 var(--sans); color: var(--paper); display: flex; align-items: center; gap: 10px; }
+.d1-root .t .flag { width: 0; height: 0; border-top: 11px solid var(--fail); border-left: 11px solid transparent; flex: none; }
+.d1-root .t .clock { line-height: 0; color: var(--g17); }
+.d1-root .d { font: 400 14px/1.45 var(--sans); color: var(--ink-2); margin-top: 4px; max-width: 760px; }
+.d1-root ol { margin: 12px 0 0; padding: 0; list-style: none; counter-reset: s; }
+.d1-root li { counter-increment: s; display: flex; align-items: center; gap: 12px; margin: 8px 0; font: 400 14px/1.3 var(--sans); color: var(--ink); }
+.d1-root li::before { content: counter(s); width: 22px; height: 22px; border-radius: 50%; display: grid; place-items: center; font: 600 12px/1 var(--sans); color: var(--ink-2); border: 1px solid var(--rule-2); flex: none; }
+/* the next step is the salient thing, never the broken thing */
+.d1-root li.next::before { color: var(--field); background: var(--paper); border-color: var(--paper); }
+.d1-root li.done { color: var(--ink-3); text-decoration: line-through; }
+.d1-root .n { align-self: center; padding-right: 18px; font: 300 30px/1 var(--mono); color: var(--ink-2); text-align: right; }
+.d1-root .n small { display: block; font: 400 11px/1.2 var(--sans); color: var(--ink-3); margin-top: 4px; }
+.d1-quiet { font: 400 15px/1.4 var(--sans); color: var(--ink-2); padding: 14px 18px; border: 1px dashed var(--rule-2); }
+
+.d1-job { display: grid; grid-template-columns: minmax(220px, 1.3fr) minmax(240px, 2fr) 170px 110px; gap: 18px; align-items: center; padding: 18px; border-bottom: 1px solid var(--rule-1); text-decoration: none; color: inherit; }
+.d1-job:hover { background: var(--plate); text-decoration: none; }
+.d1-job .nm { font: 500 18px/1.2 var(--mono); color: var(--paper); }
+.d1-job .st { font: 400 14px/1.3 var(--sans); color: var(--ink-2); margin-top: 5px; }
+.d1-job .see { font: 400 12px/1.3 var(--sans); color: var(--ink-3); margin-top: 3px; }
+.d1-bar { position: relative; height: 12px; background: var(--g09); }
+.d1-bar i { position: absolute; top: 0; bottom: 0; }
+.d1-bar .d { left: 0; background: var(--done); }
+.d1-bar .r { background: var(--run); }
+.d1-bar.late { box-shadow: inset -3px 0 0 var(--risk); }
+.d1-pct { font: 400 13px/1 var(--mono); color: var(--ink-2); margin-top: 6px; }
+.d1-when { font: 400 16px/1.3 var(--mono); color: var(--paper); }
+.d1-when small { display: block; font: 400 12px/1.3 var(--sans); color: var(--ink-3); }
+.d1-when.late { color: var(--risk-text); }
+.d1-act { text-align: right; }
+
+.d1-stages { display: grid; gap: 14px; margin-top: 8px; }
+.d1-stage { display: grid; grid-template-columns: 160px 1fr 120px; gap: 16px; align-items: center; }
+.d1-stage .nm { font: 600 12px/1 var(--sans); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); }
+.d1-stage .ct { font: 400 13px/1 var(--mono); color: var(--ink-2); text-align: right; }
+.d1-peek { margin-top: 28px; display: flex; gap: 12px; align-items: center; font: 400 14px/1.3 var(--sans); color: var(--ink-2); }
+.d1-pool { display: grid; grid-template-columns: 200px 1fr 160px; gap: 18px; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--rule-1); }
+.d1-pool .nm { font: 500 16px/1.2 var(--mono); color: var(--paper); }
+.d1-pool .ct { font: 400 14px/1.3 var(--mono); color: var(--ink-2); text-align: right; }
+.d1-foot { font: 400 13px/1.4 var(--sans); color: var(--ink-3); margin-top: 34px; border-top: 1px solid var(--rule-1); padding-top: 14px; }
+
+/* root items at levels 2 and 3: the same items, compact, above the table */
+.qroots { margin: 0 0 14px; }
+.qroots h2 { font: 600 11px/1 var(--sans); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); margin: 14px 0 8px; }
+.qroots .d1-root { margin-bottom: 6px; }
+.qroots .d1-root .body { padding: 10px 0; }
+.qroots .d1-root .t { font-size: 15px; }
+.qroots .d1-root .d { font-size: 13px; }
+.qroots .d1-root li { font-size: 13px; margin: 5px 0; }
+.qroots .d1-root .n { font-size: 22px; }
+.qroots .d1-quiet { padding: 8px 14px; font-size: 13px; }
+/* a job folded into a root item points to it, instead of its own red */
+.seeroot { font: 400 11px/1.3 var(--sans); color: var(--ink-3); text-decoration: none; }
+.seeroot:hover { color: var(--paper); }
+/* triage: healthy work as one line per project */
+.qfold { display: flex; gap: 14px; align-items: baseline; padding: 10px 4px; border-bottom: var(--hair) solid var(--rule-0); font: 400 13px/1.3 var(--sans); color: var(--ink-2); }
+.qfold b { font-weight: 500; color: var(--paper); }
+/* the peripheral cue: a steady red edge on the top bar while anything needs
+   a person, on every page. Never flashing (Nikolic, Orr and Sarter 2004). */
+html[data-needs="1"] .top { box-shadow: inset 0 3px 0 var(--fail); }

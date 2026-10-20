@@ -7,7 +7,7 @@
 // row. No line runs from a container to what it contains. Lines are an
 // overlay for what grouping cannot say: A, a dependency on a job outside
 // the sheet (on by default); B, a unit that reads other rows (off by
-// default, per job). Gates (INTEGRATE 4.4, level 3): a stage of waits or of
+// default, per job). Gates (INTEGRATE 4.4, Shots mode): a stage of waits or of
 // reviews is a narrow column between the stages it sits between, each of its
 // cells spanning the rows it holds (the units blocked on a wait, the frames a
 // review read), and a rework is an orange arrow from the review that sent a
@@ -84,6 +84,18 @@ function groupEdges(d, byI) {
   return e;
 }
 
+// ARC_GUTTER: the room between a plan's block names and its first stage,
+// where the dependency arcs run
+const ARC_GUTTER = 44;
+
+// fit: text cut to a width, with an ellipsis
+function fit(g, text, w) {
+  if (g.measureText(text).width <= w) return text;
+  let n = text.length;
+  while (n > 1 && g.measureText(text.slice(0, n) + '…').width > w) n--;
+  return text.slice(0, n) + '…';
+}
+
 // gateOf says whether a group of a job is a gate: every unit a wait ('wait'),
 // or every unit a review ('review': named as some unit's review.by, or a
 // group named for a check). A gate is drawn narrow, between the stages.
@@ -92,6 +104,8 @@ function gateOf(d, g, members) {
   const waits = new Set((d.waits || []).map((w) => w.unit));
   // a wait not yet open reads as blocked, so the group's name counts too
   if (members.every((u) => waits.has(u.i) || u.state === 'waits') || /^(waits?|gates?)$/i.test(g.key || '')) return 'wait';
+  // a plan's own check and review steps are stages of each block, not gates
+  if (d.rowLabels) return null;
   const by = new Set((d.unitList || []).filter((u) => u.review && u.review.by != null).map((u) => u.review.by));
   if (members.every((u) => by.has(u.i)) || /^(qc|review|check)/i.test(g.key || '')) return 'review';
   return null;
@@ -133,7 +147,8 @@ export function buildSheet({ key, title, details, anchor, graph, jobs }) {
   // rows: the anchor's widest group (frames for render, shards for CI, ranks for ML)
   const groups = A.groups || [];
   const counts = groups.map((g) => ({ g, n: unitsCount(g.units) }));
-  const N = Math.max(1, ...counts.map((c) => c.n));
+  // (a plan's rows are its blocks: a stage may run several phases a block)
+  const N = A.rowLabels ? Math.max(1, A.rowLabels.length) : Math.max(1, ...counts.map((c) => c.n));
   const start = A.axis && A.axis.kind === 'frame' ? (A.axis.start || 0) : 0;
   const step = A.axis && A.axis.step ? A.axis.step : 1;
   const axisKind = (A.axis && A.axis.kind) || 'unit';
@@ -151,6 +166,9 @@ export function buildSheet({ key, title, details, anchor, graph, jobs }) {
   sheet.cost = A.costByFrame ? new Map(A.costByFrame.map((c) => [Math.round((c.frame - start) / step), c])) : null;
   sheet.heavy = (A.heavyRegions || []).map((h) => ({ a: Math.round((h.from - start) / step), z: Math.round((h.to - start) / step), factor: h.factor, label: h.label }));
   sheet.batchFromData = !!batchG;
+  // a plan (plansheet.js): rows are blocks with names, in one band, and
+  // dependencies between blocks
+  if (A.rowLabels) { sheet.rowLabels = A.rowLabels; sheet.laneEdges = A.laneEdges || []; sheet.batch = N; }
   sheet.shotUnit = shotG ? aUnits.find((u) => u.group === shotG.key) : null;
   sheet.batchUnits = batchG ? aUnits.filter((u) => u.group === batchG.key).sort((a, b) => a.pos - b.pos) : null;
   // columns, job by job
@@ -171,10 +189,11 @@ export function buildSheet({ key, title, details, anchor, graph, jobs }) {
       const members0 = us.filter((u) => u.group === g.key);
       const maxPos = Math.max(-1, ...members0.map((u) => u.pos));
       const sameAxis = d.axis && A.axis && d.axis.kind === A.axis.kind;
-      const n = n0 === N || (sameAxis && n0 > 1 && maxPos >= n0 && maxPos < N) ? N : n0;
+      const n = n0 === N || g.perBlock || (sameAxis && n0 > 1 && maxPos >= n0 && maxPos < N) ? N : n0;
       // lane mates: later groups with the same count, no edge between, a shared successor
       const lanes = [g];
-      if (n === N) for (let gj = gi + 1; gj < gs.length; gj++) {
+      // (a plan's stages are never lane mates: each is a step of every block)
+      if (n === N && !d.rowLabels) for (let gj = gi + 1; gj < gs.length; gj++) {
         const h = gs[gj];
         const hn = unitsCount(h.units), hMax = Math.max(-1, ...us.filter((u) => u.group === h.key).map((u) => u.pos));
         const hRow = hn === N || (sameAxis && hn > 1 && hMax >= hn && hMax < N);
@@ -199,8 +218,11 @@ export function buildSheet({ key, title, details, anchor, graph, jobs }) {
         }
         for (let r = 0; r < N; r++) {
           const here = posMap.get(r);
-          if (!here) { col.cells.push({ a: r, z: r, lane: 0, lanes: 1, u: { state: 'ghost', job: jobKey }, ghost: true }); continue; }
-          for (const { u, lane } of here) col.cells.push({ a: r, z: r, lane, lanes: lanes.length, u });
+          // (a design's group column holds only its own blocks: no expected cells)
+          if (!here) { if (!g.sparse) col.cells.push({ a: r, z: r, lane: 0, lanes: 1, u: { state: 'ghost', job: jobKey }, ghost: true }); continue; }
+          // a block's phases in one stage share its cell, in order, left to right
+          const segs = g.perBlock ? here.length : 1;
+          here.forEach(({ u, lane }, k) => col.cells.push({ a: r, z: r, lane, lanes: lanes.length, u, seg: g.perBlock ? k : 0, segs }));
         }
       } else {
         // fewer units than rows: each spans the rows it covers, in order
@@ -280,14 +302,17 @@ export function layout(sheet, v) {
   const gy = Math.max(1, Math.round(b * 0.18));
   const gap = Math.max(2, Math.round(b * 0.35));
   const head = b >= 7 ? 34 : 4;
-  const labelW = b >= 7 ? Math.max(34, Math.round(b * 3.2)) : 6;
+  // a plan's rows carry block names, as wide as the longest (to a limit),
+  // with the arc gutter after them
+  const named = sheet.rowLabels ? Math.min(150, 6.2 * Math.max(4, ...sheet.rowLabels.map((n) => n.length))) : 0;
+  const labelW = sheet.rowLabels ? (b >= 7 ? Math.round(named) + ARC_GUTTER + 4 : ARC_GUTTER) : b >= 7 ? Math.max(34, Math.round(b * 3.2)) : 6;
   const NB = Math.ceil(sheet.N / sheet.batch);
   const auto = !v.collapsed;
   const collapsed = new Set();
   for (let k = 0; k < NB; k++) {
     const a = k * sheet.batch, z = Math.min(sheet.N, (k + 1) * sheet.batch) - 1;
     const isSel = v.sel && sheet.cols.some((c) => c.job === v.sel.job && c.cells.some((x) => x.u.i === v.sel.i && x.a >= a && x.a <= z));
-    if (!v.flat && (auto ? (sheet.N > 120 && !attention(sheet, a, z) && !isSel) : v.collapsed.has(k))) collapsed.add(k);
+    if (!v.flat && (auto ? (sheet.N > 120 && !sheet.rowLabels && !attention(sheet, a, z) && !isSel) : v.collapsed.has(k))) collapsed.add(k);
   }
   const up = Math.max(0, Math.min(v.upstream || 0, sheet.cols.length - 1));
   const folded = sheet.cols.slice(0, up).filter((c) => c.perRow);
@@ -300,8 +325,8 @@ export function layout(sheet, v) {
   const xs = [];
   let x = labelW;
   const pushCol = (k, w, col) => { xs.push({ k, x, w, col }); x += w + gap; };
-  // flat (detail levels below 3): the job's own units only, no shot or batch column
-  if (v.flat) { xs.push({ k: 'shot', x, w: 0 }); xs.push({ k: 'batch', x, w: 0 }); } else {
+  // flat (modes below Shots): the job's own units only, no shot or batch column
+  if (v.flat || sheet.rowLabels) { xs.push({ k: 'shot', x, w: 0 }); xs.push({ k: 'batch', x, w: 0 }); } else {
     pushCol('shot', cw.shot);
     pushCol('batch', cw.batch);
   }
@@ -363,7 +388,7 @@ function rectsOf(sheet, L) {
       for (let r = band.a; r <= band.z; r++) {
         const row = L.rows[r];
         if (!row) continue;
-        if (L.b >= 7) out.push({ key: 'l' + r, kind: 'label', x: L.labelW - 6, y: row.y, w: 0, h: row.h, text: String(sheet.start + r * sheet.step) });
+        if (L.b >= 7) out.push({ key: 'l' + r, kind: 'label', x: L.labelW - (sheet.rowLabels ? ARC_GUTTER : 6), y: row.y, w: 0, h: row.h, text: sheet.rowLabels ? sheet.rowLabels[r] || '' : String(sheet.start + r * sheet.step), clip: sheet.rowLabels ? L.labelW - ARC_GUTTER - 4 : 0 });
         if (L.folded.length) {
           const fc = X('frame');
           out.push({ key: 'f' + r, kind: 'agg', x: fc.x, y: row.y, w: fc.w, h: row.h, units: unitsIn(sheet, r, r, (c) => L.folded.includes(c)), small: true, hit: { type: 'frame', r } });
@@ -373,7 +398,8 @@ function rectsOf(sheet, L) {
           for (const cell of c.col.cells) {
             if (cell.a !== r) continue;
             const lh = (row.h - (cell.lanes - 1) * L.gy) / cell.lanes;
-            out.push({ key: c.k + '#' + r + '.' + cell.lane, kind: 'unit', x: c.x, y: row.y + cell.lane * (lh + L.gy), w: c.w, h: lh, u: cell.u, ghost: cell.ghost, hit: cell.ghost ? null : { type: 'unit', job: c.col.job, i: cell.u.i } });
+            const n = cell.segs || 1, sw = (c.w - (n - 1) * L.gy) / n;
+            out.push({ key: c.k + '#' + r + '.' + cell.lane + (n > 1 ? ':' + cell.seg : ''), kind: 'unit', x: c.x + (cell.seg || 0) * (sw + L.gy), y: row.y + cell.lane * (lh + L.gy), w: sw, h: lh, u: cell.u, ghost: cell.ghost, hit: cell.ghost ? null : { type: 'unit', job: c.col.job, i: cell.u.i } });
           }
         }
       }
@@ -399,7 +425,9 @@ function rectsOf(sheet, L) {
   return out;
 }
 
-export function drawUnit(g, T, it, t, glowAt) {
+// opts: { reasoning: draw what a unit reasons with (model or procedure) in
+// its bottom-left corner; effort: and its effort as ticks }
+export function drawUnit(g, T, it, t, glowAt, opts = {}) {
   const { x, y, w, h, u } = it;
   if (w <= 0 || h <= 0) return;
   const st = u.state;
@@ -497,6 +525,15 @@ export function drawUnit(g, T, it, t, glowAt) {
   // interrupted: stopped by the farm, not its fault; a grey notch each, never orange
   const ni = u.interruptions && h >= 4 ? Math.min(u.interruptions.length, 3 - nf) : 0;
   if (ni > 0 && st !== 'succeeded') { g.fillStyle = T.g[15]; for (let k = 0; k < ni; k++) g.fillRect(x + w - 3, y + 1 + (nf + k) * 3.5, 3, 2.2); }
+  // what it reasons with: metadata, ink only, from level 2 (level.js)
+  const rz = opts.reasoning && u.reasoning && !it.ghost;
+  if (rz && mk >= 6 && w >= 12) {
+    const ink = st === 'running' || st === 'retrying' || st === 'preflight' ? T.paper : st === 'succeeded' ? T.field : T.g[17];
+    drawMark(g, u.reasoning.does === 'procedure' ? 'procedure' : 'model', x + 1.5, y + h - mk - 1.5, mk, ink);
+    const EF = { low: 1, medium: 2, high: 3, max: 4 };
+    const ne = opts.effort && u.reasoning.does === 'model' ? EF[u.reasoning.effort] || 0 : 0;
+    if (ne && w >= mk + 14) { g.fillStyle = ink; for (let k = 0; k < ne; k++) g.fillRect(x + mk + 4 + k * 3, y + h - 4, 1.6, 1.6); }
+  }
   // ink marks: a check sent it back (rework), a check passed (checked), reused
   if (rework && st !== 'running' && st !== 'retrying') corner('rework', T.temp);
   else if (u.review && u.review.do === 'pass') corner('tick', st === 'succeeded' ? T.field : T.paper);
@@ -616,6 +653,41 @@ export class Stack {
     return this.anim || this.items.some((it) => it.kind === 'unit' && it.u && (it.u.state === 'running' || it.u.state === 'retrying')) || this.glow.size > 0;
   }
 
+  // paintArcs: a plan's dependencies between blocks, as arcs in the gutter
+  // between the block names and the first stage, pointing at the block that
+  // waits. A plan of hundreds of blocks has a dense gutter, so every arc is
+  // thin and faint, and the arcs of the selected or hovered block are in ink.
+  // view.arcs 'all' (a level-3 toggle) draws the full set at full weight.
+  paintArcs(g, T) {
+    const S = this.sheet, L = this.L;
+    const gx = L.labelW - 6;
+    const rowOf = (h) => {
+      if (!h || h.type !== 'unit') return -1;
+      for (const c of S.cols) if (c.job === h.job) { const x = c.cells.find((cell) => cell.u.i === h.i); if (x) return x.a; }
+      return -1;
+    };
+    const sel = rowOf(this.view.sel ? { type: 'unit', ...this.view.sel } : null);
+    const hov = rowOf(this.hover && this.hover.hit);
+    const all = this.view.arcs === 'all';
+    const hot = [], cold = [];
+    for (const e of S.laneEdges) {
+      const ra = L.rows[e[0]], rb = L.rows[e[1]];
+      if (!ra || !rb) continue;
+      const on = e.includes(sel) || e.includes(hov);
+      (on ? hot : cold).push([ra.y + ra.h / 2, rb.y + rb.h / 2]);
+    }
+    const arc = ([ya, yb], head) => {
+      const bend = Math.min(ARC_GUTTER - 10, 6 + Math.abs(yb - ya) * 0.12);
+      g.beginPath(); g.moveTo(gx, ya); g.bezierCurveTo(gx - bend, ya, gx - bend, yb, gx, yb); g.stroke();
+      if (head) { g.beginPath(); g.moveTo(gx, yb); g.lineTo(gx - 4, yb - 2.5); g.lineTo(gx - 4, yb + 2.5); g.closePath(); g.fill(); }
+    };
+    g.strokeStyle = all ? T.g[14] : T.g[12]; g.fillStyle = g.strokeStyle; g.lineWidth = all ? 1 : 0.6;
+    for (const a of cold) arc(a, all);
+    g.strokeStyle = T.ink; g.fillStyle = T.ink; g.lineWidth = 1.4;
+    for (const a of hot) arc(a, true);
+    g.lineWidth = 1;
+  }
+
   update({ sheet, view = {} }) {
     const T = tok();
     // remember finishes for the persistence glow
@@ -721,8 +793,8 @@ export class Stack {
     for (const it of this.items) {
       g.globalAlpha = it.alpha == null ? 1 : it.alpha;
       if (it.kind === 'agg') drawAgg(g, T, it);
-      else if (it.kind === 'unit') drawUnit(g, T, it, this.t || 0, this.glow.get(it.u.job + '#' + it.u.i));
-      else if (it.kind === 'label') { g.font = `400 ${Math.min(10, Math.max(7, L.b * 0.6))}px ${T.mono}`; g.fillStyle = T.ink4; g.textAlign = 'right'; g.textBaseline = 'middle'; g.fillText(it.text, it.x, it.y + it.h / 2); g.textAlign = 'left'; }
+      else if (it.kind === 'unit') drawUnit(g, T, it, this.t || 0, this.glow.get(it.u.job + '#' + it.u.i), { reasoning: this.view.reasoning, effort: this.view.effort });
+      else if (it.kind === 'label') { g.font = `400 ${Math.min(10, Math.max(7, L.b * 0.6))}px ${T.mono}`; g.fillStyle = T.ink4; g.textAlign = 'right'; g.textBaseline = 'middle'; g.fillText(it.clip ? fit(g, it.text, it.clip) : it.text, it.x, it.y + it.h / 2); g.textAlign = 'left'; }
       g.globalAlpha = 1;
     }
     this.paintCost(g, T);
@@ -820,8 +892,9 @@ export class Stack {
         }
       }
     }
+    if (S.laneEdges && S.laneEdges.length && !this.view.flat) this.paintArcs(g, T);
     // rework: an orange arrow from the review that sent a frame back to the
-    // frame, while the rework is under way (level 3 and up)
+    // frame, while the rework is under way (Shots mode and up)
     if (!this.view.flat) {
       const at = new Map();
       for (const it of this.items) if (it.kind === 'unit' && it.u) at.set(it.u.job + '#' + it.u.i, it);

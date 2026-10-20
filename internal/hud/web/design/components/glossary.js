@@ -13,7 +13,7 @@ export const TERMS = {
   running: { term: 'Rendering', def: 'A unit at work: bright blue, rising as it renders. Green once it is done. An agent, test or training run renders too.', swatch: 'run' },
   ready: { term: 'Ready by', def: 'The farm’s estimate of when the job finishes. It moves as work lands.' },
   due: { term: 'Due', def: 'When you need it. The farm orders work by it; nobody sets priorities.' },
-  level: { term: 'Level', def: 'The HUD starts simple. Each level adds one idea. Move up when you want it.' },
+  mode: { term: 'Mode', def: 'Which question the HUD answers: Queue, Frames, Time, Shots, Farm or Full. Each mode adds one idea to the last. Switch any time.' },
   frame: { term: 'Frame', def: 'A job is made of units. For a render, a unit is a frame: one row, filling from the bottom.' },
   binary: { term: 'Binary order', def: 'First and last frame, then the middle, then the quarters. The whole shot plays early, and costly frames show up early.' },
   retry: { term: 'Orange', def: 'Trouble the farm is handling: retrying, backoff, rework. Orange notches count earlier failed attempts.', swatch: 'temp' },
@@ -66,13 +66,15 @@ export const TERMS = {
   reused: { term: 'Reused', def: 'The same inputs ran before, so the output was reused instead of rendered again: done, with the reuse mark.', swatch: 'reused' },
   mayuse: { term: 'May use', def: 'The pools a job may run in, in the order it falls back: gpu, then gpu-spot.' },
   gate: { term: 'Gate', def: 'A wait or a check that sits between stages: a narrow column whose block spans the rows it holds. A check that sends a frame back draws an orange arrow to it.' },
+  level: { term: 'Level', def: 'How much the HUD shows and offers you: 1 for day one, 2 for a working day, 3 for everything. Choose any time; anything deeper is one click away, and nothing is locked.' },
+  reasoning: { term: 'Reasons with', def: 'What a step runs on: a model (which one, at what effort, with which tools) or a procedure, a command with no model. A small mark in ink; it is not a state and takes no color.', swatch: 'reasoning' },
 };
 export const TERM_ORDER = Object.keys(TERMS);
 export const numberOf = (k) => (TERM_ORDER.indexOf(k) + 1) || null;
 
 // the ink mark a swatch carries, as on a cell (marks.js)
 const SWATCH_MARK = { waits: ['clock', 'var(--g17)'], held: ['pause', 'var(--g16)'], locked: ['lock', 'var(--g17)'], yielding: ['pause', 'var(--paper)'],
-  rework: ['rework', 'var(--temp)'], checked: ['tick', 'var(--field)'], reused: ['reuse', 'var(--field)'], accepted: ['check', 'var(--paper)'], taken: ['seal', 'var(--paper)'] };
+  rework: ['rework', 'var(--temp)'], checked: ['tick', 'var(--field)'], reasoning: ['model', 'var(--g17)'], reused: ['reuse', 'var(--field)'], accepted: ['check', 'var(--paper)'], taken: ['seal', 'var(--paper)'] };
 // swatchHTML: a term's swatch, with its mark
 export function swatchHTML(swatch) {
   if (!swatch) return '';

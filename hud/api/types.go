@@ -10,7 +10,7 @@ type Viewer struct {
 	User     string   `json:"user"`
 	Projects []string `json:"projects"`
 	All      bool     `json:"allProjects"`
-	// Role picks the viewer's starting detail level: artist, supervisor,
+	// Role picks the viewer's starting mode and level: artist, supervisor,
 	// producer, wrangler, farm-admin, facilities or pipeline-td. Empty:
 	// the HUD guesses from All (wrangler) or not (artist).
 	Role string `json:"role,omitempty"`

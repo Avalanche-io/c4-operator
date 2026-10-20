@@ -12,6 +12,8 @@
 @import url("map.css");
 @import url("widget.css");
 @import url("views.css");
+@import url("day1.css");
+@import url("catalog.css");
 @import url("phone.css");
 
 :root {
@@ -132,7 +134,6 @@ main:focus { outline: none; }
 .idstrip { font: 400 var(--t-micro)/1 var(--mono); color: var(--g13); letter-spacing: .14em; white-space: nowrap; overflow: hidden; }
 .layout-job { display: grid; grid-template-columns: auto minmax(0, 1fr) 340px; gap: var(--gutter); align-items: start; }
 /* a plan job: its lens is the picture; the unit card, controls and book in one column */
-.layout-job.plan { grid-template-columns: minmax(0, 520px); }
 .wellbox { background: var(--well); outline: var(--hair) solid var(--rule-2); position: relative; }
 .wellbox > header, .panel > header { display: flex; align-items: baseline; gap: 10px; padding: 9px 12px 7px; border-bottom: var(--hair) solid var(--rule-1); }
 .wellbox > .body, .panel > .body { padding: 10px 12px; }
@@ -224,7 +225,7 @@ input[type="datetime-local"] { background: var(--well); color: var(--ink); borde
 [data-scale="wall"] body { background: var(--g00); }
 [data-scale="wall"] .top, [data-scale="wall"] .slate { display: none; }
 
-/* ---- detail levels (js/level.js, docs/intro/ladder.md) ---------------- */
+/* ---- modes (js/mode.js, docs/intro/ladder.md) ---------------------------- */
 .detail { display: flex; align-items: center; gap: 9px; padding: 0 14px; border-left: var(--hair) solid var(--rule-1); margin-left: auto; }
 .detail + .who { margin-left: 0; }
 .detail .cells { display: inline-flex; gap: 3px; }
@@ -242,18 +243,19 @@ input[type="datetime-local"] { background: var(--well); color: var(--ink); borde
 .offerbar .msg { font: 400 12.5px/1.35 var(--sans); color: var(--ink); }
 .offerbar.note .msg { margin-right: auto; }
 
-/* the queue below level 3: no shot or batch columns */
-html[data-level="2"] .qr { grid-template-columns: 22px 30px minmax(220px, 1fr) 104px minmax(200px, 1.25fr) 76px 150px; }
-html[data-level="2"] .qr .qshot, html[data-level="2"] .qr .qstrip,
-html[data-level="2"] .qhead > :nth-child(4), html[data-level="2"] .qhead > :nth-child(5) { display: none; }
+/* the queue below Shots mode: no shot or batch columns */
+html[data-mode="2"] .qr { grid-template-columns: 22px 30px minmax(220px, 1fr) 104px minmax(200px, 1.25fr) 76px 150px; }
+html[data-mode="2"] .qr .qshot, html[data-mode="2"] .qr .qstrip,
+html[data-mode="2"] .qhead > :nth-child(4), html[data-mode="2"] .qhead > :nth-child(5) { display: none; }
 
-/* the simple queue (levels 0 and 1) */
+/* the simple queue (Queue and Frames modes) */
 .sq-row { display: grid; align-items: center; column-gap: 16px; min-height: 60px; padding: 6px 0; border-bottom: var(--hair) solid var(--rule-0);
   grid-template-columns: 22px 30px minmax(240px, 1fr) 230px 210px 150px; }
 .sq-row.head { min-height: 0; padding: 8px 0 6px; border-bottom: var(--hair) solid var(--rule-2); }
 .sq-row .jn { font: 500 15px/1.2 var(--sans); color: var(--paper); }
 .sq-row.late .jn { color: var(--risk-text); }
 .sq-row .stack2 { display: flex; flex-direction: column; gap: 5px; }
+.sq-row .sqstrip { margin-top: 6px; line-height: 0; }
 .sq-row .big { font: 300 21px/1 var(--mono); color: var(--paper); }
 .sq-row .bigs { font: 400 20px/1 var(--sans); color: var(--paper); }
 .sq-row .sub { font: 400 11px/1.2 var(--mono); color: var(--ink-3); }
@@ -279,8 +281,8 @@ html[data-level="2"] .qhead > :nth-child(4), html[data-level="2"] .qhead > :nth-
 .pf-in2 input[type="checkbox"] { width: 16px; height: 16px; accent-color: var(--run); margin: 3px 0 0; }
 .pf-help { color: var(--ink-3); font-size: var(--t-small); line-height: 1.4; }
 .pf-note { color: var(--pencil); font-size: var(--t-small); }
-.pf-levels { display: flex; flex-wrap: wrap; gap: 4px; }
-.pf-levels .btn.on { color: var(--paper); border-color: var(--paper); }
+.pf-modes { display: flex; flex-wrap: wrap; gap: 4px; }
+.pf-modes .btn.on { color: var(--paper); border-color: var(--paper); }
 .pf-ft { border-top: var(--hair) solid var(--rule-2); padding-top: var(--s4); }
 
 /* ---- a person: needs you (red, white flag) or taken (pale red, a seal) */

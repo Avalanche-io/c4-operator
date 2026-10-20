@@ -4,7 +4,7 @@
 // job's book and its controls; the neighbouring sheets are named at the
 // edges.
 
-import { h } from '../dom.js';
+import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { own } from '../../design/components/live.js';
@@ -14,13 +14,14 @@ import { bookList } from '../../design/components/ledger.js';
 import { lensFor } from '../lenses/index.js';
 import { classChip, phaseText, orderText, burstButton, failedUnits, personMark } from './common.js';
 import { c4idEl } from '../../design/components/c4id.js';
-import { unitWords, how } from '../../design/components/words.js';
-import { markSVG } from '../../design/components/marks.js';
+import { unitWords, how, reasoningWords } from '../../design/components/words.js';
+import { markSVG, markEl } from '../../design/components/marks.js';
+import { planSheet } from '../../design/components/plansheet.js';
 
 const st = {
   key: null, details: new Map(), graph: null, book: null, lastNow: null, fetching: false,
   sel: null, unit: null, unitFor: null, unitNow: null, err: null, lens: null,
-  lineB: new Set(), contours: true, lineA: true, box: 10,
+  lineB: new Set(), contours: true, lineA: true, box: 10, arcsAll: false,
 };
 
 document.addEventListener('hud:changed', () => { st.lastNow = null; st.unitNow = null; st.unit0Now = null; });
@@ -104,7 +105,7 @@ function tcell(label, val, sub, cls = '') {
   return h('div', { class: 'cell' }, h('span', { class: 'lab' }, label), h('span', { class: 'val ' + cls }, val), sub ? h('span', { class: 'sub' }, sub) : null);
 }
 
-function titleBlock(j, level = 5) {
+function titleBlock(j, mode = 5) {
   const e = j.estimate, o = j.objective, w = j.work;
   const gl = glance(j, j);
   const done = gl.done;
@@ -117,8 +118,8 @@ function titleBlock(j, level = 5) {
         j.units.unevaluated ? `${j.units.unevaluated} generators to expand` : 'projected', ''),
     tcell('Slack', o.deadline && j.phase !== 'Succeeded' ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', !o.deadline ? 'no deadline' : e.feasible ? 'on track at current capacity' : 'will miss at current capacity', late ? 'late' : ''),
     tcell('Done', `${Math.round(done * 100)}%`, (Math.abs(gl.delivered - gl.done) > 0.005 ? `delivered ${Math.round(gl.delivered * 100)}% · ` : '') + (gl.basis === 'steps' ? `by steps · ${f.num(j.classSummary.step)} of ${f.num(j.classSummary.totalSteps)}` : w && w.basis === 'estimate' ? `by work · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)} units` : `by units · ${f.num(j.units.succeeded)} of ${f.num(j.units.total)}`)),
-    level < 4 ? null : tcell('Slots', h('span', null, h('span', { class: 't-run' }, String(e.runningSlots)), +e.requiredSlots > 0 ? h('small', null, ` of ${(+e.requiredSlots).toFixed(1)} needed`) : h('small', null, ' running')), `can get ${e.attainableSlots}`),
-    j.output && level >= 5 ? tcell('Output view', h('span', { style: { fontSize: '15px' } }, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${f.num(j.output.changesets)} changesets in`) : null);
+    mode < 4 ? null : tcell('Slots', h('span', null, h('span', { class: 't-run' }, String(e.runningSlots)), +e.requiredSlots > 0 ? h('small', null, ` of ${(+e.requiredSlots).toFixed(1)} needed`) : h('small', null, ' running')), `can get ${e.attainableSlots}`),
+    j.output && mode >= 5 ? tcell('Output view', h('span', { style: { fontSize: '15px' } }, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${f.num(j.output.changesets)} changesets in`) : null);
 }
 
 function controls(j, k) {
@@ -163,7 +164,7 @@ function unitCard(ctx, j) {
   if (!st.sel) return h('div', { class: 'panel', 'data-key': 'unit-hint' }, h('header', null, h('h2', null, 'Unit')),
     h('div', { class: 'body dim' }, lens === 'plan'
       ? 'Hover a lane for what it is; select one for its steps, attempts, log and output.'
-      : ctx.level >= 3
+      : ctx.mode >= 3
         ? 'Hover any block for what it is; select a unit for its attempts, node, log, record and output. Click a batch or the shot to collapse or open it; the collapse mark on a stage collapses everything upstream into each frame.'
         : 'Hover a frame for what it is; select one for its attempts, the node it ran on, its log and why it needs you.'));
   const raw = st.unit;
@@ -178,18 +179,23 @@ function unitCard(ctx, j) {
     h('header', null, h('h2', null, u.label), h('span', { class: 'chip ' + (CHIP[wd.cls] || '') }, wd.word), h('span', { class: 'dim mono', style: { fontSize: '10px', marginLeft: 'auto' } }, f.jobName(k))),
     h('div', { class: 'body' },
       wd.why ? h('div', { class: 'why', style: { fontSize: '12px', marginBottom: '6px' } }, wd.why) : null,
+      // what it reasons with, from level 2: metadata in ink, never a state
+      ctx.level >= 2 && reasoningWords(u.reasoning, ctx.level) ? h('div', { class: 'dim', style: { fontSize: '12px', marginBottom: '6px' }, 'data-key': 'reasons' },
+        h('span', { style: { verticalAlign: '-1px', marginRight: '6px', color: 'var(--ink-2)' } }, markEl(u.reasoning.does === 'procedure' ? 'procedure' : 'model', { size: 10 })),
+        `reasons with ${reasoningWords(u.reasoning, ctx.level)}`) : null,
       h('div', { class: 'mono', style: { fontSize: '11px', lineHeight: '1.6' } },
         h('div', null, h('span', { class: 'dim' }, 'node '), node || '–'),
         h('div', null, h('span', { class: 'dim' }, 'duration '), u.durationSeconds !== undefined ? `${f.dur(u.durationSeconds)} ` : '', h('span', { class: 'pencil' }, `est. ${f.dur(u.estimateSeconds)}`)),
-        u.outputChangeset ? h('div', null, h('span', { class: 'dim' }, 'output '), c4idEl(u.outputChangeset, { tail: 4, label: 'output changeset' })) : null,
+        // C4 IDs, provenance and native names are expert detail (level 3)
+        u.outputChangeset && ctx.level >= 3 ? h('div', null, h('span', { class: 'dim' }, 'output '), c4idEl(u.outputChangeset, { tail: 4, label: 'output changeset' })) : null,
         u.expandedInto ? h('div', null, h('span', { class: 'dim' }, 'expanded into '), `units ${u.expandedInto}`) : null,
-        ctx.level >= 5 ? h('div', { class: 'dim', style: { fontSize: '10px' } }, h('span', null, 'how '), how(u)) : null),
+        ctx.mode >= 5 && ctx.level >= 3 ? h('div', { class: 'dim', style: { fontSize: '10px' } }, h('span', null, 'how '), how(u)) : null),
       h('div', { class: 'book', style: { marginTop: '8px' } }, u.attempts.map((a) => h('div', { class: 'e', 'data-key': 'a' + a.n },
         h('span', { class: 'seq' }, `#${a.n}`), h('span', { class: 'at' }, f.clockSec(a.start).slice(0, 5)), h('i', { class: 'seal node' + (a.end ? '' : ' open') }),
         // an attempt the farm stopped (an interruption) is not a failure: grey,
-        // "interrupted", its exit code only at level 5
+        // "interrupted", its exit code only in Full mode
         stoppedByFarm(u, a)
-          ? h('span', { class: 'msg dim' }, `${a.node} interrupted${ctx.level >= 5 && a.exitCode ? ` (exit ${a.exitCode})` : ''}`)
+          ? h('span', { class: 'msg dim' }, `${a.node} interrupted${ctx.mode >= 5 && a.exitCode ? ` (exit ${a.exitCode})` : ''}`)
           : h('span', { class: 'msg' + (a.exitCode ? ' t-temp' : '') }, `${a.node}${a.end ? (a.exitCode ? ` exit ${a.exitCode}` : ' captured') : ' running'}`),
         a.reason ? h('span', { class: 'who' }, a.reason) : null))),
       u.provenance ? h('div', { class: 'mono', style: { fontSize: '10.5px', marginTop: '8px' } },
@@ -245,7 +251,7 @@ export default {
       const u = d.unitList.find((x) => x.label.startsWith(String(frame)));
       if (u) { st.sel = { job: k, i: u.i }; ctx.refresh(); }
     };
-    const L = ctx.level;
+    const L = ctx.mode;
     const keys = L >= 3 ? (st.sheetKeys || [k]) : [k];
     const details = keys.map((x) => st.details.get(x)).filter(Boolean).map((d) => ({ ...d, ...(ctx.job(keyOf(d)) || {}), unitStates: d.unitStates }))
       .map((d) => (L >= 2 ? d : { ...d, riskUnits: '', objective: {}, estimate: { ...(d.estimate || {}), feasible: true } }));
@@ -257,15 +263,24 @@ export default {
       let best = me ? width(me) : 0;
       for (const d of details) if (d.axis && me && d.axis.kind === me.axis.kind && width(d) > best) { best = width(d); anchor = keyOf(d); }
     }
-    const sheet = details.length ? buildSheet({ key: `sheet:${keys.join('|')}`, title: sheetTitle, details, anchor, graph: st.graph, jobs: ctx.snap.jobs }) : null;
+    // a plan job is drawn as a multi-stage render: its blocks are rows, its
+    // step kinds are stages (plansheet.js); from Shots mode the dependencies
+    // between blocks are arcs
+    const plan = cls && cls.lens === 'plan';
+    const planDag = plan && L >= 3;
+    const sheetDetails = plan ? details.map((d) => (keyOf(d) === k ? planSheet(d) : d)) : details;
+    const sheet = details.length ? buildSheet({ key: `sheet:${keys.join('|')}${plan ? ':plan' : ''}`, title: sheetTitle, details: sheetDetails, anchor, graph: st.graph, jobs: ctx.snap.jobs }) : null;
+    // cost per frame is expert detail (level 3)
+    if (sheet && ctx.level < 3) sheet.cost = null;
     const readers = details.filter((d) => (d.unitList || []).some((u) => u.reads));
     if (ctx.route.q && ctx.route.q.reads === '1') for (const d of readers) st.lineB.add(keyOf(d));
     const deadline = j.objective && j.objective.deadline ? Date.parse(j.objective.deadline) : null;
     const g = glance(j, detail);
-    // CI, ML and agent bundles have their own views at level 5; below it every job opens to its units
+    // CI, ML and agent bundles have their own views in Full mode; below it every job opens to its units
     const ownView = cls && (cls.lens === 'ci' || cls.lens === 'ml' || cls.lens === 'agent' || cls.lens === 'plan');
-    const planJob = cls && cls.lens === 'plan';
-    const main = detail && !(sheet && sheet.cost) && (ownView ? L >= 5 : L >= 3) ? lens.main(ctx, j, st) : [];
+    // a plan's own lens (its lanes by chapter, holds, the gate line) is
+    // expert detail under the render, in Full mode at level 3
+    const main = detail && !(sheet && sheet.cost) && (plan ? L >= 5 && ctx.level >= 3 : ownView ? L >= 5 : L >= 3) ? lens.main(ctx, j, st) : [];
     const side = detail && (ownView ? L >= 5 : true) ? lens.side(ctx, j, st) : [];
     const late = j.estimate.slackSeconds < 0 && j.phase !== 'Succeeded';
     return h('section', { class: 'sheet', 'data-key': 'sheet-' + k, 'aria-label': `Sheet ${sheetTitle}` },
@@ -274,29 +289,30 @@ export default {
           h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${j.project} / `, j.shot ? `shot ${j.shot} / ` : '', j.namespace),
           h('h1', null, j.name),
           h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 && L >= 2 ? ` · #${j.rank} in run order` : ''}`, personMark(j) ? [' ', personMark(j)] : null)),
-        L >= 2 ? titleBlock(j, L) : null),
+        L >= 2 ? titleBlock(j, ctx.level >= 3 ? L : Math.min(L, 4)) : null),
       j.estimate.message && L >= 2 ? h('div', { class: 'warn' + (j.phase === 'Failed' ? ' red' : late ? ' risk' : ''), style: { marginBottom: '12px' }, role: 'status' },
         h('span', { class: j.phase === 'Failed' ? 't-fail' : late ? 't-risk' : '' }, j.estimate.message), L >= 4 ? burstButton(j) : null) : null,
-      main.length && ownView ? h('div', { style: { marginBottom: '14px' } }, main) : null,
+      main.length && ownView && !plan ? h('div', { style: { marginBottom: '14px' } }, main) : null,
       h('div', { class: 'neat', style: { padding: '14px' } },
         L >= 3 ? edges(ctx, j, keys) : null,
-        h('div', { class: 'layout-job' + (planJob ? ' plan' : '') },
-          // a plan job's lens is its picture: no render pylon or shot stack
-          planJob ? null : h('div', { style: { width: '250px' } },
-            L >= 2 ? own('pylon', 'pylon:' + k, { glance: g, w: 250, h: 470, mode: 'full', title: j.name.toUpperCase() }) : null,
-            h('div', { class: 'legend', style: { marginTop: '14px', flexDirection: 'column', alignItems: 'flex-start' } }, legend(L))),
-          planJob ? null : h('div', { class: 'wellbox', 'data-key': 'stackbox' },
+        h('div', { class: 'layout-job' },
+          // a plan has no frames to stack in a pylon: its sheet is its picture
+          h('div', { style: { width: '250px' } },
+            L >= 2 && !plan ? own('pylon', 'pylon:' + k, { glance: g, w: 250, h: 470, mode: 'full', title: j.name.toUpperCase() }) : null,
+            h('div', { class: 'legend', style: { marginTop: plan ? 0 : '14px', flexDirection: 'column', alignItems: 'flex-start' } }, legend(L, { reasoning: ctx.level >= 2 && !!(detail && (detail.unitList || []).some((u) => u.reasoning)), plan }))),
+          h('div', { class: 'wellbox', 'data-key': 'stackbox' },
             h('div', { class: 'tools' },
-              h('span', { class: 'lab' }, L >= 3 ? `Shot ${sheetTitle}` : `Job ${j.name}`),
-              h('span', { class: 'dim mono', style: { fontSize: '10px' } }, sheet ? (L >= 3 ? `${sheet.cols.length} stages · ${f.num(sheet.N)} rows · ${sheet.batchFromData ? 'batches from the job script' : `${sheet.batch} frames per batch`}` : `${f.num(j.units.total)} units · ${orderText(j.order)}`) : ''),
+              h('span', { class: 'lab' }, plan ? `Plan ${j.name}` : L >= 3 ? `Shot ${sheetTitle}` : `Job ${j.name}`),
+              h('span', { class: 'dim mono', style: { fontSize: '10px' } }, sheet ? (plan ? `${sheet.cols.length} stages · ${f.num(sheet.N)} blocks${planDag ? ` · ${f.num(sheet.laneEdges.length)} dependencies` : ''}` : L >= 3 ? `${sheet.cols.length} stages · ${f.num(sheet.N)} rows · ${sheet.batchFromData ? 'batches from the job script' : `${sheet.batch} frames per batch`}` : `${f.num(j.units.total)} units · ${orderText(j.order)}`) : ''),
               h('span', { style: { marginLeft: 'auto' } }),
               h('button', { class: 'btn small', 'data-stack': 'zoom-', title: 'Smaller boxes (-)' }, '−'),
               h('button', { class: 'btn small', 'data-stack': 'zoom+', title: 'Bigger boxes (+)' }, '+'),
-              L < 3 ? null : h('label', null, h('input', { type: 'checkbox', 'data-stack': 'lineA', checked: st.lineA ? true : false }), 'other inputs'),
+              planDag && ctx.level >= 3 && sheet && sheet.laneEdges.length ? h('label', { title: 'Every dependency at full weight; otherwise only the selected block’s' }, h('input', { type: 'checkbox', 'data-stack': 'arcs', checked: st.arcsAll ? true : false }), 'all dependencies') : null,
+              L < 3 || planDag ? null : h('label', null, h('input', { type: 'checkbox', 'data-stack': 'lineA', checked: st.lineA ? true : false }), 'other inputs'),
               (L < 3 ? [] : readers).map((d) => h('label', { 'data-key': 'lb-' + keyOf(d) }, h('input', { type: 'checkbox', 'data-stack': 'lineB', 'data-job': keyOf(d), checked: st.lineB.has(keyOf(d)) ? true : false }), `reads · ${d.name.replace(/^sh\d+-/, '')}`)),
               L < 3 ? null : h('label', null, h('input', { type: 'checkbox', 'data-stack': 'contours', checked: st.contours ? true : false }), 'time lines')),
-            sheet ? own('stack', 'stack:' + k + (L >= 3 ? '' : ':flat'), { sheet, view: { flat: L < 3, deadline, sel: st.sel, box: st.box, lineA: L >= 3 && st.lineA, lineB: L >= 3 ? st.lineB : new Set(), contours: L >= 3 && st.contours, ...(ctx.route.q && ctx.route.q.collapse === 'shot' ? { shotCollapsed: true } : {}) } }) : h('div', { class: 'body dim' }, 'Reading the job…'),
-            j.output && L >= 5 ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset added to its chain' },
+            sheet ? own('stack', 'stack:' + k + (L >= 3 ? '' : ':flat'), { sheet, view: { flat: L < 3, arcs: st.arcsAll && ctx.level >= 3 ? 'all' : 'thin', reasoning: L >= 3 && ctx.level >= 2, effort: L >= 3 && ctx.level >= 3, deadline, sel: st.sel, box: st.box, lineA: L >= 3 && st.lineA, lineB: L >= 3 ? st.lineB : new Set(), contours: L >= 3 && st.contours, ...(ctx.route.q && ctx.route.q.collapse === 'shot' ? { shotCollapsed: true } : {}) } }) : h('div', { class: 'body dim' }, 'Reading the job…'),
+            j.output && L >= 5 && ctx.level >= 3 ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset added to its chain' },
               h('b', null, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${String(j.output.changesets).padStart(4, '0')}+00`) : null),
           h('div', null,
             unitCard(ctx, j),
@@ -307,7 +323,7 @@ export default {
               // the book scrolls in its panel, so a long one never pushes the rest down
               h('div', { class: 'body', style: { maxHeight: '420px', overflow: 'auto' } }, bookList(st.book.entries.slice(-16)))) : null))),
       // a class with its own view (CI, ML) puts that view first
-      main.length && !ownView ? h('div', { style: { marginTop: '14px' } }, main) : null);
+      main.length && (!ownView || plan) ? h('div', { style: { marginTop: '14px' } }, main) : null);
   },
 
   after(ctx, root) {
@@ -322,8 +338,9 @@ export default {
         if (a === 'zoom-') st.box = Math.max(3, st.box - 2);
         if (a === 'lineA') st.lineA = el.checked;
         if (a === 'contours') st.contours = el.checked;
+        if (a === 'arcs') st.arcsAll = el.checked;
         if (a === 'lineB') { if (el.checked) st.lineB.add(el.dataset.job); else st.lineB.delete(el.dataset.job); }
-        if (c) { Object.assign(c.view, { box: st.box, lineA: st.lineA, contours: st.contours, lineB: st.lineB }); c.relayout(false); }
+        if (c) { Object.assign(c.view, { box: st.box, lineA: st.lineA, contours: st.contours, lineB: st.lineB, arcs: st.arcsAll ? 'all' : 'thin' }); c.relayout(false); }
       });
     }
     const d = st.details.get(st.key);
@@ -335,7 +352,7 @@ export default {
   },
 };
 
-function legend(level = 5) {
+function legend(mode = 5, { reasoning = false, plan = false } = {}) {
   // a swatch in the cell's drawing; a mark sits in its corner, as on a cell
   const HATCH = 'repeating-linear-gradient(45deg, var(--g09) 0 3px, var(--g12) 3px 4px)';
   const sw = (fill, extra = '', mark = null, ink = 'var(--g17)') => {
@@ -351,14 +368,14 @@ function legend(level = 5) {
     [1, h('span', null, sw(HATCH, '', 'clock'), 'waits for: capacity, a license, a time')],
     [1, h('span', null, sw('var(--g09)', '', 'pause'), 'held: a person paused it')],
     [1, h('span', null, sw(HATCH, '', 'lock'), 'locked by another unit')],
-    [1, h('span', null, sw(notch('var(--g15)')), 'interrupted: the farm stopped it; it runs again')],
-    [1, h('span', null, sw('var(--run-pale)', 'inset 0 0 0 1px var(--run)'), 'preparing')],
+    [1, h('span', null, sw(notch('var(--g15)')), 'interrupted: the farm stopped it; it runs again'), 'f'],
+    [1, h('span', null, sw('var(--run-pale)', 'inset 0 0 0 1px var(--run)'), 'preparing'), 'f'],
     [1, h('span', null, sw(RISE, 'inset 0 0 0 1px var(--run)'), 'rendering')],
-    [1, h('span', null, sw(RISE, 'inset 0 0 0 1px var(--run)', 'pause', 'var(--paper)'), 'yielding: stops at its next safe point')],
+    [1, h('span', null, sw(RISE, 'inset 0 0 0 1px var(--run)', 'pause', 'var(--paper)'), 'yielding: stops at its next safe point'), 'f'],
     [1, h('span', null, sw('var(--temp-pale)', 'inset 0 0 0 1px var(--temp)'), 'backoff: a retry is scheduled')],
     [1, h('span', null, sw(RISE, 'inset 0 0 0 1.5px var(--temp)'), 'retrying')],
     [1, h('span', null, sw('var(--temp-pale)', 'inset 0 0 0 1px var(--temp)', 'rework', 'var(--temp)'), 'rework: a check sent it back')],
-    [1, h('span', null, sw('linear-gradient(var(--done-pale) 40%, var(--done) 40%)'), 'moving: output still moving')],
+    [1, h('span', null, sw('linear-gradient(var(--done-pale) 40%, var(--done) 40%)'), 'moving: output still moving'), 'f'],
     [1, h('span', null, sw('var(--done)'), 'done')],
     [1, h('span', null, sw('var(--done)', '', 'tick', 'var(--field)'), 'checked: a check passed')],
     [1, h('span', null, sw('linear-gradient(225deg, var(--paper) 0 4px, var(--fail) 4px)'), 'needs you')],
@@ -372,6 +389,9 @@ function legend(level = 5) {
     [2, h('span', null, h('span', { class: 'pencil mono', style: { fontSize: '10px', minWidth: '30px' } }, '14:58'), 'estimated: lighter, dashed')],
     [3, h('span', null, sw('radial-gradient(var(--g13) 0.6px, transparent 0.8px) 0 0 / 3px 3px, var(--g08)', 'inset 0 0 0 1px var(--g12)'), 'expected: work that will exist')],
     [3, h('span', null, h('i', { style: { display: 'inline-block', width: '5px', height: '14px', background: HATCH, margin: '0 4.5px' } }), 'gate: a wait or a check between stages, as long as the rows it holds')],
-    [3, h('span', null, h('i', { style: { display: 'inline-block', width: '14px', height: '0', borderTop: '1.5px solid var(--temp)', position: 'relative' } }), 'rework: from the check back to the frame it sent back')],
-  ].filter(([n]) => level >= n).map(([, el]) => el);
+    [3, h('span', null, h('i', { style: { position: 'relative', display: 'inline-block', width: '14px', height: '10px', background: 'var(--g09)' } }, h('span', { style: { position: 'absolute', left: '1px', bottom: '1px', lineHeight: 0, color: 'var(--g17)' } }, markEl('model', { size: 7 }))), 'reasons with a model (effort ticks at level 3)'), 'r'],
+    [3, h('span', null, h('i', { style: { position: 'relative', display: 'inline-block', width: '14px', height: '10px', background: 'var(--g09)' } }, h('span', { style: { position: 'absolute', left: '1px', bottom: '1px', lineHeight: 0, color: 'var(--g17)' } }, markEl('procedure', { size: 7 }))), 'reasons with a procedure: a command, no model'), 'r'],
+    [3, h('span', null, h('i', { style: { display: 'inline-block', width: '14px', height: '0', borderTop: '1.5px solid var(--temp)', position: 'relative' } }), `rework: from the check back to the ${plan ? 'block' : 'frame'} it sent back`)],
+    [3, h('span', null, s('svg', { width: 14, height: 12, viewBox: '0 0 14 12', 'aria-hidden': 'true', style: { overflow: 'visible' } }, s('path', { d: 'M12 2 C4 2 4 10 12 10', fill: 'none', stroke: 'var(--ink)', 'stroke-width': 1.4 }), s('path', { d: 'M12 10 l-4 -2.5 v5 z', fill: 'var(--ink)' })), 'depends on: an arc from a block to one that waits for it; the selected block’s in ink'), 'p'],
+  ].filter(([n, , tag]) => mode >= n && (tag !== 'r' || reasoning) && (tag !== 'f' || !plan) && (tag !== 'p' || plan)).map(([, el]) => el);
 }

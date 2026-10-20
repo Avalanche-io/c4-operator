@@ -12,6 +12,8 @@
 //   check   accepted: bad frames accepted (on pale red)
 //   seal    acknowledged: someone has it (on pale red)
 //   flag    needs you: the white corner flag (on red)
+//   model   reasons with a model (a unit's reasoning, metadata: ink only)
+//   procedure  reasons with a procedure: a command, no model
 //
 // Each is a path in a 10 x 10 box, stroked (or filled, for pause and flag).
 //   drawMark(g, kind, x, y, size, color)   on a canvas, top-left at x, y
@@ -28,6 +30,8 @@ const M = {
   check: { d: 'M2.2 5.1L4.2 7.1L8 3', fill: false, w: 1.5 },
   seal: { d: 'M5 1.8A3.2 3.2 0 1 1 4.99 1.8Z', fill: false, w: 1.2 },
   flag: { d: 'M3 0H10V7Z', fill: true },
+  model: { d: 'M5 1L6.2 3.8L9 5L6.2 6.2L5 9L3.8 6.2L1 5L3.8 3.8Z', fill: false, w: 1.1 },
+  procedure: { d: 'M5 1.4L8.1 3.2V6.8L5 8.6L1.9 6.8V3.2ZM5 4.3A0.7 0.7 0 1 1 4.99 4.3Z', fill: false, w: 1.1 },
 };
 
 export const MARK_KINDS = Object.keys(M);

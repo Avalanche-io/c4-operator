@@ -14,6 +14,30 @@ import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
 import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
 import { jobWords, tempWords } from '../../design/components/words.js';
+import { incidents, incidentOf } from '../../design/components/incidents.js';
+import { roots, readBook } from './day1.js';
+
+// the root items of this snapshot (incidents.js), read once per render
+let ITEMS = [];
+// seeOrMark: a job folded into a root item points to it, instead of its own
+// red (the suppression rule); otherwise its own needs-you mark
+function seeOrMark(j) {
+  const it = incidentOf(ITEMS, keyOf(j));
+  return it ? h('span', { class: 'seeroot', title: it.detail || it.title }, `see: ${it.title}`) : personMark(j);
+}
+// qroots: the root items above the queue, only when there are any: a quiet
+// HUD when nothing is wrong
+function qroots(ctx) {
+  return ITEMS.length ? h('div', { class: 'qroots', 'data-key': 'qroots' }, roots(ctx, ITEMS)) : null;
+}
+// triage: past ten root items, the screen sheds healthy work from view (not
+// from reach): one line per project instead of a row per job
+const TRIAGE = 10;
+function folded(ctx, rest) {
+  const by = new Map();
+  for (const j of rest) by.set(j.project, (by.get(j.project) || 0) + 1);
+  return [...by].map(([p, n]) => h('div', { class: 'qfold', 'data-key': 'fold-' + p }, h('b', null, p), `${f.num(n)} job${n === 1 ? '' : 's'} on their way`, h('a', { href: qhref(ctx, { ...ctx.route.q, triage: 'off' }) }, 'show them')));
+}
 
 const FILTERS = [['all', 'All'], ['render', 'Render'], ['ci', 'CI'], ['ml', 'ML'], ['other', 'Sim and media']];
 
@@ -84,7 +108,7 @@ function row(ctx, j, multiProject, sk) {
   ].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]));
   const b = e.burst;
   const act = [];
-  if (!fin && b && b.needsApproval && ctx.level >= 4) {
+  if (!fin && b && b.needsApproval && ctx.mode >= 4) {
     act.push(h('button', { class: 'btn request', 'data-action': 'approve', 'data-pool': b.pool, title: `Approve the pending request: ${b.slots} ${b.pool} slots for ${j.name}` },
       h('span', null, `+${b.slots} ${b.pool}`), h('b', null, f.money(b.cost))));
   } else if (j.phase === 'Held') {
@@ -106,7 +130,7 @@ function row(ctx, j, multiProject, sk) {
     h('div', { class: 'qname' },
       h('a', { class: 'jn', href: ctx.href(`job/${j.namespace}/${j.name}`) }, j.name),
       h('div', { class: 'qmeta' },
-        classChip(j, ctx.cls(j.class)), phase(j), personMark(j),
+        classChip(j, ctx.cls(j.class)), phase(j), seeOrMark(j),
         j.owner ? h('span', null, j.owner) : null,
         multiProject ? h('span', { class: 'dimmer' }, j.project) : null,
         h('span', { class: 'dimmer' }, orderText(j.order)),
@@ -223,7 +247,7 @@ function decisionCard(ctx, d, i, n) {
 }
 
 
-// ------------------------------------------------------------ levels 0 and 1
+// ------------------------------------------------------------ Queue and Frames modes
 
 // simple: the queue as a print queue. Each job: a gauge, percent done and how
 // many units, time left and when it will be ready, when it is due. An
@@ -231,7 +255,7 @@ function decisionCard(ctx, d, i, n) {
 const unitWord = (j) => (j.class === 'ci' || /ci/.test(j.class) ? 'shards' : j.class === 'media' ? 'units' : j.class === 'ml' || /ml/.test(j.class) ? 'steps' : 'frames');
 function simpleRow(ctx, j, rank) {
   const g = { ...glance(j), risk: 0, slack: NaN, feasible: true }, u = j.units, e = j.estimate, fin = j.phase === 'Succeeded';
-  const late = false; // deadline risk arrives at level 2
+  const late = false; // deadline risk arrives in Time mode
   const dl = j.objective && j.objective.deadline;
   const waiting = !fin && !inFlight(u) && !retries(u) && !u.succeeded && j.phase !== 'Running';
   return h('div', { class: `sq-row${fin ? ' fin' : ''}${late ? ' late' : ''}`, 'data-key': 'sq:' + keyOf(j), role: 'listitem' },
@@ -239,7 +263,9 @@ function simpleRow(ctx, j, rank) {
     own('pylon', 'sqpy:' + keyOf(j), { glance: g, w: 30, h: 46, mode: 'mini' }, { class: 'qpy' }),
     h('div', { class: 'qname' },
       h('a', { class: 'jn', href: ctx.href(`job/${j.namespace}/${j.name}`) }, j.name),
-      h('div', { class: 'qmeta' }, classChip(j, ctx.cls(j.class)), phase(j), personMark(j), j.owner ? h('span', null, j.owner) : null)),
+      h('div', { class: 'qmeta' }, classChip(j, ctx.cls(j.class)), phase(j), seeOrMark(j), j.owner ? h('span', null, j.owner) : null),
+      // Frames mode adds what is inside the job: its frames, batch by batch
+      ctx.mode >= 1 && !fin ? raw('div', { class: 'sqstrip', 'data-key': 'sqstrip', title: `${unitWord(j)} by batch: green done, blue ${unitWord(j) === 'frames' ? 'rendering' : 'running'}, grey waiting` }, batchStrip({ ...j, estimate: { ...j.estimate, slackSeconds: NaN, feasible: true, risk: 'none' }, objective: {} }, { w: 220, h: 14, lens: lensOf(ctx, j) }).svg) : null),
     h('div', { class: 'stack2' },
       h('span', { class: 'big' }, `${Math.round(g.done * 100)}%`),
       h('span', { class: 'sub' }, fin ? `${f.num(u.total)} ${unitWord(j)}, all done` : `${f.num(u.succeeded)} of ${f.num(u.total)} ${unitWord(j)}`,
@@ -266,6 +292,7 @@ function simple(ctx) {
         h('div', { class: 'crumbs' }, `Farm / ${v.allProjects ? 'all projects' : (v.projects || []).join(' \u00b7 ')}${v.allProjects ? '' : ' / ' + (v.user || '')}`),
         h('h1', { id: 'qtitle' }, v.allProjects ? 'The farm' : 'My jobs'),
         h('div', { class: 'meta' }, `${open.length} job${open.length === 1 ? '' : 's'} working or waiting, in the order the farm will run them. Deadlines set the order; nobody sets priorities.`))),
+    qroots(ctx),
     h('div', { class: 'neat qneat' },
       h('div', { class: 'sq-row head', 'aria-hidden': 'true' },
         ['#', '', 'Job', 'Progress', 'Ready by', 'Due'].map((x) => h('span', { class: 'lab' }, x))),
@@ -278,7 +305,8 @@ function simple(ctx) {
 
 export default {
   render(ctx) {
-    if (ctx.level < 2) return simple(ctx);
+    ITEMS = incidents(ctx.snap, readBook(ctx));
+    if (ctx.mode < 2) return simple(ctx);
     const s = ctx.snap;
     const q = ctx.route.q;
     const flt = q.class || 'all';
@@ -291,6 +319,9 @@ export default {
     const multiProject = s.viewer.projects.length > 1;
     const open = jobs.filter((j) => j.phase !== 'Succeeded');
     const fin = jobs.filter((j) => j.phase === 'Succeeded');
+    // under load, the rows that matter: late, or folded into a root item
+    const triage = ITEMS.length > TRIAGE && q.triage !== 'off';
+    const hot = triage ? open.filter((j) => isLate(j) || incidentOf(ITEMS, keyOf(j))) : open;
     const allOpen = s.jobs.filter((j) => j.phase !== 'Succeeded');
     const withDl = allOpen.filter((j) => j.objective && j.objective.deadline);
     const late = withDl.filter(isLate);
@@ -311,10 +342,11 @@ export default {
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Projected late'), h('span', { class: 'val' + (late.length ? ' late' : '') }, String(late.length)), h('span', { class: 'sub' }, late.length ? `worst ${f.signed(Math.min(...late.map((j) => j.estimate.slackSeconds)))}` : 'every deadline holds')),
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Awaiting you'), h('span', { class: 'val' }, String(decisions.length)), h('span', { class: 'sub' }, decisions.length ? `burst, est. ${f.money(decisions.reduce((a, d) => a + d.cost, 0))}` : 'no decisions')),
           win ? h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Production day'), h('span', { class: 'val' }, `day ${mday}`), h('span', { class: 'sub' }, `${win.name.toLowerCase()} · to ${f.dateLine(win.to)}`)) : null)),
-      h('div', { class: 'qcollar' + (shown.length && ctx.level >= 4 ? ' has-dc' : '') },
-        shown.length && ctx.level >= 4 ? h('div', { class: 'qdecide' }, shown.map((d, i) => decisionCard(ctx, d, i, shown.length))) : null,
-        ctx.level >= 3 ? shotsBand(ctx, shots, shotF) : null),
-      ctx.level < 3 ? null : h('div', { class: 'qtools' },
+      qroots(ctx),
+      h('div', { class: 'qcollar' + (shown.length && ctx.mode >= 4 ? ' has-dc' : '') },
+        shown.length && ctx.mode >= 4 ? h('div', { class: 'qdecide' }, shown.map((d, i) => decisionCard(ctx, d, i, shown.length))) : null,
+        ctx.mode >= 3 ? shotsBand(ctx, shots, shotF) : null),
+      ctx.mode < 3 ? null : h('div', { class: 'qtools' },
         h('div', { class: 'filters', role: 'group', 'aria-label': 'Filter by work class' },
           h('span', { class: 'lab' }, 'Show'),
           h('span', { class: 'seg' }, FILTERS.map(([k, label]) => h('a', {
@@ -323,12 +355,13 @@ export default {
         shotF ? h('a', { class: 'btn small', href: qhref(ctx, { ...q, shot: '' }), 'aria-pressed': 'true', title: 'Show every shot' }, `Shot ${shotF} ×`) : null,
         h('span', { class: 'scale mono' }, 'scale · 1 row = 1 job · batches of 24 frames (render) · slack against the deadline, −6h to +3d, log scale')),
       h('div', { class: 'neat qneat' },
-        ctx.level >= 4 ? h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('pools') }, 'pools'), ' · capacity feeding the queue') : null,
-        ctx.level >= 3 ? h('div', { class: 'edge e' }, h('a', { href: ctx.href('graph') }, 'graph'), ' · deliveries to the client ▸') : null,
-        ctx.level >= 5 ? h('div', { class: 'edge s' }, '▾ ', h('a', { href: ctx.href('wall') }, 'the wall'), ' · ', h('a', { href: ctx.href('cost') }, 'cost')) : null,
+        ctx.mode >= 4 ? h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('pools') }, 'pools'), ' · capacity feeding the queue') : null,
+        ctx.mode >= 3 ? h('div', { class: 'edge e' }, h('a', { href: ctx.href('graph') }, 'graph'), ' · deliveries to the client ▸') : null,
+        ctx.mode >= 5 ? h('div', { class: 'edge s' }, '▾ ', h('a', { href: ctx.href('wall') }, 'the wall'), ' · ', h('a', { href: ctx.href('cost') }, 'cost')) : null,
         h('div', { class: 'qtable', style: { '--datum': `${(DATUM_X * 100).toFixed(2)}%` } },
           head(),
-          jobs.length ? h('div', { class: 'qlist', role: 'list', 'aria-label': 'Jobs in run order' }, open.map((j) => row(ctx, j, multiProject, sk))) : empty('No jobs match this filter.'),
+          jobs.length ? h('div', { class: 'qlist', role: 'list', 'aria-label': 'Jobs in run order' }, triage ? hot.map((j) => row(ctx, j, multiProject, sk)) : open.map((j) => row(ctx, j, multiProject, sk))) : empty('No jobs match this filter.'),
+          triage ? folded(ctx, open.filter((j) => !hot.includes(j))) : null,
           fin.length ? h('div', { class: 'qdiv' }, h('span', { class: 'lab' }, `Finished · ${fin.length}`), h('span', { class: 'sub' }, 'kept while later jobs still read their output')) : null,
           fin.length ? h('div', { class: 'qlist fin', role: 'list', 'aria-label': 'Finished jobs' }, fin.map((j) => row(ctx, j, multiProject, sk))) : null)));
   },

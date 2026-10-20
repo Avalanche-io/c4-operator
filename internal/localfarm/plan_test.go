@@ -107,7 +107,7 @@ func TestViewersAndManager(t *testing.T) {
 		t.Fatalf("viewers %s", got)
 	}
 	v, err := LookupViewer("pipeline-td")
-	if err != nil || v.Name != "td" || Link((Options{}).HUD(), v) != "http://127.0.0.1:30080/?as=td&level=5" || (Options{HUDHostPort: 30180}).HUD() != "http://127.0.0.1:30180" {
+	if err != nil || v.Name != "td" || Link((Options{}).HUD(), v) != "http://127.0.0.1:30080/?as=td" || (Options{HUDHostPort: 30180}).HUD() != "http://127.0.0.1:30180" {
 		t.Fatalf("td %+v %v", v, err)
 	}
 	if _, err := LookupViewer("director"); err == nil {
