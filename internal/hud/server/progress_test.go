@@ -6,8 +6,8 @@ import "testing"
 // measured; a unit without one is filled by time over its estimate.
 func TestMeasuredProgress(t *testing.T) {
 	s := farm(t)
-	s.m.metrics.nodes = map[string]series{"w1": {{name: "c4_task_progress",
-		labels: map[string]string{"namespace": "show-a", "pod": "sh040-light-v007-u4"}, value: 0.4}}}
+	f := 0.4
+	s.m.metrics.units = map[[2]string]unitReport{{"show-a", "sh040-light-v007-u4"}: {Progress: &f}}
 	var d struct {
 		Progress map[string]struct {
 			Fraction float64 `json:"fraction"`

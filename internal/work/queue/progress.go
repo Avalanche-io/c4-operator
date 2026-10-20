@@ -6,9 +6,9 @@ import (
 )
 
 // Progress a running unit reports (.c4/progress, read by the node daemon
-// into its c4_task_progress gauge) reaches the queue through the manager's
-// scrape of the node daemons, never through the API server (DESIGN.md
-// 11.3). The HUD collector fills a ProgressCache after each scrape; the
+// and served to the manager alone on GET /units, never as a metric)
+// reaches the queue through the HUD's scrape of the node daemons, never
+// through the API server (DESIGN.md 11.3). The HUD collector fills a ProgressCache after each scrape; the
 // queue reads it when it estimates a running unit.
 
 // progressStale is how long a reading stays usable without a newer one.

@@ -4,7 +4,10 @@
 // would make every Materialization a hot, megabyte-sized etcd object.
 //
 // Labels are bounded: tier, project, result, upstream kind. No series is
-// labeled by object ID, pod, or node.
+// labeled by object ID, pod, job, or node: pod names carry job names, and
+// nothing identifying a job leaves the farm in metrics. What a running
+// unit reports (its progress, its safe points) the node daemon serves to
+// the manager alone, on GET /units.
 package metrics
 
 import (
@@ -22,19 +25,25 @@ func init() {
 	Registry.MustRegister(collectors.NewGoCollector(), collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 }
 
+// labelsOf is each series' label names, as declared.
+var labelsOf = map[string][]string{}
+
 func counter(name, help string, labels ...string) *prometheus.CounterVec {
+	labelsOf[name] = labels
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{Name: name, Help: help}, labels)
 	Registry.MustRegister(c)
 	return c
 }
 
 func gauge(name, help string, labels ...string) *prometheus.GaugeVec {
+	labelsOf[name] = labels
 	g := prometheus.NewGaugeVec(prometheus.GaugeOpts{Name: name, Help: help}, labels)
 	Registry.MustRegister(g)
 	return g
 }
 
 func histogram(name, help string, buckets []float64, labels ...string) *prometheus.HistogramVec {
+	labelsOf[name] = labels
 	h := prometheus.NewHistogramVec(prometheus.HistogramOpts{Name: name, Help: help, Buckets: buckets}, labels)
 	Registry.MustRegister(h)
 	return h
@@ -80,15 +89,13 @@ var (
 	NodeRecords      = counter("c4_node_task_records_total", "Task records made at capture, by result (signed, error).", "project", "result")
 	NodeMaterialized = counter("c4_node_materialized_bytes_total",
 		"Bytes of the views mounted into pods (each mount counts its view's full size). Less what the store sent, it is the bytes the tiers avoided.", "project")
-	NodeEvictions         = counter("c4_node_evictions_total", "Evicted objects and layers.", "kind")
-	NodeHashedBytes       = counter("c4_node_hashed_bytes_total", "Bytes hashed by the node, by reason (capture, verify-fill). The read path hashes nothing.", "reason")
-	NodePrewarm           = counter("c4_node_prewarm_total", "Views pre-warmed for capacity requests.", "result")
-	NodeTaskProgress      = gauge("c4_task_progress", "Progress a running unit reports in .c4/progress (0 to 1).", "namespace", "pod")
-	NodeTaskSafepoint     = gauge("c4_task_safepoint_seq", "The number of the last safe point a running unit announced in .c4/safepoint.", "namespace", "pod")
-	NodeTaskSafepointTime = gauge("c4_task_safepoint_time_seconds", "When a running unit announced its last safe point (Unix seconds).", "namespace", "pod")
+	NodeEvictions   = counter("c4_node_evictions_total", "Evicted objects and layers.", "kind")
+	NodeHashedBytes = counter("c4_node_hashed_bytes_total", "Bytes hashed by the node, by reason (capture, verify-fill). The read path hashes nothing.", "reason")
+	NodePrewarm     = counter("c4_node_prewarm_total", "Views pre-warmed for capacity requests.", "result")
 )
 
-// Handler serves the registry.
+// Handler serves the registry. Processes serve it only to a scraper the
+// API server lets get /metrics (auth.MetricsGuard).
 func Handler() http.Handler {
 	return promhttp.HandlerFor(Registry, promhttp.HandlerOpts{Registry: Registry})
 }

@@ -782,6 +782,23 @@ node already owns what is mounted on it. Within that, node daemons are the
 large, exposed population, so they hold the least: no store credentials in
 tiered mode, and API writes limited by admission policy.
 
+Metrics leave the farm, to whatever monitoring stack scrapes them, so they
+carry nothing that identifies the work: no series is labelled by pod, job,
+unit, node, namespace or object, since pod names carry job names. The
+manager, the node daemons and the regional replicas serve `/metrics` only to
+a bearer token the API server accepts (TokenReview, for its own audience)
+whose subject may `get` the non-resource URL `/metrics`
+(SubjectAccessReview), the check controller-runtime's metrics filter makes,
+with decisions cached for a minute. The `c4-metrics-reader` ClusterRole
+grants it. To scrape, bind the Prometheus service account to that role and
+give the scrape job its service-account token as a bearer token
+(`authorization: {credentials_file:
+/var/run/secrets/kubernetes.io/serviceaccount/token}`). What each running
+unit reports (its progress and its last safe point) is not a metric: the
+node daemon serves it on `GET /units` to the operator's tier token alone
+(the `c4-manager` service account, audience `c4-tier`). Both ports are
+plain HTTP on the cluster network, as the tier API is.
+
 ## 7. Very large clusters
 
 - **The control plane is not in the data path.** The controller resolves a
@@ -2053,9 +2070,9 @@ historical failure rate instead, so a broken change fails fast).
   expected remainder of running ones (past their estimate, a running unit is
   assumed to need a quarter of its elapsed time again), and the expected work
   of unexpanded generators. A unit that reports its progress `f` (a fraction
-  in `.c4/progress`, which the node daemon exports as `c4_task_progress` and
-  the manager's scrape hands to the queue, never through the API server) is
-  estimated from it. Its remainder is `(done + elapsed)(1 - f)/f`, with a
+  in `.c4/progress`, which the node daemon serves to the manager alone on
+  `GET /units`, never as a metric and never through the API server, and
+  the HUD's scrape hands to the queue) is estimated from it. Its remainder is `(done + elapsed)(1 - f)/f`, with a
   relative spread of `0.2 sqrt((1 - f)/f)`, blended by precision with its
   prediction while it is within it, and on its own once the unit has
   outrun the prediction. That is what tracks a single long unit, which has
@@ -2920,11 +2937,12 @@ has an MCP tool with the same effect (section 13.2).
   Projects, Pools, WorkClasses and CapacityRequests. Browsers add no
   API-server load: they receive server-sent events, coalesced to at most one
   update per second per scope.
-- Tier, node and progress metrics come from Prometheus with aggregate
-  queries (sum by tier, pool, locality, class and project; the top-N worst
-  nodes; progress only for the job on screen). The HUD never scrapes 10,000
-  nodes. Without Prometheus (the kind e2e) it scrapes the regional replicas
-  and node daemons directly, which is fine for small clusters.
+- Tier and node metrics come from Prometheus with aggregate queries (sum by
+  tier, pool, locality, class and project; the top-N worst nodes). The HUD
+  never scrapes 10,000 nodes. Without Prometheus (the kind e2e) it scrapes
+  the regional replicas and node daemons directly, which is fine for small
+  clusters. What units report (progress, safe points) is never a metric: the
+  HUD reads it from the node daemons' `GET /units` (section 6.8).
 - Events and logs are read on demand: opening a unit fetches that pod, its
   log tail and its Events (field-selected by involved object), as the user.
 

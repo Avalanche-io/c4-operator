@@ -114,13 +114,17 @@ func runRegional(args []string) error {
 		MaxRate:    rate.Value(),
 		Log:        log,
 	}
+	metricsHandler := metrics.Handler()
 	if !*noAuth {
 		cs, err := kubernetes.NewForConfig(cfg)
 		if err != nil {
 			return err
 		}
 		ns := *namespace
-		srv.Authorize = (&auth.Reviewer{Client: cs, Tier: "regional"}).TierAuthorizer(ns+"/c4-node", ns+"/c4-hud", ns+"/c4-manager")
+		rev := &auth.Reviewer{Client: cs, Tier: "regional"}
+		srv.Authorize = rev.TierAuthorizer(ns+"/c4-node", ns+"/c4-hud", ns+"/c4-manager")
+		// Only a scraper the API server lets get /metrics reads them.
+		metricsHandler = (&auth.MetricsGuard{Reviewer: rev}).Wrap(metricsHandler)
 		// Warming spends egress: only the operator (the queue) may ask,
 		// within a daily byte budget. Without authentication it is off.
 		if *warmPerDay > 0 {
@@ -141,7 +145,7 @@ func runRegional(args []string) error {
 		}
 	}()
 	mux := http.NewServeMux()
-	mux.Handle("/metrics", metrics.Handler())
+	mux.Handle("/metrics", metricsHandler)
 	mux.Handle("/", srv)
 	hs := &http.Server{Addr: *addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
 	go func() {

@@ -26,7 +26,6 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/fill"
 	"github.com/Avalanche-io/c4-operator/internal/layer"
 	"github.com/Avalanche-io/c4-operator/internal/membership"
-	"github.com/Avalanche-io/c4-operator/internal/metrics"
 	"github.com/Avalanche-io/c4-operator/internal/objcache"
 	"github.com/Avalanche-io/c4-operator/internal/project"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
@@ -87,6 +86,10 @@ type Daemon struct {
 
 	stacks   singleflight.Group
 	captures singleflight.Group
+
+	// units is what the running units last reported (GET /units).
+	unitsMu sync.Mutex
+	units   []UnitReport
 
 	mu     sync.Mutex
 	layers map[string]*layer.Store
@@ -218,10 +221,7 @@ func (d *Daemon) ServePeers(ctx context.Context) error {
 		ns := d.Cfg.Namespace
 		srv.Authorize = d.Reviewer.TierAuthorizer(ns+"/c4-node", ns+"/c4-regional")
 	}
-	mux := http.NewServeMux()
-	mux.Handle("/metrics", metrics.Handler())
-	mux.Handle("/", srv)
-	hs := &http.Server{Addr: d.Cfg.PeerAddr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+	hs := &http.Server{Addr: d.Cfg.PeerAddr, Handler: d.peerHandler(srv), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

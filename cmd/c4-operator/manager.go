@@ -13,11 +13,13 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/selection"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -30,12 +32,14 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/auth"
 	"github.com/Avalanche-io/c4-operator/internal/controller"
 	"github.com/Avalanche-io/c4-operator/internal/hud"
 	hudserver "github.com/Avalanche-io/c4-operator/internal/hud/server"
 	"github.com/Avalanche-io/c4-operator/internal/project"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
+	"github.com/Avalanche-io/c4-operator/internal/tier"
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
 	"github.com/Avalanche-io/c4-operator/internal/work/kindsim"
 	"github.com/Avalanche-io/c4-operator/internal/work/placement"
@@ -128,7 +132,7 @@ func runManager(args []string) error {
 
 	mgr, err := ctrl.NewManager(cfg, ctrl.Options{
 		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: *metricsAddr},
+		Metrics:                metricsserver.Options{BindAddress: *metricsAddr, FilterProvider: metricsGuard(kube)},
 		HealthProbeBindAddress: *probeAddr,
 		WebhookServer:          webhook.NewServer(webhook.Options{Port: *webhookPort, CertDir: *certDir}),
 		// Secrets are never cached: credentials are read on demand, from
@@ -199,7 +203,7 @@ func runManager(args []string) error {
 		}
 	}
 	if *hudAddr != "" {
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *hudRoles, *farmTZ, *namespace, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
 			return err
 		}
 	}
@@ -247,7 +251,7 @@ type hudImages struct {
 	plain         []string
 }
 
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, roles, tz, namespace string, images hudImages) error {
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, roles, tz, namespace, tierToken string, images hudImages) error {
 	roleGroups, err := parseRoleGroups(roles)
 	if err != nil {
 		return fmt.Errorf("--hud-role-groups: %w", err)
@@ -261,7 +265,11 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		return err
 	}
 	srv := &hudserver.Server{ImageRegistry: images.registry, ImageTag: images.tag, PlainRegistries: images.plain, Client: mgr.GetClient(), Kube: kube, Stores: stores, Web: web, Loc: loc,
-		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups}
+		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups,
+		// What units report comes from the node daemons' /units, for the
+		// operator's tier token alone; their metrics need an API token
+		// the c4-metrics-reader role is bound to.
+		TierToken: (&tier.TokenFile{Path: tierToken}).Token, MetricsToken: apiToken(mgr.GetConfig())}
 	if q != nil {
 		// Without the work system the HUD has no queue to ask (a nil
 		// *queue.Queue in the interface would not compare equal to nil).
@@ -399,4 +407,24 @@ func splitList(v string) []string {
 		}
 	}
 	return out
+}
+
+// metricsGuard puts the operator's /metrics behind the check the node
+// daemons and regional replicas make (auth.MetricsGuard): a token the API
+// server accepts, whose subject may get /metrics.
+func metricsGuard(kube kubernetes.Interface) func(*rest.Config, *http.Client) (metricsserver.Filter, error) {
+	g := &auth.MetricsGuard{Reviewer: &auth.Reviewer{Client: kube, Tier: "manager"}}
+	return func(*rest.Config, *http.Client) (metricsserver.Filter, error) {
+		return func(_ logr.Logger, h http.Handler) (http.Handler, error) { return g.Wrap(h), nil }, nil
+	}
+}
+
+// apiToken is the operator's own API token (its service account's, in a
+// pod), which the HUD presents to the node daemons' and regional
+// replicas' /metrics.
+func apiToken(cfg *rest.Config) func() string {
+	if cfg.BearerTokenFile != "" {
+		return (&tier.TokenFile{Path: cfg.BearerTokenFile}).Token
+	}
+	return func() string { return cfg.BearerToken }
 }

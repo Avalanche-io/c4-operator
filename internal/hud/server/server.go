@@ -52,6 +52,11 @@ type Server struct {
 	// Safepoints, when set, receives units' safe points from each scrape,
 	// for the queue's soft stops and the unit list.
 	Safepoints *queue.SafepointCache
+	// TierToken is the operator's tier token, for the node daemons'
+	// GET /units (what each running unit reports). MetricsToken is its
+	// API token, for their /metrics and the regional replicas'. Either
+	// may be nil (tests), which sends none.
+	TierToken, MetricsToken func() string
 	// Plans, when set, returns a job's unit table as the queue has it,
 	// expansions included (queue.Queue.PlanOf); without it the HUD plans
 	// jobs from their class alone.

@@ -3,6 +3,7 @@ package server
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -167,6 +168,20 @@ type farmMetrics struct {
 	regional []series
 	// pub holds publish latency histogram buckets summed over nodes.
 	pub, capture map[float64]float64
+	// units is what each running unit reports, by namespace and pod: the
+	// node daemons' GET /units, never their metrics.
+	units map[[2]string]unitReport
+}
+
+// unitReport is one running unit's report (node.UnitReport on the wire).
+type unitReport struct {
+	Namespace string   `json:"namespace"`
+	Pod       string   `json:"pod"`
+	Progress  *float64 `json:"progress"`
+	Safepoint *struct {
+		Seq int       `json:"seq"`
+		At  time.Time `json:"at"`
+	} `json:"safepoint"`
 }
 
 // series is one process's metrics: sums by name and label subset.
@@ -220,9 +235,11 @@ func (ss series) sum(name string, want ...string) float64 {
 	return t
 }
 
-// scrape reads /metrics from every node daemon and regional replica.
+// scrape reads /metrics from every node daemon and regional replica, and
+// the node daemons' /units.
 func (s *Server) scrape(ctx context.Context) farmMetrics {
-	fm := farmMetrics{at: time.Now(), nodes: map[string]series{}, pub: map[float64]float64{}, capture: map[float64]float64{}}
+	fm := farmMetrics{at: time.Now(), nodes: map[string]series{}, pub: map[float64]float64{}, capture: map[float64]float64{},
+		units: map[[2]string]unitReport{}}
 	if s.Kube == nil {
 		return fm
 	}
@@ -241,7 +258,16 @@ func (s *Server) scrape(ctx context.Context) farmMetrics {
 		if comp == "node" {
 			port = "7444"
 		}
-		ss, err := fetchMetrics(ctx, hc, fmt.Sprintf("http://%s:%s/metrics", p.Status.PodIP, port))
+		if comp == "node" {
+			us, err := fetchUnits(ctx, hc, fmt.Sprintf("http://%s:%s/units", p.Status.PodIP, port), bearer(s.TierToken))
+			if err != nil {
+				s.Log.V(1).Info("units", "node", p.Spec.NodeName, "err", err.Error())
+			}
+			for _, u := range us {
+				fm.units[[2]string{u.Namespace, u.Pod}] = u
+			}
+		}
+		ss, err := fetchMetrics(ctx, hc, fmt.Sprintf("http://%s:%s/metrics", p.Status.PodIP, port), bearer(s.MetricsToken))
 		if err != nil {
 			continue
 		}
@@ -264,17 +290,52 @@ func (s *Server) scrape(ctx context.Context) farmMetrics {
 	return fm
 }
 
-func fetchMetrics(ctx context.Context, hc *http.Client, url string) (series, error) {
+func bearer(f func() string) string {
+	if f == nil {
+		return ""
+	}
+	return f()
+}
+
+// fetchURL fetches url with a bearer token (none if empty), and fails on a
+// status other than 200.
+func fetchURL(ctx context.Context, hc *http.Client, url, token string) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, err
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
 	}
 	resp, err := hc.Do(req)
 	if err != nil {
 		return nil, err
 	}
+	if resp.StatusCode != http.StatusOK {
+		resp.Body.Close()
+		return nil, fmt.Errorf("%s: %s", url, resp.Status)
+	}
+	return resp, nil
+}
+
+func fetchMetrics(ctx context.Context, hc *http.Client, url, token string) (series, error) {
+	resp, err := fetchURL(ctx, hc, url, token)
+	if err != nil {
+		return nil, err
+	}
 	defer resp.Body.Close()
 	return parseMetrics(resp.Body)
+}
+
+func fetchUnits(ctx context.Context, hc *http.Client, url, token string) ([]unitReport, error) {
+	resp, err := fetchURL(ctx, hc, url, token)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	var us []unitReport
+	err = json.NewDecoder(io.LimitReader(resp.Body, 16<<20)).Decode(&us)
+	return us, err
 }
 
 // parseMetrics reads the Prometheus text format's samples. Only names
@@ -482,12 +543,9 @@ func (h *history) add(m *model) (int, int) {
 // namespace and pod, for the queue's estimates (queue.ProgressCache).
 func progressReadings(fm farmMetrics) map[[2]string]float64 {
 	out := map[[2]string]float64{}
-	for _, ss := range fm.nodes {
-		for _, x := range ss {
-			if x.name != "c4_task_progress" {
-				continue
-			}
-			out[[2]string{x.labels["namespace"], x.labels["pod"]}] = x.value
+	for k, u := range fm.units {
+		if u.Progress != nil {
+			out[k] = min(1, max(0, *u.Progress))
 		}
 	}
 	return out
@@ -497,24 +555,9 @@ func progressReadings(fm farmMetrics) map[[2]string]float64 {
 // namespace and pod (queue.SafepointCache).
 func safepointReadings(fm farmMetrics) map[[2]string]queue.Safepoint {
 	out := map[[2]string]queue.Safepoint{}
-	for _, ss := range fm.nodes {
-		for _, x := range ss {
-			k := [2]string{x.labels["namespace"], x.labels["pod"]}
-			switch x.name {
-			case "c4_task_safepoint_seq":
-				sp := out[k]
-				sp.Seq = int(x.value)
-				out[k] = sp
-			case "c4_task_safepoint_time_seconds":
-				sp := out[k]
-				sp.At = time.UnixMilli(int64(x.value * 1000)).UTC()
-				out[k] = sp
-			}
-		}
-	}
-	for k, sp := range out {
-		if sp.Seq <= 0 || sp.At.IsZero() {
-			delete(out, k)
+	for k, u := range fm.units {
+		if sp := u.Safepoint; sp != nil && sp.Seq > 0 && !sp.At.IsZero() {
+			out[k] = queue.Safepoint{Seq: sp.Seq, At: sp.At.UTC()}
 		}
 	}
 	return out

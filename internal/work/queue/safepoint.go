@@ -9,8 +9,8 @@ import (
 // Safe points. A unit announces each moment it could stop and lose nothing
 // it wants kept (c4-unit safepoint: the end of an agent turn, a frame or
 // chunk boundary, a training checkpoint). The node daemon reports the last
-// one (c4_task_safepoint_seq and _time_seconds), the HUD's scrape of the
-// node daemons fills a SafepointCache, and the queue reads it: a unit that
+// one (on GET /units, to the manager alone), the HUD's scrape of the node
+// daemons fills a SafepointCache, and the queue reads it: a unit that
 // reports safe points can be asked to stop softly (it stops at its next
 // one), and what stopping it now would lose is the time since its last.
 

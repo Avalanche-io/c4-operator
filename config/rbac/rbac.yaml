@@ -246,8 +246,8 @@ subjects:
 - {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
 # Node daemon: reads Projects, Materializations (by name, on demand) and
-# the Nodes of its locality; validates pod and tier tokens; annotates pods
-# with capture results. A ValidatingAdmissionPolicy (config/policy)
+# the Nodes of its locality; validates pod and tier tokens, and checks
+# that a scraper may get /metrics; annotates pods with capture results. A ValidatingAdmissionPolicy (config/policy)
 # narrows the pod patch to output annotations on pods of its own node.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -272,6 +272,9 @@ rules:
 - apiGroups: [authentication.k8s.io]
   resources: [tokenreviews]
   verbs: [create]
+- apiGroups: [authorization.k8s.io]
+  resources: [subjectaccessreviews]
+  verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -281,7 +284,8 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-node}
 subjects:
 - {kind: ServiceAccount, name: c4-node, namespace: c4-system}
 ---
-# Regional tier: reads Projects and validates tier tokens.
+# Regional tier: reads Projects, validates tier tokens, and checks that a
+# scraper may get /metrics.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -293,6 +297,9 @@ rules:
 - apiGroups: [authentication.k8s.io]
   resources: [tokenreviews]
   verbs: [create]
+- apiGroups: [authorization.k8s.io]
+  resources: [subjectaccessreviews]
+  verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
@@ -301,6 +308,26 @@ metadata:
 roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-regional}
 subjects:
 - {kind: ServiceAccount, name: c4-regional, namespace: c4-system}
+---
+# Metrics: the manager, the node daemons and the regional replicas serve
+# /metrics only to a bearer token the API server accepts whose subject may
+# get /metrics (TokenReview, then SubjectAccessReview). Bind your
+# Prometheus's service account to this role, as the HUD's is here.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-metrics-reader
+rules:
+- nonResourceURLs: [/metrics]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: c4-metrics-reader
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: ClusterRole, name: c4-metrics-reader}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
 # Store credentials: the manager and the regional tier read them. The node
 # daemon needs them only for projects with access: Direct; an installation

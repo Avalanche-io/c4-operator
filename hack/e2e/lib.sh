@@ -110,11 +110,25 @@ sum_series() {
     END { printf "%d", v }'
 }
 
+# metrics_token: an API token that may get /metrics (the manager's
+# service account is bound to c4-metrics-reader).
+metrics_token() {
+  k -n c4-system create token c4-manager --duration 10m
+}
+
 # node_metric NODE NAME LABEL...: a series on one node daemon.
 node_metric() {
   local n=$1
   shift
-  docker exec "$n" curl -sf localhost:7444/metrics | sum_series "$@"
+  docker exec "$n" curl -sf -H "Authorization: Bearer $(metrics_token)" localhost:7444/metrics | sum_series "$@"
+}
+
+# regional_metrics POD: a regional replica's /metrics, read from a worker
+# (the API server's pod proxy carries no token).
+regional_metrics() {
+  local ip
+  ip=$(k -n c4-system get pod "$1" -o jsonpath='{.status.podIP}')
+  docker exec "${WORKERS%% *}" curl -sf -H "Authorization: Bearer $(metrics_token)" "http://$ip:7443/metrics"
 }
 
 # nodes_metric NAME LABEL...: the series summed over all workers.
@@ -131,7 +145,7 @@ nodes_metric() {
 regional_metric() {
   local p total=0 v
   for p in $(k -n c4-system get pods -l app.kubernetes.io/component=regional --field-selector=status.phase=Running -o jsonpath='{.items[*].metadata.name}'); do
-    v=$(k get --raw "/api/v1/namespaces/c4-system/pods/$p:7443/proxy/metrics" 2>/dev/null | sum_series "$@")
+    v=$(regional_metrics "$p" 2>/dev/null | sum_series "$@")
     total=$((total + ${v:-0}))
   done
   echo "$total"
@@ -259,7 +273,7 @@ mount_error() {
 regional_pod_metric() {
   local p=$1
   shift
-  k get --raw "/api/v1/namespaces/c4-system/pods/$p:7443/proxy/metrics" 2>/dev/null | sum_series "$@"
+  regional_metrics "$p" 2>/dev/null | sum_series "$@"
 }
 
 # farm_manager [POLICY]: run the manager with the e2e farm's settings: the

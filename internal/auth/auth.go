@@ -5,7 +5,9 @@
 // driver at NodePublishVolume. Node daemons, regional replicas and the HUD
 // prove who they are to each other with their own projected tokens
 // (audience c4-tier). Both are validated with TokenReview and cached
-// until the token expires.
+// until the token expires. A metrics scraper presents its default
+// service-account token, which must also be let get /metrics
+// (MetricsGuard).
 package auth
 
 import (
@@ -66,7 +68,12 @@ type Reviewer struct {
 // ErrInvalid means the token did not validate for the audience.
 var ErrInvalid = errors.New("token is not valid")
 
-// Review validates token for audience.
+// AudienceAPI is the API server's own audience: a pod's default
+// service-account token, which a metrics scraper presents.
+const AudienceAPI = ""
+
+// Review validates token for audience (AudienceAPI: for the API server's
+// own audiences).
 func (r *Reviewer) Review(ctx context.Context, token, audience string) (*Identity, error) {
 	if token == "" {
 		return nil, fmt.Errorf("%w: no token", ErrInvalid)
@@ -80,9 +87,11 @@ func (r *Reviewer) Review(ctx context.Context, token, audience string) (*Identit
 	}
 	r.mu.Unlock()
 
-	tr, err := r.Client.AuthenticationV1().TokenReviews().Create(ctx, &authnv1.TokenReview{
-		Spec: authnv1.TokenReviewSpec{Token: token, Audiences: []string{audience}},
-	}, metav1.CreateOptions{})
+	spec := authnv1.TokenReviewSpec{Token: token}
+	if audience != AudienceAPI {
+		spec.Audiences = []string{audience}
+	}
+	tr, err := r.Client.AuthenticationV1().TokenReviews().Create(ctx, &authnv1.TokenReview{Spec: spec}, metav1.CreateOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("token review: %w", err)
 	}
@@ -90,7 +99,7 @@ func (r *Reviewer) Review(ctx context.Context, token, audience string) (*Identit
 		metrics.TierAuth.WithLabelValues(r.Tier, "invalid").Inc()
 		return nil, fmt.Errorf("%w: %s", ErrInvalid, tr.Status.Error)
 	}
-	if !contains(tr.Status.Audiences, audience) {
+	if audience != AudienceAPI && !contains(tr.Status.Audiences, audience) {
 		metrics.TierAuth.WithLabelValues(r.Tier, "invalid").Inc()
 		return nil, fmt.Errorf("%w: audience %v", ErrInvalid, tr.Status.Audiences)
 	}
