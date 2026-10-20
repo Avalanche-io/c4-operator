@@ -38,7 +38,7 @@ import (
 //	C4_BLOCK_TOOLS           the tools it may use without asking, space separated
 //	C4_BLOCK_MODEL           the model, when not the CLI's default
 //	C4_BLOCK_EFFORT          the effort level (low, medium, high, xhigh, max), when not the CLI's default
-//	C4_BLOCK_PROFILE         the name of its tool profile, for its usage.json (default: "default" without C4_BLOCK_TOOLS, else "custom")
+//	C4_BLOCK_PROFILE         the name of its tool, for its usage.json (default: "default" without C4_BLOCK_TOOLS, else "custom")
 //	C4_BLOCK_REWORK          a reworked attempt: what the review asks (a verdict's with.env)
 const (
 	EnvBlock        = "C4_AGENT_BLOCK"
@@ -51,7 +51,7 @@ const (
 	EnvBlockRework  = "C4_BLOCK_REWORK"
 )
 
-// blockProfile is the name of a block's tool profile.
+// blockProfile is the name of a block's tool.
 func blockProfile(p *corev1.Pod) string {
 	switch {
 	case podEnv(p, EnvBlockProfile) != "":

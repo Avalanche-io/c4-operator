@@ -66,7 +66,7 @@ type Unit struct {
 	Claims []Claim
 	// Reasoning is what the unit reasons with, as its document or plan
 	// declares it: a model or a procedure, which model, at what effort,
-	// with which tool profile. An empty Does takes the class's (Doer),
+	// with which tool. An empty Does takes the class's (Doer),
 	// else procedure (DoesOf).
 	Reasoning Reasoning
 	// Gate names the gate the unit passes (a unit of kind gate): a
@@ -180,7 +180,7 @@ type Doer interface {
 
 // Reasoning is what a unit reasons with (LLM-OR-PROCEDURE 6.2): Does is
 // model or procedure; Model the model, Effort its effort level (low,
-// medium, high, xhigh, max), Tools the tool profile's name. All optional.
+// medium, high, xhigh, max), Tools the tool's name. All optional.
 type Reasoning struct {
 	Does   string `json:"does,omitempty"`
 	Model  string `json:"model,omitempty"`

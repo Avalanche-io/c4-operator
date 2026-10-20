@@ -761,7 +761,7 @@ type WorkUnitUsage struct {
 
 // WorkReasoning is what an attempt reasoned with: the model (and every
 // model it used), the effort level in force at its end (and every level
-// it ran at), its thinking mode, its tool profile's name, the tools it was
+// it ran at), its thinking mode, its tool's name, the tools it was
 // offered and the MCP servers they came from.
 type WorkReasoning struct {
 	// +optional

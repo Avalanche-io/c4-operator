@@ -1,10 +1,10 @@
 package server
 
-// Units as viewers (DESIGN 10.6, tool profiles). A unit whose tool profile
+// Units as viewers (DESIGN 10.6, tools). A unit whose tool
 // grants c4 (read, job or project) holds a token for its own pod with the
 // HUD's audience, which the Kubernetes API does not accept. The HUD checks
 // it with a TokenReview for that audience, finds the pod it is bound to,
-// and lets the unit do what its profile grants: read sees its project;
+// and lets the unit do what its tool grants: read sees its project;
 // job may also act on its own job; project may also submit jobs in its
 // project. Every control it makes is recorded under its name.
 
@@ -52,7 +52,7 @@ func forHUD(tok string) bool {
 	return json.Unmarshal(claims.Aud, &many) == nil && slices.Contains(many, c4v1.HUDAudience)
 }
 
-// unitViewer is the unit whose pod token tok is, with its profile's grant.
+// unitViewer is the unit whose pod token tok is, with its tool's grant.
 func (s *Server) unitViewer(ctx context.Context, tok string) (*api.Viewer, error) {
 	tr, err := s.Kube.AuthenticationV1().TokenReviews().Create(ctx,
 		&authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: tok, Audiences: []string{c4v1.HUDAudience}}}, metav1.CreateOptions{})
@@ -75,20 +75,20 @@ func (s *Server) unitViewer(ctx context.Context, tok string) (*api.Viewer, error
 	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: podName}, &pod); err != nil || string(pod.UID) != podUID {
 		return nil, errors.New("the token's pod is not a running unit")
 	}
-	job, unit, profile := pod.Labels[c4v1.LabelJob], pod.Labels[c4v1.LabelUnit], pod.Labels[c4v1.LabelToolProfile]
-	if job == "" || profile == "" {
-		return nil, errors.New("the token's pod is not a unit with a tool profile")
+	job, unit, tool := pod.Labels[c4v1.LabelJob], pod.Labels[c4v1.LabelUnit], pod.Labels[c4v1.LabelTool]
+	if job == "" || tool == "" {
+		return nil, errors.New("the token's pod is not a unit with a tool")
 	}
-	var p c4v1.ToolProfile
-	err = s.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: profile}, &p)
+	var p c4v1.Tool
+	err = s.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: tool}, &p)
 	if apierrors.IsNotFound(err) && s.Namespace != "" {
-		err = s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: profile}, &p)
+		err = s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: tool}, &p)
 	}
 	if err != nil {
-		return nil, fmt.Errorf("tool profile %s: %w", profile, err)
+		return nil, fmt.Errorf("tool %s: %w", tool, err)
 	}
 	if p.Spec.C4 == "" {
-		return nil, fmt.Errorf("tool profile %s grants no c4", profile)
+		return nil, fmt.Errorf("tool %s grants no c4", tool)
 	}
 	v := &api.Viewer{User: fmt.Sprintf("unit:%s/%s/%s", ns, job, unit), Projects: []string{},
 		Unit: &api.UnitViewer{Namespace: ns, Job: job, Unit: unit, Grant: p.Spec.C4}}

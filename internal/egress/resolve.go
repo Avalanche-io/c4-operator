@@ -16,11 +16,11 @@ import (
 )
 
 // Cluster resolves a client address to the unit pod that has it, and the
-// unit's profile: the pod's c4.avalanche.io/tool-profile, found in its
+// unit's tool: the pod's c4.avalanche.io/tool, found in its
 // namespace, else in the operator's. Answers are kept for TTL.
 type Cluster struct {
 	Client client.Client
-	// Namespace is the operator's, where the farm's profiles live.
+	// Namespace is the operator's, where the farm's tools live.
 	Namespace string
 	TTL       time.Duration
 	Now       func() time.Time
@@ -43,7 +43,7 @@ func (c *Cluster) now() time.Time {
 	return time.Now()
 }
 
-// Rules is the unit at ip and its profile's egress.
+// Rules is the unit at ip and its tool's egress.
 func (c *Cluster) Rules(ctx context.Context, ip string) (Unit, []c4v1.ToolEgress, error) {
 	ttl := c.TTL
 	if ttl <= 0 {
@@ -74,17 +74,17 @@ func (c *Cluster) resolve(ctx context.Context, ip string) (Unit, []c4v1.ToolEgre
 		if p.Status.Phase != corev1.PodRunning && p.Status.Phase != corev1.PodPending {
 			continue
 		}
-		profile := p.Labels[c4v1.LabelToolProfile]
-		u := Unit{Namespace: p.Namespace, Job: p.Labels[c4v1.LabelJob], Unit: p.Labels[c4v1.LabelUnit], Pod: p.Name, Profile: profile}
-		if profile == "" {
-			return u, nil, errors.New("unit " + p.Namespace + "/" + p.Name + " has no tool profile")
+		tool := p.Labels[c4v1.LabelTool]
+		u := Unit{Namespace: p.Namespace, Job: p.Labels[c4v1.LabelJob], Unit: p.Labels[c4v1.LabelUnit], Pod: p.Name, Tool: tool}
+		if tool == "" {
+			return u, nil, errors.New("unit " + p.Namespace + "/" + p.Name + " has no tool")
 		}
 		for _, ns := range []string{p.Namespace, c.Namespace} {
 			if ns == "" {
 				continue
 			}
-			var tp c4v1.ToolProfile
-			err := c.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: profile}, &tp)
+			var tp c4v1.Tool
+			err := c.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: tool}, &tp)
 			if err == nil {
 				return u, tp.Spec.Egress, nil
 			}
@@ -92,7 +92,7 @@ func (c *Cluster) resolve(ctx context.Context, ip string) (Unit, []c4v1.ToolEgre
 				return u, nil, err
 			}
 		}
-		return u, nil, fmt.Errorf("tool profile %s does not exist", profile)
+		return u, nil, fmt.Errorf("tool %s does not exist", tool)
 	}
 	return Unit{}, nil, fmt.Errorf("no unit pod at %s", ip)
 }

@@ -1,8 +1,8 @@
 # The farm's egress proxy (c4-operator egress-proxy). A unit whose tool
-# profile allows hosts reaches them only through it: the queue points the
+# tool allows hosts reaches them only through it: the queue points the
 # unit's HTTPS_PROXY and HTTP_PROXY here and its NetworkPolicy allows only
 # this and DNS; the proxy lets a request through only to a host the unit's
-# profile lists, and logs each against the unit. The manager's
+# tool lists, and logs each against the unit. The manager's
 # --egress-proxy names this Service.
 apiVersion: v1
 kind: ServiceAccount
@@ -14,12 +14,12 @@ kind: ClusterRole
 metadata:
   name: c4-egress
 rules:
-# Which unit pod a client address is, and its tool profile.
+# Which unit pod a client address is, and its tool.
 - apiGroups: [""]
   resources: [pods]
   verbs: [list]
 - apiGroups: [c4.avalanche.io]
-  resources: [toolprofiles]
+  resources: [tools]
   verbs: [get]
 ---
 apiVersion: rbac.authorization.k8s.io/v1

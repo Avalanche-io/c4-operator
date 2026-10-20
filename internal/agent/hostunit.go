@@ -59,7 +59,7 @@ func (r *Runner) unitRoot(p *corev1.Pod) string {
 }
 
 // prepareUnit makes the pod's unit directory and records it on the member,
-// with the tool profile a block's attempt declares.
+// with the tool a block's attempt declares.
 func (r *Runner) prepareUnit(p *corev1.Pod, m *Member) (UnitDirs, error) {
 	u := UnitDirsAt(r.unitRoot(p))
 	for _, d := range []string{filepath.Join(u.Out, ".c4"), u.Control} {

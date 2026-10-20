@@ -1,8 +1,8 @@
-// Package egress is the farm's egress proxy (DESIGN 10.6, tool profiles).
-// A unit whose tool profile allows hosts reaches them only through it: the
+// Package egress is the farm's egress proxy (DESIGN 10.6, tools).
+// A unit whose tool allows hosts reaches them only through it: the
 // unit's NetworkPolicy allows the proxy and DNS, the queue points the
 // unit's HTTPS_PROXY and HTTP_PROXY at it, and the proxy lets a request
-// through only to a host the unit's profile lists. The proxy knows the
+// through only to a host the unit's tool lists. The proxy knows the
 // unit by its pod's address, so every request it passes or refuses is
 // logged against a job and a unit. It works on any CNI.
 package egress
@@ -23,16 +23,16 @@ import (
 
 // Unit is the unit behind a client address.
 type Unit struct {
-	Namespace, Job, Unit, Pod, Profile string
+	Namespace, Job, Unit, Pod, Tool string
 }
 
-// Resolver says which unit is at an address, and what its profile allows.
+// Resolver says which unit is at an address, and what its tool allows.
 type Resolver interface {
 	Rules(ctx context.Context, ip string) (Unit, []c4v1.ToolEgress, error)
 }
 
 // Proxy is an HTTP forward proxy: CONNECT tunnels and absolute-form
-// requests, each to a host the client unit's profile allows.
+// requests, each to a host the client unit's tool allows.
 type Proxy struct {
 	Resolve Resolver
 	Log     logr.Logger
@@ -118,10 +118,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "egress: "+err.Error(), http.StatusForbidden)
 		return
 	}
-	who := []any{"job", u.Namespace + "/" + u.Job, "unit", u.Unit, "pod", u.Pod, "profile", u.Profile, "host", host, "port", port}
+	who := []any{"job", u.Namespace + "/" + u.Job, "unit", u.Unit, "pod", u.Pod, "tool", u.Tool, "host", host, "port", port}
 	if !Allowed(rules, host, port) {
-		p.Log.Info("refused", append(who, "why", "not in the profile")...)
-		http.Error(w, "egress: "+host+":"+strconv.Itoa(port)+" is not in tool profile "+u.Profile, http.StatusForbidden)
+		p.Log.Info("refused", append(who, "why", "not in the tool")...)
+		http.Error(w, "egress: "+host+":"+strconv.Itoa(port)+" is not in tool "+u.Tool, http.StatusForbidden)
 		return
 	}
 	p.Log.Info("allowed", who...)

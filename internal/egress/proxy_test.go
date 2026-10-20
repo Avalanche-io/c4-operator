@@ -25,7 +25,7 @@ func (f fakeResolver) Rules(_ context.Context, ip string) (Unit, []c4v1.ToolEgre
 	if !ok {
 		return Unit{}, nil, errors.New("no unit pod at " + ip)
 	}
-	return Unit{Namespace: "show-a", Job: "sh040-research", Unit: "3", Pod: "sh040-research-u3", Profile: "search"}, rules, nil
+	return Unit{Namespace: "show-a", Job: "sh040-research", Unit: "3", Pod: "sh040-research-u3", Tool: "search"}, rules, nil
 }
 
 func TestAllowed(t *testing.T) {
@@ -49,7 +49,7 @@ func TestAllowed(t *testing.T) {
 	}
 }
 
-// The proxy lets a unit reach only the hosts its profile lists, by plain
+// The proxy lets a unit reach only the hosts its tool lists, by plain
 // HTTP and through a CONNECT tunnel; anything else, or a client that is no
 // unit, is refused.
 func TestProxy(t *testing.T) {
@@ -82,14 +82,14 @@ func TestProxy(t *testing.T) {
 	if resp.StatusCode != 200 || string(b) != "upstream plain.example /v1/search" {
 		t.Fatalf("plain: %d %q", resp.StatusCode, b)
 	}
-	// A host the profile does not list.
+	// A host the tool does not list.
 	resp, err = c.Get("http://evil.example/")
 	if err != nil {
 		t.Fatal(err)
 	}
 	b, _ = io.ReadAll(resp.Body)
 	resp.Body.Close()
-	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(b), "not in tool profile search") {
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(b), "not in tool search") {
 		t.Fatalf("evil: %d %q", resp.StatusCode, b)
 	}
 

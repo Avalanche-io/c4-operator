@@ -376,7 +376,7 @@ func TestTranscriptReasoning(t *testing.T) {
 }
 
 // A block declares its effort (a flag its session starts with) and the
-// name of its tool profile.
+// name of its tool.
 func TestBlockEffortAndProfile(t *testing.T) {
 	p := hostPod()
 	c := &p.Spec.Containers[0]

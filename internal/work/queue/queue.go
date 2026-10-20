@@ -94,11 +94,11 @@ type Queue struct {
 	// or without Stores, calibrations are not saved.
 	Namespace string
 	// EgressProxy is the farm's egress proxy, [<namespace>/]<service>:<port>
-	// (the operator's namespace by default): units whose tool profile
+	// (the operator's namespace by default): units whose tool
 	// allows hosts reach them through it (tools.go). Empty: none.
 	EgressProxy string
 	// HUDService is the HUD's Service, [<namespace>/]<service>:<port>:
-	// units whose tool profile grants c4 reach it (tools.go).
+	// units whose tool grants c4 reach it (tools.go).
 	HUDService string
 	// cal holds live calibrations, shareHist the projects that share
 	// theirs (calibrate.go), calp their persistence (persist.go).
@@ -270,7 +270,7 @@ type jobMem struct {
 	// avoid (avoidFor). In memory: after a restart a retry may go back
 	// once.
 	unitFailed map[int]map[string]bool
-	// toolsWait says why a unit waits for its tool profile (tools.go).
+	// toolsWait says why a unit waits for its tool (tools.go).
 	toolsWait string
 	// needs are what units stopped for, and supplied the last supply's
 	// token (needs.go).
@@ -1454,7 +1454,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		if !ok {
 			// The job's status says so (condition Tools).
 			v.mem.toolsWait = why
-			q.Log.V(1).Info("waiting for a tool profile", "job", key, "unit", idx, "why", why)
+			q.Log.V(1).Info("waiting for a tool", "job", key, "unit", idx, "why", why)
 			continue
 		}
 		if tools != nil {
@@ -1654,7 +1654,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	pod.Spec.RestartPolicy = corev1.RestartPolicyNever
 	// A unit holds no Kubernetes API token: it reaches the farm only
 	// through what the queue gives it (its control directory, its pod's
-	// annotations, and the HUD with a token a tool profile grants).
+	// annotations, and the HUD with a token a tool grants).
 	noToken := false
 	pod.Spec.AutomountServiceAccountToken = &noToken
 	if pod.Spec.PriorityClassName == "" && q.pcReady {

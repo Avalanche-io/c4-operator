@@ -36,7 +36,7 @@ commands:
   tree-id    print the view ID of a directory
   import-git import a git repository's first-parent history into a store
   mcp        serve the farm's tools to agents (MCP, stdio or HTTP)
-  egress-proxy  run the farm's egress proxy for units whose tool profile allows hosts
+  egress-proxy  run the farm's egress proxy for units whose tool allows hosts
 `
 
 func main() {

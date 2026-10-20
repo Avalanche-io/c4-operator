@@ -4,14 +4,14 @@ kind: CustomResourceDefinition
 metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.23.0
-  name: toolprofiles.c4.avalanche.io
+  name: tools.c4.avalanche.io
 spec:
   group: c4.avalanche.io
   names:
-    kind: ToolProfile
-    listKind: ToolProfileList
-    plural: toolprofiles
-    singular: toolprofile
+    kind: Tool
+    listKind: ToolList
+    plural: tools
+    singular: tool
   scope: Namespaced
   versions:
   - additionalPrinterColumns:
@@ -25,9 +25,9 @@ spec:
     schema:
       openAPIV3Schema:
         description: |-
-          ToolProfile is what a unit works with beyond its image: a configuration
+          Tool is what a unit works with beyond its image: a configuration
           (MCP server definitions, settings, skills, plugins) as a view, and what
-          the unit may reach on the network (DESIGN 10.6, tool profiles). A unit
+          the unit may reach on the network (DESIGN 10.6, tools). A unit
           names one in its reasoning.tools; the queue looks for it in the job's
           namespace, then in the operator's, where the farm's defaults live. The
           view is mounted read-only at $C4_TOOLS, and its C4 ID is in the unit's
@@ -53,7 +53,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: ToolProfileSpec is a profile's configuration and egress.
+            description: ToolSpec is a profile's configuration and egress.
             properties:
               c4:
                 description: |-

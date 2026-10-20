@@ -17,14 +17,14 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// A unit that names a tool profile waits for the profile's view, then
-// runs with it mounted at $C4_TOOLS, labelled for the profile's
-// NetworkPolicy, which allows what the profile lists, and DNS, and
-// nothing else. A profile with no egress seals its units; the farm's
-// profiles live in the operator's namespace. A unit naming no profile
-// runs as before; one naming a missing profile waits, and the job says
+// A unit that names a tool waits for the tool's view, then
+// runs with it mounted at $C4_TOOLS, labelled for the tool's
+// NetworkPolicy, which allows what the tool lists, and DNS, and
+// nothing else. A tool with no egress seals its units; the farm's
+// tools live in the operator's namespace. A unit naming no tool
+// runs as before; one naming a missing tool waits, and the job says
 // why.
-func TestToolProfiles(t *testing.T) {
+func TestTools(t *testing.T) {
 	ns, q, now, st := graphFarm(t)
 	ctx := context.Background()
 	farmNS := ns + "-farm"
@@ -35,8 +35,8 @@ func TestToolProfiles(t *testing.T) {
 	svc := &corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "searcher"},
 		Spec: corev1.ServiceSpec{Selector: map[string]string{"app": "searcher"}, Ports: []corev1.ServicePort{{Port: 8080}}}}
 	view := viewID("c4search-mcp-config")
-	for _, o := range []*c4v1.ToolProfile{
-		{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "search"}, Spec: c4v1.ToolProfileSpec{View: view,
+	for _, o := range []*c4v1.Tool{
+		{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "search"}, Spec: c4v1.ToolSpec{View: view,
 			Egress:   []c4v1.ToolEgress{{CIDR: "203.0.113.0/24", Ports: []int32{443}}, {Service: ns + "/searcher"}},
 			Sidecars: []c4v1.ToolSidecar{{Name: "web-search", Image: "mcp-search:1", Args: []string{"--port", "8811"}, Port: 8811, Env: map[string]string{"MODE": "mcp"}}}}},
 		{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "none"}},
@@ -61,15 +61,15 @@ func TestToolProfiles(t *testing.T) {
 	tick(t, q)
 	// units: 1 lookup, 2 plain, 3 quiet, 4 ghost
 	if hasPod(t, ns, "tooled", 1) || hasPod(t, ns, "tooled", 4) || !hasPod(t, ns, "tooled", 2) || !hasPod(t, ns, "tooled", 3) {
-		t.Fatal("lookup waits for its view and ghost for its profile; plain and quiet run")
+		t.Fatal("lookup waits for its view and ghost for its tool; plain and quiet run")
 	}
 	if c := meta.FindStatusCondition(get(t, ns, "tooled").Status.Conditions, "Tools"); c == nil || c.Status != metav1.ConditionFalse {
 		t.Fatalf("Tools condition %+v", c)
 	}
-	if p := podOfUnit(t, ns, "tooled", 2); p.Labels[c4v1.LabelToolProfile] != "" {
-		t.Fatalf("plain carries a profile: %v", p.Labels)
+	if p := podOfUnit(t, ns, "tooled", 2); p.Labels[c4v1.LabelTool] != "" {
+		t.Fatalf("plain carries a tool: %v", p.Labels)
 	}
-	if p := podOfUnit(t, ns, "tooled", 3); p.Labels[c4v1.LabelToolProfile] != "none" || !q.egressDenied(ctx, ns, p.Labels) {
+	if p := podOfUnit(t, ns, "tooled", 3); p.Labels[c4v1.LabelTool] != "none" || !q.egressDenied(ctx, ns, p.Labels) {
 		t.Fatalf("quiet: labels %v, sealed %v", p.Labels, q.egressDenied(ctx, ns, p.Labels))
 	}
 
@@ -80,7 +80,7 @@ func TestToolProfiles(t *testing.T) {
 	for _, vol := range p.Spec.Volumes {
 		mounted = mounted || (vol.CSI != nil && vol.CSI.VolumeAttributes[c4v1.VolumeAttrMaterialization] == toolsName("tooled", "search"))
 	}
-	if p.Labels[c4v1.LabelToolProfile] != "search" || !mounted || envOf(p.Spec.Containers[0], "C4_TOOLS") != ToolsMount {
+	if p.Labels[c4v1.LabelTool] != "search" || !mounted || envOf(p.Spec.Containers[0], "C4_TOOLS") != ToolsMount {
 		t.Fatalf("lookup's pod: labels %v, view mounted %v", p.Labels, mounted)
 	}
 	// Its sidecar runs beside it, a native sidecar, and the unit knows
@@ -100,7 +100,7 @@ func TestToolProfiles(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := np.Spec.Egress
-	if np.Spec.PodSelector.MatchLabels[c4v1.LabelToolProfile] != "search" || len(e) != 3 ||
+	if np.Spec.PodSelector.MatchLabels[c4v1.LabelTool] != "search" || len(e) != 3 ||
 		e[0].To[0].IPBlock == nil || e[0].To[0].IPBlock.CIDR != "203.0.113.0/24" || e[0].Ports[0].Port.IntValue() != 443 ||
 		e[1].To[0].PodSelector.MatchLabels["app"] != "searcher" || e[2].Ports[0].Port.IntValue() != 53 {
 		t.Fatalf("policy %+v", np.Spec)
@@ -109,14 +109,14 @@ func TestToolProfiles(t *testing.T) {
 		t.Fatal("a unit with egress counted as sealed")
 	}
 	if hasPod(t, ns, "tooled", 4) {
-		t.Fatal("ghost runs without its profile")
+		t.Fatal("ghost runs without its tool")
 	}
 }
 
-// A profile that allows hosts sends its units through the farm's egress
+// A tool that allows hosts sends its units through the farm's egress
 // proxy: the policy allows the proxy and DNS, and the pod's HTTPS_PROXY
 // names it. Without a proxy such a unit waits.
-func TestToolProfileHostsGoThroughTheProxy(t *testing.T) {
+func TestToolHostsGoThroughTheProxy(t *testing.T) {
 	ns, q, now, st := graphFarm(t)
 	ctx := context.Background()
 	farmNS := ns + "-farm"
@@ -127,8 +127,8 @@ func TestToolProfileHostsGoThroughTheProxy(t *testing.T) {
 	for _, o := range []client.Object{
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-egress"},
 			Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "egress"}, Ports: []corev1.ServicePort{{Port: 3128}}}},
-		&c4v1.ToolProfile{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "search"},
-			Spec: c4v1.ToolProfileSpec{Egress: []c4v1.ToolEgress{{Host: "api.search.example", Ports: []int32{443}}}}},
+		&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "search"},
+			Spec: c4v1.ToolSpec{Egress: []c4v1.ToolEgress{{Host: "api.search.example", Ports: []int32{443}}}}},
 	} {
 		if err := k8s.Create(ctx, o); err != nil {
 			t.Fatal(err)
@@ -166,10 +166,10 @@ func TestToolProfileHostsGoThroughTheProxy(t *testing.T) {
 	}
 }
 
-// A profile that grants c4 gives its units a token for their pod alone,
+// A tool that grants c4 gives its units a token for their pod alone,
 // with the HUD's audience, and the HUD's address; its policy allows the
 // HUD's pods on the port they listen on. Without a HUD such a unit waits.
-func TestToolProfileGrantsC4(t *testing.T) {
+func TestToolGrantsC4(t *testing.T) {
 	ns, q, now, st := graphFarm(t)
 	ctx := context.Background()
 	farmNS := ns + "-farm"
@@ -181,7 +181,7 @@ func TestToolProfileGrantsC4(t *testing.T) {
 		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-hud"},
 			Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "manager"},
 				Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt32(8090)}}}},
-		&c4v1.ToolProfile{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "lead"}, Spec: c4v1.ToolProfileSpec{C4: "job"}},
+		&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "lead"}, Spec: c4v1.ToolSpec{C4: "job"}},
 	} {
 		if err := k8s.Create(ctx, o); err != nil {
 			t.Fatal(err)

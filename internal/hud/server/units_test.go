@@ -29,7 +29,7 @@ func unitToken(pod string) string {
 	return "eyJhbGciOiJSUzI1NiJ9." + claims + ".sig"
 }
 
-// A unit holding its pod's HUD token acts as its tool profile grants: job
+// A unit holding its pod's HUD token acts as its tool grants: job
 // lets it steer its own job and no other, read lets it only look. A token
 // the review rejects, or for a pod that is no unit, is refused.
 func TestUnitTokens(t *testing.T) {
@@ -42,16 +42,16 @@ func TestUnitTokens(t *testing.T) {
 		t.Fatal("the farm has no second job in show-a")
 	}
 	rec.job.Status.UnitStates = map[string]string{"succeeded": "0-6", "running": "7-9"}
-	pod := func(name, uid, profile string) *corev1.Pod {
+	pod := func(name, uid, tool string) *corev1.Pod {
 		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: name, UID: k8stypes.UID("uid-" + uid),
-			Labels: map[string]string{c4v1.LabelJob: rec.job.Name, c4v1.LabelUnit: "8", c4v1.LabelToolProfile: profile}}}
+			Labels: map[string]string{c4v1.LabelJob: rec.job.Name, c4v1.LabelUnit: "8", c4v1.LabelTool: tool}}}
 	}
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)
 	c4v1.AddToScheme(scheme)
 	objs := []client.Object{rec.job.DeepCopy(), pod("lead-u8", "lead", "lead"), pod("reader-u8", "reader", "reader"),
-		&c4v1.ToolProfile{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "lead"}, Spec: c4v1.ToolProfileSpec{C4: "job"}},
-		&c4v1.ToolProfile{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "reader"}, Spec: c4v1.ToolProfileSpec{C4: "read"}}}
+		&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "lead"}, Spec: c4v1.ToolSpec{C4: "job"}},
+		&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "reader"}, Spec: c4v1.ToolSpec{C4: "read"}}}
 	objs = append(objs, other.job.DeepCopy())
 	s.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(objs...).Build()
 	kube := kfake.NewSimpleClientset()

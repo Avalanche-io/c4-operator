@@ -18,24 +18,24 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// Tool profiles (DESIGN 10.6). A unit that names a profile in its
-// reasoning.tools runs with it: the profile's view mounted read-only at
-// $C4_TOOLS, and egress to what the profile lists and nothing else. The
-// queue finds the profile in the job's namespace, else in the operator's
+// Tools (DESIGN 10.6). A unit that names a tool in its
+// reasoning.tools runs with it: the tool's view mounted read-only at
+// $C4_TOOLS, and egress to what the tool lists and nothing else. The
+// queue finds the tool in the job's namespace, else in the operator's
 // (the farm's defaults), and before it releases the unit makes the view's
-// Materialization and the profile's NetworkPolicy in the job's namespace,
-// which selects the unit pods labelled with the profile. Address blocks and
+// Materialization and the tool's NetworkPolicy in the job's namespace,
+// which selects the unit pods labelled with the tool. Address blocks and
 // cluster services are allowed directly; hosts only through the farm's
 // egress proxy (internal/egress, Queue.EgressProxy), which the policy allows
-// and the unit's HTTPS_PROXY and HTTP_PROXY name. Units without a profile
+// and the unit's HTTPS_PROXY and HTTP_PROXY name. Units without a tool
 // run as before.
 
-// ToolsMount is where a unit's tool profile view is mounted ($C4_TOOLS).
+// ToolsMount is where a unit's tool view is mounted ($C4_TOOLS).
 const ToolsMount = "/etc/c4/tools"
 
-// toolsName is the Materialization a job's units mount profile name's
+// toolsName is the Materialization a job's units mount tool name's
 // view through.
-func toolsName(job, profile string) string { return fmt.Sprintf("%s-tools-%s", job, profile) }
+func toolsName(job, tool string) string { return fmt.Sprintf("%s-tools-%s", job, tool) }
 
 // toolEnv is the unit's variable naming sidecar name's address.
 func toolEnv(name string) string {
@@ -50,12 +50,12 @@ func portName(name string) string {
 	return name
 }
 
-// toolsPolicyName is the NetworkPolicy of profile name in a namespace.
-func toolsPolicyName(profile string) string { return "c4-tools-" + profile }
+// toolsPolicyName is the NetworkPolicy of tool name in a namespace.
+func toolsPolicyName(tool string) string { return "c4-tools-" + tool }
 
-// hostRules reports whether a profile allows hosts, reached through the
+// hostRules reports whether a tool allows hosts, reached through the
 // egress proxy.
-func hostRules(p *c4v1.ToolProfile) bool {
+func hostRules(p *c4v1.Tool) bool {
 	for _, e := range p.Spec.Egress {
 		if e.Host != "" {
 			return true
@@ -125,14 +125,14 @@ func (q *Queue) servicePeer(ctx context.Context, ns, name string) (networkingv1.
 		PodSelector:       &metav1.LabelSelector{MatchLabels: svc.Spec.Selector}}, nil
 }
 
-// toolProfile finds the profile a unit names: the job's namespace first,
+// toolObject finds the tool a unit names: the job's namespace first,
 // then the operator's.
-func (q *Queue) toolProfile(ctx context.Context, ns, name string) (*c4v1.ToolProfile, error) {
+func (q *Queue) toolObject(ctx context.Context, ns, name string) (*c4v1.Tool, error) {
 	for _, in := range []string{ns, q.Namespace} {
 		if in == "" {
 			continue
 		}
-		var p c4v1.ToolProfile
+		var p c4v1.Tool
 		err := q.Client.Get(ctx, types.NamespacedName{Namespace: in, Name: name}, &p)
 		if err == nil {
 			return &p, nil
@@ -141,55 +141,55 @@ func (q *Queue) toolProfile(ctx context.Context, ns, name string) (*c4v1.ToolPro
 			return nil, err
 		}
 	}
-	return nil, fmt.Errorf("tool profile %s does not exist in %s or %s", name, ns, q.Namespace)
+	return nil, fmt.Errorf("tool %s does not exist in %s or %s", name, ns, q.Namespace)
 }
 
-// toolsReady prepares unit idx's tool profile, if it names one: its view's
-// Materialization, Ready, and its NetworkPolicy. It returns the profile
+// toolsReady prepares unit idx's tool, if it names one: its view's
+// Materialization, Ready, and its NetworkPolicy. It returns the tool
 // (nil for none), and false with why while the unit must wait.
-func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.ToolProfile, bool, string) {
+func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.Tool, bool, string) {
 	name := v.mem.plan.Units[idx].Reasoning.Tools
 	if name == "" {
 		return nil, true, ""
 	}
-	p, err := q.toolProfile(ctx, v.job.Namespace, name)
+	p, err := q.toolObject(ctx, v.job.Namespace, name)
 	if err != nil {
 		return nil, false, err.Error()
 	}
 	for _, sc := range p.Spec.Sidecars {
 		if sc.Name == "" || sc.Image == "" || sc.Port <= 0 || sc.Port > 65535 {
-			return nil, false, fmt.Sprintf("tool profile %s: a sidecar needs a name, an image and a port", name)
+			return nil, false, fmt.Sprintf("tool %s: a sidecar needs a name, an image and a port", name)
 		}
 	}
 	if p.Spec.C4 != "" && q.HUDService == "" {
-		return nil, false, fmt.Sprintf("tool profile %s grants c4 %s, which needs the HUD (--hud-service)", name, p.Spec.C4)
+		return nil, false, fmt.Sprintf("tool %s grants c4 %s, which needs the HUD (--hud-service)", name, p.Spec.C4)
 	}
 	if hostRules(p) && q.EgressProxy == "" {
-		return nil, false, fmt.Sprintf("tool profile %s allows hosts, which need the farm's egress proxy (--egress-proxy)", name)
+		return nil, false, fmt.Sprintf("tool %s allows hosts, which need the farm's egress proxy (--egress-proxy)", name)
 	}
 	if p.Spec.View != "" {
 		ready, err := q.ensureMaterialization(ctx, v.job, toolsName(v.job.Name, name), p.Spec.View, "")
 		if err != nil {
-			return nil, false, fmt.Sprintf("tool profile %s's view: %v", name, err)
+			return nil, false, fmt.Sprintf("tool %s's view: %v", name, err)
 		}
 		if !ready {
-			return nil, false, fmt.Sprintf("tool profile %s's view is not ready", name)
+			return nil, false, fmt.Sprintf("tool %s's view is not ready", name)
 		}
 	}
 	if err := q.ensureToolsPolicy(ctx, v.job.Namespace, p); err != nil {
-		return nil, false, fmt.Sprintf("tool profile %s's network policy: %v", name, err)
+		return nil, false, fmt.Sprintf("tool %s's network policy: %v", name, err)
 	}
 	return p, true, ""
 }
 
-// toolsPolicy is profile p's NetworkPolicy in namespace ns: egress to the
+// toolsPolicy is tool p's NetworkPolicy in namespace ns: egress to the
 // address blocks and services it lists, to the egress proxy if it lists
 // hosts, and with any rule the cluster's DNS; nothing else.
-func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.ToolProfile) (*networkingv1.NetworkPolicy, error) {
+func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*networkingv1.NetworkPolicy, error) {
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: toolsPolicyName(p.Name),
-		Labels: map[string]string{c4v1.LabelToolProfile: p.Name}},
+		Labels: map[string]string{c4v1.LabelTool: p.Name}},
 		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{c4v1.LabelToolProfile: p.Name}},
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{c4v1.LabelTool: p.Name}},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 			Egress:      []networkingv1.NetworkPolicyEgressRule{},
 		}}
@@ -264,8 +264,8 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.ToolProfile)
 	return np, nil
 }
 
-// ensureToolsPolicy makes or updates profile p's NetworkPolicy in ns.
-func (q *Queue) ensureToolsPolicy(ctx context.Context, ns string, p *c4v1.ToolProfile) error {
+// ensureToolsPolicy makes or updates tool p's NetworkPolicy in ns.
+func (q *Queue) ensureToolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) error {
 	want, err := q.toolsPolicy(ctx, ns, p)
 	if err != nil {
 		return err
@@ -284,15 +284,15 @@ func (q *Queue) ensureToolsPolicy(ctx context.Context, ns string, p *c4v1.ToolPr
 	return q.Client.Update(ctx, &cur)
 }
 
-// applyTools gives unit pod pod of job its tool profile: the label its
+// applyTools gives unit pod pod of job its tool: the label its
 // NetworkPolicy selects, the view mounted at $C4_TOOLS, for hosts the
 // egress proxy as its HTTPS_PROXY and HTTP_PROXY, and its sidecars, native
 // sidecars that start before the unit and end with it.
-func applyTools(pod *corev1.Pod, job string, p *c4v1.ToolProfile, proxy, hud string) {
+func applyTools(pod *corev1.Pod, job string, p *c4v1.Tool, proxy, hud string) {
 	if pod.Labels == nil {
 		pod.Labels = map[string]string{}
 	}
-	pod.Labels[c4v1.LabelToolProfile] = p.Name
+	pod.Labels[c4v1.LabelTool] = p.Name
 	if p.Spec.C4 != "" && hud != "" {
 		// A token for this pod alone, for the HUD alone, renewed by the
 		// kubelet: the unit's way to c4 (its grant is read at the HUD).

@@ -54,7 +54,7 @@ blocks:
 
 - `reasoning` says what the block reasons with: `does` (`model` or
   `procedure`), and optionally `model`, `effort` (low, medium, high, xhigh,
-  max) and `tools` (a tool profile's name). `holds` are paths
+  max) and `tools` (a tool's name). `holds` are paths
   or keys the block writes, exclusive claims; `claims`
   are `{on, mode}` with mode `exclusive` (the default) or `shared`; `gate`
   names the one-slot gate the block passes (a merge). The queue enforces

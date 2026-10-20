@@ -1,4 +1,4 @@
 resources:
 - manager.yaml
 - priorityclass.yaml
-- toolprofiles.yaml
+- tools.yaml

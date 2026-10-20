@@ -98,11 +98,11 @@ rules:
 - apiGroups: [networking.k8s.io]
   resources: [networkpolicies]
   verbs: [get, list, watch, create, update]
-# Tool profiles: the queue reads a unit's profile and the services its
-# egress names, and writes the profile's NetworkPolicy in the job's
+# Tools: the queue reads a unit's tool and the services its
+# egress names, and writes the tool's NetworkPolicy in the job's
 # namespace.
 - apiGroups: [c4.avalanche.io]
-  resources: [toolprofiles]
+  resources: [tools]
   verbs: [get, list, watch]
 - apiGroups: [""]
   resources: [services]

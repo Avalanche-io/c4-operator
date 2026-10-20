@@ -4,40 +4,40 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// LabelToolProfile on a unit pod names the tool profile it runs with; the
-// profile's NetworkPolicy selects the pods by it.
-const LabelToolProfile = "c4.avalanche.io/tool-profile"
+// LabelTool on a unit pod names the tool it runs with; the
+// tool's NetworkPolicy selects the pods by it.
+const LabelTool = "c4.avalanche.io/tool"
 
 // HUDAudience is the audience of the token a unit with a c4 grant holds:
 // the HUD accepts it, the Kubernetes API does not.
 const HUDAudience = "c4.avalanche.io/hud"
 
-// ToolProfile is what a unit works with beyond its image: a configuration
+// Tool is what a unit works with beyond its image: a configuration
 // (MCP server definitions, settings, skills, plugins) as a view, and what
-// the unit may reach on the network (DESIGN 10.6, tool profiles). A unit
+// the unit may reach on the network (DESIGN 10.6, tools). A unit
 // names one in its reasoning.tools; the queue looks for it in the job's
 // namespace, then in the operator's, where the farm's defaults live. The
 // view is mounted read-only at $C4_TOOLS, and its C4 ID is in the unit's
 // record, so a unit's record says exactly what it ran with. Egress is an
-// allow-list: a unit with a profile reaches what the profile lists and
+// allow-list: a unit with a tool reaches what the tool lists and
 // nothing else, and with none it is sealed.
 // +kubebuilder:object:root=true
 // +kubebuilder:printcolumn:name="View",type=string,JSONPath=`.spec.view`
 // +kubebuilder:printcolumn:name="Age",type=date,JSONPath=`.metadata.creationTimestamp`
-type ToolProfile struct {
+type Tool struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec ToolProfileSpec `json:"spec"`
+	Spec ToolSpec `json:"spec"`
 }
 
-// ToolProfileSpec is a profile's configuration and egress.
-type ToolProfileSpec struct {
+// ToolSpec is a tool's configuration and egress.
+type ToolSpec struct {
 	// View is the configuration, a view's C4 ID, mounted read-only at
 	// /etc/c4/tools ($C4_TOOLS).
 	// +optional
 	View string `json:"view,omitempty"`
-	// Egress is what a unit with the profile may reach. With any rule,
+	// Egress is what a unit with the tool may reach. With any rule,
 	// the cluster's DNS is reachable too; with none, nothing is.
 	// +optional
 	Egress []ToolEgress `json:"egress,omitempty"`
@@ -58,7 +58,7 @@ type ToolProfileSpec struct {
 	C4 string `json:"c4,omitempty"`
 }
 
-// ToolSidecar is one server a profile runs beside its units.
+// ToolSidecar is one server a tool runs beside its units.
 type ToolSidecar struct {
 	// Name names the container and the unit's $C4_TOOL_<NAME>.
 	Name  string `json:"name"`
@@ -71,7 +71,7 @@ type ToolSidecar struct {
 	Port int32 `json:"port"`
 }
 
-// ToolEgress is one destination a profile allows: a host, an address
+// ToolEgress is one destination a tool allows: a host, an address
 // block or a cluster service, optionally on some ports. Hosts are reached
 // through the farm's egress proxy; the others directly.
 type ToolEgress struct {
@@ -92,13 +92,13 @@ type ToolEgress struct {
 
 // +kubebuilder:object:root=true
 
-// ToolProfileList contains a list of ToolProfile.
-type ToolProfileList struct {
+// ToolList contains a list of Tool.
+type ToolList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []ToolProfile `json:"items"`
+	Items           []Tool `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&ToolProfile{}, &ToolProfileList{})
+	SchemeBuilder.Register(&Tool{}, &ToolList{})
 }

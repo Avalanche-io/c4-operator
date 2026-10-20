@@ -1170,7 +1170,7 @@ advertises devices), and every unit pod requests its unit's slots, so
 kube-scheduler places units by slot exactly as the queue counts them. A unit
 pod has a generated name, an owner reference to its job, the pool's node
 selector and tolerations, the job's inputs as C4 CSI volumes, and the unit's
-environment (`C4_JOB`, `C4_NAMESPACE`, `C4_UNIT`, `C4_FRAMES`, `C4_SHARD`, `C4_STEPS`..., and `C4_OUTPUT`, the mount path of the first writable input, where the unit writes what is captured). A unit pod holds no Kubernetes API token (`automountServiceAccountToken: false`, whatever its template says): it reaches the farm through its control directory, its pod's annotations, and the HUD with a token its tool profile grants. Finished pods are
+environment (`C4_JOB`, `C4_NAMESPACE`, `C4_UNIT`, `C4_FRAMES`, `C4_SHARD`, `C4_STEPS`..., and `C4_OUTPUT`, the mount path of the first writable input, where the unit writes what is captured). A unit pod holds no Kubernetes API token (`automountServiceAccountToken: false`, whatever its template says): it reaches the farm through its control directory, its pod's annotations, and the HUD with a token its tool grants. Finished pods are
 deleted only after the status that records them is written, so a restart
 loses no unit. The manager caches only unit pods (a label selector), not
 every pod in the cluster.
@@ -1485,17 +1485,17 @@ and a sweep planner that spawns trials are all generators.
   declares what it reasons with in its expansion document or plan block:
   `reasoning: {does, model, effort, tools}`, `does` being `model` or
   `procedure`, `effort` one of low, medium, high, xhigh and max, `tools` a
-  tool profile's name. `does` defaults to the class's (agent members are
+  tool's name. `does` defaults to the class's (agent members are
   model units), else a procedure. A graph job's root, its generator, is a
   procedure unless the job's `rootDoes: model` says a model reads its plan
   from prose. What an attempt actually reasoned with, as its runner saw it
-  (the model or models, the effort or efforts, thinking, the tool profile,
+  (the model or models, the effort or efforts, thinking, the tool,
   the tools offered and their MCP servers), comes back in its usage
   document's `reasoning` and is kept for each unit's latest attempt
   (`status.modelUsage[i].reasoning`), so the HUD can show declared and
   observed side by side.
-  - **Tool profiles** (agent-jobs 10.15, agent-catalog G-tool-config).
-    `reasoning.tools` names a ToolProfile, a namespaced resource. The
+  - **Tools** (agent-jobs 10.15, agent-catalog G-tool-config).
+    `reasoning.tools` names a Tool, a namespaced resource. The
     queue looks for it in the job's namespace, then in the operator's,
     where the farm's own profiles live (`none` ships with the operator).
     - **`view`** is the configuration (MCP server definitions, settings,
@@ -1515,7 +1515,7 @@ and a sweep planner that spawns trials are all generators.
       the unit. It works on any CNI. The fields stay neutral, so a
       Cilium `toFQDNs` backend could serve them instead. The queue writes the profile's
       NetworkPolicy in the job's namespace (`c4-tools-<profile>`), which
-      selects the unit pods labelled `c4.avalanche.io/tool-profile` and
+      selects the unit pods labelled `c4.avalanche.io/tool` and
       allows those, plus DNS when there is any rule. A profile with no
       egress allows nothing, so its units are sealed, which the derivation
       record counts. The owner writes the allow-list.

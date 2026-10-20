@@ -53,7 +53,7 @@ type Member struct {
 	// Block marks a block's member: a fresh session the runner started for
 	// a plan job's unit, which ends when its task does.
 	Block bool `json:"block,omitempty"`
-	// Profile is the tool profile a block's current attempt declares
+	// Profile is the tool a block's current attempt declares
 	// (C4_BLOCK_PROFILE): the name its usage.json reports as its tools.
 	Profile string `json:"profile,omitempty"`
 	// Previous lists the sessions of earlier phases, oldest first.

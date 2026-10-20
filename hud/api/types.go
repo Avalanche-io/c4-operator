@@ -15,7 +15,7 @@ type Viewer struct {
 	// the HUD guesses from All (wrangler) or not (artist).
 	Role string `json:"role,omitempty"`
 	// Unit is set when the viewer is a unit holding its pod's HUD token:
-	// what its tool profile lets it do.
+	// what its tool lets it do.
 	Unit *UnitViewer `json:"unit,omitempty"`
 }
 

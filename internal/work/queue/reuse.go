@@ -50,7 +50,7 @@ func (q *Queue) reuseUnits(ctx context.Context, v *view, now time.Time) bool {
 		u := plan.Units[idx]
 		if class.DoesOf(v.driver, u) != class.DoesProcedure || u.Generator || u.Gate != "" || len(u.Inputs) > 0 ||
 			m.rework(idx) != nil || m.resume[idx] != "" || isWait(plan, idx) ||
-			// what its process key does not see: a tool profile, supplied
+			// what its process key does not see: a tool, supplied
 			// information, a decision it resumes with
 			u.Reasoning.Tools != "" || suppliedEnv(m, idx) != nil || m.blockDecision(idx) != nil {
 			continue

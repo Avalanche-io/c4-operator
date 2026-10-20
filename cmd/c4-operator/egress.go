@@ -15,12 +15,12 @@ import (
 )
 
 // runEgressProxy is c4-operator egress-proxy: the farm's egress proxy for
-// units whose tool profile allows hosts (internal/egress).
+// units whose tool allows hosts (internal/egress).
 func runEgressProxy(args []string) error {
 	fs := flag.NewFlagSet("egress-proxy", flag.ExitOnError)
 	addr := fs.String("addr", ":3128", "listen address")
-	namespace := fs.String("namespace", env("POD_NAMESPACE", "c4-system"), "the operator's namespace, where the farm's tool profiles live")
-	ttl := fs.Duration("ttl", 30*time.Second, "how long a client address's unit and profile are kept")
+	namespace := fs.String("namespace", env("POD_NAMESPACE", "c4-system"), "the operator's namespace, where the farm's tools live")
+	ttl := fs.Duration("ttl", 30*time.Second, "how long a client address's unit and tool are kept")
 	fs.Parse(args)
 
 	ctrl.SetLogger(zap.New())

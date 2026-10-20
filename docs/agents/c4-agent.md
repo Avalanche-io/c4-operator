@@ -148,7 +148,7 @@ declared `reasoning` (`does`, `model`, `effort`, `tools`).
 - `effort` is the effort level at its last turn, and `efforts` lists
   every level it ran at, when there was more than one.
 - `thinking` is the thinking mode it asked for.
-- `tools` is the name of the profile a block declares (`C4_BLOCK_PROFILE`),
+- `tools` is the name of the tool a block declares (`C4_BLOCK_PROFILE`),
   `toolNames` the tools the session offered the model, and `mcpServers`
   the MCP servers among them (from `mcp__<server>__` names).
 
@@ -252,7 +252,7 @@ for every later one. This is the builder driver of proposals agent-jobs
 | `C4_BLOCK_TOOLS`   | the template                                                      | the tools it may use, space separated (default `Read Edit Write Glob Grep Bash(git:*) Bash(go:*)`)          |
 | `C4_BLOCK_MODEL`   | the template or a unit                                            | the model, when not the CLI's default                                                                       |
 | `C4_BLOCK_EFFORT`  | the template or a unit                                            | the effort level (`--effort`: low, medium, high, xhigh, max), when not the CLI's default                    |
-| `C4_BLOCK_PROFILE` | the template or a unit                                            | the name of its tool profile, reported in usage.json (default `default`, or `custom` with `C4_BLOCK_TOOLS`) |
+| `C4_BLOCK_PROFILE` | the template or a unit                                            | the name of its tool, reported in usage.json (default `default`, or `custom` with `C4_BLOCK_TOOLS`) |
 | `C4_BLOCK_REWORK`  | a verdict's `with.env`                                            | a reworked attempt: what the review asks                                                                    |
 
 - **The member** is `<namespace>.<job>.<unit>`, registered when its session

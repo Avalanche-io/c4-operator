@@ -49,7 +49,7 @@ type Reasoning struct {
 	// Thinking is the extended-thinking mode it requested (adaptive,
 	// enabled, disabled).
 	Thinking string `json:"thinking,omitempty"`
-	// Tools is the tool profile the unit declared (its name); ToolNames the
+	// Tools is the tool the unit declared (its name); ToolNames the
 	// tools the session offered the model, and MCPServers the MCP servers
 	// among them.
 	Tools      string   `json:"tools,omitempty"`
