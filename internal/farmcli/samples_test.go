@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -86,5 +87,33 @@ func TestSamplesRefuseEscapesAndLinks(t *testing.T) {
 	}
 	if err := GetSamples(context.Background(), Out{W: &bytes.Buffer{}}, SamplesArgs{Set: "moth", Dir: t.TempDir()}); err == nil {
 		t.Error("an unknown set was fetched")
+	}
+}
+
+// A development build takes release assets from the latest release, and
+// says when there is none.
+func TestReleaseFor(t *testing.T) {
+	published := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !published {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"tag_name": "v0.1.2"}`))
+	}))
+	defer srv.Close()
+	old := ReleasesAPI
+	ReleasesAPI = srv.URL
+	defer func() { ReleasesAPI = old }()
+	ctx := context.Background()
+	if tag, dev, err := ReleaseFor(ctx, nil, "v0.1.0"); err != nil || dev || tag != "v0.1.0" {
+		t.Errorf("a release: %s %v %v", tag, dev, err)
+	}
+	if tag, dev, err := ReleaseFor(ctx, nil, "dev"); err != nil || !dev || tag != "v0.1.2" {
+		t.Errorf("a development build: %s %v %v", tag, dev, err)
+	}
+	published = false
+	if _, _, err := ReleaseFor(ctx, nil, "8d5a9b4-dirty"); !errors.Is(err, ErrNoRelease) {
+		t.Errorf("no release yet: %v", err)
 	}
 }

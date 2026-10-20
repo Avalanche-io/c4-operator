@@ -75,19 +75,26 @@ func GetSamples(ctx context.Context, o Out, a SamplesArgs) error {
 			return err
 		}
 	} else {
-		if !strings.HasPrefix(a.Version, "v") {
-			return errors.New("this is a development build: pass --from ARCHIVE (hack/samples/build.sh makes one)")
+		version, dev, err := ReleaseFor(ctx, hc, a.Version)
+		if errors.Is(err, ErrNoRelease) {
+			return errors.New("this is a development build and no release is published yet: pass --from ARCHIVE (hack/samples/build.sh makes one)")
 		}
-		name := "c4-samples-" + a.Version + ".tar.gz"
+		if err != nil {
+			return err
+		}
+		if dev {
+			o.printf("a development build: the samples of the latest release, %s\n", version)
+		}
+		name := "c4-samples-" + version + ".tar.gz"
 		if want == "" {
-			b, err := download(ctx, hc, SamplesBase+"/"+a.Version+"/"+name+".c4", io.Discard, 1<<10)
+			b, err := download(ctx, hc, SamplesBase+"/"+version+"/"+name+".c4", io.Discard, 1<<10)
 			if err != nil {
 				return err
 			}
 			want = strings.TrimSpace(string(b))
 		}
 		o.printf("downloading %s\n", name)
-		if _, err := download(ctx, hc, SamplesBase+"/"+a.Version+"/"+name, tmp, 0); err != nil {
+		if _, err := download(ctx, hc, SamplesBase+"/"+version+"/"+name, tmp, 0); err != nil {
 			return err
 		}
 	}

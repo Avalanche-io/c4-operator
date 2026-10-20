@@ -30,6 +30,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/Avalanche-io/c4-operator/config/samples/quickstart"
+	"github.com/Avalanche-io/c4-operator/internal/farmcli"
 )
 
 // UpOptions are `c4 farm up`'s choices.
@@ -200,10 +201,17 @@ func (o UpOptions) installManifest(ctx context.Context) ([]byte, error) {
 		}
 		data = b
 	} else {
-		if !strings.HasPrefix(o.Version, "v") {
-			return nil, errors.New("this is a development build: pass --install bin/install.yaml and --image-archive (make install-yaml, make image)")
+		version, dev, err := farmcli.ReleaseFor(ctx, nil, o.Version)
+		if errors.Is(err, farmcli.ErrNoRelease) {
+			return nil, errors.New("this is a development build and no release is published yet: pass --install bin/install.yaml and --image-archive (make install-yaml, make image)")
 		}
-		u := "https://github.com/Avalanche-io/c4-operator/releases/download/" + o.Version + "/install.yaml"
+		if err != nil {
+			return nil, err
+		}
+		if dev {
+			o.logf("operator  a development build: installing the latest release, %s (--install for your own build)\n", version)
+		}
+		u := "https://github.com/Avalanche-io/c4-operator/releases/download/" + version + "/install.yaml"
 		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
 		if err != nil {
 			return nil, err
