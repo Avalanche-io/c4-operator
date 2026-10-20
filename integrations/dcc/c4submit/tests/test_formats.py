@@ -171,3 +171,10 @@ def test_local_tools_stand_in_when_the_farm_lists_none(tmp_path, monkeypatch):
     tools = Submitter(FakeFarm(serves_submissions=False)).tools_for("saltmarsh", "/show/a.nk")
     assert [t.name for t in tools] == ["nuke-comp"]
     assert Submitter.due_choices(None) == [{"value": "suggested", "label": "When the farm suggests", "at": ""}]
+
+
+def test_job_names_fit_a_label():
+    doc = {"c4": "submit/1", "shot": "s" * 30, "jobs": {"comp-" + "x" * 30: {"tool": "t"}}}
+    assert [e["path"] for e in submission.check(doc)] == ["jobs.comp-" + "x" * 30]
+    doc["name"] = "sm0140"
+    assert submission.check(doc) == []

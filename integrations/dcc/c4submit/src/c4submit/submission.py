@@ -111,6 +111,10 @@ def check(doc: Any) -> List[Dict[str, str]]:
         base = f"jobs.{key}"
         if not KEY.match(str(key)):
             errs.append(error(base, f'"{key}" is not a job key', "lowercase letters, digits and -, starting with a letter"))
+        stem = str(doc.get("name") or doc.get("shot") or "")
+        if stem and len(f"{stem}-{key}-v000") > 63:
+            errs.append(error(base, f"{stem}-{key}-v001 is longer than a job's name may be (63 characters)",
+                              "shorten the job's key, or set name: to a shorter stem"))
         if not isinstance(job, dict):
             errs.append(error(base, "a job is a map of fields", "give it at least tool:"))
             continue
