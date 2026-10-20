@@ -481,3 +481,55 @@ func TestReworkPromptCarriesWhatWasSupplied(t *testing.T) {
 		}
 	}
 }
+
+// On a host, a block that asked another unit a question keeps its slot:
+// the runner leaves its session stopped until the answer is among the
+// unit's messages, then resumes it with the answer and marks it read.
+// With no answer within its hold, a question to the job's answerer wakes
+// it to decide within its brief.
+func TestHostHoldsForAnswer(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	m := e.register("lead", sess)
+	r, c := hostRunner(t, e, hostPod())
+	p := getPod(t, c)
+	u, err := r.prepareUnit(p, m)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.since, r.waited = map[types.UID]time.Time{}, map[types.UID]bool{}
+	now := time.Date(2026, 10, 20, 6, 0, 0, 0, time.UTC)
+	r.Now = func() time.Time { return now }
+	if err := WriteAsking(u.Out, Asking{ID: "0#1", To: "unit:plan", At: now}); err != nil {
+		t.Fatal(err)
+	}
+	a, _ := ReadAsking(u.Out)
+	if err := r.holdForAnswer(ctx, p, m, u, a); err != nil || len(e.fake.resumes) != 0 {
+		t.Fatalf("woke before the answer: %v %d", err, len(e.fake.resumes))
+	}
+	os.WriteFile(filepath.Join(u.Control, "steer"), []byte(`[{"seq":4,"at":"2026-10-20T06:01:00Z","text":"answer to 0#1 from plan: the lexer package","answer":{"id":"0#1","from":"plan"}}]`), 0o644)
+	if err := r.holdForAnswer(ctx, p, m, u, a); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.fake.resumes); n != 1 || !strings.Contains(e.fake.resumes[0].prompt, "answered by plan:\nanswer to 0#1 from plan: the lexer package") {
+		t.Fatalf("resumes %+v", e.fake.resumes)
+	}
+	if _, ok := ReadAsking(u.Out); ok {
+		t.Fatal("the answered question is still open")
+	}
+	if b, _ := os.ReadFile(filepath.Join(u.Out, ".c4", "steer-seen")); strings.TrimSpace(string(b)) != "4" {
+		t.Fatalf("steer-seen %q", b)
+	}
+
+	// a question to the job's answerer that goes unanswered
+	e.fake.active = map[string]Active{}
+	WriteAsking(u.Out, Asking{ID: "0#2", At: now})
+	a, _ = ReadAsking(u.Out)
+	now = now.Add(DefaultAskHold + time.Second)
+	if err := r.holdForAnswer(ctx, p, m, u, a); err != nil {
+		t.Fatal(err)
+	}
+	if n := len(e.fake.resumes); n != 2 || !strings.Contains(e.fake.resumes[1].prompt, "No answer to your question 0#2") {
+		t.Fatalf("resumes %+v", e.fake.resumes)
+	}
+}

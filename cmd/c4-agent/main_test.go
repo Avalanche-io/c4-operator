@@ -188,8 +188,14 @@ func readFile(p string) string { b, _ := os.ReadFile(p); return string(b) }
 
 // fakeUnit stands in for c4-unit: it records its arguments and exits with
 // $FAKE_UNIT_CODE (10 is "stop"); steer prints $FAKE_STEER, the unread
-// messages (exit 1 when there are none), and is not recorded.
+// messages as JSON lines (exit 1 when there are none), and is not
+// recorded; ask prints $FAKE_ASK_ID, the question's id.
 const fakeUnit = `#!/bin/sh
+if [ "$1" = ask ]; then
+  echo "$@" >> "$FAKE_UNIT_LOG"
+  echo "${FAKE_ASK_ID:-3#1}"
+  exit 0
+fi
 if [ "$1" = steer ]; then
   [ -n "$FAKE_STEER" ] || exit 1
   printf '%s\n' "$FAKE_STEER"
@@ -386,7 +392,7 @@ func TestHookSteer(t *testing.T) {
 		t.Fatalf("no messages: %q", stdout)
 	}
 	// a message: the session carries on with it
-	t.Setenv("FAKE_STEER", "dana (2026-10-20T05:40:00Z): use the v3 plates")
+	t.Setenv("FAKE_STEER", `{"seq":1,"at":"2026-10-20T05:40:00Z","actor":"dana","text":"use the v3 plates"}`)
 	_, stdout, _ := runCLI(t, hook, "checkpoint", "--hook")
 	var got struct {
 		Decision string `json:"decision"`
@@ -400,5 +406,66 @@ func TestHookSteer(t *testing.T) {
 	_, stdout, _ = runCLI(t, hook, "checkpoint", "--hook")
 	if strings.Contains(stdout, "v3 plates") || !strings.Contains(stdout, `"continue":false`) {
 		t.Fatalf("a stop: %q", stdout)
+	}
+}
+
+// A turn's question to another unit goes to the farm (c4-unit ask) and is
+// recorded open; a turn's answer to a question it was asked goes back
+// (c4-unit answer). A question that reaches the block comes with how to
+// answer it, and the answer to its own question closes it.
+func TestHookAsksAndAnswers(t *testing.T) {
+	_, work := setup(t)
+	root := t.TempDir()
+	unit, log := filepath.Join(root, "c4-unit"), filepath.Join(root, "unit.log")
+	if err := os.WriteFile(unit, []byte(fakeUnit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "out")
+	os.MkdirAll(filepath.Join(out, ".c4"), 0o755)
+	t.Setenv("C4_UNIT_BIN", unit)
+	t.Setenv("FAKE_UNIT_LOG", log)
+	t.Setenv("C4_PODINFO", filepath.Join(root, "annotations"))
+	t.Setenv("C4_OUTPUT", out)
+	if code, _, e := runCLI(t, "", "register", "--name", "lead", "--session", sid, "--cwd", work); code != 0 {
+		t.Fatalf("register: %d %s", code, e)
+	}
+	hook := `{"session_id":"` + sid + `","hook_event_name":"Stop"}`
+	put := func(name, doc string) {
+		if err := os.WriteFile(filepath.Join(out, ".c4", name), []byte(doc), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	logged := func() string { b, _ := os.ReadFile(log); return string(b) }
+
+	put("ask.json", `{"to": "unit:plan", "ask": "Which module owns the tokenizer?"}`)
+	t.Setenv("FAKE_ASK_ID", "4#1")
+	runCLI(t, hook, "checkpoint", "--hook")
+	if !strings.Contains(logged(), "ask --ask Which module owns the tokenizer? --to unit:plan") {
+		t.Fatalf("c4-unit ran %q", logged())
+	}
+	a, ok := agent.ReadAsking(out)
+	if !ok || a.ID != "4#1" || a.To != "unit:plan" {
+		t.Fatalf("open question %+v %v", a, ok)
+	}
+
+	put("answer.json", `{"ask": "2#3", "answer": "the lexer package"}`)
+	runCLI(t, hook, "checkpoint", "--hook")
+	if !strings.Contains(logged(), "answer --ask 2#3 --answer the lexer package") {
+		t.Fatalf("c4-unit ran %q", logged())
+	}
+
+	t.Setenv("FAKE_STEER", `{"seq":2,"at":"2026-10-20T06:00:00Z","text":"question 2#4 from 2: which encoding?\n(answer with: c4-unit answer --ask 2#4 --answer TEXT, or --cannot WHY)","ask":{"id":"2#4","from":"2"}}`+"\n"+
+		`{"seq":3,"at":"2026-10-20T06:01:00Z","text":"answer to 4#1 from plan: the lexer package","answer":{"id":"4#1","from":"plan"}}`)
+	_, stdout, _ := runCLI(t, hook, "checkpoint", "--hook")
+	var got struct{ Reason string }
+	json.Unmarshal([]byte(stdout), &got)
+	if !strings.Contains(got.Reason, `answer.json`) || !strings.Contains(got.Reason, `"ask": "2#4"`) || strings.Contains(got.Reason, "c4-unit answer") {
+		t.Fatalf("the question's message: %q", got.Reason)
+	}
+	if !strings.Contains(got.Reason, "answer to 4#1 from plan") {
+		t.Fatalf("the answer's message: %q", got.Reason)
+	}
+	if _, ok := agent.ReadAsking(out); ok {
+		t.Fatal("the answered question is still open")
 	}
 }

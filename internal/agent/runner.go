@@ -72,6 +72,9 @@ type Runner struct {
 	// job's repository (C4_BLOCK_REPO). HookCommand is the Stop hook their
 	// sessions run (c4-agent checkpoint --hook, with its environment).
 	BlocksCwd, HookCommand string
+	// UnitBin is c4-unit, for the waits the runner opens for a block
+	// (default c4-unit on the PATH).
+	UnitBin string
 	// UnitsDir holds each running unit's directory (default the agents
 	// home's units/): its output root, control directory and podinfo.
 	UnitsDir string
@@ -96,7 +99,10 @@ type Runner struct {
 	parts map[types.UID]string
 	// fetched are the pods whose resume view was fetched here
 	fetched map[types.UID]bool
-	since   map[types.UID]time.Time
+	// waited are the pods whose block turned its hold for an answer into a
+	// wait on the answerer
+	waited map[types.UID]bool
+	since  map[types.UID]time.Time
 	// asked is when the runner first saw each pod's yield request.
 	asked map[types.UID]time.Time
 	// rising is a higher capacity waiting out RaiseAfter, and since when.
@@ -139,6 +145,7 @@ func (r *Runner) Tick(ctx context.Context) error {
 		r.relays = map[types.UID]*relayState{}
 		r.parts = map[types.UID]string{}
 		r.fetched = map[types.UID]bool{}
+		r.waited = map[types.UID]bool{}
 		r.since = map[types.UID]time.Time{}
 	}
 	if err := r.heartbeat(ctx); err != nil {
@@ -273,7 +280,11 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 			return r.needsInformation(ctx, p, m, msg)
 		}
 		stopped := r.relays[p.UID] != nil && r.relays[p.UID].stopped
+		_, asking := ReadAsking(u.Out)
 		switch note, more := takeMore(u); {
+		case asking && !stopped:
+			// it asked another unit: it keeps its slot for the answer
+			r.logf("%s: asked a question; holds for the answer", m.Name)
 		case stopped:
 			// its session knows the part it noted; the next attempt resumes it
 			_ = note
@@ -288,6 +299,10 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		default:
 			r.logf("%s: its task is done; stopped its session", m.Name)
 		}
+	}
+	// a block holding for the answer to its question
+	if a, ok := ReadAsking(u.Out); ok && !live && m.Block && p.Status.Phase == corev1.PodRunning && r.parts[p.UID] == "" && !(r.relays[p.UID] != nil && r.relays[p.UID].stopped) {
+		return r.holdForAnswer(ctx, p, m, u, a)
 	}
 	// the next part, in this attempt: wake the block's session by its ID
 	if !live && m.Block && p.Status.Phase == corev1.PodRunning && r.parts[p.UID] != "" && !(r.relays[p.UID] != nil && r.relays[p.UID].stopped) {

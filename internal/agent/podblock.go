@@ -46,8 +46,11 @@ type PodBlock struct {
 	// run (c4-agent checkpoint --hook, with this agents home).
 	Claude, HookCommand string
 	// Env reads the pod's environment.
-	Env  func(string) string
-	Logf func(format string, args ...any)
+	Env func(string) string
+	// AskPoll is how often a block holding for an answer looks for it
+	// (default 2 s).
+	AskPoll time.Duration
+	Logf    func(format string, args ...any)
 }
 
 // Exit codes of a block's attempt: done, yielded at a safe point (also a
@@ -142,6 +145,20 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 			b.logf("%s: the farm said stop at this safe point; it yields with its session in its view", m.Name)
 			return PodBlockYielded, nil
 		}
+		if a, ok := ReadAsking(b.Out); ok {
+			prompt, yielded, err := b.holdForAnswer(ctx, p, u, st, m, a)
+			if err != nil {
+				return 1, err
+			}
+			if yielded {
+				b.logf("%s: waits for %s's answer without its slot; it yields with its session in its view", m.Name, a.To)
+				return PodBlockYielded, nil
+			}
+			if err := b.claude(ctx, append(append([]string{"-p", "--resume", m.Session}, flags...), "--", prompt), nil); err != nil {
+				return 1, err
+			}
+			continue
+		}
 		if note, more := takeMore(u); more {
 			b.logf("%s: a part is done; next: %s", m.Name, note)
 			if err := b.claude(ctx, append(append([]string{"-p", "--resume", m.Session}, flags...), "--", partPrompt(note, u)), nil); err != nil {
@@ -173,6 +190,51 @@ func (b *PodBlock) linkLease() error {
 	link := filepath.Join(b.ConfigDir, ".credentials.json")
 	os.Remove(link)
 	return os.Symlink(target, link)
+}
+
+// holdForAnswer keeps the block in its slot until the answer to its
+// question comes, and returns the prompt that wakes it with the answer.
+// Past its hold, a question to a named unit becomes a wait served by that
+// unit (yielded: the farm stops the block there), and one to the job's
+// answerer wakes it to decide within its brief.
+func (b *PodBlock) holdForAnswer(ctx context.Context, p *corev1.Pod, u UnitDirs, st *Store, m *Member, a *Asking) (prompt string, yielded bool, err error) {
+	poll := b.AskPoll
+	if poll <= 0 {
+		poll = 2 * time.Second
+	}
+	hold := askHold(p)
+	b.logf("%s: asked %s; holds up to %s for the answer", m.Name, a.ID, hold)
+	for {
+		if msg, ok := answerFor(u, a.ID); ok {
+			markSteerSeen(u, msg.Seq)
+			ClearAsking(b.Out)
+			b.logf("%s: the answer to %s came", m.Name, a.ID)
+			return answerPrompt(a, msg, u), false, nil
+		}
+		if time.Since(a.At) >= hold {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			return "", false, ctx.Err()
+		case <-time.After(poll):
+		}
+	}
+	if a.To != "" {
+		ref := ""
+		if cp, err := st.Last(m.Name); err == nil && cp != nil {
+			ref = point(m, cp)
+		}
+		stopped, err := openAnswerWait(ctx, b.Env("C4_UNIT_BIN"), u, a, ref)
+		if err != nil {
+			b.logf("%s: could not open a wait on %s: %v", m.Name, a.To, err)
+		}
+		if stopped {
+			return "", true, nil
+		}
+	}
+	ClearAsking(b.Out)
+	return noAnswerPrompt(a, hold), false, nil
 }
 
 // needsInformation ends the attempt for information its brief lacks: the

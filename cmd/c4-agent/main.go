@@ -378,7 +378,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		if err != nil {
 			return err
 		}
-		r.BlocksCwd, r.HookCommand = *blocksCwd, hook
+		r.BlocksCwd, r.HookCommand, r.UnitBin = *blocksCwd, hook, os.Getenv("C4_UNIT_BIN")
 	}
 	if *slotsFile != "" {
 		r.Capacity = func() (int, string) { return readSlotsFile(*slotsFile, *slots) }

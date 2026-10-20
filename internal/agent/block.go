@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -262,8 +263,82 @@ func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	b.WriteString("  - a generator writes its expansion document (version 1) to expand.json there;\n")
 	b.WriteString("  - a review writes its verdict (version 1) to verdict.json there.\n")
 	b.WriteString("- If your task says it has parts, do one part per turn. When a part is done and more remain, write a one-line note of the next part to more in that .c4/ directory and end your turn: the farm then wakes you for it, or stops you there and resumes you later. After the last part, write no note (to withdraw one, write the file empty).\n")
+	b.WriteString(`- If you lack a fact another unit of this job has (the plan's lead, a peer's interface, a reviewer's criterion), ask it: write ask.json in that .c4/ directory, {"to": "unit:<its name>", "ask": "the question, on its own"} (without "to" it goes to the job's answerer), and end your turn. You keep your place and are woken with the answer. Questions to you arrive as messages, with how to answer them.` + "\n")
 	b.WriteString(`- Act on your brief: decide everything it leaves to you, and never ask for confirmation of what it says. If it lacks information only a person could give, do not guess: write needs.json in that .c4/ directory, {"needs": "exactly what is missing", "why": "why the brief does not settle it"}, and end your turn. That stops this block as an error the pipeline must fix; once the information is supplied, you resume with it.` + "\n\n")
 	return b.String()
+}
+
+// holdForAnswer keeps a block that asked another unit a question in its
+// slot until the answer comes, and wakes its session with it. Past its hold
+// (askHold), a question to a named unit becomes a wait served by that unit
+// (c4-unit wait --server unit:<name>): the farm stops the block and gives
+// its slot up, and it resumes with the answer as its decision. A question
+// to the job's answerer, with no unit to name, wakes the block instead to
+// decide within its brief.
+func (r *Runner) holdForAnswer(ctx context.Context, p *corev1.Pod, m *Member, u UnitDirs, a *Asking) error {
+	if msg, ok := answerFor(u, a.ID); ok {
+		markSteerSeen(u, msg.Seq)
+		ClearAsking(u.Out)
+		if _, err := r.Harness.Resume(ctx, m.Name, answerPrompt(a, msg, u)); err != nil {
+			return err
+		}
+		r.since[p.UID] = r.now()
+		r.logf("%s: woke with the answer to %s", m.Name, a.ID)
+		return nil
+	}
+	if r.now().Sub(a.At) < askHold(p) || r.waited[p.UID] {
+		return nil
+	}
+	if a.To != "" {
+		ref := ""
+		if cp, err := r.Harness.Store.Last(m.Name); err == nil && cp != nil {
+			ref = point(m, cp)
+		}
+		if stopped, err := openAnswerWait(ctx, r.UnitBin, u, a, ref); err == nil && stopped {
+			r.waited[p.UID] = true
+			r.logf("%s: no answer to %s within %s; waits for %s without its slot", m.Name, a.ID, askHold(p), a.To)
+			return nil
+		} else if err != nil {
+			r.logf("%s: could not open a wait on %s: %v", m.Name, a.To, err)
+		}
+	}
+	// no wait to give the slot up for: the block decides within its brief
+	ClearAsking(u.Out)
+	if _, err := r.Harness.Resume(ctx, m.Name, noAnswerPrompt(a, askHold(p))); err != nil {
+		return err
+	}
+	r.since[p.UID] = r.now()
+	r.logf("%s: no answer to %s within %s; woke it to decide", m.Name, a.ID, askHold(p))
+	return nil
+}
+
+// noAnswerPrompt wakes a block whose question went unanswered.
+func noAnswerPrompt(a *Asking, hold time.Duration) string {
+	return fmt.Sprintf("No answer to your question %s came within %s. Decide within your brief, or if only a person could give it, report it missing, and carry on with your task.", a.ID, hold)
+}
+
+// openAnswerWait opens a wait served by the unit a block asked, at a safe
+// point (c4-unit wait), in the block's unit directory. stopped reports that
+// the farm opened it and stops the block there.
+func openAnswerWait(ctx context.Context, bin string, u UnitDirs, a *Asking, ref string) (stopped bool, err error) {
+	if bin == "" {
+		bin = "c4-unit"
+	}
+	args := []string{"wait", "--server", a.To, "--ask", "the answer to question " + a.ID, "--wait", "8s"}
+	if ref != "" {
+		args = append(args, "--checkpoint", ref)
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Env = append(os.Environ(), "C4_OUTPUT="+u.Out, "C4_CONTROL="+u.Control, "C4_PODINFO="+u.PodInfo)
+	err = cmd.Run()
+	var exit *exec.ExitError
+	switch {
+	case errors.As(err, &exit) && exit.ExitCode() == 10:
+		return true, nil // the farm stops it there: its yield follows
+	case errors.As(err, &exit):
+		return false, nil // refused, or no decision in time
+	}
+	return false, err
 }
 
 // needsInformation stops a block whose brief lacks information only a
@@ -353,9 +428,14 @@ func decisionText(p *corev1.Pod, replyDir string) string {
 	if who == "" {
 		who = "a person"
 	}
-	fmt.Fprintf(&b, "%s answered the question you asked: %s.", who, d.Do)
-	if d.Note != "" {
-		fmt.Fprintf(&b, " Their note: %s", d.Note)
+	if d.Do == "answer" {
+		// a wait served by another unit, decided by its answer
+		fmt.Fprintf(&b, "%s answered your question: %s", who, d.Note)
+	} else {
+		fmt.Fprintf(&b, "%s answered the question you asked: %s.", who, d.Do)
+		if d.Note != "" {
+			fmt.Fprintf(&b, " Their note: %s", d.Note)
+		}
 	}
 	if d.View != "" && replyDir != "" {
 		fmt.Fprintf(&b, " Their reply's files are in %s (read-only).", replyDir)

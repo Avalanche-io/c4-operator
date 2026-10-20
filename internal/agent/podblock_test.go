@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakePrint is claude in print mode as a block pod runs it: it appends a
@@ -27,6 +28,10 @@ mkdir -p "$(dirname "$tr")"
 if [ "$mode" = resume ] && [ ! -f "$tr" ]; then echo "No conversation found with session ID: $sid" >&2; exit 1; fi
 echo '{"type":"assistant","message":{"id":"m","model":"opus","content":[{"type":"text","text":"a turn"}]}}' >> "$tr"
 echo "$mode $sid" >> "$FAKE_LOG"
+if [ -n "$FAKE_PROMPTS" ]; then printf '%s\n----\n' "$1" >> "$FAKE_PROMPTS"; fi
+if [ -n "$FAKE_ASK" ] && [ "$(wc -l < "$FAKE_LOG")" -eq 1 ]; then
+  printf '{"id":"0#1","to":"%s","at":"%s"}\n' "$FAKE_ASK_TO" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$C4_OUTPUT/.c4/asking"; exit 0
+fi
 if [ -n "$FAKE_NEEDS" ]; then echo "$FAKE_NEEDS" > "$C4_OUTPUT/.c4/needs.json"; exit 0; fi
 if [ "$(wc -l < "$FAKE_LOG")" -eq 1 ]; then echo "part 2" > "$C4_OUTPUT/.c4/more"; else echo "done" > "$C4_OUTPUT/.c4/done"; fi
 `
@@ -160,4 +165,57 @@ func TestPodBlockNeedsInformation(t *testing.T) {
 	if _, err := ReadSessionInfo(out); err != nil {
 		t.Fatalf("the session is not in its view: %v", err)
 	}
+}
+
+// A block in a pod that asked another unit a question keeps its slot until
+// the answer comes, then is woken with it; with no answer within its hold,
+// a question to the job's answerer wakes it to decide within its brief.
+func TestPodBlockHoldsForAnswer(t *testing.T) {
+	run := func(t *testing.T, to, hold string, answer bool) (int, string, UnitDirs) {
+		bin := filepath.Join(t.TempDir(), "claude")
+		if err := os.WriteFile(bin, []byte(fakePrint), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		cwd, out, cfg, control := t.TempDir(), t.TempDir(), t.TempDir(), t.TempDir()
+		prompts := filepath.Join(t.TempDir(), "prompts")
+		t.Setenv("FAKE_SLUG", ProjectSlug(cwd))
+		t.Setenv("FAKE_LOG", filepath.Join(t.TempDir(), "calls"))
+		t.Setenv("FAKE_PROMPTS", prompts)
+		t.Setenv("FAKE_ASK", "1")
+		t.Setenv("FAKE_ASK_TO", to)
+		t.Setenv("C4_ASK_HOLD", hold)
+		t.Setenv("C4_JOB", "port")
+		t.Setenv("C4_UNIT_NAME", "notes")
+		t.Setenv("C4_OUTPUT", out)
+		t.Setenv("C4_CONTROL", control)
+		if answer {
+			// the answer is there by the time the block holds for it
+			os.WriteFile(filepath.Join(control, "steer"), []byte(`[{"seq":1,"at":"2026-10-20T06:00:00Z","text":"answer to 0#1 from plan: the lexer package","answer":{"id":"0#1","from":"plan"}}]`), 0o644)
+		}
+		b := &PodBlock{Out: out, ConfigDir: cfg, Cwd: cwd, Claude: bin, HookCommand: "true", Env: os.Getenv, Logf: t.Logf, AskPoll: 50 * time.Millisecond}
+		code, err := b.Run(context.Background())
+		if err != nil {
+			t.Fatal(err)
+		}
+		got, _ := os.ReadFile(prompts)
+		return code, string(got), UnitDirs{Out: out, Control: control}
+	}
+	t.Run("answered", func(t *testing.T) {
+		code, prompts, u := run(t, "unit:plan", "1m", true)
+		if code != PodBlockDone || !strings.Contains(prompts, "was answered by plan:\nanswer to 0#1 from plan: the lexer package") {
+			t.Fatalf("exit %d, prompts:\n%s", code, prompts)
+		}
+		if _, ok := ReadAsking(u.Out); ok {
+			t.Fatal("the answered question is still open")
+		}
+		if b, _ := os.ReadFile(filepath.Join(u.Out, ".c4", "steer-seen")); strings.TrimSpace(string(b)) != "1" {
+			t.Fatalf("the answer is not marked seen: %q", b)
+		}
+	})
+	t.Run("unanswered", func(t *testing.T) {
+		code, prompts, _ := run(t, "", "300ms", false)
+		if code != PodBlockDone || !strings.Contains(prompts, "No answer to your question 0#1 came within 300ms") {
+			t.Fatalf("exit %d, prompts:\n%s", code, prompts)
+		}
+	})
 }

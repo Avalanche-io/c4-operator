@@ -319,7 +319,12 @@ renders the light it was given.
   - **It is not retried.** It shows as an incident, with its checkpoint and its session's view kept.
   - **When someone supplies the information** (HUD or MCP `c4_supply`), the unit runs again and resumes the same session. The prompt says what it reported missing (`$C4_NEEDED`) and what was supplied (`$C4_SUPPLIED`).
 - **A person who decides on purpose,** such as a creative approval gate, is a step in the job's graph: a wait or a review that a person decides. The block resumed after it hears the decision (`$C4_DECISION`), with the reply's files at `$C4_REPLY`, or fetched into the host unit's `reply/`.
-- **Coming:** questions between agents. A block will ask its lead, a peer or a reviewer for a fact it lacks, keeping its slot while an agent answers. See proposals/agent-jobs ASKS.md.
+- **Questions between agents.** A block that lacks a fact another unit of its job has asks it. It writes `.c4/ask.json` (`{"to": "unit:<name>", "ask": "..."}`; without `to`, the job's `answerer`) and ends its turn.
+  - **Asking:** the Stop hook puts the question to the farm (`c4-unit ask`) and records it open in `.c4/asking`.
+  - **Holding:** the block keeps its slot. The runner, or `block-pod`, holds it idle and wakes its session with the answer, marking it read, for up to `C4_ASK_HOLD` (default 10 minutes).
+  - **A slow answer:** past the hold, a question to a named unit becomes a wait served by that unit (`c4-unit wait --server unit:<name>`). The block gives up its slot and resumes with the answer as its decision. A question to the job's answerer, or one whose wait is refused, wakes the block instead to decide within its brief.
+  - **Answering:** a question to a block arrives as a message, with how to answer. The block writes `.c4/answer.json` (`{"ask": "<id>", "answer": "..."}`, or `"cannot": "why"`), and the hook gives it to the farm (`c4-unit answer`).
+  - The design is in proposals/agent-jobs ASKS.md.
 
 ### Steering a running block
 

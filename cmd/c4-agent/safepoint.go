@@ -68,6 +68,12 @@ func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agen
 	ref := safepointRef(input, cp)
 	ctx, cancel := context.WithTimeout(ctx, 2*safepointWait)
 	defer cancel()
+	// the turn's answer to a question it was asked, and its own question
+	// to another unit, go to the farm before the safe point
+	if out != "" {
+		hookAnswer(ctx, bin, env, out, stderr)
+		hookAsk(ctx, bin, env, out, stderr)
+	}
 	args := []string{"safepoint"}
 	if ref != "" {
 		args = append(args, "--checkpoint", ref)
@@ -87,29 +93,156 @@ func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agen
 	case err != nil:
 		fmt.Fprintln(stderr, "c4-agent hook: c4-unit safepoint:", err)
 	}
-	hookSteer(ctx, bin, env, stdout, stderr)
+	hookSteer(ctx, bin, env, out, stdout, stderr)
 }
 
-// hookSteer delivers what people sent the unit while it worked (c4-unit
-// steer: the messages it has not seen, marked seen as they are read) at
-// the end of a turn that goes on: the hook keeps the session from stopping
-// and gives it the messages, so it takes them into account now rather
-// than when it next thinks to look. A turn the farm stops leaves them for
-// the attempt that resumes it.
-func hookSteer(ctx context.Context, bin string, env []string, stdout, stderr io.Writer) {
-	var msgs strings.Builder
-	cmd := exec.CommandContext(ctx, bin, "steer")
-	cmd.Stdout, cmd.Stderr = &msgs, stderr
+// hookAsk puts a turn's question to another unit (.c4/ask.json:
+// {"to": "unit:<name>", "ask": "..."}; to defaults to the job's answerer)
+// to the farm with c4-unit ask, and records it open (.c4/asking), so the
+// runner holds the block for the answer. A question that cannot be put
+// becomes the block's next-part note: it decides within its brief.
+func hookAsk(ctx context.Context, bin string, env []string, out string, stderr io.Writer) {
+	var q struct {
+		To  string `json:"to,omitempty"`
+		Ask string `json:"ask"`
+	}
+	ok, err := takeTurnFile(out, "ask.json", &q)
+	if !ok {
+		return
+	}
+	if err == nil && strings.TrimSpace(q.Ask) == "" {
+		err = errors.New("ask.json: no question in ask")
+	}
+	if err == nil && q.To != "" && !strings.HasPrefix(q.To, "unit:") {
+		err = fmt.Errorf("ask.json: to %q is not unit:<name>", q.To)
+	}
+	var id strings.Builder
+	if err == nil {
+		args := []string{"ask", "--ask", strings.TrimSpace(q.Ask)}
+		if q.To != "" {
+			args = append(args, "--to", q.To)
+		}
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Stdout, cmd.Stderr, cmd.Env = &id, stderr, env
+		if err = cmd.Run(); err == nil {
+			err = agent.WriteAsking(out, agent.Asking{ID: strings.TrimSpace(id.String()), To: q.To, At: time.Now().UTC()})
+		}
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "c4-agent hook: the question was not put:", err)
+		note := "Your question could not be put (" + err.Error() + "). Decide within your brief and carry on with your task."
+		os.WriteFile(filepath.Join(out, ".c4", "more"), []byte(note+"\n"), 0o644)
+	}
+}
+
+// hookAnswer gives the farm a turn's answer to a question it was asked
+// (.c4/answer.json: {"ask": "<id>", "answer": "..."} or {"ask": "<id>",
+// "cannot": "why"}), with c4-unit answer.
+func hookAnswer(ctx context.Context, bin string, env []string, out string, stderr io.Writer) {
+	var a struct {
+		Ask    string `json:"ask"`
+		Answer string `json:"answer,omitempty"`
+		Cannot string `json:"cannot,omitempty"`
+	}
+	ok, err := takeTurnFile(out, "answer.json", &a)
+	if !ok {
+		return
+	}
+	if err == nil && (a.Ask == "" || (a.Answer == "") == (a.Cannot == "")) {
+		err = errors.New(`answer.json: needs "ask" and one of "answer" or "cannot"`)
+	}
+	if err == nil {
+		args := []string{"answer", "--ask", a.Ask}
+		if a.Answer != "" {
+			args = append(args, "--answer", a.Answer)
+		} else {
+			args = append(args, "--cannot", a.Cannot)
+		}
+		cmd := exec.CommandContext(ctx, bin, args...)
+		cmd.Stderr, cmd.Env = stderr, env
+		err = cmd.Run()
+	}
+	if err != nil {
+		fmt.Fprintln(stderr, "c4-agent hook: the answer was not given:", err)
+	}
+}
+
+// takeTurnFile reads and consumes a document the turn left in out/.c4/,
+// strictly; ok is false when there is none.
+func takeTurnFile(out, name string, v any) (ok bool, err error) {
+	path := filepath.Join(out, ".c4", name)
+	b, err := os.ReadFile(path)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return true, err
+	}
+	os.Remove(path)
+	dec := json.NewDecoder(strings.NewReader(string(b)))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(v); err != nil {
+		return true, fmt.Errorf("%s: %v", name, err)
+	}
+	return true, nil
+}
+
+// hookSteer delivers what was sent to the unit while it worked (c4-unit
+// steer --json: the messages it has not seen, marked seen as they are read)
+// at the end of a turn that goes on: the hook keeps the session from
+// stopping and gives it the messages, so it takes them into account now. A
+// person's message is passed on; a question from another unit comes with
+// how to answer it; an answer to the block's own open question closes it.
+// A turn the farm stops leaves them for the attempt that resumes it.
+func hookSteer(ctx context.Context, bin string, env []string, out string, stdout, stderr io.Writer) {
+	var raw strings.Builder
+	cmd := exec.CommandContext(ctx, bin, "steer", "--json")
+	cmd.Stdout, cmd.Stderr = &raw, stderr
 	cmd.Env = env
-	if cmd.Run() != nil || strings.TrimSpace(msgs.String()) == "" {
+	if cmd.Run() != nil || strings.TrimSpace(raw.String()) == "" {
 		return // exit 1: nothing new
 	}
-	out, _ := json.Marshal(map[string]any{
+	var lines []string
+	for _, l := range strings.Split(strings.TrimSpace(raw.String()), "\n") {
+		var m agent.SteerMessage
+		if json.Unmarshal([]byte(l), &m) != nil {
+			continue
+		}
+		lines = append(lines, steerLine(m, out))
+	}
+	if len(lines) == 0 {
+		return
+	}
+	reason, _ := json.Marshal(map[string]any{
 		"decision": "block",
-		"reason": "Messages for you arrived while you worked:\n" + strings.TrimSpace(msgs.String()) +
+		"reason": "Messages for you arrived while you worked:\n" + strings.Join(lines, "\n") +
 			"\nTake them into account and carry on with your task, then end your turn as before.",
 	})
-	fmt.Fprintln(stdout, string(out))
+	fmt.Fprintln(stdout, string(reason))
+}
+
+// steerLine is one message as the session reads it.
+func steerLine(m agent.SteerMessage, out string) string {
+	text := m.Text
+	switch {
+	case m.Ask != nil:
+		// the farm's text says how to answer from a shell; a block answers
+		// with a file
+		if i := strings.Index(text, "\n(answer with:"); i >= 0 {
+			text = text[:i]
+		}
+		return fmt.Sprintf(`- %s. Answer it from what you know: write answer.json in %s/.c4/, {"ask": %q, "answer": "..."}, or {"ask": %q, "cannot": "why"} if you cannot.`, text, out, m.Ask.ID, m.Ask.ID)
+	case m.Answer != nil:
+		if a, ok := agent.ReadAsking(out); ok && a.ID == m.Answer.ID {
+			agent.ClearAsking(out)
+		}
+		return "- " + text
+	}
+	who := m.Actor
+	if who == "" {
+		who = "someone"
+	}
+	return fmt.Sprintf("- %s: %s", who, text)
 }
 
 // safepointRef names the turn the safe point is at: the member's checkpoint
