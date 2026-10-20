@@ -1,9 +1,12 @@
 package schema
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"sigs.k8s.io/yaml"
 )
 
 func TestChunkAll(t *testing.T) {
@@ -55,5 +58,46 @@ func TestRepositoryTools(t *testing.T) {
 		if want := filepath.Base(filepath.Dir(f)); tl.Name != want {
 			t.Errorf("%s names itself %q; a tool's folder is its name", f, tl.Name)
 		}
+	}
+}
+
+// TestSlice1 keeps fixtures/submit/slice1.yaml whole: every submission it
+// refuses is a passing fixture, every refusal has a path, a message and a
+// fix, and at least one passing submission is left for slice 1 to run.
+func TestSlice1(t *testing.T) {
+	b, err := fs.ReadFile(Fixtures(), "submit/slice1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var f struct {
+		Refusals map[string][]Error `json:"refusals"`
+	}
+	if err := yaml.UnmarshalStrict(b, &f); err != nil {
+		t.Fatal(err)
+	}
+	pass := map[string]bool{}
+	for _, c := range cases(t) {
+		if c.Format == "submit" && c.Pass {
+			pass[c.Name] = true
+		}
+	}
+	for name, errs := range f.Refusals {
+		if !pass[name] {
+			t.Errorf("slice1.yaml refuses %q, which is not a passing submission", name)
+		}
+		for _, e := range errs {
+			if e.Path == "" || e.Message == "" || e.Fix == "" {
+				t.Errorf("%s: a refusal needs a path, a message and a fix: %+v", name, e)
+			}
+		}
+	}
+	runs := 0
+	for name := range pass {
+		if f.Refusals[name] == nil {
+			runs++
+		}
+	}
+	if runs == 0 {
+		t.Error("slice 1 runs none of the passing submissions")
 	}
 }

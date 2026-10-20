@@ -1,0 +1,11 @@
+# The tool design's section 7.3, as a submission. Slice 1 runs it.
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: "2026-10-21"
+tree: .
+jobs:
+  depth:
+    tool: depth
+    frames: 1001-1096
+    with: {plates: plates/sm0140.$F4.exr}

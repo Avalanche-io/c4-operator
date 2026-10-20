@@ -1,0 +1,185 @@
+# What slice 1 of the farm cannot lower yet: for each passing submission
+# it must refuse, the exact errors, sorted by path. A submission not listed
+# here is one slice 1 runs. Each refusal leaves this file when the operator
+# change it waits on lands.
+refusals:
+  after-all:
+  - path: jobs.comp.tool
+    message: nuke-comp needs licences (foundry/nuke_r), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  after-default:
+  - path: jobs.comp.tool
+    message: nuke-comp needs licences (foundry/nuke_r), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  after-map:
+  - path: jobs.comp.after
+    message: a job that follows two jobs cannot run on this farm yet
+    fix: follow one job, and have that one follow the other
+  - path: jobs.comp.tool
+    message: nuke-comp needs licences (foundry/nuke_r), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  - path: jobs.fx.tool
+    message: pyro-sim needs licences (sesi/hbatch), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  after-previous:
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  - path: jobs.sim.tool
+    message: pyro-sim needs licences (sesi/hbatch), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  answers-lead:
+  - path: jobs.port.answers
+    message: answering agents cannot run on this farm yet
+    fix: 'remove answers: for now'
+  - path: jobs.port.plan
+    message: this farm cannot run plans yet
+    fix: submit the plan's blocks as jobs for now
+  - path: tree
+    message: git trees cannot be submitted on this farm yet
+    fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
+  answers-tool:
+  - path: jobs.port.answers
+    message: answering agents cannot run on this farm yet
+    fix: 'remove answers: for now'
+  - path: jobs.port.plan
+    message: this farm cannot run plans yet
+    fix: submit the plan's blocks as jobs for now
+  - path: tree
+    message: git trees cannot be submitted on this farm yet
+    fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
+  answers-unit:
+  - path: jobs.port.answers
+    message: answering agents cannot run on this farm yet
+    fix: 'remove answers: for now'
+  - path: jobs.port.plan
+    message: this farm cannot run plans yet
+    fix: submit the plan's blocks as jobs for now
+  - path: tree
+    message: git trees cannot be submitted on this farm yet
+    fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
+  approve-end:
+  - path: jobs.light.approve
+    message: approvals cannot be part of a job on this farm yet
+    fix: 'remove approve: for now'
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  approve-preview:
+  - path: jobs.light.approve
+    message: approvals cannot be part of a job on this farm yet
+    fix: 'remove approve: for now'
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  check:
+  - path: jobs.light.check
+    message: checks cannot run inside a job on this farm yet
+    fix: 'remove check: for now'
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  comp:
+  - path: jobs.comp.approve
+    message: approvals cannot be part of a job on this farm yet
+    fix: 'remove approve: for now'
+  - path: jobs.comp.tool
+    message: nuke-comp needs licences (foundry/nuke_r), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  expansion-uses:
+  - path: jobs.light.tool
+    message: this farm cannot run generator tools yet
+    fix: use a frames or once tool for now
+  - path: jobs.light.uses
+    message: a generator's children cannot run on this farm yet
+    fix: 'remove uses: for now'
+  glance:
+  - path: jobs.comp.approve
+    message: approvals cannot be part of a job on this farm yet
+    fix: 'remove approve: for now'
+  - path: jobs.comp.tool
+    message: nuke-comp needs licences (foundry/nuke_r), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  light-expansion-agent:
+  - path: jobs.light.approve
+    message: approvals cannot be part of a job on this farm yet
+    fix: 'remove approve: for now'
+  - path: jobs.light.check
+    message: checks cannot run inside a job on this farm yet
+    fix: 'remove check: for now'
+  - path: jobs.light.tool
+    message: this farm cannot run generator tools yet
+    fix: use a frames or once tool for now
+  - path: jobs.light.uses
+    message: a generator's children cannot run on this farm yet
+    fix: 'remove uses: for now'
+  light-expansion:
+  - path: jobs.light.approve
+    message: approvals cannot be part of a job on this farm yet
+    fix: 'remove approve: for now'
+  - path: jobs.light.check
+    message: checks cannot run inside a job on this farm yet
+    fix: 'remove check: for now'
+  - path: jobs.light.tool
+    message: this farm cannot run generator tools yet
+    fix: use a frames or once tool for now
+  - path: jobs.light.uses
+    message: a generator's children cannot run on this farm yet
+    fix: 'remove uses: for now'
+  over-combine:
+  - path: jobs.wedge.over
+    message: units over more than frames cannot run on this farm yet
+    fix: 'remove over: for now'
+  - path: jobs.wedge.tool
+    message: pyro-sim needs licences (sesi/hbatch), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  plan-each:
+  - path: jobs.port.plan
+    message: this farm cannot run plans yet
+    fix: submit the plan's blocks as jobs for now
+  - path: tree
+    message: git trees cannot be submitted on this farm yet
+    fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
+  port:
+  - path: jobs.port.answers
+    message: answering agents cannot run on this farm yet
+    fix: 'remove answers: for now'
+  - path: jobs.port.plan
+    message: this farm cannot run plans yet
+    fix: submit the plan's blocks as jobs for now
+  - path: jobs.port.uses
+    message: a generator's children cannot run on this farm yet
+    fix: 'remove uses: for now'
+  - path: tree
+    message: git trees cannot be submitted on this farm yet
+    fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
+  small:
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  wait-clock:
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  - path: jobs.light.wait
+    message: waits cannot be part of a job on this farm yet
+    fix: 'remove wait: for now'
+  wait-party:
+  - path: jobs.light.tool
+    message: karma needs licences (sesi/karma), which this farm cannot count yet
+    fix: use a version of the tool that declares none for now
+  - path: jobs.light.wait
+    message: waits cannot be part of a job on this farm yet
+    fix: 'remove wait: for now'

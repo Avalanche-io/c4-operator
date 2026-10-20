@@ -1,0 +1,16 @@
+# Proxies, then a review movie of them: a chain slice 1 runs.
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: dailies
+tree: .
+jobs:
+  proxies:
+    tool: proxies
+    frames: 1001-1048
+    with: {plates: plates/sm0140.$F4.exr}
+  movie:
+    tool: transcode
+    after: proxies
+    frames: 1001-1048
+    with: {plates: plates/sm0140.$F4.exr, codec: prores-422hq}

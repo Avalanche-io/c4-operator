@@ -1,0 +1,11 @@
+# The file the tool design's section 7.1 Submit panel sends. Slice 1 runs it.
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: dailies
+tree: .
+jobs:
+  proxies:
+    tool: proxies
+    frames: 1001-1048
+    with: {plates: plates/sm0140.$F4.exr}

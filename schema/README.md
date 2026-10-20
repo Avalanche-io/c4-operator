@@ -18,6 +18,7 @@ wraps a tool writes Kubernetes objects:
 | `tool-1.schema.json`         | JSON Schema 2020-12 for a tool, served as `GET /schema/tool`                                 |
 | `fixtures/farm.yaml`         | the farm the fixtures are checked against: projects, milestones, people, roles, tools        |
 | `fixtures/submit/pass/`      | every worked submission in the format's design, and every fragment wrapped whole             |
+| `fixtures/submit/slice1.yaml` | the passing submissions slice 1 cannot lower yet, each with its exact refusals; the rest it runs |
 | `fixtures/submit/fail/`      | submissions that must be refused, each with `<case>.expect.json`                             |
 | `fixtures/tool/pass/<tool>/` | every worked tool, the snippets wrapped whole, and the tools the submissions name            |
 | `fixtures/tool/fail/`        | tools that must be refused, each with `<case>.expect.json`                                   |
