@@ -24,6 +24,7 @@ class Renderable:
     reads: List[str] = field(default_factory=list)     # names of renderables whose outputs it reads
     enabled: bool = True               # ticked by default
     note: str = ""                     # why it is disabled, or anything the panel should say
+    key: str = ""                      # the name its job key is made from, when not ``name`` (mantra1 for /out/mantra1)
 
 
 @dataclass
@@ -45,6 +46,9 @@ class Host:
     stage = "render"
     #: what a scene file is called in messages
     scene_word = "scene"
+    #: True when ``save()`` writes the scene for every submission (a LOP
+    #: writing its stage to USD), so "unsaved changes" means nothing
+    writes_scene = False
 
     def __init__(self, env: Optional[Mapping[str, str]] = None):
         self.env = env if env is not None else os.environ

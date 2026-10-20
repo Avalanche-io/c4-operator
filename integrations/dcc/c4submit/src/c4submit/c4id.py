@@ -3,7 +3,7 @@ padded to 88 characters and prefixed "c4". The same computation as the Go
 library's c4.Identify and ID.String."""
 
 import hashlib
-from typing import BinaryIO, Union
+from typing import BinaryIO, Callable, Optional, Union
 
 _CHARSET = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz"
 _LEN = 90
@@ -39,10 +39,20 @@ def identify(data: Union[bytes, str, BinaryIO]) -> str:
     return encode(h.digest())
 
 
-def identify_file(path: str) -> str:
-    """The C4 ID of a file's bytes, read in chunks."""
+def identify_file(path: str, cancelled: Optional[Callable[[], bool]] = None) -> str:
+    """The C4 ID of a file's bytes, read in chunks. ``cancelled`` is asked
+    between chunks; when it says so, ``Interrupted`` is raised."""
+    h = hashlib.sha512()
     with open(path, "rb") as f:
-        return identify(f)
+        for chunk in iter(lambda: f.read(_CHUNK), b""):
+            if cancelled and cancelled():
+                raise Interrupted(path)
+            h.update(chunk)
+    return encode(h.digest())
+
+
+class Interrupted(Exception):
+    """Hashing stopped part way, because the caller cancelled."""
 
 
 def is_id(s: str) -> bool:

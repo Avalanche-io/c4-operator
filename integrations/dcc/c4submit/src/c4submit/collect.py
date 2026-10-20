@@ -17,7 +17,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Tuple
 
 from c4submit import frames as framelib
 from c4submit import seq
-from c4submit.c4id import identify_file
+from c4submit.c4id import Interrupted, identify_file
 from c4submit.host import Dependency
 from c4submit.paths import norm, relative
 from c4submit.tree import Tree, UnsupportedName
@@ -186,7 +186,10 @@ def identify(col: Collection, cache: Optional[IDCache] = None, progress: Optiona
             mtime = int(st.st_mtime_ns)
             cid = cache.get(f.abs, f.size, mtime)
             if not cid:
-                cid = identify_file(f.abs)
+                try:
+                    cid = identify_file(f.abs, cancelled)
+                except Interrupted:
+                    raise Cancelled() from None
                 cache.put(f.abs, f.size, mtime, cid)
             f.id = cid
             return f, None

@@ -206,7 +206,7 @@ class Draft:
         several = len(picked) > 1
         out: Dict[str, Optional[Renderable]] = {}
         for r in picked:
-            k = submission.job_key(self.stage, r.name, several)
+            k = submission.job_key(self.stage, r.key or r.name, several)
             base, n = k, 2
             while k in out:
                 sfx = f"-{n}"
@@ -236,6 +236,9 @@ def prepare(draft: Draft) -> Prepared:
             problems.append(Problem("error", "scene", f"could not save the {host.scene_word}: {e}",
                                     f"save it yourself; the farm reads the saved {host.scene_word}"))
         draft.refresh()
+    elif host.writes_scene and not draft.save_scene:
+        problems.append(Problem("warning", "scene", f"the {host.scene_word} is written for each submission; with that off, "
+                                "the farm renders the last one written"))
     elif host.is_modified():
         problems.append(Problem("warning", "scene", f"the {host.scene_word} has unsaved changes; the farm renders the saved file",
                                 f"save the {host.scene_word} to render what you see"))

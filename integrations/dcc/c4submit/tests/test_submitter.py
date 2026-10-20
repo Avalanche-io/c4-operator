@@ -188,7 +188,7 @@ def test_id_cache_skips_unchanged_files(tmp_path, farm, monkeypatch):
     s.check(prepare(draft_for(host, farm)))
     reads = []
     real = collect.identify_file
-    monkeypatch.setattr(collect, "identify_file", lambda p: reads.append(p) or real(p))
+    monkeypatch.setattr(collect, "identify_file", lambda p, c=None: reads.append(p) or real(p, c))
     write(os.path.join(str(tmp_path), "luts", "show.cube"), b"LUT v2, longer")
     s2 = Submitter(farm, cache=collect.IDCache(str(tmp_path / "cache.json")))
     s2.check(prepare(draft_for(host, farm)))
@@ -275,3 +275,27 @@ def test_submit_refuses_a_stale_check(tmp_path, farm, nocache):
     write(host.scene_file(), b"# nuke script, saved again\n")
     assert c.stale()
     assert not [ln for ln in summary.lines(s.check(prepare(d)), errors=False) if ln.level == "error"]
+
+
+def test_a_host_names_its_jobs(tmp_path, farm):
+    host = comp_scene(tmp_path)
+    host._renderables = [Renderable("/out/mantra1", key="mantra1"), Renderable("/out/mantra2", key="mantra2")]
+    assert list(draft_for(host, farm).keys()) == ["comp-mantra1", "comp-mantra2"]
+
+
+def test_a_scene_written_for_every_submission(tmp_path, farm):
+    host = comp_scene(tmp_path, modified=True)
+    host.writes_scene = True
+    d = draft_for(host, farm)
+    d.save_scene = False
+    msgs = [pr.message for pr in prepare(d).problems]
+    assert msgs == ["the script is written for each submission; with that off, the farm renders the last one written"]
+
+
+def test_cancel_inside_a_big_file(tmp_path):
+    from c4submit.c4id import Interrupted, identify_file
+    big = write(str(tmp_path / "big.exr"), b"x" * (3 << 20))
+    asked = []
+    with pytest.raises(Interrupted):
+        identify_file(big, lambda: asked.append(1) or len(asked) > 1)
+    assert len(asked) == 2, "asked between chunks, and stopped at the second"
