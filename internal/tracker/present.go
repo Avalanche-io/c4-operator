@@ -95,6 +95,15 @@ type ReviewFinder interface {
 	FindReviews(ctx context.Context, links []LinkState) (map[string]Ref, error)
 }
 
+// Verdicter gives an adapter's own default C4 decision for one of its
+// native words where the Tracker's verdictsIn names none ("" for no
+// decision): Kitsu reads it from the status's flags (is_done, is_retake)
+// rather than from names a studio may change. Adapters whose defaults are
+// the loop's need not implement it.
+type Verdicter interface {
+	Verdict(native string) string
+}
+
 // WriteKey is the idempotency key of a write: the link, the field and
 // what it writes. A crash between a write and the loop remembering it is
 // found by the adapter's probe under the same key.

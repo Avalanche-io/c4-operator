@@ -1125,8 +1125,9 @@ func reworking(l *c4v1.TrackerLink) bool {
 // --- decisions in ---
 
 // DefaultVerdicts maps GitHub's decisions to C4's, for a decision the
-// Tracker's verdictsIn does not name (docs/c4-sync.md).
-// A COMMENTED review decides nothing.
+// Tracker's verdictsIn does not name (docs/c4-sync.md), by adapters with no
+// defaults of their own (tracker.Verdicter). A COMMENTED review decides
+// nothing.
 var DefaultVerdicts = map[string]string{
 	"APPROVED":          "approve",
 	"CHANGES_REQUESTED": "rework",
@@ -1135,9 +1136,14 @@ var DefaultVerdicts = map[string]string{
 	"action:accept":     "accept",
 }
 
-func verdictFor(t *c4v1.Tracker, native string) string {
+// verdictFor is the C4 decision for a tracker's native word: the Tracker's
+// verdictsIn, else the adapter's own default, else DefaultVerdicts.
+func verdictFor(t *c4v1.Tracker, a tracker.Adapter, native string) string {
 	if v, ok := t.Spec.VerdictsIn[native]; ok {
 		return v
+	}
+	if vr, ok := a.(tracker.Verdicter); ok {
+		return vr.Verdict(native)
 	}
 	return DefaultVerdicts[native]
 }
@@ -1181,7 +1187,7 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 	var pick *tracker.Decision
 	for i := range cands {
 		d := &cands[i]
-		if done[d.Source.String()] || verdictFor(t, d.Native) == "" || d.At.Before(w.Since.Add(-time.Second)) {
+		if done[d.Source.String()] || verdictFor(t, c.adapter, d.Native) == "" || d.At.Before(w.Since.Add(-time.Second)) {
 			continue
 		}
 		if pick == nil || d.At.After(pick.At) {
@@ -1193,7 +1199,7 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 	}
 	rec := c4v1.TrackerDecision{Source: pick.Source.String(), By: pick.By.ID, Unit: unitRef(w), Job: jr.Name,
 		At: metav1.NewTime(pick.At), Note: clip(pick.Body, 4096)}
-	do := verdictFor(t, pick.Native)
+	do := verdictFor(t, c.adapter, pick.Native)
 	if w.Escalated && do == "approve" {
 		do = "accept" // an escalated unit is accepted, not approved
 	}
