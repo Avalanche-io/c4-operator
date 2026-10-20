@@ -23,12 +23,12 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "chunk": {"type": "integer", "minimum": 1},
+        "chunk": {"oneOf": [{"type": "integer", "minimum": 1}, {"const": "all"}], "description": "Frames per unit, or all for one unit over the whole range."},
         "order": {"enum": ["binary", "sequential", "reverse"]}
       }
     },
-    "writes": {"type": "array", "items": {"type": "string", "minLength": 1}},
-    "previews": {"type": "string", "minLength": 1},
+    "writes": {"type": "array", "description": "Paths in the tree the tool writes: globs (*, **) and format strings allowed.", "items": {"type": "string", "minLength": 1}},
+    "previews": {"type": "string", "minLength": 1, "pattern": "(\\$F[0-9]|<F[0-9]>|%0[0-9]+d)", "description": "The frames worth showing: a path with globs and where the frame number goes ($F4, <F4> or %04d)."},
     "needs": {"$ref": "#/$defs/needs"},
     "progress": {"type": "array", "items": {"$ref": "#/$defs/progressRule"}},
     "errors": {

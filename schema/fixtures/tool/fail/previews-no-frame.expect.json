@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "previews",
+      "message": "\"render/*.exr\" has no frame number",
+      "fix": "write where the frame number goes, as render/*.$F4.exr"
+    }
+  ],
+  "schemaMentions": "previews"
+}

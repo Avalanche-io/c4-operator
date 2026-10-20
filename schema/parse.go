@@ -747,6 +747,8 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		return "a progress rule says which group is the percent or the frame", "add percent: 1 or frame: 1"
 	case "oneOfMany tool progress[]":
 		return "a progress rule reads a percent or a frame, not both", "keep one of them"
+	case "pattern tool previews":
+		return fmt.Sprintf("%s has no frame number", quote(v)), "write where the frame number goes, as render/*.$F4.exr"
 	case "enum tool needs.farm":
 		return quote(v) + " is not a farm access", "a tool may have read, job or project; administration is a person's"
 	case "required tool runs.sidecars[]":

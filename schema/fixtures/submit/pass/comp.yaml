@@ -14,4 +14,5 @@ jobs:
   movie:
     tool: transcode
     after: comp
-    with: {codec: prores-422hq, view: "ACES 1.0 - SDR Video", slate: true}
+    frames: 1001-1048
+    with: {plates: comp/sm0140.$F4.exr, codec: prores-422hq}

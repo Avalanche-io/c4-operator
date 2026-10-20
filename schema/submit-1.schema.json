@@ -205,7 +205,7 @@
         },
         "retries": {"type": "integer", "minimum": 0},
         "maxParallel": {"type": "integer", "minimum": 0},
-        "chunk": {"type": "integer", "minimum": 1},
+        "chunk": {"oneOf": [{"type": "integer", "minimum": 1}, {"const": "all"}], "description": "Frames per unit, or all for one unit over the whole range."},
         "order": {"enum": ["binary", "sequential", "reverse"]},
         "follows": {"type": "string", "minLength": 1}
       }

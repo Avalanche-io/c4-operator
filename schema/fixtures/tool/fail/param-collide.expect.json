@@ -1,0 +1,11 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "params[1].name",
+      "message": "frame_range and frameRange are both C4_PARAM_FRAME_RANGE",
+      "fix": "rename one of them"
+    }
+  ],
+  "note": "Parameters reach a unit as C4_PARAM_ and the name in upper snake case, so names that differ only in case or underscores collide."
+}

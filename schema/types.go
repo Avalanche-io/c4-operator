@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // A Submission is a c4: submit/1 document: what to do for one piece of
@@ -61,7 +62,7 @@ type Job struct {
 	Measure     *Measure       `json:"measure,omitempty"`
 	Retries     *int           `json:"retries,omitempty"`
 	MaxParallel *int           `json:"maxParallel,omitempty"`
-	Chunk       *int           `json:"chunk,omitempty"`
+	Chunk       *Chunk         `json:"chunk,omitempty"`
 	Order       string         `json:"order,omitempty"`
 	Follows     string         `json:"follows,omitempty"`
 }
@@ -137,6 +138,34 @@ func (a *After) UnmarshalJSON(b []byte) error {
 		}
 	}
 	return nil
+}
+
+// Chunk is frames per unit: N, or All for one unit over the whole range.
+type Chunk struct {
+	N   int
+	All bool
+}
+
+// UnmarshalJSON takes a whole number or "all".
+func (c *Chunk) UnmarshalJSON(b []byte) error {
+	if string(bytes.TrimSpace(b)) == `"all"` {
+		*c = Chunk{All: true}
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil {
+		return fmt.Errorf("chunk is a number of frames or all")
+	}
+	*c = Chunk{N: n}
+	return nil
+}
+
+// MarshalJSON writes the number, or "all".
+func (c Chunk) MarshalJSON() ([]byte, error) {
+	if c.All {
+		return []byte(`"all"`), nil
+	}
+	return json.Marshal(c.N)
 }
 
 // Resources are what a unit needs, or a submission's overrides of them.
@@ -380,7 +409,7 @@ type FileFilter struct {
 
 // FrameDefaults are a frames tool's chunk and order.
 type FrameDefaults struct {
-	Chunk int    `json:"chunk,omitempty"`
+	Chunk *Chunk `json:"chunk,omitempty"`
 	Order string `json:"order,omitempty"`
 }
 
@@ -472,4 +501,21 @@ func orderedObject(b []byte) ([]string, []json.RawMessage, error) {
 		raws = append(raws, raw)
 	}
 	return keys, raws, nil
+}
+
+// ImageRef is the image a tool's runs.image (or a sidecar's image) names.
+// c4/<name>[:<tag>] is one of the farm's own images,
+// ghcr.io/avalanche-io/c4-<name>, at the tag written, else release. Any
+// other name is returned as written. Publishing resolves the result to a
+// digest for tool.lock.
+func ImageRef(written, release string) string {
+	rest, ok := strings.CutPrefix(written, "c4/")
+	if !ok || rest == "" {
+		return written
+	}
+	name, tag, tagged := strings.Cut(rest, ":")
+	if !tagged {
+		tag = release
+	}
+	return "ghcr.io/avalanche-io/c4-" + name + ":" + tag
 }

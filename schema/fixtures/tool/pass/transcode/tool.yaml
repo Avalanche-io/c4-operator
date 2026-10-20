@@ -2,15 +2,17 @@
 c4: tool/1
 name: transcode
 title: Review movie
-summary: An ACES transcode of the job's frames to a review movie, with a slate.
+summary: An ACES-managed review movie of a plate or render sequence, and a contact sheet.
 kind: once
 runs:
-  image: c4/runtime-media
-  command: [bash, "{{Tool.Dir}}/transcode.sh", "{{Param.codec}}", "{{Param.view}}", "{{Param.slate}}"]
+  image: c4/job-media
+  command: [bash, "{{Tool.Dir}}/transcode.sh", "{{Param.plates}}", "{{Param.range}}", "{{Param.codec}}", "{{Param.fps}}", "{{Param.view}}", "{{Job.Shot}}"]
 params:
+- {name: plates, type: PATH, objectType: FILE, dataFlow: IN, from: scene.selection, userInterface: {control: CHOOSE_INPUT_FILE, label: Frames to review}}
+- {name: range, type: RANGE_EXPR, from: shot.frames, userInterface: {control: LINE_EDIT, label: Frames}}
 - {name: codec, type: STRING, default: prores-422hq, allowedValues: [prores-422hq, prores-4444, dnxhr-hqx], userInterface: {control: DROPDOWN_LIST, label: Codec}}
-- {name: view, type: STRING, default: "ACES 1.0 - SDR Video", userInterface: {label: OCIO view}}
-- {name: slate, type: BOOL, default: true, userInterface: {control: CHECK_BOX, label: Slate}}
-writes: [movie/]
-needs: {cpu: 4, memory: 8G}
+- {name: fps, type: STRING, default: "24", allowedValues: ["23.976", "24", "25", "29.97", "30", "48", "50", "59.94", "60"], show: advanced}
+- {name: view, type: STRING, default: "ACES 2.0 - SDR 100 nits (Rec.709)", allowedValues: ["ACES 2.0 - SDR 100 nits (Rec.709)", Un-tone-mapped, Video (colorimetric), Raw], show: advanced}
+writes: [review/]
+needs: {scratch: 4G}
 reuse: exact
