@@ -75,18 +75,18 @@ documentation site. The operator embeds and serves the HUD itself.
 
 ## Quickstart
 
-With Docker, kind, kubectl and Go:
+With Docker:
 
 ```sh
-git clone https://github.com/Avalanche-io/c4-operator && cd c4-operator && git checkout v0.1.0
-go install ./cmd/c4-operator
-kind create cluster --name c4 --config config/samples/quickstart/kind.yaml
-kubectl apply -k config/release
+brew install avalanche-io/tap/c4-farm
+c4 farm up
 ```
 
-[docs/quickstart.md](docs/quickstart.md) continues from there: a store, a
-project, a tree ingested and mounted in a pod, its output captured, and a
-render queued and watched in the HUD, in about five minutes.
+That is a whole farm on your machine: render nodes, a store, the operator,
+the HUD and a sign-in for every role. [docs/quickstart.md](docs/quickstart.md)
+continues from there: a sample shot rendered and watched in the HUD, its
+deadline moved, its frames taken home with every file checked, and a tool of
+your own written, tested and published.
 
 To install on a cluster of your own, see [docs/install.md](docs/install.md).
 Releases attach one `install.yaml`, and the image is
@@ -139,7 +139,7 @@ not yet built.
 
 | document                                     | what it covers                                                            |
 | -------------------------------------------- | ------------------------------------------------------------------------- |
-| [docs/quickstart.md](docs/quickstart.md)     | five minutes on kind                                                      |
+| [docs/quickstart.md](docs/quickstart.md)     | a farm on your machine, a render, and your first tool                     |
 | [docs/install.md](docs/install.md)           | requirements, install, projects, pools, the HUD, hardening for production |
 | [DESIGN.md](DESIGN.md)                       | the design of record                                                      |
 | [REPORT-v2.md](REPORT-v2.md)                 | what each phase proved, the numbers, the Scion comparison, open decisions |

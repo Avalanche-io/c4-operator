@@ -79,8 +79,8 @@ spec:
 ```
 
 Put trees in the store with `c4-operator ingest` (or `import-git` for a git
-history), then mount them with a `Materialization` and a csi volume; the
-[quickstart](quickstart.md) shows each step. [DESIGN.md](../DESIGN.md)
+history), then mount them with a `Materialization` and a csi volume;
+[a trial cluster on kind](#a-trial-cluster-on-kind-by-hand) shows each step. [DESIGN.md](../DESIGN.md)
 section 6 covers isolation, grants for vendors, and revocation.
 
 ## Run work
@@ -142,6 +142,71 @@ c4-operator mcp --hud https://hud.example.com --token-file ~/.c4/token
 
 See [docs/agents/tools.md](agents/tools.md) and the
 [`c4-farm` skill](../skills/c4-farm/SKILL.md).
+
+## A trial cluster on kind, by hand
+
+`c4 farm up` builds a local farm in one command ([the quickstart](quickstart.md)).
+To see each piece go in yourself, the same farm by hand:
+
+```sh
+kind create cluster --name c4 --config config/samples/quickstart/kind.yaml
+kubectl apply -k config/release
+kubectl -n c4-system rollout status deploy/c4-manager
+kubectl apply -f config/samples/quickstart/store.yaml
+kubectl -n c4-store wait --for=condition=complete job/bucket --timeout=300s
+kubectl -n c4-system create secret generic quickstart-store \
+  --from-literal=AWS_ACCESS_KEY_ID=GKc4c4c4c4c4c4c4c4c4c4c4c4 \
+  --from-literal=AWS_SECRET_ACCESS_KEY=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4
+kubectl apply -f config/samples/quickstart/project.yaml
+```
+
+Two workers in the `cpu` pool, the operator, a one-node
+[Garage](https://garagehq.deuxfleurs.fr) store with a bucket named
+`quickstart` (these keys are for a local trial only), and the project `demo`.
+Put a tree in the store and mount it in a pod:
+
+```sh
+mkdir -p shot/plates
+for f in 1001 1002 1003 1004; do head -c 1048576 /dev/urandom > shot/plates/sh010.$f.exr; done
+export AWS_ACCESS_KEY_ID=GKc4c4c4c4c4c4c4c4c4c4c4c4
+export AWS_SECRET_ACCESS_KEY=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4
+VIEW=$(c4-operator ingest -q --shard 's0=s3://quickstart/c4/?endpoint=http://127.0.0.1:30900' shot)
+kubectl apply -f - <<EOF
+apiVersion: c4.avalanche.io/v1alpha1
+kind: Materialization
+metadata: {name: shot, namespace: demo}
+spec:
+  source: {id: "$VIEW"}
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: reader, namespace: demo}
+spec:
+  restartPolicy: Never
+  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
+  containers:
+  - name: reader
+    image: busybox:1.37
+    command: [sh, -c, "ls -l /show/plates && echo 'looks good' > /show/plates/notes.txt"]
+    securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
+    volumeMounts: [{name: show, mountPath: /show}]
+  volumes:
+  - name: show
+    csi:
+      driver: c4.avalanche.io
+      volumeAttributes: {materialization: shot}
+EOF
+kubectl -n demo wait --for=jsonpath='{.status.phase}'=Succeeded pod/reader --timeout=120s
+kubectl -n demo get pod reader -o jsonpath='{.metadata.annotations}' | tr ',' '\n' | grep output
+```
+
+The Materialization resolves the view against the project's store; the
+pod's volume is an overlay of a layer built in the node's cache, each object
+fetched once. When the pod ends, the node daemon captures what it wrote as a
+changeset over the view (`output-tree`, `output-changeset`) and signs a
+record of the task (`output-provenance`). A WorkJob is the same pod template
+with the queue in charge: see [Run work](#run-work). `kind delete cluster
+--name c4` removes it all.
 
 ## Hardening for production
 

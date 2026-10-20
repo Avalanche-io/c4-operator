@@ -189,8 +189,8 @@ The repository is public at
    workload signers, the issuer's refusals, and the CA's reach. It needs
    `hack/e2e/redeploy.sh` first (new manifests: `config/signing`, the node
    daemon's `c4-signer` token, the manager's issuer port).
-2. Validate `docs/quickstart.md` on a fresh kind cluster with locally built
-   images, then delete that cluster.
+2. Follow `docs/quickstart.md` word for word on `c4 farm up` with locally
+   built images, then `c4 farm down`.
 3. `make release-snapshot` and `make images`: the release images, built
    locally and published nowhere.
 

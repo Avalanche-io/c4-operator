@@ -1,182 +1,204 @@
-# Quickstart: c4-operator on kind in five minutes
+# Quickstart: a farm on your machine, a render, and your first tool
 
-This runs the operator on a three-node kind cluster on your machine, puts a
-small directory tree into a store, mounts it in a pod as a C4 view, captures
-what the pod writes, and queues a small render you can watch in the HUD.
+This builds a complete C4 farm inside Docker, renders a sample shot on it,
+watches the render in the HUD, moves its deadline, takes the frames home with
+every file checked, and then teaches the farm a small job of your own. No
+Kubernetes command or field appears anywhere: the farm's administrators
+have [docs/install.md](install.md) for that.
 
-You need Docker, [kind](https://kind.sigs.k8s.io) 0.33 or later, kubectl,
-and Go 1.26 for the command-line tool.
+You need Docker Desktop running, with at least 6 GB of memory and 4 CPUs
+(Settings → Resources).
 
-## 1. The source and the CLI
-
-```sh
-git clone https://github.com/Avalanche-io/c4-operator
-cd c4-operator
-git checkout v0.1.0
-go install ./cmd/c4-operator        # or take a binary from the release page
-```
-
-## 2. A cluster
+## 1. Install `c4 farm`
 
 ```sh
-kind create cluster --name c4 --config config/samples/quickstart/kind.yaml
+brew install avalanche-io/tap/c4-farm
 ```
 
-Two workers in one zone, both in the `cpu` pool. The control plane maps the
-store to `127.0.0.1:30900` and the HUD to `127.0.0.1:30080`.
+This installs `c4-farm`, or take a binary for your machine from the
+[release page](https://github.com/Avalanche-io/c4-operator/releases). If you
+have the `c4` command, `c4 farm` runs it too; this guide writes it that way.
 
-## 3. The operator
+## 2. Start the farm
 
 ```sh
-kubectl apply -k config/release
-kubectl -n c4-system rollout status deploy/c4-manager
-kubectl -n c4-system rollout status ds/c4-node
+c4 farm up
 ```
 
-The images come from `ghcr.io/avalanche-io/c4-operator`.
+```
+farm      c4-local   4 nodes · 6 slots, 4 more to rent · store ready
+project   saltmarsh   you: artist
+HUD       http://127.0.0.1:30080/?as=artist
+roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)
+```
 
-## 4. A store and a project
+That is a farm, not a demo of one: render nodes in two pools (`cpu` and
+`gpu`), a burst pool the farm rents from only when a deadline needs it, a
+store that names every file by its C4 ID, a project (`saltmarsh`, Petrel &
+Finch's feature) and a sign-in for every role. The HUD opens in your
+browser. The prebuilt tools (render, comp, transcode, usd, sim, ci, lora and
+infer) are published to every project.
 
 ```sh
-kubectl apply -f config/samples/quickstart/store.yaml
-kubectl -n c4-store wait --for=condition=complete job/bucket --timeout=300s
-kubectl -n c4-system create secret generic quickstart-store \
-  --from-literal=AWS_ACCESS_KEY_ID=GKc4c4c4c4c4c4c4c4c4c4c4c4 \
-  --from-literal=AWS_SECRET_ACCESS_KEY=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4
-kubectl apply -f config/samples/quickstart/project.yaml
+c4 farm tools
 ```
 
-The store is one [Garage](https://garagehq.deuxfleurs.fr) node with a
-bucket named `quickstart`; the project `demo` owns the namespace `demo`
-and reads and writes that store. Garage key IDs are `GK` and 24 hex digits,
-and secrets 64 hex digits; these are for a local trial only.
-
-## 5. Put a tree in the store
+## 3. Get the sample shot
 
 ```sh
-mkdir -p shot/plates
-for f in 1001 1002 1003 1004; do head -c 1048576 /dev/urandom > shot/plates/sh010.$f.exr; done
-export AWS_ACCESS_KEY_ID=GKc4c4c4c4c4c4c4c4c4c4c4c4
-export AWS_SECRET_ACCESS_KEY=c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4
-VIEW=$(c4-operator ingest -q --shard 's0=s3://quickstart/c4/?endpoint=http://127.0.0.1:30900' shot)
-echo "$VIEW"
+c4 farm samples get saltmarsh
 ```
 
-`ingest` hashes each file once, uploads what the store lacks and prints the
-view's ID: the C4 ID of the whole tree.
+This unpacks Petrel & Finch's sample shots into `~/c4-samples/saltmarsh`:
+sm0140, a heron lifting off the marsh at dusk, as a USD stage with its
+geometry, lights and textures.
 
-## 6. Mount it in a pod
+## 4. Render it
 
 ```sh
-kubectl apply -f - <<EOF
-apiVersion: c4.avalanche.io/v1alpha1
-kind: Materialization
-metadata: {name: shot, namespace: demo}
-spec:
-  source: {id: "$VIEW"}
----
-apiVersion: v1
-kind: Pod
-metadata: {name: reader, namespace: demo}
-spec:
-  restartPolicy: Never
-  securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
-  containers:
-  - name: reader
-    image: busybox:1.37
-    command: [sh, -c, "ls -l /show/plates && echo 'looks good' > /show/plates/notes.txt"]
-    securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-    volumeMounts: [{name: show, mountPath: /show}]
-  volumes:
-  - name: show
-    csi:
-      driver: c4.avalanche.io
-      volumeAttributes: {materialization: shot}
-EOF
-kubectl -n demo wait --for=jsonpath='{.status.phase}'=Ready materialization/shot
-kubectl -n demo wait --for=jsonpath='{.status.phase}'=Succeeded pod/reader --timeout=120s
-kubectl -n demo logs reader
+c4 farm submit render ~/c4-samples/saltmarsh/sm0140/sm0140.usda --frames 1001-1048 --deadline +2h
 ```
 
-The Materialization resolved the view against the project's store and
-checked every object is there. The pod's volume is an overlay of a layer
-built in the node's cache; the node fetched each object once, from the
-store or from a peer.
+```
+sm0140-light-v001   render · 48 frames · Cycles · pool cpu
 
-When the pod ended, the node daemon captured what it wrote as a changeset
-over the view and signed a record of the task:
+  files     12 files found · 1.2 MB · 12 to upload (1.2 MB)
+  estimate  ready ~15:42 PDT  (p90 ~15:51 PDT)
+  deadline  16:30 PDT today (23:30 UTC) · slack ~39m
+
+Submit? [Y/n]
+```
+
+`c4 farm` named every file of the shot's folder by its C4 ID, found which
+the store already holds, and asked the farm for a plan before anything ran.
+The estimate is the farm's: when the job will be ready, given everything
+else in the queue. **Slack** is the time to spare between ready and due.
+Press Enter, and only the files the store lacked go up.
+
+## 5. Watch it
 
 ```sh
-kubectl -n demo get pod reader -o jsonpath='{.metadata.annotations}' | tr ',' '\n' | grep output
+c4 farm watch sm0140-light-v001
 ```
 
-`c4.avalanche.io/output-tree` is the ID of the tree the pod left behind (the
-plates plus `notes.txt`), `output-changeset` the ID of the change, and
-`output-provenance` the signed task record.
+Or open the job in the HUD (`c4 farm open sm0140-light-v001`). The frames
+render coarse to fine, in binary order: first and last, then the middle,
+then the quarters, so the whole shot can be played early. Each frame shows
+its preview as it lands.
 
-## 7. Queue a render and watch it in the HUD
+## 6. Move the deadline
+
+Production says the shot is for Friday's review, not this afternoon:
 
 ```sh
-kubectl apply -f - <<EOF
-apiVersion: c4.avalanche.io/v1alpha1
-kind: WorkJob
-metadata: {name: sh010-comp-v001, namespace: demo}
-spec:
-  class: render
-  params: {frames: "1001-1024", order: binary, estimateSeconds: "4"}
-  inputs: [{materialization: shot, mountPath: /show}]
-  template:
-    spec:
-      securityContext: {runAsNonRoot: true, runAsUser: 65532, seccompProfile: {type: RuntimeDefault}}
-      containers:
-      - name: comp
-        image: busybox:1.37
-        command: [sh, -c, "mkdir -p /show/comp && for f in \$(seq \$C4_FRAME_START \$C4_FRAME_END); do sleep 3; echo frame \$f > /show/comp/sh010.\$f.exr; done"]
-        securityContext: {allowPrivilegeEscalation: false, capabilities: {drop: [ALL]}}
-EOF
+c4 farm deadline sm0140-light-v001 "fri 18:00"
 ```
 
-The HUD needs a signed-in viewer. For this local trial only, let the
-manager accept a development viewer:
+There is no priority to set, on this farm or any other C4 farm. A deadline
+is what changes the order: the farm re-plans the whole queue around it at
+once, and every job's slack shows the result.
+
+## 7. Take the frames home
 
 ```sh
-kubectl -n c4-system patch deploy c4-manager --type=json \
-  -p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"--hud-dev-viewers=wrangler=*;artist=demo"}]'
-kubectl -n c4-system rollout status deploy/c4-manager
-open "http://127.0.0.1:30080/?as=wrangler"      # or xdg-open, or paste it into a browser
+c4 farm get sm0140-light-v001 ~/renders/sm0140
 ```
 
-`wrangler` sees every project; `artist` sees only `demo`, and the top
-bar's **View as** switches between them.
+```
+48 files · 46 MB · every ID checked
+view      c4…
+in        /Users/you/renders/sm0140
+```
 
-The queue releases the job's units in binary order (1001, 1024, 1012, ...)
-two slots per node, adds each unit's captured frames to the job's output
-view, and shows its estimate converge as frames finish. Set a deadline and
-watch the queue plan for it:
+Every file arrives named by its C4 ID and is checked against it, so a frame
+that arrived damaged is caught, not copied. The `view` is the C4 ID of the
+whole output tree: the same ID on every machine that has these frames.
+
+## 8. Teach the farm a job of your own
+
+A tool is a folder: a `tool.yaml` that tells the farm how to run it and what
+it takes, and the script it runs. This one lists a folder of the shot and
+writes a note beside it, so you can see what the farm captures.
 
 ```sh
-kubectl -n demo patch workjob sh010-comp-v001 --type=merge -p "{\"spec\":{\"deadline\":\"$(date -u -v+10M +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d '+10 min' +%Y-%m-%dT%H:%M:%SZ)\"}}"
+c4 farm tool new once ~/tools/notes
 ```
 
-## 8. Ask an agent
+Replace `~/tools/notes/notes.sh` with:
 
 ```sh
-claude mcp add c4-farm -- c4-operator mcp --hud http://127.0.0.1:30080 --as wrangler
+#!/bin/bash
+# notes: list a folder of the job's tree, and leave a note beside it.
+set -euo pipefail
+folder="$1"
+mkdir -p "$C4_TREE/notes"
+ls -l "$folder" >"$C4_TREE/notes/listing.txt"
+echo "looks good" >"$C4_TREE/notes/notes.txt"
+echo "openjd_progress: 100"
 ```
 
-Then ask, for example, "which frames of sh010-comp-v001 are done, and will
-it make its deadline?" The tools are listed in
-[docs/agents/tools.md](agents/tools.md).
+and set `expect` in `~/tools/notes/tool.yaml` to the files it now writes:
+
+```yaml
+  expect: [notes/listing.txt, notes/notes.txt]
+```
+
+Test it on your machine, then publish it to the project:
+
+```sh
+c4 farm tool test ~/tools/notes
+c4 farm tool publish ~/tools/notes
+```
+
+`test` checks the file, then runs the tool in Docker exactly as a unit runs
+on the farm: as an unprivileged user, with no network, the tool's folder
+read-only and a scratch copy of its test tree writable. `publish` stores the
+folder as a C4 tree (its ID is the tool's version), runs the test again on
+the farm, and only then offers the tool to the project. No image was built,
+and no cluster command was run.
+
+Now run it over the shot's geometry:
+
+```sh
+c4 farm submit notes ~/c4-samples/saltmarsh/sm0140/geo
+c4 farm get sm0140-notes-v001 ~/notes
+```
+
+`~/notes` holds the shot's files plus `notes/listing.txt` and
+`notes/notes.txt`. The farm mounted the shot's tree, captured what the unit
+wrote as a change to it, and named the result by its ID: the job's output
+is the tree it left. The node that ran the unit signed a record of it.
+
+## 9. Read a file's history
+
+In the HUD, open `sm0140-light-v001`, click its output view, pick a frame
+and choose **Provenance**. Each step from the frame back to your upload is a
+record signed by whoever did it: the node that rendered it, the farm's queue
+and controller, you. Anyone holding the files can check the chain, with no
+access to the farm.
+
+## 10. Ask an agent
+
+```sh
+claude mcp add c4-farm -- c4 farm mcp
+```
+
+Then ask, for example, "which frames of sm0140-light-v001 are done, and
+will it make its deadline?" The agent has your access and nothing more. The
+tools it gets are listed in [docs/agents/tools.md](agents/tools.md), and
+every tool you publish appears among them, as `c4_run_<tool>`.
 
 ## Clean up
 
 ```sh
-kind delete cluster --name c4
+c4 farm down
 ```
 
 ## Next
 
-- [docs/install.md](install.md): a cluster of your own.
+- The guides for each role, starting at the HUD's
+  [Start here](https://github.com/Avalanche-io/c4-hud/tree/main/docs/start).
+- [docs/install.md](install.md): the operator on a cluster of your own, for
+  administrators.
 - [DESIGN.md](../DESIGN.md): how views, tiers, isolation, the queue and
   provenance work.
-- [REPORT-v2.md](../REPORT-v2.md): what was measured, and what is not built.
