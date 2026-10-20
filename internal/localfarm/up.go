@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-logr/logr"
 	appsv1 "k8s.io/api/apps/v1"
 	batchv1 "k8s.io/api/batch/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
@@ -23,6 +24,7 @@ import (
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/kind/pkg/cluster"
 	"sigs.k8s.io/kind/pkg/cluster/nodeutils"
 	"sigs.k8s.io/yaml"
@@ -124,6 +126,9 @@ func Up(ctx context.Context, o UpOptions) error {
 	if err != nil {
 		return err
 	}
+	// The client logs nothing a user should see; without a logger it
+	// prints a warning and a stack trace.
+	ctrllog.SetLogger(logr.Discard())
 	c, err := client.New(rc, client.Options{})
 	if err != nil {
 		return err
