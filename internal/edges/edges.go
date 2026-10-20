@@ -2,8 +2,8 @@
 // read a tree (code markers, a list a tool wrote) and give the edges as an
 // expansion document of edges alone (DESIGN 10.6), which a procedural
 // unit re-run after each merge writes to .c4/expand.json. The plan's
-// edges are then computed, not kept by hand (LLM-OR-PROCEDURE 5 and 7.2:
-// Ra's Pending markers).
+// edges are then computed, not kept by hand (DESIGN.md 10.6, Edge
+// sources; for example Ra's Pending markers).
 //
 // A source is a plugin: Register adds one by name, and c4-edges runs one.
 // Two are built in:

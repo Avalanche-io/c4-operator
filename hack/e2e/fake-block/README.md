@@ -39,7 +39,7 @@ A graph job:
 - a writable input mounted inside `/private/tmp`;
 - `CLAUDE_CONFIG_DIR` an emptyDir.
 
-The run of 2026-10-20 is written up in proposals/agent-jobs RUN-2026-10-20-asks.md. All four cases worked live:
+In the run of 2026-10-20, all four cases worked live:
 - missing information, supplied through the HUD, then resumed;
 - an answer within the hold;
 - one past the hold that became a wait;

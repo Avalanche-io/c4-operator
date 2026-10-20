@@ -53,7 +53,7 @@ var invariants = []struct{ name, what string }{
 }
 
 // knownBugs are invariants that fail on main for a cause already found:
-// the bugs hud-scenarios found (fixed on the scenarios branch) and the
+// the bugs the HUD's tutorial scenarios found (fixed on their branch) and the
 // ones this grid found. The grid reports them, the Go test logs them
 // instead of failing, and each has a skipped reproducer in stress_test.go.
 // Remove an entry when its fix lands.

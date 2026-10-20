@@ -1,6 +1,6 @@
 // Command c4-plan turns a plan into a WorkJob's expansion document
 // (expansion v1, the queue's own format): a block per piece of work, the
-// edges between them, and where each edge came from (agent-jobs section 10).
+// edges between them, and where each edge came from (docs/agents/c4-plan.md).
 //
 //	c4-plan import [--format file|lanemap] [--milestone M1] [--extra EXTRA.yaml]
 //	               [-o OUT.json] [--notes NOTES.json] [--owners OWNERS.json] PLAN

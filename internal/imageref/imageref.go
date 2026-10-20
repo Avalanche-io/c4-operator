@@ -1,8 +1,8 @@
 // Package imageref pins a container image reference to its digest: what
 // publishing a tool writes into tool.lock, so the published tree's C4 ID
-// covers the exact image (TOOL.md section 1). It asks the image's registry
-// (the Docker Registry HTTP API v2, with the bearer tokens public
-// registries hand out), and can read a digest a node already reports for
+// covers the exact image (DESIGN.md 10.6, Published tools). It asks the
+// image's registry (the Docker Registry HTTP API v2, with the bearer
+// tokens public registries hand out), and can read a digest a node already reports for
 // the image (NodeDigest), for a farm that cannot reach the registry.
 package imageref
 

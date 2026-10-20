@@ -1,6 +1,6 @@
 // Package plan builds a WorkJob's expansion document from a plan: one block
 // per piece of work, the edges between them, and where each edge came from
-// (agent-jobs section 10).
+// (docs/agents/c4-plan.md).
 //
 // The output is the queue's own format, expansion v1 (class.Doc; DESIGN
 // 10.6), and Doc checks it the way the queue reads it. Nothing here knows

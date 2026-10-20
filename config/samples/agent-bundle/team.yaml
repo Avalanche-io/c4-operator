@@ -28,12 +28,12 @@ spec:
   maxRunning: 5
   pools: [agent]
   members:
-  - {name: hud-scenarios}
-  - {name: sched-stress}
+  - {name: tutorials}
+  - {name: scheduler-tests}
   - {name: onboarding}
-  - {name: agent-jobs}
-  - {name: prov-graph}
-  - {name: eta-deadlines}
+  - {name: plan-jobs}
+  - {name: provenance}
+  - {name: estimates}
   - {name: hud-intro}
   - {name: talk-prep}
   # suspend: true   # every running member yields at its next turn boundary

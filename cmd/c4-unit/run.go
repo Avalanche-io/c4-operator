@@ -1,6 +1,6 @@
 package main
 
-// c4-unit run, the tool runner (proposals/authoring/TOOL.md section 4).
+// c4-unit run, the tool runner (schema/README.md; DESIGN.md 10.6, Tools).
 // Every unit that runs a tool starts it. It reads the tool's tool.yaml from
 // $C4_TOOLS and the resolved parameters from $C4_PARAMS, fills in the
 // command's format strings, and starts the command. It reads every line the
@@ -58,7 +58,8 @@ const (
 
 // tool is the part of a tool.yaml (c4: tool/1) the runner reads. Publish
 // has validated the whole document, so this decodes leniently.
-// TODO(agent-jobs): use schema.ParseTool once c4-authoring lands it.
+// TODO: decode with schema.ParseTool, so the runner reads tool.yaml as
+// publishing does.
 type tool struct {
 	Kind string `json:"kind"`
 	Runs struct {

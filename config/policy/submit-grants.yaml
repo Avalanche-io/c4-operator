@@ -1,7 +1,7 @@
-# A submit grant (GAPS 17) is a person's own word that a Tracker may
-# submit work for them. Only the HUD writes one, for the person signed in,
-# with its signed control record (internal/hud/server/grants.go): nobody
-# else creates, changes or deletes it, so a Tracker's author cannot forge
+# A submit grant (internal/hud/API.md, Grants) is a person's own word
+# that a Tracker may submit work for them. Only the HUD writes one, for
+# the person signed in, with its signed control record
+# (internal/hud/server/grants.go): nobody else creates, changes or deletes it, so a Tracker's author cannot forge
 # one and a revoked grant stays on the trail. A grant goes with its
 # namespace: once the namespace is being deleted, its grants may be
 # deleted (by the namespace controller), or the namespace could never go.

@@ -17,7 +17,8 @@ spec:
   scope: {repo: acme/widgets}
   credential:
     # A short-lived installation token, kept current in this Secret by the
-    # credential lease that holds the GitHub App's key (integrations GAPS 8).
+    # credential lease that holds the GitHub App's key
+    # (docs/agents/credential-leases.md).
     lease: widgets-github-app
     secret: {name: widgets-github-token, key: token}
   webhookSecret: {name: widgets-github-webhook, key: secret}

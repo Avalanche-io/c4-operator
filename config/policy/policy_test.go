@@ -195,12 +195,14 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"nudge":{"hold":true}}}`))); err != nil {
 		t.Errorf("an ordinary change was refused: %v", err)
 	}
-	// A job's review is set when it is created (GAPS 7): added later, it
+	// A job's review is set when it is created (DESIGN.md 10.6, The job's
+	// review): added later, it
 	// would not fit the plan the queue has replayed.
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"review":{"server":"person:noor"}}}`))); err == nil {
 		t.Error("a review was added to a running job")
 	}
-	// A job is a forecast or not from its creation (GAPS 9): a real job
+	// A job is a forecast or not from its creation (DESIGN.md 10.12,
+	// Forecast jobs): a real job
 	// replaces a forecast; neither turns into the other.
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"forecast":{"slotHours":"4"}}}`))); err == nil {
 		t.Error("a running job became a forecast")

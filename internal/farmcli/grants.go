@@ -9,7 +9,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
-// Grant lets a tracker submit work for you (integrations GAPS 17): jobs
+// Grant lets a tracker submit work for you (internal/hud/API.md, Grants): jobs
 // it makes from your issues or tasks are yours, so what is yours (a lease
 // of your own sign-in) serves them. Granting again renews it.
 func Grant(ctx context.Context, c *Client, o Out, project string, req api.GrantRequest) error {

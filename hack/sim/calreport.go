@@ -185,7 +185,8 @@ func writeCalibrationSection(b *strings.Builder, o *orderResults) {
 	fmt.Fprintf(b, "Binary order, by stratum (what the estimator sees), strata with at least %d moments; %d moments fall in smaller strata.\n\n", minStratumMoments, small)
 	table(b, []string{"share finished / heavy multiple measured / running frame past it", "moments", "as built", "calibrated"}, rows)
 
-	// The acceptance test (eta-deadlines section 9), as written and as
+	// The acceptance test for calibration (DESIGN.md 10.8, Calibration):
+	// W90 covers 87 to 93% in each stratum, as first written and as
 	// revised for what is observable.
 	cell := func(name string, t *tally) string {
 		return fmt.Sprintf("%s %.1f%% (se %.1f)", name, 100*t.share(true), 100*t.se())

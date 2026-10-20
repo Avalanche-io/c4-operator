@@ -1,9 +1,9 @@
 // Package authoring reads the two authoring formats, submissions (c4:
 // submit/1) and tools (c4: tool/1), checks them against the farm, and
-// lowers them to the jobs the operator runs (proposals/authoring SUBMIT.md
-// section 7, TOOL.md section 9). The HUD's POST /submissions and POST
-// /tools use it; so do the CLI and the tool runner, so that every reader
-// parses the files alike.
+// lowers them to the jobs the operator runs (schema/README.md; DESIGN.md
+// 10.6, Tools). The HUD's POST /submissions and POST /tools use it; so do
+// the CLI and the tool runner, so that every reader parses the files
+// alike.
 package authoring
 
 import (

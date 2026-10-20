@@ -198,16 +198,16 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [milestones]
   verbs: [get, list, watch]
-# Submit grants (GAPS 17): the HUD is their only writer, for the person
-# signed in; it reads the Tracker a grant names.
+# Submit grants (internal/hud/API.md, Grants): the HUD is their only
+# writer, for the person signed in; it reads the Tracker a grant names.
 - apiGroups: [c4.avalanche.io]
   resources: [submitgrants]
   verbs: [get, list, watch, create, update, patch]
 - apiGroups: [c4.avalanche.io]
   resources: [trackers]
   verbs: [get, list, watch]
-# Held tracker writes (GAPS 11): the HUD lists them and records a person's
-# answer for one in its TrackerLink's status.
+# Held tracker writes (internal/hud/API.md): the HUD lists them and
+# records a person's answer for one in its TrackerLink's status.
 - apiGroups: [c4.avalanche.io]
   resources: [trackerlinks]
   verbs: [get, list, watch]
@@ -219,8 +219,8 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [workjobs, materializations]
   verbs: [create]
-# A real job replacing a forecast deletes the forecast (GAPS 9), after the
-# same check as the real job's.
+# A real job replacing a forecast deletes the forecast (DESIGN.md
+# 10.12), after the same check as the real job's.
 - apiGroups: [c4.avalanche.io]
   resources: [workjobs]
   verbs: [delete]

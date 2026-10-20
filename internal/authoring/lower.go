@@ -23,7 +23,7 @@ const ToolsMount = "/etc/c4/tools"
 const ReadRoot = "/c4/read"
 
 // RunnerCommand is every tool unit's command: the tool runner, which
-// starts the tool's own command (TOOL.md section 4).
+// starts the tool's own command (cmd/c4-unit/run.go).
 var RunnerCommand = []string{"c4-unit", "run"}
 
 // classParams are the class parameters a tool's parameter of the same
@@ -58,7 +58,7 @@ type toolJob struct {
 }
 
 // lowerTool lowers one job of a frames or once tool to a POST /jobs
-// request (TOOL.md section 9): class render, the runner as the command in
+// request: class render, the runner as the command in
 // the tool's pinned image, the tool's tree read-only at ToolsMount, its
 // parameters resolved into C4_PARAMS, and its needs as requests. Paths in
 // errors are relative to the job (with.stage, frames).
@@ -535,10 +535,10 @@ func fillAIUsage(u map[string]any, params map[string]any) map[string]any {
 
 // LowerTest is a tool's test (its test: tree, frames and with) as one job
 // named <tool>-test-<version>, for publishing to run before the tool is
-// offered (TOOL.md section 2.10): testTree, the C4 ID of the view of the
-// test's folder in the published tree, mounts writable at the project's
-// root, and the tool's own tree read-only at ToolsMount, as for any job
-// of the tool.
+// offered (DESIGN.md 10.6, Published tools): testTree, the C4 ID of the
+// view of the test's folder in the published tree, mounts writable at
+// the project's root, and the tool's own tree read-only at ToolsMount, as
+// for any job of the tool.
 func LowerTest(t *Tool, ref ToolRef, testTree, project, namespace, root string) (*api.SubmitRequest, error) {
 	if t.Test == nil {
 		return nil, fmt.Errorf("%s has no test", t.Name)

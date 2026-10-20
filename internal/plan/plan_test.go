@@ -197,7 +197,7 @@ func TestExtraBy(t *testing.T) {
 }
 
 // A plan file is YAML 1.2: a claim's on key reads unquoted (YAML 1.1 read
-// it as true, and the strict reader refused it; c4-agent-catalog's
+// it as true, and the strict reader refused it; the agent catalogue's
 // report), and a block's reasoning comes through.
 func TestReadClaimsOnAndReasoning(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "plan.yaml")

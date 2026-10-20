@@ -10,7 +10,7 @@ import (
 )
 
 // formatNames are the format strings a tool may use besides
-// {{Param.<name>}} (TOOL.md section 3.1).
+// {{Param.<name>}} (the tool format: schema/README.md).
 var formatNames = []string{"Unit.Frames", "Unit.FrameStart", "Unit.FrameEnd", "Unit.FrameCount", "Unit.Name", "Unit.Index",
 	"Job.Tree", "Job.Shot", "Job.Name", "Tool.Dir", "Run.Exe", "Run.PathMap"}
 
