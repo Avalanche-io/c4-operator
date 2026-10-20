@@ -133,6 +133,26 @@ type ProjectSpec struct {
 	// Work configures the project's share of the farm (P5).
 	// +optional
 	Work *ProjectWork `json:"work,omitempty"`
+
+	// Root is where the project's trees mount in its units: the tree a
+	// submission names, and the outputs of the jobs it follows. A clean
+	// absolute path; unset, /show (DefaultProjectRoot).
+	// +kubebuilder:validation:Pattern=`^/([A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*)?$`
+	// +kubebuilder:validation:XValidation:rule="!(self + '/').contains('/./') && !(self + '/').contains('/../')",message="a project root is a clean path, without . or .."
+	// +optional
+	Root string `json:"root,omitempty"`
+}
+
+// DefaultProjectRoot is where a project's trees mount when it sets no Root.
+const DefaultProjectRoot = "/show"
+
+// TreeRoot is where the project's trees mount (Root, else
+// DefaultProjectRoot).
+func (s *ProjectSpec) TreeRoot() string {
+	if s.Root != "" {
+		return s.Root
+	}
+	return DefaultProjectRoot
 }
 
 // ProjectWork is the project's entitlement and budgets in the work queue.

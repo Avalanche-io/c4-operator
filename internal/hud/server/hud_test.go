@@ -66,7 +66,7 @@ func farm(t *testing.T) *Server {
 	m := &model{at: now, byKey: map[string]*jobRec{}, nsProject: map[string]string{"show-a": "show-a", "show-b": "show-b"},
 		projects: []c4v1.Project{
 			{ObjectMeta: metav1.ObjectMeta{Name: "show-a"}, Spec: c4v1.ProjectSpec{Namespaces: []string{"show-a"}}},
-			{ObjectMeta: metav1.ObjectMeta{Name: "show-b"}, Spec: c4v1.ProjectSpec{Namespaces: []string{"show-b"}}}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "show-b"}, Spec: c4v1.ProjectSpec{Namespaces: []string{"show-b"}, Root: "/mnt/shows/b"}}},
 		pools: []c4v1.Pool{{ObjectMeta: metav1.ObjectMeta{Name: "cpu"},
 			Spec: c4v1.PoolSpec{NodeSelector: map[string]string{"c4.avalanche.io/pool": "cpu"}, SlotsPerNode: 4}}},
 		nodes: []corev1.Node{node("w1", "burbank-r1", "burbank"), node("w2", "us-west-2a", "us-west-2")},
@@ -468,4 +468,20 @@ func TestNoETAInSnapshot(t *testing.T) {
 		return
 	}
 	t.Fatal("research not in the snapshot")
+}
+
+// A project's trees mount at its root: /show unless it sets one.
+func TestProjectRootInSnapshot(t *testing.T) {
+	s := farm(t)
+	var snap api.Snapshot
+	if code := get(t, s, "/api/v1/snapshot?as=wrangler", &snap); code != 200 {
+		t.Fatalf("snapshot: %d", code)
+	}
+	roots := map[string]string{}
+	for _, p := range snap.Projects {
+		roots[p.Name] = p.Root
+	}
+	if roots["show-a"] != "/show" || roots["show-b"] != "/mnt/shows/b" {
+		t.Fatalf("roots %v", roots)
+	}
 }

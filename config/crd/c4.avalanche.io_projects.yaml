@@ -94,6 +94,16 @@ spec:
                   type: string
                 minItems: 1
                 type: array
+              root:
+                description: |-
+                  Root is where the project's trees mount in its units: the tree a
+                  submission names, and the outputs of the jobs it follows. A clean
+                  absolute path; unset, /show (DefaultProjectRoot).
+                pattern: ^/([A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*)?$
+                type: string
+                x-kubernetes-validations:
+                - message: a project root is a clean path, without . or ..
+                  rule: '!(self + ''/'').contains(''/./'') && !(self + ''/'').contains(''/../'')'
               scope:
                 default: Store
                 description: |-

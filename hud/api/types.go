@@ -225,7 +225,10 @@ type Class struct {
 }
 
 type Project struct {
-	Name              string           `json:"name"`
+	Name string `json:"name"`
+	// Root is where the project's trees mount in its units (Project
+	// spec.root, /show by default).
+	Root              string           `json:"root"`
 	Quotas            []map[string]any `json:"quotas"`
 	BurstSpendToday   float64          `json:"burstSpendToday"`
 	BurstBudgetPerDay float64          `json:"burstBudgetPerDay"`

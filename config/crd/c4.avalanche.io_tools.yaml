@@ -32,7 +32,7 @@ spec:
           namespace, then in the operator's, where the farm's defaults live. The
           view is mounted read-only at $C4_TOOLS, and its C4 ID is in the unit's
           record, so a unit's record says exactly what it ran with. Egress is an
-          allow-list: a unit with a profile reaches what the profile lists and
+          allow-list: a unit with a tool reaches what the tool lists and
           nothing else, and with none it is sealed.
         properties:
           apiVersion:
@@ -53,7 +53,7 @@ spec:
           metadata:
             type: object
           spec:
-            description: ToolSpec is a profile's configuration and egress.
+            description: ToolSpec is a tool's configuration and egress.
             properties:
               c4:
                 description: |-
@@ -70,11 +70,11 @@ spec:
                 type: string
               egress:
                 description: |-
-                  Egress is what a unit with the profile may reach. With any rule,
+                  Egress is what a unit with the tool may reach. With any rule,
                   the cluster's DNS is reachable too; with none, nothing is.
                 items:
                   description: |-
-                    ToolEgress is one destination a profile allows: a host, an address
+                    ToolEgress is one destination a tool allows: a host, an address
                     block or a cluster service, optionally on some ports. Hosts are reached
                     through the farm's egress proxy; the others directly.
                   properties:
@@ -105,8 +105,7 @@ spec:
                   $C4_TOOL_<NAME>, http://localhost:<port>. They share the unit's
                   network, so its egress is theirs.
                 items:
-                  description: ToolSidecar is one server a profile runs beside its
-                    units.
+                  description: ToolSidecar is one server a tool runs beside its units.
                   properties:
                     args:
                       items:

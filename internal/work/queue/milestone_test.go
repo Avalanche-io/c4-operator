@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -72,5 +73,25 @@ func TestMilestoneDeadline(t *testing.T) {
 	tick(t, q)
 	if st := get(t, ns, covered.Name).Status; st.Deadline == nil || !st.Deadline.Time.Equal(now.Add(3*time.Hour)) {
 		t.Fatalf("after the due moved: %v", st.Deadline)
+	}
+}
+
+// A project's root is a clean absolute path.
+func TestProjectRootIsClean(t *testing.T) {
+	ctx := context.Background()
+	store := c4v1.ProjectStore{Shards: []c4v1.StoreShard{{Name: "s0", URL: "file:///tmp/none"}}}
+	for i, c := range []struct {
+		root string
+		ok   bool
+	}{{"/mnt/shows/saltmarsh", true}, {"/", true}, {"show", false}, {"/show/../etc", false}, {"/show//x", false}, {"/show/", false}} {
+		p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("root-%d-%d", i, time.Now().UnixNano()%1e6)},
+			Spec: c4v1.ProjectSpec{Namespaces: []string{fmt.Sprintf("root-ns-%d", i)}, Store: store, Root: c.root}}
+		err := k8s.Create(ctx, p)
+		if (err == nil) != c.ok {
+			t.Errorf("root %q: %v", c.root, err)
+		}
+		if err == nil {
+			k8s.Delete(ctx, p)
+		}
 	}
 }

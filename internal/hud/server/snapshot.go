@@ -83,7 +83,7 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 		if !visible[p.Name] {
 			continue
 		}
-		ap := api.Project{Name: p.Name, Quotas: []map[string]any{}, WorkerHours: []map[string]any{}}
+		ap := api.Project{Name: p.Name, Root: p.Spec.TreeRoot(), Quotas: []map[string]any{}, WorkerHours: []map[string]any{}}
 		if w := p.Spec.Work; w != nil {
 			for _, q := range w.Quotas {
 				bl := any(nil)
