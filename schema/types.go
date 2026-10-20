@@ -39,31 +39,31 @@ func (js Jobs) Job(key string) *Job {
 // A Job is one tool over its units, or a plan whose blocks run a tool.
 type Job struct {
 	// Key is the job's key in the file: its stage, the middle of its name.
-	Key         string          `json:"-"`
-	Tool        string          `json:"tool,omitempty"`
-	Frames      Frames          `json:"frames,omitempty"`
-	With        map[string]any  `json:"with,omitempty"`
-	After       After           `json:"after,omitempty"`
-	Due         string          `json:"due,omitempty"`
-	Size        string          `json:"size,omitempty"`
-	Needs       *Resources      `json:"needs,omitempty"`
-	Pools       []string        `json:"pools,omitempty"`
-	Preview     string          `json:"preview,omitempty"`
-	Check       *Check          `json:"check,omitempty"`
-	Approve     *Approve        `json:"approve,omitempty"`
-	Wait        *Wait           `json:"wait,omitempty"`
-	Answers     *Answers        `json:"answers,omitempty"`
-	Uses        map[string]Use  `json:"uses,omitempty"`
-	Plan        string          `json:"plan,omitempty"`
-	Each        *Each           `json:"each,omitempty"`
-	Over        Axes            `json:"over,omitempty"`
-	Combine     string          `json:"combine,omitempty"`
-	Measure     *Measure        `json:"measure,omitempty"`
-	Retries     *int            `json:"retries,omitempty"`
-	MaxParallel *int            `json:"maxParallel,omitempty"`
-	Chunk       *int            `json:"chunk,omitempty"`
-	Order       string          `json:"order,omitempty"`
-	Follows     string          `json:"follows,omitempty"`
+	Key         string         `json:"-"`
+	Tool        string         `json:"tool,omitempty"`
+	Frames      Frames         `json:"frames,omitempty"`
+	With        map[string]any `json:"with,omitempty"`
+	After       After          `json:"after,omitempty"`
+	Due         string         `json:"due,omitempty"`
+	Size        string         `json:"size,omitempty"`
+	Needs       *Resources     `json:"needs,omitempty"`
+	Pools       []string       `json:"pools,omitempty"`
+	Preview     string         `json:"preview,omitempty"`
+	Check       *Check         `json:"check,omitempty"`
+	Approve     *Approve       `json:"approve,omitempty"`
+	Wait        *Wait          `json:"wait,omitempty"`
+	Answers     *Answers       `json:"answers,omitempty"`
+	Uses        map[string]Use `json:"uses,omitempty"`
+	Plan        string         `json:"plan,omitempty"`
+	Each        *Each          `json:"each,omitempty"`
+	Over        Axes           `json:"over,omitempty"`
+	Combine     string         `json:"combine,omitempty"`
+	Measure     *Measure       `json:"measure,omitempty"`
+	Retries     *int           `json:"retries,omitempty"`
+	MaxParallel *int           `json:"maxParallel,omitempty"`
+	Chunk       *int           `json:"chunk,omitempty"`
+	Order       string         `json:"order,omitempty"`
+	Follows     string         `json:"follows,omitempty"`
 }
 
 // Frames is a frame list in OpenJD's range grammar ("1001-1240:2"); a
@@ -273,32 +273,32 @@ func (js *Jobs) UnmarshalJSON(b []byte) error {
 
 // A Tool is a c4: tool/1 document: how one kind of work runs.
 type Tool struct {
-	C4         string          `json:"c4"`
-	Name       string          `json:"name"`
-	Title      string          `json:"title,omitempty"`
-	Summary    string          `json:"summary,omitempty"`
-	Owner      string          `json:"owner,omitempty"`
-	Docs       string          `json:"docs,omitempty"`
-	Kind       string          `json:"kind"`
-	Runs       Runs            `json:"runs"`
-	Params     []Param         `json:"params,omitempty"`
-	Frames     *FrameDefaults  `json:"frames,omitempty"`
-	Writes     []string        `json:"writes,omitempty"`
-	Previews   string          `json:"previews,omitempty"`
-	Needs      Needs           `json:"needs,omitempty"`
-	Progress   []ProgressRule  `json:"progress,omitempty"`
-	Errors     Errors          `json:"errors,omitempty"`
-	Stall      *Stall          `json:"stall,omitempty"`
-	Retries    *int            `json:"retries,omitempty"`
-	RetryOn    *RetryOn        `json:"retryOn,omitempty"`
-	Reuse      string          `json:"reuse,omitempty"`
-	Emits      []string        `json:"emits,omitempty"`
-	Judges     string          `json:"judges,omitempty"`
-	Rework     *Rework         `json:"rework,omitempty"`
-	Gate       string          `json:"gate,omitempty"`
-	AIUsage    map[string]any  `json:"aiUsage,omitempty"`
-	Test       *Test           `json:"test,omitempty"`
-	Kubernetes *Kubernetes     `json:"kubernetes,omitempty"`
+	C4         string         `json:"c4"`
+	Name       string         `json:"name"`
+	Title      string         `json:"title,omitempty"`
+	Summary    string         `json:"summary,omitempty"`
+	Owner      string         `json:"owner,omitempty"`
+	Docs       string         `json:"docs,omitempty"`
+	Kind       string         `json:"kind"`
+	Runs       Runs           `json:"runs"`
+	Params     []Param        `json:"params,omitempty"`
+	Frames     *FrameDefaults `json:"frames,omitempty"`
+	Writes     []string       `json:"writes,omitempty"`
+	Previews   string         `json:"previews,omitempty"`
+	Needs      Needs          `json:"needs,omitempty"`
+	Progress   []ProgressRule `json:"progress,omitempty"`
+	Errors     Errors         `json:"errors,omitempty"`
+	Stall      *Stall         `json:"stall,omitempty"`
+	Retries    *int           `json:"retries,omitempty"`
+	RetryOn    *RetryOn       `json:"retryOn,omitempty"`
+	Reuse      string         `json:"reuse,omitempty"`
+	Emits      []string       `json:"emits,omitempty"`
+	Judges     string         `json:"judges,omitempty"`
+	Rework     *Rework        `json:"rework,omitempty"`
+	Gate       string         `json:"gate,omitempty"`
+	AIUsage    map[string]any `json:"aiUsage,omitempty"`
+	Test       *Test          `json:"test,omitempty"`
+	Kubernetes *Kubernetes    `json:"kubernetes,omitempty"`
 }
 
 // Param returns the parameter with the name, or nil.
