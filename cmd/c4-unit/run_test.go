@@ -556,13 +556,16 @@ name: x
 kind: frames
 runs:
   image: c4/runtime-base
-  command: [bash, -c, 'mkdir -p render; for f in 1001 1002 1003 1004 1005 1006 1007 1008; do sleep 0.1; cp "$C4_TOOLS/f.png" render/sm.$f.png; done']
+  command: [bash, -c, 'mkdir -p render; for f in 1001 1002 1003 1004 1005 1006 1007 1008; do sleep 0.5; cp "$C4_TOOLS/f.png" render/sm.$f.png; done']
   workdir: "{{Job.Tree}}"
 previews: "render/*.$F4.png"
 stall: {quietMinutes: 3}
 `)
 	r.vars["C4_FRAME_END"] = "1008"
-	r.minute = 100 * time.Millisecond
+	// A 3 s stall window, frames 0.5 s apart and 4 s in all: the run
+	// outlasts the window, so only the frames keep it alive, and a loaded
+	// machine's gaps between frames still fit inside it.
+	r.minute = time.Second
 	writePNG(t, filepath.Join(r.dir, "f.png"))
 	if c := r.run(); c != 0 {
 		t.Fatalf("exit %d: %+v", c, r.outcome())
