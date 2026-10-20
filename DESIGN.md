@@ -1527,8 +1527,22 @@ and a sweep planner that spawns trials are all generators.
       Materialization is Ready, and its policy is written. Until then the
       job's `Tools` condition says what it waits for. Units that name no
       profile run as before.
-    - **Tokens:** no unit pod holds a Kubernetes API token (10.2); c4
-      itself is reached through the HUD with a token the profile grants.
+    - **Tokens:** no unit pod holds a Kubernetes API token (10.2). A
+      profile's `c4` says what its units may do with c4 itself, through
+      the HUD and so MCP.
+      - **Grants:** `read` sees their project; `job` may also act on
+        their own job (decide its waits, steer, nudge); `project` may
+        also submit jobs in their project.
+      - **The token:** such a unit holds a token for its pod alone, a
+        projected service-account token with the HUD's audience
+        (`c4.avalanche.io/hud`), which the Kubernetes API does not
+        accept. It sits at `$C4_HUD_TOKEN_FILE`, with the HUD at
+        `$C4_HUD` (the manager's `--hud-service`), and its policy
+        allows the HUD.
+      - **At the HUD:** the HUD checks the token with a TokenReview for
+        that audience, finds the pod it is bound to, and acts on the
+        unit's grant. Every control the unit makes is in the book as
+        `unit:<namespace>/<job>/<unit>`.
   - **Work share.** Each ended attempt also adds its slot time (hours
     times slots) to its unit, and status gives the model units' share of
     it (`spend.modelWorkShare`): how much of the work models did, which

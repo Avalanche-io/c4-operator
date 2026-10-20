@@ -201,6 +201,10 @@ func (s *Server) viewer(r *http.Request) (*api.Viewer, error) {
 		if !ok || s.Kube == nil {
 			return nil, errUnauthenticated
 		}
+		if forHUD(tok) {
+			// A unit's own token (tools.go in the queue).
+			return s.unitViewer(r.Context(), tok)
+		}
 		tr, err := s.Kube.AuthenticationV1().TokenReviews().Create(r.Context(),
 			&authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: tok}}, metav1.CreateOptions{})
 		if err != nil {

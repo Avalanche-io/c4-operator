@@ -55,6 +55,19 @@ spec:
           spec:
             description: ToolProfileSpec is a profile's configuration and egress.
             properties:
+              c4:
+                description: |-
+                  C4 is what the unit may do with c4 itself, through the HUD (and so
+                  MCP): read (see its project), job (also act on its own job: decide
+                  its waits, steer, nudge) or project (also submit jobs in its
+                  project). Empty: nothing. The unit holds a token for its pod alone,
+                  at $C4_HUD_TOKEN_FILE, and every control it makes is in the book
+                  under its name.
+                enum:
+                - read
+                - job
+                - project
+                type: string
               egress:
                 description: |-
                   Egress is what a unit with the profile may reach. With any rule,

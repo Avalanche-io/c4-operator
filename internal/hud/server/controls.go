@@ -32,6 +32,10 @@ import (
 // account makes it and records an Event naming the user.
 
 func (s *Server) authorize(ctx context.Context, r *http.Request, v *api.Viewer, ns, verb, resource, name string) error {
+	if v != nil && v.Unit != nil {
+		// A unit: what its tool profile grants (units.go).
+		return s.unitMay(v, ns, resource, name)
+	}
 	if s.DevViewers != nil {
 		return nil
 	}

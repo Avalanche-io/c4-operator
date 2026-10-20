@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -161,6 +162,59 @@ func TestToolProfileHostsGoThroughTheProxy(t *testing.T) {
 	if len(e) != 2 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "egress" ||
 		e[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != farmNS || e[0].Ports[0].Port.IntValue() != 3128 ||
 		e[1].Ports[0].Port.IntValue() != 53 {
+		t.Fatalf("policy %+v", np.Spec)
+	}
+}
+
+// A profile that grants c4 gives its units a token for their pod alone,
+// with the HUD's audience, and the HUD's address; its policy allows the
+// HUD's pods on the port they listen on. Without a HUD such a unit waits.
+func TestToolProfileGrantsC4(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	farmNS := ns + "-farm"
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
+		t.Fatal(err)
+	}
+	q.Namespace = farmNS
+	for _, o := range []client.Object{
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-hud"},
+			Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "manager"},
+				Ports: []corev1.ServicePort{{Port: 80, TargetPort: intstr.FromInt32(8090)}}}},
+		&c4v1.ToolProfile{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "lead"}, Spec: c4v1.ToolProfileSpec{C4: "job"}},
+	} {
+		if err := k8s.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := k8s.Create(ctx, job(ns, "granted", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "lead", "reasoning": {"does": "model", "tools": "lead"}}]}`)
+	finishUnit(t, now, ns, "granted", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	if hasPod(t, ns, "granted", 1) {
+		t.Fatal("a unit granted c4 ran with no HUD")
+	}
+	q.HUDService = "c4-hud:80"
+	tick(t, q)
+	p := podOfUnit(t, ns, "granted", 1)
+	var tok *corev1.ServiceAccountTokenProjection
+	for _, v := range p.Spec.Volumes {
+		if v.Projected != nil && len(v.Projected.Sources) == 1 {
+			tok = v.Projected.Sources[0].ServiceAccountToken
+		}
+	}
+	if tok == nil || tok.Audience != c4v1.HUDAudience || envOf(p.Spec.Containers[0], "C4_HUD") != "http://c4-hud."+farmNS+".svc:80/api/v1" ||
+		envOf(p.Spec.Containers[0], "C4_HUD_TOKEN_FILE") != "/etc/c4/hud/token" || p.Spec.AutomountServiceAccountToken == nil || *p.Spec.AutomountServiceAccountToken {
+		t.Fatalf("lead's pod: token %+v, env %v", tok, p.Spec.Containers[0].Env)
+	}
+	var np networkingv1.NetworkPolicy
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "c4-tools-lead"}, &np); err != nil {
+		t.Fatal(err)
+	}
+	if e := np.Spec.Egress; len(e) != 2 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "manager" || e[0].Ports[0].Port.IntValue() != 8090 {
 		t.Fatalf("policy %+v", np.Spec)
 	}
 }

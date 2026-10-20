@@ -79,6 +79,29 @@ func (q *Queue) egressProxy() (ns, name string, port int32, err error) {
 	return ns, name, int32(n), nil
 }
 
+// hudService is the HUD's Service: its namespace and name, and port.
+func (q *Queue) hudService() (ns, name string, port int32, err error) {
+	ref, ps, ok := strings.Cut(q.HUDService, ":")
+	n, perr := strconv.Atoi(ps)
+	if !ok || perr != nil || n <= 0 || n > 65535 || ref == "" {
+		return "", "", 0, fmt.Errorf("HUD service %q: want [<namespace>/]<service>:<port>", q.HUDService)
+	}
+	ns, name, ok = strings.Cut(ref, "/")
+	if !ok {
+		ns, name = q.Namespace, ref
+	}
+	return ns, name, int32(n), nil
+}
+
+// hudURL is the HUD's API for a unit with a c4 grant ($C4_HUD).
+func (q *Queue) hudURL() string {
+	ns, name, port, err := q.hudService()
+	if err != nil {
+		return ""
+	}
+	return fmt.Sprintf("http://%s.%s.svc:%d/api/v1", name, ns, port)
+}
+
 // proxyURL is the egress proxy's address for a unit's HTTPS_PROXY.
 func (q *Queue) proxyURL() string {
 	ns, name, port, err := q.egressProxy()
@@ -137,6 +160,9 @@ func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.ToolPro
 		if sc.Name == "" || sc.Image == "" || sc.Port <= 0 || sc.Port > 65535 {
 			return nil, false, fmt.Sprintf("tool profile %s: a sidecar needs a name, an image and a port", name)
 		}
+	}
+	if p.Spec.C4 != "" && q.HUDService == "" {
+		return nil, false, fmt.Sprintf("tool profile %s grants c4 %s, which needs the HUD (--hud-service)", name, p.Spec.C4)
 	}
 	if hostRules(p) && q.EgressProxy == "" {
 		return nil, false, fmt.Sprintf("tool profile %s allows hosts, which need the farm's egress proxy (--egress-proxy)", name)
@@ -207,6 +233,29 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.ToolProfile)
 		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer},
 			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &pp}}})
 	}
+	if p.Spec.C4 != "" {
+		// The HUD, on the port its pods listen on.
+		hns, hname, port, err := q.hudService()
+		if err != nil {
+			return nil, err
+		}
+		var svc corev1.Service
+		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: hns, Name: hname}, &svc); err != nil {
+			return nil, fmt.Errorf("the HUD: %w", err)
+		}
+		peer, err := q.servicePeer(ctx, hns, hname)
+		if err != nil {
+			return nil, fmt.Errorf("the HUD: %w", err)
+		}
+		target := intstr.FromInt32(port)
+		for _, sp := range svc.Spec.Ports {
+			if sp.Port == port && sp.TargetPort.IntValue() > 0 {
+				target = intstr.FromInt32(int32(sp.TargetPort.IntValue()))
+			}
+		}
+		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer},
+			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &target}}})
+	}
 	if len(np.Spec.Egress) > 0 {
 		dns := intstr.FromInt32(53)
 		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{
@@ -239,11 +288,30 @@ func (q *Queue) ensureToolsPolicy(ctx context.Context, ns string, p *c4v1.ToolPr
 // NetworkPolicy selects, the view mounted at $C4_TOOLS, for hosts the
 // egress proxy as its HTTPS_PROXY and HTTP_PROXY, and its sidecars, native
 // sidecars that start before the unit and end with it.
-func applyTools(pod *corev1.Pod, job string, p *c4v1.ToolProfile, proxy string) {
+func applyTools(pod *corev1.Pod, job string, p *c4v1.ToolProfile, proxy, hud string) {
 	if pod.Labels == nil {
 		pod.Labels = map[string]string{}
 	}
 	pod.Labels[c4v1.LabelToolProfile] = p.Name
+	if p.Spec.C4 != "" && hud != "" {
+		// A token for this pod alone, for the HUD alone, renewed by the
+		// kubelet: the unit's way to c4 (its grant is read at the HUD).
+		exp := int64(3600)
+		if pod.Spec.ServiceAccountName == "" {
+			// a projected token needs a named account (admission names
+			// "default" too, where it runs)
+			pod.Spec.ServiceAccountName = "default"
+		}
+		pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{Name: "c4-hud-token", VolumeSource: corev1.VolumeSource{
+			Projected: &corev1.ProjectedVolumeSource{Sources: []corev1.VolumeProjection{{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{
+				Audience: c4v1.HUDAudience, ExpirationSeconds: &exp, Path: "token"}}}}}})
+		for k := range pod.Spec.Containers {
+			pod.Spec.Containers[k].VolumeMounts = append(pod.Spec.Containers[k].VolumeMounts,
+				corev1.VolumeMount{Name: "c4-hud-token", MountPath: "/etc/c4/hud", ReadOnly: true})
+			pod.Spec.Containers[k].Env = append(pod.Spec.Containers[k].Env, corev1.EnvVar{Name: "C4_HUD", Value: hud},
+				corev1.EnvVar{Name: "C4_HUD_TOKEN_FILE", Value: "/etc/c4/hud/token"})
+		}
+	}
 	always := corev1.ContainerRestartPolicyAlways
 	no := false
 	for _, sc := range p.Spec.Sidecars {

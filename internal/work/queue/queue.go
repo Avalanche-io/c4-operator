@@ -93,6 +93,9 @@ type Queue struct {
 	// (the operator's namespace by default): units whose tool profile
 	// allows hosts reach them through it (tools.go). Empty: none.
 	EgressProxy string
+	// HUDService is the HUD's Service, [<namespace>/]<service>:<port>:
+	// units whose tool profile grants c4 reach it (tools.go).
+	HUDService string
 	// cal holds live calibrations, shareHist the projects that share
 	// theirs (calibrate.go), calp their persistence (persist.go).
 	cal       calibrations
@@ -1358,7 +1361,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		v.mem.attempts[idx]++
 		pod := q.podFor(v, idx, v.mem.attempts[idx], p)
 		if tools != nil {
-			applyTools(pod, v.job.Name, tools, q.proxyURL())
+			applyTools(pod, v.job.Name, tools, q.proxyURL(), q.hudURL())
 		}
 		q.leaseOutside(ctx, pod, p.spec.Name)
 		if err := q.Client.Create(ctx, pod); err != nil {

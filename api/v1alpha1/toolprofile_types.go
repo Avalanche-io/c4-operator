@@ -8,6 +8,10 @@ import (
 // profile's NetworkPolicy selects the pods by it.
 const LabelToolProfile = "c4.avalanche.io/tool-profile"
 
+// HUDAudience is the audience of the token a unit with a c4 grant holds:
+// the HUD accepts it, the Kubernetes API does not.
+const HUDAudience = "c4.avalanche.io/hud"
+
 // ToolProfile is what a unit works with beyond its image: a configuration
 // (MCP server definitions, settings, skills, plugins) as a view, and what
 // the unit may reach on the network (DESIGN 10.6, tool profiles). A unit
@@ -43,6 +47,15 @@ type ToolProfileSpec struct {
 	// network, so its egress is theirs.
 	// +optional
 	Sidecars []ToolSidecar `json:"sidecars,omitempty"`
+	// C4 is what the unit may do with c4 itself, through the HUD (and so
+	// MCP): read (see its project), job (also act on its own job: decide
+	// its waits, steer, nudge) or project (also submit jobs in its
+	// project). Empty: nothing. The unit holds a token for its pod alone,
+	// at $C4_HUD_TOKEN_FILE, and every control it makes is in the book
+	// under its name.
+	// +kubebuilder:validation:Enum=read;job;project
+	// +optional
+	C4 string `json:"c4,omitempty"`
 }
 
 // ToolSidecar is one server a profile runs beside its units.

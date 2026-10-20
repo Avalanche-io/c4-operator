@@ -14,6 +14,18 @@ type Viewer struct {
 	// producer, wrangler, farm-admin, facilities or pipeline-td. Empty:
 	// the HUD guesses from All (wrangler) or not (artist).
 	Role string `json:"role,omitempty"`
+	// Unit is set when the viewer is a unit holding its pod's HUD token:
+	// what its tool profile lets it do.
+	Unit *UnitViewer `json:"unit,omitempty"`
+}
+
+// UnitViewer is a unit acting on c4 through the HUD: its job, and its
+// grant (read, job or project).
+type UnitViewer struct {
+	Namespace string `json:"namespace"`
+	Job       string `json:"job"`
+	Unit      string `json:"unit"`
+	Grant     string `json:"grant"`
 }
 
 // Roles a viewer can have (Viewer.Role).

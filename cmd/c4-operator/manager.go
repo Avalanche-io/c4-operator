@@ -80,6 +80,7 @@ func runManager(args []string) error {
 	tick := fs.Duration("work-tick", 2*time.Second, "work queue decision period")
 	unitPriority := fs.String("unit-priority-class", "c4-unit", "PriorityClass for unit pods (preemptionPolicy Never: only c4 preempts them); empty sets none")
 	policy := fs.String("work-policy", "objective", "scheduling policy: objective, edf, fifo")
+	hudService := fs.String("hud-service", "c4-hud:80", "the HUD's Service, [<namespace>/]<service>:<port>: units whose tool profile grants c4 reach it")
 	egressProxy := fs.String("egress-proxy", "c4-egress:3128", "the farm's egress proxy, [<namespace>/]<service>:<port> (config/egress): units whose tool profile allows hosts reach them through it; empty for none")
 	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process, comma-separated: kind-sim (tests), provisioning-request (Cluster Autoscaler); empty for an external provider")
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
@@ -184,7 +185,7 @@ func runManager(args []string) error {
 			// node daemons (without the HUD, units are estimated from
 			// elapsed time alone).
 			Progress: &queue.ProgressCache{}, Safepoints: &queue.SafepointCache{}, PriorityClass: *unitPriority,
-			HolderTransfer: *holderTransfer == "allow", EgressProxy: *egressProxy}
+			HolderTransfer: *holderTransfer == "allow", EgressProxy: *egressProxy, HUDService: *hudService}
 		if err := mgr.Add(q); err != nil {
 			return err
 		}
