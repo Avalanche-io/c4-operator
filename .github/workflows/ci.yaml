@@ -21,8 +21,16 @@ jobs:
     - run: make verify
 
   test:
-    name: unit and envtest
-    runs-on: ubuntu-latest
+    # Both architectures, so a bug that shows on one only (an int
+    # conversion of +Inf, an alignment) fails here, not on a laptop.
+    name: unit and envtest (linux ${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+        - {arch: amd64, runner: ubuntu-latest}
+        - {arch: arm64, runner: ubuntu-24.04-arm}
+    runs-on: ${{ matrix.runner }}
     steps:
     - uses: actions/checkout@v7
     - uses: actions/setup-go@v7
