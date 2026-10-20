@@ -258,7 +258,9 @@ job does afterwards.
   still of the output (the middle frame's preview proxy) as the comment's
   preview: a new revision, which Kitsu plays in review and playlists. A
   publish interrupted between the comment and the upload is finished on
-  the next pass, so no revision is left processing.
+  the next pass, so no revision is left processing. When the HUD cannot
+  give the still (its leader is away), the revision waits for it up to
+  five minutes, then goes up without one.
 - **Decisions.** A person's comment that moves the task out of review is
   the decision. Its text, with the notes and replies written on the task
   since the review opened, is the decision's note, and with

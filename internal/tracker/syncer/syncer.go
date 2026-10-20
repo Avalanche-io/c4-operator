@@ -962,7 +962,11 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	}
 	// Publish before presenting: a published review entity (a Flow
 	// Version) is what the presentation then points at.
-	if err := s.publish(ctx, c, l, jr, sum); err != nil {
+	if err := s.publish(ctx, c, l, jr, sum); errors.Is(err, errStillWaiting) {
+		// Nothing is presented either: the review the publish makes is
+		// what the presentation points at.
+		return nil
+	} else if err != nil {
 		return err
 	}
 	if err := s.reviewHead(ctx, c, l, fresh); err != nil {
@@ -1463,10 +1467,15 @@ func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr f
 // the publish is once, so publishing without would lose it for good.
 const stillPatience = 5 * time.Minute
 
+// errStillWaiting is a publish put off to wait for its still: not a
+// failure of the pass (the tracker answered nothing wrong), so the link is
+// left as it is until the next one.
+var errStillWaiting = errors.New("the publish waits for its still")
+
 // still is the output's still for adapters that publish one, best effort:
 // none when the farm has none (or one too big, or not an image); on another
-// error the publish is put off to a later pass, for stillPatience from the
-// first failure, then made without it.
+// error the publish is put off to a later pass (errStillWaiting), for
+// stillPatience from the first failure, then made without it.
 func (s *Syncer) still(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr farm.JobRef, view string) (*tracker.Still, error) {
 	if !c.adapter.Capabilities().PublishPreview {
 		return nil, nil
@@ -1489,7 +1498,11 @@ func (s *Syncer) still(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr far
 	}
 	s.mu.Unlock()
 	if now.Sub(first) < stillPatience {
-		return nil, fmt.Errorf("the output's preview: %w; the publish waits for it until %s", err, first.Add(stillPatience).UTC().Format(time.RFC3339))
+		if !ok {
+			s.Log.Info("the output's preview is not to be had yet; its publish waits for it", "job", jr.String(),
+				"until", first.Add(stillPatience).UTC().Format(time.RFC3339), "error", err.Error())
+		}
+		return nil, errStillWaiting
 	}
 	s.Log.Error(err, "reading the output's preview; publishing without it", "job", jr.String())
 	return nil, nil

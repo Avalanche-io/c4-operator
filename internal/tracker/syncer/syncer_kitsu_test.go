@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -549,11 +550,13 @@ func TestKitsuPublishWaitsForTheStill(t *testing.T) {
 	e := setupKitsu(t)
 	e.inReview()
 	e.farm.PreviewFails = 1
-	if err := e.sync.Sync(context.Background(), e.tracker()); err == nil || !strings.Contains(err.Error(), "preview") {
-		t.Fatalf("the failed still should put the publish off: %v", err)
+	before := len(e.botComments())
+	e.pass() // waiting is no failure of the pass
+	if e.published() != 0 || len(e.botComments()) != before {
+		t.Fatalf("wrote while waiting for the still: %d published, %d comments (was %d)", e.published(), len(e.botComments()), before)
 	}
-	if e.published() != 0 {
-		t.Fatal("published without waiting for the still")
+	if c := meta.FindStatusCondition(e.tracker().Status.Conditions, syncer.CondReady); c == nil || c.Status != metav1.ConditionTrue {
+		t.Fatalf("the Tracker while it waits: %+v", c)
 	}
 	e.clock.add(time.Minute)
 	e.pass()
