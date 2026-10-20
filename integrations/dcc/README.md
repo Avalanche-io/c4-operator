@@ -72,6 +72,7 @@ TOOL.md section 6 for the forms). In short:
 | `C4_ROOT`                             | the folder on this machine that is the top of the project's tree (the farm mounts it as `/show` or the project's root path); default the project's root path when it exists here |
 | `C4_SHOT`, or `SHOT`                  | the shot                                                                                      |
 | `C4_SHOT_PATTERN`                     | a regular expression with a `shot` group, matched against the scene's path, when no variable names the shot |
+| `C4_TOOL_PATH`                        | folders of tool folders (`<name>/tool.yaml`) a panel offers when the farm does not list tools yet, so it can still draw its form and save the file |
 | `C4SUBMIT_CACHE`                      | where file IDs are cached (default `~/.cache/c4submit/ids.json`)                              |
 
 A studio sets these in its launcher, as it does for other pipeline tools.

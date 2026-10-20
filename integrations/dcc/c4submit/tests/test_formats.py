@@ -133,3 +133,19 @@ def test_required_field_without_a_scene():
     form = Form(Tool(NUKE_COMP))
     assert ("script", "needs a value") in form.errors()
     assert "script" not in form.values()
+
+
+def test_local_tools_stand_in_when_the_farm_lists_none(tmp_path, monkeypatch):
+    import json
+    from c4submit.submitter import Submitter
+    from c4submit.testing import FakeFarm
+    from c4submit.tool import local_tools
+    (tmp_path / "nuke-comp").mkdir()
+    (tmp_path / "nuke-comp" / "tool.yaml").write_text(json.dumps(NUKE_COMP))
+    (tmp_path / "broken").mkdir()
+    (tmp_path / "broken" / "tool.yaml").write_text("{not json")
+    assert [t.name for t in local_tools(str(tmp_path))] == ["nuke-comp"]
+    monkeypatch.setenv("C4_TOOL_PATH", str(tmp_path))
+    tools = Submitter(FakeFarm(serves_submissions=False)).tools_for("saltmarsh", "/show/a.nk")
+    assert [t.name for t in tools] == ["nuke-comp"]
+    assert Submitter.due_choices(None) == [{"value": "suggested", "label": "When the farm suggests", "at": ""}]

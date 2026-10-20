@@ -9,6 +9,7 @@ import os
 from typing import Any, Dict, List, Optional
 
 from c4submit import frames as framelib
+from c4submit import yamlio
 
 TYPES = ("STRING", "PATH", "INT", "FLOAT", "BOOL", "RANGE_EXPR")
 SHOW = ("artist", "advanced", "wrangler", "hidden")
@@ -198,3 +199,37 @@ class Tool:
             if not pats or any(fnmatch.fnmatch(base.lower(), pat.lower()) for pat in pats):
                 return True
         return False
+
+
+def load(path: str) -> Tool:
+    """A tool from its ``tool.yaml`` (or the folder holding it)."""
+    if os.path.isdir(path):
+        path = os.path.join(path, "tool.yaml")
+    with open(path, encoding="utf-8") as f:
+        d = yamlio.load(f.read())
+    if not isinstance(d, dict) or d.get("c4") != "tool/1":
+        raise ValueError(f"{path} is not a tool (c4: tool/1)")
+    return Tool(d)
+
+
+def local_tools(search: Optional[str] = None) -> List[Tool]:
+    """The tools in the folders on ``C4_TOOL_PATH`` (``os.pathsep``-separated):
+    each folder, or each folder inside it, holding a ``tool.yaml``.
+    Unreadable ones are skipped."""
+    out: List[Tool] = []
+    seen = set()
+    for d in (search if search is not None else os.environ.get("C4_TOOL_PATH", "")).split(os.pathsep):
+        if not d or not os.path.isdir(d):
+            continue
+        cands = [d] + sorted(os.path.join(d, n) for n in os.listdir(d))
+        for c in cands:
+            if not os.path.isfile(os.path.join(c, "tool.yaml")):
+                continue
+            try:
+                t = load(c)
+            except (OSError, ValueError):
+                continue
+            if t.name not in seen:
+                seen.add(t.name)
+                out.append(t)
+    return out

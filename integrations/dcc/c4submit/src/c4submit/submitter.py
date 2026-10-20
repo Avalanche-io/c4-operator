@@ -30,7 +30,7 @@ from c4submit.collect import Cancelled, Collection, IDCache, Problem
 from c4submit.farm import Farm, FarmError, NotOnFarm
 from c4submit.form import Form
 from c4submit.host import Dependency, Host, Renderable
-from c4submit.tool import Tool
+from c4submit.tool import Tool, local_tools
 
 Progress = Callable[[str, int, int], None]
 
@@ -325,15 +325,19 @@ class Submitter:
     # --- reading the farm ---------------------------------------------------
 
     def tools_for(self, project: str, scene_file: str) -> List[Tool]:
-        """The project's tools that run scenes like the open one."""
-        out = []
-        for t in self.farm.tools(project):
-            tool = Tool(self.farm.tool(project, t["name"]))
-            if tool.accepts_scene(scene_file):
-                out.append(tool)
-        return out
+        """The project's tools that run scenes like the open one. On a farm
+        that does not list tools yet, the tool folders on ``C4_TOOL_PATH``
+        stand in, so a panel can still draw its form and save the file."""
+        try:
+            tools = [Tool(self.farm.tool(project, t["name"])) for t in self.farm.tools(project)]
+        except NotOnFarm:
+            tools = local_tools()
+            if not tools:
+                raise
+        return [t for t in tools if t.accepts_scene(scene_file)]
 
-    def due_choices(self, project_info: Optional[dict]) -> List[Dict[str, str]]:
+    @staticmethod
+    def due_choices(project_info: Optional[dict]) -> List[Dict[str, str]]:
         """"Needed by": the project's milestones, then the farm's suggestion."""
         out = []
         for m in (project_info or {}).get("milestones") or []:
