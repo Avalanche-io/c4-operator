@@ -41,8 +41,10 @@ type WaitState struct {
 	Escalated bool
 }
 
-// Decisions are what a person may decide on the wait: approve and its
-// choices, or for an escalated unit accept and rework.
+// Decisions are what a person may decide on the wait, as the queue and
+// the HUD take them (internal/work/queue/wait.go): a wait with choices
+// takes one of them (or fail); a wait without takes approve; an escalated
+// unit takes accept or rework.
 func (w *WaitState) Decisions() []string {
 	if w == nil {
 		return nil
@@ -50,13 +52,10 @@ func (w *WaitState) Decisions() []string {
 	if w.Escalated {
 		return []string{"accept", "rework"}
 	}
-	out := []string{"approve"}
-	for _, c := range w.Choices {
-		if c != "approve" {
-			out = append(out, c)
-		}
+	if len(w.Choices) == 0 {
+		return []string{"approve"}
 	}
-	return out
+	return append([]string(nil), w.Choices...)
 }
 
 // Written is what the loop last wrote for one field.

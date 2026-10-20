@@ -110,7 +110,13 @@ type HUD struct {
 	Token func(ctx context.Context) (string, error)
 	// Agent is what the HUD books c4-sync's controls as (X-C4-Agent).
 	Agent string
-	HTTP  *http.Client
+	// As selects a development viewer (?as=) on HUDs started with
+	// --hud-dev-viewers (tests and demos only), which ignore bearer tokens.
+	As string
+	// Public is the HUD's address as people reach it, for links written
+	// to trackers (an ingress); empty uses Base.
+	Public string
+	HTTP   *http.Client
 }
 
 // APIError is a refusal from the HUD.
@@ -122,7 +128,15 @@ type APIError struct {
 func (e *APIError) Error() string { return fmt.Sprintf("HUD %d: %s", e.Status, e.Msg) }
 
 func (h *HUD) do(ctx context.Context, method, path string, ctype string, body []byte, out any) error {
-	req, err := http.NewRequestWithContext(ctx, method, strings.TrimSuffix(h.Base, "/")+"/api/v1"+path, bytes.NewReader(body))
+	u := strings.TrimSuffix(h.Base, "/") + "/api/v1" + path
+	if h.As != "" {
+		sep := "?"
+		if strings.Contains(u, "?") {
+			sep = "&"
+		}
+		u += sep + "as=" + url.QueryEscape(h.As)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u, bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -293,5 +307,9 @@ func (h *HUD) StoreView(ctx context.Context, project string, files map[string][]
 func (h *HUD) EnsureMilestone(context.Context, Milestone) error { return ErrNotBuilt }
 
 func (h *HUD) JobURL(j JobRef) string {
-	return strings.TrimSuffix(h.Base, "/") + "/#/job/" + j.Namespace + "/" + j.Name
+	base := h.Public
+	if base == "" {
+		base = h.Base
+	}
+	return strings.TrimSuffix(base, "/") + "/#/job/" + j.Namespace + "/" + j.Name
 }

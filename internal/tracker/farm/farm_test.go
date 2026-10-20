@@ -168,3 +168,19 @@ func TestMilestoneNotBuilt(t *testing.T) {
 		t.Fatalf("want ErrNotBuilt, got %v", err)
 	}
 }
+
+func TestDevViewerAndPublicURL(t *testing.T) {
+	var got string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.URL.RawQuery
+		_, _ = w.Write([]byte(`{"namespace":"work","name":"j","phase":"Running"}`))
+	}))
+	defer srv.Close()
+	h := &farm.HUD{Base: srv.URL, As: "c4-sync", Public: "https://c4.example.com/"}
+	if _, err := h.Job(context.Background(), farm.JobRef{Namespace: "work", Name: "j"}); err != nil || got != "as=c4-sync" {
+		t.Fatalf("query %q, %v", got, err)
+	}
+	if u := h.JobURL(farm.JobRef{Namespace: "work", Name: "j"}); u != "https://c4.example.com/#/job/work/j" {
+		t.Fatalf("job URL %q", u)
+	}
+}

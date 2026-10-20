@@ -48,8 +48,8 @@ func main() {
 }
 
 type options struct {
-	hud, tokenFile, listen, agent string
-	interval                      time.Duration
+	hud, hudPublic, tokenFile, listen, agent, devViewer string
+	interval                                            time.Duration
 }
 
 func parse(args []string, stderr io.Writer) (options, error) {
@@ -61,6 +61,8 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.StringVar(&o.listen, "listen", ":8090", "where to receive tracker deliveries (/webhooks/{namespace}/{tracker})")
 	fs.StringVar(&o.agent, "agent", "c4-sync", "the name the HUD books c4-sync's controls under (X-C4-Agent)")
 	fs.DurationVar(&o.interval, "interval", time.Minute, "time between passes over every Tracker")
+	fs.StringVar(&o.hudPublic, "hud-public-url", os.Getenv("C4_HUD_PUBLIC_URL"), "the HUD's address as people reach it, for links written to trackers (default --hud)")
+	fs.StringVar(&o.devViewer, "hud-dev-viewer", "", "development only: the HUD viewer (?as=) to act as, on a HUD started with --hud-dev-viewers")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return o, err
@@ -108,7 +110,7 @@ func run(args []string, stderr io.Writer) error {
 	}
 	s := &syncer.Syncer{
 		Client: k8s,
-		Farm: &farm.HUD{Base: o.hud, Agent: o.agent, Token: func(context.Context) (string, error) {
+		Farm: &farm.HUD{Base: o.hud, Agent: o.agent, As: o.devViewer, Public: o.hudPublic, Token: func(context.Context) (string, error) {
 			if o.tokenFile == "" {
 				return "", nil
 			}

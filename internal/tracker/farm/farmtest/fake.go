@@ -84,9 +84,10 @@ func (f *Farm) SetDeadline(_ context.Context, j farm.JobRef, at time.Time) error
 	return nil
 }
 
-// Decide carries out a decision on an open wait, as the HUD would: a
-// wait unit takes approve, one of its choices, or fail; an escalated unit
-// accept, rework or fail.
+// Decide carries out a decision on an open wait, as the HUD and the queue
+// do (internal/hud/server/controls.go, internal/work/queue/wait.go): a
+// wait with choices takes one of them or fail, one without takes any;
+// an escalated unit takes accept, rework or fail.
 func (f *Farm) Decide(_ context.Context, j farm.JobRef, r farm.Relay) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -107,7 +108,7 @@ func (f *Farm) Decide(_ context.Context, j farm.JobRef, r farm.Relay) error {
 	switch {
 	case w.Escalated && r.Do != "accept" && r.Do != "rework" && r.Do != "fail":
 		return fmt.Errorf("do: accept, rework or fail, for a unit a review escalated")
-	case !w.Escalated && len(w.Choices) > 0 && r.Do != "fail" && r.Do != "approve" && !slices.Contains(w.Choices, r.Do):
+	case !w.Escalated && len(w.Choices) > 0 && r.Do != "fail" && !slices.Contains(w.Choices, r.Do):
 		return fmt.Errorf("do: one of %v, or fail", w.Choices)
 	}
 	now := f.Now()

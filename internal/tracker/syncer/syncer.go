@@ -616,6 +616,14 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 		review = rule.Review.Wait
 	}
 	jr := farm.JobRef{Namespace: l.Namespace, Name: l.Spec.Target.WorkJob}
+	// A rework relayed for this job whose next version was not made (a
+	// pass that failed between relaying and moving the link) is finished
+	// now: submitting and storing are idempotent.
+	if rule.Rework == "nextVersion" {
+		if d := lastDecision(l); d != nil && d.Do == "rework" && d.Job == jr.Name {
+			return s.nextVersion(ctx, t, l, j, rule)
+		}
+	}
 	sum := Summarize(j, review, reworking(l))
 
 	// Decisions first: a decision relayed now changes what is written.
@@ -759,8 +767,8 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 	if pick == nil {
 		return "", nil
 	}
-	rec := c4v1.TrackerDecision{Source: pick.Source.String(), By: pick.By.ID, Unit: unitRef(w), At: metav1.NewTime(pick.At),
-		Note: clip(pick.Body, 4096)}
+	rec := c4v1.TrackerDecision{Source: pick.Source.String(), By: pick.By.ID, Unit: unitRef(w), Job: jr.Name,
+		At: metav1.NewTime(pick.At), Note: clip(pick.Body, 4096)}
 	do := verdictFor(t, pick.Native)
 	if w.Escalated && do == "approve" {
 		do = "accept" // an escalated unit is accepted, not approved
@@ -772,7 +780,7 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 		return "", s.recordDecision(ctx, l, rec)
 	}
 	if !allowed(w, do) {
-		rec.Error = fmt.Sprintf("the wait does not take %q (choices: %s)", do, strings.Join(append([]string{"approve"}, w.Choices...), ", "))
+		rec.Error = fmt.Sprintf("the wait does not take %q (choices: %s); add it to the wait's choices or map the tracker's decision to one", do, strings.Join(w.Choices, ", "))
 		return "", s.recordDecision(ctx, l, rec)
 	}
 	err := s.Farm.Decide(ctx, jr, farm.Relay{
@@ -797,14 +805,13 @@ func unitRef(w *api.Wait) string {
 	return strconv.Itoa(w.Unit)
 }
 
+// allowed is the queue's rule (internal/work/queue/wait.go): a wait with
+// choices takes one of them or fail; one without takes anything.
 func allowed(w *api.Wait, do string) bool {
 	if w.Escalated {
 		return do == "accept" || do == "rework" || do == "fail"
 	}
 	if do == "fail" || len(w.Choices) == 0 {
-		return true
-	}
-	if do == "approve" {
 		return true
 	}
 	for _, c := range w.Choices {
@@ -990,12 +997,20 @@ const NoteMount = "/c4/notes"
 
 // lastDecisionNote is the text of the decision just relayed.
 func lastDecisionNote(l *c4v1.TrackerLink) string {
-	for i := len(l.Status.Decisions) - 1; i >= 0; i-- {
-		if d := l.Status.Decisions[i]; d.Error == "" {
-			return d.Note
-		}
+	if d := lastDecision(l); d != nil {
+		return d.Note
 	}
 	return ""
+}
+
+// lastDecision is the last decision relayed (not refused) for the link.
+func lastDecision(l *c4v1.TrackerLink) *c4v1.TrackerDecision {
+	for i := len(l.Status.Decisions) - 1; i >= 0; i-- {
+		if d := &l.Status.Decisions[i]; d.Error == "" {
+			return d
+		}
+	}
+	return nil
 }
 
 // --- status writes to the API ---

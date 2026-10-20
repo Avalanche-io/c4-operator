@@ -326,6 +326,9 @@ type TrackerDecision struct {
 	Do string `json:"do"`
 	// Unit is the wait it served.
 	Unit string `json:"unit"`
+	// Job is the job whose wait it served.
+	// +optional
+	Job string `json:"job,omitempty"`
 	// Note is the decision's text (a reviewer's note), up to 4 KiB; the
 	// whole of it is in the evidence C4 stored.
 	// +optional

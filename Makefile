@@ -16,7 +16,7 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 comma := ,
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync sync-yaml install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync sync-yaml demo-dailies install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -124,6 +124,12 @@ release-snapshot:
 
 e2e:
 	hack/e2e/run.sh
+
+# The Flow dailies demo on the running e2e cluster: a fake Flow site,
+# c4-sync and a render, with HUD captures in hack/demo/out/dailies; it
+# tears down what it made (KEEP=1 keeps it; hack/demo/dailies.sh down).
+demo-dailies:
+	hack/demo/dailies.sh
 
 e2e-down:
 	$(KIND) delete cluster --name c4-operator-e2e

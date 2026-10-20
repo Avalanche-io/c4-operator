@@ -2,6 +2,7 @@ package syncer_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -10,10 +11,13 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
@@ -42,7 +46,7 @@ type flowEnv struct {
 // days out, and a Tracker that turns ready lighting Tasks into render
 // jobs whose deadline is Thursday-style dailies: 14:00 local on the due
 // date.
-func setupFlow(t *testing.T) *flowEnv {
+func setupFlow(t *testing.T, opts ...func(*fake.ClientBuilder)) *flowEnv {
 	t.Helper()
 	ck := &clock{t: time.Now().UTC().Truncate(time.Second)}
 	site := flowtest.New()
@@ -85,12 +89,16 @@ func setupFlow(t *testing.T) *flowEnv {
 			People:     map[string]string{"dana": "dana"},
 		},
 	}
-	k8s := fake.NewClientBuilder().WithScheme(sch).
+	b := fake.NewClientBuilder().WithScheme(sch).
 		WithStatusSubresource(&c4v1.Tracker{}, &c4v1.TrackerLink{}).
 		WithObjects(tr,
 			&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "flow-script"}, Data: map[string][]byte{"key": []byte(site.Key)}},
 			&corev1.Secret{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "flow-hook"}, Data: map[string][]byte{"token": flowHook}},
-		).Build()
+		)
+	for _, o := range opts {
+		o(b)
+	}
+	k8s := b.Build()
 	fm := farmtest.New()
 	fm.Now = ck.now
 	s := &syncer.Syncer{Client: k8s, Farm: fm, Now: ck.now}
@@ -208,7 +216,7 @@ func TestFlowDailiesLoop(t *testing.T) {
 	// 4. The render finishes and its dailies wait opens: the output is
 	// published as v001 in pending review, with its C4 ID.
 	e.job(first, func(j *api.Job) { j.Output = &api.Output{View: "c4OutputV001"} })
-	e.farm.OpenWait(ns, first, "dailies", "person:dana", "rework", "accept")
+	e.farm.OpenWait(ns, first, "dailies", "person:dana", "approve", "rework", "accept")
 	e.pass()
 	vs := e.versions()
 	if len(vs) != 1 {
@@ -279,7 +287,7 @@ func TestFlowDailiesLoop(t *testing.T) {
 		t.Fatal("the Task should be back in progress")
 	}
 	e.job(second.Name, func(j *api.Job) { j.Output = &api.Output{View: "c4OutputV002"} })
-	e.farm.OpenWait(ns, second.Name, "dailies", "person:dana", "rework", "accept")
+	e.farm.OpenWait(ns, second.Name, "dailies", "person:dana", "approve", "rework", "accept")
 	e.pass()
 	vs = e.versions()
 	if len(vs) != 2 || vs[1].Fields["code"] != "sh040_lgt_v002" || vs[1].Fields["sg_c4_id"] != "c4OutputV002" || vs[1].Fields["sg_status_list"] != "rev" {
@@ -336,7 +344,7 @@ func TestFlowOnlyTheReviewerDecides(t *testing.T) {
 	e.pass()
 	job := "flow-" + strconv.Itoa(e.task.ID)
 	e.job(job, func(j *api.Job) { j.Phase = "Running"; j.Output = &api.Output{View: "c4v"} })
-	e.farm.OpenWait(ns, job, "dailies", "person:dana", "rework")
+	e.farm.OpenWait(ns, job, "dailies", "person:dana", "approve", "rework")
 	e.pass()
 	v := e.versions()[0]
 	e.clock.add(time.Minute)
@@ -369,5 +377,47 @@ func TestFlowTokenRenewal(t *testing.T) {
 	}
 	if n != 2 {
 		t.Fatalf("%d token requests, want 2: one at the start, one after the expiry", n)
+	}
+}
+
+// A pass that relays a rework and submits the next version, but cannot
+// move the link (the API refused the patch: on the live cluster, RBAC),
+// finishes the next version on the following pass instead of losing it.
+func TestFlowNextVersionSurvivesAFailedLinkMove(t *testing.T) {
+	refused := 0
+	e := setupFlow(t, func(b *fake.ClientBuilder) {
+		b.WithInterceptorFuncs(interceptor.Funcs{Patch: func(ctx context.Context, c client.WithWatch, o client.Object, p client.Patch, opts ...client.PatchOption) error {
+			if _, ok := o.(*c4v1.TrackerLink); ok && refused == 0 {
+				refused++
+				return apierrors.NewForbidden(schema.GroupResource{Group: "c4.avalanche.io", Resource: "trackerlinks"}, o.GetName(), errors.New("no patch"))
+			}
+			return c.Patch(ctx, o, p, opts...)
+		}})
+	})
+	first := "flow-" + strconv.Itoa(e.task.ID)
+	e.pass()
+	e.job(first, func(j *api.Job) { j.Phase = "Running"; j.Output = &api.Output{View: "c4v1"} })
+	e.farm.OpenWait(ns, first, "dailies", "person:dana", "approve", "rework", "accept")
+	e.pass()
+	e.clock.add(time.Minute)
+	v := e.versions()[0]
+	e.site.Set(flowtest.Link{Type: "Version", ID: v.ID}, map[string]any{"sg_status_list": "fix"}, e.dana)
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.sync.Sync(context.Background(), &tr); err == nil {
+		t.Fatal("the refused patch should fail the pass")
+	}
+	if l := e.link(); l.Spec.Target.WorkJob != first {
+		t.Fatalf("the link moved despite the refusal: %s", l.Spec.Target.WorkJob)
+	}
+	e.pass()
+	l := e.link()
+	if l.Spec.Target.WorkJob != first+"-v002" || len(l.Status.Versions) != 1 || l.Status.Versions[0] != first {
+		t.Fatalf("after the retry: target %s, versions %v", l.Spec.Target.WorkJob, l.Status.Versions)
+	}
+	if n := len(e.farm.Submitted); n != 2 || len(e.farm.Relays) != 1 {
+		t.Fatalf("submitted %d jobs and relayed %d decisions; want 2 and 1", n, len(e.farm.Relays))
 	}
 }

@@ -97,11 +97,24 @@ func singular(p string) string {
 	return ""
 }
 
-// New starts a fake site with one project.
+// New starts a fake site with one project, on a random local port.
 func New() *Server {
+	s := newServer()
+	s.Server.Start()
+	return s
+}
+
+// Unstarted makes a fake site that does not listen: serve Handler()
+// yourself, beside other routes (hack/demo/fakeflow runs it as a service).
+func Unstarted() *Server { return newServer() }
+
+// Handler is the site's REST API, to mount beside other routes.
+func (s *Server) Handler() http.Handler { return http.HandlerFunc(s.serve) }
+
+func newServer() *Server {
 	s := &Server{Script: "c4-sync", Key: "s3cretkey", TokenSeconds: 600, now: time.Now,
 		next: map[string]int{}, recs: map[string]map[int]*Record{}, tokens: map[string]time.Time{}}
-	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
+	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(s.serve))
 	s.mu.Lock()
 	s.project = s.add("Project", map[string]any{"name": "Saltmarsh"}, nil).ID
 	u := s.add("ApiUser", map[string]any{"firstname": "c4-sync", "lastname": "script"}, nil)

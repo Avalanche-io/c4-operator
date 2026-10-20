@@ -252,7 +252,7 @@ func TestIssueToJobToReviewLoop(t *testing.T) {
 
 	// 6. The review wait opens: the check run says who it waits for and
 	// offers the wait's decisions as buttons.
-	e.farm.OpenWait(ns, "gh-7", "review", "person:dana", "rework")
+	e.farm.OpenWait(ns, "gh-7", "review", "person:dana", "approve", "rework")
 	e.pass()
 	cr = e.lastCheck("abc")
 	if cr.Status != "in_progress" || cr.Output.Title != "Waiting for review by dana · ETA "+later.UTC().Format("Mon 15:04 UTC") ||
@@ -309,7 +309,7 @@ func TestIssueToJobToReviewLoop(t *testing.T) {
 	// 9. The rework comes back for review; Dana approves; the approval
 	// serves the new wait. The old rework is not relayed again.
 	e.clock.add(time.Hour)
-	e.farm.OpenWait(ns, "gh-7", "review", "person:dana", "rework")
+	e.farm.OpenWait(ns, "gh-7", "review", "person:dana", "approve", "rework")
 	e.pass()
 	e.clock.add(time.Minute)
 	e.gh.AddReview(12, "dana", "APPROVED", "Ship it.")
@@ -387,7 +387,7 @@ func TestCheckRunButtonServesWait(t *testing.T) {
 	e.pass()
 	e.gh.AddPull(12, "Port", "C4-Job: work/gh-7", "abc", "lee")
 	e.job(func(j *api.Job) { j.Phase = "Running" })
-	e.farm.OpenWait(ns, "gh-7", "review", "person:dana", "rework")
+	e.farm.OpenWait(ns, "gh-7", "review", "person:dana", "approve", "rework")
 	e.pass()
 	id := e.lastCheck("abc").ID
 	if c := e.deliver("check_run", e.gh.CheckActionPayload(id, "approve", "lee"), hookSecret, "a-1"); c != http.StatusAccepted {
@@ -557,5 +557,30 @@ func TestPushGetsNewCheckRun(t *testing.T) {
 	}
 	if len(e.gh.CheckRuns("def")) != 1 || len(e.gh.Statuses("def")) != 1 {
 		t.Fatalf("new head: %d runs, %d statuses", len(e.gh.CheckRuns("def")), len(e.gh.Statuses("def")))
+	}
+}
+
+// The queue and the HUD take only a wait's choices when it has them
+// (internal/work/queue/wait.go): an approval the wait does not offer is
+// refused and recorded, not sent to be refused 400 times by the HUD.
+func TestApproveOnlyWhenTheWaitOffersIt(t *testing.T) {
+	e := setup(t)
+	e.pass()
+	e.gh.AddPull(12, "Port", "C4-Job: work/gh-7", "abc", "lee")
+	e.job(func(j *api.Job) { j.Phase = "Running" })
+	e.farm.OpenWait(ns, "gh-7", "review", "person:dana", "rework")
+	e.pass()
+	e.clock.add(time.Minute)
+	e.gh.AddReview(12, "dana", "APPROVED", "ok")
+	e.pass()
+	if len(e.farm.Relays) != 0 {
+		t.Fatal("approve was relayed to a wait whose only choice is rework")
+	}
+	ds := e.link().Status.Decisions
+	if len(ds) != 1 || !strings.Contains(ds[0].Error, `does not take "approve"`) {
+		t.Fatalf("decisions: %+v", ds)
+	}
+	if acts := e.lastCheck("abc").Actions; len(acts) != 1 || acts[0].Identifier != "rework" {
+		t.Fatalf("the check run offers only what the wait takes: %+v", acts)
 	}
 }

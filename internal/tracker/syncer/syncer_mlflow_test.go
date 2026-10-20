@@ -151,7 +151,7 @@ func TestMLflowPromoteLoop(t *testing.T) {
 	// 3. Training finishes; the promote wait opens: the output is
 	// registered as version 1, from the run, with its C4 ID.
 	e.job(func(j *api.Job) { j.Output = &api.Output{View: "c4Checkpoint1"} })
-	e.farm.OpenWait(ns, e.jobName(), "promote", "party:ml-leads", "rework")
+	e.farm.OpenWait(ns, e.jobName(), "promote", "party:ml-leads", "approve", "rework")
 	e.pass()
 	vs := e.ml.Versions("denoiser")
 	if len(vs) != 1 || vs[0].Source != "c4:///c4Checkpoint1" || vs[0].RunID != e.run || vs[0].Tags["c4.id"] != "c4Checkpoint1" ||
@@ -216,7 +216,7 @@ func TestMLflowReworkTag(t *testing.T) {
 	e := setupML(t, "")
 	e.pass()
 	e.job(func(j *api.Job) { j.Phase = "Running"; j.Output = &api.Output{View: "c4C1"} })
-	e.farm.OpenWait(ns, e.jobName(), "promote", "party:ml-leads", "rework")
+	e.farm.OpenWait(ns, e.jobName(), "promote", "party:ml-leads", "approve", "rework")
 	e.pass()
 	e.clock.add(time.Minute)
 	e.ml.SetVersionTag("denoiser", "1", "c4.note", "val loss regressed on night plates; add the night set")
@@ -240,7 +240,7 @@ func TestMLflowRegistryCannotServeAPersonsWait(t *testing.T) {
 	e := setupML(t, "")
 	e.pass()
 	e.job(func(j *api.Job) { j.Phase = "Running"; j.Output = &api.Output{View: "c4C1"} })
-	e.farm.OpenWait(ns, e.jobName(), "promote", "person:dana", "rework")
+	e.farm.OpenWait(ns, e.jobName(), "promote", "person:dana", "approve", "rework")
 	e.pass()
 	e.clock.add(time.Minute)
 	e.ml.SetAlias("denoiser", "production", "1")
