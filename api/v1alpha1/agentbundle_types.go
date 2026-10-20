@@ -18,7 +18,8 @@ const LabelSlotLimit = "c4.avalanche.io/slot-limit"
 // plain words ("power: 38 of 40 W, battery 48% on a 39 W adapter").
 const AnnotationCapacityReason = "c4.avalanche.io/capacity-reason"
 
-// AgentClock is a bundle's virtual clock (proposals/agent-jobs, section 3):
+// AgentClock is a bundle's virtual clock (docs/agents/c4-agent.md,
+// "Capacity under a power cap, and the bundle's clock"):
 // it runs while the bundle runs and stops while it is suspended, so a
 // suspension is invisible to the members' timers. Real deadlines stay real.
 type AgentClock struct {
@@ -76,7 +77,7 @@ type AgentMemberSpec struct {
 
 // AgentBundleSpec declares a bundle of agents that the farm schedules as
 // one: its members, how many may run at once, its deadline and where it
-// runs (proposals/agent-jobs, section 2).
+// runs (docs/agents/c4-agent.md, "Bundles on the farm").
 type AgentBundleSpec struct {
 	// Members, in the order the bundle's lead wants them run.
 	// +kubebuilder:validation:MinItems=1

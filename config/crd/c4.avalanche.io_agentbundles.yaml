@@ -57,7 +57,7 @@ spec:
             description: |-
               AgentBundleSpec declares a bundle of agents that the farm schedules as
               one: its members, how many may run at once, its deadline and where it
-              runs (proposals/agent-jobs, section 2).
+              runs (docs/agents/c4-agent.md, "Bundles on the farm").
             properties:
               deadline:
                 description: Deadline is the bundle's real-time deadline.

@@ -32,7 +32,7 @@ spec:
       openAPIV3Schema:
         description: |-
           A SubmitGrant is a person's leave for a Tracker to submit work for them
-          (proposals/integrations GAPS 17): jobs the Tracker's sync makes "for"
+          (internal/hud/API.md, Grants): jobs the Tracker's sync makes "for"
           the person are the person's own, so what is bound to them (a lease of
           their own sign-in) serves those jobs and nothing else does.
 

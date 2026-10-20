@@ -63,7 +63,7 @@ type MilestoneStatus struct {
 	// Done counts the covered jobs that succeeded.
 	// +optional
 	Done int32 `json:"done,omitempty"`
-	// Forecast counts the covered forecast jobs (integrations GAPS 9).
+	// Forecast counts the covered forecast jobs (DESIGN.md 10.12).
 	// ForecastRisk is the worst risk once their work comes: theirs, and
 	// the covered real jobs' as the farm plans them with it. Risk is the
 	// real work's alone, as the farm plans it now.

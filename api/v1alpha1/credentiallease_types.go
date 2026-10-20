@@ -4,7 +4,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// A CredentialLease (proposals agent-jobs 09, "Credential leases") says who
+// A CredentialLease (docs/agents/credential-leases.md) says who
 // may use which model credential, where and until when, and keeps its
 // Secret renewed or revokes it: to a model credential what a cert-manager
 // Certificate is to a TLS key.

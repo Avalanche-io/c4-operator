@@ -12,7 +12,7 @@ import (
 )
 
 // A SubmitGrant is a person's leave for a Tracker to submit work for them
-// (proposals/integrations GAPS 17): jobs the Tracker's sync makes "for"
+// (internal/hud/API.md, Grants): jobs the Tracker's sync makes "for"
 // the person are the person's own, so what is bound to them (a lease of
 // their own sign-in) serves those jobs and nothing else does.
 //
@@ -77,7 +77,7 @@ func init() {
 
 // AnnotationGrant on a WorkJob a Tracker submitted for a person is the C4
 // ID of that person's grant record: the job is theirs under that grant
-// (GAPS 17). Set at creation, never changed.
+// Set at creation, never changed.
 const AnnotationGrant = "c4.avalanche.io/grant"
 
 // SubmitGrantName is the one grant a person has for a Tracker, so granting

@@ -214,8 +214,8 @@ spec:
                 type: string
               state:
                 description: |-
-                  State is the job's summary state as last written
-                  (integrations MAPPING section 2).
+                  State is the job's summary state as last written: one of the work
+                  states in docs/c4-sync.md, "What it writes".
                 type: string
               versions:
                 description: |-
@@ -241,7 +241,7 @@ spec:
                         State is sending while the write is journaled and not yet answered
                         (an interruption leaves it so), and unconfirmed when it was
                         interrupted and nothing can tell whether it happened: it is held
-                        for a person (integrations GAPS 11). Empty: written.
+                        for a person (internal/hud/API.md, Held tracker writes). Empty: written.
                       enum:
                       - sending
                       - unconfirmed

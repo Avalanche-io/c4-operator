@@ -55,8 +55,8 @@ spec:
               credential:
                 description: |-
                   Credential is where the tracker credential is. It is a Secret in
-                  this namespace, materialized by a credential lease (integrations
-                  GAPS 8); c4-sync rereads it on every use, so rotation needs no
+                  this namespace, materialized by a credential lease
+                  (docs/agents/credential-leases.md); c4-sync rereads it on every use, so rotation needs no
                   restart.
                 properties:
                   lease:
@@ -114,7 +114,7 @@ spec:
                       description: |-
                         As is job (the entity becomes a WorkJob), milestone (it becomes a
                         Milestone, whose due date the jobs it covers take) or forecast (it
-                        becomes a forecast job, integrations GAPS 9: work the farm plans for
+                        becomes a forecast job, DESIGN.md 10.12: work the farm plans for
                         before it is ready; when a job rule matches the entity later, the
                         real job replaces it).
                       enum:
@@ -157,7 +157,7 @@ spec:
                         For says whose work the jobs are: the person the farm records as
                         their owner, so what is bound to that person (a lease of their
                         sign-in) serves them. The person must have let this Tracker submit
-                        for them (a grant, integrations GAPS 17); without one nothing is
+                        for them (a grant, internal/hud/API.md, Grants); without one nothing is
                         submitted, never c4-sync's own job instead. Empty: the jobs are
                         c4-sync's.
                       properties:
@@ -249,7 +249,7 @@ spec:
                           type: string
                         forecast:
                           description: |-
-                            Forecast makes the job a forecast only (integrations GAPS 9): work a
+                            Forecast makes the job a forecast only (DESIGN.md 10.12): work a
                             tracker expects (a shot not yet turned over, its bid) that the farm
                             plans for. It is estimated and placed among the real work, never
                             released: no pods, no quota, no burst capacity bought for it, and no
@@ -323,7 +323,7 @@ spec:
                           type: integer
                         measure:
                           description: |-
-                            Measure is the job's own measure of done (PRIMITIVES Q12): a number a
+                            Measure is the job's own measure of done (DESIGN.md 10.6): a number a
                             unit reports (.c4/measure.json, c4-unit measure), such as rules
                             sited of 379, shown as the job's progress.
                           properties:
@@ -392,7 +392,7 @@ spec:
                             Review is a person's (or party's) review of the whole job's work:
                             a final wait, unit "@review", after every other unit, including
                             those expansions add later, so the job is Succeeded only once it is
-                            decided ("done means approved", integrations GAPS 7). Any choice but
+                            decided ("done means approved", DESIGN.md 10.6). Any choice but
                             fail completes it; fail fails the job. Set at creation only.
                           properties:
                             ask:
@@ -472,7 +472,7 @@ spec:
                         Rework is what a rework decision does: inPlace (default: the job's
                         units run again, as in CI and agent work) or nextVersion (a new job
                         follows this one with the note as an input, as v008 follows v007 in
-                        media; integrations GAPS 6).
+                        media).
                       enum:
                       - inPlace
                       - nextVersion
@@ -540,7 +540,7 @@ spec:
                       in-review, rework, held, failed) to the tracker's own status, for
                       trackers whose statuses differ per site (flow: running: ip). A state
                       not listed is not written. done is never written: approval is the
-                      tracker's (integrations MAPPING section 2).
+                      tracker's (docs/c4-sync.md, "What it writes").
                     type: object
                 type: object
               verdictsIn:
@@ -632,8 +632,8 @@ spec:
                 type: string
               farmCursor:
                 description: |-
-                  FarmCursor is the last transition of the farm's log (GET /book?since,
-                  integrations GAPS 5) this Tracker has acted on: after an outage it
+                  FarmCursor is the last transition of the farm's log (GET /book?since
+                  in internal/hud/API.md) this Tracker has acted on: after an outage it
                   reads what it missed from there.
                 format: int64
                 type: integer

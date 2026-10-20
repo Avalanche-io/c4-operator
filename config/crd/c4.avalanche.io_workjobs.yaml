@@ -116,7 +116,7 @@ spec:
                 type: string
               forecast:
                 description: |-
-                  Forecast makes the job a forecast only (integrations GAPS 9): work a
+                  Forecast makes the job a forecast only (DESIGN.md 10.12): work a
                   tracker expects (a shot not yet turned over, its bid) that the farm
                   plans for. It is estimated and placed among the real work, never
                   released: no pods, no quota, no burst capacity bought for it, and no
@@ -188,7 +188,7 @@ spec:
                 type: integer
               measure:
                 description: |-
-                  Measure is the job's own measure of done (PRIMITIVES Q12): a number a
+                  Measure is the job's own measure of done (DESIGN.md 10.6): a number a
                   unit reports (.c4/measure.json, c4-unit measure), such as rules
                   sited of 379, shown as the job's progress.
                 properties:
@@ -254,7 +254,7 @@ spec:
                   Review is a person's (or party's) review of the whole job's work:
                   a final wait, unit "@review", after every other unit, including
                   those expansions add later, so the job is Succeeded only once it is
-                  decided ("done means approved", integrations GAPS 7). Any choice but
+                  decided ("done means approved", DESIGN.md 10.6). Any choice but
                   fail completes it; fail fails the job. Set at creation only.
                 properties:
                   ask:
@@ -390,7 +390,7 @@ spec:
                   signature, a node, a review's reason, information a brief lacked),
                   each with the units it touched and what the farm did, so people and
                   trackers see one item per cause rather than one per failure
-                  (integrations GAPS 4). At most 16, the newest kept; CausesDropped
+                  (DESIGN.md 10.14). At most 16, the newest kept; CausesDropped
                   counts the rest.
                 items:
                   description: WorkCause is one cause of a job's failures or flags.
@@ -1138,7 +1138,7 @@ spec:
                 description: |-
                   Procedural lists model units whose work a procedure might do: run
                   again on the same inputs, they wrote the same bytes every time
-                  (LLM-OR-PROCEDURE 6.1). A report, for a person to weigh.
+                  (DESIGN.md 10.6). A report, for a person to weigh.
                 items:
                   description: |-
                     WorkProceduralCandidate is a model unit that behaved like a function of
@@ -1327,7 +1327,7 @@ spec:
               spend:
                 description: |-
                   Spend is what the job's units cost so far, split between
-                  procedural and model units (LLM-OR-PROCEDURE 6.2).
+                  procedural and model units (DESIGN.md 10.6).
                 properties:
                   cacheReadTokens:
                     format: int64

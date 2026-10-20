@@ -4,8 +4,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// Tracker and TrackerLink are experimental (proposals/integrations,
-// ADAPTER.md section 3). c4-sync reconciles them; the operator does not
+// Tracker and TrackerLink are experimental (docs/c4-sync.md). c4-sync
+// reconciles them; the operator does not
 // read them. They are not in the default kustomization.
 
 // SyncAccount is c4-sync's identity (config/sync), the only caller the HUD
@@ -17,11 +17,11 @@ const (
 )
 
 // LabelTracker on a WorkJob names the Tracker whose work it serves
-// (integrations GAPS 2).
+// (DESIGN.md 10.7).
 const LabelTracker = "c4.avalanche.io/tracker"
 
 // AnnotationTrackerRef on a WorkJob is the tracker entity it serves:
-// <tracker>/<type>/<id> (integrations GAPS 2).
+// <tracker>/<type>/<id> (DESIGN.md 10.7).
 const AnnotationTrackerRef = "c4.avalanche.io/tracker-ref"
 
 // Tracker is one connection to one tracker site, scoped to what one
@@ -52,8 +52,8 @@ type TrackerSpec struct {
 	// +optional
 	Scope map[string]string `json:"scope,omitempty"`
 	// Credential is where the tracker credential is. It is a Secret in
-	// this namespace, materialized by a credential lease (integrations
-	// GAPS 8); c4-sync rereads it on every use, so rotation needs no
+	// this namespace, materialized by a credential lease
+	// (docs/agents/credential-leases.md); c4-sync rereads it on every use, so rotation needs no
 	// restart.
 	Credential TrackerCredential `json:"credential"`
 	// WebhookSecret verifies deliveries the tracker pushes, when it does.
@@ -132,7 +132,7 @@ type TrackerIntake struct {
 	Match TrackerMatch `json:"match"`
 	// As is job (the entity becomes a WorkJob), milestone (it becomes a
 	// Milestone, whose due date the jobs it covers take) or forecast (it
-	// becomes a forecast job, integrations GAPS 9: work the farm plans for
+	// becomes a forecast job, DESIGN.md 10.12: work the farm plans for
 	// before it is ready; when a job rule matches the entity later, the
 	// real job replaces it).
 	// +kubebuilder:validation:Enum=job;milestone;forecast
@@ -156,7 +156,7 @@ type TrackerIntake struct {
 	// For says whose work the jobs are: the person the farm records as
 	// their owner, so what is bound to that person (a lease of their
 	// sign-in) serves them. The person must have let this Tracker submit
-	// for them (a grant, integrations GAPS 17); without one nothing is
+	// for them (a grant, internal/hud/API.md, Grants); without one nothing is
 	// submitted, never c4-sync's own job instead. Empty: the jobs are
 	// c4-sync's.
 	// +optional
@@ -169,7 +169,7 @@ type TrackerIntake struct {
 	// Rework is what a rework decision does: inPlace (default: the job's
 	// units run again, as in CI and agent work) or nextVersion (a new job
 	// follows this one with the note as an input, as v008 follows v007 in
-	// media; integrations GAPS 6).
+	// media).
 	// +kubebuilder:validation:Enum=inPlace;nextVersion
 	// +optional
 	Rework string `json:"rework,omitempty"`
@@ -260,7 +260,7 @@ type TrackerStatusOut struct {
 	// in-review, rework, held, failed) to the tracker's own status, for
 	// trackers whose statuses differ per site (flow: running: ip). A state
 	// not listed is not written. done is never written: approval is the
-	// tracker's (integrations MAPPING section 2).
+	// tracker's (docs/c4-sync.md, "What it writes").
 	// +optional
 	States map[string]string `json:"states,omitempty"`
 }
@@ -272,8 +272,8 @@ type TrackerStatus struct {
 	// Cursor is the adapter's own change cursor, opaque to the loop.
 	// +optional
 	Cursor string `json:"cursor,omitempty"`
-	// FarmCursor is the last transition of the farm's log (GET /book?since,
-	// integrations GAPS 5) this Tracker has acted on: after an outage it
+	// FarmCursor is the last transition of the farm's log (GET /book?since
+	// in internal/hud/API.md) this Tracker has acted on: after an outage it
 	// reads what it missed from there.
 	// +optional
 	FarmCursor int64 `json:"farmCursor,omitempty"`
@@ -339,8 +339,8 @@ type TrackerTarget struct {
 
 // TrackerLinkStatus is what c4-sync last read and wrote.
 type TrackerLinkStatus struct {
-	// State is the job's summary state as last written
-	// (integrations MAPPING section 2).
+	// State is the job's summary state as last written: one of the work
+	// states in docs/c4-sync.md, "What it writes".
 	// +optional
 	State string `json:"state,omitempty"`
 	// ExternalVersion is the entity's version (updatedAt, etag) last read.
@@ -382,7 +382,7 @@ type TrackerWritten struct {
 	// State is sending while the write is journaled and not yet answered
 	// (an interruption leaves it so), and unconfirmed when it was
 	// interrupted and nothing can tell whether it happened: it is held
-	// for a person (integrations GAPS 11). Empty: written.
+	// for a person (internal/hud/API.md, Held tracker writes). Empty: written.
 	// +kubebuilder:validation:Enum=sending;unconfirmed
 	// +optional
 	State string `json:"state,omitempty"`

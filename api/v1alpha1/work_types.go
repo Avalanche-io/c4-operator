@@ -103,7 +103,7 @@ const (
 	// (status.decided), and records it in status.waits.
 	AnnotationDecide = "c4.avalanche.io/decide"
 	// AnnotationReplaces on a real WorkJob names the forecast job in its
-	// namespace it replaced (integrations GAPS 9). The HUD deletes that
+	// namespace it replaced (DESIGN.md 10.12). The HUD deletes that
 	// forecast when it submits the job, and again until it is gone.
 	AnnotationReplaces = "c4.avalanche.io/replaces"
 	// AnnotationSteer on a WorkJob carries messages people send to its
@@ -186,7 +186,7 @@ type WorkJobSpec struct {
 	// +optional
 	Pools []string `json:"pools,omitempty"`
 
-	// Measure is the job's own measure of done (PRIMITIVES Q12): a number a
+	// Measure is the job's own measure of done (DESIGN.md 10.6): a number a
 	// unit reports (.c4/measure.json, c4-unit measure), such as rules
 	// sited of 379, shown as the job's progress.
 	// +optional
@@ -204,12 +204,12 @@ type WorkJobSpec struct {
 	// Review is a person's (or party's) review of the whole job's work:
 	// a final wait, unit "@review", after every other unit, including
 	// those expansions add later, so the job is Succeeded only once it is
-	// decided ("done means approved", integrations GAPS 7). Any choice but
+	// decided ("done means approved", DESIGN.md 10.6). Any choice but
 	// fail completes it; fail fails the job. Set at creation only.
 	// +optional
 	Review *WorkReviewSpec `json:"review,omitempty"`
 
-	// Forecast makes the job a forecast only (integrations GAPS 9): work a
+	// Forecast makes the job a forecast only (DESIGN.md 10.12): work a
 	// tracker expects (a shot not yet turned over, its bid) that the farm
 	// plans for. It is estimated and placed among the real work, never
 	// released: no pods, no quota, no burst capacity bought for it, and no
@@ -355,7 +355,7 @@ type WorkJobStatus struct {
 	InputSubstitutes []WorkInputSubstitute `json:"inputSubstitutes,omitempty"`
 	// Procedural lists model units whose work a procedure might do: run
 	// again on the same inputs, they wrote the same bytes every time
-	// (LLM-OR-PROCEDURE 6.1). A report, for a person to weigh.
+	// (DESIGN.md 10.6). A report, for a person to weigh.
 	// +optional
 	Procedural []WorkProceduralCandidate `json:"procedural,omitempty"`
 	// Rank is the job's position in dispatch order (1 is next).
@@ -460,7 +460,7 @@ type WorkJobStatus struct {
 	// +optional
 	Reused string `json:"reused,omitempty"`
 	// Spend is what the job's units cost so far, split between
-	// procedural and model units (LLM-OR-PROCEDURE 6.2).
+	// procedural and model units (DESIGN.md 10.6).
 	// +optional
 	Spend *WorkSpend `json:"spend,omitempty"`
 	// ModelUsage maps each model unit's index to its token use and cost
@@ -478,7 +478,7 @@ type WorkJobStatus struct {
 	// signature, a node, a review's reason, information a brief lacked),
 	// each with the units it touched and what the farm did, so people and
 	// trackers see one item per cause rather than one per failure
-	// (integrations GAPS 4). At most 16, the newest kept; CausesDropped
+	// (DESIGN.md 10.14). At most 16, the newest kept; CausesDropped
 	// counts the rest.
 	// +optional
 	Causes []WorkCause `json:"causes,omitempty"`
@@ -1157,7 +1157,7 @@ type WorkDecideRequest struct {
 
 // NeedsInformation is the reason of a unit attempt that stopped because
 // its brief lacked information only a person could give: a work-stopping
-// error, not a question (agent-jobs ASKS.md). Its container exits
+// error, not a question (DESIGN.md 10.6). Its container exits
 // NeedsExitCode with the missing information as its termination message
 // (c4-unit needs), or a host runner sets the pod's status reason. The
 // unit fails without a retry, and runs again once the information is
