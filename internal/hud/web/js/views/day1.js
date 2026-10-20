@@ -16,6 +16,7 @@ import { glance } from '../../design/components/core.js';
 import { jobWords } from '../../design/components/words.js';
 import { markEl } from '../../design/components/marks.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
+import { decisions } from './controls.js';
 
 const keyOf = (j) => `${j.namespace}/${j.name}`;
 
@@ -154,6 +155,7 @@ export const job1 = {
       h('h1', null, j.name),
       h('p', { class: 'd1-sub ' + w.cls }, `${w.why ? `${w.word} ${w.why}` : w.word} · ${fin ? 'done' : e.noEta ? 'no ETA yet' : `ready ~${f.when(e.etaP50)}`}${dl ? ` · due ${f.when(dl)}` : ''}${late ? ' · projected late' : ''}`),
       items.length ? roots(ctx, items, { handled: false }) : null,
+      decisions(ctx, j, k),
       h('h2', null, 'Progress'),
       h('div', { class: 'd1-stage' }, h('span', { class: 'nm' }, 'All of it'), bar(g, late), h('span', { class: 'ct' }, `${Math.round(g.done * 100)}%`)),
       stages.length > 1 ? h('div', { class: 'd1-stages' }, stages.map((s) => h('div', { class: 'd1-stage', 'data-key': 'st-' + s.label },

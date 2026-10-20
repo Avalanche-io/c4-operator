@@ -178,3 +178,17 @@ canvas[data-player] { background: var(--g02); }
 .heldw .ht { font: 400 13.5px/1.4 var(--sans); color: var(--paper); }
 .heldw .hd { font: 400 12px/1.4 var(--sans); color: var(--ink-2); margin-top: 3px; }
 .heldw .hact { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* Decisions and unit actions (views/controls.js) */
+.decide .dcard { padding: 10px 0; border-top: var(--hair) solid var(--rule-1); }
+.decide .dcard:first-child { border-top: 0; padding-top: 0; }
+.decide .dcard.mine { box-shadow: inset 3px 0 0 var(--fail); padding-left: 10px; }
+.decide .dask { font: 400 13.5px/1.4 var(--sans); color: var(--paper); }
+.decide .dmeta { font: 400 11.5px/1.4 var(--sans); color: var(--ink-2); margin: 3px 0 8px; }
+.decide .dbtns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
+.dnote, .dreply { width: 100%; box-sizing: border-box; font: 400 12.5px/1.4 var(--sans); color: var(--paper); background: var(--well); border: var(--hair) solid var(--g13); padding: 5px 7px; margin-top: 4px; }
+.uact { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; }
+.uact .dnote { width: auto; flex: 1 1 120px; margin-top: 0; }
+.uact.col { flex-direction: column; align-items: stretch; }
+.uact.col .btn { align-self: flex-start; }
+.downer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; font: 400 12px/1.4 var(--sans); margin-top: 4px; }

@@ -375,6 +375,9 @@ function toast(msg, err = false) {
   toastTimer = setTimeout(() => { t.hidden = true; }, 4200);
 }
 
+// value: the trimmed text of the input an action names, or ''
+const value = (elId) => { const el = elId && document.getElementById(elId); return el ? el.value.trim() : ''; };
+
 // Controls. Every button names what it does; the farm's answer is shown.
 const ACTIONS = {
   hold: (d) => [`/jobs/${d.job}/nudge`, { hold: true }],
@@ -401,6 +404,26 @@ const ACTIONS = {
     return ['/grants', { namespace: d.ns, tracker: d.tracker, classes: ticked('class'), pools: ticked('pool'), until }];
   },
   revoke: (d) => [`/grants/${d.grant}`, null, 'DELETE'],
+  // a decision on a wait or an escalated check, with its note and answer
+  decide: (d) => {
+    const reply = value(d.reply);
+    if (d.reply && !reply && d.do !== 'fail') throw new Error('This decision needs an answer: write it first.');
+    return [`/jobs/${d.job}/decide`, { unit: Number(d.unit), do: d.do, note: value(d.note) || undefined, reply: reply ? { text: reply } : undefined }];
+  },
+  // a failed unit: you take it, or you give it to someone
+  ack: (d) => {
+    const assignee = value(d.assignee);
+    if (d.kind === 'assign' && !assignee) throw new Error('Name the person to give it to.');
+    return [`/jobs/${d.job}/ack`, { units: d.units, kind: d.kind, assignee: assignee || undefined }];
+  },
+  // a message to a unit while it runs
+  steer: (d) => {
+    const text = value(d.text);
+    if (!text) throw new Error('Write the message first.');
+    return [`/jobs/${d.job}/steer`, { unit: Number(d.unit), text }];
+  },
+  deadlinemode: (d) => [`/jobs/${d.job}/nudge`, { deadlineMode: d.mode }],
+  nextsession: (d) => [`/jobs/${d.job}/nudge`, { nextSession: true }],
   // a held tracker write: whether it reached the tracker
   held: (d) => [`/held/${d.ns}/${d.link}/${d.field}`, { happened: d.happened === 'true' }],
 };

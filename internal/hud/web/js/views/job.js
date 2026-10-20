@@ -18,6 +18,7 @@ import { unitWords, how, reasoningWords } from '../../design/components/words.js
 import { markSVG, markEl } from '../../design/components/marks.js';
 import { planSheet } from '../../design/components/plansheet.js';
 import { heldSection } from './held.js';
+import { decisions, unitActions, deadlineOwner } from './controls.js';
 
 const st = {
   key: null, details: new Map(), graph: null, book: null, lastNow: null, fetching: false,
@@ -123,7 +124,7 @@ function titleBlock(j, mode = 5) {
     j.output && mode >= 5 ? tcell('Output view', h('span', { style: { fontSize: '15px' } }, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${f.num(j.output.changesets)} changesets in`) : null);
 }
 
-function controls(j, k) {
+function controls(ctx, j, k) {
   const held = j.nudge.hold;
   const dl = j.objective.deadline ? f.inputValue(j.objective.deadline) : '';
   return h('div', { class: 'panel', 'data-key': 'ctl' },
@@ -135,6 +136,7 @@ function controls(j, k) {
       h('span', { class: 'seg' }, [1, 1.25, 1.5, 2].map((b) => h('button', { class: 'btn small', 'data-action': 'boost', 'data-job': k, 'data-value': String(b), 'aria-pressed': Math.abs(j.nudge.boost - b) < 0.01 ? 'true' : 'false' }, `×${b}`))),
       h('input', { type: 'datetime-local', id: 'deadline-input', value: dl, 'data-key': 'dl-' + k, 'aria-label': 'Deadline' }),
       h('button', { class: 'btn small', 'data-action': 'deadline', 'data-job': k, 'data-input': 'deadline-input' }, 'Set deadline'),
+      deadlineOwner(ctx, j, k),
       j.units.failed ? h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': failedUnits(j) }, `Requeue failed (${j.units.failed})`) : null,
       (j.blacklist || []).map((n) => h('button', { class: 'btn small', 'data-action': 'unblacklist', 'data-job': k, 'data-node': n, title: 'Blacklisted for this job' }, h('span', { class: 't-temp' }, n), ' allow again'))));
 }
@@ -206,7 +208,8 @@ function unitCard(ctx, j) {
       h('pre', { class: 'mono', style: { margin: 0, fontSize: '10.5px', color: 'var(--ink-2)', background: 'var(--well)', padding: '6px', whiteSpace: 'pre-wrap', maxHeight: '120px', overflow: 'auto' } }, (u.logTail || []).join('\n') || '(no output yet)'),
       h('div', { class: 'controls', style: { marginTop: '8px' } },
         ['failed', 'succeeded'].includes(u.state) ? h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': String(u.i) }, u.state === 'failed' ? 'Requeue unit' : (j.class === 'render' ? 'Render again' : 'Run again')) : null,
-        node ? h('button', { class: 'btn small', 'data-action': 'blacklist', 'data-job': k, 'data-node': node }, `Avoid ${node}`) : null)));
+        node ? h('button', { class: 'btn small', 'data-action': 'blacklist', 'data-job': k, 'data-node': node }, `Avoid ${node}`) : null),
+      unitActions(ctx, ctx.job(k) || j, k, u)));
 }
 
 // adjacent sheets: upstream and downstream jobs outside this sheet, other shots of the project
@@ -316,10 +319,11 @@ export default {
             j.output && L >= 5 && ctx.level >= 3 ? h('div', { class: 'edgecode', title: 'The job’s output view: one step per changeset added to its chain' },
               h('b', null, c4idEl(j.output.view, { tail: 4, label: 'output view' })), `${String(j.output.changesets).padStart(4, '0')}+00`) : null),
           h('div', null,
+            decisions(ctx, j, k),
             ctx.level >= 2 ? heldSection(ctx, `job=${encodeURIComponent(k)}`, { title: 'A tracker write to check', job: false }) : null,
             unitCard(ctx, j),
             side,
-            L >= 2 ? controls(j, k) : null,
+            L >= 2 ? controls(ctx, j, k) : null,
             st.book && st.book.entries && L >= 5 ? h('div', { class: 'panel', 'data-key': 'book' },
               h('header', null, h('h2', null, 'The book'), h('span', { class: 'dim mono', style: { fontSize: '10px' } }, 'append only · signed by whoever acted')),
               // the book scrolls in its panel, so a long one never pushes the rest down
