@@ -48,8 +48,8 @@ jobs:
     shot: ep102-sh030
     reads: [comp/ep102-sh030.1001.exr]
     frames: 1001-1072
-    frameSeconds: 5
-    due: +2h
+    frameSeconds: 30
+    due: +1h
   - name: sm0150-light-v004
     project: saltmarsh
     as: artist
@@ -59,7 +59,7 @@ jobs:
     frames: 1001-1096
     frameSeconds: 208
     fail: *heron
-    due: +2h50m
+    due: +1h10m
   - name: sm0150-comp-v002
     project: saltmarsh
     as: artist
@@ -69,7 +69,7 @@ jobs:
     after: [sm0150-light-v004]
     frames: 1001-1096
     frameSeconds: 20
-    due: +3h
+    due: +1h25m
   - name: sm0160-light-v001
     project: saltmarsh
     as: artist
