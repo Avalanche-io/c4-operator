@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 
@@ -95,29 +94,14 @@ func paramValues(t *schema.Tool, tree string, with ...map[string]any) (map[strin
 	return out, nil
 }
 
-// paramEnv is C4_PARAMS and C4_PARAM_<NAME>, as the farm sets them:
-// scalars as strings, lists and objects as JSON.
+// paramEnv is C4_PARAMS, as the farm's lowering sets it; c4-unit run
+// gives the script each as C4_PARAM_<NAME> (schema.ParamEnv).
 func paramEnv(params map[string]any) ([]string, error) {
 	b, err := json.Marshal(params)
 	if err != nil {
 		return nil, err
 	}
-	env := []string{"C4_PARAMS=" + string(b)}
-	names := make([]string, 0, len(params))
-	for k := range params {
-		names = append(names, k)
-	}
-	sort.Strings(names)
-	for _, k := range names {
-		v := params[k]
-		s, ok := v.(string)
-		if !ok {
-			vb, _ := json.Marshal(v)
-			s = string(vb)
-		}
-		env = append(env, "C4_PARAM_"+strings.ToUpper(strings.ReplaceAll(k, "-", "_"))+"="+s)
-	}
-	return env, nil
+	return []string{"C4_PARAMS=" + string(b)}, nil
 }
 
 // testUnit is one unit of a tool's test: its frames, as a range.

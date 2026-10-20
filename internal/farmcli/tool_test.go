@@ -17,6 +17,7 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 func TestNewToolPassesItsOwnChecks(t *testing.T) {
@@ -132,7 +133,7 @@ func TestToolUnitsAndParams(t *testing.T) {
 		t.Error("a parameter the tool lacks was accepted")
 	}
 	env, _ := paramEnv(map[string]any{"plates": "/show/p.exr", "width": 960})
-	if strings.Join(env, " ") != `C4_PARAMS={"plates":"/show/p.exr","width":960} C4_PARAM_PLATES=/show/p.exr C4_PARAM_WIDTH=960` {
+	if strings.Join(env, " ") != `C4_PARAMS={"plates":"/show/p.exr","width":960}` {
 		t.Errorf("env %q", env)
 	}
 	if ResolveImage("c4/runtime-oiio") != "ghcr.io/avalanche-io/c4-runtime-oiio:v0.1.0" || ResolveImage("studio/nuke:16") != "studio/nuke:16" {
@@ -179,7 +180,7 @@ func TestTestToolRunsEachUnitInDocker(t *testing.T) {
 	}
 	args, _ := os.ReadFile(log)
 	for _, want := range []string{"--user 65532:65532", "--cap-drop ALL", "--read-only", "--network none", dir + ":/etc/c4/tools:ro",
-		"C4_PARAM_PLATES=/show/plates/test.$F4.exr", "C4_FRAME_START=1001", "C4_FRAME_END=1002", "ghcr.io/avalanche-io/c4-runtime-oiio:v0.1.0 c4-unit run"} {
+		`C4_PARAMS={"plates":"/show/plates/test.$F4.exr"`, "C4_FRAME_START=1001", "C4_FRAME_END=1002", "ghcr.io/avalanche-io/c4-runtime-oiio:v0.1.0 c4-unit run"} {
 		if !strings.Contains(string(args), want) {
 			t.Errorf("docker run lacks %q:\n%s", want, args)
 		}
@@ -255,7 +256,7 @@ func (h *toolsHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Message: `no job "comp-v4" in this submission`, Fix: `jobs follow jobs by their key in the file; did you mean "comp"?`}}})
 			return
 		}
-		json.NewEncoder(w).Encode(map[string]any{"ok": true, "submission": "c4sub", "jobs": []submissionJob{
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "submission": "c4sub", "jobs": []api.SubmissionJob{
 			{Key: "proxies", Namespace: "saltmarsh", Name: "sm0140-proxies-v001", Tool: "proxies", Version: "v4", What: "Proxies and previews · 48 frames"}}})
 	default:
 		http.Error(w, "no "+r.Method+" "+p, http.StatusNotFound)
@@ -353,5 +354,25 @@ func TestSubmitTypedOverAPublishedTool(t *testing.T) {
 		if _, err := Submit(context.Background(), c, Out{W: io.Discard}, bad); err == nil {
 			t.Errorf("%+v accepted", bad.Options)
 		}
+	}
+}
+
+// A submission goes to the farm in the order written, which is the order
+// its jobs are created in, after the CLI names its project and tree.
+func TestSubmissionKeepsItsOrder(t *testing.T) {
+	raw, err := schema.ToJSON([]byte("c4: submit/1\ntree: shots\njobs:\n  proxies: {tool: proxies}\n  comp: {tool: comp, after: proxies}\n  movie: {tool: transcode, after: comp}\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	d, err := readDoc(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.setString("tree", "c45xZ")
+	d.setString("project", "saltmarsh")
+	b, _ := d.MarshalJSON()
+	want := `{"c4":"submit/1","tree":"c45xZ","jobs":{"proxies":{"tool":"proxies"},"comp":{"tool":"comp","after":"proxies"},"movie":{"tool":"transcode","after":"comp"}},"project":"saltmarsh"}`
+	if string(b) != want {
+		t.Errorf("sent\n%s\nwant\n%s", b, want)
 	}
 }

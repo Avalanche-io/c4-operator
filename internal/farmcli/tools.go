@@ -1,6 +1,7 @@
 package farmcli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -11,11 +12,10 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strings"
 	"time"
-
-	"sigs.k8s.io/yaml"
 
 	"github.com/Avalanche-io/c4"
 
@@ -233,60 +233,114 @@ type SubmitFileArgs struct {
 	Yes     bool
 }
 
-// submissionJob is a job of a submission as the farm planned it.
-type submissionJob struct {
-	Key       string              `json:"key"`
-	Namespace string              `json:"namespace"`
-	Name      string              `json:"name"`
-	Tool      string              `json:"tool"`
-	Version   string              `json:"version"`
-	What      string              `json:"what"`
-	Estimate  *api.SubmitEstimate `json:"estimate,omitempty"`
-}
-
-type submissionResponse struct {
-	OK         bool             `json:"ok"`
-	Errors     []api.FieldError `json:"errors,omitempty"`
-	Submission string           `json:"submission"`
-	Jobs       []submissionJob  `json:"jobs"`
-	Explain    string           `json:"explain,omitempty"`
-}
-
 // SubmitFile sends a submission (c4: submit/1): a local tree is uploaded
 // first (only what the farm lacks) and named by its ID; the farm checks it
 // and shows the plan; on confirmation it submits.
-func SubmitFile(ctx context.Context, c *Client, o Out, a SubmitFileArgs) (*submissionResponse, error) {
+func SubmitFile(ctx context.Context, c *Client, o Out, a SubmitFileArgs) (*api.SubmissionResponse, error) {
 	data, err := os.ReadFile(a.Path)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := yaml.YAMLToJSON(data)
+	// in the order written: the farm creates the jobs in it
+	raw, err := schema.ToJSON(data)
 	if err != nil {
 		return nil, fmt.Errorf("%s: %w", a.Path, err)
 	}
-	var doc map[string]any
-	if err := json.Unmarshal(raw, &doc); err != nil || doc == nil {
+	doc, err := readDoc(raw)
+	if err != nil {
 		return nil, fmt.Errorf("%s: a submission is a YAML or JSON object", a.Path)
 	}
-	if doc["c4"] != "submit/1" {
-		return nil, fmt.Errorf("%s: c4 is %v; a submission says c4: submit/1", a.Path, doc["c4"])
+	if v := doc.str("c4"); v != "submit/1" {
+		return nil, fmt.Errorf("%s: c4 is %q; a submission says c4: submit/1", a.Path, v)
 	}
 	return submitDoc(ctx, c, o, doc, filepath.Dir(a.Path), a)
+}
+
+// submissionDoc is a submission's top level, its keys in the order
+// written and each value as written, so changing one keeps the jobs'
+// order.
+type submissionDoc struct {
+	keys []string
+	vals map[string]json.RawMessage
+}
+
+func readDoc(raw []byte) (*submissionDoc, error) {
+	dec := json.NewDecoder(bytes.NewReader(raw))
+	if t, err := dec.Token(); err != nil || t != json.Delim('{') {
+		return nil, errors.New("not an object")
+	}
+	d := &submissionDoc{vals: map[string]json.RawMessage{}}
+	for dec.More() {
+		t, err := dec.Token()
+		if err != nil {
+			return nil, err
+		}
+		var v json.RawMessage
+		if err := dec.Decode(&v); err != nil {
+			return nil, err
+		}
+		d.set(t.(string), v)
+	}
+	return d, nil
+}
+
+func (d *submissionDoc) set(key string, v json.RawMessage) {
+	if _, ok := d.vals[key]; !ok {
+		d.keys = append(d.keys, key)
+	}
+	d.vals[key] = v
+}
+
+func (d *submissionDoc) setString(key, s string) {
+	b, _ := json.Marshal(s)
+	d.set(key, b)
+}
+
+// str is a top-level string, "" when it is none.
+func (d *submissionDoc) str(key string) string {
+	var s string
+	json.Unmarshal(d.vals[key], &s)
+	return s
+}
+
+func (d *submissionDoc) MarshalJSON() ([]byte, error) {
+	var b bytes.Buffer
+	b.WriteByte('{')
+	for i, k := range d.keys {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		kb, _ := json.Marshal(k)
+		b.Write(kb)
+		b.WriteByte(':')
+		b.Write(d.vals[k])
+	}
+	b.WriteByte('}')
+	return b.Bytes(), nil
+}
+
+// hostOS is this machine's operating system as a source root names it.
+func hostOS() string {
+	if runtime.GOOS == "darwin" {
+		return "macos"
+	}
+	return runtime.GOOS
 }
 
 // submitDoc sends a submission document: a folder tree (relative to base)
 // is uploaded and named by its ID, the farm plans it, and on confirmation
 // it is submitted.
-func submitDoc(ctx context.Context, c *Client, o Out, doc map[string]any, base string, a SubmitFileArgs) (*submissionResponse, error) {
-	project, _ := doc["project"].(string)
+func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base string, a SubmitFileArgs) (*api.SubmissionResponse, error) {
+	project := doc.str("project")
 	if project == "" {
 		project = a.Project
-		doc["project"] = project
+		doc.setString("project", project)
 	}
 	if project == "" {
 		return nil, errors.New("the submission names no project, and neither does --project")
 	}
-	if tree, ok := doc["tree"].(string); ok && localTree(tree) {
+	var roots []api.SourceRoot
+	if tree := doc.str("tree"); localTree(tree) {
 		dir := tree
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(base, dir)
@@ -298,10 +352,19 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc map[string]any, base s
 		if sent > 0 {
 			o.printf("uploaded  %s from %s\n", plural(sent, "file", "files"), tree)
 		}
-		doc["tree"] = id
+		doc.setString("tree", id)
+		// the paths the tree's scenes hold were written under it
+		if abs, err := filepath.Abs(dir); err == nil {
+			roots = []api.SourceRoot{{OS: hostOS(), Path: filepath.ToSlash(abs)}}
+		}
 	}
-	var plan submissionResponse
-	if err := doChecked(ctx, c, "POST", "/submissions", map[string]any{"submission": doc, "dryRun": true, "explain": a.Explain}, &plan); err != nil {
+	body, err := doc.MarshalJSON()
+	if err != nil {
+		return nil, err
+	}
+	var plan api.SubmissionResponse
+	req := api.SubmissionRequest{Submission: body, DryRun: true, Explain: a.Explain, SourceRoots: roots}
+	if err := doChecked(ctx, c, "POST", "/submissions", req, &plan); err != nil {
 		return nil, err
 	}
 	if len(plan.Errors) > 0 {
@@ -312,14 +375,18 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc map[string]any, base s
 	} else {
 		o.printJobs(plan.Jobs)
 	}
+	for _, w := range plan.Warnings {
+		o.printf("note      %s\n", w)
+	}
 	if a.DryRun || a.Explain {
 		return &plan, nil
 	}
 	if !a.Yes && !o.confirm("Submit?") {
 		return nil, errors.New("not submitted")
 	}
-	var done submissionResponse
-	if err := doChecked(ctx, c, "POST", "/submissions", map[string]any{"submission": doc}, &done); err != nil {
+	var done api.SubmissionResponse
+	req.DryRun, req.Explain = false, false
+	if err := doChecked(ctx, c, "POST", "/submissions", req, &done); err != nil {
 		return nil, err
 	}
 	if len(done.Errors) > 0 {
@@ -333,7 +400,7 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc map[string]any, base s
 
 // printJobs is the plan of a submission's jobs: each job's line, then its
 // estimate.
-func (o Out) printJobs(jobs []submissionJob) {
+func (o Out) printJobs(jobs []api.SubmissionJob) {
 	w := 0
 	for _, j := range jobs {
 		w = max(w, len(j.Name))
@@ -394,7 +461,7 @@ func doChecked(ctx context.Context, c *Client, method, path string, in, out any)
 // SubmitTool is `c4 farm submit TOOL ASSET` over a published tool: a
 // submission of one job, whose tree is the asset's folder (as FindRoot
 // finds it) and whose first input path parameter is the asset.
-func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a SubmitArgs) (*submissionResponse, error) {
+func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a SubmitArgs) (*api.SubmissionResponse, error) {
 	switch {
 	case a.Name != "":
 		return nil, errors.New("--name: a tool's job is named <shot>-<stage>-vNNN; set --shot or --stage instead")
@@ -471,7 +538,12 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	if a.Deadline != "" {
 		doc["due"] = a.Deadline
 	}
-	return submitDoc(ctx, c, o, doc, "", SubmitFileArgs{Project: a.Project, DryRun: a.DryRun, Yes: a.Yes})
+	raw, _ := json.Marshal(doc) // one job: no order to keep
+	d, err := readDoc(raw)
+	if err != nil {
+		return nil, err
+	}
+	return submitDoc(ctx, c, o, d, "", SubmitFileArgs{Project: a.Project, DryRun: a.DryRun, Yes: a.Yes})
 }
 
 // frameToken is where a sequence path puts the frame number: $F4, <F4>,
