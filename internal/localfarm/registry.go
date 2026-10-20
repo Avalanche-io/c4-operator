@@ -3,6 +3,7 @@ package localfarm
 import (
 	"context"
 	"fmt"
+	"net"
 	"os/exec"
 	"strings"
 )
@@ -39,6 +40,9 @@ func ensureRegistry(ctx context.Context, port int) error {
 	state, err := docker(ctx, "inspect", "-f", "{{.State.Running}}", RegistryName)
 	switch {
 	case err != nil:
+		if err := portsFree(ctx, []farmPort{{"the farm's registry", port, "--registry-port"}}); err != nil {
+			return err
+		}
 		if _, err := docker(ctx, "run", "-d", "--restart=always", "-p", fmt.Sprintf("127.0.0.1:%d:5000", port),
 			"--name", RegistryName, RegistryImage); err != nil {
 			return fmt.Errorf("starting the farm's registry: %w", err)
@@ -105,4 +109,31 @@ func localName(img string) string {
 		name += ":latest"
 	}
 	return name
+}
+
+// farmPort is one of the farm's ports on this machine, and the flag that
+// moves it.
+type farmPort struct {
+	what string
+	port int
+	flag string
+}
+
+// portsFree refuses, before kind is asked, a port something else on this
+// machine holds, naming the container that publishes it when there is one
+// (another kind cluster, often) and the flag that moves the farm's.
+func portsFree(ctx context.Context, ports []farmPort) error {
+	for _, p := range ports {
+		l, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", p.port))
+		if err == nil {
+			l.Close()
+			continue
+		}
+		by := "something else on this machine"
+		if names, _ := docker(ctx, "ps", "--filter", fmt.Sprintf("publish=%d", p.port), "--format", "{{.Names}}"); names != "" {
+			by = "the container " + strings.Fields(names)[0]
+		}
+		return fmt.Errorf("port %d, for %s, is in use by %s; stop it, or give the farm another port with %s", p.port, p.what, by, p.flag)
+	}
+	return nil
 }

@@ -97,6 +97,12 @@ func Up(ctx context.Context, o UpOptions) error {
 		return err
 	}
 	if !have {
+		if err := portsFree(ctx, []farmPort{
+			{"the HUD", or(o.HUDHostPort, HUDPort), "--port"},
+			{"the store", or(o.StoreHostPort, StorePort), "--store-port"},
+		}); err != nil {
+			return err
+		}
 		o.logf("cluster   creating %s: a control plane and %d workers\n", name, len(nodes))
 		if err := p.Create(name, cluster.CreateWithRawConfig(KindConfig(o.Options)), cluster.CreateWithWaitForReady(5*time.Minute),
 			cluster.CreateWithDisplayUsage(false), cluster.CreateWithDisplaySalutation(false)); err != nil {
