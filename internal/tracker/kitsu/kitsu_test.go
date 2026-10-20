@@ -307,7 +307,7 @@ func TestMentionAndEdit(t *testing.T) {
 	}
 }
 
-func png(name string) *tracker.Still {
+func still(name string) *tracker.Still {
 	return &tracker.Still{Name: name, Data: []byte("\x89PNG\r\n\x1a\nfake")}
 }
 
@@ -320,7 +320,7 @@ func TestPublish(t *testing.T) {
 	ctx := context.Background()
 	on := tracker.Ref{Type: "Task", ID: sh.task}
 	out := tracker.Output{Name: "work/kitsu-1", Version: 1, View: "c4view1", JobURL: "https://hud/#/job/work/kitsu-1", Custody: "https://hud/p",
-		Preview: png("sh040.1120.png")}
+		Preview: still("sh040.1120.png")}
 	ref, err := a.Publish(ctx, on, out, "pk")
 	if err != nil || ref.Type != "Task" || ref.ID != sh.task || ref.URL == "" {
 		t.Fatal(ref, err)
@@ -340,7 +340,7 @@ func TestPublish(t *testing.T) {
 	// v2: the answer to the upload is lost after Kitsu made the preview;
 	// the next publish uploads to it, and makes no third revision.
 	out2 := out
-	out2.Version, out2.View, out2.Preview = 2, "c4view2", png("sh040.1121.png")
+	out2.Version, out2.View, out2.Preview = 2, "c4view2", still("sh040.1121.png")
 	sh.site.LoseAnswers(1, "/add-preview")
 	if _, err := a.Publish(ctx, on, out2, "pk2"); err == nil {
 		t.Fatal("the lost answer")
