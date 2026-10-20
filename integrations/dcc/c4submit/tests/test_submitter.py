@@ -290,6 +290,10 @@ def test_a_scene_written_for_every_submission(tmp_path, farm):
     d.save_scene = False
     msgs = [pr.message for pr in prepare(d).problems]
     assert msgs == ["the script is written for each submission; with that off, the farm renders the last one written"]
+    host.modified = False
+    d.save_scene = True
+    prepare(d)
+    assert host.saves == 1, "written even when nothing is unsaved"
 
 
 def test_cancel_inside_a_big_file(tmp_path):

@@ -229,7 +229,7 @@ def prepare(draft: Draft) -> Prepared:
     call that reads the scene."""
     host = draft.host
     problems: List[Problem] = []
-    if draft.save_scene and host.is_modified():
+    if draft.save_scene and (host.writes_scene or host.is_modified()):
         try:
             host.save()
         except Exception as e:  # noqa: BLE001 - every DCC raises its own
