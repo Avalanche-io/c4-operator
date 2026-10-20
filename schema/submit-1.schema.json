@@ -13,6 +13,7 @@
     "name": {"$ref": "#/$defs/dnsName", "description": "The stem of the jobs' names; default the shot."},
     "due": {"$ref": "#/$defs/due"},
     "tree": {"$ref": "#/$defs/treeSource", "description": "Where the work starts: a folder (. or a path), a C4 ID, job:<name>, or git:<repo>@<ref>."},
+    "root": {"type": "string", "pattern": "^(/|[A-Za-z]:[\\\\/])", "description": "The folder on the submitter's machine that is the top of tree (S:/shows/saltmarsh, /Users/noor/shows/saltmarsh), for mapping the paths its scenes hold; its form says WINDOWS or POSIX. Left out when it is the project's root path."},
     "read": {
       "type": "object",
       "description": "Further trees mounted read-only, by name.",

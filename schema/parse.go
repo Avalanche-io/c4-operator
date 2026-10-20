@@ -692,6 +692,8 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 			return "a person is never asked mid-run: questions go to an agent",
 				"name an agent (lead, tool:<name> or unit:<name>); for a person's decision, add an approve step"
 		}
+	case "pattern submit root":
+		return fmt.Sprintf("%s is not an absolute path", quote(v)), "write the folder the tree came from, as S:/shows/saltmarsh or /Users/noor/shows/saltmarsh"
 	case "dependentRequired submit jobs.*.combine":
 		return "combine needs over: the values it combines", "add over:, or remove combine"
 	case "dependentRequired submit jobs.*.each":

@@ -1,0 +1,12 @@
+# A submission from a Windows workstation: its paths are mapped from root.
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: dailies
+root: S:/shows/saltmarsh
+tree: .
+jobs:
+  proxies:
+    tool: proxies
+    frames: 1001-1048
+    with: {plates: plates/sm0140.$F4.exr}

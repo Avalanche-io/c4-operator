@@ -11,12 +11,15 @@ import (
 // A Submission is a c4: submit/1 document: what to do for one piece of
 // production. Jobs keep the order they were written in.
 type Submission struct {
-	C4      string            `json:"c4"`
-	Project string            `json:"project,omitempty"`
-	Shot    string            `json:"shot,omitempty"`
-	Name    string            `json:"name,omitempty"`
-	Due     string            `json:"due,omitempty"`
-	Tree    string            `json:"tree,omitempty"`
+	C4      string `json:"c4"`
+	Project string `json:"project,omitempty"`
+	Shot    string `json:"shot,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Due     string `json:"due,omitempty"`
+	Tree    string `json:"tree,omitempty"`
+	// Root is the folder on the submitter's machine that is the top of
+	// Tree, for mapping the paths its scenes hold.
+	Root    string            `json:"root,omitempty"`
 	Read    map[string]string `json:"read,omitempty"`
 	Tracker string            `json:"tracker,omitempty"`
 	For     string            `json:"for,omitempty"`

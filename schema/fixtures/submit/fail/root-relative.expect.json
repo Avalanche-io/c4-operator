@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "root",
+      "message": "\"shows/saltmarsh\" is not an absolute path",
+      "fix": "write the folder the tree came from, as S:/shows/saltmarsh or /Users/noor/shows/saltmarsh"
+    }
+  ],
+  "schemaMentions": "root"
+}
