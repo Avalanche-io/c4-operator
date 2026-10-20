@@ -10,6 +10,7 @@ Kubernetes anywhere.
 | `c4submit/` | the shared Python library every panel uses (standard library only, Python 3.9 and up) |
 | `nuke/`     | the Nuke panel: each Write node is a job                                               |
 | `houdini/`  | the Solaris C4 Render LOP and the C4 Submit ROP                                        |
+| `maya/`     | the Maya window: each renderable render layer is a job                                 |
 
 Each panel has a `README.md` (install and use) and a `CHECKLIST.md` (what to
 check by hand in the real application). Their tests run against fakes of
