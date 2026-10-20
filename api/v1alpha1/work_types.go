@@ -1222,7 +1222,7 @@ type WorkSupplyRequest struct {
 // MaxSteerText bounds a message to a running unit, in bytes.
 const MaxSteerText = 8192
 
-// WorkSteerRequest is a message to a unit while it runs (G-steer).
+// WorkSteerRequest is a message to a unit while it runs.
 type WorkSteerRequest struct {
 	// Token makes each request distinct; requests are carried out in
 	// token order (base-36 nanoseconds).
