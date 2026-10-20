@@ -24,6 +24,7 @@ type Farm struct {
 	Submitted []farm.JobRequest
 	Relays    []farm.Relay
 	Deadlines []time.Time
+	Resized   []api.ForecastChange
 	Views     map[string]map[string][]byte
 	// Grants are the people who let the tracker submit for them; a
 	// submission for anyone else is refused 403, as the HUD refuses it.
@@ -81,6 +82,10 @@ func (f *Farm) Submit(_ context.Context, r farm.JobRequest) (farm.JobRef, error)
 	}
 	j := &api.Job{Namespace: r.Namespace, Name: r.Name, Project: "proj", Class: r.Spec.Class, Phase: "Queued",
 		Owner: owner, CreatedAt: f.Now()}
+	if fc := r.Spec.Forecast; fc != nil {
+		j.Phase = "Forecast"
+		j.Forecast = &api.JobForecast{SlotHours: fc.SlotHours, SD: fc.SD, UnitHours: fc.UnitHours, Exists: fc.Exists}
+	}
 	j.Objective.Type = "Deadline"
 	j.Objective.Mode = r.Spec.DeadlineMode
 	if r.Spec.Deadline != nil {
@@ -117,6 +122,29 @@ func (f *Farm) SetDeadline(_ context.Context, j farm.JobRef, at time.Time) error
 		job.Objective.Mode = "Pinned"
 	}
 	f.Deadlines = append(f.Deadlines, at)
+	return nil
+}
+
+// Resize changes a forecast job's size, as the HUD does; a real job is
+// refused 409.
+func (f *Farm) Resize(_ context.Context, j farm.JobRef, c api.ForecastChange) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	job, ok := f.jobs[k(j)]
+	if !ok {
+		return farm.ErrNotFound
+	}
+	if job.Forecast == nil {
+		return &farm.APIError{Status: http.StatusConflict, Msg: j.Name + " is a real job: only a forecast is resized"}
+	}
+	fc := *job.Forecast
+	for _, x := range []struct{ to, field *string }{{c.SlotHours, &fc.SlotHours}, {c.SD, &fc.SD}, {c.UnitHours, &fc.UnitHours}, {c.Exists, &fc.Exists}} {
+		if x.to != nil {
+			*x.field = *x.to
+		}
+	}
+	job.Forecast = &fc
+	f.Resized = append(f.Resized, c)
 	return nil
 }
 

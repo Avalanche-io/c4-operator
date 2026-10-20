@@ -104,7 +104,9 @@ Each Tracker says:
   the farm plans for it and shows its risk. Its size is `slotHours`, or
   the entity's own estimate times `perUnit` (Flow's bid:
   `{field: est_in_mins, perUnit: "0.05"}` for 3 slot-minutes per bid
-  minute), or, with neither, the class's plan of the job's params. Nothing
+  minute), or, with neither, the class's plan of the job's params. When
+  the bid changes, the forecast is resized to follow it (its slot-hours
+  and unit hours; anything else set on the forecast stays). Nothing
   is written to the tracker for it. When a job rule matches the entity
   later, the real job replaces the forecast and the link moves to it;
 - `review.wait`: the job's wait that the tracker's decision serves. With

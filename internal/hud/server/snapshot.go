@@ -198,6 +198,13 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}
 	aj.Shot = j.Labels[LabelShot]
 	aj.Work = r.work
+	if f := j.Spec.Forecast; f != nil {
+		aj.Forecast = &api.JobForecast{SlotHours: f.SlotHours, SD: f.SD, UnitHours: f.UnitHours, Exists: f.Exists}
+		if f.Start != nil {
+			t := f.Start.UTC()
+			aj.Forecast.Start = &t
+		}
+	}
 	if !r.hasWork {
 		aj.Work = jobWork(m, r)
 	}

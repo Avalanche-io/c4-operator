@@ -79,6 +79,9 @@ type Farm interface {
 	Job(ctx context.Context, j JobRef) (*api.Job, error)
 	// SetDeadline writes a tracker-owned deadline (deadlineMode Tracking).
 	SetDeadline(ctx context.Context, j JobRef, at time.Time) error
+	// Resize changes a forecast job's size (spec.forecast) as the
+	// tracker's bid changes: the fields set in c replace the job's.
+	Resize(ctx context.Context, j JobRef, c api.ForecastChange) error
 	// Decide relays a tracker decision to an open wait.
 	Decide(ctx context.Context, j JobRef, r Relay) error
 	// StoreView stores files in the project's store as a view and returns
@@ -240,6 +243,10 @@ func (h *HUD) Job(ctx context.Context, j JobRef) (*api.Job, error) {
 func (h *HUD) SetDeadline(ctx context.Context, j JobRef, at time.Time) error {
 	return h.doJSON(ctx, http.MethodPost, jobPath(j)+"/nudge",
 		map[string]string{"deadline": at.UTC().Format(time.RFC3339)}, nil)
+}
+
+func (h *HUD) Resize(ctx context.Context, j JobRef, c api.ForecastChange) error {
+	return h.doJSON(ctx, http.MethodPost, jobPath(j)+"/forecast", c, nil)
 }
 
 // Decide stores the evidence in the project's store and relays the

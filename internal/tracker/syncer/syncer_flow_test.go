@@ -23,6 +23,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm/farmtest"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/flow"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/flow/flowtest"
@@ -598,6 +599,23 @@ func TestFlowForecastThenReal(t *testing.T) {
 	}
 	if l := e.link(); l.Spec.Target.WorkJob != f.Name || l.Spec.Intake != 0 {
 		t.Fatalf("link: %+v", l.Spec)
+	}
+	e.pass()
+	if len(e.farm.Resized) != 0 {
+		t.Fatalf("a forecast resized with no change to its bid: %+v", e.farm.Resized)
+	}
+
+	// The bid goes from ten hours to fifteen: the forecast follows it,
+	// once.
+	e.clock.add(time.Minute)
+	e.site.Set(e.task, map[string]any{"est_in_mins": 900}, e.dana)
+	e.pass()
+	e.pass()
+	if len(e.farm.Resized) != 1 || e.farm.Resized[0].SlotHours == nil || *e.farm.Resized[0].SlotHours != "45" || e.farm.Resized[0].UnitHours != nil {
+		t.Fatalf("resized: %+v", e.farm.Resized)
+	}
+	if j, _ := e.farm.Job(context.Background(), farm.JobRef{Namespace: ns, Name: f.Name}); j.Forecast.SlotHours != "45" || j.Forecast.UnitHours != "1" {
+		t.Fatalf("the forecast after the bid: %+v", j.Forecast)
 	}
 
 	e.clock.add(time.Minute)

@@ -566,6 +566,11 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 	if l != nil && rule.As == "forecast" && int(l.Spec.Intake) < len(t.Spec.Intake) && t.Spec.Intake[l.Spec.Intake].As == "job" {
 		return s.followDue(ctx, l, t.Spec.Intake[l.Spec.Intake], it) // already real
 	}
+	if l != nil && rule.As == "forecast" {
+		if err := s.followBid(ctx, l, rule, it); err != nil {
+			return err
+		}
+	}
 	if l == nil || replaces != "" {
 		spec := *rule.Job.DeepCopy()
 		spec.Deadline, spec.DeadlineMode = nil, ""
@@ -650,6 +655,46 @@ func forecastOf(rule c4v1.TrackerIntake, it tracker.Item) *c4v1.WorkForecast {
 		}
 	}
 	return f
+}
+
+// followBid resizes a forecast job when what sizes it (the entity's bid,
+// or the rule) changed since it was made: the slot-hours and the unit
+// hours, the two the rule sets; anything else on the forecast is left as
+// it is.
+func (s *Syncer) followBid(ctx context.Context, l *c4v1.TrackerLink, rule c4v1.TrackerIntake, it tracker.Item) error {
+	if l.Spec.Target.WorkJob == "" {
+		return nil
+	}
+	jr := farm.JobRef{Namespace: l.Namespace, Name: l.Spec.Target.WorkJob}
+	j, err := s.Farm.Job(ctx, jr)
+	if err != nil || j == nil || j.Forecast == nil {
+		return nil // gone, or real already: nothing to size
+	}
+	want := forecastOf(rule, it)
+	var c api.ForecastChange
+	if !sameHours(want.SlotHours, j.Forecast.SlotHours) {
+		c.SlotHours = &want.SlotHours
+	}
+	if !sameHours(want.UnitHours, j.Forecast.UnitHours) {
+		c.UnitHours = &want.UnitHours
+	}
+	if c.SlotHours == nil && c.UnitHours == nil {
+		return nil
+	}
+	if err := s.Farm.Resize(ctx, jr, c); err != nil {
+		return fmt.Errorf("resizing %s for %s: %w", jr, it.Ref, err)
+	}
+	return nil
+}
+
+// sameHours compares two decimal strings as numbers ("30" is "30.0").
+func sameHours(a, b string) bool {
+	if a == b {
+		return true
+	}
+	x, err1 := strconv.ParseFloat(a, 64)
+	y, err2 := strconv.ParseFloat(b, 64)
+	return err1 == nil && err2 == nil && x == y
 }
 
 // forPerson is whom an intake rule's job is for: "" for c4-sync's own

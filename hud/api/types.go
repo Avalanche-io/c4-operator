@@ -498,6 +498,9 @@ type Job struct {
 	Measure *Measure `json:"measure,omitempty"`
 	// Spend splits what the job cost between procedural and model units.
 	Spend *Spend `json:"spend,omitempty"`
+	// Forecast is set on a forecast job (spec.forecast, integrations GAPS
+	// 9): work expected, never run, as it is sized now.
+	Forecast *JobForecast `json:"forecast,omitempty"`
 	// ModelShare is the share of the job's work (slot time, every attempt)
 	// that model units did, 0 to 1; absent before any unit ran. Spend's
 	// ModelShare is their share of the cost.
@@ -817,4 +820,27 @@ type Wait struct {
 	// Block says the unit opened the wait for itself at a safe point
 	// (c4-unit wait): it runs again, resuming, once decided.
 	Block bool `json:"block,omitempty"`
+}
+
+// JobForecast is a forecast job's size (spec.forecast): numbers as
+// decimal strings, empty where the class's plan or the default stands.
+type JobForecast struct {
+	SlotHours string     `json:"slotHours,omitempty"`
+	SD        string     `json:"sd,omitempty"`
+	UnitHours string     `json:"unitHours,omitempty"`
+	Start     *time.Time `json:"start,omitempty"`
+	Exists    string     `json:"exists,omitempty"`
+}
+
+// ForecastChange is POST /jobs/{ns}/{name}/forecast: a forecast job
+// resized, as its tracker's bid changes. A field sent replaces the job's
+// (an empty string clears it: the class's plan or the default stands); a
+// field left out is kept.
+type ForecastChange struct {
+	SlotHours *string `json:"slotHours,omitempty"`
+	SD        *string `json:"sd,omitempty"`
+	UnitHours *string `json:"unitHours,omitempty"`
+	// Start is RFC 3339, or empty to clear it.
+	Start  *string `json:"start,omitempty"`
+	Exists *string `json:"exists,omitempty"`
 }
