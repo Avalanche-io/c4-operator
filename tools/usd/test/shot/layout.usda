@@ -1,0 +1,18 @@
+#usda 1.0
+(
+    defaultPrim = "World"
+    upAxis = "Y"
+)
+
+def Xform "World" (
+    kind = "assembly"
+)
+{
+    def "ball" (
+        prepend references = @geo/ball.usda@
+    )
+    {
+        double3 xformOp:translate = (0, 0.5, 0)
+        uniform token[] xformOpOrder = ["xformOp:translate"]
+    }
+}

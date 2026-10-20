@@ -1,0 +1,21 @@
+#usda 1.0
+(
+    doc = "The usd tool's test stage: a shot layer over a layout layer, which references a model."
+    defaultPrim = "World"
+    startTimeCode = 1001
+    endTimeCode = 1002
+    timeCodesPerSecond = 24
+    metersPerUnit = 1
+    upAxis = "Y"
+    subLayers = [
+        @layout.usda@
+    ]
+)
+
+over "World"
+{
+    over "ball"
+    {
+        color3f[] primvars:displayColor = [(0.62, 0.40, 0.22)]
+    }
+}
