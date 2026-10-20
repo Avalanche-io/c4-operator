@@ -72,6 +72,44 @@ type Snapshot struct {
 	// Gates are the one-slot resources a project's jobs pass first come,
 	// first served (a merge gate), each with its holder and line.
 	Gates []Gate `json:"gates,omitempty"`
+	// Incidents group what needs attention by root cause: one item per
+	// cause, its symptoms folded in, with an ordered checklist (needs
+	// first, most work first). Always present, so a client never groups
+	// on its own.
+	Incidents []Incident `json:"incidents"`
+}
+
+// Incident is one root cause and what it caused.
+type Incident struct {
+	ID string `json:"id"`
+	// NeedsYou: a person must act (failures after their retries, a
+	// decision that is the viewer's or a party's); false when the farm is
+	// handling it (machines that stopped reporting, work moved).
+	NeedsYou bool   `json:"needsYou"`
+	Title    string `json:"title"`
+	Detail   string `json:"detail,omitempty"`
+	// Count of CountOf ("24", "frames moved").
+	Count   int       `json:"count"`
+	CountOf string    `json:"countOf,omitempty"`
+	Jobs    []string  `json:"jobs"`
+	Since   time.Time `json:"since"`
+	// State is open, or acknowledged once every job in it has someone on
+	// it (its failed units taken or assigned).
+	State     string         `json:"state"`
+	Checklist []IncidentStep `json:"checklist"`
+}
+
+// IncidentStep is one step of an incident's checklist: a label, the
+// button's words (Act), and a link (Href, a HUD route) or a job control
+// (Action on Job, for Units).
+type IncidentStep struct {
+	Label  string `json:"label"`
+	Act    string `json:"act,omitempty"`
+	Href   string `json:"href,omitempty"`
+	Action string `json:"action,omitempty"`
+	Job    string `json:"job,omitempty"`
+	Units  string `json:"units,omitempty"`
+	Done   bool   `json:"done,omitempty"`
 }
 
 // Gate is a gate and the units at it.

@@ -16,7 +16,7 @@
     "go.mod",
     "internal/pytest"
    ],
-   "kind": "model"
+   "reasoning": {"does": "model"}
   },
   {
    "name": "survey",
@@ -32,7 +32,7 @@
    },
    "slots": 1,
    "group": "setup",
-   "kind": "model"
+   "reasoning": {"does": "model"}
   },
   {
    "name": "docs",
@@ -50,7 +50,7 @@
    "holds": [
     "README.md"
    ],
-   "kind": "model"
+   "reasoning": {"does": "model"}
   }
  ],
  "dependents": "all"

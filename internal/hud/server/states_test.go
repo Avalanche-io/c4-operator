@@ -29,8 +29,13 @@ func TestRoleOf(t *testing.T) {
 		{[]string{"system:authenticated", "c4:role:wrangler"}, "wrangler"},
 		{[]string{"c4-role-pipeline-td"}, "pipeline-td"},
 		{[]string{"c4:role:emperor", "c4:role:artist"}, "artist"},
+		// The studio's own group names, ahead of the convention.
+		{[]string{"c4:role:artist", "vfx-leads"}, "supervisor"},
+		{[]string{"render-wranglers"}, "wrangler"},
+		{[]string{"bad-map"}, ""},
 	} {
-		if got := RoleOf(c.groups); got != c.want {
+		byGroup := map[string]string{"vfx-leads": "supervisor", "render-wranglers": "wrangler", "bad-map": "emperor"}
+		if got := RoleOf(c.groups, byGroup); got != c.want {
 			t.Errorf("RoleOf(%v) = %q, want %q", c.groups, got, c.want)
 		}
 	}

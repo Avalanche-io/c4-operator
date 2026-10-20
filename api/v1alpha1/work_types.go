@@ -655,6 +655,35 @@ type WorkUnitUsage struct {
 	CostSource string `json:"costSource,omitempty"`
 	// +optional
 	Models []WorkModelTokens `json:"models,omitempty"`
+	// Reasoning is what the unit's latest attempt reasoned with, as its
+	// runner observed it (c4-unit usage, c4-agent's Stop hook).
+	// +optional
+	Reasoning *WorkReasoning `json:"reasoning,omitempty"`
+}
+
+// WorkReasoning is what an attempt reasoned with: the model (and every
+// model it used), the effort level in force at its end (and every level
+// it ran at), its thinking mode, its tool profile's name, the tools it was
+// offered and the MCP servers they came from.
+type WorkReasoning struct {
+	// +optional
+	Does string `json:"does,omitempty"`
+	// +optional
+	Model string `json:"model,omitempty"`
+	// +optional
+	Models []string `json:"models,omitempty"`
+	// +optional
+	Effort string `json:"effort,omitempty"`
+	// +optional
+	Efforts []string `json:"efforts,omitempty"`
+	// +optional
+	Thinking string `json:"thinking,omitempty"`
+	// +optional
+	Tools string `json:"tools,omitempty"`
+	// +optional
+	ToolNames []string `json:"toolNames,omitempty"`
+	// +optional
+	MCPServers []string `json:"mcpServers,omitempty"`
 }
 
 // WorkModelTokens is one model's tokens in a unit.

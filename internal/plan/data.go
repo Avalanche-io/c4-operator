@@ -1,11 +1,13 @@
 package plan
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 
-	"sigs.k8s.io/yaml"
+	yaml "go.yaml.in/yaml/v3"
 
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
@@ -53,11 +55,11 @@ type FileBlock struct {
 	Holds   []string          `json:"holds,omitempty"`
 	Claims  []class.DocClaim  `json:"claims,omitempty"`
 	Gate    string            `json:"gate,omitempty"`
-	Does    string            `json:"does,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
 	Wait    *class.DocWait    `json:"wait,omitempty"`
-	// Kind is the older spelling of Does (procedural or model).
-	Kind string `json:"kind,omitempty"`
+	// Reasoning is what the block reasons with: {does, model, effort,
+	// tools}.
+	Reasoning *class.Reasoning `json:"reasoning,omitempty"`
 	// Before lists blocks that run after this one: the same edges as their
 	// After, written where the reason is (a wait before what it holds up).
 	Before []string `json:"before,omitempty"`
@@ -74,7 +76,7 @@ func Read(path string) (*Plan, error) {
 		return nil, err
 	}
 	var f File
-	if err := yaml.UnmarshalStrict(b, &f); err != nil {
+	if err := readStrict(b, &f); err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
 	if f.Version != 1 {
@@ -107,11 +109,13 @@ func FromFile(f *File, file string) (*Plan, error) {
 		if fb.Slots > 0 {
 			u.Slots = fb.Slots
 		}
-		does, err := class.ParseDoes(fb.Does, fb.Kind)
-		if err != nil {
-			return nil, fmt.Errorf("%s: block %s: %w", file, fb.Name, err)
+		if fb.Reasoning != nil {
+			if err := fb.Reasoning.Check(); err != nil {
+				return nil, fmt.Errorf("%s: block %s: reasoning: %w", file, fb.Name, err)
+			}
+			u.Reasoning = fb.Reasoning
 		}
-		u.Work, u.WorkSD, u.Env, u.Inputs, u.Holds, u.Claims, u.Gate, u.Does = fb.Work, fb.WorkSD, fb.Env, fb.Inputs, fb.Holds, fb.Claims, fb.Gate, does
+		u.Work, u.WorkSD, u.Env, u.Inputs, u.Holds, u.Claims, u.Gate = fb.Work, fb.WorkSD, fb.Env, fb.Inputs, fb.Holds, fb.Claims, fb.Gate
 		for k, v := range fb.Params {
 			u.Params[k] = v
 		}
@@ -162,4 +166,21 @@ func FromFile(f *File, file string) (*Plan, error) {
 		}
 	}
 	return p, nil
+}
+
+// readStrict reads a plan file, YAML or JSON, into f, refusing fields File
+// does not have. It reads YAML 1.2, where a key such as a claim's on is a
+// string (YAML 1.1 reads on, yes and no as booleans).
+func readStrict(b []byte, f *File) error {
+	var doc any
+	if err := yaml.Unmarshal(b, &doc); err != nil {
+		return err
+	}
+	j, err := json.Marshal(doc)
+	if err != nil {
+		return err
+	}
+	dec := json.NewDecoder(bytes.NewReader(j))
+	dec.DisallowUnknownFields()
+	return dec.Decode(f)
 }

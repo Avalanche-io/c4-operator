@@ -431,11 +431,12 @@ func TestSpendByKind(t *testing.T) {
 		t.Fatal(err)
 	}
 	tick(t, q)
-	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "impl", "does": "model"}, {"name": "check", "after": ["impl"]}]}`)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "impl", "reasoning": {"does": "model"}}, {"name": "check", "after": ["impl"]}]}`)
 	finish(t, podOfUnit(t, ns, "kinds", 0), corev1.PodSucceeded, *now, 30*time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
 	tick(t, q)
 	usage := putDoc(t, st, `{"models": [{"model": "claude-opus-5-5", "inputTokens": 120000, "outputTokens": 8000, "cacheReadTokens": 90000, "costUSD": 1.92},
-		{"model": "claude-haiku-5-5", "inputTokens": 2000}], "costSource": "metering-proxy"}`)
+		{"model": "claude-haiku-5-5", "inputTokens": 2000}], "costSource": "metering-proxy",
+		"reasoning": {"does": "model", "model": "claude-opus-5-5", "effort": "high", "efforts": ["medium", "high"], "toolNames": ["Read", "Edit"]}}`)
 	finish(t, podOfUnit(t, ns, "kinds", 1), corev1.PodSucceeded, *now, 30*time.Minute, map[string]string{c4v1.AnnotationOutputUsage: usage})
 	tick(t, q)
 	finish(t, podOfUnit(t, ns, "kinds", 2), corev1.PodSucceeded, *now, 30*time.Minute, nil)
@@ -457,7 +458,8 @@ func TestSpendByKind(t *testing.T) {
 			t.Fatalf("%s: slot hours %s and %s, work share %s", when, sp.ModelSlotHours, sp.ProceduralSlotHours, sp.ModelWorkShare)
 		}
 		if u := got.Status.ModelUsage["1"]; len(u.Models) != 2 || u.Models[1].Model != "claude-opus-5-5" || u.InputTokens != 122000 || u.Cost != "1.9200" ||
-			u.Models[0].Cost != "" || u.CostSource != "metering-proxy" || u.SlotCost != "0.2000" || u.SlotHours != "0.5000" {
+			u.Models[0].Cost != "" || u.CostSource != "metering-proxy" || u.SlotCost != "0.2000" || u.SlotHours != "0.5000" ||
+			u.Reasoning == nil || u.Reasoning.Model != "claude-opus-5-5" || u.Reasoning.Effort != "high" || len(u.Reasoning.ToolNames) != 2 {
 			t.Fatalf("%s: usage %+v", when, got.Status.ModelUsage)
 		}
 	}
@@ -478,7 +480,7 @@ func TestUnpricedCacheReadsAreWeighted(t *testing.T) {
 		t.Fatal(err)
 	}
 	tick(t, q)
-	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "lane", "kind": "model"}, {"name": "other", "kind": "model"}]}`)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "lane", "reasoning": {"does": "model"}}, {"name": "other", "reasoning": {"does": "model"}}]}`)
 	finish(t, podOfUnit(t, ns, "agent", 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
 	tick(t, q)
 	// agent-jobs' measured session, on Sonnet 5.5 at $2 a million input.

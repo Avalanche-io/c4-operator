@@ -19,7 +19,7 @@ import (
 )
 
 // Spend, procedural and model (LLM-OR-PROCEDURE 6.2). Every unit is
-// a procedure's or a model's (class.DoesOf: the document's does, else the
+// a procedure's or a model's (class.DoesOf: the document's reasoning.does, else the
 // class's; agent members are model units). Each ended attempt adds its
 // slot time, priced at its pool's rate, to its unit; a model unit's
 // attempt also adds the tokens it reported in .c4/usage.json (c4-unit
@@ -49,6 +49,8 @@ type usageDoc struct {
 	modelUse
 	Models     []modelUse `json:"models"`
 	CostSource string     `json:"costSource"`
+	// Reasoning is what the attempt reasoned with, as observed.
+	Reasoning *c4v1.WorkReasoning `json:"reasoning"`
 }
 
 func (m modelUse) counts() tokens.Counts {
@@ -73,6 +75,7 @@ type unitSpend struct {
 	slotCost   float64
 	slotHours  float64
 	costSource string
+	reasoning  *c4v1.WorkReasoning // the latest attempt's, as observed
 }
 
 func (s *unitSpend) add(u modelUse) {
@@ -155,6 +158,9 @@ func (q *Queue) noteSpend(ctx context.Context, v *view, idx int, p *corev1.Pod, 
 	if doc.CostSource != "" {
 		s.costSource = doc.CostSource
 	}
+	if doc.Reasoning != nil {
+		s.reasoning = doc.Reasoning
+	}
 	if m.spentPod == nil {
 		m.spentPod = map[types.UID]bool{}
 	}
@@ -197,7 +203,7 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 		}
 		modelSlot += s.slotCost
 		modelHours += s.slotHours
-		u := c4v1.WorkUnitUsage{SlotCost: money(s.slotCost), SlotHours: hours(s.slotHours), CostSource: s.costSource}
+		u := c4v1.WorkUnitUsage{SlotCost: money(s.slotCost), SlotHours: hours(s.slotHours), CostSource: s.costSource, Reasoning: s.reasoning}
 		var names []string
 		for name := range s.models {
 			names = append(names, name)
@@ -291,7 +297,7 @@ func (m *jobMem) loadSpend(st *c4v1.WorkJobStatus) {
 		if err != nil {
 			continue
 		}
-		s := &unitSpend{slotCost: f(u.SlotCost), slotHours: f(u.SlotHours), costSource: u.CostSource, models: map[string]*tokenUse{}}
+		s := &unitSpend{slotCost: f(u.SlotCost), slotHours: f(u.SlotHours), costSource: u.CostSource, reasoning: u.Reasoning, models: map[string]*tokenUse{}}
 		for _, mt := range u.Models {
 			s.models[mt.Model] = &tokenUse{Counts: tokens.Counts{Input: mt.InputTokens, Output: mt.OutputTokens, CacheRead: mt.CacheReadTokens,
 				CacheWrite: mt.CacheWriteTokens}, unpriced: mt.UnpricedTokens, unpricedW: float64(mt.UnpricedWeightedTokens),

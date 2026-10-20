@@ -103,11 +103,11 @@ func TestExpandDocumentRefuses(t *testing.T) {
 	}
 }
 
-// does says what does a unit's work. A document may give it, or the older
-// kind (procedural or model); both must agree. The graph root is a
-// procedure unless rootDoes says it is a model (a generator reading a plan
-// from prose); an agent member is a model by class.
-func TestDoes(t *testing.T) {
+// A unit's reasoning (does, model, effort, tools) comes from its
+// document; does defaults to the class's (an agent member is a model unit)
+// else a procedure. The graph root is a procedure unless rootDoes says it
+// is a model (a generator reading a plan from prose).
+func TestReasoning(t *testing.T) {
 	d, _ := Lookup("graph")
 	p, err := d.Plan(graphJob(map[string]string{"rootDoes": "model"}))
 	if err != nil || DoesOf(d, p.Units[0]) != DoesModel {
@@ -120,26 +120,26 @@ func TestDoes(t *testing.T) {
 		t.Fatal("rootDoes llm accepted")
 	}
 	root := Unit{Name: "plan", Key: "graph", Generator: true}
-	doc := `{"version": 1, "units": [{"name": "a", "does": "model"}, {"name": "b", "kind": "model"},
-	  {"name": "c", "kind": "procedural"}, {"name": "d"}]}`
+	doc := `{"version": 1, "units": [
+	  {"name": "a", "reasoning": {"does": "model", "model": "claude-sonnet-5-5", "effort": "high", "tools": "repo-rw"}},
+	  {"name": "b", "reasoning": {"does": "procedure"}}, {"name": "c"}]}`
 	x, err := ExpandDocument(graphJob(nil), root, []byte(doc), map[string]int{"plan": 0}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var got []string
-	for _, u := range x.Units {
-		got = append(got, DoesOf(d, u))
+	if r := ReasoningOf(d, x.Units[0]); r != (Reasoning{Does: "model", Model: "claude-sonnet-5-5", Effort: "high", Tools: "repo-rw"}) {
+		t.Fatalf("a: %+v", r)
 	}
-	if want := []string{"model", "model", "procedure", "procedure"}; !slices.Equal(got, want) {
-		t.Fatalf("does %v, want %v", got, want)
+	if DoesOf(d, x.Units[1]) != DoesProcedure || DoesOf(d, x.Units[2]) != DoesProcedure {
+		t.Fatal("b and c are procedures")
 	}
-	for _, bad := range []string{`{"name": "a", "does": "model", "kind": "procedural"}`, `{"name": "a", "does": "human"}`} {
+	for _, bad := range []string{`{"name": "a", "reasoning": {"does": "human"}}`, `{"name": "a", "reasoning": {"effort": "turbo"}}`} {
 		if _, err := ExpandDocument(graphJob(nil), root, []byte(`{"version": 1, "units": [`+bad+`]}`), map[string]int{"plan": 0}, 1); err == nil {
 			t.Fatalf("accepted %s", bad)
 		}
 	}
 	a, _ := Lookup("agent")
-	if DoesOf(a, Unit{}) != DoesModel {
+	if r := ReasoningOf(a, Unit{}); r.Does != DoesModel {
 		t.Fatal("an agent member is a model unit")
 	}
 }

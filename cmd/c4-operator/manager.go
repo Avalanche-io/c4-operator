@@ -84,6 +84,7 @@ func runManager(args []string) error {
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name[@role]=project|project;... (* for all projects; a name that is a role, such as wrangler, has that role)")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
+	hudRoles := fs.String("hud-role-groups", "", "the studio's groups and the HUD roles they start their members at, as group=role,... (roles: artist, supervisor, producer, wrangler, farm-admin, facilities, pipeline-td); groups named c4:role:<role> need no entry")
 	hudSites := fs.String("hud-sites", "", "JSON file of the farm's sites (name, label, region, lat, lon, kind onprem or cloud, localities) for the HUD's map; nodes join a site by their topology.kubernetes.io/region label")
 	farmTZ := fs.String("tz", "UTC", "the farm's time zone, for times the queue and the HUD show")
 	staging := fs.Bool("staging", false, "experimental: let the work queue move jobs' inputs to pools at other sites over the links in the --hud-sites topology file")
@@ -185,7 +186,7 @@ func runManager(args []string) error {
 		}
 	}
 	if *hudAddr != "" {
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *farmTZ, *namespace); err != nil {
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *hudRoles, *farmTZ, *namespace); err != nil {
 			return err
 		}
 	}
@@ -224,7 +225,11 @@ func runManager(args []string) error {
 
 // addHUD runs the HUD backend: a collector on every replica and an HTTP
 // server for the web app and the HUD API.
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, tz, namespace string) error {
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, roles, tz, namespace string) error {
+	roleGroups, err := parseRoleGroups(roles)
+	if err != nil {
+		return fmt.Errorf("--hud-role-groups: %w", err)
+	}
 	loc, err := time.LoadLocation(tz)
 	if err != nil {
 		return fmt.Errorf("--tz: %w", err)
@@ -234,7 +239,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		return err
 	}
 	srv := &hudserver.Server{Client: mgr.GetClient(), Kube: kube, Stores: stores, Web: web, Loc: loc,
-		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud}
+		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups}
 	if q != nil {
 		// Without the work system the HUD has no queue to ask (a nil
 		// *queue.Queue in the interface would not compare equal to nil).
@@ -327,4 +332,20 @@ func addStaging(mgr ctrl.Manager, q *queue.Queue, stores func(context.Context, s
 		p.Run(ctx, 15*time.Second)
 		return nil
 	}))
+}
+
+// parseRoleGroups reads --hud-role-groups: group=role,...
+func parseRoleGroups(spec string) (map[string]string, error) {
+	out := map[string]string{}
+	for _, kv := range strings.Split(spec, ",") {
+		if kv = strings.TrimSpace(kv); kv == "" {
+			continue
+		}
+		g, r, ok := strings.Cut(kv, "=")
+		if !ok || g == "" || !slices.Contains(api.Roles, r) {
+			return nil, fmt.Errorf("%q: want group=role, role one of %s", kv, strings.Join(api.Roles, ", "))
+		}
+		out[g] = r
+	}
+	return out, nil
 }

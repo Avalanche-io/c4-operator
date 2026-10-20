@@ -39,9 +39,12 @@ import (
 
 // Server is the HUD backend.
 type Server struct {
-	Client client.Client        // the manager's cached client
-	Kube   kubernetes.Interface // logs, events, token and access reviews, c4-system pods
-	Queue  Queue                // burst spend and deadline options (optional)
+	// RoleGroups maps the studio's group names to viewer roles
+	// (api.Roles), ahead of groups named c4:role:<role> (RoleOf).
+	RoleGroups map[string]string
+	Client     client.Client        // the manager's cached client
+	Kube       kubernetes.Interface // logs, events, token and access reviews, c4-system pods
+	Queue      Queue                // burst spend and deadline options (optional)
 	// Progress, when set, receives units' reported progress from each
 	// scrape of the node daemons, for the queue's estimates.
 	Progress *queue.ProgressCache
@@ -217,7 +220,7 @@ func (s *Server) access(ctx context.Context, user string, groups []string) (*api
 	}
 	m := s.m
 	s.mu.Unlock()
-	v := &api.Viewer{User: user, Projects: []string{}, All: true, Role: RoleOf(groups)}
+	v := &api.Viewer{User: user, Projects: []string{}, All: true, Role: RoleOf(groups, s.RoleGroups)}
 	if m != nil {
 		for _, p := range m.projects {
 			ok := false
@@ -367,10 +370,16 @@ func (s *Server) expand(v *api.Viewer) *api.Viewer {
 	return out
 }
 
-// RoleOf is a viewer's role from their groups: a group named
+// RoleOf is a viewer's role from their groups: a group the map names
+// (the studio's own group names, --role-groups), else a group named
 // c4:role:<role> or c4-role-<role>, for a role in api.Roles. The first
 // match wins; none leaves the role empty and the HUD guesses.
-func RoleOf(groups []string) string {
+func RoleOf(groups []string, byGroup map[string]string) string {
+	for _, g := range groups {
+		if r, ok := byGroup[g]; ok && slices.Contains(api.Roles, r) {
+			return r
+		}
+	}
 	for _, g := range groups {
 		r, ok := strings.CutPrefix(g, "c4:role:")
 		if !ok {

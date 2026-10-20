@@ -176,7 +176,16 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 			e["reused"] = true
 		}
 		if rec.driver != nil {
-			e["does"] = class.DoesOf(rec.driver, u)
+			r := map[string]any{"does": class.DoesOf(rec.driver, u)}
+			for k, v := range map[string]string{"model": u.Reasoning.Model, "effort": u.Reasoning.Effort, "tools": u.Reasoning.Tools} {
+				if v != "" {
+					r[k] = v
+				}
+			}
+			if us, ok := rec.job.Status.ModelUsage[strconv.Itoa(i)]; ok && us.Reasoning != nil {
+				r["observed"] = us.Reasoning
+			}
+			e["reasoning"] = r
 		}
 		if us, ok := rec.job.Status.ModelUsage[strconv.Itoa(i)]; ok {
 			e["usage"] = us

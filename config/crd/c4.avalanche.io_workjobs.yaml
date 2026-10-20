@@ -802,6 +802,38 @@ spec:
                     outputTokens:
                       format: int64
                       type: integer
+                    reasoning:
+                      description: |-
+                        Reasoning is what the unit's latest attempt reasoned with, as its
+                        runner observed it (c4-unit usage, c4-agent's Stop hook).
+                      properties:
+                        does:
+                          type: string
+                        effort:
+                          type: string
+                        efforts:
+                          items:
+                            type: string
+                          type: array
+                        mcpServers:
+                          items:
+                            type: string
+                          type: array
+                        model:
+                          type: string
+                        models:
+                          items:
+                            type: string
+                          type: array
+                        thinking:
+                          type: string
+                        toolNames:
+                          items:
+                            type: string
+                          type: array
+                        tools:
+                          type: string
+                      type: object
                     slotCost:
                       type: string
                     slotHours:

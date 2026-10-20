@@ -111,11 +111,11 @@ type DocUnit struct {
 	Holds   []string          `json:"holds,omitempty"`
 	Claims  []DocClaim        `json:"claims,omitempty"`
 	Gate    string            `json:"gate,omitempty"`
-	Does    string            `json:"does,omitempty"`
 	Params  map[string]string `json:"params,omitempty"`
 	Cites   json.RawMessage   `json:"cites,omitempty"`
-	// Kind is the older spelling of Does (procedural or model).
-	Kind string `json:"kind,omitempty"`
+	// Reasoning is what the unit reasons with: {does, model, effort,
+	// tools}.
+	Reasoning *Reasoning `json:"reasoning,omitempty"`
 	// Wait makes the unit a wait for a person, a party or a clock.
 	Wait *DocWait `json:"wait,omitempty"`
 }
@@ -262,8 +262,11 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 			}
 			u.Claims = append(u.Claims, c)
 		}
-		if u.Does, err = ParseDoes(du.Does, du.Kind); err != nil {
-			return nil, fmt.Errorf("unit %s: %w", du.Name, err)
+		if du.Reasoning != nil {
+			if err := du.Reasoning.Check(); err != nil {
+				return nil, fmt.Errorf("unit %s: reasoning: %w", du.Name, err)
+			}
+			u.Reasoning = *du.Reasoning
 		}
 		if du.Work < 0 || du.WorkSD < 0 {
 			return nil, fmt.Errorf("unit %s: negative work", du.Name)
@@ -431,15 +434,15 @@ func (graph) Plan(job *c4v1.WorkJob) (*Plan, error) {
 	name, key := param(job, "root", "plan"), param(job, "key", "graph")
 	// The root is the generator: a procedure by default, a model when it
 	// reads a plan from prose (rootDoes: model).
-	does, err := ParseDoes(param(job, "rootDoes", ""), "")
-	if err != nil {
+	does := param(job, "rootDoes", "")
+	if err := checkDoes(does); err != nil {
 		return nil, fmt.Errorf("rootDoes: %w", err)
 	}
 	cfg := estimate.DefaultConfig()
 	cfg.NoLocality = true
 	cfg.Default = estimate.Prior{Mean: 600, SD: 300}
 	p := &Plan{OrderName: string(order.Sequential), Estimate: cfg, Prior: prior, Axis: Axis{Kind: "step"},
-		Units: []Unit{{Index: 0, Name: name, Label: name, Key: key, Slots: 1, Generator: true, Exists: 1, Does: does,
+		Units: []Unit{{Index: 0, Name: name, Label: name, Key: key, Slots: 1, Generator: true, Exists: 1, Reasoning: Reasoning{Does: does},
 			Env: []corev1.EnvVar{env("C4_UNIT_NAME", name)}}},
 		Order: []int{0}}
 	return p, nil

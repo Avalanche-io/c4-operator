@@ -5,7 +5,7 @@
    "name": "port/bisect",
    "label": "port bisect",
    "key": "porter",
-   "kind": "model",
+   "reasoning": {"does": "model"},
    "group": "ports",
    "after": [
     "scaffold"
@@ -22,7 +22,7 @@
    "name": "port/colorsys",
    "label": "port colorsys",
    "key": "porter",
-   "kind": "model",
+   "reasoning": {"does": "model"},
    "group": "ports",
    "after": [
     "scaffold"
@@ -39,7 +39,7 @@
    "name": "port/fnmatch",
    "label": "port fnmatch",
    "key": "porter",
-   "kind": "model",
+   "reasoning": {"does": "model"},
    "group": "ports",
    "after": [
     "scaffold"
@@ -56,7 +56,7 @@
    "name": "port/shlex",
    "label": "port shlex",
    "key": "porter",
-   "kind": "model",
+   "reasoning": {"does": "model"},
    "group": "ports",
    "after": [
     "scaffold"
@@ -73,7 +73,7 @@
    "name": "port/textwrap",
    "label": "port textwrap",
    "key": "porter",
-   "kind": "model",
+   "reasoning": {"does": "model"},
    "group": "ports",
    "after": [
     "scaffold"
@@ -90,7 +90,7 @@
    "name": "review/api",
    "label": "review api",
    "key": "reviewer",
-   "kind": "model",
+   "reasoning": {"does": "model"},
    "group": "review",
    "after": [
     "port/bisect",
@@ -107,7 +107,7 @@
    "name": "review/diff",
    "label": "review diff",
    "key": "reviewer",
-   "kind": "model",
+   "reasoning": {"does": "model"},
    "group": "review",
    "after": [
     "port/bisect",

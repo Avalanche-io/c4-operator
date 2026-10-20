@@ -48,9 +48,8 @@ type Unit struct {
 	Holds  []string
 	Claims []class.DocClaim
 	Gate   string
-	// Does is what does the block's work: model or procedure (empty: its
-	// class decides).
-	Does string
+	// Reasoning is what the block reasons with (nil: its class decides).
+	Reasoning *class.Reasoning
 	// Params are facts from the plan, carried to the queue as they are.
 	Params map[string]string
 	// Cites says where each edge in After came from.
@@ -152,7 +151,7 @@ func (p *Plan) Doc() (*class.Doc, error) {
 		exists := u.Exists
 		du := class.DocUnit{Name: u.Name, Label: u.Label, Key: u.Key, After: slices.Sorted(slices.Values(u.After)),
 			Work: u.Work, WorkSD: u.WorkSD, Exists: &exists, Planned: u.Planned, Env: u.Env, Inputs: u.Inputs,
-			Slots: u.Slots, Group: u.Group, Holds: slices.Compact(slices.Sorted(slices.Values(u.Holds))), Claims: u.Claims, Gate: u.Gate, Does: u.Does, Wait: u.Wait}
+			Slots: u.Slots, Group: u.Group, Holds: slices.Compact(slices.Sorted(slices.Values(u.Holds))), Claims: u.Claims, Gate: u.Gate, Reasoning: u.Reasoning, Wait: u.Wait}
 		if len(du.Holds) == 0 {
 			du.Holds = nil
 		}

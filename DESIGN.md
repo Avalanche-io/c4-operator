@@ -1436,13 +1436,19 @@ and a sweep planner that spawns trials are all generators.
     line, fixtures are excluded by glob, a marker naming its own owner is
     no edge, and what cannot be read is listed. Ra's `Pending{…}` markers
     are the motivating case: the pattern is the job's, not c4's.
-- **Procedural and model units** (LLM-OR-PROCEDURE 6.2 and 7.2). What
-  does each unit's work is `model` or `procedure`: the expansion
-  document's `does`, else its class's (agent members are model units),
-  else a procedure. A graph job's root, its generator, is a procedure
-  unless the job's `rootDoes: model` says a model reads its plan from
-  prose. `kind: procedural|model` is the older spelling of `does`, still
-  read (a unit giving both must agree); c4-plan files take `does` too.
+- **Procedural and model units** (LLM-OR-PROCEDURE 6.2 and 7.2). A unit
+  declares what it reasons with in its expansion document or plan block:
+  `reasoning: {does, model, effort, tools}`, `does` being `model` or
+  `procedure`, `effort` one of low, medium, high, xhigh and max, `tools` a
+  tool profile's name. `does` defaults to the class's (agent members are
+  model units), else a procedure. A graph job's root, its generator, is a
+  procedure unless the job's `rootDoes: model` says a model reads its plan
+  from prose. What an attempt actually reasoned with, as its runner saw it
+  (the model or models, the effort or efforts, thinking, the tool profile,
+  the tools offered and their MCP servers), comes back in its usage
+  document's `reasoning` and is kept for each unit's latest attempt
+  (`status.modelUsage[i].reasoning`), so the HUD can show declared and
+  observed side by side.
   - **Work share.** Each ended attempt also adds its slot time (hours
     times slots) to its unit, and status gives the model units' share of
     it (`spend.modelWorkShare`): how much of the work models did, which

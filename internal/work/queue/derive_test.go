@@ -235,7 +235,7 @@ func TestModelWorkAProcedureCouldDo(t *testing.T) {
 		t.Fatal(err)
 	}
 	q.Stores = func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }
-	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "summarize", "kind": "model"}, {"name": "draft", "kind": "model"}]}`)
+	doc := putDoc(t, st, `{"version": 1, "units": [{"name": "summarize", "reasoning": {"does": "model"}}, {"name": "draft", "reasoning": {"does": "model"}}]}`)
 	run := func(name string, draft string) *c4v1.WorkJob {
 		t.Helper()
 		j := job(ns, name, "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))

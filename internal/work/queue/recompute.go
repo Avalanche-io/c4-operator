@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 	"time"
 
@@ -48,9 +47,8 @@ import (
 
 // AnnotationRecomputeUnit on a WorkJob makes it a recompute of one unit:
 // the queue plans that unit alone. Its value is the unit's definition
-// (JSON: name, label, key, position, slots, does, environment, work), or,
-// as first written, its index in the class's plan. Recompute sets it; a
-// person does not.
+// (JSON: name, label, key, position, slots, reasoning, environment, work).
+// Recompute sets it; a person does not.
 const AnnotationRecomputeUnit = "c4.avalanche.io/recompute-unit"
 
 // AnnotationRecomputeOf names the job and unit a recompute reruns
@@ -135,15 +133,15 @@ func (q *Queue) producingUnit(src *c4v1.WorkJob, d class.Driver, idx int) (class
 
 // recomputeSpec is the unit a recompute runs (AnnotationRecomputeUnit).
 type recomputeSpec struct {
-	Name   string          `json:"name,omitempty"`
-	Label  string          `json:"label"`
-	Key    string          `json:"key,omitempty"`
-	Pos    int             `json:"pos,omitempty"`
-	Slots  int             `json:"slots,omitempty"`
-	Does   string          `json:"does,omitempty"`
-	Env    []corev1.EnvVar `json:"env,omitempty"`
-	Work   float64         `json:"work,omitempty"`
-	WorkSD float64         `json:"workSD,omitempty"`
+	Name      string          `json:"name,omitempty"`
+	Label     string          `json:"label"`
+	Key       string          `json:"key,omitempty"`
+	Pos       int             `json:"pos,omitempty"`
+	Slots     int             `json:"slots,omitempty"`
+	Reasoning class.Reasoning `json:"reasoning,omitempty"`
+	Env       []corev1.EnvVar `json:"env,omitempty"`
+	Work      float64         `json:"work,omitempty"`
+	WorkSD    float64         `json:"workSD,omitempty"`
 }
 
 // recomputeJob is the WorkJob that reruns src's unit idx, u, at site.
@@ -158,7 +156,7 @@ func recomputeJob(src *c4v1.WorkJob, idx int, u class.Unit, key process.Key, inp
 	for _, in := range src.Spec.Inputs {
 		readOnly[in.MountPath] = in.ReadOnly
 	}
-	spec, _ := json.Marshal(recomputeSpec{Name: u.Name, Label: u.Label, Key: u.Key, Pos: u.Pos, Slots: u.Slots, Does: u.Does,
+	spec, _ := json.Marshal(recomputeSpec{Name: u.Name, Label: u.Label, Key: u.Key, Pos: u.Pos, Slots: u.Slots, Reasoning: u.Reasoning,
 		Env: u.Env, Work: u.Work, WorkSD: u.WorkSD})
 	deadline := metav1.NewTime(by)
 	j := &c4v1.WorkJob{
@@ -207,20 +205,12 @@ func recomputeUnit(j *c4v1.WorkJob, p *class.Plan) (*class.Plan, error) {
 	if !ok {
 		return p, nil
 	}
-	var u class.Unit
-	if idx, err := strconv.Atoi(s); err == nil {
-		if idx < 0 || idx >= len(p.Units) {
-			return nil, fmt.Errorf("%s %q: the plan has %d units", AnnotationRecomputeUnit, s, len(p.Units))
-		}
-		u = p.Units[idx]
-	} else {
-		var rs recomputeSpec
-		if err := json.Unmarshal([]byte(s), &rs); err != nil || rs.Label == "" {
-			return nil, fmt.Errorf("%s: not a unit: %q", AnnotationRecomputeUnit, s)
-		}
-		u = class.Unit{Name: rs.Name, Label: rs.Label, Key: rs.Key, Pos: rs.Pos, Slots: max(1, rs.Slots), Does: rs.Does,
-			Env: rs.Env, Work: rs.Work, WorkSD: rs.WorkSD, Exists: 1}
+	var rs recomputeSpec
+	if err := json.Unmarshal([]byte(s), &rs); err != nil || rs.Label == "" {
+		return nil, fmt.Errorf("%s: not a unit: %q", AnnotationRecomputeUnit, s)
 	}
+	u := class.Unit{Name: rs.Name, Label: rs.Label, Key: rs.Key, Pos: rs.Pos, Slots: max(1, rs.Slots), Reasoning: rs.Reasoning,
+		Env: rs.Env, Work: rs.Work, WorkSD: rs.WorkSD, Exists: 1}
 	u.Index, u.After, u.Inputs, u.Generator, u.Parent, u.Depth = 0, nil, nil, false, 0, 0
 	p.Units, p.Order = []class.Unit{u}, []int{0}
 	return p, nil

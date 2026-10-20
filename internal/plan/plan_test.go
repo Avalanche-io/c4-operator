@@ -104,7 +104,7 @@ func TestDocIsWhatTheQueueTakes(t *testing.T) {
 func TestClaimsAndGate(t *testing.T) {
 	f := &File{Version: 1, Blocks: []FileBlock{
 		{Name: "a", Holds: []string{"src/a"}, Claims: []class.DocClaim{{On: "db/test", Mode: "shared"}}},
-		{Name: "a-merge", After: []string{"a"}, Planned: new(bool), Gate: "main", Does: "procedure"},
+		{Name: "a-merge", After: []string{"a"}, Planned: new(bool), Gate: "main", Reasoning: &class.Reasoning{Does: "procedure"}},
 	}}
 	p, err := FromFile(f, "x.yaml")
 	if err != nil {
@@ -119,7 +119,7 @@ func TestClaimsAndGate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(x.Units[0].Claims) != 2 || x.Units[1].Gate != "main" || x.Units[1].Does != "procedure" {
+	if len(x.Units[0].Claims) != 2 || x.Units[1].Gate != "main" || x.Units[1].Reasoning.Does != "procedure" {
 		t.Fatalf("the queue reads claims %+v, gate %q", x.Units[0].Claims, x.Units[1].Gate)
 	}
 	f.Blocks[0].Claims[0].Mode = "sometimes"
@@ -193,5 +193,27 @@ func TestExtraBy(t *testing.T) {
 	}
 	if i := slices.IndexFunc(u.Cites, func(c Cite) bool { return c.After == "io/paths" }); i < 0 || u.Cites[i].By != "" {
 		t.Fatalf("a file's own edge says who read it: %+v", u.Cites)
+	}
+}
+
+// A plan file is YAML 1.2: a claim's on key reads unquoted (YAML 1.1 read
+// it as true, and the strict reader refused it; c4-agent-catalog's
+// report), and a block's reasoning comes through.
+func TestReadClaimsOnAndReasoning(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "plan.yaml")
+	body := "version: 1\nblocks:\n  - {name: a, claims: [{on: \"section:x\", mode: shared}, {on: notes/a.md}], reasoning: {does: model, effort: high, tools: repo-rw}}\n"
+	if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p, err := Read(f)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a := p.Unit("a")
+	if len(a.Claims) != 2 || a.Claims[0].On != "section:x" || a.Claims[0].Mode != "shared" || a.Claims[1].On != "notes/a.md" {
+		t.Fatalf("claims %+v", a.Claims)
+	}
+	if a.Reasoning == nil || a.Reasoning.Does != "model" || a.Reasoning.Effort != "high" || a.Reasoning.Tools != "repo-rw" {
+		t.Fatalf("reasoning %+v", a.Reasoning)
 	}
 }

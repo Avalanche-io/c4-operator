@@ -6,6 +6,7 @@ package class
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -63,10 +64,11 @@ type Unit struct {
 	// Claims are what the unit writes, with a mode (claims.go): its
 	// holds as exclusive claims, and the document's claims.
 	Claims []Claim
-	// Does says what does the unit's work: a model or a procedure
-	// (LLM-OR-PROCEDURE 6.2), from the document's does; empty takes the
-	// class's (Doer), else procedure.
-	Does string
+	// Reasoning is what the unit reasons with, as its document or plan
+	// declares it: a model or a procedure, which model, at what effort,
+	// with which tool profile. An empty Does takes the class's (Doer),
+	// else procedure (DoesOf).
+	Reasoning Reasoning
 	// Gate names the gate the unit passes (a unit of kind gate): a
 	// resource of one slot shared by the jobs of a namespace, taken first
 	// come, first served (the queue's gates.go).
@@ -168,10 +170,42 @@ type Doer interface {
 	UnitDoes() string
 }
 
+// Reasoning is what a unit reasons with (LLM-OR-PROCEDURE 6.2): Does is
+// model or procedure; Model the model, Effort its effort level (low,
+// medium, high, xhigh, max), Tools the tool profile's name. All optional.
+type Reasoning struct {
+	Does   string `json:"does,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+	Tools  string `json:"tools,omitempty"`
+}
+
+// Efforts are the effort levels a reasoning may declare.
+var Efforts = []string{"low", "medium", "high", "xhigh", "max"}
+
+// Check refuses a does or effort outside their values.
+func (r Reasoning) Check() error {
+	if err := checkDoes(r.Does); err != nil {
+		return err
+	}
+	if r.Effort != "" && !slices.Contains(Efforts, r.Effort) {
+		return fmt.Errorf("effort %q, want one of %s", r.Effort, strings.Join(Efforts, ", "))
+	}
+	return nil
+}
+
+// ReasoningOf is unit u's reasoning in class d, with the class's does
+// when the unit declares none.
+func ReasoningOf(d Driver, u Unit) Reasoning {
+	r := u.Reasoning
+	r.Does = DoesOf(d, u)
+	return r
+}
+
 // DoesOf is what does unit u's work in class d.
 func DoesOf(d Driver, u Unit) string {
-	if u.Does != "" {
-		return u.Does
+	if u.Reasoning.Does != "" {
+		return u.Reasoning.Does
 	}
 	if k, ok := d.(Doer); ok {
 		return k.UnitDoes()
@@ -179,32 +213,12 @@ func DoesOf(d Driver, u Unit) string {
 	return DoesProcedure
 }
 
-// ParseDoes reads a document's does, model or procedure. kind is the
-// older spelling of the same field (procedural or model, before does was
-// agreed with c4-plan); a document giving both must agree.
-func ParseDoes(does, kind string) (string, error) {
+func checkDoes(does string) error {
 	switch does {
 	case "", DoesModel, DoesProcedure:
-	default:
-		return "", fmt.Errorf("does %q, want model or procedure", does)
+		return nil
 	}
-	var old string
-	switch kind {
-	case "":
-	case "procedural":
-		old = DoesProcedure
-	case "model":
-		old = DoesModel
-	default:
-		return "", fmt.Errorf("kind %q, want procedural or model (or does: model or procedure)", kind)
-	}
-	if does != "" && old != "" && does != old {
-		return "", fmt.Errorf("does %q and kind %q disagree", does, kind)
-	}
-	if does == "" {
-		does = old
-	}
-	return does, nil
+	return fmt.Errorf("does %q, want model or procedure", does)
 }
 
 // Mover is implemented by classes whose units the queue may move at a
