@@ -34,4 +34,6 @@ type Transitions struct {
 	Entries []Transition `json:"entries"`
 	Next    int64        `json:"next"`
 	More    bool         `json:"more"`
+	// Head is the latest transition in the log: where a new client starts.
+	Head int64 `json:"head"`
 }

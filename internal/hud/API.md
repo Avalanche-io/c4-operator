@@ -585,10 +585,42 @@ sources:
 Per-unit captures and failures are in the job's provenance index (each
 capture's task record, `GET /trace`) and its status counts rather than in
 the real backend's book. `seq` there is the entry's time in microseconds,
-made strictly increasing, so it is stable from one request to the next.
+made strictly increasing within one answer; it is not a cursor (it shifts
+with `limit`, `job` and scope). To resume, use `since` (below).
 Events expire after the API server's event TTL (an hour by default); the
 signed records they name stay in the project store, and decisions stay in
 WorkJob status.
+
+## GET /book?since={seq}&limit=N
+
+The farm's transition log (integrations GAPS 5): every change of a job's
+status the work queue wrote, numbered farm-wide in the order it wrote
+them, kept durably. A client that was away (c4-sync after an outage) reads
+what it missed, in order, from its cursor.
+
+```
+{ entries: [ { seq, at, project, job, unit?, kind, actor?, do?, record?, message, key } ], next, more, head }
+```
+
+- `kind`: `phase`, `started`, `finished`, `wait-opened` (with an
+  escalation, "escalated to …"), `wait-decided`, `verdict`, `ack`,
+  `decision`, `yield`, `interrupted`, `needs`, `supplied`, `cause`.
+- Order by `seq`, never by `at`. `at` is when the change happened; `seq` is
+  when the queue recorded it.
+- `key` names the change itself. One recorded twice (after a crash) has the
+  same key.
+- Only the viewer's projects' entries are returned. `next` is the cursor to
+  send next: it moves past entries the viewer can't see. `more` says a full
+  page was cut at `limit`. `head` is the latest entry, where a new client
+  starts.
+- `410` with `{ error, oldest }` when the log no longer reaches
+  `since + 1` for a project. Read the jobs again, then go on from `oldest`.
+
+The queue alone writes it, each tick, before the statuses it describes. A
+ConfigMap `c4-work-book` in the operator's namespace holds the next number
+and each project's latest entries. Each 128 entries are sealed as an object
+in the project's own store, naming the previous one by C4 ID, and the head
+lists the latest 64 per project. Any HUD replica serves it.
 
 ## GET /events
 

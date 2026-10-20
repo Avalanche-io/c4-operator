@@ -84,10 +84,19 @@ type Farm interface {
 	StoreView(ctx context.Context, project string, files map[string][]byte) (string, error)
 	// JobURL is the job's page in the HUD, for links written to trackers.
 	JobURL(j JobRef) string
+	// Book reads the farm's transition log after since (GAPS 5); a cursor
+	// the log no longer reaches is an *ErrGone.
+	Book(ctx context.Context, since int64, limit int) (api.Transitions, error)
 }
 
 // ErrNotFound is a job the farm does not have, or will not show.
 var ErrNotFound = errors.New("farm: not found")
+
+// ErrGone is a cursor the farm's log no longer reaches: Oldest is where
+// it begins now.
+type ErrGone struct{ Oldest int64 }
+
+func (e *ErrGone) Error() string { return fmt.Sprintf("the farm's log begins at %d now", e.Oldest) }
 
 // ErrNotOpen is a decision for a wait that is not open (decided already,
 // or not open yet); the HUD answers 409.
@@ -113,6 +122,8 @@ type HUD struct {
 type APIError struct {
 	Status int
 	Msg    string
+	// Body is the answer as sent, for fields beside its error.
+	Body []byte
 }
 
 func (e *APIError) Error() string { return fmt.Sprintf("HUD %d: %s", e.Status, e.Msg) }
@@ -165,7 +176,7 @@ func (h *HUD) do(ctx context.Context, method, path string, ctype string, body []
 			Error string `json:"error"`
 		}
 		_ = json.Unmarshal(data, &e)
-		return &APIError{Status: resp.StatusCode, Msg: e.Error}
+		return &APIError{Status: resp.StatusCode, Msg: e.Error, Body: data}
 	}
 	if out != nil {
 		return json.Unmarshal(data, out)
@@ -278,6 +289,20 @@ func (h *HUD) StoreView(ctx context.Context, project string, files map[string][]
 		return "", err
 	}
 	return out.View, nil
+}
+
+func (h *HUD) Book(ctx context.Context, since int64, limit int) (api.Transitions, error) {
+	var out api.Transitions
+	err := h.doJSON(ctx, http.MethodGet, fmt.Sprintf("/book?since=%d&limit=%d", since, limit), nil, &out)
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusGone {
+		var g struct {
+			Oldest int64 `json:"oldest"`
+		}
+		_ = json.Unmarshal(ae.Body, &g)
+		return out, &ErrGone{Oldest: g.Oldest}
+	}
+	return out, err
 }
 
 func (h *HUD) JobURL(j JobRef) string {

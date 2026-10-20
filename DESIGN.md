@@ -1009,7 +1009,10 @@ Records are not yet batched at chain checkpoints (section 2.5).
 
 - An index (by output file, output view, input view, job, model and dataset)
   is derived data, rebuildable from the records. Today the queue keeps one
-  index per job (output file and unit to task record); the farm-wide index,
+  index per job (output file and unit to task record), and the transition
+  log (`GET /book?since`, integrations GAPS 5): job transitions numbered
+  farm-wide by the queue, sealed in each project's store as hash-linked
+  segments, the head in the ConfigMap `c4-work-book`; the farm-wide index,
   kept in the installation's system store as a hash-chained log like the
   usage ledger (section 12.2), is designed.
 - Usage records (section 12) and license usage (section 16.2) reference the

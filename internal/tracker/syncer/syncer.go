@@ -285,6 +285,12 @@ func (s *Syncer) pass(ctx context.Context, t *c4v1.Tracker, c *conn) error {
 		dirty[k] = true
 	}
 	s.mu.Unlock()
+	// What changed in the farm since this Tracker last read its log
+	// (GAPS 5), however long it was away.
+	feed, farmCursor, err := s.readFeed(ctx, t)
+	if err != nil {
+		return err
+	}
 	var errs []error
 	for _, l := range links {
 		fresh := resync
@@ -299,6 +305,11 @@ func (s *Syncer) pass(ctx context.Context, t *c4v1.Tracker, c *conn) error {
 			errs = append(errs, fmt.Errorf("%s: %w", l.Name, err))
 		}
 	}
+	for _, l := range links {
+		if err := s.mirrorDecided(ctx, t, c, l, feed); err != nil {
+			errs = append(errs, fmt.Errorf("%s: %w", l.Name, err))
+		}
+	}
 	if err := errors.Join(errs...); err != nil {
 		return err
 	}
@@ -307,12 +318,87 @@ func (s *Syncer) pass(ctx context.Context, t *c4v1.Tracker, c *conn) error {
 	s.mu.Unlock()
 	return s.patchTrackerStatus(ctx, t, func(st *c4v1.TrackerStatus) {
 		st.Cursor = next
+		st.FarmCursor = farmCursor
 		st.Links = int32(len(links))
 		if resync {
 			now := metav1.NewTime(s.now())
 			st.LastResync = &now
 		}
 	})
+}
+
+// feedPages bounds the log a pass reads; the rest waits for the next.
+const feedPages = 10
+
+// readFeed reads the farm's transitions after the Tracker's cursor. A new
+// Tracker starts at the log's head (it acts on what happens from now); a
+// cursor the log no longer reaches goes on from where it begins.
+func (s *Syncer) readFeed(ctx context.Context, t *c4v1.Tracker) ([]api.Transition, int64, error) {
+	cursor := t.Status.FarmCursor
+	var out []api.Transition
+	for page := 0; page < feedPages; page++ {
+		res, err := s.Farm.Book(ctx, cursor, 500)
+		var gone *farm.ErrGone
+		if errors.As(err, &gone) {
+			s.Log.Info("the farm's log no longer reaches this Tracker's cursor; going on from its start", "tracker", key(t), "oldest", gone.Oldest)
+			cursor = gone.Oldest - 1
+			continue
+		}
+		if err != nil {
+			return nil, cursor, err
+		}
+		if t.Status.FarmCursor == 0 && cursor == 0 {
+			return nil, res.Head, nil
+		}
+		out = append(out, res.Entries...)
+		cursor = res.Next
+		if !res.More {
+			break
+		}
+	}
+	return out, cursor, nil
+}
+
+// mirrorDecided tells the tracker of decisions made in C4 itself on a
+// linked job's waits (in the HUD, by MCP), which it would otherwise never
+// see: a wait decided is no longer open, however long c4-sync was away.
+// Decisions the tracker relayed are its own already. Once each.
+func (s *Syncer) mirrorDecided(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.TrackerLink, feed []api.Transition) error {
+	if !c.adapter.Capabilities().EditableComments || l.Spec.Target.WorkJob == "" {
+		return nil
+	}
+	jobs := append([]string{l.Spec.Target.WorkJob}, l.Status.Versions...)
+	on := tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL}
+	for _, tr := range feed {
+		if tr.Kind != "wait-decided" || !slices.Contains(jobs, strings.TrimPrefix(tr.Job, l.Namespace+"/")) ||
+			strings.Contains(tr.Actor, " via tracker "+t.Name+" ") {
+			continue
+		}
+		field := "decided/" + tracker.WriteKey(tr.Key, "", "")[:12]
+		unit := "a wait"
+		if tr.Unit != nil {
+			unit = fmt.Sprintf("unit %d", *tr.Unit)
+		}
+		body := fmt.Sprintf("C4: %s of %s was decided %s by %s, in C4, at %s.", unit, tr.Job, tr.Do, or(tr.Actor, "someone"),
+			tr.At.UTC().Format("Mon 2 Jan 15:04 UTC"))
+		if tr.Record != "" {
+			body += " Record " + tr.Record + "."
+		}
+		key := tracker.WriteKey(l.Namespace+"/"+l.Name, field, "")
+		if err := s.write(ctx, c, l, field, "told", "", 0, s.now(), func(tracker.Written) tracker.Write {
+			return tracker.Write{On: on, Kind: "comment", Fields: map[string]string{"subject": "C4: decided in C4"}, Note: &tracker.Note{Body: body}, Key: key}
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func or(s, d string) string {
+	if s == "" {
+		return d
+	}
+	return s
 }
 
 func slack(j *api.Job) float64 {

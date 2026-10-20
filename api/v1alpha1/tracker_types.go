@@ -248,6 +248,11 @@ type TrackerStatus struct {
 	// Cursor is the adapter's own change cursor, opaque to the loop.
 	// +optional
 	Cursor string `json:"cursor,omitempty"`
+	// FarmCursor is the last transition of the farm's log (GET /book?since,
+	// integrations GAPS 5) this Tracker has acted on: after an outage it
+	// reads what it missed from there.
+	// +optional
+	FarmCursor int64 `json:"farmCursor,omitempty"`
 	// +optional
 	LastResync *metav1.Time `json:"lastResync,omitempty"`
 	// Links counts the TrackerLinks of this Tracker.

@@ -561,6 +561,13 @@ spec:
                 description: Cursor is the adapter's own change cursor, opaque to
                   the loop.
                 type: string
+              farmCursor:
+                description: |-
+                  FarmCursor is the last transition of the farm's log (GET /book?since,
+                  integrations GAPS 5) this Tracker has acted on: after an outage it
+                  reads what it missed from there.
+                format: int64
+                type: integer
               lastResync:
                 format: date-time
                 type: string

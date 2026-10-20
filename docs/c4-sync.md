@@ -118,6 +118,13 @@ cannot grant farm access. MLflow records no author for an alias or a tag.
 Its decisions are attributed to `mlflow-registry`, which you map to a
 party (`party:ml-leads`), and a person's wait refuses them.
 
+**What it missed.** c4-sync keeps a cursor into the farm's transition log
+(`status.farmCursor`, `GET /book?since`) and reads from it each pass, so a
+review decided in C4 itself (in the HUD, by an agent over MCP) reaches the
+tracker as one comment, even if c4-sync was down when it happened.
+Decisions the tracker relayed are not echoed back. A new Tracker starts at
+the log's head.
+
 **Causes.** For each cause a person must act on (units that failed
 after their retries, a review's escalation, information a brief lacked),
 c4-sync keeps one comment on the issue or Task: what it is ("exit 137

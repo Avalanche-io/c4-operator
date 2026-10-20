@@ -217,3 +217,25 @@ func TestDecideSendsTheNoteAsAReply(t *testing.T) {
 		t.Fatalf("a wait that asks for no reply got one: %v", bodies[1])
 	}
 }
+
+// A cursor the farm's log no longer reaches is ErrGone, with where the
+// log begins.
+func TestBookGone(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /api/v1/book", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("since") != "3" {
+			http.Error(w, "since", http.StatusBadRequest)
+			return
+		}
+		w.WriteHeader(http.StatusGone)
+		_, _ = w.Write([]byte(`{"error":"the log no longer reaches 4","oldest":11}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	f := &farm.HUD{Base: srv.URL, Token: func(context.Context) (string, error) { return "t", nil }}
+	_, err := f.Book(context.Background(), 3, 100)
+	var gone *farm.ErrGone
+	if !errors.As(err, &gone) || gone.Oldest != 11 {
+		t.Fatalf("want ErrGone{11}, got %v", err)
+	}
+}

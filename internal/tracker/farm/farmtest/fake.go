@@ -28,6 +28,35 @@ type Farm struct {
 	// Grants are the people who let the tracker submit for them; a
 	// submission for anyone else is refused 403, as the HUD refuses it.
 	Grants map[string]bool
+	// Log is the farm's transition log; Oldest, when set, is where it
+	// begins (an older cursor is gone).
+	Log    []api.Transition
+	Oldest int64
+}
+
+func (f *Farm) Book(_ context.Context, since int64, limit int) (api.Transitions, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.Oldest > 0 && since+1 < f.Oldest {
+		return api.Transitions{}, &farm.ErrGone{Oldest: f.Oldest}
+	}
+	out := api.Transitions{Entries: []api.Transition{}, Next: since}
+	for _, t := range f.Log {
+		out.Head = max(out.Head, t.Seq)
+		if t.Seq <= since {
+			continue
+		}
+		if len(out.Entries) == limit {
+			out.More = true
+			break
+		}
+		out.Entries = append(out.Entries, t)
+		out.Next = t.Seq
+	}
+	if !out.More {
+		out.Next = max(since, out.Head)
+	}
+	return out, nil
 }
 
 // New makes an empty farm.

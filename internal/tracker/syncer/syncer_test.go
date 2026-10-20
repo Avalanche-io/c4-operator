@@ -3,6 +3,7 @@ package syncer_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -707,5 +708,59 @@ func TestCauseCommentsOnePerCause(t *testing.T) {
 	e.pass()
 	if got = causes(); len(got) != 1 || !strings.Contains(got[0], "3 attempts, units 0-2") || !strings.Contains(got[0], "then blacklisted") {
 		t.Fatalf("after the cause grew: %q", got)
+	}
+}
+
+// The farm's log, read from the Tracker's cursor: a new Tracker starts at
+// its head (no history is posted); a decision made in C4 on a linked job
+// reaches the tracker once, however long c4-sync was away; a decision the
+// tracker relayed is not echoed back; a cursor the log no longer reaches
+// goes on from where it begins.
+func TestFarmLogTellsTheTrackerWhatItMissed(t *testing.T) {
+	e := setup(t)
+	at := e.clock.now()
+	seven := 7
+	decided := func(seq int64, actor, do string) api.Transition {
+		return api.Transition{Seq: seq, At: at, Project: "proj", Job: ns + "/gh-7", Unit: &seven, Kind: "wait-decided", Actor: actor, Do: do,
+			Record: "c4rec" + strconv.FormatInt(seq, 10), Key: fmt.Sprintf("%s/gh-7/wait-decided/7/%d", ns, seq)}
+	}
+	e.farm.Log = []api.Transition{decided(1, "maya", "approve"), {Seq: 2, Job: ns + "/other", Kind: "phase", Key: "p"}}
+	e.pass()
+	if c := e.tracker().Status.FarmCursor; c != 2 {
+		t.Fatalf("a new Tracker's cursor: %d, want the head", c)
+	}
+	told := func() []string {
+		var out []string
+		for _, c := range e.gh.Comments(7) {
+			if strings.Contains(c.Body, "in C4, at") {
+				out = append(out, c.Body)
+			}
+		}
+		return out
+	}
+	if len(told()) != 0 {
+		t.Fatal("history from before the Tracker was posted")
+	}
+
+	// While c4-sync was away: Dana decided in the HUD; another decision
+	// came from the tracker itself.
+	e.farm.Log = append(e.farm.Log, decided(3, "dana", "rework"), decided(4, "dana via tracker gh (@dana)", "approve"))
+	e.clock.add(time.Hour)
+	e.pass()
+	e.pass()
+	got := told()
+	if len(got) != 1 || !strings.Contains(got[0], "C4: unit 7 of "+ns+"/gh-7 was decided rework by dana, in C4") || !strings.Contains(got[0], "Record c4rec3.") {
+		t.Fatalf("told: %q", got)
+	}
+	if c := e.tracker().Status.FarmCursor; c != 4 {
+		t.Fatalf("cursor %d, want 4", c)
+	}
+
+	// The log moved past the cursor (its older segments dropped).
+	e.farm.Log = append(e.farm.Log, decided(12, "pat", "approve"))
+	e.farm.Oldest = 10
+	e.pass()
+	if got = told(); len(got) != 2 || !strings.Contains(got[1], "decided approve by pat") {
+		t.Fatalf("after the log moved on: %q", got)
 	}
 }

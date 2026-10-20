@@ -54,7 +54,7 @@ func (s *Server) handleTransitions(w http.ResponseWriter, r *http.Request, v *ap
 	var cm corev1.ConfigMap
 	err := s.Client.Get(ctx, client.ObjectKey{Namespace: s.Namespace, Name: queue.BookConfigMap}, &cm)
 	if apierrors.IsNotFound(err) {
-		writeJSON(w, http.StatusOK, api.Transitions{Entries: []api.Transition{}, Next: since})
+		writeJSON(w, http.StatusOK, api.Transitions{Entries: []api.Transition{}, Next: since, Head: 0})
 		return
 	}
 	if err != nil {
@@ -105,7 +105,7 @@ func (s *Server) handleTransitions(w http.ResponseWriter, r *http.Request, v *ap
 		}
 	}
 	sort.Slice(out, func(a, b int) bool { return out[a].Seq < out[b].Seq })
-	res := api.Transitions{Entries: out, Next: max(since, h.Next-1)}
+	res := api.Transitions{Entries: out, Next: max(since, h.Next-1), Head: h.Next - 1}
 	if len(out) > limit {
 		res.Entries, res.Next, res.More = out[:limit], out[limit-1].Seq, true
 	}
