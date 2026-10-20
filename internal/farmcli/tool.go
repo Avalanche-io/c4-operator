@@ -250,7 +250,7 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 	o.printf("test        %s in %s, on this machine\n", unitFrames(t, units), plural(len(units), "unit", "units"))
 	for _, u := range units {
 		env := append([]string{"C4_TOOLS=/etc/c4/tools", "C4_TREE=/show", "C4_OUTPUT=/show", "C4_CONTROL=/etc/c4/control",
-			"C4_JOB=test", "C4_UNIT=" + u.label, "C4_UNIT_LABEL=" + u.label, "C4_ATTEMPT=1"}, penv...)
+			"C4_JOB=test", "C4_SHOT=test", "C4_UNIT=" + u.label, "C4_UNIT_NAME=" + u.label, "C4_UNIT_LABEL=" + u.label, "C4_ATTEMPT=1"}, penv...)
 		frames := fmt.Sprintf("%d-%d", u.start, u.end)
 		if u.start == u.end {
 			frames = fmt.Sprint(u.start)
@@ -311,7 +311,7 @@ func replayLog(ctx context.Context, o Out, docker, image, dir, log string) error
 
 func unitFrames(t *schema.Tool, units []testUnit) string {
 	if t.Kind != "frames" {
-		return "1 run"
+		return "the whole job"
 	}
 	n := 0
 	for _, u := range units {

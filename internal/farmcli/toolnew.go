@@ -83,7 +83,8 @@ for f in $(seq "$C4_FRAME_START" "$C4_FRAME_END"); do
   src="${input/\$F4/$(printf %04d "$f")}"
   out="$C4_TREE/out/$(basename "$src")"
   cp "$src" "$out"          # the work goes here
-  echo "c4_frame: $f $out"  # one line per finished frame: the farm's progress
+  echo "c4_frame: $f"       # one line per finished frame: the farm's progress
+  # (with a path, as c4_frame: $f $out.exr, the frame is also the HUD's preview)
 done
 `), 0o755},
 		{"test/in/frame.1001.txt", "frame 1001\n", 0o644},
