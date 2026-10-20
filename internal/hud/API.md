@@ -653,22 +653,27 @@ holds bytes under the wrong name. `200 { ok, id, stored, bytes? }`;
 ### POST /views/{project}
 
 ```
-{ files: [ { path, id, size, exec? } ] }  ->  { view, files, bytes }
+{ files: [ { path, id, size, exec? } ], dirs?: [ path/ ], links?: [ { path, target } ] }  ->  { view, files, bytes }
 ```
 
 Records a tree of stored objects as a view: its directory records go into
 the store and `view` is the tree's C4 ID, the same ID `c4-operator tree-id`
 gives the directory on disk. Paths are clean, relative and slash-separated.
+`dirs` are the tree's empty directories (any other directory is implied by
+its paths) and `links` its symbolic links, recorded as given and never
+followed by the farm; both are part of the ID.
 `409 { missing: [c4id], files, bytes }` when an object is not in the store.
 
 ### GET /views/{project}/{c4id}/files[?path=prefix&limit=N]
 
 ```
-{ view, files: [ { path, id, size, exec? } ], truncated? }
+{ view, files: [ { path, id, size, exec? } ], dirs?, links?, truncated? }
 ```
 
-The files of a view, or of the subtree at `path`; the bytes of each come
-from `GET /objects/{project}/{c4id}`. This is what `c4 farm get` reads.
+The files of a view, or of the subtree at `path`, with its empty
+directories and links; the bytes of each file come from
+`GET /objects/{project}/{c4id}`. This is what `c4 farm get` reads. `get`
+makes a link only when its target stays inside the folder it writes to.
 
 ### POST /jobs
 

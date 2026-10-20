@@ -349,7 +349,11 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	for _, f := range v.Files {
 		files = append(files, api.ViewFile{Path: f.Path, ID: f.ID.String(), Size: f.Size, Exec: f.Exec})
 	}
-	if err := c.Do(ctx, "POST", "/views/"+a.Project, api.ViewRequest{Files: files}, &vr); err != nil {
+	vreq := api.ViewRequest{Files: files, Dirs: v.EmptyDirs()}
+	for _, l := range v.Symlinks {
+		vreq.Links = append(vreq.Links, api.ViewLink{Path: l.Path, Target: l.Target})
+	}
+	if err := c.Do(ctx, "POST", "/views/"+a.Project, vreq, &vr); err != nil {
 		return nil, fmt.Errorf("recording the tree: %w", err)
 	}
 	if vr.View != v.ID.String() {

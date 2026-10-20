@@ -72,6 +72,19 @@ func FromNode(root *Node) *View {
 	return v
 }
 
+// EmptyDirs are the view's directories with nothing in them, each ending
+// in "/", parents before children; every other directory is implied by
+// the paths of its files and links.
+func (v *View) EmptyDirs() []string {
+	var out []string
+	for _, d := range v.Dirs {
+		if n := v.Root.Dir(d); len(n.Files) == 0 && len(n.Dirs) == 0 {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // Objects returns the unique content IDs of the view, sorted by size,
 // largest first, so long transfers start early.
 func (v *View) Objects() []Object {

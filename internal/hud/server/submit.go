@@ -319,8 +319,8 @@ func (s *Server) handlePostView(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "body: %v", err)
 		return
 	}
-	if len(body.Files) == 0 || len(body.Files) > maxViewFiles {
-		fail(w, http.StatusBadRequest, "a view needs 1 to %d files", maxViewFiles)
+	if n := len(body.Files) + len(body.Dirs) + len(body.Links); n == 0 || n > maxViewFiles {
+		fail(w, http.StatusBadRequest, "a view needs 1 to %d files, empty directories and links", maxViewFiles)
 		return
 	}
 	root := c4view.NewNode("")
@@ -345,7 +345,7 @@ func (s *Server) handlePostView(w http.ResponseWriter, r *http.Request) {
 		}
 		dir, name := c4view.SplitPath(p)
 		parent := root.Dir(dir)
-		if _, clash := parent.Dirs[name]; clash {
+		if _, clash := parent.Dirs[name+"/"]; clash {
 			fail(w, http.StatusBadRequest, "%s is both a file and a directory", p)
 			return
 		}
@@ -353,10 +353,36 @@ func (s *Server) handlePostView(w http.ResponseWriter, r *http.Request) {
 		ids = append(ids, f.ID)
 		bytes += f.Size
 	}
+	for _, l := range body.Links {
+		p, err := cleanViewPath(l.Path)
+		if err != nil {
+			fail(w, http.StatusBadRequest, "%v", err)
+			return
+		}
+		if seen[p] {
+			fail(w, http.StatusBadRequest, "%s is listed twice", p)
+			return
+		}
+		seen[p] = true
+		if l.Target == "" || strings.ContainsRune(l.Target, 0) {
+			fail(w, http.StatusBadRequest, "%s: a link needs a target", p)
+			return
+		}
+		dir, name := c4view.SplitPath(p)
+		root.Dir(dir).Files[name] = c4view.SymlinkEntry(name, l.Target)
+	}
+	for _, d := range body.Dirs {
+		p, err := cleanViewPath(strings.TrimSuffix(d, "/"))
+		if err != nil {
+			fail(w, http.StatusBadRequest, "%v", err)
+			return
+		}
+		root.Dir(p + "/")
+	}
 	// a file named like a directory that a later path created
 	if err := root.Walk("", func(dir string, n *c4view.Node) error {
 		for name := range n.Files {
-			if _, ok := n.Dirs[name]; ok {
+			if _, ok := n.Dirs[name+"/"]; ok {
 				return fmt.Errorf("%s%s is both a file and a directory", dir, name)
 			}
 		}
@@ -415,15 +441,37 @@ func (s *Server) handleViewFiles(w http.ResponseWriter, r *http.Request) {
 		limit = l
 	}
 	out := api.ViewListing{View: id.String(), Files: []api.ViewFile{}}
+	under := func(p string) bool {
+		p = strings.TrimSuffix(p, "/")
+		return prefix == "" || p == strings.TrimSuffix(prefix, "/") || strings.HasPrefix(p, strings.TrimSuffix(prefix, "/")+"/")
+	}
+	full := func() bool {
+		if len(out.Files)+len(out.Dirs)+len(out.Links) < limit {
+			return false
+		}
+		out.Truncated = true
+		return true
+	}
 	for _, f := range view.Files {
-		if prefix != "" && f.Path != prefix && !strings.HasPrefix(f.Path, strings.TrimSuffix(prefix, "/")+"/") {
+		if !under(f.Path) {
 			continue
 		}
-		if len(out.Files) == limit {
-			out.Truncated = true
+		if full() {
 			break
 		}
 		out.Files = append(out.Files, api.ViewFile{Path: f.Path, ID: f.ID.String(), Size: f.Size, Exec: f.Exec})
+	}
+	for _, l := range view.Symlinks {
+		if !under(l.Path) || full() {
+			continue
+		}
+		out.Links = append(out.Links, api.ViewLink{Path: l.Path, Target: l.Target})
+	}
+	for _, d := range view.EmptyDirs() {
+		if !under(d) || full() {
+			continue
+		}
+		out.Dirs = append(out.Dirs, d)
 	}
 	writeJSON(w, http.StatusOK, out)
 }

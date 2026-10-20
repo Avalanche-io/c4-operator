@@ -27,6 +27,17 @@ type ViewFile struct {
 // view. Every file's object must already be in the project's store.
 type ViewRequest struct {
 	Files []ViewFile `json:"files"`
+	// Dirs are the tree's empty directories (one with anything in it is
+	// implied by its paths), and Links its symbolic links.
+	Dirs  []string   `json:"dirs,omitempty"`
+	Links []ViewLink `json:"links,omitempty"`
+}
+
+// ViewLink is a symbolic link of a view, recorded as given and never
+// followed by the farm.
+type ViewLink struct {
+	Path   string `json:"path"`
+	Target string `json:"target"`
 }
 
 // ViewResponse is a recorded view, or the objects it still needs.
@@ -41,6 +52,8 @@ type ViewResponse struct {
 type ViewListing struct {
 	View      string     `json:"view"`
 	Files     []ViewFile `json:"files"`
+	Dirs      []string   `json:"dirs,omitempty"`
+	Links     []ViewLink `json:"links,omitempty"`
 	Truncated bool       `json:"truncated,omitempty"`
 }
 

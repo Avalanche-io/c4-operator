@@ -142,6 +142,58 @@ func TestViewFromListing(t *testing.T) {
 	}
 }
 
+// A tree's empty directories and symbolic links are part of its ID, so
+// the HUD records them and lists them back.
+func TestViewWithEmptyDirsAndLinks(t *testing.T) {
+	s := submitFarm(t)
+	b := []byte("# pipeline tools")
+	id := c4.Identify(bytes.NewReader(b)).String()
+	if code := call(t, s, http.MethodPut, "/api/v1/objects/show-a/"+id+"?as=artist", b, nil); code != 200 {
+		t.Fatalf("upload: %d", code)
+	}
+	dir := t.TempDir()
+	writeFile(t, dir, "README.md", b)
+	for _, d := range []string{"out", ".git/refs/tags"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.Symlink("README.md", filepath.Join(dir, "README")); err != nil {
+		t.Fatal(err)
+	}
+	scanned, err := c4view.ScanDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := api.ViewRequest{Files: []api.ViewFile{{Path: "README.md", ID: id, Size: int64(len(b))}},
+		Dirs: scanned.EmptyDirs(), Links: []api.ViewLink{{Path: "README", Target: "README.md"}}}
+	if got := strings.Join(req.Dirs, " "); got != ".git/refs/tags/ out/" {
+		t.Fatalf("empty dirs %q", got)
+	}
+	var vr api.ViewResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/views/show-a?as=artist", req, &vr); code != 200 || vr.View != scanned.ID.String() {
+		t.Fatalf("view %d %s, scanned %s", code, vr.View, scanned.ID)
+	}
+	var ls api.ViewListing
+	if code := call(t, s, http.MethodGet, "/api/v1/views/show-a/"+vr.View+"/files?as=artist", nil, &ls); code != 200 ||
+		len(ls.Files) != 1 || strings.Join(ls.Dirs, " ") != ".git/refs/tags/ out/" || len(ls.Links) != 1 || ls.Links[0] != req.Links[0] {
+		t.Fatalf("listing: %d %+v", code, ls)
+	}
+	for _, bad := range []api.ViewRequest{
+		{Links: []api.ViewLink{{Path: "l", Target: ""}}},
+		{Links: []api.ViewLink{{Path: "../l", Target: "x"}}},
+		{Files: req.Files, Links: []api.ViewLink{{Path: "README.md", Target: "x"}}},
+		{Dirs: []string{"/abs/"}},
+		{Files: req.Files, Dirs: []string{"README.md/"}},
+		{Files: []api.ViewFile{{Path: "a", ID: id, Size: int64(len(b))}, {Path: "a/b", ID: id, Size: int64(len(b))}}},
+		{Files: []api.ViewFile{{Path: "a/b", ID: id, Size: int64(len(b))}, {Path: "a", ID: id, Size: int64(len(b))}}},
+	} {
+		if code := call(t, s, http.MethodPost, "/api/v1/views/show-a?as=artist", bad, nil); code != http.StatusBadRequest {
+			t.Errorf("%+v accepted: %d", bad, code)
+		}
+	}
+}
+
 func TestSubmit(t *testing.T) {
 	s := submitFarm(t)
 	eta := time.Date(2026, 10, 23, 14, 52, 0, 0, time.UTC)
