@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"testing"
 
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -75,5 +76,46 @@ func TestResizeForecast(t *testing.T) {
 	}
 	if code := call(t, s, http.MethodPost, "/api/v1/jobs/show-a/sh050-light-v001/forecast?as=artist", api.ForecastChange{SlotHours: str("45")}, &e); code != http.StatusConflict {
 		t.Fatalf("a real job: %d %s", code, e.Error)
+	}
+}
+
+// A forecast whose work is no longer expected is withdrawn: deleted,
+// once; a real job is not.
+func TestWithdrawForecast(t *testing.T) {
+	s := submitFarm(t)
+	ctx := context.Background()
+	m := s.current()
+	for _, j := range []*c4v1.WorkJob{
+		{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "sh060-light-forecast"},
+			Spec: c4v1.WorkJobSpec{Class: "render", Forecast: &c4v1.WorkForecast{SlotHours: "30"}}},
+		{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "sh060-light-v001"}, Spec: c4v1.WorkJobSpec{Class: "render"}},
+	} {
+		if err := s.Client.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+		rec := &jobRec{job: *j, key: j.Namespace + "/" + j.Name, project: "show-a"}
+		m.jobs = append(m.jobs, rec)
+		m.byKey[rec.key] = rec
+	}
+	var out struct {
+		OK      bool   `json:"ok"`
+		Message string `json:"message"`
+		Error   string `json:"error"`
+	}
+	path := "/api/v1/jobs/show-a/sh060-light-forecast/withdraw?as=artist"
+	body := map[string]string{"reason": "Task/4411 no longer matches any of the tracker's intake rules"}
+	if code := call(t, s, http.MethodPost, path, body, &out); code != http.StatusOK ||
+		out.Message != "sh060-light-forecast: forecast withdrawn, Task/4411 no longer matches any of the tracker's intake rules" {
+		t.Fatalf("withdraw: %d %+v", code, out)
+	}
+	var live c4v1.WorkJob
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "sh060-light-forecast"}, &live); !apierrors.IsNotFound(err) {
+		t.Fatalf("the forecast is still there: %v", err)
+	}
+	if code := call(t, s, http.MethodPost, path, body, &out); code != http.StatusNotFound {
+		t.Fatalf("again: %d %+v", code, out)
+	}
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs/show-a/sh060-light-v001/withdraw?as=artist", body, &out); code != http.StatusConflict {
+		t.Fatalf("a real job: %d %+v", code, out)
 	}
 }

@@ -25,6 +25,8 @@ type Farm struct {
 	Relays    []farm.Relay
 	Deadlines []time.Time
 	Resized   []api.ForecastChange
+	// Withdrawn are the forecasts withdrawn: namespace/name, and why.
+	Withdrawn []string
 	Views     map[string]map[string][]byte
 	// Grants are the people who let the tracker submit for them; a
 	// submission for anyone else is refused 403, as the HUD refuses it.
@@ -145,6 +147,22 @@ func (f *Farm) Resize(_ context.Context, j farm.JobRef, c api.ForecastChange) er
 	}
 	job.Forecast = &fc
 	f.Resized = append(f.Resized, c)
+	return nil
+}
+
+// Withdraw deletes a forecast, as the HUD does; a real job is refused 409.
+func (f *Farm) Withdraw(_ context.Context, j farm.JobRef, reason string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	job, ok := f.jobs[k(j)]
+	if !ok {
+		return farm.ErrNotFound
+	}
+	if job.Forecast == nil {
+		return &farm.APIError{Status: http.StatusConflict, Msg: j.Name + " is a real job: only a forecast is withdrawn"}
+	}
+	delete(f.jobs, k(j))
+	f.Withdrawn = append(f.Withdrawn, k(j)+": "+reason)
 	return nil
 }
 

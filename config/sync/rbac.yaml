@@ -20,8 +20,9 @@ rules:
   verbs: [get, list, watch]
 - apiGroups: [c4.avalanche.io]
   resources: [trackerlinks]
-  # patch: a rework that makes a next version moves the link to it.
-  verbs: [get, list, watch, create, patch, update]
+  # patch: a rework that makes a next version moves the link to it;
+  # delete: a forecast withdrawn takes its link with it.
+  verbs: [get, list, watch, create, patch, update, delete]
 - apiGroups: [c4.avalanche.io]
   resources: [trackers/status, trackerlinks/status]
   verbs: [get, patch, update]

@@ -632,3 +632,60 @@ func TestFlowForecastThenReal(t *testing.T) {
 		t.Fatalf("link after: %+v", l.Spec)
 	}
 }
+
+// A forecast whose Task leaves every rule (the shot is omitted) is
+// withdrawn, and its link goes; if the Task comes back, it is a new
+// forecast.
+func TestFlowForecastWithdrawn(t *testing.T) {
+	e := setupFlow(t)
+	ctx := context.Background()
+	e.site.Set(e.task, map[string]any{"sg_status_list": "wtg", "est_in_mins": 600}, e.dana)
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	real := tr.Spec.Intake[0]
+	fc := *real.DeepCopy()
+	fc.As, fc.Review, fc.Rework = "forecast", nil, ""
+	fc.Match.Fields = map[string]string{"sg_status_list": "wtg", "step.Step.short_name": "LGT"}
+	fc.Forecast = &c4v1.TrackerForecast{Field: "est_in_mins", PerUnit: "0.05", UnitHours: "1"}
+	tr.Spec.Intake = []c4v1.TrackerIntake{fc, real}
+	if err := e.k8s.Update(ctx, &tr); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	if len(e.farm.Submitted) != 1 {
+		t.Fatalf("submitted %d", len(e.farm.Submitted))
+	}
+	name := e.farm.Submitted[0].Name
+
+	e.clock.add(time.Minute)
+	e.site.Set(e.task, map[string]any{"sg_status_list": "omt"}, e.dana)
+	e.pass()
+	tid := strconv.Itoa(e.task.ID)
+	if len(e.farm.Withdrawn) != 1 || e.farm.Withdrawn[0] != ns+"/"+name+": Task/"+tid+" no longer matches any of the tracker's intake rules" {
+		t.Fatalf("withdrawn: %q", e.farm.Withdrawn)
+	}
+	if _, err := e.farm.Job(ctx, farm.JobRef{Namespace: ns, Name: name}); !errors.Is(err, farm.ErrNotFound) {
+		t.Fatalf("the forecast is still there: %v", err)
+	}
+	var ls c4v1.TrackerLinkList
+	if err := e.k8s.List(ctx, &ls, client.InNamespace(ns)); err != nil || len(ls.Items) != 0 {
+		t.Fatalf("links after: %d %v", len(ls.Items), err)
+	}
+	e.pass()
+	if len(e.farm.Withdrawn) != 1 || len(e.farm.Submitted) != 1 {
+		t.Fatalf("a second pass did more: withdrawn %q, submitted %d", e.farm.Withdrawn, len(e.farm.Submitted))
+	}
+
+	// The shot is back in the cut: a new forecast.
+	e.clock.add(time.Minute)
+	e.site.Set(e.task, map[string]any{"sg_status_list": "wtg"}, e.dana)
+	e.pass()
+	if len(e.farm.Submitted) != 2 || e.farm.Submitted[1].Name != name {
+		t.Fatalf("submitted after it came back: %d", len(e.farm.Submitted))
+	}
+	if l := e.link(); l.Spec.Target.WorkJob != name || l.Spec.Intake != 0 {
+		t.Fatalf("link: %+v", l.Spec)
+	}
+}

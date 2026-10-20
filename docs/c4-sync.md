@@ -106,7 +106,10 @@ Each Tracker says:
   `{field: est_in_mins, perUnit: "0.05"}` for 3 slot-minutes per bid
   minute), or, with neither, the class's plan of the job's params. When
   the bid changes, the forecast is resized to follow it (its slot-hours
-  and unit hours; anything else set on the forecast stays). Nothing
+  and unit hours; anything else set on the forecast stays). When the
+  entity matches no rule any more (an omitted shot) or is gone, the
+  forecast is withdrawn (deleted, signed and booked as `withdrawn`) and
+  its link goes; if it comes back, it is a new forecast. Nothing
   is written to the tracker for it. When a job rule matches the entity
   later, the real job replaces the forecast and the link moves to it;
 - `review.wait`: the job's wait that the tracker's decision serves. With

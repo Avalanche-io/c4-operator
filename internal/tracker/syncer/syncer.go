@@ -237,29 +237,48 @@ func (s *Syncer) pass(ctx context.Context, t *c4v1.Tracker, c *conn) error {
 		return err
 	}
 	// An entity that changed but no longer matches its intake rule (its
-	// status moved on) still has its due date followed.
+	// status moved on) still has its due date followed. A forecast's
+	// entity that no rule matches (an omitted shot), or that is gone, is
+	// work no longer expected: its forecast is withdrawn, and its link
+	// goes with it.
 	s.mu.Lock()
 	changed := map[string]bool{}
 	for k := range c.dirty {
 		changed[k] = true
 	}
 	s.mu.Unlock()
+	kept := links[:0]
 	for _, l := range links {
 		ref := tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID}
 		if seen[l.Name] || !(changed[ref.String()] || resync) || int(l.Spec.Intake) >= len(t.Spec.Intake) {
+			kept = append(kept, l)
 			continue
 		}
 		it, err := c.adapter.Get(ctx, ref)
-		if errors.Is(err, tracker.ErrNotFound) {
-			continue
-		}
-		if err != nil {
+		gone := errors.Is(err, tracker.ErrNotFound)
+		if err != nil && !gone {
 			return err
 		}
-		if err := s.followDue(ctx, l, t.Spec.Intake[l.Spec.Intake], it); err != nil {
+		rule := t.Spec.Intake[l.Spec.Intake]
+		if rule.As == "forecast" {
+			why := ref.String() + " no longer matches any of the tracker's intake rules"
+			if gone {
+				why = ref.String() + " is gone from the tracker"
+			}
+			if err := s.withdraw(ctx, l, why); err != nil {
+				return err
+			}
+			continue
+		}
+		kept = append(kept, l)
+		if gone {
+			continue
+		}
+		if err := s.followDue(ctx, l, rule, it); err != nil {
 			return err
 		}
 	}
+	links = kept
 	if err := s.findReviews(ctx, t, c, links); err != nil {
 		return err
 	}
@@ -683,6 +702,21 @@ func (s *Syncer) followBid(ctx context.Context, l *c4v1.TrackerLink, rule c4v1.T
 	}
 	if err := s.Farm.Resize(ctx, jr, c); err != nil {
 		return fmt.Errorf("resizing %s for %s: %w", jr, it.Ref, err)
+	}
+	return nil
+}
+
+// withdraw deletes a link's forecast job, signed and booked by the HUD,
+// then the link: if the entity matches a rule again, it is a new forecast.
+func (s *Syncer) withdraw(ctx context.Context, l *c4v1.TrackerLink, why string) error {
+	if l.Spec.Target.WorkJob != "" {
+		err := s.Farm.Withdraw(ctx, farm.JobRef{Namespace: l.Namespace, Name: l.Spec.Target.WorkJob}, why)
+		if err != nil && !errors.Is(err, farm.ErrNotFound) {
+			return fmt.Errorf("withdrawing %s/%s: %w", l.Namespace, l.Spec.Target.WorkJob, err)
+		}
+	}
+	if err := s.Client.Delete(ctx, l); err != nil && !apierrors.IsNotFound(err) {
+		return err
 	}
 	return nil
 }

@@ -82,6 +82,9 @@ type Farm interface {
 	// Resize changes a forecast job's size (spec.forecast) as the
 	// tracker's bid changes: the fields set in c replace the job's.
 	Resize(ctx context.Context, j JobRef, c api.ForecastChange) error
+	// Withdraw deletes a forecast job whose work is no longer expected,
+	// saying why; ErrNotFound when it is gone already.
+	Withdraw(ctx context.Context, j JobRef, reason string) error
 	// Decide relays a tracker decision to an open wait.
 	Decide(ctx context.Context, j JobRef, r Relay) error
 	// StoreView stores files in the project's store as a view and returns
@@ -247,6 +250,15 @@ func (h *HUD) SetDeadline(ctx context.Context, j JobRef, at time.Time) error {
 
 func (h *HUD) Resize(ctx context.Context, j JobRef, c api.ForecastChange) error {
 	return h.doJSON(ctx, http.MethodPost, jobPath(j)+"/forecast", c, nil)
+}
+
+func (h *HUD) Withdraw(ctx context.Context, j JobRef, reason string) error {
+	err := h.doJSON(ctx, http.MethodPost, jobPath(j)+"/withdraw", map[string]string{"reason": reason}, nil)
+	var ae *APIError
+	if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
+		return ErrNotFound
+	}
+	return err
 }
 
 // Decide stores the evidence in the project's store and relays the
