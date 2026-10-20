@@ -109,3 +109,24 @@ func TestPodBlockRunsAndResumesFromItsView(t *testing.T) {
 		t.Fatalf("the chain on B: %+v %v", r, err)
 	}
 }
+
+// With a credential lease mounted, the pod's store reads its credentials
+// file through a link to the lease's, so a renewal reaches it; a pod whose
+// lease is missing does not start its block.
+func TestPodBlockLinksItsLease(t *testing.T) {
+	leaseDir, cfg := t.TempDir(), filepath.Join(t.TempDir(), "claude")
+	b := &PodBlock{ConfigDir: cfg, LeaseDir: leaseDir}
+	if err := b.linkLease(); err == nil {
+		t.Fatal("linked a lease that is not there")
+	}
+	if err := os.WriteFile(filepath.Join(leaseDir, ".credentials.json"), []byte("first"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.linkLease(); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(leaseDir, ".credentials.json"), []byte("renewed"), 0o600)
+	if got, _ := os.ReadFile(filepath.Join(cfg, ".credentials.json")); string(got) != "renewed" {
+		t.Fatalf("the store reads %q", got)
+	}
+}

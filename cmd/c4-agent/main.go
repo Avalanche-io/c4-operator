@@ -14,6 +14,7 @@
 //	c4-agent hooks
 //	c4-agent runner [--node NAME] [--slots N] [--label K=V]...
 //	c4-agent block-pod [--cwd DIR]
+//	c4-agent lease --name N --namespace NS --holder H --owner O --pool P [--ttl 8h] [--renew-before 15m] [--config-dir DIR]
 //
 // State lives in $C4_AGENT_HOME (default ~/.c4/agents). The claude binary is
 // $C4_AGENT_CLAUDE, else claude on PATH.
@@ -37,6 +38,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -44,6 +46,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/agent"
+	"github.com/Avalanche-io/c4-operator/internal/lease"
 	"github.com/Avalanche-io/c4-operator/internal/tier"
 )
 
@@ -87,6 +90,9 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 	}
 	if cmd == "block-pod" {
 		return runBlockPod(ctx, rest, stderr)
+	}
+	if cmd == "lease" {
+		return runLease(ctx, rest, stderr)
 	}
 	if err := dispatch(ctx, h, cmd, rest, stdout); err != nil {
 		fmt.Fprintln(stderr, "c4-agent:", err)
@@ -303,6 +309,12 @@ const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
   runner [--node N] [--slots N] [--label K=V]... [--every 5s] [--yield-timeout 1m]
                        run this machine's members for the farm's queue (a host
                        runner: a Node for the machine, member pods bound to it)
+  block-pod [--cwd DIR]
+                       run a block as a unit pod's command
+  lease --name N --namespace NS --holder H --owner O --pool P [--ttl 8h]
+                       the holder's agent for a holder-transfer credential
+                       lease: keeps its Secret holding the holder's current
+                       short-lived token until the lease ends or it stops
 
 State: $C4_AGENT_HOME (default ~/.c4/agents). claude: $C4_AGENT_CLAUDE or claude on PATH.
 Exit codes: 3 running or already has a session, 4 a copy was started, 5 still busy.
@@ -405,6 +417,70 @@ func readSlotsFile(path string, def int) (int, string) {
 	return n, strings.TrimSpace(reason)
 }
 
+// runLease is the holder's agent for a holder-transfer CredentialLease:
+// it keeps the lease's Secret holding the holder's current short-lived
+// Claude Code token (from --config-dir's sign-in, the refresh token never
+// copied), renews it before it expires, and when the lease's TTL ends or
+// the agent is stopped (SIGINT, SIGTERM) deletes the Secret. It prints
+// when the lease is good until, never the credential.
+func runLease(ctx context.Context, args []string, stderr io.Writer) int {
+	fs := flag.NewFlagSet("lease", flag.ContinueOnError)
+	fs.SetOutput(stderr)
+	name := fs.String("name", "", "the lease's name (its Secret is c4-lease-<name>)")
+	ns := fs.String("namespace", "", "the namespace of the holder's jobs")
+	holder := fs.String("holder", "", "the person the sign-in belongs to")
+	account := fs.String("account", "anthropic", "the model account it serves")
+	var owners, pools multi
+	fs.Var(&owners, "owner", "an identity whose jobs are the holder's own (a WorkJob's c4.avalanche.io/owner); repeatable")
+	fs.Var(&pools, "pool", "a pool whose unit pods may mount it; repeatable")
+	ttl := fs.Duration("ttl", 8*time.Hour, "the lease's life")
+	renewBefore := fs.Duration("renew-before", 15*time.Minute, "renew this long before the token expires")
+	configDir := fs.String("config-dir", os.Getenv("CLAUDE_CONFIG_DIR"), "the Claude Code config dir whose sign-in it leases (default $CLAUDE_CONFIG_DIR, else ~/.claude)")
+	kubeconfig := fs.String("kubeconfig", "", "the holder's kubeconfig (default: $KUBECONFIG or ~/.kube/config)")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	if *name == "" || *ns == "" || *holder == "" || len(owners) == 0 || len(pools) == 0 {
+		fmt.Fprintln(stderr, "c4-agent lease: needs --name, --namespace, --holder, --owner and --pool")
+		return 2
+	}
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM)
+	defer stop()
+	src, err := lease.ClaudeSource(*configDir)
+	if err != nil {
+		fmt.Fprintln(stderr, "c4-agent lease:", err)
+		return 1
+	}
+	if *kubeconfig != "" {
+		os.Setenv("KUBECONFIG", *kubeconfig)
+	}
+	cfg, err := ctrlconfig.GetConfig()
+	if err != nil {
+		fmt.Fprintln(stderr, "c4-agent lease:", err)
+		return 1
+	}
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c4v1.AddToScheme(scheme)
+	cl, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		fmt.Fprintln(stderr, "c4-agent lease:", err)
+		return 1
+	}
+	a := &lease.Agent{Client: cl, Namespace: *ns, Name: *name, Source: src,
+		Spec: c4v1.CredentialLeaseSpec{Account: *account, Holder: *holder, BoundTo: c4v1.LeaseBinding{Owners: owners},
+			Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: pools},
+			TTL: metav1.Duration{Duration: *ttl}, RenewBefore: metav1.Duration{Duration: *renewBefore}},
+		Logf: func(format string, args ...any) {
+			fmt.Fprintf(stderr, "%s c4-agent lease: %s\n", time.Now().Format("15:04:05"), fmt.Sprintf(format, args...))
+		}}
+	if err := a.Run(ctx); err != nil {
+		fmt.Fprintln(stderr, "c4-agent lease:", err)
+		return 1
+	}
+	return 0
+}
+
 // runBlockPod runs a block as a unit pod's command: one attempt, its
 // session in the unit's output view ($C4_OUTPUT), the holder's Claude Code
 // store as CLAUDE_CONFIG_DIR. It ignores SIGTERM, so a pod the farm
@@ -433,7 +509,7 @@ func runBlockPod(ctx context.Context, args []string, stderr io.Writer) int {
 	if claude == "" {
 		claude = "claude"
 	}
-	b := &agent.PodBlock{Out: out, ConfigDir: cfg, Cwd: *cwd, Claude: claude, HookCommand: hook, Env: os.Getenv,
+	b := &agent.PodBlock{Out: out, ConfigDir: cfg, LeaseDir: os.Getenv("C4_LEASE_DIR"), Cwd: *cwd, Claude: claude, HookCommand: hook, Env: os.Getenv,
 		Logf: func(format string, args ...any) { fmt.Fprintf(stderr, "c4-agent block-pod: "+format+"\n", args...) }}
 	code, err := b.Run(ctx)
 	if err != nil {

@@ -35,6 +35,10 @@ type PodBlock struct {
 	Out string
 	// ConfigDir is the holder's Claude Code store (CLAUDE_CONFIG_DIR).
 	ConfigDir string
+	// LeaseDir, when set, is where the pod's credential lease is mounted,
+	// read-only ($C4_LEASE_DIR): the store's credentials file is a link to
+	// the lease's, so a renewal reaches the running session.
+	LeaseDir string
 	// Cwd is the folder the session runs in. The transcript is filed by it,
 	// so a session that moves keeps the same one on every machine.
 	Cwd string
@@ -82,6 +86,9 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 	st := &Store{Dir: filepath.Join(b.Out, SessionDir, "agents")}
 	h := New(st, podClaude{})
 	if err := os.MkdirAll(filepath.Join(b.Out, ".c4"), 0o755); err != nil {
+		return 1, err
+	}
+	if err := b.linkLease(); err != nil {
 		return 1, err
 	}
 	name := blockMember(p)
@@ -139,6 +146,23 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 		b.logf("%s: ended its turn without finishing its task or noting a next part", m.Name)
 		return PodBlockGaveUp, nil
 	}
+}
+
+// linkLease points the store's credentials file at the lease's.
+func (b *PodBlock) linkLease() error {
+	if b.LeaseDir == "" {
+		return nil
+	}
+	target := filepath.Join(b.LeaseDir, c4v1.LeaseCredentialKey)
+	if _, err := os.Stat(target); err != nil {
+		return fmt.Errorf("the pod's credential lease: %w", err)
+	}
+	if err := os.MkdirAll(b.ConfigDir, 0o700); err != nil {
+		return err
+	}
+	link := filepath.Join(b.ConfigDir, ".credentials.json")
+	os.Remove(link)
+	return os.Symlink(target, link)
 }
 
 // register records the new session's member once its transcript appears,

@@ -1,0 +1,174 @@
+package lease
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+)
+
+const refresh = "sk-ant-ort01-never-leaves-the-machine"
+
+func signIn(access string, expires time.Time) []byte {
+	return []byte(fmt.Sprintf(`{"claudeAiOauth":{"accessToken":%q,"refreshToken":%q,"expiresAt":%d,"scopes":["user:inference"],"subscriptionType":"max"}}`,
+		access, refresh, expires.UnixMilli()))
+}
+
+// A lease carries the access token, its expiry and what it is for, never
+// the refresh token; a document with no sign-in is refused without quoting
+// it.
+func TestShortLived(t *testing.T) {
+	exp := time.Date(2026, 10, 19, 22, 0, 0, 0, time.UTC)
+	out, got, err := ShortLived(signIn("sk-ant-oat01-short", exp))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Equal(exp) || bytes.Contains(out, []byte(refresh)) || bytes.Contains(out, []byte("refreshToken")) {
+		t.Fatalf("expiry %s, document %s", got, out)
+	}
+	var d struct {
+		OAuth struct {
+			AccessToken      string   `json:"accessToken"`
+			ExpiresAt        int64    `json:"expiresAt"`
+			Scopes           []string `json:"scopes"`
+			SubscriptionType string   `json:"subscriptionType"`
+		} `json:"claudeAiOauth"`
+	}
+	if json.Unmarshal(out, &d) != nil || d.OAuth.AccessToken != "sk-ant-oat01-short" || d.OAuth.ExpiresAt != exp.UnixMilli() || d.OAuth.SubscriptionType != "max" {
+		t.Fatalf("document %s", out)
+	}
+	for _, bad := range []string{`{}`, `not json sk-ant-secret`, `{"claudeAiOauth":{"refreshToken":"sk-ant-secret"}}`} {
+		if _, _, err := ShortLived([]byte(bad)); err == nil || strings.Contains(err.Error(), "sk-ant") {
+			t.Fatalf("%s: %v", bad, err)
+		}
+	}
+}
+
+// Claude Code's keychain item for a config dir other than ~/.claude is
+// suffixed with its path's SHA-256.
+func TestClaudeSource(t *testing.T) {
+	t.Setenv("HOME", "/Users/holder")
+	s, err := ClaudeSource("/Users/holder/.claude-b")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if k, ok := s.(KeychainSource); ok {
+		// sha256("/Users/holder/.claude-b")[:8]
+		if !strings.HasPrefix(k.Service, "Claude Code-credentials-") || len(k.Service) != len("Claude Code-credentials-")+8 {
+			t.Fatalf("service %q", k.Service)
+		}
+		d, _ := ClaudeSource("")
+		if d.(KeychainSource).Service != "Claude Code-credentials" {
+			t.Fatalf("default service %q", d.(KeychainSource).Service)
+		}
+		return
+	}
+	if s.Where() != "/Users/holder/.claude-b/.credentials.json" {
+		t.Fatalf("source %s", s.Where())
+	}
+}
+
+type memSource struct {
+	mu  sync.Mutex
+	doc []byte
+}
+
+func (m *memSource) Read(ctx context.Context) ([]byte, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return append([]byte(nil), m.doc...), nil
+}
+func (m *memSource) Where() string { return "memory" }
+func (m *memSource) set(doc []byte) {
+	m.mu.Lock()
+	m.doc = doc
+	m.mu.Unlock()
+}
+
+// The holder's agent issues the lease, renews it when the holder's sign-in
+// is refreshed, and when it stops deletes the Secret and marks the lease
+// revoked. Nothing it logs carries the token.
+func TestAgentIssuesRenewsRevokes(t *testing.T) {
+	s := runtime.NewScheme()
+	clientgoscheme.AddToScheme(s)
+	c4v1.AddToScheme(s)
+	c := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&c4v1.CredentialLease{}).Build()
+	src := &memSource{doc: signIn("sk-ant-oat01-first", time.Now().Add(time.Hour))}
+	var mu sync.Mutex
+	var logs []string
+	a := &Agent{Client: c, Namespace: "practice", Name: "joshua-claude", Source: src, Retry: 50 * time.Millisecond,
+		Spec: c4v1.CredentialLeaseSpec{Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"kubernetes-admin"}},
+			Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"blocks-kind"}},
+			TTL: metav1.Duration{Duration: time.Hour}, RenewBefore: metav1.Duration{Duration: 59*time.Minute + 59*time.Second}},
+		Logf: func(f string, args ...any) { mu.Lock(); logs = append(logs, fmt.Sprintf(f, args...)); mu.Unlock() }}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- a.Run(ctx) }()
+
+	ctxb := context.Background()
+	secret := func() string {
+		var sec corev1.Secret
+		if c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "c4-lease-joshua-claude"}, &sec) != nil {
+			return ""
+		}
+		return string(sec.Data[c4v1.LeaseCredentialKey])
+	}
+	waitFor := func(what string, ok func() bool) {
+		t.Helper()
+		for end := time.Now().Add(10 * time.Second); !ok(); time.Sleep(20 * time.Millisecond) {
+			if time.Now().After(end) {
+				t.Fatalf("timed out waiting for %s", what)
+			}
+		}
+	}
+	waitFor("the first token", func() bool { return strings.Contains(secret(), "sk-ant-oat01-first") })
+	if strings.Contains(secret(), refresh) {
+		t.Fatal("the refresh token left the machine")
+	}
+	var l c4v1.CredentialLease
+	c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "joshua-claude"}, &l)
+	if l.Status.State != c4v1.LeaseActive || l.Status.ExpiresAt == nil {
+		t.Fatalf("lease %+v", l.Status)
+	}
+
+	// the holder's Claude Code refreshes: the agent copies the new token
+	src.set(signIn("sk-ant-oat01-second", time.Now().Add(2*time.Hour)))
+	waitFor("the renewed token", func() bool { return strings.Contains(secret(), "sk-ant-oat01-second") })
+
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatal(err)
+	}
+	if secret() != "" {
+		t.Fatal("the Secret outlived the agent")
+	}
+	c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "joshua-claude"}, &l)
+	if l.Status.State != c4v1.LeaseRevoked {
+		t.Fatalf("state %q after the agent stopped", l.Status.State)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, line := range logs {
+		if strings.Contains(line, "sk-ant") {
+			t.Fatalf("a log line carries a token: %s", line)
+		}
+	}
+	if len(logs) == 0 {
+		t.Fatal("the agent said nothing")
+	}
+	var _ client.Client = c
+}
