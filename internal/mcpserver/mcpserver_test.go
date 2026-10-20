@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -85,6 +86,12 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 		json.NewEncoder(w).Encode(api.GrantList{Grants: []api.Grant{{Namespace: "show-a", Name: "github-ab12", Person: "maya", Tracker: "github",
 			Until: due, Record: "c4grant", Active: true}}})
+	case r.Method == "GET" && r.URL.Path == "/api/v1/capacity/forecast":
+		f.mu.Lock()
+		f.posts = append(f.posts, "GET "+r.URL.String())
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(api.CapacityForecast{At: &due, Jobs: []string{"show-a/sh050-light-forecast"},
+			Bursts: []api.ForecastBurst{{Pool: "cpu", Slots: 12, Live: 4, CostPerSlotHour: 0.5, ExtraCostPerHour: 4}}, Worse: []api.ForecastRisk{}})
 	case r.Method == "GET" && r.URL.Path == "/api/v1/trackers":
 		f.mu.Lock()
 		f.posts = append(f.posts, "GET "+r.URL.String())
@@ -426,5 +433,21 @@ func TestGrantTools(t *testing.T) {
 		if a != "Bearer tok-maya" {
 			t.Fatalf("a request went to the HUD as %q", a)
 		}
+	}
+}
+
+// The farm's forecast, read through the HUD.
+func TestCapacityForecastTool(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "tok-maya")
+	res, out := call(t, cs, "c4_get_capacity_forecast", map[string]any{})
+	bs, _ := out["bursts"].([]any)
+	if res.IsError || len(bs) != 1 || bs[0].(map[string]any)["extraCostPerHour"] != 4.0 {
+		t.Fatalf("forecast: %v %q", out, text(res))
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	if !slices.Equal(hud.posts, []string{"GET /api/v1/capacity/forecast"}) {
+		t.Fatalf("requests %v", hud.posts)
 	}
 }

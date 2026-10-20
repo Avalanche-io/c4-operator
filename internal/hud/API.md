@@ -640,6 +640,27 @@ At most one per second, and only when something changed. Comment lines
 `/snapshot` once on load so the first paint does not wait on the stream; the
 HUD does.
 
+## GET /capacity/forecast
+
+What the farm's forecast jobs (`spec.forecast`: work a tracker expects
+from a bid or a schedule, not yet submitted; integrations GAPS 9) would
+need among the real work, as the queue's last forecast pass planned it.
+Nothing of it is requested or acted on.
+
+```
+{ at?, jobs: [ns/name], bursts: [ { pool, slots, live, costPerSlotHour?, extraCostPerHour? } ],
+  worse: [ { job, risk, live } ] }
+```
+
+`at` is the last forecast pass, absent when there has been none (no
+forecast jobs). `jobs` are the forecast jobs planned and `worse` the real
+jobs whose risk the forecast work raises (`risk` with it, `live` as the
+farm plans now), both only in projects the viewer sees. `bursts` are
+farm-wide, as pools are in the snapshot: the burst slots suggested in a
+pool with the forecast work (`slots`) and now (`live`), approved or not,
+and what the difference would cost an hour at the pool's burst price.
+`503` from a HUD without the work queue.
+
 ## Controls
 
 Every control is a POST with a JSON body. In the real backend each one is one

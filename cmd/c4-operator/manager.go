@@ -255,6 +255,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// *queue.Queue in the interface would not compare equal to nil).
 		srv.Queue = q
 		srv.DryRun = hudserver.QueueDryRun(q)
+		srv.Forecast = func() api.CapacityForecast { return forecastView(q.Forecast()) }
 		srv.Progress = q.Progress
 		srv.Safepoints = q.Safepoints
 		srv.Plans = q.PlanOf
@@ -358,4 +359,20 @@ func parseRoleGroups(spec string) (map[string]string, error) {
 		out[g] = r
 	}
 	return out, nil
+}
+
+// forecastView is the queue's last forecast pass as the HUD API names it.
+func forecastView(f queue.Forecast) api.CapacityForecast {
+	out := api.CapacityForecast{Jobs: f.Jobs}
+	if !f.At.IsZero() {
+		at := f.At.UTC()
+		out.At = &at
+	}
+	for _, b := range f.Bursts {
+		out.Bursts = append(out.Bursts, api.ForecastBurst{Pool: b.Pool, Slots: b.Slots, Live: b.Live})
+	}
+	for _, w := range f.Worse {
+		out.Worse = append(out.Worse, api.ForecastRisk{Job: w.Job, Risk: w.Risk, Live: w.Live})
+	}
+	return out
 }

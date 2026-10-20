@@ -76,6 +76,9 @@ type Server struct {
 	// DryRun plans jobs before they are submitted (POST /jobs); nil
 	// answers dry runs with 503.
 	DryRun DryRunFunc
+	// Forecast is the queue's last forecast pass (integrations GAPS 9),
+	// unscoped; nil answers GET /capacity/forecast with 503.
+	Forecast func() api.CapacityForecast
 	// MaxObjectBytes caps one uploaded object (default 64 GiB), and
 	// SpoolDir is where uploads are held while they are identified
 	// (default the system's temporary directory).
@@ -138,6 +141,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/supply", s.handleSupply)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/blacklist", s.handleBlacklist)
 	mux.HandleFunc("POST /api/v1/nodes/{name}/disable", s.handleDisable)
+	mux.HandleFunc("GET /api/v1/capacity/forecast", s.handleCapacityForecast)
 	mux.HandleFunc("POST /api/v1/capacity/{pool}/approve", s.handleApprove)
 	mux.HandleFunc("POST /api/v1/grants", s.handleGrant)
 	mux.HandleFunc("GET /api/v1/grants", s.handleGrants)

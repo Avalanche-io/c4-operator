@@ -110,6 +110,8 @@ func Tools(c *Client) []Tool {
 			idempotent, c.disableNode),
 		tool("c4_submit_job", "Submit a job", "Submit a render, CI or training job: the class and its parameters, the image each unit runs, input views or upstream jobs, and an optional deadline (omit it and the farm suggests one). Call with dry_run first: it returns the estimate (units, ETA p50 and p90, slack, on track or not) and creates nothing; show it to the person, then submit. The job is owned by the person you act for.",
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.submitJob),
+		tool("c4_get_capacity_forecast", "Capacity forecast", "What the farm's forecast jobs (work a tracker expects, from a bid or a schedule, not yet submitted) would need among the real work, as of the last forecast pass: burst slots per pool with the forecasts and as planned now, what the difference would cost an hour, and the real jobs the forecast work would put at more risk. Nothing is requested for a forecast; use it to plan capacity and budget before the work arrives.",
+			readOnly, c.capacityForecast),
 		tool("c4_approve_capacity", "Approve burst capacity", "Approve the burst capacity request waiting in a pool. This provisions paid capacity; check c4_capacity_and_cost first for its cost and the jobs it is for.",
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.approveCapacity),
 		tool("c4_grant", "Let a tracker submit work for you", "Let a production tracker's sync (a Tracker: GitHub, Flow, ...) submit work for the person you act for, so jobs it makes from their issues or tasks are theirs and what is theirs (a lease of their own sign-in) serves them. Only when that person asks: the grant is theirs, signed and recorded in the book. Optionally limit it to pools and job classes; it ends at until (30d by default, at most 90d). Granting again renews it.",
@@ -883,5 +885,11 @@ func (c *Client) revokeGrant(ctx context.Context, _ *mcp.CallToolRequest, in Rev
 func (c *Client) listTrackers(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, api.TrackerList, error) {
 	var out api.TrackerList
 	err := c.do(ctx, "GET", "/trackers", nil, &out)
+	return nil, out, err
+}
+
+func (c *Client) capacityForecast(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, api.CapacityForecast, error) {
+	var out api.CapacityForecast
+	err := c.do(ctx, "GET", "/capacity/forecast", nil, &out)
 	return nil, out, err
 }
