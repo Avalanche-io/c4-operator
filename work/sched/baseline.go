@@ -173,7 +173,7 @@ func (a *alloc) suspendForBumped(order []*jobCtx) {
 				}
 				for _, ru := range v.j.RunningUnits {
 					if _, p := a.st.pending[ru.ID]; ru.Pool == pool && !p {
-						vs = append(vs, victim{v, ru})
+						vs = append(vs, victim{v, ru, keepNone})
 					}
 				}
 			}

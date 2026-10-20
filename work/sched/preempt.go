@@ -21,10 +21,18 @@ import (
 //     rounded up from units the starvation guard started, whatever work
 //     they lose (ReasonGuard). A job the plan makes late may take guard
 //     units too, up to its planned share.
+//   - time-slicing: a job planned for a fraction of a slot that would be
+//     late waiting for one to free (the unit holding it is expected to run
+//     past the job's latest start) takes up to that number rounded up from
+//     jobs that checkpoint, which yield at their next safe point and lose
+//     only their restore cost; such a victim keeps its share rounded down.
+//     On a one-slot pool this is how an urgent job runs at all.
 //
 // A victim unit belongs to a preemptible job with slack above
-// PreemptSlack that still holds its planned share, rounded up, without
-// the unit (counting units already being stopped), has been preempted fewer than
+// PreemptSlack that still holds its planned share, rounded up (rounded
+// down for time-slicing; for reclaim a borrower above its nominal gives
+// up borrowed units whatever its share, since what it borrowed was lent),
+// without the unit (counting units already being stopped), has been preempted fewer than
 // MaxPreemptionsPerUnit times, would lose at most MaxLostWork, and is
 // chosen by least lost work. Each pool
 // allows at most PreemptPerWindow preemptions per PreemptWindow.
@@ -41,9 +49,21 @@ func (a *alloc) preempt() {
 }
 
 type victim struct {
-	jc *jobCtx
-	ru RunningUnit
+	jc   *jobCtx
+	ru   RunningUnit
+	keep keepRule
 }
+
+// keepRule is what a victim job keeps of its planned share: rounded up
+// (ordinary victims), rounded down (units the starvation guard started,
+// and time-slicing), or nothing (borrowed units a lender reclaims).
+type keepRule int
+
+const (
+	keepCeil keepRule = iota
+	keepFloor
+	keepNone
+)
 
 func (a *alloc) budget(pool string) int {
 	log := a.st.preemptLog[pool]
@@ -74,12 +94,17 @@ func (a *alloc) victimLoss(jc *jobCtx, ru RunningUnit) time.Duration {
 // a unit from it would leave it below its share, and two jobs whose shares
 // are fractions of a slot would take one slot back and forth.
 //
-// A unit the starvation guard started gives up that protection: its job
-// need keep only its share rounded down (guard true).
-func (jc *jobCtx) canGive(k int, guard bool) bool {
+// A unit the starvation guard started gives up that protection, as does a
+// unit time-sliced for a job that checkpoints: its job need keep only its
+// share rounded down (keepFloor). A borrower keeps nothing of what it
+// borrowed (keepNone).
+func (jc *jobCtx) canGive(k int, rule keepRule) bool {
 	keep := int(math.Ceil(jc.share - 1e-9))
-	if guard {
+	switch rule {
+	case keepFloor:
 		keep = int(math.Floor(jc.share + 1e-9))
+	case keepNone:
+		keep = 0
 	}
 	return jc.running-jc.outgoing-k >= keep
 }
@@ -88,24 +113,36 @@ func (jc *jobCtx) canGive(k int, guard bool) bool {
 // With guardOK, units the starvation guard started are victims whatever
 // work they would lose.
 func (a *alloc) victims(pool string, ok func(*jobCtx) bool, guardOK bool) []victim {
+	return a.victimsBy(pool, ok, func(jc *jobCtx, ru RunningUnit) (keepRule, bool) {
+		if _, guard := a.st.guard[ru.ID]; guard && guardOK {
+			return keepFloor, true
+		}
+		return keepCeil, true
+	})
+}
+
+// victimsBy lists eligible running units in pool, least lost work first;
+// rule says what each unit's job keeps, and whether it is a victim at all.
+func (a *alloc) victimsBy(pool string, ok func(*jobCtx) bool, rule func(*jobCtx, RunningUnit) (keepRule, bool)) []victim {
 	var out []victim
 	for _, jc := range a.jobs {
 		if !jc.j.Preemptible || jc.slack <= a.cfg.PreemptSlack || !ok(jc) {
 			continue
 		}
 		for _, ru := range jc.j.RunningUnits {
-			_, guard := a.st.guard[ru.ID]
-			guard = guard && guardOK
-			if ru.Pool != pool || ru.Preemptions >= a.cfg.MaxPreemptionsPerUnit || !jc.canGive(ru.Slots, guard) {
+			keep, eligible := rule(jc, ru)
+			if !eligible || ru.Pool != pool || ru.Preemptions >= a.cfg.MaxPreemptionsPerUnit || !jc.canGive(ru.Slots, keep) {
 				continue
 			}
+			_, guard := a.st.guard[ru.ID]
+			guard = guard && keep == keepFloor
 			if a.cfg.MaxLostWork > 0 && a.victimLoss(jc, ru) > a.cfg.MaxLostWork && !guard {
 				continue
 			}
 			if _, pending := a.st.pending[ru.ID]; pending {
 				continue
 			}
-			out = append(out, victim{jc, ru})
+			out = append(out, victim{jc, ru, keep})
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -127,8 +164,7 @@ func (a *alloc) take(pool string, vs []victim, want int, reason PreemptReason, f
 		if freed >= want || a.budget(pool) <= 0 {
 			break
 		}
-		_, guard := a.st.guard[v.ru.ID]
-		if !v.jc.canGive(v.ru.Slots, guard && reason == ReasonFeasibility) || !still(v) {
+		if !v.jc.canGive(v.ru.Slots, v.keep) || !still(v) {
 			continue
 		}
 		if _, pending := a.st.pending[v.ru.ID]; pending {
@@ -199,7 +235,10 @@ func (a *alloc) reclaim() {
 			borrowing := func(p *projState) bool {
 				return p != pr && p.usage[pool] > a.quota(p.p.Name, pool).Nominal
 			}
-			vs := a.victims(pool, func(v *jobCtx) bool { return borrowing(v.proj) }, false)
+			// What a borrower borrowed was lent: it keeps none of it
+			// back for its share (keepNone).
+			vs := a.victimsBy(pool, func(v *jobCtx) bool { return borrowing(v.proj) },
+				func(*jobCtx, RunningUnit) (keepRule, bool) { return keepNone, true })
 			freed := a.take(pool, vs, want, ReasonReclaim, forJob.j.ID, func(v victim) bool { return borrowing(v.jc.proj) })
 			forJob.incoming += freed
 		}
@@ -241,6 +280,7 @@ func (a *alloc) restoreFeasibility() {
 		// StarvationDeferMax, which keeps the two from trading the slot.
 		a.restoreFrom(jc, int(math.Floor(target+1e-9)), false)
 		a.restoreFrom(jc, int(math.Ceil(target-1e-9)), true)
+		a.timeSlice(jc, int(math.Ceil(target-1e-9)))
 	}
 	// A job the plan already makes late misses its deadline by more for
 	// every slot it lacks: it too may take guard units, up to its planned
@@ -254,6 +294,42 @@ func (a *alloc) restoreFeasibility() {
 	sort.SliceStable(late, func(i, j int) bool { return late[i].W < late[j].W })
 	for _, jc := range late {
 		a.restoreFrom(jc, int(math.Ceil(jc.share-1e-9)), true)
+	}
+}
+
+// timeSlice takes slots for jc up to upTo held from jobs that checkpoint,
+// when waiting for a unit of theirs to end would make jc late: the unit is
+// expected to run past jc's latest start (its deadline less the time its
+// remaining work needs on upTo slots). The victim yields at its next safe
+// point, loses its restore cost, keeps its share rounded down, and may not
+// take the slot back within the hour (State.took).
+func (a *alloc) timeSlice(jc *jobCtx, upTo int) {
+	want := upTo - (jc.running + jc.incoming)
+	if want <= 0 || upTo <= 0 {
+		return
+	}
+	want = max(want, jc.unitSlots(jc.j.Runnable[jc.next]))
+	startBy := jc.T - math.Max(div(jc.W90, float64(upTo)), jc.tpath)
+	for _, pool := range jc.j.Pools {
+		ps := a.pools[pool]
+		if ps == nil || want <= 0 {
+			continue
+		}
+		eligible := func(v *jobCtx) bool {
+			if v == jc || !v.j.Checkpoints {
+				return false
+			}
+			if v.proj == jc.proj || !a.quotas || !ps.hasQuota {
+				return true
+			}
+			return v.proj.usage[pool] > a.quota(v.proj.p.Name, pool).Nominal
+		}
+		vs := a.victimsBy(pool, eligible, func(_ *jobCtx, ru RunningUnit) (keepRule, bool) {
+			return keepFloor, ru.Remaining > 0 && ru.Remaining.Seconds() > startBy
+		})
+		freed := a.take(pool, vs, want, ReasonFeasibility, jc.j.ID, func(v victim) bool { return eligible(v.jc) })
+		jc.incoming += freed
+		want -= freed
 	}
 }
 

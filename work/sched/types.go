@@ -160,6 +160,9 @@ type RunningUnit struct {
 	// where it was.
 	RestoreCost time.Duration
 	Preemptions int
+	// Remaining is the time the unit is expected to run on (0: not
+	// known): how long a job waiting for its slot would wait.
+	Remaining time.Duration
 }
 
 // Decisions is what a call to Decide returns.

@@ -45,7 +45,7 @@ func (a *alloc) shed() {
 				if _, pending := a.st.pending[ru.ID]; ru.Pool != name || pending {
 					continue
 				}
-				vs = append(vs, victim{jc, ru})
+				vs = append(vs, victim{jc, ru, keepNone})
 			}
 		}
 		sort.SliceStable(vs, func(i, j int) bool {

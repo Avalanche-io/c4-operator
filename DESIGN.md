@@ -2320,6 +2320,21 @@ through the tiers instead of from the store.
   jobs whose slack exceeds a threshold. It picks victims by lost work: time
   since the unit's last checkpoint, plus restore cost. It is rate-limited per
   pool, and a unit is preempted at most twice.
+  - **What a victim keeps.** A victim job keeps its planned share
+    rounded up, so two jobs with fractional shares do not trade a slot.
+    Two cases are exempt. A borrower above its nominal gives up what it
+    borrowed whatever its share, since that capacity was lent. And a job
+    that checkpoints keeps its share rounded down when another job would
+    be late waiting for its unit to end (time-slicing).
+  - **Time-slicing.** A job planned for a fraction of a slot (an urgent
+    job on a one-slot pool, say) that would miss waiting for the slot to
+    free takes the slot from a checkpointing unit. That happens when the
+    unit is expected to run past the job's latest start: its deadline,
+    less what its remaining work needs on its share rounded up. The unit
+    yields at its next safe point and loses only its restore cost, and it
+    may not take the slot back within the hour. The queue tells the
+    policy each running unit's expected time left
+    (`RunningUnit.Remaining`). With no estimate, nothing is sliced.
 - A unit of a class that checkpoints is asked to yield, not killed. The
   queue sets the annotation `c4.avalanche.io/yield` on its pod; the unit sees
   it through a downward API file (`C4_PODINFO`), saves a checkpoint into its

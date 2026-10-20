@@ -485,6 +485,9 @@ type view struct {
 	// openWaits are the wait units whose units are done, waiting for
 	// their decision (wait.go).
 	openWaits map[int]bool
+	// runRem is each running unit's expected time left, in seconds, for
+	// the policy (sched.RunningUnit.Remaining).
+	runRem map[int]float64
 	// roundsExp is what the queue expects of each loop's remaining rounds,
 	// by first generator (rounds.go).
 	roundsExp map[int]roundsExp
@@ -1100,6 +1103,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	// The critical path is the longest chain of remaining work through
 	// the unit graph; without edges, the longest single remaining unit.
 	rem := map[int]float64{}
+	v.runRem = map[int]float64{}
 	for _, idx := range v.runnable {
 		u := plan.Units[idx]
 		rem[idx] = e.Predict(u.Key, u.Pos).Mean - retained(idx)
@@ -1131,6 +1135,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 			progress, _ = q.Progress.Get(pod.Namespace, pod.Name, now)
 		}
 		rem[idx], _ = e.RemainderAt(e.Predict(u.Key, u.Pos), retained(idx), math.Max(0, now.Sub(r.started).Seconds()), progress)
+		v.runRem[idx] = rem[idx]
 	}
 	for idx, d := range reworkPath {
 		if _, ok := rem[idx]; ok {
@@ -1233,6 +1238,9 @@ func schedJob(v *view, free int) sched.Job {
 	for idx, r := range v.running {
 		j.Running[r.pool] += r.slots
 		ru := sched.RunningUnit{ID: unitID(v.key, idx), Pool: r.pool, Slots: r.slots, Started: r.started, Preemptions: 0}
+		if left := v.runRem[idx]; left > 0 {
+			ru.Remaining = time.Duration(left * float64(time.Second))
+		}
 		// What stopping a unit now loses is the work since its last safe
 		// point; a unit that reports them can be asked to stop at the next.
 		if sp, ok := v.safe[idx]; ok {
