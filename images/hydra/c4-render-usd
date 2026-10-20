@@ -18,6 +18,8 @@ while [ $# -gt 2 ]; do
     --frames|-f) frames=$2; shift 2 ;;
     --imageWidth|-w) width=$2; shift 2 ;;
     --disableGpu) shift ;;
+    # Blender renders through the stage's first camera
+    --renderSettingsPrimPath) shift 2 ;;
     *) echo "c4-render-usd: unknown option $1" >&2; exit 2 ;;
   esac
 done

@@ -70,8 +70,17 @@ var types = map[string]JobType{
 		Renderers: map[string]string{"cycles": "Cycles", "karma-xpu": "BRAY_HdKarmaXPU", "karma-cpu": "BRAY_HdKarma",
 			"prman": "HdPrmanLoaderRendererPlugin", "arnold": "HdArnoldRendererPlugin", "vray": "HdVRayRendererPlugin"},
 		Script: `mkdir -p {{.Mount}}/render
-usdrecord --disableGpu --renderer {{.Renderer}} --frames "$C4_FRAME_START:$C4_FRAME_END" \
-  --imageWidth {{index .Set "width"}} {{.Mount}}/{{.Asset}} {{.Mount}}/render/{{.Stem}}.####.exr
+# the stage's render settings (its camera and frame), if it has any
+rs=$(python3 -c 'import sys
+from pxr import Usd, UsdRender
+s = Usd.Stage.Open(sys.argv[1])
+r = UsdRender.Settings.GetStageRenderSettings(s)
+if not r:
+    r = next((UsdRender.Settings(p) for p in s.Traverse() if p.IsA(UsdRender.Settings)), None)
+print(r.GetPath() if r else "")' {{.Mount}}/{{.Asset}} 2>/dev/null || true)
+set -- --disableGpu --renderer {{.Renderer}} --frames "$C4_FRAME_START:$C4_FRAME_END" --imageWidth {{index .Set "width"}}
+if [ -n "$rs" ]; then set -- "$@" --renderSettingsPrimPath "$rs"; fi
+usdrecord "$@" {{.Mount}}/{{.Asset}} {{.Mount}}/render/{{.Stem}}.####.exr
 for f in $(seq "$C4_FRAME_START" "$C4_FRAME_END"); do
   c4-unit preview "{{.Mount}}/render/{{.Stem}}.$f.exr" "$f"
 done`, Set: map[string]string{"width": "1920"}},

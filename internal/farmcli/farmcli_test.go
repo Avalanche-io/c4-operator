@@ -102,8 +102,9 @@ func TestTypes(t *testing.T) {
 	if a := spec.Template.Spec.Containers[0].Args[0]; !strings.Contains(a, "--in '/show/plates/sm0140/sm0140.%04d.exr'") || !strings.Contains(a, "/show/depth/sm0140.%04d.exr") {
 		t.Fatalf("infer on a folder of plates:\n%s", a)
 	}
-	if !strings.Contains(args, "usdrecord --disableGpu") {
-		t.Fatalf("render without --disableGpu:\n%s", args)
+	if !strings.Contains(args, "set -- --disableGpu") || !strings.Contains(args, "--renderSettingsPrimPath \"$rs\"") ||
+		!strings.Contains(args, "usdrecord \"$@\" /show/sm0140/sm0140.usda") {
+		t.Fatalf("render without --disableGpu, or not through the stage's render settings:\n%s", args)
 	}
 	tr, _ := LookupType("transcode")
 	spec, _ = tr.Spec(Options{Asset: "plates/sm0140", AssetIsDir: true, Frames: "1001-1048"})
