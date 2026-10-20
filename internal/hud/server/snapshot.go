@@ -245,6 +245,18 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNeedsPerson); c != nil && c.Status == metav1.ConditionTrue {
 		aj.NeedsPerson = &api.NeedsPerson{Reason: strings.ToLower(c.Reason), Message: c.Message, Since: c.LastTransitionTime.Time.UTC()}
 	}
+	for k, n := range st.Needs {
+		i, err := strconv.Atoi(k)
+		if err != nil {
+			continue
+		}
+		an := api.Needs{Unit: i, Text: n.Text, Why: n.Why, At: n.At.Time.UTC(), Record: n.Record, Supplied: n.Supplied, By: n.By}
+		if r.plan != nil && i < len(r.plan.Units) {
+			an.Name = r.plan.Units[i].Name
+		}
+		aj.Needs = append(aj.Needs, an)
+	}
+	sort.Slice(aj.Needs, func(a, b int) bool { return aj.Needs[a].Unit < aj.Needs[b].Unit })
 	for _, m := range st.Steers {
 		as := api.Steer{Unit: int(m.Unit), Name: m.Name, Seq: int(m.Seq), Actor: m.Actor, At: m.At.Time.UTC(), Text: m.Text,
 			Record: m.Record, Seen: m.Seen}

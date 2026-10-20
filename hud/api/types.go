@@ -502,6 +502,22 @@ type Job struct {
 	// Steers are the latest messages sent to the job's units while they
 	// run.
 	Steers []Steer `json:"steers,omitempty"`
+	// Needs are the units that stopped for information their brief
+	// lacked: what each asked for, and what was supplied.
+	Needs []Needs `json:"needs,omitempty"`
+}
+
+// Needs is what a unit stopped for (NeedsInformation): a work-stopping
+// error in the pipeline, fixed by supplying it.
+type Needs struct {
+	Unit     int       `json:"unit"`
+	Name     string    `json:"name,omitempty"`
+	Text     string    `json:"text"`
+	Why      string    `json:"why,omitempty"`
+	At       time.Time `json:"at"`
+	Record   string    `json:"record,omitempty"`
+	Supplied string    `json:"supplied,omitempty"`
+	By       string    `json:"by,omitempty"`
 }
 
 // Steer is a message sent to a unit while it runs: delivered once it

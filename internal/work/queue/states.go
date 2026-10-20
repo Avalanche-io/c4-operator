@@ -261,6 +261,12 @@ func shownSlack(v *view, js sched.JobState, e *c4v1.WorkEstimate) (int64, bool) 
 func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagged int, gen int64) {
 	reason, msg := "", ""
 	switch {
+	case len(v.mem.openNeedsList()) > 0:
+		open := v.mem.openNeedsList()
+		reason, msg = c4v1.NeedsInformation, "needs information: "+v.mem.needs[open[0]].text
+		if len(open) > 1 {
+			msg = fmt.Sprintf("%d units need information the brief lacked, first: %s", len(open), v.mem.needs[open[0]].text)
+		}
 	case waiting > 0:
 		reason, msg = c4v1.NeedsFailed, fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", waiting)
 	case v.measureShort != "":

@@ -860,6 +860,37 @@ spec:
                   ModelUsage maps each model unit's index to its token use and cost
                   over all its attempts.
                 type: object
+              needs:
+                additionalProperties:
+                  description: WorkNeeds is what a unit stopped for.
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    by:
+                      type: string
+                    record:
+                      description: Record is the C4 ID of the signed record.
+                      type: string
+                    supplied:
+                      description: |-
+                        Supplied is the information a person supplied, and By who; the
+                        unit then runs again.
+                      type: string
+                    text:
+                      description: Text is the information it needs, and Why why it
+                        needs it.
+                      type: string
+                    why:
+                      type: string
+                  required:
+                  - at
+                  - text
+                  type: object
+                description: |-
+                  Needs holds, by unit index, what each unit that stopped for
+                  information its brief lacked asked for (NeedsInformation).
+                type: object
               observedGeneration:
                 format: int64
                 type: integer
@@ -1309,6 +1340,11 @@ spec:
                 - quantile
                 - state
                 type: object
+              supplied:
+                description: |-
+                  Supplied is the token of the last supply carried out
+                  (AnnotationSupply).
+                type: string
               unitMillis:
                 description: |-
                   UnitMillis is each finished unit's run time in milliseconds, by

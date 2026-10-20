@@ -893,3 +893,105 @@ func (s *Server) handleSteer(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, http.StatusOK, out)
 }
+
+// handleSupply gives a unit that stopped for information its brief lacked
+// (NeedsInformation) what it asked for: signed, then written as a request
+// in c4.avalanche.io/supply that the queue carries out once. The unit runs
+// again, resuming where it stopped, with the text in $C4_SUPPLIED.
+func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
+	_, rec, v := s.job(w, r)
+	if rec == nil {
+		return
+	}
+	var body struct {
+		Unit json.RawMessage `json:"unit"`
+		Text string          `json:"text"`
+	}
+	if err := decodeBody(r, &body); err != nil {
+		failBody(w, err)
+		return
+	}
+	var ref string
+	if err := json.Unmarshal(body.Unit, &ref); err != nil {
+		var n int
+		if err := json.Unmarshal(body.Unit, &n); err != nil {
+			fail(w, http.StatusBadRequest, "unit: a unit's name or index")
+			return
+		}
+		ref = strconv.Itoa(n)
+	}
+	if strings.TrimSpace(body.Text) == "" {
+		fail(w, http.StatusBadRequest, "text: the information the unit asked for")
+		return
+	}
+	if rec.plan == nil {
+		fail(w, http.StatusConflict, "the job has no units yet")
+		return
+	}
+	idx := -1
+	for i, u := range rec.plan.Units {
+		if u.Name != "" && u.Name == ref {
+			idx = i
+		}
+	}
+	if n, err := strconv.Atoi(ref); idx < 0 && err == nil && n >= 0 && n < len(rec.plan.Units) {
+		idx = n
+	}
+	need, ok := rec.job.Status.Needs[strconv.Itoa(idx)]
+	if idx < 0 || !ok || unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx] != "failed" {
+		fail(w, http.StatusConflict, "unit %q is not waiting for information", ref)
+		return
+	}
+	ctx := r.Context()
+	if err := s.authorize(ctx, r, v, rec.job.Namespace, "patch", "workjobs", rec.job.Name); err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
+	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
+	if err != nil {
+		fail(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
+	if j.Annotations == nil {
+		j.Annotations = map[string]string{}
+	}
+	now := time.Now()
+	unit := rec.plan.Units[idx].Name
+	if unit == "" {
+		unit = strconv.Itoa(idx)
+	}
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "supply", map[string]any{"unit": unit, "needed": need.Text, "text": body.Text})
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
+	var reqs []c4v1.WorkSupplyRequest
+	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationSupply]), &reqs)
+	reqs = append(reqs, c4v1.WorkSupplyRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Text: body.Text,
+		Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
+	if len(reqs) > 16 {
+		reqs = reqs[len(reqs)-16:]
+	}
+	b, _ := json.Marshal(reqs)
+	j.Annotations[c4v1.AnnotationSupply] = string(b)
+	if err := s.Client.Patch(ctx, j, patch); err != nil {
+		fail(w, http.StatusConflict, "%v", err)
+		return
+	}
+	msg := fmt.Sprintf("%s: %s has what it needed and runs again", j.Name, unit)
+	note := msg
+	if id != "" {
+		note += "; record " + shortID(id)
+	}
+	if via(r) == "mcp" {
+		note += "; via MCP"
+	}
+	s.record(ctx, j, "WorkJob", v.User, "Supplied", note, bookNote{actor: actorOf(r, v), kind: "supply", record: id})
+	out := map[string]any{"ok": true, "message": msg}
+	if id != "" {
+		out["record"] = id
+	}
+	writeJSON(w, http.StatusOK, out)
+}

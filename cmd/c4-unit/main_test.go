@@ -295,3 +295,21 @@ func TestSteer(t *testing.T) {
 		t.Fatalf("json: %d %q", c, buf.String())
 	}
 }
+
+// A unit that lacks information only a person could give says what it
+// needs in its termination message and exits 12.
+func TestNeeds(t *testing.T) {
+	log := filepath.Join(t.TempDir(), "termination-log")
+	e := vars(map[string]string{"C4_TERMINATION_LOG": log})
+	var buf bytes.Buffer
+	c, err := run([]string{"needs", "--what", "the delivery frame rate", "--why", "the brief gives 24 and 25"}, &buf, e)
+	if c != needsCode || err != nil {
+		t.Fatalf("needs: %d %v", c, err)
+	}
+	if b, _ := os.ReadFile(log); string(b) != "the delivery frame rate\nwhy: the brief gives 24 and 25" {
+		t.Fatalf("termination message %q", b)
+	}
+	if c, _ := run([]string{"needs"}, &buf, e); c != 2 {
+		t.Fatalf("no --what: %d", c)
+	}
+}

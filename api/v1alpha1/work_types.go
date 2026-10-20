@@ -110,6 +110,12 @@ const (
 	// AnnotationSteerSeen on a unit pod is the number of the last message
 	// its unit read, relayed from the unit's .c4/steer-seen.
 	AnnotationSteerSeen = "c4.avalanche.io/steer-seen"
+	// AnnotationSupply on a WorkJob carries information people supply to
+	// units that stopped for it (NeedsInformation): a JSON list of
+	// WorkSupplyRequest. The queue carries out each once, in token order
+	// (status.supplied): the unit runs again with the text in
+	// $C4_SUPPLIED, resuming where it stopped.
+	AnnotationSupply = "c4.avalanche.io/supply"
 	// AnnotationPreflight on a unit pod reports the step it is preparing
 	// before the work starts: JSON {"step": "stage" | "fetch" | "image" |
 	// "license", "bytes": n, "of": n}. The node daemon and the class
@@ -351,6 +357,14 @@ type WorkJobStatus struct {
 	// (reworked, escalated, accepted with a note) to what it decided last.
 	// +optional
 	Reviews map[string]WorkReview `json:"reviews,omitempty"`
+	// Needs holds, by unit index, what each unit that stopped for
+	// information its brief lacked asked for (NeedsInformation).
+	// +optional
+	Needs map[string]WorkNeeds `json:"needs,omitempty"`
+	// Supplied is the token of the last supply carried out
+	// (AnnotationSupply).
+	// +optional
+	Supplied string `json:"supplied,omitempty"`
 	// Requeued is the token of the last requeue request carried out.
 	// +optional
 	Requeued string `json:"requeued,omitempty"`
@@ -1054,6 +1068,49 @@ type WorkDecideRequest struct {
 	// for one: the wait unit's output, which the units it holds up mount.
 	// +optional
 	View string `json:"view,omitempty"`
+}
+
+// NeedsInformation is the reason of a unit attempt that stopped because
+// its brief lacked information only a person could give: a work-stopping
+// error, not a question (agent-jobs ASKS.md). Its container exits
+// NeedsExitCode with the missing information as its termination message
+// (c4-unit needs), or a host runner sets the pod's status reason. The
+// unit fails without a retry, and runs again once the information is
+// supplied (AnnotationSupply).
+const (
+	NeedsInformation = "NeedsInformation"
+	NeedsExitCode    = 12
+)
+
+// WorkNeeds is what a unit stopped for.
+type WorkNeeds struct {
+	// Text is the information it needs, and Why why it needs it.
+	Text string `json:"text"`
+	// +optional
+	Why string      `json:"why,omitempty"`
+	At  metav1.Time `json:"at"`
+	// Record is the C4 ID of the signed record.
+	// +optional
+	Record string `json:"record,omitempty"`
+	// Supplied is the information a person supplied, and By who; the
+	// unit then runs again.
+	// +optional
+	Supplied string `json:"supplied,omitempty"`
+	// +optional
+	By string `json:"by,omitempty"`
+}
+
+// WorkSupplyRequest supplies the information a unit stopped for.
+type WorkSupplyRequest struct {
+	// Token makes each request distinct; requests are carried out in
+	// token order (base-36 nanoseconds).
+	Token string      `json:"token"`
+	Unit  string      `json:"unit"`
+	Text  string      `json:"text"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// +optional
+	Record string `json:"record,omitempty"`
 }
 
 // MaxSteerText bounds a message to a running unit, in bytes.

@@ -195,6 +195,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.Decided, st.Waits = m.waitRecs().decided, waitStatus(m, now)
 	st.Rounds = roundsStatus(m.plan, m, v.roundsExp)
 	st.Steered, st.Steers = m.steered, steerStatus(m)
+	st.Supplied, st.Needs = m.supplied, needsStatus(m)
 	taken := map[int]bool{}
 	for _, a := range st.Acks {
 		for _, i := range decode(a.Units) {
@@ -203,7 +204,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	waiting := 0
 	for _, i := range fail {
-		if !taken[i] {
+		// a unit that stopped for information is its own kind of stop
+		if !taken[i] && !m.openNeeds(i) {
 			waiting++
 		}
 	}

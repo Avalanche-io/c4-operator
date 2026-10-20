@@ -16,6 +16,10 @@
 //	c4-unit steer [--json]          print the messages sent to this unit since it
 //	                                last read them (a person steering it while it
 //	                                runs), and note them read; exit 1 if none
+//	c4-unit needs --what TEXT [--why TEXT]
+//	                                stop: the brief lacks information only a person
+//	                                could give (exit 12); the unit runs again, with
+//	                                it in $C4_SUPPLIED, once someone supplies it
 //	c4-unit decision                print the decision this attempt resumed with
 //	                                (JSON: seq, do, note, actor, at, view, reply),
 //	                                exit 1 if none
@@ -81,6 +85,9 @@ const (
 	yieldByAnnotation = "c4.avalanche.io/yield-by"
 	// stopCode is safepoint's exit status when the unit should stop.
 	stopCode = 10
+	// needsCode is the exit status of a unit that stopped for information
+	// its brief lacked (c4v1.NeedsExitCode).
+	needsCode = 12
 )
 
 func main() {
@@ -118,6 +125,8 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	choices := fs.String("choices", "", "with wait: the decisions that resume the unit besides approve, comma-separated (fail always may)")
 	reply := fs.Bool("reply", false, "with wait: the decision carries content, mounted at $C4_REPLY when the unit resumes")
 	expect := fs.Duration("expect", 0, "with wait: how long the decision is expected to take")
+	what := fs.String("what", "", "with needs: the information the brief lacks")
+	why := fs.String("why", "", "with needs: why it is needed, or why the brief does not settle it")
 	asJSON := fs.Bool("json", false, "with steer: print each message as a line of JSON {seq, at, actor, text}")
 	of := fs.Int64("of", 0, "with measure: the target (default the job's)")
 	name := fs.String("name", "", "with measure: what is counted (default the job's)")
@@ -274,6 +283,24 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 			return 1, nil
 		}
 		return 0, nil
+	case "needs":
+		if strings.TrimSpace(*what) == "" {
+			return 2, errors.New("usage: c4-unit needs --what TEXT [--why TEXT]")
+		}
+		msg := strings.TrimSpace(*what)
+		if *why != "" {
+			msg += "\nwhy: " + strings.TrimSpace(*why)
+		}
+		// The container's termination message is how the farm learns it.
+		path := e.get("C4_TERMINATION_LOG")
+		if path == "" {
+			path = "/dev/termination-log"
+		}
+		if err := os.WriteFile(path, []byte(msg), 0o644); err != nil {
+			return 1, err
+		}
+		fmt.Fprintln(stdout, "needs: "+strings.ReplaceAll(msg, "\n", "; "))
+		return needsCode, nil
 	case "decision":
 		d := e.get("C4_DECISION")
 		if d == "" {
@@ -308,7 +335,7 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		fmt.Fprintln(stdout, out)
 		return 0, nil
 	}
-	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, wait, steer, decision, resume-dir or output", cmd)
+	return 2, fmt.Errorf("no command %q: progress, preview, yield-requested, safepoint, wait, steer, needs, decision, resume-dir or output", cmd)
 }
 
 func code(err error) (int, error) {

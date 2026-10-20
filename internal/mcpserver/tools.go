@@ -102,6 +102,8 @@ func Tools(c *Client) []Tool {
 			idempotent, c.decide),
 		tool("c4_steer", "Send a message to a running unit", "Send a message to one unit of a job while it runs, without stopping it: a change of direction, a hint, a correction. The unit reads it at its next safe point (an agent block at the end of its turn). A unit not running yet gets it when it starts; a finished one takes none. Delivered and read status are in c4_job_detail's steers.",
 			idempotent, c.steer),
+		tool("c4_supply", "Supply what a unit stopped for", "Give a unit that stopped because its brief lacked information only a person could give (needsPerson reason needsinformation; the question is in c4_job_detail's needs) what it asked for. It runs again, resuming where it stopped, with the text. Signed and recorded in the book.",
+			idempotent, c.supply),
 		tool("c4_avoid_node", "Avoid or allow a node for a job", "Keep a job's units off a node (a bad worker for that job), or allow it again.",
 			idempotent, c.avoidNode),
 		tool("c4_disable_node", "Disable or enable a node", "Take a node out of service for the whole farm (running units finish) or put it back.",
@@ -702,6 +704,20 @@ func (c *Client) steer(ctx context.Context, _ *mcp.CallToolRequest, in SteerIn) 
 		return nil, Done{}, err
 	}
 	return c.control(ctx, p+"/steer", map[string]any{"unit": in.Unit, "text": in.Text})
+}
+
+type SupplyIn struct {
+	JobRef
+	Unit string `json:"unit" jsonschema:"the unit's name or index"`
+	Text string `json:"text" jsonschema:"the information it asked for"`
+}
+
+func (c *Client) supply(ctx context.Context, _ *mcp.CallToolRequest, in SupplyIn) (*mcp.CallToolResult, Done, error) {
+	p, err := in.path()
+	if err != nil {
+		return nil, Done{}, err
+	}
+	return c.control(ctx, p+"/supply", map[string]any{"unit": in.Unit, "text": in.Text})
 }
 
 type AvoidIn struct {

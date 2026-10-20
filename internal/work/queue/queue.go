@@ -258,6 +258,10 @@ type jobMem struct {
 	steered string
 	// toolsWait says why a unit waits for its tool profile (tools.go).
 	toolsWait string
+	// needs are what units stopped for, and supplied the last supply's
+	// token (needs.go).
+	needs     map[int]*needsRec
+	supplied  string
 	acks      []*ackRecord
 	acked     string
 	decisions []decisionRecord
@@ -337,6 +341,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.loadAcks(st)
 	m.loadWaits(st)
 	m.loadSteers(st)
+	m.loadNeeds(st)
 	m.loadLoops(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
@@ -692,6 +697,8 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	applyDecides(j, m, now)
 	// People steering units while they run (steer.go).
 	applySteers(j, m)
+	// People supplying what units stopped for (needs.go).
+	applySupplies(j, m)
 	// Nodes a person allowed again leave the automatic blacklist.
 	for _, n := range strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",") {
 		if n = strings.TrimSpace(n); n != "" && m.blacklist[n] {
@@ -883,6 +890,14 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			if !m.failed[idx] && !m.succeeded[idx] && !m.foldedPod[p.UID] {
 				m.interrupted(idx, p, interruptedBy(p), now)
 				m.foldedPod[p.UID] = true
+			}
+			v.done = append(v.done, p)
+		case p.Status.Phase == corev1.PodFailed && isNeeds(p):
+			// It stopped for information its brief lacked: no retry, no
+			// mark on the node (needs.go).
+			q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6)
+			if !m.failed[idx] && !m.succeeded[idx] && attemptOf(p) >= m.attempts[idx] {
+				q.noteNeeds(ctx, v, idx, p, d, now)
 			}
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed:
@@ -1569,6 +1584,11 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	}
 	if w := v.mem.blockDecision(idx); w != nil {
 		applyDecision(pod, j.Name, idx, w)
+	}
+	if e := suppliedEnv(v.mem, idx); e != nil {
+		for c := range pod.Spec.Containers {
+			pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, e...)
+		}
 	}
 	if r, ok := v.driver.(class.Resumer); ok && v.mem.resume[idx] != "" {
 		env = append(env, r.ResumeEnv(v.mem.resume[idx])...)

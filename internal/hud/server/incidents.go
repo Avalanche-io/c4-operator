@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -174,6 +175,29 @@ func incidents(m *model, v *api.Viewer, jobs []api.Job) []api.Incident {
 				Jobs: keys, Since: since, State: "open", Checklist: []api.IncidentStep{
 					{Label: "See what it holds up", Act: "Open", Href: "job/" + key(first)},
 					{Label: "Decide: approve, rework or accept", Act: "Decide", Href: "job/" + key(first)},
+				}})
+		case "needsinformation":
+			// A unit's brief lacked information only a person could give:
+			// a work-stopping error, fixed by supplying it.
+			var open []api.Needs
+			for _, n := range first.Needs {
+				if n.Supplied == "" {
+					open = append(open, n)
+				}
+			}
+			detail := g.cause
+			units := ""
+			if len(open) > 0 {
+				detail = open[0].Text
+				if open[0].Why != "" {
+					detail += " (" + open[0].Why + ")"
+				}
+				units = strconv.Itoa(open[0].Unit)
+			}
+			out = append(out, api.Incident{ID: g.reason + ":" + key(first), NeedsYou: true, Title: first.Name + " needs information its brief lacked",
+				Detail: detail, Count: max(len(open), 1), CountOf: "question", Jobs: keys, Since: since, State: "open", Checklist: []api.IncidentStep{
+					{Label: "See what it was doing", Act: "Open", Href: "job/" + key(first)},
+					{Label: "Supply the information; the unit resumes where it stopped", Act: "Supply", Action: "supply", Job: key(first), Units: units},
 				}})
 		default:
 			out = append(out, api.Incident{ID: g.reason + ":" + key(first), NeedsYou: true, Title: first.Name + " needs you", Detail: g.cause,

@@ -1721,6 +1721,23 @@ and a sweep planner that spawns trials are all generators.
     mounted read-only at `$C4_REPLY` (`/etc/c4/reply`). A unit that ends
     without stopping withdraws its wait. Each ask is in the book
     (`safepoint-wait`).
+  - **Missing information is an error, not a question** (Joshua, agent-jobs
+    ASKS.md). A unit acts on its brief and decides what the brief leaves
+    to it. When the brief lacks information only a person could give, the
+    unit stops with `NeedsInformation`.
+    - **Signal:** its container exits 12 with the information as its
+      termination message (`c4-unit needs --what [--why]`), or a host
+      runner sets the pod's status reason.
+    - **The unit fails at once,** without a retry (the same brief would
+      ask the same again) and without a mark on its node. It keeps what it
+      saved, and the job says what it needs: `status.needs[i]` and
+      NeedsPerson `NeedsInformation`, an incident of its own in the HUD.
+      The rest of the job goes on where it does not depend on the unit.
+    - **Supplying it** (`POST /jobs/{ns}/{name}/supply {unit, text}`, MCP
+      `c4_supply`, signed) runs the unit again, resuming where it stopped,
+      with the text in `$C4_SUPPLIED` and what it asked in `$C4_NEEDED`.
+    - **A person answering on purpose** (a creative approval) is a step
+      in the graph: a wait or a verdict, decided as above.
   - **Steering** (agent-catalog G-steer): a message to a unit while it
     runs, without ending it.
     - **Sending:** a person sends it with `POST /jobs/{ns}/{name}/steer
