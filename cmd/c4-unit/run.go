@@ -42,7 +42,6 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/schema"
-
 )
 
 const (
