@@ -1,0 +1,81 @@
+# A Thursday evening at Petrel & Finch: the wrangler's guide and the agent
+# operator's (c4-hud docs/start/roles/wrangler.md, agent-operator.md).
+#
+# Three shows share the local farm. A training run holds a GPU when the
+# commercial's lighting render needs both; one CPU node fails every
+# Saltmarsh frame it is given, which makes the sm0150 comp late; and a
+# series review runs early on a default deadline.
+#
+# Deadlines are offsets from the moment the scenario loads. Units are
+# stand-ins (standin.sh): each takes the time below and writes
+# placeholder files.
+name: evening
+title: an evening at Petrel & Finch
+summary: three shows, a training run on the GPUs, and a CPU node that fails Saltmarsh's frames
+projects:
+  - {name: copperline, title: "Copperline, season 1 (series)", lateCostPerHour: "90"}
+  - {name: glassworks, title: "Glassworks (commercial)", lateCostPerHour: "200"}
+
+# the bad node: every Saltmarsh lighting frame given to it fails
+defs:
+  heron: &heron {node: c4-local-worker2, after: 41, message: "read /show/geo/heron.usdc: input/output error"}
+
+jobs:
+  - name: style-train-v003
+    project: saltmarsh
+    as: artist
+    type: lora
+    shot: style
+    reads: [frames/README, models/tiny-sd/README]
+    steps: 1500
+    stepSeconds: 4
+    checkpointEvery: 100
+    due: +38h
+  - name: gw010-light-v007
+    project: glassworks
+    as: wrangler
+    type: render
+    shot: gw010
+    reads: [gw010.usda, geo/car.usdc]
+    frames: 1001-1060
+    pools: [gpu]
+    frameSeconds: 140
+    due: +1h30m
+  - name: ep102-sh030-review-v001
+    project: copperline
+    as: wrangler
+    type: transcode
+    shot: ep102-sh030
+    reads: [comp/ep102-sh030.1001.exr]
+    frames: 1001-1072
+    frameSeconds: 5
+    due: +2h
+  - name: sm0150-light-v004
+    project: saltmarsh
+    as: artist
+    type: render
+    shot: sm0150
+    reads: [sm0150.usda, geo/heron.usdc, geo/reeds.usdc]
+    frames: 1001-1096
+    frameSeconds: 208
+    fail: *heron
+    due: +2h50m
+  - name: sm0150-comp-v002
+    project: saltmarsh
+    as: artist
+    type: comp
+    shot: sm0150
+    reads: [comp.sh]
+    after: [sm0150-light-v004]
+    frames: 1001-1096
+    frameSeconds: 20
+    due: +3h
+  - name: sm0160-light-v001
+    project: saltmarsh
+    as: artist
+    type: render
+    shot: sm0160
+    reads: [sm0160.usda, geo/heron.usdc]
+    frames: 1001-1048
+    frameSeconds: 208
+    fail: *heron

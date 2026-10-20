@@ -201,6 +201,27 @@ func upload(ctx context.Context, c *Client, project, root string, v *view.View, 
 	return int(sent.Load()), bytes.Load(), first
 }
 
+// recordView records a tree whose objects the farm has as a view, and
+// checks the farm names it as this machine does.
+func recordView(ctx context.Context, c *Client, project string, v *view.View) error {
+	files := make([]api.ViewFile, 0, len(v.Files))
+	for _, f := range v.Files {
+		files = append(files, api.ViewFile{Path: f.Path, ID: f.ID.String(), Size: f.Size, Exec: f.Exec})
+	}
+	req := api.ViewRequest{Files: files, Dirs: v.EmptyDirs()}
+	for _, l := range v.Symlinks {
+		req.Links = append(req.Links, api.ViewLink{Path: l.Path, Target: l.Target})
+	}
+	var vr api.ViewResponse
+	if err := c.Do(ctx, "POST", "/views/"+project, req, &vr); err != nil {
+		return fmt.Errorf("recording the tree: %w", err)
+	}
+	if vr.View != v.ID.String() {
+		return fmt.Errorf("the farm named the tree %s, this machine %s", vr.View, v.ID)
+	}
+	return nil
+}
+
 // Submit plans a job from a type and an asset, shows the plan, and on
 // confirmation uploads what the farm lacks and submits it.
 func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitResponse, error) {
@@ -344,20 +365,8 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	if err != nil {
 		return nil, err
 	}
-	var vr api.ViewResponse
-	files := make([]api.ViewFile, 0, len(v.Files))
-	for _, f := range v.Files {
-		files = append(files, api.ViewFile{Path: f.Path, ID: f.ID.String(), Size: f.Size, Exec: f.Exec})
-	}
-	vreq := api.ViewRequest{Files: files, Dirs: v.EmptyDirs()}
-	for _, l := range v.Symlinks {
-		vreq.Links = append(vreq.Links, api.ViewLink{Path: l.Path, Target: l.Target})
-	}
-	if err := c.Do(ctx, "POST", "/views/"+a.Project, vreq, &vr); err != nil {
-		return nil, fmt.Errorf("recording the tree: %w", err)
-	}
-	if vr.View != v.ID.String() {
-		return nil, fmt.Errorf("the farm named the tree %s, this machine %s", vr.View, v.ID)
+	if err := recordView(ctx, c, a.Project, v); err != nil {
+		return nil, err
 	}
 	if sent > 0 {
 		o.printf("uploaded  %s · %s\n", plural(sent, "file", "files"), Bytes(sentBytes))

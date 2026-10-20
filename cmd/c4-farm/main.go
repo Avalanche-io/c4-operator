@@ -42,6 +42,7 @@ Farms
 
 Work
   samples get [SET]        download the sample shots and repositories to ~/c4-samples
+  samples load [NAME]      load a guide's scenario onto the local farm (no NAME lists them)
   types                    the prebuilt job types
   submit TYPE ASSET        plan a job, show the estimate, and submit it
   ls                       the queue, in run order (--mine, --at-risk, --all)
@@ -486,8 +487,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
+		if len(pos) > 0 && pos[0] == "load" {
+			return loadScenario(ctx, stdout, cfg, cm.utc, pos[1:])
+		}
 		if len(pos) == 0 || pos[0] != "get" {
-			return errors.New("usage: c4 farm samples get [SET] [--dir DIR] [--from ARCHIVE]")
+			return errors.New("usage: c4 farm samples get [SET] [--dir DIR] [--from ARCHIVE], or c4 farm samples load [SCENARIO]")
 		}
 		set := ""
 		if len(pos) > 1 {

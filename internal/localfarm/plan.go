@@ -183,6 +183,45 @@ func Site(o Options) []byte {
 	return b
 }
 
+// ProjectSpec is one project of the local farm.
+type ProjectSpec struct {
+	Name, Title string
+	// BurstBudgetPerDay and LateCostPerHour are dollars; empty takes the
+	// local farm's (20 and 40).
+	BurstBudgetPerDay, LateCostPerHour string
+}
+
+// Store is where a project's objects go: one Garage bucket, a key prefix
+// per project (Saltmarsh's is c4/).
+func (p ProjectSpec) Store() string {
+	prefix := p.Name
+	if p.Name == Project {
+		prefix = "c4"
+	}
+	return "s3://quickstart/" + prefix + "/?endpoint=http://garage-s3.c4-store:3900"
+}
+
+// ProjectObjects are a project's namespace and Project.
+func ProjectObjects(p ProjectSpec) []obj {
+	budget, late := p.BurstBudgetPerDay, p.LateCostPerHour
+	if budget == "" {
+		budget = "20"
+	}
+	if late == "" {
+		late = "40"
+	}
+	return []obj{
+		{"apiVersion": "v1", "kind": "Namespace", "metadata": meta(p.Name, "labels",
+			obj{"pod-security.kubernetes.io/enforce": "restricted", "c4.avalanche.io/studio": "petrel-finch"})},
+		{"apiVersion": "c4.avalanche.io/v1alpha1", "kind": "Project", "metadata": meta(p.Name, "annotations",
+			obj{"c4.avalanche.io/title": p.Title}),
+			"spec": obj{"namespaces": []string{p.Name}, "isolation": "Strict",
+				"store": obj{"access": "Tiered", "credentialsSecretRef": obj{"name": "local-store"},
+					"shards": []obj{{"name": "s0", "url": p.Store()}}},
+				"work": obj{"burstBudgetPerDay": budget, "lateCostPerHour": late}}},
+	}
+}
+
 // Farm is everything applied after the operator and the store, in order:
 // the store's credentials, the project and its namespace, the pools, the
 // HUD's NodePort and the site for the map.
@@ -190,15 +229,8 @@ func Farm(o Options) []obj {
 	out := []obj{
 		{"apiVersion": "v1", "kind": "Secret", "metadata": meta("local-store", "namespace", "c4-system"),
 			"stringData": obj{"AWS_ACCESS_KEY_ID": quickstart.StoreKey, "AWS_SECRET_ACCESS_KEY": quickstart.StoreSecret}},
-		{"apiVersion": "v1", "kind": "Namespace", "metadata": meta(Project, "labels",
-			obj{"pod-security.kubernetes.io/enforce": "restricted", "c4.avalanche.io/studio": "petrel-finch"})},
-		{"apiVersion": "c4.avalanche.io/v1alpha1", "kind": "Project", "metadata": meta(Project, "annotations",
-			obj{"c4.avalanche.io/title": "Saltmarsh (feature), Petrel & Finch"}),
-			"spec": obj{"namespaces": []string{Project}, "isolation": "Strict",
-				"store": obj{"access": "Tiered", "credentialsSecretRef": obj{"name": "local-store"},
-					"shards": []obj{{"name": "s0", "url": "s3://quickstart/c4/?endpoint=http://garage-s3.c4-store:3900"}}},
-				"work": obj{"burstBudgetPerDay": "20", "lateCostPerHour": "40"}}},
 	}
+	out = append(out, ProjectObjects(ProjectSpec{Name: Project, Title: "Saltmarsh (feature), Petrel & Finch"})...)
 	for _, p := range Pools {
 		spec := obj{"nodeSelector": obj{"c4.avalanche.io/pool": p.Name}, "slotsPerNode": p.SlotsPerNode,
 			"costPerSlotHour": p.CostPerSlotHour, "attributes": p.Attributes}

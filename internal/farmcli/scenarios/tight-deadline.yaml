@@ -1,0 +1,60 @@
+# A tight afternoon for one delivery: the supervisor's guide (c4-hud
+# docs/start/roles/supervisor.md).
+#
+# sm0170's client movie is due in three hours. It waits on a comp, which
+# waits on a lighting render on the two GPU slots and on depth mattes;
+# the render alone takes about 3h20m there, so the movie will miss by
+# about 50 minutes. Rented cloud GPUs would close it, but Saltmarsh's
+# burst budget is $3.00 today, under their price, so the farm asks for
+# approval.
+#
+# Deadlines are offsets from the moment the scenario loads. Units are
+# stand-ins (standin.sh): each takes the time below and writes
+# placeholder files.
+name: tight-deadline
+title: a tight afternoon for sm0170
+summary: one delivery that will miss on the GPUs it has, and a burst over the day's budget
+budgets: {saltmarsh: "3"}
+
+jobs:
+  - name: sm0170-light-v002
+    project: saltmarsh
+    as: supervisor
+    type: render
+    shot: sm0170
+    reads: [sm0170.usda, geo/heron.usdc, geo/marsh.usdc]
+    frames: 1001-1096
+    pools: [gpu]
+    frameSeconds: 249
+  - name: sm0170-depth-v001
+    project: saltmarsh
+    as: supervisor
+    type: infer
+    shot: sm0170
+    reads: [plates/sm0170.1001.exr]
+    frames: 1001-1096
+    frameSeconds: 15
+    aiUsage:
+      generated: generated
+      model: Depth Anything V2 Small
+      oversight: human_validated
+      consent: [saltmarsh-plates-release-2026-08]
+  - name: sm0170-comp-v001
+    project: saltmarsh
+    as: supervisor
+    type: comp
+    shot: sm0170
+    reads: [comp.sh]
+    after: [sm0170-light-v002, sm0170-depth-v001]
+    frames: 1001-1096
+    frameSeconds: 62
+  - name: sm0170-review-v001
+    project: saltmarsh
+    as: supervisor
+    type: transcode
+    shot: sm0170
+    reads: [review/README]
+    after: [sm0170-comp-v001]
+    frames: 1001-1096
+    frameSeconds: 5
+    due: +3h

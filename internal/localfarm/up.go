@@ -118,18 +118,7 @@ func Up(ctx context.Context, o UpOptions) error {
 			}
 		}
 	}
-	kc, err := p.KubeConfig(name, false)
-	if err != nil {
-		return err
-	}
-	rc, err := clientcmd.RESTConfigFromKubeConfig([]byte(kc))
-	if err != nil {
-		return err
-	}
-	// The client logs nothing a user should see; without a logger it
-	// prints a warning and a stack trace.
-	ctrllog.SetLogger(logr.Discard())
-	c, err := client.New(rc, client.Options{})
+	c, err := kubeClient(name)
 	if err != nil {
 		return err
 	}
@@ -175,6 +164,22 @@ func Up(ctx context.Context, o UpOptions) error {
 		}
 	}
 	return waitHUD(ctx, o.HUD(), 2*time.Minute)
+}
+
+// kubeClient is a client for the local farm's cluster.
+func kubeClient(name string) (client.Client, error) {
+	kc, err := cluster.NewProvider().KubeConfig(name, false)
+	if err != nil {
+		return nil, err
+	}
+	rc, err := clientcmd.RESTConfigFromKubeConfig([]byte(kc))
+	if err != nil {
+		return nil, err
+	}
+	// The client logs nothing a user should see; without a logger it
+	// prints a warning and a stack trace.
+	ctrllog.SetLogger(logr.Discard())
+	return client.New(rc, client.Options{})
 }
 
 // Down deletes the local farm.
