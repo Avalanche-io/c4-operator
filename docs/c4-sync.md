@@ -99,6 +99,14 @@ Each Tracker says:
   never submits the job as its own instead. `c4 farm grants --tracker
   <ns>/<tracker>` shows who has granted it; `c4 farm revoke` takes a grant
   back. Without `for`, the jobs are c4-sync's;
+- `as: forecast` with `forecast`: an entity not yet ready (a shot not
+  turned over) becomes a forecast job, `<job>-forecast`. It never runs, but
+  the farm plans for it and shows its risk. Its size is `slotHours`, or
+  the entity's own estimate times `perUnit` (Flow's bid:
+  `{field: est_in_mins, perUnit: "0.05"}` for 3 slot-minutes per bid
+  minute), or, with neither, the class's plan of the job's params. Nothing
+  is written to the tracker for it. When a job rule matches the entity
+  later, the real job replaces the forecast and the link moves to it;
 - `review.wait`: the job's wait that the tracker's decision serves. With
   `job.review` (the job's own final review, `@review`, after all its
   work), leave it out: the tracker serves that one, and the job is done

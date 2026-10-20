@@ -2210,8 +2210,12 @@ class's own plan of its params.
   `count`, `done` and `risk` stay the real work's; `forecastRisk` is the
   worst once the forecast work comes, the forecast jobs' and the covered
   real jobs' as the forecast pass plans them.
-- A job is a forecast, or not, from when it is created, and a real job
-  replaces it; its size may change as the bid does.
+- A job is a forecast, or not, from when it is created; its size may
+  change as the bid does. A real job replaces it (`POST /jobs`
+  `replaces`), and the forecast is deleted and booked.
+- c4-sync makes forecasts from tracker entities that aren't ready yet
+  (`as: forecast`, sized by a bid field), and replaces each with the real
+  job when a job rule matches the entity.
 
 The scheduler expresses demand as **CapacityRequest** objects, one per pool.
 Actuators turn them into the platform's own APIs:

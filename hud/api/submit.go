@@ -106,6 +106,10 @@ type SubmitRequest struct {
 	// identity under the grant that person gave the Tracker TrackerRef
 	// names: the person owns the job (integrations GAPS 17).
 	For string `json:"for,omitempty"`
+	// Replaces names the forecast job in the namespace this real job
+	// replaces (spec.forecast, integrations GAPS 9): it is deleted once
+	// this one is made, and the book says so.
+	Replaces string `json:"replaces,omitempty"`
 }
 
 // SubmitEstimate is what the farm expects of a job before it runs.

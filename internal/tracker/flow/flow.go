@@ -344,7 +344,7 @@ func (a *Adapter) read(ctx context.Context, typ string, id string, fields []stri
 
 // --- reading ---
 
-var taskFields = []string{"content", "due_date", "sg_status_list", "entity", "step", "project", "task_assignees", "updated_at"}
+var taskFields = []string{"content", "due_date", "sg_status_list", "entity", "step", "project", "task_assignees", "updated_at", "est_in_mins"}
 
 func (a *Adapter) taskItem(r record) tracker.Item {
 	it := tracker.Item{
@@ -368,6 +368,11 @@ func (a *Adapter) taskItem(r record) tracker.Item {
 	}
 	if s := r.link("step"); s != nil {
 		it.Fields["step"] = s.Name
+	}
+	// The bid, in minutes: a forecast's size (GAPS 9).
+	var bid float64
+	if json.Unmarshal(r.Attributes["est_in_mins"], &bid) == nil && bid > 0 {
+		it.Fields["est_in_mins"] = strconv.FormatFloat(bid, 'f', -1, 64)
 	}
 	return it
 }

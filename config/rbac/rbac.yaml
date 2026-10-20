@@ -202,6 +202,11 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [workjobs, materializations]
   verbs: [create]
+# A real job replacing a forecast deletes the forecast (GAPS 9), after the
+# same check as the real job's.
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs]
+  verbs: [delete]
 - apiGroups: [""]
   resources: [pods/log]
   verbs: [get]

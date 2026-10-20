@@ -47,6 +47,8 @@ type JobRequest struct {
 	// The HUD refuses it without a grant (403), or when it takes none
 	// (501): never c4-sync's own job instead.
 	For string
+	// Replaces is the forecast job this real job replaces (GAPS 9).
+	Replaces string
 }
 
 // Relay is a decision made in a tracker, relayed to a wait (GAPS 3).
@@ -205,7 +207,7 @@ func (h *HUD) Submit(ctx context.Context, r JobRequest) (JobRef, error) {
 		return JobRef{}, err
 	}
 	in := api.SubmitRequest{Namespace: r.Namespace, Name: r.Name, Type: "tracker", Spec: spec, Inputs: r.Inputs,
-		TrackerRef: r.TrackerRef, Follows: r.Follows, For: r.For}
+		TrackerRef: r.TrackerRef, Follows: r.Follows, For: r.For, Replaces: r.Replaces}
 	var out api.SubmitResponse
 	err = h.doJSON(ctx, http.MethodPost, "/jobs", in, &out)
 	var ae *APIError

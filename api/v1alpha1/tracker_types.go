@@ -130,9 +130,12 @@ type TrackerRate struct {
 type TrackerIntake struct {
 	// Match selects entities.
 	Match TrackerMatch `json:"match"`
-	// As is job (the entity becomes a WorkJob) or milestone (it becomes a
-	// Milestone, whose due date the jobs it covers take).
-	// +kubebuilder:validation:Enum=job;milestone
+	// As is job (the entity becomes a WorkJob), milestone (it becomes a
+	// Milestone, whose due date the jobs it covers take) or forecast (it
+	// becomes a forecast job, integrations GAPS 9: work the farm plans for
+	// before it is ready; when a job rule matches the entity later, the
+	// real job replaces it).
+	// +kubebuilder:validation:Enum=job;milestone;forecast
 	As string `json:"as"`
 	// Job is the WorkJob spec a matched entity is submitted with. Its
 	// deadline and deadline mode are set from Deadline.
@@ -158,6 +161,11 @@ type TrackerIntake struct {
 	// c4-sync's.
 	// +optional
 	For *TrackerFor `json:"for,omitempty"`
+	// Forecast sizes the forecast jobs an `as: forecast` rule makes:
+	// slot-hours as given, or from a field of the entity (a bid) times
+	// PerUnit. Without either the class plans it from the job's params.
+	// +optional
+	Forecast *TrackerForecast `json:"forecast,omitempty"`
 	// Rework is what a rework decision does: inPlace (default: the job's
 	// units run again, as in CI and agent work) or nextVersion (a new job
 	// follows this one with the note as an input, as v008 follows v007 in
@@ -165,6 +173,22 @@ type TrackerIntake struct {
 	// +kubebuilder:validation:Enum=inPlace;nextVersion
 	// +optional
 	Rework string `json:"rework,omitempty"`
+}
+
+// TrackerForecast is how big a forecast job is.
+type TrackerForecast struct {
+	// SlotHours is the work, the same for every entity.
+	// +optional
+	SlotHours string `json:"slotHours,omitempty"`
+	// Field names the entity's own estimate (Flow: est_in_mins, the bid
+	// in minutes), and PerUnit how many slot-hours one unit of it is.
+	// +optional
+	Field string `json:"field,omitempty"`
+	// +optional
+	PerUnit string `json:"perUnit,omitempty"`
+	// UnitHours is the longest single unit (the critical path).
+	// +optional
+	UnitHours string `json:"unitHours,omitempty"`
 }
 
 // TrackerFor names whose work an intake rule's jobs are: one person, or

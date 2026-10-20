@@ -760,6 +760,11 @@ grant's record. It is refused, never created as the caller's own job:
 Tracker in the namespace, the person has no grant to it, the grant was
 revoked or has ended, or it does not cover the job's pools or class;
 `400` without `trackerRef`; `501` on a farm without grants installed.
+`replaces` names a forecast job (`spec.forecast`) in the namespace that
+this real job replaces: once the job is made, the forecast is deleted and
+booked (kind `replaced`). Only a forecast is replaced, and only by a real
+job (`400` otherwise). A forecast is submitted with no container, since
+it never runs.
 
 `estimate` is what the queue expects of the job against the farm as it last
 planned it. `slackSeconds` is the deadline less `eta90` (`eta95` for a

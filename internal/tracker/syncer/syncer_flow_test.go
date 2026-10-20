@@ -564,3 +564,53 @@ func TestFlowCauseNote(t *testing.T) {
 		t.Fatalf("cause notes: %d", found)
 	}
 }
+
+// A Task not yet ready is a forecast job sized by its bid; nothing is
+// written to Flow for it. When the Task is ready, the real job replaces
+// the forecast and the link moves to it.
+func TestFlowForecastThenReal(t *testing.T) {
+	e := setupFlow(t)
+	e.site.Set(e.task, map[string]any{"sg_status_list": "wtg", "est_in_mins": 600}, e.dana)
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	real := tr.Spec.Intake[0]
+	fc := *real.DeepCopy()
+	fc.As, fc.Review, fc.Rework = "forecast", nil, ""
+	fc.Match.Fields = map[string]string{"sg_status_list": "wtg", "step.Step.short_name": "LGT"}
+	fc.Forecast = &c4v1.TrackerForecast{Field: "est_in_mins", PerUnit: "0.05", UnitHours: "1"}
+	tr.Spec.Intake = []c4v1.TrackerIntake{fc, real}
+	if err := e.k8s.Update(context.Background(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	tid := strconv.Itoa(e.task.ID)
+	if len(e.farm.Submitted) != 1 {
+		t.Fatalf("submitted %d", len(e.farm.Submitted))
+	}
+	f := e.farm.Submitted[0]
+	if f.Name != "flow-"+tid+"-forecast" || f.Spec.Forecast == nil || f.Spec.Forecast.SlotHours != "30" || f.Replaces != "" {
+		t.Fatalf("the forecast: %+v", f)
+	}
+	if got := e.site.Get("Task", e.task.ID); got["sg_status_list"] != "wtg" || got["sg_c4_eta"] != nil {
+		t.Fatalf("Flow was written for a forecast: %v", got)
+	}
+	if l := e.link(); l.Spec.Target.WorkJob != f.Name || l.Spec.Intake != 0 {
+		t.Fatalf("link: %+v", l.Spec)
+	}
+
+	e.clock.add(time.Minute)
+	e.site.Set(e.task, map[string]any{"sg_status_list": "rdy"}, e.dana)
+	e.pass()
+	if len(e.farm.Submitted) != 2 {
+		t.Fatalf("submitted %d", len(e.farm.Submitted))
+	}
+	r := e.farm.Submitted[1]
+	if r.Name != "flow-"+tid || r.Replaces != f.Name || r.Spec.Forecast != nil {
+		t.Fatalf("the real job: %+v", r)
+	}
+	if l := e.link(); l.Spec.Target.WorkJob != r.Name || l.Spec.Intake != 1 {
+		t.Fatalf("link after: %+v", l.Spec)
+	}
+}

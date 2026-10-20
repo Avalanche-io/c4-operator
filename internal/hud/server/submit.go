@@ -547,7 +547,8 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "spec.class is required: render, ci or ml")
 		return
 	}
-	if len(spec.Template.Spec.Containers) == 0 {
+	if len(spec.Template.Spec.Containers) == 0 && spec.Forecast == nil {
+		// A forecast never runs: it needs no image yet.
 		fail(w, http.StatusBadRequest, "spec.template needs a container: the image each unit runs")
 		return
 	}
@@ -625,6 +626,22 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		spec.Follows = body.Follows
+	}
+	var replaced *c4v1.WorkJob
+	if body.Replaces != "" {
+		f, err := s.liveJob(ctx, ns, body.Replaces)
+		switch {
+		case err != nil:
+			fail(w, http.StatusBadRequest, "replaces %q: no such job in %s", body.Replaces, ns)
+			return
+		case f.Spec.Forecast == nil:
+			fail(w, http.StatusBadRequest, "replaces %q: it is a real job, not a forecast", body.Replaces)
+			return
+		case spec.Forecast != nil:
+			fail(w, http.StatusBadRequest, "replaces %q: a forecast replaces nothing; a real job replaces a forecast", body.Replaces)
+			return
+		}
+		replaced = f
 	}
 	if spec.Deadline == nil && spec.DeadlineMode == "" {
 		spec.DeadlineMode = "Suggested"
@@ -741,6 +758,15 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		note += "; via MCP"
 	}
 	s.record(ctx, job, "WorkJob", v.User, "Submitted", note, bookNote{actor: actorOf(r, v), kind: "submit"})
+	if replaced != nil {
+		// The forecast's work is this job now (GAPS 9).
+		if err := s.Client.Delete(ctx, replaced); err != nil && !apierrors.IsNotFound(err) {
+			s.Log.Error(err, "delete the replaced forecast", "job", ns+"/"+replaced.Name)
+		} else {
+			s.record(ctx, replaced, "WorkJob", v.User, "Replaced", fmt.Sprintf("%s: replaced by %s", replaced.Name, name),
+				bookNote{actor: actorOf(r, v), kind: "replaced"})
+		}
+	}
 	out.Message = msg
 	writeJSON(w, http.StatusCreated, out)
 }

@@ -534,17 +534,33 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 			return nil
 		}
 		return s.ensureMilestone(ctx, t, idx, rule, it, *due)
-	case "job":
+	case "job", "forecast":
 	default:
 		return fmt.Errorf("intake %d: as %q", idx, rule.As)
 	}
 	if rule.Job == nil {
-		return fmt.Errorf("intake %d: as job needs a job spec", idx)
+		return fmt.Errorf("intake %d: as %s needs a job spec", idx, rule.As)
 	}
 	jr := farm.JobRef{Namespace: t.Namespace, Name: JobName(t.Name, it.Ref)}
-	if l == nil {
+	if rule.As == "forecast" {
+		jr.Name = dns(jr.Name + "-forecast")
+	}
+	replaces := ""
+	if l != nil && rule.As == "job" && l.Spec.Intake != int32(idx) && int(l.Spec.Intake) < len(t.Spec.Intake) &&
+		t.Spec.Intake[l.Spec.Intake].As == "forecast" {
+		// The entity was a forecast and is ready now: the real job
+		// replaces it, and the link moves to it.
+		replaces = l.Spec.Target.WorkJob
+	}
+	if l != nil && rule.As == "forecast" && int(l.Spec.Intake) < len(t.Spec.Intake) && t.Spec.Intake[l.Spec.Intake].As == "job" {
+		return s.followDue(ctx, l, t.Spec.Intake[l.Spec.Intake], it) // already real
+	}
+	if l == nil || replaces != "" {
 		spec := *rule.Job.DeepCopy()
 		spec.Deadline, spec.DeadlineMode = nil, ""
+		if rule.As == "forecast" {
+			spec.Forecast = forecastOf(rule, it)
+		}
 		if due != nil {
 			spec.Deadline = &metav1.Time{Time: *due}
 			spec.DeadlineMode = "Tracking"
@@ -570,7 +586,7 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 			}
 			var err error
 			got, err = s.Farm.Submit(ctx, farm.JobRequest{Namespace: jr.Namespace, Name: jr.Name, Spec: spec,
-				TrackerRef: t.Name + "/" + it.Ref.String(), For: person})
+				TrackerRef: t.Name + "/" + it.Ref.String(), For: person, Replaces: replaces})
 			if refused(err) {
 				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "NoGrant", noGrant(person, err))
 				return nil
@@ -581,6 +597,11 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 			if person != "" {
 				s.clearTrackerCond(ctx, t, CondIntake, "NoGrant", "Granted", person+" lets this tracker submit work for them")
 			}
+		}
+		if replaces != "" {
+			before := l.DeepCopy()
+			l.Spec.Target.WorkJob, l.Spec.Intake = got.Name, int32(idx)
+			return s.Client.Patch(ctx, l, client.MergeFrom(before))
 		}
 		l = &c4v1.TrackerLink{
 			ObjectMeta: metav1.ObjectMeta{Namespace: t.Namespace, Name: LinkName(t.Name, it.Ref),
@@ -598,6 +619,26 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 		return nil
 	}
 	return s.followDue(ctx, l, rule, it)
+}
+
+// forecastOf sizes a forecast job from its rule: the entity's own
+// estimate times PerUnit, else the rule's slot-hours, else (empty) the
+// class's plan of the job's params.
+func forecastOf(rule c4v1.TrackerIntake, it tracker.Item) *c4v1.WorkForecast {
+	f := &c4v1.WorkForecast{}
+	r := rule.Forecast
+	if r == nil {
+		return f
+	}
+	f.SlotHours, f.UnitHours = r.SlotHours, r.UnitHours
+	if r.Field != "" {
+		v, err1 := strconv.ParseFloat(it.Fields[r.Field], 64)
+		per, err2 := strconv.ParseFloat(r.PerUnit, 64)
+		if err1 == nil && err2 == nil && v > 0 && per > 0 {
+			f.SlotHours = strconv.FormatFloat(v*per, 'f', -1, 64)
+		}
+	}
+	return f
 }
 
 // forPerson is whom an intake rule's job is for: "" for c4-sync's own
@@ -776,6 +817,12 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	var rule c4v1.TrackerIntake
 	if int(l.Spec.Intake) < len(t.Spec.Intake) {
 		rule = t.Spec.Intake[l.Spec.Intake]
+	}
+	if rule.As == "forecast" {
+		// A forecast never runs: nothing to tell the tracker but its date,
+		// which intake follows (GAPS 9).
+		s.setLinkCond(ctx, l, CondSynced, metav1.ConditionTrue, "Forecast", "a forecast job; the tracker hears from it once real work replaces it")
+		return nil
 	}
 	review := ""
 	switch {

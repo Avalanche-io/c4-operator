@@ -421,3 +421,46 @@ func TestSubmitIsStrict(t *testing.T) {
 		}
 	}
 }
+
+// A forecast is submitted with no image (it never runs); a real job
+// replaces it, and it is gone. Only a forecast is replaced, and only by a
+// real job.
+func TestSubmitReplacesAForecast(t *testing.T) {
+	s := submitFarm(t)
+	s.DryRun = func(context.Context, *c4v1.WorkJob, string) (api.SubmitEstimate, error) {
+		return api.SubmitEstimate{}, nil
+	}
+	fc, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-100"},
+		Forecast: &c4v1.WorkForecast{SlotHours: "40"}})
+	var out api.SubmitResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Name: "sh090-forecast", Spec: fc}, &out); code != http.StatusCreated {
+		t.Fatalf("forecast: %d %+v", code, out)
+	}
+	real, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-100"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+	bad := []struct {
+		req  api.SubmitRequest
+		says string
+	}{
+		{api.SubmitRequest{Project: "show-a", Name: "a", Spec: real, Replaces: "nope"}, "no such job"},
+		{api.SubmitRequest{Project: "show-a", Name: "b", Spec: fc, Replaces: "sh090-forecast"}, "a forecast replaces nothing"},
+	}
+	for _, b := range bad {
+		var e map[string]any
+		if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", b.req, &e); code != http.StatusBadRequest || !strings.Contains(fmt.Sprint(e["error"]), b.says) {
+			t.Errorf("%s: %d %v", b.req.Name, code, e)
+		}
+	}
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Name: "sh090", Spec: real, Replaces: "sh090-forecast"}, &out); code != http.StatusCreated {
+		t.Fatalf("the real job: %d %+v", code, out)
+	}
+	var gone c4v1.WorkJob
+	if err := s.Client.Get(context.Background(), types.NamespacedName{Namespace: "show-a", Name: "sh090-forecast"}, &gone); err == nil {
+		t.Fatal("the forecast is still there")
+	}
+	var e map[string]any
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Name: "c", Spec: real, Replaces: "sh090"}, &e); code != http.StatusBadRequest ||
+		!strings.Contains(fmt.Sprint(e["error"]), "real job, not a forecast") {
+		t.Fatalf("replacing a real job: %d %v", code, e)
+	}
+}

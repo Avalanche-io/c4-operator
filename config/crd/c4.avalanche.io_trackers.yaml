@@ -112,11 +112,15 @@ spec:
                   properties:
                     as:
                       description: |-
-                        As is job (the entity becomes a WorkJob) or milestone (it becomes a
-                        Milestone, whose due date the jobs it covers take).
+                        As is job (the entity becomes a WorkJob), milestone (it becomes a
+                        Milestone, whose due date the jobs it covers take) or forecast (it
+                        becomes a forecast job, integrations GAPS 9: work the farm plans for
+                        before it is ready; when a job rule matches the entity later, the
+                        real job replaces it).
                       enum:
                       - job
                       - milestone
+                      - forecast
                       type: string
                     covers:
                       additionalProperties:
@@ -164,6 +168,27 @@ spec:
                           type: boolean
                         person:
                           description: Person is a C4 person.
+                          type: string
+                      type: object
+                    forecast:
+                      description: |-
+                        Forecast sizes the forecast jobs an `as: forecast` rule makes:
+                        slot-hours as given, or from a field of the entity (a bid) times
+                        PerUnit. Without either the class plans it from the job's params.
+                      properties:
+                        field:
+                          description: |-
+                            Field names the entity's own estimate (Flow: est_in_mins, the bid
+                            in minutes), and PerUnit how many slot-hours one unit of it is.
+                          type: string
+                        perUnit:
+                          type: string
+                        slotHours:
+                          description: SlotHours is the work, the same for every entity.
+                          type: string
+                        unitHours:
+                          description: UnitHours is the longest single unit (the critical
+                            path).
                           type: string
                       type: object
                     job:
