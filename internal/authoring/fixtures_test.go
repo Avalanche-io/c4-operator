@@ -23,11 +23,11 @@ type fixtureFarm struct {
 		} `json:"shots"`
 		Jobs []string `json:"jobs"`
 	} `json:"projects"`
-	PeopleL  []string          `json:"people"`
-	RolesL   []string          `json:"roles"`
-	PartiesL []string          `json:"parties"`
-	ToolsV   map[string]string `json:"tools"`
-	Policies map[string]any    `json:"policies"`
+	PeopleL  []string               `json:"people"`
+	RolesL   []string               `json:"roles"`
+	PartiesL []string               `json:"parties"`
+	ToolsV   map[string]string      `json:"tools"`
+	Policies map[string]*FarmPolicy `json:"policies"`
 	tools    map[string]*Tool
 }
 
@@ -93,7 +93,8 @@ func (f *fixtureFarm) Namespace(p string) string {
 	}
 	return p
 }
-func (f *fixtureFarm) Cut(p, shot string) string { return f.Projects[p].Shots[shot].Cut }
+func (f *fixtureFarm) Cut(p, shot string) string   { return f.Projects[p].Shots[shot].Cut }
+func (f *fixtureFarm) Policy(p string) *FarmPolicy { return f.Policies[p] }
 
 // The fixtures' milestones are on New York time.
 func (f *fixtureFarm) Location(string) *time.Location {
@@ -210,4 +211,81 @@ func TestTestJobName(t *testing.T) {
 	if len(l1) > MaxJobName || len(l2) > MaxJobName || l1 == l2 {
 		t.Fatalf("%q (%d) %q (%d)", l1, len(l1), l2, len(l2))
 	}
+}
+
+// The submissions' failing check fixtures are refused by Check with
+// exactly their errors, and the passing submissions are not.
+func TestCheckFixtures(t *testing.T) {
+	farm := loadFarm(t)
+	n := 0
+	for _, c := range cases(t) {
+		if c.Format != "submit" || !c.Pass && c.Expect.By != "check" {
+			continue
+		}
+		t.Run(c.Name, func(t *testing.T) {
+			sub, errs := ParseSubmission(c.Doc)
+			if len(errs) > 0 {
+				t.Fatalf("parse: %v", errs)
+			}
+			errs = Check(sub, farm)
+			if c.Pass {
+				if len(errs) > 0 {
+					t.Fatalf("refused: %v", errs)
+				}
+				return
+			}
+			if !reflect.DeepEqual(errs, c.Expect.Errors) {
+				t.Fatalf("\n got  %v\n want %v", errs, c.Expect.Errors)
+			}
+			n++
+		})
+	}
+	t.Logf("%d check fixtures refused exactly", n)
+}
+
+// Every passing submission lowers exactly as slice1.yaml says: refused
+// with its errors when listed, else to one request per job.
+func TestLowerFixtures(t *testing.T) {
+	farm := loadFarm(t)
+	b, err := fs.ReadFile(schema.Fixtures(), "submit/slice1.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var want struct {
+		Refusals map[string][]Error `json:"refusals"`
+	}
+	if err := yaml.UnmarshalStrict(b, &want); err != nil {
+		t.Fatal(err)
+	}
+	refused, ran, errs := 0, 0, 0
+	for _, c := range cases(t) {
+		if c.Format != "submit" || !c.Pass {
+			continue
+		}
+		t.Run(c.Name, func(t *testing.T) {
+			sub, perrs := ParseSubmission(c.Doc)
+			if len(perrs) > 0 {
+				t.Fatalf("parse: %v", perrs)
+			}
+			plan, lerrs := Lower(sub, farm)
+			w, listed := want.Refusals[c.Name]
+			switch {
+			case listed && !reflect.DeepEqual(lerrs, w):
+				t.Fatalf("\n got  %v\n want %v", lerrs, w)
+			case listed:
+				refused++
+				errs += len(lerrs)
+			case len(lerrs) > 0:
+				t.Fatalf("refused: %v", lerrs)
+			case plan == nil || len(plan.Jobs) != len(sub.Jobs):
+				t.Fatalf("plan %+v", plan)
+			default:
+				ran++
+			}
+		})
+	}
+	if refused != len(want.Refusals) {
+		t.Errorf("%d submissions refused, slice1.yaml lists %d", refused, len(want.Refusals))
+	}
+	t.Logf("%d refused with %d errors, %d lowered", refused, errs, ran)
 }

@@ -831,6 +831,74 @@ queue's to set; `c4.avalanche.io/recompute-view`
 and `-site` name the input it rebuilds and where, and the queue sets
 `c4.avalanche.io/recompute-output` to the view its unit wrote.
 
+### POST /submissions
+
+```
+{ submission, dryRun?, explain? }
+->
+{ ok, dryRun?, errors?: [ { path, message, fix } ], submission,
+  jobs?: [ { key, namespace, name, tool, version, what, estimate?, estimateError?, after?: [name], link } ],
+  estimate?: { eta50?, eta90?, deadline?, slackSeconds, feasible, atRisk, jobs },
+  warnings?: [string], explain?, message? }
+```
+
+`submission` is a submission (`c4: submit/1`, the submission format,
+schema/README.md) as JSON, its keys in the order written. The farm checks
+it against the project (its tools and their parameters, the jobs it
+follows, its dues, trees and people), lowers each job to a `POST /jobs`
+request, and creates the jobs in the order written: `201`. With `dryRun`
+it plans each (`200`; a job's `estimateError` says why it has none, since
+later jobs follow jobs that do not exist yet). A refused submission is
+`422` with `errors`, each at a dotted path (`jobs.comp.after`) with what to
+do about it, and nothing is created: every job is checked as `POST /jobs`
+checks it before the first is made. `404` for a project the viewer cannot
+see. `project` may be left out by a viewer with one project.
+
+Each job is named `<name>-<key>-vNNN` (`name` defaults to the shot), one
+version past the latest such job, for the whole submission before any is
+made, so a job's inputs can name the jobs it follows. A job runs the tool's
+unit image pinned in its `tool.lock`, with the tool runner (`c4-unit run`)
+as the command and the tool's tree read-only at `/etc/c4/tools`; its
+parameters are `C4_PARAMS`, its shot `C4_SHOT`, the submission's `root:`
+`C4_SOURCE_ROOTS`. Memory and GPUs are limited to what is requested, CPU
+only requested; sizes are binary (`64G` is `64Gi`). The tree is mounted
+writable at the project's root: a C4 ID as its view, `job:<name>` as the
+latest such job's output, and for a job with `after` the output of the job
+it follows (`dependsOn`). `read` trees mount read-only at
+`/c4/read/<name>`. A folder is the front end's to upload first (`POST
+/objects`, `POST /views`); a dry run takes a C4 ID the store lacks, a
+submit does not. A `due` that names a milestone labels the job
+`c4.avalanche.io/milestone: <name>`, which joins the Milestone whatever its
+selector; a time (`fri 18:00`, `18:00`, `+3h`, RFC 3339, in the project's
+zone) or a date pins the deadline; `suggested` (the default) leaves it to
+the farm. Each job carries `c4.avalanche.io/submission`, the submission's
+C4 ID (of the compact JSON sent), and `c4.avalanche.io/derivation-class:
+exact` when its tool says `reuse: exact`.
+
+What the farm cannot run yet is refused in its words, not run otherwise:
+plans, checks, approvals, waits, answering agents, generators and their
+children, units over more than frames, policy, a job that follows two,
+git trees, tools that need licences, the network beyond their licence
+servers, sidecars, a Kubernetes overlay, a gate, farm access, or only a
+host. `warnings` are what it does differently meanwhile: a job that
+follows another frame by frame waits for the whole of it. `estimate` is
+the jobs' as one: the latest finish, the earliest deadline, the least
+slack. `explain` is what each job lowers to: its WorkJob, class and
+params, inputs, image, command and tool, resources, units and deadline.
+
+### GET /projects/{project}
+
+```
+-> { name, root, timeZone, dueTime, milestones: [ { name, label?, at } ] }
+```
+
+What a submitter writes for: where the project's trees mount (`spec.root`,
+`/show` without one), the zone a due without one is read in and the time
+of day a date falls at (`spec.work.dueTime`, 18:00 UTC without one), and
+the Milestones of the project's namespace, soonest first; `label` is the
+tracker entity that owns the date. `404` for a project the viewer cannot
+see.
+
 ## Tools
 
 A tool is a folder with a `tool.yaml` (`c4: tool/1`, the tool format,

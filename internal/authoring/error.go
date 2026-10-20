@@ -43,7 +43,8 @@ func errf(path, fix, format string, args ...any) Error {
 
 // closest is the candidate nearest to s by edit distance, if near enough
 // to be a slip (at most a third of its length, and at least one edit), or
-// sharing a prefix of three letters.
+// sharing a prefix of three letters, or holding most of its letters in
+// order.
 func closest(s string, candidates []string) (string, bool) {
 	best, bestD := "", -1
 	for _, c := range candidates {
@@ -62,7 +63,35 @@ func closest(s string, candidates []string) (string, bool) {
 	if len(s) >= 3 && len(best) >= 3 && strings.HasPrefix(strings.ToLower(best), strings.ToLower(s[:3])) {
 		return best, true
 	}
+	// a word spelt by ear (lite for light): most of its letters, in order
+	sim, simBest := 0.0, ""
+	for _, c := range candidates {
+		l := lcs(strings.ToLower(s), strings.ToLower(c))
+		if r := 2 * float64(l) / float64(len(s)+len(c)); r > sim || r == sim && c < simBest {
+			sim, simBest = r, c
+		}
+	}
+	if sim >= 0.65 && len(s) >= 3 {
+		return simBest, true
+	}
 	return "", false
+}
+
+// lcs is the length of the longest common subsequence of a and b.
+func lcs(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		for j := 1; j <= len(b); j++ {
+			if a[i-1] == b[j-1] {
+				cur[j] = prev[j-1] + 1
+			} else {
+				cur[j] = max(prev[j], cur[j-1])
+			}
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }
 
 // distance is the edit distance between a and b (insertions, deletions,

@@ -17,17 +17,6 @@ type SubmissionRequest struct {
 	// Explain adds what each job lowers to: its WorkJob's class, params,
 	// inputs, template and deadline.
 	Explain bool `json:"explain,omitempty"`
-	// SourceRoots are the roots the submitter's paths were written under
-	// (the folder the tree was uploaded from), given to each unit as
-	// C4_SOURCE_ROOTS for the tool runner's path map.
-	SourceRoots []SourceRoot `json:"sourceRoots,omitempty"`
-}
-
-// SourceRoot is a root on a submitter's machine: its operating system
-// (linux, windows, macos) and path.
-type SourceRoot struct {
-	OS   string `json:"os"`
-	Path string `json:"path"`
 }
 
 // SubmissionResponse answers POST /submissions: 201 when the jobs are
@@ -88,4 +77,27 @@ type SubmissionEstimate struct {
 	AtRisk   bool `json:"atRisk"`
 	// Jobs is how many of the jobs had an estimate.
 	Jobs int `json:"jobs"`
+}
+
+// ProjectDetail answers GET /projects/{project}: what a submitter needs to
+// write a submission for the project.
+type ProjectDetail struct {
+	Name string `json:"name"`
+	// Root is where the project's trees mount in a unit (/show).
+	Root string `json:"root"`
+	// TimeZone is the IANA zone a due without one is read in, and DueTime
+	// the time of day ("18:00") a due given as a date falls at.
+	TimeZone   string             `json:"timeZone"`
+	DueTime    string             `json:"dueTime"`
+	Milestones []ProjectMilestone `json:"milestones"`
+}
+
+// ProjectMilestone is a milestone a submission may be due at (due:
+// <name>), soonest first.
+type ProjectMilestone struct {
+	Name string `json:"name"`
+	// Label is the tracker entity that owns the date, <tracker>/<type>/<id>,
+	// when one does.
+	Label string    `json:"label,omitempty"`
+	At    time.Time `json:"at"`
 }

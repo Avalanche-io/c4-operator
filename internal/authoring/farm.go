@@ -50,6 +50,23 @@ type Farm interface {
 	// Location is the project's time zone, which a due without one is
 	// read in (nil: UTC).
 	Location(project string) *time.Location
+	// Policy is the project's policy as a submission may name and narrow
+	// it, or nil when the farm keeps none to check against.
+	Policy(project string) *FarmPolicy
+}
+
+// FarmPolicy is a project's policy as a submission sees it: the sets it
+// may name, and the values it may narrow (only ever lower).
+type FarmPolicy struct {
+	Sets   []string               `json:"sets"`
+	Values map[string]PolicyValue `json:"values"`
+}
+
+// PolicyValue is one value of a project's policy: a number, or a duration
+// as written (2h).
+type PolicyValue struct {
+	Value      any  `json:"value"`
+	Narrowable bool `json:"narrowable"`
 }
 
 func toolNames(refs []ToolRef) []string {

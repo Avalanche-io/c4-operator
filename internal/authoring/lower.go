@@ -69,7 +69,7 @@ type toolJob struct {
 // errors are relative to the job (with.stage, frames).
 func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 	t := j.tool
-	if e := onceFrames(t, j.frames, j.with); e != nil {
+	if e := onceFrames(t, j.frames); e != nil {
 		return nil, []Error{*e}
 	}
 	params, errs := resolveParams(t, j.with, j.root, j.frames)
@@ -232,11 +232,11 @@ func frameParam(t *Tool) *Param {
 
 // onceFrames refuses frames for a once tool that has no parameter for
 // them: a once tool runs one unit over the whole job.
-func onceFrames(t *Tool, frames Frames, with map[string]any) *Error {
+func onceFrames(t *Tool, frames Frames) *Error {
 	if t.Kind != "once" || frames == "" || frameParam(t) != nil {
 		return nil
 	}
-	e := errf("frames", "remove frames: a once tool runs one unit over the whole job", "%s is a once tool with no frame parameter, so it takes no frames", t.Name)
+	e := errf("frames", "remove frames:", "%s takes no frames: it is a once tool with no frame parameter", t.Name)
 	return &e
 }
 

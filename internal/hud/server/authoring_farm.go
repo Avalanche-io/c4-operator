@@ -95,3 +95,7 @@ func (f *hudFarm) Location(project string) *time.Location {
 	}
 	return time.UTC
 }
+
+// Policy: the farm keeps no policy model a submission can narrow yet, so
+// nothing to check against; lowering refuses policy: for now.
+func (f *hudFarm) Policy(string) *authoring.FarmPolicy { return nil }

@@ -148,6 +148,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/trace/{ns}/{name}", s.handleTrace)
 	mux.HandleFunc("GET /api/v1/custody/{ns}/{name}", s.handleCustody)
 	mux.HandleFunc("POST /api/v1/jobs", s.handleSubmit)
+	mux.HandleFunc("POST /api/v1/submissions", s.handleSubmission)
+	mux.HandleFunc("GET /api/v1/projects/{project}", s.handleProject)
 	mux.HandleFunc("POST /api/v1/tools/{project}", s.handlePublishTool)
 	mux.HandleFunc("GET /api/v1/tools/{project}", s.handleTools)
 	mux.HandleFunc("GET /api/v1/tools/{project}/{tool}", s.handleTool)

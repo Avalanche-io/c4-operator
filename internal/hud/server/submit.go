@@ -536,6 +536,13 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 // milestone).
 type createOpts struct {
 	Annotations, Labels map[string]string
+	// CheckOnly checks the request as a create would, and stops before the
+	// estimate: a submission checks every job before it creates any.
+	CheckOnly bool
+	// EstimateOptional makes a dry run without an estimate a plan that
+	// says why (EstimateError) rather than a refusal: a submission's later
+	// jobs follow jobs that do not exist yet.
+	EstimateOptional bool
 }
 
 // createJob checks and creates a job from a POST /jobs request for viewer
@@ -727,12 +734,17 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	for _, mt := range mats {
 		out.Materializations = append(out.Materializations, mt.Name)
 	}
+	if o.CheckOnly {
+		return out, http.StatusOK, nil
+	}
 	est, estErr := s.dryRun(ctx, job, project)
 	if est != nil {
 		out.Estimate = est
 	}
 	if body.DryRun {
-		if estErr != nil {
+		if estErr != nil && o.EstimateOptional {
+			out.EstimateError = estErr.Error()
+		} else if estErr != nil {
 			code := http.StatusUnprocessableEntity
 			if errors.Is(estErr, ErrNotPlanned) {
 				code = http.StatusServiceUnavailable
