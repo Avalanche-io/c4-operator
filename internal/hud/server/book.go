@@ -59,6 +59,15 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 		}
 		limit = min(n, bookMax)
 	}
+	if q := r.URL.Query().Get("since"); q != "" {
+		since, err := strconv.ParseInt(q, 10, 64)
+		if err != nil || since < 0 {
+			fail(w, http.StatusBadRequest, "since must be a transition number (0 for the start)")
+			return
+		}
+		s.handleTransitions(w, r, v, since, limit)
+		return
+	}
 	var only *jobRec
 	if key := r.URL.Query().Get("job"); key != "" {
 		only = m.byKey[key]
