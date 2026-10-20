@@ -63,7 +63,7 @@ type Container struct {
 // computation: which job, which attempt, which pod. They are left out of a
 // process key.
 var RunEnv = map[string]bool{
-	"C4_JOB": true, "C4_UNIT": true, "C4_ATTEMPT": true, "C4_PODINFO": true, "C4_CONTROL": true,
+	"C4_JOB": true, "C4_NAMESPACE": true, "C4_UNIT": true, "C4_ATTEMPT": true, "C4_PODINFO": true, "C4_CONTROL": true,
 	"C4_RESUME_VIEW": true, "C4_OUTPUT": true, "HOSTNAME": true,
 }
 
