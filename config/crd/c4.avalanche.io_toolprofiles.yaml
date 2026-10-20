@@ -85,6 +85,39 @@ spec:
                       type: string
                   type: object
                 type: array
+              sidecars:
+                description: |-
+                  Sidecars are servers that run beside the unit for its whole run
+                  (MCP servers, a headless browser), each told to the unit as
+                  $C4_TOOL_<NAME>, http://localhost:<port>. They share the unit's
+                  network, so its egress is theirs.
+                items:
+                  description: ToolSidecar is one server a profile runs beside its
+                    units.
+                  properties:
+                    args:
+                      items:
+                        type: string
+                      type: array
+                    env:
+                      additionalProperties:
+                        type: string
+                      type: object
+                    image:
+                      type: string
+                    name:
+                      description: Name names the container and the unit's $C4_TOOL_<NAME>.
+                      type: string
+                    port:
+                      description: Port is where it listens on localhost.
+                      format: int32
+                      type: integer
+                  required:
+                  - image
+                  - name
+                  - port
+                  type: object
+                type: array
               view:
                 description: |-
                   View is the configuration, a view's C4 ID, mounted read-only at

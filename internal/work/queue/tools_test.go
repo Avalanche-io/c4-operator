@@ -36,7 +36,8 @@ func TestToolProfiles(t *testing.T) {
 	view := viewID("c4search-mcp-config")
 	for _, o := range []*c4v1.ToolProfile{
 		{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "search"}, Spec: c4v1.ToolProfileSpec{View: view,
-			Egress: []c4v1.ToolEgress{{CIDR: "203.0.113.0/24", Ports: []int32{443}}, {Service: ns + "/searcher"}}}},
+			Egress:   []c4v1.ToolEgress{{CIDR: "203.0.113.0/24", Ports: []int32{443}}, {Service: ns + "/searcher"}},
+			Sidecars: []c4v1.ToolSidecar{{Name: "web-search", Image: "mcp-search:1", Args: []string{"--port", "8811"}, Port: 8811, Env: map[string]string{"MODE": "mcp"}}}}},
 		{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "none"}},
 	} {
 		if err := k8s.Create(ctx, o); err != nil {
@@ -80,6 +81,18 @@ func TestToolProfiles(t *testing.T) {
 	}
 	if p.Labels[c4v1.LabelToolProfile] != "search" || !mounted || envOf(p.Spec.Containers[0], "C4_TOOLS") != ToolsMount {
 		t.Fatalf("lookup's pod: labels %v, view mounted %v", p.Labels, mounted)
+	}
+	// Its sidecar runs beside it, a native sidecar, and the unit knows
+	// where.
+	var sc *corev1.Container
+	for k := range p.Spec.InitContainers {
+		if p.Spec.InitContainers[k].Name == "tool-web-search" {
+			sc = &p.Spec.InitContainers[k]
+		}
+	}
+	if sc == nil || sc.Image != "mcp-search:1" || sc.RestartPolicy == nil || *sc.RestartPolicy != corev1.ContainerRestartPolicyAlways ||
+		envOf(*sc, "MODE") != "mcp" || envOf(p.Spec.Containers[0], "C4_TOOL_WEB_SEARCH") != "http://localhost:8811" {
+		t.Fatalf("sidecar %+v, unit env %v", sc, p.Spec.Containers[0].Env)
 	}
 	var np networkingv1.NetworkPolicy
 	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "c4-tools-search"}, &np); err != nil {

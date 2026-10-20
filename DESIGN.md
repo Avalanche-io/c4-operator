@@ -1514,6 +1514,15 @@ and a sweep planner that spawns trials are all generators.
       allows those, plus DNS when there is any rule. A profile with no
       egress allows nothing, so its units are sealed, which the derivation
       record counts. The owner writes the allow-list.
+    - **`sidecars`** are servers that run beside the unit for its whole
+      run: MCP servers, a headless browser (`{name, image, args?, env?,
+      port}`). They are native sidecars, started before the unit and
+      ended with it, with the view mounted too. The unit finds each at
+      `$C4_TOOL_<NAME>` (`http://localhost:<port>`). They share the
+      unit's network, so its egress is theirs.
+    - **Reuse:** a unit's process key is its template, so a unit with a
+      profile is never reused from an earlier run. Nor is one given
+      supplied information or a decision.
     - **Release:** a unit is released once its profile exists, its view's
       Materialization is Ready, and its policy is written. Until then the
       job's `Tools` condition says what it waits for. Units that name no

@@ -37,6 +37,25 @@ type ToolProfileSpec struct {
 	// the cluster's DNS is reachable too; with none, nothing is.
 	// +optional
 	Egress []ToolEgress `json:"egress,omitempty"`
+	// Sidecars are servers that run beside the unit for its whole run
+	// (MCP servers, a headless browser), each told to the unit as
+	// $C4_TOOL_<NAME>, http://localhost:<port>. They share the unit's
+	// network, so its egress is theirs.
+	// +optional
+	Sidecars []ToolSidecar `json:"sidecars,omitempty"`
+}
+
+// ToolSidecar is one server a profile runs beside its units.
+type ToolSidecar struct {
+	// Name names the container and the unit's $C4_TOOL_<NAME>.
+	Name  string `json:"name"`
+	Image string `json:"image"`
+	// +optional
+	Args []string `json:"args,omitempty"`
+	// +optional
+	Env map[string]string `json:"env,omitempty"`
+	// Port is where it listens on localhost.
+	Port int32 `json:"port"`
 }
 
 // ToolEgress is one destination a profile allows: a host, an address

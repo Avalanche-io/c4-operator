@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -35,6 +36,19 @@ const ToolsMount = "/etc/c4/tools"
 // toolsName is the Materialization a job's units mount profile name's
 // view through.
 func toolsName(job, profile string) string { return fmt.Sprintf("%s-tools-%s", job, profile) }
+
+// toolEnv is the unit's variable naming sidecar name's address.
+func toolEnv(name string) string {
+	return "C4_TOOL_" + strings.ToUpper(strings.NewReplacer("-", "_", ".", "_").Replace(name))
+}
+
+// portName is a container port name (at most 15 characters).
+func portName(name string) string {
+	if len(name) > 15 {
+		return name[:15]
+	}
+	return name
+}
 
 // toolsPolicyName is the NetworkPolicy of profile name in a namespace.
 func toolsPolicyName(profile string) string { return "c4-tools-" + profile }
@@ -118,6 +132,11 @@ func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.ToolPro
 	p, err := q.toolProfile(ctx, v.job.Namespace, name)
 	if err != nil {
 		return nil, false, err.Error()
+	}
+	for _, sc := range p.Spec.Sidecars {
+		if sc.Name == "" || sc.Image == "" || sc.Port <= 0 || sc.Port > 65535 {
+			return nil, false, fmt.Sprintf("tool profile %s: a sidecar needs a name, an image and a port", name)
+		}
 	}
 	if hostRules(p) && q.EgressProxy == "" {
 		return nil, false, fmt.Sprintf("tool profile %s allows hosts, which need the farm's egress proxy (--egress-proxy)", name)
@@ -217,13 +236,37 @@ func (q *Queue) ensureToolsPolicy(ctx context.Context, ns string, p *c4v1.ToolPr
 }
 
 // applyTools gives unit pod pod of job its tool profile: the label its
-// NetworkPolicy selects, the view mounted at $C4_TOOLS, and for hosts the
-// egress proxy as its HTTPS_PROXY and HTTP_PROXY.
+// NetworkPolicy selects, the view mounted at $C4_TOOLS, for hosts the
+// egress proxy as its HTTPS_PROXY and HTTP_PROXY, and its sidecars, native
+// sidecars that start before the unit and end with it.
 func applyTools(pod *corev1.Pod, job string, p *c4v1.ToolProfile, proxy string) {
 	if pod.Labels == nil {
 		pod.Labels = map[string]string{}
 	}
 	pod.Labels[c4v1.LabelToolProfile] = p.Name
+	always := corev1.ContainerRestartPolicyAlways
+	no := false
+	for _, sc := range p.Spec.Sidecars {
+		c := corev1.Container{Name: "tool-" + sc.Name, Image: sc.Image, Args: sc.Args, RestartPolicy: &always,
+			SecurityContext: &corev1.SecurityContext{AllowPrivilegeEscalation: &no, Capabilities: &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}}},
+			Ports:           []corev1.ContainerPort{{Name: portName(sc.Name), ContainerPort: sc.Port}}}
+		keys := make([]string, 0, len(sc.Env))
+		for k := range sc.Env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			c.Env = append(c.Env, corev1.EnvVar{Name: k, Value: sc.Env[k]})
+		}
+		if p.Spec.View != "" {
+			c.VolumeMounts = append(c.VolumeMounts, corev1.VolumeMount{Name: "c4-tools", MountPath: ToolsMount, ReadOnly: true})
+		}
+		pod.Spec.InitContainers = append(pod.Spec.InitContainers, c)
+		for k := range pod.Spec.Containers {
+			pod.Spec.Containers[k].Env = append(pod.Spec.Containers[k].Env,
+				corev1.EnvVar{Name: toolEnv(sc.Name), Value: fmt.Sprintf("http://localhost:%d", sc.Port)})
+		}
+	}
 	if hostRules(p) && proxy != "" {
 		env := []corev1.EnvVar{}
 		for _, k := range []string{"HTTPS_PROXY", "HTTP_PROXY", "https_proxy", "http_proxy"} {
