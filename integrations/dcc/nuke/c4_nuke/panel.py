@@ -37,6 +37,8 @@ STANDARD = "Standard"
 EACH_RANGE = "each Write node's own range"
 EACH_WRITE = "each ticked Write node"
 STALE = "Changed since the check: Check again before you submit."
+LOCAL_TOOLS = ("Setting C4_TOOL_PATH to the studio's tool folders lets this panel draw the form and save "
+               "the submission as a file, to submit when the farm takes it.")
 PROGRESS_WORDS = {"hash": "Reading files", "upload": "Uploading"}
 
 
@@ -382,24 +384,11 @@ class SubmitPanel(nukescripts.PythonPanel):
 
     def signature(self) -> str:
         """Everything a check depends on, so a change since is seen: the
-        draft's fields, and the script's file and unsaved state."""
-        d = self.draft
-        if d is None:
+        draft's own signature, and whether the script has unsaved edits
+        (which only Nuke knows, so the draft cannot see them)."""
+        if self.draft is None:
             return ""
-        scene = d.scene_file
-        try:
-            st = os.stat(scene)
-            stamp = [st.st_size, st.st_mtime_ns]
-        except OSError:
-            stamp = []
-        state = {
-            "tool": d.tool.name, "project": d.project, "shot": d.shot, "due": d.due, "frames": d.frames,
-            "note": d.note, "size": d.size, "ticked": sorted(d.ticked),
-            "form": {f.name: [f.value, f.linked] for f in d.form.fields},
-            "renderables": [[r.name, r.frames, r.outputs, r.reads] for r in d.renderables],
-            "scene": [scene, stamp, self.host.is_modified()],
-        }
-        return json.dumps(state, sort_keys=True, default=str)
+        return self.draft.signature() + "\nunsaved=" + json.dumps(bool(self.host.is_modified()))
 
     def knobChanged(self, knob) -> None:  # noqa: N802 - Nuke's name
         if self._updating:
@@ -491,9 +480,9 @@ class SubmitPanel(nukescripts.PythonPanel):
                 info = self.farm.project(project)
                 tools = Submitter(self.farm).tools_for(project, scene)
                 if not tools:
-                    err = f"No tool on the farm renders Nuke scripts for {project}."
+                    err = f"No tool on the farm renders Nuke scripts for {project}. " + LOCAL_TOOLS
             except NotOnFarm as e:
-                err = f"{e.message}, so this panel has nothing to fill in."
+                err = f"{e.message}, so this panel has no form to draw. " + LOCAL_TOOLS
             except FarmError as e:
                 hint = e.status in (0, 401, 403) and "C4_HUD" not in e.message
                 err = e.message + (" (check C4_HUD and your sign-in)" if hint else "")
@@ -508,7 +497,7 @@ class SubmitPanel(nukescripts.PythonPanel):
             return  # the artist typed another project meanwhile; its own load answers
         self.project_info = info
         self.tools = tools
-        choices = Submitter(self._farm).due_choices(info)
+        choices = Submitter.due_choices(info)
         self._due_values = [c["value"] for c in choices[:-1]] + ["suggested", ""]
         labels = [c["label"] for c in choices[:-1]] + [SUGGESTED, TYPED]
         due = self.k["c4_due"]
@@ -652,7 +641,7 @@ class SubmitPanel(nukescripts.PythonPanel):
             self._sync()
             return
         self.checked, self._checked_sig = checked, sig
-        text = summarylib.text(checked)
+        text = problems_text(checked) + summarylib.text(checked, errors=False)
         if checked.ok:
             text += "\n\nReady: press Submit to send it to the farm."
         elif not checked.errors:
@@ -759,8 +748,24 @@ class SubmitPanel(nukescripts.PythonPanel):
             return None
         note = f" It has {len(c.errors)} problem{'s' if len(c.errors) != 1 else ''} to fix first." if c.errors else ""
         self._set_summary(f"Saved {path}.{note}\nSubmit it later with: c4 farm submit {os.path.basename(path)}"
-                          f"\n\n{summarylib.text(c)}")
+                          f"\n\n{problems_text(c)}{summarylib.text(c, errors=False)}")
         return path
+
+
+def problems_text(checked: Checked) -> str:
+    """A check's errors, each with its fix on the line under it, then its
+    warnings, ahead of the summary; '' when there are none."""
+    rows = []
+    if checked.errors:
+        rows.append("To fix before submitting:")
+        for e in checked.errors:
+            rows.append("  " + (f"{e['path']}: " if e.get("path") else "") + e["message"])
+            if e.get("fix"):
+                rows.append("      " + e["fix"])
+    if checked.warnings:
+        rows.append("Worth knowing:")
+        rows += ["  " + w for w in checked.warnings]
+    return "\n".join(rows) + "\n\n" if rows else ""
 
 
 def _farm_errors(e: FarmError) -> str:

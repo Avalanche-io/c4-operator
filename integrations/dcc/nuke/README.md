@@ -17,6 +17,7 @@ environment:
 | `C4_PROJECT`                       | the project, for example `saltmarsh`. The artist can change it in the panel                                                                                                                 |
 | `C4_ROOT`                          | the folder on this machine that is the top of the project's tree, for example `/show`. Every file a script reads must be under it                                                           |
 | `C4_SHOT` or `C4_SHOT_PATTERN`     | the shot, or a regular expression whose `shot` group finds it in the script's path, for example `/(?P<shot>sm\d{4})/`                                                                        |
+| `C4_TOOL_PATH`                     | optional: folders of tools (each holding a `tool.yaml`), used when the farm does not list its tools yet, so the panel can still draw the form and save the submission as a file              |
 
 Nuke 14, 15 and 16 are supported. Nuke 13 and earlier (Python 3.7) are not.
 
@@ -48,6 +49,11 @@ job, the files found and how many must be sent, the estimate, and the slack
 against Needed by. Errors come with their fix. **Show file** shows the
 submission as a file. **Save file...** saves it, to submit later with
 `c4 farm submit FILE`.
+
+If the farm lists no tools for the project, the panel says so and draws no
+form. Setting `C4_TOOL_PATH` to the studio's tool folders lets it draw the form
+and save the file. Check then reads the files and checks the file locally,
+and the submission waits until the farm takes it.
 
 ## On Submit
 

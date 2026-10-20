@@ -1,6 +1,7 @@
 """The panel, driven the way an artist drives it, against the fake farm."""
 
 import copy
+import json
 import os
 import re
 
@@ -234,7 +235,10 @@ def test_one_write_alone_needs_the_others_render(tmp_path, farm):
     nk.settle(p)
     assert not p.checked.ok
     assert any(e["path"] == "Read_bg" and "bg.####.exr" in e["message"] for e in p.checked.errors)
-    assert "Read_bg: " in value(p, "c4_summary") and value(p, "c4_summary").endswith("Check again.")
+    text = value(p, "c4_summary")
+    assert text.startswith("To fix before submitting:\n  Read_bg: ") and text.endswith("Check again.")
+    assert text.count("bg.####.exr: no such files") == 1, "each error once: the summary leaves them to the panel"
+    assert "\n      fix the path, or render or copy the files first" in text
     nk.type_into(p, "c4_write_0", True)
     nk.press(p, "c4_check")
     nk.settle(p)
@@ -313,7 +317,26 @@ def test_a_farm_without_tools_yet(tmp_path):
     p, _ = opened(tmp_path, FakeFarm(serves_submissions=False))
     assert p.draft is None
     assert "does not serve tools yet" in value(p, "c4_summary")
+    assert "C4_TOOL_PATH" in value(p, "c4_summary"), "it says how to get a form anyway"
     assert not p.knobs()["c4_check"].enabled()
+
+
+def test_tools_from_c4_tool_path_on_a_farm_without_them(tmp_path, monkeypatch):
+    tools = tmp_path / "tools" / "nuke-comp"
+    tools.mkdir(parents=True)
+    (tools / "tool.yaml").write_text(json.dumps(NUKE_COMP))
+    monkeypatch.setenv("C4_TOOL_PATH", str(tmp_path / "tools"))
+    p, _ = opened(tmp_path / "show", FakeFarm(serves_submissions=False))
+    assert p.knobs()["c4_tool"].values() == ["Nuke comp"] and "p_write" in p.knobs()
+    nk.press(p, "c4_check")
+    nk.settle(p)
+    c = p.checked
+    assert c.errors == [] and not c.farm_checked and not p.knobs()["c4_submit"].enabled()
+    text = value(p, "c4_summary")
+    assert text.startswith("Worth knowing:\n  this farm does not take submissions yet")
+    assert "Save file keeps it" in text
+    path = p.save_file(str(tmp_path / "sm0140.yaml"))
+    assert path and yamlio.load(open(path).read()) == c.doc
 
 
 def test_no_farm_address(tmp_path):

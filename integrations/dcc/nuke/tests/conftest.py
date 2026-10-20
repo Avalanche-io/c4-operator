@@ -17,7 +17,7 @@ import pytest  # noqa: E402
 def _fresh(monkeypatch, tmp_path):
     # Tests never read or write the artist's ID cache, or reach a real farm.
     monkeypatch.setenv("C4SUBMIT_CACHE", str(tmp_path / "ids.json"))
-    for k in ("C4_HUD", "C4_HUD_TOKEN", "C4_HUD_TOKEN_FILE", "C4_PROJECT", "C4_SHOT", "C4_SHOT_PATTERN", "C4_ROOT", "SHOT"):
+    for k in ("C4_HUD", "C4_HUD_TOKEN", "C4_HUD_TOKEN_FILE", "C4_PROJECT", "C4_SHOT", "C4_SHOT_PATTERN", "C4_ROOT", "SHOT", "C4_TOOL_PATH"):
         monkeypatch.delenv(k, raising=False)
     fakenuke.reset()
     yield
