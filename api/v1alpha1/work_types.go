@@ -1175,6 +1175,12 @@ type WorkSteer struct {
 	Text  string      `json:"text"`
 	// +optional
 	Record string `json:"record,omitempty"`
+	// Ask is the id of the question this message puts to the unit, and
+	// Answer that of the question it answers (WorkAsk).
+	// +optional
+	Ask string `json:"ask,omitempty"`
+	// +optional
+	Answer string `json:"answer,omitempty"`
 	// Delivered is when it reached a pod of the unit; Seen says the unit
 	// read it (c4-unit steer).
 	// +optional

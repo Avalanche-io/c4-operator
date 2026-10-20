@@ -98,6 +98,13 @@ func TestUnitsAskUnits(t *testing.T) {
 	if w3 == nil || !w3.Wait || w3.Answer != "yes, frozen" || q21 == nil || q21.To != 1 || q21.Answer != "tokenize/" || q21.Answered == nil {
 		t.Fatalf("asks %+v", got.Status.Asks)
 	}
+	var marked bool
+	for _, s := range got.Status.Steers {
+		marked = marked || s.Unit == 2 && s.Answer == "2#1"
+	}
+	if !marked {
+		t.Fatalf("worker's answer is not marked in status.steers: %+v", got.Status.Steers)
+	}
 	for _, w := range got.Status.Waits {
 		if w.Unit == 3 && (w.Do != "answer" || w.Note != "yes, frozen" || w.Actor != "unit:lead") {
 			t.Fatalf("the gate's wait %+v", w)

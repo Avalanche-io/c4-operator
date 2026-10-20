@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -184,6 +185,12 @@ func steerStatus(m *jobMem) []c4v1.WorkSteer {
 		if !s.delivered.IsZero() {
 			w.Delivered = &metav1.Time{Time: s.delivered.Truncate(time.Second)}
 		}
+		if s.ask != nil {
+			w.Ask = s.ask.ID
+		}
+		if s.answer != nil {
+			w.Answer = s.answer.ID
+		}
 		out = append(out, w)
 	}
 	return out
@@ -194,6 +201,12 @@ func (m *jobMem) loadSteers(st *c4v1.WorkJobStatus) {
 	m.steered = st.Steered
 	for _, w := range st.Steers {
 		s := &steerRec{unit: int(w.Unit), seq: int(w.Seq), actor: w.Actor, text: w.Text, record: w.Record, at: w.At.Time, seen: w.Seen}
+		if w.Ask != "" {
+			s.ask = &askRef{ID: w.Ask, From: w.Actor}
+		}
+		if w.Answer != "" {
+			s.answer = &answerRef{ID: w.Answer, From: w.Actor, Cannot: strings.Contains(w.Text, ": cannot: ")}
+		}
 		if w.Delivered != nil {
 			s.delivered = w.Delivered.Time
 		}

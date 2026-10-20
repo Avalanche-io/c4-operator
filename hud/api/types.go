@@ -549,6 +549,10 @@ type Steer struct {
 	Record    string     `json:"record,omitempty"`
 	Delivered *time.Time `json:"delivered,omitempty"`
 	Seen      bool       `json:"seen,omitempty"`
+	// Ask is the question this message puts to the unit, Answer the one
+	// it answers (Job.Asks).
+	Ask    string `json:"ask,omitempty"`
+	Answer string `json:"answer,omitempty"`
 }
 
 // NeedsPerson says why a job waits on a person, and since when.

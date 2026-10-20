@@ -1276,6 +1276,13 @@ spec:
                   properties:
                     actor:
                       type: string
+                    answer:
+                      type: string
+                    ask:
+                      description: |-
+                        Ask is the id of the question this message puts to the unit, and
+                        Answer that of the question it answers (WorkAsk).
+                      type: string
                     at:
                       format: date-time
                       type: string

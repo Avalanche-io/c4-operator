@@ -171,7 +171,7 @@ the viewer's scope (1 is next).
   waits?: [ { unit, name?, waitsFor, ask?, choices?, reply?, block?, escalated?, since?, expectSeconds?, blocking?, needsYou?,
              do?, note?, actor?, at?, record?, view? } ],
   rounds?: [ { unit, name?, round, max, until?, stoppedBy?, generators?, expectMore?, expectSeconds? } ],
-  steers?: [ { unit, name?, seq, actor, at, text, record?, delivered?, seen? } ],
+  steers?: [ { unit, name?, seq, actor, at, text, record?, delivered?, seen?, ask?, answer? } ],
   needs?: [ { unit, name?, text, why?, at, record?, supplied?, by? } ],
   asks?: [ { id, from, to, text, at, answer?, cannot?, answered?, wait? } ],
   acks?: [ { kind, units, actor, assignee?, note?, at, record? } ]

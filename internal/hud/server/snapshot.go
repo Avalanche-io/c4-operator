@@ -267,7 +267,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	}
 	for _, m := range st.Steers {
 		as := api.Steer{Unit: int(m.Unit), Name: m.Name, Seq: int(m.Seq), Actor: m.Actor, At: m.At.Time.UTC(), Text: m.Text,
-			Record: m.Record, Seen: m.Seen}
+			Record: m.Record, Seen: m.Seen, Ask: m.Ask, Answer: m.Answer}
 		if m.Delivered != nil {
 			t := m.Delivered.Time.UTC()
 			as.Delivered = &t
