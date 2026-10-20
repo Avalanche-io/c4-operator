@@ -135,7 +135,7 @@ capture() {
   state_json >"$SHOTS/$1-kitsu.json"
 }
 
-JOB=$(k -n "$NS" get trackerlinks -o jsonpath='{.items[0].spec.target.workJob}' 2>/dev/null)
+JOB=
 has_link() { JOB=$(k -n "$NS" get trackerlinks -o jsonpath='{.items[0].spec.target.workJob}' 2>/dev/null) && [ -n "$JOB" ]; }
 wait_until "c4-sync to make a job from task $TASK" 120 has_link
 wait_until "job $JOB" 60 has_job "$JOB"
