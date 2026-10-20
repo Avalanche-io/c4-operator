@@ -1,0 +1,42 @@
+# Only the work queue (the manager's account) makes a pod a WorkJob's unit:
+# it alone creates pods whose controller reference names a WorkJob, and no
+# one else adds such a reference later. A host runner runs a pod as the
+# work of the job's owner, read from the job the reference names
+# (internal/agent/owner.go), so without this anyone who could create a pod
+# could point one at another person's job and have it run under that
+# person's sign-in. Removing a reference (the garbage collector orphaning
+# a pod) is anyone's to do.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-host-pods
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [""]
+      apiVersions: [v1]
+      operations: [CREATE, UPDATE]
+      resources: [pods]
+  variables:
+  - name: after
+    expression: >-
+      has(object.metadata.ownerReferences) ?
+        object.metadata.ownerReferences.filter(r, r.kind == 'WorkJob' && r.apiVersion.startsWith('c4.avalanche.io/')).map(r, r.uid) : []
+  - name: before
+    expression: >-
+      request.operation == 'CREATE' || !has(oldObject.metadata.ownerReferences) ? [] :
+        oldObject.metadata.ownerReferences.filter(r, r.kind == 'WorkJob' && r.apiVersion.startsWith('c4.avalanche.io/')).map(r, r.uid)
+  validations:
+  - expression: >-
+      request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager' ||
+        variables.after.all(u, u in variables.before)
+    message: only the work queue makes a pod a WorkJob's unit (an owner reference to a WorkJob)
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-host-pods
+spec:
+  policyName: c4-host-pods
+  validationActions: [Deny]

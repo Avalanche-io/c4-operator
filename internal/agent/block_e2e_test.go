@@ -115,19 +115,21 @@ func TestBlockOnHostRunner(t *testing.T) {
 	os.WriteFile(filepath.Join(shared, ".c4", "verdict.json"), []byte(`{"stale":true}`), 0o644)
 	docs := &docStore{}
 	r := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: map[string]string{"c4.avalanche.io/host": host}, Slots: 1,
-		BlocksCwd: shared, HookCommand: "/bin/c4-agent checkpoint --hook", Docs: docs, DocsProject: "practice", Logf: t.Logf}
+		Owners: []string{"joshua"}, BlocksCwd: shared, HookCommand: "/bin/c4-agent checkpoint --hook", Docs: docs, DocsProject: "practice", Logf: t.Logf}
 	tick := func() {
 		t.Helper()
 		if err := r.Tick(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
+	job := ownedJob(t, "default", "practice-1", "joshua")
 	pod := func(name string, extra ...corev1.EnvVar) *corev1.Pod {
 		t.Helper()
 		env := append([]corev1.EnvVar{{Name: agent.EnvBlock, Value: "1"}, {Name: agent.EnvBlockRepo, Value: "/repo"},
 			{Name: agent.EnvBlockPrompt, Value: "the job's default task"}, {Name: "C4_UNIT_NAME", Value: "count"},
 			{Name: agent.EnvBlockPrompt, Value: "Write Count(s string) map[string]int with its tests."}}, extra...)
-		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", Labels: map[string]string{c4v1.LabelJob: "practice-1"}},
+		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", Labels: map[string]string{c4v1.LabelJob: "practice-1"},
+			OwnerReferences: unitOf(job)},
 			Spec: corev1.PodSpec{NodeName: host, Containers: []corev1.Container{{Name: "member", Image: "c4-agent", Env: env}}}}
 		if err := k8s.Create(ctx, p); err != nil {
 			t.Fatal(err)

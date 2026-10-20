@@ -130,6 +130,7 @@ func (q *Queue) observeForecast(v *view, pools map[string]*pool, now time.Time) 
 		}
 	}
 	switch {
+	case v.unschedulable != "":
 	case !known:
 		v.unschedulable = fmt.Sprintf("none of the job's pools %v exists", v.pools)
 	case plan.Units[0].Slots > widest:

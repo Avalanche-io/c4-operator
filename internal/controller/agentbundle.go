@@ -100,6 +100,15 @@ func JobForBundle(b *c4v1.AgentBundle) *c4v1.WorkJob {
 			},
 		},
 	}
+	// The job is the bundle's owner's, so pools with owners and host
+	// runners take its members as that person's work. The manager is a
+	// delegate of the owner webhook, so the owner it names stays.
+	if o := b.Annotations[c4v1.AnnotationOwner]; o != "" {
+		j.Annotations = map[string]string{c4v1.AnnotationOwner: o}
+		if via := b.Annotations[c4v1.AnnotationSubmittedVia]; via != "" {
+			j.Annotations[c4v1.AnnotationSubmittedVia] = via
+		}
+	}
 	return j
 }
 

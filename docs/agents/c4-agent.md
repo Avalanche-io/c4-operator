@@ -182,7 +182,23 @@ sessions live. It is a host runner.
   turn.
 
 The sessions run as the machine's own Claude Code sessions, under their
-holder's own sign-in, so no credential leaves the machine.
+holder's own sign-in, so no credential leaves the machine. So a runner
+runs only its owners' work:
+- `c4-agent runner --owner USER` (repeat for more; required) binds and runs
+  a pod only if the WorkJob that controls it is owned by one of them. It
+  reads the owner from the job, matched by the UID in the pod's controller
+  reference, never from the pod. Anything else bound to its Node fails
+  with reason `NotTheOwner`.
+- A job's owner (`c4.avalanche.io/owner`) is whoever created it, and
+  cannot change. A bundle is stamped the same way, and its member job
+  carries the bundle's owner.
+- Only the work queue creates pods a WorkJob controls (the `c4-host-pods`
+  admission policy), so no one can point a pod of their own at someone
+  else's job.
+- A Pool's `owners` keeps everyone else's jobs out of it in the first
+  place. A job of another owner that names only that pool is not
+  schedulable, and says whose work the pool runs; a dry run of it is
+  refused with the same words.
 
 `config/samples/agent-bundle/team.yaml` has a Pool for a runner and a
 bundle of eight members with at most five running. Setting `suspend: true`

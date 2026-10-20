@@ -12,7 +12,7 @@
 //	c4-agent verify NAME
 //	c4-agent log NAME [-n 10]
 //	c4-agent hooks
-//	c4-agent runner [--node NAME] [--slots N] [--label K=V]...
+//	c4-agent runner --owner USER [--node NAME] [--slots N] [--label K=V]...
 //	c4-agent block-pod [--cwd DIR]
 //	c4-agent lease --name N --namespace NS --holder H --owner O --pool P [--ttl 8h] [--renew-before 15m] [--config-dir DIR]
 //
@@ -306,7 +306,7 @@ const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
   verify NAME          check the checkpoint chain against the transcript
   log NAME [-n N]      recent checkpoints
   hooks                print the settings fragment that installs the Stop hook
-  runner [--node N] [--slots N] [--label K=V]... [--every 5s] [--yield-timeout 1m]
+  runner --owner USER [--node N] [--slots N] [--label K=V]... [--every 5s] [--yield-timeout 1m]
                        run this machine's members for the farm's queue (a host
                        runner: a Node for the machine, member pods bound to it)
   block-pod [--cwd DIR]
@@ -337,10 +337,15 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	storeToken := fs.String("store-token-file", "", "a file holding the bearer token for --store")
 	storeProject := fs.String("store-project", "", "the project to store documents in (default: the Project listing the pod's namespace)")
 	blocksCwd := fs.String("blocks-cwd", "", "run plan jobs' blocks (pods with C4_AGENT_BLOCK=1), each a fresh session started in this folder, which the claude CLI must trust; without it the runner runs registered members only")
+	var owners multi
+	fs.Var(&owners, "owner", "a user whose jobs this machine runs, by each job's owner (c4.avalanche.io/owner); repeat for more. Required: a pod of anyone else's job is never bound or run")
 	var lbls multi
 	fs.Var(&lbls, "label", "a Node label K=V for the agent pool's nodeSelector (default c4.avalanche.io/host=<node>)")
 	if err := fs.Parse(args); err != nil {
 		return err
+	}
+	if len(owners) == 0 {
+		return errors.New("runner: --owner is required: the users whose jobs this machine runs")
 	}
 	set := map[string]string{}
 	for _, l := range lbls {
@@ -371,7 +376,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	if err != nil {
 		return err
 	}
-	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Slots: *slots, YieldTimeout: *yieldTimeout, HardStopAfter: *hardStop,
+	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Owners: owners, Slots: *slots, YieldTimeout: *yieldTimeout, HardStopAfter: *hardStop,
 		Logf: func(f string, a ...any) { fmt.Fprintf(out, time.Now().Format("15:04:05 ")+f+"\n", a...) }}
 	if *blocksCwd != "" {
 		hook, err := blockHookCommand()
@@ -397,7 +402,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 			Breakers: tier.NewBreakers(), Backoff: tier.Backoff{Base: 200 * time.Millisecond, Max: 5 * time.Second}, Client: http.DefaultClient, Rounds: 3}
 		r.Docs, r.Views, r.ViewSrc = up, up, src
 	}
-	fmt.Fprintf(out, "runner %s: %d slots, labels %v\n", *node, *slots, set)
+	fmt.Fprintf(out, "runner %s: %d slots, labels %v, the jobs of %s\n", *node, *slots, set, strings.Join(owners, ", "))
 	return r.Run(ctx, *every)
 }
 

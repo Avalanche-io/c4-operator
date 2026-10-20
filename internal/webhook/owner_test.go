@@ -51,15 +51,11 @@ func owner(t *testing.T, resp admission.Response) (string, bool) {
 	return "", false
 }
 
-func newOwner(t *testing.T) *WorkJobOwner {
-	s := runtime.NewScheme()
-	if err := c4v1.AddToScheme(s); err != nil {
-		t.Fatal(err)
-	}
-	return &WorkJobOwner{Decoder: admission.NewDecoder(s), Delegates: []string{managerSA}}
+func newOwner(t *testing.T) *Owner {
+	return &Owner{Delegates: []string{managerSA}}
 }
 
-func TestWorkJobOwnerFromRequester(t *testing.T) {
+func TestOwnerFromRequester(t *testing.T) {
 	m := newOwner(t)
 	resp := m.Handle(context.Background(), ownerRequest(t, "noor", admissionv1.Create, nil))
 	if got, ok := owner(t, resp); !ok || got != "noor" {
@@ -67,7 +63,7 @@ func TestWorkJobOwnerFromRequester(t *testing.T) {
 	}
 }
 
-func TestWorkJobOwnerCannotBeClaimed(t *testing.T) {
+func TestOwnerCannotBeClaimed(t *testing.T) {
 	m := newOwner(t)
 	resp := m.Handle(context.Background(), ownerRequest(t, "ivo", admissionv1.Create,
 		map[string]string{c4v1.AnnotationOwner: "noor"}))
@@ -76,7 +72,7 @@ func TestWorkJobOwnerCannotBeClaimed(t *testing.T) {
 	}
 }
 
-func TestWorkJobOwnerDelegate(t *testing.T) {
+func TestOwnerDelegate(t *testing.T) {
 	m := newOwner(t)
 	resp := m.Handle(context.Background(), ownerRequest(t, managerSA, admissionv1.Create,
 		map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "hud"}))
@@ -90,10 +86,31 @@ func TestWorkJobOwnerDelegate(t *testing.T) {
 	}
 }
 
-func TestWorkJobOwnerIgnoresUpdates(t *testing.T) {
+func TestOwnerIgnoresUpdates(t *testing.T) {
 	m := newOwner(t)
 	resp := m.Handle(context.Background(), ownerRequest(t, "ivo", admissionv1.Update, nil))
 	if !resp.Allowed || len(resp.Patches) != 0 {
 		t.Fatalf("an update was patched: %v", resp.Patches)
+	}
+}
+
+// A bundle is stamped as a job is: its member jobs carry its owner.
+func TestOwnerOfABundle(t *testing.T) {
+	b := &c4v1.AgentBundle{TypeMeta: metav1.TypeMeta{APIVersion: c4v1.GroupVersion.String(), Kind: "AgentBundle"},
+		ObjectMeta: metav1.ObjectMeta{Name: "team", Namespace: "agents", Annotations: map[string]string{c4v1.AnnotationOwner: "ivo"}},
+		Spec:       c4v1.AgentBundleSpec{Pools: []string{"team"}}}
+	raw, err := json.Marshal(b)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp := newOwner(t).Handle(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+		Operation: admissionv1.Create, UserInfo: authnv1.UserInfo{Username: "joshua"}, Object: runtime.RawExtension{Raw: raw}}})
+	if got, ok := owner(t, resp); !ok || got != "joshua" {
+		t.Fatalf("owner %q, patches %v", got, resp.Patches)
+	}
+	for _, p := range resp.Patches {
+		if p.Path != "/metadata/annotations/c4.avalanche.io~1owner" && p.Path != "/metadata/annotations/c4.avalanche.io~1submitted-via" {
+			t.Errorf("patched %s", p.Path)
+		}
 	}
 }

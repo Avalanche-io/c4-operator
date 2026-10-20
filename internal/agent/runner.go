@@ -42,6 +42,10 @@ type Runner struct {
 	// Labels are put on the Node; the agent pool's nodeSelector matches
 	// them.
 	Labels map[string]string
+	// Owners are the users whose work the runner runs: a pod runs here only
+	// if the WorkJob that controls it is owned by one of them (owner.go).
+	// With none, it runs nothing.
+	Owners []string
 	// Slots is how many members may run here at once.
 	Slots int
 	// Capacity, when set, lowers the slots the node offers below Slots,
@@ -92,6 +96,10 @@ type Runner struct {
 	ViewSrc ViewSource
 
 	seen map[types.UID]bool
+	// owned is why each pod may not run here ("" if it may).
+	owned map[types.UID]string
+	// refused are the pods whose refusal was logged.
+	refused map[types.UID]bool
 	// relays is each pod's safe-point relay.
 	relays map[types.UID]*relayState
 	// parts are blocks' next parts, by pod, to wake them for; since is
@@ -148,6 +156,9 @@ func (r *Runner) Tick(ctx context.Context) error {
 		r.waited = map[types.UID]bool{}
 		r.since = map[types.UID]time.Time{}
 	}
+	if r.owned == nil {
+		r.owned, r.refused = map[types.UID]string{}, map[types.UID]bool{}
+	}
 	if err := r.heartbeat(ctx); err != nil {
 		return fmt.Errorf("node %s: %w", r.Node, err)
 	}
@@ -160,6 +171,18 @@ func (r *Runner) Tick(ctx context.Context) error {
 		p := &pods.Items[i]
 		if p.Spec.NodeName == "" && p.Status.Phase == corev1.PodPending && p.DeletionTimestamp == nil &&
 			sel.Matches(labels.Set(p.Spec.NodeSelector)) && memberOf(p) != "" {
+			why, err := r.refuses(ctx, p)
+			if err != nil {
+				r.logf("%s/%s: %v", p.Namespace, p.Name, err)
+				continue
+			}
+			if why != "" {
+				if !r.refused[p.UID] {
+					r.refused[p.UID] = true
+					r.logf("not binding %s/%s: %s", p.Namespace, p.Name, why)
+				}
+				continue
+			}
 			if err := r.bind(ctx, p); err != nil {
 				r.logf("bind %s/%s: %v", p.Namespace, p.Name, err)
 			}
@@ -167,6 +190,21 @@ func (r *Runner) Tick(ctx context.Context) error {
 		}
 		if p.Spec.NodeName != r.Node {
 			continue
+		}
+		if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
+			why, err := r.refuses(ctx, p)
+			if err != nil {
+				r.logf("%s/%s: %v", p.Namespace, p.Name, err)
+				continue
+			}
+			if why != "" {
+				// bound here by someone else: never run it
+				r.logf("refusing %s/%s: %s", p.Namespace, p.Name, why)
+				if err := r.finish(ctx, p, corev1.PodFailed, "NotTheOwner", why, 1); err != nil {
+					r.logf("%s/%s: %v", p.Namespace, p.Name, err)
+				}
+				continue
+			}
 		}
 		if err := r.handle(ctx, p); err != nil {
 			r.logf("%s/%s: %v", p.Namespace, p.Name, err)

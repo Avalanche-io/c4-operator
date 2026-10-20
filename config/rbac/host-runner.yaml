@@ -31,6 +31,10 @@ rules:
 - apiGroups: [""]
   resources: [pods/binding]
   verbs: [create]
+- apiGroups: [c4.avalanche.io]
+  # read only: whose job a pod belongs to, from the job itself
+  resources: [workjobs]
+  verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -94,6 +94,7 @@ func (q *Queue) Recompute(ctx context.Context, project string, key process.Key, 
 	if len(pools) == 0 {
 		pools = d.Pools()
 	}
+	pools, _ = q.servingPools(&src, pools)
 	pools = q.poolsAt(pools, site)
 	if len(pools) == 0 {
 		return fmt.Errorf("%w: no pool of %s is at %s", errNotRerunnable, pr.Job, site)

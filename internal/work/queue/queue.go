@@ -130,6 +130,9 @@ type Queue struct {
 	// guards it and the books map: the Placement reads both during a tick,
 	// which holds mu.
 	sites map[string]string
+	// poolOwners are the owners each pool runs work for, at the last tick
+	// (Pool spec.owners; none is anyone's). derivMu guards it too.
+	poolOwners map[string][]string
 	// subs are the input substitutes by project, site and view.
 	subs    map[string]map[string]map[string]substitute
 	derivMu sync.Mutex
@@ -565,12 +568,15 @@ func (q *Queue) Tick(ctx context.Context) error {
 
 	q.milestones = q.listMilestones(ctx)
 	poolInfo := q.pools(ctx, pools.Items, nodes.Items, pods.Items, crs.Items)
-	sites := map[string]string{}
+	sites, owners := map[string]string{}, map[string][]string{}
 	for name, p := range poolInfo {
 		sites[name] = p.site
+		if o := p.spec.Spec.Owners; len(o) > 0 {
+			owners[name] = o
+		}
 	}
 	q.derivMu.Lock()
-	q.sites = sites
+	q.sites, q.poolOwners = sites, owners
 	q.derivMu.Unlock()
 	nsProject := map[string]string{}
 	q.shareHist = map[string]bool{}
@@ -707,6 +713,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	if len(v.pools) == 0 {
 		v.pools = d.Pools()
 	}
+	v.pools, v.unschedulable = q.servingPools(j, v.pools)
 	if isForecast(j) {
 		q.observeForecast(v, pools, now)
 		return v
@@ -772,6 +779,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		}
 	}
 	switch {
+	case v.unschedulable != "":
 	case !known:
 		v.unschedulable = fmt.Sprintf("none of the job's pools %v exists", v.pools)
 	case plan.Units[0].Slots > widest:

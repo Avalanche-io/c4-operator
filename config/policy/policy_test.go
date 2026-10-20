@@ -59,7 +59,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "host-pods.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -204,6 +204,20 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	// replaces a forecast; neither turns into the other.
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"forecast":{"slotHours":"4"}}}`))); err == nil {
 		t.Error("a running job became a forecast")
+	}
+
+	// a bundle's owner is fixed the same way: its member job carries it
+	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "team",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "joshua", c4v1.AnnotationSubmittedVia: "api"}},
+		Spec: c4v1.AgentBundleSpec{Pools: []string{"team"}, Members: []c4v1.AgentMemberSpec{{Name: "lead"}}}}
+	if err := c.Create(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Patch(ctx, b, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/owner":"ivo"}}}`))); err == nil {
+		t.Error("a bundle's owner was changed")
+	}
+	if err := c.Patch(ctx, b, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"suspend":true}}`))); err != nil {
+		t.Errorf("an ordinary change to a bundle was refused: %v", err)
 	}
 }
 
@@ -496,5 +510,53 @@ func TestLeaseMounts(t *testing.T) {
 	}
 	if err := manager.Create(ctx, pod(projected)); err == nil {
 		t.Error("a lease was projected")
+	}
+}
+
+// Only the work queue makes a pod a WorkJob's unit: no one else creates a
+// pod whose controller reference names a WorkJob, or adds one to a pod
+// later, so a host runner may read a pod's owner from the job it names.
+// Others still annotate unit pods, and anyone may drop the reference.
+func TestOnlyTheQueueMakesUnitPods(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "agents"}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-pods"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	manager, err := client.New(mc, client.Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	yes := true
+	ref := []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: "team",
+		UID: "6b1f0d4e-0000-4000-8000-000000000001", Controller: &yes}}
+	pod := func(name string, refs []metav1.OwnerReference) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "agents", Name: name, OwnerReferences: refs},
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "member", Image: "c4-agent"}}}}
+	}
+	enforced(t, "c4-host-pods", func(try int) error { return admin.Create(ctx, pod(fmt.Sprintf("forged-%d", try), ref)) })
+	unit := pod("lead-0", ref)
+	eventually(t, "the queue's unit pod", func() error { return manager.Create(ctx, unit) })
+	if err := admin.Patch(ctx, unit, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/output-epoch":"3"}}}`))); err != nil {
+		t.Errorf("annotating a unit pod: %v", err)
+	}
+
+	plain := pod("plain", nil)
+	if err := admin.Create(ctx, plain); err != nil {
+		t.Fatalf("a pod of no job: %v", err)
+	}
+	forge := client.MergeFrom(plain.DeepCopy())
+	plain.OwnerReferences = ref
+	if err := admin.Patch(ctx, plain, forge); err == nil || !strings.Contains(err.Error(), "c4-host-pods") {
+		t.Errorf("a WorkJob reference added to a pod later: %v", err)
+	}
+	orphan := client.MergeFrom(unit.DeepCopy())
+	unit.OwnerReferences = nil
+	if err := admin.Patch(ctx, unit, orphan); err != nil {
+		t.Errorf("dropping the reference: %v", err)
 	}
 }

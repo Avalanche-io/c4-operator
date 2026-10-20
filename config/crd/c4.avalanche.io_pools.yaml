@@ -97,6 +97,14 @@ spec:
                   NodeSelector picks the pool's nodes; it is also added to every unit
                   pod released into the pool.
                 type: object
+              owners:
+                description: |-
+                  Owners are the users whose jobs the pool runs, by each job's owner
+                  (c4.avalanche.io/owner, fixed when it is created): a host runner on a
+                  person's own machine runs only their work. Empty, any job may use it.
+                items:
+                  type: string
+                type: array
               slotsPerNode:
                 description: SlotsPerNode is each node's capacity in slots.
                 format: int32

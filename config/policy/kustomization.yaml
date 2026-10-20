@@ -4,3 +4,4 @@ resources:
 - host-runner.yaml
 - lease-mounts.yaml
 - submit-grants.yaml
+- host-pods.yaml

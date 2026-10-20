@@ -58,3 +58,19 @@ webhooks:
       name: c4-operator-webhook
       namespace: c4-system
       path: /mutate-workjob
+- name: agentbundles.c4.avalanche.io
+  admissionReviewVersions: [v1]
+  sideEffects: None
+  # A bundle is stamped as a job is: the manager copies its owner to the
+  # member jobs it makes, and host runners and owner-only pools read it.
+  failurePolicy: Fail
+  rules:
+  - operations: [CREATE]
+    apiGroups: [c4.avalanche.io]
+    apiVersions: [v1alpha1]
+    resources: [agentbundles]
+  clientConfig:
+    service:
+      name: c4-operator-webhook
+      namespace: c4-system
+      path: /mutate-agentbundle

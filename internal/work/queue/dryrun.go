@@ -95,6 +95,11 @@ func (q *Queue) DryRun(ctx context.Context, job *c4v1.WorkJob, project string) (
 	if len(v.pools) == 0 {
 		v.pools = d.Pools()
 	}
+	v.pools, v.unschedulable = q.servingPools(draft, v.pools)
+	if v.unschedulable != "" {
+		q.mu.Unlock()
+		return out, fmt.Errorf("%w: %s", ErrInvalidJob, v.unschedulable)
+	}
 	v.runnable = append([]int(nil), plan.Order...)
 	// A forecast waits for its work to come: planned, never released.
 	v.blocked = isForecast(draft)

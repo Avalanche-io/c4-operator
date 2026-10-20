@@ -1,7 +1,10 @@
 # A WorkJob's owner is set once, when it is created (by the
 # /mutate-workjob webhook from the requesting user, or by the manager for
-# jobs it creates for HUD and MCP users), and never changes: the HUD's
-# "My shots", the book and the job's signed record all read it.
+# jobs it creates for HUD and MCP users and for bundles), and never
+# changes: the HUD's "My shots", the book, the job's signed record, pools
+# with owners and host runners all read it. An AgentBundle's owner
+# (/mutate-agentbundle) is fixed the same way, since its member jobs carry
+# it.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -13,7 +16,7 @@ spec:
     - apiGroups: [c4.avalanche.io]
       apiVersions: [v1alpha1]
       operations: [UPDATE]
-      resources: [workjobs]
+      resources: [workjobs, agentbundles]
   variables:
   - name: before
     expression: "has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"
@@ -23,7 +26,7 @@ spec:
   - expression: >-
       ['c4.avalanche.io/owner', 'c4.avalanche.io/submitted-via', 'c4.avalanche.io/grant'].all(k,
         !(k in variables.before) || (k in variables.after && variables.after[k] == variables.before[k]))
-    message: a WorkJob's owner, how it was submitted and the grant it was submitted under are set at creation and cannot change
+    message: a WorkJob's or AgentBundle's owner, how it was submitted and the grant it was submitted under are set at creation and cannot change
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

@@ -95,3 +95,19 @@ func TestCredentialLeaseEnds(t *testing.T) {
 		t.Fatal("a holder-transfer lease kept its Secret on a farm that does not use the mode")
 	}
 }
+
+// A bundle's job is its owner's: pools with owners and host runners read
+// it there.
+func TestJobForBundleCarriesItsOwner(t *testing.T) {
+	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Name: "team", Namespace: "agents",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "joshua", c4v1.AnnotationSubmittedVia: "api"}},
+		Spec: c4v1.AgentBundleSpec{Pools: []string{"team"}, Members: []c4v1.AgentMemberSpec{{Name: "lead"}}}}
+	j := JobForBundle(b)
+	if j.Annotations[c4v1.AnnotationOwner] != "joshua" || j.Annotations[c4v1.AnnotationSubmittedVia] != "api" {
+		t.Fatalf("annotations %v", j.Annotations)
+	}
+	b.Annotations = nil
+	if j := JobForBundle(b); j.Annotations[c4v1.AnnotationOwner] != "" {
+		t.Fatalf("an owner from nowhere: %v", j.Annotations)
+	}
+}

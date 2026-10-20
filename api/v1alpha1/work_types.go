@@ -1514,6 +1514,11 @@ type PoolSpec struct {
 	// Burst makes the pool grow on request.
 	// +optional
 	Burst *PoolBurst `json:"burst,omitempty"`
+	// Owners are the users whose jobs the pool runs, by each job's owner
+	// (c4.avalanche.io/owner, fixed when it is created): a host runner on a
+	// person's own machine runs only their work. Empty, any job may use it.
+	// +optional
+	Owners []string `json:"owners,omitempty"`
 }
 
 // PoolBurst describes on-request capacity.
