@@ -177,7 +177,7 @@ func TestLoadScenario(t *testing.T) {
 		"submitted saltmarsh/style-train-v003           LoRA fine-tune · due Sat 04:10 EDT",
 		"          glassworks/gw010-light-v007          render · 60 frames · pool gpu · due 15:40 EDT",
 		"          copperline/ep102-sh030-review-v001   transcode · due 15:10 EDT",
-		"          saltmarsh/sm0150-comp-v002           comp · after sm0150-light-v004 · due 15:35 EDT",
+		"          saltmarsh/sm0150-comp-v002           comp · after sm0150-light-v004 · due 17:10 EDT",
 		"          saltmarsh/sm0160-light-v001          render · 48 frames · deadline suggested",
 	} {
 		if !strings.Contains(out.String(), want+"\n") {

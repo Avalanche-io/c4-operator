@@ -6,6 +6,10 @@
 # Saltmarsh frame it is given, which makes the sm0150 comp late; and a
 # series review runs early on a default deadline.
 #
+# The sizes are real for this farm: with the bad node out, sm0150's
+# lighting has two CPU slots and needs about 2h50m, so the comp due at +3h
+# is at risk until the wrangler frees capacity.
+#
 # Deadlines are offsets from the moment the scenario loads. Units are
 # stand-ins (standin.sh): each takes the time below and writes
 # placeholder files.
@@ -59,7 +63,7 @@ jobs:
     frames: 1001-1096
     frameSeconds: 208
     fail: *heron
-    due: +1h10m
+    due: +2h50m
   - name: sm0150-comp-v002
     project: saltmarsh
     as: artist
@@ -69,7 +73,7 @@ jobs:
     after: [sm0150-light-v004]
     frames: 1001-1096
     frameSeconds: 20
-    due: +1h25m
+    due: +3h
   - name: sm0160-light-v001
     project: saltmarsh
     as: artist
