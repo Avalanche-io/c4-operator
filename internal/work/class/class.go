@@ -89,6 +89,8 @@ type Wait struct {
 	Expect float64
 	// Choices, when set, are the decisions that complete it, besides fail.
 	Choices []string
+	// Reply: the decision carries content, the unit's output view.
+	Reply bool
 	// At is a clock wait's time.
 	At time.Time
 }

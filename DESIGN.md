@@ -1594,7 +1594,7 @@ and a sweep planner that spawns trials are all generators.
     the finish to 18.
 - **Waits** (PRIMITIVES Q6; the HUD word is "waits for"). A wait is a
   unit served by something other than a slot. A document's unit carries
-  `wait: {server, ask?, expect?, choices?}`, and `server` says what serves
+  `wait: {server, ask?, expect?, choices?, reply?}`, and `server` says what serves
   it: `person:<id>`, `party:<name>` or `clock:<RFC 3339 time>`.
   `predicate:<unit>` is designed and refused until it is built.
   - **No pod.** A wait creates no pod, holds no slot, and is never handed
@@ -1606,6 +1606,14 @@ and a sweep planner that spawns trials are all generators.
     carries out once, in token order. `do` is `approve`, one of the
     wait's `choices`, or `fail`, which fails it. A clock's wait completes
     at its time.
+  - **Replies.** A wait with `reply: true` asks for content with its
+    decision: a text, a file, an edited plan. The decision carries it as
+    a view (`reply.view`, or `reply.text`, which the HUD stores as a view
+    of one file, `reply.md`), and anything but `fail` without one leaves
+    the wait open. The reply is the wait unit's output, so the units it
+    holds up mount it with a `fromUnit` input, as they would a unit's
+    view; `waits[].view` shows it. A unit may read only a wait that
+    replies, and a clock cannot reply.
   - **Estimate.** A wait adds its expected time to the critical path and
     nothing to slot-seconds. The expected time is the median of the
     job's decided waits for the same server, else the unit's `expect`,

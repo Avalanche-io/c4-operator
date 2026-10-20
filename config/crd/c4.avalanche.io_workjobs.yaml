@@ -1401,6 +1401,11 @@ spec:
                       type: string
                     record:
                       type: string
+                    reply:
+                      description: |-
+                        Reply says the decision carries content; View is the reply, once
+                        decided.
+                      type: boolean
                     server:
                       description: |-
                         Server is who or what it waits for: person:<id>, party:<name> or
@@ -1414,6 +1419,8 @@ spec:
                     unit:
                       format: int32
                       type: integer
+                    view:
+                      type: string
                   required:
                   - server
                   - unit

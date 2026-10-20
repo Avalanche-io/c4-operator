@@ -45,6 +45,7 @@ type waitRec struct {
 	actor     string
 	at        time.Time
 	record    string
+	view      string // the decision's reply
 }
 
 func (w *waitRec) done() bool { return w.do != "" }
@@ -142,11 +143,19 @@ func applyDecides(j *c4v1.WorkJob, m *jobMem, now time.Time) {
 			if c := plan.Units[i].Wait.Choices; len(c) > 0 && r.Do != "fail" && !contains(c, r.Do) {
 				continue
 			}
+			if plan.Units[i].Wait.Reply && r.Do != "fail" && r.View == "" {
+				continue // a wait that asks for a reply completes only with one
+			}
 			w.do, w.note, w.actor, w.at, w.record = r.Do, r.Note, r.Actor, at, r.Record
 			if r.Do == "fail" {
 				m.failed[i] = true
 			} else {
 				m.succeeded[i] = true
+				if r.View != "" {
+					// The reply is the wait unit's output: what reads it
+					// mounts it (graph.go).
+					w.view, m.unitOut[i] = r.View, r.View
+				}
 			}
 		case m.flagged(i):
 			w := ws.recs[i]
@@ -259,9 +268,9 @@ func waitStatus(m *jobMem, now time.Time) []c4v1.WorkWait {
 		w := ws.recs[i]
 		u := plan.Units[i]
 		ww := c4v1.WorkWait{Unit: int32(i), Name: u.Name, Server: w.server, Escalated: w.escalated,
-			Do: w.do, Note: w.note, Actor: w.actor, Record: w.record}
+			Do: w.do, Note: w.note, Actor: w.actor, Record: w.record, View: w.view}
 		if u.Wait != nil {
-			ww.Ask, ww.Choices = u.Wait.Ask, u.Wait.Choices
+			ww.Ask, ww.Choices, ww.Reply = u.Wait.Ask, u.Wait.Choices, u.Wait.Reply
 		} else if r := m.reviews[i]; r != nil {
 			ww.Ask = r.Why
 		}
@@ -284,7 +293,13 @@ func (m *jobMem) loadWaits(st *c4v1.WorkJobStatus) {
 	ws := m.waitRecs()
 	ws.decided = st.Decided
 	for _, w := range st.Waits {
-		r := &waitRec{escalated: w.Escalated, server: w.Server, do: w.Do, note: w.Note, actor: w.Actor, record: w.Record}
+		r := &waitRec{escalated: w.Escalated, server: w.Server, do: w.Do, note: w.Note, actor: w.Actor, record: w.Record, view: w.View}
+		if w.View != "" {
+			if m.unitOut == nil {
+				m.unitOut = map[int]string{}
+			}
+			m.unitOut[int(w.Unit)] = w.View
+		}
 		if w.Since != nil {
 			r.since = w.Since.Time
 		}

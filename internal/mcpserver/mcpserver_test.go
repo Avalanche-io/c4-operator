@@ -214,6 +214,16 @@ func TestControlsPostAsTheCaller(t *testing.T) {
 		!strings.Contains(hud.posts[0], `"holdStop":true`) {
 		t.Fatalf("posts %v", hud.posts)
 	}
+	hud.mu.Unlock()
+	res, out = call(t, cs, "c4_decide", map[string]any{"namespace": "show-a", "name": "sh010", "unit": "brief", "do": "approve", "reply_text": "Keep it whole."})
+	if res.IsError {
+		t.Fatalf("decide: %v %q", out, text(res))
+	}
+	hud.mu.Lock()
+	if len(hud.posts) != 2 || !strings.Contains(hud.posts[1], "/api/v1/jobs/show-a/sh010/decide") ||
+		!strings.Contains(hud.posts[1], `"reply":{"text":"Keep it whole.","view":""}`) {
+		t.Fatalf("posts %v", hud.posts)
+	}
 	for _, a := range hud.auth {
 		if a != "Bearer tok-maya" {
 			t.Fatalf("a request went to the HUD as %q", a)

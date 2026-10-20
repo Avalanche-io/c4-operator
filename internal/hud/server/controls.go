@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -15,9 +16,12 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/Avalanche-io/c4"
+
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 	"github.com/Avalanche-io/c4-operator/work/forecast"
 	"github.com/Avalanche-io/c4-operator/work/order"
@@ -594,6 +598,13 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		Unit json.RawMessage `json:"unit"`
 		Do   string          `json:"do"`
 		Note string          `json:"note"`
+		// Reply is the decision's content, for a wait that asks for one:
+		// a view already stored, or a text the HUD stores as a view of
+		// one file, reply.md.
+		Reply *struct {
+			View string `json:"view"`
+			Text string `json:"text"`
+		} `json:"reply"`
 	}
 	if err := decodeBody(r, &body); err != nil {
 		fail(w, http.StatusBadRequest, "body: %v", err)
@@ -635,6 +646,31 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "%v", err)
 		return
 	}
+	reply := ""
+	switch {
+	case body.Reply != nil && !wait.Reply:
+		fail(w, http.StatusBadRequest, "reply: this wait takes no reply")
+		return
+	case wait.Reply && body.Do != "fail" && (body.Reply == nil || body.Reply.View == "" && body.Reply.Text == ""):
+		fail(w, http.StatusBadRequest, "reply: this wait asks for one: a view or a text")
+		return
+	case body.Reply != nil && body.Reply.View != "" && body.Reply.Text != "":
+		fail(w, http.StatusBadRequest, "reply: a view or a text, not both")
+		return
+	case body.Reply != nil && body.Reply.View != "":
+		if _, err := c4.Parse(body.Reply.View); err != nil {
+			fail(w, http.StatusBadRequest, "reply.view %q is not a C4 ID", body.Reply.View)
+			return
+		}
+		reply = body.Reply.View
+	case body.Reply != nil && body.Reply.Text != "":
+		id, err := s.textView(ctx, rec.project, body.Reply.Text)
+		if err != nil {
+			fail(w, http.StatusBadGateway, "reply: storing the text: %v", err)
+			return
+		}
+		reply = id
+	}
 	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
 	if err != nil {
 		fail(w, http.StatusNotFound, "%v", err)
@@ -654,6 +690,10 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	if body.Note != "" {
 		change["note"] = body.Note
 	}
+	if reply != "" {
+		// The signed decision names its reply.
+		change["reply"] = reply
+	}
 	id, err := s.controlJob(ctx, r, v, rec, j, before, "decide", change)
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
@@ -662,7 +702,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	var reqs []c4v1.WorkDecideRequest
 	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationDecide]), &reqs)
 	reqs = append(reqs, c4v1.WorkDecideRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Do: body.Do,
-		Note: body.Note, Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
+		Note: body.Note, Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id, View: reply})
 	if len(reqs) > 16 {
 		reqs = reqs[len(reqs)-16:]
 	}
@@ -689,4 +729,33 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		out["record"] = id
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// textView stores a text as a view of one file, reply.md, in the project's
+// store, and returns the view's C4 ID.
+func (s *Server) textView(ctx context.Context, project, text string) (string, error) {
+	if s.Stores == nil {
+		return "", errors.New("no store")
+	}
+	st, err := s.Stores(ctx, project)
+	if err != nil {
+		return "", err
+	}
+	if st == nil {
+		return "", fmt.Errorf("project %s has no store", project)
+	}
+	b := []byte(text)
+	id, err := st.PutBytes(ctx, b)
+	if err != nil {
+		return "", err
+	}
+	root := c4view.NewNode("")
+	root.Files["reply.md"] = c4view.FileEntry("reply.md", int64(len(b)), id, false)
+	v := c4view.FromNode(root)
+	for _, rec := range v.Records() {
+		if _, err := st.PutBytes(ctx, rec.Data); err != nil {
+			return "", err
+		}
+	}
+	return v.ID.String(), nil
 }

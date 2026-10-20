@@ -691,4 +691,8 @@ type Wait struct {
 	Actor  string     `json:"actor,omitempty"`
 	At     *time.Time `json:"at,omitempty"`
 	Record string     `json:"record,omitempty"`
+	// Reply says the decision carries content; View is the reply once
+	// decided, mounted by the units the wait holds up.
+	Reply bool   `json:"reply,omitempty"`
+	View  string `json:"view,omitempty"`
 }

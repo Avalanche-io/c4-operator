@@ -1010,6 +1010,10 @@ type WorkDecideRequest struct {
 	// Record is the C4 ID of the signed decision record.
 	// +optional
 	Record string `json:"record,omitempty"`
+	// View is the decision's reply, a view's C4 ID, for a wait that asks
+	// for one: the wait unit's output, which the units it holds up mount.
+	// +optional
+	View string `json:"view,omitempty"`
 }
 
 // WorkWait is a unit that waits for someone or something: a person, an
@@ -1051,6 +1055,12 @@ type WorkWait struct {
 	At *metav1.Time `json:"at,omitempty"`
 	// +optional
 	Record string `json:"record,omitempty"`
+	// Reply says the decision carries content; View is the reply, once
+	// decided.
+	// +optional
+	Reply bool `json:"reply,omitempty"`
+	// +optional
+	View string `json:"view,omitempty"`
 }
 
 // WorkAck is a standing acknowledgement of failed units.

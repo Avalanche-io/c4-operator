@@ -21,9 +21,9 @@ queue would refuse is an error here, not at run time.
 The core (`internal/plan`) knows blocks, edges, citations, waits and notes,
 and nothing about any one project. A plan reaches it through an adapter:
 
-| format    | `PLAN` is   | for                                                                                         |
-| --------- | ----------- | ------------------------------------------------------------------------------------------- |
-| `file`    | a file      | a plan written as data: the format to keep a plan in                                        |
+| format    | `PLAN` is   | for                                                                       |
+| --------- | ----------- | ------------------------------------------------------------------------- |
+| `file`    | a file      | a plan written as data: the format to keep a plan in                      |
 | `lanemap` | a directory | a plan written as prose in the lane-map layout, read by sentence patterns |
 
 Without `--format`, a file is read as `file` and a directory as `lanemap`.
@@ -136,21 +136,23 @@ run after it:
 
 `server` is `person:<id>`, `party:<name>` or `clock:<time>`. `expect` is
 the expected wait in seconds, used until the job has measured that
-server's own decisions.
+server's own decisions. `reply: true` asks for content with the decision
+(a text, a file, an edited plan), which the blocks after it read as the
+wait's output.
 
 ## The lane-map layout
 
 The `lanemap` adapter (`internal/plan/lanemap`) reads a plan written as a
 lane map: `LANES.md`, a milestone file (`M1.md`), and `charters/`.
 
-| from                                        | it reads                                                                                                                                                                                                                                    |
-| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `LANES.md`, the lane tables                 | each lane, its chapter (the block's row), its rule count, status (merged, chartered), charter, the rule families it owns, the M2 column's `after` lists                                                                                     |
+| from                                        | it reads                                                                                                                                                                                                                                           |
+| ------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LANES.md`, the lane tables                 | each lane, its chapter (the block's row), its rule count, status (merged, chartered), charter, the rule families it owns, the M2 column's `after` lists                                                                                            |
 | `LANES.md`, prose and the hard orderings    | "X follows Y", "X cannot start before Y merges", "X precedes Y", "X lands before Y starts", "X starts after Y merges", "X starts when Y … landed", families that "come after" other families; ranges (`C4.1 … C4.6`) and chapter references (`C3`) |
-| `LANES.md`, the run order block             | each lane's `runOrder`                                                                                                                                                                                                                      |
-| `LANES.md`, "… as fillers"                  | `filler: true`                                                                                                                                                                                                                              |
-| the milestone file, "Order and parallelism" | the waves, "(after X)", "X, then Y", "Z … once Y lands"                                                                                                                                                                                     |
-| each charter                                | `- **Model:**`, `- **Refutation:**`, and the paths under `- **Grants, by file:**`, which become the block's `holds`                                                                                                                          |
+| `LANES.md`, the run order block             | each lane's `runOrder`                                                                                                                                                                                                                             |
+| `LANES.md`, "… as fillers"                  | `filler: true`                                                                                                                                                                                                                                     |
+| the milestone file, "Order and parallelism" | the waves, "(after X)", "X, then Y", "Z … once Y lands"                                                                                                                                                                                            |
+| each charter                                | `- **Model:**`, `- **Refutation:**`, and the paths under `- **Grants, by file:**`, which become the block's `holds`                                                                                                                                |
 
 A lane whose row says **DEFERRED TO M2** is left out of the milestone. Its
 keys name the lane's kind (`lane`, `infra-lane`, `frontend-lane`,

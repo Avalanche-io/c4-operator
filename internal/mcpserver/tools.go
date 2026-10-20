@@ -98,7 +98,7 @@ func Tools(c *Client) []Tool {
 			destructive, c.requeue),
 		tool("c4_acknowledge_units", "Take, assign or accept failed units", "Say a person has failed units in hand so the farm stops asking: acknowledge (you take them), assign (to assignee), or accept (the failure stands; the units count as done, so nothing waits on them). Recorded with who and when, and signed in the book. A requeue clears it. Units is a set like \"14\" or \"0-9,14\"; only failed units are taken.",
 			idempotent, c.acknowledge),
-		tool("c4_decide", "Decide what waits for a person", "Decide a job's wait for a person (a ruling, an approval, an outside party's answer): do is approve, one of the wait's choices, or fail. Or decide a unit a review escalated: accept (it stands), rework (it runs again) or fail. The job's waits, and whether each holds up work, are in c4_job_detail. Signed and recorded in the book.",
+		tool("c4_decide", "Decide what waits for a person", "Decide a job's wait for a person (a ruling, an approval, an outside party's answer): do is approve, one of the wait's choices, or fail. A wait that asks for a reply (reply in c4_job_detail's waits) takes one with the decision, reply_text or reply_view, which the units it holds up read. Or decide a unit a review escalated: accept (it stands), rework (it runs again) or fail. The job's waits, and whether each holds up work, are in c4_job_detail. Signed and recorded in the book.",
 			idempotent, c.decide),
 		tool("c4_avoid_node", "Avoid or allow a node for a job", "Keep a job's units off a node (a bad worker for that job), or allow it again.",
 			idempotent, c.avoidNode),
@@ -668,6 +668,9 @@ type DecideIn struct {
 	Unit string `json:"unit" jsonschema:"the waiting unit's name or index"`
 	Do   string `json:"do" jsonschema:"approve, one of the wait's choices, or fail; for an escalated unit accept, rework or fail"`
 	Note string `json:"note,omitempty" jsonschema:"why, for the book"`
+	// A wait that asks for a reply completes only with one.
+	ReplyText string `json:"reply_text,omitempty" jsonschema:"the decision's content, for a wait that asks for a reply: stored as reply.md, which the units it holds up read"`
+	ReplyView string `json:"reply_view,omitempty" jsonschema:"the decision's content as a view already in the project's store (its C4 ID), instead of reply_text"`
 }
 
 func (c *Client) decide(ctx context.Context, _ *mcp.CallToolRequest, in DecideIn) (*mcp.CallToolResult, Done, error) {
@@ -678,6 +681,9 @@ func (c *Client) decide(ctx context.Context, _ *mcp.CallToolRequest, in DecideIn
 	body := map[string]any{"unit": in.Unit, "do": in.Do}
 	if in.Note != "" {
 		body["note"] = in.Note
+	}
+	if in.ReplyText != "" || in.ReplyView != "" {
+		body["reply"] = map[string]string{"text": in.ReplyText, "view": in.ReplyView}
 	}
 	return c.control(ctx, p+"/decide", body)
 }

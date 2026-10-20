@@ -12,6 +12,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
@@ -19,6 +20,12 @@ import (
 // decide adds a decision to a job's AnnotationDecide list, as the HUD or
 // MCP does.
 func decide(t *testing.T, ns, name, unit, do string, at time.Time) {
+	t.Helper()
+	decideReply(t, ns, name, unit, do, "", at)
+}
+
+// decideReply is decide with the decision's reply, a view.
+func decideReply(t *testing.T, ns, name, unit, do, view string, at time.Time) {
 	t.Helper()
 	j := get(t, ns, name)
 	var reqs []c4v1.WorkDecideRequest
@@ -28,7 +35,7 @@ func decide(t *testing.T, ns, name, unit, do string, at time.Time) {
 		}
 	}
 	reqs = append(reqs, c4v1.WorkDecideRequest{Token: strconv.FormatInt(at.UnixNano(), 36), Unit: unit, Do: do,
-		Actor: "owner", Note: "ruled", At: metav1.Time{Time: at}})
+		Actor: "owner", Note: "ruled", At: metav1.Time{Time: at}, View: view})
 	b, _ := json.Marshal(reqs)
 	if j.Annotations == nil {
 		j.Annotations = map[string]string{}
@@ -117,6 +124,60 @@ func TestWaitForAPerson(t *testing.T) {
 	}
 	if c := meta.FindStatusCondition(got.Status.Conditions, c4v1.ConditionNeedsPerson); c != nil {
 		t.Fatalf("still needs a person: %+v", c)
+	}
+}
+
+// A wait that asks for a reply completes only with one: the reply is the
+// wait unit's output, which the unit reading it mounts, and survives a
+// restart of the queue.
+func TestWaitWithAReply(t *testing.T) {
+	ns, q, now := graphJob(t, "briefed", func(time.Time) string {
+		return `{"name": "lane", "label": "lane"},
+		{"name": "brief", "after": ["lane"], "wait": {"server": "person:owner", "ask": "what should the draft say?", "reply": true}},
+		{"name": "draft", "after": ["brief"], "inputs": [{"fromUnit": "brief", "mountPath": "/brief"}]}`
+	}, 72*time.Hour)
+	// units: 0 root, 1 lane, 2 brief, 3 draft
+	ctx := context.Background()
+	finishUnit(t, now, ns, "briefed", 1, nil)
+	tick(t, q)
+	tick(t, q)
+	got := get(t, ns, "briefed")
+	if len(got.Status.Waits) != 1 || !got.Status.Waits[0].Reply || got.Status.Waits[0].View != "" {
+		t.Fatalf("waits %+v", got.Status.Waits)
+	}
+
+	// A decision without a reply leaves the wait open.
+	*now = now.Add(time.Hour)
+	decide(t, ns, "briefed", "brief", "approve", *now)
+	tick(t, q)
+	tick(t, q)
+	if got = get(t, ns, "briefed"); !slices.Equal(states(t, got, "waits"), []int{2}) || got.Status.Waits[0].Do != "" {
+		t.Fatalf("a decision without a reply: states %v, wait %+v", got.Status.UnitStates, got.Status.Waits[0])
+	}
+
+	*now = now.Add(time.Hour)
+	reply := viewID("c4brief")
+	decideReply(t, ns, "briefed", "brief", "approve", reply, now.Add(time.Second))
+	tick(t, q)
+	tick(t, q)
+	got = get(t, ns, "briefed")
+	if !slices.Contains(states(t, got, "succeeded"), 2) || got.Status.Waits[0].View != reply || got.Status.UnitOutputs["2"] != reply {
+		t.Fatalf("after the reply: states %v, wait %+v, outputs %v", got.Status.UnitStates, got.Status.Waits[0], got.Status.UnitOutputs)
+	}
+	var m c4v1.Materialization
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: unitInputName("briefed", 2)}, &m); err != nil || m.Spec.Source.ID != reply {
+		t.Fatalf("draft's input %+v %v", m.Spec, err)
+	}
+
+	// A restart rebuilds the reply from status.
+	q = &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
+	tick(t, q)
+	got = get(t, ns, "briefed")
+	if got.Status.Waits[0].View != reply || got.Status.UnitOutputs["2"] != reply || !slices.Contains(states(t, got, "succeeded"), 2) {
+		t.Fatalf("after a restart: wait %+v, outputs %v", got.Status.Waits[0], got.Status.UnitOutputs)
+	}
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: unitInputName("briefed", 2)}, &m); err != nil || m.Spec.Source.ID != reply {
+		t.Fatalf("after a restart, draft's input %+v %v", m.Spec, err)
 	}
 }
 

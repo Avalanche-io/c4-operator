@@ -127,6 +127,10 @@ type DocWait struct {
 	Ask     string   `json:"ask,omitempty"`
 	Expect  float64  `json:"expect,omitempty"` // seconds
 	Choices []string `json:"choices,omitempty"`
+	// Reply says the decision carries content (a text, a file, an edited
+	// plan): it becomes the wait unit's output view, which the units it
+	// holds up mount with a fromUnit input.
+	Reply bool `json:"reply,omitempty"`
 }
 
 // docWait checks a document's wait and turns it into the unit's.
@@ -138,7 +142,7 @@ func docWait(name string, w *DocWait, planned bool) (*Wait, error) {
 		return nil, fmt.Errorf("unit %s: negative expect", name)
 	}
 	kind, who, _ := strings.Cut(w.Server, ":")
-	out := &Wait{Server: w.Server, Ask: w.Ask, Expect: w.Expect, Choices: w.Choices}
+	out := &Wait{Server: w.Server, Ask: w.Ask, Expect: w.Expect, Choices: w.Choices, Reply: w.Reply}
 	switch {
 	case who == "":
 		return nil, fmt.Errorf("unit %s waits for %q: want person:<id>, party:<name> or clock:<time>", name, w.Server)
@@ -149,6 +153,9 @@ func docWait(name string, w *DocWait, planned bool) (*Wait, error) {
 			return nil, fmt.Errorf("unit %s waits for a clock at %q: %v", name, who, err)
 		}
 		out.At = t
+		if w.Reply {
+			return nil, fmt.Errorf("unit %s waits for a clock, which cannot reply", name)
+		}
 	case kind == "predicate":
 		return nil, fmt.Errorf("unit %s waits for a predicate: predicate waits are designed, not built", name)
 	default:
@@ -316,6 +323,15 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 			u.Env = append(u.Env, env(k, du.Env[k]))
 		}
 		x.Units = append(x.Units, u)
+	}
+	// A unit may read a wait of the document only if its decision carries
+	// a reply: otherwise there is no view to mount.
+	for _, u := range x.Units {
+		for _, in := range u.Inputs {
+			if k := in.From - first; k >= 0 && k < len(x.Units) && x.Units[k].Wait != nil && !x.Units[k].Wait.Reply {
+				return nil, fmt.Errorf("unit %s reads %s, a wait whose decision carries no reply (wait.reply)", u.Name, x.Units[k].Name)
+			}
+		}
 	}
 	for _, e := range d.Edges {
 		f, ok1 := resolve(e.From)
