@@ -319,8 +319,8 @@ shot() { # NAME URL WIDTH HEIGHT: one capture; the browser exits by itself
     --virtual-time-budget=9000 --run-all-compositor-stages-before-draw \
     --screenshot="$SHOTS/$1.png" "$2" >/dev/null 2>&1
 }
-capture() { # STEP JOB: the HUD's queue and job view as the wrangler, the job as the supervisor, and Flow
-  shot "$1-hud-queue" "$HUD/?as=wrangler&static=1#/queue" 1600 1000
+capture() { # STEP JOB: the HUD queue (the supervisor sees the show only), the job as the wrangler and the supervisor, and Flow
+  shot "$1-hud-queue" "$HUD/?as=dana&static=1#/queue" 1600 1000
   shot "$1-hud-job" "$HUD/?as=wrangler&static=1#/job/$NS/$2" 1600 1300
   shot "$1-hud-supervisor" "$HUD/?as=dana&static=1#/job/$NS/$2" 1600 1300
   shot "$1-flow" "$FF/demo/" 1280 900
