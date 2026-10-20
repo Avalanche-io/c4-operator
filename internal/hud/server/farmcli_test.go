@@ -210,7 +210,7 @@ func TestFarmCLISubmitsAFile(t *testing.T) {
 	if err != nil || len(plan.Jobs) != 2 || plan.Jobs[0].Name != "sm0140-proxies-v001" || plan.Jobs[1].Name != "sm0140-movie-v001" {
 		t.Fatalf("plan %+v %v\n%s", plan, err, out.String())
 	}
-	if !strings.Contains(out.String(), "uploaded  2 files from .") || !strings.Contains(out.String(), "sm0140-movie-v001     ") || !strings.Contains(out.String(), "note      ") {
+	if !strings.Contains(out.String(), "  files     2 files found · ") || strings.Contains(out.String(), "uploaded") || !strings.Contains(out.String(), "sm0140-movie-v001   ") || !strings.Contains(out.String(), "note      ") {
 		t.Errorf("plan output:\n%s", out.String())
 	}
 	out.Reset()
@@ -218,7 +218,7 @@ func TestFarmCLISubmitsAFile(t *testing.T) {
 	if err != nil || len(done.Jobs) != 2 {
 		t.Fatalf("submit %+v %v\n%s", done, err, out.String())
 	}
-	if !strings.Contains(out.String(), "queued    show-a/sm0140-proxies-v001\nqueued    show-a/sm0140-movie-v001\n") {
+	if !strings.Contains(out.String(), "uploaded  2 files · 362 B\nqueued    show-a/sm0140-proxies-v001\nqueued    show-a/sm0140-movie-v001\nHUD       ") {
 		t.Errorf("submit output:\n%s", out.String())
 	}
 	var movie c4v1.WorkJob

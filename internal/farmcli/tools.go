@@ -330,19 +330,19 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	if project == "" {
 		return nil, errors.New("the submission names no project, and neither does --project")
 	}
-	if tree := doc.str("tree"); localTree(tree) {
-		dir := tree
+	// a folder here is named by its ID, as the farm will name it; the farm
+	// plans with the ID alone, so nothing is sent until the plan is accepted
+	var tree *folderTree
+	if t := doc.str("tree"); localTree(t) {
+		dir := t
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(base, dir)
 		}
-		id, sent, err := putTree(ctx, c, project, dir)
-		if err != nil {
-			return nil, fmt.Errorf("tree %s: %w", tree, err)
+		var err error
+		if tree, err = scanTree(ctx, c, project, dir); err != nil {
+			return nil, fmt.Errorf("tree %s: %w", t, err)
 		}
-		if sent > 0 {
-			o.printf("uploaded  %s from %s\n", plural(sent, "file", "files"), tree)
-		}
-		doc.setString("tree", id)
+		doc.setString("tree", tree.v.ID.String())
 		// the paths the tree's scenes hold were written under it, unless
 		// the file says where they were written
 		if abs, err := filepath.Abs(dir); err == nil && doc.str("root") == "" {
@@ -364,7 +364,7 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	if a.Explain && plan.Explain != "" {
 		o.printf("%s", strings.TrimRight(plan.Explain, "\n")+"\n")
 	} else {
-		o.printJobs(plan.Jobs)
+		o.printJobs(plan.Jobs, tree)
 	}
 	for _, w := range plan.Warnings {
 		o.printf("note      %s\n", w)
@@ -374,6 +374,18 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	}
 	if !a.Yes && !o.confirm("Submit?") {
 		return nil, errors.New("not submitted")
+	}
+	if tree != nil {
+		sent, sentBytes, err := upload(ctx, c, project, tree.dir, tree.v, tree.need)
+		if err != nil {
+			return nil, err
+		}
+		if err := recordView(ctx, c, project, tree.v); err != nil {
+			return nil, err
+		}
+		if sent > 0 {
+			o.printf("uploaded  %s · %s\n", plural(sent, "file", "files"), Bytes(sentBytes))
+		}
 	}
 	var done api.SubmissionResponse
 	req.DryRun, req.Explain = false, false
@@ -386,23 +398,74 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	for _, j := range done.Jobs {
 		o.printf("queued    %s/%s\n", j.Namespace, j.Name)
 	}
+	if n := len(done.Jobs); n > 0 && done.Jobs[n-1].Link != "" {
+		o.printf("HUD       %s\n", c.Web(done.Jobs[n-1].Link, nil))
+	}
 	return &done, nil
 }
 
-// printJobs is the plan of a submission's jobs: each job's line, then its
-// estimate.
-func (o Out) printJobs(jobs []api.SubmissionJob) {
+// folderTree is a submission's tree from a folder on this machine: its
+// view, named here as the farm names it, and the objects the farm lacks.
+type folderTree struct {
+	dir       string
+	v         *view.View
+	need      map[c4.ID]bool
+	needBytes int64
+}
+
+func scanTree(ctx context.Context, c *Client, project, dir string) (*folderTree, error) {
+	v, err := view.ScanDir(dir)
+	if err != nil {
+		return nil, err
+	}
+	need, err := missingIDs(ctx, c, project, v.Objects())
+	if err != nil {
+		return nil, err
+	}
+	t := &folderTree{dir: dir, v: v, need: need}
+	for _, ob := range v.Objects() {
+		if need[ob.ID] {
+			t.needBytes += ob.Size
+		}
+	}
+	return t, nil
+}
+
+// printJobs is the plan of a submission's jobs: each job's line and its
+// estimate, and what of a folder tree is to be sent.
+func (o Out) printJobs(jobs []api.SubmissionJob, tree *folderTree) {
 	w := 0
 	for _, j := range jobs {
 		w = max(w, len(j.Name))
 	}
-	for _, j := range jobs {
+	for i, j := range jobs {
 		o.printf("%-*s   %s\n", w, j.Name, j.What)
-		if j.Estimate != nil {
+		if i == 0 && tree != nil {
+			o.printFiles(tree)
+		}
+		switch {
+		case j.Estimate != nil:
 			o.printPlan(j.Estimate, nil)
+		case j.EstimateError != "":
+			o.printf("  estimate  none yet: %s\n", j.EstimateError)
 		}
 	}
 	o.printf("\n")
+}
+
+// printFiles is the files line of a plan: what the folder holds, and what
+// of it the farm lacks.
+func (o Out) printFiles(t *folderTree) {
+	tot := t.v.Totals()
+	upl := plural(len(t.need), "to upload", "to upload")
+	if len(t.need) > 0 {
+		upl += " (" + Bytes(t.needBytes) + ")"
+	}
+	if have := int(tot.UniqueObjects) - len(t.need); have > 0 {
+		o.printf("  files     %s found · %d already on the farm · %s\n", plural(int(tot.Files), "file", "files"), have, upl)
+		return
+	}
+	o.printf("  files     %s found · %s · %s\n", plural(int(tot.Files), "file", "files"), Bytes(tot.Bytes), upl)
 }
 
 // localTree says a submission's tree is a folder on this machine, not a C4
@@ -415,27 +478,6 @@ func localTree(s string) bool {
 		return false
 	}
 	return true
-}
-
-// putTree uploads a folder's objects the farm lacks, records it as a view,
-// and returns its ID and how many files were sent.
-func putTree(ctx context.Context, c *Client, project, dir string) (string, int, error) {
-	v, err := view.ScanDir(dir)
-	if err != nil {
-		return "", 0, err
-	}
-	need, err := missingIDs(ctx, c, project, v.Objects())
-	if err != nil {
-		return "", 0, err
-	}
-	sent, _, err := upload(ctx, c, project, dir, v, need)
-	if err != nil {
-		return "", 0, err
-	}
-	if err := recordView(ctx, c, project, v); err != nil {
-		return "", 0, err
-	}
-	return v.ID.String(), sent, nil
 }
 
 // doChecked is Do for calls the farm may answer with field errors (422):
