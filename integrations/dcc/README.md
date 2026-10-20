@@ -11,6 +11,7 @@ Kubernetes anywhere.
 | `nuke/`     | the Nuke panel: each Write node is a job                                               |
 | `houdini/`  | the Solaris C4 Render LOP and the C4 Submit ROP                                        |
 | `maya/`     | the Maya window: each renderable render layer is a job                                 |
+| `blender/`  | the Blender add-on: a C4 Farm panel in Render Properties; each view layer is a job     |
 
 Each panel has a `README.md` (install and use) and a `CHECKLIST.md` (what to
 check by hand in the real application). Their tests run against fakes of
