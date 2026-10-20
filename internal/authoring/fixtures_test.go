@@ -18,7 +18,10 @@ import (
 type fixtureFarm struct {
 	Projects map[string]struct {
 		Milestones map[string]string `json:"milestones"`
-		Jobs       []string          `json:"jobs"`
+		Shots      map[string]struct {
+			Cut string `json:"cut"`
+		} `json:"shots"`
+		Jobs []string `json:"jobs"`
 	} `json:"projects"`
 	PeopleL  []string          `json:"people"`
 	RolesL   []string          `json:"roles"`

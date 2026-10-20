@@ -4,9 +4,11 @@
 projects:
   saltmarsh:
     milestones: {dailies: "2026-10-22T18:00:00-04:00", client-review: "2026-10-23T10:00:00-04:00"}
+    shots: {sm0140: {cut: 1001-1048}, sm0220: {cut: 1001-1240}}
     jobs: [sm0140-light-v003, sm0100-light-v002]
   textkit:
     milestones: {}
+    shots: {}
     jobs: []
 people: [noor, maya, owner]
 roles: [comp-supervisor, lighting-supervisor, lighting-lead]

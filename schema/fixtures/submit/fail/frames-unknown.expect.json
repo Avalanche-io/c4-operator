@@ -1,0 +1,11 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.light.frames",
+      "message": "light needs frames: sm9999 has no cut on the farm and light follows no job with frames",
+      "fix": "add frames: (as 1001-1240)"
+    }
+  ],
+  "note": "A frames job's frames default to those of the one frames job it follows, else the shot's cut, else this refusal."
+}

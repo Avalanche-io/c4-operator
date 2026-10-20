@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.merge.frames",
+      "message": "merge takes no frames: it is a once tool with no frame parameter",
+      "fix": "remove frames:"
+    }
+  ]
+}
