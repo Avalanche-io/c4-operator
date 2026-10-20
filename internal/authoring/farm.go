@@ -44,6 +44,12 @@ type Farm interface {
 	Root(project string) string
 	// Namespace is the project's namespace for a submission's jobs.
 	Namespace(project string) string
+	// Cut is a shot's frames as the farm knows them (a frame list), or
+	// "": a frames job given no frames of its own takes them.
+	Cut(project, shot string) string
+	// Location is the project's time zone, which a due without one is
+	// read in (nil: UTC).
+	Location(project string) *time.Location
 }
 
 func toolNames(refs []ToolRef) []string {

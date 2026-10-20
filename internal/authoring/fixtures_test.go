@@ -83,11 +83,23 @@ func (f *fixtureFarm) Milestones(ns string) map[string]time.Time {
 	return out
 }
 
-func (f *fixtureFarm) People() []string          { return f.PeopleL }
-func (f *fixtureFarm) Roles() []string           { return f.RolesL }
-func (f *fixtureFarm) Parties() []string         { return f.PartiesL }
-func (f *fixtureFarm) Root(string) string        { return "/show" }
-func (f *fixtureFarm) Namespace(p string) string { return p }
+func (f *fixtureFarm) People() []string   { return f.PeopleL }
+func (f *fixtureFarm) Roles() []string    { return f.RolesL }
+func (f *fixtureFarm) Parties() []string  { return f.PartiesL }
+func (f *fixtureFarm) Root(string) string { return "/show" }
+func (f *fixtureFarm) Namespace(p string) string {
+	if _, ok := f.Projects[p]; !ok {
+		return ""
+	}
+	return p
+}
+func (f *fixtureFarm) Cut(p, shot string) string { return f.Projects[p].Shots[shot].Cut }
+
+// The fixtures' milestones are on New York time.
+func (f *fixtureFarm) Location(string) *time.Location {
+	loc, _ := time.LoadLocation("America/New_York")
+	return loc
+}
 
 func cases(t *testing.T) []schema.Case {
 	t.Helper()
@@ -155,16 +167,16 @@ func TestLowerTest(t *testing.T) {
 	farm := loadFarm(t)
 	lowered := 0
 	for name, tl := range farm.tools {
-		if tl.Test == nil || (tl.Kind != "frames" && tl.Kind != "once") || len(refusals(tl)) > 0 {
+		if tl.Test == nil || (tl.Kind != "frames" && tl.Kind != "once") || len(ToolRefusals(tl)) > 0 {
 			continue
 		}
 		_, ref, _ := farm.Tool("saltmarsh", name, "")
-		req, err := LowerTest(tl, ref, "c4testtree", "saltmarsh", "saltmarsh", "/show")
-		if err != nil {
-			t.Errorf("%s: %v", name, err)
+		req, errs := LowerTest(tl, ref, "c4testtree", "saltmarsh", "saltmarsh", "/show")
+		if len(errs) > 0 {
+			t.Errorf("%s: %v", name, errs)
 			continue
 		}
-		if req.Name != name+"-test-"+ref.Version || len(req.Inputs) != 2 || req.Inputs[0].MountPath != ToolsMount ||
+		if req.Name != TestJobName(name, ref) || len(req.Inputs) != 2 || req.Inputs[0].MountPath != ToolsMount ||
 			!req.Inputs[0].ReadOnly || req.Inputs[1].View != "c4testtree" || req.Inputs[1].MountPath != "/show" || req.Inputs[1].ReadOnly {
 			t.Errorf("%s: %+v", name, req)
 		}
@@ -178,4 +190,24 @@ func TestLowerTest(t *testing.T) {
 		t.Fatal("no tool's test was lowered")
 	}
 	t.Logf("%d tools' tests lowered", lowered)
+}
+
+// A test job's name tells two trees of the same version apart (a farm
+// tool's v1 and a project's), and stays within a WorkJob's 50 characters
+// however long the tool's name, two long names still apart.
+func TestTestJobName(t *testing.T) {
+	a := TestJobName("proxies", ToolRef{Version: "v1", View: "c41AbCdEfGhJk"})
+	b := TestJobName("proxies", ToolRef{Version: "v1", View: "c42ZyXwVuTsRq"})
+	if a != "proxies-test-1abcdefghj" || a == b {
+		t.Fatalf("%q %q", a, b)
+	}
+	if n := TestJobName("proxies", ToolRef{Version: "v3"}); n != "proxies-test-v3" {
+		t.Fatalf("no view: %q", n)
+	}
+	long := strings.Repeat("usd-passes-with-a-name-far-too-long", 2)
+	l1 := TestJobName(long+"-a", ToolRef{Version: "v1"})
+	l2 := TestJobName(long+"-b", ToolRef{Version: "v1"})
+	if len(l1) > MaxJobName || len(l2) > MaxJobName || l1 == l2 {
+		t.Fatalf("%q (%d) %q (%d)", l1, len(l1), l2, len(l2))
+	}
 }

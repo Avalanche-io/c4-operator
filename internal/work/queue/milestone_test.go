@@ -95,3 +95,18 @@ func TestProjectRootIsClean(t *testing.T) {
 		}
 	}
 }
+
+// A job labelled with a Milestone's name joins it whatever the selector,
+// as a submission due at a milestone is; an empty selector picks no other.
+func TestMilestoneByLabel(t *testing.T) {
+	m := &c4v1.Milestone{ObjectMeta: metav1.ObjectMeta{Name: "dailies"}}
+	labelled := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{c4v1.LabelMilestone: "dailies"}}}
+	other := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{c4v1.LabelMilestone: "client-review", c4v1.LabelShot: "sh040"}}}
+	if !selects(m, labelled) || selects(m, other) {
+		t.Fatalf("labelled %v, other %v", selects(m, labelled), selects(m, other))
+	}
+	m.Spec.Selector = metav1.LabelSelector{MatchLabels: map[string]string{c4v1.LabelShot: "sh040"}}
+	if !selects(m, other) || !selects(m, labelled) {
+		t.Fatal("the selector and the label should both join")
+	}
+}

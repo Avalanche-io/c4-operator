@@ -369,9 +369,9 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 				root = p.Spec.TreeRoot()
 			}
 		}
-		req, err := authoring.LowerTest(tool, ref, testTree.ID.String(), project, projectNS, root)
-		if err != nil {
-			refuse(api.FieldError{Path: "test", Message: err.Error(), Fix: "the test lowers as a submission's job would; fix it as the message says"})
+		req, lerrs := authoring.LowerTest(tool, ref, testTree.ID.String(), project, projectNS, root)
+		if len(lerrs) > 0 {
+			refuse(errs(lerrs)...)
 			return
 		}
 		req.Project = project

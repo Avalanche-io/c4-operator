@@ -84,6 +84,10 @@ const (
 	AnnotationSubmittedVia = "c4.avalanche.io/submitted-via"
 	// LabelShot groups a shot's jobs (the HUD's shot view).
 	LabelShot = "c4.avalanche.io/shot"
+	// LabelMilestone on a WorkJob joins it to the Milestone of that name
+	// in its namespace, whatever the Milestone's selector: a submission
+	// due at a milestone (due: dailies) is labelled so.
+	LabelMilestone = "c4.avalanche.io/milestone"
 	// LabelJobType names the prebuilt job type a job was made from
 	// (render, usd, sim, comp, transcode, ci, lora, infer, ...).
 	LabelJobType = "c4.avalanche.io/job-type"

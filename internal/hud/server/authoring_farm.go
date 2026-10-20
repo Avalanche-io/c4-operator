@@ -78,3 +78,20 @@ func (f *hudFarm) Namespace(project string) string {
 	}
 	return ""
 }
+
+// Cut: the farm keeps no shot's cut yet (a tracker sync would bring it),
+// so a frames job must give its frames or follow a job that has them.
+func (f *hudFarm) Cut(project, shot string) string { return "" }
+
+// Location is the zone of the project's due-time convention.
+func (f *hudFarm) Location(project string) *time.Location {
+	for _, p := range f.m.projects {
+		if p.Name != project || p.Spec.Work == nil || p.Spec.Work.DueTime == nil || p.Spec.Work.DueTime.TimeZone == "" {
+			continue
+		}
+		if loc, err := time.LoadLocation(p.Spec.Work.DueTime.TimeZone); err == nil {
+			return loc
+		}
+	}
+	return time.UTC
+}

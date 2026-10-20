@@ -40,7 +40,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
-	"unicode"
+
+	"github.com/Avalanche-io/c4-operator/schema"
 
 	"github.com/Avalanche-io/c4-operator/schema"
 )
@@ -481,20 +482,9 @@ func scalar(v any) (string, bool) {
 	return string(b), true
 }
 
-// envName is a parameter's variable: C4_PARAM_ and its name in upper snake
-// case (frameRange is C4_PARAM_FRAME_RANGE).
-func envName(p string) string {
-	var b strings.Builder
-	b.WriteString("C4_PARAM_")
-	rs := []rune(p)
-	for i, c := range rs {
-		if unicode.IsUpper(c) && i > 0 && (unicode.IsLower(rs[i-1]) || unicode.IsDigit(rs[i-1])) {
-			b.WriteByte('_')
-		}
-		b.WriteRune(unicode.ToUpper(c))
-	}
-	return b.String()
-}
+// envName is a parameter's variable (schema.ParamEnv): C4_PARAM_ and its
+// name in upper snake case (frameRange is C4_PARAM_FRAME_RANGE).
+func envName(p string) string { return schema.ParamEnv(p) }
 
 // childEnv is the tool's environment: the unit's, plus C4_TREE, a
 // variable per parameter, and the path map.

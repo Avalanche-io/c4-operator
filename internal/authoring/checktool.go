@@ -7,6 +7,8 @@ import (
 	"regexp/syntax"
 	"sort"
 	"strings"
+
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // formatNames are the format strings a tool may use besides
@@ -193,17 +195,5 @@ func show(v any) string {
 	return fmt.Sprint(plain(v))
 }
 
-// ParamEnv is the variable the tool runner gives a parameter as,
-// C4_PARAM_<NAME>: its name in upper snake case (frameRange and
-// frame_range are both C4_PARAM_FRAME_RANGE).
-func ParamEnv(name string) string {
-	var b strings.Builder
-	rs := []rune(name)
-	for i, r := range rs {
-		if i > 0 && r >= 'A' && r <= 'Z' && (rs[i-1] >= 'a' && rs[i-1] <= 'z' || rs[i-1] >= '0' && rs[i-1] <= '9') {
-			b.WriteByte('_')
-		}
-		b.WriteRune(r)
-	}
-	return "C4_PARAM_" + strings.ToUpper(b.String())
-}
+// ParamEnv is the variable a unit gets a parameter as (schema.ParamEnv).
+func ParamEnv(name string) string { return schema.ParamEnv(name) }

@@ -22,16 +22,19 @@ const ToolsMount = "/etc/c4/tools"
 // ReadRoot is where a submission's read trees mount, each at its name.
 const ReadRoot = "/c4/read"
 
+// maxChunk is the most frames the render class puts in one unit.
+const maxChunk = 1000
+
 // RunnerCommand is every tool unit's command: the tool runner, which
 // starts the tool's own command (cmd/c4-unit/run.go).
 var RunnerCommand = []string{"c4-unit", "run"}
 
 // classParams are the class parameters a tool's parameter of the same
-// name is also given as: render's pass, ci's shards and target, ml's
-// steps, checkpointEvery and ranks.
+// name is also given as: render's pass, ci's shards, target and
+// latencyTarget, ml's steps, checkpointEvery and ranks.
 var classParams = map[string][]string{
 	"render": {"pass"},
-	"ci":     {"shards", "target"},
+	"ci":     {"shards", "target", "latencyTarget"},
 	"ml":     {"steps", "checkpointEvery", "ranks"},
 }
 
@@ -55,6 +58,8 @@ type toolJob struct {
 	chunk   *schema.Chunk
 	order   string
 	inputs  []api.SubmitInput
+	env     []corev1.EnvVar
+	measure *c4v1.WorkMeasureSpec
 }
 
 // lowerTool lowers one job of a frames or once tool to a POST /jobs
@@ -64,19 +69,16 @@ type toolJob struct {
 // errors are relative to the job (with.stage, frames).
 func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 	t := j.tool
-	var errs []Error
-	errs = append(errs, refusals(t)...)
-	params, perrs := resolveParams(t, j.with, j.root)
-	errs = append(errs, perrs...)
+	if e := onceFrames(t, j.frames, j.with); e != nil {
+		return nil, []Error{*e}
+	}
+	params, errs := resolveParams(t, j.with, j.root, j.frames)
 	if len(errs) > 0 {
 		return nil, errs
 	}
-	frames := string(j.frames)
+	frames := farmFrames(j.frames)
 	switch t.Kind {
 	case "once":
-		if frames != "" && frames != "1" {
-			return nil, []Error{errf("frames", "remove frames: a once tool runs one unit over the whole job", "%s is a once tool, which has no frames", t.Name)}
-		}
 		frames = "1"
 	case "frames":
 		if frames == "" {
@@ -99,9 +101,15 @@ func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 			// one unit over the whole range
 			fs, err := order_.ParseFrames(frames)
 			if err != nil {
-				return nil, []Error{errf("frames", "write frames as 1001-1240", "%q is not a frame list: %v", frames, err)}
+				return nil, []Error{errf("frames", "write frames as 1001-1240", "%q is not a frame list: %v", j.frames, err)}
 			}
 			n = len(fs)
+			if n > maxChunk {
+				return nil, []Error{errf("chunk", "give chunk: a number of frames for now", "a whole-range unit over more than %d frames cannot run on this farm yet", maxChunk)}
+			}
+		}
+		if n > maxChunk {
+			return nil, []Error{errf("chunk", fmt.Sprintf("give chunk: %d frames or fewer", maxChunk), "a unit over more than %d frames cannot run on this farm yet", maxChunk)}
 		}
 		if n > 0 {
 			cp["chunk"] = strconv.Itoa(n)
@@ -119,21 +127,23 @@ func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 	if err != nil {
 		return nil, []Error{errf("with", "", "the parameters cannot be written: %v", err)}
 	}
+	// Only the image tool.lock pinned runs: the tool's tree names it by
+	// digest, so what ran is what was published.
 	image := j.ref.Image
 	if image == "" {
-		image = t.Runs.Image
+		return nil, []Error{errf("tool", "publish the tool again, which pins its image", "%s@%s has no image pinned in its tool.lock, so this farm cannot run it", t.Name, j.ref.Version)}
 	}
 	env := []corev1.EnvVar{{Name: "C4_TOOLS", Value: ToolsMount}, {Name: "C4_PARAMS", Value: string(pj)}}
 	if j.shot != "" {
 		env = append(env, corev1.EnvVar{Name: "C4_SHOT", Value: j.shot})
 	}
-	req, rerrs := requests(t, j.size, j.needs)
+	env = append(env, j.env...)
+	res, rerrs := requests(t, j.size, j.needs)
 	if len(rerrs) > 0 {
 		return nil, rerrs
 	}
-	c := corev1.Container{Name: "unit", Image: image, Command: append([]string(nil), RunnerCommand...), Env: env,
-		Resources: corev1.ResourceRequirements{Requests: req}}
-	spec := c4v1.WorkJobSpec{Class: "render", Params: cp, Pools: j.pools, MaxParallel: int32(j.maxPar),
+	c := corev1.Container{Name: "unit", Image: image, Command: append([]string(nil), RunnerCommand...), Env: env, Resources: res}
+	spec := c4v1.WorkJobSpec{Class: "render", Params: cp, Pools: j.pools, MaxParallel: int32(j.maxPar), Measure: j.measure,
 		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{c}}}}
 	retries := j.retries
 	if retries == nil {
@@ -157,43 +167,84 @@ func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 	return out, nil
 }
 
-// refusals are the fields of a tool that slice 1 cannot lower yet, each
-// with the reason, rather than run something other than what the tool
-// says.
-func refusals(t *Tool) []Error {
+// ToolRefusals are what about a tool this farm cannot run yet, at path
+// "tool": the farm refuses the job rather than run something other than
+// what the tool says. A unit's network to its licence servers goes with
+// the licences, and is not refused on its own.
+func ToolRefusals(t *Tool) []Error {
 	var errs []Error
+	add := func(fix, format string, args ...any) { errs = append(errs, errf("tool", fix, format, args...)) }
+	n := t.Needs
 	if t.Kind != "frames" && t.Kind != "once" {
-		errs = append(errs, errf("tool", "use a frames or once tool for now", "%s is a %s tool; the farm runs frames and once tools so far", t.Name, t.Kind))
+		add("use a frames or once tool for now", "this farm cannot run %s tools yet", t.Kind)
 	}
-	if t.Runs.Image == "" {
-		errs = append(errs, errf("tool", "give the tool runs.image as well as runs.host", "%s runs only on host runners, which run tools from slice 3", t.Name))
+	if net := otherNetwork(n.Network); len(net) > 0 {
+		add("use a version of the tool that needs no network for now", "%s reaches the network (%s), which this farm cannot fence yet", t.Name, strings.Join(net, ", "))
+	}
+	if len(n.Licences) > 0 {
+		add("use a version of the tool that declares none for now", "%s needs licences (%s), which this farm cannot count yet", t.Name, strings.Join(sortedKeys(n.Licences), ", "))
 	}
 	if len(t.Runs.Sidecars) > 0 {
-		errs = append(errs, errf("tool", "remove runs.sidecars for now", "%s runs sidecars, which need the job's Tool, from slice 3", t.Name))
+		add("use a version of the tool without sidecars for now", "%s runs sidecars, which this farm cannot start yet", t.Name)
 	}
 	if t.Kubernetes != nil {
-		errs = append(errs, errf("tool", "remove kubernetes for now", "%s overlays the pod, which needs a farm admin's approval, from slice 3", t.Name))
+		add("use a version of the tool without one for now", "%s has a Kubernetes overlay, which this farm cannot apply yet", t.Name)
 	}
 	if t.Gate != "" {
-		errs = append(errs, errf("tool", "remove gate for now", "%s passes a gate, which tools reach in slice 3", t.Name))
+		add("use a version of the tool without a gate for now", "%s passes the %s gate, which this farm cannot hold yet", t.Name, t.Gate)
 	}
-	if n := t.Needs; true {
-		if len(n.Network) > 0 {
-			errs = append(errs, errf("tool", "remove needs.network for now", "%s needs the network, which a tool's units reach from slice 3: until then they are sealed", t.Name))
-		}
-		if len(n.Licences) > 0 {
-			errs = append(errs, errf("tool", "remove needs.licences for now", "%s needs licences, which the farm counts from slice 2", t.Name))
-		}
-		if n.Farm != "" {
-			errs = append(errs, errf("tool", "remove needs.farm for now", "%s needs the farm (%s), which a tool's units reach from slice 3", t.Name, n.Farm))
-		}
+	if n.Farm != "" {
+		add("use a version of the tool that does not for now", "%s acts on the farm (%s), which this farm cannot grant yet", t.Name, n.Farm)
+	}
+	if t.Runs.Image == "" {
+		add("use a version of the tool with an image for now", "%s runs only on hosts, which this farm cannot reach yet", t.Name)
 	}
 	return errs
 }
 
-// requests are the container's resource requests: the tool's needs, a
-// named size of it, then the job's own (slice 1 sets no limits).
-func requests(t *Tool, size string, jn *Resources) (corev1.ResourceList, []Error) {
+// otherNetwork is what a tool's needs.network asks for besides its
+// licence servers.
+func otherNetwork(net []string) []string {
+	var out []string
+	for _, n := range net {
+		if n != "licences" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// farmFrames is a frame list in the farm's grammar: OpenJD's step,
+// 1001-1240:2, is 1001-1240x2 to the render class.
+func farmFrames(f Frames) string { return strings.ReplaceAll(string(f), ":", "x") }
+
+// frameParam is a once tool's parameter that its job's frames fill: a
+// RANGE_EXPR from shot.frames or scene.frames (transcode's range).
+func frameParam(t *Tool) *Param {
+	for i := range t.Params {
+		p := &t.Params[i]
+		if p.Type == "RANGE_EXPR" && (p.From == "shot.frames" || p.From == "scene.frames") {
+			return p
+		}
+	}
+	return nil
+}
+
+// onceFrames refuses frames for a once tool that has no parameter for
+// them: a once tool runs one unit over the whole job.
+func onceFrames(t *Tool, frames Frames, with map[string]any) *Error {
+	if t.Kind != "once" || frames == "" || frameParam(t) != nil {
+		return nil
+	}
+	e := errf("frames", "remove frames: a once tool runs one unit over the whole job", "%s is a once tool with no frame parameter, so it takes no frames", t.Name)
+	return &e
+}
+
+// requests are the container's resources: the tool's needs, a named size
+// of it, then the job's own. Memory and GPUs are limited to what is
+// requested, so a unit cannot take a neighbour's; CPU is only requested,
+// so a unit may use what is idle.
+func requests(t *Tool, size string, jn *Resources) (corev1.ResourceRequirements, []Error) {
 	n := t.Needs.Resources
 	if size != "" {
 		s, ok := t.Needs.Sizes[size]
@@ -202,7 +253,7 @@ func requests(t *Tool, size string, jn *Resources) (corev1.ResourceList, []Error
 			if names := sortedKeys(t.Needs.Sizes); len(names) > 0 {
 				fix = "its sizes are " + strings.Join(names, ", ")
 			}
-			return nil, []Error{errf("size", fix, "%s has no size %q", t.Name, size)}
+			return corev1.ResourceRequirements{}, []Error{errf("size", fix, "%s has no size %q", t.Name, size)}
 		}
 		over(&n, &s)
 	}
@@ -222,14 +273,23 @@ func requests(t *Tool, size string, jn *Resources) (corev1.ResourceList, []Error
 		}
 		r, err := resource.ParseQuantity(kubeSize(q.v))
 		if err != nil {
-			return nil, []Error{errf("needs", "write a size with its unit: 64G", "%q is not a size", q.v)}
+			return corev1.ResourceRequirements{}, []Error{errf("needs", "write a size with its unit: 64G", "%q is not a size", q.v)}
 		}
 		out[q.name] = r
 	}
 	if n.GPU != nil && *n.GPU > 0 {
 		out["nvidia.com/gpu"] = *resource.NewQuantity(int64(*n.GPU), resource.DecimalSI)
 	}
-	return out, nil
+	rr := corev1.ResourceRequirements{Requests: out}
+	for _, name := range []corev1.ResourceName{corev1.ResourceMemory, "nvidia.com/gpu"} {
+		if q, ok := out[name]; ok {
+			if rr.Limits == nil {
+				rr.Limits = corev1.ResourceList{}
+			}
+			rr.Limits[name] = q
+		}
+	}
+	return rr, nil
 }
 
 func over(n *Resources, o *Resources) {
@@ -250,15 +310,29 @@ func over(n *Resources, o *Resources) {
 	}
 }
 
-// kubeSize is a size as Kubernetes writes it: 64G stays 64G, 64Gi too.
-func kubeSize(s string) string { return s }
+// kubeSize is a size as Kubernetes writes it. Sizes are binary: 64G is
+// 64Gi, and 64Gi stays as written.
+func kubeSize(s string) string {
+	s = strings.TrimSuffix(strings.TrimSpace(s), "B")
+	if s != "" && strings.ContainsRune("KMGTPE", rune(s[len(s)-1])) {
+		return s + "i"
+	}
+	return s
+}
 
 // resolveParams is a tool's parameters as C4_PARAMS has them: the
 // submission's values, else the defaults, checked against each
 // parameter's type and range, with a PATH relative to the job's tree made
 // absolute under root. A parameter with neither is required; an optional
 // one with no value is left out.
-func resolveParams(t *Tool, with map[string]any, root string) (map[string]any, []Error) {
+func resolveParams(t *Tool, with map[string]any, root string, frames Frames) (map[string]any, []Error) {
+	return resolve(t, with, root, frames, true)
+}
+
+// resolve is resolveParams; with required false, a parameter with no
+// value is not an error (a generator's children's settings, which the
+// generator completes).
+func resolve(t *Tool, with map[string]any, root string, frames Frames, required bool) (map[string]any, []Error) {
 	var errs []Error
 	out := map[string]any{}
 	known := map[string]*Param{}
@@ -267,6 +341,7 @@ func resolveParams(t *Tool, with map[string]any, root string) (map[string]any, [
 		known[t.Params[i].Name] = &t.Params[i]
 		names = append(names, t.Params[i].Name)
 	}
+	slips := map[string]bool{}
 	for _, k := range sortedKeys(with) {
 		if known[k] == nil {
 			fix := t.Name + " has no parameters"
@@ -275,21 +350,28 @@ func resolveParams(t *Tool, with map[string]any, root string) (map[string]any, [
 			}
 			if c, ok := closest(k, names); ok {
 				fix = fmt.Sprintf("did you mean %q?", c)
+				slips[c] = true
 			}
 			errs = append(errs, errf("with."+k, fix, "%s has no parameter %q", t.Name, k))
 		}
 	}
 	var missing []*Param
+	fp := frameParam(t)
 	for _, p := range t.Params {
 		v, given := with[p.Name]
-		if !given {
-			if p.Default == nil {
-				if p.From == "" {
-					missing = append(missing, known[p.Name])
-				}
-				continue
-			}
+		switch {
+		case given:
+		case fp != nil && p.Name == fp.Name && frames != "":
+			v = string(frames)
+		case p.Default != nil:
 			v = p.Default
+		default:
+			// a parameter with no default must be given, as in OpenJD,
+			// even when the tool says where a front end finds it (from)
+			if required && !slips[p.Name] {
+				missing = append(missing, known[p.Name])
+			}
+			continue
 		}
 		v = plain(v)
 		val, e := paramValue(p, v, root)
@@ -539,24 +621,39 @@ func fillAIUsage(u map[string]any, params map[string]any) map[string]any {
 // view of the test's folder in the published tree, mounts writable at
 // the project's root, and the tool's own tree read-only at ToolsMount, as
 // for any job of the tool.
-func LowerTest(t *Tool, ref ToolRef, testTree, project, namespace, root string) (*api.SubmitRequest, error) {
+func LowerTest(t *Tool, ref ToolRef, testTree, project, namespace, root string) (*api.SubmitRequest, []Error) {
 	if t.Test == nil {
-		return nil, fmt.Errorf("%s has no test", t.Name)
+		return nil, []Error{errf("test", "add test: {tree: test/}", "%s has no test", t.Name)}
 	}
 	if root == "" {
 		root = c4v1.DefaultProjectRoot
+	}
+	if errs := ToolRefusals(t); len(errs) > 0 {
+		return nil, prefix("test", errs)
 	}
 	frames := t.Test.Frames
 	if t.Kind == "frames" && frames == "" {
 		frames = "1"
 	}
 	req, errs := lowerTool(toolJob{tool: t, ref: ref, project: project, ns: namespace, root: root,
-		name: fmt.Sprintf("%s-test-%s", t.Name, ref.Version), stage: "test", frames: frames, with: t.Test.With,
+		name: TestJobName(t.Name, ref), stage: "test", frames: frames, with: t.Test.With,
 		inputs: []api.SubmitInput{{View: testTree, MountPath: root}}})
 	if len(errs) > 0 {
-		return nil, Errors(prefix("test", errs))
+		return nil, prefix("test", errs)
 	}
 	return req, nil
+}
+
+// TestJobName is the name of a tool version's test job: <tool>-test- and
+// the start of its tree's C4 ID, which tells a farm tool's v1 from a
+// project's (<tool>-test-<version> without one), cut to MaxJobName with
+// a hash when the tool's name is long.
+func TestJobName(tool string, ref ToolRef) string {
+	id := strings.ToLower(strings.TrimPrefix(ref.View, "c4"))
+	if len(id) < 10 || id == strings.ToLower(ref.View) {
+		return capName(fmt.Sprintf("%s-test-%s", tool, ref.Version))
+	}
+	return capName(tool + "-test-" + id[:10])
 }
 
 // prefix puts errors' paths under p.

@@ -41,9 +41,12 @@ func (q *Queue) listMilestones(ctx context.Context) map[string][]*c4v1.Milestone
 	return out
 }
 
-// selects reports whether Milestone m covers job j; an empty selector
-// covers none.
+// selects reports whether Milestone m covers job j: a job labelled with
+// its name, or one its selector picks; an empty selector picks none.
 func selects(m *c4v1.Milestone, j *c4v1.WorkJob) bool {
+	if j.Labels[c4v1.LabelMilestone] == m.Name {
+		return true
+	}
 	if len(m.Spec.Selector.MatchLabels) == 0 && len(m.Spec.Selector.MatchExpressions) == 0 {
 		return false
 	}

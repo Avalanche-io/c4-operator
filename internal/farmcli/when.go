@@ -3,10 +3,9 @@ package farmcli
 import (
 	"fmt"
 	"math"
-	"regexp"
-	"strconv"
-	"strings"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/when"
 )
 
 // Clock formats times for people: local time with a short zone, and UTC
@@ -103,58 +102,10 @@ func Span(d time.Duration) string {
 	return s
 }
 
-var (
-	clockRE  = regexp.MustCompile(`^(\d{1,2}):(\d{2})$`)
-	dayRE    = regexp.MustCompile(`^(mon|tue|wed|thu|fri|sat|sun)[a-z]*\s+(\d{1,2}):(\d{2})$`)
-	offsetRE = regexp.MustCompile(`^\+(\d+(?:\.\d+)?)(m|h|d)$`)
-)
-
-// ParseWhen reads a deadline as a person types it, on the local clock:
-// "18:00" (today, or tomorrow if that has passed), "fri 18:00" (the next
-// Friday), "+3h", "+90m", "+2d", or an RFC 3339 time. "suggested" (or
-// "") returns the zero time: the farm suggests one.
+// ParseWhen reads a deadline as a person types it, on the local clock
+// (when.Parse): "18:00" (today, or tomorrow if that has passed), "fri
+// 18:00" (the next Friday), "+3h", "+90m", "+2d", or an RFC 3339 time.
+// "suggested" (or "") returns the zero time: the farm suggests one.
 func (c Clock) ParseWhen(in string) (time.Time, error) {
-	raw := strings.TrimSpace(in)
-	s := strings.ToLower(raw)
-	now := c.now().In(c.loc())
-	switch {
-	case s == "" || s == "suggested":
-		return time.Time{}, nil
-	case clockRE.MatchString(s):
-		m := clockRE.FindStringSubmatch(s)
-		h, _ := strconv.Atoi(m[1])
-		mi, _ := strconv.Atoi(m[2])
-		if h > 23 || mi > 59 {
-			return time.Time{}, fmt.Errorf("%q is not a time of day", s)
-		}
-		t := time.Date(now.Year(), now.Month(), now.Day(), h, mi, 0, 0, now.Location())
-		if !t.After(now) {
-			t = t.AddDate(0, 0, 1)
-		}
-		return t, nil
-	case dayRE.MatchString(s):
-		m := dayRE.FindStringSubmatch(s)
-		h, _ := strconv.Atoi(m[2])
-		mi, _ := strconv.Atoi(m[3])
-		if h > 23 || mi > 59 {
-			return time.Time{}, fmt.Errorf("%q is not a time of day", s)
-		}
-		want := map[string]time.Weekday{"sun": 0, "mon": 1, "tue": 2, "wed": 3, "thu": 4, "fri": 5, "sat": 6}[m[1]]
-		t := time.Date(now.Year(), now.Month(), now.Day(), h, mi, 0, 0, now.Location())
-		for t.Weekday() != want || !t.After(now) {
-			t = t.AddDate(0, 0, 1)
-		}
-		return t, nil
-	case offsetRE.MatchString(s):
-		m := offsetRE.FindStringSubmatch(s)
-		n, _ := strconv.ParseFloat(m[1], 64)
-		unit := map[string]time.Duration{"m": time.Minute, "h": time.Hour, "d": 24 * time.Hour}[m[2]]
-		return c.now().Add(time.Duration(n * float64(unit))).Truncate(time.Minute), nil
-	}
-	for _, layout := range []string{time.RFC3339, "2006-01-02T15:04", "2006-01-02 15:04"} {
-		if t, err := time.ParseInLocation(layout, strings.ToUpper(raw), c.loc()); err == nil {
-			return t, nil
-		}
-	}
-	return time.Time{}, fmt.Errorf("%q: give a time like 18:00, fri 18:00, +3h, 2026-10-23T18:00:00-07:00, or suggested", s)
+	return when.Parse(in, c.now(), c.loc())
 }

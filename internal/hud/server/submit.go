@@ -19,7 +19,6 @@ import (
 	"net/http"
 	"os"
 	"path"
-	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -32,6 +31,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/jobspec"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
@@ -479,27 +479,16 @@ func (s *Server) handleViewFiles(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-var versionSuffix = regexp.MustCompile(`-v(\d+)$`)
-
 // nextName is <shot>-<stage>-vNNN, one version past the latest job of
-// that shot and stage in the namespace.
+// that shot and stage in the namespace (authoring.NextName).
 func nextName(m *model, ns, shot, stage string) string {
-	base := strings.Trim(strings.ToLower(shot+"-"+stage), "-")
-	if base == "" {
-		base = "job"
-	}
-	top := 0
+	var names []string
 	for _, rec := range m.jobs {
-		if rec.job.Namespace != ns || !strings.HasPrefix(rec.job.Name, base+"-v") {
-			continue
-		}
-		if mm := versionSuffix.FindStringSubmatch(rec.job.Name); mm != nil && rec.job.Name == base+mm[0] {
-			if n, _ := strconv.Atoi(mm[1]); n > top {
-				top = n
-			}
+		if rec.job.Namespace == ns {
+			names = append(names, rec.job.Name)
 		}
 	}
-	return fmt.Sprintf("%s-v%03d", base, top+1)
+	return authoring.NextName(names, shot, stage)
 }
 
 // inputMaterialization names the Materialization of an input view: the

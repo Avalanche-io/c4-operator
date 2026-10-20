@@ -3,6 +3,7 @@ package class
 import (
 	"fmt"
 	"strconv"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -61,14 +62,25 @@ func (render) Plan(job *c4v1.WorkJob) (*Plan, error) {
 	}
 	for i, c := range chunks {
 		label := strconv.Itoa(c[0])
-		if len(c) > 1 {
+		step := stepOf(c)
+		switch {
+		case len(c) > 1 && step > 0:
 			label = fmt.Sprintf("%d-%d", c[0], c[len(c)-1])
+		case len(c) > 1:
+			// irregular frames (1001,1050-1052) are named as they are
+			label = frameExpr(c)
 		}
-		p.Units = append(p.Units, Unit{
+		u := Unit{
 			Index: i, Label: label, Key: "render/" + pass, Pos: c[0] - frames[0], Slots: 1,
 			Env: []corev1.EnvVar{env("C4_FRAMES", label), env("C4_FRAME_START", strconv.Itoa(c[0])),
 				env("C4_FRAME_END", strconv.Itoa(c[len(c)-1])), env("C4_PASS", pass)},
-		})
+		}
+		if step > 1 {
+			// 1001-1240:2 in chunks: the unit renders every step-th frame
+			// from start to end, not every frame between.
+			u.Env = append(u.Env, env("C4_FRAME_STEP", strconv.Itoa(step)))
+		}
+		p.Units = append(p.Units, u)
 	}
 	p.Order, err = order.Units(kind, len(p.Units), nil)
 	if err != nil {
@@ -197,6 +209,39 @@ func (ml) Objective(job *c4v1.WorkJob, ready time.Time) Objective {
 		t = 36 * time.Hour
 	}
 	return Objective{Type: "deadline", Deadline: job.CreationTimestamp.Add(t)}
+}
+
+// frameExpr is frames as a frame list: runs of consecutive frames as
+// ranges, the rest as single frames.
+func frameExpr(fs []int) string {
+	var parts []string
+	for i := 0; i < len(fs); {
+		j := i
+		for j+1 < len(fs) && fs[j+1] == fs[j]+1 {
+			j++
+		}
+		if j > i {
+			parts = append(parts, fmt.Sprintf("%d-%d", fs[i], fs[j]))
+		} else {
+			parts = append(parts, strconv.Itoa(fs[i]))
+		}
+		i = j + 1
+	}
+	return strings.Join(parts, ",")
+}
+
+// stepOf is the step between a chunk's frames when it is one, else 0.
+func stepOf(c []int) int {
+	if len(c) < 2 {
+		return 0
+	}
+	step := c[1] - c[0]
+	for i := 2; i < len(c); i++ {
+		if c[i]-c[i-1] != step {
+			return 0
+		}
+	}
+	return step
 }
 
 func orderKind(s string) (order.Kind, error) {
