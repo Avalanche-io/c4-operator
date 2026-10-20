@@ -1,0 +1,118 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: submitgrants.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: SubmitGrant
+    listKind: SubmitGrantList
+    plural: submitgrants
+    singular: submitgrant
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.person
+      name: Person
+      type: string
+    - jsonPath: .spec.tracker
+      name: Tracker
+      type: string
+    - jsonPath: .spec.until
+      name: Until
+      type: string
+    - jsonPath: .spec.revoked.at
+      name: Revoked
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          A SubmitGrant is a person's leave for a Tracker to submit work for them
+          (proposals/integrations GAPS 17): jobs the Tracker's sync makes "for"
+          the person are the person's own, so what is bound to them (a lease of
+          their own sign-in) serves those jobs and nothing else does.
+
+          People never write one. They grant and revoke as themselves through the
+          HUD (POST and DELETE /api/v1/grants, MCP c4_grant, c4 farm grant), which
+          signs each as a control record and is the only writer (the
+          c4-submit-grants policy). A revoked grant is kept, marked, for the trail.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SubmitGrantSpec is who lets which Tracker submit what, until
+              when.
+            properties:
+              classes:
+                description: Classes limits the jobs to these job classes; empty,
+                  any.
+                items:
+                  type: string
+                type: array
+              person:
+                description: Person is the C4 person who gave the grant, and whom
+                  the jobs are for.
+                type: string
+              pools:
+                description: Pools limits the jobs to these pools; empty, any of the
+                  project's.
+                items:
+                  type: string
+                type: array
+              record:
+                description: Record is the C4 ID of the signed control record of the
+                  grant.
+                type: string
+              revoked:
+                description: Revoked is set when the person (or a project admin) took
+                  it back.
+                properties:
+                  at:
+                    format: date-time
+                    type: string
+                  by:
+                    type: string
+                  record:
+                    type: string
+                required:
+                - at
+                - by
+                type: object
+              tracker:
+                description: Tracker is the Tracker in this namespace that may submit
+                  for them.
+                type: string
+              until:
+                description: Until is when the grant ends. Every grant ends.
+                format: date-time
+                type: string
+            required:
+            - person
+            - tracker
+            - until
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

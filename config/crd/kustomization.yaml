@@ -8,3 +8,4 @@ resources:
 - c4.avalanche.io_agentbundles.yaml
 - c4.avalanche.io_credentialleases.yaml
 - c4.avalanche.io_toolprofiles.yaml
+- c4.avalanche.io_submitgrants.yaml

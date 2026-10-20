@@ -21,9 +21,9 @@ spec:
     expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
   validations:
   - expression: >-
-      ['c4.avalanche.io/owner', 'c4.avalanche.io/submitted-via'].all(k,
+      ['c4.avalanche.io/owner', 'c4.avalanche.io/submitted-via', 'c4.avalanche.io/grant'].all(k,
         !(k in variables.before) || (k in variables.after && variables.after[k] == variables.before[k]))
-    message: a WorkJob's owner and how it was submitted are set at creation and cannot change
+    message: a WorkJob's owner, how it was submitted and the grant it was submitted under are set at creation and cannot change
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

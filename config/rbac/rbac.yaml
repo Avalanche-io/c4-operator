@@ -59,7 +59,7 @@ metadata:
   name: c4-queue
 rules:
 - apiGroups: [c4.avalanche.io]
-  resources: [workjobs, pools, capacityrequests, milestones]
+  resources: [workjobs, pools, capacityrequests, milestones, submitgrants]
   verbs: [get, list, watch]
 - apiGroups: [c4.avalanche.io]
   resources: [workjobs/status, pools/status, capacityrequests/status, milestones/status]
@@ -188,6 +188,14 @@ rules:
   verbs: [get, list, watch, patch]
 - apiGroups: [c4.avalanche.io]
   resources: [milestones]
+  verbs: [get, list, watch]
+# Submit grants (GAPS 17): the HUD is their only writer, for the person
+# signed in; it reads the Tracker a grant names.
+- apiGroups: [c4.avalanche.io]
+  resources: [submitgrants]
+  verbs: [get, list, watch, create, update, patch]
+- apiGroups: [c4.avalanche.io]
+  resources: [trackers]
   verbs: [get, list, watch]
 # Submitting for a signed-in viewer (POST /api/v1/jobs), after a
 # SubjectAccessReview says the viewer may create the same objects.

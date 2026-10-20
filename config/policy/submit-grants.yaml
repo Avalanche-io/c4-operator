@@ -1,0 +1,29 @@
+# A submit grant (GAPS 17) is a person's own word that a Tracker may
+# submit work for them. Only the HUD writes one, for the person signed in,
+# with its signed control record (internal/hud/server/grants.go): nobody
+# else creates, changes or deletes it, so a Tracker's author cannot forge
+# one and a revoked grant stays on the trail.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-submit-grants
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [c4.avalanche.io]
+      apiVersions: ["*"]
+      operations: [CREATE, UPDATE, DELETE]
+      resources: [submitgrants]
+  validations:
+  - expression: >-
+      request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
+    message: submit grants are given and revoked in the HUD, by the person, never written directly
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-submit-grants
+spec:
+  policyName: c4-submit-grants
+  validationActions: [Deny]

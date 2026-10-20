@@ -59,7 +59,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "host-runner.yaml", "lease-mounts.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -173,8 +173,59 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/owner":null}}}`))); err == nil {
 		t.Error("the owner was removed")
 	}
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/grant":"c4forged"}}}`))); err != nil {
+		t.Fatalf("adding a grant where there was none is a creation-time field the policy leaves to admission: %v", err)
+	}
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/grant":"c4other"}}}`))); err == nil {
+		t.Error("the grant a job was submitted under was changed")
+	}
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"nudge":{"hold":true}}}`))); err != nil {
 		t.Errorf("an ordinary change was refused: %v", err)
+	}
+}
+
+// TestSubmitGrantsOnlyFromTheHUD: a person's grant to a Tracker is written
+// only by the HUD (the manager's account), never directly, so a Tracker's
+// author cannot forge or erase one.
+func TestSubmitGrantsOnlyFromTheHUD(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	s := runtime.NewScheme()
+	c4v1.AddToScheme(s)
+	hud, err := client.New(mc, client.Options{Scheme: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	grant := func(name string) *c4v1.SubmitGrant {
+		return &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: name},
+			Spec: c4v1.SubmitGrantSpec{Person: "joshua", Tracker: "github", Until: metav1.NewTime(time.Now().Add(time.Hour))}}
+	}
+	eventually(t, "a grant written directly refused", func() error {
+		if err := admin.Create(ctx, grant("forged")); err == nil {
+			return errNotYet
+		}
+		return nil
+	})
+	g := grant("github-joshua")
+	if err := hud.Create(ctx, g); err != nil {
+		t.Fatalf("the HUD's grant: %v", err)
+	}
+	if err := admin.Patch(ctx, g, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"person":"mallory"}}`))); err == nil {
+		t.Error("a grant was changed directly")
+	}
+	if err := admin.Delete(ctx, g); err == nil {
+		t.Error("a grant was erased directly")
+	}
+	g.Spec.Revoked = &c4v1.GrantRevocation{By: "joshua", At: metav1.Now()}
+	if err := hud.Update(ctx, g); err != nil {
+		t.Errorf("the HUD's revocation: %v", err)
 	}
 }
 

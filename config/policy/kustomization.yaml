@@ -3,3 +3,4 @@ resources:
 - workjob-owner.yaml
 - host-runner.yaml
 - lease-mounts.yaml
+- submit-grants.yaml
