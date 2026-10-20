@@ -505,6 +505,23 @@ type Job struct {
 	// Needs are the units that stopped for information their brief
 	// lacked: what each asked for, and what was supplied.
 	Needs []Needs `json:"needs,omitempty"`
+	// Asks are the latest questions the job's units asked one another,
+	// and their answers.
+	Asks []Ask `json:"asks,omitempty"`
+}
+
+// Ask is a question one unit asked another (or a wait unit asked the unit
+// that serves it), and its answer once given.
+type Ask struct {
+	ID       string     `json:"id"`
+	From     int        `json:"from"`
+	To       int        `json:"to"`
+	Text     string     `json:"text"`
+	At       time.Time  `json:"at"`
+	Answer   string     `json:"answer,omitempty"`
+	Cannot   string     `json:"cannot,omitempty"`
+	Answered *time.Time `json:"answered,omitempty"`
+	Wait     bool       `json:"wait,omitempty"`
 }
 
 // Needs is what a unit stopped for (NeedsInformation): a work-stopping

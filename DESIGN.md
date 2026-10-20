@@ -1738,7 +1738,29 @@ and a sweep planner that spawns trials are all generators.
       with the text in `$C4_SUPPLIED` and what it asked in `$C4_NEEDED`.
     - **A person answering on purpose** (a creative approval) is a step
       in the graph: a wait or a verdict, decided as above.
-  - **Steering** (agent-catalog G-steer): a message to a unit while it
+  - **Agents answer agents** (Joshua; agent-jobs ASKS.md). A unit that
+    lacks a fact another unit of its job has asks it: `c4-unit ask --to
+    unit:<name> --ask TEXT` prints the question's id (`<unit>#<n>`).
+    - **Answering:** the answerer replies with `c4-unit answer --ask ID
+      (--answer TEXT | --cannot WHY)`. Both commands write lists in the
+      unit's `.c4/` (`asks`, `answers`), which the node daemon or host
+      runner relays as pod annotations.
+    - **Routing:** the queue routes each question, once, as a steering
+      message marked `ask: {id, from}` to the answerer, and each answer
+      back marked `answer: {id, from, cannot?}`. The answerer is the
+      question's `to`, else the job's `answerer` param.
+    - **Answered `cannot` at once:** a question with no answerer, one to a
+      unit that has finished, one that would wait in a cycle, or one past
+      `maxAsks` (3) open questions.
+    - **Answer-decided waits:** a wait may be served by a unit (`server:
+      unit:<name>`). A wait unit of the graph asks its `ask` of that unit,
+      and the answer completes it. A block that waited past its hold gives
+      up its slot to such a wait and resumes with the answer
+      (`C4_DECISION` with `do: answer`). The expected wait for a unit's
+      answer is 10 minutes until one is measured.
+    - **Status and book:** `status.asks` keeps the latest 64, and every
+      question and answer is in the book. Waking an answerer that has
+      already finished is not built.
     runs, without ending it.
     - **Sending:** a person sends it with `POST /jobs/{ns}/{name}/steer
       {unit, text}` or MCP `c4_steer`. It is signed, then written as a

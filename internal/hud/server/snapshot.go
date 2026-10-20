@@ -257,6 +257,14 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		aj.Needs = append(aj.Needs, an)
 	}
 	sort.Slice(aj.Needs, func(a, b int) bool { return aj.Needs[a].Unit < aj.Needs[b].Unit })
+	for _, a := range st.Asks {
+		aa := api.Ask{ID: a.ID, From: int(a.From), To: int(a.To), Text: a.Text, At: a.At.Time.UTC(), Answer: a.Answer, Cannot: a.Cannot, Wait: a.Wait}
+		if a.Answered != nil {
+			t := a.Answered.Time.UTC()
+			aa.Answered = &t
+		}
+		aj.Asks = append(aj.Asks, aa)
+	}
 	for _, m := range st.Steers {
 		as := api.Steer{Unit: int(m.Unit), Name: m.Name, Seq: int(m.Seq), Actor: m.Actor, At: m.At.Time.UTC(), Text: m.Text,
 			Record: m.Record, Seen: m.Seen}

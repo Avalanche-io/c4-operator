@@ -107,4 +107,16 @@ func TestSteerRelay(t *testing.T) {
 	if got := annotation(t, c, c4v1.AnnotationSteerSeen); got != "1" {
 		t.Fatalf("steer-seen %q", got)
 	}
+	// The unit's questions and answers go to the pod as they are.
+	asks := `[{"seq":1,"to":"unit:lead","ask":"which module?"}]`
+	os.WriteFile(filepath.Join(upper, ".c4", "asks"), []byte(asks), 0o644)
+	os.WriteFile(filepath.Join(upper, ".c4", "answers"), []byte("not json"), 0o644)
+	relays["u3"].steerAt = time.Time{}
+	d.safepointsOnce(ctx, relays)
+	if got := annotation(t, c, c4v1.AnnotationAsks); got != asks {
+		t.Fatalf("asks %q", got)
+	}
+	if got := annotation(t, c, c4v1.AnnotationAnswers); got != "" {
+		t.Fatalf("answers that are not a list were relayed: %q", got)
+	}
 }

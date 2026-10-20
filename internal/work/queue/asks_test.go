@@ -111,3 +111,31 @@ func TestUnitsAskUnits(t *testing.T) {
 		t.Fatalf("after a restart: %d asks, was %d", m, n)
 	}
 }
+
+// A unit that waited past its hold gives up its slot to wait on its
+// answerer (a block wait served by unit:<name>); the answer decides the
+// wait, and the unit runs again with it in C4_DECISION.
+func TestAnswerResumesAWaitingUnit(t *testing.T) {
+	ns, q, now := graphJob(t, "held", func(time.Time) string {
+		return `{"name": "lead"}, {"name": "worker"}`
+	}, 24*time.Hour)
+	q.Safepoints = &SafepointCache{}
+	notePod(t, ns, "held", 2, c4v1.AnnotationAsks, `[{"seq": 1, "to": "unit:lead", "ask": "Which module owns the tokenizer?"}]`)
+	tick(t, q)
+	askAt(t, podOfUnit(t, ns, "held", 2), 1, *now, `{"server": "unit:lead", "ask": "Which module owns the tokenizer?"}`)
+	tick(t, q)
+	*now = now.Add(time.Minute)
+	finishUnit(t, now, ns, "held", 2, nil)
+	tick(t, q)
+	if hasPod(t, ns, "held", 2) || !slices.Equal(states(t, get(t, ns, "held"), "waits"), []int{2}) {
+		t.Fatalf("worker does not wait: %v", get(t, ns, "held").Status.UnitStates)
+	}
+	notePod(t, ns, "held", 1, c4v1.AnnotationAnswers, `[{"seq": 1, "ask": "2#1", "answer": "tokenize/"}]`)
+	tick(t, q)
+	readyMaterialization(t, ns, resumeName("held", 2), get(t, ns, "held").Status.Resume["2"])
+	tick(t, q)
+	p := podOfUnit(t, ns, "held", 2)
+	if d := envOf(p.Spec.Containers[0], "C4_DECISION"); !strings.Contains(d, `"do":"answer"`) || !strings.Contains(d, "tokenize/") {
+		t.Fatalf("worker's C4_DECISION %q", d)
+	}
+}

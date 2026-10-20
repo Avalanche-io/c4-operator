@@ -136,6 +136,14 @@ func TestHostSafepointRelay(t *testing.T) {
 	if got := getPod(t, c).Annotations[c4v1.AnnotationSteerSeen]; got != "1" {
 		t.Fatalf("steer-seen %q", got)
 	}
+	answers := `[{"seq":1,"ask":"2#1","answer":"tokenize/"}]`
+	os.WriteFile(filepath.Join(u.Out, ".c4", "answers"), []byte(answers), 0o644)
+	if err := r.relay(ctx, getPod(t, c), u); err != nil {
+		t.Fatal(err)
+	}
+	if got := getPod(t, c).Annotations[c4v1.AnnotationAnswers]; got != answers {
+		t.Fatalf("answers %q", got)
+	}
 
 	// the queue answers: stop
 	dec, _ := json.Marshal(node.SafepointDecision{Seq: 1, Do: "stop", Why: "capacity: battery low", At: at})
