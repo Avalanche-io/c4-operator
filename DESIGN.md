@@ -2942,7 +2942,15 @@ has an MCP tool with the same effect (section 13.2).
   never scrapes 10,000 nodes. Without Prometheus (the kind e2e) it scrapes
   the regional replicas and node daemons directly, which is fine for small
   clusters. What units report (progress, safe points) is never a metric: the
-  HUD reads it from the node daemons' `GET /units` (section 6.8).
+  HUD reads it from the node daemons' `GET /units` (section 6.8). Today
+  the HUD polls `/units` on every node every 5 s, which is fine for small
+  farms; at 10,000 nodes it must change, to a watch or a push from each
+  node, or a poll of only the nodes running the units on screen.
+- The node and tier counters keep their `project` label. They are the
+  studio's own operational metrics, read inside its perimeter and only with
+  a token allowed to get `/metrics`, and a studio's monitoring needs
+  per-project numbers. Telemetry, which leaves the farm, never reads these
+  labels raw: it carries a project only as a keyed pseudonym.
 - Events and logs are read on demand: opening a unit fetches that pod, its
   log tail and its Events (field-selected by involved object), as the user.
 
