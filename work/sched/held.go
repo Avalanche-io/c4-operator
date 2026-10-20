@@ -17,11 +17,16 @@ import (
 // slots it lacks free as other jobs' units end, soonest first; a unit
 // being stopped frees its slot for the job it is stopped for, and a unit
 // whose time left is unknown counts as ending now, as does one this
-// decision releases for another job. A job a burst is
-// planned for is left as planned: the burst is its capacity. Shares and
-// bursts are unchanged: this is what the job reports, and what a stop
-// asked for another job is reconsidered against (Reconsider).
+// decision releases for another job; burst slots requested and not yet
+// provisioned come once they are (Burst.Provisioning). A job a burst is
+// planned for is left as planned: the burst is its capacity. A job
+// waiting on one priced so reports no earlier a finish than it allows
+// (showDownstream). Shares and bursts are unchanged: this is what the job
+// reports, and what a stop asked for another job is reconsidered against
+// (Reconsider).
 func (a *alloc) heldPricing() {
+	changed := map[*jobCtx]bool{}
+	defer func() { a.showDownstream(changed) }()
 	for _, jc := range a.jobs {
 		if !jc.hasDeadline || jc.T <= 0 || jc.noPool || jc.j.Hold || jc.j.HoldStop || jc.waiting() || jc.burst != nil {
 			continue
@@ -51,6 +56,52 @@ func (a *alloc) heldPricing() {
 			s.atRisk, s.lateBy = true, secs(math.Min(f90, bigSeconds)-jc.T)
 		}
 		jc.shown = &s
+		changed[jc] = true
+	}
+}
+
+// showDownstream moves what a deadline job still waiting on upstream jobs
+// (Job.After) reports, when an upstream job it waits on reports a later
+// finish than the plan's (heldPricing): it starts no earlier than that
+// finish and then takes its own duration, as in startAfterUpstream. In
+// rounds, so a chain follows, at most one round per job.
+func (a *alloc) showDownstream(changed map[*jobCtx]bool) {
+	for round := 0; round < len(a.jobs) && len(changed) > 0; round++ {
+		moved := false
+		for _, jc := range a.jobs {
+			if !jc.hasDeadline || len(jc.j.After) == 0 || !jc.waiting() || jc.noPool || jc.j.Hold || jc.j.HoldStop {
+				continue
+			}
+			g50, g90, upChanged := 0.0, 0.0, false
+			for _, id := range jc.j.After {
+				u := a.byID[id]
+				if u == nil || u == jc {
+					continue
+				}
+				v := u.view()
+				g50, g90 = math.Max(g50, v.finish50), math.Max(g90, v.finish90)
+				upChanged = upChanged || changed[u]
+			}
+			if !upChanged {
+				continue
+			}
+			v := jc.view()
+			f90 := g90 + jc.duration()
+			if f90 <= v.finish90+1e-6 {
+				continue
+			}
+			s := shownPlan{finish50: math.Max(v.finish50, g50+math.Max(div(jc.W, jc.A), jc.tpath)), finish90: f90}
+			if f90 > jc.T {
+				s.atRisk, s.lateBy = true, secs(math.Min(f90, bigSeconds)-jc.T)
+			}
+			jc.shown = &s
+			if !changed[jc] {
+				changed[jc], moved = true, true
+			}
+		}
+		if !moved {
+			return
+		}
 	}
 }
 
@@ -66,6 +117,11 @@ func (a *alloc) slotsFor(jc *jobCtx, lack int) (now int, until float64) {
 			continue
 		}
 		now += max(0, ps.free)
+		if b := ps.p.Burst; b != nil {
+			for k := 0; k < b.Requested-b.Provisioned; k++ {
+				ends = append(ends, b.Provisioning.Seconds())
+			}
+		}
 		for _, o := range a.jobs {
 			if o == jc {
 				continue

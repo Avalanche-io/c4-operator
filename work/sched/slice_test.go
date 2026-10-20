@@ -159,3 +159,45 @@ func TestFinishPricedOnHeldSlots(t *testing.T) {
 		t.Fatalf("with a slot ending in a minute: %+v", g)
 	}
 }
+
+// Burst slots already requested come once provisioned: a job planned on
+// them is not priced on the slots it holds now (homelab's approved
+// moment: sh0220's lighting on 2 owned slots and 2 cloud slots on their
+// way read 5 h late, while its comp and review read on time).
+func TestHeldPricingCountsBurstOnItsWay(t *testing.T) {
+	light := job("light", "show", 22, 12, 3*time.Hour+30*time.Minute)
+	light.Pools = []string{"gpu", "cloud"}
+	light.RunningUnits, light.Running = runningUnits("light", "gpu", 2, t0.Add(-time.Minute))
+	for i := range light.RunningUnits {
+		light.RunningUnits[i].Remaining = time.Hour
+	}
+	cloud := Pool{Name: "cloud", Burst: &Burst{MaxSlots: 4, Provisioning: 10 * time.Minute, CostPerSlotHour: 1, Requested: 2}}
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "gpu", Slots: 2, Used: 2}, cloud}, Jobs: []Job{light}}
+	g := Decide(s, &State{}, DefaultConfig()).Jobs["light"]
+	if g.AtRisk || g.ETA90.After(t0.Add(3*time.Hour+30*time.Minute)) {
+		t.Fatalf("with 2 burst slots on their way: %+v", g)
+	}
+}
+
+// A job waiting on one priced on its held slots reports no earlier a
+// finish than that allows: gw010's comp is late with it.
+func TestHeldPricingReachesDependents(t *testing.T) {
+	render := job("gw010", "show", 51, 52*140.0/3600, 75*time.Minute)
+	render.Pools = []string{"gpu"}
+	render.RunningUnits, render.Running = runningUnits("gw010", "gpu", 1, t0.Add(-time.Minute))
+	render.RunningUnits[0].Remaining = 80 * time.Second
+	other := job("sim", "show", 0, 4, 0)
+	other.Pools = []string{"gpu"}
+	other.Runnable, other.RunnableTotal = nil, 0
+	other.RunningUnits, other.Running = runningUnits("sim", "gpu", 1, t0.Add(-20*time.Minute))
+	other.RunningUnits[0].Remaining = 3 * time.Hour
+	other.Preemptible = false
+	comp := waitingJob("gw010-comp", 4, 0.2, 2*time.Hour, "gw010")
+	comp.Pools = []string{"gpu"}
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "gpu", Slots: 2, Used: 2}}, Jobs: []Job{render, other, comp}}
+	d := Decide(s, &State{}, DefaultConfig())
+	g, c := d.Jobs["gw010"], d.Jobs["gw010-comp"]
+	if !g.AtRisk || !c.ETA90.After(g.ETA90) || !c.AtRisk {
+		t.Fatalf("render %+v\ncomp %+v", g, c)
+	}
+}

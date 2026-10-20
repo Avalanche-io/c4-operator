@@ -2276,8 +2276,10 @@ Burst decisions are cost-aware:
   slots until other jobs' units end and free the rest, soonest first; then
   its share. It reports that finish when it is later than the plan's, and
   is at risk when it passes the deadline. A unit with no estimate of its
-  time left, or released this decision, counts as ending now, and a job a
-  burst is planned for is left as planned. Shares and bursts are
+  time left, or released this decision, counts as ending now; burst slots
+  requested and still provisioning come after the pool's provisioning time;
+  and a job a burst is planned for is left as planned. A job waiting on one
+  priced so reports no earlier a finish than that allows. Shares and bursts are
   unchanged: gw010 on one GPU slot, behind a training unit with three
   hours left, reports itself late instead of on time on two.
 - **Bursts are topped up from what is left.** A job confined to a subset of
