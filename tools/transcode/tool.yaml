@@ -5,7 +5,7 @@ summary: An ACES-managed review movie of a plate or render sequence (ProRes 422 
 kind: once
 runs:
   image: c4/job-media
-  command: [bash, "{{Tool.Dir}}/transcode.sh", "{{Param.plates}}", "{{Param.range}}", "{{Param.codec}}", "{{Param.fps}}", "{{Job.Shot}}"]
+  command: [bash, "{{Tool.Dir}}/transcode.sh", "{{Param.plates}}", "{{Param.range}}", "{{Param.codec}}", "{{Param.fps}}", "{{Param.view}}", "{{Job.Shot}}"]
 params:
 - name: plates
   type: PATH
@@ -35,6 +35,13 @@ params:
   description: The movie's frame rate.
   show: advanced
   userInterface: {control: DROPDOWN_LIST, label: Frame rate}
+- name: view
+  type: STRING
+  default: ACES 2.0 - SDR 100 nits (Rec.709)
+  allowedValues: [ACES 2.0 - SDR 100 nits (Rec.709), Un-tone-mapped, Video (colorimetric), Raw]
+  description: The view the frames are shown through, on the Rec.1886 Rec.709 display of OpenColorIO's studio config (ocio://studio-config-latest).
+  show: advanced
+  userInterface: {control: DROPDOWN_LIST, label: View}
 writes: [review/]
 needs: {scratch: 4G}
 reuse: exact

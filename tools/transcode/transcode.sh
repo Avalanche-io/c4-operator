@@ -1,12 +1,12 @@
 #!/bin/bash
 # An ACES-managed review movie and a contact sheet of a frame sequence.
-#   transcode.sh PLATES RANGE CODEC FPS [SHOT]
+#   transcode.sh PLATES RANGE CODEC FPS VIEW [SHOT]
 # PLATES is an absolute path in the job's tree: a sequence with $F4, <F4>
 # or %04d for the frame, a folder of <name>.####.exr frames, or one frame's
 # file. Writes $C4_TREE/review/<shot>_review.mov and <shot>_contact.jpg;
 # SHOT defaults to the frames' name.
 set -euo pipefail
-plates="$1" range="$2" codec="$3" fps="$4" shot="${5:-}"
+plates="$1" range="$2" codec="$3" fps="$4" view="$5" shot="${6:-}"
 
 # seq_pattern PATH [NAME]: the sequence as a printf pattern (%04d)
 seq_pattern() {
@@ -70,7 +70,7 @@ mkdir -p "$out"
 echo "openjd_status: converting frames $start-$end to Rec.709"
 oiiotool --frames "$start-$end" "${pattern//%04d/#}" \
   --colorconfig ocio://studio-config-latest --iscolorspace ACES2065-1 \
-  --ociodisplay "Rec.1886 Rec.709 - Display" "ACES 2.0 - SDR 100 nits (Rec.709)" \
+  --ociodisplay "Rec.1886 Rec.709 - Display" "$view" \
   -d uint16 -o "$tmp/f.#.tif"
 echo "openjd_progress: 50"
 echo "openjd_status: encoding ${shot}_review.mov ($codec, $fps fps)"
