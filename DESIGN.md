@@ -1012,7 +1012,9 @@ Records are not yet batched at chain checkpoints (section 2.5).
   index per job (output file and unit to task record), and the transition
   log (`GET /book?since`, integrations GAPS 5): job transitions numbered
   farm-wide by the queue, sealed in each project's store as hash-linked
-  segments, the head in the ConfigMap `c4-work-book`; the farm-wide index,
+  segments, the head in ConfigMaps (`c4-work-book` for the number, one
+  `c4-work-book-<project>` per project, so none grows with the farm); the
+  farm-wide index,
   kept in the installation's system store as a hash-chained log like the
   usage ledger (section 12.2), is designed.
 - Usage records (section 12) and license usage (section 16.2) reference the

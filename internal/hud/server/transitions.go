@@ -14,9 +14,6 @@ import (
 	"sync"
 
 	"github.com/Avalanche-io/c4"
-	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
@@ -51,19 +48,9 @@ func (s *Server) segment(ctx context.Context, project, id string) (*queue.BookSe
 
 func (s *Server) handleTransitions(w http.ResponseWriter, r *http.Request, v *api.Viewer, since int64, limit int) {
 	ctx := r.Context()
-	var cm corev1.ConfigMap
-	err := s.Client.Get(ctx, client.ObjectKey{Namespace: s.Namespace, Name: queue.BookConfigMap}, &cm)
-	if apierrors.IsNotFound(err) {
-		writeJSON(w, http.StatusOK, api.Transitions{Entries: []api.Transition{}, Next: since, Head: 0})
-		return
-	}
+	h, err := queue.ReadBook(ctx, s.Client, s.Namespace)
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "the transition log: %v", err)
-		return
-	}
-	h, err := queue.ReadBookHead(cm.Data)
-	if err != nil {
-		fail(w, http.StatusInternalServerError, "the transition log: %v", err)
 		return
 	}
 	projects := map[string]bool{}

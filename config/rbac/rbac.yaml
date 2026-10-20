@@ -314,15 +314,14 @@ rules:
   resources: [configmaps]
   resourceNames: [c4-work-calibrations]
   verbs: [get, patch]
-# The transition log's head (internal/work/queue/book.go): updated with its
-# resourceVersion, so a stale leader cannot fork the log.
+# The transition log (internal/work/queue/book.go): c4-work-book (the
+# number) and one c4-work-book-<project> per project, each updated with its
+# resourceVersion, so a stale leader cannot fork the log. RBAC names no
+# prefix, so this is any ConfigMap in the operator's own namespace, which
+# only the operator writes.
 - apiGroups: [""]
   resources: [configmaps]
-  resourceNames: [c4-work-book]
-  verbs: [get, update]
-- apiGroups: [""]
-  resources: [configmaps]
-  verbs: [create]
+  verbs: [create, update]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

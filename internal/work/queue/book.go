@@ -11,12 +11,14 @@ package queue
 // so a change is never in status without being in the log. A crash
 // between the two re-records a change with a new number and the same Key.
 //
-// The log follows the calibrations' pattern (persist.go): the ConfigMap
-// bookConfigMap holds the next number and each project's tail; a full tail
-// is sealed as an object in the project's own store, linked to the one
-// before by its C4 ID (a hash chain), and the ConfigMap lists the latest
-// bookSegments of them. A project's transitions never go to another
-// project's store.
+// The log follows the calibrations' pattern (persist.go): small mutable
+// pointers beside content-addressed objects. The ConfigMap BookConfigMap
+// holds the next number, farm-wide; each project's ConfigMap
+// (BookProjectName) holds its tail and its segment index, so no object
+// grows with the farm. A tail is sealed, at bookSeal transitions or
+// bookSealBytes, as an object in the project's own store, linked to the
+// one before by its C4 ID (a hash chain). A project's transitions never go
+// to another project's store.
 
 import (
 	"context"
@@ -37,19 +39,29 @@ import (
 )
 
 const (
-	// BookConfigMap holds the log's head, in the operator's namespace.
-	BookConfigMap = "c4-work-book"
-	// bookSeal is how many transitions a project's tail holds before it
-	// is sealed into its store; bookSegments how many sealed segments the
-	// head lists per project; bookTailMax the most a tail keeps while its
-	// store cannot be reached.
-	bookTailMax = 1024
-	bookKind    = "c4.avalanche.io/work-book-segment"
+	// BookConfigMap holds the log's next number, farm-wide, in the
+	// operator's namespace; each project's tail and segments are in its
+	// own ConfigMap, BookProjectPrefix and the project's name, so no one
+	// object grows with the number of projects.
+	BookConfigMap     = "c4-work-book"
+	BookProjectPrefix = "c4-work-book-"
+	// BookLabel marks a project's book ConfigMap; its value is the project.
+	BookLabel = "c4.avalanche.io/work-book"
+	bookKind  = "c4.avalanche.io/work-book-segment"
 )
 
 var (
-	bookSeal     = 128
-	bookSegments = 64
+	// bookSeal is how many transitions a project's tail holds before it is
+	// sealed into the project's store, and bookSealBytes how large it may
+	// grow before it is sealed early; bookSegments is how many sealed
+	// segments a project's head lists.
+	bookSeal      = 128
+	bookSealBytes = 256 << 10
+	bookSegments  = 64
+	// bookTailBytes bounds a tail while its store cannot be reached: the
+	// oldest go past it, and the head says so. With bookSegments rows of
+	// the index, a project's ConfigMap stays far under the 1 MiB limit.
+	bookTailBytes = 512 << 10
 )
 
 // BookSegment is one sealed run of a project's transitions, as the head
@@ -71,7 +83,8 @@ type BookSegmentObject struct {
 	Entries []api.Transition `json:"entries"`
 }
 
-// BookHead is the log's head as the ConfigMap holds it.
+// BookHead is the log's head: the next number and every project's tail
+// and segments, as their ConfigMaps hold them.
 type BookHead struct {
 	// Next is the number the next transition gets.
 	Next     int64
@@ -82,62 +95,92 @@ type BookHead struct {
 	Dropped map[string]bool
 }
 
-// Book key names in the ConfigMap. A project's name is a DNS name, which
-// has no "_"; the synthetic project of a namespace no Project claims
-// ("namespace/<ns>") has a "/", which a key may not: it is written "_".
-func bookTailKey(p string) string { return "tail." + keyOf(p) }
-func bookSegKey(p string) string  { return "segments." + keyOf(p) }
-func bookDropKey(p string) string { return "dropped." + keyOf(p) }
-func keyOf(p string) string       { return strings.ReplaceAll(p, "/", "_") }
-func projectOf(k string) string   { return strings.ReplaceAll(k, "_", "/") }
+func newHead() *BookHead {
+	return &BookHead{Next: 1, Tails: map[string][]api.Transition{}, Segments: map[string][]BookSegment{}, Dropped: map[string]bool{}}
+}
 
-// ReadBookHead reads the head from the ConfigMap's data.
-func ReadBookHead(data map[string]string) (*BookHead, error) {
-	h := &BookHead{Next: 1, Tails: map[string][]api.Transition{}, Segments: map[string][]BookSegment{}, Dropped: map[string]bool{}}
-	if s := data["next"]; s != "" {
-		n, err := strconv.ParseInt(s, 10, 64)
-		if err != nil {
-			return nil, fmt.Errorf("book head next %q: %w", s, err)
-		}
-		h.Next = n
+// BookProjectName is a project's book ConfigMap. A project's name is a
+// DNS name; the synthetic project of a namespace no Project claims
+// ("namespace/<ns>") has a "/", which a name may not: it is written "--".
+func BookProjectName(p string) string { return BookProjectPrefix + strings.ReplaceAll(p, "/", "--") }
+
+// ReadBook reads the head: the farm-wide number and each project's
+// ConfigMap. A farm with no log yet has an empty head.
+func ReadBook(ctx context.Context, c client.Reader, ns string) (*BookHead, error) {
+	h := newHead()
+	var seq corev1.ConfigMap
+	err := c.Get(ctx, client.ObjectKey{Namespace: ns, Name: BookConfigMap}, &seq)
+	if err != nil && !apierrors.IsNotFound(err) {
+		return nil, err
 	}
-	for k, v := range data {
-		switch {
-		case strings.HasPrefix(k, "tail."):
-			var es []api.Transition
-			if err := json.Unmarshal([]byte(v), &es); err != nil {
-				return nil, fmt.Errorf("book %s: %w", k, err)
-			}
-			h.Tails[projectOf(strings.TrimPrefix(k, "tail."))] = es
-		case strings.HasPrefix(k, "segments."):
-			var ss []BookSegment
-			if err := json.Unmarshal([]byte(v), &ss); err != nil {
-				return nil, fmt.Errorf("book %s: %w", k, err)
-			}
-			h.Segments[projectOf(strings.TrimPrefix(k, "segments."))] = ss
-		case strings.HasPrefix(k, "dropped."):
-			h.Dropped[projectOf(strings.TrimPrefix(k, "dropped."))] = v == "true"
+	if err == nil {
+		if h.Next, err = readNext(seq.Data); err != nil {
+			return nil, err
+		}
+	}
+	var list corev1.ConfigMapList
+	if err := c.List(ctx, &list, client.InNamespace(ns), client.HasLabels{BookLabel}); err != nil {
+		return nil, err
+	}
+	for i := range list.Items {
+		if err := h.readProject(list.Items[i].Data); err != nil {
+			return nil, fmt.Errorf("%s: %w", list.Items[i].Name, err)
 		}
 	}
 	return h, nil
 }
 
-func (h *BookHead) data() map[string]string {
-	d := map[string]string{"next": strconv.FormatInt(h.Next, 10)}
-	for p, es := range h.Tails {
-		b, _ := json.Marshal(es)
-		d[bookTailKey(p)] = string(b)
+func readNext(d map[string]string) (int64, error) {
+	s := d["next"]
+	if s == "" {
+		return 1, nil
 	}
-	for p, ss := range h.Segments {
-		b, _ := json.Marshal(ss)
-		d[bookSegKey(p)] = string(b)
+	n, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("book next %q: %w", s, err)
 	}
-	for p, dropped := range h.Dropped {
-		if dropped {
-			d[bookDropKey(p)] = "true"
+	return n, nil
+}
+
+func (h *BookHead) readProject(d map[string]string) error {
+	p := d["project"]
+	if p == "" {
+		return fmt.Errorf("no project")
+	}
+	if v := d["tail"]; v != "" {
+		var es []api.Transition
+		if err := json.Unmarshal([]byte(v), &es); err != nil {
+			return fmt.Errorf("tail: %w", err)
 		}
+		h.Tails[p] = es
+	}
+	if v := d["segments"]; v != "" {
+		var ss []BookSegment
+		if err := json.Unmarshal([]byte(v), &ss); err != nil {
+			return fmt.Errorf("segments: %w", err)
+		}
+		h.Segments[p] = ss
+	}
+	h.Dropped[p] = d["dropped"] == "true"
+	return nil
+}
+
+// projectData is a project's ConfigMap data.
+func (h *BookHead) projectData(p string) map[string]string {
+	d := map[string]string{"project": p}
+	b, _ := json.Marshal(h.Tails[p])
+	d["tail"] = string(b)
+	b, _ = json.Marshal(h.Segments[p])
+	d["segments"] = string(b)
+	if h.Dropped[p] {
+		d["dropped"] = "true"
 	}
 	return d
+}
+
+func tailBytes(ts []api.Transition) int {
+	b, _ := json.Marshal(ts)
+	return len(b)
 }
 
 // Oldest is the first transition a project's head still reaches.
@@ -151,11 +194,13 @@ func (h *BookHead) Oldest(p string) int64 {
 	return h.Next
 }
 
-// bookLog is the queue's copy of the head and the ConfigMap's version it
-// last wrote, so a write from a stale copy (another leader's) fails.
+// bookLog is the queue's copy of the head and the versions of the
+// ConfigMaps it last wrote, so a write from a stale copy (another
+// leader's) fails.
 type bookLog struct {
 	head *BookHead
-	cm   *corev1.ConfigMap
+	seq  *corev1.ConfigMap
+	proj map[string]*corev1.ConfigMap
 }
 
 // loadBook reads the head once, as the leader starts.
@@ -163,27 +208,38 @@ func (q *Queue) loadBook(ctx context.Context) error {
 	if q.tlog != nil {
 		return nil
 	}
-	var cm corev1.ConfigMap
-	err := q.Client.Get(ctx, client.ObjectKey{Namespace: q.Namespace, Name: BookConfigMap}, &cm)
+	b := &bookLog{head: newHead(), proj: map[string]*corev1.ConfigMap{}}
+	var seq corev1.ConfigMap
+	err := q.Client.Get(ctx, client.ObjectKey{Namespace: q.Namespace, Name: BookConfigMap}, &seq)
 	switch {
-	case apierrors.IsNotFound(err):
-		q.tlog = &bookLog{head: &BookHead{Next: 1, Tails: map[string][]api.Transition{}, Segments: map[string][]BookSegment{}, Dropped: map[string]bool{}}}
-		return nil
-	case err != nil:
+	case err == nil:
+		if b.head.Next, err = readNext(seq.Data); err != nil {
+			return err
+		}
+		b.seq = &seq
+	case !apierrors.IsNotFound(err):
 		return err
 	}
-	h, err := ReadBookHead(cm.Data)
-	if err != nil {
+	var list corev1.ConfigMapList
+	if err := q.Client.List(ctx, &list, client.InNamespace(q.Namespace), client.HasLabels{BookLabel}); err != nil {
 		return err
 	}
-	q.tlog = &bookLog{head: h, cm: &cm}
+	for i := range list.Items {
+		cm := &list.Items[i]
+		if err := b.head.readProject(cm.Data); err != nil {
+			return fmt.Errorf("%s: %w", cm.Name, err)
+		}
+		b.proj[cm.Data["project"]] = cm
+	}
+	q.tlog = b
 	return nil
 }
 
 // appendBook numbers ts, adds them to their projects' tails, seals full
-// tails into their stores, and writes the head. On an error nothing is
-// kept: the caller writes no status, and the same changes are found again
-// next tick.
+// tails into their stores, and writes the number, then each project's
+// ConfigMap. On an error nothing is kept: the caller writes no status, and
+// the same changes are found again next tick (with new numbers and the
+// same keys; numbers already taken are skipped).
 func (q *Queue) appendBook(ctx context.Context, ts []api.Transition) error {
 	if len(ts) == 0 || q.Namespace == "" {
 		return nil // no operator namespace (a queue in a test): no log
@@ -193,46 +249,76 @@ func (q *Queue) appendBook(ctx context.Context, ts []api.Transition) error {
 	}
 	b := q.tlog
 	h := cloneHead(b.head)
+	touched := map[string]bool{}
 	for i := range ts {
 		ts[i].Seq = h.Next
 		h.Next++
 		h.Tails[ts[i].Project] = append(h.Tails[ts[i].Project], ts[i])
+		touched[ts[i].Project] = true
 	}
-	for p, tail := range h.Tails {
-		if len(tail) < bookSeal {
+	for p := range touched {
+		tail := h.Tails[p]
+		if len(tail) < bookSeal && tailBytes(tail) < bookSealBytes {
 			continue
 		}
 		if err := q.sealBook(ctx, h, p); err != nil {
 			q.Log.Error(err, "seal the transition log", "project", p)
-			if len(tail) > bookTailMax {
-				// The store has been away a long time: the oldest go, and
-				// the head says so.
-				h.Tails[p] = tail[len(tail)-bookTailMax:]
+			// The store is away: the tail grows, to a bound; past it the
+			// oldest go, and the head says so.
+			for len(h.Tails[p]) > 1 && tailBytes(h.Tails[p]) > bookTailBytes {
+				h.Tails[p] = h.Tails[p][len(h.Tails[p])/4:]
 				h.Dropped[p] = true
 			}
 		}
 	}
-	data := h.data()
-	if b.cm == nil {
-		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: q.Namespace, Name: BookConfigMap,
-			Labels: map[string]string{"app.kubernetes.io/name": "c4-operator", "app.kubernetes.io/component": "queue"}}, Data: data}
-		if err := q.Client.Create(ctx, cm); err != nil {
-			q.tlog = nil // read it again: another writer made it
-			return err
-		}
-		b.cm = cm
-	} else {
-		cm := b.cm.DeepCopy()
-		cm.Data = data
-		if err := q.Client.Update(ctx, cm); err != nil {
-			// Another leader wrote it, or the version moved: read it again.
+	// The number first, version-checked: a stale leader stops here.
+	seq, err := q.writeBook(ctx, b.seq, BookConfigMap, nil, map[string]string{"next": strconv.FormatInt(h.Next, 10)})
+	if err != nil {
+		q.tlog = nil // read it again
+		return err
+	}
+	b.seq = seq
+	ps := make([]string, 0, len(touched))
+	for p := range touched {
+		ps = append(ps, p)
+	}
+	sort.Strings(ps)
+	for _, p := range ps {
+		cm, err := q.writeBook(ctx, b.proj[p], BookProjectName(p), map[string]string{BookLabel: labelValue(p)}, h.projectData(p))
+		if err != nil {
 			q.tlog = nil
 			return err
 		}
-		b.cm = cm
+		b.proj[p] = cm
 	}
 	b.head = h
 	return nil
+}
+
+// labelValue is a project as a label value (at most 63 characters of
+// [-_.a-zA-Z0-9]); the ConfigMap's data names the project itself.
+func labelValue(p string) string {
+	v := strings.ReplaceAll(p, "/", ".")
+	if len(v) > 63 {
+		v = v[:63]
+	}
+	return strings.Trim(v, "-_.")
+}
+
+// writeBook creates a book ConfigMap, or updates the version the queue
+// last wrote.
+func (q *Queue) writeBook(ctx context.Context, last *corev1.ConfigMap, name string, labels, data map[string]string) (*corev1.ConfigMap, error) {
+	if last == nil {
+		l := map[string]string{"app.kubernetes.io/name": "c4-operator", "app.kubernetes.io/component": "queue"}
+		for k, v := range labels {
+			l[k] = v
+		}
+		cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: q.Namespace, Name: name, Labels: l}, Data: data}
+		return cm, q.Client.Create(ctx, cm)
+	}
+	cm := last.DeepCopy()
+	cm.Data = data
+	return cm, q.Client.Update(ctx, cm)
 }
 
 // sealBook stores a project's tail as a segment and lists it in the head.

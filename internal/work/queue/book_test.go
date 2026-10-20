@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -98,11 +99,7 @@ func TestTransitionLogSealsAndRefusesAStaleWriter(t *testing.T) {
 		t.Fatal(err)
 	}
 	head := func() *BookHead {
-		var cm corev1.ConfigMap
-		if err := k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: BookConfigMap}, &cm); err != nil {
-			t.Fatal(err)
-		}
-		h, err := ReadBookHead(cm.Data)
+		h, err := ReadBook(ctx, k8s, ns)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,12 +115,10 @@ func TestTransitionLogSealsAndRefusesAStaleWriter(t *testing.T) {
 	}
 
 	// Another leader, holding the head as it was before, cannot write.
-	stale := &Queue{Client: k8s, Log: q.Log, Namespace: ns, Stores: q.Stores, tlog: &bookLog{head: cloneHead(h)}}
-	var cm corev1.ConfigMap
-	if err := k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: BookConfigMap}, &cm); err != nil {
+	stale := &Queue{Client: k8s, Log: q.Log, Namespace: ns, Stores: q.Stores}
+	if err := stale.loadBook(ctx); err != nil {
 		t.Fatal(err)
 	}
-	stale.tlog.cm = cm.DeepCopy()
 	if err := batch(q, 1); err != nil {
 		t.Fatal(err)
 	}
@@ -168,11 +163,7 @@ func TestJobTransitionsReachTheLog(t *testing.T) {
 	}
 	tick(t, q)
 	tick(t, q)
-	var cm corev1.ConfigMap
-	if err := k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: BookConfigMap}, &cm); err != nil {
-		t.Fatal(err)
-	}
-	h, err := ReadBookHead(cm.Data)
+	h, err := ReadBook(ctx, k8s, ns)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,4 +187,87 @@ func TestJobTransitionsReachTheLog(t *testing.T) {
 	if got != "phase,phase,finished" {
 		t.Fatalf("the job's transitions: %s", got)
 	}
+}
+
+// No object grows with the farm: each project's tail and segments are in
+// its own ConfigMap, the farm-wide one holds only the number, a tail is
+// sealed early when it grows large, and while a store is away a tail
+// keeps to its bound. Every book ConfigMap stays far under the API
+// server's 1 MiB limit, however many projects are busy.
+func TestBookStaysUnderTheObjectLimit(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	ctx := context.Background()
+	q.Namespace = ns
+	st, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: t.TempDir()}}, storeurl.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	away := map[string]bool{"show-away": true}
+	q.Stores = func(_ context.Context, p string) (*storeurl.Sharded, error) {
+		if away[p] {
+			return nil, fmt.Errorf("store away")
+		}
+		return st, nil
+	}
+	msg := func(n int) string { return strings.Repeat("m", n) }
+	put := func(project string, n, size int) {
+		t.Helper()
+		var ts []api.Transition
+		for i := 0; i < n; i++ {
+			ts = append(ts, api.Transition{Project: project, Job: project + "/j", Kind: "phase", Message: msg(size), Key: fmt.Sprint(i)})
+		}
+		if err := q.appendBook(ctx, ts); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Forty busy projects, each a tail just short of sealing, of 2 KB
+	// transitions: one ConfigMap for all would be ~10 MiB.
+	for i := 0; i < 40; i++ {
+		put(fmt.Sprintf("show-%02d", i), bookSeal-1, 2000)
+	}
+	// A project with 4 KB transitions seals by size before 128.
+	put("show-big", 100, 4000)
+	// A project whose store is away keeps a bounded tail.
+	for i := 0; i < 8; i++ {
+		put("show-away", 100, 2000)
+	}
+
+	var list corev1.ConfigMapList
+	if err := k8s.List(ctx, &list, client.InNamespace(ns)); err != nil {
+		t.Fatal(err)
+	}
+	books := 0
+	for _, cm := range list.Items {
+		if cm.Name != BookConfigMap && !strings.HasPrefix(cm.Name, BookProjectPrefix) {
+			continue
+		}
+		books++
+		size := 0
+		for k, v := range cm.Data {
+			size += len(k) + len(v)
+		}
+		if size > 600<<10 {
+			t.Errorf("%s holds %d bytes", cm.Name, size)
+		}
+		if cm.Name == BookConfigMap && size > 64 {
+			t.Errorf("the farm-wide ConfigMap holds more than the number: %v", cm.Data)
+		}
+	}
+	if books != 43 {
+		t.Fatalf("%d book ConfigMaps, want the number and 42 projects", books)
+	}
+	h, err := ReadBook(ctx, k8s, ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(h.Segments["show-big"]) == 0 || len(h.Tails["show-big"]) >= 100 {
+		t.Fatalf("the big tail was not sealed early: %d sealed, %d in the tail", len(h.Segments["show-big"]), len(h.Tails["show-big"]))
+	}
+	if !h.Dropped["show-away"] || tailBytes(h.Tails["show-away"]) > bookTailBytes {
+		t.Fatalf("the tail of a project whose store is away: dropped %v, %d bytes", h.Dropped["show-away"], tailBytes(h.Tails["show-away"]))
+	}
+	if want := int64(40*(bookSeal-1) + 100 + 800 + 1); h.Next != want {
+		t.Fatalf("next %d, want %d", h.Next, want)
+	}
+	_ = now
 }

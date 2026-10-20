@@ -616,11 +616,15 @@ what it missed, in order, from its cursor.
 - `410` with `{ error, oldest }` when the log no longer reaches
   `since + 1` for a project. Read the jobs again, then go on from `oldest`.
 
-The queue alone writes it, each tick, before the statuses it describes. A
-ConfigMap `c4-work-book` in the operator's namespace holds the next number
-and each project's latest entries. Each 128 entries are sealed as an object
-in the project's own store, naming the previous one by C4 ID, and the head
-lists the latest 64 per project. Any HUD replica serves it.
+The queue alone writes it, each tick, before the statuses it describes.
+In the operator's namespace, the ConfigMap `c4-work-book` holds only the
+next number, and each project's ConfigMap `c4-work-book-<project>` (label
+`c4.avalanche.io/work-book`) holds its latest entries and segment index.
+So no object grows with the number of projects, and each stays far under
+the API server's 1 MiB limit. Every 128 entries (or 256 KiB, whichever
+comes first) are sealed as an object in the project's own store, naming
+the previous one by C4 ID; the head lists the latest 64 per project. Any
+HUD replica serves it.
 
 ## GET /events
 

@@ -43,14 +43,23 @@ func TestBookSince(t *testing.T) {
 		t.Fatal(err)
 	}
 	enc := func(v any) string { b, _ := json.Marshal(v); return string(b) }
-	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: queue.BookConfigMap}, Data: map[string]string{
-		"next":            "7",
-		"segments.show-a": enc([]queue.BookSegment{{First: 1, Last: 3, ID: id.String()}}),
-		"tail.show-a":     enc([]api.Transition{tr(4, "show-a", "cause"), tr(6, "show-a", "finished")}),
-		"tail.show-b":     enc([]api.Transition{tr(5, "show-b", "phase")}),
-	}}
-	if err := s.Client.Create(ctx, cm); err != nil {
-		t.Fatal(err)
+	project := func(p string, data map[string]string) *corev1.ConfigMap {
+		data["project"] = p
+		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: queue.BookProjectName(p),
+			Labels: map[string]string{queue.BookLabel: p}}, Data: data}
+	}
+	cm := project("show-a", map[string]string{
+		"segments": enc([]queue.BookSegment{{First: 1, Last: 3, ID: id.String()}}),
+		"tail":     enc([]api.Transition{tr(4, "show-a", "cause"), tr(6, "show-a", "finished")}),
+	})
+	for _, o := range []*corev1.ConfigMap{
+		{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: queue.BookConfigMap}, Data: map[string]string{"next": "7"}},
+		cm,
+		project("show-b", map[string]string{"tail": enc([]api.Transition{tr(5, "show-b", "phase")})}),
+	} {
+		if err := s.Client.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
 	}
 	read := func(q string) (int, api.Transitions) {
 		var out api.Transitions
@@ -82,8 +91,8 @@ func TestBookSince(t *testing.T) {
 	// Older segments dropped: a cursor before what is kept is told where
 	// the log begins.
 	// (Later: the kept segments begin at 11, those before were dropped.)
-	cm.Data["dropped.show-a"] = "true"
-	cm.Data["segments.show-a"] = enc([]queue.BookSegment{{First: 11, Last: 13, ID: id.String()}})
+	cm.Data["dropped"] = "true"
+	cm.Data["segments"] = enc([]queue.BookSegment{{First: 11, Last: 13, ID: id.String()}})
 	if err := s.Client.Update(ctx, cm); err != nil {
 		t.Fatal(err)
 	}
