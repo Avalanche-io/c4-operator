@@ -1,9 +1,0 @@
-# The fake Flow site for the dailies demo (hack/demo/fakeflow): a test
-# double, not Autodesk software. hack/demo/dailies.sh builds the binary
-# into bin/demo-context/linux/<arch>/fakeflow first.
-FROM gcr.io/distroless/static-debian12:nonroot
-ARG TARGETPLATFORM
-COPY ${TARGETPLATFORM}/fakeflow /fakeflow
-USER 65532:65532
-EXPOSE 8080
-ENTRYPOINT ["/fakeflow"]

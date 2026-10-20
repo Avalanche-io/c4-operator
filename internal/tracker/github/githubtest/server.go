@@ -192,8 +192,17 @@ type Server struct {
 	reset     time.Time
 }
 
-// New starts a fake for owner/repo.
+// New starts a fake for owner/repo on a random local port.
 func New(owner, repo string) *Server {
+	s := Unstarted(owner, repo)
+	s.Server.Start()
+	return s
+}
+
+// Unstarted makes a fake that does not listen: serve Handler() yourself
+// (hack/demo/fakegithub runs it as a service), and set URL to the address
+// clients reach it at, for the links it writes.
+func Unstarted(owner, repo string) *Server {
 	s := &Server{
 		Owner: owner, Repo: repo,
 		App:       User{Login: "c4-sync[bot]", ID: 900, Type: "Bot"},
@@ -210,8 +219,47 @@ func New(owner, repo string) *Server {
 		remaining: 5000,
 	}
 	s.users[s.App.Login] = s.App
-	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
+	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(s.serve))
 	return s
+}
+
+// Handler is the fake's REST API, to mount beside other routes.
+func (s *Server) Handler() http.Handler { return http.HandlerFunc(s.serve) }
+
+// AddLabel gives an issue a label, as a person does.
+func (s *Server) AddLabel(number int, label string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if is := s.issues[number]; is != nil {
+		is.Labels = append(is.Labels, Label{Name: label})
+		is.UpdatedAt = s.now()
+	}
+}
+
+// Issues returns the issues and pull requests, by number.
+func (s *Server) Issues() []Issue {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []Issue
+	for _, n := range sortedKeys(s.issues) {
+		out = append(out, *s.issues[n])
+	}
+	return out
+}
+
+// Pull returns a pull request and its reviews.
+func (s *Server) Pull(number int) (Pull, []Review, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	p := s.pulls[number]
+	if p == nil {
+		return Pull{}, nil, false
+	}
+	var rs []Review
+	for _, r := range s.reviews[number] {
+		rs = append(rs, *r)
+	}
+	return *p, rs, true
 }
 
 // SetClock replaces time.Now for timestamps the fake assigns.

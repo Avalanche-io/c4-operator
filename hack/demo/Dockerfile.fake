@@ -1,0 +1,10 @@
+# A fake tracker for the live demos (hack/demo/fakeflow, hack/demo/fakegithub):
+# test doubles built from the vendors' published API shapes, not their
+# software. lib.sh builds the binary into bin/demo-context/linux/<arch>/ first.
+FROM gcr.io/distroless/static-debian12:nonroot
+ARG TARGETPLATFORM
+ARG FAKE
+COPY ${TARGETPLATFORM}/${FAKE} /fake
+USER 65532:65532
+EXPOSE 8080
+ENTRYPOINT ["/fake"]
