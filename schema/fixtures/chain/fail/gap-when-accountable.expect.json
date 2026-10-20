@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "/else",
+  "errors": [
+    {
+      "path": "gap",
+      "message": "an accountable chain has no gap",
+      "fix": "remove gap, or set accountable: false"
+    }
+  ]
+}

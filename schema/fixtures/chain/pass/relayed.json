@@ -1,0 +1,33 @@
+{
+  "act": "decide",
+  "by": {
+    "tracker": "flow",
+    "user": "noor.k",
+    "grade": "relayed"
+  },
+  "for": {
+    "party": "noor",
+    "grade": "relayed"
+  },
+  "under": [
+    {
+      "record": "c458KN43mnYHYkLqwSrWE8Gu8RGBu93Aukjm4dnKGNVVn1DmkUWs3x5xZ7LYopK3iGzxA7GBafv7hHaMqVZvZ9c1cT",
+      "kind": "people-map"
+    }
+  ],
+  "on": [
+    {
+      "deployment": "saltmarsh/component/c4-sync",
+      "binding": "c44AodpwTGKzBksCf85xyjY6YEnXQH6HFP2FVs6zrppgXkydBu1LBBjeE5aPEoCfk84sc2dpZyoiiZUCgvZhDPAUaT",
+      "owner": "avalanche",
+      "runFor": "studio-x"
+    },
+    {
+      "deployment": "saltmarsh/component/hud",
+      "binding": "c4415LnEDVW3nGu9JLv5zgTTwBWNm9pfxY6tsxJd1auJErLJoDxuU6Q2Ln1p55wQDQps4iDgQABdsFYLwcFfR8a6Q7",
+      "owner": "avalanche",
+      "runFor": "studio-x"
+    }
+  ],
+  "accountable": true
+}

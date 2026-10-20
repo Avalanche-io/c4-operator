@@ -15,10 +15,14 @@ func TestParseFixtures(t *testing.T) {
 		t.Run(c.Format+"/"+c.Name+map[bool]string{true: "", false: " (fail)"}[c.Pass], func(t *testing.T) {
 			var errs []Error
 			var parsed any
-			if c.Format == "submit" {
+			switch c.Format {
+			case "submit":
 				s, e := ParseSubmission(c.Doc)
 				parsed, errs = s, e
-			} else {
+			case "chain":
+				ch, e := ParseChain(c.Doc)
+				parsed, errs = ch, e
+			default:
 				tl, e := ParseTool(c.Doc)
 				parsed, errs = tl, e
 			}
@@ -45,12 +49,15 @@ func TestParseFixtures(t *testing.T) {
 // validator accept and refuse the same fixtures.
 func TestParsersAgreeWithTheSchema(t *testing.T) {
 	for _, c := range cases(t) {
-		rs := resolve(t, map[string][]byte{"submit": SubmitSchema(), "tool": ToolSchema()}[c.Format])
+		rs := resolve(t, map[string][]byte{"submit": SubmitSchema(), "tool": ToolSchema(), "chain": ChainSchema()}[c.Format])
 		validErr := rs.Validate(value(t, c.Doc))
 		var errs []Error
-		if c.Format == "submit" {
+		switch c.Format {
+		case "submit":
 			_, errs = ParseSubmission(c.Doc)
-		} else {
+		case "chain":
+			_, errs = ParseChain(c.Doc)
+		default:
 			_, errs = ParseTool(c.Doc)
 		}
 		if (validErr == nil) != (errs == nil) {

@@ -1,0 +1,28 @@
+{
+  "act": "steer",
+  "by": {
+    "agent": "assistant",
+    "grade": "claimed"
+  },
+  "for": {
+    "party": "noor",
+    "grade": "direct"
+  },
+  "under": [
+    {
+      "grant": "c45eMDdSrhpfVPz6jBQseEv1jVqSgPCK89Feqw3UcdushXwYmhtZUr8fGN3uzZvNFeJT75piSqXhYGZhTCPfuYpQM4",
+      "kind": "sign",
+      "from": "noor",
+      "to": "agent assistant"
+    }
+  ],
+  "on": [
+    {
+      "deployment": "saltmarsh/component/hud",
+      "binding": "c4415LnEDVW3nGu9JLv5zgTTwBWNm9pfxY6tsxJd1auJErLJoDxuU6Q2Ln1p55wQDQps4iDgQABdsFYLwcFfR8a6Q7",
+      "owner": "avalanche",
+      "runFor": "studio-x"
+    }
+  ],
+  "accountable": true
+}

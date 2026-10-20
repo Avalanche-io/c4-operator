@@ -1,0 +1,12 @@
+{
+  "act": "build",
+  "by": {
+    "person": "noor",
+    "grade": "verified"
+  },
+  "for": {
+    "party": "noor",
+    "grade": "direct"
+  },
+  "accountable": true
+}

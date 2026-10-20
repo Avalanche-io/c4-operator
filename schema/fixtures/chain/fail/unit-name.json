@@ -1,0 +1,12 @@
+{
+  "act": "build",
+  "by": {
+    "unit": "show-a/github-7/3",
+    "grade": "direct"
+  },
+  "for": {
+    "party": "noor",
+    "grade": "direct"
+  },
+  "accountable": true
+}

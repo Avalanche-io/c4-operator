@@ -115,6 +115,9 @@ func cases(t *testing.T) []schema.Case {
 // the failing ones the schema refuses with exactly their errors.
 func TestParseFixtures(t *testing.T) {
 	for _, c := range cases(t) {
+		if c.Format == "chain" { // the accountability chain is not a lowering input
+			continue
+		}
 		t.Run(c.Format+"/"+c.Name, func(t *testing.T) {
 			var errs []Error
 			if c.Format == "submit" {

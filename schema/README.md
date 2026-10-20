@@ -22,6 +22,8 @@ wraps a tool writes Kubernetes objects:
 | `fixtures/submit/fail/`      | submissions that must be refused, each with `<case>.expect.json`                             |
 | `fixtures/tool/pass/<tool>/` | every worked tool, the snippets wrapped whole, and the tools the submissions name            |
 | `fixtures/tool/fail/`        | tools that must be refused, each with `<case>.expect.json`                                   |
+| `chain-1.schema.json`        | JSON Schema for the accountability chain (`chain/1`) every signed record and book entry carries; `chain.go` has its type, `ParseChain` and `Line`, the chain read aloud |
+| `fixtures/chain/`            | chains that pass (each with its `.line.txt`, read with `names.yaml`) and chains refused, with their errors |
 | `lock-1.schema.json`         | JSON Schema for `tool.lock` (`c4: lock/1`): each image a tool names, pinned by digest        |
 | `types.go`                   | `Submission`, `Tool`, `Lock` and their parts, as the lowering, the runner and the CLI read them |
 | `parse.go`                   | `ParseSubmission`, `ParseTool`, `ParseLock`, `ToJSON`: the shape checked, errors in the farm's words |

@@ -1,0 +1,28 @@
+{
+  "act": "yield",
+  "by": {
+    "deployment": "saltmarsh/component/queue",
+    "rule": "deadline-order",
+    "grade": "signed"
+  },
+  "for": {
+    "party": "dana",
+    "grade": "direct"
+  },
+  "under": [
+    {
+      "policy": "quota.cpu",
+      "value": 40,
+      "from": "project saltmarsh, set by maya"
+    }
+  ],
+  "on": [
+    {
+      "deployment": "saltmarsh/component/queue",
+      "binding": "c45Gy9ZtiRXPiVYGnXjfAXCGyF2syDkNbwnZ4FPGRDWU7mBzUBtDFMm2VJ4DSSj2rY2Kx25g2WH5gzsA5RseHqHmLs",
+      "owner": "avalanche",
+      "runFor": "studio-x"
+    }
+  ],
+  "accountable": true
+}

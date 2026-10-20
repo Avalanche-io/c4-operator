@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "anyOf",
+  "errors": [
+    {
+      "path": "by",
+      "message": "by names who acted: a person, a unit, an agent, a deployment or a tracker user",
+      "fix": "add one of person, unit, agent, deployment or user"
+    }
+  ]
+}

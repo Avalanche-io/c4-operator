@@ -151,7 +151,7 @@ var (
 func schemaFor(format string) (*jsonschema.Schema, error) {
 	resolvedOnce.Do(func() {
 		schemas = map[string]*jsonschema.Schema{}
-		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock} {
+		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "chain": chainSchema} {
 			s := new(jsonschema.Schema)
 			if err := json.Unmarshal(b, s); err != nil {
 				resolveErr = fmt.Errorf("schema %s: %w", f, err)
@@ -202,13 +202,14 @@ func dedupe(errs []Error) []Error {
 	return out
 }
 
-var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock"}
+var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "chain": "a chain"}
 
 // nouns name the $defs in errors: "frame" is not a field of a job.
 var nouns = map[string]string{
 	"job": "a job", "check": "a check", "approve": "an approve", "wait": "a wait", "answers": "answers",
 	"use": "a use", "needs": "needs", "runs": "runs", "param": "a parameter", "userInterface": "userInterface",
 	"progressRule": "a progress rule", "fileFilter": "a file filter",
+	"by": "by", "for": "for", "delegation": "a delegation", "credential": "a credential", "deployment": "a deployment",
 }
 
 // elem is one step of a path: a key, or an index (key "").
@@ -759,6 +760,14 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		return "a progress rule reads a percent or a frame, not both", "keep one of them"
 	case "pattern tool previews":
 		return fmt.Sprintf("%s has no frame number", quote(v)), "write where the frame number goes, as render/*.$F4.exr"
+	case "pattern chain for.party":
+		return fmt.Sprintf("%s is not a party: a party is a person or an organization", quote(v)), "name the person or organization; an agent or unit goes in by"
+	case "anyOf chain by":
+		return "by names who acted: a person, a unit, an agent, a deployment or a tracker user", "add one of person, unit, agent, deployment or user"
+	case "pattern chain by.unit":
+		return fmt.Sprintf("%s is not a unit: it needs its job's UID", quote(v)), "write <project>/<job>@<job UID>/<index>, as show-a/github-7@3f9a1c/3"
+	case "forbidden chain gap":
+		return "an accountable chain has no gap", "remove gap, or set accountable: false"
 	case "enum tool needs.farm":
 		return quote(v) + " is not a farm access", "a tool may have read, job or project; administration is a person's"
 	case "required tool runs.sidecars[]":
@@ -768,6 +777,8 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 	}
 	// Anywhere.
 	switch {
+	case kind == "required" && c.format == "chain" && ctx["field"] == "gap":
+		return "an unaccountable chain says why", "add gap: the first link that failed, in words"
 	case kind == "required" && len(path) == 1 && ctx["field"] == "c4":
 		return "the file has no c4 field, so it is not " + rootNoun[c.format],
 			fmt.Sprintf("add c4: %s as the first line", map[string]string{"submit": "submit/1", "tool": "tool/1", "lock": "lock/1"}[c.format])

@@ -1,0 +1,21 @@
+{
+  "act": "submit",
+  "by": {
+    "deployment": "saltmarsh/component/c4-sync",
+    "grade": "direct"
+  },
+  "for": {
+    "subject": "system:serviceaccount:c4-system:c4-sync",
+    "grade": "direct"
+  },
+  "on": [
+    {
+      "deployment": "saltmarsh/component/hud",
+      "binding": "c4415LnEDVW3nGu9JLv5zgTTwBWNm9pfxY6tsxJd1auJErLJoDxuU6Q2Ln1p55wQDQps4iDgQABdsFYLwcFfR8a6Q7",
+      "owner": "avalanche",
+      "runFor": "studio-x"
+    }
+  ],
+  "accountable": false,
+  "gap": "owner system:serviceaccount:c4-system:c4-sync is not a party"
+}

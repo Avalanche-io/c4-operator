@@ -1,0 +1,12 @@
+{
+  "act": "build",
+  "by": {
+    "person": "noor",
+    "grade": "direct"
+  },
+  "for": {
+    "party": "agent:block",
+    "grade": "direct"
+  },
+  "accountable": true
+}

@@ -1,0 +1,15 @@
+# Display names the chain fixtures are read aloud with (schema.Names).
+{
+  "parties": {
+    "avalanche": "Avalanche",
+    "studio-x": "Studio X"
+  },
+  "records": {
+    "c42Hkvd8CyVqiQ5DezE15kWsxWx8A2BD5UipWZxC6bmqxUS3VjbCRJyZMXQydJCm4kXqoyMU8MTvnXStCmdLXRoTGu": "g-12"
+  },
+  "deployments": {
+    "saltmarsh/component/queue": "the queue",
+    "saltmarsh/component/hud": "the HUD",
+    "saltmarsh/component/c4-sync": "tracker sync"
+  }
+}

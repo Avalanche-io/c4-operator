@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "verified",
+  "errors": [
+    {
+      "path": "by.grade",
+      "message": "\"verified\" is not one of claimed, direct, relayed, signed",
+      "fix": "use one of them"
+    }
+  ]
+}

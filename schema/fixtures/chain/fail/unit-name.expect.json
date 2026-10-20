@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "show-a/github-7/3",
+  "errors": [
+    {
+      "path": "by.unit",
+      "message": "\"show-a/github-7/3\" is not a unit: it needs its job's UID",
+      "fix": "write <project>/<job>@<job UID>/<index>, as show-a/github-7@3f9a1c/3"
+    }
+  ]
+}

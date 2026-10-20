@@ -1,0 +1,40 @@
+{
+  "act": "build",
+  "by": {
+    "unit": "show-a/github-7@3f9a1c/3",
+    "agent": "block",
+    "grade": "direct"
+  },
+  "for": {
+    "party": "joshua",
+    "grade": "direct"
+  },
+  "under": [
+    {
+      "grant": "c42Hkvd8CyVqiQ5DezE15kWsxWx8A2BD5UipWZxC6bmqxUS3VjbCRJyZMXQydJCm4kXqoyMU8MTvnXStCmdLXRoTGu",
+      "kind": "submit",
+      "from": "joshua",
+      "to": "tracker github"
+    }
+  ],
+  "using": [
+    {
+      "lease": "c45y8aHPSgw5kJNqJ9LZb9C8bxfMfjKuKYrBCZS5q8LzZSErH43E3ThFJwwftaFLjuCt3jyrSP8PSJgaPLFgJNtVdm",
+      "holder": "joshua"
+    }
+  ],
+  "on": [
+    {
+      "deployment": "saltmarsh/node/abyss",
+      "binding": "c45smVV94WBzRnBoJNXRRMf1vseR7CCfZEHiDQyJXDnqTbKFxcgNwcRHUR6ms45NGYB3TsMhHEcP1pZBGKeajFypHs",
+      "owner": "joshua"
+    },
+    {
+      "deployment": "saltmarsh/component/queue",
+      "binding": "c45Gy9ZtiRXPiVYGnXjfAXCGyF2syDkNbwnZ4FPGRDWU7mBzUBtDFMm2VJ4DSSj2rY2Kx25g2WH5gzsA5RseHqHmLs",
+      "owner": "avalanche",
+      "runFor": "studio-x"
+    }
+  ],
+  "accountable": true
+}

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "agent:block",
+  "errors": [
+    {
+      "path": "for.party",
+      "message": "\"agent:block\" is not a party: a party is a person or an organization",
+      "fix": "name the person or organization; an agent or unit goes in by"
+    }
+  ]
+}

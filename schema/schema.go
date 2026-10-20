@@ -73,7 +73,7 @@ type Error struct {
 
 // Case is one fixture document.
 type Case struct {
-	Format string // "submit" or "tool"
+	Format string // "submit", "tool" or "chain"
 	Name   string // the file's name without .yaml, or the tool's folder
 	Pass   bool
 	Doc    []byte  // YAML, as written
@@ -85,7 +85,7 @@ type Case struct {
 func Cases() ([]Case, error) {
 	fsys := Fixtures()
 	var out []Case
-	for _, format := range []string{"submit", "tool"} {
+	for _, format := range []string{"submit", "tool", "chain"} {
 		for _, pass := range []bool{true, false} {
 			dir := path.Join(format, map[bool]string{true: "pass", false: "fail"}[pass])
 			entries, err := fs.ReadDir(fsys, dir)
@@ -100,11 +100,17 @@ func Cases() ([]Case, error) {
 					names = append(names, n)
 				case !e.IsDir() && strings.HasSuffix(n, ".yaml") && !strings.HasSuffix(n, ".plan.yaml"):
 					names = append(names, strings.TrimSuffix(n, ".yaml"))
+				case !e.IsDir() && strings.HasSuffix(n, ".json") && !strings.HasSuffix(n, ".expect.json"):
+					names = append(names, strings.TrimSuffix(n, ".json")+".json")
 				}
 			}
 			sort.Strings(names)
 			for _, n := range names {
 				file := path.Join(dir, n+".yaml")
+				if strings.HasSuffix(n, ".json") {
+					file = path.Join(dir, n)
+					n = strings.TrimSuffix(n, ".json")
+				}
 				if format == "tool" && pass {
 					file = path.Join(dir, n, "tool.yaml")
 				}

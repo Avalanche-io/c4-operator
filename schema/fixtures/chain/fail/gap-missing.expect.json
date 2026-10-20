@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "gap",
+  "errors": [
+    {
+      "path": "gap",
+      "message": "an unaccountable chain says why",
+      "fix": "add gap: the first link that failed, in words"
+    }
+  ]
+}
