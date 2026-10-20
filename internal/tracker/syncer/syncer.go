@@ -784,7 +784,7 @@ func (s *Syncer) relay(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.Tr
 		return "", s.recordDecision(ctx, l, rec)
 	}
 	err := s.Farm.Decide(ctx, jr, farm.Relay{
-		Project: j.Project, Unit: rec.Unit, Do: do, Note: pick.Body,
+		Project: j.Project, Unit: rec.Unit, Do: do, Note: pick.Body, Reply: w.Reply,
 		Tracker: t.Name, Source: pick.Source.URL + " (" + pick.Source.String() + ")",
 		By: "@" + pick.By.ID, Person: person, Evidence: pick.Evidence,
 	})

@@ -56,6 +56,10 @@ type Relay struct {
 	Unit    string // the wait's name or index
 	Do      string // approve, a wait choice, accept, rework or fail
 	Note    string // the decision's text
+	// Reply sends the note as the decision's content, for a wait that asks
+	// for one (the HUD stores it as reply.md, which the units the wait
+	// holds up mount).
+	Reply bool
 	// Via says where it was made: the tracker, the entity that carries it,
 	// and the person, as the tracker names them and as C4 does.
 	Tracker, Source, By, Person string
@@ -251,9 +255,11 @@ func (h *HUD) Decide(ctx context.Context, j JobRef, r Relay) error {
 		}
 		evidence = id.String()
 	}
-	err := h.doJSON(ctx, http.MethodPost, jobPath(j)+"/decide", map[string]any{
-		"unit": r.Unit, "do": r.Do, "note": RelayNote(r, evidence),
-	}, nil)
+	body := map[string]any{"unit": r.Unit, "do": r.Do, "note": RelayNote(r, evidence)}
+	if r.Reply && r.Do != "fail" {
+		body["reply"] = map[string]string{"text": RelayNote(r, evidence)}
+	}
+	err := h.doJSON(ctx, http.MethodPost, jobPath(j)+"/decide", body, nil)
 	var ae *APIError
 	if errors.As(err, &ae) && ae.Status == http.StatusConflict {
 		return fmt.Errorf("%w: %s", ErrNotOpen, ae.Msg)

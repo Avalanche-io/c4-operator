@@ -184,3 +184,31 @@ func TestDevViewerAndPublicURL(t *testing.T) {
 		t.Fatalf("job URL %q", u)
 	}
 }
+
+// A wait that asks for a reply gets the relayed note as its content
+// (API.md, decide: reply {text}); one that does not, gets none.
+func TestDecideSendsTheNoteAsAReply(t *testing.T) {
+	var bodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var b map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&b)
+		bodies = append(bodies, b)
+		_, _ = w.Write([]byte(`{"ok":true}`))
+	}))
+	defer srv.Close()
+	h := &farm.HUD{Base: srv.URL}
+	j := farm.JobRef{Namespace: "work", Name: "j"}
+	if err := h.Decide(context.Background(), j, farm.Relay{Unit: "review", Do: "rework", Note: "assert the order", Reply: true, Tracker: "github"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := h.Decide(context.Background(), j, farm.Relay{Unit: "review", Do: "approve", Note: "ok", Tracker: "github"}); err != nil {
+		t.Fatal(err)
+	}
+	reply, _ := bodies[0]["reply"].(map[string]any)
+	if text, _ := reply["text"].(string); !strings.HasPrefix(text, "assert the order") {
+		t.Fatalf("reply: %v", bodies[0])
+	}
+	if _, ok := bodies[1]["reply"]; ok {
+		t.Fatalf("a wait that asks for no reply got one: %v", bodies[1])
+	}
+}
