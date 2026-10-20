@@ -1,11 +1,16 @@
 # Releasing c4-operator
 
-A release is a pushed tag `vX.Y.Z`. The `release` workflow then runs
-GoReleaser (`.goreleaser.yaml`): the CLI for Linux and macOS (amd64 and
-arm64), the image `ghcr.io/avalanche-io/c4-operator:vX.Y.Z` for linux/amd64
-and linux/arm64, `install.yaml`, checksums, and a draft GitHub release to
-review and publish by hand. `make release-snapshot` runs the same locally
-and publishes nothing.
+A release is a pushed tag `vX.Y.Z`. The `release` workflow then tests, builds
+the job images on a native runner per architecture and joins them into
+multi-arch tags, writes each prebuilt tool's `tool.lock` pinning those images
+by digest (`make tool-locks`), and runs GoReleaser (`.goreleaser.yaml`): the
+CLI for Linux and macOS (amd64 and arm64), with the locked tools embedded in
+`c4-farm`, the image `ghcr.io/avalanche-io/c4-operator:vX.Y.Z` for
+linux/amd64 and linux/arm64, `install.yaml`, checksums, the Homebrew
+formulas, and a draft GitHub release to review and publish by hand. Last it
+builds the sample set with the release's images and attaches it.
+`make release-snapshot` runs GoReleaser locally and publishes nothing; its
+`c4-farm` has no tool locks, so its farm pins the images when it publishes.
 
 ## v0.1.0 checklist
 
@@ -52,9 +57,9 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
    ```
    The `release` workflow builds and pushes the images and drafts the
    release.
-10. **Joshua: make the GHCR package public**: Packages, `c4-operator`,
-    Package settings, Change visibility, Public; and connect it to the
-    repository if GitHub has not.
+10. **Joshua: make the GHCR packages public**: Packages, `c4-operator`
+    and each `c4-job-*`, Package settings, Change visibility, Public; and
+    connect each to the repository if GitHub has not.
 11. **Joshua: review and publish the draft release** (notes, `install.yaml`,
     archives, checksums).
 12. **Joshua: flip the repository public**: Settings, General, Change

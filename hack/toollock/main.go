@@ -12,8 +12,10 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/imageref"
@@ -30,7 +32,7 @@ func main() {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
-	if err := run(ctx, &imageref.Resolver{}, *dir, *version); err != nil {
+	if err := run(ctx, dockerPins{}, *dir, *version); err != nil {
 		fmt.Fprintln(os.Stderr, "toollock:", err)
 		os.Exit(1)
 	}
@@ -38,6 +40,28 @@ func main() {
 
 type pinner interface {
 	Pin(ctx context.Context, ref string) (string, error)
+}
+
+// dockerPins asks the registry through docker buildx imagetools, with
+// docker's login: a release's images are private until they are made
+// public, after the release is built.
+type dockerPins struct{}
+
+func (dockerPins) Pin(ctx context.Context, ref string) (string, error) {
+	r, err := imageref.Parse(ref)
+	if err != nil {
+		return "", err
+	}
+	out, err := exec.CommandContext(ctx, "docker", "buildx", "imagetools", "inspect", "--format", "{{.Manifest.Digest}}", ref).CombinedOutput()
+	d := strings.TrimSpace(string(out))
+	if err != nil {
+		return "", fmt.Errorf("%v: %s", err, d)
+	}
+	if !strings.HasPrefix(d, "sha256:") {
+		return "", fmt.Errorf("the registry gave no digest: %s", d)
+	}
+	r.Digest = d
+	return r.Pinned(), nil
 }
 
 func run(ctx context.Context, z pinner, dir, version string) error {

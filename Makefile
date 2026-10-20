@@ -18,7 +18,7 @@ comma := ,
 JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-image-names job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-image-names tool-locks job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -193,3 +193,12 @@ stress:
 # The job images' names, for scripts (the release workflow).
 job-image-names:
 	@echo $(JOB_IMAGES)
+
+# The prebuilt tools' tool.lock files (tools/<name>/tool.lock), pinning
+# their images at VERSION by digest, as publishing does. The release build
+# writes them once the job images are pushed and before c4-farm is built,
+# so the tools c4-farm embeds are the trees c4 farm up publishes, tested in
+# the release. They are not committed: a development build has none, and
+# the farm pins the images when it publishes.
+tool-locks:
+	go run ./hack/toollock -version $(VERSION)

@@ -18,3 +18,6 @@ hack/stress/out/
 
 # demo captures (hack/demo)
 hack/demo/out/
+
+# written by the release build (make tool-locks)
+/tools/*/tool.lock

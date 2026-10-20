@@ -13,37 +13,21 @@ permissions:
   packages: write
 
 jobs:
-  release:
+  test:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
-      with:
-        fetch-depth: 0
     - uses: actions/setup-go@v7
       with:
         go-version-file: go.mod
-    - uses: docker/setup-buildx-action@v4
-    - uses: docker/login-action@v4
-      with:
-        registry: ghcr.io
-        username: ${{ github.actor }}
-        password: ${{ secrets.GITHUB_TOKEN }}
     - run: make tools
     - run: make test
-    - uses: goreleaser/goreleaser-action@v7
-      with:
-        version: "~> v2"
-        args: release --clean
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # a token that can write to Avalanche-io/homebrew-tap, for the formulas
-        HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
   # The job images (the prebuilt tools run in them), each architecture on a
   # runner of its own, natively: OpenUSD's compile under emulation would
   # outlast a job's time limit. Each pushes <name>:<tag>-<arch>.
   images:
-    needs: release
+    needs: test
     strategy:
       matrix:
         include:
@@ -79,10 +63,40 @@ jobs:
           docker buildx imagetools create -t "$img:$tag" "$img:$tag-amd64" "$img:$tag-arm64"
         done
 
+  # The CLIs, the operator image, the manifests and the formulas. The
+  # prebuilt tools' tool.lock files are written first, pinning the images
+  # above, so c4-farm embeds the tools exactly as c4 farm up publishes them.
+  release:
+    needs: manifests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - uses: docker/setup-buildx-action@v4
+    - uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - run: make tools
+    - run: make tool-locks VERSION=${{ github.ref_name }}
+    - uses: goreleaser/goreleaser-action@v7
+      with:
+        version: "~> v2"
+        args: release --clean
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # a token that can write to Avalanche-io/homebrew-tap, for the formulas
+        HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+
   # The sample set `c4 farm samples get` downloads, built with this release's
   # images, attached to the draft release with its C4 ID beside it.
   samples:
-    needs: manifests
+    needs: release
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7
