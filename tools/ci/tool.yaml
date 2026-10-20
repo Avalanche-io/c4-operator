@@ -28,4 +28,4 @@ reuse: never
 test:
   tree: test/
   with: {shards: 2}
-  expect: [results/shard-0.py.xml, results/shard-1.py.xml, results/shard-0.go.xml]
+  expect: [results/shard-0.py.xml, results/shard-1.py.xml]

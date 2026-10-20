@@ -60,6 +60,9 @@ docker run --rm --user 65532:65532 -v /tmp/t:/show -v "$PWD/tools/render:/etc/c4
   prefixed `/work/`.
 - The fixed mount paths (`/show`, `/src`, `/work`) are gone: every script
   uses `$C4_TREE`, and `ci`, `comp` and `lora` run in `{{Job.Tree}}`.
+- `ci`'s test repository is Python only. These folders are embedded in
+  `c4-farm` for `c4 farm up`, and Go embeds no folder holding its own
+  `go.mod`; `ci.sh` still runs a repository's Go tests.
 
 ## Open questions for c4-authoring
 
