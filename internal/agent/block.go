@@ -238,6 +238,9 @@ func blockPrompt(p *corev1.Pod, u UnitDirs) string {
 // asks, or that the farm resumed it, and its new unit directory.
 func reworkPrompt(p *corev1.Pod, u UnitDirs) string {
 	var b strings.Builder
+	if ids := strings.TrimSpace(podEnv(p, "C4_ANSWER_ONLY")); ids != "" {
+		return answerOnlyPrompt(ids, u)
+	}
 	if s := suppliedText(p); s != "" {
 		b.WriteString(s)
 	} else if why := strings.TrimSpace(podEnv(p, EnvBlockRework)); why != "" {
@@ -392,6 +395,16 @@ func takeNeeds(u UnitDirs) (msg string, ok bool, err error) {
 	}
 	return msg, true, nil
 }
+
+// answerOnlyPrompt wakes a finished block to answer questions other units
+// asked it (c4-sched's wakes: an extra attempt, $C4_ANSWER_ONLY), and
+// nothing else.
+func answerOnlyPrompt(ids string, u UnitDirs) string {
+	return fmt.Sprintf("Your task is done. Other units of this job asked you questions (%s); they reach you as messages when this turn ends. Answer each from what you know and from your work, by writing answer.json in %s/.c4/, {\"ask\": \"<its id>\", \"answer\": \"...\"}, or {\"ask\": \"<its id>\", \"cannot\": \"why\"}. Change nothing else, and end your turn when they are answered.", ids, u.Out)
+}
+
+// answerOnly reports whether a block's attempt is a wake to answer only.
+func answerOnly(p *corev1.Pod) bool { return strings.TrimSpace(podEnv(p, "C4_ANSWER_ONLY")) != "" }
 
 // suppliedText is what was supplied for the information a block reported
 // missing ($C4_NEEDED, $C4_SUPPLIED), for the attempt that resumes it.

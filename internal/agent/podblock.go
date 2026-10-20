@@ -145,6 +145,10 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 			b.logf("%s: the farm said stop at this safe point; it yields with its session in its view", m.Name)
 			return PodBlockYielded, nil
 		}
+		if answerOnly(p) {
+			b.logf("%s: answered what it was asked", m.Name)
+			return PodBlockDone, nil
+		}
 		if a, ok := ReadAsking(b.Out); ok {
 			prompt, yielded, err := b.holdForAnswer(ctx, p, u, st, m, a)
 			if err != nil {

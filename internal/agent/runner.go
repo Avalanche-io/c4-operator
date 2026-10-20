@@ -282,6 +282,10 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		stopped := r.relays[p.UID] != nil && r.relays[p.UID].stopped
 		_, asking := ReadAsking(u.Out)
 		switch note, more := takeMore(u); {
+		case answerOnly(p):
+			// a wake to answer: its task was already done
+			r.logf("%s: answered what it was asked; stopped its session", m.Name)
+			return r.finish(ctx, p, corev1.PodSucceeded, "Completed", "the block answered the questions it was woken for", 0)
 		case asking && !stopped:
 			// it asked another unit: it keeps its slot for the answer
 			r.logf("%s: asked a question; holds for the answer", m.Name)

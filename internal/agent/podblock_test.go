@@ -32,6 +32,7 @@ if [ -n "$FAKE_PROMPTS" ]; then printf '%s\n----\n' "$1" >> "$FAKE_PROMPTS"; fi
 if [ -n "$FAKE_ASK" ] && [ "$(wc -l < "$FAKE_LOG")" -eq 1 ]; then
   printf '{"id":"0#1","to":"%s","at":"%s"}\n' "$FAKE_ASK_TO" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$C4_OUTPUT/.c4/asking"; exit 0
 fi
+if [ -n "$FAKE_QUIET" ]; then exit 0; fi
 if [ -n "$FAKE_NEEDS" ]; then echo "$FAKE_NEEDS" > "$C4_OUTPUT/.c4/needs.json"; exit 0; fi
 if [ "$(wc -l < "$FAKE_LOG")" -eq 1 ]; then echo "part 2" > "$C4_OUTPUT/.c4/more"; else echo "done" > "$C4_OUTPUT/.c4/done"; fi
 `
@@ -218,4 +219,53 @@ func TestPodBlockHoldsForAnswer(t *testing.T) {
 			t.Fatalf("exit %d, prompts:\n%s", code, prompts)
 		}
 	})
+}
+
+// A finished block woken to answer questions (C4_ANSWER_ONLY) is told to
+// answer only, and its attempt completes when that turn ends, without a
+// done of its own.
+func TestPodBlockWokenToAnswer(t *testing.T) {
+	ctx := context.Background()
+	bin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(bin, []byte(fakePrint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd := t.TempDir()
+	prompts := filepath.Join(t.TempDir(), "prompts")
+	t.Setenv("FAKE_SLUG", ProjectSlug(cwd))
+	t.Setenv("FAKE_LOG", filepath.Join(t.TempDir(), "calls"))
+	t.Setenv("C4_JOB", "port")
+	t.Setenv("C4_UNIT_NAME", "notes")
+	run := func(out, cfg string) int {
+		t.Helper()
+		t.Setenv("C4_OUTPUT", out)
+		b := &PodBlock{Out: out, ConfigDir: cfg, Cwd: cwd, Claude: bin, HookCommand: "true", Env: os.Getenv, Logf: t.Logf}
+		code, err := b.Run(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return code
+	}
+	outA := t.TempDir()
+	if code := run(outA, t.TempDir()); code != PodBlockDone {
+		t.Fatalf("the block's own attempt exited %d", code)
+	}
+	st := &memStore{}
+	id, err := CaptureView(ctx, st, "practice", outA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outB := filepath.Join(t.TempDir(), "out")
+	if err := FetchView(ctx, st, "practice", id, outB); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("C4_ANSWER_ONLY", "2#1")
+	t.Setenv("FAKE_QUIET", "1")
+	t.Setenv("FAKE_PROMPTS", prompts)
+	if code := run(outB, t.TempDir()); code != PodBlockDone {
+		t.Fatalf("the wake to answer exited %d", code)
+	}
+	if b, _ := os.ReadFile(prompts); !strings.Contains(string(b), "Other units of this job asked you questions (2#1)") {
+		t.Fatalf("prompt:\n%s", b)
+	}
 }
