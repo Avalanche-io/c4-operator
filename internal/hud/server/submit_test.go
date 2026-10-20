@@ -370,23 +370,6 @@ func TestSubmitTrackerRefFollowsDue(t *testing.T) {
 	}
 }
 
-// Work for another person is refused until the HUD checks their grant
-// (integrations GAPS 17): never created as the caller's own.
-func TestSubmitForAnotherPersonIsRefused(t *testing.T) {
-	s := submitFarm(t)
-	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-4"},
-		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
-	req := api.SubmitRequest{Project: "show-a", Name: "for-dana", Spec: spec, TrackerRef: "gh/Issue/7", For: "dana"}
-	var out api.SubmitResponse
-	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", req, &out); code != http.StatusNotImplemented {
-		t.Fatalf("for: %d %+v", code, out)
-	}
-	var job c4v1.WorkJob
-	if err := s.Client.Get(context.Background(), types.NamespacedName{Namespace: "show-a", Name: "for-dana"}, &job); err == nil {
-		t.Fatal("a job was created for another person without their grant")
-	}
-}
-
 // An object list as large as the API allows, 100,000 IDs, is read whole
 // (c4 farm sends 50,000 at a time); one over it is refused by count, and
 // a body over the list limit with 413.

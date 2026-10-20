@@ -531,13 +531,6 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "body: %v", err)
 		return
 	}
-	if body.For != "" {
-		// Work for another person needs the grant they gave the tracker
-		// (integrations GAPS 17), which the HUD does not take yet: refused,
-		// never submitted as the caller's own instead.
-		fail(w, http.StatusNotImplemented, "for %q: submitting for another person needs their grant to the tracker, which this HUD does not take yet", body.For)
-		return
-	}
 	project, ns, err := s.project(m, v, body.Project, body.Namespace)
 	if err != nil {
 		fail(w, http.StatusNotFound, "%v", err)
@@ -663,6 +656,26 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		job.Annotations[c4v1.AnnotationTrackerRef] = body.TrackerRef
 		job.Labels[c4v1.LabelTracker] = tracker
 	}
+	var grant *c4v1.SubmitGrant
+	if body.For != "" {
+		// Work for another person, by a tracker's sync under the grant the
+		// person gave that tracker (integrations GAPS 17): the person owns
+		// it. Refused otherwise, never created as the caller's own instead.
+		g, err := s.grantFor(ctx, v, ns, &body, &spec)
+		if err != nil {
+			code := http.StatusForbidden
+			var ge *errGrant
+			if errors.As(err, &ge) {
+				code = ge.code
+			}
+			fail(w, code, "for %s: %v", body.For, err)
+			return
+		}
+		grant = g
+		job.Annotations[c4v1.AnnotationOwner] = body.For
+		job.Annotations[c4v1.AnnotationSubmittedVia] = c4v1.SyncDevViewer
+		job.Annotations[c4v1.AnnotationGrant] = grantRef(g)
+	}
 	if body.Type != "" {
 		if errs := validation.IsValidLabelValue(body.Type); len(errs) > 0 {
 			fail(w, http.StatusBadRequest, "type %q: %s", body.Type, strings.Join(errs, "; "))
@@ -720,6 +733,9 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	msg := fmt.Sprintf("%s: submitted, %s, %d input view%s", name, spec.Class, len(mats), plural(len(mats)))
+	if grant != nil {
+		msg += fmt.Sprintf(", for %s under their grant to tracker %s", grant.Spec.Person, grant.Spec.Tracker)
+	}
 	note := msg
 	if via(r) == "mcp" {
 		note += "; via MCP"

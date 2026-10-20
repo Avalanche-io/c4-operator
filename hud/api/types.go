@@ -632,12 +632,14 @@ type BookEntry struct {
 
 // BookObject is what a book entry is about.
 type BookObject struct {
-	Type string `json:"type"` // job, unit, node, capacity, view
+	Type string `json:"type"` // job, unit, node, capacity, view, grant
 	Job  string `json:"job,omitempty"`
-	Unit *int   `json:"unit,omitempty"`
-	Node string `json:"node,omitempty"`
-	Pool string `json:"pool,omitempty"`
-	View string `json:"view,omitempty"`
+	// Grant is a submit grant, <namespace>/<name>.
+	Grant string `json:"grant,omitempty"`
+	Unit  *int   `json:"unit,omitempty"`
+	Node  string `json:"node,omitempty"`
+	Pool  string `json:"pool,omitempty"`
+	View  string `json:"view,omitempty"`
 }
 
 // Signers of book entries.

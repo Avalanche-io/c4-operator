@@ -8,6 +8,14 @@ import (
 // ADAPTER.md section 3). c4-sync reconciles them; the operator does not
 // read them. They are not in the default kustomization.
 
+// SyncAccount is c4-sync's identity (config/sync), the only caller the HUD
+// lets submit work for another person, under that person's grant
+// (SubmitGrant); SyncDevViewer is the same in development (?as=c4-sync).
+const (
+	SyncAccount   = "system:serviceaccount:c4-system:c4-sync"
+	SyncDevViewer = "c4-sync"
+)
+
 // LabelTracker on a WorkJob names the Tracker whose work it serves
 // (integrations GAPS 2).
 const LabelTracker = "c4.avalanche.io/tracker"

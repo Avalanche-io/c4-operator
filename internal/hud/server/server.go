@@ -139,6 +139,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/blacklist", s.handleBlacklist)
 	mux.HandleFunc("POST /api/v1/nodes/{name}/disable", s.handleDisable)
 	mux.HandleFunc("POST /api/v1/capacity/{pool}/approve", s.handleApprove)
+	mux.HandleFunc("POST /api/v1/grants", s.handleGrant)
+	mux.HandleFunc("GET /api/v1/grants", s.handleGrants)
+	mux.HandleFunc("DELETE /api/v1/grants/{ns}/{name}", s.handleRevoke)
 	files := http.FileServer(http.FS(s.Web))
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Cache-Control", "no-cache")
