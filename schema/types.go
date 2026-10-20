@@ -24,6 +24,7 @@ type Submission struct {
 	Tracker string            `json:"tracker,omitempty"`
 	For     string            `json:"for,omitempty"`
 	Note    string            `json:"note,omitempty"`
+	Policy  *Policy           `json:"policy,omitempty"`
 	Jobs    Jobs              `json:"jobs"`
 }
 
@@ -68,6 +69,14 @@ type Job struct {
 	Chunk       *Chunk         `json:"chunk,omitempty"`
 	Order       string         `json:"order,omitempty"`
 	Follows     string         `json:"follows,omitempty"`
+	Policy      *Policy        `json:"policy,omitempty"`
+}
+
+// Policy names a policy set and narrows its values for a submission or a
+// job. It never defines policy; the farm does.
+type Policy struct {
+	Set    string         `json:"set,omitempty"`
+	Narrow map[string]any `json:"narrow,omitempty"`
 }
 
 // Frames is a frame list in OpenJD's range grammar ("1001-1240:2"); a

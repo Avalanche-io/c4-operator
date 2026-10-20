@@ -10,6 +10,12 @@ projects:
     milestones: {}
     shots: {}
     jobs: []
+policies:
+  # Values a submission may narrow (only ever tighten), by project. The key
+  # names follow the farm's policy model and may still change.
+  saltmarsh:
+    sets: [dailies, client-review]
+    values: {asks.max: {value: 3, narrowable: true}, escalation.pressAfter: {value: 2h, narrowable: true}}
 people: [noor, maya, owner]
 roles: [comp-supervisor, lighting-supervisor, lighting-lead]
 parties: [client]

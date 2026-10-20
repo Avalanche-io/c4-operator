@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.proxies-for-review",
+      "message": "\"saltmarsh-sequence-forty-the-marsh-at-dawn-proxies-for-review-v001\" is longer than a job's name may be (63 characters)",
+      "fix": "shorten the job's key, or set name: to a shorter stem"
+    }
+  ]
+}

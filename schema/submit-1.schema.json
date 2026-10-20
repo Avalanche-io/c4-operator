@@ -23,6 +23,7 @@
     "tracker": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$", "description": "The tracker entity this is for: <tracker>/<type>/<id>."},
     "for": {"type": "string", "pattern": "^person:\\S+$", "description": "The person a tracker or service submits for, so the jobs are theirs."},
     "note": {"type": "string", "description": "A line for the jobs' book."},
+    "policy": {"$ref": "#/$defs/policy"},
     "jobs": {
       "type": "object",
       "minProperties": 1,
@@ -208,8 +209,10 @@
         "maxParallel": {"type": "integer", "minimum": 0},
         "chunk": {"oneOf": [{"type": "integer", "minimum": 1}, {"const": "all"}], "description": "Frames per unit, or all for one unit over the whole range."},
         "order": {"enum": ["binary", "sequential", "reverse"]},
-        "follows": {"type": "string", "minLength": 1}
+        "follows": {"type": "string", "minLength": 1},
+        "policy": {"$ref": "#/$defs/policy"}
       }
-    }
+    },
+    "policy": {"type": "object", "additionalProperties": false, "description": "A policy set by name, and values narrowed for this submission or job. A submission names and narrows policy; it never defines it. A narrowing may only tighten a value the policy marks narrowable.", "properties": {"set": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$"}, "narrow": {"type": "object", "minProperties": 1, "propertyNames": {"type": "string", "pattern": "^[a-z][A-Za-z0-9]*(\\.[a-z][A-Za-z0-9]*)*$"}, "additionalProperties": {"type": ["string", "number", "boolean"]}}}, "minProperties": 1}
   }
 }

@@ -99,10 +99,11 @@ type farm struct {
 		} `json:"shots"`
 		Jobs []string `json:"jobs"`
 	} `json:"projects"`
-	People  []string          `json:"people"`
-	Roles   []string          `json:"roles"`
-	Parties []string          `json:"parties"`
-	Tools   map[string]string `json:"tools"`
+	People   []string          `json:"people"`
+	Roles    []string          `json:"roles"`
+	Parties  []string          `json:"parties"`
+	Tools    map[string]string `json:"tools"`
+	Policies map[string]any    `json:"policies"`
 }
 
 // TestFarmContext keeps the fixtures whole: every tool farm.yaml publishes

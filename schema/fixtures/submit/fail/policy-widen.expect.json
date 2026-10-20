@@ -1,0 +1,11 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "policy.narrow.asks.max",
+      "message": "asks.max 5 is above saltmarsh's 3; a submission may only lower it",
+      "fix": "use 3 or less, or leave it out"
+    }
+  ],
+  "note": "A submission names and narrows policy; it never defines or widens it."
+}

@@ -1,0 +1,12 @@
+# A submission names a policy set and narrows two of its values for this work.
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: dailies
+tree: .
+policy: {set: dailies, narrow: {asks.max: 1, escalation.pressAfter: 30m}}
+jobs:
+  proxies:
+    tool: proxies
+    frames: 1001-1048
+    with: {plates: plates/sm0140.$F4.exr}

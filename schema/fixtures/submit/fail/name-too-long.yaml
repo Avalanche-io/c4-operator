@@ -1,0 +1,8 @@
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+name: saltmarsh-sequence-forty-the-marsh-at-dawn
+due: dailies
+tree: .
+jobs:
+  proxies-for-review: {tool: proxies, frames: 1001-1048, with: {plates: plates/sm0140.$F4.exr}}

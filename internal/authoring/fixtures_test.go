@@ -27,6 +27,7 @@ type fixtureFarm struct {
 	RolesL   []string          `json:"roles"`
 	PartiesL []string          `json:"parties"`
 	ToolsV   map[string]string `json:"tools"`
+	Policies map[string]any    `json:"policies"`
 	tools    map[string]*Tool
 }
 
