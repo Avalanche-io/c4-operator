@@ -1,5 +1,5 @@
 // Package agent is the harness that makes a Claude Code session a member of
-// an agent bundle (proposals/agent-jobs, FIRST-SLICE step 1). It records each
+// an agent bundle (docs/agents/c4-agent.md). It records each
 // member's session, saves a checkpoint at every turn boundary, resumes a
 // member by its session ID and never starts a fresh agent in its place, and
 // keeps at most one live copy of each member.

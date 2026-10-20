@@ -23,9 +23,10 @@ import (
 // pool's tolerations admit member pods.
 const TaintHostRunner = "c4.avalanche.io/host-runner"
 
-// Runner is the host runner (FIRST-SLICE step 2): it runs the members of
-// agent bundles as the machine's own Claude Code sessions, under the
-// holder's own sign-in, and plays the kubelet's part for their unit pods.
+// Runner is the host runner (docs/agents/c4-agent.md, Bundles on the
+// farm): it runs the members of agent bundles as the machine's own Claude
+// Code sessions, under the holder's own sign-in, and plays the kubelet's
+// part for their unit pods.
 //
 // It registers a Node for the machine, binds member pods that select it,
 // resumes each member's session by its session ID when its pod starts,

@@ -13,7 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
-// Questions between blocks (proposals agent-jobs ASKS.md section 2). A
+// Questions between blocks (DESIGN.md 10.6, Agents answer agents). A
 // block that lacks a fact another unit of its job has writes .c4/ask.json
 // and ends its turn; the Stop hook puts the question to the farm (c4-unit
 // ask) and records it open in .c4/asking. The farm routes it to the

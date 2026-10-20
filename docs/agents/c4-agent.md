@@ -257,8 +257,8 @@ adds nothing under the generator.
 A plan job (class `graph`, its units from an expansion document) runs on a
 host as **blocks**: each unit is its own Claude Code session, which the
 runner starts for the unit's first attempt and resumes by its session ID
-for every later one. This is the builder driver of proposals agent-jobs
-10.14. `c4-agent runner --blocks-cwd DIR` turns it on.
+for every later one, so each unit starts fresh and keeps its own context
+across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
 
 | variable           | set by                                                            | what                                                                                                        |
 | ------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -347,7 +347,7 @@ renders the light it was given.
   - **A slow answer:** past the hold, a question to a named unit becomes a wait served by that unit (`c4-unit wait --server unit:<name>`). The block gives up its slot and resumes with the answer as its decision. A question to the job's answerer, or one whose wait is refused, wakes the block instead to decide within its brief.
   - **Answering:** a question to a block arrives as a message, with how to answer. The block writes `.c4/answer.json` (`{"ask": "<id>", "answer": "..."}`, or `"cannot": "why"`), and the hook gives it to the farm (`c4-unit answer`).
   - **A question to a block that has finished** wakes it for an extra attempt (`$C4_ANSWER_ONLY`). The block is told to answer only, and the attempt completes when that turn ends.
-  - The design is in proposals/agent-jobs ASKS.md.
+  - The design is in DESIGN.md 10.6, "Agents answer agents" and "Missing information is an error, not a question".
 
 ### Steering a running block
 

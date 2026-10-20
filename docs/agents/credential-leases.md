@@ -102,5 +102,3 @@ your lease; `c4 farm revoke` takes it back (docs/c4-sync.md, `for`).
 | `status.state`                 | `active`, `renewing`, `waiting-for-holder`, `revoked` or `expired`                        |
 | `status.expiresAt`             | when the credential or the lease ends, whichever is first                                 |
 | `status.message`               | why, in plain words                                                                       |
-
-The design is in proposals/agent-jobs 09, "Credential leases".

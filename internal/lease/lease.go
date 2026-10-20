@@ -1,5 +1,5 @@
 // Package lease is the holder's side of a holder-transfer CredentialLease
-// (proposals agent-jobs 09): the holder's agent, on the holder's own
+// (docs/agents/credential-leases.md): the holder's agent, on the holder's own
 // machine, takes the holder's current Claude Code sign-in and keeps the
 // lease's Secret holding its short-lived access token, renewed before it
 // expires, until the lease ends or the agent stops, when it deletes the

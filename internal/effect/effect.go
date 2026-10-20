@@ -1,7 +1,7 @@
 // Package effect makes a write to an outside service (a tracker, a
-// registry, a git remote) happen once (integrations GAPS 11; the effect
-// gateway of agent-jobs 03.5, as a library). It is the transactional
-// outbox at the call boundary:
+// registry, a git remote) happen once (docs/c4-sync.md, What it writes):
+// an effect gateway, as a library. It is the transactional outbox at the
+// call boundary:
 //
 //  1. the intent is journaled under its key before it is sent;
 //  2. a call the journal shows done is answered from the record, not sent;

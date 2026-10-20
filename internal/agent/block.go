@@ -21,7 +21,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/needs"
 )
 
-// Blocks: the builder driver (proposals agent-jobs 10.14 step 4). A plan
+// Blocks (docs/agents/c4-agent.md, Blocks). A plan
 // job's units (class graph) run on a host as blocks: each unit is its own
 // fresh Claude Code session, started for the unit's first attempt with the
 // unit's task as its first prompt, and resumed by its session ID for any
@@ -404,7 +404,7 @@ func takeNeeds(u UnitDirs) (msg string, ok bool, err error) {
 }
 
 // answerOnlyPrompt wakes a finished block to answer questions other units
-// asked it (c4-sched's wakes: an extra attempt, $C4_ANSWER_ONLY), and
+// asked it (the scheduler's wakes: an extra attempt, $C4_ANSWER_ONLY), and
 // nothing else.
 func answerOnlyPrompt(ids string, u UnitDirs) string {
 	return fmt.Sprintf("Your task is done. Other units of this job asked you questions (%s); they reach you as messages when this turn ends. Answer each from what you know and from your work, by writing answer.json in %s/.c4/, {\"ask\": \"<its id>\", \"answer\": \"...\"}, or {\"ask\": \"<its id>\", \"cannot\": \"why\"}. Change nothing else, and end your turn when they are answered.", ids, u.Out)

@@ -383,7 +383,7 @@ func TestPowerCapShedsAtTurnBoundary(t *testing.T) {
 	h := agent.New(&agent.Store{Dir: filepath.Join(root, "agents")}, fk)
 	h.Workspace, h.Poll, h.SettleQuiet, h.SettleMax = "none", time.Millisecond, time.Millisecond, 5*time.Millisecond
 	sessions := map[string]string{}
-	for i, name := range []string{"hud-scenarios", "prov-graph"} {
+	for i, name := range []string{"tutorials", "provenance"} {
 		s := fmt.Sprintf("%08d-0000-0000-0000-%012d", i+1, i+1)
 		sessions[s] = name
 		tr := filepath.Join(cfg, "projects", agent.ProjectSlug(work), s+".jsonl")
@@ -402,10 +402,10 @@ func TestPowerCapShedsAtTurnBoundary(t *testing.T) {
 		Now: func() time.Time { return now }, CaptureWait: time.Minute}
 	rec := &controller.AgentBundleReconciler{Client: k8s, Now: func() time.Time { return now }}
 	push := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "push", Annotations: joshuas}, Spec: c4v1.AgentBundleSpec{
-		Pools: []string{pool.Name}, Members: []c4v1.AgentMemberSpec{{Name: "hud-scenarios"}},
+		Pools: []string{pool.Name}, Members: []c4v1.AgentMemberSpec{{Name: "tutorials"}},
 		Deadline: &metav1.Time{Time: now.Add(11 * time.Hour)}}} // Sunday 10:00 PDT
 	research := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "research", Annotations: joshuas}, Spec: c4v1.AgentBundleSpec{
-		Pools: []string{pool.Name}, Members: []c4v1.AgentMemberSpec{{Name: "prov-graph"}}}}
+		Pools: []string{pool.Name}, Members: []c4v1.AgentMemberSpec{{Name: "provenance"}}}}
 	for _, b := range []*c4v1.AgentBundle{push, research} {
 		if err := k8s.Create(ctx, b); err != nil {
 			t.Fatal(err)
@@ -445,8 +445,8 @@ func TestPowerCapShedsAtTurnBoundary(t *testing.T) {
 	slots, reason = 1, "power: battery 21% falling on a 45 W adapter"
 	round()
 	round()
-	if got := running(); len(got) != 1 || got[0] != "hud-scenarios" {
-		t.Fatalf("under the cap: running %v, want only hud-scenarios (the push keeps its slot)", got)
+	if got := running(); len(got) != 1 || got[0] != "tutorials" {
+		t.Fatalf("under the cap: running %v, want only tutorials (the push keeps its slot)", got)
 	}
 	var b c4v1.AgentBundle
 	k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "research"}, &b)

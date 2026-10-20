@@ -23,7 +23,7 @@ import (
 
 // AgentBundleReconciler keeps one WorkJob of class agent for each
 // AgentBundle, with one unit per member, and reports the members from the
-// unit pods (proposals/agent-jobs, FIRST-SLICE step 2). The queue
+// unit pods (docs/agents/c4-agent.md, Bundles on the farm). The queue
 // schedules the units like any others; a runner on the member's machine
 // resumes the member's session for each attempt.
 type AgentBundleReconciler struct {
