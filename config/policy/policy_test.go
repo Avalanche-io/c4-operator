@@ -98,6 +98,29 @@ func eventually(t *testing.T, what string, f func() error) {
 	t.Fatalf("%s: %v", what, err)
 }
 
+// enforced waits until policy refuses a write it must refuse. A policy and
+// its binding take a moment to reach the admission plugin, and a case run
+// before then would pass or fail only because the policy is not yet in
+// force. probe makes the write, with a value or name of its own on each
+// try, since rewriting an unchanged value is allowed and a second create
+// of one name is refused for another reason. Only a refusal from policy
+// counts, not one from RBAC still settling.
+func enforced(t *testing.T, policy string, probe func(try int) error) {
+	t.Helper()
+	try := 0
+	eventually(t, policy+" in force", func() error {
+		try++
+		err := probe(try)
+		if err == nil {
+			return errNotYet
+		}
+		if !strings.Contains(err.Error(), "ValidatingAdmissionPolicy '"+policy+"'") {
+			return fmt.Errorf("refused, but not by the policy: %w", err)
+		}
+		return nil
+	})
+}
+
 func TestNodeDaemonWrites(t *testing.T) {
 	cfg, admin := start(t)
 	ctx := context.Background()
@@ -128,15 +151,8 @@ func TestNodeDaemonWrites(t *testing.T) {
 	annotate := func(p *corev1.Pod, k, v string) error {
 		return node.Patch(ctx, p, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"`+k+`":"`+v+`"}}}`)))
 	}
-	// the policy is in force once an unrelated annotation is refused; each
-	// try writes a new value, since rewriting an unchanged one is allowed
-	try := 0
-	eventually(t, "the policy refusing another annotation", func() error {
-		try++
-		if err := annotate(mine, "example.com/other", fmt.Sprint(try)); err == nil {
-			return errNotYet
-		}
-		return nil
+	enforced(t, "c4-node-writes", func(try int) error {
+		return annotate(mine, "example.com/other", fmt.Sprint(try))
 	})
 	for _, k := range []string{c4v1.AnnotationOutputTree, c4v1.AnnotationPreflight, c4v1.AnnotationEgress} {
 		if err := annotate(mine, k, "v"); err != nil {
@@ -161,14 +177,8 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Create(ctx, j); err != nil {
 		t.Fatal(err)
 	}
-	try := 0
-	eventually(t, "the owner refusing to change", func() error {
-		try++
-		err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"annotations":{"c4.avalanche.io/owner":"ivo%d"}}}`, try))))
-		if err == nil {
-			return errNotYet
-		}
-		return nil
+	enforced(t, "c4-workjob-owner", func(try int) error {
+		return c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(fmt.Sprintf(`{"metadata":{"annotations":{"c4.avalanche.io/owner":"ivo%d"}}}`, try))))
 	})
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/owner":null}}}`))); err == nil {
 		t.Error("the owner was removed")
@@ -212,16 +222,12 @@ func TestSubmitGrantsOnlyFromTheHUD(t *testing.T) {
 		return &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: name},
 			Spec: c4v1.SubmitGrantSpec{Person: "joshua", Tracker: "github", Until: metav1.NewTime(time.Now().Add(time.Hour))}}
 	}
-	eventually(t, "a grant written directly refused", func() error {
-		if err := admin.Create(ctx, grant("forged")); err == nil {
-			return errNotYet
-		}
-		return nil
+	enforced(t, "c4-submit-grants", func(try int) error {
+		return admin.Create(ctx, grant(fmt.Sprintf("forged-%d", try)))
 	})
+	// the manager's binding may still be settling
 	g := grant("github-joshua")
-	if err := hud.Create(ctx, g); err != nil {
-		t.Fatalf("the HUD's grant: %v", err)
-	}
+	eventually(t, "the HUD's grant", func() error { return hud.Create(ctx, g) })
 	if err := admin.Patch(ctx, g, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"person":"mallory"}}`))); err == nil {
 		t.Error("a grant was changed directly")
 	}
@@ -265,14 +271,12 @@ func TestHostRunnerWrites(t *testing.T) {
 		return &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: name, Labels: map[string]string{"c4.avalanche.io/pool": "agent",
 			"c4.avalanche.io/host": name}}, Spec: corev1.NodeSpec{Taints: taints}}
 	}
-	// policies reach admission after a moment: wait until a forbidden
-	// create is refused, then run the cases
-	eventually(t, "the node policy in force", func() error {
-		if err := laptop.Create(ctx, node("someone-else", taint)); err == nil {
+	enforced(t, "c4-host-runner-nodes", func(int) error {
+		err := laptop.Create(ctx, node("someone-else", taint))
+		if err == nil {
 			admin.Delete(ctx, node("someone-else", nil))
-			return errNotYet
 		}
-		return nil
+		return err
 	})
 	if err := laptop.Create(ctx, node("laptop-1", nil)); err == nil {
 		t.Fatal("a Node without the host-runner taint was created")
@@ -314,6 +318,11 @@ func TestHostRunnerWrites(t *testing.T) {
 		return p
 	}
 	onMe, onW1, unbound := pod("member-0", "laptop-1"), pod("render-3", "w1"), pod("member-1", "")
+	// the pods policy (which also covers Leases) comes into force apart
+	// from the Node one
+	enforced(t, "c4-host-runner-pods", func(try int) error {
+		return patch(laptop, onW1, fmt.Sprintf(`{"metadata":{"annotations":{"example.com/probe":"%d"}}}`, try))
+	})
 	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/output-checkpoint":"c4abc","c4.avalanche.io/output-epoch":"3"}}}`); err != nil {
 		t.Errorf("checkpoint annotations on its pod: %v", err)
 	}
@@ -443,16 +452,10 @@ func TestLeaseMounts(t *testing.T) {
 		p.Spec.Volumes = []corev1.Volume{{Name: "lease", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "c4-lease-joshua-claude"}}}}
 		p.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "lease", MountPath: "/etc/c4/lease", ReadOnly: true}}
 	}
-	eventually(t, "a person's pod with a lease refused", func() error {
-		if err := admin.Create(ctx, pod(withLease)); err == nil {
-			return errNotYet
-		}
-		return nil
-	})
+	enforced(t, "c4-lease-mounts", func(int) error { return admin.Create(ctx, pod(withLease)) })
+	// the manager's binding may still be settling
 	unit := pod(withLease)
-	if err := manager.Create(ctx, unit); err != nil {
-		t.Fatalf("the queue's unit pod with its lease: %v", err)
-	}
+	eventually(t, "the queue's unit pod with its lease", func() error { return manager.Create(ctx, unit) })
 	// others still annotate it (the node daemon's output annotations)
 	if err := admin.Patch(ctx, unit, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/output-tree":"c4abc"}}}`))); err != nil {
 		t.Errorf("annotating a unit pod with a lease: %v", err)
