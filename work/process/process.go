@@ -61,11 +61,11 @@ type Container struct {
 }
 
 // RunEnv are environment variables that differ between runs of the same
-// computation: which job, which attempt, which pod. They are left out of a
-// process key.
+// computation: which job, which attempt, which pod, which node. They are
+// left out of a process key.
 var RunEnv = map[string]bool{
 	"C4_JOB": true, "C4_NAMESPACE": true, "C4_UNIT": true, "C4_ATTEMPT": true, "C4_PODINFO": true, "C4_CONTROL": true,
-	"C4_RESUME_VIEW": true, "C4_OUTPUT": true, "HOSTNAME": true,
+	"C4_RESUME_VIEW": true, "C4_OUTPUT": true, "C4_NODE": true, "HOSTNAME": true,
 }
 
 // ProcessID is the identity of a process: the containers' image digests,

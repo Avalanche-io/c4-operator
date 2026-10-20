@@ -103,6 +103,10 @@ func containersOf(spec corev1.PodSpec, statuses []corev1.ContainerStatus, digest
 			unseal("an image is not pinned by digest")
 		}
 		for _, e := range c.Env {
+			if process.RunEnv[e.Name] {
+				// Names the run, not the work (C4_NODE is a field ref).
+				continue
+			}
 			if e.ValueFrom != nil {
 				// A secret's or a field's value is not in the record.
 				pc.Env[e.Name] = "valueFrom"
