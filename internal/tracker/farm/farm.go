@@ -217,8 +217,8 @@ func (h *HUD) Job(ctx context.Context, j JobRef) (*api.Job, error) {
 }
 
 // SetDeadline sends the deadline alone: on a job whose mode is Tracking the
-// HUD keeps the mode (a deadline with deadlineMode Tracking in one nudge
-// is refused, internal/hud/server/controls.go).
+// HUD keeps the mode. The sync loop moves only deadlines that follow
+// tracking; one a person pinned stays theirs.
 func (h *HUD) SetDeadline(ctx context.Context, j JobRef, at time.Time) error {
 	return h.doJSON(ctx, http.MethodPost, jobPath(j)+"/nudge",
 		map[string]string{"deadline": at.UTC().Format(time.RFC3339)}, nil)
