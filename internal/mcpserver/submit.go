@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"time"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -98,13 +97,14 @@ func (c *Client) submitJob(ctx context.Context, _ *mcp.CallToolRequest, in Submi
 }
 
 // postSubmission sends a submission document (JSON, keys in the order
-// written) to POST /submissions; a refusal (422) is an answer, not an
-// error: its errors say where and how to fix it.
+// written) to POST /submissions; a refusal with errors (422, or 403 and
+// 404 for a job the farm would not create) is an answer, not an error:
+// its errors say where and how to fix it.
 func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun, explain bool) (*mcp.CallToolResult, SubmitOut, error) {
 	var r api.SubmissionResponse
 	err := c.do(ctx, "POST", "/submissions", api.SubmissionRequest{Submission: doc, DryRun: dryRun, Explain: explain}, &r)
 	var ae *APIError
-	if errors.As(err, &ae) && ae.Status == http.StatusUnprocessableEntity && json.Unmarshal(ae.Body, &r) == nil && len(r.Errors) > 0 {
+	if errors.As(err, &ae) && json.Unmarshal(ae.Body, &r) == nil && len(r.Errors) > 0 {
 		err = nil
 	}
 	if err != nil {

@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"net/http"
 	"net/url"
 	"regexp"
 	"sort"
@@ -193,7 +192,7 @@ func (c *Client) publishTool(ctx context.Context, _ *mcp.CallToolRequest, in Pub
 	var r api.ToolPublishResponse
 	err := c.do(ctx, "POST", "/tools/"+url.PathEscape(p), api.ToolPublishRequest{View: in.View, Farm: in.Farm, DryRun: in.DryRun}, &r)
 	var ae *APIError
-	if errors.As(err, &ae) && ae.Status == http.StatusUnprocessableEntity && json.Unmarshal(ae.Body, &r) == nil && len(r.Errors) > 0 {
+	if errors.As(err, &ae) && json.Unmarshal(ae.Body, &r) == nil && len(r.Errors) > 0 {
 		err = nil
 	}
 	if err != nil {
