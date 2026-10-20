@@ -143,6 +143,15 @@ spec:
                 description: Done counts the covered jobs that succeeded.
                 format: int32
                 type: integer
+              forecast:
+                description: |-
+                  Forecast counts the covered forecast jobs (integrations GAPS 9),
+                  and ForecastRisk is the worst risk among them; Risk is the real
+                  work's alone.
+                format: int32
+                type: integer
+              forecastRisk:
+                type: string
               jobs:
                 description: |-
                   Jobs are the covered jobs' names (at most 200, sorted), and Count

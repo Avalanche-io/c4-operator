@@ -114,6 +114,37 @@ spec:
                   version of (v008 answers the notes on v007). The job record names
                   it, so lineage links the versions.
                 type: string
+              forecast:
+                description: |-
+                  Forecast makes the job a forecast only (integrations GAPS 9): work a
+                  tracker expects (a shot not yet turned over, its bid) that the farm
+                  plans for. It is estimated and placed among the real work, never
+                  released: no pods, no quota, no burst capacity bought for it. A real
+                  job replaces it when the work is submitted. Set at creation only.
+                properties:
+                  exists:
+                    description: Exists is the chance it happens at all, 0 to 1 (default
+                      1).
+                    type: string
+                  sd:
+                    description: SD is the spread of SlotHours (default half of it).
+                    type: string
+                  slotHours:
+                    description: |-
+                      SlotHours is its expected work; empty, the class plans it from the
+                      job's params as it would the real job (frames, and the class's
+                      prior).
+                    type: string
+                  start:
+                    description: Start is the earliest it can begin (a turnover date).
+                    format: date-time
+                    type: string
+                  unitHours:
+                    description: |-
+                      UnitHours is its longest single unit, its critical path (default an
+                      hour, at most SlotHours).
+                    type: string
+                type: object
               inputs:
                 description: Inputs are C4 views mounted into every unit.
                 items:
@@ -1082,8 +1113,9 @@ spec:
                 - view
                 type: object
               phase:
-                description: Phase is Queued, Running, Blocked, Held, Succeeded or
-                  Failed.
+                description: |-
+                  Phase is Queued, Running, Blocked, Held, Succeeded or Failed; or
+                  Forecast for a forecast job (spec.forecast), which never runs.
                 type: string
               preemptions:
                 description: Preemptions counts units stopped or asked to yield to
@@ -1780,6 +1812,9 @@ spec:
         - message: a job's review is set when it is created
           rule: has(self.spec.review) == has(oldSelf.spec.review) && (!has(self.spec.review)
             || self.spec.review == oldSelf.spec.review)
+        - message: 'a job is a forecast, or not, from when it is created: a real job
+            replaces a forecast'
+          rule: has(self.spec.forecast) == has(oldSelf.spec.forecast)
     served: true
     storage: true
     subresources:

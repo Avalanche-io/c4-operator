@@ -78,6 +78,10 @@ type Queue struct {
 	Stores StoreFunc
 	// tlog is the transition log's head (book.go), read once per leader.
 	tlog *bookLog
+	// The last forecast pass (forecast.go).
+	lastFpass    time.Time
+	lastFdec     sched.Decisions
+	lastForecast Forecast
 	// PriorityClass, when it names a PriorityClass that exists, is set on
 	// unit pods whose template names none (config/manager: c4-unit, with
 	// preemptionPolicy Never, so only the queue preempts units).
@@ -596,15 +600,22 @@ func (q *Queue) Tick(ctx context.Context) error {
 	}
 
 	seen := map[types.UID]bool{}
-	var views []*view
+	var views, fviews []*view
 	for i := range jobs.Items {
 		j := &jobs.Items[i]
 		seen[j.UID] = true
 		v := q.observe(ctx, j, podsByJob[j.Namespace+"/"+j.Name], phases, nsProject, poolInfo, now)
-		if v != nil {
-			views = append(views, v)
-			q.noteProfiles(v)
+		if v == nil {
+			continue
 		}
+		if isForecast(j) {
+			// A forecast is estimated, never decided on or released
+			// (forecast.go).
+			fviews = append(fviews, v)
+			continue
+		}
+		views = append(views, v)
+		q.noteProfiles(v)
 	}
 	q.releaseOrphans(ctx, podsByJob, phases)
 	for uid := range q.jobs {
@@ -642,7 +653,9 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.stage(ctx, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
+	q.forecastPass(now, poolInfo, snap, fviews, cfg)
 	q.report(ctx, now, dec, views)
+	q.report(ctx, now, q.lastFdec, fviews)
 	q.milestoneStatus(ctx, q.milestones, jobs.Items)
 	q.saveCalibrations(ctx, now)
 	q.last = now
@@ -1437,6 +1450,11 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		}
 		if tools != nil {
 			v.mem.toolsWait = ""
+		}
+		if isForecast(v.job) {
+			// Never: a forecast is left out of the live decision.
+			q.Log.Error(nil, "refusing to release a forecast job's unit", "job", key, "unit", idx)
+			continue
 		}
 		v.mem.attempts[idx]++
 		pod := q.podFor(v, idx, v.mem.attempts[idx], p)

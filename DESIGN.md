@@ -2183,6 +2183,29 @@ node-hour times node-hours. The same numbers drive capacity requests.
 
 ### 10.12 Capacity hooks
 
+**Forecast jobs** (integrations GAPS 9). A WorkJob with `spec.forecast:
+{slotHours?, sd?, unitHours?, start?, exists?}` exists only as a
+forecast: work a tracker expects (a shot not yet turned over, its bid)
+that the farm plans for. Its size is given as slot-hours, planned as one
+unexpanded generator whose prior is the forecast, or it comes from the
+class's own plan of its params.
+- The queue observes and estimates it but leaves it out of the live
+  decision. So it never creates pods (the release loop refuses one as a
+  third guard), reserves no quota or fair share, moves no real job's ETA,
+  and buys no burst capacity.
+- At most every 30 seconds, a forecast pass copies the live snapshot, adds
+  the forecast jobs as waiting work (ready at `start`), and runs the policy
+  on a throwaway state. That gives each forecast job its own estimate and
+  risk (phase `Forecast`) and gives the farm the burst capacity its
+  forecasts would need per pool (`Queue.Forecast`), never requested.
+- A Milestone counts its forecast jobs apart (`forecast`, `forecastRisk`).
+  Its `risk` stays the real work's.
+- A job is a forecast, or not, from when it is created; a real job
+  replaces it.
+- The policy plans waiting work as able to start now, so a forecast with a
+  later `start` reads optimistic until the scheduler takes a not-before
+  time.
+
 The scheduler expresses demand as **CapacityRequest** objects, one per pool.
 Actuators turn them into the platform's own APIs:
 

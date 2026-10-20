@@ -201,6 +201,14 @@ type WorkJobSpec struct {
 	// +optional
 	Review *WorkReviewSpec `json:"review,omitempty"`
 
+	// Forecast makes the job a forecast only (integrations GAPS 9): work a
+	// tracker expects (a shot not yet turned over, its bid) that the farm
+	// plans for. It is estimated and placed among the real work, never
+	// released: no pods, no quota, no burst capacity bought for it. A real
+	// job replaces it when the work is submitted. Set at creation only.
+	// +optional
+	Forecast *WorkForecast `json:"forecast,omitempty"`
+
 	// Inputs are C4 views mounted into every unit.
 	// +optional
 	Inputs []WorkInput `json:"inputs,omitempty"`
@@ -278,7 +286,8 @@ type WorkNudge struct {
 type WorkJobStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Phase is Queued, Running, Blocked, Held, Succeeded or Failed.
+	// Phase is Queued, Running, Blocked, Held, Succeeded or Failed; or
+	// Forecast for a forecast job (spec.forecast), which never runs.
 	// +optional
 	Phase string `json:"phase,omitempty"`
 	// Order is the dispatch order over the unit axis.
@@ -1273,6 +1282,28 @@ type WorkRounds struct {
 	ExpectSeconds int64 `json:"expectSeconds,omitempty"`
 }
 
+// WorkForecast is how much work a forecast job is expected to be.
+type WorkForecast struct {
+	// SlotHours is its expected work; empty, the class plans it from the
+	// job's params as it would the real job (frames, and the class's
+	// prior).
+	// +optional
+	SlotHours string `json:"slotHours,omitempty"`
+	// SD is the spread of SlotHours (default half of it).
+	// +optional
+	SD string `json:"sd,omitempty"`
+	// UnitHours is its longest single unit, its critical path (default an
+	// hour, at most SlotHours).
+	// +optional
+	UnitHours string `json:"unitHours,omitempty"`
+	// Start is the earliest it can begin (a turnover date).
+	// +optional
+	Start *metav1.Time `json:"start,omitempty"`
+	// Exists is the chance it happens at all, 0 to 1 (default 1).
+	// +optional
+	Exists string `json:"exists,omitempty"`
+}
+
 // WorkReviewSpec is the final review of a job's work.
 type WorkReviewSpec struct {
 	// Server is who reviews: person:<id> or party:<name>.
@@ -1418,6 +1449,7 @@ type HeavyRegion struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 50",message="a WorkJob name is at most 50 characters (it labels and prefixes its unit pods)"
 // +kubebuilder:validation:XValidation:rule="has(self.spec.review) == has(oldSelf.spec.review) && (!has(self.spec.review) || self.spec.review == oldSelf.spec.review)",message="a job's review is set when it is created"
+// +kubebuilder:validation:XValidation:rule="has(self.spec.forecast) == has(oldSelf.spec.forecast)",message="a job is a forecast, or not, from when it is created: a real job replaces a forecast"
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=wj
 // +kubebuilder:printcolumn:name="Class",type=string,JSONPath=`.spec.class`

@@ -222,6 +222,39 @@ spec:
                             version of (v008 answers the notes on v007). The job record names
                             it, so lineage links the versions.
                           type: string
+                        forecast:
+                          description: |-
+                            Forecast makes the job a forecast only (integrations GAPS 9): work a
+                            tracker expects (a shot not yet turned over, its bid) that the farm
+                            plans for. It is estimated and placed among the real work, never
+                            released: no pods, no quota, no burst capacity bought for it. A real
+                            job replaces it when the work is submitted. Set at creation only.
+                          properties:
+                            exists:
+                              description: Exists is the chance it happens at all,
+                                0 to 1 (default 1).
+                              type: string
+                            sd:
+                              description: SD is the spread of SlotHours (default
+                                half of it).
+                              type: string
+                            slotHours:
+                              description: |-
+                                SlotHours is its expected work; empty, the class plans it from the
+                                job's params as it would the real job (frames, and the class's
+                                prior).
+                              type: string
+                            start:
+                              description: Start is the earliest it can begin (a turnover
+                                date).
+                              format: date-time
+                              type: string
+                            unitHours:
+                              description: |-
+                                UnitHours is its longest single unit, its critical path (default an
+                                hour, at most SlotHours).
+                              type: string
+                          type: object
                         inputs:
                           description: Inputs are C4 views mounted into every unit.
                           items:

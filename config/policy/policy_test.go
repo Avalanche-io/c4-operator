@@ -200,6 +200,11 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"review":{"server":"person:noor"}}}`))); err == nil {
 		t.Error("a review was added to a running job")
 	}
+	// A job is a forecast or not from its creation (GAPS 9): a real job
+	// replaces a forecast; neither turns into the other.
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"forecast":{"slotHours":"4"}}}`))); err == nil {
+		t.Error("a running job became a forecast")
+	}
 }
 
 // TestSubmitGrantsOnlyFromTheHUD: a person's grant to a Tracker is written

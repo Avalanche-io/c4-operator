@@ -63,6 +63,13 @@ type MilestoneStatus struct {
 	// Done counts the covered jobs that succeeded.
 	// +optional
 	Done int32 `json:"done,omitempty"`
+	// Forecast counts the covered forecast jobs (integrations GAPS 9),
+	// and ForecastRisk is the worst risk among them; Risk is the real
+	// work's alone.
+	// +optional
+	Forecast int32 `json:"forecast,omitempty"`
+	// +optional
+	ForecastRisk string `json:"forecastRisk,omitempty"`
 }
 
 // +kubebuilder:object:root=true

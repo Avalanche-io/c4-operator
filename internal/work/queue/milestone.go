@@ -86,6 +86,15 @@ func (q *Queue) milestoneStatus(ctx context.Context, ms map[string][]*c4v1.Miles
 					continue
 				}
 				names = append(names, j.Name)
+				if j.Spec.Forecast != nil {
+					// Forecasts are counted apart: risk stays the real
+					// work's, which trackers write back.
+					st.Forecast++
+					if e := j.Status.Estimate; e != nil && riskRank[e.Risk] > riskRank[orStr(st.ForecastRisk, "none")] {
+						st.ForecastRisk = e.Risk
+					}
+					continue
+				}
 				switch j.Status.Phase {
 				case "Succeeded":
 					st.Done++
@@ -105,7 +114,8 @@ func (q *Queue) milestoneStatus(ctx context.Context, ms map[string][]*c4v1.Miles
 			st.Count = int32(len(names))
 			st.Jobs = names[:min(len(names), milestoneJobsKept)]
 			if st.ObservedGeneration == m.Status.ObservedGeneration && st.Count == m.Status.Count && st.Done == m.Status.Done &&
-				st.Risk == m.Status.Risk && slices.Equal(st.Jobs, m.Status.Jobs) {
+				st.Risk == m.Status.Risk && slices.Equal(st.Jobs, m.Status.Jobs) &&
+				st.Forecast == m.Status.Forecast && st.ForecastRisk == m.Status.ForecastRisk {
 				continue
 			}
 			m.Status = st

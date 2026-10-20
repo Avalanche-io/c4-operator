@@ -317,6 +317,9 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	// Accepted and superseded units count as done: nothing waits on them.
 	finished := len(succ) + len(accepted) + len(superseded)
 	switch {
+	case isForecast(v.job):
+		// It never runs: a real job replaces it (forecast.go).
+		st.Phase = "Forecast"
 	case finished == n && short && active == 0:
 		// Every unit finished, short of the measure the job requires.
 		st.Phase = "Failed"
