@@ -309,6 +309,29 @@ What the host needs:
 - The account the sessions run as still shows in their context (its
   email); restricted mode removes everything else of the machine's.
 
+### A block asks a person
+
+A block that cannot go on without a person's decision asks for one. It
+writes `ask.json` in its unit's `.c4/` and ends its turn:
+
+```json
+{"ask": "Port the C extension too?", "choices": ["yes", "no"], "reply": false, "expect": "2h"}
+```
+
+| field     | meaning                                                                         |
+| --------- | ------------------------------------------------------------------------------- |
+| `ask`     | the question, on its own                                                        |
+| `choices` | the answers to choose from (optional)                                           |
+| `reply`   | `true` asks for files as well as a decision                                     |
+| `server`  | who decides: `person:<id>` (default `person:owner`, the job's owner), `party:<name>` or `clock:<time>` |
+| `expect`  | how long the answer is expected to take, as a duration                          |
+
+At that safe point the Stop hook runs `c4-unit wait` instead of
+`c4-unit safepoint`, and consumes the file, so a question is asked once.
+- **The farm opens the wait.** The block stops there and gives up its slot, and its pod yields (reason `wait`).
+- **When the person decides,** the next attempt resumes the session by its ID. The resume prompt says who decided what, with their note. It also says where the reply's files are: `$C4_REPLY` in a pod, or on a host the runner fetches the reply view into the unit directory's `reply/`.
+- **The farm doesn't open the wait, or the file is malformed.** The hook writes the reason as the block's next-part note, and the block is woken to decide for itself.
+
 ## Blocks in containers, and sessions as views
 
 A block can run in a unit pod as well as on a host runner. Its session
