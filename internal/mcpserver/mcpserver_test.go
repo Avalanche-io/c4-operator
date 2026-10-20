@@ -128,6 +128,8 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.Unmarshal(body, &req)
 		eta := due.Add(-2 * time.Hour)
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "dryRun": req.DryRun, "submission": "c4sub",
+			"estimate": api.SubmissionEstimate{ETA90: &eta, Deadline: &due, Feasible: true, Jobs: 1},
+			"warnings": []string{"a frame-by-frame after waits for the whole job"},
 			"jobs": []map[string]any{{"key": "proxies", "namespace": "show-a", "name": "sm0140-proxies-v001", "tool": "proxies", "version": "v4",
 				"what": "48 frames in 12 units", "estimate": api.SubmitEstimate{Units: 12, ETA50: &eta, ETA90: &eta, Deadline: &due, Feasible: true}}},
 			"explain": "sm0140-proxies-v001  WorkJob show-a/sm0140-proxies-v001"})
@@ -427,7 +429,8 @@ func TestSubmitSubmission(t *testing.T) {
 		"submission": map[string]any{"c4": "submit/1", "project": "show-a", "shot": "sm0140",
 			"jobs": map[string]any{"proxies": map[string]any{"tool": "proxies", "frames": "1001-1048", "with": map[string]any{"plates": "plates/sm0140.####.exr"}}}}})
 	jobs, _ := out["jobs"].([]any)
-	if res.IsError || out["ok"] != true || out["submitted"] != false || len(jobs) != 1 || out["explain"] == "" {
+	if res.IsError || out["ok"] != true || out["submitted"] != false || len(jobs) != 1 || out["explain"] == "" ||
+		out["onTrack"] != true || out["eta90"] == nil || len(out["warnings"].([]any)) != 1 {
 		t.Fatalf("dry run: %v %q", out, text(res))
 	}
 	if j := asMap(jobs[0]); j["job"] != "show-a/sm0140-proxies-v001" || j["onTrack"] != true || j["units"] != float64(12) {

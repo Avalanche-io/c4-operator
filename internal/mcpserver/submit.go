@@ -39,6 +39,7 @@ type SubmittedJob struct {
 	OnTrack       bool     `json:"onTrack" jsonschema:"whether it makes its deadline at current capacity"`
 	Warning       string   `json:"warning,omitempty"`
 	EstimateError string   `json:"estimateError,omitempty"`
+	Link          string   `json:"link,omitempty" jsonschema:"the job's page in the HUD"`
 }
 
 type SubmitOut struct {
@@ -47,6 +48,11 @@ type SubmitOut struct {
 	Errors     []api.FieldError `json:"errors,omitempty" jsonschema:"each problem at its dotted path (jobs.comp.after), with the fix"`
 	Submission string           `json:"submission,omitempty" jsonschema:"the C4 ID of the submission as sent"`
 	Jobs       []SubmittedJob   `json:"jobs,omitempty"`
+	ETA50      string           `json:"eta50,omitempty" jsonschema:"when the last job is expected to finish, p50"`
+	ETA90      string           `json:"eta90,omitempty" jsonschema:"the same, p90"`
+	Deadline   string           `json:"deadline,omitempty" jsonschema:"the earliest due among its jobs"`
+	OnTrack    bool             `json:"onTrack" jsonschema:"whether every job makes its deadline at current capacity"`
+	Warnings   []string         `json:"warnings,omitempty" jsonschema:"what the farm does differently from what the submission says"`
 	Explain    string           `json:"explain,omitempty"`
 	Message    string           `json:"message,omitempty"`
 }
@@ -65,36 +71,6 @@ func submitSchema() *jsonschema.Schema {
 	}
 	s.Properties["submission"] = &jsonschema.Schema{Type: "object", Description: desc}
 	return s
-}
-
-// submissionRequest and submissionResponse are POST /submissions'
-// body and answer (hud/api's SubmissionRequest and SubmissionResponse).
-type submissionRequest struct {
-	Submission json.RawMessage `json:"submission"`
-	DryRun     bool            `json:"dryRun,omitempty"`
-	Explain    bool            `json:"explain,omitempty"`
-}
-
-type submissionJob struct {
-	Key           string              `json:"key"`
-	Namespace     string              `json:"namespace"`
-	Name          string              `json:"name"`
-	Tool          string              `json:"tool"`
-	Version       string              `json:"version"`
-	What          string              `json:"what"`
-	Estimate      *api.SubmitEstimate `json:"estimate,omitempty"`
-	EstimateError string              `json:"estimateError,omitempty"`
-	After         []string            `json:"after,omitempty"`
-}
-
-type submissionResponse struct {
-	OK         bool             `json:"ok"`
-	DryRun     bool             `json:"dryRun,omitempty"`
-	Errors     []api.FieldError `json:"errors,omitempty"`
-	Submission string           `json:"submission,omitempty"`
-	Jobs       []submissionJob  `json:"jobs,omitempty"`
-	Explain    string           `json:"explain,omitempty"`
-	Message    string           `json:"message,omitempty"`
 }
 
 func rfc(t *time.Time) string {
@@ -125,8 +101,8 @@ func (c *Client) submitJob(ctx context.Context, _ *mcp.CallToolRequest, in Submi
 // written) to POST /submissions; a refusal (422) is an answer, not an
 // error: its errors say where and how to fix it.
 func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun, explain bool) (*mcp.CallToolResult, SubmitOut, error) {
-	var r submissionResponse
-	err := c.do(ctx, "POST", "/submissions", submissionRequest{Submission: doc, DryRun: dryRun, Explain: explain}, &r)
+	var r api.SubmissionResponse
+	err := c.do(ctx, "POST", "/submissions", api.SubmissionRequest{Submission: doc, DryRun: dryRun, Explain: explain}, &r)
 	var ae *APIError
 	if errors.As(err, &ae) && ae.Status == http.StatusUnprocessableEntity && json.Unmarshal(ae.Body, &r) == nil && len(r.Errors) > 0 {
 		err = nil
@@ -134,13 +110,17 @@ func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun
 	if err != nil {
 		return nil, SubmitOut{}, err
 	}
-	out := SubmitOut{OK: r.OK, Submitted: r.OK && !r.DryRun, Errors: r.Errors, Submission: r.Submission, Explain: r.Explain, Message: r.Message}
+	out := SubmitOut{OK: r.OK, Submitted: r.OK && !r.DryRun, Errors: r.Errors, Submission: r.Submission, Warnings: r.Warnings,
+		Explain: r.Explain, Message: r.Message}
+	if e := r.Estimate; e != nil {
+		out.ETA50, out.ETA90, out.Deadline, out.OnTrack = rfc(e.ETA50), rfc(e.ETA90), rfc(e.Deadline), e.Feasible && !e.AtRisk
+	}
 	if !r.OK && out.Message == "" {
 		out.Message = fmt.Sprintf("the farm refused the submission: %d problems; fix each at its path and submit again", len(r.Errors))
 	}
 	for _, j := range r.Jobs {
 		sj := SubmittedJob{Key: j.Key, Job: j.Namespace + "/" + j.Name, Tool: j.Tool, Version: j.Version, What: j.What, After: j.After,
-			EstimateError: j.EstimateError}
+			EstimateError: j.EstimateError, Link: j.Link}
 		if e := j.Estimate; e != nil {
 			sj.Units, sj.ETA50, sj.ETA90, sj.Deadline = e.Units, rfc(e.ETA50), rfc(e.ETA90), rfc(e.Deadline)
 			sj.SlackSeconds, sj.OnTrack, sj.Warning = e.SlackSeconds, e.Feasible && !e.AtRisk, e.Message
