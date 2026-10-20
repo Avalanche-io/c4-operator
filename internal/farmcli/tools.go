@@ -12,7 +12,6 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -319,14 +318,6 @@ func (d *submissionDoc) MarshalJSON() ([]byte, error) {
 	return b.Bytes(), nil
 }
 
-// hostOS is this machine's operating system as a source root names it.
-func hostOS() string {
-	if runtime.GOOS == "darwin" {
-		return "macos"
-	}
-	return runtime.GOOS
-}
-
 // submitDoc sends a submission document: a folder tree (relative to base)
 // is uploaded and named by its ID, the farm plans it, and on confirmation
 // it is submitted.
@@ -339,7 +330,6 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	if project == "" {
 		return nil, errors.New("the submission names no project, and neither does --project")
 	}
-	var roots []api.SourceRoot
 	if tree := doc.str("tree"); localTree(tree) {
 		dir := tree
 		if !filepath.IsAbs(dir) {
@@ -353,9 +343,10 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 			o.printf("uploaded  %s from %s\n", plural(sent, "file", "files"), tree)
 		}
 		doc.setString("tree", id)
-		// the paths the tree's scenes hold were written under it
-		if abs, err := filepath.Abs(dir); err == nil {
-			roots = []api.SourceRoot{{OS: hostOS(), Path: filepath.ToSlash(abs)}}
+		// the paths the tree's scenes hold were written under it, unless
+		// the file says where they were written
+		if abs, err := filepath.Abs(dir); err == nil && doc.str("root") == "" {
+			doc.setString("root", filepath.ToSlash(abs))
 		}
 	}
 	body, err := doc.MarshalJSON()
@@ -363,7 +354,7 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 		return nil, err
 	}
 	var plan api.SubmissionResponse
-	req := api.SubmissionRequest{Submission: body, DryRun: true, Explain: a.Explain, SourceRoots: roots}
+	req := api.SubmissionRequest{Submission: body, DryRun: true, Explain: a.Explain}
 	if err := doChecked(ctx, c, "POST", "/submissions", req, &plan); err != nil {
 		return nil, err
 	}
