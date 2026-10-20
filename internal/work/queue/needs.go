@@ -92,6 +92,7 @@ func (q *Queue) noteNeeds(ctx context.Context, v *view, idx int, p *corev1.Pod, 
 		n.record = m.decisions[k-1].Record
 	}
 	m.needs[idx] = n
+	m.noteCause("needs", "needs:"+causeText(text), "needs information: "+causeText(text), idx, p.Spec.NodeName, now, "held")
 	q.Log.Info("needs information", "job", v.key, "unit", idx, "needs", text)
 }
 

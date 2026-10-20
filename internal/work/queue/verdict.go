@@ -516,6 +516,19 @@ func checkRework(v *view, w *c4v1.WorkRework) error {
 // apply carries out one action of review idx's verdict.
 func (q *Queue) apply(v *view, idx int, a action) {
 	m := v.mem
+	switch a.do {
+	case "rework", "escalate", "fail":
+		did := map[string]string{"rework": "reworked", "escalate": "escalated", "fail": "failed"}[a.do]
+		why := causeText(a.why)
+		title := "review: " + a.do
+		if why != "" {
+			title += ": " + why
+		}
+		c := m.noteCause("verdict", "verdict:"+a.do+":"+why, title, a.unit, "", q.Now(), did)
+		if a.do == "escalate" && a.to != "" {
+			c.To = a.to
+		}
+	}
 	if m.reviews == nil {
 		m.reviews = map[int]*c4v1.WorkReview{}
 	}

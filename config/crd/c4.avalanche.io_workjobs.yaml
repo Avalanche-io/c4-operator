@@ -341,6 +341,78 @@ spec:
                 items:
                   type: string
                 type: array
+              causes:
+                description: |-
+                  Causes are the job's failures and flags grouped by cause (an exit
+                  signature, a node, a review's reason, information a brief lacked),
+                  each with the units it touched and what the farm did, so people and
+                  trackers see one item per cause rather than one per failure
+                  (integrations GAPS 4). At most 16, the newest kept; CausesDropped
+                  counts the rest.
+                items:
+                  description: WorkCause is one cause of a job's failures or flags.
+                  properties:
+                    count:
+                      format: int32
+                      type: integer
+                    did:
+                      description: |-
+                        Did is what the farm did about it: retried, failed, blacklisted,
+                        reworked, escalated, accepted (each once, in order).
+                      items:
+                        type: string
+                      type: array
+                    first:
+                      format: date-time
+                      type: string
+                    key:
+                      description: |-
+                        Key names the cause within the job; it stays the same as the cause
+                        grows.
+                      type: string
+                    kind:
+                      description: |-
+                        Kind is exit (a unit's process failed), node (a node failed units
+                        up to the job's limit), verdict (a review reworked, escalated or
+                        failed units) or needs (units need information their brief lacked).
+                      type: string
+                    last:
+                      format: date-time
+                      type: string
+                    nodes:
+                      description: Nodes it happened on, at most four.
+                      items:
+                        type: string
+                      type: array
+                    sample:
+                      format: int32
+                      type: integer
+                    title:
+                      description: Title says it in production's terms ("exit 137
+                        OOMKilled").
+                      type: string
+                    to:
+                      description: To is whom a review escalated it to.
+                      type: string
+                    units:
+                      description: |-
+                        Units is the set of units it touched ("0-9,14"); Count its attempts;
+                        Sample one of them.
+                      type: string
+                  required:
+                  - count
+                  - first
+                  - key
+                  - kind
+                  - last
+                  - sample
+                  - title
+                  - units
+                  type: object
+                type: array
+              causesDropped:
+                format: int32
+                type: integer
               conditions:
                 items:
                   description: Condition contains details for one aspect of the current

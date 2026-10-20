@@ -85,3 +85,37 @@ func TestIncidents(t *testing.T) {
 		t.Fatalf("after acks: %+v", it)
 	}
 }
+
+// Failed jobs are one incident per cause (status.causes), not one for the
+// whole farm: the NeedsPerson message says only how many failed.
+func TestIncidentsGroupFailuresByCause(t *testing.T) {
+	now := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	since := now.Add(-20 * time.Minute)
+	failed := func(name string, n int, causes ...api.Cause) api.Job {
+		return api.Job{Namespace: "show-a", Name: name, Class: "render", Units: api.Counts{Failed: n}, UnitStates: api.States{Failed: "0-3"},
+			NeedsPerson: &api.NeedsPerson{Reason: "failed", Message: fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", n), Since: since},
+			Causes:      causes}
+	}
+	oom := api.Cause{Kind: "exit", Key: "exit:137:OOMKilled", Title: "exit 137 OOMKilled", Did: []string{"retried", "failed"}, Last: since}
+	missing := api.Cause{Kind: "exit", Key: "exit:1:Error:no such file: plates/sh#.exr", Title: "exit 1: no such file: plates/sh#.exr",
+		Did: []string{"failed"}, Last: since}
+	retriedOnly := api.Cause{Kind: "exit", Key: "exit:143:Error", Title: "exit 143", Did: []string{"retried"}, Last: now}
+	jobs := []api.Job{
+		failed("sh010-light-v003", 4, oom, retriedOnly),
+		failed("sh020-light-v001", 2, oom),
+		failed("sh060-comp-v001", 3, missing),
+	}
+	items := incidents(&model{at: now}, &api.Viewer{User: "maya"}, jobs)
+	if len(items) != 2 {
+		for _, it := range items {
+			t.Logf("%+v", it)
+		}
+		t.Fatalf("%d incidents, want 2 (one per cause)", len(items))
+	}
+	if a := items[0]; len(a.Jobs) != 2 || a.Detail != "exit 137 OOMKilled" || a.Count != 6 {
+		t.Fatalf("the OOM incident: %+v", a)
+	}
+	if b := items[1]; len(b.Jobs) != 1 || b.Detail != "exit 1: no such file: plates/sh#.exr" {
+		t.Fatalf("the missing-plates incident: %+v", b)
+	}
+}

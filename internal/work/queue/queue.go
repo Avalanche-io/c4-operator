@@ -230,11 +230,14 @@ type jobMem struct {
 	millis         map[int]int64
 	out            *output
 	foldedPod      map[types.UID]bool
-	outLoad        string // the stored chain to load before the next fold
-	outIndex       string // the stored provenance index to load before the next fold
-	launched       map[int]time.Time
-	nodeFails      map[string]int
-	blacklist      map[string]bool
+	// causes are the job's failures and flags by cause (causes.go).
+	causes        map[string]*causeRec
+	causesDropped int
+	outLoad       string // the stored chain to load before the next fold
+	outIndex      string // the stored provenance index to load before the next fold
+	launched      map[int]time.Time
+	nodeFails     map[string]int
+	blacklist     map[string]bool
 	// resume holds, per unit, the view a yielded attempt captured: the
 	// next attempt mounts it and continues from its checkpoint.
 	resume map[int]string
@@ -353,6 +356,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.loadWaits(st)
 	m.loadSteers(st)
 	m.loadNeeds(st)
+	m.loadCauses(st)
 	m.loadAsks(st)
 	m.loadLoops(st)
 	// Yields and preemptions before a restart stay in the record.
@@ -955,7 +959,16 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed:
 			q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6)
-			if !m.failed[idx] && !m.succeeded[idx] && attemptOf(p) >= m.attempts[idx] {
+			// Counted once, though the pod may be seen again before it is
+			// cleaned up.
+			if !m.failed[idx] && !m.succeeded[idx] && attemptOf(p) >= m.attempts[idx] && !m.foldedPod[p.UID] {
+				m.foldedPod[p.UID] = true
+				did := "retried"
+				if m.attempts[idx] > retries {
+					did = "failed"
+				}
+				key, title := exitCause(p)
+				m.noteCause("exit", key, title, idx, p.Spec.NodeName, finishOf(p, now), did)
 				if n := p.Spec.NodeName; n != "" {
 					// Its retries go elsewhere (avoidFor).
 					if m.unitFailed == nil {
@@ -967,6 +980,13 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 					m.unitFailed[idx][n] = true
 					m.nodeFails[n]++
 					if m.nodeFails[n] >= limit {
+						if !m.blacklist[n] {
+							m.noteCause("node", "node:"+n, fmt.Sprintf("node %s: failed %d units, kept off this job", n, m.nodeFails[n]),
+								idx, n, finishOf(p, now), "blacklisted")
+							if c := m.causes[key]; c != nil {
+								c.addDid("blacklisted")
+							}
+						}
 						m.blacklist[n] = true
 					}
 				}

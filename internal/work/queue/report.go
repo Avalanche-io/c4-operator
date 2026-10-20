@@ -279,6 +279,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		st.Yields = append(st.Yields, c4v1.WorkYield{Unit: int32(y.Unit), At: metav1.Time{Time: y.At.Truncate(time.Second)}, Reason: y.Reason, View: y.View})
 	}
 	st.Interruptions, st.Interrupted = interruptStatus(m)
+	st.Causes, st.CausesDropped = m.causeStatus(), int32(m.causesDropped)
 	st.Preemptions = int32(m.preemptBase)
 	for _, n := range m.preemptions {
 		st.Preemptions += int32(n)

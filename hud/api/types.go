@@ -504,6 +504,9 @@ type Job struct {
 	ModelShare *float64 `json:"modelShare,omitempty"`
 	// Acks are the standing acknowledgements of failed units.
 	Acks []Ack `json:"acks,omitempty"`
+	// Causes are the job's failures and flags grouped by cause, newest
+	// last (status.causes).
+	Causes []Cause `json:"causes,omitempty"`
 	// Waits are what the job waits for: its wait units (a ruling, an
 	// approval, an outside party, a clock) and units a review escalated,
 	// open and decided.
@@ -577,6 +580,22 @@ type NeedsPerson struct {
 
 // Ack is a person taking failed units (acknowledge, or assign to
 // Assignee) or accepting them as they are (accept).
+// Cause is one cause of a job's failures or flags: what it is, the units
+// it touched, and what the farm did about it.
+type Cause struct {
+	Kind   string    `json:"kind"`
+	Key    string    `json:"key"`
+	Title  string    `json:"title"`
+	Units  string    `json:"units"`
+	Count  int       `json:"count"`
+	Sample int       `json:"sample"`
+	First  time.Time `json:"first"`
+	Last   time.Time `json:"last"`
+	Nodes  []string  `json:"nodes,omitempty"`
+	Did    []string  `json:"did,omitempty"`
+	To     string    `json:"to,omitempty"`
+}
+
 type Ack struct {
 	Kind     string    `json:"kind"`
 	Units    string    `json:"units"`

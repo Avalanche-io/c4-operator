@@ -454,6 +454,16 @@ type WorkJobStatus struct {
 	Interruptions []WorkInterruption `json:"interruptions,omitempty"`
 	// +optional
 	Interrupted int32 `json:"interrupted,omitempty"`
+	// Causes are the job's failures and flags grouped by cause (an exit
+	// signature, a node, a review's reason, information a brief lacked),
+	// each with the units it touched and what the farm did, so people and
+	// trackers see one item per cause rather than one per failure
+	// (integrations GAPS 4). At most 16, the newest kept; CausesDropped
+	// counts the rest.
+	// +optional
+	Causes []WorkCause `json:"causes,omitempty"`
+	// +optional
+	CausesDropped int32 `json:"causesDropped,omitempty"`
 	// Started and Finished bound the job's run.
 	// +optional
 	Started *metav1.Time `json:"started,omitempty"`
@@ -856,6 +866,36 @@ type WorkHoldWaiter struct {
 	Unit int32  `json:"unit"`
 	Name string `json:"name,omitempty"`
 	On   string `json:"on,omitempty"`
+}
+
+// WorkCause is one cause of a job's failures or flags.
+type WorkCause struct {
+	// Kind is exit (a unit's process failed), node (a node failed units
+	// up to the job's limit), verdict (a review reworked, escalated or
+	// failed units) or needs (units need information their brief lacked).
+	Kind string `json:"kind"`
+	// Key names the cause within the job; it stays the same as the cause
+	// grows.
+	Key string `json:"key"`
+	// Title says it in production's terms ("exit 137 OOMKilled").
+	Title string `json:"title"`
+	// Units is the set of units it touched ("0-9,14"); Count its attempts;
+	// Sample one of them.
+	Units  string      `json:"units"`
+	Count  int32       `json:"count"`
+	Sample int32       `json:"sample"`
+	First  metav1.Time `json:"first"`
+	Last   metav1.Time `json:"last"`
+	// Nodes it happened on, at most four.
+	// +optional
+	Nodes []string `json:"nodes,omitempty"`
+	// Did is what the farm did about it: retried, failed, blacklisted,
+	// reworked, escalated, accepted (each once, in order).
+	// +optional
+	Did []string `json:"did,omitempty"`
+	// To is whom a review escalated it to.
+	// +optional
+	To string `json:"to,omitempty"`
 }
 
 // WorkInterruption is one attempt the farm stopped.

@@ -3,6 +3,7 @@ package server
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,6 +63,19 @@ func noun(class string, n int) string {
 
 var digits = regexp.MustCompile(`\d+`)
 
+// failingCause is the cause of a job's failed units: the latest cause
+// whose units failed for good.
+func failingCause(j *api.Job) *api.Cause {
+	var out *api.Cause
+	for i := range j.Causes {
+		c := &j.Causes[i]
+		if slices.Contains(c.Did, "failed") && (out == nil || !c.Last.Before(out.Last)) {
+			out = c
+		}
+	}
+	return out
+}
+
 func incidents(m *model, v *api.Viewer, jobs []api.Job) []api.Incident {
 	out := []api.Incident{}
 	key := func(j *api.Job) string { return j.Namespace + "/" + j.Name }
@@ -81,7 +95,11 @@ func incidents(m *model, v *api.Viewer, jobs []api.Job) []api.Incident {
 		}
 		cause, k := np.Message, np.Reason+"|"+key(j)
 		if np.Reason == "failed" {
-			if _, after, ok := strings.Cut(np.Message, ":"); ok && strings.TrimSpace(after) != "" {
+			if c := failingCause(j); c != nil {
+				// Jobs failing for the same cause are one incident; others
+				// are not, whatever their messages say (status.causes).
+				cause, k = c.Title, "failed|"+c.Key
+			} else if _, after, ok := strings.Cut(np.Message, ":"); ok && strings.TrimSpace(after) != "" {
 				cause = strings.TrimSpace(after)
 			} else {
 				cause = "failed after its retries"

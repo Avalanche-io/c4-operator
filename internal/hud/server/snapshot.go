@@ -304,6 +304,10 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		aj.Acks = append(aj.Acks, api.Ack{Kind: a.Kind, Units: a.Units, Actor: a.Actor, Assignee: a.Assignee, Note: a.Note,
 			At: a.At.Time.UTC(), Record: a.Record})
 	}
+	for _, c := range st.Causes {
+		aj.Causes = append(aj.Causes, api.Cause{Kind: c.Kind, Key: c.Key, Title: c.Title, Units: c.Units, Count: int(c.Count),
+			Sample: int(c.Sample), First: c.First.Time.UTC(), Last: c.Last.Time.UTC(), Nodes: c.Nodes, Did: c.Did, To: c.To})
+	}
 	if r.plan != nil && aj.Units.Total == 0 {
 		// Not yet seen by the queue: every unit is queued.
 		aj.Units.Total, aj.Units.Queued = len(r.plan.Units), len(r.plan.Units)

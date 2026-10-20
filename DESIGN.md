@@ -2499,6 +2499,18 @@ field and the record will change with it.
   from the HUD.
 - A node that fails units across several jobs and projects is flagged as
   suspect, which usually means bad hardware rather than a bad job.
+- **Causes** (integrations GAPS 4). A job's failures and flags are
+  grouped by cause in `status.causes`: a unit's exit (its code, the
+  container's reason such as OOMKilled, the first line of its message with
+  numbers blurred), a node that failed units up to the job's limit, a
+  review's reason, information a brief lacked. Each records the units it
+  touched (a unit set), how many attempts, a sample, its first and last
+  time, up to four nodes, and what the farm did: retried, failed,
+  blacklisted, reworked, escalated (and to whom), accepted. A failed pod
+  counts once. There are at most 16 causes; a new one drops the one seen
+  least recently, counted in `causesDropped`. Status is their only record,
+  loaded back after a restart. The HUD's incidents group failed jobs by
+  cause, and a tracker gets one comment per cause.
 - **Interrupted is not failed.** An attempt the farm stopped is
   interrupted. It spends no retry, marks no node, and runs again. That
   covers the pod's `DisruptionTarget` condition (scheduler preemption, an

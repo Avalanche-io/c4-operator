@@ -140,6 +140,7 @@ func applyAcks(j *c4v1.WorkJob, m *jobMem, n int) {
 			for i := range units {
 				m.accepted[i] = true
 			}
+			m.causesDid(units, "accepted")
 		}
 		// A newer acknowledgement of a unit replaces an older one.
 		for _, old := range m.acks {
