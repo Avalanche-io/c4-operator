@@ -1,8 +1,11 @@
 # A credential lease's Secret (c4-lease-<lease>) reaches only its holder's
 # own unit pods: only the work queue (the manager's account) creates pods
 # that mount one, and it does so only for jobs the lease serves, in the
-# lease's pools, while it is active (internal/work/queue/lease.go). Nobody
-# puts one in an environment variable or a projected volume.
+# lease's pools, while it is active (internal/work/queue/lease.go). A pod's
+# volumes are fixed at its creation, so that is checked at CREATE; others
+# may still update the pod (the node daemon's output annotations). Nobody
+# puts a lease in an environment variable, in any container, ephemeral
+# ones included, or in a projected volume.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -14,7 +17,7 @@ spec:
     - apiGroups: [""]
       apiVersions: [v1]
       operations: [CREATE, UPDATE]
-      resources: [pods]
+      resources: [pods, pods/ephemeralcontainers]
   variables:
   - name: lease
     expression: "'c4-lease-'"
@@ -23,13 +26,14 @@ spec:
   - name: containers
     expression: >-
       (has(object.spec.containers) ? object.spec.containers : []) +
-      (has(object.spec.initContainers) ? object.spec.initContainers : [])
+      (has(object.spec.initContainers) ? object.spec.initContainers : []) +
+      (has(object.spec.ephemeralContainers) ? object.spec.ephemeralContainers : [])
   - name: mounts
     expression: >-
       variables.volumes.exists(v, has(v.secret) && has(v.secret.secretName) && v.secret.secretName.startsWith(variables.lease))
   validations:
   - expression: >-
-      !variables.mounts || request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
+      request.operation != 'CREATE' || !variables.mounts || request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
     message: only the work queue creates pods that mount a credential lease's Secret
   - expression: >-
       !variables.volumes.exists(v, has(v.projected) && has(v.projected.sources) &&

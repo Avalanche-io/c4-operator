@@ -311,7 +311,7 @@ const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
                        runner: a Node for the machine, member pods bound to it)
   block-pod [--cwd DIR]
                        run a block as a unit pod's command
-  lease --name N --namespace NS --holder H --owner O --pool P [--ttl 8h]
+  lease --name N --namespace NS --holder H --owner O --pool P [--ttl 8h] [--context C]
                        the holder's agent for a holder-transfer credential
                        lease: keeps its Secret holding the holder's current
                        short-lived token until the lease ends or it stops
@@ -437,6 +437,7 @@ func runLease(ctx context.Context, args []string, stderr io.Writer) int {
 	renewBefore := fs.Duration("renew-before", 15*time.Minute, "renew this long before the token expires")
 	configDir := fs.String("config-dir", os.Getenv("CLAUDE_CONFIG_DIR"), "the Claude Code config dir whose sign-in it leases (default $CLAUDE_CONFIG_DIR, else ~/.claude)")
 	kubeconfig := fs.String("kubeconfig", "", "the holder's kubeconfig (default: $KUBECONFIG or ~/.kube/config)")
+	kubecontext := fs.String("context", "", "the kubeconfig context of the farm (default: its current context)")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
@@ -454,7 +455,7 @@ func runLease(ctx context.Context, args []string, stderr io.Writer) int {
 	if *kubeconfig != "" {
 		os.Setenv("KUBECONFIG", *kubeconfig)
 	}
-	cfg, err := ctrlconfig.GetConfig()
+	cfg, err := ctrlconfig.GetConfigWithContext(*kubecontext)
 	if err != nil {
 		fmt.Fprintln(stderr, "c4-agent lease:", err)
 		return 1

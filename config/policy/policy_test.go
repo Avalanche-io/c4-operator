@@ -393,8 +393,13 @@ func TestLeaseMounts(t *testing.T) {
 		}
 		return nil
 	})
-	if err := manager.Create(ctx, pod(withLease)); err != nil {
-		t.Errorf("the queue's unit pod with its lease: %v", err)
+	unit := pod(withLease)
+	if err := manager.Create(ctx, unit); err != nil {
+		t.Fatalf("the queue's unit pod with its lease: %v", err)
+	}
+	// others still annotate it (the node daemon's output annotations)
+	if err := admin.Patch(ctx, unit, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/output-tree":"c4abc"}}}`))); err != nil {
+		t.Errorf("annotating a unit pod with a lease: %v", err)
 	}
 	if err := admin.Create(ctx, pod(func(*corev1.Pod) {})); err != nil {
 		t.Errorf("a pod with no lease: %v", err)
