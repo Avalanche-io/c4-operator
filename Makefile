@@ -18,7 +18,7 @@ comma := ,
 JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github job-images job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github job-images job-image-names job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -125,14 +125,15 @@ images:
 # The prebuilt job images, for every platform in PLATFORMS, from the
 # repository root (each copies cmd/c4-unit). Without PUSH=1 each is written
 # to bin/ as an OCI archive; with PUSH=1 it goes to
-# $(REGISTRY)/c4-job-<name>:$(VERSION). JOB_IMAGES=oiio builds one; JOBS=2 caps
+# $(REGISTRY)/c4-job-<name>:$(VERSION)$(TAG_SUFFIX) (the release builds each
+# platform on its own runner with TAG_SUFFIX=-<arch>, then joins them). JOB_IMAGES=oiio builds one; JOBS=2 caps
 # the compiles (usd, hydra) at two parallel jobs.
 job-images:
 	@mkdir -p bin
 	@for i in $(JOB_IMAGES); do \
 	  echo "build c4-job-$$i ($(PLATFORMS))"; \
 	  docker buildx build --platform $(PLATFORMS) -f images/$$i/Dockerfile $(if $(JOBS),--build-arg JOBS=$(JOBS)) \
-	    -t $(REGISTRY)/c4-job-$$i:$(VERSION) \
+	    -t $(REGISTRY)/c4-job-$$i:$(VERSION)$(TAG_SUFFIX) \
 	    --label org.opencontainers.image.version=$(VERSION) \
 	    --label org.opencontainers.image.revision=$$(git rev-parse HEAD) \
 	    $(if $(PUSH),--push,--output type=oci$(comma)dest=bin/c4-job-$$i-$(VERSION).oci.tar) . || exit 1; \
@@ -185,3 +186,7 @@ stress-quick:
 
 stress:
 	go run ./hack/stress -workers $(STRESS_WORKERS)
+
+# The job images' names, for scripts (the release workflow).
+job-image-names:
+	@echo $(JOB_IMAGES)
