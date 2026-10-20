@@ -2,7 +2,11 @@
 # submit work for them. Only the HUD writes one, for the person signed in,
 # with its signed control record (internal/hud/server/grants.go): nobody
 # else creates, changes or deletes it, so a Tracker's author cannot forge
-# one and a revoked grant stays on the trail.
+# one and a revoked grant stays on the trail. A grant goes with its
+# namespace: once the namespace is being deleted, its grants may be
+# deleted (by the namespace controller), or the namespace could never go.
+# The signed records of each grant and revocation stay in the project's
+# store.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -17,7 +21,8 @@ spec:
       resources: [submitgrants]
   validations:
   - expression: >-
-      request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
+      request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager' ||
+      (request.operation == 'DELETE' && namespaceObject != null && has(namespaceObject.metadata.deletionTimestamp))
     message: submit grants are given and revoked in the HUD, by the person, never written directly
 ---
 apiVersion: admissionregistration.k8s.io/v1

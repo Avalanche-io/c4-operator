@@ -246,6 +246,12 @@ func TestSubmitGrantsOnlyFromTheHUD(t *testing.T) {
 	if err := hud.Update(ctx, g); err != nil {
 		t.Errorf("the HUD's revocation: %v", err)
 	}
+	// A grant goes with its namespace, or the namespace could never be
+	// deleted: once it is terminating, its grants may be deleted.
+	if err := admin.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "a grant deleted with its namespace", func() error { return admin.Delete(ctx, g) })
 }
 
 type notYet struct{}
