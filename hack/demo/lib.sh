@@ -1,5 +1,5 @@
-# Shared by the live tracker demos (dailies.sh: Flow; github.sh: GitHub).
-# Source it after setting:
+# Shared by the live tracker demos (dailies.sh: Flow; github.sh: GitHub;
+# kitsu.sh: Kitsu, a real server rather than a fake). Source it after setting:
 #
 #   DEMO_NAME   the demo's namespace, Project, bucket and Pool (dailies, widgets)
 #   FAKE        the fake tracker's command and image name (fakeflow, fakegithub)
@@ -21,9 +21,9 @@ STATE=$SHOTS/.state
 FAKE_URL=http://127.0.0.1:$FAKE_PORT
 HUD=http://127.0.0.1:30080
 ORACLE=${ORACLE:-c4-job-oiio:dev}
-# Development viewers for both demos' projects, so either demo's run keeps
+# Development viewers for every demo's project, so any demo's run keeps
 # the manager's arguments the same.
-DEMO_VIEWERS="wrangler=*;artist=show-a;dana@supervisor=dailies|widgets;c4-sync@wrangler=dailies|widgets;joshua@artist=dailies|widgets"
+DEMO_VIEWERS="wrangler=*;artist=show-a;dana@supervisor=dailies|widgets|kitsu;c4-sync@wrangler=dailies|widgets|kitsu;joshua@artist=dailies|widgets|kitsu"
 # DEMO_BLOCK=1 (the GitHub demo): the agent's work is a real block, Claude
 # Code in the block image, on the sign-in Joshua lends with his own
 # holder-transfer lease, for jobs the Tracker submits for him under his

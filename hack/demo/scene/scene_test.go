@@ -1,5 +1,5 @@
 // Package scene holds the live demos' unit scripts (render.sh for dailies,
-// agent.sh for GitHub); these tests keep their expansion documents valid
+// agent.sh for GitHub, frames.sh for Kitsu); these tests keep them valid
 // under the queue's own, strict reading, so the demos cannot drift from
 // the operator.
 package scene
@@ -72,5 +72,12 @@ func agentPlan(t *testing.T, block string) {
 	}
 	if b := x.Units[0]; (block != "") != (b.Reasoning.Does == "model") {
 		t.Fatalf("the build's reasoning, block=%q: %+v", block, b.Reasoning)
+	}
+}
+
+// frames.sh (the Kitsu demo's render) is plain sh, as the job image runs it.
+func TestFramesScriptParses(t *testing.T) {
+	if b, err := exec.Command("sh", "-n", "frames.sh").CombinedOutput(); err != nil {
+		t.Fatalf("frames.sh: %v\n%s", err, b)
 	}
 }

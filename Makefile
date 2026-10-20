@@ -18,7 +18,7 @@ comma := ,
 JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github job-images job-image-names job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-image-names job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -166,6 +166,9 @@ e2e:
 # tears down what it made (KEEP=1 keeps it; hack/demo/dailies.sh down).
 demo-dailies:
 	hack/demo/dailies.sh
+
+demo-kitsu:
+	hack/demo/kitsu.sh
 
 demo-github:
 	hack/demo/github.sh
