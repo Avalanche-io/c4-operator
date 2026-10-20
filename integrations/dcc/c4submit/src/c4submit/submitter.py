@@ -231,9 +231,10 @@ def prepare(draft: Draft) -> Prepared:
                 if v is not None:
                     override[p.name] = v
         values = draft.form.values(override)
-        for name, err in draft.form.errors():
-            if name not in override:
-                problems.append(Problem("error", f"jobs.{key}.with.{name}", f"{tool.param(name).label}: {err}"))
+        for p in tool.params:
+            err = p.check(values.get(p.name, p.default))
+            if err:
+                problems.append(Problem("error", f"jobs.{key}.with.{p.name}", f"{p.label}: {err}"))
         for p in tool.params:
             if p.type != "PATH" or p.name not in values:
                 continue

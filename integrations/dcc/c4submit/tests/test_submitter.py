@@ -248,3 +248,13 @@ def test_unreachable_farm(tmp_path, nocache):
     tool = Tool({"tool": FakeFarm().tools_by["nuke-comp"]})
     c = Submitter(Farm(base="http://127.0.0.1:9"), cache=nocache).check(prepare(Draft(host, tool)))
     assert c.errors and c.errors[0]["message"].startswith("cannot reach http://127.0.0.1:9")
+
+
+def test_parameter_errors_once_per_job(tmp_path, farm):
+    host = comp_scene(tmp_path)
+    d = draft_for(host, farm)
+    d.form.set("threads", 500)
+    p = prepare(d)
+    errs = [(pr.path, pr.message) for pr in p.problems]
+    assert errs == [("jobs.comp-bg.with.threads", "Threads: must be at most 128"),
+                    ("jobs.comp-main.with.threads", "Threads: must be at most 128")]
