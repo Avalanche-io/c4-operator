@@ -28,13 +28,18 @@ type hud struct {
 	nudges  []map[string]string
 	agent   []string
 	submits []api.SubmitRequest
+	byName  map[string]api.SubmitRequest
+	// foreign are names someone else took: name to owner, and the
+	// tracker entity their job names, if any.
+	foreign, foreignRef map[string]string
 }
 
 // newHUD answers the HUD API routes c4-sync calls (internal/hud/API.md):
 // 201 then 409 for a taken name, 404 for an unknown job, 409 from decide
 // when nothing open waits.
 func newHUD(t *testing.T) *hud {
-	h := &hud{names: map[string]bool{}, objects: map[string][]byte{}}
+	h := &hud{names: map[string]bool{}, objects: map[string][]byte{}, byName: map[string]api.SubmitRequest{},
+		foreign: map[string]string{}, foreignRef: map[string]string{}}
 	mux := http.NewServeMux()
 	auth := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
@@ -54,23 +59,36 @@ func newHUD(t *testing.T) *hud {
 			http.Error(w, `{"error":"bad spec"}`, http.StatusBadRequest)
 			return
 		}
-		if h.names[in.Name] {
+		if h.names[in.Name] || h.foreign[in.Name] != "" {
 			w.WriteHeader(http.StatusConflict)
 			_, _ = w.Write([]byte(`{"error":"name taken"}`))
 			return
 		}
 		h.names[in.Name] = true
+		h.byName[in.Name] = in
 		h.submits = append(h.submits, in)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(api.SubmitResponse{OK: true, Namespace: in.Namespace, Name: in.Name})
 	}))
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}", auth(func(w http.ResponseWriter, r *http.Request) {
-		if !h.names[r.PathValue("name")] {
+		name := r.PathValue("name")
+		if owner := h.foreign[name]; owner != "" {
+			// A job someone else made under the name.
+			_ = json.NewEncoder(w).Encode(map[string]any{"namespace": r.PathValue("ns"), "name": name, "phase": "Queued",
+				"project": "proj", "owner": owner, "trackerRef": h.foreignRef[name]})
+			return
+		}
+		if !h.names[name] {
 			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
 			return
 		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"namespace": r.PathValue("ns"), "name": r.PathValue("name"),
-			"phase": "Running", "project": "proj", "unitList": []any{}})
+		in := h.byName[name]
+		owner := in.For
+		if owner == "" {
+			owner = c4v1.SyncDevViewer
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{"namespace": r.PathValue("ns"), "name": name,
+			"phase": "Running", "project": "proj", "unitList": []any{}, "owner": owner, "trackerRef": in.TrackerRef})
 	}))
 	mux.HandleFunc("PUT /api/v1/objects/{project}/{id}", auth(func(w http.ResponseWriter, r *http.Request) {
 		b, _ := io.ReadAll(r.Body)
@@ -289,5 +307,35 @@ func TestPreviewFetchesTheMiddleProxy(t *testing.T) {
 	if _, _, err := h.Preview(ctx, farm.JobRef{Namespace: "work", Name: "wrong"}); err == nil || errors.Is(err, farm.ErrNotFound) ||
 		!strings.Contains(err.Error(), "does not match") {
 		t.Fatalf("a proxy that is not its ID: %v", err)
+	}
+}
+
+// A taken name is adopted only when the job there is this submission's
+// own: the same tracker entity, owned as it would be. A job someone else
+// made under the name, or another entity's, is refused, never adopted.
+func TestSubmitNeverAdoptsAStranger(t *testing.T) {
+	h := newHUD(t)
+	f := client(h)
+	due := metav1.NewTime(time.Date(2026, 11, 2, 17, 0, 0, 0, time.UTC))
+	req := farm.JobRequest{Namespace: "work", Name: "gh-8", Spec: c4v1.WorkJobSpec{Class: "agent", Deadline: &due, DeadlineMode: "Tracking"},
+		TrackerRef: "gh/Issue/8", For: "dana"}
+	for _, c := range []struct{ owner, ref string }{
+		{"mallory", "gh/Issue/8"}, // her own job, posing as the entity's
+		{"dana", "gh/Issue/9"},    // dana's, but another entity's
+		{"dana", ""},              // dana's own job, no tracker's
+	} {
+		h.foreign["gh-8"], h.foreignRef["gh-8"] = c.owner, c.ref
+		if _, err := f.Submit(context.Background(), req); !errors.Is(err, farm.ErrTaken) {
+			t.Errorf("%s's job serving %q was adopted: %v", c.owner, c.ref, err)
+		}
+	}
+	h.foreign["gh-8"], h.foreignRef["gh-8"] = "dana", "gh/Issue/8"
+	if ref, err := f.Submit(context.Background(), req); err != nil || ref.Name != "gh-8" {
+		t.Fatalf("the entity's own job, from an earlier attempt: %v %v", ref, err)
+	}
+	// Without for, the job is the sync's own.
+	req.For, h.foreign["gh-8"] = "", "dana"
+	if _, err := f.Submit(context.Background(), req); !errors.Is(err, farm.ErrTaken) {
+		t.Errorf("dana's job adopted as the sync's: %v", err)
 	}
 }

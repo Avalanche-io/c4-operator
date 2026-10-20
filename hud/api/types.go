@@ -474,12 +474,15 @@ type Input struct {
 }
 
 type Job struct {
-	Namespace    string    `json:"namespace"`
-	Name         string    `json:"name"`
-	Project      string    `json:"project"`
-	Class        string    `json:"class"`
-	Driver       string    `json:"driver"`
-	Owner        string    `json:"owner,omitempty"`
+	Namespace string `json:"namespace"`
+	Name      string `json:"name"`
+	Project   string `json:"project"`
+	Class     string `json:"class"`
+	Driver    string `json:"driver"`
+	Owner     string `json:"owner,omitempty"`
+	// TrackerRef is the tracker entity the job serves
+	// (<tracker>/<type>/<id>), when a tracker's sync submitted it.
+	TrackerRef   string    `json:"trackerRef,omitempty"`
 	Phase        string    `json:"phase"`
 	Order        string    `json:"order"`
 	Units        Counts    `json:"units"`

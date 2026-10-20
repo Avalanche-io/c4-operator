@@ -194,7 +194,10 @@ Deliveries arrive at `POST /webhooks/<namespace>/<tracker>` on the
 `c4-sync` Service (port 80). Put it behind your ingress, or a relay for
 sites that cannot take inbound traffic. Set `webhookSecret` so each
 delivery is verified:
-- GitHub: `X-Hub-Signature-256`;
+- GitHub: `X-Hub-Signature-256`. A check-run button (approve, rework)
+  carries its decision in the delivery alone, so without a secret the
+  buttons decide nothing: anyone who could reach the endpoint could
+  otherwise press them as a reviewer;
 - Flow: `X-SG-SIGNATURE`, `sha1=`;
 - MLflow: `X-MLflow-Signature`, `v1,`, with a five-minute timestamp window.
 
@@ -213,7 +216,9 @@ kubectl -n <ns> describe tracker <name>
 
 A Tracker reports `Ready`, `RateLimited` (with when it resumes) and
 `Intake` (`MilestoneCoversNothing` when a milestone rule names no
-`covers`, or an entity lacks a field it names). `kubectl get milestones`
+`covers`, or an entity lacks a field it names; `NameTaken` when a job
+someone else made already has the name an entity's job would take, which
+c4-sync never adopts). `kubectl get milestones`
 shows each Milestone's due date, how many jobs it covers and their worst
 risk. A TrackerLink's status shows:
 - the summary state last written;

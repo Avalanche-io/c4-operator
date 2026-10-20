@@ -73,7 +73,7 @@ func TestSampleMLflowTracker(t *testing.T) {
 	if err := yaml.UnmarshalStrict(b, &tr); err != nil {
 		t.Fatal(err)
 	}
-	if tr.Spec.Kind != "mlflow" || tr.Spec.People["mlflow-registry"] != "ml-leads" || tr.Spec.Intake[0].Match.Fields["status"] != "SCHEDULED" {
+	if tr.Spec.Kind != "mlflow" || tr.Spec.People["mlflow-registry"] != "party:ml-leads" || tr.Spec.Intake[0].Match.Fields["status"] != "SCHEDULED" {
 		t.Fatalf("sample: %+v", tr.Spec)
 	}
 }

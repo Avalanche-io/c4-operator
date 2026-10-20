@@ -791,3 +791,24 @@ func TestFarmLogTellsTheTrackerWhatItMissed(t *testing.T) {
 		t.Fatalf("after the log moved on: %q", got)
 	}
 }
+
+// A job someone else made under the name c4-sync would give an issue's
+// job is never adopted: it would carry this tracker's states and
+// decisions. The Tracker says the name is taken, and nothing is linked.
+func TestNameTakenIsNotAdopted(t *testing.T) {
+	e := setup(t)
+	e.farm.Seed(api.Job{Namespace: ns, Name: "gh-7", Owner: "mallory", TrackerRef: "gh/Issue/7", Phase: "Queued"})
+	e.pass()
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "gh"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(tr.Status.Conditions, syncer.CondIntake)
+	if c == nil || c.Reason != "NameTaken" || !strings.Contains(c.Message, "mallory") {
+		t.Fatalf("intake: %+v", c)
+	}
+	var ls c4v1.TrackerLinkList
+	if err := e.k8s.List(context.Background(), &ls, client.InNamespace(ns)); err != nil || len(ls.Items) != 0 {
+		t.Fatalf("links: %d %v", len(ls.Items), err)
+	}
+}
