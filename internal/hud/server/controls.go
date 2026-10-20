@@ -1098,6 +1098,12 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "%v", err)
 		return
 	}
+	// A unit's question is withdrawn by a person or by its own re-check,
+	// never by another unit of the job (whomay.go).
+	if err := MayControl("withdraw", "", deciderOf(r, v)); err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
 	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
 	if err != nil {
 		fail(w, http.StatusNotFound, "%v", err)

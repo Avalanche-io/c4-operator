@@ -138,6 +138,15 @@ func TestWithdrawNeeds(t *testing.T) {
 		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/show-a/sh040-light-v007/needs/"+unit+"/withdraw?as=wrangler", strings.NewReader(body)))
 		return w.Code, w.Body.String()
 	}
+	// Another unit of the job may not withdraw its sibling's question,
+	// though its tool lets it change the job.
+	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/sh040-light-v007/3", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "sh040-light-v007", Unit: "3", Grant: "job"}}
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/show-a/sh040-light-v007/needs/7/withdraw?as=unit", strings.NewReader(`{"why": "moot"}`)))
+	if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "only a person may withdraw") {
+		t.Errorf("a unit withdraws a sibling's question: %d %s", w.Code, w.Body.String())
+	}
 	for _, c := range []struct {
 		unit, body string
 		want       int

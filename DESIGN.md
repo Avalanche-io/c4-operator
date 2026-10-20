@@ -1770,7 +1770,7 @@ and a sweep planner that spawns trials are all generators.
     wait by a member of the party (a `c4:party:<name>` group, or the
     party a tracker maps), an `agent:` wait by that agent. An agent never
     decides a wait that does not name it, and a unit never decides a
-    person's wait or supplies another unit's question. Deciding for
+    person's wait or supplies or withdraws another unit's question. Deciding for
     someone else is standing in: `decide.standIn` is a farm security key,
     `deny` by default (`--decide-stand-in`); only under a farm at `allow`
     may a project allow it (Project `spec.work.policy.values`), and then
