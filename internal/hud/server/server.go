@@ -4,8 +4,8 @@
 // the metrics of the node daemons and the regional tier. It runs in the
 // manager, next to the queue.
 //
-// Viewers: a bearer token (TokenReview), or headers from a trusted SSO
-// proxy, or, in development only, ?as= with configured viewers. A viewer
+// Viewers: a bearer token (TokenReview), or headers from an SSO proxy
+// that proves itself with a shared secret, or, in development only, ?as= with configured viewers. A viewer
 // sees the projects whose namespaces it may list WorkJobs in
 // (SubjectAccessReview). Controls are checked with a SubjectAccessReview
 // for the write they make, made by the HUD's service account, and recorded
@@ -14,6 +14,7 @@ package server
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,6 +32,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/imageref"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
@@ -80,8 +82,12 @@ type Server struct {
 	// TrustProxy reads X-Forwarded-User and X-Forwarded-Groups from an
 	// SSO proxy in front of the HUD.
 	TrustProxy bool
-	Namespace  string // the operator's namespace
-	Log        logr.Logger
+	// ProxySecret is what the proxy sends in ProxySecretHeader on every
+	// request; with TrustProxy, a request whose X-Forwarded-User comes
+	// without it is refused.
+	ProxySecret []byte
+	Namespace   string // the operator's namespace
+	Log         logr.Logger
 	// Signer signs a control record for each action a person or agent
 	// takes through the HUD or MCP; nil signs none.
 	Signer *provenance.Signer
@@ -213,7 +219,30 @@ func (s *Server) Handler() http.Handler {
 		w.Header().Set("Cache-Control", "no-cache")
 		files.ServeHTTP(w, r)
 	}))
-	return mux
+	return s.proxyGuard(mux)
+}
+
+// proxyGuard lets X-Forwarded-User and X-Forwarded-Groups through only on
+// a request that carries the proxy's secret, and refuses one that names a
+// viewer without it: whoever reaches the HUD past the proxy could
+// otherwise sign in as anyone. Without TrustProxy the headers mean
+// nothing and are dropped. The secret itself goes no further.
+func (s *Server) proxyGuard(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secret := r.Header.Get(ProxySecretHeader)
+		r.Header.Del(ProxySecretHeader)
+		named := r.Header.Get("X-Forwarded-User") != "" || r.Header.Get("X-Forwarded-Groups") != ""
+		switch {
+		case !named:
+		case !s.TrustProxy:
+			r.Header.Del("X-Forwarded-User")
+			r.Header.Del("X-Forwarded-Groups")
+		case len(s.ProxySecret) == 0 || subtle.ConstantTimeCompare([]byte(secret), s.ProxySecret) != 1:
+			http.Error(w, "X-Forwarded-User came without the SSO proxy's secret: sign in through the proxy", http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // Start collects the farm's state once a second until ctx ends. It runs
@@ -241,6 +270,9 @@ func (s *Server) Start(ctx context.Context) error {
 
 // NeedLeaderElection lets every replica serve the HUD.
 func (s *Server) NeedLeaderElection() bool { return false }
+
+// ProxySecretHeader carries the SSO proxy's shared secret (ProxySecret).
+const ProxySecretHeader = "X-C4-Proxy-Secret"
 
 var errUnauthenticated = errors.New("sign in: send a bearer token, or reach the HUD through the SSO proxy")
 
@@ -274,12 +306,19 @@ func (s *Server) viewer(r *http.Request) (*api.Viewer, error) {
 			// A unit's own token (tools.go in the queue).
 			return s.unitViewer(r.Context(), tok)
 		}
+		// A token minted for the HUD alone is reviewed at the HUD's
+		// audience, which the API server would refuse it for; any other
+		// (a person's sign-in) at the API server's own.
+		var aud []string
+		if claimsAudience(tok, c4v1.HUDAPIAudience) {
+			aud = []string{c4v1.HUDAPIAudience}
+		}
 		tr, err := s.Kube.AuthenticationV1().TokenReviews().Create(r.Context(),
-			&authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: tok}}, metav1.CreateOptions{})
+			&authnv1.TokenReview{Spec: authnv1.TokenReviewSpec{Token: tok, Audiences: aud}}, metav1.CreateOptions{})
 		if err != nil {
 			return nil, err
 		}
-		if !tr.Status.Authenticated {
+		if !tr.Status.Authenticated || (aud != nil && !slices.Contains(tr.Status.Audiences, c4v1.HUDAPIAudience)) {
 			return nil, errUnauthenticated
 		}
 		user, groups = tr.Status.User.Username, tr.Status.User.Groups

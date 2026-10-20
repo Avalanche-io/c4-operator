@@ -42,7 +42,14 @@ keeps it legible.
 
 The real backend identifies the viewer from a bearer token (TokenReview), or
 from `X-Forwarded-User` and `X-Forwarded-Groups` set by an SSO proxy in front
-of it (`--hud-trust-proxy`). A viewer sees the projects with a namespace where
+of it (`--hud-trust-proxy`). The proxy proves itself on every request with a
+shared secret in `X-C4-Proxy-Secret` (`--hud-proxy-secret-file`). A request
+that names a viewer in those headers without the secret gets 401. A token
+whose audience is `c4.avalanche.io/hud-api` is reviewed at that audience.
+Mint one with `kubectl create token NAME --audience c4.avalanche.io/hud-api`,
+or project it into a pod. The API server refuses such a token, so a token
+sent to the HUD is no use anywhere else. Any other token is reviewed at the
+API server's own audience. A viewer sees the projects with a namespace where
 it may list WorkJobs (SubjectAccessReview, cached for a minute). The mock, and
 the real backend started with `--hud-dev-viewers` (tests and demos only), take
 `?as=artist` or `?as=wrangler` on any request instead, including the event

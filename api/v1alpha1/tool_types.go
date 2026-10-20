@@ -12,6 +12,11 @@ const LabelTool = "c4.avalanche.io/tool"
 // the HUD accepts it, the Kubernetes API does not.
 const HUDAudience = "c4.avalanche.io/hud"
 
+// HUDAPIAudience is the audience of a token a person or a farm client
+// (c4 farm, c4-sync, MCP) mints for the HUD alone: the HUD accepts it, the
+// Kubernetes API does not, so a token sent to the HUD is no use elsewhere.
+const HUDAPIAudience = "c4.avalanche.io/hud-api"
+
 // Tool is what a unit works with beyond its image: a configuration
 // (MCP server definitions, settings, skills, plugins) as a view, and what
 // the unit may reach on the network (DESIGN 10.6, tools). A unit

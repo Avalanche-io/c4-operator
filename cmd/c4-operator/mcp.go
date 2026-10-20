@@ -26,7 +26,7 @@ import (
 func runMCP(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
 	hud := fs.String("hud", env("C4_HUD", "http://127.0.0.1:30080"), "the HUD's address")
-	tokenFile := fs.String("token-file", "", "file holding the bearer token sent to the HUD (stdio mode; over HTTP each request's own token is used)")
+	tokenFile := fs.String("token-file", "", "file holding the bearer token sent to the HUD (stdio only; over HTTP each request sends its own, and one without is refused)")
 	as := fs.String("as", "", "development only: the viewer to ask as, on a HUD started with --hud-dev-viewers")
 	agent := fs.String("agent", "", "the agent's name; the farm's book records its controls as agent/NAME for the user")
 	addr := fs.String("http", "", "serve Streamable HTTP on this address instead of stdio")
@@ -50,14 +50,10 @@ func runMCP(args []string) error {
 	if *addr == "" {
 		return mcpserver.New(&mcpserver.Client{Base: *hud, Token: token, As: *as, Agent: *agent}).Run(ctx, &mcp.StdioTransport{})
 	}
-	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
-		c := &mcpserver.Client{Base: *hud, Token: token, As: *as, Agent: *agent}
-		if t, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-			c.Token = t
-		}
-		return mcpserver.New(c)
-	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
-	srv := &http.Server{Addr: *addr, Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	if token != "" {
+		return errors.New("--token-file is for stdio: over HTTP each request sends its own bearer token, and one without is refused")
+	}
+	srv := &http.Server{Addr: *addr, Handler: mcpHTTPHandler(*hud, *as, *agent), ReadHeaderTimeout: 10 * time.Second}
 	go func() {
 		<-ctx.Done()
 		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -68,6 +64,26 @@ func runMCP(args []string) error {
 		return err
 	}
 	return nil
+}
+
+// mcpHTTPHandler serves MCP over Streamable HTTP, each request as the
+// caller its bearer token names. A request without one is refused (401),
+// unless as names a development viewer, which only a HUD started with
+// development viewers accepts.
+func mcpHTTPHandler(hud, as, agent string) http.Handler {
+	h := mcp.NewStreamableHTTPHandler(func(r *http.Request) *mcp.Server {
+		t, _ := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		return mcpserver.New(&mcpserver.Client{Base: hud, Token: t, As: as, Agent: agent})
+	}, &mcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true})
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if as == "" && (!ok || strings.TrimSpace(t) == "") {
+			w.Header().Set("WWW-Authenticate", `Bearer realm="c4"`)
+			http.Error(w, "a bearer token is required: each request acts as the caller it names", http.StatusUnauthorized)
+			return
+		}
+		h.ServeHTTP(w, r)
+	})
 }
 
 // toolsMarkdown writes the tool reference from the tools themselves: it

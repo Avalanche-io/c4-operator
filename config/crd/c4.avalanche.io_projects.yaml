@@ -79,6 +79,34 @@ spec:
                   - tree
                   type: object
                 type: array
+              importers:
+                description: |-
+                  Importers are the service accounts that sign the project's import
+                  and ingest records (c4-operator import-git, ingest): the farm's
+                  certificate issuer certifies a workload only if a project names it
+                  here, in one of the project's namespaces. Any other workload's
+                  token is refused a certificate.
+                items:
+                  description: |-
+                    Importer names a service account that signs a project's import and
+                    ingest records.
+                  properties:
+                    namespace:
+                      description: Namespace is one of the project's namespaces.
+                      maxLength: 63
+                      minLength: 1
+                      type: string
+                    serviceAccount:
+                      description: ServiceAccount is the account's name.
+                      maxLength: 253
+                      minLength: 1
+                      type: string
+                  required:
+                  - namespace
+                  - serviceAccount
+                  type: object
+                maxItems: 64
+                type: array
               isolation:
                 default: Strict
                 description: Isolation modes.
@@ -91,7 +119,9 @@ spec:
                   Namespaces whose Materializations belong to this project. A
                   namespace belongs to at most one project.
                 items:
+                  maxLength: 63
                   type: string
+                maxItems: 256
                 minItems: 1
                 type: array
               root:
@@ -357,6 +387,10 @@ spec:
             - namespaces
             - store
             type: object
+            x-kubernetes-validations:
+            - message: an importer is a service account in one of the project's namespaces
+              rule: '!has(self.importers) || self.importers.all(i, i.namespace in
+                self.namespaces)'
           status:
             description: ProjectStatus reports validation.
             properties:

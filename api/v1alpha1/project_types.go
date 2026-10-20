@@ -103,10 +103,13 @@ type Grant struct {
 }
 
 // ProjectSpec defines a project.
+// +kubebuilder:validation:XValidation:rule="!has(self.importers) || self.importers.all(i, i.namespace in self.namespaces)",message="an importer is a service account in one of the project's namespaces"
 type ProjectSpec struct {
 	// Namespaces whose Materializations belong to this project. A
 	// namespace belongs to at most one project.
 	// +kubebuilder:validation:MinItems=1
+	// +kubebuilder:validation:MaxItems=256
+	// +kubebuilder:validation:items:MaxLength=63
 	Namespaces []string `json:"namespaces"`
 
 	// +kubebuilder:default=Strict
@@ -141,6 +144,39 @@ type ProjectSpec struct {
 	// +kubebuilder:validation:XValidation:rule="!(self + '/').contains('/./') && !(self + '/').contains('/../')",message="a project root is a clean path, without . or .."
 	// +optional
 	Root string `json:"root,omitempty"`
+
+	// Importers are the service accounts that sign the project's import
+	// and ingest records (c4-operator import-git, ingest): the farm's
+	// certificate issuer certifies a workload only if a project names it
+	// here, in one of the project's namespaces. Any other workload's
+	// token is refused a certificate.
+	// +kubebuilder:validation:MaxItems=64
+	// +optional
+	Importers []Importer `json:"importers,omitempty"`
+}
+
+// Importer names a service account that signs a project's import and
+// ingest records.
+type Importer struct {
+	// Namespace is one of the project's namespaces.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=63
+	Namespace string `json:"namespace"`
+	// ServiceAccount is the account's name.
+	// +kubebuilder:validation:MinLength=1
+	// +kubebuilder:validation:MaxLength=253
+	ServiceAccount string `json:"serviceAccount"`
+}
+
+// Imports reports whether the project names namespace/account among its
+// importers.
+func (s *ProjectSpec) Imports(namespace, account string) bool {
+	for _, i := range s.Importers {
+		if i.Namespace == namespace && i.ServiceAccount == account {
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultProjectRoot is where a project's trees mount when it sets no Root.

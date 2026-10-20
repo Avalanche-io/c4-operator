@@ -514,3 +514,46 @@ func TestUnitHoldsNoToken(t *testing.T) {
 		t.Fatalf("C4_NAMESPACE %q", envOf(p.Spec.Containers[0], "C4_NAMESPACE"))
 	}
 }
+
+// Nor does a template get one by projecting it: a unit that could project
+// a token for the signer could have its own output certified as a source,
+// and one with no audience is an API token. Other sources of a projected
+// volume stay, and a volume left with none stays mountable, empty.
+func TestUnitProjectsNoToken(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 2)
+	j := job(ns, "projected", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(time.Hour))
+	exp := int64(3600)
+	j.Spec.Template.Spec.ServiceAccountName = "default"
+	j.Spec.Template.Spec.Volumes = append(j.Spec.Template.Spec.Volumes,
+		corev1.Volume{Name: "signer", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{Sources: []corev1.VolumeProjection{
+			{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{Audience: "c4-signer", ExpirationSeconds: &exp, Path: "token"}}}}}},
+		corev1.Volume{Name: "mixed", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{Sources: []corev1.VolumeProjection{
+			{ServiceAccountToken: &corev1.ServiceAccountTokenProjection{ExpirationSeconds: &exp, Path: "api"}},
+			{DownwardAPI: &corev1.DownwardAPIProjection{Items: []corev1.DownwardAPIVolumeFile{{Path: "labels", FieldRef: &corev1.ObjectFieldSelector{FieldPath: "metadata.labels"}}}}}}}}})
+	if err := k8s.Create(context.Background(), j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	pods := unitPods(t, ns, "projected")
+	if len(pods) != 1 {
+		t.Fatalf("%d pods", len(pods))
+	}
+	seen := map[string]bool{}
+	for _, v := range pods[0].Spec.Volumes {
+		seen[v.Name] = true
+		if v.Projected == nil {
+			continue
+		}
+		for _, s := range v.Projected.Sources {
+			if s.ServiceAccountToken != nil {
+				t.Fatalf("volume %s projects a token (audience %q)", v.Name, s.ServiceAccountToken.Audience)
+			}
+		}
+		if v.Name == "mixed" && len(v.Projected.Sources) != 1 {
+			t.Fatalf("mixed keeps %d sources, want the downward API one", len(v.Projected.Sources))
+		}
+	}
+	if !seen["signer"] || !seen["mixed"] {
+		t.Fatalf("volumes %v: a stripped volume must stay so its mounts resolve", seen)
+	}
+}

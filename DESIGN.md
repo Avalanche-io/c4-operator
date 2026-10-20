@@ -805,6 +805,24 @@ node daemon serves it on `GET /units` to the operator's tier token alone
 (the `c4-manager` service account, audience `c4-tier`). Both ports are
 plain HTTP on the cluster network, as the tier API is.
 
+A workload's own credentials don't reach its units. A unit pod gets no
+automounted API token. The queue also removes every service-account token
+a job's template projects, so no unit can hold a token for the certificate
+issuer, or an API token. The only token a unit gets is the HUD token its
+tool grants. The issuer certifies a workload only if a Project names it
+among its `importers`. A node daemon is certified as the node its token is
+bound to. The manager's and the regional tier's accounts are refused. So
+the only identities whose import and ingest records verify as a project's
+sources are the accounts that project named.
+
+Every way into the HUD proves who is asking:
+- A bearer token is reviewed at the HUD's client audience
+  (`c4.avalanche.io/hud-api`) if it claims that audience, and at the API
+  server's own otherwise.
+- The SSO proxy's headers count only beside the proxy's shared secret.
+- MCP over HTTP refuses a request with no bearer token. It never serves a
+  request under a token the server was started with.
+
 ## 7. Very large clusters
 
 - **The control plane is not in the data path.** The controller resolves a
@@ -3050,7 +3068,10 @@ has an MCP tool with the same effect (section 13.2).
 - Authentication is a bearer token (an OIDC ID token or a service-account
   token) validated with TokenReview, or the user and groups an SSO proxy in
   front of the HUD sets (`X-Forwarded-User`, `X-Forwarded-Groups`, trusted
-  only with `--hud-trust-proxy`). A development mode (`--hud-dev-viewers`)
+  only with `--hud-trust-proxy`, and only on a request that carries the
+  proxy's shared secret, `X-C4-Proxy-Secret`). A client's token may be
+  minted for the HUD alone (audience `c4.avalanche.io/hud-api`), which the
+  API server refuses. A development mode (`--hud-dev-viewers`)
   takes the viewer from `?as=`; the e2e cluster uses it and nothing else
   should.
 - A viewer's scope is the set of projects whose namespaces the viewer may

@@ -1743,6 +1743,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	// annotations, and the HUD with a token a tool grants).
 	noToken := false
 	pod.Spec.AutomountServiceAccountToken = &noToken
+	dropProjectedTokens(&pod.Spec)
 	if pod.Spec.PriorityClassName == "" && q.pcReady {
 		pod.Spec.PriorityClassName = q.PriorityClass
 	}
@@ -1864,6 +1865,31 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		c.Resources.Limits[SlotResource] = qty
 	}
 	return pod
+}
+
+// dropProjectedTokens removes every service-account token a template
+// projects. A token for the signer would get the unit's own output
+// certified as a source, and one with no audience is an API token. A
+// projected volume keeps its other sources, and one left with none
+// becomes an empty directory, so its mounts still resolve. The HUD's
+// token, for units whose tool grants c4, is added after this.
+func dropProjectedTokens(spec *corev1.PodSpec) {
+	for i := range spec.Volumes {
+		pv := spec.Volumes[i].Projected
+		if pv == nil {
+			continue
+		}
+		kept := pv.Sources[:0]
+		for _, s := range pv.Sources {
+			if s.ServiceAccountToken == nil {
+				kept = append(kept, s)
+			}
+		}
+		pv.Sources = kept
+		if len(kept) == 0 {
+			spec.Volumes[i].VolumeSource = corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}
+		}
+	}
 }
 
 func notOnNodes(a *corev1.Affinity, nodes []string) *corev1.Affinity {

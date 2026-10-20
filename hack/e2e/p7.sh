@@ -55,15 +55,21 @@ k -n show-a create token ingest --audience c4-signer --duration 10m >"$TMP/token
 k -n show-b create token ingest --audience c4-signer --duration 10m >"$TMP/token-b"
 k -n show-a create token ingest --duration 10m >"$TMP/token-wrong-audience"
 k -n c4-system create token c4-regional --audience c4-signer --duration 10m >"$TMP/token-regional"
+k -n show-a create token default --audience c4-signer --duration 10m >"$TMP/token-unlisted"
+# Each project names the accounts that sign its imports and ingests.
+k patch project show-a --type=merge -p '{"spec":{"importers":[{"namespace":"show-a","serviceAccount":"ingest"}]}}' >/dev/null
+k patch project show-b --type=merge -p '{"spec":{"importers":[{"namespace":"show-b","serviceAccount":"ingest"}]}}' >/dev/null
 issue() { # TOKENFILE: the issuer's status for a request with that token
   curl -s -o "$TMP/issue.out" -w '%{http_code}' -X POST "$SIGNER/v1/certificate" -H "Authorization: Bearer $(cat "$1")" \
     -H 'Content-Type: application/json' -d '{"publicKey":"AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="}'
 }
 WRONG=$(issue "$TMP/token-wrong-audience")
 REGIONAL=$(issue "$TMP/token-regional")
+UNLISTED=$(issue "$TMP/token-unlisted")
 [ "$WRONG" = 403 ] || fail "a token for another audience got $WRONG"
 [ "$REGIONAL" = 403 ] || fail "the regional tier's token got $REGIONAL"
-record "The issuer refused a service account token minted for another audience ($WRONG) and the regional tier's own token ($REGIONAL: the regional tier signs nothing)."
+[ "$UNLISTED" = 403 ] || fail "an account no project names as an importer got $UNLISTED"
+record "The issuer refused a service account token minted for another audience ($WRONG), the regional tier's own token ($REGIONAL: the regional tier signs nothing) and an account no project names as an importer ($UNLISTED)."
 record ""
 
 log "a signed ingest"

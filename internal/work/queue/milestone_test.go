@@ -96,6 +96,28 @@ func TestProjectRootIsClean(t *testing.T) {
 	}
 }
 
+// A project's importers are accounts in its own namespaces: naming one
+// elsewhere is refused, so a project can't vouch for another's workload.
+func TestProjectImportersAreItsOwn(t *testing.T) {
+	ctx := context.Background()
+	store := c4v1.ProjectStore{Shards: []c4v1.StoreShard{{Name: "s0", URL: "file:///tmp/none"}}}
+	for i, c := range []struct {
+		ns string
+		ok bool
+	}{{"imp-own", true}, {"imp-elsewhere", false}} {
+		p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("imp-%d-%d", i, time.Now().UnixNano()%1e6)},
+			Spec: c4v1.ProjectSpec{Namespaces: []string{"imp-own"}, Store: store,
+				Importers: []c4v1.Importer{{Namespace: c.ns, ServiceAccount: "import-git"}}}}
+		err := k8s.Create(ctx, p)
+		if (err == nil) != c.ok {
+			t.Errorf("importer in %s: %v", c.ns, err)
+		}
+		if err == nil {
+			k8s.Delete(ctx, p)
+		}
+	}
+}
+
 // A job labelled with a Milestone's name joins it whatever the selector,
 // as a submission due at a milestone is; an empty selector picks no other.
 func TestMilestoneByLabel(t *testing.T) {

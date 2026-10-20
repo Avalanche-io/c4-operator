@@ -13,7 +13,9 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/auth"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
@@ -127,29 +129,16 @@ func publishRoot(ctx context.Context, kube kubernetes.Interface, ns string, cert
 	return []byte(bundle), nil
 }
 
-// issuerRunnable serves the certificate issuer on addr.
-func issuerRunnable(s *signing, kube kubernetes.Interface, namespace, addr string) everyReplica {
+// issuerRunnable serves the certificate issuer on addr. projects reads
+// the Projects that name importers (the manager's API reader).
+func issuerRunnable(s *signing, kube kubernetes.Interface, projects client.Reader, namespace, addr string) everyReplica {
 	rev := &auth.Reviewer{Client: kube, Tier: "signer"}
 	iss := &provenance.Issuer{CA: s.ca, Identify: func(ctx context.Context, token string) (string, time.Duration, error) {
 		id, err := rev.Review(ctx, token, AudienceSigner)
 		if err != nil {
 			return "", 0, err
 		}
-		switch {
-		case id.Namespace == "":
-			// People sign with their own keys through an OIDC-backed
-			// issuer (designed, DESIGN.md section 9.2); this issuer
-			// serves workloads.
-			return "", 0, fmt.Errorf("%s is not a service account", id.User)
-		case id.Namespace == namespace && id.Account == "c4-node":
-			if id.NodeName == "" {
-				return "", 0, errors.New("a node daemon's token must be bound to its pod (it names no node)")
-			}
-			return provenance.NodeIdentity(id.NodeName), 24 * time.Hour, nil
-		case id.Namespace == namespace && (id.Account == "c4-manager" || id.Account == "c4-regional"):
-			return "", 0, fmt.Errorf("%s does not sign records", id.User)
-		}
-		return provenance.ServiceAccountIdentity(id.Namespace, id.Account), time.Hour, nil
+		return signerIdentity(ctx, projects, id, namespace)
 	}}
 	return everyReplica(func(ctx context.Context) error {
 		hs := &http.Server{Addr: addr, Handler: iss, ReadHeaderTimeout: 10 * time.Second}
@@ -164,6 +153,37 @@ func issuerRunnable(s *signing, kube kubernetes.Interface, namespace, addr strin
 		}
 		return nil
 	})
+}
+
+// signerIdentity is the identity the issuer certifies a reviewed token's
+// account as, and for how long. A node daemon is certified as its node
+// for a day; a workload as itself for an hour, and only if a project
+// names it among its importers. Anything else is refused.
+func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identity, namespace string) (string, time.Duration, error) {
+	switch {
+	case id.Namespace == "":
+		// People sign with their own keys through an OIDC-backed
+		// issuer (designed, DESIGN.md section 9.2); this issuer
+		// serves workloads.
+		return "", 0, fmt.Errorf("%s is not a service account", id.User)
+	case id.Namespace == namespace && id.Account == "c4-node":
+		if id.NodeName == "" {
+			return "", 0, errors.New("a node daemon's token must be bound to its pod (it names no node)")
+		}
+		return provenance.NodeIdentity(id.NodeName), 24 * time.Hour, nil
+	case id.Namespace == namespace && (id.Account == "c4-manager" || id.Account == "c4-regional"):
+		return "", 0, fmt.Errorf("%s does not sign records", id.User)
+	}
+	var list c4v1.ProjectList
+	if err := projects.List(ctx, &list); err != nil {
+		return "", 0, fmt.Errorf("reading the projects' importers: %w", err)
+	}
+	for i := range list.Items {
+		if list.Items[i].Spec.Imports(id.Namespace, id.Account) {
+			return provenance.ServiceAccountIdentity(id.Namespace, id.Account), time.Hour, nil
+		}
+	}
+	return "", 0, fmt.Errorf("%s is not an importer of a project: a project names the accounts that sign its imports and ingests (spec.importers)", id.User)
 }
 
 // everyReplica runs on every manager replica, leader or not: the issuer

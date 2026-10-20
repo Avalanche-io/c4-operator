@@ -27,9 +27,12 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
-// forHUD reports whether a token says it is for the HUD (its aud claim):
-// a hint for which review to ask; the review decides.
-func forHUD(tok string) bool {
+// forHUD reports whether a token says it is a unit's, for the HUD (its
+// aud claim): a hint for which review to ask; the review decides.
+func forHUD(tok string) bool { return claimsAudience(tok, c4v1.HUDAudience) }
+
+// claimsAudience reports whether a token's aud claim names aud.
+func claimsAudience(tok, aud string) bool {
 	parts := strings.Split(tok, ".")
 	if len(parts) != 3 {
 		return false
@@ -46,10 +49,10 @@ func forHUD(tok string) bool {
 	}
 	var one string
 	if json.Unmarshal(claims.Aud, &one) == nil {
-		return one == c4v1.HUDAudience
+		return one == aud
 	}
 	var many []string
-	return json.Unmarshal(claims.Aud, &many) == nil && slices.Contains(many, c4v1.HUDAudience)
+	return json.Unmarshal(claims.Aud, &many) == nil && slices.Contains(many, aud)
 }
 
 // unitViewer is the unit whose pod token tok is, with its tool's grant.

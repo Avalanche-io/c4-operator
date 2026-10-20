@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"flag"
@@ -90,7 +91,8 @@ func runManager(args []string) error {
 	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process, comma-separated: kind-sim (tests), provisioning-request (Cluster Autoscaler); empty for an external provider")
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name[@role]=project|project;... (* for all projects; a name that is a role, such as wrangler, has that role)")
-	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
+	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD); needs --hud-proxy-secret-file")
+	hudProxySecret := fs.String("hud-proxy-secret-file", "", "a file holding the secret the SSO proxy sends in X-C4-Proxy-Secret on every request; a request naming a viewer without it is refused")
 	hudRoles := fs.String("hud-role-groups", "", "the studio's groups and the HUD roles they start their members at, as group=role,... (roles: artist, supervisor, producer, wrangler, farm-admin, facilities, pipeline-td); groups named c4:role:<role> need no entry")
 	singlePerson := fs.String("single-person-farm", "", "a local farm's installer, who plays every role there and may decide a wait addressed to any of them, recorded as standing in for that role; empty on a shared farm")
 	standIn := fs.String("decide-stand-in", "deny", "the farm's limit on deciding a person's wait for them (decide.standIn): deny, or allow so a project may choose (Project spec.work.policy)")
@@ -206,12 +208,16 @@ func runManager(args []string) error {
 		}
 	}
 	if *hudAddr != "" {
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
+		proxy, err := proxySecret(*hudProxy, *hudProxySecret)
+		if err != nil {
+			return err
+		}
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, proxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
 			return err
 		}
 	}
 	if sig.ca != nil && *signerAddr != "" {
-		if err := mgr.Add(issuerRunnable(sig, kube, *namespace, *signerAddr)); err != nil {
+		if err := mgr.Add(issuerRunnable(sig, kube, mgr.GetAPIReader(), *namespace, *signerAddr)); err != nil {
 			return err
 		}
 	}
@@ -255,7 +261,30 @@ type hudImages struct {
 	plain         []string
 }
 
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, roles, tz, namespace, tierToken, standIn, singlePerson string, images hudImages) error {
+// proxySecret reads the SSO proxy's secret: nil when the HUD trusts no
+// proxy. Trusting one without a secret is refused, since anyone who
+// reached the HUD past the proxy could then send its headers.
+func proxySecret(trust bool, file string) ([]byte, error) {
+	switch {
+	case !trust && file == "":
+		return nil, nil
+	case !trust:
+		return nil, errors.New("--hud-proxy-secret-file needs --hud-trust-proxy")
+	case file == "":
+		return nil, errors.New("--hud-trust-proxy needs --hud-proxy-secret-file: the secret the proxy sends in X-C4-Proxy-Secret, so headers from anyone else are refused")
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("--hud-proxy-secret-file: %w", err)
+	}
+	b = bytes.TrimSpace(b)
+	if len(b) < 16 {
+		return nil, errors.New("--hud-proxy-secret-file: the secret is shorter than 16 bytes")
+	}
+	return b, nil
+}
+
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy []byte, sites, roles, tz, namespace, tierToken, standIn, singlePerson string, images hudImages) error {
 	if standIn != "allow" && standIn != "deny" {
 		return fmt.Errorf("--decide-stand-in: allow or deny, not %q", standIn)
 	}
@@ -272,7 +301,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		return err
 	}
 	srv := &hudserver.Server{ImageRegistry: images.registry, ImageTag: images.tag, PlainRegistries: images.plain, Client: mgr.GetClient(), Kube: kube, Stores: stores, Web: web, Loc: loc,
-		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups, StandIn: standIn, SinglePerson: singlePerson,
+		TrustProxy: proxy != nil, ProxySecret: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups, StandIn: standIn, SinglePerson: singlePerson,
 		// What units report comes from the node daemons' /units, for the
 		// operator's tier token alone; their metrics need an API token
 		// the c4-metrics-reader role is bound to.

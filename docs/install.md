@@ -103,7 +103,9 @@ carry quotas per pool and a burst budget (`spec.work`).
 ## The HUD and the MCP server
 
 The HUD is served by the manager on port 8090 (Service `c4-hud`). Put an SSO
-proxy in front of it and start the manager with `--hud-trust-proxy`, or call
+proxy in front of it and start the manager with `--hud-trust-proxy` and
+`--hud-proxy-secret-file` (the proxy adds the secret as `X-C4-Proxy-Secret`
+on every request), or call
 it with Kubernetes bearer tokens; every viewer sees the projects whose
 namespaces they may list WorkJobs in, and every control is checked against
 their permissions. `--hud-dev-viewers` skips sign-in and is for local trials
@@ -217,7 +219,12 @@ with the queue in charge: see [Run work](#run-work). `kind delete cluster
   Secret in `c4-signing` that only the manager reads; in production the
   root key lives in a KMS or HSM and signs an intermediate for the manager.
 - **Sign in through your SSO.** Put an SSO proxy in front of the HUD and
-  start the manager with `--hud-trust-proxy`; never set `--hud-dev-viewers`.
+  start the manager with `--hud-trust-proxy` and `--hud-proxy-secret-file`;
+  never set `--hud-dev-viewers`. Mint client tokens for the HUD alone:
+  `kubectl create token NAME --audience c4.avalanche.io/hud-api`.
+- **Name each project's importers.** The certificate issuer certifies only
+  the service accounts a Project lists in `spec.importers`. Only their
+  import and ingest records verify as the project's sources.
 
 ## Uninstall
 
