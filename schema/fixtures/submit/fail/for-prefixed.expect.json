@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "for",
+      "message": "\"person:noor\": for names a party by its name alone",
+      "fix": "write for: noor"
+    }
+  ],
+  "schemaMentions": "for"
+}

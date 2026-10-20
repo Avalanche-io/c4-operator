@@ -21,7 +21,7 @@
       "additionalProperties": {"$ref": "#/$defs/treeSource"}
     },
     "tracker": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$", "description": "The tracker entity this is for: <tracker>/<type>/<id>."},
-    "for": {"type": "string", "pattern": "^person:\\S+$", "description": "The person a tracker or service submits for, so the jobs are theirs."},
+    "for": {"type": "string", "pattern": "^[^\\s:]+$", "description": "The party the jobs are for, by its name in the farm's party list (noor, petrelfinch): the person or organization they accrue to. A tracker or service submits for someone this way."},
     "note": {"type": "string", "description": "A line for the jobs' book."},
     "policy": {"$ref": "#/$defs/policy"},
     "jobs": {
