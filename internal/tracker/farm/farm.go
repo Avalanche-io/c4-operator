@@ -1,11 +1,7 @@
 // Package farm is c4-sync's side of the farm: the few things the sync loop
 // asks of C4, behind one interface. The real implementation calls the HUD
 // API as c4-sync's own identity, so every change c4-sync makes is checked,
-// signed and booked like a person's (internal/hud/API.md). Operator
-// primitives that are designed but not built (proposals/integrations
-// GAPS.md: Milestone, external refs, relayed decisions) are reached through
-// this interface in the shapes GAPS.md gives, so the loop does not change
-// when they land.
+// signed and booked like a person's (internal/hud/API.md).
 package farm
 
 import (
@@ -36,16 +32,15 @@ type JobRequest struct {
 	Namespace string
 	Name      string
 	Spec      c4v1.WorkJobSpec
-	// TrackerRef is <tracker>/<type>/<id> (GAPS 2). Carried by the job once
-	// the operator takes it; until then the TrackerLink holds the mapping.
+	// TrackerRef is <tracker>/<type>/<id>: the job carries it (annotation
+	// c4.avalanche.io/tracker-ref, label c4.avalanche.io/tracker) and its
+	// record names it.
 	TrackerRef string
-	Tracker    string
 	// Inputs are views the job mounts besides its spec's (a note it
 	// answers).
 	Inputs []api.SubmitInput
-	// Follows is the job this one is the next version of (GAPS 6). The
-	// operator has no field for it yet; the HUD client books it in the
-	// job's name only, and the TrackerLink keeps the chain.
+	// Follows is the job this one is the next version of (spec.follows,
+	// in its record too), so lineage links the versions.
 	Follows string
 }
 
@@ -68,15 +63,6 @@ type Relay struct {
 	Evidence []byte
 }
 
-// Milestone is a due date owned by a tracker, which jobs roll up to
-// (GAPS 1).
-type Milestone struct {
-	Namespace, Name string
-	Due             time.Time
-	Selector        map[string]string
-	Tracker, Ref    string
-}
-
 // Farm is what the sync loop asks of C4.
 type Farm interface {
 	// Submit creates the job, or finds it when it exists already: a
@@ -91,17 +77,12 @@ type Farm interface {
 	// StoreView stores files in the project's store as a view and returns
 	// its C4 ID.
 	StoreView(ctx context.Context, project string, files map[string][]byte) (string, error)
-	// EnsureMilestone creates or updates a Milestone (GAPS 1).
-	EnsureMilestone(ctx context.Context, m Milestone) error
 	// JobURL is the job's page in the HUD, for links written to trackers.
 	JobURL(j JobRef) string
 }
 
 // ErrNotFound is a job the farm does not have, or will not show.
 var ErrNotFound = errors.New("farm: not found")
-
-// ErrNotBuilt is an operator primitive that is designed but not built yet.
-var ErrNotBuilt = errors.New("farm: designed, not built in the operator yet")
 
 // ErrNotOpen is a decision for a wait that is not open (decided already,
 // or not open yet); the HUD answers 409.
@@ -207,7 +188,8 @@ func (h *HUD) Submit(ctx context.Context, r JobRequest) (JobRef, error) {
 	if err != nil {
 		return JobRef{}, err
 	}
-	in := api.SubmitRequest{Namespace: r.Namespace, Name: r.Name, Type: "tracker", Spec: spec, Inputs: r.Inputs}
+	in := api.SubmitRequest{Namespace: r.Namespace, Name: r.Name, Type: "tracker", Spec: spec, Inputs: r.Inputs,
+		TrackerRef: r.TrackerRef, Follows: r.Follows}
 	var out api.SubmitResponse
 	err = h.doJSON(ctx, http.MethodPost, "/jobs", in, &out)
 	var ae *APIError
@@ -309,8 +291,6 @@ func (h *HUD) StoreView(ctx context.Context, project string, files map[string][]
 	}
 	return out.View, nil
 }
-
-func (h *HUD) EnsureMilestone(context.Context, Milestone) error { return ErrNotBuilt }
 
 func (h *HUD) JobURL(j JobRef) string {
 	base := h.Public

@@ -123,7 +123,7 @@ type TrackerIntake struct {
 	// Match selects entities.
 	Match TrackerMatch `json:"match"`
 	// As is job (the entity becomes a WorkJob) or milestone (it becomes a
-	// Milestone that jobs roll up to; needs integrations GAPS 1).
+	// Milestone, whose due date the jobs it covers take).
 	// +kubebuilder:validation:Enum=job;milestone
 	As string `json:"as"`
 	// Job is the WorkJob spec a matched entity is submitted with. Its
@@ -136,6 +136,12 @@ type TrackerIntake struct {
 	// Review opens a wait for a person once the work is up for review.
 	// +optional
 	Review *TrackerReview `json:"review,omitempty"`
+	// Covers says which jobs a Milestone made by intake as milestone
+	// covers: job labels, each matching a field of the entity (label:
+	// field), so the date reaches every job submitted for it, not only
+	// jobs c4-sync makes. Flow: {c4.avalanche.io/shot: entity.name}.
+	// +optional
+	Covers map[string]string `json:"covers,omitempty"`
 	// Rework is what a rework decision does: inPlace (default: the job's
 	// units run again, as in CI and agent work) or nextVersion (a new job
 	// follows this one with the note as an input, as v008 follows v007 in
@@ -168,13 +174,15 @@ type TrackerDeadline struct {
 	// +optional
 	Field string `json:"field,omitempty"`
 	// DateOnlyAt is the local time ("18:00") a due date that carries no
-	// time of day means, in TZ (integrations GAPS 10). Without it such a
-	// due date is not guessed at: the job gets a suggested deadline.
+	// time of day means, in TimeZone. Without it such a due date falls at
+	// the project's due time (Project spec.work.dueTime; 18:00 UTC without
+	// one), as the farm reads a date sent to it.
+	// +kubebuilder:validation:Pattern=`^([01][0-9]|2[0-3]):[0-5][0-9]$`
 	// +optional
 	DateOnlyAt string `json:"dateOnlyAt,omitempty"`
-	// TZ is an IANA zone for DateOnlyAt.
+	// TimeZone is an IANA zone for DateOnlyAt (default UTC).
 	// +optional
-	TZ string `json:"tz,omitempty"`
+	TimeZone string `json:"timeZone,omitempty"`
 }
 
 // TrackerReview is the wait a person serves in the tracker.

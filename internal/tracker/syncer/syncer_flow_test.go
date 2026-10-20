@@ -12,6 +12,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
@@ -79,7 +80,7 @@ func setupFlow(t *testing.T, opts ...func(*fake.ClientBuilder)) *flowEnv {
 				Match:    c4v1.TrackerMatch{Type: "Task", Fields: map[string]string{"sg_status_list": "rdy", "step.Step.short_name": "LGT"}},
 				As:       "job",
 				Job:      &c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1001-1240"}},
-				Deadline: c4v1.TrackerDeadline{DateOnlyAt: "14:00", TZ: "America/Los_Angeles"},
+				Deadline: c4v1.TrackerDeadline{DateOnlyAt: "14:00", TimeZone: "America/Los_Angeles"},
 				Review:   &c4v1.TrackerReview{Wait: "dailies"},
 				Rework:   "nextVersion",
 			}},
@@ -419,5 +420,82 @@ func TestFlowNextVersionSurvivesAFailedLinkMove(t *testing.T) {
 	}
 	if n := len(e.farm.Submitted); n != 2 || len(e.farm.Relays) != 1 {
 		t.Fatalf("submitted %d jobs and relayed %d decisions; want 2 and 1", n, len(e.farm.Relays))
+	}
+}
+
+// A Task taken as a milestone becomes a Milestone covering every job of
+// its shot, whoever submits them, due at the project's due time on the
+// Task's date; a moved date moves it. No job is submitted.
+func TestFlowMilestoneCoversTheShot(t *testing.T) {
+	proj := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Namespaces: []string{ns},
+		Work: &c4v1.ProjectWork{DueTime: &c4v1.DueTime{At: "18:00", TimeZone: "America/Los_Angeles"}}}}
+	e := setupFlow(t, func(b *fake.ClientBuilder) { b.WithObjects(proj) })
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	tr.Spec.Intake[0].As = "milestone"
+	tr.Spec.Intake[0].Job = nil
+	tr.Spec.Intake[0].Deadline = c4v1.TrackerDeadline{}
+	tr.Spec.Intake[0].Covers = map[string]string{c4v1.LabelShot: "entity.name"}
+	if err := e.k8s.Update(context.Background(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	if len(e.farm.Submitted) != 0 {
+		t.Fatalf("milestone intake submitted %d jobs", len(e.farm.Submitted))
+	}
+	loc, _ := time.LoadLocation("America/Los_Angeles")
+	at := func(d time.Time) time.Time {
+		y, m, dd := d.Date()
+		return time.Date(y, m, dd, 18, 0, 0, 0, loc)
+	}
+	name := "flow-task-" + strconv.Itoa(e.task.ID)
+	m := func() *c4v1.Milestone {
+		var m c4v1.Milestone
+		if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: name}, &m); err != nil {
+			t.Fatal(err)
+		}
+		return &m
+	}
+	got := m()
+	if !got.Spec.Due.Time.Equal(at(e.due)) || got.Spec.Selector.MatchLabels[c4v1.LabelShot] != "sh040" || len(got.Spec.Selector.MatchLabels) != 1 ||
+		got.Spec.Source == nil || got.Spec.Source.Tracker != "flow" || got.Spec.Source.Ref != "Task/"+strconv.Itoa(e.task.ID) ||
+		len(got.OwnerReferences) != 1 || got.OwnerReferences[0].Name != "flow" {
+		t.Fatalf("milestone: %+v", got)
+	}
+
+	e.clock.add(time.Minute)
+	newDue := e.due.AddDate(0, 0, 2)
+	e.site.Set(e.task, map[string]any{"due_date": newDue.Format("2006-01-02")}, e.dana)
+	e.pass()
+	if got := m(); !got.Spec.Due.Time.Equal(at(newDue)) {
+		t.Fatalf("due %s, want %s", got.Spec.Due, at(newDue))
+	}
+}
+
+// A milestone rule that names no covers would cover nothing: the Tracker
+// says so, and no Milestone is made.
+func TestFlowMilestoneNeedsCovers(t *testing.T) {
+	e := setupFlow(t)
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	tr.Spec.Intake[0].As = "milestone"
+	if err := e.k8s.Update(context.Background(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	c := meta.FindStatusCondition(tr.Status.Conditions, syncer.CondIntake)
+	if c == nil || c.Reason != "MilestoneCoversNothing" {
+		t.Fatalf("condition: %+v", c)
+	}
+	var ms c4v1.MilestoneList
+	if err := e.k8s.List(context.Background(), &ms); err != nil || len(ms.Items) != 0 {
+		t.Fatalf("milestones: %d (%v)", len(ms.Items), err)
 	}
 }

@@ -113,27 +113,39 @@ spec:
                     as:
                       description: |-
                         As is job (the entity becomes a WorkJob) or milestone (it becomes a
-                        Milestone that jobs roll up to; needs integrations GAPS 1).
+                        Milestone, whose due date the jobs it covers take).
                       enum:
                       - job
                       - milestone
                       type: string
+                    covers:
+                      additionalProperties:
+                        type: string
+                      description: |-
+                        Covers says which jobs a Milestone made by intake as milestone
+                        covers: job labels, each matching a field of the entity (label:
+                        field), so the date reaches every job submitted for it, not only
+                        jobs c4-sync makes. Flow: {c4.avalanche.io/shot: entity.name}.
+                      type: object
                     deadline:
                       description: Deadline says where the deadline comes from.
                       properties:
                         dateOnlyAt:
                           description: |-
                             DateOnlyAt is the local time ("18:00") a due date that carries no
-                            time of day means, in TZ (integrations GAPS 10). Without it such a
-                            due date is not guessed at: the job gets a suggested deadline.
+                            time of day means, in TimeZone. Without it such a due date falls at
+                            the project's due time (Project spec.work.dueTime; 18:00 UTC without
+                            one), as the farm reads a date sent to it.
+                          pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
                           type: string
                         field:
                           description: |-
                             Field names the due date (github: milestone.due_on). Empty uses the
                             adapter's default.
                           type: string
-                        tz:
-                          description: TZ is an IANA zone for DateOnlyAt.
+                        timeZone:
+                          description: TimeZone is an IANA zone for DateOnlyAt (default
+                            UTC).
                           type: string
                       type: object
                     job:

@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"net/http"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
@@ -394,9 +396,10 @@ func (s *Syncer) intake(ctx context.Context, t *c4v1.Tracker, c *conn, links []*
 }
 
 // Deadline turns a tracker due date into a deadline. A date with no time
-// of day becomes the rule's local time on that date; without one it is
-// not guessed at, and the job gets the farm's suggestion instead.
-func Deadline(d *tracker.Due, rule c4v1.TrackerDeadline) (*time.Time, string, error) {
+// of day falls at the rule's local time on that date, else at the
+// project's due time (conv, Project spec.work.dueTime; 18:00 UTC when
+// nil), as the farm reads a date sent to it.
+func Deadline(d *tracker.Due, rule c4v1.TrackerDeadline, conv *c4v1.DueTime) (*time.Time, string, error) {
 	if d == nil {
 		return nil, "no due date", nil
 	}
@@ -404,28 +407,37 @@ func Deadline(d *tracker.Due, rule c4v1.TrackerDeadline) (*time.Time, string, er
 		t := d.At.UTC()
 		return &t, "", nil
 	}
-	if rule.DateOnlyAt == "" {
-		return nil, "the due date has no time of day and the rule names none (dateOnlyAt)", nil
+	if rule.DateOnlyAt != "" {
+		conv = &c4v1.DueTime{At: rule.DateOnlyAt, TimeZone: rule.TimeZone}
 	}
-	loc := time.UTC
-	if rule.TZ != "" {
-		l, err := time.LoadLocation(rule.TZ)
-		if err != nil {
-			return nil, "", fmt.Errorf("intake tz: %w", err)
-		}
-		loc = l
-	}
-	hm, err := time.Parse("15:04", rule.DateOnlyAt)
+	at, err := conv.DueOn(d.At.UTC().Format("2006-01-02"))
 	if err != nil {
-		return nil, "", fmt.Errorf("intake dateOnlyAt %q: want HH:MM", rule.DateOnlyAt)
+		return nil, "", fmt.Errorf("intake deadline: %w", err)
 	}
-	y, m, dd := d.At.UTC().Date()
-	at := time.Date(y, m, dd, hm.Hour(), hm.Minute(), 0, 0, loc).UTC()
+	at = at.UTC()
 	return &at, "", nil
 }
 
+// deadline is Deadline under the due-time convention of the project that
+// owns ns.
+func (s *Syncer) deadline(ctx context.Context, ns string, d *tracker.Due, rule c4v1.TrackerDeadline) (*time.Time, string, error) {
+	var conv *c4v1.DueTime
+	if d != nil && d.DateOnly && rule.DateOnlyAt == "" {
+		var ps c4v1.ProjectList
+		if err := s.Client.List(ctx, &ps); err != nil {
+			return nil, "", fmt.Errorf("reading the project's due time: %w", err)
+		}
+		for _, p := range ps.Items {
+			if slices.Contains(p.Spec.Namespaces, ns) && p.Spec.Work != nil {
+				conv = p.Spec.Work.DueTime
+			}
+		}
+	}
+	return Deadline(d, rule, conv)
+}
+
 func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule c4v1.TrackerIntake, it tracker.Item, l *c4v1.TrackerLink) error {
-	due, why, err := Deadline(it.Due, rule.Deadline)
+	due, why, err := s.deadline(ctx, t.Namespace, it.Due, rule.Deadline)
 	if err != nil {
 		return err
 	}
@@ -434,15 +446,7 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 		if due == nil {
 			return nil
 		}
-		err := s.Farm.EnsureMilestone(ctx, farm.Milestone{Namespace: t.Namespace, Name: LinkName(t.Name, it.Ref),
-			Due: *due, Tracker: t.Name, Ref: it.Ref.String(),
-			Selector: map[string]string{c4v1.LabelTracker: t.Name}})
-		if errors.Is(err, farm.ErrNotBuilt) {
-			s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "MilestoneNotBuilt",
-				"intake as milestone needs the operator's Milestone (integrations GAPS 1)")
-			return nil
-		}
-		return err
+		return s.ensureMilestone(ctx, t, idx, rule, it, *due)
 	case "job":
 	default:
 		return fmt.Errorf("intake %d: as %q", idx, rule.As)
@@ -474,7 +478,7 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 		} else {
 			var err error
 			got, err = s.Farm.Submit(ctx, farm.JobRequest{Namespace: jr.Namespace, Name: jr.Name, Spec: spec,
-				Tracker: t.Name, TrackerRef: t.Name + "/" + it.Ref.String()})
+				TrackerRef: t.Name + "/" + it.Ref.String()})
 			if err != nil {
 				return fmt.Errorf("submitting %s for %s: %w", jr, it.Ref, err)
 			}
@@ -497,11 +501,44 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 	return s.followDue(ctx, l, rule, it)
 }
 
+// ensureMilestone keeps the entity's Milestone: its due date, covering
+// the jobs whose labels match the entity's fields (the rule's covers).
+// The Tracker owns it, so it goes when the Tracker does.
+func (s *Syncer) ensureMilestone(ctx context.Context, t *c4v1.Tracker, idx int, rule c4v1.TrackerIntake, it tracker.Item, due time.Time) error {
+	if len(rule.Covers) == 0 {
+		s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "MilestoneCoversNothing",
+			fmt.Sprintf("intake %d makes milestones but names no covers (job label: entity field)", idx))
+		return nil
+	}
+	sel := map[string]string{}
+	for label, field := range rule.Covers {
+		v := it.Fields[field]
+		if v == "" {
+			s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "MilestoneCoversNothing",
+				fmt.Sprintf("%s has no %s for the milestone's %s", it.Ref, field, label))
+			return nil
+		}
+		sel[label] = v
+	}
+	m := &c4v1.Milestone{ObjectMeta: metav1.ObjectMeta{Namespace: t.Namespace, Name: LinkName(t.Name, it.Ref)}}
+	_, err := controllerutil.CreateOrPatch(ctx, s.Client, m, func() error {
+		if m.Labels == nil {
+			m.Labels = map[string]string{}
+		}
+		m.Labels[c4v1.LabelTracker] = t.Name
+		m.Spec.Due = metav1.NewTime(due)
+		m.Spec.Selector = metav1.LabelSelector{MatchLabels: sel}
+		m.Spec.Source = &c4v1.MilestoneSource{Tracker: t.Name, Ref: it.Ref.String()}
+		return controllerutil.SetControllerReference(t, m, s.Client.Scheme())
+	})
+	return err
+}
+
 // followDue moves a link's job deadline when the tracker's due date moved,
 // while the job still follows tracking. A person who pinned another time
 // in the HUD wins; the link says so instead.
 func (s *Syncer) followDue(ctx context.Context, l *c4v1.TrackerLink, rule c4v1.TrackerIntake, it tracker.Item) error {
-	due, _, err := Deadline(it.Due, rule.Deadline)
+	due, _, err := s.deadline(ctx, l.Namespace, it.Due, rule.Deadline)
 	if err != nil || due == nil || l.Spec.Target.WorkJob == "" {
 		return err
 	}
@@ -970,7 +1007,7 @@ func (s *Syncer) nextVersion(ctx context.Context, t *c4v1.Tracker, l *c4v1.Track
 		spec.DeadlineMode = j.Objective.Mode
 	}
 	if _, err := s.Farm.Submit(ctx, farm.JobRequest{Namespace: l.Namespace, Name: name, Spec: spec, Inputs: inputs,
-		Follows: prev, Tracker: t.Name, TrackerRef: t.Name + "/" + l.Spec.Ref.Type + "/" + l.Spec.Ref.ID}); err != nil {
+		Follows: prev, TrackerRef: t.Name + "/" + l.Spec.Ref.Type + "/" + l.Spec.Ref.ID}); err != nil {
 		return fmt.Errorf("submitting %s after %s: %w", name, prev, err)
 	}
 	before := l.DeepCopy()

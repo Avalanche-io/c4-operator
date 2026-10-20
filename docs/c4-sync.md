@@ -81,7 +81,14 @@ namespace:
 Each Tracker says:
 - `intake`: which entities become jobs, and from what job spec;
 - `deadline`: how a date with no time of day becomes one, for example
-  14:00 in `America/Los_Angeles`, Flow's dailies;
+  `{dateOnlyAt: "14:00", timeZone: America/Los_Angeles}`, Flow's dailies.
+  Without it, a date falls at the project's due time (Project
+  `spec.work.dueTime`, 18:00 UTC without one), as the farm reads any date;
+- `as: milestone` with `covers`: instead of a job, the entity becomes a
+  Milestone that covers the jobs whose labels match its fields, whoever
+  submits them, for example `covers: {c4.avalanche.io/shot: entity.name}`
+  for a Flow Task's shot. Those jobs take its due date unless they have
+  their own;
 - `review.wait`: the job's wait that the tracker's decision serves;
 - `rework`: `inPlace` reruns units, the CI, agent and ML way;
   `nextVersion` makes v002 follow v001 with the note as an input view,
@@ -121,8 +128,10 @@ kubectl -n <ns> describe tracker <name>
 ```
 
 A Tracker reports `Ready`, `RateLimited` (with when it resumes) and
-`Intake`. Intake as a milestone needs the operator's Milestone, which is
-not built yet (`MilestoneNotBuilt`). A TrackerLink's status shows:
+`Intake` (`MilestoneCoversNothing` when a milestone rule names no
+`covers`, or an entity lacks a field it names). `kubectl get milestones`
+shows each Milestone's due date, how many jobs it covers and their worst
+risk. A TrackerLink's status shows:
 - the summary state last written;
 - what is under review;
 - each relayed or refused decision, with the reason;
@@ -145,10 +154,11 @@ See integrations/mlflow-c4/README.md.
 
 ## Limits
 
-- Experimental API; no Milestone, relayed-decision custody or `follows`
-  field in the operator yet (proposals/integrations GAPS 1, 3, 6). Until
-  then, a relayed decision's facts are in its note, and a version chain
-  is kept in its TrackerLink.
+- Experimental API. The jobs c4-sync submits carry their tracker
+  entity (`c4.avalanche.io/tracker-ref`) and the version they follow
+  (`spec.follows`), both in their records. A relayed decision's custody
+  (who decided, in which tracker) is not a field of the decision record
+  yet (proposals/integrations GAPS 3), so its facts are in its note.
 - One c4-sync replica: there is no leader election yet.
 - Tracker request limits are those each vendor publishes (GitHub's), or a
   conservative default (`rate`) where none are published (Flow).

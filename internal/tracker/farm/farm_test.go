@@ -27,6 +27,7 @@ type hud struct {
 	decided []map[string]any
 	nudges  []map[string]string
 	agent   []string
+	submits []api.SubmitRequest
 }
 
 // newHUD answers the HUD API routes c4-sync calls (internal/hud/API.md):
@@ -59,6 +60,7 @@ func newHUD(t *testing.T) *hud {
 			return
 		}
 		h.names[in.Name] = true
+		h.submits = append(h.submits, in)
 		w.WriteHeader(http.StatusCreated)
 		_ = json.NewEncoder(w).Encode(api.SubmitResponse{OK: true, Namespace: in.Namespace, Name: in.Name})
 	}))
@@ -109,15 +111,20 @@ func TestSubmitIsIdempotent(t *testing.T) {
 	h := newHUD(t)
 	f := client(h)
 	due := metav1.NewTime(time.Date(2026, 11, 2, 17, 0, 0, 0, time.UTC))
-	req := farm.JobRequest{Namespace: "work", Name: "gh-7", Spec: c4v1.WorkJobSpec{Class: "agent", Deadline: &due, DeadlineMode: "Tracking"}}
+	req := farm.JobRequest{Namespace: "work", Name: "gh-7-v002", Spec: c4v1.WorkJobSpec{Class: "agent", Deadline: &due, DeadlineMode: "Tracking"},
+		TrackerRef: "gh/Issue/7", Follows: "gh-7"}
 	for i := 0; i < 2; i++ {
 		ref, err := f.Submit(context.Background(), req)
-		if err != nil || ref != (farm.JobRef{Namespace: "work", Name: "gh-7"}) {
+		if err != nil || ref != (farm.JobRef{Namespace: "work", Name: "gh-7-v002"}) {
 			t.Fatalf("submit %d: %v %v", i, ref, err)
 		}
 	}
 	if h.agent[0] != "c4-sync" {
 		t.Fatalf("X-C4-Agent: %q", h.agent[0])
+	}
+	// The job carries the entity it was made for and the version it follows.
+	if s := h.submits[0]; s.TrackerRef != "gh/Issue/7" || s.Follows != "gh-7" || s.Type != "tracker" {
+		t.Fatalf("submitted: %+v", s)
 	}
 }
 
@@ -160,12 +167,6 @@ func TestSetDeadlineSendsTheDeadlineAlone(t *testing.T) {
 	}
 	if len(h.nudges[0]) != 1 || h.nudges[0]["deadline"] != "2026-11-03T08:00:00Z" {
 		t.Fatalf("nudge: %v", h.nudges[0])
-	}
-}
-
-func TestMilestoneNotBuilt(t *testing.T) {
-	if err := client(newHUD(t)).EnsureMilestone(context.Background(), farm.Milestone{}); !errors.Is(err, farm.ErrNotBuilt) {
-		t.Fatalf("want ErrNotBuilt, got %v", err)
 	}
 }
 

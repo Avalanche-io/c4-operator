@@ -280,7 +280,7 @@ spec:
   intake:
   - match: {type: Task, fields: {sg_status_list: rdy, step.Step.short_name: LGT}}
     as: job
-    deadline: {dateOnlyAt: "14:00", tz: America/Los_Angeles}
+    deadline: {dateOnlyAt: "14:00", timeZone: America/Los_Angeles}
     review: {wait: dailies}
     rework: nextVersion
     job:

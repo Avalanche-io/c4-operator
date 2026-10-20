@@ -17,17 +17,13 @@ import (
 
 // Farm is the fake.
 type Farm struct {
-	mu         sync.Mutex
-	Now        func() time.Time
-	jobs       map[string]*api.Job
-	Submitted  []farm.JobRequest
-	Relays     []farm.Relay
-	Deadlines  []time.Time
-	Milestones []farm.Milestone
-	Views      map[string]map[string][]byte
-	// MilestonesBuilt makes EnsureMilestone succeed; by default it answers
-	// ErrNotBuilt, as the operator does today.
-	MilestonesBuilt bool
+	mu        sync.Mutex
+	Now       func() time.Time
+	jobs      map[string]*api.Job
+	Submitted []farm.JobRequest
+	Relays    []farm.Relay
+	Deadlines []time.Time
+	Views     map[string]map[string][]byte
 }
 
 // New makes an empty farm.
@@ -135,16 +131,6 @@ func (f *Farm) StoreView(_ context.Context, project string, files map[string][]b
 	id := fmt.Sprintf("c4view%03d", len(f.Views)+1)
 	f.Views[id] = files
 	return id, nil
-}
-
-func (f *Farm) EnsureMilestone(_ context.Context, m farm.Milestone) error {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	if !f.MilestonesBuilt {
-		return farm.ErrNotBuilt
-	}
-	f.Milestones = append(f.Milestones, m)
-	return nil
 }
 
 func (f *Farm) JobURL(j farm.JobRef) string {

@@ -2,7 +2,9 @@
 # each project grants it its own Tracker's credential Secrets by name, in
 # its own namespace (config/samples/tracker-github/role.yaml). It changes
 # jobs only through the HUD API, as its own identity, so the HUD checks
-# and books every change.
+# and books every change. The one farm object it writes itself is a
+# Milestone, a tracker's date that jobs take (intake as milestone), owned
+# by its Tracker.
 apiVersion: v1
 kind: ServiceAccount
 metadata:
@@ -23,6 +25,13 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [trackers/status, trackerlinks/status]
   verbs: [get, patch, update]
+- apiGroups: [c4.avalanche.io]
+  resources: [milestones]
+  verbs: [get, list, create, patch, update]
+# A project's due time (spec.work.dueTime), for due dates with no time.
+- apiGroups: [c4.avalanche.io]
+  resources: [projects]
+  verbs: [get, list]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

@@ -469,36 +469,27 @@ func TestPinnedDeadlineDiverges(t *testing.T) {
 	}
 }
 
-// Intake as a milestone needs the operator's Milestone, which is not
-// built: the Tracker says so and nothing else happens.
-func TestMilestoneIntakeNotBuilt(t *testing.T) {
-	e := setup(t, func(tr *c4v1.Tracker) { tr.Spec.Intake[0].As = "milestone" })
-	e.pass()
-	c := meta.FindStatusCondition(e.tracker().Status.Conditions, syncer.CondIntake)
-	if c == nil || c.Reason != "MilestoneNotBuilt" {
-		t.Fatalf("condition: %+v", c)
-	}
-	if len(e.farm.Submitted) != 0 {
-		t.Fatal("milestone intake must not submit jobs")
-	}
-}
-
 func TestDeadline(t *testing.T) {
 	at := time.Date(2026, 11, 2, 7, 0, 0, 0, time.UTC)
+	la := &c4v1.DueTime{At: "18:00", TimeZone: "America/Los_Angeles"}
 	cases := []struct {
 		due  *tracker.Due
 		rule c4v1.TrackerDeadline
+		conv *c4v1.DueTime
 		want string
 		why  bool
 	}{
-		{nil, c4v1.TrackerDeadline{}, "", true},
-		{&tracker.Due{At: at}, c4v1.TrackerDeadline{}, "2026-11-02T07:00:00Z", false},
-		{&tracker.Due{At: at, DateOnly: true}, c4v1.TrackerDeadline{}, "", true},
-		{&tracker.Due{At: at, DateOnly: true}, c4v1.TrackerDeadline{DateOnlyAt: "18:00", TZ: "America/Los_Angeles"}, "2026-11-03T02:00:00Z", false},
-		{&tracker.Due{At: at}, c4v1.TrackerDeadline{DateOnlyAt: "14:00", TZ: "America/Los_Angeles"}, "2026-11-02T22:00:00Z", false},
+		{nil, c4v1.TrackerDeadline{}, nil, "", true},
+		{&tracker.Due{At: at}, c4v1.TrackerDeadline{}, la, "2026-11-02T07:00:00Z", false},
+		// a date alone: the project's due time, else 18:00 UTC, as the farm reads one
+		{&tracker.Due{At: at, DateOnly: true}, c4v1.TrackerDeadline{}, nil, "2026-11-02T18:00:00Z", false},
+		{&tracker.Due{At: at, DateOnly: true}, c4v1.TrackerDeadline{}, la, "2026-11-03T02:00:00Z", false},
+		// the rule's time wins over the project's
+		{&tracker.Due{At: at, DateOnly: true}, c4v1.TrackerDeadline{DateOnlyAt: "18:00", TimeZone: "America/Los_Angeles"}, nil, "2026-11-03T02:00:00Z", false},
+		{&tracker.Due{At: at}, c4v1.TrackerDeadline{DateOnlyAt: "14:00", TimeZone: "America/Los_Angeles"}, &c4v1.DueTime{At: "09:00"}, "2026-11-02T22:00:00Z", false},
 	}
 	for i, c := range cases {
-		got, why, err := syncer.Deadline(c.due, c.rule)
+		got, why, err := syncer.Deadline(c.due, c.rule, c.conv)
 		if err != nil {
 			t.Fatalf("%d: %v", i, err)
 		}
@@ -510,8 +501,17 @@ func TestDeadline(t *testing.T) {
 			t.Errorf("%d: got %q %q, want %q", i, s, why, c.want)
 		}
 	}
-	if _, _, err := syncer.Deadline(&tracker.Due{At: at, DateOnly: true}, c4v1.TrackerDeadline{DateOnlyAt: "6pm"}); err == nil {
+	if _, _, err := syncer.Deadline(&tracker.Due{At: at, DateOnly: true}, c4v1.TrackerDeadline{DateOnlyAt: "6pm"}, nil); err == nil {
 		t.Error("a bad dateOnlyAt should be an error")
+	}
+}
+
+// The job c4-sync submits carries the issue it was made for.
+func TestSubmitCarriesTheTrackerRef(t *testing.T) {
+	e := setup(t)
+	e.pass()
+	if len(e.farm.Submitted) != 1 || e.farm.Submitted[0].TrackerRef != "gh/Issue/7" || e.farm.Submitted[0].Follows != "" {
+		t.Fatalf("submitted: %+v", e.farm.Submitted)
 	}
 }
 
