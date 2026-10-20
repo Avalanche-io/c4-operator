@@ -332,6 +332,16 @@ At that safe point the Stop hook runs `c4-unit wait` instead of
 - **When the person decides,** the next attempt resumes the session by its ID. The resume prompt says who decided what, with their note. It also says where the reply's files are: `$C4_REPLY` in a pod, or on a host the runner fetches the reply view into the unit directory's `reply/`.
 - **The farm doesn't open the wait, or the file is malformed.** The hook writes the reason as the block's next-part note, and the block is woken to decide for itself.
 
+### Steering a running block
+
+A person can message a running block (HUD steer, MCP `c4_steer`). The
+messages reach the unit's control directory. At the end of every turn
+that goes on, the Stop hook reads the new ones (`c4-unit steer`, which
+marks them seen) and keeps the session from stopping, with the messages
+as what to do next. So the block takes them into account in the same
+attempt. A turn the farm stops at reads none, and they wait for the
+attempt that resumes it.
+
 ## Blocks in containers, and sessions as views
 
 A block can run in a unit pod as well as on a host runner. Its session

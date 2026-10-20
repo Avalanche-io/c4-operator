@@ -187,8 +187,14 @@ func TestReorder(t *testing.T) {
 func readFile(p string) string { b, _ := os.ReadFile(p); return string(b) }
 
 // fakeUnit stands in for c4-unit: it records its arguments and exits with
-// $FAKE_UNIT_CODE (10 is "stop").
+// $FAKE_UNIT_CODE (10 is "stop"); steer prints $FAKE_STEER, the unread
+// messages (exit 1 when there are none), and is not recorded.
 const fakeUnit = `#!/bin/sh
+if [ "$1" = steer ]; then
+  [ -n "$FAKE_STEER" ] || exit 1
+  printf '%s\n' "$FAKE_STEER"
+  exit 0
+fi
 echo "$@" >> "$FAKE_UNIT_LOG"
 exit "${FAKE_UNIT_CODE:-0}"
 `
@@ -431,5 +437,48 @@ func TestHookAsk(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(filepath.Join(out, ".c4", "more")); !strings.Contains(string(b), "unknown field") {
 		t.Fatalf("malformed: the note is %q", b)
+	}
+}
+
+// At the end of a turn that goes on, the hook gives the session what
+// people sent it while it worked, keeping it from stopping; a turn the
+// farm stops leaves the messages for the attempt that resumes it.
+func TestHookSteer(t *testing.T) {
+	_, work := setup(t)
+	root := t.TempDir()
+	unit := filepath.Join(root, "c4-unit")
+	if err := os.WriteFile(unit, []byte(fakeUnit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(root, "out")
+	os.MkdirAll(filepath.Join(out, ".c4"), 0o755)
+	t.Setenv("C4_UNIT_BIN", unit)
+	t.Setenv("FAKE_UNIT_LOG", filepath.Join(root, "unit.log"))
+	t.Setenv("C4_PODINFO", filepath.Join(root, "annotations"))
+	t.Setenv("C4_OUTPUT", out)
+	if code, _, e := runCLI(t, "", "register", "--name", "lead", "--session", sid, "--cwd", work); code != 0 {
+		t.Fatalf("register: %d %s", code, e)
+	}
+	hook := `{"session_id":"` + sid + `","hook_event_name":"Stop"}`
+
+	// nothing new: the turn ends as it would
+	if _, stdout, _ := runCLI(t, hook, "checkpoint", "--hook"); stdout != "" {
+		t.Fatalf("no messages: %q", stdout)
+	}
+	// a message: the session carries on with it
+	t.Setenv("FAKE_STEER", "dana (2026-10-20T05:40:00Z): use the v3 plates")
+	_, stdout, _ := runCLI(t, hook, "checkpoint", "--hook")
+	var got struct {
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	if json.Unmarshal([]byte(stdout), &got) != nil || got.Decision != "block" || !strings.Contains(got.Reason, "use the v3 plates") {
+		t.Fatalf("a message: %q", stdout)
+	}
+	// the farm stops the turn: no message is delivered, so none is lost
+	t.Setenv("FAKE_UNIT_CODE", "10")
+	_, stdout, _ = runCLI(t, hook, "checkpoint", "--hook")
+	if strings.Contains(stdout, "v3 plates") || !strings.Contains(stdout, `"continue":false`) {
+		t.Fatalf("a stop: %q", stdout)
 	}
 }

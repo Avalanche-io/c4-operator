@@ -96,12 +96,36 @@ func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agen
 		}
 		out, _ := json.Marshal(map[string]any{"continue": false, "stopReason": why})
 		fmt.Fprintln(stdout, string(out))
+		return // its messages wait for the attempt that resumes it
 	case ask != nil:
 		// the farm did not open the wait: the block decides for itself
 		askRefused(out, strings.TrimSpace(said.String()), stderr)
 	case err != nil:
 		fmt.Fprintln(stderr, "c4-agent hook: c4-unit safepoint:", err)
 	}
+	hookSteer(ctx, bin, env, stdout, stderr)
+}
+
+// hookSteer delivers what people sent the unit while it worked (c4-unit
+// steer: the messages it has not seen, marked seen as they are read) at
+// the end of a turn that goes on: the hook keeps the session from stopping
+// and gives it the messages, so it takes them into account now rather
+// than when it next thinks to look. A turn the farm stops leaves them for
+// the attempt that resumes it.
+func hookSteer(ctx context.Context, bin string, env []string, stdout, stderr io.Writer) {
+	var msgs strings.Builder
+	cmd := exec.CommandContext(ctx, bin, "steer")
+	cmd.Stdout, cmd.Stderr = &msgs, stderr
+	cmd.Env = env
+	if cmd.Run() != nil || strings.TrimSpace(msgs.String()) == "" {
+		return // exit 1: nothing new
+	}
+	out, _ := json.Marshal(map[string]any{
+		"decision": "block",
+		"reason": "Messages for you arrived while you worked:\n" + strings.TrimSpace(msgs.String()) +
+			"\nTake them into account and carry on with your task, then end your turn as before.",
+	})
+	fmt.Fprintln(stdout, string(out))
 }
 
 // blockAsk is a block's question for a person, which it writes to its
