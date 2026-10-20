@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strconv"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,10 +59,15 @@ func TestMain(m *testing.M) {
 
 // farm makes nodes labeled for one pool and the Pool itself, in a fresh
 // namespace, and returns the namespace and a queue on a manual clock.
+// farmSeq numbers the farms the package's tests make.
+var farmSeq atomic.Int64
+
 func farm(t *testing.T, pool string, nodes, slots int) (string, *Queue, *time.Time) {
 	t.Helper()
 	ctx := context.Background()
-	ns := fmt.Sprintf("q-%d", time.Now().UnixNano()%1e9)
+	// a counter, not the clock alone: two farms made a whole number of
+	// seconds apart got one name
+	ns := fmt.Sprintf("q-%d-%d", farmSeq.Add(1), time.Now().UnixNano()%1e6)
 	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: ns}}); err != nil {
 		t.Fatal(err)
 	}

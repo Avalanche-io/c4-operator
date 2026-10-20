@@ -102,3 +102,60 @@ func TestTrainingYieldsToALateRender(t *testing.T) {
 		t.Fatalf("preempted %+v; gw010 %+v", d.Preempt, d.Jobs["gw010"])
 	}
 }
+
+// c4-onboarding's evening run: the training run is asked to yield for
+// gw010, and at its safe point the stop holds. Priced on the plan's share
+// (the slot this stop frees), gw010 looks on time and the stop withdrew
+// itself at every safe point; on the one slot it holds without it, 52
+// frames of 140 s end long after its deadline.
+func TestTimeSliceHoldsAtTheSafePoint(t *testing.T) {
+	render := job("gw010", "show", 51, 52*140.0/3600, 75*time.Minute)
+	render.Pools = []string{"gpu"}
+	render.RunningUnits, render.Running = runningUnits("gw010", "gpu", 1, t0.Add(-time.Minute))
+	render.RunningUnits[0].Remaining = 80 * time.Second
+	train := job("style-train", "show", 0, 4, 0)
+	train.Class, train.Pools = "ml", []string{"gpu"}
+	train.Runnable, train.RunnableTotal = nil, 0
+	train.RunningUnits, train.Running = runningUnits("style-train", "gpu", 1, t0.Add(-20*time.Minute))
+	train.RunningUnits[0].Remaining = 3 * time.Hour
+	train.Checkpoints = true
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "gpu", Slots: 2, Used: 2}}, Jobs: []Job{render, train}}
+	st := &State{}
+	d := Decide(s, st, DefaultConfig())
+	if len(d.Preempt) != 1 || d.Preempt[0].Unit != "style-train/r0" {
+		t.Fatalf("preempted %+v; gw010 %+v", d.Preempt, d.Jobs["gw010"])
+	}
+	// Seven minutes on, at the training run's next safe point.
+	s.Now = t0.Add(7 * time.Minute)
+	d = Decide(s, st, DefaultConfig())
+	pending, stop, why := st.Reconsider(s, d, "style-train/r0")
+	if !pending || !stop {
+		t.Fatalf("at the safe point: pending %v stop %v (%s); gw010 %+v", pending, stop, why, d.Jobs["gw010"])
+	}
+}
+
+// A job planned on a slot no unit frees in time and nothing stops for it
+// reports its finish on what it holds: gw010 behind a long unit that does
+// not checkpoint is late on its one slot, though its plan gives it two.
+func TestFinishPricedOnHeldSlots(t *testing.T) {
+	render := job("gw010", "show", 51, 52*140.0/3600, 75*time.Minute)
+	render.Pools = []string{"gpu"}
+	render.RunningUnits, render.Running = runningUnits("gw010", "gpu", 1, t0.Add(-time.Minute))
+	render.RunningUnits[0].Remaining = 80 * time.Second
+	other := job("sim", "show", 0, 4, 0)
+	other.Pools = []string{"gpu"}
+	other.Runnable, other.RunnableTotal = nil, 0
+	other.RunningUnits, other.Running = runningUnits("sim", "gpu", 1, t0.Add(-20*time.Minute))
+	other.RunningUnits[0].Remaining = 3 * time.Hour
+	other.Preemptible = false
+	s := Snapshot{Now: t0, Pools: []Pool{{Name: "gpu", Slots: 2, Used: 2}}, Jobs: []Job{render, other}}
+	g := Decide(s, &State{}, DefaultConfig()).Jobs["gw010"]
+	if !g.AtRisk || g.ETA90.Before(t0.Add(2*time.Hour)) {
+		t.Fatalf("on its one slot: %+v", g)
+	}
+	// The same unit, ending in a minute: the plan's second slot comes.
+	s.Jobs[1].RunningUnits[0].Remaining = time.Minute
+	if g := Decide(s, &State{}, DefaultConfig()).Jobs["gw010"]; g.AtRisk || g.ETA90.After(t0.Add(75*time.Minute)) {
+		t.Fatalf("with a slot ending in a minute: %+v", g)
+	}
+}

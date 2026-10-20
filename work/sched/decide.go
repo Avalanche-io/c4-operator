@@ -56,6 +56,7 @@ func Decide(s Snapshot, st *State, cfg Config) Decisions {
 	a.fair()
 	a.preempt()
 	a.burst()
+	a.heldPricing()
 	a.rank()
 	a.report()
 	return a.out

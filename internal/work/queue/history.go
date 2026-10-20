@@ -12,18 +12,26 @@ import (
 // render is the previous version of the same shot: in the stage 1
 // evidence its per-frame durations put the estimate at submission within
 // 12% of the truth, against 65% for farm-wide history. The queue keeps,
-// per project, shot, class and unit key (render pass), the durations of
-// the most recently finished job of that shot by axis value (frame), and
-// gives them to the next job of the shot as a profile
+// per project, shot, stage and job type (labels LabelStage and
+// LabelJobType), class and unit key (render pass), the durations of the
+// most recently finished job of that shot by axis value (frame), and
+// gives them to the next job of the same shot and stage as a profile
 // (estimate.SetProfile). The profiles come from WorkJobs the queue
 // already sees, so they survive a restart without storage of their own;
 // a deleted job's profile lasts until the queue restarts. History never
-// crosses projects.
+// crosses projects, and a shot's depth pass is never its lighting's
+// previous version.
 
 // maxProfiles bounds the profiles kept; the oldest go first.
 const maxProfiles = 10000
 
-type profileKey struct{ project, shot, class, key string }
+type profileKey struct{ project, shot, stage, kind, class, key string }
+
+// profileFor is the history key of a job's unit key.
+func profileFor(v *view, key string) profileKey {
+	l := v.job.Labels
+	return profileKey{v.project, l[c4v1.LabelShot], l[c4v1.LabelStage], l[c4v1.LabelJobType], v.job.Spec.Class, key}
+}
 
 type shotProfile struct {
 	finished time.Time
@@ -59,7 +67,7 @@ func (q *Queue) noteProfiles(v *view) {
 		q.profiles = map[profileKey]*shotProfile{}
 	}
 	for key, byAxis := range by {
-		k := profileKey{v.project, shot, v.job.Spec.Class, key}
+		k := profileFor(v, key)
 		if p := q.profiles[k]; p != nil && (p.uid == v.job.UID || p.finished.After(finished)) {
 			continue
 		}
@@ -88,7 +96,7 @@ func (q *Queue) shotProfiles(v *view) map[string]map[int]float64 {
 	}
 	plan := v.mem.plan
 	for _, u := range plan.Units {
-		p := q.profiles[profileKey{v.project, shot, v.job.Spec.Class, u.Key}]
+		p := q.profiles[profileFor(v, u.Key)]
 		if p == nil || p.uid == v.job.UID {
 			continue
 		}

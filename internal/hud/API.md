@@ -764,7 +764,9 @@ such job in the namespace; makes a Materialization for each input view
 adds `fromJob` inputs to `dependsOn`; sets the deadline mode to `Suggested`
 when the spec has no deadline; and stamps `c4.avalanche.io/owner` (the
 viewer), `c4.avalanche.io/submitted-via` (`hud` or `mcp`), and the labels
-`c4.avalanche.io/shot` and `c4.avalanche.io/job-type`. `aiUsage` becomes
+`c4.avalanche.io/shot`, `c4.avalanche.io/job-type` and
+`c4.avalanche.io/stage` (which, with the shot, key the shot history a job's
+estimate starts from). `aiUsage` becomes
 the job's `c4.avalanche.io/ai-usage` annotation. `trackerRef`
 (`<tracker>/<type>/<id>`) is the tracker entity the job is made for: it
 becomes the annotation `c4.avalanche.io/tracker-ref` and the label

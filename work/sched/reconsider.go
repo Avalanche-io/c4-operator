@@ -17,7 +17,12 @@ import "fmt"
 //     counting the other units already being stopped there;
 //   - a stop for another job (reclaim-nominal, restore-feasibility,
 //     guard-unit) holds while that job still waits for slots and is still
-//     at risk, and the pool has no free slots for it now;
+//     at risk, and the pool has no free slots for it now. At risk is
+//     priced on what that job holds without this unit (its running slots
+//     and the other stops pending for it), not on the plan's share, which
+//     counts the slot this stop would free: priced on the share, the job
+//     the stop is for looks on time, and the stop would withdraw itself
+//     at every safe point;
 //   - wrangler-suspend always holds.
 //
 // The caller cancels a stop that does not hold (CancelPreempt).
@@ -80,13 +85,40 @@ func (st *State) Reconsider(s Snapshot, d Decisions, unit string) (pending, stop
 	if forJob == nil || forJob.RunnableTotal == 0 {
 		return true, false, pp.forJob + " no longer waits for slots"
 	}
-	if js, ok := d.Jobs[pp.forJob]; ok && !js.AtRisk && pp.reason != ReasonReclaim {
-		return true, false, pp.forJob + " is on time again"
-	}
 	if free >= pp.slots {
 		return true, false, fmt.Sprintf("capacity returned in %s", pp.pool)
 	}
+	if js, ok := d.Jobs[pp.forJob]; ok && !js.AtRisk && pp.reason != ReasonReclaim && !st.lateWithout(s, js, forJob, unit) {
+		return true, false, pp.forJob + " is on time again"
+	}
 	return true, true, fmt.Sprintf("%s for %s, which still waits for slots", pp.reason, pp.forJob)
+}
+
+// lateWithout says whether job j (planned as js) misses its deadline on
+// what it holds without unit's slots: its running slots and the other
+// stops pending for it, at p90, max(W90/held, t_path).
+func (st *State) lateWithout(s Snapshot, js JobState, j *Job, unit string) bool {
+	if js.Deadline.IsZero() {
+		return false
+	}
+	held := 0
+	for _, n := range j.Running {
+		held += n
+	}
+	for id, o := range st.pending {
+		if id != unit && o.forJob == j.ID {
+			held += o.slots
+		}
+	}
+	w90 := j.Estimate.W90
+	if j.Estimate.W > w90 {
+		w90 = j.Estimate.W
+	}
+	finish := div(w90, float64(held))
+	if j.Estimate.TPath > finish {
+		finish = j.Estimate.TPath
+	}
+	return finish > js.Deadline.Sub(s.Now).Seconds()
 }
 
 // Pending is why a pending stop of a unit was asked, and the job it is

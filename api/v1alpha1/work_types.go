@@ -87,6 +87,10 @@ const (
 	// LabelJobType names the prebuilt job type a job was made from
 	// (render, usd, sim, comp, transcode, ci, lora, infer, ...).
 	LabelJobType = "c4.avalanche.io/job-type"
+	// LabelStage names the pipeline stage a job is (light, depth, comp,
+	// review, ...): with the shot and the job type it keys the shot
+	// history a job's estimate starts from.
+	LabelStage = "c4.avalanche.io/stage"
 	// AnnotationAcks on a WorkJob carries people's acknowledgements of
 	// units that need a person: a JSON list of WorkAckRequest, newest last.
 	// The queue carries out each request once (status.acked) and records

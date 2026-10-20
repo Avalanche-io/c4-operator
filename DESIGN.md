@@ -2269,6 +2269,17 @@ Burst decisions are cost-aware:
   projects' own prices: the overrun tail a calibrated 90th percentile leaves
   still costs more than the margin. Every margin burst passes the same
   economic rule, priced from the lateness the margin plans.
+- **What a job reports is priced on slots it can get.** The fluid plan gives
+  a job its share as though slots moved freely; they move only as units end
+  or are stopped. A job whose share is above what it holds (running,
+  released now, and being freed for it) has only that and its pools' free
+  slots until other jobs' units end and free the rest, soonest first; then
+  its share. It reports that finish when it is later than the plan's, and
+  is at risk when it passes the deadline. A unit with no estimate of its
+  time left, or released this decision, counts as ending now, and a job a
+  burst is planned for is left as planned. Shares and bursts are
+  unchanged: gw010 on one GPU slot, behind a training unit with three
+  hours left, reports itself late instead of on time on two.
 - **Bursts are topped up from what is left.** A job confined to a subset of
   its group's pools takes the more pessimistic of the two plans: the riskier
   plan's shortfall, but the smaller share. At that smaller share it needs
@@ -2436,7 +2447,10 @@ through the tiers instead of from the store.
     the scheduler reconsiders it: a hold-stop holds while the job is on
     hold; a capacity shrink while the pool is still over its slots; a stop
     for another job while that job still waits for slots, is still at
-    risk, and the pool has no free slots for it. A unit asked to stop for
+    risk, and the pool has no free slots for it. At risk is priced on what
+    that job holds without this unit, not on its planned share, which
+    counts the slot the stop frees: priced on the share, the job looks on
+    time and the stop would withdraw itself at every safe point. A unit asked to stop for
     another job that is nearly done (90%) goes on: stopping it would lose
     more than it frees. A stop that no longer holds is cancelled.
   - With no stop pending, the queue may move the unit if its class allows

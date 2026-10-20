@@ -194,7 +194,11 @@ func TestShotHistoryIsThePrior(t *testing.T) {
 	v2.Labels = map[string]string{c4v1.LabelShot: "sh100"}
 	other := job(ns, "sh200-v001", "render", "cpu-"+ns, map[string]string{"frames": "1001-1008", "estimateSeconds": "60"}, now.Add(time.Hour))
 	other.Labels = map[string]string{c4v1.LabelShot: "sh200"}
-	for _, j := range []*c4v1.WorkJob{v2, other} {
+	// The same shot's depth pass, another stage of the same class: the
+	// lighting is not its previous version.
+	depth := job(ns, "sh100-depth-v001", "render", "cpu-"+ns, map[string]string{"frames": "1001-1008", "estimateSeconds": "60"}, now.Add(time.Hour))
+	depth.Labels = map[string]string{c4v1.LabelShot: "sh100", c4v1.LabelStage: "depth", c4v1.LabelJobType: "infer"}
+	for _, j := range []*c4v1.WorkJob{v2, other, depth} {
 		if err := k8s.Create(ctx, j); err != nil {
 			t.Fatal(err)
 		}
@@ -204,5 +208,8 @@ func TestShotHistoryIsThePrior(t *testing.T) {
 	wo := get(t, ns, "sh200-v001").Status.Estimate.RemainingWork
 	if w2 < 7*240 || wo > 8*60+1 {
 		t.Fatalf("remaining work: next version %ds (want about %d from the last one), another shot %ds (want %d from its declaration)", w2, 8*240, wo, 8*60)
+	}
+	if wd := get(t, ns, "sh100-depth-v001").Status.Estimate.RemainingWork; wd > 8*60+1 {
+		t.Fatalf("the shot's depth pass took the lighting's history: %ds, want %d from its declaration", wd, 8*60)
 	}
 }

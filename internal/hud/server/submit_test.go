@@ -238,7 +238,7 @@ func TestSubmit(t *testing.T) {
 		t.Fatal(err)
 	}
 	if job.Annotations[c4v1.AnnotationOwner] != "maya" || job.Annotations[c4v1.AnnotationSubmittedVia] != "hud" ||
-		job.Labels[c4v1.LabelShot] != "sm0140" || job.Labels[c4v1.LabelJobType] != "render" {
+		job.Labels[c4v1.LabelShot] != "sm0140" || job.Labels[c4v1.LabelJobType] != "render" || job.Labels[c4v1.LabelStage] != "light" {
 		t.Fatalf("job metadata %v %v", job.Annotations, job.Labels)
 	}
 	if sc := job.Spec.Template.Spec.SecurityContext; sc == nil || sc.RunAsNonRoot == nil || !*sc.RunAsNonRoot {

@@ -700,6 +700,13 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		}
 		job.Labels[c4v1.LabelJobType] = body.Type
 	}
+	if body.Stage != "" {
+		if errs := validation.IsValidLabelValue(body.Stage); len(errs) > 0 {
+			fail(w, http.StatusBadRequest, "stage %q: %s", body.Stage, strings.Join(errs, "; "))
+			return
+		}
+		job.Labels[c4v1.LabelStage] = body.Stage
+	}
 	if body.AIUsage != nil {
 		raw, err := json.Marshal(body.AIUsage)
 		if err != nil {
