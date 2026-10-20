@@ -679,6 +679,20 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	custody, actor := CustodyDirect, actorOf(r, v)
+	standFor := ""
+	if body.Via == nil {
+		// Whom the wait names decides it, or someone the farm and the
+		// project let stand in (whomay.go); a relay checks the person its
+		// tracker maps instead.
+		var err error
+		if standFor, err = s.mayDecide(rec.project, wait.Server, deciderOf(r, v)); err != nil {
+			fail(w, http.StatusForbidden, "%v", err)
+			return
+		}
+		if standFor != "" {
+			custody = CustodyStandIn
+		}
+	}
 	if body.Via != nil {
 		grade, who, err := s.relayed(ctx, v, rec, wait, body.Via)
 		if err != nil {
@@ -742,6 +756,8 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	id, err := s.controlJob(ctx, r, v, rec, j, before, "decide", change, func(p *controlPredicate) {
 		p.Custody = custody
+		// Standing in, the record names both: for the person, by the actor.
+		p.For = standFor
 		if body.Via != nil {
 			// The decider is the tracker's person; who relayed it, and how
 			// the relay authenticated, is the rest of the record.
@@ -979,6 +995,12 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	if err := s.authorize(ctx, r, v, rec.job.Namespace, "patch", "workjobs", rec.job.Name); err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
+	// A unit's question is for a person, not for its job's other units
+	// (whomay.go).
+	if err := MayControl("supply", "", deciderOf(r, v)); err != nil {
 		fail(w, http.StatusForbidden, "%v", err)
 		return
 	}

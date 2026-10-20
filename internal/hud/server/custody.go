@@ -49,6 +49,9 @@ type controlPredicate struct {
 	// relayed-unattributed (by a party the tracker names, no person;
 	// internal/hud/API.md, Relayed decisions).
 	Custody string `json:"custody,omitempty"`
+	// For is the person a stand-in decided for (custody stand-in): the
+	// wait was theirs, the actor decided it (whomay.go).
+	For string `json:"for,omitempty"`
 	// Relay is where a relayed decision came from: the tracker, the
 	// entity, the tracker user, the C4 person and the evidence's C4 ID.
 	Relay any `json:"relay,omitempty"`

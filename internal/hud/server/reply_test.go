@@ -39,8 +39,8 @@ func TestDecideWithAReply(t *testing.T) {
 	since := metav1.NewTime(time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC))
 	rec.job.Status.UnitStates = map[string]string{"succeeded": "0-6", "waits": "7-8", "blocked": "9"}
 	rec.job.Status.Waits = []c4v1.WorkWait{
-		{Unit: 8, Name: "brief", Server: "person:owner", Ask: "what should the draft say?", Reply: true, Since: &since, Blocking: true},
-		{Unit: 7, Name: "ruling", Server: "person:owner", Since: &since, Blocking: true},
+		{Unit: 8, Name: "brief", Server: "person:dana", Ask: "what should the draft say?", Reply: true, Since: &since, Blocking: true},
+		{Unit: 7, Name: "ruling", Server: "person:dana", Since: &since, Blocking: true},
 	}
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)

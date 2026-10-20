@@ -222,8 +222,9 @@ spec:
                           type: string
                         quantile:
                           description: |-
-                            Quantile is the finish percentile a suggestion must meet, "0.8" by
-                            default ("0.9" suits deliveries).
+                            Quantile is the finish percentile a suggestion must meet, "0.95" by
+                            default (forecast.DefaultQuantile); a lower one, such as "0.8",
+                            suggests earlier deadlines that are missed more often.
                           type: string
                         round:
                           description: Round ("15m") and MinLead ("15m") shape achievable
@@ -304,6 +305,18 @@ spec:
                       LateCostPerHour prices an hour of lateness, so the scheduler can
                       weigh a burst against the lateness it prevents.
                     type: string
+                  policy:
+                    description: |-
+                      Policy sets the project's values of the farm's policy keys (such
+                      as decide.standIn), within the limits the farm sets.
+                    properties:
+                      values:
+                        additionalProperties:
+                          type: string
+                        description: Values by key. A value the farm's limit does
+                          not allow is ignored.
+                        type: object
+                    type: object
                   quotas:
                     description: |-
                       Quotas per pool, with Kueue's semantics: nominal slots are

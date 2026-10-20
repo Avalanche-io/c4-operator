@@ -5,6 +5,8 @@
 # through it) checks who may give each control, signs it and books it, so
 # it is the one place a control enters the farm. Anyone else with patch on
 # a WorkJob could otherwise decide a person's wait as any actor, unsigned.
+# The list of a job's control records is the HUD's too: no one else may
+# add a record to it, or drop one.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:
@@ -29,7 +31,8 @@ spec:
     expression: >-
       ['c4.avalanche.io/requeue', 'c4.avalanche.io/allow-nodes', 'c4.avalanche.io/acks',
        'c4.avalanche.io/decide', 'c4.avalanche.io/steer', 'c4.avalanche.io/supply',
-       'c4.avalanche.io/accept-validated', 'c4.avalanche.io/withdraw-needs']
+       'c4.avalanche.io/accept-validated', 'c4.avalanche.io/withdraw-needs',
+       'c4.avalanche.io/control-records']
   validations:
   - expression: >-
       variables.controls.all(k,

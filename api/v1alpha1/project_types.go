@@ -186,6 +186,10 @@ type ProjectWork struct {
 	// project's jobs, one per class.
 	// +optional
 	DeadlinePolicies []DeadlinePolicy `json:"deadlinePolicies,omitempty"`
+	// Policy sets the project's values of the farm's policy keys (such
+	// as decide.standIn), within the limits the farm sets.
+	// +optional
+	Policy *ProjectPolicy `json:"policy,omitempty"`
 	// DueTime is the time of day a date-only due date means (most
 	// trackers keep dates): 18:00 UTC when unset.
 	// +optional
@@ -219,6 +223,13 @@ type ProjectRecheck struct {
 	// MinInterval between two re-checks (10m).
 	// +optional
 	MinInterval *metav1.Duration `json:"minInterval,omitempty"`
+}
+
+// ProjectPolicy is a project's own values of the farm's policy keys.
+type ProjectPolicy struct {
+	// Values by key. A value the farm's limit does not allow is ignored.
+	// +optional
+	Values map[string]string `json:"values,omitempty"`
 }
 
 // DueTime is the project's convention for date-only due dates.
@@ -272,8 +283,9 @@ type DeadlinePolicy struct {
 	// Turnaround is a duration ("24h") for kind turnaround.
 	// +optional
 	Turnaround string `json:"turnaround,omitempty"`
-	// Quantile is the finish percentile a suggestion must meet, "0.8" by
-	// default ("0.9" suits deliveries).
+	// Quantile is the finish percentile a suggestion must meet, "0.95" by
+	// default (forecast.DefaultQuantile); a lower one, such as "0.8",
+	// suggests earlier deadlines that are missed more often.
 	// +optional
 	Quantile string `json:"quantile,omitempty"`
 	// Round ("15m") and MinLead ("15m") shape achievable deadlines.

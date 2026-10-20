@@ -43,9 +43,13 @@ type Server struct {
 	// RoleGroups maps the studio's group names to viewer roles
 	// (api.Roles), ahead of groups named c4:role:<role> (RoleOf).
 	RoleGroups map[string]string
-	Client     client.Client        // the manager's cached client
-	Kube       kubernetes.Interface // logs, events, token and access reviews, c4-system pods
-	Queue      Queue                // burst spend and deadline options (optional)
+	// StandIn is the farm's limit on deciding a person's wait for them
+	// (decide.standIn, whomay.go): "allow" lets a project choose; anything
+	// else denies.
+	StandIn string
+	Client  client.Client        // the manager's cached client
+	Kube    kubernetes.Interface // logs, events, token and access reviews, c4-system pods
+	Queue   Queue                // burst spend and deadline options (optional)
 	// Progress, when set, receives units' reported progress from each
 	// scrape of the node daemons, for the queue's estimates.
 	Progress *queue.ProgressCache
@@ -276,7 +280,7 @@ func (s *Server) access(ctx context.Context, user string, groups []string) (*api
 	}
 	m := s.m
 	s.mu.Unlock()
-	v := &api.Viewer{User: user, Projects: []string{}, All: true, Role: RoleOf(groups, s.RoleGroups)}
+	v := &api.Viewer{User: user, Projects: []string{}, All: true, Role: RoleOf(groups, s.RoleGroups), Parties: PartiesOf(groups)}
 	if m != nil {
 		for _, p := range m.projects {
 			ok := false
@@ -417,7 +421,7 @@ func (s *Server) expand(v *api.Viewer) *api.Viewer {
 	if !v.All || len(v.Projects) > 0 {
 		return v
 	}
-	out := &api.Viewer{User: v.User, All: true, Projects: []string{}, Role: v.Role}
+	out := &api.Viewer{User: v.User, All: true, Projects: []string{}, Role: v.Role, Parties: v.Parties}
 	if m := s.current(); m != nil {
 		for _, p := range m.projects {
 			out.Projects = append(out.Projects, p.Name)

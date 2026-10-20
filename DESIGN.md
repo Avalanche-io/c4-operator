@@ -1766,6 +1766,18 @@ and a sweep planner that spawns trials are all generators.
     carries out once, in token order. `do` is `approve`, one of the
     wait's `choices`, or `fail`, which fails it. A clock's wait completes
     at its time.
+  - **Who decides.** A `person:X` wait is decided by X alone, a `party:`
+    wait by a member of the party (a `c4:party:<name>` group, or the
+    party a tracker maps), an `agent:` wait by that agent. An agent never
+    decides a wait that does not name it, and a unit never decides a
+    person's wait or supplies another unit's question. Deciding for
+    someone else is standing in: `decide.standIn` is a farm security key,
+    `deny` by default (`--decide-stand-in`); only under a farm at `allow`
+    may a project allow it (Project `spec.work.policy.values`), and then
+    `decide.standInBy` (`role:farm-admin` by default) may decide, signed
+    with custody `stand-in` and `for: person:X`. The keys are read in one
+    place (`decide.by`, `decide.byUnits`, `supply.by`, `withdraw.by`),
+    which a farm policy will set.
   - **Replies.** A wait with `reply: true` asks for content with its
     decision: a text, a file, an edited plan. The decision carries it as
     a view (`reply.view`, or `reply.text`, which the HUD stores as a view

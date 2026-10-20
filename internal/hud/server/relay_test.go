@@ -87,7 +87,7 @@ func TestRelayedDecisions(t *testing.T) {
 	}{
 		{"wrangler", via(nil), http.StatusForbidden, "only a tracker's sync relays"},
 		{c4v1.SyncDevViewer, via(func(v map[string]any) { v["tracker"] = "jira" }), http.StatusForbidden, "not tracker jira's work"},
-		{c4v1.SyncDevViewer, via(func(v map[string]any) { v["by"], v["person"] = "mallory", "mallory" }), http.StatusForbidden, "the wait is for dana"},
+		{c4v1.SyncDevViewer, via(func(v map[string]any) { v["by"], v["person"] = "mallory", "mallory" }), http.StatusForbidden, "this waits for dana's decision"},
 		{c4v1.SyncDevViewer, via(func(v map[string]any) { v["person"] = "dan" }), http.StatusForbidden, "does not map @dana to dan"},
 		{c4v1.SyncDevViewer, via(func(v map[string]any) { v["by"] = "eve" }), http.StatusForbidden, "does not map @eve"},
 		{c4v1.SyncDevViewer, via(func(v map[string]any) { v["source"] = "" }), http.StatusBadRequest, "names its tracker, source"},

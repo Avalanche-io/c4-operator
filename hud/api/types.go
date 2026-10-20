@@ -14,6 +14,9 @@ type Viewer struct {
 	// producer, wrangler, farm-admin, facilities or pipeline-td. Empty:
 	// the HUD guesses from All (wrangler) or not (artist).
 	Role string `json:"role,omitempty"`
+	// Parties are the outside parties the viewer speaks for (groups
+	// c4:party:<name> or c4-party-<name>): a party's wait takes a member.
+	Parties []string `json:"parties,omitempty"`
 	// Unit is set when the viewer is a unit holding its pod's HUD token:
 	// what its tool lets it do.
 	Unit *UnitViewer `json:"unit,omitempty"`

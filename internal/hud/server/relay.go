@@ -4,8 +4,8 @@ package server
 // approves in a tracker never signed in to the HUD; the tracker's sync
 // relays what they decided. The HUD takes it only from the sync, only for
 // a job of that Tracker, and only from a tracker user the Tracker's people
-// map makes the person the wait is for (or, for a party's wait, any user
-// it maps). The decision is signed with its custody: relayed, or
+// map makes the person the wait is for (or, for a party's wait, a user it
+// maps to that party). The decision is signed with its custody: relayed, or
 // relayed-unattributed when the map names a party rather than a person.
 
 import (
@@ -26,6 +26,9 @@ const (
 	CustodyDirect              = "direct"
 	CustodyRelayed             = "relayed"
 	CustodyRelayedUnattributed = "relayed-unattributed"
+	// CustodyStandIn: someone the farm and the project let stand in
+	// decided a person's wait for them (whomay.go).
+	CustodyStandIn = "stand-in"
 )
 
 // relayed checks a relayed decision on wait and returns its custody grade
@@ -61,14 +64,17 @@ func (s *Server) relayed(ctx context.Context, v *api.Viewer, rec *jobRec, wait *
 	if strings.HasPrefix(mapped, "party:") {
 		grade = CustodyRelayedUnattributed
 	}
-	switch {
-	case strings.HasPrefix(wait.Server, "person:"):
-		if want := strings.TrimPrefix(wait.Server, "person:"); mapped != want {
-			return "", "", refuse("the wait is for %s; @%s is %s", want, via.By, mapped)
-		}
-	case strings.HasPrefix(wait.Server, "party:"):
-	default:
+	if !strings.HasPrefix(wait.Server, "person:") && !strings.HasPrefix(wait.Server, "party:") {
 		return "", "", refuse("the wait is for %s, which a tracker cannot serve", wait.Server)
+	}
+	// The person the map names decides as a person signed in would
+	// (whomay.go); a party the map names speaks as a member of it.
+	who := Decider{User: mapped}
+	if p, ok := strings.CutPrefix(mapped, "party:"); ok {
+		who = Decider{User: mapped, Parties: []string{p}}
+	}
+	if err := MayControl("decide", wait.Server, who); err != nil {
+		return "", "", refuse("@%s is %s: %v", via.By, mapped, err)
 	}
 	return grade, fmt.Sprintf("%s via tracker %s (@%s)", mapped, via.Tracker, via.By), nil
 }

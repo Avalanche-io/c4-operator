@@ -183,8 +183,8 @@ func TestDecideControl(t *testing.T) {
 	since := metav1.NewTime(time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC))
 	rec.job.Status.UnitStates = map[string]string{"succeeded": "0-7", "waits": "8", "blocked": "9"}
 	rec.job.Status.Waits = []c4v1.WorkWait{
-		{Unit: 8, Name: "ruling", Server: "person:owner", Ask: "split the chapter?", Choices: []string{"split", "keep"}, Since: &since, ExpectSeconds: 46080, Blocking: true},
-		{Unit: 7, Name: "f7", Server: "person:lead", Escalated: true, Since: &since},
+		{Unit: 8, Name: "ruling", Server: "person:dana", Ask: "split the chapter?", Choices: []string{"split", "keep"}, Since: &since, ExpectSeconds: 46080, Blocking: true},
+		{Unit: 7, Name: "f7", Server: "person:dana", Escalated: true, Since: &since},
 	}
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)
@@ -229,7 +229,7 @@ func TestDecideControl(t *testing.T) {
 		if j.Name != "sh040-light-v007" {
 			continue
 		}
-		if len(j.Waits) != 2 || !j.Waits[0].NeedsYou || j.Waits[0].WaitsFor != "person:owner" || !j.Waits[1].NeedsYou || !j.Waits[1].Escalated || j.UnitStates.Waits != "8" {
+		if len(j.Waits) != 2 || !j.Waits[0].NeedsYou || j.Waits[0].WaitsFor != "person:dana" || !j.Waits[1].NeedsYou || !j.Waits[1].Escalated || j.UnitStates.Waits != "8" {
 			t.Fatalf("summary waits %+v, states %+v", j.Waits, j.UnitStates)
 		}
 	}
