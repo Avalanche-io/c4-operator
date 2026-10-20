@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "emits",
+      "message": "only a generator emits",
+      "fix": "set kind: generator, or remove emits"
+    }
+  ],
+  "schemaMentions": "allOf/0/else"
+}

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "c4",
+      "message": "the file has no c4 field, so it is not a submission",
+      "fix": "add c4: submit/1 as the first line"
+    }
+  ],
+  "schemaMentions": "c4"
+}

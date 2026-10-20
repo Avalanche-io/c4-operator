@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.light.with.renderer",
+      "message": "\"karma-xpu\" is not one of BRAY_HdKarmaXPU, BRAY_HdKarma",
+      "fix": "did you mean \"BRAY_HdKarmaXPU\"?"
+    }
+  ]
+}

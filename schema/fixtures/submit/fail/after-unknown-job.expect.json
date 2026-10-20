@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.movie.after",
+      "message": "no job \"comp-v4\" in this submission",
+      "fix": "jobs follow jobs by their key in the file; did you mean \"comp\"?"
+    }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.comp.after",
+      "message": "no job \"lite\" in this submission",
+      "fix": "did you mean \"light\"?"
+    }
+  ]
+}

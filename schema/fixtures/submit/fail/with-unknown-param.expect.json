@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.light.with.stg",
+      "message": "karma has no parameter \"stg\"",
+      "fix": "did you mean \"stage\"?"
+    }
+  ]
+}

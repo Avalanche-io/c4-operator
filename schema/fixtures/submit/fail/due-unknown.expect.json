@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "due",
+      "message": "\"someday\" is not a milestone in saltmarsh, a time or a date",
+      "fix": "use a milestone (dailies, client-review), a time (fri 18:00, +3h), a date (2026-10-23), or suggested"
+    }
+  ]
+}

@@ -1,0 +1,40 @@
+# The tool format design's example, section 7.1. Keep in step with it.
+c4: tool/1
+name: proxies
+title: Proxies and previews
+summary: Half-size sRGB JPEGs of an EXR plate sequence, and the HUD's preview frames.
+owner: pipeline@petrelfinch.example
+kind: frames
+runs:
+  image: c4/runtime-oiio
+  command: [bash, "{{Tool.Dir}}/proxies.sh", "{{Param.plates}}", "{{Param.width}}", "{{Param.colorspace}}"]
+frames: {chunk: 8, order: binary}
+params:
+- name: plates
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The plate sequence, with $F4 where the frame number goes.
+  from: scene.selection
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Plates, fileFilters: [{label: EXR, patterns: ["*.exr"]}]}
+- name: width
+  type: INT
+  default: 960
+  minValue: 64
+  maxValue: 8192
+  show: advanced
+  userInterface: {control: SPIN_BOX, label: Width, singleStepDelta: 16}
+- name: colorspace
+  type: STRING
+  default: ACES2065-1
+  allowedValues: [ACES2065-1, ACEScg, sRGB]
+  show: advanced
+  userInterface: {control: DROPDOWN_LIST, label: Plate colour space}
+writes: [proxy/]
+needs: {cpu: 1, memory: 2G}
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1002
+  with: {plates: plates/test.$F4.exr}
+  expect: [proxy/test.1001.jpg, proxy/test.1002.jpg]

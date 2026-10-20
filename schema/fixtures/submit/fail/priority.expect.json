@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.light.priority",
+      "message": "a job has no priority: work is ordered by when it is due",
+      "fix": "say when it is needed with due: a milestone, a time, a date or suggested"
+    }
+  ],
+  "schemaMentions": "priority"
+}

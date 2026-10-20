@@ -1,0 +1,10 @@
+# The tool format design's example, section 2.8, wrapped in the smallest whole tool. Keep in step with it.
+c4: tool/1
+name: snippet-retries
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, "{{Tool.Dir}}/run.sh"]
+retries: 2                 # the default for jobs that use the tool
+retryOn: {exitCodes: [137, 139]}
+reuse: exact               # exact | never

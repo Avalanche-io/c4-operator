@@ -1,0 +1,18 @@
+# The submission design's section 5.3: the lead agent's first try.
+c4: submit/1
+project: textkit
+shot: port
+due: 2026-11-06T18:00:00-08:00
+tree: git:textkit@main
+jobs:
+  port:
+    plan: port.plan.yaml
+    each: {tool: survey}               # lists a module's functions and tests, and writes its steps
+    uses:
+      translate:    {with: {model: claude-opus-5-5, effort: high}}
+      differential: {}                 # old and new on the behaviour suite; a check that sends back mismatches
+      idiom-review: {with: {model: claude-sonnet-5-5, effort: medium}}
+      merge:        {}                 # one at a time: the tool's units pass the project's merge gate
+    answers: {by: tool:port-lead, with: {model: claude-opus-5-5, effort: high}}
+    measure: {name: functions ported, of: 412, required: true}
+    maxParallel: 6

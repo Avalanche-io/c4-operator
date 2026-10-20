@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "needs.memory",
+      "message": "memory needs a unit",
+      "fix": "write 64G"
+    }
+  ],
+  "schemaMentions": "64"
+}

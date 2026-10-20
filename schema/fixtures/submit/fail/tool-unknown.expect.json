@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.light.tool",
+      "message": "no tool \"karmah\" in saltmarsh",
+      "fix": "did you mean \"karma\"? c4 farm tools lists them"
+    }
+  ]
+}

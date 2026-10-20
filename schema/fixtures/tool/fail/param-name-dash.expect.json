@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "params[0].name",
+      "message": "\"plate-seq\" is not a parameter name",
+      "fix": "use letters, digits and _, as plate_seq"
+    }
+  ],
+  "schemaMentions": "plate-seq"
+}

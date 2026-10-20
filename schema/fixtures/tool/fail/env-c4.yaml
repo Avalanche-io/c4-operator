@@ -1,0 +1,7 @@
+c4: tool/1
+name: proxies
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, run.sh]
+  env: {C4_FRAMES: 1001-1008}

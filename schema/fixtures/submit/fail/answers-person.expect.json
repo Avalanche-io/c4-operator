@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.port.answers.by",
+      "message": "a person is never asked mid-run: questions go to an agent",
+      "fix": "name an agent (lead, tool:<name> or unit:<name>); for a person's decision, add an approve step"
+    }
+  ],
+  "schemaMentions": "person:noor"
+}

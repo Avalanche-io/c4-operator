@@ -1,0 +1,11 @@
+# The submission format design's example, section 4.6, wrapped in the smallest whole submission. Keep in step with it.
+c4: submit/1
+project: saltmarsh
+shot: sm0220
+due: dailies
+tree: .
+jobs:
+  wedge:
+    tool: pyro-sim
+    over: {seed: [1, 2, 3, 4], dissipation: [0.05, 0.1]}
+    combine: "seed * dissipation"            # eight units

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.light",
+      "message": "a job needs a tool, or a plan with each",
+      "fix": "add tool: <name>; c4 farm tools lists them"
+    }
+  ],
+  "schemaMentions": "anyOf"
+}

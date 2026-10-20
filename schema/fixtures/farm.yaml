@@ -1,0 +1,29 @@
+# The farm a check runs the fixtures against: what POST /submissions would
+# look up. Tools are the directories under tool/pass that are not glance or a
+# snippet, published at the versions given. Jobs are ones that already exist.
+projects:
+  saltmarsh:
+    milestones: {dailies: "2026-10-22T18:00:00-04:00", client-review: "2026-10-23T10:00:00-04:00"}
+    jobs: [sm0140-light-v003, sm0100-light-v002]
+  textkit:
+    milestones: {}
+    jobs: []
+people: [noor, maya, owner]
+roles: [comp-supervisor, lighting-supervisor, lighting-lead]
+parties: [client]
+tools:
+  karma: v4
+  proxies: v1
+  depth: v2
+  nuke-comp: v2
+  transcode: v1
+  usd-passes: v7
+  exr-qc: v3
+  survey: v3
+  translate: v2
+  differential: v1
+  review: v2
+  merge: v1
+  pyro-sim: v1
+  port-lead: v1
+  shot-lead: v1

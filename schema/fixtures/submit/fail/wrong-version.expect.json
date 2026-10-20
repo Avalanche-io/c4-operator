@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "c4",
+      "message": "submit/2 is not a format this farm reads",
+      "fix": "this farm reads submit/1"
+    }
+  ],
+  "schemaMentions": "submit/2"
+}

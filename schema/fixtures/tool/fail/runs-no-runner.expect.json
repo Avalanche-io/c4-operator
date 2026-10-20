@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "runs",
+      "message": "runs needs an image, a host, or both",
+      "fix": "add image: <an image>, or host: {has: [...]}"
+    }
+  ],
+  "schemaMentions": "anyOf"
+}

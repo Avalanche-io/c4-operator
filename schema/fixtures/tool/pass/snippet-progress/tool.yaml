@@ -1,0 +1,16 @@
+# The tool format design's example, section 2.7, wrapped in the smallest whole tool. Keep in step with it.
+c4: tool/1
+name: snippet-progress
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, "{{Tool.Dir}}/run.sh"]
+progress:
+- {match: 'ALF_PROGRESS (\d+)%', percent: 1}          # husk -V 2a, prman's Alfred lines
+- {match: '^Fra:(\d+) .*Saved:', frame: 1}            # Blender
+errors:
+  licence:   ['No licenses could be found to run this application']
+  permanent: ['Unable to open stage']
+  retry:     ['CUDA error: out of memory']
+  ignore:    ['Warning: unused render var']
+stall: {quietMinutes: 30}

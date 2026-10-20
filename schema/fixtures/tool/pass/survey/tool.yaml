@@ -1,0 +1,11 @@
+# A context tool: one the submission design's examples name. Written for the fixtures.
+c4: tool/1
+name: survey
+title: Survey a module
+summary: Lists a module's functions and tests and emits its steps.
+kind: generator
+emits: [translate, differential, review, merge]
+runs:
+  image: c4/runtime-python
+  command: [python3, "{{Tool.Dir}}/survey.py"]
+needs: {cpu: 1, memory: 2G}

@@ -1,0 +1,5 @@
+# A plan for the answers fixtures: it has the unit they name.
+version: 1
+blocks:
+- {name: port/architect, group: lead, key: architect}
+- {name: text/scan, group: leaves, key: module, planned: true, holds: [text/scan], after: [port/architect]}

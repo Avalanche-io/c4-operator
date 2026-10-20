@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "emits[0]",
+      "message": "no tool \"karmah\" in saltmarsh",
+      "fix": "did you mean \"karma\"?"
+    }
+  ]
+}

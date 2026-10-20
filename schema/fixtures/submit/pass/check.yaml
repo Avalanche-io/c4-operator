@@ -1,0 +1,17 @@
+# The submission format design's example, section 4.3, wrapped in the smallest whole submission. Keep in step with it.
+c4: submit/1
+project: saltmarsh
+shot: sm0220
+due: dailies
+tree: .
+jobs:
+  light:
+    tool: karma
+    frames: 1001-1240
+    with: {stage: sm0220.usda}
+    check:
+      tool: exr-qc                    # a check tool: reads the frames, writes a verdict
+      with: {black: true, nan: true, flicker: true}
+      every: 24                       # one check per 24 frames, with a frame of overlap each side
+      rework: 2                       # a frame sent back twice goes to a person instead
+      then: role:lighting-lead

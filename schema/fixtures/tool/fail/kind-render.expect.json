@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "kind",
+      "message": "\"render\" is not a kind",
+      "fix": "a render is kind: frames"
+    }
+  ],
+  "schemaMentions": "render"
+}

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.wedge.combine",
+      "message": "combine needs over: the values it combines",
+      "fix": "add over:, or remove combine"
+    }
+  ],
+  "schemaMentions": "over"
+}

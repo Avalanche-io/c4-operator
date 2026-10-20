@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "params[0].objectType",
+      "message": "objectType is for PATH parameters",
+      "fix": "remove it, or make the parameter a PATH"
+    }
+  ],
+  "schemaMentions": "param/allOf/0/else"
+}

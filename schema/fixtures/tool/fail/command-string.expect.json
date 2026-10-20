@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "runs.command",
+      "message": "a command is a list of arguments, never one shell string",
+      "fix": "write [bash, \"{{Tool.Dir}}/run.sh\"]"
+    }
+  ],
+  "schemaMentions": "bash run.sh"
+}

@@ -1,0 +1,9 @@
+# The submission format design's example, section 5.3, the plan (abridged as there). Keep in step with it.
+version: 1
+blocks:
+- {name: text/scan,   group: leaves, key: module, planned: true, holds: [text/scan],   params: {functions: "14"}}
+- {name: text/format, group: leaves, key: module, planned: true, holds: [text/format], after: [text/scan],
+   why: {text/scan: "format calls scan's tokenizer"}}
+- {name: api-break, wait: {server: "person:owner", ask: "Keep the old signature of Document.open?", expect: 7200},
+   before: [doc/document]}
+# ... 22 more modules

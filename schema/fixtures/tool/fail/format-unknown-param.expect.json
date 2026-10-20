@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "runs.command[2]",
+      "message": "no parameter \"platez\"",
+      "fix": "did you mean \"plates\"?"
+    }
+  ]
+}

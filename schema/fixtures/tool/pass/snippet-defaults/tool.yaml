@@ -1,0 +1,12 @@
+# The tool format design's example, section 2.12, wrapped in the smallest whole tool. Keep in step with it.
+c4: tool/1
+name: snippet-defaults
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, "{{Tool.Dir}}/run.sh"]
+params:
+- {name: model, type: STRING, default: depth-anything-v2-small}
+frames: {chunk: 8, order: binary}      # for frames tools: units of 8 frames, dispatched binary
+gate: merge                            # each unit passes the project's "merge" gate, one at a time
+aiUsage: {model: "{{Param.model}}", task: depth, oversight: comp artist reviews the pass}

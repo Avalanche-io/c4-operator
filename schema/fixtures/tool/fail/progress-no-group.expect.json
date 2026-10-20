@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "progress[0]",
+      "message": "a progress rule says which group is the percent or the frame",
+      "fix": "add percent: 1 or frame: 1"
+    }
+  ],
+  "schemaMentions": "oneOf"
+}

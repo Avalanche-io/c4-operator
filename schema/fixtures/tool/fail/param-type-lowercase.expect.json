@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "params[1].type",
+      "message": "\"int\" is not a parameter type",
+      "fix": "types are OpenJD's, in capitals: INT"
+    }
+  ],
+  "schemaMentions": "int"
+}

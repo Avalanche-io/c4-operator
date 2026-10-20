@@ -1,0 +1,11 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.light.with",
+      "message": "karma needs stage (USD stage)",
+      "fix": "add with: {stage: <a .usd file in the tree>}"
+    }
+  ],
+  "note": "A parameter with no default must be given, as in OpenJD."
+}

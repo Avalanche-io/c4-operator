@@ -1,0 +1,17 @@
+# The submission design's section 5.1: the agent's first try.
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: dailies
+tree: job:sm0140-light
+note: comp v4, new edge treatment per Thursday's notes
+jobs:
+  comp:
+    tool: nuke-comp
+    frames: 1001-1048
+    with: {script: comp/sm0140_comp.nk, write: Write_main}
+    approve: {by: role:comp-supervisor}
+  movie:
+    tool: transcode
+    after: comp-v4
+    with: {codec: prores-422hq, view: "ACES 1.0 - SDR Video", slate: true}

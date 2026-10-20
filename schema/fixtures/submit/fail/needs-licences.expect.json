@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.light.needs.licences",
+      "message": "licences are the tool's to declare, not a submission's",
+      "fix": "ask the tool's owner to add them to its needs, or choose one of its sizes"
+    }
+  ],
+  "schemaMentions": "licences"
+}

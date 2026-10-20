@@ -1,0 +1,11 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.comp.after",
+      "message": "light and comp follow each other, which is a cycle",
+      "fix": "remove one of the two after fields"
+    }
+  ],
+  "note": "Reported where the cycle closes, reading the jobs in the order written."
+}

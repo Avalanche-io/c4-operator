@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.light.frame",
+      "message": "\"frame\" is not a field of a job",
+      "fix": "did you mean \"frames\"?"
+    }
+  ],
+  "schemaMentions": "frame"
+}

@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "runs.command[2]",
+      "message": "\"Unit.Start\" is not a format string",
+      "fix": "did you mean \"Unit.FrameStart\"?"
+    }
+  ]
+}

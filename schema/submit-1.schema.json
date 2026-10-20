@@ -1,0 +1,214 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cccc.io/schema/submit-1.schema.json",
+  "title": "C4 submission (c4: submit/1)",
+  "description": "What to do for one piece of production: the project and shot, the tree to start from, the jobs to run, how they follow each other, what is checked and approved, who answers questions, and when it is due. No priority, no Kubernetes. The submission format's design has a worked example of each field. This schema checks the shape; the farm's check adds what needs the farm (tools, milestones, names).",
+  "type": "object",
+  "required": ["c4", "jobs"],
+  "additionalProperties": false,
+  "properties": {
+    "c4": {"const": "submit/1", "description": "The format and its version."},
+    "project": {"$ref": "#/$defs/dnsName", "description": "The project; may be left out when the person has one."},
+    "shot": {"type": "string", "minLength": 1, "description": "The shot, or the work's equivalent (an asset, a sequence, a branch); default from the tree's name."},
+    "name": {"$ref": "#/$defs/dnsName", "description": "The stem of the jobs' names; default the shot."},
+    "due": {"$ref": "#/$defs/due"},
+    "tree": {"$ref": "#/$defs/treeSource", "description": "Where the work starts: a folder (. or a path), a C4 ID, job:<name>, or git:<repo>@<ref>."},
+    "read": {
+      "type": "object",
+      "description": "Further trees mounted read-only, by name.",
+      "propertyNames": {"$ref": "#/$defs/key"},
+      "additionalProperties": {"$ref": "#/$defs/treeSource"}
+    },
+    "tracker": {"type": "string", "pattern": "^[^/\\s]+/[^/\\s]+/[^/\\s]+$", "description": "The tracker entity this is for: <tracker>/<type>/<id>."},
+    "for": {"type": "string", "pattern": "^person:\\S+$", "description": "The person a tracker or service submits for, so the jobs are theirs."},
+    "note": {"type": "string", "description": "A line for the jobs' book."},
+    "jobs": {
+      "type": "object",
+      "minProperties": 1,
+      "description": "The jobs, by key, in the order written. The key is the job's stage and the middle of its name.",
+      "propertyNames": {"$ref": "#/$defs/key"},
+      "additionalProperties": {"$ref": "#/$defs/job"}
+    }
+  },
+  "$defs": {
+    "dnsName": {"type": "string", "pattern": "^[a-z0-9]([-a-z0-9]*[a-z0-9])?$", "maxLength": 63},
+    "key": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$", "maxLength": 40},
+    "toolName": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,62}$"},
+    "toolRef": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]{0,62}(@(v[1-9][0-9]*|c4[1-9A-HJ-NP-Za-km-z]{88}))?$",
+      "description": "A tool by name (karma), or pinned to a version (karma@v4) or a tree (karma@c4...)."
+    },
+    "paramName": {"type": "string", "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,63}$"},
+    "treeSource": {"type": "string", "minLength": 1},
+    "due": {
+      "type": "string",
+      "minLength": 1,
+      "description": "A milestone (dailies), a time (fri 18:00, 18:00, +3h, RFC 3339), a date (2026-10-23, at the project's due time), or suggested. Never a priority."
+    },
+    "frames": {
+      "description": "A frame list in OpenJD's range grammar: 1001-1240, 1001-1240:2, 1001,1050-1100; or one frame.",
+      "oneOf": [
+        {"type": "integer", "minimum": 0},
+        {"type": "string", "pattern": "^[0-9]+(-[0-9]+(:[1-9][0-9]*)?)?(,[0-9]+(-[0-9]+(:[1-9][0-9]*)?)?)*$"}
+      ]
+    },
+    "size": {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?[KMGT]i?$", "description": "A quantity with its unit: 64G, 512M, 1.5T."},
+    "duration": {
+      "oneOf": [
+        {"type": "integer", "minimum": 0, "description": "Seconds."},
+        {"type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?(s|m|h|d)$"}
+      ]
+    },
+    "with": {"type": "object", "description": "A tool's parameters, by name. The farm checks them against the tool's own schema."},
+    "needs": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Overrides of a tool's needs for this job. Licences and network are the tool's to declare, not a submission's.",
+      "properties": {
+        "cpu": {"type": "number", "exclusiveMinimum": 0},
+        "memory": {"$ref": "#/$defs/size"},
+        "gpu": {"type": "integer", "minimum": 0},
+        "gpuMemory": {"$ref": "#/$defs/size"},
+        "scratch": {"$ref": "#/$defs/size"}
+      }
+    },
+    "after": {
+      "description": "The jobs this one follows: a key (frame by frame when both have frames, else when it is done), a list of keys, or a map of key to how (frames, all, previous).",
+      "oneOf": [
+        {"$ref": "#/$defs/key"},
+        {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/key"}},
+        {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/$defs/key"},
+          "additionalProperties": {"enum": ["frames", "all", "previous"]}
+        }
+      ]
+    },
+    "check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["tool"],
+      "description": "A check over the job's units: a check tool that writes verdicts while the job runs.",
+      "properties": {
+        "tool": {"$ref": "#/$defs/toolRef"},
+        "with": {"$ref": "#/$defs/with"},
+        "every": {"type": "integer", "minimum": 1, "description": "One check per this many frames, with a frame of overlap either side."},
+        "rework": {"type": "integer", "minimum": 0, "description": "How many times a unit may be sent back before it goes to then."},
+        "then": {"type": "string", "pattern": "^(person|role):\\S+$", "description": "Who decides a unit sent back too often."}
+      }
+    },
+    "approve": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by"],
+      "description": "A decision by a person, declared on purpose: after the preview frames, or at the end of the job.",
+      "properties": {
+        "by": {"type": "string", "pattern": "^(person|role):\\S+$"},
+        "after": {"enum": ["preview"]},
+        "ask": {"type": "string"},
+        "expect": {"$ref": "#/$defs/duration"},
+        "choices": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+      }
+    },
+    "wait": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "A wait on an outside party or a person (for), or a clock (until).",
+      "properties": {
+        "for": {"type": "string", "pattern": "^(person|party):\\S+$"},
+        "until": {"type": "string", "minLength": 1},
+        "ask": {"type": "string"},
+        "expect": {"$ref": "#/$defs/duration"},
+        "choices": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "reply": {"type": "boolean"}
+      },
+      "oneOf": [{"required": ["for"]}, {"required": ["until"]}]
+    },
+    "answers": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["by"],
+      "description": "Who answers the questions the job's units raise: always an agent. A person decides only at an approve or wait the submission declares.",
+      "properties": {
+        "by": {"type": "string", "pattern": "^(lead|tool:[a-z][a-z0-9-]{0,62}|unit:\\S+)$"},
+        "with": {"$ref": "#/$defs/with"}
+      }
+    },
+    "use": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Settings for a tool a generator's children run.",
+      "properties": {
+        "with": {"$ref": "#/$defs/with"},
+        "size": {"$ref": "#/$defs/key"},
+        "needs": {"$ref": "#/$defs/needs"},
+        "pools": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/key"}}
+      }
+    },
+    "job": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One job: a tool over its units, or a plan whose blocks run a tool.",
+      "anyOf": [{"required": ["tool"]}, {"required": ["plan"]}],
+      "dependentRequired": {"each": ["plan"], "combine": ["over"]},
+      "properties": {
+        "tool": {"$ref": "#/$defs/toolRef"},
+        "frames": {"$ref": "#/$defs/frames"},
+        "with": {"$ref": "#/$defs/with"},
+        "after": {"$ref": "#/$defs/after"},
+        "due": {"$ref": "#/$defs/due"},
+        "size": {"$ref": "#/$defs/key"},
+        "needs": {"$ref": "#/$defs/needs"},
+        "pools": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/key"}},
+        "preview": {
+          "type": "string",
+          "pattern": "^(fml|none|every:[1-9][0-9]*|[0-9]+(-[0-9]+(:[1-9][0-9]*)?)?(,[0-9]+(-[0-9]+(:[1-9][0-9]*)?)?)*)$",
+          "description": "Which frames go first: fml (first, middle, last), every:N, a frame list, or none."
+        },
+        "check": {"$ref": "#/$defs/check"},
+        "approve": {"$ref": "#/$defs/approve"},
+        "wait": {"$ref": "#/$defs/wait"},
+        "answers": {"$ref": "#/$defs/answers"},
+        "uses": {
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {"$ref": "#/$defs/toolName"},
+          "additionalProperties": {"$ref": "#/$defs/use"}
+        },
+        "plan": {"type": "string", "minLength": 1, "description": "A plan file in c4-plan's format, relative to the submission."},
+        "each": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["tool"],
+          "description": "The tool a planned block runs.",
+          "properties": {"tool": {"$ref": "#/$defs/toolRef"}, "with": {"$ref": "#/$defs/with"}}
+        },
+        "over": {
+          "type": "object",
+          "minProperties": 1,
+          "description": "Values to make units over, by parameter name.",
+          "propertyNames": {"$ref": "#/$defs/paramName"},
+          "additionalProperties": {"type": "array", "minItems": 1}
+        },
+        "combine": {"type": "string", "minLength": 1, "description": "OpenJD's combination grammar over the names in over (and frames): *, ( , )."},
+        "measure": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "of"],
+          "properties": {
+            "name": {"type": "string", "minLength": 1},
+            "of": {"type": "number", "exclusiveMinimum": 0},
+            "required": {"type": "boolean"}
+          }
+        },
+        "retries": {"type": "integer", "minimum": 0},
+        "maxParallel": {"type": "integer", "minimum": 0},
+        "chunk": {"type": "integer", "minimum": 1},
+        "order": {"enum": ["binary", "sequential", "reverse"]},
+        "follows": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+# A context tool: one the submission design's examples name. Written for the fixtures.
+c4: tool/1
+name: nuke-comp
+title: Nuke comp
+summary: Renders a Nuke script's Write node over the job's frames.
+kind: frames
+runs:
+  image: registry.petrelfinch.example/nuke:16.0
+  exe: nuke
+  command: ["{{Run.Exe}}", -x, -X, "{{Param.write}}", -F, "{{Unit.Frames}}", "{{Param.script}}"]
+frames: {chunk: 4, order: binary}
+params:
+- {name: script, type: PATH, objectType: FILE, dataFlow: IN, from: scene.file, userInterface: {control: CHOOSE_INPUT_FILE, label: Nuke script}}
+- {name: write, type: STRING, default: Write_main, userInterface: {label: Write node}}
+writes: [comp/]
+previews: "comp/*.$F4.exr"
+needs: {cpu: 4, memory: 16G, licences: {foundry/nuke_r: 1}, network: [licences]}
+reuse: exact

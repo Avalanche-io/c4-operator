@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "progress[0].match",
+      "message": "this is not a regular expression: missing closing )",
+      "fix": "close the group: ALF_PROGRESS (\\d+)%"
+    }
+  ]
+}

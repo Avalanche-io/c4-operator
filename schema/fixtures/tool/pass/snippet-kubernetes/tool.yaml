@@ -1,0 +1,9 @@
+# The tool format design's example, section 2.11, wrapped in the smallest whole tool. Keep in step with it.
+c4: tool/1
+name: snippet-kubernetes
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, "{{Tool.Dir}}/run.sh"]
+kubernetes:
+  pod: {hostAliases: [{ip: 10.0.4.20, hostnames: [lic01.vendor.example]}]}   # a vendor tool that hard-codes its licence host

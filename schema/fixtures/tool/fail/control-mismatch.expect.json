@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "params[0].userInterface.control",
+      "message": "CHOOSE_INPUT_FILE is not a control for an INT",
+      "fix": "an INT is drawn with SPIN_BOX or DROPDOWN_LIST"
+    }
+  ],
+  "schemaMentions": "CHOOSE_INPUT_FILE"
+}

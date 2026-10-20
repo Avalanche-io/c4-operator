@@ -1,0 +1,7 @@
+c4: tool/1
+name: usd-passes
+kind: generator
+runs:
+  image: c4/runtime-base
+  command: [bash, "{{Tool.Dir}}/run.sh"]
+emits: [karmah]

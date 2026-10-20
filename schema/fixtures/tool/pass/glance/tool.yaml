@@ -1,0 +1,23 @@
+# The tool format design's example, section 2, the format at a glance. Keep in step with it.
+c4: tool/1
+name: proxies
+title: Proxies and previews
+summary: Half-size sRGB JPEGs of an EXR plate sequence, and the HUD's preview frames.
+kind: frames
+runs:
+  image: c4/runtime-oiio
+  command: [bash, "{{Tool.Dir}}/proxies.sh", "{{Param.plates}}", "{{Param.width}}", ACES2065-1]
+params:
+- name: plates
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Plates}
+- name: width
+  type: INT
+  default: 960
+  minValue: 64
+  maxValue: 8192
+  show: advanced
+needs: {memory: 2G}
+reuse: exact

@@ -1,0 +1,13 @@
+# A context tool: one the submission design's examples name. Written for the fixtures.
+c4: tool/1
+name: differential
+title: Old against new
+summary: Runs the old and new code side by side on the behaviour suite, and sends mismatches back.
+kind: check
+judges: units
+rework: {maxPasses: 2, onExhausted: escalate}
+runs:
+  image: c4/runtime-python
+  command: [python3, "{{Tool.Dir}}/differential.py"]
+needs: {cpu: 2, memory: 4G}
+reuse: exact

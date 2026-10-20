@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.light.frames",
+      "message": "\"1001..1240\" is not a frame list",
+      "fix": "write a range with a dash: 1001-1240"
+    }
+  ],
+  "schemaMentions": "$defs/frames"
+}

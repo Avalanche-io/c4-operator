@@ -1,0 +1,8 @@
+c4: tool/1
+name: proxies
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, "{{Tool.Dir}}/run.sh"]
+params:
+- {name: colorspace, type: STRING, default: Rec709, allowedValues: [ACES2065-1, ACEScg, sRGB]}

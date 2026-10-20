@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "params[0].default",
+      "message": "the default \"Rec709\" is not one of its allowedValues",
+      "fix": "add it to allowedValues, or choose one of them"
+    }
+  ]
+}

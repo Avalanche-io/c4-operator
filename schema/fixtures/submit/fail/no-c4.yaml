@@ -1,0 +1,4 @@
+project: saltmarsh
+shot: sm0140
+jobs:
+  light: {tool: karma, with: {stage: sm0140.usda}}

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "runs.env.C4_FRAMES",
+      "message": "C4_ variables are the farm's own",
+      "fix": "use another name; the farm sets C4_FRAMES itself"
+    }
+  ],
+  "schemaMentions": "env/propertyNames"
+}

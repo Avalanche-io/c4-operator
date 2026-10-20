@@ -1,0 +1,11 @@
+# The submission format design's example, section 4.7, wrapped in the smallest whole submission. Keep in step with it.
+c4: submit/1
+project: textkit
+shot: port
+due: 2026-11-06T18:00:00-08:00
+tree: git:textkit@main
+jobs:
+  port:
+    plan: answers.plan.yaml
+    each: {tool: survey}
+    answers: {by: unit:port/architect}

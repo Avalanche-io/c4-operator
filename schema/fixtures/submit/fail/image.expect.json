@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.light.image",
+      "message": "a submission names tools, never images",
+      "fix": "publish a tool that runs the image (c4 farm tool new), and name it in tool:"
+    }
+  ],
+  "schemaMentions": "image"
+}

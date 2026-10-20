@@ -1,0 +1,6 @@
+c4: tool/1
+name: proxies
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: bash run.sh

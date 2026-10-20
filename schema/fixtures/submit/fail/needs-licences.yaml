@@ -1,0 +1,7 @@
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: dailies
+tree: .
+jobs:
+  light: {tool: karma, with: {stage: sm0140.usda}, needs: {licences: {sesi/karma: 2}}}

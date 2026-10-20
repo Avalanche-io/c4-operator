@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "params[1].name",
+      "message": "a second parameter named \"width\"",
+      "fix": "rename or remove one of them"
+    }
+  ]
+}

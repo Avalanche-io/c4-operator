@@ -1,0 +1,22 @@
+# The submission format design's example, section 5.2, as the agent wrote it. Keep in step with it.
+c4: submit/1
+project: saltmarsh
+shot: sm0220
+due: client-review                 # Thursday 10:00, from the tracker
+tree: .
+tracker: flow/Task/48213
+jobs:
+  light:
+    tool: usd-passes
+    frames: 1001-1240
+    with: {stage: sm0220.usda}
+    uses:
+      karma: {with: {renderer: BRAY_HdKarmaXPU}, size: heavy}
+    preview: fml
+    approve: {by: person:maya, after: preview}
+    check:
+      tool: exr-qc
+      with: {black: true, nan: true, flicker: true, aovs: true}
+      every: 24
+      rework: 2
+      then: role:lighting-lead

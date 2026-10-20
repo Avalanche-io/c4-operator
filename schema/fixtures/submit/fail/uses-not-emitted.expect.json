@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.port.uses.idiom-review",
+      "message": "survey@v3 does not emit \"idiom-review\"; it emits translate, differential, review, merge",
+      "fix": "rename the key to \"review\", or publish a survey that emits idiom-review"
+    }
+  ]
+}

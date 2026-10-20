@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "needs.licences.karma",
+      "message": "a licence is named pool/feature",
+      "fix": "for example sesi/karma: 1"
+    }
+  ],
+  "schemaMentions": "karma"
+}

@@ -6,6 +6,7 @@ require (
 	github.com/Avalanche-io/c4 v1.0.17-0.20261016134402-db4c7bec2376
 	github.com/container-storage-interface/spec v1.13.0
 	github.com/go-logr/logr v1.4.4
+	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/prometheus/client_golang v1.24.0
 	go.uber.org/zap v1.27.1
@@ -50,7 +51,6 @@ require (
 	github.com/go-openapi/swag/typeutils v0.27.1 // indirect
 	github.com/go-openapi/swag/yamlutils v0.27.1 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
-	github.com/google/jsonschema-go v0.4.3 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
