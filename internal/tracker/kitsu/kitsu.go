@@ -119,7 +119,7 @@ func (a *Adapter) Kind() string { return Kind }
 // and receives no deliveries.
 func (a *Adapter) Capabilities() tracker.Capabilities {
 	return tracker.Capabilities{EventLog: true, EditableComments: true, CustomFields: true, DateOnlyDue: true,
-		PublishForReview: true, Mentions: true}
+		PublishForReview: true, PublishPreview: true, Mentions: true}
 }
 
 // --- HTTP ---

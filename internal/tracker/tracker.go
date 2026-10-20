@@ -154,6 +154,9 @@ type Capabilities struct {
 	// PublishForReview: Publish makes the entity people review (a Flow
 	// Version), which becomes the link's review.
 	PublishForReview bool
+	// PublishPreview: Publish uploads the output's still (Output.Preview),
+	// which the loop fetches from the farm only for such adapters.
+	PublishPreview bool
 	// Mentions: the tracker can tell a person by name, where they work
 	// (write kind mention: an @-mention, a Note addressed to them).
 	Mentions bool

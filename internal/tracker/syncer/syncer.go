@@ -86,7 +86,10 @@ type conn struct {
 	until     time.Time // rate limited until
 	dirty     map[string]bool
 	pending   []tracker.Decision // decisions carried only by deliveries
-	resync    time.Time
+	// stillSince is when the farm first failed to give an output's still,
+	// by link and output view.
+	stillSince map[string]time.Time
+	resync     time.Time
 }
 
 func (s *Syncer) now() time.Time {
@@ -144,7 +147,7 @@ func (s *Syncer) conn(t *c4v1.Tracker) (*conn, error) {
 	old := s.conns[key(t)]
 	c := &conn{gen: t.Generation, adapter: a, presenter: p, limiter: lim, dirty: map[string]bool{}}
 	if old != nil {
-		c.dirty, c.pending, c.until = old.dirty, old.pending, old.until
+		c.dirty, c.pending, c.until, c.stillSince = old.dirty, old.pending, old.until, old.stillSince
 	}
 	s.conns[key(t)] = c
 	return c, nil
@@ -1433,17 +1436,18 @@ func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr f
 	if n := len(l.Status.Versions); n > 0 {
 		out.Follows = farm.JobRef{Namespace: l.Namespace, Name: l.Status.Versions[n-1]}.String()
 	}
-	// A still, where the farm has one: best effort, the output publishes
-	// without it.
-	if name, data, err := s.Farm.Preview(ctx, jr); err == nil && len(data) > 0 {
-		out.Preview = &tracker.Still{Name: name, Data: data}
-	} else if err != nil && !errors.Is(err, farm.ErrNotFound) {
-		s.Log.Error(err, "reading the output's preview; publishing without it", "job", jr.String())
+	still, err := s.still(ctx, c, l, jr, sum.Output)
+	if err != nil {
+		return err
 	}
+	out.Preview = still
 	ref, err := c.adapter.Publish(ctx, on, out, tracker.WriteKey(l.Namespace+"/"+l.Name, "publish", sum.Output))
 	if err != nil {
 		return err
 	}
+	s.mu.Lock()
+	delete(c.stillSince, l.Namespace+"/"+l.Name+"@"+sum.Output)
+	s.mu.Unlock()
 	if err := s.remember(ctx, l, "publish", sum.Output, ref.ID, s.now()); err != nil {
 		return err
 	}
@@ -1452,6 +1456,43 @@ func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr f
 		return s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.Review, st.ReviewHead = &r, "" })
 	}
 	return nil
+}
+
+// stillPatience is how long a publish waits for a still the farm failed to
+// give (a timeout; a 503 from a replica that is not the queue's leader):
+// the publish is once, so publishing without would lose it for good.
+const stillPatience = 5 * time.Minute
+
+// still is the output's still for adapters that publish one, best effort:
+// none when the farm has none (or one too big, or not an image); on another
+// error the publish is put off to a later pass, for stillPatience from the
+// first failure, then made without it.
+func (s *Syncer) still(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr farm.JobRef, view string) (*tracker.Still, error) {
+	if !c.adapter.Capabilities().PublishPreview {
+		return nil, nil
+	}
+	name, data, err := s.Farm.Preview(ctx, jr)
+	switch {
+	case err == nil && len(data) > 0:
+		return &tracker.Still{Name: name, Data: data}, nil
+	case err == nil || errors.Is(err, farm.ErrNotFound):
+		return nil, nil
+	}
+	key, now := l.Namespace+"/"+l.Name+"@"+view, s.now()
+	s.mu.Lock()
+	if c.stillSince == nil {
+		c.stillSince = map[string]time.Time{}
+	}
+	first, ok := c.stillSince[key]
+	if !ok {
+		first, c.stillSince[key] = now, now
+	}
+	s.mu.Unlock()
+	if now.Sub(first) < stillPatience {
+		return nil, fmt.Errorf("the output's preview: %w; the publish waits for it until %s", err, first.Add(stillPatience).UTC().Format(time.RFC3339))
+	}
+	s.Log.Error(err, "reading the output's preview; publishing without it", "job", jr.String())
+	return nil, nil
 }
 
 // nextVersion answers a rework the media way, as Flow's dailies do: a

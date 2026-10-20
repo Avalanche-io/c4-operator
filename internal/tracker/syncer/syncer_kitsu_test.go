@@ -522,3 +522,75 @@ func TestKitsuForecastFollowsTheEstimation(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// inReview takes the first job to its review with an output and a still.
+func (e *kitsuEnv) inReview() {
+	e.t.Helper()
+	e.pass()
+	e.farm.Previews = map[string][]byte{ns + "/" + e.firstJob: []byte("\x89PNG\r\n\x1a\nv1")}
+	e.job(e.firstJob, func(j *api.Job) { j.Phase = "Running"; j.Output = &api.Output{View: "c4OutputV001"} })
+	e.farm.OpenWait(ns, e.firstJob, "dailies", "person:dana", "approve", "rework", "accept")
+}
+
+func (e *kitsuEnv) published() int {
+	n := 0
+	for _, c := range e.botComments() {
+		if strings.Contains(c.Text, "Output view: c4OutputV001") {
+			n++
+		}
+	}
+	return n
+}
+
+// A still the farm fails to give (a replica that is not the leader) puts
+// the publish off to the next pass, not off for good; past the patience,
+// the output is published without it.
+func TestKitsuPublishWaitsForTheStill(t *testing.T) {
+	e := setupKitsu(t)
+	e.inReview()
+	e.farm.PreviewFails = 1
+	if err := e.sync.Sync(context.Background(), e.tracker()); err == nil || !strings.Contains(err.Error(), "preview") {
+		t.Fatalf("the failed still should put the publish off: %v", err)
+	}
+	if e.published() != 0 {
+		t.Fatal("published without waiting for the still")
+	}
+	e.clock.add(time.Minute)
+	e.pass()
+	if ps := e.site.Previews(e.task); e.published() != 1 || len(ps) != 1 || ps[0].Status != "ready" {
+		t.Fatalf("published %d, previews %+v", e.published(), ps)
+	}
+
+	f := setupKitsu(t)
+	f.inReview()
+	f.farm.PreviewFails = 1000
+	for range 3 {
+		_ = f.sync.Sync(context.Background(), f.tracker())
+		f.clock.add(2 * time.Minute)
+	}
+	f.pass()
+	if f.published() != 1 || len(f.site.Previews(f.task)) != 0 {
+		t.Fatalf("past the patience: published %d, previews %d", f.published(), len(f.site.Previews(f.task)))
+	}
+}
+
+// The upload made but its answer lost: the next pass finds the comment and
+// its uploaded preview, and adds no revision.
+func TestKitsuLostUploadAnswerMakesOneRevision(t *testing.T) {
+	e := setupKitsu(t)
+	e.inReview()
+	e.site.LoseAnswers(1, "/pictures/preview-files/")
+	if err := e.sync.Sync(context.Background(), e.tracker()); err == nil {
+		t.Fatal("the lost answer should fail the pass")
+	}
+	e.clock.add(time.Minute)
+	e.pass()
+	e.pass()
+	ps := e.site.Previews(e.task)
+	if e.published() != 1 || len(ps) != 1 || ps[0].Revision != 1 || ps[0].Status != "ready" {
+		t.Fatalf("published %d, previews %+v", e.published(), ps)
+	}
+	if r := e.link().Status.Review; r == nil || r.ID != e.task {
+		t.Fatalf("review: %+v", r)
+	}
+}

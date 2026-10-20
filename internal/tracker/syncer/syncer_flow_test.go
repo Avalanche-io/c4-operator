@@ -328,6 +328,9 @@ func TestFlowDailiesLoop(t *testing.T) {
 	if n := e.scriptVersionWrites(); n != 0 {
 		t.Fatalf("c4-sync changed a Version %d times after publishing it", n)
 	}
+	if e.farm.PreviewCalls != 0 {
+		t.Fatalf("a Flow publish fetched %d stills it does not upload", e.farm.PreviewCalls)
+	}
 	if e.site.Get("Version", v1.ID)["sg_status_list"] != "fix" || e.site.Get("Version", vs[1].ID)["sg_status_list"] != "apr" {
 		t.Fatal("the supervisor's statuses must stand")
 	}

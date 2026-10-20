@@ -241,28 +241,53 @@ func TestBookGone(t *testing.T) {
 }
 
 // Preview reads the job's frames and fetches the middle one that has a
-// proxy; a job with none has no preview.
+// proxy, checked against its C4 ID and named by its bytes; a job with none,
+// a proxy that is too big or not an image, is no preview; one that does not
+// match its ID is an error.
 func TestPreviewFetchesTheMiddleProxy(t *testing.T) {
+	objects := map[string][]byte{}
+	put := func(b []byte) string {
+		id := c4.Identify(bytes.NewReader(b)).String()
+		objects[id] = b
+		return "/api/v1/objects/proj/" + id
+	}
+	png := []byte("\x89PNG\r\n\x1a\nframe")
+	jpg := []byte("\xff\xd8\xff\xe0frame")
+	frames := map[string][]map[string]any{
+		"sh040": {{"frame": 1001, "url": put([]byte("\x89PNG\r\n\x1a\na"))}, {"frame": 1002},
+			{"frame": 1003, "url": put(png)}, {"frame": 1004, "url": put([]byte("\x89PNG\r\n\x1a\nc"))}},
+		"jpeg":  {{"frame": 1, "url": put(jpg)}},
+		"plain": {{"frame": 1001}, {"frame": 1002}},
+		"text":  {{"frame": 1, "url": put([]byte("not an image"))}},
+		"big":   {{"frame": 1, "url": put(append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 16<<20)...))}},
+		"wrong": {{"frame": 1, "url": "/api/v1/objects/proj/" + c4.Identify(strings.NewReader("other")).String()}},
+	}
+	objects[c4.Identify(strings.NewReader("other")).String()] = png
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/jobs/work/{name}/preview", func(w http.ResponseWriter, r *http.Request) {
-		frames := []map[string]any{{"frame": 1001}, {"frame": 1002}}
-		if r.PathValue("name") == "sh040" {
-			frames = []map[string]any{{"frame": 1001, "url": "/api/v1/objects/proj/c4a"}, {"frame": 1002},
-				{"frame": 1003, "url": "/api/v1/objects/proj/c4b"}, {"frame": 1004, "url": "/api/v1/objects/proj/c4c"}}
-		}
-		_ = json.NewEncoder(w).Encode(map[string]any{"fps": 24, "frames": frames})
+		_ = json.NewEncoder(w).Encode(map[string]any{"fps": 24, "frames": frames[r.PathValue("name")]})
 	})
 	mux.HandleFunc("GET /api/v1/objects/proj/{id}", func(w http.ResponseWriter, r *http.Request) {
-		_, _ = w.Write([]byte("png:" + r.PathValue("id")))
+		_, _ = w.Write(objects[r.PathValue("id")])
 	})
 	srv := httptest.NewServer(mux)
 	defer srv.Close()
 	h := &farm.HUD{Base: srv.URL}
-	name, data, err := h.Preview(context.Background(), farm.JobRef{Namespace: "work", Name: "sh040"})
-	if err != nil || name != "sh040.1003.png" || string(data) != "png:c4b" {
+	ctx := context.Background()
+	name, data, err := h.Preview(ctx, farm.JobRef{Namespace: "work", Name: "sh040"})
+	if err != nil || name != "sh040.1003.png" || !bytes.Equal(data, png) {
 		t.Fatalf("preview: %q %q %v", name, data, err)
 	}
-	if _, _, err := h.Preview(context.Background(), farm.JobRef{Namespace: "work", Name: "plain"}); !errors.Is(err, farm.ErrNotFound) {
-		t.Fatalf("a job with no proxies: %v", err)
+	if name, _, err := h.Preview(ctx, farm.JobRef{Namespace: "work", Name: "jpeg"}); err != nil || name != "jpeg.0001.jpg" {
+		t.Fatalf("jpeg: %q %v", name, err)
+	}
+	for _, none := range []string{"plain", "text", "big"} {
+		if _, _, err := h.Preview(ctx, farm.JobRef{Namespace: "work", Name: none}); !errors.Is(err, farm.ErrNotFound) {
+			t.Fatalf("%s is no preview: %v", none, err)
+		}
+	}
+	if _, _, err := h.Preview(ctx, farm.JobRef{Namespace: "work", Name: "wrong"}); err == nil || errors.Is(err, farm.ErrNotFound) ||
+		!strings.Contains(err.Error(), "does not match") {
+		t.Fatalf("a proxy that is not its ID: %v", err)
 	}
 }

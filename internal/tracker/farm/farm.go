@@ -339,8 +339,15 @@ func (h *HUD) Book(ctx context.Context, since int64, limit int) (api.Transitions
 	return out, err
 }
 
+// previewMax is the largest still a tracker is given: a proxy, not a plate.
+const previewMax = 16 << 20
+
 // Preview reads the job's frames (GET /jobs/{ns}/{name}/preview) and
-// fetches the middle one's preview proxy, a PNG, from the project's store.
+// fetches the middle rendered one's preview proxy from the project's
+// store, checked against its C4 ID, so what a tracker shows is the frame
+// C4 made. A proxy over previewMax, or neither PNG nor JPEG (API.md, GET
+// /objects), is no preview. The route is answered by the queue's leader:
+// another replica's 503 is an error to try again later.
 func (h *HUD) Preview(ctx context.Context, j JobRef) (string, []byte, error) {
 	var p struct {
 		Frames []struct {
@@ -374,7 +381,22 @@ func (h *HUD) Preview(ctx context.Context, j JobRef) (string, []byte, error) {
 	if err := h.do(ctx, http.MethodGet, path, "", nil, &data); err != nil {
 		return "", nil, err
 	}
-	return fmt.Sprintf("%s.%04d.png", j.Name, f.Frame), data, nil
+	if len(data) > previewMax {
+		return "", nil, fmt.Errorf("%w: the preview of %s is over %d MiB", ErrNotFound, j, previewMax>>20)
+	}
+	if want := path[strings.LastIndex(path, "/")+1:]; c4.Identify(bytes.NewReader(data)).String() != want {
+		return "", nil, fmt.Errorf("the HUD's preview of %s does not match its C4 ID %s", j, want)
+	}
+	ext := ""
+	switch {
+	case bytes.HasPrefix(data, []byte("\x89PNG\r\n\x1a\n")):
+		ext = "png"
+	case bytes.HasPrefix(data, []byte("\xff\xd8\xff")):
+		ext = "jpg"
+	default:
+		return "", nil, fmt.Errorf("%w: the preview of %s is neither PNG nor JPEG", ErrNotFound, j)
+	}
+	return fmt.Sprintf("%s.%04d.%s", j.Name, f.Frame, ext), data, nil
 }
 
 func (h *HUD) JobURL(j JobRef) string {
