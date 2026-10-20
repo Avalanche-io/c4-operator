@@ -4,7 +4,7 @@ package api
 // /jobs/{ns}/{name}/decide (`via`, internal/hud/API.md, Relayed decisions):
 // made in the tracker, by a tracker user the Tracker's people map names.
 // The HUD checks it and signs the decision with its custody: relayed, or
-// relayed-unattributed when the map names a party, not a person.
+// relayed-party when the map names a party, not a person.
 type Relay struct {
 	// Tracker is the Tracker's name, in the job's namespace.
 	Tracker string `json:"tracker"`

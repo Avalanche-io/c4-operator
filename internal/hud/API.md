@@ -1018,7 +1018,7 @@ takes any user the map names); otherwise `403`, `400` for a malformed
 `via`. The control record's `actor` is the person as the tracker named
 them (`dana via tracker github (@dana)`), `authenticated` says who relayed
 it, `relay` is `via`, and `custody` is `relayed`, or
-`relayed-unattributed` when `people` maps the user to a party rather than
+`relayed-party` when `people` maps the user to a party rather than
 a person (a model registry, which names no person). A decision made in the
 HUD is `direct`.
 

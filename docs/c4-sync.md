@@ -290,7 +290,7 @@ job does afterwards.
 - Experimental API. The jobs c4-sync submits carry their tracker
   entity (`c4.avalanche.io/tracker-ref`) and the version they follow
   (`spec.follows`), both in their records. A decision relayed from a
-  tracker is signed as `relayed` (or `relayed-unattributed`, by a party
+  tracker is signed as `relayed` (or `relayed-party`, by a party
   such as a model registry), naming the tracker, the entity, the tracker
   user and the stored evidence; the HUD checks it against the Tracker's
   `people`.

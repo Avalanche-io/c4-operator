@@ -62,7 +62,7 @@ func (s *Server) relayed(ctx context.Context, v *api.Viewer, rec *jobRec, wait *
 	}
 	grade := CustodyRelayed
 	if strings.HasPrefix(mapped, "party:") {
-		grade = CustodyRelayedUnattributed
+		grade = CustodyRelayedParty
 	}
 	if !strings.HasPrefix(wait.Server, "person:") && !strings.HasPrefix(wait.Server, "party:") {
 		return "", "", refuse("the wait is for %s, which a tracker cannot serve", wait.Server)
