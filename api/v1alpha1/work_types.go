@@ -204,8 +204,11 @@ type WorkJobSpec struct {
 	// Forecast makes the job a forecast only (integrations GAPS 9): work a
 	// tracker expects (a shot not yet turned over, its bid) that the farm
 	// plans for. It is estimated and placed among the real work, never
-	// released: no pods, no quota, no burst capacity bought for it. A real
-	// job replaces it when the work is submitted. Set at creation only.
+	// released: no pods, no quota, no burst capacity bought for it, and no
+	// real job's ETA moves for it. It needs a deadline, its own or a
+	// Milestone's. A real job replaces it when the work is submitted. A
+	// job is a forecast, or not, from its creation; its size may change
+	// as the bid does.
 	// +optional
 	Forecast *WorkForecast `json:"forecast,omitempty"`
 
@@ -1287,19 +1290,27 @@ type WorkForecast struct {
 	// SlotHours is its expected work; empty, the class plans it from the
 	// job's params as it would the real job (frames, and the class's
 	// prior).
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
 	// +optional
 	SlotHours string `json:"slotHours,omitempty"`
 	// SD is the spread of SlotHours (default half of it).
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
 	// +optional
 	SD string `json:"sd,omitempty"`
-	// UnitHours is its longest single unit, its critical path (default an
-	// hour, at most SlotHours).
+	// UnitHours is how long one unit runs. With SlotHours it is the
+	// longest unit, the critical path (default the class's recent unit
+	// time in the project, else an hour; at most SlotHours); with the
+	// class's plan, every unit's prior.
+	// +kubebuilder:validation:Pattern=`^[0-9]+(\.[0-9]+)?$`
 	// +optional
 	UnitHours string `json:"unitHours,omitempty"`
-	// Start is the earliest it can begin (a turnover date).
+	// Start is the earliest it can begin (a turnover date): it is planned
+	// to finish no earlier than Start and its own duration.
 	// +optional
 	Start *metav1.Time `json:"start,omitempty"`
-	// Exists is the chance it happens at all, 0 to 1 (default 1).
+	// Exists is the chance it happens at all, 0 to 1 (default 1): it
+	// weights the expected work.
+	// +kubebuilder:validation:Pattern=`^(0(\.[0-9]+)?|1(\.0+)?)$`
 	// +optional
 	Exists string `json:"exists,omitempty"`
 }

@@ -89,6 +89,11 @@ type Job struct {
 	// still waiting starts no earlier than its upstream jobs' planned
 	// finish.
 	After []string
+	// NotBefore is when a job still waiting can begin at the earliest (a
+	// forecast's start). Like After, it moves the job's planned finish
+	// and its risk, not its share or the bursts: zero or past, it could
+	// begin now.
+	NotBefore time.Time
 	// RequiredRate is a throughput objective in slots, used when Deadline
 	// is zero.
 	RequiredRate float64

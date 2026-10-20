@@ -79,36 +79,46 @@ func (q *Queue) milestoneStatus(ctx context.Context, ms map[string][]*c4v1.Miles
 	for _, list := range ms {
 		for _, m := range list {
 			st := c4v1.MilestoneStatus{ObservedGeneration: m.Generation, Risk: "none"}
+			fr := "none"
+			worse := func(r *string, x string) {
+				if riskRank[x] > riskRank[*r] {
+					*r = x
+				}
+			}
 			var names []string
 			for i := range jobs {
 				j := &jobs[i]
 				if j.Namespace != m.Namespace || !selects(m, j) {
 					continue
 				}
-				names = append(names, j.Name)
-				if j.Spec.Forecast != nil {
-					// Forecasts are counted apart: risk stays the real
-					// work's, which trackers write back.
+				if isForecast(j) {
+					// Counted apart: risk stays the real work's, which
+					// trackers write back (forecast.go).
 					st.Forecast++
-					if e := j.Status.Estimate; e != nil && riskRank[e.Risk] > riskRank[orStr(st.ForecastRisk, "none")] {
-						st.ForecastRisk = e.Risk
+					if e := j.Status.Estimate; e != nil {
+						worse(&fr, e.Risk)
 					}
 					continue
 				}
+				names = append(names, j.Name)
 				switch j.Status.Phase {
 				case "Succeeded":
 					st.Done++
 					continue
 				case "Failed":
 					// It will not finish until a person acts.
-					if riskRank[st.Risk] < riskRank["willMiss"] {
-						st.Risk = "willMiss"
-					}
+					worse(&st.Risk, "willMiss")
 					continue
 				}
-				if e := j.Status.Estimate; e != nil && riskRank[e.Risk] > riskRank[st.Risk] {
-					st.Risk = e.Risk
+				if e := j.Status.Estimate; e != nil {
+					worse(&st.Risk, e.Risk)
 				}
+				// as the farm would plan it with the forecast work
+				worse(&fr, q.fc.risk[j.Namespace+"/"+j.Name])
+			}
+			if st.Forecast > 0 {
+				worse(&fr, st.Risk)
+				st.ForecastRisk = fr
 			}
 			sort.Strings(names)
 			st.Count = int32(len(names))

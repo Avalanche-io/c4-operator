@@ -78,10 +78,8 @@ type Queue struct {
 	Stores StoreFunc
 	// tlog is the transition log's head (book.go), read once per leader.
 	tlog *bookLog
-	// The last forecast pass (forecast.go).
-	lastFpass    time.Time
-	lastFdec     sched.Decisions
-	lastForecast Forecast
+	// fc is the last forecast pass (forecast.go).
+	fc forecastMem
 	// PriorityClass, when it names a PriorityClass that exists, is set on
 	// unit pods whose template names none (config/manager: c4-unit, with
 	// preemptionPolicy Never, so only the queue preempts units).
@@ -653,9 +651,9 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.stage(ctx, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
-	q.forecastPass(now, poolInfo, snap, fviews, cfg)
+	q.forecastPass(now, snap, cfg, dec, views, fviews)
 	q.report(ctx, now, dec, views)
-	q.report(ctx, now, q.lastFdec, fviews)
+	q.report(ctx, now, q.fc.dec, fviews)
 	q.milestoneStatus(ctx, q.milestones, jobs.Items)
 	q.saveCalibrations(ctx, now)
 	q.last = now
@@ -708,6 +706,10 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	v.pools = j.Spec.Pools
 	if len(v.pools) == 0 {
 		v.pools = d.Pools()
+	}
+	if isForecast(j) {
+		q.observeForecast(v, pools, now)
+		return v
 	}
 	// A person's requeue request: run these units again.
 	if req := j.Annotations[c4v1.AnnotationRequeue]; req != "" {
@@ -1112,6 +1114,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 			}
 		}
 	}
+	q.forecastPriors(e, v)
 	noteExpansions(e, plan, v.mem)
 	// A unit's key learns from its first pass: a rerun (a rework, which
 	// resumes from the unit's last output) is priced apart (rework.go),
@@ -1364,6 +1367,12 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		if !ok || v == nil || p == nil {
 			continue
 		}
+		if isForecast(v.job) {
+			// Never: a forecast is left out of the live decision
+			// (forecast.go), so this is a third guard.
+			q.Log.Error(nil, "refusing to release a forecast job's unit", "job", key, "unit", idx)
+			continue
+		}
 		if !guard.admitGate(v, idx) || !guard.admit(v, idx) {
 			// Its claims conflict with a unit started this tick: it waits.
 			continue
@@ -1450,11 +1459,6 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		}
 		if tools != nil {
 			v.mem.toolsWait = ""
-		}
-		if isForecast(v.job) {
-			// Never: a forecast is left out of the live decision.
-			q.Log.Error(nil, "refusing to release a forecast job's unit", "job", key, "unit", idx)
-			continue
 		}
 		v.mem.attempts[idx]++
 		pod := q.podFor(v, idx, v.mem.attempts[idx], p)

@@ -647,8 +647,9 @@ func (a *alloc) planSubsets(g []groupMember) {
 }
 
 // startAfterUpstream delays the planned finish of a deadline job still
-// waiting on upstream jobs (Job.After): it starts no earlier than their
-// latest planned finish and then takes its own duration, so its finish
+// waiting on upstream jobs (Job.After) or for its NotBefore: it starts no
+// earlier than their latest planned finish, or than NotBefore, and then
+// takes its own duration, so its finish
 // is the later of that and its place in the plan, and it is at risk if
 // that passes its deadline. The plan above treats it as able to start
 // now. Upstream finishes may themselves move, so this runs in rounds
@@ -664,7 +665,8 @@ func (a *alloc) startAfterUpstream() {
 	}
 	var es []entry
 	for _, jc := range a.jobs {
-		if !jc.hasDeadline || len(jc.j.After) == 0 || !jc.waiting() || jc.noPool || jc.j.Hold || jc.j.HoldStop {
+		later := jc.j.NotBefore.After(a.now)
+		if !jc.hasDeadline || len(jc.j.After) == 0 && !later || !jc.waiting() || jc.noPool || jc.j.Hold || jc.j.HoldStop {
 			continue
 		}
 		es = append(es, entry{jc: jc, base: jc.planState(), gs: jc.view()})
@@ -674,6 +676,10 @@ func (a *alloc) startAfterUpstream() {
 		for _, e := range es {
 			jc := e.jc
 			s50, s90, g50, g90 := 0.0, 0.0, 0.0, 0.0
+			if nb := jc.j.NotBefore; nb.After(a.now) {
+				s := nb.Sub(a.now).Seconds()
+				s50, s90, g50, g90 = s, s, s, s
+			}
 			for _, id := range jc.j.After {
 				u := a.byID[id]
 				if u == nil || u == jc || u.finish90 <= 0 {

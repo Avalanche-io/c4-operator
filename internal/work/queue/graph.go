@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"strconv"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -59,13 +58,20 @@ func (e errLoading) Error() string { return "loading expansion documents: " + e.
 // recorded expansion replayed from its document.
 func (q *Queue) planJob(ctx context.Context, v *view) (*class.Plan, error) {
 	m, j := v.mem, v.job
-	var p *class.Plan
-	var err error
-	if isForecast(j) && forecastHours(j.Spec.Forecast.SlotHours) > 0 {
-		p = forecastPlan(j)
-	} else {
-		p, err = v.driver.Plan(j)
+	if f := j.Spec.Forecast; f != nil {
+		// A forecast is sized, never run: slot-hours, or the class's
+		// units (forecast.go). No review: it is never done.
+		if f.SlotHours != "" {
+			return forecastPlan(j)
+		}
+		p, err := v.driver.Plan(j)
+		if err != nil {
+			return nil, err
+		}
+		forecastUnits(p, f)
+		return p, nil
 	}
+	p, err := v.driver.Plan(j)
 	if err == nil {
 		p, err = recomputeUnit(j, p)
 	}
@@ -342,12 +348,8 @@ func unitPriors(e *estimate.Estimator, plan *class.Plan, hasPrior map[string]boo
 			sd = u.Work / 2
 		}
 		if u.Generator {
-			longest := u.Work
-			if l, err := strconv.ParseFloat(u.Params["longest"], 64); err == nil && l > 0 {
-				longest = l // a forecast's longest unit (forecast.go)
-			}
-			e.SetGenPrior(u.Key, estimate.GenPrior{Children: estimate.Prior{Mean: max(1, u.Work/longest), SD: 1},
-				Work: estimate.Prior{Mean: u.Work, SD: sd}, Longest: estimate.Prior{Mean: longest, SD: min(sd, longest/2)}})
+			e.SetGenPrior(u.Key, estimate.GenPrior{Children: estimate.Prior{Mean: 1, SD: 1},
+				Work: estimate.Prior{Mean: u.Work, SD: sd}, Longest: estimate.Prior{Mean: u.Work, SD: sd}})
 			continue
 		}
 		slots := float64(max(1, u.Slots))

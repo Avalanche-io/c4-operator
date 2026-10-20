@@ -319,7 +319,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	switch {
 	case isForecast(v.job):
 		// It never runs: a real job replaces it (forecast.go).
-		st.Phase = "Forecast"
+		forecastStatus(&st, v)
 	case finished == n && short && active == 0:
 		// Every unit finished, short of the measure the job requires.
 		st.Phase = "Failed"
@@ -364,7 +364,20 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	if !ok {
 		return st
 	}
-	st.Rank = int32(js.Rank)
+	if !isForecast(v.job) {
+		st.Rank = int32(js.Rank)
+	}
+	e, raw := q.estimateFor(now, v, js)
+	if m := v.mem; m.plan != nil && !isForecast(v.job) {
+		m.noteFinish(now, len(m.millis), len(m.plan.Units), raw.P50)
+	}
+	st.Estimate = e
+	return st
+}
+
+// estimateFor is a job's status.estimate from its plan state js, and the
+// band before the live calibration's adjustment.
+func (q *Queue) estimateFor(now time.Time, v *view, js sched.JobState) (*c4v1.WorkEstimate, forecast.Band) {
 	e := &c4v1.WorkEstimate{
 		RemainingWork: int64(v.sum.W), RemainingWorkP90: int64(v.sum.W90),
 		RequiredSlots: fmt.Sprintf("%.2f", js.Required), AttainableSlots: fmt.Sprintf("%.2f", js.Attainable),
@@ -378,9 +391,6 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	// What a person is shown: the calibrated band with half the tail
 	// (forecast.Display), not the scheduler's conservative finish.
 	raw := forecast.Display(now, v.sum, js.ETA50, js.ETA90, forecast.Tail(v.mem.plan.Units[0].Slots, js.GroupSlots))
-	if m := v.mem; m.plan != nil {
-		m.noteFinish(now, len(m.millis), len(m.plan.Units), raw.P50)
-	}
 	if b := q.shown(v, now, raw); !b.IsZero() {
 		t := func(x time.Time) *metav1.Time { return &metav1.Time{Time: x.Truncate(time.Second)} }
 		e.ETA50, e.ETA80, e.ETA90, e.ETA95 = t(b.P50), t(b.P80), t(b.P90), t(b.P95)
@@ -395,8 +405,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	if sl, ok := shownSlack(v, js, e); ok {
 		e.SlackSeconds = sl
 	}
-	st.Estimate = e
-	return st
+	return e, raw
 }
 
 // heavy lists the job's heavy ranges in axis values (frames).

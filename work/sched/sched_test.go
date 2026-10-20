@@ -1442,3 +1442,28 @@ func TestRemoteBurstPoolStagesWithTheBurst(t *testing.T) {
 		t.Fatalf("stages %+v", d.Stage)
 	}
 }
+
+// A waiting job that cannot begin before NotBefore is planned to finish
+// no earlier than then plus its duration, and is at risk when that is
+// past its deadline; a NotBefore already past changes nothing.
+func TestNotBeforeDelaysTheFinish(t *testing.T) {
+	shot := waitingJob("shot", 10, 10, 6*time.Hour) // 1h on 10 slots
+	s := Snapshot{Now: t0, Pools: []Pool{cpu(10)}, Jobs: []Job{shot}}
+	now := Decide(s, &State{}, DefaultConfig()).Jobs["shot"]
+	if now.AtRisk || now.ETA90.After(t0.Add(2*time.Hour)) {
+		t.Fatalf("able to begin now: ETA90 %v, at risk %v", now.ETA90, now.AtRisk)
+	}
+	s.Jobs[0].NotBefore = t0.Add(4 * time.Hour)
+	later := Decide(s, &State{}, DefaultConfig()).Jobs["shot"]
+	if later.ETA90.Before(t0.Add(5*time.Hour)) || !later.StartAfter.Equal(t0.Add(4*time.Hour)) || later.AtRisk {
+		t.Fatalf("not before 4h: ETA90 %v, start after %v, at risk %v", later.ETA90, later.StartAfter, later.AtRisk)
+	}
+	s.Jobs[0].NotBefore = t0.Add(5*time.Hour + 30*time.Minute)
+	if late := Decide(s, &State{}, DefaultConfig()).Jobs["shot"]; !late.AtRisk {
+		t.Fatalf("not before 5h30 with 1h of work due at 6h: ETA90 %v, not at risk", late.ETA90)
+	}
+	s.Jobs[0].NotBefore = t0.Add(-time.Hour)
+	if past := Decide(s, &State{}, DefaultConfig()).Jobs["shot"]; !past.ETA90.Equal(now.ETA90) || !past.StartAfter.IsZero() {
+		t.Fatalf("a past NotBefore moved the plan: ETA90 %v (was %v), start after %v", past.ETA90, now.ETA90, past.StartAfter)
+	}
+}

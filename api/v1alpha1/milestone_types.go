@@ -50,8 +50,8 @@ type MilestoneSource struct {
 type MilestoneStatus struct {
 	// +optional
 	ObservedGeneration int64 `json:"observedGeneration,omitempty"`
-	// Jobs are the covered jobs' names (at most 200, sorted), and Count
-	// how many it covers.
+	// Jobs are the covered real jobs' names (at most 200, sorted), and
+	// Count how many it covers; forecast jobs are counted in Forecast.
 	// +optional
 	Jobs []string `json:"jobs,omitempty"`
 	// +optional
@@ -63,9 +63,10 @@ type MilestoneStatus struct {
 	// Done counts the covered jobs that succeeded.
 	// +optional
 	Done int32 `json:"done,omitempty"`
-	// Forecast counts the covered forecast jobs (integrations GAPS 9),
-	// and ForecastRisk is the worst risk among them; Risk is the real
-	// work's alone.
+	// Forecast counts the covered forecast jobs (integrations GAPS 9).
+	// ForecastRisk is the worst risk once their work comes: theirs, and
+	// the covered real jobs' as the farm plans them with it. Risk is the
+	// real work's alone, as the farm plans it now.
 	// +optional
 	Forecast int32 `json:"forecast,omitempty"`
 	// +optional
