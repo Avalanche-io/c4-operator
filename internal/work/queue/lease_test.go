@@ -90,3 +90,71 @@ func TestLeaseGatesUnitPods(t *testing.T) {
 		}
 	}
 }
+
+// A job a tracker submitted for a person, under the person's grant, gets
+// their lease only while that grant serves: not once it is revoked, ended
+// or does not cover the pool. Units are not released in the meantime.
+func TestLeaseNeedsTheGrantTheJobWasSubmittedUnder(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	q.HolderTransfer = true
+	ctx := context.Background()
+	pool := "cpu-" + ns
+	exp := metav1.NewTime(now.Add(30 * time.Minute))
+	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "mine"}, Spec: c4v1.CredentialLeaseSpec{
+		Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"joshua"}},
+		Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{pool}},
+		TTL: metav1.Duration{Duration: 24 * time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
+	if err := k8s.Create(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	l.Status = c4v1.CredentialLeaseStatus{State: c4v1.LeaseActive, ExpiresAt: &exp}
+	if err := k8s.Status().Update(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	j := job(ns, "github-7", "render", pool, map[string]string{"frames": "1-1"}, now.Add(time.Hour))
+	j.Annotations = map[string]string{c4v1.AnnotationOwner: "joshua", c4v1.AnnotationGrant: "c4grantrecord"}
+	j.Labels = map[string]string{c4v1.LabelTracker: "github"}
+	spec := &j.Spec.Template.Spec
+	spec.Volumes = []corev1.Volume{{Name: "lease", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: c4v1.LeaseSecretPrefix + "mine"}}}}
+	spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "lease", MountPath: "/etc/c4/lease", ReadOnly: true}}
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	held := func(why string) {
+		t.Helper()
+		tick(t, q)
+		if n := len(unitPods(t, ns, "github-7")); n != 0 {
+			t.Fatalf("released %d units %s", n, why)
+		}
+		if ok, reason := q.leaseReady(ctx, j, pool, *now); ok || reason == "" {
+			t.Fatalf("%s: lease ready %v %q", why, ok, reason)
+		}
+	}
+	held("with no grant")
+
+	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: c4v1.SubmitGrantName("github", "joshua")},
+		Spec: c4v1.SubmitGrantSpec{Person: "joshua", Tracker: "github", Until: metav1.NewTime(now.Add(time.Hour)),
+			Revoked: &c4v1.GrantRevocation{By: "joshua", At: metav1.NewTime(*now)}}}
+	if err := k8s.Create(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	held("under a revoked grant")
+	g.Spec.Revoked, g.Spec.Until = nil, metav1.NewTime(now.Add(-time.Minute))
+	if err := k8s.Update(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	held("under an ended grant")
+	g.Spec.Until, g.Spec.Pools = metav1.NewTime(now.Add(time.Hour)), []string{"gpu"}
+	if err := k8s.Update(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	held("in a pool the grant does not cover")
+	g.Spec.Pools = []string{pool}
+	if err := k8s.Update(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if pods := unitPods(t, ns, "github-7"); len(pods) != 1 || pods[0].Annotations[c4v1.AnnotationOwner] != "joshua" {
+		t.Fatalf("under the grant: %+v", pods)
+	}
+}

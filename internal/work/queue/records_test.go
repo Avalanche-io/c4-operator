@@ -39,7 +39,8 @@ func TestQueueSignsDecisionsAndJobs(t *testing.T) {
 	q := &Queue{Signer: sg, PolicyName: "objective", Log: zap.New(zap.WriteTo(&strings.Builder{})),
 		Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
 	j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "train",
-		Annotations: map[string]string{c4v1.AnnotationControlRecords: "c4control1,c4control2"}},
+		Annotations: map[string]string{c4v1.AnnotationControlRecords: "c4control1,c4control2",
+			c4v1.AnnotationOwner: "joshua", c4v1.AnnotationSubmittedVia: "c4-sync", c4v1.AnnotationGrant: "c4grantrecord"}},
 		Spec: c4v1.WorkJobSpec{Class: "ml"}}
 	v := &view{job: j, key: "show-a/train", project: "show-a", mem: &jobMem{}}
 	now := time.Now()
@@ -85,12 +86,16 @@ func TestQueueSignsDecisionsAndJobs(t *testing.T) {
 		Job       string           `json:"job"`
 		Decisions []map[string]any `json:"decisions"`
 		Controls  []string         `json:"controls"`
+		Owner     string           `json:"owner"`
+		Via       string           `json:"submittedVia"`
+		Grant     string           `json:"grant"`
 	}
 	if err := json.Unmarshal(jr.Predicate, &p); err != nil {
 		t.Fatal(err)
 	}
 	if jr.Subject("output") != out.String() || p.Job != "show-a/train" || len(p.Decisions) != 1 ||
-		p.Decisions[0]["record"] != v.mem.decisions[0].Record || len(p.Controls) != 2 {
+		p.Decisions[0]["record"] != v.mem.decisions[0].Record || len(p.Controls) != 2 ||
+		p.Owner != "joshua" || p.Via != "c4-sync" || p.Grant != "c4grantrecord" {
 		t.Fatalf("job record %s", jr.Predicate)
 	}
 	// Sealed once: a later status pass keeps the same record.

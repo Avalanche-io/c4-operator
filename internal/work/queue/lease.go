@@ -9,6 +9,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	"k8s.io/apimachinery/pkg/types"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -64,8 +65,38 @@ func (q *Queue) leaseReady(ctx context.Context, j *c4v1.WorkJob, pool string, no
 		case !now.Before(l.LeaseDeadline().Time):
 			return false, fmt.Sprintf("credential lease %s has ended", name)
 		}
+		if why := q.grantServes(ctx, j, pool, now); why != "" {
+			return false, why
+		}
 	}
 	return true, ""
+}
+
+// grantServes says why a job a tracker submitted for a person (under the
+// person's grant, integrations GAPS 17) may no longer have their lease in
+// pool: the grant is gone, revoked or ended, or does not cover the pool or
+// the job's class. "" for a job submitted otherwise, or while it serves. A
+// unit already running finishes its attempt, as when a lease lapses; the
+// next is not released.
+func (q *Queue) grantServes(ctx context.Context, j *c4v1.WorkJob, pool string, now time.Time) string {
+	if j.Annotations[c4v1.AnnotationGrant] == "" {
+		return ""
+	}
+	owner, tracker := j.Annotations[c4v1.AnnotationOwner], j.Labels[c4v1.LabelTracker]
+	var g c4v1.SubmitGrant
+	if err := q.Client.Get(ctx, types.NamespacedName{Namespace: j.Namespace, Name: c4v1.SubmitGrantName(tracker, owner)}, &g); err != nil {
+		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {
+			return fmt.Sprintf("the grant from %s to tracker %s is gone", owner, tracker)
+		}
+		return fmt.Sprintf("the grant from %s to tracker %s: %v", owner, tracker, err)
+	}
+	if g.Spec.Person != owner || g.Spec.Tracker != tracker {
+		return fmt.Sprintf("the grant from %s to tracker %s is gone", owner, tracker)
+	}
+	if why := g.Lapsed(now); why != "" {
+		return why
+	}
+	return g.Uncovered([]string{pool}, j.Spec.Class)
 }
 
 func orNone(s string) string {
