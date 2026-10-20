@@ -124,10 +124,13 @@ needs Maya 2023 or later (Python 3.9); no C4 menu added" in the Script Editor.
    worker, turns true after Esc. `cmds.file(save=True)` saves to the open
    path without a dialog.
 2. **Expect** in the summary: "sm0140-render-beauty-v001   Maya render · 48
-   frames · 12 units" and "sm0140-render-fg-v001   Maya render · 10 frames ·
-   3 units", "files 76 found from sm0140_light_v003.ma … 76 to upload",
-   estimate and due lines with a slack, local times with UTC beside them, and
-   "Ready: press Submit to send it to the farm." Submit is now available.
+   frames in 12 units" and "sm0140-render-fg-v001   Maya render · 10 frames
+   in 3 units" (neither "after" the other), "files 76 found from
+   sm0140_light_v003.ma … 76 to upload", an estimate line for each layer, due
+   lines "Dailies, Thu 18:00 · slack …" with local times and UTC beside them,
+   and "Ready: press Submit to send it to the farm." Submit is now available.
+   The tool must declare no licences: until the farm counts seats it refuses
+   such a tool, and the summary says so with its fix.
    **[guess]** that `maya.utils.executeDeferred(fn, *args)` runs the update
    on the main thread soon after, even while Maya is idle.
 3. Press **Check** and press Esc at once. **Expect:** "Check cancelled." The

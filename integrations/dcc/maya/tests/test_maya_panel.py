@@ -155,11 +155,13 @@ def test_open_check_submit(tmp_path, farm):
     assert fm.state().progress is None, "the progress window closes"
     assert w.checked.ok, w.checked.errors
     text = summary()
-    assert "sm0140-render-beauty-v001   Maya render · 48 frames · 12 units" in text
-    assert "sm0140-render-fg-v001   Maya render · 10 frames · 3 units" in text
-    assert re.search(r"estimate\s+ready", text) and "dailies · slack" in text
+    assert "sm0140-render-beauty-v001   Maya render · 48 frames in 12 units" in text
+    assert "sm0140-render-fg-v001   Maya render · 10 frames in 3 units" in text
+    assert "after" not in text, "layers do not wait for each other"
+    assert len(re.findall(r"estimate\s+ready", text)) == 2, "each layer has its own estimate"
+    assert "Dailies, Thu 18:00 · slack" in text, "the milestone as the project names it"
     assert "76 found from sm0140_light_v003.ma" in text and "76 to upload" in text
-    assert "autodesk/arnold, 1 per unit" in text
+    assert "licences" not in text
     assert text.endswith("Ready: press Submit to send it to the farm.")
     assert farm.calls[-1][0] == "check" and not farm.store
     log = fm.state().progress_log[0]
@@ -407,6 +409,18 @@ def test_a_missing_file_is_listed_with_its_fix(tmp_path, farm):
     fm.type_into("c4_layer_0", False)
     check(w)
     assert w.checked.ok, "fg does not read the caustics"
+
+
+def test_a_tool_that_needs_licences_is_refused_with_its_fix(tmp_path):
+    counted = copy.deepcopy(MAYA_RENDER)
+    counted["needs"]["licences"] = {"autodesk/arnold": 1}
+    w = opened(tmp_path, FakeFarm(tools=[counted], projects={"saltmarsh": dict(SALTMARSH, root="/show")}))
+    check(w)
+    assert not w.checked.ok and not enabled("c4_submit")
+    text = summary()
+    assert text.startswith("To fix before submitting:\n  jobs.render-beauty.tool: maya-render needs licences")
+    assert "      use a version of the tool that declares none for now" in text
+    assert text.endswith("Check again.")
 
 
 def test_no_farm_address(tmp_path):

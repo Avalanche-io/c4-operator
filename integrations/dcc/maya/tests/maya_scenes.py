@@ -29,7 +29,7 @@ MAYA_RENDER = {
         {"name": "verbose", "type": "BOOL", "default": False, "show": "advanced",
          "userInterface": {"label": "Verbose log"}},
     ],
-    "needs": {"cpu": 16, "memory": "64G", "licences": {"autodesk/arnold": 1}},
+    "needs": {"cpu": 16, "memory": "64G"},   # no licences: the farm refuses tools that need them for now
     "reuse": "exact",
 }
 
