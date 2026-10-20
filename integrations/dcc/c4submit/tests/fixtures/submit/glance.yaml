@@ -1,0 +1,16 @@
+# From proposals/authoring/SUBMIT.md (2026-10-20), as written there.
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: dailies                       # a milestone, a time ("fri 18:00", "+3h"), or "suggested"
+tree: .                            # where the work starts: a folder, a C4 ID, or job:<name>
+jobs:
+  light:
+    tool: karma
+    frames: 1001-1048
+    with: {stage: sm0140.usda}
+  comp:
+    tool: nuke-comp
+    after: light                   # frame by frame
+    with: {script: comp/sm0140_comp.nk}
+    approve: {by: role:comp-supervisor}
