@@ -144,6 +144,9 @@ type Capabilities struct {
 	// PublishForReview: Publish makes the entity people review (a Flow
 	// Version), which becomes the link's review.
 	PublishForReview bool
+	// Mentions: the tracker can tell a person by name, where they work
+	// (write kind mention: an @-mention, a Note addressed to them).
+	Mentions bool
 }
 
 // Adapter is one tracker family.

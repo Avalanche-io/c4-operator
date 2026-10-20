@@ -3,6 +3,7 @@ package syncer_test
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -510,5 +511,34 @@ func TestFlowMilestoneNeedsCovers(t *testing.T) {
 	var ms c4v1.MilestoneList
 	if err := e.k8s.List(context.Background(), &ms); err != nil || len(ms.Items) != 0 {
 		t.Fatalf("milestones: %d (%v)", len(ms.Items), err)
+	}
+}
+
+// In Flow the assignment is a Note on the Task addressed to the person,
+// so Flow notifies them.
+func TestFlowAssignmentAddressesTheNote(t *testing.T) {
+	e := setupFlow(t)
+	e.pass()
+	job := "flow-" + strconv.Itoa(e.task.ID)
+	at := e.clock.now()
+	e.job(job, func(j *api.Job) {
+		j.Phase = "Running"
+		j.Acks = []api.Ack{{Kind: "assign", Units: "1001-1004", Actor: "pat", Assignee: "dana", Note: "relight the key", At: at}}
+	})
+	e.pass()
+	e.clock.add(time.Minute)
+	e.pass()
+	var found []*flowtest.Record
+	for _, n := range e.site.All("Note") {
+		if strings.Contains(fmt.Sprint(n.Fields["content"]), "units 1001-1004") {
+			found = append(found, n)
+		}
+	}
+	if len(found) != 1 {
+		t.Fatalf("notes about the assignment: %d", len(found))
+	}
+	to := fmt.Sprint(found[0].Fields["addressings_to"])
+	if !strings.Contains(to, strconv.Itoa(e.dana.ID)) || found[0].Fields["subject"] != "C4: units assigned to you" {
+		t.Fatalf("note: %+v", found[0].Fields)
 	}
 }

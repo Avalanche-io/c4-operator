@@ -115,6 +115,14 @@ cannot grant farm access. MLflow records no author for an alias or a tag.
 Its decisions are attributed to `mlflow-registry`, which you map to a
 party (`party:ml-leads`), and a person's wait refuses them.
 
+**Assignments.** When someone assigns failed units to a person in C4
+(`c4 farm`'s acknowledge with an assignee, the HUD, MCP
+`c4_acknowledge_units`), c4-sync tells that person where they work: an
+@-mention on the GitHub issue, or a Note on the Flow Task addressed to them,
+so the tracker notifies them. It does this once per assignment, for a person
+`people` maps to a tracker user. Anyone else stays assigned in C4 only, and
+the link's `Assigned` condition says so.
+
 ## Webhooks
 
 Deliveries arrive at `POST /webhooks/<namespace>/<tracker>` on the

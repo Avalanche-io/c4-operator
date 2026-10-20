@@ -82,6 +82,7 @@ func (a *Adapter) Capabilities() tracker.Capabilities {
 		Webhooks:         true,
 		EditableComments: true,
 		ReviewHeads:      true,
+		Mentions:         true,
 		// GitHub takes no idempotency key on writes: Probe stands in.
 		// Milestone due_on is a timestamp; whether GitHub keeps a time of
 		// day for it is unverified (tools/github.md), so an intake rule
@@ -610,6 +611,8 @@ func keyMarker(key string) string { return "<!-- c4-sync:key=" + key + " -->" }
 //     target_url, context.
 //   - comment: a comment on On (an Issue or PullRequest), or with
 //     Note.Replace, an edit of that comment.
+//   - mention: a comment on On that @-mentions Fields["user"], so GitHub
+//     notifies them.
 func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, error) {
 	switch w.Kind {
 	case "check":
@@ -633,11 +636,17 @@ func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, erro
 			return tracker.Ref{}, err
 		}
 		return tracker.Ref{Type: "Status", ID: strconv.FormatInt(st.ID, 10)}, nil
-	case "comment":
+	case "comment", "mention":
 		if w.Note == nil || w.Note.Body == "" {
 			return tracker.Ref{}, errors.New("github: comment write without a body")
 		}
 		body := w.Note.Body
+		if w.Kind == "mention" {
+			if w.Fields["user"] == "" || w.Note.Replace != nil {
+				return tracker.Ref{}, errors.New("github: a mention names its user and is a new comment")
+			}
+			body = "@" + w.Fields["user"] + " " + body
+		}
 		if w.Key != "" {
 			body += "\n\n" + keyMarker(w.Key)
 		}
@@ -743,7 +752,7 @@ func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Outpu
 // state and description as the newest one.
 func (a *Adapter) Probe(ctx context.Context, w tracker.Write) (bool, tracker.Ref, error) {
 	switch w.Kind {
-	case "comment":
+	case "comment", "mention":
 		if w.Key == "" || w.Note == nil || w.Note.Replace != nil {
 			return false, tracker.Ref{}, nil // an edit is idempotent by itself
 		}

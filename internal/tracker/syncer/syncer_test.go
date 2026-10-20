@@ -633,3 +633,43 @@ func TestSubmitForAPersonNeedsTheirGrant(t *testing.T) {
 		t.Fatalf("condition after the grant: %+v", c)
 	}
 }
+
+// Failed units assigned to a person in C4 are mirrored where they work:
+// one @-mention on the issue, once, for a person the Tracker's people map
+// names; a C4 person it gives no tracker user stays assigned in C4 only.
+func TestAssignmentMentionsThePerson(t *testing.T) {
+	e := setup(t)
+	e.pass()
+	at := e.clock.now()
+	e.job(func(j *api.Job) {
+		j.Phase = "Running"
+		j.Acks = []api.Ack{{Kind: "assign", Units: "14", Actor: "lee", Assignee: "dana", Note: "the GPU driver on node-3", At: at}}
+	})
+	e.pass()
+	e.clock.add(time.Minute)
+	e.pass()
+	var mentions []string
+	for _, c := range e.gh.Comments(7) {
+		if strings.HasPrefix(c.Body, "@dana ") {
+			mentions = append(mentions, c.Body)
+		}
+	}
+	if len(mentions) != 1 || !strings.Contains(mentions[0], "units 14 of work/gh-7 failed and are assigned to you by lee: the GPU driver on node-3") {
+		t.Fatalf("mentions: %q", mentions)
+	}
+
+	e.job(func(j *api.Job) {
+		j.Acks = append(j.Acks, api.Ack{Kind: "assign", Units: "15", Actor: "lee", Assignee: "ivo", At: at})
+	})
+	e.clock.add(time.Minute)
+	e.pass()
+	c := meta.FindStatusCondition(e.link().Status.Conditions, "Assigned")
+	if c == nil || c.Reason != "NoTrackerUser" || !strings.Contains(c.Message, "ivo") {
+		t.Fatalf("condition: %+v", c)
+	}
+	for _, cm := range e.gh.Comments(7) {
+		if strings.Contains(cm.Body, "units 15") {
+			t.Fatalf("mentioned someone for ivo: %s", cm.Body)
+		}
+	}
+}

@@ -741,6 +741,9 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 			return err
 		}
 	}
+	if err := s.mirrorAssignments(ctx, c, t, l, j, jr, now); err != nil {
+		return err
+	}
 	if l.Status.State != sum.State {
 		if err := s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.State = sum.State }); err != nil {
 			return err
@@ -748,6 +751,62 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	}
 	s.setLinkCond(ctx, l, CondSynced, metav1.ConditionTrue, "Synced", "")
 	return nil
+}
+
+// mirrorAssignments tells a person, where they work, when failed units
+// are assigned to them in C4 (integrations GAPS 13): a mention on the
+// entity (an @-mention on the issue, a Note addressed to them on the
+// Task), once per assignment. A C4 person the Tracker's people map gives
+// no tracker user stays assigned in C4 only, and the link says so.
+func (s *Syncer) mirrorAssignments(ctx context.Context, c *conn, t *c4v1.Tracker, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, now time.Time) error {
+	if !c.adapter.Capabilities().Mentions {
+		return nil
+	}
+	for _, a := range j.Acks {
+		if a.Kind != "assign" || a.Assignee == "" {
+			continue
+		}
+		field := "assign/" + tracker.WriteKey(jr.String(), a.Units, a.Assignee+"@"+a.At.UTC().Format(time.RFC3339))[:12]
+		user := trackerUser(t, a.Assignee)
+		if user == "" {
+			s.setLinkCond(ctx, l, "Assigned", metav1.ConditionFalse, "NoTrackerUser",
+				fmt.Sprintf("units %s are assigned to %s, who has no tracker user in the Tracker's people; the assignment stays in C4", a.Units, a.Assignee))
+			continue
+		}
+		text := fmt.Sprintf("C4: units %s of %s failed and are assigned to you", a.Units, jr)
+		if a.Actor != "" {
+			text += " by " + a.Actor
+		}
+		if a.Note != "" {
+			text += ": " + a.Note
+		}
+		text += ". " + s.Farm.JobURL(jr)
+		on := tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL}
+		key := tracker.WriteKey(l.Namespace+"/"+l.Name, field, "")
+		if err := s.write(ctx, c, l, field, "told "+user, "", 0, now, func(tracker.Written) tracker.Write {
+			return tracker.Write{On: on, Kind: "mention", Fields: map[string]string{"user": user, "subject": "C4: units assigned to you"},
+				Note: &tracker.Note{Body: text}, Key: key}
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// trackerUser is the tracker user the Tracker's people map makes person,
+// or "" when none does.
+func trackerUser(t *c4v1.Tracker, person string) string {
+	users := make([]string, 0, len(t.Spec.People))
+	for u, p := range t.Spec.People {
+		if p == person {
+			users = append(users, u)
+		}
+	}
+	sort.Strings(users)
+	if len(users) == 0 {
+		return ""
+	}
+	return users[0]
 }
 
 // reviewHead reads the head of what is under review again when it may
