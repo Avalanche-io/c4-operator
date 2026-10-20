@@ -140,11 +140,11 @@ func TestFarmContext(t *testing.T) {
 		}
 		var d struct {
 			Jobs map[string]struct {
-				Tool    string `json:"tool"`
+				Tool    string                 `json:"tool"`
 				Check   *struct{ Tool string } `json:"check"`
 				Each    *struct{ Tool string } `json:"each"`
-				Uses    map[string]any `json:"uses"`
-				Answers *struct{ By string } `json:"answers"`
+				Uses    map[string]any         `json:"uses"`
+				Answers *struct{ By string }   `json:"answers"`
 			} `json:"jobs"`
 		}
 		if err := yaml.Unmarshal(c.Doc, &d); err != nil {
