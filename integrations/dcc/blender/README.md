@@ -23,13 +23,13 @@ places:
 
 Set these in the studio's environment, as for other pipeline tools:
 
-| variable                       | what it is                                                                                                                                                           |
-| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `C4_HUD`                       | the farm's address, for example `https://c4.petrelfinch.example`                                                                                                     |
-| `C4_HUD_TOKEN_FILE`            | a file holding the artist's sign-in token, read on each request so a renewed token takes effect (or `C4_HUD_TOKEN`)                                                  |
-| `C4_PROJECT`                   | the project, for example `saltmarsh`. The artist can change it in the panel                                                                                          |
-| `C4_ROOT`                      | the folder on this machine that is the top of the project's tree, for example `/show`. Every file a scene reads must be under it                                     |
-| `C4_SHOT` or `C4_SHOT_PATTERN` | the shot, or a regular expression whose `shot` group finds it in the file's path, for example `/(?P<shot>sh\d{3})/`                                                  |
+| variable                       | what it is                                                                                                                                                            |
+| ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `C4_HUD`                       | the farm's address, for example `https://c4.petrelfinch.example`                                                                                                      |
+| `C4_HUD_TOKEN_FILE`            | a file holding the artist's sign-in token, read on each request so a renewed token takes effect (or `C4_HUD_TOKEN`)                                                   |
+| `C4_PROJECT`                   | the project, for example `saltmarsh`. The artist can change it in the panel                                                                                           |
+| `C4_ROOT`                      | the folder on this machine that is the top of the project's tree, for example `/show`. Every file a scene reads must be under it                                      |
+| `C4_SHOT` or `C4_SHOT_PATTERN` | the shot, or a regular expression whose `shot` group finds it in the file's path, for example `/(?P<shot>sh\d{3})/`                                                   |
 | `C4_TOOL_PATH`                 | optional: folders of tools (each holding a `tool.yaml`), used when the farm does not list its tools yet, so the panel can still draw the form and save the submission |
 
 ## What the artist sees
@@ -84,6 +84,14 @@ It sends only the files the farm lacks and records them as the job's tree. It
 then submits one job per ticked view layer, each `after` the view layers whose
 renders it reads. The summary lists the jobs the farm made. Submitting the
 same file again sends nothing new.
+
+## Known limits
+
+- A texture sequence or OpenVDB sequence is collected over the frames its
+  users read across the panel's scene's frame range, not per job. When the
+  ticked view layers' scenes, or a typed Frames, cover fewer frames, the
+  panel sends more files than the jobs read. That is the safe side; nothing
+  a job needs is left out.
 
 ## Tests
 
