@@ -184,4 +184,25 @@ func TestNudgeDeadlineMode(t *testing.T) {
 		!live().Spec.Deadline.Time.Equal(next.Add(-4*time.Hour)) {
 		t.Fatalf("pin the deadline it has: %d %v", code, live().Spec.Deadline)
 	}
+	// A pinned job handed back to tracking with the tracker's date, in one
+	// write (integrations GAPS 14); a date alone is at the project's due
+	// time (18:00 in Los Angeles here).
+	for i := range s.m.projects {
+		if s.m.projects[i].Name == "show-a" {
+			if s.m.projects[i].Spec.Work == nil {
+				s.m.projects[i].Spec.Work = &c4v1.ProjectWork{}
+			}
+			s.m.projects[i].Spec.Work.DueTime = &c4v1.DueTime{At: "18:00", TimeZone: "America/Los_Angeles"}
+		}
+	}
+	if code, msg := nudge("artist", `{"deadline": "2026-10-24", "deadlineMode": "Tracking"}`); code != 200 || live().Spec.DeadlineMode != "Tracking" ||
+		!live().Spec.Deadline.Time.Equal(time.Date(2026, 10, 25, 1, 0, 0, 0, time.UTC)) {
+		t.Fatalf("tracking with its date: %d %q %v %q", code, msg, live().Spec.Deadline, live().Spec.DeadlineMode)
+	}
+	if code, _ := nudge("artist", `{"deadline": "2026-10-24", "deadlineMode": "Suggested"}`); code != http.StatusBadRequest {
+		t.Fatalf("a deadline with Suggested: %d", code)
+	}
+	if code, _ := nudge("artist", `{"deadline": "next friday"}`); code != http.StatusBadRequest {
+		t.Fatalf("not a time: %d", code)
+	}
 }

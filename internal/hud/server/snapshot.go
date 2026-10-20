@@ -281,7 +281,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		d := st.Deadline.Time.UTC()
 		aj.Objective.Deadline = &d
 	}
-	aj.Objective.Source = st.DeadlineSource
+	aj.Objective.Source, aj.Objective.Milestone = st.DeadlineSource, st.Milestone
 	aj.Objective.Mode = deadlineMode(j)
 	aj.Objective.Suggestion = s.suggestion(st.Suggestion)
 	if e := st.Estimate; e != nil {

@@ -155,6 +155,12 @@ type WorkJobSpec struct {
 	// +optional
 	DependsOn []string `json:"dependsOn,omitempty"`
 
+	// Follows names the job in this namespace this one is the next
+	// version of (v008 answers the notes on v007). The job record names
+	// it, so lineage links the versions.
+	// +optional
+	Follows string `json:"follows,omitempty"`
+
 	// Inputs are C4 views mounted into every unit.
 	// +optional
 	Inputs []WorkInput `json:"inputs,omitempty"`
@@ -268,9 +274,13 @@ type WorkJobStatus struct {
 	// +optional
 	Deadline *metav1.Time `json:"deadline,omitempty"`
 	// DeadlineSource says where Deadline comes from: spec (Pinned or
-	// Tracking), suggested, or class (the class's objective).
+	// Tracking), milestone (the earliest Milestone selecting the job),
+	// suggested, or class (the class's objective).
 	// +optional
 	DeadlineSource string `json:"deadlineSource,omitempty"`
+	// Milestone names the Milestone the deadline comes from.
+	// +optional
+	Milestone string `json:"milestone,omitempty"`
 	// Suggestion is the farm's suggested deadline and how it got there.
 	// +optional
 	Suggestion *WorkSuggestion `json:"suggestion,omitempty"`

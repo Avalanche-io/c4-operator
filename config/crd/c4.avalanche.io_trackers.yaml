@@ -186,6 +186,12 @@ spec:
                           items:
                             type: string
                           type: array
+                        follows:
+                          description: |-
+                            Follows names the job in this namespace this one is the next
+                            version of (v008 answers the notes on v007). The job record names
+                            it, so lineage links the versions.
+                          type: string
                         inputs:
                           description: Inputs are C4 views mounted into every unit.
                           items:

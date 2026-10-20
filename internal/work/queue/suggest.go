@@ -178,8 +178,13 @@ func mode(j *c4v1.WorkJob, p forecast.Policy) string {
 func (q *Queue) applySuggestion(v *view) {
 	m := v.mem
 	v.source = "class"
-	if v.job.Spec.Deadline != nil {
+	switch {
+	case v.job.Spec.Deadline != nil:
 		v.source = "spec"
+	case v.milestone != "":
+		// Whoever owns the Milestone owns the date.
+		v.source = "milestone"
+		return
 	}
 	if mode(v.job, q.policyFor(v)) != modeSuggested || m.sugg == nil || m.sugg.s.Deadline.IsZero() {
 		return
@@ -196,7 +201,7 @@ func (q *Queue) suggest(ctx context.Context, now time.Time, snap sched.Snapshot,
 			continue
 		}
 		p := q.policyFor(v)
-		if mode(v.job, p) != modeSuggested {
+		if mode(v.job, p) != modeSuggested || v.milestone != "" {
 			continue
 		}
 		if m.sugg == nil {

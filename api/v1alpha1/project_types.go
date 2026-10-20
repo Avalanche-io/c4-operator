@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"time"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -164,6 +166,37 @@ type ProjectWork struct {
 	// project's jobs, one per class.
 	// +optional
 	DeadlinePolicies []DeadlinePolicy `json:"deadlinePolicies,omitempty"`
+	// DueTime is the time of day a date-only due date means (most
+	// trackers keep dates): 18:00 UTC when unset.
+	// +optional
+	DueTime *DueTime `json:"dueTime,omitempty"`
+}
+
+// DueTime is the project's convention for date-only due dates.
+type DueTime struct {
+	// At is a time of day, "HH:MM".
+	// +kubebuilder:validation:Pattern=`^([01][0-9]|2[0-3]):[0-5][0-9]$`
+	At string `json:"at"`
+	// TimeZone is an IANA zone name (default UTC).
+	// +optional
+	TimeZone string `json:"timeZone,omitempty"`
+}
+
+// DueOn is when a date-only due date ("2026-10-23") falls under the
+// convention d (nil: 18:00 UTC).
+func (d *DueTime) DueOn(date string) (time.Time, error) {
+	at, tz := "18:00", "UTC"
+	if d != nil {
+		at = d.At
+		if d.TimeZone != "" {
+			tz = d.TimeZone
+		}
+	}
+	loc, err := time.LoadLocation(tz)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return time.ParseInLocation("2006-01-02 15:04", date+" "+at, loc)
 }
 
 // DeadlinePolicy chooses the deadlines the farm suggests for a class's

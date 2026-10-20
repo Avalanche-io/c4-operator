@@ -1628,6 +1628,25 @@ needs 4 hours gives its render inputs Friday 14:00, and their sim inputs
 earlier still. A job waiting on dependencies is not runnable, but its
 upstream jobs see its pressure.
 
+**Milestones.** A Milestone (namespaced: `spec.due`, a label `selector`
+of the jobs it covers, and optionally `source: {tracker, ref}`) is a due
+time owned by whoever plans the work: a producer, a tracker of intent. A
+job with no deadline of its own takes the earliest due of the Milestones
+in its namespace that select it; its deadline source is `milestone`
+(`status.milestone` names it) and the farm suggests none over it. In
+media the tracker does not create jobs, artists do, so the date reaches
+every render submitted for a task this way. Each tick the queue writes on
+every Milestone the jobs it covers (`status.jobs`, `count`, `done`) and
+the worst risk among the unfinished ones (`status.risk`; a failed job
+counts as `willMiss`), so a tracker can write one value back to its task.
+Date-only due dates, which most trackers keep, mean the project's due time
+(`spec.work.dueTime: {at, timeZone}`, 18:00 UTC without one) wherever the
+HUD accepts a deadline. A job carries the tracker entity it was made for
+(`c4.avalanche.io/tracker-ref: <tracker>/<type>/<id>`, label
+`c4.avalanche.io/tracker`) and the version it follows (`spec.follows`),
+and its record names both, so lineage links a version to its task and to
+the version whose notes it answers.
+
 **Suggested deadlines.** Nobody can pick a sensible deadline without some
 sense of when a job can be done, so a job with no deadline of its own gets
 one from the farm (`spec.deadlineMode: Suggested`, the default without

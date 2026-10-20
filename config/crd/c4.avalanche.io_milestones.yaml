@@ -1,0 +1,168 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: milestones.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: Milestone
+    listKind: MilestoneList
+    plural: milestones
+    singular: milestone
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.due
+      name: Due
+      type: string
+    - jsonPath: .status.count
+      name: Jobs
+      type: integer
+    - jsonPath: .status.risk
+      name: Risk
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          Milestone is a due time owned by whoever plans the work (a producer, a
+          tracker of intent), and the jobs it covers: a shot's delivery, a
+          release. A job with no deadline of its own takes the earliest due of
+          the Milestones in its namespace whose selector matches it (DESIGN
+          10.7); its deadline source reads "milestone". The queue writes which
+          jobs it covers and the worst risk among them, so a tracker can write
+          one risk back to its task instead of reading every job.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              MilestoneSpec is the due time, the jobs it covers, and where it came
+              from.
+            properties:
+              due:
+                description: Due is when the covered jobs must be done.
+                format: date-time
+                type: string
+              selector:
+                description: |-
+                  Selector picks the jobs in the namespace it covers, by label (the
+                  shot, the tracker task). An empty selector covers none.
+                properties:
+                  matchExpressions:
+                    description: matchExpressions is a list of label selector requirements.
+                      The requirements are ANDed.
+                    items:
+                      description: |-
+                        A label selector requirement is a selector that contains values, a key, and an operator that
+                        relates the key and values.
+                      properties:
+                        key:
+                          description: key is the label key that the selector applies
+                            to.
+                          type: string
+                        operator:
+                          description: |-
+                            operator represents a key's relationship to a set of values.
+                            Valid operators are In, NotIn, Exists and DoesNotExist.
+                          type: string
+                        values:
+                          description: |-
+                            values is an array of string values. If the operator is In or NotIn,
+                            the values array must be non-empty. If the operator is Exists or DoesNotExist,
+                            the values array must be empty. This array is replaced during a strategic
+                            merge patch.
+                          items:
+                            type: string
+                          type: array
+                          x-kubernetes-list-type: atomic
+                      required:
+                      - key
+                      - operator
+                      type: object
+                    type: array
+                    x-kubernetes-list-type: atomic
+                  matchLabels:
+                    additionalProperties:
+                      type: string
+                    description: |-
+                      matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels
+                      map is equivalent to an element of matchExpressions, whose key field is "key", the
+                      operator is "In", and the values array contains only "value". The requirements are ANDed.
+                    type: object
+                type: object
+                x-kubernetes-map-type: atomic
+              source:
+                description: Source names the tracker entity that owns the date, when
+                  one does.
+                properties:
+                  ref:
+                    description: Ref is the entity, <type>/<id> in the tracker's own
+                      terms.
+                    type: string
+                  tracker:
+                    description: Tracker names the Tracker in the namespace.
+                    type: string
+                required:
+                - ref
+                - tracker
+                type: object
+            required:
+            - due
+            - selector
+            type: object
+          status:
+            description: MilestoneStatus is what the queue last saw of the covered
+              jobs.
+            properties:
+              count:
+                format: int32
+                type: integer
+              done:
+                description: Done counts the covered jobs that succeeded.
+                format: int32
+                type: integer
+              jobs:
+                description: |-
+                  Jobs are the covered jobs' names (at most 200, sorted), and Count
+                  how many it covers.
+                items:
+                  type: string
+                type: array
+              observedGeneration:
+                format: int64
+                type: integer
+              risk:
+                description: |-
+                  Risk is the worst of the covered unfinished jobs' risks: none,
+                  atRisk, willMiss or missed (WorkEstimate.Risk).
+                type: string
+            type: object
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

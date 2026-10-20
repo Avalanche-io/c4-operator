@@ -241,6 +241,21 @@ spec:
                       - kind
                       type: object
                     type: array
+                  dueTime:
+                    description: |-
+                      DueTime is the time of day a date-only due date means (most
+                      trackers keep dates): 18:00 UTC when unset.
+                    properties:
+                      at:
+                        description: At is a time of day, "HH:MM".
+                        pattern: ^([01][0-9]|2[0-3]):[0-5][0-9]$
+                        type: string
+                      timeZone:
+                        description: TimeZone is an IANA zone name (default UTC).
+                        type: string
+                    required:
+                    - at
+                    type: object
                   fairShareWeight:
                     description: FairShareWeight scales the project's share of free
                       capacity.

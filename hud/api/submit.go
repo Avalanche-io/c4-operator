@@ -77,6 +77,18 @@ type SubmitRequest struct {
 	AIUsage map[string]any `json:"aiUsage,omitempty"`
 	// DryRun plans the job and returns its estimate; nothing is created.
 	DryRun bool `json:"dryRun,omitempty"`
+	// TrackerRef is the tracker entity the job is made for,
+	// <tracker>/<type>/<id>: the job carries it (annotation
+	// c4.avalanche.io/tracker-ref, label c4.avalanche.io/tracker) and its
+	// record names it.
+	TrackerRef string `json:"trackerRef,omitempty"`
+	// Follows names the job in the namespace this one is the next version
+	// of (spec.follows).
+	Follows string `json:"follows,omitempty"`
+	// Due is the job's deadline as a date ("2026-10-23"), at the time of
+	// day the project's due-time convention gives (18:00 UTC when it has
+	// none), or as an RFC 3339 time. It pins spec.deadline.
+	Due string `json:"due,omitempty"`
 }
 
 // SubmitEstimate is what the farm expects of a job before it runs.

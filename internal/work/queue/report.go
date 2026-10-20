@@ -278,7 +278,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	if !v.obj.Deadline.IsZero() {
 		st.Deadline = &metav1.Time{Time: v.obj.Deadline}
 	}
-	st.DeadlineSource = v.source
+	st.DeadlineSource, st.Milestone = v.source, v.milestone
 	st.Suggestion = suggestionStatus(m.sugg)
 	st.Derivation = q.derivationStatus(v)
 	st.InputSubstitutes = substituteStatus(m)

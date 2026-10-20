@@ -278,8 +278,11 @@ type Objective struct {
 	LatencyTargetSeconds float64    `json:"latencyTargetSeconds,omitempty"`
 	From                 string     `json:"from,omitempty"`
 	// Source is where the deadline comes from: spec (a person, a tool or
-	// tracking), suggested (the farm), or class (the class's objective).
+	// tracking), milestone (a Milestone covering the job), suggested (the
+	// farm), or class (the class's objective).
 	Source string `json:"source,omitempty"`
+	// Milestone names the Milestone when Source is milestone.
+	Milestone string `json:"milestone,omitempty"`
 	// Mode is who owns the deadline: Pinned, Suggested or Tracking.
 	Mode string `json:"mode,omitempty"`
 	// Suggestion is the farm's suggested deadline, when it made one.

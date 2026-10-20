@@ -279,3 +279,40 @@ func TestHostUploadsForItsOwnUnits(t *testing.T) {
 		t.Fatal("a host account submitted a job")
 	}
 }
+
+// A submitter names the tracker entity a job is made for, the version it
+// follows, and a date-only due date (integrations GAPS 2, 6, 10, 15).
+func TestSubmitTrackerRefFollowsDue(t *testing.T) {
+	s := submitFarm(t)
+	s.DryRun = func(context.Context, *c4v1.WorkJob, string) (api.SubmitEstimate, error) {
+		return api.SubmitEstimate{}, nil
+	}
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-4"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+	req := api.SubmitRequest{Project: "show-a", Stage: "light", Shot: "sm0150", Spec: spec}
+	var out api.SubmitResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", req, &out); code != http.StatusCreated {
+		t.Fatalf("v001: %d %+v", code, out)
+	}
+	req.Name, req.TrackerRef, req.Follows, req.Due = "sm0150-light-v002", "flow/Task/881", "sm0150-light-v001", "2026-10-23"
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", req, &out); code != http.StatusCreated || out.Name != "sm0150-light-v002" {
+		t.Fatalf("v002: %d %+v", code, out)
+	}
+	var job c4v1.WorkJob
+	if err := s.Client.Get(context.Background(), types.NamespacedName{Namespace: "show-a", Name: "sm0150-light-v002"}, &job); err != nil {
+		t.Fatal(err)
+	}
+	if job.Annotations[c4v1.AnnotationTrackerRef] != "flow/Task/881" || job.Labels[c4v1.LabelTracker] != "flow" || job.Spec.Follows != "sm0150-light-v001" ||
+		job.Spec.Deadline == nil || !job.Spec.Deadline.Time.Equal(time.Date(2026, 10, 23, 18, 0, 0, 0, time.UTC)) || job.Spec.DeadlineMode != "" {
+		t.Fatalf("job %v %v follows %q deadline %v mode %q", job.Annotations, job.Labels, job.Spec.Follows, job.Spec.Deadline, job.Spec.DeadlineMode)
+	}
+	for _, bad := range []api.SubmitRequest{
+		{Project: "show-a", Spec: spec, TrackerRef: "flow/881"},
+		{Project: "show-a", Spec: spec, Follows: "sm0150-light-v009"},
+		{Project: "show-a", Spec: spec, Due: "Friday"},
+	} {
+		if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", bad, &out); code != http.StatusBadRequest {
+			t.Fatalf("%+v: %d", bad, code)
+		}
+	}
+}

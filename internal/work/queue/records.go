@@ -110,6 +110,17 @@ func (q *Queue) sealJob(ctx context.Context, v *view, st *c4v1.WorkJobStatus, no
 	if st.Deadline != nil {
 		pred["deadline"] = st.Deadline.Time.UTC().Format(time.RFC3339)
 	}
+	if st.Milestone != "" {
+		pred["milestone"] = st.Milestone
+	}
+	// The tracker entity it was made for, and the version it follows, so
+	// lineage can answer which task a version answered.
+	if ref := v.job.Annotations[c4v1.AnnotationTrackerRef]; ref != "" {
+		pred["trackerRef"] = ref
+	}
+	if f := v.job.Spec.Follows; f != "" {
+		pred["follows"] = v.job.Namespace + "/" + f
+	}
 	if st.Finished != nil {
 		pred["finished"] = st.Finished.Time.UTC().Format(time.RFC3339)
 	}

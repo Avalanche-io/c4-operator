@@ -149,7 +149,7 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		did = append(did, fmt.Sprintf("boost %.1f", b))
 	}
 	if body.Deadline != nil {
-		t, err := time.Parse(time.RFC3339, *body.Deadline)
+		t, err := s.dueOn(ctx, rec.project, *body.Deadline)
 		if err != nil {
 			fail(w, http.StatusBadRequest, "deadline: %v", err)
 			return
@@ -193,11 +193,14 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 				j.Spec.Deadline = &metav1.Time{Time: cur.Time}
 				did = append(did, "deadline "+forecast.Clock(cur.Time, s.Loc)+" pinned")
 			}
-		case "Suggested", "Tracking":
+		case "Suggested":
 			if body.Deadline != nil {
-				fail(w, http.StatusBadRequest, "a deadline is pinned: send deadline with deadlineMode Pinned or alone")
+				fail(w, http.StatusBadRequest, "a suggested deadline is the farm's: send deadline with deadlineMode Pinned or Tracking, or alone")
 				return
 			}
+		case "Tracking":
+			// With a deadline: production tracking's date, handed back to
+			// tracking in one write (a pinned job included).
 		default:
 			fail(w, http.StatusBadRequest, "deadlineMode must be Pinned, Suggested or Tracking")
 			return

@@ -106,6 +106,9 @@ type Queue struct {
 	books        map[string]*process.Book
 	digests      map[string]string
 	lastPlatform map[string]string
+	// milestones are the Milestones by namespace at the last tick
+	// (milestone.go).
+	milestones map[string][]*c4v1.Milestone
 	// sites is each pool's site at the last tick (recompute.go). derivMu
 	// guards it and the books map: the Placement reads both during a tick,
 	// which holds mu.
@@ -424,6 +427,8 @@ type view struct {
 	// source is where the effective deadline comes from: spec,
 	// suggested or class.
 	source string
+	// milestone is the Milestone its deadline comes from (milestone.go).
+	milestone string
 	// sources are the ways to get its inputs to pools at other sites
 	// (placement.go), by pool.
 	sources map[string][]sched.Source
@@ -495,6 +500,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 		}
 	}
 
+	q.milestones = q.listMilestones(ctx)
 	poolInfo := q.pools(ctx, pools.Items, nodes.Items, pods.Items, crs.Items)
 	sites := map[string]string{}
 	for name, p := range poolInfo {
@@ -572,6 +578,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.meter(now, views, poolInfo)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
 	q.report(ctx, now, dec, views)
+	q.milestoneStatus(ctx, q.milestones, jobs.Items)
 	q.saveCalibrations(ctx, now)
 	q.last = now
 	return nil
@@ -876,7 +883,15 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			m.readyAt = j.CreationTimestamp.Time
 		}
 	}
-	v.obj = d.Objective(j, m.readyAt)
+	// A job with no deadline of its own takes its Milestone's due.
+	oj := j
+	v.milestone = ""
+	if ms := milestoneFor(q.milestones[j.Namespace], j); ms != nil {
+		cp := *j
+		cp.Spec.Deadline = &metav1.Time{Time: ms.Spec.Due.Time}
+		oj, v.milestone = &cp, ms.Name
+	}
+	v.obj = d.Objective(oj, m.readyAt)
 	q.applySuggestion(v)
 	if len(v.running) > 0 {
 		m.lastRun = now

@@ -551,6 +551,25 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if body.Due != "" {
+		t, err := s.dueOn(ctx, project, body.Due)
+		if err != nil {
+			fail(w, http.StatusBadRequest, "due: %v", err)
+			return
+		}
+		spec.Deadline = &metav1.Time{Time: t}
+	}
+	if body.Follows != "" {
+		if errs := validation.IsDNS1123Subdomain(body.Follows); len(errs) > 0 {
+			fail(w, http.StatusBadRequest, "follows %q: %s", body.Follows, strings.Join(errs, "; "))
+			return
+		}
+		if _, err := s.liveJob(ctx, ns, body.Follows); err != nil {
+			fail(w, http.StatusBadRequest, "follows %q: no such job in %s", body.Follows, ns)
+			return
+		}
+		spec.Follows = body.Follows
+	}
 	if spec.Deadline == nil && spec.DeadlineMode == "" {
 		spec.DeadlineMode = "Suggested"
 	}
@@ -567,6 +586,19 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		job.Labels[c4v1.LabelShot] = body.Shot
+	}
+	if body.TrackerRef != "" {
+		tracker, rest, ok := strings.Cut(body.TrackerRef, "/")
+		if !ok || !strings.Contains(rest, "/") || strings.HasPrefix(rest, "/") || strings.HasSuffix(rest, "/") {
+			fail(w, http.StatusBadRequest, "trackerRef %q: want <tracker>/<type>/<id>", body.TrackerRef)
+			return
+		}
+		if errs := validation.IsValidLabelValue(tracker); len(errs) > 0 || tracker == "" {
+			fail(w, http.StatusBadRequest, "trackerRef %q: tracker %q: %s", body.TrackerRef, tracker, strings.Join(errs, "; "))
+			return
+		}
+		job.Annotations[c4v1.AnnotationTrackerRef] = body.TrackerRef
+		job.Labels[c4v1.LabelTracker] = tracker
 	}
 	if body.Type != "" {
 		if errs := validation.IsValidLabelValue(body.Type); len(errs) > 0 {
@@ -659,4 +691,25 @@ func plural(n int) string {
 		return ""
 	}
 	return "s"
+}
+
+// dueOn reads a deadline sent as an RFC 3339 time, or as a date
+// ("2026-10-23") at the time of day the project's due-time convention
+// gives (Project spec.work.dueTime; 18:00 UTC without one).
+func (s *Server) dueOn(_ context.Context, project, due string) (time.Time, error) {
+	if t, err := time.Parse(time.RFC3339, due); err == nil {
+		return t, nil
+	}
+	if _, err := time.Parse("2006-01-02", due); err != nil {
+		return time.Time{}, fmt.Errorf("%q is neither an RFC 3339 time nor a date (YYYY-MM-DD)", due)
+	}
+	var conv *c4v1.DueTime
+	if m := s.current(); m != nil {
+		for _, p := range m.projects {
+			if p.Name == project && p.Spec.Work != nil {
+				conv = p.Spec.Work.DueTime
+			}
+		}
+	}
+	return conv.DueOn(due)
 }
