@@ -199,7 +199,8 @@ type testUnit struct {
 // without frames runs one unit.
 func (t *ToolFile) testUnits(frames string) ([]testUnit, error) {
 	if t.Kind != "frames" {
-		return []testUnit{{label: "0"}}, nil
+		// one unit, as the farm runs it: the single frame "1"
+		return []testUnit{{label: "0", start: 1, end: 1}}, nil
 	}
 	fs, err := order.ParseFrames(frames)
 	if err != nil {
@@ -314,10 +315,11 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 	for _, u := range units {
 		env := append([]string{"C4_TOOLS=/etc/c4/tools", "C4_TREE=/show", "C4_OUTPUT=/show", "C4_CONTROL=/etc/c4/control",
 			"C4_JOB=test", "C4_UNIT=" + u.label, "C4_UNIT_LABEL=" + u.label, "C4_ATTEMPT=1"}, penv...)
-		if t.Kind == "frames" {
-			env = append(env, fmt.Sprintf("C4_FRAMES=%d-%d", u.start, u.end), fmt.Sprintf("C4_FRAME_START=%d", u.start),
-				fmt.Sprintf("C4_FRAME_END=%d", u.end))
+		frames := fmt.Sprintf("%d-%d", u.start, u.end)
+		if u.start == u.end {
+			frames = fmt.Sprint(u.start)
 		}
+		env = append(env, "C4_FRAMES="+frames, fmt.Sprintf("C4_FRAME_START=%d", u.start), fmt.Sprintf("C4_FRAME_END=%d", u.end))
 		args := append(unitDockerArgs(dir, tree, ctl, env), image, "c4-unit", "run")
 		cmd := exec.CommandContext(ctx, docker, args...)
 		cmd.Stdout, cmd.Stderr = indent(o.W), indent(o.W)
