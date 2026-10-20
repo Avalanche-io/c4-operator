@@ -31,6 +31,7 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/config/samples/quickstart"
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
+	"github.com/Avalanche-io/c4-operator/tools"
 )
 
 // UpOptions are `c4 farm up`'s choices.
@@ -164,7 +165,56 @@ func Up(ctx context.Context, o UpOptions) error {
 			return err
 		}
 	}
-	return waitHUD(ctx, o.HUD(), 2*time.Minute)
+	if err := waitHUD(ctx, o.HUD(), 2*time.Minute); err != nil {
+		return err
+	}
+	return publishTools(ctx, o)
+}
+
+// publishTools publishes the release's own tools (the folders c4-farm
+// embeds) to every project, as tested in the release they shipped in, so
+// the farm runs no test for them. A tool whose image the farm cannot pin
+// (a development build whose job images are not loaded) is left out and
+// named, not fatal: the farm is still a farm.
+func publishTools(ctx context.Context, o UpOptions) error {
+	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: "admin", Local: true})
+	if err != nil {
+		return err
+	}
+	tmp, err := os.MkdirTemp("", "c4-tools-")
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(tmp)
+	var done, left []string
+	for _, name := range tools.Names {
+		f, err := tools.Folder(name)
+		if err != nil {
+			return err
+		}
+		dir := filepath.Join(tmp, name)
+		if err := os.CopyFS(dir, f); err != nil {
+			return err
+		}
+		var out strings.Builder
+		err = farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: Project, Farm: true, TestedIn: o.Version})
+		if err != nil {
+			why := strings.TrimSpace(out.String())
+			if why == "" {
+				why = err.Error()
+			}
+			left = append(left, name+" ("+strings.ReplaceAll(why, "\n", " ")+")")
+			continue
+		}
+		done = append(done, name)
+	}
+	if len(done) > 0 {
+		o.logf("tools     %s, for every project\n", strings.Join(done, ", "))
+	}
+	for _, l := range left {
+		o.logf("tools     not published: %s\n", l)
+	}
+	return nil
 }
 
 // kubeClient is a client for the local farm's cluster.
