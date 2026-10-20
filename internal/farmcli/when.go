@@ -60,6 +60,10 @@ func (c Clock) AtUTC(t time.Time) string {
 	if c.loc() == time.UTC {
 		return s
 	}
+	if !sameDay(t.UTC(), t.In(c.loc())) {
+		// Fri 18:00 PDT is Sat 01:00 UTC
+		return s + " (" + t.UTC().Format("Mon 15:04") + " UTC)"
+	}
 	return s + " (" + t.UTC().Format("15:04") + " UTC)"
 }
 

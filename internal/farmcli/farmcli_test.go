@@ -52,6 +52,9 @@ func TestTimesAreLocalWithUTCBeside(t *testing.T) {
 	if got := c.AtUTC(at); got != "18:00 EDT today (22:00 UTC)" {
 		t.Errorf("AtUTC %q", got)
 	}
+	if got := c.AtUTC(at.Add(3 * time.Hour)); got != "21:00 EDT today (Fri 01:00 UTC)" {
+		t.Errorf("AtUTC past midnight UTC %q", got)
+	}
 	if got := c.At(at.Add(24 * time.Hour)); got != "Fri 18:00 EDT" {
 		t.Errorf("At tomorrow %q", got)
 	}
