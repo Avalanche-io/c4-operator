@@ -146,3 +146,53 @@ func TestAnswerResumesAWaitingUnit(t *testing.T) {
 		t.Fatalf("worker's C4_DECISION %q", d)
 	}
 }
+
+// An answerer that has finished is woken to answer: an extra attempt of
+// its unit, marked as a wake, carrying the question; what it answers goes
+// to the asker, and the unit stays as it was. A wake that ends without
+// answering answers cannot.
+func TestFinishedAnswererIsWoken(t *testing.T) {
+	ns, q, now := graphJob(t, "woke", func(time.Time) string {
+		return `{"name": "lead"}, {"name": "worker"}`
+	}, 24*time.Hour)
+	finishUnit(t, now, ns, "woke", 1, nil)
+	tick(t, q)
+	notePod(t, ns, "woke", 2, c4v1.AnnotationAsks, `[{"seq": 1, "to": "unit:lead", "ask": "Which module owns the tokenizer?"}]`)
+	tick(t, q)
+	tick(t, q)
+	p := podOfUnit(t, ns, "woke", 1)
+	if p.Annotations[c4v1.AnnotationWake] != "2#1" || envOf(p.Spec.Containers[0], "C4_ANSWER_ONLY") != "2#1" || !steerAsk(podSteers(t, ns, "woke", 1), "2#1") {
+		t.Fatalf("lead's wake: %v", p.Annotations)
+	}
+	if !slices.Contains(states(t, get(t, ns, "woke"), "succeeded"), 1) {
+		t.Fatalf("lead is no longer done: %v", get(t, ns, "woke").Status.UnitStates)
+	}
+	notePod(t, ns, "woke", 1, c4v1.AnnotationAnswers, `[{"seq": 1, "ask": "2#1", "answer": "tokenize/"}]`)
+	*now = now.Add(time.Minute)
+	finishUnit(t, now, ns, "woke", 1, nil)
+	tick(t, q)
+	tick(t, q)
+	if a := steerAnswer(podSteers(t, ns, "woke", 2), "2#1"); a == nil || a.Answer.Cannot || !strings.Contains(a.Text, "tokenize/") {
+		t.Fatalf("worker's answer: %+v", a)
+	}
+	got := get(t, ns, "woke")
+	if !slices.Contains(states(t, got, "succeeded"), 1) || hasPod(t, ns, "woke", 1) {
+		t.Fatalf("after the wake: %v", got.Status.UnitStates)
+	}
+
+	// Woken again for a second question, it ends without answering.
+	notePod(t, ns, "woke", 2, c4v1.AnnotationAsks, `[{"seq": 1, "to": "unit:lead", "ask": "Which module owns the tokenizer?"},
+		{"seq": 2, "to": "unit:lead", "ask": "And the lexer?"}]`)
+	tick(t, q)
+	tick(t, q)
+	*now = now.Add(time.Minute)
+	finishUnit(t, now, ns, "woke", 1, nil)
+	tick(t, q)
+	tick(t, q)
+	if a := steerAnswer(podSteers(t, ns, "woke", 2), "2#2"); a == nil || !a.Answer.Cannot || !strings.Contains(a.Text, "did not answer") {
+		t.Fatalf("an unanswered wake: %+v", a)
+	}
+	if hasPod(t, ns, "woke", 1) {
+		t.Fatal("lead was woken again for a question its wake left")
+	}
+}

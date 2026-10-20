@@ -265,8 +265,10 @@ type jobMem struct {
 	// token (needs.go).
 	needs    map[int]*needsRec
 	supplied string
-	// asks are the questions units asked one another (asks.go).
+	// asks are the questions units asked one another, and woken the ones
+	// a finished answerer was woken for (asks.go).
 	asks      []*askRec
+	woken     map[string]bool
 	acks      []*ackRecord
 	acked     string
 	decisions []decisionRecord
@@ -488,6 +490,9 @@ type view struct {
 	// runRem is each running unit's expected time left, in seconds, for
 	// the policy (sched.RunningUnit.Remaining).
 	runRem map[int]float64
+	// waking are the finished units released this tick only to answer
+	// questions, with the questions' ids (asks.go).
+	waking map[int][]string
 	// roundsExp is what the queue expects of each loop's remaining rounds,
 	// by first generator (rounds.go).
 	roundsExp map[int]roundsExp
@@ -754,6 +759,26 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			continue
 		}
 		delete(m.launched, idx)
+		if p.Annotations[c4v1.AnnotationWake] != "" {
+			// An answerer woken to answer: its end leaves the unit as it
+			// was, and nothing it wrote is kept (asks.go).
+			switch {
+			case p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed:
+				if !m.foldedPod[p.UID] {
+					q.endWake(ctx, v, idx, p, now)
+					m.foldedPod[p.UID] = true
+				}
+				v.done = append(v.done, p)
+			case p.DeletionTimestamp != nil && letGo(p, now):
+				if err := q.release(ctx, p); err != nil {
+					q.Log.Error(err, "release unit pod", "pod", p.Name)
+				}
+			default:
+				v.pods[idx] = p
+				v.running[idx] = runInfo{pool: p.Labels[c4v1.LabelPool], slots: plan.Units[idx].Slots, started: startOf(p), node: p.Spec.NodeName}
+			}
+			continue
+		}
 		if m.superseded[idx] {
 			// A review chose others: the pod is stopped and whatever it
 			// did is dropped (verdict.go).
@@ -988,6 +1013,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	}
 	q.serveRounds(ctx, v, now)
 	q.noteLoops(v)
+	v.serveWakes()
 	q.serveWaits(v, now)
 	applyHolds(v)
 	q.estimate(v, now)
@@ -1368,6 +1394,20 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		}
 		v.mem.attempts[idx]++
 		pod := q.podFor(v, idx, v.mem.attempts[idx], p)
+		if ids := v.waking[idx]; len(ids) > 0 {
+			// Woken only to answer (asks.go).
+			pod.Annotations[c4v1.AnnotationWake] = strings.Join(ids, ",")
+			for c := range pod.Spec.Containers {
+				pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, corev1.EnvVar{Name: "C4_ANSWER_ONLY", Value: strings.Join(ids, ",")})
+			}
+			if v.mem.woken == nil {
+				v.mem.woken = map[string]bool{}
+			}
+			for _, id := range ids {
+				v.mem.woken[id] = true
+			}
+			q.recordDecision(ctx, v, idx, "wake", "to answer "+strings.Join(ids, ", "), "", now)
+		}
 		if tools != nil {
 			applyTools(pod, v.job.Name, tools, q.proxyURL(), q.hudURL())
 		}

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -26,6 +27,13 @@ import (
 // unit:<name>): a block that gave up its slot to wait for it resumes with
 // it, and a wait unit of the graph completes. Every question and answer is
 // in the book.
+//
+// An answerer that has already finished is woken for the question: an
+// extra attempt of its unit (AnnotationWake, $C4_ANSWER_ONLY), which an
+// agent block takes as its own session resumed to answer, and nothing
+// else. The attempt takes a slot like any unit; its end and anything it
+// writes leave the unit as it was. One that ends without answering answers
+// cannot.
 
 const (
 	defaultMaxAsks = 3
@@ -107,8 +115,8 @@ func (v *view) answerer(idx int, to string) (int, string) {
 		return -1, "no unit " + name + " in the job"
 	case j == idx:
 		return -1, "a unit does not answer itself"
-	case m.done(j) || m.failed[j]:
-		return -1, name + " has finished"
+	case m.failed[j] || m.superseded[j]:
+		return -1, name + " has failed"
 	}
 	for _, a := range m.asks {
 		if a.open() && a.from == j && a.to == idx {
@@ -187,6 +195,48 @@ func (q *Queue) answer(ctx context.Context, v *view, a *askRec, text, cannot str
 	m.steerTo(a.from, by, fmt.Sprintf("answer to %s from %s: %s", a.id, by, note), now, nil, &answerRef{ID: a.id, From: by, Cannot: cannot != ""})
 }
 
+// wakeFor is the open questions to unit j, a unit that has finished, that
+// no wake has been started for: why it must be woken.
+func (m *jobMem) wakeFor(j int) []string {
+	if !m.done(j) {
+		return nil
+	}
+	var ids []string
+	for _, a := range m.asks {
+		if a.open() && a.to == j && !m.woken[a.id] {
+			ids = append(ids, a.id)
+		}
+	}
+	return ids
+}
+
+// answersFrom takes the answers unit idx's pod p wrote to the questions
+// they answer.
+func (q *Queue) answersFrom(ctx context.Context, v *view, idx int, p *corev1.Pod, now time.Time) {
+	var answers []unitNote
+	_ = json.Unmarshal([]byte(p.Annotations[c4v1.AnnotationAnswers]), &answers)
+	for _, n := range answers {
+		for _, a := range v.mem.asks {
+			if a.id == n.Ask && a.open() && a.to == idx && (n.Answer != "" || n.Cannot != "") {
+				q.answer(ctx, v, a, n.Answer, n.Cannot, now)
+			}
+		}
+	}
+}
+
+// endWake closes a wake attempt that ended: what it answered stands, and
+// the questions it was woken for that it left open are answered cannot.
+func (q *Queue) endWake(ctx context.Context, v *view, idx int, p *corev1.Pod, now time.Time) {
+	q.answersFrom(ctx, v, idx, p, now)
+	for _, id := range strings.Split(p.Annotations[c4v1.AnnotationWake], ",") {
+		for _, a := range v.mem.asks {
+			if a.id == id && a.open() && a.to == idx {
+				q.answer(ctx, v, a, "", nameOf(v.mem, idx)+" woke for it and did not answer", now)
+			}
+		}
+	}
+}
+
 // routeAsks takes the questions and answers running units wrote, each
 // once, to the units they are for; and asks a wait unit's question of the
 // unit that serves it.
@@ -235,6 +285,22 @@ func (q *Queue) routeAsks(ctx context.Context, v *view, now time.Time) {
 				continue
 			}
 			q.answer(ctx, v, a, n.Answer, n.Cannot, now)
+		}
+	}
+}
+
+// serveWakes adds the finished units that must be woken to answer to what
+// may run.
+func (v *view) serveWakes() {
+	m := v.mem
+	v.waking = map[int][]string{}
+	for i := range m.plan.Units {
+		if _, running := v.running[i]; running || v.finishing[i] {
+			continue
+		}
+		if ids := m.wakeFor(i); len(ids) > 0 {
+			v.waking[i] = ids
+			v.runnable = append(v.runnable, i)
 		}
 	}
 }

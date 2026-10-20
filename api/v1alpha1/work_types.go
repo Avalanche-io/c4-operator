@@ -118,6 +118,11 @@ const (
 	// each to the unit it is for, as a steering message.
 	AnnotationAsks    = "c4.avalanche.io/asks"
 	AnnotationAnswers = "c4.avalanche.io/answers"
+	// AnnotationWake on a unit pod says it is an extra attempt of a unit
+	// that had finished, woken only to answer these questions (comma-
+	// separated ids; $C4_ANSWER_ONLY). Its end changes nothing about the
+	// unit, and nothing it writes is kept.
+	AnnotationWake = "c4.avalanche.io/wake"
 	// AnnotationSupply on a WorkJob carries information people supply to
 	// units that stopped for it (NeedsInformation): a JSON list of
 	// WorkSupplyRequest. The queue carries out each once, in token order

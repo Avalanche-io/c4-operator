@@ -1773,7 +1773,7 @@ and a sweep planner that spawns trials are all generators.
       back marked `answer: {id, from, cannot?}`. The answerer is the
       question's `to`, else the job's `answerer` param.
     - **Answered `cannot` at once:** a question with no answerer, one to a
-      unit that has finished, one that would wait in a cycle, or one past
+      unit that failed, one that would wait in a cycle, or one past
       `maxAsks` (3) open questions.
     - **Answer-decided waits:** a wait may be served by a unit (`server:
       unit:<name>`). A wait unit of the graph asks its `ask` of that unit,
@@ -1782,8 +1782,16 @@ and a sweep planner that spawns trials are all generators.
       (`C4_DECISION` with `do: answer`). The expected wait for a unit's
       answer is 10 minutes until one is measured.
     - **Status and book:** `status.asks` keeps the latest 64, and every
-      question and answer is in the book. Waking an answerer that has
-      already finished is not built.
+      question and answer is in the book.
+    - **Waking a finished answerer:** a question to a unit that has already
+      finished wakes it. The queue starts an extra attempt of that unit,
+      marked `c4.avalanche.io/wake` with the question in
+      `$C4_ANSWER_ONLY`. An agent block takes it as its own session
+      resumed to answer, and nothing else. The attempt takes a slot like
+      any unit. Its end, and anything it writes, leave the unit as it was.
+      One that ends without answering answers `cannot`, and a question
+      wakes its answerer once.
+  - **Steering** (agent-catalog G-steer): a message to a unit while it
     runs, without ending it.
     - **Sending:** a person sends it with `POST /jobs/{ns}/{name}/steer
       {unit, text}` or MCP `c4_steer`. It is signed, then written as a
