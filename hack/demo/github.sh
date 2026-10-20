@@ -138,13 +138,13 @@ import json, sys
 d, sha2, view = json.load(open(sys.argv[1])), sys.argv[2], sys.argv[3]
 p = d["Pulls"][0]
 assert p["head"]["sha"] == sha2, p["head"]
-assert [r["state"] for r in p["Reviews"]] == ["CHANGES_REQUESTED", "APPROVED"], "dana's reviews must stand"
-c = p["Checks"][-1]
-assert c["status"] == "completed" and c["conclusion"] == "success", c
+assert [r["state"] for r in p["Reviews"] or []] == ["CHANGES_REQUESTED", "APPROVED"], "dana's reviews must stand"
+c = (p["Checks"] or [{}])[-1]
+assert c.get("status") == "completed" and c.get("conclusion") == "success", c
 assert p["Statuses"] and p["Statuses"][-1]["state"] == "success", p["Statuses"]
-assert view.startswith("c4") and any(view in x["body"] for x in p["Comments"]), "the output's C4 ID is published on the pull request"
+assert view.startswith("c4") and any(view in x["body"] for x in p["Comments"] or []), "the output's C4 ID is published on the pull request"
 assert d["Judgments"] == 0, "c4-sync wrote a review or a merge"
-hooks = [x["status"] for x in d["Deliveries"]]
+hooks = [x["status"] for x in d["Deliveries"] or []]
 print("github state ok: changes requested then approved, check run success on the new head, output", view[:12], "published; webhooks:", hooks)
 PY
 lineage "$JOB" "$JOB2" "github/Issue/7"
