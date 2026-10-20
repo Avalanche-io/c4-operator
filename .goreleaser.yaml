@@ -55,7 +55,8 @@ builds:
   main: ./cmd/c4-unit
   binary: c4-unit
   env: [CGO_ENABLED=0]
-  goos: [linux]
+  # linux for units in pods; macOS and Windows for host runners
+  goos: [linux, darwin, windows]
   goarch: [amd64, arm64]
   flags: [-trimpath]
   ldflags: ["-s -w"]
@@ -69,6 +70,7 @@ archives:
 - id: c4-unit
   ids: [c4-unit]
   formats: [tar.gz]
+  format_overrides: [{goos: windows, formats: [zip]}]
   name_template: "c4-unit_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   files: [LICENSE, NOTICE, cmd/c4-unit/c4unit.py]
 - id: c4-farm

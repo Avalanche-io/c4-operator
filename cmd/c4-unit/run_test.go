@@ -115,8 +115,8 @@ runs:
   workdir: render
 params:
 - {name: stage, type: PATH}
-- {name: note, type: STRING}
-- {name: empty, type: STRING}
+- {name: note, type: STRING, default: ""}
+- {name: empty, type: STRING, default: ""}
 - {name: frameRange, type: RANGE_EXPR}
 - {name: slate, type: BOOL}
 - {name: count, type: INT}
@@ -135,19 +135,19 @@ params:
 	env := r.file("env")
 	for _, w := range []string{
 		"C4_PARAM_STAGE=/show/sm0140.usda\n", "C4_PARAM_FRAME_RANGE=1001-1015:2\n", "C4_PARAM_SLATE=true\n",
-		"C4_PARAM_COUNT=3\n", `C4_PARAM_PLATES=["/show/a.exr","/show/b.exr"]` + "\n", "C4_PARAM_EMPTY=\n",
+		"C4_PARAM_COUNT=3\n", `C4_PARAM_PLATES=["/show/a.exr","/show/b.exr"]` + "\n", "C4_PARAM_EMPTY=\n", "C4_PARAM_NOTE=\n",
 		"C4_TREE=" + r.tree + "\n", "SHOTVAR=" + r.tree + "//show/sm0140.usda\n",
 	} {
 		if !strings.Contains(env, w) {
 			t.Errorf("env lacks %q:\n%s", w, env)
 		}
 	}
-	for _, not := range []string{"NOVAR", "C4_PARAM_STALE", "C4_PARAM_NOTE"} {
+	for _, not := range []string{"NOVAR", "C4_PARAM_STALE"} {
 		if strings.Contains(env, not) {
 			t.Errorf("env has %s:\n%s", not, env)
 		}
 	}
-	if o := r.outcome(); o.Outcome != "succeeded" || o.Class != "" {
+	if o := r.outcome(); o.Result != "succeeded" || o.Class != "" {
 		t.Errorf("outcome %+v", o)
 	}
 	if p := r.file(".c4/progress"); p != "1\n" {
@@ -157,20 +157,20 @@ params:
 
 func TestRunRefusesWhatCannotRun(t *testing.T) {
 	for name, c := range map[string]struct{ yaml, want string }{
-		"farm variable": {`runs: {command: [true], env: {C4_JOB: x}}`, "runs.env.C4_JOB: the farm's C4_ variables cannot be set"},
-		"unknown param": {`runs: {command: [echo, "{{Param.nope}}"]}`, `the tool has no parameter "nope"`},
-		"unknown name":  {`runs: {command: [echo, "{{Task.Frame}}"]}`, "{{Task.Frame}} is not a format string"},
-		"no exe":        {`runs: {command: ["{{Run.Exe}}", -V]}`, "runs.command is empty once filled in"},
-		"bad regex":     {"runs: {command: [true]}\nerrors: {retry: ['(']}", "errors.retry[0]"},
-		"no group":      {"runs: {command: [true]}\nprogress: [{match: 'x', percent: 1}]", "group 1 is not in"},
-		"no program":    {`runs: {command: [/nonexistent/husk]}`, "could not start the tool"},
+		"farm variable": {`runs: {image: c4/runtime-base, command: ['true'], env: {C4_JOB: x}}`, "runs.env.C4_JOB: C4_ variables are the farm's own"},
+		"unknown param": {`runs: {image: c4/runtime-base, command: [echo, "{{Param.nope}}"]}`, `the tool has no parameter "nope"`},
+		"unknown name":  {`runs: {image: c4/runtime-base, command: [echo, "{{Task.Frame}}"]}`, "{{Task.Frame}} is not a format string"},
+		"no exe":        {`runs: {image: c4/runtime-base, command: ["{{Run.Exe}}", -V]}`, "runs.command is empty once filled in"},
+		"bad regex":     {"runs: {image: c4/runtime-base, command: ['true']}\nerrors: {retry: ['(']}", "errors.retry[0]"},
+		"no group":      {"runs: {image: c4/runtime-base, command: ['true']}\nprogress: [{match: 'x', percent: 1}]", "group 1 is not in"},
+		"no program":    {`runs: {image: c4/runtime-base, command: [/nonexistent/husk]}`, "could not start the tool"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\n"+c.yaml)
 			if code := r.run(); code != setupCode {
 				t.Fatalf("exit %d", code)
 			}
-			if o := r.outcome(); o.Outcome != "failed" || o.Class != "permanent" || !strings.Contains(o.Reason, c.want) {
+			if o := r.outcome(); o.Result != "failed" || o.Class != "permanent" || !strings.Contains(o.Reason, c.want) {
 				t.Errorf("outcome %+v, want reason with %q", o, c.want)
 			}
 		})
@@ -183,6 +183,7 @@ c4: tool/1
 name: x
 kind: once
 runs:
+  image: c4/runtime-base
   exe: "false"
   host: {has: [bash], exe: {linux: echo, macos: echo}}
   command: ["{{Run.Exe}}", hello]
@@ -212,6 +213,7 @@ c4: tool/1
 name: x
 kind: frames
 runs:
+  image: c4/runtime-base
   command: [bash, -c, 'echo openjd_status: loading the stage; echo openjd_progress: 12.5; echo "openjd_redacted_env: TOKEN=s3cret"; echo "using s3cret now"; sleep 0.1; echo "s3cret on stderr" >&2; echo c4_frame: 1001 f.1001.png; echo c4_frame: 1003; echo openjd_fail: will not be the reason; echo c4_fail: permanent the scene names a missing asset; exit 3']
 `)
 	r.vars["C4_FRAME_END"] = "1003"
@@ -220,7 +222,7 @@ runs:
 		t.Fatalf("exit %d", c)
 	}
 	o := r.outcome()
-	if o.Outcome != "failed" || o.Class != "permanent" || o.Reason != "the scene names a missing asset" || o.ExitCode != 3 {
+	if o.Result != "failed" || o.Class != "permanent" || o.Reason != "the scene names a missing asset" || o.ExitCode != 3 {
 		t.Errorf("outcome %+v", o)
 	}
 	if s := r.file(".c4/status"); s != "loading the stage\n" {
@@ -245,6 +247,7 @@ c4: tool/1
 name: x
 kind: frames
 runs:
+  image: c4/runtime-base
   command: [bash, -c, 'echo ALF_PROGRESS 40%%; echo "Warning: CUDA error in an unused pass" >&2; echo "CUDA error: out of memory" >&2; %s exit 1']
 progress:
 - {match: 'ALF_PROGRESS (\d+)%%', percent: 1}
@@ -273,7 +276,7 @@ errors:
 }
 
 func TestRunDefaultsToRetry(t *testing.T) {
-	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {command: [bash, -c, 'exit 7']}\n")
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'exit 7']}\n")
 	if c := r.run(); c != 7 {
 		t.Fatalf("exit %d", c)
 	}
@@ -283,7 +286,7 @@ func TestRunDefaultsToRetry(t *testing.T) {
 }
 
 func TestRunEndsAStall(t *testing.T) {
-	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {command: [bash, -c, 'echo started; sleep 30']}\nstall: {quietMinutes: 2}\n")
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'echo started; sleep 30']}\nstall: {quietMinutes: 2}\n")
 	r.minute = 100 * time.Millisecond
 	began := time.Now()
 	if c := r.run(); c != stallCode {
@@ -298,7 +301,7 @@ func TestRunEndsAStall(t *testing.T) {
 }
 
 func TestRunForwardsSIGTERM(t *testing.T) {
-	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {command: [bash, -c, 'trap \"echo stopping; exit 143\" TERM; echo ready; while :; do sleep 0.05; done']}\n")
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'trap \"echo stopping; exit 143\" TERM; echo ready; while :; do sleep 0.05; done']}\n")
 	go func() {
 		for !strings.Contains(r.out.String(), "ready") {
 			time.Sleep(10 * time.Millisecond)
@@ -314,7 +317,7 @@ func TestRunForwardsSIGTERM(t *testing.T) {
 }
 
 func TestRunOutlivesAChildHoldingStdout(t *testing.T) {
-	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {command: [bash, -c, '(sleep 5 &); echo done']}\n")
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, '(sleep 5 &); echo done']}\n")
 	began := time.Now()
 	if c := r.run(); c != 0 {
 		t.Fatalf("exit %d", c)
@@ -325,8 +328,8 @@ func TestRunOutlivesAChildHoldingStdout(t *testing.T) {
 }
 
 func TestRunSafePointAndNeeds(t *testing.T) {
-	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {command: [bash, -c, 'mkdir -p $C4_OUTPUT/.c4; echo 1 > $C4_OUTPUT/.c4/safepoint; exit 10']}\n")
-	writeAtomic(filepath.Join(r.tree, ".c4", "outcome"), []byte(`{"outcome":"failed"}`))
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'mkdir -p $C4_OUTPUT/.c4; echo 1 > $C4_OUTPUT/.c4/safepoint; exit 10']}\n")
+	writeAtomic(filepath.Join(r.tree, ".c4", "outcome"), []byte(`{"result":"failed"}`))
 	if c := r.run(); c != stopCode {
 		t.Fatalf("exit %d", c)
 	}
@@ -334,7 +337,7 @@ func TestRunSafePointAndNeeds(t *testing.T) {
 		t.Errorf("a stop at a safe point left an outcome: %v", err)
 	}
 
-	r = newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {command: [bash, -c, 'printf \"the frame rate\\nwhy: 24 or 25\" > $C4_TERMINATION_LOG; exit 12']}\n")
+	r = newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'printf \"the frame rate\\nwhy: 24 or 25\" > $C4_TERMINATION_LOG; exit 12']}\n")
 	if c := r.run(); c != needsCode {
 		t.Fatalf("exit %d", c)
 	}
@@ -343,9 +346,9 @@ func TestRunSafePointAndNeeds(t *testing.T) {
 	}
 
 	// exit 10 with no safe point in this run is a failure like any other
-	r = newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {command: [bash, -c, 'exit 10']}\n")
+	r = newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'exit 10']}\n")
 	r.run()
-	if o := r.outcome(); o.Outcome != "failed" || o.ExitCode != 10 {
+	if o := r.outcome(); o.Result != "failed" || o.ExitCode != 10 {
 		t.Errorf("outcome %+v", o)
 	}
 }
@@ -356,6 +359,7 @@ c4: tool/1
 name: x
 kind: frames
 runs:
+  image: c4/runtime-base
   command: [bash, -c, 'sleep 0.2; cp "$C4_TOOLS/f.png" render/beauty/sm.1001.png; sleep 0.2; cp "$C4_TOOLS/f.png" render/beauty/sm.1003.png; cp "$C4_TOOLS/f.png" render/beauty/sm.1004.png; sleep 0.2; exit 1']
   workdir: "{{Job.Tree}}"
 previews: "render/**/*.$F4.png"
@@ -386,7 +390,7 @@ func TestRunWritesThePathMap(t *testing.T) {
 	r := newToolRun(t, `c4: tool/1
 name: x
 kind: once
-runs: {command: [bash, -c, 'echo "$1 $HOUDINI_PATHMAP $C4_PATH_MAP"', x, "{{Run.PathMap}}"], env: {HOUDINI_PATHMAP: "{{Run.PathMap}}"}}
+runs: {image: c4/runtime-base, command: [bash, -c, 'echo "$1 $HOUDINI_PATHMAP $C4_PATH_MAP"', x, "{{Run.PathMap}}"], env: {HOUDINI_PATHMAP: "{{Run.PathMap}}"}}
 `)
 	r.vars["C4_SOURCE_ROOTS"] = `[{"os": "windows", "path": "S:/saltmarsh"}, {"os": "macos", "path": "/Volumes/saltmarsh"}]`
 	if c := r.run(); c != 0 {
@@ -414,7 +418,7 @@ runs: {command: [bash, -c, 'echo "$1 $HOUDINI_PATHMAP $C4_PATH_MAP"', x, "{{Run.
 	r = newToolRun(t, `c4: tool/1
 name: x
 kind: once
-runs: {command: [bash, -c, 'echo "[$#] [${HOUDINI_PATHMAP-unset}]"', x, "{{Run.PathMap}}"], env: {HOUDINI_PATHMAP: "{{Run.PathMap}}"}}
+runs: {image: c4/runtime-base, command: [bash, -c, 'echo "[$#] [${HOUDINI_PATHMAP-unset}]"', x, "{{Run.PathMap}}"], env: {HOUDINI_PATHMAP: "{{Run.PathMap}}"}}
 `)
 	r.run()
 	if got := strings.TrimSpace(r.out.String()); got != "[0] [unset]" {
@@ -485,5 +489,110 @@ func TestUnitFrames(t *testing.T) {
 	}
 	if _, err := unitFrames(vars(map[string]string{"C4_FRAME_START": "9", "C4_FRAME_END": "1"})); err == nil {
 		t.Error("a backwards range accepted")
+	}
+}
+
+// A parameter missing from C4_PARAMS takes its default, a relative PATH
+// (or each of a LIST[PATH]) is joined to the tree, and a required one with
+// no value fails as permanent, never dropped.
+func TestRunResolvesParameters(t *testing.T) {
+	const tool = `
+c4: tool/1
+name: x
+kind: once
+runs:
+  image: c4/runtime-base
+  command: [bash, -c, 'printf "%%s\n" "$@" > "$C4_TREE/args"', x, "{{Param.codec}}", "{{Param.stage}}", "{{Param.plates}}"]
+params:
+- {name: codec, type: STRING, default: prores-422hq}
+- {name: stage, type: PATH%s}
+- {name: plates, type: "LIST[PATH]", default: [plates/a.exr, /abs/b.exr]}
+`
+	r := newToolRun(t, fmt.Sprintf(tool, ""))
+	r.vars["C4_PARAMS"] = `{"stage": "shots/sm0140.usda"}`
+	if c := r.run(); c != 0 {
+		t.Fatalf("exit %d\n%s", c, r.errs.String())
+	}
+	want := "prores-422hq\n" + filepath.Join(r.tree, "shots", "sm0140.usda") + "\n" +
+		`["` + filepath.Join(r.tree, "plates", "a.exr") + `","/abs/b.exr"]` + "\n"
+	if got := r.file("args"); got != want {
+		t.Errorf("args:\n%s\nwant:\n%s", got, want)
+	}
+	for _, params := range []string{``, `{"stage": ""}`} {
+		r = newToolRun(t, fmt.Sprintf(tool, ""))
+		r.vars["C4_PARAMS"] = params
+		if c := r.run(); c != setupCode {
+			t.Fatalf("%q: exit %d", params, c)
+		}
+		if o := r.outcome(); o.Class != "permanent" || !strings.Contains(o.Reason, "parameter stage is required") {
+			t.Errorf("%q: outcome %+v", params, o)
+		}
+	}
+}
+
+// With retryOn, an unclassified failure retries only on the codes it
+// lists; any other is permanent. A classified one keeps its class.
+func TestRunRetryOn(t *testing.T) {
+	for code, class := range map[string]string{"137": "retry", "1": "permanent"} {
+		r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'exit "+code+"']}\nretryOn: {exitCodes: [137, 139]}\n")
+		r.run()
+		if o := r.outcome(); o.Class != class {
+			t.Errorf("exit %s: %+v, want %s", code, o, class)
+		}
+	}
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'echo c4_fail: licence no seat; exit 1']}\nretryOn: {exitCodes: [137]}\n")
+	r.run()
+	if o := r.outcome(); o.Class != "licence" {
+		t.Errorf("classified: %+v", o)
+	}
+}
+
+// A frames tool that writes frames without a word to its log is working,
+// not stalled.
+func TestRunFramesAreActivity(t *testing.T) {
+	r := newToolRun(t, `
+c4: tool/1
+name: x
+kind: frames
+runs:
+  image: c4/runtime-base
+  command: [bash, -c, 'mkdir -p render; for f in 1001 1002 1003 1004 1005 1006 1007 1008; do sleep 0.1; cp "$C4_TOOLS/f.png" render/sm.$f.png; done']
+  workdir: "{{Job.Tree}}"
+previews: "render/*.$F4.png"
+stall: {quietMinutes: 3}
+`)
+	r.vars["C4_FRAME_END"] = "1008"
+	r.minute = 100 * time.Millisecond
+	writePNG(t, filepath.Join(r.dir, "f.png"))
+	if c := r.run(); c != 0 {
+		t.Fatalf("exit %d: %+v", c, r.outcome())
+	}
+}
+
+// The program is found on the PATH runs.env gives the tool.
+func TestRunFindsTheProgramOnTheToolsPath(t *testing.T) {
+	bin := t.TempDir()
+	if err := os.WriteFile(filepath.Join(bin, "mytool"), []byte("#!/bin/sh\necho from mytool\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [mytool], env: {PATH: \""+bin+":/usr/bin:/bin\"}}\n")
+	if c := r.run(); c != 0 || !strings.Contains(r.out.String(), "from mytool") {
+		t.Fatalf("exit %d, log %q %s", c, r.out.String(), r.errs.String())
+	}
+}
+
+// On a host whose OS has no runs.host.exe entry, the refusal says so.
+func TestRunNamesTheMissingHostExe(t *testing.T) {
+	other := "windows"
+	if hostOS() == "windows" {
+		other = "linux"
+	}
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {host: {has: [nuke], exe: {"+other+": /bin/nuke}}, command: ['{{Run.Exe}}']}\n")
+	r.vars["C4_RUNNER"] = "host"
+	if c := r.run(); c != setupCode {
+		t.Fatalf("exit %d", c)
+	}
+	if o := r.outcome(); !strings.Contains(o.Reason, "runs.host.exe has no entry for "+hostOS()) {
+		t.Errorf("outcome %+v", o)
 	}
 }

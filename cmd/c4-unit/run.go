@@ -42,7 +42,7 @@ import (
 	"time"
 	"unicode"
 
-	"sigs.k8s.io/yaml"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 const (
@@ -56,46 +56,10 @@ const (
 	masked    = "********"
 )
 
-// tool is the part of a tool.yaml (c4: tool/1) the runner reads. Publish
-// has validated the whole document, so this decodes leniently.
-// TODO: decode with schema.ParseTool, so the runner reads tool.yaml as
-// publishing does.
-type tool struct {
-	Kind string `json:"kind"`
-	Runs struct {
-		Exe  string `json:"exe"`
-		Host *struct {
-			Exe map[string]string `json:"exe"`
-		} `json:"host"`
-		Command []string          `json:"command"`
-		Env     map[string]string `json:"env"`
-		Workdir string            `json:"workdir"`
-	} `json:"runs"`
-	Params []struct {
-		Name string `json:"name"`
-	} `json:"params"`
-	Previews string `json:"previews"`
-	Progress []struct {
-		Match   string `json:"match"`
-		Percent int    `json:"percent"`
-		Frame   int    `json:"frame"`
-	} `json:"progress"`
-	Errors struct {
-		Licence   []string `json:"licence"`
-		Permanent []string `json:"permanent"`
-		Question  []string `json:"question"`
-		Retry     []string `json:"retry"`
-		Ignore    []string `json:"ignore"`
-	} `json:"errors"`
-	Stall *struct {
-		QuietMinutes int `json:"quietMinutes"`
-	} `json:"stall"`
-}
-
 // outcome is .c4/outcome, which the node daemon relays and the queue acts
 // on (slice 3): succeeded, or failed with a class and a reason.
 type outcome struct {
-	Outcome  string `json:"outcome"`
+	Result   string `json:"result"`
 	Class    string `json:"class,omitempty"`
 	Reason   string `json:"reason,omitempty"`
 	ExitCode int    `json:"exitCode"`
@@ -167,7 +131,7 @@ func unitFrames(e env) (frames, error) {
 type runner struct {
 	e      env
 	tree   string
-	tool   tool
+	tool   *schema.Tool
 	params map[string]any
 	frames frames
 	start  time.Time
@@ -209,7 +173,7 @@ func runTool(e env, stdout, stderr io.Writer) (int, error) {
 	r := &runner{e: e, tree: tree, start: e.clock(), done: map[int]bool{}, previewed: map[int]bool{}}
 	cmd, err := r.prepare()
 	if err != nil {
-		r.writeOutcome(outcome{Outcome: "failed", Class: "permanent", Reason: err.Error(), ExitCode: setupCode})
+		r.writeOutcome(outcome{Result: "failed", Class: "permanent", Reason: err.Error(), ExitCode: setupCode})
 		return setupCode, err
 	}
 	return r.run(cmd, stdout, stderr)
@@ -225,9 +189,11 @@ func (r *runner) prepare() (*exec.Cmd, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := yaml.Unmarshal(b, &r.tool); err != nil {
-		return nil, fmt.Errorf("tool.yaml: %w", err)
+	t, errs := schema.ParseTool(b)
+	if len(errs) > 0 {
+		return nil, fmt.Errorf("tool.yaml: %s", toolErrors(errs))
 	}
+	r.tool = t
 	r.params = map[string]any{}
 	if p := r.e.get("C4_PARAMS"); p != "" {
 		d := json.NewDecoder(strings.NewReader(p))
@@ -235,6 +201,9 @@ func (r *runner) prepare() (*exec.Cmd, error) {
 		if err := d.Decode(&r.params); err != nil {
 			return nil, fmt.Errorf("C4_PARAMS is not a JSON object: %w", err)
 		}
+	}
+	if err := r.resolveParams(); err != nil {
+		return nil, err
 	}
 	if r.frames, err = unitFrames(r.e); err != nil {
 		return nil, err
@@ -262,6 +231,9 @@ func (r *runner) prepare() (*exec.Cmd, error) {
 		}
 	}
 	if len(argv) == 0 || argv[0] == "" {
+		if r.e.get("C4_RUNNER") == "host" {
+			return nil, fmt.Errorf("runs.command is empty once filled in: runs.host.exe has no entry for %s", hostOS())
+		}
 		return nil, errors.New("runs.command is empty once filled in (is runs.exe set?)")
 	}
 	cmd := exec.Command(argv[0], argv[1:]...)
@@ -282,6 +254,10 @@ func (r *runner) prepare() (*exec.Cmd, error) {
 		if ok {
 			cmd.Env = append(cmd.Env, k+"="+v)
 		}
+	}
+	// the program is found on the tool's own PATH, which runs.env may set
+	if found, ok := lookPath(argv[0], envValue(cmd.Env, "PATH")); ok {
+		cmd.Path, cmd.Err = found, nil
 	}
 	if w := r.tool.Runs.Workdir; w != "" {
 		v, ok, err := expand(w, vals)
@@ -463,11 +439,7 @@ func (r *runner) exe() string {
 	if r.tool.Runs.Host == nil {
 		return ""
 	}
-	goos := runtime.GOOS
-	if goos == "darwin" {
-		goos = "macos"
-	}
-	return r.tool.Runs.Host.Exe[goos]
+	return r.tool.Runs.Host.Exe[hostOS()]
 }
 
 var formatRE = regexp.MustCompile(`\{\{\s*([A-Za-z_][A-Za-z0-9_.]*)\s*\}\}`)
@@ -605,7 +577,7 @@ func (r *runner) run(cmd *exec.Cmd, stdout, stderr io.Writer) (int, error) {
 		return setupCode, err
 	}
 	cmd.Stdout, cmd.Stderr = outW, errW
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	ownGroup(cmd)
 	r.last = r.e.clock()
 	err = cmd.Start()
 	outW.Close()
@@ -613,7 +585,7 @@ func (r *runner) run(cmd *exec.Cmd, stdout, stderr io.Writer) (int, error) {
 	if err != nil {
 		outR.Close()
 		errR.Close()
-		r.writeOutcome(outcome{Outcome: "failed", Class: "permanent", Reason: "could not start the tool: " + err.Error(), ExitCode: setupCode})
+		r.writeOutcome(outcome{Result: "failed", Class: "permanent", Reason: "could not start the tool: " + err.Error(), ExitCode: setupCode})
 		return setupCode, err
 	}
 
@@ -654,7 +626,7 @@ func (r *runner) run(cmd *exec.Cmd, stdout, stderr io.Writer) (int, error) {
 	var signalled os.Signal
 	tick := time.NewTicker(r.tickEvery())
 	defer tick.Stop()
-	pgid := cmd.Process.Pid
+	proc := cmd.Process
 wait:
 	for {
 		select {
@@ -662,7 +634,7 @@ wait:
 			break wait
 		case s := <-sigs:
 			signalled = s
-			signalGroup(pgid, s)
+			signalGroup(proc, s)
 		case <-tick.C:
 			if stalled || r.tool.Stall == nil || r.tool.Stall.QuietMinutes < 1 {
 				continue
@@ -675,12 +647,12 @@ wait:
 			}
 			stalled = true
 			fmt.Fprintf(stderr, "c4-unit: no output for %d minutes: ending the tool\n", r.tool.Stall.QuietMinutes)
-			signalGroup(pgid, syscall.SIGTERM)
+			signalGroup(proc, syscall.SIGTERM)
 			go func() {
 				select {
 				case <-exited:
 				case <-time.After(r.e.grace()):
-					signalGroup(pgid, syscall.SIGKILL)
+					signalGroup(proc, syscall.SIGKILL)
 				}
 			}()
 		}
@@ -705,35 +677,13 @@ wait:
 	code := exitCode(cmd.ProcessState, <-waitErr)
 	o := r.result(code, stalled, signalled)
 	r.writeOutcome(o)
-	if o.Outcome == "succeeded" {
+	if o.Result == "succeeded" {
 		r.setProgress(1)
 	}
 	if stalled {
 		return stallCode, nil
 	}
 	return code, nil
-}
-
-func signalGroup(pgid int, s os.Signal) {
-	if sig, ok := s.(syscall.Signal); ok {
-		_ = syscall.Kill(-pgid, sig)
-	}
-}
-
-func exitCode(ps *os.ProcessState, err error) int {
-	if ps == nil {
-		return 1
-	}
-	if ws, ok := ps.Sys().(syscall.WaitStatus); ok && ws.Signaled() {
-		return 128 + int(ws.Signal())
-	}
-	if c := ps.ExitCode(); c >= 0 {
-		return c
-	}
-	if err != nil {
-		return 1
-	}
-	return 0
 }
 
 // result is the run's outcome. A tool that stopped at a safe point (exit
@@ -744,7 +694,7 @@ func (r *runner) result(code int, stalled bool, signalled os.Signal) outcome {
 		return outcome{}
 	}
 	if code == 0 && !stalled {
-		return outcome{Outcome: "succeeded"}
+		return outcome{Result: "succeeded"}
 	}
 	needs, needed := "", false
 	if code == needsCode {
@@ -752,7 +702,7 @@ func (r *runner) result(code int, stalled bool, signalled os.Signal) outcome {
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	o := outcome{Outcome: "failed", ExitCode: code, Stalled: stalled}
+	o := outcome{Result: "failed", ExitCode: code, Stalled: stalled}
 	switch {
 	case stalled:
 		o.Class, o.Reason = "retry", fmt.Sprintf("no output for %d minutes", r.tool.Stall.QuietMinutes)
@@ -762,6 +712,8 @@ func (r *runner) result(code int, stalled bool, signalled os.Signal) outcome {
 		o.Class = r.class
 	case r.patClass != "":
 		o.Class = r.patClass
+	case signalled == nil && r.tool.RetryOn != nil && len(r.tool.RetryOn.ExitCodes) > 0 && !slices.Contains(r.tool.RetryOn.ExitCodes, code):
+		o.Class, o.Reason = "permanent", fmt.Sprintf("exit status %d, which retryOn does not list", code)
 	default:
 		o.Class = "retry"
 	}
@@ -803,7 +755,7 @@ func (r *runner) needs() (string, bool) {
 
 func (r *runner) writeOutcome(o outcome) {
 	p := filepath.Join(r.tree, ".c4", "outcome")
-	if o.Outcome == "" {
+	if o.Result == "" {
 		os.Remove(p)
 		return
 	}
@@ -1108,6 +1060,9 @@ func (r *runner) scanTree(seen map[string]fileState, final bool) {
 // countTreeFrame takes a frame found in the tree: its preview, and, when
 // the tool has no progress rules, its progress.
 func (r *runner) countTreeFrame(n int, path string) {
+	r.mu.Lock()
+	r.last = r.e.clock()
+	r.mu.Unlock()
 	if len(r.progress) == 0 {
 		r.frameDone(n, "")
 	}
@@ -1168,4 +1123,103 @@ func (e env) errOut() io.Writer {
 		return e.stderr
 	}
 	return os.Stderr
+}
+
+// toolErrors lists a tool.yaml's refusals, as the farm states them.
+func toolErrors(errs []schema.Error) string {
+	var out []string
+	for _, e := range errs {
+		out = append(out, e.Path+": "+e.Message)
+	}
+	return strings.Join(out, "; ")
+}
+
+// resolveParams gives each declared parameter missing from C4_PARAMS its
+// default, refuses a required one with no value, and makes a PATH (or each
+// of a LIST[PATH]) written relative to the job's tree absolute, as the
+// farm's lowering does, so a tool runs the same under c4 farm tool test.
+func (r *runner) resolveParams() error {
+	for _, p := range r.tool.Params {
+		v, has := r.params[p.Name]
+		if !has || v == nil {
+			if p.Default == nil {
+				return fmt.Errorf("parameter %s is required and has no value", p.Name)
+			}
+			v = p.Default
+		}
+		if s, ok := v.(string); ok && s == "" && p.Required() {
+			return fmt.Errorf("parameter %s is required and is empty", p.Name)
+		}
+		switch p.Type {
+		case "PATH":
+			if s, ok := v.(string); ok {
+				v = r.inTree(s)
+			}
+		case "LIST[PATH]":
+			if list, ok := v.([]any); ok {
+				out := make([]any, len(list))
+				for i, e := range list {
+					if s, ok := e.(string); ok {
+						e = r.inTree(s)
+					}
+					out[i] = e
+				}
+				v = out
+			}
+		}
+		r.params[p.Name] = v
+	}
+	return nil
+}
+
+// inTree is a path relative to the job's tree made absolute; an absolute
+// path, or none, is left alone.
+func (r *runner) inTree(p string) string {
+	if p == "" || filepath.IsAbs(p) || strings.HasPrefix(p, "/") {
+		return p
+	}
+	return filepath.Join(r.tree, filepath.FromSlash(p))
+}
+
+// hostOS is the operating system as tool.yaml names it: linux, windows or
+// macos.
+func hostOS() string {
+	if runtime.GOOS == "darwin" {
+		return "macos"
+	}
+	return runtime.GOOS
+}
+
+// envValue is a variable's last value in env, as exec gives it the child.
+func envValue(env []string, key string) string {
+	v := ""
+	for _, kv := range env {
+		if k, val, ok := strings.Cut(kv, "="); ok && (k == key || runtime.GOOS == "windows" && strings.EqualFold(k, key)) {
+			v = val
+		}
+	}
+	return v
+}
+
+// lookPath finds a program named without a directory on the given PATH.
+func lookPath(name, path string) (string, bool) {
+	if name == "" || strings.ContainsAny(name, `/\`) || path == "" {
+		return "", false
+	}
+	exts := []string{""}
+	if runtime.GOOS == "windows" && filepath.Ext(name) == "" {
+		exts = []string{".exe", ".com", ".bat", ".cmd"}
+	}
+	for _, dir := range filepath.SplitList(path) {
+		if dir == "" {
+			continue
+		}
+		for _, ext := range exts {
+			p := filepath.Join(dir, name+ext)
+			if info, err := os.Stat(p); err == nil && !info.IsDir() && (runtime.GOOS == "windows" || info.Mode()&0o111 != 0) {
+				return p, true
+			}
+		}
+	}
+	return "", false
 }
