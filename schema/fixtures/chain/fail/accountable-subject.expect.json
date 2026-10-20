@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "party",
+  "errors": [
+    {
+      "path": "for",
+      "message": "an accountable chain is for a party",
+      "fix": "name the party in for.party, or set accountable: false with its gap"
+    }
+  ]
+}

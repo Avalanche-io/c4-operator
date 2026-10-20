@@ -1,0 +1,12 @@
+{
+  "act": "build",
+  "by": {
+    "deployment": "saltmarsh/component/queue",
+    "grade": "signed"
+  },
+  "for": {
+    "party": "noor",
+    "grade": "direct"
+  },
+  "accountable": true
+}

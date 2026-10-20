@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "binding",
+  "errors": [
+    {
+      "path": "on[0]",
+      "message": "an accountable chain's deployments each name their binding and owner",
+      "fix": "add binding and owner (the farm binding covers every deployment), or set accountable: false"
+    }
+  ]
+}

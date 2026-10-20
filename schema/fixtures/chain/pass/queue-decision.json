@@ -3,7 +3,7 @@
   "by": {
     "deployment": "saltmarsh/component/queue",
     "rule": "deadline-order",
-    "grade": "signed"
+    "grade": "direct"
   },
   "for": {
     "party": "dana",

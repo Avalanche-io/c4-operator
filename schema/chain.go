@@ -74,12 +74,14 @@ type Delegation struct {
 	To         string `json:"to,omitempty"`
 }
 
-// Credential is one credential spent, and the party that holds it.
+// Credential is one credential spent, and who holds it: a party, or a
+// subject that is not a party yet (which leaves the chain unaccountable).
 type Credential struct {
-	Lease   string `json:"lease,omitempty"`
-	Licence string `json:"licence,omitempty"`
-	Key     string `json:"key,omitempty"`
-	Holder  string `json:"holder"`
+	Lease         string `json:"lease,omitempty"`
+	Licence       string `json:"licence,omitempty"`
+	Key           string `json:"key,omitempty"`
+	Holder        string `json:"holder,omitempty"`
+	HolderSubject string `json:"holderSubject,omitempty"`
 }
 
 // Deployment is one deployment that did and recorded the act, with its
@@ -110,6 +112,10 @@ type Names interface {
 	Record(id string) string
 	// Deployment is a deployment's display name ("the queue").
 	Deployment(name string) string
+	// Subject is a non-party subject in words ("c4-sync itself",
+	// "dana@studio.com (no party yet)"). People never read a raw
+	// service-account name.
+	Subject(subject string) string
 }
 
 // Line is the chain read aloud, as the HUD and c4 farm show it:
@@ -121,6 +127,9 @@ func (c *Chain) Line(n Names) string {
 	party := func(s string) string { return pick(s, n, func(n Names) string { return n.Party(s) }) }
 	record := func(id string) string { return pick(short(id), n, func(n Names) string { return n.Record(id) }) }
 	dep := func(s string) string { return pick(path.Base(s), n, func(n Names) string { return n.Deployment(s) }) }
+	subject := func(s string) string {
+		return pick(lastSegment(s)+" (not a party)", n, func(n Names) string { return n.Subject(s) })
+	}
 	grade := func(g string) string {
 		if g == "" || g == GradeDirect {
 			return ""
@@ -146,14 +155,14 @@ func (c *Chain) Line(n Names) string {
 	case by.Deployment != "":
 		b.WriteString(" by " + dep(by.Deployment))
 		if by.Rule != "" {
-			b.WriteString(" by rule " + by.Rule)
+			b.WriteString(", by rule " + by.Rule)
 		}
 		b.WriteString(grade(by.Grade))
 	}
 	if c.For.Party != "" {
 		b.WriteString(", for " + party(c.For.Party) + grade(c.For.Grade))
 	} else {
-		b.WriteString(", for " + c.For.Subject + " (not a party)")
+		b.WriteString(", for " + subject(c.For.Subject))
 	}
 	if len(c.Under) > 0 {
 		var us []string
@@ -187,7 +196,11 @@ func (c *Chain) Line(n Names) string {
 			case u.Key != "":
 				what = "key"
 			}
-			us = append(us, party(u.Holder)+"'s "+what)
+			if u.Holder != "" {
+				us = append(us, party(u.Holder)+"'s "+what)
+			} else {
+				us = append(us, "a "+what+" held by "+subject(u.HolderSubject))
+			}
 		}
 		b.WriteString(", using " + and(us))
 	}
@@ -230,6 +243,15 @@ func unitName(u string) string {
 	job, idx, _ := strings.Cut(u, "/")
 	job, _, _ = strings.Cut(job, "@")
 	return job + "/" + idx
+}
+
+// lastSegment is a subject's last part: system:serviceaccount:c4-system:c4-sync
+// is c4-sync.
+func lastSegment(s string) string {
+	if i := strings.LastIndexAny(s, ":/"); i >= 0 && i < len(s)-1 {
+		return s[i+1:]
+	}
+	return s
 }
 
 // short is a record ID's last six characters, when no name is given.

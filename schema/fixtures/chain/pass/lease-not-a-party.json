@@ -1,0 +1,27 @@
+{
+  "act": "build",
+  "by": {
+    "unit": "saltmarsh/sm0140-light@9b2e4d/7",
+    "grade": "direct"
+  },
+  "for": {
+    "party": "dana",
+    "grade": "direct"
+  },
+  "using": [
+    {
+      "lease": "c43pfqp283bm6vU8ki5QKGPs9GnZ8Fgfm5MAny33NHbCfavQAS5ASRCD2U3DMRvr3pUZiULX1X9pPTQTWbSPyJfE84",
+      "holderSubject": "dana@studio.com"
+    }
+  ],
+  "on": [
+    {
+      "deployment": "saltmarsh/component/queue",
+      "binding": "c45Gy9ZtiRXPiVYGnXjfAXCGyF2syDkNbwnZ4FPGRDWU7mBzUBtDFMm2VJ4DSSj2rY2Kx25g2WH5gzsA5RseHqHmLs",
+      "owner": "avalanche",
+      "runFor": "studio-x"
+    }
+  ],
+  "accountable": false,
+  "gap": "the sign-in dana@studio.com is not a party yet"
+}

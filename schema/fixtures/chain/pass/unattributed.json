@@ -1,7 +1,7 @@
 {
   "act": "submit",
   "by": {
-    "deployment": "saltmarsh/component/c4-sync",
+    "deployment": "saltmarsh/sync/github",
     "grade": "direct"
   },
   "for": {
@@ -17,5 +17,5 @@
     }
   ],
   "accountable": false,
-  "gap": "owner system:serviceaccount:c4-system:c4-sync is not a party"
+  "gap": "c4-sync submitted on its own, for no person"
 }

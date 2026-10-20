@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "not",
+  "errors": [
+    {
+      "path": "using[0].holderSubject",
+      "message": "an accountable chain's credentials are each held by a party",
+      "fix": "name the holder's party, or set accountable: false"
+    }
+  ]
+}

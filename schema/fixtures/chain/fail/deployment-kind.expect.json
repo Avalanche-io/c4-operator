@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "saltmarsh/pod/hud-7f9c",
+  "errors": [
+    {
+      "path": "on[0].deployment",
+      "message": "\"saltmarsh/pod/hud-7f9c\" is not a deployment",
+      "fix": "write <farm>/<kind>/<name>, kind one of component, node, runner, sync or import"
+    }
+  ]
+}

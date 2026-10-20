@@ -12,11 +12,13 @@ type fixtureNames struct {
 	Parties     map[string]string `json:"parties"`
 	Records     map[string]string `json:"records"`
 	Deployments map[string]string `json:"deployments"`
+	Subjects    map[string]string `json:"subjects"`
 }
 
 func (n fixtureNames) Party(s string) string      { return n.Parties[s] }
 func (n fixtureNames) Record(s string) string     { return n.Records[s] }
 func (n fixtureNames) Deployment(s string) string { return n.Deployments[s] }
+func (n fixtureNames) Subject(s string) string    { return n.Subjects[s] }
 
 // TestChainLines reads every passing chain aloud and compares it with its
 // .line.txt, the words the HUD and c4 farm show.
@@ -52,7 +54,10 @@ func TestChainLines(t *testing.T) {
 		t.Fatal("no chains read")
 	}
 	// Without names, a chain reads with its own.
-	ch, _ := ParseChain([]byte(`{"act": "disable", "by": {"person": "maya", "grade": "direct"}, "for": {"party": "studio-x", "grade": "direct"}, "on": [{"deployment": "saltmarsh/component/hud", "owner": "avalanche"}], "accountable": true}`))
+	ch, errs := ParseChain([]byte(`{"act": "disable", "by": {"person": "maya", "grade": "direct"}, "for": {"party": "studio-x", "grade": "direct"}, "on": [{"deployment": "saltmarsh/component/hud", "binding": "c4` + strings.Repeat("1", 88) + `", "owner": "avalanche"}], "accountable": true}`))
+	if errs != nil {
+		t.Fatal(errs)
+	}
 	if got, want := ch.Line(nil), "disable by maya, for studio-x, on hud (avalanche's)"; got != want {
 		t.Errorf("no names:\n got  %s\n want %s", got, want)
 	}

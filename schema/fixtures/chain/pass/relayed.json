@@ -17,7 +17,7 @@
   ],
   "on": [
     {
-      "deployment": "saltmarsh/component/c4-sync",
+      "deployment": "saltmarsh/sync/flow",
       "binding": "c44AodpwTGKzBksCf85xyjY6YEnXQH6HFP2FVs6zrppgXkydBu1LBBjeE5aPEoCfk84sc2dpZyoiiZUCgvZhDPAUaT",
       "owner": "avalanche",
       "runFor": "studio-x"

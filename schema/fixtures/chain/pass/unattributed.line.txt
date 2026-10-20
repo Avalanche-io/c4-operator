@@ -1,1 +1,1 @@
-submit by tracker sync, for system:serviceaccount:c4-system:c4-sync (not a party), on the HUD (Avalanche, managed for Studio X); unattributed: owner system:serviceaccount:c4-system:c4-sync is not a party
+submit by tracker sync for GitHub, for c4-sync itself, on the HUD (Avalanche, managed for Studio X); unattributed: c4-sync submitted on its own, for no person

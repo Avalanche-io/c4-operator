@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "person",
+  "errors": [
+    {
+      "path": "by",
+      "message": "signed is for a party's own key: a deployment's or an agent's own record is direct",
+      "fix": "use grade: direct"
+    }
+  ]
+}

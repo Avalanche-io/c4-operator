@@ -4,95 +4,410 @@
   "title": "C4 accountability chain (chain/1)",
   "description": "The chain every signed record and book entry carries: the act, who did it (by), the party it was for, the delegations it ran under, the credentials it spent, and the deployments that did and recorded it, with whether it accrues to a party (accountable) and, when not, the first link that failed (gap). It is a field of a record; the record's own format version names it. It is added beside a record's existing actor, owner and grant fields and replaces none of them.",
   "type": "object",
-  "required": ["act", "by", "for", "accountable"],
+  "required": [
+    "act",
+    "by",
+    "for",
+    "accountable"
+  ],
   "additionalProperties": false,
   "properties": {
-    "act": {"type": "string", "pattern": "^[a-z][a-z0-9-]*$", "description": "The verb: the record's action, or the transition kind (build, submit, decide, yield)."},
-    "by": {"$ref": "#/$defs/by"},
-    "for": {"$ref": "#/$defs/for"},
-    "under": {"type": "array", "description": "The delegations, outermost first, that let by act for for.", "items": {"$ref": "#/$defs/delegation"}},
-    "using": {"type": "array", "description": "The credentials spent, each with its holder.", "items": {"$ref": "#/$defs/credential"}},
-    "on": {"type": "array", "description": "The deployments that did and recorded the act.", "items": {"$ref": "#/$defs/deployment"}},
-    "accountable": {"type": "boolean", "description": "Computed when the record is made, never trusted: true only if for is a party and every on has a binding in force."},
-    "gap": {"type": "string", "minLength": 1, "description": "When accountable is false, the first link that failed, in words."}
+    "act": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "The verb: the record's action, or the transition kind (build, submit, decide, yield)."
+    },
+    "by": {
+      "$ref": "#/$defs/by"
+    },
+    "for": {
+      "$ref": "#/$defs/for"
+    },
+    "under": {
+      "type": "array",
+      "description": "The delegations, outermost first, that let by act for for.",
+      "items": {
+        "$ref": "#/$defs/delegation"
+      }
+    },
+    "using": {
+      "type": "array",
+      "description": "The credentials spent, each with its holder.",
+      "items": {
+        "$ref": "#/$defs/credential"
+      }
+    },
+    "on": {
+      "type": "array",
+      "description": "The deployments that did and recorded the act.",
+      "items": {
+        "$ref": "#/$defs/deployment"
+      }
+    },
+    "accountable": {
+      "type": "boolean",
+      "description": "Computed when the record is made, never trusted: true only if for is a party and every on has a binding in force."
+    },
+    "gap": {
+      "type": "string",
+      "minLength": 1,
+      "description": "When accountable is false, the first link that failed, in words."
+    }
   },
-  "if": {"properties": {"accountable": {"const": false}}, "required": ["accountable"]},
-  "then": {"required": ["gap"]},
-  "else": {"not": {"required": ["gap"]}},
+  "if": {
+    "properties": {
+      "accountable": {
+        "const": false
+      }
+    },
+    "required": [
+      "accountable"
+    ]
+  },
+  "then": {
+    "required": [
+      "gap"
+    ]
+  },
+  "else": {
+    "not": {
+      "required": [
+        "gap"
+      ]
+    },
+    "properties": {
+      "for": {
+        "required": [
+          "party"
+        ]
+      },
+      "on": {
+        "items": {
+          "required": [
+            "binding",
+            "owner"
+          ]
+        }
+      },
+      "using": {
+        "items": {
+          "not": {
+            "required": [
+              "holderSubject"
+            ]
+          }
+        }
+      }
+    }
+  },
   "$defs": {
-    "party": {"type": "string", "pattern": "^[^\\s:]+$", "description": "A party's name in the farm's party list: a person or an organization."},
-    "id": {"type": "string", "pattern": "^c4[1-9A-HJ-NP-Za-km-z]{88}$", "description": "A record's C4 ID."},
-    "grade": {"enum": ["claimed", "direct", "relayed", "signed"], "description": "How strongly the link is evidenced."},
+    "party": {
+      "type": "string",
+      "pattern": "^[^\\s:]+$",
+      "description": "A party's name in the farm's party list: a person or an organization."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^c4[1-9A-HJ-NP-Za-km-z]{88}$",
+      "description": "A record's C4 ID."
+    },
+    "grade": {
+      "enum": [
+        "claimed",
+        "direct",
+        "relayed",
+        "signed"
+      ],
+      "description": "How strongly the link is evidenced."
+    },
     "by": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["grade"],
+      "required": [
+        "grade"
+      ],
       "description": "The immediate actor: a person, a unit (with its agent, if one), a deployment acting by rule, or a tracker user relayed. Never required to be a party.",
       "properties": {
-        "person": {"$ref": "#/$defs/party"},
-        "unit": {"type": "string", "pattern": "^[a-z0-9][-a-z0-9]*/[a-z0-9][-a-z0-9.]*@[0-9a-f]+/[0-9]+$", "description": "<project>/<job>@<job UID>/<unit index>, so a reused job name cannot be mistaken for it."},
-        "agent": {"type": "string", "minLength": 1},
-        "deployment": {"type": "string", "minLength": 1},
-        "rule": {"type": "string", "minLength": 1, "description": "The rule a deployment acted by."},
-        "tracker": {"type": "string", "minLength": 1},
-        "user": {"type": "string", "minLength": 1, "description": "A tracker's user, for a relayed act."},
-        "grade": {"$ref": "#/$defs/grade"}
+        "person": {
+          "$ref": "#/$defs/party"
+        },
+        "unit": {
+          "type": "string",
+          "pattern": "^[a-z0-9][-a-z0-9]*/[a-z0-9][-a-z0-9.]*@[0-9a-f]+/[0-9]+$",
+          "description": "<project>/<job>@<job UID>/<unit index>, so a reused job name cannot be mistaken for it."
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deployment": {
+          "$ref": "#/$defs/deploymentName"
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The rule a deployment acted by."
+        },
+        "tracker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "user": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A tracker's user, for a relayed act."
+        },
+        "grade": {
+          "$ref": "#/$defs/grade"
+        }
       },
-      "anyOf": [{"required": ["person"]}, {"required": ["unit"]}, {"required": ["agent"]}, {"required": ["deployment"]}, {"required": ["user"]}],
-      "dependentRequired": {"user": ["tracker"], "rule": ["deployment"]}
+      "anyOf": [
+        {
+          "required": [
+            "person"
+          ]
+        },
+        {
+          "required": [
+            "unit"
+          ]
+        },
+        {
+          "required": [
+            "agent"
+          ]
+        },
+        {
+          "required": [
+            "deployment"
+          ]
+        },
+        {
+          "required": [
+            "user"
+          ]
+        }
+      ],
+      "dependentRequired": {
+        "user": [
+          "tracker"
+        ],
+        "rule": [
+          "deployment"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "grade": {
+                "const": "signed"
+              }
+            },
+            "required": [
+              "grade"
+            ]
+          },
+          "then": {
+            "required": [
+              "person"
+            ]
+          }
+        }
+      ]
     },
     "for": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["grade"],
+      "required": [
+        "grade"
+      ],
       "description": "The party the act was for; a subject that is not a party leaves the chain unattributed.",
       "properties": {
-        "party": {"$ref": "#/$defs/party"},
-        "subject": {"type": "string", "minLength": 1, "description": "Who the act was for when that is not a party (a service account, an unmapped sign-in)."},
-        "grade": {"$ref": "#/$defs/grade"}
+        "party": {
+          "$ref": "#/$defs/party"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who the act was for when that is not a party (a service account, an unmapped sign-in)."
+        },
+        "grade": {
+          "$ref": "#/$defs/grade"
+        }
       },
-      "oneOf": [{"required": ["party"]}, {"required": ["subject"]}]
+      "oneOf": [
+        {
+          "required": [
+            "party"
+          ]
+        },
+        {
+          "required": [
+            "subject"
+          ]
+        }
+      ]
     },
     "delegation": {
       "type": "object",
       "additionalProperties": false,
       "description": "One delegation: a grant, a membership, job ownership, a policy value and who set it, or a mapping record.",
       "properties": {
-        "grant": {"$ref": "#/$defs/id"},
-        "membership": {"$ref": "#/$defs/id"},
-        "job": {"type": "string", "minLength": 1},
-        "policy": {"type": "string", "minLength": 1},
-        "record": {"$ref": "#/$defs/id"},
-        "kind": {"type": "string", "minLength": 1, "description": "The grant's kind (submit, sign) or the record's (people-map)."},
-        "value": {"type": ["string", "number", "boolean"]},
-        "from": {"type": "string", "minLength": 1, "description": "Who delegated: a party, or where a policy value came from."},
-        "to": {"type": "string", "minLength": 1}
+        "grant": {
+          "$ref": "#/$defs/id"
+        },
+        "membership": {
+          "$ref": "#/$defs/id"
+        },
+        "job": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The grant's kind (submit, sign) or the record's (people-map)."
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who delegated: a party, or where a policy value came from."
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        }
       },
-      "oneOf": [{"required": ["grant"]}, {"required": ["membership"]}, {"required": ["job"]}, {"required": ["policy"]}, {"required": ["record"]}]
+      "oneOf": [
+        {
+          "required": [
+            "grant"
+          ]
+        },
+        {
+          "required": [
+            "membership"
+          ]
+        },
+        {
+          "required": [
+            "job"
+          ]
+        },
+        {
+          "required": [
+            "policy"
+          ]
+        },
+        {
+          "required": [
+            "record"
+          ]
+        }
+      ]
     },
     "credential": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["holder"],
       "properties": {
-        "lease": {"$ref": "#/$defs/id"},
-        "licence": {"$ref": "#/$defs/id"},
-        "key": {"$ref": "#/$defs/id"},
-        "holder": {"$ref": "#/$defs/party"}
+        "lease": {
+          "$ref": "#/$defs/id"
+        },
+        "licence": {
+          "$ref": "#/$defs/id"
+        },
+        "key": {
+          "$ref": "#/$defs/id"
+        },
+        "holder": {
+          "$ref": "#/$defs/party"
+        },
+        "holderSubject": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who holds it when that is not a party yet; the chain is then unaccountable."
+        }
       },
-      "oneOf": [{"required": ["lease"]}, {"required": ["licence"]}, {"required": ["key"]}]
+      "oneOf": [
+        {
+          "required": [
+            "lease"
+          ]
+        },
+        {
+          "required": [
+            "licence"
+          ]
+        },
+        {
+          "required": [
+            "key"
+          ]
+        }
+      ],
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "required": [
+                "holder"
+              ]
+            },
+            {
+              "required": [
+                "holderSubject"
+              ]
+            }
+          ]
+        }
+      ]
     },
     "deployment": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["deployment"],
+      "required": [
+        "deployment"
+      ],
       "properties": {
-        "deployment": {"type": "string", "minLength": 1, "description": "<farm>/<kind>/<name>: a node, a component, a host runner."},
-        "binding": {"$ref": "#/$defs/id"},
-        "owner": {"$ref": "#/$defs/party"},
-        "runFor": {"$ref": "#/$defs/party", "description": "On a managed farm, the party the owner runs it for."},
-        "hostedBy": {"type": "string", "minLength": 1, "description": "A cloud's attestation of the instance, when there is one."}
+        "deployment": {
+          "$ref": "#/$defs/deploymentName"
+        },
+        "binding": {
+          "$ref": "#/$defs/id"
+        },
+        "owner": {
+          "$ref": "#/$defs/party"
+        },
+        "runFor": {
+          "$ref": "#/$defs/party",
+          "description": "On a managed farm, the party the owner runs it for."
+        },
+        "hostedBy": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A cloud's attestation of the instance, when there is one."
+        }
       }
+    },
+    "deploymentName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][-a-z0-9.]*/(component|node|runner|sync|import)/[^/\\s]+$",
+      "description": "<farm>/<kind>/<name>, kind one of component, node, runner, sync (one per tracker) or import."
     }
   }
 }

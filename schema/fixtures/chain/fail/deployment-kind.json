@@ -1,0 +1,19 @@
+{
+  "act": "build",
+  "by": {
+    "person": "noor",
+    "grade": "direct"
+  },
+  "for": {
+    "party": "noor",
+    "grade": "direct"
+  },
+  "accountable": true,
+  "on": [
+    {
+      "deployment": "saltmarsh/pod/hud-7f9c",
+      "binding": "c4415LnEDVW3nGu9JLv5zgTTwBWNm9pfxY6tsxJd1auJErLJoDxuU6Q2Ln1p55wQDQps4iDgQABdsFYLwcFfR8a6Q7",
+      "owner": "avalanche"
+    }
+  ]
+}

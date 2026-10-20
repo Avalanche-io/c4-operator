@@ -760,6 +760,22 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		return "a progress rule reads a percent or a frame, not both", "keep one of them"
 	case "pattern tool previews":
 		return fmt.Sprintf("%s has no frame number", quote(v)), "write where the frame number goes, as render/*.$F4.exr"
+	case "required chain for":
+		if ctx["field"] == "party" {
+			return "an accountable chain is for a party", "name the party in for.party, or set accountable: false with its gap"
+		}
+	case "required chain on[]":
+		return "an accountable chain's deployments each name their binding and owner", "add binding and owner (the farm binding covers every deployment), or set accountable: false"
+	case "forbidden chain using[].holderSubject":
+		return "an accountable chain's credentials are each held by a party", "name the holder's party, or set accountable: false"
+	case "required chain by":
+		if ctx["field"] == "person" {
+			return "signed is for a party's own key: a deployment's or an agent's own record is direct", "use grade: direct"
+		}
+	case "pattern chain by.deployment", "pattern chain on[].deployment":
+		return fmt.Sprintf("%s is not a deployment", quote(v)), "write <farm>/<kind>/<name>, kind one of component, node, runner, sync or import"
+	case "oneOf chain using[]":
+		return "a credential names who holds it", "add holder: (a party), or holderSubject: (who holds it, when not a party yet)"
 	case "pattern chain for.party":
 		return fmt.Sprintf("%s is not a party: a party is a person or an organization", quote(v)), "name the person or organization; an agent or unit goes in by"
 	case "anyOf chain by":

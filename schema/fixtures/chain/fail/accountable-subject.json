@@ -1,0 +1,12 @@
+{
+  "act": "build",
+  "by": {
+    "person": "noor",
+    "grade": "direct"
+  },
+  "for": {
+    "subject": "system:serviceaccount:c4-system:c4-sync",
+    "grade": "direct"
+  },
+  "accountable": true
+}

@@ -10,6 +10,11 @@
   "deployments": {
     "saltmarsh/component/queue": "the queue",
     "saltmarsh/component/hud": "the HUD",
-    "saltmarsh/component/c4-sync": "tracker sync"
+    "saltmarsh/sync/flow": "tracker sync for Flow",
+    "saltmarsh/sync/github": "tracker sync for GitHub"
+  },
+  "subjects": {
+    "system:serviceaccount:c4-system:c4-sync": "c4-sync itself",
+    "dana@studio.com": "dana@studio.com (no party yet)"
   }
 }
