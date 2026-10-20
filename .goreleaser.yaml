@@ -88,6 +88,44 @@ archives:
   name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   files: [LICENSE, NOTICE, README.md]
 
+# Homebrew formulas in Avalanche-io/homebrew-tap, for macOS and Linux:
+# `brew install avalanche-io/tap/c4-farm` (and c4-agent, the host runner).
+# Formulas rather than casks, which are macOS only. Pushing to the tap needs
+# HOMEBREW_TAP_TOKEN, a token that can write to that repository; a
+# prerelease tag skips the upload.
+brews:
+- name: c4-farm
+  ids: [c4-farm]
+  repository:
+    owner: Avalanche-io
+    name: homebrew-tap
+    token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+  directory: Formula
+  homepage: https://github.com/Avalanche-io/c4-operator
+  description: Submit work to a C4 farm, watch it and take its output home; c4 farm up makes a farm on this machine
+  license: Apache-2.0
+  skip_upload: auto
+  install: |
+    bin.install "c4-farm"
+    (share/"c4-farm/skills").install "skills/c4-farm"
+  test: |
+    system bin/"c4-farm", "help"
+- name: c4-agent
+  ids: [c4-agent]
+  repository:
+    owner: Avalanche-io
+    name: homebrew-tap
+    token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+  directory: Formula
+  homepage: https://github.com/Avalanche-io/c4-operator
+  description: C4's host runner, for agent work and tool units on a machine outside the cluster
+  license: Apache-2.0
+  skip_upload: auto
+  install: |
+    bin.install "c4-agent"
+  test: |
+    system bin/"c4-agent", "help"
+
 checksum:
   name_template: checksums.txt
 
