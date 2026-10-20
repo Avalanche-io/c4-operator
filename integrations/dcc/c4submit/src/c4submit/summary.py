@@ -102,12 +102,14 @@ def _estimate_lines(est: dict, key: str, now: Optional[datetime]) -> List[Line]:
     return out
 
 
-def lines(checked: Checked, now: Optional[datetime] = None) -> List[Line]:
+def lines(checked: Checked, now: Optional[datetime] = None, errors: bool = True) -> List[Line]:
+    """The summary's lines; ``errors=False`` leaves out the errors and
+    warnings, for a panel that shows them itself."""
     out: List[Line] = []
-    for e in checked.errors:
+    for e in checked.errors if errors else []:
         where = e.get("path") or ""
         out.append(Line("error", (f"{where}: " if where else "") + e["message"] + (f" ({e['fix']})" if e.get("fix") else ""), "error"))
-    for w in checked.warnings:
+    for w in checked.warnings if errors else []:
         out.append(Line("warning", w, "warn"))
     d = checked.prepared.draft
     ans = checked.answer or {}
@@ -149,9 +151,9 @@ def lines(checked: Checked, now: Optional[datetime] = None) -> List[Line]:
     return out
 
 
-def text(checked: Checked, now: Optional[datetime] = None) -> str:
+def text(checked: Checked, now: Optional[datetime] = None, errors: bool = True) -> str:
     """The summary as plain text, for a panel without rich text."""
     rows = []
-    for ln in lines(checked, now):
+    for ln in lines(checked, now, errors):
         rows.append(ln.text if not ln.label else f"  {ln.label:<10} {ln.text}")
     return "\n".join(rows)

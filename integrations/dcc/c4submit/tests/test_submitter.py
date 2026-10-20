@@ -258,3 +258,20 @@ def test_parameter_errors_once_per_job(tmp_path, farm):
     errs = [(pr.path, pr.message) for pr in p.problems]
     assert errs == [("jobs.comp-bg.with.threads", "Threads: must be at most 128"),
                     ("jobs.comp-main.with.threads", "Threads: must be at most 128")]
+
+
+def test_submit_refuses_a_stale_check(tmp_path, farm, nocache):
+    host = comp_scene(tmp_path)
+    d = draft_for(host, farm)
+    s = Submitter(farm, cache=nocache)
+    c = s.check(prepare(d))
+    assert c.ok and not c.stale()
+    d.note = "changed my mind"
+    assert c.stale()
+    with pytest.raises(FarmError) as e:
+        s.submit(c)
+    assert "changed since the check" in e.value.message
+    d.note = ""
+    write(host.scene_file(), b"# nuke script, saved again\n")
+    assert c.stale()
+    assert not [ln for ln in summary.lines(s.check(prepare(d)), errors=False) if ln.level == "error"]

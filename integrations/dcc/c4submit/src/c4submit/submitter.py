@@ -18,6 +18,7 @@ A panel does four things, in this order:
 Nothing here imports a DCC module or a toolkit.
 """
 
+import json
 import os
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -41,6 +42,7 @@ class Prepared:
     doc: dict                                  # the submission, without its tree yet
     collection: Collection
     problems: List[Problem] = field(default_factory=list)
+    signature: str = ""                        # the draft's, when prepared
 
 
 @dataclass
@@ -62,6 +64,11 @@ class Checked:
     @property
     def collection(self) -> Collection:
         return self.prepared.collection
+
+    def stale(self) -> bool:
+        """Whether the draft or the saved scene changed since this was
+        prepared, so Submit would send something other than what was checked."""
+        return self.prepared.draft.signature() != self.prepared.signature
 
     def yaml(self) -> str:
         """The submission as a file: what "Show file" shows and "Save" writes."""
@@ -148,6 +155,25 @@ class Draft:
         if source == "milestone":
             return self.due if self.due and self.due != "suggested" else None
         return None
+
+    def signature(self) -> str:
+        """Everything a check depends on, as one string: the draft's fields,
+        the form's values and links, the renderables as last read, and the
+        saved scene's size and time. Reads no DCC, so any thread may call it;
+        a panel calls ``refresh()`` first to see changes in the scene."""
+        try:
+            st = os.stat(self.scene_file)
+            stamp = [st.st_size, st.st_mtime_ns]
+        except OSError:
+            stamp = []
+        state = {
+            "tool": [self.tool.name, self.tool.version], "project": self.project, "shot": self.shot,
+            "due": self.due, "frames": self.frames, "note": self.note, "size": self.size, "root": self.root,
+            "ticked": sorted(self.ticked), "form": {f.name: [f.value, f.linked] for f in self.form.fields},
+            "renderables": [[r.name, r.frames, r.outputs, r.reads] for r in self.renderables],
+            "scene": [self.scene_file, stamp],
+        }
+        return json.dumps(state, sort_keys=True, default=str)
 
     # --- jobs -----------------------------------------------------------
 
@@ -295,7 +321,7 @@ def prepare(draft: Draft) -> Prepared:
             continue
         deps.append(d)
     col = collectlib.gather(draft.root, draft.scene_file, deps)
-    return Prepared(draft=draft, doc=doc, collection=col, problems=problems)
+    return Prepared(draft=draft, doc=doc, collection=col, problems=problems, signature=draft.signature())
 
 
 class Submitter:
@@ -425,6 +451,8 @@ class Submitter:
         whose check found errors."""
         if checked.errors:
             raise FarmError(0, "the submission has errors; fix them and check again", checked.errors)
+        if checked.stale():
+            raise FarmError(0, "the scene or the form changed since the check; check again before submitting")
         sent = self.upload(checked)
         answer = self.farm.submit(checked.doc)
         if answer.get("ok") is False:
