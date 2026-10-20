@@ -132,3 +132,56 @@ func TestUnknownAPICallIsJSON404(t *testing.T) {
 		t.Fatalf("%d %v", resp.StatusCode, body)
 	}
 }
+
+// `c4 farm tool publish`, `tools` and `tool show` against the real HUD: the
+// CLI uploads the folder, the farm runs its test (played here), the CLI
+// waits for the result, and the tool is then listed and described.
+func TestFarmCLIPublishesATool(t *testing.T) {
+	s := toolFarm(t)
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	c := &farmcli.Client{Base: ts.URL, As: "artist", HTTP: ts.Client()}
+	dir := filepath.Join(t.TempDir(), "notes")
+	for p, body := range notesTool("echo hi > out.txt") {
+		writeFile(t, dir, p, []byte(body))
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	done := make(chan error, 1)
+	go func() {
+		done <- farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: "show-a", Poll: 20 * time.Millisecond, Wait: 15 * time.Second})
+	}()
+	// the queue's part: the test job runs and leaves what the test expects
+	var job string
+	for job == "" {
+		select {
+		case err := <-done:
+			t.Fatalf("publish ended before its test ran: %v\n%s", err, out.String())
+		case <-ctx.Done():
+			t.Fatal("no test job")
+		case <-time.After(20 * time.Millisecond):
+		}
+		var jobs c4v1.WorkJobList
+		if err := s.Client.List(ctx, &jobs); err == nil && len(jobs.Items) > 0 {
+			job = jobs.Items[0].Namespace + "/" + jobs.Items[0].Name
+		}
+	}
+	finishTest(t, s, job, "Succeeded", map[string]string{"out.txt": "hi"})
+	if err := <-done; err != nil {
+		t.Fatalf("publish: %v\n%s", err, out.String())
+	}
+	for _, want := range []string{"notes v1", "test on the farm   " + job, "ok in", `published to show-a: artists see "Notes" in Submit`} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("no %q in\n%s", want, out.String())
+		}
+	}
+	out.Reset()
+	if err := farmcli.ListTools(ctx, c, farmcli.Out{W: &out}, "show-a"); err != nil || !strings.Contains(out.String(), "notes  once    v1    Notes") {
+		t.Errorf("tools: %v\n%s", err, out.String())
+	}
+	out.Reset()
+	if err := farmcli.ShowTool(ctx, c, farmcli.Out{W: &out}, "show-a", "notes"); err != nil || !strings.Contains(out.String(), "--set width=int (default 960)") {
+		t.Errorf("tool show: %v\n%s", err, out.String())
+	}
+}
