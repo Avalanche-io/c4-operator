@@ -58,6 +58,7 @@ func (s *Server) authorize(ctx context.Context, r *http.Request, v *api.Viewer, 
 // JSON each; maxViewFiles entries with their paths).
 const (
 	controlBody = 1 << 16
+	jobBody     = 1 << 20
 	listBody    = 16 << 20
 	viewBody    = 512 << 20
 )

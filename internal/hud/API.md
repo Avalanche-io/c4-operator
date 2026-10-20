@@ -693,7 +693,7 @@ makes a link only when its target stays inside the folder it writes to.
   estimateError? }
 ```
 
-`spec` is a WorkJob spec (`c4.avalanche.io/v1alpha1`). The HUD names the
+`spec` is a WorkJob spec (`c4.avalanche.io/v1alpha1`). The request and its spec are read strictly: a field neither has is `400`, naming it. The body is at most 1 MiB. The HUD names the
 job `<shot>-<stage>-vNNN` (stage defaults to type) when `name` is empty, one version past the latest
 such job in the namespace; makes a Materialization for each input view
 (named from the view's ID, so the same view is one Materialization);

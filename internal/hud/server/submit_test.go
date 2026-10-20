@@ -417,3 +417,24 @@ func TestMissingTakesAFullList(t *testing.T) {
 		t.Fatalf("a view of 20,000 files: %d, %d missing", code, len(vr.Missing))
 	}
 }
+
+// A submission is read strictly: a field the request or its spec does not
+// have is refused by name, never dropped.
+func TestSubmitIsStrict(t *testing.T) {
+	s := submitFarm(t)
+	for body, want := range map[string]string{
+		`{"project": "show-a", "dryRun": true, "spec": {"class": "render", "deadlinMode": "Tracking",
+			"template": {"spec": {"containers": [{"name": "unit", "image": "c4-job-hydra"}]}}}}`: `unknown field "deadlinMode"`,
+		`{"project": "show-a", "dryRun": true, "spec": {"class": "render",
+			"template": {"spec": {"containers": [{"name": "unit", "image": "c4-job-hydra", "imag": "x"}]}}}}`: `unknown field "imag"`,
+		`{"project": "show-a", "dryRun": true, "trackRef": "ftrack/task/1", "spec": {"class": "render",
+			"template": {"spec": {"containers": [{"name": "unit", "image": "c4-job-hydra"}]}}}}`: `unknown field "trackRef"`,
+	} {
+		var out struct {
+			Error string `json:"error"`
+		}
+		if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", []byte(body), &out); code != http.StatusBadRequest || !strings.Contains(out.Error, want) {
+			t.Errorf("%d %q, want 400 naming %s", code, out.Error, want)
+		}
+	}
+}

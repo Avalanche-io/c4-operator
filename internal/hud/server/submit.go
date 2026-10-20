@@ -35,6 +35,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/jobspec"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
 // DryRunFunc plans a job that does not exist yet and returns what the
@@ -518,8 +519,15 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "the HUD is still reading the farm")
 		return
 	}
+	// Read strictly, as every document is: a field the request or the
+	// spec does not have is an error naming it, never dropped.
+	raw, err := io.ReadAll(http.MaxBytesReader(nil, r.Body, jobBody))
+	if err != nil {
+		failBody(w, err)
+		return
+	}
 	var body api.SubmitRequest
-	if err := decodeBody(r, &body); err != nil {
+	if err := class.Strict(raw, &body); err != nil {
 		fail(w, http.StatusBadRequest, "body: %v", err)
 		return
 	}
@@ -537,7 +545,7 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 	var spec c4v1.WorkJobSpec
 	if len(body.Spec) > 0 {
-		if err := json.Unmarshal(body.Spec, &spec); err != nil {
+		if err := class.Strict(body.Spec, &spec); err != nil {
 			fail(w, http.StatusBadRequest, "spec: %v", err)
 			return
 		}
