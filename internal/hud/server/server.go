@@ -32,6 +32,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/imageref"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
@@ -84,6 +85,16 @@ type Server struct {
 	// (default the system's temporary directory).
 	MaxObjectBytes int64
 	SpoolDir       string
+	// Images pins a published tool's images by digest (tools.go); nil asks
+	// registries with the defaults.
+	Images *imageref.Resolver
+	// ImageRegistry and ImageTag resolve a tool's c4/<name> image:
+	// <ImageRegistry>/c4-<name>:<ImageTag>, or c4-<name>:<ImageTag> on a
+	// farm whose images are loaded onto its nodes (ImageRegistry empty).
+	ImageRegistry, ImageTag string
+	// PlainRegistries are registries (host[:port]) reached without TLS,
+	// such as a local farm's (kind-registry:5000); loopback always is.
+	PlainRegistries []string
 
 	mu      sync.RWMutex
 	m       *model
@@ -132,6 +143,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/trace/{ns}/{name}", s.handleTrace)
 	mux.HandleFunc("GET /api/v1/custody/{ns}/{name}", s.handleCustody)
 	mux.HandleFunc("POST /api/v1/jobs", s.handleSubmit)
+	mux.HandleFunc("POST /api/v1/tools/{project}", s.handlePublishTool)
+	mux.HandleFunc("GET /api/v1/tools/{project}", s.handleTools)
+	mux.HandleFunc("GET /api/v1/tools/{project}/{tool}", s.handleTool)
+	mux.HandleFunc("GET /api/v1/schema/{format}", s.handleSchema)
 	mux.HandleFunc("POST /api/v1/objects/{project}/missing", s.handleMissing)
 	mux.HandleFunc("PUT /api/v1/objects/{project}/{id}", s.handlePutObject)
 	mux.HandleFunc("POST /api/v1/views/{project}", s.handlePostView)
@@ -175,6 +190,7 @@ func (s *Server) Start(ctx context.Context) error {
 			s.Log.Error(err, "collect")
 		}
 		s.sweepReplaced(ctx, time.Now())
+		s.settleToolTests(ctx, s.current())
 		select {
 		case <-ctx.Done():
 			return nil

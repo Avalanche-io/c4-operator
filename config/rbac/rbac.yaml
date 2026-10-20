@@ -100,10 +100,19 @@ rules:
   verbs: [get, list, watch, create, update]
 # Tools: the queue reads a unit's tool and the services its
 # egress names, and writes the tool's NetworkPolicy in the job's
-# namespace.
+# namespace. The HUD publishes tools (POST /tools): it creates a tool,
+# records each version and its test in the status, and moves spec.view to
+# a version whose test passed.
 - apiGroups: [c4.avalanche.io]
   resources: [tools]
-  verbs: [get, list, watch]
+  verbs: [get, list, watch, create, patch]
+- apiGroups: [c4.avalanche.io]
+  resources: [tools/status]
+  verbs: [get, update, patch]
+# A farm-wide tool is granted in projects that read only granted trees.
+- apiGroups: [c4.avalanche.io]
+  resources: [projects]
+  verbs: [patch]
 - apiGroups: [""]
   resources: [services]
   verbs: [get, list, watch]

@@ -1497,7 +1497,7 @@ and a sweep planner that spawns trials are all generators.
   - **Tools** (agent-jobs 10.15, agent-catalog G-tool-config).
     `reasoning.tools` names a Tool, a namespaced resource. The
     queue looks for it in the job's namespace, then in the operator's,
-    where the farm's own profiles live (`none` ships with the operator).
+    where the farm's own tools live (`none` ships with the operator).
     - **`view`** is the configuration (MCP server definitions, settings,
       skills, plugins), a view's C4 ID, mounted read-only at
       `/etc/c4/tools` (`$C4_TOOLS`). The unit's record names it, so a
@@ -1510,13 +1510,13 @@ and a sweep planner that spawns trials are all generators.
       `--egress-proxy`). The unit's `HTTPS_PROXY` and `HTTP_PROXY` name
       the proxy, and its policy allows the proxy rather than the hosts.
       The proxy knows the unit by its pod's address, lets a request
-      through (CONNECT or plain HTTP) only to a host the unit's profile
+      through (CONNECT or plain HTTP) only to a host the unit's tool
       lists, and logs each one it passes or refuses against the job and
       the unit. It works on any CNI. The fields stay neutral, so a
-      Cilium `toFQDNs` backend could serve them instead. The queue writes the profile's
-      NetworkPolicy in the job's namespace (`c4-tools-<profile>`), which
+      Cilium `toFQDNs` backend could serve them instead. The queue writes the tool's
+      NetworkPolicy in the job's namespace (`c4-tools-<tool>`), which
       selects the unit pods labelled `c4.avalanche.io/tool` and
-      allows those, plus DNS when there is any rule. A profile with no
+      allows those, plus DNS when there is any rule. A tool with no
       egress allows nothing, so its units are sealed, which the derivation
       record counts. The owner writes the allow-list.
     - **`sidecars`** are servers that run beside the unit for its whole
@@ -1526,14 +1526,14 @@ and a sweep planner that spawns trials are all generators.
       `$C4_TOOL_<NAME>` (`http://localhost:<port>`). They share the
       unit's network, so its egress is theirs.
     - **Reuse:** a unit's process key is its template, so a unit with a
-      profile is never reused from an earlier run. Nor is one given
+      tool is never reused from an earlier run. Nor is one given
       supplied information or a decision.
-    - **Release:** a unit is released once its profile exists, its view's
+    - **Release:** a unit is released once its tool exists, its view's
       Materialization is Ready, and its policy is written. Until then the
       job's `Tools` condition says what it waits for. Units that name no
-      profile run as before.
+      tool run as before.
     - **Tokens:** no unit pod holds a Kubernetes API token (10.2). A
-      profile's `c4` says what its units may do with c4 itself, through
+      tool's `c4` says what its units may do with c4 itself, through
       the HUD and so MCP.
       - **Grants:** `read` sees their project; `job` may also act on
         their own job (decide its waits, steer, nudge); `project` may
@@ -1548,6 +1548,19 @@ and a sweep planner that spawns trials are all generators.
         that audience, finds the pod it is bound to, and acts on the
         unit's grant. Every control the unit makes is in the book as
         `unit:<namespace>/<job>/<unit>`.
+    - **Published tools** (authoring slice 1, the HUD's `POST /tools`). A
+      Tool whose view has a `tool.yaml` at its top is a tool in the
+      authoring sense (c4-authoring's TOOL.md): what one unit runs, its
+      parameters and its test. Publishing pins every image it names by
+      digest into `tool.lock` in the tree, records a version (`v<N>`) in
+      the Tool's status, and runs the tool's test as a job; `spec.view`
+      moves to the version only once its test passes, so a tool whose test
+      fails on the farm is not offered. A project's tools live in its
+      namespace and the farm's in the operator's, a project's shadowing a
+      farm tool of the same name; a farm-wide tool's tree is copied into
+      every project's store, and granted where a project reads only
+      granted trees. A Tool without a `tool.yaml` is an agent's
+      configuration, as above.
   - **Work share.** Each ended attempt also adds its slot time (hours
     times slots) to its unit, and status gives the model units' share of
     it (`spend.modelWorkShare`): how much of the work models did, which

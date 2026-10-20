@@ -87,6 +87,9 @@ func runManager(args []string) error {
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name[@role]=project|project;... (* for all projects; a name that is a role, such as wrangler, has that role)")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
 	hudRoles := fs.String("hud-role-groups", "", "the studio's groups and the HUD roles they start their members at, as group=role,... (roles: artist, supervisor, producer, wrangler, farm-admin, facilities, pipeline-td); groups named c4:role:<role> need no entry")
+	hudImageRegistry := fs.String("hud-image-registry", "ghcr.io/avalanche-io", "where a tool's c4/<name> images are: c4/<name> is <registry>/c4-<name>:<tag>; empty for images loaded onto the nodes (the local farm), named c4-<name>:<tag>")
+	hudPlainRegistries := fs.String("hud-plain-registries", "", "registries a tool's images are pinned from without TLS, host[:port],... (a local farm's registry); loopback always is")
+	hudImageTag := fs.String("hud-image-tag", "v0.1.0", "the tag of a tool's c4/<name> images that name none (dev on the local farm)")
 	hudSites := fs.String("hud-sites", "", "JSON file of the farm's sites (name, label, region, lat, lon, kind onprem or cloud, localities) for the HUD's map; nodes join a site by their topology.kubernetes.io/region label")
 	farmTZ := fs.String("tz", "UTC", "the farm's time zone, for times the queue and the HUD show")
 	staging := fs.Bool("staging", false, "experimental: let the work queue move jobs' inputs to pools at other sites over the links in the --hud-sites topology file")
@@ -196,7 +199,7 @@ func runManager(args []string) error {
 		}
 	}
 	if *hudAddr != "" {
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *hudRoles, *farmTZ, *namespace); err != nil {
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *hudRoles, *farmTZ, *namespace, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
 			return err
 		}
 	}
@@ -235,7 +238,13 @@ func runManager(args []string) error {
 
 // addHUD runs the HUD backend: a collector on every replica and an HTTP
 // server for the web app and the HUD API.
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, roles, tz, namespace string) error {
+// hudImages is where a published tool's c4/<name> images are (tools.go).
+type hudImages struct {
+	registry, tag string
+	plain         []string
+}
+
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, roles, tz, namespace string, images hudImages) error {
 	roleGroups, err := parseRoleGroups(roles)
 	if err != nil {
 		return fmt.Errorf("--hud-role-groups: %w", err)
@@ -248,7 +257,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 	if err != nil {
 		return err
 	}
-	srv := &hudserver.Server{Client: mgr.GetClient(), Kube: kube, Stores: stores, Web: web, Loc: loc,
+	srv := &hudserver.Server{ImageRegistry: images.registry, ImageTag: images.tag, PlainRegistries: images.plain, Client: mgr.GetClient(), Kube: kube, Stores: stores, Web: web, Loc: loc,
 		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups}
 	if q != nil {
 		// Without the work system the HUD has no queue to ask (a nil
@@ -373,6 +382,18 @@ func forecastView(f queue.Forecast) api.CapacityForecast {
 	}
 	for _, w := range f.Worse {
 		out.Worse = append(out.Worse, api.ForecastRisk{Job: w.Job, Risk: w.Risk, Live: w.Live})
+	}
+	return out
+}
+
+// splitList is a comma-separated flag's values, trimmed, empty ones left
+// out.
+func splitList(v string) []string {
+	var out []string
+	for _, x := range strings.Split(v, ",") {
+		if x = strings.TrimSpace(x); x != "" {
+			out = append(out, x)
+		}
 	}
 	return out
 }

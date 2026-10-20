@@ -831,6 +831,77 @@ queue's to set; `c4.avalanche.io/recompute-view`
 and `-site` name the input it rebuilds and where, and the queue sets
 `c4.avalanche.io/recompute-output` to the view its unit wrote.
 
+## Tools
+
+A tool is a folder with a `tool.yaml` (`c4: tool/1`, c4-authoring's
+TOOL.md): what one unit runs, its parameters and its test. Publishing
+stores it as a `Tool` in the project's namespace, or in the operator's for
+the whole farm, and offers it to submissions (`POST /submissions`) and to
+agents (MCP). The schemas are served at `GET /schema/{submit,tool,lock}`.
+
+### POST /tools/{project}
+
+```
+{ view: c4id, farm?: bool, dryRun?: bool }
+  ->  { ok, errors?: [ { path, message, fix } ], tool, version, view, image, scope, lock,
+        test: { job, state: running|ok } }
+```
+
+`view` is the folder's tree, already stored through `PUT /objects` and
+`POST /views`. Publishing:
+
+- reads `tool.yaml` from the tree's top and checks it: the schema's errors
+  and the farm's (an `emits` naming no tool, a format string naming no
+  parameter), each with its dotted path and fix, as `422 { errors }`;
+- pins every image the tool names (`runs.image`, each sidecar's) by digest
+  into `tool.lock` (`c4: lock/1`, `GET /schema/lock`), writing the
+  published tree (`view` in the answer) with it, so the tree's ID covers
+  the exact images. `c4/<name>` is the farm's own image,
+  `<registry>/c4-<name>:<tag>` (`--hud-image-registry`,
+  `--hud-image-tag`). A digest comes from a node that reports one for the
+  image, else from its registry (anonymous bearer tokens, as ghcr.io and
+  Docker Hub hand out); an image neither knows is refused at `runs.image`;
+- with `dryRun`, answers `200` with the would-be `tool.lock` and `view`,
+  and writes nothing;
+- with `testedIn: <release>` (the `farm-admin` role: `c4 farm up`, for the
+  tool folders a release embeds), records the version as tested in that
+  release (`test: {state: ok, testedIn}`) and runs no test on the farm;
+- records version `v<N>` (counted per tool in its namespace) and runs the
+  tool's `test` as a job, `<tool>-test-v<N>`, on the test's folder of the
+  tree, answering `201` once the job exists (`test.state: running`). A tool
+  with no test is offered at once (`test.state: ok`);
+- offers the version (the `Tool`'s `spec.view` and `status.version`) only
+  when its test passes: the job succeeded and wrote every path the test's
+  `expect` lists. A version whose test fails is kept in the tool's history
+  with the reason, and the version before it stays in use;
+- with `farm` (the `farm-admin` role), writes the `Tool` in the operator's
+  namespace, copies the tree into every project's store, and grants it in
+  projects with `scope: Grants`;
+- is booked (`tool-publish`: who, the version, the tree, the test job).
+
+### GET /tools/{project}
+
+```
+{ tools: [ { name, title, summary, kind, version, view, image, scope: project|farm } ] }
+```
+
+The tools the project may use, at the versions in use: its own and the
+farm's, a project's tool shadowing a farm tool of the same name. A tool no
+version of which has passed its test is not listed.
+
+### GET /tools/{project}/{tool}[?version=vN]
+
+```
+{ name, title, summary, kind, version, view, image, scope,
+  params, paramSchema, frames?, needs?, test: { job, state, seconds?, reason? },
+  versions: [ { version, view, image, by, at, test } ] }
+```
+
+A version of a tool (the one in use by default): `params` as `tool.yaml`
+writes them, `paramSchema` the JSON Schema of a submission's `with` for
+it, and its test. `c4 farm tool publish` polls this until `test.state` is
+`ok` or `failed`.
+
 ## Relayed decisions
 
 A person who decides in a tracker (approves a Version in Flow, reviews a
