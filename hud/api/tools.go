@@ -14,9 +14,8 @@ type ToolPublishRequest struct {
 	Farm bool `json:"farm,omitempty"`
 	// DryRun checks the tool and pins its images, writing nothing.
 	DryRun bool `json:"dryRun,omitempty"`
-	// TestedIn publishes a release's own tool as tested in that release,
-	// running no test on the farm (the farm admin only: c4 farm up, for the
-	// folders the release embeds).
+	// TestedIn is ignored: whether a tree is one of the release's own
+	// tools, tested in it, is the server's to decide from the tree's ID.
 	TestedIn string `json:"testedIn,omitempty"`
 }
 
@@ -25,7 +24,8 @@ type ToolTestState struct {
 	// Job is the test job, <namespace>/<name>; empty for a tool with no
 	// test.
 	Job string `json:"job,omitempty"`
-	// State is running, ok or failed.
+	// State is running, ok or failed; or untested for a person's tool
+	// with no test, offered at once.
 	State   string `json:"state"`
 	Seconds int64  `json:"seconds,omitempty"`
 	Reason  string `json:"reason,omitempty"`
@@ -66,6 +66,9 @@ type ToolSummary struct {
 	// Scope is project, or farm for a farm-wide tool. A project's tool
 	// shadows a farm tool of the same name.
 	Scope string `json:"scope"`
+	// Untested marks a version offered with no test that passed (a
+	// person's tool with no test); the Submit panel says so.
+	Untested bool `json:"untested,omitempty"`
 }
 
 // ToolListResponse is GET /tools/{project}.
@@ -87,6 +90,9 @@ type ToolVersionInfo struct {
 // for (the one in use by default), as its tool.yaml declares it.
 type ToolDetail struct {
 	ToolSummary
+	// Tool is the version's tool.yaml as JSON, keys in the order written,
+	// for a form to draw from (tool.params, frames, needs.sizes, kind).
+	Tool json.RawMessage `json:"tool,omitempty"`
 	// Params are the tool.yaml's params as written, and ParamSchema the
 	// JSON Schema of a submission's `with` for this tool.
 	Params      json.RawMessage `json:"params,omitempty"`
@@ -97,4 +103,6 @@ type ToolDetail struct {
 	Test *ToolTestState `json:"test,omitempty"`
 	// Versions are the tool's publishes in this scope, newest last.
 	Versions []ToolVersionInfo `json:"versions,omitempty"`
+	// Earlier are the versions older than those, by tree.
+	Earlier []ToolVersionInfo `json:"earlier,omitempty"`
 }

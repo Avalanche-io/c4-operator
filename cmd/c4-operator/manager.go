@@ -93,7 +93,7 @@ func runManager(args []string) error {
 	hudRoles := fs.String("hud-role-groups", "", "the studio's groups and the HUD roles they start their members at, as group=role,... (roles: artist, supervisor, producer, wrangler, farm-admin, facilities, pipeline-td); groups named c4:role:<role> need no entry")
 	hudImageRegistry := fs.String("hud-image-registry", "ghcr.io/avalanche-io", "where a tool's c4/<name> images are: c4/<name> is <registry>/c4-<name>:<tag>; empty for images loaded onto the nodes (the local farm), named c4-<name>:<tag>")
 	hudPlainRegistries := fs.String("hud-plain-registries", "", "registries a tool's images are pinned from without TLS, host[:port],... (a local farm's registry); loopback always is")
-	hudImageTag := fs.String("hud-image-tag", "v0.1.0", "the tag of a tool's c4/<name> images that name none (dev on the local farm)")
+	hudImageTag := fs.String("hud-image-tag", version, "the tag of a tool's c4/<name> images that name none: by default the operator's own version, so a release's tools run its own images")
 	hudSites := fs.String("hud-sites", "", "JSON file of the farm's sites (name, label, region, lat, lon, kind onprem or cloud, localities) for the HUD's map; nodes join a site by their topology.kubernetes.io/region label")
 	farmTZ := fs.String("tz", "UTC", "the farm's time zone, for times the queue and the HUD show")
 	staging := fs.Bool("staging", false, "experimental: let the work queue move jobs' inputs to pools at other sites over the links in the --hud-sites topology file")

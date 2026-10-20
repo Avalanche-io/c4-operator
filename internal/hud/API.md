@@ -907,74 +907,101 @@ see.
 
 ## Tools
 
-A tool is a folder with a `tool.yaml` (`c4: tool/1`, the tool format,
-schema/README.md): what one unit runs, its parameters and its test. Publishing
-stores it as a `Tool` in the project's namespace, or in the operator's for
-the whole farm, and offers it to submissions (`POST /submissions`) and to
-agents (MCP). The schemas are served at `GET /schema/{submit,tool,lock}`.
+A tool is a folder with a `tool.yaml` (`c4: tool/1`, `schema/README.md`):
+what one unit runs, its parameters and its test. Publishing stores it as a
+`Tool` in the project's namespace, or in the operator's for the whole farm,
+and offers it to submissions (`POST /submissions`) and to agents (MCP).
+Tools and agent configurations are both `Tool` objects and share one name
+space. The schemas are served at `GET /schema/{submit,tool,lock}`.
 
 ### POST /tools/{project}
 
 ```
 { view: c4id, farm?: bool, dryRun?: bool }
   ->  { ok, errors?: [ { path, message, fix } ], tool, version, view, image, scope, lock,
-        test: { job, state: running|ok } }
+        test: { job, state: running|ok|failed|untested, testedIn? } }
 ```
 
 `view` is the folder's tree, already stored through `PUT /objects` and
-`POST /views`. Publishing:
+`POST /views`. Who publishes is the HUD's rule, not RBAC on `Tool`
+objects: a person with the `pipeline-td` or `farm-admin` role, or an agent
+acting for one (MCP); with `farm`, the `farm-admin` role only. A unit never
+publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
 
 - reads `tool.yaml` from the tree's top and checks it: the schema's errors
   and the farm's (an `emits` naming no tool, a format string naming no
   parameter), each with its dotted path and fix, as `422 { errors }`;
+- refuses, at `tool`, what the farm cannot run yet (network, sidecars, farm
+  access, a Kubernetes overlay, licences), in the words a submission's
+  refusal uses, and a tool an agent publishes with no `test`;
+- refuses a name an agent's configuration holds ("render is an agent
+  configuration on this farm; choose another name");
 - pins every image the tool names (`runs.image`, each sidecar's) by digest
   into `tool.lock` (`c4: lock/1`, `GET /schema/lock`), writing the
   published tree (`view` in the answer) with it, so the tree's ID covers
   the exact images. `c4/<name>` is the farm's own image,
-  `<registry>/c4-<name>:<tag>` (`--hud-image-registry`,
-  `--hud-image-tag`). A digest comes from a node that reports one for the
-  image, else from its registry (anonymous bearer tokens, as ghcr.io and
-  Docker Hub hand out); an image neither knows is refused at `runs.image`;
+  `<registry>/c4-<name>:<tag>` (`--hud-image-registry`, and
+  `--hud-image-tag`, by default the operator's own version). A digest
+  comes from a node that reports one for the image, else from its
+  registry (anonymous bearer tokens, as ghcr.io and Docker Hub hand out);
+  an image neither knows is refused at `runs.image`;
 - with `dryRun`, answers `200` with the would-be `tool.lock` and `view`,
   and writes nothing;
-- with `testedIn: <release>` (the `farm-admin` role: `c4 farm up`, for the
-  tool folders a release embeds), records the version as tested in that
-  release (`test: {state: ok, testedIn}`) and runs no test on the farm;
-- records version `v<N>` (counted per tool in its namespace) and runs the
-  tool's `test` as a job, `<tool>-test-v<N>`, on the test's folder of the
-  tree, answering `201` once the job exists (`test.state: running`). A tool
-  with no test is offered at once (`test.state: ok`);
-- offers the version (the `Tool`'s `spec.view` and `status.version`) only
-  when its test passes: the job succeeded and wrote every path the test's
-  `expect` lists. A version whose test fails is kept in the tool's history
-  with the reason, and the version before it stays in use;
-- with `farm` (the `farm-admin` role), writes the `Tool` in the operator's
-  namespace, copies the tree into every project's store, and grants it in
-  projects with `scope: Grants`;
-- is booked (`tool-publish`: who, the version, the tree, the test job).
+- takes a tree that is one of the release's own tools (the server knows
+  their IDs; the release builds them with `tool.lock` written) as it is,
+  tested in its release (`test: {state: ok, testedIn}`), and runs no test.
+  No other tree is tested in a release; the request cannot say so;
+- answers `200` with the version a tree already is, testing nothing again,
+  unless that version's test failed, when it is tested again as the same
+  version;
+- otherwise records version `v<N>`, numbered as it is recorded, and runs
+  the tool's `test` as a job on the test's folder of the tree, named by the
+  tool, its scope and its tree (`notes-test-1a2b3c4d`, under 50
+  characters), answering `201` once the job exists (`test.state:
+  running`). A person's tool with no test is offered at once, marked
+  `untested`;
+- offers a tested version only when its test passes: the job succeeded and
+  wrote every path the test's `expect` lists. A version whose test fails is
+  kept in the tool's history with the reason, and the version before it
+  stays in use. Offering sets every field of the `Tool` from the version
+  (`spec.view`, egress from `needs.network`, sidecars, `spec.c4` from
+  `needs.farm`), clearing what the version does not declare;
+- with `farm`, writes the `Tool` in the operator's namespace and, once a
+  version is offered, copies its tree into every project's store and grants
+  it in projects with `scope: Grants`, projects made later included. A
+  version no longer offered and used by no job loses its grants;
+- is booked: the publish (`tool-publish`: who, the version, the tree, the
+  test job), the test's pass or failure with its reason (`tool-test`), and
+  the offer (`tool-offer`).
 
 ### GET /tools/{project}
 
 ```
-{ tools: [ { name, title, summary, kind, version, view, image, scope: project|farm } ] }
+{ tools: [ { name, title, summary, kind, version, view, image, scope: project|farm, untested? } ] }
 ```
 
 The tools the project may use, at the versions in use: its own and the
-farm's, a project's tool shadowing a farm tool of the same name. A tool no
-version of which has passed its test is not listed.
+farm's, a project's tool shadowing a farm tool of the same name. A tool
+with no version offered yet is not listed.
 
-### GET /tools/{project}/{tool}[?version=vN]
+### GET /tools/{project}/{tool}[?version=vN|c4id]
 
 ```
-{ name, title, summary, kind, version, view, image, scope,
-  params, paramSchema, frames?, needs?, test: { job, state, seconds?, reason? },
-  versions: [ { version, view, image, by, at, test } ] }
+{ name, title, summary, kind, version, view, image, scope, untested?,
+  tool, params, paramSchema, frames?, needs?, test: { job, state, seconds?, reason? },
+  versions: [ { version, view, image, by, at, test } ], earlier?: [ { version, view, image, test } ] }
 ```
 
-A version of a tool (the one in use by default): `params` as `tool.yaml`
-writes them, `paramSchema` the JSON Schema of a submission's `with` for
-it, and its test. `c4 farm tool publish` polls this until `test.state` is
-`ok` or `failed`.
+A version of a tool (the one in use by default), by name or by tree:
+`tool` is its `tool.yaml` as JSON, keys in the order written, for a form
+to draw from; `params` as `tool.yaml` writes them; `paramSchema` the JSON
+Schema of a submission's `with` (a param is required when it has no
+default; `x-show` and `x-from` carry `show` and `from`, and a
+`RANGE_EXPR` has its pattern); and its test. `earlier` are the versions
+older than the last 32, by tree, which still run: a submission's
+`tool@v<N>` resolves them, and `tool@c4…` any published tree of the tool
+the project's store holds. `c4 farm tool publish` polls this until
+`test.state` is `ok` or `failed`.
 
 ## Relayed decisions
 

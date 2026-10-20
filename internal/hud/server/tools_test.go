@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	kfake "k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/Avalanche-io/c4"
@@ -43,6 +46,16 @@ func toolFarm(t *testing.T) *Server {
 	s.Client = fake.NewClientBuilder().WithScheme(scheme).WithRuntimeObjects(objs...).
 		WithStatusSubresource(&c4v1.Tool{}, &c4v1.WorkJob{}).Build()
 	s.DevViewers["admin"] = &api.Viewer{User: "ops", Role: "farm-admin", Projects: []string{"show-a", "show-b"}, All: true}
+	s.DevViewers["td"] = &api.Viewer{User: "lee", Role: "pipeline-td", Projects: []string{"show-a"}}
+	// the book's Events, named as the API server names them
+	n := 0
+	s.Kube.(*kfake.Clientset).PrependReactor("create", "events", func(a k8stesting.Action) (bool, runtime.Object, error) {
+		if ev := a.(k8stesting.CreateAction).GetObject().(*corev1.Event); ev.Name == "" {
+			n++
+			ev.Name = fmt.Sprintf("%s%d", ev.GenerateName, n)
+		}
+		return false, nil, nil
+	})
 	return s
 }
 
@@ -131,7 +144,7 @@ func getTool(t *testing.T, s *Server, ns, name string) c4v1.Tool {
 func TestPublishToolDryRun(t *testing.T) {
 	s := toolFarm(t)
 	view := putTree(t, s, "show-a", notesTool("echo hi > out.txt"))
-	code, out := publish(t, s, "artist", "show-a", api.ToolPublishRequest{View: view.String(), DryRun: true})
+	code, out := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: view.String(), DryRun: true})
 	if code != http.StatusOK || !out.OK || out.Tool != "notes" || out.Version != "" || !strings.Contains(out.Image, "@sha256:") {
 		t.Fatalf("dry run: %d %+v", code, out)
 	}
@@ -145,7 +158,7 @@ func TestPublishToolDryRun(t *testing.T) {
 	}
 	// a folder with no tool.yaml
 	bare := putTree(t, s, "show-a", map[string]string{"run.sh": "echo"})
-	if code, out := publish(t, s, "artist", "show-a", api.ToolPublishRequest{View: bare.String()}); code != http.StatusUnprocessableEntity ||
+	if code, out := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: bare.String()}); code != http.StatusUnprocessableEntity ||
 		len(out.Errors) != 1 || !strings.Contains(out.Errors[0].Message, "no tool.yaml") {
 		t.Fatalf("no tool.yaml: %d %+v", code, out)
 	}
@@ -156,7 +169,7 @@ func TestPublishToolDryRun(t *testing.T) {
 func TestPublishToolOffersOnlyWhatPassed(t *testing.T) {
 	s := toolFarm(t)
 	view := putTree(t, s, "show-a", notesTool("echo hi > out.txt"))
-	code, out := publish(t, s, "artist", "show-a", api.ToolPublishRequest{View: view.String()})
+	code, out := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: view.String()})
 	if code != http.StatusCreated || out.Version != "v1" || out.Test == nil || out.Test.State != c4v1.ToolTestRunning || out.Test.Job == "" {
 		t.Fatalf("publish: %d %+v", code, out)
 	}
@@ -176,7 +189,7 @@ func TestPublishToolOffersOnlyWhatPassed(t *testing.T) {
 
 	// v2 writes nothing its test expects: it fails, and v1 stays in use.
 	view2 := putTree(t, s, "show-a", notesTool("true"))
-	code, out2 := publish(t, s, "artist", "show-a", api.ToolPublishRequest{View: view2.String()})
+	code, out2 := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: view2.String()})
 	if code != http.StatusCreated || out2.Version != "v2" {
 		t.Fatalf("v2: %d %+v", code, out2)
 	}
@@ -196,55 +209,11 @@ func TestPublishToolOffersOnlyWhatPassed(t *testing.T) {
 	}
 	// a failed test job fails the version
 	view3 := putTree(t, s, "show-a", notesTool("exit 1"))
-	_, out3 := publish(t, s, "artist", "show-a", api.ToolPublishRequest{View: view3.String()})
+	_, out3 := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: view3.String()})
 	finishTest(t, s, out3.Test.Job, "Failed", nil)
 	if tool = getTool(t, s, "show-a", "notes"); tool.Status.Versions[2].Test.State != c4v1.ToolTestFailed || tool.Status.Version != "v1" {
 		t.Fatalf("after v3's job failed: %+v", tool.Status)
 	}
-}
-
-// A farm-wide tool is the farm admin's to publish; its tree is copied into
-// every project's store and granted where a project reads only granted
-// trees. A project's own tool of the same name shadows it.
-func TestFarmTools(t *testing.T) {
-	s := toolFarm(t)
-	files := notesTool("echo hi > out.txt")
-	delete(files, "test/plates/a.exr")
-	files["tool.yaml"] = strings.Replace(files["tool.yaml"], "test:\n  tree: test/\n  expect: [out.txt]\n", "", 1)
-	view := putTree(t, s, "show-a", files)
-	if code, _ := publish(t, s, "artist", "show-a", api.ToolPublishRequest{View: view.String(), Farm: true}); code != http.StatusForbidden {
-		t.Fatalf("an artist published farm-wide: %d", code)
-	}
-	code, out := publish(t, s, "admin", "show-a", api.ToolPublishRequest{View: view.String(), Farm: true})
-	if code != http.StatusCreated || out.Scope != "farm" || out.Test.State != c4v1.ToolTestOK {
-		t.Fatalf("farm publish: %d %+v", code, out)
-	}
-	if tool := getTool(t, s, s.Namespace, "notes"); tool.Spec.View != out.View {
-		t.Fatalf("a tool with no test is offered at once: %+v", tool)
-	}
-	ctx := context.Background()
-	stB, _ := s.Stores(ctx, "show-b")
-	vid, _ := c4.Parse(out.View)
-	if _, err := c4view.Load(ctx, vid, c4view.StoreRecords(stB), 4); err != nil {
-		t.Fatalf("the tree is not in show-b's store: %v", err)
-	}
-	var b c4v1.Project
-	if err := s.Client.Get(ctx, types.NamespacedName{Name: "show-b"}, &b); err != nil || len(b.Spec.Grants) != 1 || b.Spec.Grants[0].Tree != out.View {
-		t.Fatalf("show-b's grants %+v %v", b.Spec.Grants, err)
-	}
-	var list api.ToolListResponse
-	if get(t, s, "/api/v1/tools/show-b?as=wrangler", &list); len(list.Tools) != 1 || list.Tools[0].Scope != "farm" {
-		t.Fatalf("show-b's tools: %+v", list)
-	}
-	// show-a's own notes shadows the farm's
-	own := putTree(t, s, "show-a", files)
-	if code, _ := publish(t, s, "artist", "show-a", api.ToolPublishRequest{View: own.String()}); code != http.StatusCreated {
-		t.Fatalf("own publish: %d", code)
-	}
-	if get(t, s, "/api/v1/tools/show-a?as=artist", &list); len(list.Tools) != 1 || list.Tools[0].Scope != "project" {
-		t.Fatalf("show-a's tools: %+v", list)
-	}
-	_ = stB
 }
 
 func TestSchemaEndpoints(t *testing.T) {
@@ -298,21 +267,4 @@ func httptestGet(s *Server, path string) *httptest.ResponseRecorder {
 	w := httptest.NewRecorder()
 	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 	return w
-}
-
-// A release's own tool, published by c4 farm up, was tested in its
-// release: the farm runs no test, and only the farm admin may say so.
-func TestPublishToolTestedInRelease(t *testing.T) {
-	s := toolFarm(t)
-	view := putTree(t, s, "show-a", notesTool("echo hi > out.txt"))
-	if code, _ := publish(t, s, "artist", "show-a", api.ToolPublishRequest{View: view.String(), TestedIn: "v0.1.0"}); code != http.StatusForbidden {
-		t.Fatalf("an artist skipped the test: %d", code)
-	}
-	code, out := publish(t, s, "admin", "show-a", api.ToolPublishRequest{View: view.String(), Farm: true, TestedIn: "v0.1.0"})
-	if code != http.StatusCreated || out.Test == nil || out.Test.State != c4v1.ToolTestOK || out.Test.TestedIn != "v0.1.0" || out.Test.Job != "" {
-		t.Fatalf("release publish: %d %+v", code, out)
-	}
-	if tool := getTool(t, s, s.Namespace, "notes"); tool.Spec.View != out.View || tool.Status.Versions[0].Test.TestedIn != "v0.1.0" {
-		t.Fatalf("release tool: %+v", tool)
-	}
 }

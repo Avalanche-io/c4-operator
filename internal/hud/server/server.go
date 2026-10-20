@@ -100,6 +100,11 @@ type Server struct {
 	// PlainRegistries are registries (host[:port]) reached without TLS,
 	// such as a local farm's (kind-registry:5000); loopback always is.
 	PlainRegistries []string
+	// ReleaseTrees are the trees of the release's own tools, by C4 ID, and
+	// the release each shipped in. They are built with their tool.lock
+	// written, so the ID is final: publishing one of these trees marks it
+	// tested in its release and runs no test, and no other tree is.
+	ReleaseTrees map[string]string
 
 	mu      sync.RWMutex
 	m       *model
@@ -116,6 +121,10 @@ type Server struct {
 	// retire is when to try again to delete each replaced forecast a
 	// failed delete left (replace.go); only Start's loop touches it.
 	retire map[string]retireTry
+	// toolMu guards spread: the projects each farm-wide tool tree has been
+	// copied and granted into (tools.go).
+	toolMu sync.Mutex
+	spread map[string]bool
 }
 
 // Queue is what the HUD asks the work queue (*queue.Queue).
@@ -199,6 +208,7 @@ func (s *Server) Start(ctx context.Context) error {
 		}
 		s.sweepReplaced(ctx, time.Now())
 		s.settleToolTests(ctx, s.current())
+		s.reconcileFarmTools(ctx, s.current())
 		select {
 		case <-ctx.Done():
 			return nil

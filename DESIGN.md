@@ -1573,19 +1573,25 @@ and a sweep planner that spawns trials are all generators.
         that audience, finds the pod it is bound to, and acts on the
         unit's grant. Every control the unit makes is in the book as
         `unit:<namespace>/<job>/<unit>`.
-    - **Published tools** (the HUD's `POST /tools`). A Tool whose view
-      has a `tool.yaml` at its top is a tool in the authoring sense (the
-      tool format, schema/README.md): what one unit runs, its parameters
-      and its test. Publishing pins every image it names by
-      digest into `tool.lock` in the tree, records a version (`v<N>`) in
-      the Tool's status, and runs the tool's test as a job; `spec.view`
-      moves to the version only once its test passes, so a tool whose test
-      fails on the farm is not offered. A project's tools live in its
-      namespace and the farm's in the operator's, a project's shadowing a
-      farm tool of the same name; a farm-wide tool's tree is copied into
-      every project's store, and granted where a project reads only
-      granted trees. A Tool without a `tool.yaml` is an agent's
-      configuration, as above.
+    - **Published tools** (the HUD's `POST /tools`, `schema/README.md`).
+      A Tool whose view has a `tool.yaml` at its top is a tool in the
+      authoring sense: what one unit runs, its parameters and its test.
+      Only a pipeline TD or farm admin publishes one (or an agent acting
+      for one), never a unit. Publishing pins every image it names by
+      digest into `tool.lock` in the tree and records a version (`v<N>`)
+      in the Tool's status; a version is its tree, so the same tree is the
+      same version. The tool's test runs as a job, and the version is
+      offered only once it passes, so a tool whose test fails on the farm
+      is not offered; a person's tool with no test is offered marked
+      untested. Offering sets the whole spec from the version (view,
+      egress, sidecars, farm access), so nothing is inherited. A project's
+      tools live in its namespace and the farm's in the operator's, a
+      project's shadowing a farm tool of the same name; an offered
+      farm-wide version is copied into every project's store, and granted
+      where a project reads only granted trees, and loses its grants when
+      it is neither offered nor used by a job. A Tool without a
+      `tool.yaml` is an agent's configuration, as above, and the two share
+      one name space.
   - **Work share.** Each ended attempt also adds its slot time (hours
     times slots) to its unit, and status gives the model units' share of
     it (`spend.modelWorkShare`): how much of the work models did, which

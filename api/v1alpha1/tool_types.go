@@ -24,8 +24,9 @@ const HUDAudience = "c4.avalanche.io/hud"
 //
 // A Tool whose tree has a tool.yaml at its root is a published tool
 // (c4: tool/1, the HUD's POST /tools): its status records each version
-// published and its test on the farm, and spec.view is the latest version
-// whose test passed. One without is an agent's configuration.
+// published and its test on the farm, and its spec is the version
+// offered, every field set from that version. One with no versions is an
+// agent's configuration; the two share one name space.
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:printcolumn:name="Version",type=string,JSONPath=`.status.version`
@@ -62,10 +63,28 @@ type ToolStatus struct {
 	// MaxToolVersions), whether their tests passed or not.
 	// +optional
 	Versions []ToolVersion `json:"versions,omitempty"`
+	// Earlier are the versions that left Versions, oldest first: their
+	// trees, so tool@v<N> still resolves and a job that ran one can run
+	// it again.
+	// +optional
+	Earlier []ToolVersionRef `json:"earlier,omitempty"`
 }
 
-// MaxToolVersions bounds ToolStatus.Versions; the oldest go first.
+// MaxToolVersions bounds ToolStatus.Versions; the oldest go first, into
+// Earlier.
 const MaxToolVersions = 32
+
+// ToolVersionRef is a version's tree and image, all a job needs to run
+// it.
+type ToolVersionRef struct {
+	Version string `json:"version"`
+	View    string `json:"view"`
+	// +optional
+	Image string `json:"image,omitempty"`
+	// Untested is set for a version offered without a test that passed.
+	// +optional
+	Untested bool `json:"untested,omitempty"`
+}
 
 // ToolVersion is one publish of a tool.
 type ToolVersion struct {
@@ -83,6 +102,9 @@ type ToolVersion struct {
 	Summary string `json:"summary,omitempty"`
 	// +optional
 	Kind string `json:"kind,omitempty"`
+	// Project is the project whose store the tree was published from.
+	// +optional
+	Project string `json:"project,omitempty"`
 	// By is who published it, and At when.
 	By string      `json:"by"`
 	At metav1.Time `json:"at"`
@@ -94,11 +116,12 @@ type ToolVersion struct {
 // tool's test, and how it went.
 type ToolTest struct {
 	// Job is the test job, <namespace>/<name>; empty for a tool with no
-	// test, which passes at once.
+	// test.
 	// +optional
 	Job string `json:"job,omitempty"`
-	// State is running, ok or failed.
-	// +kubebuilder:validation:Enum=running;ok;failed
+	// State is running, ok or failed; or untested for a person's tool
+	// with no test, offered at once and marked so.
+	// +kubebuilder:validation:Enum=running;ok;failed;untested
 	State string `json:"state"`
 	// Seconds is how long the test took, once it ended.
 	// +optional
@@ -107,17 +130,19 @@ type ToolTest struct {
 	// +optional
 	Reason string `json:"reason,omitempty"`
 	// TestedIn is the release whose own tests ran the version, for the
-	// tools a release ships (published by c4 farm up from the folders it
-	// embeds): the farm ran no test of its own, and State is ok.
+	// tools a release ships: the server knows their trees' IDs, and only
+	// a tree matching one is tested in its release. The farm runs no test
+	// of its own, and State is ok.
 	// +optional
 	TestedIn string `json:"testedIn,omitempty"`
 }
 
 // Tool test states (ToolTest.State).
 const (
-	ToolTestRunning = "running"
-	ToolTestOK      = "ok"
-	ToolTestFailed  = "failed"
+	ToolTestRunning  = "running"
+	ToolTestOK       = "ok"
+	ToolTestFailed   = "failed"
+	ToolTestUntested = "untested"
 )
 
 // ToolSpec is a tool's configuration and egress.

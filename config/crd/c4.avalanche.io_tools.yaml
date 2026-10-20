@@ -43,8 +43,9 @@ spec:
 
           A Tool whose tree has a tool.yaml at its root is a published tool
           (c4: tool/1, the HUD's POST /tools): its status records each version
-          published and its test on the farm, and spec.view is the latest version
-          whose test passed. One without is an agent's configuration.
+          published and its test on the farm, and its spec is the version
+          offered, every field set from that version. One with no versions is an
+          agent's configuration; the two share one name space.
         properties:
           apiVersion:
             description: |-
@@ -152,6 +153,31 @@ spec:
               ToolStatus is what publishing a tool recorded: the version in use, what
               its tool.yaml says of itself, and every version published, newest last.
             properties:
+              earlier:
+                description: |-
+                  Earlier are the versions that left Versions, oldest first: their
+                  trees, so tool@v<N> still resolves and a job that ran one can run
+                  it again.
+                items:
+                  description: |-
+                    ToolVersionRef is a version's tree and image, all a job needs to run
+                    it.
+                  properties:
+                    image:
+                      type: string
+                    untested:
+                      description: Untested is set for a version offered without a
+                        test that passed.
+                      type: boolean
+                    version:
+                      type: string
+                    view:
+                      type: string
+                  required:
+                  - version
+                  - view
+                  type: object
+                type: array
               image:
                 description: Image is the unit image at Version, pinned by digest
                   (tool.lock).
@@ -186,6 +212,10 @@ spec:
                       type: string
                     kind:
                       type: string
+                    project:
+                      description: Project is the project whose store the tree was
+                        published from.
+                      type: string
                     summary:
                       type: string
                     test:
@@ -194,7 +224,7 @@ spec:
                         job:
                           description: |-
                             Job is the test job, <namespace>/<name>; empty for a tool with no
-                            test, which passes at once.
+                            test.
                           type: string
                         reason:
                           description: Reason says why it failed.
@@ -205,17 +235,21 @@ spec:
                           format: int64
                           type: integer
                         state:
-                          description: State is running, ok or failed.
+                          description: |-
+                            State is running, ok or failed; or untested for a person's tool
+                            with no test, offered at once and marked so.
                           enum:
                           - running
                           - ok
                           - failed
+                          - untested
                           type: string
                         testedIn:
                           description: |-
                             TestedIn is the release whose own tests ran the version, for the
-                            tools a release ships (published by c4 farm up from the folders it
-                            embeds): the farm ran no test of its own, and State is ok.
+                            tools a release ships: the server knows their trees' IDs, and only
+                            a tree matching one is tested in its release. The farm runs no test
+                            of its own, and State is ok.
                           type: string
                       required:
                       - state
