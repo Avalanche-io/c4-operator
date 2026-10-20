@@ -173,6 +173,10 @@ class LopHost(_HoudiniHost):
 
     stage = "light"
     scene_word = "stage"
+    # The stage is written for every submission: the network can change
+    # without the hip file changing (a time-dependent node, a referenced
+    # file updated on disk).
+    writes_scene = True
 
     def __init__(self, node, env: Optional[Mapping[str, str]] = None):
         super().__init__(node, env)
@@ -199,10 +203,9 @@ class LopHost(_HoudiniHost):
         return self.usd_path() if self.stage_node() is not None else ""
 
     def is_modified(self) -> bool:
-        # The stage is written for every submission: the network can change
-        # without the hip file changing (a time-dependent node, a referenced
-        # file updated on disk).
-        return True
+        """Whether the stage file may not match the network: it was never
+        written, or the hip file has changes not saved."""
+        return not os.path.isfile(self.usd_path()) or bool(hou.hipFile.hasUnsavedChanges())
 
     def save(self) -> None:
         """Writes the stage to ``usd_path()`` with a USD ROP over the frames
@@ -263,7 +266,7 @@ class LopHost(_HoudiniHost):
         settings = [p for p in prims if p.IsA(UsdRender.Settings)]
         names = [p.GetPath().pathString for p in settings]
         tick = default if default in names else (names[0] if names else "")
-        return [Renderable(name=n, label=n, enabled=(n == tick)) for n in names]
+        return [Renderable(name=n, label=n, key=n.rsplit("/", 1)[-1], enabled=(n == tick)) for n in names]
 
     def dependencies(self) -> List[Dependency]:
         """Every layer and asset the written stage reads, from USD's own
@@ -406,7 +409,7 @@ class RopHost(_HoudiniHost):
             elif p not in direct:
                 feeds = [os.path.basename(d) for d in below[p] if d in direct]
                 note = "upstream of " + ", ".join(feeds) if feeds else "upstream"
-            out.append(Renderable(name=p, label=n.name(), frames=self.rop_frames(n), outputs=self.outputs(n),
+            out.append(Renderable(name=p, label=n.name(), key=n.name(), frames=self.rop_frames(n), outputs=self.outputs(n),
                                   reads=above(p, []), enabled=(p in direct and not _bypassed(n)), note=note))
         return out
 

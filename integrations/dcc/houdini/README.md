@@ -8,7 +8,7 @@ submits to any render queue:
 - **C4 Submit** (ROP): renders the ROPs wired into it from the saved hip
   file, one job per ROP, each after the ROPs it reads.
 
-Both are drawn from the farm's tool definitions (TOOL.md section 6) and use
+Both are drawn from the parameters of the farm's tools and use
 `c4submit`, the library under every C4 DCC panel.
 
 ## Install
@@ -79,6 +79,17 @@ names any that are not, and any that are missing.
 C4 Submit reads every file reference in the hip file, so a missing file on
 a node nobody renders also stops the submission. Delete or bypass that
 node; a bypassed node's missing file is only a warning.
+
+## For TDs: a tool for C4 Submit
+
+C4 Submit offers the project's tools whose scene parameter (`from:
+scene.file`) takes `*.hip` files, and fills a `from: scene.renderables`
+parameter with each ROP's path, one job per ROP. Such a tool must render
+that one ROP **without its inputs**, as `hou.node(rop).render(...,
+ignore_inputs=True)` in hython does. Each ROP upstream that the artist
+ticks is its own job, run first; one left unticked was rendered before and
+is read from disk. A tool that renders inputs too would render them again
+inside every job. `tests/houdini_scenes.py` has an example, `houdini-rop`.
 
 ## Tests
 

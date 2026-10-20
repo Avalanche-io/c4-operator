@@ -1,7 +1,7 @@
 """The C4 nodes' parameters and what their buttons do.
 
-The interface is drawn from the tool's parameters (TOOL.md section 6) as
-Houdini parameters:
+The interface is drawn from the tool's parameters, as the farm's other
+submit forms are, as Houdini parameters:
 
 - a header the same for every tool: Tool, Project, Shot, Needed by, Frames
   with a link toggle, the render settings (LOP) or ROPs (ROP) to render,

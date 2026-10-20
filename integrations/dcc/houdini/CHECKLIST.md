@@ -145,8 +145,8 @@ one making `/Render/beauty_only`.
     (nothing at all if the USD ROP writes the same bytes twice; note which)
     and the job is `-v002`.
 11. Tick both render settings, turn Frames' Linked off and type `1001-1010`,
-    Submit: two jobs, `light-render-beauty-only` and
-    `light-render-rendersettings`, each 10 frames; the stage file holds
+    Submit: two jobs, `light-beauty-only` and
+    `light-rendersettings`, each 10 frames; the stage file holds
     frames 1001 to 1010.
 12. Press **Check**, then Cancel in the progress dialog while files are
     read (use a shot with a few thousand files, or a slow disk): the
@@ -180,8 +180,8 @@ on disk; and a texture with `<UDIM>` tiles.
    (`f1`, `f2`, `f3`). Bypass flip: it is listed "(bypassed)" and unticked.
 3. Press **Check** with the sim cache not on disk: an error names the File
    SOP and `sim.$F4.bgeo.sc` ("no such files"). Tick `sim` and Check again:
-   no error; the jobs are `render-out-sim`, `render-out-mantra1` (after
-   `render-out-sim`) and `render-out-flip`.
+   no error; the jobs are `render-sim`, `render-mantra1` (after
+   `render-sim`) and `render-flip`.
 4. **[API]** `hou.fileReferences()`: the files counted include the `$F4`
    sequence frame by frame, the UDIM tiles, the hip file and any studio HDA
    under `/tmp/show`; they do not include the ROPs' outputs, files under

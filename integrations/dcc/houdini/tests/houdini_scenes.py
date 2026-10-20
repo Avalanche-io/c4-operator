@@ -8,7 +8,9 @@ from c4submit.testing import KARMA, SALTMARSH, FakeFarm, write
 
 HOUDINI_ROP = {
     "c4": "tool/1", "name": "houdini-rop", "title": "Houdini ROP",
-    "summary": "Renders one ROP of a hip file with hython over frames.",
+    # It renders the one ROP without its inputs (ignore_inputs=True in
+    # hython): C4 Submit makes each ROP upstream its own job, run first.
+    "summary": "Renders one ROP of a hip file with hython over frames, without its inputs.",
     "kind": "frames",
     "runs": {"image": "registry.petrelfinch.example/houdini:21.0.440", "exe": "hython",
              "command": ["{{Run.Exe}}", "-m", "c4_rop", "{{Param.hip}}", "{{Param.rop}}", "{{Unit.Frames}}"]},
@@ -17,7 +19,8 @@ HOUDINI_ROP = {
         {"name": "hip", "type": "PATH", "objectType": "FILE", "dataFlow": "IN", "from": "scene.file",
          "userInterface": {"control": "CHOOSE_INPUT_FILE", "label": "Hip file",
                            "fileFilters": [{"label": "Houdini", "patterns": ["*.hip", "*.hiplc", "*.hipnc"]}]}},
-        {"name": "rop", "type": "STRING", "from": "scene.renderables", "userInterface": {"label": "ROP"}},
+        {"name": "rop", "type": "STRING", "from": "scene.renderables", "userInterface": {"label": "ROP"},
+         "description": "The ROP to render, by path; rendered with ignore_inputs=True."},
         {"name": "threads", "type": "INT", "default": 0, "minValue": 0, "maxValue": 128, "show": "advanced",
          "affectsOutput": False, "userInterface": {"label": "Threads"}},
         {"name": "verbose", "type": "BOOL", "default": False, "show": "advanced",

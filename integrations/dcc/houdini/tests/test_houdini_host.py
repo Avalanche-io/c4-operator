@@ -162,3 +162,34 @@ def test_shot_pattern_reads_the_hip_path(tmp_path, monkeypatch):
     show, submit = fx_scene(tmp_path)
     monkeypatch.setenv("C4_SHOT_PATTERN", r"/(?P<shot>sm\d{4})/")
     assert RopHost(submit).shot() == "sm0140"
+
+
+def test_job_keys_from_node_and_prim_names(tmp_path):
+    _, lop = light_scene(tmp_path)
+    assert [r.key for r in LopHost(c4render(lop)).renderables()] == ["beauty_only", "rendersettings"]
+    _, submit = fx_scene(tmp_path / "fx")
+    assert [r.key for r in RopHost(submit).renderables()] == ["sim", "mantra1", "flip"]
+
+
+def test_the_stage_is_written_for_every_submission(tmp_path):
+    from c4submit.submitter import Draft, prepare
+    from c4submit.testing import KARMA
+    from c4submit.tool import Tool
+    show, lop = light_scene(tmp_path)
+    from c4_houdini import nodes
+    node = c4render(lop)
+    nodes.rebuild(node, None)
+    node.parm("c4_shot").set("sm0220")
+    host = LopHost(node, env={"C4_ROOT": show, "C4_SHOT": "sm0220", "C4_PROJECT": "saltmarsh"})
+    assert LopHost.writes_scene and host.is_modified(), "never written"
+    d = Draft(host, Tool(KARMA))
+    prepare(d)
+    prepare(d)
+    assert len(hou.rendered) == 2 and not host.is_modified(), "written each time, though the hip is unchanged"
+    hou.hipFile.modified = True
+    assert host.is_modified()
+    d.save_scene = False
+    p = prepare(d)
+    assert len(hou.rendered) == 2
+    assert [pr.message for pr in p.problems] == [
+        "the stage is written for each submission; with that off, the farm renders the last one written"]

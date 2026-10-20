@@ -81,10 +81,10 @@ def test_lighting_two_settings_typed_frames_and_size(tmp_path, monkeypatch):
     hou.ui.answers = [SUBMIT]
     node.parm("c4_submit").pressButton()
     (doc,) = fake.jobs
-    assert set(doc["jobs"]) == {"light-render-beauty-only", "light-render-rendersettings"}
+    assert set(doc["jobs"]) == {"light-beauty-only", "light-rendersettings"}
     for key, job in doc["jobs"].items():
         assert job["frames"] == "1001-1010" and job["size"] == "heavy" and job["with"]["renderer"] == "BRAY_HdKarma"
-    assert doc["jobs"]["light-render-beauty-only"]["with"]["settings"] == "/Render/beauty_only"
+    assert doc["jobs"]["light-beauty-only"]["with"]["settings"] == "/Render/beauty_only"
     assert hou.rendered[-1]["frames"] == (1001, 1010, 1), "the stage is written over the frames rendered"
 
 
@@ -99,11 +99,11 @@ def test_rop_jobs_follow_the_rop_graph(tmp_path, monkeypatch):
     panel = nodes.panel_for(submit)
     assert panel.checked.ok, panel.checked.errors
     jobs = panel.checked.doc["jobs"]
-    assert list(jobs) == ["render-out-sim", "render-out-mantra1", "render-out-flip"]
-    assert jobs["render-out-mantra1"]["after"] == "render-out-sim"
-    assert "after" not in jobs["render-out-flip"]
-    assert jobs["render-out-mantra1"]["with"] == {"hip": "sm0140/fx/sm0140_fx_v002.hip", "rop": "/out/mantra1"}
-    assert jobs["render-out-flip"]["frames"] == "1001"
+    assert list(jobs) == ["render-sim", "render-mantra1", "render-flip"]
+    assert jobs["render-mantra1"]["after"] == "render-sim"
+    assert "after" not in jobs["render-flip"]
+    assert jobs["render-mantra1"]["with"] == {"hip": "sm0140/fx/sm0140_fx_v002.hip", "rop": "/out/mantra1"}
+    assert jobs["render-flip"]["frames"] == "1001"
     files = sorted(panel.checked.collection.files)
     assert not [f for f in files if "/cache/" in f or "/render/" in f or "/flip/" in f], \
         "what a submitted ROP writes is not collected, nor read from disk"
@@ -111,14 +111,14 @@ def test_rop_jobs_follow_the_rop_graph(tmp_path, monkeypatch):
     assert "sm0140/fx/tex/wood.1001.rat" in files and "sm0140/fx/tex/wood.1002.rat" in files
     assert "assets/env/env.abc" in files and "otls/studio_tools.hda" in files and "sm0140/fx/sm0140_fx_v002.hip" in files
     text = summary(submit)
-    assert "after render-out-sim" in text and "dailies · slack" in text
+    assert "after render-sim" in text and "dailies · slack" in text
     assert "bypassed" not in text and "old_version.bgeo.sc: no such file" in text, "a bypassed node's file is a warning"
 
     hou.ui.answers = [SUBMIT]
     submit.parm("c4_submit").pressButton()
     (doc,) = fake.jobs
-    assert list(doc["jobs"]) == ["render-out-sim", "render-out-mantra1", "render-out-flip"]
-    assert summary(submit).startswith("Submitted sm0140-render-out-sim-v001, sm0140-render-out-mantra1-v001")
+    assert list(doc["jobs"]) == ["render-sim", "render-mantra1", "render-flip"]
+    assert summary(submit).startswith("Submitted sm0140-render-sim-v001, sm0140-render-mantra1-v001")
 
 
 def test_an_upstream_cache_left_unticked_is_read_from_disk(tmp_path, monkeypatch):
@@ -126,7 +126,7 @@ def test_an_upstream_cache_left_unticked_is_read_from_disk(tmp_path, monkeypatch
     submit.parm("c4_check").pressButton()
     panel = nodes.panel_for(submit)
     assert panel.checked.ok, panel.checked.errors
-    assert list(panel.checked.doc["jobs"]) == ["render-out-mantra1", "render-out-flip"]
+    assert list(panel.checked.doc["jobs"]) == ["render-mantra1", "render-flip"]
     assert len([f for f in panel.checked.collection.files if "/cache/sim." in f]) == 48
 
 
@@ -203,10 +203,10 @@ def test_cancel_while_reading_files(tmp_path, monkeypatch):
     real_id, real_update = collect.identify_file, hou.InterruptableOperation.updateLongProgress
     read = []
 
-    def slow(path):
+    def slow(path, cancelled=None):
         time.sleep(0.03)
         read.append(path)
-        return real_id(path)
+        return real_id(path, cancelled)
 
     def update(self, percentage=-1.0, long_op_status=None):
         real_update(self, percentage, long_op_status)
