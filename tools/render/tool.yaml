@@ -1,0 +1,51 @@
+c4: tool/1
+name: render
+title: USD render
+summary: Renders a USD stage through a Hydra delegate to OpenEXR, frame by frame, with the stage's own render settings.
+kind: frames
+runs:
+  image: c4/job-hydra
+  command: [bash, "{{Tool.Dir}}/render.sh", "{{Param.stage}}", "{{Param.renderer}}", "{{Param.width}}"]
+frames: {chunk: 1, order: binary}
+params:
+- name: stage
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The USD stage to render. Its RenderSettings prim, if it has one, gives the camera and the frame.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: USD stage, fileFilters: [{label: USD, patterns: ["*.usd", "*.usda", "*.usdc", "*.usdz"]}]}
+- name: renderer
+  type: STRING
+  default: cycles
+  allowedValues: [cycles, karma-xpu, karma-cpu, prman, arnold, vray]
+  description: The Hydra delegate. c4/job-hydra carries Cycles; the others need a studio image with that delegate installed.
+  show: artist
+  userInterface: {control: DROPDOWN_LIST, label: Renderer}
+- name: width
+  type: INT
+  default: 1920
+  minValue: 16
+  maxValue: 16384
+  description: The image width in pixels; the height follows the camera's aspect.
+  show: advanced
+  userInterface: {control: SPIN_BOX, label: Width, singleStepDelta: 16}
+- name: pass
+  type: STRING
+  default: beauty
+  minLength: 1
+  description: The pass this render is. The farm keeps frame-time history per pass, so a new pass starts its own estimate.
+  show: advanced
+  affectsOutput: false
+  userInterface: {control: LINE_EDIT, label: Pass}
+writes: [render/]
+previews: "render/*.$F4.exr"
+errors:
+  permanent: ['Could not open layer', "usdrecord: error: argument --renderer"]
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1002
+  with: {stage: shot/test.usda, width: 64}
+  expect: [render/test.1001.exr, render/test.1002.exr]
