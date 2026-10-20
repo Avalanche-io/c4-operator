@@ -294,6 +294,9 @@ func TestFlowDailiesLoop(t *testing.T) {
 	if len(vs) != 2 || vs[1].Fields["code"] != "sh040_lgt_v002" || vs[1].Fields["sg_c4_id"] != "c4OutputV002" || vs[1].Fields["sg_status_list"] != "rev" {
 		t.Fatalf("v002: %d %v", len(vs), vs[len(vs)-1].Fields)
 	}
+	if d, _ := vs[1].Fields["description"].(string); !strings.HasPrefix(d, "C4 output, version 2, follows "+ns+"/"+first+".") {
+		t.Fatalf("v002's description says what it is and what it follows, no state: %q", d)
+	}
 
 	// 8. Dana approves v002 in Flow: the approval serves the wait. Nothing
 	// C4 wrote to a Version after creating it: approval stays in Flow.

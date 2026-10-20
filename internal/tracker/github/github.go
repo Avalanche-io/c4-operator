@@ -723,9 +723,7 @@ func (a *Adapter) applyCheck(ctx context.Context, w tracker.Write) (tracker.Ref,
 func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Output, key string) (tracker.Ref, error) {
 	var b strings.Builder
 	fmt.Fprintf(&b, "**C4 output: %s**\n\n", out.Name)
-	if out.Summary != "" {
-		b.WriteString(out.Summary + "\n\n")
-	}
+	b.WriteString(out.Describe() + ".\n\n")
 	fmt.Fprintf(&b, "- output view: `%s`\n", out.View)
 	if out.Record != "" {
 		fmt.Fprintf(&b, "- job record: `%s`\n", out.Record)

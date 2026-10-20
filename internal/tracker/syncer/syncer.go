@@ -964,7 +964,10 @@ func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr f
 	}
 	url := s.Farm.JobURL(jr)
 	out := tracker.Output{Name: jr.String(), Version: len(l.Status.Versions) + 1, JobURL: url, View: sum.Output,
-		Custody: strings.TrimSuffix(url, "/") + "/provenance", Summary: sum.Words() + "."}
+		Custody: strings.TrimSuffix(url, "/") + "/provenance"}
+	if n := len(l.Status.Versions); n > 0 {
+		out.Follows = farm.JobRef{Namespace: l.Namespace, Name: l.Status.Versions[n-1]}.String()
+	}
 	ref, err := c.adapter.Publish(ctx, on, out, tracker.WriteKey(l.Namespace+"/"+l.Name, "publish", sum.Output))
 	if err != nil {
 		return err

@@ -75,7 +75,7 @@ func TestPublishOnceAndDecisions(t *testing.T) {
 	run := s.AddRun("7", "a", "RUNNING", nil)
 	a := adapter(t, s, s.Password, nil)
 	ctx := context.Background()
-	out := tracker.Output{View: "c4v1", JobURL: "https://hud/#/job/w/j", Custody: "https://hud/p", Summary: "ok"}
+	out := tracker.Output{View: "c4v1", JobURL: "https://hud/#/job/w/j", Custody: "https://hud/p"}
 	ref, err := a.Publish(ctx, tracker.Ref{Type: "Run", ID: run}, out, "k")
 	if err != nil {
 		t.Fatal(err)

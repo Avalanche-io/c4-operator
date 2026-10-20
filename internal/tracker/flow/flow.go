@@ -701,7 +701,7 @@ func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Outpu
 		step = s.Name
 	}
 	code := VersionCode(entity.Name, step, t.str("content"), out.Version)
-	desc := fmt.Sprintf("%s\nC4 job: %s\nOutput view: %s\nProvenance: %s", out.Summary, out.JobURL, out.View, out.Custody)
+	desc := fmt.Sprintf("%s.\nC4 job: %s\nOutput view: %s\nProvenance: %s", out.Describe(), out.JobURL, out.View, out.Custody)
 	in := map[string]any{"project": a.projectLink(), "code": code, "entity": link{Type: entity.Type, ID: entity.ID},
 		"sg_task": task, "sg_status_list": a.reviewStatus, "description": desc, a.idField: out.View}
 	if a.linkField != "" {

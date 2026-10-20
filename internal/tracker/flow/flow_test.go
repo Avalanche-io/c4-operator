@@ -136,7 +136,7 @@ func TestPublishAndDecisions(t *testing.T) {
 	task := s.AddTask(s.AddShot("sh040"), "Lighting", "LGT", "ip", "2026-10-23", pat)
 	a := adapter(t, s, s.Key, nil)
 	ctx := context.Background()
-	out := tracker.Output{Name: "work/flow-1", Version: 7, View: "c4view", JobURL: "https://hud/#/job/work/flow-1", Custody: "https://hud/p", Summary: "Done."}
+	out := tracker.Output{Name: "work/flow-1", Version: 7, View: "c4view", JobURL: "https://hud/#/job/work/flow-1", Custody: "https://hud/p", Follows: "work/flow-0"}
 	on := tracker.Ref{Type: "Task", ID: strconv.Itoa(task.ID)}
 	v, err := a.Publish(ctx, on, out, "k")
 	if err != nil {

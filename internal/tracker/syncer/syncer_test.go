@@ -336,8 +336,14 @@ func TestIssueToJobToReviewLoop(t *testing.T) {
 		t.Fatalf("statuses: %+v", st)
 	}
 	pub := e.gh.Comments(12)
-	if len(pub) != 1 || !strings.Contains(pub[0].Body, "`c4Output1234`") {
+	if len(pub) != 1 || !strings.Contains(pub[0].Body, "`c4Output1234`") || !strings.Contains(pub[0].Body, "C4 output, version 1.") {
 		t.Fatalf("published: %+v", pub)
+	}
+	// What is published stays true: no state in it (that is the check run's).
+	for _, w := range []string{"Done", "Waiting", "Running", "review"} {
+		if strings.Contains(pub[0].Body, w) {
+			t.Fatalf("the published comment carries state (%q): %s", w, pub[0].Body)
+		}
 	}
 	w = e.writes()
 	e.pass()

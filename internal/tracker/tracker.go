@@ -81,7 +81,18 @@ type Output struct {
 	View    string // the output view's C4 ID
 	Record  string // the job record's C4 ID
 	Custody string // the provenance view's URL
-	Summary string
+	Follows string // the job this version follows; "" for the first
+}
+
+// Describe says what the output is, and nothing about the job's state:
+// what is published stays true, while the state is kept current where it
+// lives (a check run, a status). "C4 output, version 2, follows work/gh-7".
+func (o Output) Describe() string {
+	d := fmt.Sprintf("C4 output, version %d", o.Version)
+	if o.Follows != "" {
+		d += ", follows " + o.Follows
+	}
+	return d
 }
 
 // Note is a comment to add, or to edit in place.

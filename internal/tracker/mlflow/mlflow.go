@@ -501,7 +501,7 @@ func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Outpu
 	}
 	in := map[string]any{
 		"name": a.model, "source": a.sourcePrefix + out.View, "run_id": on.ID,
-		"description": out.Summary,
+		"description": out.Describe() + ".",
 		"tags":        []tag{{"c4.id", out.View}, {"c4.job", out.Name}, {"c4.job_url", out.JobURL}, {"c4.custody", out.Custody}, {"c4.key", key}},
 	}
 	var res struct {
