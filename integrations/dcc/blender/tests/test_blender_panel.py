@@ -167,12 +167,12 @@ def test_open_check_submit(tmp_path, monkeypatch):
     assert bf.state.saves == 1, "the farm reads the saved file, so Check saves it"
     assert c.checked.ok, c.checked.errors
     text = c.summary_text()
-    # The farm's own words for each job and its estimate are c4submit's to
-    # test; here, that both jobs are listed with their frames and the slack.
     heads = [ln for ln in text.splitlines() if ln.startswith("sh010-render-")]
-    assert [h.split()[0] for h in heads] == ["sh010-render-bg-v001", "sh010-render-fg-v001"]
-    assert all("48 frames" in h for h in heads)
-    assert "slack" in text
+    assert heads == ["sh010-render-bg-v001   Blender render · 48 frames in 12 units",
+                     "sh010-render-fg-v001   Blender render · 48 frames in 12 units"], "the farm's own words"
+    assert re.search(r"estimate\s+ready", text)
+    assert re.search(r"due\s+.*· Dailies, Thu 18:00 · slack ", text), "the milestone by its label"
+    assert "licences" not in text
     assert f"{LIGHTING_FILES} found from sh010_lighting_v003.blend" in text and f"{LIGHTING_FILES} to upload" in text
     assert text.endswith("Ready: press Submit to send it to the farm.")
     assert fake.calls[-1][0] == "check" and not fake.store
@@ -207,6 +207,15 @@ def test_a_scene_that_reads_another_comes_after_it(tmp_path, monkeypatch):
     assert list(jobs) == ["render-bg", "render-fg", "render-comp"]
     assert jobs["render-comp"]["after"] == ["render-bg", "render-fg"]
     assert jobs["render-comp"]["with"]["view_layer"] == "sh010_comp/comp"
+    text = c.summary_text()
+    assert ("sh010-render-comp-v001   Blender render · 48 frames in 12 units, after sh010-render-bg-v001, "
+            "sh010-render-fg-v001") in text
+    # In a check, the jobs it follows are not made yet: the farm says so in
+    # place of an estimate, as a warning, and the check still passes.
+    est = [r for r in c.rows if r[0] == "estimate"]
+    assert est[-1] == ("estimate", "it follows sh010-render-bg-v001, which does not exist until this is submitted",
+                       "warn")
+    assert [r[2] for r in est[:-1]] == ["ok", "ok"]
     assert c.checked.ok and len(c.checked.collection.files) == LIGHTING_FILES, "sh010's render is made, not sent"
 
     layer("sh010/bg").ticked = False

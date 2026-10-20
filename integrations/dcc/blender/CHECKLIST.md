@@ -122,10 +122,11 @@ Run the whole list in **Blender 4.2 LTS** and **Blender 4.5 LTS**.
    unsaved again. `window_manager.progress_begin`/`progress_update`/
    `progress_end` work while the operator is modal.
 2. **Expect** the summary: "To fix" is absent. It lists 72 files found from
-   `sh010_lighting_v003.blend` and 72 to upload, `sh010-render-bg-v001`
-   and `sh010-render-fg-v001`, each with its 48 frames and an estimate and,
-   with Dailies picked, the slack against Dailies. It ends
-   "Ready: press Submit to send it to the farm."
+   `sh010_lighting_v003.blend` and 72 to upload, then
+   "sh010-render-bg-v001   Blender render · 48 frames in 12 units" and the
+   same for fg, each with an estimate line and, with Dailies picked, a due
+   line ending "Dailies, Thu 18:00 · slack ...". There are no licence lines.
+   It ends "Ready: press Submit to send it to the farm."
    **[guess]** in reading the file:
    - `bpy.utils.blend_paths(absolute=True)` lists a sequence by its first
      frame's file, a tiled texture with `<UDIM>` or a tile number, and a
@@ -164,8 +165,10 @@ Run the whole list in **Blender 4.2 LTS** and **Blender 4.5 LTS**.
    `event_timer_add` keeps calling `modal` with nothing else happening.
    Opening another file while it runs may be refused while the operator is
    modal; that is acceptable.
-5. Tick `sh010_comp / comp`, Check. **Expect:** three jobs, and
-   `sh010-render-comp-v001` comes after the bg and fg jobs. Untick bg
+5. Tick `sh010_comp / comp`, Check. **Expect:** three jobs. The comp job's
+   heading ends "after sh010-render-bg-v001, sh010-render-fg-v001". In place
+   of its estimate, a warning says it follows a job that does not exist until
+   this is submitted. The check still passes. Untick bg
    and fg, Check. **Expect:** an error on `sh010_render` saying the render's
    files are missing, with its fix on the line under it.
 
