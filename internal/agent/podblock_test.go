@@ -269,3 +269,34 @@ func TestPodBlockWokenToAnswer(t *testing.T) {
 		t.Fatalf("prompt:\n%s", b)
 	}
 }
+
+// An attempt resumed from a view does not inherit the open question of the
+// attempt before it: that question's answer comes as this attempt's
+// decision or as a message.
+func TestPodBlockDropsAnInheritedQuestion(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(bin, []byte(fakePrint), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cwd, out := t.TempDir(), t.TempDir()
+	t.Setenv("FAKE_SLUG", ProjectSlug(cwd))
+	calls := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("FAKE_LOG", calls)
+	t.Setenv("C4_JOB", "port")
+	t.Setenv("C4_UNIT_NAME", "notes")
+	t.Setenv("C4_OUTPUT", out)
+	t.Setenv("C4_ASK_HOLD", "10ms")
+	os.MkdirAll(filepath.Join(out, ".c4"), 0o755)
+	if err := WriteAsking(out, Asking{ID: "5#1", To: "unit:slow", At: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	b := &PodBlock{Out: out, ConfigDir: t.TempDir(), Cwd: cwd, Claude: bin, HookCommand: "true", Env: os.Getenv, Logf: t.Logf, AskPoll: time.Millisecond}
+	code, err := b.Run(context.Background())
+	if err != nil || code != PodBlockDone {
+		t.Fatalf("exit %d, %v", code, err)
+	}
+	// its own two parts, and no wake for a question it did not ask
+	if b, _ := os.ReadFile(calls); strings.Count(string(b), "\n") != 2 {
+		t.Fatalf("claude ran %q", b)
+	}
+}

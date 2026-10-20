@@ -660,6 +660,7 @@ func (r *Runner) resumeFromView(ctx context.Context, p *corev1.Pod, name string)
 	if err != nil {
 		return err
 	}
+	defer ClearAsking(u.Out) // an attempt never inherits an open question
 	if err := FetchView(ctx, r.ViewSrc, project, vid, u.Out); err != nil {
 		return fmt.Errorf("%s: fetch the resume view %s: %w", name, id, err)
 	}

@@ -104,6 +104,9 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 	}
 	var m *Member
 	var prompt string
+	// an attempt never inherits an open question: the one an earlier
+	// attempt asked comes back as this attempt's decision or a message
+	ClearAsking(b.Out)
 	if _, err := ReadSessionInfo(b.Out); err == nil {
 		// resumed from a view: the session comes with it
 		if m, err = h.ImportSession(ctx, b.Out, b.ConfigDir); err != nil {
