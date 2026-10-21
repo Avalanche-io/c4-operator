@@ -80,8 +80,9 @@ The format's open points these folders raised, and how they were settled
   `RANGE_EXPR` parameter whose `from` is `shot.frames`, as `transcode`'s
   `range`.
 - **`needs`:** declared only from a measured run; a guess is a ceiling.
-- **Network:** `c4 farm up` defines `huggingface`, `pypi` and `goproxy`;
-  weights in the tool's tree are preferred where a tool can carry them.
+- **Network:** the farm refuses a declared `needs.network` until it fences
+  a unit's network; named services such as `huggingface` come then. A
+  model's weights are not carried in the tool's tree or its image.
 - **`writes` and `previews`** take globs and parameters, as `sim`'s
   `**/cache/` and `infer`'s `{{Param.task}}/`.
 - **Values:** a `BOOL` is `true` or `false`; an argument that is one format

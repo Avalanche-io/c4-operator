@@ -206,10 +206,10 @@ func Up(ctx context.Context, o UpOptions) error {
 }
 
 // publishTools publishes the release's own tools (the folders c4-farm
-// embeds) to every project, as tested in the release they shipped in, so
-// the farm runs no test for them. A tool whose image the farm cannot pin
-// (a development build whose job images are not loaded) is left out and
-// named, not fatal: the farm is still a farm.
+// embeds) to every project. The farm tests each before it offers it, and
+// up does not wait for those tests (NoWait). A tool whose image the farm
+// cannot pin (a development build whose job images are not loaded) is
+// left out and named, not fatal: the farm is still a farm.
 func publishTools(ctx context.Context, o UpOptions) error {
 	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: "admin", Local: true})
 	if err != nil {
