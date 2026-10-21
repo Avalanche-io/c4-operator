@@ -116,6 +116,8 @@ The farm at a glance. Also delivered by the event stream.
   gates?: [ { namespace, name, holder?: { job, unit, name?, since?, expectStart? }, waiting: [ ... ] } ],
   incidents: [ { id, needsYou, title, detail?, count, countOf?, jobs: [ "ns/name" ], since, state,
                  checklist: [ { label, act?, href?, action?, job?, units?, done? } ] } ],
+  observed?: [ { session, name?, kind, running, word, needsYou?, cwd?, startedAt?, lastActive?, turnAge?,
+                 backgroundOpen, usage?, limit?, transcript?, onFarm, machine, node, owners[], observedAt, postedAt } ],
   tiers: { tiers: [ { name, hitRate, requestsIn, upstreamRequests, bytesServed, shedRate, inflightFills } ],
            fanIn: { requesters, nodeRequests, peerRequests, regionalRequests, storeRequests },
            publishP50, publishP95, captureP50 },
@@ -694,8 +696,42 @@ it), so a listed button is never refused.
 - Standing in for someone else is not something that needs you, so it is
   not listed; the job's own controls still take it where allowed.
 
+An observed session whose `word` is `needs you` (see `observed`, below) is
+listed too, as `kind: session`, `id: session:<node>/<session>`, its
+`needsYou` as `ask`. No farm control answers it, so its `actions` are
+empty and `open` says how: `claude --resume <session>`.
+
 Ordered pressing first, then by `answerBy`, then oldest. Settled questions
 and decided waits leave the list.
+
+## POST /nodes/{node}/observed
+
+A host runner's report of the Claude Code sessions on its machine,
+`c4-agent observe --json` as written, posted about every minute:
+
+```
+{ machine, observedAt, owners: [ ... ], sessions: [ { session, name?, kind, running, word, needsYou?, cwd?, startedAt?,
+                                     lastActive?, turnAge?, backgroundOpen, usage?, limit?, transcript?, onFarm } ] }
+```
+
+- Only the node's own runner may post: the service account
+  `c4-hosts/<node>`. Any other caller, or another node's runner, gets 403.
+- Each report replaces the node's last. Reports are held in memory only,
+  never in a resource or the book, and a report not renewed within 5
+  minutes is dropped.
+- At most 200 sessions; more is 413.
+- `owners` are the runner's `--owner` users, whose machine it is.
+- The answer is `{ shownTo: [ ... ], why? }`: those of the runner's owners
+  who also own a pool the node is in (Pool `spec.owners`), so a runner
+  cannot put rows before someone who never took its node. They alone see
+  the rows, as the snapshot's `observed`, each with `machine`, `node`,
+  `owners`, `observedAt` and `postedAt` added. No one else sees them, a
+  farm admin included, nor any count of them. An empty `shownTo` comes
+  with `why`: the runner names no owner, or its node is in no pool its
+  owners own.
+- The rows are served only in a viewer's own answers (the snapshot,
+  needs-me, and MCP through them). Nothing that leaves the farm, such as a
+  diagnostic bundle, reads them.
 
 ## GET /events
 

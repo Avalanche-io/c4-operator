@@ -3,7 +3,10 @@
 // (cmd/hudmock in the c4-hud repository), so the two cannot drift apart.
 package api
 
-import "time"
+import (
+	"encoding/json"
+	"time"
+)
 
 // Viewer is who the response is filtered for.
 type Viewer struct {
@@ -98,6 +101,51 @@ type Snapshot struct {
 	// first, most work first). Always present, so a client never groups
 	// on its own.
 	Incidents []Incident `json:"incidents"`
+	// Observed are the Claude Code sessions the viewer's own machines
+	// report (c4-agent observe, posted by each host runner), farm members
+	// or not. Only an owner of a pool the runner's node is in sees them;
+	// anyone else gets none, not even a count.
+	Observed []ObservedSession `json:"observed,omitempty"`
+}
+
+// ObservedSession is one Claude Code session a host runner observed on its
+// machine: c4-agent observe's row as the runner posted it, plus where it
+// came from (Machine, Node), whom it is shown to (Owners) and when.
+type ObservedSession struct {
+	Session string `json:"session"`
+	Name    string `json:"name,omitempty"`
+	Kind    string `json:"kind"`
+	Running bool   `json:"running"`
+	// Word is its state in one word: needs you, at its limit, working,
+	// failed, idle, done or stopped.
+	Word string `json:"word"`
+	// NeedsYou is the one thing that needs its person, or "".
+	NeedsYou       string          `json:"needsYou,omitempty"`
+	Cwd            string          `json:"cwd,omitempty"`
+	StartedAt      *time.Time      `json:"startedAt,omitempty"`
+	LastActive     *time.Time      `json:"lastActive,omitempty"`
+	TurnAge        string          `json:"turnAge,omitempty"`
+	BackgroundOpen int             `json:"backgroundOpen"`
+	Usage          json.RawMessage `json:"usage,omitempty"`
+	Limit          json.RawMessage `json:"limit,omitempty"`
+	Transcript     string          `json:"transcript,omitempty"`
+	// OnFarm: a member C4 runs (registered with c4-agent).
+	OnFarm     bool      `json:"onFarm"`
+	Machine    string    `json:"machine"`
+	Node       string    `json:"node"`
+	Owners     []string  `json:"owners"`
+	ObservedAt time.Time `json:"observedAt"`
+	PostedAt   time.Time `json:"postedAt"`
+}
+
+// ObservedReport is POST /nodes/{node}/observed: a host runner's report of
+// its machine's sessions (c4-agent observe --json).
+type ObservedReport struct {
+	Machine    string    `json:"machine"`
+	ObservedAt time.Time `json:"observedAt"`
+	// Owners are the runner's --owner users, whose machine it is.
+	Owners   []string          `json:"owners"`
+	Sessions []ObservedSession `json:"sessions"`
 }
 
 // NeedsMe is GET /needs-me: only what this viewer may act on now, the
@@ -139,6 +187,9 @@ type NeedsMeItem struct {
 	Actions     []NeedsMeAction `json:"actions"`
 	// Href is the HUD route to what it is about.
 	Href string `json:"href,omitempty"`
+	// Open is how to answer an observed session (kind session): it has
+	// no farm control, only its own Claude Code (claude --resume <id>).
+	Open string `json:"open,omitempty"`
 }
 
 // NeedsMeAction is one button: its words, the control, and the request

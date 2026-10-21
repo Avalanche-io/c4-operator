@@ -185,6 +185,7 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 	}
 	sort.Slice(snap.Usage.GPUHours, func(a, b int) bool { return snap.Usage.GPUHours[a].Project < snap.Usage.GPUHours[b].Project })
 	snap.Incidents = incidents(m, v, snap.Jobs)
+	snap.Observed = s.observedSessions(m, v, time.Now())
 	return snap
 }
 

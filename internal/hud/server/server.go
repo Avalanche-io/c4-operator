@@ -158,6 +158,10 @@ type Server struct {
 	// copied and granted into (tools.go).
 	toolMu sync.Mutex
 	spread map[string]bool
+	// obsMu guards observed: each host runner's last report of its
+	// machine's sessions, by node, in memory only (observed.go).
+	obsMu    sync.Mutex
+	observed map[string]observedReport
 }
 
 // Queue is what the HUD asks the work queue (*queue.Queue).
@@ -179,6 +183,7 @@ func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/snapshot", s.handleSnapshot)
 	mux.HandleFunc("GET /api/v1/needs-me", s.handleNeedsMe)
+	mux.HandleFunc("POST /api/v1/nodes/{node}/observed", s.handleObserved)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 	mux.HandleFunc("GET /api/v1/graph", s.handleGraph)
 	mux.HandleFunc("GET /api/v1/book", s.handleBook)

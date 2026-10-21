@@ -1902,7 +1902,12 @@ and a sweep planner that spawns trials are all generators.
       /needs-me` (MCP `c4_needs_me`), the one-person view a solo
       farm's HUD opens on. An item is listed only when the controls would
       take its actions from that viewer, so a listed button is never
-      refused.
+      refused. The person's own Claude Code sessions are in it too, when
+      one needs them: each host runner reports its machine's sessions
+      (`POST /nodes/{node}/observed`, as that node only), shown only to
+      the runner's own owners who also own one of its node's pools, held
+      in memory, never in the book or anything that leaves the farm,
+      because a session's words and folders are the person's own.
     - **It holds the job, never fails it.** The unit is in state `needs`
       (`units.needs`), not `failed`. Once nothing else can run, the job is
       `Held` with NeedsPerson `NeedsInformation` ("waiting on a

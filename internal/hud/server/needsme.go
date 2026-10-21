@@ -136,6 +136,27 @@ func (s *Server) needsMe(r *http.Request, v *api.Viewer, snap *api.Snapshot) *ap
 			out.Items = append(out.Items, it)
 		}
 	}
+	// An observed session that needs its person: no farm control answers
+	// it, only the session itself, in Claude Code.
+	for _, o := range snap.Observed {
+		if o.Word != "needs you" {
+			continue
+		}
+		name := o.Name
+		if name == "" {
+			name = "a session"
+		}
+		on := o.Machine
+		if on == "" {
+			on = o.Node
+		}
+		it := api.NeedsMeItem{ID: "session:" + o.Node + "/" + o.Session, Kind: "session", Title: name + " on " + on + " needs you",
+			Ask: o.NeedsYou, State: "open", Severity: "warning", Actions: []api.NeedsMeAction{}, Open: "claude --resume " + o.Session}
+		if o.LastActive != nil {
+			it.Since = *o.LastActive
+		}
+		out.Items = append(out.Items, it)
+	}
 	for _, c := range snap.Capacity {
 		if c.State != "PendingApproval" {
 			continue
