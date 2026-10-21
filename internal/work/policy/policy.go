@@ -40,6 +40,12 @@ const (
 	// Answers is who answers a unit's questions, in order: unit names of
 	// the job.
 	Answers = "answers"
+	// SubmissionPendingFor is how long a submission's jobs may stay held
+	// while it makes the rest (10m): one still held past it was left by a
+	// submission that never finished, and is deleted with its attempt.
+	SubmissionPendingFor = "submission.pendingFor"
+	// SubmissionSweepEvery is how often the HUD looks for such jobs (1m).
+	SubmissionSweepEvery = "submission.sweepEvery"
 )
 
 // RecheckInFlight is how many re-checks of one question may run at once:
@@ -89,6 +95,9 @@ var defaults = map[string]string{
 	RecheckSeconds:     "300",
 	AsksMax:            "3",
 	Answers:            "",
+	// A submission's, read for its project; the sweep's, for the farm.
+	SubmissionPendingFor: "10m",
+	SubmissionSweepEvery: "1m",
 }
 
 // limits are the farm's limits on a project's values, in each key's
@@ -245,6 +254,9 @@ func valid(key, s string) bool {
 	case PressAfter, PressMargin, RecheckMinInterval:
 		d, err := time.ParseDuration(s)
 		return err == nil && d >= 0
+	case SubmissionPendingFor, SubmissionSweepEvery:
+		d, err := time.ParseDuration(s)
+		return err == nil && d > 0
 	case RecheckMax:
 		n, err := strconv.Atoi(s)
 		return err == nil && n >= 0
