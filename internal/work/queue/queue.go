@@ -316,6 +316,9 @@ type jobMem struct {
 	// admitWait and leaseWait are the latest refusal of a unit's pod and
 	// the latest credential-lease wait (waits.go).
 	admitWait, leaseWait startWait
+	// grantWait says why units wait for the person's grant the job was
+	// submitted under (lease.go, grantServes).
+	grantWait string
 	// needs are what units stopped for, and supplied and withdrawn the
 	// last supply's and withdrawal's tokens (needs.go).
 	needs     map[int]*needsRec
@@ -1596,9 +1599,12 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		// it, runs only while the person's grant serves it, leases or
 		// not; a unit already running finishes its attempt.
 		if why := q.grantServes(ctx, v.job, p.spec.Name, now); why != "" {
+			// The job's status says so (condition Grant).
+			v.mem.grantWait = why
 			q.Log.V(1).Info("waiting: the job's grant does not serve", "job", key, "unit", idx, "pool", p.spec.Name, "why", why)
 			continue
 		}
+		v.mem.grantWait = ""
 		tools, ok, why := q.toolsReady(ctx, v, idx)
 		if err, checked := q.unitsSealed[v.job.Namespace]; !checked || err != nil {
 			// Never released into a namespace whose units would have

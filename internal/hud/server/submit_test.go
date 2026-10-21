@@ -846,3 +846,31 @@ func TestAUnitsJobOnABoundFarm(t *testing.T) {
 		t.Errorf("a one-person binding on an unguarded HUD: %d %s", code, out)
 	}
 }
+
+// A job its grant holds says so (held: grant, in the grant's words), and
+// the job whose unit submitted it says its units wait for that child.
+func TestHeldJobsAndTheirParents(t *testing.T) {
+	s := farm(t)
+	m := s.current()
+	parent := m.byKey["show-a/sh040-light-v007"]
+	parent.job.UID = "3f9a1c77-parent"
+	since := metav1.NewTime(time.Date(2026, 10, 23, 9, 0, 0, 0, time.UTC))
+	child := &jobRec{key: "show-a/sh040-fix", project: "show-a", job: c4v1.WorkJob{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "sh040-fix", Annotations: map[string]string{
+			c4v1.AnnotationSubmittedByUnit: schema.UnitRef("show-a", "sh040-light-v007", string(parent.job.UID), "3")}},
+		Status: c4v1.WorkJobStatus{Conditions: []metav1.Condition{{Type: c4v1.ConditionGrant, Status: metav1.ConditionFalse,
+			Reason: "Waiting", Message: "dana revoked the grant from dana to tracker github", LastTransitionTime: since}}}}}
+	m.jobs = append(m.jobs, child)
+	m.byKey[child.key] = child
+	if got := heldBy(m, &child.job); len(got) != 1 || got[0].Kind != "grant" || got[0].Message != "dana revoked the grant from dana to tracker github" {
+		t.Errorf("the held child: %+v", got)
+	}
+	got := heldBy(m, &parent.job)
+	if len(got) != 1 || got[0].Kind != "child" || got[0].Child != "sh040-fix" ||
+		got[0].Message != "units wait for child job sh040-fix: dana revoked the grant from dana to tracker github" {
+		t.Errorf("the parent: %+v", got)
+	}
+	if other := heldBy(m, &m.byKey["show-a/sh050-comp-v001"].job); len(other) != 0 {
+		t.Errorf("a job with no held child: %+v", other)
+	}
+}

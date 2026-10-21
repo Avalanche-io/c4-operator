@@ -137,6 +137,12 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: c4v1.ConditionNetwork, Status: metav1.ConditionFalse,
 			Reason: "NoTool", Message: c4v1.NoToolNoNetwork, ObservedGeneration: v.job.Generation})
 	}
+	if m.grantWait != "" {
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: c4v1.ConditionGrant, Status: metav1.ConditionFalse,
+			Reason: "Waiting", Message: m.grantWait, ObservedGeneration: v.job.Generation})
+	} else {
+		meta.RemoveStatusCondition(&st.Conditions, c4v1.ConditionGrant)
+	}
 	n := len(m.plan.Units)
 	st.Order = strings.ToLower(m.plan.OrderName)
 	// Each unit is in one state. Units holding a slot are preflight,

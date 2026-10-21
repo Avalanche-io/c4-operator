@@ -80,6 +80,13 @@ func init() {
 // Set at creation, never changed.
 const AnnotationGrant = "c4.avalanche.io/grant"
 
+// ConditionGrant, False with reason Waiting, on a job submitted under a
+// person's grant (or a unit's job under it) says its units wait because
+// the grant no longer serves them: the message is the grant's own
+// sentence (revoked, ended, or not covering the pool or the class).
+// Absent while the grant serves.
+const ConditionGrant = "Grant"
+
 // AnnotationGrantTracker on a job a unit submitted, whose own job a
 // Tracker submitted under a person's grant, names that Tracker, so the
 // queue finds the grant that bounds the child too. The child does not

@@ -282,6 +282,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNetwork); c != nil && c.Status == metav1.ConditionFalse && j.Spec.Tool == nil {
 		aj.NoNetwork = c.Message
 	}
+	aj.Held = heldBy(m, j)
 	for k, n := range st.Needs {
 		i, err := strconv.Atoi(k)
 		if err != nil {

@@ -36,6 +36,16 @@ type Viewer struct {
 	Groups []string `json:"-"`
 }
 
+// Hold is one reason a job's units are held back. Kind is grant, tools or
+// child; Child names the held child job (kind child); Message says why,
+// in the farm's words.
+type Hold struct {
+	Kind    string    `json:"kind"`
+	Message string    `json:"message"`
+	Child   string    `json:"child,omitempty"`
+	Since   time.Time `json:"since"`
+}
+
 // UnitViewer is a unit acting on c4 through the HUD: its job, and its
 // grant (read, job or project).
 type UnitViewer struct {
@@ -682,6 +692,10 @@ type Job struct {
 	// the farm's sentence for why it reached no network (its Network
 	// condition).
 	NoNetwork string `json:"noNetwork,omitempty"`
+	// Held says why the job's units are held back while it is otherwise
+	// ready: a grant that no longer serves, a tool not ready, or a child
+	// job a unit submitted that is itself held.
+	Held []Hold `json:"held,omitempty"`
 	// Measure is the job's own measure of done, when it declares one.
 	Measure *Measure `json:"measure,omitempty"`
 	// Spend splits what the job cost between procedural and model units.

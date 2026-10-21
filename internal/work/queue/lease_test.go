@@ -2,11 +2,14 @@ package queue
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
@@ -182,6 +185,16 @@ func TestGrantHoldsALeaselessJob(t *testing.T) {
 	if n := len(unitPods(t, ns, "github-8")); n != 0 {
 		t.Fatalf("released %d units under a revoked grant", n)
 	}
+	grantCond := func() *metav1.Condition {
+		var got c4v1.WorkJob
+		if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "github-8"}, &got); err != nil {
+			t.Fatal(err)
+		}
+		return meta.FindStatusCondition(got.Status.Conditions, c4v1.ConditionGrant)
+	}
+	if c := grantCond(); c == nil || c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, "noor revoked the grant") {
+		t.Errorf("the job says nothing of its revoked grant: %+v", c)
+	}
 	g.Spec.Revoked = nil
 	if err := k8s.Update(ctx, g); err != nil {
 		t.Fatal(err)
@@ -189,5 +202,9 @@ func TestGrantHoldsALeaselessJob(t *testing.T) {
 	tick(t, q)
 	if n := len(unitPods(t, ns, "github-8")); n != 1 {
 		t.Fatalf("released %d units under the grant, want 1", n)
+	}
+	tick(t, q)
+	if c := grantCond(); c != nil {
+		t.Errorf("the grant serves again, but the job still says %q", c.Message)
 	}
 }
