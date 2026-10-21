@@ -102,13 +102,15 @@ range, renderables and the files it reads) and a way to draw
 - set `writes_scene` when it writes the scene for every submission (a USD
   stage from a LOP network);
 - tag a file with the renderables that read it (`Dependency.renderables`:
-  `None` when unknown, so every job carries it).
- Everything else
-(collection, IDs, the check, the summary, uploads, the file) is
-`c4submit`'s. `c4submit.testing` has a fake farm (in memory, and over HTTP)
-and a fake host for tests. The next DCCs plug into their own farm seams
-rather than drawing a panel: Katana through its FarmAPI, and Unreal as a
-Movie Render Queue executor.
+  `None` when unknown, so every job carries it);
+- tell the artist how it read the scene (`warnings()`: that every file was
+  sent because the application could not say which ones the jobs read).
+
+Everything else (collection, IDs, the check, the summary, uploads, the
+file) is `c4submit`'s. `c4submit.testing` has a fake farm (in memory, and
+over HTTP) and a fake host for tests. Where an application has its own farm
+seam, the submitter plugs into it rather than drawing a panel: Katana's
+FarmAPI, Unreal's Movie Render Queue executor.
 
 ## Status
 
