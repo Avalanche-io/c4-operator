@@ -60,7 +60,7 @@ func TestFarmCLIAgainstTheHUD(t *testing.T) {
 	}
 	got := out.String()
 	for _, want := range []string{"sm0140-light-v001   render · 4 frames · Cycles · pool cpu", "4 files found from sm0140.usda",
-		"4 to upload", "ready ~14:52 PDT  (p90 ~15:04 PDT)", "deadline  18:00 PDT today (01:00 UTC) · slack ~3h 8m",
+		"4 to upload", "ready ~14:52 PDT  (p90 ~15:04 PDT)", "deadline  18:00 PDT today (Sat 01:00 UTC) · slack ~3h 8m",
 		"uploaded  4 files", "queued    show-a/sm0140-light-v001", "?as=artist#/job/show-a/sm0140-light-v001"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output lacks %q:\n%s", want, got)
@@ -142,7 +142,7 @@ func TestFarmCLIPublishesATool(t *testing.T) {
 	s := toolFarm(t)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
-	c := &farmcli.Client{Base: ts.URL, As: "artist", HTTP: ts.Client()}
+	c := &farmcli.Client{Base: ts.URL, As: "td", HTTP: ts.Client()}
 	dir := filepath.Join(t.TempDir(), "notes")
 	for p, body := range notesTool("echo hi > out.txt") {
 		writeFile(t, dir, p, []byte(body))

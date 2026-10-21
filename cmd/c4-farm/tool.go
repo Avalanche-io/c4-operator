@@ -91,6 +91,18 @@ func toolCommand(ctx context.Context, fs *flag.FlagSet, args []string, stdout io
 			return err
 		}
 		a.Dir = pos[0]
+		if f.Local {
+			// publishing takes the TD role (farm admin for every
+			// project); on the local farm you hold every role
+			role, as := "TD", "td"
+			if a.Farm {
+				role, as = "farm admin", "admin"
+			}
+			if c.As != as && c.As != "admin" {
+				c.As = as
+				fmt.Fprintf(stdout, "as        %s: publishing takes the %s role, and the local farm signs you in as it\n", as, role)
+			}
+		}
 		return farmcli.PublishTool(ctx, c, o, a)
 
 	case "show":
