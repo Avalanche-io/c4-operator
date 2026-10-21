@@ -715,3 +715,75 @@ func TestIrregularChunk(t *testing.T) {
 		t.Error("a bad list accepted")
 	}
 }
+
+// A question stands as it was asked: a tool that reports one and exits 12
+// itself keeps its words, and a later openjd_fail line does not replace
+// them.
+func TestRunQuestionKeepsItsWords(t *testing.T) {
+	for name, script := range map[string]string{
+		"exit 12 itself":    "echo c4_fail: question which frame rate, 24 or 25; exit 12",
+		"then openjd_fail":  "echo c4_fail: question which frame rate, 24 or 25; echo openjd_fail: the render stopped; exit 3",
+		"openjd_fail first": "echo openjd_fail: the render stopped; echo c4_fail: question which frame rate, 24 or 25; exit 3",
+	} {
+		r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, '"+script+"']}\n")
+		if c := r.run(); c != needsCode {
+			t.Errorf("%s: exit %d", name, c)
+		}
+		if o := r.outcome(); o.Class != "question" || o.Reason != "which frame rate, 24 or 25" {
+			t.Errorf("%s: outcome %+v", name, o)
+		}
+		if b, _ := os.ReadFile(r.vars["C4_TERMINATION_LOG"]); string(b) != "which frame rate, 24 or 25" {
+			t.Errorf("%s: termination message %q", name, b)
+		}
+	}
+}
+
+// When a stronger class beats the question c4-unit needs raised, the
+// termination message says the failure, not the question. A class the
+// tool reported stands when it then stalls.
+func TestRunFailureOverQuestionAndStall(t *testing.T) {
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'printf \"the frame rate\" > $C4_TERMINATION_LOG; echo c4_fail: permanent the stage is missing; exit 12']}\n")
+	if c := r.run(); c != 1 {
+		t.Errorf("exit %d", c)
+	}
+	if b, _ := os.ReadFile(r.vars["C4_TERMINATION_LOG"]); string(b) != "the stage is missing" {
+		t.Errorf("termination message %q", b)
+	}
+
+	r = newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'echo c4_fail: permanent no such stage; sleep 30']}\nstall: {quietMinutes: 2}\n")
+	r.minute = 100 * time.Millisecond
+	if c := r.run(); c != stallCode {
+		t.Errorf("stalled: exit %d", c)
+	}
+	if o := r.outcome(); o.Class != "permanent" || o.Reason != "no such stage" || !o.Stalled {
+		t.Errorf("stalled: outcome %+v", o)
+	}
+}
+
+// A re-check of a tool that does not reason passes its question through
+// as it was asked, why and what it is about included. A tool that reasons
+// (kind agent) runs, told it is a re-check, and decides for itself.
+func TestRunRecheckPassesTheQuestionThrough(t *testing.T) {
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'touch $C4_TREE/ran']}\n")
+	r.vars["C4_RECHECK"], r.vars["C4_NEEDED"] = "1", "the delivery frame rate"
+	r.vars["C4_NEEDED_WHY"], r.vars["C4_NEEDED_ABOUT"] = "the plates disagree", "path:plates/a, unit:comp"
+	if c := r.run(); c != needsCode {
+		t.Fatalf("exit %d", c)
+	}
+	want := "the delivery frame rate\nwhy: the plates disagree\nabout: path:plates/a, unit:comp"
+	if b, _ := os.ReadFile(r.vars["C4_TERMINATION_LOG"]); string(b) != want {
+		t.Errorf("termination message %q, want %q", b, want)
+	}
+	if o := r.outcome(); o.Class != "question" || o.Reason != "the delivery frame rate" {
+		t.Errorf("outcome %+v", o)
+	}
+
+	r = newToolRun(t, "c4: tool/1\nname: x\nkind: agent\nruns: {image: c4/runtime-base, command: [bash, -c, 'echo $C4_RECHECK > $C4_TREE/ran']}\n")
+	r.vars["C4_RECHECK"], r.vars["C4_NEEDED"] = "1", "the delivery frame rate"
+	if c := r.run(); c != 0 {
+		t.Errorf("agent: exit %d", c)
+	}
+	if b, err := os.ReadFile(filepath.Join(r.tree, "ran")); err != nil || strings.TrimSpace(string(b)) != "1" {
+		t.Errorf("an agent tool did not run its re-check: %q %v", b, err)
+	}
+}

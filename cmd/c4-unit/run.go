@@ -41,6 +41,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Avalanche-io/c4-operator/internal/needs"
 	"github.com/Avalanche-io/c4-operator/schema"
 )
 
@@ -178,9 +179,13 @@ type runner struct {
 	done      map[int]bool // frames finished
 	previewed map[int]bool // frames whose preview is queued
 	class     string       // from c4_fail
-	reason    string       // from c4_fail or openjd_fail
+	reason    string       // from c4_fail
+	failText  string       // from openjd_fail
 	patClass  string       // from the tool's error patterns
 	patLine   string
+	// asked is set when the question that stands is the one c4-unit
+	// needs wrote to the termination log in this run
+	asked bool
 }
 
 type progressRule struct {
@@ -200,16 +205,22 @@ func runTool(e env, stdout, stderr io.Writer) (int, error) {
 		return setupCode, err
 	}
 	r := &runner{e: e, tree: tree, start: e.clock(), done: map[int]bool{}, previewed: map[int]bool{}}
-	if e.get("C4_RECHECK") == "1" {
-		// A tool cannot tell whether its question still applies, so a
-		// re-check runs nothing: the question stands as it was, for a
-		// person, the lead or the job's answerer.
-		needed := strings.TrimSpace(e.get("C4_NEEDED"))
-		if err := os.WriteFile(terminationLog(e), []byte(needed), 0o644); err != nil {
+	if e.get("C4_RECHECK") == "1" && toolKind(e) != "agent" {
+		// Only a tool that reasons (kind agent) can tell whether its
+		// question still applies, so for any other a re-check runs
+		// nothing: the question stands as it was, for a person, the lead
+		// or the job's answerer.
+		text := strings.TrimSpace(e.get("C4_NEEDED"))
+		var about []string
+		if a := strings.TrimSpace(e.get("C4_NEEDED_ABOUT")); a != "" {
+			about = strings.Split(a, ", ")
+		}
+		msg := needs.Message(text, e.get("C4_NEEDED_WHY"), about)
+		if err := os.WriteFile(terminationLog(e), []byte(msg), 0o644); err != nil {
 			return 1, err
 		}
-		r.writeOutcome(outcome{Result: "failed", Class: "question", Reason: needed, ExitCode: needsCode})
-		fmt.Fprintln(stderr, "c4-unit: a re-check: a tool does not re-check its own question; it stands")
+		r.writeOutcome(outcome{Result: "failed", Class: "question", Reason: text, ExitCode: needsCode})
+		fmt.Fprintln(stderr, "c4-unit: a re-check: this tool does not re-check its own question; it stands")
 		return needsCode, nil
 	}
 	cmd, err := r.prepare()
@@ -702,7 +713,7 @@ wait:
 		// raised as c4-unit needs raises it: exit 12, the question as the
 		// termination message, so the farm escalates it rather than
 		// spending a retry
-		if code != needsCode {
+		if !r.asked {
 			if err := os.WriteFile(terminationLog(r.e), []byte(o.Reason), 0o644); err != nil {
 				return 1, err
 			}
@@ -710,7 +721,11 @@ wait:
 		return needsCode, nil
 	case code == needsCode && o.Result == "failed":
 		// a stronger class than the question c4-unit needs raised: not
-		// escalated as one
+		// escalated as one, and the termination message says the failure,
+		// not the question
+		if err := os.WriteFile(terminationLog(r.e), []byte(o.Reason), 0o644); err != nil {
+			return 1, err
+		}
 		return 1, nil
 	}
 	if o.Result == "succeeded" {
@@ -749,22 +764,27 @@ func (r *runner) result(code int, stalled bool, signalled os.Signal) outcome {
 	}
 	if needed && stronger("question", best.class) {
 		best = said{"question", "the brief lacks information: " + needs}
+		r.asked = true
 	}
 	switch {
-	case stalled:
-		o.Class, o.Reason = "retry", fmt.Sprintf("no output for %d minutes", r.tool.Stall.QuietMinutes)
 	case best.class != "":
+		// a class the tool reported stands, even when it then stalled
 		o.Class, o.Reason = best.class, best.reason
+		if o.Reason == "" && best.class == r.class {
+			o.Reason = r.failText
+		}
 		if o.Reason == "" && best.class == r.class {
 			o.Reason = r.patLine
 		}
+	case stalled:
+		o.Class, o.Reason = "retry", fmt.Sprintf("no output for %d minutes", r.tool.Stall.QuietMinutes)
 	case signalled == nil && r.tool.RetryOn != nil && len(r.tool.RetryOn.ExitCodes) > 0 && !slices.Contains(r.tool.RetryOn.ExitCodes, code):
 		o.Class, o.Reason = "permanent", fmt.Sprintf("exit status %d, which retryOn does not list", code)
 	default:
 		o.Class = "retry"
 	}
 	if o.Reason == "" {
-		o.Reason = r.reason
+		o.Reason = r.failText
 	}
 	if o.Reason == "" {
 		o.Reason = r.patLine
@@ -873,8 +893,9 @@ func (r *runner) protocol(l string) bool {
 		return true
 	}
 	if v, ok := cutProto(l, "openjd_fail"); ok {
+		// the failure's own words; a reason c4_fail gave stands over them
 		r.mu.Lock()
-		r.reason = v
+		r.failText = v
 		r.mu.Unlock()
 		return true
 	}
@@ -1320,3 +1341,16 @@ func frameList(label string) (frames, error) {
 
 // imageExts are the files a preview can be made from.
 var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".exr": true, ".tif": true, ".tiff": true, ".dpx": true, ".hdr": true, ".tga": true}
+
+// toolKind is the kind of the tool in C4_TOOLS ("" when it cannot be read).
+func toolKind(e env) string {
+	b, err := os.ReadFile(filepath.Join(e.get("C4_TOOLS"), "tool.yaml"))
+	if err != nil {
+		return ""
+	}
+	t, errs := schema.ParseTool(b)
+	if len(errs) > 0 || t == nil {
+		return ""
+	}
+	return t.Kind
+}

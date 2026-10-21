@@ -5,6 +5,9 @@
 //	c4-unit run                     run the tool in $C4_TOOLS/tool.yaml with the
 //	                                parameters in $C4_PARAMS: progress, previews,
 //	                                stalls and .c4/outcome from what it prints (run.go)
+//	                                on a re-check, a tool not of kind agent does not
+//	                                run: its question stands as asked ($C4_NEEDED,
+//	                                $C4_NEEDED_WHY, $C4_NEEDED_ABOUT), exit 12
 //	c4-unit progress 0.4            write the unit's progress (0 to 1)
 //	c4-unit preview IMAGE FRAME     write preview/FRAME.png for the HUD's player
 //	c4-unit yield-requested         exit 0 if the farm asked this unit to yield
