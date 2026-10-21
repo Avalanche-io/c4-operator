@@ -6,7 +6,7 @@ package server
 // a job of that Tracker, and only from a tracker user the Tracker's people
 // map makes the person the wait is for (or, for a party's wait, a user it
 // maps to that party). The decision is signed with its custody: relayed, or
-// relayed-unattributed when the map names a party rather than a person.
+// relayed-party when the map names a party rather than a person.
 
 import (
 	"context"
