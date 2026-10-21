@@ -227,7 +227,12 @@ func Up(ctx context.Context, o UpOptions) error {
 // cannot pin (a development build whose job images are not loaded) is
 // left out and named, not fatal: the farm is still a farm.
 func publishTools(ctx context.Context, o UpOptions) error {
-	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: "admin", Local: true})
+	// the owner publishes, so the farm's tests of them are the owner's
+	as := "admin"
+	if o.Owner != "" {
+		as = o.Owner
+	}
+	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: as, Local: true})
 	if err != nil {
 		return err
 	}
@@ -249,7 +254,20 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			return err
 		}
 		var out strings.Builder
-		err = farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: Project, Farm: true, NoWait: true})
+		// a store or record the farm could not reach a moment ago is
+		// tried again here, so the person is not told to
+		for wait := 2 * time.Second; ; wait *= 2 {
+			out.Reset()
+			err = farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: Project, Farm: true, NoWait: true})
+			if err == nil || wait > 16*time.Second || !strings.Contains(out.String()+err.Error(), "try again shortly") {
+				break
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(wait):
+			}
+		}
 		if err != nil {
 			why := strings.TrimSpace(out.String())
 			if why == "" {
@@ -281,10 +299,15 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			}
 			// one line of what the farm said, not every error it holds
 			why = strings.Join(strings.Fields(why), " ")
+			// the farm's words, without telling the person to wait and
+			// try: up has tried, and says what runs it again
+			if i := strings.Index(why, "; try again shortly"); i >= 0 {
+				why = why[:i]
+			}
 			if len(why) > 100 {
 				why = why[:100] + "…"
 			}
-			left = append(left, name+" ("+why+")")
+			left = append(left, name+" ("+why+"; c4 farm up publishes it again)")
 			continue
 		}
 		if strings.Contains(out.String(), "(running;") {

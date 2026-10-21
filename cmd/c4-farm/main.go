@@ -232,7 +232,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
-		c, _, o, _, err := connect()
+		c, f, o, _, err := connect()
 		if err != nil {
 			return err
 		}
@@ -247,6 +247,12 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			role = "wrangler"
 		default:
 			role = "artist"
+		}
+		if f.Owner != "" && s.Viewer.User == f.Owner {
+			// the farm's one person: every role is theirs
+			role = "owner, every role"
+		} else if f.Owner != "" {
+			role += ", a role's view of " + f.Owner + "'s farm"
 		}
 		fmt.Fprintf(o.W, "%s · %s · projects %s\n", s.Viewer.User, role, strings.Join(s.Viewer.Projects, ", "))
 		return nil
