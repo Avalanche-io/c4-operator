@@ -3,6 +3,7 @@ package farmcli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/cookiejar"
@@ -14,19 +15,29 @@ import (
 	"time"
 )
 
-// fakeAgent is a c4-agent that answers find, register, hooks and ls as the
-// real one does, and records what it was asked in calls.
-func fakeAgent(t *testing.T, session string) (bin, calls string) {
+// fakeAgent is a c4-agent that answers find, register, hooks, ls and
+// unregister as the real one does, and records what it was asked in calls.
+// Its sessions' transcripts are in cd and say they ran in folder; members
+// lists the members ls shows, "name session" per line.
+func fakeAgent(t *testing.T, cd, folder string, sessions ...string) (bin, calls string) {
 	t.Helper()
 	dir := t.TempDir()
 	bin, calls = filepath.Join(dir, "c4-agent"), filepath.Join(dir, "calls")
+	members := filepath.Join(dir, "members")
+	os.WriteFile(members, nil, 0o644)
+	os.MkdirAll(filepath.Join(cd, "projects", "x"), 0o755)
+	for _, s := range sessions {
+		os.WriteFile(filepath.Join(cd, "projects", "x", s+".jsonl"),
+			[]byte(`{"type":"permission-mode"}`+"\n"+`{"type":"user","cwd":"`+folder+`","sessionId":"`+s+`"}`+"\n"), 0o644)
+	}
 	script := `#!/bin/sh
 echo "$@" >>` + calls + `
 case "$1" in
-find) if [ "$3" = scout ]; then printf '` + session + `\t/cfg/projects/x/` + session + `.jsonl\n'; fi ;;
-register) echo "$3: session $5, phase 0, epoch 0, transcript /cfg/projects/x/$5.jsonl" ;;
-hooks) printf '{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"` + "BIN" + ` checkpoint --hook","timeout":30}]}]}}\n' ;;
-ls) printf 'MEMBER  STATE  SESSION\nscout   idle   ` + session + `\n' ;;
+find) if [ "$3" = scout ]; then printf '` + sessions[0] + `\t` + cd + `/projects/x/` + sessions[0] + `.jsonl\n'; fi ;;
+register) echo "$3 $5" >>` + members + `; echo "$3: session $5, phase 0, epoch 0" ;;
+hooks) printf '{"hooks":{"PostToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"BIN checkpoint --hook","timeout":10}]}],"Stop":[{"hooks":[{"type":"command","command":"BIN checkpoint --hook","timeout":30}]}]}}\n' ;;
+ls) echo "MEMBER  STATE  SESSION"; while read n s; do echo "$n  idle  $s"; done <` + members + ` ;;
+unregister) grep -v "^$3 " ` + members + ` >` + members + `.new; mv ` + members + `.new ` + members + ` ;;
 esac
 `
 	script = strings.ReplaceAll(script, "BIN", bin)
@@ -36,71 +47,142 @@ esac
 	return bin, calls
 }
 
-// agents add finds the session by the agent's name, registers it through
-// c4-agent, and merges c4-agent's Stop hook into settings.json once,
-// keeping the person's keys and hooks in their order; a second add
-// changes nothing.
-func TestAddAgentRegistersAndInstallsTheHookOnce(t *testing.T) {
+// agents add finds the session by the agent's name, registers it, and puts
+// every hook c4-agent prints in the member's own folder's
+// settings.local.json, never the global settings: the person's bytes stay
+// as written (2>&1 unescaped), the file keeps its mode, and a second add
+// changes nothing. rm takes out exactly the hooks.
+func TestAddAgentPutsEveryHookInItsFolder(t *testing.T) {
 	session := "0b5e7c52-8a6f-4d0e-9b1c-3f2a4e6d8c10"
-	bin, calls := fakeAgent(t, session)
-	cd := t.TempDir()
-	settings := filepath.Join(cd, "settings.json")
-	before := `{"model": "opus", "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh"}]}]}, "env": {"X": "1"}}`
-	os.WriteFile(settings, []byte(before), 0o644)
+	cd, folder := t.TempDir(), t.TempDir()
+	bin, calls := fakeAgent(t, cd, folder, session)
+	settings := filepath.Join(folder, ".claude", "settings.local.json")
+	os.MkdirAll(filepath.Dir(settings), 0o755)
+	head := `{"model": "opus",
+  "hooks": {"PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "guard.sh 2>&1"}]}]`
+	before := head + `},
+  "env": {"X": "1"}
+}
+`
+	os.WriteFile(settings, []byte(before), 0o640)
 
 	a := AgentsArgs{Name: "scout", ConfigDir: cd, Yes: true, AgentBin: bin}
 	var out bytes.Buffer
 	if err := AddAgent(context.Background(), Out{W: &out}, a); err != nil {
 		t.Fatalf("%v\n%s", err, out.String())
 	}
-	if !strings.Contains(out.String(), "member    scout · session "+session) || !strings.Contains(out.String(), "installed the hook") {
+	if !strings.Contains(out.String(), "member    scout · session "+session+" · "+folder) ||
+		!strings.Contains(out.String(), "installed PostToolUse and Stop") {
 		t.Errorf("output:\n%s", out.String())
 	}
-	if c, _ := os.ReadFile(calls); !strings.Contains(string(c), "find --agent-name scout --config-dir "+cd) ||
-		!strings.Contains(string(c), "register --name scout --session "+session+" --config-dir "+cd) {
+	if c, _ := os.ReadFile(calls); !strings.Contains(string(c), "register --name scout --session "+session+" --config-dir "+cd) {
 		t.Errorf("c4-agent was asked:\n%s", c)
 	}
 	b, _ := os.ReadFile(settings)
 	s := string(b)
-	model, hooks, env := strings.Index(s, `"model"`), strings.Index(s, `"hooks"`), strings.Index(s, `"env"`)
-	if model < 0 || hooks < model || env < hooks || !strings.Contains(s, "guard.sh") ||
-		!strings.Contains(s, `"command": "`+bin+` checkpoint --hook"`) || strings.Index(s, `"Stop"`) < strings.Index(s, `"PreToolUse"`) {
-		t.Errorf("settings.json:\n%s", s)
+	var doc map[string]any
+	if err := json.Unmarshal(b, &doc); err != nil || !strings.HasPrefix(s, head) || !strings.HasSuffix(s, "},\n  \"env\": {\"X\": \"1\"}\n}\n") ||
+		strings.Count(s, bin+" checkpoint --hook") != 2 || strings.Contains(s, "\\u0026") {
+		t.Errorf("settings.local.json (%v):\n%s", err, s)
 	}
-	if bk, _ := os.ReadFile(settings + ".c4-backup"); string(bk) != before {
-		t.Errorf("backup %q", bk)
+	if fi, _ := os.Stat(settings); fi.Mode().Perm() != 0o640 {
+		t.Errorf("mode %v", fi.Mode().Perm())
+	}
+	if _, err := os.Stat(filepath.Join(cd, "settings.json")); !os.IsNotExist(err) {
+		t.Error("the global settings.json was written")
 	}
 
 	out.Reset()
-	if err := AddAgent(context.Background(), Out{W: &out}, a); err != nil || !strings.Contains(out.String(), "hook      already in") {
+	if err := AddAgent(context.Background(), Out{W: &out}, a); err != nil || !strings.Contains(out.String(), "hooks     already in") {
 		t.Fatalf("second add: %v\n%s", err, out.String())
 	}
 	if again, _ := os.ReadFile(settings); string(again) != s {
-		t.Error("a second add changed settings.json")
+		t.Error("a second add changed the settings")
 	}
+
 	out.Reset()
-	if err := ListAgents(context.Background(), Out{W: &out}, a); err != nil || !strings.Contains(out.String(), "scout   idle") {
-		t.Errorf("ls: %v\n%s", err, out.String())
+	if err := RemoveAgent(context.Background(), Out{W: &out}, a); err != nil || !strings.Contains(out.String(), "loses PostToolUse and Stop") {
+		t.Fatalf("rm: %v\n%s", err, out.String())
+	}
+	b, _ = os.ReadFile(settings)
+	if strings.Contains(string(b), "checkpoint") || !strings.Contains(string(b), `"guard.sh 2>&1"`) || !strings.HasPrefix(string(b), `{"model": "opus",`) {
+		t.Errorf("after rm:\n%s", b)
+	}
+	if c, _ := os.ReadFile(calls); !strings.Contains(string(c), "unregister --name scout") {
+		t.Errorf("c4-agent was asked:\n%s", c)
 	}
 }
 
-// Declining the hook keeps the member, leaves settings.json as it was, and
-// says how to install it later; an agent no session names is refused with
-// the flag that names one.
-func TestAddAgentAsksBeforeTheHook(t *testing.T) {
-	session := "1c6f8d63-9b70-4e1f-8c2d-4a3b5f7e9d21"
-	bin, _ := fakeAgent(t, session)
-	cd := t.TempDir()
-	a := AgentsArgs{Name: "lab", Session: session, ConfigDir: cd, AgentBin: bin}
+// A second add repairs a hook that is missing; rm leaves the hooks while
+// another member runs in the same folder.
+func TestAddAgentRepairsAndRmKeepsSharedHooks(t *testing.T) {
+	s1, s2 := "1c6f8d63-9b70-4e1f-8c2d-4a3b5f7e9d21", "2d7a9e74-ac81-4f2a-9d3e-5b4c6a8f0e32"
+	cd, folder := t.TempDir(), t.TempDir()
+	bin, _ := fakeAgent(t, cd, folder, s1, s2)
+	settings := filepath.Join(folder, ".claude", "settings.local.json")
+	os.MkdirAll(filepath.Dir(settings), 0o755)
+	os.WriteFile(settings, []byte(`{"hooks": {"Stop": [{"hooks": [{"type": "command", "command": "`+bin+` checkpoint --hook"}]}]}}`), 0o644)
 	var out bytes.Buffer
-	err := AddAgent(context.Background(), Out{W: &out, In: strings.NewReader("n\n")}, a)
-	if err == nil || !strings.Contains(err.Error(), "c4 farm agents add again installs it") || !strings.Contains(out.String(), "Install it? [Y/n]") {
-		t.Fatalf("%v\n%s", err, out.String())
+	if err := AddAgent(context.Background(), Out{W: &out}, AgentsArgs{Name: "scout", ConfigDir: cd, Yes: true, AgentBin: bin}); err != nil ||
+		!strings.Contains(out.String(), "gains PostToolUse,") {
+		t.Fatalf("repair: %v\n%s", err, out.String())
 	}
-	if _, err := os.Stat(filepath.Join(cd, "settings.json")); !os.IsNotExist(err) {
-		t.Error("settings.json was written after no")
+	if b, _ := os.ReadFile(settings); strings.Count(string(b), "checkpoint --hook") != 2 {
+		t.Errorf("repaired:\n%s", b)
 	}
-	a.Session = ""
+	if err := AddAgent(context.Background(), Out{W: &out}, AgentsArgs{Name: "lab", Session: s2, ConfigDir: cd, Yes: true, AgentBin: bin}); err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	if err := RemoveAgent(context.Background(), Out{W: &out}, AgentsArgs{Name: "scout", ConfigDir: cd, Yes: true, AgentBin: bin}); err != nil ||
+		!strings.Contains(out.String(), "stay in "+settings+": lab runs there too") {
+		t.Fatalf("rm: %v\n%s", err, out.String())
+	}
+	if b, _ := os.ReadFile(settings); strings.Count(string(b), "checkpoint --hook") != 2 {
+		t.Errorf("shared hooks went:\n%s", b)
+	}
+}
+
+// add asks only a person at a terminal, and no is the default: an empty
+// line or the end of input is no. Without a terminal and without --yes it
+// refuses. Either way, nothing is registered or written before a yes.
+func TestAddAgentAsksOnlyAtATerminal(t *testing.T) {
+	session := "3e8b0f85-bd92-4a3b-8e4f-6c5d7b9a1f43"
+	cd, folder := t.TempDir(), t.TempDir()
+	bin, calls := fakeAgent(t, cd, folder, session)
+	settings := filepath.Join(folder, ".claude", "settings.local.json")
+	unchanged := func(when string) {
+		t.Helper()
+		if c, _ := os.ReadFile(calls); strings.Contains(string(c), "register") {
+			t.Errorf("%s: registered before a yes", when)
+		}
+		if _, err := os.Stat(settings); !os.IsNotExist(err) {
+			t.Errorf("%s: settings written before a yes", when)
+		}
+	}
+	a := AgentsArgs{Name: "scout", ConfigDir: cd, AgentBin: bin}
+	var out bytes.Buffer
+	if err := AddAgent(context.Background(), Out{W: &out, In: strings.NewReader("y\n")}, a); err == nil ||
+		!strings.Contains(err.Error(), "no one is at a terminal to answer; run it at one, or pass --yes") {
+		t.Fatalf("no terminal: %v", err)
+	}
+	unchanged("no terminal")
+	a.Terminal = true
+	for _, in := range []string{"", "\n", "n\n"} {
+		out.Reset()
+		if err := AddAgent(context.Background(), Out{W: &out, In: strings.NewReader(in)}, a); err == nil ||
+			!strings.Contains(err.Error(), "nothing was changed") || !strings.Contains(out.String(), "and install them? [y/N]") {
+			t.Fatalf("answer %q: %v\n%s", in, err, out.String())
+		}
+		unchanged("answer " + strings.TrimSpace(in))
+	}
+	if err := AddAgent(context.Background(), Out{W: &out, In: strings.NewReader("y\n")}, a); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(settings); err != nil {
+		t.Error("yes wrote no settings")
+	}
+	a.Name, a.Session = "nobody", ""
 	if err := AddAgent(context.Background(), Out{W: &out}, a); err == nil || !strings.Contains(err.Error(), "--session ID") {
 		t.Errorf("no session: %v", err)
 	}

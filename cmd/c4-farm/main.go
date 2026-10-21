@@ -74,7 +74,8 @@ Trackers
 Agents
   agent power              offer this machine's agent slots by its battery: stop below 25%, resume at 90% (--once to read it now)
   agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all, --open for the HUD)
-  agents add NAME          make a Claude Code session an agent the farm can run, and install its Stop hook
+  agents add NAME          make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first)
+  agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
   mcp                      serve the farm's tools to an agent over stdio
 
@@ -732,7 +733,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 	case "agents":
 		session := fs.String("session", "", "with add: the Claude Code session (default the newest whose transcript names the agent)")
 		configDir := fs.String("config-dir", "", "with add: the Claude Code config dir (default $CLAUDE_CONFIG_DIR, else ~/.claude)")
-		yes := fs.Bool("yes", false, "with add: install the Stop hook without asking")
+		folder := fs.String("folder", "", "with add or rm: the member's folder, whose .claude/settings.local.json gets the hooks (default the session's working folder)")
+		yes := fs.Bool("yes", false, "with add or rm: change the settings without asking (needed where no one is at a terminal)")
 		all := fs.Bool("all", false, "with no subcommand: finished and stopped sessions too")
 		openHUD := fs.Bool("open", false, "with no subcommand: show them in the HUD, served on this machine, read-only")
 		port := fs.Int("port", 0, "with --open: the port on 127.0.0.1 (default any free one)")
@@ -753,12 +755,16 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			})
 		case len(pos) == 0:
 			return farmcli.Sessions(ctx, o, farmcli.SessionsArgs{All: *all})
-		case len(pos) == 2 && pos[0] == "add":
-			return farmcli.AddAgent(ctx, o, farmcli.AgentsArgs{Name: pos[1], Session: *session, ConfigDir: *configDir, Yes: *yes})
+		case len(pos) == 2 && (pos[0] == "add" || pos[0] == "rm"):
+			a := farmcli.AgentsArgs{Name: pos[1], Session: *session, ConfigDir: *configDir, Folder: *folder, Yes: *yes, Terminal: isTerminal(stdin)}
+			if pos[0] == "rm" {
+				return farmcli.RemoveAgent(ctx, o, a)
+			}
+			return farmcli.AddAgent(ctx, o, a)
 		case len(pos) == 1 && pos[0] == "ls":
 			return farmcli.ListAgents(ctx, o, farmcli.AgentsArgs{})
 		}
-		return errors.New("usage: c4 farm agents add NAME [--session ID] [--config-dir DIR] [--yes] | agents ls")
+		return errors.New("usage: c4 farm agents add NAME [--session ID] [--folder DIR] [--config-dir DIR] [--yes] | agents rm NAME | agents ls")
 
 	case "machine":
 		return fmt.Errorf("%s is not in this build yet; `c4 farm up` makes a local farm, and `c4 farm login HUD-URL` signs in to a running one", cmd)
@@ -771,6 +777,17 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 	}
 	sort.Strings(names)
 	return fmt.Errorf("no command %q; try: %s", cmd, strings.Join(names, ", "))
+}
+
+// isTerminal says r is a terminal a person types at, not a pipe, a file or
+// an agent's tool.
+func isTerminal(r io.Reader) bool {
+	f, ok := r.(*os.File)
+	if !ok {
+		return false
+	}
+	fi, err := f.Stat()
+	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
 // openURL opens a link in the default browser.
