@@ -13,14 +13,15 @@ import (
 // and unanswered; flags answer it in scripts; with no terminal nothing is
 // asked or recorded, and the install is minimal.
 func TestChooseAsksOnceAtATerminal(t *testing.T) {
-	found := []Detected{{Name: Claude, Found: true}}
+	found := []Detected{{Name: Claude, Found: true, Question: IntegrateQuestion(true)}}
 	var out bytes.Buffer
 	cfg := &Config{}
 	if on, err := Choose(cfg, found, "", false, false, Out{W: &out, In: strings.NewReader("y\n")}); err != nil || len(on) != 0 || len(cfg.Integrations) != 0 {
 		t.Fatalf("no terminal: %v %v %v", on, err, cfg.Integrations)
 	}
 	if on, err := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("\n")}); err != nil || len(on) != 1 ||
-		!strings.Contains(out.String(), IntegrateQuestion+" [Y/n]") {
+		!strings.Contains(out.String(), ".claude.json), and lets c4 farm agents add save") || !strings.Contains(out.String(), "a background service (") ||
+		!strings.HasSuffix(out.String(), "c4 farm integrate claude off takes it all out. [Y/n] ") {
 		t.Fatalf("terminal, enter: %v %v\n%s", on, err, out.String())
 	}
 	out.Reset()
@@ -32,6 +33,9 @@ func TestChooseAsksOnceAtATerminal(t *testing.T) {
 	}
 	if on, _ := Choose(cfg, found, "claude", false, false, Out{W: &out}); len(on) != 1 {
 		t.Errorf("--integrate=claude: %v", on)
+	}
+	if q := IntegrateQuestion(false); strings.Contains(q, "background service") {
+		t.Errorf("a login's question names a service: %s", q)
 	}
 	if _, err := Choose(cfg, found, "blender", false, false, Out{W: &out}); err == nil || !strings.Contains(err.Error(), "c4 farm integrations lists them") {
 		t.Errorf("unknown: %v", err)
@@ -66,7 +70,7 @@ func TestIntegrationOnAndOff(t *testing.T) {
 	in := Integration{FarmBin: "/usr/local/bin/c4-farm", ClaudeBin: claude, AgentBin: agent, ConfigDir: cd, Service: svc,
 		Runner: func(context.Context, Out) error { ran = true; return nil }}
 	out.Reset()
-	if err := in.On(context.Background(), Out{W: &out}); err != nil || !ran || !strings.Contains(out.String(), "has the farm's tools") {
+	if err := in.On(context.Background(), Out{W: &out}); err != nil || !ran || !strings.Contains(out.String(), "has the farm's tools (c4-farm in ") {
 		t.Fatalf("on: %v %v\n%s", err, ran, out.String())
 	}
 	if c, _ := os.ReadFile(calls); !strings.Contains(string(c), "mcp add --scope user c4-farm -- /usr/local/bin/c4-farm mcp") {

@@ -161,7 +161,8 @@ type AgentService struct {
 	Ctl func(ctx context.Context, name string, args ...string) error
 }
 
-func (s *AgentService) fill() error {
+// fillPaths settles the OS and home folder the service's files are under.
+func (s *AgentService) fillPaths() error {
 	if s.OS == "" {
 		s.OS = runtime.GOOS
 	}
@@ -174,6 +175,13 @@ func (s *AgentService) fill() error {
 			return err
 		}
 		s.Home = h
+	}
+	return nil
+}
+
+func (s *AgentService) fill() error {
+	if err := s.fillPaths(); err != nil {
+		return err
 	}
 	if s.FarmBin == "" {
 		exe, err := os.Executable()

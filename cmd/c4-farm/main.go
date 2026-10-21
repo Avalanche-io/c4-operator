@@ -229,7 +229,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		cfg.Farms[n], cfg.Current = f, n
-		on, err := farmcli.Choose(cfg, farmcli.Detect(), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
+		on, err := farmcli.Choose(cfg, farmcli.Detect(false), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
 		if err != nil {
 			return err
 		}
@@ -242,7 +242,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			// and no runner (that is the farm admin's to enroll)
 			(&farmcli.Integration{}).On(ctx, farmcli.Out{W: stdout})
 		}
-		fmt.Fprintf(stdout, "%s\n", farmcli.IntegrateLine(cfg))
+		if l := farmcli.IntegrateLine(cfg); l != "" {
+			fmt.Fprintf(stdout, "%s\n", l)
+		}
 		return nil
 
 	case "whoami":
@@ -666,7 +668,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner}
 		cfg.Current = localfarm.Name
-		on, err := farmcli.Choose(cfg, farmcli.Detect(), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
+		on, err := farmcli.Choose(cfg, farmcli.Detect(true), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
 		if err != nil {
 			return err
 		}
@@ -684,7 +686,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			in := farmcli.Integration{Runner: localRunner(o.Owner, stdin, stdout)}
 			in.On(ctx, farmcli.Out{W: stdout})
 		}
-		fmt.Fprintf(stdout, "%s\n", farmcli.IntegrateLine(cfg))
+		if l := farmcli.IntegrateLine(cfg); l != "" {
+			fmt.Fprintf(stdout, "%s\n", l)
+		}
 		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)\n")
 		if o.Tracker || localfarm.HasTracker(ctx) {
@@ -797,7 +801,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
-		farmcli.Integrations(cfg, farmcli.Detect(), farmcli.Out{W: stdout})
+		farmcli.Integrations(cfg, farmcli.Detect(false), farmcli.Out{W: stdout})
 		return nil
 
 	case "integrate":
@@ -832,7 +836,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := cfg.Save(); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "%s\n", farmcli.IntegrateLine(cfg))
+		if l := farmcli.IntegrateLine(cfg); l != "" {
+			fmt.Fprintf(stdout, "%s\n", l)
+		}
 		return nil
 
 	case "agents":

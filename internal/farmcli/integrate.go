@@ -12,10 +12,43 @@ import (
 )
 
 // IntegrateQuestion is asked once, on the first c4 farm up or login at a
-// terminal: whether Claude Code gets the farm's tools and its agents are
-// shown and run on the farm. It stays true as the farm takes on running
-// subagents.
-const IntegrateQuestion = "Let Claude Code show and run its agents on this farm? It adds the farm's tools to Claude Code, saves your agents' turns, and makes this machine one of their runners."
+// terminal, before anything is changed: it names what yes changes on this
+// machine, where, and how each comes out. runner says this machine would
+// also run the farm's agents (a local farm's up).
+func IntegrateQuestion(runner bool) string {
+	q := "Connect Claude Code to this farm? It adds the farm's tools to Claude Code (" + tildePath(mcpConfig()) +
+		"), and lets c4 farm agents add save an agent's turns with a hook in that agent's own folder, without asking again"
+	if runner {
+		q += ", and runs a background service (" + tildePath(serviceFile()) + ") so this machine can run your agents"
+	}
+	return q + ". c4 farm integrate claude off takes it all out."
+}
+
+// mcpConfig is the file claude mcp add --scope user writes.
+func mcpConfig() string {
+	if d := os.Getenv("CLAUDE_CONFIG_DIR"); d != "" {
+		return filepath.Join(d, ".claude.json")
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude.json")
+}
+
+// serviceFile is where the agent service is defined on this machine.
+func serviceFile() string {
+	s := &AgentService{}
+	if s.fillPaths() != nil {
+		return AgentLabel
+	}
+	return s.path()
+}
+
+// tildePath writes a path under the home folder from ~.
+func tildePath(p string) string {
+	if home, err := os.UserHomeDir(); err == nil && strings.HasPrefix(p, home+string(filepath.Separator)) {
+		return "~" + p[len(home):]
+	}
+	return p
+}
 
 // mcpName is the farm's MCP server in Claude Code.
 const mcpName = "c4-farm"
@@ -74,9 +107,9 @@ func (in *Integration) On(ctx context.Context, o Out) error {
 		out, err := exec.CommandContext(ctx, in.ClaudeBin, "mcp", "add", "--scope", "user", mcpName, "--", in.FarmBin, "mcp").CombinedOutput()
 		switch {
 		case err == nil:
-			o.printf("claude    has the farm's tools (MCP server %s)\n", mcpName)
+			o.printf("claude    has the farm's tools (%s in %s); c4 farm integrate claude off takes it all out\n", mcpName, tildePath(mcpConfig()))
 		case strings.Contains(string(out), "already exists"):
-			o.printf("claude    has the farm's tools already (MCP server %s)\n", mcpName)
+			o.printf("claude    has the farm's tools (%s in %s, already); c4 farm integrate claude off takes it all out\n", mcpName, tildePath(mcpConfig()))
 		default:
 			o.printf("claude    has no farm tools yet: claude mcp add said %s\n", firstLine(string(out), err))
 		}
@@ -162,13 +195,18 @@ const Claude = "claude"
 type Detected struct {
 	Name, Title, Where string
 	Found              bool
+	// Question is what the person is asked before it is added, naming
+	// what it changes and where.
+	Question string
 }
 
 // Detect lists the integrations this machine could take. Today that is
 // Claude Code; each DCC's (integrations/dcc) joins as it learns to install
 // and remove itself.
-func Detect() []Detected {
-	d := Detected{Name: Claude, Title: "Claude Code: the farm's tools, your agents' turns saved and shown, this machine as their runner"}
+// runner says this machine would also run the farm's agents.
+func Detect(runner bool) []Detected {
+	d := Detected{Name: Claude, Title: "Claude Code: the farm's tools, your agents' turns saved and shown, this machine as their runner",
+		Question: IntegrateQuestion(runner)}
 	if p, err := exec.LookPath("claude"); err == nil {
 		d.Found, d.Where = true, p
 	} else {
@@ -210,9 +248,9 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 			if _, answered := cfg.Integrations[d.Name]; answered || !d.Found {
 				continue
 			}
-			q := d.Title + "?"
-			if d.Name == Claude {
-				q = IntegrateQuestion
+			q := d.Question
+			if q == "" {
+				q = d.Title + "?"
 			}
 			cfg.Integrations[d.Name] = o.confirm(q)
 		}
@@ -226,12 +264,14 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 	return on, nil
 }
 
-// IntegrateLine is what up and login say of the Claude Code integration.
+// IntegrateLine is what up and login say of the Claude Code integration
+// when it added nothing: off, or not set. On, the lines of what it did
+// say it, and this is empty.
 func IntegrateLine(cfg *Config) string {
 	on, answered := cfg.Integrations[Claude]
 	switch {
 	case on:
-		return "integration claude on: Claude Code has the farm's tools, and agents add saves an agent's turns without asking again (c4 farm integrate claude off takes it all out)"
+		return "" // the claude and agents lines say what it did
 	case answered:
 		return "integration claude off: nothing added to Claude Code or this machine; Claude Code can drive the farm from its docs (c4 farm integrate claude on adds it)"
 	}
