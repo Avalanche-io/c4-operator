@@ -126,8 +126,8 @@ func TestLeaseNeedsTheGrantTheJobWasSubmittedUnder(t *testing.T) {
 		if n := len(unitPods(t, ns, "github-7")); n != 0 {
 			t.Fatalf("released %d units %s", n, why)
 		}
-		if ok, reason := q.leaseReady(ctx, j, pool, *now); ok || reason == "" {
-			t.Fatalf("%s: lease ready %v %q", why, ok, reason)
+		if reason := q.grantServes(ctx, j, pool, *now); reason == "" {
+			t.Fatalf("%s: the grant serves", why)
 		}
 	}
 	held("with no grant")
@@ -156,5 +156,38 @@ func TestLeaseNeedsTheGrantTheJobWasSubmittedUnder(t *testing.T) {
 	tick(t, q)
 	if pods := unitPods(t, ns, "github-7"); len(pods) != 1 || pods[0].Annotations[c4v1.AnnotationOwner] != "noor" {
 		t.Fatalf("under the grant: %+v", pods)
+	}
+}
+
+// A job submitted under a person's grant releases no unit once the grant
+// is revoked, though it holds no credential lease: the grant bounds the
+// job, not only the lease.
+func TestGrantHoldsALeaselessJob(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	ctx := context.Background()
+	pool := "cpu-" + ns
+	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: c4v1.SubmitGrantName("github", "joshua")},
+		Spec: c4v1.SubmitGrantSpec{Person: "joshua", Tracker: "github", Until: metav1.NewTime(now.Add(time.Hour)),
+			Revoked: &c4v1.GrantRevocation{By: "joshua", At: metav1.NewTime(*now)}}}
+	if err := k8s.Create(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	j := job(ns, "github-8", "render", pool, map[string]string{"frames": "1-1"}, now.Add(time.Hour))
+	j.Annotations = map[string]string{c4v1.AnnotationOwner: "joshua", c4v1.AnnotationGrant: "c4grantrecord"}
+	j.Labels = map[string]string{c4v1.LabelTracker: "github"}
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if n := len(unitPods(t, ns, "github-8")); n != 0 {
+		t.Fatalf("released %d units under a revoked grant", n)
+	}
+	g.Spec.Revoked = nil
+	if err := k8s.Update(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if n := len(unitPods(t, ns, "github-8")); n != 1 {
+		t.Fatalf("released %d units under the grant, want 1", n)
 	}
 }

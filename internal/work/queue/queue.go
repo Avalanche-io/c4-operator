@@ -1592,6 +1592,13 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			q.Log.V(1).Info("waiting for a credential lease", "job", key, "unit", idx, "pool", p.spec.Name, "why", why)
 			continue
 		}
+		// A job a tracker submitted for a person, or a unit's job under
+		// it, runs only while the person's grant serves it, leases or
+		// not; a unit already running finishes its attempt.
+		if why := q.grantServes(ctx, v.job, p.spec.Name, now); why != "" {
+			q.Log.V(1).Info("waiting: the job's grant does not serve", "job", key, "unit", idx, "pool", p.spec.Name, "why", why)
+			continue
+		}
 		tools, ok, why := q.toolsReady(ctx, v, idx)
 		if err, checked := q.unitsSealed[v.job.Namespace]; !checked || err != nil {
 			// Never released into a namespace whose units would have

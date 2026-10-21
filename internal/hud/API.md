@@ -1686,9 +1686,10 @@ grant: the person, or a project admin, revokes it").
 A grant is `{ namespace, name, project, person, tracker, pools?, classes?,
 until, record, revoked?: { by, at, record }, active, why? }`; `why` says
 why it does not serve now. The work queue checks it again each time it
-releases a unit that mounts the person's credential lease: a unit running
-when a grant is revoked or ends finishes its attempt, and the next is not
-released.
+releases a unit of a job made under it (or of a unit's job under that
+job), whether or not the unit mounts the person's credential lease: a unit
+running when a grant is revoked or ends finishes its attempt, and the next
+is not released.
 
 A tracker is `{ namespace, name, project, kind, site, syncs?, ready, why?,
 granted, mine? }`, in words a person reads: `site` is what it connects to
