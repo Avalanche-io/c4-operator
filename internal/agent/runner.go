@@ -420,6 +420,9 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 				if err := r.fetchReply(ctx, p, u); err != nil {
 					return err
 				}
+				if _, _, err := ensureBranch(ctx, p); err != nil {
+					return r.finish(ctx, p, corev1.PodFailed, "NoBranch", "the block's own branch: "+err.Error(), 1)
+				}
 				prompt = reworkPrompt(p, u)
 			}
 			res, err := r.Harness.Resume(ctx, name, prompt)
@@ -636,6 +639,9 @@ func (r *Runner) running(ctx context.Context, p *corev1.Pod, m *Member) error {
 }
 
 func (r *Runner) finish(ctx context.Context, p *corev1.Pod, phase corev1.PodPhase, reason, msg string, code int32) error {
+	if isBlock(p) {
+		r.recordBranch(ctx, p, UnitDirsAt(r.unitRoot(p)), phase == corev1.PodSucceeded && reason == "Completed")
+	}
 	r.recordEnd(ctx, p)
 	now := metav1.NewTime(r.now())
 	started := now

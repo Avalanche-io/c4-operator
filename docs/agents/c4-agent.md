@@ -251,6 +251,21 @@ unit directory> --ask <id> --answer ...`). The messages are then marked
 read, so it is woken once for them. A member mid-turn, or with background
 work open, is left alone; it is woken at its next idle turn boundary.
 
+**A branch per unit.** On a host, a block works on a branch of its own: a
+git worktree of its job's repository (`C4_BLOCK_REPO`, the folder the work
+was submitted from) at `.worktrees/c4-<job>-<unit>`, on `c4/<job>/<unit>`,
+made from the repository's HEAD at the unit's first attempt and kept for its
+later ones. The runner adds `/.worktrees/` to the repository's own exclude
+file (`.git/info/exclude`, never committed), so the developer's `git
+status` stays as it was. The block is told the branch is its output; its
+file tools get the worktree (`--add-dir`). At the end of each attempt the
+runner records the branch with the unit (`.c4/branch.json`) and on its pod
+(`c4.avalanche.io/output-branch`): the repository, the branch, its base and
+head, and how many commits. When the unit is done, the worktree's folder is
+removed if nothing is left uncommitted there; the branch stays, already in
+the developer's repository to switch to, merge or drop. A folder that is not
+a git repository gets no branch: the block works in it as it is.
+
 **A stop lands within a step, not a turn.** The farm stops a member only at
 a turn's end, and a turn can run for most of an hour. So the same hook also
 runs after every tool call (`PostToolUse`): when the farm has asked the

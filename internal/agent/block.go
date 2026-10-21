@@ -264,7 +264,9 @@ func reworkPrompt(p *corev1.Pod, u UnitDirs) string {
 func whereThingsAre(p *corev1.Pod, u UnitDirs) string {
 	var b strings.Builder
 	b.WriteString("Where things are:\n")
-	if repo := podEnv(p, EnvBlockRepo); repo != "" {
+	if br, ok := blockBranch(p); ok && isDir(br.Dir) {
+		fmt.Fprintf(&b, "- Your own branch of the project's repository, %s, checked out at %s. Do your work there and commit it on that branch: your commits are your output, and the branch is how your work comes back.\n", br.Branch, br.Dir)
+	} else if repo := podEnv(p, EnvBlockRepo); repo != "" {
 		fmt.Fprintf(&b, "- The project's repository: %s. Do your work there.\n", repo)
 	}
 	b.WriteString("- Run each shell command on its own: no cd, no &&, ; or pipes. Use absolute paths, git -C <dir> and go -C <dir>; only the commands you were allowed run, and a compound one is refused.\n")
@@ -545,6 +547,14 @@ func (r *Runner) startBlock(ctx context.Context, p *corev1.Pod, name string) err
 	flags, err := r.blockFlags(p, name)
 	if err != nil {
 		return err
+	}
+	b, ok, err := ensureBranch(ctx, p)
+	if err != nil {
+		return r.finish(ctx, p, corev1.PodFailed, "NoBranch", "the block's own branch: "+err.Error(), 1)
+	}
+	if ok {
+		flags = append(flags, "--add-dir", b.Dir)
+		r.logf("%s: works on branch %s in %s", name, b.Branch, b.Dir)
 	}
 	m, err := r.Harness.Start(ctx, StartOptions{Name: name, Cwd: r.BlocksCwd, Flags: flags, Prompt: blockPrompt(p, u)})
 	if err != nil {
