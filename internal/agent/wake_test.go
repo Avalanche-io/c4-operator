@@ -32,7 +32,7 @@ func TestHostWakesAnIdleMember(t *testing.T) {
 		t.Fatal(err)
 	}
 	msgs := []SteerMessage{
-		{Seq: 1, Actor: "joshua", Text: "start round 7: the bundle endpoint"},
+		{Seq: 1, Actor: "noor", Text: "start round 7: the bundle endpoint"},
 		{Seq: 2, Actor: "unit:c4-sched", Text: "which pool serves agents on this machine?", Ask: &AskRef{ID: "4#2", From: "unit:c4-sched"}},
 		{Seq: 3, Text: "use the team pool", Answer: &AskRef{ID: "0#1", From: "unit:income"}},
 	}
@@ -59,7 +59,7 @@ func TestHostWakesAnIdleMember(t *testing.T) {
 		t.Fatalf("not woken: %v %v, %d stops", woke, err, len(e.fake.stops))
 	}
 	prompt := e.fake.resumes[len(e.fake.resumes)-1].prompt
-	for _, want := range []string{"from joshua: start round 7", "a question from unit:c4-sched (4#2): which pool",
+	for _, want := range []string{"from noor: start round 7", "a question from unit:c4-sched (4#2): which pool",
 		"the answer to your question 0#1, from unit:income: use the team pool", "c4-unit answer --dir " + u.Out + " --ask <its id>"} {
 		if !strings.Contains(prompt, want) {
 			t.Errorf("the prompt lacks %q:\n%s", want, prompt)

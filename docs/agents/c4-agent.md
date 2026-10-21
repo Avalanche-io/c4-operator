@@ -423,7 +423,7 @@ that job's ownership, using its holder's own sign-in on this machine (a
 `signIn` credential, no lease), on `<farm>/runner/<node>` (`--farm`). The
 holder is the machine's, never the job's: `--holder`, else the runner's one
 `--owner`; with several owners and no `--holder`, the chain says it cannot
-tell. So a runner shared by two owners shows "for dana, using joshua's
+tell. So a runner shared by two owners shows "for dana, using noor's
 sign-in", which is the fact the chain is there to show. Until
 deployments are bound, its `gap` says the runner has no binding. The record
 goes to the project's store (`--store`) and its ID onto the pod

@@ -140,7 +140,7 @@ func TestBundleOnHostRunner(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	runner := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Owners: []string{"joshua"}, Slots: 2, YieldTimeout: time.Second, Logf: t.Logf}
+	runner := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Owners: []string{"noor"}, Slots: 2, YieldTimeout: time.Second, Logf: t.Logf}
 	t.Cleanup(func() {
 		k8s.Delete(ctx, pool)
 		k8s.Delete(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: host}})
@@ -151,7 +151,7 @@ func TestBundleOnHostRunner(t *testing.T) {
 		Now: func() time.Time { return now }, CaptureWait: time.Minute}
 	rec := &controller.AgentBundleReconciler{Client: k8s}
 
-	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "team", Annotations: joshuas}, Spec: c4v1.AgentBundleSpec{
+	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "team", Annotations: noors}, Spec: c4v1.AgentBundleSpec{
 		MaxRunning: 2, Pools: []string{pool.Name},
 		Deadline: &metav1.Time{Time: now.Add(12 * time.Hour)}}}
 	for _, m := range members {
@@ -279,7 +279,7 @@ func TestBundleOnHostRunner(t *testing.T) {
 	fk.active = map[string]bool{}
 	before := len(fk.resumes)
 	fk.mu.Unlock()
-	fresh := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Owners: []string{"joshua"}, Slots: 2, YieldTimeout: time.Second, Logf: t.Logf}
+	fresh := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Owners: []string{"noor"}, Slots: 2, YieldTimeout: time.Second, Logf: t.Logf}
 	round(fresh)
 	if n := fk.running(); n != 2 {
 		t.Fatalf("after the restart: %d sessions running, want 2", n)
@@ -400,16 +400,16 @@ func TestPowerCapShedsAtTurnBoundary(t *testing.T) {
 	}
 	now := time.Date(2026, 10, 18, 5, 50, 0, 0, time.UTC) // 22:50 PDT
 	slots, reason := 2, ""
-	runner := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Owners: []string{"joshua"}, Slots: 2, YieldTimeout: time.Second,
+	runner := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Owners: []string{"noor"}, Slots: 2, YieldTimeout: time.Second,
 		Capacity: func() (int, string) { return slots, reason }, RaiseAfter: time.Minute,
 		Now: func() time.Time { return now }, Logf: t.Logf}
 	q := &queue.Queue{Client: k8s, Policy: sched.Decide, Cfg: sched.DefaultConfig(), Log: zap.New(zap.WriteTo(os.Stderr)),
 		Now: func() time.Time { return now }, CaptureWait: time.Minute}
 	rec := &controller.AgentBundleReconciler{Client: k8s, Now: func() time.Time { return now }}
-	push := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "push", Annotations: joshuas}, Spec: c4v1.AgentBundleSpec{
+	push := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "push", Annotations: noors}, Spec: c4v1.AgentBundleSpec{
 		Pools: []string{pool.Name}, Members: []c4v1.AgentMemberSpec{{Name: "tutorials"}},
 		Deadline: &metav1.Time{Time: now.Add(11 * time.Hour)}}} // Sunday 10:00 PDT
-	research := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "research", Annotations: joshuas}, Spec: c4v1.AgentBundleSpec{
+	research := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "research", Annotations: noors}, Spec: c4v1.AgentBundleSpec{
 		Pools: []string{pool.Name}, Members: []c4v1.AgentMemberSpec{{Name: "provenance"}}}}
 	for _, b := range []*c4v1.AgentBundle{push, research} {
 		if err := k8s.Create(ctx, b); err != nil {
@@ -469,6 +469,6 @@ func TestPowerCapShedsAtTurnBoundary(t *testing.T) {
 	}
 }
 
-// joshuas marks a bundle as joshua's, as the owner webhook would when he
-// applies it (envtest runs no webhooks); the runners here run his jobs.
-var joshuas = map[string]string{c4v1.AnnotationOwner: "joshua"}
+// noors marks a bundle as noor's, as the owner webhook would when she
+// applies it (envtest runs no webhooks); the runners here run her jobs.
+var noors = map[string]string{c4v1.AnnotationOwner: "noor"}

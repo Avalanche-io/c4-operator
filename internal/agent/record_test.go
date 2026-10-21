@@ -43,7 +43,7 @@ func TestHostRunnerSignsTaskRecords(t *testing.T) {
 	p.Annotations[c4v1.AnnotationOutputTree] = view.String()
 	p.Annotations[c4v1.AnnotationOutputCheckpoint] = m.Session + "#4:" + head.String()
 	job := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "team", UID: "5c1d7e00-0000-4000-8000-000000000001",
-		Annotations: map[string]string{c4v1.AnnotationOwner: "joshua"}}}
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor"}}}
 	yes := true
 	p.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: "team", UID: job.UID, Controller: &yes}}
 	docs := &fakeDocs{}
@@ -51,7 +51,7 @@ func TestHostRunnerSignsTaskRecords(t *testing.T) {
 	if err := c.Create(ctx, job); err != nil {
 		t.Fatal(err)
 	}
-	r.Signer, r.Docs, r.DocsProject, r.Version, r.Farm, r.Owners = sg, docs, "saltmarsh", "test", "saltmarsh", []string{"joshua"}
+	r.Signer, r.Docs, r.DocsProject, r.Version, r.Farm, r.Owners = sg, docs, "saltmarsh", "test", "saltmarsh", []string{"noor"}
 	if err := r.finish(ctx, getPod(t, c), corev1.PodSucceeded, "Completed", "done", 0); err != nil {
 		t.Fatal(err)
 	}
@@ -78,8 +78,8 @@ func TestHostRunnerSignsTaskRecords(t *testing.T) {
 		t.Fatalf("predicate %+v", pred)
 	}
 	ch := pred.Chain
-	if ch == nil || ch.Act != "build" || ch.By.Unit != "show-a/team@5c1d7e/3" || ch.By.Agent != "lead" || ch.For.Party != "joshua" ||
-		len(ch.Using) != 1 || ch.Using[0].SignIn != "saltmarsh/runner/host" || ch.Using[0].Holder != "joshua" ||
+	if ch == nil || ch.Act != "build" || ch.By.Unit != "show-a/team@5c1d7e/3" || ch.By.Agent != "lead" || ch.For.Party != "noor" ||
+		len(ch.Using) != 1 || ch.Using[0].SignIn != "saltmarsh/runner/host" || ch.Using[0].Holder != "noor" ||
 		len(ch.On) != 1 || ch.On[0].Deployment != "saltmarsh/runner/host" || ch.Accountable || ch.Gap != "deployment saltmarsh/runner/host has no binding" {
 		t.Fatalf("chain %+v", ch)
 	}
@@ -98,7 +98,7 @@ func TestHostRunnerSignsTaskRecords(t *testing.T) {
 }
 
 // The holder is the runner's, never the job's: a runner shared by two
-// owners shows dana's job using joshua's sign-in, the fact the chain exists
+// owners shows dana's job using noor's sign-in, the fact the chain exists
 // to show. With several owners and no --holder, the chain says it cannot
 // tell. Every chain, the fallbacks too, parses as chain/1.
 func TestChainHolderIsTheRunners(t *testing.T) {
@@ -125,7 +125,7 @@ func TestChainHolderIsTheRunners(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	r.Farm, r.Node, r.Owners, r.Holder = "saltmarsh", "laptop-1", []string{"joshua", "dana"}, "joshua"
+	r.Farm, r.Node, r.Owners, r.Holder = "saltmarsh", "laptop-1", []string{"noor", "dana"}, "noor"
 	valid := func(name string, ch *schema.Chain) {
 		t.Helper()
 		b, _ := json.Marshal(ch)
@@ -135,7 +135,7 @@ func TestChainHolderIsTheRunners(t *testing.T) {
 	}
 
 	ch := r.chainOf(ctx, podOf(danas))
-	if ch.For.Party != "dana" || ch.Using[0].Holder != "joshua" || ch.On[0].Owner != "joshua" {
+	if ch.For.Party != "dana" || ch.Using[0].Holder != "noor" || ch.On[0].Owner != "noor" {
 		t.Errorf("shared runner: %+v", ch)
 	}
 	valid("shared runner", ch)
@@ -144,8 +144,8 @@ func TestChainHolderIsTheRunners(t *testing.T) {
 	if ch := r.chainOf(ctx, podOf(danas)); ch.Using[0].Holder != "" || ch.Using[0].HolderSubject != "unknown" {
 		t.Errorf("two owners, no --holder: %+v", ch.Using)
 	}
-	r.Owners = []string{"joshua"}
-	if ch := r.chainOf(ctx, podOf(danas)); ch.Using[0].Holder != "joshua" {
+	r.Owners = []string{"noor"}
+	if ch := r.chainOf(ctx, podOf(danas)); ch.Using[0].Holder != "noor" {
 		t.Errorf("one owner is the holder: %+v", ch.Using)
 	}
 

@@ -110,8 +110,8 @@ func TestAgentIssuesRenewsRevokes(t *testing.T) {
 	src := &memSource{doc: signIn("sk-ant-oat01-first", time.Now().Add(time.Hour))}
 	var mu sync.Mutex
 	var logs []string
-	a := &Agent{Client: c, Namespace: "practice", Name: "joshua-claude", Source: src, Retry: 50 * time.Millisecond,
-		Spec: c4v1.CredentialLeaseSpec{Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"kubernetes-admin"}},
+	a := &Agent{Client: c, Namespace: "practice", Name: "noor-claude", Source: src, Retry: 50 * time.Millisecond,
+		Spec: c4v1.CredentialLeaseSpec{Account: "anthropic-max", Holder: "noor", BoundTo: c4v1.LeaseBinding{Owners: []string{"kubernetes-admin"}},
 			Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"blocks-kind"}},
 			TTL: metav1.Duration{Duration: time.Hour}, RenewBefore: metav1.Duration{Duration: 59*time.Minute + 59*time.Second}},
 		Logf: func(f string, args ...any) { mu.Lock(); logs = append(logs, fmt.Sprintf(f, args...)); mu.Unlock() }}
@@ -122,7 +122,7 @@ func TestAgentIssuesRenewsRevokes(t *testing.T) {
 	ctxb := context.Background()
 	secret := func() string {
 		var sec corev1.Secret
-		if c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "c4-lease-joshua-claude"}, &sec) != nil {
+		if c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "c4-lease-noor-claude"}, &sec) != nil {
 			return ""
 		}
 		return string(sec.Data[c4v1.LeaseCredentialKey])
@@ -142,7 +142,7 @@ func TestAgentIssuesRenewsRevokes(t *testing.T) {
 	// The Secret is written before the lease's status, so wait for both.
 	var l c4v1.CredentialLease
 	waitFor("the lease to be active", func() bool {
-		return c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "joshua-claude"}, &l) == nil &&
+		return c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "noor-claude"}, &l) == nil &&
 			l.Status.State == c4v1.LeaseActive && l.Status.ExpiresAt != nil
 	})
 
@@ -157,7 +157,7 @@ func TestAgentIssuesRenewsRevokes(t *testing.T) {
 	if secret() != "" {
 		t.Fatal("the Secret outlived the agent")
 	}
-	c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "joshua-claude"}, &l)
+	c.Get(ctxb, types.NamespacedName{Namespace: "practice", Name: "noor-claude"}, &l)
 	if l.Status.State != c4v1.LeaseRevoked {
 		t.Fatalf("state %q after the agent stopped", l.Status.State)
 	}
@@ -183,14 +183,14 @@ func TestAgentHonoursTheFarm(t *testing.T) {
 	c4v1.AddToScheme(s)
 	c := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&c4v1.CredentialLease{}).Build()
 	src := &memSource{doc: signIn("sk-ant-oat01-first", time.Now().Add(time.Hour))}
-	a := &Agent{Client: c, Namespace: "practice", Name: "joshua-claude", Source: src, Retry: 50 * time.Millisecond,
-		Spec: c4v1.CredentialLeaseSpec{Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"o"}},
+	a := &Agent{Client: c, Namespace: "practice", Name: "noor-claude", Source: src, Retry: 50 * time.Millisecond,
+		Spec: c4v1.CredentialLeaseSpec{Account: "anthropic-max", Holder: "noor", BoundTo: c4v1.LeaseBinding{Owners: []string{"o"}},
 			Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"p"}},
 			TTL: metav1.Duration{Duration: time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
 	done := make(chan error, 1)
 	go func() { done <- a.Run(context.Background()) }()
 	ctx := context.Background()
-	key := types.NamespacedName{Namespace: "practice", Name: "joshua-claude"}
+	key := types.NamespacedName{Namespace: "practice", Name: "noor-claude"}
 	var l c4v1.CredentialLease
 	for end := time.Now().Add(10 * time.Second); ; time.Sleep(20 * time.Millisecond) {
 		if c.Get(ctx, key, &l) == nil && l.Status.State == c4v1.LeaseActive {
@@ -214,7 +214,7 @@ func TestAgentHonoursTheFarm(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("the agent kept a lease the farm revoked")
 	}
-	if err := c.Get(ctx, types.NamespacedName{Namespace: "practice", Name: "c4-lease-joshua-claude"}, &corev1.Secret{}); err == nil {
+	if err := c.Get(ctx, types.NamespacedName{Namespace: "practice", Name: "c4-lease-noor-claude"}, &corev1.Secret{}); err == nil {
 		t.Fatal("the Secret outlived the farm's revocation")
 	}
 	c.Get(ctx, key, &l)

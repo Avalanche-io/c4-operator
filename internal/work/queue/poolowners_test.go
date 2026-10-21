@@ -26,7 +26,7 @@ func TestPoolOwners(t *testing.T) {
 	if err := k8s.Get(ctx, types.NamespacedName{Name: pool}, &p); err != nil {
 		t.Fatal(err)
 	}
-	p.Spec.Owners = []string{"joshua"}
+	p.Spec.Owners = []string{"noor"}
 	if err := k8s.Update(ctx, &p); err != nil {
 		t.Fatal(err)
 	}
@@ -40,7 +40,7 @@ func TestPoolOwners(t *testing.T) {
 		}
 		return j
 	}
-	for _, j := range []*c4v1.WorkJob{owned("mine", "joshua"), owned("theirs", "ivo"), owned("nobodys", "")} {
+	for _, j := range []*c4v1.WorkJob{owned("mine", "noor"), owned("theirs", "ivo"), owned("nobodys", "")} {
 		if err := k8s.Create(ctx, j); err != nil {
 			t.Fatal(err)
 		}
@@ -58,16 +58,16 @@ func TestPoolOwners(t *testing.T) {
 			t.Fatal(err)
 		}
 		c := meta.FindStatusCondition(j.Status.Conditions, "Schedulable")
-		want := "pool " + pool + " runs only the jobs of joshua; " + whose
+		want := "pool " + pool + " runs only the jobs of noor; " + whose
 		if c == nil || c.Status != "False" || c.Message != want {
 			t.Errorf("%s: Schedulable %+v, want %q", name, c, want)
 		}
 	}
 	_, err := q.DryRun(ctx, owned("draft", "ivo"), "namespace/"+ns)
-	if !errors.Is(err, ErrInvalidJob) || !strings.Contains(err.Error(), "runs only the jobs of joshua; this job is ivo's") {
+	if !errors.Is(err, ErrInvalidJob) || !strings.Contains(err.Error(), "runs only the jobs of noor; this job is ivo's") {
 		t.Errorf("dry run: %v", err)
 	}
-	if _, err := q.DryRun(ctx, owned("draft", "joshua"), "namespace/"+ns); err != nil {
+	if _, err := q.DryRun(ctx, owned("draft", "noor"), "namespace/"+ns); err != nil {
 		t.Errorf("the owner's dry run: %v", err)
 	}
 

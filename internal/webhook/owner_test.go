@@ -125,8 +125,8 @@ func TestOwnerOfABundle(t *testing.T) {
 		t.Fatal(err)
 	}
 	resp := newOwner(t).Handle(context.Background(), admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
-		Operation: admissionv1.Create, UserInfo: authnv1.UserInfo{Username: "joshua"}, Object: runtime.RawExtension{Raw: raw}}})
-	if got, ok := owner(t, resp); !ok || got != "joshua" {
+		Operation: admissionv1.Create, UserInfo: authnv1.UserInfo{Username: "lee"}, Object: runtime.RawExtension{Raw: raw}}})
+	if got, ok := owner(t, resp); !ok || got != "lee" {
 		t.Fatalf("owner %q, patches %v", got, resp.Patches)
 	}
 	for _, p := range resp.Patches {

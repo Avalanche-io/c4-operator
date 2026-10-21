@@ -31,8 +31,8 @@ manager's `--holder-transfer=allow`, and it is `disallow` by default.
 On the holder's machine, with the holder's kubeconfig:
 
 ```sh
-c4-agent lease --context my-farm --namespace practice --name joshua-claude \
-  --holder joshua --owner joshua@studio --pool blocks \
+c4-agent lease --context my-farm --namespace practice --name noor-claude \
+  --holder noor --owner noor@studio.example --pool blocks \
   --ttl 8h --renew-before 15m --config-dir ~/.claude
 ```
 
@@ -75,7 +75,7 @@ template:
     volumes:
     - {name: store, emptyDir: {}}
     - name: lease
-      secret: {secretName: c4-lease-joshua-claude}
+      secret: {secretName: c4-lease-noor-claude}
 ```
 
 A unit of this job waits, without a pod, until the lease is active. The
@@ -108,5 +108,5 @@ your lease; `c4 farm revoke` takes it back (docs/c4-sync.md, `for`).
 (`c4.avalanche.io/owner`, stamped by the farm's owner webhook and fixed
 from then on, as a job's owner is). `HolderVerified` is true when the
 creator is `spec.holder`, false ("created by kubernetes-admin, not its holder
-joshua") when someone else made it. It labels the lease; it refuses
+noor") when someone else made it. It labels the lease; it refuses
 nothing.

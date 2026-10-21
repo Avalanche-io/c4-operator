@@ -115,14 +115,14 @@ func TestBlockOnHostRunner(t *testing.T) {
 	os.WriteFile(filepath.Join(shared, ".c4", "verdict.json"), []byte(`{"stale":true}`), 0o644)
 	docs := &docStore{}
 	r := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: map[string]string{"c4.avalanche.io/host": host}, Slots: 1,
-		Owners: []string{"joshua"}, BlocksCwd: shared, HookCommand: "/bin/c4-agent checkpoint --hook", Docs: docs, DocsProject: "practice", Logf: t.Logf}
+		Owners: []string{"noor"}, BlocksCwd: shared, HookCommand: "/bin/c4-agent checkpoint --hook", Docs: docs, DocsProject: "practice", Logf: t.Logf}
 	tick := func() {
 		t.Helper()
 		if err := r.Tick(ctx); err != nil {
 			t.Fatal(err)
 		}
 	}
-	job := ownedJob(t, "default", "practice-1", "joshua")
+	job := ownedJob(t, "default", "practice-1", "noor")
 	pod := func(name string, extra ...corev1.EnvVar) *corev1.Pod {
 		t.Helper()
 		env := append([]corev1.EnvVar{{Name: agent.EnvBlock, Value: "1"}, {Name: agent.EnvBlockRepo, Value: "/repo"},

@@ -213,7 +213,7 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 
 	// a bundle's owner is fixed the same way: its member job carries it
 	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "team",
-		Annotations: map[string]string{c4v1.AnnotationOwner: "joshua", c4v1.AnnotationSubmittedVia: "api"}},
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "api"}},
 		Spec: c4v1.AgentBundleSpec{Pools: []string{"team"}, Members: []c4v1.AgentMemberSpec{{Name: "lead"}}}}
 	if err := c.Create(ctx, b); err != nil {
 		t.Fatal(err)
@@ -227,8 +227,8 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 
 	// and a lease's creator: its holder is checked against it
 	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "mine",
-		Annotations: map[string]string{c4v1.AnnotationOwner: "joshua"}}, Spec: c4v1.CredentialLeaseSpec{
-		Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"joshua"}},
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor"}}, Spec: c4v1.CredentialLeaseSpec{
+		Account: "anthropic-max", Holder: "noor", BoundTo: c4v1.LeaseBinding{Owners: []string{"noor"}},
 		Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"blocks"}},
 		TTL: metav1.Duration{Duration: time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
 	if err := c.Create(ctx, l); err != nil {
@@ -260,13 +260,13 @@ func TestSubmitGrantsOnlyFromTheHUD(t *testing.T) {
 	}
 	grant := func(name string) *c4v1.SubmitGrant {
 		return &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: name},
-			Spec: c4v1.SubmitGrantSpec{Person: "joshua", Tracker: "github", Until: metav1.NewTime(time.Now().Add(time.Hour))}}
+			Spec: c4v1.SubmitGrantSpec{Person: "noor", Tracker: "github", Until: metav1.NewTime(time.Now().Add(time.Hour))}}
 	}
 	enforced(t, "c4-submit-grants", func(try int) error {
 		return admin.Create(ctx, grant(fmt.Sprintf("forged-%d", try)))
 	})
 	// the manager's binding may still be settling
-	g := grant("github-joshua")
+	g := grant("github-noor")
 	eventually(t, "the HUD's grant", func() error { return hud.Create(ctx, g) })
 	if err := admin.Patch(ctx, g, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"person":"mallory"}}`))); err == nil {
 		t.Error("a grant was changed directly")
@@ -274,7 +274,7 @@ func TestSubmitGrantsOnlyFromTheHUD(t *testing.T) {
 	if err := admin.Delete(ctx, g); err == nil {
 		t.Error("a grant was erased directly")
 	}
-	g.Spec.Revoked = &c4v1.GrantRevocation{By: "joshua", At: metav1.Now()}
+	g.Spec.Revoked = &c4v1.GrantRevocation{By: "noor", At: metav1.Now()}
 	if err := hud.Update(ctx, g); err != nil {
 		t.Errorf("the HUD's revocation: %v", err)
 	}
@@ -495,7 +495,7 @@ func TestLeaseMounts(t *testing.T) {
 		return p
 	}
 	withLease := func(p *corev1.Pod) {
-		p.Spec.Volumes = []corev1.Volume{{Name: "lease", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "c4-lease-joshua-claude"}}}}
+		p.Spec.Volumes = []corev1.Volume{{Name: "lease", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: "c4-lease-noor-claude"}}}}
 		p.Spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "lease", MountPath: "/etc/c4/lease", ReadOnly: true}}
 	}
 	enforced(t, "c4-lease-mounts", func(int) error { return admin.Create(ctx, pod(withLease)) })
@@ -511,20 +511,20 @@ func TestLeaseMounts(t *testing.T) {
 	}
 	env := func(p *corev1.Pod) {
 		p.Spec.Containers[0].Env = []corev1.EnvVar{{Name: "T", ValueFrom: &corev1.EnvVarSource{SecretKeyRef: &corev1.SecretKeySelector{
-			LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-joshua-claude"}, Key: ".credentials.json"}}}}
+			LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-noor-claude"}, Key: ".credentials.json"}}}}
 	}
 	if err := manager.Create(ctx, pod(env)); err == nil {
 		t.Error("a lease went into an environment variable")
 	}
 	envFrom := func(p *corev1.Pod) {
-		p.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-joshua-claude"}}}}
+		p.Spec.Containers[0].EnvFrom = []corev1.EnvFromSource{{SecretRef: &corev1.SecretEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-noor-claude"}}}}
 	}
 	if err := manager.Create(ctx, pod(envFrom)); err == nil {
 		t.Error("a lease went into the environment")
 	}
 	projected := func(p *corev1.Pod) {
 		p.Spec.Volumes = []corev1.Volume{{Name: "all", VolumeSource: corev1.VolumeSource{Projected: &corev1.ProjectedVolumeSource{
-			Sources: []corev1.VolumeProjection{{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-joshua-claude"}}}}}}}}
+			Sources: []corev1.VolumeProjection{{Secret: &corev1.SecretProjection{LocalObjectReference: corev1.LocalObjectReference{Name: "c4-lease-noor-claude"}}}}}}}}
 	}
 	if err := manager.Create(ctx, pod(projected)); err == nil {
 		t.Error("a lease was projected")

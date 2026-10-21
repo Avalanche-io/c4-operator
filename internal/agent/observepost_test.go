@@ -31,12 +31,12 @@ func TestRunnerPostsObservedSessions(t *testing.T) {
 		b, _ := io.ReadAll(r.Body)
 		json.Unmarshal(b, &rep)
 		posts = append(posts, rep)
-		w.Write([]byte(`{"shownTo":["joshua"]}`))
+		w.Write([]byte(`{"shownTo":["noor"]}`))
 	}))
 	defer hud.Close()
 	r, _ := hostRunner(t, e, hostPod())
 	now := time.Date(2026, 10, 21, 3, 0, 0, 0, time.UTC)
-	r.Now, r.Node, r.Owners = func() time.Time { return now }, "laptop-1", []string{"joshua"}
+	r.Now, r.Node, r.Owners = func() time.Time { return now }, "laptop-1", []string{"noor"}
 	r.observeTick(ctx)
 	if len(posts) != 0 {
 		t.Fatal("posted without --observe")

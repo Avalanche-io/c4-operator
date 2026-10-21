@@ -412,10 +412,10 @@ func TestReworkPromptCarriesTheDecision(t *testing.T) {
 	os.MkdirAll(filepath.Join(u.Root, "reply"), 0o755)
 	c := &p.Spec.Containers[0]
 	c.Env = append(c.Env, corev1.EnvVar{Name: "C4_DECISION",
-		Value: `{"safepoint":3,"do":"yes","note":"keep the C extension out of scope","actor":"joshua","at":"2026-10-20T05:00:00Z","view":"c4abc","reply":"/etc/c4/reply"}`},
+		Value: `{"safepoint":3,"do":"yes","note":"keep the C extension out of scope","actor":"noor","at":"2026-10-20T05:00:00Z","view":"c4abc","reply":"/etc/c4/reply"}`},
 		corev1.EnvVar{Name: "C4_REPLY", Value: "/etc/c4/reply"})
 	got := reworkPrompt(p, u)
-	for _, want := range []string{"joshua answered the question you asked: yes.", "keep the C extension out of scope", filepath.Join(u.Root, "reply")} {
+	for _, want := range []string{"noor answered the question you asked: yes.", "keep the C extension out of scope", filepath.Join(u.Root, "reply")} {
 		if !strings.Contains(got, want) {
 			t.Fatalf("the prompt lacks %q:\n%s", want, got)
 		}

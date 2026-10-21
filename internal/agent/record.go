@@ -98,7 +98,7 @@ func (r *Runner) Deployment() string {
 // does), under that job, using the sign-in of this machine's holder, on
 // this runner (the holder's machine). The holder is the runner's, never the
 // job's: one sign-in serves every job here, so a runner shared by two owners
-// shows "for dana, using joshua's sign-in". Until the runner's deployment is
+// shows "for dana, using noor's sign-in". Until the runner's deployment is
 // bound, no chain is accountable, and the gap says so.
 func (r *Runner) chainOf(ctx context.Context, p *corev1.Pod) *schema.Chain {
 	dep := r.Deployment()

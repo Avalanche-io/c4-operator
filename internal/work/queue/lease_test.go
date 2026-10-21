@@ -30,13 +30,13 @@ func TestLeaseGatesUnitPods(t *testing.T) {
 		}
 		return j
 	}
-	leased("mine", "joshua")
+	leased("mine", "noor")
 	tick(t, q)
 	if n := len(unitPods(t, ns, "mine")); n != 0 {
 		t.Fatalf("released %d units with no lease", n)
 	}
 	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "mine"}, Spec: c4v1.CredentialLeaseSpec{
-		Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"joshua"}},
+		Account: "anthropic-max", Holder: "noor", BoundTo: c4v1.LeaseBinding{Owners: []string{"noor"}},
 		Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{pool}},
 		TTL: metav1.Duration{Duration: 24 * time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
 	if err := k8s.Create(ctx, l); err != nil {
@@ -58,7 +58,7 @@ func TestLeaseGatesUnitPods(t *testing.T) {
 	q.HolderTransfer = true
 	tick(t, q)
 	pods := unitPods(t, ns, "mine")
-	if len(pods) != 1 || pods[0].Annotations[c4v1.AnnotationOwner] != "joshua" || len(pods[0].Spec.Volumes) == 0 {
+	if len(pods) != 1 || pods[0].Annotations[c4v1.AnnotationOwner] != "noor" || len(pods[0].Spec.Volumes) == 0 {
 		t.Fatalf("pods %+v", pods)
 	}
 
@@ -101,7 +101,7 @@ func TestLeaseNeedsTheGrantTheJobWasSubmittedUnder(t *testing.T) {
 	pool := "cpu-" + ns
 	exp := metav1.NewTime(now.Add(30 * time.Minute))
 	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "mine"}, Spec: c4v1.CredentialLeaseSpec{
-		Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"joshua"}},
+		Account: "anthropic-max", Holder: "noor", BoundTo: c4v1.LeaseBinding{Owners: []string{"noor"}},
 		Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{pool}},
 		TTL: metav1.Duration{Duration: 24 * time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
 	if err := k8s.Create(ctx, l); err != nil {
@@ -112,7 +112,7 @@ func TestLeaseNeedsTheGrantTheJobWasSubmittedUnder(t *testing.T) {
 		t.Fatal(err)
 	}
 	j := job(ns, "github-7", "render", pool, map[string]string{"frames": "1-1"}, now.Add(time.Hour))
-	j.Annotations = map[string]string{c4v1.AnnotationOwner: "joshua", c4v1.AnnotationGrant: "c4grantrecord"}
+	j.Annotations = map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationGrant: "c4grantrecord"}
 	j.Labels = map[string]string{c4v1.LabelTracker: "github"}
 	spec := &j.Spec.Template.Spec
 	spec.Volumes = []corev1.Volume{{Name: "lease", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: c4v1.LeaseSecretPrefix + "mine"}}}}
@@ -132,9 +132,9 @@ func TestLeaseNeedsTheGrantTheJobWasSubmittedUnder(t *testing.T) {
 	}
 	held("with no grant")
 
-	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: c4v1.SubmitGrantName("github", "joshua")},
-		Spec: c4v1.SubmitGrantSpec{Person: "joshua", Tracker: "github", Until: metav1.NewTime(now.Add(time.Hour)),
-			Revoked: &c4v1.GrantRevocation{By: "joshua", At: metav1.NewTime(*now)}}}
+	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: c4v1.SubmitGrantName("github", "noor")},
+		Spec: c4v1.SubmitGrantSpec{Person: "noor", Tracker: "github", Until: metav1.NewTime(now.Add(time.Hour)),
+			Revoked: &c4v1.GrantRevocation{By: "noor", At: metav1.NewTime(*now)}}}
 	if err := k8s.Create(ctx, g); err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestLeaseNeedsTheGrantTheJobWasSubmittedUnder(t *testing.T) {
 		t.Fatal(err)
 	}
 	tick(t, q)
-	if pods := unitPods(t, ns, "github-7"); len(pods) != 1 || pods[0].Annotations[c4v1.AnnotationOwner] != "joshua" {
+	if pods := unitPods(t, ns, "github-7"); len(pods) != 1 || pods[0].Annotations[c4v1.AnnotationOwner] != "noor" {
 		t.Fatalf("under the grant: %+v", pods)
 	}
 }

@@ -1,10 +1,10 @@
 # An agent bundle on one machine's host runner (docs/agents/c4-agent.md).
 #
 # On the machine: register each member with c4-agent, then run
-#   c4-agent runner --owner joshua --node c4-host-laptop-1 --slots 5
+#   c4-agent runner --owner noor --node c4-host-laptop-1 --slots 5
 # The runner registers the Node c4-host-laptop-1, labeled
 # c4.avalanche.io/host=c4-host-laptop-1 and tainted so only agent pods land on
-# it. The Pool below selects it, and runs only joshua's jobs: the bundle is
+# it. The Pool below selects it, and runs only noor's jobs: the bundle is
 # his if he applies it, and so is its member job.
 apiVersion: c4.avalanche.io/v1alpha1
 kind: Pool
@@ -13,7 +13,7 @@ metadata:
 spec:
   nodeSelector: {c4.avalanche.io/host: c4-host-laptop-1}
   slotsPerNode: 5
-  owners: [joshua]
+  owners: [noor]
   tolerations:
   - {key: c4.avalanche.io/host-runner, operator: Exists, effect: NoSchedule}
 ---

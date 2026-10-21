@@ -28,7 +28,7 @@ func TestCredentialLeaseEnds(t *testing.T) {
 	now := time.Now()
 	lease := func(name string, expires time.Time) *c4v1.CredentialLease {
 		l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}, Spec: c4v1.CredentialLeaseSpec{
-			Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"joshua"}},
+			Account: "anthropic-max", Holder: "noor", BoundTo: c4v1.LeaseBinding{Owners: []string{"noor"}},
 			Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"blocks"}},
 			TTL: metav1.Duration{Duration: 24 * time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
 		if err := k8s.Create(ctx, l); err != nil {
@@ -101,10 +101,10 @@ func TestCredentialLeaseEnds(t *testing.T) {
 // it there.
 func TestJobForBundleCarriesItsOwner(t *testing.T) {
 	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Name: "team", Namespace: "agents",
-		Annotations: map[string]string{c4v1.AnnotationOwner: "joshua", c4v1.AnnotationSubmittedVia: "api"}},
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "api"}},
 		Spec: c4v1.AgentBundleSpec{Pools: []string{"team"}, Members: []c4v1.AgentMemberSpec{{Name: "lead"}}}}
 	j := JobForBundle(b)
-	if j.Annotations[c4v1.AnnotationOwner] != "joshua" || j.Annotations[c4v1.AnnotationSubmittedVia] != "api" {
+	if j.Annotations[c4v1.AnnotationOwner] != "noor" || j.Annotations[c4v1.AnnotationSubmittedVia] != "api" {
 		t.Fatalf("annotations %v", j.Annotations)
 	}
 	b.Annotations = nil
@@ -121,13 +121,13 @@ func TestLeaseHolderVerified(t *testing.T) {
 		status                  metav1.ConditionStatus
 		msg                     string
 	}{
-		{"joshua", "joshua", "", metav1.ConditionTrue, "created by its holder, joshua"},
-		{"kubernetes-admin", "joshua", "", metav1.ConditionFalse, "created by kubernetes-admin, not its holder joshua"},
-		{"", "joshua", "", metav1.ConditionUnknown, "the lease records no creator (made before leases were stamped)"},
+		{"noor", "noor", "", metav1.ConditionTrue, "created by its holder, noor"},
+		{"kubernetes-admin", "noor", "", metav1.ConditionFalse, "created by kubernetes-admin, not its holder noor"},
+		{"", "noor", "", metav1.ConditionUnknown, "the lease records no creator (made before leases were stamped)"},
 		// a single-person farm's installer is every person on it
-		{"kubernetes-admin", "joshua", "joshua", metav1.ConditionTrue, "created by kubernetes-admin, this single-person farm's installer joshua, its holder"},
-		{"system:serviceaccount:show-a:importer", "joshua", "joshua", metav1.ConditionFalse, "created by system:serviceaccount:show-a:importer, not its holder joshua"},
-		{"kubernetes-admin", "ivo", "joshua", metav1.ConditionFalse, "created by kubernetes-admin, not its holder ivo"},
+		{"kubernetes-admin", "noor", "noor", metav1.ConditionTrue, "created by kubernetes-admin, this single-person farm's installer noor, its holder"},
+		{"system:serviceaccount:show-a:importer", "noor", "noor", metav1.ConditionFalse, "created by system:serviceaccount:show-a:importer, not its holder noor"},
+		{"kubernetes-admin", "ivo", "noor", metav1.ConditionFalse, "created by kubernetes-admin, not its holder ivo"},
 	} {
 		l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Name: "mine", Annotations: map[string]string{}},
 			Spec: c4v1.CredentialLeaseSpec{Holder: c.holder}}

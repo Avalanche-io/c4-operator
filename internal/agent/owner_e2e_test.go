@@ -56,11 +56,11 @@ func TestRunnerRunsOnlyItsOwnersJobs(t *testing.T) {
 	t.Cleanup(func() { k8s.Delete(ctx, &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: host}}) })
 	h := agent.New(&agent.Store{Dir: t.TempDir()}, &fake{active: map[string]bool{}})
 	var logs []string
-	r := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Owners: []string{"joshua"}, Slots: 4,
+	r := &agent.Runner{Client: k8s, Harness: h, Node: host, Labels: sel, Owners: []string{"noor"}, Slots: 4,
 		Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }}
 
-	mine, theirs := ownedJob(t, ns, "mine", "joshua"), ownedJob(t, ns, "theirs", "ivo")
-	gone := ownedJob(t, ns, "gone", "joshua")
+	mine, theirs := ownedJob(t, ns, "mine", "noor"), ownedJob(t, ns, "theirs", "ivo")
+	gone := ownedJob(t, ns, "gone", "noor")
 	stale := unitOf(gone)
 	if err := k8s.Delete(ctx, gone); err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestRunnerRunsOnlyItsOwnersJobs(t *testing.T) {
 	pod := func(name, node string, refs []metav1.OwnerReference) *corev1.Pod {
 		t.Helper()
 		p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name, Labels: map[string]string{c4v1.LabelJob: "x"},
-			Annotations: map[string]string{c4v1.AnnotationOwner: "joshua"}, OwnerReferences: refs},
+			Annotations: map[string]string{c4v1.AnnotationOwner: "noor"}, OwnerReferences: refs},
 			Spec: corev1.PodSpec{NodeSelector: sel, NodeName: node, Containers: []corev1.Container{{Name: "member", Image: "c4-agent",
 				Env: []corev1.EnvVar{{Name: "C4_AGENT_MEMBER", Value: "lead"}}}}}}
 		if err := k8s.Create(ctx, p); err != nil {
@@ -105,7 +105,7 @@ func TestRunnerRunsOnlyItsOwnersJobs(t *testing.T) {
 		t.Errorf("another owner's pod was bound to %s", p.Spec.NodeName)
 	}
 	for name, want := range map[string]string{
-		"theirs-bound": "job " + ns + "/theirs is ivo's; this runner runs only the jobs of joshua",
+		"theirs-bound": "job " + ns + "/theirs is ivo's; this runner runs only the jobs of noor",
 		"loose":        "the pod is not a unit of a WorkJob",
 		"stale":        "its controller reference names an earlier job " + ns + "/gone",
 	} {
