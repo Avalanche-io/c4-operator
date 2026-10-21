@@ -17,9 +17,9 @@ import (
 )
 
 // optionsFarm is two projects on one 4-slot pool with an empty burst pool
-// beside it: show-a's hero render (16 ten-minute frames, due in eight
-// hours, allowed to burst) and comp (8 frames, due in two hours), and
-// show-b's crowd render (8 frames, due in two hours).
+// beside it: show-a's hero render (8 ten-minute frames, due in eight
+// hours, allowed to burst) and comp (12 frames, due in two hours and ten
+// minutes), and show-b's crowd render (12 frames, due in two hours).
 func optionsFarm(t *testing.T) (*Queue, *time.Time, string, string, string) {
 	t.Helper()
 	ctx := context.Background()
@@ -47,7 +47,10 @@ func optionsFarm(t *testing.T) (*Queue, *time.Time, string, string, string) {
 	frames := func(n string) map[string]string { return map[string]string{"frames": n, "estimateSeconds": "600"} }
 	hero := job(nsA, "hero", "render", "cpu-"+nsA, frames("1-8"), now.Add(8*time.Hour))
 	hero.Spec.Pools = append(hero.Spec.Pools, spot.Name)
-	comp := job(nsA, "comp", "render", "cpu-"+nsA, frames("1-12"), now.Add(120*time.Minute))
+	// comp has ten minutes more slack than crowd, so which of the two a
+	// tighter hero makes late is the plan's choice (crowd), never a
+	// floating-point tie between twins that can differ by architecture.
+	comp := job(nsA, "comp", "render", "cpu-"+nsA, frames("1-12"), now.Add(130*time.Minute))
 	crowd := job(nsB, "crowd", "render", "cpu-"+nsA, frames("1-12"), now.Add(120*time.Minute))
 	for _, j := range []*c4v1.WorkJob{hero, comp, crowd} {
 		if err := k8s.Create(ctx, j); err != nil {
