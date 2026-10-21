@@ -1,0 +1,11 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.proxies.answers.by",
+      "message": "proxies/0 cannot answer questions: it runs a procedure",
+      "fix": "leave answers: out: only a unit that reasons answers questions"
+    }
+  ],
+  "note": "Only a unit that reasons (an agent) answers its job's questions; a frames tool's units run a procedure."
+}

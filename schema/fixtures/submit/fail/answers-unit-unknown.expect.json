@@ -1,0 +1,10 @@
+{
+  "by": "check",
+  "errors": [
+    {
+      "path": "jobs.proxies.answers.by",
+      "message": "no unit \"light/3\" in proxies",
+      "fix": "name one of its units, proxies/0 to proxies/5, or leave answers: out"
+    }
+  ]
+}
