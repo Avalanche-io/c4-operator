@@ -464,7 +464,7 @@ func transitions(job, project string, before, after *c4v1.WorkJobStatus, now tim
 		for _, p := range d.Policy {
 			last := &out[len(out)-1]
 			last.Policy = append(last.Policy, api.PolicyUse{Key: p.Key, Value: p.Value,
-				From: api.PolicyFrom{Scope: p.From.Scope, Ref: p.From.Ref, SetBy: p.From.SetBy, Record: p.From.Record}})
+				From: api.PolicyFrom{Scope: p.From.Scope, Ref: p.From.Ref, SetBy: p.From.SetBy, Record: p.From.Record, Note: p.From.Note}})
 		}
 	}
 	yk := map[string]bool{}

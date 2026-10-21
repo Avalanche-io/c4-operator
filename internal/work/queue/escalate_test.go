@@ -625,4 +625,19 @@ func TestNeedsBesideARealFailure(t *testing.T) {
 		got.Status.Needs["1"].State != needsRaised {
 		t.Fatalf("phase %s, states %v, needs %+v", got.Status.Phase, got.Status.UnitStates, got.Status.Needs)
 	}
+	// The failure is the reason a person is needed, its remedy requeue or
+	// accept; the question is mentioned beside it.
+	c := meta.FindStatusCondition(got.Status.Conditions, c4v1.ConditionNeedsPerson)
+	if c == nil || c.Reason != c4v1.NeedsFailed || c.Message != "1 units failed after their retries; requeue, take or accept them; a unit waits for information too" {
+		t.Fatalf("needs person %+v", c)
+	}
+	// An answer never reopens the finished job.
+	*now = now.Add(time.Minute)
+	supplyUnit(t, ns, "both", "cut", "24 fps", *now)
+	tick(t, q)
+	tick(t, q)
+	got = get(t, ns, "both")
+	if n := got.Status.Needs["1"]; n.State != needsRaised || n.Supplied != "" || hasPod(t, ns, "both", 1) || got.Status.Phase != "Failed" {
+		t.Fatalf("answered a finished job: %+v, phase %s, pod %v", n, got.Status.Phase, hasPod(t, ns, "both", 1))
+	}
 }

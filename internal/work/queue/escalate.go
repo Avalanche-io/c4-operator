@@ -22,8 +22,8 @@ import (
 // person is an error that can heal. Raised when the unit stops; pressing
 // once the plan says an answer now costs the deadline (answerBy, less
 // escalation.pressMargin) or it has been open escalation.pressAfter;
-// supplied by a person or the job's answerer; withdrawn by the lead, or by
-// the block itself on a re-check.
+// supplied by a person or the job's answerer; withdrawn by one of the
+// people who may control the job, or by the block itself on a re-check.
 //
 // A re-check is an extra attempt of the unit, like a wake (asks.go):
 // AnnotationRecheck, $C4_RECHECK, $C4_NEEDED (with $C4_NEEDED_WHY and

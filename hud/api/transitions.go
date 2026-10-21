@@ -46,6 +46,7 @@ type PolicyFrom struct {
 	Ref    string `json:"ref,omitempty"`
 	SetBy  string `json:"setBy,omitempty"`
 	Record string `json:"record,omitempty"`
+	Note   string `json:"note,omitempty"`
 }
 
 // Transitions answers GET /book?since=<seq>: transitions after since in

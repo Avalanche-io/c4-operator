@@ -1108,9 +1108,8 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(ref); idx < 0 && err == nil && n >= 0 && n < len(rec.plan.Units) {
 		idx = n
 	}
-	need, ok := rec.job.Status.Needs[strconv.Itoa(idx)]
-	if idx < 0 || !ok || !stoppedOnQuestion(rec, idx, need) {
-		fail(w, http.StatusConflict, "unit %q is not waiting for information", ref)
+	if why := questionRefusal(&rec.job, len(rec.plan.Units), idx, nameAt(rec, idx), ref, "is not waiting for information"); why != "" {
+		fail(w, http.StatusConflict, "%s", why)
 		return
 	}
 	ctx := r.Context()
@@ -1129,6 +1128,13 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "%v", err)
 		return
 	}
+	// The live job, not the snapshot, decides, before anything is signed:
+	// the queue would drop a supply to a question settled meanwhile.
+	if why := questionRefusal(j, len(rec.plan.Units), idx, nameAt(rec, idx), ref, "is not waiting for information"); why != "" {
+		fail(w, http.StatusConflict, "%s", why)
+		return
+	}
+	need := j.Status.Needs[strconv.Itoa(idx)]
 	patch := client.MergeFrom(j.DeepCopy())
 	before := queue.SpecDigest(j)
 	if j.Annotations == nil {
@@ -1209,9 +1215,8 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 	if n, err := strconv.Atoi(ref); idx < 0 && err == nil && n >= 0 && n < len(rec.plan.Units) {
 		idx = n
 	}
-	need, ok := rec.job.Status.Needs[strconv.Itoa(idx)]
-	if idx < 0 || !ok || !stoppedOnQuestion(rec, idx, need) {
-		fail(w, http.StatusConflict, "unit %q has no open question", ref)
+	if why := questionRefusal(&rec.job, len(rec.plan.Units), idx, nameAt(rec, idx), ref, "has no open question"); why != "" {
+		fail(w, http.StatusConflict, "%s", why)
 		return
 	}
 	ctx := r.Context()
@@ -1230,6 +1235,11 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "%v", err)
 		return
 	}
+	if why := questionRefusal(j, len(rec.plan.Units), idx, nameAt(rec, idx), ref, "has no open question"); why != "" {
+		fail(w, http.StatusConflict, "%s", why)
+		return
+	}
+	need := j.Status.Needs[strconv.Itoa(idx)]
 	patch := client.MergeFrom(j.DeepCopy())
 	before := queue.SpecDigest(j)
 	if j.Annotations == nil {
@@ -1275,18 +1285,68 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// stoppedOnQuestion reports whether unit idx is stopped on its question,
-// need, nobody has supplied or withdrawn: unit state needs, or failed
-// with a question that has no state (from a queue before held questions).
-func stoppedOnQuestion(rec *jobRec, idx int, need c4v1.WorkNeeds) bool {
-	if need.Supplied != "" || need.Withdrawn != nil || need.State == "supplied" || need.State == "withdrawn" {
+// questionRefusal is why unit idx of job j (n units; name its name, ref as
+// the caller named it) takes no supply or withdrawal now, or "": its question must be
+// open (unit state needs, or failed with a question that has no state,
+// from a queue before held questions), the job unfinished (an answer
+// never reopens a finished job), and no supply or withdrawal for it on
+// its way to the queue. none is the words for a unit with no question.
+func questionRefusal(j *c4v1.WorkJob, n, idx int, name, ref, none string) string {
+	st := &j.Status
+	need, ok := st.Needs[strconv.Itoa(idx)]
+	if idx < 0 || !ok || need.Supplied != "" || need.Withdrawn != nil || need.State == "supplied" || need.State == "withdrawn" {
+		return fmt.Sprintf("unit %q %s", ref, none)
+	}
+	switch unitStateMap(st, n)[idx] {
+	case "needs":
+	case "failed":
+		if need.State != "" {
+			return fmt.Sprintf("unit %q %s", ref, none)
+		}
+	default:
+		return fmt.Sprintf("unit %q %s", ref, none)
+	}
+	if st.Finished != nil {
+		phase := strings.ToLower(st.Phase)
+		if phase == "" {
+			phase = "finished"
+		}
+		return fmt.Sprintf("%s %s; requeue it, then answer", j.Name, phase)
+	}
+	if pendingFor(j.Annotations[c4v1.AnnotationSupply], st.Supplied, idx, name) {
+		return fmt.Sprintf("unit %q already has an answer on its way", ref)
+	}
+	if pendingFor(j.Annotations[c4v1.AnnotationWithdrawNeeds], st.Withdrawn, idx, name) {
+		return fmt.Sprintf("unit %q's question is already being withdrawn", ref)
+	}
+	return ""
+}
+
+// nameAt is unit idx's name in rec's plan, or "".
+func nameAt(rec *jobRec, idx int) string {
+	if idx < 0 || idx >= len(rec.plan.Units) {
+		return ""
+	}
+	return rec.plan.Units[idx].Name
+}
+
+// pendingFor reports whether a request list (supply or withdraw-needs)
+// holds one for unit idx (named name) the queue has not carried out: its
+// token past done, the last carried out.
+func pendingFor(list, done string, idx int, name string) bool {
+	var reqs []struct {
+		Token string `json:"token"`
+		Unit  string `json:"unit"`
+	}
+	if json.Unmarshal([]byte(list), &reqs) != nil {
 		return false
 	}
-	switch unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx] {
-	case "needs":
-		return true
-	case "failed":
-		return need.State == ""
+	last, _ := strconv.ParseInt(done, 36, 64)
+	for _, r := range reqs {
+		t, err := strconv.ParseInt(r.Token, 36, 64)
+		if err == nil && t > last && (name != "" && r.Unit == name || r.Unit == strconv.Itoa(idx)) {
+			return true
+		}
 	}
 	return false
 }

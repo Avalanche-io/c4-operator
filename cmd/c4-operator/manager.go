@@ -33,6 +33,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/controller-runtime/pkg/webhook"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+	"sigs.k8s.io/yaml"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
@@ -50,6 +51,7 @@ import (
 	c4webhook "github.com/Avalanche-io/c4-operator/internal/webhook"
 	"github.com/Avalanche-io/c4-operator/internal/work/kindsim"
 	"github.com/Avalanche-io/c4-operator/internal/work/placement"
+	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 	"github.com/Avalanche-io/c4-operator/internal/work/provreq"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 	"github.com/Avalanche-io/c4-operator/tools"
@@ -116,7 +118,11 @@ func runManager(args []string) error {
 	signerAddr := fs.String("signer-addr", ":8092", "certificate issuer listen address, for node daemons and importers")
 	telemetryRing := fs.Bool("telemetry-ring", false, "the telemetry tier a farm starts at before its farm admin sets one: keep the last two hours of the work queue's decisions, redacted, in memory, so a diagnostic bundle (GET /api/v1/diagnose) covers the moment a problem happened; off, a bundle holds the present moment alone. Nothing leaves the farm either way; C4_TELEMETRY=off holds it off")
 	holderTransfer := fs.String("holder-transfer", "disallow", "holder-transfer credential leases, a holder's own sign-in materialized for the holder's own unit pods: allow or disallow")
+	policyFile := fs.String("policy-file", "", "the farm's policy: a YAML map of policy keys to {value, limit} (internal/work/policy), the farm's value and its limit on a project's; empty keeps the built-in ones")
 	fs.Parse(args)
+	if err := loadPolicy(*policyFile); err != nil {
+		return err
+	}
 
 	ctrl.SetLogger(zap.New())
 	log := ctrl.Log.WithName("manager")
@@ -578,4 +584,24 @@ func apiToken(cfg *rest.Config) func() string {
 		return (&tier.TokenFile{Path: cfg.BearerTokenFile}).Token
 	}
 	return func() string { return cfg.BearerToken }
+}
+
+// loadPolicy sets the farm's policy values and limits from path (none when
+// path is empty).
+func loadPolicy(path string) error {
+	if path == "" {
+		return nil
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("--policy-file: %w", err)
+	}
+	var s map[string]policy.Setting
+	if err := yaml.UnmarshalStrict(b, &s); err != nil {
+		return fmt.Errorf("--policy-file %s: %w", path, err)
+	}
+	if err := policy.SetFarm(s); err != nil {
+		return fmt.Errorf("--policy-file %s: %w", path, err)
+	}
+	return nil
 }

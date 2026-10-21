@@ -592,9 +592,12 @@ spec:
                           the job).
                         properties:
                           from:
-                            description: WorkPolicyFrom is where a policy value came
-                              from.
+                            description: |-
+                              WorkPolicyFrom is where a policy value came from. Note says why a value
+                              asked for was not taken (a project's past the farm's limit).
                             properties:
+                              note:
+                                type: string
                               record:
                                 type: string
                               ref:

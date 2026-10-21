@@ -2066,8 +2066,12 @@ and a sweep planner that spawns trials are all generators.
       (`units.needs`), not `failed`. Once nothing else can run, the job is
       `Held` with NeedsPerson `NeedsInformation` ("waiting on a
       question"), so the jobs after it wait rather than give up, and it
-      is not sealed. A unit whose retries are spent still fails the job,
-      its open questions listed beside the failure.
+      is not sealed. A unit whose retries are spent still fails the job:
+      the failure is the reason a person is needed (requeue or accept),
+      its open questions listed beside it. An answer or a withdrawal never
+      reopens a finished job; the HUD refuses it ("requeue it, then
+      answer"), and checks the live job, and any supply or withdrawal
+      already on its way, before it signs anything.
     - **It is an error that can heal,** graded by state
       (`status.needs[i].state`): `raised` when the unit stops, `pressing`
       once urgent, then `supplied` or `withdrawn`, both final. Each step
@@ -2114,16 +2118,21 @@ and a sweep planner that spawns trials are all generators.
       unit runs again without an answer, with the why in
       `$C4_WITHDRAWN`.
     - **The values are policy** (`internal/work/policy`), read in one
-      place: the farm's default, then the Project's
+      place: the farm's value, then the Project's
       `spec.work.policy.values` (any key, `asks.max` and `answers`
-      included) or `spec.work.escalation`, each only within the farm's
-      limit (`policy.SetLimits`; by default at most a pressAfter of 24h,
-      10 asks, 10 re-checks of 900 seconds, and at least a pressMargin of
-      5m and a minInterval of 2m), then the job's params, which
-      may only tighten them (a shorter pressAfter; a longer pressMargin or
-      minInterval; a lower recheck.max, recheck.seconds or asks.max). A decision a value
-      made names it, its value and where it came from (`policy: [{key,
-      value, from}]`) in its record and its book entry.
+      included) or `spec.work.escalation`, then the job's params. The
+      farm sets each key's value and its limit on projects in the
+      `c4-policy` ConfigMap (`--policy-file`: `asks.max: {value: "3",
+      limit: "10"}`); by default a project may set at most a pressAfter
+      of 24h, 10 asks, 10 re-checks of 900 seconds and a background wait
+      of 30m, and at least a pressMargin of 5m and a minInterval of 2m. A
+      project's value past the limit is held to it, and the record says
+      so (`from: {scope: farm, ref: limit, note: "project show asked for
+      50, past the farm's limit of 10"}`). A job may only tighten (a
+      shorter pressAfter; a longer pressMargin or minInterval; a lower
+      recheck.max, recheck.seconds or asks.max). A decision a value made
+      names it, its value and where it came from (`policy: [{key, value,
+      from}]`) in its record and its book entry.
     - **A usage limit is the model's capacity, not a failure.** A pod
       block's turn at a model's usage limit exits 75 with "usage limit:
       <the CLI's words> (until <RFC 3339>)". The queue spends no retry,

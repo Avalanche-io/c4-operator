@@ -210,6 +210,12 @@ func (q *Queue) applySupplies(ctx context.Context, v *view, ctl *c4v1.WorkJob, n
 // supplyNeeds gives unit i what it stopped for: it runs again with it.
 func (q *Queue) supplyNeeds(ctx context.Context, v *view, i int, text, by, control string, now time.Time) {
 	m := v.mem
+	if !m.finished.IsZero() {
+		// An answer never reopens a finished job (the HUD refuses it): a
+		// person requeues it first.
+		q.Log.Info("an answer to a finished job's question dropped", "job", v.key, "unit", i, "by", by)
+		return
+	}
 	n := m.needs[i]
 	n.supplied, n.by, n.suppliedAt, n.state = text, by, now, needsSupplied
 	extra := map[string]any{"needs": n.text, "supplied": text, "by": by}
@@ -221,7 +227,6 @@ func (q *Queue) supplyNeeds(ctx context.Context, v *view, i int, text, by, contr
 	m.closeNeedsAsk(n, "supplied by "+or(by, "someone"), now)
 	delete(m.failed, i)
 	m.attempts[i] = 0
-	m.finished = time.Time{} // it runs again
 }
 
 // applyWithdraws carries out the lead's withdrawals of units' questions,
@@ -255,6 +260,10 @@ func (q *Queue) applyWithdraws(ctx context.Context, v *view, ctl *c4v1.WorkJob, 
 // answer, told why ($C4_WITHDRAWN).
 func (q *Queue) withdrawNeeds(ctx context.Context, v *view, i int, by, why, control string, now time.Time) {
 	m := v.mem
+	if !m.finished.IsZero() {
+		q.Log.Info("a withdrawal from a finished job dropped", "job", v.key, "unit", i, "by", by)
+		return
+	}
 	n := m.needs[i]
 	n.state, n.inFlight, n.pending = needsWithdrawn, false, ""
 	n.withdrawn = &c4v1.WorkWithdrawal{By: by, Why: why, At: metav1.Time{Time: now.Truncate(time.Second)}}
@@ -267,7 +276,6 @@ func (q *Queue) withdrawNeeds(ctx context.Context, v *view, i int, by, why, cont
 	m.closeNeedsAsk(n, "withdrawn by "+by, now)
 	delete(m.failed, i)
 	m.attempts[i] = 0
-	m.finished = time.Time{} // it runs again
 	q.Log.Info("question withdrawn", "job", v.key, "unit", i, "by", by, "why", why)
 }
 

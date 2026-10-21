@@ -263,9 +263,15 @@ func shownSlack(v *view, js sched.JobState, e *c4v1.WorkEstimate) (int64, bool) 
 // (waitConditions), if anything.
 func needsPerson(st *c4v1.WorkJobStatus, v *view, approval *c4v1.CapacityRequest, waiting, flagged int, waitReason, waitMsg string, gen int64) {
 	reason, msg := "", ""
-	switch {
-	case len(v.mem.openNeedsList()) > 0:
-		open := v.mem.openNeedsList()
+	switch open := v.mem.openNeedsList(); {
+	case waiting > 0:
+		// A failure is the reason even beside open questions: requeue or
+		// accept it, then answer them.
+		reason, msg = c4v1.NeedsFailed, fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", waiting)
+		if len(open) > 0 {
+			msg += fmt.Sprintf("; %s for information too", plural(len(open), "a unit waits", fmt.Sprintf("%d units wait", len(open))))
+		}
+	case len(open) > 0:
 		reason, msg = c4v1.NeedsInformation, "needs information: "+v.mem.needs[open[0]].text
 		if len(open) > 1 {
 			msg = fmt.Sprintf("%d units need information the brief lacked, first: %s", len(open), v.mem.needs[open[0]].text)
@@ -276,8 +282,6 @@ func needsPerson(st *c4v1.WorkJobStatus, v *view, approval *c4v1.CapacityRequest
 				break
 			}
 		}
-	case waiting > 0:
-		reason, msg = c4v1.NeedsFailed, fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", waiting)
 	case v.measureShort != "":
 		reason, msg = c4v1.NeedsMeasure, v.measureShort
 	case flagged > 0:

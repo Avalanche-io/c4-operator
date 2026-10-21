@@ -25,7 +25,7 @@ spec:
       containers:
       - name: manager
         image: c4-operator
-        args: [manager]
+        args: [manager, --policy-file=/etc/c4/policy/policy.yaml]
         env:
         - name: POD_NAMESPACE
           valueFrom: {fieldRef: {fieldPath: metadata.namespace}}
@@ -52,13 +52,35 @@ spec:
         # The operator's identity toward the sites' regional replicas, for
         # staging (--staging): what a site holds, and asking it to warm.
         - {name: tier-token, mountPath: /var/run/secrets/c4-tier, readOnly: true}
+        # The farm's policy values and their limits on projects (c4-policy).
+        - {name: policy, mountPath: /etc/c4/policy, readOnly: true}
       volumes:
+      - name: policy
+        configMap: {name: c4-policy}
       - name: tmp
         emptyDir: {}
       - name: tier-token
         projected:
           sources:
           - serviceAccountToken: {audience: c4-tier, expirationSeconds: 3600, path: token}
+---
+# The farm's policy: each key's value and its limit on what a project may
+# set (spec.work.policy.values), read by the manager at start
+# (--policy-file; internal/work/policy). A project's value past a limit is
+# held to it, and the book says so. Empty keeps the built-in values, for
+# example:
+#   asks.max: {value: "3", limit: "10"}
+#   escalation.pressAfter: {value: 2h, limit: 24h}
+#   escalation.recheck.seconds: {value: "300", limit: "900"}
+#   yield.backgroundWait: {value: 30m, limit: 30m}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c4-policy
+  labels:
+    app.kubernetes.io/name: c4-operator
+data:
+  policy.yaml: ""
 ---
 # The HUD: the web app and its API. Put an SSO proxy (or an Ingress with
 # authentication) in front of it, or reach it with bearer tokens.

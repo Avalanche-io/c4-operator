@@ -5,15 +5,20 @@
 // came from (the farm's default, the job's Project, the job itself), so a
 // decision a value made can cite it in its signed record and in the book.
 //
-// A job may tighten a value its project or the farm sets, never loosen it:
-// a shorter pressAfter, a longer pressMargin or recheck.minInterval, a
-// lower recheck.max, recheck.seconds or asks.max. A looser job value is
-// ignored.
+// The farm sets each key's value and its limit (SetFarm, from the
+// manager's --policy-file); a project may set a value within the limit,
+// and one past it is held to the limit, saying so. A job may tighten a
+// value its project or the farm sets, never loosen it: a shorter
+// pressAfter, a longer pressMargin or recheck.minInterval, a lower
+// recheck.max, recheck.seconds or asks.max. A looser job value is ignored.
 package policy
 
 import (
+	"fmt"
+	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -69,13 +74,15 @@ const SubmissionPendingFloor = 3 * time.Minute
 const RecheckInFlight = 1
 
 // From is where a value came from: its scope (farm, project, job or
-// unit), what in that scope (the project's or job's name), and, once
-// policies are objects, who set it and its record.
+// unit), what in that scope (the project's or job's name, or limit for the
+// farm's limit), and, once policies are objects, who set it and its
+// record. Note says why a value asked for was not taken.
 type From struct {
 	Scope  string `json:"scope"`
 	Ref    string `json:"ref,omitempty"`
 	SetBy  string `json:"setBy,omitempty"`
 	Record string `json:"record,omitempty"`
+	Note   string `json:"note,omitempty"`
 }
 
 // Use is a value that decided something, for a signed record or a book
@@ -123,8 +130,8 @@ var defaults = map[string]string{
 // limits are the farm's limits on a project's values, in each key's
 // looser direction: a project may set a value up to its limit (a pressAfter
 // of at most 24h, a recheck.max of at most 10), never past it; a value past
-// it is ignored. A job only tightens, so needs none. SetLimits changes them
-// for the farm.
+// it is held to the limit. A job only tightens, so needs none. SetFarm
+// changes them, and defaults, for the farm; mu guards both.
 var limits = map[string]string{
 	PressAfter:         "24h",
 	PressMargin:        "5m",
@@ -137,23 +144,67 @@ var limits = map[string]string{
 	YieldBackgroundWait: "30m",
 }
 
-// SetLimits sets the farm's limits on project values, by key; a malformed
-// limit is ignored.
-func SetLimits(l map[string]string) {
-	for k, v := range l {
-		if _, ok := limits[k]; ok && valid(k, v) {
-			limits[k] = v
-		}
-	}
+var mu sync.RWMutex
+
+// Setting is the farm's value of a key and its limit on a project's
+// value; either may be empty to keep the built-in one.
+type Setting struct {
+	Value string `json:"value,omitempty"`
+	Limit string `json:"limit,omitempty"`
 }
 
-// Limit is the farm's limit on key's project value, or "" for none.
-func Limit(key string) string { return limits[key] }
+// SetFarm sets the farm's values and limits, by key. It changes nothing
+// and says why when a key is unknown or a value or limit is malformed, or
+// a key with no direction is given a limit.
+func SetFarm(s map[string]Setting) error {
+	keys := make([]string, 0, len(s))
+	for k := range s {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var bad []string
+	for _, k := range keys {
+		st := s[k]
+		switch _, known := defaults[k]; {
+		case !known:
+			bad = append(bad, k+": no such key")
+		case st.Value != "" && !valid(k, st.Value):
+			bad = append(bad, fmt.Sprintf("%s: value %q", k, st.Value))
+		case st.Limit != "" && tighter[k] == nil:
+			bad = append(bad, k+": takes no limit")
+		case st.Limit != "" && !valid(k, st.Limit):
+			bad = append(bad, fmt.Sprintf("%s: limit %q", k, st.Limit))
+		}
+	}
+	if len(bad) > 0 {
+		return fmt.Errorf("the farm's policy: %s", strings.Join(bad, "; "))
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	for _, k := range keys {
+		if v := s[k].Value; v != "" {
+			defaults[k] = v
+		}
+		if l := s[k].Limit; l != "" {
+			limits[k] = l
+		}
+	}
+	return nil
+}
 
-// withinLimit reports whether a project may set key to s.
-func withinLimit(key, s string) bool {
+// Farm is the farm's value of key and its limit on a project's value
+// ("" for none).
+func Farm(key string) Setting {
+	mu.RLock()
+	defer mu.RUnlock()
+	return Setting{Value: defaults[key], Limit: limits[key]}
+}
+
+// withinLimit reports whether a project may set key to s; the limit is
+// "" when there is none. Callers hold mu.
+func withinLimit(key, s string) (ok bool, limit string) {
 	l, t := limits[key], tighter[key]
-	return l == "" || t == nil || t(s, l)
+	return l == "" || t == nil || t(s, l), l
 }
 
 // jobParam is where a job sets each key; the older names stay the
@@ -175,9 +226,17 @@ var jobParam = map[string]string{
 // spec.work.policy.values, or spec.work.escalation) within the farm's
 // limit, then the job, which may only tighten what is above it.
 func Value(job *c4v1.WorkJob, project *c4v1.Project, unit int, key string) (string, From) {
+	mu.RLock()
+	defer mu.RUnlock()
 	v, from := defaults[key], From{Scope: "farm"}
-	if p := projectValue(project, key); p != "" && valid(key, p) && withinLimit(key, p) {
-		v, from = p, From{Scope: "project", Ref: project.Name}
+	if p := projectValue(project, key); p != "" && valid(key, p) {
+		if ok, limit := withinLimit(key, p); ok {
+			v, from = p, From{Scope: "project", Ref: project.Name}
+		} else {
+			// past the farm's limit: held to it, and the book says why
+			v, from = limit, From{Scope: "farm", Ref: "limit",
+				Note: fmt.Sprintf("project %s asked for %s, past the farm's limit of %s", project.Name, p, limit)}
+		}
 	}
 	if job != nil {
 		if s := strings.TrimSpace(job.Spec.Params[jobParam[key]]); s != "" && valid(key, s) {
@@ -220,6 +279,9 @@ func Record(uses ...Use) []map[string]any {
 		f := map[string]any{"scope": u.From.Scope}
 		if u.From.Ref != "" {
 			f["ref"] = u.From.Ref
+		}
+		if u.From.Note != "" {
+			f["note"] = u.From.Note
 		}
 		out = append(out, map[string]any{"key": u.Key, "value": u.Value, "from": f})
 	}
@@ -312,7 +374,7 @@ func Work(uses ...Use) []c4v1.WorkPolicyUse {
 	var out []c4v1.WorkPolicyUse
 	for _, u := range uses {
 		out = append(out, c4v1.WorkPolicyUse{Key: u.Key, Value: u.Value,
-			From: c4v1.WorkPolicyFrom{Scope: u.From.Scope, Ref: u.From.Ref, SetBy: u.From.SetBy, Record: u.From.Record}})
+			From: c4v1.WorkPolicyFrom{Scope: u.From.Scope, Ref: u.From.Ref, SetBy: u.From.SetBy, Record: u.From.Record, Note: u.From.Note}})
 	}
 	return out
 }

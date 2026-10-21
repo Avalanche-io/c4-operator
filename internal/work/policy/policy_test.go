@@ -62,10 +62,10 @@ func TestValue(t *testing.T) {
 		{"job loosens seconds", job(map[string]string{RecheckSeconds: "600"}), values, RecheckSeconds, "120", "project"},
 		{"farm seconds", nil, nil, RecheckSeconds, "300", "farm"},
 		{"a malformed value falls back to escalation", job(nil), values, PressAfter, "1h", "project"},
-		{"asks past the farm's limit", job(nil), loose, AsksMax, "3", "farm"},
-		{"rechecks past the farm's limit", job(nil), loose, RecheckMax, "5", "farm"},
-		{"recheck seconds past the farm's limit", job(nil), loose, RecheckSeconds, "300", "farm"},
-		{"a margin under the farm's limit", job(nil), loose, PressMargin, "15m", "farm"},
+		{"asks past the farm's limit, held to it", job(nil), loose, AsksMax, "10", "farm"},
+		{"rechecks past the farm's limit, held to it", job(nil), loose, RecheckMax, "10", "farm"},
+		{"recheck seconds past the farm's limit, held to it", job(nil), loose, RecheckSeconds, "900", "farm"},
+		{"a margin under the farm's limit, held to it", job(nil), loose, PressMargin, "5m", "farm"},
 		{"within the limit, looser than the farm", job(nil), loose, PressAfter, "6h", "project"},
 		{"background wait past the farm's limit", job(nil), loose, YieldBackgroundWait, "30m", "farm"},
 		{"a job's shorter background wait", job(map[string]string{YieldBackgroundWait: "10m"}), loose, YieldBackgroundWait, "10m", "job"},
@@ -91,17 +91,61 @@ func TestValue(t *testing.T) {
 	}
 }
 
-// The farm sets its limits on project values.
-func TestSetLimits(t *testing.T) {
-	defer SetLimits(map[string]string{AsksMax: "10"})
+// The farm sets its values and limits; a project's value past a limit is
+// held to it, and says why; a malformed farm policy changes nothing.
+func TestSetFarm(t *testing.T) {
+	defer func(a, r Setting) {
+		if err := SetFarm(map[string]Setting{AsksMax: a, RecheckMax: r}); err != nil {
+			t.Fatal(err)
+		}
+	}(Farm(AsksMax), Farm(RecheckMax))
 	proj := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{
-		Policy: &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "8"}}}}}
-	if v, _ := Value(nil, proj, -1, AsksMax); v != "8" {
-		t.Fatalf("within the default limit: %s", v)
+		Policy: &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "50"}}}}}
+	if err := SetFarm(map[string]Setting{AsksMax: {Value: "4", Limit: "8"}, RecheckMax: {Value: "2"}}); err != nil {
+		t.Fatal(err)
 	}
-	SetLimits(map[string]string{AsksMax: "5", RecheckMax: "many"})
-	if v, _ := Value(nil, proj, -1, AsksMax); v != "3" || Limit(RecheckMax) != "10" {
-		t.Fatalf("past a farm's limit of 5: %s; a malformed limit: %s", v, Limit(RecheckMax))
+	if v, from := Value(nil, nil, -1, AsksMax); v != "4" || from.Scope != "farm" {
+		t.Fatalf("the farm's value: %s from %+v", v, from)
+	}
+	v, from := Value(nil, proj, -1, AsksMax)
+	if v != "8" || from.Scope != "farm" || from.Ref != "limit" || from.Note != "project show asked for 50, past the farm's limit of 8" {
+		t.Fatalf("past the limit: %s from %+v", v, from)
+	}
+	_, u := Int(nil, proj, -1, AsksMax)
+	if r := Record(u); r[0]["from"].(map[string]any)["note"] == nil || Work(u)[0].From.Note == "" {
+		t.Fatalf("the record does not say why: %v", r)
+	}
+	for _, bad := range []map[string]Setting{
+		{"asks.many": {Value: "1"}},
+		{AsksMax: {Value: "lots"}},
+		{AsksMax: {Limit: "0"}},
+		{Answers: {Limit: "lead"}},
+	} {
+		if err := SetFarm(bad); err == nil {
+			t.Errorf("%v taken", bad)
+		}
+	}
+	if s := Farm(AsksMax); s.Value != "4" || s.Limit != "8" {
+		t.Fatalf("a refused policy changed the farm: %+v", s)
+	}
+}
+
+// Values are read while the farm's policy changes (go test -race).
+func TestSetFarmRaces(t *testing.T) {
+	done := make(chan bool)
+	go func() {
+		for k := 0; k < 200; k++ {
+			_ = SetFarm(map[string]Setting{RecheckSeconds: {Value: "300", Limit: "900"}})
+		}
+		close(done)
+	}()
+	for {
+		select {
+		case <-done:
+			return
+		default:
+			Value(nil, nil, -1, RecheckSeconds)
+		}
 	}
 }
 

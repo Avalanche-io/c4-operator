@@ -720,7 +720,8 @@ type WorkPolicyUse struct {
 	From  WorkPolicyFrom `json:"from"`
 }
 
-// WorkPolicyFrom is where a policy value came from.
+// WorkPolicyFrom is where a policy value came from. Note says why a value
+// asked for was not taken (a project's past the farm's limit).
 type WorkPolicyFrom struct {
 	// Scope is farm, project, job or unit.
 	Scope string `json:"scope"`
@@ -730,6 +731,8 @@ type WorkPolicyFrom struct {
 	SetBy string `json:"setBy,omitempty"`
 	// +optional
 	Record string `json:"record,omitempty"`
+	// +optional
+	Note string `json:"note,omitempty"`
 }
 
 // WorkExpansion is one generator's evaluation: its expansion document

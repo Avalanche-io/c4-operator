@@ -419,12 +419,17 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		// usagelimit.go)
 		aj.Estimate.Message = j.Namespace + "/" + j.Name + " is " + c.Message + "."
 	}
-	if st.Phase == "Held" && aj.Estimate.Message == "" {
-		aj.Estimate.Message = j.Namespace + "/" + j.Name + " is held: no new units are released."
-		if q := openQuestion(st); q != "" {
-			// held on a unit's question, not by a person (Job.Needs)
-			aj.Estimate.Message = j.Namespace + "/" + j.Name + " is waiting on a question: " + q
+	byPerson := j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop
+	if q := openQuestion(st); q != "" && st.Phase == "Held" && !byPerson {
+		// Held on a unit's question, not by a person (Job.Needs): the
+		// question is what it waits on, whatever else the estimate says.
+		msg := j.Namespace + "/" + j.Name + " is waiting on a question: " + q
+		if risk := aj.Estimate.Message; risk != "" {
+			msg += ". " + risk
 		}
+		aj.Estimate.Message = msg
+	} else if st.Phase == "Held" && aj.Estimate.Message == "" {
+		aj.Estimate.Message = j.Namespace + "/" + j.Name + " is held: no new units are released."
 	}
 	for _, cr := range m.crs {
 		if cr.Spec.Approved || !strings.Contains(cr.Name, "-approve-") {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -187,5 +188,93 @@ func TestWithdrawNeeds(t *testing.T) {
 	if err := json.Unmarshal([]byte(live.Annotations[c4v1.AnnotationWithdrawNeeds]), &reqs); err != nil || len(reqs) != 1 ||
 		reqs[0].Why != "the client chose 24 in the kickoff" || reqs[0].Unit != "7" || reqs[0].Actor != "dana" {
 		t.Fatalf("requests %v %s", err, live.Annotations[c4v1.AnnotationWithdrawNeeds])
+	}
+}
+
+// Supply and withdraw decide on the live job, before anything is signed:
+// a question settled since the snapshot, one with an answer already on its
+// way, or one in a finished job takes none, and nothing is written. The
+// question shows whenever the job waits on it, and only then.
+func TestQuestionControlsReadTheLiveJob(t *testing.T) {
+	s := farm(t)
+	ctx := context.Background()
+	rec := s.m.byKey["show-a/sh040-light-v007"]
+	at := metav1.NewTime(time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC))
+	open := c4v1.WorkJobStatus{Phase: "Held", UnitStates: map[string]string{"succeeded": "0-5,8-9", "needs": "6-7"},
+		Units: c4v1.UnitCounts{Total: 10, Succeeded: 8, Needs: 2},
+		Needs: map[string]c4v1.WorkNeeds{"6": {Text: "the codec", At: at, State: "raised"}, "7": {Text: "the delivery frame rate", At: at, State: "raised"}},
+		Conditions: []metav1.Condition{{Type: c4v1.ConditionNeedsPerson, Status: metav1.ConditionTrue, Reason: c4v1.NeedsInformation,
+			Message: "needs information: the codec", LastTransitionTime: at}}}
+	rec.job.Status = *open.DeepCopy()
+	rec.job.Status.Estimate = &c4v1.WorkEstimate{Message: "misses its deadline by 2h", AtRisk: true}
+	live := rec.job.DeepCopy()
+	// Since the snapshot: 6 was withdrawn, and 7 has a supply on its way.
+	w6 := live.Status.Needs["6"]
+	w6.State, w6.Withdrawn = "withdrawn", &c4v1.WorkWithdrawal{By: "lead", Why: "moot", At: at}
+	live.Status.Needs["6"] = w6
+	live.Annotations = map[string]string{c4v1.AnnotationSupply: `[{"token":"` + strconv.FormatInt(at.UnixNano(), 36) + `","unit":"7","text":"24","actor":"dana"}]`}
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c4v1.AddToScheme(scheme)
+	s.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(live).WithStatusSubresource(live).Build()
+	if err := s.Client.Status().Update(ctx, live); err != nil {
+		t.Fatal(err)
+	}
+
+	var snap api.Snapshot
+	get(t, s, "/api/v1/snapshot?as=wrangler", &snap)
+	for _, j := range snap.Jobs {
+		if j.Name == "sh040-light-v007" && j.Estimate.Message != "show-a/sh040-light-v007 is waiting on a question: the codec. misses its deadline by 2h" {
+			t.Fatalf("message %q", j.Estimate.Message)
+		}
+	}
+	post := func(path, body string) (int, string) {
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/show-a/sh040-light-v007/"+path+"?as=wrangler", strings.NewReader(body)))
+		return w.Code, w.Body.String()
+	}
+	for _, c := range []struct{ path, body, want string }{
+		{"supply", `{"unit": 6, "text": "H.264"}`, "is not waiting for information"},
+		{"needs/6/withdraw", `{"why": "moot"}`, "has no open question"},
+		{"supply", `{"unit": 7, "text": "25"}`, "already has an answer on its way"},
+		// a supply on its way settles it first
+		{"needs/7/withdraw", `{"why": "moot"}`, "already has an answer on its way"},
+	} {
+		if code, out := post(c.path, c.body); code != http.StatusConflict || !strings.Contains(out, c.want) {
+			t.Errorf("%s %s: %d %s, want %q", c.path, c.body, code, out, c.want)
+		}
+	}
+	var after c4v1.WorkJob
+	if err := s.Client.Get(ctx, client.ObjectKey{Namespace: "show-a", Name: "sh040-light-v007"}, &after); err != nil {
+		t.Fatal(err)
+	}
+	if r := after.Annotations[c4v1.AnnotationControlRecords]; r != "" || after.Annotations[c4v1.AnnotationWithdrawNeeds] != "" {
+		t.Fatalf("refused controls were signed or written: %v", after.Annotations)
+	}
+
+	// A finished job: requeue it, then answer.
+	done := live.DeepCopy()
+	done.ResourceVersion, done.Annotations = "", nil
+	done.Status = *open.DeepCopy()
+	done.Status.Phase, done.Status.Finished = "Failed", &at
+	done.Status.UnitStates["failed"] = "5"
+	rec.job = *done.DeepCopy()
+	s.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(done).WithStatusSubresource(done).Build()
+	if err := s.Client.Status().Update(ctx, done); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := post("supply", `{"unit": 7, "text": "24"}`); code != http.StatusConflict || !strings.Contains(out, "sh040-light-v007 failed; requeue it, then answer") {
+		t.Fatalf("a finished job: %d %s", code, out)
+	}
+
+	// A job a person held shows the hold, not the question.
+	held := open.DeepCopy()
+	rec.job.Status = *held
+	rec.job.Spec.Nudge.Hold = true
+	get(t, s, "/api/v1/snapshot?as=wrangler", &snap)
+	for _, j := range snap.Jobs {
+		if j.Name == "sh040-light-v007" && j.Estimate.Message != "show-a/sh040-light-v007 is held: no new units are released." {
+			t.Fatalf("a person's hold: %q", j.Estimate.Message)
+		}
 	}
 }
