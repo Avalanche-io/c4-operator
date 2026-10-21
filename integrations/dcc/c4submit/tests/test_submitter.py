@@ -429,3 +429,16 @@ def test_a_sequence_read_over_each_jobs_frames(tmp_path, farm, nocache):
     assert smoke == [f"fx/smoke.{f}.vdb" for f in range(1001, 1011)], "the frames of the job that reads it, not all 60"
     d.tick("Write_main", False)
     assert not any(r.startswith("fx/") for r in prepare(d).collection.files), "no ticked job reads it"
+
+
+def test_handles_read_the_frames_around_each_job(tmp_path, farm):
+    from c4submit.host import JOB_FRAMES
+    show = str(tmp_path)
+    for f in range(995, 1061):
+        write(os.path.join(show, "fx", f"trail.{f:04d}.bgeo"), b"%d" % f)
+    host = comp_scene(tmp_path, extra_deps=[
+        Dependency(os.path.join(show, "fx", "trail.####.bgeo"), JOB_FRAMES, node="Trail", handles=(2, 1))])
+    host._renderables[0].frames = host._renderables[1].frames = "1001-1010"
+    col = prepare(draft_for(host, farm)).collection
+    got = sorted(int(r.split(".")[1]) for r in col.files if r.startswith("fx/"))
+    assert got == list(range(999, 1012)), "two before, one after"

@@ -48,6 +48,9 @@ class Dependency:
     node: str = ""                     # who reads it, for messages
     renderables: Optional[List[str]] = None   # the renderables that read it ([] none of them); None, not known
     optional: bool = False             # missing is a warning, not an error
+    # With JOB_FRAMES: frames read before and after each job's range, for
+    # motion blur or a trail that reads its neighbours.
+    handles: Tuple[int, int] = (0, 0)
 
 
 class Host:

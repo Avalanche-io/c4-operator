@@ -26,7 +26,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from c4submit import collect as collectlib
 from c4submit import frames as framelib
@@ -250,9 +250,10 @@ def _to_tree_path(root: str, value: Any) -> Any:
 
 
 def _frames_of_jobs(draft: "Draft", keys: Dict[str, Optional[Renderable]],
-                    readers: Optional[List[str]]) -> Optional[str]:
+                    readers: Optional[List[str]], handles: Tuple[int, int] = (0, 0)) -> Optional[str]:
     """The frames of the jobs that read a file (every job when ``readers``
-    is None), as one frame list; None when no job has frames."""
+    is None), widened by ``handles`` frames before and after each, as one
+    frame list; None when no job has frames."""
     frames: set = set()
     for r in keys.values():
         if readers is not None and r is not None and r.name not in readers:
@@ -261,9 +262,12 @@ def _frames_of_jobs(draft: "Draft", keys: Dict[str, Optional[Renderable]],
         if not expr:
             continue
         try:
-            frames.update(framelib.parse(expr))
+            fs = framelib.parse(expr)
         except framelib.FrameError:
             continue
+        before, after = handles
+        for f in fs:
+            frames.update(range(f - max(before, 0), f + max(after, 0) + 1))
     return framelib.format(frames) if frames else None
 
 
@@ -382,7 +386,7 @@ def prepare(draft: Draft) -> Prepared:
         if seq.canonical(d.path) in outputs:
             continue
         if d.frames == JOB_FRAMES:
-            d = dataclasses.replace(d, frames=_frames_of_jobs(draft, keys, d.renderables))
+            d = dataclasses.replace(d, frames=_frames_of_jobs(draft, keys, d.renderables, d.handles))
         deps.append(d)
     col = collectlib.gather(draft.root, draft.scene_file, deps)
     problems += [Problem("warning", "scene", w) for w in host.warnings()]
