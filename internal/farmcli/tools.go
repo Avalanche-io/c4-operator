@@ -568,8 +568,7 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	}
 	shot := a.Shot
 	if shot == "" && rel != "." {
-		shot = strings.TrimSuffix(filepath.Base(rel), filepath.Ext(rel))
-		shot, _, _ = strings.Cut(shot, ".") // sm0140.$F4.exr names the shot sm0140
+		shot = shotOf(root, rel)
 	}
 	doc := map[string]any{"c4": "submit/1", "project": a.Project, "tree": root, "jobs": map[string]any{key: job}}
 	if shot != "" {
@@ -585,6 +584,27 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	}
 	return submitDoc(ctx, c, o, d, "", SubmitFileArgs{Project: a.Project, DryRun: a.DryRun, Yes: a.Yes})
 }
+
+// shotOf is the shot an asset belongs to: the first name along the tree's
+// root and the asset's path that reads as a shot code (sm0140/geo,
+// sm0140/sm0140.usda and, in a root named sm0140, plates/x.$F4.exr are all
+// sm0140), else the asset's own name.
+func shotOf(root, rel string) string {
+	names := []string{filepath.Base(root)}
+	names = append(names, strings.Split(filepath.ToSlash(rel), "/")...)
+	for _, n := range names {
+		n, _, _ = strings.Cut(n, ".")
+		if shotCode.MatchString(n) {
+			return n
+		}
+	}
+	last, _, _ := strings.Cut(names[len(names)-1], ".")
+	return last
+}
+
+// shotCode is how shots are named: letters, then three or more digits,
+// then perhaps a suffix (sm0140, sh0420, sm0220_fx).
+var shotCode = regexp.MustCompile(`^[A-Za-z]{1,4}[0-9]{3,}([_-][A-Za-z0-9]+)?$`)
 
 // localRegistryLacks is the farm refusing an image its local registry
 // (c4 farm up's) does not hold, and the image it names.

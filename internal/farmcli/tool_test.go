@@ -376,3 +376,15 @@ func TestSubmissionKeepsItsOrder(t *testing.T) {
 		t.Errorf("sent\n%s\nwant\n%s", b, want)
 	}
 }
+
+// A tool's job takes its shot from the folder its asset is in at the top
+// of the project, not from the asset's own name.
+func TestShotOfAnAsset(t *testing.T) {
+	for rel, want := range map[string]string{"saltmarsh/sm0140/geo": "sm0140", "saltmarsh/sm0140/sm0140.usda": "sm0140",
+		"sm0140/plates/x.$F4.exr": "sm0140", "saltmarsh/sm0140.$F4.exr": "sm0140", "saltmarsh/sm0220_fx": "sm0220_fx", "work/notes": "notes"} {
+		root, rel, _ := strings.Cut(rel, "/")
+		if got := shotOf("/home/td/"+root, rel); got != want {
+			t.Errorf("shotOf(%q) = %q, want %q", rel, got, want)
+		}
+	}
+}
