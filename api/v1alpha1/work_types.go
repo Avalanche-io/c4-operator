@@ -478,6 +478,9 @@ type WorkJobStatus struct {
 	// (AnnotationWithdrawNeeds).
 	// +optional
 	Withdrawn string `json:"withdrawn,omitempty"`
+	// UsageLimits are the units held for a model's usage limit, by index.
+	// +optional
+	UsageLimits map[string]WorkUsageLimit `json:"usageLimits,omitempty"`
 	// Requeued is the token of the last requeue request carried out.
 	// +optional
 	Requeued string `json:"requeued,omitempty"`
@@ -1280,6 +1283,29 @@ const (
 	NeedsInformation = "NeedsInformation"
 	NeedsExitCode    = 12
 )
+
+// UsageLimitExitCode is the exit status of a unit attempt (a pod block's
+// turn) that hit a model's usage limit: not the unit's failure. Its
+// termination message is "usage limit: <the CLI's words>", with " (until
+// <RFC 3339>)" when the limit said when it resets. The queue spends no
+// retry, holds the unit until then (or usage.limitProbe), and resumes it
+// from its view (status.usageLimits, condition UsageLimit).
+const UsageLimitExitCode = 75
+
+// ConditionUsageLimit is True while units of the job wait for a model's
+// usage limit to reset; its message says until when.
+const ConditionUsageLimit = "UsageLimit"
+
+// WorkUsageLimit is a unit held for a model's usage limit: what the limit
+// said, when it hit, and until when the unit waits (Probe when the limit
+// did not say, and the wait is usage.limitProbe).
+type WorkUsageLimit struct {
+	Why   string      `json:"why"`
+	At    metav1.Time `json:"at"`
+	Until metav1.Time `json:"until"`
+	// +optional
+	Probe bool `json:"probe,omitempty"`
+}
 
 // Withdrawn is the reason of a re-check attempt (AnnotationRecheck) whose
 // block withdrew its question, with the why as the pod's message (a host

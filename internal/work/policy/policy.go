@@ -35,6 +35,14 @@ const (
 	// RecheckSeconds is how long one re-check may run, in seconds (300):
 	// the block's turn ($C4_RECHECK_SECONDS) and the pod's deadline.
 	RecheckSeconds = "escalation.recheck.seconds"
+	// UsageLimitProbe is how long a unit that hit a model's usage limit
+	// waits before it tries again when the limit did not say when it
+	// resets (30m).
+	UsageLimitProbe = "usage.limitProbe"
+	// YieldBackgroundWait is how long a member's yield waits for its
+	// background work to report before it stops anyway
+	// ($C4_YIELD_BACKGROUND_WAIT, 30m).
+	YieldBackgroundWait = "yield.backgroundWait"
 	// AsksMax is how many questions a unit may have open (3).
 	AsksMax = "asks.max"
 	// Answers is who answers a unit's questions, in order: unit names of
@@ -87,22 +95,25 @@ func (f From) String() string {
 
 // tighter says whether a job's value a may replace b: a stricter value.
 var tighter = map[string]func(a, b string) bool{
-	PressAfter:         func(a, b string) bool { return dur(a) <= dur(b) },
-	PressMargin:        func(a, b string) bool { return dur(a) >= dur(b) },
-	RecheckMinInterval: func(a, b string) bool { return dur(a) >= dur(b) },
-	RecheckMax:         func(a, b string) bool { return num(a) <= num(b) },
-	RecheckSeconds:     func(a, b string) bool { return num(a) <= num(b) },
-	AsksMax:            func(a, b string) bool { return num(a) <= num(b) },
+	PressAfter:          func(a, b string) bool { return dur(a) <= dur(b) },
+	PressMargin:         func(a, b string) bool { return dur(a) >= dur(b) },
+	RecheckMinInterval:  func(a, b string) bool { return dur(a) >= dur(b) },
+	RecheckMax:          func(a, b string) bool { return num(a) <= num(b) },
+	RecheckSeconds:      func(a, b string) bool { return num(a) <= num(b) },
+	YieldBackgroundWait: func(a, b string) bool { return dur(a) <= dur(b) },
+	AsksMax:             func(a, b string) bool { return num(a) <= num(b) },
 }
 
 var defaults = map[string]string{
-	PressAfter:         "2h",
-	PressMargin:        "15m",
-	RecheckMax:         "5",
-	RecheckMinInterval: "10m",
-	RecheckSeconds:     "300",
-	AsksMax:            "3",
-	Answers:            "",
+	PressAfter:          "2h",
+	PressMargin:         "15m",
+	RecheckMax:          "5",
+	RecheckMinInterval:  "10m",
+	RecheckSeconds:      "300",
+	UsageLimitProbe:     "30m",
+	YieldBackgroundWait: "30m",
+	AsksMax:             "3",
+	Answers:             "",
 	// A submission's, read for its project; the sweep's, for the farm.
 	SubmissionPendingFor: "10m",
 	SubmissionSweepEvery: "1m",
@@ -121,6 +132,9 @@ var limits = map[string]string{
 	RecheckMax:         "10",
 	RecheckSeconds:     "900",
 	AsksMax:            "10",
+	// a member's slot is held while it waits: no project waits longer
+	// than the farm
+	YieldBackgroundWait: "30m",
 }
 
 // SetLimits sets the farm's limits on project values, by key; a malformed
@@ -145,13 +159,15 @@ func withinLimit(key, s string) bool {
 // jobParam is where a job sets each key; the older names stay the
 // params jobs already use.
 var jobParam = map[string]string{
-	PressAfter:         PressAfter,
-	PressMargin:        PressMargin,
-	RecheckMax:         RecheckMax,
-	RecheckMinInterval: RecheckMinInterval,
-	RecheckSeconds:     RecheckSeconds,
-	AsksMax:            "maxAsks",
-	Answers:            "answerer",
+	PressAfter:          PressAfter,
+	PressMargin:         PressMargin,
+	RecheckMax:          RecheckMax,
+	RecheckMinInterval:  RecheckMinInterval,
+	RecheckSeconds:      RecheckSeconds,
+	UsageLimitProbe:     UsageLimitProbe,
+	YieldBackgroundWait: YieldBackgroundWait,
+	AsksMax:             "maxAsks",
+	Answers:             "answerer",
 }
 
 // Value is key's value for unit of job (unit -1 for the job), and where
@@ -268,7 +284,7 @@ func valid(key, s string) bool {
 		// back, or the sweep takes one still being made.
 		d, err := time.ParseDuration(s)
 		return err == nil && d >= SubmissionPendingFloor
-	case SubmissionSweepEvery, SubmissionKeyFor:
+	case SubmissionSweepEvery, SubmissionKeyFor, UsageLimitProbe, YieldBackgroundWait:
 		d, err := time.ParseDuration(s)
 		return err == nil && d > 0
 	case RecheckMax:

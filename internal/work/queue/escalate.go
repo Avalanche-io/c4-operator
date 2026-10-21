@@ -26,9 +26,10 @@ import (
 // the block itself on a re-check.
 //
 // A re-check is an extra attempt of the unit, like a wake (asks.go):
-// AnnotationRecheck, $C4_RECHECK, $C4_NEEDED, $C4_RECHECK_WHY and
-// $C4_RECHECK_SECONDS (escalation.recheck.seconds, which also bounds the
-// pod), mounting the job's inputs and the unit's resume view as they are
+// AnnotationRecheck, $C4_RECHECK, $C4_NEEDED (with $C4_NEEDED_WHY and
+// $C4_NEEDED_ABOUT, so a tool's runner can ask the same again),
+// $C4_RECHECK_WHY and $C4_RECHECK_SECONDS (escalation.recheck.seconds,
+// which also bounds the pod), mounting the job's inputs and the unit's resume view as they are
 // now. Events start it, never a clock: a unit it waits on or reads
 // succeeds, a unit or path it is about changes, the unit table grows, or a
 // job it is about or reads from finishes. Only units whose reasoning is a
@@ -371,6 +372,8 @@ func recheckPod(pod *corev1.Pod, n *needsRec, why string, seconds int) {
 		pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env,
 			corev1.EnvVar{Name: "C4_RECHECK", Value: "1"},
 			corev1.EnvVar{Name: "C4_NEEDED", Value: n.text},
+			corev1.EnvVar{Name: "C4_NEEDED_WHY", Value: n.why},
+			corev1.EnvVar{Name: "C4_NEEDED_ABOUT", Value: strings.Join(n.about, ", ")},
 			corev1.EnvVar{Name: "C4_RECHECK_WHY", Value: why},
 			corev1.EnvVar{Name: "C4_RECHECK_SECONDS", Value: strconv.Itoa(seconds)})
 	}

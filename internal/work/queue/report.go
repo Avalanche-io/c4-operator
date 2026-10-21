@@ -219,6 +219,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.Rounds = roundsStatus(m.plan, m, v.roundsExp)
 	st.Steered, st.Steers = m.steered, steerStatus(m)
 	st.Supplied, st.Withdrawn, st.Needs = m.supplied, m.withdrawn, needsStatus(m)
+	st.UsageLimits = usageStatus(m)
+	q.usageCondition(&st, v)
 	st.Asks = askStatus(m)
 	taken := map[int]bool{}
 	for _, a := range st.Acks {

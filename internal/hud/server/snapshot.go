@@ -414,6 +414,11 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		}
 	}
 	aj.Estimate.Risk = shownRisk(m.at, st, aj.Estimate.Risk)
+	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionUsageLimit); c != nil && c.Status == metav1.ConditionTrue && aj.Estimate.Message == "" {
+		// units wait for a model's usage limit to reset (the queue's
+		// usagelimit.go)
+		aj.Estimate.Message = j.Namespace + "/" + j.Name + " is " + c.Message + "."
+	}
 	if st.Phase == "Held" && aj.Estimate.Message == "" {
 		aj.Estimate.Message = j.Namespace + "/" + j.Name + " is held: no new units are released."
 		if q := openQuestion(st); q != "" {

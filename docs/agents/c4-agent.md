@@ -366,7 +366,11 @@ so ("usage limit: You've hit your session limit · resets 1:10am ..."). The
 queue yields and holds members as for any drop in capacity, and brings them
 back when the slots return. In a pod, a turn that hits a limit ends the
 attempt with exit 75 and the limit as its message, not as the block giving
-up.
+up. The queue spends no retry on it: it keeps the view the attempt
+captured, holds the unit until the limit resets (`until` in the message,
+or the farm's `usage.limitProbe`, 30 minutes, when it gave none), and
+then runs it again from that view. The job says why (condition
+`UsageLimit`, "waiting for the model's usage limit to reset at 21:40").
 
 **An idle member is woken for its messages.** A member idle between turns
 does not see a message until it takes a turn, and the CLI cannot put one
@@ -413,8 +417,9 @@ stop:
   `c4-agent yield` keep the session running until the work reports (the
   session takes a new turn with its result, and the stop comes at the end
   of that turn).
-- **The wait is bounded.** It lasts `C4_YIELD_BACKGROUND_WAIT` (default
-  30 minutes), and never past the farm's own deadline for the stop: a
+- **The wait is bounded.** It lasts `C4_YIELD_BACKGROUND_WAIT` (the
+  farm's `yield.backgroundWait`, 30 minutes by default; a project or job
+  may shorten it, never lengthen it), and never past the farm's own deadline for the stop: a
   minute before a soft stop's `yield-by` (10 minutes after the request),
   30 seconds before a deleting pod's grace ends. So the farm never has to
   kill the session with its work unrecorded.

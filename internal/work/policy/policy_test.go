@@ -46,7 +46,7 @@ func TestValue(t *testing.T) {
 		Policy:     &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "2", Answers: "lead", RecheckSeconds: "120", PressAfter: "soon"}},
 		Escalation: &c4v1.ProjectEscalation{PressAfter: &metav1.Duration{Duration: time.Hour}}}}}
 	loose := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{
-		Policy: &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "50", RecheckMax: "99", RecheckSeconds: "5000", PressMargin: "1m", PressAfter: "6h"}}}}}
+		Policy: &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "50", RecheckMax: "99", RecheckSeconds: "5000", PressMargin: "1m", PressAfter: "6h", YieldBackgroundWait: "2h"}}}}}
 	cases = append(cases, []struct {
 		name         string
 		job          *c4v1.WorkJob
@@ -67,6 +67,10 @@ func TestValue(t *testing.T) {
 		{"recheck seconds past the farm's limit", job(nil), loose, RecheckSeconds, "300", "farm"},
 		{"a margin under the farm's limit", job(nil), loose, PressMargin, "15m", "farm"},
 		{"within the limit, looser than the farm", job(nil), loose, PressAfter, "6h", "project"},
+		{"background wait past the farm's limit", job(nil), loose, YieldBackgroundWait, "30m", "farm"},
+		{"a job's shorter background wait", job(map[string]string{YieldBackgroundWait: "10m"}), loose, YieldBackgroundWait, "10m", "job"},
+		{"a probe", job(map[string]string{UsageLimitProbe: "5m"}), nil, UsageLimitProbe, "5m", "job"},
+		{"no zero probe", job(map[string]string{UsageLimitProbe: "0s"}), nil, UsageLimitProbe, "30m", "farm"},
 	}...)
 	for _, c := range cases {
 		v, from := Value(c.job, c.project, -1, c.key)

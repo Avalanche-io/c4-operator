@@ -191,7 +191,8 @@ func TestNeedsRecheck(t *testing.T) {
 	p := podOfUnit(t, ns, "rechecked", 1)
 	c := p.Spec.Containers[0]
 	if p.Annotations[c4v1.AnnotationRecheck] != "grade finished" || envOf(c, "C4_RECHECK") != "1" || envOf(c, "C4_NEEDED") != "the delivery frame rate" ||
-		envOf(c, "C4_RECHECK_WHY") != "grade finished" || envOf(c, "C4_RECHECK_SECONDS") != "300" {
+		envOf(c, "C4_RECHECK_WHY") != "grade finished" || envOf(c, "C4_RECHECK_SECONDS") != "300" ||
+		envOf(c, "C4_NEEDED_WHY") != "the brief gives 24 and 25" || envOf(c, "C4_NEEDED_ABOUT") != "unit:grade, job:plates" {
 		t.Fatalf("re-check pod: %v %v", p.Annotations, c.Env)
 	}
 	if hasPod(t, ns, "rechecked", 4) {

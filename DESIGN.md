@@ -2124,6 +2124,14 @@ and a sweep planner that spawns trials are all generators.
       minInterval; a lower recheck.max, recheck.seconds or asks.max). A decision a value
       made names it, its value and where it came from (`policy: [{key,
       value, from}]`) in its record and its book entry.
+    - **A usage limit is the model's capacity, not a failure.** A pod
+      block's turn at a model's usage limit exits 75 with "usage limit:
+      <the CLI's words> (until <RFC 3339>)". The queue spends no retry,
+      keeps the attempt's view, holds the unit until the reset (or
+      `usage.limitProbe`, 30m, when it gave none), books the wait as a
+      yield and a `usage-limit` decision, says so (condition
+      `UsageLimit`), and resumes the unit from its view. Host runners
+      take their slots away until the reset themselves.
     - **A person answering on purpose** (a creative approval) is a step
       in the graph: a wait or a verdict, decided as above.
   - **Agents answer agents** (Joshua). A unit that

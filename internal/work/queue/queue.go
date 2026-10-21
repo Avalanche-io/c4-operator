@@ -320,6 +320,9 @@ type jobMem struct {
 	needs     map[int]*needsRec
 	supplied  string
 	withdrawn string
+	// usage are the units waiting for a model's usage limit to reset
+	// (usagelimit.go).
+	usage map[int]*usageRec
 	// asks are the questions units asked one another, and woken the ones
 	// a finished answerer was woken for (asks.go).
 	asks  []*askRec
@@ -411,6 +414,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.loadWaits(st)
 	m.loadSteers(st)
 	m.loadNeeds(st)
+	m.loadUsage(st)
 	m.loadCauses(st)
 	m.loadAsks(st)
 	m.loadLoops(st)
@@ -1081,6 +1085,15 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				m.foldedPod[p.UID] = true
 			}
 			v.done = append(v.done, p)
+		case p.Status.Phase == corev1.PodFailed && isUsageLimit(p):
+			// It hit a model's usage limit: the model's capacity, not the
+			// unit's failure (usagelimit.go).
+			q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6)
+			if !m.failed[idx] && !m.succeeded[idx] && !m.foldedPod[p.UID] {
+				q.noteUsageLimit(ctx, v, idx, p, d, now)
+				m.foldedPod[p.UID] = true
+			}
+			v.done = append(v.done, p)
 		case p.Status.Phase == corev1.PodFailed && isNeeds(p):
 			// It stopped for information its brief lacked: no retry, no
 			// mark on the node (needs.go).
@@ -1192,6 +1205,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	v.serveWakes()
 	q.serveWaits(v, now)
 	applyHolds(v)
+	v.holdUsageLimits(now)
 	q.estimate(v, now)
 	q.escalate(ctx, v, phases, now)
 	return v
@@ -1291,6 +1305,10 @@ func (q *Queue) estimate(v *view, now time.Time) {
 			queued = append(queued, unit(idx))
 		}
 	}
+	for idx := range v.mem.usage {
+		// a unit waiting for a usage limit runs again once it resets
+		queued = append(queued, unit(idx))
+	}
 	for idx, r := range v.running {
 		ru := estimate.RunningUnit{Unit: unit(idx), Elapsed: math.Max(0, now.Sub(r.started).Seconds())}
 		if pod := v.pods[idx]; pod != nil {
@@ -1331,6 +1349,10 @@ func (q *Queue) estimate(v *view, now time.Time) {
 			u := plan.Units[idx]
 			rem[idx] += math.Max(0, e.Predict(u.Key, u.Pos).Mean-retained(idx))
 		}
+	}
+	for idx, r := range v.mem.usage {
+		u := plan.Units[idx]
+		rem[idx] = math.Max(0, r.until.Sub(now).Seconds()) + math.Max(0, e.Predict(u.Key, u.Pos).Mean-retained(idx))
 	}
 	for idx, r := range v.running {
 		u := plan.Units[idx]
@@ -1919,6 +1941,7 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	if w := v.mem.blockDecision(idx); w != nil {
 		applyDecision(pod, j.Name, idx, w)
 	}
+	env = append(env, q.backgroundWaitEnv(v, idx)...)
 	if e := suppliedEnv(v.mem, idx); e != nil {
 		for c := range pod.Spec.Containers {
 			pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, e...)

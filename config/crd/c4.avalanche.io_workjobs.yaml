@@ -1854,6 +1854,31 @@ spec:
                     format: int32
                     type: integer
                 type: object
+              usageLimits:
+                additionalProperties:
+                  description: |-
+                    WorkUsageLimit is a unit held for a model's usage limit: what the limit
+                    said, when it hit, and until when the unit waits (Probe when the limit
+                    did not say, and the wait is usage.limitProbe).
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    probe:
+                      type: boolean
+                    until:
+                      format: date-time
+                      type: string
+                    why:
+                      type: string
+                  required:
+                  - at
+                  - until
+                  - why
+                  type: object
+                description: UsageLimits are the units held for a model's usage limit,
+                  by index.
+                type: object
               verdicts:
                 description: |-
                   Verdicts lists the most recent verdicts review units wrote, each
