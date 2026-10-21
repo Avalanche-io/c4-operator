@@ -206,3 +206,51 @@ summary should change as stated.
 14. **A large script** (a few thousand nodes). **Expect:** ticking boxes
     stays instant and Check starts within a second or two. Every scene read
     walks the whole graph.
+
+## The nuke-render tool (each one a [guess] about Nuke's command line)
+
+Run these on the studio's Nuke image (or a render machine) after setting
+`runs.image` in `tools/nuke-render/tool.yaml`. `c4 farm tool test
+tools/nuke-render` runs the tool's test as a unit runs it.
+
+1. **The test.** **Expect:** `c4 farm tool test` passes, with
+   `comp/out/test.1001.exr` and `test.1002.exr` written, and two
+   `c4_frame:` lines in the log. **[guess]** that `test/comp/test.nk`, a
+   hand-written script (a Constant into a Write whose file is
+   `[file dirname [value root.name]]/out/test.####.exr`), opens in Nuke 14
+   to 16.
+2. **Terminal mode.** **[guess]** that `nuke -m 4 -t nuke_render.py SCRIPT
+   WRITE PROXY` runs the script with `sys.argv` as `[nuke_render.py, SCRIPT,
+   WRITE, PROXY]`, as `__main__`, and exits with its `sys.exit` code.
+   **[guess]** that `-t` takes a render licence (`nuke_r`) as `-x` does,
+   not an interactive one; check the licence server's log. **[guess]**
+   that `-m` sets the threads `nuke.execute` uses.
+3. **One Write, frame by frame.** **[guess]** that `nuke.scriptOpen(path)`
+   opens the script without a dialog, and `nuke.execute(write, f, f, 1)`
+   renders that Write alone, as `-X` does. **Expect:** the other Writes
+   write nothing. If one `execute` per frame is much slower than one per
+   unit, note how much: the script can render a unit's run of frames at
+   once and report the frames after.
+4. **The file each frame writes.** **[guess]** that `nuke.filename(write)`
+   keeps `####` and `%04d` (and gives the proxy file in proxy mode), so the
+   script can check each frame's file. **Expect** a `c4_frame:` line per
+   frame with the real path. A Write with "create directories" off still
+   renders, because the script makes the folder first.
+5. **A Write inside a Group.** Submit `Group1.Write1`. **Expect:** it
+   renders. **[guess]** that `nuke.toNode("Group1.Write1")` finds it.
+6. **A missing input.** Delete a plate frame and render. **Expect:** the
+   unit fails with `c4_fail: permanent Nuke failed on frame …`, not
+   retried. **[guess]** that `nuke.execute` raises with Nuke's "Read error"
+   or "No such file or directory" text. Note the exact text; if it differs,
+   update `MISSING_INPUT` in `nuke_render.py`, and add it to the tool's
+   `errors.permanent`.
+7. **Path mapping.** Submit from a Windows machine whose project folder is
+   `S:\show`. **Expect:** Reads and the Write resolve under the job's tree.
+   **[guess]** that `nuke.addFilenameFilter(fn)` applies to every file knob
+   Nuke reads and writes, from before `scriptOpen`.
+8. **A home folder it cannot write.** Units run as an unprivileged user.
+   **[guess]** that Nuke starts with a read-only `$HOME` (its `.nuke`
+   folder). If it does not, set `NUKE_TEMP_DIR` and `HOME` in `runs.env`.
+9. **The licence error.** Run with no licence reachable. Note Nuke's exact
+   message and add it to the tool's `errors.licence`, so the farm waits
+   for a seat instead of spending a retry.

@@ -1,0 +1,60 @@
+c4: tool/1
+name: nuke-render
+title: Nuke render
+summary: Renders one Write node of a saved Nuke script over the job's frames, as nuke -x -X does, in the studio's own Nuke image.
+kind: frames
+runs:
+  # The studio's own Nuke image: set this to it before publishing.
+  image: registry.example.com/nuke:16.0
+  exe: nuke
+  host:
+    has: [nuke-16.0]
+    exe:
+      linux: /usr/local/Nuke16.0v1/Nuke16.0
+      windows: "C:/Program Files/Nuke16.0v1/Nuke16.0.exe"
+  # Terminal mode runs nuke_render.py in Nuke's Python: one licence, and a
+  # c4_frame line with each frame's file.
+  command: ["{{Run.Exe}}", -m, "{{Param.threads}}", -t, "{{Tool.Dir}}/nuke_render.py", "{{Param.script}}", "{{Param.write}}", "{{Param.proxy}}"]
+frames: {chunk: 4, order: binary}
+params:
+- name: script
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The saved Nuke script.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Script, fileFilters: [{label: Nuke, patterns: ["*.nk"]}]}
+- name: write
+  type: STRING
+  minLength: 1
+  description: The Write node to render, by its full name (Group1.Write1 for one inside a group). Each ticked Write node is its own job.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: Write node}
+- name: proxy
+  type: BOOL
+  default: false
+  description: Render in proxy mode, to the Write's proxy file at the script's proxy scale.
+  show: advanced
+  userInterface: {control: CHECK_BOX, label: Proxy mode}
+- name: threads
+  type: INT
+  default: 4
+  minValue: 1
+  maxValue: 128
+  description: Render threads. Keep it at the unit's CPUs; Nuke otherwise counts the whole machine's.
+  show: advanced
+  affectsOutput: false
+  userInterface: {control: SPIN_BOX, label: Threads}
+previews: "**/*.$F4.exr"
+# A ceiling until a measured run says otherwise. When the farm counts
+# licence seats, add licences: {foundry/nuke_r: 1} and network: [licences].
+needs: {cpu: 4, memory: 16G}
+retries: 2
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1002
+  with: {script: comp/test.nk, write: Write_test}
+  expect: [comp/out/test.1001.exr, comp/out/test.1002.exr]

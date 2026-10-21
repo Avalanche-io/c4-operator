@@ -1,0 +1,22 @@
+#! nuke -nx
+version 14.0 v5
+Root {
+ inputs 0
+ frame 1001
+ first_frame 1001
+ last_frame 1002
+ format "64 64 0 0 64 64 1 c4_test_64"
+}
+Constant {
+ inputs 0
+ channels rgb
+ color {0.18 0.18 0.18 1}
+ format "64 64 0 0 64 64 1 c4_test_64"
+ name Constant1
+}
+Write {
+ file "\[file dirname \[value root.name]]/out/test.####.exr"
+ file_type exr
+ create_directories true
+ name Write_test
+}
