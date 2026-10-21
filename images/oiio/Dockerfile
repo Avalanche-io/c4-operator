@@ -16,6 +16,9 @@ FROM ${GO} AS unit
 WORKDIR /src
 COPY go.mod go.sum ./
 COPY cmd/c4-unit ./cmd/c4-unit
+# the packages c4-unit imports from this module (images_test.go checks)
+COPY internal/needs ./internal/needs
+COPY schema ./schema
 RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/c4-unit ./cmd/c4-unit
 
 FROM ${DEBIAN}

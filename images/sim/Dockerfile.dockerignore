@@ -3,4 +3,6 @@
 !go.mod
 !go.sum
 !cmd/c4-unit/
+!internal/needs/
+!schema/
 !images/sim/
