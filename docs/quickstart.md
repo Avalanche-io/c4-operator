@@ -37,23 +37,23 @@ That is a farm, not a demo of one: render nodes in two pools (`cpu` and
 `gpu`), a burst pool the farm rents from only when a deadline needs it, a
 store that names every file by its C4 ID, a project (`saltmarsh`, Petrel &
 Finch's feature) and a sign-in for every role. The HUD opens in your
-browser. The prebuilt tools (render, comp, transcode, usd, sim, ci, lora and
-infer) are published to every project.
+browser. The prebuilt tools are published to every project:
 
 ```sh
 c4 farm tools
 ```
 
 ```
-ci         shards  v1    Repository tests · farm-wide
 comp       frames  v1    Composite · farm-wide
 infer      frames  v1    Model pass · farm-wide
-lora       train   v1    LoRA fine-tune · farm-wide
 render     frames  v1    USD render · farm-wide
 sim        frames  v1    Fluid sim bake · farm-wide
 transcode  once    v1    Review movie · farm-wide
 usd        once    v1    Flatten and check a USD stage · farm-wide
 ```
+
+Repository tests and LoRA training run too, as the farm's built-in jobs
+(`c4 farm submit ci DIR`, `c4 farm submit lora DIR`).
 
 ## 3. Get the sample shot
 
