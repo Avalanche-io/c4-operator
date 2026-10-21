@@ -341,6 +341,10 @@ func Link(hud string, v Viewer) string {
 	return fmt.Sprintf("%s/?as=%s", hud, v.Name)
 }
 
+// NeedsLink is the HUD's Needs-you view as v: only the questions and
+// decisions waiting on the person, where a new farm's owner starts.
+func NeedsLink(hud string, v Viewer) string { return Link(hud, v) + "#/needs" }
+
 // DefaultOwner is who owns a farm made on this machine unless --owner
 // says: the local part of git's user.email (a bare name keeps addresses
 // out of every record), else the login name.

@@ -614,12 +614,12 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
 		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
 		fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
-		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.Link(o.HUD(), v))
+		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)\n")
 		if *noOpen {
 			return nil
 		}
-		return openURL(localfarm.Link(o.HUD(), v))
+		return openURL(localfarm.NeedsLink(o.HUD(), v))
 
 	case "down":
 		localName := fs.String("name", localfarm.Name, "the local farm to delete")
