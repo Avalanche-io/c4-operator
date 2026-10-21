@@ -104,9 +104,22 @@ func Up(ctx context.Context, o UpOptions) error {
 			return err
 		}
 		o.logf("cluster   creating %s: a control plane and %d workers\n", name, len(nodes))
+		// kind makes its cluster kubectl's current context; a person whose
+		// kubectl points at another cluster keeps pointing there
+		rules := clientcmd.NewDefaultClientConfigLoadingRules()
+		before := ""
+		if kc, err := rules.Load(); err == nil {
+			before = kc.CurrentContext
+		}
 		if err := p.Create(name, cluster.CreateWithRawConfig(KindConfig(o.Options)), cluster.CreateWithWaitForReady(5*time.Minute),
 			cluster.CreateWithDisplayUsage(false), cluster.CreateWithDisplaySalutation(false)); err != nil {
 			return fmt.Errorf("creating the cluster: %w", err)
+		}
+		if kc, err := rules.Load(); err == nil && before != "" && kc.CurrentContext != before {
+			kc.CurrentContext = before
+			if err := clientcmd.ModifyConfig(rules, *kc, false); err == nil {
+				o.logf("kubectl   context kind-%s added; yours is still %s\n", name, before)
+			}
 		}
 	}
 	// the farm's registry, which every node pulls from by name
@@ -207,7 +220,7 @@ func publishTools(ctx context.Context, o UpOptions) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	var done, left, unloaded, images []string
+	var done, later, failed, left, unloaded, images []string
 	for _, name := range tools.Names {
 		// as tools.ReleaseTrees names it
 		dir, err := tools.CopyTo(tmp, name)
@@ -220,6 +233,16 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			why := strings.TrimSpace(out.String())
 			if why == "" {
 				why = err.Error()
+			}
+			switch {
+			case strings.Contains(why, "cannot run"):
+				// a kind this farm does not lower yet (ci's shards,
+				// lora's training): the built-in job runs it
+				later = append(later, name)
+				continue
+			case strings.Contains(why, "test on the farm"):
+				failed = append(failed, name)
+				continue
 			}
 			if strings.Contains(why, "cannot be pinned") {
 				// its image is not in the farm's registry yet
@@ -238,15 +261,37 @@ func publishTools(ctx context.Context, o UpOptions) error {
 		done = append(done, name)
 	}
 	if len(done) > 0 {
-		o.logf("tools     %s, for every project\n", strings.Join(done, ", "))
+		o.logf("tools     %s ready for every project (c4 farm tools)\n", andList(done))
+	}
+	if len(later) > 0 {
+		subs := make([]string, len(later))
+		for i, n := range later {
+			subs[i] = "c4 farm submit " + n
+		}
+		o.logf("tools     %s run as the farm's built-in jobs (%s)\n", andList(later), strings.Join(subs, ", "))
+	}
+	if len(failed) > 0 {
+		tests := "their tests"
+		if len(failed) == 1 {
+			tests = "its test"
+		}
+		o.logf("tools     %s did not pass %s on this farm; c4 farm up tries again\n", andList(failed), tests)
 	}
 	if len(unloaded) > 0 {
-		o.logf("tools     %s wait for their images: c4 farm image load %s, then c4 farm up\n", strings.Join(unloaded, ", "), strings.Join(images, " "))
+		o.logf("tools     %s wait for their images: c4 farm image load %s, then c4 farm up\n", andList(unloaded), strings.Join(images, " "))
 	}
 	for _, l := range left {
 		o.logf("tools     not published: %s\n", l)
 	}
 	return nil
+}
+
+// andList is names as a sentence lists them: "a", "a and b", "a, b and c".
+func andList(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // kubeClient is a client for the local farm's cluster.

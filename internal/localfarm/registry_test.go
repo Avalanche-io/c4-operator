@@ -26,3 +26,11 @@ func TestPortsFreeNamesTheFlag(t *testing.T) {
 		t.Errorf("a free port: %v", err)
 	}
 }
+
+func TestAndList(t *testing.T) {
+	for want, in := range map[string][]string{"": nil, "ci": {"ci"}, "ci and lora": {"ci", "lora"}, "a, b and c": {"a", "b", "c"}} {
+		if got := andList(in); got != want {
+			t.Errorf("andList(%v) = %q", in, got)
+		}
+	}
+}
