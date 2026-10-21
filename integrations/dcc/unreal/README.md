@@ -108,6 +108,61 @@ is why sending all of Content is the default.
 - The summary dialogs are Unreal's message boxes. Long summaries scroll in the
   Output Log, not in the box.
 
+## For TDs: the tool
+
+Render (Remote) submits to a tool named `unreal-render`, and
+[`tools/unreal-render/`](tools/unreal-render) is that tool. Unreal is not
+free to ship in an image, so its `runs.image` is a placeholder,
+`registry.example.com/unreal:5.5`: set it to the studio's own Unreal image
+(Linux, with the engine built and a GPU driver; images made the way
+ue4-docker makes them keep the engine at `/home/ue4/UnrealEngine`), set
+`runs.exe` to that image's
+`Engine/Binaries/ThirdParty/Python3/Linux/bin/python3`, then:
+
+```sh
+c4 farm tool test integrations/dcc/unreal/tools/unreal-render
+c4 farm tool publish integrations/dcc/unreal/tools/unreal-render
+```
+
+`runs.host` (`has: [unreal-5.5]`, with the Windows and Linux paths of
+Unreal's own Python) is there for studios that render on their Windows
+workstations; set the paths to where Unreal is installed. Until the farm can
+reach hosts, units run in the image.
+
+**A unit is a whole job** (`frames: {chunk: all}`). Movie Render Queue renders
+a job's range in one process, and each start costs minutes (the engine,
+shader compiles, loading the map, the job's warm-up frames), so splitting a
+job's frames over several Unreals would pay that start for each. A
+submission's frames still decide what is rendered.
+
+Each unit runs `unreal_render.py` with Unreal's own Python (standard library
+only), which finds `UnrealEditor-Cmd` beside it (or at `UNREAL_EDITOR`) and:
+
+1. reads the job's queue manifest (`config`, from the project's folder) and
+   refuses one that does not render the job's `map`;
+2. writes a copy under the project's `Saved/MovieRenderPipeline/C4/`, with
+   the Output settings' custom range set to the unit's frames and the output
+   folder set to `render/<job>/` at the top of the job's tree (the job's own
+   file name format is kept);
+3. starts Unreal as its own Render (Local, new process) does: the project,
+   `MoviePipelineEntryMap` with the Movie Pipeline game mode, `-game
+   -MoviePipelineConfig=MovieRenderPipeline/C4/<unit>.utxt`, offscreen
+   (`-RenderOffscreen`), unattended, logging to its output;
+4. passes Unreal's log through, and prints `c4_frame` for each frame once a
+   later frame's file is written (or Unreal has exited), with
+   `openjd_progress`; a frame Unreal did not write fails the unit, to be
+   retried.
+
+A job whose config is a Movie Render Graph has no Output settings to set,
+and is refused for now. Frames with gaps (1001-1010, 1020-1030) are refused
+too: Movie Render Queue renders one range, every frame or every Nth.
+
+The test project (`test/Test/`) holds only a `.uproject`. Its job's config is
+a `.py`, which the wrapper runs in the editor (`-run=pythonscript`) to build a
+map, a level sequence over 1001-1003 and the job's manifest, then renders
+two frames at 64x36. So the test needs only the studio's image, not a
+project of its own.
+
 ## Tests
 
 ```

@@ -185,3 +185,81 @@ Run the whole list in **Unreal Engine 5.4, 5.5 and 5.6**.
    No.
 5. Read every label, tooltip and dialog. **Expect:** none says image, pod,
    namespace, priority, cluster or container, and nothing offers a priority.
+
+## The farm's tool (`tools/unreal-render`)
+
+The tool's tests (`tests/test_unreal_tool.py`) run its wrapper against a
+stand-in for `UnrealEditor-Cmd` and a queue manifest written in the shape
+Unreal's export text is taken to have. No real Unreal has run it yet, so
+every item here is to be checked, in Unreal 5.4, 5.5 and 5.6.
+
+1. Set `runs.image` and `runs.exe` to the studio's Unreal image, then run
+   `c4 farm tool test integrations/dcc/unreal/tools/unreal-render` on a
+   machine with a GPU. **Expect:** "building the job with 01-c4test.py", then
+   "rendering c4test, frames 1001-1002", two `c4_frame` lines and
+   `render/c4test/C4Test_seq.1001.png` and `.1002.png`. **[guess]**:
+   - the bundled Python is at `Engine/Binaries/ThirdParty/Python3/Linux/bin/python3`
+     and `UnrealEditor-Cmd` at `Engine/Binaries/Linux/` (the wrapper falls
+     back to `UnrealEditor` when there is no `-Cmd`);
+   - `-run=pythonscript -script=<file>` runs the builder in the editor with
+     the `.uproject`'s plug-ins, and `-nullrhi` is enough for it;
+   - in the builder: `LevelEditorSubsystem.new_level`, the
+     `EditorActorSubsystem` spawns, `LevelSequenceFactoryNew`, the camera
+     cut's `set_camera_binding_id` with `get_portable_binding_id` (or
+     `get_binding_id` before it), `MoviePipelineQueue.allocate_new_job`,
+     `find_or_add_setting_by_class` for the deferred pass and PNG output, and
+     `output_resolution` and `file_name_format` on the Output settings.
+2. Open a manifest Render (Remote) wrote (`C4/queue/01-sh010-lighting.utxt`)
+   beside `MANIFEST` in `tests/test_unreal_tool.py`. **Expect:** the same
+   shape. **[guess]**:
+   - the Output settings are declared with
+     `Class=/Script/MovieRenderPipelineCore.MoviePipelineOutputSetting`, and
+     their properties are in a later `Begin Object Name="..."` block (or in
+     the declaration when there is only one block);
+   - the properties are `bUseCustomPlaybackRange`, `CustomStartFrame`,
+     `CustomEndFrame` (one past the last frame), `OutputFrameStep` and
+     `OutputDirectory=(Path="...")`, and a property left at its default is
+     not written;
+   - the job's map appears as `/Game/Maps/Sh010.Sh010`.
+
+   If not, fix `set_output` and `MANIFEST` together.
+3. Submit sh010_lighting (1001-1010) to a farm with the tool published.
+   **Expect:** ten frames under `render/sh010-lighting/` in the job's tree,
+   named as the job's file name format says, and a copy of the manifest under
+   the project's `Saved/MovieRenderPipeline/C4/` with the unit's range.
+   **[guess]**:
+   - `-MoviePipelineConfig` takes a manifest's path from the project's
+     `Saved` folder, as the engine's own new-process executor passes
+     `MovieRenderPipeline/QueueManifest.utxt`;
+   - `MoviePipelineEntryMap?game=/Script/MovieRenderPipelineCore.MoviePipelineGameMode`
+     is the startup map that executor uses, and the job's map is loaded from
+     the manifest;
+   - `-RenderOffscreen` renders with no display in a container, and
+     `-windowed -ResX=1280 -ResY=720` do not change the output resolution;
+   - an absolute `OutputDirectory` is used as given.
+4. Edit the submission's frames to `1001-1005` and submit. **Expect:** five
+   frames, not ten. Then `1001-1010:2`. **Expect:** 1001, 1003 ... 1009.
+   **[guess]**: `OutputFrameStep` renders every Nth frame and names files by
+   their own frame numbers.
+5. Keep a unit's log (the job's log in the HUD). **Expect:** lines of
+   `LogMovieRenderPipeline` that give progress. **[guess]**: `progress_of`'s
+   two patterns (a percentage, or "frame N/M" or "N of M") are written from
+   no real log; replace them, and the sample lines in the tests, with what
+   Unreal prints. `c4 farm tool test --log <file>` replays a captured log
+   through the tool's patterns.
+6. **Expect** each `c4_frame` line soon after its file appears, and none for
+   a frame still being written. **[guess]**: Movie Render Queue writes a
+   frame's files (every pass and format) before it starts the next frame's,
+   and the last digits of a file name are its frame (`{frame_number}`, with
+   `FrameNumberOffset` 0).
+7. Make a job fail (a missing map), and one that renders no frames. **Expect:**
+   each unit fails and is retried, saying how many frames were written.
+   **[guess]**: Unreal exits non-zero on a failed render with `-Unattended`;
+   the wrapper checks the files either way.
+8. A job whose config is a Movie Render Graph. **Expect:** a permanent
+   failure saying the farm renders Movie Render Queue presets.
+9. On a Windows workstation with Unreal 5.5 at the default place, run the
+   wrapper with `runs.host.exe.windows` by hand (`python.exe unreal_render.py
+   <project> map=... sequence=... config=...`, with `C4_TREE` and
+   `C4_FRAME_START`/`C4_FRAME_END` set). **Expect:** the same frames, and
+   `UnrealEditor-Cmd.exe` found from `Engine\Binaries\Win64`.

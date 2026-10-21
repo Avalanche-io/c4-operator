@@ -95,6 +95,52 @@ same file again sends nothing new.
   panel sends more files than the jobs read. That is the safe side; nothing
   a job needs is left out.
 
+## For TDs: the tool
+
+The panel submits to a tool named `blender-render`, and
+[`tools/blender-render/`](tools/blender-render) is that tool, ready to
+publish. It runs in `c4/job-sim`, the farm's own Blender image (Blender 5.2
+LTS, Cycles on the CPU, no GPU), so a farm needs no image of its own to
+render Blender files:
+
+```sh
+c4 farm tool test integrations/dcc/blender/tools/blender-render
+c4 farm tool publish integrations/dcc/blender/tools/blender-render
+```
+
+The test builds a two-view-layer scene from `test/shot/scene.py` and renders
+two frames of one view layer. For GPUs or another Blender, copy the folder,
+set `runs.image` to the studio's image (with `blender` on its `PATH`, or
+`BLENDER` set to it), add `needs` from a measured run (`gpu: 1` for GPU
+Cycles or EEVEE), and publish the copy. A file saved in a newer Blender than
+the image's may not open; keep the image's Blender at or above the artists'.
+
+Each unit runs `blender -b FILE --python-exit-code 1 --python render.py`,
+which:
+
+- renders the job's `scene` and only its `view_layer` (the others are turned
+  off for the run; the file is not saved), with `camera`, `engine` (`file`
+  keeps the scene's) and `samples` (0 keeps the file's) when given;
+- renders each of the unit's frames, and prints `c4_frame` with the file's
+  path once it is on disk;
+- refuses, as a permanent failure, a scene, view layer or camera the file
+  does not have, naming the ones it has.
+
+Frames go where the scene's output path says, from the file's folder, with
+two changes. When the scene has more than one view layer to render, each
+goes in a folder of its name (`render/bg/sh010_1001.exr`), so the jobs of
+one scene do not write the same files. An output outside the job's tree goes
+to `render/` at its top.
+
+A tool's `.py` file in place of the `.blend` is run by Blender first to build
+the `.blend` beside it, which is how the test needs no binary file in git.
+
+Not handled yet: a compositor's File Output nodes write where the file says,
+without a folder per view layer; a scene whose compositor combines several
+view layers renders with only the job's on. Python in the file (drivers,
+scripts) runs only as far as Blender allows without auto-run, as on an
+artist's machine with Blender's defaults.
+
 ## Tests
 
 ```

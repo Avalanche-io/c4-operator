@@ -224,3 +224,45 @@ Run the whole list in **Blender 4.2 LTS** and **Blender 4.5 LTS**.
 3. Make the summary's errors long (a long path). **Expect:** rows wrap to the
    panel's width, roughly. **[guess]**: about 7 pixels per character at UI
    scale 1.
+
+## The farm's tool (`tools/blender-render`)
+
+The tool's tests (`tests/test_blender_tool.py`) run its script against a fake
+`bpy`. Its own test (`c4 farm tool test`) passes in `c4/job-sim`'s Blender
+5.2.2. This is what is left to check in a studio's Blender images and on the
+farm.
+
+1. In a studio image with Blender 4.2 LTS, then 4.5 LTS, run
+   `c4 farm tool test --image <image> integrations/dcc/blender/tools/blender-render`.
+   **Expect:** "expect: 2 of 2 files" and `c4_frame` lines for
+   `shot/render/fg/sh010_1001.png` and `sh010_1002.png`. Then
+   `--with engine=EEVEE` on a GPU image. **Expect:** the same files.
+   **[guess]**: EEVEE is `BLENDER_EEVEE_NEXT` from 4.2 until 5.0 and
+   `BLENDER_EEVEE` from 5.0; EEVEE renders headless (`-b`) with a GPU and no
+   display.
+2. `--with scene=sh020`, then `--with view_layer=fx`, then
+   `--with camera=Cube`. **Expect:** each fails at once, as permanent, naming
+   what the file has ("its scenes are sh010", "its view layers are bg, fg",
+   "the file has no camera Cube").
+3. Submit the Setup's lighting file from the panel (bg and fg) to a farm
+   with the tool published. **Expect:** bg's frames in
+   `sh010/lighting/render/bg/sh010_1001.exr` and so on, fg's in `.../fg/`,
+   and each bg frame shows only bg's collections. **[guess]**:
+   - turning a view layer's `use` off for the run renders only the job's;
+   - `bpy.ops.render.render(animation=True, scene=name)` renders the named
+     scene in background mode even when it is not the file's active scene;
+   - a one-frame animation (frame start and end set to the frame) names its
+     file as the whole animation would, and `RenderSettings.frame_path(frame=f)`
+     is that file.
+4. Tick `sh010_comp / comp` too and submit. **Expect:** the comp job waits for
+   bg and fg. **[guess]**: its compositor's Image node finds the renders it
+   reads; it reads `//render/sh010_####.exr`, which a scene with two view
+   layers now writes per view layer, so a comp reading a multi-layer scene's
+   render may need its path pointed at one view layer's folder.
+5. A scene with a compositor File Output node. **Expect:** its files are
+   written where the node says (inside the job's tree when the path is `//`),
+   not per view layer. This is a known gap, listed in the README.
+6. A file whose rig uses a Python driver. **Expect:** it renders as Blender
+   does with "Auto Run Python Scripts" off, the default. **[guess]**: that is
+   how the artist sees it too; a studio that runs scripts adds `-y` in its
+   copy of `blender-render.sh`.
