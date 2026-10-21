@@ -220,7 +220,12 @@ func publishTools(ctx context.Context, o UpOptions) error {
 		return err
 	}
 	defer os.RemoveAll(tmp)
-	var done, later, failed, left, unloaded, images []string
+	// the HUD answers before the store behind it does
+	if err := farmcli.WaitStore(ctx, c, Project, 3*time.Minute); err != nil {
+		o.logf("tools     not published yet: %v; c4 farm up tries again\n", err)
+		return nil
+	}
+	var done, later, failed, stored, left, unloaded, images []string
 	for _, name := range tools.Names {
 		// as tools.ReleaseTrees names it
 		dir, err := tools.CopyTo(tmp, name)
@@ -243,6 +248,9 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			case strings.Contains(why, "test on the farm"):
 				failed = append(failed, name)
 				continue
+			case strings.Contains(why, "store:"), strings.Contains(why, "connection refused"):
+				stored = append(stored, name)
+				continue
 			}
 			if strings.Contains(why, "cannot be pinned") {
 				// its image is not in the farm's registry yet
@@ -255,7 +263,12 @@ func publishTools(ctx context.Context, o UpOptions) error {
 				}
 				continue
 			}
-			left = append(left, name+" ("+strings.Join(strings.Fields(why), " ")+")")
+			// one line of what the farm said, not every error it holds
+			why = strings.Join(strings.Fields(why), " ")
+			if len(why) > 100 {
+				why = why[:100] + "…"
+			}
+			left = append(left, name+" ("+why+")")
 			continue
 		}
 		done = append(done, name)
@@ -276,6 +289,9 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			tests = "its test"
 		}
 		o.logf("tools     %s did not pass %s on this farm; c4 farm up tries again\n", andList(failed), tests)
+	}
+	if len(stored) > 0 {
+		o.logf("tools     %s could not be stored yet; c4 farm up tries again\n", andList(stored))
 	}
 	if len(unloaded) > 0 {
 		o.logf("tools     %s wait for their images: c4 farm image load %s, then c4 farm up\n", andList(unloaded), strings.Join(images, " "))

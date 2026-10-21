@@ -182,7 +182,7 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 	if a.Farm {
 		where = "to every project"
 	}
-	o.printf("published %s: artists see %q in Submit\n", where, t.Title)
+	o.printf("published %s: c4 farm submit %s runs it, and c4 farm tools lists it as %q\n", where, t.Name, t.Title)
 	return nil
 }
 
@@ -216,7 +216,12 @@ func waitPublish(ctx context.Context, c *Client, o Out, a PublishArgs, name, ver
 		st = t.Test
 	}
 	if st.State == "ok" {
-		o.printf("                   ok in %ds\n", st.Seconds)
+		if st.Seconds > 0 && st.Seconds < 7*24*3600 {
+			o.printf("                   ok in %s\n", Span(time.Duration(st.Seconds)*time.Second))
+		} else {
+			// a test job with no start the farm could time
+			o.printf("                   ok\n")
+		}
 	}
 	return st, nil
 }

@@ -289,7 +289,7 @@ func TestToolsPublishAndSubmitAgainstTheHUD(t *testing.T) {
 	if len(hud.publishes) != 1 || !strings.HasPrefix(hud.publishes[0]["view"].(string), "c4") || hud.polls < 2 {
 		t.Fatalf("publish %v, %d polls", hud.publishes, hud.polls)
 	}
-	for _, want := range []string{"proxies v4", "image ghcr.io/avalanche-io/c4-runtime-oiio@sha256:91f2", "ok in 6s", `published to saltmarsh: artists see "Proxies and previews" in Submit`} {
+	for _, want := range []string{"proxies v4", "image ghcr.io/avalanche-io/c4-runtime-oiio@sha256:91f2", "ok in 6s", `published to saltmarsh: c4 farm submit proxies runs it, and c4 farm tools lists it as "Proxies and previews"`} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("no %q in\n%s", want, out.String())
 		}

@@ -173,7 +173,7 @@ func TestFarmCLIPublishesATool(t *testing.T) {
 	if err := <-done; err != nil {
 		t.Fatalf("publish: %v\n%s", err, out.String())
 	}
-	for _, want := range []string{"notes v1", "test on the farm   " + job, "ok in", `published to show-a: artists see "Notes" in Submit`} {
+	for _, want := range []string{"notes v1", "test on the farm   " + job, "                   ok", `published to show-a: c4 farm submit notes runs it, and c4 farm tools lists it as "Notes"`} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("no %q in\n%s", want, out.String())
 		}

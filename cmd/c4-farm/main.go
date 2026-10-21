@@ -236,9 +236,13 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
-		role := "artist"
-		if s.Viewer.All {
+		role := s.Viewer.Role
+		switch {
+		case role != "":
+		case s.Viewer.All:
 			role = "wrangler"
+		default:
+			role = "artist"
 		}
 		fmt.Fprintf(o.W, "%s · %s · projects %s\n", s.Viewer.User, role, strings.Join(s.Viewer.Projects, ", "))
 		return nil

@@ -446,3 +446,25 @@ func (o Out) printPlan(e *api.SubmitEstimate, planErr error) {
 		o.printf("  note      %s\n", e.Message)
 	}
 }
+
+// WaitStore waits until the project's store answers through the HUD (a
+// missing-objects check of one object), or until timeout: the HUD can
+// answer before the store behind it does.
+func WaitStore(ctx context.Context, c *Client, project string, timeout time.Duration) error {
+	probe := []view.Object{{ID: c4.Identify(strings.NewReader("c4 farm: is the store answering?"))}}
+	deadline := time.Now().Add(timeout)
+	for {
+		_, err := missingIDs(ctx, c, project, probe)
+		if err == nil {
+			return nil
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("the store did not answer in %s", Span(timeout))
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
+}
