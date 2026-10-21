@@ -238,8 +238,12 @@ makes what the runner needs, and running it again makes nothing new:
 - the runner folder, `<agents home>/runner/`: its `kubeconfig`, which reads
   its token from `tokens/kube`, and `enrolled.json` (node, owner, pool);
 - the blocks' own config directory, `<agents home>/blocks-env`, filled from
-  the base environment. `enroll` says whether its person has signed in
-  there yet (`blocksSignedIn` with `--json`), and how to, once.
+  the base environment, and the one folder blocks run in, `~/.c4/blocks`
+  (beside the agents home). `enroll` says whether its person has signed
+  in there and trusted the folder yet (`blocksSignedIn`, `blocksTrusted`
+  with `--json`), and the one step that does both:
+  `cd ~/.c4/blocks && CLAUDE_CONFIG_DIR=<blocks-env> claude`. Until the
+  folder is trusted, blocks wait, pending, and the runner says why once.
 
 On an enrolled machine `c4-agent runner` needs no flags: it takes its node,
 owner and kubeconfig from the enrollment. It keeps its tokens there fresh

@@ -452,6 +452,13 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	if len(set) == 0 {
 		set["c4.avalanche.io/host"] = *node
 	}
+	// an enrolled machine runs its blocks in its one blocks folder
+	if *blocksCwd == "" && isEnrolled {
+		*blocksCwd = agent.BlocksFolder(h.Store.Dir)
+		if err := os.MkdirAll(*blocksCwd, 0o700); err != nil {
+			return err
+		}
+	}
 	// an enrolled machine signs in as itself, and keeps its own tokens
 	tokens := ""
 	if *kubeconfig == "" && isEnrolled && *node == enrolled.Node {
@@ -619,6 +626,11 @@ func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		return err
 	}
 	e.BlocksSignedIn, _ = agent.NewCLI().SignedIn(ctx, e.BlocksEnv)
+	e.BlocksFolder = agent.BlocksFolder(h.Store.Dir)
+	if err := os.MkdirAll(e.BlocksFolder, 0o700); err != nil {
+		return err
+	}
+	e.BlocksTrusted = agent.Trusted(e.BlocksEnv, e.BlocksFolder)
 	if *asJSON {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
@@ -629,8 +641,8 @@ func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		fmt.Fprintf(out, "  made %s\n", m)
 	}
 	fmt.Fprintf(out, "its kubeconfig: %s\n", e.Kubeconfig)
-	if !e.BlocksSignedIn {
-		fmt.Fprintf(out, "its blocks run in %s, not signed in yet: sign in there once, through Anthropic's own flow (CLAUDE_CONFIG_DIR=%s claude)\n", e.BlocksEnv, e.BlocksEnv)
+	if !e.BlocksSignedIn || !e.BlocksTrusted {
+		fmt.Fprintf(out, "its blocks run in %s with the config directory %s, which needs its person once, to sign in through Anthropic's own flow and trust the folder: cd %s && CLAUDE_CONFIG_DIR=%s claude\n", e.BlocksFolder, e.BlocksEnv, e.BlocksFolder, e.BlocksEnv)
 	}
 	fmt.Fprintln(out, "start its runner: c4-agent runner")
 	return nil

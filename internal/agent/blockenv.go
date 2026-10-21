@@ -191,3 +191,40 @@ func (c *CLI) SignedIn(ctx context.Context, configDir string) (bool, error) {
 	}
 	return st.LoggedIn, nil
 }
+
+// BlocksFolder is the one folder a machine's blocks run in, beside its
+// agents home (~/.c4/blocks for ~/.c4/agents): the folder the claude CLI
+// must trust, once, in the blocks' config directory.
+func BlocksFolder(home string) string { return filepath.Join(filepath.Dir(home), "blocks") }
+
+// Trusted reports whether the claude CLI trusts folder in the config
+// directory configDir ("" for the person's own), as its own state file
+// records the trust dialog's answer. It reads that answer and nothing
+// else.
+func Trusted(configDir, folder string) bool {
+	state := filepath.Join(configDir, ".claude.json")
+	if configDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return false
+		}
+		state = filepath.Join(home, ".claude.json")
+	}
+	b, err := os.ReadFile(state)
+	if err != nil {
+		return false
+	}
+	var st struct {
+		Projects map[string]struct {
+			HasTrustDialogAccepted bool `json:"hasTrustDialogAccepted"`
+		} `json:"projects"`
+	}
+	if json.Unmarshal(b, &st) != nil {
+		return false
+	}
+	abs, err := filepath.Abs(folder)
+	if err != nil {
+		return false
+	}
+	return st.Projects[abs].HasTrustDialogAccepted
+}

@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -157,5 +158,43 @@ func TestBlocksRunInTheirOwnEnvironment(t *testing.T) {
 	x.Spec.Containers[0].Env = append(x.Spec.Containers[0].Env, corev1.EnvVar{Name: EnvAgentEnv, Value: "c4nothere"})
 	if _, _, _, err := r.blockEnv(x); err == nil || !strings.Contains(err.Error(), "not on this machine") {
 		t.Errorf("an unknown environment: %v", err)
+	}
+}
+
+// A block waits, pending, until its folder is trusted in the blocks'
+// config directory, as the CLI records the trust dialog's answer there;
+// then it starts. Only that answer is read.
+func TestBlocksWaitForTrust(t *testing.T) {
+	e := newEnv(t)
+	home := t.TempDir()
+	folder := filepath.Join(home, "blocks")
+	os.MkdirAll(folder, 0o700)
+	dir, err := PrepareBlocksEnv(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if Trusted(dir, folder) {
+		t.Fatal("trusted before anyone said so")
+	}
+	p := hostPod()
+	p.UID = "block-trust"
+	p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: EnvBlock, Value: "1"}, corev1.EnvVar{Name: EnvBlockPrompt, Value: "port the notes"})
+	r, c := hostRunner(t, e, p)
+	r.BlocksCwd, r.BlocksEnv, r.EnvSources, r.HookCommand = folder, dir, EnvSourcesDir(home), "c4-agent checkpoint --hook"
+	var logs []string
+	r.Logf = func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }
+	if err := r.startBlock(context.Background(), p, "ns.port.0"); err != nil {
+		t.Fatal(err)
+	}
+	if got := getPod(t, c); got.Status.Phase == corev1.PodFailed || len(e.fake.active) != 0 {
+		t.Fatalf("a block started or failed in an untrusted folder: %s, %d sessions", got.Status.Phase, len(e.fake.active))
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "trust it once") {
+		t.Errorf("logs %q", logs)
+	}
+	abs, _ := filepath.Abs(folder)
+	os.WriteFile(filepath.Join(dir, ".claude.json"), []byte(`{"projects":{"`+abs+`":{"hasTrustDialogAccepted":true}}}`), 0o600)
+	if !Trusted(dir, folder) {
+		t.Fatal("not trusted after the dialog's answer")
 	}
 }

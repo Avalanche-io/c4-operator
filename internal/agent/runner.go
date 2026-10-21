@@ -88,6 +88,7 @@ type Runner struct {
 	// from the environment trees in EnvSources (blockenv.go); unset, they
 	// run in the CLI's default one.
 	BlocksEnv, EnvSources string
+	trustAsked            bool
 	baseEnv               string
 	blockEnvs             map[types.UID]string
 	// UnitBin is c4-unit, for the waits the runner opens for a block

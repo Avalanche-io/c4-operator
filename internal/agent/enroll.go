@@ -85,6 +85,10 @@ type Enrolled struct {
 	// enroll fills both; Enroll leaves them).
 	BlocksEnv      string `json:"blocksEnv,omitempty"`
 	BlocksSignedIn bool   `json:"blocksSignedIn"`
+	// BlocksFolder is the folder its blocks run in, and BlocksTrusted
+	// whether the CLI trusts it in BlocksEnv yet.
+	BlocksFolder  string `json:"blocksFolder,omitempty"`
+	BlocksTrusted bool   `json:"blocksTrusted"`
 }
 
 // Enroll enrolls a machine. Running it again changes nothing but the

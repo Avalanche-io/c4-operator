@@ -555,6 +555,16 @@ func (r *Runner) startBlock(ctx context.Context, p *corev1.Pod, name string) err
 	if wait {
 		return nil // running blocks use another version of the environment
 	}
+	if configDir != "" && !Trusted(configDir, r.BlocksCwd) {
+		// the CLI refuses a background session in a folder it does not
+		// trust: the block waits for its person to trust it, once
+		if !r.trustAsked {
+			r.trustAsked = true
+			r.logf("blocks wait: %s is not trusted in %s; trust it once: cd %s && CLAUDE_CONFIG_DIR=%s claude", r.BlocksCwd, configDir, r.BlocksCwd, configDir)
+		}
+		return nil
+	}
+	r.trustAsked = false
 	flags = append(flags, envFlags...)
 	b, ok, err := ensureBranch(ctx, p)
 	if err != nil {
