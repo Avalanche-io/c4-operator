@@ -25,7 +25,7 @@ const done = (j) => j.phase === 'Succeeded';
 
 // ------------------------------------------------------------ batch strip
 
-const STATES = ['succeeded', 'running', 'retrying', 'failed', 'flagged', 'unevaluated', 'planned', 'queued', 'blocked', 'waits'];
+const STATES = ['succeeded', 'running', 'retrying', 'failed', 'flagged', 'needs', 'unevaluated', 'planned', 'queued', 'blocked', 'waits'];
 // the strip's slot for each state: flagged needs a person like failed, planned is expected work
 const SLOT = { queued: 'waiting', blocked: 'waiting', waits: 'waiting', flagged: 'failed', planned: 'unevaluated' };
 
@@ -43,7 +43,7 @@ export function buckets(j, size) {
   let max = (j.units.total || 0) - 1;
   for (const k of STATES) for (const [, b] of ranges((j.unitStates || {})[k])) max = Math.max(max, b);
   const n = Math.max(1, Math.ceil((max + 1) / size));
-  const out = Array.from({ length: n }, () => ({ n: 0, succeeded: 0, running: 0, retrying: 0, failed: 0, unevaluated: 0, waiting: 0 }));
+  const out = Array.from({ length: n }, () => ({ n: 0, succeeded: 0, running: 0, retrying: 0, failed: 0, needs: 0, unevaluated: 0, waiting: 0 }));
   // the operator sends planned and, for older clients, the same set as
   // unevaluated: count it once
   const us = j.unitStates || {};
@@ -72,6 +72,7 @@ export function batchStrip(j, o = {}) {
   const cw = (W - gap * (cells.length - 1)) / cells.length;
   const settled = done(j);
   const held = j.nudge && j.nudge.hold;
+  const pressing = (j.needs || []).some((n) => n.state === 'pressing' && !n.supplied && !n.withdrawn);
   const late = !settled && Number.isFinite(j.estimate.slackSeconds) && j.estimate.slackSeconds < 0;
   const willMiss = late && willMissOf(j.estimate);
   const h = H - 4;
@@ -90,6 +91,8 @@ export function batchStrip(j, o = {}) {
     }
     if (c.failed) s += `<rect x="${(x + cw - Math.min(3, cw)).toFixed(2)}" y="0" width="${Math.min(3, cw).toFixed(2)}" height="${Math.max(3, y(c.failed / c.n)).toFixed(2)}" fill="${T.fail}"/>`;
     if (c.retrying) s += `<rect x="${(x + cw - Math.min(3, cw) - (c.failed ? Math.min(4, cw) : 0)).toFixed(2)}" y="0" width="${Math.min(3, cw).toFixed(2)}" height="${Math.max(3, y(c.retrying / c.n)).toFixed(2)}" fill="${T.temp}"/>`;
+    // a unit stopped on a question: the at-risk hue, orange once pressing
+    if (c.needs) s += `<rect x="${x.toFixed(2)}" y="0" width="${Math.min(3, cw).toFixed(2)}" height="${Math.max(3, y(c.needs / c.n)).toFixed(2)}" fill="${pressing ? T.temp : T.risk}"/>`;
     // the deadline, under every batch that still has work waiting: a dashed
     // orchid rule at risk, a solid one when it will miss at any capacity
     if (late && c.waiting + c.unevaluated > 0) s += `<line x1="${x.toFixed(2)}" x2="${(x + cw).toFixed(2)}" y1="${H - 1}" y2="${H - 1}" stroke="${T.risk}" stroke-width="${willMiss ? 2.2 : 1.5}"${willMiss ? '' : ' stroke-dasharray="2 1.5"'}/>`;
@@ -98,7 +101,7 @@ export function batchStrip(j, o = {}) {
     const hx = W - 9;
     s += `<rect x="${hx - 3}" y="${h / 2 - 6}" width="12" height="12" fill="${T.field}"/><rect x="${hx}" y="${h / 2 - 4}" width="1.5" height="8" fill="${T.g[16]}"/><rect x="${hx + 4}" y="${h / 2 - 4}" width="1.5" height="8" fill="${T.g[16]}"/>`;
   }
-  const label = `${j.units.succeeded} of ${j.units.total} units done in batches of ${size}${inFlight(j.units) ? `, ${inFlight(j.units)} running` : ''}${retries(j.units) ? `, ${retries(j.units)} retrying` : ''}${j.units.failed ? `, ${j.units.failed} failed` : ''}`;
+  const label = `${j.units.succeeded} of ${j.units.total} units done in batches of ${size}${inFlight(j.units) ? `, ${inFlight(j.units)} running` : ''}${retries(j.units) ? `, ${retries(j.units)} retrying` : ''}${j.units.failed ? `, ${j.units.failed} failed` : ''}${j.units.needs ? `, ${j.units.needs} stopped on a question` : ''}`;
   return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">${s}</svg>`, size, cells: cells.length };
 }
 

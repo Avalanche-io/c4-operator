@@ -17,7 +17,7 @@ import { own } from '../../design/components/live.js';
 import { tok, glance, inFlight, retries } from '../../design/components/core.js';
 import { drawAgg } from '../../design/components/stack.js';
 import { ranges } from '../../design/components/rle.js';
-import { jobWords } from '../../design/components/words.js';
+import { jobWords, heldByPerson } from '../../design/components/words.js';
 import { deadlineSource } from './common.js';
 
 const st = { key: null, detail: null, graph: null, now: null, busy: false, err: null };
@@ -207,7 +207,7 @@ export function widgetSheet(ctx, k, j, d, graph, compact) {
             h('div', { class: 'runs' }, compact ? null : h('div', { class: 'lbl' }, 'running now'),
               h('div', { class: 'v' + (par ? '' : ' idle') }, h('i', { class: 'par', 'aria-hidden': 'true' }), `${par}%`))),
           done ? h('div', { class: 'r2' }, h('span', { class: 'eta ink' }, `done ${f.clock(e.etaP90, false)}`))
-            : j.phase === 'Held' ? h('div', { class: 'r2' }, h('span', { class: 'eta' }, 'held'), h('span', { class: 'sm pencil' }, `released now ≈${f.clock(e.etaP90, false)}`))
+            : heldByPerson(j) ? h('div', { class: 'r2' }, h('span', { class: 'eta' }, 'held'), h('span', { class: 'sm pencil' }, `released now ≈${f.clock(e.etaP90, false)}`))
             : h('div', { class: 'r2' }, h('span', { class: 'eta pencil' + (late ? ' rpen' : '') }, f.approx(e.remainingSeconds)), compact ? null : h('span', { class: 'sm pencil' }, `p90 ${f.dur(e.p90RemainingSeconds)}`)),
           h('div', { class: 'r3' }, dl ? h('span', { class: 'ink' }, `due ${f.clock(dl, false)}`) : h('span', { class: 'dimmer' }, 'no deadline'), slack),
           late && !compact && (j.units.failed || retries(j.units)) ? h('div', { class: 'r3 small' },

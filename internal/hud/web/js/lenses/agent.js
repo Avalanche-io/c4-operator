@@ -3,7 +3,7 @@
 // bundle's own time, which stops while the bundle waits for capacity or is held),
 // the cap against the members running, and each member's checkpoint.
 //
-// States take the HUD's one vocabulary (design/README.md): rendering is
+// States take the HUD's one vocabulary (design/README.md): working is
 // bright blue (an agent at work); queued is the flat grey of a unit not
 // started; a member the queue stopped at a turn boundary for capacity waits
 // for capacity: hatched, with the clock mark and the checkpoint mark where it
@@ -17,7 +17,7 @@ import { c4idEl } from '../../design/components/c4id.js';
 import { markAttrs } from '../../design/components/marks.js';
 
 const STATE = {
-  running: { fill: 'var(--run)', word: 'rendering' },
+  running: { fill: 'var(--run)', word: 'working' },
   yielding: { fill: 'var(--run)', word: 'yielding: stops at the end of its turn' },
   waiting: { fill: 'var(--g09)', word: 'queued' },
   suspended: { fill: 'url(#ag-hatch)', word: 'waits for capacity; it resumes from its checkpoint' },
@@ -122,14 +122,14 @@ export function agentLens(ctx, job) {
 
   const drift = clock.driftSeconds || 0;
   const vnow = clock.virtualNow ? f.ms(clock.virtualNow) : null;
-  const phase = { Held: 'held by a person', Holding: 'yielding for a person', Suspended: 'waits for capacity', Running: 'rendering', Pending: 'queued' }[cs.phase] || 'queued';
+  const phase = { Held: 'held by a person', Holding: 'yielding for a person', Suspended: 'waits for capacity', Running: 'working', Pending: 'queued' }[cs.phase] || 'queued';
   return [
     h('div', { class: 'panel', 'data-key': 'agent-members' },
       h('header', null, h('h2', null, 'Members'),
         h('span', { class: 'dim' }, `Bundle ${cs.bundle || job.name}: ${phase}. ${cs.running || 0} rendering${cs.cap ? ` of at most ${cs.cap}` : ''}.`)),
       h('div', { class: 'well', style: { padding: '14px 0 6px' } }, chart),
       h('div', { class: 'legend', style: { padding: '8px 12px' } },
-        h('span', null, h('i', { style: { background: 'var(--run)', width: '14px', height: '9px', display: 'inline-block' } }), 'rendering'),
+        h('span', null, h('i', { style: { background: 'var(--run)', width: '14px', height: '9px', display: 'inline-block' } }), 'working'),
         h('span', null, h('i', { style: { background: 'var(--g09)', width: '14px', height: '9px', display: 'inline-block' } }), 'queued'),
         h('span', null, h('i', { style: { background: 'repeating-linear-gradient(45deg, var(--g09) 0 3px, var(--g12) 3px 4px)', width: '14px', height: '9px', display: 'inline-block' } }), 'waits for capacity'),
         h('span', null, h('i', { style: { background: 'var(--ink)', width: '7px', height: '7px', display: 'inline-block' } }), 'checkpoint: where it resumes'),

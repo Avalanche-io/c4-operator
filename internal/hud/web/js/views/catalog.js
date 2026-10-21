@@ -42,7 +42,7 @@ function load(ctx) {
   if (st.data || st.busy || st.err) return;
   st.busy = true;
   get('/catalog').then((d) => {
-    if (!String(d.schema || '').startsWith('c4-agent-catalog/export/v1')) throw new Error(`a catalogue this HUD cannot read (${d.schema || 'no schema'})`);
+    if (!String(d.schema || '').startsWith('c4-catalog/export/v1')) throw new Error(`a catalogue this HUD cannot read (${d.schema || 'no schema'})`);
     st.data = d;
   }).catch((e) => { st.err = e.message; }).finally(() => { st.busy = false; ctx.refresh(); });
 }

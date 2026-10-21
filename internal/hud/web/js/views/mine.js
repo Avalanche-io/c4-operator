@@ -12,7 +12,7 @@ import { glance, inFlight, retries } from '../../design/components/core.js';
 import { buildSheet } from '../../design/components/stack.js';
 import { phaseText, deadlineSource } from './common.js';
 import { c4idEl } from '../../design/components/c4id.js';
-import { tempWords } from '../../design/components/words.js';
+import { tempWords, heldByPerson } from '../../design/components/words.js';
 
 const st = { details: new Map(), graph: null, at: -Infinity, busy: false };
 document.addEventListener('hud:changed', () => { st.at = -Infinity; });
@@ -92,7 +92,7 @@ function card(ctx, j) {
       h('div', { class: 'mtb' },
         tcell('Deadline', dl ? f.clock(dl) : '–', deadlineSource(j.objective)),
         tcell('Slack', dl && !done ? h('span', { class: late ? 't-risk pencil' : 'pencil' }, f.signed(e.slackSeconds)) : '–', late ? 'projected late' : done ? 'done' : e.feasible ? 'on time at current capacity' : 'will miss at current capacity'),
-        tcell('Done', h('span', null, `${Math.round(g.done * 100)}`, h('small', null, '%')), par ? h('span', { class: 't-run' }, `${par}% running now`) : j.phase === 'Held' ? 'held' : 'nothing running'),
+        tcell('Done', h('span', null, `${Math.round(g.done * 100)}`, h('small', null, '%')), par ? h('span', { class: 't-run' }, `${par}% running now`) : heldByPerson(j) ? 'held' : 'nothing running'),
         tcell(done ? 'Finished' : 'About', done ? f.clock(e.etaP90, false) : h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, f.approx(e.remainingSeconds)), done ? '' : `p90 ${f.clock(e.etaP90, false)}`),
         late && e.burst && M >= 4 ? h('div', { class: 'mfix' }, `+${e.burst.slots} ${e.burst.pool} slots closes it · `, h('span', { class: 'pencil' }, `est. ${f.money(e.burst.cost)}`), e.burst.needsApproval ? ' · waits for approval' : '') : null,
         !late && retries(j.units) ? h('div', { class: 'mnote t-temp' }, tempWords(j.units)) : null,

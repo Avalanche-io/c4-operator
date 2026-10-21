@@ -22,20 +22,47 @@ const keyOf = (j) => `${j.namespace}/${j.name}`;
 
 // ------------------------------------------------------------ root items
 
+// openNeed: the open question an item's steps act on, from its job
+function openNeed(ctx, it) {
+  const s = it.steps.find((x) => x.action === 'supply');
+  const j = s && ctx.job(s.job);
+  return j ? (j.needs || []).find((n) => String(n.unit) === String(s.units) && !n.supplied && !n.withdrawn) : null;
+}
+
+// a step's input, for the controls that carry words: the answer a unit
+// stopped for, or why its question no longer applies
+const INPUT = {
+  supply: { attr: 'data-text', tag: 'textarea', ph: 'Your answer. The agent resumes with it where it stopped.' },
+  'withdraw-needs': { attr: 'data-why', tag: 'input', ph: 'Why it no longer applies' },
+};
+
 export function rootCard(ctx, it) {
   const next = it.steps.findIndex((s) => !s.done);
   // acknowledged: someone has it, so it goes pale with their seal (the pale rule)
-  const ack = it.state === 'acknowledged';
-  return h('div', { class: 'd1-root d1-' + it.sev + (ack ? ' d1-ack' : ''), 'data-key': 'root-' + it.id, role: it.sev === 'needs' && !ack ? 'alert' : 'status' },
+  const ack = it.state === 'acknowledged', resolved = it.state === 'resolved';
+  // a question's tier: at risk while raised, orange once pressing
+  const tier = it.sev === 'needs' && it.severity ? ' d1-' + it.severity : '';
+  const need = it.id.startsWith('needsinformation:') ? openNeed(ctx, it) : null;
+  const [ask, press] = it.detail.split('; pressing: ');
+  const icon = it.sev === 'needs'
+    ? (ack ? h('span', { class: 'clock', 'aria-hidden': 'true' }, markEl('seal', { size: 14 })) : h('i', { class: 'flag', 'aria-hidden': 'true' }))
+    : h('span', { class: 'clock', 'aria-hidden': 'true' }, markEl(resolved ? 'check' : 'clock', { size: 14 }));
+  return h('div', { class: 'd1-root d1-' + it.sev + tier + (ack ? ' d1-ack' : '') + (resolved ? ' d1-resolved' : ''), 'data-key': 'root-' + it.id, role: it.sev === 'needs' && !ack ? 'alert' : 'status' },
     h('i', { class: 'bar', 'aria-hidden': 'true' }),
     h('div', { class: 'body' },
-      h('div', { class: 't' }, it.sev === 'needs' ? (ack ? h('span', { class: 'clock', 'aria-hidden': 'true' }, markEl('seal', { size: 14 })) : h('i', { class: 'flag', 'aria-hidden': 'true' })) : h('span', { class: 'clock', 'aria-hidden': 'true' }, markEl('clock', { size: 14 })), it.title, ack ? h('span', { class: 'dim', style: { fontSize: '13px', fontWeight: 400 } }, ' · acknowledged') : null),
-      it.detail ? h('div', { class: 'd' }, it.detail) : null,
-      it.steps.length ? h('ol', null, it.steps.map((s, k) => h('li', { class: s.done ? 'done' : k === next ? 'next' : '', 'data-key': 's' + k },
-        h('span', null, s.label),
-        s.done ? null : s.href
-          ? h('a', { class: 'btn small' + (k === next ? ' primary' : ''), href: ctx.href(s.href) }, s.act)
-          : h('button', { class: 'btn small' + (k === next ? ' primary' : ''), 'data-action': s.action, 'data-job': s.job, 'data-units': s.units || '' }, s.act)))) : null),
+      h('div', { class: 't' }, icon, it.title, ack ? h('span', { class: 'dim', style: { fontSize: '13px', fontWeight: 400 } }, ' · acknowledged') : resolved ? h('span', { class: 'dim', style: { fontSize: '13px', fontWeight: 400 } }, ' · resolved') : null),
+      ask ? h('div', { class: 'd' }, ask) : null,
+      press ? h('div', { class: 'd press' }, `Pressing: ${press}.`)
+        : need && need.answerBy ? h('div', { class: 'd by' }, `Answer by ${f.when(need.answerBy)} and ${it.jobs[0].split('/').pop()} still makes its deadline; the rest of it runs on meanwhile.`) : null,
+      it.steps.length ? h('ol', null, it.steps.map((s, k) => {
+        const inp = !s.done && s.action && INPUT[s.action], id = inp ? `${s.action}-${s.job}-${s.units}`.replace(/[^\w-]/g, '-') : '';
+        return h('li', { class: (s.done ? 'done' : k === next ? 'next' : '') + (inp ? ' with-input' : ''), 'data-key': 's' + k },
+          h('span', null, s.label),
+          inp ? h(inp.tag, { id, class: 'd1-in', placeholder: inp.ph, 'aria-label': inp.ph, rows: inp.tag === 'textarea' ? 2 : undefined }) : null,
+          s.done ? null : s.href
+            ? h('a', { class: 'btn small' + (k === next ? ' primary' : ''), href: ctx.href(s.href) }, s.act)
+            : h('button', { class: 'btn small' + (k === next ? ' primary' : ''), 'data-action': s.action, 'data-job': s.job, 'data-units': s.units || '', ...(inp ? { [inp.attr]: id } : {}) }, s.act));
+      })) : null),
     h('div', { class: 'n' }, f.num(it.count), h('small', null, it.unit)));
 }
 
@@ -57,21 +84,65 @@ export function bar(g, late) {
     h('i', { class: 'r', style: { left: `${(d * 100).toFixed(1)}%`, width: `${(r * 100).toFixed(1)}%` } }));
 }
 
+// agentGlance: an agent bundle's progress is its work, not its units (one
+// member is one unit until it ends): what it has done and is doing, of all
+// it is expected to need
+function agentGlance(j) {
+  const w = j.work || {};
+  const spent = (w.doneSlotSeconds || 0) + (w.runningSlotSeconds || 0), left = w.remainingSlotSeconds || 0;
+  return { done: spent + left > 0 ? spent / (spent + left) : 0, run: 0, left };
+}
+
+// agentWords: an agent bundle in its own words: working, or paused at a
+// turn's end for capacity, or waiting for your answer
+function agentWords(j) {
+  const open = (j.needs || []).filter((n) => !n.supplied && !n.withdrawn);
+  const run = j.units ? j.units.running || 0 : 0;
+  if (open.length) {
+    const p = open.some((n) => n.state === 'pressing');
+    return { word: run ? `working · ${open[0].name || 'an agent'} waits for your answer` : 'waits for your answer', cls: p ? 't-temp' : 't-risk', why: '' };
+  }
+  if (j.phase === 'Running') return { word: `working${j.units.total > 1 ? ` · ${run} of ${j.units.total} agents` : ''}`, cls: 't-run', why: '' };
+  if (/checkpoint/.test((j.estimate || {}).noEta || '')) return { word: "paused at a turn's end", cls: '', why: '· resumes from its checkpoint when capacity returns' };
+  return null;
+}
+const isAgent = (j) => j.driver === 'agent';
+
+// memberWord: one agent of a bundle in a word: working, asks you, paused
+// at a turn's end, done
+function memberWord(j, u) {
+  if (u.state === 'succeeded') return 'done';
+  if (u.state === 'running' || u.state === 'preflight') return 'working';
+  if (u.state === 'needs' || (j.needs || []).some((n) => n.unit === u.i && !n.supplied && !n.withdrawn)) return 'asks you';
+  if (u.state === 'failed') return 'needs you';
+  return (u.attempts || u.epoch) || /checkpoint/.test((j.estimate || {}).noEta || '') ? 'paused' : 'queued';
+}
+
 function jobRow(ctx, j, items) {
-  const e = j.estimate || {}, g = glance(j);
+  const e = j.estimate || {}, agent = isAgent(j), g = agent ? agentGlance(j) : glance(j);
   const fin = j.phase === 'Succeeded';
   const late = !fin && e.slackSeconds < 0;
-  const w = jobWords(j);
+  const w = (agent && !fin && agentWords(j)) || jobWords(j);
   const dl = j.objective && j.objective.deadline;
   // a job folded into a root item points to it, instead of its own red
   const it = items ? incidentOf(items, keyOf(j)) : null;
   return h('a', { class: 'd1-job', href: ctx.href(`job/${keyOf(j)}`), 'data-key': 'j-' + keyOf(j) },
     h('div', null, h('div', { class: 'nm' }, j.name), h('div', { class: 'st ' + (it ? '' : w.cls) }, w.why ? `${w.word} ${w.why}` : w.word),
       it ? h('div', { class: 'see' }, `see: ${it.title}`) : null),
-    h('div', null, bar(g, late), h('div', { class: 'd1-pct' }, `${Math.round(g.done * 100)}% done`)),
+    h('div', null, bar(g, late), h('div', { class: 'd1-pct' }, agent && !fin ? (g.left ? `about ${f.dur(g.left)} of work left` : '') : `${Math.round(g.done * 100)}% done`)),
     h('div', { class: 'd1-when' + (late ? ' late' : '') }, fin ? 'done' : e.noEta ? '–' : `~${f.when(e.etaP50)}`,
       h('small', null, fin ? '' : late ? `late: due ${f.when(dl)}` : dl ? `due ${f.when(dl)}` : 'no deadline')),
     h('div', { class: 'd1-act' }, h('span', { class: 'btn small' }, 'Open')));
+}
+
+// slotWords: slots in use; past what is offered (a pool just capped, say by
+// a laptop's power), how many stop at their next turn's end or safe point
+export function slotWords(s) {
+  const used = s.farm.slotsUsed, total = s.farm.slotsTotal;
+  if (used <= total) return `${f.num(used)} of ${f.num(total)} slots in use`;
+  const over = used - total;
+  const agents = s.jobs.filter((j) => j.phase === 'Running').every(isAgent);
+  return `${f.num(used)} running, ${f.num(total)} slots offered now: ${f.num(over)} ${over === 1 ? 'stops' : 'stop'} at the end of ${agents ? (over === 1 ? 'its turn' : 'their turns') : (over === 1 ? 'its next safe point' : 'their next safe points')}`;
 }
 
 const foot = () => h('div', { class: 'd1-foot' }, 'Level 1. Everything else is one click away: open any job for its frames, or change your level in the top bar.');
@@ -107,7 +178,7 @@ export const farm1 = {
     const list = (late.length ? late : open).slice(0, 8);
     return h('section', { class: 'd1', 'data-key': 'd1-farm' },
       h('h1', null, 'The farm'),
-      h('p', { class: 'd1-sub' }, `${f.num(open.length)} jobs working or waiting · ${late.length ? `${f.num(late.length)} projected late` : 'every deadline holds'} · ${f.num(s.farm.slotsUsed)} of ${f.num(s.farm.slotsTotal)} slots in use`),
+      h('p', { class: 'd1-sub' }, `${f.num(open.length)} jobs working or waiting · ${late.length ? `${f.num(late.length)} projected late` : 'every deadline holds'} · ${slotWords(s)}`),
       roots(ctx, items),
       h('h2', null, late.length ? `Projected late · ${f.num(late.length)}${late.length > list.length ? ` · the ${list.length} most at risk` : ''}` : 'Next in the queue'),
       list.map((j) => jobRow(ctx, j, items)),
@@ -134,11 +205,12 @@ export const job1 = {
     const j = ctx.job(k);
     if (!j) return h('div', { class: 'd1' }, 'Reading the job…');
     const d = detailOf(ctx, k);
-    const g = glance(j, d);
+    const g = isAgent(j) ? agentGlance(j) : glance(j, d);
     const e = j.estimate || {};
     const fin = j.phase === 'Succeeded', late = !fin && e.slackSeconds < 0;
     const dl = j.objective && j.objective.deadline;
-    const w = jobWords(j);
+    const aw = isAgent(j) && !fin ? agentWords(j) : null;
+    const w = aw || jobWords(j);
     const items = incidents(ctx.snap, [j]).filter((x) => x.sev === 'needs');
     const by = new Map();
     for (const u of (d && d.unitList) || []) {
@@ -153,16 +225,18 @@ export const job1 = {
     return h('section', { class: 'd1', 'data-key': 'd1-job' },
       h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, all ? '← The farm' : '← My jobs')),
       h('h1', null, j.name),
-      h('p', { class: 'd1-sub ' + w.cls }, `${w.why ? `${w.word} ${w.why}` : w.word} · ${fin ? 'done' : e.noEta ? 'no ETA yet' : `ready ~${f.when(e.etaP50)}`}${dl ? ` · due ${f.when(dl)}` : ''}${late ? ' · projected late' : ''}`),
+      h('p', { class: 'd1-sub ' + w.cls }, `${w.why ? `${w.word} ${w.why}` : w.word}${aw && e.noEta ? '' : ` · ${fin ? 'done' : e.noEta ? 'no ETA yet' : `ready ~${f.when(e.etaP50)}`}`}${dl ? ` · due ${f.when(dl)}` : ''}${late ? ' · projected late' : ''}`),
       items.length ? roots(ctx, items, { handled: false }) : null,
       decisions(ctx, j, k),
       h('h2', null, 'Progress'),
       h('div', { class: 'd1-stage' }, h('span', { class: 'nm' }, 'All of it'), bar(g, late), h('span', { class: 'ct' }, `${Math.round(g.done * 100)}%`)),
-      stages.length > 1 ? h('div', { class: 'd1-stages' }, stages.map((s) => h('div', { class: 'd1-stage', 'data-key': 'st-' + s.label },
-        h('span', { class: 'nm' }, s.label), bar({ done: s.n ? s.done / s.n : 0, run: s.n ? s.run / s.n : 0 }, false), h('span', { class: 'ct' }, `${f.num(s.done)} of ${f.num(s.n)}`)))) : null,
+      isAgent(j) ? h('div', { class: 'd1-stages' }, ((d && d.unitList) || []).map((u) => h('div', { class: 'd1-stage', 'data-key': 'st-' + u.label },
+        h('span', { class: 'nm' }, u.label), bar({ done: u.state === 'succeeded' ? 1 : 0, run: u.state === 'running' ? 1 : 0 }, false), h('span', { class: 'ct' }, memberWord(j, u)))))
+        : stages.length > 1 ? h('div', { class: 'd1-stages' }, stages.map((s) => h('div', { class: 'd1-stage', 'data-key': 'st-' + s.label },
+          h('span', { class: 'nm' }, s.label), bar({ done: s.n ? s.done / s.n : 0, run: s.n ? s.run / s.n : 0 }, false), h('span', { class: 'ct' }, `${f.num(s.done)} of ${f.num(s.n)}`)))) : null,
       h('div', { class: 'd1-peek' },
-        h('a', { class: 'btn', href: ctx.href(`job/${k}?peek=2`), 'data-peek': '1' }, 'Show the frames'),
-        h('span', null, 'Opens this job at level 2: its frames, stages and time. Your level stays 1.')),
+        h('a', { class: 'btn', href: ctx.href(`job/${k}?peek=2`), 'data-peek': '1' }, isAgent(j) ? 'Show the agents' : 'Show the frames'),
+        h('span', null, isAgent(j) ? 'Opens this job at level 2: each agent along time, its checkpoints and the bundle’s own clock. Your level stays 1.' : 'Opens this job at level 2: its frames, stages and time. Your level stays 1.')),
       foot());
   },
 };
@@ -173,7 +247,7 @@ export const pools1 = {
     const items = incidents(s);
     return h('section', { class: 'd1', 'data-key': 'd1-pools' },
       h('h1', null, 'Capacity'),
-      h('p', { class: 'd1-sub' }, `${f.num(s.farm.slotsUsed)} of ${f.num(s.farm.slotsTotal)} slots in use`),
+      h('p', { class: 'd1-sub' }, slotWords(s)),
       roots(ctx, items),
       h('h2', null, 'Pools'),
       (s.pools || []).map((p) => h('div', { class: 'd1-pool', 'data-key': 'p-' + p.name },

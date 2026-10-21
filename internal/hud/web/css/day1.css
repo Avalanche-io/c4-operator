@@ -72,3 +72,28 @@
 /* the peripheral cue: a steady red edge on the top bar while anything needs
    a person, on every page. Never flashing (Nikolic, Orr and Sarter 2004). */
 html[data-needs="1"] .top { box-shadow: inset 0 3px 0 var(--fail); }
+html[data-needs="warning"] .top { box-shadow: inset 0 3px 0 var(--risk); }
+html[data-needs="urgent"] .top { box-shadow: inset 0 3px 0 var(--temp); }
+
+/* A question a unit stopped for (incidents.js): at risk while raised,
+   orange once pressing; resolved, it is shown a few minutes, settled. */
+.d1-root.d1-needs.d1-warning .bar { background: var(--risk); }
+.d1-root.d1-warning .t .flag { border-top-color: var(--risk); }
+.d1-root.d1-needs.d1-urgent .bar { background: var(--temp); }
+.d1-root.d1-urgent .t .flag { border-top-color: var(--temp); }
+.d1-root .d.by { color: var(--risk-text); }
+.d1-root .d.press { color: var(--temp-text); }
+.d1-root.d1-resolved .t .clock { color: var(--done-text); }
+.d1-root li.with-input { flex-wrap: wrap; }
+.d1-root li.with-input > span { flex: 1 1 calc(100% - 48px); }
+.d1-root .d1-in { flex: 1 1 320px; box-sizing: border-box; font: 400 13px/1.4 var(--sans); color: var(--paper); background: var(--well); border: var(--hair) solid var(--g13); padding: 6px 8px; margin-left: 34px; resize: vertical; }
+
+/* Needs you (views/needs.js): a job's decisions under its name */
+.needs-job { margin-bottom: 14px; }
+.needs-job > .nm { display: block; font: 500 15px/1.3 var(--mono); color: var(--paper); margin-bottom: 6px; }
+
+/* Your sessions (views/sessions.js) */
+.ses .ses-ask { font: 400 14px/1.4 var(--sans); color: var(--paper); margin-bottom: 4px; }
+.ses .ses-act { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
+.ses .ses-cmd { display: flex; flex-direction: column; gap: 4px; max-width: 320px; font: 400 12px/1.4 var(--sans); text-align: right; }
+.ses .ses-cmd code { font: 400 12px/1.4 var(--mono); color: var(--paper); background: var(--well); padding: 4px 6px; user-select: all; }

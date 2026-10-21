@@ -192,3 +192,6 @@ canvas[data-player] { background: var(--g02); }
 .uact.col { flex-direction: column; align-items: stretch; }
 .uact.col .btn { align-self: flex-start; }
 .downer { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; width: 100%; font: 400 12px/1.4 var(--sans); margin-top: 4px; }
+
+/* your page: a login to confirm, its two buttons side by side */
+.me .gbtns { display: flex; gap: 6px; flex: none; }

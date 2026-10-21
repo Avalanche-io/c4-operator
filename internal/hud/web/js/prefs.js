@@ -53,12 +53,17 @@ export const SCHEMA = {
     group: 'Appearance', type: 'enum', values: ['system', 'dark', 'light'], default: 'system', label: 'Scheme',
     names: { system: 'Follow the system', dark: 'Dark', light: 'Light' }, link: 'scheme',
   },
+  // the HUD channel of policy's escalation.notify: a question to you that
+  // turns pressing is sent as a browser notification while the HUD is open
+  notifyPressing: {
+    group: 'Notifications', type: 'bool', default: false, label: 'Tell me when a question to me turns pressing',
+    help: 'An agent or a unit stopped for an answer only you can give, and it now costs a deadline or has waited too long. The browser shows it once, while the HUD is open; your browser asks first.',
+  },
   // Reserved, so stored values and the server's schema leave room for them:
-  // motion (reduced), vision (color-vision variants), density, sounds,
-  // notifications.
+  // motion (reduced), vision (color-vision variants), density, sounds.
 };
 
-export const GROUPS = ['Level', 'Mode', 'Time', 'Appearance'];
+export const GROUPS = ['Level', 'Mode', 'Time', 'Appearance', 'Notifications'];
 
 function validZone(z) {
   try { new Intl.DateTimeFormat('en-US', { timeZone: z }); return true; } catch { return false; }

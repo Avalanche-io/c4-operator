@@ -11,7 +11,7 @@ import * as f from './fmt.js';
 import * as md from './mode.js';
 import * as lvl from './level.js';
 import { mine1, farm1, job1, pools1 } from './views/day1.js';
-import { incidents, needsCount } from '../design/components/incidents.js';
+import { incidents, needsTier } from '../design/components/incidents.js';
 import * as prefs from './prefs.js';
 import { installC4ID } from '../design/components/c4id.js';
 import queue from './views/queue.js';
@@ -26,11 +26,17 @@ import graph from './views/graph.js';
 import cost from './views/cost.js';
 import catalog from './views/catalog.js';
 import yourPage from './views/me.js';
+import needsYou from './views/needs.js';
+import sessions from './views/sessions.js';
 
-const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage };
+const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage, needs: needsYou, sessions };
 // each view and the mode it arrives at (docs/intro/ladder.md)
 // [view, label, mode, level]: a tab shows from that mode, at that level
 const NAV = [
+  // only what needs you, at every mode and level (views/needs.js)
+  ['needs', 'Needs you', 0, 1],
+  // the sessions running on this machine outside the farm, when something observes them
+  ['sessions', 'Your sessions', 0, 1],
   ['queue', 'Queue', 3, 1],
   ['pools', 'Pools', 4, 1],
   ['map', 'Map', 4, 2],
@@ -115,7 +121,7 @@ function topBar() {
       h('span', { class: 'num' }, s ? f.clockSec(s.now) : '--:--:--', s && f.utc(s.now) ? h('span', { class: 'cx', title: 'UTC' }, f.utc(s.now)) : null),
       h('span', { class: 'lab' }, s ? `${f.dateLine(s.now)} \u00b7 ${f.offsetLabel()}` : '')),
     h('nav', { class: 'views', 'aria-label': 'Views' },
-      NAV.filter(([k, , n, l]) => (state.mode.mode >= n && ctx.level >= l && (k !== 'catalog' || state.catalog)) || (state.route && state.route.name === k)).map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
+      NAV.filter(([k, , n, l]) => (state.mode.mode >= n && ctx.level >= l && (k !== 'catalog' || state.catalog) && (k !== 'sessions' || state.observed)) || (state.route && state.route.name === k)).map(([k, label]) => h('a', { href: href(k), 'aria-current': state.route && (state.route.name === k || (k === 'queue' && state.route.name === 'job') || (k === 'pools' && state.route.name === 'workers')) ? 'page' : false }, label))),
     levelSwitch(),
     detail(),
     h('div', { class: 'who' },
@@ -209,7 +215,28 @@ document.addEventListener('change', (e) => {
   const el = e.target.closest('.pf-sheet [data-pref]');
   if (!el) return;
   setPref(el.dataset.pref, el.type === 'checkbox' ? el.checked : el.value);
+  // the browser asks once, on the click that turns notifications on
+  if (el.dataset.pref === 'notifyPressing' && el.checked && typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission();
 });
+
+// notifyPressing: a question to you that turns pressing is sent once as a
+// browser notification, when you asked for that (Preferences). Questions
+// already pressing when the page opens are on the screen, so they are not
+// sent. Orange says something is wrong and may still resolve itself; a
+// pressing question may yet be answered by other work, but it is a
+// question to a person, so it may reach them (policy escalation.notify).
+const told = new Set();
+let primed = false;
+function notifyPressing() {
+  if (!state.snap) return;
+  const send = primed && typeof Notification !== 'undefined' && Notification.permission === 'granted' && prefs.effective(me(), 'notifyPressing').value;
+  for (const it of incidents(state.snap)) {
+    if (it.sev !== 'needs' || it.severity !== 'urgent' || told.has(it.id)) continue;
+    told.add(it.id);
+    if (send) new Notification(it.title, { body: it.detail.split('; pressing: ').reverse().join('. Asked: '), tag: it.id });
+  }
+  primed = true;
+}
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape' && state.sheet) { state.sheet = false; render(); }
 });
@@ -307,6 +334,8 @@ function slate() {
 let lastView = null, lastRoute = null;
 // the Catalogue tab shows only on a farm that serves a catalogue of designs
 fetch(objectURL('/api/v1/catalog'), { method: 'HEAD' }).then((r) => { state.catalog = r.ok; if (r.ok && state.snap) render(); }).catch(() => {});
+// the Your sessions tab shows only where something observes this machine's sessions
+fetch(objectURL('/api/v1/observed'), { method: 'HEAD' }).then((r) => { state.observed = r.ok; if (r.ok && state.snap) render(); }).catch(() => {});
 function render() {
   const route = state.route;
   state.mode = md.current(state.snap && state.snap.viewer);
@@ -315,7 +344,8 @@ function render() {
   document.documentElement.dataset.level = String(ctx.level);
   // the peripheral cue: a steady red edge on the top bar while anything
   // needs a person, on every page and in every mode (incidents.js)
-  if (state.snap) document.documentElement.dataset.needs = needsCount(incidents(state.snap)) > 0 ? '1' : '0';
+  if (state.snap) document.documentElement.dataset.needs = needsTier(incidents(state.snap));
+  notifyPressing();
   // reaching for expert detail at level 2 counts toward the one offer of 3
   if (state.snap && state.level.level === 2 && lastRoute !== location.hash && (ctx.mode >= 5 || ['tiers', 'wall', 'cost'].includes(route.name))) lvl.used(state.snap.viewer, 'expert');
   lastRoute = location.hash;
@@ -424,6 +454,20 @@ const ACTIONS = {
   },
   deadlinemode: (d) => [`/jobs/${d.job}/nudge`, { deadlineMode: d.mode }],
   nextsession: (d) => [`/jobs/${d.job}/nudge`, { nextSession: true }],
+  // a tracker login offered as you: confirm it is you, or take it back
+  'people-confirm': (d) => ['/people', { namespace: d.ns, tracker: d.tracker, login: d.login }],
+  'people-revoke': (d) => [`/people/${d.name}`, null, 'DELETE'],
+  // a question a unit stopped for: answer it, or withdraw it with why
+  supply: (d) => {
+    const text = value(d.text);
+    if (!text) throw new Error('Write the answer first.');
+    return [`/jobs/${d.job}/supply`, { unit: Number(d.units), text }];
+  },
+  'withdraw-needs': (d) => {
+    const why = value(d.why);
+    if (!why) throw new Error('Say why the question no longer applies.');
+    return [`/jobs/${d.job}/needs/${d.units}/withdraw`, { why }];
+  },
   // a held tracker write: whether it reached the tracker
   held: (d) => [`/held/${d.ns}/${d.link}/${d.field}`, { happened: d.happened === 'true' }],
 };

@@ -13,7 +13,7 @@ import { glance, inFlight, retries } from '../../design/components/core.js';
 import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
 import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
-import { jobWords, tempWords } from '../../design/components/words.js';
+import { jobWords, tempWords, heldByPerson } from '../../design/components/words.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
 import { roots } from './day1.js';
 
@@ -39,9 +39,25 @@ function folded(ctx, rest) {
   return [...by].map(([p, n]) => h('div', { class: 'qfold', 'data-key': 'fold-' + p }, h('b', null, p), `${f.num(n)} job${n === 1 ? '' : 's'} on their way`, h('a', { href: qhref(ctx, { ...ctx.route.q, triage: 'off' }) }, 'show them')));
 }
 
-const FILTERS = [['all', 'All'], ['render', 'Render'], ['ci', 'CI'], ['ml', 'ML'], ['other', 'Sim and media']];
+const FILTERS = [['all', 'All'], ['render', 'Render'], ['ci', 'CI'], ['ml', 'ML'], ['agent', 'Agents'], ['other', 'Sim and media']];
+// agent bundles and plan jobs (agents working through a plan) are agents' work
+const AGENTS = ['agent', 'plan'];
 
 const st = { dismissed: new Set() };
+// whether any job on the farm belongs to a shot: else no Shot column
+let SHOTS = true;
+
+// openQuestions: the questions a job's units stopped for, still open
+const openQuestions = (j) => (j.needs || []).filter((n) => !n.supplied && !n.withdrawn);
+
+// scaleWords: the sheet's scale, in the units of the work on it
+function scaleWords(ctx, jobs) {
+  const lenses = new Set(jobs.map((j) => lensOf(ctx, j)));
+  const parts = ['scale · 1 row = 1 job'];
+  if (lenses.has('render')) parts.push('batches of 24 frames (render)');
+  if (AGENTS.some((l) => lenses.has(l))) parts.push('one cell per agent or step (agents)');
+  return [...parts, 'slack against the deadline, −6h to +3d, log scale'].join(' · ');
+}
 
 const keyOf = (j) => `${j.namespace}/${j.name}`;
 
@@ -53,7 +69,8 @@ function lensOf(ctx, j) {
 function matches(ctx, j, flt) {
   if (flt === 'all') return true;
   const lens = lensOf(ctx, j);
-  if (flt === 'other') return !['render', 'ci', 'ml'].includes(lens);
+  if (flt === 'other') return !['render', 'ci', 'ml', ...AGENTS].includes(lens);
+  if (flt === 'agent') return AGENTS.includes(lens);
   return lens === flt;
 }
 
@@ -78,10 +95,11 @@ function holdMark() {
 }
 
 function phase(j) {
-  if (j.phase === 'Held') return h('span', { class: 'q-ph held' }, holdMark(), 'held');
+  if (heldByPerson(j)) return h('span', { class: 'q-ph held' }, holdMark(), 'held');
   if (j.phase === 'Failed') return h('span', { class: 'q-ph t-fail' }, 'needs you');
-  if (j.phase === 'Running' && retries(j.units)) return h('span', { class: 'q-ph' }, h('span', { class: 't-run' }, 'rendering'), h('span', { class: 't-temp' }, ` · ${tempWords(j.units)}`));
-  if (j.phase === 'Running') return h('span', { class: 'q-ph t-run' }, 'rendering');
+  const run = j.driver === 'agent' ? 'working' : 'rendering';
+  if (j.phase === 'Running' && retries(j.units)) return h('span', { class: 'q-ph' }, h('span', { class: 't-run' }, run), h('span', { class: 't-temp' }, ` · ${tempWords(j.units)}`));
+  if (j.phase === 'Running') return h('span', { class: 'q-ph t-run' }, run);
   if (j.phase === 'Succeeded') return h('span', { class: 'q-ph t-done' }, 'done');
   const w = jobWords(j);
   return h('span', { class: 'q-ph ' + w.cls }, w.why ? `${w.word} ${w.why}` : w.word);
@@ -99,11 +117,15 @@ function row(ctx, j, multiProject, sk) {
   const shot = sk(j);
   const dl = j.objective && j.objective.deadline;
   const passed = dl && Date.parse(dl) < f.now() && !fin;
+  // a unit stopped for a question is failed to the API: it is said as the
+  // question it is, in its tier's hue, and is not requeued
+  const asks = openQuestions(j), failed = u.failed || 0;
   const capt = fin ? `${f.num(u.succeeded)} done` : [
     `${f.num(u.succeeded)}/${f.num(u.total)}`,
-    inFlight(u) ? h('span', { class: 't-run' }, `${inFlight(u)} rendering`) : null,
+    inFlight(u) ? h('span', { class: 't-run' }, `${inFlight(u)} ${j.driver === 'agent' ? 'working' : 'rendering'}`) : null,
     retries(u) ? h('span', { class: 't-temp' }, tempWords(u)) : null,
-    u.failed ? h('span', { class: 't-fail' }, `${u.failed} ${u.failed === 1 ? 'needs' : 'need'} you`) : null,
+    asks.length ? h('span', { class: asks.some((n) => n.state === 'pressing') ? 't-temp' : 't-risk' }, `${asks.length} ${asks.length === 1 ? 'asks' : 'ask'} you`) : null,
+    failed ? h('span', { class: 't-fail' }, `${failed} ${failed === 1 ? 'needs' : 'need'} you`) : null,
     u.unevaluated || u.planned ? `${f.num(u.unevaluated || u.planned)} expected` : null,
   ].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]));
   const b = e.burst;
@@ -111,10 +133,10 @@ function row(ctx, j, multiProject, sk) {
   if (!fin && b && b.needsApproval && ctx.mode >= 4) {
     act.push(h('button', { class: 'btn request', 'data-action': 'approve', 'data-pool': b.pool, title: `Approve the pending request: ${b.slots} ${b.pool} slots for ${j.name}` },
       h('span', null, `+${b.slots} ${b.pool}`), h('b', null, f.money(b.cost))));
-  } else if (j.phase === 'Held') {
+  } else if (heldByPerson(j)) {
     act.push(h('button', { class: 'btn small', 'data-action': 'release', 'data-job': k }, 'Release'));
-  } else if (u.failed > 0) {
-    act.push(h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': failedUnits(j) }, `Requeue ${u.failed} failed`));
+  } else if (failed > 0) {
+    act.push(h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': failedUnits(j) }, `Requeue ${failed} failed`));
   }
   const dueCell = dl ? h('div', { class: 'qdue' },
     h('span', { class: 'ink' + (passed ? ' t-risk' : '') }, f.clock(dl)),
@@ -124,7 +146,7 @@ function row(ctx, j, multiProject, sk) {
   const slack = dl && !fin && Number.isFinite(e.slackSeconds)
     ? h('div', { class: 'qslack' + (late ? ' late' : '') }, h('span', { class: late && !passed ? 'pencil' : '' }, f.signed(e.slackSeconds)), h('small', null, late ? (passed ? 'past due' : 'projected late') : 'slack'))
     : h('div', { class: 'qslack none' }, '–');
-  return h('div', { class: `qr${fin ? ' fin' : ''}${late ? ' late' : ''}${j.phase === 'Held' ? ' held' : ''}`, 'data-key': k, role: 'listitem' },
+  return h('div', { class: `qr${fin ? ' fin' : ''}${late ? ' late' : ''}${heldByPerson(j) ? ' held' : ''}`, 'data-key': k, role: 'listitem' },
     h('div', { class: 'qrank' }, j.rank > 0 && !fin ? String(j.rank) : ''),
     own('pylon', 'qpy:' + k, { glance: glance(j), w: 30, h: 46, mode: 'mini' }, { class: 'qpy' }),
     h('div', { class: 'qname' },
@@ -135,7 +157,7 @@ function row(ctx, j, multiProject, sk) {
         multiProject ? h('span', { class: 'dimmer' }, j.project) : null,
         h('span', { class: 'dimmer' }, orderText(j.order)),
         j.blacklist && j.blacklist.length ? h('span', { class: 't-temp', title: 'Nodes this job will not use' }, `avoids ${j.blacklist.join(', ')}`) : null)),
-    h('div', { class: 'qshot' }, shot ? h('a', { href: qhref(ctx, { ...ctx.route.q, shot }), class: 'shotref', title: `Only shot ${shot}` }, shot) : h('span', { class: 'dimmer' }, '–')),
+    h('div', { class: 'qshot' }, shot ? h('a', { href: qhref(ctx, { ...ctx.route.q, shot }), class: 'shotref', title: `Only shot ${shot}` }, shot) : SHOTS ? h('span', { class: 'dimmer' }, '–') : null),
     h('div', { class: 'qstrip' },
       raw('div', { class: 'strip', 'data-key': 'strip' }, strip.svg),
       h('div', { class: 'cap' }, capt, j.work && j.work.basis === 'estimate' ? null : h('span', { class: 'dimmer' }, ' · by units'))),
@@ -150,7 +172,7 @@ function head() {
     h('span', { class: 'lab', style: { textAlign: 'right' } }, '#'),
     h('span'),
     h('span', { class: 'lab' }, 'Job'),
-    h('span', { class: 'lab' }, 'Shot'),
+    h('span', { class: 'lab' }, SHOTS ? 'Shot' : ''),
     h('span', { class: 'lab' }, 'Batches'),
     h('span', { class: 'lab' }, 'Deadline · p90'),
     h('div', { class: 'datumhead' },
@@ -306,6 +328,7 @@ function simple(ctx) {
 export default {
   render(ctx) {
     ITEMS = incidents(ctx.snap);
+    SHOTS = ((k) => ctx.snap.jobs.some((j) => !!k(j)))(shotKeyFn(ctx.snap.jobs));
     if (ctx.mode < 2) return simple(ctx);
     const s = ctx.snap;
     const q = ctx.route.q;
@@ -327,6 +350,8 @@ export default {
     const late = withDl.filter(isLate);
     const counts = Object.fromEntries(FILTERS.map(([k]) => [k, s.jobs.filter((j) => matches(ctx, j, k)).length]));
     const decisions = allOpen.map((j) => burstDecision(s, j)).filter(Boolean);
+    const questions = allOpen.flatMap(openQuestions);
+    const awaiting = decisions.length + questions.length;
     const shown = decisions.filter((d) => !st.dismissed.has(keyOf(d.job)));
     const win = ((s.usage && s.usage.productionWindows) || []).find((w) => w.active);
     const mday = win ? Math.floor((f.now() - Date.parse(win.from)) / 864e5) + 1 : null;
@@ -340,7 +365,9 @@ export default {
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Now'), h('span', { class: 'val' }, f.clockSec(s.now)), h('span', { class: 'sub' }, `${f.dateLine(s.now)} · ${f.offsetLabel()}`)),
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'On time'), h('span', { class: 'val' }, String(withDl.length - late.length), h('small', null, `of ${withDl.length}`)), h('span', { class: 'sub' }, 'with a deadline')),
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Projected late'), h('span', { class: 'val' + (late.length ? ' late' : '') }, String(late.length)), h('span', { class: 'sub' }, late.length ? `worst ${f.signed(Math.min(...late.map((j) => j.estimate.slackSeconds)))}` : 'every deadline holds')),
-          h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Awaiting you'), h('span', { class: 'val' }, String(decisions.length)), h('span', { class: 'sub' }, decisions.length ? `burst, est. ${f.money(decisions.reduce((a, d) => a + d.cost, 0))}` : 'no decisions')),
+          h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Awaiting you'), h('span', { class: 'val' }, String(awaiting)), h('span', { class: 'sub' }, awaiting ? [
+            questions.length ? `${questions.length} ${questions.length === 1 ? 'question' : 'questions'}` : '',
+            decisions.length ? `burst, est. ${f.money(decisions.reduce((a, d) => a + d.cost, 0))}` : ''].filter(Boolean).join(' · ') : 'no decisions')),
           win ? h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Production day'), h('span', { class: 'val' }, `day ${mday}`), h('span', { class: 'sub' }, `${win.name.toLowerCase()} · to ${f.dateLine(win.to)}`)) : null)),
       qroots(ctx),
       h('div', { class: 'qcollar' + (shown.length && ctx.mode >= 4 ? ' has-dc' : '') },
@@ -349,11 +376,11 @@ export default {
       ctx.mode < 3 ? null : h('div', { class: 'qtools' },
         h('div', { class: 'filters', role: 'group', 'aria-label': 'Filter by work class' },
           h('span', { class: 'lab' }, 'Show'),
-          h('span', { class: 'seg' }, FILTERS.map(([k, label]) => h('a', {
+          h('span', { class: 'seg' }, FILTERS.filter(([k]) => k === 'all' || k === flt || counts[k] > 0).map(([k, label]) => h('a', {
             class: 'btn small', href: qhref(ctx, { ...q, class: k }), 'aria-pressed': flt === k ? 'true' : 'false',
           }, `${label} ${counts[k]}`)))),
         shotF ? h('a', { class: 'btn small', href: qhref(ctx, { ...q, shot: '' }), 'aria-pressed': 'true', title: 'Show every shot' }, `Shot ${shotF} ×`) : null,
-        h('span', { class: 'scale mono' }, 'scale · 1 row = 1 job · batches of 24 frames (render) · slack against the deadline, −6h to +3d, log scale')),
+        h('span', { class: 'scale mono' }, scaleWords(ctx, s.jobs))),
       h('div', { class: 'neat qneat' },
         ctx.mode >= 4 ? h('div', { class: 'edge w' }, '◂ ', h('a', { href: ctx.href('pools') }, 'pools'), ' · capacity feeding the queue') : null,
         ctx.mode >= 3 ? h('div', { class: 'edge e' }, h('a', { href: ctx.href('graph') }, 'graph'), ' · deliveries to the client ▸') : null,

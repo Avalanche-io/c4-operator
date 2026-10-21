@@ -2,7 +2,7 @@
 
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
-import { jobWords, who } from '../../design/components/words.js';
+import { jobWords, who, heldByPerson } from '../../design/components/words.js';
 
 export const key = (j) => `${j.namespace}/${j.name}`;
 
@@ -41,7 +41,7 @@ export function lane(j, { tall = false } = {}) {
   const p50 = (f.ms(e.etaP50) - now) / 1000;
   const p90 = (f.ms(e.etaP90) - now) / 1000;
   const done = j.phase === 'Succeeded';
-  const held = j.phase === 'Held';
+  const held = heldByPerson(j);
   if (done) {
     kids.push(s('rect', { x: 0, y: mid - 3, width: 6, height: 6, fill: 'var(--u-done)' }));
     kids.push(s('text', { x: 12, y: mid + 3.5, style: { font: '10px var(--mono)', 'font-stretch': '75%', fill: 'var(--ink-2)' } }, `done ${f.clock(e.etaP90)}`));

@@ -5,7 +5,8 @@
 //
 //   seal(signer, {open})   a signer's mark: node diamond, queue square,
 //                          HUD circle (a person or agent), controller,
-//                          importer and ingest triangle; dashed until signed
+//                          importer and ingest triangle; dashed until signed,
+//                          and in the book wherever no signed record exists
 //   ink(text) / pencil(text)
 //   bookList(entries)      the book: sequence, time, seal, entry, actor
 
@@ -36,7 +37,9 @@ export function bookList(entries) {
     (entries || []).map((e) => el('div', { class: `e${e.superseded ? ' struck' : ''}${e.open ? ' open' : ''}`, 'data-key': 'b' + e.seq },
       el('span', { class: 'seq' }, String(e.seq).padStart(4, '0')),
       el('span', { class: 'at' + (e.approx ? ' pencil' : '') }, e.approx ? '<' + f.clock(e.at, false) : f.clockSec(e.at)),
-      seal(e.signer, { open: !!e.open }),
+      // signed only where a record exists: an entry without one is drawn
+      // open, by whom it was booked
+      seal(e.signer, { open: !!e.open || !e.record, title: e.record ? undefined : `booked by the ${e.signer}; no signed record` }),
       el('span', { class: 'msg ' + (TONE[e.kind] || '') }, e.message),
       el('span', { class: 'who' }, `${e.actor || ''}${e.signer ? ' · ' + e.signer : ''}`, e.record ? [' · ', c4idEl(e.record, { label: 'signed record' })] : null))));
 }

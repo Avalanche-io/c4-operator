@@ -48,6 +48,7 @@ export function unitWords(u) {
       return { word: 'queued', cls: '', why: 'ready; waits for a slot' };
     case 'blocked': return { word: 'blocked on', cls: '', why: u.blockedOn ? u.blockedOn : 'work before it' };
     case 'held': return { word: 'held', cls: '', why: 'a person paused it' };
+    case 'needs': return { word: 'asks you', cls: 't-risk', why: 'it stopped on a question only a person can answer' };
     case 'locked': return { word: 'locked by', cls: '', why: u.lockedBy || 'another unit' };
     case 'waits': {
       if (!w) return { word: 'waits for', cls: '', why: 'a decision' };
@@ -83,6 +84,11 @@ export function how(u) {
   return out.join(' · ');
 }
 
+// heldByPerson: a job a person paused, not one held on an open question
+// (phase Held either way; an open question holds a job once nothing else
+// runs, and it is answered, not released)
+export const heldByPerson = (j) => j.phase === 'Held' && !(j.needs || []).some((n) => !n.supplied && !n.withdrawn);
+
 // jobWords: a job's state in one phrase, the Queue-mode word (INTEGRATE 4.4):
 // "blocked on comp", "waits for license-nuke", "held", "needs you" (the
 // caller's personMark says why), else its phase in the vocabulary.
@@ -90,6 +96,9 @@ const PHASE = { Queued: 'queued', Running: 'rendering', Blocked: 'blocked on', H
 export function jobWords(j) {
   const short = (k) => String(k).split('/').pop();
   if (j.phase === 'Blocked') return { word: 'blocked on', cls: '', why: (j.dependsOn || []).map(short).join(', ') || 'earlier work' };
+  // held on an open question, not by a person: it waits on the answer
+  const asks = (j.needs || []).filter((n) => !n.supplied && !n.withdrawn);
+  if (j.phase === 'Held' && asks.length) return { word: 'waits on a question', cls: asks.some((n) => n.state === 'pressing') ? 't-temp' : 't-risk', why: '' };
   if (j.phase === 'Held') return { word: 'held', cls: 't-magenta', why: '' };
   const open = (j.waits || []).filter((w) => !w.do);
   const run = j.units ? (j.units.running || 0) + (j.units.retrying || 0) + (j.units.preflight || 0) : 0;
@@ -98,6 +107,8 @@ export function jobWords(j) {
     return { word: 'waits for', cls: isPerson(w) ? 't-red' : '', why: who(w.waitsFor) + (open.length > 1 ? ` and ${open.length - 1} more` : '') };
   }
   if (j.phase === 'Yielded') return { word: 'queued', cls: 'dim', why: 'yielded; resumes where it left off' };
+  // an agent works; frames render
+  if (j.phase === 'Running' && j.driver === 'agent') return { word: 'working', cls: '', why: '' };
   return { word: PHASE[j.phase] || String(j.phase || '').toLowerCase(), cls: j.phase === 'Failed' ? 't-red' : j.phase === 'Succeeded' ? 'settled' : '', why: '' };
 }
 
