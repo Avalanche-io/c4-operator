@@ -598,6 +598,25 @@ func TestUnrealRefusesSomeoneElsesInitAtApply(t *testing.T) {
 	diff(t, "a refused apply", before, snapshot(t, fk.roots.Home))
 }
 
+// When the system keeps c4 out of the guarded folder after the yes, Apply
+// says so in plain words, and changes nothing.
+func TestAppliedLookRefusedSaysWhy(t *testing.T) {
+	fk := darwinApps(t)
+	lock, unlock := guard(t, fk)
+	before := snapshot(t, fk.roots.Home)
+	c := plan(t, find(t, &fk.roots, "unreal", "5.7"), true)
+	lock()
+	err := Apply(c)
+	if err == nil || err.Error() != "macOS kept c4 out of ~/Documents; allow your terminal under System Settings > Privacy & Security > Files and Folders, then run c4 farm integrate unreal@5.7 on again" {
+		t.Errorf("Apply: %v", err)
+	}
+	if _, err := Plan(find(t, &fk.roots, "unreal", "5.7"), false); err != nil {
+		t.Errorf("an off with nothing on: %v", err)
+	}
+	unlock()
+	diff(t, "a refused look", before, snapshot(t, fk.roots.Home))
+}
+
 // Only a layout with files under a guarded folder is planned without
 // looking: Blender's add-on, under ~/Library, is planned as before.
 func TestOnlyGuardedLayoutsSkipTheLook(t *testing.T) {

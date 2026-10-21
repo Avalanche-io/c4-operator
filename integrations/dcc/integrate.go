@@ -173,6 +173,30 @@ func (r *Roots) Plan(f Found, on bool) (Change, error) { return r.plan(f, on, fa
 
 // plan is Plan; look lets it read guarded folders.
 func (r *Roots) plan(f Found, on bool, look bool) (Change, error) {
+	c, err := r.planIn(f, on, look)
+	return c, r.kept(f, on, err)
+}
+
+// kept says in plain words that the system kept c4 out of a guarded
+// folder (the person declined its question, or no question could be shown),
+// rather than a bare permission error.
+func (r *Roots) kept(f Found, on bool, err error) error {
+	var pe *fs.PathError
+	if !errors.Is(err, fs.ErrPermission) || !errors.As(err, &pe) {
+		return err
+	}
+	for _, g := range r.Guarded {
+		if pe.Path != g && !strings.HasPrefix(pe.Path, g+string(filepath.Separator)) {
+			continue
+		}
+		dir := "~" + string(filepath.Separator) + filepath.Base(g)
+		return fmt.Errorf("macOS kept c4 out of %s; allow your terminal under System Settings > Privacy & Security > Files and Folders, then run c4 farm integrate %s %s again",
+			dir, f.Name+"@"+f.Version, map[bool]string{true: "on", false: "off"}[on])
+	}
+	return err
+}
+
+func (r *Roots) planIn(f Found, on bool, look bool) (Change, error) {
 	shape := versionShape[f.Name]
 	if shape == nil {
 		return Change{}, fmt.Errorf("C4 has no integration for %q", f.Name)
@@ -864,6 +888,7 @@ func Apply(c Change) error {
 	}
 	if err == nil {
 		cleanup, err = c.applyLocked()
+		err = c.roots.kept(c.found, c.on, err)
 	}
 	cleanup = append(cleanup, made...)
 	removeEmptyDirs(cleanup)
