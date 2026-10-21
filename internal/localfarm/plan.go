@@ -342,11 +342,12 @@ func Link(hud string, v Viewer) string {
 }
 
 // DefaultOwner is who owns a farm made on this machine unless --owner
-// says: git's user.email, else the login name.
+// says: the local part of git's user.email (a bare name keeps addresses
+// out of every record), else the login name.
 func DefaultOwner() string {
 	if out, err := exec.Command("git", "config", "--global", "user.email").Output(); err == nil {
-		if e := strings.TrimSpace(string(out)); e != "" {
-			return e
+		if name, _, _ := strings.Cut(strings.TrimSpace(string(out)), "@"); name != "" {
+			return name
 		}
 	}
 	if u, err := user.Current(); err == nil && u.Username != "" {

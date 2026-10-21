@@ -578,7 +578,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		port := fs.Int("port", localfarm.HUDPort, "the HUD's port on this machine")
 		storePort := fs.Int("store-port", localfarm.StorePort, "the store's port on this machine")
 		registryPort := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
-		owner := fs.String("owner", "", "who owns this farm and plays every role on it (default your git user.email, else your login)")
+		owner := fs.String("owner", "", "who owns this farm and plays every role on it (default the name in your git user.email, else your login)")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
