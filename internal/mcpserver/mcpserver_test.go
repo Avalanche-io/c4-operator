@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"slices"
 	"strings"
 	"sync"
@@ -181,6 +182,12 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(api.HeldList{Held: []api.HeldWrite{{Namespace: "show-a", Link: "gh-issue-7", Field: "comment", Tracker: "gh",
 			Kind: "github", Entity: api.HeldEntity{Type: "Issue", ID: "7"}, Job: "show-a/gh-7", Owner: "maya", Since: due,
 			Says: "the GitHub comment on Issue 7, saying running", Yours: true}}})
+	case r.Method == "GET" && r.URL.Path == "/api/v1/needs-me":
+		unit := 1
+		json.NewEncoder(w).Encode(api.NeedsMe{Now: due, Viewer: &api.Viewer{User: "maya"}, Items: []api.NeedsMeItem{{
+			ID: "question:show-a/sh010/1", Kind: "question", Job: "show-a/sh010", Unit: &unit, Title: "grade in sh010 asks you",
+			Ask: "which LUT", State: "pressing", Severity: "urgent", Since: due,
+			Actions: []api.NeedsMeAction{{Act: "Supply", Action: "supply", Path: "/api/v1/jobs/show-a/sh010/supply", Body: map[string]any{"unit": 1}}}}}})
 	case r.Method == "GET" && r.URL.Path == "/api/v1/trackers":
 		f.mu.Lock()
 		f.posts = append(f.posts, "GET "+r.URL.String())
@@ -261,7 +268,7 @@ func TestToolsAreNamedAndAnnotated(t *testing.T) {
 		}
 		readOnly := strings.HasPrefix(tl.Name, "c4_list") || strings.HasPrefix(tl.Name, "c4_get") || tl.Name == "c4_farm_status" ||
 			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book" ||
-			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool"
+			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me"
 		if tl.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %s: readOnlyHint %v", tl.Name, tl.Annotations.ReadOnlyHint)
 		}
@@ -820,5 +827,41 @@ func TestSubmitRawForm(t *testing.T) {
 	if res, _ := call(t, cs, "c4_submit_job", map[string]any{"class": "render", "image": "x",
 		"submission_yaml": "c4: submit/1"}); !res.IsError {
 		t.Fatal("both forms at once")
+	}
+}
+
+// c4_needs_me lists what waits for the person the agent acts for, as the
+// HUD's one-person view has it.
+func TestNeedsMe(t *testing.T) {
+	cs := session(t, &fakeHUD{}, "")
+	res, out := call(t, cs, "c4_needs_me", map[string]any{})
+	if res.IsError {
+		t.Fatalf("c4_needs_me: %s", text(res))
+	}
+	items, _ := out["items"].([]any)
+	if out["for"] != "maya" || len(items) != 1 {
+		t.Fatalf("out %v", out)
+	}
+	it := items[0].(map[string]any)
+	if it["kind"] != "question" || it["state"] != "pressing" || it["job"] != "show-a/sh010" {
+		t.Fatalf("item %v", it)
+	}
+}
+
+// A tool's description names only tools that exist (c4_run_<tool> is
+// made per published tool).
+func TestDescriptionsNameRealTools(t *testing.T) {
+	names := map[string]bool{}
+	for _, tl := range Tools(nil) {
+		names[tl.Def.Name] = true
+	}
+	ref := regexp.MustCompile(`c4_[a-z_]+`)
+	for _, tl := range Tools(nil) {
+		for _, n := range ref.FindAllString(tl.Def.Description, -1) {
+			n = strings.TrimRight(n, "_")
+			if !names[n] && !strings.HasPrefix(n, "c4_run") {
+				t.Errorf("%s's description names %s, which is not a tool", tl.Def.Name, n)
+			}
+		}
 	}
 }

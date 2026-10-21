@@ -145,6 +145,8 @@ func Tools(c *Client) []Tool {
 			destructive, c.requeue),
 		tool("c4_acknowledge_units", "Take, assign or accept failed units", "Say a person has failed units in hand so the farm stops asking: acknowledge (you take them), assign (to assignee), or accept (the failure stands; the units count as done, so nothing waits on them). Recorded with who and when, and signed in the book. A requeue clears it. Units is a set like \"14\" or \"0-9,14\"; only failed units are taken.",
 			idempotent, c.acknowledge),
+		tool("c4_needs_me", "What needs me", "Only what waits for the person you act for, most urgent first: questions units of their jobs stopped on (raised, or pressing once the plan says an answer is due, with answer_by, the latest an answer keeps the job on time), decisions a wait addresses to them or a party they speak for, and burst capacity waiting for their approval. Each item names the control that answers it: c4_supply or c4_withdraw_needs for a question, c4_decide with one of its choices for a decision, c4_approve_capacity for a burst. Use it to tell the person what is waiting for them; answer only what they tell you to.",
+			readOnly, c.needsMe),
 		tool("c4_decide", "Decide what waits for a person", "Decide a job's wait for a person (a ruling, an approval, an outside party's answer): do is approve, one of the wait's choices, or fail. A wait that asks for a reply (reply in c4_get_job's waits) takes one with the decision, reply_text or reply_view, which the units it holds up read. Or decide a unit a review escalated: accept (it stands), rework (it runs again) or fail. The job's waits, and whether each holds up work, are in c4_get_job. Signed and recorded in the book.",
 			idempotent, c.decide),
 		tool("c4_steer", "Send a message to a running unit", "Send a message to one unit of a job while it runs, without stopping it: a change of direction, a hint, a correction. The unit reads it at its next safe point (an agent block at the end of its turn). A unit not running yet gets it when it starts; a finished one takes none. Delivered and read status are in c4_get_job's steers.",
@@ -230,6 +232,28 @@ func (c *Client) farmStatus(ctx context.Context, _ *mcp.CallToolRequest, _ Empty
 		if atRisk(j) {
 			out.AtRisk = append(out.AtRisk, j.Namespace+"/"+j.Name)
 		}
+	}
+	return nil, out, nil
+}
+
+// NeedsMeOut is c4_needs_me's answer: the HUD's needs-me list.
+type NeedsMeOut struct {
+	Now   string            `json:"now"`
+	For   string            `json:"for,omitempty"`
+	Items []api.NeedsMeItem `json:"items"`
+}
+
+func (c *Client) needsMe(ctx context.Context, _ *mcp.CallToolRequest, _ Empty) (*mcp.CallToolResult, NeedsMeOut, error) {
+	var n api.NeedsMe
+	if err := c.do(ctx, "GET", "/needs-me", nil, &n); err != nil {
+		return nil, NeedsMeOut{}, err
+	}
+	out := NeedsMeOut{Now: n.Now.Format(time.RFC3339), Items: n.Items}
+	if n.Viewer != nil {
+		out.For = n.Viewer.User
+	}
+	if out.Items == nil {
+		out.Items = []api.NeedsMeItem{}
 	}
 	return nil, out, nil
 }
@@ -395,6 +419,12 @@ type GetJobOut struct {
 	// time to green and flaky targets for CI; ranks, checkpoints and
 	// yields for ML.
 	Lens map[string]any `json:"lens,omitempty"`
+	// Waits are what its units wait for (a person's decision, a party's
+	// answer), Needs the questions units stopped on, and Steers the
+	// messages sent to running units, as the HUD's job detail has them.
+	Waits  []api.Wait  `json:"waits,omitempty"`
+	Needs  []api.Needs `json:"needs,omitempty"`
+	Steers []api.Steer `json:"steers,omitempty"`
 }
 
 func (c *Client) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobIn) (*mcp.CallToolResult, GetJobOut, error) {
@@ -412,7 +442,8 @@ func (c *Client) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobIn
 	}
 	out := GetJobOut{Job: row(j), Objective: asMap(d["objective"]), Estimate: asMap(d["estimate"]),
 		HeavyRegions: asMaps(d["heavyRegions"]), Inputs: asMaps(d["inputs"]), UnitStates: asMap(d["unitStates"]),
-		Pools: j.Pools, DependsOn: j.DependsOn, Blacklist: j.Blacklist, Work: j.Work}
+		Pools: j.Pools, DependsOn: j.DependsOn, Blacklist: j.Blacklist, Work: j.Work,
+		Waits: j.Waits, Needs: j.Needs, Steers: j.Steers}
 	if o := asMap(d["output"]); len(o) > 0 {
 		out.Output = o
 	}

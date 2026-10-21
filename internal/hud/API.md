@@ -76,6 +76,10 @@ a development viewer named after a
 role has that role, and `name@role=projects` gives one. Without a role the
 HUD guesses: wrangler for a viewer of every project, else artist.
 
+`viewer.solo` is true when the farm is this one person's: a local farm's
+installer (the operator's `--single-person-farm`). The HUD then opens on
+what needs them (`GET /needs-me`).
+
 Every response is filtered on the server to the viewer's projects:
 
 - jobs, units, logs, previews, objects, graph nodes and capacity requests of
@@ -657,6 +661,41 @@ the API server's 1 MiB limit. Every 128 entries (or 256 KiB, whichever
 comes first) are sealed as an object in the project's own store, naming
 the previous one by C4 ID; the head lists the latest 64 per project. Any
 HUD replica serves it.
+
+## GET /needs-me
+
+Only what this viewer may act on now: the one-person view, and MCP's
+`c4_needs_me`. Each item is listed only if the controls would take its
+actions from this viewer (patch rights on the job, then who may answer
+it), so a listed button is never refused.
+
+```
+{ now, viewer,
+  items: [ { id, kind, job?, project?, unit?, unitName?, title, ask?, why?,
+             state, severity, since, answerBy?, pressingWhy?, choices?,
+             actions: [ { act, action, path, body? } ], href? } ] }
+```
+
+| `kind`     | what waits                                   | who gets it                                                                             | `actions`                                                      |
+| ---------- | -------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `question` | a unit stopped for information (`job.needs`) | the job's owner; with no owner, anyone who may change the job                           | `supply` (`/supply`, add `text`), `withdraw-needs` (add `why`) |
+| `decision` | a wait for a person, a party or an agent     | whom it names (a member of its party); on a single-person farm, the installer, any role | one `decide` per choice, its `do` in `body`                    |
+| `burst`    | capacity waiting for approval                | whoever may approve the request                                                         | `approve` (`/capacity/{pool}/approve`)                         |
+
+- `id` is `question:<ns>/<job>/<unit>`, `decision:<ns>/<job>/<unit>` or
+  `burst:<pool>`.
+- `title` reads "comp in sm0140 asks you", as the question's incident does.
+- `state` is `raised` or `pressing` for a question, `open` for a decision,
+  `pending` for a burst; `severity` is `urgent` once pressing, else
+  `warning`.
+- `answerBy` is the latest an answer keeps the job on time.
+- `body` never carries the person's words: the client adds `text` (a
+  supply) or `why` (a withdrawal).
+- Standing in for someone else is not something that needs you, so it is
+  not listed; the job's own controls still take it where allowed.
+
+Ordered pressing first, then by `answerBy`, then oldest. Settled questions
+and decided waits leave the list.
 
 ## GET /events
 

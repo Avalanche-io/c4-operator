@@ -211,6 +211,7 @@ func incidents(m *model, v *api.Viewer, jobs []api.Job) []api.Incident {
 			}
 			detail := g.cause
 			units := ""
+			asker := "a unit"
 			if len(open) > 0 {
 				n := open[0]
 				for _, o := range open {
@@ -227,8 +228,12 @@ func incidents(m *model, v *api.Viewer, jobs []api.Job) []api.Incident {
 					detail += "; pressing: " + n.PressingWhy
 				}
 				units = strconv.Itoa(n.Unit)
+				asker = n.Name
+				if asker == "" {
+					asker = "unit " + units
+				}
 			}
-			out = append(out, api.Incident{ID: g.reason + ":" + key(first), NeedsYou: true, Title: first.Name + " needs information its brief lacked",
+			out = append(out, api.Incident{ID: g.reason + ":" + key(first), NeedsYou: true, Title: asker + " in " + first.Name + " asks you",
 				Detail: detail, Count: max(len(open), 1), CountOf: "question", Jobs: keys, Since: since, State: "open", Severity: severity,
 				Checklist: []api.IncidentStep{
 					{Label: "See what it was doing", Act: "Open", Href: "job/" + key(first)},

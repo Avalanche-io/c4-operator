@@ -20,6 +20,9 @@ type Viewer struct {
 	// Unit is set when the viewer is a unit holding its pod's HUD token:
 	// what its tool lets it do.
 	Unit *UnitViewer `json:"unit,omitempty"`
+	// Solo: the farm is this one person's (a local farm's installer), so
+	// the HUD opens on what needs them.
+	Solo bool `json:"solo,omitempty"`
 }
 
 // UnitViewer is a unit acting on c4 through the HUD: its job, and its
@@ -95,6 +98,57 @@ type Snapshot struct {
 	// first, most work first). Always present, so a client never groups
 	// on its own.
 	Incidents []Incident `json:"incidents"`
+}
+
+// NeedsMe is GET /needs-me: only what this viewer may act on now, the
+// one-person view. Open questions of the jobs they own, decisions a wait
+// addresses to them or their party, and bursts waiting for their
+// approval, most urgent first. Each item's actions are ones the viewer may
+// take: the same rules as the controls decide what is listed.
+type NeedsMe struct {
+	Now    time.Time     `json:"now"`
+	Viewer *Viewer       `json:"viewer"`
+	Items  []NeedsMeItem `json:"items"`
+}
+
+// NeedsMeItem is one thing waiting for the viewer.
+type NeedsMeItem struct {
+	// ID is question:<ns>/<job>/<unit>, decision:<ns>/<job>/<unit> or
+	// burst:<pool>.
+	ID string `json:"id"`
+	// Kind is question (a unit stopped for information), decision (a wait
+	// for the viewer) or burst (capacity waiting for approval).
+	Kind     string `json:"kind"`
+	Job      string `json:"job,omitempty"`
+	Project  string `json:"project,omitempty"`
+	Unit     *int   `json:"unit,omitempty"`
+	UnitName string `json:"unitName,omitempty"`
+	Title    string `json:"title"`
+	// Ask is the question or the wait's ask; Why, the unit's reason.
+	Ask string `json:"ask,omitempty"`
+	Why string `json:"why,omitempty"`
+	// State is raised or pressing (a question), open (a decision) or
+	// pending (a burst); Severity is urgent once pressing, else warning.
+	State    string    `json:"state"`
+	Severity string    `json:"severity"`
+	Since    time.Time `json:"since"`
+	// AnswerBy is the latest an answer keeps the job on time.
+	AnswerBy    *time.Time      `json:"answerBy,omitempty"`
+	PressingWhy string          `json:"pressingWhy,omitempty"`
+	Choices     []string        `json:"choices,omitempty"`
+	Actions     []NeedsMeAction `json:"actions"`
+	// Href is the HUD route to what it is about.
+	Href string `json:"href,omitempty"`
+}
+
+// NeedsMeAction is one button: its words, the control, and the request
+// that gives it (POST Path with Body; a question's answer or a
+// withdrawal's why is the person's to add).
+type NeedsMeAction struct {
+	Act    string         `json:"act"`
+	Action string         `json:"action"`
+	Path   string         `json:"path"`
+	Body   map[string]any `json:"body,omitempty"`
 }
 
 // Incident is one root cause and what it caused.

@@ -47,7 +47,7 @@ func TestSupplyInformation(t *testing.T) {
 		}
 		found = true
 		supply := it.Checklist[1]
-		if !it.NeedsYou || !strings.Contains(it.Title, "needs information") || it.Detail != "the delivery frame rate (the brief gives 24 and 25)" ||
+		if !it.NeedsYou || it.Title != "unit 7 in sh040-light-v007 asks you" || it.Detail != "the delivery frame rate (the brief gives 24 and 25)" ||
 			supply.Action != "supply" || supply.Units != "7" || it.Severity != "warning" {
 			t.Fatalf("incident %+v", it)
 		}

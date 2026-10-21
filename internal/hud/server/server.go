@@ -178,6 +178,7 @@ type accessEntry struct {
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/v1/snapshot", s.handleSnapshot)
+	mux.HandleFunc("GET /api/v1/needs-me", s.handleNeedsMe)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 	mux.HandleFunc("GET /api/v1/graph", s.handleGraph)
 	mux.HandleFunc("GET /api/v1/book", s.handleBook)
@@ -446,6 +447,12 @@ func (s *Server) withViewer(w http.ResponseWriter, r *http.Request) *api.Viewer 
 	case err != nil:
 		fail(w, http.StatusUnauthorized, "%v", err)
 		return nil
+	}
+	if s.SinglePerson != "" && v.User == s.SinglePerson && !v.Solo {
+		// A copy: dev viewers are shared.
+		solo := *v
+		solo.Solo = true
+		v = &solo
 	}
 	return v
 }

@@ -1896,6 +1896,13 @@ and a sweep planner that spawns trials are all generators.
     - **Supplying it** (`POST /jobs/{ns}/{name}/supply {unit, text}`, MCP
       `c4_supply`, signed) runs the unit again, resuming where it stopped,
       with the text in `$C4_SUPPLIED` and what it asked in `$C4_NEEDED`.
+    - **Only what needs me.** The question goes to the job's owner
+      (`escalation.to`'s default), listed with the decisions a wait
+      addresses to them and the bursts they may approve in `GET
+      /needs-me` (MCP `c4_needs_me`), the one-person view a solo
+      farm's HUD opens on. An item is listed only when the controls would
+      take its actions from that viewer, so a listed button is never
+      refused.
     - **It holds the job, never fails it.** The unit is in state `needs`
       (`units.needs`), not `failed`. Once nothing else can run, the job is
       `Held` with NeedsPerson `NeedsInformation` ("waiting on a
