@@ -140,8 +140,9 @@ Each Tracker says:
   their own;
 - `for`: whose work the jobs are, `{person: dana}` or `{assignee: true}`
   (the entity's assignee, through `people`). The assignee is the issue's
-  on GitHub and Linear, the task's people on Kitsu and Flow (not a
-  group), and the run's author on MLflow; every sample sets it. The person
+  on GitHub and Linear, and the task's people on Kitsu and Flow (not a
+  group). MLflow has none: a run's author is whatever its client sent, so
+  an MLflow rule names its person. Every sample sets `for`. The person
   owns the job, so what is theirs serves it, such as a lease of their own sign-in. They must
   first let the Tracker submit for them, which they do as themselves, not
   in the Tracker: `c4 farm grant <tracker>` (optionally `--pools`,

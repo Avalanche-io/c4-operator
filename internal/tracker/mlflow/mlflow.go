@@ -233,8 +233,11 @@ func (a *Adapter) runItem(r run) tracker.Item {
 	}
 	it.Job = tg["c4.job"]
 	if r.Info.UserID != "" {
-		// MLflow names no assignee; the run's author is whose work it is.
-		it.Assignees = []tracker.Person{{ID: r.Info.UserID}}
+		// A run's user_id is what the creating client said, which the
+		// server does not check (its auth app authorizes the experiment,
+		// not the name), so it is no assignee: whose work a run's job is
+		// comes from the intake rule's for. Shown as information only.
+		it.Fields["author"] = r.Info.UserID
 	}
 	if d := tg["c4.deadline"]; d != "" {
 		if t, err := time.Parse(time.RFC3339, d); err == nil {

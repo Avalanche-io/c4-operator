@@ -155,18 +155,19 @@ func TestEmptyPathSourceRefused(t *testing.T) {
 	}
 }
 
-// A run's author is whose work it is: its assignee for intake's for.
-func TestRunAuthorIsItsAssignee(t *testing.T) {
+// A run's author is what its client claimed, so it is information, never
+// the assignee a job is made for.
+func TestRunAuthorIsNoAssignee(t *testing.T) {
 	s := server(t)
 	id := s.AddRun("7", "a", "SCHEDULED", map[string]string{"c4.intake": "true"})
 	s.SetRunUser(id, "noor")
 	anon := s.AddRun("7", "b", "SCHEDULED", map[string]string{"c4.intake": "true"})
 	a := adapter(t, s, s.Password, nil)
 	it, err := a.Get(context.Background(), tracker.Ref{Type: "Run", ID: id})
-	if err != nil || len(it.Assignees) != 1 || it.Assignees[0].ID != "noor" {
-		t.Fatalf("run %+v %v", it.Assignees, err)
+	if err != nil || len(it.Assignees) != 0 || it.Fields["author"] != "noor" {
+		t.Fatalf("run %+v %v %v", it.Assignees, it.Fields, err)
 	}
-	if it, err := a.Get(context.Background(), tracker.Ref{Type: "Run", ID: anon}); err != nil || len(it.Assignees) != 0 {
-		t.Fatalf("a run with no author %+v %v", it.Assignees, err)
+	if it, err := a.Get(context.Background(), tracker.Ref{Type: "Run", ID: anon}); err != nil || it.Fields["author"] != "" {
+		t.Fatalf("a run with no author %+v %v", it.Fields, err)
 	}
 }

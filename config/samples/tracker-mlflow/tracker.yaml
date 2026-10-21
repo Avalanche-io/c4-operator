@@ -28,16 +28,16 @@ spec:
   events: {mode: poll, pollSeconds: 60, resyncSeconds: 900}
   people:
     mlflow-registry: party:ml-leads
-    # a run's author, its assignee: the person its job is for
-    noor: noor
   intake:
   - match:
       type: Run
       fields: {status: SCHEDULED, c4.intake: "true"}
     as: job
-    # whose work the jobs are: the first assignee the people map names,
-    # once they let this Tracker submit for them (their page in the HUD)
-    for: {assignee: true}
+    # whose work the jobs are: one named person, who answers for the
+    # registry's runs once they let this Tracker submit for them (their page
+    # in the HUD). Not the run's author: MLflow stores the user_id its
+    # client sends without checking it.
+    for: {person: noor}
     review: {wait: promote}
     job:
       class: ml
