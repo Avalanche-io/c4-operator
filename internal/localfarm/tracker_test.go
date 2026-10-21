@@ -21,7 +21,7 @@ func TestTrackerManagerArgs(t *testing.T) {
 	}
 	args := ManagerArgs(Options{Tracker: true})
 	if !slices.Contains(args, "--hud-sandbox=http://c4-sandbox-github.c4-system.svc:8080") ||
-		!slices.Contains(args, "--hud-dev-viewers="+DevViewers()+";c4-sync@wrangler=saltmarsh") {
+		!slices.Contains(args, "--hud-dev-viewers="+DevViewers("")+";c4-sync@wrangler=saltmarsh") {
 		t.Fatalf("a farm with one: %q", args)
 	}
 	var p struct {

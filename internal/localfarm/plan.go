@@ -46,6 +46,13 @@ var Viewers = []Viewer{
 	{Name: "td", Role: "pipeline-td", Projects: Project},
 }
 
+// OwnerViewer is the farm's owner's own sign-in: every project, at the
+// farm admin's level, and, as the manager's --single-person-farm, every
+// role's decisions.
+func OwnerViewer(owner string) Viewer {
+	return Viewer{Name: owner, Role: "farm-admin", Projects: "*"}
+}
+
 // Viewer is one local sign-in.
 type Viewer struct {
 	Name, Role, Projects string
@@ -66,9 +73,15 @@ func LookupViewer(s string) (Viewer, error) {
 }
 
 // DevViewers is the manager's --hud-dev-viewers value.
-func DevViewers() string {
+// The owner, when named, signs in as themselves first, and the role
+// sign-ins stay for trying the other views.
+func DevViewers(owner string) string {
 	var parts []string
-	for _, v := range Viewers {
+	vs := Viewers
+	if owner != "" {
+		vs = append([]Viewer{OwnerViewer(owner)}, Viewers...)
+	}
+	for _, v := range vs {
 		n := v.Name
 		if v.Role != v.Name {
 			n += "@" + v.Role
@@ -274,7 +287,7 @@ func Farm(o Options) []obj {
 
 // ManagerArgs are what the local farm adds to the manager's arguments.
 func ManagerArgs(o Options) []string {
-	viewers := DevViewers()
+	viewers := DevViewers(o.Owner)
 	if o.Tracker {
 		viewers += ";" + syncViewer
 	}

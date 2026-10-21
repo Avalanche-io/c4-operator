@@ -104,7 +104,7 @@ func TestFarmObjects(t *testing.T) {
 }
 
 func TestViewersAndManager(t *testing.T) {
-	if got := DevViewers(); got != "artist=saltmarsh;supervisor=saltmarsh;wrangler=*;admin@farm-admin=*;facilities=*;td@pipeline-td=saltmarsh" {
+	if got := DevViewers(""); got != "artist=saltmarsh;supervisor=saltmarsh;wrangler=*;admin@farm-admin=*;facilities=*;td@pipeline-td=saltmarsh" {
 		t.Fatalf("viewers %s", got)
 	}
 	v, err := LookupViewer("pipeline-td")
@@ -202,5 +202,16 @@ func TestOwnerName(t *testing.T) {
 		if got, err := OwnerName(raw); err == nil {
 			t.Errorf("%q: %q, want refused", raw, got)
 		}
+	}
+}
+
+// The owner signs in as themselves, first, beside the role sign-ins.
+func TestOwnerSignsInAsThemselves(t *testing.T) {
+	args := strings.Join(ManagerArgs(Options{Owner: "noor"}), " ")
+	if !strings.Contains(args, "--hud-dev-viewers=noor@farm-admin=*;artist=saltmarsh;") || !strings.Contains(args, "--single-person-farm=noor") {
+		t.Errorf("manager args: %s", args)
+	}
+	if v := OwnerViewer("noor"); v.Name != "noor" || v.Projects != "*" {
+		t.Errorf("owner viewer %+v", v)
 	}
 }

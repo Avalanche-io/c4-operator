@@ -571,7 +571,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 
 	case "up":
 		localName := fs.String("name", localfarm.Name, "the local farm's name, for a second farm beside the first (with --port and --store-port)")
-		as := fs.String("as", "artist", "the role to open the HUD as: artist, supervisor, wrangler, admin, facilities or td")
+		as := fs.String("as", "", "open the HUD as a role instead of as the owner: artist, supervisor, wrangler, admin, facilities or td")
 		plan := fs.Bool("plan", false, "print the cluster config and the objects, and change nothing")
 		install := fs.String("install", "", "the operator's install manifest (default this release's)")
 		archive := fs.String("image-archive", "", "an operator image archive to load into the cluster (a development build)")
@@ -588,10 +588,6 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		localfarm.Name = *localName
-		v, err := localfarm.LookupViewer(*as)
-		if err != nil {
-			return err
-		}
 		tz := localfarm.LocalTZ()
 		lat, lon := localfarm.Place(tz)
 		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort,
@@ -611,6 +607,13 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		default:
 			if o.Owner = localfarm.DefaultOwner(); o.Owner == "" {
 				return errors.New("no name for the farm's owner from git's user.email or the login; give one with --owner NAME")
+			}
+		}
+		// the owner signs in as themselves; --as opens a role's view
+		v := localfarm.OwnerViewer(o.Owner)
+		if *as != "" {
+			if v, err = localfarm.LookupViewer(*as); err != nil {
+				return err
 			}
 		}
 		if *plan {
@@ -649,7 +652,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
 		}
 		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
-		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)\n")
+		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)\n")
 		if o.Tracker || localfarm.HasTracker(ctx) {
 			fmt.Fprintf(stdout, "tracker   %s   a stand-in for GitHub; nothing leaves this machine\n", localfarm.SandboxPage(o.HUD(), v.Name))
 		} else if first {
