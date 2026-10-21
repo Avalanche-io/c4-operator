@@ -324,6 +324,7 @@ func runSchema(rt runTool) map[string]any {
 		"due":     map[string]any{"type": "string", "description": "when it is due: a milestone (dailies), a time (fri 18:00, +3h, RFC 3339), a date, or suggested (the farm suggests one). Never a priority"},
 		"tree":    map[string]any{"type": "string", "description": "what the job reads and writes: a view's C4 ID, or job:<name> for an earlier job's output"},
 		"dry_run": map[string]any{"type": "boolean", "description": "check and plan only: return the estimate and create nothing. Do this first and show the person the estimate"},
+		"key":     map[string]any{"type": "string", "description": "makes a retry safe: send the key an earlier answer gave when you run the same thing again after an error or a timeout, and the farm answers with the job it made then rather than making it twice"},
 		"explain": map[string]any{"type": "boolean", "description": "also return what the job lowers to in the operator, as text"},
 	}
 	var required []string
@@ -370,6 +371,7 @@ type runIn struct {
 	Tree    string          `json:"tree,omitempty"`
 	DryRun  bool            `json:"dry_run,omitempty"`
 	Explain bool            `json:"explain,omitempty"`
+	Key     string          `json:"key,omitempty"`
 }
 
 // runSubmission is the one-job submission a run tool posts, its keys in
@@ -433,7 +435,7 @@ func (c *Client) addRunTools(ctx context.Context, s *mcp.Server) {
 			if err != nil {
 				return toolError(err), nil
 			}
-			_, out, err := c.postSubmission(ctx, doc, in.DryRun, in.Explain)
+			_, out, err := c.postSubmission(ctx, doc, in.DryRun, in.Explain, in.Key)
 			if err != nil {
 				return toolError(err), nil
 			}

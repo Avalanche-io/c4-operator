@@ -2,6 +2,8 @@ package mcpserver
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +22,7 @@ type SubmitIn struct {
 	SubmissionYAML string          `json:"submission_yaml,omitempty" jsonschema:"the same submission as YAML text, as a person writes it; jobs keep the order written"`
 	DryRun         bool            `json:"dry_run,omitempty" jsonschema:"check and plan only: return each job's estimate (units, ETA p50 and p90, slack, on track or not), create nothing. Do this first and show the person the estimate"`
 	Explain        bool            `json:"explain,omitempty" jsonschema:"also return what each job lowers to in the operator (class, inputs, image, units), as text"`
+	Key            string          `json:"key,omitempty" jsonschema:"makes a retry safe: send the key an earlier answer gave (or one of your own) when you submit the same thing again after an error or a timeout, and the farm answers with the jobs it made then rather than making them twice"`
 }
 
 // SubmittedJob is one job of a submission as the farm planned or made it.
@@ -54,6 +57,7 @@ type SubmitOut struct {
 	Warnings   []string         `json:"warnings,omitempty" jsonschema:"what the farm does differently from what the submission says"`
 	Explain    string           `json:"explain,omitempty"`
 	Message    string           `json:"message,omitempty"`
+	Key        string           `json:"key,omitempty" jsonschema:"the key this submission was sent with: send it again with the same submission if you retry, so nothing is made twice"`
 }
 
 // submitSchema is SubmitIn's schema, with submission an object: the
@@ -93,16 +97,25 @@ func (c *Client) submitJob(ctx context.Context, _ *mcp.CallToolRequest, in Submi
 	case len(doc) == 0:
 		return nil, SubmitOut{}, errors.New("a submission is required: submission (an object, c4: submit/1) or submission_yaml (text)")
 	}
-	return c.postSubmission(ctx, doc, in.DryRun, in.Explain)
+	return c.postSubmission(ctx, doc, in.DryRun, in.Explain, in.Key)
 }
 
 // postSubmission sends a submission document (JSON, keys in the order
 // written) to POST /submissions; a refusal with errors (422, or 403 and
 // 404 for a job the farm would not create) is an answer, not an error:
 // its errors say where and how to fix it.
-func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun, explain bool) (*mcp.CallToolResult, SubmitOut, error) {
+//
+// A submission is sent with a key, the caller's or one made here, which
+// the answer carries: sent again on a retry, it gets the jobs the first
+// made rather than a second set.
+func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun, explain bool, key string) (*mcp.CallToolResult, SubmitOut, error) {
+	if !dryRun && key == "" {
+		b := make([]byte, 12)
+		_, _ = rand.Read(b)
+		key = hex.EncodeToString(b)
+	}
 	var r api.SubmissionResponse
-	err := c.do(ctx, "POST", "/submissions", api.SubmissionRequest{Submission: doc, DryRun: dryRun, Explain: explain}, &r)
+	err := c.do(ctx, "POST", "/submissions", api.SubmissionRequest{Submission: doc, DryRun: dryRun, Explain: explain, Key: key}, &r)
 	var ae *APIError
 	if errors.As(err, &ae) && json.Unmarshal(ae.Body, &r) == nil && len(r.Errors) > 0 {
 		err = nil
@@ -112,6 +125,9 @@ func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun
 	}
 	out := SubmitOut{OK: r.OK, Submitted: r.OK && !r.DryRun, Errors: r.Errors, Submission: r.Submission, Warnings: r.Warnings,
 		Explain: r.Explain, Message: r.Message}
+	if !dryRun {
+		out.Key = key
+	}
 	if e := r.Estimate; e != nil {
 		out.ETA50, out.ETA90, out.Deadline, out.OnTrack = rfc(e.ETA50), rfc(e.ETA90), rfc(e.Deadline), e.Feasible && !e.AtRisk
 	}

@@ -649,3 +649,31 @@ func TestPeopleMapTool(t *testing.T) {
 		t.Fatalf("requests %q", hud.posts)
 	}
 }
+
+// A submission goes with a key, the agent's or one made for it, which the
+// answer gives back for a retry; a dry run needs none.
+func TestSubmitSubmissionKey(t *testing.T) {
+	hud := &fakeHUD{tools: true}
+	cs := session(t, hud, "tok-noor")
+	sub := map[string]any{"c4": "submit/1", "project": "show-a", "shot": "sm0140",
+		"jobs": map[string]any{"proxies": map[string]any{"tool": "proxies", "frames": "1001-1048"}}}
+	_, out := call(t, cs, "c4_submit_job", map[string]any{"submission": sub})
+	made, _ := out["key"].(string)
+	if len(made) != 24 {
+		t.Fatalf("a submission's key: %v", out)
+	}
+	_, out = call(t, cs, "c4_submit_job", map[string]any{"submission": sub, "key": "take-2"})
+	if out["key"] != "take-2" {
+		t.Fatalf("the agent's own key: %v", out)
+	}
+	_, out = call(t, cs, "c4_submit_job", map[string]any{"submission": sub, "dry_run": true})
+	if out["key"] != nil {
+		t.Fatalf("a dry run's key: %v", out)
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	if len(hud.posts) != 3 || !strings.Contains(hud.posts[0], `"key":"`+made+`"`) || !strings.Contains(hud.posts[1], `"key":"take-2"`) ||
+		strings.Contains(hud.posts[2], `"key"`) {
+		t.Fatalf("posts %v", hud.posts)
+	}
+}
