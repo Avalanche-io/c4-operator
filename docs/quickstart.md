@@ -44,6 +44,17 @@ infer) are published to every project.
 c4 farm tools
 ```
 
+```
+ci         shards  v1    Repository tests · farm-wide
+comp       frames  v1    Composite · farm-wide
+infer      frames  v1    Model pass · farm-wide
+lora       train   v1    LoRA fine-tune · farm-wide
+render     frames  v1    USD render · farm-wide
+sim        frames  v1    Fluid sim bake · farm-wide
+transcode  once    v1    Review movie · farm-wide
+usd        once    v1    Flatten and check a USD stage · farm-wide
+```
+
 ## 3. Get the sample shot
 
 ```sh
@@ -61,8 +72,7 @@ c4 farm submit render ~/c4-samples/saltmarsh/sm0140/sm0140.usda --frames 1001-10
 ```
 
 ```
-sm0140-light-v001   render · 48 frames · Cycles · pool cpu
-
+sm0140-render-v001   48 frames in 48 units
   files     12 files found · 1.2 MB · 12 to upload (1.2 MB)
   estimate  ready ~15:42 PDT  (p90 ~15:51 PDT)
   deadline  16:30 PDT today (23:30 UTC) · slack ~39m
@@ -72,17 +82,22 @@ Submit? [Y/n]
 
 `c4 farm` named every file of the shot's folder by its C4 ID, found which
 the store already holds, and asked the farm for a plan before anything ran.
-The estimate is the farm's: when the job will be ready, given everything
-else in the queue. **Slack** is the time to spare between ready and due.
-Press Enter, and only the files the store lacked go up.
+The job is named for the shot, the tool and its version. The estimate is the
+farm's: when the job will be ready, given everything else in the queue.
+**Slack** is the time to spare between ready and due. Press Enter, and only
+the files the store lacked go up.
+
+A new farm has not timed a frame of anything yet, so its first estimate is
+cautious, and may say the job will miss. It tightens as the first frames
+land.
 
 ## 5. Watch it
 
 ```sh
-c4 farm watch sm0140-light-v001
+c4 farm watch sm0140-render-v001
 ```
 
-Or open the job in the HUD (`c4 farm open sm0140-light-v001`). The frames
+Or open the job in the HUD (`c4 farm open sm0140-render-v001`). The frames
 render coarse to fine, in binary order: first and last, then the middle,
 then the quarters, so the whole shot can be played early. Each frame shows
 its preview as it lands.
@@ -92,7 +107,7 @@ its preview as it lands.
 Production says the shot is for Friday's review, not this afternoon:
 
 ```sh
-c4 farm deadline sm0140-light-v001 "fri 18:00"
+c4 farm deadline sm0140-render-v001 "fri 18:00"
 ```
 
 There is no priority to set, on this farm or any other C4 farm. A deadline
@@ -102,18 +117,21 @@ once, and every job's slack shows the result.
 ## 7. Take the frames home
 
 ```sh
-c4 farm get sm0140-light-v001 ~/renders/sm0140
+c4 farm get sm0140-render-v001 render ~/renders/sm0140
 ```
 
 ```
-48 files · 46 MB · every ID checked
+48 files · 530 MB · every ID checked
 view      c4…
 in        /Users/you/renders/sm0140
 ```
 
-Every file arrives named by its C4 ID and is checked against it, so a frame
-that arrived damaged is caught, not copied. The `view` is the C4 ID of the
-whole output tree: the same ID on every machine that has these frames.
+A job's output is the whole tree it left: the shot's files, plus what it
+wrote. `render` picks the frames, which land in `~/renders/sm0140/render/`;
+leave it out to take everything. Every file arrives named by its C4 ID and
+is checked against it, so a frame that arrived damaged is caught, not
+copied. The `view` is the C4 ID of the whole output tree: the same ID on
+every machine that has these frames.
 
 ## 8. Teach the farm a job of your own
 
@@ -138,7 +156,12 @@ echo "looks good" >"$C4_TREE/notes/notes.txt"
 echo "openjd_progress: 100"
 ```
 
-and set `expect` in `~/tools/notes/tool.yaml` to the files it now writes:
+and in `~/tools/notes/tool.yaml`, say where it now writes, and which files
+its test should leave:
+
+```yaml
+writes: [notes/]
+```
 
 ```yaml
   expect: [notes/listing.txt, notes/notes.txt]
@@ -151,12 +174,19 @@ c4 farm tool test ~/tools/notes
 c4 farm tool publish ~/tools/notes
 ```
 
+```
+notes v1   c41w…qu9T · 3 files, 3 to upload · image ghcr.io/avalanche-io/c4-runtime-base@sha256:6f5a…
+test on the farm   saltmarsh/notes-test-1w4xvo7vmy
+                   ok in 9s
+published to saltmarsh: artists see "notes" in Submit
+```
+
 `test` checks the file, then runs the tool in Docker exactly as a unit runs
 on the farm: as an unprivileged user, with no network, the tool's folder
 read-only and a scratch copy of its test tree writable. `publish` stores the
-folder as a C4 tree (its ID is the tool's version), runs the test again on
-the farm, and only then offers the tool to the project. No image was built,
-and no cluster command was run.
+folder as a C4 tree, pins its image by digest, runs the test again on the
+farm, and only then offers the tool to the project as `notes v1`. No image
+was built, and no cluster command was run.
 
 Now run it over the shot's geometry:
 
@@ -172,7 +202,7 @@ is the tree it left. The node that ran the unit signed a record of it.
 
 ## 9. Read a file's history
 
-In the HUD, open `sm0140-light-v001`, click its output view, pick a frame
+In the HUD, open `sm0140-render-v001`, click its output view, pick a frame
 and choose **Provenance**. Each step from the frame back to your upload is a
 record signed by whoever did it: the node that rendered it, the farm's queue
 and controller, you. Anyone holding the files can check the chain, with no
@@ -184,7 +214,7 @@ access to the farm.
 claude mcp add c4-farm -- c4 farm mcp
 ```
 
-Then ask, for example, "which frames of sm0140-light-v001 are done, and
+Then ask, for example, "which frames of sm0140-render-v001 are done, and
 will it make its deadline?" The agent has your access and nothing more. The
 tools it gets are listed in [docs/agents/tools.md](agents/tools.md), and
 every tool you publish appears among them, as `c4_run_<tool>`.
