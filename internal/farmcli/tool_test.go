@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -346,10 +347,11 @@ func TestSubmitTypedOverAPublishedTool(t *testing.T) {
 	job := doc["jobs"].(map[string]any)["proxies"].(map[string]any)
 	with := job["with"].(map[string]any)
 	if doc["shot"] != "sm0140" || doc["due"] != "+3h" || job["tool"] != "proxies" || job["frames"] != "1001-1048" ||
-		with["plates"] != "plates/sm0140.$F4.exr" || with["width"] != "480" || !strings.HasPrefix(doc["tree"].(string), "c4") {
+		with["plates"] != "plates/sm0140.$F4.exr" || with["width"] != float64(480) || !strings.HasPrefix(doc["tree"].(string), "c4") {
 		t.Errorf("submission %v", doc)
 	}
 	for _, bad := range []SubmitArgs{{Type: "proxies", Asset: a.Asset, Project: "saltmarsh", Options: Options{Set: map[string]string{"colour": "x"}}},
+		{Type: "proxies", Asset: a.Asset, Project: "saltmarsh", Options: Options{Set: map[string]string{"width": "wide"}}},
 		{Type: "proxies", Asset: a.Asset, Project: "saltmarsh", Options: Options{Image: "mine:dev"}}} {
 		if _, err := Submit(context.Background(), c, Out{W: io.Discard}, bad); err == nil {
 			t.Errorf("%+v accepted", bad.Options)
@@ -386,5 +388,46 @@ func TestShotOfAnAsset(t *testing.T) {
 		if got := shotOf("/home/td/"+root, rel); got != want {
 			t.Errorf("shotOf(%q) = %q, want %q", rel, got, want)
 		}
+	}
+}
+
+// trace prints a file's signed record: whether it verifies, the unit and
+// node that made it, and what it read; a record that does not verify
+// fails the command.
+func TestTraceAFile(t *testing.T) {
+	verified := true
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/snapshot":
+			json.NewEncoder(w).Encode(api.Snapshot{Jobs: []api.Job{{Namespace: "saltmarsh", Name: "sm0140-render-v001"}}})
+		case "/api/v1/trace/saltmarsh/sm0140-render-v001":
+			if r.URL.Query().Get("path") != "render/sm0140.1024.exr" {
+				http.NotFound(w, r)
+				return
+			}
+			fmt.Fprintf(w, `{"verified":%v,"signer":"https://cccc.io/id/node/c4-local-worker2","signedAt":"2026-10-21T00:11:19Z","record":"c449jt8DzAk2GmnQ",
+				"file":{"id":"c44TARH9igh6Xrx5","path":"render/sm0140.1024.exr"},"lineage":[{"view":"c42JkXENgggchnoL"},{"view":"c4aaaabbbbccccdd","job":"sm0140-light-v001"}],
+				"statement":{"predicate":{"invocation":{"job":"sm0140-render-v001","unit":"23"},"runtime":{"node":"c4-local-worker2","images":[{"digest":"sha256:de81"}]}}}}`, verified)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
+	var out bytes.Buffer
+	o := Out{W: &out, Clock: Clock{UTC: true}}
+	if err := Trace(context.Background(), c, o, "", "sm0140-render-v001", "render/sm0140.1024.exr"); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"render/sm0140.1024.exr   c44T…Xrx5   verifies\n",
+		"  made by   saltmarsh/sm0140-render-v001 · unit 23 · node c4-local-worker2 · signed by the node\n",
+		"  read      view c42J…hnoL, as uploaded\n", "  read      the output of sm0140-light-v001 · view c4aa…ccdd\n", "  image     sha256:de81\n"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("no %q in\n%s", want, out.String())
+		}
+	}
+	verified = false
+	if err := Trace(context.Background(), c, Out{W: io.Discard}, "", "sm0140-render-v001", "render/sm0140.1024.exr"); err == nil {
+		t.Error("a record that does not verify passed")
 	}
 }

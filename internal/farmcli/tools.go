@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -532,9 +533,11 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	}
 	with := map[string]any{}
 	known := map[string]bool{}
+	types := map[string]string{}
 	asset := ""
 	for _, p := range params {
 		known[p.Name] = true
+		types[p.Name] = p.Type
 		if asset == "" && p.Type == "PATH" && p.DataFlow != "OUT" {
 			asset = p.Name
 		}
@@ -547,7 +550,11 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 		if !known[k] {
 			return nil, fmt.Errorf("%s has no parameter %q (c4 farm tool show %s lists them)", t.Name, k, t.Name)
 		}
-		with[k] = v
+		val, err := setValue(types[k], v)
+		if err != nil {
+			return nil, fmt.Errorf("--set %s=%s: %w", k, v, err)
+		}
+		with[k] = val
 	}
 	if r := a.Options.Renderer; r != "" {
 		if !known["renderer"] {
@@ -618,4 +625,30 @@ var frameToken = regexp.MustCompile(`\$F\d|<F\d>|%0\dd|#`)
 func notFound(err error) bool {
 	var ae *APIError
 	return errors.As(err, &ae) && ae.Status == http.StatusNotFound
+}
+
+// setValue is a --set value as its parameter's type has it: the farm takes
+// an INT, FLOAT or BOOL parameter as a number or a boolean, not a string.
+func setValue(typ, v string) (any, error) {
+	switch typ {
+	case "INT":
+		n, err := strconv.ParseInt(v, 10, 64)
+		if err != nil {
+			return nil, errors.New("give a whole number")
+		}
+		return n, nil
+	case "FLOAT":
+		f, err := strconv.ParseFloat(v, 64)
+		if err != nil {
+			return nil, errors.New("give a number")
+		}
+		return f, nil
+	case "BOOL":
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			return nil, errors.New("give true or false")
+		}
+		return b, nil
+	}
+	return v, nil
 }

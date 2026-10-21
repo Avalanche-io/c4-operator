@@ -56,6 +56,7 @@ Work
   boost JOB N              ask for N times the slots its deadline needs (1 to 2)
   requeue JOB UNITS        run units again ("14", "0-9,14")
   get JOB|VIEW [PATH...] DIR   write a job's output under DIR, checking every C4 ID
+  trace JOB FILE           a file of its output: the signed record of the unit that made it, and what it read
 
 Tools
   tools                    the tools you can submit
@@ -349,6 +350,20 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		a.Project = project
 		return farmcli.Ls(ctx, c, o, a)
+
+	case "trace":
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		if err := need(pos, 2, "JOB FILE"); err != nil {
+			return err
+		}
+		c, _, o, project, err := connect()
+		if err != nil {
+			return err
+		}
+		return farmcli.Trace(ctx, c, o, project, pos[0], pos[1])
 
 	case "watch":
 		every := fs.Duration("every", 2*time.Second, "how often to look")
