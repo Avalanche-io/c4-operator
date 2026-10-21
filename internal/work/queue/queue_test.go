@@ -22,6 +22,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/work/order"
 	"github.com/Avalanche-io/c4-operator/work/sched"
 )
@@ -555,5 +556,42 @@ func TestUnitProjectsNoToken(t *testing.T) {
 	}
 	if !seen["signer"] || !seen["mixed"] {
 		t.Fatalf("volumes %v: a stripped volume must stay so its mounts resolve", seen)
+	}
+}
+
+// A unit pod names the agent it runs in its agent label, which the HUD
+// trusts as the unit's agent: the queue sets it (a block's is "block"),
+// and a label the template brings is never kept.
+func TestUnitPodNamesItsAgent(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	mk := func(name string, block bool) {
+		j := job(ns, name, "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(time.Hour))
+		j.Spec.Template.Labels = map[string]string{c4v1.LabelAgent: "someone-else"}
+		if block {
+			c := &j.Spec.Template.Spec.Containers[0]
+			c.Env = append(c.Env, corev1.EnvVar{Name: "C4_AGENT_BLOCK", Value: "1"})
+		}
+		if err := k8s.Create(context.Background(), j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("forged", false)
+	mk("block", true)
+	tick(t, q)
+	for name, want := range map[string]string{"forged": "", "block": "block"} {
+		pods := unitPods(t, ns, name)
+		if len(pods) != 1 {
+			t.Fatalf("%s: %d pods", name, len(pods))
+		}
+		if got := pods[0].Labels[c4v1.LabelAgent]; got != want {
+			t.Errorf("%s: agent label %q, want %q", name, got, want)
+		}
+	}
+	member := class.Unit{Env: []corev1.EnvVar{{Name: "C4_AGENT_MEMBER", Value: "render-bot"}}}
+	if got := unitAgent(corev1.PodSpec{}, member); got != "render-bot" {
+		t.Errorf("a bundle member's unit: %q", got)
+	}
+	if got := unitAgent(corev1.PodSpec{}, class.Unit{Env: []corev1.EnvVar{{Name: "C4_AGENT_MEMBER", Value: "not a label!"}}}); got != "" {
+		t.Errorf("a member name no label can carry: %q", got)
 	}
 }

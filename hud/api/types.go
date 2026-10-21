@@ -43,6 +43,9 @@ type UnitViewer struct {
 	JobUID string `json:"jobUID,omitempty"`
 	Unit   string `json:"unit"`
 	Grant  string `json:"grant"`
+	// Agent is the agent the unit runs, from its pod's agent label (the
+	// queue's), "" for none.
+	Agent string `json:"agent,omitempty"`
 }
 
 // Roles a viewer can have (Viewer.Role).

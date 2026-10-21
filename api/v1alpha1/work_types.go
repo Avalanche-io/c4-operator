@@ -11,6 +11,11 @@ const (
 	LabelJob = "c4.avalanche.io/job"
 	// LabelUnit is the unit's index within its job.
 	LabelUnit = "c4.avalanche.io/unit"
+	// LabelAgent on a unit pod names the agent the unit runs: a bundle
+	// member's name, or "block" for a block. Only the queue sets it (it
+	// alone makes unit pods), so the HUD may take a unit's token as that
+	// agent's when the unit decides a wait that names it.
+	LabelAgent = "c4.avalanche.io/agent"
 	// LabelPool is the pool a unit was released into.
 	LabelPool = "c4.avalanche.io/pool"
 	// AnnotationAttempt is the unit's attempt number, from 1.

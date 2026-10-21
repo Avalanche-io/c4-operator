@@ -25,6 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -1821,6 +1822,12 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	pod.Labels[c4v1.LabelJob] = j.Name
 	pod.Labels[c4v1.LabelUnit] = strconv.Itoa(idx)
 	pod.Labels[c4v1.LabelPool] = p.spec.Name
+	// Which agent the unit runs is the queue's to say, never the
+	// template's.
+	delete(pod.Labels, c4v1.LabelAgent)
+	if a := unitAgent(tpl.Spec, u); a != "" {
+		pod.Labels[c4v1.LabelAgent] = a
+	}
 	if pod.Annotations == nil {
 		pod.Annotations = map[string]string{}
 	}
@@ -1967,6 +1974,29 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 		c.Resources.Limits[SlotResource] = qty
 	}
 	return pod
+}
+
+// unitAgent is the agent unit u runs: the bundle member its plan names
+// (C4_AGENT_MEMBER), or "block" for a block (C4_AGENT_BLOCK=1 in the
+// template); "" for a unit that runs no agent, or a name no label can
+// carry.
+func unitAgent(spec corev1.PodSpec, u class.Unit) string {
+	for _, e := range u.Env {
+		if e.Name == "C4_AGENT_MEMBER" && e.Value != "" {
+			if len(validation.IsValidLabelValue(e.Value)) > 0 {
+				return ""
+			}
+			return e.Value
+		}
+	}
+	for _, c := range spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == "C4_AGENT_BLOCK" && e.Value == "1" {
+				return "block"
+			}
+		}
+	}
+	return ""
 }
 
 // dropProjectedTokens removes every service-account token a template

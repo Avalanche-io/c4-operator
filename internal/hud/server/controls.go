@@ -834,9 +834,10 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 			custody = CustodyClaimed
 		}
 	}
-	if deciderOf(r, v).Agent != "" {
+	if deciderOf(r, v).Agent != "" && v.Unit == nil {
 		// An agent decides only a wait that names it, and that it is
-		// the agent rests on the client's header alone.
+		// the agent rests on the client's header alone. A unit running
+		// the agent is known by its own token, so it decides directly.
 		custody = CustodyClaimed
 	}
 	standFor := ""
@@ -845,7 +846,9 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		// project let stand in (whomay.go); a relay checks the person its
 		// tracker maps instead.
 		var err error
-		if standFor, err = s.mayDecide(rec.project, wait.Server, deciderOf(r, v)); err != nil {
+		d := deciderOf(r, v)
+		d.OwnJob = v.Unit != nil && v.Unit.Namespace == rec.job.Namespace && v.Unit.Job == rec.job.Name
+		if standFor, err = s.mayDecide(rec.project, wait.Server, d); err != nil {
 			fail(w, http.StatusForbidden, "%v", err)
 			return
 		}

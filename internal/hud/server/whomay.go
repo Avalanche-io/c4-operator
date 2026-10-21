@@ -69,11 +69,18 @@ type Decider struct {
 	// Agent names the agent, when the control comes through MCP.
 	Agent string
 	Unit  bool
+	// UnitAgent is the agent a unit runs (its pod's agent label), and
+	// OwnJob whether the control is on the unit's own job.
+	UnitAgent string
+	OwnJob    bool
 }
 
 // deciderOf is who makes request r as viewer v.
 func deciderOf(r *http.Request, v *api.Viewer) Decider {
 	d := Decider{User: v.User, Role: v.Role, Parties: v.Parties, Unit: v.Unit != nil}
+	if v.Unit != nil {
+		d.UnitAgent = v.Unit.Agent
+	}
 	if via(r) == "mcp" {
 		d.Agent = r.Header.Get("X-C4-Agent")
 		if d.Agent == "" {
@@ -93,6 +100,10 @@ func MayControl(control, server string, who Decider) error {
 	}
 	kind, name, _ := strings.Cut(server, ":")
 	switch {
+	case who.Unit && kind == "agent" && name != "" && who.UnitAgent == name && who.OwnJob:
+		// A unit of the job running the agent the wait names: the
+		// agent itself, by its unit token.
+		return nil
 	case who.Unit && !rule.Units:
 		return fmt.Errorf("%s is a unit; only a person may %s this (%s.byUnits is off)", who.User, control, control)
 	case who.Agent != "" && kind == "agent" && name == who.Agent:

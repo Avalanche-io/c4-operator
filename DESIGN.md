@@ -1984,8 +1984,12 @@ and a sweep planner that spawns trials are all generators.
     at its time.
   - **Who decides.** A `person:X` wait is decided by X alone, a `party:`
     wait by a member of the party (a `c4:party:<name>` group, or the
-    party a tracker maps), an `agent:` wait by that agent. An agent never
-    decides a wait that does not name it, and a unit never decides a
+    party a tracker maps), an `agent:` wait by that agent. That is either
+    a unit of the same job running the agent, known by its unit token and
+    its pod's agent label (`c4.avalanche.io/agent`, which only the queue
+    sets) and graded `direct`; or an MCP client that names the agent in
+    `X-C4-Agent`, behind its person's patch rights and graded `claimed`.
+    An agent never decides a wait that does not name it, and a unit never decides a
     person's wait or supplies or withdraws another unit's question. Deciding for
     someone else is standing in: `decide.standIn` is a farm security key,
     `deny` by default (`--decide-stand-in`); only under a farm at `allow`

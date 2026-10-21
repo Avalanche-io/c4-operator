@@ -281,3 +281,28 @@ func TestRequeueAllowAcceptNameTheirRecords(t *testing.T) {
 		}
 	}
 }
+
+// A wait that names an agent is decided by a unit of the same job running
+// that agent, known by its unit token, so the decision is direct. A unit
+// running another agent, or the same agent in another job, may not.
+func TestAgentWaitDecidedByItsUnit(t *testing.T) {
+	s, decide := decideFarm(t)
+	rec := s.m.byKey["show-a/sh040-light-v007"]
+	rec.job.Status.Waits[0].Server = "agent:render-bot"
+	unit := func(job, agent, grant string) *api.Viewer {
+		return &api.Viewer{User: "unit:show-a/" + job + "/3", Projects: []string{"show-a"},
+			Unit: &api.UnitViewer{Namespace: "show-a", Job: job, Unit: "3", Grant: grant, Agent: agent}}
+	}
+	s.DevViewers["its-unit"] = unit("sh040-light-v007", "render-bot", "job")
+	s.DevViewers["other-agent"] = unit("sh040-light-v007", "comp-bot", "job")
+	s.DevViewers["other-job"] = unit("sh050-comp-v001", "render-bot", "project")
+	code, p := decide(decideRequest("its-unit", nil))
+	if code != http.StatusOK || p.Custody != CustodyDirect || p.Actor != "unit:show-a/sh040-light-v007/3" {
+		t.Errorf("the agent's own unit: %d, custody %q, actor %q", code, p.Custody, p.Actor)
+	}
+	for _, as := range []string{"other-agent", "other-job"} {
+		if code, _ := decide(decideRequest(as, nil)); code != http.StatusForbidden {
+			t.Errorf("%s: %d, want 403", as, code)
+		}
+	}
+}

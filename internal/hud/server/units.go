@@ -99,7 +99,7 @@ func (s *Server) unitViewer(ctx context.Context, tok string) (*api.Viewer, error
 		return nil, fmt.Errorf("tool %s grants no c4", tool)
 	}
 	v := &api.Viewer{User: fmt.Sprintf("unit:%s/%s/%s", ns, job, unit), Projects: []string{},
-		Unit: &api.UnitViewer{Namespace: ns, Job: job, Unit: unit, Grant: p.Spec.C4}}
+		Unit: &api.UnitViewer{Namespace: ns, Job: job, Unit: unit, Grant: p.Spec.C4, Agent: pod.Labels[c4v1.LabelAgent]}}
 	if ref := metav1.GetControllerOf(&pod); ref != nil && ref.Kind == "WorkJob" && ref.Name == job {
 		v.Unit.JobUID = string(ref.UID)
 	}
