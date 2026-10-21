@@ -103,8 +103,8 @@ needed.
 
   | application | its pointer                                                                                             |
   | ----------- | ------------------------------------------------------------------------------------------------------- |
-  | Blender     | the add-on itself (with `c4submit` inside) in the version's `scripts/addons`, plus a `scripts/startup` module that turns it on once |
-  | Unreal      | `~/Documents/UnrealEngine/Python/init_unreal.py`; refused if one is there that isn't C4's              |
+  | Blender     | the add-on in the version's `scripts/addons`, and a `scripts/startup` module that turns it on once      |
+  | Unreal      | `~/Documents/UnrealEngine/Python/init_unreal.py`; refused if one is there that isn't C4's               |
   | Houdini     | `packages/c4.json` in the version's preferences folder                                                  |
   | Maya        | `c4.mod` in the version's user `modules` folder                                                         |
   | Nuke        | one marked line in `~/.nuke/init.py`, after a backup of the file                                        |
