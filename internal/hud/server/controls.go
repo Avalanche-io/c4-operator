@@ -648,7 +648,7 @@ func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	name := r.PathValue("name")
-	if !v.All && isDev(v) {
+	if !v.All && isDev(v) && !s.everyRole(ctx, v) {
 		fail(w, http.StatusForbidden, "%s may not disable nodes", v.User)
 		return
 	}
@@ -848,6 +848,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		var err error
 		d := deciderOf(r, v)
 		d.OwnJob = v.Unit != nil && v.Unit.Namespace == rec.job.Namespace && v.Unit.Job == rec.job.Name
+		d.EveryRole = s.everyRole(ctx, v)
 		if standFor, err = s.mayDecide(rec.project, wait.Server, d); err != nil {
 			fail(w, http.StatusForbidden, "%v", err)
 			return
@@ -924,6 +925,9 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		p.Custody = custody
 		// Standing in, the record names both: for the person, by the actor.
 		p.For = standFor
+		if one, from := s.farmOwner(ctx); standFor != "" && one != "" && one == v.User {
+			p.Authorization += fmt.Sprintf("; a single-person farm: %s, the farm's owner (%s), holds every role", one, from)
+		}
 		if body.Via != nil {
 			// The decider is the tracker's person; who relayed it, and how
 			// the relay authenticated, is the rest of the record.

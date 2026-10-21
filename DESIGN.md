@@ -2004,15 +2004,18 @@ and a sweep planner that spawns trials are all generators.
     `decide.standInBy` (`role:farm-admin` by default) may decide, signed
     with custody `stand-in` and `for: person:X`. The keys are read in one
     place (`decide.by`, `decide.byUnits`, `supply.by`, `withdraw.by`),
-    which a farm policy will set. A single-person farm (a local farm,
-    `--single-person-farm=<installer>`, or a farm binding marked
-    `onePerson`) is one person in every role: there the installer decides
-    a wait addressed to any role, signed as standing in for it (`for:
-    role:wrangler`, by the installer). Roles only: a wait for another
-    person stays theirs, under `decide.standIn` as anywhere. It is a
-    setting the local farm makes, never inferred from where the HUD
-    listens, nor from whom the farm is bound to, and it holds only on a
-    HUD guarded by the installer token.
+    which a farm policy will set. A wait may also be addressed to a role
+    (`role:<role>`), and anyone with that role decides it. A single-person
+    farm (a local farm, `--single-person-farm=<installer>`, or a farm
+    binding marked `onePerson`) is one person in every role: there the
+    installer decides a wait addressed to any role, signed as standing in
+    for it (`for: role:wrangler`, by the installer, the record naming them
+    as the farm's owner and where that came from). They also have every
+    role's rights. Roles only: a wait for another person stays theirs,
+    under `decide.standIn` as anywhere. It is a setting the local farm
+    makes, never inferred from where the HUD listens, nor from whom the
+    farm is bound to, and it holds only on a HUD guarded by the installer
+    token.
   - **Replies.** A wait with `reply: true` asks for content with its
     decision: a text, a file, an edited plan. The decision carries it as
     a view (`reply.view`, or `reply.text`, which the HUD stores as a view

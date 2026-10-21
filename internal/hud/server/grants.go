@@ -290,7 +290,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	if g.Spec.Person != v.User {
 		// Development viewers are not checked; only a farm-wide one may
 		// stand in for an admin there.
-		if isDev(v) && !v.All {
+		if isDev(v) && !v.All && !s.everyRole(ctx, v) {
 			fail(w, http.StatusForbidden, "only %s, or a project admin, revokes their grant", g.Spec.Person)
 			return
 		}

@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strings"
@@ -46,7 +47,7 @@ func devRole(v *api.Viewer) string {
 // devMay says whether development viewer v may verb resource in ns.
 func (s *Server) devMay(v *api.Viewer, ns, verb, resource string) error {
 	role := devRole(v)
-	if !slices.Contains(devWriters[resource], role) {
+	if !slices.Contains(devWriters[resource], role) && !s.everyRole(context.Background(), v) {
 		return fmt.Errorf("%s (%s) may not %s %s: on this farm that takes %s", v.User, role, verb, resource, strings.Join(devWriters[resource], ", "))
 	}
 	if ns == "" || v.All {

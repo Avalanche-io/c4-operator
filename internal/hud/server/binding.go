@@ -83,14 +83,31 @@ func (s *Server) farmBinding(ctx context.Context) (*c4v1.DeploymentBinding, erro
 // farm bound any other way, or on a HUD without the token; and
 // --single-person-farm (singlePersonFlag) on a farm with no binding.
 func (s *Server) singlePerson(ctx context.Context) string {
+	one, _ := s.farmOwner(ctx)
+	return one
+}
+
+// farmOwner is singlePerson and where it comes from, in words for a
+// record: the farm binding, or --single-person-farm.
+func (s *Server) farmOwner(ctx context.Context) (string, string) {
 	b, err := s.farmBinding(ctx)
 	if err != nil || b == nil {
-		return s.singlePersonFlag()
+		return s.singlePersonFlag(), "--single-person-farm"
 	}
 	if !s.installerGuarded() {
-		return ""
+		return "", ""
 	}
-	return b.Spec.SingleOwner()
+	return b.Spec.SingleOwner(), "the farm binding"
+}
+
+// everyRole says whether v holds every role: the farm's owner, signed in
+// as themselves, on a single-person farm.
+func (s *Server) everyRole(ctx context.Context, v *api.Viewer) bool {
+	if v == nil || v.Unit != nil || v.User == "" {
+		return false
+	}
+	one := s.singlePerson(ctx)
+	return one != "" && v.User == one
 }
 
 // handleFarmBinding answers GET /api/v1/farm/binding.

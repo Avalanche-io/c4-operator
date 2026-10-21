@@ -241,10 +241,13 @@ func errs(in []schema.Error) []api.FieldError {
 // whatever its farm access (needs.farm: project lets it submit jobs, not
 // publish tools). This is the HUD's rule, not RBAC on Tool objects, which
 // the HUD writes itself, and development viewers keep to it too.
-func mayPublish(v *api.Viewer, farm bool) string {
+func mayPublish(v *api.Viewer, farm, everyRole bool) string {
 	switch {
 	case v.Unit != nil:
 		return "a unit does not publish tools, whatever its farm access; a pipeline TD publishes them"
+	case everyRole:
+		// the farm's owner on a single-person farm
+		return ""
 	case farm && v.Role != "farm-admin":
 		return "publishing a tool to the whole farm takes the farm admin role: the right to create tools in the operator's namespace, or a sign-in group the HUD maps to farm-admin (--hud-role-groups GROUP=farm-admin)"
 	case v.Role != "pipeline-td" && v.Role != "farm-admin":
@@ -321,7 +324,7 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "no project %s", r.PathValue("project"))
 		return
 	}
-	if why := mayPublish(s.publishRole(r, v, projectNS), body.Farm); why != "" {
+	if why := mayPublish(s.publishRole(r, v, projectNS), body.Farm, s.everyRole(r.Context(), v)); why != "" {
 		fail(w, http.StatusForbidden, "%s", why)
 		return
 	}

@@ -306,3 +306,88 @@ func TestAgentWaitDecidedByItsUnit(t *testing.T) {
 		}
 	}
 }
+
+// On a single-person farm the farm's owner holds every role: signed in as
+// themselves, they decide a wait addressed to a role, recorded as standing
+// in for that role with the farm's owner named, and they have every
+// role's rights. On a shared farm the same sign-in is just its own role.
+func TestOwnerHoldsEveryRole(t *testing.T) {
+	s, decide := decideFarm(t)
+	rec := s.m.byKey["show-a/sh040-light-v007"]
+	rec.job.Status.Waits[0].Server = "role:wrangler"
+	s.DevViewers["noor"] = &api.Viewer{User: "noor", Role: "artist", Projects: []string{"show-a"}}
+	s.DevViewers["wrangler"].Role = "wrangler" // as --hud-dev-viewers gives a viewer named for a role
+	may := func(ns, resource string) bool {
+		r := httptest.NewRequest(http.MethodPost, "/", nil)
+		v := *s.DevViewers["noor"]
+		v.DevBy = devOpen // as the open test farm resolves ?as=
+		return s.authorize(context.Background(), r, &v, ns, "patch", resource, "x") == nil
+	}
+	approve := func() int {
+		if !may("", "capacityrequests") {
+			return http.StatusForbidden
+		}
+		return http.StatusOK
+	}
+	// every gate a role holds, in order: approving a burst, disabling a
+	// node, revoking another's grant, binding the farm, publishing
+	gates := func() []bool {
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/nodes/w1/disable?as=noor", strings.NewReader(`{"disabled": true}`)))
+		g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "dana-github"},
+			Spec: c4v1.SubmitGrantSpec{Person: "dana", Tracker: "github", Until: metav1.NewTime(time.Now().Add(time.Hour))}}
+		s.Client.Delete(context.Background(), g)
+		if err := s.Client.Create(context.Background(), g); err != nil {
+			t.Fatal(err)
+		}
+		revoke := httptest.NewRecorder()
+		s.Handler().ServeHTTP(revoke, httptest.NewRequest(http.MethodDelete, "/api/v1/grants/show-a/dana-github?as=noor", nil))
+		return []bool{may("", "capacityrequests"), w.Code != http.StatusForbidden && may("", "nodes"), revoke.Code != http.StatusForbidden && may("show-a", "submitgrants"),
+			may("", "deploymentbindings"), mayPublish(s.DevViewers["noor"], true, s.everyRole(context.Background(), s.DevViewers["noor"])) == ""}
+	}
+
+	if code, _ := decide(decideRequest("noor", nil)); code != http.StatusForbidden {
+		t.Errorf("an artist decides the wrangler's wait on a shared farm: %d", code)
+	}
+	for i, ok := range gates() {
+		if ok {
+			t.Errorf("gate %d is open to an artist on a shared farm", i)
+		}
+	}
+	if code := approve(); code != http.StatusForbidden {
+		t.Errorf("an artist approves a burst on a shared farm: %d", code)
+	}
+	if code, p := decide(decideRequest("wrangler", nil)); code != http.StatusOK || p.For != "" {
+		t.Errorf("the wrangler decides a wait addressed to their role: %d, for %q", code, p.For)
+	}
+
+	s.SinglePerson = "noor"
+	code, p := decide(decideRequest("noor", nil))
+	if code != http.StatusOK {
+		t.Fatalf("the owner decides on a single-person farm: %d", code)
+	}
+	if p.Actor != "noor" || p.For != "role:wrangler" || p.Custody != CustodyStandIn || !strings.Contains(p.Authorization, "noor, the farm's owner") {
+		t.Errorf("the owner's record: actor %q, for %q, custody %q, authorization %q", p.Actor, p.For, p.Custody, p.Authorization)
+	}
+	if code := approve(); code == http.StatusForbidden {
+		t.Error("the owner may not approve a burst on a single-person farm")
+	}
+	for i, ok := range gates() {
+		if !ok {
+			t.Errorf("gate %d is closed to the owner on a single-person farm", i)
+		}
+	}
+
+	// bound as noor's alone, on a HUD the installer's token does not
+	// guard: no one holds every role, whatever --single-person-farm says
+	b := &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "c4-local/*", OnePerson: true, For: []string{"task/v1"}, Start: metav1.Now(), By: "noor"}}
+	if err := s.Client.Create(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	for i, ok := range gates() {
+		if ok {
+			t.Errorf("gate %d is open to a one-person binding's owner on an unguarded HUD", i)
+		}
+	}
+}

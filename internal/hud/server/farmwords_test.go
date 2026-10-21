@@ -48,18 +48,18 @@ func TestRefusalsInFarmWords(t *testing.T) {
 	}
 
 	// Publishing: the role from RBAC.
-	if got := s.publishRole(r, v, ns); got.Role != "" || mayPublish(got, false) == "" {
+	if got := s.publishRole(r, v, ns); got.Role != "" || mayPublish(got, false, false) == "" {
 		t.Fatalf("joe publishes with no right: %+v", got)
 	}
-	if !strings.Contains(mayPublish(v, false), "c4-project-admin in the project") {
-		t.Fatalf("the publish refusal names no way to the role: %s", mayPublish(v, false))
+	if !strings.Contains(mayPublish(v, false, false), "c4-project-admin in the project") {
+		t.Fatalf("the publish refusal names no way to the role: %s", mayPublish(v, false, false))
 	}
 	allow[ns+" create tools"] = true
-	if got := s.publishRole(r, v, ns); got.Role != "pipeline-td" || mayPublish(got, false) != "" || mayPublish(got, true) == "" {
+	if got := s.publishRole(r, v, ns); got.Role != "pipeline-td" || mayPublish(got, false, false) != "" || mayPublish(got, true, false) == "" {
 		t.Fatalf("one who may create tools in the project is not a TD for it: %+v", got)
 	}
 	allow["c4-system create tools"] = true
-	if got := s.publishRole(r, v, ns); got.Role != "farm-admin" || mayPublish(got, true) != "" {
+	if got := s.publishRole(r, v, ns); got.Role != "farm-admin" || mayPublish(got, true, false) != "" {
 		t.Fatalf("one who may create tools in the operator's namespace is not a farm admin for it: %+v", got)
 	}
 	if v.Role != "" {

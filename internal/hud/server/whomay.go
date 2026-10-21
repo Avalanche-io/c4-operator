@@ -73,6 +73,9 @@ type Decider struct {
 	// OwnJob whether the control is on the unit's own job.
 	UnitAgent string
 	OwnJob    bool
+	// EveryRole: the farm's owner on a single-person farm, who holds
+	// every role.
+	EveryRole bool
 }
 
 // deciderOf is who makes request r as viewer v.
@@ -119,11 +122,14 @@ func MayControl(control, server string, who Decider) error {
 			return nil
 		case by == ByWaitsPerson && kind == "party" && slices.Contains(who.Parties, name):
 			return nil
+		case by == ByWaitsPerson && kind == "role" && who.Role != "" && who.Role == name:
+			// a wait addressed to a role, by someone who has it
+			return nil
 		case by == ByWaitsPerson && kind == "unit":
 			// A unit answers its wait; a person may still decide it for
 			// the job.
 			return nil
-		case strings.HasPrefix(by, ByRole) && who.Role != "" && who.Role == strings.TrimPrefix(by, ByRole):
+		case strings.HasPrefix(by, ByRole) && (who.EveryRole || who.Role != "" && who.Role == strings.TrimPrefix(by, ByRole)):
 			return nil
 		}
 	}
@@ -140,6 +146,8 @@ func waitsWhom(server string) string {
 		return "a member of " + name
 	case kind == "agent":
 		return "agent " + name
+	case kind == "role":
+		return "the " + name
 	case kind == "unit":
 		return "unit " + name + "'s answer"
 	}
@@ -214,7 +222,7 @@ func (s *Server) mayDecide(project, server string, who Decider) (string, error) 
 		return "", nil
 	}
 	kind, name, _ := strings.Cut(server, ":")
-	if who.Unit || who.Agent != "" || kind != "person" || name == "" {
+	if who.Unit || who.Agent != "" || (kind != "person" && kind != "role") || name == "" {
 		return "", err
 	}
 	// A single-person farm (a local farm: its onePerson binding or
@@ -224,6 +232,9 @@ func (s *Server) mayDecide(project, server string, who Decider) (string, error) 
 	// theirs, and standing in for them is the farm's policy, as anywhere.
 	if one := s.singlePerson(context.Background()); one != "" && who.User == one && slices.Contains(api.Roles, name) {
 		return "role:" + name, nil
+	}
+	if kind == "role" {
+		return "", err
 	}
 	ok, by, from := s.standIn(project)
 	if !ok {
