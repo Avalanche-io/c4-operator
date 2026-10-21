@@ -729,3 +729,34 @@ func TestHUDJobsRecordTheirOwnersGroups(t *testing.T) {
 		}
 	}
 }
+
+// A unit's job that names a pool running only other people's work is
+// refused when submitted, in the farm's words, rather than wait unplaced.
+func TestAUnitsJobNamesItsOwnersPools(t *testing.T) {
+	s := submitFarm(t)
+	ownersMay(s)
+	ctx := context.Background()
+	m := s.current()
+	m.pools = append(m.pools, c4v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "ivo-desk"}, Spec: c4v1.PoolSpec{Owners: []string{"ivo"}}})
+	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port", UID: "uid-port", Annotations: map[string]string{c4v1.AnnotationOwner: "lee"}},
+		Spec: c4v1.WorkJobSpec{Class: "agent", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+	if err := s.Client.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/port/0", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "port", JobUID: "uid-port", Unit: "0", Grant: "project"}}
+	submit := func(name string, pools ...string) (int, string) {
+		spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Pools: pools, Params: map[string]string{"frames": "1-2"},
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+		var out map[string]any
+		code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit", api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: name, Spec: spec}, &out)
+		msg, _ := out["error"].(string)
+		return code, msg
+	}
+	if code, msg := submit("others", "ivo-desk"); code != http.StatusForbidden || !strings.Contains(msg, "pool ivo-desk runs only the jobs of ivo, so a unit of lee's job may not use it") {
+		t.Errorf("a pool of ivo's: %d %q", code, msg)
+	}
+	if code, msg := submit("anyones", "cpu"); code != http.StatusCreated {
+		t.Errorf("a pool that runs anyone's: %d %q", code, msg)
+	}
+}

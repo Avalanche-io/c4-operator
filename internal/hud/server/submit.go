@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -597,6 +598,23 @@ func unitRefusal(v *api.Viewer, err error) error {
 // meanwhile: a submission numbers its jobs again rather than report it.
 type takenError struct{ error }
 
+// poolsRefuse says which of pools runs only other owners' work, so a job of
+// owner's could not run there; "" when each serves owner (a pool with no
+// owners runs anyone's).
+func poolsRefuse(m *model, owner string, pools []string) string {
+	if m == nil {
+		return ""
+	}
+	for _, name := range pools {
+		for _, p := range m.pools {
+			if p.Name == name && len(p.Spec.Owners) > 0 && !slices.Contains(p.Spec.Owners, owner) {
+				return fmt.Sprintf("pool %s runs only the jobs of %s, so a unit of %s's job may not use it", name, strings.Join(p.Spec.Owners, ", "), owner)
+			}
+		}
+	}
+	return ""
+}
+
 // ownerMay says why a unit of parent, owner's job, may not submit in ns
 // for owner, with its status: the API server is asked what owner's own
 // submission there would be, with the groups recorded when parent was
@@ -782,6 +800,11 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		// unit: in every namespace, its parent's too.
 		if code, err := s.ownerMay(ctx, &parent, owner, ns); err != nil {
 			return api.SubmitResponse{}, code, fmt.Errorf("%s: %v", v.User, err)
+		}
+		// Pools that run only others' work would never run it (the queue
+		// keeps to the pools that serve the owner): say so now.
+		if why := poolsRefuse(m, owner, spec.Pools); why != "" {
+			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: %s", v.User, why)
 		}
 		if g, ok := parent.Annotations[c4v1.AnnotationOwnerGroups]; ok {
 			job.Annotations[c4v1.AnnotationOwnerGroups] = g
