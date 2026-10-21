@@ -21,7 +21,7 @@ JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 RUNTIME_IMAGES ?= base python oiio torch
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks job-image-hydra-blender install-yaml release-snapshot verify cross e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks tool-tests job-image-hydra-blender install-yaml release-snapshot verify cross e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -251,3 +251,19 @@ runtime-image-names:
 # the farm pins the images when it publishes.
 tool-locks:
 	go run ./hack/toollock -version $(VERSION)
+
+# The prebuilt tools' own tests, run as `c4 farm tool test` runs them (in
+# Docker, as an unprivileged unit with no network), against the images of
+# VERSION: the release runs them once its images are pushed and joined, so
+# the farm can book its own tools tested in that release. A development
+# build (VERSION without a v) tests against this machine's c4-job-<name>:dev.
+# The tools whose kind the farm runs; ci and lora join when it runs shards
+# and training tools.
+TESTED_TOOLS ?= comp render infer sim transcode usd
+tool-tests:
+	@mkdir -p bin
+	go build -trimpath -ldflags="-X main.version=$(VERSION)" -o bin/c4-farm-tools ./cmd/c4-farm
+	@for t in $(TESTED_TOOLS); do \
+	  echo "== tool test $$t ($(VERSION))"; \
+	  bin/c4-farm-tools tool test tools/$$t || exit 1; \
+	done

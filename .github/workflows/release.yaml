@@ -64,11 +64,29 @@ jobs:
           docker buildx imagetools create -t "$img:$tag" "$img:$tag-amd64" "$img:$tag-arm64"
         done
 
+  # The prebuilt tools' own tests against the images just joined, each as a
+  # unit runs (in Docker, unprivileged, no network): a tool that fails its
+  # test stops the release, and the tools a release ships are tested in it.
+  tool-tests:
+    needs: manifests
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - run: make tool-tests VERSION=${{ github.ref_name }}
+
   # The CLIs, the operator image, the manifests and the formulas. The
   # prebuilt tools' tool.lock files are written first, pinning the images
   # above, so c4-farm embeds the tools exactly as c4 farm up publishes them.
   release:
-    needs: manifests
+    needs: [manifests, tool-tests]
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@v7

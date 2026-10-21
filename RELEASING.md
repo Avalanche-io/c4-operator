@@ -1,16 +1,18 @@
 # Releasing c4-operator
 
-A release is a pushed tag `vX.Y.Z`. The `release` workflow then tests, builds
-the job images on a native runner per architecture and joins them into
-multi-arch tags, writes each prebuilt tool's `tool.lock` pinning those images
-by digest (`make tool-locks`), and runs GoReleaser (`.goreleaser.yaml`): the
-CLI for Linux and macOS (amd64 and arm64), with the locked tools embedded in
-`c4-farm`, the image `ghcr.io/avalanche-io/c4-operator:vX.Y.Z` for
-linux/amd64 and linux/arm64, `install.yaml`, checksums, the Homebrew
-formulas, and a draft GitHub release to review and publish by hand. Last it
-builds the sample set with the release's images and attaches it.
-`make release-snapshot` runs GoReleaser locally and publishes nothing; its
-`c4-farm` has no tool locks, so its farm pins the images when it publishes.
+A release is a pushed tag `vX.Y.Z`. The `release` workflow then tests,
+builds the job images on a native runner per architecture and joins them
+into multi-arch tags, runs the prebuilt tools' own tests against those
+images (`make tool-tests`; a tool that fails stops the release), writes each
+prebuilt tool's `tool.lock` pinning those images by digest (`make
+tool-locks`), and runs GoReleaser (`.goreleaser.yaml`): the CLI for Linux
+and macOS (amd64 and arm64), with the locked tools embedded in `c4-farm`,
+the image `ghcr.io/avalanche-io/c4-operator:vX.Y.Z` for linux/amd64 and
+linux/arm64, `install.yaml`, checksums, the Homebrew formulas, and a draft
+GitHub release to review and publish by hand. Last it builds the sample set
+with the release's images and attaches it. `make release-snapshot` runs
+GoReleaser locally and publishes nothing; its `c4-farm` has no tool locks,
+so its farm pins the images when it publishes.
 
 ## v0.1.0 checklist
 
