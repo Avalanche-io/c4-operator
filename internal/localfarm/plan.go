@@ -8,6 +8,9 @@ package localfarm
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"os/exec"
+	"os/user"
 	"strings"
 
 	"sigs.k8s.io/yaml"
@@ -96,6 +99,10 @@ type Options struct {
 	// c4/<name> is c4-<name>:dev in the farm's registry, not the release's
 	// image on ghcr.io.
 	LocalImages bool
+	// Owner is the person who owns the farm and plays every role on it: the
+	// installer, recorded as standing in for a role when they decide a wait
+	// addressed to it (the manager's --single-person-farm).
+	Owner string
 }
 
 // HUD is the HUD's address on this machine.
@@ -274,6 +281,9 @@ func ManagerArgs(o Options) []string {
 	if o.LocalImages {
 		args = append(args, "--hud-image-registry="+RegistryInFarm, "--hud-image-tag=dev")
 	}
+	if o.Owner != "" {
+		args = append(args, "--single-person-farm="+o.Owner)
+	}
 	return args
 }
 
@@ -288,7 +298,7 @@ func ManagerPatch(o Options, args []string) []byte {
 	keep := []string{}
 	for _, a := range args {
 		drop := false
-		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz=", "--hud-plain-registries=",
+		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz=", "--hud-plain-registries=", "--single-person-farm=",
 			"--hud-image-registry=", "--hud-image-tag="} {
 			if strings.HasPrefix(a, f) {
 				drop = true
@@ -329,4 +339,18 @@ func YAML(objs []obj) []byte {
 // in their role's mode and level.
 func Link(hud string, v Viewer) string {
 	return fmt.Sprintf("%s/?as=%s", hud, v.Name)
+}
+
+// DefaultOwner is who owns a farm made on this machine unless --owner
+// says: git's user.email, else the login name.
+func DefaultOwner() string {
+	if out, err := exec.Command("git", "config", "--global", "user.email").Output(); err == nil {
+		if e := strings.TrimSpace(string(out)); e != "" {
+			return e
+		}
+	}
+	if u, err := user.Current(); err == nil && u.Username != "" {
+		return u.Username
+	}
+	return os.Getenv("USER")
 }

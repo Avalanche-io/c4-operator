@@ -578,6 +578,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		port := fs.Int("port", localfarm.HUDPort, "the HUD's port on this machine")
 		storePort := fs.Int("store-port", localfarm.StorePort, "the store's port on this machine")
 		registryPort := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
+		owner := fs.String("owner", "", "who owns this farm and plays every role on it (default your git user.email, else your login)")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
@@ -589,8 +590,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		tz := localfarm.LocalTZ()
 		lat, lon := localfarm.Place(tz)
 		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort,
-			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != ""},
+			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != "", Owner: *owner},
 			Install: *install, Version: version, ImageArchive: *archive, Log: stdout}
+		if o.Owner == "" {
+			o.Owner = localfarm.DefaultOwner()
+		}
 		if *plan {
 			fmt.Fprintf(stdout, "%s---\n%s", localfarm.KindConfig(o.Options), localfarm.YAML(localfarm.Farm(o.Options)))
 			fmt.Fprintf(stdout, "---\n# manager arguments added: %s\n", strings.Join(localfarm.ManagerArgs(o.Options), " "))
@@ -609,6 +613,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
 		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
+		fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
 		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.Link(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)\n")
 		if *noOpen {

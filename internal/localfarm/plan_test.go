@@ -2,6 +2,7 @@ package localfarm
 
 import (
 	"encoding/json"
+	"slices"
 	"strings"
 	"testing"
 
@@ -162,5 +163,21 @@ func TestPlace(t *testing.T) {
 	}
 	if lat, lon := Place("Mars/Olympus"); lat != 0 || lon != 0 {
 		t.Fatal("an unknown zone was placed")
+	}
+}
+
+// The farm's owner reaches the manager as --single-person-farm, and a
+// second up replaces it rather than adding another.
+func TestOwnerIsTheSinglePerson(t *testing.T) {
+	o := Options{Owner: "noor@petrelfinch.example"}
+	if !slices.Contains(ManagerArgs(o), "--single-person-farm=noor@petrelfinch.example") {
+		t.Fatalf("args %v", ManagerArgs(o))
+	}
+	p := string(ManagerPatch(o, []string{"manager", "--single-person-farm=someone-else"}))
+	if strings.Contains(p, "someone-else") || strings.Count(p, "--single-person-farm=") != 1 {
+		t.Errorf("patch %s", p)
+	}
+	if slices.ContainsFunc(ManagerArgs(Options{}), func(a string) bool { return strings.HasPrefix(a, "--single-person-farm") }) {
+		t.Error("a farm with no owner named one")
 	}
 }
