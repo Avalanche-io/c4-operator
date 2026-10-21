@@ -268,6 +268,18 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		aj.Needs = append(aj.Needs, an)
 	}
 	sort.Slice(aj.Needs, func(a, b int) bool { return aj.Needs[a].Unit < aj.Needs[b].Unit })
+	for k, b := range st.UnitBranches {
+		i, err := strconv.Atoi(k)
+		if err != nil {
+			continue
+		}
+		ab := api.UnitBranch{Unit: i, Repo: b.Repo, Branch: b.Branch, Base: b.Base, Head: b.Head, Commits: int(b.Commits)}
+		if r.plan != nil && i < len(r.plan.Units) {
+			ab.Name = r.plan.Units[i].Name
+		}
+		aj.Branches = append(aj.Branches, ab)
+	}
+	sort.Slice(aj.Branches, func(a, b int) bool { return aj.Branches[a].Unit < aj.Branches[b].Unit })
 	for _, a := range st.Asks {
 		aa := api.Ask{ID: a.ID, From: int(a.From), To: int(a.To), Text: a.Text, At: a.At.Time.UTC(), Answer: a.Answer, Cannot: a.Cannot, Wait: a.Wait}
 		if a.Answered != nil {

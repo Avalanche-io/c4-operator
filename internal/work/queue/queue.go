@@ -223,6 +223,9 @@ type jobMem struct {
 	expansions []expansionRec
 	docs       map[string][]byte
 	unitOut    map[int]string
+	// branches are units' git branches, as their runners last recorded
+	// them (branch.go).
+	branches map[int]c4v1.WorkUnitBranch
 	// gateSince is when each unit waiting for a gate joined its line.
 	gateSince map[int]time.Time
 	// measure is the latest reading of the job's measure (measure.go).
@@ -423,6 +426,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 			m.unitOut[i] = view
 		}
 	}
+	m.loadBranches(st)
 	for _, x := range st.Interruptions {
 		m.interruptions = append(m.interruptions, interruptRec{Unit: int(x.Unit), At: x.At.Time, Reason: x.Reason, Node: x.Node})
 	}
@@ -907,6 +911,9 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				}
 			}
 			continue
+		}
+		if p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed {
+			m.noteBranch(idx, p)
 		}
 		slots := plan.Units[idx].Slots
 		switch {

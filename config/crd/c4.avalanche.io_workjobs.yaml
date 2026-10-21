@@ -1683,6 +1683,43 @@ spec:
                   Supplied is the token of the last supply carried out
                   (AnnotationSupply).
                 type: string
+              unitBranches:
+                additionalProperties:
+                  description: |-
+                    WorkUnitBranch is a unit's git branch: the repository on the machine
+                    that ran it, the worktree it worked in (gone once the unit is done), the
+                    branch, the commit it started from and its last, and how many commits
+                    it made.
+                  properties:
+                    attempt:
+                      description: Attempt is the attempt that recorded it.
+                      format: int32
+                      type: integer
+                    base:
+                      type: string
+                    branch:
+                      type: string
+                    commits:
+                      format: int32
+                      type: integer
+                    dir:
+                      type: string
+                    head:
+                      type: string
+                    repo:
+                      type: string
+                  required:
+                  - base
+                  - branch
+                  - commits
+                  - repo
+                  type: object
+                description: |-
+                  UnitBranches maps a unit's index to the git branch its work is on,
+                  as its last attempt's runner recorded it: a block on a host works
+                  in its own worktree of the developer's repository, and its commits
+                  are its output.
+                type: object
               unitMillis:
                 description: |-
                   UnitMillis is each finished unit's run time in milliseconds, by

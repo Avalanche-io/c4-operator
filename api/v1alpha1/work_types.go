@@ -410,6 +410,12 @@ type WorkJobStatus struct {
 	// to its captured output view.
 	// +optional
 	UnitOutputs map[string]string `json:"unitOutputs,omitempty"`
+	// UnitBranches maps a unit's index to the git branch its work is on,
+	// as its last attempt's runner recorded it: a block on a host works
+	// in its own worktree of the developer's repository, and its commits
+	// are its output.
+	// +optional
+	UnitBranches map[string]WorkUnitBranch `json:"unitBranches,omitempty"`
 	// Verdicts lists the most recent verdicts review units wrote, each
 	// carried out once.
 	// +optional
@@ -616,6 +622,23 @@ type WorkOutput struct {
 	// Conflicts lists paths two units wrote (the later write is kept).
 	// +optional
 	Conflicts []string `json:"conflicts,omitempty"`
+}
+
+// WorkUnitBranch is a unit's git branch: the repository on the machine
+// that ran it, the worktree it worked in (gone once the unit is done), the
+// branch, the commit it started from and its last, and how many commits
+// it made.
+type WorkUnitBranch struct {
+	Repo   string `json:"repo"`
+	Dir    string `json:"dir,omitempty"`
+	Branch string `json:"branch"`
+	Base   string `json:"base"`
+	// +optional
+	Head    string `json:"head,omitempty"`
+	Commits int32  `json:"commits"`
+	// Attempt is the attempt that recorded it.
+	// +optional
+	Attempt int32 `json:"attempt,omitempty"`
 }
 
 // WorkYield is one yield of a checkpointing unit.

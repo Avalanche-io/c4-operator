@@ -175,6 +175,9 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if u.Name != "" {
 			e["name"] = u.Name
 		}
+		if b, ok := rec.job.Status.UnitBranches[strconv.Itoa(i)]; ok {
+			e["branch"] = map[string]any{"repo": b.Repo, "branch": b.Branch, "base": b.Base, "head": b.Head, "commits": b.Commits}
+		}
 		if u.Gate != "" {
 			e["gate"] = u.Gate
 		}

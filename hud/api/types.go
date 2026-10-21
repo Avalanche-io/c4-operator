@@ -549,6 +549,10 @@ type Job struct {
 	// Asks are the latest questions the job's units asked one another,
 	// and their answers.
 	Asks []Ask `json:"asks,omitempty"`
+	// Branches are the git branches the job's blocks worked on, by unit:
+	// their commits are the units' output, in the repository of the
+	// machine that ran them.
+	Branches []UnitBranch `json:"branches,omitempty"`
 }
 
 // Ask is a question one unit asked another (or a wait unit asked the unit
@@ -563,6 +567,19 @@ type Ask struct {
 	Cannot   string     `json:"cannot,omitempty"`
 	Answered *time.Time `json:"answered,omitempty"`
 	Wait     bool       `json:"wait,omitempty"`
+}
+
+// UnitBranch is a unit's git branch (status.unitBranches): the repository
+// on the machine that ran it, the branch, the commit it started from and
+// its last, and how many commits it made.
+type UnitBranch struct {
+	Unit    int    `json:"unit"`
+	Name    string `json:"name,omitempty"`
+	Repo    string `json:"repo"`
+	Branch  string `json:"branch"`
+	Base    string `json:"base"`
+	Head    string `json:"head,omitempty"`
+	Commits int    `json:"commits"`
 }
 
 // Needs is what a unit stopped for (NeedsInformation): an error in the

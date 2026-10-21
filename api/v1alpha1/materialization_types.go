@@ -20,6 +20,10 @@ const (
 
 	// AnnotationOutputTree is written at capture: the output view's ID.
 	AnnotationOutputTree = "c4.avalanche.io/output-tree"
+	// AnnotationOutputBranch is a block's git branch as the host runner
+	// records it at the end of each attempt: JSON {repo, dir, branch,
+	// base, head, commits} (WorkUnitBranch).
+	AnnotationOutputBranch = "c4.avalanche.io/output-branch"
 	// AnnotationOutputChangeset is the ID of the changeset c4m (parent
 	// view ID on the first line, then the changed entries).
 	AnnotationOutputChangeset = "c4.avalanche.io/output-changeset"
