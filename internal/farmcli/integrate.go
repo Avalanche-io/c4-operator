@@ -480,12 +480,16 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 	return append(on, apps...), nil
 }
 
+// declined is the record of a no to an offer for f: by version and c4
+// release, so a newer release offers it once more.
+func declined(f dcc.Found) string { return f.Name + "@" + f.Version + "#" + dcc.Release() }
+
 // updates are an application's versions C4 is not fully in, whose offer
-// was never turned down.
+// this release of c4 never had turned down.
 func updates(cfg *Config, d Detected) []dcc.Found {
 	var todo []dcc.Found
 	for _, f := range d.Versions {
-		if yes, ok := cfg.Integrations[f.Name+"@"+f.Version]; f.Status == dcc.StatusInstalled || (ok && !yes) {
+		if _, no := cfg.Integrations[declined(f)]; f.Status == dcc.StatusInstalled || no {
 			continue
 		}
 		todo = append(todo, f)
@@ -505,7 +509,7 @@ func titles(fs []dcc.Found) []string {
 // versions C4 is not fully in: each one an earlier c4 release's files are
 // in, an install was interrupted in, or C4 was never added to. A yes
 // covers those versions (NAME@VERSION); a no is recorded for each, so up
-// doesn't ask again; no answer records nothing.
+// doesn't ask again until a newer c4 release; no answer records nothing.
 func offerUpdates(cfg *Config, d Detected, o Out) []string {
 	todo := updates(cfg, d)
 	if len(todo) == 0 {
@@ -544,7 +548,12 @@ func offerUpdates(cfg *Config, d Detected, o Out) []string {
 		if a == "y" || a == "yes" {
 			out = append(out, f.Name+"@"+f.Version)
 		} else {
-			cfg.Integrations[f.Name+"@"+f.Version] = false
+			for k := range cfg.Integrations { // an earlier release's no
+				if strings.HasPrefix(k, f.Name+"@"+f.Version+"#") {
+					delete(cfg.Integrations, k)
+				}
+			}
+			cfg.Integrations[declined(f)] = false
 		}
 	}
 	return out

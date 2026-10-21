@@ -143,12 +143,24 @@ func TestChooseOffersUpdates(t *testing.T) {
 
 	// enter is no, kept per version: not asked again
 	out.Reset()
-	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("\n")}); len(on) != 0 || cfg.Integrations["blender@4.5"] || !cfg.Integrations["blender"] {
+	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("\n")}); len(on) != 0 || len(cfg.Integrations) != 4 || !cfg.Integrations["blender"] {
 		t.Fatalf("enter: %v %v", on, cfg.Integrations)
 	}
 	out.Reset()
 	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("y\n")}); len(on) != 0 || out.Len() != 0 {
 		t.Errorf("asked again after a no: %v\n%s", on, out.String())
+	}
+	// a no from an earlier c4 release: asked once more, and its record replaced
+	for _, v := range []string{"4.5", "5.0", "5.1"} {
+		delete(cfg.Integrations, "blender@"+v+"#"+dcc.Release())
+		cfg.Integrations["blender@"+v+"#0123456789abcdef"] = false
+	}
+	out.Reset()
+	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("n\n")}); len(on) != 0 || out.Len() == 0 || len(cfg.Integrations) != 4 || cfg.Integrations["blender@4.5#0123456789abcdef"] {
+		t.Errorf("a newer release: %v %v\n%s", on, cfg.Integrations, out.String())
+	}
+	if _, ok := cfg.Integrations["blender@4.5#"+dcc.Release()]; !ok {
+		t.Errorf("this release's no not recorded: %v", cfg.Integrations)
 	}
 
 	// the input ended: nothing recorded, asked next time
