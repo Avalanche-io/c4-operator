@@ -16,6 +16,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf16"
 
 	"github.com/Avalanche-io/c4-operator/work/estimate"
@@ -175,7 +176,7 @@ func scan(out []byte, tokens []string) []string {
 		}
 		lt := strings.ToLower(tok)
 		for i := 0; i+4 <= len(lt); i++ {
-			if sub := lt[i : i+4]; strings.Contains(lower, sub) && !commonWord(sub) {
+			if sub := lt[i : i+4]; strings.Contains(lower, sub) && !commonWord(sub) && hasLetter(sub) {
 				found = append(found, tok+" through "+strconv.Quote(sub))
 				break
 			}
@@ -183,6 +184,13 @@ func scan(out []byte, tokens []string) []string {
 	}
 	return found
 }
+
+// hasLetter says a run has a letter. A run of digits alone ("0420" of
+// sh0420) is not looked for: the record's numbers are counts, scaled money
+// and relative times, which can hold any four digits, and the test checks
+// them semantically instead (no fixture date, Unix time or unscaled
+// amount).
+func hasLetter(s string) bool { return strings.ContainsFunc(s, unicode.IsLetter) }
 
 // commonWord is a four-character run of a token that is also part of a
 // record's own field or enum names (written by this package, not taken
@@ -382,7 +390,7 @@ func TestCanaryRunsAreChecked(t *testing.T) {
 		}
 		checked := 0
 		for i := 0; i+4 <= len(lt); i++ {
-			if !recordWords[lt[i:i+4]] {
+			if !recordWords[lt[i:i+4]] && hasLetter(lt[i:i+4]) {
 				checked++
 			}
 		}
