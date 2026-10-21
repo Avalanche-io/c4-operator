@@ -45,6 +45,8 @@ func TestValue(t *testing.T) {
 	values := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{
 		Policy:     &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "2", Answers: "lead", RecheckSeconds: "120", PressAfter: "soon"}},
 		Escalation: &c4v1.ProjectEscalation{PressAfter: &metav1.Duration{Duration: time.Hour}}}}}
+	loose := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{
+		Policy: &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "50", RecheckMax: "99", RecheckSeconds: "5000", PressMargin: "1m", PressAfter: "6h"}}}}}
 	cases = append(cases, []struct {
 		name         string
 		job          *c4v1.WorkJob
@@ -60,6 +62,11 @@ func TestValue(t *testing.T) {
 		{"job loosens seconds", job(map[string]string{RecheckSeconds: "600"}), values, RecheckSeconds, "120", "project"},
 		{"farm seconds", nil, nil, RecheckSeconds, "300", "farm"},
 		{"a malformed value falls back to escalation", job(nil), values, PressAfter, "1h", "project"},
+		{"asks past the farm's limit", job(nil), loose, AsksMax, "3", "farm"},
+		{"rechecks past the farm's limit", job(nil), loose, RecheckMax, "5", "farm"},
+		{"recheck seconds past the farm's limit", job(nil), loose, RecheckSeconds, "300", "farm"},
+		{"a margin under the farm's limit", job(nil), loose, PressMargin, "15m", "farm"},
+		{"within the limit, looser than the farm", job(nil), loose, PressAfter, "6h", "project"},
 	}...)
 	for _, c := range cases {
 		v, from := Value(c.job, c.project, -1, c.key)
@@ -77,5 +84,19 @@ func TestValue(t *testing.T) {
 	}
 	if w := Work(u); len(w) != 1 || w[0].From.Scope != "project" || w[0].Value != "1h" {
 		t.Fatalf("work %+v", w)
+	}
+}
+
+// The farm sets its limits on project values.
+func TestSetLimits(t *testing.T) {
+	defer SetLimits(map[string]string{AsksMax: "10"})
+	proj := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{
+		Policy: &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "8"}}}}}
+	if v, _ := Value(nil, proj, -1, AsksMax); v != "8" {
+		t.Fatalf("within the default limit: %s", v)
+	}
+	SetLimits(map[string]string{AsksMax: "5", RecheckMax: "many"})
+	if v, _ := Value(nil, proj, -1, AsksMax); v != "3" || Limit(RecheckMax) != "10" {
+		t.Fatalf("past a farm's limit of 5: %s; a malformed limit: %s", v, Limit(RecheckMax))
 	}
 }

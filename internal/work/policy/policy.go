@@ -91,6 +91,39 @@ var defaults = map[string]string{
 	Answers:            "",
 }
 
+// limits are the farm's limits on a project's values, in each key's
+// looser direction: a project may set a value up to its limit (a pressAfter
+// of at most 24h, a recheck.max of at most 10), never past it; a value past
+// it is ignored. A job only tightens, so needs none. SetLimits changes them
+// for the farm.
+var limits = map[string]string{
+	PressAfter:         "24h",
+	PressMargin:        "5m",
+	RecheckMinInterval: "2m",
+	RecheckMax:         "10",
+	RecheckSeconds:     "900",
+	AsksMax:            "10",
+}
+
+// SetLimits sets the farm's limits on project values, by key; a malformed
+// limit is ignored.
+func SetLimits(l map[string]string) {
+	for k, v := range l {
+		if _, ok := limits[k]; ok && valid(k, v) {
+			limits[k] = v
+		}
+	}
+}
+
+// Limit is the farm's limit on key's project value, or "" for none.
+func Limit(key string) string { return limits[key] }
+
+// withinLimit reports whether a project may set key to s.
+func withinLimit(key, s string) bool {
+	l, t := limits[key], tighter[key]
+	return l == "" || t == nil || t(s, l)
+}
+
 // jobParam is where a job sets each key; the older names stay the
 // params jobs already use.
 var jobParam = map[string]string{
@@ -105,11 +138,11 @@ var jobParam = map[string]string{
 
 // Value is key's value for unit of job (unit -1 for the job), and where
 // it came from: the farm's default, then the job's Project (its
-// spec.work.policy.values, or spec.work.escalation), then the job, which
-// may only tighten what is above it.
+// spec.work.policy.values, or spec.work.escalation) within the farm's
+// limit, then the job, which may only tighten what is above it.
 func Value(job *c4v1.WorkJob, project *c4v1.Project, unit int, key string) (string, From) {
 	v, from := defaults[key], From{Scope: "farm"}
-	if p := projectValue(project, key); p != "" && valid(key, p) {
+	if p := projectValue(project, key); p != "" && valid(key, p) && withinLimit(key, p) {
 		v, from = p, From{Scope: "project", Ref: project.Name}
 	}
 	if job != nil {

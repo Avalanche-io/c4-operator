@@ -1010,7 +1010,7 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 		idx = n
 	}
 	need, ok := rec.job.Status.Needs[strconv.Itoa(idx)]
-	if idx < 0 || !ok || !stoppedOnQuestion(rec, idx) {
+	if idx < 0 || !ok || !stoppedOnQuestion(rec, idx, need) {
 		fail(w, http.StatusConflict, "unit %q is not waiting for information", ref)
 		return
 	}
@@ -1111,7 +1111,7 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 		idx = n
 	}
 	need, ok := rec.job.Status.Needs[strconv.Itoa(idx)]
-	if idx < 0 || !ok || need.Supplied != "" || need.Withdrawn != nil || !stoppedOnQuestion(rec, idx) {
+	if idx < 0 || !ok || !stoppedOnQuestion(rec, idx, need) {
 		fail(w, http.StatusConflict, "unit %q has no open question", ref)
 		return
 	}
@@ -1176,9 +1176,18 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-// stoppedOnQuestion reports whether unit idx is stopped on its question:
-// unit state needs (failed, from a queue before held questions).
-func stoppedOnQuestion(rec *jobRec, idx int) bool {
-	st := unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx]
-	return st == "needs" || st == "failed"
+// stoppedOnQuestion reports whether unit idx is stopped on its question,
+// need, nobody has supplied or withdrawn: unit state needs, or failed
+// with a question that has no state (from a queue before held questions).
+func stoppedOnQuestion(rec *jobRec, idx int, need c4v1.WorkNeeds) bool {
+	if need.Supplied != "" || need.Withdrawn != nil || need.State == "supplied" || need.State == "withdrawn" {
+		return false
+	}
+	switch unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx] {
+	case "needs":
+		return true
+	case "failed":
+		return need.State == ""
+	}
+	return false
 }

@@ -388,17 +388,37 @@ func TestRecheckTriggers(t *testing.T) {
 	if why := fire(); why != "" {
 		t.Fatalf("nothing changed and it fired: %s", why)
 	}
-	m.succeeded[0], m.unitOut[0] = true, "v1"
+	at := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	end := func(u int, out string) {
+		at = at.Add(time.Minute)
+		m.succeeded[u], m.unitOut[u], m.ended[u] = true, out, at
+	}
+	end(0, "v1")
 	if why := fire(); why != "root finished" {
 		t.Fatalf("a unit it waits on: %q", why)
 	}
-	m.succeeded[2], m.unitOut[2] = true, "g1"
+	end(2, "g1")
 	if why := fire(); why != "grade finished" {
 		t.Fatalf("a unit it is about: %q", why)
 	}
-	m.unitOut[2] = "g2"
+	end(2, "g2")
 	if why := fire(); why != "grade's output changed" {
 		t.Fatalf("its output: %q", why)
+	}
+	end(2, "g2")
+	if why := fire(); why != "grade ran again" {
+		t.Fatalf("an identical re-run: %q", why)
+	}
+	// After a restart the queue knows grade succeeded, not when ("ok" in
+	// what status kept): nothing fires until it runs again, and then it does.
+	n.base.outs[2] = "ok"
+	delete(m.ended, 2)
+	if why := fire(); why != "" {
+		t.Fatalf("after a restart: %q", why)
+	}
+	end(2, "g2")
+	if why := fire(); why != "grade ran again" {
+		t.Fatalf("a re-run after a restart: %q", why)
 	}
 	plan.Units = append(plan.Units, class.Unit{Name: "more"})
 	if why := fire(); why != "the job's unit table grew from 4 to 5 units" {
@@ -582,5 +602,26 @@ func TestRecheckNeedsAnExplicitWithdraw(t *testing.T) {
 	tick(t, q)
 	if n := get(t, ns, "explicit").Status.Needs["1"]; n.State != needsWithdrawn || n.Withdrawn.Why != "dub settled it: 25 fps" {
 		t.Fatalf("a host runner's withdrawal: %+v", n)
+	}
+}
+
+// A unit whose retries are spent fails the job even beside an open
+// question; the question stays listed, and its unit in state needs.
+func TestNeedsBesideARealFailure(t *testing.T) {
+	ns, q, now := graphJob(t, "both", func(time.Time) string {
+		return `{"name": "cut"}, {"name": "grade"}, {"name": "deliver", "after": ["cut", "grade"]}`
+	}, 72*time.Hour)
+	failNeeding(t, podOfUnit(t, ns, "both", 1), *now, "the delivery frame rate", false)
+	tick(t, q)
+	for k := 0; k < 4 && hasPod(t, ns, "both", 2); k++ {
+		*now = now.Add(time.Minute)
+		finish(t, podOfUnit(t, ns, "both", 2), corev1.PodFailed, *now, time.Minute, nil)
+		tick(t, q)
+		tick(t, q)
+	}
+	got := get(t, ns, "both")
+	if got.Status.Phase != "Failed" || !containsInt(states(t, got, "failed"), 2) || !containsInt(states(t, got, "needs"), 1) ||
+		got.Status.Needs["1"].State != needsRaised {
+		t.Fatalf("phase %s, states %v, needs %+v", got.Status.Phase, got.Status.UnitStates, got.Status.Needs)
 	}
 }

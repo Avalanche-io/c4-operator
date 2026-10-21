@@ -378,6 +378,10 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	aj.Estimate.Risk = shownRisk(m.at, st, aj.Estimate.Risk)
 	if st.Phase == "Held" && aj.Estimate.Message == "" {
 		aj.Estimate.Message = j.Namespace + "/" + j.Name + " is held: no new units are released."
+		if q := openQuestion(st); q != "" {
+			// held on a unit's question, not by a person (Job.Needs)
+			aj.Estimate.Message = j.Namespace + "/" + j.Name + " is waiting on a question: " + q
+		}
 	}
 	for _, cr := range m.crs {
 		if cr.Spec.Approved || !strings.Contains(cr.Name, "-approve-") {
@@ -743,4 +747,22 @@ func needsOf(n c4v1.WorkNeeds) api.Needs {
 		an.Withdrawn = &api.NeedsWithdrawn{By: w.By, Why: w.Why, At: w.At.Time.UTC(), Record: w.Record}
 	}
 	return an
+}
+
+// openQuestion is the first open question of a job held on one: the
+// lowest unit's, pressing ones first.
+func openQuestion(st *c4v1.WorkJobStatus) string {
+	best, unit := "", -1
+	pressing := false
+	for k, n := range st.Needs {
+		i, err := strconv.Atoi(k)
+		if err != nil || n.Supplied != "" || n.Withdrawn != nil || n.State == "supplied" || n.State == "withdrawn" {
+			continue
+		}
+		p := n.State == "pressing"
+		if best == "" || p && !pressing || p == pressing && i < unit {
+			best, unit, pressing = n.Text, i, p
+		}
+	}
+	return best
 }

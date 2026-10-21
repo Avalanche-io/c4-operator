@@ -1860,9 +1860,10 @@ and a sweep planner that spawns trials are all generators.
       with the text in `$C4_SUPPLIED` and what it asked in `$C4_NEEDED`.
     - **It holds the job, never fails it.** The unit is in state `needs`
       (`units.needs`), not `failed`. Once nothing else can run, the job is
-      `Held` with NeedsPerson `NeedsInformation`, so the jobs after it
-      wait rather than give up, and it is not sealed. It fails only if the
-      unit then fails for real.
+      `Held` with NeedsPerson `NeedsInformation` ("waiting on a
+      question"), so the jobs after it wait rather than give up, and it
+      is not sealed. A unit whose retries are spent still fails the job,
+      its open questions listed beside the failure.
     - **It is an error that can heal,** graded by state
       (`status.needs[i].state`): `raised` when the unit stops, `pressing`
       once urgent, then `supplied` or `withdrawn`, both final. Each step
@@ -1911,7 +1912,10 @@ and a sweep planner that spawns trials are all generators.
     - **The values are policy** (`internal/work/policy`), read in one
       place: the farm's default, then the Project's
       `spec.work.policy.values` (any key, `asks.max` and `answers`
-      included) or `spec.work.escalation`, then the job's params, which
+      included) or `spec.work.escalation`, each only within the farm's
+      limit (`policy.SetLimits`; by default at most a pressAfter of 24h,
+      10 asks, 10 re-checks of 900 seconds, and at least a pressMargin of
+      5m and a minInterval of 2m), then the job's params, which
       may only tighten them (a shorter pressAfter; a longer pressMargin or
       minInterval; a lower recheck.max, recheck.seconds or asks.max). A decision a value
       made names it, its value and where it came from (`policy: [{key,

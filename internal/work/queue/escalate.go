@@ -266,10 +266,13 @@ func (q *Queue) triggered(v *view, i int, n *needsRec, phases map[string]string)
 		switch {
 		case !m.succeeded[u]:
 			cur.outs[u] = ""
-		case m.unitOut[u] != "":
-			cur.outs[u] = "ok:" + m.unitOut[u]
+		case !m.ended[u].IsZero():
+			// its run as the queue saw it end: an identical re-run is a
+			// new end
+			cur.outs[u] = "ok:" + m.unitOut[u] + "@" + m.ended[u].UTC().Format(time.RFC3339Nano)
 		case n.base != nil && strings.HasPrefix(n.base.outs[u], "ok"):
-			// succeeded, its output not known since a restart: as seen
+			// succeeded before a restart (its end is in memory only): as
+			// seen
 			cur.outs[u] = n.base.outs[u]
 		default:
 			cur.outs[u] = "ok"
@@ -288,12 +291,17 @@ func (q *Queue) triggered(v *view, i int, n *needsRec, phases map[string]string)
 	}
 	for _, u := range slices.Sorted(maps.Keys(cur.outs)) {
 		o, had := old.outs[u]
-		if c := cur.outs[u]; had && c != o && strings.HasPrefix(c, "ok") && o != "ok" {
-			if o == "" {
-				return nameOf(m, u) + " finished"
-			}
-			return nameOf(m, u) + "'s output changed"
+		c := cur.outs[u]
+		if !had || c == o || !strings.HasPrefix(c, "ok") {
+			continue
 		}
+		switch {
+		case o == "":
+			return nameOf(m, u) + " finished"
+		case o == "ok" || outView(c) == outView(o):
+			return nameOf(m, u) + " ran again"
+		}
+		return nameOf(m, u) + "'s output changed"
 	}
 	for k, ph := range cur.phases {
 		if o, had := old.phases[k]; had && ph != o && (ph == "Succeeded" || ph == "Failed") {
@@ -312,6 +320,13 @@ func (q *Queue) triggered(v *view, i int, n *needsRec, phases map[string]string)
 		}
 	}
 	return ""
+}
+
+// outView is the output view in a trigger's record of a unit's run,
+// ok:<view>@<end>.
+func outView(s string) string {
+	v, _, _ := strings.Cut(strings.TrimPrefix(s, "ok:"), "@")
+	return v
 }
 
 // serveRecheck releases unit i for a re-check of its question when a

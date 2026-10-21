@@ -93,8 +93,9 @@ func TestWithdrawNeeds(t *testing.T) {
 	at := metav1.NewTime(time.Date(2026, 10, 23, 11, 0, 0, 0, time.UTC))
 	by := metav1.NewTime(at.Add(5 * time.Hour))
 	pressed := metav1.NewTime(at.Add(2 * time.Hour))
-	rec.job.Status.UnitStates = map[string]string{"succeeded": "0-5,8-9", "failed": "6-7"}
-	rec.job.Status.Units = c4v1.UnitCounts{Total: 10, Succeeded: 8, Failed: 2}
+	rec.job.Status.Phase = "Held"
+	rec.job.Status.UnitStates = map[string]string{"succeeded": "0-5,8-9", "needs": "6-7"}
+	rec.job.Status.Units = c4v1.UnitCounts{Total: 10, Succeeded: 8, Needs: 2}
 	rec.job.Status.Needs = map[string]c4v1.WorkNeeds{
 		"7": {Text: "the delivery frame rate", At: at, State: "pressing", AnswerBy: &by, PressingAt: &pressed, PressingWhy: "unanswered for 2h",
 			About: []string{"unit:grade"}, Rechecks: &c4v1.WorkRechecks{Done: 5, Max: 5, LastWhy: "grade finished"}},
@@ -125,6 +126,10 @@ func TestWithdrawNeeds(t *testing.T) {
 	}
 	if w := job.Needs[0].Withdrawn; w == nil || w.By != "lead" || job.Needs[0].State != "withdrawn" {
 		t.Fatalf("withdrawn %+v", job.Needs[0])
+	}
+	// held on a question, not by a person
+	if m := job.Estimate.Message; m != "show-a/sh040-light-v007 is waiting on a question: the delivery frame rate" {
+		t.Fatalf("message %q", m)
 	}
 	for _, it := range snap.Incidents {
 		if strings.HasPrefix(it.ID, "needsinformation:") && (it.Severity != "urgent" || it.Count != 1 || !strings.Contains(it.Detail, "pressing: unanswered for 2h") ||
@@ -159,6 +164,17 @@ func TestWithdrawNeeds(t *testing.T) {
 		if code, out := post(c.unit, c.body); code != c.want {
 			t.Errorf("%s %s: %d %s, want %d", c.unit, c.body, code, out, c.want)
 		}
+	}
+	// A closed question takes no supply either: refused before anything
+	// is signed or written.
+	sw := httptest.NewRecorder()
+	s.Handler().ServeHTTP(sw, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/show-a/sh040-light-v007/supply?as=wrangler", strings.NewReader(`{"unit": 6, "text": "H.264"}`)))
+	var before c4v1.WorkJob
+	if err := s.Client.Get(ctx, client.ObjectKey{Namespace: "show-a", Name: "sh040-light-v007"}, &before); err != nil {
+		t.Fatal(err)
+	}
+	if sw.Code != http.StatusConflict || before.Annotations[c4v1.AnnotationSupply] != "" || before.Annotations[c4v1.AnnotationControlRecords] != "" {
+		t.Fatalf("supply on a withdrawn question: %d %s, annotations %v", sw.Code, sw.Body, before.Annotations)
 	}
 	if code, out := post("7", `{"why": "the client chose 24 in the kickoff"}`); code != http.StatusOK {
 		t.Fatalf("withdraw: %d %s", code, out)

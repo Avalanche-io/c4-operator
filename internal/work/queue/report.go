@@ -329,14 +329,15 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		st.Phase = "Failed"
 	case finished == n:
 		st.Phase = "Succeeded"
-	case finished+len(fail)+len(flag)+len(asking)+len(v.stuck) == n && active == 0 && len(asking) > 0:
+	case finished+len(fail)+len(flag)+len(asking)+len(v.stuck) == n && active == 0 && len(fail)+len(flag) == 0:
 		// Nothing runs until a question is answered or withdrawn: held,
 		// not failed (NeedsPerson NeedsInformation says why), so the jobs
 		// after it wait rather than give up.
 		st.Phase = "Held"
-	case finished+len(fail)+len(flag)+len(v.stuck) == n && active == 0:
+	case finished+len(fail)+len(flag)+len(asking)+len(v.stuck) == n && active == 0:
 		// Units waiting on a failed one count with it: they cannot run
-		// until a person acts.
+		// until a person acts. A unit whose retries are spent fails the
+		// job even beside open questions, which stay listed.
 		st.Phase = "Failed"
 	case v.blocked:
 		st.Phase = "Blocked"
