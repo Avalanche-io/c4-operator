@@ -213,6 +213,14 @@ func Up(ctx context.Context, o UpOptions) error {
 	if err := waitHUD(ctx, o.HUD(), 5*time.Minute); err != nil {
 		return err
 	}
+	// the networks tools declare (needs.network), before any tool's test runs
+	added, err := ensureNetworks(ctx, c)
+	if err != nil {
+		return err
+	}
+	if len(added) > 0 {
+		o.logf("networks  %s, for tools that declare them (c4-networks in c4-system)\n", strings.Join(added, " and "))
+	}
 	if installTracker {
 		if err := upTracker(ctx, c, o); err != nil {
 			return err

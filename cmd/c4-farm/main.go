@@ -648,6 +648,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		if *plan {
 			fmt.Fprintf(stdout, "%s---\n%s", localfarm.KindConfig(o.Options), localfarm.YAML(localfarm.Farm(o.Options)))
+			fmt.Fprintf(stdout, "---\n# networks tools may declare; up adds only those the farm does not define yet\n%s", localfarm.YAML([]map[string]any{localfarm.NetworksObject()}))
 			if *trackerOn {
 				objs, err := localfarm.TrackerObjects(o.Options)
 				if err != nil {
