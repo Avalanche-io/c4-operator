@@ -72,9 +72,20 @@ builds:
   flags: [-trimpath]
   ldflags: ["-s -w"]
 
+# c4-unit again, for the platforms c4-agent runs on, to go in its archive
+- id: c4-unit-host
+  main: ./cmd/c4-unit
+  binary: c4-unit
+  env: [CGO_ENABLED=0]
+  goos: [linux, darwin]
+  goarch: [amd64, arm64]
+  flags: [-trimpath]
+  ldflags: ["-s -w"]
+
 archives:
+# c4-agent's archive carries c4-unit too: a host runner runs its units with it
 - id: c4-agent
-  ids: [c4-agent]
+  ids: [c4-agent, c4-unit-host]
   formats: [tar.gz]
   name_template: "c4-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   files: [LICENSE, NOTICE]
@@ -118,6 +129,10 @@ brews:
   description: Submit work to a C4 farm, watch it and take its output home; c4 farm up makes a farm on this machine
   license: Apache-2.0
   skip_upload: auto
+  # one brew install (c4, which depends on this formula) brings c4 farm,
+  # c4-agent and c4-unit: c4 farm agents reads sessions through c4-agent
+  dependencies:
+  - name: avalanche-io/tap/c4-agent
   install: |
     bin.install "c4-farm"
     (share/"c4-farm/skills").install "skills/c4-farm"
@@ -131,13 +146,14 @@ brews:
     token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
   directory: Formula
   homepage: https://github.com/Avalanche-io/c4-operator
-  description: C4's host runner, for agent work and tool units on a machine outside the cluster
+  description: C4's host runner and unit runner, for agent work and tool units on a machine outside the cluster
   license: Apache-2.0
   skip_upload: auto
   install: |
-    bin.install "c4-agent"
+    bin.install "c4-agent", "c4-unit"
   test: |
     system bin/"c4-agent", "help"
+    assert_match "usage: c4-unit run", shell_output("#{bin}/c4-unit 2>&1", 2)
 
 checksum:
   name_template: checksums.txt
