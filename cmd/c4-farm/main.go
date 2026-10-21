@@ -681,7 +681,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
 		}
 		if slices.Contains(on, farmcli.Claude) {
-			in := farmcli.Integration{Runner: localRunner(o.Owner)}
+			in := farmcli.Integration{Runner: localRunner(o.Owner, stdin, stdout)}
 			in.On(ctx, farmcli.Out{W: stdout})
 		}
 		fmt.Fprintf(stdout, "%s\n", farmcli.IntegrateLine(cfg))
@@ -815,7 +815,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		o := farmcli.Out{W: stdout}
 		in := farmcli.Integration{}
 		if _, f, err := cfg.Resolve(cm.farm); err == nil && f.Local && on {
-			in.Runner = localRunner(localfarm.DefaultOwner())
+			in.Runner = localRunner(localfarm.DefaultOwner(), stdin, stdout)
 		}
 		if on {
 			err = in.On(ctx, o)
@@ -902,7 +902,7 @@ func isTerminal(r io.Reader) bool {
 // enroll, then the agent service (c4 farm agent start), which runs the
 // power reader and the host runner. It never stops up: the farm is a farm
 // without it, and its line says how to finish.
-func localRunner(owner string) func(ctx context.Context, o farmcli.Out) error {
+func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx context.Context, o farmcli.Out) error {
 	return func(ctx context.Context, o farmcli.Out) error {
 		bin, err := exec.LookPath("c4-agent")
 		if err != nil {
@@ -920,8 +920,32 @@ func localRunner(owner string) func(ctx context.Context, o farmcli.Out) error {
 			return fmt.Errorf("%s is enrolled, but its runner did not start: %v (c4 farm agent start tries again)", e.Node, err)
 		}
 		fmt.Fprintf(o.W, "agents    this machine (%s) runs %s's agents, %s pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)\n", e.Node, e.Owner, e.Pool)
+		return signInBlocks(ctx, e, stdin, stdout)
+	}
+}
+
+// signInBlocks signs the person in, once, where the machine's blocks run:
+// their own clean config directory, not the person's ~/.claude. It runs
+// Claude Code's own sign-in there, in the person's terminal, and copies no
+// credential. Without a terminal it says the command instead.
+func signInBlocks(ctx context.Context, e localfarm.Enrolled, stdin io.Reader, stdout io.Writer) error {
+	if e.BlocksEnv == "" || e.BlocksSignedIn {
 		return nil
 	}
+	step := "CLAUDE_CONFIG_DIR=" + e.BlocksEnv + " claude"
+	claude, err := exec.LookPath("claude")
+	if err != nil || !isTerminal(stdin) {
+		fmt.Fprintf(stdout, "agents    one step left: sign in where the agents' blocks run, in your terminal: %s (sign in, then /exit)\n", step)
+		return nil
+	}
+	fmt.Fprintf(stdout, "agents    sign in where the agents' blocks run (%s, apart from your own Claude Code): sign in, then /exit\n", e.BlocksEnv)
+	cmd := exec.CommandContext(ctx, claude)
+	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+e.BlocksEnv)
+	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stdout
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("the blocks' sign-in did not finish (%v); run %s", err, step)
+	}
+	return nil
 }
 
 // openURL opens a link in the default browser.

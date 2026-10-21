@@ -21,6 +21,10 @@ type Enrolled struct {
 	Pool       string   `json:"pool"`
 	Kubeconfig string   `json:"kubeconfig"`
 	Made       []string `json:"made"`
+	// BlocksEnv is the clean config directory the machine's blocks run
+	// in, and BlocksSignedIn whether the person has signed in there.
+	BlocksEnv      string `json:"blocksEnv,omitempty"`
+	BlocksSignedIn bool   `json:"blocksSignedIn"`
 }
 
 // EnrollMachine makes this machine a host runner of the local farm for
