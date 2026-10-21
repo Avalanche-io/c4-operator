@@ -72,6 +72,8 @@ Trackers
   revoke NS/GRANT          take a grant back
 
 Agents
+  agent start              keep this machine's power reader and host runner running, as a service (agent stop removes it)
+  agent run                what the service runs: the power reader and c4-agent runner, restarted if it stops
   agent power              offer this machine's agent slots by its battery: stop below 25%, resume at 90% (--once to read it now)
   agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all, --open for the HUD)
   agents add NAME          make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first)
@@ -745,16 +747,25 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		resumeAt := fs.Int("resume-at", 90, "resume stopped work once the battery is back at this percent")
 		every := fs.Duration("every", time.Minute, "how often to read the battery")
 		once := fs.Bool("once", false, "read the battery, write the slots and stop")
+		agentBin := fs.String("agent-bin", "", "with run or start: c4-agent (default c4-agent on PATH)")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
 		}
-		if len(pos) != 1 || pos[0] != "power" {
-			return errors.New("usage: c4 farm agent power [--slots N] [--stop-below 25] [--resume-at 90] [--slots-file F] [--once]")
-		}
 		o := farmcli.Out{W: stdout, Clock: farmcli.Clock{UTC: cm.utc}}
-		return farmcli.AgentPower(ctx, o, farmcli.PowerArgs{SlotsFile: *slotsFile, Every: *every, Once: *once,
-			Policy: power.Policy{Slots: *slots, StopBelow: *stopBelow, ResumeAt: *resumeAt}})
+		svc := &farmcli.AgentService{AgentBin: *agentBin, Slots: *slots}
+		switch {
+		case len(pos) == 1 && pos[0] == "power":
+			return farmcli.AgentPower(ctx, o, farmcli.PowerArgs{SlotsFile: *slotsFile, Every: *every, Once: *once,
+				Policy: power.Policy{Slots: *slots, StopBelow: *stopBelow, ResumeAt: *resumeAt}})
+		case len(pos) == 1 && pos[0] == "run":
+			return farmcli.AgentRun(ctx, o, farmcli.AgentRunArgs{AgentBin: *agentBin, Slots: *slots, SlotsFile: *slotsFile})
+		case len(pos) == 1 && pos[0] == "start":
+			return svc.Start(ctx, o)
+		case len(pos) == 1 && pos[0] == "stop":
+			return svc.Stop(ctx, o)
+		}
+		return errors.New("usage: c4 farm agent start | stop | run | power [--slots N] [--stop-below 25] [--resume-at 90] [--slots-file F] [--once]")
 
 	case "agents":
 		session := fs.String("session", "", "with add: the Claude Code session (default the newest whose transcript names the agent)")
