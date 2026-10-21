@@ -78,7 +78,7 @@ documentation site. The operator embeds and serves the HUD itself.
 With Docker:
 
 ```sh
-brew install avalanche-io/tap/c4
+brew install mrjoshuak/tap/c4
 c4 farm up
 ```
 

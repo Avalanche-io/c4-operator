@@ -37,13 +37,13 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
 
 ### On GitHub
 
-5. **Joshua: create the tap repository** `github.com/Avalanche-io/homebrew-tap`:
-   public, with a README so it has a `main` branch, and nothing else. The
+5. The tap is `github.com/mrjoshuak/homebrew-tap` (`mrjoshuak/tap`), which
+   exists already, until Avalanche-io is part of the service offering. The
    C4 lead runs the Homebrew release from its own machine: it writes
    `Formula/c4-farm.rb` and `Formula/c4-agent.rb` from the release's
    checksums (c4toolkit `scripts/farm-formulas.sh`) and the suite's
    `Formula/c4.rb`, which depends on both, so `brew install
-   avalanche-io/tap/c4` brings c4, `c4 farm`, c4-agent and c4-unit. The
+   mrjoshuak/tap/c4` brings c4, `c4 farm`, c4-agent and c4-unit. The
    release pushes nothing to the tap and needs no token for it; GoReleaser
    generates the two formulas into `dist/homebrew` only, as a reference.
 6. Done already: `github.com/Avalanche-io/c4-operator` is public, with
@@ -80,9 +80,9 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
     then the suite's `c4.rb`; `brew install` works from then on (the
     repository is public already).
 13. Smoke test from a clean machine with the published images: `brew
-    install avalanche-io/tap/c4-farm`, then `c4-farm` (help, exit 0),
+    install mrjoshuak/tap/c4-farm`, then `c4-farm` (help, exit 0),
     `c4-agent help` and `c4-unit` (its usage, exit 2); once the C4 suite
-    release has written `c4.rb`, `brew install avalanche-io/tap/c4` and
+    release has written `c4.rb`, `brew install mrjoshuak/tap/c4` and
     `c4 farm agents`; the quickstart; and `kubectl apply -f
     https://github.com/Avalanche-io/c4-operator/releases/download/v0.1.0/install.yaml`.
 14. **Joshua, optional:** the repository description and topics (kubernetes,

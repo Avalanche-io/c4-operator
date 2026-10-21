@@ -58,7 +58,7 @@ func (a *AgentsArgs) agentBin() (string, error) {
 	}
 	p, err := exec.LookPath("c4-agent")
 	if err != nil {
-		return "", errors.New("c4-agent is not on PATH; brew install avalanche-io/tap/c4 installs it beside c4 farm")
+		return "", errors.New("c4-agent is not on PATH; brew install mrjoshuak/tap/c4 installs it beside c4 farm")
 	}
 	return filepath.Abs(p)
 }
