@@ -101,3 +101,15 @@ func TestSlice1(t *testing.T) {
 		t.Error("slice 1 runs none of the passing submissions")
 	}
 }
+
+// TestOneErrorPerSlip: a STRING drawn with a control no parameter has gives
+// one error, with the STRING's controls as its fix.
+func TestOneErrorPerSlip(t *testing.T) {
+	_, errs := ParseTool([]byte("c4: tool/1\nname: a\nkind: once\nruns: {image: c4/runtime-base, command: [\"true\"]}\nparams:\n- {name: task, type: STRING, userInterface: {control: MULTILINE}}\n"))
+	if len(errs) != 1 {
+		t.Fatalf("want one error, got %+v", errs)
+	}
+	if want := "a STRING is drawn with LINE_EDIT or MULTILINE_EDIT or DROPDOWN_LIST or CHECK_BOX"; errs[0].Fix != want {
+		t.Errorf("fix %q, want %q", errs[0].Fix, want)
+	}
+}

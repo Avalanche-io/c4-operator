@@ -190,13 +190,23 @@ func parse(b []byte, format string, into any) []Error {
 	return nil
 }
 
+// dedupe keeps one error per path and message. When two rules say the same
+// thing with different fixes (a control every parameter may have, and the
+// controls its type may have), the narrower fix, the shorter, is kept.
 func dedupe(errs []Error) []Error {
+	type key struct{ path, message string }
 	var out []Error
-	seen := map[Error]bool{}
+	at := map[key]int{}
 	for _, e := range errs {
-		if !seen[e] {
-			seen[e] = true
+		k := key{e.Path, e.Message}
+		i, ok := at[k]
+		if !ok {
+			at[k] = len(out)
 			out = append(out, e)
+			continue
+		}
+		if len(e.Fix) < len(out[i].Fix) {
+			out[i].Fix = e.Fix
 		}
 	}
 	return out
