@@ -92,5 +92,7 @@ def test_maya_and_zbrush_tokens(tmp_path):
     write(str(tmp_path / "tex/skin_notes.txt"))
     found, _ = seq.expand(str(tmp_path / "tex/skin_u<U>_v<V>.exr"))
     assert len(found) == 3
-    write(str(tmp_path / "tex/arnold.1001.tx"))
-    assert len(seq.expand(str(tmp_path / "tex/arnold.<tile>.tx"))[0]) == 1
+    write(str(tmp_path / "tex/bark_u1_v1.tx"))
+    write(str(tmp_path / "tex/bark_u2_v1.tx"))
+    write(str(tmp_path / "tex/bark.1001.tx"))
+    assert len(seq.expand(str(tmp_path / "tex/bark<tile>.tx"))[0]) == 2, "Arnold's <tile> is _u1_v1, not 1001"

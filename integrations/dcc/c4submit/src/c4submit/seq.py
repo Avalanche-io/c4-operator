@@ -1,7 +1,7 @@
 """File paths that stand for sequences and tiles, in the spellings DCCs
 write them: frames as ``####``, ``%04d``, ``$F4``, ``${F4}``, ``<F4>`` or
 Maya's ``<f>``, and texture tiles as ``<UDIM>``, ``<UVTILE>``, Arnold's
-``<tile>``, ``%(UDIM)d``, ``_MAPID_``, or ``<U>`` and ``<V>`` apart (ZBrush's
+``<tile>`` (which writes ``_u1_v1``), ``%(UDIM)d``, ``_MAPID_``, or ``<U>`` and ``<V>`` apart (ZBrush's
 ``_u<U>_v<V>``, Mudbox's ``_u<u>_v<v>``). A front end expands them to the
 files on disk a job reads."""
 
@@ -76,6 +76,8 @@ def _regex(pattern: str) -> "re.Pattern":
             rx += re.escape(p)
         elif kind == "frame":
             rx += r"(?P<f%d>-?\d+)" % len(rx)
+        elif p.group(0) == "<tile>":
+            rx += r"_u\d+_v\d+"          # Arnold's <tile> is Mudbox's _u1_v1
         else:
             rx += r"\d+(?:_\d+)?"
     return re.compile(rx)
