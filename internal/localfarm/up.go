@@ -209,12 +209,9 @@ func publishTools(ctx context.Context, o UpOptions) error {
 	defer os.RemoveAll(tmp)
 	var done, left, unloaded, images []string
 	for _, name := range tools.Names {
-		f, err := tools.Folder(name)
+		// as tools.ReleaseTrees names it
+		dir, err := tools.CopyTo(tmp, name)
 		if err != nil {
-			return err
-		}
-		dir := filepath.Join(tmp, name)
-		if err := os.CopyFS(dir, f); err != nil {
 			return err
 		}
 		var out strings.Builder

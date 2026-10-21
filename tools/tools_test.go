@@ -52,3 +52,19 @@ func TestPrebuiltToolsRead(t *testing.T) {
 		}
 	}
 }
+
+// A development build's tools carry no tool.lock, so none of their trees
+// counts as tested in a release.
+func TestNoReleaseTreesWithoutLocks(t *testing.T) {
+	for _, name := range tools.Names {
+		if f, _ := tools.Folder(name); f != nil {
+			if _, err := fs.Stat(f, "tool.lock"); err == nil {
+				t.Skipf("%s has a tool.lock: a release build", name)
+			}
+		}
+	}
+	trees, err := tools.ReleaseTrees("v0.1.0")
+	if err != nil || trees != nil {
+		t.Errorf("trees %v, err %v", trees, err)
+	}
+}

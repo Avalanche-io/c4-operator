@@ -45,6 +45,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/work/placement"
 	"github.com/Avalanche-io/c4-operator/internal/work/provreq"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
+	"github.com/Avalanche-io/c4-operator/tools"
 	"github.com/Avalanche-io/c4-operator/work/sched"
 	"github.com/Avalanche-io/c4-operator/work/topology"
 )
@@ -274,6 +275,13 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// operator's tier token alone; their metrics need an API token
 		// the c4-metrics-reader role is bound to.
 		TierToken: (&tier.TokenFile{Path: tierToken}).Token, MetricsToken: apiToken(mgr.GetConfig())}
+	if strings.HasPrefix(version, "v") {
+		// the release's own tools, built with their tool.lock: c4 farm
+		// up publishes these trees, tested in this release
+		if srv.ReleaseTrees, err = tools.ReleaseTrees(version); err != nil {
+			return fmt.Errorf("the release's tools: %w", err)
+		}
+	}
 	if q != nil {
 		// Without the work system the HUD has no queue to ask (a nil
 		// *queue.Queue in the interface would not compare equal to nil).
