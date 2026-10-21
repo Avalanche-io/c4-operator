@@ -554,25 +554,23 @@ func (r *runner) writePathMap() (string, error) {
 
 // run starts the tool and reads it until it exits.
 func (r *runner) run(cmd *exec.Cmd, stdout, stderr io.Writer) (int, error) {
-	// Pipes of our own, not cmd's: Wait would close cmd's at the tool's
-	// exit, and a child it left behind holding stdout would hang its own.
+	// One pipe for both of the tool's streams, so the runner reads its
+	// lines in the order it wrote them: a secret it announces on stdout is
+	// masked on stderr from then on, however late the announcement is read.
+	// Two pipes would lose that order. A pipe of our own, not cmd's: Wait
+	// would close cmd's at the tool's exit, and a child it left behind
+	// holding the pipe would hang its own.
 	outR, outW, err := os.Pipe()
 	if err != nil {
 		return setupCode, err
 	}
-	errR, errW, err := os.Pipe()
-	if err != nil {
-		return setupCode, err
-	}
-	cmd.Stdout, cmd.Stderr = outW, errW
+	cmd.Stdout, cmd.Stderr = outW, outW
 	ownGroup(cmd)
 	r.last = r.e.clock()
 	err = cmd.Start()
 	outW.Close()
-	errW.Close()
 	if err != nil {
 		outR.Close()
-		errR.Close()
 		r.writeOutcome(outcome{Result: "failed", Class: "permanent", Reason: "could not start the tool: " + err.Error(), ExitCode: setupCode})
 		return setupCode, err
 	}
@@ -582,12 +580,8 @@ func (r *runner) run(cmd *exec.Cmd, stdout, stderr io.Writer) (int, error) {
 	previewsDone.Add(1)
 	go func() { defer previewsDone.Done(); r.makePreviews() }()
 
-	var reading sync.WaitGroup
-	reading.Add(2)
-	go func() { defer reading.Done(); r.read(outR, stdout, true) }()
-	go func() { defer reading.Done(); r.read(errR, stderr, false) }()
 	readDone := make(chan struct{})
-	go func() { reading.Wait(); close(readDone) }()
+	go func() { defer close(readDone); r.read(outR, stdout) }()
 
 	exited := make(chan struct{})
 	waitErr := make(chan error, 1)
@@ -651,7 +645,6 @@ wait:
 	case <-readDone:
 	case <-time.After(r.e.grace()):
 		outR.Close()
-		errR.Close()
 		<-readDone
 	}
 	close(stopWatch)
@@ -753,15 +746,15 @@ func (r *runner) writeOutcome(o outcome) {
 	}
 }
 
-// read copies one of the tool's streams to the log, a line at a time,
-// masked, and reads each line. The protocol is read on stdout only; the
-// patterns on both.
-func (r *runner) read(src io.Reader, dst io.Writer, protocol bool) {
+// read copies the tool's output (its stdout and stderr, in the order it
+// wrote them) to the log, a line at a time, masked, and reads each line for
+// the protocol and the tool's patterns.
+func (r *runner) read(src io.Reader, dst io.Writer) {
 	br := bufio.NewReaderSize(src, 64<<10)
 	for {
 		line, err := br.ReadString('\n')
 		if line != "" {
-			r.line(strings.TrimRight(line, "\r\n"), dst, protocol)
+			r.line(strings.TrimRight(line, "\r\n"), dst)
 		}
 		if err != nil {
 			return
@@ -769,21 +762,22 @@ func (r *runner) read(src io.Reader, dst io.Writer, protocol bool) {
 	}
 }
 
-func (r *runner) line(l string, dst io.Writer, protocol bool) {
+func (r *runner) line(l string, dst io.Writer) {
+	if r.e.slowRead > 0 {
+		time.Sleep(r.e.slowRead)
+	}
 	r.mu.Lock()
 	r.last = r.e.clock()
-	if protocol {
-		if v, ok := cutProto(l, "openjd_redacted_env"); ok {
-			if _, secret, ok := strings.Cut(v, "="); ok && secret != "" {
-				r.masks = append(r.masks, secret)
-			}
+	if v, ok := cutProto(l, "openjd_redacted_env"); ok {
+		if _, secret, ok := strings.Cut(v, "="); ok && secret != "" {
+			r.masks = append(r.masks, secret)
 		}
 	}
 	shown := r.maskLocked(l)
 	r.mu.Unlock()
 	io.WriteString(dst, shown+"\n")
 
-	if protocol && r.protocol(shown) {
+	if r.protocol(shown) {
 		return
 	}
 	for _, re := range r.ignore {
@@ -847,8 +841,8 @@ func (r *runner) protocol(l string) bool {
 
 // patterns reads a line with the tool's progress and error patterns. The
 // strongest class any line matched is the failure's, and the first line
-// of it the reason. Strongest, not first: stdout and stderr are read
-// apart, so which of two streams' lines came first is not known.
+// of it the reason. Strongest, not first: a tool that buffers stdout but
+// not stderr writes its lines out of the order it meant them.
 func (r *runner) patterns(raw, shown string) {
 	for _, p := range r.progress {
 		m := p.re.FindStringSubmatch(raw)

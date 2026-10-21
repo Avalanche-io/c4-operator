@@ -41,6 +41,7 @@ type toolRun struct {
 	out, errs syncBuffer
 	signals   chan os.Signal
 	minute    time.Duration
+	slow      time.Duration
 }
 
 func newToolRun(t *testing.T, toolYAML string) *toolRun {
@@ -71,6 +72,7 @@ func (r *toolRun) env() env {
 		minuteLen: r.minute,
 		stopGrace: 300 * time.Millisecond,
 		pollEvery: 20 * time.Millisecond,
+		slowRead:  r.slow,
 	}
 }
 
@@ -556,16 +558,15 @@ name: x
 kind: frames
 runs:
   image: c4/runtime-base
-  command: [bash, -c, 'mkdir -p render; for f in 1001 1002 1003 1004 1005 1006 1007 1008; do sleep 0.5; cp "$C4_TOOLS/f.png" render/sm.$f.png; done']
+  command: [bash, -c, 'mkdir -p render; for f in 1001 1002 1003 1004 1005 1006 1007 1008 1009 1010 1011 1012; do cp "$C4_TOOLS/f.png" render/sm.$f.png; sleep 0.2; done']
   workdir: "{{Job.Tree}}"
 previews: "render/*.$F4.png"
 stall: {quietMinutes: 3}
 `)
-	r.vars["C4_FRAME_END"] = "1008"
-	// A 3 s stall window, frames 0.5 s apart and 4 s in all: the run
-	// outlasts the window, so only the frames keep it alive, and a loaded
-	// machine's gaps between frames still fit inside it.
-	r.minute = time.Second
+	// 12 frames a fifth of a second apart (2.4 s or more) outlast the stall
+	// window, 1.5 s, and leave room for a loaded machine between frames
+	r.vars["C4_FRAME_END"] = "1012"
+	r.minute = 500 * time.Millisecond
 	writePNG(t, filepath.Join(r.dir, "f.png"))
 	if c := r.run(); c != 0 {
 		t.Fatalf("exit %d: %+v", c, r.outcome())
@@ -597,5 +598,35 @@ func TestRunNamesTheMissingHostExe(t *testing.T) {
 	}
 	if o := r.outcome(); !strings.Contains(o.Reason, "runs.host.exe has no entry for "+hostOS()) {
 		t.Errorf("outcome %+v", o)
+	}
+}
+
+// A secret is masked whichever of the tool's streams speaks first: here
+// stdout is deep in a backlog when the tool announces the secret there and
+// at once writes it to stderr, so a reader of two pipes would see stderr's
+// line long before stdout's announcement.
+func TestRunMasksAcrossStreams(t *testing.T) {
+	r := newToolRun(t, `
+c4: tool/1
+name: x
+kind: once
+runs:
+  image: c4/runtime-base
+  command: [bash, -c, 'i=0; while [ $i -lt 200 ]; do echo "filler $i"; i=$((i+1)); done; echo "openjd_redacted_env: TOKEN=s3cret"; echo "s3cret on stderr" >&2; echo "s3cret on stdout"']
+`)
+	// the line the tool announces the secret on is read late, behind a
+	// backlog: as a loaded machine reads it
+	r.slow = time.Millisecond
+	if c := r.run(); c != 0 {
+		t.Fatalf("exit %d", c)
+	}
+	log := r.out.String() + r.errs.String()
+	for _, l := range strings.Split(log, "\n") {
+		if strings.Contains(l, "s3cret") {
+			t.Errorf("unmasked: %q", l)
+		}
+	}
+	if !strings.Contains(log, "******** on stderr") || !strings.Contains(log, "******** on stdout") {
+		t.Errorf("the masked lines are missing:\n%s", log)
 	}
 }
