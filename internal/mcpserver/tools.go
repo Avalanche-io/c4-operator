@@ -38,14 +38,47 @@ func New(c *Client) *mcp.Server {
 	for _, t := range Tools(c) {
 		t.add(s)
 	}
-	// Each published tool is its own tool too (authoring.go), when the
-	// server has a HUD to ask.
+	// Each published tool is its own tool too (runtools.go), when the
+	// server has a HUD to ask, read again whenever a client lists them.
 	if c != nil && c.Base != "" {
+		c.server = s
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		c.addRunTools(ctx, s)
+		c.syncRunTools(ctx, s, false)
 		cancel()
+		s.AddReceivingMiddleware(func(next mcp.MethodHandler) mcp.MethodHandler {
+			return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+				if method == "tools/list" {
+					c.syncRunTools(ctx, s, true)
+				}
+				return next(ctx, method, req)
+			}
+		})
 	}
 	return s
+}
+
+// Serve runs the MCP server over one long-lived transport (stdio): the
+// run tools are read again every runEvery too, so a tool published while
+// the session runs appears without the client asking.
+func Serve(ctx context.Context, c *Client, t mcp.Transport) error {
+	s := New(c)
+	if c != nil && c.Base != "" {
+		go func() {
+			tick := time.NewTicker(runEvery)
+			defer tick.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-tick.C:
+					sctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+					c.syncRunTools(sctx, s, true)
+					cancel()
+				}
+			}
+		}()
+	}
+	return s.Run(ctx, t)
 }
 
 // Tool is one tool and how to register it. Tools are listed by Tools so
@@ -112,13 +145,13 @@ func Tools(c *Client) []Tool {
 			destructive, c.requeue),
 		tool("c4_acknowledge_units", "Take, assign or accept failed units", "Say a person has failed units in hand so the farm stops asking: acknowledge (you take them), assign (to assignee), or accept (the failure stands; the units count as done, so nothing waits on them). Recorded with who and when, and signed in the book. A requeue clears it. Units is a set like \"14\" or \"0-9,14\"; only failed units are taken.",
 			idempotent, c.acknowledge),
-		tool("c4_decide", "Decide what waits for a person", "Decide a job's wait for a person (a ruling, an approval, an outside party's answer): do is approve, one of the wait's choices, or fail. A wait that asks for a reply (reply in c4_job_detail's waits) takes one with the decision, reply_text or reply_view, which the units it holds up read. Or decide a unit a review escalated: accept (it stands), rework (it runs again) or fail. The job's waits, and whether each holds up work, are in c4_job_detail. Signed and recorded in the book.",
+		tool("c4_decide", "Decide what waits for a person", "Decide a job's wait for a person (a ruling, an approval, an outside party's answer): do is approve, one of the wait's choices, or fail. A wait that asks for a reply (reply in c4_get_job's waits) takes one with the decision, reply_text or reply_view, which the units it holds up read. Or decide a unit a review escalated: accept (it stands), rework (it runs again) or fail. The job's waits, and whether each holds up work, are in c4_get_job. Signed and recorded in the book.",
 			idempotent, c.decide),
-		tool("c4_steer", "Send a message to a running unit", "Send a message to one unit of a job while it runs, without stopping it: a change of direction, a hint, a correction. The unit reads it at its next safe point (an agent block at the end of its turn). A unit not running yet gets it when it starts; a finished one takes none. Delivered and read status are in c4_job_detail's steers.",
+		tool("c4_steer", "Send a message to a running unit", "Send a message to one unit of a job while it runs, without stopping it: a change of direction, a hint, a correction. The unit reads it at its next safe point (an agent block at the end of its turn). A unit not running yet gets it when it starts; a finished one takes none. Delivered and read status are in c4_get_job's steers.",
 			idempotent, c.steer),
-		tool("c4_supply", "Supply what a unit stopped for", "Give a unit that stopped because its brief lacked information only a person could give (needsPerson reason needsinformation; the question is in c4_job_detail's needs) what it asked for. It runs again, resuming where it stopped, with the text. Signed and recorded in the book.",
+		tool("c4_supply", "Supply what a unit stopped for", "Give a unit that stopped because its brief lacked information only a person could give (needsPerson reason needsinformation; the question is in c4_get_job's needs) what it asked for. It runs again, resuming where it stopped, with the text. Signed and recorded in the book.",
 			idempotent, c.supply),
-		tool("c4_withdraw_needs", "Withdraw a unit's question", "Withdraw the question a unit stopped for (needsPerson reason needsinformation; c4_job_detail's needs) once it no longer applies, with why. The unit runs again without an answer, told why. Supplied or withdrawn questions take none. Signed and recorded in the book.",
+		tool("c4_withdraw_needs", "Withdraw a unit's question", "Withdraw the question a unit stopped for (needsPerson reason needsinformation; c4_get_job's needs) once it no longer applies, with why. The unit runs again without an answer, told why. Supplied or withdrawn questions take none. Signed and recorded in the book.",
 			idempotent, c.withdrawNeeds),
 		tool("c4_avoid_node", "Avoid or allow a node for a job", "Keep a job's units off a node (a bad worker for that job), or allow it again.",
 			idempotent, c.avoidNode),

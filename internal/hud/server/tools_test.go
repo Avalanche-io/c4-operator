@@ -268,3 +268,16 @@ func httptestGet(s *Server, path string) *httptest.ResponseRecorder {
 	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, path, nil))
 	return w
 }
+
+// A parameter filled from upstream (from) is given by the job it follows:
+// its schema does not ask the submitter for it.
+func TestParamSchemaFromIsNotRequired(t *testing.T) {
+	s := paramSchema([]schema.Param{{Name: "plates", Type: "PATH"}, {Name: "movie", Type: "PATH", From: "proxies"},
+		{Name: "width", Type: "INT", Default: 960}})
+	if fmt.Sprint(s["required"]) != "[plates]" {
+		t.Fatalf("required %v", s["required"])
+	}
+	if p := s["properties"].(map[string]any)["movie"].(map[string]any); p["x-from"] != "proxies" {
+		t.Fatalf("movie %v", p)
+	}
+}

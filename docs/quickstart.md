@@ -271,7 +271,8 @@ c4 farm integrate on
 Then ask, for example, "which frames of sm0140-render-v001 are done, and
 will it make its deadline?" The agent has your access and nothing more. The
 tools it gets are listed in [docs/agents/tools.md](agents/tools.md), and
-every tool you publish appears among them, as `c4_run_<tool>`.
+every tool you publish appears among them, as `c4_run_<tool>`, even one
+published while the session runs.
 
 ## Clean up
 

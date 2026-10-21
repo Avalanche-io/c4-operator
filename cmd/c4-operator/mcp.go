@@ -48,7 +48,7 @@ func runMCP(args []string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if *addr == "" {
-		return mcpserver.New(&mcpserver.Client{Base: *hud, Token: token, As: *as, Agent: *agent}).Run(ctx, &mcp.StdioTransport{})
+		return mcpserver.Serve(ctx, &mcpserver.Client{Base: *hud, Token: token, As: *as, Agent: *agent}, &mcp.StdioTransport{})
 	}
 	if token != "" {
 		return errors.New("--token-file is for stdio: over HTTP each request sends its own bearer token, and one without is refused")

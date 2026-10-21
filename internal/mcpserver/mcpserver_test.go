@@ -25,12 +25,20 @@ type fakeHUD struct {
 	auth  []string
 	// tools serves two published tools and POST /submissions.
 	tools bool
+	// depth publishes a third tool; proxiesV moves proxies on (v4 when
+	// empty), with a new form that a v4 pin no longer fits.
+	depth    bool
+	proxiesV string
 }
 
 func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	f.auth = append(f.auth, r.Header.Get("Authorization"))
+	depth, pv := f.depth, f.proxiesV
 	f.mu.Unlock()
+	if pv == "" {
+		pv = "v4"
+	}
 	w.Header().Set("Content-Type", "application/json")
 	due := time.Date(2026, 10, 23, 18, 0, 0, 0, time.UTC)
 	next := due.Add(4 * time.Hour)
@@ -83,12 +91,20 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			Estimate: &api.SubmitEstimate{Units: 48, ETA50: &eta, ETA90: &eta, Deadline: &due, DeadlineSource: "suggested",
 				SlackSeconds: 10800, Feasible: true}})
 	case f.tools && r.Method == "GET" && r.URL.Path == "/api/v1/tools/show-a":
-		json.NewEncoder(w).Encode(api.ToolListResponse{Tools: []api.ToolSummary{
-			{Name: "proxies", Title: "Proxies and previews", Summary: "Half-size sRGB JPEGs of an EXR plate sequence.", Kind: "frames", Version: "v4", View: "c4proxies", Scope: "project"},
-			{Name: "movie", Title: "Review movie", Summary: "A review movie of the proxies.", Kind: "once", Version: "v1", View: "c4movie", Scope: "farm"}}})
+		ts := []api.ToolSummary{
+			{Name: "proxies", Title: "Proxies and previews", Summary: "Half-size sRGB JPEGs of an EXR plate sequence.", Kind: "frames", Version: pv, View: "c4proxies", Scope: "project"},
+			{Name: "movie", Title: "Review movie", Summary: "A review movie of the proxies.", Kind: "once", Version: "v1", View: "c4movie", Scope: "farm"}}
+		if depth {
+			ts = append(ts, api.ToolSummary{Name: "depth", Title: "Depth maps", Kind: "frames", Version: "v1", View: "c4depth", Scope: "project"})
+		}
+		json.NewEncoder(w).Encode(api.ToolListResponse{Tools: ts})
+	case f.tools && depth && r.Method == "GET" && r.URL.Path == "/api/v1/tools/show-a/depth":
+		json.NewEncoder(w).Encode(api.ToolDetail{ToolSummary: api.ToolSummary{Name: "depth", Title: "Depth maps", Kind: "frames", Version: "v1", Scope: "project"},
+			Params:      json.RawMessage(`[{"name":"plates","type":"PATH"}]`),
+			ParamSchema: map[string]any{"type": "object", "properties": map[string]any{"plates": map[string]any{"type": "string"}}}})
 	case f.tools && r.Method == "GET" && r.URL.Path == "/api/v1/tools/show-a/proxies":
 		json.NewEncoder(w).Encode(api.ToolDetail{ToolSummary: api.ToolSummary{Name: "proxies", Title: "Proxies and previews",
-			Summary: "Half-size sRGB JPEGs of an EXR plate sequence.", Kind: "frames", Version: r.URL.Query().Get("version") + "v4", Scope: "project"},
+			Summary: "Half-size sRGB JPEGs of an EXR plate sequence.", Kind: "frames", Version: r.URL.Query().Get("version") + pv, Scope: "project"},
 			Params: json.RawMessage(`[{"name":"plates","type":"PATH"},{"name":"width","type":"INT","default":960}]`),
 			ParamSchema: map[string]any{"$schema": "https://json-schema.org/draft/2020-12/schema", "type": "object", "additionalProperties": false,
 				"properties": map[string]any{"plates": map[string]any{"type": "string"}, "width": map[string]any{"type": "integer", "default": 960}},
@@ -116,6 +132,12 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.posts = append(f.posts, r.URL.Path+" "+string(body))
 		f.mu.Unlock()
+		if pv != "v4" && strings.Contains(string(body), "proxies@v4") {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "errors": []api.FieldError{{Path: "jobs.proxies.tool",
+				Message: "proxies is " + pv + " now; its form changed", Fix: "draw it again"}}})
+			return
+		}
 		if strings.Contains(string(body), "karmah") {
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			json.NewEncoder(w).Encode(map[string]any{"ok": false, "errors": []api.FieldError{{Path: "jobs.light.tool", Message: `no tool "karmah" in show-a`,
@@ -505,9 +527,11 @@ func TestToolTools(t *testing.T) {
 	var sch map[string]any
 	json.Unmarshal(b, &sch)
 	props := asMap(sch["properties"])
-	with := asMap(props["with"])
-	if asMap(asMap(with["properties"])["plates"])["type"] != "string" || props["frames"] == nil || props["project"] != nil ||
-		!strings.Contains(fmt.Sprint(sch["required"]), "frames") || !strings.Contains(byName["c4_run_proxies"].Description, "Half-size sRGB") {
+	// The tool's parameters are arguments of their own, beside the
+	// submission's fields; nothing is nested under with.
+	if asMap(props["plates"])["type"] != "string" || asMap(props["width"])["type"] != "integer" || props["with"] != nil ||
+		props["frames"] == nil || props["project"] != nil || fmt.Sprint(sch["required"]) != "[frames plates]" ||
+		!strings.Contains(byName["c4_run_proxies"].Description, "Half-size sRGB") {
 		t.Fatalf("c4_run_proxies schema %s, description %q", b, byName["c4_run_proxies"].Description)
 	}
 	b, _ = json.Marshal(byName["c4_run_movie"].InputSchema)
@@ -516,7 +540,7 @@ func TestToolTools(t *testing.T) {
 	}
 
 	res, out = call(t, cs, "c4_run_proxies", map[string]any{"shot": "sm0140", "frames": "1001-1048", "due": "dailies",
-		"with": map[string]any{"plates": "plates/sm0140.####.exr"}, "dry_run": true})
+		"plates": "plates/sm0140.####.exr", "dry_run": true})
 	if res.IsError || out["ok"] != true {
 		t.Fatalf("run: %v %q", out, text(res))
 	}
@@ -675,5 +699,126 @@ func TestSubmitSubmissionKey(t *testing.T) {
 	if len(hud.posts) != 3 || !strings.Contains(hud.posts[0], `"key":"`+made+`"`) || !strings.Contains(hud.posts[1], `"key":"take-2"`) ||
 		strings.Contains(hud.posts[2], `"key"`) {
 		t.Fatalf("posts %v", hud.posts)
+	}
+}
+
+// A run tool refuses an argument it does not take, with the name it may
+// have meant, and the old nested with; a refusal is an answer, not an
+// error.
+func TestRunToolArguments(t *testing.T) {
+	hud := &fakeHUD{tools: true}
+	cs := session(t, hud, "tok-noor")
+	res, out := call(t, cs, "c4_run_proxies", map[string]any{"frames": "1001-1048", "plate": "plates/a.####.exr", "widht": 480,
+		"with": map[string]any{"plates": "x"}})
+	errs := asMaps(out["errors"])
+	if res.IsError || out["ok"] != false || len(errs) != 3 {
+		t.Fatalf("%v %q", out, text(res))
+	}
+	if errs[0]["path"] != "plate" || !strings.Contains(errs[0]["fix"].(string), "did you mean plates?") ||
+		errs[1]["path"] != "widht" || !strings.Contains(errs[1]["fix"].(string), "did you mean width?") ||
+		errs[2]["path"] != "with" || !strings.Contains(errs[2]["fix"].(string), "arguments of their own") {
+		t.Fatalf("errors %v", errs)
+	}
+	hud.mu.Lock()
+	n := len(hud.posts)
+	hud.mu.Unlock()
+	if n != 0 {
+		t.Fatal("refused arguments were sent to the farm")
+	}
+	// A parameter in the tool's own order, typed as given.
+	if res, out := call(t, cs, "c4_run_proxies", map[string]any{"frames": "1001-1048", "width": 480, "plates": "p.####.exr"}); res.IsError || out["ok"] != true {
+		t.Fatalf("%v %q", out, text(res))
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	if !strings.Contains(hud.posts[0], `"with":{"plates":"p.####.exr","width":480}`) {
+		t.Fatalf("sent %s", hud.posts[0])
+	}
+}
+
+// The run tools follow the farm while a session runs: a tool published
+// meanwhile appears at the next tools/list, and the client is told; a run
+// tool whose pin went stale is refused (an answer, not an error) and drawn
+// again with the tool's current version.
+func TestRunToolsFollowTheFarm(t *testing.T) {
+	hud := &fakeHUD{tools: true}
+	ts := httptest.NewServer(hud)
+	t.Cleanup(ts.Close)
+	ctx := context.Background()
+	srv := New(&Client{Base: ts.URL, Token: "tok-follow"})
+	ct, st := mcp.NewInMemoryTransports()
+	if _, err := srv.Connect(ctx, st, nil); err != nil {
+		t.Fatal(err)
+	}
+	changed := make(chan struct{}, 8)
+	cs, err := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "v1"}, &mcp.ClientOptions{
+		ToolListChangedHandler: func(context.Context, *mcp.ToolListChangedRequest) { changed <- struct{}{} }}).Connect(ctx, ct, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cs.Close() })
+	names := func() map[string]*mcp.Tool {
+		lt, err := cs.ListTools(ctx, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := map[string]*mcp.Tool{}
+		for _, tl := range lt.Tools {
+			out[tl.Name] = tl
+		}
+		return out
+	}
+	if n := names(); n["c4_run_depth"] != nil || n["c4_run_proxies"] == nil {
+		t.Fatal("the starting tools")
+	}
+	hud.mu.Lock()
+	hud.depth = true
+	hud.mu.Unlock()
+	if n := names(); n["c4_run_depth"] == nil {
+		t.Fatal("a tool published meanwhile is not listed")
+	}
+	select {
+	case <-changed:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the client was not told the tools changed")
+	}
+
+	// proxies moves to v5: the v4 pin is refused and the tool drawn again.
+	hud.mu.Lock()
+	hud.proxiesV = "v5"
+	hud.mu.Unlock()
+	res, out := call(t, cs, "c4_run_proxies", map[string]any{"frames": "1001-1048", "plates": "p.####.exr"})
+	if res.IsError || out["ok"] != false || !strings.Contains(out["message"].(string), "drawn again") ||
+		asMaps(out["errors"])[0]["path"] != "jobs.proxies.tool" {
+		t.Fatalf("stale pin: %v %q", out, text(res))
+	}
+	if d := names()["c4_run_proxies"].Description; !strings.Contains(d, "proxies v5") {
+		t.Fatalf("not drawn again: %q", d)
+	}
+	if res, out := call(t, cs, "c4_run_proxies", map[string]any{"frames": "1001-1048", "plates": "p.####.exr"}); res.IsError || out["ok"] != true {
+		t.Fatalf("after the redraw: %v %q", out, text(res))
+	}
+}
+
+// c4_submit_job takes one job in the raw form too (an image and its
+// command), through POST /jobs.
+func TestSubmitRawForm(t *testing.T) {
+	hud := &fakeHUD{tools: true}
+	cs := session(t, hud, "tok-noor")
+	res, out := call(t, cs, "c4_submit_job", map[string]any{"class": "render", "image": "ghcr.io/studio/render:1",
+		"command": []string{"render", "--frame", ""}, "params": map[string]string{"frames": "1001-1048"},
+		"shot": "sm0140", "dry_run": true})
+	jobs := asMaps(out["jobs"])
+	if res.IsError || out["ok"] != true || out["submitted"] != false || len(jobs) != 1 || jobs[0]["job"] != "show-a/sm0140-render-v001" ||
+		jobs[0]["units"] != float64(48) {
+		t.Fatalf("%v %q", out, text(res))
+	}
+	if res, out := call(t, cs, "c4_submit_job", map[string]any{"class": "render"}); res.IsError || out["ok"] != false ||
+		asMaps(out["errors"])[0]["path"] != "image" {
+		t.Fatalf("no image: %v %q", out, text(res))
+	}
+	if res, _ := call(t, cs, "c4_submit_job", map[string]any{"class": "render", "image": "x",
+		"submission_yaml": "c4: submit/1"}); !res.IsError {
+		t.Fatal("both forms at once")
 	}
 }

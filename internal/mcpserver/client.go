@@ -15,7 +15,10 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Client calls the HUD API as one identity.
@@ -31,6 +34,12 @@ type Client struct {
 	// controls as "agent/NAME for USER" (X-C4-Agent).
 	Agent string
 	HTTP  *http.Client
+
+	// The run tools on the server this client serves (runtools.go):
+	// syncMu guards added, each tool's fingerprint.
+	server *mcp.Server
+	syncMu sync.Mutex
+	added  map[string]string
 }
 
 // APIError is a HUD error, phrased for an agent to act on.

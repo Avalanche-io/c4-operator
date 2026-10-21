@@ -1123,7 +1123,9 @@ func paramSchema(params []schema.Param) map[string]any {
 			s["x-from"] = p.From
 		}
 		props[p.Name] = s
-		if p.Required() {
+		// A parameter filled from upstream (from) is given by the job it
+		// follows, not by whoever submits.
+		if p.Required() && p.From == "" {
 			required = append(required, p.Name)
 		}
 	}

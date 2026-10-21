@@ -582,7 +582,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		mcpserver.Version = version
-		return mcpserver.New(&mcpserver.Client{Base: c.Base, Token: c.Token, As: c.As, Agent: *agent}).Run(ctx, &mcp.StdioTransport{})
+		return mcpserver.Serve(ctx, &mcpserver.Client{Base: c.Base, Token: c.Token, As: c.As, Agent: *agent}, &mcp.StdioTransport{})
 
 	case "samples":
 		from := fs.String("from", "", "a local sample archive instead of the release's")

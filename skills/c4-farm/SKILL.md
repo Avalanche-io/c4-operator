@@ -35,12 +35,18 @@ show a shot's whole chain (sim, FX, comp, transcode).
 
 Work goes in through a published tool. `c4_list_tools` lists the tools in the
 person's projects, and `c4_describe_tool` gives one's parameters, frames and needs.
-`c4_run_<tool>` submits one job of a tool: its `with` (the parameters), `frames`
-for a frames tool, the `shot`, when it is `due` (a milestone, a time, a date or
-`suggested`, never a priority) and the `tree` it works on (a view's C4 ID, or
-`job:<name>` for an earlier job's output). `c4_submit_job` takes a whole
-submission (`c4: submit/1`, as an object or as YAML) for several jobs that follow
-each other. Always call either with `dry_run: true` first and tell the person what
+`c4_run_<tool>` submits one job of a tool: the tool's parameters, each an argument
+of its own (one the tool does not take is refused, with the name it may have
+meant), `frames` for a frames tool, the `shot`, when it is `due` (a milestone, a
+time, a date or `suggested`, never a priority) and the `tree` it works on (a
+view's C4 ID, or `job:<name>` for an earlier job's output). A tool published
+while you work appears among your tools; if one changed since you read it, the
+farm refuses the old form and the tool is drawn again: read it and call it again.
+`c4_submit_job` takes a whole submission (`c4: submit/1`, as an object or as
+YAML) for several jobs that follow each other, or one job in the raw form (a
+`class` and an `image`) for work with no tool. A refusal is an answer with
+`errors`, each at its path with its fix; send the answer's `key` again when you
+retry after an error or a timeout, and nothing is made twice. Always call either with `dry_run: true` first and tell the person what
 the farm expects (units, ready p50 and p90, slack, on track or not), or what it
 refused and how to fix it; submit only when they agree. The jobs are owned by the
 person, and the book records that you submitted them for them. `c4_publish_tool`
