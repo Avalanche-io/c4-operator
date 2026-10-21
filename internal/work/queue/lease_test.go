@@ -166,14 +166,14 @@ func TestGrantHoldsALeaselessJob(t *testing.T) {
 	ns, q, now := farm(t, "cpu", 1, 4)
 	ctx := context.Background()
 	pool := "cpu-" + ns
-	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: c4v1.SubmitGrantName("github", "joshua")},
-		Spec: c4v1.SubmitGrantSpec{Person: "joshua", Tracker: "github", Until: metav1.NewTime(now.Add(time.Hour)),
-			Revoked: &c4v1.GrantRevocation{By: "joshua", At: metav1.NewTime(*now)}}}
+	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: c4v1.SubmitGrantName("github", "noor")},
+		Spec: c4v1.SubmitGrantSpec{Person: "noor", Tracker: "github", Until: metav1.NewTime(now.Add(time.Hour)),
+			Revoked: &c4v1.GrantRevocation{By: "noor", At: metav1.NewTime(*now)}}}
 	if err := k8s.Create(ctx, g); err != nil {
 		t.Fatal(err)
 	}
 	j := job(ns, "github-8", "render", pool, map[string]string{"frames": "1-1"}, now.Add(time.Hour))
-	j.Annotations = map[string]string{c4v1.AnnotationOwner: "joshua", c4v1.AnnotationGrant: "c4grantrecord"}
+	j.Annotations = map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationGrant: "c4grantrecord"}
 	j.Labels = map[string]string{c4v1.LabelTracker: "github"}
 	if err := k8s.Create(ctx, j); err != nil {
 		t.Fatal(err)
