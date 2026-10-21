@@ -1610,8 +1610,15 @@ and a sweep planner that spawns trials are all generators.
       supplied information or a decision.
     - **Release:** a unit is released once its tool exists, its view's
       Materialization is Ready, and its policy is written. Until then the
-      job's `Tools` condition says what it waits for. Units that name no
-      tool run as before.
+      job's `Tools` condition says what it waits for. Every other wait
+      that keeps a unit from starting says so the same way, never only
+      in the manager's log: `Admitted` when the API server refuses the
+      unit's pod (Pod Security, a webhook, an admission policy, or the
+      namespace's quota), `Images` when its image cannot be pulled,
+      `Lease` while it waits for a credential lease. Each says what to
+      do, and sets NeedsPerson (`Permission`, `Quota` or `Stuck`); a
+      refusal that stops recurring for two minutes is over. Units that
+      name no tool run as before.
     - **Tokens:** no unit pod holds a Kubernetes API token (10.2). A
       tool's `c4` says what its units may do with c4 itself, through
       the HUD and so MCP.

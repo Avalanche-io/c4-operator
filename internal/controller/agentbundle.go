@@ -221,10 +221,35 @@ func bundleStatus(b *c4v1.AgentBundle, j *c4v1.WorkJob, pods []corev1.Pod) c4v1.
 	default:
 		st.Phase = "Pending"
 	}
+	// What keeps the job's units from starting keeps the members from
+	// starting: the bundle says so, and is not Ready while it holds.
+	var blocked *metav1.Condition
+	for _, typ := range memberWaits {
+		c := meta.FindStatusCondition(j.Status.Conditions, typ)
+		if c == nil || c.Status != metav1.ConditionFalse {
+			meta.RemoveStatusCondition(&st.Conditions, typ)
+			continue
+		}
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: typ, Status: metav1.ConditionFalse,
+			Reason: c.Reason, Message: c.Message, ObservedGeneration: b.Generation})
+		if blocked == nil {
+			blocked = c
+		}
+	}
+	if blocked != nil {
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Ready", Status: metav1.ConditionFalse,
+			Reason: blocked.Type, Message: "its members cannot start: " + blocked.Message, ObservedGeneration: b.Generation})
+		return st
+	}
 	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: "Ready", Status: metav1.ConditionTrue,
 		Reason: "JobReconciled", Message: "the bundle's WorkJob " + j.Name + " follows its spec", ObservedGeneration: b.Generation})
 	return st
 }
+
+// memberWaits are the job conditions that keep its units from starting
+// (Schedulable, and the queue's waits.go), in the order a bundle names
+// them.
+var memberWaits = []string{"Schedulable", "Admitted", "Images", "Lease", "Tools"}
 
 // advanceClock moves a bundle's virtual clock to now. The clock starts the
 // first time the bundle runs, stops when it becomes Suspended (by the

@@ -241,7 +241,8 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	if short && len(succ)+len(accepted) == n && len(pre)+len(run)+len(retry)+len(egress) == 0 {
 		v.measureShort = measureMessage(st.Measure)
 	}
-	needsPerson(&st, v, q.approvals[v.key], waiting, flaggedWaiting, v.job.Generation)
+	waitReason, waitMsg := waitConditions(&st, v, now)
+	needsPerson(&st, v, q.approvals[v.key], waiting, flaggedWaiting, waitReason, waitMsg, v.job.Generation)
 	active := len(pre) + len(run) + len(retry) + len(egress)
 	var att []string
 	for i := 0; i < n; i++ {

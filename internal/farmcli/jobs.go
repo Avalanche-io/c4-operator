@@ -91,6 +91,7 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 	fmt.Fprintln(tw, "RUN\tJOB\tDONE\tREADY\tDEADLINE\tSLACK\tOWNER")
 	n, finished := 0, 0
 	var latest *api.Job
+	var whys []string
 	for i, j := range s.Jobs {
 		if a.Project != "" && j.Project != a.Project {
 			continue
@@ -128,6 +129,11 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 				slack += " late"
 			}
 		}
+		if why := stuck(&j); why != "" {
+			// It cannot run, so it is not ready at any time.
+			ready, slack = "stuck", "-"
+			whys = append(whys, j.Namespace+"/"+j.Name+": "+why)
+		}
 		fmt.Fprintf(tw, "%s\t%s/%s\t%s\t%s\t%s\t%s\t%s\n", rank, j.Namespace, j.Name, done, ready, due, slack, j.Owner)
 		n++
 	}
@@ -143,7 +149,25 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 		o.printf("%s finished (c4 farm ls --all lists them); the newest, %s/%s, %s: c4 farm get %s DIR\n",
 			plural(finished, "job", "jobs"), latest.Namespace, latest.Name, verb, latest.Name)
 	}
+	for _, w := range whys {
+		o.printf("stuck %s\n", w)
+	}
 	return nil
+}
+
+// stuck says why a job cannot run at all (its pods are refused, its image
+// cannot be pulled, it has no pool or no plan, its quota is used up), or
+// "" if it can. Such a job has no ready time worth showing.
+func stuck(j *api.Job) string {
+	n := j.NeedsPerson
+	if n == nil || j.Units.Running > 0 {
+		return ""
+	}
+	switch n.Reason {
+	case "stuck", "permission", "quota":
+		return n.Message
+	}
+	return ""
 }
 
 // Watch prints a job's title block whenever it changes, until the job
@@ -179,7 +203,9 @@ func titleBlock(cl Clock, j *api.Job) string {
 	if j.Units.Failed > 0 {
 		parts = append(parts, fmt.Sprintf("failed %d", j.Units.Failed))
 	}
-	if !j.Estimate.EtaP50.IsZero() && j.Phase != "Succeeded" {
+	if why := stuck(j); why != "" {
+		parts = append(parts, "stuck: "+why)
+	} else if !j.Estimate.EtaP50.IsZero() && j.Phase != "Succeeded" {
 		parts = append(parts, "ready ~"+cl.At(j.Estimate.EtaP50)+" · ~"+cl.At(j.Estimate.EtaP90))
 	}
 	if d := j.Objective.Deadline; d != nil {

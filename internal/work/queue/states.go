@@ -259,7 +259,9 @@ func shownSlack(v *view, js sched.JobState, e *c4v1.WorkEstimate) (int64, bool) 
 }
 
 // needsPerson sets or clears the NeedsPerson condition.
-func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagged int, gen int64) {
+// waitReason and waitMsg are what keeps its units from starting
+// (waitConditions), if anything.
+func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagged int, waitReason, waitMsg string, gen int64) {
 	reason, msg := "", ""
 	switch {
 	case len(v.mem.openNeedsList()) > 0:
@@ -287,6 +289,8 @@ func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagge
 		reason, msg = c4v1.NeedsStuck, "the job has no plan; fix its parameters"
 	case v.unschedulable != "":
 		reason, msg = c4v1.NeedsStuck, v.unschedulable
+	case waitReason != "":
+		reason, msg = waitReason, waitMsg
 	case v.stuckOn != "":
 		reason, msg = c4v1.NeedsStuck, "it waits on "+v.stuckOn+", which failed"
 	case approval:

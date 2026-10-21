@@ -298,6 +298,9 @@ type jobMem struct {
 	unitFailed map[int]map[string]bool
 	// toolsWait says why a unit waits for its tool (tools.go).
 	toolsWait string
+	// admitWait and leaseWait are the latest refusal of a unit's pod and
+	// the latest credential-lease wait (waits.go).
+	admitWait, leaseWait startWait
 	// needs are what units stopped for, and supplied and withdrawn the
 	// last supply's and withdrawal's tokens (needs.go).
 	needs     map[int]*needsRec
@@ -1536,6 +1539,8 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			}
 		}
 		if ok, why := q.leaseReady(ctx, v.job, p.spec.Name, now); !ok {
+			// The job's status says so (condition Lease).
+			v.mem.leaseWait = startWait{reason: "Waiting", msg: why, at: now}
 			q.Log.V(1).Info("waiting for a credential lease", "job", key, "unit", idx, "pool", p.spec.Name, "why", why)
 			continue
 		}
@@ -1577,9 +1582,14 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		q.leaseOutside(ctx, pod, p.spec.Name)
 		if err := q.Client.Create(ctx, pod); err != nil {
 			v.mem.attempts[idx]--
+			if reason, msg := refusal(err, v.job.Namespace); reason != "" {
+				// The job's status says so (condition Admitted).
+				v.mem.admitWait = startWait{reason: reason, msg: msg, at: now}
+			}
 			q.Log.Error(err, "create unit pod", "job", key, "unit", idx)
 			continue
 		}
+		v.mem.admitWait, v.mem.leaseWait = startWait{}, startWait{}
 		v.mem.launched[idx] = now
 		if recheck != "" {
 			q.startedRecheck(ctx, v, idx, recheck, now)
