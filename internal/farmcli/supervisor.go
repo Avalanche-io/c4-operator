@@ -283,7 +283,7 @@ func (s *AgentService) definition() string {
 		b.WriteString(`  </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
-  <key>EnvironmentVariables</key><dict><key>PATH</key><string>` + xmlEscape(s.envPath()) + `</string></dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>` + xmlEscape(s.envPath()) + `</string><key>HOME</key><string>` + xmlEscape(s.Home) + `</string></dict>
   <key>ProcessType</key><string>Background</string>
   <key>Nice</key><integer>10</integer>
   <key>StandardOutPath</key><string>` + xmlEscape(s.log()) + `</string>
@@ -301,7 +301,7 @@ func (s *AgentService) definition() string {
 Description=C4 farm agent: this machine's power reader and host runner
 
 [Service]
-Environment=` + strconv.Quote("PATH="+s.envPath()) + `
+Environment=` + strconv.Quote("PATH="+s.envPath()) + ` ` + strconv.Quote("HOME="+s.Home) + `
 ExecStart=` + strings.Join(quoted, " ") + `
 Restart=on-failure
 RestartSec=5

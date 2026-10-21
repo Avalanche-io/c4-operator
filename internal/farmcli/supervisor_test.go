@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -131,7 +132,8 @@ func TestAgentServicePathAndRestart(t *testing.T) {
 		if err := svc.Start(context.Background(), Out{W: &out}); err != nil {
 			t.Fatal(err)
 		}
-		if def := svc.definition(); !strings.Contains(def, "/opt/c4/bin:") || !strings.Contains(def, "/usr/bin:/bin") {
+		if def := svc.definition(); !strings.Contains(def, "/opt/c4/bin:") || !strings.Contains(def, "/usr/bin:/bin") ||
+			!(strings.Contains(def, "<key>HOME</key><string>"+svc.Home+"</string>") || strings.Contains(def, strconv.Quote("HOME="+svc.Home))) {
 			t.Errorf("%s: no PATH in\n%s", goos, def)
 		}
 		calls = nil
