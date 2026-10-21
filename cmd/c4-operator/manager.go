@@ -336,7 +336,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 	if err != nil {
 		return err
 	}
-	srv := &hudserver.Server{ImageRegistry: images.registry, ImageTag: images.tag, PlainRegistries: images.plain, Client: mgr.GetClient(), Kube: kube, Stores: stores, Web: web, Loc: loc,
+	srv := &hudserver.Server{ImageRegistry: images.registry, ImageTag: images.tag, PlainRegistries: images.plain, Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Kube: kube, Stores: stores, Web: web, Loc: loc,
 		TrustProxy: proxy != nil, ProxySecret: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups, StandIn: standIn, SinglePerson: singlePerson,
 		// What units report comes from the node daemons' /units, for the
 		// operator's tier token alone; their metrics need an API token

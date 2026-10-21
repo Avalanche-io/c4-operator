@@ -46,7 +46,15 @@ const (
 	SubmissionPendingFor = "submission.pendingFor"
 	// SubmissionSweepEvery is how often the HUD looks for such jobs (1m).
 	SubmissionSweepEvery = "submission.sweepEvery"
+	// SubmissionKeyFor is how long a submission's key answers a retry
+	// (24h): after it, the same key makes a new submission.
+	SubmissionKeyFor = "submission.keyFor"
 )
+
+// SubmissionPendingFloor is the least submission.pendingFor: the HUD's
+// two minutes to make a submission and thirty seconds to roll it back,
+// with room to spare. A smaller value is ignored.
+const SubmissionPendingFloor = 3 * time.Minute
 
 // RecheckInFlight is how many re-checks of one question may run at once:
 // a rule, not a policy value.
@@ -98,6 +106,7 @@ var defaults = map[string]string{
 	// A submission's, read for its project; the sweep's, for the farm.
 	SubmissionPendingFor: "10m",
 	SubmissionSweepEvery: "1m",
+	SubmissionKeyFor:     "24h",
 }
 
 // limits are the farm's limits on a project's values, in each key's
@@ -254,7 +263,12 @@ func valid(key, s string) bool {
 	case PressAfter, PressMargin, RecheckMinInterval:
 		d, err := time.ParseDuration(s)
 		return err == nil && d >= 0
-	case SubmissionPendingFor, SubmissionSweepEvery:
+	case SubmissionPendingFor:
+		// At least the time a submission may take to be made and rolled
+		// back, or the sweep takes one still being made.
+		d, err := time.ParseDuration(s)
+		return err == nil && d >= SubmissionPendingFloor
+	case SubmissionSweepEvery, SubmissionKeyFor:
 		d, err := time.ParseDuration(s)
 		return err == nil && d > 0
 	case RecheckMax:

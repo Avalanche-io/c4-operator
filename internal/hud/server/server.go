@@ -60,6 +60,9 @@ type Server struct {
 	Client       client.Client        // the manager's cached client
 	Kube         kubernetes.Interface // logs, events, token and access reviews, c4-system pods
 	Queue        Queue                // burst spend and deadline options (optional)
+	// Reader reads from the API server, not the cache: for what the HUD
+	// has just written (a submission's jobs). Nil reads through Client.
+	Reader client.Reader
 	// Progress, when set, receives units' reported progress from each
 	// scrape of the node daemons, for the queue's estimates.
 	Progress *queue.ProgressCache

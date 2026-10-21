@@ -1110,7 +1110,7 @@ Input:
       ]
     },
     "key": {
-      "description": "makes a retry safe: send the key an earlier answer gave (or one of your own) when you submit the same thing again after an error or a timeout, and the farm answers with the jobs it made then rather than making them twice",
+      "description": "always pass one: a short name of your own for this submission (the same one on every retry of it, a new one for the next): a retry after an error or a timeout is then answered with the jobs the farm made, never a second set",
       "type": "string"
     },
     "name": {

@@ -17,6 +17,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
@@ -121,7 +122,8 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 		// jobs the first made (submission_commit.go).
 		label := keyLabel(v.User, body.Key)
 		defer s.submitKeys.lock(label)()
-		jobs, record, pending, err := s.keyed(ctx, plan.Namespace, label)
+		keyFor, _ := policy.Duration(nil, projectObject(m, plan.Project), -1, policy.SubmissionKeyFor)
+		jobs, record, made, pending, err := s.keyed(ctx, plan.Namespace, label, keyFor)
 		switch {
 		case err != nil:
 			refuse(http.StatusServiceUnavailable, api.FieldError{Path: "key", Message: "the farm could not look this key up just now",
@@ -130,6 +132,10 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 		case pending:
 			refuse(http.StatusConflict, api.FieldError{Path: "key", Message: "the submission sent with this key is still being made",
 				Fix: "ask again in a moment, with the same key"})
+			return
+		case len(jobs) > 0 && made != out.Submission:
+			refuse(http.StatusConflict, api.FieldError{Path: "key", Message: fmt.Sprintf("this key was sent with another submission (%s)", made),
+				Fix: "give this submission a key of its own; a key names one submission, sent again only on a retry"})
 			return
 		case len(jobs) > 0:
 			out.Jobs, out.OK, out.Record = jobs, true, record
@@ -142,7 +148,7 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
-	var taken []string
+	var taken, leftover []string
 	for attempt := 0; ; attempt++ {
 		jobs, code, ferr := s.makeSubmission(r, v, m, plan, &body, &out)
 		if ferr == nil {
@@ -158,7 +164,7 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if !errors.As(ferr.err, &te) || attempt >= 4 {
-			fe := leftWords(s.farmWords(ferr.key, ferr.name, plan.Project, code, ferr.err), ferr.left, ferr.until)
+			fe := leftWords(s.farmWords(ferr.key, ferr.name, plan.Project, code, ferr.err), append(leftover, ferr.left...), ferr.until, ferr.unsigned)
 			if errors.As(ferr.err, &te) {
 				fe = fieldRefusal{api.FieldError{Path: "jobs." + ferr.key, Message: "job names kept being taken while the submission was made",
 					Fix: "submit it again"}, http.StatusConflict}
@@ -166,7 +172,13 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 			refuse(fe.code, fe.FieldError)
 			return
 		}
-		// A name taken meanwhile: number the submission past it.
+		// A name taken meanwhile: number the submission past it. What the
+		// attempt could not delete is reported, not dropped.
+		leftover = append(leftover, ferr.left...)
+		if len(ferr.left) > 0 {
+			out.Warnings = append(out.Warnings, fmt.Sprintf("%s, from an attempt numbered again, could not be removed: delete it (the farm deletes what is still held after %s)",
+				strings.Join(ferr.left, ", "), ferr.until))
+		}
 		taken = append(taken, ferr.name)
 		var again []authoring.Error
 		if plan, again = authoring.Lower(sub, authoring.Taking(farm, plan.Namespace, taken)); len(again) > 0 {
@@ -208,6 +220,8 @@ type jobFailure struct {
 	// farm deletes those still held (submission_commit.go).
 	left  []string
 	until string
+	// unsigned says a signed submission's withdrawal could not be signed.
+	unsigned bool
 }
 
 // makeSubmission checks every job of a plan as POST /jobs would, then

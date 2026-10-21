@@ -200,7 +200,7 @@ func runSchema(rt runTool) map[string]any {
 		"due":     map[string]any{"type": "string", "description": "when it is due: a milestone (dailies), a time (fri 18:00, +3h, RFC 3339), a date, or suggested (the farm suggests one). Never a priority"},
 		"tree":    map[string]any{"type": "string", "description": "what the job reads and writes: a view's C4 ID, or job:<name> for an earlier job's output"},
 		"dry_run": map[string]any{"type": "boolean", "description": "check and plan only: return the estimate and create nothing. Do this first and show the person the estimate"},
-		"key":     map[string]any{"type": "string", "description": "makes a retry safe: send the key an earlier answer gave when you run the same thing again after an error or a timeout, and the farm answers with the job it made then rather than making it twice"},
+		"key":     map[string]any{"type": "string", "description": "always pass one: a short name of your own for this run (the same one on every retry of it, a new one for the next): a retry after an error or a timeout is then answered with the job the farm made, never a second"},
 		"explain": map[string]any{"type": "boolean", "description": "also return what the job lowers to in the operator, as text"},
 	}
 	var required []string

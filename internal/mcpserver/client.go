@@ -92,7 +92,12 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	}
 	hc := c.HTTP
 	if hc == nil {
+		// A call with a deadline of its own (a submission, which the HUD
+		// may take two minutes to make) is bounded by it alone.
 		hc = &http.Client{Timeout: 30 * time.Second}
+		if _, ok := ctx.Deadline(); ok {
+			hc = &http.Client{}
+		}
 	}
 	resp, err := hc.Do(req)
 	if err != nil {

@@ -100,3 +100,16 @@ func TestSetLimits(t *testing.T) {
 		t.Fatalf("past a farm's limit of 5: %s; a malformed limit: %s", v, Limit(RecheckMax))
 	}
 }
+
+// submission.pendingFor has a floor: a project value under it would let
+// the sweep take a submission still being made, so it is ignored.
+func TestSubmissionPendingForFloor(t *testing.T) {
+	p := &c4v1.Project{Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{Policy: &c4v1.ProjectPolicy{Values: map[string]string{SubmissionPendingFor: "1m"}}}}}
+	if d, use := Duration(nil, p, -1, SubmissionPendingFor); d != 10*time.Minute || use.From.Scope != "farm" {
+		t.Fatalf("under the floor: %v %+v", d, use)
+	}
+	p.Spec.Work.Policy.Values[SubmissionPendingFor] = "5m"
+	if d, _ := Duration(nil, p, -1, SubmissionPendingFor); d != 5*time.Minute {
+		t.Fatalf("over it: %v", d)
+	}
+}

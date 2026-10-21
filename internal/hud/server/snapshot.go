@@ -207,7 +207,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	aj := api.Job{Namespace: j.Namespace, Name: j.Name, Project: r.project, Class: j.Spec.Class, Driver: j.Spec.Class,
 		Owner: j.Annotations["c4.avalanche.io/owner"], Note: j.Annotations[authoring.AnnotationNote], Phase: st.Phase, Order: st.Order, Rank: int(st.Rank),
 		Pools: j.Spec.Pools, DependsOn: []string{}, CreatedAt: j.CreationTimestamp.Time.UTC(),
-		Nudge:     api.Nudge{Hold: j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop, Boost: num(j.Spec.Nudge.Boost)},
+		Nudge:     api.Nudge{Hold: (j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop) && !pendingJob(j), Boost: num(j.Spec.Nudge.Boost)},
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}
 	aj.Shot = j.Labels[LabelShot]
 	aj.TrackerRef = j.Annotations[c4v1.AnnotationTrackerRef]
@@ -667,6 +667,9 @@ func shownRisk(now time.Time, st *c4v1.WorkJobStatus, queued string) string {
 
 // noETA says, in plain words, why the scheduler projects no ETA for a job.
 func noETA(m *model, j *c4v1.WorkJob, hasDeadline bool, running int) string {
+	if pendingJob(j) {
+		return "being submitted: it runs once its submission's jobs are all made"
+	}
 	if j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop {
 		return "held"
 	}

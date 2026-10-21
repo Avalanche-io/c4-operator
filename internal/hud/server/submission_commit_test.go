@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -227,7 +228,8 @@ func (tr *trap) install(s *Server) {
 // step fails gets nothing left behind and no stray record. Either way a
 // retry with the same key duplicates nothing.
 func TestSubmissionClientHangsUpAtEachStep(t *testing.T) {
-	steps := []step{{"create", 1}, {"create", 2}, {"sign", 1}, {"patch", 1}, {"patch", 2}}
+	// patch 1 and 2 put the record on, 3 and 4 take the holds off.
+	steps := []step{{"create", 1}, {"create", 2}, {"sign", 1}, {"patch", 1}, {"patch", 2}, {"patch", 3}, {"patch", 4}}
 	for _, st := range steps {
 		for _, fail := range []bool{false, true} {
 			name := st.verb + "-" + string(rune('0'+st.n))
@@ -357,7 +359,7 @@ func TestSubmissionHeldUntilAllMade(t *testing.T) {
 		t.Fatal(err)
 	}
 	made := workJob(t, s, "held")
-	if err := s.release(context.Background(), made, "rec"); err != nil {
+	if err := s.release(context.Background(), made, "rec", true); err != nil {
 		t.Fatal(err)
 	}
 	if j := workJob(t, s, "held"); !j.Spec.Nudge.Hold || j.Annotations[AnnotationSubmissionPending] != "" || j.Annotations[AnnotationSubmissionHoldAsked] != "" {
@@ -473,11 +475,215 @@ func modelOf(t *testing.T, s *Server) {
 	}
 	m := &model{byKey: map[string]*jobRec{}}
 	for _, j := range list.Items {
-		rec := &jobRec{job: j, key: j.Namespace + "/" + j.Name}
+		rec := &jobRec{job: j, key: j.Namespace + "/" + j.Name, project: j.Namespace} // show-a is both
 		m.jobs = append(m.jobs, rec)
 		m.byKey[rec.key] = rec
 	}
 	s.mu.Lock()
 	s.m = m
 	s.mu.Unlock()
+}
+
+// stale is a client whose cache has not seen what was just written: Get
+// and List of WorkJobs miss. The submission reads through Reader.
+func stale(s *Server) {
+	s.Reader = s.Client
+	s.Client = interceptor.NewClient(s.Client.(client.WithWatch), interceptor.Funcs{
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			if _, ok := obj.(*c4v1.WorkJob); ok {
+				return apierrors.NewNotFound(c4v1.GroupVersion.WithResource("workjobs").GroupResource(), key.Name)
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*c4v1.WorkJobList); ok {
+				return nil
+			}
+			return c.List(ctx, list, opts...)
+		}})
+}
+
+// A submission's release and its key's answer read what was just written
+// from the API server, not a cache that has not seen it yet.
+func TestSubmissionReadsTheAPIServer(t *testing.T) {
+	s, _ := commitFarm(t)
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	stale(s)
+	body := api.SubmissionRequest{Submission: submission(t, "proxies-movie", tree), Key: "k-stale"}
+	if code, out := submit(t, s, body); code != http.StatusCreated || len(out.Jobs) != 2 {
+		t.Fatalf("a stale cache rolled a good submission back: %d %+v", code, out)
+	}
+	if code, out := submit(t, s, body); code != http.StatusOK || len(out.Jobs) != 2 || out.Jobs[0].Name != "sm0140-proxies-v001" {
+		t.Fatalf("the retry: %d %+v", code, out)
+	}
+	var list c4v1.WorkJobList
+	if err := s.Reader.List(context.Background(), &list); err != nil || len(list.Items) != 2 {
+		t.Fatalf("jobs: %d %v", len(list.Items), err)
+	}
+}
+
+// A key names one submission: the same key with another file is refused;
+// a key lapses after submission.keyFor.
+func TestSubmissionKeyNamesOneSubmission(t *testing.T) {
+	s, _ := commitFarm(t)
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	first := submission(t, "proxies-movie", tree)
+	if code, _ := submit(t, s, api.SubmissionRequest{Submission: first, Key: "k1"}); code != http.StatusCreated {
+		t.Fatalf("first: %d", code)
+	}
+	other := []byte(strings.Replace(string(first), `"jobs"`, `"note":"another take","jobs"`, 1))
+	code, out := submit(t, s, api.SubmissionRequest{Submission: other, Key: "k1"})
+	if code != http.StatusConflict || len(out.Errors) != 1 || out.Errors[0].Path != "key" || !strings.Contains(out.Errors[0].Message, "another submission") {
+		t.Fatalf("the same key, another file: %d %+v", code, out)
+	}
+	// Past its lifetime the key is free: the jobs it named are old.
+	ctx := context.Background()
+	var list c4v1.WorkJobList
+	if err := s.Client.List(ctx, &list); err != nil {
+		t.Fatal(err)
+	}
+	for i := range list.Items {
+		j := &list.Items[i]
+		j.CreationTimestamp = metav1.NewTime(time.Now().Add(-48 * time.Hour))
+		if err := s.Client.Update(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if code, out := submit(t, s, api.SubmissionRequest{Submission: other, Key: "k1"}); code != http.StatusCreated || out.Jobs[0].Name != "sm0140-proxies-v002" {
+		t.Fatalf("a lapsed key: %d %+v", code, out)
+	}
+}
+
+// The rollback has a window of its own: a request whose time is gone
+// still has its jobs deleted, and a signed submission's withdrawal names
+// what was deleted, signed by the farm after the deletes.
+func TestRollbackHasItsOwnWindow(t *testing.T) {
+	s, dir := commitFarm(t)
+	ctx := context.Background()
+	var made []madeJob
+	for _, n := range []string{"a-v001", "b-v001"} {
+		j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Name: n, Namespace: "show-a", UID: types.UID("u-" + n)}, Spec: c4v1.WorkJobSpec{Class: "render"}}
+		if err := s.Client.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+		made = append(made, madeJob{job: workJob(t, s, n)})
+	}
+	done, cancel := context.WithTimeout(ctx, time.Nanosecond)
+	defer cancel()
+	<-done.Done()
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/submissions", nil).WithContext(done)
+	out := s.rollback(r, &api.Viewer{User: "maya"}, &authoring.Plan{Project: "show-a", Namespace: "show-a"}, made, "movie", "c4rec", "att1")
+	if len(out.left) != 0 || out.unsigned {
+		t.Fatalf("rolled back: %+v", out)
+	}
+	if jobs := listJobs(t, s); len(jobs) != 0 {
+		t.Fatalf("left: %v", jobs)
+	}
+	if _, wds := signed(t, dir); wds != 1 {
+		t.Fatalf("withdrawals: %d", wds)
+	}
+}
+
+// Release is two passes: when the first hold comes off, every job already
+// carries the record and is still held.
+func TestReleaseInTwoPasses(t *testing.T) {
+	s, _ := commitFarm(t)
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	var seen []string
+	var mu sync.Mutex
+	inner := s.Client.(client.WithWatch)
+	s.Client = interceptor.NewClient(inner, interceptor.Funcs{
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, p client.Patch, opts ...client.PatchOption) error {
+			if j, ok := obj.(*c4v1.WorkJob); ok && !j.Spec.Nudge.Hold && len(seen) == 0 {
+				var list c4v1.WorkJobList
+				_ = c.List(ctx, &list)
+				mu.Lock()
+				for _, x := range list.Items {
+					seen = append(seen, fmt.Sprintf("%s held=%v record=%v", x.Name, x.Spec.Nudge.Hold, x.Annotations[authoring.AnnotationSubmissionRecord] != ""))
+				}
+				mu.Unlock()
+			}
+			return c.Patch(ctx, obj, p, opts...)
+		}})
+	if code, out := submit(t, s, api.SubmissionRequest{Submission: submission(t, "proxies-movie", tree)}); code != http.StatusCreated {
+		t.Fatalf("%d %+v", code, out)
+	}
+	if strings.Join(seen, "; ") != "sm0140-movie-v001 held=true record=true; sm0140-proxies-v001 held=true record=true" {
+		t.Fatalf("at the first release: %v", seen)
+	}
+}
+
+// A job being submitted cannot have its hold changed, and reads as being
+// submitted, not held.
+func TestPendingJobIsNotAPersonsHold(t *testing.T) {
+	s, _ := commitFarm(t)
+	ctx := context.Background()
+	j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Name: "sm0140-proxies-v001", Namespace: "show-a",
+		Annotations: map[string]string{AnnotationSubmissionPending: time.Now().Add(time.Hour).UTC().Format(time.RFC3339)}},
+		Spec: c4v1.WorkJobSpec{Class: "render", Nudge: c4v1.WorkNudge{Hold: true}}}
+	if err := s.Client.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	modelOf(t, s)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/jobs/show-a/sm0140-proxies-v001/nudge?as=wrangler", strings.NewReader(`{"hold": false}`)))
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "being submitted") {
+		t.Fatalf("nudge: %d %s", w.Code, w.Body)
+	}
+	if !workJob(t, s, "sm0140-proxies-v001").Spec.Nudge.Hold {
+		t.Fatal("released by a nudge")
+	}
+	m := s.current()
+	got := s.jobSummary(m, m.jobs[0])
+	if got.Nudge.Hold || !strings.Contains(noETA(m, &m.jobs[0].job, false, 0), "being submitted") {
+		t.Fatalf("shown as %+v / %q", got.Nudge, noETA(m, &m.jobs[0].job, false, 0))
+	}
+}
+
+// The sweep withdraws, signed by the farm, an attempt that was signed for
+// before the HUD stopped.
+func TestSweepWithdrawsASignedAttempt(t *testing.T) {
+	s, dir := commitFarm(t)
+	ctx := context.Background()
+	past := time.Now().Add(-time.Minute).UTC().Format(time.RFC3339)
+	j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Name: "a-v001", Namespace: "show-a", Annotations: map[string]string{
+		AnnotationSubmissionAttempt: "att", AnnotationSubmissionPending: past, authoring.AnnotationSubmissionRecord: "c4rec"}},
+		Spec: c4v1.WorkJobSpec{Class: "render"}}
+	if err := s.Client.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	modelOf(t, s)
+	s.sweepSubmissions(ctx, time.Now())
+	if jobs := listJobs(t, s); len(jobs) != 0 {
+		t.Fatalf("left: %v", jobs)
+	}
+	if _, wds := signed(t, dir); wds != 1 {
+		t.Fatalf("withdrawals: %d", wds)
+	}
+}
+
+// A job a failed attempt could not delete is marked failed: a retry with
+// the key does not wait for it, and keys' locks do not pile up.
+func TestFailedLeftoverDoesNotBlockTheKey(t *testing.T) {
+	s, _ := commitFarm(t)
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	tr := &trap{at: step{"create", 2}, fail: true, failDeletes: "sm0140-proxies-v001"}
+	tr.install(s)
+	body := api.SubmissionRequest{Submission: submission(t, "proxies-movie", tree), Key: "k-left"}
+	if code, _ := submit(t, s, body); code < 400 {
+		t.Fatalf("first: %d", code)
+	}
+	if a := workJob(t, s, "sm0140-proxies-v001").Annotations; a[AnnotationSubmissionFailed] != "true" {
+		t.Fatalf("not marked failed: %v", a)
+	}
+	tr.mu.Lock()
+	tr.at, tr.failDeletes = step{}, ""
+	tr.mu.Unlock()
+	code, out := submit(t, s, body)
+	if code != http.StatusCreated || out.Jobs[0].Name != "sm0140-proxies-v002" {
+		t.Fatalf("the retry waited for a leftover: %d %+v", code, out)
+	}
+	if n := s.submitKeys.size(); n != 0 {
+		t.Fatalf("%d key locks kept", n)
+	}
 }

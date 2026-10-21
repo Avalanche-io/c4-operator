@@ -29,7 +29,7 @@ type SubmitIn struct {
 	SubmissionYAML string          `json:"submission_yaml,omitempty" jsonschema:"the same submission as YAML text, as a person writes it; jobs keep the order written"`
 	DryRun         bool            `json:"dry_run,omitempty" jsonschema:"check and plan only: return each job's estimate (units, ETA p50 and p90, slack, on track or not), create nothing. Do this first and show the person the estimate"`
 	Explain        bool            `json:"explain,omitempty" jsonschema:"also return what each job lowers to in the operator (class, inputs, image, units), as text"`
-	Key            string          `json:"key,omitempty" jsonschema:"makes a retry safe: send the key an earlier answer gave (or one of your own) when you submit the same thing again after an error or a timeout, and the farm answers with the jobs it made then rather than making them twice"`
+	Key            string          `json:"key,omitempty" jsonschema:"always pass one: a short name of your own for this submission (the same one on every retry of it, a new one for the next): a retry after an error or a timeout is then answered with the jobs the farm made, never a second set"`
 
 	// The raw form: one job, an image and its command, instead of a
 	// submission.
@@ -138,6 +138,10 @@ func (c *Client) submitJob(ctx context.Context, _ *mcp.CallToolRequest, in Submi
 	return c.postSubmission(ctx, doc, in.DryRun, in.Explain, in.Key)
 }
 
+// submitTimeout bounds one submission's call: more than the two minutes
+// the HUD may take to make it and the thirty to roll it back.
+const submitTimeout = 3 * time.Minute
+
 // postSubmission sends a submission document (JSON, keys in the order
 // written) to POST /submissions; a refusal with errors (422, or 403 and
 // 404 for a job the farm would not create) is an answer, not an error:
@@ -153,10 +157,17 @@ func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun
 		key = hex.EncodeToString(b)
 	}
 	var r api.SubmissionResponse
-	err := c.do(ctx, "POST", "/submissions", api.SubmissionRequest{Submission: doc, DryRun: dryRun, Explain: explain, Key: key}, &r)
+	// Longer than the HUD takes to make a submission and roll it back.
+	sctx, cancel := context.WithTimeout(ctx, submitTimeout)
+	defer cancel()
+	err := c.do(sctx, "POST", "/submissions", api.SubmissionRequest{Submission: doc, DryRun: dryRun, Explain: explain, Key: key}, &r)
 	var ae *APIError
 	if errors.As(err, &ae) && json.Unmarshal(ae.Body, &r) == nil && len(r.Errors) > 0 {
 		err = nil
+	}
+	if err != nil && !dryRun {
+		// The farm may have made it: the retry must carry the same key.
+		return nil, SubmitOut{}, fmt.Errorf("%v; it was sent with key %q: to retry, send the same submission again with key %q, and nothing is made twice", err, key, key)
 	}
 	if err != nil {
 		return nil, SubmitOut{}, err

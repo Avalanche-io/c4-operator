@@ -139,6 +139,11 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				Message: "proxies is " + pv + " now; its form changed", Fix: "draw it again"}}})
 			return
 		}
+		if strings.Contains(string(body), "crash") {
+			w.WriteHeader(http.StatusInternalServerError)
+			json.NewEncoder(w).Encode(map[string]any{"error": "the HUD fell over"})
+			return
+		}
 		if strings.Contains(string(body), "karmah") {
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			json.NewEncoder(w).Encode(map[string]any{"ok": false, "errors": []api.FieldError{{Path: "jobs.light.tool", Message: `no tool "karmah" in show-a`,
@@ -863,5 +868,17 @@ func TestDescriptionsNameRealTools(t *testing.T) {
 				t.Errorf("%s's description names %s, which is not a tool", tl.Def.Name, n)
 			}
 		}
+	}
+}
+
+// A submission whose answer never came says which key it went with, so the
+// retry carries it and the farm makes nothing twice.
+func TestSubmitFailureCarriesTheKey(t *testing.T) {
+	hud := &fakeHUD{tools: true}
+	cs := session(t, hud, "tok-noor")
+	res, _ := call(t, cs, "c4_submit_job", map[string]any{"submission": map[string]any{"c4": "submit/1", "project": "show-a", "shot": "crash",
+		"jobs": map[string]any{"proxies": map[string]any{"tool": "proxies", "frames": "1001-1048"}}}, "key": "take-1"})
+	if !res.IsError || !strings.Contains(text(res), `key "take-1"`) {
+		t.Fatalf("%q", text(res))
 	}
 }

@@ -984,18 +984,22 @@ refused: "proxies is v5 now; its form changed: draw it again".
 
 It is all or nothing, whatever the client does. Every job is checked as
 `POST /jobs` checks it before the first is made. The jobs are created
-held, so none of their units runs, the submission is signed for once they
-all exist, and they are released together. If a create, the signature or
+held, so none of their units runs (and nobody may change their hold:
+`409`; the HUD shows them as being submitted), the submission is signed
+for once they all exist, and they are released together: the record goes
+on every job while all are held, then the holds come off. If a create, the signature or
 the release fails, the jobs made are deleted, each only while it is still
 the job made, and booked so; a submission already signed for gets a
-signed withdrawal; a job that could not be deleted is named in the
-refusal. All of this goes on if the client hangs up. A HUD that stops
+withdrawal, signed by the farm after the deletes, naming what was deleted
+and what was left; a job that could not be deleted is named in the
+refusal. The rollback has a window of its own, so a submission that ran
+out of time is still rolled back. All of this goes on if the client hangs up. A HUD that stops
 midway leaves its jobs held and marked pending
 (`c4.avalanche.io/submission-pending`) until `submission.pendingFor` (10
-minutes, a project policy value), after which they are deleted with every
-job of their attempt. A name taken meanwhile is numbered past and the
-jobs made again, never reported; a job's `version` is never numbered
-again. Every refusal is `{ path,
+minutes, a project policy value, at least 3), after which they are deleted
+with every job of their attempt, and a signed attempt is withdrawn. A name
+taken meanwhile is numbered past and the jobs made again, never reported; a
+job's `version` is never numbered again. Every refusal is `{ path,
 message, fix }` in the farm's words, at a dotted path (`jobs.comp.after`,
 `jobs.movie` for a job the farm would not take): `422` for the file or the
 farm's policy, `403` without access, `404` for a project the viewer cannot
@@ -1017,7 +1021,10 @@ its class: `503`, try again.
 text) and sends the same key on every retry: the request is answered
 once. A retry is given the jobs the first made (`200`, "submitted
 already, with this key"), or `409` at `key` while they are still being
-made, never a second set. Keys are the submitter's own. Without a key the
+made, never a second set. A key names one submission: sent with another
+file it is refused at `key` (`409`). Keys are the submitter's own, and
+answer for `submission.keyFor` (24 hours); after that the same key makes
+a new submission. Without a key the
 same file sent twice is two submissions, the second numbered past the
 first. MCP's tools send one and give it back (`key`).
 

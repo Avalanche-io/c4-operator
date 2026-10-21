@@ -155,6 +155,12 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "%v", err)
 		return
 	}
+	if pendingJob(j) && (body.Hold != nil || body.HoldStop != nil) {
+		// Its submission holds it until all its jobs are made, then
+		// releases them together (submission_commit.go).
+		fail(w, http.StatusConflict, "%s is being submitted: it is held until its submission's jobs are all made; change its hold after that", j.Name)
+		return
+	}
 	patch := client.MergeFrom(j.DeepCopy())
 	before := queue.SpecDigest(j)
 	var did []string
