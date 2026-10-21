@@ -124,6 +124,9 @@ type Server struct {
 	// DryRunAll plans a submission's jobs together (POST /submissions);
 	// nil plans each alone with DryRun.
 	DryRunAll DryRunAllFunc
+	// AgentEnv is the version (C4 ID) of the agent environment blocks
+	// run in by default ($C4_AGENT_ENV); "" sets none.
+	AgentEnv string
 	// Forecast is the queue's last forecast pass (DESIGN.md 10.12),
 	// unscoped; nil answers GET /capacity/forecast with 503.
 	Forecast func() api.CapacityForecast

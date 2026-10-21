@@ -101,6 +101,9 @@ func (f *hudFarm) Location(project string) *time.Location {
 // nothing to check against; lowering refuses policy: for now.
 func (f *hudFarm) Policy(string) *authoring.FarmPolicy { return nil }
 
+// AgentEnv is the farm's clean agent environment (Server.AgentEnv).
+func (f *hudFarm) AgentEnv() string { return f.s.AgentEnv }
+
 // HostPools are the pools whose nodes are host runners (their node
 // selector names the host label), with the owners whose jobs they take.
 func (f *hudFarm) HostPools() []authoring.HostPool {

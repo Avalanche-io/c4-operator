@@ -29,6 +29,7 @@ type fixtureFarm struct {
 	ToolsV   map[string]string      `json:"tools"`
 	Policies map[string]*FarmPolicy `json:"policies"`
 	Hosts    []HostPool             `json:"hostPools"`
+	Env      string                 `json:"agentEnv"`
 	tools    map[string]*Tool
 }
 
@@ -98,6 +99,7 @@ func (f *fixtureFarm) Cut(p, shot string) string   { return f.Projects[p].Shots[
 func (f *fixtureFarm) Policy(p string) *FarmPolicy { return f.Policies[p] }
 func (f *fixtureFarm) Trackers(string) []string    { return nil }
 func (f *fixtureFarm) HostPools() []HostPool       { return f.Hosts }
+func (f *fixtureFarm) AgentEnv() string            { return f.Env }
 
 // The fixtures' milestones are on New York time.
 func (f *fixtureFarm) Location(string) *time.Location {

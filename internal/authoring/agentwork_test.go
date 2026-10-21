@@ -29,6 +29,7 @@ params:
 - {name: model, type: STRING, default: "", show: advanced}
 - {name: effort, type: STRING, allowedValues: ["", low, medium, high, xhigh, max], default: "", show: advanced}
 - {name: allow, type: STRING, default: "Read Edit Write Glob Grep Bash(git:*)", show: advanced}
+- {name: env, type: STRING, default: "", show: advanced}
 needs: {network: [model-api]}
 reuse: never
 `
@@ -48,6 +49,7 @@ func agentFarm(t *testing.T) *fixtureFarm {
 		}
 		f.ToolsV[name], f.tools[name] = "v1", tl
 	}
+	f.Env = "c4farmenv"
 	f.Hosts = []HostPool{{Name: "laptop", Owners: []string{"dev"}}, {Name: "theirs", Owners: []string{"someone"}}}
 	return f
 }
@@ -114,7 +116,7 @@ jobs:
 	}
 	env := envMap(spec)
 	for k, v := range map[string]string{"C4_AGENT_BLOCK": "1", "C4_BLOCK_PROFILE": "agent", "C4_BLOCK_REPO": "/Users/dev/textkit",
-		"C4_BLOCK_TOOLS": "Read Edit Write Glob Grep Bash(git:*)", "C4_BLOCK_EFFORT": "high"} {
+		"C4_BLOCK_TOOLS": "Read Edit Write Glob Grep Bash(git:*)", "C4_BLOCK_EFFORT": "high", "C4_AGENT_ENV": "c4farmenv"} {
 		if env[k] != v {
 			t.Errorf("template %s = %q, want %q", k, env[k], v)
 		}
@@ -144,7 +146,7 @@ func TestLowerAgentPlan(t *testing.T) {
 	planFile := []byte(`version: 1
 blocks:
 - {name: scan, params: {task: "port scan", model: m1, functions: "14"}}
-- {name: format, after: [scan], planned: false, reasoning: {effort: low}, params: {task: "port format", effort: max}}
+- {name: format, after: [scan], planned: false, reasoning: {effort: low}, params: {task: "port format", effort: max, env: c4blockenv}}
 - {name: api-break, wait: {server: "person:owner", ask: "Keep the old signature?"}, before: [format]}
 `)
 	plan, errs := lowerAgentDoc(t, agentFarm(t), `c4: submit/1
@@ -155,7 +157,7 @@ jobs:
   port:
     tool: agent
     plan: port.plan.yaml
-    with: {model: m0, effort: high}
+    with: {model: m0, effort: high, env: c4jobenv}
 `, Inputs{Owner: "dev", Plans: map[string][]byte{"port.plan.yaml": planFile}})
 	if len(errs) > 0 {
 		t.Fatal(errs)
@@ -177,6 +179,14 @@ jobs:
 	if format.Env["C4_BLOCK_PROMPT"] != "port format" || format.Env["C4_BLOCK_MODEL"] != "m0" || format.Env["C4_BLOCK_EFFORT"] != "low" ||
 		format.Reasoning.Effort != "low" || format.Reasoning.Model != "m0" || format.Planned {
 		t.Fatalf("format: %+v %+v", format, format.Reasoning)
+	}
+	// The job's with.env replaces the farm's environment; a block's own
+	// env param replaces the job's, for that block.
+	if env := envMap(agentSpec(t, j)); env["C4_AGENT_ENV"] != "c4jobenv" {
+		t.Errorf("the job's environment: %q", env["C4_AGENT_ENV"])
+	}
+	if format.Env["C4_AGENT_ENV"] != "c4blockenv" || scan.Env["C4_AGENT_ENV"] != "c4jobenv" {
+		t.Errorf("blocks' environments: %q %q", format.Env["C4_AGENT_ENV"], scan.Env["C4_AGENT_ENV"])
 	}
 	if wait.Wait == nil || wait.Env != nil || wait.Reasoning != nil {
 		t.Fatalf("the wait: %+v", wait)

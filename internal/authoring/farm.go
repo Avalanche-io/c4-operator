@@ -58,6 +58,9 @@ type Farm interface {
 	Trackers(project string) []string
 	// HostPools are the pools of host runners, which run agent work.
 	HostPools() []HostPool
+	// AgentEnv is the version (C4 ID) of the agent environment a block's
+	// session runs in unless its job or block names another; "" for none.
+	AgentEnv() string
 }
 
 // FarmPolicy is a project's policy as a submission sees it: the sets it

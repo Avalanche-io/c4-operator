@@ -51,6 +51,7 @@ var blockEnv = []struct{ param, env string }{
 	{"allow", "C4_BLOCK_TOOLS"},
 	{"model", "C4_BLOCK_MODEL"},
 	{"effort", "C4_BLOCK_EFFORT"},
+	{"env", "C4_AGENT_ENV"},
 }
 
 // LowerWith is Lower with what the request carries beside the document.
@@ -194,6 +195,12 @@ func (c *subCtx) lowerAgent(j *Job, tj toolJob) (*api.SubmitRequest, []byte, []E
 	for _, b := range blockEnv {
 		if v := paramString(params[b.param]); v != "" && b.param != "task" {
 			env = append(env, corev1.EnvVar{Name: b.env, Value: v})
+		}
+	}
+	if v := paramString(params["env"]); v == "" {
+		// the farm's clean environment, unless the job names another
+		if e := c.farm.AgentEnv(); e != "" {
+			env = append(env, corev1.EnvVar{Name: "C4_AGENT_ENV", Value: e})
 		}
 	}
 	if tj.shot != "" {
