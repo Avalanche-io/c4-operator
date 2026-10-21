@@ -1,0 +1,8 @@
+# The build context is the repository root; this image needs only these.
+*
+!go.mod
+!go.sum
+!cmd/c4-unit/
+!internal/needs/
+!schema/
+!images/runtime-oiio/
