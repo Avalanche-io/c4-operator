@@ -784,3 +784,65 @@ func TestAUnitsJobNamesItsOwnersPools(t *testing.T) {
 		t.Errorf("a pool that runs anyone's: %d %q", code, msg)
 	}
 }
+
+// On a farm bound as its owner's alone (onePerson) behind the installer's
+// token, that owner is the farm's one person, so a unit of their job may
+// submit for them without a SubjectAccessReview, whatever
+// --single-person-farm says. Bound any other way, or on a HUD the token
+// does not guard, the owner is asked about like anyone.
+func TestAUnitsJobOnABoundFarm(t *testing.T) {
+	s := submitFarm(t)
+	ctx := context.Background()
+	kube := kfake.NewSimpleClientset()
+	kube.PrependReactor("create", "subjectaccessreviews", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, &authzv1.SubjectAccessReview{}, nil // no one may, by RBAC
+	})
+	s.Kube = kube
+	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port", UID: "uid-port", Annotations: map[string]string{c4v1.AnnotationOwner: "noor"}},
+		Spec: c4v1.WorkJobSpec{Class: "agent", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+	b := &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", OnePerson: true, For: []string{"task/v1"}, Start: metav1.Now(), By: "noor"}}
+	for _, o := range []client.Object{parent, b} {
+		if err := s.Client.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.SinglePerson = "someone-else"
+	s.DevViewersOpen, s.InstallerToken = false, []byte(testInstallerToken)
+	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/port/0", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "port", JobUID: "uid-port", Unit: "0", Grant: "project"}}
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-2"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+	submit := func(name string) (int, string) {
+		raw, _ := json.Marshal(api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: name, Spec: spec})
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/jobs?as=unit", bytes.NewReader(raw))
+		if !s.DevViewersOpen {
+			r.Header.Set(InstallerHeader, testInstallerToken)
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		return w.Code, w.Body.String()
+	}
+	if code, out := submit("child"); code != http.StatusCreated {
+		t.Errorf("the bound owner's unit: %d %s", code, out)
+	}
+
+	// bound to noor, but not as one person's farm
+	b.Spec.OnePerson = false
+	if err := s.Client.Update(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if code, out := submit("child-shared"); code != http.StatusForbidden {
+		t.Errorf("a farm bound to noor, not one person's: %d %s", code, out)
+	}
+
+	// one person's, but the HUD's development viewers are open to anyone
+	b.Spec.OnePerson = true
+	if err := s.Client.Update(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	s.DevViewersOpen, s.InstallerToken = true, nil
+	if code, out := submit("child-open"); code != http.StatusForbidden {
+		t.Errorf("a one-person binding on an unguarded HUD: %d %s", code, out)
+	}
+}

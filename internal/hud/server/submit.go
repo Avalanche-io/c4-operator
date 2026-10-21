@@ -620,9 +620,10 @@ func poolsRefuse(m *model, owner string, pools []string) string {
 // submission there would be, with the groups recorded when parent was
 // made, never the unit's rights or the HUD's. Where parent recorded no
 // groups only what owner is given by name counts, and the refusal says
-// so. On a single-person farm its one person always may.
+// so. On a single-person farm its one person (the farm binding's owner,
+// else --single-person-farm) always may.
 func (s *Server) ownerMay(ctx context.Context, parent *c4v1.WorkJob, owner, ns string) (int, error) {
-	if one := s.singlePersonFlag(); one != "" && owner == one {
+	if one := s.singlePerson(ctx); one != "" && owner == one {
 		return 0, nil
 	}
 	var groups []string
