@@ -98,3 +98,26 @@ What the hydra recipe needed, beyond the first draft:
   type passes the stage's settings prim (the stage's `renderSettingsPrimPath`,
   else the first RenderSettings prim), so the shot camera and its frame
   are used.
+
+## Runtime images
+
+The runtimes a tool names in `runs.image` (TOOL.md section 2.3), as
+`c4/runtime-<name>`: `ghcr.io/avalanche-io/c4-runtime-<name>:<version>`.
+Unlike the job images they carry no application of their own. The tool's
+script arrives as content at `$C4_TOOLS`, so a tool's version is its tree.
+Each one starts with the same steps (Debian, bash, coreutils, findutils,
+CA certificates, `c4-unit`, uid 65532, nothing setuid), so the images share
+those layers in the registry and on every node.
+
+| image               | adds                                                                        |
+| ------------------- | --------------------------------------------------------------------------- |
+| `c4-runtime-base`   | nothing more: bash tools                                                    |
+| `c4-runtime-python` | Python 3.13 in a venv on PATH, with pip, NumPy and PyYAML                   |
+| `c4-runtime-oiio`   | OpenImageIO (oiiotool and Python) with OpenColorIO 2.2+ built in            |
+| `c4-runtime-torch`  | `c4-runtime-python` and PyTorch for the CPU (`TORCH_INDEX` for a GPU build) |
+
+```sh
+make runtime-images                  # every runtime, OCI archives in bin/
+make runtime-images PUSH=1 REGISTRY=ghcr.io/avalanche-io VERSION=v0.1.0
+make runtime-images-dev              # this machine's architecture, loaded as c4-runtime-<name>:dev
+```

@@ -16,9 +16,12 @@ LDFLAGS := -s -w -X main.version=$(VERSION)
 comma := ,
 # The prebuilt job images (images/<name>/Dockerfile), named c4-job-<name>.
 JOB_IMAGES ?= oiio media usd ci train infer sim hydra
+# The runtimes a tool runs on (images/runtime-<name>/Dockerfile), named
+# c4-runtime-<name>: TOOL.md section 2.3.
+RUNTIME_IMAGES ?= base python oiio torch
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev job-image-names tool-locks job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -139,6 +142,27 @@ job-images:
 	    $(if $(PUSH),--push,--output type=oci$(comma)dest=bin/c4-job-$$i-$(VERSION).oci.tar) . || exit 1; \
 	done
 
+# The runtime images, as job-images builds the job images: OCI archives in
+# bin/, or with PUSH=1 $(REGISTRY)/c4-runtime-<name>:$(VERSION)$(TAG_SUFFIX).
+runtime-images:
+	@mkdir -p bin
+	@for i in $(RUNTIME_IMAGES); do \
+	  echo "build c4-runtime-$$i ($(PLATFORMS))"; \
+	  docker buildx build --platform $(PLATFORMS) -f images/runtime-$$i/Dockerfile \
+	    -t $(REGISTRY)/c4-runtime-$$i:$(VERSION)$(TAG_SUFFIX) \
+	    --label org.opencontainers.image.version=$(VERSION) \
+	    --label org.opencontainers.image.revision=$$(git rev-parse HEAD) \
+	    $(if $(PUSH),--push,--output type=oci$(comma)dest=bin/c4-runtime-$$i-$(VERSION).oci.tar) . || exit 1; \
+	done
+
+# The runtime images for this machine, loaded as c4-runtime-<name>:dev.
+runtime-images-dev:
+	@for i in $(RUNTIME_IMAGES); do \
+	  echo "build c4-runtime-$$i:dev (linux/$(ARCH))"; \
+	  docker buildx build --platform linux/$(ARCH) -f images/runtime-$$i/Dockerfile \
+	    -t c4-runtime-$$i:dev --label org.opencontainers.image.revision=$$(git rev-parse HEAD) --load . || exit 1; \
+	done
+
 # The job images for this machine's architecture, loaded into its Docker as
 # c4-job-<name>:dev: what a development c4-farm's tool test runs and what
 # `c4 farm image load c4-job-<name>:dev` gives a local farm. Rebuild them
@@ -205,6 +229,10 @@ stress:
 # The job images' names, for scripts (the release workflow).
 job-image-names:
 	@echo $(JOB_IMAGES)
+
+# The runtime images' names, for scripts (the release workflow).
+runtime-image-names:
+	@echo $(RUNTIME_IMAGES)
 
 # The prebuilt tools' tool.lock files (tools/<name>/tool.lock), pinning
 # their images at VERSION by digest, as publishing does. The release build

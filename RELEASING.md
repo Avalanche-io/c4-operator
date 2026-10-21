@@ -57,9 +57,9 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
    ```
    The `release` workflow builds and pushes the images and drafts the
    release.
-10. **Joshua: make the GHCR packages public**: Packages, `c4-operator`
-    and each `c4-job-*`, Package settings, Change visibility, Public; and
-    connect each to the repository if GitHub has not.
+10. **Joshua: make the GHCR packages public**: Packages, `c4-operator`,
+    each `c4-job-*` and each `c4-runtime-*`, Package settings, Change
+    visibility, Public; and connect each to the repository if GitHub has not.
 11. **Joshua: review and publish the draft release** (notes, `install.yaml`,
     archives, checksums).
 12. **Joshua: flip the repository public**: Settings, General, Change

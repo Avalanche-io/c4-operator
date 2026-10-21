@@ -42,7 +42,7 @@ jobs:
         registry: ghcr.io
         username: ${{ github.actor }}
         password: ${{ secrets.GITHUB_TOKEN }}
-    - run: make job-images PUSH=1 PLATFORMS=linux/${{ matrix.arch }} VERSION=${{ github.ref_name }} TAG_SUFFIX=-${{ matrix.arch }}
+    - run: make job-images runtime-images PUSH=1 PLATFORMS=linux/${{ matrix.arch }} VERSION=${{ github.ref_name }} TAG_SUFFIX=-${{ matrix.arch }}
 
   # One multi-arch tag per image, from the two above.
   manifests:
@@ -58,8 +58,9 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     - run: |
         tag=${{ github.ref_name }}
-        for i in $(make -s job-image-names); do
-          img=ghcr.io/avalanche-io/c4-job-$i
+        for img in $(make -s job-image-names | tr ' ' '\n' | sed 's#^#c4-job-#') \
+                   $(make -s runtime-image-names | tr ' ' '\n' | sed 's#^#c4-runtime-#'); do
+          img=ghcr.io/avalanche-io/$img
           docker buildx imagetools create -t "$img:$tag" "$img:$tag-amd64" "$img:$tag-arm64"
         done
 
