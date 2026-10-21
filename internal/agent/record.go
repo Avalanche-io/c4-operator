@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 	"time"
 
@@ -97,22 +96,27 @@ func (r *Runner) Deployment() string {
 
 // chainOf says whom a host-run unit accrues to: run by the unit (and the
 // member it is), for its job's owner (read from the job, as the owner check
-// does), under that job's ownership, using its holder's own sign-in on this
-// machine, on this runner. Until deployments are bound (slice 2), no chain
-// is accountable, and the gap says so.
+// does), under that job, using the sign-in of this machine's holder, on
+// this runner (the holder's machine). The holder is the runner's, never the
+// job's: one sign-in serves every job here, so a runner shared by two owners
+// shows "for dana, using joshua's sign-in". Until the runner's deployment is
+// bound, no chain is accountable, and the gap says so.
 func (r *Runner) chainOf(ctx context.Context, p *corev1.Pod) *schema.Chain {
+	dep := r.Deployment()
+	holder := r.holder()
+	using := schema.Credential{SignIn: dep, Holder: holder}
+	if holder == "" {
+		using = schema.Credential{SignIn: dep, HolderSubject: "unknown"}
+	}
+	on := []schema.Deployment{{Deployment: dep, Owner: holder}}
 	var j c4v1.WorkJob
 	ref := metav1.GetControllerOf(p)
 	if ref == nil || ref.Kind != "WorkJob" || r.Client.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &j) != nil || j.UID != ref.UID {
-		return &schema.Chain{Act: "build", By: schema.Actor{Unit: p.Namespace + "/" + p.Name, Grade: schema.GradeDirect},
-			For: schema.For{Grade: schema.GradeClaimed}, Gap: "the pod is not a unit of a job this runner can read"}
+		return &schema.Chain{Act: "build", By: schema.Actor{Deployment: dep, Grade: schema.GradeDirect},
+			For:   schema.For{Subject: "pod " + p.Namespace + "/" + p.Name + ", of no job this runner can read", Grade: schema.GradeClaimed},
+			Using: []schema.Credential{using}, On: on, Gap: "the pod is not a unit of a job this runner can read"}
 	}
 	owner := j.Annotations[c4v1.AnnotationOwner]
-	holder := owner
-	if !slices.Contains(r.Owners, holder) && len(r.Owners) > 0 {
-		holder = r.Owners[0]
-	}
-	dep := r.Deployment()
 	uid := string(j.UID)
 	if len(uid) > 6 {
 		uid = uid[:6]
@@ -121,18 +125,31 @@ func (r *Runner) chainOf(ctx context.Context, p *corev1.Pod) *schema.Chain {
 		Act:   "build",
 		By:    schema.Actor{Unit: fmt.Sprintf("%s/%s@%s/%s", j.Namespace, j.Name, uid, p.Labels[c4v1.LabelUnit]), Agent: memberOf(p), Grade: schema.GradeDirect},
 		For:   schema.For{Party: owner, Grade: schema.GradeDirect},
-		Under: []schema.Delegation{{Job: j.Namespace + "/" + j.Name, Kind: "ownership", From: owner}},
-		Using: []schema.Credential{{SignIn: dep, Holder: holder}},
-		On:    []schema.Deployment{{Deployment: dep, Owner: holder}},
+		Under: []schema.Delegation{{Job: j.Namespace + "/" + j.Name, From: owner}},
+		Using: []schema.Credential{using},
+		On:    on,
 	}
 	switch {
 	case owner == "":
-		c.For = schema.For{Grade: schema.GradeClaimed}
+		c.For = schema.For{Subject: "no owner recorded on job " + j.Namespace + "/" + j.Name, Grade: schema.GradeClaimed}
+		c.Under = []schema.Delegation{{Job: j.Namespace + "/" + j.Name}}
 		c.Gap = "job " + j.Namespace + "/" + j.Name + " has no owner"
 	default:
 		c.Gap = "deployment " + dep + " has no binding"
 	}
 	return c
+}
+
+// holder is whose sign-in this machine's members use: --holder, else the
+// runner's one owner; "" when it has several and no --holder.
+func (r *Runner) holder() string {
+	if r.Holder != "" {
+		return r.Holder
+	}
+	if len(r.Owners) == 1 {
+		return r.Owners[0]
+	}
+	return ""
 }
 
 // recordEnd signs the record of a unit pod that is ending and notes it on

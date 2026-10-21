@@ -95,6 +95,9 @@ type Runner struct {
 	// version it names.
 	Signer  *provenance.Signer
 	Version string
+	// Holder is the person whose sign-in this machine's members use (the
+	// Claude Code config here); default the runner's owner, when it has one.
+	Holder string
 	// Farm names the farm in this runner's deployment name
 	// (<farm>/runner/<node>), as its records name it.
 	Farm string

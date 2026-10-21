@@ -384,6 +384,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	storeProject := fs.String("store-project", "", "the project to store documents in (default: the Project listing the pod's namespace)")
 	blocksCwd := fs.String("blocks-cwd", "", "run plan jobs' blocks (pods with C4_AGENT_BLOCK=1), each a fresh session started in this folder, which the claude CLI must trust; without it the runner runs registered members only")
 	signerURL := fs.String("signer", "", "the farm's certificate issuer (https://host:port): sign a task record for each unit this machine runs, as its node; without it, host-run units leave none")
+	holder := fs.String("holder", "", "the person whose Claude Code sign-in this machine's members use, named on each record's chain (default: --owner, when there is one)")
 	farm := fs.String("farm", "farm", "the farm's name, in this runner's deployment name (<farm>/runner/<node>) on its records")
 	signerToken := fs.String("signer-token-file", "", "with --signer: a file holding this machine's token for the issuer (its c4-hosts account, audience c4-signer)")
 	var owners multi
@@ -425,7 +426,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	if err != nil {
 		return err
 	}
-	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Owners: owners, Slots: *slots, YieldTimeout: *yieldTimeout, HardStopAfter: *hardStop,
+	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Owners: owners, Holder: *holder, Slots: *slots, YieldTimeout: *yieldTimeout, HardStopAfter: *hardStop,
 		Logf: func(f string, a ...any) { fmt.Fprintf(out, time.Now().Format("15:04:05 ")+f+"\n", a...) }}
 	if *blocksCwd != "" {
 		hook, err := blockHookCommand()
