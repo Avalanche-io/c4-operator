@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
 )
@@ -20,7 +21,13 @@ func Grant(ctx context.Context, c *Client, o Out, project string, req api.GrantR
 	if err := c.Do(ctx, "POST", "/grants", req, &r); err != nil {
 		return err
 	}
-	o.printf("%s\n", r.Message)
+	// the farm writes the end in UTC; say it as every other time is said,
+	// local with UTC beside it
+	msg := r.Message
+	if u := r.Grant.Until; !u.IsZero() {
+		msg = strings.ReplaceAll(msg, u.UTC().Format(time.RFC3339), o.Clock.AtUTC(u))
+	}
+	o.printf("%s\n", msg)
 	o.printf("  revoke with: c4 farm revoke %s/%s\n", r.Grant.Namespace, r.Grant.Name)
 	return nil
 }

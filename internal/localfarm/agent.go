@@ -10,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/kind/pkg/cluster"
 )
 
@@ -70,4 +71,40 @@ func EnrollMachine(ctx context.Context, agentBin, owner string, slots int) (Enro
 		return Enrolled{}, fmt.Errorf("enroll: %w", err)
 	}
 	return e, nil
+}
+
+// RunnerServes says this machine's runner, enrolled under home, serves the
+// local farm name: its kubeconfig names that farm's API server. A runner
+// enrolled to another farm, or none at all, is not this farm's to stop.
+func RunnerServes(home, name string) bool {
+	b, err := os.ReadFile(filepath.Join(home, ".c4", "agents", "runner", "kubeconfig"))
+	if err != nil {
+		return false
+	}
+	kc, err := cluster.NewProvider().KubeConfig(name, false)
+	if err != nil {
+		return false
+	}
+	return sameServer(b, []byte(kc))
+}
+
+// sameServer says two kubeconfigs' current clusters are one API server.
+func sameServer(a, b []byte) bool {
+	server := func(kc []byte) string {
+		cfg, err := clientcmd.Load(kc)
+		if err != nil {
+			return ""
+		}
+		if ctx := cfg.Contexts[cfg.CurrentContext]; ctx != nil {
+			if c := cfg.Clusters[ctx.Cluster]; c != nil {
+				return c.Server
+			}
+		}
+		for _, c := range cfg.Clusters {
+			return c.Server
+		}
+		return ""
+	}
+	sa, sb := server(a), server(b)
+	return sa != "" && sa == sb
 }

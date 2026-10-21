@@ -707,17 +707,16 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		localfarm.Name = *localName
+		// this machine's runner goes with the farm only if it serves this
+		// farm: read before the farm (and its API server) is gone
+		home, _ := os.UserHomeDir()
+		serves := home != "" && localfarm.RunnerServes(home, localfarm.Name)
 		if err := localfarm.Down(localfarm.Name); err != nil {
 			return err
 		}
-		// this machine's runner served the farm that is gone: its service
-		// and enrollment go with it (an answer to the integration stays,
-		// for the next up)
-		if f, ok := cfg.Farms[localfarm.Name]; ok && f.Local {
+		if serves {
 			(&farmcli.AgentService{}).Stop(ctx, farmcli.Out{W: io.Discard})
-			if home, err := os.UserHomeDir(); err == nil {
-				os.RemoveAll(filepath.Join(home, ".c4", "agents", "runner"))
-			}
+			os.RemoveAll(filepath.Join(home, ".c4", "agents", "runner"))
 			fmt.Fprintf(stdout, "agents    this machine's runner for it is stopped and its enrollment removed\n")
 		}
 		delete(cfg.Farms, localfarm.Name)

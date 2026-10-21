@@ -255,3 +255,18 @@ func TestChooseOwner(t *testing.T) {
 		t.Errorf("change: %v", err)
 	}
 }
+
+// A runner is this farm's when its kubeconfig names this farm's API
+// server; another farm's runner, or a kubeconfig that cannot be read, is
+// not, so down leaves it alone.
+func TestSameServer(t *testing.T) {
+	kc := func(server string) []byte {
+		return []byte("apiVersion: v1\nkind: Config\ncurrent-context: x\ncontexts:\n- name: x\n  context: {cluster: c, user: u}\nclusters:\n- name: c\n  cluster: {server: " + server + "}\nusers:\n- name: u\n  user: {token: t}\n")
+	}
+	if !sameServer(kc("https://127.0.0.1:50001"), kc("https://127.0.0.1:50001")) {
+		t.Error("the same farm")
+	}
+	if sameServer(kc("https://127.0.0.1:50001"), kc("https://127.0.0.1:50002")) || sameServer([]byte("not yaml: ["), kc("https://127.0.0.1:50001")) {
+		t.Error("another farm, or no kubeconfig, counted as this one")
+	}
+}
