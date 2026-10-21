@@ -60,7 +60,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "host-pods.yaml", "deployment-bindings.yaml", "telemetry-setting.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "host-pods.yaml", "deployment-bindings.yaml", "telemetry-setting.yaml", "reserved-tools.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -816,5 +816,66 @@ func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
 	other := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "c4-other"}, Data: map[string]string{"x": "y"}}
 	if err := admin.Create(ctx, other); err != nil {
 		t.Errorf("another ConfigMap was refused: %v", err)
+	}
+}
+
+// TestReservedToolNames: only the manager makes a Tool with a farm tool's
+// name, in any namespace, so no project can stand one in for the farm's.
+func TestReservedToolNames(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "c4-system"}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	s := runtime.NewScheme()
+	c4v1.AddToScheme(s)
+	manager, err := client.New(mc, client.Options{Scheme: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tool := func(ns, name string) *c4v1.Tool {
+		return &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}}
+	}
+	enforced(t, "c4-reserved-tools", func(try int) error {
+		return admin.Create(ctx, tool("saltmarsh", c4v1.NoneTool))
+	})
+	for _, name := range c4v1.FarmTools {
+		for _, ns := range []string{"saltmarsh", "c4-system"} {
+			err := admin.Create(ctx, tool(ns, name))
+			if err == nil || !strings.Contains(err.Error(), name+" is one of the farm's own tools") {
+				t.Errorf("%s/%s by an admin: %v", ns, name, err)
+			}
+		}
+	}
+	if err := admin.Create(ctx, tool("saltmarsh", "render")); err != nil {
+		t.Errorf("another name: %v", err)
+	}
+	if err := manager.Create(ctx, tool("c4-system", c4v1.NoneTool)); err != nil {
+		t.Errorf("the manager's none: %v", err)
+	}
+	none := tool("c4-system", c4v1.NoneTool)
+	if err := admin.Get(ctx, client.ObjectKeyFromObject(none), none); err != nil {
+		t.Fatal(err)
+	}
+	none.Spec.Egress = []c4v1.ToolEgress{{CIDR: "0.0.0.0/0"}}
+	if err := admin.Update(ctx, none); err == nil {
+		t.Error("an admin opened the farm's none")
+	}
+}
+
+// The policy's reserved names are the farm's tools (c4v1.FarmTools).
+func TestReservedToolNamesMatchTheFarm(t *testing.T) {
+	data, err := os.ReadFile("reserved-tools.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "['" + strings.Join(c4v1.FarmTools, "', '") + "']"
+	if !strings.Contains(string(data), `expression: "`+want+`"`) {
+		t.Fatalf("reserved-tools.yaml does not reserve %s", want)
 	}
 }

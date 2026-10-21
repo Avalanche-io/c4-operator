@@ -116,7 +116,7 @@ func (c *Cluster) resolve(ctx context.Context, ip string) (Unit, []c4v1.ToolEgre
 			}
 			return u, rules, nil
 		}
-		for _, ns := range []string{p.Namespace, c.Namespace} {
+		for _, ns := range c4v1.ToolNamespaces(p.Namespace, c.Namespace, tool) {
 			if ns == "" {
 				continue
 			}

@@ -83,9 +83,14 @@ func (s *Server) unitViewer(ctx context.Context, tok string) (*api.Viewer, error
 		return nil, errors.New("the token's pod is not a unit with a tool")
 	}
 	var p c4v1.Tool
-	err = s.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: tool}, &p)
-	if apierrors.IsNotFound(err) && s.Namespace != "" {
-		err = s.Client.Get(ctx, types.NamespacedName{Namespace: s.Namespace, Name: tool}, &p)
+	err = apierrors.NewNotFound(c4v1.GroupVersion.WithResource("tools").GroupResource(), tool)
+	for _, in := range c4v1.ToolNamespaces(ns, s.Namespace, tool) {
+		if in == "" {
+			continue
+		}
+		if err = s.Client.Get(ctx, types.NamespacedName{Namespace: in, Name: tool}, &p); !apierrors.IsNotFound(err) {
+			break
+		}
 	}
 	if err != nil {
 		return nil, fmt.Errorf("tool %s: %w", tool, err)

@@ -9,9 +9,8 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
-// NoneTool is the farm's tool with no configuration and no egress: a unit
-// with it is sealed (DESIGN 10.6, tools).
-const NoneTool = "none"
+// NoneTool is the farm's sealed tool (c4v1.NoneTool).
+const NoneTool = c4v1.NoneTool
 
 // ensureFarmTools creates the farm's own tools in the operator's namespace
 // if they are absent, and never changes one that exists. The manager makes
@@ -22,11 +21,12 @@ func (q *Queue) ensureFarmTools(ctx context.Context) bool {
 	if q.Namespace == "" {
 		return true
 	}
-	t := &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: q.Namespace, Name: NoneTool}}
-	err := q.Client.Create(ctx, t)
-	if err == nil || apierrors.IsAlreadyExists(err) {
-		return true
+	for _, name := range c4v1.FarmTools {
+		t := &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: q.Namespace, Name: name}}
+		if err := q.Client.Create(ctx, t); err != nil && !apierrors.IsAlreadyExists(err) {
+			q.Log.V(1).Info("farm tools not made yet", "error", err.Error())
+			return false
+		}
 	}
-	q.Log.V(1).Info("farm tools not made yet", "error", err.Error())
-	return false
+	return true
 }

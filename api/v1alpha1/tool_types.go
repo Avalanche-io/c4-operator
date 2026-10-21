@@ -29,6 +29,36 @@ const ConditionNetwork = "Network"
 // because its job names no tool.
 const NoToolNoNetwork = "this job names no tool, so it has no network: name a tool that declares one"
 
+// NoneTool is the farm's tool with no configuration and no egress: a unit
+// with it is sealed (DESIGN 10.6, tools).
+const NoneTool = "none"
+
+// FarmTools are the farm's own tools, which the manager makes in its
+// namespace. Their names are reserved: no one publishes over them, in a
+// project or farm-wide, and a project's Tool never stands in for one
+// (config/policy/reserved-tools.yaml refuses such a Tool at admission).
+var FarmTools = []string{NoneTool}
+
+// FarmTool reports whether name is one of the farm's own tools.
+func FarmTool(name string) bool {
+	for _, n := range FarmTools {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// ToolNamespaces are where a unit's tool is looked for, in order: the
+// job's namespace, then the operator's, where the farm's defaults live; a
+// farm tool's name only in the operator's, so a project cannot replace it.
+func ToolNamespaces(jobNS, operatorNS, name string) []string {
+	if FarmTool(name) {
+		return []string{operatorNS}
+	}
+	return []string{jobNS, operatorNS}
+}
+
 // HUDAudience is the audience of the token a unit with a c4 grant holds:
 // the HUD accepts it, the Kubernetes API does not.
 const HUDAudience = "c4.avalanche.io/hud"

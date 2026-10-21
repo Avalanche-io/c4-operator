@@ -9,3 +9,4 @@ resources:
 - host-pods.yaml
 - deployment-bindings.yaml
 - telemetry-setting.yaml
+- reserved-tools.yaml

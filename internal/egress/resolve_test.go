@@ -187,3 +187,23 @@ func TestOfferingNarrowestFirst(t *testing.T) {
 		t.Fatalf("offering %s", got)
 	}
 }
+
+// A unit labelled with a farm tool gets the farm's, never a Tool of that
+// name a project made in its own namespace.
+func TestFarmToolNotReplacedByAProject(t *testing.T) {
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c4v1.AddToScheme(scheme)
+	p := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "u1",
+		Labels: map[string]string{c4v1.LabelJob: "sh040", c4v1.LabelUnit: "1", c4v1.LabelTool: c4v1.NoneTool}},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: "10.0.0.1"}}
+	c := fake.NewClientBuilder().WithScheme(scheme).
+		WithIndex(&corev1.Pod{}, "status.podIP", func(o client.Object) []string { return []string{o.(*corev1.Pod).Status.PodIP} }).
+		WithObjects(p, &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: c4v1.NoneTool}},
+			&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: c4v1.NoneTool},
+				Spec: c4v1.ToolSpec{Egress: []c4v1.ToolEgress{{Host: "*.example.com"}}}}).Build()
+	r := &Cluster{Client: c, Namespace: "c4-system"}
+	if _, rules, err := r.Rules(context.Background(), "10.0.0.1"); err != nil || len(rules) != 0 {
+		t.Fatalf("none: %v %v", rules, err)
+	}
+}

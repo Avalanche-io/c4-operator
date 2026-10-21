@@ -495,3 +495,21 @@ func TestRepublishIsIdempotent(t *testing.T) {
 		t.Fatalf("lock bytes %q", lock)
 	}
 }
+
+// The farm's own tools' names are reserved, in a project and farm-wide.
+func TestPublishRefusesFarmToolNames(t *testing.T) {
+	s := toolFarm(t)
+	files := untested("echo none")
+	files["tool.yaml"] = strings.Replace(files["tool.yaml"], "name: notes", "name: none", 1)
+	view := putTree(t, s, "show-a", files).String()
+	for _, b := range []api.ToolPublishRequest{{View: view}, {View: view, Farm: true}} {
+		code, out := publish(t, s, "admin", "show-a", b)
+		if code != http.StatusUnprocessableEntity || len(out.Errors) != 1 || out.Errors[0].Message != "none is one of the farm's own tools; choose another name" {
+			t.Fatalf("farm %v: %d %+v", b.Farm, code, out)
+		}
+	}
+	var l c4v1.ToolList
+	if err := s.Client.List(context.Background(), &l); err != nil || len(l.Items) != 0 {
+		t.Fatalf("%d tools, %v", len(l.Items), err)
+	}
+}

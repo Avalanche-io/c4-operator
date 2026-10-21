@@ -1,0 +1,37 @@
+# The farm's own tools (none, the sealed default a unit runs with when it
+# names no configuration) are made by the manager in its namespace, and
+# the queue looks for them only there. Their names are reserved: no one but
+# the manager's account creates or changes a Tool with one, in any
+# namespace, so a project cannot stand a Tool of its own in for the farm's.
+# The names are c4v1.FarmTools (api/v1alpha1/tool_types.go); a test keeps
+# this list the same.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-reserved-tools
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [c4.avalanche.io]
+      apiVersions: [v1alpha1]
+      operations: [CREATE, UPDATE]
+      resources: [tools]
+  matchConditions:
+  - name: not-the-manager
+    expression: "request.userInfo.username != 'system:serviceaccount:c4-system:c4-manager'"
+  variables:
+  - name: reserved
+    expression: "['none']"
+  validations:
+  - expression: "!(object.metadata.name in variables.reserved)"
+    messageExpression: >-
+      object.metadata.name + " is one of the farm's own tools, which only the farm makes; choose another name"
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-reserved-tools
+spec:
+  policyName: c4-reserved-tools
+  validationActions: [Deny]

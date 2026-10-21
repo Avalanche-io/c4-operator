@@ -325,6 +325,11 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		refuse(errs(perr)...)
 		return
 	}
+	if c4v1.FarmTool(tool.Name) {
+		refuse(api.FieldError{Path: "name", Message: fmt.Sprintf("%s is one of the farm's own tools; choose another name", tool.Name),
+			Fix: "rename the tool in tool.yaml"})
+		return
+	}
 	if cerr := authoring.CheckTool(tool, project, s.farmFor(ctx, m)); len(cerr) > 0 {
 		refuse(errs(cerr)...)
 		return

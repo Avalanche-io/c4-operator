@@ -1332,6 +1332,8 @@ publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
   sealed. A `c4-networks` the farm cannot read as networks is refused
   here too (`422`, "the c4-networks ConfigMap in c4-system is malformed:
   ..."), for a farm admin to fix, not retried;
+- refuses the names of the farm's own tools (`none`), in a project and
+  farm-wide ("none is one of the farm's own tools; choose another name");
 - refuses a name an agent's configuration holds ("render is an agent
   configuration on this farm; choose another name");
 - writes the `Tool` only once nothing is left to refuse, so a refused

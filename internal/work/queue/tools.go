@@ -153,9 +153,9 @@ func (q *Queue) servicePeer(ctx context.Context, ns, name string) (networkingv1.
 }
 
 // toolObject finds the tool a unit names: the job's namespace first,
-// then the operator's.
+// then the operator's; a farm tool's name only in the operator's.
 func (q *Queue) toolObject(ctx context.Context, ns, name string) (*c4v1.Tool, error) {
-	for _, in := range []string{ns, q.Namespace} {
+	for _, in := range c4v1.ToolNamespaces(ns, q.Namespace, name) {
 		if in == "" {
 			continue
 		}
