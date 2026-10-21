@@ -676,8 +676,19 @@ func TestAUnitsJobKeepsItsParentsGrant(t *testing.T) {
 	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "in-grant"}, &child); err != nil {
 		t.Fatal(err)
 	}
-	if child.Annotations[c4v1.AnnotationGrant] != "c4-grant-record" || child.Labels[c4v1.LabelTracker] != "github" {
-		t.Errorf("the child carries grant %q, tracker %q", child.Annotations[c4v1.AnnotationGrant], child.Labels[c4v1.LabelTracker])
+	if child.Annotations[c4v1.AnnotationGrant] != "c4-grant-record" || child.Annotations[c4v1.AnnotationGrantTracker] != "github" || c4v1.GrantTracker(&child) != "github" {
+		t.Errorf("the child carries grant %q under tracker %q", child.Annotations[c4v1.AnnotationGrant], child.Annotations[c4v1.AnnotationGrantTracker])
+	}
+	// It is not the tracker's work: no tracker label, so the tracker's
+	// sync may not relay decisions to it.
+	if _, ok := child.Labels[c4v1.LabelTracker]; ok {
+		t.Errorf("the child carries the tracker's label %q", child.Labels[c4v1.LabelTracker])
+	}
+	sync := &api.Viewer{User: c4v1.SyncAccount}
+	wait := &c4v1.WorkWait{Unit: 0, Name: "review", Server: "person:dana"}
+	via := &api.Relay{Tracker: "github", Source: "https://github.com/o/r/pull/41", By: "dana", Person: "dana"}
+	if _, _, _, err := s.relayed(ctx, sync, &jobRec{job: child}, wait, via); err == nil || !strings.Contains(err.Error(), "is not tracker github's work") {
+		t.Errorf("the tracker's sync relayed a decision to a unit's job: %v", err)
 	}
 	for _, c := range []struct {
 		name, class string

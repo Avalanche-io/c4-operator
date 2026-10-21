@@ -82,7 +82,7 @@ func (q *Queue) grantServes(ctx context.Context, j *c4v1.WorkJob, pool string, n
 	if j.Annotations[c4v1.AnnotationGrant] == "" {
 		return ""
 	}
-	owner, tracker := j.Annotations[c4v1.AnnotationOwner], j.Labels[c4v1.LabelTracker]
+	owner, tracker := j.Annotations[c4v1.AnnotationOwner], c4v1.GrantTracker(j)
 	var g c4v1.SubmitGrant
 	if err := q.Client.Get(ctx, types.NamespacedName{Namespace: j.Namespace, Name: c4v1.SubmitGrantName(tracker, owner)}, &g); err != nil {
 		if apierrors.IsNotFound(err) || meta.IsNoMatchError(err) {

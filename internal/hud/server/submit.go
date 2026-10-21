@@ -817,7 +817,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 				return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: %v", v.User, err)
 			}
 			job.Annotations[c4v1.AnnotationGrant] = ref
-			job.Labels[c4v1.LabelTracker] = parent.Labels[c4v1.LabelTracker]
+			job.Annotations[c4v1.AnnotationGrantTracker] = c4v1.GrantTracker(&parent)
 		}
 		job.Annotations[c4v1.AnnotationOwner] = owner
 		job.Annotations[c4v1.AnnotationSubmittedByUnit] = schema.UnitRef(u.Namespace, u.Job, u.JobUID, u.Unit)

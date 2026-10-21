@@ -80,6 +80,23 @@ func init() {
 // Set at creation, never changed.
 const AnnotationGrant = "c4.avalanche.io/grant"
 
+// AnnotationGrantTracker on a job a unit submitted, whose own job a
+// Tracker submitted under a person's grant, names that Tracker, so the
+// queue finds the grant that bounds the child too. The child does not
+// carry the Tracker's label: the job is not the Tracker's work, and its
+// sync may not relay decisions to it. Set at creation, never changed.
+const AnnotationGrantTracker = "c4.avalanche.io/grant-tracker"
+
+// GrantTracker is the Tracker whose grant j was submitted under: its
+// label on a job the Tracker made, else the grant-tracker annotation on a
+// unit's job under it.
+func GrantTracker(j *WorkJob) string {
+	if t := j.Labels[LabelTracker]; t != "" {
+		return t
+	}
+	return j.Annotations[AnnotationGrantTracker]
+}
+
 // SubmitGrantName is the one grant a person has for a Tracker, so granting
 // again renews it in place.
 func SubmitGrantName(tracker, person string) string {

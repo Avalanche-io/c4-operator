@@ -396,7 +396,7 @@ func (s *Server) grantFor(ctx context.Context, v *api.Viewer, ns string, body *a
 // gone or has lapsed, or does not cover spec's pools or class. The grant
 // is read where the parent is.
 func (s *Server) parentGrantCovers(ctx context.Context, parent *c4v1.WorkJob, owner string, spec *c4v1.WorkJobSpec) error {
-	tracker := parent.Labels[c4v1.LabelTracker]
+	tracker := c4v1.GrantTracker(parent)
 	g := &c4v1.SubmitGrant{}
 	err := s.Client.Get(ctx, types.NamespacedName{Namespace: parent.Namespace, Name: c4v1.SubmitGrantName(tracker, owner)}, g)
 	if err != nil || g.Spec.Person != owner || g.Spec.Tracker != tracker {

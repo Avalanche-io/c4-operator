@@ -52,8 +52,9 @@ func (m *Owner) Handle(_ context.Context, req admission.Request) admission.Respo
 	ann[c4v1.AnnotationOwner] = user
 	ann[c4v1.AnnotationOwnerGroups] = groups
 	ann[c4v1.AnnotationSubmittedVia] = "api"
-	// only the farm says a unit submitted it
+	// only the farm says a unit submitted it, and under whose grant
 	delete(ann, c4v1.AnnotationSubmittedByUnit)
+	delete(ann, c4v1.AnnotationGrantTracker)
 	obj.SetAnnotations(ann)
 	raw, err := obj.MarshalJSON()
 	if err != nil {

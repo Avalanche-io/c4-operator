@@ -270,3 +270,23 @@ func TestRequeueAllowAcceptNeedTheirRecords(t *testing.T) {
 		t.Error("an unsigned farm's acceptance")
 	}
 }
+
+// A unit's job under a person's grant has no tracker label (it is not
+// the tracker's work), so the queue finds the grant that bounds its
+// leases through the grant-tracker annotation.
+func TestGrantBoundsAUnitsJob(t *testing.T) {
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	c4v1.AddToScheme(scheme)
+	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "show", Name: c4v1.SubmitGrantName("github", "dana")},
+		Spec: c4v1.SubmitGrantSpec{Person: "dana", Tracker: "github", Pools: []string{"cpu"}, Until: metav1.NewTime(time.Now().Add(time.Hour))}}
+	q := &Queue{Client: fake.NewClientBuilder().WithScheme(scheme).WithObjects(g).Build()}
+	child := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show", Name: "child", Annotations: map[string]string{
+		c4v1.AnnotationOwner: "dana", c4v1.AnnotationGrant: "c4-record", c4v1.AnnotationGrantTracker: "github"}}, Spec: c4v1.WorkJobSpec{Class: "render"}}
+	if why := q.grantServes(ctx, child, "cpu", time.Now()); why != "" {
+		t.Errorf("in the grant's pool: %s", why)
+	}
+	if why := q.grantServes(ctx, child, "spot", time.Now()); !strings.Contains(why, "does not cover pool spot") {
+		t.Errorf("outside the grant's pools: %q", why)
+	}
+}

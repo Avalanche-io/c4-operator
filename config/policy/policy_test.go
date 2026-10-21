@@ -199,6 +199,9 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/owner-groups":"[\"admins\"]"}}}`))); err == nil {
 		t.Error("an owner's groups were added after the job was made")
 	}
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/grant-tracker":"github"}}}`))); err == nil {
+		t.Error("a job was put under a tracker's grant after it was made")
+	}
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"nudge":{"hold":true}}}`))); err != nil {
 		t.Errorf("an ordinary change was refused: %v", err)
 	}
