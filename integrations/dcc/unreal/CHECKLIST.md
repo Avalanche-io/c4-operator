@@ -165,7 +165,10 @@ Run the whole list in **Unreal Engine 5.4, 5.5 and 5.6**.
    - a project plug-in's content mounts at `/<PluginName>/`;
    - editor packages are single `.uasset`/`.umap` files, perhaps with
      `.ubulk`, `.uexp` or `.uptnl` beside them.
-3. Render the referenced submission on the farm. **Expect:** frames that
+3. Add a C++ class to the project (so the `.uproject` has `Modules`) and
+   check again. **Expect:** "Worth knowing: Saltmarsh has C++ code; Binaries
+   are never sent...".
+4. Render the referenced submission on the farm. **Expect:** frames that
    match a local render. A missing asset here means something loaded it by
    name; send all of Content (the default) for such a project.
 

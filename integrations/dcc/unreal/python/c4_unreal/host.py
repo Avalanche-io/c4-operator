@@ -26,6 +26,7 @@ module loads (and is tested) with a fake ``unreal`` in ``sys.modules``.
 Every method runs on the editor's main thread, as c4submit's Host requires.
 """
 
+import json
 import os
 import re
 from typing import Dict, Iterable, List, Optional, Set, Tuple
@@ -283,15 +284,47 @@ class UnrealHost(Host):
         out += [Dependency(paths.norm(os.path.join(proj, self.manifest(stem))), node=job.job_name,
                            renderables=[by_config[self.manifest(stem)]])
                 for stem, job in self.jobs()]
+        self._warnings = self._code_warnings()
+        mode = self.env.get("C4_UNREAL_CONTENT", "all").strip().lower()
+        if mode not in ("all", "referenced", ""):
+            self._warnings.append(f'C4_UNREAL_CONTENT is "{mode}", which is neither "all" nor "referenced"; '
+                                  "all of Content is sent")
         content = os.path.join(proj, "Content")
         if self._referenced_only():
             try:
                 return out + self._referenced(content)
             except Exception as e:  # noqa: BLE001 - the asset registry failed: send all of Content
-                _unreal().log_warning(f"C4: the asset registry could not list what the jobs read ({e}); "
-                                      "sending all of Content")
+                msg = f"the asset registry could not list what the jobs read ({e}), so all of Content is sent"
+                self._warnings.append(msg)
+                _unreal().log_warning("C4: " + msg)
         out += [Dependency(f, node="Content") for f in (walk_files(content) if os.path.isdir(content) else [])]
         return out
+
+    def warnings(self) -> List[str]:
+        """What the artist should know about how the project was read, as
+        of the last ``dependencies()``."""
+        return list(getattr(self, "_warnings", []))
+
+    def _code_warnings(self) -> List[str]:
+        """The project's and its plug-ins' C++ modules: their Binaries are
+        never sent, so the farm's Unreal must build them or have them."""
+        found = []
+        proj = self.project_dir()
+        files = [self.scene_file()]
+        plugins = os.path.join(proj, "Plugins")
+        files += [f for f in (walk_files(plugins) if os.path.isdir(plugins) else []) if f.lower().endswith(".uplugin")]
+        for f in files:
+            try:
+                with open(f, encoding="utf-8") as fh:
+                    modules = json.load(fh).get("Modules") or []
+            except (OSError, ValueError, AttributeError):
+                continue
+            if modules:
+                found.append(os.path.splitext(os.path.basename(f))[0])
+        if not found:
+            return []
+        return [f"{', '.join(found)} {'has' if len(found) == 1 else 'have'} C++ code; Binaries are never sent, "
+                "so the farm's Unreal must build it or have it already"]
 
     def _referenced_only(self) -> bool:
         return self.env.get("C4_UNREAL_CONTENT", "all").strip().lower() == "referenced"

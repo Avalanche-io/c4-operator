@@ -100,7 +100,9 @@ is why sending all of Content is the default.
 ## Known limits
 
 - A C++ project's `Binaries/` are never sent, so the farm's Unreal must build
-  the project's code or already have it.
+  the project's code or already have it. The summary says so under "Worth
+  knowing" when the project or a plug-in has C++ modules, and also when the
+  asset registry failed and all of Content was sent.
 - The tool's own fields, beyond those it takes from the jobs, keep their
   defaults. A job's render settings belong in its queue config.
 - The summary dialogs are Unreal's message boxes. Long summaries scroll in the

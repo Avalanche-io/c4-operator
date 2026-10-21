@@ -142,6 +142,18 @@ def test_errors_come_with_their_fix_and_no_submit(tmp_path, monkeypatch):
     assert not fake.jobs
 
 
+def test_how_the_project_was_read_is_in_the_summary(tmp_path, monkeypatch):
+    show, proj, queue, fake = ready(tmp_path, monkeypatch)
+    monkeypatch.setenv("C4_UNREAL_CONTENT", "referenced")
+    ue.state.registry_fails = True
+    ue.state.answers = ["yes", "ok"]
+    render_remote(queue)
+    summary = ue.state.messages()[0]
+    assert summary.startswith("Worth knowing:\n  the asset registry could not list what the jobs read "
+                              "(the asset registry is still loading), so all of Content is sent\n")
+    assert len(fake.jobs) == 1, "a warning does not stop the submission"
+
+
 def test_cancel_a_check(tmp_path, monkeypatch):
     show, proj, queue, fake = ready(tmp_path, monkeypatch)
 

@@ -109,9 +109,32 @@ def test_a_registry_that_fails_sends_all_of_content(tmp_path, monkeypatch):
     show, proj, queue = saltmarsh(tmp_path)
     monkeypatch.setenv("C4_UNREAL_CONTENT", "referenced")
     ue.state.registry_fails = True
-    deps = UnrealHost(queue).dependencies()
+    h = UnrealHost(queue)
+    deps = h.dependencies()
     assert "Content/Env/Unused.uasset" in rel(proj, deps)
-    assert any(lvl == "warning" and "sending all of Content" in m for lvl, m in ue.state.logs)
+    assert h.warnings() == ["the asset registry could not list what the jobs read (the asset registry is still "
+                            "loading), so all of Content is sent"]
+    assert any(lvl == "warning" and "all of Content is sent" in m for lvl, m in ue.state.logs)
+    ue.state.registry_fails = False
+    h.dependencies()
+    assert h.warnings() == [], "asked again, the registry answered"
+
+
+def test_warnings_for_code_and_an_unknown_content_mode(tmp_path, monkeypatch):
+    show, proj, queue = saltmarsh(tmp_path)
+    h = UnrealHost(queue)
+    h.dependencies()
+    assert h.warnings() == [], "a project of content alone"
+    with open(os.path.join(proj, "Saltmarsh.uproject"), "w") as f:
+        f.write('{"FileVersion": 3, "Modules": [{"Name": "Saltmarsh", "Type": "Runtime"}]}')
+    with open(os.path.join(proj, "Plugins", "SaltTools", "SaltTools.uplugin"), "w") as f:
+        f.write('{"Modules": [{"Name": "SaltTools"}]}')
+    monkeypatch.setenv("C4_UNREAL_CONTENT", "some")
+    h.dependencies()
+    assert h.warnings() == [
+        "Saltmarsh, SaltTools have C++ code; Binaries are never sent, so the farm's Unreal must build it or have it "
+        "already",
+        'C4_UNREAL_CONTENT is "some", which is neither "all" nor "referenced"; all of Content is sent']
 
 
 def test_paths():
