@@ -41,11 +41,14 @@ func (m *Owner) Handle(_ context.Context, req admission.Request) admission.Respo
 	if ann == nil {
 		ann = map[string]string{}
 	}
-	if ann[c4v1.AnnotationOwner] == user && ann[c4v1.AnnotationSubmittedVia] == "api" {
+	_, byUnit := ann[c4v1.AnnotationSubmittedByUnit]
+	if ann[c4v1.AnnotationOwner] == user && ann[c4v1.AnnotationSubmittedVia] == "api" && !byUnit {
 		return admission.Allowed("owner already the requester")
 	}
 	ann[c4v1.AnnotationOwner] = user
 	ann[c4v1.AnnotationSubmittedVia] = "api"
+	// only the farm says a unit submitted it
+	delete(ann, c4v1.AnnotationSubmittedByUnit)
 	obj.SetAnnotations(ann)
 	raw, err := obj.MarshalJSON()
 	if err != nil {

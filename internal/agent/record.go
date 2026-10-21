@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"strings"
 	"time"
 
@@ -117,13 +116,9 @@ func (r *Runner) chainOf(ctx context.Context, p *corev1.Pod) *schema.Chain {
 			Using: []schema.Credential{using}, On: on, Gap: "the pod is not a unit of a job this runner can read"}
 	}
 	owner := j.Annotations[c4v1.AnnotationOwner]
-	uid := string(j.UID)
-	if len(uid) > 6 {
-		uid = uid[:6]
-	}
 	c := &schema.Chain{
 		Act:   "build",
-		By:    schema.Actor{Unit: fmt.Sprintf("%s/%s@%s/%s", j.Namespace, j.Name, uid, p.Labels[c4v1.LabelUnit]), Agent: memberOf(p), Grade: schema.GradeDirect},
+		By:    schema.Actor{Unit: schema.UnitRef(j.Namespace, j.Name, string(j.UID), p.Labels[c4v1.LabelUnit]), Agent: memberOf(p), Grade: schema.GradeDirect},
 		For:   schema.For{Party: owner, Grade: schema.GradeDirect},
 		Under: []schema.Delegation{{Job: j.Namespace + "/" + j.Name, From: owner}},
 		Using: []schema.Credential{using},

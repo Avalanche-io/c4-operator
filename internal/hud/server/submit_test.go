@@ -16,6 +16,7 @@ import (
 
 	"github.com/Avalanche-io/c4"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -24,6 +25,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // submitFarm is farm() with a store per project and a fake API server.
@@ -462,5 +464,46 @@ func TestSubmitReplacesAForecast(t *testing.T) {
 	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Name: "c", Spec: real, Replaces: "sh090"}, &e); code != http.StatusBadRequest ||
 		!strings.Contains(fmt.Sprint(e["error"]), "real job, not a forecast") {
 		t.Fatalf("replacing a real job: %d %v", code, e)
+	}
+}
+
+// A job a unit submits is its own job's owner's: that owner's runners run
+// it and that owner answers for it, and the job names the unit. A unit
+// whose job is gone submits nothing.
+func TestAUnitsJobIsItsOwners(t *testing.T) {
+	s := submitFarm(t)
+	ctx := context.Background()
+	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port", UID: "9c1d2e7f-port", Annotations: map[string]string{c4v1.AnnotationOwner: "lee"}},
+		Spec: c4v1.WorkJobSpec{Class: "agent", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+	if err := s.Client.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/port/2", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "port", JobUID: string(parent.UID), Unit: "2", Grant: "project"}}
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-2"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+	var out api.SubmitResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit", api.SubmitRequest{Project: "show-a", Name: "child", Spec: spec}, &out); code != http.StatusCreated {
+		t.Fatalf("submit: %d %+v", code, out)
+	}
+	var job c4v1.WorkJob
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "child"}, &job); err != nil {
+		t.Fatal(err)
+	}
+	if job.Annotations[c4v1.AnnotationOwner] != "lee" || job.Annotations[c4v1.AnnotationSubmittedByUnit] != schema.UnitRef("show-a", "port", string(parent.UID), "2") ||
+		!strings.Contains(job.Annotations[c4v1.AnnotationSubmittedByUnit], "port@") {
+		t.Fatalf("annotations %v", job.Annotations)
+	}
+	s.DevViewers["orphan"] = &api.Viewer{User: "unit:show-a/gone/0", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "gone", Unit: "0", Grant: "project"}}
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=orphan", api.SubmitRequest{Project: "show-a", Name: "child2", Spec: spec}, nil); code != http.StatusForbidden {
+		t.Fatalf("a unit of no job submitted: %d", code)
+	}
+	// its job made again under the same name, by someone else: not its job
+	s.DevViewers["stale"] = &api.Viewer{User: "unit:show-a/port/2", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "port", JobUID: "an-earlier-port", Unit: "2", Grant: "project"}}
+	var refused map[string]string
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=stale", api.SubmitRequest{Project: "show-a", Name: "child3", Spec: spec}, &refused); code != http.StatusForbidden || !strings.Contains(refused["error"], "was replaced") {
+		t.Fatalf("a replaced job's unit submitted: %d %v", code, refused)
 	}
 }

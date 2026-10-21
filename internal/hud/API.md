@@ -785,7 +785,13 @@ when the spec has no deadline; and stamps `c4.avalanche.io/owner` (the
 viewer), `c4.avalanche.io/submitted-via` (`hud` or `mcp`), and the labels
 `c4.avalanche.io/shot`, `c4.avalanche.io/job-type` and
 `c4.avalanche.io/stage` (which, with the shot, key the shot history a job's
-estimate starts from). `aiUsage` becomes
+estimate starts from). A job a unit submits (with its pod's token and a `c4`
+grant) is owned by the owner of the unit's own job, whose runners run it
+and who answers for it, and `c4.avalanche.io/submitted-by-unit` names the
+unit as a record names it (`<namespace>/<job>@<uid6>/<unit>`, the job's UID
+from the unit pod's controller reference); a unit whose job is gone, was
+made again under the same name, or has no owner, gets `403`. Only the farm sets that annotation: the owner webhook
+drops anyone else's, and it cannot be added or changed later. `aiUsage` becomes
 the job's `c4.avalanche.io/ai-usage` annotation. `trackerRef`
 (`<tracker>/<type>/<id>`) is the tracker entity the job is made for: it
 becomes the annotation `c4.avalanche.io/tracker-ref` and the label

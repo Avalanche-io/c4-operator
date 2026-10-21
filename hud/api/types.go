@@ -27,8 +27,11 @@ type Viewer struct {
 type UnitViewer struct {
 	Namespace string `json:"namespace"`
 	Job       string `json:"job"`
-	Unit      string `json:"unit"`
-	Grant     string `json:"grant"`
+	// JobUID is the job's UID, from the unit pod's controller reference:
+	// a job made again under the same name is another.
+	JobUID string `json:"jobUID,omitempty"`
+	Unit   string `json:"unit"`
+	Grant  string `json:"grant"`
 }
 
 // Roles a viewer can have (Viewer.Role).

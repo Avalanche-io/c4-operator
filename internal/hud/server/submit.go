@@ -27,6 +27,7 @@ import (
 	"github.com/Avalanche-io/c4"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/validation"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -38,6 +39,7 @@ import (
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // DryRunFunc plans a job that does not exist yet and returns what the
@@ -676,6 +678,23 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 	if replaced != nil {
 		job.Annotations[c4v1.AnnotationReplaces] = replaced.Name
+	}
+	if u := v.Unit; u != nil {
+		// a unit's job is its job's owner's, never the unit's own: the
+		// runners of that owner run it, and the owner answers for it
+		var parent c4v1.WorkJob
+		if err := s.Client.Get(ctx, types.NamespacedName{Namespace: u.Namespace, Name: u.Job}, &parent); err != nil {
+			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: its own job %s/%s: %v", v.User, u.Namespace, u.Job, err)
+		}
+		if u.JobUID == "" || string(parent.UID) != u.JobUID {
+			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: the unit's own job %s/%s was replaced", v.User, u.Namespace, u.Job)
+		}
+		owner := parent.Annotations[c4v1.AnnotationOwner]
+		if owner == "" {
+			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: its own job %s/%s has no owner to submit for", v.User, u.Namespace, u.Job)
+		}
+		job.Annotations[c4v1.AnnotationOwner] = owner
+		job.Annotations[c4v1.AnnotationSubmittedByUnit] = schema.UnitRef(u.Namespace, u.Job, u.JobUID, u.Unit)
 	}
 	if body.Shot != "" {
 		if errs := validation.IsValidLabelValue(body.Shot); len(errs) > 0 {

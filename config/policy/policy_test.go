@@ -192,6 +192,9 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/grant":"c4other"}}}`))); err == nil {
 		t.Error("the grant a job was submitted under was changed")
 	}
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/submitted-by-unit":"saltmarsh/other/0"}}}`))); err == nil {
+		t.Error("a job was said, after its creation, to be a unit's")
+	}
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"nudge":{"hold":true}}}`))); err != nil {
 		t.Errorf("an ordinary change was refused: %v", err)
 	}

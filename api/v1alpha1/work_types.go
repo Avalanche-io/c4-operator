@@ -82,6 +82,10 @@ const (
 	// c4-sync (a tracker's, for a person under their grant), or api
 	// (anything else that wrote the WorkJob directly).
 	AnnotationSubmittedVia = "c4.avalanche.io/submitted-via"
+	// AnnotationSubmittedByUnit names the unit (<namespace>/<job>/<unit>)
+	// that submitted a job as part of its own work. Its owner is the owner
+	// of the unit's job, who is accountable for it; only the farm sets it.
+	AnnotationSubmittedByUnit = "c4.avalanche.io/submitted-by-unit"
 	// LabelShot groups a shot's jobs (the HUD's shot view).
 	LabelShot = "c4.avalanche.io/shot"
 	// LabelMilestone on a WorkJob joins it to the Milestone of that name

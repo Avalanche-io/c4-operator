@@ -72,6 +72,27 @@ func TestOwnerCannotBeClaimed(t *testing.T) {
 	}
 }
 
+// Only the farm says a unit submitted a job: anyone else's claim is
+// dropped, even with the owner already the requester.
+func TestOwnerDropsAUnitClaim(t *testing.T) {
+	m := newOwner(t)
+	resp := m.Handle(context.Background(), ownerRequest(t, "ivo", admissionv1.Create, map[string]string{
+		c4v1.AnnotationOwner: "ivo", c4v1.AnnotationSubmittedVia: "api", c4v1.AnnotationSubmittedByUnit: "saltmarsh/lead/0"}))
+	dropped := false
+	for _, p := range resp.Patches {
+		dropped = dropped || (p.Operation == "remove" && p.Path == "/metadata/annotations/c4.avalanche.io~1submitted-by-unit")
+	}
+	if !resp.Allowed || !dropped {
+		t.Fatalf("a unit claim stood: %v %v", resp.Allowed, resp.Patches)
+	}
+	// the farm's own, made for a unit, stands
+	resp = m.Handle(context.Background(), ownerRequest(t, managerSA, admissionv1.Create, map[string]string{
+		c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "hud", c4v1.AnnotationSubmittedByUnit: "saltmarsh/lead/0"}))
+	if !resp.Allowed || len(resp.Patches) != 0 {
+		t.Fatalf("the farm's own was changed: %v", resp.Patches)
+	}
+}
+
 func TestOwnerDelegate(t *testing.T) {
 	m := newOwner(t)
 	resp := m.Handle(context.Background(), ownerRequest(t, managerSA, admissionv1.Create,

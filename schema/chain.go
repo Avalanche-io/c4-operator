@@ -242,6 +242,16 @@ func pick(fallback string, n Names, f func(Names) string) string {
 	return fallback
 }
 
+// UnitRef is a unit as a chain names it, its job by name and the first six
+// characters of its UID, so a job made again under the same name is
+// another: show-a/github-7@3f9a1c/3.
+func UnitRef(namespace, job, jobUID, unit string) string {
+	if len(jobUID) > 6 {
+		jobUID = jobUID[:6]
+	}
+	return namespace + "/" + job + "@" + jobUID + "/" + unit
+}
+
 // unitName is a unit read aloud: show-a/github-7@3f9a1c/3 is github-7/3.
 func unitName(u string) string {
 	if _, rest, ok := strings.Cut(u, "/"); ok {
