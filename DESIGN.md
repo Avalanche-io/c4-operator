@@ -1745,6 +1745,19 @@ and a sweep planner that spawns trials are all generators.
       it is neither offered nor used by a job. A Tool without a
       `tool.yaml` is an agent's configuration, as above, and the two share
       one name space.
+    - **Tool jobs run under their tool.** A tool's job (a submission's, or
+      its test when it is published) names the tool and the networks the
+      version declares in `spec.tool`. Its units are labelled with the tool
+      and selected by the job's own NetworkPolicy (`c4-job-tool-<job>`, owned
+      by the job): with no network declared it allows nothing, so the units
+      are sealed and count as sealed in their derivation records; with one,
+      it allows the egress proxy (hosts) or the addresses and services the
+      network lists, and DNS. The networks are the farm admin's
+      (`c4-networks` in the operator's namespace, name to rules); the proxy
+      reads a tool job's unit's networks from its job, not from the Tool
+      object, so a test runs with its own version's network before it is
+      offered. Its refusal names the line to add: the network to declare,
+      or that a farm admin must define one first.
   - **Work share.** Each ended attempt also adds its slot time (hours
     times slots) to its unit, and status gives the model units' share of
     it (`spend.modelWorkShare`): how much of the work models did, which

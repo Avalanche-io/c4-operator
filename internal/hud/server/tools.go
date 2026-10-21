@@ -26,6 +26,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
+	"github.com/Avalanche-io/c4-operator/internal/egress"
 	"github.com/Avalanche-io/c4-operator/internal/imageref"
 	"github.com/Avalanche-io/c4-operator/internal/storeurl"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
@@ -332,6 +333,19 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		refuse(errs(rerr)...)
 		return
 	}
+	if names := otherNetwork(tool.Needs.Network); len(names) > 0 {
+		nets, err := egress.LoadNetworks(ctx, s.Client, s.Namespace)
+		if err != nil {
+			s.Log.Error(err, "tool publish: networks")
+			fail(w, http.StatusBadGateway, "the farm's networks cannot be read just now; try again shortly")
+			return
+		}
+		if _, missing := nets.Expand(names); len(missing) > 0 {
+			refuse(api.FieldError{Path: "needs.network", Message: egress.Missing(tool.Name, missing),
+				Fix: "declare a network this farm defines, or ask a farm admin to define it"})
+			return
+		}
+	}
 	if via(r) == "mcp" && tool.Test == nil {
 		refuse(api.FieldError{Path: "test", Message: "a tool an agent publishes must have a test",
 			Fix: "add test: with the tree to run it on and what it writes; a person may publish it untested"})
@@ -568,17 +582,15 @@ func earlierVersion(e c4v1.ToolVersionRef) c4v1.ToolVersion {
 // toolSpec is the Tool spec a version declares: its tree, what its units
 // reach on the network, its sidecars (images as tool.lock pins them) and
 // its farm access, and nothing it does not declare, so a version never
-// inherits another's or an agent configuration's. The network's licences
-// are the licence servers, which go with the pools a job's licences name;
-// any other name is a service the farm admin defined, in the operator's
-// namespace.
-func (s *Server) toolSpec(t *schema.Tool, lock *schema.Lock, view string) c4v1.ToolSpec {
+// inherits another's or an agent configuration's. The network is the
+// rules of the networks it names as the farm defines them (c4-networks);
+// its licences are the licence servers, which go with the pools a job's
+// licences name. A tool job's units take their network from their job,
+// which names the version's networks (WorkJobSpec.Tool); this is the
+// version in use's, for anyone reading the Tool.
+func (s *Server) toolSpec(t *schema.Tool, lock *schema.Lock, view string, nets egress.Networks) c4v1.ToolSpec {
 	spec := c4v1.ToolSpec{View: view, C4: t.Needs.Farm}
-	for _, n := range t.Needs.Network {
-		if n != "licences" {
-			spec.Egress = append(spec.Egress, c4v1.ToolEgress{Service: s.Namespace + "/" + n})
-		}
-	}
+	spec.Egress, _ = nets.Expand(otherNetwork(t.Needs.Network))
 	for _, sc := range t.Runs.Sidecars {
 		img := sc.Image
 		if p := lock.Images[sc.Image]; p != "" {
@@ -604,7 +616,11 @@ func (s *Server) offer(ctx context.Context, m *model, key types.NamespacedName, 
 	if versionNumber(obj.Status.Version) > versionNumber(ver.Version) {
 		return nil // a later version is offered already
 	}
-	if spec := s.toolSpec(tt.tool, tt.lock, ver.View); !equality.Semantic.DeepEqual(obj.Spec, spec) {
+	nets, err := egress.LoadNetworks(ctx, s.Client, s.Namespace)
+	if err != nil {
+		return err
+	}
+	if spec := s.toolSpec(tt.tool, tt.lock, ver.View, nets); !equality.Semantic.DeepEqual(obj.Spec, spec) {
 		patch := client.MergeFrom(obj.DeepCopy())
 		obj.Spec = spec
 		if err := s.Client.Patch(ctx, &obj, patch); err != nil {
@@ -1316,4 +1332,15 @@ func orElse(s, d string) string {
 		return d
 	}
 	return s
+}
+
+// otherNetwork is what a needs.network names besides the licence servers.
+func otherNetwork(names []string) []string {
+	var out []string
+	for _, n := range names {
+		if n != "licences" {
+			out = append(out, n)
+		}
+	}
+	return out
 }

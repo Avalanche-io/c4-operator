@@ -149,7 +149,11 @@ func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 		return nil, rerrs
 	}
 	c := corev1.Container{Name: "unit", Image: image, Command: append([]string(nil), RunnerCommand...), Env: env, Resources: res}
+	// The units run under the tool: sealed unless it declares a network,
+	// and then reaching only that (the queue's job policy and the egress
+	// proxy). A tool's test runs the same way.
 	spec := c4v1.WorkJobSpec{Class: "render", Params: cp, Pools: j.pools, MaxParallel: int32(j.maxPar), Measure: j.measure,
+		Tool:     &c4v1.WorkTool{Name: t.Name, Network: otherNetwork(t.Needs.Network)},
 		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{c}}}}
 	retries := j.retries
 	if retries == nil {
@@ -175,17 +179,15 @@ func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 
 // ToolRefusals are what about a tool this farm cannot run yet, at path
 // "tool": the farm refuses the job rather than run something other than
-// what the tool says. A unit's network to its licence servers goes with
-// the licences, and is not refused on its own.
+// what the tool says. A declared network is not refused: the units reach
+// it and nothing else (WorkJobSpec.Tool). A unit's network to its licence
+// servers goes with the licences.
 func ToolRefusals(t *Tool) []Error {
 	var errs []Error
 	add := func(fix, format string, args ...any) { errs = append(errs, errf("tool", fix, format, args...)) }
 	n := t.Needs
 	if t.Kind != "frames" && t.Kind != "once" {
 		add("use a frames or once tool for now", "this farm cannot run %s tools yet", t.Kind)
-	}
-	if net := otherNetwork(n.Network); len(net) > 0 {
-		add("use a version of the tool that needs no network for now", "%s reaches the network (%s), which this farm cannot fence yet", t.Name, strings.Join(net, ", "))
 	}
 	if len(n.Licences) > 0 {
 		add("use a version of the tool that declares none for now", "%s needs licences (%s), which this farm cannot count yet", t.Name, strings.Join(sortedKeys(n.Licences), ", "))

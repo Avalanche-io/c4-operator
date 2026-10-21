@@ -2,7 +2,8 @@
 # tool allows hosts reaches them only through it: the queue points the
 # unit's HTTPS_PROXY and HTTP_PROXY here and its NetworkPolicy allows only
 # this and DNS; the proxy lets a request through only to a host the unit's
-# tool lists, and logs each against the unit. The manager's
+# tool lists (for a tool job, the networks its tool declares, as the
+# c4-networks ConfigMap defines them), and logs each against the unit. The manager's
 # --egress-proxy names this Service.
 apiVersion: v1
 kind: ServiceAccount
@@ -21,6 +22,30 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [tools]
   verbs: [get]
+# A tool job's unit: the networks its job's tool declares.
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs]
+  verbs: [get]
+---
+# The networks the farm admin defines (c4-networks), in the operator's
+# namespace alone.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-egress-networks
+rules:
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [c4-networks]
+  verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-egress-networks
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-egress-networks}
+subjects:
+- {kind: ServiceAccount, name: c4-egress, namespace: c4-system}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

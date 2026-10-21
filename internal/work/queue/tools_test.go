@@ -10,6 +10,7 @@ import (
 	networkingv1 "k8s.io/api/networking/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -216,5 +217,94 @@ func TestToolGrantsC4(t *testing.T) {
 	}
 	if e := np.Spec.Egress; len(e) != 2 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "manager" || e[0].Ports[0].Port.IntValue() != 8090 {
 		t.Fatalf("policy %+v", np.Spec)
+	}
+}
+
+// A tool job's units run under its tool (spec.tool): labelled with it and
+// selected by the job's own NetworkPolicy, which allows nothing when the
+// tool declares no network, so the unit is sealed, and only the egress
+// proxy and DNS when it declares one, the proxy then allowing only that
+// network's hosts. A Tool object of the same name, and its wider policy,
+// do not apply. A tool's test job runs the same way. A network the farm
+// does not define holds the units, and the job says why.
+func TestToolJobsRunUnderTheirTool(t *testing.T) {
+	ns, q, now, _ := graphFarm(t)
+	ctx := context.Background()
+	farmNS := ns + "-farm"
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
+		t.Fatal(err)
+	}
+	q.Namespace, q.EgressProxy = farmNS, "c4-egress:3128"
+	for _, o := range []client.Object{
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-egress"},
+			Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "egress"}, Ports: []corev1.ServicePort{{Port: 3128}}}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: c4v1.NetworksConfigMap},
+			Data: map[string]string{"studio-api": "- {host: api.studio.example, ports: [443]}"}},
+		&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "fetch"},
+			Spec: c4v1.ToolSpec{Egress: []c4v1.ToolEgress{{CIDR: "0.0.0.0/0"}}}},
+	} {
+		if err := k8s.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk := func(name string, network ...string) {
+		t.Helper()
+		j := job(ns, name, "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(4*time.Hour))
+		j.Spec.Tool = &c4v1.WorkTool{Name: "fetch", Network: network}
+		if err := k8s.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("fetch-sealed")
+	mk("fetch-declared", "studio-api")
+	mk("fetch-test-1a2b3c4d", "studio-api") // a tool's test job, as LowerTest makes it
+	mk("fetch-missing", "studio-db")
+	tick(t, q)
+
+	policy := func(job string) networkingv1.NetworkPolicy {
+		t.Helper()
+		var np networkingv1.NetworkPolicy
+		if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "c4-job-tool-" + job}, &np); err != nil {
+			t.Fatal(err)
+		}
+		if np.Spec.PodSelector.MatchLabels[c4v1.LabelJob] != job || np.Spec.PodSelector.MatchLabels[c4v1.LabelJobTool] != "true" ||
+			len(np.OwnerReferences) != 1 || np.OwnerReferences[0].Name != job {
+			t.Fatalf("%s's policy %+v", job, np.ObjectMeta)
+		}
+		return np
+	}
+	sealed := podOfUnit(t, ns, "fetch-sealed", 0)
+	if sealed.Labels[c4v1.LabelTool] != "fetch" || sealed.Labels[c4v1.LabelJobTool] != "true" || envOf(sealed.Spec.Containers[0], "HTTPS_PROXY") != "" {
+		t.Fatalf("sealed pod %v %v", sealed.Labels, sealed.Spec.Containers[0].Env)
+	}
+	if np := policy("fetch-sealed"); len(np.Spec.Egress) != 0 || !q.egressDenied(ctx, ns, sealed.Labels) {
+		t.Fatalf("not sealed: %+v", np.Spec)
+	}
+	for _, name := range []string{"fetch-declared", "fetch-test-1a2b3c4d"} {
+		p := podOfUnit(t, ns, name, 0)
+		e := policy(name).Spec.Egress
+		if p.Labels[c4v1.LabelTool] != "fetch" || envOf(p.Spec.Containers[0], "HTTPS_PROXY") != "http://c4-egress."+farmNS+".svc:3128" ||
+			len(e) != 2 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "egress" || e[0].Ports[0].Port.IntValue() != 3128 ||
+			e[1].Ports[0].Port.IntValue() != 53 {
+			t.Fatalf("%s: labels %v, egress %+v", name, p.Labels, e)
+		}
+	}
+	if hasPod(t, ns, "fetch-missing", 0) {
+		t.Fatal("a unit ran with a network the farm does not define")
+	}
+	if c := meta.FindStatusCondition(get(t, ns, "fetch-missing").Status.Conditions, "Tools"); c == nil || !strings.Contains(c.Message, "studio-db, which this farm does not define") {
+		t.Fatalf("Tools condition %+v", c)
+	}
+	// The Tool object's own policy, made for agents, leaves tool jobs' units out.
+	if err := q.ensureToolsPolicy(ctx, ns, &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Name: "fetch"}, Spec: c4v1.ToolSpec{Egress: []c4v1.ToolEgress{{CIDR: "0.0.0.0/0"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	var wide networkingv1.NetworkPolicy
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "c4-tools-fetch"}, &wide); err != nil {
+		t.Fatal(err)
+	}
+	sel, _ := metav1.LabelSelectorAsSelector(&wide.Spec.PodSelector)
+	if sel.Matches(labels.Set(sealed.Labels)) {
+		t.Fatal("the Tool's policy selects a tool job's unit")
 	}
 }

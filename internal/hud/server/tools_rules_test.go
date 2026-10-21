@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -138,14 +139,30 @@ func TestOfferSetsEveryField(t *testing.T) {
 }
 
 // What the farm cannot lower yet is refused at publish, in the words a
-// submission's refusal uses.
-func TestPublishRefusesWhatDoesNotLower(t *testing.T) {
+// submission's refusal uses; so is a network the farm does not define. A
+// declared network the farm defines publishes, and offering it gives the
+// Tool that network's rules.
+func TestPublishNetworks(t *testing.T) {
 	s := toolFarm(t)
+	ctx := context.Background()
 	files := untested("echo hi")
 	files["tool.yaml"] = strings.Replace(files["tool.yaml"], "params:", "needs: {network: [studio-db]}\nparams:", 1)
 	code, out := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: putTree(t, s, "show-a", files).String()})
-	if code != http.StatusUnprocessableEntity || len(out.Errors) == 0 || out.Errors[0].Path != "tool" || !strings.Contains(out.Errors[0].Message, "studio-db), which this farm cannot fence yet") {
-		t.Fatalf("network: %d %+v", code, out)
+	if code != http.StatusUnprocessableEntity || len(out.Errors) != 1 || out.Errors[0].Path != "needs.network" ||
+		out.Errors[0].Message != "notes reaches studio-db, which this farm does not define; a farm admin defines networks in the c4-networks ConfigMap" {
+		t.Fatalf("undefined network: %d %+v", code, out)
+	}
+	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: s.Namespace, Name: c4v1.NetworksConfigMap},
+		Data: map[string]string{"studio-db": "- {host: db.studio.example, ports: [5432]}"}}
+	if err := s.Client.Create(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	code, out = publish(t, s, "td", "show-a", api.ToolPublishRequest{View: putTree(t, s, "show-a", files).String()})
+	if code != http.StatusCreated {
+		t.Fatalf("defined network: %d %+v", code, out)
+	}
+	if tool := getTool(t, s, "show-a", "notes"); len(tool.Spec.Egress) != 1 || tool.Spec.Egress[0].Host != "db.studio.example" {
+		t.Fatalf("egress %+v", tool.Spec.Egress)
 	}
 }
 

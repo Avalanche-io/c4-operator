@@ -126,3 +126,27 @@ func TestProxy(t *testing.T) {
 		t.Fatalf("no unit: %d", resp.StatusCode)
 	}
 }
+
+type advising struct{ fakeResolver }
+
+func (advising) Advise(_ context.Context, u Unit, host string, port int) string {
+	return fmt.Sprintf("add needs: {network: [x]} to %s's tool.yaml", u.Tool)
+}
+
+// The proxy's refusal names the line that would allow the host.
+func TestRefusalNamesTheLine(t *testing.T) {
+	p := &Proxy{Log: logr.Discard(), Resolve: advising{fakeResolver{"127.0.0.1": {{Host: "api.search.example"}}}}}
+	srv := httptest.NewServer(p)
+	defer srv.Close()
+	proxyURL, _ := url.Parse(srv.URL)
+	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	resp, err := c.Get("http://evil.example/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, _ := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(b), "not in tool search; to reach it, add needs: {network: [x]} to search's tool.yaml") {
+		t.Fatalf("%d %q", resp.StatusCode, b)
+	}
+}

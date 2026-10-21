@@ -1,9 +1,15 @@
 package authoring
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // Memory and GPUs are limited to what is requested and CPU only
@@ -38,15 +44,14 @@ func TestRequestsAndLimits(t *testing.T) {
 }
 
 // A tool is refused for each thing this farm cannot run yet, in the
-// farm's words; the network to its licence servers alone is not one.
+// farm's words; a declared network is not one.
 func TestToolRefusals(t *testing.T) {
 	tl := &Tool{Name: "sim", Kind: "frames", Gate: "merge"}
 	tl.Runs.Image = "c4/runtime-base"
-	tl.Needs.Network = []string{"licences", "pypi.org"}
+	tl.Needs.Network = []string{"licences", "pypi"}
 	tl.Needs.Farm = "read"
 	errs := ToolRefusals(tl)
 	want := []string{
-		"sim reaches the network (pypi.org), which this farm cannot fence yet",
 		"sim passes the merge gate, which this farm cannot hold yet",
 		"sim acts on the farm (read), which this farm cannot grant yet",
 	}
@@ -63,5 +68,49 @@ func TestToolRefusals(t *testing.T) {
 	ok.Needs.Network = []string{"licences"}
 	if errs := ToolRefusals(ok); len(errs) != 0 {
 		t.Fatalf("network to licence servers alone: %v", errs)
+	}
+}
+
+// A tool job runs under its tool: the networks it declares (not the
+// licence servers, which go with licences) or none, sealed. A tool's test
+// job is lowered the same way, so a declared network applies to it too.
+func TestToolJobsRunUnderTheirTool(t *testing.T) {
+	tl := &Tool{Name: "fetch", Kind: "once"}
+	tl.Runs.Image = "c4/runtime-base"
+	tl.Runs.Command = []string{"true"}
+	tl.Test = &schema.Test{Tree: "test/"}
+	ref := ToolRef{Name: "fetch", Version: "v1", View: "c4view", Image: "registry.example/base@sha256:" + strings.Repeat("a", 64)}
+	spec := func(req *api.SubmitRequest) c4v1.WorkJobSpec {
+		t.Helper()
+		var s c4v1.WorkJobSpec
+		if err := json.Unmarshal(req.Spec, &s); err != nil {
+			t.Fatal(err)
+		}
+		return s
+	}
+	lower := func() (*api.SubmitRequest, *api.SubmitRequest) {
+		t.Helper()
+		job, errs := lowerTool(toolJob{tool: tl, ref: ref, project: "p", ns: "p", root: "/show", name: "fetch-v001"})
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+		test, errs := LowerTest(tl, ref, "c4testtree", "p", "p", "/show")
+		if len(errs) > 0 {
+			t.Fatal(errs)
+		}
+		return job, test
+	}
+	job, test := lower()
+	for _, req := range []*api.SubmitRequest{job, test} {
+		if s := spec(req); s.Tool == nil || s.Tool.Name != "fetch" || len(s.Tool.Network) != 0 {
+			t.Fatalf("undeclared: %+v", s.Tool)
+		}
+	}
+	tl.Needs.Network = []string{"licences", "studio-api"}
+	job, test = lower()
+	for _, req := range []*api.SubmitRequest{job, test} {
+		if s := spec(req); s.Tool == nil || len(s.Tool.Network) != 1 || s.Tool.Network[0] != "studio-api" {
+			t.Fatalf("declared: %+v", s.Tool)
+		}
 	}
 }

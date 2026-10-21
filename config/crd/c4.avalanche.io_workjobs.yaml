@@ -288,6 +288,27 @@ spec:
                   repeat the pod schema (it would exceed what kubectl apply can carry).
                 type: object
                 x-kubernetes-preserve-unknown-fields: true
+              tool:
+                description: |-
+                  Tool is the published tool the job's units run under: a tool job's
+                  (POST /submissions, and a tool's test when it is published). Its
+                  units are labelled with it and reach the networks it names and
+                  nothing else; with none they are sealed (DESIGN.md 10.6, tools).
+                properties:
+                  name:
+                    pattern: ^[a-z0-9]([-a-z0-9]*[a-z0-9])?$
+                    type: string
+                  network:
+                    description: |-
+                      Network names the networks the units may reach, as the farm admin
+                      defines them (the c4-networks ConfigMap in the operator's
+                      namespace). Empty: the units are sealed.
+                    items:
+                      type: string
+                    type: array
+                required:
+                - name
+                type: object
             required:
             - class
             - template

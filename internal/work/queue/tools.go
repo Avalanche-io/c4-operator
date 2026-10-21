@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/intstr"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/egress"
 )
 
 // Tools (DESIGN 10.6). A unit that names a tool in its
@@ -27,8 +28,10 @@ import (
 // which selects the unit pods labelled with the tool. Address blocks and
 // cluster services are allowed directly; hosts only through the farm's
 // egress proxy (internal/egress, Queue.EgressProxy), which the policy allows
-// and the unit's HTTPS_PROXY and HTTP_PROXY name. Units without a tool
-// run as before.
+// and the unit's HTTPS_PROXY and HTTP_PROXY name. A tool job's units
+// (spec.tool) run under its tool the same way, in the job's own policy and
+// with the networks the job names (jobToolReady). Other units run as
+// before.
 
 // ToolsMount is where a unit's tool view is mounted ($C4_TOOLS).
 const ToolsMount = "/etc/c4/tools"
@@ -149,6 +152,9 @@ func (q *Queue) toolObject(ctx context.Context, ns, name string) (*c4v1.Tool, er
 // (nil for none), and false with why while the unit must wait.
 func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.Tool, bool, string) {
 	name := v.mem.plan.Units[idx].Reasoning.Tools
+	if name == "" && v.job.Spec.Tool != nil {
+		return q.jobToolReady(ctx, v.job)
+	}
 	if name == "" {
 		return nil, true, ""
 	}
@@ -182,14 +188,58 @@ func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.Tool, b
 	return p, true, ""
 }
 
+// jobToolPolicyName is a tool job's own NetworkPolicy (a job's name is at
+// most 50 characters, so this fits a name's 63).
+func jobToolPolicyName(job string) string { return "c4-job-tool-" + job }
+
+// jobToolReady prepares a tool job's units' tool (spec.tool): the networks
+// it declares, as the farm defines them, in the job's own NetworkPolicy,
+// which selects only the job's units and goes with the job. With no
+// network declared the policy allows nothing: the units are sealed. The
+// tool's tree is already one of the job's inputs, at ToolsMount, so
+// nothing is mounted here. It returns the tool as its units see it.
+func (q *Queue) jobToolReady(ctx context.Context, j *c4v1.WorkJob) (*c4v1.Tool, bool, string) {
+	name := j.Spec.Tool.Name
+	nets := egress.Networks{}
+	if q.Namespace != "" {
+		var err error
+		if nets, err = egress.LoadNetworks(ctx, q.Client, q.Namespace); err != nil {
+			return nil, false, "the farm's networks: " + err.Error()
+		}
+	}
+	rules, missing := nets.Expand(j.Spec.Tool.Network)
+	if len(missing) > 0 {
+		return nil, false, egress.Missing(name, missing)
+	}
+	p := &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: c4v1.ToolSpec{Egress: rules}}
+	if hostRules(p) && q.EgressProxy == "" {
+		return nil, false, fmt.Sprintf("tool %s reaches hosts, which need the farm's egress proxy (--egress-proxy)", name)
+	}
+	np, err := q.toolsPolicy(ctx, j.Namespace, p)
+	if err != nil {
+		return nil, false, fmt.Sprintf("tool %s's network policy: %v", name, err)
+	}
+	np.Name = jobToolPolicyName(j.Name)
+	np.Labels = map[string]string{c4v1.LabelTool: name, c4v1.LabelJob: j.Name}
+	np.Spec.PodSelector = metav1.LabelSelector{MatchLabels: map[string]string{c4v1.LabelJob: j.Name, c4v1.LabelJobTool: "true"}}
+	np.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: j.Name, UID: j.UID}}
+	if err := q.ensurePolicy(ctx, np); err != nil {
+		return nil, false, fmt.Sprintf("tool %s's network policy: %v", name, err)
+	}
+	return p, true, ""
+}
+
 // toolsPolicy is tool p's NetworkPolicy in namespace ns: egress to the
 // address blocks and services it lists, to the egress proxy if it lists
 // hosts, and with any rule the cluster's DNS; nothing else.
 func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*networkingv1.NetworkPolicy, error) {
+	// A tool job's units carry the tool's label too, under their job's
+	// own policy (jobToolPolicy), so this one leaves them out.
 	np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: toolsPolicyName(p.Name),
 		Labels: map[string]string{c4v1.LabelTool: p.Name}},
 		Spec: networkingv1.NetworkPolicySpec{
-			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{c4v1.LabelTool: p.Name}},
+			PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{c4v1.LabelTool: p.Name},
+				MatchExpressions: []metav1.LabelSelectorRequirement{{Key: c4v1.LabelJobTool, Operator: metav1.LabelSelectorOpDoesNotExist}}},
 			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
 			Egress:      []networkingv1.NetworkPolicyEgressRule{},
 		}}
@@ -270,8 +320,13 @@ func (q *Queue) ensureToolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) 
 	if err != nil {
 		return err
 	}
+	return q.ensurePolicy(ctx, want)
+}
+
+// ensurePolicy makes or updates a NetworkPolicy.
+func (q *Queue) ensurePolicy(ctx context.Context, want *networkingv1.NetworkPolicy) error {
 	var cur networkingv1.NetworkPolicy
-	err = q.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: want.Name}, &cur)
+	err := q.Client.Get(ctx, types.NamespacedName{Namespace: want.Namespace, Name: want.Name}, &cur)
 	switch {
 	case apierrors.IsNotFound(err):
 		return q.Client.Create(ctx, want)
@@ -285,14 +340,18 @@ func (q *Queue) ensureToolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) 
 }
 
 // applyTools gives unit pod pod of job its tool: the label its
-// NetworkPolicy selects, the view mounted at $C4_TOOLS, for hosts the
+// NetworkPolicy selects (and, for a tool job's tool, the label its job's
+// policy selects), the view mounted at $C4_TOOLS, for hosts the
 // egress proxy as its HTTPS_PROXY and HTTP_PROXY, and its sidecars, native
 // sidecars that start before the unit and end with it.
-func applyTools(pod *corev1.Pod, job string, p *c4v1.Tool, proxy, hud string) {
+func applyTools(pod *corev1.Pod, job string, p *c4v1.Tool, jobTool bool, proxy, hud string) {
 	if pod.Labels == nil {
 		pod.Labels = map[string]string{}
 	}
 	pod.Labels[c4v1.LabelTool] = p.Name
+	if jobTool {
+		pod.Labels[c4v1.LabelJobTool] = "true"
+	}
 	if p.Spec.C4 != "" && hud != "" {
 		// A token for this pod alone, for the HUD alone, renewed by the
 		// kubelet: the unit's way to c4 (its grant is read at the HUD).

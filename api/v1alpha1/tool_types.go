@@ -8,6 +8,17 @@ import (
 // tool's NetworkPolicy selects the pods by it.
 const LabelTool = "c4.avalanche.io/tool"
 
+// LabelJobTool on a unit pod says its tool is its job's (WorkJob
+// spec.tool), not a reasoning unit's Tool: the job's own NetworkPolicy
+// selects it, and the egress proxy reads its networks from the job.
+const LabelJobTool = "c4.avalanche.io/job-tool"
+
+// NetworksConfigMap, in the operator's namespace, is the networks the farm
+// admin defines for tools to declare (needs.network): each key a network's
+// name, each value its egress rules as YAML, a list of {host, cidr,
+// service, ports}.
+const NetworksConfigMap = "c4-networks"
+
 // HUDAudience is the audience of the token a unit with a c4 grant holds:
 // the HUD accepts it, the Kubernetes API does not.
 const HUDAudience = "c4.avalanche.io/hud"

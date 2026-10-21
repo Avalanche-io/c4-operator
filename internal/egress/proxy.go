@@ -24,6 +24,14 @@ import (
 // Unit is the unit behind a client address.
 type Unit struct {
 	Namespace, Job, Unit, Pod, Tool string
+	// JobTool is set for a tool job's unit: its tool is its job's.
+	JobTool bool
+}
+
+// Adviser says what would let a refused unit reach a host, for the
+// proxy's refusal to name the line to add.
+type Adviser interface {
+	Advise(ctx context.Context, u Unit, host string, port int) string
 }
 
 // Resolver says which unit is at an address, and what its tool allows.
@@ -121,7 +129,11 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	who := []any{"job", u.Namespace + "/" + u.Job, "unit", u.Unit, "pod", u.Pod, "tool", u.Tool, "host", host, "port", port}
 	if !Allowed(rules, host, port) {
 		p.Log.Info("refused", append(who, "why", "not in the tool")...)
-		http.Error(w, "egress: "+host+":"+strconv.Itoa(port)+" is not in tool "+u.Tool, http.StatusForbidden)
+		msg := "egress: " + host + ":" + strconv.Itoa(port) + " is not in tool " + u.Tool
+		if a, ok := p.Resolve.(Adviser); ok {
+			msg += "; to reach it, " + a.Advise(r.Context(), u, host, port)
+		}
+		http.Error(w, msg, http.StatusForbidden)
 		return
 	}
 	p.Log.Info("allowed", who...)

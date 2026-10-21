@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	kfake "k8s.io/client-go/kubernetes/fake"
+	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	k8stesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -38,6 +39,7 @@ func toolFarm(t *testing.T) *Server {
 	if err := c4v1.AddToScheme(scheme); err != nil {
 		t.Fatal(err)
 	}
+	clientgoscheme.AddToScheme(scheme) // the farm's networks are a ConfigMap
 	s.m.projects[1].Spec.Scope = c4v1.ScopeGrants
 	objs := []runtime.Object{}
 	for i := range s.m.projects {

@@ -16,8 +16,9 @@ import (
 )
 
 // Cluster resolves a client address to the unit pod that has it, and the
-// unit's tool: the pod's c4.avalanche.io/tool, found in its
-// namespace, else in the operator's. Answers are kept for TTL.
+// unit's tool: the pod's c4.avalanche.io/tool, found in its namespace,
+// else in the operator's; for a tool job's unit, the networks its job's
+// tool declares, as the farm defines them. Answers are kept for TTL.
 type Cluster struct {
 	Client client.Client
 	// Namespace is the operator's, where the farm's tools live.
@@ -75,9 +76,29 @@ func (c *Cluster) resolve(ctx context.Context, ip string) (Unit, []c4v1.ToolEgre
 			continue
 		}
 		tool := p.Labels[c4v1.LabelTool]
-		u := Unit{Namespace: p.Namespace, Job: p.Labels[c4v1.LabelJob], Unit: p.Labels[c4v1.LabelUnit], Pod: p.Name, Tool: tool}
+		u := Unit{Namespace: p.Namespace, Job: p.Labels[c4v1.LabelJob], Unit: p.Labels[c4v1.LabelUnit], Pod: p.Name, Tool: tool,
+			JobTool: p.Labels[c4v1.LabelJobTool] != ""}
 		if tool == "" {
 			return u, nil, errors.New("unit " + p.Namespace + "/" + p.Name + " has no tool")
+		}
+		if u.JobTool {
+			// A tool job's unit: the networks its job's tool declares.
+			var j c4v1.WorkJob
+			if err := c.Client.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: u.Job}, &j); err != nil {
+				return u, nil, fmt.Errorf("job %s/%s: %w", p.Namespace, u.Job, err)
+			}
+			if j.Spec.Tool == nil || j.Spec.Tool.Name != tool {
+				return u, nil, fmt.Errorf("job %s/%s does not run under tool %s", p.Namespace, u.Job, tool)
+			}
+			nets, err := LoadNetworks(ctx, c.Client, c.Namespace)
+			if err != nil {
+				return u, nil, err
+			}
+			rules, missing := nets.Expand(j.Spec.Tool.Network)
+			if len(missing) > 0 {
+				return u, nil, errors.New(Missing(tool, missing))
+			}
+			return u, rules, nil
 		}
 		for _, ns := range []string{p.Namespace, c.Namespace} {
 			if ns == "" {
@@ -95,4 +116,21 @@ func (c *Cluster) resolve(ctx context.Context, ip string) (Unit, []c4v1.ToolEgre
 		return u, nil, fmt.Errorf("tool %s does not exist", tool)
 	}
 	return Unit{}, nil, fmt.Errorf("no unit pod at %s", ip)
+}
+
+// Advise says what would let a refused unit reach host on port: for a
+// tool job, the network to declare in its tool.yaml, or that a farm admin
+// must define one first; for an agent's Tool, the rule to add.
+func (c *Cluster) Advise(ctx context.Context, u Unit, host string, port int) string {
+	if !u.JobTool {
+		return fmt.Sprintf("add {host: %s, ports: [%d]} to Tool %s's spec.egress", host, port, u.Tool)
+	}
+	nets, err := LoadNetworks(ctx, c.Client, c.Namespace)
+	if err == nil {
+		if names := nets.Offering(host, port); len(names) > 0 {
+			return fmt.Sprintf("add needs: {network: [%s]} to %s's tool.yaml and publish it again", names[0], u.Tool)
+		}
+	}
+	return fmt.Sprintf("ask a farm admin to define a network for %s:%d in the %s ConfigMap, then add needs: {network: [<its name>]} to %s's tool.yaml",
+		host, port, c4v1.NetworksConfigMap, u.Tool)
 }

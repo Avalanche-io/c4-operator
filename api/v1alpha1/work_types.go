@@ -225,6 +225,13 @@ type WorkJobSpec struct {
 	// +optional
 	Follows string `json:"follows,omitempty"`
 
+	// Tool is the published tool the job's units run under: a tool job's
+	// (POST /submissions, and a tool's test when it is published). Its
+	// units are labelled with it and reach the networks it names and
+	// nothing else; with none they are sealed (DESIGN.md 10.6, tools).
+	// +optional
+	Tool *WorkTool `json:"tool,omitempty"`
+
 	// Review is a person's (or party's) review of the whole job's work:
 	// a final wait, unit "@review", after every other unit, including
 	// those expansions add later, so the job is Succeeded only once it is
@@ -298,6 +305,18 @@ type WorkInput struct {
 	// ReadOnly mounts without capture.
 	// +optional
 	ReadOnly bool `json:"readOnly,omitempty"`
+}
+
+// WorkTool is the tool a job's units run under, and the networks the
+// version declares (its tool.yaml's needs.network).
+type WorkTool struct {
+	// +kubebuilder:validation:Pattern=`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`
+	Name string `json:"name"`
+	// Network names the networks the units may reach, as the farm admin
+	// defines them (the c4-networks ConfigMap in the operator's
+	// namespace). Empty: the units are sealed.
+	// +optional
+	Network []string `json:"network,omitempty"`
 }
 
 // WorkNudge is a person's bounded override.

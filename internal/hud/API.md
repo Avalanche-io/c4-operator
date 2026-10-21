@@ -1172,9 +1172,16 @@ publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
 - reads `tool.yaml` from the tree's top and checks it: the schema's errors
   and the farm's (an `emits` naming no tool, a format string naming no
   parameter), each with its dotted path and fix, as `422 { errors }`;
-- refuses, at `tool`, what the farm cannot run yet (network, sidecars, farm
-  access, a Kubernetes overlay, licences), in the words a submission's
-  refusal uses, and a tool an agent publishes with no `test`;
+- refuses, at `tool`, what the farm cannot run yet (sidecars, farm access,
+  a Kubernetes overlay, licences), in the words a submission's refusal
+  uses, and a tool an agent publishes with no `test`;
+- refuses, at `needs.network`, a network the farm does not define. The farm
+  admin defines networks in the `c4-networks` ConfigMap in the operator's
+  namespace: each key a network's name, each value a YAML list of rules
+  (`- {host: api.studio.example, ports: [443]}`, or `cidr`, or `service:
+  <namespace>/<name>`). A tool's jobs, its test's included, reach the
+  networks it declares and nothing else; one that declares none is
+  sealed;
 - refuses a name an agent's configuration holds ("render is an agent
   configuration on this farm; choose another name");
 - writes the `Tool` only once nothing is left to refuse, so a refused
@@ -1248,6 +1255,74 @@ was a version of the tool, and only one whose test passed or that was
 offered untested: a tree that was never published, or whose test failed,
 is refused, however its `tool.yaml` names it. `c4 farm tool publish`
 polls this until `test.state` is `ok` or `failed`.
+
+## Networks (the c4-networks ConfigMap)
+
+A tool declares what its units may reach by name (`needs.network:
+[studio-api]`); the farm admin says what each name is. The names live in
+one ConfigMap, `c4-networks`, in the operator's namespace (`c4-system`):
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: c4-networks
+  namespace: c4-system
+data:
+  model-api: |
+    - {host: api.anthropic.com, ports: [443]}
+  studio-api: |
+    - {host: api.studio.example, ports: [443]}
+  pypi: |
+    - {host: pypi.org}
+    - {host: files.pythonhosted.org}
+  licence-servers: |
+    - {cidr: 10.20.0.0/24, ports: [27000, 27001]}
+  asset-db: |
+    - {service: pipeline/asset-db, ports: [5432]}
+```
+
+`model-api` is what the `agent` tool and the lead tools declare: the model
+provider's API, through the egress proxy (no OAuth host is needed inside
+the unit). `c4 farm up` defines it on a local farm; a plain install
+defines no network, since letting units reach a model provider is the farm
+admin's call. A farm on Bedrock, Vertex or a gateway defines `model-api` as
+those hosts, or as a `service`. Units on host runners run outside the
+cluster, where no NetworkPolicy applies.
+
+- **Keys** are network names, as tools write them in `needs.network`:
+  lower-case letters, digits and `-`, starting with a letter. `licences`
+  is not a key: it names the licence servers of the pools a job's
+  licences come from, and goes with them.
+- **Each value** is a YAML list of rules. Each rule names exactly one of:
+  - `host`: a host name, or `*.domain` for the names under it. Hosts are
+    reached only through the farm's egress proxy, which checks each
+    request's host and port against the rule;
+  - `cidr`: an address block, reached directly;
+  - `service`: a cluster service as `<namespace>/<name>`, reached directly
+    (its pods).
+
+  `ports` limits a rule to those TCP ports; with none, any port (a host
+  rule's proxy requests are then allowed on any port).
+- **What a job gets.** A tool job's units (`spec.tool`) reach the union of
+  the rules of the networks its tool declares, and nothing else. Their
+  NetworkPolicy (`c4-job-tool-<job>`) allows each `cidr` and `service`
+  rule, the egress proxy when any rule is a `host`, and then DNS. With no
+  network declared it allows nothing at all, not even DNS: the units are
+  sealed, and their records say so. The proxy reads the networks from the
+  job and this ConfigMap, so an admin's change applies to the next
+  request a unit makes (after the proxy's short cache).
+- **A name the farm does not define** is refused when a tool is published
+  (`needs.network`: "fetch reaches studio-db, which this farm does not
+  define; a farm admin defines networks in the c4-networks ConfigMap"), and
+  holds a job's units with that reason in its `Tools` condition.
+- **A refused request** gets the proxy's 403 naming the line to add: the
+  network that allows the host ("add needs: {network: [pypi]} to fetch's
+  tool.yaml and publish it again"), or, when no network allows it, that a
+  farm admin must define one first.
+- A malformed value (not a list, or a rule naming none or two of host,
+  cidr and service) makes every lookup fail with the network's name, so a
+  unit holds rather than runs with less or more than its tool says.
 
 ## Relayed decisions
 
