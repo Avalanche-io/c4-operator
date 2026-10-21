@@ -22,9 +22,13 @@ type Enrolled struct {
 	Kubeconfig string   `json:"kubeconfig"`
 	Made       []string `json:"made"`
 	// BlocksEnv is the clean config directory the machine's blocks run
-	// in, and BlocksSignedIn whether the person has signed in there.
+	// with, and BlocksSignedIn whether the person has signed in there.
 	BlocksEnv      string `json:"blocksEnv,omitempty"`
 	BlocksSignedIn bool   `json:"blocksSignedIn"`
+	// BlocksFolder is the one folder the blocks run in, and BlocksTrusted
+	// whether Claude Code trusts it in that config directory.
+	BlocksFolder  string `json:"blocksFolder,omitempty"`
+	BlocksTrusted bool   `json:"blocksTrusted"`
 }
 
 // EnrollMachine makes this machine a host runner of the local farm for

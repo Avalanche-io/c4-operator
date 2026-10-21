@@ -925,21 +925,26 @@ func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx conte
 }
 
 // signInBlocks signs the person in, once, where the machine's blocks run:
-// their own clean config directory, not the person's ~/.claude. It runs
-// Claude Code's own sign-in there, in the person's terminal, and copies no
-// credential. Without a terminal it says the command instead.
+// their own clean config directory, not the person's ~/.claude, in their
+// one folder. Claude Code's own sign-in and its trust prompt for that
+// folder come in the same session, in the person's terminal, and no
+// credential is copied. Without a terminal it says the command instead.
 func signInBlocks(ctx context.Context, e localfarm.Enrolled, stdin io.Reader, stdout io.Writer) error {
-	if e.BlocksEnv == "" || e.BlocksSignedIn {
+	if e.BlocksEnv == "" || (e.BlocksSignedIn && (e.BlocksTrusted || e.BlocksFolder == "")) {
 		return nil
 	}
 	step := "CLAUDE_CONFIG_DIR=" + e.BlocksEnv + " claude"
+	if e.BlocksFolder != "" {
+		step = "cd " + e.BlocksFolder + " && " + step
+	}
 	claude, err := exec.LookPath("claude")
 	if err != nil || !isTerminal(stdin) {
-		fmt.Fprintf(stdout, "agents    one step left: sign in where the agents' blocks run, in your terminal: %s (sign in, then /exit)\n", step)
+		fmt.Fprintf(stdout, "agents    one step left, in your terminal: %s (sign in, trust the folder, then /exit); until then the agents' blocks wait\n", step)
 		return nil
 	}
-	fmt.Fprintf(stdout, "agents    sign in where the agents' blocks run (%s, apart from your own Claude Code): sign in, then /exit\n", e.BlocksEnv)
+	fmt.Fprintf(stdout, "agents    sign in where the agents' blocks run, apart from your own Claude Code: sign in, trust the folder, then /exit\n")
 	cmd := exec.CommandContext(ctx, claude)
+	cmd.Dir = e.BlocksFolder
 	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+e.BlocksEnv)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stdout
 	if err := cmd.Run(); err != nil {
