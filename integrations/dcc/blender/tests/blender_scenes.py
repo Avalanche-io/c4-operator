@@ -20,9 +20,10 @@ BLENDER_RENDER = {
         {"name": "blend", "type": "PATH", "objectType": "FILE", "dataFlow": "IN", "from": "scene.file",
          "userInterface": {"control": "CHOOSE_INPUT_FILE", "label": "Blender file",
                            "fileFilters": [{"label": "Blender", "patterns": ["*.blend"]}]}},
-        {"name": "view_layer", "type": "STRING", "default": "Scene/ViewLayer", "from": "scene.renderables",
-         "description": "The scene and view layer to render, as Scene/ViewLayer.",
-         "userInterface": {"label": "View layer"}},
+        {"name": "scene", "type": "STRING", "default": "Scene", "from": "scene.renderables",
+         "description": "The scene to render.", "userInterface": {"label": "Scene"}},
+        {"name": "view_layer", "type": "STRING", "default": "ViewLayer", "from": "scene.renderables",
+         "description": "The view layer of the scene to render.", "userInterface": {"label": "View layer"}},
         {"name": "engine", "type": "STRING", "default": "CYCLES",
          "allowedValues": ["CYCLES", "BLENDER_EEVEE_NEXT", "BLENDER_WORKBENCH"],
          "userInterface": {"control": "DROPDOWN_LIST", "label": "Render engine"}},
@@ -93,6 +94,7 @@ def lighting(root, modified: bool = False):
     ])
 
     comp = bf.Scene("sh010_comp", frame_start=1001, frame_end=1048)
+    comp.camera = bf.Struct(name="CAM_comp")
     comp.layer("comp")
     comp.render.filepath = "//render/sh010_comp_"
     comp.use_nodes = True

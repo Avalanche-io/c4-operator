@@ -29,6 +29,16 @@ def test_view_layers_become_renderables_with_keys(tmp_path):
     assert rs[0].label == "bg" and rs[0].note == ""
 
 
+def test_each_layer_gives_its_scene_layer_and_camera(tmp_path):
+    lighting(tmp_path)
+    rs = BlenderHost().renderables()
+    assert rs[0].values == {"scene": "sh010", "view_layer": "bg", "scene.camera": "CAM_sh010"}
+    assert rs[2].values == {"scene": "sh010_comp", "view_layer": "comp", "scene.camera": "CAM_comp"}
+    bf.data.scenes["sh010_comp"].camera = None
+    assert "scene.camera" not in BlenderHost().renderables()[2].values, "no camera: the panel's scene's stands"
+    assert "|False" in BlenderHost().signature(), "the file's path and its unsaved state"
+
+
 def test_disabled_layers_are_left_out(tmp_path):
     lighting(tmp_path)
     assert "sh010/old" not in [r.name for r in BlenderHost().renderables()]

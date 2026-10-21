@@ -96,13 +96,14 @@ def test_widget_specs_from_the_blender_render_tool():
     artist, advanced = form_specs(Form(Tool({"tool": BLENDER_RENDER})))
     assert [(s.kind, s.param, s.label, s.attr, s.linked) for s in artist] == [
         ("path", "blend", "Blender file", "path_value", True),
+        ("text", "scene", "Scene", "string_value", True),
         ("text", "view_layer", "View layer", "string_value", True),
         ("menu", "engine", "Render engine", "choice", None),
     ], "fields taken from the file start linked; engine has no link toggle"
     assert [(s.kind, s.param, s.label) for s in advanced] == [
         ("text", "camera", "Camera"), ("int", "samples", "Samples (0 keeps the file's)"), ("bool", "denoise", "Denoise")]
     by = {s.param: s for s in artist + advanced}
-    assert by["view_layer"].value == "Scene/ViewLayer", "the tool's default until the file says"
+    assert by["view_layer"].value == "ViewLayer", "the tool's default until the file says"
     assert by["engine"].options == ["CYCLES", "BLENDER_EEVEE_NEXT", "BLENDER_WORKBENCH"]
     assert by["engine"].value == "CYCLES" and by["engine"].value_attr == "string_value"
     assert by["samples"].value == 0 and by["denoise"].value is True
@@ -141,7 +142,8 @@ def test_open_check_submit(tmp_path, monkeypatch):
     assert top == ["tool", "project", "shot", "due", "frames", "frames_linked",
                    "label:View layers", "c4.refresh", "layer:sh010/bg", "layer:sh010/fg", "layer:sh010_comp/comp",
                    "size", "note",
-                   "blend.path_value", "blend.linked", "view_layer.string_value", "view_layer.linked", "engine.choice",
+                   "blend.path_value", "blend.linked", "scene.string_value", "scene.linked",
+                   "view_layer.string_value", "view_layer.linked", "engine.choice",
                    "label:Advanced", "c4.check", "c4.submit", "c4.show_file", "c4.save_file"]
     s = settings()
     assert [t.name for t in c.tools] == ["blender-render"], "only tools that render .blend files"
@@ -154,6 +156,7 @@ def test_open_check_submit(tmp_path, monkeypatch):
     assert layer("sh010/bg").label == "bg  1001-1048"
     assert layer("sh010_comp/comp").label == "sh010_comp / comp  1001-1048  (scene sh010_comp · after bg, fg)"
     assert field("view_layer").string_value == EACH_LAYER and field("view_layer").linked
+    assert field("scene").string_value == "sh010", "both ticked view layers are in sh010, so it shows as itself"
     assert field("blend").path_value.endswith("sh010_lighting_v003.blend") and field("blend").linked
     assert not entry("c4.submit").enabled and not entry("c4.show_file").enabled, "nothing checked yet"
     with pytest.raises(RuntimeError, match="poll"):
@@ -189,8 +192,9 @@ def test_open_check_submit(tmp_path, monkeypatch):
     jobs = fake.jobs[0]["jobs"]
     assert list(jobs) == ["render-bg", "render-fg"]
     assert jobs["render-bg"] == {"tool": "blender-render", "frames": "1001-1048", "with": {
-        "blend": "sh010/lighting/sh010_lighting_v003.blend", "view_layer": "sh010/bg", "camera": "CAM_sh010"}}
-    assert jobs["render-fg"]["with"]["view_layer"] == "sh010/fg" and "after" not in jobs["render-fg"]
+        "blend": "sh010/lighting/sh010_lighting_v003.blend", "scene": "sh010", "view_layer": "bg",
+        "camera": "CAM_sh010"}}
+    assert jobs["render-fg"]["with"]["view_layer"] == "fg" and "after" not in jobs["render-fg"]
     assert fake.jobs[0]["due"] == "dailies" and len(fake.store) == LIGHTING_FILES
     text = c.summary_text()
     assert text.startswith("Submitted to the farm:\n  sh010-render-bg-v001\n  sh010-render-fg-v001")
@@ -206,7 +210,9 @@ def test_a_scene_that_reads_another_comes_after_it(tmp_path, monkeypatch):
     jobs = c.checked.doc["jobs"]
     assert list(jobs) == ["render-bg", "render-fg", "render-comp"]
     assert jobs["render-comp"]["after"] == ["render-bg", "render-fg"]
-    assert jobs["render-comp"]["with"]["view_layer"] == "sh010_comp/comp"
+    w = jobs["render-comp"]["with"]
+    assert (w["scene"], w["view_layer"], w["camera"]) == ("sh010_comp", "comp", "CAM_comp"), "its own scene's camera"
+    assert field("scene").string_value == EACH_LAYER, "two scenes ticked: one value per job"
     text = c.summary_text()
     assert ("sh010-render-comp-v001   Blender render · 48 frames in 12 units, after sh010-render-bg-v001, "
             "sh010-render-fg-v001") in text
@@ -274,8 +280,10 @@ def test_submit_is_refused_after_a_change(tmp_path, monkeypatch):
     assert entry("c4.submit").enabled, "back as it was checked"
 
     bf.data.is_dirty = True     # the artist moves a light
-    assert not entry("c4.submit").enabled and c.submit() is False
-    bf.data.is_dirty = False
+    assert not entry("c4.submit").enabled and c.submit() is False and not fake.jobs
+    assert c.checked.stale(), "Submit re-read the file, so c4submit's own check sees the edit too"
+    check()                      # which saves the file: only a save clears Blender's unsaved mark
+    assert entry("c4.submit").enabled and not c.checked.stale()
     layer("sh010/fg").ticked = False
     assert not entry("c4.submit").enabled
     layer("sh010/fg").ticked = True
@@ -355,17 +363,20 @@ def test_parameter_widgets_edit_the_form(tmp_path, monkeypatch):
     field("samples").int_value = 64
     field("engine").choice = "BLENDER_EEVEE_NEXT"
     assert field("engine").string_value == "BLENDER_EEVEE_NEXT"
-    field("view_layer").string_value = "sh010/bg"
-    assert not field("view_layer").linked and c.draft.form.field("view_layer").value == "sh010/bg"
+    field("view_layer").string_value = "bg"
+    assert not field("view_layer").linked and c.draft.form.field("view_layer").value == "bg"
     field("view_layer").linked = True
     assert field("view_layer").string_value == EACH_LAYER
     field("samples").int_value = 70000
     assert field("samples").int_value == 70000 and c.draft.form.field("samples").error == "must be at most 65536"
     field("samples").int_value = 64
+    layer("sh010/bg").ticked = False
+    assert field("view_layer").string_value == "fg", "one view layer ticked: the field shows it"
+    layer("sh010/bg").ticked = True
     check()
     w = c.checked.doc["jobs"]["render-bg"]["with"]
-    assert w["samples"] == 64 and w["engine"] == "BLENDER_EEVEE_NEXT" and w["view_layer"] == "sh010/bg"
-    assert c.checked.doc["jobs"]["render-fg"]["with"]["view_layer"] == "sh010/fg"
+    assert w["samples"] == 64 and w["engine"] == "BLENDER_EEVEE_NEXT" and w["view_layer"] == "bg"
+    assert c.checked.doc["jobs"]["render-fg"]["with"]["view_layer"] == "fg"
 
 
 def test_size_and_another_tool(tmp_path, monkeypatch):
@@ -393,7 +404,7 @@ def test_choices_are_kept_with_the_file(tmp_path, monkeypatch):
     s.note = "for review"
     s.due = "client-review"
     field("samples").int_value = 128
-    field("view_layer").string_value = "sh010/bg"
+    field("view_layer").string_value = "bg"
     field("view_layer").linked = True
     field("camera").linked = False
     panel.forget()                 # the file is closed and opened again

@@ -52,9 +52,11 @@ Properties > Render > **C4 Farm**, top to bottom:
   it. Advanced parameters are in a folded **Advanced** section.
 - **Check**, **Submit**, **Show file**, **Save file...**, and the summary.
 
-The panel's choices are saved with the file. A tool parameter taken from
-`scene.renderables` gets the view layer as `Scene/ViewLayer`, so a tool that
-renders one view layer knows which scene it is in.
+The panel's choices are saved with the file. Each job gives the tool's
+`scene.renderables` parameters its own values. A parameter named `scene` gets
+the view layer's scene, and one named `view_layer` gets the view layer. Any
+other gets both together, as `Scene/ViewLayer`. A `scene.camera` parameter gets
+that scene's camera.
 
 **Check** saves the file. It then reads every file the ticked view layers need
 (textures, with `<UDIM>` tile sets and sequences over the frames they are

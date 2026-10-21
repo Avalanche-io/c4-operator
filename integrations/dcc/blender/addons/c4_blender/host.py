@@ -3,8 +3,10 @@
 Each view layer with "Use for Rendering" on is a renderable, so each one
 ticked is a job. The active scene's view layers are ticked to begin with;
 the other scenes' are listed unticked. A renderable's name is
-``Scene/ViewLayer`` (what a tool's ``from: scene.renderables`` parameter
-gets) and its job key is made from the view layer's name.
+``Scene/ViewLayer`` and its job key is made from the view layer's name. A
+tool's ``from: scene.renderables`` parameters named ``scene`` and
+``view_layer`` get the two parts; any other gets ``Scene/ViewLayer``. A
+``from: scene.camera`` parameter gets the view layer's scene's camera.
 
 Every file the scene reads is a dependency: textures (sequences with the
 frames their users read, UDIM tile sets), linked libraries, movie clips,
@@ -241,9 +243,12 @@ class BlenderHost(Host):
                 notes.append("after " + ", ".join(label[r] for r in reads))
             if s.render.image_settings.file_format in MOVIES:
                 notes.append("writes a movie, not a file per frame")
+            values = {"scene": s.name, "view_layer": vl.name}
+            if getattr(s, "camera", None) is not None:
+                values["scene.camera"] = s.camera.name
             out.append(Renderable(name=name, label=label[name], frames=_span(s), outputs=outs[s.as_pointer()],
                                   reads=reads, enabled=s.as_pointer() == me.as_pointer(), note=" · ".join(notes),
-                                  key=vl.name if count[vl.name] == 1 else f"{s.name}-{vl.name}"))
+                                  key=vl.name if count[vl.name] == 1 else f"{s.name}-{vl.name}", values=values))
         return out
 
     # --- what it reads --------------------------------------------------------

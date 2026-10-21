@@ -83,8 +83,9 @@ Run the whole list in **Blender 4.2 LTS** and **Blender 4.5 LTS**.
    layers" with a refresh button, and checkboxes "bg  1001-1048" and
    "fg  1001-1048" (both ticked) and "sh010_comp / comp  1001-1048  (scene
    sh010_comp · after bg, fg)" (unticked). There is no `old`. Then Size,
-   Note, Blender file (a file field, linked), View layer ("each ticked view
-   layer", linked), Render engine (a menu), a folded **Advanced** section,
+   Note, Blender file (a file field, linked), Scene ("sh010", linked), View
+   layer ("each ticked view layer", linked), Render engine (a menu), a folded
+   **Advanced** section,
    Check and Submit (greyed), Show file and Save file... (greyed), and the
    summary box.
    **[guess]**: `UILayout.panel(idname, default_closed=True)` (Blender 4.1
@@ -182,7 +183,7 @@ Run the whole list in **Blender 4.2 LTS** and **Blender 4.5 LTS**.
 2. Check again, then press **Submit**. **Expect:** "Submitting to the
    farm...", then "Submitted to the farm:" with one line per job and "72
    files sent". In the Python Console, `farm.jobs[-1]["jobs"]` has
-   `render-bg` and `render-fg` with `view_layer` `sh010/bg` and `sh010/fg`.
+   `render-bg` and `render-fg` with `scene` `sh010` and `view_layer` `bg` and `fg`.
    Submit is greyed until the next check.
 3. Check and Submit again. **Expect:** "Nothing to send: the farm had every
    file." and `-v002` jobs.

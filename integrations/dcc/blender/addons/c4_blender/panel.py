@@ -609,14 +609,14 @@ class Controller:
     def _shown(self, f: Field) -> Any:
         """What a linked field shows when its value is one per job."""
         d = self.draft
-        if d is None or not f.linked:
+        if d is None or not f.linked or not f.param.source or not d.per_renderable:
             return None
-        if f.param.source == "scene.renderables" and len(d.picked()) > 1:
-            return EACH_LAYER
-        if f.param.source in ("scene.frames", "shot.frames") and d.per_renderable:
-            if len({d.job_frames(r) for r in d.picked()}) > 1:
-                return EACH_RANGE
-        return None
+        if f.param.source in ("scene.frames", "shot.frames"):
+            return EACH_RANGE if len({d.job_frames(r) for r in d.picked()}) > 1 else None
+        # One value for every ticked view layer shows as itself (the form
+        # holds the first one's); several show as "each ticked view layer".
+        per_job = {json.dumps(d._derive(f.param.source, f.name, r), default=str) for r in d.picked()}
+        return EACH_LAYER if len(per_job) > 1 else None
 
     def _rebuild_fields(self) -> None:
         s, d = self.settings, self.draft
@@ -707,13 +707,14 @@ class Controller:
     # --- what changed since the check ----------------------------------------------
 
     def signature(self) -> str:
-        """Everything a check depends on: the draft's signature, whether
-        the file has unsaved edits (which only Blender knows) and where it
-        is saved."""
+        """Everything a check depends on: the draft's signature, which holds
+        the host's (the file's path and unsaved edits) as of the last
+        refresh, and the host's now, since Blender tells the panel of no
+        edit: a panel draws often, and re-reading the file on every draw
+        would cost more than this."""
         if self.draft is None:
             return ""
-        return (self.draft.signature() + "\nunsaved=" + json.dumps(bool(self.host.is_modified()))
-                + "\nfile=" + self.host.scene_file())
+        return self.draft.signature() + "\nnow=" + self.host.signature()
 
     def stale(self) -> bool:
         return self.checked is not None and self.submitted is None and self.signature() != self.checked_sig
@@ -839,7 +840,10 @@ class Controller:
         if c is None or not c.ok or self.submitted is not None:
             self._say("Check first: Submit sends what the last check passed.")
             return False
-        if self.signature() != self.checked_sig:
+        # Re-read the file, so the check's own staleness (which c4submit's
+        # Submit refuses on too) sees what changed in Blender since.
+        self.refresh_scene()
+        if self.signature() != self.checked_sig or c.stale():
             self.message = STALE
             self._redraw()
             return False
