@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strings"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -210,4 +211,31 @@ func writeAtomic(path string, data []byte) error {
 		return err
 	}
 	return os.Rename(tmp.Name(), path)
+}
+
+// Unregister takes a member out of the store: its record goes, and its
+// checkpoint log is kept beside the others, renamed, so a member of the
+// same name later starts a chain of its own. Its session, transcript and
+// config directory are left as they are; nothing is stopped.
+func (h *Harness) Unregister(name string) (*Member, error) {
+	unlock, err := h.Store.Lock(name)
+	if err != nil {
+		return nil, err
+	}
+	defer unlock()
+	m, err := h.Store.Get(name)
+	if err != nil {
+		return nil, err
+	}
+	log := h.Store.logPath(name)
+	if _, err := os.Stat(log); err == nil {
+		kept := strings.TrimSuffix(log, ".checkpoints.jsonl") + fmt.Sprintf(".unregistered-%d.checkpoints.jsonl", h.Now().Unix())
+		if err := os.Rename(log, kept); err != nil {
+			return nil, err
+		}
+	}
+	if err := os.Remove(h.Store.memberPath(name)); err != nil {
+		return nil, err
+	}
+	return m, nil
 }

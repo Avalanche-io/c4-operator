@@ -8,6 +8,7 @@
 //	c4-agent observe [--all] [--json]
 //	c4-agent find --agent-name NAME [--config-dir DIR]
 //	c4-agent ls
+//	c4-agent unregister --name NAME
 //	c4-agent checkpoint NAME | --hook
 //	c4-agent resume NAME [PROMPT]
 //	c4-agent yield NAME [--timeout 10m]
@@ -182,6 +183,23 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 			return enc.Encode(agent.ObservedReport{Machine: agent.Machine(), ObservedAt: time.Now().UTC(), Sessions: obs})
 		}
 		printObserved(out, obs)
+	case "unregister":
+		name := fs.String("name", "", "the member to take out")
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		if *name == "" {
+			return errors.New("unregister: --name is required")
+		}
+		m, err := h.Unregister(*name)
+		if errors.Is(err, agent.ErrNoMember) {
+			return fmt.Errorf("unregister: no member named %s", *name)
+		}
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(out, "unregistered %s; its session %s is left as it is\n", m.Name, agent.ShortID(m.Session))
+		return nil
 	case "find":
 		var name, cd string
 		fs.StringVar(&name, "agent-name", "", "the agentName to look for")
@@ -351,6 +369,7 @@ const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
                        (--all: finished and stopped ones too)
   find --agent-name N  list sessions whose transcript names that agent, newest first
   ls                 members, whether each is busy, idle or stopped, and its last checkpoint
+  unregister --name N  take a member out (its session and transcript are left as they are)
   checkpoint NAME      save a turn boundary now
   checkpoint --hook    the Claude Code Stop hook: save the turn that just ended
   resume NAME [PROMPT] continue a stopped member's session (refused while it runs)

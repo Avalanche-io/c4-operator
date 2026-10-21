@@ -488,3 +488,35 @@ func TestPrintObserved(t *testing.T) {
 		t.Error("said nothing needs you with a question waiting")
 	}
 }
+
+// unregister takes a member out and says so in one line; its checkpoint
+// log is kept aside, so registering the name again starts a new chain.
+// An unknown name is an error naming it. No settings file is touched.
+func TestCLIUnregister(t *testing.T) {
+	_, work := setup(t)
+	if code, _, errs := runCLI(t, "", "register", "--name", "lead", "--session", sid, "--cwd", work); code != 0 {
+		t.Fatalf("register: %d %s", code, errs)
+	}
+	settings := filepath.Join(os.Getenv("CLAUDE_CONFIG_DIR"), "settings.json")
+	os.WriteFile(settings, []byte(`{"hooks":{}}`), 0o644)
+	code, out, errs := runCLI(t, "", "unregister", "--name", "lead")
+	if code != 0 || strings.Count(out, "\n") != 1 || !strings.HasPrefix(out, "unregistered lead") {
+		t.Fatalf("unregister: %d %q %q", code, out, errs)
+	}
+	if _, out, _ := runCLI(t, "", "ls"); strings.Contains(out, "lead") {
+		t.Errorf("still listed:\n%s", out)
+	}
+	if b, _ := os.ReadFile(settings); string(b) != `{"hooks":{}}` {
+		t.Errorf("a settings file was touched: %s", b)
+	}
+	kept, _ := filepath.Glob(filepath.Join(os.Getenv("C4_AGENT_HOME"), "members", "lead.unregistered-*.checkpoints.jsonl"))
+	if len(kept) != 1 {
+		t.Errorf("the checkpoint log was not kept aside: %v", kept)
+	}
+	if code, _, errs := runCLI(t, "", "register", "--name", "lead", "--session", sid, "--cwd", work); code != 0 {
+		t.Fatalf("registering the name again: %d %s", code, errs)
+	}
+	if code, _, errs := runCLI(t, "", "unregister", "--name", "nobody"); code == 0 || !strings.Contains(errs, "no member named nobody") {
+		t.Errorf("an unknown name: %d %q", code, errs)
+	}
+}
