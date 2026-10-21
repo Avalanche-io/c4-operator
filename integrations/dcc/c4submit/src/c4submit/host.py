@@ -107,7 +107,13 @@ class Host:
     # --- production context ---------------------------------------------
 
     def project(self) -> str:
-        return self.env.get("C4_PROJECT", "")
+        """``C4_PROJECT``, else the project ``c4 farm``'s farm names."""
+        if self.env.get("C4_PROJECT"):
+            return self.env["C4_PROJECT"]
+        if self.env is not os.environ:
+            return ""  # a host given its own environment reads nothing else
+        from c4submit import farmconfig  # noqa: PLC0415 - only when the environment names none
+        return str((farmconfig.resolve() or {}).get("project") or "")
 
     def shot(self) -> str:
         """The shot: ``C4_SHOT``, else ``SHOT``, else the ``shot`` group of

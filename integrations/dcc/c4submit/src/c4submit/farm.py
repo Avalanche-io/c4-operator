@@ -2,11 +2,14 @@
 ``internal/hud/API.md``), as the artist's own identity, standard library
 only.
 
-Configuration, in order: explicit arguments, then the environment:
+Configuration, in order: explicit arguments, then the environment, then
+the farm ``c4 farm`` talks to (``~/.c4/farm.yaml``, see farmconfig.py):
 
 - ``C4_HUD``: the HUD's base URL, for example ``https://c4.petrelfinch.example``;
 - ``C4_HUD_TOKEN`` or ``C4_HUD_TOKEN_FILE``: the artist's bearer token (the
-  file is read on every request, so a rotated token takes effect).
+  file is read on every request, so a rotated token takes effect);
+- ``C4_HUD_AS``: a development viewer, for a local farm started for
+  development (``c4 farm up``); a studio's farm refuses it.
 
 The routes are API.md's: ``GET /tools/{project}`` and
 ``/tools/{project}/{tool}``, ``GET /projects/{project}``, and ``POST
@@ -21,7 +24,7 @@ import urllib.parse
 import urllib.request
 from typing import Any, Dict, List, Optional
 
-from c4submit import __version__
+from c4submit import __version__, farmconfig
 
 MISSING_BATCH = 100_000   # POST /objects/{project}/missing takes at most this many
 
@@ -47,12 +50,20 @@ def q(s: str) -> str:
 
 class Farm:
     def __init__(self, base: Optional[str] = None, token: Optional[str] = None, token_file: Optional[str] = None,
-                 client: str = "c4submit", timeout: float = 120):
+                 client: str = "c4submit", timeout: float = 120, viewer: Optional[str] = None):
         self.base = (base or os.environ.get("C4_HUD") or "").rstrip("/")
+        cfg: dict = {}
         if not self.base:
-            raise FarmError(0, "the farm's address is not set: set C4_HUD to the HUD's URL")
+            cfg = farmconfig.resolve() or {}
+            self.base = str(cfg.get("hud") or "").rstrip("/")
+        if not self.base:
+            raise FarmError(0, "the farm's address is not set: set C4_HUD to the HUD's URL, "
+                               "or run c4 farm login (or c4 farm up) once")
         self._token = token if token is not None else os.environ.get("C4_HUD_TOKEN")
-        self._token_file = token_file or os.environ.get("C4_HUD_TOKEN_FILE")
+        self._token_file = token_file or os.environ.get("C4_HUD_TOKEN_FILE") or cfg.get("tokenFile")
+        self.viewer = viewer if viewer is not None else (os.environ.get("C4_HUD_AS") or str(cfg.get("as") or ""))
+        #: the project the farm's config names, for a host that names none
+        self.default_project = str(cfg.get("project") or "")
         self.client = client
         self.timeout = timeout
 
@@ -68,6 +79,8 @@ class Farm:
     def request(self, method: str, path: str, body: Any = None, data: Any = None, length: Optional[int] = None,
                 query: Optional[dict] = None, ctype: str = "application/json") -> bytes:
         url = self.base + "/api/v1" + path
+        if self.viewer:
+            query = dict(query or {}, **{"as": self.viewer})
         if query:
             url += "?" + urllib.parse.urlencode(query)
         headers = {"Accept": "application/json", "X-C4-Client": f"{self.client}/{__version__}"}
