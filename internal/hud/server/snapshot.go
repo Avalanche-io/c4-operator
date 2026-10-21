@@ -135,6 +135,17 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 		}
 		snap.Nodes = append(snap.Nodes, s.nodeSummary(m, &n, pool, visible))
 	}
+	// What each machine's own sessions use outside the queue, by count.
+	outside := s.usedOutside(time.Now())
+	for i := range snap.Nodes {
+		n := &snap.Nodes[i]
+		n.UsedOutside = outside[n.Name]
+		for j := range snap.Pools {
+			if snap.Pools[j].Name == n.Pool {
+				snap.Pools[j].UsedOutside += n.UsedOutside
+			}
+		}
+	}
 
 	snap.Tiers = m.metrics.tiers()
 

@@ -102,14 +102,14 @@ The farm at a glance. Also delivered by the event stream.
   farm: { slotsUsed, slotsTotal, queuedUnits, unitsPerHour, failuresLastHour,
           burstSlots, burstCostPerHour,
           bytesMaterialized, bytesFetchedFromStore, bytesAvoided, otherProjectsSlots },
-  pools: [ { name, attrs: { class, gpuModel?, vram?, capacityType }, slots, used, costPerSlotHour,
+  pools: [ { name, attrs: { class, gpuModel?, vram?, capacityType }, slots, used, usedOutside?, costPerSlotHour,
              burst?: { maxSlots, provisioningSeconds, costPerSlotHour, requested, provisioned } } ],
   classes: [ { name, driver, slo: { type, p50Seconds?, p95Seconds?, turnaroundSeconds? }, lens } ],
   projects: [ { name, root, quotas: [ { pool, nominal, borrowingLimit, used } ],
                 burstSpendToday, burstBudgetPerDay, bytesAvoided,
                 workerHours: [ { pool, class, hours } ], gpuHours } ],
   jobs: [ JobSummary ],
-  nodes: [ { name, pool, locality, zone?, region?, state, slots, used, failuresLastHour, suspect,
+  nodes: [ { name, pool, locality, zone?, region?, state, slots, used, usedOutside?, failuresLastHour, suspect,
              cacheBytes, cacheHitRate, running?: [ { job, unit, slots } ],
              capped?, shapeSlots?, capacityReason? } ],
   sites?: [ { name, label, region, lat, lon, kind, localities[], tz? } ],
@@ -732,6 +732,12 @@ A host runner's report of the Claude Code sessions on its machine,
 - The rows are served only in a viewer's own answers (the snapshot,
   needs-me, and MCP through them). Nothing that leaves the farm, such as a
   diagnostic bundle, reads them.
+- `nodes[].usedOutside` counts a node's reported sessions in use outside
+  the queue (`working`, `needs you`, `at its limit`), and
+  `pools[].usedOutside` sums its nodes. The HUD draws a busy machine as
+  "in use outside the queue", not free. It is a bare count, shown to
+  anyone who sees the node, and never slots: the queue does not read it,
+  so a person's own sessions never make the farm refuse their queued work.
 
 ## GET /events
 

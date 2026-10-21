@@ -314,12 +314,15 @@ type Farm struct {
 }
 
 type Pool struct {
-	Name            string         `json:"name"`
-	Attrs           map[string]any `json:"attrs"`
-	Slots           int            `json:"slots"`
-	Used            int            `json:"used"`
-	CostPerSlotHour float64        `json:"costPerSlotHour"`
-	Burst           *PoolBurst     `json:"burst,omitempty"`
+	Name  string         `json:"name"`
+	Attrs map[string]any `json:"attrs"`
+	Slots int            `json:"slots"`
+	Used  int            `json:"used"`
+	// UsedOutside counts its nodes' observed sessions in use outside the
+	// queue (Node.UsedOutside). Never slots: nothing schedules on it.
+	UsedOutside     int        `json:"usedOutside,omitempty"`
+	CostPerSlotHour float64    `json:"costPerSlotHour"`
+	Burst           *PoolBurst `json:"burst,omitempty"`
 }
 
 type PoolBurst struct {
@@ -888,12 +891,18 @@ type Heavy struct {
 }
 
 type Node struct {
-	Name             string    `json:"name"`
-	Pool             string    `json:"pool"`
-	Locality         string    `json:"locality"`
-	State            string    `json:"state"`
-	Slots            int       `json:"slots"`
-	Used             int       `json:"used"`
+	Name     string `json:"name"`
+	Pool     string `json:"pool"`
+	Locality string `json:"locality"`
+	State    string `json:"state"`
+	Slots    int    `json:"slots"`
+	Used     int    `json:"used"`
+	// UsedOutside is how many of the machine's own Claude Code sessions
+	// (its runner's observed report) are in use outside the queue:
+	// working, needing their person or at a usage limit. A bare count,
+	// naming no one. It is never slots, so the queue does not read it:
+	// a person's own sessions never make the farm refuse their queued work.
+	UsedOutside      int       `json:"usedOutside,omitempty"`
 	FailuresLastHour int       `json:"failuresLastHour"`
 	Suspect          bool      `json:"suspect"`
 	CacheBytes       float64   `json:"cacheBytes"`

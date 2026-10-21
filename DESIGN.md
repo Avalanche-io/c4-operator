@@ -1907,7 +1907,12 @@ and a sweep planner that spawns trials are all generators.
       (`POST /nodes/{node}/observed`, as that node only), shown only to
       the runner's own owners who also own one of its node's pools, held
       in memory, never in the book or anything that leaves the farm,
-      because a session's words and folders are the person's own.
+      because a session's words and folders are the person's own. Their
+      count in use (working, needing their person, at a limit) shows on
+      the node and pool as used outside the queue, so a busy machine
+      never reads as free. It is never slots, and the policy and
+      placement never read it: a lead's own subagents cannot make the farm
+      refuse the same person's queued work.
     - **It holds the job, never fails it.** The unit is in state `needs`
       (`units.needs`), not `failed`. Once nothing else can run, the job is
       `Held` with NeedsPerson `NeedsInformation` ("waiting on a

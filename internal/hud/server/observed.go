@@ -132,6 +132,30 @@ func nodeOwners(m *model, node string) []string {
 	return out
 }
 
+// inUse are the words of a session in use outside the queue: it holds the
+// machine's attention or its model account, whatever the farm does.
+var inUse = map[string]bool{"working": true, "needs you": true, "at its limit": true}
+
+// usedOutside counts, by node, the observed sessions in use outside the
+// queue, from reports that still stand. Only a count leaves here, for any
+// viewer of the node: it names no one. The queue never reads it.
+func (s *Server) usedOutside(now time.Time) map[string]int {
+	out := map[string]int{}
+	s.obsMu.Lock()
+	defer s.obsMu.Unlock()
+	for node, rep := range s.observed {
+		if now.Sub(rep.postedAt) > observedFor {
+			continue
+		}
+		for _, o := range rep.sessions {
+			if inUse[o.Word] {
+				out[node]++
+			}
+		}
+	}
+	return out
+}
+
 // observedSessions are the sessions v may see: those of every node whose
 // runner v owns (and v owns one of its pools), from reports that still
 // stand, by node then session.

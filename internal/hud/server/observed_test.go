@@ -142,3 +142,45 @@ func TestObservedSessions(t *testing.T) {
 		t.Fatalf("a stale report is still shown: %+v", snap.Observed)
 	}
 }
+
+// A machine's own sessions in use (working, needing their person, at a
+// usage limit) are counted on its node and pool as used outside the queue,
+// for anyone who sees the node, as a bare count. They are never slots: the
+// pool's slots and use, which the queue plans on, do not move.
+func TestUsedOutsideTheQueue(t *testing.T) {
+	m := &model{at: time.Now().UTC(), byKey: map[string]*jobRec{}, nsProject: map[string]string{},
+		nodes: []corev1.Node{{ObjectMeta: metav1.ObjectMeta{Name: "laptop-1", Labels: map[string]string{"pool": "agent-dana"}}}},
+		pools: []c4v1.Pool{{ObjectMeta: metav1.ObjectMeta{Name: "agent-dana"},
+			Spec:   c4v1.PoolSpec{NodeSelector: map[string]string{"pool": "agent-dana"}, Owners: []string{"dana"}, SlotsPerNode: 4},
+			Status: c4v1.PoolStatus{Slots: 4, Used: 1}}}}
+	s := &Server{Loc: time.UTC, Log: zap.New(zap.WriteTo(&bytes.Buffer{})), m: m, DevViewers: map[string]*api.Viewer{
+		"host": {User: HostAccountPrefix + "laptop-1"},
+		"maya": {User: "maya", Projects: []string{}}}}
+	look := func() (api.Pool, api.Node) {
+		var snap api.Snapshot
+		get(t, s, "/api/v1/snapshot?as=maya", &snap)
+		if len(snap.Pools) != 1 || len(snap.Nodes) != 1 {
+			t.Fatalf("pools %+v nodes %+v", snap.Pools, snap.Nodes)
+		}
+		return snap.Pools[0], snap.Nodes[0]
+	}
+	poolBefore, nodeBefore := look()
+
+	rep := api.ObservedReport{Machine: "Dana's MacBook Pro", ObservedAt: time.Now(), Owners: []string{"dana"}, Sessions: []api.ObservedSession{
+		{Session: "a", Word: "working"}, {Session: "b", Word: "needs you"}, {Session: "c", Word: "at its limit"}, {Session: "d", Word: "idle"}}}
+	b, _ := json.Marshal(rep)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/nodes/laptop-1/observed?as=host", bytes.NewReader(b)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("post: %d %s", w.Code, w.Body.String())
+	}
+
+	pool, node := look()
+	if node.UsedOutside != 3 || pool.UsedOutside != 3 {
+		t.Fatalf("used outside: node %d, pool %d, want 3", node.UsedOutside, pool.UsedOutside)
+	}
+	if pool.Slots != poolBefore.Slots || pool.Used != poolBefore.Used || node.Slots != nodeBefore.Slots || node.Used != nodeBefore.Used {
+		t.Fatalf("the sessions moved slots: pool %d/%d (was %d/%d), node %d/%d (was %d/%d)", pool.Used, pool.Slots,
+			poolBefore.Used, poolBefore.Slots, node.Used, node.Slots, nodeBefore.Used, nodeBefore.Slots)
+	}
+}
