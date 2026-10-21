@@ -62,6 +62,7 @@ type Queue struct {
 	jobs    map[types.UID]*jobMem
 	spentMu sync.Mutex
 	spent   map[string]float64 // burst dollars per project today
+	ledger  spendLedger        // its saved copy (burstledger.go)
 	day     int
 	last    time.Time
 	// Loc is the farm's time zone, for the times in estimate messages.
@@ -559,6 +560,8 @@ func (q *Queue) Tick(ctx context.Context) error {
 		q.day, q.spent = d, map[string]float64{}
 		q.spentMu.Unlock()
 	}
+	// A new leader starts the day at what was spent, not at nothing.
+	q.loadSpend(ctx, now)
 
 	var (
 		pools    c4v1.PoolList
@@ -674,6 +677,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.deliverSteers(ctx, now, views)
 	q.stage(ctx, dec, views, poolInfo)
 	q.meter(now, views, poolInfo)
+	q.saveSpend(ctx, now)
 	q.capacity(ctx, now, dec, poolInfo, crs.Items)
 	q.forecastPass(now, snap, cfg, dec, views, fviews)
 	q.report(ctx, now, dec, views)

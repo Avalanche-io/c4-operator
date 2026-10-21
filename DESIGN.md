@@ -2372,6 +2372,11 @@ Burst decisions are cost-aware:
   burst budget and below the lateness it prevents, priced at the project's
   `lateCostPerHour`. Otherwise the HUD shows the option and its price, and a
   person approves it.
+- What each project spent on burst today survives a restart: the queue saves
+  it, with the day, in the ConfigMap `c4-work-burst-spend` in the operator's
+  namespace at most every minute, and a new leader adds it back on its first
+  tick, before any burst is decided. A restart cannot refill a day's budget;
+  it loses at most a minute of spend.
 - Bursts are sized from a plan with a margin: the critical path's work is
   counted in W90 and again as the job's tail. What a job reports (at risk,
   late by, ETA) uses Graham's bound without the double count, so a burst the
