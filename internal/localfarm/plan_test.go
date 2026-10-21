@@ -238,3 +238,20 @@ func TestTimings(t *testing.T) {
 		t.Error("a nil Timings says something")
 	}
 }
+
+// A new farm's owner is --owner or the default; an existing farm keeps its
+// owner, and up refuses an --owner naming someone else.
+func TestChooseOwner(t *testing.T) {
+	if got, err := ChooseOwner("", "Noor@studio.example"); err != nil || got != "noor" {
+		t.Errorf("new farm, --owner: %q %v", got, err)
+	}
+	if got, err := ChooseOwner("noor", ""); err != nil || got != "noor" {
+		t.Errorf("kept: %q %v", got, err)
+	}
+	if got, err := ChooseOwner("noor", "NOOR"); err != nil || got != "noor" {
+		t.Errorf("--owner naming the owner: %q %v", got, err)
+	}
+	if _, err := ChooseOwner("noor", "sam"); err == nil || !strings.Contains(err.Error(), "this farm's owner is noor; up does not change it (changing it will be c4 farm owner change)") {
+		t.Errorf("change: %v", err)
+	}
+}

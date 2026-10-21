@@ -613,7 +613,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		registryPort := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
 		integrateOn := fs.String("integrate", "", "the integrations to add, without asking: claude (c4 farm integrations lists them)")
 		integrateOff := fs.Bool("no-integrate", false, "the minimal install: no integration added, without asking")
-		owner := fs.String("owner", "", "who owns this farm and plays every role on it (default the name in your git user.email, else your login)")
+		owner := fs.String("owner", "", "for a new farm: who owns it and plays every role on it (default the name in your git user.email, else your login); an existing farm keeps its owner")
 		trackerOn := fs.Bool("tracker", false, "add a stand-in GitHub and c4-sync: issues you open become jobs, its reviews serve them (nothing leaves this machine)")
 		syncInstall := fs.String("sync-install", "", "c4-sync's install manifest, with --tracker (default this release's)")
 		syncImage := fs.String("sync-image", "", "the c4-sync image, with --tracker; one only in this machine's Docker (c4-sync:dev) is pushed to the farm's registry")
@@ -630,21 +630,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != "", Owner: *owner, Tracker: *trackerOn},
 			Install: *install, Version: version, ImageArchive: *archive, SyncInstall: *syncInstall, SyncImage: *syncImage, Log: stdout,
 			Timings: &localfarm.Timings{}}
-		// the owner is kept from one up to the next; --owner changes it
-		was := cfg.Farms[localfarm.Name].Owner
-		switch {
-		case o.Owner != "":
-			name, err := localfarm.OwnerName(o.Owner)
-			if err != nil {
-				return err
-			}
-			o.Owner = name
-		case was != "":
-			o.Owner = was
-		default:
-			if o.Owner = localfarm.DefaultOwner(); o.Owner == "" {
-				return errors.New("no name for the farm's owner from git's user.email or the login; give one with --owner NAME")
-			}
+		// the owner is chosen when the farm is made, and kept after
+		if o.Owner, err = localfarm.ChooseOwner(cfg.Farms[localfarm.Name].Owner, o.Owner); err != nil {
+			return err
 		}
 		// the owner signs in as themselves; --as opens a role's view
 		v := localfarm.OwnerViewer(o.Owner)
@@ -688,11 +676,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
 		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
-		if was != "" && was != o.Owner {
-			fmt.Fprintf(stdout, "owner     %s, no longer %s: %s now plays every role here\n", o.Owner, was, o.Owner)
-		} else {
-			fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
-		}
+		fmt.Fprintf(stdout, "owner     %s, who plays every role here\n", o.Owner)
 		if slices.Contains(on, farmcli.Claude) {
 			in := farmcli.Integration{Runner: localRunner(o.Owner, stdin, stdout)}
 			in.On(ctx, farmcli.Out{W: stdout})

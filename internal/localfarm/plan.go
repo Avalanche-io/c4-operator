@@ -7,6 +7,7 @@ package localfarm
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -388,6 +389,30 @@ func DefaultOwner() string {
 		}
 	}
 	return ""
+}
+
+// ChooseOwner is the farm's owner as up settles it: a new farm's is
+// --owner, else DefaultOwner; an existing farm keeps the one it has, and
+// up refuses an --owner naming someone else, since changing a farm's
+// owner will be a recorded act of its own (c4 farm owner change).
+func ChooseOwner(was, flag string) (string, error) {
+	if flag != "" {
+		name, err := OwnerName(flag)
+		if err != nil {
+			return "", err
+		}
+		if was != "" && name != was {
+			return "", fmt.Errorf("this farm's owner is %s; up does not change it (changing it will be c4 farm owner change); c4 farm up without --owner keeps %s", was, was)
+		}
+		return name, nil
+	}
+	if was != "" {
+		return was, nil
+	}
+	if name := DefaultOwner(); name != "" {
+		return name, nil
+	}
+	return "", errors.New("no name for the farm's owner from git's user.email or the login; give one with --owner NAME")
 }
 
 // OwnerName is a person's name as the farm records its owner: an
