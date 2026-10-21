@@ -22,8 +22,9 @@ import (
 )
 
 // Controls are carried out on their records (DESIGN.md section 9.2). The
-// HUD signs each decide, supply, steer, acknowledgement and withdrawal
-// before it writes the request, and the request names its record. With
+// HUD signs each decide, supply, steer, acknowledgement, withdrawal,
+// requeue, allowed node and acceptance of a validated input before it
+// writes the request, and the request names its record. With
 // signing on (Roots set), the queue acts on a request only if that record
 // verifies against the farm's roots, was signed by the HUD, is a control
 // record for this job, and names the same action, actor, unit, token and
@@ -55,6 +56,13 @@ var controlKinds = []controlKind{
 		fields: []string{"unit", "text"}, last: func(m *jobMem) string { return m.supplied }},
 	{key: c4v1.AnnotationWithdrawNeeds, action: func(map[string]any) string { return "withdraw-needs" },
 		fields: []string{"unit", "why"}, last: func(m *jobMem) string { return m.withdrawn }},
+	{key: c4v1.AnnotationRequeue, action: func(map[string]any) string { return "requeue" },
+		fields: []string{"units"}, last: func(m *jobMem) string { return m.requeued }},
+	{key: c4v1.AnnotationAllowNodes, action: func(map[string]any) string { return "allow-node" },
+		fields: []string{"node"}, last: func(m *jobMem) string { return m.allowed }},
+	// An acceptance holds until a newer one, so every one is checked.
+	{key: c4v1.AnnotationAcceptValidated, action: func(map[string]any) string { return "accept-validated" },
+		fields: []string{"accept"}, last: func(*jobMem) string { return "" }},
 }
 
 // controlRecord is what the queue reads of a HUD control record.
@@ -88,7 +96,10 @@ func (q *Queue) trustedControls(ctx context.Context, v *view, now time.Time) *c4
 		}
 		var reqs []map[string]any
 		if err := json.Unmarshal([]byte(raw), &reqs); err != nil {
-			continue
+			// Not a list of requests (an older form, written without a
+			// record): nothing in it is carried out.
+			q.refuseControl(ctx, v, k.key, "-", errors.New("it is not a list of signed requests"), now)
+			reqs = nil
 		}
 		last := tokenValue(k.last(v.mem))
 		kept := reqs[:0:0]

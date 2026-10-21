@@ -654,12 +654,13 @@ credentials.
   and `c4 farm` through it, is therefore the one place a control enters the
   farm: it checks who may give it, signs it and books it. Patch rights on a
   WorkJob alone cannot decide a person's wait. With signing on, the queue
-  also checks each acknowledgement, decision, steer, supply and withdrawal
-  against the record it names: signed by the HUD, for this job, with the
-  same action, actor, token and content. A request without one is left
-  undone and reported once as a `ControlRefused` Warning event on the job.
-  Requeue, allowing nodes and accepting a validated input carry no record of
-  their own yet; for those the admission policy is the guard.
+  also checks each acknowledgement, decision, steer, supply, withdrawal,
+  requeue, allowed node and acceptance of a validated input against the
+  record it names: signed by the HUD, for this job, with the same action,
+  actor, token and content. A request without one is left undone and
+  reported once as a `ControlRefused` Warning event on the job, as is a
+  control in an older plain form (`TOKEN:SET`, a node list, `"true"`),
+  which names no record. A farm with signing off still reads those forms.
 
 ### 6.3 Strict mode: no shared caches
 

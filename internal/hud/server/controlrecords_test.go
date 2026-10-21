@@ -14,6 +14,7 @@ import (
 	authzv1 "k8s.io/api/authorization/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	kfake "k8s.io/client-go/kubernetes/fake"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ktesting "k8s.io/client-go/testing"
@@ -243,5 +244,37 @@ func TestAgentDecisionIsClaimed(t *testing.T) {
 	}
 	if p.Custody != CustodyClaimed || p.Agent != "wrangler-bot" || p.AgentGrade != CustodyClaimed {
 		t.Errorf("custody %q, agent %q (%q); want claimed, wrangler-bot (claimed)", p.Custody, p.Agent, p.AgentGrade)
+	}
+}
+
+// A requeue, an allowed node and an acceptance of a validated input are
+// written as requests that name their signed record, with the record's own
+// token, so the queue can carry each out on its record alone.
+func TestRequeueAllowAcceptNameTheirRecords(t *testing.T) {
+	s, post := decideFarm(t)
+	for _, c := range []struct {
+		path, body, key, action string
+	}{
+		{"requeue", `{"units": [7]}`, c4v1.AnnotationRequeue, "requeue"},
+		{"blacklist", `{"node": "w1", "remove": true}`, c4v1.AnnotationAllowNodes, "allow-node"},
+		{"accept-validated", `{"accept": true}`, c4v1.AnnotationAcceptValidated, "accept-validated"},
+	} {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/show-a/sh040-light-v007/"+c.path+"?as=wrangler", strings.NewReader(c.body))
+		code, p := post(r)
+		if code != http.StatusOK {
+			t.Fatalf("%s: %d", c.path, code)
+		}
+		var j c4v1.WorkJob
+		if err := s.Client.Get(context.Background(), k8stypes.NamespacedName{Namespace: "show-a", Name: "sh040-light-v007"}, &j); err != nil {
+			t.Fatal(err)
+		}
+		var reqs []map[string]any
+		if err := json.Unmarshal([]byte(j.Annotations[c.key]), &reqs); err != nil || len(reqs) != 1 {
+			t.Fatalf("%s: %s is %q", c.path, c.key, j.Annotations[c.key])
+		}
+		req := p.Change.(map[string]any)["request"].(map[string]any)
+		if p.Action != c.action || reqs[0]["record"] == "" || reqs[0]["token"] != req["token"] || reqs[0]["actor"] != "dana" {
+			t.Errorf("%s: request %v, record %s %v", c.path, reqs[0], p.Action, req)
+		}
 	}
 }

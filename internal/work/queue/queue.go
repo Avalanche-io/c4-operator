@@ -278,6 +278,8 @@ type jobMem struct {
 	preemptBase int // preemptions counted before the last restart
 	yields      []yieldRecord
 	requeued    string
+	// allowed is the last allow-node request carried out.
+	allowed string
 	// accepted are failed units a person accepted (also in failed);
 	// acks the standing acknowledgements, acked the last request's token
 	// (states.go).
@@ -487,19 +489,22 @@ func decode(s string) []int {
 
 // view is one job during a tick.
 type view struct {
-	job       *c4v1.WorkJob
-	key       string // namespace/name
-	mem       *jobMem
-	driver    class.Driver
-	project   string
-	obj       class.Objective
-	pods      map[int]*corev1.Pod // live unit pods by index
-	done      []*corev1.Pod       // terminal pods to delete once recorded
-	running   map[int]runInfo
-	finishing map[int]bool // succeeded, waiting for capture
-	preflight map[int]bool // live pods still preparing
-	runnable  []int
-	blocked   bool
+	job     *c4v1.WorkJob
+	key     string // namespace/name
+	mem     *jobMem
+	driver  class.Driver
+	project string
+	obj     class.Objective
+	pods    map[int]*corev1.Pod // live unit pods by index
+	// acceptValidated is whether the job accepts a validated recompute
+	// of its inputs, on a request the queue trusts (AnnotationAcceptValidated).
+	acceptValidated bool
+	done            []*corev1.Pod // terminal pods to delete once recorded
+	running         map[int]runInfo
+	finishing       map[int]bool // succeeded, waiting for capture
+	preflight       map[int]bool // live pods still preparing
+	runnable        []int
+	blocked         bool
 	// after lists the jobs it waits on that have not succeeded (keys).
 	after []string
 	// stuckOn names a dependency that failed: the job cannot start.
@@ -760,40 +765,38 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		q.observeForecast(v, pools, now)
 		return v
 	}
-	// A person's requeue request: run these units again.
-	if req := j.Annotations[c4v1.AnnotationRequeue]; req != "" {
-		token, set, _ := strings.Cut(req, ":")
-		if token != m.requeued {
-			for _, i := range decode(set) {
-				if i < 0 || i >= len(plan.Units) {
-					continue
-				}
-				delete(m.succeeded, i)
-				delete(m.failed, i)
-				delete(m.millis, i)
-				delete(m.ended, i)
-				m.forgetAcks(i)
-				m.attempts[i] = 0
-			}
-			// Work run again is reviewed again: the job's review reopens,
-			// so an earlier approval does not pass the new work.
-			if r, ok := plan.Review(); ok && len(decode(set)) > 0 {
-				delete(m.succeeded, r)
-				delete(m.failed, r)
-				delete(m.millis, r)
-				delete(m.ended, r)
-				delete(m.waitRecs().recs, r)
-			}
-			m.requeued = token
-			m.finished = time.Time{}
-			// Moments planned before the requeue did not foresee it.
-			m.calPts, m.learned = nil, true
-			m.finPts, m.finLearned = nil, true
-		}
-	}
 	// What people asked for, carried out on its signed record only
 	// (controltrust.go).
 	ctl := q.trustedControls(ctx, v, now)
+	// People's requeue requests: run these units again.
+	for _, req := range requeues(ctl, m, q.Roots == nil) {
+		token, set := req.Token, req.Units
+		for _, i := range decode(set) {
+			if i < 0 || i >= len(plan.Units) {
+				continue
+			}
+			delete(m.succeeded, i)
+			delete(m.failed, i)
+			delete(m.millis, i)
+			delete(m.ended, i)
+			m.forgetAcks(i)
+			m.attempts[i] = 0
+		}
+		// Work run again is reviewed again: the job's review reopens,
+		// so an earlier approval does not pass the new work.
+		if r, ok := plan.Review(); ok && len(decode(set)) > 0 {
+			delete(m.succeeded, r)
+			delete(m.failed, r)
+			delete(m.millis, r)
+			delete(m.ended, r)
+			delete(m.waitRecs().recs, r)
+		}
+		m.requeued = token
+		m.finished = time.Time{}
+		// Moments planned before the requeue did not foresee it.
+		m.calPts, m.learned = nil, true
+		m.finPts, m.finLearned = nil, true
+	}
 	// People taking or accepting failed units.
 	applyAcks(ctl, m, len(plan.Units))
 	// People deciding what waits for them (wait.go).
@@ -805,12 +808,14 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	q.applySupplies(ctx, v, ctl, now)
 	q.applyWithdraws(ctx, v, ctl, now)
 	// Nodes a person allowed again leave the automatic blacklist.
-	for _, n := range strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",") {
-		if n = strings.TrimSpace(n); n != "" && m.blacklist[n] {
+	for _, n := range allowedNodes(ctl, m, q.Roots == nil) {
+		if m.blacklist[n] {
 			delete(m.blacklist, n)
 			delete(m.nodeFails, n)
 		}
 	}
+	// Whether the job accepts a validated recompute of its inputs.
+	v.acceptValidated = acceptsValidated(ctl, q.Roots == nil)
 	v.avoid = map[string]bool{}
 	for n := range m.blacklist {
 		v.avoid[n] = true

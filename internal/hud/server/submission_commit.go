@@ -158,7 +158,7 @@ func (s *Server) commitSubmission(r *http.Request, v *api.Viewer, m *model, plan
 	sum := sha256.Sum256(body.Submission)
 	record, err := s.signControl(ctx, []string{plan.Project}, provenance.Subject{Name: "submission:" + out.Submission,
 		Digest: map[string]string{"sha256": hex.EncodeToString(sum[:])}},
-		controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r),
+		controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
 			Authorization: s.authorization(v, "create", "workjobs", plan.Namespace, ""), Action: "submit",
 			Target: "submission:" + out.Submission, Change: map[string]any{"project": plan.Project, "jobs": names}})
 	if err != nil {
@@ -244,7 +244,7 @@ func (s *Server) rollback(ctx context.Context, r *http.Request, v *api.Viewer, p
 		}
 		var err error
 		withdrawal, err = s.signControl(ctx, []string{plan.Project}, provenance.Subject{Name: "submission-record:" + record},
-			controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r),
+			controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
 				Authorization: s.authorization(v, "delete", "workjobs", plan.Namespace, ""), Action: "withdraw",
 				Target: "submission-record:" + record, Change: map[string]any{"jobs": names, "failed": failed}})
 		if err != nil {

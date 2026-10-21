@@ -852,9 +852,13 @@ cannot plan it. Without `dryRun` the answer is `201`, with
 A book entry of kind `submit` names the viewer (or the agent for the
 viewer, through MCP).
 
-A job may carry `c4.avalanche.io/accept-validated: "true"` (experimental,
-staging): it accepts a validated recompute of an input in place of moving
-it to another site. A validated recompute's output differs from the
+A job may accept a validated recompute of an input in place of moving it to
+another site (experimental, staging). `POST /jobs/{ns}/{name}/accept-validated`
+`{ accept }` sets it, as anyone who may patch the job, and answers `{ ok,
+message, job, record }`. It is an approval, so it is signed: the request
+names its control record, and the queue holds to the newest acceptance it
+can verify. A farm with signing off also reads
+`c4.avalanche.io/accept-validated: "true"`. A validated recompute's output differs from the
 recorded one, so only the consuming job may choose it; exact recomputes and
 identical outputs need no consent, and volatile ones are never offered.
 At that site the queue points the job at the recompute's output (input

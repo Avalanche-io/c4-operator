@@ -340,9 +340,81 @@ func (s *Server) handleRequeue(w http.ResponseWriter, r *http.Request) {
 	if j.Annotations == nil {
 		j.Annotations = map[string]string{}
 	}
-	j.Annotations[c4v1.AnnotationRequeue] = strconv.FormatInt(time.Now().UnixNano(), 36) + ":" + order.EncodeSet(idx)
+	now := time.Now()
+	token := strconv.FormatInt(now.UnixNano(), 36)
+	units := order.EncodeSet(idx)
+	// Signed first, so the request names its record (controltrust.go).
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "requeue", map[string]any{"units": units, "token": token})
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
+	var reqs []c4v1.WorkRequeueRequest
+	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationRequeue]), &reqs)
+	reqs = append(reqs, c4v1.WorkRequeueRequest{Token: token, Units: units, Actor: actorOf(r, v),
+		At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
+	j.Annotations[c4v1.AnnotationRequeue] = lastRequests(reqs)
 	msg := fmt.Sprintf("%s: %d units queued again", j.Name, len(idx))
-	s.finishJobControl(w, r, v, rec, j, patch, before, "requeue", "requeue", map[string]any{"units": order.EncodeSet(idx)}, "Requeued", msg)
+	s.patchJobControl(w, r, v, rec, j, patch, id, "requeue", "Requeued", msg)
+}
+
+// lastRequests is a control annotation's value: its newest 16 requests.
+func lastRequests[T any](reqs []T) string {
+	if len(reqs) > 16 {
+		reqs = reqs[len(reqs)-16:]
+	}
+	b, _ := json.Marshal(reqs)
+	return string(b)
+}
+
+// handleAcceptValidated is POST /jobs/{ns}/{name}/accept-validated
+// {accept}: the job accepts (or no longer accepts) a validated recompute
+// of its inputs in place of moving them. It is an approval, so it is
+// signed, and the queue holds to the newest one it can verify.
+func (s *Server) handleAcceptValidated(w http.ResponseWriter, r *http.Request) {
+	_, rec, v := s.job(w, r)
+	if rec == nil {
+		return
+	}
+	var body struct {
+		Accept *bool `json:"accept"`
+	}
+	if err := decodeBody(r, &body); err != nil || body.Accept == nil {
+		fail(w, http.StatusBadRequest, "send {accept: true} or {accept: false}")
+		return
+	}
+	ctx := r.Context()
+	if err := s.authorize(ctx, r, v, rec.job.Namespace, "patch", "workjobs", rec.job.Name); err != nil {
+		fail(w, http.StatusForbidden, "%v", err)
+		return
+	}
+	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
+	if err != nil {
+		fail(w, http.StatusNotFound, "%v", err)
+		return
+	}
+	patch := client.MergeFrom(j.DeepCopy())
+	before := queue.SpecDigest(j)
+	if j.Annotations == nil {
+		j.Annotations = map[string]string{}
+	}
+	now := time.Now()
+	token := strconv.FormatInt(now.UnixNano(), 36)
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "accept-validated", map[string]any{"accept": *body.Accept, "token": token})
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
+	var reqs []c4v1.WorkAcceptValidatedRequest
+	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationAcceptValidated]), &reqs)
+	reqs = append(reqs, c4v1.WorkAcceptValidatedRequest{Token: token, Accept: *body.Accept, Actor: actorOf(r, v),
+		At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
+	j.Annotations[c4v1.AnnotationAcceptValidated] = lastRequests(reqs)
+	msg := fmt.Sprintf("%s: accepts a validated recompute of its inputs", j.Name)
+	if !*body.Accept {
+		msg = fmt.Sprintf("%s: no longer accepts a validated recompute of its inputs", j.Name)
+	}
+	s.patchJobControl(w, r, v, rec, j, patch, id, "accept-validated", "AcceptValidated", msg)
 }
 
 // handleAck is POST /jobs/{ns}/{name}/ack: a person takes failed units
@@ -484,23 +556,31 @@ func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
 	}
 	patch := client.MergeFrom(j.DeepCopy())
 	before := queue.SpecDigest(j)
-	msg := ""
 	if body.Remove {
 		j.Spec.AvoidNodes = slices.DeleteFunc(j.Spec.AvoidNodes, func(n string) bool { return n == body.Node })
 		if j.Annotations == nil {
 			j.Annotations = map[string]string{}
 		}
-		allow := strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",")
-		allow = append(slices.DeleteFunc(allow, func(n string) bool { return n == "" || n == body.Node }), body.Node)
-		j.Annotations[c4v1.AnnotationAllowNodes] = strings.Join(allow, ",")
-		msg = fmt.Sprintf("%s: %s allowed again", j.Name, body.Node)
-	} else {
-		if !slices.Contains(j.Spec.AvoidNodes, body.Node) {
-			j.Spec.AvoidNodes = append(j.Spec.AvoidNodes, body.Node)
+		now := time.Now()
+		token := strconv.FormatInt(now.UnixNano(), 36)
+		// Signed first, so the request names its record (controltrust.go).
+		id, err := s.controlJob(ctx, r, v, rec, j, before, "allow-node", map[string]any{"node": body.Node, "token": token})
+		if err != nil {
+			fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+			return
 		}
-		msg = fmt.Sprintf("%s: will not use %s", j.Name, body.Node)
+		var reqs []c4v1.WorkAllowNodeRequest
+		_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationAllowNodes]), &reqs)
+		reqs = append(reqs, c4v1.WorkAllowNodeRequest{Token: token, Node: body.Node, Actor: actorOf(r, v),
+			At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
+		j.Annotations[c4v1.AnnotationAllowNodes] = lastRequests(reqs)
+		s.patchJobControl(w, r, v, rec, j, patch, id, "allow", "Blacklist", fmt.Sprintf("%s: %s allowed again", j.Name, body.Node))
+		return
 	}
-	s.finishJobControl(w, r, v, rec, j, patch, before, "avoid-node", map[bool]string{true: "allow", false: "avoid"}[body.Remove], body, "Blacklist", msg)
+	if !slices.Contains(j.Spec.AvoidNodes, body.Node) {
+		j.Spec.AvoidNodes = append(j.Spec.AvoidNodes, body.Node)
+	}
+	s.finishJobControl(w, r, v, rec, j, patch, before, "avoid-node", "avoid", body, "Blacklist", fmt.Sprintf("%s: will not use %s", j.Name, body.Node))
 }
 
 func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {

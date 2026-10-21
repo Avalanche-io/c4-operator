@@ -183,7 +183,7 @@ func (s *Server) handlePeopleConfirm(w http.ResponseWriter, r *http.Request) {
 	now := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	offer := c4v1.TrackerPersonOffer{From: "spec.people", Generation: tr.Generation}
 	target := "trackerperson:" + ns + "/" + name
-	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r),
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
 		Authorization: "the person the login is offered as (" + person + ")", Action: "people-confirm", Target: target,
 		Change: map[string]any{"tracker": tr.Name, "login": body.Login, "person": person, "offer": offer}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target,

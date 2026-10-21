@@ -99,7 +99,7 @@ func (q *Queue) noteRecomputeOutput(ctx context.Context, v *view, out string) {
 // substitutesAt are the substitutes job v may read at site, by input
 // index: none unless it accepts validated recomputes.
 func (q *Queue) substitutesAt(v *view, inputs []process.Input, site string) map[int]substitute {
-	if v.job.Annotations[c4v1.AnnotationAcceptValidated] != "true" || site == "" {
+	if !v.acceptValidated || site == "" {
 		return nil
 	}
 	q.derivMu.Lock()

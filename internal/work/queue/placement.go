@@ -49,7 +49,7 @@ func (q *Queue) placeJobs(ctx context.Context, views []*view, pools map[string]*
 		if !ok || len(inputs) == 0 {
 			continue
 		}
-		accept := v.job.Annotations[c4v1.AnnotationAcceptValidated] == "true"
+		accept := v.acceptValidated
 		for _, name := range v.pools {
 			p := pools[name]
 			if p == nil || p.site == "" {

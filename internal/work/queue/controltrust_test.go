@@ -145,3 +145,128 @@ func TestControlsNeedTheirRecord(t *testing.T) {
 		t.Fatal("without roots the job is not used as written")
 	}
 }
+
+// Requeues, allowed nodes and acceptances of a validated input are
+// carried out on their records too, as the other controls are. With
+// signing on, a request with no record, or one whose record says other
+// content, is left undone and reported; so is the older plain form, which
+// names no record. With signing off, the plain forms are still read.
+func TestRequeueAllowAcceptNeedTheirRecords(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 10, 20, 19, 0, 0, 0, time.UTC)
+	st, err := storeurl.OpenSharded([]storeurl.Spec{{Name: "s0", URL: t.TempDir()}}, storeurl.Credentials{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca, err := provenance.NewCA(now.Add(-time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	hud, err := provenance.NewSigner(ctx, provenance.LocalIssuer(ca, provenance.ComponentIdentity("hud"), time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	sign := func(action string, request map[string]any) string {
+		pred := map[string]any{"actor": "dana", "action": action, "target": "workjob:show/sh010", "change": map[string]any{"request": request}}
+		rec, err := provenance.SignStatement(ctx, hud, provenance.PredicateControl, []provenance.Subject{{Name: "workjob:show/sh010",
+			Digest: map[string]string{"sha256": strings.Repeat("0", 64)}}}, pred, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		id := c4.Identify(bytes.NewReader(rec))
+		if err := st.Put(ctx, id, bytes.NewReader(rec), int64(len(rec))); err != nil {
+			t.Fatal(err)
+		}
+		return id.String()
+	}
+	list := func(v any) string { b, _ := json.Marshal(v); return string(b) }
+	requeue := list([]c4v1.WorkRequeueRequest{
+		{Token: "r1", Units: "0-3", Actor: "dana", Record: sign("requeue", map[string]any{"units": "0-3", "token": "r1"})},
+		{Token: "r2", Units: "0-9", Actor: "dana", Record: sign("requeue", map[string]any{"units": "4", "token": "r2"})}, // other units
+		{Token: "r3", Units: "5", Actor: "dana"}, // no record
+	})
+	allow := list([]c4v1.WorkAllowNodeRequest{
+		{Token: "a1", Node: "w1", Actor: "dana", Record: sign("allow-node", map[string]any{"node": "w1", "token": "a1"})},
+		{Token: "a2", Node: "w2", Actor: "dana", Record: sign("requeue", map[string]any{"node": "w2", "token": "a2"})}, // another action's
+	})
+	accept := list([]c4v1.WorkAcceptValidatedRequest{
+		{Token: "v1", Accept: false, Actor: "dana", Record: sign("accept-validated", map[string]any{"accept": false, "token": "v1"})},
+		{Token: "v2", Accept: true, Actor: "dana"}, // the newest, but unsigned
+	})
+	j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show", Name: "sh010", UID: "u1", Annotations: map[string]string{
+		c4v1.AnnotationRequeue: requeue, c4v1.AnnotationAllowNodes: allow, c4v1.AnnotationAcceptValidated: accept}}}
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c4v1.AddToScheme(scheme)
+	kc := fake.NewClientBuilder().WithScheme(scheme).Build()
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Cert)
+	q := &Queue{Client: kc, Log: zap.New(zap.WriteTo(&bytes.Buffer{})), Roots: roots,
+		Stores: func(context.Context, string) (*storeurl.Sharded, error) { return st, nil }}
+	v := &view{job: j, key: "show/sh010", mem: newMem(), project: "show"}
+
+	ctl := q.trustedControls(ctx, v, now)
+	var got []string
+	for _, r := range requeues(ctl, v.mem, false) {
+		got = append(got, r.Token+":"+r.Units)
+	}
+	if strings.Join(got, ",") != "r1:0-3" {
+		t.Errorf("requeues carried out: %v, want r1:0-3", got)
+	}
+	if nodes := allowedNodes(ctl, v.mem, false); strings.Join(nodes, ",") != "w1" {
+		t.Errorf("nodes allowed: %v, want w1", nodes)
+	}
+	if acceptsValidated(ctl, false) {
+		t.Error("an unsigned acceptance was taken over the newest signed one, which declines")
+	}
+	var evs corev1.EventList
+	kc.List(ctx, &evs)
+	want := map[string]string{"r2": `says units "4", the request "0-9"`, "r3": "names no signed record", "a2": "is a requeue, not a allow-node", "v2": "names no signed record"}
+	if len(evs.Items) != len(want) {
+		t.Fatalf("%d events, want %d: %+v", len(evs.Items), len(want), evs.Items)
+	}
+	for _, e := range evs.Items {
+		ok := false
+		for token, says := range want {
+			if e.Reason == "ControlRefused" && strings.Contains(e.Message, "(token "+token+")") && strings.Contains(e.Message, says) {
+				ok = true
+			}
+		}
+		if !ok {
+			t.Errorf("event: %s", e.Message)
+		}
+	}
+
+	// The older plain forms name no record: refused with signing on.
+	plain := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show", Name: "sh010", UID: "u1", Annotations: map[string]string{
+		c4v1.AnnotationRequeue: "t1:0-3", c4v1.AnnotationAllowNodes: "w1,w2", c4v1.AnnotationAcceptValidated: "true"}}}
+	pv := &view{job: plain, key: "show/sh010", mem: newMem(), project: "show"}
+	pctl := q.trustedControls(ctx, pv, now)
+	if len(requeues(pctl, pv.mem, false)) != 0 || len(allowedNodes(pctl, pv.mem, false)) != 0 || acceptsValidated(pctl, false) {
+		t.Error("a plain request was carried out with signing on")
+	}
+	evs = corev1.EventList{}
+	kc.List(ctx, &evs)
+	plainRefused := 0
+	for _, e := range evs.Items {
+		if strings.Contains(e.Message, "it is not a list of signed requests") {
+			plainRefused++
+		}
+	}
+	if plainRefused != 3 {
+		t.Errorf("%d plain requests reported, want 3 (requeue, allow-nodes, accept-validated)", plainRefused)
+	}
+	// Signing off, they are read as written.
+	q.Roots = nil
+	pv.mem = newMem()
+	pctl = q.trustedControls(ctx, pv, now)
+	if r := requeues(pctl, pv.mem, true); len(r) != 1 || r[0].Units != "0-3" {
+		t.Errorf("an unsigned farm's requeue: %v", r)
+	}
+	if n := allowedNodes(pctl, pv.mem, true); strings.Join(n, ",") != "w1,w2" {
+		t.Errorf("an unsigned farm's allowed nodes: %v", n)
+	}
+	if !acceptsValidated(pctl, true) {
+		t.Error("an unsigned farm's acceptance")
+	}
+}

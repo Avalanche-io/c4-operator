@@ -15,12 +15,14 @@ const (
 	LabelPool = "c4.avalanche.io/pool"
 	// AnnotationAttempt is the unit's attempt number, from 1.
 	AnnotationAttempt = "c4.avalanche.io/attempt"
-	// AnnotationRequeue on a WorkJob asks the queue to run units again:
-	// "TOKEN:SET", where SET is a run-length index set and TOKEN makes
-	// each request distinct.
+	// AnnotationRequeue on a WorkJob asks the queue to run units again: a
+	// JSON list of WorkRequeueRequest, each naming its signed record. On a
+	// farm with signing off, "TOKEN:SET" (SET a run-length index set,
+	// TOKEN making each request distinct) is still read.
 	AnnotationRequeue = "c4.avalanche.io/requeue"
-	// AnnotationAllowNodes on a WorkJob lists nodes (comma-separated) to
-	// take off the job's automatic blacklist.
+	// AnnotationAllowNodes on a WorkJob takes nodes off the job's
+	// automatic blacklist: a JSON list of WorkAllowNodeRequest. On a farm
+	// with signing off, a comma-separated list of nodes is still read.
 	AnnotationAllowNodes = "c4.avalanche.io/allow-nodes"
 	// AnnotationYield asks a unit to stop at its next safe point (a
 	// checkpoint, a frame or chunk boundary, the end of an agent turn): a
@@ -72,7 +74,9 @@ const (
 	// admission from the request's user (or, for jobs the HUD creates for
 	// a signed-in viewer, by the HUD) and never changed afterwards.
 	AnnotationOwner = "c4.avalanche.io/owner"
-	// AnnotationAcceptValidated, "true" on a WorkJob, accepts a validated
+	// AnnotationAcceptValidated on a WorkJob (a JSON list of
+	// WorkAcceptValidatedRequest; "true" on a farm with signing off)
+	// accepts a validated
 	// recompute of its inputs in place of moving them (staging,
 	// experimental): the recomputed output differs from the recorded one,
 	// so only the consuming job may choose it. Exact recomputes and
@@ -1405,6 +1409,44 @@ type WorkSteerRequest struct {
 	Actor string      `json:"actor"`
 	At    metav1.Time `json:"at"`
 	// Record is the C4 ID of the signed control record.
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkRequeueRequest asks the queue to run units again
+// (AnnotationRequeue, a JSON list of them).
+type WorkRequeueRequest struct {
+	// Token makes each request distinct; requests are carried out in
+	// token order (base-36 nanoseconds).
+	Token string `json:"token"`
+	// Units is a run-length index set.
+	Units string      `json:"units"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// Record is the C4 ID of the signed control record.
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkAllowNodeRequest takes a node off the job's automatic blacklist
+// (AnnotationAllowNodes, a JSON list of them).
+type WorkAllowNodeRequest struct {
+	Token string      `json:"token"`
+	Node  string      `json:"node"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkAcceptValidatedRequest accepts (or no longer accepts) a validated
+// recompute of the job's inputs (AnnotationAcceptValidated, a JSON list
+// of them; the newest the queue trusts holds).
+type WorkAcceptValidatedRequest struct {
+	Token  string      `json:"token"`
+	Accept bool        `json:"accept"`
+	Actor  string      `json:"actor"`
+	At     metav1.Time `json:"at"`
 	// +optional
 	Record string `json:"record,omitempty"`
 }
