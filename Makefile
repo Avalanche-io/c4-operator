@@ -260,8 +260,8 @@ tool-locks:
 # The tools whose kind the farm runs; ci and lora join when it runs shards
 # and training tools. infer fetches its model from Hugging Face, which a
 # sealed test cannot reach and which it cannot declare (needs.network) until
-# the farm fences a unit's network; it joins then, or once its image carries
-# its default model.
+# the farm fences a unit's network; it joins then, or once the farm brings
+# its model from C4 storage.
 TESTED_TOOLS ?= comp render sim transcode usd
 tool-tests:
 	@mkdir -p bin
