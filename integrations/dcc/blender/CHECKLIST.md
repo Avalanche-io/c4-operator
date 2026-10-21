@@ -272,9 +272,12 @@ farm.
 
 1. With Blender 5.2 (Steam) closed, run `c4 farm integrate blender on`, then
    start Blender. **Expect:** C4 Farm is on under Preferences > Add-ons, and
-   the panel is in Render Properties. **[guess]** that Blender 4.2 to 5.x still
-   loads a legacy add-on from the user `scripts/addons` folder, imports each
-   module in `scripts/startup` and calls its `register()`, and that setting
-   `preferences.is_dirty` makes Blender save the add-on as on when it quits.
+   the panel is in Render Properties. Blender 5.2's own scripts
+   (`addon_utils.paths`, `bpy.utils.load_scripts`, `bpy.path.module_names`)
+   show that it still searches the user `scripts/addons` folder, calls
+   `register()` on each `scripts/startup` module, and skips names that start
+   with a dot (c4's temporary folders). **[guess]** that the same holds in
+   4.2 to 4.5, and that setting `preferences.is_dirty` makes Blender save the
+   add-on as on when it quits.
    Turn it off in Preferences, restart: it stays off. Run `off`: the add-on
    and the start-up module are gone.

@@ -18,6 +18,10 @@ type layout struct {
 	// refuse says why an existing file at one of files' paths, which no
 	// manifest of c4's records, can't be replaced ("" for the default).
 	refuse map[string]string
+	// shared are per-user files every version of the application reads
+	// (Unreal's start-up script); off leaves them while another version
+	// has C4 on.
+	shared map[string]bool
 	// derived are files the integration itself makes later, inside a
 	// folder c4 owns, which off takes out too (Blender's turned-on-once
 	// mark).
@@ -225,9 +229,10 @@ _c4_runpy.run_path(` + target + `, run_name="c4_init_unreal")
 del _c4_runpy
 `)
 	return layout{
-		on:    fmt.Sprintf("Adds a start-up script to Unreal's per-user Python folder, which makes C4FarmExecutor (Render (Remote) in the Movie Render Queue) available in %s and every other Unreal Engine you open.", f.Title),
-		off:   fmt.Sprintf("Takes C4's start-up script out of Unreal's per-user Python folder, so %s no longer loads C4FarmExecutor.", f.Title),
-		files: files,
+		on:     fmt.Sprintf("Adds a start-up script to Unreal's per-user Python folder, which makes C4FarmExecutor (Render (Remote) in the Movie Render Queue) available in %s and every other Unreal Engine you open.", f.Title),
+		off:    fmt.Sprintf("Takes C4's start-up script out of Unreal's per-user Python folder, so %s no longer loads C4FarmExecutor.", f.Title),
+		files:  files,
+		shared: map[string]bool{init: true},
 		refuse: map[string]string{init: "you already have an init_unreal.py in " + dir +
 			", and c4 won't overwrite it. Add `import runpy; runpy.run_path(" + target + ")` to it yourself, " +
 			"or set it aside and run this again"},

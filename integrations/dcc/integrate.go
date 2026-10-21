@@ -8,8 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -25,11 +27,14 @@ type Change struct {
 	roots   *Roots
 	on      bool
 	mpath   string
-	final   *manifest // on: the manifest once done
-	intent  *manifest // on: written before anything else, so an interrupted Apply is still undoable
+	seen    map[string]string // every manifest's digest when planned
+	final   *manifest         // on: the manifest once done
+	intent  *manifest         // on: written before anything else, so an interrupted Apply is still undoable
+	heir    *manifest         // off: another version's manifest, given the files the versions share
 	writes  []fileWrite
 	edits   []lineChange
 	removes []fileRemove
+	stale   []string // c4's own temporary files or folders an earlier run left
 	rmdirs  []string // deepest first; each removed only if empty
 }
 
@@ -46,7 +51,7 @@ type fileRemove struct {
 
 // lineChange adds c4's marked line to a person's file, or takes it out.
 type lineChange struct {
-	path    string
+	path    string // the file written: a symbolic link's target, not the link
 	expect  string // the file's digest when planned; "" if it didn't exist
 	data    []byte // the file afterwards
 	remove  bool   // off, and the file was c4's alone: remove it instead
@@ -67,7 +72,9 @@ type manifest struct {
 type fileEntry struct {
 	Path   string `json:"path"`
 	SHA256 string `json:"sha256"`
-	Prev   string `json:"prev,omitempty"` // while an install is under way: the file's digest before it
+	// Prev is another contents c4 put there: the file's before an install
+	// under way, or another version's when it was handed this entry.
+	Prev string `json:"prev,omitempty"`
 }
 
 type lineEntry struct {
@@ -80,6 +87,10 @@ type lineEntry struct {
 // failWrite, when a test sets it, fails the write of a file (part-way
 // through its data), as a full disk or a crash would.
 var failWrite func(path string) error
+
+// tmpMark is in the name of every temporary file or folder c4 makes. Each
+// starts with a dot, which Blender's add-on and start-up scans skip.
+const tmpMark = ".c4-tmp-"
 
 func digest(b []byte) string {
 	s := sha256.Sum256(b)
@@ -104,6 +115,7 @@ func readManifest(p string) (*manifest, error) {
 // others are every integration manifest except name-version's.
 func (r *Roots) others(name, version string) []*manifest {
 	ps, _ := filepath.Glob(filepath.Join(r.manifestDir(), "*.json"))
+	sort.Strings(ps)
 	var out []*manifest
 	for _, p := range ps {
 		m, err := readManifest(p)
@@ -113,6 +125,29 @@ func (r *Roots) others(name, version string) []*manifest {
 		out = append(out, m)
 	}
 	return out
+}
+
+// manifestDigests are every manifest file's digest, to tell whether
+// another run of c4 changed any since a plan.
+func (r *Roots) manifestDigests() map[string]string {
+	ps, _ := filepath.Glob(filepath.Join(r.manifestDir(), "*.json"))
+	out := map[string]string{}
+	for _, p := range ps {
+		if b, err := os.ReadFile(p); err == nil {
+			out[p] = digest(b)
+		}
+	}
+	return out
+}
+
+// versionShape is what a version looks like for each application.
+var versionShape = map[string]*regexp.Regexp{
+	"blender": bareMM,
+	"unreal":  bareMM,
+	"houdini": bareMM,
+	"maya":    regexp.MustCompile(`^\d{4}$`),
+	"nuke":    bareMM,
+	"katana":  bareMM,
 }
 
 // Plan says what `c4 farm integrate <f.Name> on|off` would do for f. It
@@ -128,8 +163,15 @@ func Plan(f Found, on bool) (Change, error) {
 
 // Plan says what turning C4 on or off in f would do, under these roots.
 func (r *Roots) Plan(f Found, on bool) (Change, error) {
-	if f.Name == "" || f.Version == "" {
-		return Change{}, errors.New("which application, and which version of it?")
+	shape := versionShape[f.Name]
+	if shape == nil {
+		return Change{}, fmt.Errorf("C4 has no integration for %q", f.Name)
+	}
+	if !shape.MatchString(f.Version) {
+		return Change{}, fmt.Errorf("%q isn't a %s version", f.Version, titles[f.Name])
+	}
+	if f.Title == "" {
+		f.Title = titles[f.Name] + " " + f.Version
 	}
 	if r.Home == "" || !isDir(r.Home) {
 		return Change{}, fmt.Errorf("no home folder to install into (%q)", r.Home)
@@ -138,7 +180,7 @@ func (r *Roots) Plan(f Found, on bool) (Change, error) {
 	if err != nil {
 		return Change{}, err
 	}
-	c := Change{roots: r, on: on, mpath: r.manifestPath(f.Name, f.Version)}
+	c := Change{roots: r, on: on, mpath: r.manifestPath(f.Name, f.Version), seen: r.manifestDigests()}
 	own, err := readManifest(c.mpath)
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return Change{}, err
@@ -152,8 +194,26 @@ func (r *Roots) Plan(f Found, on bool) (Change, error) {
 	if err != nil {
 		return Change{}, err
 	}
+	var touched []string
+	for p := range l.files {
+		touched = append(touched, p)
+	}
+	for _, ed := range l.edits {
+		touched = append(touched, ed.path)
+	}
+	if own != nil {
+		for _, e := range own.Files {
+			touched = append(touched, e.Path)
+		}
+	}
+	c.findStale(touched)
 	sort.Strings(c.Writes)
 	return c, nil
+}
+
+func fileExists(p string) bool {
+	_, err := os.Lstat(p)
+	return err == nil
 }
 
 // fileState reads a file: its contents, and whether it exists.
@@ -163,6 +223,27 @@ func fileState(p string) ([]byte, bool, error) {
 		return nil, false, nil
 	}
 	return b, err == nil, err
+}
+
+// resolveLink is the file a person's start-up file really is: p, or what
+// p links to. A link to nothing is refused rather than read as no file.
+func resolveLink(p string) (string, bool, error) {
+	st, err := os.Lstat(p)
+	if errors.Is(err, fs.ErrNotExist) {
+		return p, false, nil
+	}
+	if err != nil {
+		return "", false, err
+	}
+	if st.Mode()&fs.ModeSymlink == 0 {
+		return p, true, nil
+	}
+	t, err := filepath.EvalSymlinks(p)
+	if err != nil {
+		dest, _ := os.Readlink(p)
+		return "", false, fmt.Errorf("%s is a link to %s, which isn't there; c4 won't replace the link. Restore the file it points to, or remove the link, and run this again", p, dest)
+	}
+	return t, true, nil
 }
 
 // knownDigests are the digests c4 recorded for each file, in any manifest.
@@ -185,12 +266,32 @@ func knownDigests(ms ...*manifest) map[string]map[string]bool {
 	return k
 }
 
+// recordedLine is the entry a manifest has for c4's line in path.
+func recordedLine(ms []*manifest, path, marker string) *lineEntry {
+	for _, m := range ms {
+		if m == nil {
+			continue
+		}
+		for i, le := range m.Lines {
+			if le.Path == path && markerOf(le.Line) == marker {
+				return &m.Lines[i]
+			}
+		}
+	}
+	return nil
+}
+
 func (c *Change) planOn(f Found, l layout, own *manifest, others []*manifest) error {
 	all := append([]*manifest{own}, others...)
 	known := knownDigests(all...)
 	final := &manifest{Name: f.Name, Version: f.Version, Release: release, Complete: true}
 	var prev []fileEntry // what the intent manifest records beyond final
 	wanted := map[string]bool{}
+	keep := func(e fileEntry) {
+		wanted[e.Path] = true
+		final.Files = append(final.Files, fileEntry{Path: e.Path, SHA256: e.SHA256})
+		prev = append(prev, e)
+	}
 
 	paths := make([]string, 0, len(l.files))
 	for p := range l.files {
@@ -199,7 +300,6 @@ func (c *Change) planOn(f Found, l layout, own *manifest, others []*manifest) er
 	sort.Strings(paths)
 	for _, p := range paths {
 		data := l.files[p]
-		wanted[p] = true
 		cur, exists, err := fileState(p)
 		if err != nil {
 			return err
@@ -221,75 +321,54 @@ func (c *Change) planOn(f Found, l layout, own *manifest, others []*manifest) er
 		default:
 			c.writes = append(c.writes, fileWrite{path: p, data: data})
 		}
-		final.Files = append(final.Files, fileEntry{Path: p, SHA256: e.SHA256})
-		prev = append(prev, e)
+		keep(e)
 	}
 
 	// The person's own files: one marked line each.
 	for _, ed := range l.edits {
-		cur, exists, err := fileState(ed.path)
+		target, exists, err := resolveLink(ed.path)
 		if err != nil {
-			return err
+			return fmt.Errorf("can't add C4 to %s: %w", l.title, err)
+		}
+		var cur []byte
+		if exists {
+			if cur, err = os.ReadFile(target); err != nil {
+				return err
+			}
 		}
 		out, addedNL := addLine(cur, ed.line, ed.marker)
 		entry := lineEntry{Path: ed.path, Line: ed.line, Created: !exists, AddedNewline: addedNL}
+		if rec := recordedLine(all, ed.path, ed.marker); rec != nil { // keep how the file was before c4 first changed it
+			entry.Created, entry.AddedNewline = rec.Created, rec.AddedNewline || addedNL
+		}
+		final.Lines = append(final.Lines, entry)
+
+		// The backup is of the file before c4 first changed it, and is
+		// never replaced once made.
 		backup := ed.path + ".c4-backup"
-		if bytes.Equal(out, cur) && exists { // already there: keep what was recorded when it was added
-			entry = lineEntry{Path: ed.path, Line: ed.line}
-			for _, m := range all {
-				if m == nil {
-					continue
-				}
-				for _, le := range m.Lines {
-					if le.Path == ed.path && le.Line == ed.line {
-						entry = le
-					}
-				}
-				for _, fe := range m.Files {
-					if fe.Path == backup && !wanted[backup] {
-						wanted[backup] = true
-						final.Files = append(final.Files, fileEntry{Path: backup, SHA256: fe.SHA256})
-						prev = append(prev, fileEntry{Path: backup, SHA256: fe.SHA256})
-					}
-				}
-			}
-			final.Lines = append(final.Lines, entry)
-			continue
+		bcur, bexists, err := fileState(backup)
+		if err != nil {
+			return err
 		}
-		for _, m := range all { // a line an earlier release added keeps how the file was before it
-			if m == nil {
-				continue
-			}
-			for _, le := range m.Lines {
-				if le.Path == ed.path {
-					entry.Created, entry.AddedNewline = le.Created, le.AddedNewline || addedNL
-				}
-			}
-		}
-		lc := lineChange{path: ed.path, data: out, existed: exists}
-		if exists {
-			lc.expect = digest(cur)
-			bcur, bexists, err := fileState(backup)
-			if err != nil {
-				return err
-			}
-			if bexists && !known[backup][digest(bcur)] {
+		if bexists {
+			if !known[backup][digest(bcur)] {
 				return fmt.Errorf("can't add C4 to %s: %s is already there and isn't c4's; set it aside and run this again", l.title, backup)
 			}
-			bw := fileWrite{path: backup, data: cur}
-			if bexists {
-				bw.expect = digest(bcur)
+			keep(fileEntry{Path: backup, SHA256: digest(bcur)})
+		}
+		if exists && bytes.Equal(out, cur) {
+			continue // the line is already there
+		}
+		lc := lineChange{path: target, data: out, existed: exists}
+		if exists {
+			lc.expect = digest(cur)
+			if !bexists {
+				c.writes = append(c.writes, fileWrite{path: backup, data: cur})
+				keep(fileEntry{Path: backup, SHA256: digest(cur)})
 			}
-			if !bexists || !bytes.Equal(bcur, cur) {
-				c.writes = append(c.writes, bw)
-			}
-			wanted[backup] = true
-			final.Files = append(final.Files, fileEntry{Path: backup, SHA256: digest(cur)})
-			prev = append(prev, fileEntry{Path: backup, SHA256: digest(cur), Prev: bw.expect})
 		}
 		c.edits = append(c.edits, lc)
-		c.Writes = append(c.Writes, ed.path)
-		final.Lines = append(final.Lines, entry)
+		c.Writes = append(c.Writes, target)
 	}
 
 	// An earlier release's files this one no longer has.
@@ -351,8 +430,7 @@ func (c *Change) planOn(f Found, l layout, own *manifest, others []*manifest) er
 	}
 	sort.Strings(final.Dirs)
 
-	same := own != nil && len(c.writes) == 0 && len(c.edits) == 0 && len(c.removes) == 0 && sameManifest(own, final)
-	if same {
+	if own != nil && len(c.writes) == 0 && len(c.edits) == 0 && len(c.removes) == 0 && sameManifest(own, final) {
 		c.Line = "C4 is already in " + l.title + "; nothing to change."
 		return nil
 	}
@@ -364,6 +442,9 @@ func (c *Change) planOn(f Found, l layout, own *manifest, others []*manifest) er
 		c.Writes = append(c.Writes, w.path)
 	}
 	c.Writes = append(c.Writes, c.mpath)
+	if lock := filepath.Join(c.roots.manifestDir(), lockName); !fileExists(lock) {
+		c.Writes = append(c.Writes, lock) // the lock Apply holds, kept while c4 has files here
+	}
 	c.Line = l.on
 	if own != nil && own.Complete && own.Release != release {
 		c.Line += " It replaces the files an earlier c4 release put there."
@@ -405,12 +486,29 @@ func (r *Roots) missingDirs(dir string) []string {
 	return out
 }
 
-// addLine puts line at the end of cur, replacing any line carrying marker
-// (an earlier release's). addedNL says it ended cur's last line first.
+// addLine is cur with c4's line in it: unchanged if the line is there; an
+// earlier release's marked line replaced where it stands; else the line
+// added at the end. addedNL says it ended cur's last line first.
 func addLine(cur []byte, line, marker string) ([]byte, bool) {
-	base := removeLine(cur, marker)
-	addedNL := len(base) > 0 && base[len(base)-1] != '\n'
-	out := append([]byte{}, base...)
+	var out []byte
+	placed := false
+	for _, l := range bytes.SplitAfter(cur, []byte("\n")) {
+		body := bytes.TrimRight(l, "\r\n")
+		if len(l) == 0 || !bytes.HasSuffix(body, []byte(marker)) {
+			out = append(out, l...)
+			continue
+		}
+		if placed {
+			continue // a second marked line
+		}
+		placed = true
+		out = append(out, line...)
+		out = append(out, l[len(body):]...) // its own line ending
+	}
+	if placed {
+		return out, false
+	}
+	addedNL := len(out) > 0 && out[len(out)-1] != '\n'
 	if addedNL {
 		out = append(out, '\n')
 	}
@@ -418,16 +516,21 @@ func addLine(cur []byte, line, marker string) ([]byte, bool) {
 	return append(out, '\n'), addedNL
 }
 
-// removeLine takes out every line ending with marker.
-func removeLine(cur []byte, marker string) []byte {
-	var out []byte
-	for _, l := range bytes.SplitAfter(cur, []byte("\n")) {
+// removeLine takes out every line ending with marker. last says one of
+// them was the file's last line.
+func removeLine(cur []byte, marker string) (out []byte, last bool) {
+	parts := bytes.SplitAfter(cur, []byte("\n"))
+	for len(parts) > 0 && len(parts[len(parts)-1]) == 0 {
+		parts = parts[:len(parts)-1]
+	}
+	for i, l := range parts {
 		if bytes.HasSuffix(bytes.TrimRight(l, "\r\n"), []byte(marker)) {
+			last = last || i == len(parts)-1
 			continue
 		}
 		out = append(out, l...)
 	}
-	return out
+	return out, last
 }
 
 func (c *Change) planOff(f Found, l layout, own *manifest, others []*manifest) error {
@@ -436,12 +539,6 @@ func (c *Change) planOff(f Found, l layout, own *manifest, others []*manifest) e
 		return nil
 	}
 	shared := sharedFiles(others)
-	sharedLines := map[string]bool{}
-	for _, m := range others {
-		for _, le := range m.Lines {
-			sharedLines[le.Path+"\x00"+le.Line] = true
-		}
-	}
 	known := knownDigests(own)
 	for p, data := range l.files {
 		if known[p] == nil {
@@ -450,43 +547,91 @@ func (c *Change) planOff(f Found, l layout, own *manifest, others []*manifest) e
 		known[p][digest(data)] = true
 	}
 
+	// While another version of the application has C4 on, the files the
+	// versions share (the panel under ~/.c4/integrations/<name>, the
+	// per-user start-up file, c4's line and its backup) stay, and their
+	// entries are handed to that version's manifest, whose off removes them.
+	var heir *manifest
+	for _, m := range others {
+		if m.Name == f.Name {
+			h := *m
+			h.Files = append([]fileEntry{}, m.Files...)
+			h.Lines = append([]lineEntry{}, m.Lines...)
+			h.Dirs = append([]string{}, m.Dirs...)
+			heir = &h
+			break
+		}
+	}
+	payload := c.roots.payloadDir(f.Name) + string(filepath.Separator)
+	backups := map[string]bool{}
 	for _, le := range own.Lines {
-		if sharedLines[le.Path+"\x00"+le.Line] {
+		backups[le.Path+".c4-backup"] = true
+	}
+	handed := false
+	var kept []string
+	keepForHeir := func(e fileEntry) bool {
+		if heir == nil || !(strings.HasPrefix(e.Path, payload) || l.shared[e.Path] || backups[e.Path]) {
+			return false
+		}
+		kept = append(kept, e.Path)
+		for i := range heir.Files {
+			if heir.Files[i].Path == e.Path {
+				if heir.Files[i].SHA256 != e.SHA256 && heir.Files[i].Prev == "" {
+					heir.Files[i].Prev, handed = e.SHA256, true
+				}
+				return true
+			}
+		}
+		heir.Files = append(heir.Files, fileEntry{Path: e.Path, SHA256: e.SHA256})
+		handed = true
+		return true
+	}
+
+	for _, le := range own.Lines {
+		marker := markerOf(le.Line)
+		if marker == "" || recordedLine(others, le.Path, marker) != nil {
+			continue // another version's line too
+		}
+		if heir != nil {
+			heir.Lines = append(heir.Lines, le)
+			handed = true
 			continue
 		}
-		cur, exists, err := fileState(le.Path)
+		target, exists, err := resolveLink(le.Path)
+		if err != nil {
+			return fmt.Errorf("can't take C4 out of %s: %w", l.title, err)
+		}
+		if !exists {
+			continue
+		}
+		cur, err := os.ReadFile(target)
 		if err != nil {
 			return err
 		}
-		marker := markerOf(le.Line)
-		if !exists || marker == "" {
-			continue
-		}
-		out := removeLine(cur, marker)
+		out, last := removeLine(cur, marker)
 		if bytes.Equal(out, cur) {
 			continue
 		}
-		if le.AddedNewline && bytes.HasSuffix(out, []byte("\n")) {
-			out = out[:len(out)-1]
+		if le.AddedNewline && last { // give back the person's last line as it ended
+			if bytes.HasSuffix(out, []byte("\r\n")) {
+				out = out[:len(out)-2]
+			} else if bytes.HasSuffix(out, []byte("\n")) {
+				out = out[:len(out)-1]
+			}
 		}
-		lc := lineChange{path: le.Path, expect: digest(cur), data: out, existed: true}
-		if le.Created && len(out) == 0 {
+		lc := lineChange{path: target, expect: digest(cur), data: out, existed: true}
+		if le.Created && len(out) == 0 && target == le.Path {
 			lc.remove = true
-			c.Removes = append(c.Removes, le.Path)
+			c.Removes = append(c.Removes, target)
 		} else {
-			c.Writes = append(c.Writes, le.Path)
+			c.Writes = append(c.Writes, target)
 		}
 		c.edits = append(c.edits, lc)
 	}
 
 	dirs := map[string]bool{}
-	for _, d := range own.Dirs {
-		if !shared[d] {
-			dirs[d] = true
-		}
-	}
 	for _, e := range own.Files {
-		if shared[e.Path] {
+		if shared[e.Path] || keepForHeir(e) {
 			continue
 		}
 		cur, exists, err := fileState(e.Path)
@@ -515,29 +660,91 @@ func (c *Change) planOff(f Found, l layout, own *manifest, others []*manifest) e
 			}
 		}
 	}
+	for _, d := range own.Dirs {
+		if shared[d] {
+			continue
+		}
+		holds := false
+		for _, p := range kept {
+			if strings.HasPrefix(p, d+string(filepath.Separator)) {
+				holds = true
+				break
+			}
+		}
+		if holds { // a folder the kept files are in: the heir removes it
+			heir.Dirs = append(heir.Dirs, d)
+			handed = true
+			continue
+		}
+		dirs[d] = true
+	}
 	for _, p := range l.derived {
 		if _, exists, _ := fileState(p); exists {
 			c.removes = append(c.removes, fileRemove{path: p})
 			c.Removes = append(c.Removes, p)
 		}
 	}
+	if handed {
+		sort.Strings(heir.Dirs)
+		c.heir = heir
+		c.Writes = append(c.Writes, c.roots.manifestPath(heir.Name, heir.Version))
+		c.Notes = append(c.Notes, fmt.Sprintf("C4's files that every %s version shares stay for %s %s, which still has C4 on.", titles[f.Name], titles[f.Name], heir.Version))
+	}
 	c.removes = append(c.removes, fileRemove{path: c.mpath})
 	c.Removes = append(c.Removes, c.mpath)
+	if lock := filepath.Join(c.roots.manifestDir(), lockName); len(others) == 0 && fileExists(lock) {
+		c.Removes = append(c.Removes, lock) // with the last integration, the lock Apply holds goes too
+	}
 	for d := range dirs {
 		c.rmdirs = append(c.rmdirs, d)
 	}
-	sort.Slice(c.rmdirs, func(i, j int) bool { // deepest first
-		a, b := strings.Count(c.rmdirs[i], string(filepath.Separator)), strings.Count(c.rmdirs[j], string(filepath.Separator))
-		if a != b {
-			return a > b
-		}
-		return c.rmdirs[i] > c.rmdirs[j]
-	})
+	sortDeepestFirst(c.rmdirs)
 	for _, d := range c.rmdirs {
 		c.Removes = append(c.Removes, d+string(filepath.Separator))
 	}
 	c.Line = l.off
 	return nil
+}
+
+func sortDeepestFirst(dirs []string) {
+	sort.Slice(dirs, func(i, j int) bool {
+		a, b := strings.Count(dirs[i], string(filepath.Separator)), strings.Count(dirs[j], string(filepath.Separator))
+		if a != b {
+			return a > b
+		}
+		return dirs[i] > dirs[j]
+	})
+}
+
+// findStale lists c4's own temporary files and folders, left by a run that
+// was killed, in the folders this integration's files are in.
+func (c *Change) findStale(touched []string) {
+	dirs := map[string]bool{c.roots.manifestDir(): true}
+	nearest := func(p string) {
+		d := filepath.Dir(p)
+		for !isDir(d) && d != filepath.Dir(d) {
+			d = filepath.Dir(d)
+		}
+		dirs[d] = true
+	}
+	for _, p := range touched {
+		nearest(p)
+	}
+	for _, w := range c.writes {
+		nearest(w.path)
+	}
+	for _, lc := range c.edits {
+		nearest(lc.path)
+	}
+	for _, rm := range c.removes {
+		nearest(rm.path)
+	}
+	for d := range dirs {
+		ms, _ := filepath.Glob(filepath.Join(d, ".*"+tmpMark+"*"))
+		c.stale = append(c.stale, ms...)
+	}
+	sort.Strings(c.stale)
+	c.Removes = append(c.Removes, c.stale...)
 }
 
 // markerOf is the marker a line c4 added ends with.
@@ -552,20 +759,43 @@ func markerOf(line string) string {
 // Apply does what Plan said: every file written whole (a temporary file
 // renamed into place; a new folder built beside its place and renamed in),
 // the manifest recorded before and after, and on off exactly the
-// manifest's files removed. If anything on disk changed since Plan, it
-// stops and says so.
+// manifest's files removed. It holds a lock in ~/.c4/integrations while it
+// works, so two runs of c4 never interleave. If anything on disk changed
+// since Plan (another run's manifests included), it stops and says so.
 func Apply(c Change) error {
 	if c.roots == nil {
 		return errors.New("apply a Change that Plan made")
 	}
+	if c.final == nil && len(c.edits) == 0 && len(c.removes) == 0 && len(c.stale) == 0 {
+		return nil // nothing to change
+	}
+	made := c.roots.missingDirs(c.roots.manifestDir())
+	lk, err := c.roots.lock()
+	if err != nil {
+		return err
+	}
+	cleanup, err := c.applyLocked()
+	cleanup = append(cleanup, made...)
+	removeEmptyDirs(cleanup)
+	lk.release()
+	// The manifest folder and those above it go only once the lock file
+	// in it has.
+	removeEmptyDirs(cleanup)
+	return err
+}
+
+func (c *Change) applyLocked() ([]string, error) {
+	if !maps.Equal(c.roots.manifestDigests(), c.seen) {
+		return nil, errors.New("another run of c4 changed C4's integrations since the plan; plan again")
+	}
 	for _, w := range c.writes {
 		if err := expectState(w.path, w.expect); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, lc := range c.edits {
 		if err := expectState(lc.path, lc.expect); err != nil {
-			return err
+			return nil, err
 		}
 	}
 	for _, rm := range c.removes {
@@ -573,13 +803,20 @@ func Apply(c Change) error {
 			continue
 		}
 		if err := expectState(rm.path, rm.expect); err != nil && !errors.Is(err, errGone) {
-			return err
+			return nil, err
+		}
+	}
+	for _, p := range c.stale {
+		if strings.Contains(filepath.Base(p), tmpMark) {
+			if err := os.RemoveAll(p); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if c.on {
 		return c.applyOn()
 	}
-	return c.applyOff()
+	return c.rmdirs, c.applyOff()
 }
 
 var errGone = errors.New("gone")
@@ -600,38 +837,31 @@ func expectState(p, want string) error {
 	return nil
 }
 
-func (c *Change) applyOn() error {
+func (c *Change) applyOn() ([]string, error) {
 	if c.final == nil {
-		return nil // nothing to change
-	}
-	missing := c.roots.missingDirs(c.roots.manifestDir())
-	if err := os.MkdirAll(c.roots.manifestDir(), 0o755); err != nil {
-		return err
+		return nil, nil // only stale temporary files to clear
 	}
 	// The manifest is written first, naming everything this may write, so
 	// even a crash part-way leaves nothing of c4's unrecorded; off removes
 	// only files whose contents are c4's. If a write fails, the manifest
 	// is then cut down to what is really there.
 	if err := writeManifest(c.mpath, c.intent); err != nil {
-		for i := len(missing) - 1; i >= 0; i-- {
-			os.Remove(missing[i]) // only the empty folders just made
-		}
-		return err
+		return nil, err
 	}
 	err := c.writeAll()
 	if err == nil {
 		err = writeManifest(c.mpath, c.final)
 	}
 	if err != nil {
-		c.settle()
+		return c.settle(), err
 	}
-	return err
+	return nil, nil
 }
 
 // settle rewrites an interrupted install's manifest to name only what is
-// on disk and c4's, or removes it (and the empty folders it made) when
-// nothing is.
-func (c *Change) settle() {
+// on disk and c4's, or removes it when nothing is, and returns the folders
+// to remove if they are now empty.
+func (c *Change) settle() []string {
 	m := *c.intent
 	m.Files, m.Lines, m.Dirs = nil, nil, nil
 	for _, e := range c.intent.Files {
@@ -653,13 +883,20 @@ func (c *Change) settle() {
 	}
 	if len(m.Files) > 0 || len(m.Lines) > 0 {
 		_ = writeManifest(c.mpath, &m)
-		return
+		return nil
 	}
 	if err := os.Remove(c.mpath); err != nil {
-		return
+		return nil
 	}
-	sort.Slice(m.Dirs, func(i, j int) bool { return len(m.Dirs[i]) > len(m.Dirs[j]) })
-	for _, d := range m.Dirs {
+	sortDeepestFirst(m.Dirs)
+	return m.Dirs
+}
+
+// removeEmptyDirs removes each folder that is empty, deepest first.
+func removeEmptyDirs(dirs []string) {
+	dirs = append([]string{}, dirs...)
+	sortDeepestFirst(dirs)
+	for _, d := range dirs {
 		if ents, err := os.ReadDir(d); err == nil && len(ents) == 0 {
 			os.Remove(d)
 		}
@@ -693,16 +930,8 @@ func (c *Change) writeAll() error {
 			return err
 		}
 	}
-
 	for _, lc := range c.edits {
-		if err := os.MkdirAll(filepath.Dir(lc.path), 0o755); err != nil {
-			return err
-		}
-		mode := fs.FileMode(0o644)
-		if st, err := os.Stat(lc.path); err == nil {
-			mode = st.Mode().Perm()
-		}
-		if err := writeAtomic(lc.path, lc.data, mode); err != nil {
+		if err := writeEdit(lc); err != nil {
 			return err
 		}
 	}
@@ -714,23 +943,40 @@ func (c *Change) writeAll() error {
 	return nil
 }
 
+// writeEdit writes a person's start-up file whole, keeping its mode. A
+// linked file's target is written, in the target's own folder, so the
+// link stays a link.
+func writeEdit(lc lineChange) error {
+	if lc.remove {
+		if err := os.Remove(lc.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
+	if err := os.MkdirAll(filepath.Dir(lc.path), 0o755); err != nil {
+		return err
+	}
+	mode := fs.FileMode(0o644)
+	if st, err := os.Stat(lc.path); err == nil {
+		mode = st.Mode().Perm()
+	}
+	return writeAtomic(lc.path, lc.data, mode)
+}
+
 func (c *Change) applyOff() error {
 	for _, lc := range c.edits {
-		if lc.remove {
-			if err := os.Remove(lc.path); err != nil && !errors.Is(err, fs.ErrNotExist) {
-				return err
-			}
-			continue
-		}
-		mode := fs.FileMode(0o644)
-		if st, err := os.Stat(lc.path); err == nil {
-			mode = st.Mode().Perm()
-		}
-		if err := writeAtomic(lc.path, lc.data, mode); err != nil {
+		if err := writeEdit(lc); err != nil {
 			return err
 		}
 	}
-	// The manifest goes last, so an interrupted off can be run again.
+	// The other version's manifest takes the shared files before this one
+	// lets them go; this manifest goes last, so an interrupted off can be
+	// run again.
+	if c.heir != nil {
+		if err := writeManifest(c.roots.manifestPath(c.heir.Name, c.heir.Version), c.heir); err != nil {
+			return err
+		}
+	}
 	for _, rm := range c.removes {
 		if rm.path == c.mpath {
 			continue
@@ -741,15 +987,6 @@ func (c *Change) applyOff() error {
 	}
 	if err := os.Remove(c.mpath); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
-	}
-	for _, d := range c.rmdirs {
-		ents, err := os.ReadDir(d)
-		if err != nil || len(ents) > 0 {
-			continue // gone already, or holds something that isn't c4's
-		}
-		if err := os.Remove(d); err != nil && !errors.Is(err, fs.ErrNotExist) {
-			return err
-		}
 	}
 	return nil
 }
@@ -781,7 +1018,7 @@ func writeData(f *os.File, dest string, b []byte) error {
 // writeAtomic replaces a file whole: anything reading it sees the old
 // contents or the new, never part of either.
 func writeAtomic(p string, b []byte, mode fs.FileMode) (err error) {
-	f, err := os.CreateTemp(filepath.Dir(p), "."+filepath.Base(p)+".c4-tmp-*")
+	f, err := os.CreateTemp(filepath.Dir(p), "."+filepath.Base(p)+tmpMark+"*")
 	if err != nil {
 		return err
 	}
@@ -809,7 +1046,7 @@ func writeAtomic(p string, b []byte, mode fs.FileMode) (err error) {
 // writeTree builds the folder top, holding ws, as a temporary sibling and
 // renames it into place, so top appears complete or not at all.
 func writeTree(top string, ws []fileWrite) (err error) {
-	tmp, err := os.MkdirTemp(filepath.Dir(top), "."+filepath.Base(top)+".c4-tmp-*")
+	tmp, err := os.MkdirTemp(filepath.Dir(top), "."+filepath.Base(top)+tmpMark+"*")
 	if err != nil {
 		return err
 	}

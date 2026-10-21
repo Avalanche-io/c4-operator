@@ -126,14 +126,28 @@ needed.
 
 - **Every write is whole**: a file is written beside its place and renamed
   in, and a new folder is built beside its place and renamed in. A file that
-  is already there and isn't C4's is never overwritten.
+  is already there and isn't C4's is never overwritten. A start-up file that
+  is a symbolic link stays one: C4 edits the file it points to, and refuses
+  a link that points to nothing. The temporary names start with a dot, which
+  Blender's add-on and start-up scans skip. A run that was killed leaves its
+  temporary files behind, and the next `on` or `off` clears them.
+- **One run at a time**: Apply holds a lock file, `~/.c4/integrations/.lock`.
+  If another run of `c4` changed C4's integrations since the plan, Apply
+  stops and asks for a new plan.
 - **Off removes exactly what on wrote**, as recorded in
   `~/.c4/integrations/<name>-<version>.json`, plus Python's compiled copies
-  of those modules, even after the application is uninstalled. A file
-  changed since C4 wrote it is left, and said so.
-  Nuke's and Katana's start-up files lose only C4's line.
-- **Running on again** changes nothing; after a newer `c4` release it
-  replaces only C4's own files.
+  of those modules. This works even after the application is uninstalled. A
+  file changed since C4 wrote it is left, and Plan says so. Nuke's and
+  Katana's start-up files lose only C4's line, and get back their last line
+  ending as it was.
+- **Versions share some files.** Every version of an application uses the
+  same panel folder, Nuke's and Katana's line and backup, and Unreal's
+  start-up script. While another version still has C4 on, off leaves these
+  files and records them in that version's manifest, so that version's off
+  removes them.
+- **Running on again** changes nothing. C4's line stays where it is, and the
+  backup keeps the file as it was before C4 first changed it. After a newer
+  `c4` release, on replaces only C4's own files.
 
 ## The tools on the farm
 

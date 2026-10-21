@@ -1,6 +1,7 @@
 package dcc
 
 import (
+	"bytes"
 	"encoding/json"
 	"os"
 	"path/filepath"
@@ -331,6 +332,7 @@ func (r *Roots) unreal() []Found {
 				AppVersion      string
 			}
 		}
+		b = bytes.TrimPrefix(b, []byte("\xef\xbb\xbf")) // a byte-order mark, as Windows editors write
 		if json.Unmarshal(b, &list) != nil {
 			continue
 		}

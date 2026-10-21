@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"reflect"
 	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"unicode/utf16"
 )
@@ -293,6 +295,11 @@ func snapshot(t *testing.T, dir string) map[string]string {
 		if d.IsDir() {
 			out[p] = "dir " + info.Mode().Perm().String()
 			return nil
+		}
+		if info.Mode()&fs.ModeSymlink != 0 {
+			dest, err := os.Readlink(p)
+			out[p] = "link " + dest
+			return err
 		}
 		b, err := os.ReadFile(p)
 		if err != nil {
@@ -819,8 +826,8 @@ func TestInterruptedApply(t *testing.T) {
 					continue
 				}
 				data, ours := want[p]
-				if p == c.mpath {
-					continue // checked below
+				if p == c.mpath || filepath.Base(p) == lockName {
+					continue // the manifest is checked below; the lock file stays while c4 has files here
 				}
 				if !ours || v[strings.Index(v, " ")+1:] != string(data) {
 					t.Errorf("%s, write %d failed: %s is half-written or not c4's", app.name, n, p)
@@ -924,4 +931,353 @@ func TestOffAfterTheApplicationIsUninstalled(t *testing.T) {
 	if len(fk.roots.Installed()) != 0 {
 		t.Error("still listed after off")
 	}
+}
+
+// A start-up file that is a symbolic link (a dotfiles checkout) stays a
+// link: c4 edits the file it points to, and off gives it back as it was.
+func TestStartupFileLinkStaysALink(t *testing.T) {
+	fk := darwinApps(t)
+	dot := filepath.Join(fk.root, "dotfiles", "nuke-init.py")
+	write(t, dot, "import nuke\n")
+	init := filepath.Join(fk.roots.Home, ".nuke", "init.py")
+	mkdir(t, filepath.Dir(init))
+	if err := os.Symlink(dot, init); err != nil {
+		t.Fatal(err)
+	}
+	f := find(t, &fk.roots, "nuke", "15.1")
+	c := plan(t, f, true)
+	real, _ := filepath.EvalSymlinks(dot)
+	if !contains(c.Writes, real) {
+		t.Errorf("on doesn't say it writes the link's target %s: %v", real, c.Writes)
+	}
+	apply(t, c)
+	if st, _ := os.Lstat(init); st.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("init.py is no longer a link (%v)", st.Mode())
+	}
+	if !strings.Contains(readFile(t, dot), "# added by c4 farm integrate nuke") {
+		t.Errorf("the linked file has no line:\n%s", readFile(t, dot))
+	}
+	apply(t, plan(t, f, false))
+	if st, _ := os.Lstat(init); st.Mode()&os.ModeSymlink == 0 {
+		t.Errorf("after off, init.py is no longer a link (%v)", st.Mode())
+	}
+	if readFile(t, dot) != "import nuke\n" {
+		t.Errorf("after off the linked file is %q", readFile(t, dot))
+	}
+}
+
+// A link to a file that isn't there is refused, never read as no file.
+func TestStartupFileDanglingLinkRefused(t *testing.T) {
+	fk := darwinApps(t)
+	init := filepath.Join(fk.roots.Home, ".nuke", "init.py")
+	mkdir(t, filepath.Dir(init))
+	if err := os.Symlink(filepath.Join(fk.root, "gone.py"), init); err != nil {
+		t.Fatal(err)
+	}
+	before := snapshot(t, fk.roots.Home)
+	if _, err := Plan(find(t, &fk.roots, "nuke", "15.1"), true); err == nil || !strings.Contains(err.Error(), "won't replace the link") {
+		t.Errorf("Plan with a dangling init.py link: %v", err)
+	}
+	diff(t, "a refused plan", before, snapshot(t, fk.roots.Home))
+}
+
+// Off for one version keeps the panel files another version still uses,
+// even ones only this version's (newer) manifest lists, and hands them to
+// that version, whose off removes them.
+func TestOffKeepsPanelFilesAnotherVersionUses(t *testing.T) {
+	fk := darwinApps(t)
+	before := snapshot(t, fk.roots.Home)
+	n15, n16 := find(t, &fk.roots, "nuke", "15.1"), find(t, &fk.roots, "nuke", "16.0")
+	apply(t, plan(t, n16, true))
+	apply(t, plan(t, n15, true))
+	// Make 16's manifest look like an earlier release's that lacked one module.
+	m, err := readManifest(fk.roots.manifestPath("nuke", "16.0"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var g string
+	for i, e := range m.Files {
+		if strings.Contains(e.Path, "c4_nuke") && strings.HasSuffix(e.Path, ".py") {
+			g = e.Path
+			m.Files = append(m.Files[:i], m.Files[i+1:]...)
+			break
+		}
+	}
+	m.Release = "earlier"
+	if err := writeManifest(fk.roots.manifestPath("nuke", "16.0"), m); err != nil {
+		t.Fatal(err)
+	}
+	off := plan(t, n15, false)
+	if contains(off.Removes, g) || !contains(off.Writes, fk.roots.manifestPath("nuke", "16.0")) {
+		t.Errorf("off for 15.1: removes %v, writes %v", off.Removes, off.Writes)
+	}
+	apply(t, off)
+	if _, err := os.Stat(g); err != nil {
+		t.Errorf("Nuke 16 still has C4 on, but off for 15.1 removed %s", g)
+	}
+	if _, err := os.Stat(filepath.Join(fk.roots.Home, ".nuke", "init.py")); err != nil {
+		t.Errorf("off for 15.1 removed the start-up file Nuke 16 uses: %v", err)
+	}
+	apply(t, plan(t, n16, false))
+	diff(t, "both off", before, snapshot(t, fk.roots.Home))
+}
+
+// Unreal's start-up file is every engine's: off for one keeps it.
+func TestOffKeepsUnrealStartupForAnotherEngine(t *testing.T) {
+	fk := darwinApps(t)
+	ue56 := filepath.Join(fk.root, "Shared", "Epic Games", "UE_5.6")
+	mkdir(t, ue56)
+	fk.epic(t, map[string]string{"UE_5.7": filepath.Join(fk.root, "Shared", "Epic Games", "UE_5.7"), "UE_5.6": ue56})
+	before := snapshot(t, fk.roots.Home)
+	u56, u57 := find(t, &fk.roots, "unreal", "5.6"), find(t, &fk.roots, "unreal", "5.7")
+	apply(t, plan(t, u56, true))
+	apply(t, plan(t, u57, true))
+	init := filepath.Join(fk.roots.Home, "Documents", "UnrealEngine", "Python", "init_unreal.py")
+	// The 5.7 manifest forgets the start-up file, as an earlier release's might.
+	m, _ := readManifest(fk.roots.manifestPath("unreal", "5.7"))
+	for i, e := range m.Files {
+		if e.Path == init {
+			m.Files = append(m.Files[:i], m.Files[i+1:]...)
+			break
+		}
+	}
+	writeManifest(fk.roots.manifestPath("unreal", "5.7"), m)
+	apply(t, plan(t, u56, false))
+	if _, err := os.Stat(init); err != nil {
+		t.Errorf("off for 5.6 removed the start-up file 5.7 uses: %v", err)
+	}
+	apply(t, plan(t, u57, false))
+	diff(t, "both off", before, snapshot(t, fk.roots.Home))
+}
+
+// Whether another version uses c4's line is decided by the file and the
+// marker, not the line's exact text (an earlier release's line differs).
+func TestOffKeepsTheLineAnotherVersionUses(t *testing.T) {
+	fk := darwinApps(t)
+	init := filepath.Join(fk.roots.Home, ".nuke", "init.py")
+	write(t, init, "import nuke\n")
+	before := snapshot(t, fk.roots.Home)
+	n15, n16 := find(t, &fk.roots, "nuke", "15.1"), find(t, &fk.roots, "nuke", "16.0")
+	apply(t, plan(t, n15, true))
+	apply(t, plan(t, n16, true))
+	m, _ := readManifest(fk.roots.manifestPath("nuke", "15.1"))
+	m.Lines[0].Line = "import nuke; nuke.pluginAddPath('/old')  # added by c4 farm integrate nuke"
+	writeManifest(fk.roots.manifestPath("nuke", "15.1"), m)
+	apply(t, plan(t, n15, false))
+	if !strings.Contains(readFile(t, init), "integrate nuke") {
+		t.Errorf("off for 15.1 removed the line Nuke 16 needs:\n%s", readFile(t, init))
+	}
+	apply(t, plan(t, n16, false))
+	diff(t, "both off", before, snapshot(t, fk.roots.Home))
+}
+
+// A file an editor turned to CRLF after on gets back its last line as it
+// ended, with no stray CR; a final newline the person added after c4's
+// line is kept.
+func TestOffAfterCRLFLeavesNoStrayCR(t *testing.T) {
+	fk := darwinApps(t)
+	init := filepath.Join(fk.roots.Home, ".nuke", "init.py")
+	f := find(t, &fk.roots, "nuke", "15.1")
+
+	write(t, init, "import nuke")
+	apply(t, plan(t, f, true))
+	write(t, init, strings.ReplaceAll(readFile(t, init), "\n", "\r\n"))
+	apply(t, plan(t, f, false))
+	if got := readFile(t, init); got != "import nuke" {
+		t.Errorf("after off: %q", got)
+	}
+
+	write(t, init, "import nuke")
+	apply(t, plan(t, f, true))
+	write(t, init, readFile(t, init)+"mine()\n")
+	apply(t, plan(t, f, false))
+	if got := readFile(t, init); got != "import nuke\nmine()\n" {
+		t.Errorf("after off, with their line after c4's: %q", got)
+	}
+}
+
+// Running on again leaves c4's line where it is and the backup of the
+// file as it was before c4 first changed it.
+func TestReOnLeavesTheLineAndBackupAlone(t *testing.T) {
+	fk := darwinApps(t)
+	init := filepath.Join(fk.roots.Home, ".nuke", "init.py")
+	write(t, init, "import nuke\n")
+	f := find(t, &fk.roots, "nuke", "15.1")
+	apply(t, plan(t, f, true))
+	theirs := readFile(t, init) + "mine()\n"
+	write(t, init, theirs)
+	c := plan(t, f, true)
+	if contains(c.Writes, init) || contains(c.Writes, init+".c4-backup") {
+		t.Errorf("a second on rewrites init.py or its backup: %v", c.Writes)
+	}
+	apply(t, c)
+	if readFile(t, init) != theirs {
+		t.Errorf("init.py was changed:\n%s", readFile(t, init))
+	}
+	if b := readFile(t, init+".c4-backup"); b != "import nuke\n" {
+		t.Errorf("the backup was overwritten with %q", b)
+	}
+
+	// An earlier release's line is replaced where it stands.
+	old := "import nuke; nuke.pluginAddPath('/old')  # added by c4 farm integrate nuke\n"
+	write(t, init, "import nuke\n"+old+"mine()\n")
+	apply(t, plan(t, f, true))
+	if got := readFile(t, init); !strings.HasPrefix(got, "import nuke\nimport nuke; nuke.pluginAddPath('"+fk.roots.payloadDir("nuke")) || !strings.HasSuffix(got, "mine()\n") {
+		t.Errorf("the earlier line wasn't replaced in place:\n%s", got)
+	}
+	if b := readFile(t, init+".c4-backup"); b != "import nuke\n" {
+		t.Errorf("the backup was overwritten with %q", b)
+	}
+}
+
+// A version or name a caller made up can't steer writes elsewhere.
+func TestPlanRefusesABadVersionOrName(t *testing.T) {
+	fk := darwinApps(t)
+	for _, f := range []Found{
+		{Name: "maya", Version: "2025/../../../../../../../Desktop"},
+		{Name: "maya", Version: "25.0"},
+		{Name: "blender", Version: "4.5/.."},
+		{Name: "nuke", Version: "15"},
+		{Name: "../maya", Version: "2025"},
+		{Name: "photoshop", Version: "26.0"},
+	} {
+		for _, on := range []bool{true, false} {
+			if c, err := fk.roots.Plan(f, on); err == nil {
+				t.Errorf("Plan(%q %q, %v) accepted: writes %v", f.Name, f.Version, on, c.Writes)
+			}
+		}
+	}
+}
+
+// Two runs at once are kept apart: one goes first, the other is told to
+// plan again (its plan is out of date), and planning again works.
+func TestConcurrentOnIsSerialized(t *testing.T) {
+	for i := 0; i < 20; i++ {
+		fk := darwinApps(t)
+		init := filepath.Join(fk.roots.Home, ".nuke", "init.py")
+		write(t, init, "import nuke\n")
+		n15, n16 := find(t, &fk.roots, "nuke", "15.1"), find(t, &fk.roots, "nuke", "16.0")
+		cs := []Change{plan(t, n15, true), plan(t, n16, true)}
+		var wg sync.WaitGroup
+		errs := make([]error, 2)
+		for j := range cs {
+			wg.Add(1)
+			go func(j int) { defer wg.Done(); errs[j] = Apply(cs[j]) }(j)
+		}
+		wg.Wait()
+		failed := 0
+		for j, err := range errs {
+			if err == nil {
+				continue
+			}
+			failed++
+			if !strings.Contains(err.Error(), "plan again") {
+				t.Errorf("run %d: %v", i, err)
+			}
+			apply(t, plan(t, []Found{n15, n16}[j], true))
+		}
+		if failed != 1 {
+			t.Errorf("run %d: %d of the two plans failed; one should have gone first", i, failed)
+		}
+		if n := strings.Count(readFile(t, init), "integrate nuke"); n != 1 {
+			t.Errorf("run %d: %d c4 lines", i, n)
+		}
+		for _, f := range []Found{n15, n16} {
+			if st := find(t, &fk.roots, f.Name, f.Version).Status; st != StatusInstalled {
+				t.Errorf("run %d: %s %s", i, f.Title, st)
+			}
+		}
+	}
+}
+
+// An off racing an on: the second to take the lock is told to plan again.
+func TestOffRacingOnPlansAgain(t *testing.T) {
+	fk := darwinApps(t)
+	n15, n16 := find(t, &fk.roots, "nuke", "15.1"), find(t, &fk.roots, "nuke", "16.0")
+	apply(t, plan(t, n15, true))
+	off, on := plan(t, n15, false), plan(t, n16, true)
+	apply(t, on)
+	if err := Apply(off); err == nil || !strings.Contains(err.Error(), "plan again") {
+		t.Errorf("an off planned before another version's on: %v", err)
+	}
+	apply(t, plan(t, n15, false))
+	if _, err := os.Stat(filepath.Join(fk.roots.payloadDir("nuke"), "nuke", "menu.py")); err != nil {
+		t.Errorf("Nuke 16's files went: %v", err)
+	}
+}
+
+// The plist readers never panic, whatever they are given.
+func TestPlistReadersNeverPanic(t *testing.T) {
+	seed := []byte(xmlPlist("4.5.3"))
+	rng := rand.New(rand.NewSource(1))
+	for i := 0; i < 200000; i++ {
+		if i%2 == 0 {
+			b := make([]byte, 40+rng.Intn(80))
+			rng.Read(b)
+			copy(b, "bplist00")
+			tr := b[len(b)-32:]
+			tr[6], tr[7] = byte(1+rng.Intn(8)), byte(1+rng.Intn(8))
+			for k := 8; k < 32; k++ {
+				if rng.Intn(3) > 0 {
+					tr[k] = 0
+				}
+			}
+			tr[15] = byte(rng.Intn(8))
+			tr[31] = byte(rng.Intn(len(b)))
+			tr[23] = byte(rng.Intn(4))
+			_, _ = bplistString(b, "CFBundleShortVersionString")
+			continue
+		}
+		b := append([]byte{}, seed...)
+		for k := 0; k < 3; k++ {
+			b[rng.Intn(len(b))] = byte(rng.Intn(256))
+		}
+		_, _ = xmlPlistString(b, "CFBundleShortVersionString")
+	}
+}
+
+// Epic's list read with a byte-order mark, as a Windows editor saves it.
+func TestEpicListWithByteOrderMark(t *testing.T) {
+	fk := newFake(t, "windows")
+	ue := filepath.Join(fk.root, "Program Files", "Epic Games", "UE_5.5")
+	mkdir(t, ue)
+	b, _ := json.Marshal(map[string]any{"InstallationList": []map[string]string{{"InstallLocation": ue, "AppName": "UE_5.5"}}})
+	write(t, fk.roots.Epic[0], "\xef\xbb\xbf"+string(b))
+	if got := detected(&fk.roots); len(got) != 1 || got[0].Version != "5.5" {
+		t.Errorf("Detect: %v", got)
+	}
+}
+
+// Temporary files and folders a killed run left are c4's to clear: on and
+// off list them and remove them, and nothing else of the kind.
+func TestStaleTemporaryFilesCleared(t *testing.T) {
+	fk := darwinApps(t)
+	f := find(t, &fk.roots, "houdini", "21.0")
+	before := snapshot(t, fk.roots.Home)
+	apply(t, plan(t, f, true))
+	pkgs := filepath.Join(fk.roots.Home, "Library", "Preferences", "houdini", "21.0", "packages")
+	staleFile := filepath.Join(pkgs, ".c4.json"+tmpMark+"123")
+	staleDir := filepath.Join(fk.roots.manifestDir(), ".houdini"+tmpMark+"456")
+	write(t, staleFile, "half")
+	write(t, filepath.Join(staleDir, "LICENSE"), "half")
+	theirs := filepath.Join(pkgs, ".hidden")
+	write(t, theirs, "theirs")
+	c := plan(t, f, true)
+	if !contains(c.Removes, staleFile) || !contains(c.Removes, staleDir) || contains(c.Removes, theirs) {
+		t.Errorf("on removes %v", c.Removes)
+	}
+	apply(t, c)
+	for _, p := range []string{staleFile, staleDir} {
+		if _, err := os.Stat(p); err == nil {
+			t.Errorf("%s is still there", p)
+		}
+	}
+	write(t, staleFile, "half")
+	os.Remove(theirs)
+	off := plan(t, f, false)
+	if !contains(off.Removes, staleFile) {
+		t.Errorf("off removes %v", off.Removes)
+	}
+	apply(t, off)
+	diff(t, "on, off, with stale files cleared", before, snapshot(t, fk.roots.Home))
 }
