@@ -175,6 +175,7 @@ c4 farm tool publish ~/tools/notes
 ```
 
 ```
+as        td: publishing takes the TD role, and the local farm signs you in as it
 notes v1   c41w…qu9T · 3 files, 3 to upload · image ghcr.io/avalanche-io/c4-runtime-base@sha256:6f5a…
 test on the farm   saltmarsh/notes-test-1w4xvo7vmy
                    ok in 9s
