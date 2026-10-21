@@ -181,3 +181,26 @@ func TestOwnerIsTheSinglePerson(t *testing.T) {
 		t.Error("a farm with no owner named one")
 	}
 }
+
+// The owner's name is one the farm can record and no role's: an address's
+// local part, a Windows user without its domain, GitHub's private address
+// without its number, lowercase, with what else a name carries made '-'.
+func TestOwnerName(t *testing.T) {
+	for raw, want := range map[string]string{
+		"joshua@studio.example":                       "joshua",
+		"Joshua Kolden":                               "joshua-kolden",
+		"12345678+mrjoshuak@users.noreply.github.com": "mrjoshuak",
+		`AVALANCHE\jkolden`:                           "jkolden",
+		"  j.kolden  ":                                "j.kolden",
+		"o'brien--x":                                  "o-brien-x",
+	} {
+		if got, err := OwnerName(raw); err != nil || got != want {
+			t.Errorf("%q: %q, %v", raw, got, err)
+		}
+	}
+	for _, raw := range []string{"td@studio.com", "Admin", "farm-admin", "", "@", "---"} {
+		if got, err := OwnerName(raw); err == nil {
+			t.Errorf("%q: %q, want refused", raw, got)
+		}
+	}
+}

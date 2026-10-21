@@ -597,8 +597,21 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort,
 			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != "", Owner: *owner, Tracker: *trackerOn},
 			Install: *install, Version: version, ImageArchive: *archive, SyncInstall: *syncInstall, SyncImage: *syncImage, Log: stdout}
-		if o.Owner == "" {
-			o.Owner = localfarm.DefaultOwner()
+		// the owner is kept from one up to the next; --owner changes it
+		was := cfg.Farms[localfarm.Name].Owner
+		switch {
+		case o.Owner != "":
+			name, err := localfarm.OwnerName(o.Owner)
+			if err != nil {
+				return err
+			}
+			o.Owner = name
+		case was != "":
+			o.Owner = was
+		default:
+			if o.Owner = localfarm.DefaultOwner(); o.Owner == "" {
+				return errors.New("no name for the farm's owner from git's user.email or the login; give one with --owner NAME")
+			}
 		}
 		if *plan {
 			fmt.Fprintf(stdout, "%s---\n%s", localfarm.KindConfig(o.Options), localfarm.YAML(localfarm.Farm(o.Options)))
@@ -623,14 +636,18 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := localfarm.Up(ctx, o); err != nil {
 			return err
 		}
-		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true}
+		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner}
 		cfg.Current = localfarm.Name
 		if err := cfg.Save(); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
 		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
-		fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
+		if was != "" && was != o.Owner {
+			fmt.Fprintf(stdout, "owner     %s, no longer %s: %s now plays every role here\n", o.Owner, was, o.Owner)
+		} else {
+			fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
+		}
 		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)\n")
 		if o.Tracker || localfarm.HasTracker(ctx) {

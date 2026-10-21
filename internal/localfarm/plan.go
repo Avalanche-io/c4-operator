@@ -356,16 +356,63 @@ func Link(hud string, v Viewer) string {
 func NeedsLink(hud string, v Viewer) string { return Link(hud, v) + "#/needs" }
 
 // DefaultOwner is who owns a farm made on this machine unless --owner
-// says: the local part of git's user.email (a bare name keeps addresses
-// out of every record), else the login name.
+// says: the local part of git's user.email, as git reads it here (this
+// repository's, else the global one), else the login name, made a name
+// OwnerName takes. A bare name keeps addresses out of every record. It is
+// empty when neither gives one.
 func DefaultOwner() string {
-	if out, err := exec.Command("git", "config", "--global", "user.email").Output(); err == nil {
-		if name, _, _ := strings.Cut(strings.TrimSpace(string(out)), "@"); name != "" {
+	var tries []string
+	if out, err := exec.Command("git", "config", "user.email").Output(); err == nil {
+		tries = append(tries, strings.TrimSpace(string(out)))
+	}
+	if u, err := user.Current(); err == nil {
+		tries = append(tries, u.Username)
+	}
+	tries = append(tries, os.Getenv("USER"))
+	for _, t := range tries {
+		if name, err := OwnerName(t); err == nil {
 			return name
 		}
 	}
-	if u, err := user.Current(); err == nil && u.Username != "" {
-		return u.Username
+	return ""
+}
+
+// OwnerName is a person's name as the farm records its owner: an
+// address's local part, a Windows DOMAIN\user's user, GitHub's private
+// address without its numeric prefix (12345678+name), in lowercase, with
+// anything outside a-z, 0-9, '.' and '-' made '-'. A role's sign-in name
+// (artist, td, admin...) is refused: the owner is a person, and taking a
+// role's name would quietly give that sign-in every power.
+func OwnerName(raw string) (string, error) {
+	s := strings.TrimSpace(raw)
+	if i := strings.LastIndexByte(s, '\\'); i >= 0 {
+		s = s[i+1:]
 	}
-	return os.Getenv("USER")
+	s, _, _ = strings.Cut(s, "@")
+	if num, rest, ok := strings.Cut(s, "+"); ok && num != "" && strings.Trim(num, "0123456789") == "" {
+		s = rest
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	name := b.String()
+	for strings.Contains(name, "--") {
+		name = strings.ReplaceAll(name, "--", "-")
+	}
+	name = strings.Trim(name, "-.")
+	if name == "" {
+		return "", fmt.Errorf("%q gives no name for the farm's owner; give one with --owner NAME", raw)
+	}
+	for _, v := range Viewers {
+		if name == v.Name || name == v.Role {
+			return "", fmt.Errorf("%q is the %s sign-in's name; the owner is a person: give your own name with --owner NAME", name, v.Role)
+		}
+	}
+	return name, nil
 }

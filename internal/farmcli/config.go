@@ -22,6 +22,9 @@ type Farm struct {
 	TokenFile string `json:"tokenFile,omitempty"` // a bearer token (studio farms)
 	Project   string `json:"project,omitempty"`   // the default project
 	Local     bool   `json:"local,omitempty"`
+	// Owner is who owns a local farm and plays every role on it; up keeps
+	// it unless --owner changes it.
+	Owner string `json:"owner,omitempty"`
 }
 
 // Config is ~/.c4/farm.yaml.
