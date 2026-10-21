@@ -157,14 +157,14 @@ func (s *Server) handleConfirm(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusForbidden, "only the job's owner, or one allowed to change the job, confirms its tracker writes")
 			return
 		}
-		authz = s.authorization("patch", "workjobs", ns, job)
+		authz = s.authorization(v, "patch", "workjobs", ns, job)
 	}
 	action, did := "confirm-write", "happened"
 	if !*body.Happened {
 		action, did = "deny-write", "did not happen; c4-sync writes it again"
 	}
 	target := "trackerlink:" + ns + "/" + name + "#" + field
-	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r), Authorization: authz,
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r), Authorization: authz,
 		Action: action, Target: target, Change: map[string]any{"field": field, "write": wr.Value, "happened": *body.Happened, "note": body.Note}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target, Digest: map[string]string{"sha256": sha256JSON(wr)}}, pred)
 	if err != nil {

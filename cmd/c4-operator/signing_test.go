@@ -64,3 +64,16 @@ func TestIssuerCertifiesOnlyImporters(t *testing.T) {
 		}
 	}
 }
+
+// A HUD is loopback-only when its listen address says so, never when a
+// request does: an empty host or a routable address listens to the network.
+func TestLoopbackOnly(t *testing.T) {
+	for addr, want := range map[string]bool{
+		"127.0.0.1:8090": true, "[::1]:8090": true, "localhost:8090": true, "127.0.0.2:8090": true,
+		":8090": false, "0.0.0.0:8090": false, "[::]:8090": false, "10.0.0.5:8090": false, "hud.example.com:8090": false, "": false,
+	} {
+		if got := loopbackOnly(addr); got != want {
+			t.Errorf("%q: %v, want %v", addr, got, want)
+		}
+	}
+}

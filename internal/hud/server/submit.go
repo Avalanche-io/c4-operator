@@ -831,8 +831,8 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	replaceRecord := ""
 	if replaced != nil {
 		// Signed first: the replacement deletes the forecast.
-		pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
-			Authorization: s.authorization("create", "workjobs", ns, "") + "; " + replaceWhy, Action: "replace",
+		pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
+			Authorization: s.authorization(v, "create", "workjobs", ns, "") + "; " + replaceWhy, Action: "replace",
 			Target: "workjob:" + ns + "/" + replaced.Name, Change: map[string]any{"replacedBy": name, "forecast": replaced.Spec.Forecast}}
 		id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target,
 			Digest: map[string]string{"sha256": queue.SpecDigest(replaced)}}, pred)

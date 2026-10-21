@@ -144,11 +144,12 @@ func TestWhoMayDecide(t *testing.T) {
 		return p
 	}
 
-	// The person decides their own wait, directly.
+	// The person decides their own wait, directly (unattributed: a
+	// development viewer on a HUD the network reaches).
 	setPolicy("", "")
 	if code, out := post("wrangler", "decide", ruling, false); code != http.StatusOK {
 		t.Fatalf("dana decides: %d %v", code, out)
-	} else if p := record(out); p.Custody != CustodyDirect || p.For != "" || p.Actor != "dana" {
+	} else if p := record(out); p.Custody != CustodyUnattributed || p.For != "" || p.Actor != "dana" {
 		t.Fatalf("dana's record: %+v", p)
 	}
 	// A member of the party decides its wait.

@@ -146,8 +146,8 @@ func (s *Server) handleGrant(w http.ResponseWriter, r *http.Request) {
 	g.Namespace, g.Name = key.Namespace, key.Name
 	g.Spec = c4v1.SubmitGrantSpec{Person: v.User, Tracker: tr.Name, Pools: body.Pools, Classes: body.Classes,
 		Until: metav1.NewTime(until.UTC().Truncate(time.Second))}
-	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
-		Authorization: s.authorization("create", "workjobs", ns, ""), Action: "grant",
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
+		Authorization: s.authorization(v, "create", "workjobs", ns, ""), Action: "grant",
 		Target: "submitgrant:" + ns + "/" + g.Name,
 		Change: map[string]any{"person": v.User, "tracker": tr.Name, "pools": body.Pools, "classes": body.Classes, "until": g.Spec.Until.Time}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(g.Spec)}}, pred)
@@ -273,7 +273,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusForbidden, "only %s, or a project admin, revokes their grant: %v", g.Spec.Person, err)
 			return
 		}
-		authz = s.authorization("delete", "submitgrants", ns, name)
+		authz = s.authorization(v, "delete", "submitgrants", ns, name)
 	}
 	if g.Spec.Revoked != nil {
 		fail(w, http.StatusConflict, "%s revoked it already", g.Spec.Revoked.By)
@@ -281,7 +281,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	before := sha256JSON(g.Spec)
 	now := time.Now()
-	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r), Authorization: authz,
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r), Authorization: authz,
 		Action: "revoke", Target: "submitgrant:" + ns + "/" + name,
 		Change: map[string]any{"person": g.Spec.Person, "tracker": g.Spec.Tracker, "grant": g.Spec.Record}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, pred)

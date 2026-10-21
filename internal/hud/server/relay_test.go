@@ -148,7 +148,9 @@ func TestRelayedDecisions(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("direct: %d %v", code, out)
 	}
-	if p := record(out); p.Custody != CustodyDirect || p.Relay != nil || p.Actor != "dana" {
+	// dana signed in as a development viewer on a HUD the network
+	// reaches: decided directly, but by no one the HUD authenticated.
+	if p := record(out); p.Custody != CustodyUnattributed || p.Relay != nil || p.Actor != "dana" {
 		t.Fatalf("direct record: %+v", p)
 	}
 

@@ -39,7 +39,13 @@ const maxControlRecords = 16
 type controlPredicate struct {
 	Actor         string `json:"actor"`
 	Authenticated string `json:"authenticated"`
-	Via           string `json:"via"`
+	// Via is the client that carried the act: hud (the web app), mcp,
+	// c4-farm or c4-sync, as the client says (X-C4-Client).
+	Via string `json:"via"`
+	// Agent is the agent the client says acts (X-C4-Agent), and
+	// AgentGrade how far that is evidenced: claimed, the client's word.
+	Agent         string `json:"agent,omitempty"`
+	AgentGrade    string `json:"agentGrade,omitempty"`
 	Authorization string `json:"authorization"`
 	Action        string `json:"action"`
 	Target        string `json:"target"`
@@ -62,32 +68,88 @@ type controlPredicate struct {
 	Chain *schema.Chain `json:"chain,omitempty"`
 }
 
-// via names the client: the MCP server says so in X-C4-Client; anything
-// else is the web app. The header is the client's claim; the actor is not.
+// Grades of how far a record's link is evidenced, beside the custody
+// grades of a decision (relay.go): claimed is a client's word about
+// itself (an agent's name, a loopback development viewer); unattributed
+// is no one's.
+const (
+	CustodyClaimed      = "claimed"
+	CustodyUnattributed = "unattributed"
+)
+
+// clients are the HUD's own clients, as they name themselves in
+// X-C4-Client; no header is the web app.
+var clients = []string{"mcp", "c4-farm", "c4-sync"}
+
+// via names the client. The header is the client's claim; the actor is
+// not. A name the HUD doesn't know is recorded as such.
 func via(r *http.Request) string {
-	if strings.EqualFold(r.Header.Get("X-C4-Client"), "mcp") {
-		return "mcp"
+	c := strings.ToLower(strings.TrimSpace(r.Header.Get("X-C4-Client")))
+	switch {
+	case c == "":
+		return "hud"
+	case slices.Contains(clients, c):
+		return c
 	}
-	return "hud"
+	return fmt.Sprintf("unknown client (X-C4-Client: %.40s)", r.Header.Get("X-C4-Client"))
 }
 
-func (s *Server) authenticatedBy(r *http.Request) string {
+// claimedAgent is the agent a client says acts for the viewer
+// (X-C4-Agent), "" for none.
+func claimedAgent(r *http.Request) string {
+	a := strings.TrimSpace(r.Header.Get("X-C4-Agent"))
+	if len(a) > 64 {
+		a = a[:64]
+	}
+	return a
+}
+
+// authenticatedBy says how the HUD knows who v is.
+func (s *Server) authenticatedBy(r *http.Request, v *api.Viewer) string {
 	switch {
+	case v != nil && v.Unit != nil:
+		return fmt.Sprintf("the unit's pod token (TokenReview, audience %s), pod of unit %s of %s/%s", c4v1.HUDAudience, v.Unit.Unit, v.Unit.Namespace, v.Unit.Job)
+	case s.DevViewers != nil && s.Loopback:
+		return fmt.Sprintf("development viewer (?as=%s) on a HUD listening only on loopback: claimed by the installer, %s", devName(r), s.installer())
 	case s.DevViewers != nil:
-		return "development viewer (?as=), not authenticated"
+		return fmt.Sprintf("development viewer (?as=%s), not authenticated", devName(r))
 	case s.TrustProxy && r.Header.Get("X-Forwarded-User") != "":
-		return "SSO proxy (X-Forwarded-User)"
+		return "SSO proxy (X-Forwarded-User, with the proxy's secret)"
+	}
+	if tok, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok && claimsAudience(tok, c4v1.HUDAPIAudience) {
+		return fmt.Sprintf("bearer token for the HUD (TokenReview, audience %s)", c4v1.HUDAPIAudience)
 	}
 	return "bearer token (TokenReview)"
 }
 
-func (s *Server) authorization(verb, resource, ns, name string) string {
-	if s.DevViewers != nil {
-		return "development mode: not checked"
+func (s *Server) installer() string {
+	if s.SinglePerson != "" {
+		return s.SinglePerson
 	}
+	return "unnamed (--single-person-farm names them)"
+}
+
+// devName is the development viewer a request asks as.
+func devName(r *http.Request) string {
+	if as := r.URL.Query().Get("as"); as != "" {
+		return as
+	}
+	return "wrangler"
+}
+
+// authorization says how the HUD let v make the write: a unit by its
+// tool's grant, a development viewer by its role, anyone else by a
+// SubjectAccessReview.
+func (s *Server) authorization(v *api.Viewer, verb, resource, ns, name string) string {
 	target := name
 	if ns != "" {
 		target = ns + "/" + name
+	}
+	switch {
+	case v != nil && v.Unit != nil:
+		return fmt.Sprintf("unit grant: its tool grants c4: %s; the HUD allowed %s %s %s, checked by the HUD, not by Kubernetes RBAC", v.Unit.Grant, verb, resource, target)
+	case s.DevViewers != nil:
+		return fmt.Sprintf("development mode: role %s may %s %s %s, checked by the HUD, not by Kubernetes RBAC", devRole(v), verb, resource, target)
 	}
 	return fmt.Sprintf("SubjectAccessReview: %s %s %s allowed", verb, resource, target)
 }
@@ -97,6 +159,9 @@ func (s *Server) authorization(verb, resource, ns, name string) string {
 func (s *Server) signControl(ctx context.Context, projects []string, subject provenance.Subject, pred controlPredicate) (string, error) {
 	if s.Signer == nil || s.Stores == nil || len(projects) == 0 {
 		return "", nil
+	}
+	if pred.Agent != "" {
+		pred.AgentGrade = CustodyClaimed
 	}
 	rec, err := provenance.SignStatement(ctx, s.Signer, provenance.PredicateControl, []provenance.Subject{subject}, pred, time.Now())
 	if err != nil {
@@ -119,8 +184,8 @@ func (s *Server) signControl(ctx context.Context, projects []string, subject pro
 // job's annotation. j is the job as it will be written; before is its
 // spec digest before the change.
 func (s *Server) controlJob(ctx context.Context, r *http.Request, v *api.Viewer, rec *jobRec, j *c4v1.WorkJob, before, action string, change any, opts ...func(*controlPredicate)) (string, error) {
-	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
-		Authorization: s.authorization("patch", "workjobs", j.Namespace, j.Name),
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
+		Authorization: s.authorization(v, "patch", "workjobs", j.Namespace, j.Name),
 		Action:        action, Target: "workjob:" + j.Namespace + "/" + j.Name,
 		Change: map[string]any{"request": change, "specBefore": before, "specAfter": queue.SpecDigest(j)}}
 	for _, o := range opts {

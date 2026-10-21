@@ -84,6 +84,11 @@ type Server struct {
 	// Sandbox is a development farm's stand-in tracker (c4 farm up --tracker),
 	// served at /sandbox/ on the HUD's own port; only with DevViewers.
 	Sandbox *url.URL
+	// Loopback is whether the HUD listens only on a loopback address. A
+	// development viewer there is the installer (SinglePerson names
+	// them), graded claimed, since only processes on this machine reach
+	// it; elsewhere it is unattributed.
+	Loopback bool
 	// TrustProxy reads X-Forwarded-User and X-Forwarded-Groups from an
 	// SSO proxy in front of the HUD.
 	TrustProxy bool
@@ -295,7 +300,16 @@ var errUnauthenticated = errors.New("sign in: send a bearer token, or reach the 
 // viewer resolves who is asking.
 func (s *Server) viewer(r *http.Request) (*api.Viewer, error) {
 	if s.DevViewers != nil {
-		v, ok := s.DevViewers[r.URL.Query().Get("as")]
+		as := r.URL.Query().Get("as")
+		v, ok := s.DevViewers[as]
+		if !ok && as != "" {
+			names := make([]string, 0, len(s.DevViewers))
+			for n := range s.DevViewers {
+				names = append(names, n)
+			}
+			slices.Sort(names)
+			return nil, badViewer(fmt.Sprintf("no development viewer %q here: ?as= one of %s", as, strings.Join(names, ", ")))
+		}
 		if !ok {
 			v, ok = s.DevViewers["wrangler"]
 		}
@@ -412,10 +426,21 @@ func fail(w http.ResponseWriter, code int, format string, args ...any) {
 	writeJSON(w, code, map[string]string{"error": fmt.Sprintf(format, args...)})
 }
 
-// withViewer resolves the viewer or answers 401.
+// badViewer is a request that names a viewer that isn't there (400).
+type badViewer string
+
+func (e badViewer) Error() string { return string(e) }
+
+// withViewer resolves the viewer or answers 401 (400 for an unknown
+// development viewer).
 func (s *Server) withViewer(w http.ResponseWriter, r *http.Request) *api.Viewer {
 	v, err := s.viewer(r)
-	if err != nil {
+	var bad badViewer
+	switch {
+	case errors.As(err, &bad):
+		fail(w, http.StatusBadRequest, "%v", err)
+		return nil
+	case err != nil:
 		fail(w, http.StatusUnauthorized, "%v", err)
 		return nil
 	}

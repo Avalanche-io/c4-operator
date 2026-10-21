@@ -820,8 +820,24 @@ Every way into the HUD proves who is asking:
   (`c4.avalanche.io/hud-api`) if it claims that audience, and at the API
   server's own otherwise.
 - The SSO proxy's headers count only beside the proxy's shared secret.
+- A development viewer has no RBAC behind it. Its role's rights stand in
+  for RBAC, and only in the projects it sees.
 - MCP over HTTP refuses a request with no bearer token. It never serves a
   request under a token the server was started with.
+
+Each control record says how its actor was let act:
+- a SubjectAccessReview;
+- a unit's tool grant, checked by the HUD;
+- a development viewer's role.
+
+It names the client that carried the act (the web app, MCP, `c4 farm` or
+c4-sync) and the agent the client says acts, graded `claimed`.
+
+A development viewer's record still says "development viewer":
+- On a HUD whose listen address is loopback only, it is claimed by the
+  installer (`--single-person-farm`), because only processes on that machine
+  reach it.
+- On any HUD the network reaches, it is unattributed.
 
 ## 7. Very large clusters
 

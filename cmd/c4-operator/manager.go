@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io/fs"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -263,6 +264,20 @@ type hudImages struct {
 	plain         []string
 }
 
+// loopbackOnly reports whether addr listens only on a loopback address
+// (127.0.0.0/8, ::1 or localhost); an empty host listens everywhere.
+func loopbackOnly(addr string) bool {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return false
+	}
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 // proxySecret reads the SSO proxy's secret: nil when the HUD trusts no
 // proxy. Trusting one without a secret is refused, since anyone who
 // reached the HUD past the proxy could then send its headers.
@@ -331,6 +346,9 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		if err != nil {
 			return err
 		}
+		// Whether only this machine reaches the HUD is its listen
+		// address's to say, never a request's.
+		srv.Loopback = loopbackOnly(addr)
 	}
 	if sandbox != "" {
 		if srv.DevViewers == nil {

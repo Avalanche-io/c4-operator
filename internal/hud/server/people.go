@@ -183,7 +183,7 @@ func (s *Server) handlePeopleConfirm(w http.ResponseWriter, r *http.Request) {
 	now := metav1.NewTime(time.Now().UTC().Truncate(time.Second))
 	offer := c4v1.TrackerPersonOffer{From: "spec.people", Generation: tr.Generation}
 	target := "trackerperson:" + ns + "/" + name
-	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r),
 		Authorization: "the person the login is offered as (" + person + ")", Action: "people-confirm", Target: target,
 		Change: map[string]any{"tracker": tr.Name, "login": body.Login, "person": person, "offer": offer}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target,
@@ -277,14 +277,14 @@ func (s *Server) handlePeopleRevoke(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusForbidden, "only %s, or a project admin, revokes it: %v", whoIs(tp.Spec.Person), err)
 			return
 		}
-		authz = s.authorization("delete", "trackerpeople", ns, name)
+		authz = s.authorization(v, "delete", "trackerpeople", ns, name)
 	}
 	if tp.Spec.Revoked != nil {
 		fail(w, http.StatusConflict, "%s revoked it already", tp.Spec.Revoked.By)
 		return
 	}
 	target := "trackerperson:" + ns + "/" + name
-	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r), Authorization: authz,
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r), Authorization: authz,
 		Action: "people-revoke", Target: target,
 		Change: map[string]any{"tracker": tp.Spec.Tracker, "login": tp.Spec.Login, "person": tp.Spec.Person, "confirmation": tp.Spec.Accepted.Record}}
 	id, err := s.signControl(ctx, []string{project}, provenance.Subject{Name: target,

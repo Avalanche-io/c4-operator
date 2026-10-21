@@ -38,7 +38,7 @@ func (s *Server) authorize(ctx context.Context, r *http.Request, v *api.Viewer, 
 		return s.unitMay(v, ns, resource, name)
 	}
 	if s.DevViewers != nil {
-		return nil
+		return s.devMay(v, ns, verb, resource)
 	}
 	var groups []string
 	if s.TrustProxy {
@@ -584,8 +584,8 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 			projects = append(projects, jr.project)
 		}
 	}
-	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
-		Authorization: s.authorization("patch", "capacityrequests", "", cr.Name), Action: "approve-capacity",
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
+		Authorization: s.authorization(v, "patch", "capacityrequests", "", cr.Name), Action: "approve-capacity",
 		Target: "capacityrequest:" + cr.Name,
 		Change: map[string]any{"pool": pool, "slots": cr.Spec.Slots, "jobs": cr.Spec.Jobs, "estimatedCost": cr.Spec.EstimatedCost}}
 	id, err := s.signControl(ctx, projects, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, pred)
@@ -695,6 +695,19 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	custody, actor := CustodyDirect, actorOf(r, v)
 	var chain *schema.Chain
+	if s.DevViewers != nil && v.Unit == nil {
+		// No one signed in: the installer's word on loopback, else no
+		// one's.
+		custody = CustodyUnattributed
+		if s.Loopback {
+			custody = CustodyClaimed
+		}
+	}
+	if deciderOf(r, v).Agent != "" {
+		// An agent decides only a wait that names it, and that it is
+		// the agent rests on the client's header alone.
+		custody = CustodyClaimed
+	}
 	standFor := ""
 	if body.Via == nil {
 		// Whom the wait names decides it, or someone the farm and the
@@ -781,7 +794,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 			// The decider is the tracker's person; who relayed it, and how
 			// the relay authenticated, is the rest of the record.
 			p.Actor = actor
-			p.Authenticated = "relayed by " + v.User + " (" + s.authenticatedBy(r) + ")"
+			p.Authenticated = "relayed by " + v.User + " (" + s.authenticatedBy(r, v) + ")"
 			p.Relay = body.Via
 			p.Chain = chain
 		}

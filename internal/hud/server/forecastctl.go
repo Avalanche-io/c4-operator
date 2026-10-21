@@ -138,7 +138,7 @@ func (s *Server) handleWithdraw(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "%v", err)
 		return
 	}
-	authz := s.authorization("delete", "workjobs", j.Namespace, j.Name) + "; " + why
+	authz := s.authorization(v, "delete", "workjobs", j.Namespace, j.Name) + "; " + why
 	id, err := s.controlJob(ctx, r, v, rec, j, queue.SpecDigest(j), "withdraw", body, func(p *controlPredicate) { p.Authorization = authz })
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)

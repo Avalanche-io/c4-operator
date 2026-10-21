@@ -53,7 +53,19 @@ API server's own audience. A viewer sees the projects with a namespace where
 it may list WorkJobs (SubjectAccessReview, cached for a minute). The mock, and
 the real backend started with `--hud-dev-viewers` (tests and demos only), take
 `?as=artist` or `?as=wrangler` on any request instead, including the event
-stream and object URLs.
+stream and object URLs. An `?as=` that names no configured viewer gets 400
+naming the ones there are; no `?as=` is the wrangler. A development viewer
+has no RBAC behind it, so its role's rights stand in:
+- every role but facilities may change jobs and mounts in the projects it
+  sees;
+- producers, wranglers and farm admins approve bursts and grant
+  submissions;
+- facilities, wranglers and farm admins disable nodes.
+
+A development viewer's control records say "development viewer". On a HUD
+listening only on loopback (`--hud-addr 127.0.0.1:…`) they are claimed by
+the installer (`--single-person-farm`), graded `claimed`. Elsewhere they are
+`unattributed`.
 
 `viewer.role` sets the mode and level a new viewer starts at: `artist`,
 `supervisor`, `producer`, `wrangler`, `farm-admin`, `facilities` or
