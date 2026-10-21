@@ -119,3 +119,81 @@ func TestChooseAppsDefaultNo(t *testing.T) {
 		t.Errorf("integrations:\n%s", s)
 	}
 }
+
+// These tests run as a person would, whatever shell runs them (an agent's
+// included); the ones about an agent set CLAUDECODE themselves.
+func init() { os.Unsetenv("CLAUDECODE") }
+
+// Nothing that changes this machine runs from inside an agent, even with
+// --yes, nor without a terminal unless --yes; each refusal names the
+// command for the person to run.
+func TestConsent(t *testing.T) {
+	if err := Consent(false, true, "c4 farm integrate on"); err != nil {
+		t.Errorf("at a terminal: %v", err)
+	}
+	if err := Consent(true, false, "c4 farm integrate on"); err != nil {
+		t.Errorf("--yes in a script: %v", err)
+	}
+	if err := Consent(false, false, "c4 farm integrate on"); err == nil || !strings.Contains(err.Error(), "run c4 farm integrate on at one, or pass --yes") {
+		t.Errorf("no terminal: %v", err)
+	}
+	t.Setenv("CLAUDECODE", "1")
+	if err := Consent(true, true, "c4 farm integrate on"); err == nil || !strings.Contains(err.Error(), "you run it, not an agent: in your own terminal, c4 farm integrate on") {
+		t.Errorf("inside an agent with --yes: %v", err)
+	}
+	cfg := &Config{}
+	found := []Detected{{Name: Claude, Found: true, Question: "q?", DefaultYes: true, Runner: true}}
+	if on, err := Choose(cfg, found, "", false, true, Out{W: &bytes.Buffer{}, In: strings.NewReader("y\n")}); err != nil || len(on) != 0 || len(cfg.Integrations) != 0 {
+		t.Errorf("an agent at up was asked or turned something on: %v %v %v", on, err, cfg.Integrations)
+	}
+	if _, err := Choose(cfg, found, "claude", false, true, Out{W: &bytes.Buffer{}}); err == nil {
+		t.Error("an agent gave itself --integrate=claude")
+	}
+	cd, folder := t.TempDir(), t.TempDir()
+	bin, calls := fakeAgent(t, cd, folder, "0b5e7c52-8a6f-4d0e-9b1c-3f2a4e6d8c10")
+	if err := AddAgent(context.Background(), Out{W: &bytes.Buffer{}}, AgentsArgs{Name: "scout", ConfigDir: cd, Yes: true, AgentBin: bin}); err == nil ||
+		!strings.Contains(err.Error(), "you run it, not an agent") {
+		t.Errorf("agents add --yes inside an agent: %v", err)
+	}
+	if c, _ := os.ReadFile(calls); strings.Contains(string(c), "register") {
+		t.Error("registered from inside an agent")
+	}
+}
+
+// A yes given at login names no service, so up asks about the runner on
+// its own; a yes at up covers both.
+func TestRunnerHasItsOwnYes(t *testing.T) {
+	cfg := &Config{Integrations: map[string]bool{Claude: true}}
+	found := []Detected{{Name: Claude, Found: true, Question: "q?", DefaultYes: true, Runner: true}}
+	var out bytes.Buffer
+	Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("n\n")})
+	if on, asked := cfg.Integrations[RunnerKey]; !asked || on || !strings.Contains(out.String(), "Run your agents on this machine too?") {
+		t.Errorf("runner after login's yes: %v %v\n%s", on, asked, out.String())
+	}
+	cfg = &Config{}
+	Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("\n")})
+	if !cfg.Integrations[Claude] || !cfg.Integrations[RunnerKey] {
+		t.Errorf("up's yes: %v", cfg.Integrations)
+	}
+}
+
+// Off takes out the MCP entry only if c4 added it; one the person added
+// stays, and says so.
+func TestOffKeepsAnMCPEntryC4DidNotAdd(t *testing.T) {
+	dir := t.TempDir()
+	calls := filepath.Join(dir, "calls")
+	claude := filepath.Join(dir, "claude")
+	os.WriteFile(claude, []byte("#!/bin/sh\necho \"$@\" >>"+calls+"\n"), 0o755)
+	cfgDir := t.TempDir()
+	t.Setenv("CLAUDE_CONFIG_DIR", cfgDir)
+	os.WriteFile(filepath.Join(cfgDir, ".claude.json"), []byte(`{"mcpServers":{"c4-farm":{"command":"/somewhere/else/c4-farm"}}}`), 0o644)
+	svc := &AgentService{FarmBin: "/f", AgentBin: "/a", Home: t.TempDir(), OS: "linux", Ctl: func(context.Context, string, ...string) error { return nil }}
+	in := Integration{FarmBin: "/f", ClaudeBin: claude, AgentBin: "", Service: svc, Record: map[string]bool{}}
+	var out bytes.Buffer
+	if err := in.Off(context.Background(), Out{W: &out}); err != nil {
+		t.Fatal(err)
+	}
+	if c, _ := os.ReadFile(calls); strings.Contains(string(c), "mcp remove") || !strings.Contains(out.String(), "c4 did not add it, so it is left as it was") {
+		t.Errorf("off removed the person's entry: %s\n%s", c, out.String())
+	}
+}

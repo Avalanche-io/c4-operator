@@ -115,6 +115,9 @@ func ask(o Out, q string) bool {
 // terminal. Without a terminal, nobody is there to agree, so it is no.
 func (a *AgentsArgs) agree(o Out, q, refused string) error {
 	switch {
+	case InsideAgent():
+		// an agent must not give itself the hooks, whatever its flags say
+		return fmt.Errorf("%s: this changes Claude Code's settings, so you run it, not an agent: c4 farm agents add %s in your own terminal", refused, a.Name)
 	case a.Yes:
 		return nil
 	case !a.Terminal || o.In == nil:

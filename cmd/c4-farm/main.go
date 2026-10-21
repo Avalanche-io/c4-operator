@@ -4,6 +4,7 @@ package main
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"flag"
@@ -234,18 +235,23 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		cfg.Farms[n], cfg.Current = f, n
+		wasOn := cfg.Integrations[farmcli.Claude]
 		on, err := farmcli.Choose(cfg, farmcli.Detect(false), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
 		if err != nil {
 			return err
 		}
-		if err := cfg.Save(); err != nil {
-			return err
-		}
 		fmt.Fprintf(stdout, "signed in to %s as %s · projects %s\n", n, s.Viewer.User, strings.Join(s.Viewer.Projects, ", "))
-		if slices.Contains(on, farmcli.Claude) {
+		switch in := (&farmcli.Integration{Record: cfg.Integrations}); {
+		case slices.Contains(on, farmcli.Claude):
 			// a farm signed in to, not made here: its tools in Claude Code,
 			// and no runner (that is the farm admin's to enroll)
-			(&farmcli.Integration{}).On(ctx, farmcli.Out{W: stdout})
+			in.On(ctx, farmcli.Out{W: stdout})
+		case *integrateOff && wasOn:
+			// --no-integrate takes out what is there, not only the answer
+			in.Off(ctx, farmcli.Out{W: stdout})
+		}
+		if err := cfg.Save(); err != nil {
+			return err
 		}
 		applyApps(stdout, on)
 		if l := farmcli.IntegrateLine(cfg); l != "" {
@@ -667,19 +673,27 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner}
 		cfg.Current = localfarm.Name
+		wasOn := cfg.Integrations[farmcli.Claude]
 		on, err := farmcli.Choose(cfg, farmcli.Detect(true), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
 		if err != nil {
-			return err
-		}
-		if err := cfg.Save(); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
 		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
 		fmt.Fprintf(stdout, "owner     %s, who plays every role here\n", o.Owner)
-		if slices.Contains(on, farmcli.Claude) {
-			in := farmcli.Integration{Runner: localRunner(o.Owner, stdin, stdout)}
+		in := farmcli.Integration{Record: cfg.Integrations}
+		switch {
+		case slices.Contains(on, farmcli.Claude):
+			// the runner only on its own yes: one given at login named no service
+			if cfg.Integrations[farmcli.RunnerKey] {
+				in.Runner = localRunner(o.Owner, stdin, stdout)
+			}
 			in.On(ctx, farmcli.Out{W: stdout})
+		case *integrateOff && wasOn:
+			in.Off(ctx, farmcli.Out{W: stdout})
+		}
+		if err := cfg.Save(); err != nil {
+			return err
 		}
 		applyApps(stdout, on)
 		if l := farmcli.IntegrateLine(cfg); l != "" {
@@ -707,6 +721,16 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		localfarm.Name = *localName
 		if err := localfarm.Down(localfarm.Name); err != nil {
 			return err
+		}
+		// this machine's runner served the farm that is gone: its service
+		// and enrollment go with it (an answer to the integration stays,
+		// for the next up)
+		if f, ok := cfg.Farms[localfarm.Name]; ok && f.Local {
+			(&farmcli.AgentService{}).Stop(ctx, farmcli.Out{W: io.Discard})
+			if home, err := os.UserHomeDir(); err == nil {
+				os.RemoveAll(filepath.Join(home, ".c4", "agents", "runner"))
+			}
+			fmt.Fprintf(stdout, "agents    this machine's runner for it is stopped and its enrollment removed\n")
 		}
 		delete(cfg.Farms, localfarm.Name)
 		if cfg.Current == localfarm.Name {
@@ -789,6 +813,10 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		case len(pos) == 1 && pos[0] == "run":
 			return farmcli.AgentRun(ctx, o, farmcli.AgentRunArgs{AgentBin: *agentBin, Slots: *slots, SlotsFile: *slotsFile})
 		case len(pos) == 1 && pos[0] == "start":
+			// a background service on this machine: its person starts it
+			if err := farmcli.Consent(false, isTerminal(stdin), "c4 farm agent start"); err != nil {
+				return err
+			}
 			return svc.Start(ctx, o)
 		case len(pos) == 1 && pos[0] == "stop":
 			return svc.Stop(ctx, o)
@@ -804,7 +832,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 
 	case "integrate":
 		show := fs.Bool("show", false, "say every file it would write or remove, and change nothing (an application's)")
-		yes := fs.Bool("yes", false, "change an application's setup without asking (needed where no one is at a terminal)")
+		yes := fs.Bool("yes", false, "change it without asking, where no one is at a terminal (never from inside an agent)")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
@@ -828,38 +856,56 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		pos = []string{target}
 		o := farmcli.Out{W: stdout}
 		name, _, _ := strings.Cut(pos[0], "@")
+		// nothing here changes this machine without its person: never from
+		// inside an agent, and otherwise --yes or a yes at a terminal
+		command := "c4 farm integrate " + map[bool]string{true: "", false: "off "}[on] + pos[0]
+		if name == farmcli.Claude {
+			command = "c4 farm integrate " + map[bool]string{true: "on", false: "off"}[on]
+		}
+		terminal := isTerminal(stdin)
+		if err := farmcli.Consent(*yes, terminal, command); err != nil {
+			return err
+		}
+		asker := farmcli.Out{W: stdout, In: bufio.NewReader(stdin)}
+		if cfg.Integrations == nil {
+			cfg.Integrations = map[string]bool{}
+		}
 		if name != farmcli.Claude {
-			// an application's own setup changes: asked of each, at a terminal
 			var confirm func(string) bool
-			switch {
-			case *yes || *show:
-			case isTerminal(stdin):
-				in := farmcli.Out{W: stdout, In: bufio.NewReader(stdin)}
-				confirm = func(q string) bool { return farmcli.Ask(in, q) }
-			default:
-				// no one to say yes: the plan, then the refusal
-				farmcli.App(o, pos[0], on, true, nil)
-				return errors.New("c4 farm integrate asks before it changes an application's setup, and no one is at a terminal to answer; run it at one, or pass --yes")
+			if !*yes && !*show {
+				confirm = func(q string) bool { return farmcli.Ask(asker, q) }
 			}
 			if err := farmcli.App(o, pos[0], on, *show, confirm); err != nil || *show {
 				return err
 			}
 		} else {
-			in := farmcli.Integration{}
-			if _, f, err := cfg.Resolve(cm.farm); err == nil && f.Local && on {
-				in.Runner = localRunner(localfarm.DefaultOwner(), stdin, stdout)
+			in := farmcli.Integration{Record: cfg.Integrations}
+			_, f, ferr := cfg.Resolve(cm.farm)
+			runner := ferr == nil && f.Local && on
+			if !*yes {
+				q := "Take Claude Code's integration out? It removes what c4 added: the farm's tools from Claude Code, the agents' hooks, and this machine's agent service."
+				if on {
+					q = farmcli.IntegrateQuestion(runner)
+				}
+				if !farmcli.Ask(asker, q) {
+					fmt.Fprintf(stdout, "nothing was changed\n")
+					return nil
+				}
+			}
+			if runner {
+				// the farm's own owner, whose work this machine runs
+				in.Runner = localRunner(cmp.Or(f.Owner, localfarm.DefaultOwner()), stdin, stdout)
+				cfg.Integrations[farmcli.RunnerKey] = true
 			}
 			if on {
 				err = in.On(ctx, o)
 			} else {
 				err = in.Off(ctx, o)
+				cfg.Integrations[farmcli.RunnerKey] = false
 			}
 			if err != nil {
 				return err
 			}
-		}
-		if cfg.Integrations == nil {
-			cfg.Integrations = map[string]bool{}
 		}
 		cfg.Integrations[name] = on
 		if err := cfg.Save(); err != nil {
@@ -897,14 +943,16 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return farmcli.Sessions(ctx, o, farmcli.SessionsArgs{All: *all})
 		case len(pos) == 2 && (pos[0] == "add" || pos[0] == "rm"):
 			// the integration, once on, is the person's yes to an agent's hooks
-			integrated := cfg.Integrations[farmcli.Claude] && pos[0] == "add"
+			// the recorded yes stands in for add's question only for a
+			// person at a terminal; an agent or a script needs its own
+			integrated := cfg.Integrations[farmcli.Claude] && pos[0] == "add" && isTerminal(stdin)
 			a := farmcli.AgentsArgs{Name: pos[1], Session: *session, ConfigDir: *configDir, Folder: *folder, Yes: *yes || integrated, Terminal: isTerminal(stdin)}
 			if pos[0] == "rm" {
 				return farmcli.RemoveAgent(ctx, o, a)
 			}
 			return farmcli.AddAgent(ctx, o, a)
 		case len(pos) == 1 && pos[0] == "add":
-			a := farmcli.AgentsArgs{ConfigDir: *configDir, Folder: *folder, Yes: *yes || cfg.Integrations[farmcli.Claude], Terminal: isTerminal(stdin)}
+			a := farmcli.AgentsArgs{ConfigDir: *configDir, Folder: *folder, Yes: *yes || (cfg.Integrations[farmcli.Claude] && isTerminal(stdin)), Terminal: isTerminal(stdin)}
 			if err := farmcli.PickAgent(ctx, &o, &a); err != nil {
 				return err
 			}
@@ -970,8 +1018,18 @@ func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx conte
 		if err := svc.Start(ctx, farmcli.Out{W: io.Discard}); err != nil {
 			return fmt.Errorf("%s is enrolled, but its runner did not start: %v (c4 farm agent start tries again)", e.Node, err)
 		}
-		fmt.Fprintf(o.W, "agents    this machine (%s) runs %s's agents, %s pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)\n", e.Node, e.Owner, e.Pool)
-		return signInBlocks(ctx, e, stdin, stdout)
+		// said only as it is: the runner runs the owner's agents once its
+		// blocks have their folder and a sign-in there
+		switch {
+		case e.BlocksFolder == "":
+			fmt.Fprintf(o.W, "agents    this machine (%s) is enrolled for %s's agents and its runner is started; agents run here once c4-agent runs blocks (a newer c4-agent)\n", e.Node, e.Owner)
+			return nil
+		case e.BlocksSignedIn && e.BlocksTrusted:
+			fmt.Fprintf(o.W, "agents    this machine (%s) runs %s's agents, %s pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)\n", e.Node, e.Owner, e.Pool)
+			return nil
+		}
+		fmt.Fprintf(o.W, "agents    this machine (%s) is enrolled for %s's agents and its runner is started; they run here once you sign in where they run\n", e.Node, e.Owner)
+		return signInBlocks(e, stdin, stdout)
 	}
 }
 
@@ -980,26 +1038,24 @@ func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx conte
 // one folder. Claude Code's own sign-in and its trust prompt for that
 // folder come in the same session, in the person's terminal, and no
 // credential is copied. Without a terminal it says the command instead.
-func signInBlocks(ctx context.Context, e localfarm.Enrolled, stdin io.Reader, stdout io.Writer) error {
-	if e.BlocksEnv == "" || (e.BlocksSignedIn && (e.BlocksTrusted || e.BlocksFolder == "")) {
+func signInBlocks(e localfarm.Enrolled, stdin io.Reader, stdout io.Writer) error {
+	// only in the blocks' own folder: never wherever up was started
+	if e.BlocksEnv == "" || e.BlocksFolder == "" || (e.BlocksSignedIn && e.BlocksTrusted) {
 		return nil
 	}
-	step := "CLAUDE_CONFIG_DIR=" + e.BlocksEnv + " claude"
-	if e.BlocksFolder != "" {
-		step = "cd " + e.BlocksFolder + " && " + step
-	}
+	step := "cd " + e.BlocksFolder + " && CLAUDE_CONFIG_DIR=" + e.BlocksEnv + " claude"
 	claude, err := exec.LookPath("claude")
 	if err != nil || !isTerminal(stdin) {
 		fmt.Fprintf(stdout, "agents    one step left, in your terminal: %s (sign in, trust the folder, then /exit); until then the agents' blocks wait\n", step)
 		return nil
 	}
 	fmt.Fprintf(stdout, "agents    sign in where the agents' blocks run, apart from your own Claude Code: sign in, trust the folder, then /exit\n")
-	if e.BlocksFolder != "" {
-		if err := os.MkdirAll(e.BlocksFolder, 0o755); err != nil {
-			return err
-		}
+	if err := os.MkdirAll(e.BlocksFolder, 0o755); err != nil {
+		return err
 	}
-	cmd := exec.CommandContext(ctx, claude)
+	// not tied to up's context: a Ctrl-C reaches Claude Code itself, which
+	// ends as it does, rather than being killed with the terminal left raw
+	cmd := exec.Command(claude)
 	cmd.Dir = e.BlocksFolder
 	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+e.BlocksEnv)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = stdin, stdout, stdout

@@ -2,6 +2,7 @@ package farmcli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -71,6 +72,9 @@ type Integration struct {
 	Runner func(ctx context.Context, o Out) error
 	// Service is the agent service off removes (default the machine's).
 	Service *AgentService
+	// Record is where On notes what it added (the person's Config's
+	// Integrations), so Off takes out only that.
+	Record map[string]bool
 }
 
 func (in *Integration) fill() error {
@@ -97,24 +101,20 @@ func (in *Integration) fill() error {
 
 // On turns the integration on: the farm's MCP server in Claude Code
 // (claude mcp add, for every folder), and this machine as a runner when
-// Runner is given. A part that cannot be done is one line, and the rest
-// still is.
+// Runner is given. Record keeps what it added, so Off takes out only that
+// (Record["claude.mcp"]: the MCP entry is c4's). A part that cannot be
+// done is one line, and the rest still is.
 func (in *Integration) On(ctx context.Context, o Out) error {
 	if err := in.fill(); err != nil {
 		return err
 	}
+	if in.Record == nil {
+		in.Record = map[string]bool{}
+	}
 	if in.ClaudeBin == "" {
 		o.printf("claude    not on this machine, so it has no farm tools yet: install Claude Code (https://claude.com/claude-code), then c4 farm integrate on\n")
 	} else {
-		out, err := exec.CommandContext(ctx, in.ClaudeBin, "mcp", "add", "--scope", "user", mcpName, "--", in.FarmBin, "mcp").CombinedOutput()
-		switch {
-		case err == nil:
-			o.printf("claude    has the farm's tools (%s in %s); c4 farm integrate off takes it all out\n", mcpName, tildePath(mcpConfig()))
-		case strings.Contains(string(out), "already exists"):
-			o.printf("claude    has the farm's tools (%s in %s, already); c4 farm integrate off takes it all out\n", mcpName, tildePath(mcpConfig()))
-		default:
-			o.printf("claude    has no farm tools yet: claude mcp add said %s\n", firstLine(string(out), err))
-		}
+		in.mcpOn(ctx, o)
 	}
 	if in.Runner != nil {
 		if err := in.Runner(ctx, o); err != nil {
@@ -124,25 +124,93 @@ func (in *Integration) On(ctx context.Context, o Out) error {
 	return nil
 }
 
+// mcpOn adds the farm's MCP server to Claude Code, or says how the one
+// there already differs: one c4 added before and that names another
+// c4-farm is pointed here; one the person added is left as it is.
+func (in *Integration) mcpOn(ctx context.Context, o Out) {
+	add := func() ([]byte, error) {
+		return exec.CommandContext(ctx, in.ClaudeBin, "mcp", "add", "--scope", "user", mcpName, "--", in.FarmBin, "mcp").CombinedOutput()
+	}
+	out, err := add()
+	switch {
+	case err == nil:
+		in.Record["claude.mcp"] = true
+		o.printf("claude    has the farm's tools (%s in %s); c4 farm integrate off takes it all out\n", mcpName, tildePath(mcpConfig()))
+		return
+	case !strings.Contains(string(out), "already exists"):
+		o.printf("claude    has no farm tools yet: claude mcp add said %s\n", firstLine(string(out), err))
+		return
+	}
+	cmd := mcpCommand()
+	switch {
+	case cmd == "" || cmd == in.FarmBin:
+		o.printf("claude    has the farm's tools (%s in %s, already)\n", mcpName, tildePath(mcpConfig()))
+	case in.Record["claude.mcp"]:
+		// c4's own entry, naming a c4-farm moved or replaced: point it here
+		exec.CommandContext(ctx, in.ClaudeBin, "mcp", "remove", "--scope", "user", mcpName).Run()
+		if out, err := add(); err != nil {
+			o.printf("claude    still runs %s as %s: claude mcp add said %s\n", tildePath(cmd), mcpName, firstLine(string(out), err))
+			return
+		}
+		o.printf("claude    has the farm's tools (%s in %s, now this c4-farm, not %s)\n", mcpName, tildePath(mcpConfig()), tildePath(cmd))
+	default:
+		o.printf("claude    has an MCP server named %s already, running %s, which c4 did not add: left as it is\n", mcpName, tildePath(cmd))
+	}
+}
+
+// mcpCommand is the command Claude Code runs for the farm's MCP server, as
+// its user config holds it, or "" when it cannot be read.
+func mcpCommand() string {
+	b, err := os.ReadFile(mcpConfig())
+	if err != nil {
+		return ""
+	}
+	var cfg struct {
+		MCPServers map[string]struct {
+			Command string `json:"command"`
+		} `json:"mcpServers"`
+	}
+	if json.Unmarshal(b, &cfg) != nil {
+		return ""
+	}
+	return cfg.MCPServers[mcpName].Command
+}
+
 // Off turns the integration off and takes out what On and agents add put
-// in: the MCP server, the agent service, and c4-agent's hooks in every
-// member's folder. The members stay c4-agent's, for agents rm.
+// in: the MCP server, if c4 added it, the agent service, and c4-agent's
+// hooks in every member's folder. It says what it leaves: the members
+// (c4-agent's, for agents rm) and this machine's enrollment, which the
+// farm keeps until the farm itself goes.
 func (in *Integration) Off(ctx context.Context, o Out) error {
 	if err := in.fill(); err != nil {
 		return err
 	}
-	if in.ClaudeBin != "" {
+	if in.Record == nil {
+		in.Record = map[string]bool{}
+	}
+	switch {
+	case in.ClaudeBin == "":
+	case !in.Record["claude.mcp"]:
+		if mcpCommand() != "" {
+			o.printf("claude    keeps its MCP server %s: c4 did not add it, so it is left as it was\n", mcpName)
+		}
+	default:
 		out, err := exec.CommandContext(ctx, in.ClaudeBin, "mcp", "remove", "--scope", "user", mcpName).CombinedOutput()
 		switch {
 		case err == nil:
+			delete(in.Record, "claude.mcp")
 			o.printf("claude    no longer has the farm's tools\n")
 		case strings.Contains(string(out), "not found") || strings.Contains(string(out), "No "):
+			delete(in.Record, "claude.mcp")
 		default:
 			o.printf("claude    still has the farm's tools: claude mcp remove said %s\n", firstLine(string(out), err))
 		}
 	}
 	if err := in.Service.Stop(ctx, o); err != nil {
 		o.printf("agent     %v\n", err)
+	}
+	if enrolled, err := os.Stat(enrollment()); err == nil && !enrolled.IsDir() {
+		o.printf("machine   stays enrolled on the farm (its account and pool) until the farm goes; c4 farm down takes the local farm away\n")
 	}
 	if in.AgentBin == "" {
 		return nil
@@ -180,6 +248,12 @@ func (in *Integration) Off(ctx context.Context, o Out) error {
 	return nil
 }
 
+// enrollment is the file c4-agent enroll writes for this machine's runner.
+func enrollment() string {
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".c4", "agents", "runner", "enrolled.json")
+}
+
 func firstLine(out string, err error) string {
 	l, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
 	if l == "" && err != nil {
@@ -199,9 +273,13 @@ type Detected struct {
 	Found              bool
 	// Question is what the person is asked before it is added, naming
 	// what it changes and where; DefaultYes makes Enter yes (Claude Code,
-	// by Joshua's choice), else Enter is no (an application's own setup).
+	// as PLAN 1a.1 records), else Enter is no (an application's own
+	// setup). Either way only a person at a terminal answers it.
 	Question   string
 	DefaultYes bool
+	// Runner says yes also makes this machine one of the farm's runners
+	// (a local farm's up), recorded under RunnerKey.
+	Runner bool
 	// Versions are an application's installed versions (integrations/dcc).
 	Versions []dcc.Found
 }
@@ -211,7 +289,7 @@ type Detected struct {
 // runner says this machine would also run the farm's agents.
 func Detect(runner bool) []Detected {
 	d := Detected{Name: Claude, Title: "Claude Code: the farm's tools, your agents' turns saved and shown, this machine as their runner",
-		Question: IntegrateQuestion(runner), DefaultYes: true}
+		Question: IntegrateQuestion(runner), DefaultYes: true, Runner: runner}
 	if p, err := exec.LookPath("claude"); err == nil {
 		d.Found, d.Where = true, p
 	} else {
@@ -254,18 +332,50 @@ func apps(found []dcc.Found) []Detected {
 	return out
 }
 
+// RunnerKey records the person's yes to this machine running the farm's
+// agents (the agent service), apart from Claude Code's tools: a yes at
+// login, which runs no service, does not cover it.
+const RunnerKey = "claude.runner"
+
+// RunnerQuestion is asked at a local farm's up when Claude Code's tools
+// are on but the runner was never asked about.
+func RunnerQuestion() string {
+	return "Run your agents on this machine too? It runs a background service (" + tildePath(serviceFile()) +
+		") so this machine is one of the farm's runners. c4 farm integrate off takes it out."
+}
+
+// InsideAgent says this runs inside Claude Code (its CLAUDECODE
+// environment): an agent, not the person, whatever its flags say.
+func InsideAgent() bool { return os.Getenv("CLAUDECODE") != "" }
+
+// Consent is the person's leave to change this machine: never from inside
+// an agent, even with --yes (an agent must not give itself the
+// integration); otherwise --yes, or a person at a terminal to ask.
+// command is what the person runs themselves.
+func Consent(yes, terminal bool, command string) error {
+	switch {
+	case InsideAgent():
+		return fmt.Errorf("this changes your machine, so you run it, not an agent: in your own terminal, %s", command)
+	case !yes && !terminal:
+		return fmt.Errorf("this asks before it changes your machine, and no one is at a terminal to answer: run %s at one, or pass --yes", command)
+	}
+	return nil
+}
+
 // Choose settles which integrations are on. --integrate=NAMES turns those
 // on, --no-integrate turns every one off, and each is recorded; otherwise
 // a recorded answer stands, and the person at a terminal is asked once
-// about each one found and unanswered. With no terminal nothing is asked
-// or recorded, and the install is minimal. It returns the names on.
+// about each one found and unanswered, each yes covering only what its
+// question named. Inside an agent nothing is asked or turned on, and with
+// no terminal nothing is asked or recorded: the install is minimal. It
+// returns the names on.
 func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool, o Out) ([]string, error) {
 	if cfg.Integrations == nil {
 		cfg.Integrations = map[string]bool{}
 	}
-	known := map[string]bool{}
+	byName := map[string]Detected{}
 	for _, d := range found {
-		known[d.Name] = true
+		byName[d.Name] = d
 	}
 	switch {
 	case integrate != "" && none:
@@ -273,24 +383,42 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 	case none:
 		for _, d := range found {
 			cfg.Integrations[d.Name] = false
+			if d.Runner {
+				cfg.Integrations[RunnerKey] = false
+			}
 		}
 	case integrate != "":
+		if err := Consent(true, terminal, "c4 farm up --integrate="+integrate); err != nil {
+			return nil, err
+		}
 		for _, n := range strings.Split(integrate, ",") {
 			n = strings.TrimSpace(n)
-			if !known[n] {
+			d, ok := byName[n]
+			if !ok {
 				return nil, fmt.Errorf("no integration %q here; c4 farm integrations lists them", n)
 			}
 			cfg.Integrations[n] = true
-		}
-	case terminal && o.In != nil:
-		for _, d := range found {
-			if _, answered := cfg.Integrations[d.Name]; answered || !d.Found || d.Question == "" {
-				continue
+			if d.Runner {
+				cfg.Integrations[RunnerKey] = true
 			}
-			if d.DefaultYes {
-				cfg.Integrations[d.Name] = o.confirm(d.Question)
-			} else {
+		}
+	case terminal && o.In != nil && !InsideAgent():
+		for _, d := range found {
+			on, answered := cfg.Integrations[d.Name]
+			switch {
+			case !d.Found || d.Question == "":
+			case !answered && d.DefaultYes:
+				yes := o.confirm(d.Question)
+				cfg.Integrations[d.Name] = yes
+				if d.Runner {
+					cfg.Integrations[RunnerKey] = yes
+				}
+			case !answered:
 				cfg.Integrations[d.Name] = ask(o, d.Question)
+			case on && d.Runner:
+				if _, asked := cfg.Integrations[RunnerKey]; !asked {
+					cfg.Integrations[RunnerKey] = o.confirm(RunnerQuestion())
+				}
 			}
 		}
 	}
@@ -372,6 +500,13 @@ func App(o Out, name string, on, show bool, confirm func(string) bool) error {
 			o.printf("%s  has C4 already\n", f.Title)
 			continue
 		}
+		// asked before anything is planned: a plan may read a folder the
+		// system guards (macOS ~/Documents, for Unreal), and only a yes
+		// may lead there
+		if confirm != nil && !confirm(f.Title+": "+map[bool]string{true: "add the C4 Farm panel", false: "take C4 out"}[on]+"? (--show lists each file first)") {
+			o.printf("%s  not changed\n", f.Title)
+			continue
+		}
 		c, err := dcc.Plan(f, on)
 		if err != nil {
 			o.printf("%s  not changed: %v\n", f.Title, err)
@@ -385,10 +520,6 @@ func App(o Out, name string, on, show bool, confirm func(string) bool) error {
 			for _, r := range c.Removes {
 				o.printf("          removes %s\n", tildePath(r))
 			}
-			continue
-		}
-		if confirm != nil && !confirm(f.Title+": "+c.Line+" Go ahead?") {
-			o.printf("%s  not changed\n", f.Title)
 			continue
 		}
 		if err := dcc.Apply(c); err != nil {

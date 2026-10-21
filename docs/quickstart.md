@@ -65,16 +65,23 @@ farm      c4-local   4 nodes · 6 slots, 4 more to rent · store ready
 project   saltmarsh   you: sam
 owner     sam, who plays every role here
 claude    has the farm's tools (c4-farm in ~/.claude.json); c4 farm integrate off takes it all out
-agents    this machine (c4-host-laptop) runs sam's agents, agent pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)
+agents    this machine (c4-host-laptop) is enrolled for sam's agents and its runner is started; they run here once you sign in where they run
 HUD       http://127.0.0.1:30080/?as=sam#/needs
 roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)
 time      up in 1m4s: cluster 41s, operator 12s, store 6s, tools 4s
 ```
 
+The first time, a yes also opens Claude Code once, in the folder the farm's
+agents run in (`~/.c4/blocks`), apart from your own Claude Code: sign in,
+trust the folder, then `/exit`. Until then the agents wait, and `up` says so.
+
 Saying no, or `c4 farm up --no-integrate`, adds nothing to Claude Code or
 this machine. Run without a terminal (a script, CI), `up` asks nothing,
 adds nothing, and says so. Either way `c4 farm integrations` lists what it
-could add, and `c4 farm integrate on` adds it later.
+could add, and `c4 farm integrate on` adds it later. An agent cannot turn
+it on for you: from inside Claude Code, `c4 farm integrate` and `c4 farm
+agents add` refuse and print the command for you to run in your own
+terminal.
 
 That is a farm, not a demo of one: render nodes in two pools (`cpu` and
 `gpu`), a burst pool the farm rents from only when a deadline needs it, a

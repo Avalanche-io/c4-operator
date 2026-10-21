@@ -2,6 +2,7 @@ package farmcli
 
 import (
 	"bufio"
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
@@ -10,9 +11,11 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/power"
@@ -35,6 +38,11 @@ type AgentRunArgs struct {
 	// Backoff is the first wait before a stopped runner is started again
 	// (default 1s); it doubles to a minute.
 	Backoff time.Duration
+	// ServiceFile is the service's definition, removed when the
+	// enrollment lapses (default this machine's); Log is the log, moved
+	// aside past LogLimit at start (default ~/.c4/agents/agent.log, 10 MiB).
+	ServiceFile, Log string
+	LogLimit         int64
 }
 
 // enrollAgain is what the runner says when its machine's enrollment has
@@ -67,6 +75,14 @@ func AgentRun(ctx context.Context, o Out, a AgentRunArgs) error {
 	if backoff <= 0 {
 		backoff = time.Second
 	}
+	if a.ServiceFile == "" || a.Log == "" {
+		svc := &AgentService{}
+		if svc.fillPaths() == nil {
+			a.ServiceFile = cmp.Or(a.ServiceFile, svc.path())
+			a.Log = cmp.Or(a.Log, svc.log())
+		}
+	}
+	rotate(a.Log, cmp.Or(a.LogLimit, 10<<20))
 	// the power reader and the runner's output write at once
 	o.W = &syncWriter{w: o.W}
 	ctx, cancel := context.WithCancel(ctx)
@@ -92,6 +108,11 @@ func AgentRun(ctx context.Context, o Out, a AgentRunArgs) error {
 		}
 		if lapsed {
 			o.printf("runner    this machine's enrollment has lapsed: run c4 farm up to enroll it again\n")
+			// the service is not started again at the next sign-in: its
+			// definition goes, and up makes it again after enrolling
+			if a.ServiceFile != "" {
+				os.Remove(a.ServiceFile)
+			}
 			return nil
 		}
 		if time.Since(started) > time.Minute {
@@ -104,6 +125,14 @@ func AgentRun(ctx context.Context, o Out, a AgentRunArgs) error {
 		case <-time.After(wait):
 		}
 		wait = min(2*wait, time.Minute)
+	}
+}
+
+// rotate moves a log past its limit aside (log.1, one kept), so the next
+// writes start a new file.
+func rotate(log string, limit int64) {
+	if fi, err := os.Stat(log); err == nil && fi.Size() > limit {
+		os.Rename(log, log+".1")
 	}
 }
 
@@ -124,7 +153,12 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 func runRunner(ctx context.Context, o Out, bin, slotsFile string, slots int) (bool, error) {
 	// an enrolled runner takes its node, owner and kubeconfig from its
 	// enrollment, and its slots from the file the power reader writes
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
 	cmd := exec.CommandContext(ctx, bin, "runner", "--slots-file", slotsFile)
+	// asked to stop, the runner finishes its turn: SIGTERM, then a grace
+	cmd.Cancel = func() error { return cmd.Process.Signal(syscall.SIGTERM) }
+	cmd.WaitDelay = 30 * time.Second
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	lapsed := false
@@ -134,10 +168,13 @@ func runRunner(ctx context.Context, o Out, bin, slotsFile string, slots int) (bo
 		sc := bufio.NewScanner(pr)
 		for sc.Scan() {
 			line := sc.Text()
-			if strings.Contains(line, enrollAgain) {
-				lapsed = true
-			}
 			o.printf("runner    %s\n", line)
+			if strings.Contains(line, enrollAgain) && !lapsed {
+				// a runner whose enrollment lapsed only says so, again and
+				// again: stop it now rather than wait for an exit
+				lapsed = true
+				stop()
+			}
 		}
 	}()
 	err := cmd.Run()
@@ -245,6 +282,7 @@ func (s *AgentService) definition() string {
 		b.WriteString(`  </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
+  <key>EnvironmentVariables</key><dict><key>PATH</key><string>` + xmlEscape(s.envPath()) + `</string></dict>
   <key>ProcessType</key><string>Background</string>
   <key>Nice</key><integer>10</integer>
   <key>StandardOutPath</key><string>` + xmlEscape(s.log()) + `</string>
@@ -262,6 +300,7 @@ func (s *AgentService) definition() string {
 Description=C4 farm agent: this machine's power reader and host runner
 
 [Service]
+Environment=` + strconv.Quote("PATH="+s.envPath()) + `
 ExecStart=` + strings.Join(quoted, " ") + `
 Restart=on-failure
 RestartSec=5
@@ -272,6 +311,27 @@ StandardError=append:` + s.log() + `
 [Install]
 WantedBy=default.target
 `
+}
+
+// envPath is the service's PATH: launchd and systemd give a service the
+// system's alone, so claude and c4-agent are found where they are here,
+// then where Homebrew and the system put things.
+func (s *AgentService) envPath() string {
+	var dirs []string
+	add := func(d string) {
+		if d != "" && d != "." && !slices.Contains(dirs, d) {
+			dirs = append(dirs, d)
+		}
+	}
+	add(filepath.Dir(s.AgentBin))
+	add(filepath.Dir(s.FarmBin))
+	if p, err := exec.LookPath("claude"); err == nil {
+		add(filepath.Dir(p))
+	}
+	for _, d := range []string{filepath.Join(s.Home, ".local", "bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"} {
+		add(d)
+	}
+	return strings.Join(dirs, ":")
 }
 
 func xmlEscape(s string) string {
@@ -290,8 +350,20 @@ func (s *AgentService) Start(ctx context.Context, o Out) error {
 	if err := os.MkdirAll(filepath.Dir(s.path()), 0o755); err != nil {
 		return err
 	}
+	// a service running as defined is left alone: starting it again would
+	// stop the runner under live work
+	target := "gui/" + strconv.Itoa(os.Getuid())
+	if b, err := os.ReadFile(s.path()); err == nil && string(b) == s.definition() {
+		running := s.Ctl(ctx, "systemctl", "--user", "is-active", "--quiet", "c4-agent.service") == nil
+		if s.OS == "darwin" {
+			running = s.Ctl(ctx, "launchctl", "print", target+"/"+AgentLabel) == nil
+		}
+		if running {
+			o.printf("agent     running already, as defined (%s)\n", s.path())
+			return nil
+		}
+	}
 	if s.OS == "darwin" {
-		target := "gui/" + strconv.Itoa(os.Getuid())
 		s.Ctl(ctx, "launchctl", "bootout", target+"/"+AgentLabel) // not loaded is fine
 		if err := os.WriteFile(s.path(), []byte(s.definition()), 0o644); err != nil {
 			return err

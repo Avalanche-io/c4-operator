@@ -90,3 +90,58 @@ echo "the machine's token has expired: enroll it again (c4 farm up)"; exit 1
 		t.Errorf("the power reader wrote no slots file: %v", err)
 	}
 }
+
+// A runner whose enrollment lapsed says so and keeps running, as the real
+// one does: agent run stops it at once and takes the service's definition
+// away, so it is not started again at the next sign-in.
+func TestAgentRunStopsALapsedRunner(t *testing.T) {
+	dir := t.TempDir()
+	slots, svc := filepath.Join(dir, "slots"), filepath.Join(dir, "io.avalanche.c4.agent.plist")
+	os.WriteFile(svc, []byte("<plist/>"), 0o644)
+	bin := filepath.Join(dir, "c4-agent")
+	os.WriteFile(bin, []byte("#!/bin/sh\nwhile :; do echo \"the machine's token has expired: enroll it again (c4 farm up)\"; sleep 1; done\n"), 0o755)
+	var out bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	start := time.Now()
+	if err := AgentRun(ctx, Out{W: &out}, AgentRunArgs{AgentBin: bin, SlotsFile: slots, Backoff: time.Millisecond, ServiceFile: svc, Log: filepath.Join(dir, "agent.log")}); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) > 10*time.Second || !strings.Contains(out.String(), "run c4 farm up to enroll it again") {
+		t.Errorf("after %s:\n%s", time.Since(start), out.String())
+	}
+	if _, err := os.Stat(svc); !os.IsNotExist(err) {
+		t.Error("the service's definition is still there")
+	}
+}
+
+// The service finds claude and c4-agent under launchd and systemd, whose
+// PATH is the system's alone; starting a service running as defined
+// leaves it alone.
+func TestAgentServicePathAndRestart(t *testing.T) {
+	for _, goos := range []string{"darwin", "linux"} {
+		var calls []string
+		svc := &AgentService{FarmBin: "/opt/c4/bin/c4-farm", AgentBin: "/opt/c4/bin/c4-agent", Home: t.TempDir(), OS: goos,
+			Ctl: func(_ context.Context, name string, args ...string) error {
+				calls = append(calls, name+" "+strings.Join(args, " "))
+				return nil
+			}}
+		var out bytes.Buffer
+		if err := svc.Start(context.Background(), Out{W: &out}); err != nil {
+			t.Fatal(err)
+		}
+		if def := svc.definition(); !strings.Contains(def, "/opt/c4/bin:") || !strings.Contains(def, "/usr/bin:/bin") {
+			t.Errorf("%s: no PATH in\n%s", goos, def)
+		}
+		calls = nil
+		out.Reset()
+		if err := svc.Start(context.Background(), Out{W: &out}); err != nil || !strings.Contains(out.String(), "running already") {
+			t.Errorf("%s: second start: %v\n%s", goos, err, out.String())
+		}
+		for _, c := range calls {
+			if strings.Contains(c, "bootout") || strings.Contains(c, "bootstrap") || strings.Contains(c, "enable") {
+				t.Errorf("%s: restarted a running service: %v", goos, calls)
+			}
+		}
+	}
+}
