@@ -6,6 +6,7 @@ import fakehou as hou
 from houdini_scenes import c4render, fx_scene, light_scene
 
 from c4_houdini.host import LopHost, RopHost, expand
+from c4submit.host import JOB_FRAMES
 
 
 def test_expand_keeps_frame_variables(tmp_path):
@@ -193,3 +194,56 @@ def test_the_stage_is_written_for_every_submission(tmp_path):
     assert len(hou.rendered) == 2
     assert [pr.message for pr in p.problems] == [
         "the stage is written for each submission; with that off, the farm renders the last one written"]
+
+
+def _sop(name, type_name, *inputs, **parms):
+    n = hou.Node(f"/obj/geo1/{name}" if "/" not in name else name, type_name, "Sop",
+                 hou.NODE_PARMS[("Sop", type_name)]())
+    for i, src in enumerate(inputs):
+        n.setInput(i, src)
+    for k, v in parms.items():
+        n.parm(k).set(v)
+    return n
+
+
+def test_a_sequence_is_read_over_the_jobs_frames(tmp_path):
+    show, submit = fx_scene(tmp_path)
+    hip = os.path.join(show, "sm0140", "fx")
+    deps = {d.path: d for d in RopHost(submit).dependencies()}
+    assert deps[f"{hip}/geo/fluid.$F4.bgeo.sc"].frames == JOB_FRAMES, "read frame for frame"
+    assert deps[f"{hip}/geo/fluid.$F4.bgeo.sc"].renderables is None, "by every job, as before"
+    assert deps[f"{hip}/tex/wood.<UDIM>.rat"].frames is None, "tiles are not frames"
+    assert deps[f"{show}/assets/env/env.abc"].frames is None
+
+
+def test_a_time_shift_downstream_keeps_every_file_on_disk(tmp_path):
+    show, submit = fx_scene(tmp_path)
+    hip = os.path.join(show, "sm0140", "fx")
+    fluid = hou.node("/obj/geo1/fluid")
+    _sop("rest", "timeshift", _sop("tidy", "null", fluid))
+    deps = {d.path: d for d in RopHost(submit).dependencies()}
+    assert deps[f"{hip}/geo/fluid.$F4.bgeo.sc"].frames is None, "a retimed read may need any frame"
+    assert deps[f"{hip}/cache/sim.$F4.bgeo.sc"].frames == JOB_FRAMES, "only what the Time Shift reads"
+
+
+def test_a_retime_through_a_reference_or_a_namespaced_type(tmp_path):
+    show, submit = fx_scene(tmp_path)
+    hip = os.path.join(show, "sm0140", "fx")
+    hou.node("/obj").createNode("geo", "geo2")
+    merge = _sop("/obj/geo2/merge_sim", "object_merge", objpath1="/obj/geo1/simread")
+    hou.Node("/obj/geo2/hold", "studio::timeshift::2.0", "Sop").setInput(0, merge)
+    deps = {d.path: d for d in RopHost(submit).dependencies()}
+    assert deps[f"{hip}/cache/sim.$F4.bgeo.sc"].frames is None, "an Object Merge's Time Shift retimes it"
+    assert deps[f"{hip}/geo/fluid.$F4.bgeo.sc"].frames == JOB_FRAMES
+
+
+def test_a_read_houdini_cannot_walk_is_every_file(tmp_path, monkeypatch):
+    from c4_houdini import host as hostlib
+    show, submit = fx_scene(tmp_path)
+    hip = os.path.join(show, "sm0140", "fx")
+    monkeypatch.setattr(hostlib, "RETIME_WALK_LIMIT", 1)
+    deps = {d.path: d for d in RopHost(submit).dependencies()}
+    assert deps[f"{hip}/geo/fluid.$F4.bgeo.sc"].frames is None, "unsure: as before"
+    assert hostlib.retimes(hou.Node("/obj/geo1/vellum", "vellumsolver", "Sop"))
+    assert hostlib.retimes(hou.Node("/obj/dops/gravity", "gravity", "Dop"))
+    assert not hostlib.retimes(hou.node("/obj/geo1/fluid"))

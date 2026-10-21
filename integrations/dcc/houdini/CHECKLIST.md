@@ -216,6 +216,24 @@ on disk; and a texture with `<UDIM>` tiles.
     `/obj/topnet1/pythonscript1`. Submit: one job, no frames, `with: {hip:
     ..., top: /obj/topnet1/pythonscript1}`. Pick houdini-rop again: the
     ROPs are back.
+11. A sequence over the jobs' frames. Put 48 frames of the `$F4` sequence
+    on disk and set mantra1 to render 1001-1010 (flip renders the current
+    frame). Check: only the sequence's frames 1001-1010 are counted, not
+    all 48. Wire a Time Shift SOP after the File SOP reading it (frame
+    1001, for a rest pose) and Check again: all 48 are counted, as are
+    those of a File SOP whose geometry an Object Merge in another network
+    feeds into a Time Shift. **[API]** that `Node.outputs()` and
+    `Node.dependents(include_children=False)` find the Time Shift (the
+    second through the Object Merge's `objpath1`), and that `/obj` is a
+    `Manager` node, where the walk stops. **[GUESS]** that the type
+    names in `RETIMING` (`timeshift`, `timewarp`, `retime`, `timeblend`,
+    `trail`, `cache`, `timecache`, `dopnet`, the `dopimport` family),
+    any type ending in `solver` and any DOP are the nodes that cook
+    other frames; note any other (a CHOP-driven retime, a studio HDA)
+    that a real hip file uses. **[GUESS]** that motion blur reads `$F`
+    files only at the frame rendered: with deformation blur on in
+    mantra1, render frame 1010 on the farm and check its log for a read
+    of frame 1011.
 
 ## 5a. The tools, run by hand
 

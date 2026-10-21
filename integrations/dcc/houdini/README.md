@@ -61,7 +61,11 @@ The C4 Render node also has **Stage file** (where the stage is written,
 1. Writes the stage to the Stage file with a USD ROP (C4 Render), or saves
    the hip file (C4 Submit).
 2. Lists every file the stage or hip file reads, sequences and UDIM tiles
-   included, but not what a ticked ROP writes for another.
+   included, but not what a ticked ROP writes for another. A `$F`
+   sequence is sent for the ticked jobs' frames only, unless a node that
+   cooks other frames (a Time Shift or Time Warp, a trail, a cache, a
+   solver) is found downstream of the node reading it; then every file of
+   it on disk is sent.
 3. Asks the farm what it lacks and when it would be ready, and shows the
    summary: files to upload, licences, the estimate and the slack against
    **Needed by**. Press **Submit** to go ahead, **Show file** to see the

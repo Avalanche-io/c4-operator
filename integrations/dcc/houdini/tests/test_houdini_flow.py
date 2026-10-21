@@ -292,3 +292,24 @@ def test_tools_from_c4_tool_path_when_the_farm_lists_none(tmp_path, monkeypatch)
     node.parm("c4_save").pressButton()
     assert "does not take submissions yet" in summary(node)
     assert yamlio.load(open(path, encoding="utf-8").read())["jobs"]["light"]["tool"] == "karma"
+
+
+def test_a_sequence_is_sent_for_the_jobs_frames_only(tmp_path, monkeypatch):
+    show, submit, fake = fx(tmp_path, monkeypatch)
+    hou.node("/out/mantra1").parmTuple("f").set((1001, 1010, 1))
+    submit.parm("c4_check").pressButton()
+    panel = nodes.panel_for(submit)
+    files = sorted(panel.checked.collection.files)
+    fluid = [f for f in files if "/geo/fluid." in f]
+    assert fluid == [f"sm0140/fx/geo/fluid.{f}.bgeo.sc" for f in range(1001, 1011)], \
+        "mantra1 renders 1001-1010 and flip 1001: the sequence is sent for those frames"
+
+
+def test_a_retimed_sequence_is_sent_whole(tmp_path, monkeypatch):
+    show, submit, fake = fx(tmp_path, monkeypatch)
+    hou.node("/out/mantra1").parmTuple("f").set((1001, 1010, 1))
+    rest = hou.Node("/obj/geo1/rest", "timeshift", "Sop", hou.NODE_PARMS[("Sop", "timeshift")]())
+    rest.setInput(0, hou.node("/obj/geo1/fluid"))
+    submit.parm("c4_check").pressButton()
+    files = nodes.panel_for(submit).checked.collection.files
+    assert len([f for f in files if "/geo/fluid." in f]) == 48, "a Time Shift may read any frame"

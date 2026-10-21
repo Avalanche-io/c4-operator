@@ -18,7 +18,7 @@ import hou
 from c4submit import frames as framelib
 from c4submit import paths, seq
 from c4submit import usd as usdlib
-from c4submit.host import Dependency, Host, Renderable
+from c4submit.host import JOB_FRAMES, Dependency, Host, Renderable
 
 # Houdini's frame variables. They are kept as written when a path is
 # expanded, so a sequence stays a sequence that c4submit can read.
@@ -35,6 +35,15 @@ OUTPUT_PARMS = ("vm_picture", "picture", "outputimage", "lopoutput", "sopoutput"
 
 # ROPs that render nothing themselves; their inputs are read through them.
 PASS_THROUGH = ("merge", "null")
+
+# Nodes that cook what they are fed at other times than the frame being
+# rendered (a Time Shift holding a rest frame, a trail, a cache, a solver
+# stepping from its start frame), by type name without namespace or
+# version. A sequence read through one is not read frame for frame.
+RETIMING = ("timeshift", "timewarp", "retime", "retimeinstances", "timeblend", "trail", "cache", "timecache",
+            "dopnet", "dopimport", "dopimportfield", "dopimportrecords")
+# How many nodes the walk from a reader looks at before it gives up, unsure.
+RETIME_WALK_LIMIT = 2000
 
 
 def expand(path: str) -> str:
@@ -144,6 +153,72 @@ def top_output(net):
         except (AttributeError, hou.Error):
             continue
     return None
+
+
+def _type_base(node) -> Tuple[str, str]:
+    """A node's type name without its namespace or version (``timeshift``
+    for ``studio::timeshift::2.0``), and its category's name."""
+    try:
+        t = node.type()
+        parts = t.name().lower().split("::")
+        cat = t.category().name()
+    except (AttributeError, hou.Error):
+        return "", ""
+    if len(parts) > 1 and re.fullmatch(r"[\d.]+", parts[-1]):
+        parts = parts[:-1]
+    return parts[-1], cat
+
+
+def retimes(node) -> bool:
+    """Whether a node cooks its inputs at other times than the current one."""
+    base, cat = _type_base(node)
+    return cat == "Dop" or base in RETIMING or base.endswith("solver")
+
+
+def read_retimed(node) -> bool:
+    """Whether what a node reads may be cooked at other frames than the one
+    rendered: a retiming node downstream of it, or of a network it is in,
+    by wire or by reference (an Object Merge, a SOP Import), within a
+    cheap walk. True when unsure: the walk was cut short or Houdini
+    could not say."""
+    seen: Set[str] = set()
+    todo = [node]
+    while todo:
+        n = todo.pop()
+        try:
+            path = n.path()
+        except (AttributeError, hou.Error):
+            return True
+        if path in seen or path == "/":
+            continue
+        seen.add(path)
+        if len(seen) > RETIME_WALK_LIMIT:
+            return True
+        if n is not node and retimes(n):
+            return True
+        if _type_base(n)[1] in ("Manager", "Director"):
+            continue   # /obj, /out, /stage: what is inside them is not what they feed
+        try:
+            todo.extend(getattr(n, "outputs", tuple)())
+            todo.extend(_dependents(n))
+            parent = getattr(n, "parent", lambda: None)()
+        except hou.Error:
+            return True
+        if parent is not None:
+            todo.append(parent)
+    return False
+
+
+def _dependents(node) -> tuple:
+    """The nodes that name this one in a parameter (not its children: the
+    walk reaches those through their own wires)."""
+    fn = getattr(node, "dependents", None)
+    if fn is None:
+        return ()
+    try:
+        return tuple(fn(include_children=False))
+    except TypeError:
+        return tuple(fn())
 
 
 def _bypassed(node) -> bool:
@@ -470,17 +545,23 @@ class RopHost(_HoudiniHost):
         """Every file the hip file reads, from ``hou.fileReferences()``,
         as typed (so ``$F4`` stays a sequence and ``<UDIM>`` a tile set).
         Files ROPs write are not inputs; a reference on a bypassed node is
-        only a warning when it is missing."""
+        only a warning when it is missing.
+
+        A sequence is read over the jobs' frames (``JOB_FRAMES``) when
+        nothing retimes its node (``read_retimed``); else, or when that is
+        not known, it is every file of it on disk."""
         scene = self.scene_file()
         out, seen = [], set()
+        retimed: Dict[str, bool] = {}
         for parm, ref in hou.fileReferences():
-            who, optional, raw = "", False, ref
+            who, optional, raw, node = "", False, ref, None
             if parm is not None:
                 if writes(parm):
                     continue
                 raw = unexpanded(parm)
-                who = parm.node().path()
-                optional = _bypassed(parm.node())
+                node = parm.node()
+                who = node.path()
+                optional = _bypassed(node)
             p = self._absolute(expand(raw))
             if not p or p == scene or self._not_a_project_file(p):
                 continue
@@ -488,5 +569,10 @@ class RopHost(_HoudiniHost):
             if key in seen:
                 continue
             seen.add(key)
-            out.append(Dependency(path=p, node=who, optional=optional))
+            frames = None
+            if node is not None and seq.has_frames(p):
+                if who not in retimed:
+                    retimed[who] = read_retimed(node)
+                frames = None if retimed[who] else JOB_FRAMES
+            out.append(Dependency(path=p, frames=frames, node=who, optional=optional))
         return out

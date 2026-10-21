@@ -548,7 +548,7 @@ class NodeTypeCategory:
         return self._name
 
 
-_categories = {n: NodeTypeCategory(n) for n in ("Lop", "Driver", "Sop", "Object", "Manager", "Top")}
+_categories = {n: NodeTypeCategory(n) for n in ("Lop", "Driver", "Sop", "Object", "Manager", "Top", "Dop")}
 
 
 def lopNodeTypeCategory():
@@ -659,6 +659,29 @@ class Node:
         while len(self._inputs) <= index:
             self._inputs.append(None)
         self._inputs[index] = node
+
+    def outputs(self):
+        return tuple(n for n in _nodes.values() if any(i is self for i in n._inputs))
+
+    def dependents(self, include_children=True):
+        """The nodes whose node-path parameters name this one (or, with
+        ``include_children``, a node inside it): an Object Merge's object."""
+        out = []
+        for n in list(_nodes.values()):
+            if n is self:
+                continue
+            for p in n.parms():
+                t = p._template
+                if t.type() != parmTemplateType.String or t.stringType() != stringParmType.NodeReference:
+                    continue
+                v = p.eval()
+                target = n.node(v) if v else None
+                if target is None:
+                    continue
+                if target is self or (include_children and target.path().startswith(self._path + "/")):
+                    out.append(n)
+                    break
+        return tuple(out)
 
     def isBypassed(self):
         return self._bypassed
@@ -850,6 +873,10 @@ NODE_PARMS = {
     ("Sop", "alembic"): lambda: [StringParmTemplate("fileName", "File Name", 1, default_value=("",),
                                                     string_type=stringParmType.FileReference)],
     ("Object", "geo"): lambda: [],
+    ("Sop", "object_merge"): lambda: [StringParmTemplate("objpath1", "Object 1", 1, default_value=("",),
+                                                         string_type=stringParmType.NodeReference)],
+    ("Sop", "timeshift"): lambda: [FloatParmTemplate("frame", "Frame", 1, default_value=(1,))],
+    ("Sop", "null"): lambda: [],
 }
 
 
