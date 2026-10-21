@@ -469,3 +469,22 @@ func TestHookAsksAndAnswers(t *testing.T) {
 		t.Fatal("the answered question is still open")
 	}
 }
+
+// The text view says what each session has used, and that a session with
+// no transcript has written nothing yet.
+func TestPrintObserved(t *testing.T) {
+	var b strings.Builder
+	printObserved(&b, []agent.Observed{
+		{Name: "lead", Word: agent.WordNeedsYou, NeedsYou: "it asks: Which pool?", Transcript: "t", Usage: &agent.ObservedUse{Models: []agent.ModelUsage{{Model: "opus", InputTokens: 12000, OutputTokens: 400}}}},
+		{Name: "new", Word: agent.WordIdle},
+		{Name: "big", Word: agent.WordWorking, Transcript: "t", TurnAge: "5 minutes", BackgroundOpen: 2, Usage: &agent.ObservedUse{Models: []agent.ModelUsage{{Model: "opus", InputTokens: 3_400_000}}}},
+	})
+	for _, want := range []string{"it asks: Which pool?, 12k tokens used", "no transcript yet", "last wrote 5 minutes ago, 2 background tasks running, 3.4M tokens used"} {
+		if !strings.Contains(b.String(), want) {
+			t.Errorf("no %q in\n%s", want, b.String())
+		}
+	}
+	if strings.Contains(b.String(), "Nothing needs you") {
+		t.Error("said nothing needs you with a question waiting")
+	}
+}

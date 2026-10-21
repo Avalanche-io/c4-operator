@@ -49,16 +49,24 @@ member.
 and only reads: the CLI's own list (`claude agents --json`) and their
 transcripts. It moves, stops and signs in nothing, and needs no farm.
 Each session gets:
-- **a word:** `needs you` (the CLI's own `blocked`, its "needs input"),
-  `working`, `idle`, `done`, `stopped`, or `at its limit` (a usage window it
-  hit that has not reset);
-- **the one thing that needs you,** when there is one: what it last said
-  when it is waiting on you, or a spend limit only you can raise;
+- **a word:** `needs you`, `at its limit` (a usage window it hit that has
+  not reset), `working`, `failed`, `idle`, `done` or `stopped`, in that
+  order of who needs their person first;
+- **the one thing that needs you,** when there is one: a tool call waiting
+  for your permission, a question it ended its turn on, the error it
+  stopped on, or a spend limit only you can raise. A session the CLI calls
+  `blocked` that asks nothing reads as `idle`, since a finished task reads
+  as blocked too;
 - **what it has used,** per model, over its transcript;
 - **its open background work,** and how long since it last wrote.
 
-What needs you comes first. `--json` gives the same rows for a program to
-read (`c4 farm agents` shows them).
+Without `--all` it lists the sessions that are running, and the ones that
+failed. `--json` gives the same rows, with the machine's name, for a program
+to read. A host runner started with `--observe --hud URL` (off unless asked)
+shares them with that farm every minute, quoted words included. The farm
+shows them to the owners of the pools its node is in (the runner's
+owners), and to no one else. Paths stay on the machine: the farm gets
+the name of each session's folder, and no transcript path.
 
 ## A clean environment for each member
 
@@ -90,19 +98,19 @@ environment, never in a person's `~/.claude`:
 
 ## Commands
 
-| command                                   | does                                                                                                                               |
-| ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `c4-agent observe [--all] [--json]`      | the Claude Code sessions on this machine as they are, read-only: each one's state in a word, what needs you, what it has used |
-| `c4-agent find --agent-name NAME`         | lists sessions whose transcript names that agent, newest first                                                                     |
-| `c4-agent register --name N --session ID` | adds a member (`--cwd`, `--config-dir`, `--flag` for resume flags, `--new-phase`; `--env DIR` runs it in a clean environment, `--import DIR` brings its session there) |
-| `c4-agent ls`                             | every member: busy, idle (at a turn boundary) or stopped, with its epoch and last checkpoint                                       |
-| `c4-agent resume NAME [PROMPT]`           | continues a stopped member's session in the background; refused while it runs (exit 3)                                             |
+| command                                   | does                                                                                                                                                                                                                                 |
+| ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `c4-agent observe [--all] [--json]`       | the Claude Code sessions on this machine as they are, read-only: each one's state in a word, what needs you, what it has used                                                                                                        |
+| `c4-agent find --agent-name NAME`         | lists sessions whose transcript names that agent, newest first                                                                                                                                                                       |
+| `c4-agent register --name N --session ID` | adds a member (`--cwd`, `--config-dir`, `--flag` for resume flags, `--new-phase`; `--env DIR` runs it in a clean environment, `--import DIR` brings its session there)                                                               |
+| `c4-agent ls`                             | every member: busy, idle (at a turn boundary) or stopped, with its epoch and last checkpoint                                                                                                                                         |
+| `c4-agent resume NAME [PROMPT]`           | continues a stopped member's session in the background; refused while it runs (exit 3)                                                                                                                                               |
 | `c4-agent yield NAME [--timeout 10m]`     | stops a member at its next turn boundary, after a checkpoint; a busy member is left running if it does not finish in time (exit 5); background work still running gets the same wait, then is recorded in the checkpoint and stopped |
-| `c4-agent checkpoint NAME`                | saves a checkpoint now                                                                                                             |
-| `c4-agent checkpoint --hook`              | the Stop hook: saves the turn that just ended; ignores sessions that are not members; always exits 0                               |
-| `c4-agent verify NAME`                    | checks the checkpoint chain against the transcript                                                                                 |
-| `c4-agent log NAME [-n 10]`               | recent checkpoints                                                                                                                 |
-| `c4-agent hooks`                          | prints the settings fragment that installs the hook: at each turn's end (Stop) and after each tool call (PostToolUse)             |
+| `c4-agent checkpoint NAME`                | saves a checkpoint now                                                                                                                                                                                                               |
+| `c4-agent checkpoint --hook`              | the Stop hook: saves the turn that just ended; ignores sessions that are not members; always exits 0                                                                                                                                 |
+| `c4-agent verify NAME`                    | checks the checkpoint chain against the transcript                                                                                                                                                                                   |
+| `c4-agent log NAME [-n 10]`               | recent checkpoints                                                                                                                                                                                                                   |
+| `c4-agent hooks`                          | prints the settings fragment that installs the hook: at each turn's end (Stop) and after each tool call (PostToolUse)                                                                                                                |
 
 Exit codes: 3 when the member is running (or already has a session), 4
 when the CLI started a copy, 5 when a member is still busy.
@@ -408,16 +416,16 @@ runner starts for the unit's first attempt and resumes by its session ID
 for every later one, so each unit starts fresh and keeps its own context
 across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
 
-| variable           | set by                                                            | what                                                                                                        |
-| ------------------ | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| `C4_AGENT_BLOCK`   | the job's template                                                | `1`: the pod is a block                                                                                     |
-| `C4_BLOCK_PROMPT`  | the template, or a unit's `env` in its document (the unit's wins) | the block's task                                                                                            |
-| `C4_BLOCK_REPO`    | the template                                                      | the project's working tree on the host                                                                      |
-| `C4_BLOCK_TOOLS`   | the template                                                      | the tools it may use, space separated (default `Read Edit Write Glob Grep Bash(git:*) Bash(go:*)`)          |
-| `C4_BLOCK_MODEL`   | the template or a unit                                            | the model, when not the CLI's default                                                                       |
-| `C4_BLOCK_EFFORT`  | the template or a unit                                            | the effort level (`--effort`: low, medium, high, xhigh, max), when not the CLI's default                    |
+| variable           | set by                                                            | what                                                                                                |
+| ------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `C4_AGENT_BLOCK`   | the job's template                                                | `1`: the pod is a block                                                                             |
+| `C4_BLOCK_PROMPT`  | the template, or a unit's `env` in its document (the unit's wins) | the block's task                                                                                    |
+| `C4_BLOCK_REPO`    | the template                                                      | the project's working tree on the host                                                              |
+| `C4_BLOCK_TOOLS`   | the template                                                      | the tools it may use, space separated (default `Read Edit Write Glob Grep Bash(git:*) Bash(go:*)`)  |
+| `C4_BLOCK_MODEL`   | the template or a unit                                            | the model, when not the CLI's default                                                               |
+| `C4_BLOCK_EFFORT`  | the template or a unit                                            | the effort level (`--effort`: low, medium, high, xhigh, max), when not the CLI's default            |
 | `C4_BLOCK_PROFILE` | the template or a unit                                            | the name of its tool, reported in usage.json (default `default`, or `custom` with `C4_BLOCK_TOOLS`) |
-| `C4_BLOCK_REWORK`  | a verdict's `with.env`                                            | a reworked attempt: what the review asks                                                                    |
+| `C4_BLOCK_REWORK`  | a verdict's `with.env`                                            | a reworked attempt: what the review asks                                                            |
 
 - **The member** is `<namespace>.<job>.<unit>`, registered when its session
   starts, and marked a block.

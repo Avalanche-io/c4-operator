@@ -208,6 +208,11 @@ func bundleStatus(b *c4v1.AgentBundle, j *c4v1.WorkJob, pods []corev1.Pod) c4v1.
 		st.Phase = "Held"
 	case running+yielding > 0:
 		st.Phase = "Running"
+	case j.Status.Phase == "Succeeded":
+		// every member finished: the bundle follows its job
+		st.Phase = "Done"
+	case j.Status.Phase == "Failed":
+		st.Phase = "Failed"
 	case saved > 0:
 		// Every member that ran was stopped at a turn boundary by the
 		// queue (capacity, a power cap): the bundle is suspended, and its

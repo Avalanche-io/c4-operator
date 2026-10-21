@@ -128,7 +128,7 @@ type AgentBundleStatus struct {
 	// Phase is Running; Holding or Held (a person suspended the bundle,
 	// spec.suspend, and a person resumes it); Suspended (the queue stopped
 	// every member that ran at a turn boundary, and resumes them itself);
-	// or Pending.
+	// Done or Failed (its job ended so); or Pending.
 	// +optional
 	Phase string `json:"phase,omitempty"`
 	// Job is the WorkJob that holds the members' units.

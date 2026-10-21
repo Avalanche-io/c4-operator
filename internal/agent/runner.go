@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
 	"strconv"
 	"time"
 
@@ -98,6 +99,19 @@ type Runner struct {
 	// Holder is the person whose sign-in this machine's members use (the
 	// Claude Code config here); default the runner's owner, when it has one.
 	Holder string
+	// Observe, when set, reports this machine's Claude Code sessions (in
+	// ObserveConfigDir, the person's own; "" for the CLI's default) to the
+	// farm every ObserveEvery, read-only, through the HUD at HUD with the
+	// runner's token (HUDToken). HTTPClient is for tests.
+	Observe          bool
+	ObserveConfigDir string
+	ObserveEvery     time.Duration
+	HUD              string
+	HUDToken         func() string
+	HTTPClient       *http.Client
+	observedAt       time.Time
+	observedErr      string
+	observedUnseen   bool
 	// Farm names the farm in this runner's deployment name
 	// (<farm>/runner/<node>), as its records name it.
 	Farm string
@@ -190,6 +204,7 @@ func (r *Runner) Tick(ctx context.Context) error {
 	if err := r.heartbeat(ctx); err != nil {
 		return fmt.Errorf("node %s: %w", r.Node, err)
 	}
+	r.observeTick(ctx)
 	var pods corev1.PodList
 	if err := r.Client.List(ctx, &pods, client.HasLabels{c4v1.LabelJob}); err != nil {
 		return err

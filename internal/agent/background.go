@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -57,77 +58,101 @@ func OpenBackground(transcript string, since time.Time) ([]Background, error) {
 		return nil, err
 	}
 	defer f.Close()
-	open := map[string]*Background{}
-	byTask := map[string]string{}
+	t := newBgTracker(transcript, since)
 	sc := bufio.NewScanner(f)
 	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
 	for sc.Scan() {
-		line := sc.Bytes()
-		var rec struct {
-			Type          string          `json:"type"`
-			Timestamp     time.Time       `json:"timestamp"`
-			Message       json.RawMessage `json:"message"`
-			ToolUseResult json.RawMessage `json:"toolUseResult"`
-		}
-		if json.Unmarshal(line, &rec) != nil {
-			continue
-		}
-		// a notification that background work ended, wherever it appears
-		if strings.Contains(string(line), "task-notification") {
-			for _, n := range notifyRE.FindAllString(unescapeJSON(string(line)), -1) {
-				if m := notifyToolRE.FindStringSubmatch(n); m != nil {
-					delete(open, m[1])
-				}
-				if m := notifyTaskRE.FindStringSubmatch(n); m != nil {
-					delete(open, byTask[m[1]])
-				}
-			}
-		}
-		for _, id := range stopped(rec.Message) {
-			delete(open, byTask[id])
-		}
-		if rec.Type != "user" || len(rec.ToolUseResult) == 0 || rec.ToolUseResult[0] != '{' {
-			continue
-		}
-		// to the second: a fake or a coarse clock writes no fraction
-		if !since.IsZero() && rec.Timestamp.Before(since.Truncate(time.Second)) {
-			continue
-		}
-		var res struct {
-			IsAsync          bool   `json:"isAsync"`
-			Status           string `json:"status"`
-			AgentID          string `json:"agentId"`
-			Description      string `json:"description"`
-			BackgroundTaskID string `json:"backgroundTaskId"`
-		}
-		if json.Unmarshal(rec.ToolUseResult, &res) != nil {
-			continue
-		}
-		b := Background{Started: rec.Timestamp, Description: res.Description}
-		switch {
-		case res.IsAsync && res.Status == "async_launched" && res.AgentID != "":
-			b.Kind, b.Task = "agent", res.AgentID
-			b.Transcript = filepath.Join(strings.TrimSuffix(transcript, ".jsonl"), "subagents", "agent-"+res.AgentID+".jsonl")
-		case res.BackgroundTaskID != "":
-			b.Kind, b.Task = "command", res.BackgroundTaskID
-		default:
-			continue
-		}
-		b.ID = toolUseID(rec.Message)
-		if b.ID == "" {
-			b.ID = b.Task
-		}
-		open[b.ID], byTask[b.Task] = &b, b.ID
+		t.feed(sc.Bytes())
 	}
 	if err := sc.Err(); err != nil {
 		return nil, fmt.Errorf("%s: %w", transcript, err)
 	}
-	out := make([]Background, 0, len(open))
-	for _, b := range open {
+	return t.open(), nil
+}
+
+// bgTracker follows a transcript a line at a time for its background work:
+// launched, and not yet reported or stopped.
+type bgTracker struct {
+	transcript string
+	since      time.Time
+	launched   map[string]*Background
+	byTask     map[string]string
+}
+
+func newBgTracker(transcript string, since time.Time) *bgTracker {
+	return &bgTracker{transcript: transcript, since: since, launched: map[string]*Background{}, byTask: map[string]string{}}
+}
+
+func (t *bgTracker) feed(line []byte) {
+	var rec struct {
+		Type          string          `json:"type"`
+		Timestamp     time.Time       `json:"timestamp"`
+		Message       json.RawMessage `json:"message"`
+		ToolUseResult json.RawMessage `json:"toolUseResult"`
+	}
+	if json.Unmarshal(line, &rec) != nil {
+		return
+	}
+	t.feedRecord(line, rec.Type, rec.Timestamp, rec.Message, rec.ToolUseResult)
+}
+
+// feedRecord takes a line already decoded this far.
+func (t *bgTracker) feedRecord(line []byte, typ string, ts time.Time, msg, toolUseResult json.RawMessage) {
+	// a notification that background work ended, wherever it appears
+	if bytes.Contains(line, []byte("task-notification")) {
+		for _, n := range notifyRE.FindAllString(unescapeJSON(string(line)), -1) {
+			if m := notifyToolRE.FindStringSubmatch(n); m != nil {
+				delete(t.launched, m[1])
+			}
+			if m := notifyTaskRE.FindStringSubmatch(n); m != nil {
+				delete(t.launched, t.byTask[m[1]])
+			}
+		}
+	}
+	for _, id := range stopped(msg) {
+		delete(t.launched, t.byTask[id])
+	}
+	if typ != "user" || len(toolUseResult) == 0 || toolUseResult[0] != '{' {
+		return
+	}
+	// to the second: a fake or a coarse clock writes no fraction
+	if !t.since.IsZero() && ts.Before(t.since.Truncate(time.Second)) {
+		return
+	}
+	var res struct {
+		IsAsync          bool   `json:"isAsync"`
+		Status           string `json:"status"`
+		AgentID          string `json:"agentId"`
+		Description      string `json:"description"`
+		BackgroundTaskID string `json:"backgroundTaskId"`
+	}
+	if json.Unmarshal(toolUseResult, &res) != nil {
+		return
+	}
+	b := Background{Started: ts, Description: res.Description}
+	switch {
+	case res.IsAsync && res.Status == "async_launched" && res.AgentID != "":
+		b.Kind, b.Task = "agent", res.AgentID
+		b.Transcript = filepath.Join(strings.TrimSuffix(t.transcript, ".jsonl"), "subagents", "agent-"+res.AgentID+".jsonl")
+	case res.BackgroundTaskID != "":
+		b.Kind, b.Task = "command", res.BackgroundTaskID
+	default:
+		return
+	}
+	b.ID = toolUseID(msg)
+	if b.ID == "" {
+		b.ID = b.Task
+	}
+	t.launched[b.ID], t.byTask[b.Task] = &b, b.ID
+}
+
+func (t *bgTracker) open() []Background {
+	out := make([]Background, 0, len(t.launched))
+	for _, b := range t.launched {
 		out = append(out, *b)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Started.Before(out[j].Started) })
-	return out, nil
+	return out
 }
 
 // stopped is the background work a message stops (TaskStop, KillShell).

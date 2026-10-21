@@ -141,3 +141,16 @@ func TestLeaseHolderVerified(t *testing.T) {
 		}
 	}
 }
+
+// A bundle's phase follows its job once the job has ended: every member
+// done, the bundle is Done, not Pending.
+func TestBundlePhaseFollowsItsJob(t *testing.T) {
+	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Name: "team", Namespace: "agents"}, Spec: c4v1.AgentBundleSpec{Members: []c4v1.AgentMemberSpec{{Name: "lead"}}}}
+	for phase, want := range map[string]string{"Succeeded": "Done", "Failed": "Failed", "": "Pending"} {
+		j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Name: "team"}}
+		j.Status.Phase = phase
+		if got := bundleStatus(b, j, nil).Phase; got != want {
+			t.Errorf("job %q: bundle %q, want %q", phase, got, want)
+		}
+	}
+}

@@ -5,6 +5,7 @@
 //
 //	c4-agent register --name lead --session <id> [--cwd DIR] [--config-dir DIR] [--flag F]... [--new-phase]
 //	                  [--env DIR [--env-id ID] [--import CONFIGDIR]]
+//	c4-agent observe [--all] [--json]
 //	c4-agent find --agent-name NAME [--config-dir DIR]
 //	c4-agent ls
 //	c4-agent checkpoint NAME | --hook
@@ -175,10 +176,7 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 		if *asJSON {
 			enc := json.NewEncoder(out)
 			enc.SetIndent("", "  ")
-			return enc.Encode(struct {
-				ObservedAt time.Time        `json:"observedAt"`
-				Sessions   []agent.Observed `json:"sessions"`
-			}{time.Now().UTC(), obs})
+			return enc.Encode(agent.ObservedReport{Machine: agent.Machine(), ObservedAt: time.Now().UTC(), Sessions: obs})
 		}
 		printObserved(out, obs)
 	case "find":
@@ -342,8 +340,12 @@ const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
                        from an agent environment; --import: bring its session there
                        add a member for an existing session (a different session
                        for an existing member needs --new-phase)
+  observe [--all] [--json]
+                       this machine's Claude Code sessions as they are, read-only:
+                       each one's state in a word, what needs you, what it has used
+                       (--all: finished and stopped ones too)
   find --agent-name N  list sessions whose transcript names that agent, newest first
-  ls                   members, whether each is busy, idle or stopped, and its last checkpoint
+  ls                 members, whether each is busy, idle or stopped, and its last checkpoint
   checkpoint NAME      save a turn boundary now
   checkpoint --hook    the Claude Code Stop hook: save the turn that just ended
   resume NAME [PROMPT] continue a stopped member's session (refused while it runs)
@@ -385,6 +387,9 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	blocksCwd := fs.String("blocks-cwd", "", "run plan jobs' blocks (pods with C4_AGENT_BLOCK=1), each a fresh session started in this folder, which the claude CLI must trust; without it the runner runs registered members only")
 	signerURL := fs.String("signer", "", "the farm's certificate issuer (https://host:port): sign a task record for each unit this machine runs, as its node; without it, host-run units leave none")
 	holder := fs.String("holder", "", "the person whose Claude Code sign-in this machine's members use, named on each record's chain (default: --owner, when there is one)")
+	observe := fs.Bool("observe", false, "report this machine's Claude Code sessions (read-only, the person's own config dir) to the farm's HUD every minute, for the person's own view; needs --hud")
+	hud := fs.String("hud", "", "the farm's HUD (https://host:port), where --observe reports")
+	hudToken := fs.String("hud-token-file", "", "with --hud: a file holding this machine's token (its c4-hosts account)")
 	farm := fs.String("farm", "farm", "the farm's name, in this runner's deployment name (<farm>/runner/<node>) on its records")
 	signerToken := fs.String("signer-token-file", "", "with --signer: a file holding this machine's token for the issuer (its c4-hosts account, audience c4-signer)")
 	var owners multi
@@ -434,6 +439,17 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 			return err
 		}
 		r.BlocksCwd, r.HookCommand, r.UnitBin = *blocksCwd, hook, os.Getenv("C4_UNIT_BIN")
+	}
+	if *observe {
+		if *hud == "" {
+			return errors.New("runner: --observe needs --hud, where the sessions are reported")
+		}
+		path := *hudToken
+		r.Observe, r.HUD, r.ObserveConfigDir = true, *hud, os.Getenv("CLAUDE_CONFIG_DIR")
+		r.HUDToken = func() string {
+			b, _ := os.ReadFile(path)
+			return strings.TrimSpace(string(b))
+		}
 	}
 	if *signerURL != "" {
 		if *store == "" {
@@ -633,16 +649,25 @@ func printObserved(out io.Writer, obs []agent.Observed) {
 			name = agent.ShortID(o.Session)
 		}
 		what := o.NeedsYou
-		if what == "" {
-			what = "last wrote " + o.TurnAge + " ago"
-			if o.BackgroundOpen > 0 {
-				what += fmt.Sprintf(", %d background task(s) running", o.BackgroundOpen)
-			}
-			if o.Limit != nil {
-				what = o.Limit.Text
-			}
-		} else {
+		switch {
+		case what != "":
 			needs++
+		case o.Limit != nil:
+			what = o.Limit.Text
+		case o.Transcript == "":
+			what = "no transcript yet"
+		case o.TurnAge == "just now":
+			what = "last wrote just now"
+		default:
+			what = "last wrote " + o.TurnAge + " ago"
+		}
+		if o.BackgroundOpen == 1 {
+			what += ", 1 background task running"
+		} else if o.BackgroundOpen > 1 {
+			what += fmt.Sprintf(", %d background tasks running", o.BackgroundOpen)
+		}
+		if n := o.Usage.Tokens(); n > 0 {
+			what += ", " + tokenWords(n) + " tokens used"
 		}
 		fmt.Fprintf(out, "%-13s %-24s %s\n", o.Word, name, what)
 	}
@@ -652,4 +677,15 @@ func printObserved(out io.Writer, obs []agent.Observed) {
 	case needs == 0:
 		fmt.Fprintln(out, "Nothing needs you.")
 	}
+}
+
+// tokenWords says a token count briefly: 950, 12k, 3.4M.
+func tokenWords(n int64) string {
+	switch {
+	case n < 1000:
+		return strconv.FormatInt(n, 10)
+	case n < 999_500:
+		return strconv.FormatInt((n+500)/1000, 10) + "k"
+	}
+	return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
 }

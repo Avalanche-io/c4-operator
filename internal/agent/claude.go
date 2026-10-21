@@ -110,7 +110,7 @@ func (c *CLI) run(ctx context.Context, configDir, dir string, args ...string) ([
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Run(); err != nil {
-		return stdout.Bytes(), fmt.Errorf("%s %s: %v: %s", c.Path, strings.Join(args, " "), err,
+		return stdout.Bytes(), fmt.Errorf("%s %s: %w: %s", c.Path, strings.Join(args, " "), err,
 			strings.TrimSpace(stderr.String()+" "+stdout.String()))
 	}
 	return append(stdout.Bytes(), stderr.Bytes()...), nil
