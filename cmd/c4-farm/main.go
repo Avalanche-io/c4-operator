@@ -588,6 +588,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		port := fs.Int("port", localfarm.HUDPort, "the HUD's port on this machine")
 		storePort := fs.Int("store-port", localfarm.StorePort, "the store's port on this machine")
 		registryPort := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
+		noAgent := fs.Bool("no-agent", false, "don't make this machine one of the farm's runners for your agents (c4 farm agent start does it later)")
 		owner := fs.String("owner", "", "who owns this farm and plays every role on it (default the name in your git user.email, else your login)")
 		trackerOn := fs.Bool("tracker", false, "add a stand-in GitHub and c4-sync: issues you open become jobs, its reviews serve them (nothing leaves this machine)")
 		syncInstall := fs.String("sync-install", "", "c4-sync's install manifest, with --tracker (default this release's)")
@@ -658,6 +659,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			fmt.Fprintf(stdout, "owner     %s, no longer %s: %s now plays every role here\n", o.Owner, was, o.Owner)
 		} else {
 			fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
+		}
+		if !*noAgent {
+			upAgent(ctx, stdout, o.Owner)
 		}
 		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)\n")
@@ -825,6 +829,33 @@ func isTerminal(r io.Reader) bool {
 	}
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// upAgent makes this machine one of the local farm's runners for its
+// owner: c4-agent enroll, then the agent service (c4 farm agent start),
+// which runs the power reader and the host runner. Neither stops up: the
+// farm is a farm without it, and the line says how to finish.
+func upAgent(ctx context.Context, w io.Writer, owner string) {
+	bin, err := exec.LookPath("c4-agent")
+	if err != nil {
+		fmt.Fprintf(w, "agents    this machine runs no agents yet: c4-agent is not on PATH (brew install avalanche-io/tap/c4 brings it; then c4 farm up)\n")
+		return
+	}
+	if bin, err = filepath.Abs(bin); err != nil {
+		fmt.Fprintf(w, "agents    this machine runs no agents yet: %v\n", err)
+		return
+	}
+	e, err := localfarm.EnrollMachine(ctx, bin, owner, 4)
+	if err != nil {
+		fmt.Fprintf(w, "agents    this machine runs no agents yet: %v (c4 farm up tries again)\n", err)
+		return
+	}
+	svc := &farmcli.AgentService{AgentBin: bin, Slots: 4}
+	if err := svc.Start(ctx, farmcli.Out{W: io.Discard}); err != nil {
+		fmt.Fprintf(w, "agents    %s is enrolled, but its runner did not start: %v (c4 farm agent start tries again)\n", e.Node, err)
+		return
+	}
+	fmt.Fprintf(w, "agents    this machine (%s) runs %s's agents, %s pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)\n", e.Node, e.Owner, e.Pool)
 }
 
 // openURL opens a link in the default browser.

@@ -122,7 +122,9 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 // runRunner runs c4-agent runner once, its output passed through, and
 // reports whether it ended because the machine must be enrolled again.
 func runRunner(ctx context.Context, o Out, bin, slotsFile string, slots int) (bool, error) {
-	cmd := exec.CommandContext(ctx, bin, "runner", "--slots", strconv.Itoa(slots), "--slots-file", slotsFile)
+	// an enrolled runner takes its node, owner and kubeconfig from its
+	// enrollment, and its slots from the file the power reader writes
+	cmd := exec.CommandContext(ctx, bin, "runner", "--slots-file", slotsFile)
 	pr, pw := io.Pipe()
 	cmd.Stdout, cmd.Stderr = pw, pw
 	lapsed := false
