@@ -1,0 +1,77 @@
+c4: tool/1
+name: blender-render
+title: Blender render
+summary: Renders one view layer of one scene of a Blender file over frames, headless, to the file's own output format.
+kind: frames
+runs:
+  # The farm's own Blender image (Blender 5.2, Cycles on the CPU). A studio
+  # with GPUs or another Blender copies this folder, sets its own image and
+  # publishes the copy: see integrations/dcc/blender/README.md.
+  image: c4/job-sim
+  command:
+  - bash
+  - "{{Tool.Dir}}/blender-render.sh"
+  - "{{Param.blend}}"
+  - "scene={{Param.scene}}"
+  - "view_layer={{Param.view_layer}}"
+  - "camera={{Param.camera}}"
+  - "engine={{Param.engine}}"
+  - "samples={{Param.samples}}"
+frames: {chunk: 4, order: binary}
+params:
+- name: blend
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The Blender file. A .py is run by Blender to build the .blend first, beside it.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Blender file, fileFilters: [{label: Blender, patterns: ["*.blend"]}]}
+- name: scene
+  type: STRING
+  default: Scene
+  minLength: 1
+  description: The scene to render.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: Scene}
+- name: view_layer
+  type: STRING
+  default: ViewLayer
+  minLength: 1
+  description: The view layer of the scene to render. Only it renders; when the scene has more than one view layer to render, its frames go in a folder named for it.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: View layer}
+- name: engine
+  type: STRING
+  default: file
+  allowedValues: [file, CYCLES, EEVEE, WORKBENCH]
+  description: The render engine; file keeps the scene's. EEVEE needs a GPU, which c4/job-sim does not have.
+  show: artist
+  userInterface: {control: DROPDOWN_LIST, label: Render engine}
+- name: camera
+  type: STRING
+  default: ""
+  description: The camera object; empty keeps the scene's.
+  show: advanced
+  from: scene.camera
+  userInterface: {control: LINE_EDIT, label: Camera}
+- name: samples
+  type: INT
+  default: 0
+  minValue: 0
+  maxValue: 65536
+  description: Render samples for Cycles or EEVEE; 0 keeps the file's.
+  show: advanced
+  userInterface: {control: SPIN_BOX, label: Samples (0 keeps the file's)}
+writes: ["**/render/"]
+previews: "**/render/**/*$F4.*"
+errors:
+  permanent: ['Cannot read file', 'File format is not supported']
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1002
+  with: {blend: shot/scene.py, scene: sh010, view_layer: fg, engine: CYCLES, samples: 4}
+  expect: [shot/render/fg/sh010_1001.png, shot/render/fg/sh010_1002.png]
