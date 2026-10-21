@@ -136,6 +136,17 @@ func (r record) str(k string) string {
 	return s
 }
 
+// links is a multi-entity relationship (task_assignees).
+func (r record) links(k string) []link {
+	rel, ok := r.Relationships[k]
+	if !ok {
+		return nil
+	}
+	var ls []link
+	_ = json.Unmarshal(rel.Data, &ls)
+	return ls
+}
+
 func (r record) link(k string) *link {
 	rel, ok := r.Relationships[k]
 	if !ok {
@@ -390,7 +401,7 @@ func (a *Adapter) Get(ctx context.Context, ref tracker.Ref) (tracker.Item, error
 		if err != nil {
 			return tracker.Item{}, err
 		}
-		return a.taskItem(r), nil
+		return a.withAssignees(ctx, a.taskItem(r), r)
 	case "Version":
 		r, err := a.read(ctx, "Version", ref.ID, []string{"code", "sg_status_list", "entity", "sg_task", a.idField, "updated_at"})
 		if err != nil {
@@ -428,7 +439,11 @@ func (a *Adapter) List(ctx context.Context, q tracker.Query, page string) ([]tra
 	}
 	out := make([]tracker.Item, 0, len(rs))
 	for _, r := range rs {
-		out = append(out, a.taskItem(r))
+		it, err := a.withAssignees(ctx, a.taskItem(r), r)
+		if err != nil {
+			return nil, "", err
+		}
+		out = append(out, it)
 	}
 	return out, next, nil
 }
@@ -815,4 +830,21 @@ func (a *Adapter) Person(ctx context.Context, id string) (tracker.Person, error)
 	a.people[id] = p
 	a.mu.Unlock()
 	return p, nil
+}
+
+// withAssignees adds a Task's assignees: the people (HumanUsers) in
+// task_assignees, by login, which the Tracker's people map keys on. A
+// Group assigned is no person, and is left out.
+func (a *Adapter) withAssignees(ctx context.Context, it tracker.Item, r record) (tracker.Item, error) {
+	for _, l := range r.links("task_assignees") {
+		if l.Type != "HumanUser" {
+			continue
+		}
+		p, err := a.Person(ctx, "HumanUser/"+strconv.Itoa(l.ID))
+		if err != nil {
+			return tracker.Item{}, fmt.Errorf("flow: Task %s's assignee HumanUser %d: %w", it.Ref.ID, l.ID, err)
+		}
+		it.Assignees = append(it.Assignees, p)
+	}
+	return it, nil
 }

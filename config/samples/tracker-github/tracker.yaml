@@ -29,6 +29,9 @@ spec:
   intake:
   - match: {type: Issue, labels: ["c4:agent"]}
     as: job
+    # whose work the jobs are: the first assignee the people map names,
+    # once they let this Tracker submit for them (their page in the HUD)
+    for: {assignee: true}
     review: {wait: review}
     job:
       class: agent

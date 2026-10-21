@@ -37,6 +37,9 @@ spec:
       type: Issue
       labels: [c4, render]
     as: job
+    # whose work the jobs are: the first assignee the people map names,
+    # once they let this Tracker submit for them (their page in the HUD)
+    for: {assignee: true}
     deadline: {dateOnlyAt: "18:00", timeZone: America/Los_Angeles}
     review: {wait: review}
     rework: nextVersion

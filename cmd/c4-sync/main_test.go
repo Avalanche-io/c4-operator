@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -113,5 +114,29 @@ func TestSampleLinearTracker(t *testing.T) {
 	}
 	if _, err := tracker.New(tr.Spec.Kind, tracker.Config{Scope: tr.Spec.Scope}); err != nil {
 		t.Fatalf("c4-sync builds the sample's adapter: %v", err)
+	}
+}
+
+// Every rule the samples ship says whose work its jobs are, so no sample
+// makes jobs that are c4-sync's own.
+func TestSamplesSayWhoseWork(t *testing.T) {
+	files, err := filepath.Glob("../../config/samples/tracker-*/tracker.yaml")
+	if err != nil || len(files) < 5 {
+		t.Fatalf("samples %v %v", files, err)
+	}
+	for _, f := range files {
+		b, err := os.ReadFile(f)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var tr c4v1.Tracker
+		if err := yaml.UnmarshalStrict(b, &tr); err != nil {
+			t.Fatalf("%s: %v", f, err)
+		}
+		for i, in := range tr.Spec.Intake {
+			if in.As != "milestone" && (in.For == nil || (in.For.Person == "" && !in.For.Assignee)) {
+				t.Errorf("%s: intake %d (%s) names no for", f, i, in.As)
+			}
+		}
 	}
 }

@@ -49,6 +49,9 @@ spec:
       type: Task
       fields: {task_type: Lighting, task_status: ready, entity.type: Shot}
     as: job
+    # whose work the jobs are: the first assignee the people map names,
+    # once they let this Tracker submit for them (their page in the HUD)
+    for: {assignee: true}
     deadline: {dateOnlyAt: "14:00", timeZone: America/Los_Angeles}
     review: {wait: dailies}
     rework: nextVersion
@@ -66,6 +69,7 @@ spec:
       type: Task
       fields: {task_type: Lighting, task_status: todo, entity.type: Shot}
     as: forecast
+    for: {assignee: true}
     forecast: {field: estimation, perUnit: "0.05", unitHours: "1"}
     deadline: {dateOnlyAt: "14:00", timeZone: America/Los_Angeles}
     job:

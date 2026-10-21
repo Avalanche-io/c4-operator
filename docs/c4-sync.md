@@ -139,8 +139,10 @@ Each Tracker says:
   for a Flow Task's shot. Those jobs take its due date unless they have
   their own;
 - `for`: whose work the jobs are, `{person: dana}` or `{assignee: true}`
-  (the entity's assignee, through `people`). The person owns the job, so
-  what is theirs serves it, such as a lease of their own sign-in. They must
+  (the entity's assignee, through `people`). The assignee is the issue's
+  on GitHub and Linear, the task's people on Kitsu and Flow (not a
+  group), and the run's author on MLflow; every sample sets it. The person
+  owns the job, so what is theirs serves it, such as a lease of their own sign-in. They must
   first let the Tracker submit for them, which they do as themselves, not
   in the Tracker: `c4 farm grant <tracker>` (optionally `--pools`,
   `--classes`, `--until 30d`), MCP `c4_grant`, or `POST /api/v1/grants`.

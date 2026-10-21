@@ -52,8 +52,10 @@ type Tag struct {
 // Run is a run (info and tags).
 type Run struct {
 	ID, Name, Experiment, Status string
-	Start, End                   int64
-	Tags                         map[string]string
+	// User is who created the run (info.user_id).
+	User       string
+	Start, End int64
+	Tags       map[string]string
 }
 
 // ModelVersion is a registered model's version.
@@ -394,6 +396,9 @@ func (s *Server) runJSON(r *Run) map[string]any {
 	if r.End > 0 {
 		info["end_time"] = r.End
 	}
+	if r.User != "" {
+		info["user_id"] = r.User
+	}
 	return map[string]any{"info": info, "data": map[string]any{"tags": tagList(r.Tags), "params": []any{}, "metrics": []any{}}}
 }
 
@@ -515,4 +520,11 @@ func (s *Server) searchVersions(filter string) (any, *apiErr) {
 		}
 	}
 	return map[string]any{"model_versions": out}, nil
+}
+
+// SetRunUser records who created a run, as a client's MLflow login does.
+func (s *Server) SetRunUser(id, user string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.runs[id].User = user
 }

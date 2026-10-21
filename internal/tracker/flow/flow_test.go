@@ -228,3 +228,23 @@ func TestVersionCode(t *testing.T) {
 		}
 	}
 }
+
+// A Task's assignees are its people, by login; a Group assigned is none.
+func TestTaskAssignees(t *testing.T) {
+	s := site(t)
+	pat, dana := s.AddUser("pat", "Pat", ""), s.AddUser("dana", "Dana Reyes", "dana@example.com")
+	task := s.AddTask(s.AddShot("sh040"), "Lighting", "LGT", "rdy", "2026-10-23", pat)
+	s.Set(task, map[string]any{"task_assignees": []flowtest.Link{{Type: "Group", ID: 3, Name: "lighting"}, dana}}, pat)
+	a := adapter(t, s, s.Key, nil)
+	it, err := a.Get(context.Background(), tracker.Ref{Type: "Task", ID: strconv.Itoa(task.ID)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(it.Assignees) != 1 || it.Assignees[0].ID != "dana" || it.Assignees[0].Name != "Dana Reyes" {
+		t.Fatalf("assignees %+v", it.Assignees)
+	}
+	items, _, err := a.List(context.Background(), tracker.Query{Type: "Task", Fields: map[string]string{"sg_status_list": "rdy"}}, "")
+	if err != nil || len(items) != 1 || len(items[0].Assignees) != 1 || items[0].Assignees[0].ID != "dana" {
+		t.Fatalf("listed %+v %v", items, err)
+	}
+}

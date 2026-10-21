@@ -195,6 +195,7 @@ type run struct {
 		Status       string `json:"status"`
 		ExperimentID string `json:"experiment_id"`
 		StartTime    int64  `json:"start_time"`
+		UserID       string `json:"user_id"`
 	} `json:"info"`
 	Data struct {
 		Tags []tag `json:"tags"`
@@ -231,6 +232,10 @@ func (a *Adapter) runItem(r run) tracker.Item {
 		Name: r.Info.RunName,
 	}
 	it.Job = tg["c4.job"]
+	if r.Info.UserID != "" {
+		// MLflow names no assignee; the run's author is whose work it is.
+		it.Assignees = []tracker.Person{{ID: r.Info.UserID}}
+	}
 	if d := tg["c4.deadline"]; d != "" {
 		if t, err := time.Parse(time.RFC3339, d); err == nil {
 			it.Due = &tracker.Due{At: t.UTC()}
