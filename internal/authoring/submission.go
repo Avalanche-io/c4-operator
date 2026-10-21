@@ -53,20 +53,32 @@ type PlannedJob struct {
 	Due    Due
 	// Note is the submission's note:, a line for the job's book.
 	Note string
+	// Once is a once tool's job: one unit over the whole job.
+	Once bool
 }
 
-// What is the job in a line.
+// Count is n of a thing: "1 unit", "6 units".
+func Count(n int, thing string) string {
+	if n == 1 {
+		return "1 " + thing
+	}
+	return fmt.Sprintf("%d %ss", n, thing)
+}
+
+// What is the job in a line: "48 frames in 6 units", "1 frame in 1
+// unit", "1 unit over 1001-1048" (a once job filling its frame parameter),
+// "1 unit".
 func (j PlannedJob) What() string {
 	var s string
 	switch {
-	case j.Units == 1 && j.Frames != "":
-		s = "one unit over " + string(j.Frames)
-	case j.Units == 1:
-		s = "one unit"
+	case j.Once && j.Frames != "":
+		s = "1 unit over " + string(j.Frames)
+	case j.Once || j.Frames == "":
+		s = Count(j.Units, "unit")
 	default:
-		s = fmt.Sprintf("%s frames in %d units", string(j.Frames), j.Units)
+		s = "frames " + string(j.Frames) + " in " + Count(j.Units, "unit")
 		if fs, err := order_.ParseFrames(farmFrames(j.Frames)); err == nil {
-			s = fmt.Sprintf("%d frames in %d units", len(fs), j.Units)
+			s = Count(len(fs), "frame") + " in " + Count(j.Units, "unit")
 		}
 	}
 	if len(j.After) > 0 {
@@ -251,7 +263,7 @@ func (c *subCtx) lower() (*Plan, []Error) {
 			// the previous version of the same stem and key, if there is one
 			req.Follows = Latest(existing, strings.TrimSuffix(versionSuffix.ReplaceAllString(names[j.Key], ""), "-"))
 		}
-		pj.Note = sub.Note
+		pj.Note, pj.Once = sub.Note, r.tool.Kind == "once"
 		due := j.Due
 		if due == "" {
 			due = sub.Due

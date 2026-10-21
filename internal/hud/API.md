@@ -865,7 +865,7 @@ and `-site` name the input it rebuilds and where, and the queue sets
 ```
 { submission, dryRun?, explain?, key? }
 ->
-{ ok, dryRun?, errors?: [ { path, message, fix } ], submission, record?,
+{ ok, dryRun?, errors?: [ { path, message, fix, reason? } ], submission, record?,
   jobs?: [ { key, namespace, name, tool, version, what, estimate?, estimateError?, after?: [name], link } ],
   estimate?: { eta50?, eta90?, deadline?, slackSeconds, feasible, atRisk, jobs },
   warnings?: [string], explain?, message? }
@@ -895,7 +895,11 @@ message, fix }` in the farm's words, at a dotted path (`jobs.comp.after`,
 `jobs.movie` for a job the farm would not take): `422` for the file or the
 farm's policy, `403` without access, `404` for a project the viewer cannot
 see, `503` when the farm cannot make a job just now. A folder tree is
-refused beside the file's other errors.
+refused beside the file's other errors. A submission for a person
+(`for:`) refused for its grant is refused at `for` with POST /jobs's
+`reason` (`no-grant`, `grant-lapsed`, `grant-uncovered`, `no-tracker`,
+`not-sync`, `not-installed`) and the status POST /jobs gives, so one
+handler serves both.
 
 `key` makes a retry safe. A client names the submission it means (any
 text) and sends the same key on every retry: the request is answered
@@ -910,10 +914,14 @@ follows and competing for the same slots, so the last job's `eta` is when
 the chain is ready (`200`). A job's `estimate.reused` is how many of its
 units would reuse an earlier run's output rather than run (at most: a
 share runs anyway to verify), and its `what` says so (`48 frames in 6
-units; 6 of 6 units reused`). `estimateError` says why there is none (the
+units; 6 of 6 units reused`; `1 frame in 1 unit`, `1 unit over 1001-1048`
+for a once job filling its frame parameter, `1 unit`). `estimateError` says why there is none (the
 queue has not planned yet).
 
-Each job is named `<name>-<key>-vNNN` (`name` defaults to the shot), one
+Each job is named `<name>-<key>-vNNN` (`name` defaults to the shot,
+lowercased, with anything outside `[a-z0-9-]` made `-`, repeats collapsed
+and the ends trimmed: `sm0220_fx` names `sm0220-fx-light-v001`; a shot with
+nothing left is refused at `shot`), one
 version past the latest such job, for the whole submission before any is
 made, so a job's inputs can name the jobs it follows; it `follows` the
 previous version of the same name and key unless the file says otherwise.
@@ -945,12 +953,15 @@ entry, with the submission's ID. `c4.avalanche.io/derivation-class: exact`
 marks a job whose tool says `reuse: exact`.
 
 What the farm cannot run yet is refused in its words, not run otherwise:
-plans, checks, approvals, waits, answering agents, generators and their
-children, units over more than frames, policy, a job that follows two,
+plans, checks, approvals, waits, a lead or a tool answering questions,
+generators and their children, units over more than frames, policy, a job that follows two,
 git trees, a `preview` other than `fml` and `none` (this farm orders only
 those), tools that need licences, the network beyond their licence
 servers, sidecars, a Kubernetes overlay, a gate, farm access, or only a
-host. `warnings` are what it does differently meanwhile: a job that
+host. `answers: {by: unit:<name>}` must name a unit of the job that
+reasons: a frames or once job's units (`<key>/<n>` from 0) each run a
+procedure, so each is refused ("render/3 cannot answer questions: it runs
+a procedure"), as is a name that is no unit of the job. `warnings` are what it does differently meanwhile: a job that
 follows another frame by frame waits for the whole of it. `estimate` is
 the jobs' as one: the latest finish, the earliest deadline, the least
 slack. `explain` is what each job lowers to: its WorkJob (project/name),

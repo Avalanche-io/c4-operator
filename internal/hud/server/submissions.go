@@ -150,7 +150,7 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 		}
 		var te takenError
 		if !errors.As(ferr.err, &te) || attempt >= 4 {
-			fe := leftWords(s.farmWords(ferr.key, plan.Project, code, ferr.err), ferr.left, ferr.until)
+			fe := leftWords(s.farmWords(ferr.key, ferr.name, plan.Project, code, ferr.err), ferr.left, ferr.until)
 			if errors.As(ferr.err, &te) {
 				fe = fieldRefusal{api.FieldError{Path: "jobs." + ferr.key, Message: "job names kept being taken while the submission was made",
 					Fix: "submit it again"}, http.StatusConflict}
@@ -282,9 +282,18 @@ type fieldRefusal struct {
 
 // farmWords is a create's failure as the farm says it, at jobs.<key>:
 // admission policy, access and the API's own errors, never raw.
-func (s *Server) farmWords(key, project string, code int, err error) fieldRefusal {
+func (s *Server) farmWords(key, name, project string, code int, err error) fieldRefusal {
 	path, msg := "jobs."+key, err.Error()
+	var gr *grantRefused
+	if errors.As(err, &gr) {
+		// A submission for a person, refused as POST /jobs refuses it:
+		// at for:, with the same reason, so one handler serves both.
+		return fieldRefusal{api.FieldError{Path: "for", Message: gr.msg, Fix: grantFix[gr.reason], Reason: gr.reason}, gr.code}
+	}
 	switch {
+	case strings.Contains(msg, "RFC 1123"):
+		return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("%s can't name a job: use letters, digits and -", name),
+			Fix: "set name: to override"}, http.StatusUnprocessableEntity}
 	case strings.Contains(msg, "denied the request:"):
 		_, why, _ := strings.Cut(msg, "denied the request:")
 		return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("the farm's admission policy refused %s: %s", key, strings.TrimSpace(why)),
@@ -307,7 +316,7 @@ func (s *Server) farmWords(key, project string, code int, err error) fieldRefusa
 func what(j authoring.PlannedJob, e *api.SubmitEstimate) string {
 	s := j.What()
 	if e != nil && e.Reused > 0 && j.Units > 0 {
-		s += fmt.Sprintf("; %d of %d units reused", e.Reused, j.Units)
+		s += fmt.Sprintf("; %d of %s reused", e.Reused, authoring.Count(j.Units, "unit"))
 	}
 	return s
 }
@@ -410,4 +419,15 @@ func (s *Server) handleProject(w http.ResponseWriter, r *http.Request) {
 		return a.At.Before(b.At) || a.At.Equal(b.At) && a.Name < b.Name
 	})
 	writeJSON(w, http.StatusOK, out)
+}
+
+// grantFix is what to do about each grant refusal of a submission for a
+// person.
+var grantFix = map[string]string{
+	api.RefusedNoGrant:        "the person lets the tracker submit for them with c4 farm grant <tracker>",
+	api.RefusedGrantLapsed:    "the person grants the tracker again with c4 farm grant <tracker>",
+	api.RefusedGrantUncovered: "the person widens their grant's pools or classes with c4 farm grant <tracker>, or the job narrows to them",
+	api.RefusedNoTracker:      "name a tracker of the project in tracker:",
+	api.RefusedNotSync:        "leave for: out: only a tracker's sync submits for another person",
+	api.RefusedNotInstalled:   "leave for: out: this farm has no trackers or grants",
 }

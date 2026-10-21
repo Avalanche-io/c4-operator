@@ -12,6 +12,7 @@ import (
 	"github.com/Avalanche-io/c4"
 	"github.com/Avalanche-io/c4-operator/internal/when"
 	"github.com/Avalanche-io/c4-operator/schema"
+	order_ "github.com/Avalanche-io/c4-operator/work/order"
 )
 
 // now is the clock dues are read on.
@@ -137,9 +138,13 @@ func stems(jobs []string) []string {
 // checkNames refuses a job whose name, <name>-<key>-vNNN, would be too
 // long.
 func (c *subCtx) checkNames() {
-	stem := c.sub.Name
+	path, stem := "name", c.sub.Name
 	if stem == "" {
-		stem = c.sub.Shot
+		path, stem = "shot", c.sub.Shot
+	}
+	if stem != "" && JobStem(stem) == "" {
+		c.add(errf(path, "set name: to override", "%s can't name a job: use letters, digits and -", stem))
+		return
 	}
 	jobs := c.farm.Jobs(c.ns)
 	for _, j := range c.sub.Jobs {
@@ -310,7 +315,53 @@ func (c *subCtx) checkJob(j *Job) {
 		if name, ok := strings.CutPrefix(a.By, "tool:"); ok {
 			c.tool(p+".answers.by", name)
 		}
+		if name, ok := strings.CutPrefix(a.By, "unit:"); ok && r.tool != nil && j.Tool != "" {
+			c.checkAnswerer(p, j, r.tool, name)
+		}
 	}
+}
+
+// checkAnswerer refuses an answers: unit that is not a unit of the job, or
+// one that cannot answer: a frames or once tool's units, named <key>/<n>
+// from 0 (or <n>), each run a procedure, and only a unit that reasons
+// answers questions.
+func (c *subCtx) checkAnswerer(p string, j *Job, t *Tool, name string) {
+	n := c.unitCount(j, t)
+	i, err := strconv.Atoi(strings.TrimPrefix(name, j.Key+"/"))
+	switch {
+	case err != nil || i < 0 || n > 0 && i >= n:
+		fix := "name a unit of the job, or leave answers: out"
+		if n > 0 {
+			fix = fmt.Sprintf("name one of its units, %s/0 to %s/%d, or leave answers: out", j.Key, j.Key, n-1)
+		}
+		c.add(errf(p+".answers.by", fix, "no unit %q in %s", name, j.Key))
+	default:
+		c.add(errf(p+".answers.by", "leave answers: out: only a unit that reasons answers questions",
+			"%s/%d cannot answer questions: it runs a procedure", j.Key, i))
+	}
+}
+
+// unitCount is how many units a frames or once job makes, 0 when its
+// frames are not known.
+func (c *subCtx) unitCount(j *Job, t *Tool) int {
+	if t.Kind == "once" {
+		return 1
+	}
+	fs, err := order_.ParseFrames(farmFrames(c.framesOf(j.Key, map[string]bool{})))
+	if err != nil {
+		return 0
+	}
+	chunk := j.Chunk
+	if chunk == nil && t.Frames != nil {
+		chunk = t.Frames.Chunk
+	}
+	switch {
+	case chunk == nil || chunk.N < 1 && !chunk.All:
+		return len(fs)
+	case chunk.All:
+		return 1
+	}
+	return (len(fs) + chunk.N - 1) / chunk.N
 }
 
 // resolveTools resolves every job's tool (a plan's each.tool) before any

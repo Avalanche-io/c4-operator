@@ -15,11 +15,25 @@ const MaxJobName = 50
 
 var versionSuffix = regexp.MustCompile(`-v(\d+)$`)
 
+var (
+	nonName = regexp.MustCompile(`[^a-z0-9-]+`)
+	dashes  = regexp.MustCompile(`-{2,}`)
+)
+
+// JobStem is s as part of a job's name: lowercased, anything outside
+// [a-z0-9-] made -, repeats collapsed and the ends trimmed (sm0220_fx is
+// sm0220-fx). "" when nothing of s can name a job.
+func JobStem(s string) string {
+	s = nonName.ReplaceAllString(strings.ToLower(s), "-")
+	return strings.Trim(dashes.ReplaceAllString(s, "-"), "-")
+}
+
 // NextName is <stem>-<stage>-vNNN, one version past the latest job of that
 // stem and stage among names (the jobs of a namespace), as POST /jobs
-// names a job it is given no name for.
+// names a job it is given no name for; the stem and stage as JobStem
+// makes them.
 func NextName(names []string, stem, stage string) string {
-	base := strings.Trim(strings.ToLower(stem+"-"+stage), "-")
+	base := JobStem(stem + "-" + stage)
 	if base == "" {
 		base = "job"
 	}

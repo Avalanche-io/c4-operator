@@ -93,7 +93,7 @@ func TestLowerProxiesMovie(t *testing.T) {
 	if len(p.Warnings) != 1 || !strings.Contains(p.Warnings[0], "frame by frame") {
 		t.Fatalf("warnings %v", p.Warnings)
 	}
-	if w := mv.What(); w != "one unit over 1001-1048, after sm0140-proxies-v001" {
+	if w := mv.What(); w != "1 unit over 1001-1048, after sm0140-proxies-v001" {
 		t.Fatalf("what %q", w)
 	}
 	x := Explain(p)
@@ -207,20 +207,16 @@ func TestLowerNeedsPinnedImage(t *testing.T) {
 	}
 }
 
-// answers: {by: unit:<name>} lowers to the job's answerer param; a lead
-// or a tool answering stays refused, in the farm's words.
+// answers: {by: unit:<name>} must name a unit of the job that reasons: a
+// frames or once tool's units (<key>/<n> from 0) each run a procedure, so
+// each is refused at the check, as is a name that is no unit of the job;
+// a lead or a tool answering stays refused, in the farm's words.
 func TestLowerAnswers(t *testing.T) {
-	p := mustLower(t, `c4: submit/1
-project: saltmarsh
-shot: sm0140
-tree: .
-jobs:
-  proxies: {tool: proxies, answers: {by: unit:lead}, with: {plates: plates/sm0140.$F4.exr}}
-`)
-	if s := specOf(t, p.Jobs[0]); s.Params["answerer"] != "lead" {
-		t.Fatalf("params %v", s.Params)
-	}
 	for by, want := range map[string]string{
+		"unit:lead":      `no unit "lead" in proxies`,
+		"unit:proxies/9": `no unit "proxies/9" in proxies`,
+		"unit:proxies/2": "proxies/2 cannot answer questions: it runs a procedure",
+		"unit:4":         "proxies/4 cannot answer questions: it runs a procedure",
 		"lead":           "a lead answering a job's questions cannot run on this farm yet",
 		"tool:shot-lead": "a tool answering a job's questions cannot run on this farm yet",
 	} {
@@ -291,5 +287,45 @@ jobs:
 `)
 	if len(errs) != 1 || errs[0].Path != "jobs.proxies.preview" || !strings.Contains(errs[0].Message, "orders only fml and none") {
 		t.Fatalf("preview: %v", errs)
+	}
+}
+
+// Counts say "1 unit" and "1 frame"; a one-unit frames job says its frames.
+func TestWhatSingular(t *testing.T) {
+	for _, c := range []struct{ job, want string }{
+		{"{tool: proxies, frames: 1001, with: {plates: p.exr}}", "1 frame in 1 unit"},
+		{"{tool: proxies, frames: 1001-1010, chunk: all, with: {plates: p.exr}}", "10 frames in 1 unit"},
+		{"{tool: proxies, frames: 1001-1048, with: {plates: p.exr}}", "48 frames in 6 units"},
+		{"{tool: transcode, frames: 1001-1048, with: {plates: p.exr}}", "1 unit over 1001-1048"},
+	} {
+		p := mustLower(t, "c4: submit/1\nproject: saltmarsh\nshot: sm0140\ntree: .\njobs:\n  k: "+c.job+"\n")
+		if w := p.Jobs[0].What(); w != c.want {
+			t.Errorf("%s: %q, want %q", c.job, w, c.want)
+		}
+	}
+	if w := (PlannedJob{Once: true, Units: 1}).What(); w != "1 unit" {
+		t.Errorf("a once job with no frames: %q", w)
+	}
+	if Count(1, "frame") != "1 frame" || Count(0, "unit") != "0 units" {
+		t.Fatal(Count(1, "frame"), Count(0, "unit"))
+	}
+}
+
+// A shot names jobs as its stem lowercased, with anything outside
+// [a-z0-9-] made -, repeats collapsed and the ends trimmed; one with
+// nothing left is refused at shot.
+func TestJobStem(t *testing.T) {
+	for in, want := range map[string]string{"sm0220_fx": "sm0220-fx", "SM0220__FX ": "sm0220-fx", "-a.b-": "a-b", "___": "", "日本": ""} {
+		if got := JobStem(in); got != want {
+			t.Errorf("JobStem(%q) = %q, want %q", in, got, want)
+		}
+	}
+	p := mustLower(t, "c4: submit/1\nproject: saltmarsh\nshot: sm0220_FX\ntree: .\njobs:\n  proxies: {tool: proxies, frames: 1-4, with: {plates: p.exr}}\n")
+	if n := p.Jobs[0].Request.Name; n != "sm0220-fx-proxies-v001" || p.Jobs[0].Request.Shot != "sm0220_FX" {
+		t.Fatalf("name %s shot %s", n, p.Jobs[0].Request.Shot)
+	}
+	_, errs := lowerDoc(t, "c4: submit/1\nproject: saltmarsh\nshot: ___\ntree: .\njobs:\n  proxies: {tool: proxies, frames: 1-4, with: {plates: p.exr}}\n")
+	if len(errs) != 1 || errs[0].Path != "shot" || errs[0].Message != "___ can't name a job: use letters, digits and -" || errs[0].Fix != "set name: to override" {
+		t.Fatalf("%v", errs)
 	}
 }

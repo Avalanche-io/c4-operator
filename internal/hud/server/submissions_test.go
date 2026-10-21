@@ -324,3 +324,26 @@ func TestSubmissionFolderBesideErrors(t *testing.T) {
 		t.Fatalf("%d %+v", code, out)
 	}
 }
+
+// A submission for a person is refused for its grant at for:, with POST
+// /jobs's reason; a shot like sm0220_fx names its jobs sm0220-fx-…, and
+// Kubernetes' own words about a name never reach the caller.
+func TestSubmissionForAndNames(t *testing.T) {
+	s := submissionFarm(t)
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	doc := strings.Replace(string(submission(t, "proxies", tree)), `"jobs"`, `"for":"noor","jobs"`, 1)
+	code, out := submit(t, s, api.SubmissionRequest{Submission: []byte(doc), DryRun: true})
+	if code != http.StatusForbidden || len(out.Errors) != 1 || out.Errors[0].Path != "for" || out.Errors[0].Reason != api.RefusedNotSync ||
+		out.Errors[0].Fix == "" {
+		t.Fatalf("for: %d %+v", code, out)
+	}
+	doc = strings.Replace(string(submission(t, "proxies", tree)), `"shot":"sm0140"`, `"shot":"sm0140_fx"`, 1)
+	if code, out := submit(t, s, api.SubmissionRequest{Submission: []byte(doc)}); code != http.StatusCreated || out.Jobs[0].Name != "sm0140-fx-proxies-v001" {
+		t.Fatalf("shot sm0140_fx: %d %+v", code, out)
+	}
+	fe := s.farmWords("proxies", "sm0140_fx-proxies-v001", "show-a", http.StatusBadRequest,
+		errors.New(`name "sm0140_fx-proxies-v001": a lowercase RFC 1123 subdomain must consist of lower case alphanumeric characters`))
+	if fe.Message != "sm0140_fx-proxies-v001 can't name a job: use letters, digits and -" || strings.Contains(fe.Message, "RFC") || fe.code != http.StatusUnprocessableEntity {
+		t.Fatalf("%+v", fe)
+	}
+}
