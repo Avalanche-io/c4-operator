@@ -20,7 +20,7 @@ import (
 var Version = "dev"
 
 // Instructions are sent to clients when they connect.
-const Instructions = `This server operates a render, CI and ML farm on Kubernetes, the same farm the HUD shows. Jobs are named namespace/name.
+const Instructions = `This server operates a farm on Kubernetes that runs render, CI, ML and agents' work, the same farm the HUD shows. Jobs are named namespace/name.
 Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in through a published tool: c4_list_tools, c4_describe_tool, then c4_run_<tool> for one job or c4_submit_job for a submission of several (dry_run first, either way). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), take or accept them (c4_acknowledge_units), or decide what waits for a person, a ruling or an escalated unit (c4_decide). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
 Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. Costs: c4_approve_capacity provisions paid burst capacity.`
 
