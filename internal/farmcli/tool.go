@@ -1,6 +1,7 @@
 package farmcli
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -267,8 +268,12 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 		env = append(env, "C4_FRAMES="+frames, fmt.Sprintf("C4_FRAME_START=%d", u.start), fmt.Sprintf("C4_FRAME_END=%d", u.end))
 		args := append(unitDockerArgs(dir, tree, ctl, env), image, "c4-unit", "run")
 		cmd := exec.CommandContext(ctx, docker, args...)
-		cmd.Stdout, cmd.Stderr = indent(o.W), indent(o.W)
+		var said bytes.Buffer
+		cmd.Stdout, cmd.Stderr = io.MultiWriter(indent(o.W), &said), io.MultiWriter(indent(o.W), &said)
 		if err := cmd.Run(); err != nil {
+			if strings.Contains(said.String(), `no command "run"`) {
+				return fmt.Errorf("unit %s failed: %s carries a c4-unit older than the tool runner (c4-unit run); rebuild the image, or give one with --image", u.label, image)
+			}
 			return fmt.Errorf("unit %s failed: %w%s", u.label, err, outcome(tree))
 		}
 	}
