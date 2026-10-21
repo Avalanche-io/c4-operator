@@ -15,10 +15,13 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+	authzv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	kfake "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -512,5 +515,49 @@ func TestAUnitsJobIsItsOwners(t *testing.T) {
 	refused = nil
 	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=loose", api.SubmitRequest{Project: "show-a", Name: "child4", Spec: spec}, &refused); code != http.StatusForbidden || !strings.Contains(refused["error"], "names no WorkJob as its controller") {
 		t.Fatalf("a unit pod of no job controller: %d %v", code, refused)
+	}
+}
+
+// A unit submits in its owner's name, so outside its parent's namespace the
+// owner must be allowed to create jobs there; in the parent's namespace the
+// owner already was.
+func TestAUnitsJobNeedsItsOwnersRight(t *testing.T) {
+	s := submitFarm(t)
+	ctx := context.Background()
+	m := s.current()
+	m.projects[0].Spec.Namespaces = append(m.projects[0].Spec.Namespaces, "show-a-fx")
+	m.nsProject["show-a-fx"] = "show-a"
+	kube := kfake.NewSimpleClientset()
+	kube.PrependReactor("create", "subjectaccessreviews", func(a ktesting.Action) (bool, runtime.Object, error) {
+		sar := a.(ktesting.CreateAction).GetObject().(*authzv1.SubjectAccessReview)
+		allowed := sar.Spec.User == "lee" && sar.Spec.ResourceAttributes.Namespace == "show-a-fx"
+		return true, &authzv1.SubjectAccessReview{Status: authzv1.SubjectAccessReviewStatus{Allowed: allowed}}, nil
+	})
+	s.Kube = kube
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-2"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+	for _, owner := range []string{"lee", "mallory"} {
+		parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port-" + owner, UID: types.UID("uid-" + owner),
+			Annotations: map[string]string{c4v1.AnnotationOwner: owner}},
+			Spec: c4v1.WorkJobSpec{Class: "agent", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+		if err := s.Client.Create(ctx, parent); err != nil {
+			t.Fatal(err)
+		}
+		s.DevViewers["unit-"+owner] = &api.Viewer{User: "unit:show-a/port-" + owner + "/0", Projects: []string{"show-a"},
+			Unit: &api.UnitViewer{Namespace: "show-a", Job: "port-" + owner, JobUID: string(parent.UID), Unit: "0", Grant: "project"}}
+		// in the parent's own namespace: no question asked, made
+		if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit-"+owner, api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: "here-" + owner, Spec: spec}, nil); code != http.StatusCreated {
+			t.Fatalf("%s: a child in its parent's namespace: %d", owner, code)
+		}
+	}
+	// elsewhere in the project: lee may create jobs there, mallory may not
+	var out api.SubmitResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit-lee", api.SubmitRequest{Project: "show-a", Namespace: "show-a-fx", Name: "there-lee", Spec: spec}, &out); code != http.StatusCreated {
+		t.Fatalf("lee's unit in show-a-fx: %d %+v", code, out)
+	}
+	var refused map[string]string
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit-mallory", api.SubmitRequest{Project: "show-a", Namespace: "show-a-fx", Name: "there-mallory", Spec: spec}, &refused); code != http.StatusForbidden ||
+		!strings.Contains(refused["error"], "mallory, who may not create jobs in show-a-fx") {
+		t.Fatalf("mallory's unit made a job where mallory may not: %d %v", code, refused)
 	}
 }

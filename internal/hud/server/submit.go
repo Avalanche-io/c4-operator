@@ -717,6 +717,24 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		if owner == "" {
 			return api.SubmitResponse{}, http.StatusForbidden, identityError{fmt.Errorf("%s: its own job %s/%s has no owner to submit for", v.User, u.Namespace, u.Job)}
 		}
+		// The job runs on the owner's runners and in the owner's name, so
+		// the owner must be able to make it there, not only the unit. In
+		// its parent's namespace the owner already did; elsewhere in the
+		// project the API server is asked about the owner by name (their
+		// own rights only: groups a sign-in carries are not known here).
+		if ns != parent.Namespace && s.Kube == nil && s.DevViewers == nil {
+			// no client to ask with: never taken as allowed
+			return api.SubmitResponse{}, http.StatusServiceUnavailable, fmt.Errorf("%s: cannot ask whether %s may create jobs in %s: the HUD has no API server client", v.User, owner, ns)
+		}
+		if ns != parent.Namespace && s.Kube != nil {
+			ok, err := s.allowed(ctx, owner, nil, ns, "create", "workjobs", "")
+			if err != nil {
+				return api.SubmitResponse{}, http.StatusServiceUnavailable, fmt.Errorf("%s: could not ask whether %s may create jobs in %s: %v", v.User, owner, ns, err)
+			}
+			if !ok {
+				return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s submits for %s, who may not create jobs in %s: submit it in %s, or give %s the right there", v.User, owner, ns, parent.Namespace, owner)
+			}
+		}
 		job.Annotations[c4v1.AnnotationOwner] = owner
 		job.Annotations[c4v1.AnnotationSubmittedByUnit] = schema.UnitRef(u.Namespace, u.Job, u.JobUID, u.Unit)
 	}
