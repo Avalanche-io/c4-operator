@@ -108,10 +108,6 @@ type Farm interface {
 // ErrNotFound is a job the farm does not have, or will not show.
 var ErrNotFound = errors.New("farm: not found")
 
-// ErrTaken is a job name already used by a job that is not this
-// submission's: another tracker entity's, or someone else's.
-var ErrTaken = errors.New("farm: the job name is taken")
-
 // ErrGone is a cursor the farm's log no longer reaches: Oldest is where
 // it begins now.
 type ErrGone struct{ Oldest int64 }
@@ -234,42 +230,13 @@ func (h *HUD) Submit(ctx context.Context, r JobRequest) (JobRef, error) {
 	err = h.doJSON(ctx, http.MethodPost, "/jobs", in, &out)
 	var ae *APIError
 	if errors.As(err, &ae) && ae.Status == http.StatusConflict {
-		// The name is taken. An earlier attempt of this submission made
-		// it, or someone else did: adopt it only when it serves the same
-		// tracker entity and is owned as this submission would own it.
-		ref := JobRef{r.Namespace, r.Name}
-		j, err := h.Job(ctx, ref)
-		if err != nil {
-			return JobRef{}, fmt.Errorf("reading %s, whose name is taken: %w", ref, err)
-		}
-		if why := notOurs(j, r); why != "" {
-			return JobRef{}, fmt.Errorf("%w: %s %s", ErrTaken, ref, why)
-		}
-		return ref, nil
+		// The name is taken: an earlier attempt created it.
+		return JobRef{r.Namespace, r.Name}, nil
 	}
 	if err != nil {
 		return JobRef{}, err
 	}
 	return JobRef{out.Namespace, out.Name}, nil
-}
-
-// notOurs says why an existing job is not the one r would have made: it
-// serves another tracker entity, or another owner has it (the person r is
-// for, else the tracker's sync itself).
-func notOurs(j *api.Job, r JobRequest) string {
-	if j.TrackerRef != r.TrackerRef {
-		return fmt.Sprintf("serves %q, not %q", j.TrackerRef, r.TrackerRef)
-	}
-	if r.For != "" {
-		if j.Owner != r.For {
-			return fmt.Sprintf("is %s's, not %s's", j.Owner, r.For)
-		}
-		return ""
-	}
-	if j.Owner != c4v1.SyncAccount && j.Owner != c4v1.SyncDevViewer {
-		return fmt.Sprintf("is %s's, not the tracker's sync's", j.Owner)
-	}
-	return ""
 }
 
 func (h *HUD) Job(ctx context.Context, j JobRef) (*api.Job, error) {

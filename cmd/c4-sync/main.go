@@ -34,7 +34,6 @@ import (
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/flow"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/github"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/kitsu"
-	_ "github.com/Avalanche-io/c4-operator/internal/tracker/linear"
 	_ "github.com/Avalanche-io/c4-operator/internal/tracker/mlflow"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/syncer"
 )

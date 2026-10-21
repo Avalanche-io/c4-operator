@@ -2,7 +2,6 @@ package queue
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"maps"
 	"math"
@@ -27,20 +26,24 @@ import (
 // the block itself on a re-check.
 //
 // A re-check is an extra attempt of the unit, like a wake (asks.go):
-// AnnotationRecheck, $C4_RECHECK, $C4_NEEDED and $C4_RECHECK_WHY, mounting
-// the job's inputs and the unit's resume view as they are now. Events
-// start it, never a clock: a unit it waits on or reads succeeds, a unit
-// or path it is about changes, the unit table grows, or a job it is about
-// or reads from finishes. Only units whose reasoning is a model re-check.
-// Exit 0 withdraws the question, with the termination message as the why;
-// exit NeedsExitCode keeps it (with its new text); anything else keeps it.
+// AnnotationRecheck, $C4_RECHECK, $C4_NEEDED, $C4_RECHECK_WHY and
+// $C4_RECHECK_SECONDS (escalation.recheck.seconds, which also bounds the
+// pod), mounting the job's inputs and the unit's resume view as they are
+// now. Events start it, never a clock: a unit it waits on or reads
+// succeeds, a unit or path it is about changes, the unit table grows, or a
+// job it is about or reads from finishes. Only units whose reasoning is a
+// model re-check. Only an explicit withdrawal withdraws the question
+// (reason c4v1.Withdrawn with a why, or exit 0 with "withdrawn: <why>",
+// c4-unit withdraw --why); exit NeedsExitCode keeps it (with its new
+// text); anything else, exit 0 without a withdrawal included, keeps it.
 // No retry is spent and nothing it writes is kept. At most one runs at a
 // time (policy.RecheckInFlight), one per escalation.recheck.minInterval,
 // escalation.recheck.max in all.
 
-// recheckSeconds is how long a re-check may take ($C4_RECHECK_SECONDS):
-// the runner's limit, not a policy value.
-const recheckSeconds = 300
+// recheckGrace is how much longer than its turn (escalation.recheck.seconds)
+// a re-check's pod may live, for its start and the block's last word,
+// before the kubelet stops it (ActiveDeadlineSeconds).
+const recheckGrace = 60
 
 // needsBase is what a question's triggers compare with.
 type needsBase struct {
@@ -126,6 +129,7 @@ func (q *Queue) press(ctx context.Context, v *view, i int, n *needsRec, now time
 		extra["answerBy"] = by.UTC().Format(time.RFC3339)
 	}
 	q.recordPolicyDecision(ctx, v, i, "needs-pressing", why, now, []policy.Use{use}, extra)
+	n.pressingRecord = v.mem.lastRecord(i)
 	q.Log.Info("question pressing", "job", v.key, "unit", i, "why", why)
 }
 
@@ -259,10 +263,16 @@ func (q *Queue) triggered(v *view, i int, n *needsRec, phases map[string]string)
 		if u < 0 || u >= len(plan.Units) || u == i {
 			continue
 		}
-		if m.succeeded[u] {
-			cur.outs[u] = "ok:" + m.unitOut[u] + "@" + m.ended[u].UTC().Format(time.RFC3339Nano)
-		} else {
+		switch {
+		case !m.succeeded[u]:
 			cur.outs[u] = ""
+		case m.unitOut[u] != "":
+			cur.outs[u] = "ok:" + m.unitOut[u]
+		case n.base != nil && strings.HasPrefix(n.base.outs[u], "ok"):
+			// succeeded, its output not known since a restart: as seen
+			cur.outs[u] = n.base.outs[u]
+		default:
+			cur.outs[u] = "ok"
 		}
 	}
 	for k := range jobs {
@@ -278,7 +288,7 @@ func (q *Queue) triggered(v *view, i int, n *needsRec, phases map[string]string)
 	}
 	for _, u := range slices.Sorted(maps.Keys(cur.outs)) {
 		o, had := old.outs[u]
-		if c := cur.outs[u]; had && c != o && strings.HasPrefix(c, "ok:") {
+		if c := cur.outs[u]; had && c != o && strings.HasPrefix(c, "ok") && o != "ok" {
 			if o == "" {
 				return nameOf(m, u) + " finished"
 			}
@@ -335,8 +345,9 @@ func (q *Queue) serveRecheck(ctx context.Context, v *view, i int, n *needsRec, n
 	v.runnable = append(v.runnable, i)
 }
 
-// recheckPod makes pod a re-check of unit idx's question.
-func recheckPod(pod *corev1.Pod, n *needsRec, why string) {
+// recheckPod makes pod a re-check of unit idx's question, its turn
+// bounded by seconds and its pod by seconds and recheckGrace.
+func recheckPod(pod *corev1.Pod, n *needsRec, why string, seconds int) {
 	if pod.Annotations == nil {
 		pod.Annotations = map[string]string{}
 	}
@@ -346,8 +357,10 @@ func recheckPod(pod *corev1.Pod, n *needsRec, why string) {
 			corev1.EnvVar{Name: "C4_RECHECK", Value: "1"},
 			corev1.EnvVar{Name: "C4_NEEDED", Value: n.text},
 			corev1.EnvVar{Name: "C4_RECHECK_WHY", Value: why},
-			corev1.EnvVar{Name: "C4_RECHECK_SECONDS", Value: strconv.Itoa(recheckSeconds)})
+			corev1.EnvVar{Name: "C4_RECHECK_SECONDS", Value: strconv.Itoa(seconds)})
 	}
+	deadline := int64(seconds + recheckGrace)
+	pod.Spec.ActiveDeadlineSeconds = &deadline
 }
 
 // startedRecheck notes a re-check of unit idx's question released.
@@ -370,8 +383,12 @@ func (q *Queue) endRecheck(ctx context.Context, v *view, idx int, p *corev1.Pod,
 	}
 	n.inFlight = false
 	switch {
-	case p.Status.Phase == corev1.PodSucceeded:
+	case p.Status.Phase == corev1.PodSucceeded && withdrawWhy(p) != "":
 		q.withdrawNeeds(ctx, v, idx, "unit:"+v.key+"/"+nameOf(m, idx), withdrawWhy(p), "", now)
+	case p.Status.Phase == corev1.PodSucceeded:
+		// It ended without withdrawing (it ignored the re-check, or said
+		// nothing): still needed.
+		q.Log.Info("a re-check ended without withdrawing; the question stands", "job", v.key, "unit", idx)
 	case isNeeds(p):
 		text, why, about, _ := needsOf(p)
 		if text != n.text || why != n.why {
@@ -387,27 +404,25 @@ func (q *Queue) endRecheck(ctx context.Context, v *view, idx int, p *corev1.Pod,
 	}
 }
 
-// withdrawWhy is why a block withdrew its question: its termination
-// message (a host runner's pod message), plain or {"why": ...}.
+// withdrawWhy is why a re-check's block withdrew its question, or "" if
+// it did not say so: the pod's reason Withdrawn with the why as its
+// message (a host runner), or a container's exit 0 with "withdrawn: <why>"
+// as its termination message (c4-unit withdraw --why). A withdrawal
+// without a why is none.
 func withdrawWhy(p *corev1.Pod) string {
-	msg := p.Status.Message
+	if p.Status.Reason == c4v1.Withdrawn {
+		return strings.TrimSpace(p.Status.Message)
+	}
 	for _, cs := range p.Status.ContainerStatuses {
-		if t := cs.State.Terminated; t != nil && strings.TrimSpace(t.Message) != "" {
-			msg = t.Message
-			break
+		t := cs.State.Terminated
+		if t == nil || t.ExitCode != 0 {
+			continue
+		}
+		if why, ok := strings.CutPrefix(strings.TrimSpace(t.Message), c4v1.WithdrawnPrefix); ok {
+			return strings.TrimSpace(why)
 		}
 	}
-	msg = strings.TrimSpace(msg)
-	var w struct {
-		Why string `json:"why"`
-	}
-	if json.Unmarshal([]byte(msg), &w) == nil && strings.TrimSpace(w.Why) != "" {
-		msg = strings.TrimSpace(w.Why)
-	}
-	if msg == "" {
-		msg = "the unit found on a re-check that it no longer needs it"
-	}
-	return msg
+	return ""
 }
 
 // askAnswerer puts unit idx's question to the job's answerer, if it has

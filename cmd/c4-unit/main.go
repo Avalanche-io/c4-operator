@@ -104,6 +104,9 @@ const (
 	// needsCode is the exit status of a unit that stopped for information
 	// its brief lacked (c4v1.NeedsExitCode).
 	needsCode = 12
+	// withdrawnPrefix opens a re-check's termination message when it
+	// withdraws its question (c4v1.WithdrawnPrefix).
+	withdrawnPrefix = "withdrawn: "
 )
 
 func main() {
@@ -381,8 +384,9 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 		if err := writeAtomic(filepath.Join(out, ".c4", "withdraw"), append(doc, '\n')); err != nil {
 			return 1, err
 		}
-		// the farm reads the why as the re-check's termination message
-		if err := os.WriteFile(terminationLog(e), []byte(w), 0o644); err != nil {
+		// the farm reads the withdrawal as the re-check's termination
+		// message
+		if err := os.WriteFile(terminationLog(e), []byte(withdrawnPrefix+w), 0o644); err != nil {
 			return 1, err
 		}
 		fmt.Fprintln(stdout, "withdrawn: "+w)

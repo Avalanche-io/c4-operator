@@ -18,7 +18,6 @@ may change. Its place in the design is DESIGN.md section 15.2.
 | Flow Production Tracking | `flow`   | Tasks by field; `due_date` (a date)                 | Task status and two fields; a Version per output                     | Version status changes and Notes                 |
 | Kitsu                    | `kitsu`  | tasks by type, status and shot; `due_date` (a date) | comments carrying the task's status; task data; a preview per output | a person's comment moving the task out of review |
 | MLflow                   | `mlflow` | scheduled runs; `c4.deadline` tag                   | run status and `c4.*` tags; a model version per output               | the approve alias; a review tag                  |
-| Linear                   | `linear` | labeled issues; `dueDate` (a date)                  | workflow state by type; one status card; an attachment per output    | state changes by people, with their comments     |
 
 ## What it writes, and what it never writes
 
@@ -100,14 +99,11 @@ namespace:
    - MLflow: the password of a basic-auth user with EDIT on the experiment.
      It needs MANAGE only if c4-sync should create model versions under an
      admin-only model.
-   - Linear: a personal API key limited to the team, or an OAuth app's
-     access token (`actor=app`, so its changes are the app's, not a
-     person's).
 2. **A Role letting c4-sync read those Secrets by name**, and nothing else.
    See `config/samples/tracker-github/role.yaml`.
 3. **The Tracker.** Start from a sample:
-   `config/samples/tracker-github`, `tracker-flow`, `tracker-kitsu`,
-   `tracker-linear` or `tracker-mlflow`.
+   `config/samples/tracker-github`, `tracker-flow`, `tracker-kitsu` or
+   `tracker-mlflow`.
 
 Each Tracker says:
 - `intake`: which entities become jobs, and from what job spec;
@@ -157,11 +153,9 @@ Each Tracker says:
   override that, or to give a needed person a status of their own;
 - `verdictsIn`: which tracker decisions mean approve, rework or accept.
   For Kitsu, a status flagged done approves and one flagged retake asks for
-  rework; name a status (`status:cbb: accept`) to override its flag.
-  For Linear, a move to a completed-type state approves whatever the team
-  calls it; name any other state (`state:Changes Requested: rework`);
+  rework; name a status (`status:cbb: accept`) to override its flag;
 - `people`: tracker users mapped to C4 people: GitHub and Flow logins,
-  Kitsu and Linear emails.
+  Kitsu emails.
 
 **People.** A person's wait (`person:dana`) is served only by the tracker
 user `people` maps to `dana`. Anyone else's decision is refused and
@@ -200,22 +194,15 @@ Deliveries arrive at `POST /webhooks/<namespace>/<tracker>` on the
 `c4-sync` Service (port 80). Put it behind your ingress, or a relay for
 sites that cannot take inbound traffic. Set `webhookSecret` so each
 delivery is verified:
-- GitHub: `X-Hub-Signature-256`. A check-run button (approve, rework)
-  carries its decision in the delivery alone, so without a secret the
-  buttons decide nothing: anyone who could reach the endpoint could
-  otherwise press them as a reviewer;
+- GitHub: `X-Hub-Signature-256`;
 - Flow: `X-SG-SIGNATURE`, `sha1=`;
-- MLflow: `X-MLflow-Signature`, `v1,`, with a five-minute timestamp window;
-- Linear: `Linear-Signature`, hex HMAC-SHA256, with a one-minute timestamp
-  window (`webhookTimestamp`), so a captured delivery cannot be replayed.
+- MLflow: `X-MLflow-Signature`, `v1,`, with a five-minute timestamp window.
 
 Deliveries are only hints. c4-sync also polls the tracker (`events.pollSeconds`)
 and reconciles every link (`events.resyncSeconds`), so a lost delivery
 costs time, never correctness. Flow is read from its event log, which it
 can replay from any entry. Kitsu pushes nothing c4-sync can verify or
 replay (its live events are Socket.IO), so c4-sync reads its event log.
-Linear keeps no event log, so c4-sync polls the team's issues by
-`updatedAt` under the webhooks.
 
 ## Watching it
 
@@ -226,9 +213,7 @@ kubectl -n <ns> describe tracker <name>
 
 A Tracker reports `Ready`, `RateLimited` (with when it resumes) and
 `Intake` (`MilestoneCoversNothing` when a milestone rule names no
-`covers`, or an entity lacks a field it names; `NameTaken` when a job
-someone else made already has the name an entity's job would take, which
-c4-sync never adopts). `kubectl get milestones`
+`covers`, or an entity lacks a field it names). `kubectl get milestones`
 shows each Milestone's due date, how many jobs it covers and their worst
 risk. A TrackerLink's status shows:
 - the summary state last written;
@@ -300,14 +285,10 @@ job does afterwards.
 - Experimental API. The jobs c4-sync submits carry their tracker
   entity (`c4.avalanche.io/tracker-ref`) and the version they follow
   (`spec.follows`), both in their records. A decision relayed from a
-  tracker is signed as `relayed` (or `relayed-party`, by a party
+  tracker is signed as `relayed` (or `relayed-unattributed`, by a party
   such as a model registry), naming the tracker, the entity, the tracker
   user and the stored evidence; the HUD checks it against the Tracker's
   `people`.
 - One c4-sync replica: there is no leader election yet.
-- Tracker request limits are those each vendor publishes (GitHub's,
-  Linear's 2,500 requests an hour per API key), or a conservative default
-  (`rate`) where none are published (Flow, Kitsu).
-- Linear: work comes in by label and state. Delegating an issue to an app
-  user (Linear's agent sessions) and @-mentions in comments are not yet
-  used, and project milestones do not yet become Milestones.
+- Tracker request limits are those each vendor publishes (GitHub's), or a
+  conservative default (`rate`) where none are published (Flow, Kitsu).

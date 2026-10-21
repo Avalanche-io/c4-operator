@@ -142,7 +142,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		isWaiting[i] = true
 	}
 	var lockedU []int
-	var succ, egress, fail, flag, accepted, pre, run, retry, backoff, queued, planned, blockedU, waits, superseded []int
+	var succ, egress, fail, flag, accepted, pre, run, retry, backoff, queued, planned, blockedU, waits, superseded, asking []int
 	for i := 0; i < n; i++ {
 		_, running := v.running[i]
 		switch {
@@ -160,6 +160,10 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			succ = append(succ, i)
 		case m.accepted[i]:
 			accepted = append(accepted, i)
+		case m.openNeeds(i):
+			// stopped on a question that can still heal: not a failure
+			// (needs.go)
+			asking = append(asking, i)
 		case m.flagged(i):
 			flag = append(flag, i)
 		case m.failed[i]:
@@ -183,7 +187,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		Failed: int32(len(fail)), Accepted: int32(len(accepted)), Preflight: int32(len(pre)),
 		Running: int32(len(run)), Retrying: int32(len(retry)), Backoff: int32(len(backoff)), Queued: int32(len(queued)),
 		Planned: int32(len(planned)), Blocked: int32(len(blockedU)), Flagged: int32(len(flag)), Waits: int32(len(waits)),
-		Locked: int32(len(lockedU)), Superseded: int32(len(superseded))}
+		Locked: int32(len(lockedU)), Superseded: int32(len(superseded)), Needs: int32(len(asking))}
 	switch {
 	case v.blocked:
 		st.Units.Blocked, st.Units.Queued, st.Units.Backoff = int32(len(queued)+len(backoff)+len(blockedU)), 0, 0
@@ -193,7 +197,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	st.UnitStates = map[string]string{}
 	for name, set := range map[string][]int{"succeeded": succ, "egress": egress, "failed": fail, "accepted": accepted,
 		"preflight": pre, "running": run, "retrying": retry, "backoff": backoff, "queued": queued,
-		"planned": planned, "blocked": blockedU, "flagged": flag, "waits": waits, "locked": lockedU, "superseded": superseded} {
+		"planned": planned, "blocked": blockedU, "flagged": flag, "waits": waits, "locked": lockedU, "superseded": superseded, "needs": asking} {
 		if len(set) > 0 {
 			st.UnitStates[name] = order.EncodeSet(set)
 		}
@@ -325,6 +329,11 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		st.Phase = "Failed"
 	case finished == n:
 		st.Phase = "Succeeded"
+	case finished+len(fail)+len(flag)+len(asking)+len(v.stuck) == n && active == 0 && len(asking) > 0:
+		// Nothing runs until a question is answered or withdrawn: held,
+		// not failed (NeedsPerson NeedsInformation says why), so the jobs
+		// after it wait rather than give up.
+		st.Phase = "Held"
 	case finished+len(fail)+len(flag)+len(v.stuck) == n && active == 0:
 		// Units waiting on a failed one count with it: they cannot run
 		// until a person acts.

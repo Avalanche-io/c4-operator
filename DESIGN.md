@@ -1830,6 +1830,11 @@ and a sweep planner that spawns trials are all generators.
     - **Supplying it** (`POST /jobs/{ns}/{name}/supply {unit, text}`, MCP
       `c4_supply`, signed) runs the unit again, resuming where it stopped,
       with the text in `$C4_SUPPLIED` and what it asked in `$C4_NEEDED`.
+    - **It holds the job, never fails it.** The unit is in state `needs`
+      (`units.needs`), not `failed`. Once nothing else can run, the job is
+      `Held` with NeedsPerson `NeedsInformation`, so the jobs after it
+      wait rather than give up, and it is not sealed. It fails only if the
+      unit then fails for real.
     - **It is an error that can heal,** graded by state
       (`status.needs[i].state`): `raised` when the unit stops, `pressing`
       once urgent, then `supplied` or `withdrawn`, both final. Each step
@@ -1857,13 +1862,19 @@ and a sweep planner that spawns trials are all generators.
       grows, or a job it names or reads from finishes. Only units whose
       reasoning is a model re-check. A re-check is an extra attempt, as a
       wake is: `c4.avalanche.io/recheck`, `$C4_RECHECK=1`,
-      `$C4_NEEDED`, `$C4_RECHECK_WHY` and `$C4_RECHECK_SECONDS` (300),
-      mounting the inputs and resume view as they are now. Exit 0
-      withdraws the question, its termination message (plain or
-      `{"why"}`) the why; exit 12 keeps it, with its new text; anything
-      else keeps it. No retry is spent and nothing it writes is kept. One
-      at a time, one per `escalation.recheck.minInterval` (10m), at most
-      `escalation.recheck.max` (5); then it waits for a person.
+      `$C4_NEEDED`, `$C4_RECHECK_WHY` and `$C4_RECHECK_SECONDS`
+      (`escalation.recheck.seconds`, 300, the block's turn; the pod's
+      `activeDeadlineSeconds` is a minute more), mounting the inputs and
+      resume view as they are now. Only an explicit withdrawal withdraws
+      the question: `c4-unit withdraw --why` (exit 0 with `withdrawn:
+      <why>` as the termination message), or a host runner's reason
+      `Withdrawn` with the why. Exit 12 keeps it, with its new text;
+      anything else, exit 0 without a withdrawal included, keeps it. No
+      retry is spent and nothing it writes is kept. One at a time, one
+      per `escalation.recheck.minInterval` (10m), at most
+      `escalation.recheck.max` (5); then it waits for a person. What the
+      triggers last saw is in `status.needs[i].seen`, so a restart misses
+      no event.
     - **The lead withdraws it** (`POST
       /jobs/{ns}/{name}/needs/{unit}/withdraw {why}`, MCP
       `c4_withdraw_needs`, signed, the rights of supply). Withdrawn, the
@@ -1871,9 +1882,10 @@ and a sweep planner that spawns trials are all generators.
       `$C4_WITHDRAWN`.
     - **The values are policy** (`internal/work/policy`), read in one
       place: the farm's default, then the Project's
-      `spec.work.escalation`, then the job's params, which may only
-      tighten them (a shorter pressAfter; a longer pressMargin or
-      minInterval; a lower recheck.max or asks.max). A decision a value
+      `spec.work.policy.values` (any key, `asks.max` and `answers`
+      included) or `spec.work.escalation`, then the job's params, which
+      may only tighten them (a shorter pressAfter; a longer pressMargin or
+      minInterval; a lower recheck.max, recheck.seconds or asks.max). A decision a value
       made names it, its value and where it came from (`policy: [{key,
       value, from}]`) in its record and its book entry.
     - **A person answering on purpose** (a creative approval) is a step
@@ -3169,14 +3181,14 @@ Events record which user an agent acted for.
 **As built** (`internal/mcpserver`, on the official Go SDK v1.8.0, which
 speaks MCP 2026-07-28): thirty tools, every one a call to the HUD API.
 
-| group   | built                                                                                                                                                                                                                                                                                                                                         | annotations                           |
-| ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| inspect | `c4_farm_status`, `c4_list_jobs` (filters, `limit`, `offset`, `nextOffset`), `c4_get_job` (units on request), `c4_get_unit` (log tail, events), `c4_list_nodes`, `c4_cache_tiers`, `c4_capacity_and_cost`, `c4_get_capacity_forecast`, `c4_dependency_graph`, `c4_diff_views`, `c4_read_book`, `c4_trace_file`, `c4_verify_custody`           | read-only, closed-world               |
-| plan    | `c4_suggest_deadline` (the suggestion, its source and band), `c4_deadline_options` (what candidate deadlines would take, section 10.7)                                                                                                                                                                                                        | read-only, closed-world               |
-| act     | `c4_hold_job`, `c4_boost_job`, `c4_set_deadline` (with `mode`: pin, suggested, tracking), `c4_move_to_next_session`, `c4_avoid_node`, `c4_disable_node`                                                                                                                                                                                       | idempotent, not destructive           |
-| act     | `c4_requeue_units`                                                                                                                                                                                                                                                                                                                            | destructive (discards results)        |
+| group   | built                                                                                                                                                                                                                                                                                                                                                        | annotations                           |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------- |
+| inspect | `c4_farm_status`, `c4_list_jobs` (filters, `limit`, `offset`, `nextOffset`), `c4_get_job` (units on request), `c4_get_unit` (log tail, events), `c4_list_nodes`, `c4_cache_tiers`, `c4_capacity_and_cost`, `c4_get_capacity_forecast`, `c4_dependency_graph`, `c4_diff_views`, `c4_read_book`, `c4_trace_file`, `c4_verify_custody`                          | read-only, closed-world               |
+| plan    | `c4_suggest_deadline` (the suggestion, its source and band), `c4_deadline_options` (what candidate deadlines would take, section 10.7)                                                                                                                                                                                                                       | read-only, closed-world               |
+| act     | `c4_hold_job`, `c4_boost_job`, `c4_set_deadline` (with `mode`: pin, suggested, tracking), `c4_move_to_next_session`, `c4_avoid_node`, `c4_disable_node`                                                                                                                                                                                                      | idempotent, not destructive           |
+| act     | `c4_requeue_units`                                                                                                                                                                                                                                                                                                                                           | destructive (discards results)        |
 | grant   | `c4_grant`, `c4_list_grants` (read-only), `c4_revoke_grant` (destructive), `c4_list_trackers` (read-only), `c4_list_held_writes` (read-only), `c4_confirm_write`: a person's leave for a tracker to submit work for them, the trackers to choose from (internal/hud/API.md, Grants), and their answer for a tracker write held unconfirmed (docs/c4-sync.md) |                                       |
-| spend   | `c4_approve_capacity`                                                                                                                                                                                                                                                                                                                         | open-world (provisions paid capacity) |
+| spend   | `c4_approve_capacity`                                                                                                                                                                                                                                                                                                                                        | open-world (provisions paid capacity) |
 
 Errors come back as tool results that say what to do next ("Job names are
 namespace/name; call c4_list_jobs to see the jobs you can see"). The tool

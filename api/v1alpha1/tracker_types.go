@@ -41,8 +41,8 @@ type Tracker struct {
 
 // TrackerSpec says which tracker, how to reach it, and what crosses.
 type TrackerSpec struct {
-	// Kind names the adapter: github, flow, kitsu, linear, mlflow (built);
-	// ftrack, ayon, gitlab, jira (designed).
+	// Kind names the adapter: github (built); flow, ftrack, kitsu, ayon,
+	// gitlab, jira, linear, mlflow (designed).
 	Kind string `json:"kind"`
 	// Endpoint is the tracker's API base URL; empty means the adapter's
 	// public default (https://api.github.com for github).

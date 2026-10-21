@@ -313,6 +313,9 @@ type Counts struct {
 	// Superseded counts units a review ended because it chose others:
 	// done, not accepted, out of the job's output.
 	Superseded int `json:"superseded,omitempty"`
+	// Needs counts units stopped on an open question (Job.Needs): not
+	// failed; the job is held until each is answered or withdrawn.
+	Needs int `json:"needs,omitempty"`
 }
 
 type States struct {
@@ -332,6 +335,7 @@ type States struct {
 	Flagged     string `json:"flagged,omitempty"`
 	Locked      string `json:"locked,omitempty"`
 	Superseded  string `json:"superseded,omitempty"`
+	Needs       string `json:"needs,omitempty"`
 }
 
 type Objective struct {
@@ -474,15 +478,12 @@ type Input struct {
 }
 
 type Job struct {
-	Namespace string `json:"namespace"`
-	Name      string `json:"name"`
-	Project   string `json:"project"`
-	Class     string `json:"class"`
-	Driver    string `json:"driver"`
-	Owner     string `json:"owner,omitempty"`
-	// TrackerRef is the tracker entity the job serves
-	// (<tracker>/<type>/<id>), when a tracker's sync submitted it.
-	TrackerRef   string    `json:"trackerRef,omitempty"`
+	Namespace    string    `json:"namespace"`
+	Name         string    `json:"name"`
+	Project      string    `json:"project"`
+	Class        string    `json:"class"`
+	Driver       string    `json:"driver"`
+	Owner        string    `json:"owner,omitempty"`
 	Phase        string    `json:"phase"`
 	Order        string    `json:"order"`
 	Units        Counts    `json:"units"`
@@ -570,6 +571,7 @@ type Needs struct {
 	AnswerBy       *time.Time      `json:"answerBy,omitempty"`
 	PressingAt     *time.Time      `json:"pressingAt,omitempty"`
 	PressingWhy    string          `json:"pressingWhy,omitempty"`
+	PressingRecord string          `json:"pressingRecord,omitempty"`
 	About          []string        `json:"about,omitempty"`
 	Rechecks       *NeedsRechecks  `json:"rechecks,omitempty"`
 	Supplied       string          `json:"supplied,omitempty"`

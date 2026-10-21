@@ -1108,6 +1108,10 @@ type UnitCounts struct {
 	// Superseded units ended because a review chose others: done, not
 	// accepted, and out of the job's output.
 	Superseded int32 `json:"superseded,omitempty"`
+	// Needs counts units stopped on a question nobody has answered or
+	// withdrawn yet: not failed, the job held until it heals.
+	// +optional
+	Needs int32 `json:"needs,omitempty"`
 }
 
 // Ack kinds.
@@ -1212,6 +1216,16 @@ const (
 	NeedsExitCode    = 12
 )
 
+// Withdrawn is the reason of a re-check attempt (AnnotationRecheck) whose
+// block withdrew its question, with the why as the pod's message (a host
+// runner). A container says it by exiting 0 with WithdrawnPrefix and the
+// why as its termination message (c4-unit withdraw --why). Nothing else
+// withdraws a question: a re-check that ends otherwise keeps it.
+const (
+	Withdrawn       = "Withdrawn"
+	WithdrawnPrefix = "withdrawn: "
+)
+
 // WorkAsk is a question one unit asked another (c4-unit ask), or a wait
 // unit asked the unit that serves it (Wait).
 type WorkAsk struct {
@@ -1272,6 +1286,9 @@ type WorkNeeds struct {
 	PressingAt *metav1.Time `json:"pressingAt,omitempty"`
 	// +optional
 	PressingWhy string `json:"pressingWhy,omitempty"`
+	// PressingRecord is the signed decision that made it pressing.
+	// +optional
+	PressingRecord string `json:"pressingRecord,omitempty"`
 	// About is what the question is about, so work landing there re-checks
 	// it: path:<prefix> in the job's tree, unit:<name>, job:<ns>/<name>.
 	// +optional
@@ -1283,6 +1300,21 @@ type WorkNeeds struct {
 	// the lead) and why; the unit runs again without an answer.
 	// +optional
 	Withdrawn *WorkWithdrawal `json:"withdrawn,omitempty"`
+	// Seen is what its re-check triggers last saw, so a restart misses no
+	// event: the unit table's size, the outputs of the units it waits on,
+	// reads or is about (by index; "ok" a unit succeeded whose output is
+	// not known), and the phases of the jobs it is about or reads from.
+	// +optional
+	Seen *WorkNeedsSeen `json:"seen,omitempty"`
+}
+
+// WorkNeedsSeen is what a question's re-check triggers last saw.
+type WorkNeedsSeen struct {
+	Units int32 `json:"units"`
+	// +optional
+	Outputs map[string]string `json:"outputs,omitempty"`
+	// +optional
+	Phases map[string]string `json:"phases,omitempty"`
 }
 
 // WorkRechecks are a block's re-checks of its question: how many ran, the

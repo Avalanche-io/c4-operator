@@ -64,7 +64,7 @@ func TestNeedsInformation(t *testing.T) {
 	tick(t, q)
 	tick(t, q)
 	got := get(t, ns, "briefed")
-	if !slices.Contains(states(t, got, "failed"), 1) || hasPod(t, ns, "briefed", 1) {
+	if !slices.Contains(states(t, got, "needs"), 1) || hasPod(t, ns, "briefed", 1) {
 		t.Fatalf("cut: states %v, pod %v", got.Status.UnitStates, hasPod(t, ns, "briefed", 1))
 	}
 	n := got.Status.Needs["1"]

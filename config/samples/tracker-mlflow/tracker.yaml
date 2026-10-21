@@ -27,7 +27,7 @@ spec:
   webhookSecret: {name: denoiser-mlflow-webhook, key: secret}
   events: {mode: poll, pollSeconds: 60, resyncSeconds: 900}
   people:
-    mlflow-registry: party:ml-leads
+    mlflow-registry: ml-leads
   intake:
   - match:
       type: Run

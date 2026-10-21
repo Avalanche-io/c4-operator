@@ -25,7 +25,7 @@
   ],
   "on": [
     {
-      "deployment": "saltmarsh/node/laptop-1",
+      "deployment": "saltmarsh/node/abyss",
       "binding": "c45smVV94WBzRnBoJNXRRMf1vseR7CCfZEHiDQyJXDnqTbKFxcgNwcRHUR6ms45NGYB3TsMhHEcP1pZBGKeajFypHs",
       "owner": "joshua"
     },

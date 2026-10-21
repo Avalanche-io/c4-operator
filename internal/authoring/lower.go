@@ -60,6 +60,9 @@ type toolJob struct {
 	inputs  []api.SubmitInput
 	env     []corev1.EnvVar
 	measure *c4v1.WorkMeasureSpec
+	// answerer is the unit that answers its units' questions (answers:
+	// {by: unit:<name>}), the job's answerer param.
+	answerer string
 }
 
 // lowerTool lowers one job of a frames or once tool to a POST /jobs
@@ -122,6 +125,9 @@ func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 		if v, ok := params[name]; ok {
 			cp[name] = fmt.Sprint(v)
 		}
+	}
+	if j.answerer != "" {
+		cp["answerer"] = j.answerer
 	}
 	pj, err := json.Marshal(params)
 	if err != nil {

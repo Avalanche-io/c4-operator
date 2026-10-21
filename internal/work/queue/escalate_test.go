@@ -212,7 +212,7 @@ func TestNeedsRecheck(t *testing.T) {
 	got = get(t, ns, "rechecked")
 	n = got.Status.Needs["1"]
 	if n.Text != "the delivery frame rate, 24 or 25" || n.Why != "grade did not settle it" || n.State != needsRaised || n.Rechecks.InFlight ||
-		hasPod(t, ns, "rechecked", 1) || !containsInt(states(t, got, "failed"), 1) {
+		hasPod(t, ns, "rechecked", 1) || !containsInt(states(t, got, "needs"), 1) {
 		t.Fatalf("after the re-check: %+v, states %v", n, got.Status.UnitStates)
 	}
 
@@ -290,7 +290,7 @@ func TestNeedsWithdrawn(t *testing.T) {
 	finishUnit(t, now, ns, "mooted", 2, nil)
 	tick(t, q)
 	tick(t, q)
-	endRecheckPod(t, podOfUnit(t, ns, "mooted", 1), *now, 0, `{"why": "grade settled it: 24 fps"}`)
+	endRecheckPod(t, podOfUnit(t, ns, "mooted", 1), *now, 0, "withdrawn: grade settled it: 24 fps")
 	tick(t, q)
 	tick(t, q)
 	got := get(t, ns, "mooted")
@@ -449,12 +449,12 @@ func TestNeedsBooked(t *testing.T) {
 	before := &c4v1.WorkJobStatus{Needs: map[string]c4v1.WorkNeeds{"4": {Text: "which take?", At: at, State: needsRaised}}}
 	after := before.DeepCopy()
 	n := after.Needs["4"]
-	n.State, n.PressingAt, n.PressingWhy = needsPressing, &later, "unanswered for 2h"
+	n.State, n.PressingAt, n.PressingWhy, n.PressingRecord = needsPressing, &later, "unanswered for 2h", "c4p"
 	after.Needs["4"] = n
 	after.Decisions = []c4v1.WorkDecision{{Unit: 4, At: later, Kind: "needs-pressing", Reason: "unanswered for 2h", Record: "c4p",
 		Policy: []c4v1.WorkPolicyUse{{Key: "escalation.pressAfter", Value: "2h", From: c4v1.WorkPolicyFrom{Scope: "farm"}}}}}
 	ts := transitions("show-a/sh040", "show-a", before, after, later.Time)
-	if len(ts) != 2 || ts[0].Kind != "decision" || ts[1].Kind != "pressing" || ts[1].Message != "pressing: unanswered for 2h" {
+	if len(ts) != 2 || ts[0].Kind != "decision" || ts[1].Kind != "pressing" || ts[1].Message != "pressing: unanswered for 2h" || ts[1].Record != "c4p" {
 		t.Fatalf("pressing: %+v", ts)
 	}
 	if p := ts[0].Policy; len(p) != 1 || p[0].Key != "escalation.pressAfter" || p[0].Value != "2h" || p[0].From.Scope != "farm" {
@@ -467,5 +467,120 @@ func TestNeedsBooked(t *testing.T) {
 	ts = transitions("show-a/sh040", "show-a", after, done, later.Time)
 	if len(ts) != 1 || ts[0].Kind != "needs-withdrawn" || ts[0].Actor != "unit:show-a/sh040/cut" || ts[0].Record != "c4w" || ts[0].Message != "withdrawn by unit:show-a/sh040/cut: moot" {
 		t.Fatalf("withdrawn: %+v", ts)
+	}
+}
+
+func newQueueFrom(q *Queue) *Queue {
+	return &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
+}
+
+// An open question holds the job, never fails it: its unit is in state
+// needs, not failed, the job's phase is Held with NeedsPerson
+// NeedsInformation, and a job after it waits rather than gives up, across
+// a restart. Once the question is withdrawn and the unit then fails for
+// real, the job fails and the job after it is stuck.
+func TestNeedsHoldsTheJob(t *testing.T) {
+	ns, q, now := graphJob(t, "held", func(time.Time) string {
+		return `{"name": "cut"}, {"name": "deliver", "after": ["cut"]}`
+	}, 72*time.Hour)
+	ctx := context.Background()
+	next := job(ns, "next", "graph", "cpu-"+ns, nil, now.Add(72*time.Hour))
+	next.Spec.DependsOn = []string{"held"}
+	if err := k8s.Create(ctx, next); err != nil {
+		t.Fatal(err)
+	}
+	failNeeding(t, podOfUnit(t, ns, "held", 1), *now, "the delivery frame rate", false)
+	tick(t, q)
+	tick(t, q)
+	check := func(when string) {
+		t.Helper()
+		got := get(t, ns, "held")
+		c := meta.FindStatusCondition(got.Status.Conditions, c4v1.ConditionNeedsPerson)
+		if got.Status.Phase != "Held" || !containsInt(states(t, got, "needs"), 1) || len(states(t, got, "failed")) != 0 ||
+			got.Status.Units.Needs != 1 || got.Status.Units.Failed != 0 || got.Status.Finished != nil || c == nil || c.Reason != c4v1.NeedsInformation {
+			t.Fatalf("%s: phase %s, states %v, units %+v, needs person %+v", when, got.Status.Phase, got.Status.UnitStates, got.Status.Units, c)
+		}
+		n := get(t, ns, "next")
+		if n.Status.Phase != "Blocked" {
+			t.Fatalf("%s: the job after it is %s", when, n.Status.Phase)
+		}
+		if c := meta.FindStatusCondition(n.Status.Conditions, c4v1.ConditionNeedsPerson); c != nil {
+			t.Fatalf("%s: the job after it needs a person: %+v", when, c)
+		}
+	}
+	check("raised")
+	q = newQueueFrom(q)
+	tick(t, q)
+	check("after a restart")
+
+	*now = now.Add(time.Minute)
+	withdrawUnit(t, ns, "held", "cut", "the delivery spec is out of scope", *now)
+	tick(t, q)
+	for k := 0; k < 4 && hasPod(t, ns, "held", 1); k++ {
+		*now = now.Add(time.Minute)
+		finish(t, podOfUnit(t, ns, "held", 1), corev1.PodFailed, *now, time.Minute, nil)
+		tick(t, q)
+		tick(t, q)
+	}
+	got := get(t, ns, "held")
+	if got.Status.Phase != "Failed" || !containsInt(states(t, got, "failed"), 1) || got.Status.Units.Needs != 0 {
+		t.Fatalf("failed for real: phase %s, states %v", got.Status.Phase, got.Status.UnitStates)
+	}
+	*now = now.Add(time.Minute) // a change of conditions alone is written at most every statusEvery
+	tick(t, q)
+	if c := meta.FindStatusCondition(get(t, ns, "next").Status.Conditions, c4v1.ConditionNeedsPerson); c == nil || c.Reason != c4v1.NeedsStuck {
+		t.Fatalf("the job after it: %+v", c)
+	}
+}
+
+// Only an explicit withdrawal withdraws: a re-check that exits 0 without
+// one (a block that ignored $C4_RECHECK and ran its task) keeps the
+// question. The re-check's turn and its pod's deadline are
+// escalation.recheck.seconds; a host runner withdraws by reason.
+func TestRecheckNeedsAnExplicitWithdraw(t *testing.T) {
+	ns, q, now := graphJobWith(t, "explicit", map[string]string{"escalation.recheck.seconds": "120", "escalation.recheck.minInterval": "10m"}, func(time.Time) string {
+		return `{"name": "cut", "reasoning": {"does": "model"}}, {"name": "grade"}, {"name": "dub"}, {"name": "deliver", "after": ["cut", "grade", "dub"]}`
+	}, 72*time.Hour)
+	failNeeding(t, podOfUnit(t, ns, "explicit", 1), *now, "the delivery frame rate\nabout: unit:grade, unit:dub", false)
+	tick(t, q)
+	// A restart between the question and the work it is about loses no
+	// event: what the triggers saw is in status.
+	q = newQueueFrom(q)
+	tick(t, q)
+	*now = now.Add(time.Minute)
+	finishUnit(t, now, ns, "explicit", 2, nil)
+	tick(t, q)
+	tick(t, q)
+	p := podOfUnit(t, ns, "explicit", 1)
+	if p.Annotations[c4v1.AnnotationRecheck] != "grade finished" || envOf(p.Spec.Containers[0], "C4_RECHECK_SECONDS") != "120" ||
+		p.Spec.ActiveDeadlineSeconds == nil || *p.Spec.ActiveDeadlineSeconds != 120+recheckGrace {
+		t.Fatalf("re-check pod: %v, deadline %v", p.Annotations, p.Spec.ActiveDeadlineSeconds)
+	}
+	endRecheckPod(t, p, *now, 0, "rendered 48 frames")
+	tick(t, q)
+	tick(t, q)
+	got := get(t, ns, "explicit")
+	if n := got.Status.Needs["1"]; n.State != needsRaised || n.Withdrawn != nil || hasPod(t, ns, "explicit", 1) || len(decisionsOf(got, "needs-withdrawn")) != 0 {
+		t.Fatalf("exit 0 without a withdrawal: %+v", n)
+	}
+
+	// A host runner says it by the pod's reason.
+	*now = now.Add(11 * time.Minute)
+	finishUnit(t, now, ns, "explicit", 3, nil)
+	tick(t, q)
+	tick(t, q)
+	p = podOfUnit(t, ns, "explicit", 1)
+	if p.Annotations[c4v1.AnnotationRecheck] != "dub finished" {
+		t.Fatalf("second re-check: %v", p.Annotations)
+	}
+	p.Status.Phase, p.Status.Reason, p.Status.Message = corev1.PodSucceeded, c4v1.Withdrawn, "dub settled it: 25 fps"
+	p.Status.StartTime = &metav1.Time{Time: now.Add(-time.Minute)}
+	if err := k8s.Status().Update(context.Background(), p); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	tick(t, q)
+	if n := get(t, ns, "explicit").Status.Needs["1"]; n.State != needsWithdrawn || n.Withdrawn.Why != "dub settled it: 25 fps" {
+		t.Fatalf("a host runner's withdrawal: %+v", n)
 	}
 }

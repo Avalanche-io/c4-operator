@@ -29,6 +29,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 	"github.com/Avalanche-io/c4-operator/work/forecast"
 	"github.com/Avalanche-io/c4-operator/work/order"
@@ -340,6 +341,10 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		m.succeeded[i] = true
 	}
 	for _, i := range decode(st.UnitStates["failed"]) {
+		m.failed[i] = true
+	}
+	// A unit stopped on an open question is failed in memory (needs.go).
+	for _, i := range decode(st.UnitStates["needs"]) {
 		m.failed[i] = true
 	}
 	for _, i := range decode(st.UnitStates["superseded"]) {
@@ -1528,7 +1533,8 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		recheck := v.rechecking[idx]
 		if recheck != "" {
 			// Released only to re-check its question (escalate.go).
-			recheckPod(pod, v.mem.needs[idx], recheck)
+			secs, _ := policy.Int(v.job, q.projectOf(v), idx, policy.RecheckSeconds)
+			recheckPod(pod, v.mem.needs[idx], recheck, secs)
 		}
 		if tools != nil {
 			applyTools(pod, v.job.Name, tools, q.proxyURL(), q.hudURL())

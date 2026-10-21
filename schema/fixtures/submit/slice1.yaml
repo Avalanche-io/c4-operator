@@ -38,9 +38,9 @@ refusals:
     message: pyro-sim needs licences (sesi/hbatch), which this farm cannot count yet
     fix: use a version of the tool that declares none for now
   answers-lead:
-  - path: jobs.port.answers
-    message: answering agents cannot run on this farm yet
-    fix: 'remove answers: for now'
+  - path: jobs.port.answers.by
+    message: a lead answering a job's questions cannot run on this farm yet
+    fix: 'name a unit of the job: unit:<name>'
   - path: jobs.port.plan
     message: this farm cannot run plans yet
     fix: submit the plan's blocks as jobs for now
@@ -48,9 +48,9 @@ refusals:
     message: git trees cannot be submitted on this farm yet
     fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
   answers-tool:
-  - path: jobs.port.answers
-    message: answering agents cannot run on this farm yet
-    fix: 'remove answers: for now'
+  - path: jobs.port.answers.by
+    message: a tool answering a job's questions cannot run on this farm yet
+    fix: 'name a unit of the job: unit:<name>'
   - path: jobs.port.plan
     message: this farm cannot run plans yet
     fix: submit the plan's blocks as jobs for now
@@ -58,9 +58,6 @@ refusals:
     message: git trees cannot be submitted on this farm yet
     fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
   answers-unit:
-  - path: jobs.port.answers
-    message: answering agents cannot run on this farm yet
-    fix: 'remove answers: for now'
   - path: jobs.port.plan
     message: this farm cannot run plans yet
     fix: submit the plan's blocks as jobs for now
@@ -157,9 +154,9 @@ refusals:
     message: policies cannot be applied on this farm yet
     fix: 'remove policy: for now'
   port:
-  - path: jobs.port.answers
-    message: answering agents cannot run on this farm yet
-    fix: 'remove answers: for now'
+  - path: jobs.port.answers.by
+    message: a tool answering a job's questions cannot run on this farm yet
+    fix: 'name a unit of the job: unit:<name>'
   - path: jobs.port.plan
     message: this farm cannot run plans yet
     fix: submit the plan's blocks as jobs for now

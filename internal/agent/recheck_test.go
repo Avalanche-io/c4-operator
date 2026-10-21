@@ -195,7 +195,7 @@ func TestPodBlockRechecks(t *testing.T) {
 		code int
 		msg  string
 	}{
-		{"withdraws", map[string]string{"FAKE_NEEDS": "", "FAKE_WITHDRAW": `{"why": "schema fixes 24 fps"}`}, PodBlockDone, "schema fixes 24 fps"},
+		{"withdraws", map[string]string{"FAKE_NEEDS": "", "FAKE_WITHDRAW": `{"why": "schema fixes 24 fps"}`}, PodBlockDone, "withdrawn: schema fixes 24 fps"},
 		{"keeps it", map[string]string{"FAKE_NEEDS": `{"needs": "24 or 25 for the delivery"}`}, PodBlockNeedsInformation, "24 or 25 for the delivery"},
 		{"decides nothing", map[string]string{"FAKE_NEEDS": "", "FAKE_QUIET": "1"}, PodBlockNeedsInformation, "the delivery frame rate\nabout: unit:schema"},
 		{"past its time", map[string]string{"FAKE_NEEDS": "", "FAKE_SLEEP": "20", EnvRecheckSeconds: "1"}, PodBlockNeedsInformation, "the delivery frame rate\nabout: unit:schema"},

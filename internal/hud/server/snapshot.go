@@ -197,7 +197,6 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		Nudge:     api.Nudge{Hold: j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop, Boost: num(j.Spec.Nudge.Boost)},
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}
 	aj.Shot = j.Labels[LabelShot]
-	aj.TrackerRef = j.Annotations[c4v1.AnnotationTrackerRef]
 	aj.Work = r.work
 	if f := j.Spec.Forecast; f != nil {
 		aj.Forecast = &api.JobForecast{SlotHours: f.SlotHours, SD: f.SD, UnitHours: f.UnitHours, Exists: f.Exists}
@@ -225,12 +224,12 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	aj.Units = api.Counts{Total: int(u.Total), Queued: int(u.Queued), Blocked: int(u.Blocked), Running: int(u.Running),
 		Retrying: int(u.Retrying), Succeeded: int(u.Succeeded), Failed: int(u.Failed), Held: int(u.Held),
 		Preflight: int(u.Preflight), Backoff: int(u.Backoff), Egress: int(u.Egress), Accepted: int(u.Accepted), Waits: int(u.Waits),
-		Unevaluated: int(u.Planned), Planned: int(u.Planned), Flagged: int(u.Flagged), Locked: int(u.Locked), Reused: int(u.Reused), Superseded: int(u.Superseded)}
+		Unevaluated: int(u.Planned), Planned: int(u.Planned), Flagged: int(u.Flagged), Locked: int(u.Locked), Reused: int(u.Reused), Superseded: int(u.Superseded), Needs: int(u.Needs)}
 	us := st.UnitStates
 	aj.UnitStates = api.States{Queued: us["queued"], Blocked: us["blocked"], Running: us["running"], Retrying: us["retrying"],
 		Succeeded: us["succeeded"], Failed: us["failed"], Preflight: us["preflight"], Backoff: us["backoff"],
 		Egress: us["egress"], Accepted: us["accepted"], Waits: us["waits"],
-		Unevaluated: us["planned"], Planned: us["planned"], Flagged: us["flagged"], Locked: us["locked"], Superseded: us["superseded"]}
+		Unevaluated: us["planned"], Planned: us["planned"], Flagged: us["flagged"], Locked: us["locked"], Superseded: us["superseded"], Needs: us["needs"]}
 	if sp := st.Spend; sp != nil {
 		f := func(x string) float64 { v, _ := strconv.ParseFloat(x, 64); return v }
 		aj.Spend = &api.Spend{ModelUnits: int(sp.ModelUnits), ProceduralUnits: int(sp.ProceduralUnits), ModelTokens: sp.ModelTokens, UnpricedTokens: sp.UnpricedTokens,
@@ -731,7 +730,7 @@ func needsOf(n c4v1.WorkNeeds) api.Needs {
 		state = "raised"
 	}
 	an := api.Needs{Text: n.Text, Why: n.Why, At: n.At.Time.UTC(), Record: n.Record, State: state, RaisedAt: n.At.Time.UTC(),
-		AnswerBy: at(n.AnswerBy), PressingAt: at(n.PressingAt), PressingWhy: n.PressingWhy, About: n.About,
+		AnswerBy: at(n.AnswerBy), PressingAt: at(n.PressingAt), PressingWhy: n.PressingWhy, PressingRecord: n.PressingRecord, About: n.About,
 		Supplied: n.Supplied, By: n.By, SuppliedAt: at(n.SuppliedAt), SuppliedRecord: n.SuppliedRecord}
 	if r := n.Rechecks; r != nil {
 		an.Rechecks = &api.NeedsRechecks{Done: int(r.Done), Max: int(r.Max), UsedUp: r.Done >= r.Max, LastAt: at(r.LastAt),

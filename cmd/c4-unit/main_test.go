@@ -350,7 +350,8 @@ func TestAskAndAnswer(t *testing.T) {
 }
 
 // A question names the work whose landing may settle it; a re-check, and
-// only a re-check, withdraws it, with the why as the termination message.
+// only a re-check, withdraws it, saying so with the why as the termination
+// message.
 func TestNeedsAboutAndWithdraw(t *testing.T) {
 	log := filepath.Join(t.TempDir(), "termination-log")
 	out := t.TempDir()
@@ -374,7 +375,7 @@ func TestNeedsAboutAndWithdraw(t *testing.T) {
 	if c, err := run([]string{"withdraw", "--why", "schema fixes 24 fps"}, &buf, e); c != 0 || err != nil {
 		t.Fatalf("withdraw: %d %v", c, err)
 	}
-	if b, _ := os.ReadFile(log); string(b) != "schema fixes 24 fps" {
+	if b, _ := os.ReadFile(log); string(b) != "withdrawn: schema fixes 24 fps" {
 		t.Fatalf("termination message %q", b)
 	}
 	if b, _ := os.ReadFile(filepath.Join(out, ".c4", "withdraw")); string(b) != `{"why":"schema fixes 24 fps"}`+"\n" {

@@ -12,6 +12,8 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
 // recheckDone ends a re-check on a host runner at its turn's end: Succeeded
@@ -23,7 +25,7 @@ func (r *Runner) recheckDone(ctx context.Context, p *corev1.Pod, m *Member, u Un
 	if !withdrawn {
 		return r.needsInformation(ctx, p, m, text)
 	}
-	return r.finish(ctx, p, corev1.PodSucceeded, "Withdrawn", text, 0)
+	return r.finish(ctx, p, corev1.PodSucceeded, c4v1.Withdrawn, text, 0)
 }
 
 // A block that stopped for information its brief lacked (needs.json, exit
@@ -31,7 +33,8 @@ func (r *Runner) recheckDone(ctx context.Context, p *corev1.Pod, m *Member, u Un
 // runs a short extra attempt of it, a re-check, to say whether its question
 // still applies. The re-check resumes the block's session for one turn,
 // told to decide only, and ends at that turn's end: a withdrawal (.c4/withdraw,
-// {"why": "..."}) ends it with exit 0 and the why as its message; needs.json
+// {"why": "..."}) ends it with exit 0 and "withdrawn: <why>" as its
+// message (a host runner: reason Withdrawn, the why); needs.json
 // again ends it with exit 12 and the new text; neither, or a turn past its
 // time, is still needed, with the text it had.
 const (
@@ -160,7 +163,7 @@ func (b *PodBlock) recheck(ctx context.Context, m *Member, u UnitDirs, args []st
 	if !withdrawn {
 		return b.needsInformation(m, text)
 	}
-	if err := os.WriteFile(b.terminationLog(), []byte(text), 0o644); err != nil {
+	if err := os.WriteFile(b.terminationLog(), []byte(c4v1.WithdrawnPrefix+text), 0o644); err != nil {
 		return 1, err
 	}
 	return PodBlockDone, nil

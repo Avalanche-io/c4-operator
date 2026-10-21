@@ -385,8 +385,9 @@ func (s *Server) handleAck(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	failed, _ := order.DecodeSet(rec.job.Status.UnitStates["failed"])
+	asking, _ := order.DecodeSet(rec.job.Status.UnitStates["needs"])
 	isFailed := map[int]bool{}
-	for _, i := range failed {
+	for _, i := range append(failed, asking...) {
 		isFailed[i] = true
 	}
 	var take []int
@@ -887,7 +888,7 @@ func (s *Server) handleSteer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	switch st := unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx]; st {
-	case "succeeded", "failed", "accepted", "superseded", "flagged":
+	case "succeeded", "failed", "needs", "accepted", "superseded", "flagged":
 		fail(w, http.StatusConflict, "unit %s has ended (%s): it reads no more messages", ref, st)
 		return
 	}
@@ -989,7 +990,7 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 		idx = n
 	}
 	need, ok := rec.job.Status.Needs[strconv.Itoa(idx)]
-	if idx < 0 || !ok || unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx] != "failed" {
+	if idx < 0 || !ok || !stoppedOnQuestion(rec, idx) {
 		fail(w, http.StatusConflict, "unit %q is not waiting for information", ref)
 		return
 	}
@@ -1089,7 +1090,7 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 		idx = n
 	}
 	need, ok := rec.job.Status.Needs[strconv.Itoa(idx)]
-	if idx < 0 || !ok || need.Supplied != "" || need.Withdrawn != nil || unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx] != "failed" {
+	if idx < 0 || !ok || need.Supplied != "" || need.Withdrawn != nil || !stoppedOnQuestion(rec, idx) {
 		fail(w, http.StatusConflict, "unit %q has no open question", ref)
 		return
 	}
@@ -1151,4 +1152,11 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 		out["record"] = id
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// stoppedOnQuestion reports whether unit idx is stopped on its question:
+// unit state needs (failed, from a queue before held questions).
+func stoppedOnQuestion(rec *jobRec, idx int) bool {
+	st := unitStateMap(&rec.job.Status, len(rec.plan.Units))[idx]
+	return st == "needs" || st == "failed"
 }

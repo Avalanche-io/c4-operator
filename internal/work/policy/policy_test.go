@@ -42,6 +42,25 @@ func TestValue(t *testing.T) {
 		{"no zero asks", job(map[string]string{"maxAsks": "0"}), nil, AsksMax, "3", "farm"},
 		{"answers", job(map[string]string{"answerer": "lead, sup"}), nil, Answers, "lead, sup", "job"},
 	}
+	values := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{
+		Policy:     &c4v1.ProjectPolicy{Values: map[string]string{AsksMax: "2", Answers: "lead", RecheckSeconds: "120", PressAfter: "soon"}},
+		Escalation: &c4v1.ProjectEscalation{PressAfter: &metav1.Duration{Duration: time.Hour}}}}}
+	cases = append(cases, []struct {
+		name         string
+		job          *c4v1.WorkJob
+		project      *c4v1.Project
+		key          string
+		value, scope string
+	}{
+		{"project asks", job(nil), values, AsksMax, "2", "project"},
+		{"project answers", job(nil), values, Answers, "lead", "project"},
+		{"job answers", job(map[string]string{"answerer": "sup"}), values, Answers, "sup", "job"},
+		{"project recheck seconds", job(nil), values, RecheckSeconds, "120", "project"},
+		{"job tightens seconds", job(map[string]string{RecheckSeconds: "60"}), values, RecheckSeconds, "60", "job"},
+		{"job loosens seconds", job(map[string]string{RecheckSeconds: "600"}), values, RecheckSeconds, "120", "project"},
+		{"farm seconds", nil, nil, RecheckSeconds, "300", "farm"},
+		{"a malformed value falls back to escalation", job(nil), values, PressAfter, "1h", "project"},
+	}...)
 	for _, c := range cases {
 		v, from := Value(c.job, c.project, -1, c.key)
 		if v != c.value || from.Scope != c.scope {

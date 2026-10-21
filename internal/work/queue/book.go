@@ -505,7 +505,7 @@ func transitions(job, project string, before, after *c4v1.WorkJobStatus, now tim
 			add("needs", &u, n.At.Time, "", "", n.Record, "needs information: "+n.Text, n.At.UTC().Format(time.RFC3339))
 		}
 		if n.PressingAt != nil && (raised || o.PressingAt == nil) {
-			add("pressing", &u, n.PressingAt.Time, "", "", "", "pressing: "+n.PressingWhy, n.At.UTC().Format(time.RFC3339))
+			add("pressing", &u, n.PressingAt.Time, "", "", n.PressingRecord, "pressing: "+n.PressingWhy, n.At.UTC().Format(time.RFC3339))
 		}
 		if n.Supplied != "" && (raised || o.Supplied == "") {
 			at := now

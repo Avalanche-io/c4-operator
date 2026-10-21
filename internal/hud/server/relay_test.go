@@ -28,7 +28,7 @@ import (
 // A decision made in a tracker is relayed only by the tracker's sync, for
 // that tracker's job, from a tracker user its people map makes the person
 // the wait is for; the record signs it as relayed (or, by a party the map
-// names, relayed-party), with where it came from. A person's own
+// names, relayed-unattributed), with where it came from. A person's own
 // decision in the HUD is direct.
 func TestRelayedDecisions(t *testing.T) {
 	s := farm(t)
@@ -140,7 +140,7 @@ func TestRelayedDecisions(t *testing.T) {
 	if code != http.StatusOK {
 		t.Fatalf("relayed by a party: %d %v", code, out)
 	}
-	if p := record(out); p.Custody != CustodyRelayedParty || p.Actor != "party:ml via tracker github (@mlflow-registry)" {
+	if p := record(out); p.Custody != CustodyRelayedUnattributed || p.Actor != "party:ml via tracker github (@mlflow-registry)" {
 		t.Fatalf("unattributed record: %+v", p)
 	}
 

@@ -122,12 +122,22 @@ func (c *subCtx) refusals() []Error {
 			{"check", "checks cannot run inside a job", j.Check != nil},
 			{"approve", "approvals cannot be part of a job", j.Approve != nil},
 			{"wait", "waits cannot be part of a job", j.Wait != nil},
-			{"answers", "answering agents cannot run", j.Answers != nil},
 			{"uses", "a generator's children cannot run", len(j.Uses) > 0},
 			{"over", "units over more than frames cannot run", len(j.Over) > 0},
 		} {
 			if f.set {
 				errs = append(errs, errf(p+"."+f.field, "remove "+f.field+": for now", "%s on this farm yet", f.what))
+			}
+		}
+		if a := j.Answers; a != nil {
+			// Only a unit of the job answers its questions for now.
+			switch {
+			case a.By == "lead":
+				errs = append(errs, errf(p+".answers.by", "name a unit of the job: unit:<name>", "a lead answering a job's questions cannot run on this farm yet"))
+			case strings.HasPrefix(a.By, "tool:"):
+				errs = append(errs, errf(p+".answers.by", "name a unit of the job: unit:<name>", "a tool answering a job's questions cannot run on this farm yet"))
+			case len(a.With) > 0:
+				errs = append(errs, errf(p+".answers.with", "remove answers.with: for now", "settings for an answering unit cannot be applied on this farm yet"))
 			}
 		}
 		switch pv := j.Preview; {
@@ -174,6 +184,9 @@ func (c *subCtx) lower() (*Plan, []Error) {
 		tj := toolJob{tool: r.tool, ref: r.ref, project: c.project, ns: c.ns, root: root, shot: sub.Shot,
 			name: names[j.Key], stage: j.Key, frames: frames, with: j.With, size: j.Size, needs: j.Needs,
 			pools: j.Pools, retries: j.Retries, chunk: j.Chunk, order: j.Order, env: env}
+		if a := j.Answers; a != nil {
+			tj.answerer, _ = strings.CutPrefix(a.By, "unit:")
+		}
 		if r.tool.Kind == "once" {
 			tj.frames = ""
 			if frameParam(r.tool) != nil {

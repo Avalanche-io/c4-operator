@@ -26,7 +26,7 @@ func TestParse(t *testing.T) {
 		t.Fatal("a 1s interval should be refused")
 	}
 	out.Reset()
-	if _, err := parse([]string{"--version"}, &out); err != errVersion || !strings.Contains(out.String(), "flow, github, kitsu, linear, mlflow") {
+	if _, err := parse([]string{"--version"}, &out); err != errVersion || !strings.Contains(out.String(), "flow, github, kitsu, mlflow") {
 		t.Fatalf("version: %v %q", err, out.String())
 	}
 }
@@ -73,7 +73,7 @@ func TestSampleMLflowTracker(t *testing.T) {
 	if err := yaml.UnmarshalStrict(b, &tr); err != nil {
 		t.Fatal(err)
 	}
-	if tr.Spec.Kind != "mlflow" || tr.Spec.People["mlflow-registry"] != "party:ml-leads" || tr.Spec.Intake[0].Match.Fields["status"] != "SCHEDULED" {
+	if tr.Spec.Kind != "mlflow" || tr.Spec.People["mlflow-registry"] != "ml-leads" || tr.Spec.Intake[0].Match.Fields["status"] != "SCHEDULED" {
 		t.Fatalf("sample: %+v", tr.Spec)
 	}
 }
@@ -94,24 +94,5 @@ func TestSampleKitsuTracker(t *testing.T) {
 	}
 	if _, err := tracker.New(tr.Spec.Kind, tracker.Config{Endpoint: tr.Spec.Endpoint, Scope: tr.Spec.Scope}); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestSampleLinearTracker(t *testing.T) {
-	b, err := os.ReadFile("../../config/samples/tracker-linear/tracker.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var tr c4v1.Tracker
-	if err := yaml.UnmarshalStrict(b, &tr); err != nil {
-		t.Fatal(err)
-	}
-	in := tr.Spec.Intake[0]
-	if tr.Spec.Kind != "linear" || tr.Spec.Scope["team"] != "ENG" || len(in.Match.Labels) != 2 || in.Rework != "nextVersion" ||
-		tr.Spec.VerdictsIn["state:Changes Requested"] != "rework" || tr.Spec.People["dana@example.com"] != "dana" {
-		t.Fatalf("sample: %+v", tr.Spec)
-	}
-	if _, err := tracker.New(tr.Spec.Kind, tracker.Config{Scope: tr.Spec.Scope}); err != nil {
-		t.Fatalf("c4-sync builds the sample's adapter: %v", err)
 	}
 }

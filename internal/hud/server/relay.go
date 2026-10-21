@@ -23,9 +23,9 @@ import (
 
 // Custody grades of a decision.
 const (
-	CustodyDirect       = "direct"
-	CustodyRelayed      = "relayed"
-	CustodyRelayedParty = "relayed-party"
+	CustodyDirect              = "direct"
+	CustodyRelayed             = "relayed"
+	CustodyRelayedUnattributed = "relayed-unattributed"
 	// CustodyStandIn: someone the farm and the project let stand in
 	// decided a person's wait for them (whomay.go).
 	CustodyStandIn = "stand-in"
@@ -62,7 +62,7 @@ func (s *Server) relayed(ctx context.Context, v *api.Viewer, rec *jobRec, wait *
 	}
 	grade := CustodyRelayed
 	if strings.HasPrefix(mapped, "party:") {
-		grade = CustodyRelayedParty
+		grade = CustodyRelayedUnattributed
 	}
 	if !strings.HasPrefix(wait.Server, "person:") && !strings.HasPrefix(wait.Server, "party:") {
 		return "", "", refuse("the wait is for %s, which a tracker cannot serve", wait.Server)

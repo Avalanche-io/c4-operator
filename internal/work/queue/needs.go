@@ -59,6 +59,8 @@ type needsRec struct {
 	answerBy    time.Time
 	pressingAt  time.Time
 	pressingWhy string
+	// pressingRecord is the decision that made it pressing.
+	pressingRecord string
 	// withdrawn says who withdrew it and why.
 	withdrawn *c4v1.WorkWithdrawal
 	// The block's re-checks: how many ran, the most allowed, the last and
@@ -75,8 +77,7 @@ type needsRec struct {
 	model      bool
 	// askID is the question put to the job's answerer, if any.
 	askID string
-	// base is what the triggers compare with (memory only: after a
-	// restart, from what the queue sees first).
+	// base is what the triggers compare with (status.needs[i].seen).
 	base *needsBase
 }
 
@@ -320,7 +321,19 @@ func needsStatus(m *jobMem) map[string]c4v1.WorkNeeds {
 		w := c4v1.WorkNeeds{Text: n.text, Why: n.why, At: metav1.Time{Time: n.at.Truncate(time.Second)},
 			Record: n.record, Supplied: n.supplied, By: n.by, SuppliedAt: ts(n.suppliedAt), SuppliedRecord: n.suppliedRecord,
 			State: n.state, AnswerBy: ts(n.answerBy), PressingAt: ts(n.pressingAt), PressingWhy: n.pressingWhy,
-			About: n.about, Withdrawn: n.withdrawn}
+			PressingRecord: n.pressingRecord, About: n.about, Withdrawn: n.withdrawn}
+		if b := n.base; b != nil && n.open() {
+			w.Seen = &c4v1.WorkNeedsSeen{Units: int32(b.units)}
+			for u, o := range b.outs {
+				if w.Seen.Outputs == nil {
+					w.Seen.Outputs = map[string]string{}
+				}
+				w.Seen.Outputs[strconv.Itoa(u)] = o
+			}
+			if len(b.phases) > 0 {
+				w.Seen.Phases = b.phases
+			}
+		}
 		if n.model {
 			w.Rechecks = &c4v1.WorkRechecks{Done: int32(n.rechecks), Max: int32(n.recheckMax), LastAt: ts(n.lastCheck),
 				LastWhy: n.lastWhy, InFlight: n.inFlight}
@@ -349,7 +362,19 @@ func (m *jobMem) loadNeeds(st *c4v1.WorkJobStatus) {
 		}
 		n := &needsRec{text: w.Text, why: w.Why, about: w.About, record: w.Record, at: w.At.Time, state: w.State,
 			supplied: w.Supplied, by: w.By, suppliedAt: ts(w.SuppliedAt), suppliedRecord: w.SuppliedRecord,
-			answerBy: ts(w.AnswerBy), pressingAt: ts(w.PressingAt), pressingWhy: w.PressingWhy, withdrawn: w.Withdrawn}
+			answerBy: ts(w.AnswerBy), pressingAt: ts(w.PressingAt), pressingWhy: w.PressingWhy, pressingRecord: w.PressingRecord,
+			withdrawn: w.Withdrawn}
+		if s := w.Seen; s != nil {
+			n.base = &needsBase{units: int(s.Units), outs: map[int]string{}, phases: map[string]string{}}
+			for k, o := range s.Outputs {
+				if u, err := strconv.Atoi(k); err == nil {
+					n.base.outs[u] = o
+				}
+			}
+			for k, ph := range s.Phases {
+				n.base.phases[k] = ph
+			}
+		}
 		switch {
 		case n.state != "":
 		case n.supplied != "":

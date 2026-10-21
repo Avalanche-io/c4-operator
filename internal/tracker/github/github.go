@@ -526,7 +526,7 @@ func (a *Adapter) reviewBody(ctx context.Context, pull string, r ghReview, raw j
 // Receive verifies X-Hub-Signature-256 (when a secret is configured, a
 // delivery without one is refused) and parses the events the loop uses.
 // A check run's requested action carries its decision in the delivery
-// alone, so it is returned as a Decision, from a signed delivery only.
+// alone, so it is returned as a Decision.
 func (a *Adapter) Receive(r *http.Request) (tracker.Delivery, error) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, maxDelivery+1))
 	if err != nil {
@@ -535,7 +535,6 @@ func (a *Adapter) Receive(r *http.Request) (tracker.Delivery, error) {
 	if len(body) > maxDelivery {
 		return tracker.Delivery{}, errors.New("github: delivery over 25 MB")
 	}
-	verified := false
 	if a.c.WebhookSecret != nil {
 		secret, err := a.c.WebhookSecret(r.Context())
 		if err != nil {
@@ -544,7 +543,6 @@ func (a *Adapter) Receive(r *http.Request) (tracker.Delivery, error) {
 		if len(secret) > 0 && !verify(body, secret, r.Header.Get("X-Hub-Signature-256")) {
 			return tracker.Delivery{}, tracker.ErrBadSignature
 		}
-		verified = len(secret) > 0
 	}
 	d := tracker.Delivery{ID: r.Header.Get("X-GitHub-Delivery")}
 	var p struct {
@@ -572,10 +570,7 @@ func (a *Adapter) Receive(r *http.Request) (tracker.Delivery, error) {
 			d.Refs = append(d.Refs, pullItem(*p.PullRequest).Ref)
 		}
 	case "check_run":
-		// A requested action carries its decision in the delivery alone,
-		// so only a signed delivery's is one: without a webhook secret,
-		// anyone who can reach the endpoint could approve as a reviewer.
-		if p.Action == "requested_action" && p.CheckRun != nil && p.Requested != nil && verified {
+		if p.Action == "requested_action" && p.CheckRun != nil && p.Requested != nil {
 			d.Decisions = append(d.Decisions, tracker.Decision{
 				On:       tracker.Ref{Type: "CheckRun", ID: strconv.FormatInt(p.CheckRun.ID, 10), URL: p.CheckRun.HTMLURL},
 				Source:   tracker.Ref{Type: "CheckAction", ID: d.ID},

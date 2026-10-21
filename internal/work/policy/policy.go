@@ -7,7 +7,8 @@
 //
 // A job may tighten a value its project or the farm sets, never loosen it:
 // a shorter pressAfter, a longer pressMargin or recheck.minInterval, a
-// lower recheck.max or asks.max. A looser job value is ignored.
+// lower recheck.max, recheck.seconds or asks.max. A looser job value is
+// ignored.
 package policy
 
 import (
@@ -31,6 +32,9 @@ const (
 	// RecheckMinInterval is the least time between two re-checks of one
 	// question (10m).
 	RecheckMinInterval = "escalation.recheck.minInterval"
+	// RecheckSeconds is how long one re-check may run, in seconds (300):
+	// the block's turn ($C4_RECHECK_SECONDS) and the pod's deadline.
+	RecheckSeconds = "escalation.recheck.seconds"
 	// AsksMax is how many questions a unit may have open (3).
 	AsksMax = "asks.max"
 	// Answers is who answers a unit's questions, in order: unit names of
@@ -73,6 +77,7 @@ var tighter = map[string]func(a, b string) bool{
 	PressMargin:        func(a, b string) bool { return dur(a) >= dur(b) },
 	RecheckMinInterval: func(a, b string) bool { return dur(a) >= dur(b) },
 	RecheckMax:         func(a, b string) bool { return num(a) <= num(b) },
+	RecheckSeconds:     func(a, b string) bool { return num(a) <= num(b) },
 	AsksMax:            func(a, b string) bool { return num(a) <= num(b) },
 }
 
@@ -81,6 +86,7 @@ var defaults = map[string]string{
 	PressMargin:        "15m",
 	RecheckMax:         "5",
 	RecheckMinInterval: "10m",
+	RecheckSeconds:     "300",
 	AsksMax:            "3",
 	Answers:            "",
 }
@@ -92,13 +98,15 @@ var jobParam = map[string]string{
 	PressMargin:        PressMargin,
 	RecheckMax:         RecheckMax,
 	RecheckMinInterval: RecheckMinInterval,
+	RecheckSeconds:     RecheckSeconds,
 	AsksMax:            "maxAsks",
 	Answers:            "answerer",
 }
 
 // Value is key's value for unit of job (unit -1 for the job), and where
-// it came from: the farm's default, then the job's Project, then the job,
-// which may only tighten what is above it.
+// it came from: the farm's default, then the job's Project (its
+// spec.work.policy.values, or spec.work.escalation), then the job, which
+// may only tighten what is above it.
 func Value(job *c4v1.WorkJob, project *c4v1.Project, unit int, key string) (string, From) {
 	v, from := defaults[key], From{Scope: "farm"}
 	if p := projectValue(project, key); p != "" && valid(key, p) {
@@ -151,11 +159,21 @@ func Record(uses ...Use) []map[string]any {
 	return out
 }
 
+// projectValue is key's value for project p: spec.work.policy.values, any
+// key, else spec.work.escalation for the escalation keys.
 func projectValue(p *c4v1.Project, key string) string {
-	if p == nil || p.Spec.Work == nil || p.Spec.Work.Escalation == nil {
+	if p == nil || p.Spec.Work == nil {
 		return ""
 	}
+	if pol := p.Spec.Work.Policy; pol != nil {
+		if s := strings.TrimSpace(pol.Values[key]); s != "" && valid(key, s) {
+			return s
+		}
+	}
 	e := p.Spec.Work.Escalation
+	if e == nil {
+		return ""
+	}
 	switch key {
 	case PressAfter:
 		if e.PressAfter != nil {
@@ -197,7 +215,7 @@ func valid(key, s string) bool {
 	case RecheckMax:
 		n, err := strconv.Atoi(s)
 		return err == nil && n >= 0
-	case AsksMax:
+	case AsksMax, RecheckSeconds:
 		n, err := strconv.Atoi(s)
 		return err == nil && n > 0
 	}

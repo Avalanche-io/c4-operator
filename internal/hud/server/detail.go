@@ -445,7 +445,7 @@ func unitStateMap(st *c4v1.WorkJobStatus, n int) []string {
 	for i := range out {
 		out[i] = "queued"
 	}
-	for _, name := range []string{"planned", "blocked", "locked", "waits", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "accepted", "superseded", "succeeded"} {
+	for _, name := range []string{"planned", "blocked", "locked", "waits", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "needs", "accepted", "superseded", "succeeded"} {
 		idx, _ := order.DecodeSet(st.UnitStates[name])
 		for _, i := range idx {
 			if i >= 0 && i < n {

@@ -46,7 +46,7 @@ type controlPredicate struct {
 	// Custody is how the decision reached the HUD (decide only): direct
 	// (the person signed in), relayed (a tracker's sync read it from a
 	// named tracker, by a person its people map names) or
-	// relayed-party (by a party the tracker names, no person;
+	// relayed-unattributed (by a party the tracker names, no person;
 	// internal/hud/API.md, Relayed decisions).
 	Custody string `json:"custody,omitempty"`
 	// For is the person a stand-in decided for (custody stand-in): the

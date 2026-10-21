@@ -1117,6 +1117,10 @@ spec:
                         words.
                       format: date-time
                       type: string
+                    pressingRecord:
+                      description: PressingRecord is the signed decision that made
+                        it pressing.
+                      type: string
                     pressingWhy:
                       type: string
                     rechecks:
@@ -1143,6 +1147,27 @@ spec:
                     record:
                       description: Record is the C4 ID of the signed record.
                       type: string
+                    seen:
+                      description: |-
+                        Seen is what its re-check triggers last saw, so a restart misses no
+                        event: the unit table's size, the outputs of the units it waits on,
+                        reads or is about (by index; "ok" a unit succeeded whose output is
+                        not known), and the phases of the jobs it is about or reads from.
+                      properties:
+                        outputs:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        phases:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        units:
+                          format: int32
+                          type: integer
+                      required:
+                      - units
+                      type: object
                     state:
                       description: |-
                         State is raised (the unit stopped; the rest of the job runs on),
@@ -1717,6 +1742,12 @@ spec:
                     description: |-
                       Locked counts units waiting for a unit of the job that holds what
                       they claim.
+                    format: int32
+                    type: integer
+                  needs:
+                    description: |-
+                      Needs counts units stopped on a question nobody has answered or
+                      withdrawn yet: not failed, the job held until it heals.
                     format: int32
                     type: integer
                   planned:

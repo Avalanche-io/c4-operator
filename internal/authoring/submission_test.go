@@ -206,3 +206,33 @@ func TestLowerNeedsPinnedImage(t *testing.T) {
 		t.Fatalf("%v", errs)
 	}
 }
+
+// answers: {by: unit:<name>} lowers to the job's answerer param; a lead
+// or a tool answering stays refused, in the farm's words.
+func TestLowerAnswers(t *testing.T) {
+	p := mustLower(t, `c4: submit/1
+project: saltmarsh
+shot: sm0140
+tree: .
+jobs:
+  proxies: {tool: proxies, answers: {by: unit:lead}, with: {plates: plates/sm0140.$F4.exr}}
+`)
+	if s := specOf(t, p.Jobs[0]); s.Params["answerer"] != "lead" {
+		t.Fatalf("params %v", s.Params)
+	}
+	for by, want := range map[string]string{
+		"lead":           "a lead answering a job's questions cannot run on this farm yet",
+		"tool:shot-lead": "a tool answering a job's questions cannot run on this farm yet",
+	} {
+		_, errs := lowerDoc(t, `c4: submit/1
+project: saltmarsh
+shot: sm0140
+tree: .
+jobs:
+  proxies: {tool: proxies, answers: {by: "`+by+`"}, with: {plates: plates/sm0140.$F4.exr}}
+`)
+		if len(errs) != 1 || errs[0].Path != "jobs.proxies.answers.by" || errs[0].Message != want {
+			t.Errorf("answers by %s: %v", by, errs)
+		}
+	}
+}
