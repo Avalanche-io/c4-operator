@@ -11,5 +11,5 @@ runs:
     exe: {linux: /opt/hfs21.0/bin/husk, windows: "C:/Program Files/Side Effects Software/Houdini 21.0.440/bin/husk.exe"}
   exe: husk                                              # the program, in the image
   command: ["{{Run.Exe}}", -V, 2a, -f, "{{Unit.FrameStart}}", -n, "{{Unit.FrameCount}}", "{{Param.stage}}"]
-  env: {HOUDINI_PATHMAP: "{{Run.PathMap}}"}
+  env: {HOUDINI_PATHMAP: "{{Run.PathMap.houdini}}"}
   workdir: "{{Job.Tree}}"

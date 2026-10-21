@@ -24,7 +24,7 @@ runs:
   - -V
   - 2a
   - "{{Param.stage}}"
-  env: {HOUDINI_PATHMAP: "{{Run.PathMap}}"}
+  env: {HOUDINI_PATHMAP: "{{Run.PathMap.houdini}}"}
 frames: {chunk: 1, order: binary}
 params:
 - name: stage

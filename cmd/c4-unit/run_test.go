@@ -392,15 +392,17 @@ func TestRunWritesThePathMap(t *testing.T) {
 	r := newToolRun(t, `c4: tool/1
 name: x
 kind: once
-runs: {image: c4/runtime-base, command: [bash, -c, 'echo "$1 $HOUDINI_PATHMAP $C4_PATH_MAP"', x, "{{Run.PathMap}}"], env: {HOUDINI_PATHMAP: "{{Run.PathMap}}"}}
+runs: {image: c4/runtime-base, command: [bash, -c, 'echo "$1 $C4_PATH_MAP"; echo "$HOUDINI_PATHMAP"', x, "{{Run.PathMap}}"], env: {HOUDINI_PATHMAP: "{{Run.PathMap.houdini}}"}}
 `)
-	r.vars["C4_SOURCE_ROOTS"] = `[{"os": "windows", "path": "S:/saltmarsh"}, {"os": "macos", "path": "/Volumes/saltmarsh"}]`
+	r.vars["C4_SOURCE_ROOTS"] = `[{"os": "windows", "path": "S:\\saltmarsh"}, {"os": "macos", "path": "/Volumes/saltmarsh"}]`
 	if c := r.run(); c != 0 {
 		t.Fatalf("exit %d", c)
 	}
 	p := filepath.Join(r.tree, ".c4", "path-map.json")
-	if got := strings.TrimSpace(r.out.String()); got != p+" "+p+" "+p {
-		t.Errorf("log %q", got)
+	// Houdini's map is JSON text, Windows paths with forward slashes
+	houdini := `{"/Volumes/saltmarsh":"` + r.tree + `","S:/saltmarsh":"` + r.tree + `"}`
+	if got := strings.TrimSpace(r.out.String()); got != p+" "+p+"\n"+houdini {
+		t.Errorf("log %q, want the rules file twice, then %s", got, houdini)
 	}
 	var doc struct {
 		Version string `json:"version"`
@@ -412,7 +414,7 @@ runs: {image: c4/runtime-base, command: [bash, -c, 'echo "$1 $HOUDINI_PATHMAP $C
 	}
 	json.Unmarshal([]byte(r.file(".c4/path-map.json")), &doc)
 	if doc.Version != "pathmapping-1.0" || len(doc.Rules) != 2 || doc.Rules[0].SourcePathFormat != "WINDOWS" ||
-		doc.Rules[0].SourcePath != "S:/saltmarsh" || doc.Rules[1].SourcePathFormat != "POSIX" || doc.Rules[1].DestinationPath != r.tree {
+		doc.Rules[0].SourcePath != `S:\saltmarsh` || doc.Rules[1].SourcePathFormat != "POSIX" || doc.Rules[1].DestinationPath != r.tree {
 		t.Errorf("path map %+v", doc)
 	}
 
@@ -420,7 +422,7 @@ runs: {image: c4/runtime-base, command: [bash, -c, 'echo "$1 $HOUDINI_PATHMAP $C
 	r = newToolRun(t, `c4: tool/1
 name: x
 kind: once
-runs: {image: c4/runtime-base, command: [bash, -c, 'echo "[$#] [${HOUDINI_PATHMAP-unset}]"', x, "{{Run.PathMap}}"], env: {HOUDINI_PATHMAP: "{{Run.PathMap}}"}}
+runs: {image: c4/runtime-base, command: [bash, -c, 'echo "[$#] [${HOUDINI_PATHMAP-unset}]"', x, "{{Run.PathMap}}"], env: {HOUDINI_PATHMAP: "{{Run.PathMap.houdini}}"}}
 `)
 	r.run()
 	if got := strings.TrimSpace(r.out.String()); got != "[0] [unset]" {

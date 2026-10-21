@@ -177,6 +177,7 @@ type runner struct {
 	last      time.Time    // the tool's last line
 	written   float64      // the progress last written
 	lines     int          // lines read
+	pathRules []pathRule   // the path map's rules
 	done      map[int]bool // frames finished
 	previewed map[int]bool // frames whose preview is queued
 	class     string       // from c4_fail
@@ -469,6 +470,8 @@ func (r *runner) values(toolDir, pathMap string) func(string) (string, bool, err
 			v = r.exe()
 		case "Run.PathMap":
 			v = pathMap
+		case "Run.PathMap.houdini":
+			v = houdiniPathMap(r.pathRules)
 		default:
 			return "", false, fmt.Errorf("{{%s}} is not a format string the runner knows", name)
 		}
@@ -563,6 +566,32 @@ func (r *runner) childEnv(pathMap string) []string {
 	return out
 }
 
+// pathRule is one rule of the path map: a root the submitter's paths start
+// with, and where it is here.
+type pathRule struct {
+	Windows  bool
+	From, To string
+}
+
+// houdiniPathMap is the path map as HOUDINI_PATHMAP takes it, JSON text
+// from each root to where it is here ({"S:/shows": "/show"}); Houdini
+// writes Windows paths with forward slashes. "" with no rules.
+func houdiniPathMap(rules []pathRule) string {
+	if len(rules) == 0 {
+		return ""
+	}
+	m := map[string]string{}
+	for _, x := range rules {
+		from := x.From
+		if x.Windows {
+			from = strings.ReplaceAll(from, `\`, "/")
+		}
+		m[from] = x.To
+	}
+	b, _ := json.Marshal(m)
+	return string(b)
+}
+
 // writePathMap writes OpenJD's pathmapping-1.0 rules from each root the
 // submitter recorded ($C4_SOURCE_ROOTS) to the tree, and returns its path,
 // or "" with no roots.
@@ -600,6 +629,9 @@ func (r *runner) writePathMap() (string, error) {
 	}
 	if len(doc.Rules) == 0 {
 		return "", nil
+	}
+	for _, x := range doc.Rules {
+		r.pathRules = append(r.pathRules, pathRule{Windows: x.SourcePathFormat == "WINDOWS", From: x.SourcePath, To: x.DestinationPath})
 	}
 	b, _ := json.MarshalIndent(doc, "", "  ")
 	p := filepath.Join(r.tree, ".c4", "path-map.json")

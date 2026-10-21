@@ -14,7 +14,7 @@ import (
 // formatNames are the format strings a tool may use besides
 // {{Param.<name>}} (the tool format: schema/README.md).
 var formatNames = []string{"Unit.Frames", "Unit.FrameStart", "Unit.FrameEnd", "Unit.FrameCount", "Unit.Name", "Unit.Index",
-	"Job.Tree", "Job.Shot", "Job.Name", "Tool.Dir", "Run.Exe", "Run.PathMap"}
+	"Job.Tree", "Job.Shot", "Job.Name", "Tool.Dir", "Run.Exe", "Run.PathMap", "Run.PathMap.houdini"}
 
 var formatRe = regexp.MustCompile(`\{\{\s*([^{}]*?)\s*\}\}`)
 
