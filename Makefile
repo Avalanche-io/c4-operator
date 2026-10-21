@@ -258,8 +258,11 @@ tool-locks:
 # the farm can book its own tools tested in that release. A development
 # build (VERSION without a v) tests against this machine's c4-job-<name>:dev.
 # The tools whose kind the farm runs; ci and lora join when it runs shards
-# and training tools.
-TESTED_TOOLS ?= comp render infer sim transcode usd
+# and training tools. infer fetches its model from Hugging Face, which a
+# sealed test cannot reach and which it cannot declare (needs.network) until
+# the farm fences a unit's network; it joins then, or once its image carries
+# its default model.
+TESTED_TOOLS ?= comp render sim transcode usd
 tool-tests:
 	@mkdir -p bin
 	go build -trimpath -ldflags="-X main.version=$(VERSION)" -o bin/c4-farm-tools ./cmd/c4-farm

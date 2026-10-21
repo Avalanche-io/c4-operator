@@ -526,3 +526,16 @@ func TestPublishUntestedAndNoWait(t *testing.T) {
 		t.Fatalf("no wait: %v, %d polls\n%s", err, hud.polls, out.String())
 	}
 }
+
+// A tool's unit is sealed unless the tool declares needs.network; then it
+// reaches this machine's network, with a writable cache in its home.
+func TestUnitNetworkFollowsTheTool(t *testing.T) {
+	sealed := strings.Join(unitDockerArgs("/t", "/s", "/c", nil, false), " ")
+	open := strings.Join(unitDockerArgs("/t", "/s", "/c", nil, true), " ")
+	if !strings.Contains(sealed, "--network none") || strings.Contains(sealed, ".cache") {
+		t.Errorf("sealed: %s", sealed)
+	}
+	if strings.Contains(open, "--network") || !strings.Contains(open, "--tmpfs /home/c4/.cache:uid=65532,gid=65532") || !strings.Contains(open, "--read-only") {
+		t.Errorf("declared: %s", open)
+	}
+}

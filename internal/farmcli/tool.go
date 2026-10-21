@@ -257,6 +257,9 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 		return err
 	}
 	os.Chmod(ctl, 0o777)
+	if n := t.Needs.Network; len(n) > 0 {
+		o.printf("network     %s: this machine's network, which the farm narrows to those\n", strings.Join(n, ", "))
+	}
 	o.printf("test        %s in %s, on this machine\n", unitFrames(t, units), plural(len(units), "unit", "units"))
 	for _, u := range units {
 		env := append([]string{"C4_TOOLS=/etc/c4/tools", "C4_TREE=/show", "C4_OUTPUT=/show", "C4_CONTROL=/etc/c4/control",
@@ -266,7 +269,7 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 			frames = fmt.Sprint(u.start)
 		}
 		env = append(env, "C4_FRAMES="+frames, fmt.Sprintf("C4_FRAME_START=%d", u.start), fmt.Sprintf("C4_FRAME_END=%d", u.end))
-		args := append(unitDockerArgs(dir, tree, ctl, env), image, "c4-unit", "run")
+		args := append(unitDockerArgs(dir, tree, ctl, env, len(t.Needs.Network) > 0), image, "c4-unit", "run")
 		cmd := exec.CommandContext(ctx, docker, args...)
 		var said bytes.Buffer
 		cmd.Stdout, cmd.Stderr = io.MultiWriter(indent(o.W), &said), io.MultiWriter(indent(o.W), &said)
@@ -296,11 +299,19 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 
 // unitDockerArgs run one unit as the farm runs it: as 65532, every
 // capability dropped, no privilege escalation, a read-only root, the
-// tool's tree read-only and the job's tree writable.
-func unitDockerArgs(tool, tree, ctl string, env []string) []string {
+// tool's tree read-only and the job's tree writable. With no network
+// declared the unit is sealed; one that declares needs.network reaches
+// this machine's network, which on the farm its egress proxy narrows to
+// the services named, and gets a writable cache in its home.
+func unitDockerArgs(tool, tree, ctl string, env []string, network bool) []string {
 	args := []string{"run", "--rm", "--user", "65532:65532", "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-		"--read-only", "--tmpfs", "/tmp", "--network", "none",
-		"-v", tool + ":/etc/c4/tools:ro", "-v", tree + ":/show", "-v", ctl + ":/etc/c4/control", "-w", "/show"}
+		"--read-only", "--tmpfs", "/tmp"}
+	if network {
+		args = append(args, "--tmpfs", "/home/c4/.cache:uid=65532,gid=65532")
+	} else {
+		args = append(args, "--network", "none")
+	}
+	args = append(args, "-v", tool+":/etc/c4/tools:ro", "-v", tree+":/show", "-v", ctl+":/etc/c4/control", "-w", "/show")
 	for _, e := range env {
 		args = append(args, "-e", e)
 	}
