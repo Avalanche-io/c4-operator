@@ -39,7 +39,7 @@ from c4submit.form import Field
 from c4submit.submitter import Checked, Draft, Submitted, Submitter, default_filename, prepare, save
 from c4submit.tool import Tool
 
-from c4_houdini.host import LopHost, RopHost, expand, unexpanded
+from c4_houdini.host import LopHost, RopHost, expand, lists_for, unexpanded
 
 PREFIX = "c4p_"            # a tool parameter's Houdini parameter is c4p_<name>
 LINK = "_link"             # and its link toggle c4p_<name>_link
@@ -129,7 +129,8 @@ def header(kind: str) -> List["hou.ParmTemplate"]:
               menu_type=hou.menuType.StringToggle,
               help=("The stage's render settings to render; each one ticked is a job." if lop else
                     "The ROPs to render; each one ticked is a job, after the ROPs it reads. "
-                    "ROPs further up the chain are listed unticked.")),
+                    "ROPs further up the chain are listed unticked. For a tool that cooks TOP networks, "
+                    "the hip file's TOP networks are listed instead; each ticked one is a job.")),
         _toggle("c4_hassizes", "Has sizes", False, is_hidden=True),
     ]
     size = _menu("c4_size", "Size", "size", help="A bigger machine for a heavy shot, as the tool offers.")
@@ -379,6 +380,8 @@ class Panel:
         if tool is None:
             self.draft = None
             return
+        if isinstance(self.host, RopHost):
+            self.host.lists = lists_for(tool)   # ROPs, or TOP networks for a tool that cooks them
         d = Draft(self.host, tool, project=self.project_info)
         if old is not None:
             d.due, d.note, d.frames, d.shot, d.project = old.due, old.note, old.frames, old.shot, old.project

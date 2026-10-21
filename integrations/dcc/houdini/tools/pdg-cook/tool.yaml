@@ -1,0 +1,44 @@
+# A PDG artist's whole TOP cook, moved off the workstation: one unit cooks
+# the network with PDG's local scheduler. Its work items are not the farm's
+# units. Set runs.image to the studio's Houdini image (and runs.host.exe to
+# where Houdini is installed on its workstations) before publishing:
+# c4 farm tool publish <this folder>.
+c4: tool/1
+name: pdg-cook
+title: Cook a TOP network
+summary: Cooks a TOP network of a hip file in one unit with hython and PDG's local scheduler, as a whole-graph job.
+kind: once
+runs:
+  image: registry.example.com/houdini:21.0     # a placeholder: the studio's own Houdini image
+  exe: hython
+  host:
+    has: [houdini-21.0]
+    exe:
+      linux: /opt/hfs21.0/bin/hython
+      windows: "C:/Program Files/Side Effects Software/Houdini 21.0.440/bin/hython.exe"
+      macos: /Applications/Houdini/Houdini21.0.440/Frameworks/Houdini.framework/Versions/Current/Resources/bin/hython
+  command: ["{{Run.Exe}}", "{{Tool.Dir}}/pdg_cook.py", "{{Param.hip}}", "{{Param.top}}"]
+params:
+- name: hip
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The saved hip file. A .py that builds the scene and saves it to the path it is given also works, which is how the test makes one.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Hip file, fileFilters: [{label: Houdini, patterns: ["*.hip", "*.hiplc", "*.hipnc"]}]}
+- name: top
+  type: STRING
+  minLength: 1
+  description: The TOP network to cook (its output node, the one with the display flag), or a TOP node in one, by path, as /obj/topnet1.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: TOP network}
+errors:
+  licence: ['No licenses could be found to run this application']
+retries: 1
+reuse: exact
+test:
+  tree: test/
+  with: {hip: fx/pdg_setup.py, top: /obj/tops}
+  expect: [fx/pdg/item.0.txt, fx/pdg/item.1.txt, fx/pdg/item.2.txt]

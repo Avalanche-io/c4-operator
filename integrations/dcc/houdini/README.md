@@ -80,19 +80,79 @@ C4 Submit reads every file reference in the hip file, so a missing file on
 a node nobody renders also stops the submission. Delete or bypass that
 node; a bypassed node's missing file is only a warning.
 
-## For TDs: a tool for C4 Submit
+## For TDs: the tools
+
+The nodes submit to tools the farm has published. `tools/` holds three,
+ready to publish once they name the studio's Houdini:
+
+| tool          | kind     | node       | what it runs                                                                                      |
+| ------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------- |
+| `karma`       | `frames` | C4 Render  | `husk` over the stage the node writes, one ticked render settings prim per job, CPU or XPU         |
+| `houdini-rop` | `frames` | C4 Submit  | `hython houdini_rop.py`: one ROP of the saved hip file over the unit's frames, without its inputs |
+| `pdg-cook`    | `once`   | C4 Submit  | `hython pdg_cook.py`: a whole TOP network in one unit, with PDG's local scheduler                |
+
+To publish one:
+
+1. Copy its folder, and in `tool.yaml` set `runs.image` to the studio's
+   own Houdini image (the folders say `registry.example.com/houdini:21.0`,
+   a placeholder), with `hython` and `husk` on its `PATH`. On workstations
+   that run units themselves (`runs.host`, tagged `houdini-21.0`), set
+   `runs.host.exe` to where Houdini is installed there.
+2. Add `needs` (CPU, memory, GPUs for XPU) once a real shot has been
+   measured; until then the farm's defaults apply.
+3. `c4 farm tool test <folder>`, then `c4 farm tool publish <folder>`. The
+   farm runs the tool's test again and offers it only once that passes.
+
+Each test makes its scene without a binary file in git. `karma`'s is a
+small text stage, `test/cube.usda`. The two hython tools take a `.py` as
+well as a hip file: the script runs it with the path of the hip file to
+save (`<name>.hip` beside it), then opens that file. Their tests hold such
+a `.py`: `test/fx/rop_setup.py` (a Geometry ROP writing two frames) and
+`test/fx/pdg_setup.py` (a TOP network of three work items).
+
+What the scripts do:
+
+- **houdini-rop** renders the ROP with `ignore_inputs=True`. Each ROP
+  upstream that the artist ticks is its own job, run first; one left
+  unticked was rendered before and is read from disk. It prints
+  `c4_frame: <frame> <file>` as each frame's file appears (the file is
+  read from the ROP's output parameter, as C4 Submit reads it), and
+  `c4_fail: permanent ...` for a missing hip file or ROP. Its units are 4
+  frames each: a ROP whose frames depend on the ones before (a sim cache)
+  needs a copy with `frames: {chunk: all, order: sequential}`.
+- **pdg-cook** cooks the network's output node (the one with the display
+  flag), or the TOP node named. It gives every TOP network above that node
+  a local scheduler of its own, as many slots as the unit has CPUs, so a
+  hip file saved with a farm scheduler still cooks inside the unit. It
+  prints `openjd_progress` and `openjd_status` as work items finish, and
+  fails the unit if one fails. The farm schedules none of the work items
+  itself: the whole cook moves off the workstation, as "submit graph as
+  job" does in other queues.
 
 C4 Submit offers the project's tools whose scene parameter (`from:
-scene.file`) takes `*.hip` files, and fills a `from: scene.renderables`
-parameter with each ROP's path, one job per ROP. Such a tool must render
-that one ROP **without its inputs**, as `hou.node(rop).render(...,
-ignore_inputs=True)` in hython does. Each ROP upstream that the artist
-ticks is its own job, run first; one left unticked was rendered before and
-is read from disk. A tool that renders inputs too would render them again
-inside every job. `tests/houdini_scenes.py` has an example, `houdini-rop`.
+scene.file`) takes `*.hip` files. For a tool whose `from:
+scene.renderables` parameter is named `top`, it lists the hip file's TOP
+networks (wherever they are: `/obj`, `/out`, `/tasks`) instead of ROPs:
+one wired into it is ticked, or the only one there is, and the job's `top`
+is the network's output node. Otherwise it lists ROPs, and a tool given a
+ROP must render it without its inputs, as `houdini-rop` does: a tool that
+rendered inputs too would render them again inside every job.
+
+Two things the farm does not do yet, which these tools work within:
+
+- Houdini needs its licence server. The tools declare no licences and no
+  network, as the farm refuses both at submit for now, so a unit must
+  reach the licence server without the farm opening the way (a host
+  runner, or a cluster whose units reach it).
+- Path mapping. The farm passes its path map as a file
+  (`{{Run.PathMap}}`); Houdini reads `HOUDINI_PATHMAP` as JSON text. So
+  the farm must see the project's files where the artist's `C4_ROOT`
+  does, which is the default (a submission names its own root only when
+  it differs).
 
 ## Tests
 
 `python3 -m pytest -q integrations/dcc/houdini` runs against a fake `hou`
-and `pxr` (`tests/fakehou.py`). What only a real Houdini can show is in
+and `pxr` (`tests/fakehou.py`), the tools' scripts included (with a fake
+`pdg` in `tests/test_houdini_tools.py`). What only a real Houdini can show is in
 [CHECKLIST.md](CHECKLIST.md).

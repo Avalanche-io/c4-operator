@@ -1,0 +1,73 @@
+# The C4 Render LOP's tool: one job per ticked render settings prim, husk
+# over the stage the node writes. Set runs.image to the studio's Houdini
+# image (and runs.host.exe to where Houdini is installed on its
+# workstations) before publishing: c4 farm tool publish <this folder>.
+c4: tool/1
+name: karma
+title: Karma render
+summary: Renders a USD stage's render settings with Karma (CPU or XPU) through husk, frame by frame.
+kind: frames
+runs:
+  image: registry.example.com/houdini:21.0     # a placeholder: the studio's own Houdini image
+  exe: husk
+  host:
+    has: [houdini-21.0]
+    exe:
+      linux: /opt/hfs21.0/bin/husk
+      windows: "C:/Program Files/Side Effects Software/Houdini 21.0.440/bin/husk.exe"
+      macos: /Applications/Houdini/Houdini21.0.440/Frameworks/Houdini.framework/Versions/Current/Resources/bin/husk
+  # Relative product paths (render/cube.0001.exr) land in the job's tree.
+  workdir: "{{Job.Tree}}"
+  command:
+  - "{{Run.Exe}}"
+  - --renderer
+  - "{{Param.renderer}}"
+  - --settings
+  - "{{Param.settings}}"
+  - -f
+  - "{{Unit.FrameStart}}"
+  - -n
+  - "{{Unit.FrameCount}}"
+  - --make-output-path
+  - -V
+  - 2a
+  - "{{Param.stage}}"
+frames: {chunk: 1, order: binary}
+params:
+- name: stage
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The USD stage, as the C4 Render LOP writes it (every frame of the range as time samples).
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: USD stage, fileFilters: [{label: USD, patterns: ["*.usd", "*.usda", "*.usdc"]}]}
+- name: settings
+  type: STRING
+  default: /Render/rendersettings
+  minLength: 1
+  description: The render settings prim to render; it names the camera, the resolution and the images written.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: Render settings}
+- name: renderer
+  type: STRING
+  default: BRAY_HdKarma
+  allowedValues: [BRAY_HdKarma, BRAY_HdKarmaXPU]
+  description: Karma CPU, or Karma XPU on a farm whose machines and image have GPUs.
+  show: artist
+  userInterface: {control: DROPDOWN_LIST, label: Engine}
+previews: "**/render/**/*.$F4.exr"
+writes: ["**/render/"]
+progress:
+- {match: 'ALF_PROGRESS (\d+)%', percent: 1}
+errors:
+  licence: ['No licenses could be found to run this application']
+stall: {quietMinutes: 45}
+retries: 2
+reuse: exact
+test:
+  tree: test/
+  frames: 1
+  with: {stage: cube.usda, settings: /Render/rendersettings, renderer: BRAY_HdKarma}
+  expect: [render/cube.0001.exr]

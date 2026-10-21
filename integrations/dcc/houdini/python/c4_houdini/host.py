@@ -17,6 +17,7 @@ import hou
 
 from c4submit import frames as framelib
 from c4submit import paths, seq
+from c4submit import usd as usdlib
 from c4submit.host import Dependency, Host, Renderable
 
 # Houdini's frame variables. They are kept as written when a path is
@@ -102,6 +103,47 @@ def unexpanded(parm) -> str:
         return parm.unexpandedString()
     except hou.Error:
         return parm.evalAsString()  # an expression or a non-string parameter: its value now
+
+
+def lists_for(tool) -> str:
+    """What the C4 Submit ROP lists for a tool: TOP networks ("tops") when
+    the parameter it fills from the renderables is named ``top`` (as
+    pdg-cook's), else ROPs ("rops")."""
+    for p in getattr(tool, "params", []):
+        if p.source == "scene.renderables":
+            return "tops" if p.name == "top" else "rops"
+    return "rops"
+
+
+def top_networks() -> list:
+    """Every TOP network in the hip file (a ``topnet`` node in any context:
+    /obj, /out, /tasks, inside SOPs), by path."""
+    found = {}
+    for cat in hou.nodeTypeCategories().values():
+        t = hou.nodeType(cat, "topnet")
+        if t is None:
+            continue
+        for n in t.instances():
+            found[n.path()] = n
+    return [found[p] for p in sorted(found)]
+
+
+def top_output(net):
+    """A TOP network's output node, the one with the display flag (what a
+    cook of the network cooks); None when no node has it."""
+    try:
+        shown = net.displayNode()
+    except (AttributeError, hou.Error):
+        shown = None
+    if shown is not None:
+        return shown
+    for n in net.children():
+        try:
+            if n.isDisplayFlagSet():
+                return n
+        except (AttributeError, hou.Error):
+            continue
+    return None
 
 
 def _bypassed(node) -> bool:
@@ -276,37 +318,26 @@ class LopHost(_HoudiniHost):
         scene = self.scene_file()
         if not scene or not os.path.isfile(scene):
             return []
-        from pxr import Sdf, UsdUtils
-        layers, assets, unresolved = UsdUtils.ComputeAllDependencies(Sdf.AssetPath(scene))
         src = self.stage_node()
         who = src.path() if src is not None else self.node.path()
-        found: List[str] = []
-        for layer in layers:
-            if getattr(layer, "anonymous", False):
-                continue
-            found.append(layer.realPath or layer.identifier)
-        found += [str(a) for a in assets]
-        anchor = os.path.dirname(scene)
-        found += [p if paths.is_absolute(p) or _SCHEME.match(p) else os.path.join(anchor, p)
-                  for p in (str(u) for u in unresolved)]
-        out, seen = [], {paths.norm(scene)}
-        for p in found:
-            p = p if _SCHEME.match(p) else paths.norm(p)
-            if p in seen or self._not_a_project_file(p):
-                continue
-            seen.add(p)
-            out.append(Dependency(path=p, node=who))
-        return out
+        found, _ = usdlib.dependencies(scene, node=who)
+        return [d for d in found if not self._not_a_project_file(d.path)]
 
 
 class RopHost(_HoudiniHost):
     """The C4 Submit ROP: renders the ROPs wired into it, from the saved
     hip file. Each ROP is a job; one with another listed ROP upstream runs
     after it. ROPs further upstream are listed unticked, so an artist can
-    send a cache to the farm along with the render that reads it."""
+    send a cache to the farm along with the render that reads it.
+
+    For a tool that cooks TOP networks (``lists = "tops"``, set from the
+    tool by ``lists_for``), the hip file's TOP networks are listed instead:
+    one wired into the node is ticked (or the only one there is), and each
+    carries the node a cook of it cooks as the tool's ``top``."""
 
     stage = "render"
     scene_word = "hip file"
+    lists = "rops"
 
     def scene_file(self) -> str:
         return self.hip()
@@ -389,7 +420,27 @@ class RopHost(_HoudiniHost):
         a, b, c = f.eval()
         return framelib.span(int(round(a)), int(round(b)), max(1, int(round(c))))
 
+    def top_renderables(self) -> List[Renderable]:
+        nets = top_networks()
+        wired = {n.path() for n in self._upstream(self.node)}
+        tick = wired & {n.path() for n in nets} or ({nets[0].path()} if len(nets) == 1 else set())
+        out = []
+        for n in nets:
+            p = n.path()
+            cook = top_output(n)
+            if _bypassed(n):
+                note = "bypassed"
+            elif cook is None:
+                note = "no output node: set the display flag on the node to cook"
+            else:
+                note = "cooks " + cook.name()
+            out.append(Renderable(name=p, label=p, key=n.name(), enabled=(p in tick and not _bypassed(n)), note=note,
+                                  values={"top": cook.path()} if cook is not None else {}))
+        return out
+
     def renderables(self) -> List[Renderable]:
+        if self.lists == "tops":
+            return self.top_renderables()
         order, ups, direct = self._graph()
 
         def above(p: str, acc: List[str]) -> List[str]:

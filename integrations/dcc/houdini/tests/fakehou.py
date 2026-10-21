@@ -35,6 +35,10 @@ class OperationInterrupted(Error):
     pass
 
 
+class LoadWarning(Error):
+    pass
+
+
 class _Enum:
     def __init__(self, kind: str, *names: str):
         for n in names:
@@ -439,6 +443,14 @@ class Parm:
     def evalAsString(self):
         return str(self.eval())
 
+    def evalAtFrame(self, frame):
+        was = _current_frame[0]
+        _current_frame[0] = float(frame)
+        try:
+            return self.eval()
+        finally:
+            _current_frame[0] = was
+
     def unexpandedString(self):
         if self._template.type() != parmTemplateType.String:
             raise OperationFailed(f"{self._name} is not a string parameter")
@@ -536,7 +548,7 @@ class NodeTypeCategory:
         return self._name
 
 
-_categories = {n: NodeTypeCategory(n) for n in ("Lop", "Driver", "Sop", "Object", "Manager")}
+_categories = {n: NodeTypeCategory(n) for n in ("Lop", "Driver", "Sop", "Object", "Manager", "Top")}
 
 
 def lopNodeTypeCategory():
@@ -545,6 +557,14 @@ def lopNodeTypeCategory():
 
 def ropNodeTypeCategory():
     return _categories["Driver"]
+
+
+def topNodeTypeCategory():
+    return _categories["Top"]
+
+
+def nodeTypeCategories():
+    return dict(_categories)
 
 
 class NodeType:
@@ -557,17 +577,28 @@ class NodeType:
     def category(self):
         return self._category
 
+    def instances(self):
+        return tuple(n for n in _nodes.values()
+                     if n.type().name() == self._name and n.type().category() is self._category)
+
 
 _registered_types: Dict[tuple, NodeType] = {}
 
 
 def nodeType(category, name):
-    return _registered_types.get((category.name(), name))
+    """A registered type (an HDA), or a type some node in the session has."""
+    t = _registered_types.get((category.name(), name))
+    if t is None and any(n.type().name() == name and n.type().category() is category for n in _nodes.values()):
+        t = NodeType(name, category.name())
+    return t
 
 
 _nodes: Dict[str, "Node"] = {}
 _ids = [0]
 _selected: List["Node"] = []
+
+# The category of the nodes inside a node of these types.
+_CHILDREN = {"geo": "Sop", "topnet": "Top", "ropnet": "Driver", "lopnet": "Lop"}
 
 
 def _child_category(parent_path: str, type_name: str) -> str:
@@ -578,7 +609,9 @@ def _child_category(parent_path: str, type_name: str) -> str:
     if parent_path == "/obj":
         return "Object"
     parent = _nodes.get(parent_path)
-    return parent.type().category().name() if parent else "Manager"
+    if parent is None:
+        return "Manager"
+    return _CHILDREN.get(parent.type().name(), parent.type().category().name())
 
 
 class Node:
@@ -682,12 +715,46 @@ class Node:
                 return i.stage()
         return None
 
+    # flags
+    def setDisplayFlag(self, on):
+        if on:
+            for n in self.parent().children():
+                n._display = False
+        self._display = bool(on)
+
+    def isDisplayFlagSet(self):
+        return getattr(self, "_display", False)
+
+    def setRenderFlag(self, on):
+        self._render_flag = bool(on)
+
+    def displayNode(self):
+        for n in self.children():
+            if n.isDisplayFlagSet():
+                return n
+        return None
+
+    def childTypeCategory(self):
+        """What its children are: a network's kind, a subnet's own; None
+        for a node that holds no network."""
+        name = self._type.name()
+        if name in _CHILDREN:
+            return _categories[_CHILDREN[name]]
+        return self._type.category() if name == "subnet" else None
+
     # ROPs
+    def addRenderEventCallback(self, callback):
+        self.__dict__.setdefault("_callbacks", []).append(callback)
+
+    def removeRenderEventCallback(self, callback):
+        self.__dict__.setdefault("_callbacks", []).remove(callback)
+
     def render(self, frame_range=(), res=(), output_file=None, output_format=None, to_flipbook=False, quality=2,
                ignore_inputs=False, method=None, ignore_bypass_flags=False, ignore_lock_flags=False, verbose=False,
                output_progress=False):
         if self._type.name() != "usd":
-            raise NotImplementedError("the fake renders only the USD ROP")
+            self._render_frames(frame_range, ignore_inputs)
+            return
         src = _nodes[self.parm("loppath").eval()]
         out = self.parm("lopoutput").eval()
         stage = src.stage()
@@ -695,6 +762,27 @@ class Node:
                          "trange": self.parm("trange").eval()})
         with open(out, "w", encoding="utf-8") as f:
             json.dump(stage.dependencies(out), f)
+
+    def _render_frames(self, frame_range, ignore_inputs):
+        """Any other ROP: writes a small file per frame at its output
+        parameter (the first whose chooser writes), firing the render event
+        callbacks. ``fail_render`` makes it raise; ``skip_frames`` leaves
+        those frames unwritten."""
+        if getattr(self, "fail_render", ""):
+            raise OperationFailed(self.fail_render)
+        a, b, step = (tuple(frame_range) + (1,))[:3] if frame_range else (frame(), frame(), 1)
+        out = next((p for p in self.parms() if p._template.tags().get("filechooser_mode") == "write"), None)
+        done = []
+        for f in range(int(a), int(b) + 1, int(step)):
+            if out is not None and f not in getattr(self, "skip_frames", ()):
+                path = out.evalAtFrame(f)
+                os.makedirs(os.path.dirname(path), exist_ok=True)
+                with open(path, "w", encoding="utf-8") as fh:
+                    fh.write(f"{self._path} frame {f}\n")
+            done.append(f)
+            for cb in list(getattr(self, "_callbacks", [])):
+                cb(self, ropRenderEventType.PostFrame, frameToTime(f))
+        rendered.append({"rop": self._path, "frames": tuple(frame_range), "ignore_inputs": ignore_inputs, "done": done})
 
     def errors(self):
         return tuple(self._errors)
@@ -737,7 +825,18 @@ NODE_PARMS = {
                                                                               string_type=stringParmType.NodeReference)],
     ("Driver", "ifd"): lambda: _rop_parms("vm_picture"),
     ("Driver", "karma"): lambda: _rop_parms("picture"),
-    ("Driver", "geometry"): lambda: _rop_parms("sopoutput"),
+    ("Driver", "geometry"): lambda: _rop_parms("sopoutput") + [
+        StringParmTemplate("soppath", "SOP Path", 1, default_value=("",), string_type=stringParmType.NodeReference)],
+    ("Driver", "topnet"): lambda: [StringParmTemplate("topscheduler", "TOP Scheduler Override", 1, default_value=("",),
+                                                      string_type=stringParmType.NodeReference)],
+    ("Object", "topnet"): lambda: [StringParmTemplate("topscheduler", "TOP Scheduler Override", 1, default_value=("",),
+                                                      string_type=stringParmType.NodeReference)],
+    ("Top", "localscheduler"): lambda: [StringParmTemplate("maxprocsmenu", "Total Slots", 1, default_value=("0",)),
+                                        IntParmTemplate("maxprocs", "Slots", 1, default_value=(1,))],
+    ("Top", "genericgenerator"): lambda: [IntParmTemplate("itemcount", "Item Count", 1, default_value=(1,))],
+    ("Top", "pythonscript"): lambda: [StringParmTemplate("script", "Script", 1, default_value=("",))],
+    ("Sop", "box"): lambda: [],
+    ("Sop", "xform"): lambda: [FloatParmTemplate("t", "Translate", 3, default_value=(0, 0, 0))],
     ("Driver", "opengl"): lambda: _rop_parms("picture"),
     ("Driver", "alembic"): lambda: _rop_parms("filename"),
     ("Driver", "fetch"): lambda: [StringParmTemplate("source", "Source", 1, default_value=("",),
@@ -821,8 +920,43 @@ class _HipFile:
         variables.update(HIP=os.path.dirname(path), HIPFILE=path,
                          HIPNAME=os.path.splitext(os.path.basename(path))[0])
 
+    def clear(self, suppress_save_prompt=False):
+        """A new session; the fake keeps no nodes across it but the networks."""
+        _nodes.clear()
+        self._path, self.modified = "", False
+
+    def load(self, file_name, suppress_save_prompt=False, ignore_load_warnings=False):
+        """Opens a hip file. The fake cannot read one: the nodes in the
+        session stand for what it holds. ``load_warning`` raises
+        LoadWarning after loading, as a hip file with a missing HDA does."""
+        if not os.path.isfile(file_name):
+            raise OperationFailed(f"Unable to open file: {file_name}")
+        self._path, self.modified = file_name, False
+        self.loads.append(file_name)
+        variables.update(HIP=os.path.dirname(file_name), HIPFILE=file_name,
+                         HIPNAME=os.path.splitext(os.path.basename(file_name))[0])
+        if self.load_warning and not ignore_load_warnings:
+            raise LoadWarning(self.load_warning)
+
+    loads: List[str] = []
+    load_warning = ""
+
 
 hipFile = _HipFile()
+
+ropRenderEventType = _Enum("ropRenderEventType", "PreRender", "PreFrame", "PostFrame", "PostWrite", "PostRender")
+
+
+def fps() -> float:
+    return 24.0
+
+
+def frameToTime(f: float) -> float:
+    return (float(f) - 1) / fps()
+
+
+def timeToFrame(t: float) -> float:
+    return float(t) * fps() + 1
 extra_references: List[tuple] = []
 
 
@@ -911,6 +1045,7 @@ def reset(hip: str = "", **env: str) -> None:
     variables.update(env)
     setFrame(1001)
     hipFile._path, hipFile.modified, hipFile.saves = "", False, 0
+    hipFile.loads, hipFile.load_warning = [], ""
     if hip:
         hipFile._path = hip
         variables.update(HIP=os.path.dirname(hip), HIPFILE=hip, HIPNAME=os.path.splitext(os.path.basename(hip))[0])
