@@ -85,6 +85,7 @@ Agents
   agents add [NAME]        make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first; no NAME lists the sessions to pick from)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
+  diagnose                 a redacted bundle of the farm's decisions for a bug report: no names, paths or contents (--show first)
   integrations             what this machine could add (Claude Code, and each application found), and which are on
   integrate on|off         Claude Code's integration: the farm's tools, the agents' hooks, this machine as runner
   integrate APP            add the C4 Farm panel to an application (APP@VERSION for one; --show says each file); integrate off APP takes it out
@@ -822,6 +823,23 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return svc.Stop(ctx, o)
 		}
 		return errors.New("usage: c4 farm agent start | stop | run | power [--slots N] [--stop-below 25] [--resume-at 90] [--slots-file F] [--once]")
+
+	case "diagnose":
+		window := fs.String("window", "", "only the decisions within this long of the latest (30m, 2h; default all the farm keeps)")
+		out := fs.String("out", "", "where to write the bundle (default its own name, in this folder)")
+		show := fs.Bool("show", false, "print what the bundle holds, its README and every field, and write nothing")
+		seal := fs.Bool("seal", false, "also write it sealed for C4's maintainers (not yet in this build)")
+		if _, err := parse(fs, rest); err != nil {
+			return err
+		}
+		if *seal {
+			return errors.New("--seal is not in this build yet: it seals to the C4 project's key, which comes with a later release; attach the plain bundle only where you would show its README")
+		}
+		c, _, o, _, err := connect()
+		if err != nil {
+			return err
+		}
+		return farmcli.Diagnose(ctx, c, o, farmcli.DiagnoseArgs{Window: *window, Out: *out, Show: *show})
 
 	case "integrations":
 		if _, err := parse(fs, rest); err != nil {
