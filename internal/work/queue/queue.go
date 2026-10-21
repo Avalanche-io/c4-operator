@@ -43,6 +43,11 @@ import (
 // slot, as the queue counts them.
 const SlotResource corev1.ResourceName = "c4.avalanche.io/slots"
 
+// Recorder is told each tick's decision.
+type Recorder interface {
+	Note(s sched.Snapshot, before sched.StateDoc, cfg sched.Config, d sched.Decisions)
+}
+
 // Queue is the controller. Run it under leader election: it keeps state in
 // memory between ticks (rebuilt from WorkJob status on start).
 type Queue struct {
@@ -81,6 +86,10 @@ type Queue struct {
 	ctlChecked map[string]checkedRecord
 	// PolicyName names the policy in decision records.
 	PolicyName string
+	// Recorder, when set, is told each tick's decision: the snapshot, the
+	// policy's state before it, the configuration and what it decided
+	// (the farm's telemetry ring, DESIGN.md section 6.9).
+	Recorder Recorder
 	// Placement (experimental) locates pools at sites and prices moving a
 	// job's inputs between them (placement.go); nil keeps every pool a job
 	// may use as holding its inputs.
@@ -685,7 +694,14 @@ func (q *Queue) Tick(ctx context.Context) error {
 	if cfg.Loc == nil {
 		cfg.Loc = q.Loc
 	}
+	var before sched.StateDoc
+	if q.Recorder != nil {
+		before = q.st.Doc()
+	}
 	dec := q.Policy(snap, &q.st, cfg)
+	if q.Recorder != nil {
+		q.Recorder.Note(snap, before, cfg, dec)
+	}
 	pol := make(map[string]forecast.Policy, len(views))
 	adj := make(map[string]func(time.Time, forecast.Band) forecast.Band, len(views))
 	for _, v := range views {

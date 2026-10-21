@@ -38,6 +38,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/imageref"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/telemetry/ring"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
@@ -133,6 +134,9 @@ type Server struct {
 	// written, so the ID is final: publishing one of these trees marks it
 	// tested in its release and runs no test, and no other tree is.
 	ReleaseTrees map[string]string
+	// Telemetry is the farm's telemetry ring, for diagnostic bundles
+	// (GET /diagnose, diagnose.go); nil answers 503.
+	Telemetry *ring.Ring
 
 	mu      sync.RWMutex
 	m       *model
@@ -230,6 +234,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/held", s.handleHeld)
 	mux.HandleFunc("GET /api/v1/farm/binding", s.handleFarmBinding)
 	mux.HandleFunc("POST /api/v1/farm/binding", s.handleBind)
+	mux.HandleFunc("GET /api/v1/diagnose", s.handleDiagnose)
 	mux.HandleFunc("POST /api/v1/held/{ns}/{link}/{field}", s.handleConfirm)
 	// an API path with no route is a 404 in JSON, never the web page, so a
 	// client can tell "no such call" from an answer
