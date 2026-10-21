@@ -1025,6 +1025,10 @@ Input:
       "description": "also return what each job lowers to in the operator (class, inputs, image, units), as text",
       "type": "boolean"
     },
+    "key": {
+      "description": "makes a retry safe: send the key an earlier answer gave (or one of your own) when you submit the same thing again after an error or a timeout, and the farm answers with the jobs it made then rather than making them twice",
+      "type": "string"
+    },
     "submission": {
       "description": "the submission (c4: submit/1) as a JSON object: project, shot, due, tree, and jobs by key, each a tool with its frames and with; GET /api/v1/schema/submit is its schema",
       "type": "object"
