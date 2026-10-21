@@ -982,6 +982,7 @@ custody crosses signers.
 | record     | predicate (`https://cccc.io/provenance/...`) | signed by                                                                                                                             | identity (`https://cccc.io/id/...`) |
 | ---------- | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------- |
 | task       | `task/v1`                                    | the node daemon that ran and captured the unit                                                                                        | `node/<node>`                       |
+| task       | `task/v1`                                    | the host runner that ran the unit on a machine outside the cluster (service account `c4-hosts/<node>`)                                | `runner/<node>`                     |
 | resolution | `resolution/v1`                              | the controller, for the view a Materialization resolved to, under which grant, with every object present                              | `component/controller`              |
 | decision   | `decision/v1`                                | the queue, for each preemption or yield it decides, and for whom                                                                      | `component/queue`                   |
 | job        | `job/v1`                                     | the queue, when a job ends: its output view, chain and record index, and the decision and control records that touched it             | `component/queue`                   |
@@ -998,8 +999,10 @@ life. The issuer runs in the manager (`POST /v1/certificate` behind the
 `c4-signer` Service). A signer proves who it is with a projected
 service-account token for the audience `c4-signer`, checked with
 TokenReview. A node daemon's token is bound to its pod and names its node,
-so the issuer certifies the daemon's key as that node and no other; any
-other service account is certified as itself; the manager's and the
+so the issuer certifies the daemon's key as that node and no other; a host
+runner's account `c4-hosts/<node>` is certified as `runner/<node>`; any
+other service account is certified as itself, if a Project names it among
+its `importers`; the manager's and the
 regional tier's accounts are refused (the controller, the queue and the HUD
 sign with certificates the manager issues to itself in-process). People
 are not certified by this issuer.
@@ -1023,7 +1026,8 @@ checks the chain to the farm's roots at that time, then the signature, then
 the signer policy, and stores nothing but the bundle: each record is a C4
 object in the project's store, so its ID commits to its content.
 
-**Policy.** A task record must be signed by the node it says it ran on;
+**Policy.** A task record must be signed by the node it says it ran on, or
+by that node's host runner;
 resolutions by the controller; decisions and job records by the queue;
 controls by the HUD; imports and ingests by a workload identity of the
 project whose store holds the content. A record that verifies but fails the

@@ -51,6 +51,9 @@ func TestIssuerCertifiesOnlyImporters(t *testing.T) {
 		{id: sa("c4-system", "c4-node"), err: "bound to its pod"},
 		{id: sa("c4-system", "c4-manager"), err: "does not sign records"},
 		{id: &auth.Identity{User: "alice"}, err: "not a service account"},
+		// A host runner is its own machine's service account in c4-hosts.
+		{id: sa("c4-hosts", "laptop-1"), want: provenance.RunnerIdentity("laptop-1"), life: time.Hour},
+		{id: sa("show-a", "laptop-1"), err: "is not an importer of a project"},
 	} {
 		got, life, err := signerIdentity(ctx, r, c.id, "c4-system")
 		if c.err != "" {

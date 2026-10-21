@@ -156,3 +156,32 @@ func TestLegacyRecordsStillVerifyButNameNoSigner(t *testing.T) {
 		t.Fatalf("legacy record policy: %v", err)
 	}
 }
+
+// A host runner signs the task records of the units it runs, as
+// runner/<node>: the policy takes a task record from the node it says it
+// ran on, or from that node's host runner, and from no other.
+func TestHostRunnerSignsItsTasks(t *testing.T) {
+	ca, _ := farm(t)
+	ctx := context.Background()
+	runner, err := NewSigner(ctx, LocalIssuer(ca, RunnerIdentity("laptop-1"), time.Hour))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pool, err := RootsFromPEM(roots(t, ca))
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec, _ := SignStatement(ctx, runner, PredicateTask, nil, taskFor("laptop-1"), time.Now())
+	v, err := VerifyBundle(rec, pool)
+	if err != nil || v.Identity != RunnerIdentity("laptop-1") || CheckSigner(v) != nil {
+		t.Fatalf("the runner's own task: %v %+v, policy %v", err, v, CheckSigner(v))
+	}
+	lie, _ := SignStatement(ctx, runner, PredicateTask, nil, taskFor("w2"), time.Now())
+	if v, err = VerifyBundle(lie, pool); err != nil || CheckSigner(v) == nil {
+		t.Fatalf("a runner signed a task for another node: %v", err)
+	}
+	job, _ := SignStatement(ctx, runner, PredicateJob, nil, map[string]any{"job": "show-a/sh010"}, time.Now())
+	if v, _ = VerifyBundle(job, pool); CheckSigner(v) == nil {
+		t.Fatal("a runner signed a queue record and the policy accepted it")
+	}
+}

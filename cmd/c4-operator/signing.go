@@ -155,10 +155,14 @@ func issuerRunnable(s *signing, kube kubernetes.Interface, projects client.Reade
 	})
 }
 
+// hostsNamespace holds the host runners' accounts, one per machine.
+const hostsNamespace = "c4-hosts"
+
 // signerIdentity is the identity the issuer certifies a reviewed token's
 // account as, and for how long. A node daemon is certified as its node
-// for a day; a workload as itself for an hour, and only if a project
-// names it among its importers. Anything else is refused.
+// for a day; a host runner (c4-hosts/<node>) as runner/<node> for an
+// hour; a workload as itself for an hour, and only if a project names it
+// among its importers. Anything else is refused.
 func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identity, namespace string) (string, time.Duration, error) {
 	switch {
 	case id.Namespace == "":
@@ -173,6 +177,10 @@ func signerIdentity(ctx context.Context, projects client.Reader, id *auth.Identi
 		return provenance.NodeIdentity(id.NodeName), 24 * time.Hour, nil
 	case id.Namespace == namespace && (id.Account == "c4-manager" || id.Account == "c4-regional"):
 		return "", 0, fmt.Errorf("%s does not sign records", id.User)
+	case id.Namespace == hostsNamespace:
+		// A host runner is its machine's own account, named for its
+		// Node (config/rbac/host-runner.yaml).
+		return provenance.RunnerIdentity(id.Account), time.Hour, nil
 	}
 	var list c4v1.ProjectList
 	if err := projects.List(ctx, &list); err != nil {
