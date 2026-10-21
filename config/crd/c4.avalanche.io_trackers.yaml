@@ -484,8 +484,8 @@ spec:
                 type: array
               kind:
                 description: |-
-                  Kind names the adapter: github (built); flow, ftrack, kitsu, ayon,
-                  gitlab, jira, linear, mlflow (designed).
+                  Kind names the adapter: github, flow, kitsu, linear, mlflow (built);
+                  ftrack, ayon, gitlab, jira (designed).
                 type: string
               owner:
                 description: Owner is the party whose tracker this is (ownership MODEL

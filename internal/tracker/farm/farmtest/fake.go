@@ -76,7 +76,16 @@ func (f *Farm) Submit(_ context.Context, r farm.JobRequest) (farm.JobRef, error)
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	ref := farm.JobRef{Namespace: r.Namespace, Name: r.Name}
-	if _, ok := f.jobs[k(ref)]; ok {
+	if j, ok := f.jobs[k(ref)]; ok {
+		// A taken name is adopted only when it is this submission's own,
+		// as the HUD client checks (farm.HUD.Submit).
+		owner := "c4-sync"
+		if r.For != "" {
+			owner = r.For
+		}
+		if j.TrackerRef != r.TrackerRef || j.Owner != owner {
+			return farm.JobRef{}, fmt.Errorf("%w: %s is %s's, serving %q", farm.ErrTaken, k(ref), j.Owner, j.TrackerRef)
+		}
 		return ref, nil
 	}
 	if r.For != "" && !f.Grants[r.For] {
@@ -88,7 +97,7 @@ func (f *Farm) Submit(_ context.Context, r farm.JobRequest) (farm.JobRef, error)
 		owner = r.For
 	}
 	j := &api.Job{Namespace: r.Namespace, Name: r.Name, Project: "proj", Class: r.Spec.Class, Phase: "Queued",
-		Owner: owner, CreatedAt: f.Now()}
+		Owner: owner, TrackerRef: r.TrackerRef, CreatedAt: f.Now()}
 	if fc := r.Spec.Forecast; fc != nil {
 		j.Phase = "Forecast"
 		j.Forecast = &api.JobForecast{SlotHours: fc.SlotHours, SD: fc.SD, UnitHours: fc.UnitHours, Exists: fc.Exists}
@@ -268,4 +277,11 @@ func (f *Farm) Count() int {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return len(f.jobs)
+}
+
+// Seed puts a job on the farm that no submission made: someone else's.
+func (f *Farm) Seed(j api.Job) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.jobs[j.Namespace+"/"+j.Name] = &j
 }

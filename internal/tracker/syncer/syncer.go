@@ -634,6 +634,13 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "NoGrant", noGrant(person, err))
 				return nil
 			}
+			if errors.Is(err, farm.ErrTaken) {
+				// Never adopt a job that is not this entity's own: it would
+				// carry this tracker's states and decisions.
+				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "NameTaken",
+					fmt.Sprintf("%s is not submitted: %v", it.Ref, err))
+				return nil
+			}
 			if err != nil {
 				return fmt.Errorf("submitting %s for %s: %w", jr, it.Ref, err)
 			}

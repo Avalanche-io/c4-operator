@@ -209,7 +209,8 @@ func TestReceiveVerifiesSignature(t *testing.T) {
 
 func TestReceiveCheckAction(t *testing.T) {
 	gh := fake(t)
-	a := newAdapter(t, gh, nil)
+	secret := []byte("hook")
+	a := newAdapter(t, gh, secret)
 	ref, err := a.Apply(context.Background(), tracker.Write{Kind: "check", Fields: map[string]string{
 		"name": "C4", "head_sha": "abc", "status": "in_progress", "title": "Waiting for review", "summary": "s",
 		"actions": "approve=Approve;rework=Rework", "external_id": "work/gh-7"}})
@@ -223,11 +224,23 @@ func TestReceiveCheckAction(t *testing.T) {
 	for _, c := range gh.CheckRuns("abc") {
 		id = c.ID
 	}
-	if _, _, err := githubtest.Deliver(srv.URL, "check_run", gh.CheckActionPayload(id, "rework", "dana"), nil); err != nil {
+	if _, _, err := githubtest.Deliver(srv.URL, "check_run", gh.CheckActionPayload(id, "rework", "dana"), secret); err != nil {
 		t.Fatal(err)
 	}
 	if len(got.Decisions) != 1 || got.Decisions[0].Native != "action:rework" || got.Decisions[0].On.ID != ref.ID || got.Decisions[0].By.ID != "dana" {
 		t.Fatalf("action: %+v", got)
+	}
+
+	// Without a webhook secret nothing proves who clicked: the delivery is
+	// no decision, so no one who can reach the endpoint approves as dana.
+	open := newAdapter(t, gh, nil)
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) { got, _ = open.Receive(req) }))
+	defer srv2.Close()
+	if _, _, err := githubtest.Deliver(srv2.URL, "check_run", gh.CheckActionPayload(id, "approve", "dana"), nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Decisions) != 0 {
+		t.Fatalf("an unsigned delivery decided: %+v", got.Decisions)
 	}
 }
 
