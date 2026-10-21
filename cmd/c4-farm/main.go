@@ -73,6 +73,7 @@ Trackers
 
 Agents
   agent power              offer this machine's agent slots by its battery: stop below 25%, resume at 90% (--once to read it now)
+  agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all)
   agents add NAME          make a Claude Code session an agent the farm can run, and install its Stop hook
   agents ls                your agents: busy, idle or stopped, and the last turn saved
   mcp                      serve the farm's tools to an agent over stdio
@@ -712,12 +713,15 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		session := fs.String("session", "", "with add: the Claude Code session (default the newest whose transcript names the agent)")
 		configDir := fs.String("config-dir", "", "with add: the Claude Code config dir (default $CLAUDE_CONFIG_DIR, else ~/.claude)")
 		yes := fs.Bool("yes", false, "with add: install the Stop hook without asking")
+		all := fs.Bool("all", false, "with no subcommand: finished and stopped sessions too")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
 		}
 		o := farmcli.Out{W: stdout, In: stdin, Clock: farmcli.Clock{UTC: cm.utc}}
 		switch {
+		case len(pos) == 0:
+			return farmcli.Sessions(ctx, o, farmcli.SessionsArgs{All: *all})
 		case len(pos) == 2 && pos[0] == "add":
 			return farmcli.AddAgent(ctx, o, farmcli.AgentsArgs{Name: pos[1], Session: *session, ConfigDir: *configDir, Yes: *yes})
 		case len(pos) == 1 && pos[0] == "ls":

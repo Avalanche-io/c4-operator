@@ -5,8 +5,10 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fakeAgent is a c4-agent that answers find, register, hooks and ls as the
@@ -98,5 +100,30 @@ func TestAddAgentAsksBeforeTheHook(t *testing.T) {
 	a.Session = ""
 	if err := AddAgent(context.Background(), Out{W: &out}, a); err == nil || !strings.Contains(err.Error(), "--session ID") {
 		t.Errorf("no session: %v", err)
+	}
+}
+
+// c4 farm agents, with nothing after it, shows this machine's Claude Code
+// sessions read-only: what needs the person first, each state in a word,
+// and a last line that says who waits, or that nothing does.
+func TestSessionsShowsWhatNeedsYou(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "claude")
+	now := time.Date(2026, 10, 20, 19, 0, 0, 0, time.UTC)
+	started := now.Add(-90 * time.Minute).UnixMilli()
+	json := `[{"name":"tests","cwd":"/tmp/repo","kind":"background","status":"busy","state":"working","startedAt":` + strconv.FormatInt(started, 10) + `},
+{"name":"port","cwd":"/tmp/repo","kind":"background","status":"idle","state":"blocked","startedAt":` + strconv.FormatInt(started, 10) + `},
+{"sessionId":"4363d63d-ee8a-4f04","cwd":"/tmp","kind":"interactive","status":"idle","startedAt":` + strconv.FormatInt(started, 10) + `}]`
+	os.WriteFile(bin, []byte("#!/bin/sh\ncat <<'X'\n"+json+"\nX\n"), 0o755)
+	var out bytes.Buffer
+	o := Out{W: &out, Clock: Clock{Now: func() time.Time { return now }}}
+	if err := Sessions(context.Background(), o, SessionsArgs{Claude: bin}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
+	if len(lines) != 6 || !strings.HasPrefix(lines[1], "port ") || !strings.Contains(lines[1], "needs you") ||
+		!strings.Contains(lines[2], "working") || !strings.HasPrefix(lines[3], "4363d63d") || !strings.Contains(lines[3], "1h 30m") ||
+		lines[5] != "port needs you." {
+		t.Errorf("agents:\n%s", out.String())
 	}
 }
