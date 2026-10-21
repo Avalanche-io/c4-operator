@@ -4,6 +4,7 @@
 // and keeps at most one live copy of each member.
 //
 //	c4-agent register --name lead --session <id> [--cwd DIR] [--config-dir DIR] [--flag F]... [--new-phase]
+//	                  [--env DIR [--env-id ID] [--import CONFIGDIR]]
 //	c4-agent find --agent-name NAME [--config-dir DIR]
 //	c4-agent ls
 //	c4-agent checkpoint NAME | --hook
@@ -122,6 +123,9 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 		fs.StringVar(&o.ConfigDir, "config-dir", os.Getenv("CLAUDE_CONFIG_DIR"), "the session's CLAUDE_CONFIG_DIR")
 		fs.Var(&flags, "flag", "a claude flag for resuming from stopped (repeatable)")
 		fs.BoolVar(&o.NewPhase, "new-phase", false, "give the member a different session on purpose")
+		fs.StringVar(&o.Env, "env", "", "an agent environment tree to run the member in: its own config directory (--config-dir, default members/NAME/config under the agents home) is filled from it, never a person's ~/.claude")
+		fs.StringVar(&o.EnvID, "env-id", "", "with --env: the version (C4 ID) the environment must be")
+		fs.StringVar(&o.Import, "import", "", "with --env: the config directory the session ran in until now (e.g. ~/.claude-b); its transcript is copied in, the source unchanged")
 		if err := fs.Parse(args); err != nil {
 			return err
 		}
@@ -134,11 +138,17 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 		if len(flags) > 0 {
 			o.Flags = flags
 		}
+		if o.Env != "" && !explicit(fs, "config-dir") {
+			o.ConfigDir = "" // the member's own, not the caller's CLAUDE_CONFIG_DIR
+		}
 		m, err := h.Register(ctx, o)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(out, "%s: session %s, phase %d, epoch %d, transcript %s\n", m.Name, m.Session, m.Phase, m.Epoch, m.Transcript)
+		if m.Env != "" {
+			fmt.Fprintf(out, "%s: environment %s in %s; sign in there once (CLAUDE_CONFIG_DIR=%s claude) before it runs\n", m.Name, m.Env, m.ConfigDir, m.ConfigDir)
+		}
 	case "find":
 		var name, cd string
 		fs.StringVar(&name, "agent-name", "", "the agentName to look for")
@@ -295,6 +305,9 @@ func short(id string) string {
 const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
 
   register --name N --session ID [--cwd DIR] [--config-dir DIR] [--flag F]... [--new-phase]
+           [--env DIR [--env-id ID] [--import CONFIGDIR]]
+                       --env: run the member in its own config directory, filled
+                       from an agent environment; --import: bring its session there
                        add a member for an existing session (a different session
                        for an existing member needs --new-phase)
   find --agent-name N  list sessions whose transcript names that agent, newest first
@@ -547,3 +560,10 @@ func blockHookCommand() (string, error) {
 
 // shellQuote quotes s for a POSIX shell.
 func shellQuote(s string) string { return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'" }
+
+// explicit reports whether the flag was given on the command line.
+func explicit(fs *flag.FlagSet, name string) bool {
+	given := false
+	fs.Visit(func(f *flag.Flag) { given = given || f.Name == name })
+	return given
+}

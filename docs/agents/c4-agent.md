@@ -43,12 +43,40 @@ If the CLI starts a copy anyway (a race with another resume), `c4-agent
 resume` stops the copy at once and fails with exit 4. A copy is never a
 member.
 
+## A clean environment for each member
+
+A member runs in a config directory of its own, filled by C4 from an agent
+environment, never in a person's `~/.claude`:
+- **An environment is a tree:** `settings.json` (C4's Stop hook), `CLAUDE.md`
+  (a member's working rules), `mcp.json` (its MCP servers), skills, and
+  `c4-member.json` (the flags members run with, and the commands they need).
+  `config/agent-env/base` is the clean one C4 ships.
+- **Its version is its C4 ID:** the ID of its listing, every file 0644, every
+  directory 0755, every time 2026-01-01T00:00:00Z, so the ID depends on
+  content only. Every change for a build is a new version, recorded as a
+  layer: what changed, why, who decided it.
+- **`c4-agent register --name N --session ID --env DIR`** fills the member's
+  own config directory (default `members/N/config` under the agents home)
+  from the tree, with `--env-id ID` to insist on a version. It records the
+  version on the member and on every checkpoint, so any result traces to the
+  exact environment it was made in. The environment's MCP configuration is
+  the member's only one (`--mcp-config`, `--strict-mcp-config`). A person's
+  own `~/.claude` or `~/.claude-*` is refused as a member's directory.
+- **`--import DIR`** brings an existing session in from the config directory
+  it ran in (for example `~/.claude-b`): its transcript, subagents and tool
+  results are copied into the member's directory, and the source is left as
+  it was. A session still running there is refused, since the copy would
+  fork; from then on the member is resumed only in its own directory.
+- **Sign-in:** the new directory has none. The person signs in there once,
+  through Anthropic's own flow (`CLAUDE_CONFIG_DIR=<dir> claude`), and
+  `register` says so. No credential is copied between directories.
+
 ## Commands
 
 | command                                   | does                                                                                                                               |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
 | `c4-agent find --agent-name NAME`         | lists sessions whose transcript names that agent, newest first                                                                     |
-| `c4-agent register --name N --session ID` | adds a member (`--cwd`, `--config-dir`, `--flag` for resume flags, `--new-phase`)                                                  |
+| `c4-agent register --name N --session ID` | adds a member (`--cwd`, `--config-dir`, `--flag` for resume flags, `--new-phase`; `--env DIR` runs it in a clean environment, `--import DIR` brings its session there) |
 | `c4-agent ls`                             | every member: busy, idle (at a turn boundary) or stopped, with its epoch and last checkpoint                                       |
 | `c4-agent resume NAME [PROMPT]`           | continues a stopped member's session in the background; refused while it runs (exit 3)                                             |
 | `c4-agent yield NAME [--timeout 10m]`     | stops a member at its next turn boundary, after a checkpoint; a busy member is left running if it does not finish in time (exit 5); background work still running gets the same wait, then is recorded in the checkpoint and stopped |

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -76,6 +77,15 @@ type RegisterOptions struct {
 	// NewPhase replaces the member's session with a new one on purpose. The
 	// old session must not be running.
 	NewPhase bool
+	// Env, when set, is an environment tree to run the member in: its own
+	// config directory (ConfigDir, default members/<name>/config under the
+	// agents home) is filled from it, and its version is recorded on the
+	// member and each checkpoint. EnvID, when set, is the version it must be.
+	Env, EnvID string
+	// Import is a config directory the session ran in until now (~/.claude-b,
+	// say): its transcript is copied into the member's own, unchanged in the
+	// source.
+	Import string
 }
 
 // Register adds a member for an existing session, or updates its flags.
@@ -87,6 +97,27 @@ func (h *Harness) Register(ctx context.Context, o RegisterOptions) (*Member, err
 	if err := checkFlags(o.Flags); err != nil {
 		return nil, err
 	}
+	var env Env
+	if o.Env != "" {
+		if o.ConfigDir == "" {
+			o.ConfigDir = filepath.Join(h.Store.Dir, "members", o.Name, "config")
+		}
+		var err error
+		if env, err = FillEnv(o.Env, o.ConfigDir, o.EnvID); err != nil {
+			return nil, err
+		}
+		o.Flags = append(append([]string(nil), env.Flags...), o.Flags...)
+	}
+	if o.Import != "" {
+		if o.Env == "" {
+			return nil, errors.New("--import moves a session into a member's own environment: give --env too")
+		}
+		if _, err := FindTranscript(o.ConfigDir, o.Cwd, o.Session); err != nil {
+			if _, err := h.ImportTranscript(ctx, o.Import, o.ConfigDir, o.Cwd, o.Session); err != nil {
+				return nil, err
+			}
+		}
+	}
 	unlock, err := h.Store.Lock(o.Name)
 	if err != nil {
 		return nil, err
@@ -96,7 +127,7 @@ func (h *Harness) Register(ctx context.Context, o RegisterOptions) (*Member, err
 	if err != nil && !errors.Is(err, ErrNoMember) {
 		return nil, err
 	}
-	m := &Member{Name: o.Name, Session: o.Session, Cwd: o.Cwd, ConfigDir: o.ConfigDir, Flags: o.Flags, Registered: h.Now().UTC()}
+	m := &Member{Name: o.Name, Session: o.Session, Cwd: o.Cwd, ConfigDir: o.ConfigDir, Flags: o.Flags, Env: env.ID, Registered: h.Now().UTC()}
 	if old != nil {
 		switch {
 		case old.Session == o.Session:
@@ -106,6 +137,10 @@ func (h *Harness) Register(ctx context.Context, o RegisterOptions) (*Member, err
 			}
 			if o.Cwd != "" {
 				m.Cwd = o.Cwd
+			}
+			if env.ID != "" {
+				// a new version of its environment, or its first
+				m.Env, m.ConfigDir = env.ID, o.ConfigDir
 			}
 		case !o.NewPhase:
 			return nil, fmt.Errorf("member %s has session %s: %w; a different session is a new phase (--new-phase), never a replacement for an agent that has context",
@@ -213,7 +248,7 @@ func (h *Harness) checkpointStopping(ctx context.Context, m *Member, event strin
 	if last, _ := h.Store.Last(m.Name); last != nil {
 		cp.Seq = last.Seq + 1
 	}
-	cp.Epoch, cp.At, cp.Event, cp.Session = m.Epoch, h.Now().UTC(), event, m.Session
+	cp.Epoch, cp.At, cp.Event, cp.Session, cp.Env = m.Epoch, h.Now().UTC(), event, m.Session, m.Env
 	cp.Workspace = SealWorkspace(ctx, m.Cwd, h.Workspace)
 	if err := h.Store.appendLog(m.Name, cp); err != nil {
 		return nil, false, err

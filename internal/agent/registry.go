@@ -56,6 +56,10 @@ type Member struct {
 	// Profile is the tool a block's current attempt declares
 	// (C4_BLOCK_PROFILE): the name its usage.json reports as its tools.
 	Profile string `json:"profile,omitempty"`
+	// Env is the version of the environment the member runs in (a C4 ID),
+	// when C4 filled its config directory; empty for a session run in a
+	// config directory of its own making.
+	Env string `json:"env,omitempty"`
 	// Previous lists the sessions of earlier phases, oldest first.
 	Previous []string `json:"previous,omitempty"`
 	// Registered is when the member was first registered.

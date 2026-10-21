@@ -43,6 +43,8 @@ type Checkpoint struct {
 	// checkpoint uses to detect a transcript that was rewritten rather than
 	// appended to.
 	Tail string `json:"tail"`
+	// Env is the environment the member ran in (Member.Env).
+	Env string `json:"env,omitempty"`
 	// Workspace is the member's working tree at the same point.
 	Workspace Workspace `json:"workspace"`
 	// Note records anything unusual: a rewritten transcript, a lagging

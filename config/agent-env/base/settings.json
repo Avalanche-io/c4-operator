@@ -1,0 +1,15 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "c4-agent checkpoint --hook",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}
