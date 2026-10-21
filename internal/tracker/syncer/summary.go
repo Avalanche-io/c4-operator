@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 )
@@ -32,6 +33,9 @@ type Summary struct {
 	Wait *api.Wait
 	// Why is the reason a person is needed, or the job failed.
 	Why string
+	// Question says the person needed is asked for information a unit
+	// stopped for (NeedsInformation), which Why then is.
+	Question bool
 	// ETA is the finish a person is shown (p80 when the band has it, else
 	// p90); nil when the job has none.
 	ETA      *time.Time
@@ -82,6 +86,7 @@ func Summarize(j *api.Job, review string, reworking bool) Summary {
 		s.State = StateInReview
 	case j.NeedsPerson != nil:
 		s.State, s.Why = StateNeedsPerson, needsWhy(j)
+		s.Question = j.NeedsPerson.Reason == strings.ToLower(c4v1.NeedsInformation)
 	case j.Phase == "Held":
 		s.State = StateHeld
 	case reworking && j.Phase == "Running":
@@ -112,6 +117,9 @@ func (s Summary) Words() string {
 	case StateRunning:
 		return "Running"
 	case StateNeedsPerson:
+		if s.Question {
+			return "Blocked: needs information"
+		}
 		return "Needs a person"
 	case StateInReview:
 		if who := strings.TrimPrefix(s.Wait.WaitsFor, "person:"); who != s.Wait.WaitsFor {

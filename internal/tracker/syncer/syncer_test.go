@@ -900,3 +900,19 @@ func TestTimesInTheProjectsZone(t *testing.T) {
 		t.Fatalf("issue comment: %+v", cs)
 	}
 }
+
+// A job held on a unit's question reads as blocked on information, with
+// the question as its why, not as a bare hold; its state stays
+// needs-person, so a site's status map for it still applies.
+func TestQuestionHeldReadsAsBlocked(t *testing.T) {
+	j := &api.Job{Phase: "Held", NeedsPerson: &api.NeedsPerson{Reason: "needsinformation",
+		Message: "work/gh-7 is waiting on a question: which LUT does the plate use?"}}
+	s := syncer.Summarize(j, "", false)
+	if s.State != syncer.StateNeedsPerson || s.Words() != "Blocked: needs information" || !strings.Contains(s.Why, "which LUT") {
+		t.Fatalf("summary %+v %q", s, s.Words())
+	}
+	j.NeedsPerson.Reason = "stuck"
+	if s := syncer.Summarize(j, "", false); s.Words() != "Needs a person" {
+		t.Fatalf("a stuck job reads %q", s.Words())
+	}
+}
