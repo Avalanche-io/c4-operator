@@ -15,6 +15,12 @@ is tagged with those layers, so unticking a layer leaves out what only it
 reads. References and Alembic caches are read whenever the scene opens,
 so every layer needs them.
 
+A USD file the scene reads (a ``mayaUsdProxyShape``'s stage, or a
+reference to a USD file) is followed into what it reads in turn, its
+sublayers, references, payloads and textures, with ``c4submit.usd``, each
+tagged as the node that reads it. A binary layer that cannot be read
+without USD's Python is sent and named in ``warnings()``.
+
 Only ``maya.cmds`` is imported, and only by the functions that need it,
 so the module loads (and is tested) with a fake ``maya`` in
 ``sys.modules``. Every method runs on Maya's main thread, as c4submit's
@@ -27,6 +33,7 @@ from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tupl
 
 from c4submit import frames as framelib
 from c4submit import paths, seq
+from c4submit import usd as usdlib
 from c4submit.host import Dependency, Host, Renderable
 
 #: The master layer's node.
@@ -42,6 +49,16 @@ _UV = re.compile(r"<[uU]>|<[vV]>")
 _UV_IN_NAME = re.compile(r"([._-]?)u(\d+)_v(\d+)(?=\D*$)")
 _UDIM_IN_NAME = re.compile(r"(?<!\d)1\d{3}(?!\d)")
 _LAST_NUMBER = re.compile(r"(\d+)(?=\D*$)")
+#: USD layers whose own sublayers, references and assets are followed.
+USD_LAYERS = (".usd", ".usda", ".usdc")
+#: The Maya USD plug-in's node that draws and renders a stage.
+USD_PROXY = "mayaUsdProxyShape"
+
+
+def unread_warning(path: str) -> str:
+    """What the artist is told about a binary layer USD's Python was not here to read."""
+    return (f"{path} is binary USD and USD's Python is not available here, "
+            "so what it reads in turn was not collected")
 
 
 def _cmds():
@@ -297,11 +314,14 @@ class MayaHost(Host):
         layers = [n for n in render_layers() if _get(n + ".renderable", False)]
         members = _layer_members(layers)
         out: List[Dependency] = []
+        self._unread: List[str] = []
 
         def add(path: str, node: str, tagged: bool = True, optional: bool = False):
-            if path:
-                out.append(Dependency(path=path, node=node, optional=optional,
-                                      renderables=_layers_of(node, members) if tagged else None))
+            if not path:
+                return
+            tags = _layers_of(node, members) if tagged else None
+            out.append(Dependency(path=path, node=node, optional=optional, renderables=tags))
+            out.extend(self._usd(path, node, tags, optional))
 
         for n in _ls(type="file"):
             for p in self._texture(n):
@@ -321,10 +341,40 @@ class MayaHost(Host):
             files += [layered] if isinstance(layered, str) else list(layered)
             for p in files:
                 add(self.absolute(p), n, tagged=False)
+        for n in _ls(type=USD_PROXY):
+            add(self._proxy_path(n), n)
         for ref, path, loaded in self._references():
             add(path, ref, tagged=False, optional=not loaded)
         out += self._listed(out)
         return out
+
+    def warnings(self) -> List[str]:
+        """Each binary USD layer whose own files could not be followed."""
+        return [unread_warning(u) for u in getattr(self, "_unread", [])]
+
+    def _proxy_path(self, node: str) -> str:
+        """A proxy shape's stage. With ``filePathRelative`` on, the Maya USD
+        plug-in keeps the path relative to the scene file's folder."""
+        raw = os.path.expandvars((_get(node + ".filePath", "") or "").strip())
+        if not raw:
+            return ""
+        scene_dir = os.path.dirname(self.scene_file())
+        if _get(node + ".filePathRelative", False) and not paths.is_absolute(raw) and scene_dir:
+            return paths.norm(scene_dir.rstrip("/\\") + "/" + raw)
+        return self.absolute(raw)
+
+    def _usd(self, path: str, node: str, tags: Optional[List[str]], optional: bool) -> List[Dependency]:
+        """What a USD file reads in turn, tagged as the node that reads it.
+        Anything else (a texture, a sequence, a file not there) reads
+        nothing here."""
+        if not path.lower().endswith(USD_LAYERS) or seq.has_frames(path) or not os.path.isfile(path):
+            return []
+        deps, unread = usdlib.dependencies(path, node=f"{node} > {os.path.basename(path)}")
+        for d in deps:
+            d.renderables = None if tags is None else list(tags)
+            d.optional = optional
+        self._unread += [u for u in unread if u not in self._unread]
+        return deps
 
     def _texture(self, node: str) -> List[str]:
         """The files a file node reads, as one pattern: Maya's own computed

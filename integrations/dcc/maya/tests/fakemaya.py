@@ -24,7 +24,8 @@ SHORT = {"q": "query", "e": "edit", "ex": "exists", "sn": "sceneName", "rd": "ro
          "l": "label", "tx": "text", "v": "value", "en": "enable", "vis": "visible", "ann": "annotation",
          "cc": "changeCommand", "c": "command", "p": "parent"}
 
-DAG_TYPES = ("transform", "mesh", "camera", "aiStandIn", "aiVolume", "gpuCache", "aiSkyDomeLight", "nurbsCurve")
+DAG_TYPES = ("transform", "mesh", "camera", "aiStandIn", "aiVolume", "gpuCache", "aiSkyDomeLight", "nurbsCurve",
+             "mayaUsdProxyShape")
 SHAPE_TYPES = DAG_TYPES[1:]
 
 
@@ -780,6 +781,13 @@ def listed(*paths: str) -> None:
 
 def select(*names: str) -> None:
     _s.selection = list(names)
+
+
+def usd_proxy(name: str, path: str, relative: bool = False) -> str:
+    """A Maya USD stage: a transform with a mayaUsdProxyShape on ``path``
+    (relative to the scene's folder when ``relative``); returns the shape."""
+    node("transform", name)
+    return node("mayaUsdProxyShape", name + "Shape", name, filePath=path, filePathRelative=relative)
 
 
 reset()

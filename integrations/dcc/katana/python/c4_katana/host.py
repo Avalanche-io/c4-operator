@@ -10,9 +10,13 @@ Every file a node's parameters name is a dependency: Alembic caches, USD
 stages, look files, textures on shading nodes, live groups, anything with
 a file widget or a file's name. Each is tagged with the Render nodes
 downstream of it in the node graph, so unticking a Render node leaves out
-what only it reads. What a file names in turn (a USD stage's sublayers and
-references, a look file's textures) is not read here: those files must be
-under the project folder for the job, and are a known limit.
+what only it reads. A USD file (a UsdIn's stage, or any parameter naming
+one) is followed into what it reads in turn, its sublayers, references,
+payloads and textures, with ``c4submit.usd``, each tagged as the node that
+reads the stage; a binary layer that cannot be read without USD's Python is
+sent and named in ``warnings()``. What a look file or a live group names in
+turn is not read: those files must be under the project folder for the job,
+and are a known limit.
 
 Only ``Katana``'s ``FarmAPI``, ``NodegraphAPI`` and ``KatanaFile`` are
 imported, and only by the functions that need them, so the module loads
@@ -26,7 +30,8 @@ import re
 from typing import Dict, List, Optional, Set, Tuple
 
 from c4submit import frames as framelib
-from c4submit import paths
+from c4submit import paths, seq
+from c4submit import usd as usdlib
 from c4submit.host import Dependency, Host, Renderable
 
 #: Nodes that are jobs.
@@ -42,6 +47,27 @@ FILE_EXTENSIONS = (
     ".tiff", ".png", ".jpg", ".jpeg", ".hdr", ".hdri", ".ptex", ".ptx", ".vdb", ".ass", ".ass.gz", ".rib",
     ".ocio", ".cube", ".csp", ".spi1d", ".spi3d", ".lut", ".xml", ".bgeo", ".bgeo.sc", ".obj", ".fbx",
 )
+#: USD layers whose own sublayers, references and assets are followed.
+USD_LAYERS = (".usd", ".usda", ".usdc")
+
+
+def unread_warning(path: str) -> str:
+    """What the artist is told about a binary layer USD's Python was not here to read."""
+    return (f"{path} is binary USD and USD's Python is not available here, "
+            "so what it reads in turn was not collected")
+
+
+def usd_dependencies(path: str, label: str, renderables: Optional[List[str]]) -> Tuple[List[Dependency], List[str]]:
+    """What a USD file reads in turn, tagged with the renderables of the
+    node that reads it, and the binary layers that could not be read. A
+    path that is not a USD layer on disk (a sequence, an asset ID) reads
+    nothing here."""
+    if not path.lower().endswith(USD_LAYERS) or seq.has_frames(path) or not os.path.isfile(path):
+        return [], []
+    deps, unread = usdlib.dependencies(path, node=f"{label} > {os.path.basename(path)}")
+    for d in deps:
+        d.renderables = None if renderables is None else list(renderables)
+    return deps, unread
 
 
 #: How a path begins: a variable, home, a root, a drive, or a folder name and a slash.
@@ -296,6 +322,7 @@ class KatanaHost(Host):
 
     def dependencies(self) -> List[Dependency]:
         _, ng, _ = _katana()
+        self._unread: List[str] = []
         graph = _Graph()
         renders = render_nodes()
         ups = {r.getName(): graph.upstream(r) for r in renders}
@@ -315,6 +342,13 @@ class KatanaHost(Host):
                 p = self.absolute(raw)
                 if not p or (scene and paths.same(p, scene)):
                     continue
-                out.append(Dependency(path=p, node=f"{name}.{param.split('.', 1)[-1]}" if param else name,
-                                      renderables=tag))
+                label = f"{name}.{param.split('.', 1)[-1]}" if param else name
+                out.append(Dependency(path=p, node=label, renderables=tag))
+                deps, unread = usd_dependencies(p, label, tag)
+                out += deps
+                self._unread += [u for u in unread if u not in self._unread]
         return out
+
+    def warnings(self) -> List[str]:
+        """Each binary USD layer whose own files could not be followed."""
+        return [unread_warning(u) for u in getattr(self, "_unread", [])]
