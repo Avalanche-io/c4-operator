@@ -611,10 +611,12 @@ name: x
 kind: once
 runs:
   image: c4/runtime-base
-  command: [bash, -c, 'i=0; while [ $i -lt 200 ]; do echo "filler $i"; i=$((i+1)); done; echo "openjd_redacted_env: TOKEN=s3cret"; echo "s3cret on stderr" >&2; echo "s3cret on stdout"']
+  command: [bash, -c, 'i=0; while [ $i -lt 800 ]; do echo "filler $i: a line long enough that the backlog outgrows the reader buffer, as a real tool log does"; i=$((i+1)); done; echo "openjd_redacted_env: TOKEN=s3cret"; echo "s3cret on stderr" >&2; echo "s3cret on stdout"']
 `)
 	// the line the tool announces the secret on is read late, behind a
-	// backlog: as a loaded machine reads it
+	// backlog: as a loaded machine reads it. The backlog takes longer to
+	// read than the stop grace, so the tool has exited well before its
+	// last lines are read: they are read all the same.
 	testReadPause = time.Millisecond
 	t.Cleanup(func() { testReadPause = 0 })
 	if c := r.run(); c != 0 {
@@ -626,8 +628,8 @@ runs:
 			t.Errorf("unmasked: %q", l)
 		}
 	}
-	if !strings.Contains(log, "******** on stderr") || !strings.Contains(log, "******** on stdout") {
-		t.Errorf("the masked lines are missing:\n%s", log)
+	if !strings.Contains(log, "filler 799:") || !strings.Contains(log, "******** on stderr") || !strings.Contains(log, "******** on stdout") {
+		t.Errorf("lines are missing: %d bytes, ending %q", len(log), log[max(0, len(log)-200):])
 	}
 }
 

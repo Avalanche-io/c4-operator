@@ -176,6 +176,7 @@ type runner struct {
 	masks     []string
 	last      time.Time    // the tool's last line
 	written   float64      // the progress last written
+	lines     int          // lines read
 	done      map[int]bool // frames finished
 	previewed map[int]bool // frames whose preview is queued
 	class     string       // from c4_fail
@@ -689,13 +690,21 @@ wait:
 			}()
 		}
 	}
-	// The last lines, unless something the tool left behind keeps the
-	// pipes open.
-	select {
-	case <-readDone:
-	case <-time.After(r.e.grace()):
-		outR.Close()
-		<-readDone
+	// The last lines, however far behind the reader is, unless something
+	// the tool left behind keeps the pipe open: it is closed once a grace
+	// passes with nothing read.
+	for read := r.linesRead(); ; {
+		select {
+		case <-readDone:
+		case <-time.After(r.e.grace()):
+			if n := r.linesRead(); n != read {
+				read = n
+				continue
+			}
+			outR.Close()
+			<-readDone
+		}
+		break
 	}
 	close(stopWatch)
 	watching.Wait()
@@ -799,6 +808,13 @@ func (r *runner) result(code int, stalled bool, signalled os.Signal) outcome {
 	return o
 }
 
+// linesRead is how many of the tool's lines have been read.
+func (r *runner) linesRead() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.lines
+}
+
 // touched reports whether the file was written during this run.
 func (r *runner) touched(p string) bool {
 	info, err := os.Stat(p)
@@ -853,6 +869,7 @@ func (r *runner) line(l string, dst io.Writer) {
 	}
 	r.mu.Lock()
 	r.last = r.e.clock()
+	r.lines++
 	if v, ok := cutProto(l, "openjd_redacted_env"); ok {
 		if _, secret, ok := strings.Cut(v, "="); ok && secret != "" {
 			r.masks = append(r.masks, secret)
