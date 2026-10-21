@@ -3,6 +3,8 @@ package agent
 import (
 	"context"
 	"fmt"
+	"github.com/Avalanche-io/c4-operator/work/tokens"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -131,5 +133,48 @@ func TestAgeWords(t *testing.T) {
 		if got := ageWords(d); got != want {
 			t.Errorf("%v: %q, want %q", d, got, want)
 		}
+	}
+}
+
+// A failed session says the error it stopped on, from the CLI's own API
+// error record; the CLI's filler messages (model <synthetic>) are neither
+// the model's last words nor usage. A failure older than a day that no
+// longer runs is at rest: listed with --all only.
+func TestObserveFailures(t *testing.T) {
+	e := newEnv(t)
+	now := time.Now()
+	start := now.Add(-time.Hour)
+	add := func(id, name, text string, age time.Duration) {
+		e.transcript(id, text)
+		if age > 0 {
+			os.Chtimes(e.transcriptPath(id), now.Add(-age), now.Add(-age))
+		}
+		e.fake.active[id] = Active{SessionID: id, Name: name, Kind: "background", State: "failed", Cwd: e.cwd, StartedAt: start.UnixMilli()}
+	}
+	broke := `{"type":"assistant","message":{"id":"m1","model":"opus","usage":{"input_tokens":10,"output_tokens":5},"content":[{"type":"text","text":"Fetching the plates."}]}}` + "\n" +
+		`{"type":"assistant","isApiErrorMessage":true,"error":"server_error","message":{"id":"e1","model":"<synthetic>","content":[{"type":"text","text":"API Error: Can't reach the API server (ENOTFOUND)\nretry later"}]}}` + "\n" +
+		`{"type":"assistant","message":{"id":"s1","model":"<synthetic>","usage":{"input_tokens":0,"output_tokens":0},"content":[{"type":"text","text":"No response requested."}]}}` + "\n"
+	add("dddddddd-0000-4000-8000-000000000001", "fresh", broke, 0)
+	add("dddddddd-0000-4000-8000-000000000002", "old", broke, 53*24*time.Hour)
+
+	obs, err := e.h.Observe(context.Background(), e.configDir, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(obs) != 1 || obs[0].Name != "fresh" {
+		t.Fatalf("listed %+v, want the fresh failure alone", obs)
+	}
+	o := obs[0]
+	if o.NeedsYou != "it stopped on an error: API Error: Can't reach the API server (ENOTFOUND)" {
+		t.Errorf("needsYou %q", o.NeedsYou)
+	}
+	if o.Usage == nil || len(o.Usage.Models) != 1 || o.Usage.Models[0].Model != "opus" {
+		t.Errorf("usage %+v: no <synthetic> entries", o.Usage)
+	}
+	if want := tokens.Weighted("opus", tokens.Counts{Input: 10, Output: 5}); o.Weighted != want || want == 0 {
+		t.Errorf("weighted %v, want %v", o.Weighted, want)
+	}
+	if all, _ := e.h.Observe(context.Background(), e.configDir, true, now); len(all) != 2 {
+		t.Errorf("with --all: %d", len(all))
 	}
 }

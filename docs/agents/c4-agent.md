@@ -54,14 +54,20 @@ Each session gets:
   order of who needs their person first;
 - **the one thing that needs you,** when there is one: a tool call waiting
   for your permission, a question it ended its turn on, the error it
-  stopped on, or a spend limit only you can raise. A session the CLI calls
+  stopped on (the first line of the API error, when the CLI recorded
+  one), or a spend limit only you can raise. A session the CLI calls
   `blocked` that asks nothing reads as `idle`, since a finished task reads
   as blocked too;
-- **what it has used,** per model, over its transcript;
+- **what it has used,** per model, over its transcript: `usage.models`, a
+  list of `{model, inputTokens, outputTokens, cacheReadTokens,
+  cacheWriteTokens}`, without the CLI's own `<synthetic>` messages. The
+  text view says what it wrote and what it read, cache reads included,
+  which is nearly all of what a long session is billed for. `weighted` is
+  the same in input-equivalent tokens, weighed as the farm weighs them;
 - **its open background work,** and how long since it last wrote.
 
 Without `--all` it lists the sessions that are running, and the ones that
-failed. `--json` gives the same rows, with the machine's name, for a program
+failed within the last day; an older failure is at rest. `--json` gives the same rows, with the machine's name, for a program
 to read. A host runner started with `--observe --hud URL` (off unless asked)
 shares them with that farm every minute, quoted words included. The farm
 shows them to the owners of the pools its node is in (the runner's

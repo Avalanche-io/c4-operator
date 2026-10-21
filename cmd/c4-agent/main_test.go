@@ -477,9 +477,9 @@ func TestPrintObserved(t *testing.T) {
 	printObserved(&b, []agent.Observed{
 		{Name: "lead", Word: agent.WordNeedsYou, NeedsYou: "it asks: Which pool?", Transcript: "t", Usage: &agent.ObservedUse{Models: []agent.ModelUsage{{Model: "opus", InputTokens: 12000, OutputTokens: 400}}}},
 		{Name: "new", Word: agent.WordIdle},
-		{Name: "big", Word: agent.WordWorking, Transcript: "t", TurnAge: "5 minutes", BackgroundOpen: 2, Usage: &agent.ObservedUse{Models: []agent.ModelUsage{{Model: "opus", InputTokens: 3_400_000}}}},
+		{Name: "big", Word: agent.WordWorking, Transcript: "t", TurnAge: "5 minutes", BackgroundOpen: 2, Usage: &agent.ObservedUse{Models: []agent.ModelUsage{{Model: "opus", InputTokens: 400_000, OutputTokens: 2_400_000, CacheReadTokens: 1_400_000_000}}}},
 	})
-	for _, want := range []string{"it asks: Which pool?, 12k tokens used", "no transcript yet", "last wrote 5 minutes ago, 2 background tasks running, 3.4M tokens used"} {
+	for _, want := range []string{"it asks: Which pool? · wrote 400, read 12k tokens", "no transcript yet", "last wrote 5 minutes ago, 2 background tasks running · wrote 2.4M, read 1.4B tokens"} {
 		if !strings.Contains(b.String(), want) {
 			t.Errorf("no %q in\n%s", want, b.String())
 		}

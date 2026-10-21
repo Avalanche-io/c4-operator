@@ -679,8 +679,8 @@ func printObserved(out io.Writer, obs []agent.Observed) {
 		} else if o.BackgroundOpen > 1 {
 			what += fmt.Sprintf(", %d background tasks running", o.BackgroundOpen)
 		}
-		if n := o.Usage.Tokens(); n > 0 {
-			what += ", " + tokenWords(n) + " tokens used"
+		if w, rd := o.Usage.Wrote(), o.Usage.Read(); w+rd > 0 {
+			what += " · wrote " + tokenWords(w) + ", read " + tokenWords(rd) + " tokens"
 		}
 		fmt.Fprintf(out, "%-13s %-24s %s\n", o.Word, name, what)
 	}
@@ -692,7 +692,7 @@ func printObserved(out io.Writer, obs []agent.Observed) {
 	}
 }
 
-// tokenWords says a token count briefly: 950, 12k, 3.4M.
+// tokenWords says a token count briefly: 950, 12k, 3.4M, 1.4B.
 func tokenWords(n int64) string {
 	switch {
 	case n < 1000:
@@ -700,5 +700,8 @@ func tokenWords(n int64) string {
 	case n < 999_500:
 		return strconv.FormatInt((n+500)/1000, 10) + "k"
 	}
-	return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+	if n < 999_950_000 {
+		return strconv.FormatFloat(float64(n)/1e6, 'f', 1, 64) + "M"
+	}
+	return strconv.FormatFloat(float64(n)/1e9, 'f', 1, 64) + "B"
 }

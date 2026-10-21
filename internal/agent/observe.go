@@ -6,8 +6,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Avalanche-io/c4-operator/work/tokens"
 	"os"
 	"os/exec"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -41,6 +43,10 @@ type Observed struct {
 	Usage          *ObservedUse  `json:"usage,omitempty"`
 	Limit          *ObservedHalt `json:"limit,omitempty"`
 	Transcript     string        `json:"transcript,omitempty"`
+	// Weighted is what it has used in input-equivalent tokens, each model's
+	// counts weighted as the farm weighs them (work/tokens), so every
+	// reader shows one number.
+	Weighted float64 `json:"weighted"`
 	// OnFarm is true when the session is a member C4 runs (registered with
 	// c4-agent, as c4 farm agents add registers one).
 	OnFarm bool `json:"onFarm"`
@@ -51,14 +57,27 @@ type ObservedUse struct {
 	Models []ModelUsage `json:"models"`
 }
 
-// Tokens is its input and output, summed over its models.
-func (u *ObservedUse) Tokens() int64 {
+// Wrote is the tokens its models wrote, summed over its models.
+func (u *ObservedUse) Wrote() int64 {
 	if u == nil {
 		return 0
 	}
 	var n int64
 	for _, m := range u.Models {
-		n += m.InputTokens + m.OutputTokens
+		n += m.OutputTokens
+	}
+	return n
+}
+
+// Read is the tokens its models read, cache reads and writes included:
+// nearly all of what a long session is billed for.
+func (u *ObservedUse) Read() int64 {
+	if u == nil {
+		return 0
+	}
+	var n int64
+	for _, m := range u.Models {
+		n += m.InputTokens + m.CacheReadTokens + m.CacheWriteTokens
 	}
 	return n
 }
@@ -86,7 +105,7 @@ var wordOrder = []string{WordNeedsYou, WordAtLimit, WordWorking, WordFailed, Wor
 // Observe lists the sessions in configDir as they are at now: the running
 // ones and any that failed, or every one with all. What needs its person
 // comes first.
-func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now time.Time) ([]Observed, error) {
+func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now time.Time) (out []Observed, err error) {
 	as, err := h.Claude.Active(ctx, configDir, true)
 	if errors.Is(err, exec.ErrNotFound) {
 		return nil, errors.New("Claude Code isn't installed here, or isn't on the PATH (C4_AGENT_CLAUDE names it)")
@@ -100,7 +119,16 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 			keep = append(keep, a)
 		}
 	}
-	out := make([]Observed, len(keep))
+	defer func() {
+		if all {
+			return
+		}
+		// a failure is news for a day; an older one is at rest
+		out = slices.DeleteFunc(out, func(o Observed) bool {
+			return o.Word == WordFailed && !o.Running && (o.LastActive == nil || now.Sub(*o.LastActive) > FailedNewsFor)
+		})
+	}()
+	out = make([]Observed, len(keep))
 	var wg sync.WaitGroup
 	work := make(chan int)
 	for w := 0; w < min(4, len(keep)); w++ {
@@ -166,13 +194,19 @@ func observe(configDir string, a Active, now time.Time) Observed {
 	}
 	if len(sc.usage) > 0 {
 		o.Usage = &ObservedUse{Models: sc.usage}
+		for _, m := range sc.usage {
+			o.Weighted += tokens.Weighted(m.Model, tokens.Counts{Input: m.InputTokens, Output: m.OutputTokens, CacheRead: m.CacheReadTokens, CacheWrite: m.CacheWriteTokens})
+		}
 	}
 	switch {
 	case a.Status == "busy":
 		o.Word = WordWorking
 	case a.State == "failed":
 		o.Word, o.NeedsYou = WordFailed, "it stopped on an error"
-		if sc.lastText != "" {
+		switch {
+		case sc.lastError != "":
+			o.NeedsYou += ": " + sc.lastError
+		case sc.lastText != "":
 			o.NeedsYou += ": " + sc.lastText
 		}
 	case o.Running && len(sc.pendingTools) > 0:
@@ -248,6 +282,7 @@ type sessionScan struct {
 	limit             *UsageLimit
 	successAfterLimit bool
 	lastText          string   // the last line of the model's last words
+	lastError         string   // the first line of an API error since its last words
 	pendingTools      []string // tools called at the end with no result yet
 }
 
@@ -330,6 +365,13 @@ func scanSession(path string, started time.Time) sessionScan {
 		switch rec.Type {
 		case "assistant":
 			if rec.IsAPIErrorMessage {
+				if rec.Error != "rate_limit" {
+					for _, p := range parts {
+						if t := strings.TrimSpace(p.Text); p.Type == "text" && t != "" {
+							s.lastError = firstLine(t)
+						}
+					}
+				}
 				if rec.Error == "rate_limit" {
 					var text []string
 					for _, p := range parts {
@@ -346,9 +388,13 @@ func scanSession(path string, started time.Time) sessionScan {
 				}
 				continue
 			}
+			if msg.Model == syntheticModel {
+				continue // the CLI's own filler ("No response requested."), not the model's
+			}
 			if s.limit != nil {
 				s.successAfterLimit = true
 			}
+			s.lastError = ""
 			if msg.Usage != nil && msg.Model != "" && msg.ID != "" && !seen[msg.ID] {
 				seen[msg.ID] = true
 				u := by[msg.Model]
@@ -398,6 +444,22 @@ func scanSession(path string, started time.Time) sessionScan {
 	}
 	sort.Strings(s.pendingTools)
 	return s
+}
+
+// syntheticModel marks a message the CLI wrote itself, not a model.
+const syntheticModel = "<synthetic>"
+
+// FailedNewsFor is how long a failed session that is no longer running is
+// listed without --all: after that, it is at rest.
+const FailedNewsFor = 24 * time.Hour
+
+// firstLine is a text's first line, up to 120 characters.
+func firstLine(text string) string {
+	l, _, _ := strings.Cut(strings.TrimSpace(text), "\n")
+	if r := []rune(strings.TrimSpace(l)); len(r) > 120 {
+		return string(r[:119]) + "…"
+	}
+	return strings.TrimSpace(l)
 }
 
 // lastLine is a text's last line, up to 120 characters: where a question
