@@ -727,6 +727,8 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 			return `"render" is not a kind`, "a render is kind: frames"
 		}
 		return quote(v) + " is not a kind", "the kinds are frames, once, shards, generator, check, agent and train"
+	case "oneOf submit jobs.*.version", "pattern submit jobs.*.version", "minimum submit jobs.*.version":
+		return quote(v) + " is not a version", "write the version as a number (4) or as v004"
 	case "anyOf tool runs":
 		return "runs needs an image, a host, or both", "add image: <an image>, or host: {has: [...]}"
 	case "type tool runs.command":

@@ -1,0 +1,12 @@
+# A job given the version a tracker already holds: its name ends -v004.
+c4: submit/1
+project: saltmarsh
+shot: sm0150
+due: dailies
+tree: .
+jobs:
+  proxies:
+    tool: proxies
+    version: v004
+    frames: 1001-1048
+    with: {plates: plates/sm0150.$F4.exr}

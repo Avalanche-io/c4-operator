@@ -113,3 +113,22 @@ func TestOneErrorPerSlip(t *testing.T) {
 		t.Errorf("fix %q, want %q", errs[0].Fix, want)
 	}
 }
+
+// TestVersion: a job's given version reads as a number or vNNN, and names
+// the job's version as its name ends.
+func TestVersion(t *testing.T) {
+	for _, v := range []string{"4", "v004"} {
+		s, errs := ParseSubmission([]byte("c4: submit/1\njobs:\n  proxies: {tool: proxies, version: " + v + "}\n"))
+		if errs != nil {
+			t.Fatalf("%s: %+v", v, errs)
+		}
+		if got := s.Jobs.Job("proxies").Version; got != 4 || got.String() != "v004" {
+			t.Errorf("%s: %d %s", v, got, got.String())
+		}
+	}
+	for _, v := range []string{"0", "v4", "four"} {
+		if _, errs := ParseSubmission([]byte("c4: submit/1\njobs:\n  proxies: {tool: proxies, version: " + v + "}\n")); len(errs) != 1 || errs[0].Path != "jobs.proxies.version" {
+			t.Errorf("%s: %+v", v, errs)
+		}
+	}
+}

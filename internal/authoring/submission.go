@@ -132,6 +132,7 @@ func (c *subCtx) refusals() []Error {
 			{"wait", "waits cannot be part of a job", j.Wait != nil},
 			{"uses", "a generator's children cannot run", len(j.Uses) > 0},
 			{"over", "units over more than frames cannot run", len(j.Over) > 0},
+			{"version", "a given version cannot be set", j.Version != 0},
 		} {
 			if f.set {
 				errs = append(errs, errf(p+"."+f.field, "remove "+f.field+": for now", "%s on this farm yet", f.what))

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.proxies.version",
+      "message": "\"four\" is not a version",
+      "fix": "write the version as a number (4) or as v004"
+    }
+  ],
+  "schemaMentions": "version"
+}

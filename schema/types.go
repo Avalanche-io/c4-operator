@@ -69,6 +69,7 @@ type Job struct {
 	Chunk       *Chunk         `json:"chunk,omitempty"`
 	Order       string         `json:"order,omitempty"`
 	Follows     string         `json:"follows,omitempty"`
+	Version     Version        `json:"version,omitempty"`
 	Policy      *Policy        `json:"policy,omitempty"`
 }
 
@@ -171,6 +172,32 @@ func (c *Chunk) UnmarshalJSON(b []byte) error {
 	*c = Chunk{N: n}
 	return nil
 }
+
+// Version is the version a job is given, as a tracker numbers it: 4, or
+// v004. Zero means the next one.
+type Version int
+
+// UnmarshalJSON takes a number or vNNN.
+func (v *Version) UnmarshalJSON(b []byte) error {
+	var s string
+	if json.Unmarshal(b, &s) == nil {
+		n, err := strconv.Atoi(strings.TrimPrefix(s, "v"))
+		if err != nil || !strings.HasPrefix(s, "v") || n < 1 {
+			return fmt.Errorf("version is a number (4) or v004")
+		}
+		*v = Version(n)
+		return nil
+	}
+	var n int
+	if err := json.Unmarshal(b, &n); err != nil || n < 1 {
+		return fmt.Errorf("version is a number (4) or v004")
+	}
+	*v = Version(n)
+	return nil
+}
+
+// String is the version as a job's name ends: v004.
+func (v Version) String() string { return fmt.Sprintf("v%03d", int(v)) }
 
 // MarshalJSON writes the number, or "all".
 func (c Chunk) MarshalJSON() ([]byte, error) {

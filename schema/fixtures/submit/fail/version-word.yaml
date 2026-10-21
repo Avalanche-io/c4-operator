@@ -1,0 +1,7 @@
+c4: submit/1
+project: saltmarsh
+shot: sm0140
+due: dailies
+tree: .
+jobs:
+  proxies: {tool: proxies, version: four, frames: 1001-1048, with: {plates: plates/sm0140.$F4.exr}}

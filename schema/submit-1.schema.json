@@ -210,6 +210,7 @@
         "chunk": {"oneOf": [{"type": "integer", "minimum": 1}, {"const": "all"}], "description": "Frames per unit, or all for one unit over the whole range."},
         "order": {"enum": ["binary", "sequential", "reverse"]},
         "follows": {"type": "string", "minLength": 1},
+        "version": {"oneOf": [{"type": "integer", "minimum": 1}, {"type": "string", "pattern": "^v[0-9]{3,}$"}], "description": "The version this job is, as a tracker already numbers it (4, or v004); its name ends -v004. Default one past the latest job of that name and key."},
         "policy": {"$ref": "#/$defs/policy"}
       }
     },
