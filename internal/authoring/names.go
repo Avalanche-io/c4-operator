@@ -51,6 +51,15 @@ func NextName(names []string, stem, stage string) string {
 	return fmt.Sprintf("%s-v%03d", base, top+1)
 }
 
+// VersionName is the job a version names: <stem>-<stage>-v<NNN>.
+func VersionName(stem, stage string, v int) string {
+	base := JobStem(stem + "-" + stage)
+	if base == "" {
+		base = "job"
+	}
+	return fmt.Sprintf("%s-v%03d", base, v)
+}
+
 // Latest is the job name names: the name itself when it is a job, else
 // the latest version of it (<name>-vNNN), else "".
 func Latest(names []string, name string) string {

@@ -170,10 +170,6 @@ refusals:
   - path: jobs.light.tool
     message: karma needs licences (sesi/karma), which this farm cannot count yet
     fix: use a version of the tool that declares none for now
-  version-given:
-  - path: jobs.proxies.version
-    message: a given version cannot be set on this farm yet
-    fix: 'remove version: for now'
   wait-clock:
   - path: jobs.light.tool
     message: karma needs licences (sesi/karma), which this farm cannot count yet

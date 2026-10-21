@@ -329,3 +329,36 @@ func TestJobStem(t *testing.T) {
 		t.Fatalf("%v", errs)
 	}
 }
+
+// A tool pinned to a version older than the one in use is refused: a form
+// or c4_run_<tool> drawn from it has the old parameters. A version past
+// the latest is no version at all.
+func TestStalePin(t *testing.T) {
+	for pin, want := range map[string]string{
+		"karma@v3": "karma is v4 now; its form changed: draw it again",
+		"karma@v9": "no version v9 of karma in saltmarsh",
+	} {
+		sub, _ := ParseSubmission([]byte("c4: submit/1\nproject: saltmarsh\nshot: sm0140\ntree: .\njobs:\n  light: {tool: " + pin + ", frames: 1-4, with: {stage: s.usda}}\n"))
+		errs := Check(sub, loadFarm(t))
+		if len(errs) != 1 || errs[0].Path != "jobs.light.tool" || errs[0].Message != want {
+			t.Errorf("%s: %v", pin, errs)
+		}
+	}
+}
+
+// A job's version names it, and must be past every job of its name.
+func TestVersionGiven(t *testing.T) {
+	p := mustLower(t, "c4: submit/1\nproject: saltmarsh\nshot: sm0140\ntree: .\njobs:\n  light: {tool: depth, version: 7, frames: 1-4, with: {plates: p.exr}}\n")
+	if j := p.Jobs[0]; j.Request.Name != "sm0140-light-v007" || !j.Pinned {
+		t.Fatalf("%s pinned %v", j.Request.Name, j.Pinned)
+	}
+	for v, want := range map[string]string{
+		"3":    "sm0140-light-v003 exists; leave version out for the next one, v004",
+		"v002": "sm0140-light-v002 is below the latest, sm0140-light-v003; leave version out for the next one, v004",
+	} {
+		_, errs := lowerDoc(t, "c4: submit/1\nproject: saltmarsh\nshot: sm0140\ntree: .\njobs:\n  light: {tool: depth, version: "+v+", frames: 1-4, with: {plates: p.exr}}\n")
+		if len(errs) != 1 || errs[0].Path != "jobs.light.version" || errs[0].Message != want || errs[0].Fix != "leave version out, or set version: 4 or later" {
+			t.Errorf("version %s: %v", v, errs)
+		}
+	}
+}

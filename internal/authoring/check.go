@@ -148,10 +148,32 @@ func (c *subCtx) checkNames() {
 	}
 	jobs := c.farm.Jobs(c.ns)
 	for _, j := range c.sub.Jobs {
+		next := NextName(jobs, stem, j.Key)
+		if j.Version != 0 {
+			c.checkVersion(j, stem, next)
+		}
 		if n := NextName(jobs, stem, j.Key); len(n) > MaxJobName {
 			c.add(errf("jobs."+j.Key, "shorten the job's key, or set name: to a shorter stem",
 				"%q is longer than a job's name may be (%d characters)", n, MaxJobName))
 		}
+	}
+}
+
+// checkVersion refuses a job's version: whose name exists or is below
+// the latest of its name and key: a version names the next one, never an
+// old one.
+func (c *subCtx) checkVersion(j Job, stem, next string) {
+	name := VersionName(stem, j.Key, int(j.Version))
+	m := versionSuffix.FindStringSubmatch(next)
+	top, _ := strconv.Atoi(m[1])
+	top-- // the latest there is
+	fix := fmt.Sprintf("leave version out, or set version: %d or later", top+1)
+	switch {
+	case has(c.farm.Jobs(c.ns), name):
+		c.add(errf("jobs."+j.Key+".version", fix, "%s exists; leave version out for the next one, v%03d", name, top+1))
+	case int(j.Version) < top:
+		c.add(errf("jobs."+j.Key+".version", fix, "%s is below the latest, %s; leave version out for the next one, v%03d",
+			name, VersionName(stem, j.Key, top), top+1))
 	}
 }
 
@@ -216,6 +238,23 @@ func policyNumber(v any) (float64, bool) {
 	return d.Seconds(), err == nil
 }
 
+// current is the version of a tool in use in the project.
+func (c *subCtx) current(name string) (ToolRef, bool) {
+	for _, r := range c.farm.Tools(c.project) {
+		if r.Name == name {
+			return r, true
+		}
+	}
+	return ToolRef{}, false
+}
+
+// stale says whether a pinned version v<N> is older than the one in use.
+func stale(pinned, current string) bool {
+	p, err1 := strconv.Atoi(strings.TrimPrefix(pinned, "v"))
+	c, err2 := strconv.Atoi(strings.TrimPrefix(current, "v"))
+	return strings.HasPrefix(pinned, "v") && err1 == nil && err2 == nil && p < c
+}
+
 func splitTool(s string) (name, version string) {
 	name, version, _ = strings.Cut(s, "@")
 	return name, version
@@ -225,6 +264,13 @@ func splitTool(s string) (name, version string) {
 // key), or reports why not at path.
 func (c *subCtx) tool(path, s string) (*Tool, ToolRef, bool) {
 	name, version := splitTool(s)
+	if cur, ok := c.current(name); ok && stale(version, cur.Version) {
+		// a form or c4_run_<tool> drawn from an older version: its
+		// parameters are the old schema's
+		c.add(errf(path, fmt.Sprintf("write tool: %s for the version in use", name),
+			"%s is %s now; its form changed: draw it again", name, cur.Version))
+		return nil, ToolRef{}, false
+	}
 	t, ref, err := c.farm.Tool(c.project, name, version)
 	if err == nil && t != nil {
 		return t, ref, true

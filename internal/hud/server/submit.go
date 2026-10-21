@@ -570,6 +570,20 @@ type createOpts struct {
 	Made *c4v1.WorkJob
 }
 
+// identityError is a unit's submission refused for who the unit is: its
+// own job, its owner, what its tool grants. A submission says it as it is.
+type identityError struct{ error }
+
+func (e identityError) Unwrap() error { return e.error }
+
+// unitRefusal is an authorization refusal, an identityError for a unit.
+func unitRefusal(v *api.Viewer, err error) error {
+	if v != nil && v.Unit != nil {
+		return identityError{err}
+	}
+	return fmt.Errorf("%v", err)
+}
+
 // takenError is a create refused because the job's name was taken
 // meanwhile: a submission numbers its jobs again rather than report it.
 type takenError struct{ error }
@@ -609,7 +623,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 	ctx := r.Context()
 	if err := s.authorize(ctx, r, v, ns, "create", "workjobs", ""); err != nil {
-		return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%v", err)
+		return api.SubmitResponse{}, http.StatusForbidden, unitRefusal(v, err)
 	}
 
 	// input views become Materializations, one per view
@@ -641,7 +655,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 	if len(mats) > 0 {
 		if err := s.authorize(ctx, r, v, ns, "create", "materializations", ""); err != nil {
-			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%v", err)
+			return api.SubmitResponse{}, http.StatusForbidden, unitRefusal(v, err)
 		}
 	}
 	if body.Due != "" {
@@ -691,17 +705,17 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		// runners of that owner run it, and the owner answers for it
 		var parent c4v1.WorkJob
 		if err := s.Client.Get(ctx, types.NamespacedName{Namespace: u.Namespace, Name: u.Job}, &parent); err != nil {
-			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: its own job %s/%s: %v", v.User, u.Namespace, u.Job, err)
+			return api.SubmitResponse{}, http.StatusForbidden, identityError{fmt.Errorf("%s: its own job %s/%s cannot be read", v.User, u.Namespace, u.Job)}
 		}
 		if u.JobUID == "" {
-			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: its pod names no WorkJob as its controller, so its own job cannot be told from another of the name %s/%s", v.User, u.Namespace, u.Job)
+			return api.SubmitResponse{}, http.StatusForbidden, identityError{fmt.Errorf("%s: its pod names no WorkJob as its controller, so its own job cannot be told from another of the name %s/%s", v.User, u.Namespace, u.Job)}
 		}
 		if string(parent.UID) != u.JobUID {
-			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: the unit's own job %s/%s was replaced by another of the same name", v.User, u.Namespace, u.Job)
+			return api.SubmitResponse{}, http.StatusForbidden, identityError{fmt.Errorf("%s: the unit's own job %s/%s was replaced by another of the same name", v.User, u.Namespace, u.Job)}
 		}
 		owner := parent.Annotations[c4v1.AnnotationOwner]
 		if owner == "" {
-			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: its own job %s/%s has no owner to submit for", v.User, u.Namespace, u.Job)
+			return api.SubmitResponse{}, http.StatusForbidden, identityError{fmt.Errorf("%s: its own job %s/%s has no owner to submit for", v.User, u.Namespace, u.Job)}
 		}
 		job.Annotations[c4v1.AnnotationOwner] = owner
 		job.Annotations[c4v1.AnnotationSubmittedByUnit] = schema.UnitRef(u.Namespace, u.Job, u.JobUID, u.Unit)
@@ -843,14 +857,14 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 	for _, mt := range mats {
 		if err := s.Client.Create(ctx, mt); err != nil && !apierrors.IsAlreadyExists(err) {
-			return api.SubmitResponse{}, http.StatusConflict, fmt.Errorf("materialization %s: %v", mt.Name, err)
+			return api.SubmitResponse{}, http.StatusConflict, fmt.Errorf("materialization %s: %w", mt.Name, err)
 		}
 	}
 	if err := s.Client.Create(ctx, job); err != nil {
 		if apierrors.IsAlreadyExists(err) {
-			return api.SubmitResponse{}, http.StatusConflict, takenError{fmt.Errorf("%v", err)}
+			return api.SubmitResponse{}, http.StatusConflict, takenError{fmt.Errorf("%w", err)}
 		}
-		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("%v", err)
+		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("%w", err)
 	}
 	if o.Made != nil {
 		*o.Made = *job.DeepCopy()

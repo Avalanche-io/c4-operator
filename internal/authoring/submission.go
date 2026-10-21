@@ -55,6 +55,9 @@ type PlannedJob struct {
 	Note string
 	// Once is a once tool's job: one unit over the whole job.
 	Once bool
+	// Pinned is a job whose version the file gives: it is never numbered
+	// again.
+	Pinned bool
 }
 
 // Count is n of a thing: "1 unit", "6 units".
@@ -144,7 +147,6 @@ func (c *subCtx) refusals() []Error {
 			{"wait", "waits cannot be part of a job", j.Wait != nil},
 			{"uses", "a generator's children cannot run", len(j.Uses) > 0},
 			{"over", "units over more than frames cannot run", len(j.Over) > 0},
-			{"version", "a given version cannot be set", j.Version != 0},
 		} {
 			if f.set {
 				errs = append(errs, errf(p+"."+f.field, "remove "+f.field+": for now", "%s on this farm yet", f.what))
@@ -184,6 +186,9 @@ func (c *subCtx) lower() (*Plan, []Error) {
 	names := map[string]string{}
 	for _, j := range sub.Jobs {
 		names[j.Key] = NextName(existing, stem, j.Key)
+		if j.Version != 0 {
+			names[j.Key] = VersionName(stem, j.Key, int(j.Version))
+		}
 	}
 	root := c.farm.Root(c.project)
 	if root == "" {
@@ -263,7 +268,7 @@ func (c *subCtx) lower() (*Plan, []Error) {
 			// the previous version of the same stem and key, if there is one
 			req.Follows = Latest(existing, strings.TrimSuffix(versionSuffix.ReplaceAllString(names[j.Key], ""), "-"))
 		}
-		pj.Note, pj.Once = sub.Note, r.tool.Kind == "once"
+		pj.Note, pj.Once, pj.Pinned = sub.Note, r.tool.Kind == "once", j.Version != 0
 		due := j.Due
 		if due == "" {
 			due = sub.Due

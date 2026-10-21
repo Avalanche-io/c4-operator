@@ -17,6 +17,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 )
 
 // handleSubmission is POST /submissions: a submission checked, lowered to
@@ -149,6 +150,13 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 			break
 		}
 		var te takenError
+		if errors.As(ferr.err, &te) && pinned(plan, ferr.key) {
+			// a version the file gives is never numbered again
+			refuse(http.StatusConflict, api.FieldError{Path: "jobs." + ferr.key + ".version",
+				Message: fmt.Sprintf("%s exists; leave version out for the next one", ferr.name),
+				Fix:     "leave version out, or give a later one"})
+			return
+		}
 		if !errors.As(ferr.err, &te) || attempt >= 4 {
 			fe := leftWords(s.farmWords(ferr.key, ferr.name, plan.Project, code, ferr.err), ferr.left, ferr.until)
 			if errors.As(ferr.err, &te) {
@@ -180,6 +188,16 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Message = fmt.Sprintf("%s: %s", strings.Join(names, ", "), verb)
 	writeJSON(w, code, out)
+}
+
+// pinned says whether the file gives a job's version.
+func pinned(plan *authoring.Plan, key string) bool {
+	for _, j := range plan.Jobs {
+		if j.Key == key {
+			return j.Pinned
+		}
+	}
+	return false
 }
 
 // jobFailure is the job a submission failed at, and why.
@@ -243,7 +261,7 @@ func (s *Server) makeSubmission(r *http.Request, v *api.Viewer, m *model, plan *
 		for i, j := range plan.Jobs {
 			resp := api.SubmitResponse{Namespace: plan.Namespace, Name: j.Request.Name, Link: "#/job/" + plan.Namespace + "/" + j.Request.Name}
 			if estErr != nil {
-				resp.EstimateError = estErr.Error()
+				resp.EstimateError = s.estimateWords(estErr)
 			} else {
 				e := ests[i]
 				resp.Estimate = &e
@@ -281,14 +299,38 @@ type fieldRefusal struct {
 }
 
 // farmWords is a create's failure as the farm says it, at jobs.<key>:
-// admission policy, access and the API's own errors, never raw.
+// admission policy, access, a grant, the API's own errors, never raw.
 func (s *Server) farmWords(key, name, project string, code int, err error) fieldRefusal {
 	path, msg := "jobs."+key, err.Error()
 	var gr *grantRefused
 	if errors.As(err, &gr) {
-		// A submission for a person, refused as POST /jobs refuses it:
-		// at for:, with the same reason, so one handler serves both.
-		return fieldRefusal{api.FieldError{Path: "for", Message: gr.msg, Fix: grantFix[gr.reason], Reason: gr.reason}, gr.code}
+		// A submission for a person, refused as POST /jobs refuses it,
+		// with the same reason, so one handler serves both: at for:, or
+		// at tracker: for a farm with no trackers.
+		at := "for"
+		if gr.reason == api.RefusedNotInstalled && strings.Contains(gr.msg, "trackers") || gr.reason == api.RefusedNoTracker {
+			at = "tracker"
+		}
+		m := gr.msg
+		if gr.code == http.StatusNotImplemented {
+			// said once, as what this farm lacks, never as a thing to retry
+			m += ", so submitting for a person is not available on this farm"
+		}
+		return fieldRefusal{api.FieldError{Path: at, Message: m, Fix: grantFix[gr.reason], Reason: gr.reason}, gr.code}
+	}
+	var ge *errGrant
+	if errors.As(err, &ge) {
+		// the grant's own refusal, at the field that asked for it
+		at, m, fix := "for", ge.msg, "leave for: out, or ask a farm admin about the grant"
+		if ge.code == http.StatusNotImplemented {
+			at, m, fix = "tracker", ge.msg+", so trackers are not available on this farm", "leave tracker: out on this farm"
+		}
+		return fieldRefusal{api.FieldError{Path: at, Message: m, Fix: fix}, ge.code}
+	}
+	var ie identityError
+	if errors.As(err, &ie) {
+		return fieldRefusal{api.FieldError{Path: path, Message: ie.Error(),
+			Fix: "a unit submits only what its tool grants, for its own job's owner"}, http.StatusForbidden}
 	}
 	switch {
 	case strings.Contains(msg, "RFC 1123"):
@@ -298,25 +340,45 @@ func (s *Server) farmWords(key, name, project string, code int, err error) field
 		_, why, _ := strings.Cut(msg, "denied the request:")
 		return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("the farm's admission policy refused %s: %s", key, strings.TrimSpace(why)),
 			Fix: "change the job as it says, or ask a farm admin"}, http.StatusUnprocessableEntity}
-	case code == http.StatusForbidden || strings.Contains(msg, "is forbidden"):
+	case transient(err, code):
+		return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("the farm could not make %s just now", key),
+			Fix: "try again in a moment"}, http.StatusServiceUnavailable}
+	case code == http.StatusForbidden || apierrors.IsForbidden(err):
 		return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("you may not create jobs in %s", project),
 			Fix: "ask a farm admin for access to " + project}, http.StatusForbidden}
 	case code == http.StatusNotFound:
 		return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("no project %q you can submit to", project),
 			Fix: "c4 farm projects lists the ones you can submit to"}, http.StatusNotFound}
-	case code >= 500 || errors.Is(err, ErrNotPlanned):
-		return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("the farm could not make %s just now", key),
-			Fix: "try again in a moment; nothing of the submission was kept"}, http.StatusServiceUnavailable}
 	}
-	return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("the farm refused %s as lowered: %s", key, msg),
-		Fix: "explain: true shows what it lowered to; a farm admin can say why the farm refused it"}, http.StatusUnprocessableEntity}
+	// Anything else is the farm's to explain, not the caller's to read.
+	s.Log.Error(err, "a submission's job refused as lowered", "job", key, "code", code)
+	return fieldRefusal{api.FieldError{Path: path, Message: fmt.Sprintf("the farm could not make %s as lowered", key),
+		Fix: "explain: true shows what it lowered to; the HUD's log says why the farm refused it"}, http.StatusUnprocessableEntity}
 }
 
-// what is a job in a line, with what reuse will skip.
+// transient says whether a failure is the API's for the moment (too many
+// requests, a timeout, a server error), not the submission's.
+func transient(err error, code int) bool {
+	return errors.Is(err, ErrNotPlanned) || errors.Is(err, context.DeadlineExceeded) ||
+		apierrors.IsTooManyRequests(err) || apierrors.IsTimeout(err) || apierrors.IsServerTimeout(err) ||
+		apierrors.IsInternalError(err) || apierrors.IsServiceUnavailable(err) || code >= 500 && code != http.StatusNotImplemented
+}
+
+// estimateWords is why a dry run has no estimate, in the farm's words.
+func (s *Server) estimateWords(err error) string {
+	if errors.Is(err, ErrNotPlanned) {
+		return "the farm has not planned its work yet; ask again in a moment"
+	}
+	s.Log.Error(err, "a submission's dry run")
+	return "the farm could not estimate it just now"
+}
+
+// what is a job in a line, with what reuse will skip: the estimate's
+// units, which a once job has too.
 func what(j authoring.PlannedJob, e *api.SubmitEstimate) string {
 	s := j.What()
-	if e != nil && e.Reused > 0 && j.Units > 0 {
-		s += fmt.Sprintf("; %d of %s reused", e.Reused, authoring.Count(j.Units, "unit"))
+	if e != nil && e.Reused > 0 && e.Units > 0 {
+		s += fmt.Sprintf("; %d of %s reused", e.Reused, authoring.Count(e.Units, "unit"))
 	}
 	return s
 }

@@ -893,9 +893,13 @@ and `-site` name the input it rebuilds and where, and the queue sets
 `submission` is a submission (`c4: submit/1`, the submission format,
 schema/README.md) as JSON, its keys in the order written. The farm checks
 it against the project (its tools and their parameters, the jobs it
-follows, its dues, trees, people, `for:` and `tracker:`), lowers each job
-to a `POST /jobs` request, and creates the jobs in the order written:
-`201`. `project` may be left out by a viewer with one project.
+follows, its dues, trees and `tracker:`), lowers each job to a `POST /jobs`
+request, and creates the jobs in the order written: `201`. `project` may
+be left out by a viewer with one project. `for:` and the people a
+submission names are not checked yet: the HUD keeps no list of the farm's
+people, so only a grant's refusal (below) speaks for them. A tool pinned
+to a version older than the one in use (`proxies@v4` when v5 is) is
+refused: "proxies is v5 now; its form changed: draw it again".
 
 It is all or nothing, whatever the client does. Every job is checked as
 `POST /jobs` checks it before the first is made. The jobs are created
@@ -909,16 +913,24 @@ midway leaves its jobs held and marked pending
 (`c4.avalanche.io/submission-pending`) until `submission.pendingFor` (10
 minutes, a project policy value), after which they are deleted with every
 job of their attempt. A name taken meanwhile is numbered past and the
-jobs made again, never reported. Every refusal is `{ path,
+jobs made again, never reported; a job's `version` is never numbered
+again. Every refusal is `{ path,
 message, fix }` in the farm's words, at a dotted path (`jobs.comp.after`,
 `jobs.movie` for a job the farm would not take): `422` for the file or the
 farm's policy, `403` without access, `404` for a project the viewer cannot
-see, `503` when the farm cannot make a job just now. A folder tree is
-refused beside the file's other errors. A submission for a person
+see, `503` when the farm cannot make a job just now (too many requests,
+a timeout, a server error: "try again in a moment"). Nothing of the
+operator's own text reaches the caller, in a refusal or a dry run's
+`estimateError`. A folder tree is refused beside the file's other errors. A submission for a person
 (`for:`) refused for its grant is refused at `for` with POST /jobs's
 `reason` (`no-grant`, `grant-lapsed`, `grant-uncovered`, `no-tracker`,
 `not-sync`, `not-installed`) and the status POST /jobs gives, so one
-handler serves both.
+handler serves both; a farm with no trackers is refused at `tracker`, one
+with no grants at `for`, once (`501`), as not available on this farm,
+never as a thing to retry. A unit's submission refused for who it is (its
+own job, that job's owner, what its tool grants) says so in its own words
+at `jobs.<key>` (`403`). A create the API turns away for the moment keeps
+its class: `503`, try again.
 
 `key` makes a retry safe. A client names the submission it means (any
 text) and sends the same key on every retry: the request is answered
@@ -940,7 +952,10 @@ queue has not planned yet).
 Each job is named `<name>-<key>-vNNN` (`name` defaults to the shot,
 lowercased, with anything outside `[a-z0-9-]` made `-`, repeats collapsed
 and the ends trimmed: `sm0220_fx` names `sm0220-fx-light-v001`; a shot with
-nothing left is refused at `shot`), one
+nothing left is refused at `shot`). A job's `version` (`4` or `v004`, as a
+tracker numbers it) names it `<name>-<key>-v004`; one whose name exists
+or is below the latest is refused ("sm0150-proxies-v004 exists; leave
+version out for the next one, v005"). Otherwise it is one
 version past the latest such job, for the whole submission before any is
 made, so a job's inputs can name the jobs it follows; it `follows` the
 previous version of the same name and key unless the file says otherwise.
