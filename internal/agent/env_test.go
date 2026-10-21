@@ -119,3 +119,19 @@ func TestRegisterInAnEnvironmentWithImport(t *testing.T) {
 		t.Fatalf("again: %v", err)
 	}
 }
+
+// The base environment's version, as the HUD gives it to blocks that name
+// none, is the one its folder has.
+func TestBaseEnvID(t *testing.T) {
+	got, err := BaseEnvID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := EnvID(cleanEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want || !strings.HasPrefix(got, "c4") {
+		t.Fatalf("embedded %s, folder %s", got, want)
+	}
+}

@@ -1235,9 +1235,12 @@ tool's defaults), set as the unit's `C4_BLOCK_PROMPT` (`task`),
 `C4_BLOCK_TOOLS` (`allow`), `C4_BLOCK_MODEL` and `C4_BLOCK_EFFORT`; other
 params stay facts of the plan, and a block may not set `C4_*` itself. The
 template, once for the job, is the tool's, with `C4_AGENT_BLOCK=1`,
-`C4_BLOCK_PROFILE` (the tool's name) and `C4_BLOCK_REPO`, the
-submission's `root`: the repository on the developer's machine, where a
-host runner gives each block its own worktree. A tool that runs on hosts
+`C4_BLOCK_PROFILE` (the tool's name), `C4_BLOCK_REPO`, the submission's
+`root` (the repository on the developer's machine, where a host runner
+gives each block its own worktree), and `C4_AGENT_ENV`, the version of the
+agent environment a block's session runs in: the farm's clean one
+(`config/agent-env/base`) unless the job's `with.env` or a block's `env`
+names another. A tool that runs on hosts
 goes to the farm's host pools the submitter may use (pools whose node
 selector names `c4.avalanche.io/host`, with no `owners` or the submitter
 among them); with none, a tool that also has an image runs as block pods

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"github.com/Avalanche-io/c4-operator/internal/agent"
 	"io/fs"
 	"net"
 	"net/http"
@@ -404,6 +405,12 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// operator's tier token alone; their metrics need an API token
 		// the c4-metrics-reader role is bound to.
 		TierToken: (&tier.TokenFile{Path: tierToken}).Token, MetricsToken: apiToken(mgr.GetConfig())}
+	// The clean agent environment blocks run in by default ().
+	if id, err := agent.BaseEnvID(); err != nil {
+		ctrl.Log.WithName("hud").Error(err, "the clean agent environment's version; blocks get none")
+	} else {
+		srv.AgentEnv = id
+	}
 	if strings.HasPrefix(version, "v") {
 		// the release's own tools, built with their tool.lock: c4 farm
 		// up publishes these trees, tested in this release

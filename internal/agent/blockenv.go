@@ -59,6 +59,20 @@ func BaseEnv(sources string) (string, error) {
 	return id, os.Rename(tmp, dst)
 }
 
+// BaseEnvID is the version of the release's base environment, the one a
+// block runs in when its job names none ($C4_AGENT_ENV).
+func BaseEnvID() (string, error) {
+	tmp, err := os.MkdirTemp("", "c4-base-env-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(tmp)
+	if err := os.CopyFS(tmp, agentenv.Base()); err != nil {
+		return "", err
+	}
+	return EnvID(tmp)
+}
+
 // PrepareBlocksEnv fills an agents home's blocks directory from the base
 // environment, unless it has been filled before, and returns it.
 func PrepareBlocksEnv(home string) (string, error) {
