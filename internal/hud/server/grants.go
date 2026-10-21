@@ -391,6 +391,26 @@ func (s *Server) grantFor(ctx context.Context, v *api.Viewer, ns string, body *a
 	return g, nil
 }
 
+// parentGrantCovers says why a unit of parent, a job a tracker's sync
+// made for owner under owner's grant, may not submit spec: the grant is
+// gone or has lapsed, or does not cover spec's pools or class. The grant
+// is read where the parent is.
+func (s *Server) parentGrantCovers(ctx context.Context, parent *c4v1.WorkJob, owner string, spec *c4v1.WorkJobSpec) error {
+	tracker := parent.Labels[c4v1.LabelTracker]
+	g := &c4v1.SubmitGrant{}
+	err := s.Client.Get(ctx, types.NamespacedName{Namespace: parent.Namespace, Name: c4v1.SubmitGrantName(tracker, owner)}, g)
+	if err != nil || g.Spec.Person != owner || g.Spec.Tracker != tracker {
+		return fmt.Errorf("its own job %s was made under %s's grant to tracker %s, which is gone, so a unit of it may not submit", parent.Name, owner, tracker)
+	}
+	if why := g.Lapsed(time.Now()); why != "" {
+		return fmt.Errorf("its own job %s was made under %s's grant to tracker %s, and %s, so a unit of it may not submit", parent.Name, owner, tracker, why)
+	}
+	if why := g.Uncovered(spec.Pools, spec.Class); why != "" {
+		return fmt.Errorf("its own job %s was made under %s's grant to tracker %s, and a unit's job is bound by it too: %s", parent.Name, owner, tracker, why)
+	}
+	return nil
+}
+
 // grantRef is what a job submitted under g carries: the grant's record,
 // or, unsigned (development), the grant itself.
 func grantRef(g *c4v1.SubmitGrant) string {

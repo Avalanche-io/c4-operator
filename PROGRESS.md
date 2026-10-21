@@ -323,6 +323,7 @@
 | `image-user` | 2026-10-20 | 2026-10-20 | Publishing a tool whose image runs as root warns that its units (65532, Pod Security restricted) may fail on their first write, with the fix; the image's USER is read from its registry (index, manifest, config), briefly and best-effort. Found by the first-run audit. Tests: TestImageUser, TestPublishWarnsOfARootImage. |
 | `bundle-api` | 2026-10-20 | 2026-10-20 | A person runs their own agents without kubectl: POST /bundles/{project} makes an AgentBundle owned by the viewer (dry run, refusals in the farm's words, a warning for a member no serving runner has registered), GET, suspend and DELETE beside it, and MCP c4_run_bundle, c4_list_bundles, c4_stop_bundle. For c4 farm agents. Tests: TestBundleEndpoint, TestRunBundle. |
 | `tool-test-label` | 2026-10-25 | 2026-10-25 | Only the HUD marks a job a tool's publish test: c4-workjob-controls refuses anyone else setting, moving or removing c4.avalanche.io/tool-test, which hides a job's failures from the project and refuses its controls |
+| `owner-rights` | 2026-10-21 | 2026-10-21 | A unit of a job made under a person grant (a tracker sync, for the person) is bound by that grant: its job is refused for a pool or class the grant leaves out or once the grant lapses, and carries the grant and tracker label so the queue bounds it too. Test: TestAUnitsJobKeepsItsParentsGrant. |
 
 Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
 c4 pseudo-version, so worktrees need nothing else; to build against a local c4

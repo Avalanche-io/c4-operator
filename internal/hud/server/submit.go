@@ -754,6 +754,16 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 				return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s submits for %s, who may not create jobs in %s: submit it in %s, or give %s the right there", v.User, owner, ns, parent.Namespace, owner)
 			}
 		}
+		// A job a tracker's sync made for a person, under the person's
+		// grant: its children are bound by the same grant, so a unit
+		// cannot widen what the person granted.
+		if ref := parent.Annotations[c4v1.AnnotationGrant]; ref != "" {
+			if err := s.parentGrantCovers(ctx, &parent, owner, &spec); err != nil {
+				return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: %v", v.User, err)
+			}
+			job.Annotations[c4v1.AnnotationGrant] = ref
+			job.Labels[c4v1.LabelTracker] = parent.Labels[c4v1.LabelTracker]
+		}
 		job.Annotations[c4v1.AnnotationOwner] = owner
 		job.Annotations[c4v1.AnnotationSubmittedByUnit] = schema.UnitRef(u.Namespace, u.Job, u.JobUID, u.Unit)
 		own = &parent

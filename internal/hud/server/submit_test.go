@@ -23,6 +23,7 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	kfake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -587,5 +588,68 @@ func TestSubmitRefusesSpecTool(t *testing.T) {
 			!strings.Contains(out.Error, "spec.tool is set by the farm when it lowers a tool's submission") {
 			t.Errorf("dryRun %s: %d %q, want 400 refusing spec.tool", dry, code, out.Error)
 		}
+	}
+}
+
+// A job a tracker's sync made for a person, under the person's grant, has
+// children bound by the same grant: a unit of it may not ask for a pool or
+// a class the grant leaves out, nor submit once the grant is revoked. A
+// child it may make carries the grant, so the queue bounds it as it bounds
+// the parent.
+func TestAUnitsJobKeepsItsParentsGrant(t *testing.T) {
+	s := submitFarm(t)
+	ctx := context.Background()
+	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: c4v1.SubmitGrantName("github", "dana")},
+		Spec: c4v1.SubmitGrantSpec{Person: "dana", Tracker: "github", Pools: []string{"cpu"}, Classes: []string{"render"},
+			Until: metav1.NewTime(time.Now().Add(24 * time.Hour)), Record: "c4-grant-record"}}
+	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "issue-41", UID: "uid-issue-41",
+		Labels:      map[string]string{c4v1.LabelTracker: "github"},
+		Annotations: map[string]string{c4v1.AnnotationOwner: "dana", c4v1.AnnotationGrant: "c4-grant-record"}},
+		Spec: c4v1.WorkJobSpec{Class: "agent", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+	for _, o := range []client.Object{g, parent} {
+		if err := s.Client.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/issue-41/0", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "issue-41", JobUID: "uid-issue-41", Unit: "0", Grant: "project"}}
+	submit := func(name, class string, pools ...string) (int, string) {
+		spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: class, Pools: pools, Params: map[string]string{"frames": "1-2"},
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+		var out map[string]any
+		code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit", api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: name, Spec: spec}, &out)
+		msg, _ := out["error"].(string)
+		return code, msg
+	}
+	if code, msg := submit("in-grant", "render", "cpu"); code != http.StatusCreated {
+		t.Fatalf("a child the grant covers: %d %s", code, msg)
+	}
+	var child c4v1.WorkJob
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "in-grant"}, &child); err != nil {
+		t.Fatal(err)
+	}
+	if child.Annotations[c4v1.AnnotationGrant] != "c4-grant-record" || child.Labels[c4v1.LabelTracker] != "github" {
+		t.Errorf("the child carries grant %q, tracker %q", child.Annotations[c4v1.AnnotationGrant], child.Labels[c4v1.LabelTracker])
+	}
+	for _, c := range []struct {
+		name, class string
+		pools       []string
+		says        string
+	}{
+		{"other-pool", "render", []string{"spot-a"}, "does not cover pool spot-a (only cpu)"},
+		{"other-class", "ci", []string{"cpu"}, "does not cover class ci (only render)"},
+		{"no-pool", "render", nil, "covers only pools cpu, and the job names none"},
+	} {
+		code, msg := submit(c.name, c.class, c.pools...)
+		if code != http.StatusForbidden || !strings.Contains(msg, "made under dana's grant to tracker github") || !strings.Contains(msg, c.says) {
+			t.Errorf("%s: %d %q, want 403 saying %q", c.name, code, msg, c.says)
+		}
+	}
+	g.Spec.Revoked = &c4v1.GrantRevocation{By: "dana", At: metav1.Now()}
+	if err := s.Client.Update(ctx, g); err != nil {
+		t.Fatal(err)
+	}
+	if code, msg := submit("after-revoke", "render", "cpu"); code != http.StatusForbidden || !strings.Contains(msg, "dana revoked the grant") {
+		t.Errorf("after the grant is revoked: %d %q", code, msg)
 	}
 }
