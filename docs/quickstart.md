@@ -26,12 +26,27 @@ write `c4-farm` wherever this guide writes `c4 farm`.
 c4 farm up
 ```
 
+The first time, at a terminal, it asks one question, and remembers the
+answer:
+
+```
+Let Claude Code show and run its agents on this farm? It adds the farm's tools to Claude Code, saves your agents' turns, and makes this machine one of their runners. [Y/n]
+```
+
 ```
 farm      c4-local   4 nodes · 6 slots, 4 more to rent · store ready
-project   saltmarsh   you: artist
-HUD       http://127.0.0.1:30080/?as=artist
-roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)
+project   saltmarsh   you: sam
+owner     sam, who plays every role here (c4 farm up --owner NAME to change it)
+claude    has the farm's tools (MCP server c4-farm)
+agents    this machine (c4-host-laptop) runs sam's agents, agent pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)
+integration claude on: Claude Code has the farm's tools, and agents add saves an agent's turns without asking again (c4 farm integrate claude off takes it all out)
+HUD       http://127.0.0.1:30080/?as=sam#/needs
+roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)
 ```
+
+Saying no, or `c4 farm up --no-integrate`, adds nothing to Claude Code or
+this machine; `c4 farm integrations` lists what it could add, and `c4 farm
+integrate claude on` adds it later.
 
 That is a farm, not a demo of one: render nodes in two pools (`cpu` and
 `gpu`), a burst pool the farm rents from only when a deadline needs it, a
@@ -211,8 +226,11 @@ access to the farm.
 
 ## 10. Ask an agent
 
+If you said yes at `c4 farm up`, Claude Code has the farm's tools already;
+otherwise:
+
 ```sh
-claude mcp add c4-farm -- c4 farm mcp
+c4 farm integrate claude on
 ```
 
 Then ask, for example, "which frames of sm0140-render-v001 are done, and
