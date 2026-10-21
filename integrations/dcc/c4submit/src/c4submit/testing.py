@@ -102,6 +102,10 @@ class FakeFarm:
         self.calls: List[tuple] = []
         self.versions: Dict[str, int] = {}
         self.fail_put: Optional[str] = None
+        self.by_key: Dict[str, dict] = {}
+        # Drops the connection after making the jobs this many times, as a
+        # submit whose answer never arrives.
+        self.drop_after_submit = 0
 
     # --- objects and views ------------------------------------------------
 
@@ -281,10 +285,22 @@ class FakeFarm:
             raise NotOnFarm(404, "this farm does not take submissions yet (POST /submissions)")
         return self._answer(doc, True)
 
-    def submit(self, doc: dict) -> dict:
+    def submit(self, doc: dict, key: str = "") -> dict:
         self.calls.append(("submit", json.loads(json.dumps(doc))))
         if not self.serves_submissions:
             raise NotOnFarm(404, "this farm does not take submissions yet (POST /submissions)")
+        if key and key in self.by_key:
+            # As the farm answers a retry: the jobs the first made, no new ones.
+            return dict(self.by_key[key], message="submitted already, with this key")
+        ans = self._create(doc)
+        if key and ans.get("ok"):
+            self.by_key[key] = ans
+        if self.drop_after_submit:
+            self.drop_after_submit -= 1
+            raise FarmError(0, "lost the connection to the farm: reset by peer")
+        return ans
+
+    def _create(self, doc: dict) -> dict:
         tree = doc.get("tree", "")
         if tree.startswith("c4") and tree not in self.views:
             return {"ok": False, "errors": [submission.error("tree", f"no tree {tree} in the project's store",
@@ -349,7 +365,7 @@ class _Handler(BaseHTTPRequestHandler):
                 if req.get("dryRun"):
                     ans = f.check(req["submission"], req.get("explain", False))
                     return self._send(200 if ans.get("ok") else 422, ans)
-                ans = f.submit(req["submission"])
+                ans = f.submit(req["submission"], key=req.get("key", ""))
                 return self._send(201 if ans.get("ok") else 422, ans)
         except FarmError as e:
             return self._send(e.status or 500, e.body if isinstance(e.body, dict) else {"error": e.message})

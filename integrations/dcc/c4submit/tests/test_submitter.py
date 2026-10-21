@@ -384,3 +384,32 @@ def test_a_renderable_asks_for_its_whole_range_in_one_unit(tmp_path, farm, nocac
     c = Submitter(farm, cache=nocache).check(p)
     assert c.ok, c.errors
     assert c.answer["jobs"][0]["what"] == "one unit over 1001-1048"
+
+
+def test_a_dropped_submit_is_retried_with_its_key_and_makes_one_set(tmp_path, farm, nocache):
+    host = comp_scene(tmp_path)
+    s = Submitter(farm, cache=nocache)
+    s.submit_backoff = 0
+    c = s.check(prepare(draft_for(host, farm)))
+    farm.drop_after_submit = 1            # the jobs are made, the answer never arrives
+    out = s.submit(c)
+    assert out.jobs == ["sm0140-comp-bg-v001", "sm0140-comp-main-v001"]
+    assert len(farm.jobs) == 1, "one set of jobs, however many tries"
+    assert out.answer["message"] == "submitted already, with this key"
+    assert sum(1 for k in farm.calls if k[0] == "submit") == 2
+
+
+def test_the_key_goes_over_the_wire(tmp_path, nocache):
+    fake = FakeFarm(projects={"saltmarsh": dict(SALTMARSH, root=str(tmp_path))})
+    served = serve(fake)
+    try:
+        farm = Farm(base=served.url)
+        host = comp_scene(tmp_path)
+        s = Submitter(farm, cache=nocache)
+        c = s.check(prepare(Draft(host, Tool(farm.tool("saltmarsh", "nuke-comp")), project=farm.project("saltmarsh"))))
+        s.submit(c)
+        again = farm.submit(c.doc, key=c.key)      # a retry the panel never saw answered
+        assert again["message"] == "submitted already, with this key"
+        assert len(fake.jobs) == 1 and fake.by_key.keys() == {c.key}
+    finally:
+        served.close()

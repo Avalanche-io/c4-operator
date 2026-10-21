@@ -184,8 +184,10 @@ class Farm:
 
     # --- submissions ------------------------------------------------------
 
-    def _submission(self, doc: dict, dry_run: bool, explain: bool) -> dict:
+    def _submission(self, doc: dict, dry_run: bool, explain: bool, key: str = "") -> dict:
         body: Dict[str, Any] = {"submission": doc}
+        if key:
+            body["key"] = key
         if dry_run:
             body["dryRun"] = True
         if explain:
@@ -208,6 +210,9 @@ class Farm:
         make and when it would be ready. Nothing is created."""
         return self._submission(doc, True, explain)
 
-    def submit(self, doc: dict) -> dict:
-        return self._submission(doc, False, False)
+    def submit(self, doc: dict, key: str = "") -> dict:
+        """Creates the submission's jobs. With ``key``, a retry of the same
+        submission (after a dropped connection) is given the jobs the first
+        made, never a second set."""
+        return self._submission(doc, False, False, key)
 

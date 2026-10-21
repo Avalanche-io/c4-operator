@@ -21,6 +21,8 @@ Nothing here imports a DCC module or a toolkit.
 import json
 import os
 import threading
+import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
@@ -56,6 +58,9 @@ class Checked:
     errors: List[Dict[str, str]] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
     farm_checked: bool = False                 # False when the farm could not check it (not reachable, or no route)
+    # One per submission meant: sent with it, and again on every retry of
+    # it, so a retry is never a second set of jobs.
+    key: str = field(default_factory=lambda: uuid.uuid4().hex)
 
     @property
     def ok(self) -> bool:
@@ -492,10 +497,31 @@ class Submitter:
         if checked.stale():
             raise FarmError(0, "the scene or the form changed since the check; check again before submitting")
         sent = self.upload(checked)
-        answer = self.farm.submit(checked.doc)
+        answer = self._submit_once(checked)
         if answer.get("ok") is False:
             raise FarmError(0, "the farm refused the submission", answer.get("errors"))
         return Submitted(checked=checked, answer=answer, uploaded=len(checked.missing), uploaded_bytes=sent)
+
+
+    #: How a dropped submit is tried again: the same key each time, so the
+    #: farm makes the jobs once whichever attempt reached it.
+    submit_tries = 4
+    submit_backoff = 2.0
+
+    def _submit_once(self, checked: Checked) -> dict:
+        for attempt in range(self.submit_tries):
+            try:
+                return self.farm.submit(checked.doc, key=checked.key)
+            except FarmError as e:
+                # A connection that dropped (0), or the first attempt still
+                # being made (409 at key): ask again with the same key.
+                retry = e.status == 0 or (e.status == 409 and "key" in json.dumps(e.body or e.message))
+                if not retry or attempt == self.submit_tries - 1:
+                    raise
+            if self.cancelled and self.cancelled():
+                raise Cancelled()
+            time.sleep(self.submit_backoff * (attempt + 1))
+        raise FarmError(0, "the submission could not be sent")
 
 
 def save(checked: Checked, path: str) -> str:
