@@ -352,10 +352,9 @@ func TestRedirectsOnlyWhereAllowed(t *testing.T) {
 	}
 }
 
-// The token goes only on the client's own requests to the Hub, never on a
-// redirect it follows: not to a CDN subdomain of the Hub, not on a
-// relative hop on the Hub itself.
-func TestTokenNeverOnAFollowedHop(t *testing.T) {
+// The token goes to the Hub, a hop back to the Hub's own host included,
+// and never off it: not to a CDN subdomain of the Hub.
+func TestTokenOnlyToTheHub(t *testing.T) {
 	for _, sameHost := range []bool{false, true} {
 		s := hub(t)
 		s.Commit("model", "o/m", "main", files)
@@ -365,7 +364,10 @@ func TestTokenNeverOnAFollowedHop(t *testing.T) {
 			t.Fatal(err)
 		}
 		if n := s.FollowedWithToken(); n != 0 {
-			t.Fatalf("same-host hop %v: %d followed requests carried the token", sameHost, n)
+			t.Fatalf("same-host hop %v: %d requests off the Hub carried the token", sameHost, n)
+		}
+		if sameHost && s.HubHopsWithToken() == 0 {
+			t.Fatal("a hop back to the Hub went without the token")
 		}
 	}
 }
@@ -419,13 +421,14 @@ func TestListingPathsChecked(t *testing.T) {
 	}
 }
 
-// A body longer than its file stops one byte past it.
+// A body longer than its file stops one byte past it, even one that never
+// ends.
 func TestOversizedBody(t *testing.T) {
 	s := hub(t)
 	s.Commit("model", "o/m", "main", files)
 	c := client(s, "")
 	snap := snapshot(t, s, c)
-	s.Oversize = 1 << 20
+	s.Endless = true
 	if st, err := fetchAll(t, c, snap); !errors.Is(err, source.ErrMismatch) || len(st.objs) != 0 {
 		t.Fatalf("%v, stored %d", err, len(st.objs))
 	}
@@ -507,5 +510,190 @@ func TestGatedSignedIn(t *testing.T) {
 	c := client(s, "hf_lease")
 	if err := c.Access(context.Background(), snapshot(t, s, c)); !errors.Is(err, source.ErrGated) || !strings.Contains(err.Error(), "authorized list") {
 		t.Fatalf("%v", err)
+	}
+}
+
+// A probe that fails, by a 502 with no RateLimit or a dropped connection,
+// does not stop the bucket: the next caller probes again and goes through.
+func TestFailedProbeDoesNotStall(t *testing.T) {
+	for name, set := range map[string]func(*hftest.Server){
+		"502":     func(s *hftest.Server) { s.FailNext = 1 },
+		"dropped": func(s *hftest.Server) { s.DropNext = 1 },
+	} {
+		s := hub(t)
+		s.Commit("model", "o/m", "main", files)
+		set(s)
+		slept := 0
+		c := client(s, "")
+		c.Sleep = func(context.Context, time.Duration) error {
+			if slept++; slept > 50 {
+				return errors.New("still waiting after 50 sleeps")
+			}
+			return nil
+		}
+		if _, err := c.Resolve(context.Background(), "", "o/m", "main"); err == nil {
+			t.Fatalf("%s: the failed probe succeeded", name)
+		}
+		if _, err := c.Resolve(context.Background(), "", "o/m", "main"); err != nil || slept > 0 {
+			t.Fatalf("%s: after a failed probe: %v, slept %d", name, err, slept)
+		}
+	}
+}
+
+// A request that fails before it is sent still leaves flight: three token
+// failures do not shrink the window for the client's life.
+func TestFailedRequestsLeaveFlight(t *testing.T) {
+	s := hub(t)
+	s.Commit("model", "o/m", "main", files)
+	s.Quota = 3
+	fails := 3
+	slept := 0
+	c := &huggingface.Client{Endpoint: s.Endpoint, HTTP: s.Client(), Hosts: []string{"*." + hftest.Hub},
+		Token: func(context.Context) (string, error) {
+			if fails > 0 {
+				fails--
+				return "", errors.New("the lease is renewing")
+			}
+			return "", nil
+		},
+		Sleep: func(context.Context, time.Duration) error { slept++; s.ResetWindow(); return nil }}
+	for i := 0; i < 3; i++ {
+		if _, err := c.Resolve(context.Background(), "", "o/m", "main"); err == nil {
+			t.Fatal("a token failure went through")
+		}
+	}
+	for i := 0; i < 2; i++ {
+		if _, err := c.Resolve(context.Background(), "", "o/m", "main"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if slept != 0 {
+		t.Fatalf("two requests in a window of three waited %d times: the failures stayed in flight", slept)
+	}
+}
+
+// Callers at once before anything is known wait for one probe's answer,
+// then share the window; none is refused.
+func TestFirstCallersWaitForTheProbe(t *testing.T) {
+	s := hub(t)
+	s.Commit("model", "o/m", "main", files)
+	s.Quota = 3
+	c := client(s, "")
+	c.Sleep = func(_ context.Context, d time.Duration) error {
+		if d <= 100*time.Millisecond {
+			time.Sleep(d)
+		} else {
+			s.ResetWindow()
+		}
+		return nil
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, 10)
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := c.Resolve(context.Background(), "", "o/m", "main")
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if n := s.Throttled(); n != 0 {
+		t.Fatalf("throttled %d", n)
+	}
+}
+
+// A renamed repository redirects on the Hub; the client follows it with
+// the token, so a private one still resolves and serves its files.
+func TestRenamedRepository(t *testing.T) {
+	s := hub(t)
+	rp, commit := s.Commit("model", "o/new", "main", files)
+	rp.Private, rp.Access["noor"] = true, true
+	s.Renames = map[string]string{"o/old": "o/new"}
+	c := client(s, "hf_lease")
+	snap, err := c.Resolve(context.Background(), "", "o/old", "main")
+	if err != nil || snap.Commit != commit {
+		t.Fatalf("%+v %v", snap, err)
+	}
+	if err := c.List(context.Background(), &snap, source.Filter{Include: []string{"config.json", "model.safetensors"}}); err != nil {
+		t.Fatal(err)
+	}
+	if st, err := fetchAll(t, c, snap); err != nil || len(st.objs) != 2 || s.FollowedWithToken() != 0 {
+		t.Fatalf("%v, followed with the token %d", err, s.FollowedWithToken())
+	}
+}
+
+// An error page of HTML is no part of an error.
+func TestNoHTMLInErrors(t *testing.T) {
+	s := hub(t)
+	s.Commit("model", "o/m", "main", files)
+	s.HTMLError = true
+	_, err := client(s, "").Resolve(context.Background(), "", "o/m", "main")
+	if err == nil || strings.Contains(err.Error(), "<") || strings.Contains(err.Error(), "hidden-detail") || !strings.Contains(err.Error(), "500") {
+		t.Fatalf("%v", err)
+	}
+	s.HTMLError, s.FailNext = false, 1
+	if _, err := client(s, "").Resolve(context.Background(), "", "o/m", "main"); err == nil || strings.Contains(err.Error(), "<") {
+		t.Fatalf("a proxy's page: %v", err)
+	}
+}
+
+// A CDN that sends the download back to the Hub: the Hub's answer must
+// name the commit; an answer off the Hub that names another is refused.
+func TestHopsNameTheCommit(t *testing.T) {
+	for name, c := range map[string]struct {
+		set func(*hftest.Server)
+		ok  bool
+	}{
+		"back to the Hub":                 {func(s *hftest.Server) { s.HopBack = true }, true},
+		"back to the Hub, naming none":    {func(s *hftest.Server) { s.HopBack, s.HopBackCommit = true, "-" }, false},
+		"back to the Hub, naming another": {func(s *hftest.Server) { s.HopBack, s.HopBackCommit = true, strings.Repeat("e", 40) }, false},
+		"the CDN naming another":          {func(s *hftest.Server) { s.CDNCommit = strings.Repeat("e", 40) }, false},
+	} {
+		s := hub(t)
+		s.Commit("model", "o/m", "main", files)
+		cl := client(s, "hf_lease")
+		snap := snapshot(t, s, cl, "model.safetensors")
+		c.set(s)
+		st, err := fetchAll(t, cl, snap)
+		if c.ok != (err == nil) || (!c.ok && !errors.Is(err, source.ErrMoved)) || (!c.ok && len(st.objs) != 0) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if c.ok && s.HubHopsWithToken() == 0 {
+			t.Errorf("%s: the hop back to the Hub went without the token", name)
+		}
+	}
+}
+
+// A listing that pages forever stops at MaxPages.
+func TestPagesAreBounded(t *testing.T) {
+	s := hub(t)
+	s.Commit("model", "o/m", "main", files)
+	s.EndlessPages = true
+	c := client(s, "")
+	snap, _ := c.Resolve(context.Background(), "", "o/m", "main")
+	if err := c.List(context.Background(), &snap, source.Filter{}); err == nil || !strings.Contains(err.Error(), "pages") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// Paths that would collide in a tree on some file system are refused: by
+// case, or a file where another path needs a folder.
+func TestPathsThatCollide(t *testing.T) {
+	for _, p := range []string{"Config.json", "README.md/inside", "sub dir", "SUB DIR/a b.txt"} {
+		s := hub(t)
+		s.Commit("model", "o/m", "main", files)
+		s.ExtraEntries = []map[string]any{{"type": "file", "path": p, "size": 1, "oid": "aa"}}
+		c := client(s, "")
+		snap, _ := c.Resolve(context.Background(), "", "o/m", "main")
+		if err := c.List(context.Background(), &snap, source.Filter{}); err == nil {
+			t.Errorf("%q was listed beside the others", p)
+		}
 	}
 }

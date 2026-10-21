@@ -10,12 +10,13 @@
 //     a CDN, answering X-Repo-Commit (required, and checked against the
 //     commit) and, for a large file, X-Linked-Etag (its SHA-256).
 //
-// The token goes only on requests the client makes to the Hub's own host,
-// never on a redirect it follows. Redirects are followed one hop at a
-// time, https only, to the hosts the source allows, a few at most. URLs in
-// errors carry no query, since a CDN's are signed. Every request reads the
-// Hub's RateLimit headers, and the client paces itself before a window
-// runs out rather than waiting for a 429.
+// A redirect to the Hub's own host (its scheme and host) is the Hub, and
+// is followed with the token, as for a renamed repository. A redirect
+// anywhere else is followed only by a download, one hop at a time, https
+// only, to the hosts the source allows, a few at most, and never with the
+// token. URLs in errors carry no query, since a CDN's are signed. Every
+// request reads the Hub's RateLimit headers, and the client paces itself
+// before a window runs out rather than waiting for a 429.
 package huggingface
 
 import (
@@ -26,6 +27,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"regexp"
 	"sort"
 	"strconv"
@@ -39,11 +41,16 @@ import (
 // Endpoint is the Hub.
 const Endpoint = "https://huggingface.co"
 
-// Hosts are the hosts the Hub's downloads redirect to.
+// Hosts are the Hub's own hosts and the CDN hosts its downloads redirect
+// to.
 var Hosts = []string{"huggingface.co", "*.huggingface.co", "*.hf.co"}
 
-// MaxHops is how many redirects a download may follow.
-const MaxHops = 5
+// MaxHops is how many redirects a request may follow; MaxPages how many
+// pages a listing may have.
+const (
+	MaxHops  = 5
+	MaxPages = 1000
+)
 
 // Repository types.
 const (
@@ -75,22 +82,33 @@ type Client struct {
 	Now   func() time.Time
 	Sleep func(context.Context, time.Duration) error
 
-	mu      sync.Mutex
-	windows map[string]*window
-	// inflight counts requests admitted and not yet answered, by bucket:
-	// an answer's count of what is left predates them.
-	inflight map[string]int
+	mu    sync.Mutex
+	rates map[string]*rate
 }
 
-// window is what the Hub last said of one rate bucket: how many requests
-// are left (less those admitted since), its quota if it said, and when it
+// rate is what the client knows of one rate bucket.
+type rate struct {
+	// win is the Hub's last word on the window; nil before it has said
+	// one, or once a window whose quota it never said has reset.
+	win *window
+	// unlimited: the Hub answered without RateLimit, so it limits nothing
+	// here until it says otherwise.
+	unlimited bool
+	// probe is when the request that will say the window was let through
+	// alone; zero when none is out. Any answer or error ends it.
+	probe time.Time
+	// inflight counts requests admitted and not yet answered: an answer's
+	// count of what is left predates them.
+	inflight int
+}
+
+// window is the Hub's count for one bucket: how many requests are left,
+// less those admitted since; its quota and span if it said them; when it
 // resets.
 type window struct {
 	quota, left int
+	span        time.Duration
 	reset       time.Time
-	// fresh: the Hub's window has reset and this one counts from it,
-	// until an answer says how many are left.
-	fresh bool
 }
 
 func (c *Client) endpoint() string {
@@ -110,6 +128,12 @@ func (c *Client) base() *url.URL {
 
 // url is the Hub's address for path p.
 func (c *Client) url(p string) string { return c.endpoint() + p }
+
+// hub says whether u is the Hub's own scheme and host.
+func (c *Client) hub(u *url.URL) bool {
+	b := c.base()
+	return u.Scheme == b.Scheme && u.Host == b.Host
+}
 
 func (c *Client) now() time.Time {
 	if c.Now != nil {
@@ -200,82 +224,96 @@ func bucket(u string) string {
 	return "api"
 }
 
-// pace waits, before a request of bucket b, until the window has room in
-// this client's share, and counts the request against it, so callers at
-// once do not all pass at the edge. Once the Hub's window resets, a fresh
-// one admits its quota when the Hub said it, else one request, whose
-// answer tells the rest how many are left. A window whose quota the Hub
-// did not say keeps one request in hand.
+// probeWait is how long a caller waits for the answer that will say a
+// window; probeDeadline how long a probe may be out before another goes.
+const (
+	probeWait     = 100 * time.Millisecond
+	probeDeadline = 30 * time.Second
+	defaultSpan   = 5 * time.Minute
+)
+
+func (c *Client) rate(b string) *rate {
+	if c.rates == nil {
+		c.rates = map[string]*rate{}
+	}
+	r := c.rates[b]
+	if r == nil {
+		r = &rate{}
+		c.rates[b] = r
+	}
+	return r
+}
+
+// pace waits, before a request of bucket b, until it may go, and counts
+// it in flight. While nothing is known of the bucket (before its first
+// answer, or after a window whose quota the Hub never said), one request
+// goes alone, and its answer says the rest; a window the Hub said admits
+// up to this client's share of it, keeping one request in hand, and once
+// it resets starts again at its quota.
 func (c *Client) pace(ctx context.Context, b string) error {
 	for {
 		c.mu.Lock()
-		w := c.windows[b]
-		if w == nil {
-			c.admit(b)
-			c.mu.Unlock()
-			return nil
-		}
-		keep := 1
-		if w.quota > 0 {
-			share := c.Share
-			if share <= 0 || share > 1 {
-				share = 1
-			}
-			// what the share leaves to others, and one request in hand
-			keep = w.quota - int(float64(w.quota)*share) + 1
-			// but never the whole quota, or nothing is ever sent
-			keep = min(keep, w.quota-1)
-		}
+		r := c.rate(b)
 		now := c.now()
-		if !now.Before(w.reset) && !w.fresh {
-			w.fresh = true
+		w := r.win
+		if w != nil && !now.Before(w.reset) {
 			if w.quota > 0 {
-				w.left = w.quota
+				// the next window, less what is still in flight, which lands
+				// in it
+				w.left, w.reset = w.quota-r.inflight, now.Add(w.span)
 			} else {
-				w.left = keep + 1
+				r.win, w = nil, nil
 			}
 		}
-		if w.left > keep {
-			w.left--
-			c.admit(b)
+		var wait time.Duration
+		switch {
+		case w == nil && r.unlimited:
+			r.inflight++
 			c.mu.Unlock()
 			return nil
+		case w == nil:
+			if r.probe.IsZero() || now.Sub(r.probe) > probeDeadline {
+				r.probe = now
+				r.inflight++
+				c.mu.Unlock()
+				return nil
+			}
+			wait = probeWait
+		default:
+			keep := 1
+			if w.quota > 0 {
+				share := c.Share
+				if share <= 0 || share > 1 {
+					share = 1
+				}
+				// what the share leaves to others, and one in hand, but
+				// never the whole quota, or nothing is ever sent
+				keep = min(w.quota-int(float64(w.quota)*share)+1, w.quota-1)
+			}
+			if w.left > keep {
+				w.left--
+				r.inflight++
+				c.mu.Unlock()
+				return nil
+			}
+			wait = w.reset.Sub(now)
 		}
-		d := w.reset.Sub(now)
-		if w.fresh {
-			// spent before the Hub has answered for the fresh window
-			d = probeWait
+		var until time.Time
+		if w != nil {
+			until = w.reset
 		}
 		c.mu.Unlock()
-		if err := c.sleep(ctx, d); err != nil {
+		if err := c.sleep(ctx, wait); err != nil {
 			return err
 		}
 		c.mu.Lock()
-		if c.windows[b] == w && !w.fresh {
-			// waited what the Hub said: its window has reset
+		if wait != probeWait && r.win == w && w != nil && w.reset.Equal(until) {
+			// waited what the Hub said: its window has reset (unless
+			// another caller has started the next one already)
 			w.reset = time.Time{}
 		}
 		c.mu.Unlock()
 	}
-}
-
-// probeWait is how long a caller waits for the answer that tells a fresh
-// window's count.
-const probeWait = 100 * time.Millisecond
-
-// admit counts a request of bucket b in flight; c.mu is held.
-func (c *Client) admit(b string) {
-	if c.inflight == nil {
-		c.inflight = map[string]int{}
-	}
-	c.inflight[b]++
-}
-
-// answered takes a request of bucket b out of flight.
-func (c *Client) answered(b string) {
-	c.mu.Lock()
-	c.inflight[b]--
-	c.mu.Unlock()
 }
 
 // RateLimit: "resolvers";r=2998;t=227 and RateLimit-Policy: "fixed
@@ -294,65 +332,59 @@ func params(h string) map[string]int {
 	return out
 }
 
-// observe keeps what a response says of its window.
-func (c *Client) observe(h http.Header) {
-	rl := h.Get("RateLimit")
-	if rl == "" {
+// answered takes a request of bucket b out of flight and keeps what its
+// answer says: a window, or with no RateLimit on an answer under 500, that
+// the Hub limits nothing here. Any answer or error ends a probe.
+func (c *Client) answered(b string, resp *http.Response) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	r := c.rate(b)
+	r.inflight--
+	r.probe = time.Time{}
+	if resp == nil {
 		return
 	}
+	rl := resp.Header.Get("RateLimit")
 	names := rlName.FindAllStringSubmatch(rl, -1)
-	if len(names) == 0 {
+	if rl == "" || len(names) == 0 {
+		if resp.StatusCode < 500 {
+			r.unlimited = true
+		}
 		return
 	}
 	p := params(rl)
-	b := names[0][1]
-	w := &window{left: p["r"], reset: c.now().Add(time.Duration(p["t"]) * time.Second)}
-	w.quota = params(h.Get("RateLimit-Policy"))["q"]
-	c.mu.Lock()
-	if c.windows == nil {
-		c.windows = map[string]*window{}
+	pol := params(resp.Header.Get("RateLimit-Policy"))
+	w := &window{quota: pol["q"], span: time.Duration(pol["w"]) * time.Second, reset: c.now().Add(time.Duration(p["t"]) * time.Second)}
+	if w.span <= 0 {
+		w.span = defaultSpan
 	}
-	// the Hub counted what it had seen; requests still in flight are not in
-	// its count
-	w.left -= c.inflight[b]
-	c.windows[b] = w
-	c.mu.Unlock()
+	// the Hub counted what it had seen; requests still in flight are not
+	// in its count
+	w.left = p["r"] - r.inflight
+	nr := c.rate(names[0][1])
+	nr.win, nr.unlimited = w, false
 }
 
-// do sends a request to the Hub, u being on the Hub's own host, with the
-// token, paced, following no redirect; a 429 waits out its window and
-// tries again.
-func (c *Client) do(ctx context.Context, method, u string) (*http.Response, error) {
+// send sends one request to the Hub, with the token, paced, following no
+// redirect; a 429 waits out its window and tries again.
+func (c *Client) send(ctx context.Context, method, u string) (*http.Response, error) {
 	ru, err := url.Parse(u)
 	if err != nil {
 		return nil, err
 	}
-	if b := c.base(); ru.Scheme != b.Scheme || ru.Host != b.Host {
+	if !c.hub(ru) {
 		return nil, fmt.Errorf("huggingface: %s is not the Hub", redact(ru))
 	}
+	b := bucket(u)
 	for attempt := 0; ; attempt++ {
-		if err := c.pace(ctx, bucket(u)); err != nil {
+		if err := c.pace(ctx, b); err != nil {
 			return nil, err
 		}
-		req, err := http.NewRequestWithContext(ctx, method, u, nil)
+		resp, err := c.request(ctx, method, ru)
+		c.answered(b, resp)
 		if err != nil {
 			return nil, err
 		}
-		if c.Token != nil {
-			tok, err := c.Token(ctx)
-			if err != nil {
-				return nil, fmt.Errorf("huggingface: the token: %w", err)
-			}
-			if tok != "" {
-				req.Header.Set("Authorization", "Bearer "+tok)
-			}
-		}
-		resp, err := c.client().Do(req)
-		c.answered(bucket(u))
-		if err != nil {
-			return nil, fmt.Errorf("huggingface: %s %s: %w", method, redact(ru), plain(err))
-		}
-		c.observe(resp.Header)
 		if resp.StatusCode != http.StatusTooManyRequests || attempt >= 5 {
 			return resp, nil
 		}
@@ -370,7 +402,55 @@ func (c *Client) do(ctx context.Context, method, u string) (*http.Response, erro
 	}
 }
 
-// failure is a non-success answer, in the Hub's words where it gives them.
+// request is one request to the Hub with the token.
+func (c *Client) request(ctx context.Context, method string, u *url.URL) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), nil)
+	if err != nil {
+		return nil, err
+	}
+	if c.Token != nil {
+		tok, err := c.Token(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("huggingface: the token: %w", err)
+		}
+		if tok != "" {
+			req.Header.Set("Authorization", "Bearer "+tok)
+		}
+	}
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("huggingface: %s %s: %w", method, redact(u), plain(err))
+	}
+	return resp, nil
+}
+
+// do sends a request to the Hub and follows its redirects to the Hub's
+// own host, with the token, a few at most. It stops at an answer that is
+// not such a redirect, which may be a redirect elsewhere for the caller
+// to follow or refuse.
+func (c *Client) do(ctx context.Context, method, u string) (*http.Response, error) {
+	for hops := 0; ; hops++ {
+		resp, err := c.send(ctx, method, u)
+		if err != nil {
+			return nil, err
+		}
+		if !redirect(resp.StatusCode) {
+			return resp, nil
+		}
+		loc, err := resp.Location()
+		if err != nil || !c.hub(loc) {
+			return resp, nil
+		}
+		resp.Body.Close()
+		if hops >= MaxHops {
+			return nil, fmt.Errorf("huggingface: %s: more than %d redirects", redact(loc), MaxHops)
+		}
+		u = loc.String()
+	}
+}
+
+// failure is a non-success answer, in the Hub's words where it gives them
+// (X-Error-Message, or a JSON error), never a page of HTML.
 func failure(resp *http.Response, what string) error {
 	b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 	msg := resp.Header.Get("X-Error-Message")
@@ -378,11 +458,12 @@ func failure(resp *http.Response, what string) error {
 		var e struct {
 			Error string `json:"error"`
 		}
-		if json.Unmarshal(b, &e) == nil && e.Error != "" {
+		if json.Unmarshal(b, &e) == nil {
 			msg = e.Error
-		} else {
-			msg = strings.TrimSpace(string(b))
 		}
+	}
+	if len(msg) > 300 {
+		msg = msg[:300] + "…"
 	}
 	kind := errors.New(resp.Status)
 	switch code := resp.Header.Get("X-Error-Code"); {
@@ -403,6 +484,10 @@ func (c *Client) getJSON(ctx context.Context, u, what string, out any) (*http.Re
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if redirect(resp.StatusCode) {
+		loc, _ := resp.Location()
+		return nil, fmt.Errorf("huggingface: %s: the Hub redirected to %s, off the Hub", what, redact(loc))
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, failure(resp, what)
 	}
@@ -474,9 +559,37 @@ func checkPath(p string) error {
 	return nil
 }
 
+// paths tells apart the paths of one listing, as a tree written on any
+// file system must: no path twice, none that differs from another only by
+// case, and no file where another path needs a folder.
+type paths struct {
+	files, dirs map[string]string // by lower-case path, the path as listed
+}
+
+func (ps *paths) add(p string) error {
+	if ps.files == nil {
+		ps.files, ps.dirs = map[string]string{}, map[string]string{}
+	}
+	lp := strings.ToLower(p)
+	if was, ok := ps.files[lp]; ok {
+		return fmt.Errorf("huggingface: the listing names %q and %q, one file on a file system that ignores case", was, p)
+	}
+	if was, ok := ps.dirs[lp]; ok {
+		return fmt.Errorf("huggingface: the listing names %q as a file and as a folder (%q)", p, was)
+	}
+	for d := path.Dir(p); d != "."; d = path.Dir(d) {
+		if was, ok := ps.files[strings.ToLower(d)]; ok {
+			return fmt.Errorf("huggingface: the listing names %q as a file and as a folder (%q)", was, p)
+		}
+		ps.dirs[strings.ToLower(d)] = p
+	}
+	ps.files[lp] = p
+	return nil
+}
+
 // List fills s.Files with the files at s.Commit that f takes, by path. A
-// listing with a path that is not plain and relative, or a path twice, is
-// refused whole.
+// listing with a path that is not plain and relative, or paths that would
+// collide in a tree, is refused whole.
 func (c *Client) List(ctx context.Context, s *source.Snapshot, f source.Filter) error {
 	if err := f.Check(); err != nil {
 		return err
@@ -498,12 +611,16 @@ func (c *Client) List(ctx context.Context, s *source.Snapshot, f source.Filter) 
 	}
 	u := c.url(api + "/tree/" + url.PathEscape(s.Commit) + "?recursive=true")
 	var files []source.File
-	seenPage, seenPath := map[string]bool{}, map[string]bool{}
+	var seen paths
+	pages := map[string]bool{}
 	for u != "" {
-		if seenPage[u] {
+		if pages[u] {
 			return fmt.Errorf("huggingface: %s@%s: the listing's pages go round", s.Repo, s.Commit)
 		}
-		seenPage[u] = true
+		if len(pages) >= MaxPages {
+			return fmt.Errorf("huggingface: %s@%s: the listing has more than %d pages", s.Repo, s.Commit, MaxPages)
+		}
+		pages[u] = true
 		var page []entry
 		resp, err := c.getJSON(ctx, u, s.Repo+"@"+s.Commit+" files", &page)
 		if err != nil {
@@ -516,10 +633,9 @@ func (c *Client) List(ctx context.Context, s *source.Snapshot, f source.Filter) 
 			if err := checkPath(e.Path); err != nil {
 				return err
 			}
-			if seenPath[e.Path] {
-				return fmt.Errorf("huggingface: the listing names %q twice", e.Path)
+			if err := seen.add(e.Path); err != nil {
+				return err
 			}
-			seenPath[e.Path] = true
 			if !f.Takes(e.Path) {
 				continue
 			}
@@ -547,12 +663,11 @@ func (c *Client) next(link string) (string, error) {
 	if m == nil {
 		return "", nil
 	}
-	b := c.base()
-	u, err := b.Parse(m[1])
+	u, err := c.base().Parse(m[1])
 	if err != nil {
 		return "", err
 	}
-	if u.Scheme != b.Scheme || u.Host != b.Host {
+	if !c.hub(u) {
 		return "", fmt.Errorf("huggingface: the next page is at %s, not the Hub", redact(u))
 	}
 	return u.String(), nil
@@ -618,11 +733,23 @@ func (c *Client) allowed(u *url.URL) error {
 	return fmt.Errorf("a redirect to %s, which this source does not allow", redact(u))
 }
 
+// served checks that an answer from the Hub names the pinned commit.
+func served(resp *http.Response, commit, what string) error {
+	got := resp.Header.Get("X-Repo-Commit")
+	if got == "" {
+		return fmt.Errorf("huggingface: %s: the Hub did not say which commit it served: %w", what, source.ErrMoved)
+	}
+	if got != commit {
+		return fmt.Errorf("huggingface: %s: %s: %w", what, got, source.ErrMoved)
+	}
+	return nil
+}
+
 // Fetch reads one file of s and stores it through put, checked against
-// its hashes (source.Store), spooling in dir. The Hub must say which
-// commit it serves (X-Repo-Commit), and every hop that says one must say
-// s.Commit. Redirects are followed one at a time, without the token, to
-// allowed hosts only.
+// its hashes (source.Store), spooling in dir. Every answer from the Hub
+// must name s.Commit (X-Repo-Commit), and any other answer that names a
+// commit must name it too. Redirects off the Hub are followed one at a
+// time, without the token, to allowed hosts only.
 func (c *Client) Fetch(ctx context.Context, s source.Snapshot, f source.File, dir string, put source.Put) (source.Fetched, error) {
 	what := s.Repo + "@" + s.Commit + ": " + f.Path
 	resp, err := c.do(ctx, http.MethodGet, c.url(resolvePath(s, f.Path)))
@@ -633,12 +760,8 @@ func (c *Client) Fetch(ctx context.Context, s source.Snapshot, f source.File, di
 	if resp.StatusCode >= 400 {
 		return source.Fetched{}, failure(resp, what)
 	}
-	got := resp.Header.Get("X-Repo-Commit")
-	if got == "" {
-		return source.Fetched{}, fmt.Errorf("huggingface: %s: the Hub did not say which commit it served: %w", what, source.ErrMoved)
-	}
-	if got != s.Commit {
-		return source.Fetched{}, fmt.Errorf("huggingface: %s: %s: %w", what, got, source.ErrMoved)
+	if err := served(resp, s.Commit, what); err != nil {
+		return source.Fetched{}, err
 	}
 	if etag := strings.Trim(resp.Header.Get("X-Linked-Etag"), `"`); f.SHA256 != "" && etag != "" && !strings.EqualFold(etag, f.SHA256) {
 		return source.Fetched{}, fmt.Errorf("huggingface: %s: the Hub's etag %s, its listing %s: %w", what, etag, f.SHA256, source.ErrMismatch)
@@ -654,14 +777,30 @@ func (c *Client) Fetch(ctx context.Context, s source.Snapshot, f source.File, di
 		if err := c.allowed(loc); err != nil {
 			return source.Fetched{}, fmt.Errorf("huggingface: %s: %w", what, err)
 		}
-		next, err := c.hop(ctx, loc)
+		var next *http.Response
+		if c.hub(loc) {
+			// back to the Hub: the Hub, with the token, naming the commit
+			if next, err = c.do(ctx, http.MethodGet, loc.String()); err == nil && next.StatusCode < 400 {
+				if err = served(next, s.Commit, what); err != nil {
+					next.Body.Close()
+				}
+			}
+		} else {
+			next, err = c.hop(ctx, loc)
+			if err == nil {
+				if h := next.Header.Get("X-Repo-Commit"); h != "" && h != s.Commit {
+					next.Body.Close()
+					err = fmt.Errorf("huggingface: %s: %s: %w", what, h, source.ErrMoved)
+				}
+			}
+		}
 		if err != nil {
 			return source.Fetched{}, fmt.Errorf("huggingface: %s: %w", what, err)
 		}
 		resp.Body.Close()
 		resp = next
-		if h := resp.Header.Get("X-Repo-Commit"); h != "" && h != s.Commit {
-			return source.Fetched{}, fmt.Errorf("huggingface: %s: %s: %w", what, h, source.ErrMoved)
+		if resp.StatusCode >= 400 {
+			return source.Fetched{}, failure(resp, what)
 		}
 	}
 	if resp.StatusCode != http.StatusOK {
@@ -670,7 +809,7 @@ func (c *Client) Fetch(ctx context.Context, s source.Snapshot, f source.File, di
 	return source.Store(ctx, f, resp.Body, dir, put)
 }
 
-// hop follows one redirect, without the token.
+// hop follows one redirect off the Hub, without the token.
 func (c *Client) hop(ctx context.Context, u *url.URL) (*http.Response, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
@@ -684,8 +823,8 @@ func (c *Client) hop(ctx context.Context, u *url.URL) (*http.Response, error) {
 }
 
 // Whoami is the Hub account the token reads as, "" when anonymous. An
-// import compares it with the account its lease names (accountMatchesLease)
-// and refuses when they differ; the record never names the account.
+// import compares it with the account its lease names, and refuses when
+// they differ; the import's record never names the account.
 func (c *Client) Whoami(ctx context.Context) (string, error) {
 	if c.Token == nil {
 		return "", nil

@@ -78,13 +78,31 @@ type Server struct {
 	Oversize int
 	// ExtraEntries are added to a listing's first page as they are.
 	ExtraEntries []map[string]any
-	// SelfNext makes a listing's next page itself.
-	SelfNext bool
+	// SelfNext makes a listing's next page itself; EndlessPages gives it a
+	// next page forever, empty past the last file.
+	SelfNext, EndlessPages bool
+	// FailNext answers the next requests 502 with no RateLimit, as a proxy
+	// in front of the Hub may; DropNext closes their connections unanswered.
+	FailNext, DropNext int
+	// Renames redirects a repository's old name to its new one, on the Hub,
+	// as the Hub does for a renamed repository.
+	Renames map[string]string
+	// HTMLError answers a revision with a page of HTML and a 500.
+	HTMLError bool
+	// Endless serves a file's bytes without end.
+	Endless bool
+	// HopBack makes the CDN redirect back to the Hub, which serves the
+	// file naming HopBackCommit ("" the pinned one, "-" none). CDNCommit
+	// is the commit the CDN names, if any.
+	HopBack       bool
+	HopBackCommit string
+	CDNCommit     string
 
 	mu        sync.Mutex
 	repos     map[string]*Repo
 	used      map[string]int
-	followed  int // followed redirects that carried a token: must stay 0
+	followed  int // redirects off the Hub that carried a token: must stay 0
+	hubHops   int // hops back to the Hub that carried a token
 	throttled int
 	corrupt   map[string]bool
 	calls     []string
@@ -114,8 +132,8 @@ func New() *Server {
 // Close stops both servers.
 func (s *Server) Close() { s.hub.Close(); s.cdnSrv.Close() }
 
-// Client reaches the fake's names: the Hub at Hub, every other name at
-// the CDN. A name starting down. never answers. It follows no redirect on its own.
+// Client reaches the fake's names: the Hub at Hub, any other .example
+// name at the CDN, and a name starting down. not at all.
 func (s *Server) Client() *http.Client {
 	hub, cdn := s.hub.Listener.Addr().String(), s.cdnSrv.Listener.Addr().String()
 	d := &net.Dialer{}
@@ -173,9 +191,12 @@ func (s *Server) Corrupt(path string) { s.mu.Lock(); s.corrupt[path] = true; s.m
 // ResetWindow starts every rate window afresh, as time passing does.
 func (s *Server) ResetWindow() { s.mu.Lock(); s.used = map[string]int{}; s.mu.Unlock() }
 
-// FollowedWithToken is how many followed redirects (to the CDN, or a hop on
-// the Hub) carried a token.
+// FollowedWithToken is how many redirects off the Hub (to its CDN) carried
+// a token.
 func (s *Server) FollowedWithToken() int { s.mu.Lock(); defer s.mu.Unlock(); return s.followed }
+
+// HubHopsWithToken is how many redirects back to the Hub carried a token.
+func (s *Server) HubHopsWithToken() int { s.mu.Lock(); defer s.mu.Unlock(); return s.hubHops }
 
 // Throttled is how many requests were answered 429.
 func (s *Server) Throttled() int { s.mu.Lock(); defer s.mu.Unlock(); return s.throttled }
@@ -235,11 +256,61 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, r.Method+" "+r.URL.RequestURI())
 	p := r.URL.EscapedPath()
-	if strings.HasPrefix(p, "/hop/") {
-		// a same-host hop: a client follows it without the token
-		if r.Header.Get("Authorization") != "" {
-			s.followed++
+	if s.DropNext > 0 {
+		s.DropNext--
+		if hj, ok := w.(http.Hijacker); ok {
+			if conn, _, err := hj.Hijack(); err == nil {
+				conn.Close()
+				return
+			}
 		}
+	}
+	if s.FailNext > 0 {
+		s.FailNext--
+		w.Header().Set("Content-Type", "text/html")
+		w.WriteHeader(http.StatusBadGateway)
+		_, _ = w.Write([]byte("<html><body>502 Bad Gateway from the proxy</body></html>"))
+		return
+	}
+	for old, nu := range s.Renames {
+		for _, pre := range []string{"/api/models/", "/api/datasets/", "/", "/datasets/"} {
+			if strings.HasPrefix(p, pre+old+"/") {
+				w.Header().Set("Location", pre+nu+strings.TrimPrefix(p, pre+old))
+				w.WriteHeader(http.StatusTemporaryRedirect)
+				return
+			}
+		}
+	}
+	if strings.HasPrefix(p, "/served/") {
+		// a hop back to the Hub from the CDN: the Hub serves the file
+		if r.Header.Get("Authorization") != "" {
+			s.hubHops++
+		}
+		parts := strings.SplitN(strings.TrimPrefix(p, "/served/"), "/", 2)
+		path, _ := url.PathUnescape(parts[1])
+		switch s.HopBackCommit {
+		case "":
+			w.Header().Set("X-Repo-Commit", parts[0])
+		case "-":
+		default:
+			w.Header().Set("X-Repo-Commit", s.HopBackCommit)
+		}
+		for _, rp := range s.repos {
+			if b, ok := rp.commits[parts[0]][path]; ok {
+				s.write(w, path, b)
+				return
+			}
+		}
+		http.NotFound(w, r)
+		return
+	}
+	if strings.HasPrefix(p, "/hop/") {
+		// a same-host hop is the Hub: it names the commit, and a client
+		// follows it with the token
+		if r.Header.Get("Authorization") != "" {
+			s.hubHops++
+		}
+		w.Header().Set("X-Repo-Commit", strings.SplitN(strings.TrimPrefix(p, "/hop/"), "/", 2)[0])
 		w.Header().Set("Location", "http://"+s.CDNHost+"/xet-bridge/"+strings.TrimPrefix(p, "/hop/")+"?"+Signature)
 		w.WriteHeader(http.StatusFound)
 		return
@@ -303,6 +374,12 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request, p, acct string) {
 	arg, _ := url.PathUnescape(parts[3])
 	switch parts[2] {
 	case "revision":
+		if s.HTMLError {
+			w.Header().Set("Content-Type", "text/html")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte("<!doctype html><html><head><title>500</title></head><body>Internal error, request id hidden-detail</body></html>"))
+			return
+		}
 		commit := rp.refs[arg]
 		if commit == "" && rp.commits[arg] != nil {
 			commit = arg
@@ -336,6 +413,7 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request, p, acct string) {
 		}
 		sort.Strings(paths)
 		start, _ := strconv.Atoi(r.URL.Query().Get("cursor"))
+		start = min(start, len(paths))
 		end := min(start+s.PageSize, len(paths))
 		var page []map[string]any
 		for _, path := range paths[start:end] {
@@ -352,6 +430,13 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request, p, acct string) {
 			page = append(page, s.ExtraEntries...)
 		}
 		switch {
+		case s.EndlessPages:
+			q := r.URL.Query()
+			q.Set("cursor", strconv.Itoa(max(end, start+1)))
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?%s>; rel="next"`, s.Endpoint, p, q.Encode()))
+			if start > len(paths) {
+				page = []map[string]any{}
+			}
 		case s.SelfNext:
 			w.Header().Set("Link", fmt.Sprintf(`<%s%s?%s>; rel="next"`, s.Endpoint, p, r.URL.RawQuery))
 		case end < len(paths):
@@ -421,12 +506,28 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, p, acct string)
 		w.WriteHeader(http.StatusFound)
 		return
 	}
-	b = s.served(path, b)
-	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	if r.Method == http.MethodHead {
+		w.Header().Set("Content-Length", strconv.Itoa(len(s.served(path, b))))
 		return
 	}
-	_, _ = w.Write(b)
+	s.write(w, path, b)
+}
+
+// write serves a file's bytes as the knobs serve them, endlessly with
+// Endless (until the client goes).
+func (s *Server) write(w http.ResponseWriter, path string, b []byte) {
+	b = s.served(path, b)
+	if !s.Endless {
+		w.Header().Set("Content-Length", strconv.Itoa(len(b)))
+		_, _ = w.Write(b)
+		return
+	}
+	chunk := make([]byte, 32<<10)
+	for {
+		if _, err := w.Write(chunk); err != nil {
+			return
+		}
+	}
 }
 
 // served is a file's bytes as the knobs serve them.
@@ -461,9 +562,17 @@ func (s *Server) cdn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	path, _ := url.PathUnescape(parts[1])
+	if s.HopBack {
+		w.Header().Set("Location", "http://"+Hub+"/served/"+parts[0]+"/"+parts[1])
+		w.WriteHeader(http.StatusFound)
+		return
+	}
+	if s.CDNCommit != "" {
+		w.Header().Set("X-Repo-Commit", s.CDNCommit)
+	}
 	for _, rp := range s.repos {
 		if b, ok := rp.commits[parts[0]][path]; ok {
-			_, _ = w.Write(s.served(path, b))
+			s.write(w, path, b)
 			return
 		}
 	}
