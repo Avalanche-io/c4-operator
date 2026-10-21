@@ -1,0 +1,12 @@
+{
+	"FileVersion": 3,
+	"EngineAssociation": "5.5",
+	"Category": "",
+	"Description": "The unreal-render tool's test project: empty until the test's 01-c4test.py builds its map, sequence and job.",
+	"Plugins": [
+		{"Name": "PythonScriptPlugin", "Enabled": true},
+		{"Name": "EditorScriptingUtilities", "Enabled": true},
+		{"Name": "SequencerScripting", "Enabled": true},
+		{"Name": "MovieRenderPipeline", "Enabled": true}
+	]
+}

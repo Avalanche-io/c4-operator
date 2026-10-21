@@ -1,0 +1,66 @@
+c4: tool/1
+name: unreal-render
+title: Unreal render
+summary: Renders one Movie Render Queue job of an Unreal project, its whole range in one unit, offscreen.
+kind: frames
+runs:
+  # The studio's own Unreal image (a placeholder until it is set): see
+  # integrations/dcc/unreal/README.md. exe is Unreal's own Python, which runs
+  # the wrapper and finds UnrealEditor-Cmd beside it.
+  image: registry.example.com/unreal:5.5
+  exe: /home/ue4/UnrealEngine/Engine/Binaries/ThirdParty/Python3/Linux/bin/python3
+  host:
+    has: [unreal-5.5]
+    exe:
+      windows: "C:/Program Files/Epic Games/UE_5.5/Engine/Binaries/ThirdParty/Python3/Win64/python.exe"
+      linux: /opt/UnrealEngine/Engine/Binaries/ThirdParty/Python3/Linux/bin/python3
+  command:
+  - "{{Run.Exe}}"
+  - "{{Tool.Dir}}/unreal_render.py"
+  - "{{Param.project}}"
+  - "map={{Param.map}}"
+  - "sequence={{Param.sequence}}"
+  - "config={{Param.config}}"
+# Movie Render Queue renders a job's range in one process, and starting one
+# (the engine, shaders, the map, warm-up frames) costs minutes: a unit is
+# the whole job.
+frames: {chunk: all, order: sequential}
+params:
+- name: project
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The Unreal project.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Project, fileFilters: [{label: Unreal project, patterns: ["*.uproject"]}]}
+- name: map
+  type: STRING
+  default: ""
+  description: The job's map package (/Game/Maps/Sh010); the job must render on it.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: Map}
+- name: sequence
+  type: STRING
+  default: ""
+  description: The job's level sequence.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: Level sequence}
+- name: config
+  type: STRING
+  minLength: 1
+  description: The job's queue manifest, from the project's folder (C4/queue/01-sh010-lighting.utxt), which Render (Remote) writes.
+  show: advanced
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: Config}
+writes: [render/]
+previews: "render/**/*.$F4.*"
+needs: {gpu: 1}
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1002
+  with: {project: Test/Test.uproject, map: /Game/C4Test, sequence: /Game/C4Test_seq.C4Test_seq, config: C4/queue/01-c4test.py}
+  expect: [render/c4test/C4Test_seq.1001.png, render/c4test/C4Test_seq.1002.png]
