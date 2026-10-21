@@ -1,0 +1,44 @@
+# Project details the canary farm carries in every field that can hold
+# them. No output may contain any of them, in any encoding (canary_test.go).
+# Titles, ruse titles, episode codes
+NIGHTJAR_S02
+saltmarsh
+BLUE HARVEST
+# Shots, sequences, stages
+SM_101_0420
+sh0420
+seq030
+fx_hero
+lighting
+# Paths
+/mnt/proj/saltmarsh/seq030/sh0420/comp/v012/
+\\fileserver\shows\saltmarsh
+S:\shows\saltmarsh\seq030
+# People
+dana.kim
+noor@studio.example
+Dana Kim
+# Clients and vendors
+Examplevale Pictures
+# Hosts, pools, sites
+render-bk-017.saltmarsh.internal
+bk-cpu
+gpu-a100-burst
+London
+# Trackers
+PROJ-1234
+https://tracker.example/projects/saltmarsh/shots/4242
+# A C4 ID of fixture content, its short form
+c45ZQpdqHMDeGu6tLjk8jmz9XJ2E8Bw7D5Kyxv4Kx3j8bWDE5WgtQ6vqvPXR4ofJXWhSWMLWHmNHx1QgGWy2Bgp6aR
+c45ZQpdqHMDe
+# Agent text, tools, sessions
+render the hero plate with the new grade
+nuke-render
+web-search
+session-8f2a9c41
+# Configuration
+SHOW_ROOT=/mnt/proj/saltmarsh
+registry.studio.example/hydra:7
+# Time
+America/Los_Angeles
+2026-11-14T09:00

@@ -392,6 +392,30 @@ roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-queue-calibr
 subjects:
 - {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
 ---
+# The farm's telemetry key (internal/telemetry/farmkey): made the first time
+# the farm produces telemetry, read to name a diagnostic bundle's
+# pseudonyms, replaced by a rotation. Only the manager may read it.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: c4-telemetry-key
+rules:
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [c4-telemetry-key]
+  verbs: [get, update]
+- apiGroups: [""]
+  resources: [secrets]
+  verbs: [create]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: c4-telemetry-key
+roleRef: {apiGroup: rbac.authorization.k8s.io, kind: Role, name: c4-telemetry-key}
+subjects:
+- {kind: ServiceAccount, name: c4-manager, namespace: c4-system}
+---
 # Node daemons find the regional tier through its EndpointSlices.
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role

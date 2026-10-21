@@ -1,0 +1,5 @@
+go test fuzz v1
+string("0N\x1f\xb6\xe5\xe3\x93R")
+string("\x10")
+string("bk-cpu")
+string("0100")

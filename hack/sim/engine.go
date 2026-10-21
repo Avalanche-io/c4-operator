@@ -654,6 +654,10 @@ func (e *engine) estimate(j *job) estimate.Summary {
 	return s
 }
 
+// observeDecide, when set, sees every decision with the policy's state as
+// it was before it: the bundle tests, and -bundle, which writes them down.
+var observeDecide func(pol policySpec, s sched.Snapshot, before sched.StateDoc, cfg sched.Config, d sched.Decisions)
+
 func (e *engine) decide() {
 	for _, p := range e.pools {
 		p.meter(e.now)
@@ -662,7 +666,14 @@ func (e *engine) decide() {
 	if e.eta != nil {
 		e.eta.beforeDecide(e, &s)
 	}
+	var before sched.StateDoc
+	if observeDecide != nil {
+		before = e.pst.Doc()
+	}
 	d := e.pol.fn(s, &e.pst, e.pcfg)
+	if observeDecide != nil {
+		observeDecide(e.pol, s, before, e.pcfg, d)
+	}
 	if e.eta != nil {
 		e.eta.afterDecide(e, s, d)
 	}

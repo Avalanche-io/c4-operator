@@ -840,6 +840,40 @@ A development viewer's record still says "development viewer":
   reach it.
 - On any HUD the network reaches, it is unattributed.
 
+### 6.9 Telemetry: what C4 writes about itself
+Telemetry is anything C4 produces about how it behaved, for someone outside
+the moment: a maintainer reading a diagnostic bundle, a studio's own
+collector. It never carries the work: no names, paths, contents, prompts or
+other free text, no raw C4 IDs, no wall-clock dates or zones, and no money
+as it was. That holds by construction, not by filtering:
+- **Closed types.** `internal/telemetry`'s records hold only enums with a
+  table (an unknown value becomes `other`), counts, reals, scaled money,
+  durations, times relative to the record's own epoch, keyed pseudonyms and
+  the build. A reflection test fails the build if a field could hold a
+  string, and the one encoder (`telemetry.Encode`) refuses such a record
+  before writing a byte. The package opens no file and prints nothing.
+- **Pseudonyms under a farm key.** Every name and C4 ID becomes
+  HMAC-SHA256 under 256 random bits kept in the Secret
+  `c4-telemetry-key`, which only the manager reads, truncated to 80 bits.
+  Kinds are kept apart, two farms share no pseudonym, and only the farm can
+  map one back. Each carries its rank among the record's names of its kind.
+- **Replays that reproduce.** A redacted snapshot of the policy's input
+  restores with each name replaced by a synthetic one built from its rank,
+  so every comparison the policy makes between names comes out as it did,
+  with no change to the policy. Before a snapshot is written, the
+  faithfulness check replays it through `sched.Decide` and records whether
+  it gives the farm's decisions, and if not, how many of each kind differ.
+  Every decision of the simulator's test weeks replays exactly, with time
+  shifted and money scaled.
+- **A canary corpus in CI.** A farm whose every field carries realistic
+  project details is redacted. The test fails if any detail appears in the
+  output in any encoding: case, JSON escaping, URL and base64 encoding, hex,
+  UTF-16, a four-character run of a name, or an unsalted MD5, SHA-1 or
+  SHA-256. It also checks that no wall-clock time or unscaled amount
+  survives, and that the farm key never appears. A fuzz target fills every
+  string the redactor reads, and a deliberately leaky record proves the
+  tests would catch one.
+
 ## 7. Very large clusters
 
 - **The control plane is not in the data path.** The controller resolves a
