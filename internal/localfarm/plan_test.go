@@ -188,12 +188,12 @@ func TestOwnerIsTheSinglePerson(t *testing.T) {
 // without its number, lowercase, with what else a name carries made '-'.
 func TestOwnerName(t *testing.T) {
 	for raw, want := range map[string]string{
-		"joshua@studio.example":                       "joshua",
-		"Joshua Kolden":                               "joshua-kolden",
+		"lena@studio.example": "lena",
+		"Noor Haddad":         "noor-haddad",
 		"12345678+mrjoshuak@users.noreply.github.com": "mrjoshuak",
-		`AVALANCHE\jkolden`:                           "jkolden",
-		"  j.kolden  ":                                "j.kolden",
-		"o'brien--x":                                  "o-brien-x",
+		`STUDIO\nhaddad`: "nhaddad",
+		"  n.haddad  ":   "n.haddad",
+		"o'brien--x":     "o-brien-x",
 	} {
 		if got, err := OwnerName(raw); err != nil || got != want {
 			t.Errorf("%q: %q, %v", raw, got, err)
