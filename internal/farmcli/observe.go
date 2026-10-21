@@ -69,7 +69,7 @@ func (s SessionsServer) Handler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(web))
 	mux.HandleFunc("GET /api/v1/observed", func(w http.ResponseWriter, r *http.Request) {
-		rows, err := readSessions(r.Context(), SessionsArgs{Agent: s.Agent, Claude: s.Claude, All: s.All})
+		rows, _, err := readSessions(r.Context(), SessionsArgs{Agent: s.Agent, Claude: s.Claude, All: s.All})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return

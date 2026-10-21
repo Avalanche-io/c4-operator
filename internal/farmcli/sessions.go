@@ -104,9 +104,18 @@ type SessionsArgs struct {
 	Agent, Claude string
 }
 
+// installClaude is what a machine without Claude Code is told.
+const installClaude = "Claude Code (claude) is not installed on this machine; install it (https://claude.com/claude-code), then run c4 farm agents again"
+
+// claudeMissing says an error is Claude Code not being there.
+func claudeMissing(msg string) bool {
+	return strings.Contains(msg, "claude") && (strings.Contains(msg, "executable file not found") || strings.Contains(msg, "not found"))
+}
+
 // readSessions are this machine's sessions: from c4-agent observe, or,
-// with a c4-agent too old to observe or none at all, from claude agents.
-func readSessions(ctx context.Context, a SessionsArgs) ([]row, error) {
+// with a c4-agent too old to observe or none at all, from claude agents,
+// which cannot say what needs the person (observed is false).
+func readSessions(ctx context.Context, a SessionsArgs) (rows []row, observed bool, err error) {
 	bin := a.Agent
 	if bin == "" {
 		bin, _ = exec.LookPath("c4-agent")
@@ -126,23 +135,28 @@ func readSessions(ctx context.Context, a SessionsArgs) ([]row, error) {
 				Sessions []json.RawMessage `json:"sessions"`
 			}
 			if err := json.Unmarshal(out, &doc); err != nil {
-				return nil, fmt.Errorf("c4-agent observe: %w", err)
+				return nil, false, fmt.Errorf("c4-agent observe: %w", err)
 			}
 			rows := make([]row, 0, len(doc.Sessions))
 			for _, raw := range doc.Sessions {
 				var r row
 				if err := json.Unmarshal(raw, &r); err != nil {
-					return nil, fmt.Errorf("c4-agent observe: %w", err)
+					return nil, false, fmt.Errorf("c4-agent observe: %w", err)
 				}
 				r.Raw = raw
 				rows = append(rows, r)
 			}
-			return rows, nil
+			return rows, true, nil
 		case !strings.Contains(stderr.String(), "unknown command"):
-			return nil, fmt.Errorf("c4-agent observe: %s", strings.TrimSpace(stderr.String()))
+			msg := strings.TrimPrefix(strings.TrimSpace(stderr.String()), "c4-agent: ")
+			if claudeMissing(msg) {
+				return nil, false, errors.New(installClaude)
+			}
+			return nil, false, fmt.Errorf("c4-agent observe: %s", msg)
 		}
 	}
-	return claudeRows(ctx, a)
+	rows, err = claudeRows(ctx, a)
+	return rows, false, err
 }
 
 // claudeRows are the sessions `claude agents --json` lists, in observe's
@@ -152,7 +166,7 @@ func claudeRows(ctx context.Context, a SessionsArgs) ([]row, error) {
 	if bin == "" {
 		p, err := exec.LookPath("claude")
 		if err != nil {
-			return nil, errors.New("Claude Code (claude) is not on PATH; c4 farm agents shows its sessions")
+			return nil, errors.New(installClaude)
 		}
 		bin = p
 	}
@@ -160,9 +174,17 @@ func claudeRows(ctx context.Context, a SessionsArgs) ([]row, error) {
 	if a.All {
 		args = append(args, "--all")
 	}
-	out, err := exec.CommandContext(ctx, bin, args...).Output()
+	var stderr bytes.Buffer
+	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("claude agents: %w", err)
+		// an old claude has no agents command; say so without its path
+		msg, _, _ := strings.Cut(strings.TrimSpace(stderr.String()), "\n")
+		if msg == "" || strings.Contains(msg, "unknown") || strings.Contains(msg, "agents") {
+			return nil, errors.New("this Claude Code is too old to list its sessions; run claude update, then c4 farm agents again")
+		}
+		return nil, fmt.Errorf("claude agents: %s", msg)
 	}
 	var ss []struct {
 		Name, SessionID, Cwd, Kind, Status, State string
@@ -173,13 +195,13 @@ func claudeRows(ctx context.Context, a SessionsArgs) ([]row, error) {
 	}
 	rows := make([]row, 0, len(ss))
 	for _, s := range ss {
-		r := row{Session: s.SessionID, Name: s.Name, Kind: s.Kind, Cwd: s.Cwd, Running: s.State != "done" && s.State != "stopped"}
+		r := row{Session: s.SessionID, Name: s.Name, Kind: s.Kind, Cwd: s.Cwd, Running: s.State != "done" && s.State != "stopped" && s.State != "failed"}
 		switch {
 		case s.State == "blocked":
 			r.Word = "needs you"
 		case s.State == "working", s.Status == "busy":
 			r.Word = "working"
-		case s.State == "done", s.State == "stopped":
+		case s.State == "done", s.State == "stopped", s.State == "failed":
 			r.Word = s.State
 		default:
 			r.Word = "idle"
@@ -199,7 +221,7 @@ func claudeRows(ctx context.Context, a SessionsArgs) ([]row, error) {
 // word, what it has used, and then what needs the person. Nothing is
 // moved, stopped or signed in, and no farm is needed.
 func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
-	rows, err := readSessions(ctx, a)
+	rows, observed, err := readSessions(ctx, a)
 	if err != nil {
 		return err
 	}
@@ -254,7 +276,7 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 	fmt.Fprintln(tw, "AGENT\tSTATE\tFOLDER\tUSED\tFOR")
 	var waiting []row
 	for _, r := range rows {
-		if r.Word == "needs you" {
+		if r.Word == "needs you" || r.Word == "at its limit" {
 			waiting = append(waiting, r)
 		}
 		dir := r.Cwd
@@ -273,12 +295,26 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 	}
 	tw.Flush()
 	olderEnded(o, old, now)
-	if len(waiting) == 0 {
+	switch {
+	case len(waiting) == 0 && !observed:
+		// claude agents says which sessions are blocked, but not what on,
+		// nor what a limit holds up
+		o.printf("\nWithout c4-agent, c4 farm agents can't tell what needs you; brew install avalanche-io/tap/c4 brings it\n")
+		return nil
+	case len(waiting) == 0:
 		o.printf("\nNothing needs you.\n")
 		return nil
 	}
 	o.printf("\n")
 	for _, r := range waiting {
+		if r.Word == "at its limit" {
+			if r.NeedsYou != "" {
+				o.printf("%s is at its limit: %s\n", r.label(), r.NeedsYou)
+				continue
+			}
+			o.printf("%s is at its limit and waits for it to reset, or for you\n", r.label())
+			continue
+		}
 		if r.NeedsYou != "" {
 			o.printf("%s needs you: %s\n", r.label(), r.NeedsYou)
 			continue

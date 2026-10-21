@@ -318,3 +318,39 @@ func TestSessionsServer(t *testing.T) {
 		t.Errorf("another host name: %v %v", err, resp)
 	}
 }
+
+// The first touch, where c4 farm agents can't see everything: without
+// c4-agent it does not claim nothing needs you, a failed session is
+// failed, an old or missing claude is one sentence that says what to do
+// (no path, no doubled prefix), and a session at its limit waits on you.
+func TestSessionsFirstTouch(t *testing.T) {
+	dir := t.TempDir()
+	script := func(name, body string) string {
+		p := filepath.Join(dir, name)
+		os.WriteFile(p, []byte("#!/bin/sh\n"+body), 0o755)
+		return p
+	}
+	var out bytes.Buffer
+	claude := script("claude", `echo '[{"name":"a","sessionId":"1c6f8d63","cwd":"/tmp","kind":"background","status":"idle","state":"failed","startedAt":1792534445663},{"name":"b","sessionId":"2d7a9e74","cwd":"/tmp","kind":"background","status":"idle","state":"idle","startedAt":1792534445663}]'`)
+	old := fakeObserve(t, "", true)
+	if err := Sessions(context.Background(), Out{W: &out}, SessionsArgs{Agent: old, Claude: claude, All: true}); err != nil ||
+		!strings.Contains(out.String(), "\na      failed") || strings.Contains(out.String(), "Nothing needs you") ||
+		!strings.HasSuffix(out.String(), "Without c4-agent, c4 farm agents can't tell what needs you; brew install avalanche-io/tap/c4 brings it\n") {
+		t.Errorf("fallback: %v\n%s", err, out.String())
+	}
+	tooOld := script("claude-old", "echo \"error: unknown command 'agents'\" >&2; exit 1\n")
+	if err := Sessions(context.Background(), Out{W: &out}, SessionsArgs{Agent: old, Claude: tooOld}); err == nil ||
+		err.Error() != "this Claude Code is too old to list its sessions; run claude update, then c4 farm agents again" {
+		t.Errorf("old claude: %v", err)
+	}
+	noClaude := script("c4-agent-noclaude", "echo 'c4-agent: exec: \"claude\": executable file not found in $PATH' >&2; exit 1\n")
+	if err := Sessions(context.Background(), Out{W: &out}, SessionsArgs{Agent: noClaude}); err == nil || err.Error() != installClaude {
+		t.Errorf("no claude: %v", err)
+	}
+	limited := fakeObserve(t, `[{"session":"3e8b0f85","name":"scout","kind":"background","running":true,"word":"at its limit","startedAt":"2026-10-21T08:00:00Z"}]`, false)
+	out.Reset()
+	if err := Sessions(context.Background(), Out{W: &out}, SessionsArgs{Agent: limited}); err != nil ||
+		!strings.HasSuffix(out.String(), "\nscout is at its limit and waits for it to reset, or for you\n") {
+		t.Errorf("at its limit: %v\n%s", err, out.String())
+	}
+}
