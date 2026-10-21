@@ -273,11 +273,24 @@ func Down(name string) error {
 	if name == "" {
 		name = Name
 	}
-	if err := cluster.NewProvider().Delete(name, ""); err != nil {
+	p := cluster.NewProvider()
+	if err := p.Delete(name, ""); err != nil {
 		return err
 	}
-	// and its registry, with the images pushed to it
-	if out, err := docker(context.Background(), "rm", "-f", RegistryName); err != nil && !strings.Contains(out, "No such container") {
+	// and its registry, with the images pushed to it, unless another local
+	// farm (one whose nodes pull from it) still uses it
+	ctx := context.Background()
+	others, _ := p.List()
+	for _, other := range others {
+		nodes, err := p.ListInternalNodes(other)
+		if err != nil || len(nodes) == 0 {
+			continue
+		}
+		if _, err := docker(ctx, "exec", nodes[0].String(), "test", "-f", "/etc/containerd/certs.d/"+RegistryInFarm+"/hosts.toml"); err == nil {
+			return nil
+		}
+	}
+	if out, err := docker(ctx, "rm", "-f", RegistryName); err != nil && !strings.Contains(out, "No such container") {
 		return err
 	}
 	return nil

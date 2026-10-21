@@ -524,11 +524,13 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 
 	case "samples":
 		from := fs.String("from", "", "a local sample archive instead of the release's")
+		localName := fs.String("name", localfarm.Name, "the local farm a scenario loads onto")
 		dir := fs.String("dir", "", "where to unpack (default ~/c4-samples)")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
 		}
+		localfarm.Name = *localName
 		if len(pos) > 0 && pos[0] == "load" {
 			return loadScenario(ctx, stdout, cfg, cm.utc, pos[1:])
 		}
@@ -543,6 +545,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		return farmcli.GetSamples(ctx, o, farmcli.SamplesArgs{Set: set, Version: version, Dir: *dir, From: *from})
 
 	case "up":
+		localName := fs.String("name", localfarm.Name, "the local farm's name, for a second farm beside the first (with --port and --store-port)")
 		as := fs.String("as", "artist", "the role to open the HUD as: artist, supervisor, wrangler, admin, facilities or td")
 		plan := fs.Bool("plan", false, "print the cluster config and the objects, and change nothing")
 		install := fs.String("install", "", "the operator's install manifest (default this release's)")
@@ -555,6 +558,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
+		localfarm.Name = *localName
 		v, err := localfarm.LookupViewer(*as)
 		if err != nil {
 			return err
@@ -590,9 +594,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		return openURL(localfarm.Link(o.HUD(), v))
 
 	case "down":
+		localName := fs.String("name", localfarm.Name, "the local farm to delete")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
+		localfarm.Name = *localName
 		if err := localfarm.Down(localfarm.Name); err != nil {
 			return err
 		}
@@ -607,9 +613,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		return nil
 
 	case "status":
+		localName := fs.String("name", localfarm.Name, "the local farm")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
+		localfarm.Name = *localName
 		have, err := localfarm.Exists(localfarm.Name)
 		if err != nil {
 			return err

@@ -15,9 +15,12 @@ import (
 	"github.com/Avalanche-io/c4-operator/config/samples/quickstart"
 )
 
+// Name is the local farm's cluster: c4-local, or what --name gives, so two farms
+// can run on one machine on different ports.
+var Name = "c4-local"
+
 // Defaults of the local farm.
 const (
-	Name      = "c4-local"
 	NodeImage = "kindest/node:v1.36.1"
 	Project   = "saltmarsh"
 	Zone      = "local-a"
