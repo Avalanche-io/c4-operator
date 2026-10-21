@@ -63,7 +63,7 @@ Connect Claude Code to this farm? It adds the farm's tools to Claude Code (~/.cl
 ```
 farm      c4-local   4 nodes · 6 slots, 4 more to rent · store ready
 project   saltmarsh   you: sam
-owner     sam, who plays every role here (c4 farm up --owner NAME to change it)
+owner     sam, who plays every role here
 claude    has the farm's tools (c4-farm in ~/.claude.json); c4 farm integrate off takes it all out
 agents    this machine (c4-host-laptop) runs sam's agents, agent pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)
 HUD       http://127.0.0.1:30080/?as=sam#/needs
