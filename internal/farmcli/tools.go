@@ -158,6 +158,13 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 		return err
 	}
 	if len(r.Errors) > 0 {
+		for i, e := range r.Errors {
+			// a local farm's own registry lacks the image: this machine
+			// has it, and image load puts it there
+			if m := localRegistryLacks.FindStringSubmatch(e.Message); m != nil {
+				r.Errors[i].Fix = "load it into the local farm, then publish again: c4 farm image load " + m[1]
+			}
+		}
 		return printFieldErrors(o, r.Errors)
 	}
 	tot := v.Totals()
@@ -578,6 +585,10 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	}
 	return submitDoc(ctx, c, o, d, "", SubmitFileArgs{Project: a.Project, DryRun: a.DryRun, Yes: a.Yes})
 }
+
+// localRegistryLacks is the farm refusing an image its local registry
+// (c4 farm up's) does not hold, and the image it names.
+var localRegistryLacks = regexp.MustCompile(`the registry c4-local-registry:[0-9]+ has no (\S+)`)
 
 // frameToken is where a sequence path puts the frame number: $F4, <F4>,
 // %04d or #, the forms husk and Houdini accept.
