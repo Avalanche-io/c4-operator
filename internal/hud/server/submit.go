@@ -45,6 +45,10 @@ import (
 // queue; a nil DryRun answers dry runs with 503.
 type DryRunFunc func(ctx context.Context, job *c4v1.WorkJob, project string) (api.SubmitEstimate, error)
 
+// DryRunAllFunc plans drafts together, each after the ones it depends
+// on; views are the view IDs of their input Materializations by name.
+type DryRunAllFunc func(ctx context.Context, jobs []*c4v1.WorkJob, project string, views map[string]string) ([]api.SubmitEstimate, error)
+
 // ErrNotPlanned is what a DryRunFunc returns (wrapped) when the queue has
 // not planned the farm yet; the HUD answers 503 and the client retries.
 var ErrNotPlanned = errors.New("the queue has not planned the farm yet")
@@ -549,7 +553,17 @@ type createOpts struct {
 	// says why (EstimateError) rather than a refusal: a submission's later
 	// jobs follow jobs that do not exist yet.
 	EstimateOptional bool
+	// Draft, when set, receives the WorkJob as it would be created (with
+	// CheckOnly: as checked), for planning a submission's jobs together.
+	Draft *c4v1.WorkJob
+	// Book is a line added to the job's book entry (a submission's ID and
+	// note).
+	Book string
 }
+
+// takenError is a create refused because the job's name was taken
+// meanwhile: a submission numbers its jobs again rather than report it.
+type takenError struct{ error }
 
 // createJob checks and creates a job from a POST /jobs request for viewer
 // v, or plans it (body.DryRun), as handleSubmit and the submissions
@@ -740,6 +754,9 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	for _, mt := range mats {
 		out.Materializations = append(out.Materializations, mt.Name)
 	}
+	if o.Draft != nil {
+		*o.Draft = *job.DeepCopy()
+	}
 	if o.CheckOnly {
 		return out, http.StatusOK, nil
 	}
@@ -783,17 +800,19 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		}
 	}
 	if err := s.Client.Create(ctx, job); err != nil {
-		code := http.StatusConflict
-		if !apierrors.IsAlreadyExists(err) {
-			code = http.StatusBadRequest
+		if apierrors.IsAlreadyExists(err) {
+			return api.SubmitResponse{}, http.StatusConflict, takenError{fmt.Errorf("%v", err)}
 		}
-		return api.SubmitResponse{}, code, fmt.Errorf("%v", err)
+		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("%v", err)
 	}
 	msg := fmt.Sprintf("%s: submitted, %s, %d input view%s", name, spec.Class, len(mats), plural(len(mats)))
 	if grant != nil {
 		msg += fmt.Sprintf(", for %s under their grant to tracker %s", grant.Spec.Person, grant.Spec.Tracker)
 	}
 	note := msg
+	if o.Book != "" {
+		note += "; " + o.Book
+	}
 	if via(r) == "mcp" {
 		note += "; via MCP"
 	}

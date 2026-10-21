@@ -95,6 +95,7 @@ func (f *fixtureFarm) Namespace(p string) string {
 }
 func (f *fixtureFarm) Cut(p, shot string) string   { return f.Projects[p].Shots[shot].Cut }
 func (f *fixtureFarm) Policy(p string) *FarmPolicy { return f.Policies[p] }
+func (f *fixtureFarm) Trackers(string) []string    { return nil }
 
 // The fixtures' milestones are on New York time.
 func (f *fixtureFarm) Location(string) *time.Location {

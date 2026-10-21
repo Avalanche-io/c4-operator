@@ -486,7 +486,9 @@ type Job struct {
 	Owner     string `json:"owner,omitempty"`
 	// TrackerRef is the tracker entity the job serves
 	// (<tracker>/<type>/<id>), when a tracker's sync submitted it.
-	TrackerRef   string    `json:"trackerRef,omitempty"`
+	TrackerRef string `json:"trackerRef,omitempty"`
+	// Note is the note: of the submission the job came from.
+	Note         string    `json:"note,omitempty"`
 	Phase        string    `json:"phase"`
 	Order        string    `json:"order"`
 	Units        Counts    `json:"units"`

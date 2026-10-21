@@ -13,6 +13,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
@@ -192,7 +193,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	j := &r.job
 	st := &j.Status
 	aj := api.Job{Namespace: j.Namespace, Name: j.Name, Project: r.project, Class: j.Spec.Class, Driver: j.Spec.Class,
-		Owner: j.Annotations["c4.avalanche.io/owner"], Phase: st.Phase, Order: st.Order, Rank: int(st.Rank),
+		Owner: j.Annotations["c4.avalanche.io/owner"], Note: j.Annotations[authoring.AnnotationNote], Phase: st.Phase, Order: st.Order, Rank: int(st.Rank),
 		Pools: j.Spec.Pools, DependsOn: []string{}, CreatedAt: j.CreationTimestamp.Time.UTC(),
 		Nudge:     api.Nudge{Hold: j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop, Boost: num(j.Spec.Nudge.Boost)},
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}

@@ -146,7 +146,7 @@ the viewer's scope (1 is next).
 
 ```
 {
-  namespace, name, project, class, driver, owner?, trackerRef?, phase, order,
+  namespace, name, project, class, driver, owner?, trackerRef?, note?, phase, order,
   units: { total, unevaluated, queued, blocked, running, retrying, succeeded, failed, held,
            preflight?, backoff?, egress?, accepted?, waits? },
   unitStates: { unevaluated, queued, blocked, running, retrying, succeeded, failed,
@@ -848,7 +848,7 @@ and `-site` name the input it rebuilds and where, and the queue sets
 ```
 { submission, dryRun?, explain? }
 ->
-{ ok, dryRun?, errors?: [ { path, message, fix } ], submission,
+{ ok, dryRun?, errors?: [ { path, message, fix } ], submission, record?,
   jobs?: [ { key, namespace, name, tool, version, what, estimate?, estimateError?, after?: [name], link } ],
   estimate?: { eta50?, eta90?, deadline?, slackSeconds, feasible, atRisk, jobs },
   warnings?: [string], explain?, message? }
@@ -857,46 +857,72 @@ and `-site` name the input it rebuilds and where, and the queue sets
 `submission` is a submission (`c4: submit/1`, the submission format,
 schema/README.md) as JSON, its keys in the order written. The farm checks
 it against the project (its tools and their parameters, the jobs it
-follows, its dues, trees and people), lowers each job to a `POST /jobs`
-request, and creates the jobs in the order written: `201`. With `dryRun`
-it plans each (`200`; a job's `estimateError` says why it has none, since
-later jobs follow jobs that do not exist yet). A refused submission is
-`422` with `errors`, each at a dotted path (`jobs.comp.after`) with what to
-do about it, and nothing is created: every job is checked as `POST /jobs`
-checks it before the first is made. `404` for a project the viewer cannot
-see. `project` may be left out by a viewer with one project.
+follows, its dues, trees, people, `for:` and `tracker:`), lowers each job
+to a `POST /jobs` request, and creates the jobs in the order written:
+`201`. `project` may be left out by a viewer with one project.
+
+It is all or nothing. Every job is checked as `POST /jobs` checks it
+before the first is made; if a create still fails, the jobs already made
+are deleted (and booked so) and the answer is the refusal, so a client
+that retries never makes duplicates. A name taken meanwhile is numbered
+past and the jobs made again, never reported. Every refusal is `{ path,
+message, fix }` in the farm's words, at a dotted path (`jobs.comp.after`,
+`jobs.movie` for a job the farm would not take): `422` for the file or the
+farm's policy, `403` without access, `404` for a project the viewer cannot
+see, `503` when the farm cannot make a job just now. A folder tree is
+refused beside the file's other errors.
+
+With `dryRun` the jobs are planned together, each after the jobs it
+follows and competing for the same slots, so the last job's `eta` is when
+the chain is ready (`200`). A job's `estimate.reused` is how many of its
+units would reuse an earlier run's output rather than run (at most: a
+share runs anyway to verify), and its `what` says so (`48 frames in 6
+units; 6 of 6 units reused`). `estimateError` says why there is none (the
+queue has not planned yet).
 
 Each job is named `<name>-<key>-vNNN` (`name` defaults to the shot), one
 version past the latest such job, for the whole submission before any is
-made, so a job's inputs can name the jobs it follows. A job runs the tool's
-unit image pinned in its `tool.lock`, with the tool runner (`c4-unit run`)
-as the command and the tool's tree read-only at `/etc/c4/tools`; its
-parameters are `C4_PARAMS`, its shot `C4_SHOT`, the submission's `root:`
-`C4_SOURCE_ROOTS`. Memory and GPUs are limited to what is requested, CPU
-only requested; sizes are binary (`64G` is `64Gi`). The tree is mounted
-writable at the project's root: a C4 ID as its view, `job:<name>` as the
-latest such job's output, and for a job with `after` the output of the job
-it follows (`dependsOn`). `read` trees mount read-only at
+made, so a job's inputs can name the jobs it follows; it `follows` the
+previous version of the same name and key unless the file says otherwise.
+A job runs the tool's unit image pinned in its `tool.lock`, with the tool
+runner (`c4-unit run`) as the command and the tool's tree read-only at
+`/etc/c4/tools`; its parameters are `C4_PARAMS`, its shot `C4_SHOT`, the
+submission's `root:` `C4_SOURCE_ROOTS`. Memory and GPUs are limited to
+what is requested, CPU only requested; sizes are binary (`64G` is
+`64Gi`). A `frames` job without frames takes those of the frames job it
+follows, else the shot's cut where the farm knows it, else it is refused;
+a `once` job's frame parameter takes the same default. The tree is
+mounted writable at the project's root: a C4 ID as its view, `job:<name>`
+as the latest such job's output, and for a job with `after` the output of
+the job it follows (`dependsOn`). `read` trees mount read-only at
 `/c4/read/<name>`. A folder is the front end's to upload first (`POST
 /objects`, `POST /views`); a dry run takes a C4 ID the store lacks, a
 submit does not. A `due` that names a milestone labels the job
 `c4.avalanche.io/milestone: <name>`, which joins the Milestone whatever its
 selector; a time (`fri 18:00`, `18:00`, `+3h`, RFC 3339, in the project's
 zone) or a date pins the deadline; `suggested` (the default) leaves it to
-the farm. Each job carries `c4.avalanche.io/submission`, the submission's
-C4 ID (of the compact JSON sent), and `c4.avalanche.io/derivation-class:
-exact` when its tool says `reuse: exact`.
+the farm.
+
+Each job carries two identities: `c4.avalanche.io/submission`, the C4 ID
+of the file (the compact JSON sent), and `c4.avalanche.io/submission-record`,
+the ID of the signed record of submitting it (`record`; kind `submit`),
+so the same file sent twice is two submissions, the next versions of each
+job. `note:` is the job's `c4.avalanche.io/note` and a line of its book
+entry, with the submission's ID. `c4.avalanche.io/derivation-class: exact`
+marks a job whose tool says `reuse: exact`.
 
 What the farm cannot run yet is refused in its words, not run otherwise:
 plans, checks, approvals, waits, answering agents, generators and their
 children, units over more than frames, policy, a job that follows two,
-git trees, tools that need licences, the network beyond their licence
+git trees, a `preview` other than `fml` and `none` (this farm orders only
+those), tools that need licences, the network beyond their licence
 servers, sidecars, a Kubernetes overlay, a gate, farm access, or only a
 host. `warnings` are what it does differently meanwhile: a job that
 follows another frame by frame waits for the whole of it. `estimate` is
 the jobs' as one: the latest finish, the earliest deadline, the least
-slack. `explain` is what each job lowers to: its WorkJob, class and
-params, inputs, image, command and tool, resources, units and deadline.
+slack. `explain` is what each job lowers to: its WorkJob (project/name),
+class and params, inputs, image, command and tool, resources, units and
+deadline. `message` names the jobs as project/name.
 
 ### GET /projects/{project}
 

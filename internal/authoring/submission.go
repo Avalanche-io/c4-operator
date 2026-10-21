@@ -15,9 +15,15 @@ import (
 	order_ "github.com/Avalanche-io/c4-operator/work/order"
 )
 
-// AnnotationSubmission on a WorkJob is the C4 ID of the submission it was
-// lowered from.
-const AnnotationSubmission = "c4.avalanche.io/submission"
+// AnnotationSubmission on a WorkJob is the C4 ID of the submission file
+// it was lowered from (what was sent), AnnotationSubmissionRecord the ID
+// of the signed record of submitting it (which act: the same file sent
+// twice is two submissions), and AnnotationNote the submission's note.
+const (
+	AnnotationSubmission       = "c4.avalanche.io/submission"
+	AnnotationSubmissionRecord = "c4.avalanche.io/submission-record"
+	AnnotationNote             = "c4.avalanche.io/note"
+)
 
 // A Plan is a submission lowered: one POST /jobs request per job, in the
 // order written, named and joined to each other.
@@ -45,6 +51,8 @@ type PlannedJob struct {
 	Frames Frames
 	Units  int
 	Due    Due
+	// Note is the submission's note:, a line for the job's book.
+	Note string
 }
 
 // What is the job in a line.
@@ -143,7 +151,8 @@ func (c *subCtx) refusals() []Error {
 		switch pv := j.Preview; {
 		case pv == "" || pv == "fml" || pv == "none":
 		default:
-			errs = append(errs, errf(p+".preview", "use preview: fml for now", "previews other than fml and none cannot run on this farm yet"))
+			errs = append(errs, errf(p+".preview", "use preview: fml or none for now",
+				"this farm orders only fml and none so far; preview %q cannot run on this farm yet", pv))
 		}
 	}
 	return errs
@@ -237,6 +246,11 @@ func (c *subCtx) lower() (*Plan, []Error) {
 			continue
 		}
 		req.TrackerRef, req.For, req.Follows = sub.Tracker, sub.For, j.Follows
+		if req.Follows == "" {
+			// the previous version of the same stem and key, if there is one
+			req.Follows = Latest(existing, strings.TrimSuffix(versionSuffix.ReplaceAllString(names[j.Key], ""), "-"))
+		}
+		pj.Note = sub.Note
 		due := j.Due
 		if due == "" {
 			due = sub.Due

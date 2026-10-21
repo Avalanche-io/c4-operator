@@ -6,6 +6,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // hudFarm is the farm as checking and lowering a submission or a tool see
@@ -99,3 +100,17 @@ func (f *hudFarm) Location(project string) *time.Location {
 // Policy: the farm keeps no policy model a submission can narrow yet, so
 // nothing to check against; lowering refuses policy: for now.
 func (f *hudFarm) Policy(string) *authoring.FarmPolicy { return nil }
+
+// Trackers are the Trackers in the project's namespace.
+func (f *hudFarm) Trackers(project string) []string {
+	ns := f.Namespace(project)
+	var l c4v1.TrackerList
+	if ns == "" || f.s.Client == nil || f.s.Client.List(f.ctx, &l, client.InNamespace(ns)) != nil {
+		return nil
+	}
+	out := []string{}
+	for _, t := range l.Items {
+		out = append(out, t.Name)
+	}
+	return out
+}

@@ -28,8 +28,11 @@ type SubmissionResponse struct {
 	Errors []FieldError `json:"errors,omitempty"`
 	// Submission is the C4 ID of the document as sent (compact JSON), the
 	// annotation c4.avalanche.io/submission on each of its jobs.
-	Submission string          `json:"submission,omitempty"`
-	Jobs       []SubmissionJob `json:"jobs,omitempty"`
+	Submission string `json:"submission,omitempty"`
+	// Record is the ID of the signed record of this submission (on a farm
+	// that signs), c4.avalanche.io/submission-record on its jobs.
+	Record string          `json:"record,omitempty"`
+	Jobs   []SubmissionJob `json:"jobs,omitempty"`
 	// Estimate is the submission's as a whole: when its last job is
 	// expected to finish, against the earliest due among its jobs.
 	Estimate *SubmissionEstimate `json:"estimate,omitempty"`

@@ -2,19 +2,31 @@ package server
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"io/fs"
 	"net/http"
 	"path"
+	"sort"
 	"strings"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	k8sschema "k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
+	kfake "k8s.io/client-go/kubernetes/fake"
+	ktesting "k8s.io/client-go/testing"
+	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/schema"
 )
 
@@ -195,5 +207,120 @@ func TestProjectDetail(t *testing.T) {
 	}
 	if code := get(t, s, "/api/v1/projects/show-b?as=artist", &d); code != http.StatusNotFound {
 		t.Fatalf("another project: %d", code)
+	}
+}
+
+func listJobs(t *testing.T, s *Server) []string {
+	t.Helper()
+	var list c4v1.WorkJobList
+	if err := s.Client.List(context.Background(), &list); err != nil {
+		t.Fatal(err)
+	}
+	var out []string
+	for _, j := range list.Items {
+		out = append(out, j.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// A submission is made whole or not at all: when its second job is
+// refused, its first is deleted and the refusal is the farm's words, not
+// the API's.
+func TestSubmissionAllOrNothing(t *testing.T) {
+	s := submissionFarm(t)
+	s.Client = interceptor.NewClient(s.Client.(client.WithWatch), interceptor.Funcs{
+		Create: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.CreateOption) error {
+			if obj.GetName() == "sm0140-movie-v001" {
+				return apierrors.NewForbidden(k8sschema.GroupResource{Group: "c4.avalanche.io", Resource: "workjobs"}, obj.GetName(),
+					errors.New(`admission webhook "owner.c4.avalanche.io" denied the request: units may not run as root`))
+			}
+			return c.Create(ctx, obj, opts...)
+		}})
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	code, out := submit(t, s, api.SubmissionRequest{Submission: submission(t, "proxies-movie", tree)})
+	if code != http.StatusUnprocessableEntity || out.OK || len(out.Jobs) != 0 || len(out.Errors) != 1 {
+		t.Fatalf("%d %+v", code, out)
+	}
+	e := out.Errors[0]
+	if e.Path != "jobs.movie" || e.Message != "the farm's admission policy refused movie: units may not run as root" || strings.Contains(e.Message, "webhook") {
+		t.Fatalf("refusal %+v", e)
+	}
+	if jobs := listJobs(t, s); len(jobs) != 0 {
+		t.Fatalf("left behind: %v", jobs)
+	}
+}
+
+// A name taken while the submission was made is numbered past, never
+// reported; the same file sent twice is two submissions, the next
+// versions, with the same file ID and two records; a note reaches the
+// jobs and their book.
+func TestSubmissionRenumberAndRecords(t *testing.T) {
+	s := submissionFarm(t)
+	ctx := context.Background()
+	ca, err := provenance.NewCA(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Signer, err = provenance.NewSigner(ctx, provenance.LocalIssuer(ca, provenance.ComponentIdentity("hud"), time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	kube := kfake.NewSimpleClientset()
+	n := 0
+	kube.PrependReactor("create", "events", func(a ktesting.Action) (bool, runtime.Object, error) {
+		if ev := a.(ktesting.CreateAction).GetObject().(*corev1.Event); ev.Name == "" {
+			n++
+			ev.Name = fmt.Sprintf("%s%d", ev.GenerateName, n)
+		}
+		return false, nil, nil
+	})
+	s.Kube = kube
+	// made by someone else meanwhile: the HUD's model has not seen it
+	other := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "sm0140-proxies-v001"}, Spec: c4v1.WorkJobSpec{Class: "render"}}
+	if err := s.Client.Create(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	doc := strings.Replace(string(submission(t, "proxies-movie", tree)), `"jobs"`, `"note":"new grade, per Thursday","jobs"`, 1)
+	code, first := submit(t, s, api.SubmissionRequest{Submission: []byte(doc)})
+	if code != http.StatusCreated || first.Jobs[0].Name != "sm0140-proxies-v002" || first.Record == "" {
+		t.Fatalf("first: %d %+v", code, first)
+	}
+	code, second := submit(t, s, api.SubmissionRequest{Submission: []byte(doc)})
+	if code != http.StatusCreated || second.Jobs[0].Name != "sm0140-proxies-v003" || second.Jobs[1].Name != "sm0140-movie-v002" ||
+		second.Submission != first.Submission || second.Record == first.Record || second.Record == "" {
+		t.Fatalf("second: %d %+v (first %s %s)", code, second, first.Submission, first.Record)
+	}
+	var j c4v1.WorkJob
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "sm0140-movie-v002"}, &j); err != nil {
+		t.Fatal(err)
+	}
+	if j.Annotations[authoring.AnnotationSubmission] != second.Submission || j.Annotations[authoring.AnnotationSubmissionRecord] != second.Record ||
+		j.Annotations[authoring.AnnotationNote] != "new grade, per Thursday" {
+		t.Fatalf("annotations %v", j.Annotations)
+	}
+	evs, err := kube.CoreV1().Events("show-a").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	booked := false
+	for _, ev := range evs.Items {
+		if ev.InvolvedObject.Name == "sm0140-movie-v002" && strings.Contains(ev.Message, "note: new grade, per Thursday") &&
+			strings.Contains(ev.Message, "submission "+second.Submission) {
+			booked = true
+		}
+	}
+	if !booked {
+		t.Fatalf("the note is not in the book: %+v", evs.Items)
+	}
+}
+
+// A dry run reports a folder tree beside the file's other errors.
+func TestSubmissionFolderBesideErrors(t *testing.T) {
+	s := submissionFarm(t)
+	doc := `{"c4":"submit/1","project":"show-a","shot":"sm0140","tree":".","jobs":{"light":{"tool":"proxie","frames":"1-4","with":{"plates":"p.exr"}}}}`
+	code, out := submit(t, s, api.SubmissionRequest{Submission: []byte(doc), DryRun: true})
+	if code != http.StatusUnprocessableEntity || len(out.Errors) != 2 || out.Errors[0].Path != "jobs.light.tool" || out.Errors[1].Path != "tree" {
+		t.Fatalf("%d %+v", code, out)
 	}
 }

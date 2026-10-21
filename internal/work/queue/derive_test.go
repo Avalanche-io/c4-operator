@@ -11,6 +11,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	"github.com/Avalanche-io/c4"
 
@@ -200,6 +201,19 @@ func TestExactVerifiedWorkIsReused(t *testing.T) {
 	}
 	if d := get(t, ns, "sh400-v2").Status.Derivation; d == nil || !d.Verified {
 		t.Fatalf("not verified: %+v", d)
+	}
+	// Planned before it is submitted, the next version says what reuse
+	// will skip.
+	draft := exactJob(ns, "sh400-v3", *now)
+	views := map[string]string{}
+	for _, in := range draft.Spec.Inputs {
+		var m c4v1.Materialization
+		if err := k8s.Get(ctx, client.ObjectKey{Namespace: ns, Name: in.Materialization}, &m); err == nil {
+			views[in.Materialization] = m.Status.ViewID
+		}
+	}
+	if dr, err := q.DryRunAll(ctx, []*c4v1.WorkJob{draft}, "namespace/"+ns, views); err != nil || dr[0].Reused != 2 {
+		t.Fatalf("dry run of v3: %+v %v", dr, err)
 	}
 	if err := k8s.Create(ctx, exactJob(ns, "sh400-v3", *now)); err != nil {
 		t.Fatal(err)

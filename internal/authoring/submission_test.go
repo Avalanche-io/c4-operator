@@ -236,3 +236,60 @@ jobs:
 		}
 	}
 }
+
+// trackerFarm is the fixture farm with flow connected to saltmarsh.
+type trackerFarm struct{ *fixtureFarm }
+
+func (trackerFarm) Trackers(string) []string { return []string{"flow"} }
+
+// The defaults and refusals added after review: follows defaults to the
+// previous version; frames come from the frames job followed (one written
+// after it too), then the cut, for a once job's range as well; for: and
+// tracker: are checked against the farm; preview orders fml and none
+// only.
+func TestLowerReviewed(t *testing.T) {
+	p := mustLower(t, `c4: submit/1
+project: saltmarsh
+shot: sm0140
+tree: .
+jobs:
+  light: {tool: depth, with: {plates: p.$F4.exr}}
+`)
+	if j := p.Jobs[0].Request; j.Name != "sm0140-light-v004" || j.Follows != "sm0140-light-v003" {
+		t.Fatalf("follows: %s follows %q", j.Name, j.Follows)
+	}
+	// the movie follows a frames job written after it, and fills its range
+	p = mustLower(t, `c4: submit/1
+project: saltmarsh
+shot: sm0999
+tree: .
+jobs:
+  movie: {tool: transcode, after: plates, with: {plates: p.$F4.exr}}
+  plates: {tool: proxies, frames: 1-24, with: {plates: p.$F4.exr}}
+`)
+	if v, _ := envVal(specOf(t, p.Jobs[0]), "C4_PARAMS"); !strings.Contains(v, `"range":"1-24"`) {
+		t.Fatalf("movie's range: %s", v)
+	}
+	farm := loadFarm(t)
+	for _, c := range []struct{ doc, path, msg string }{
+		{"for: nor\n", "for", `no person or party "nor" on this farm`},
+		{"tracker: flwo/Task/1\n", "tracker", `no tracker "flwo" in saltmarsh`},
+	} {
+		sub, _ := ParseSubmission([]byte("c4: submit/1\nproject: saltmarsh\nshot: sm0140\ntree: .\n" + c.doc +
+			"jobs:\n  proxies: {tool: proxies, frames: 1-4, with: {plates: p.exr}}\n"))
+		errs := Check(sub, trackerFarm{farm})
+		if len(errs) != 1 || errs[0].Path != c.path || errs[0].Message != c.msg {
+			t.Errorf("%s: %v", c.path, errs)
+		}
+	}
+	_, errs := lowerDoc(t, `c4: submit/1
+project: saltmarsh
+shot: sm0140
+tree: .
+jobs:
+  proxies: {tool: proxies, frames: 1-4, preview: "every:10", with: {plates: p.exr}}
+`)
+	if len(errs) != 1 || errs[0].Path != "jobs.proxies.preview" || !strings.Contains(errs[0].Message, "orders only fml and none") {
+		t.Fatalf("preview: %v", errs)
+	}
+}

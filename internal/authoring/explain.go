@@ -20,7 +20,7 @@ func Explain(p *Plan) string {
 		req := j.Request
 		var spec c4v1.WorkJobSpec
 		_ = json.Unmarshal(req.Spec, &spec)
-		fmt.Fprintf(&b, "%s  WorkJob %s/%s\n", req.Name, p.Namespace, req.Name)
+		fmt.Fprintf(&b, "%s  WorkJob %s/%s\n", req.Name, p.Project, req.Name)
 		fmt.Fprintf(&b, "  class %s · params {%s}\n", spec.Class, params(spec.Params))
 		var ins []string
 		for _, in := range req.Inputs {

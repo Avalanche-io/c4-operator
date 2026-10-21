@@ -53,6 +53,9 @@ type Farm interface {
 	// Policy is the project's policy as a submission may name and narrow
 	// it, or nil when the farm keeps none to check against.
 	Policy(project string) *FarmPolicy
+	// Trackers are the trackers the project is connected to, by name (nil:
+	// not known).
+	Trackers(project string) []string
 }
 
 // FarmPolicy is a project's policy as a submission sees it: the sets it
@@ -73,6 +76,24 @@ func toolNames(refs []ToolRef) []string {
 	out := make([]string, len(refs))
 	for i, r := range refs {
 		out[i] = r.Name
+	}
+	return out
+}
+
+// Taking is farm with names taken in namespace ns besides the jobs it
+// has: a submission numbered again past a name taken while it was made.
+func Taking(farm Farm, ns string, names []string) Farm { return taking{farm, ns, names} }
+
+type taking struct {
+	Farm
+	ns    string
+	names []string
+}
+
+func (t taking) Jobs(ns string) []string {
+	out := t.Farm.Jobs(ns)
+	if ns == t.ns {
+		out = append(append([]string(nil), out...), t.names...)
 	}
 	return out
 }

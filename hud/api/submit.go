@@ -132,7 +132,10 @@ type SubmitEstimate struct {
 	Feasible       bool              `json:"feasible"`
 	AtRisk         bool              `json:"atRisk"`
 	Calibrated     bool              `json:"calibrated,omitempty"`
-	Message        string            `json:"message,omitempty"`
+	// Reused is how many units would reuse an earlier run's output rather
+	// than run (at most: a share runs anyway to verify).
+	Reused  int    `json:"reused,omitempty"`
+	Message string `json:"message,omitempty"`
 }
 
 // SubmitSuggestion is the deadline the farm would suggest for a job whose

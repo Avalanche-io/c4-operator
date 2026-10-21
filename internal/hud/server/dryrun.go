@@ -26,6 +26,25 @@ func QueueDryRun(q *queue.Queue) DryRunFunc {
 	}
 }
 
+// QueueDryRunAll plans drafts together with the work queue
+// (queue.DryRunAll), for Server.DryRunAll.
+func QueueDryRunAll(q *queue.Queue) DryRunAllFunc {
+	return func(ctx context.Context, jobs []*c4v1.WorkJob, project string, views map[string]string) ([]api.SubmitEstimate, error) {
+		ds, err := q.DryRunAll(ctx, jobs, project, views)
+		switch {
+		case errors.Is(err, queue.ErrNoPlan):
+			return nil, fmt.Errorf("%w: %v", ErrNotPlanned, err)
+		case err != nil:
+			return nil, err
+		}
+		out := make([]api.SubmitEstimate, len(ds))
+		for i, d := range ds {
+			out[i] = estimateOf(d)
+		}
+		return out, nil
+	}
+}
+
 func timePtr(t time.Time) *time.Time {
 	if t.IsZero() {
 		return nil
@@ -44,7 +63,7 @@ func estimateOf(d queue.DryRun) api.SubmitEstimate {
 		Units: d.Units, Work50: w50, Work90: d.Estimate.W90,
 		ETA50: timePtr(d.Band.P50), ETA80: timePtr(d.Band.P80), ETA90: timePtr(d.Band.P90), ETA95: timePtr(d.Band.P95),
 		Deadline: timePtr(d.Deadline), DeadlineSource: d.DeadlineSource,
-		Feasible: d.Feasible, AtRisk: d.AtRisk, Calibrated: d.Estimate.Calibrated, Message: d.Message,
+		Feasible: d.Feasible, AtRisk: d.AtRisk, Calibrated: d.Estimate.Calibrated, Message: d.Message, Reused: d.Reused,
 	}
 	// slack against the shown p90, as a running job's (queue report.go;
 	// p95 for a suggested deadline)

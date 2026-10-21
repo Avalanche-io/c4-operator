@@ -289,6 +289,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// *queue.Queue in the interface would not compare equal to nil).
 		srv.Queue = q
 		srv.DryRun = hudserver.QueueDryRun(q)
+		srv.DryRunAll = hudserver.QueueDryRunAll(q)
 		srv.Forecast = func() api.CapacityForecast { return forecastView(q.Forecast()) }
 		srv.Progress = q.Progress
 		srv.Safepoints = q.Safepoints

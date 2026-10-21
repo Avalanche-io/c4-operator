@@ -81,6 +81,9 @@ func (c *subCtx) check() {
 	}
 	c.checkNames()
 	c.checkPolicy("policy", sub.Policy)
+	c.checkFor()
+	c.checkTracker()
+	c.resolveTools()
 	for i := range sub.Jobs {
 		c.checkJob(&sub.Jobs[i])
 		c.checkPolicy("jobs."+sub.Jobs[i].Key+".policy", sub.Jobs[i].Policy)
@@ -252,22 +255,14 @@ func (c *subCtx) checkJob(j *Job) {
 	for i, x := range c.sub.Jobs {
 		keys[i] = x.Key
 	}
-	var gen *Tool
-	var genRef ToolRef
+	r, ok := c.tools[j.Key]
+	gen, genRef := r.tool, r.ref
 	switch {
-	case j.Tool != "":
-		if t, ref, ok := c.tool(p+".tool", j.Tool); ok {
-			c.tools[j.Key] = resolved{t, ref}
-			c.checkWith(p, t, j)
-			gen, genRef = t, ref
-		}
-	case j.Each != nil:
-		if t, ref, ok := c.tool(p+".each.tool", j.Each.Tool); ok {
-			c.tools[j.Key] = resolved{t, ref}
-			_, errs := resolve(t, j.Each.With, "", "", false)
-			c.errs = append(c.errs, prefix(p+".each", errs)...)
-			gen, genRef = t, ref
-		}
+	case ok && j.Tool != "":
+		c.checkWith(p, r.tool, j)
+	case ok && j.Each != nil:
+		_, errs := resolve(r.tool, j.Each.With, "", "", false)
+		c.errs = append(c.errs, prefix(p+".each", errs)...)
 	}
 	for _, a := range j.After {
 		if a.Job == j.Key {
@@ -318,6 +313,62 @@ func (c *subCtx) checkJob(j *Job) {
 	}
 }
 
+// resolveTools resolves every job's tool (a plan's each.tool) before any
+// job is checked: a job's frames may come from a job written after it.
+func (c *subCtx) resolveTools() {
+	for _, j := range c.sub.Jobs {
+		p := "jobs." + j.Key
+		switch {
+		case j.Tool != "":
+			if t, ref, ok := c.tool(p+".tool", j.Tool); ok {
+				c.tools[j.Key] = resolved{t, ref}
+			}
+		case j.Each != nil:
+			if t, ref, ok := c.tool(p+".each.tool", j.Each.Tool); ok {
+				c.tools[j.Key] = resolved{t, ref}
+			}
+		}
+	}
+}
+
+// checkFor refuses a for: that is no person or party the farm knows,
+// when it keeps a list of them.
+func (c *subCtx) checkFor() {
+	who := c.sub.For
+	people, parties := c.farm.People(), c.farm.Parties()
+	if who == "" || people == nil && parties == nil || has(people, who) || has(parties, who) {
+		return
+	}
+	known := append(append([]string(nil), people...), parties...)
+	fix := "for: names a person or party the work is for: " + strings.Join(sortedStrings(known), ", ")
+	if s, ok := closest(who, known); ok {
+		fix = fmt.Sprintf("did you mean %q?", s)
+	}
+	c.add(errf("for", fix, "no person or party %q on this farm", who))
+}
+
+// checkTracker refuses a tracker: whose tracker the project has not
+// configured, when the farm can say which it has.
+func (c *subCtx) checkTracker() {
+	ref := c.sub.Tracker
+	trackers := c.farm.Trackers(c.project)
+	if ref == "" || trackers == nil {
+		return
+	}
+	name, _, _ := strings.Cut(ref, "/")
+	if has(trackers, name) {
+		return
+	}
+	fix := "leave tracker: out, or ask a farm admin to connect the tracker"
+	if len(trackers) > 0 {
+		fix = "the project's trackers are " + strings.Join(sortedStrings(trackers), ", ")
+	}
+	if s, ok := closest(name, trackers); ok {
+		fix = fmt.Sprintf("did you mean %q?", s)
+	}
+	c.add(errf("tracker", fix, "no tracker %q in %s", name, c.project))
+}
+
 // checkWith checks a job's with against its tool, and its frames and size.
 func (c *subCtx) checkWith(p string, t *Tool, j *Job) {
 	if e := onceFrames(t, j.Frames); e != nil {
@@ -345,8 +396,9 @@ func (c *subCtx) checkWith(p string, t *Tool, j *Job) {
 	}
 }
 
-// framesOf is a job's frames: its own, else those of the one job it
-// follows when that job has frames, else the shot's cut, else "".
+// framesOf is a job's frames: its own, else those of the one frames job
+// it follows, else the shot's cut, else "". A once job's frame parameter
+// takes the same default.
 func (c *subCtx) framesOf(key string, seen map[string]bool) Frames {
 	j := c.jobs[key]
 	if j == nil {
@@ -358,8 +410,7 @@ func (c *subCtx) framesOf(key string, seen map[string]bool) Frames {
 	if !seen[key] && len(j.After) == 1 {
 		seen[key] = true
 		if up := c.jobs[j.After[0].Job]; up != nil {
-			r, ok := c.tools[up.Key]
-			if up.Frames != "" || ok && r.tool.Kind == "frames" {
+			if r, ok := c.tools[up.Key]; ok && r.tool.Kind == "frames" {
 				if f := c.framesOf(up.Key, seen); f != "" {
 					return f
 				}

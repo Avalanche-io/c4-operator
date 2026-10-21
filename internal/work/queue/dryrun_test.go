@@ -174,3 +174,29 @@ func TestDryRunFromClassHistory(t *testing.T) {
 		t.Fatalf("the band did not come in: %v then %v", before.Band.At(0.5), after.Band.At(0.5))
 	}
 }
+
+// Drafts planned together are planned as a chain: the one that follows
+// another starts after it, so the chain is ready when its last job is,
+// later than that job planned alone.
+func TestDryRunAll(t *testing.T) {
+	ns, q, _ := farm(t, "cpu", 2, 2)
+	ctx := context.Background()
+	tick(t, q)
+	first := job(ns, "sm0140-proxies-v001", "render", "cpu-"+ns, map[string]string{"frames": "1001-1016", "estimateSeconds": "600"}, time.Time{})
+	second := job(ns, "sm0140-movie-v001", "render", "cpu-"+ns, map[string]string{"frames": "1001-1016", "estimateSeconds": "600"}, time.Time{})
+	second.Spec.DependsOn = []string{first.Name}
+	alone, err := q.DryRun(ctx, second, "namespace/"+ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	both, err := q.DryRunAll(ctx, []*c4v1.WorkJob{first, second}, "namespace/"+ns, nil)
+	if err != nil || len(both) != 2 {
+		t.Fatalf("%v %d", err, len(both))
+	}
+	if !both[1].Band.P50.After(both[0].Band.P50) || !both[1].Band.P50.After(alone.Band.P50) {
+		t.Fatalf("chain: first %s, second %s, second alone %s", both[0].Band.P50, both[1].Band.P50, alone.Band.P50)
+	}
+	if both[0].Reused != 0 || both[1].Reused != 0 {
+		t.Fatalf("reused with no book: %d %d", both[0].Reused, both[1].Reused)
+	}
+}
