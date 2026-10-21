@@ -51,6 +51,17 @@ builds:
   flags: [-trimpath]
   ldflags: ["-s -w -X main.version={{ .Tag }}"]
 
+# The local farm's stand-in GitHub (c4 farm up --tracker), in c4-sync's
+# image beside it; linux only, and in no archive.
+- id: c4-sandbox-github
+  main: ./cmd/c4-sandbox-github
+  binary: c4-sandbox-github
+  env: [CGO_ENABLED=0]
+  goos: [linux]
+  goarch: [amd64, arm64]
+  flags: [-trimpath]
+  ldflags: ["-s -w"]
+
 - id: c4-unit
   main: ./cmd/c4-unit
   binary: c4-unit
@@ -152,7 +163,7 @@ dockers_v2:
 # c4-sync's own image (experimental): it holds tracker credentials the
 # operator never sees, so it is not in the operator's image.
 - id: c4-sync
-  ids: [c4-sync]
+  ids: [c4-sync, c4-sandbox-github]
   dockerfile: Dockerfile.c4-sync
   images: [ghcr.io/avalanche-io/c4-sync]
   tags: ["{{ .Tag }}"]

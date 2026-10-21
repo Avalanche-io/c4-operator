@@ -93,11 +93,13 @@ image:
 	docker build --build-arg TARGETARCH=$(ARCH) -t $(IMG) .
 
 # c4-sync's image for this machine's architecture (experimental; its own
-# image, Dockerfile.c4-sync). SYNC_IMG names it.
+# image, Dockerfile.c4-sync, with the local farm's stand-in GitHub beside
+# it). SYNC_IMG names it.
 SYNC_IMG ?= c4-sync:dev
 image-sync:
 	@mkdir -p bin/sync-context/linux/$(ARCH)
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o bin/sync-context/linux/$(ARCH)/c4-sync ./cmd/c4-sync
+	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -o bin/sync-context/linux/$(ARCH)/c4-sandbox-github ./cmd/c4-sandbox-github
 	docker build -f Dockerfile.c4-sync --build-arg TARGETPLATFORM=linux/$(ARCH) -t $(SYNC_IMG) bin/sync-context
 
 # A block's image for this machine's architecture (images/block): Claude

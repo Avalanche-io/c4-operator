@@ -2,10 +2,12 @@
 # the operator's image because it holds tracker credentials the operator
 # never sees. GoReleaser places each platform's binary at
 # $TARGETPLATFORM/c4-sync in the build context; `make image-sync` does the
-# same under bin/sync-context.
+# same under bin/sync-context. Beside it, the local farm's stand-in GitHub
+# (c4 farm up --tracker runs it with this image, as /c4-sandbox-github).
 FROM gcr.io/distroless/static-debian12:nonroot
 ARG TARGETPLATFORM
 COPY ${TARGETPLATFORM}/c4-sync /c4-sync
+COPY ${TARGETPLATFORM}/c4-sandbox-github /c4-sandbox-github
 USER 65532:65532
 EXPOSE 8090
 ENTRYPOINT ["/c4-sync"]

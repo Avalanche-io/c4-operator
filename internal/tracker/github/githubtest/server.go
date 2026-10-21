@@ -172,6 +172,13 @@ type Server struct {
 	Token string
 	// App is the identity writes are made as (a GitHub App's bot user).
 	App User
+	// HTMLBase is where html_url links point (default
+	// https://github.com/<owner>/<repo>): a stand-in GitHub with a page
+	// of its own links there.
+	HTMLBase string
+	// MaxCalls keeps only the newest calls (0: all), for a fake that
+	// serves for days.
+	MaxCalls int
 
 	mu        sync.Mutex
 	now       func() time.Time
@@ -272,6 +279,9 @@ func (s *Server) SetClock(now func() time.Time) {
 func (s *Server) id() int64 { s.nextID++; return s.nextID }
 
 func (s *Server) html(p string) string {
+	if s.HTMLBase != "" {
+		return strings.TrimSuffix(s.HTMLBase, "/") + "/" + p
+	}
 	return fmt.Sprintf("https://github.com/%s/%s/%s", s.Owner, s.Repo, p)
 }
 
@@ -282,6 +292,14 @@ func (s *Server) AddUser(login, name, email string) User {
 	u := User{Login: login, ID: s.id(), Type: "User", Name: name, Email: email}
 	s.users[login] = u
 	return u
+}
+
+// User returns a registered user.
+func (s *Server) User(login string) (User, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, ok := s.users[login]
+	return u, ok
 }
 
 // AddIssue adds an issue with labels and an optional milestone due date.
@@ -548,6 +566,9 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, Call{Method: r.Method, Path: r.URL.RequestURI(), Body: string(body)})
+	if s.MaxCalls > 0 && len(s.calls) > s.MaxCalls {
+		s.calls = append([]Call(nil), s.calls[len(s.calls)-s.MaxCalls:]...)
+	}
 
 	if s.Token != "" {
 		a := r.Header.Get("Authorization")
