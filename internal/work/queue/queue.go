@@ -47,6 +47,8 @@ const SlotResource corev1.ResourceName = "c4.avalanche.io/slots"
 // memory between ticks (rebuilt from WorkJob status on start).
 type Queue struct {
 	Client client.Client
+	// farmTools is set once the farm's own tools exist (ensureFarmTools).
+	farmTools bool
 	// Every is the tick period (default 2 s).
 	Every  time.Duration
 	Policy sched.Policy
@@ -194,6 +196,9 @@ func (q *Queue) Start(ctx context.Context) error {
 	t := time.NewTicker(q.Every)
 	defer t.Stop()
 	for {
+		if !q.farmTools {
+			q.farmTools = q.ensureFarmTools(ctx)
+		}
 		if err := q.Tick(ctx); err != nil && ctx.Err() == nil {
 			q.Log.Error(err, "tick")
 		}

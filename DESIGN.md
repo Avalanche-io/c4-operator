@@ -1528,7 +1528,7 @@ and a sweep planner that spawns trials are all generators.
   - **Tools.**
     `reasoning.tools` names a Tool, a namespaced resource. The
     queue looks for it in the job's namespace, then in the operator's,
-    where the farm's own tools live (`none` ships with the operator).
+    where the farm's own tools live (the manager makes `none` at start if it is absent, and never changes it; the install manifest creates no Tool, since one made in the same apply as its CRD fails on a clean cluster).
     - **`view`** is the configuration (MCP server definitions, settings,
       skills, plugins), a view's C4 ID, mounted read-only at
       `/etc/c4/tools` (`$C4_TOOLS`). The unit's record names it, so a
