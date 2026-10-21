@@ -235,6 +235,10 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/farm/binding", s.handleFarmBinding)
 	mux.HandleFunc("POST /api/v1/farm/binding", s.handleBind)
 	mux.HandleFunc("GET /api/v1/diagnose", s.handleDiagnose)
+	mux.HandleFunc("GET /api/v1/telemetry", s.handleTelemetry)
+	mux.HandleFunc("POST /api/v1/telemetry/resolve", s.handleTelemetryResolve)
+	mux.HandleFunc("POST /api/v1/telemetry/tier", s.handleTelemetryTier)
+	mux.HandleFunc("POST /api/v1/telemetry/rotate", s.handleTelemetryRotate)
 	mux.HandleFunc("POST /api/v1/held/{ns}/{link}/{field}", s.handleConfirm)
 	// an API path with no route is a 404 in JSON, never the web page, so a
 	// client can tell "no such call" from an answer

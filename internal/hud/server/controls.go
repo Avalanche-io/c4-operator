@@ -112,7 +112,7 @@ func (s *Server) record(ctx context.Context, obj client.Object, kind, user, reas
 		Reason:         reason, Message: msg + " (by " + user + " in the HUD)", Type: corev1.EventTypeNormal,
 		Source: corev1.EventSource{Component: "c4-hud"}, FirstTimestamp: now, LastTimestamp: now, Count: 1,
 	}
-	if kind == "Node" {
+	if kind == "Node" || kind == "ConfigMap" {
 		ev.InvolvedObject.APIVersion = "v1"
 	}
 	if note.record != "" {

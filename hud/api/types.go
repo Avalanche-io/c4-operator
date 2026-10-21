@@ -850,7 +850,7 @@ type BookEntry struct {
 
 // BookObject is what a book entry is about.
 type BookObject struct {
-	Type string `json:"type"` // job, unit, node, capacity, view, grant
+	Type string `json:"type"` // job, unit, node, capacity, view, grant, telemetry
 	Job  string `json:"job,omitempty"`
 	// Grant is a submit grant, <namespace>/<name>.
 	Grant string `json:"grant,omitempty"`

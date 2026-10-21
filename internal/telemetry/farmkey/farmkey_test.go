@@ -46,3 +46,21 @@ func TestKeyLifecycle(t *testing.T) {
 		t.Fatal("a pseudonym survived the rotation")
 	}
 }
+
+// The tier is none until saved, then what was saved, with its record.
+func TestTierSetting(t *testing.T) {
+	ctx := context.Background()
+	kube := kfake.NewSimpleClientset()
+	if _, _, ok, err := LoadTier(ctx, kube, "c4-system"); ok || err != nil {
+		t.Fatalf("a new farm has a tier: %v %v", ok, err)
+	}
+	for _, tier := range []string{"b", "a"} {
+		if err := SaveTier(ctx, kube, "c4-system", tier, "c4rec", []byte("{}")); err != nil {
+			t.Fatal(err)
+		}
+		got, rec, ok, err := LoadTier(ctx, kube, "c4-system")
+		if err != nil || !ok || got != tier || rec != "c4rec" {
+			t.Fatalf("saved %s, read %q %v %v", tier, got, ok, err)
+		}
+	}
+}

@@ -895,13 +895,34 @@ on the farm until a person carries it out:
   gzip header carries a time or an owner, so the same snapshots make the
   same bytes. A reader checks every entry against the manifest and
   refuses a bundle that differs.
-- **The ring.** With `--telemetry-ring` the manager keeps the last two
-  hours of decision-changing ticks, redacted as they are recorded and
-  bounded at 64 MiB; past either bound the oldest go, and the README says
-  so. Off by default: then a bundle holds the present moment alone.
-  `C4_TELEMETRY=off` in the manager's environment holds the ring off,
-  whatever the flag says. The ring lives in the manager's memory, so a
-  restart empties it. Nothing leaves the farm either way.
+- **The ring.** At tier b the manager keeps the last two hours of
+  decision-changing ticks, redacted as they are recorded and bounded at
+  64 MiB; past either bound the oldest go, and the README says so. At tier
+  a, the default, a bundle holds the present moment alone. The ring lives
+  in the manager's memory, so a restart empties it. Nothing leaves the
+  farm at either tier.
+- **The tier** is the farm's setting, the ConfigMap `c4-telemetry` in
+  `c4-system`, which only the manager writes (the admission policy
+  `c4-telemetry-setting` refuses anyone else). `--telemetry-ring` is the
+  tier a farm starts at before its admin sets one. `C4_TELEMETRY=off` in
+  the manager's environment holds every tier at a, whatever the setting
+  says.
+- **The controls**, all the farm admin's (or a single-person farm's
+  installer's), never a unit's:
+  - `GET /api/v1/telemetry` answers the tier, the kill switch, the key's
+    epoch and the ring (window, bounds, bytes, snapshots, dropped).
+  - `POST /api/v1/telemetry/tier {tier}` sets a or b. Raising it takes a
+    person acting as themselves: not through MCP or an agent, not a
+    unit, not a tracker's relayed request. Lowering is accepted by any
+    route, since turning telemetry down can never leak.
+  - `POST /api/v1/telemetry/rotate` starts the key's next epoch; the
+    ring's records under the old key go.
+  - `POST /api/v1/telemetry/resolve {pseudonym}` names the job, project,
+    pool or other name a pseudonym stands for, among the names the farm
+    holds now, under the current key; only for a person acting as
+    themselves.
+  - Each change is a signed control record, kept whole in the setting and
+    in every project's store, and booked.
 - **Replay.** `go run ./hack/sim -bundle FILE -replay decide` replays
   every snapshot through its policy and compares decision hashes.
   `-replay forward [-horizon 24h -step 1m]` runs the farm on from the

@@ -59,7 +59,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "host-pods.yaml", "deployment-bindings.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "host-pods.yaml", "deployment-bindings.yaml", "telemetry-setting.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -717,5 +717,54 @@ func TestBindingsOnlyFromTheHUD(t *testing.T) {
 	}
 	if err := admin.Delete(ctx, b); err == nil {
 		t.Error("an admin deleted the farm binding")
+	}
+}
+
+// The farm's telemetry setting is the manager's alone to write: an admin
+// with ConfigMap access in c4-system cannot raise the tier around the
+// HUD's custody rule, nor delete the setting; other ConfigMaps there are
+// untouched by the policy.
+func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "c4-system"}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	s := runtime.NewScheme()
+	clientgoscheme.AddToScheme(s)
+	manager, err := client.New(mc, client.Options{Scheme: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setting := func(tier string) *corev1.ConfigMap {
+		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "c4-telemetry"}, Data: map[string]string{"tier": tier}}
+	}
+	enforced(t, "c4-telemetry-setting", func(try int) error {
+		cm := setting(fmt.Sprint("b", try))
+		err := admin.Create(ctx, cm)
+		if err == nil {
+			// made before the policy was in force: take it away again
+			admin.Delete(ctx, cm)
+		}
+		return err
+	})
+	cm := setting("a")
+	eventually(t, "the manager's setting", func() error { return manager.Create(ctx, cm) })
+	if err := admin.Patch(ctx, cm, client.RawPatch(types.MergePatchType, []byte(`{"data":{"tier":"b"}}`))); err == nil {
+		t.Error("the tier was raised directly")
+	}
+	if err := admin.Delete(ctx, cm); err == nil {
+		t.Error("the setting was deleted directly")
+	}
+	if err := manager.Patch(ctx, cm, client.RawPatch(types.MergePatchType, []byte(`{"data":{"tier":"b"}}`))); err != nil {
+		t.Errorf("the manager could not change the tier: %v", err)
+	}
+	other := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "c4-other"}, Data: map[string]string{"x": "y"}}
+	if err := admin.Create(ctx, other); err != nil {
+		t.Errorf("another ConfigMap was refused: %v", err)
 	}
 }

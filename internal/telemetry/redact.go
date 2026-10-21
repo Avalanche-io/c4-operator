@@ -349,3 +349,17 @@ func sortedKeys[V any](m map[string]V) []string {
 	sort.Strings(out)
 	return out
 }
+
+// NamesIn is every name a snapshot holds, by kind: the names a pseudonym
+// in a record of it can be resolved among.
+func NamesIn(s sched.Snapshot) map[Kind][]string {
+	n := NewNamer(Key{})
+	noteSnapshot(n, s, sched.StateDoc{}, sched.Decisions{})
+	out := map[Kind][]string{}
+	for kind, m := range n.names {
+		for name := range m {
+			out[kind] = append(out[kind], name)
+		}
+	}
+	return out
+}

@@ -407,6 +407,15 @@ rules:
 - apiGroups: [""]
   resources: [secrets]
   verbs: [create]
+# The farm's telemetry setting (its tier); c4-telemetry-setting refuses
+# any other writer.
+- apiGroups: [""]
+  resources: [configmaps]
+  resourceNames: [c4-telemetry]
+  verbs: [get, update]
+- apiGroups: [""]
+  resources: [configmaps]
+  verbs: [create]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding

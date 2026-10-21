@@ -14,6 +14,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/telemetry/farmkey"
 )
 
 // The book (GET /book) is read on demand, never watched: Kubernetes Events
@@ -188,6 +189,10 @@ func (s *Server) book(ctx context.Context, m *model, v *api.Viewer, only *jobRec
 			}
 			for _, ev := range s.events(ctx, ns, "Node", "") {
 				add(bookItem{e: s.eventEntry(ev, api.BookObject{Type: "node", Node: ev.InvolvedObject.Name})})
+			}
+			// the farm's telemetry changes (telemetry.go)
+			for _, ev := range s.events(ctx, ns, "ConfigMap", farmkey.Setting) {
+				add(bookItem{e: s.eventEntry(ev, api.BookObject{Type: "telemetry"})})
 			}
 		}
 	}

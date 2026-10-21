@@ -8,3 +8,4 @@ resources:
 - tracker-people.yaml
 - host-pods.yaml
 - deployment-bindings.yaml
+- telemetry-setting.yaml

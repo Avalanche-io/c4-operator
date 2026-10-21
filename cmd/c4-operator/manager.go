@@ -111,7 +111,7 @@ func runManager(args []string) error {
 	tierToken := fs.String("tier-token-file", "/var/run/secrets/c4-tier/token", "with --staging: the operator's service account token (audience c4-tier) for the sites' regional replicas")
 	signingNS := fs.String("signing-namespace", "c4-signing", "namespace of the farm's signing CA, readable only by the manager (empty turns signing off)")
 	signerAddr := fs.String("signer-addr", ":8092", "certificate issuer listen address, for node daemons and importers")
-	telemetryRing := fs.Bool("telemetry-ring", false, "keep the last two hours of the work queue's decisions, redacted, in memory, so a diagnostic bundle (GET /api/v1/diagnose) covers the moment a problem happened; off, a bundle holds the present moment alone. Nothing leaves the farm either way; C4_TELEMETRY=off holds it off")
+	telemetryRing := fs.Bool("telemetry-ring", false, "the telemetry tier a farm starts at before its farm admin sets one: keep the last two hours of the work queue's decisions, redacted, in memory, so a diagnostic bundle (GET /api/v1/diagnose) covers the moment a problem happened; off, a bundle holds the present moment alone. Nothing leaves the farm either way; C4_TELEMETRY=off holds it off")
 	holderTransfer := fs.String("holder-transfer", "disallow", "holder-transfer credential leases, a holder's own sign-in materialized for the holder's own unit pods: allow or disallow")
 	fs.Parse(args)
 
@@ -209,7 +209,15 @@ func runManager(args []string) error {
 		// it each decision; the HUD writes bundles from it. Its key is read,
 		// or made, the first time it is needed.
 		ns := *namespace
-		q.Recorder = ring.New(ring.TierFrom(*telemetryRing), telemetry.PolicyOf(*policy), func(ctx context.Context) (telemetry.Key, error) {
+		tier := ring.TierFrom(*telemetryRing)
+		// The farm admin's setting, once there is one, wins over the
+		// install's preset; the kill switch over both.
+		if t, _, ok, err := farmkey.LoadTier(ctx, kube, ns); err != nil {
+			log.Error(err, "the farm's telemetry setting could not be read; starting at the install's preset")
+		} else if pt, known := ring.ParseTier(t); ok && known && !ring.KillSwitch() {
+			tier = pt
+		}
+		q.Recorder = ring.New(tier, telemetry.PolicyOf(*policy), func(ctx context.Context) (telemetry.Key, error) {
 			return farmkey.LoadOrCreate(ctx, kube, ns)
 		})
 		if err := mgr.Add(q); err != nil {

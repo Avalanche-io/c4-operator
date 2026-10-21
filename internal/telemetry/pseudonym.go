@@ -160,3 +160,16 @@ func Resolve(key Key, p Pseudonym, names []string) (string, bool) {
 	}
 	return "", false
 }
+
+// ParsePseudonym reads a pseudonym's text form (j.ABCD…), with no rank.
+func ParsePseudonym(text string) (Pseudonym, error) {
+	var p Pseudonym
+	err := p.UnmarshalJSON([]byte(`{"id":` + strconv.Quote(text) + `}`))
+	if err == nil && p.Kind == KindOther {
+		err = errors.New("pseudonym: an unknown kind")
+	}
+	return p, err
+}
+
+// KindName is k's name: job, unit, project, pool and so on.
+func KindName(k Kind) string { return enumName(k) }

@@ -38,7 +38,7 @@ const (
 // TierFrom is the tier a farm asks for, held at off when the kill switch
 // C4_TELEMETRY=off is set in the manager's environment.
 func TierFrom(ring bool) Tier {
-	if os.Getenv("C4_TELEMETRY") == "off" || !ring {
+	if KillSwitch() || !ring {
 		return TierOff
 	}
 	return TierBundles
@@ -200,4 +200,87 @@ func (r *Ring) redactor(ctx context.Context) (*telemetry.Redactor, error) {
 		r.red.Policy = r.policy
 	}
 	return r.red, nil
+}
+
+// KillSwitch says C4_TELEMETRY=off is set: every tier is held at off.
+func KillSwitch() bool { return os.Getenv("C4_TELEMETRY") == "off" }
+
+// TierName is a tier's letter in DESIGN.md's terms: a (off) or b
+// (diagnostic bundles).
+func TierName(t Tier) string {
+	if t == TierBundles {
+		return "b"
+	}
+	return "a"
+}
+
+// ParseTier reads a tier's letter. Only a and b exist today.
+func ParseTier(s string) (Tier, bool) {
+	switch s {
+	case "a":
+		return TierOff, true
+	case "b":
+		return TierBundles, true
+	}
+	return TierOff, false
+}
+
+// SetTier changes the ring's tier; the kill switch holds it at off.
+// Going to off lets the kept snapshots go.
+func (r *Ring) SetTier(t Tier) Tier {
+	if KillSwitch() {
+		t = TierOff
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.tier = t
+	if t == TierOff {
+		r.recs, r.bytes, r.dropped, r.noted = nil, 0, false, false
+	}
+	return t
+}
+
+// Rekey forgets the key and every snapshot kept under it, after the farm
+// key is rotated: the next snapshot is under the new key.
+func (r *Ring) Rekey() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.red = nil
+	r.recs, r.bytes, r.dropped, r.noted = nil, 0, false, false
+}
+
+// Stats is the ring's state, for the telemetry status.
+type Stats struct {
+	Window    time.Duration
+	MaxBytes  int
+	Bytes     int
+	Snapshots int
+	Dropped   bool
+}
+
+// Stats is what the ring keeps now.
+func (r *Ring) Stats() Stats {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return Stats{Window: r.window, MaxBytes: r.maxBytes, Bytes: r.bytes, Snapshots: len(r.recs), Dropped: r.dropped}
+}
+
+// Key is the farm key the ring names pseudonyms with.
+func (r *Ring) Key(ctx context.Context) (telemetry.Key, error) {
+	red, err := r.redactor(ctx)
+	if err != nil {
+		return telemetry.Key{}, err
+	}
+	return red.Key, nil
+}
+
+// Present is the latest decision's input, unredacted, for resolving a
+// pseudonym on the farm; false before the first tick.
+func (r *Ring) Present() (sched.Snapshot, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.present == nil {
+		return sched.Snapshot{}, false
+	}
+	return r.present.s, true
 }

@@ -122,3 +122,35 @@ func TestRingConcurrent(t *testing.T) {
 	}
 	<-done
 }
+
+// Lowering the tier and rotating the key let the kept snapshots go; the
+// kill switch holds a raised tier at off.
+func TestRingTierAndRekey(t *testing.T) {
+	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
+	r := New(TierBundles, telemetry.PolicyObjective, key)
+	note := func() {
+		for i := 0; i < 3; i++ {
+			s, b, c, d := tick(now.Add(time.Duration(i)*time.Minute), 1+i)
+			r.Note(s, b, c, d)
+		}
+	}
+	note()
+	if r.Stats().Snapshots != 3 {
+		t.Fatalf("kept %d", r.Stats().Snapshots)
+	}
+	r.Rekey()
+	if st := r.Stats(); st.Snapshots != 0 || st.Bytes != 0 {
+		t.Fatalf("after a rotation the ring kept %+v", st)
+	}
+	note()
+	if r.SetTier(TierOff) != TierOff || r.Stats().Snapshots != 0 {
+		t.Fatal("tier a kept snapshots")
+	}
+	t.Setenv("C4_TELEMETRY", "off")
+	if r.SetTier(TierBundles) != TierOff || r.Tier() != TierOff {
+		t.Fatal("the kill switch let the tier rise")
+	}
+	if _, ok := ParseTier("c"); ok {
+		t.Fatal("tier c parsed")
+	}
+}
