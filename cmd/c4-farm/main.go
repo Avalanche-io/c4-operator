@@ -675,31 +675,17 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner}
 		cfg.Current = localfarm.Name
-		wasOn := cfg.Integrations[farmcli.Claude]
-		on, err := farmcli.Choose(cfg, farmcli.Detect(true), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
+		ui := upIntegration{integrate: *integrateOn, none: *integrateOff, stdin: stdin, stdout: stdout,
+			detect: farmcli.Detect(true), runner: localRunner(o.Owner, stdin, stdout)}
+		on, wasOn, err := ui.choose(cfg)
 		if err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
 		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
 		fmt.Fprintf(stdout, "owner     %s, who plays every role here\n", o.Owner)
-		in := farmcli.Integration{Record: cfg.Integrations}
-		switch {
-		case slices.Contains(on, farmcli.Claude):
-			// the runner only on its own yes: one given at login named no service
-			if cfg.Integrations[farmcli.RunnerKey] {
-				in.Runner = localRunner(o.Owner, stdin, stdout)
-			}
-			in.On(ctx, farmcli.Out{W: stdout})
-		case *integrateOff && wasOn:
-			in.Off(ctx, farmcli.Out{W: stdout})
-		}
-		if err := cfg.Save(); err != nil {
+		if err := ui.apply(ctx, cfg, on, wasOn); err != nil {
 			return err
-		}
-		applyApps(stdout, on)
-		if l := farmcli.IntegrateLine(cfg); l != "" {
-			fmt.Fprintf(stdout, "%s\n", l)
 		}
 		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)\n")
@@ -984,6 +970,49 @@ func isTerminal(r io.Reader) bool {
 	// a terminal, not merely a character device: a background job's stdin
 	// is /dev/null, which is one too, and nobody is there to answer
 	return ok && term.IsTerminal(int(f.Fd()))
+}
+
+// upIntegration is up's integration path, apart from making the farm: the
+// question, asked only of a person at a terminal (never from inside an
+// agent, never answered by an ended input), then what the answers turn
+// on. With no terminal nothing is asked, recorded or installed.
+type upIntegration struct {
+	integrate string
+	none      bool
+	stdin     io.Reader
+	stdout    io.Writer
+	detect    []farmcli.Detected
+	runner    func(ctx context.Context, o farmcli.Out) error
+}
+
+// choose settles the answers, and says whether Claude Code's was on before.
+func (u upIntegration) choose(cfg *farmcli.Config) (on []string, wasOn bool, err error) {
+	wasOn = cfg.Integrations[farmcli.Claude]
+	on, err = farmcli.Choose(cfg, u.detect, u.integrate, u.none, isTerminal(u.stdin), farmcli.Out{W: u.stdout, In: u.stdin})
+	return on, wasOn, err
+}
+
+// apply does what the answers say, keeps them, and says what it did.
+func (u upIntegration) apply(ctx context.Context, cfg *farmcli.Config, on []string, wasOn bool) error {
+	in := farmcli.Integration{Record: cfg.Integrations}
+	switch {
+	case slices.Contains(on, farmcli.Claude):
+		// the runner only on its own yes: one given at login named no service
+		if cfg.Integrations[farmcli.RunnerKey] {
+			in.Runner = u.runner
+		}
+		in.On(ctx, farmcli.Out{W: u.stdout})
+	case u.none && wasOn:
+		in.Off(ctx, farmcli.Out{W: u.stdout})
+	}
+	if err := cfg.Save(); err != nil {
+		return err
+	}
+	applyApps(u.stdout, on)
+	if l := farmcli.IntegrateLine(cfg); l != "" {
+		fmt.Fprintf(u.stdout, "%s\n", l)
+	}
+	return nil
 }
 
 // applyApps adds C4 to each application chosen at up or login (every

@@ -15,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/farmcli"
 )
 
 // Every command in the usage parses its flags: a flag a command defines
@@ -138,5 +139,56 @@ func TestIsTerminal(t *testing.T) {
 	defer w.Close()
 	if isTerminal(devnull) || isTerminal(r) || isTerminal(strings.NewReader("y\n")) {
 		t.Error("something that is not a terminal counts as one")
+	}
+}
+
+// up with no terminal, its own path (the question and what it turns on):
+// stdin /dev/null, as a background job has, and a pipe holding a "y".
+// Nothing is asked, recorded or installed: no answer kept, no claude mcp
+// call, no runner.
+func TestUpWithNoTerminalInstallsNothing(t *testing.T) {
+	t.Setenv("CLAUDECODE", "")
+	bin := t.TempDir()
+	calls := filepath.Join(bin, "calls")
+	os.WriteFile(filepath.Join(bin, "claude"), []byte("#!/bin/sh\necho \"$@\" >>"+calls+"\n"), 0o755)
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devnull.Close()
+	r, w, _ := os.Pipe()
+	w.WriteString("y\n")
+	w.Close()
+	defer r.Close()
+	for name, stdin := range map[string]*os.File{"/dev/null": devnull, "a pipe": r} {
+		cfgPath := filepath.Join(t.TempDir(), "farm.yaml")
+		cfg, err := farmcli.LoadConfig(cfgPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		ran := false
+		var out bytes.Buffer
+		ui := upIntegration{stdin: stdin, stdout: &out, detect: []farmcli.Detected{
+			{Name: farmcli.Claude, Found: true, Question: farmcli.IntegrateQuestion(true), DefaultYes: true, Runner: true}},
+			runner: func(context.Context, farmcli.Out) error { ran = true; return nil }}
+		on, wasOn, err := ui.choose(cfg)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := ui.apply(context.Background(), cfg, on, wasOn); err != nil {
+			t.Fatal(err)
+		}
+		if len(on) != 0 || len(cfg.Integrations) != 0 || ran || strings.Contains(out.String(), "Connect Claude Code") {
+			t.Errorf("%s: on %v, recorded %v, runner %v\n%s", name, on, cfg.Integrations, ran, out.String())
+		}
+		if c, _ := os.ReadFile(calls); len(c) > 0 {
+			t.Errorf("%s: claude was run: %s", name, c)
+		}
+		saved, _ := os.ReadFile(cfgPath)
+		if strings.Contains(string(saved), "integrations") {
+			t.Errorf("%s: an answer was saved:\n%s", name, saved)
+		}
 	}
 }
