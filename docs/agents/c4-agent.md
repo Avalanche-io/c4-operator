@@ -43,6 +43,23 @@ If the CLI starts a copy anyway (a race with another resume), `c4-agent
 resume` stops the copy at once and fails with exit 4. A copy is never a
 member.
 
+## Your sessions as they are
+
+`c4-agent observe` reads the Claude Code sessions already on the machine,
+and only reads: the CLI's own list (`claude agents --json`) and their
+transcripts. It moves, stops and signs in nothing, and needs no farm.
+Each session gets:
+- **a word:** `needs you` (the CLI's own `blocked`, its "needs input"),
+  `working`, `idle`, `done`, `stopped`, or `at its limit` (a usage window it
+  hit that has not reset);
+- **the one thing that needs you,** when there is one: what it last said
+  when it is waiting on you, or a spend limit only you can raise;
+- **what it has used,** per model, over its transcript;
+- **its open background work,** and how long since it last wrote.
+
+What needs you comes first. `--json` gives the same rows for a program to
+read (`c4 farm agents` shows them).
+
 ## A clean environment for each member
 
 A member runs in a config directory of its own, filled by C4 from an agent
@@ -75,6 +92,7 @@ environment, never in a person's `~/.claude`:
 
 | command                                   | does                                                                                                                               |
 | ----------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `c4-agent observe [--all] [--json]`      | the Claude Code sessions on this machine as they are, read-only: each one's state in a word, what needs you, what it has used |
 | `c4-agent find --agent-name NAME`         | lists sessions whose transcript names that agent, newest first                                                                     |
 | `c4-agent register --name N --session ID` | adds a member (`--cwd`, `--config-dir`, `--flag` for resume flags, `--new-phase`; `--env DIR` runs it in a clean environment, `--import DIR` brings its session there) |
 | `c4-agent ls`                             | every member: busy, idle (at a turn boundary) or stopped, with its epoch and last checkpoint                                       |

@@ -24,6 +24,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -150,6 +151,26 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 		if m.Env != "" {
 			fmt.Fprintf(out, "%s: environment %s in %s; sign in there once (CLAUDE_CONFIG_DIR=%s claude) before it runs\n", m.Name, m.Env, m.ConfigDir, m.ConfigDir)
 		}
+	case "observe":
+		all := fs.Bool("all", false, "also the background sessions that are not running")
+		asJSON := fs.Bool("json", false, "print the sessions as JSON")
+		cd := fs.String("config-dir", os.Getenv("CLAUDE_CONFIG_DIR"), "the CLAUDE_CONFIG_DIR to read")
+		if err := fs.Parse(args); err != nil {
+			return err
+		}
+		obs, err := h.Observe(ctx, *cd, *all, time.Now())
+		if err != nil {
+			return err
+		}
+		if *asJSON {
+			enc := json.NewEncoder(out)
+			enc.SetIndent("", "  ")
+			return enc.Encode(struct {
+				ObservedAt time.Time        `json:"observedAt"`
+				Sessions   []agent.Observed `json:"sessions"`
+			}{time.Now().UTC(), obs})
+		}
+		printObserved(out, obs)
 	case "find":
 		var name, cd string
 		fs.StringVar(&name, "agent-name", "", "the agentName to look for")
@@ -589,4 +610,35 @@ func explicit(fs *flag.FlagSet, name string) bool {
 	given := false
 	fs.Visit(func(f *flag.Flag) { given = given || f.Name == name })
 	return given
+}
+
+// printObserved writes one line per session: its word, its name, and the
+// one thing that needs its person, else how long since it last wrote.
+func printObserved(out io.Writer, obs []agent.Observed) {
+	needs := 0
+	for _, o := range obs {
+		name := o.Name
+		if name == "" {
+			name = agent.ShortID(o.Session)
+		}
+		what := o.NeedsYou
+		if what == "" {
+			what = "last wrote " + o.TurnAge + " ago"
+			if o.BackgroundOpen > 0 {
+				what += fmt.Sprintf(", %d background task(s) running", o.BackgroundOpen)
+			}
+			if o.Limit != nil {
+				what = o.Limit.Text
+			}
+		} else {
+			needs++
+		}
+		fmt.Fprintf(out, "%-13s %-24s %s\n", o.Word, name, what)
+	}
+	switch {
+	case len(obs) == 0:
+		fmt.Fprintln(out, "No Claude Code sessions are running here.")
+	case needs == 0:
+		fmt.Fprintln(out, "Nothing needs you.")
+	}
 }
