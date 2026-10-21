@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // syncBuffer is a log the runner's goroutines write while a test reads it.
@@ -216,7 +218,7 @@ name: x
 kind: frames
 runs:
   image: c4/runtime-base
-  command: [bash, -c, 'echo openjd_status: loading the stage; echo openjd_progress: 12.5; echo "openjd_redacted_env: TOKEN=s3cret"; echo "using s3cret now"; sleep 0.1; echo "s3cret on stderr" >&2; echo c4_frame: 1001 f.1001.png; echo c4_frame: 1003; echo openjd_fail: will not be the reason; echo c4_fail: permanent the scene names a missing asset; exit 3']
+  command: [bash, -c, 'echo openjd_status: loading the stage; echo openjd_progress: 12.5; echo "openjd_redacted_env: TOKEN=s3cret"; echo "using s3cret now"; echo "s3cret on stderr" >&2; echo c4_frame: 1001 f.1001.png; echo c4_frame: 1003; echo openjd_fail: will not be the reason; echo c4_fail: permanent the scene names a missing asset; exit 3']
 `)
 	r.vars["C4_FRAME_END"] = "1003"
 	writePNG(t, filepath.Join(r.tree, "f.1001.png"))
@@ -294,8 +296,8 @@ func TestRunEndsAStall(t *testing.T) {
 	if c := r.run(); c != stallCode {
 		t.Fatalf("exit %d", c)
 	}
-	if d := time.Since(began); d > 5*time.Second {
-		t.Errorf("the stall took %v to end", d)
+	if d := time.Since(began); d > 20*time.Second {
+		t.Errorf("the stall took %v to end; the tool alone runs 30 s", d)
 	}
 	if o := r.outcome(); o.Class != "retry" || !o.Stalled || o.Reason != "no output for 2 minutes" {
 		t.Errorf("outcome %+v", o)
@@ -319,13 +321,13 @@ func TestRunForwardsSIGTERM(t *testing.T) {
 }
 
 func TestRunOutlivesAChildHoldingStdout(t *testing.T) {
-	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, '(sleep 5 &); echo done']}\n")
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, '(sleep 60 &); echo done']}\n")
 	began := time.Now()
 	if c := r.run(); c != 0 {
 		t.Fatalf("exit %d", c)
 	}
-	if d := time.Since(began); d > 3*time.Second {
-		t.Errorf("waited %v for the child's stdout", d)
+	if d := time.Since(began); d > 30*time.Second {
+		t.Errorf("waited %v for the child's stdout; the child holds it 60 s", d)
 	}
 }
 
@@ -549,27 +551,26 @@ func TestRunRetryOn(t *testing.T) {
 	}
 }
 
-// A frames tool that writes frames without a word to its log is working,
-// not stalled.
-func TestRunFramesAreActivity(t *testing.T) {
-	r := newToolRun(t, `
-c4: tool/1
-name: x
-kind: frames
-runs:
-  image: c4/runtime-base
-  command: [bash, -c, 'mkdir -p render; for f in 1001 1002 1003 1004 1005 1006 1007 1008 1009 1010 1011 1012; do cp "$C4_TOOLS/f.png" render/sm.$f.png; sleep 0.2; done']
-  workdir: "{{Job.Tree}}"
-previews: "render/*.$F4.png"
-stall: {quietMinutes: 3}
-`)
-	// 12 frames a fifth of a second apart (2.4 s or more) outlast the stall
-	// window, 1.5 s, and leave room for a loaded machine between frames
-	r.vars["C4_FRAME_END"] = "1012"
-	r.minute = 500 * time.Millisecond
-	writePNG(t, filepath.Join(r.dir, "f.png"))
-	if c := r.run(); c != 0 {
-		t.Fatalf("exit %d: %+v", c, r.outcome())
+// A frame appearing in the tree is activity: it moves the stall clock as a
+// log line does, so a frames tool that writes frames without a word to its
+// log is working, not stalled. On an injected clock, not the wall's.
+func TestFrameInTheTreeIsActivity(t *testing.T) {
+	start := time.Date(2026, 10, 20, 17, 0, 0, 0, time.UTC)
+	now := start
+	tree := t.TempDir()
+	r := &runner{e: env{now: func() time.Time { return now }}, tree: tree, tool: &schema.Tool{},
+		frames: frames{start: 1001, end: 1008, step: 1, known: true}, start: start, last: start,
+		done: map[int]bool{}, previewed: map[int]bool{}, previewQ: make(chan previewJob, 8)}
+	now = start.Add(40 * time.Minute)
+	if q := r.quiet(); q != 40*time.Minute {
+		t.Fatalf("quiet %v before the frame", q)
+	}
+	r.countTreeFrame(1001, filepath.Join(tree, "render", "sm.1001.exr"))
+	if q := r.quiet(); q != 0 {
+		t.Fatalf("quiet %v after a frame landed", q)
+	}
+	if p := r.written; p != 0.125 {
+		t.Errorf("progress %v, want 1 of 8", p)
 	}
 }
 

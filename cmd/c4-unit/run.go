@@ -621,10 +621,7 @@ wait:
 			if stalled || r.tool.Stall == nil || r.tool.Stall.QuietMinutes < 1 {
 				continue
 			}
-			r.mu.Lock()
-			quiet := r.e.clock().Sub(r.last)
-			r.mu.Unlock()
-			if quiet < time.Duration(r.tool.Stall.QuietMinutes)*r.e.minute() {
+			if r.quiet() < time.Duration(r.tool.Stall.QuietMinutes)*r.e.minute() {
 				continue
 			}
 			stalled = true
@@ -1063,6 +1060,14 @@ func fixedPrefix(p string) string {
 		out = append(out, d)
 	}
 	return filepath.FromSlash(strings.Join(out, "/"))
+}
+
+// quiet is how long since the tool last showed it was working: a line in
+// its log, or a frame in the tree.
+func (r *runner) quiet() time.Duration {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.e.clock().Sub(r.last)
 }
 
 func (r *runner) tickEvery() time.Duration {
