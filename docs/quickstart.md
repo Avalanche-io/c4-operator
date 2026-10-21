@@ -55,14 +55,14 @@ The first time, at a terminal, it asks one question before it changes
 anything, and remembers the answer:
 
 ```
-Connect Claude Code to this farm? It adds the farm's tools to Claude Code (~/.claude.json), and lets c4 farm agents add save an agent's turns with a hook in that agent's own folder, without asking again, and runs a background service (~/Library/LaunchAgents/io.avalanche.c4.agent.plist) so this machine can run your agents. c4 farm integrate claude off takes it all out. [Y/n]
+Connect Claude Code to this farm? It adds the farm's tools to Claude Code (~/.claude.json), and lets c4 farm agents add save an agent's turns with a hook in that agent's own folder, without asking again, and runs a background service (~/Library/LaunchAgents/io.avalanche.c4.agent.plist) so this machine can run your agents. c4 farm integrate off takes it all out. [Y/n]
 ```
 
 ```
 farm      c4-local   4 nodes · 6 slots, 4 more to rent · store ready
 project   saltmarsh   you: sam
 owner     sam, who plays every role here (c4 farm up --owner NAME to change it)
-claude    has the farm's tools (c4-farm in ~/.claude.json); c4 farm integrate claude off takes it all out
+claude    has the farm's tools (c4-farm in ~/.claude.json); c4 farm integrate off takes it all out
 agents    this machine (c4-host-laptop) runs sam's agents, agent pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)
 HUD       http://127.0.0.1:30080/?as=sam#/needs
 roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)
@@ -71,7 +71,7 @@ roles     artist, supervisor, wrangler, admin, facilities, td, to try their view
 Saying no, or `c4 farm up --no-integrate`, adds nothing to Claude Code or
 this machine. Run without a terminal (a script, CI), `up` asks nothing,
 adds nothing, and says so. Either way `c4 farm integrations` lists what it
-could add, and `c4 farm integrate claude on` adds it later.
+could add, and `c4 farm integrate on` adds it later.
 
 That is a farm, not a demo of one: render nodes in two pools (`cpu` and
 `gpu`), a burst pool the farm rents from only when a deadline needs it, a
@@ -255,7 +255,7 @@ If you said yes at `c4 farm up`, Claude Code has the farm's tools already;
 otherwise:
 
 ```sh
-c4 farm integrate claude on
+c4 farm integrate on
 ```
 
 Then ask, for example, "which frames of sm0140-render-v001 are done, and

@@ -23,7 +23,7 @@ func TestChooseAsksOnceAtATerminal(t *testing.T) {
 	}
 	if on, err := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("\n")}); err != nil || len(on) != 1 ||
 		!strings.Contains(out.String(), ".claude.json), and lets c4 farm agents add save") || !strings.Contains(out.String(), "a background service (") ||
-		!strings.HasSuffix(out.String(), "c4 farm integrate claude off takes it all out. [Y/n] ") {
+		!strings.HasSuffix(out.String(), "c4 farm integrate off takes it all out. [Y/n] ") {
 		t.Fatalf("terminal, enter: %v %v\n%s", on, err, out.String())
 	}
 	out.Reset()

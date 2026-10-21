@@ -82,7 +82,8 @@ Agents
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
   integrations             what this machine could add (Claude Code, and each application found), and which are on
-  integrate NAME on|off    add an integration, or take out everything it added (NAME@VERSION for one version; --show says what it would write)
+  integrate on|off         Claude Code's integration: the farm's tools, the agents' hooks, this machine as runner
+  integrate APP            add the C4 Farm panel to an application (APP@VERSION for one; --show says each file); integrate off APP takes it out
   mcp                      serve the farm's tools to an agent over stdio
 
 Flags for every command: --farm NAME, --project NAME, --utc (times in UTC).
@@ -814,10 +815,23 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
-		if len(pos) != 2 || (pos[1] != "on" && pos[1] != "off") {
-			return errors.New("usage: c4 farm integrate NAME[@VERSION] on|off [--show] (c4 farm integrations lists them)")
+		// integrate on|off (Claude Code), integrate APP, integrate off APP;
+		// APP on|off too
+		var target string
+		on := true
+		switch {
+		case len(pos) == 1 && (pos[0] == "on" || pos[0] == "off"):
+			target, on = farmcli.Claude, pos[0] == "on"
+		case len(pos) == 1:
+			target = pos[0]
+		case len(pos) == 2 && pos[0] == "off":
+			target, on = pos[1], false
+		case len(pos) == 2 && (pos[1] == "on" || pos[1] == "off"):
+			target, on = pos[0], pos[1] == "on"
+		default:
+			return errors.New("usage: c4 farm integrate on|off (Claude Code) | integrate APP[@VERSION] [--show] [--yes] | integrate off APP (c4 farm integrations lists them)")
 		}
-		on := pos[1] == "on"
+		pos = []string{target}
 		o := farmcli.Out{W: stdout}
 		name, _, _ := strings.Cut(pos[0], "@")
 		if name != farmcli.Claude {
@@ -829,7 +843,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 				in := farmcli.Out{W: stdout, In: bufio.NewReader(stdin)}
 				confirm = func(q string) bool { return farmcli.Ask(in, q) }
 			default:
-				return errors.New("c4 farm integrate asks before it changes an application's setup, and no one is at a terminal to answer; run it at one, or pass --yes (--show says what it would change)")
+				// no one to say yes: the plan, then the refusal
+				farmcli.App(o, pos[0], on, true, nil)
+				return errors.New("c4 farm integrate asks before it changes an application's setup, and no one is at a terminal to answer; run it at one, or pass --yes")
 			}
 			if err := farmcli.App(o, pos[0], on, *show, confirm); err != nil || *show {
 				return err
@@ -947,14 +963,14 @@ func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx conte
 	return func(ctx context.Context, o farmcli.Out) error {
 		bin, err := exec.LookPath("c4-agent")
 		if err != nil {
-			return errors.New("this machine runs no agents yet: c4-agent is not on PATH (brew install mrjoshuak/tap/c4 brings it; then c4 farm integrate claude on)")
+			return errors.New("this machine runs no agents yet: c4-agent is not on PATH (brew install mrjoshuak/tap/c4 brings it; then c4 farm integrate on)")
 		}
 		if bin, err = filepath.Abs(bin); err != nil {
 			return err
 		}
 		e, err := localfarm.EnrollMachine(ctx, bin, owner, 4)
 		if err != nil {
-			return fmt.Errorf("this machine runs no agents yet: %v (c4 farm integrate claude on tries again)", err)
+			return fmt.Errorf("this machine runs no agents yet: %v (c4 farm integrate on tries again)", err)
 		}
 		svc := &farmcli.AgentService{AgentBin: bin, Slots: 4}
 		if err := svc.Start(ctx, farmcli.Out{W: io.Discard}); err != nil {

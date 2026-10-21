@@ -23,7 +23,7 @@ func IntegrateQuestion(runner bool) string {
 	if runner {
 		q += ", and runs a background service (" + tildePath(serviceFile()) + ") so this machine can run your agents"
 	}
-	return q + ". c4 farm integrate claude off takes it all out."
+	return q + ". c4 farm integrate off takes it all out."
 }
 
 // mcpConfig is the file claude mcp add --scope user writes.
@@ -109,9 +109,9 @@ func (in *Integration) On(ctx context.Context, o Out) error {
 		out, err := exec.CommandContext(ctx, in.ClaudeBin, "mcp", "add", "--scope", "user", mcpName, "--", in.FarmBin, "mcp").CombinedOutput()
 		switch {
 		case err == nil:
-			o.printf("claude    has the farm's tools (%s in %s); c4 farm integrate claude off takes it all out\n", mcpName, tildePath(mcpConfig()))
+			o.printf("claude    has the farm's tools (%s in %s); c4 farm integrate off takes it all out\n", mcpName, tildePath(mcpConfig()))
 		case strings.Contains(string(out), "already exists"):
-			o.printf("claude    has the farm's tools (%s in %s, already); c4 farm integrate claude off takes it all out\n", mcpName, tildePath(mcpConfig()))
+			o.printf("claude    has the farm's tools (%s in %s, already); c4 farm integrate off takes it all out\n", mcpName, tildePath(mcpConfig()))
 		default:
 			o.printf("claude    has no farm tools yet: claude mcp add said %s\n", firstLine(string(out), err))
 		}
@@ -221,7 +221,10 @@ func Detect(runner bool) []Detected {
 }
 
 // apps groups an application's installed versions into one integration,
-// asked about once: what adding it changes in each version not yet done.
+// asked about in one line however many versions there are. The offer
+// reads nothing but what Detect read: an application's plan may look in a
+// folder the system guards (macOS ~/Documents, for Unreal), so Plan runs
+// only after the person says yes.
 func apps(found []dcc.Found) []Detected {
 	var out []Detected
 	byName := map[string]int{}
@@ -235,19 +238,17 @@ func apps(found []dcc.Found) []Detected {
 		out[i].Versions = append(out[i].Versions, f)
 	}
 	for i := range out {
-		var titles, lines []string
+		var titles, todo []string
 		for _, f := range out[i].Versions {
 			titles = append(titles, f.Title)
-			if f.Status == dcc.StatusInstalled {
-				continue
-			}
-			if c, err := dcc.Plan(f, true); err == nil {
-				lines = append(lines, c.Line)
+			if f.Status != dcc.StatusInstalled {
+				todo = append(todo, f.Title)
 			}
 		}
 		out[i].Title = andList(titles) + ": the C4 Farm panel, to submit from inside it"
-		if len(lines) > 0 {
-			out[i].Question = "Add C4 to " + andList(titles) + "? It " + strings.Join(lines, "; ") + ". c4 farm integrate " + out[i].Name + " off takes it out."
+		if len(todo) > 0 {
+			out[i].Question = "Add the C4 Farm panel to " + andList(todo) + "? It changes that application's own setup; c4 farm integrate " +
+				out[i].Name + " --show says each file first, and c4 farm integrate off " + out[i].Name + " takes it out."
 		}
 	}
 	return out
@@ -311,7 +312,7 @@ func IntegrateLine(cfg *Config) string {
 	case on:
 		return "" // the claude and agents lines say what it did
 	case answered:
-		return "integration claude off: nothing added to Claude Code or this machine; Claude Code can drive the farm from its docs (c4 farm integrate claude on adds it)"
+		return "integration claude off: nothing added to Claude Code or this machine; Claude Code can drive the farm from its docs (c4 farm integrate on adds it)"
 	}
 	return "integration claude not set: nothing added to Claude Code or this machine (c4 farm integrations lists what it could add)"
 }
@@ -335,7 +336,7 @@ func Integrations(cfg *Config, found []Detected, o Out) {
 		}
 	}
 	tw.Flush()
-	o.printf("c4 farm integrate NAME[@VERSION] on|off adds or takes one out (--show says what it would write, and changes nothing)\n")
+	o.printf("c4 farm integrate on|off for Claude Code; c4 farm integrate APP[@VERSION] adds an application's, integrate off APP takes it out (--show says each file, and changes nothing)\n")
 }
 
 // App turns an application's integration on or off: on adds C4 to each

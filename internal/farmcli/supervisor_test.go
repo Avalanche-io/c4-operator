@@ -64,7 +64,11 @@ func TestAgentRunRestartsTheRunner(t *testing.T) {
 	dir := t.TempDir()
 	count := filepath.Join(dir, "count")
 	bin := filepath.Join(dir, "c4-agent")
+	slots := filepath.Join(dir, "slots")
+	// the runner reads what the power reader writes: wait for it, as the
+	// real one does, so the run cannot end before the reader has written
 	os.WriteFile(bin, []byte(`#!/bin/sh
+i=0; while [ ! -f `+slots+` ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done
 n=$(cat `+count+` 2>/dev/null || echo 0); n=$((n+1)); echo $n > `+count+`
 if [ $n -lt 2 ]; then echo "runner up, then it fell over"; exit 1; fi
 echo "the machine's token has expired: enroll it again (c4 farm up)"; exit 1
@@ -72,7 +76,7 @@ echo "the machine's token has expired: enroll it again (c4 farm up)"; exit 1
 	var out bytes.Buffer
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	err := AgentRun(ctx, Out{W: &out}, AgentRunArgs{AgentBin: bin, SlotsFile: filepath.Join(dir, "slots"), Backoff: time.Millisecond})
+	err := AgentRun(ctx, Out{W: &out}, AgentRunArgs{AgentBin: bin, SlotsFile: slots, Backoff: time.Millisecond})
 	if err != nil {
 		t.Fatal(err)
 	}
