@@ -99,9 +99,9 @@ range, renderables and the files it reads) and a way to draw
  Everything else
 (collection, IDs, the check, the summary, uploads, the file) is
 `c4submit`'s. `c4submit.testing` has a fake farm (in memory, and over HTTP)
-and a fake host for tests. The next DCCs, in the order the research
-recommends: Maya, Blender, Katana (through its FarmAPI), Unreal (a Movie
-Render Queue executor).
+and a fake host for tests. The next DCCs plug into their own farm seams
+rather than drawing a panel: Katana through its FarmAPI, and Unreal as a
+Movie Render Queue executor.
 
 ## Status
 
