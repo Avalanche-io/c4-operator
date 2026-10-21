@@ -2,6 +2,7 @@ package farmcli
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -202,6 +203,9 @@ type toolsHUD struct {
 	publishes   []map[string]any
 	submissions []map[string]any
 	polls       int
+	// publishState is the test state a publish answers with (default
+	// running)
+	publishState string
 }
 
 func (h *toolsHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -247,7 +251,7 @@ func (h *toolsHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		json.NewDecoder(r.Body).Decode(&req)
 		h.publishes = append(h.publishes, req)
 		json.NewEncoder(w).Encode(map[string]any{"ok": true, "tool": "proxies", "version": "v4", "view": req["view"],
-			"image": "ghcr.io/avalanche-io/c4-runtime-oiio@sha256:91f2", "test": api.ToolTestState{Job: "saltmarsh/proxies-test-v4", State: "running"}})
+			"image": "ghcr.io/avalanche-io/c4-runtime-oiio@sha256:91f2", "test": api.ToolTestState{Job: "saltmarsh/proxies-test-v4", State: cmp.Or(h.publishState, "running")}})
 	case r.Method == http.MethodPost && p == "/submissions":
 		var req map[string]any
 		json.NewDecoder(r.Body).Decode(&req)
@@ -498,5 +502,27 @@ func TestFramesOnDisk(t *testing.T) {
 	}
 	if fs := framesOnDisk(dir, "sm0150.$F4.exr"); fs != nil {
 		t.Errorf("no such sequence: %v", fs)
+	}
+}
+
+// A tool published without a test is offered at once, which is a success
+// with its own words; publishing with NoWait (as c4 farm up does) returns
+// once the farm's test runs, without waiting for its end.
+func TestPublishUntestedAndNoWait(t *testing.T) {
+	hud := &toolsHUD{publishState: "untested"}
+	srv := httptest.NewServer(hud)
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "td"})
+	dir := writeTool(t, proxiesYAML)
+	var out bytes.Buffer
+	if err := PublishTool(context.Background(), c, Out{W: &out}, PublishArgs{Dir: dir, Project: "saltmarsh", Poll: 1}); err != nil ||
+		!strings.Contains(out.String(), "published to saltmarsh, untested: c4 farm submit proxies runs it") {
+		t.Fatalf("untested: %v\n%s", err, out.String())
+	}
+	hud.publishState = ""
+	out.Reset()
+	if err := PublishTool(context.Background(), c, Out{W: &out}, PublishArgs{Dir: dir, Project: "saltmarsh", Poll: 1, NoWait: true}); err != nil ||
+		hud.polls != 0 || !strings.Contains(out.String(), "test on the farm   saltmarsh/proxies-test-v4 (running; c4 farm tool show proxies says how it ends)") {
+		t.Fatalf("no wait: %v, %d polls\n%s", err, hud.polls, out.String())
 	}
 }

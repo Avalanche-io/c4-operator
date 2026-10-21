@@ -126,6 +126,9 @@ type PublishArgs struct {
 	Wait time.Duration
 	// Poll is how often the test's state is read (default 2s).
 	Poll time.Duration
+	// NoWait returns once the farm has the version and its test is
+	// running, without waiting for the test's end.
+	NoWait bool
 }
 
 // PublishTool uploads a tool's folder (only what the farm lacks), asks the
@@ -168,22 +171,35 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 	tot := v.Totals()
 	o.printf("%s %s   %s · %s, %d to upload · image %s\n", t.Name, r.Version, shortID(r.View), plural(int(tot.Files), "file", "files"),
 		len(need), r.Image)
-	if a.DryRun || r.Test == nil {
+	if a.DryRun {
+		return nil
+	}
+	where := "to " + a.Project
+	if a.Farm {
+		where = "to every project"
+	}
+	if r.Test == nil || r.Test.State == "untested" {
+		// a person's tool with no test is offered at once, as it is
+		o.printf("published %s, untested: c4 farm submit %s runs it; add test: so the farm checks each version before offering it\n", where, t.Name)
+		return nil
+	}
+	if a.NoWait && (r.Test.State == "running" || r.Test.State == "") {
+		o.printf("test on the farm   %s (running; c4 farm tool show %s says how it ends)\n", r.Test.Job, t.Name)
 		return nil
 	}
 	state, err := waitPublish(ctx, c, o, a, t.Name, r.Version, r.Test)
 	if err != nil {
 		return err
 	}
-	if state.State != "ok" {
-		return fmt.Errorf("the test failed on the farm (%s): %s; the tool is not published", state.Job, state.Reason)
+	switch state.State {
+	case "ok":
+		o.printf("published %s: c4 farm submit %s runs it, and c4 farm tools lists it as %q\n", where, t.Name, t.Title)
+		return nil
+	case "untested":
+		o.printf("published %s, untested: c4 farm submit %s runs it\n", where, t.Name)
+		return nil
 	}
-	where := "to " + a.Project
-	if a.Farm {
-		where = "to every project"
-	}
-	o.printf("published %s: c4 farm submit %s runs it, and c4 farm tools lists it as %q\n", where, t.Name, t.Title)
-	return nil
+	return fmt.Errorf("the test failed on the farm (%s): %s; the tool is not published", state.Job, state.Reason)
 }
 
 // waitPublish follows a version's test run on the farm until it ends.

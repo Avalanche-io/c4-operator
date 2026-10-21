@@ -225,7 +225,7 @@ func publishTools(ctx context.Context, o UpOptions) error {
 		o.logf("tools     not published yet: %v; c4 farm up tries again\n", err)
 		return nil
 	}
-	var done, later, failed, stored, left, unloaded, images []string
+	var done, testing, later, failed, stored, left, unloaded, images []string
 	for _, name := range tools.Names {
 		// as tools.ReleaseTrees names it
 		dir, err := tools.CopyTo(tmp, name)
@@ -233,7 +233,7 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			return err
 		}
 		var out strings.Builder
-		err = farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: Project, Farm: true})
+		err = farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: Project, Farm: true, NoWait: true})
 		if err != nil {
 			why := strings.TrimSpace(out.String())
 			if why == "" {
@@ -271,10 +271,18 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			left = append(left, name+" ("+why+")")
 			continue
 		}
+		if strings.Contains(out.String(), "(running;") {
+			// its test runs on the farm; up does not wait for it
+			testing = append(testing, name)
+			continue
+		}
 		done = append(done, name)
 	}
 	if len(done) > 0 {
 		o.logf("tools     %s ready for every project (c4 farm tools)\n", andList(done))
+	}
+	if len(testing) > 0 {
+		o.logf("tools     %s testing on the farm, each offered once its test passes (c4 farm tools)\n", andList(testing))
 	}
 	if len(later) > 0 {
 		subs := make([]string, len(later))
