@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"strconv"
@@ -713,6 +714,15 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		job.Annotations[c4v1.AnnotationTrackerRef] = body.TrackerRef
 		job.Labels[c4v1.LabelTracker] = tracker
 	}
+	if body.TrackerURL != "" {
+		if body.TrackerRef == "" {
+			return api.SubmitResponse{}, http.StatusBadRequest, errors.New("trackerURL needs the trackerRef it is the address of")
+		}
+		if !trackerURL(body.TrackerURL) {
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("trackerURL %q: want an http(s) URL or a path on this host", body.TrackerURL)
+		}
+		job.Annotations[c4v1.AnnotationTrackerURL] = body.TrackerURL
+	}
 	var grant *c4v1.SubmitGrant
 	if body.For != "" {
 		// Work for another person, by a tracker's sync under the grant the
@@ -894,4 +904,24 @@ func (s *Server) dueOn(_ context.Context, project, due string) (time.Time, error
 		}
 	}
 	return conv.DueOn(due)
+}
+
+// trackerURL says whether u is a link the HUD may put on a job: http or
+// https with a host, or a path on the HUD's own host. Never a script or
+// another scheme, and never protocol-relative (//host).
+func trackerURL(u string) bool {
+	if len(u) > 2048 || strings.ContainsAny(u, "\x00\r\n\\") {
+		return false
+	}
+	p, err := url.Parse(u)
+	if err != nil {
+		return false
+	}
+	switch p.Scheme {
+	case "http", "https":
+		return p.Host != ""
+	case "":
+		return p.Host == "" && strings.HasPrefix(u, "/") && !strings.HasPrefix(u, "//")
+	}
+	return false
 }

@@ -36,6 +36,8 @@ type JobRequest struct {
 	// c4.avalanche.io/tracker-ref, label c4.avalanche.io/tracker) and its
 	// record names it.
 	TrackerRef string
+	// TrackerURL is where a person opens the entity (its Ref's URL).
+	TrackerURL string
 	// Inputs are views the job mounts besides its spec's (a note it
 	// answers).
 	Inputs []api.SubmitInput
@@ -233,7 +235,7 @@ func (h *HUD) Submit(ctx context.Context, r JobRequest) (JobRef, error) {
 		return JobRef{}, err
 	}
 	in := api.SubmitRequest{Namespace: r.Namespace, Name: r.Name, Type: "tracker", Spec: spec, Inputs: r.Inputs,
-		TrackerRef: r.TrackerRef, Follows: r.Follows, For: r.For, Replaces: r.Replaces}
+		TrackerRef: r.TrackerRef, TrackerURL: r.TrackerURL, Follows: r.Follows, For: r.For, Replaces: r.Replaces}
 	var out api.SubmitResponse
 	err = h.doJSON(ctx, http.MethodPost, "/jobs", in, &out)
 	var ae *APIError

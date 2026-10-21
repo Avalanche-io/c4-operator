@@ -538,11 +538,13 @@ func TestDeadline(t *testing.T) {
 	}
 }
 
-// The job c4-sync submits carries the issue it was made for.
+// The job c4-sync submits carries the issue it was made for, and where a
+// person opens it.
 func TestSubmitCarriesTheTrackerRef(t *testing.T) {
 	e := setup(t)
 	e.pass()
-	if len(e.farm.Submitted) != 1 || e.farm.Submitted[0].TrackerRef != "gh/Issue/7" || e.farm.Submitted[0].Follows != "" {
+	if len(e.farm.Submitted) != 1 || e.farm.Submitted[0].TrackerRef != "gh/Issue/7" || e.farm.Submitted[0].Follows != "" ||
+		!strings.HasSuffix(e.farm.Submitted[0].TrackerURL, "/issues/7") {
 		t.Fatalf("submitted: %+v", e.farm.Submitted)
 	}
 }

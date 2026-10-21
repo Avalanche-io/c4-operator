@@ -95,6 +95,9 @@ type SubmitRequest struct {
 	// c4.avalanche.io/tracker-ref, label c4.avalanche.io/tracker) and its
 	// record names it.
 	TrackerRef string `json:"trackerRef,omitempty"`
+	// TrackerURL is where a person opens that entity (annotation
+	// c4.avalanche.io/tracker-url): http(s), or a path on the HUD's host.
+	TrackerURL string `json:"trackerURL,omitempty"`
 	// Follows names the job in the namespace this one is the next version
 	// of (spec.follows).
 	Follows string `json:"follows,omitempty"`

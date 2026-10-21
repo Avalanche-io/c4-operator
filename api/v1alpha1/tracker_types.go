@@ -24,6 +24,11 @@ const LabelTracker = "c4.avalanche.io/tracker"
 // <tracker>/<type>/<id> (DESIGN.md 10.7).
 const AnnotationTrackerRef = "c4.avalanche.io/tracker-ref"
 
+// AnnotationTrackerURL on a WorkJob is where a person opens the tracker
+// entity it serves: an http(s) URL, or a path on the HUD's own host (a
+// development farm's stand-in tracker).
+const AnnotationTrackerURL = "c4.avalanche.io/tracker-url"
+
 // Tracker is one connection to one tracker site, scoped to what one
 // project syncs with it.
 // +kubebuilder:object:root=true

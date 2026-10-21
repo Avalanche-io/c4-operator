@@ -490,6 +490,9 @@ type Job struct {
 	// TrackerRef is the tracker entity the job serves
 	// (<tracker>/<type>/<id>), when a tracker's sync submitted it.
 	TrackerRef string `json:"trackerRef,omitempty"`
+	// TrackerURL is where a person opens that entity, as the tracker
+	// links it: http(s), or a path on the HUD's own host.
+	TrackerURL string `json:"trackerURL,omitempty"`
 	// Note is the note: of the submission the job came from.
 	Note         string    `json:"note,omitempty"`
 	Phase        string    `json:"phase"`

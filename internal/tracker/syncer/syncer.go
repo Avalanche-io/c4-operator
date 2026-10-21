@@ -674,7 +674,7 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 			// would close that window.
 			var err error
 			got, err = s.Farm.Submit(ctx, farm.JobRequest{Namespace: jr.Namespace, Name: jr.Name, Spec: spec,
-				TrackerRef: t.Name + "/" + it.Ref.String(), For: person, Replaces: replaces})
+				TrackerRef: t.Name + "/" + it.Ref.String(), TrackerURL: it.Ref.URL, For: person, Replaces: replaces})
 			if reason, msg, ok := refusal(err, t.Name, person); ok {
 				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, reason, msg)
 				return nil
@@ -1606,7 +1606,7 @@ func (s *Syncer) nextVersion(ctx context.Context, t *c4v1.Tracker, l *c4v1.Track
 		person = j.Owner // the next version is for whom the last one was
 	}
 	_, err := s.Farm.Submit(ctx, farm.JobRequest{Namespace: l.Namespace, Name: name, Spec: spec, Inputs: inputs,
-		Follows: prev, TrackerRef: t.Name + "/" + l.Spec.Ref.Type + "/" + l.Spec.Ref.ID, For: person})
+		Follows: prev, TrackerRef: t.Name + "/" + l.Spec.Ref.Type + "/" + l.Spec.Ref.ID, TrackerURL: l.Spec.Ref.URL, For: person})
 	if reason, msg, ok := refusal(err, t.Name, person); ok {
 		s.setLinkCond(ctx, l, "Version", metav1.ConditionFalse, reason, msg)
 		return nil

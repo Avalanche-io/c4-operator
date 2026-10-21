@@ -199,6 +199,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}
 	aj.Shot = j.Labels[LabelShot]
 	aj.TrackerRef = j.Annotations[c4v1.AnnotationTrackerRef]
+	aj.TrackerURL = j.Annotations[c4v1.AnnotationTrackerURL]
 	aj.Work = r.work
 	if f := j.Spec.Forecast; f != nil {
 		aj.Forecast = &api.JobForecast{SlotHours: f.SlotHours, SD: f.SD, UnitHours: f.UnitHours, Exists: f.Exists}

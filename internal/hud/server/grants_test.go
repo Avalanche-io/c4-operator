@@ -307,3 +307,30 @@ func TestSubmitRefusalsSayWhich(t *testing.T) {
 		t.Fatalf("revoked: %d %+v", code, out)
 	}
 }
+
+// A tracker's link on a job is http(s), or a path on the HUD's own host
+// (the local farm's stand-in): never a script, another scheme or another
+// host by //. It needs the trackerRef it is the address of.
+func TestSubmitTrackerURL(t *testing.T) {
+	for u, ok := range map[string]bool{
+		"https://github.com/acme/widgets/issues/7": true, "http://flow.local/detail/Task/12": true, "/sandbox/issues/7": true,
+		"javascript:alert(1)": false, "//evil.example/x": false, "data:text/html,x": false, "sandbox/issues/7": false,
+		"https:///x": false, "/a\nb": false, "/a\\b": false,
+	} {
+		if trackerURL(u) != ok {
+			t.Errorf("%q: %v", u, !ok)
+		}
+	}
+	s := grantFarm(t)
+	spec := json.RawMessage(`{"class":"render","pools":["cpu"],"template":{"spec":{"containers":[{"name":"unit","image":"c4-job-hydra"}]}}}`)
+	req := api.SubmitRequest{Project: "show-a", Name: "r1", Spec: spec, TrackerURL: "/sandbox/issues/7"}
+	var out api.SubmitResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", req, &out); code != http.StatusBadRequest {
+		t.Fatalf("a URL without its ref: %d", code)
+	}
+	req.TrackerRef = "github/Issue/7"
+	req.TrackerURL = "javascript:alert(1)"
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", req, &out); code != http.StatusBadRequest {
+		t.Fatalf("a script: %d", code)
+	}
+}
