@@ -482,7 +482,8 @@ func cycle(units []Unit, first int) []string {
 // shards and a sweep planner are graph jobs.
 //
 //	params: root "plan" (the root unit's name), key "graph",
-//	        turnaround "24h", estimateSeconds, maxExpandDepth "4"
+//	        turnaround "24h", estimateSeconds, maxExpandDepth "4",
+//	        table (a stored unit table in place of the root: table.go)
 type graph struct{}
 
 func init() { register(graph{}) }
@@ -494,6 +495,9 @@ func (graph) Checkpoints() bool { return false }
 func (graph) Lens() string      { return "graph" }
 
 func (graph) Plan(job *c4v1.WorkJob) (*Plan, error) {
+	if id := TableOf(job); id != "" {
+		return nil, &NeedsTable{ID: id}
+	}
 	prior, err := priorParam(job)
 	if err != nil {
 		return nil, err

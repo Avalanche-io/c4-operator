@@ -3,6 +3,7 @@ package queue
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -72,6 +73,15 @@ func (q *Queue) planJob(ctx context.Context, v *view) (*class.Plan, error) {
 		return p, nil
 	}
 	p, err := v.driver.Plan(j)
+	var nt *class.NeedsTable
+	if errors.As(err, &nt) {
+		// The job's units were stored with it at submit.
+		doc, derr := q.expansionDoc(ctx, v.project, m, nt.ID)
+		if derr != nil {
+			return nil, errLoading{derr}
+		}
+		p, err = class.TablePlan(j, doc)
+	}
 	if err == nil {
 		p, err = recomputeUnit(j, p)
 	}

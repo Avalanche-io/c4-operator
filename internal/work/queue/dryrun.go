@@ -63,6 +63,12 @@ func (q *Queue) DryRun(ctx context.Context, job *c4v1.WorkJob, project string) (
 // IDs of the drafts' input Materializations by name, which do not exist
 // yet, for saying how many units reuse would skip.
 func (q *Queue) DryRunAll(ctx context.Context, jobs []*c4v1.WorkJob, project string, views map[string]string) ([]DryRun, error) {
+	return q.DryRunTables(ctx, jobs, project, views, nil)
+}
+
+// DryRunTables is DryRunAll for drafts whose unit tables are not stored
+// yet: tables are the documents their table params name, by C4 ID.
+func (q *Queue) DryRunTables(ctx context.Context, jobs []*c4v1.WorkJob, project string, views map[string]string, tables map[string][]byte) ([]DryRun, error) {
 	type draftRun struct {
 		v    *view
 		plan *class.Plan
@@ -88,7 +94,20 @@ func (q *Queue) DryRunAll(ctx context.Context, jobs []*c4v1.WorkJob, project str
 				forecastUnits(plan, f)
 			}
 		default:
-			if plan, err = d.Plan(job); err == nil {
+			plan, err = d.Plan(job)
+			var nt *class.NeedsTable
+			if errors.As(err, &nt) {
+				// a draft's table as given, else one already stored
+				doc, ok := tables[nt.ID]
+				if !ok {
+					var derr error
+					if doc, derr = q.expansionDoc(ctx, project, newMem(), nt.ID); derr != nil {
+						return nil, fmt.Errorf("%w: its unit table: %v", ErrInvalidJob, derr)
+					}
+				}
+				plan, err = class.TablePlan(job, doc)
+			}
+			if err == nil {
 				plan, err = class.WithReview(job, plan)
 			}
 		}
