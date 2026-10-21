@@ -85,6 +85,42 @@ farm in `~/.c4/farm.yaml` (or `C4_FARM_CONFIG`; `C4_FARM` picks another),
 with its sign-in and its default project. So an artist who has run
 `c4 farm login` or `c4 farm up` sets nothing more.
 
+## Installing into the applications
+
+`c4 farm integrations` lists the applications on the machine, and
+`c4 farm integrate <name> on|off` puts a panel in or takes it out. Both use
+this folder's Go package (`dcc`), which carries every panel's files and
+`c4submit` inside `c4 farm` itself, so no checkout and no Python install is
+needed.
+
+- **Finding them** reads files only: application bundles' `Info.plist`s in
+  `/Applications`, `~/Applications` and Steam's library on macOS, Epic's
+  `LauncherInstalled.dat` for Unreal, and the usual install folders on
+  Linux and Windows. It never starts an application.
+- **On** shows each file it would write and asks first. The panel goes in
+  `~/.c4/integrations/<name>/`, and the application gets a small pointer in
+  a folder it already reads:
+
+  | application | its pointer                                                                                             |
+  | ----------- | ------------------------------------------------------------------------------------------------------- |
+  | Blender     | the add-on itself (with `c4submit` inside) in the version's `scripts/addons`, plus a `scripts/startup` module that turns it on once |
+  | Unreal      | `~/Documents/UnrealEngine/Python/init_unreal.py`; refused if one is there that isn't C4's              |
+  | Houdini     | `packages/c4.json` in the version's preferences folder                                                  |
+  | Maya        | `c4.mod` in the version's user `modules` folder                                                         |
+  | Nuke        | one marked line in `~/.nuke/init.py`, after a backup of the file                                        |
+  | Katana      | one marked line in `~/.katana/init.py`, after a backup of the file                                      |
+
+- **Every write is whole**: a file is written beside its place and renamed
+  in, and a new folder is built beside its place and renamed in. A file that
+  is already there and isn't C4's is never overwritten.
+- **Off removes exactly what on wrote**, as recorded in
+  `~/.c4/integrations/<name>-<version>.json`, plus Python's compiled copies
+  of those modules, even after the application is uninstalled. A file
+  changed since C4 wrote it is left, and said so.
+  Nuke's and Katana's start-up files lose only C4's line.
+- **Running on again** changes nothing; after a newer `c4` release it
+  replaces only C4's own files.
+
 ## The tools on the farm
 
 A panel submits to a tool the farm already has. Each application's folder

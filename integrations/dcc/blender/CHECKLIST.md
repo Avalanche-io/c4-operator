@@ -267,3 +267,14 @@ farm.
    does with "Auto Run Python Scripts" off, the default. **[guess]**: that is
    how the artist sees it too; a studio that runs scripts adds `-y` in its
    copy of `blender-render.sh`.
+
+## Installed by `c4 farm integrate blender on`
+
+1. With Blender 5.2 (Steam) closed, run `c4 farm integrate blender on`, then
+   start Blender. **Expect:** C4 Farm is on under Preferences > Add-ons, and
+   the panel is in Render Properties. **[guess]** that Blender 4.2 to 5.x still
+   loads a legacy add-on from the user `scripts/addons` folder, imports each
+   module in `scripts/startup` and calls its `register()`, and that setting
+   `preferences.is_dirty` makes Blender save the add-on as on when it quits.
+   Turn it off in Preferences, restart: it stays off. Run `off`: the add-on
+   and the start-up module are gone.

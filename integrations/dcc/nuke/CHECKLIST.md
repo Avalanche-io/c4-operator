@@ -254,3 +254,12 @@ tools/nuke-render` runs the tool's test as a unit runs it.
 9. **The licence error.** Run with no licence reachable. Note Nuke's exact
    message and add it to the tool's `errors.licence`, so the farm waits
    for a seat instead of spending a retry.
+
+## Installed by `c4 farm integrate nuke on`
+
+1. With a `~/.nuke/init.py` of your own, run `c4 farm integrate nuke on`,
+   start Nuke. **Expect:** the C4 menu; `init.py` is yours plus one line
+   ending `# added by c4 farm integrate nuke`, and `init.py.c4-backup` is
+   your file as it was. **[guess]** that `nuke.pluginAddPath` from
+   `init.py` makes Nuke run the added folder's `menu.py`. Run `off`: your
+   `init.py` is exactly as it was.

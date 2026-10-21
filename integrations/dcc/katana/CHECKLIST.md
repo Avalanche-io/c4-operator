@@ -263,3 +263,11 @@ tools/katana-render` runs the tool's test as a unit runs it.
    **[guess]** that a `.katana` file is XML text (or gzipped XML) holding
    each path as written, so a copy with the farm's paths in their place
    renders the same project.
+
+## Installed by `c4 farm integrate katana on`
+
+1. With `KATANA_RESOURCES` and `KATANA_USER_RESOURCE_DIRECTORY` unset, run
+   `c4 farm integrate katana on`, start Katana. **Expect:** C4 on the farm
+   menus. **[guess]** that Katana runs `~/.katana/init.py` at start-up on
+   Linux as Foundry documents for Windows. Run `off`: your `init.py` is
+   exactly as it was.

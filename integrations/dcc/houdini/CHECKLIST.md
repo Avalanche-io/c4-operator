@@ -344,3 +344,11 @@ image, pod, namespace, priority, GPU request or any Kubernetes term.
 
 - [ ] Save a hip under a root other than the farm's (a Windows `S:/shows/...` or a home folder), with a file SOP and a texture under that root, and submit it with C4 Submit. Expect the submission to carry `root:`, and the unit's log to show `HOUDINI_PATHMAP` as JSON from that root to the farm's (`{"S:/shows/saltmarsh": "/show"}`); the cache and texture load, and the render matches a local one.
 - [ ] Submit a hip saved under the farm's own root. Expect no `root:` in the submission and no `HOUDINI_PATHMAP` in the unit's environment.
+
+## 7. Installed by `c4 farm integrate houdini on`
+
+Run `c4 farm integrate houdini on`, start Houdini. **Expect:** the C4 shelf
+and the C4 nodes, with nothing set in `houdini.env`. **[guess]** that the
+version's preferences folder (`~/Library/Preferences/houdini/<version>` on
+macOS, `~/houdini<version>` on Linux, `~/Documents/houdini<version>` on
+Windows) has its `packages` folder read with no `HOUDINI_PACKAGE_DIR` set.

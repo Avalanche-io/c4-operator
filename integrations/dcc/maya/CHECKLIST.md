@@ -316,3 +316,12 @@ tools/maya-render` runs the tool's test as a unit runs it.
    **Expect:** Maya starts; the script points `MAYA_APP_DIR` at a scratch
    folder when `$HOME` cannot be written. **[guess]** that this is enough
    for `Render` to start.
+
+## Installed by `c4 farm integrate maya on`
+
+1. Run `c4 farm integrate maya on`, start Maya. **Expect:** the C4 menu.
+   **[guess]** that the version's user `modules` folder
+   (`~/Library/Preferences/Autodesk/maya/<year>/modules` on macOS,
+   `~/maya/<year>/modules` on Linux, `~/Documents/maya/<year>/modules` on
+   Windows) is on the default `MAYA_MODULE_PATH`, and that a module path
+   with spaces in it (a Windows home folder) still reads.

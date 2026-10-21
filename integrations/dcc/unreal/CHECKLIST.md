@@ -263,3 +263,11 @@ every item here is to be checked, in Unreal 5.4, 5.5 and 5.6.
    <project> map=... sequence=... config=...`, with `C4_TREE` and
    `C4_FRAME_START`/`C4_FRAME_END` set). **Expect:** the same frames, and
    `UnrealEditor-Cmd.exe` found from `Engine\Binaries\Win64`.
+
+## Installed by `c4 farm integrate unreal on`
+
+1. Run `c4 farm integrate unreal on`, open a project with the three plug-ins
+   on. **Expect:** the Output Log says "C4: C4FarmExecutor is ready".
+   **[guess]** that Unreal adds `~/Documents/UnrealEngine/Python` to its
+   Python path on macOS as on Windows, and runs the `init_unreal.py` there.
+   Run `off`: the file is gone and the executor no longer loads.
