@@ -49,6 +49,9 @@ type ToolPublishResponse struct {
 	// and GET /tools/{project}/{tool}?version= says how it went.
 	Test   *ToolTestState `json:"test,omitempty"`
 	DryRun bool           `json:"dryRun,omitempty"`
+	// Warnings are what will likely go wrong when its units run, though
+	// the farm publishes it: an image that runs as root, for one.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 // ToolSummary is a published tool in GET /tools/{project}.

@@ -1380,6 +1380,11 @@ publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
   version is offered, copies its tree into every project's store and grants
   it in projects with `scope: Grants`, projects made later included. A
   version no longer offered and used by no job loses its grants;
+- warns (`warnings`) of what will likely fail when its units run, and still
+  publishes: an image that runs as root (no `USER`, or 0), since units run
+  as 65532 under Pod Security restricted, with the fix (build it `FROM
+  c4/runtime-base`, or add `USER 65532`). The farm asks the image's
+  registry, briefly; an image it cannot ask about gets no warning;
 - is booked: the publish (`tool-publish`: who, the version, the tree, the
   test job), the test's pass or failure with its reason (`tool-test`), and
   the offer (`tool-offer`).

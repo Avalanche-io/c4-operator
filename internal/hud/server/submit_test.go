@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/Avalanche-io/c4-operator/internal/imageref"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -50,7 +51,15 @@ func submitFarm(t *testing.T) *Server {
 	}
 	s.Stores = func(_ context.Context, project string) (*storeurl.Sharded, error) { return stores[project], nil }
 	s.SpoolDir = t.TempDir()
+	// No registry answers here: a test that needs one gives its own.
+	s.Images = &imageref.Resolver{Client: &http.Client{Transport: noRegistry{}}}
 	return s
+}
+
+type noRegistry struct{}
+
+func (noRegistry) RoundTrip(*http.Request) (*http.Response, error) {
+	return nil, errors.New("no registry in this test")
 }
 
 func call(t *testing.T, s *Server, method, path string, body any, out any) int {

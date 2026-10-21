@@ -85,14 +85,7 @@ func (s *Server) pinImage(ctx context.Context, m *model, ref string) (string, er
 	if d, ok := imageref.NodeDigest(m.nodes, resolved); ok {
 		return d, nil
 	}
-	z := s.Images
-	if z == nil {
-		plain := map[string]bool{}
-		for _, h := range s.PlainRegistries {
-			plain[h] = true
-		}
-		z = &imageref.Resolver{PlainHTTP: func(host string) bool { return plain[host] || imageref.Loopback(host) }}
-	}
+	z := s.resolver()
 	if resolved != ref {
 		p, err := z.Pin(ctx, resolved)
 		if err != nil {
@@ -101,6 +94,35 @@ func (s *Server) pinImage(ctx context.Context, m *model, ref string) (string, er
 		return p, nil
 	}
 	return z.Pin(ctx, resolved)
+}
+
+func (s *Server) resolver() *imageref.Resolver {
+	if s.Images != nil {
+		return s.Images
+	}
+	plain := map[string]bool{}
+	for _, h := range s.PlainRegistries {
+		plain[h] = true
+	}
+	return &imageref.Resolver{PlainHTTP: func(host string) bool { return plain[host] || imageref.Loopback(host) }}
+}
+
+// rootWarning says an image runs as root, which fails under Pod Security
+// restricted on its first write, or "" (also when its registry cannot say:
+// an image loaded onto the nodes has no registry to ask).
+func (s *Server) rootWarning(ctx context.Context, image string) string {
+	if image == "" {
+		return ""
+	}
+	// Best effort, and quick: a registry that does not answer at once
+	// leaves the warning out rather than holding up the publish.
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cancel()
+	user, err := s.resolver().User(ctx, image)
+	if err != nil || !imageref.RunsAsRoot(user) {
+		return ""
+	}
+	return fmt.Sprintf("%s runs as root, and the farm runs units as user 65532 (Pod Security restricted), so its first write may fail with permission denied: build it FROM c4/runtime-base, or add USER 65532 to its Dockerfile", image)
 }
 
 // readFile is a file of a view, from a store.
@@ -434,6 +456,9 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 	}
 	out := api.ToolPublishResponse{OK: true, Tool: tool.Name, View: published.ID.String(),
 		Image: lock.Images[tool.Runs.Image], Scope: scope, Lock: lockJSON, DryRun: body.DryRun}
+	if w := s.rootWarning(ctx, out.Image); w != "" {
+		out.Warnings = append(out.Warnings, w)
+	}
 	if body.DryRun {
 		writeJSON(w, http.StatusOK, out)
 		return

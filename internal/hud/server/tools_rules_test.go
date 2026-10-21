@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/Avalanche-io/c4-operator/internal/imageref"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -511,5 +512,43 @@ func TestPublishRefusesFarmToolNames(t *testing.T) {
 	var l c4v1.ToolList
 	if err := s.Client.List(context.Background(), &l); err != nil || len(l.Items) != 0 {
 		t.Fatalf("%d tools, %v", len(l.Items), err)
+	}
+}
+
+// Publishing a tool whose image runs as root warns that its units, which
+// run as 65532, may fail on their first write, and says how to fix it;
+// an image with a user publishes without the warning.
+func TestPublishWarnsOfARootImage(t *testing.T) {
+	s := toolFarm(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/manifests/sha256:"+strings.Repeat("1", 64)):
+			w.Write([]byte(`{"config":{"digest":"sha256:root"}}`))
+		case strings.HasSuffix(r.URL.Path, "/manifests/sha256:"+strings.Repeat("2", 64)):
+			w.Write([]byte(`{"config":{"digest":"sha256:user"}}`))
+		case strings.HasSuffix(r.URL.Path, "/blobs/sha256:root"):
+			w.Write([]byte(`{"config":{}}`))
+		case strings.HasSuffix(r.URL.Path, "/blobs/sha256:user"):
+			w.Write([]byte(`{"config":{"User":"65532"}}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	host := strings.TrimPrefix(srv.URL, "http://")
+	s.Images = &imageref.Resolver{Client: srv.Client()}
+	for digit, root := range map[string]bool{"1": true, "2": false} {
+		image := host + "/studio/notes@sha256:" + strings.Repeat(digit, 64)
+		files := untested("echo hi")
+		files["tool.yaml"] = strings.Replace(files["tool.yaml"], busybox, image, 1)
+		view := putTree(t, s, "show-a", files)
+		code, out := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: view.String(), DryRun: true})
+		if code != http.StatusOK || !out.OK {
+			t.Fatalf("%s: %d %+v", image, code, out)
+		}
+		warned := len(out.Warnings) == 1 && strings.Contains(out.Warnings[0], "runs as root") && strings.Contains(out.Warnings[0], "FROM c4/runtime-base")
+		if warned != root {
+			t.Errorf("%s: warnings %v", image, out.Warnings)
+		}
 	}
 }
