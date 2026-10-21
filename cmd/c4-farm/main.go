@@ -13,6 +13,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"syscall"
@@ -79,6 +80,8 @@ Agents
   agents add NAME          make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
+  integrations             what this machine could add (Claude Code today), and which are on
+  integrate NAME on|off    add an integration, or take out everything it added
   mcp                      serve the farm's tools to an agent over stdio
 
 Flags for every command: --farm NAME, --project NAME, --utc (times in UTC).
@@ -196,6 +199,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		name := fs.String("name", "", "a name for the farm (default the HUD's host)")
 		as := fs.String("as", "", "a development viewer, on a local farm")
 		tokenFile := fs.String("token-file", "", "a file holding your bearer token")
+		integrateOn := fs.String("integrate", "", "the integrations to add, without asking: claude")
+		integrateOff := fs.Bool("no-integrate", false, "add no integration, without asking")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
@@ -224,10 +229,20 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		cfg.Farms[n], cfg.Current = f, n
+		on, err := farmcli.Choose(cfg, farmcli.Detect(), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
+		if err != nil {
+			return err
+		}
 		if err := cfg.Save(); err != nil {
 			return err
 		}
 		fmt.Fprintf(stdout, "signed in to %s as %s · projects %s\n", n, s.Viewer.User, strings.Join(s.Viewer.Projects, ", "))
+		if slices.Contains(on, farmcli.Claude) {
+			// a farm signed in to, not made here: its tools in Claude Code,
+			// and no runner (that is the farm admin's to enroll)
+			(&farmcli.Integration{}).On(ctx, farmcli.Out{W: stdout})
+		}
+		fmt.Fprintf(stdout, "%s\n", farmcli.IntegrateLine(cfg))
 		return nil
 
 	case "whoami":
@@ -588,7 +603,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		port := fs.Int("port", localfarm.HUDPort, "the HUD's port on this machine")
 		storePort := fs.Int("store-port", localfarm.StorePort, "the store's port on this machine")
 		registryPort := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
-		noAgent := fs.Bool("no-agent", false, "don't make this machine one of the farm's runners for your agents (c4 farm agent start does it later)")
+		integrateOn := fs.String("integrate", "", "the integrations to add, without asking: claude (c4 farm integrations lists them)")
+		integrateOff := fs.Bool("no-integrate", false, "the minimal install: no integration added, without asking")
 		owner := fs.String("owner", "", "who owns this farm and plays every role on it (default the name in your git user.email, else your login)")
 		trackerOn := fs.Bool("tracker", false, "add a stand-in GitHub and c4-sync: issues you open become jobs, its reviews serve them (nothing leaves this machine)")
 		syncInstall := fs.String("sync-install", "", "c4-sync's install manifest, with --tracker (default this release's)")
@@ -650,6 +666,10 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner}
 		cfg.Current = localfarm.Name
+		on, err := farmcli.Choose(cfg, farmcli.Detect(), *integrateOn, *integrateOff, isTerminal(stdin), farmcli.Out{W: stdout, In: stdin})
+		if err != nil {
+			return err
+		}
 		if err := cfg.Save(); err != nil {
 			return err
 		}
@@ -660,9 +680,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		} else {
 			fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
 		}
-		if !*noAgent {
-			upAgent(ctx, stdout, o.Owner)
+		if slices.Contains(on, farmcli.Claude) {
+			in := farmcli.Integration{Runner: localRunner(o.Owner)}
+			in.On(ctx, farmcli.Out{W: stdout})
 		}
+		fmt.Fprintf(stdout, "%s\n", farmcli.IntegrateLine(cfg))
 		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)\n")
 		if o.Tracker || localfarm.HasTracker(ctx) {
@@ -771,6 +793,48 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		return errors.New("usage: c4 farm agent start | stop | run | power [--slots N] [--stop-below 25] [--resume-at 90] [--slots-file F] [--once]")
 
+	case "integrations":
+		if _, err := parse(fs, rest); err != nil {
+			return err
+		}
+		farmcli.Integrations(cfg, farmcli.Detect(), farmcli.Out{W: stdout})
+		return nil
+
+	case "integrate":
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		if len(pos) != 2 || (pos[1] != "on" && pos[1] != "off") {
+			return errors.New("usage: c4 farm integrate NAME on|off (c4 farm integrations lists them)")
+		}
+		if pos[0] != farmcli.Claude {
+			return fmt.Errorf("no integration %q here; c4 farm integrations lists them", pos[0])
+		}
+		on := pos[1] == "on"
+		o := farmcli.Out{W: stdout}
+		in := farmcli.Integration{}
+		if _, f, err := cfg.Resolve(cm.farm); err == nil && f.Local && on {
+			in.Runner = localRunner(localfarm.DefaultOwner())
+		}
+		if on {
+			err = in.On(ctx, o)
+		} else {
+			err = in.Off(ctx, o)
+		}
+		if err != nil {
+			return err
+		}
+		if cfg.Integrations == nil {
+			cfg.Integrations = map[string]bool{}
+		}
+		cfg.Integrations[pos[0]] = on
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "%s\n", farmcli.IntegrateLine(cfg))
+		return nil
+
 	case "agents":
 		session := fs.String("session", "", "with add: the Claude Code session (default the newest whose transcript names the agent)")
 		configDir := fs.String("config-dir", "", "with add: the Claude Code config dir (default $CLAUDE_CONFIG_DIR, else ~/.claude)")
@@ -797,7 +861,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		case len(pos) == 0:
 			return farmcli.Sessions(ctx, o, farmcli.SessionsArgs{All: *all})
 		case len(pos) == 2 && (pos[0] == "add" || pos[0] == "rm"):
-			a := farmcli.AgentsArgs{Name: pos[1], Session: *session, ConfigDir: *configDir, Folder: *folder, Yes: *yes, Terminal: isTerminal(stdin)}
+			// the integration, once on, is the person's yes to an agent's hooks
+			integrated := cfg.Integrations[farmcli.Claude] && pos[0] == "add"
+			a := farmcli.AgentsArgs{Name: pos[1], Session: *session, ConfigDir: *configDir, Folder: *folder, Yes: *yes || integrated, Terminal: isTerminal(stdin)}
 			if pos[0] == "rm" {
 				return farmcli.RemoveAgent(ctx, o, a)
 			}
@@ -831,31 +897,31 @@ func isTerminal(r io.Reader) bool {
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
 }
 
-// upAgent makes this machine one of the local farm's runners for its
-// owner: c4-agent enroll, then the agent service (c4 farm agent start),
-// which runs the power reader and the host runner. Neither stops up: the
-// farm is a farm without it, and the line says how to finish.
-func upAgent(ctx context.Context, w io.Writer, owner string) {
-	bin, err := exec.LookPath("c4-agent")
-	if err != nil {
-		fmt.Fprintf(w, "agents    this machine runs no agents yet: c4-agent is not on PATH (brew install avalanche-io/tap/c4 brings it; then c4 farm up)\n")
-		return
+// localRunner makes this machine one of the local farm's runners for its
+// owner, as the Claude Code integration does on a local farm: c4-agent
+// enroll, then the agent service (c4 farm agent start), which runs the
+// power reader and the host runner. It never stops up: the farm is a farm
+// without it, and its line says how to finish.
+func localRunner(owner string) func(ctx context.Context, o farmcli.Out) error {
+	return func(ctx context.Context, o farmcli.Out) error {
+		bin, err := exec.LookPath("c4-agent")
+		if err != nil {
+			return errors.New("this machine runs no agents yet: c4-agent is not on PATH (brew install avalanche-io/tap/c4 brings it; then c4 farm integrate claude on)")
+		}
+		if bin, err = filepath.Abs(bin); err != nil {
+			return err
+		}
+		e, err := localfarm.EnrollMachine(ctx, bin, owner, 4)
+		if err != nil {
+			return fmt.Errorf("this machine runs no agents yet: %v (c4 farm integrate claude on tries again)", err)
+		}
+		svc := &farmcli.AgentService{AgentBin: bin, Slots: 4}
+		if err := svc.Start(ctx, farmcli.Out{W: io.Discard}); err != nil {
+			return fmt.Errorf("%s is enrolled, but its runner did not start: %v (c4 farm agent start tries again)", e.Node, err)
+		}
+		fmt.Fprintf(o.W, "agents    this machine (%s) runs %s's agents, %s pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)\n", e.Node, e.Owner, e.Pool)
+		return nil
 	}
-	if bin, err = filepath.Abs(bin); err != nil {
-		fmt.Fprintf(w, "agents    this machine runs no agents yet: %v\n", err)
-		return
-	}
-	e, err := localfarm.EnrollMachine(ctx, bin, owner, 4)
-	if err != nil {
-		fmt.Fprintf(w, "agents    this machine runs no agents yet: %v (c4 farm up tries again)\n", err)
-		return
-	}
-	svc := &farmcli.AgentService{AgentBin: bin, Slots: 4}
-	if err := svc.Start(ctx, farmcli.Out{W: io.Discard}); err != nil {
-		fmt.Fprintf(w, "agents    %s is enrolled, but its runner did not start: %v (c4 farm agent start tries again)\n", e.Node, err)
-		return
-	}
-	fmt.Fprintf(w, "agents    this machine (%s) runs %s's agents, %s pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)\n", e.Node, e.Owner, e.Pool)
 }
 
 // openURL opens a link in the default browser.

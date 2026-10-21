@@ -31,7 +31,11 @@ type Farm struct {
 type Config struct {
 	Current string          `json:"current"`
 	Farms   map[string]Farm `json:"farms"`
-	path    string
+	// Integrations are the person's answers, by integration (claude, and
+	// later each DCC): on or off; one not in the map is unanswered, and is
+	// asked about once (c4 farm integrate NAME on|off changes it).
+	Integrations map[string]bool `json:"integrations,omitempty"`
+	path         string
 }
 
 // ConfigPath is where the config lives: $C4_FARM_CONFIG, else
