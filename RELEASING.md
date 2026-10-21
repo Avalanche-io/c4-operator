@@ -8,9 +8,10 @@ prebuilt tool's `tool.lock` pinning those images by digest (`make
 tool-locks`), and runs GoReleaser (`.goreleaser.yaml`): the CLI for Linux
 and macOS (amd64 and arm64), with the locked tools embedded in `c4-farm`,
 the image `ghcr.io/avalanche-io/c4-operator:vX.Y.Z` for linux/amd64 and
-linux/arm64, `install.yaml`, checksums, the Homebrew formulas, and a draft
-GitHub release to review and publish by hand. Last it builds the sample set
-with the release's images and attaches it. `make release-snapshot` runs
+linux/arm64, `install.yaml`, checksums, the Homebrew formulas (generated
+for reference, not pushed), and a draft GitHub release to review and
+publish by hand. Last it builds the sample set with the release's images
+and attaches it. `make release-snapshot` runs
 GoReleaser locally and publishes nothing; its `c4-farm` has no tool locks,
 so its farm pins the images when it publishes.
 
@@ -38,10 +39,13 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
 
 5. **Joshua: create the tap repository** `github.com/Avalanche-io/homebrew-tap`:
    public, with a README so it has a `main` branch, and nothing else. The
-   release writes `Formula/c4-farm.rb` and `Formula/c4-agent.rb` there; the
-   C4 suite release writes `Formula/c4.rb`, which depends on both, so `brew
-   install avalanche-io/tap/c4` brings c4, `c4 farm`, c4-agent and c4-unit.
-   The C4 lead owns the Homebrew release and its order with the suite's.
+   C4 lead runs the Homebrew release from its own machine: it writes
+   `Formula/c4-farm.rb` and `Formula/c4-agent.rb` from the release's
+   checksums (c4toolkit `scripts/farm-formulas.sh`) and the suite's
+   `Formula/c4.rb`, which depends on both, so `brew install
+   avalanche-io/tap/c4` brings c4, `c4 farm`, c4-agent and c4-unit. The
+   release pushes nothing to the tap and needs no token for it; GoReleaser
+   generates the two formulas into `dist/homebrew` only, as a reference.
 6. Done already: `github.com/Avalanche-io/c4-operator` is public, with
    `main` pushed.
 7. **Joshua: settings.**
@@ -51,11 +55,6 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
      workflows to write packages (the release workflow pushes to GHCR with
      `GITHUB_TOKEN`).
    - Branches: protect `main`, requiring the `ci` checks.
-   - Secrets and variables, Actions: a repository secret
-     `HOMEBREW_TAP_TOKEN`, a fine-grained personal access token with
-     resource owner Avalanche-io, repository access only
-     `Avalanche-io/homebrew-tap`, and one permission, Contents: Read and
-     write. GoReleaser pushes the formulas with it; nothing else uses it.
 8. Wait for the `ci` workflow on `main` to pass: verify, unit and envtest,
    privileged Linux tests, build.
 
@@ -76,9 +75,10 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
     if GitHub has not. This is needed once, for the first release.
 11. **Joshua: review and publish the draft release** (notes, `install.yaml`,
     archives, checksums).
-12. The formulas download the release's archives, so `brew install` works
-    from the moment the draft is published (the repository is public
-    already).
+12. **The C4 lead: the tap.** Once the draft is published, it writes
+    `c4-farm.rb` and `c4-agent.rb` to the tap from the release's checksums,
+    then the suite's `c4.rb`; `brew install` works from then on (the
+    repository is public already).
 13. Smoke test from a clean machine with the published images: `brew
     install avalanche-io/tap/c4-farm`, then `c4-farm` (help, exit 0),
     `c4-agent help` and `c4-unit` (its usage, exit 2); once the C4 suite

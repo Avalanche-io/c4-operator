@@ -112,8 +112,6 @@ jobs:
         args: release --clean
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        # a token that can write to Avalanche-io/homebrew-tap, for the formulas
-        HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
   # The sample set `c4 farm samples get` downloads, built with this release's
   # images, attached to the draft release with its C4 ID beside it.

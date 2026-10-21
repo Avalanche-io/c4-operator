@@ -114,23 +114,25 @@ archives:
   name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
   files: [LICENSE, NOTICE, README.md]
 
-# Homebrew formulas in Avalanche-io/homebrew-tap, for macOS and Linux:
+# Homebrew formulas for Avalanche-io/homebrew-tap, for macOS and Linux:
 # `brew install avalanche-io/tap/c4-farm` (and c4-agent, the host runner).
-# Formulas rather than casks, which are macOS only. Pushing to the tap needs
-# HOMEBREW_TAP_TOKEN, a token that can write to that repository; a
-# prerelease tag skips the upload.
+# Formulas rather than casks, which are macOS only. The release never pushes
+# them: the C4 lead writes the tap's c4-farm.rb and c4-agent.rb from the
+# release's checksums (c4toolkit scripts/farm-formulas.sh), so these are
+# generated into dist/homebrew only, as the reference they are checked
+# against.
 brews:
 - name: c4-farm
   ids: [c4-farm]
   repository:
     owner: Avalanche-io
     name: homebrew-tap
-    token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    token: "{{ envOrDefault \"HOMEBREW_TAP_TOKEN\" \"\" }}"
   directory: Formula
   homepage: https://github.com/Avalanche-io/c4-operator
   description: Submit work to a C4 farm, watch it and take its output home; c4 farm up makes a farm on this machine
   license: Apache-2.0
-  skip_upload: auto
+  skip_upload: true
   # one brew install (c4, which depends on this formula) brings c4 farm,
   # c4-agent and c4-unit: c4 farm agents reads sessions through c4-agent
   dependencies:
@@ -145,12 +147,12 @@ brews:
   repository:
     owner: Avalanche-io
     name: homebrew-tap
-    token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    token: "{{ envOrDefault \"HOMEBREW_TAP_TOKEN\" \"\" }}"
   directory: Formula
   homepage: https://github.com/Avalanche-io/c4-operator
   description: C4's host runner and unit runner, for agent work and tool units on a machine outside the cluster
   license: Apache-2.0
-  skip_upload: auto
+  skip_upload: true
   install: |
     bin.install "c4-agent", "c4-unit"
   test: |
