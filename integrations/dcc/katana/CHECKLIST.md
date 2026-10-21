@@ -199,10 +199,21 @@ For each item, press Check and Show file.
    follows binary layers too. Without it, a binary `.usd` layer is sent
    and the check warns "… is binary USD and USD's Python is not available
    here, so what it reads in turn was not collected".
-7. **Known limits.** The textures inside a look file, a live group's own
-   contents and files an expression names on frames after the first are
-   not collected. Note any that a real project needs.
-8. **A large project** (thousands of nodes). **Expect:** ticking boxes stays
+7. **A sequence an expression names.** Set an Alembic_In's `abcAsset`
+   to the expression `'/tmp/show/fx/smoke.%04d.abc' % frame` (48 files on
+   disk) and give its Render node the range 1001-1010. **Expect:** Check
+   counts the ten files 1001-1010, for that Render node only. Change the
+   expression to give `'/tmp/show/fx/smoke.####.abc'`: the same ten.
+   Give it `frame + 10`: one file, frame 1011, as before. **[guess]**
+   that `Parameter.isExpression()` says whether a parameter is given by
+   an expression, and `getValue(frame)` evaluates it at that frame (the
+   next frame's value is how a per-frame file is found). **[guess]** that
+   Katana's own nodes (Alembic_In, a VDB reader) read such a file frame
+   for frame, with no handle frames before or after the range.
+8. **Known limits.** The textures inside a look file, a live group's own
+   contents and files any other expression names on frames after the
+   first are not collected. Note any that a real project needs.
+9. **A large project** (thousands of nodes). **Expect:** ticking boxes stays
    instant and Check starts within a few seconds. Each read walks every
    node's parameters.
 

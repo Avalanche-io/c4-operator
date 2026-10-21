@@ -7,7 +7,8 @@ from c4submit.collect import gather
 from c4submit.testing import write
 from katana_scenes import ASSET, light_project
 
-from c4_katana.host import KatanaHost, looks_like_file, param_files
+from c4_katana.host import KatanaHost, expression_sequence, looks_like_file, param_files
+from c4submit.host import JOB_FRAMES
 
 
 def by_name(items):
@@ -147,3 +148,55 @@ def test_an_unsaved_project_cannot_be_saved_from_here():
         assert "File > Save As" in str(e)
     else:
         raise AssertionError("an unsaved project has nowhere to be saved")
+
+
+def test_an_expression_naming_each_frames_file_is_a_sequence_over_the_jobs_frames(tmp_path):
+    host, project, _ = light_project(tmp_path)
+    show = str(tmp_path)
+    smoke = fk.node("Alembic_In", "smoke_abc",
+                    abcAsset=(lambda t: f"{show}/fx/smoke/smoke.{int(t):04d}.abc", ASSET))
+    fk.render("Render_fx", smoke, outputs=[os.path.join(show, "render", "fx.####.exr")], frames=(1001, 1010))
+    fk.node("UsdIn", "vdb_in", fileName=(lambda t: f"{show}/fx/fog/fog.%04d.vdb", ASSET))
+    fk.node("Alembic_In", "offset_abc", abcAsset=(lambda t: f"{show}/fx/later.{int(t) + 10:04d}.abc", ASSET))
+    fk.node("Alembic_In", "same_abc", abcAsset=(lambda t: f"{show}/anim/same.abc", ASSET))
+    fk.node("Alembic_In", "typed_seq", abcAsset=(f"{show}/fx/typed.####.abc", ASSET))
+    deps = {d.node: d for d in host.dependencies()}
+    d = deps["smoke_abc.abcAsset"]
+    assert d.path == f"{show}/fx/smoke/smoke.####.abc" and d.frames == JOB_FRAMES, "the pattern, over the jobs' frames"
+    assert d.renderables == ["Render_fx"], "tagged as before"
+    assert (deps["vdb_in.fileName"].path, deps["vdb_in.fileName"].frames) == (f"{show}/fx/fog/fog.%04d.vdb",
+                                                                              JOB_FRAMES), "a pattern it gives as one"
+    assert (deps["offset_abc.abcAsset"].path, deps["offset_abc.abcAsset"].frames) == (f"{show}/fx/later.1011.abc",
+                                                                                      None), "an offset: as before"
+    assert deps["same_abc.abcAsset"].frames is None and deps["same_abc.abcAsset"].path == f"{show}/anim/same.abc"
+    assert deps["typed_seq.abcAsset"].frames is None, "a typed pattern, not an expression: every file, as before"
+    assert sorted(p for p, _ in param_files(fk.state().nodes["smoke_abc"], 1001)) == [f"{show}/fx/smoke/smoke.####.abc"]
+
+
+def test_an_unpadded_frame_and_a_katana_without_isexpression(tmp_path, monkeypatch):
+    fk.reset(str(tmp_path / "a.katana"), 8, 12)
+    n = fk.node("Alembic_In", "a", abcAsset=(lambda t: f"/show/fx/a.{int(t)}.abc", ASSET))
+    assert param_files(n, 9) == [("/show/fx/a.#.abc", "a.abcAsset")], "9 then 10: unpadded"
+    monkeypatch.delattr(fk.Parameter, "isExpression")
+    assert param_files(n, 9) == [("/show/fx/a.#.abc", "a.abcAsset")], "known from two frames"
+    m = fk.node("Alembic_In", "b", abcAsset=(lambda t: "/show/fx/b.####.abc", ASSET))
+    assert param_files(m, 9) == [("/show/fx/b.####.abc", "b.abcAsset")]
+    assert expression_sequence(m.getParameter("abcAsset"), "/show/fx/b.####.abc", 9) is None, \
+        "a pattern, with no way to know it is an expression: as before"
+
+
+def test_only_the_jobs_frames_of_an_expressions_sequence_are_sent(tmp_path):
+    from c4submit.submitter import Draft, prepare
+    from c4submit.tool import Tool
+    from katana_scenes import KATANA_RENDER
+
+    host, project, _ = light_project(tmp_path)
+    show = str(tmp_path)
+    for f in range(1001, 1049):
+        write(os.path.join(show, "fx", "smoke", f"smoke.{f:04d}.abc"), b"%d" % f)
+    smoke = fk.node("Alembic_In", "smoke_abc",
+                    abcAsset=(lambda t: f"{show}/fx/smoke/smoke.{int(t):04d}.abc", ASSET))
+    fk.render("Render_fx", smoke, outputs=[os.path.join(show, "render", "fx.####.exr")], frames=(1001, 1010))
+    files = prepare(Draft(host, Tool(KATANA_RENDER), {"name": "saltmarsh", "root": show})).collection.files
+    got = sorted(f for f in files if f.startswith("fx/smoke/"))
+    assert got == [f"fx/smoke/smoke.{f}.abc" for f in range(1001, 1011)], "Render_fx's ten frames, not 48 or one"

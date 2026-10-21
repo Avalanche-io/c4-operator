@@ -62,6 +62,10 @@ class Parameter:
             return self.value(time)
         return self.value
 
+    def isExpression(self) -> bool:  # noqa: N802
+        # A value given as a function of the frame stands for an expression.
+        return callable(self.value)
+
     def setValue(self, v: Any, time: float = 0) -> None:  # noqa: N802
         self.value = float(v) if self.type == "number" else v
         _s.dirty = True

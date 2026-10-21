@@ -78,8 +78,14 @@ node that reads it. Katana carries USD's Python, which does this exactly.
 Without it, text layers are read directly, and a binary layer is sent with
 a warning that what it reads was not collected. Known limits: the textures
 inside a look file and a live group's own contents are not read, so they
-must already be under the project folder (`C4_ROOT`). An expression that
-names a different file on each frame is read at the first frame only.
+must already be under the project folder (`C4_ROOT`).
+
+A file parameter given by an expression that names a sequence is sent for
+the frames of the jobs that read it: an expression whose value holds frame
+tokens (`fog.%04d.vdb`, `####`), or one that names this frame's file and
+the next frame's in turn (`smoke.1001.abc`, `smoke.1002.abc`). Any other
+expression (one that adds an offset to the frame, say) is read at the
+first frame only.
 
 ## On Submit
 

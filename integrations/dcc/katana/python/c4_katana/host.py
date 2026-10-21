@@ -10,7 +10,9 @@ Every file a node's parameters name is a dependency: Alembic caches, USD
 stages, look files, textures on shading nodes, live groups, anything with
 a file widget or a file's name. Each is tagged with the Render nodes
 downstream of it in the node graph, so unticking a Render node leaves out
-what only it reads. A USD file (a UsdIn's stage, or any parameter naming
+what only it reads. A parameter given by an expression that names a
+sequence (its value holds frame tokens, or names this frame's file and the
+next frame's in turn) is read over the jobs' frames. A USD file (a UsdIn's stage, or any parameter naming
 one) is followed into what it reads in turn, its sublayers, references,
 payloads and textures, with ``c4submit.usd``, each tagged as the node that
 reads the stage; a binary layer that cannot be read without USD's Python is
@@ -32,7 +34,7 @@ from typing import Dict, List, Optional, Set, Tuple
 from c4submit import frames as framelib
 from c4submit import paths, seq
 from c4submit import usd as usdlib
-from c4submit.host import Dependency, Host, Renderable
+from c4submit.host import JOB_FRAMES, Dependency, Host, Renderable
 
 #: Nodes that are jobs.
 RENDER_TYPES = ("Render",)
@@ -130,11 +132,48 @@ def looks_like_file(value: str) -> bool:
     return v.endswith(FILE_EXTENSIONS)
 
 
+_DIGITS = re.compile(r"\d+")
+
+
+def expression_sequence(param, value: str, frame: float) -> Optional[str]:
+    """The sequence a file parameter given by an expression reads, as a
+    pattern: its value when that holds frame tokens (``fog.####.vdb``), or
+    its value at ``frame`` with that frame's number made ``#`` when the
+    value at the next frame is the next frame's file (``fog.1001.vdb``,
+    ``fog.1002.vdb``). None when it is not an expression, or names one file
+    (or files that are not frame for frame, such as an offset)."""
+    is_expr = getattr(param, "isExpression", None)
+    if is_expr is not None and not _call(is_expr, default=False):
+        return None
+    if seq.has_frames(value):
+        return value if is_expr is not None else None
+    f = int(round(frame))
+    nxt = _call(param.getValue, f + 1, default=None)
+    if not isinstance(nxt, str) or nxt.strip() == value:
+        return None
+    nxt = nxt.strip()
+    for m in reversed(list(_DIGITS.finditer(value))):
+        if int(m.group(0)) != f:
+            continue
+        pattern = value[:m.start()] + "#" * len(m.group(0)) + value[m.end():]
+        if seq.at_frame(pattern, f + 1) == nxt:
+            return pattern
+    return None
+
+
 def param_files(node, frame: float) -> List[Tuple[str, str]]:
-    """(path, parameter) for every file a node's parameters name to read.
+    """(path, parameter) for every file a node's parameters name to read
+    (a sequence an expression names as its pattern)."""
+    return [(p, name) for p, name, _ in param_reads(node, frame)]
+
+
+def param_reads(node, frame: float) -> List[Tuple[str, str, Optional[str]]]:
+    """(path, parameter, frames) for every file a node's parameters name to
+    read: ``frames`` is ``JOB_FRAMES`` for a sequence an expression names
+    (``expression_sequence``), whose path is then its pattern, else None.
     A shading node's parameter that is not enabled is its shader's default,
     so it is skipped."""
-    out: List[Tuple[str, str]] = []
+    out: List[Tuple[str, str, Optional[str]]] = []
 
     def walk(p) -> None:
         kids = _call(p.getChildren, default=[]) or []
@@ -154,7 +193,10 @@ def param_files(node, frame: float) -> List[Tuple[str, str]]:
         if widget in OUTPUT_WIDGETS:
             return
         if widget in INPUT_WIDGETS or looks_like_file(v):
-            out.append((v.strip(), _call(p.getFullName, default=p.getName()) or p.getName()))
+            v = v.strip()
+            pattern = expression_sequence(p, v, frame)
+            out.append((pattern or v, _call(p.getFullName, default=p.getName()) or p.getName(),
+                        JOB_FRAMES if pattern else None))
 
     root = _call(node.getParameters)
     if root is not None:
@@ -336,18 +378,18 @@ class KatanaHost(Host):
         for n in ng.GetAllNodes() or []:
             if n.getType() in OUTPUT_TYPES or bypassed(n):
                 continue
-            files = param_files(n, frame)
+            files = param_reads(n, frame)
             if not files:
                 continue
             name = n.getName()
             readers = [r for r, up in ups.items() if name in up]
             tag: Optional[List[str]] = None if not ups or len(readers) == len(ups) else readers
-            for raw, param in files:
+            for raw, param, frames in files:
                 p = self.absolute(raw)
                 if not p or (scene and paths.same(p, scene)):
                     continue
                 label = f"{name}.{param.split('.', 1)[-1]}" if param else name
-                out.append(Dependency(path=p, node=label, renderables=tag))
+                out.append(Dependency(path=p, frames=frames, node=label, renderables=tag))
                 deps, unread = usd_dependencies(p, label, tag)
                 out += deps
                 self._unread += [u for u in unread if u not in self._unread]
