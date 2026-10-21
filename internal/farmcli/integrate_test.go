@@ -120,6 +120,66 @@ func TestChooseAppsDefaultNo(t *testing.T) {
 	}
 }
 
+// An application already said yes to is asked once, at a terminal, about
+// the versions C4 isn't fully in, and a yes covers only those; a no is
+// kept, so up doesn't ask again. With no terminal or inside an agent
+// nothing is asked or changed, and a line says how to bring it up to date.
+func TestChooseOffersUpdates(t *testing.T) {
+	found := []Detected{{Name: "blender", Found: true, Question: "Add the C4 Farm panel?", Versions: []dcc.Found{
+		{Name: "blender", Version: "4.5", Title: "Blender 4.5", Status: dcc.StatusOlder},
+		{Name: "blender", Version: "5.0", Title: "Blender 5.0", Status: dcc.StatusAvailable},
+		{Name: "blender", Version: "5.1", Title: "Blender 5.1", Status: dcc.StatusIncomplete},
+		{Name: "blender", Version: "5.2", Title: "Blender 5.2", Status: dcc.StatusInstalled},
+	}}}
+	var out bytes.Buffer
+	cfg := &Config{Integrations: map[string]bool{"blender": true}}
+	on, err := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("y\n")})
+	if err != nil || strings.Join(on, " ") != "blender@4.5 blender@5.0 blender@5.1" {
+		t.Fatalf("yes: %v %v", on, err)
+	}
+	if s := out.String(); s != "C4 Farm panel: update it in Blender 4.5 (an earlier c4 release's), finish it in Blender 5.1 (an install was interrupted) and add it to Blender 5.0? c4 farm integrate blender --show says each file first. [y/N] " {
+		t.Errorf("asked: %q", s)
+	}
+
+	// enter is no, kept per version: not asked again
+	out.Reset()
+	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("\n")}); len(on) != 0 || cfg.Integrations["blender@4.5"] || !cfg.Integrations["blender"] {
+		t.Fatalf("enter: %v %v", on, cfg.Integrations)
+	}
+	out.Reset()
+	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("y\n")}); len(on) != 0 || out.Len() != 0 {
+		t.Errorf("asked again after a no: %v\n%s", on, out.String())
+	}
+
+	// the input ended: nothing recorded, asked next time
+	cfg = &Config{Integrations: map[string]bool{"blender": true}}
+	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("")}); len(on) != 0 || len(cfg.Integrations) != 1 {
+		t.Errorf("no answer: %v %v", on, cfg.Integrations)
+	}
+
+	// no terminal, or inside an agent: nothing asked or changed, one line
+	for _, agent := range []string{"", "1"} {
+		t.Setenv("CLAUDECODE", agent)
+		out.Reset()
+		on, _ := Choose(cfg, found, "", false, agent != "", Out{W: &out, In: strings.NewReader("y\n")})
+		if len(on) != 0 || len(cfg.Integrations) != 1 || out.String() != "Blender 4.5, Blender 5.0 and Blender 5.1: c4 farm integrate blender brings C4's panel up to date there\n" {
+			t.Errorf("agent %q: %v %v %q", agent, on, cfg.Integrations, out.String())
+		}
+	}
+	t.Setenv("CLAUDECODE", "")
+
+	// said no to the application: never asked about its versions
+	cfg = &Config{Integrations: map[string]bool{"blender": false}}
+	out.Reset()
+	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("y\n")}); len(on) != 0 || out.Len() != 0 {
+		t.Errorf("said no: %v %q", on, out.String())
+	}
+	// --integrate=blender turns it on, every version
+	if on, _ := Choose(cfg, found, "blender", false, true, Out{W: &out}); strings.Join(on, " ") != "blender" {
+		t.Errorf("--integrate=blender: %v", on)
+	}
+}
+
 // These tests run as a person would, whatever shell runs them (an agent's
 // included); the ones about an agent set CLAUDECODE themselves.
 func init() { os.Unsetenv("CLAUDECODE") }

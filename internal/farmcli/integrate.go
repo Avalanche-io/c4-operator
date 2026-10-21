@@ -381,9 +381,13 @@ func Consent(yes, terminal bool, command string) error {
 // on, --no-integrate turns every one off, and each is recorded; otherwise
 // a recorded answer stands, and the person at a terminal is asked once
 // about each one found and unanswered, each yes covering only what its
-// question named. Inside an agent nothing is asked or turned on, and with
-// no terminal nothing is asked or recorded: the install is minimal. It
-// returns the names on.
+// question named. An application already said yes to is asked again only
+// about its versions C4 is not yet in (a newer one, or an earlier c4
+// release's files, or an interrupted install), once. Inside an agent
+// nothing is asked or turned on, and with no terminal nothing is asked or
+// recorded: the install is minimal, and a line says how to bring an
+// application up to date. It returns what to turn on now: Claude Code if
+// it is on, and each application (NAME, or NAME@VERSION) a yes covers.
 func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool, o Out) ([]string, error) {
 	if cfg.Integrations == nil {
 		cfg.Integrations = map[string]bool{}
@@ -392,6 +396,8 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 	for _, d := range found {
 		byName[d.Name] = d
 	}
+	var apps []string // applications to change now
+	asked := false
 	switch {
 	case integrate != "" && none:
 		return nil, errors.New("--integrate and --no-integrate: give one")
@@ -416,8 +422,12 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 			if d.Runner {
 				cfg.Integrations[RunnerKey] = true
 			}
+			if len(d.Versions) > 0 {
+				apps = append(apps, n)
+			}
 		}
 	case terminal && o.In != nil && !InsideAgent():
+		asked = true
 		for _, d := range found {
 			on, answered := cfg.Integrations[d.Name]
 			switch {
@@ -442,6 +452,11 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 				}
 				a := strings.ToLower(strings.TrimSpace(line))
 				cfg.Integrations[d.Name] = a == "y" || a == "yes"
+				if cfg.Integrations[d.Name] {
+					apps = append(apps, d.Name)
+				}
+			case on && len(d.Versions) > 0:
+				apps = append(apps, offerUpdates(cfg, d, o)...)
 			case on && d.Runner:
 				if _, asked := cfg.Integrations[RunnerKey]; !asked {
 					if yes, gave := enterYes(o, RunnerQuestion()); gave {
@@ -453,11 +468,86 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 	}
 	var on []string
 	for _, d := range found {
-		if cfg.Integrations[d.Name] {
+		if len(d.Versions) == 0 && cfg.Integrations[d.Name] {
 			on = append(on, d.Name)
 		}
+		if !asked && !none && integrate == "" && cfg.Integrations[d.Name] {
+			if todo := updates(cfg, d); len(todo) > 0 {
+				o.printf("%s: c4 farm integrate %s brings C4's panel up to date there\n", andList(titles(todo)), d.Name)
+			}
+		}
 	}
-	return on, nil
+	return append(on, apps...), nil
+}
+
+// updates are an application's versions C4 is not fully in, whose offer
+// was never turned down.
+func updates(cfg *Config, d Detected) []dcc.Found {
+	var todo []dcc.Found
+	for _, f := range d.Versions {
+		if yes, ok := cfg.Integrations[f.Name+"@"+f.Version]; f.Status == dcc.StatusInstalled || (ok && !yes) {
+			continue
+		}
+		todo = append(todo, f)
+	}
+	return todo
+}
+
+func titles(fs []dcc.Found) []string {
+	var out []string
+	for _, f := range fs {
+		out = append(out, f.Title)
+	}
+	return out
+}
+
+// offerUpdates asks, once, about an application already said yes to whose
+// versions C4 is not fully in: each one an earlier c4 release's files are
+// in, an install was interrupted in, or C4 was never added to. A yes
+// covers those versions (NAME@VERSION); a no is recorded for each, so up
+// doesn't ask again; no answer records nothing.
+func offerUpdates(cfg *Config, d Detected, o Out) []string {
+	todo := updates(cfg, d)
+	if len(todo) == 0 {
+		return nil
+	}
+	var update, finish, add []string
+	for _, f := range todo {
+		switch f.Status {
+		case dcc.StatusOlder:
+			update = append(update, f.Title)
+		case dcc.StatusIncomplete:
+			finish = append(finish, f.Title)
+		default:
+			add = append(add, f.Title)
+		}
+	}
+	var parts []string
+	if len(update) > 0 {
+		parts = append(parts, "update it in "+andList(update)+" (an earlier c4 release's)")
+	}
+	if len(finish) > 0 {
+		parts = append(parts, "finish it in "+andList(finish)+" (an install was interrupted)")
+	}
+	if len(add) > 0 {
+		parts = append(parts, "add it to "+andList(add))
+	}
+	o.printf("C4 Farm panel: %s? c4 farm integrate %s --show says each file first. [y/N] ", andList(parts), d.Name)
+	line, err := bufio.NewReader(o.In).ReadString('\n')
+	if err != nil {
+		o.printf("\n")
+		return nil
+	}
+	a := strings.ToLower(strings.TrimSpace(line))
+	var out []string
+	for _, f := range todo {
+		if a == "y" || a == "yes" {
+			out = append(out, f.Name+"@"+f.Version)
+		} else {
+			cfg.Integrations[f.Name+"@"+f.Version] = false
+		}
+	}
+	return out
 }
 
 // IntegrateLine is what up and login say of the Claude Code integration
