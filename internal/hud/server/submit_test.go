@@ -649,7 +649,7 @@ func TestAUnitsJobKeepsItsParentsGrant(t *testing.T) {
 	ctx := context.Background()
 	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: c4v1.SubmitGrantName("github", "dana")},
 		Spec: c4v1.SubmitGrantSpec{Person: "dana", Tracker: "github", Pools: []string{"cpu"}, Classes: []string{"render"},
-			Until: metav1.NewTime(time.Now().Add(24 * time.Hour)), Record: "c4-grant-record"}}
+			Until: metav1.NewTime(time.Now().Add(24 * time.Hour)), Record: "c4-grant-renewed"}}
 	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "issue-41", UID: "uid-issue-41",
 		Labels:      map[string]string{c4v1.LabelTracker: "github"},
 		Annotations: map[string]string{c4v1.AnnotationOwner: "dana", c4v1.AnnotationGrant: "c4-grant-record"}},
@@ -661,13 +661,25 @@ func TestAUnitsJobKeepsItsParentsGrant(t *testing.T) {
 	}
 	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/issue-41/0", Projects: []string{"show-a"},
 		Unit: &api.UnitViewer{Namespace: "show-a", Job: "issue-41", JobUID: "uid-issue-41", Unit: "0", Grant: "project"}}
-	submit := func(name, class string, pools ...string) (int, string) {
+	m := s.current()
+	m.projects[0].Spec.Namespaces = append(m.projects[0].Spec.Namespaces, "show-a-fx")
+	m.nsProject["show-a-fx"] = "show-a"
+	submitIn := func(ns, name, class string, pools ...string) (int, string) {
 		spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: class, Pools: pools, Params: map[string]string{"frames": "1-2"},
 			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
 		var out map[string]any
-		code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit", api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: name, Spec: spec}, &out)
+		code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit", api.SubmitRequest{Project: "show-a", Namespace: ns, Name: name, Spec: spec}, &out)
 		msg, _ := out["error"].(string)
 		return code, msg
+	}
+	submit := func(name, class string, pools ...string) (int, string) {
+		return submitIn("show-a", name, class, pools...)
+	}
+	// the grant holds only where the parent is: elsewhere the child could
+	// never run
+	if code, msg := submitIn("show-a-fx", "elsewhere", "render", "cpu"); code != http.StatusForbidden ||
+		!strings.Contains(msg, "a unit of a job made under dana's grant to tracker github submits in show-a-fx; the grant holds only in show-a") {
+		t.Errorf("a granted parent's child in another namespace: %d %q", code, msg)
 	}
 	if code, msg := submit("in-grant", "render", "cpu"); code != http.StatusCreated {
 		t.Fatalf("a child the grant covers: %d %s", code, msg)
@@ -676,7 +688,8 @@ func TestAUnitsJobKeepsItsParentsGrant(t *testing.T) {
 	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "in-grant"}, &child); err != nil {
 		t.Fatal(err)
 	}
-	if child.Annotations[c4v1.AnnotationGrant] != "c4-grant-record" || child.Annotations[c4v1.AnnotationGrantTracker] != "github" || c4v1.GrantTracker(&child) != "github" {
+	// the grant as it is now (renewed since the parent), not the parent's copy
+	if child.Annotations[c4v1.AnnotationGrant] != "c4-grant-renewed" || child.Annotations[c4v1.AnnotationGrantTracker] != "github" || c4v1.GrantTracker(&child) != "github" {
 		t.Errorf("the child carries grant %q under tracker %q", child.Annotations[c4v1.AnnotationGrant], child.Annotations[c4v1.AnnotationGrantTracker])
 	}
 	// It is not the tracker's work: no tracker label, so the tracker's

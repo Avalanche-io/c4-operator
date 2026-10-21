@@ -812,11 +812,19 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		// A job a tracker's sync made for a person, under the person's
 		// grant: its children are bound by the same grant, so a unit
 		// cannot widen what the person granted.
-		if ref := parent.Annotations[c4v1.AnnotationGrant]; ref != "" {
-			if err := s.parentGrantCovers(ctx, &parent, owner, &spec); err != nil {
+		if parent.Annotations[c4v1.AnnotationGrant] != "" {
+			if ns != parent.Namespace {
+				// A grant is a person's to one tracker in one namespace: it
+				// holds nowhere else, so a child elsewhere could never run.
+				return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: a unit of a job made under %s's grant to tracker %s submits in %s; the grant holds only in %s",
+					v.User, owner, c4v1.GrantTracker(&parent), ns, parent.Namespace)
+			}
+			g, err := s.parentGrantCovers(ctx, &parent, owner, &spec)
+			if err != nil {
 				return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: %v", v.User, err)
 			}
-			job.Annotations[c4v1.AnnotationGrant] = ref
+			// the grant as it is now, not the parent's recorded copy
+			job.Annotations[c4v1.AnnotationGrant] = grantRef(g)
 			job.Annotations[c4v1.AnnotationGrantTracker] = c4v1.GrantTracker(&parent)
 		}
 		job.Annotations[c4v1.AnnotationOwner] = owner
