@@ -3323,6 +3323,13 @@ has an MCP tool with the same effect (section 13.2).
 - A viewer's scope is the set of projects whose namespaces the viewer may
   list WorkJobs in, checked with SubjectAccessReview and cached per user for
   a minute.
+- People get those rights from three ClusterRoles bound per project
+  (`config/rbac/people.yaml`): `c4-artist` sees the project, submits,
+  runs their own agents and gives the job controls; `c4-wrangler` also
+  removes jobs, approves burst and revokes grants; `c4-project-admin` also
+  manages the project's tools, trackers, milestones and grants, and grants
+  these roles. The c4 read and submit rules also join Kubernetes' own
+  `view`, `edit` and `admin`. Disabling a node stays a farm admin's.
 - The event stream a browser receives is filtered on the server. Job names,
   units, logs, views and per-project tier series of other projects never
   leave the server.

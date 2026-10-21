@@ -1,0 +1,117 @@
+# Roles for people, granted per project with a RoleBinding in the project's
+# namespace (c4 farm invite, or kubectl create rolebinding ... --clusterrole
+# c4-artist --user NAME -n NAMESPACE). The HUD checks each control as the
+# person (a SubjectAccessReview), and shows a project to whoever may list
+# its WorkJobs.
+#
+# - c4-artist: sees the project, submits work and runs their own agents,
+#   holds, boosts, steers, requeues and decides (patch on WorkJobs).
+# - c4-wrangler: an artist who also removes jobs, approves burst capacity
+#   and revokes grants.
+# - c4-project-admin: a wrangler who also manages the project's tools,
+#   trackers, milestones and grants, and who may grant these roles in it.
+#
+# Disabling a node is farm-wide (patch on Nodes), so it stays with farm
+# admins. The read and submit rules also join Kubernetes' own view, edit
+# and admin roles, so a person bound to edit can list and submit WorkJobs.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-view
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-view: "true"
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs, workjobs/status, materializations, agentbundles, agentbundles/status, tools, milestones, trackers, capacityrequests, submitgrants]
+  verbs: [get, list, watch]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-submit
+  labels:
+    rbac.authorization.k8s.io/aggregate-to-edit: "true"
+    rbac.authorization.k8s.io/aggregate-to-admin: "true"
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs]
+  verbs: [create, patch]
+- apiGroups: [c4.avalanche.io]
+  resources: [materializations]
+  verbs: [create]
+- apiGroups: [c4.avalanche.io]
+  resources: [agentbundles]
+  verbs: [create, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-artist
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs, workjobs/status, materializations, agentbundles, agentbundles/status, tools, milestones, trackers, capacityrequests, submitgrants]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs]
+  verbs: [create, patch]
+- apiGroups: [c4.avalanche.io]
+  resources: [materializations]
+  verbs: [create]
+- apiGroups: [c4.avalanche.io]
+  resources: [agentbundles]
+  verbs: [create, patch, delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-wrangler
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs, workjobs/status, materializations, agentbundles, agentbundles/status, tools, milestones, trackers, capacityrequests, submitgrants]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs]
+  verbs: [create, patch, delete]
+- apiGroups: [c4.avalanche.io]
+  resources: [materializations]
+  verbs: [create]
+- apiGroups: [c4.avalanche.io]
+  resources: [agentbundles]
+  verbs: [create, patch, delete]
+- apiGroups: [c4.avalanche.io]
+  resources: [capacityrequests]
+  verbs: [patch]
+- apiGroups: [c4.avalanche.io]
+  resources: [submitgrants]
+  verbs: [delete]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: c4-project-admin
+rules:
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs, workjobs/status, materializations, agentbundles, agentbundles/status, tools, milestones, trackers, capacityrequests, submitgrants]
+  verbs: [get, list, watch]
+- apiGroups: [c4.avalanche.io]
+  resources: [workjobs]
+  verbs: [create, patch, delete]
+- apiGroups: [c4.avalanche.io]
+  resources: [materializations]
+  verbs: [create, delete]
+- apiGroups: [c4.avalanche.io]
+  resources: [agentbundles]
+  verbs: [create, patch, delete]
+- apiGroups: [c4.avalanche.io]
+  resources: [capacityrequests]
+  verbs: [patch]
+- apiGroups: [c4.avalanche.io]
+  resources: [tools, milestones, trackers, submitgrants]
+  verbs: [create, update, patch, delete]
+# Granting these roles in the project: Kubernetes lets a person bind only a
+# role whose rights they hold, so a project admin cannot grant more.
+- apiGroups: [rbac.authorization.k8s.io]
+  resources: [rolebindings]
+  verbs: [get, list, watch, create, update, patch, delete]

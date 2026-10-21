@@ -1,3 +1,4 @@
 resources:
 - rbac.yaml
 - host-runner.yaml
+- people.yaml

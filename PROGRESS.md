@@ -318,6 +318,7 @@
 | `reserved-tools` | 2026-10-21 | 2026-10-21 | The farm's own tools (none) are reserved: one list (c4v1.FarmTools), looked up only in the operator's namespace by the queue, the egress proxy and the HUD, refused at publish, and an admission policy lets only the manager make one |
 | `tool-tests-quiet` | 2026-10-20 | 2026-10-20 | A tool's publish test is its publisher's: never an incident or Needs-you item (a new farm no longer opens on a red item from its own setup), toolTest in the snapshot, and requeue or acknowledge on it refused. Found by the first-run audit. Test: TestToolTestsAreNotIncidents. |
 | `farm-words` | 2026-10-20 | 2026-10-20 | Refusals in the farm's words: what the person tried, in which project, and the role for people that allows it with how to get it; publishing reads the TD and farm-admin roles from RBAC too, so an admin whose sign-in carries no groups is not refused. Found by the first-run audit. Test: TestRefusalsInFarmWords. |
+| `people-roles` | 2026-10-20 | 2026-10-21 | Roles for people: c4-artist, c4-wrangler and c4-project-admin ClusterRoles to bind per project, each with what the HUD checks for and nothing beyond; c4 read and submit rules join Kubernetes' view, edit and admin, so a person bound to edit can list WorkJobs. Found by the first-run audit. Test: TestPeopleRoles (envtest SubjectAccessReviews). |
 
 Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
 c4 pseudo-version, so worktrees need nothing else; to build against a local c4
