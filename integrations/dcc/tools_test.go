@@ -1,7 +1,8 @@
 // Package dcc_test checks the tool folders the DCC submitters ship
 // (integrations/dcc/<application>/tools/<tool>/): each reads as `c4 farm`
-// reads a tool, is named for its folder, has a test whose tree it carries,
-// and asks for nothing the farm refuses at submit today, so a studio that
+// reads a tool, is named for its folder, passes the farm's publish-time
+// check, has a test whose tree it carries, and asks for nothing the farm
+// refuses at submit today, so a studio that
 // points its own image at one can publish it and submit from the panel.
 package dcc_test
 
@@ -29,6 +30,9 @@ func TestShippedToolsRead(t *testing.T) {
 		}
 		if tool.Name != name {
 			t.Errorf("%s: tool.yaml names it %q", dir, tool.Name)
+		}
+		for _, e := range authoring.CheckTool(tool, "", nil) {
+			t.Errorf("%s: %s: %s (%s)", dir, e.Path, e.Message, e.Fix)
 		}
 		for _, e := range authoring.ToolRefusals(tool) {
 			t.Errorf("%s: the farm would refuse it at submit: %s (%s)", dir, e.Message, e.Fix)

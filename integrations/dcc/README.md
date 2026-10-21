@@ -85,6 +85,30 @@ farm in `~/.c4/farm.yaml` (or `C4_FARM_CONFIG`; `C4_FARM` picks another),
 with its sign-in and its default project. So an artist who has run
 `c4 farm login` or `c4 farm up` sets nothing more.
 
+## The tools on the farm
+
+A panel submits to a tool the farm already has. Each application's folder
+ships the tool its panel expects, under `tools/`, ready for a TD to point at
+the studio's own image and publish (`c4 farm tool publish <folder>`):
+
+| folder           | tool                               | one unit                                                                               |
+| ---------------- | ---------------------------------- | -------------------------------------------------------------------------------------- |
+| `nuke/tools/`    | `nuke-render`                      | one Write node over a chunk of frames                                                  |
+| `houdini/tools/` | `houdini-rop`, `karma`, `pdg-cook` | one ROP's frames; one stage's frames with husk; a whole TOP network cooked in one unit |
+| `maya/tools/`    | `maya-render`                      | one render layer's frames                                                              |
+| `katana/tools/`  | `katana-render`                    | one Render node's frames                                                               |
+| `blender/tools/` | `blender-render`                   | one view layer's frames (on the farm's own Blender image)                              |
+| `unreal/tools/`  | `unreal-render`                    | a whole Movie Render Queue job                                                         |
+
+Each prints a line per finished frame, says why it failed and whether a
+retry could help, and carries a small test the farm runs before it offers
+the tool. A Go test beside them (`tools_test.go`) checks each reads as
+`c4 farm` reads a tool, passes the farm's publish-time check and asks for
+nothing the farm refuses at submit. The licensed applications declare no
+licences yet: the farm cannot count seats today, and refuses a tool that
+asks for them. Their tests need a route to the studio's licence server, so
+on a farm without one they fail at publish until licences arrive.
+
 ## Writing a panel for another DCC
 
 A panel is a `c4submit.host.Host` (what the scene is: its file, frame

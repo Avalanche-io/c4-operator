@@ -29,6 +29,9 @@ class Renderable:
     # ({"view_layer": "bg"}) or by where a field comes from
     # ({"scene.camera": "shotCam"}); the name wins when both are given.
     values: Dict[str, Any] = field(default_factory=dict)
+    # Frames per unit for its job when not the tool's: "all" for a sim cache
+    # that must run its whole range in one unit.
+    chunk: Optional[str] = None
 
 
 @dataclass

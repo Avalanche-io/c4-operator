@@ -235,7 +235,8 @@ class FakeFarm:
             name = job["tool"].split("@")[0]
             tool = Tool(self.tools_by[name])
             n = len(framelib.parse(job["frames"])) if job.get("frames") else 1
-            chunk = tool.frames_defaults.get("chunk", 1) if tool.takes_frames else n
+            chunk = job.get("chunk") or tool.frames_defaults.get("chunk", 1) if tool.takes_frames else n
+            chunk = n if chunk == "all" else int(chunk)   # `chunk: all` is the whole range in one unit
             units = -(-n // chunk)
             after = job.get("after")
             after = [after] if isinstance(after, str) else list(after or [])

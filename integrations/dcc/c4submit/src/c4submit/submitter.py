@@ -323,6 +323,8 @@ def prepare(draft: Draft) -> Prepared:
             after = [key_of[n] for n in r.reads if n in key_of and key_of[n] != key]
             if after:
                 job["after"] = after[0] if len(after) == 1 else after
+        if r is not None and r.chunk and tool.takes_frames:
+            job["chunk"] = r.chunk
         if draft.size:
             job["size"] = draft.size
         jobs[key] = job

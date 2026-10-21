@@ -373,3 +373,14 @@ def test_a_hosts_warnings_reach_the_check(tmp_path, farm, nocache):
     host.warnings = lambda: ["every file was sent: the application could not say which ones the jobs read"]
     c = Submitter(farm, cache=nocache).check(prepare(draft_for(host, farm)))
     assert c.ok and "every file was sent: the application could not say which ones the jobs read" in c.warnings
+
+
+def test_a_renderable_asks_for_its_whole_range_in_one_unit(tmp_path, farm, nocache):
+    host = comp_scene(tmp_path)
+    host._renderables = [Renderable("Write_sim", frames="1001-1048", chunk="all")]
+    d = draft_for(host, farm)
+    p = prepare(d)
+    assert p.doc["jobs"]["comp"]["chunk"] == "all"
+    c = Submitter(farm, cache=nocache).check(p)
+    assert c.ok, c.errors
+    assert c.answer["jobs"][0]["what"] == "48 frames in 1 units"

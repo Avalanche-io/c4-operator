@@ -81,3 +81,20 @@ def test_with_usds_own_python(tmp_path, monkeypatch):
     got = [os.path.relpath(d.path, str(tmp_path)).replace(os.sep, "/") for d in deps]
     assert got == ["lay.usd", "tex/a.<UDIM>.exr", "missing/ref.usda"]
     assert {d.node for d in deps} == {"/stage/LOP"}
+
+
+def test_a_layer_usd_cannot_open_is_read_as_text(tmp_path, monkeypatch):
+    import sys
+    import types
+    shot = write(os.path.join(str(tmp_path), "sh010.usda"), b'#usda 1.0\ndef "s" { asset t = @tex/a.exr@ }\n')
+
+    def broken(asset):
+        raise RuntimeError("Failed to open layer")
+
+    pxr = types.ModuleType("pxr")
+    pxr.Sdf = types.SimpleNamespace(AssetPath=lambda p: p)
+    pxr.UsdUtils = types.SimpleNamespace(ComputeAllDependencies=broken)
+    monkeypatch.setitem(sys.modules, "pxr", pxr)
+    deps, _ = usd.dependencies(shot)
+    assert [os.path.basename(d.path) for d in deps] == ["a.exr"]
+    assert "binary USD" in usd.unread_warning("/show/x.usdc")

@@ -32,12 +32,21 @@ def _is_binary(path: str) -> bool:
         return False
 
 
+def unread_warning(path: str) -> str:
+    """What a host tells the artist about a binary layer it could not read."""
+    return (f"{path} is binary USD and USD's Python is not available here, "
+            "so what it reads in turn was not collected")
+
+
 def _with_pxr(path: str) -> Optional[List[str]]:
     try:
         from pxr import Sdf, UsdUtils  # type: ignore
     except ImportError:
         return None
-    layers, assets, unresolved = UsdUtils.ComputeAllDependencies(Sdf.AssetPath(path))
+    try:
+        layers, assets, unresolved = UsdUtils.ComputeAllDependencies(Sdf.AssetPath(path))
+    except Exception:  # noqa: BLE001 - a layer USD cannot open is read as text instead
+        return None
     out = [getattr(layer, "realPath", "") or layer.identifier for layer in layers
            if not getattr(layer, "anonymous", False)]
     out += [str(a) for a in assets]
