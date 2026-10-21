@@ -614,6 +614,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := localfarm.CheckDocker(ctx); err != nil {
 			return err
 		}
+		// the tracker is offered once, on the farm's first up
+		first := true
+		if have, err := localfarm.Exists(localfarm.Name); err == nil {
+			first = !have
+		}
 		if err := localfarm.Up(ctx, o); err != nil {
 			return err
 		}
@@ -629,7 +634,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)\n")
 		if o.Tracker || localfarm.HasTracker(ctx) {
 			fmt.Fprintf(stdout, "tracker   %s   a stand-in for GitHub; nothing leaves this machine\n", localfarm.SandboxPage(o.HUD(), v.Name))
-		} else {
+		} else if first {
 			fmt.Fprintf(stdout, "try a tracker: c4 farm up --tracker\n")
 		}
 		if *noOpen {
