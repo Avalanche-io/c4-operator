@@ -24,7 +24,22 @@ func main() {
 	skipOrder := flag.Bool("skip-order", false, "skip the binary-order experiment")
 	trials := flag.Int("order-trials", 40, "binary-order trials per (frames, multiplier)")
 	skipETA := flag.Bool("skip-eta", false, "skip the ETA band and suggested-deadline experiment")
+	bundleFile := flag.String("bundle", "", "replay this diagnostic bundle (c4-diagnose-*.tgz) instead of simulating")
+	replay := flag.String("replay", "decide", "with -bundle: decide replays each snapshot's decision; forward runs the farm on from the last snapshot")
+	horizon := flag.Duration("horizon", 24*time.Hour, "with -replay forward: how far to run")
+	step := flag.Duration("step", time.Minute, "with -replay forward: how often to decide")
 	flag.Parse()
+	if *bundleFile != "" {
+		ok, err := replayFile(*bundleFile, *replay, *horizon, *step, os.Stdout)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(2)
+		}
+		if !ok {
+			os.Exit(1)
+		}
+		return
+	}
 
 	started := time.Now()
 	p := defaultParams()

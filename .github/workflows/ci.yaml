@@ -40,6 +40,9 @@ jobs:
     # The controllers and the queue run against a real API server and etcd
     # (envtest); setup-envtest downloads them.
     - run: make test
+    # A bundle written on one machine replays to the same decisions here.
+    - name: a diagnostic bundle replays
+      run: go run ./hack/sim -bundle hack/sim/testdata/gpu-tight.tgz -replay decide
     - name: cache tiers under the race detector
       run: go test -race -count=1 ./internal/tier/... ./internal/fill/... ./internal/objcache/...
 

@@ -861,8 +861,9 @@ as it was. That holds by construction, not by filtering:
   restores with each name replaced by a synthetic one built from its rank,
   so every comparison the policy makes between names comes out as it did,
   with no change to the policy. Before a snapshot is written, the
-  faithfulness check replays it through `sched.Decide` and records whether
-  it gives the farm's decisions, and if not, how many of each kind differ.
+  faithfulness check replays it through the policy it names and records
+  whether it gives the farm's decisions, and if not, how many of each kind
+  differ.
   Every decision of the simulator's test weeks replays exactly, with time
   shifted and money scaled.
 - **A canary corpus in CI.** A farm whose every field carries realistic
@@ -873,6 +874,41 @@ as it was. That holds by construction, not by filtering:
   survives, and that the farm key never appears. A fuzz target fills every
   string the redactor reads, and a deliberately leaky record proves the
   tests would catch one.
+
+**The diagnostic bundle** is the first thing telemetry makes, and it stays
+on the farm until a person carries it out:
+- **`GET /api/v1/diagnose[?window=30m]`** answers `c4-diagnose-<first 12 of
+  its ID>.tgz`, with no farm name and no date. It is open to the farm admin
+  and to a single-person farm's installer; a unit never gets one. Without
+  the farm key, or if any record fails to encode, it answers with the
+  reason and writes no byte of a bundle.
+- **What it holds.** `README.txt` comes first: in plain words, what the
+  bundle holds and never holds, the key's epoch, how many snapshots replay
+  and the bundle's C4 ID. Then come `manifest.c4m` (every other entry with
+  its size and C4 ID; the bundle's ID is the manifest's) and
+  `snapshots/NNN.json`, one per tick that changed a decision, oldest
+  first, each naming the policy that decided it. After those are
+  `build.json`, `farm.json` (the shape, as pseudonyms and counts) and
+  `redaction.json` (the rules applied and each snapshot's faithfulness,
+  never the money factor). `events.jsonl` and `counters.jsonl` are there,
+  empty, until the event log and the counters are projected. No tar or
+  gzip header carries a time or an owner, so the same snapshots make the
+  same bytes. A reader checks every entry against the manifest and
+  refuses a bundle that differs.
+- **The ring.** With `--telemetry-ring` the manager keeps the last two
+  hours of decision-changing ticks, redacted as they are recorded and
+  bounded at 64 MiB; past either bound the oldest go, and the README says
+  so. Off by default: then a bundle holds the present moment alone.
+  `C4_TELEMETRY=off` in the manager's environment holds the ring off,
+  whatever the flag says. The ring lives in the manager's memory, so a
+  restart empties it. Nothing leaves the farm either way.
+- **Replay.** `go run ./hack/sim -bundle FILE -replay decide` replays
+  every snapshot through its policy and compares decision hashes.
+  `-replay forward [-horizon 24h -step 1m]` runs the farm on from the
+  last snapshot, with each unit taking its job's mean estimate, and lists
+  when each job finishes against its deadline. CI replays a committed
+  bundle of an overloaded GPU farm's week (`hack/sim/testdata`) on amd64
+  and arm64, so a decision that depends on the architecture fails there.
 
 ## 7. Very large clusters
 
