@@ -1,13 +1,13 @@
-# Quickstart: a farm on your machine, a render, and your first tool
+# Quickstart: your own agents first, then a farm on your machine
 
-This builds a complete C4 farm inside Docker, renders a sample shot on it,
-watches the render in the HUD, moves its deadline, takes the frames home with
-every file checked, and then teaches the farm a small job of your own. No
-Kubernetes command or field appears anywhere: the farm's administrators
-have [docs/install.md](install.md) for that.
-
-You need Docker Desktop running, with at least 6 GB of memory and 4 CPUs
-(Settings → Resources).
+If you use Claude Code, start with what you already run: one command shows
+your sessions as work, what each is doing and what needs you, without
+moving or changing anything. Then this builds a complete C4 farm inside
+Docker, renders a sample shot on it, watches the render in the HUD, moves
+its deadline, takes the frames home with every file checked, and teaches
+the farm a small job of your own. No Kubernetes command or field appears
+anywhere: the farm's administrators have [docs/install.md](install.md) for
+that.
 
 ## 1. Install `c4 farm`
 
@@ -20,7 +20,32 @@ This installs the `c4` command and its farm tools; `c4 farm` runs
 [release page](https://github.com/Avalanche-io/c4-operator/releases) and
 write `c4-farm` wherever this guide writes `c4 farm`.
 
-## 2. Start the farm
+## 2. See your own agents
+
+```sh
+c4 farm agents
+```
+
+```
+AGENT   STATE      FOLDER         USED  FOR
+port    needs you  ~/src/textkit  41k   2h 10m
+docs    working    ~/src/textkit  12k   25m
+review  idle       ~/src/site     950   3h 5m
+
+port needs you: Should I rename the package too?
+```
+
+One line per Claude Code session on this machine: its state in a word,
+its folder, the tokens it has used and how long it has run, and then what
+needs you, or "Nothing needs you." It reads what is already on your
+machine, needs no farm and no Docker, and moves, stops and signs in to
+nothing. `c4 farm agents --open` shows the same in the HUD, served on this
+machine only.
+
+## 3. Start the farm
+
+You need Docker Desktop running, with at least 6 GB of memory and 4 CPUs
+(Settings → Resources).
 
 ```sh
 c4 farm up
@@ -70,7 +95,7 @@ usd        once    v1    Flatten and check a USD stage · farm-wide
 Repository tests and LoRA training run too, as the farm's built-in jobs
 (`c4 farm submit ci DIR`, `c4 farm submit lora DIR`).
 
-## 3. Get the sample shot
+## 4. Get the sample shot
 
 ```sh
 c4 farm samples get saltmarsh
@@ -80,7 +105,7 @@ This unpacks Petrel & Finch's sample shots into `~/c4-samples/saltmarsh`:
 sm0140, a heron lifting off the marsh at dusk, as a USD stage with its
 geometry, lights and textures.
 
-## 4. Render it
+## 5. Render it
 
 ```sh
 c4 farm submit render ~/c4-samples/saltmarsh/sm0140/sm0140.usda --frames 1001-1048 --deadline +2h
@@ -106,7 +131,7 @@ A new farm has not timed a frame of anything yet, so its first estimate is
 cautious, and may say the job will miss. It tightens as the first frames
 land.
 
-## 5. Watch it
+## 6. Watch it
 
 ```sh
 c4 farm watch sm0140-render-v001
@@ -117,7 +142,7 @@ render coarse to fine, in binary order: first and last, then the middle,
 then the quarters, so the whole shot can be played early. Each frame shows
 its preview as it lands.
 
-## 6. Move the deadline
+## 7. Move the deadline
 
 Production says the shot is for Friday's review, not this afternoon:
 
@@ -129,7 +154,7 @@ There is no priority to set, on this farm or any other C4 farm. A deadline
 is what changes the order: the farm re-plans the whole queue around it at
 once, and every job's slack shows the result.
 
-## 7. Take the frames home
+## 8. Take the frames home
 
 ```sh
 c4 farm get sm0140-render-v001 render ~/renders/sm0140
@@ -148,7 +173,7 @@ is checked against it, so a frame that arrived damaged is caught, not
 copied. The `view` is the C4 ID of the whole output tree: the same ID on
 every machine that has these frames.
 
-## 8. Teach the farm a job of your own
+## 9. Teach the farm a job of your own
 
 A tool is a folder: a `tool.yaml` that tells the farm how to run it and what
 it takes, and the script it runs. This one lists a folder of the shot and
@@ -216,7 +241,7 @@ c4 farm get sm0140-notes-v001 ~/notes
 wrote as a change to it, and named the result by its ID: the job's output
 is the tree it left. The node that ran the unit signed a record of it.
 
-## 9. Read a file's history
+## 10. Read a file's history
 
 In the HUD, open `sm0140-render-v001`, click its output view, pick a frame
 and choose **Provenance**. Each step from the frame back to your upload is a
@@ -224,7 +249,7 @@ record signed by whoever did it: the node that rendered it, the farm's queue
 and controller, you. Anyone holding the files can check the chain, with no
 access to the farm.
 
-## 10. Ask an agent
+## 11. Ask an agent
 
 If you said yes at `c4 farm up`, Claude Code has the farm's tools already;
 otherwise:
