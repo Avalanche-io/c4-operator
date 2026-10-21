@@ -214,7 +214,7 @@ func TestCanaryRunsAreChecked(t *testing.T) {
 		}
 		checked := 0
 		for i := 0; i+4 <= len(lt); i++ {
-			if !recordWords[lt[i:i+4]] {
+			if !recordWords[lt[i:i+4]] && canary.HasLetter(lt[i:i+4]) {
 				checked++
 			}
 		}

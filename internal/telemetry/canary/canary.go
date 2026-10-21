@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 	"unicode/utf16"
 
 	"github.com/Avalanche-io/c4-operator/work/estimate"
@@ -147,8 +148,8 @@ func ScanWhole(out []byte, tokens []string) []string {
 }
 
 // Scan reports every token found in out, in any encoding, or as a run of
-// four or more characters of a token, except runs in skip: the four-
-// character runs of the record's own keys and enum names, which telemetry
+// four or more characters of a token with a letter in it, except runs in
+// skip: the four-character runs of the record's own keys and enum names, which telemetry
 // writes itself.
 func Scan(out []byte, tokens []string, skip map[string]bool) []string {
 	found := ScanWhole(out, tokens)
@@ -156,7 +157,7 @@ func Scan(out []byte, tokens []string, skip map[string]bool) []string {
 	for _, tok := range tokens {
 		lt := strings.ToLower(tok)
 		for i := 0; i+4 <= len(lt); i++ {
-			if sub := lt[i : i+4]; strings.Contains(lower, sub) && !skip[sub] {
+			if sub := lt[i : i+4]; strings.Contains(lower, sub) && !skip[sub] && HasLetter(sub) {
 				found = append(found, tok+" through "+strconv.Quote(sub))
 				break
 			}
@@ -164,6 +165,13 @@ func Scan(out []byte, tokens []string, skip map[string]bool) []string {
 	}
 	return found
 }
+
+// HasLetter says a run has a letter. A run of digits alone ("0420" of
+// sh0420) is not looked for: a record's numbers are counts, scaled money
+// and relative times, which can hold any four digits, and the tests check
+// them semantically instead (no fixture date, Unix time or unscaled
+// amount).
+func HasLetter(s string) bool { return strings.ContainsFunc(s, unicode.IsLetter) }
 
 // AddRuns adds s's four-character runs, lowercased, to words.
 func AddRuns(words map[string]bool, s string) {
