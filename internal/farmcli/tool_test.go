@@ -483,3 +483,20 @@ func TestLsSaysWhatFinished(t *testing.T) {
 		t.Errorf("ls:\n%s", out.String())
 	}
 }
+
+// A sequence pattern finds its frames on disk, in each form husk and
+// Houdini write; the list keeps runs as ranges.
+func TestFramesOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"sm0140.1001.exr", "sm0140.1002.exr", "sm0140.1003.exr", "sm0140.1010.exr", "sm0140.1004.jpg", "other.1005.exr"} {
+		os.WriteFile(filepath.Join(dir, f), nil, 0o644)
+	}
+	for _, p := range []string{"sm0140.$F4.exr", "sm0140.####.exr", "sm0140.%04d.exr", "sm0140.<F4>.exr"} {
+		if got := frameList(framesOnDisk(dir, p)); got != "1001-1003,1010" {
+			t.Errorf("%s: %q", p, got)
+		}
+	}
+	if fs := framesOnDisk(dir, "sm0150.$F4.exr"); fs != nil {
+		t.Errorf("no such sequence: %v", fs)
+	}
+}

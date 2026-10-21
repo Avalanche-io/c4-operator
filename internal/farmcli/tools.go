@@ -569,8 +569,15 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 		key = t.Name
 	}
 	job := map[string]any{"tool": t.Name, "with": with}
-	if a.Options.Frames != "" {
+	switch {
+	case a.Options.Frames != "":
 		job["frames"] = a.Options.Frames
+	case pattern != "" && t.Kind == "frames":
+		// the frames the sequence holds on disk, unless --frames says
+		if fs := framesOnDisk(target, pattern); len(fs) > 0 {
+			job["frames"] = frameList(fs)
+			o.printf("frames    %s, from the %s %s matches (--frames to choose)\n", frameList(fs), plural(len(fs), "file", "files"), pattern)
+		}
 	}
 	if len(a.Options.Pools) > 0 {
 		job["pools"] = a.Options.Pools
@@ -653,4 +660,53 @@ func setValue(typ, v string) (any, error) {
 		return b, nil
 	}
 	return v, nil
+}
+
+// framesOnDisk are the frame numbers of the files in dir that a sequence
+// pattern (sm0140.$F4.exr, sm0140.####.exr, sm0140.%04d.exr) matches, in
+// order.
+func framesOnDisk(dir, pattern string) []int {
+	loc := frameToken.FindStringIndex(pattern)
+	if loc == nil {
+		return nil
+	}
+	re, err := regexp.Compile("^" + regexp.QuoteMeta(pattern[:loc[0]]) + "([0-9]+)" + regexp.QuoteMeta(strings.TrimLeft(pattern[loc[1]:], "#")) + "$")
+	if err != nil {
+		return nil
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil
+	}
+	seen := map[int]bool{}
+	var out []int
+	for _, e := range entries {
+		if m := re.FindStringSubmatch(e.Name()); m != nil {
+			if n, err := strconv.Atoi(m[1]); err == nil && !seen[n] {
+				seen[n] = true
+				out = append(out, n)
+			}
+		}
+	}
+	sort.Ints(out)
+	return out
+}
+
+// frameList is frames as a frame list: runs of consecutive frames as
+// ranges, the rest as single frames (1001-1004,1010).
+func frameList(fs []int) string {
+	var parts []string
+	for i := 0; i < len(fs); {
+		j := i
+		for j+1 < len(fs) && fs[j+1] == fs[j]+1 {
+			j++
+		}
+		if j > i {
+			parts = append(parts, fmt.Sprintf("%d-%d", fs[i], fs[j]))
+		} else {
+			parts = append(parts, strconv.Itoa(fs[i]))
+		}
+		i = j + 1
+	}
+	return strings.Join(parts, ",")
 }
