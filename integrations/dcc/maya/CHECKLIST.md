@@ -235,7 +235,22 @@ change as stated.
     withoutCopyNumber=True)` adds what no node above accounts for (an OCIO
     config, a plug-in's files). A missing one is a warning, because Maya
     lists files a render may not read.
-11. **A large scene** (thousands of nodes, hundreds of textures). **Expect:**
+11. **A USD stage.** With the Maya USD plug-in loaded, create a stage from
+    a `.usda` that sublayers a second layer, references a `.usd` and names
+    a `<UDIM>` texture, and add the stage to fg only. **Expect:** the stage
+    and everything it reads are collected, tagged with fg (untick fg and
+    they go). **[guess]** that the node is a `mayaUsdProxyShape` whose
+    `filePath` holds the stage, and that with `filePathRelative` on the
+    path is relative to the scene file's folder. **[guess]** that Maya's
+    Python here has `pxr` (the plug-in carries it), so USD's own resolver
+    follows binary layers too. Without it, a binary `.usd` layer is sent
+    and the check warns "… is binary USD and USD's Python is not available
+    here, so what it reads in turn was not collected".
+12. **A reference to a USD file** (File > Create Reference on a `.usd`).
+    **Expect:** what it reads is collected for every layer, as the
+    reference is. **[guess]** that `referenceQuery` gives the `.usd` path.
+    An Arnold standin on a `.usd` is followed the same way.
+13. **A large scene** (thousands of nodes, hundreds of textures). **Expect:**
     ticking boxes stays instant and Check starts within a few seconds.
     Every scene read walks the shading networks and switches layers.
 
@@ -256,3 +271,48 @@ change as stated.
    `sm0140-render-beauty-v001` and `sm0140-render-fg-v001`, and how many files
    were sent. Submit greys until the next check. With the fake farm,
    `farm.submitted()` in the Script Editor shows one submission with two jobs.
+
+## The maya-render tool (each one a [guess] about Maya's command line)
+
+Run these on the studio's Maya image (or a render machine) after setting
+`runs.image` in `tools/maya-render/tool.yaml`. `c4 farm tool test
+tools/maya-render` runs the tool's test as a unit runs it.
+
+1. **The test.** **Expect:** `c4 farm tool test` passes, with
+   `maya/images/test.0001.png` and `test.0002.png` written and two
+   `c4_frame:` lines in the log. **[guess]** that `test/maya/scenes/test.ma`,
+   a hand-written Maya ASCII scene (a cube, a camera `testCam`, Maya
+   Software, PNG, prefix `test`), opens in Maya 2024 to 2026, and that
+   `imageFormat` 32 is PNG with the frame before the extension at four
+   digits.
+2. **mayapy and Render.** **[guess]** that `mayapy` runs a script without
+   taking a licence (only `maya.standalone.initialize()` would), and that
+   `Render` sits beside it in `bin/` (`Render.exe` on Windows).
+3. **The command.** **[guess]** that `Render -r <renderer> -proj <project>
+   -s <start> -e <end> -b <step> -rl <layer> -cam <camera> <scene>` renders
+   that layer over those frames with `-r file` keeping the scene's
+   renderer, and that `-rl` takes the layer's node (`rs_beauty`,
+   `defaultRenderLayer` for the master layer). **[guess]** that the
+   renderer names are `arnold`, `redshift`, `vray`, `renderman` and `sw`.
+4. **Which frames are done.** With Arnold, **expect** a `c4_frame:` line
+   for each frame soon after the next one starts. **[guess]** that
+   `-ai:lve 2` makes MtoA log `[driver_exr] writing file …` for each image.
+   With another renderer, note the line its log gives for each image
+   written; the script takes any absolute image path in the log that was
+   written during the run, and finds the rest under the job's tree when
+   `Render` exits.
+5. **A failed render.** Break a texture path and render. **Expect:** the
+   unit fails. **[guess]** that `Render` exits non-zero when a frame fails.
+   If it exits 0, the frame with no image still fails the unit ("Render
+   exited 0 but wrote no image for frame …"). Note the renderer's exact
+   messages for a missing texture and a missing licence, and add them to
+   the tool's `errors.permanent` and `errors.licence`.
+6. **Path mapping.** Submit from a Windows machine whose project folder is
+   `S:\show`. **Expect:** textures resolve under the job's tree. **[guess]**
+   that `-preRender "dirmap -en true; dirmap -m …"` maps the files a render
+   reads. References and caches loaded when the scene opens are not mapped
+   by it: note whether they resolve.
+7. **A home folder it cannot write.** Units run as an unprivileged user.
+   **Expect:** Maya starts; the script points `MAYA_APP_DIR` at a scratch
+   folder when `$HOME` cannot be written. **[guess]** that this is enough
+   for `Render` to start.

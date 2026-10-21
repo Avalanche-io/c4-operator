@@ -1,0 +1,5 @@
+//Maya 2024 Project Definition
+
+workspace -fr "scene" "scenes";
+workspace -fr "images" "images";
+workspace -fr "sourceImages" "sourceimages";

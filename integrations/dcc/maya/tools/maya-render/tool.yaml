@@ -1,0 +1,59 @@
+c4: tool/1
+name: maya-render
+title: Maya render
+summary: Renders one render layer of a saved Maya scene over the job's frames with Maya's command-line renderer, in the studio's own Maya image.
+kind: frames
+runs:
+  # The studio's own Maya image, with its renderer's plug-in: set this to it before publishing.
+  image: registry.example.com/maya:2025
+  exe: mayapy
+  host:
+    has: [maya-2025]
+    exe:
+      linux: /usr/autodesk/maya2025/bin/mayapy
+      windows: "C:/Program Files/Autodesk/Maya2025/bin/mayapy.exe"
+  # maya_render.py runs Render from beside mayapy and reports each frame's image.
+  command: ["{{Run.Exe}}", "{{Tool.Dir}}/maya_render.py", "{{Param.scene}}", "--layer={{Param.layer}}", "--camera={{Param.camera}}", "--renderer={{Param.renderer}}"]
+frames: {chunk: 4, order: binary}
+params:
+- name: scene
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The saved Maya scene. Its project is the nearest folder above it with a workspace.mel.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Scene, fileFilters: [{label: Maya scenes, patterns: ["*.ma", "*.mb"]}]}
+- name: layer
+  type: STRING
+  default: defaultRenderLayer
+  minLength: 1
+  description: The render layer, by its node's name (rs_beauty for the Render Setup layer beauty, defaultRenderLayer for the master layer). Each ticked layer is its own job.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: Render layer}
+- name: camera
+  type: STRING
+  description: The camera to render through; the layer's renderable camera when it is left empty.
+  show: artist
+  from: scene.camera
+  userInterface: {control: LINE_EDIT, label: Camera}
+- name: renderer
+  type: STRING
+  default: file
+  allowedValues: [file, arnold, redshift, vray, renderman, sw]
+  description: The renderer, as Render's -r names it. file renders with the scene's own renderer; sw is Maya Software.
+  show: advanced
+  userInterface: {control: DROPDOWN_LIST, label: Renderer}
+writes: ["**/images/"]
+previews: "**/images/**/*.$F4.exr"
+# A ceiling until a measured run says otherwise. When the farm counts
+# licence seats, add licences for Maya and its renderer and network: [licences].
+needs: {cpu: 16, memory: 64G}
+retries: 2
+reuse: exact
+test:
+  tree: test/
+  frames: 1-2
+  with: {scene: maya/scenes/test.ma, layer: defaultRenderLayer, camera: testCam, renderer: sw}
+  expect: [maya/images/test.0001.png, maya/images/test.0002.png]
