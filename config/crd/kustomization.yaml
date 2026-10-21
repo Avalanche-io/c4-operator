@@ -10,3 +10,4 @@ resources:
 - c4.avalanche.io_tools.yaml
 - c4.avalanche.io_submitgrants.yaml
 - c4.avalanche.io_trackerpeople.yaml
+- c4.avalanche.io_deploymentbindings.yaml

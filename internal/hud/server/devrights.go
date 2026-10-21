@@ -23,6 +23,8 @@ var devWriters = map[string][]string{
 	"capacityrequests": {"producer", "wrangler", "farm-admin"},
 	"submitgrants":     {"producer", "wrangler", "farm-admin"},
 	"nodes":            {"facilities", "wrangler", "farm-admin"},
+	// the installer binds the farm to its owner
+	"deploymentbindings": {"wrangler", "farm-admin"},
 }
 
 // devRole is a development viewer's role, or the HUD's guess for one

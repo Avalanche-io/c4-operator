@@ -1034,6 +1034,16 @@ project whose store holds the content. A record that verifies but fails the
 policy is reported as such, so a node cannot speak for another node or for
 the queue.
 
+**The farm binding.** At install the farm's owner is named (`c4 farm up
+--owner`). The HUD then binds every deployment of the farm to them: a
+`sign` grant over every record kind, made as a signed `bind` control
+record. It is kept as the DeploymentBinding `farm`, which only the HUD
+writes and nothing changes. A different owner later is an owner change, a
+new binding that follows the old one. Who holds every role on a self-run
+farm comes from this binding, and from `--single-person-farm` only on a
+farm with none. Bindings for single deployments, such as a node another
+party owns, refine it later.
+
 **Links.** A Materialization may name the record of its source (annotation
 `c4.avalanche.io/source-record`): the controller verifies it before
 resolving, refuses a mismatch or another project's workload, and links it

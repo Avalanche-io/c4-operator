@@ -1154,6 +1154,47 @@ it failed, has not run yet, or has not resynced in three resync periods;
 viewer's own grant to it, active or not. On a farm without Trackers
 installed the list is empty.
 
+## The farm binding
+
+The farm binding names whom the farm's records accrue to. The installer
+names the farm's owner once, at install (`c4 farm up --owner`), and the
+HUD binds every deployment of the farm to that owner. The binding is a
+`sign` grant over every record kind (task, resolution, decision, job,
+control, import and ingest). It is signed as a control record of kind
+`bind`, and kept as the cluster-scoped `DeploymentBinding` named `farm`.
+
+Only the HUD writes a binding (the `c4-deployment-bindings` policy), and a
+binding never changes. A new owner is an owner change: a new binding that
+follows this one, which a farm can't make yet.
+
+| route                | body                     | answer                                                                                                                                      |
+| -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /farm/binding` | `{ owner, to, runFor? }` | `{ ok, message, binding, record }`; binding again to the same owner answers `existing: true` and changes nothing; `409` for any other owner |
+| `GET /farm/binding`  |                          | `{ ok, binding, record }`; `404` while the farm has no owner bound                                                                          |
+
+`to` is `<farm>/*`, every deployment of the farm (`laptop-1/*`). The
+first binding names the farm. `runFor`, on a managed farm, is the party
+the owner runs it for: the provider owns the farm, and the record says
+who it is run for.
+
+Who may bind:
+- A person signed in who may create `deploymentbindings`.
+- On a HUD listening only on loopback, a development viewer with the
+  wrangler or farm-admin role. That binding is graded `claimed`.
+
+Refused (`403`): a unit, an agent (an MCP client naming one, or a tracker's
+sync), and a development viewer on a HUD the network reaches.
+
+A binding is `{ owner, to, runFor?, for, start, by, record, follows? }`.
+`record` is the signed bind record's C4 ID. The DeploymentBinding also
+carries the record itself (`spec.signed`), so a farm with no project
+store yet still has the proof. Every project's store keeps a copy.
+
+The binding also says who holds every role. On a farm its owner runs
+(no `runFor`), the owner may decide a wait addressed to any role, as
+`--single-person-farm` names someone on a farm with no binding. A managed
+farm has no such person.
+
 ## Held tracker writes
 
 c4-sync makes each write to a tracker once (docs/c4-sync.md). A

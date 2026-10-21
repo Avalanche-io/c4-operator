@@ -123,8 +123,8 @@ func (s *Server) authenticatedBy(r *http.Request, v *api.Viewer) string {
 }
 
 func (s *Server) installer() string {
-	if s.SinglePerson != "" {
-		return s.SinglePerson
+	if one := s.singlePerson(context.Background()); one != "" {
+		return one
 	}
 	return "unnamed (--single-person-farm names them)"
 }

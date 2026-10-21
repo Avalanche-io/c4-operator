@@ -211,6 +211,11 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [trackers]
   verbs: [get, list, watch]
+# Deployment bindings (DESIGN.md 9.2): the HUD is their only writer, for
+# the installer; it reads the farm binding for the farm's owner.
+- apiGroups: [c4.avalanche.io]
+  resources: [deploymentbindings]
+  verbs: [get, list, watch, create]
 # Held tracker writes (internal/hud/API.md): the HUD lists them and
 # records a person's answer for one in its TrackerLink's status.
 - apiGroups: [c4.avalanche.io]

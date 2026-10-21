@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"slices"
@@ -208,7 +209,7 @@ func (s *Server) mayDecide(project, server string, who Decider) (string, error) 
 	// A single-person farm (a local farm: SinglePerson names its
 	// installer) is one person in every role: the installer decides a
 	// wait addressed to any of them, recorded for that role.
-	if s.SinglePerson != "" && who.User == s.SinglePerson {
+	if one := s.singlePerson(context.Background()); one != "" && who.User == one {
 		if slices.Contains(api.Roles, name) {
 			return "role:" + name, nil
 		}

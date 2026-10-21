@@ -1,0 +1,30 @@
+# A deployment binding (DESIGN.md section 9.2) says whom the records a
+# deployment signs accrue to. The farm binding, made at install, names the
+# farm's owner. Only the HUD writes one, for the installer, with its
+# signed control record (internal/hud/server/binding.go). Nobody else
+# creates, changes or deletes one, so no one can make a farm accountable to
+# someone who never bound it, or take a binding off the trail. A binding
+# never changes: a new owner is a new binding that follows it.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-deployment-bindings
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [c4.avalanche.io]
+      apiVersions: ["*"]
+      operations: [CREATE, UPDATE, DELETE]
+      resources: [deploymentbindings]
+  validations:
+  - expression: request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
+    message: a farm's owner is bound in the HUD (c4 farm up --owner), never written directly
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-deployment-bindings
+spec:
+  policyName: c4-deployment-bindings
+  validationActions: [Deny]

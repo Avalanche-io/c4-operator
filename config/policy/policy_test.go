@@ -59,7 +59,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "host-pods.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "host-pods.yaml", "deployment-bindings.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -676,4 +676,46 @@ func TestTrackerPeopleOnlyFromTheHUD(t *testing.T) {
 		t.Fatal(err)
 	}
 	eventually(t, "an entry deleted with its namespace", func() error { return admin.Delete(ctx, e) })
+}
+
+// Only the HUD (the manager's account) binds a farm to its owner: an
+// admin cannot create, change or delete a binding directly, and the
+// manager itself cannot change one, since a new owner is a new binding.
+func TestBindingsOnlyFromTheHUD(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	s := runtime.NewScheme()
+	c4v1.AddToScheme(s)
+	hud, err := client.New(mc, client.Options{Scheme: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mk := func(name, owner string) *c4v1.DeploymentBinding {
+		return &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: c4v1.DeploymentBindingSpec{
+			Owner: owner, To: "laptop-1/*", For: []string{"task/v1"}, Start: metav1.Now(), By: "noor"}}
+	}
+	enforced(t, "c4-deployment-bindings", func(try int) error {
+		return admin.Create(ctx, mk(fmt.Sprintf("probe-%d", try), "mallory"))
+	})
+	b := mk(c4v1.FarmBindingName, "noor")
+	if err := hud.Create(ctx, b); err != nil {
+		t.Fatalf("the HUD binds the farm: %v", err)
+	}
+	changed := b.DeepCopy()
+	changed.Spec.Owner = "mallory"
+	if err := admin.Update(ctx, changed); err == nil {
+		t.Error("an admin changed the farm's owner")
+	}
+	if err := hud.Update(ctx, changed); err == nil || !strings.Contains(err.Error(), "a new owner is a new binding") {
+		t.Errorf("the HUD changed a binding in place: %v", err)
+	}
+	if err := admin.Delete(ctx, b); err == nil {
+		t.Error("an admin deleted the farm binding")
+	}
 }

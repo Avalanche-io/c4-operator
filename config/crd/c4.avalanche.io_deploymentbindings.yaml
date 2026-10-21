@@ -1,0 +1,132 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.23.0
+  name: deploymentbindings.c4.avalanche.io
+spec:
+  group: c4.avalanche.io
+  names:
+    kind: DeploymentBinding
+    listKind: DeploymentBindingList
+    plural: deploymentbindings
+    singular: deploymentbinding
+  scope: Cluster
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .spec.owner
+      name: Owner
+      type: string
+    - jsonPath: .spec.to
+      name: To
+      type: string
+    - jsonPath: .spec.runFor
+      name: Run for
+      type: string
+    - jsonPath: .spec.start
+      name: Since
+      type: string
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: |-
+          A DeploymentBinding says who owns deployments of the farm, and so whom
+          the records they sign accrue to: a sign grant from the owner to the
+          deployments (DESIGN.md section 9.2). The farm binding, named farm,
+          covers every deployment of the farm (to: <farm>/*) and is made at
+          install, when c4 farm up names the farm's owner. Bindings for single
+          deployments (a node another party owns, a person's own Mac as a host
+          runner) refine it, never widen it.
+
+          People never write one. The HUD makes it for the installer
+          (POST /api/v1/farm/binding, c4 farm up --owner), signs it as a control
+          record, and is the only writer (the c4-deployment-bindings policy). A
+          binding never changes: a new owner is a new binding that follows it.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: |-
+              DeploymentBindingSpec is who owns which deployments, since when, made by
+              whom.
+            properties:
+              by:
+                description: By is who made it, as the HUD recorded them.
+                type: string
+              follows:
+                description: Follows names the binding this one replaces (an owner
+                  change).
+                type: string
+              for:
+                description: For lists the record kinds the deployments sign under
+                  it.
+                items:
+                  type: string
+                minItems: 1
+                type: array
+              owner:
+                description: |-
+                  Owner is the party the deployments' records accrue to: a person
+                  (their sign-in name) or an organization.
+                maxLength: 253
+                minLength: 1
+                type: string
+              record:
+                description: Record is the C4 ID of the signed control record that
+                  made it.
+                type: string
+              runFor:
+                description: |-
+                  RunFor, on a managed farm, is the party the owner runs the farm for
+                  ("the provider runs this for the studio"). Empty on a farm its
+                  owner runs.
+                maxLength: 253
+                type: string
+              signed:
+                description: |-
+                  Signed is that record itself, so the binding carries its own proof
+                  on a farm with no project store yet.
+                format: byte
+                type: string
+              start:
+                description: Start is when the binding came into force.
+                format: date-time
+                type: string
+              to:
+                description: 'To names the deployments bound: <farm>/* for the farm
+                  binding.'
+                pattern: ^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/\*$
+                type: string
+            required:
+            - by
+            - for
+            - owner
+            - start
+            - to
+            type: object
+            x-kubernetes-validations:
+            - message: 'a binding never changes: a new owner is a new binding that
+                follows it'
+              rule: self == oldSelf
+        required:
+        - spec
+        type: object
+    served: true
+    storage: true
+    subresources: {}

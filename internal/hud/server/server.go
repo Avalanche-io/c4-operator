@@ -221,6 +221,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/people", s.handlePeopleConfirm)
 	mux.HandleFunc("DELETE /api/v1/people/{ns}/{name}", s.handlePeopleRevoke)
 	mux.HandleFunc("GET /api/v1/held", s.handleHeld)
+	mux.HandleFunc("GET /api/v1/farm/binding", s.handleFarmBinding)
+	mux.HandleFunc("POST /api/v1/farm/binding", s.handleBind)
 	mux.HandleFunc("POST /api/v1/held/{ns}/{link}/{field}", s.handleConfirm)
 	// an API path with no route is a 404 in JSON, never the web page, so a
 	// client can tell "no such call" from an answer
