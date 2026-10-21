@@ -40,6 +40,23 @@ C4 is the short form of The Cinema Content Creation Cloud
   file traces back to its sources, with its declared AI use and a C2PA
   manifest definition.
 
+## Start here: your own agents
+
+If you use Claude Code, the first step needs no farm and changes nothing:
+
+```sh
+brew install mrjoshuak/tap/c4
+c4 farm agents
+```
+
+It lists the Claude Code sessions already running on your machine, one line
+each, with its state in a word, its folder, the tokens it has used and how
+long it has run, and then what needs you, or "Nothing needs you." It only
+reads what is on your machine. `c4 farm agents --open` shows the same in the
+HUD, served on this machine only. Then `c4 farm up` makes a whole farm on
+your machine in Docker, where the same work runs to deadlines, with every
+step signed; [docs/quickstart.md](docs/quickstart.md) walks both.
+
 **Status: v0.1.** The API (`c4.avalanche.io/v1alpha1`) may change before
 1.0.
 
