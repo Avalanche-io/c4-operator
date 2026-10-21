@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
 // TaintHostRunner keeps ordinary pods off a host runner's node; the agent
@@ -89,6 +90,14 @@ type Runner struct {
 	// that lists the pod's namespace.
 	Docs        DocStore
 	DocsProject string
+	// Signer, when set, signs a task record for each unit pod the runner
+	// ends, as this machine's node (record.go); Version is the builder
+	// version it names.
+	Signer  *provenance.Signer
+	Version string
+	// Farm names the farm in this runner's deployment name
+	// (<farm>/runner/<node>), as its records name it.
+	Farm string
 	// Views and ViewSrc store and read units' output views (a regional
 	// replica): a block's session leaves the host as its yield's
 	// output-tree and comes back as its next attempt's C4_RESUME_VIEW, so it
@@ -619,6 +628,7 @@ func (r *Runner) running(ctx context.Context, p *corev1.Pod, m *Member) error {
 }
 
 func (r *Runner) finish(ctx context.Context, p *corev1.Pod, phase corev1.PodPhase, reason, msg string, code int32) error {
+	r.recordEnd(ctx, p)
 	now := metav1.NewTime(r.now())
 	started := now
 	if p.Status.StartTime != nil {

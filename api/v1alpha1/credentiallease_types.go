@@ -92,7 +92,16 @@ type CredentialLeaseStatus struct {
 	// Message says why, in plain words.
 	// +optional
 	Message string `json:"message,omitempty"`
+	// Conditions: HolderVerified says whether the lease was created by its
+	// holder (its creator, c4.avalanche.io/owner, fixed at creation, is
+	// spec.holder). A lease someone else created is labelled, not refused.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
+
+// ConditionHolderVerified is the lease condition that says whether its
+// creator is its holder.
+const ConditionHolderVerified = "HolderVerified"
 
 // CredentialLease is a model credential's lease.
 // +kubebuilder:object:root=true

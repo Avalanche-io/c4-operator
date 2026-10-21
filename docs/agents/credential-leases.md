@@ -102,3 +102,11 @@ your lease; `c4 farm revoke` takes it back (docs/c4-sync.md, `for`).
 | `status.state`                 | `active`, `renewing`, `waiting-for-holder`, `revoked` or `expired`                        |
 | `status.expiresAt`             | when the credential or the lease ends, whichever is first                                 |
 | `status.message`               | why, in plain words                                                                       |
+| `status.conditions`            | `HolderVerified`: whether the lease was created by its holder (below)                     |
+
+**Who created it.** A lease records its creator when it is made
+(`c4.avalanche.io/owner`, stamped by the farm's owner webhook and fixed
+from then on, as a job's owner is). `HolderVerified` is true when the
+creator is `spec.holder`, false ("created by kubernetes-admin, not its holder
+joshua") when someone else made it. It labels the lease; it refuses
+nothing.

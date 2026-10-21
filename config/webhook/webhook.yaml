@@ -74,3 +74,19 @@ webhooks:
       name: c4-operator-webhook
       namespace: c4-system
       path: /mutate-agentbundle
+- name: credentialleases.c4.avalanche.io
+  admissionReviewVersions: [v1]
+  sideEffects: None
+  # A lease records who created it, so its holder can be checked against
+  # its creator (the lease's HolderVerified condition).
+  failurePolicy: Fail
+  rules:
+  - operations: [CREATE]
+    apiGroups: [c4.avalanche.io]
+    apiVersions: [v1alpha1]
+    resources: [credentialleases]
+  clientConfig:
+    service:
+      name: c4-operator-webhook
+      namespace: c4-system
+      path: /mutate-credentiallease

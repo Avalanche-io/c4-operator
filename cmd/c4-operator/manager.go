@@ -166,7 +166,7 @@ func runManager(args []string) error {
 	if *holderTransfer != "allow" && *holderTransfer != "disallow" {
 		return fmt.Errorf("--holder-transfer: %q, want allow or disallow", *holderTransfer)
 	}
-	if err := (&controller.CredentialLeaseReconciler{Client: mgr.GetClient(), HolderTransfer: *holderTransfer == "allow"}).SetupWithManager(mgr); err != nil {
+	if err := (&controller.CredentialLeaseReconciler{Client: mgr.GetClient(), HolderTransfer: *holderTransfer == "allow", SinglePerson: *singlePerson}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	var q *queue.Queue
@@ -240,6 +240,7 @@ func runManager(args []string) error {
 	owner := &webhook.Admission{Handler: &c4webhook.Owner{Delegates: []string{self}}}
 	mgr.GetWebhookServer().Register("/mutate-workjob", owner)
 	mgr.GetWebhookServer().Register("/mutate-agentbundle", owner)
+	mgr.GetWebhookServer().Register("/mutate-credentiallease", owner)
 	mgr.AddHealthzCheck("ping", healthz.Ping)
 	mgr.AddReadyzCheck("webhook", mgr.GetWebhookServer().StartedChecker())
 	log.Info("starting", "namespace", *namespace)

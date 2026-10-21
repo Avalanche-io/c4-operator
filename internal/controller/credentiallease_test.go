@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -109,5 +110,34 @@ func TestJobForBundleCarriesItsOwner(t *testing.T) {
 	b.Annotations = nil
 	if j := JobForBundle(b); j.Annotations[c4v1.AnnotationOwner] != "" {
 		t.Fatalf("an owner from nowhere: %v", j.Annotations)
+	}
+}
+
+// A lease says whether its holder created it: its creator (the owner the
+// webhook stamped) against spec.holder. It labels; it refuses nothing.
+func TestLeaseHolderVerified(t *testing.T) {
+	for _, c := range []struct {
+		creator, holder, single string
+		status                  metav1.ConditionStatus
+		msg                     string
+	}{
+		{"joshua", "joshua", "", metav1.ConditionTrue, "created by its holder, joshua"},
+		{"kubernetes-admin", "joshua", "", metav1.ConditionFalse, "created by kubernetes-admin, not its holder joshua"},
+		{"", "joshua", "", metav1.ConditionUnknown, "the lease records no creator (made before leases were stamped)"},
+		// a single-person farm's installer is every person on it
+		{"kubernetes-admin", "joshua", "joshua", metav1.ConditionTrue, "created by kubernetes-admin, this single-person farm's installer joshua, its holder"},
+		{"system:serviceaccount:show-a:importer", "joshua", "joshua", metav1.ConditionFalse, "created by system:serviceaccount:show-a:importer, not its holder joshua"},
+		{"kubernetes-admin", "ivo", "joshua", metav1.ConditionFalse, "created by kubernetes-admin, not its holder ivo"},
+	} {
+		l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Name: "mine", Annotations: map[string]string{}},
+			Spec: c4v1.CredentialLeaseSpec{Holder: c.holder}}
+		if c.creator != "" {
+			l.Annotations[c4v1.AnnotationOwner] = c.creator
+		}
+		holderCondition(l, c.single)
+		got := meta.FindStatusCondition(l.Status.Conditions, c4v1.ConditionHolderVerified)
+		if got == nil || got.Status != c.status || got.Message != c.msg {
+			t.Errorf("%q made %q's lease: %+v", c.creator, c.holder, got)
+		}
 	}
 }

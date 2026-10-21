@@ -26,6 +26,11 @@ const IdentityBase = "https://cccc.io/id/"
 // NodeIdentity is a node daemon's identity.
 func NodeIdentity(node string) string { return IdentityBase + "node/" + node }
 
+// RunnerIdentity is a host runner's identity: the person's own machine,
+// running their members under their own sign-in. It is a deployment apart
+// from a node daemon on the same Node, owned by that person, not the farm.
+func RunnerIdentity(node string) string { return IdentityBase + "runner/" + node }
+
 // ComponentIdentity is a manager component's identity: controller, queue,
 // hud.
 func ComponentIdentity(name string) string { return IdentityBase + "component/" + name }

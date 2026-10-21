@@ -221,6 +221,19 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, b, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"suspend":true}}`))); err != nil {
 		t.Errorf("an ordinary change to a bundle was refused: %v", err)
 	}
+
+	// and a lease's creator: its holder is checked against it
+	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "mine",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "joshua"}}, Spec: c4v1.CredentialLeaseSpec{
+		Account: "anthropic-max", Holder: "joshua", BoundTo: c4v1.LeaseBinding{Owners: []string{"joshua"}},
+		Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{"blocks"}},
+		TTL: metav1.Duration{Duration: time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
+	if err := c.Create(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.Patch(ctx, l, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/owner":"ivo"}}}`))); err == nil {
+		t.Error("a lease's creator was changed")
+	}
 }
 
 // TestSubmitGrantsOnlyFromTheHUD: a person's grant to a Tracker is written
@@ -357,7 +370,7 @@ func TestHostRunnerWrites(t *testing.T) {
 		t.Errorf("checkpoint annotations on its pod: %v", err)
 	}
 	// the safe point it relays, and a generator's expansion document
-	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/safepoint":"{\"seq\":1}","c4.avalanche.io/output-expand":"c4abc","c4.avalanche.io/output-verdict":"c4def","c4.avalanche.io/output-measure":"c4fed","c4.avalanche.io/output-usage":"c4bee","c4.avalanche.io/output-tree":"c4cab","c4.avalanche.io/asks":"[]","c4.avalanche.io/answers":"[]","c4.avalanche.io/steer-seen":"1"}}}`); err != nil {
+	if err := patch(laptop, onMe, `{"metadata":{"annotations":{"c4.avalanche.io/safepoint":"{\"seq\":1}","c4.avalanche.io/output-expand":"c4abc","c4.avalanche.io/output-verdict":"c4def","c4.avalanche.io/output-measure":"c4fed","c4.avalanche.io/output-usage":"c4bee","c4.avalanche.io/output-tree":"c4cab","c4.avalanche.io/output-provenance":"c4rec","c4.avalanche.io/asks":"[]","c4.avalanche.io/answers":"[]","c4.avalanche.io/steer-seen":"1"}}}`); err != nil {
 		t.Fatalf("the runner relays a safe point and names its documents on its pod: %v", err)
 	}
 	// but not the queue's answer

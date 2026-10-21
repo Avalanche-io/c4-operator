@@ -297,10 +297,26 @@ token, issued by the farm admin). `config/rbac/host-runner.yaml` and
 - its own Node: created only with the host-runner taint, then only its
   slot limit, capacity reason and status;
 - its own Lease;
-- pods bound to it: status and seven annotations (output-checkpoint,
+- pods bound to it: status and its output annotations (output-checkpoint,
   output-epoch, output-expand, output-verdict, output-measure,
-  output-usage, safepoint);
+  output-usage, output-tree, output-provenance), safepoint, asks, answers
+  and steer-seen;
 - bindings to itself only.
+
+**Task records for host-run units.** With `--signer URL --signer-token-file
+FILE` (the farm's certificate issuer, and a token for the machine's
+`c4-hosts` account with audience `c4-signer`), the runner signs a task
+record for each unit pod it ends, as the runner (`runner/<node>`): the
+person's own machine is a deployment apart from any node daemon on the
+same Node, owned by that person, not by the farm. The record says what the
+unit left (its output view, its session's checkpoint), what it resumed
+from, the job and unit, and when. Its chain says whom it accrues to: by the
+unit and the member it is, for the job's owner (read from the job), under
+that job's ownership, using its holder's own sign-in on this machine (a
+`signIn` credential, no lease), on `<farm>/runner/<node>` (`--farm`). Until
+deployments are bound, its `gap` says the runner has no binding. The record
+goes to the project's store (`--store`) and its ID onto the pod
+(`output-provenance`), as a node daemon records a capture.
 
 Keep the host-runner taint on agent pools, so only agent pods select these
 nodes. Under a hard power line, `--hard-stop-after` stops a member that

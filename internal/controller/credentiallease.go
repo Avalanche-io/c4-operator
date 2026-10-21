@@ -2,9 +2,12 @@ package controller
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
+	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -22,6 +25,9 @@ type CredentialLeaseReconciler struct {
 	// HolderTransfer is the farm's switch for holder-transfer leases
 	// (the manager's --holder-transfer: allow, or disallow by default).
 	HolderTransfer bool
+	// SinglePerson is a single-person farm's installer (the manager's
+	// --single-person-farm), every person on it.
+	SinglePerson string
 	// Now is the clock (tests replace it).
 	Now func() time.Time
 }
@@ -58,9 +64,10 @@ func (r *CredentialLeaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 			return ctrl.Result{}, err
 		}
 	}
-	if state != l.Status.State || msg != l.Status.Message {
-		orig := l.DeepCopy()
-		l.Status.State, l.Status.Message = state, msg
+	orig := l.DeepCopy()
+	l.Status.State, l.Status.Message = state, msg
+	holderCondition(&l, r.SinglePerson)
+	if !equality.Semantic.DeepEqual(orig.Status, l.Status) {
 		if err := r.Status().Patch(ctx, &l, client.MergeFrom(orig)); err != nil {
 			return ctrl.Result{}, err
 		}
@@ -69,6 +76,31 @@ func (r *CredentialLeaseReconciler) Reconcile(ctx context.Context, req ctrl.Requ
 		return ctrl.Result{}, nil
 	}
 	return ctrl.Result{RequeueAfter: end.Sub(now) + time.Second}, nil
+}
+
+// holderCondition labels whether a lease was created by its holder: its
+// creator (c4.avalanche.io/owner, stamped at creation by the owner webhook
+// and fixed by the c4-workjob-owner policy) is spec.holder. Nothing is
+// refused; the label is the record.
+//
+// On a single-person farm (a local farm), the installer is every person
+// there: a lease its holder, the installer, made as the cluster's own user
+// (kind's admin, say) was made by its holder. A party list will say so for
+// any farm; until then this is the one case it would.
+func holderCondition(l *c4v1.CredentialLease, singlePerson string) {
+	creator := l.Annotations[c4v1.AnnotationOwner]
+	c := metav1.Condition{Type: c4v1.ConditionHolderVerified, ObservedGeneration: l.Generation}
+	switch {
+	case creator == "":
+		c.Status, c.Reason, c.Message = metav1.ConditionUnknown, "NoCreator", "the lease records no creator (made before leases were stamped)"
+	case creator == l.Spec.Holder:
+		c.Status, c.Reason, c.Message = metav1.ConditionTrue, "CreatedByHolder", "created by its holder, "+creator
+	case singlePerson != "" && l.Spec.Holder == singlePerson && !strings.HasPrefix(creator, "system:serviceaccount:"):
+		c.Status, c.Reason, c.Message = metav1.ConditionTrue, "CreatedByInstaller", "created by "+creator+", this single-person farm's installer "+singlePerson+", its holder"
+	default:
+		c.Status, c.Reason, c.Message = metav1.ConditionFalse, "CreatedByAnother", "created by "+creator+", not its holder "+l.Spec.Holder
+	}
+	meta.SetStatusCondition(&l.Status.Conditions, c)
 }
 
 // SetupWithManager registers the controller.

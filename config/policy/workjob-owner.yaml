@@ -16,7 +16,7 @@ spec:
     - apiGroups: [c4.avalanche.io]
       apiVersions: [v1alpha1]
       operations: [UPDATE]
-      resources: [workjobs, agentbundles]
+      resources: [workjobs, agentbundles, credentialleases]
   variables:
   - name: before
     expression: "has(oldObject.metadata.annotations) ? oldObject.metadata.annotations : {}"

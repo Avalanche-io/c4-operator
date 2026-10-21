@@ -247,6 +247,10 @@ func CheckSigner(v *Verified) error {
 			return err
 		}
 		want = NodeIdentity(p.Runtime.Node)
+		if v.Identity == RunnerIdentity(p.Runtime.Node) {
+			// a host runner's record of a unit it ran there
+			want = v.Identity
+		}
 	case PredicateResolution:
 		want = ComponentIdentity("controller")
 	case PredicateJob, PredicateDecision:

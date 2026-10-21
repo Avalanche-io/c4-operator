@@ -48,6 +48,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/agent"
 	"github.com/Avalanche-io/c4-operator/internal/lease"
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/tier"
 )
 
@@ -351,6 +352,9 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	storeToken := fs.String("store-token-file", "", "a file holding the bearer token for --store")
 	storeProject := fs.String("store-project", "", "the project to store documents in (default: the Project listing the pod's namespace)")
 	blocksCwd := fs.String("blocks-cwd", "", "run plan jobs' blocks (pods with C4_AGENT_BLOCK=1), each a fresh session started in this folder, which the claude CLI must trust; without it the runner runs registered members only")
+	signerURL := fs.String("signer", "", "the farm's certificate issuer (https://host:port): sign a task record for each unit this machine runs, as its node; without it, host-run units leave none")
+	farm := fs.String("farm", "farm", "the farm's name, in this runner's deployment name (<farm>/runner/<node>) on its records")
+	signerToken := fs.String("signer-token-file", "", "with --signer: a file holding this machine's token for the issuer (its c4-hosts account, audience c4-signer)")
 	var owners multi
 	fs.Var(&owners, "owner", "a user whose jobs this machine runs, by each job's owner (c4.avalanche.io/owner); repeat for more. Required: a pod of anyone else's job is never bound or run")
 	var lbls multi
@@ -398,6 +402,25 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 			return err
 		}
 		r.BlocksCwd, r.HookCommand, r.UnitBin = *blocksCwd, hook, os.Getenv("C4_UNIT_BIN")
+	}
+	if *signerURL != "" {
+		if *store == "" {
+			return errors.New("runner: --signer needs --store, where the records go")
+		}
+		path := *signerToken
+		token := func() (string, error) {
+			b, err := os.ReadFile(path)
+			if err != nil || strings.TrimSpace(string(b)) == "" {
+				return "", fmt.Errorf("no issuer token at %s", path)
+			}
+			return strings.TrimSpace(string(b)), nil
+		}
+		r.Signer, r.Farm = provenance.LazySigner(provenance.RemoteIssuer(*signerURL, token, nil)), *farm
+		go func() {
+			if err := r.Signer.Ready(ctx, 5*time.Second); err == nil {
+				fmt.Fprintf(out, "signing task records as %s\n", r.Signer.Identity())
+			}
+		}()
 	}
 	if *slotsFile != "" {
 		r.Capacity = func() (int, string) { return readSlotsFile(*slotsFile, *slots) }

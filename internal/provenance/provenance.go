@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // Types and URIs.
@@ -62,6 +64,9 @@ type TaskPredicate struct {
 	// AI is the job's declared use of generative models, if any
 	// (section 9.4), carried from the WorkJob's annotation verbatim.
 	AI json.RawMessage `json:"ai,omitempty"`
+	// Chain says whom the run accrues to: by whom, for whom, under what,
+	// using which credentials, on which deployments (chain/1).
+	Chain *schema.Chain `json:"chain,omitempty"`
 }
 
 // Builder is the component that observed the task and signed the record.
