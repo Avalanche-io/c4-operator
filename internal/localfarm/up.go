@@ -225,6 +225,7 @@ func Up(ctx context.Context, o UpOptions) error {
 		return err
 	}
 	// the networks tools declare (needs.network), before any tool's test runs
+	o.Timings.Mark("networks")
 	added, err := ensureNetworks(ctx, c)
 	if err != nil {
 		return err
