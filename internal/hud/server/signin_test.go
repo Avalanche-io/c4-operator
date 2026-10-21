@@ -4,9 +4,11 @@ import (
 	"encoding/base64"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 
 	authnv1 "k8s.io/api/authentication/v1"
 	authzv1 "k8s.io/api/authorization/v1"
@@ -100,5 +102,37 @@ func TestProxyHeadersNeedTheProxysSecret(t *testing.T) {
 	}
 	if code := get("the-proxys-secret"); code != http.StatusOK {
 		t.Errorf("X-Forwarded-User with the proxy's secret got %d, want 200", code)
+	}
+}
+
+// A development farm's stand-in tracker is served at /sandbox/ as it is,
+// with nothing of the person's sign-in; a farm without development viewers
+// serves no sandbox, whatever it is given.
+func TestSandboxBehindTheHUD(t *testing.T) {
+	var got *http.Request
+	sb := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r
+		_, _ = w.Write([]byte("sandbox"))
+	}))
+	defer sb.Close()
+	s := farm(t)
+	s.Web = fstest.MapFS{"index.html": {Data: []byte("hud")}}
+	s.Sandbox, _ = url.Parse(sb.URL)
+	get := func() *httptest.ResponseRecorder {
+		w := httptest.NewRecorder()
+		r := httptest.NewRequest(http.MethodGet, "/sandbox/issues/3?as=artist", nil)
+		r.Header.Set("Authorization", "Bearer the-persons-token")
+		r.Header.Set("Cookie", "session=x")
+		s.Handler().ServeHTTP(w, r)
+		return w
+	}
+	if w := get(); w.Body.String() != "sandbox" || got == nil || got.URL.Path != "/sandbox/issues/3" || got.URL.RawQuery != "as=artist" ||
+		got.Header.Get("Authorization") != "" || got.Header.Get("Cookie") != "" {
+		t.Fatalf("proxied: %d %q %+v", w.Code, w.Body.String(), got)
+	}
+	got = nil
+	s.DevViewers = nil
+	if w := get(); got != nil || w.Body.String() == "sandbox" {
+		t.Fatalf("a farm without development viewers served the sandbox: %d", w.Code)
 	}
 }

@@ -103,6 +103,9 @@ type Options struct {
 	// installer, recorded as standing in for a role when they decide a wait
 	// addressed to it (the manager's --single-person-farm).
 	Owner string
+	// Tracker adds the stand-in GitHub and c4-sync (c4 farm up --tracker):
+	// c4-sync's sign-in, and the sandbox's page at the HUD's /sandbox/.
+	Tracker bool
 }
 
 // HUD is the HUD's address on this machine.
@@ -271,7 +274,11 @@ func Farm(o Options) []obj {
 
 // ManagerArgs are what the local farm adds to the manager's arguments.
 func ManagerArgs(o Options) []string {
-	args := []string{"--hud-dev-viewers=" + DevViewers(), "--capacity-provider=kind-sim", "--hud-sites=/etc/c4/sites/sites.json"}
+	viewers := DevViewers()
+	if o.Tracker {
+		viewers += ";" + syncViewer
+	}
+	args := []string{"--hud-dev-viewers=" + viewers, "--capacity-provider=kind-sim", "--hud-sites=/etc/c4/sites/sites.json"}
 	if o.TZ != "" {
 		args = append(args, "--tz="+o.TZ)
 	}
@@ -283,6 +290,9 @@ func ManagerArgs(o Options) []string {
 	}
 	if o.Owner != "" {
 		args = append(args, "--single-person-farm="+o.Owner)
+	}
+	if o.Tracker {
+		args = append(args, "--hud-sandbox="+sandboxURL)
 	}
 	return args
 }
@@ -299,7 +309,7 @@ func ManagerPatch(o Options, args []string) []byte {
 	for _, a := range args {
 		drop := false
 		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz=", "--hud-plain-registries=", "--single-person-farm=",
-			"--hud-image-registry=", "--hud-image-tag="} {
+			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox="} {
 			if strings.HasPrefix(a, f) {
 				drop = true
 			}

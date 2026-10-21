@@ -1,0 +1,16 @@
+# An issue in the local farm's stand-in GitHub (c4 farm up --tracker), for
+# someone who would rather not click through the sandbox's page.
+#
+# The supervisor asks for sm0150's lighting and assigns it to the artist.
+# The Tracker makes a job of it for the artist once the artist has let it
+# submit work for them (their page in the HUD); until then the sandbox
+# says so. The job is two short stand-in units and then the supervisor's
+# review, which the pull request's review serves.
+name: tracker
+title: an issue in the sandbox GitHub
+summary: the supervisor asks the artist for sm0150's lighting; it becomes a job once the artist allows it
+issues:
+- by: supervisor
+  title: Light sm0150 for Thursday's review
+  assignee: artist
+  labels: [c4]

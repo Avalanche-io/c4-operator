@@ -1,10 +1,14 @@
 package farmcli
 
 import (
+	"bytes"
 	"context"
 	"embed"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"os"
 	"path"
 	"path/filepath"
@@ -51,7 +55,10 @@ type Scenario struct {
 	// Defs holds YAML anchors the jobs share.
 	Defs map[string]any `json:"defs,omitempty"`
 	// Jobs are submitted in order; a job's After names earlier ones.
-	Jobs []ScenarioJob `json:"jobs"`
+	Jobs []ScenarioJob `json:"jobs,omitempty"`
+	// Issues are opened in the local farm's stand-in GitHub (c4 farm up
+	// --tracker), in order, for the Tracker to make jobs of.
+	Issues []ScenarioIssue `json:"issues,omitempty"`
 }
 
 // ScenarioProject is a project a scenario adds.
@@ -89,6 +96,15 @@ type ScenarioJob struct {
 	// Fail makes every unit given to one node fail there.
 	Fail    *ScenarioFail  `json:"fail,omitempty"`
 	AIUsage map[string]any `json:"aiUsage,omitempty"`
+}
+
+// ScenarioIssue is an issue a scenario opens: by a local sign-in, assigned
+// to one, with labels.
+type ScenarioIssue struct {
+	By       string   `json:"by"`
+	Title    string   `json:"title"`
+	Assignee string   `json:"assignee,omitempty"`
+	Labels   []string `json:"labels,omitempty"`
 }
 
 // ScenarioFail is a node a job's units fail on.
@@ -140,8 +156,16 @@ func LookupScenario(name string) (Scenario, error) {
 }
 
 func (sc Scenario) check() error {
-	if sc.Name == "" || sc.Title == "" || len(sc.Jobs) == 0 {
-		return fmt.Errorf("a scenario needs a name, a title and jobs")
+	if sc.Name == "" || sc.Title == "" || len(sc.Jobs)+len(sc.Issues) == 0 {
+		return fmt.Errorf("a scenario needs a name, a title, and jobs or issues")
+	}
+	if len(sc.Jobs) > 0 && len(sc.Issues) > 0 {
+		return fmt.Errorf("a scenario has jobs or issues, not both")
+	}
+	for _, is := range sc.Issues {
+		if is.By == "" || is.Title == "" {
+			return fmt.Errorf("an issue needs by and a title")
+		}
 	}
 	seen := map[string]bool{}
 	for _, j := range sc.Jobs {
@@ -377,4 +401,46 @@ func submitStandIn(ctx context.Context, c *Client, clock Clock, scenario string,
 		return &done, &spec.Deadline.Time, nil
 	}
 	return &done, nil, nil
+}
+
+// ErrNoSandbox is a farm without the stand-in GitHub a scenario's issues
+// go to.
+var ErrNoSandbox = errors.New("the local farm has no tracker to open issues in; `c4 farm up --tracker` adds one")
+
+// LoadIssues opens a scenario's issues in the stand-in GitHub, through
+// the HUD at hud, and prints what each does on the farm.
+func LoadIssues(ctx context.Context, o Out, sc Scenario, hud string) error {
+	for _, is := range sc.Issues {
+		body, err := json.Marshal(map[string]any{"as": is.By, "title": is.Title, "assignee": is.Assignee, "labels": is.Labels})
+		if err != nil {
+			return err
+		}
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(hud, "/")+"/sandbox/issues", bytes.NewReader(body))
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Content-Type", "application/json")
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			return err
+		}
+		var out struct {
+			Number  int    `json:"number"`
+			Message string `json:"message"`
+			Error   string `json:"error"`
+		}
+		err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out)
+		resp.Body.Close()
+		switch {
+		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusBadGateway:
+			// a HUD with no sandbox behind it, or one not yet up
+			return ErrNoSandbox
+		case err != nil:
+			return fmt.Errorf("opening %q: %s", is.Title, resp.Status)
+		case out.Error != "":
+			return fmt.Errorf("opening %q: %s", is.Title, out.Error)
+		}
+		fmt.Fprintf(o.W, "issue     #%d %s (by %s)\n          %s\n", out.Number, is.Title, is.By, out.Message)
+	}
+	return nil
 }

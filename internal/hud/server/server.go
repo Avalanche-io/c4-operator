@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/http/httputil"
+	"net/url"
 	"slices"
 	"strings"
 	"sync"
@@ -79,6 +81,9 @@ type Server struct {
 	Loc *time.Location
 	// DevViewers enables ?as= with these viewers (tests and demos only).
 	DevViewers map[string]*api.Viewer
+	// Sandbox is a development farm's stand-in tracker (c4 farm up --tracker),
+	// served at /sandbox/ on the HUD's own port; only with DevViewers.
+	Sandbox *url.URL
 	// TrustProxy reads X-Forwarded-User and X-Forwarded-Groups from an
 	// SSO proxy in front of the HUD.
 	TrustProxy bool
@@ -213,6 +218,11 @@ func (s *Server) Handler() http.Handler {
 		mux.HandleFunc(m+" /api/", func(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusNotFound, "no API call %s %s", r.Method, r.URL.Path)
 		})
+	}
+	if s.Sandbox != nil && s.DevViewers != nil {
+		p := s.sandboxProxy()
+		mux.Handle("GET /sandbox/", p)
+		mux.Handle("POST /sandbox/", p)
 	}
 	files := http.FileServer(http.FS(s.Web))
 	mux.Handle("GET /", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -507,4 +517,18 @@ func RoleOf(groups []string, byGroup map[string]string) string {
 		}
 	}
 	return ""
+}
+
+// sandboxProxy passes /sandbox/ to the stand-in tracker as it is, path and
+// all. Nothing of the person's sign-in goes with it: the sandbox knows
+// people only as the page names them.
+func (s *Server) sandboxProxy() http.Handler {
+	return &httputil.ReverseProxy{Rewrite: func(pr *httputil.ProxyRequest) {
+		pr.SetURL(s.Sandbox)
+		pr.Out.URL.Path, pr.Out.URL.RawPath = pr.In.URL.Path, pr.In.URL.RawPath
+		pr.Out.Host = s.Sandbox.Host
+		for _, h := range []string{"Authorization", "Cookie", "X-Forwarded-User", "X-Forwarded-Groups", ProxySecretHeader} {
+			pr.Out.Header.Del(h)
+		}
+	}}
 }

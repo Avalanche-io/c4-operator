@@ -580,6 +580,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		storePort := fs.Int("store-port", localfarm.StorePort, "the store's port on this machine")
 		registryPort := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
 		owner := fs.String("owner", "", "who owns this farm and plays every role on it (default the name in your git user.email, else your login)")
+		trackerOn := fs.Bool("tracker", false, "add a stand-in GitHub and c4-sync: issues you open become jobs, its reviews serve them (nothing leaves this machine)")
+		syncInstall := fs.String("sync-install", "", "c4-sync's install manifest, with --tracker (default this release's)")
+		syncImage := fs.String("sync-image", "", "the c4-sync image, with --tracker; one only in this machine's Docker (c4-sync:dev) is pushed to the farm's registry")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
@@ -591,13 +594,20 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		tz := localfarm.LocalTZ()
 		lat, lon := localfarm.Place(tz)
 		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort,
-			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != "", Owner: *owner},
-			Install: *install, Version: version, ImageArchive: *archive, Log: stdout}
+			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != "", Owner: *owner, Tracker: *trackerOn},
+			Install: *install, Version: version, ImageArchive: *archive, SyncInstall: *syncInstall, SyncImage: *syncImage, Log: stdout}
 		if o.Owner == "" {
 			o.Owner = localfarm.DefaultOwner()
 		}
 		if *plan {
 			fmt.Fprintf(stdout, "%s---\n%s", localfarm.KindConfig(o.Options), localfarm.YAML(localfarm.Farm(o.Options)))
+			if *trackerOn {
+				objs, err := localfarm.TrackerObjects(o.Options)
+				if err != nil {
+					return err
+				}
+				fmt.Fprintf(stdout, "---\n# with --tracker, after c4-sync's install manifest\n%s", localfarm.YAML(objs))
+			}
 			fmt.Fprintf(stdout, "---\n# manager arguments added: %s\n", strings.Join(localfarm.ManagerArgs(o.Options), " "))
 			return nil
 		}
@@ -617,6 +627,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		fmt.Fprintf(stdout, "owner     %s, who plays every role here (c4 farm up --owner NAME to change it)\n", o.Owner)
 		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td (c4 farm up --as ROLE opens another)\n")
+		if o.Tracker || localfarm.HasTracker(ctx) {
+			fmt.Fprintf(stdout, "tracker   %s   a stand-in for GitHub; nothing leaves this machine\n", localfarm.SandboxPage(o.HUD(), v.Name))
+		} else {
+			fmt.Fprintf(stdout, "try a tracker: c4 farm up --tracker\n")
+		}
 		if *noOpen {
 			return nil
 		}

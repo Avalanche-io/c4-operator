@@ -55,6 +55,20 @@ tried fresh. c4-sync looks for a write only after an interruption, or
 once when the link has no record of the field (its status was lost), not
 before every write.
 
+## Try it on the local farm
+
+`c4 farm up --tracker` adds c4-sync and a stand-in for GitHub to the
+local farm. The stand-in is a repository on your machine, and nothing in it
+leaves your computer. Its page is the HUD's `/sandbox/`. There you act as
+any of the local farm's people: you open an issue labeled `c4` and assign
+it, you play the agent that opens the pull request, and you approve the
+pull request or request changes. Each step says what it does to the farm.
+The issue's job is submitted once its assignee has let the Tracker submit
+work for them on their own page in the HUD. The supervisor's review is the
+job's last wait, so the job is done when the pull request is approved. A
+request for changes makes the job's next version. `c4 farm samples load
+tracker` opens an issue for you.
+
 ## Install
 
 From a release (one manifest with the two CRDs, RBAC, the Deployment and

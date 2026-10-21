@@ -47,6 +47,14 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 	o.Clock.Now = func() time.Time { return now }
 
 	fmt.Fprintf(stdout, "loading   %s: %s\n", sc.Name, sc.Title)
+	if len(sc.Issues) > 0 {
+		// issues for the Tracker, not jobs: the farm's other work stays
+		if err := farmcli.LoadIssues(ctx, o, sc, f.HUD); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "sandbox   %s\n", localfarm.SandboxPage(f.HUD, sc.Issues[0].By))
+		return nil
+	}
 	p, err := localfarm.Prepare(ctx, sc, all)
 	if err != nil {
 		return err

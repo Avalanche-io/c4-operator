@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -38,7 +39,7 @@ func TestScenarios(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 2 || all[0].Name != "evening" || all[1].Name != "tight-deadline" {
+	if len(all) != 3 || all[0].Name != "evening" || all[1].Name != "tight-deadline" || all[2].Name != "tracker" || len(all[2].Issues) != 1 {
 		t.Fatalf("scenarios %+v", all)
 	}
 	clock := eastern(t)
@@ -245,5 +246,37 @@ func TestStandIn(t *testing.T) {
 	}
 	if read(filepath.Join(m, "out", "sm0150.exr")) != "stand-in weights, 4 steps" || read(filepath.Join(m, ".c4", "progress")) != "1" {
 		t.Errorf("finished run: %q", read(filepath.Join(m, "out", "sm0150.exr")))
+	}
+}
+
+// A scenario's issues go to the stand-in GitHub through the HUD, and what
+// each does on the farm is printed; a farm without one says how to add it.
+func TestLoadIssues(t *testing.T) {
+	sc, err := LookupScenario("tracker")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/sandbox/issues" || r.Header.Get("Content-Type") != "application/json" {
+			http.Error(w, "no", http.StatusMethodNotAllowed)
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"number":1,"message":"Issue #1 will become a job in saltmarsh for artist; watch it in the HUD."}`))
+	}))
+	defer srv.Close()
+	var out bytes.Buffer
+	if err := LoadIssues(context.Background(), Out{W: &out}, sc, srv.URL); err != nil {
+		t.Fatal(err)
+	}
+	if got["as"] != "supervisor" || got["assignee"] != "artist" || !strings.Contains(out.String(), "#1 Light sm0150 for Thursday's review (by supervisor)") ||
+		!strings.Contains(out.String(), "will become a job in saltmarsh for artist") {
+		t.Fatalf("sent %v, printed %q", got, out.String())
+	}
+	none := httptest.NewServer(http.NotFoundHandler())
+	defer none.Close()
+	if err := LoadIssues(context.Background(), Out{W: &out}, sc, none.URL); !errors.Is(err, ErrNoSandbox) {
+		t.Fatalf("no sandbox: %v", err)
 	}
 }

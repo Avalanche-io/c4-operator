@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"slices"
@@ -91,6 +92,7 @@ func runManager(args []string) error {
 	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process, comma-separated: kind-sim (tests), provisioning-request (Cluster Autoscaler); empty for an external provider")
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name[@role]=project|project;... (* for all projects; a name that is a role, such as wrangler, has that role)")
+	hudSandbox := fs.String("hud-sandbox", "", "development only, with --hud-dev-viewers: the stand-in tracker's URL (c4 farm up --tracker), served at /sandbox/ on the HUD's port")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD); needs --hud-proxy-secret-file")
 	hudProxySecret := fs.String("hud-proxy-secret-file", "", "a file holding the secret the SSO proxy sends in X-C4-Proxy-Secret on every request; a request naming a viewer without it is refused")
 	hudRoles := fs.String("hud-role-groups", "", "the studio's groups and the HUD roles they start their members at, as group=role,... (roles: artist, supervisor, producer, wrangler, farm-admin, facilities, pipeline-td); groups named c4:role:<role> need no entry")
@@ -212,7 +214,7 @@ func runManager(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, proxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, proxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, *hudSandbox, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
 			return err
 		}
 	}
@@ -284,7 +286,7 @@ func proxySecret(trust bool, file string) ([]byte, error) {
 	return b, nil
 }
 
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy []byte, sites, roles, tz, namespace, tierToken, standIn, singlePerson string, images hudImages) error {
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy []byte, sites, roles, tz, namespace, tierToken, standIn, singlePerson, sandbox string, images hudImages) error {
 	if standIn != "allow" && standIn != "deny" {
 		return fmt.Errorf("--decide-stand-in: allow or deny, not %q", standIn)
 	}
@@ -328,6 +330,14 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		srv.DevViewers, err = parseViewers(dev)
 		if err != nil {
 			return err
+		}
+	}
+	if sandbox != "" {
+		if srv.DevViewers == nil {
+			return errors.New("--hud-sandbox is for a development farm: it needs --hud-dev-viewers")
+		}
+		if srv.Sandbox, err = url.Parse(sandbox); err != nil || srv.Sandbox.Host == "" {
+			return fmt.Errorf("--hud-sandbox %q: want the sandbox's URL", sandbox)
 		}
 	}
 	if sites != "" {

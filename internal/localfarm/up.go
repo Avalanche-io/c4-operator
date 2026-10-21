@@ -45,7 +45,12 @@ type UpOptions struct {
 	// ImageArchive is an OCI or docker archive of the operator image to
 	// load into the cluster's nodes (a development build).
 	ImageArchive string
-	Log          io.Writer
+	// SyncInstall is c4-sync's install manifest, with --tracker: a path, or
+	// empty for the release's. SyncImage replaces the image it names; a
+	// name with no registry is pushed from this machine's Docker into the
+	// farm's registry first (a development build).
+	SyncInstall, SyncImage string
+	Log                    io.Writer
 }
 
 // Requirements of Docker for the local farm.
@@ -158,6 +163,12 @@ func Up(ctx context.Context, o UpOptions) error {
 	if err != nil {
 		return err
 	}
+	// A farm made with --tracker keeps it when up runs again without.
+	installTracker := o.Tracker
+	if !o.Tracker {
+		var d appsv1.Deployment
+		o.Tracker = c.Get(ctx, types.NamespacedName{Namespace: "c4-system", Name: sandboxName}, &d) == nil
+	}
 
 	install, err := o.installManifest(ctx)
 	if err != nil {
@@ -201,6 +212,11 @@ func Up(ctx context.Context, o UpOptions) error {
 	}
 	if err := waitHUD(ctx, o.HUD(), 5*time.Minute); err != nil {
 		return err
+	}
+	if installTracker {
+		if err := upTracker(ctx, c, o); err != nil {
+			return err
+		}
 	}
 	return publishTools(ctx, o)
 }
