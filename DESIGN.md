@@ -797,7 +797,7 @@ a bearer token the API server accepts (TokenReview, for its own audience)
 whose subject may `get` the non-resource URL `/metrics`
 (SubjectAccessReview), the check controller-runtime's metrics filter makes,
 with decisions cached for a minute. The `c4-metrics-reader` ClusterRole
-grants it. To scrape, bind the Prometheus service account to that role and
+grants it, and every refusal names it. To scrape, bind the Prometheus service account to that role and
 give the scrape job its service-account token as a bearer token
 (`authorization: {credentials_file:
 /var/run/secrets/kubernetes.io/serviceaccount/token}`). What each running

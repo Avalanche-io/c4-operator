@@ -40,12 +40,12 @@ func (g *MetricsGuard) Wrap(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		token, found := strings.CutPrefix(req.Header.Get("Authorization"), "Bearer ")
 		if !found || token == "" {
-			http.Error(w, "bearer token required", http.StatusUnauthorized)
+			http.Error(w, "bearer token required: scrape with a service account bound to the "+MetricsReader+" ClusterRole, sending its token", http.StatusUnauthorized)
 			return
 		}
 		id, err := g.Reviewer.Review(req.Context(), token, AudienceAPI)
 		if errors.Is(err, ErrInvalid) {
-			http.Error(w, "token is not valid", http.StatusUnauthorized)
+			http.Error(w, "token is not valid: send a service account token for the API server, from an account bound to the "+MetricsReader+" ClusterRole", http.StatusUnauthorized)
 			return
 		}
 		if err != nil {

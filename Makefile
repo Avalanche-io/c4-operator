@@ -88,9 +88,13 @@ build:
 
 # The image is assembled from a binary cross-compiled on the host: Go builds
 # for any architecture without emulation, and the image needs no toolchain.
+# The image is built from a context holding only what its Dockerfile
+# copies, so any builder works: the legacy one ignores .dockerignore's
+# re-include of bin/linux_* and would send none of the binary.
 image:
 	CGO_ENABLED=0 GOOS=linux GOARCH=$(ARCH) go build -trimpath -ldflags="$(LDFLAGS)" -o bin/linux_$(ARCH)/c4-operator ./cmd/c4-operator
-	docker build --build-arg TARGETARCH=$(ARCH) -t $(IMG) .
+	@ctx=$$(mktemp -d) && mkdir -p $$ctx/bin/linux_$(ARCH) && cp bin/linux_$(ARCH)/c4-operator $$ctx/bin/linux_$(ARCH)/ && cp Dockerfile $$ctx/ && \
+	  docker build --build-arg TARGETARCH=$(ARCH) -t $(IMG) $$ctx; rc=$$?; rm -rf $$ctx; exit $$rc
 
 # c4-sync's image for this machine's architecture (experimental; its own
 # image, Dockerfile.c4-sync, with the local farm's stand-in GitHub beside

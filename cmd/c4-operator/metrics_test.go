@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/go-logr/logr"
@@ -47,6 +48,10 @@ func TestOperatorMetricsGuard(t *testing.T) {
 		h.ServeHTTP(w, r)
 		if w.Code != want {
 			t.Errorf("%q: %d, want %d", token, w.Code, want)
+		}
+		// A refusal says which role a scraper needs.
+		if want != 200 && !strings.Contains(w.Body.String(), "c4-metrics-reader") {
+			t.Errorf("%q: the refusal names no role: %s", token, w.Body.String())
 		}
 	}
 }
