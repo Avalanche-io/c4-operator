@@ -16,6 +16,8 @@ runs:
       linux: /opt/hfs21.0/bin/husk
       windows: "C:/Program Files/Side Effects Software/Houdini 21.0.440/bin/husk.exe"
       macos: /Applications/Houdini/Houdini21.0.440/Frameworks/Houdini.framework/Versions/Current/Resources/bin/husk
+  # Scenes saved under another root (a Windows or home folder) are mapped to the farm's.
+  env: {HOUDINI_PATHMAP: "{{Run.PathMap.houdini}}"}
   # Relative product paths (render/cube.0001.exr) land in the job's tree.
   workdir: "{{Job.Tree}}"
   command:

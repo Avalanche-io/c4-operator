@@ -22,14 +22,14 @@ Both are drawn from the parameters of the farm's tools and use
 2. Set the studio's environment (in `houdini.env`, the package, or the
    launcher):
 
-   | variable                            | what it is                                                                                         |
-   | ----------------------------------- | -------------------------------------------------------------------------------------------------- |
-   | `C4_HUD`                            | the farm's address, such as `https://c4.petrelfinch.example`                                       |
-   | `C4_HUD_TOKEN_FILE`                 | a file holding the artist's sign-in token (read on every request); or `C4_HUD_TOKEN`               |
-   | `C4_PROJECT`                        | the farm project, such as `saltmarsh`                                                              |
-   | `C4_ROOT`                           | the folder on this machine that the farm sees as the project's top, such as `/show`                |
-   | `C4_SHOT` or `C4_SHOT_PATTERN`      | the shot, or a regular expression with a `shot` group matched against the hip file's path          |
-   | `C4_TOOL_PATH`                      | folders of tool folders, offered when the farm does not list tools yet (draw the form, save files) |
+   | variable                       | what it is                                                                                         |
+   | ------------------------------ | -------------------------------------------------------------------------------------------------- |
+   | `C4_HUD`                       | the farm's address, such as `https://c4.petrelfinch.example`                                       |
+   | `C4_HUD_TOKEN_FILE`            | a file holding the artist's sign-in token (read on every request); or `C4_HUD_TOKEN`               |
+   | `C4_PROJECT`                   | the farm project, such as `saltmarsh`                                                              |
+   | `C4_ROOT`                      | the folder on this machine that the farm sees as the project's top, such as `/show`                |
+   | `C4_SHOT` or `C4_SHOT_PATTERN` | the shot, or a regular expression with a `shot` group matched against the hip file's path          |
+   | `C4_TOOL_PATH`                 | folders of tool folders, offered when the farm does not list tools yet (draw the form, save files) |
 
 3. Optional: build the HDAs once, with a Houdini licence:
    `hython integrations/dcc/houdini/python/c4_houdini/build_hdas.py`
@@ -85,11 +85,11 @@ node; a bypassed node's missing file is only a warning.
 The nodes submit to tools the farm has published. `tools/` holds three,
 ready to publish once they name the studio's Houdini:
 
-| tool          | kind     | node       | what it runs                                                                                      |
-| ------------- | -------- | ---------- | ------------------------------------------------------------------------------------------------- |
-| `karma`       | `frames` | C4 Render  | `husk` over the stage the node writes, one ticked render settings prim per job, CPU or XPU         |
-| `houdini-rop` | `frames` | C4 Submit  | `hython houdini_rop.py`: one ROP of the saved hip file over the unit's frames, without its inputs |
-| `pdg-cook`    | `once`   | C4 Submit  | `hython pdg_cook.py`: a whole TOP network in one unit, with PDG's local scheduler                |
+| tool          | kind     | node      | what it runs                                                                                      |
+| ------------- | -------- | --------- | ------------------------------------------------------------------------------------------------- |
+| `karma`       | `frames` | C4 Render | `husk` over the stage the node writes, one ticked render settings prim per job, CPU or XPU        |
+| `houdini-rop` | `frames` | C4 Submit | `hython houdini_rop.py`: one ROP of the saved hip file over the unit's frames, without its inputs |
+| `pdg-cook`    | `once`   | C4 Submit | `hython pdg_cook.py`: a whole TOP network in one unit, with PDG's local scheduler                 |
 
 To publish one:
 
@@ -144,11 +144,11 @@ Two things the farm does not do yet, which these tools work within:
   network, as the farm refuses both at submit for now, so a unit must
   reach the licence server without the farm opening the way (a host
   runner, or a cluster whose units reach it).
-- Path mapping. The farm passes its path map as a file
-  (`{{Run.PathMap}}`); Houdini reads `HOUDINI_PATHMAP` as JSON text. So
-  the farm must see the project's files where the artist's `C4_ROOT`
-  does, which is the default (a submission names its own root only when
-  it differs).
+- Path mapping. Each tool sets `HOUDINI_PATHMAP` to
+  `{{Run.PathMap.houdini}}`, the farm's path map as the JSON Houdini reads
+  (`{"S:/shows/saltmarsh": "/show"}`), so a scene saved under a Windows or
+  home root opens on the farm unchanged. Without a root of its own the
+  variable is empty and left out.
 
 ## Tests
 

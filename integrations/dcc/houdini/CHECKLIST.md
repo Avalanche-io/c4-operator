@@ -339,3 +339,8 @@ cp -R $C4OP/integrations/dcc/houdini/tools/T/test/. /tmp/t-T
 Read every label, help text, menu and summary the nodes show. Nothing says
 image, pod, namespace, priority, GPU request or any Kubernetes term.
 "Needed by" is the only control for urgency.
+
+## Path mapping on the farm
+
+- [ ] Save a hip under a root other than the farm's (a Windows `S:/shows/...` or a home folder), with a file SOP and a texture under that root, and submit it with C4 Submit. Expect the submission to carry `root:`, and the unit's log to show `HOUDINI_PATHMAP` as JSON from that root to the farm's (`{"S:/shows/saltmarsh": "/show"}`); the cache and texture load, and the render matches a local one.
+- [ ] Submit a hip saved under the farm's own root. Expect no `root:` in the submission and no `HOUDINI_PATHMAP` in the unit's environment.
