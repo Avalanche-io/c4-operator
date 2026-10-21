@@ -60,7 +60,7 @@ func TestProxy(t *testing.T) {
 	upAddr := strings.TrimPrefix(up.URL, "http://")
 	p := &Proxy{Log: logr.Discard(),
 		Resolve: fakeResolver{"127.0.0.1": {{Host: "api.search.example"}, {Host: "plain.example", Ports: []int32{80}}}},
-		Lookup: publicNames,
+		Lookup:  publicNames,
 		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			if addr != "203.0.113.10:443" && addr != "203.0.113.11:80" {
 				return nil, fmt.Errorf("dialed %s", addr)
@@ -170,15 +170,23 @@ func publicNames(_ context.Context, host string) ([]net.IP, error) {
 // and the proxy dials the address it checked.
 func TestProxyChecksWhereANameGoes(t *testing.T) {
 	names := map[string][]net.IP{
-		"loop.example":     {net.ParseIP("127.0.0.1")},
-		"metadata.example": {net.ParseIP("169.254.169.254")},
-		"inside.example":   {net.ParseIP("10.1.2.3")},
-		"mixed.example":    {net.ParseIP("10.1.2.3"), net.ParseIP("203.0.113.12")},
+		"loop.example":      {net.ParseIP("127.0.0.1")},
+		"metadata.example":  {net.ParseIP("169.254.169.254")},
+		"inside.example":    {net.ParseIP("10.1.2.3")},
+		"mixed.example":     {net.ParseIP("10.1.2.3"), net.ParseIP("203.0.113.12")},
+		"sixtofour.example": {net.ParseIP("2002:7f00:1::1")},      // 6to4 of 127.0.0.1
+		"teredo.example":    {net.ParseIP("2001:0:4136:e378::1")}, // Teredo
+		"mapped.example":    {net.ParseIP("::ffff:169.254.169.254")},
 	}
 	var dialed string
 	rules := []c4v1.ToolEgress{{Host: "*.example"}}
 	p := &Proxy{Log: logr.Discard(), Resolve: fakeResolver{"127.0.0.1": rules},
-		Lookup: func(_ context.Context, host string) ([]net.IP, error) { return names[host], nil },
+		Lookup: func(_ context.Context, host string) ([]net.IP, error) {
+			if host == "down.example" {
+				return nil, errors.New("server misbehaving")
+			}
+			return names[host], nil
+		},
 		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
 			dialed = addr
 			return nil, errors.New("not dialing in this test")
@@ -198,10 +206,14 @@ func TestProxyChecksWhereANameGoes(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode, string(b)
 	}
-	for _, host := range []string{"loop.example", "metadata.example", "inside.example"} {
+	for _, host := range []string{"loop.example", "metadata.example", "inside.example", "sixtofour.example", "teredo.example", "mapped.example"} {
 		if code, b := get(host); code != http.StatusForbidden || !strings.Contains(b, "which a host rule never reaches") || dialed != "" {
 			t.Errorf("%s: %d %q, dialed %q", host, code, b, dialed)
 		}
+	}
+	// a DNS failure is no refusal: 502, could not resolve
+	if code, b := get("down.example"); code != http.StatusBadGateway || !strings.Contains(b, "could not resolve down.example") || dialed != "" {
+		t.Errorf("down: %d %q", code, b)
 	}
 	if _, _ = get("mixed.example"); dialed != "203.0.113.12:80" {
 		t.Errorf("mixed: dialed %q", dialed)

@@ -9,6 +9,7 @@ package egress
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -61,6 +62,8 @@ var inside = func() []*net.IPNet {
 		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
 		"192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4",
 		"::/128", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8", "64:ff9b::/96",
+		// IPv6 forms that carry an IPv4 address: 6to4 and Teredo
+		"2002::/16", "2001::/32",
 	} {
 		_, n, _ := net.ParseCIDR(c)
 		out = append(out, n)
@@ -83,7 +86,7 @@ func (p *Proxy) reachable(ctx context.Context, host string, rules []c4v1.ToolEgr
 		}
 		var err error
 		if ips, err = look(ctx, host); err != nil {
-			return nil, err
+			return nil, &unresolved{host: host, err: err}
 		}
 	}
 	var refused []string
@@ -102,6 +105,15 @@ func (p *Proxy) reachable(ctx context.Context, host string, rules []c4v1.ToolEgr
 	return nil, fmt.Errorf("%s resolves to %s, inside the cluster's or the node's addresses, which a host rule never reaches; a cidr rule must name them",
 		host, strings.Join(refused, ", "))
 }
+
+// unresolved is a host the proxy could not resolve: a DNS failure, not a
+// refusal, so it answers 502.
+type unresolved struct {
+	host string
+	err  error
+}
+
+func (u *unresolved) Error() string { return "could not resolve " + u.host + ": " + u.err.Error() }
 
 func insideRange(ip net.IP) bool {
 	for _, n := range inside {
@@ -211,8 +223,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	addrIP, err := p.reachable(r.Context(), host, rules)
 	if err != nil {
+		code := http.StatusForbidden
+		var u *unresolved
+		if errors.As(err, &u) {
+			code = http.StatusBadGateway // not a refusal: the name did not resolve
+		}
 		p.Log.Info("refused", append(who, "why", err.Error())...)
-		http.Error(w, "egress: "+err.Error(), http.StatusForbidden)
+		http.Error(w, "egress: "+err.Error(), code)
 		return
 	}
 	p.Log.Info("allowed", append(who, "address", addrIP.String())...)

@@ -1300,9 +1300,11 @@ cluster, where no NetworkPolicy applies.
     through the farm's egress proxy, which checks each request's host and
     port against the rule, resolves the name itself and dials the address
     it checked. A name that resolves only to loopback, private, link-local
-    (the cloud metadata service among them), carrier-grade NAT or other
-    reserved addresses is refused, unless one of the unit's `cidr` rules
-    covers the address;
+    (the cloud metadata service among them), carrier-grade NAT, the IPv6
+    forms that carry an IPv4 address (6to4, Teredo, NAT64) or other
+    reserved addresses is refused (403), unless one of the unit's `cidr`
+    rules covers the address. A name that does not resolve answers 502
+    ("could not resolve"), not a refusal;
   - `cidr`: an address block, reached directly, not through the proxy, so
     the proxy's log has no entry for it;
   - `service`: a cluster service as `<namespace>/<name>`, reached directly
