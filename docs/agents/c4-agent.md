@@ -64,7 +64,16 @@ Each session gets:
   text view says what it wrote and what it read, cache reads included,
   which is nearly all of what a long session is billed for. `weighted` is
   the same in input-equivalent tokens, weighed as the farm weighs them;
-- **its open background work,** and how long since it last wrote.
+- **its open background work,** and how long since it last wrote;
+- **its workers:** each subagent or teammate it started is a row of its own,
+  right after it, read from the session's `subagents` folder (each one's
+  transcript and `.meta.json`): `parent` (the session, or the worker that
+  started it), `kind` (`subagent` or `teammate`), `description` (the line
+  its starter gave it, never its prompt), its state in a word (`working`
+  while its launch is open and its session runs, `done`, `failed`,
+  `stopped` when its session stopped first), and what it has used. A
+  finished worker is listed for an hour; older ones are counted on its
+  session's row (`workersDone`).
 
 Without `--all` it lists the sessions that are running, and the ones that
 failed within the last day; an older failure is at rest. `--json` gives the same rows, with the machine's name, for a program

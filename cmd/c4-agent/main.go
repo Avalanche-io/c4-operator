@@ -808,6 +808,13 @@ func printObserved(out io.Writer, obs []agent.Observed) {
 		if name == "" {
 			name = agent.ShortID(o.Session)
 		}
+		if o.Parent != "" {
+			// a worker, under the session that started it
+			if r := []rune(name); len(r) > 20 {
+				name = string(r[:19]) + "…"
+			}
+			name = "  └ " + name
+		}
 		what := o.NeedsYou
 		switch {
 		case what != "":
@@ -830,6 +837,9 @@ func printObserved(out io.Writer, obs []agent.Observed) {
 			what += " · wrote " + tokenWords(w) + ", read " + tokenWords(rd) + " tokens"
 		}
 		fmt.Fprintf(out, "%-13s %-24s %s\n", o.Word, name, what)
+		if o.WorkersDone > 0 {
+			fmt.Fprintf(out, "%-13s %-24s %s\n", "", fmt.Sprintf("  └ %d more", o.WorkersDone), "finished earlier")
+		}
 	}
 	switch {
 	case len(obs) == 0:

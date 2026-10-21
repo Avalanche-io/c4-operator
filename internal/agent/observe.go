@@ -43,6 +43,16 @@ type Observed struct {
 	Usage          *ObservedUse  `json:"usage,omitempty"`
 	Limit          *ObservedHalt `json:"limit,omitempty"`
 	Transcript     string        `json:"transcript,omitempty"`
+	// Parent, on a worker's row, is the session (or worker) that started
+	// it; ParentClaimed says the link is a match, not a record. Description
+	// is the one line its starter gave it. WaitsOn is "lead" or "person"
+	// when it waits on one of them. WorkersDone, on a session's row, counts
+	// its finished workers not listed (workers.go).
+	Parent        string `json:"parent,omitempty"`
+	ParentClaimed bool   `json:"parentClaimed,omitempty"`
+	Description   string `json:"description,omitempty"`
+	WaitsOn       string `json:"waitsOn,omitempty"`
+	WorkersDone   int    `json:"workersDone,omitempty"`
 	// Weighted is what it has used in input-equivalent tokens, each model's
 	// counts weighted as the farm weighs them (work/tokens), so every
 	// reader shows one number.
@@ -129,6 +139,7 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 		})
 	}()
 	out = make([]Observed, len(keep))
+	workers := make([][]Observed, len(keep))
 	var wg sync.WaitGroup
 	work := make(chan int)
 	for w := 0; w < min(4, len(keep)); w++ {
@@ -137,6 +148,11 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 			defer wg.Done()
 			for i := range work {
 				out[i] = observe(configDir, keep[i], now)
+				if tr := out[i].Transcript; tr != "" {
+					if info, err := os.Stat(tr); err == nil {
+						workers[i] = workersOf(&out[i], scanSessionCached(tr, keep[i].Started(), info), now, all)
+					}
+				}
 			}
 		}()
 	}
@@ -150,14 +166,24 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 			out[i].OnFarm = true
 		}
 	}
-	sort.SliceStable(out, func(i, j int) bool {
+	idx := make([]int, len(out))
+	for i := range idx {
+		idx[i] = i
+	}
+	sort.SliceStable(idx, func(a, b int) bool {
+		i, j := idx[a], idx[b]
 		ri, rj := wordRank(out[i].Word), wordRank(out[j].Word)
 		if ri != rj {
 			return ri < rj
 		}
 		return out[i].Name < out[j].Name
 	})
-	return out, nil
+	// each session's workers right after it
+	rows := make([]Observed, 0, len(out))
+	for _, i := range idx {
+		rows = append(append(rows, out[i]), workers[i]...)
+	}
+	return rows, nil
 }
 
 func wordRank(w string) int {
@@ -281,9 +307,10 @@ type sessionScan struct {
 	background        []Background
 	limit             *UsageLimit
 	successAfterLimit bool
-	lastText          string   // the last line of the model's last words
-	lastError         string   // the first line of an API error since its last words
-	pendingTools      []string // tools called at the end with no result yet
+	lastText          string          // the last line of the model's last words
+	lastError         string          // the first line of an API error since its last words
+	pendingTools      []string        // tools called at the end with no result yet
+	results           map[string]bool // tool calls that have their result
 }
 
 var scanCache = struct {
@@ -425,6 +452,10 @@ func scanSession(path string, started time.Time) sessionScan {
 			for _, p := range parts {
 				if p.Type == "tool_result" {
 					delete(pending, p.ToolUseID)
+					if s.results == nil {
+						s.results = map[string]bool{}
+					}
+					s.results[p.ToolUseID] = true
 				}
 			}
 			if personSpoke(msg.Content, parts) {

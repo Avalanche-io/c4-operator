@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/Avalanche-io/c4-operator/work/tokens"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -176,5 +177,62 @@ func TestObserveFailures(t *testing.T) {
 	}
 	if all, _ := e.h.Observe(context.Background(), e.configDir, true, now); len(all) != 2 {
 		t.Errorf("with --all: %d", len(all))
+	}
+}
+
+// A session's workers are rows of their own, read from its subagents
+// folder: each with the session (or worker) that started it, its
+// description, and its state. A foreground worker is done once its call
+// has its result; a background one while its launch is open; a nested
+// one is under the worker that started it. A finished worker older than
+// FinishedWorkersShownFor is counted on its session's row, not listed.
+func TestObserveWorkers(t *testing.T) {
+	e := newEnv(t)
+	now := time.Now()
+	start := now.Add(-time.Hour)
+	const lead = "eeeeeeee-0000-4000-8000-000000000001"
+	e.transcript(lead, `{"type":"assistant","message":{"id":"m1","model":"opus","content":[{"type":"tool_use","id":"t1","name":"Agent"}]}}`+"\n"+
+		`{"type":"user","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"read"}]}}`+"\n"+
+		launchAgent("t2", "a2", "Port the parser", start.Add(time.Minute)))
+	e.fake.active[lead] = Active{SessionID: lead, Name: "shop-ui", Kind: "background", Status: "busy", State: "working", Cwd: e.cwd, StartedAt: start.UnixMilli()}
+	e.fake.busyFor[lead] = 1
+	dir := filepath.Join(strings.TrimSuffix(e.transcriptPath(lead), ".jsonl"), "subagents")
+	os.MkdirAll(dir, 0o755)
+	worker := func(id, meta, transcript string, age time.Duration) {
+		os.WriteFile(filepath.Join(dir, "agent-"+id+".meta.json"), []byte(meta), 0o644)
+		p := filepath.Join(dir, "agent-"+id+".jsonl")
+		os.WriteFile(p, []byte(transcript), 0o644)
+		os.Chtimes(p, now.Add(-age), now.Add(-age))
+	}
+	used := `{"type":"assistant","message":{"id":"w","model":"opus","usage":{"input_tokens":10,"output_tokens":5},"content":[{"type":"text","text":"on it"}]}}` + "\n"
+	worker("a1", `{"agentType":"Explore","description":"Read the spec","toolUseId":"t1","spawnDepth":1}`, used, time.Minute)
+	worker("a2", `{"agentType":"general-purpose","description":"Port the parser","toolUseId":"t2","spawnDepth":1,"requestShape":"background"}`,
+		used+launchAgent("t3", "a3", "Check the tests", start.Add(2*time.Minute)), 0)
+	worker("a3", `{"agentType":"general-purpose","description":"Check the tests","toolUseId":"t3","spawnDepth":2,"requestShape":"background","parentAgentId":"a2"}`, used, 0)
+	worker("a4", `{"agentType":"Explore","description":"An old survey","toolUseId":"t0","spawnDepth":1,"finished":true}`, used, 3*time.Hour)
+
+	obs, err := e.h.Observe(context.Background(), e.configDir, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(obs) != 4 || obs[0].Session != lead || obs[0].WorkersDone != 1 {
+		t.Fatalf("rows %+v", obs)
+	}
+	got := map[string]Observed{}
+	for _, o := range obs[1:] {
+		got[o.Session] = o
+	}
+	for id, want := range map[string]struct{ parent, word, desc string }{
+		"a1": {lead, WordDone, "Read the spec"},
+		"a2": {lead, WordWorking, "Port the parser"},
+		"a3": {"a2", WordWorking, "Check the tests"},
+	} {
+		o := got[id]
+		if o.Parent != want.parent || o.Word != want.word || o.Description != want.desc || o.Kind != KindSubagent || o.Weighted == 0 {
+			t.Errorf("%s: %+v", id, o)
+		}
+	}
+	if all, _ := e.h.Observe(context.Background(), e.configDir, true, now); len(all) != 5 {
+		t.Errorf("with --all: %d rows", len(all))
 	}
 }
