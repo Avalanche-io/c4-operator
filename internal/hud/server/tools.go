@@ -1123,9 +1123,11 @@ func paramSchema(params []schema.Param) map[string]any {
 			s["x-from"] = p.From
 		}
 		props[p.Name] = s
-		// A parameter filled from upstream (from) is given by the job it
-		// follows, not by whoever submits.
-		if p.Required() && p.From == "" {
+		// A range the job's frames fill (from shot.frames or
+		// scene.frames) is not asked for; any other parameter with no
+		// default is, even one a front end finds (from scene.selection),
+		// as the farm's check says.
+		if p.Required() && !(p.Type == "RANGE_EXPR" && (p.From == "shot.frames" || p.From == "scene.frames")) {
 			required = append(required, p.Name)
 		}
 	}

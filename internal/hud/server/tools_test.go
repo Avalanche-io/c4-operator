@@ -269,15 +269,16 @@ func httptestGet(s *Server, path string) *httptest.ResponseRecorder {
 	return w
 }
 
-// A parameter filled from upstream (from) is given by the job it follows:
-// its schema does not ask the submitter for it.
+// A range the job's frames fill (from shot.frames) is not asked for; a
+// parameter a front end finds (from scene.selection) with no default
+// still is, as the farm's check says.
 func TestParamSchemaFromIsNotRequired(t *testing.T) {
-	s := paramSchema([]schema.Param{{Name: "plates", Type: "PATH"}, {Name: "movie", Type: "PATH", From: "proxies"},
+	s := paramSchema([]schema.Param{{Name: "plates", Type: "PATH", From: "scene.selection"}, {Name: "range", Type: "RANGE_EXPR", From: "shot.frames"},
 		{Name: "width", Type: "INT", Default: 960}})
 	if fmt.Sprint(s["required"]) != "[plates]" {
 		t.Fatalf("required %v", s["required"])
 	}
-	if p := s["properties"].(map[string]any)["movie"].(map[string]any); p["x-from"] != "proxies" {
-		t.Fatalf("movie %v", p)
+	if p := s["properties"].(map[string]any)["range"].(map[string]any); p["x-from"] != "shot.frames" {
+		t.Fatalf("range %v", p)
 	}
 }
