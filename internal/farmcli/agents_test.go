@@ -3,6 +3,9 @@ package farmcli
 import (
 	"bytes"
 	"context"
+	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -125,5 +128,42 @@ func TestSessionsShowsWhatNeedsYou(t *testing.T) {
 		!strings.Contains(lines[2], "working") || !strings.HasPrefix(lines[3], "4363d63d") || !strings.Contains(lines[3], "1h 30m") ||
 		lines[5] != "port needs you." {
 		t.Errorf("agents:\n%s", out.String())
+	}
+}
+
+// agents --open serves the HUD's web files, this machine's sessions as
+// GET /api/v1/observed, a snapshot the HUD can start on, and nothing of a
+// farm.
+func TestSessionsServer(t *testing.T) {
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "claude")
+	os.WriteFile(bin, []byte("#!/bin/sh\necho '[{\"name\":\"port\",\"sessionId\":\"0b5e7c52-8a6f\",\"cwd\":\"/tmp/repo\",\"kind\":\"background\",\"state\":\"blocked\",\"startedAt\":1792534445663}]'\n"), 0o755)
+	h, err := SessionsServer{Claude: bin}.Handler()
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(h)
+	defer srv.Close()
+	get := func(path string) (int, string) {
+		resp, err := http.Get(srv.URL + path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer resp.Body.Close()
+		b, _ := io.ReadAll(resp.Body)
+		return resp.StatusCode, string(b)
+	}
+	if code, body := get("/api/v1/observed"); code != 200 || !strings.Contains(body, `"state":"waiting"`) || !strings.Contains(body, `"readOnly":true`) ||
+		!strings.Contains(body, `"adopt":"c4 farm agents add port"`) || !strings.Contains(body, `"session":"0b5e7c52"`) {
+		t.Errorf("observed %d %s", code, body)
+	}
+	if code, body := get("/api/v1/snapshot"); code != 200 || !strings.Contains(body, `"jobs":[]`) || !strings.Contains(body, `"allProjects":true`) {
+		t.Errorf("snapshot %d %s", code, body)
+	}
+	if code, body := get("/"); code != 200 || !strings.Contains(body, "<html") {
+		t.Errorf("index %d", code)
+	}
+	if code, _ := get("/api/v1/jobs"); code != 404 {
+		t.Errorf("a farm route answered %d", code)
 	}
 }

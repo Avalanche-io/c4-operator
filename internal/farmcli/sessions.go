@@ -2,11 +2,8 @@ package farmcli
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -55,25 +52,9 @@ type SessionsArgs struct {
 // word, and what needs the person. It only reads what `claude agents`
 // reports: nothing is moved, stopped or signed in, and no farm is needed.
 func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
-	bin := a.Claude
-	if bin == "" {
-		p, err := exec.LookPath("claude")
-		if err != nil {
-			return errors.New("Claude Code (claude) is not on PATH; c4 farm agents shows its sessions")
-		}
-		bin = p
-	}
-	args := []string{"agents", "--json"}
-	if a.All {
-		args = append(args, "--all")
-	}
-	out, err := exec.CommandContext(ctx, bin, args...).Output()
+	ss, err := claudeSessions(ctx, a.Claude, a.All)
 	if err != nil {
-		return fmt.Errorf("claude agents: %w", err)
-	}
-	var ss []session
-	if err := json.Unmarshal(out, &ss); err != nil {
-		return fmt.Errorf("claude agents: %w", err)
+		return err
 	}
 	if len(ss) == 0 {
 		o.printf("no Claude Code sessions are running on this machine\n")
