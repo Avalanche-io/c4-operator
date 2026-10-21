@@ -261,7 +261,7 @@ func shownSlack(v *view, js sched.JobState, e *c4v1.WorkEstimate) (int64, bool) 
 // needsPerson sets or clears the NeedsPerson condition.
 // waitReason and waitMsg are what keeps its units from starting
 // (waitConditions), if anything.
-func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagged int, waitReason, waitMsg string, gen int64) {
+func needsPerson(st *c4v1.WorkJobStatus, v *view, approval *c4v1.CapacityRequest, waiting, flagged int, waitReason, waitMsg string, gen int64) {
 	reason, msg := "", ""
 	switch {
 	case len(v.mem.openNeedsList()) > 0:
@@ -293,8 +293,8 @@ func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagge
 		reason, msg = waitReason, waitMsg
 	case v.stuckOn != "":
 		reason, msg = c4v1.NeedsStuck, "it waits on "+v.stuckOn+", which failed"
-	case approval:
-		reason, msg = c4v1.NeedsApproval, "capacity that would restore its deadline waits for approval"
+	case approval != nil:
+		reason, msg = c4v1.NeedsApproval, approvalWords(approval)
 	}
 	if reason == "" {
 		meta.RemoveStatusCondition(&st.Conditions, c4v1.ConditionNeedsPerson)
@@ -304,18 +304,31 @@ func needsPerson(st *c4v1.WorkJobStatus, v *view, approval bool, waiting, flagge
 		Reason: reason, Message: msg, ObservedGeneration: gen})
 }
 
-// approvals are the jobs a capacity request waits on a person for.
-func approvals(crs []c4v1.CapacityRequest) map[string]bool {
-	out := map[string]bool{}
-	for _, cr := range crs {
+// approvals are the jobs a capacity request waits on a person for, with
+// the request.
+func approvals(crs []c4v1.CapacityRequest) map[string]*c4v1.CapacityRequest {
+	out := map[string]*c4v1.CapacityRequest{}
+	for i := range crs {
+		cr := &crs[i]
 		if cr.Spec.Approved || !strings.Contains(cr.Name, "-approve-") {
 			continue
 		}
 		for _, j := range cr.Spec.Jobs {
-			out[j] = true
+			out[j] = cr
 		}
 	}
 	return out
+}
+
+// approvalWords says what a burst waits for: how much, where, what it
+// costs, who may approve it and how.
+func approvalWords(cr *c4v1.CapacityRequest) string {
+	cost := ""
+	if c := cr.Spec.EstimatedCost; c != "" {
+		cost = ", about $" + strings.TrimPrefix(c, "$")
+	}
+	return fmt.Sprintf("%d burst %s in pool %s%s would restore its deadline, over the project's burst budget: a wrangler or farm admin approves it (the HUD's Capacity view, or POST /api/v1/capacity/%s/approve)",
+		cr.Spec.Slots, plural(int(cr.Spec.Slots), "slot", "slots"), cr.Spec.Pool, cost, cr.Spec.Pool)
 }
 
 // escalatedTo names who flagged units wait for, as " to lead" or "".

@@ -173,7 +173,7 @@ type Queue struct {
 	lastPol  map[string]forecast.Policy
 	lastAdj  map[string]func(time.Time, forecast.Band) forecast.Band
 	// approvals are the jobs a capacity request waits on a person for.
-	approvals map[string]bool
+	approvals map[string]*c4v1.CapacityRequest
 	// projectObjs are the Projects by name at the last tick, for their
 	// policy values (escalate.go).
 	projectObjs map[string]*c4v1.Project

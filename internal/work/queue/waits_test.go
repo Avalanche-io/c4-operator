@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/meta"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -122,6 +123,26 @@ func TestPullWhy(t *testing.T) {
 	} {
 		if got := pullWhy(c.msg, c.image); got != c.want {
 			t.Errorf("pullWhy(%q) = %q, want %q", c.msg, got, c.want)
+		}
+	}
+}
+
+// A burst waiting for approval says how much, where, what it costs, who
+// may approve it and how.
+func TestApprovalWords(t *testing.T) {
+	crs := []c4v1.CapacityRequest{
+		{ObjectMeta: metav1.ObjectMeta{Name: "gpu-burst-approve-1"}, Spec: c4v1.CapacityRequestSpec{Pool: "gpu-burst", Slots: 8,
+			EstimatedCost: "42.50", Jobs: []string{"saltmarsh/sh010-light-v003"}}},
+		{ObjectMeta: metav1.ObjectMeta{Name: "cpu-burst-2"}, Spec: c4v1.CapacityRequestSpec{Pool: "cpu-burst", Slots: 4, Jobs: []string{"saltmarsh/auto"}}},
+	}
+	a := approvals(crs)
+	if a["saltmarsh/auto"] != nil {
+		t.Fatal("an automatic request waits for approval")
+	}
+	got := approvalWords(a["saltmarsh/sh010-light-v003"])
+	for _, want := range []string{"8 burst slots in pool gpu-burst", "about $42.50", "a wrangler or farm admin approves it", "/api/v1/capacity/gpu-burst/approve"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("%q lacks %q", got, want)
 		}
 	}
 }
