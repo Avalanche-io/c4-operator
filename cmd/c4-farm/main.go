@@ -134,6 +134,9 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 func run(args []string, stdout io.Writer, stdin io.Reader) error {
 	if len(args) == 0 || args[0] == "-h" || args[0] == "--help" || args[0] == "help" {
 		fmt.Fprint(stdout, usage)
+		if n := c4PathNote(context.Background()); n != "" {
+			fmt.Fprintf(stdout, "\n%s\n", n)
+		}
 		return nil
 	}
 	if strings.HasPrefix(version, "v") {
@@ -616,6 +619,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		syncImage := fs.String("sync-image", "", "the c4-sync image, with --tracker; one only in this machine's Docker (c4-sync:dev) is pushed to the farm's registry")
 		if _, err := parse(fs, rest); err != nil {
 			return err
+		}
+		if n := c4PathNote(ctx); n != "" {
+			fmt.Fprintf(stdout, "%s\n", n)
 		}
 		localfarm.Name = *localName
 		tz := localfarm.LocalTZ()

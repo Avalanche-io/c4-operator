@@ -2,11 +2,13 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -91,5 +93,34 @@ func TestLoginAndSubmitNeedNoDockerOrKubectl(t *testing.T) {
 	}
 	if b, err := os.ReadFile(calls); err == nil {
 		t.Errorf("login and submit ran:\n%s", b)
+	}
+}
+
+// An older c4 first on the PATH cannot run `c4 farm`: c4-farm says so,
+// and names a later c4 on the PATH that can; a c4 that lists farm, or no
+// c4 at all, gets no note.
+func TestC4PathNote(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("shell scripts stand in for c4")
+	}
+	old, brew := t.TempDir(), t.TempDir()
+	os.WriteFile(filepath.Join(old, "c4"), []byte("#!/bin/sh\necho 'Usage:'; echo '  c4 id <path>'\n"), 0o755)
+	os.WriteFile(filepath.Join(brew, "c4"), []byte("#!/bin/sh\necho 'Usage:'; echo '  c4 farm    run work on a C4 farm'\n"), 0o755)
+	ctx := context.Background()
+	t.Setenv("PATH", old+string(os.PathListSeparator)+brew)
+	if n := c4PathNote(ctx); !strings.Contains(n, "has no `c4 farm`; "+brew+"/c4 does: put "+brew+" ahead of "+old) {
+		t.Errorf("old first: %q", n)
+	}
+	t.Setenv("PATH", brew+string(os.PathListSeparator)+old)
+	if n := c4PathNote(ctx); n != "" {
+		t.Errorf("brew first: %q", n)
+	}
+	t.Setenv("PATH", old)
+	if n := c4PathNote(ctx); !strings.Contains(n, "has no `c4 farm` yet: brew upgrade mrjoshuak/tap/c4") {
+		t.Errorf("only old: %q", n)
+	}
+	t.Setenv("PATH", t.TempDir())
+	if n := c4PathNote(ctx); n != "" {
+		t.Errorf("no c4: %q", n)
 	}
 }
