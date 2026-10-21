@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -86,5 +87,75 @@ func TestBlockWorksOnItsOwnBranch(t *testing.T) {
 	plain.Spec.Containers[0].Env = append(plain.Spec.Containers[0].Env, corev1.EnvVar{Name: EnvBlockRepo, Value: t.TempDir()}, corev1.EnvVar{Name: "C4_UNIT_NAME", Value: "x"})
 	if _, ok, err := ensureBranch(ctx, plain); ok || err != nil {
 		t.Errorf("a folder that is not a repository: %v %v", ok, err)
+	}
+}
+
+// Blocks run in a clean config directory of their own, filled from the
+// agent environment each asks for (the base when it names none), without
+// the environment's hooks (a block's own settings carry them), never the
+// person's ~/.claude. Refilling it for another version leaves its sign-in;
+// a block asking for another version than a running block's waits; one
+// naming an environment the machine lacks is refused.
+func TestBlocksRunInTheirOwnEnvironment(t *testing.T) {
+	e := newEnv(t)
+	home := t.TempDir()
+	p := hostPod()
+	p.UID = "block-1"
+	r, _ := hostRunner(t, e, p)
+	dir, err := PrepareBlocksEnv(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r.BlocksEnv, r.EnvSources = dir, EnvSourcesDir(home)
+	const base = "c44qpoXu39vLhhB2jGYg8HAagoXJ9qGA6KtzGTd74eju3YDDrN9ftTcNtot8z3PyXVGzVQa57emJGYxntqDVR5Uxgv"
+	got, flags, wait, err := r.blockEnv(p)
+	if err != nil || wait || got != dir || filledWith(dir) != base {
+		t.Fatalf("blockEnv: %q %v %v, filled with %q", got, wait, err, filledWith(dir))
+	}
+	if !slices.Contains(flags, "--mcp-config") {
+		t.Errorf("flags %q", flags)
+	}
+	if b, _ := os.ReadFile(filepath.Join(dir, "settings.json")); strings.Contains(string(b), "hooks") {
+		t.Errorf("the environment's hooks are in the blocks' settings:\n%s", b)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "CLAUDE.md")); err != nil {
+		t.Error(err)
+	}
+	signIn := filepath.Join(dir, ".claude.json")
+	os.WriteFile(signIn, []byte(`{"signedIn": true}`), 0o600)
+
+	// a second version: the base and one more file
+	next := filepath.Join(t.TempDir(), "next")
+	if err := os.CopyFS(next, os.DirFS(filepath.Join(EnvSourcesDir(home), base))); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(next, "NOTES.md"), []byte("more\n"), 0o644)
+	id2, err := EnvID(next)
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Rename(next, filepath.Join(EnvSourcesDir(home), id2))
+	q := hostPod()
+	q.UID = "block-2"
+	q.Spec.Containers[0].Env = append(q.Spec.Containers[0].Env, corev1.EnvVar{Name: EnvAgentEnv, Value: id2})
+	if _, _, wait, err := r.blockEnv(q); err != nil || !wait {
+		t.Fatalf("another version while a block runs: wait %v, %v", wait, err)
+	}
+	delete(r.blockEnvs, p.UID) // the first block finished
+	if _, _, wait, err := r.blockEnv(q); err != nil || wait || filledWith(dir) != id2 {
+		t.Fatalf("after it: wait %v, %v, filled with %q", wait, err, filledWith(dir))
+	}
+	if _, err := os.Stat(signIn); err != nil {
+		t.Error("refilling lost the sign-in")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "NOTES.md")); err != nil {
+		t.Error("not filled with the second version")
+	}
+
+	x := hostPod()
+	x.UID = "block-3"
+	x.Spec.Containers[0].Env = append(x.Spec.Containers[0].Env, corev1.EnvVar{Name: EnvAgentEnv, Value: "c4nothere"})
+	if _, _, _, err := r.blockEnv(x); err == nil || !strings.Contains(err.Error(), "not on this machine") {
+		t.Errorf("an unknown environment: %v", err)
 	}
 }

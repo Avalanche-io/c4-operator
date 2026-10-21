@@ -384,6 +384,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	store := fs.String("store", "", "a regional store replica (http://host:port) to store generator members' expansion documents in, so the queue can read them; without it a generator member adds nothing")
 	storeToken := fs.String("store-token-file", "", "a file holding the bearer token for --store")
 	storeProject := fs.String("store-project", "", "the project to store documents in (default: the Project listing the pod's namespace)")
+	blocksEnv := fs.String("blocks-env", "", "the config directory blocks run in, filled from the farm's agent environment (C4_AGENT_ENV, the base by default) and signed in once by its person (default: the agents home's blocks-env; never a person's own ~/.claude)")
 	blocksCwd := fs.String("blocks-cwd", "", "run plan jobs' blocks (pods with C4_AGENT_BLOCK=1), each a fresh session started in this folder, which the claude CLI must trust; without it the runner runs registered members only")
 	signerURL := fs.String("signer", "", "the farm's certificate issuer (https://host:port): sign a task record for each unit this machine runs, as its node; without it, host-run units leave none")
 	holder := fs.String("holder", "", "the person whose Claude Code sign-in this machine's members use, named on each record's chain (default: --owner, when there is one)")
@@ -439,6 +440,15 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 			return err
 		}
 		r.BlocksCwd, r.HookCommand, r.UnitBin = *blocksCwd, hook, os.Getenv("C4_UNIT_BIN")
+		r.BlocksEnv, r.EnvSources = *blocksEnv, agent.EnvSourcesDir(h.Store.Dir)
+		if r.BlocksEnv == "" {
+			if r.BlocksEnv, err = agent.PrepareBlocksEnv(h.Store.Dir); err != nil {
+				return err
+			}
+		}
+		if in, err := agent.NewCLI().SignedIn(ctx, r.BlocksEnv); err == nil && !in {
+			fmt.Fprintf(out, "blocks run in %s, which is not signed in yet: sign in once there, through Anthropic's own flow (CLAUDE_CONFIG_DIR=%s claude)\n", r.BlocksEnv, r.BlocksEnv)
+		}
 	}
 	if *observe {
 		if *hud == "" {
@@ -584,6 +594,9 @@ func runBlockPod(ctx context.Context, args []string, stderr io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
+	// a sealed unit reaches the model and nothing else (model-api): none
+	// of the CLI's error reports or telemetry
+	os.Setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
 	out, cfg := os.Getenv("C4_OUTPUT"), os.Getenv("CLAUDE_CONFIG_DIR")
 	if out == "" || cfg == "" {
 		fmt.Fprintln(stderr, "c4-agent block-pod: needs $C4_OUTPUT (a writable input) and $CLAUDE_CONFIG_DIR (the holder's store)")

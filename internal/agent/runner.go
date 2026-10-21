@@ -79,6 +79,12 @@ type Runner struct {
 	// job's repository (C4_BLOCK_REPO). HookCommand is the Stop hook their
 	// sessions run (c4-agent checkpoint --hook, with its environment).
 	BlocksCwd, HookCommand string
+	// BlocksEnv, when set, is the config directory blocks run in, filled
+	// from the environment trees in EnvSources (blockenv.go); unset, they
+	// run in the CLI's default one.
+	BlocksEnv, EnvSources string
+	baseEnv               string
+	blockEnvs             map[types.UID]string
 	// UnitBin is c4-unit, for the waits the runner opens for a block
 	// (default c4-unit on the PATH).
 	UnitBin string
@@ -656,6 +662,7 @@ func (r *Runner) running(ctx context.Context, p *corev1.Pod, m *Member) error {
 func (r *Runner) finish(ctx context.Context, p *corev1.Pod, phase corev1.PodPhase, reason, msg string, code int32) error {
 	if isBlock(p) {
 		r.recordBranch(ctx, p, UnitDirsAt(r.unitRoot(p)), phase == corev1.PodSucceeded && reason == "Completed")
+		delete(r.blockEnvs, p.UID)
 	}
 	r.recordEnd(ctx, p)
 	now := metav1.NewTime(r.now())

@@ -548,6 +548,14 @@ func (r *Runner) startBlock(ctx context.Context, p *corev1.Pod, name string) err
 	if err != nil {
 		return err
 	}
+	configDir, envFlags, wait, err := r.blockEnv(p)
+	if err != nil {
+		return r.finish(ctx, p, corev1.PodFailed, "NoAgentEnv", err.Error(), 1)
+	}
+	if wait {
+		return nil // running blocks use another version of the environment
+	}
+	flags = append(flags, envFlags...)
 	b, ok, err := ensureBranch(ctx, p)
 	if err != nil {
 		return r.finish(ctx, p, corev1.PodFailed, "NoBranch", "the block's own branch: "+err.Error(), 1)
@@ -556,7 +564,7 @@ func (r *Runner) startBlock(ctx context.Context, p *corev1.Pod, name string) err
 		flags = append(flags, "--add-dir", b.Dir)
 		r.logf("%s: works on branch %s in %s", name, b.Branch, b.Dir)
 	}
-	m, err := r.Harness.Start(ctx, StartOptions{Name: name, Cwd: r.BlocksCwd, Flags: flags, Prompt: blockPrompt(p, u)})
+	m, err := r.Harness.Start(ctx, StartOptions{Name: name, Cwd: r.BlocksCwd, ConfigDir: configDir, Flags: flags, Prompt: blockPrompt(p, u)})
 	if err != nil {
 		return r.finish(ctx, p, corev1.PodFailed, "BlockNotStarted", err.Error(), 1)
 	}

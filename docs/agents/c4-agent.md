@@ -444,6 +444,16 @@ across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
     credentials, not by the list alone;
   - `--settings` with the Stop hook (this binary's `checkpoint --hook`,
     with its agents home and `c4-unit`).
+  - its own config directory, never the person's `~/.claude`: the
+    agents home's `blocks-env` (`--blocks-env`), filled from the agent
+    environment the block names (`C4_AGENT_ENV`, the release's base when it
+    names none) without that environment's hooks, which the block's own
+    settings carry. The directory is signed in once, by its person, through
+    Anthropic's own flow (`CLAUDE_CONFIG_DIR=<it> claude`); the runner says
+    so at its start when it is not. Filling it for another version keeps
+    the sign-in. A block asking for another version than the running blocks'
+    waits until they end, and one naming an environment the machine lacks
+    fails `NoAgentEnv`.
 - **A later attempt** (a rework, a yield) wakes the same session by its ID,
   with what the review asks (`C4_BLOCK_REWORK`) or that the farm resumed
   it, and the attempt's new output directory.
