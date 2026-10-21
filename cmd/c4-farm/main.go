@@ -628,7 +628,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		lat, lon := localfarm.Place(tz)
 		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort,
 			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != "", Owner: *owner, Tracker: *trackerOn},
-			Install: *install, Version: version, ImageArchive: *archive, SyncInstall: *syncInstall, SyncImage: *syncImage, Log: stdout}
+			Install: *install, Version: version, ImageArchive: *archive, SyncInstall: *syncInstall, SyncImage: *syncImage, Log: stdout,
+			Timings: &localfarm.Timings{}}
 		// the owner is kept from one up to the next; --owner changes it
 		was := cfg.Farms[localfarm.Name].Owner
 		switch {
@@ -707,6 +708,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		} else if first {
 			fmt.Fprintf(stdout, "try a tracker: c4 farm up --tracker\n")
 		}
+		// where up's time went, so a slow first run says load or code
+		fmt.Fprintf(stdout, "time      %s\n", o.Timings)
 		if *noOpen {
 			return nil
 		}

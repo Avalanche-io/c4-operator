@@ -5,6 +5,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"sigs.k8s.io/yaml"
 
@@ -213,5 +214,27 @@ func TestOwnerSignsInAsThemselves(t *testing.T) {
 	}
 	if v := OwnerViewer("noor"); v.Name != "noor" || v.Projects != "*" {
 		t.Errorf("owner viewer %+v", v)
+	}
+}
+
+// up's last line says the whole and each step a second or more, a step
+// marked twice adding its times, in the order steps first ran.
+func TestTimings(t *testing.T) {
+	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
+	tm := &Timings{Now: func() time.Time { return now }}
+	step := func(name string, d time.Duration) { tm.Mark(name); now = now.Add(d) }
+	step("checks", 300*time.Millisecond)
+	step("cluster", 130*time.Second)
+	step("operator", 20*time.Second)
+	step("store", 15*time.Second)
+	step("operator", 45*time.Second)
+	step("tools", 40*time.Second)
+	if got := tm.String(); got != "up in 4m10s: cluster 2m10s, operator 1m5s, store 15s, tools 40s" {
+		t.Errorf("%q", got)
+	}
+	var none *Timings
+	none.Mark("cluster")
+	if none.String() != "" {
+		t.Error("a nil Timings says something")
 	}
 }

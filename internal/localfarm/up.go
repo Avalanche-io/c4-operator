@@ -51,6 +51,8 @@ type UpOptions struct {
 	// farm's registry first (a development build).
 	SyncInstall, SyncImage string
 	Log                    io.Writer
+	// Timings, when given, gets each step's time.
+	Timings *Timings
 }
 
 // Requirements of Docker for the local farm.
@@ -95,6 +97,7 @@ func Exists(name string) (bool, error) {
 // Up creates the local farm, or finishes one a previous run left half
 // made: every step is idempotent.
 func Up(ctx context.Context, o UpOptions) error {
+	o.Timings.Mark("checks")
 	name := o.name()
 	p := cluster.NewProvider()
 	have, err := Exists(name)
@@ -108,6 +111,7 @@ func Up(ctx context.Context, o UpOptions) error {
 		}); err != nil {
 			return err
 		}
+		o.Timings.Mark("cluster")
 		o.logf("cluster   creating %s: a control plane and %d workers\n", name, len(nodes))
 		// kind makes its cluster kubectl's current context; a person whose
 		// kubectl points at another cluster keeps pointing there
@@ -128,6 +132,7 @@ func Up(ctx context.Context, o UpOptions) error {
 		}
 	}
 	// the farm's registry, which every node pulls from by name
+	o.Timings.Mark("registry")
 	if err := ensureRegistry(ctx, or(o.RegistryHostPort, RegistryPort)); err != nil {
 		return err
 	}
@@ -142,6 +147,7 @@ func Up(ctx context.Context, o UpOptions) error {
 	}
 	o.logf("registry  %s, at 127.0.0.1:%d (c4 farm image load pushes to it)\n", RegistryInFarm, or(o.RegistryHostPort, RegistryPort))
 	if o.ImageArchive != "" {
+		o.Timings.Mark("image")
 		o.logf("image     loading %s\n", filepath.Base(o.ImageArchive))
 		ns, err := p.ListInternalNodes(name)
 		if err != nil {
@@ -170,6 +176,7 @@ func Up(ctx context.Context, o UpOptions) error {
 		o.Tracker = c.Get(ctx, types.NamespacedName{Namespace: "c4-system", Name: sandboxName}, &d) == nil
 	}
 
+	o.Timings.Mark("operator")
 	install, err := o.installManifest(ctx)
 	if err != nil {
 		return err
@@ -178,6 +185,7 @@ func Up(ctx context.Context, o UpOptions) error {
 	if err := applyAll(ctx, c, install); err != nil {
 		return fmt.Errorf("installing the operator: %w", err)
 	}
+	o.Timings.Mark("store")
 	o.logf("store     Garage, bucket quickstart\n")
 	if err := applyAll(ctx, c, quickstart.Store); err != nil {
 		return fmt.Errorf("the store: %w", err)
@@ -185,9 +193,11 @@ func Up(ctx context.Context, o UpOptions) error {
 	if err := waitJob(ctx, c, "c4-store", "bucket", 5*time.Minute); err != nil {
 		return fmt.Errorf("the store's bucket: %w", err)
 	}
+	o.Timings.Mark("operator")
 	if err := waitDeployment(ctx, c, "c4-system", "c4-manager", 5*time.Minute); err != nil {
 		return err
 	}
+	o.Timings.Mark("project")
 	o.logf("project   %s, pools cpu, gpu and cloud-gpu (burst)\n", Project)
 	if err := applyAll(ctx, c, YAML(Farm(o.Options))); err != nil {
 		return err
@@ -210,6 +220,7 @@ func Up(ctx context.Context, o UpOptions) error {
 			return err
 		}
 	}
+	o.Timings.Mark("HUD")
 	if err := waitHUD(ctx, o.HUD(), 5*time.Minute); err != nil {
 		return err
 	}
@@ -222,10 +233,12 @@ func Up(ctx context.Context, o UpOptions) error {
 		o.logf("networks  %s, for tools that declare them (c4-networks in c4-system)\n", strings.Join(added, " and "))
 	}
 	if installTracker {
+		o.Timings.Mark("tracker")
 		if err := upTracker(ctx, c, o); err != nil {
 			return err
 		}
 	}
+	o.Timings.Mark("tools")
 	return publishTools(ctx, o)
 }
 
