@@ -98,9 +98,13 @@ def lighting(root, modified: bool = False):
     comp.layer("comp")
     comp.render.filepath = "//render/sh010_comp_"
     comp.use_nodes = True
-    sh010_render = bf.Image("sh010_render", "//render/sh010_0001.exr", "SEQUENCE")
+    # Two view layers render, so each writes in a folder named for it.
+    sh010_render = bf.Image("sh010_render", "//render/bg/sh010_0001.exr", "SEQUENCE")
+    sh010_fg = bf.Image("sh010_fg_render", "//render/fg/sh010_0001.exr", "SEQUENCE")
     comp.node_tree = bf.NodeTree("Compositing.001", "CompositorNodeTree", nodes=[
         bf.Node("CompositorNodeImage", image=sh010_render, frame_start=1001, frame_duration=48, frame_offset=0,
+                use_cyclic=False),
+        bf.Node("CompositorNodeImage", image=sh010_fg, frame_start=1001, frame_duration=48, frame_offset=0,
                 use_cyclic=False),
     ])
 
@@ -117,7 +121,7 @@ def lighting(root, modified: bool = False):
     unused = bf.Image("old_plate", "//../../plates/old_plate.exr", users=0)
     ref = bf.Image("reference image", "//ref/layout_ref.jpg")
     props_diffuse = bf.Image("props_diffuse", "//tex/props_diffuse.png", library=props)
-    data.images.extend([wood, smoke, matte, logo, scratch, unused, ref, props_diffuse, sh010_render])
+    data.images.extend([wood, smoke, matte, logo, scratch, unused, ref, props_diffuse, sh010_render, sh010_fg])
 
     data.materials.append(_material("M_wood", wood))
     data.materials.append(_material("M_smoke", smoke, bf.image_user(frame_start=1001, frame_duration=48)))

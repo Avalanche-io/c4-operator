@@ -179,14 +179,20 @@ class BlenderHost(Host):
         p = _bpy().path.abspath(path, library=library) if path.startswith("//") else path
         return paths.norm(p)
 
-    def outputs(self, scene) -> List[str]:
+    def outputs(self, scene, view_layer: str = "", layers: int = 1) -> List[str]:
         """What rendering the scene writes, as patterns: the output path,
-        and the compositor's File Output nodes."""
+        and the compositor's File Output nodes. With ``view_layer`` and more
+        than one of the scene's ``layers`` rendering, the output path is in a
+        folder named for the layer, as the blender-render tool writes it
+        (``render/bg/sh010_####.exr``), so each layer's job writes its own."""
         r = scene.render
         out = []
         fmt = r.image_settings.file_format
         if fmt not in MOVIES:
             p = with_frame(self.absolute(r.filepath), EXTENSIONS.get(fmt, "") if r.use_file_extension else "")
+            if p and view_layer and layers > 1 and "/" in p:
+                folder, name = p.rsplit("/", 1)
+                p = f"{folder}/{view_layer}/{name}"
             if p:
                 out.append(p)
         tree = compositor(scene)
@@ -214,28 +220,35 @@ class BlenderHost(Host):
         count: Dict[str, int] = {}
         for _, vl in used:
             count[vl.name] = count.get(vl.name, 0) + 1
-        outs = {s.as_pointer(): self.outputs(s) for s in scenes}
-        made = {}
+        rendering: Dict[int, int] = {}
+        for s, _ in used:
+            rendering[s.as_pointer()] = rendering.get(s.as_pointer(), 0) + 1
+        outs = {_name(s, vl): self.outputs(s, vl.name, rendering[s.as_pointer()]) for s, vl in used}
+        # Who writes each pattern: one layer's job, or every layer's of a
+        # scene (its File Output nodes).
+        made: Dict[str, List[str]] = {}
+        for s, vl in used:
+            for o in outs[_name(s, vl)]:
+                made.setdefault(seq.canonical(o), []).append(_name(s, vl))
+        # A scene whose compositor reads another scene's render comes after
+        # the jobs that write what it reads.
+        after: Dict[int, List[str]] = {}
         for s in scenes:
-            for o in outs[s.as_pointer()]:
-                made.setdefault(seq.canonical(o), s)
-        # A scene whose compositor reads another scene's render comes after it.
-        after: Dict[int, List] = {}
-        for s in scenes:
+            mine = [_name(s, vl) for vl in s.view_layers if vl.use]
             for img, _ in _compositor_images(s):
                 if img.source in NOT_FILES or not img.filepath:
                     continue
                 p = self.absolute(img.filepath, img.library)
-                by = made.get(seq.canonical(sequence_pattern(p) if img.source == "SEQUENCE" else p))
-                if by is not None and by.as_pointer() != s.as_pointer() and by not in after.setdefault(s.as_pointer(), []):
-                    after[s.as_pointer()].append(by)
+                for by in made.get(seq.canonical(sequence_pattern(p) if img.source == "SEQUENCE" else p), []):
+                    if by not in mine and by not in after.setdefault(s.as_pointer(), []):
+                        after[s.as_pointer()].append(by)
         label = {}
         for s, vl in used:
             label[_name(s, vl)] = vl.name if s.as_pointer() == me.as_pointer() else f"{s.name} / {vl.name}"
         out = []
         for s, vl in used:
             name = _name(s, vl)
-            reads = [_name(t, l) for t in after.get(s.as_pointer(), []) for l in t.view_layers if l.use]
+            reads = list(after.get(s.as_pointer(), []))
             notes = []
             if s.as_pointer() != me.as_pointer():
                 notes.append(f"scene {s.name}")
@@ -246,7 +259,7 @@ class BlenderHost(Host):
             values = {"scene": s.name, "view_layer": vl.name}
             if getattr(s, "camera", None) is not None:
                 values["scene.camera"] = s.camera.name
-            out.append(Renderable(name=name, label=label[name], frames=_span(s), outputs=outs[s.as_pointer()],
+            out.append(Renderable(name=name, label=label[name], frames=_span(s), outputs=outs[name],
                                   reads=reads, enabled=s.as_pointer() == me.as_pointer(), note=" · ".join(notes),
                                   key=vl.name if count[vl.name] == 1 else f"{s.name}-{vl.name}", values=values))
         return out
@@ -376,6 +389,7 @@ class BlenderHost(Host):
         dependencies; a folder (a cache) as the files in it, unless files
         above are in it already (a sequencer strip's folder)."""
         known = [d.path for d in found] + skipped + [o for s in scenes for o in self.outputs(s)]
+        known += [o for s in scenes for vl in s.view_layers if vl.use for o in self.outputs(s, vl.name, 2)]
         canon = {seq.canonical(p) for p in known}
         patterns = [p for p in known if seq.has_frames(p) or seq.has_tiles(p)]
         scene_file = paths.norm(self.scene_file())

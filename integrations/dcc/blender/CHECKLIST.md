@@ -254,11 +254,12 @@ farm.
    - a one-frame animation (frame start and end set to the frame) names its
      file as the whole animation would, and `RenderSettings.frame_path(frame=f)`
      is that file.
-4. Tick `sh010_comp / comp` too and submit. **Expect:** the comp job waits for
-   bg and fg. **[guess]**: its compositor's Image node finds the renders it
-   reads; it reads `//render/sh010_####.exr`, which a scene with two view
-   layers now writes per view layer, so a comp reading a multi-layer scene's
-   render may need its path pointed at one view layer's folder.
+4. Point `sh010_comp`'s Image nodes at the view layers' own folders
+   (`//render/bg/sh010_####.exr`, `//render/fg/...`), where a scene with
+   two view layers writes them, tick `sh010_comp / comp` too and submit.
+   **Expect:** the comp job waits for the jobs of the layers it reads (bg
+   and fg), and only those: an Image node on bg alone makes it wait for bg
+   alone. **[guess]**: its compositor's Image nodes find those renders.
 5. A scene with a compositor File Output node. **Expect:** its files are
    written where the node says (inside the job's tree when the path is `//`),
    not per view layer. This is a known gap, listed in the README.

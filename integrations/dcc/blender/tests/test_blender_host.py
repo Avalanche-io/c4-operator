@@ -21,8 +21,10 @@ def test_view_layers_become_renderables_with_keys(tmp_path):
         ("sh010/bg", "bg", True), ("sh010/fg", "fg", True), ("sh010_comp/comp", "comp", False)]
     assert all(r.frames == "1001-1048" for r in rs)
     light = os.path.join(show, "sh010", "lighting")
-    assert rs[0].outputs == [os.path.join(light, "render", "sh010_####.exr"),
+    # Two of sh010's view layers render, so each writes in its own folder.
+    assert rs[0].outputs == [os.path.join(light, "render", "bg", "sh010_####.exr"),
                              os.path.join(light, "render", "passes", "crypto_####.exr")]
+    assert rs[1].outputs[0] == os.path.join(light, "render", "fg", "sh010_####.exr")
     assert rs[2].outputs == [os.path.join(light, "render", "sh010_comp_####.png")]
     assert rs[2].reads == ["sh010/bg", "sh010/fg"], "the comp scene's compositor reads sh010's render"
     assert rs[2].label == "sh010_comp / comp" and rs[2].note == "scene sh010_comp · after bg, fg"
@@ -189,3 +191,20 @@ def test_a_movie_output_writes_no_frame_files(tmp_path):
     s.use_nodes = False
     r = BlenderHost().renderables()[0]
     assert r.outputs == [] and r.note == "writes a movie, not a file per frame"
+
+
+def test_a_comp_follows_only_the_layer_it_reads(tmp_path):
+    _, data = lighting(tmp_path)
+    comp = data.scenes[1]
+    comp.node_tree.nodes.pop()          # the fg render is no longer read
+    rs = BlenderHost().renderables()
+    assert rs[2].reads == ["sh010/bg"]
+    assert rs[2].note == "scene sh010_comp · after bg"
+
+
+def test_one_layer_writes_where_the_scene_says(tmp_path):
+    show, data = lighting(tmp_path)
+    data.scenes[0].view_layers[1].use = False   # only bg renders now
+    rs = BlenderHost().renderables()
+    light = os.path.join(show, "sh010", "lighting")
+    assert rs[0].outputs[0] == os.path.join(light, "render", "sh010_####.exr")
