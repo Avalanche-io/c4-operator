@@ -1,7 +1,7 @@
 al.essio.dev/pkg/shellescape v1.5.1 h1:86HrALUujYS/h+GtqoB26SBEdkWfmMI6FubjXlsXyho=
 al.essio.dev/pkg/shellescape v1.5.1/go.mod h1:6sIqp7X2P6mThCQ7twERpZTuigpr6KbZWtls1U8I890=
-github.com/Avalanche-io/c4 v1.0.17-0.20261016134402-db4c7bec2376 h1:5k/t1RaVwIg35HaFgnrPjpwjiLBKfWHOYqu0D7zEES0=
-github.com/Avalanche-io/c4 v1.0.17-0.20261016134402-db4c7bec2376/go.mod h1:7RFR0t44NDhJUJr4CIUqWpivYsvu0X3UVxs+BWpXN54=
+github.com/Avalanche-io/c4 v1.0.17-0.20261021011131-b3a6f2dd9280 h1:QazGFSamXp4xK1ZpSze0mT6lGr180d06Eo7PRP8DcVU=
+github.com/Avalanche-io/c4 v1.0.17-0.20261021011131-b3a6f2dd9280/go.mod h1:7RFR0t44NDhJUJr4CIUqWpivYsvu0X3UVxs+BWpXN54=
 github.com/BurntSushi/toml v1.4.0 h1:kuoIxZQy2WRRk1pttg9asf+WVv6tWQuBNVmK8+nqPr0=
 github.com/BurntSushi/toml v1.4.0/go.mod h1:ukJfTF/6rtPPRCnwkur4qwRxa8vTRFBF0uk2lLoLwho=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=

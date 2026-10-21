@@ -3,7 +3,7 @@ module github.com/Avalanche-io/c4-operator
 go 1.26.7
 
 require (
-	github.com/Avalanche-io/c4 v1.0.17-0.20261016134402-db4c7bec2376
+	github.com/Avalanche-io/c4 v1.0.17-0.20261021011131-b3a6f2dd9280
 	github.com/container-storage-interface/spec v1.13.0
 	github.com/go-logr/logr v1.4.4
 	github.com/google/jsonschema-go v0.4.3
