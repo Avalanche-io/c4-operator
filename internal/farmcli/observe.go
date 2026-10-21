@@ -2,6 +2,9 @@ package farmcli
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/subtle"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -9,6 +12,8 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/hud"
@@ -29,7 +34,15 @@ type SessionsServer struct {
 	Agent, Claude string
 	All           bool
 	Now           func() time.Time
+	// Token is the run's secret: the API answers only a request that
+	// carries it (as ?token= once, then the cookie that sets), so another
+	// user of this machine or a web page cannot read the sessions. Serve
+	// makes one.
+	Token string
 }
+
+// tokenCookie carries the run's token after the first page load.
+const tokenCookie = "c4-agents"
 
 func (s SessionsServer) now() time.Time {
 	if s.Now != nil {
@@ -64,7 +77,7 @@ func (s SessionsServer) Handler() (http.Handler, error) {
 		host, _ := os.Hostname()
 		doc := observed{Now: s.now().UTC(), Machine: host, Sessions: make([]json.RawMessage, 0, len(rows))}
 		for _, row := range rows {
-			doc.Sessions = append(doc.Sessions, row.Raw)
+			doc.Sessions = append(doc.Sessions, private(row.Raw))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(doc)
@@ -98,12 +111,68 @@ func (s SessionsServer) Handler() (http.Handler, error) {
 		w.WriteHeader(http.StatusNotFound)
 		json.NewEncoder(w).Encode(map[string]string{"error": "no farm here: c4 farm agents --open shows this machine's sessions only"})
 	})
-	return mux, nil
+	return s.guard(mux), nil
+}
+
+// guard lets a request through only from this machine's loopback names,
+// and an API request only with the run's token: the page's ?token= sets a
+// cookie the HUD's own requests then carry.
+func (s SessionsServer) guard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		host, _, err := net.SplitHostPort(r.Host)
+		if err != nil {
+			host = r.Host
+		}
+		if host != "127.0.0.1" && host != "localhost" && host != "::1" {
+			http.Error(w, "c4 farm agents answers only on this machine", http.StatusForbidden)
+			return
+		}
+		ok := s.Token == ""
+		if t := r.URL.Query().Get("token"); t != "" && subtle.ConstantTimeCompare([]byte(t), []byte(s.Token)) == 1 {
+			http.SetCookie(w, &http.Cookie{Name: tokenCookie, Value: s.Token, Path: "/", HttpOnly: true, SameSite: http.SameSiteStrictMode})
+			ok = true
+		}
+		if c, err := r.Cookie(tokenCookie); err == nil && subtle.ConstantTimeCompare([]byte(c.Value), []byte(s.Token)) == 1 {
+			ok = true
+		}
+		if !ok && strings.HasPrefix(r.URL.Path, "/api/") {
+			http.Error(w, "open the link c4 farm agents --open printed: it carries this run's token", http.StatusForbidden)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// private is an observed row as the HUD may have it: its folder from the
+// home folder (~/...), and no transcript path.
+func private(raw json.RawMessage) json.RawMessage {
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return raw
+	}
+	delete(m, "transcript")
+	if cwd, ok := m["cwd"].(string); ok {
+		if home, err := os.UserHomeDir(); err == nil && home != "" && (cwd == home || strings.HasPrefix(cwd, home+string(filepath.Separator))) {
+			m["cwd"] = "~" + filepath.ToSlash(cwd[len(home):])
+		}
+	}
+	b, err := json.Marshal(m)
+	if err != nil {
+		return raw
+	}
+	return b
 }
 
 // Serve listens on 127.0.0.1:port (0 picks one), calls ready with the
 // sessions view's URL, and serves until ctx ends.
 func (s SessionsServer) Serve(ctx context.Context, port int, ready func(url string)) error {
+	if s.Token == "" {
+		b := make([]byte, 16)
+		if _, err := rand.Read(b); err != nil {
+			return err
+		}
+		s.Token = hex.EncodeToString(b)
+	}
 	h, err := s.Handler()
 	if err != nil {
 		return err
@@ -117,7 +186,7 @@ func (s SessionsServer) Serve(ctx context.Context, port int, ready func(url stri
 		<-ctx.Done()
 		srv.Close()
 	}()
-	ready(fmt.Sprintf("http://%s/#/sessions", l.Addr()))
+	ready(fmt.Sprintf("http://%s/?token=%s#/sessions", l.Addr(), s.Token))
 	if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return err
 	}

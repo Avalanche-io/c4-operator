@@ -5,6 +5,7 @@ import (
 	"context"
 	"io"
 	"net/http"
+	"net/http/cookiejar"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
@@ -156,18 +157,23 @@ func TestSessionsFallBackToClaude(t *testing.T) {
 }
 
 // agents --open serves the HUD's web files, this machine's sessions as
-// GET /api/v1/observed (each row as c4-agent observe gives it), a snapshot
-// the HUD can start on, and nothing of a farm.
+// GET /api/v1/observed, a snapshot the HUD can start on, and nothing of a
+// farm; the API answers only with the run's token, only on loopback, and
+// carries no transcript path and no folder above the home folder.
 func TestSessionsServer(t *testing.T) {
-	agent := fakeObserve(t, `[{"session":"0b5e7c52-8a6f","name":"port","kind":"background","running":true,"word":"needs you","needsYou":"Rename it too?","backgroundOpen":0}]`, false)
-	h, err := SessionsServer{Agent: agent}.Handler()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	agent := fakeObserve(t, `[{"session":"0b5e7c52-8a6f","name":"port","kind":"background","running":true,"word":"needs you","needsYou":"Rename it too?","backgroundOpen":0,"cwd":"`+home+`/repo","transcript":"`+home+`/.claude/projects/x/0b5e.jsonl"}]`, false)
+	h, err := SessionsServer{Agent: agent, Token: "s3cret"}.Handler()
 	if err != nil {
 		t.Fatal(err)
 	}
 	srv := httptest.NewServer(h)
 	defer srv.Close()
+	jar, _ := cookiejar.New(nil)
+	client := &http.Client{Jar: jar}
 	get := func(path string) (int, string) {
-		resp, err := http.Get(srv.URL + path)
+		resp, err := client.Get(srv.URL + path)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -175,17 +181,27 @@ func TestSessionsServer(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
-	if code, body := get("/api/v1/observed"); code != 200 || !strings.Contains(body, `"word":"needs you"`) ||
-		!strings.Contains(body, `"needsYou":"Rename it too?"`) || !strings.Contains(body, `"backgroundOpen":0`) || !strings.Contains(body, `"machine":`) {
+	if code, _ := get("/api/v1/observed"); code != 403 {
+		t.Fatalf("observed without the token: %d", code)
+	}
+	if code, body := get("/?token=s3cret"); code != 200 || !strings.Contains(body, "<html") {
+		t.Fatalf("index with the token %d", code)
+	}
+	// the cookie the page load set
+	code, body := get("/api/v1/observed")
+	if code != 200 || !strings.Contains(body, `"word":"needs you"`) || !strings.Contains(body, `"needsYou":"Rename it too?"`) ||
+		!strings.Contains(body, `"cwd":"~/repo"`) || strings.Contains(body, "transcript") || strings.Contains(body, home) {
 		t.Errorf("observed %d %s", code, body)
 	}
 	if code, body := get("/api/v1/snapshot"); code != 200 || !strings.Contains(body, `"jobs":[]`) || !strings.Contains(body, `"allProjects":true`) {
 		t.Errorf("snapshot %d %s", code, body)
 	}
-	if code, body := get("/"); code != 200 || !strings.Contains(body, "<html") {
-		t.Errorf("index %d", code)
-	}
 	if code, _ := get("/api/v1/jobs"); code != 404 {
 		t.Errorf("a farm route answered %d", code)
+	}
+	req, _ := http.NewRequest("GET", srv.URL+"/api/v1/observed?token=s3cret", nil)
+	req.Host = "evil.example:80"
+	if resp, err := http.DefaultClient.Do(req); err != nil || resp.StatusCode != 403 {
+		t.Errorf("another host name: %v %v", err, resp)
 	}
 }
