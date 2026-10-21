@@ -233,6 +233,8 @@ func TestSessionsFoldOldEndedAndWeighUse(t *testing.T) {
 {"session":"0b5e7c52-8a6f-4d0e","name":"tests","kind":"background","running":true,"word":"working","cwd":"/tmp/repo","startedAt":"2026-10-21T07:30:00Z",
  "usage":{"models":[{"model":"claude-opus-5-5","inputTokens":500,"outputTokens":100000,"cacheReadTokens":40000000,"cacheWriteTokens":400000}]}},
 {"session":"5d7e9f74-ac81-4a2b","name":"Teammate availability notification","kind":"background","running":false,"word":"failed","startedAt":"2026-08-07T09:00:00Z","lastActive":"2026-08-08T09:00:00Z"},
+{"session":"7f90b196-ce03-4c4d","name":"weighed","kind":"background","running":true,"word":"idle","startedAt":"2026-10-21T08:00:00Z","weighted":1234567,
+ "usage":{"models":[{"model":"claude-opus-5-5","inputTokens":1}]}},
 {"session":"6e8fa085-bd92-4b3c","name":"yesterday","kind":"background","running":false,"word":"done","startedAt":"2026-10-21T06:00:00Z"}]`, false)
 	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 	o := func(w *bytes.Buffer) Out { return Out{W: w, Clock: Clock{Now: func() time.Time { return now }}} }
@@ -242,7 +244,7 @@ func TestSessionsFoldOldEndedAndWeighUse(t *testing.T) {
 	}
 	s := out.String()
 	// 500 + 5*100k + 1.25*400k + 0.05*40M on Opus 5.5 = 3.0M, not 40.5M
-	if strings.Contains(s, "Teammate") || !strings.Contains(s, "yesterday") || !strings.Contains(s, "3.0M tokens") ||
+	if strings.Contains(s, "Teammate") || !strings.Contains(s, "yesterday") || !strings.Contains(s, "3.0M tokens") || !strings.Contains(s, "1.2M tokens") ||
 		!strings.Contains(s, "1 older session ended 74 days ago; c4 farm agents --all lists them") {
 		t.Errorf("agents:\n%s", s)
 	}

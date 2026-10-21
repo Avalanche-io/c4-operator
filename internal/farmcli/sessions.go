@@ -39,7 +39,10 @@ type row struct {
 			CacheWriteTokens int64  `json:"cacheWriteTokens"`
 		} `json:"models"`
 	} `json:"usage,omitempty"`
-	Raw json.RawMessage `json:"-"`
+	// Weighted is observe's own weighted count, when it carries one: the
+	// CLI and the HUD read it ahead of their own sum, so they cannot drift.
+	Weighted *float64        `json:"weighted,omitempty"`
+	Raw      json.RawMessage `json:"-"`
 }
 
 // ended is a session that is over: failed, done or stopped, or no longer
@@ -79,6 +82,9 @@ func (r row) label() string {
 // (work/tokens), so cache reads, a tenth of input or less, do not swell
 // it tenfold.
 func (r row) tokens() int64 {
+	if r.Weighted != nil {
+		return int64(*r.Weighted)
+	}
 	var n float64
 	if r.Usage != nil {
 		for _, m := range r.Usage.Models {
