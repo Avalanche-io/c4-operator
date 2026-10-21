@@ -50,6 +50,10 @@ type AgentRunArgs struct {
 // lapsed: restarting it cannot help, and the person runs c4 farm up.
 const enrollAgain = "enroll it again"
 
+// exitEnrollmentEnded is the status c4-agent runner exits with when the
+// farm refused its token, or the token ran out: restarting cannot help.
+const exitEnrollmentEnded = 78
+
 // AgentRun is `c4 farm agent run`: the power reader, writing the slots
 // file, and c4-agent runner, reading it, kept running together. A runner
 // that stops is started again, waiting longer each time; one whose
@@ -181,6 +185,11 @@ func runRunner(ctx context.Context, o Out, bin, slotsFile string, slots int) (bo
 	err := cmd.Run()
 	pw.Close()
 	<-done
+	// the runner's own word that its enrollment ended, whatever it printed
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() == exitEnrollmentEnded {
+		lapsed = true
+	}
 	return lapsed, err
 }
 

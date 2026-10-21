@@ -166,3 +166,25 @@ func TestAgentServiceRefusesAForeignHome(t *testing.T) {
 		t.Error("the service file was written")
 	}
 }
+
+// The runner's exit status 78 is its enrollment ending, however it words
+// it: agent run stops trying, as it does on the words.
+func TestAgentRunStopsOnExit78(t *testing.T) {
+	dir := t.TempDir()
+	slots, svc := filepath.Join(dir, "slots"), filepath.Join(dir, "agent.plist")
+	os.WriteFile(svc, []byte("<plist/>"), 0o644)
+	bin := filepath.Join(dir, "c4-agent")
+	os.WriteFile(bin, []byte("#!/bin/sh\ni=0; while [ ! -f "+slots+" ] && [ $i -lt 100 ]; do sleep 0.05; i=$((i+1)); done\nexit 78\n"), 0o755)
+	var out bytes.Buffer
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := AgentRun(ctx, Out{W: &out}, AgentRunArgs{AgentBin: bin, SlotsFile: slots, Backoff: time.Millisecond, ServiceFile: svc, Log: filepath.Join(dir, "log")}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "enrollment has lapsed") || strings.Contains(out.String(), "starting it again") {
+		t.Errorf("exit 78:\n%s", out.String())
+	}
+	if _, err := os.Stat(svc); !os.IsNotExist(err) {
+		t.Error("the service's definition is still there")
+	}
+}
