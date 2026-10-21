@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/tracker"
 )
 
 // Summary states, the work states c4-sync writes (docs/c4-sync.md, "What it
@@ -146,11 +147,12 @@ func (s Summary) AtRisk() bool {
 	return s.Risk == "atRisk" || s.Risk == "willMiss" || s.Risk == "missed"
 }
 
-// Title is a one-line status: the state, the ETA in UTC and the risk.
-func (s Summary) Title() string {
+// Title is a one-line status: the state, the ETA in the readers' zone
+// (loc; nil is UTC) and the risk.
+func (s Summary) Title(loc *time.Location) string {
 	t := s.Words()
 	if s.Active() && s.ETA != nil {
-		t += " · ETA " + s.ETA.UTC().Format("Mon 15:04 UTC")
+		t += " · ETA " + tracker.WhenShort(*s.ETA, loc)
 	}
 	if s.AtRisk() {
 		t += " · deadline " + map[string]string{"atRisk": "at risk", "willMiss": "will be missed", "missed": "missed"}[s.Risk]

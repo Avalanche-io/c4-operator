@@ -28,6 +28,10 @@ never approves, merges, sets a Flow Version's approved status, moves a Kitsu
 task to done or out of it, or sets an MLflow alias. Approval stays with the
 person who approves, in the tracker. It changes no status when only the ETA
 moves, and it writes one cause per failure group, not one per frame.
+Times it writes are in the project's zone with UTC beside them ("Wed 21
+Oct 16:30 PDT (23:30 UTC)"). The zone is the project's
+`spec.work.dueTime.timeZone`, else c4-sync's `--tz` (the farm's), else
+UTC alone.
 
 It changes jobs only through the HUD API, as its own identity
 (`X-C4-Agent: c4-sync`), so the HUD authorizes, signs and books each

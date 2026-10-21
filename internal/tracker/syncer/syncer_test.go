@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -880,5 +881,22 @@ func TestRefusalsSayWhichTheyAre(t *testing.T) {
 		if cond == nil || cond.Reason != c.reason || !strings.Contains(cond.Message, c.says) || strings.Contains(cond.Message, "has not let") {
 			t.Errorf("%s: %+v", c.err.Reason, cond)
 		}
+	}
+}
+
+// Times written to the tracker read in the project's zone with UTC
+// beside them, as the rest of C4 shows them; a project with no zone gets
+// UTC alone, as above.
+func TestTimesInTheProjectsZone(t *testing.T) {
+	e := setup(t)
+	proj := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"}, Spec: c4v1.ProjectSpec{Namespaces: []string{ns},
+		Work: &c4v1.ProjectWork{DueTime: &c4v1.DueTime{At: "18:00", TimeZone: "America/Los_Angeles"}}}}
+	if err := e.k8s.Create(context.Background(), proj); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	cs := e.gh.Comments(7)
+	if len(cs) != 1 || !regexp.MustCompile(`P[DS]T \(\d\d:\d\d UTC\)`).MatchString(cs[0].Body) {
+		t.Fatalf("issue comment: %+v", cs)
 	}
 }

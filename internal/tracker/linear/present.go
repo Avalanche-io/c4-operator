@@ -99,7 +99,7 @@ func commentBody(s tracker.LinkState) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "**%s.**\n\n%s\n\n[C4 job](%s)", s.Words, s.Why, s.JobURL)
 	if s.Deadline != nil {
-		fmt.Fprintf(&b, " · deadline %s (%s)", s.Deadline.UTC().Format("Mon 2 Jan 15:04 UTC"), s.DeadlineSource)
+		fmt.Fprintf(&b, " · deadline %s (%s)", tracker.When(*s.Deadline, s.Loc), s.DeadlineSource)
 	}
 	return b.String()
 }

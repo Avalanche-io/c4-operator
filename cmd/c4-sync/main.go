@@ -50,8 +50,8 @@ func main() {
 }
 
 type options struct {
-	hud, hudPublic, tokenFile, listen, agent, devViewer string
-	interval                                            time.Duration
+	hud, hudPublic, tokenFile, listen, agent, devViewer, tz string
+	interval                                                time.Duration
 }
 
 func parse(args []string, stderr io.Writer) (options, error) {
@@ -65,6 +65,7 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	fs.DurationVar(&o.interval, "interval", time.Minute, "time between passes over every Tracker")
 	fs.StringVar(&o.hudPublic, "hud-public-url", os.Getenv("C4_HUD_PUBLIC_URL"), "the HUD's address as people reach it, for links written to trackers (default --hud)")
 	fs.StringVar(&o.devViewer, "hud-dev-viewer", "", "development only: the HUD viewer (?as=) to act as, on a HUD started with --hud-dev-viewers")
+	fs.StringVar(&o.tz, "tz", os.Getenv("C4_TZ"), "the farm's time zone (IANA), for times written to a tracker whose project names none; default UTC (C4_TZ)")
 	showVersion := fs.Bool("version", false, "print the version and exit")
 	if err := fs.Parse(args); err != nil {
 		return o, err
@@ -78,6 +79,11 @@ func parse(args []string, stderr io.Writer) (options, error) {
 	}
 	if o.interval < 5*time.Second {
 		return o, errors.New("--interval must be at least 5s")
+	}
+	if o.tz != "" {
+		if _, err := time.LoadLocation(o.tz); err != nil {
+			return o, fmt.Errorf("--tz %q: %v", o.tz, err)
+		}
 	}
 	return o, nil
 }
@@ -120,6 +126,9 @@ func run(args []string, stderr io.Writer) error {
 			return strings.TrimSpace(string(b)), err
 		}},
 		Log: log,
+	}
+	if o.tz != "" {
+		s.Loc, _ = time.LoadLocation(o.tz)
 	}
 	ctx := ctrl.SetupSignalHandler()
 	mux := http.NewServeMux()

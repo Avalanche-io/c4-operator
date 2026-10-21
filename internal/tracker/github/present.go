@@ -147,10 +147,10 @@ func checkSummary(s tracker.LinkState) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "C4 job [%s](%s): %s.", s.Job, s.JobURL, s.Words)
 	if s.Deadline != nil {
-		fmt.Fprintf(&b, "\n\nDeadline %s (%s).", s.Deadline.UTC().Format("Mon 2 Jan 15:04 UTC"), s.DeadlineSource)
+		fmt.Fprintf(&b, "\n\nDeadline %s (%s).", tracker.When(*s.Deadline, s.Loc), s.DeadlineSource)
 	}
 	if s.ETA != nil && s.Active {
-		fmt.Fprintf(&b, " Expected by %s.", s.ETA.UTC().Format("Mon 2 Jan 15:04 UTC"))
+		fmt.Fprintf(&b, " Expected by %s.", tracker.When(*s.ETA, s.Loc))
 	}
 	if s.Why != "" {
 		fmt.Fprintf(&b, "\n\n%s", s.Why)
@@ -166,7 +166,7 @@ func commentBody(s tracker.LinkState) string {
 	fmt.Fprintf(&b, "**C4:** %s\n\n", s.Title)
 	fmt.Fprintf(&b, "Job [%s](%s)", s.Job, s.JobURL)
 	if s.Deadline != nil {
-		fmt.Fprintf(&b, ", deadline %s (%s)", s.Deadline.UTC().Format("Mon 2 Jan 15:04 UTC"), s.DeadlineSource)
+		fmt.Fprintf(&b, ", deadline %s (%s)", tracker.When(*s.Deadline, s.Loc), s.DeadlineSource)
 	}
 	b.WriteString(".")
 	if s.Why != "" {

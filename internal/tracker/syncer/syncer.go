@@ -69,6 +69,9 @@ type Syncer struct {
 	HTTP *http.Client
 	Now  func() time.Time
 	Log  logr.Logger
+	// Loc is the farm's zone, for times written to a tracker whose project
+	// names none (nil: UTC).
+	Loc *time.Location
 
 	mu    sync.Mutex
 	conns map[string]*conn
@@ -90,6 +93,9 @@ type conn struct {
 	// by link and output view.
 	stillSince map[string]time.Time
 	resync     time.Time
+	// loc is the zone the tracker's readers read times in: its project's,
+	// read at each pass.
+	loc *time.Location
 }
 
 func (s *Syncer) now() time.Time {
@@ -145,7 +151,7 @@ func (s *Syncer) conn(t *c4v1.Tracker) (*conn, error) {
 		return nil, fmt.Errorf("adapter %s does not present states", t.Spec.Kind)
 	}
 	old := s.conns[key(t)]
-	c := &conn{gen: t.Generation, adapter: a, presenter: p, limiter: lim, dirty: map[string]bool{}}
+	c := &conn{gen: t.Generation, adapter: a, presenter: p, limiter: lim, dirty: map[string]bool{}, loc: s.Loc}
 	if old != nil {
 		c.dirty, c.pending, c.until, c.stillSince = old.dirty, old.pending, old.until, old.stillSince
 	}
@@ -194,6 +200,7 @@ func (s *Syncer) Sync(ctx context.Context, t *c4v1.Tracker) error {
 		s.setTrackerCond(ctx, t, CondReady, metav1.ConditionFalse, "NoAdapter", err.Error())
 		return err
 	}
+	c.loc = s.zone(ctx, t.Namespace)
 	if now := s.now(); now.Before(c.until) {
 		s.setTrackerCond(ctx, t, CondRateLimited, metav1.ConditionTrue, "RateLimited",
 			"waiting until "+c.until.UTC().Format(time.RFC3339))
@@ -407,7 +414,7 @@ func (s *Syncer) mirrorDecided(ctx context.Context, t *c4v1.Tracker, c *conn, l 
 			unit = fmt.Sprintf("unit %d", *tr.Unit)
 		}
 		body := fmt.Sprintf("C4: %s of %s was decided %s by %s, in C4, at %s.", unit, tr.Job, tr.Do, or(tr.Actor, "someone"),
-			tr.At.UTC().Format("Mon 2 Jan 15:04 UTC"))
+			tracker.When(tr.At, c.loc))
 		if tr.Record != "" {
 			body += " Record " + tr.Record + "."
 		}
@@ -581,6 +588,26 @@ func Deadline(d *tracker.Due, rule c4v1.TrackerDeadline, conv *c4v1.DueTime) (*t
 	}
 	at = at.UTC()
 	return &at, "", nil
+}
+
+// zone is the zone a Tracker's readers read times in: its project's due
+// time zone (spec.work.dueTime.timeZone), else the farm's (Loc), else UTC.
+func (s *Syncer) zone(ctx context.Context, ns string) *time.Location {
+	var ps c4v1.ProjectList
+	if err := s.Client.List(ctx, &ps); err == nil {
+		for _, p := range ps.Items {
+			if !slices.Contains(p.Spec.Namespaces, ns) || p.Spec.Work == nil || p.Spec.Work.DueTime == nil || p.Spec.Work.DueTime.TimeZone == "" {
+				continue
+			}
+			if loc, err := time.LoadLocation(p.Spec.Work.DueTime.TimeZone); err == nil {
+				return loc
+			}
+		}
+	}
+	if s.Loc != nil {
+		return s.Loc
+	}
+	return time.UTC
 }
 
 // deadline is Deadline under the due-time convention of the project that
@@ -947,7 +974,7 @@ func (s *Syncer) baseState(l *c4v1.TrackerLink) tracker.LinkState {
 // linkState is the link and its job's summary, as an adapter presents it.
 func (s *Syncer) linkState(l *c4v1.TrackerLink, sum Summary) tracker.LinkState {
 	ls := s.baseState(l)
-	ls.State, ls.Words, ls.Title, ls.Why = sum.State, sum.Words(), sum.Title(), sum.Why
+	ls.State, ls.Words, ls.Title, ls.Why = sum.State, sum.Words(), sum.Title(nil), sum.Why
 	ls.Active, ls.ETA, ls.AtRisk, ls.Deadline = sum.Active(), sum.ETA, sum.AtRisk(), sum.Deadline
 	ls.DeadlineSource = deadlineSource(sum)
 	if w := sum.Wait; w != nil {
@@ -1039,6 +1066,7 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 		return err
 	}
 	ls := s.linkState(l, sum)
+	ls.Loc, ls.Title = c.loc, sum.Title(c.loc)
 	cfg := tracker.PresentConfig{States: t.Spec.StatusOut.States, CheckName: t.Spec.StatusOut.CheckName,
 		CommitStatus: t.Spec.StatusOut.CommitStatus}
 	now, every := s.now(), seconds(t.Spec.StatusOut.FieldSeconds, 300)

@@ -119,7 +119,9 @@ func TrackerObjects(o Options) ([]obj, error) {
 				"credential":    obj{"secret": obj{"name": "sandbox-github", "key": "token"}},
 				"webhookSecret": obj{"name": "sandbox-github", "key": "hook"},
 				"events":        obj{"mode": "webhook", "pollSeconds": 10, "resyncSeconds": 300},
-				"people":        people,
+				// a stand-in on the farm has no rate limit; a pass is a second, not a minute
+				"rate":   obj{"perSecond": "50", "burst": 100},
+				"people": people,
 				"intake": []obj{{"match": obj{"type": "Issue", "labels": []string{sandbox.Label}}, "as": "job",
 					"for": obj{"assignee": true}, "rework": "nextVersion", "job": job}},
 				"statusOut": obj{"commitStatus": true, "fieldSeconds": 30}}},
@@ -128,10 +130,14 @@ func TrackerObjects(o Options) ([]obj, error) {
 
 // syncArgs are c4-sync's arguments on the local farm: the HUD's
 // development sign-in, links to the HUD as this machine reaches it, and a
-// short pass.
+// short pass, and the farm's zone for the times it writes.
 func syncArgs(o Options) []string {
-	return []string{"--hud=http://c4-hud.c4-system.svc", "--hud-dev-viewer=" + c4v1.SyncDevViewer,
+	args := []string{"--hud=http://c4-hud.c4-system.svc", "--hud-dev-viewer=" + c4v1.SyncDevViewer,
 		"--hud-public-url=" + o.HUD(), "--interval=10s"}
+	if o.TZ != "" {
+		args = append(args, "--tz="+o.TZ)
+	}
+	return args
 }
 
 var syncImage = regexp.MustCompile(`(image:\s*"?)([^\s"]*c4-sync(?::[^\s"]+)?)("?)`)

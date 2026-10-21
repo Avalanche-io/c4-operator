@@ -93,7 +93,7 @@ func statusBody(s tracker.LinkState) string {
 func noteBody(s tracker.LinkState) string {
 	b := fmt.Sprintf("C4: %s.\n\n%s\n\nC4 job: %s", s.Words, s.Why, s.JobURL)
 	if s.Deadline != nil {
-		b += fmt.Sprintf("\nDeadline: %s (%s)", s.Deadline.UTC().Format("Mon 2 Jan 15:04 UTC"), s.DeadlineSource)
+		b += fmt.Sprintf("\nDeadline: %s (%s)", tracker.When(*s.Deadline, s.Loc), s.DeadlineSource)
 	}
 	return b
 }

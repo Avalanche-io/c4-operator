@@ -32,6 +32,9 @@ type LinkState struct {
 	// DeadlineSource says where the deadline came from, in words.
 	DeadlineSource string
 	Wait           *WaitState
+	// Loc is the zone the tracker's readers read times in (the project's),
+	// for When; nil is UTC.
+	Loc *time.Location
 }
 
 // WaitState is the open wait the tracker serves.
@@ -110,4 +113,20 @@ type Verdicter interface {
 func WriteKey(link, field, value string) string {
 	h := sha256.Sum256([]byte(link + "/" + field + "/" + value))
 	return hex.EncodeToString(h[:12])
+}
+
+// When is a time as a tracker's readers read it: in their zone, with UTC
+// beside it ("Wed 21 Oct 16:30 PDT (23:30 UTC)"), as the rest of C4 shows
+// times; in UTC alone when the zone is UTC or not known.
+func When(t time.Time, loc *time.Location) string { return when(t, loc, "Mon 2 Jan 15:04") }
+
+// WhenShort is When without the date, for a one-line status.
+func WhenShort(t time.Time, loc *time.Location) string { return when(t, loc, "Mon 15:04") }
+
+func when(t time.Time, loc *time.Location, layout string) string {
+	u := t.UTC()
+	if loc == nil || loc.String() == "UTC" {
+		return u.Format(layout + " UTC")
+	}
+	return t.In(loc).Format(layout+" MST") + " (" + u.Format("15:04") + " UTC)"
 }

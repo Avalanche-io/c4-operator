@@ -23,3 +23,26 @@ func TestDefinite(t *testing.T) {
 		}
 	}
 }
+
+func TestWhen(t *testing.T) {
+	at := time.Date(2026, 10, 22, 0, 45, 0, 0, time.UTC)
+	la, err := time.LoadLocation("America/Los_Angeles")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		loc        *time.Location
+		long, shrt string
+	}{
+		{nil, "Thu 22 Oct 00:45 UTC", "Thu 00:45 UTC"},
+		{time.UTC, "Thu 22 Oct 00:45 UTC", "Thu 00:45 UTC"},
+		{la, "Wed 21 Oct 17:45 PDT (00:45 UTC)", "Wed 17:45 PDT (00:45 UTC)"},
+	} {
+		if got := When(at, c.loc); got != c.long {
+			t.Errorf("When %v: %q", c.loc, got)
+		}
+		if got := WhenShort(at, c.loc); got != c.shrt {
+			t.Errorf("WhenShort %v: %q", c.loc, got)
+		}
+	}
+}
