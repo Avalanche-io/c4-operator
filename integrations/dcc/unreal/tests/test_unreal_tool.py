@@ -348,7 +348,7 @@ def test_the_executor_fills_the_shipped_tool(tmp_path, monkeypatch):
     ue.state.answers = ["yes", "ok"]
     C4FarmExecutor().execute(queue)
     summary, _ = ue.state.messages()
-    assert re.search(r"sh010-render-sh010-lighting-v001\s+Unreal render · 10 frames in 1 units?\b", summary), summary
+    assert re.search(r"sh010-render-sh010-lighting-v001\s+Unreal render · one unit over 1001-1010\b", summary), summary
     job = fake.jobs[0]["jobs"]["render-sh010-lighting"]
     assert job == {"tool": "unreal-render", "frames": "1001-1010", "with": {
         "project": "unreal/Saltmarsh/Saltmarsh.uproject", "map": "/Game/Maps/Sh010",

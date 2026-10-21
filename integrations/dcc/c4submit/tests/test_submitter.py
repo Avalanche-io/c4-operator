@@ -383,4 +383,4 @@ def test_a_renderable_asks_for_its_whole_range_in_one_unit(tmp_path, farm, nocac
     assert p.doc["jobs"]["comp"]["chunk"] == "all"
     c = Submitter(farm, cache=nocache).check(p)
     assert c.ok, c.errors
-    assert c.answer["jobs"][0]["what"] == "48 frames in 1 units"
+    assert c.answer["jobs"][0]["what"] == "one unit over 1001-1048"

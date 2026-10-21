@@ -115,14 +115,14 @@ needed.
   `~/.c4/integrations/<name>/`, and the application gets a small pointer in
   a folder it already reads:
 
-  | application | its pointer                                                                                             |
-  | ----------- | ------------------------------------------------------------------------------------------------------- |
-  | Blender     | the add-on in the version's `scripts/addons`, and a `scripts/startup` module that turns it on once      |
-  | Unreal      | `~/Documents/UnrealEngine/Python/init_unreal.py`; refused if one is there that isn't C4's               |
-  | Houdini     | `packages/c4.json` in the version's preferences folder                                                  |
-  | Maya        | `c4.mod` in the version's user `modules` folder                                                         |
-  | Nuke        | one marked line in `~/.nuke/init.py`, after a backup of the file                                        |
-  | Katana      | one marked line in `~/.katana/init.py`, after a backup of the file                                      |
+  | application | its pointer                                                                                        |
+  | ----------- | -------------------------------------------------------------------------------------------------- |
+  | Blender     | the add-on in the version's `scripts/addons`, and a `scripts/startup` module that turns it on once |
+  | Unreal      | `~/Documents/UnrealEngine/Python/init_unreal.py`; refused if one is there that isn't C4's          |
+  | Houdini     | `packages/c4.json` in the version's preferences folder                                             |
+  | Maya        | `c4.mod` in the version's user `modules` folder                                                    |
+  | Nuke        | one marked line in `~/.nuke/init.py`, after a backup of the file                                   |
+  | Katana      | one marked line in `~/.katana/init.py`, after a backup of the file                                 |
 
 - **Every write is whole**: a file is written beside its place and renamed
   in, and a new folder is built beside its place and renamed in. A file that
@@ -148,6 +148,16 @@ needed.
 - **Running on again** changes nothing. C4's line stays where it is, and the
   backup keeps the file as it was before C4 first changed it. After a newer
   `c4` release, on replaces only C4's own files.
+
+## Checking against a real farm
+
+`c4submit/e2e_submit.py --hud URL [--as artist]` does what every panel
+does, with a small comp scene in place of an application: it checks the
+submission (estimate and slack), uploads what the farm lacks, records the
+tree (and refuses if the farm names it differently from the ID computed
+here), submits, waits for the job and lists the comp frames it wrote. Run
+it against a farm of your own (`c4 farm up --name ...`), since it creates a
+job; the farm's prebuilt `comp` tool must be offered.
 
 ## The tools on the farm
 

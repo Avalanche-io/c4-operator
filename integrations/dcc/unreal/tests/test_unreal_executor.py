@@ -57,7 +57,7 @@ def test_render_remote_checks_then_submits(tmp_path, monkeypatch):
 
     summary, done = ue.state.messages()
     heads = [ln for ln in summary.splitlines() if ln.startswith("sh010-render-")]
-    assert heads == ["sh010-render-sh010-lighting-v001   Unreal render · 10 frames in 1 units",
+    assert heads == ["sh010-render-sh010-lighting-v001   Unreal render · one unit over 1001-1010",
                      "sh010-render-sh020-lighting-v001   Unreal render · 24 frames in 3 units"]
     assert re.search(r"due\s+.*· Dailies, Thu 18:00 · slack ", summary)
     assert f"{ALL_FILES} found from Saltmarsh.uproject" in summary

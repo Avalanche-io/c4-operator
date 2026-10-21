@@ -240,7 +240,11 @@ class FakeFarm:
             units = -(-n // chunk)
             after = job.get("after")
             after = [after] if isinstance(after, str) else list(after or [])
-            what = (f"{n} frames in {units} units" if tool.takes_frames else "1 unit")
+            # As the farm words it (internal/authoring, PlannedJob.What).
+            if units == 1:
+                what = f"one unit over {job['frames']}" if job.get("frames") else "one unit"
+            else:
+                what = f"{n} frames in {units} units"
             if after:
                 what += ", after " + ", ".join(names[a] for a in after)
             out = {"key": key, "namespace": doc.get("project", ""), "name": names[key], "tool": name,
