@@ -34,11 +34,17 @@ class Renderable:
     chunk: Optional[str] = None
 
 
+# A Dependency's frames when a sequence is read frame for frame by the jobs
+# that read it (a path an expression names per frame): the frames of those
+# jobs, as the submission sets them.
+JOB_FRAMES = "job"
+
+
 @dataclass
 class Dependency:
     """A file, sequence or tile set the scene reads."""
     path: str                          # absolute; may hold frame or tile tokens
-    frames: Optional[str] = None       # the frames it is read over, when it is a sequence
+    frames: Optional[str] = None       # the frames it is read over, when it is a sequence; JOB_FRAMES for "each job's"
     node: str = ""                     # who reads it, for messages
     renderables: Optional[List[str]] = None   # the renderables that read it ([] none of them); None, not known
     optional: bool = False             # missing is a warning, not an error

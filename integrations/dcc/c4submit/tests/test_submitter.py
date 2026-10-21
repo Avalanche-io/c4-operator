@@ -413,3 +413,19 @@ def test_the_key_goes_over_the_wire(tmp_path, nocache):
         assert len(fake.jobs) == 1 and fake.by_key.keys() == {c.key}
     finally:
         served.close()
+
+
+def test_a_sequence_read_over_each_jobs_frames(tmp_path, farm, nocache):
+    from c4submit.host import JOB_FRAMES
+    show = str(tmp_path)
+    for f in range(1001, 1061):
+        write(os.path.join(show, "fx", f"smoke.{f}.vdb"), b"%d" % f)
+    host = comp_scene(tmp_path, extra_deps=[
+        Dependency(os.path.join(show, "fx", "smoke.####.vdb"), JOB_FRAMES, node="ReadSmoke", renderables=["Write_main"])])
+    host._renderables[1].frames = "1001-1010"           # main renders ten frames
+    d = draft_for(host, farm)
+    col = prepare(d).collection
+    smoke = sorted(r for r in col.files if r.startswith("fx/"))
+    assert smoke == [f"fx/smoke.{f}.vdb" for f in range(1001, 1011)], "the frames of the job that reads it, not all 60"
+    d.tick("Write_main", False)
+    assert not any(r.startswith("fx/") for r in prepare(d).collection.files), "no ticked job reads it"

@@ -18,6 +18,7 @@ A panel does four things, in this order:
 Nothing here imports a DCC module or a toolkit.
 """
 
+import dataclasses
 import json
 import os
 import threading
@@ -28,11 +29,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
 from c4submit import collect as collectlib
+from c4submit import frames as framelib
 from c4submit import paths, seq, submission, yamlio
 from c4submit.collect import Cancelled, Collection, IDCache, Problem
 from c4submit.farm import Farm, FarmError, NotOnFarm
 from c4submit.form import Form
-from c4submit.host import Dependency, Host, Renderable
+from c4submit.host import JOB_FRAMES, Dependency, Host, Renderable
 from c4submit.tool import Tool, local_tools
 
 Progress = Callable[[str, int, int], None]
@@ -247,6 +249,24 @@ def _to_tree_path(root: str, value: Any) -> Any:
     return paths.relative(root, value)
 
 
+def _frames_of_jobs(draft: "Draft", keys: Dict[str, Optional[Renderable]],
+                    readers: Optional[List[str]]) -> Optional[str]:
+    """The frames of the jobs that read a file (every job when ``readers``
+    is None), as one frame list; None when no job has frames."""
+    frames: set = set()
+    for r in keys.values():
+        if readers is not None and r is not None and r.name not in readers:
+            continue
+        expr = draft.job_frames(r)
+        if not expr:
+            continue
+        try:
+            frames.update(framelib.parse(expr))
+        except framelib.FrameError:
+            continue
+    return framelib.format(frames) if frames else None
+
+
 def prepare(draft: Draft) -> Prepared:
     """The submission's jobs and the files they read. Main thread: the last
     call that reads the scene."""
@@ -361,6 +381,8 @@ def prepare(draft: Draft) -> Prepared:
             continue
         if seq.canonical(d.path) in outputs:
             continue
+        if d.frames == JOB_FRAMES:
+            d = dataclasses.replace(d, frames=_frames_of_jobs(draft, keys, d.renderables))
         deps.append(d)
     col = collectlib.gather(draft.root, draft.scene_file, deps)
     problems += [Problem("warning", "scene", w) for w in host.warnings()]
