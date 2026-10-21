@@ -251,6 +251,13 @@ any others that checkpoint:
 `c4-agent runner` is the other half, on the machine where the members'
 sessions live. It is a host runner.
 
+**On a farm with more than one person, keep host runners to one person's
+own machines for now.** Every write a host runner makes is held to its own
+machine (its Node, its Lease, the pods bound to it), but a host runner can
+still read every pod, and bind a pending pod of anyone's to its own Node.
+Until the farm binds host pods itself and each runner reads only its own,
+a machine enrolled for one person can see another's work.
+
 **Enrolling the machine, once.** With the farm admin's access (the local
 farm's own, which `c4 farm up` uses), `c4-agent enroll --owner <person>`
 makes what the runner needs, and running it again makes nothing new:
