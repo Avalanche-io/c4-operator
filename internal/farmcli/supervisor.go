@@ -50,7 +50,7 @@ func AgentRun(ctx context.Context, o Out, a AgentRunArgs) error {
 	if bin == "" {
 		p, err := exec.LookPath("c4-agent")
 		if err != nil {
-			return errors.New("c4-agent is not on PATH; brew install avalanche-io/tap/c4 installs it beside c4 farm")
+			return errors.New("c4-agent is not on PATH; brew install mrjoshuak/tap/c4 installs it beside c4 farm")
 		}
 		bin = p
 	}
@@ -193,7 +193,7 @@ func (s *AgentService) fill() error {
 	if s.AgentBin == "" {
 		p, err := exec.LookPath("c4-agent")
 		if err != nil {
-			return errors.New("c4-agent is not on PATH; brew install avalanche-io/tap/c4 installs it beside c4 farm")
+			return errors.New("c4-agent is not on PATH; brew install mrjoshuak/tap/c4 installs it beside c4 farm")
 		}
 		if s.AgentBin, err = filepath.Abs(p); err != nil {
 			return err

@@ -918,7 +918,7 @@ func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx conte
 	return func(ctx context.Context, o farmcli.Out) error {
 		bin, err := exec.LookPath("c4-agent")
 		if err != nil {
-			return errors.New("this machine runs no agents yet: c4-agent is not on PATH (brew install avalanche-io/tap/c4 brings it; then c4 farm integrate claude on)")
+			return errors.New("this machine runs no agents yet: c4-agent is not on PATH (brew install mrjoshuak/tap/c4 brings it; then c4 farm integrate claude on)")
 		}
 		if bin, err = filepath.Abs(bin); err != nil {
 			return err
