@@ -261,6 +261,13 @@ func tokenExpiry(path string) time.Time {
 	return time.Unix(claims.Exp, 0)
 }
 
+// ExitEnrollAgain is c4-agent runner's exit status when its enrollment has
+// ended (ErrEnrollAgain), so a service can stop restarting it and say so.
+const ExitEnrollAgain = 78
+
+// errTokenRanOut is a farm token past its life, which cannot renew itself.
+var errTokenRanOut = errors.New("this machine's token for the farm ran out")
+
 // renewTokens keeps the runner's tokens fresh, when it has a tokens
 // folder: each is renewed once less than half its life is left, with the
 // farm token it holds. One that has run out cannot renew itself: the
@@ -278,7 +285,7 @@ func (r *Runner) renewTokens(ctx context.Context) error {
 		path := TokenFile(r.Tokens, t.file)
 		exp := tokenExpiry(path)
 		if t.file == "kube" && !exp.IsZero() && !exp.After(now) {
-			return fmt.Errorf("this machine's token for the farm ran out at %s: enroll it again (c4 farm up)", exp.Local().Format(time.DateTime))
+			return fmt.Errorf("%w at %s", errTokenRanOut, exp.Local().Format(time.DateTime))
 		}
 		if !exp.IsZero() && exp.Sub(now) > TokenLifetime/2 {
 			if due := exp.Add(-TokenLifetime / 2); due.Before(next) {

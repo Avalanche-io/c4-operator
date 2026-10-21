@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -518,5 +519,27 @@ func TestCLIUnregister(t *testing.T) {
 	}
 	if code, _, errs := runCLI(t, "", "unregister", "--name", "nobody"); code == 0 || !strings.Contains(errs, "no member named nobody") {
 		t.Errorf("an unknown name: %d %q", code, errs)
+	}
+}
+
+// A runner a service starts with the system's bare PATH finds its tools:
+// its own folder first, then the usual install folders that exist, each
+// once.
+func TestServicePath(t *testing.T) {
+	home := t.TempDir()
+	os.MkdirAll(filepath.Join(home, ".local", "bin"), 0o755)
+	t.Setenv("PATH", "/usr/bin:/bin")
+	servicePath(home)
+	parts := filepath.SplitList(os.Getenv("PATH"))
+	exe, _ := os.Executable()
+	if parts[0] != filepath.Dir(exe) {
+		t.Errorf("its own folder is not first: %v", parts)
+	}
+	if !slices.Contains(parts, filepath.Join(home, ".local", "bin")) || slices.Contains(parts, filepath.Join(home, ".claude", "local")) {
+		t.Errorf("install folders: %v", parts)
+	}
+	servicePath(home)
+	if again := filepath.SplitList(os.Getenv("PATH")); len(again) != len(parts) {
+		t.Errorf("a second call added folders again: %v", again)
 	}
 }

@@ -34,8 +34,10 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"syscall"
@@ -121,6 +123,8 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			return 4
 		case errors.Is(err, agent.ErrBusy):
 			return 5
+		case errors.Is(err, agent.ErrEnrollAgain):
+			return agent.ExitEnrollAgain
 		}
 		return 1
 	}
@@ -399,6 +403,10 @@ Exit codes: 3 running or already has a session, 4 a copy was started, 5 still bu
 // runRunner runs the host runner against the cluster in the current
 // kubeconfig.
 func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []string, out io.Writer) error {
+	servicePath(os.Getenv("HOME"))
+	if _, err := exec.LookPath(agent.NewCLI().Path); err != nil {
+		return fmt.Errorf("runner: claude is not on the PATH (%s); set C4_AGENT_CLAUDE to it", os.Getenv("PATH"))
+	}
 	dir := agent.RunnerDir(h.Store.Dir)
 	enrolled, isEnrolled, err := agent.ReadEnrolled(dir)
 	if err != nil {
@@ -554,7 +562,40 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		r.Docs, r.Views, r.ViewSrc = up, up, src
 	}
 	fmt.Fprintf(out, "runner %s: %d slots, labels %v, the jobs of %s\n", *node, *slots, set, strings.Join(owners, ", "))
+	// a service stop sends SIGTERM: stop as for an interrupt, after the
+	// round in hand and a last heartbeat that offers no slots
+	ctx, stop := signal.NotifyContext(ctx, syscall.SIGTERM)
+	defer stop()
 	return r.Run(ctx, *every)
+}
+
+// servicePath adds to PATH the folders claude, git and c4's own tools are
+// installed in, for a runner a service started (launchd, systemd) with the
+// system's bare PATH: this binary's own folder first, then the usual install
+// folders after what is there, each only if it exists and is not there
+// already.
+func servicePath(home string) {
+	have := filepath.SplitList(os.Getenv("PATH"))
+	add := func(d string, first bool) {
+		if d == "" || slices.Contains(have, d) {
+			return
+		}
+		if info, err := os.Stat(d); err != nil || !info.IsDir() {
+			return
+		}
+		if first {
+			have = append([]string{d}, have...)
+		} else {
+			have = append(have, d)
+		}
+	}
+	if exe, err := os.Executable(); err == nil {
+		add(filepath.Dir(exe), true)
+	}
+	for _, d := range []string{filepath.Join(home, ".local", "bin"), filepath.Join(home, ".claude", "local"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"} {
+		add(d, false)
+	}
+	os.Setenv("PATH", strings.Join(have, string(os.PathListSeparator)))
 }
 
 // defaultNode is the Node name a machine runs as unless told otherwise.

@@ -88,6 +88,7 @@ type Runner struct {
 	// from the environment trees in EnvSources (blockenv.go); unset, they
 	// run in the CLI's default one.
 	BlocksEnv, EnvSources string
+	stopping              bool
 	trustAsked            bool
 	baseEnv               string
 	blockEnvs             map[types.UID]string
@@ -180,18 +181,51 @@ func (r *Runner) now() time.Time {
 }
 
 // Run ticks until ctx ends.
+//
+// It returns when ctx ends, after a last heartbeat that offers no slots, so
+// the farm binds nothing more to a machine whose runner stopped; or with
+// ErrEnrollAgain once the farm has refused the machine's token for
+// RefusedTicks rounds in a row, or its farm token has run out.
 func (r *Runner) Run(ctx context.Context, every time.Duration) error {
+	refused := 0
 	for {
-		if err := r.Tick(ctx); err != nil {
+		err := r.Tick(ctx)
+		switch {
+		case errors.Is(err, errTokenRanOut):
+			return fmt.Errorf("%w: %v", ErrEnrollAgain, err)
+		case apierrors.IsUnauthorized(err):
+			if refused++; refused >= RefusedTicks {
+				return fmt.Errorf("%w: the farm has refused this machine's token %d times in a row: %v", ErrEnrollAgain, refused, err)
+			}
+		default:
+			refused = 0
+		}
+		if err != nil {
 			r.logf("tick: %v", err)
 		}
 		select {
 		case <-ctx.Done():
+			r.stopping = true
+			last, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if err := r.heartbeat(last); err != nil {
+				r.logf("stopping: its last heartbeat: %v", err)
+			}
+			cancel()
 			return nil
 		case <-time.After(every):
 		}
 	}
 }
+
+// ErrEnrollAgain is a runner's end when the farm no longer takes its
+// machine's token: the enrollment lapsed or was revoked, and only
+// enrolling the machine again (c4 farm up) mends it.
+var ErrEnrollAgain = errors.New("this machine's enrollment has ended: enroll it again (c4 farm up)")
+
+// RefusedTicks is how many rounds in a row the farm must refuse the
+// machine's token before the runner gives up on it, so one refusal while
+// the API server restarts is not taken for a lapsed enrollment.
+const RefusedTicks = 3
 
 // Tick does one round: the node's heartbeat, binding, and each pod.
 func (r *Runner) Tick(ctx context.Context) error {
@@ -213,7 +247,9 @@ func (r *Runner) Tick(ctx context.Context) error {
 	if r.limitRead == nil {
 		r.limitRead = map[string]int64{}
 	}
-	if err := r.renewTokens(ctx); err != nil && err.Error() != r.tokensErr {
+	if err := r.renewTokens(ctx); errors.Is(err, errTokenRanOut) {
+		return err
+	} else if err != nil && err.Error() != r.tokensErr {
 		r.tokensErr = err.Error()
 		r.logf("its tokens: %v", err)
 	} else if err == nil {
@@ -757,6 +793,9 @@ func (r *Runner) capacity(ctx context.Context, n *corev1.Node) error {
 	if r.Capacity != nil {
 		slots, reason = r.Capacity()
 		slots = max(0, min(slots, r.Slots))
+	}
+	if r.stopping {
+		slots, reason = 0, "its runner stopped"
 	}
 	if held, why := r.limitHold(); held {
 		slots, reason = 0, why

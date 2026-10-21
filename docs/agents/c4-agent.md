@@ -283,6 +283,18 @@ itself, renewing each at half its 7-day life: `kube` for the farm's API,
 `signer` for the certificate issuer (`--signer`, likewise). A machine left
 off longer than a token's life says to enroll it again.
 
+**As a service.** A runner a service starts (launchd, systemd) gets the
+system's bare PATH, so it adds its own folder and the usual install
+folders (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`) before it
+looks for `claude`, and refuses to start, saying so, when `claude` is
+still not found (`C4_AGENT_CLAUDE` names it). A service stop (SIGTERM)
+stops it as an interrupt does, after the round in hand, with a last
+heartbeat that offers no slots ("its runner stopped"), so the farm binds
+nothing more to the machine. When the farm refuses the machine's token
+three rounds in a row, or its farm token has run out, the runner ends with
+exit status 78 and "this machine's enrollment has ended: enroll it again
+(c4 farm up)", for the service to stop restarting it and say so.
+
 - It registers a Node for the machine, labeled `c4.avalanche.io/host=<node>`
   and tainted `c4.avalanche.io/host-runner` so only agent pods land there.
   It keeps the Node and its Lease fresh.
