@@ -183,6 +183,14 @@ licences yet: the farm cannot count seats today, and refuses a tool that
 asks for them. Their tests need a route to the studio's licence server, so
 on a farm without one they fail at publish until licences arrive.
 
+What the tool scripts share (the unit's frames from `C4_FRAMES` or
+`C4_FRAME_START`/`END`/`STEP`, the farm's path map in `C4_PATH_MAP`, the
+`c4_frame`, `c4_fail` and `openjd_progress` lines, and which frames a
+render has finished) is one file, `toolkit/c4tool.py`, standard library
+only. A published tool is one folder, so each tool folder that uses it
+carries a copy beside its script. Change the source, then copy it into
+each of them; a test in `toolkit/tests/` fails while any copy differs.
+
 ## Writing a panel for another DCC
 
 A panel is a `c4submit.host.Host` (what the scene is: its file, frame

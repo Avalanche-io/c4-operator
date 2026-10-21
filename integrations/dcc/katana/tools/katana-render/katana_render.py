@@ -30,7 +30,6 @@ is rendered as one batch per run of evenly spaced frames. Everything but
 
 import argparse
 import gzip
-import json
 import os
 import re
 import shutil
@@ -38,68 +37,24 @@ import subprocess
 import sys
 import tempfile
 import time
-from typing import Callable, Dict, Iterable, List, Mapping, Optional, Tuple
+from typing import Callable, List, Mapping, Optional, Tuple
+
+# c4tool.py, beside this script, is a copy of integrations/dcc/toolkit/c4tool.py.
+_HERE = os.path.dirname(os.path.abspath(globals().get("__file__") or sys.argv[0]))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+import c4tool  # noqa: E402
+from c4tool import fail, parse_frames, read_path_map, runs, unit_frames  # noqa: E402,F401
 
 #: Image files a render writes.
 IMAGE_EXTENSIONS = (".exr", ".tif", ".tiff", ".png", ".jpg", ".jpeg", ".dpx", ".tga", ".hdr", ".deepexr")
-#: A path to an image in a log line: absolute, ending in an image extension.
-_IMAGE_IN_LINE = re.compile(r"((?:[A-Za-z]:)?[\\/][^\s'\"`<>|]*?\.(?:" +
-                            "|".join(e[1:] for e in IMAGE_EXTENSIONS) + r"))(?=[\s'\"`]|$)", re.I)
-_LAST_NUMBER = re.compile(r"(\d+)(?=\D*$)")
+#: Which files are images, and the frame each holds.
+IMAGES = c4tool.Images(IMAGE_EXTENSIONS)
+image_paths, frame_of, new_images = IMAGES.paths, IMAGES.frame_of, IMAGES.new
 
 
 # --- the unit's frames ------------------------------------------------------------
-
-def parse_frames(label: str) -> List[int]:
-    """A frame list as the farm writes it: ``1001``, ``1001-1004``,
-    ``1001-1010:2`` (or ``x2``), and lists of those joined by commas."""
-    out: List[int] = []
-    for part in (label or "").replace(" ", "").split(","):
-        if not part:
-            continue
-        m = re.fullmatch(r"(-?\d+)(?:-(-?\d+)(?:[:x](\d+))?)?", part)
-        if not m:
-            raise ValueError(f"the frames {label!r} do not read ({part!r})")
-        first = int(m.group(1))
-        last = int(m.group(2)) if m.group(2) is not None else first
-        step = int(m.group(3) or 1)
-        if last < first or step < 1:
-            raise ValueError(f"the frames {label!r} do not read ({part!r})")
-        out += [f for f in range(first, last + 1, step) if f not in out]
-    return out
-
-
-def unit_frames(env: Mapping[str, str]) -> List[int]:
-    """This unit's frames: ``C4_FRAMES`` when it is a list, else
-    ``C4_FRAME_START`` to ``C4_FRAME_END`` by ``C4_FRAME_STEP``."""
-    label = env.get("C4_FRAMES", "")
-    if "," in label:
-        return parse_frames(label)
-    start = env.get("C4_FRAME_START", "")
-    if not start:
-        return parse_frames(label)
-    end = env.get("C4_FRAME_END") or start
-    step = env.get("C4_FRAME_STEP") or "1"
-    return parse_frames(f"{start}-{end}:{step}")
-
-
-def runs(frames: List[int]) -> List[Tuple[int, int, int]]:
-    """Frames as (start, end, step) runs, each one batch render."""
-    out: List[Tuple[int, int, int]] = []
-    fs = sorted(set(frames))
-    i = 0
-    while i < len(fs):
-        if i + 1 == len(fs):
-            out.append((fs[i], fs[i], 1))
-            break
-        step = fs[i + 1] - fs[i]
-        j = i + 1
-        while j + 1 < len(fs) and fs[j + 1] - fs[j] == step:
-            j += 1
-        out.append((fs[i], fs[j], step))
-        i = j + 1
-    return out
-
 
 def katana_frames(run: Tuple[int, int, int]) -> str:
     """A run as Katana's ``-t`` takes it: ``1001-1004``, ``1001``, or each
@@ -113,18 +68,6 @@ def katana_frames(run: Tuple[int, int, int]) -> str:
 
 
 # --- the farm's path map (OpenJD pathmapping-1.0) -----------------------------------------
-
-def read_path_map(path: str) -> List[Tuple[str, str, str]]:
-    """(format, source, destination) for each rule in the file
-    ``C4_PATH_MAP`` names, longest source first; [] with no file."""
-    if not path:
-        return []
-    with open(path, encoding="utf-8") as f:
-        doc = json.load(f)
-    rules = [(r.get("source_path_format", "POSIX").upper(), r["source_path"], r["destination_path"])
-             for r in doc.get("path_mapping_rules") or []]
-    return sorted(rules, key=lambda r: -len(r[1]))
-
 
 def map_text(text: str, rules: List[Tuple[str, str, str]]) -> str:
     """A project's text with each source root the farm's: a root followed
@@ -189,97 +132,7 @@ def build_command(katana: str, script: str, out: str) -> List[str]:
     return [katana, f"--script={script}", out]
 
 
-# --- which frames are finished -----------------------------------------------------------------
-
-def image_paths(line: str) -> List[str]:
-    """The image files a log line names."""
-    return [m.group(1) for m in _IMAGE_IN_LINE.finditer(line)]
-
-
-def frame_of(path: str) -> Optional[int]:
-    """A frame's number from its file's name: the last number before the extension."""
-    stem = os.path.basename(path)
-    for ext in IMAGE_EXTENSIONS:
-        if stem.lower().endswith(ext):
-            stem = stem[:-len(ext)]
-            break
-    m = _LAST_NUMBER.search(stem)
-    return int(m.group(1)) if m else None
-
-
-def new_images(top: str, since: float, frames: Iterable[int]) -> Dict[int, str]:
-    """Image files under ``top`` written since ``since``, by frame, for
-    the frames given: the first by name when a frame has several (its AOVs)."""
-    want, out = set(frames), {}
-    if not top or not os.path.isdir(top):
-        return out
-    for d, dirs, names in os.walk(top):
-        dirs[:] = sorted(x for x in dirs if x != ".c4")
-        for name in sorted(names):
-            if not name.lower().endswith(IMAGE_EXTENSIONS):
-                continue
-            f = frame_of(name)
-            if f not in want or f in out:
-                continue
-            p = os.path.join(d, name)
-            try:
-                if os.path.getmtime(p) >= since:
-                    out[f] = p
-            except OSError:
-                continue
-    return out
-
-
-class Finished:
-    """Reports frames as they finish. A batch render goes through its
-    frames in order, so a file for one frame means every earlier frame
-    with a file is done. Only files written during this run count, so a
-    texture the log names is never taken for a frame."""
-
-    def __init__(self, frames: List[int], since: float, say: Callable[[str], None]):
-        self.frames, self.since, self.say = list(frames), since, say
-        self.files: Dict[int, str] = {}
-        self.done: List[int] = []
-
-    def _new(self, path: str) -> bool:
-        try:
-            return os.path.getmtime(path) >= self.since
-        except OSError:
-            return True   # not there yet: being written; checked again when reported
-
-    def saw(self, path: str) -> None:
-        f = frame_of(path)
-        if f not in self.frames or not self._new(path):
-            return
-        self.files.setdefault(f, path)
-        for g in self.frames:
-            if g < f and g in self.files:
-                self.report(g)
-
-    def report(self, frame: int) -> None:
-        if frame in self.done or not os.path.isfile(self.files.get(frame, "")):
-            return
-        self.done.append(frame)
-        self.say(f"c4_frame: {frame} {self.files[frame]}")
-        self.say(f"openjd_progress: {round(100 * len(self.done) / len(self.frames))}")
-
-    def finish(self, found: Mapping[int, str]) -> List[int]:
-        """Report the rest, from the files found after the run; the frames
-        still without a file."""
-        for f in self.frames:
-            if f not in self.files or not os.path.isfile(self.files[f]):
-                if f in found:
-                    self.files[f] = found[f]
-            self.report(f)
-        return [f for f in self.frames if f not in self.done]
-
-
 # --- the render ---------------------------------------------------------------------------------
-
-def fail(say: Callable[[str], None], kind: str, reason: str) -> int:
-    say(f"c4_fail: {kind} {reason}")
-    return 2 if kind == "permanent" else 1
-
 
 def parse_args(argv: List[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(prog="katana_render.py")
@@ -289,20 +142,9 @@ def parse_args(argv: List[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-def _stream(popen, cmd, env, cwd, say, on_line=None) -> int:
-    proc = popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env, cwd=cwd,
-                 universal_newlines=True, errors="replace")
-    for line in proc.stdout:
-        line = line.rstrip("\n")
-        say(line)
-        if on_line:
-            on_line(line)
-    return proc.wait()
-
-
 def main(argv: List[str], env: Mapping[str, str], say: Optional[Callable[[str], None]] = None,
          popen=subprocess.Popen, clock: Callable[[], float] = time.time) -> int:
-    say = say or (lambda line: print(line, flush=True))
+    say = say or c4tool.say
     try:
         a = parse_args(argv)
     except SystemExit:
@@ -336,7 +178,7 @@ def main(argv: List[str], env: Mapping[str, str], say: Optional[Callable[[str], 
             scratch = tempfile.mkdtemp(prefix="c4-katana-")
             built = os.path.join(scratch, "project.katana")
             say(f"openjd_status: building the project with {os.path.basename(project)}")
-            code = _stream(popen, build_command(katana, project, built), child_env, cwd, say)
+            code = c4tool.stream(popen, build_command(katana, project, built), child_env, cwd, say)
             if code != 0 or not os.path.isfile(built):
                 return fail(say, "permanent", f"{os.path.basename(project)} did not build a project (exit {code})")
             project = built
@@ -346,14 +188,10 @@ def main(argv: List[str], env: Mapping[str, str], say: Optional[Callable[[str], 
 
         say(f"openjd_status: rendering {a.node}, frames {frames[0]}-{frames[-1]}")
         since = clock() - 1
-        done = Finished(frames, since, say)
-
-        def on_line(line: str) -> None:
-            for p in image_paths(line):
-                done.saw(p)
-
+        done = c4tool.Finished(frames, since, say, IMAGES)
         for run in runs(frames):
-            code = _stream(popen, batch_command(katana, project, a.node, run, a.threads), child_env, cwd, say, on_line)
+            code = c4tool.stream(popen, batch_command(katana, project, a.node, run, a.threads), child_env, cwd, say,
+                                 done.saw_line)
             if code != 0:
                 return fail(say, "retry", f"katana --batch exited {code} on frames {katana_frames(run)}")
         missing = done.finish(new_images(top, since, frames))

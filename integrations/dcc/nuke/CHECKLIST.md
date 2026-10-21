@@ -225,6 +225,9 @@ tools/nuke-render` runs the tool's test as a unit runs it.
    **[guess]** that `-t` takes a render licence (`nuke_r`) as `-x` does,
    not an interactive one; check the licence server's log. **[guess]**
    that `-m` sets the threads `nuke.execute` uses.
+   **[guess]** that the script finds `c4tool.py` beside it under `-t`
+   (from `__file__`, else `sys.argv[0]`). **Expect:** no
+   `ModuleNotFoundError: c4tool` in the log.
 3. **One Write, frame by frame.** **[guess]** that `nuke.scriptOpen(path)`
    opens the script without a dialog, and `nuke.execute(write, f, f, 1)`
    renders that Write alone, as `-X` does. **Expect:** the other Writes

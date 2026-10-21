@@ -19,11 +19,18 @@ nothing here parses Nuke's own frame syntax. Everything but ``main`` is
 plain Python, tested without Nuke.
 """
 
-import json
 import os
 import re
 import sys
-from typing import Callable, List, Mapping, Optional, Tuple
+from typing import Callable, List, Mapping, Optional
+
+# c4tool.py, beside this script, is a copy of integrations/dcc/toolkit/c4tool.py.
+_HERE = os.path.dirname(os.path.abspath(globals().get("__file__") or sys.argv[0]))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+import c4tool  # noqa: E402
+from c4tool import fail, map_path, parse_frames, read_path_map, unit_frames  # noqa: E402,F401
 
 #: The node classes that write files (the panel's renderables).
 WRITE_CLASSES = ("Write", "DeepWrite", "WriteGeo")
@@ -33,74 +40,6 @@ MISSING_INPUT = re.compile(r"No such file or directory|Read error|file not found
 
 _HASHES = re.compile(r"#+")
 _PRINTF = re.compile(r"%(0?)(\d*)d")
-
-
-# --- the unit's frames ------------------------------------------------------------
-
-def parse_frames(label: str) -> List[int]:
-    """A frame list as the farm writes it: ``1001``, ``1001-1004``,
-    ``1001-1010:2`` (or ``x2``), and lists of those joined by commas."""
-    out: List[int] = []
-    for part in (label or "").replace(" ", "").split(","):
-        if not part:
-            continue
-        m = re.fullmatch(r"(-?\d+)(?:-(-?\d+)(?:[:x](\d+))?)?", part)
-        if not m:
-            raise ValueError(f"the frames {label!r} do not read ({part!r})")
-        first = int(m.group(1))
-        last = int(m.group(2)) if m.group(2) is not None else first
-        step = int(m.group(3) or 1)
-        if last < first or step < 1:
-            raise ValueError(f"the frames {label!r} do not read ({part!r})")
-        out += [f for f in range(first, last + 1, step) if f not in out]
-    return out
-
-
-def unit_frames(env: Mapping[str, str]) -> List[int]:
-    """This unit's frames: ``C4_FRAMES`` when it is a list, else
-    ``C4_FRAME_START`` to ``C4_FRAME_END`` by ``C4_FRAME_STEP``."""
-    label = env.get("C4_FRAMES", "")
-    if "," in label:
-        return parse_frames(label)
-    start = env.get("C4_FRAME_START", "")
-    if not start:
-        return parse_frames(label)
-    end = env.get("C4_FRAME_END") or start
-    step = env.get("C4_FRAME_STEP") or "1"
-    return parse_frames(f"{start}-{end}:{step}")
-
-
-# --- the farm's path map (OpenJD pathmapping-1.0) -----------------------------------------
-
-def read_path_map(path: str) -> List[Tuple[str, str, str]]:
-    """(format, source, destination) for each rule in the file
-    ``C4_PATH_MAP`` names, longest source first; [] with no file."""
-    if not path:
-        return []
-    with open(path, encoding="utf-8") as f:
-        doc = json.load(f)
-    rules = [(r.get("source_path_format", "POSIX").upper(), r["source_path"], r["destination_path"])
-             for r in doc.get("path_mapping_rules") or []]
-    return sorted(rules, key=lambda r: -len(r[1]))
-
-
-def map_path(path: str, rules: List[Tuple[str, str, str]]) -> str:
-    """A path from the artist's machine as it is on the farm. A Windows
-    source matches whichever way its slashes lean and in any case."""
-    if not path or not rules:
-        return path
-    for fmt, src, dst in rules:
-        if path.startswith(dst.rstrip("/") + "/") or path == dst:
-            return path   # already the farm's
-        if fmt == "WINDOWS":
-            p, s = path.replace("\\", "/"), src.replace("\\", "/").rstrip("/")
-            if p.lower() == s.lower() or p.lower().startswith(s.lower() + "/"):
-                return dst.rstrip("/") + p[len(s):]
-            continue
-        s = src.rstrip("/")
-        if path == s or path.startswith(s + "/"):
-            return dst.rstrip("/") + path[len(s):]
-    return path
 
 
 # --- a frame's file -----------------------------------------------------------------------
@@ -130,11 +69,6 @@ def as_bool(value: str) -> bool:
 
 
 # --- the render ---------------------------------------------------------------------------------
-
-def fail(say: Callable[[str], None], kind: str, reason: str) -> int:
-    say(f"c4_fail: {kind} {reason}")
-    return 2 if kind == "permanent" else 1
-
 
 def _knob_value(node, name: str, default=None):
     try:
@@ -197,13 +131,12 @@ def render(nuke, script: str, write_name: str, proxy: bool, frames: List[int], r
         missing = [f for f in files if not os.path.isfile(f)]
         if missing:
             return fail(say, "retry", f"Nuke rendered frame {frame} but did not write {missing[0]}")
-        say(f"c4_frame: {frame} {files[0]}")
-        say(f"openjd_progress: {round(100 * (i + 1) / len(frames))}")
+        c4tool.frame_done(say, frame, files[0], i + 1, len(frames))
     return 0
 
 
 def main(argv: List[str], env: Mapping[str, str], nuke=None, say: Optional[Callable[[str], None]] = None) -> int:
-    say = say or (lambda line: print(line, flush=True))
+    say = say or c4tool.say
     if len(argv) < 2:
         return fail(say, "permanent", "usage: nuke -t nuke_render.py SCRIPT WRITE [PROXY]")
     script, write_name = argv[0], argv[1]
