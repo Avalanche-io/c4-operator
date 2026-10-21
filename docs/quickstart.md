@@ -68,6 +68,7 @@ claude    has the farm's tools (c4-farm in ~/.claude.json); c4 farm integrate of
 agents    this machine (c4-host-laptop) runs sam's agents, agent pool, while the battery allows; a background service keeps it going (c4 farm agent stop removes it)
 HUD       http://127.0.0.1:30080/?as=sam#/needs
 roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)
+time      up in 1m4s: cluster 41s, operator 12s, store 6s, tools 4s
 ```
 
 Saying no, or `c4 farm up --no-integrate`, adds nothing to Claude Code or
