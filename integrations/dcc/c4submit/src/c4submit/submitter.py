@@ -280,8 +280,20 @@ def prepare(draft: Draft) -> Prepared:
                     override[p.name] = v
         values = draft.form.values(override)
         for p in tool.params:
-            err = p.check(values.get(p.name, p.default))
-            if err:
+            v = values.get(p.name, p.default)
+            err = p.check(v)
+            if not err:
+                continue
+            # In the farm's words, which a panel shows before the farm is asked.
+            if p.required and (v is None or v == "" or v == []):
+                problems.append(Problem("error", f"jobs.{key}.with", f"{tool.name} needs {p.name} ({p.label})",
+                                        f"fill in {p.label}"))
+            elif p.allowed is not None and err.startswith("must be one of"):
+                near = submission._did_you_mean(str(v), [str(a) for a in p.allowed])
+                problems.append(Problem("error", f"jobs.{key}.with.{p.name}",
+                                        f'"{v}" is not one of ' + ", ".join(str(a) for a in p.allowed),
+                                        near or "choose one of them"))
+            else:
                 problems.append(Problem("error", f"jobs.{key}.with.{p.name}", f"{p.label}: {err}"))
         for p in tool.params:
             if p.type != "PATH" or p.name not in values:

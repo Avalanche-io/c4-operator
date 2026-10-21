@@ -5,13 +5,13 @@ submit to any render queue: pick what to render, check the frames, say when
 it is needed, see when it will be ready, press Submit. No terminal, and no
 Kubernetes anywhere.
 
-| folder      | what                                                                                   |
-| ----------- | -------------------------------------------------------------------------------------- |
+| folder      | what                                                                                  |
+| ----------- | ------------------------------------------------------------------------------------- |
 | `c4submit/` | the shared Python library every panel uses (standard library only, Python 3.9 and up) |
-| `nuke/`     | the Nuke panel: each Write node is a job                                               |
-| `houdini/`  | the Solaris C4 Render LOP and the C4 Submit ROP                                        |
-| `maya/`     | the Maya window: each renderable render layer is a job                                 |
-| `blender/`  | the Blender add-on: a C4 Farm panel in Render Properties; each view layer is a job     |
+| `nuke/`     | the Nuke panel: each Write node is a job                                              |
+| `houdini/`  | the Solaris C4 Render LOP and the C4 Submit ROP                                       |
+| `maya/`     | the Maya window: each renderable render layer is a job                                |
+| `blender/`  | the Blender add-on: a C4 Farm panel in Render Properties; each view layer is a job    |
 
 Each panel has a `README.md` (install and use) and a `CHECKLIST.md` (what to
 check by hand in the real application). Their tests run against fakes of
@@ -65,18 +65,23 @@ In short:
 
 ## Configuration
 
-| variable                              | meaning                                                                                       |
-| ------------------------------------- | --------------------------------------------------------------------------------------------- |
-| `C4_HUD`                              | the farm's HUD URL                                                                            |
-| `C4_HUD_TOKEN_FILE` or `C4_HUD_TOKEN` | your sign-in token (the file is reread on every request)                                      |
-| `C4_PROJECT`                          | the project                                                                                   |
+| variable                              | meaning                                                                                                                                                                          |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `C4_HUD`                              | the farm's HUD URL                                                                                                                                                               |
+| `C4_HUD_TOKEN_FILE` or `C4_HUD_TOKEN` | your sign-in token (the file is reread on every request)                                                                                                                         |
+| `C4_HUD_AS`                           | a development viewer, for a local farm made with `c4 farm up` (a studio's farm refuses it)                                                                                       |
+| `C4_PROJECT`                          | the project                                                                                                                                                                      |
 | `C4_ROOT`                             | the folder on this machine that is the top of the project's tree (the farm mounts it as `/show` or the project's root path); default the project's root path when it exists here |
-| `C4_SHOT`, or `SHOT`                  | the shot                                                                                      |
-| `C4_SHOT_PATTERN`                     | a regular expression with a `shot` group, matched against the scene's path, when no variable names the shot |
-| `C4_TOOL_PATH`                        | folders of tool folders (`<name>/tool.yaml`) a panel offers when the farm does not list tools yet, so it can still draw its form and save the file |
-| `C4SUBMIT_CACHE`                      | where file IDs are cached (default `~/.cache/c4submit/ids.json`)                              |
+| `C4_SHOT`, or `SHOT`                  | the shot                                                                                                                                                                         |
+| `C4_SHOT_PATTERN`                     | a regular expression with a `shot` group, matched against the scene's path, when no variable names the shot                                                                      |
+| `C4_TOOL_PATH`                        | folders of tool folders (`<name>/tool.yaml`) a panel offers when the farm does not list tools yet, so it can still draw its form and save the file                               |
+| `C4SUBMIT_CACHE`                      | where file IDs are cached (default `~/.cache/c4submit/ids.json`)                                                                                                                 |
 
 A studio sets these in its launcher, as it does for other pipeline tools.
+Without `C4_HUD`, a panel talks to the farm `c4 farm` does: the current
+farm in `~/.c4/farm.yaml` (or `C4_FARM_CONFIG`; `C4_FARM` picks another),
+with its sign-in and its default project. So an artist who has run
+`c4 farm login` or `c4 farm up` sets nothing more.
 
 ## Writing a panel for another DCC
 

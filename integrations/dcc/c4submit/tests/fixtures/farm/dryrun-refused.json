@@ -1,0 +1,32 @@
+{
+ "recorded": "the same farm, a refused dry run",
+ "request": {
+  "c4": "submit/1",
+  "project": "saltmarsh",
+  "shot": "sm0140",
+  "due": "+3h",
+  "tree": "c44PDZEaQ1XHq9wWGHAYQcsQ53HVw5Sy3uFwKGF4oyRYQRuLuTWmKP6WSycpP1TmcPmb7ZFvDSxZw9tcKvksZL6vxh",
+  "jobs": {
+   "comp": {
+    "tool": "comp",
+    "frames": "1001-1008",
+    "with": {
+     "script": "comp/x.nk",
+     "engine": "renderman"
+    }
+   }
+  }
+ },
+ "answer": {
+  "ok": false,
+  "dryRun": true,
+  "errors": [
+   {
+    "path": "jobs.comp.with.engine",
+    "message": "\"renderman\" is not one of auto, nuke, oiio",
+    "fix": "choose one of them"
+   }
+  ],
+  "submission": "c44W8fxD3AFbg97tL2F4B2kPG64XQvuWHzf6oB4KcsgExzpRxLGZ4M1y741tAgjjsoM7giY8LsVHmSUdich5vd1bMn"
+ }
+}

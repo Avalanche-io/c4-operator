@@ -32,8 +32,10 @@ class Line:
 def parse_time(s: str) -> Optional[datetime]:
     if not s:
         return None
+    # The farm writes nanoseconds; Python before 3.11 reads at most six digits.
+    s = re.sub(r"(\.\d{6})\d+", r"\1", s.replace("Z", "+00:00"))
     try:
-        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+        return datetime.fromisoformat(s)
     except ValueError:
         return None
 

@@ -1,0 +1,96 @@
+{
+ "recorded": "a local farm (c4 farm up) at c4-operator main 2026-10-20, POST /submissions dryRun",
+ "request": {
+  "c4": "submit/1",
+  "project": "saltmarsh",
+  "shot": "sm0140",
+  "due": "+3h",
+  "tree": "c44PDZEaQ1XHq9wWGHAYQcsQ53HVw5Sy3uFwKGF4oyRYQRuLuTWmKP6WSycpP1TmcPmb7ZFvDSxZw9tcKvksZL6vxh",
+  "jobs": {
+   "comp": {
+    "tool": "comp",
+    "frames": "1001-1008",
+    "with": {
+     "script": "comp/sm0140_comp_v004.nk"
+    }
+   },
+   "movie": {
+    "tool": "comp",
+    "after": "comp",
+    "frames": "1001-1008",
+    "with": {
+     "script": "comp/sm0140_comp_v004.nk"
+    }
+   }
+  }
+ },
+ "answer": {
+  "ok": true,
+  "dryRun": true,
+  "submission": "c45ZMokvTBHQDwWPzXjmLSDcYgMvnZ8A9DogR7z7ksZfG2rQwuHzqmJkbeaqCwebaUDsZ7MobkERXtCdGRFrMgSdzJ",
+  "jobs": [
+   {
+    "key": "comp",
+    "namespace": "saltmarsh",
+    "name": "sm0140-comp-v001",
+    "tool": "comp",
+    "version": "v2",
+    "what": "8 frames in 2 units",
+    "estimate": {
+     "units": 2,
+     "work50": 1.001,
+     "work90": 2.896830272,
+     "eta50": "2026-10-20T17:44:11.413833884-07:00",
+     "eta80": "2026-10-20T17:44:11.725460985-07:00",
+     "eta90": "2026-10-20T17:44:11.887791453-07:00",
+     "eta95": "2026-10-20T17:44:12.022906388-07:00",
+     "deadline": "2026-10-21T03:44:00Z",
+     "deadlineSource": "spec",
+     "slackSeconds": 10788,
+     "feasible": true,
+     "atRisk": false
+    },
+    "link": "#/job/saltmarsh/sm0140-comp-v001"
+   },
+   {
+    "key": "movie",
+    "namespace": "saltmarsh",
+    "name": "sm0140-movie-v001",
+    "tool": "comp",
+    "version": "v2",
+    "what": "8 frames in 2 units, after sm0140-comp-v001",
+    "estimate": {
+     "units": 2,
+     "work50": 1.001,
+     "work90": 2.896830272,
+     "eta50": "2026-10-20T17:44:11.413833884-07:00",
+     "eta80": "2026-10-20T17:44:11.725460985-07:00",
+     "eta90": "2026-10-20T17:44:11.887791453-07:00",
+     "eta95": "2026-10-20T17:44:12.022906388-07:00",
+     "deadline": "2026-10-21T03:44:00Z",
+     "deadlineSource": "spec",
+     "slackSeconds": 10788,
+     "feasible": true,
+     "atRisk": false
+    },
+    "after": [
+     "sm0140-comp-v001"
+    ],
+    "link": "#/job/saltmarsh/sm0140-movie-v001"
+   }
+  ],
+  "estimate": {
+   "eta50": "2026-10-20T17:44:11.413833884-07:00",
+   "eta90": "2026-10-20T17:44:11.887791453-07:00",
+   "deadline": "2026-10-21T03:44:00Z",
+   "slackSeconds": 10788,
+   "feasible": true,
+   "atRisk": false,
+   "jobs": 2
+  },
+  "warnings": [
+   "movie follows comp frame by frame; for now it waits for the whole of sm0140-comp-v001"
+  ],
+  "message": "sm0140-comp-v001, sm0140-movie-v001: planned, not submitted"
+ }
+}
