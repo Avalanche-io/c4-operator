@@ -47,9 +47,14 @@ type Server struct {
 	// (decide.standIn, whomay.go): "allow" lets a project choose; anything
 	// else denies.
 	StandIn string
-	Client  client.Client        // the manager's cached client
-	Kube    kubernetes.Interface // logs, events, token and access reviews, c4-system pods
-	Queue   Queue                // burst spend and deadline options (optional)
+	// SinglePerson names the installer of a single-person farm (a local
+	// farm, --single-person-farm), who holds every role there and so may
+	// decide a wait addressed to any of them (whomay.go). Empty on a
+	// shared farm.
+	SinglePerson string
+	Client       client.Client        // the manager's cached client
+	Kube         kubernetes.Interface // logs, events, token and access reviews, c4-system pods
+	Queue        Queue                // burst spend and deadline options (optional)
 	// Progress, when set, receives units' reported progress from each
 	// scrape of the node daemons, for the queue's estimates.
 	Progress *queue.ProgressCache

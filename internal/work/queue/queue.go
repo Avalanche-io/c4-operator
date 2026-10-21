@@ -7,6 +7,7 @@ package queue
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"math"
@@ -69,6 +70,13 @@ type Queue struct {
 	Loc *time.Location
 	// Signer signs the queue's decisions and job records; nil signs none.
 	Signer *provenance.Signer
+	// Roots are the farm's signing roots. Set, the queue carries out a
+	// person's control only on a signed record that vouches for it
+	// (controltrust.go); nil, as written.
+	Roots *x509.CertPool
+	// ctlChecked caches the control records read (controltrust.go).
+	ctlMu      sync.Mutex
+	ctlChecked map[string]checkedRecord
 	// PolicyName names the policy in decision records.
 	PolicyName string
 	// Placement (experimental) locates pools at sites and prices moving a
@@ -287,11 +295,14 @@ type jobMem struct {
 	withdrawn string
 	// asks are the questions units asked one another, and woken the ones
 	// a finished answerer was woken for (asks.go).
-	asks      []*askRec
-	woken     map[string]bool
-	acks      []*ackRecord
-	acked     string
-	decisions []decisionRecord
+	asks  []*askRec
+	woken map[string]bool
+	acks  []*ackRecord
+	acked string
+	// refusedControls are the control requests already reported as
+	// refused (controltrust.go), by annotation and token.
+	refusedControls map[string]bool
+	decisions       []decisionRecord
 	// waits are the job's wait units and escalated units, open and
 	// decided (wait.go).
 	waits *waitMem
@@ -771,16 +782,19 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			m.finPts, m.finLearned = nil, true
 		}
 	}
+	// What people asked for, carried out on its signed record only
+	// (controltrust.go).
+	ctl := q.trustedControls(ctx, v, now)
 	// People taking or accepting failed units.
-	applyAcks(j, m, len(plan.Units))
+	applyAcks(ctl, m, len(plan.Units))
 	// People deciding what waits for them (wait.go).
-	applyDecides(j, m, now)
+	applyDecides(ctl, m, now)
 	// People steering units while they run (steer.go).
-	applySteers(j, m)
+	applySteers(ctl, m)
 	// People supplying what units stopped for, or withdrawing the
 	// questions (needs.go).
-	q.applySupplies(ctx, v, now)
-	q.applyWithdraws(ctx, v, now)
+	q.applySupplies(ctx, v, ctl, now)
+	q.applyWithdraws(ctx, v, ctl, now)
 	// Nodes a person allowed again leave the automatic blacklist.
 	for _, n := range strings.Split(j.Annotations[c4v1.AnnotationAllowNodes], ",") {
 		if n = strings.TrimSpace(n); n != "" && m.blacklist[n] {

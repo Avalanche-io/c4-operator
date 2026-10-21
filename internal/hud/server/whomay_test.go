@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/Avalanche-io/c4"
@@ -165,6 +166,54 @@ func TestWhoMayDecide(t *testing.T) {
 	}
 	if p := record(out); p.Custody != CustodyStandIn || p.For != "person:dana" || p.Actor != "ines" {
 		t.Fatalf("stand-in record: %+v", p)
+	}
+
+	// On a single-person farm the installer plays every role: they decide
+	// a wait addressed to one of them, recorded for that role, by them.
+	// On a shared farm the same decision is refused.
+	rec.job.Status.Waits = append(rec.job.Status.Waits, c4v1.WorkWait{Unit: 6, Name: "triage", Server: "person:wrangler", Since: &since, Blocking: true})
+	reset()
+	setPolicy("", "")
+	triage := `{"unit": "triage", "do": "approve"}`
+	if code, out := post("artist", "decide", triage, false); code != http.StatusForbidden {
+		t.Fatalf("maya decides the wrangler's wait on a shared farm: %d %v", code, out)
+	}
+	s.SinglePerson = "maya"
+	code, out = post("artist", "decide", triage, false)
+	if code != http.StatusOK {
+		t.Fatalf("the installer decides on a local farm: %d %v", code, out)
+	}
+	if p := record(out); p.Custody != CustodyStandIn || p.For != "role:wrangler" || p.Actor != "maya" {
+		t.Fatalf("local farm record: %+v", p)
+	}
+	if code, out := post("wrangler", "decide", `{"unit": "ruling", "do": "approve"}`, false); code != http.StatusOK {
+		t.Fatalf("dana still decides her own: %d %v", code, out)
+	}
+	s.SinglePerson = ""
+	reset()
+	setPolicy("allow", "allow")
+	if code, out := post("admin", "decide", ruling, false); code != http.StatusOK {
+		t.Fatalf("stand-in again: %d %v", code, out)
+	}
+
+	// Each request names its record, and the record its request's token,
+	// which is what the queue checks before carrying it out.
+	if code, out := post("wrangler", "ack", `{"units": "7", "kind": "acknowledge"}`, false); code != http.StatusOK {
+		t.Fatalf("ack: %d %v", code, out)
+	}
+	var live c4v1.WorkJob
+	if err := s.Client.Get(ctx, client.ObjectKey{Namespace: "show-a", Name: "sh040-light-v007"}, &live); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{c4v1.AnnotationDecide, c4v1.AnnotationAcks} {
+		var reqs []struct{ Token, Record string }
+		if err := json.Unmarshal([]byte(live.Annotations[key]), &reqs); err != nil || len(reqs) != 1 || reqs[0].Record == "" {
+			t.Fatalf("%s: %v %s", key, err, live.Annotations[key])
+		}
+		p := record(map[string]any{"record": reqs[0].Record})
+		if req, _ := p.Change.(map[string]any)["request"].(map[string]any); req["token"] != reqs[0].Token {
+			t.Errorf("%s: the record names token %v, the request %s", key, req["token"], reqs[0].Token)
+		}
 	}
 }
 

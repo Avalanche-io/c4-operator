@@ -653,7 +653,13 @@ credentials.
   create or update (`config/policy/workjob-controls.yaml`). The HUD, and MCP
   and `c4 farm` through it, is therefore the one place a control enters the
   farm: it checks who may give it, signs it and books it. Patch rights on a
-  WorkJob alone cannot decide a person's wait.
+  WorkJob alone cannot decide a person's wait. With signing on, the queue
+  also checks each acknowledgement, decision, steer, supply and withdrawal
+  against the record it names: signed by the HUD, for this job, with the
+  same action, actor, token and content. A request without one is left
+  undone and reported once as a `ControlRefused` Warning event on the job.
+  Requeue, allowing nodes and accepting a validated input carry no record of
+  their own yet; for those the admission policy is the guard.
 
 ### 6.3 Strict mode: no shared caches
 
@@ -1777,7 +1783,11 @@ and a sweep planner that spawns trials are all generators.
     `decide.standInBy` (`role:farm-admin` by default) may decide, signed
     with custody `stand-in` and `for: person:X`. The keys are read in one
     place (`decide.by`, `decide.byUnits`, `supply.by`, `withdraw.by`),
-    which a farm policy will set.
+    which a farm policy will set. A single-person farm (a local farm,
+    `--single-person-farm=<installer>`) is one person in every role: there
+    the installer decides a wait addressed to any role, signed as standing
+    in for it (`for: role:wrangler`, by the installer). It is a setting the
+    local farm makes, never inferred from where the HUD listens.
   - **Replies.** A wait with `reply: true` asks for content with its
     decision: a text, a file, an edited plan. The decision carries it as
     a view (`reply.view`, or `reply.text`, which the HUD stores as a view

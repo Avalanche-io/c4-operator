@@ -264,12 +264,18 @@ func (s *Server) handleNudge(w http.ResponseWriter, r *http.Request) {
 // record's ID in its annotation, records an Event and answers.
 func (s *Server) finishJobControl(w http.ResponseWriter, r *http.Request, v *api.Viewer, rec *jobRec, j *c4v1.WorkJob, patch client.Patch,
 	before, action, bookKind string, change any, reason, msg string) {
-	ctx := r.Context()
-	id, err := s.controlJob(ctx, r, v, rec, j, before, action, change)
+	id, err := s.controlJob(r.Context(), r, v, rec, j, before, action, change)
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
 		return
 	}
+	s.patchJobControl(w, r, v, rec, j, patch, id, bookKind, reason, msg)
+}
+
+// patchJobControl writes a signed control's change and records it.
+func (s *Server) patchJobControl(w http.ResponseWriter, r *http.Request, v *api.Viewer, rec *jobRec, j *c4v1.WorkJob, patch client.Patch,
+	id, bookKind, reason, msg string) {
+	ctx := r.Context()
 	if err := s.Client.Patch(ctx, j, patch); err != nil {
 		fail(w, http.StatusConflict, "%v", err)
 		return
@@ -415,12 +421,26 @@ func (s *Server) handleAck(w http.ResponseWriter, r *http.Request) {
 	if j.Annotations == nil {
 		j.Annotations = map[string]string{}
 	}
+	now := time.Now()
+	token := strconv.FormatInt(now.UnixNano(), 36)
+	units := order.EncodeSet(take)
+	change := map[string]any{"units": units, "kind": body.Kind, "token": token}
+	if body.Assignee != "" {
+		change["assignee"] = body.Assignee
+	}
+	if body.Note != "" {
+		change["note"] = body.Note
+	}
+	// Signed first, so the request names its record (controltrust.go).
+	id, err := s.controlJob(ctx, r, v, rec, j, before, body.Kind, change)
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
+		return
+	}
 	var reqs []c4v1.WorkAckRequest
 	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationAcks]), &reqs)
-	now := time.Now()
-	units := order.EncodeSet(take)
-	reqs = append(reqs, c4v1.WorkAckRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Kind: body.Kind, Units: units,
-		Actor: actorOf(r, v), Assignee: body.Assignee, Note: body.Note, At: metav1.Time{Time: now.UTC().Truncate(time.Second)}})
+	reqs = append(reqs, c4v1.WorkAckRequest{Token: token, Kind: body.Kind, Units: units,
+		Actor: actorOf(r, v), Assignee: body.Assignee, Note: body.Note, At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
 	if len(reqs) > 16 {
 		reqs = reqs[len(reqs)-16:]
 	}
@@ -435,14 +455,7 @@ func (s *Server) handleAck(w http.ResponseWriter, r *http.Request) {
 	default:
 		msg = fmt.Sprintf("%s: %d failed units taken by %s", j.Name, len(take), v.User)
 	}
-	change := map[string]any{"units": units, "kind": body.Kind}
-	if body.Assignee != "" {
-		change["assignee"] = body.Assignee
-	}
-	if body.Note != "" {
-		change["note"] = body.Note
-	}
-	s.finishJobControl(w, r, v, rec, j, patch, before, body.Kind, body.Kind, change, "Acknowledged", msg)
+	s.patchJobControl(w, r, v, rec, j, patch, id, body.Kind, "Acknowledged", msg)
 }
 
 func (s *Server) handleBlacklist(w http.ResponseWriter, r *http.Request) {
@@ -747,7 +760,10 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	if unit == "" {
 		unit = strconv.Itoa(int(wait.Unit))
 	}
-	change := map[string]any{"unit": unit, "do": body.Do, "waitsFor": wait.Server}
+	// The record names the request's token, so the queue carries out
+	// this request on it and no other (controltrust.go).
+	token := strconv.FormatInt(now.UnixNano(), 36)
+	change := map[string]any{"unit": unit, "do": body.Do, "waitsFor": wait.Server, "token": token}
 	if body.Note != "" {
 		change["note"] = body.Note
 	}
@@ -773,7 +789,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	var reqs []c4v1.WorkDecideRequest
 	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationDecide]), &reqs)
-	reqs = append(reqs, c4v1.WorkDecideRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Do: body.Do,
+	reqs = append(reqs, c4v1.WorkDecideRequest{Token: token, Unit: unit, Do: body.Do,
 		Note: body.Note, Actor: actor, At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id, View: reply})
 	if len(reqs) > 16 {
 		reqs = reqs[len(reqs)-16:]
@@ -912,14 +928,15 @@ func (s *Server) handleSteer(w http.ResponseWriter, r *http.Request) {
 	if unit == "" {
 		unit = strconv.Itoa(idx)
 	}
-	id, err := s.controlJob(ctx, r, v, rec, j, before, "steer", map[string]any{"unit": unit, "text": body.Text})
+	token := strconv.FormatInt(now.UnixNano(), 36)
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "steer", map[string]any{"unit": unit, "text": body.Text, "token": token})
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkSteerRequest
 	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationSteer]), &reqs)
-	reqs = append(reqs, c4v1.WorkSteerRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Text: body.Text,
+	reqs = append(reqs, c4v1.WorkSteerRequest{Token: token, Unit: unit, Text: body.Text,
 		Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
 	if len(reqs) > 16 {
 		reqs = reqs[len(reqs)-16:]
@@ -1020,14 +1037,15 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 	if unit == "" {
 		unit = strconv.Itoa(idx)
 	}
-	id, err := s.controlJob(ctx, r, v, rec, j, before, "supply", map[string]any{"unit": unit, "needed": need.Text, "text": body.Text})
+	token := strconv.FormatInt(now.UnixNano(), 36)
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "supply", map[string]any{"unit": unit, "needed": need.Text, "text": body.Text, "token": token})
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkSupplyRequest
 	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationSupply]), &reqs)
-	reqs = append(reqs, c4v1.WorkSupplyRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Text: body.Text,
+	reqs = append(reqs, c4v1.WorkSupplyRequest{Token: token, Unit: unit, Text: body.Text,
 		Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
 	if len(reqs) > 16 {
 		reqs = reqs[len(reqs)-16:]
@@ -1120,14 +1138,15 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 	if unit == "" {
 		unit = strconv.Itoa(idx)
 	}
-	id, err := s.controlJob(ctx, r, v, rec, j, before, "withdraw-needs", map[string]any{"unit": unit, "needed": need.Text, "why": body.Why})
+	token := strconv.FormatInt(now.UnixNano(), 36)
+	id, err := s.controlJob(ctx, r, v, rec, j, before, "withdraw-needs", map[string]any{"unit": unit, "needed": need.Text, "why": body.Why, "token": token})
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
 		return
 	}
 	var reqs []c4v1.WorkWithdrawRequest
 	_ = json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationWithdrawNeeds]), &reqs)
-	reqs = append(reqs, c4v1.WorkWithdrawRequest{Token: strconv.FormatInt(now.UnixNano(), 36), Unit: unit, Why: body.Why,
+	reqs = append(reqs, c4v1.WorkWithdrawRequest{Token: token, Unit: unit, Why: body.Why,
 		Actor: actorOf(r, v), At: metav1.Time{Time: now.UTC().Truncate(time.Second)}, Record: id})
 	if len(reqs) > 16 {
 		reqs = reqs[len(reqs)-16:]

@@ -182,8 +182,8 @@ func (m *jobMem) lastRecord(idx int) string {
 
 // applySupplies carries out the information people supplied, in token
 // order, each once: the unit that stopped for it runs again.
-func (q *Queue) applySupplies(ctx context.Context, v *view, now time.Time) {
-	j, m := v.job, v.mem
+func (q *Queue) applySupplies(ctx context.Context, v *view, ctl *c4v1.WorkJob, now time.Time) {
+	j, m := ctl, v.mem
 	a := j.Annotations[c4v1.AnnotationSupply]
 	if a == "" || m.plan == nil {
 		return
@@ -226,8 +226,8 @@ func (q *Queue) supplyNeeds(ctx context.Context, v *view, i int, text, by, contr
 
 // applyWithdraws carries out the lead's withdrawals of units' questions,
 // in token order, each once: the unit runs again without an answer.
-func (q *Queue) applyWithdraws(ctx context.Context, v *view, now time.Time) {
-	j, m := v.job, v.mem
+func (q *Queue) applyWithdraws(ctx context.Context, v *view, ctl *c4v1.WorkJob, now time.Time) {
+	j, m := ctl, v.mem
 	a := j.Annotations[c4v1.AnnotationWithdrawNeeds]
 	if a == "" || m.plan == nil {
 		return

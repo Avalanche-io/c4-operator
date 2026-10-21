@@ -92,6 +92,7 @@ func runManager(args []string) error {
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name[@role]=project|project;... (* for all projects; a name that is a role, such as wrangler, has that role)")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD)")
 	hudRoles := fs.String("hud-role-groups", "", "the studio's groups and the HUD roles they start their members at, as group=role,... (roles: artist, supervisor, producer, wrangler, farm-admin, facilities, pipeline-td); groups named c4:role:<role> need no entry")
+	singlePerson := fs.String("single-person-farm", "", "a local farm's installer, who plays every role there and may decide a wait addressed to any of them, recorded as standing in for that role; empty on a shared farm")
 	standIn := fs.String("decide-stand-in", "deny", "the farm's limit on deciding a person's wait for them (decide.standIn): deny, or allow so a project may choose (Project spec.work.policy)")
 	hudImageRegistry := fs.String("hud-image-registry", "ghcr.io/avalanche-io", "where a tool's c4/<name> images are: c4/<name> is <registry>/c4-<name>:<tag>; empty for images loaded onto the nodes (the local farm), named c4-<name>:<tag>")
 	hudPlainRegistries := fs.String("hud-plain-registries", "", "registries a tool's images are pinned from without TLS, host[:port],... (a local farm's registry); loopback always is")
@@ -189,7 +190,7 @@ func runManager(args []string) error {
 			return fmt.Errorf("--tz: %w", err)
 		}
 		q = &queue.Queue{Loc: loc, Client: mgr.GetClient(), Every: *tick, Policy: pol, Cfg: sched.DefaultConfig(), Log: ctrl.Log.WithName("queue"),
-			Stores: stores, Signer: sig.queue, PolicyName: *policy, Namespace: *namespace,
+			Stores: stores, Signer: sig.queue, Roots: sig.pool, PolicyName: *policy, Namespace: *namespace,
 			// Units' reported progress, filled by the HUD's scrape of the
 			// node daemons (without the HUD, units are estimated from
 			// elapsed time alone).
@@ -205,7 +206,7 @@ func runManager(args []string) error {
 		}
 	}
 	if *hudAddr != "" {
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, *hudProxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
 			return err
 		}
 	}
@@ -253,7 +254,7 @@ type hudImages struct {
 	plain         []string
 }
 
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, roles, tz, namespace, tierToken, standIn string, images hudImages) error {
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy bool, sites, roles, tz, namespace, tierToken, standIn, singlePerson string, images hudImages) error {
 	if standIn != "allow" && standIn != "deny" {
 		return fmt.Errorf("--decide-stand-in: allow or deny, not %q", standIn)
 	}
@@ -270,7 +271,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		return err
 	}
 	srv := &hudserver.Server{ImageRegistry: images.registry, ImageTag: images.tag, PlainRegistries: images.plain, Client: mgr.GetClient(), Kube: kube, Stores: stores, Web: web, Loc: loc,
-		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups, StandIn: standIn,
+		TrustProxy: proxy, Namespace: namespace, Log: ctrl.Log.WithName("hud"), Signer: sig.hud, RoleGroups: roleGroups, StandIn: standIn, SinglePerson: singlePerson,
 		// What units report comes from the node daemons' /units, for the
 		// operator's tier token alone; their metrics need an API token
 		// the c4-metrics-reader role is bound to.

@@ -205,6 +205,15 @@ func (s *Server) mayDecide(project, server string, who Decider) (string, error) 
 	if who.Unit || who.Agent != "" || kind != "person" || name == "" {
 		return "", err
 	}
+	// A single-person farm (a local farm: SinglePerson names its
+	// installer) is one person in every role: the installer decides a
+	// wait addressed to any of them, recorded for that role.
+	if s.SinglePerson != "" && who.User == s.SinglePerson {
+		if slices.Contains(api.Roles, name) {
+			return "role:" + name, nil
+		}
+		return server, nil
+	}
 	ok, by, from := s.standIn(project)
 	if !ok {
 		return "", fmt.Errorf("%v; no one stands in for a person here (%s: deny, from the %s)", err, KeyStandIn, from)
