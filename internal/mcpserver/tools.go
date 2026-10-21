@@ -21,7 +21,7 @@ var Version = "dev"
 
 // Instructions are sent to clients when they connect.
 const Instructions = `This server operates a farm on Kubernetes that runs render, CI, ML and agents' work, the same farm the HUD shows. Jobs are named namespace/name.
-Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in through a published tool: c4_list_tools, c4_describe_tool, then c4_run_<tool> for one job or c4_submit_job for a submission of several (dry_run first, either way). There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), take or accept them (c4_acknowledge_units), or decide what waits for a person, a ruling or an escalated unit (c4_decide). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
+Start with c4_farm_status, then c4_list_jobs (at_risk_only for trouble). New work goes in through a published tool: c4_list_tools, c4_describe_tool, then c4_run_<tool> for one job or c4_submit_job for a submission of several (dry_run first, either way). Your own Claude Code agents run as a bundle: c4_run_bundle (dry_run first), then c4_list_bundles and c4_stop_bundle. There are no priorities: to make a job finish sooner, set its deadline (c4_set_deadline) or boost it (c4_boost_job); the queue works out the rest from estimates. A job with needsPerson waits on someone: requeue its failed units (c4_requeue_units), take or accept them (c4_acknowledge_units), or decide what waits for a person, a ruling or an escalated unit (c4_decide). Before choosing a time, c4_deadline_options says what it would take (boost, burst cost, jobs made late); a job without a deadline gets one suggested by the farm (c4_suggest_deadline). Holding a job stops new units; c4_hold_job with stop_running also stops running ones.
 Every change is made as you, checked against your Kubernetes permissions, and recorded as an Event. Costs: c4_approve_capacity provisions paid burst capacity.`
 
 func boolPtr(b bool) *bool { return &b }
@@ -159,6 +159,12 @@ func Tools(c *Client) []Tool {
 			idempotent, c.avoidNode),
 		tool("c4_disable_node", "Disable or enable a node", "Take a node out of service for the whole farm (running units finish) or put it back.",
 			idempotent, c.disableNode),
+		tool("c4_run_bundle", "Run your agents on the farm", "Run your own Claude Code agents on the farm as one bundle, by the names they were added under (c4 farm agents add): your runner resumes each at a turn's end when there is room, and the bundle's deadline orders them against the farm's other work. The bundle is yours. dry_run first: it says which agents no runner of yours has, and refuses in the farm's words when no pool runs agents for you yet.",
+			idempotent, c.runBundle),
+		tool("c4_list_bundles", "List agent bundles", "The agent bundles in your projects: each one's owner, phase, deadline and members with their state (queued, running, parked at a turn's end, done, failed), and why its members cannot start, if they cannot.",
+			readOnly, c.listBundles),
+		tool("c4_stop_bundle", "Hold, resume or remove an agent bundle", "hold stops a bundle's agents at their next turn's end, resume lets them run again, remove stops them and deletes the bundle. Signed and recorded in the book.",
+			destructive, c.stopBundle),
 		tool("c4_list_tools", "List tools", "The tools published to your projects: each one's name, title, summary, kind (frames, once, shards, train, agent), version and scope, and the c4_run_<tool> that runs it. Work goes in through a tool: pick one here, read its parameters with c4_describe_tool, then submit.",
 			readOnly, c.listTools),
 		tool("c4_describe_tool", "Describe a tool", "One published tool: its parameters as its tool.yaml writes them and as the JSON Schema of a submission's with, its frames, its needs, its test on the farm and its versions.",

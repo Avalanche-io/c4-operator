@@ -127,7 +127,8 @@ subjects:
 ---
 # Agent bundles (in the manager): each AgentBundle owns one WorkJob of class
 # agent, whose units are the bundle's members; the controller writes it and
-# reports the members from its unit pods.
+# reports the members from its unit pods. The HUD makes, holds and removes
+# bundles for the people it signs in (POST /bundles, after checking them).
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -135,7 +136,7 @@ metadata:
 rules:
 - apiGroups: [c4.avalanche.io]
   resources: [agentbundles]
-  verbs: [get, list, watch]
+  verbs: [get, list, watch, create, patch, delete]
 - apiGroups: [c4.avalanche.io]
   resources: [agentbundles/status]
   verbs: [get, update, patch]

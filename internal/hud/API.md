@@ -1300,6 +1300,61 @@ the Milestones of the project's namespace, soonest first; `label` is the
 tracker entity that owns the date. `404` for a project the viewer cannot
 see.
 
+## Agent bundles
+
+A person runs their own agents (Claude Code sessions registered on their
+machine with `c4 farm agents add`) as one AgentBundle, without kubectl:
+`c4 farm agents run`, MCP `c4_run_bundle`.
+
+### POST /bundles/{project}
+
+```
+{ name?, members: [ name | { name, kind?: resident|task, prompt? } ], maxRunning?, due?, pools?, suspend?, dryRun? }
+-> { ok, dryRun?, name, project, namespace, owner, link, due?, members: [ { name, state } ], warnings?, errors?: [ { path, message, fix } ] }
+```
+
+- **Ownership:** the bundle is the viewer's (`c4.avalanche.io/owner`), and
+  so is its job, so the pools and host runners that serve that person run
+  its members.
+- **Name:** `name` defaults to `agents`, numbered if a bundle or job
+  already has it (`agents-2`). A bundle's job takes its name.
+- **`due`:** an RFC 3339 time, a date, or words read on the farm's clock
+  (`friday 18:00`).
+- **`pools`:** empty, the agent class's pools.
+- **Refusals** are `422`, with every problem at its path in the farm's
+  words and a fix:
+  - no members, an agent named twice, or a name that cannot be one;
+  - no pool that exists and runs this person's agents ("c4 farm up makes
+    one for this machine");
+  - a due the farm cannot read;
+  - a name taken (`409`);
+  - no right to create bundles in the project (`403`).
+- **`warnings`:** where the runners serving those pools list their
+  registered agents (Node annotation `c4.avalanche.io/members`), each
+  member none of them has.
+- **Answer:** `201`. A dry run checks the same and makes nothing (`200`).
+
+### GET /bundles/{project}
+
+`[ { name, owner, phase, due?, link, members: [ { name, state, node? } ], warnings? } ]`.
+A member's state is queued, running, yielding, parked (stopped at a
+turn's end), done or failed. `warnings` says why the members cannot start,
+when they cannot: the job's `Admitted`, `Images`, `Lease` or `Tools`
+condition, which the bundle carries too, not Ready.
+
+### GET /bundles/{project}/{name}
+
+One bundle, as in the list.
+
+### POST /bundles/{project}/{name}/suspend
+
+`{ suspend }`: `true` holds it (members stop at their next turn's end),
+`false` runs it again. Signed and booked like the job controls.
+
+### DELETE /bundles/{project}/{name}
+
+Stops its members and removes the bundle and its job. Signed and booked.
+
 ## Tools
 
 A tool is a folder with a `tool.yaml` (`c4: tool/1`, `schema/README.md`):

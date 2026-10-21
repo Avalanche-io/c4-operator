@@ -20,6 +20,8 @@ import (
 var devWriters = map[string][]string{
 	"workjobs":         {"artist", "supervisor", "producer", "wrangler", "farm-admin", "pipeline-td"},
 	"materializations": {"artist", "supervisor", "producer", "wrangler", "farm-admin", "pipeline-td"},
+	// a person's own agents, as config/rbac/people.yaml lets every people role
+	"agentbundles":     {"artist", "supervisor", "producer", "wrangler", "farm-admin", "pipeline-td"},
 	"capacityrequests": {"producer", "wrangler", "farm-admin"},
 	"submitgrants":     {"producer", "wrangler", "farm-admin"},
 	"nodes":            {"facilities", "wrangler", "farm-admin"},

@@ -199,6 +199,26 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 		json.NewEncoder(w).Encode(api.TrackerList{Trackers: []api.Tracker{{Namespace: "show-a", Name: "github", Project: "show-a", Kind: "github",
 			Site: "github.com/petrelfinch/pipeline", Syncs: []string{"issues labeled render"}, Ready: true, Granted: 1}}})
+	case r.Method == "POST" && r.URL.Path == "/api/v1/bundles/show-a":
+		body, _ := io.ReadAll(r.Body)
+		f.mu.Lock()
+		f.posts = append(f.posts, r.URL.Path+" "+string(body))
+		f.mu.Unlock()
+		var req api.BundleRequest
+		json.Unmarshal(body, &req)
+		if len(req.Members) == 0 {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			json.NewEncoder(w).Encode(api.BundleResponse{Errors: []api.FieldError{{Path: "members", Message: "a bundle needs at least one agent", Fix: "name the agents to run"}}})
+			return
+		}
+		out := api.BundleResponse{OK: true, DryRun: req.DryRun, Name: "agents", Namespace: "show-a", Project: "show-a", Owner: "maya", Link: "#/job/show-a/agents"}
+		for _, m := range req.Members {
+			out.Members = append(out.Members, api.BundleMemberInfo{Name: m.Name, State: "queued"})
+		}
+		json.NewEncoder(w).Encode(out)
+	case r.Method == "GET" && r.URL.Path == "/api/v1/bundles/show-a":
+		json.NewEncoder(w).Encode([]api.BundleResponse{{OK: true, Name: "agents", Namespace: "show-a", Owner: "maya", Phase: "Running",
+			Members: []api.BundleMemberInfo{{Name: "research", State: "running", Node: "mac"}}}})
 	case r.Method == "DELETE" && strings.HasPrefix(r.URL.Path, "/api/v1/grants/"):
 		f.mu.Lock()
 		f.posts = append(f.posts, "DELETE "+r.URL.Path)
@@ -917,4 +937,37 @@ func TestRawFormSaysItHasNoNetwork(t *testing.T) {
 		return
 	}
 	t.Fatal("no c4_submit_job")
+}
+
+// A person's agents run as a bundle through MCP: members by name, a task
+// among them marked, refusals passed on as answers.
+func TestRunBundle(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "tok-maya")
+	res, out := call(t, cs, "c4_run_bundle", map[string]any{"members": []string{"research", "drafts"}, "tasks": []string{"drafts"}, "max": 1, "dry_run": true})
+	if res.IsError || out["ok"] != true || out["bundle"] != "show-a/agents" || len(out["members"].([]any)) != 2 || !strings.Contains(out["message"].(string), "dry run") {
+		t.Fatalf("dry run: %v %q", out, text(res))
+	}
+	hud.mu.Lock()
+	post := hud.posts[0]
+	hud.mu.Unlock()
+	if !strings.Contains(post, `{"name":"drafts","kind":"task"}`) || !strings.Contains(post, `"maxRunning":1`) || !strings.Contains(post, `"dryRun":true`) {
+		t.Fatalf("posted %s", post)
+	}
+	_, out = call(t, cs, "c4_run_bundle", map[string]any{"members": []string{}})
+	if errs, _ := out["errors"].([]any); out["ok"] != false || len(errs) != 1 || asMap(errs[0])["path"] != "members" {
+		t.Fatalf("refused: %v", out)
+	}
+	_, out = call(t, cs, "c4_list_bundles", map[string]any{})
+	if bs, _ := out["bundles"].([]any); len(bs) != 1 || asMap(bs[0])["phase"] != "Running" {
+		t.Fatalf("list: %v", out)
+	}
+	if res, _ := call(t, cs, "c4_stop_bundle", map[string]any{"name": "agents", "do": "hold"}); res.IsError {
+		t.Fatalf("hold: %q", text(res))
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	if last := hud.posts[len(hud.posts)-1]; !strings.Contains(last, "/api/v1/bundles/show-a/agents/suspend") || !strings.Contains(last, `"suspend":true`) {
+		t.Fatalf("hold posted %s", last)
+	}
 }
