@@ -310,6 +310,10 @@ func (s *Server) handleRequeue(w http.ResponseWriter, r *http.Request) {
 	if rec == nil {
 		return
 	}
+	if t := rec.job.Labels[LabelToolTest]; t != "" {
+		fail(w, http.StatusConflict, "%s tests the tool %s: its outcome is the tool's (c4 farm tool show %s); publish again to test again", rec.job.Name, t, t)
+		return
+	}
 	var body struct {
 		Units json.RawMessage `json:"units"`
 	}
@@ -430,6 +434,10 @@ func (s *Server) handleAcceptValidated(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAck(w http.ResponseWriter, r *http.Request) {
 	_, rec, v := s.job(w, r)
 	if rec == nil {
+		return
+	}
+	if t := rec.job.Labels[LabelToolTest]; t != "" {
+		fail(w, http.StatusConflict, "%s tests the tool %s: its outcome is the tool's (c4 farm tool show %s); publish again to test again", rec.job.Name, t, t)
 		return
 	}
 	var body struct {

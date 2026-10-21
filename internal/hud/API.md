@@ -225,7 +225,7 @@ the viewer's scope (1 is next).
 
 ```
 {
-  namespace, name, project, class, driver, owner?, trackerRef?, trackerURL?, note?, phase, order,
+  namespace, name, project, class, driver, owner?, toolTest?, trackerRef?, trackerURL?, note?, phase, order,
   units: { total, unevaluated, queued, blocked, running, retrying, succeeded, failed, held,
            preflight?, backoff?, egress?, accepted?, waits? },
   unitStates: { unevaluated, queued, blocked, running, retrying, succeeded, failed,
@@ -1376,6 +1376,11 @@ publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
 - is booked: the publish (`tool-publish`: who, the version, the tree, the
   test job), the test's pass or failure with its reason (`tool-test`), and
   the offer (`tool-offer`).
+
+A test job is the publisher's: its outcome is the tool's versions, the
+publish answer and the book. It carries `toolTest` (the tool's name) in
+the snapshot, is never an incident or a Needs-you item, and its units take
+no requeue or acknowledge (`409`: publish again to test again).
 
 ### GET /tools/{project}
 

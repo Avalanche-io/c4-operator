@@ -221,6 +221,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		Nudge:     api.Nudge{Hold: (j.Spec.Nudge.Hold || j.Spec.Nudge.HoldStop) && !pendingJob(j), Boost: num(j.Spec.Nudge.Boost)},
 		Blacklist: st.Blacklist, Inputs: []api.Input{}}
 	aj.Shot = j.Labels[LabelShot]
+	aj.ToolTest = j.Labels[LabelToolTest]
 	aj.TrackerRef = j.Annotations[c4v1.AnnotationTrackerRef]
 	aj.TrackerURL = j.Annotations[c4v1.AnnotationTrackerURL]
 	aj.Work = r.work

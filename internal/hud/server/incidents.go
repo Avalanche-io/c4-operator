@@ -90,7 +90,10 @@ func incidents(m *model, v *api.Viewer, jobs []api.Job) []api.Incident {
 	for i := range jobs {
 		j := &jobs[i]
 		np := j.NeedsPerson
-		if np == nil {
+		if np == nil || j.ToolTest != "" {
+			// A tool's test reports to its publisher, through the tool's
+			// versions and publish's answer: a farm's own setup never
+			// opens on a red item nobody can act on.
 			continue
 		}
 		cause, k := np.Message, np.Reason+"|"+key(j)

@@ -638,6 +638,10 @@ type Job struct {
 	Class     string `json:"class"`
 	Driver    string `json:"driver"`
 	Owner     string `json:"owner,omitempty"`
+	// ToolTest names the tool a job tests when publishing it: its outcome
+	// is the publisher's (the tool's versions), never a person's to-do,
+	// and it offers no requeue or accept.
+	ToolTest string `json:"toolTest,omitempty"`
 	// TrackerRef is the tracker entity the job serves
 	// (<tracker>/<type>/<id>), when a tracker's sync submitted it.
 	TrackerRef string `json:"trackerRef,omitempty"`

@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"net/http"
 	"testing"
 	"time"
 
@@ -117,5 +118,31 @@ func TestIncidentsGroupFailuresByCause(t *testing.T) {
 	}
 	if b := items[1]; len(b.Jobs) != 1 || b.Detail != "exit 1: no such file: plates/sh#.exr" {
 		t.Fatalf("the missing-plates incident: %+v", b)
+	}
+}
+
+// A tool's test that fails is its publisher's to read (the tool's
+// versions), not a red item for the project: a new farm's own setup never
+// opens on something nobody there can act on. Its units offer no requeue
+// or accept.
+func TestToolTestsAreNotIncidents(t *testing.T) {
+	now := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
+	test := api.Job{Namespace: "show-a", Name: "comp-farmtest-207760c4", Class: "render", ToolTest: "comp", Units: api.Counts{Failed: 1},
+		UnitStates: api.States{Failed: "0"}, NeedsPerson: &api.NeedsPerson{Reason: "failed", Message: "1 units failed after their retries", Since: now}}
+	if items := incidents(&model{at: now}, &api.Viewer{User: "maya"}, []api.Job{test}); len(items) != 0 {
+		t.Fatalf("a tool's test is an incident: %+v", items)
+	}
+	s := farm(t)
+	var rec *jobRec
+	for _, r := range s.m.jobs {
+		rec = r
+		break
+	}
+	rec.job.Labels = map[string]string{LabelToolTest: "comp"}
+	for _, path := range []string{"requeue", "ack"} {
+		code := call(t, s, http.MethodPost, "/api/v1/jobs/"+rec.job.Namespace+"/"+rec.job.Name+"/"+path+"?as=artist", map[string]any{"units": "0"}, nil)
+		if code != http.StatusConflict {
+			t.Errorf("%s on a tool's test: %d, want 409", path, code)
+		}
 	}
 }
