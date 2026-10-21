@@ -335,7 +335,7 @@ func TestSessionsFirstTouch(t *testing.T) {
 	old := fakeObserve(t, "", true)
 	if err := Sessions(context.Background(), Out{W: &out}, SessionsArgs{Agent: old, Claude: claude, All: true}); err != nil ||
 		!strings.Contains(out.String(), "\na      failed") || strings.Contains(out.String(), "Nothing needs you") ||
-		!strings.HasSuffix(out.String(), "Without c4-agent, c4 farm agents can't tell what needs you; brew install avalanche-io/tap/c4 brings it\n") {
+		!strings.HasSuffix(out.String(), "Without c4-agent, c4 farm agents can't tell what needs you; brew install mrjoshuak/tap/c4 brings it\n") {
 		t.Errorf("fallback: %v\n%s", err, out.String())
 	}
 	tooOld := script("claude-old", "echo \"error: unknown command 'agents'\" >&2; exit 1\n")

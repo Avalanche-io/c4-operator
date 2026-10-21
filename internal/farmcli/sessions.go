@@ -299,7 +299,7 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 	case len(waiting) == 0 && !observed:
 		// claude agents says which sessions are blocked, but not what on,
 		// nor what a limit holds up
-		o.printf("\nWithout c4-agent, c4 farm agents can't tell what needs you; brew install avalanche-io/tap/c4 brings it\n")
+		o.printf("\nWithout c4-agent, c4 farm agents can't tell what needs you; brew install mrjoshuak/tap/c4 brings it\n")
 		return nil
 	case len(waiting) == 0:
 		o.printf("\nNothing needs you.\n")
