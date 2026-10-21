@@ -1,5 +1,5 @@
 # Project details the canary farm carries in every field that can hold
-# them. No output may contain any of them, in any encoding (canary_test.go).
+# them. No output may contain any of them, in any encoding (see Scan).
 # Titles, ruse titles, episode codes
 NIGHTJAR_S02
 saltmarsh

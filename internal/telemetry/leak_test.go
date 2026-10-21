@@ -9,6 +9,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Avalanche-io/c4-operator/internal/telemetry/canary"
 	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
@@ -30,13 +31,13 @@ func TestTheTestsCatchALeak(t *testing.T) {
 		t.Fatal("the encoder wrote a record with a string field")
 	}
 	rec, _, _ := redactedCanary(t, testKey(t, 1))
-	s, _, _ := canaryFarm()
+	s, _, _ := canary.Farm()
 	leaky := leakyRecord{Snapshot: rec, ID: s.Jobs[0].ID}
 	out, err := json.Marshal(leaky) // bypassing Encode, as a careless exporter would
 	if err != nil {
 		t.Fatal(err)
 	}
-	if found := scan(out, canaryTokens(t)); len(found) == 0 {
+	if found := canary.Scan(out, canary.Tokens(), recordWords); len(found) == 0 {
 		t.Fatal("the canary scan did not find a job ID copied into the output")
 	}
 }
@@ -127,7 +128,7 @@ func FuzzRedact(f *testing.F) {
 }
 
 func fuzzFarm(project, job, pool, class string) (sched.Snapshot, *sched.State, sched.Config) {
-	s, _, cfg := canaryFarm()
+	s, _, cfg := canary.Farm()
 	s.Projects[0].Name = project
 	s.Jobs[0].ID = job
 	s.Jobs[0].Project = project

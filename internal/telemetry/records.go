@@ -9,6 +9,7 @@ package telemetry
 type Snapshot struct {
 	Build     Build
 	KeyEpoch  uint32
+	Policy    PolicyKind
 	Pools     []Pool
 	Projects  []Project
 	Jobs      []Job
@@ -21,6 +22,10 @@ type Snapshot struct {
 	// counts the decisions that differed, by kind.
 	Faithful    bool
 	Divergences []DivergenceCount
+	// DecisionHash is the SHA-256 of the farm's decisions in canonical
+	// form (ranks, not names). A replay on another machine or
+	// architecture gives the same hash, or it differs.
+	DecisionHash [32]byte
 }
 
 func (Snapshot) telemetryRecord() {}
@@ -274,4 +279,51 @@ type JobState struct {
 	ETA50, ETA90, Deadline, StartAfter                    RelTime
 	Rank                                                  Int
 	Burst                                                 bool
+}
+
+// BuildRecord is a bundle's build.json: the build of each component that
+// wrote it.
+type BuildRecord struct {
+	Manager Build
+}
+
+func (BuildRecord) telemetryRecord() {}
+
+// FarmRecord is a bundle's farm.json: the farm's shape at its last
+// snapshot, as pseudonyms with ranks and counts.
+type FarmRecord struct {
+	Pools    []Pseudonym
+	Projects []Pseudonym
+	Jobs     Int
+	Links    Int
+	Slots    Int
+}
+
+func (FarmRecord) telemetryRecord() {}
+
+// RedactionRecord is a bundle's redaction.json: how it was redacted (never
+// the money factor or the key), how many pseudonyms of each kind it holds,
+// and each snapshot's faithfulness.
+type RedactionRecord struct {
+	KeyEpoch        uint32
+	MoneyScaled     bool
+	BytesTwoFigures bool
+	Coarsened       bool
+	Pseudonyms      []KindCount
+	Snapshots       []SnapshotFaith
+}
+
+func (RedactionRecord) telemetryRecord() {}
+
+// KindCount is how many pseudonyms of a kind a bundle holds.
+type KindCount struct {
+	Kind  Kind
+	Count Int
+}
+
+// SnapshotFaith is one snapshot's faithfulness.
+type SnapshotFaith struct {
+	Index       Int
+	Faithful    bool
+	Divergences []DivergenceCount
 }

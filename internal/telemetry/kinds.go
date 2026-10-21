@@ -28,14 +28,43 @@ type Int int64
 // work in slot-seconds, a rate, bytes per second.
 type Real float64
 
-// MarshalJSON writes a Real, and an infinity as null rather than failing.
+// MarshalJSON writes a Real; an infinity or NaN, which JSON has no number
+// for, as "+Inf", "-Inf" or "NaN", so a replay reads back what the
+// policy saw.
 func (r Real) MarshalJSON() ([]byte, error) {
 	f := float64(r)
-	if math.IsInf(f, 0) || math.IsNaN(f) {
-		return []byte("null"), nil
+	switch {
+	case math.IsInf(f, 1):
+		return []byte(`"+Inf"`), nil
+	case math.IsInf(f, -1):
+		return []byte(`"-Inf"`), nil
+	case math.IsNaN(f):
+		return []byte(`"NaN"`), nil
 	}
 	return json.Marshal(f)
 }
+
+// UnmarshalJSON reads what MarshalJSON writes.
+func (r *Real) UnmarshalJSON(b []byte) error {
+	switch string(b) {
+	case `"+Inf"`:
+		*r = Real(math.Inf(1))
+		return nil
+	case `"-Inf"`:
+		*r = Real(math.Inf(-1))
+		return nil
+	case `"NaN"`:
+		*r = Real(math.NaN())
+		return nil
+	}
+	var f float64
+	err := json.Unmarshal(b, &f)
+	*r = Real(f)
+	return err
+}
+
+// UnmarshalJSON reads what MarshalJSON writes.
+func (m *Money) UnmarshalJSON(b []byte) error { return (*Real)(m).UnmarshalJSON(b) }
 
 // Money is an amount of money multiplied by the bundle's secret factor,
 // which is never in the bundle: the policy compares money only linearly,

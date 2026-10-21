@@ -27,6 +27,9 @@ type Redactor struct {
 	// figures. Off by default: exact counts and durations are what replay
 	// needs at the policy's thresholds (DESIGN.md section 6.9).
 	Coarsen bool
+	// Policy is the policy the farm decides with, recorded in each
+	// snapshot.
+	Policy PolicyKind
 }
 
 // NewRedactor is a redactor with a fresh secret money factor in [0.5, 2).
@@ -34,7 +37,7 @@ func NewRedactor(key Key) *Redactor {
 	var b [8]byte
 	_, _ = rand.Read(b[:])
 	f := 0.5 + 1.5*float64(binary.BigEndian.Uint64(b[:])>>11)/float64(1<<53)
-	return &Redactor{Key: key, MoneyFactor: f}
+	return &Redactor{Key: key, MoneyFactor: f, Policy: PolicyObjective}
 }
 
 // Names is the namer a snapshot was redacted with, for the faithfulness
@@ -51,7 +54,7 @@ func (r *Redactor) Redact(s sched.Snapshot, st *sched.State, cfg sched.Config, d
 	epoch := s.Now
 	rel := func(t time.Time) RelTime { return RelTimeOf(t, epoch) }
 	money := func(x float64) Money { return Money(x * r.MoneyFactor) }
-	out := Snapshot{Build: CurrentBuild(), KeyEpoch: r.Key.Epoch}
+	out := Snapshot{Build: CurrentBuild(), KeyEpoch: r.Key.Epoch, Policy: r.Policy}
 
 	for _, p := range s.Pools {
 		rp := Pool{Name: n.Of(KindPool, p.Name), Slots: Int(p.Slots), Used: Int(p.Used), Cost: money(p.CostPerSlotHour)}
@@ -110,6 +113,7 @@ func (r *Redactor) Redact(s sched.Snapshot, st *sched.State, cfg sched.Config, d
 	out.State = redactState(n, doc, rel)
 	out.Config = configOf(cfg)
 	out.Decisions = redactDecisions(n, d, rel, money)
+	out.DecisionHash = hashOf(canonical(out.Decisions))
 	return out, Names{n}
 }
 

@@ -195,3 +195,38 @@ func (g GOAMD64) MarshalJSON() ([]byte, error) { return enumJSON(g) }
 
 // DivergenceName is d's name.
 func DivergenceName(d Divergence) string { return enumName(d) }
+
+// PolicyKind is the scheduling policy a farm runs (the manager's
+// --work-policy), so a replay runs the same one.
+type PolicyKind uint16
+
+var policyTable = []string{"other", "objective", "edf", "fifo"}
+
+// The policies.
+const (
+	PolicyOther PolicyKind = iota
+	PolicyObjective
+	PolicyEDF
+	PolicyFIFO
+)
+
+func (p PolicyKind) Table() []string              { return policyTable }
+func (p PolicyKind) Index() int                   { return int(p) }
+func (p PolicyKind) MarshalJSON() ([]byte, error) { return enumJSON(p) }
+
+// PolicyOf is the policy named s ("" is objective, the default), or other.
+func PolicyOf(s string) PolicyKind {
+	if s == "" {
+		s = "objective"
+	}
+	return PolicyKind(enumIndex(policyTable, s))
+}
+
+// EnumTables is every enum table: every word an enum can write.
+func EnumTables() [][]string {
+	return [][]string{kindTable, tierTable, reasonTable, viaTable, channelTable, plannerTable, surplusTable, divergenceTable,
+		goosTable, goarchTable, goamd64Table, policyTable}
+}
+
+// PolicyName is p's name.
+func PolicyName(p PolicyKind) string { return enumName(p) }

@@ -1,7 +1,9 @@
 package telemetry
 
 import (
+	"crypto/sha256"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -264,3 +266,46 @@ func differ(a, b []string) int {
 	}
 	return n
 }
+
+// ReplayHash is the decision hash a replay of the record through policy
+// gives: equal to rec.DecisionHash when the replay reproduces the farm.
+func ReplayHash(rec Snapshot, policy sched.Policy) [32]byte {
+	s, st, cfg := Restore(rec)
+	return hashOf(canonicalReplay(policy(s, st, cfg)))
+}
+
+// hashOf hashes canonical decisions, each kind's lines sorted.
+func hashOf(m map[Divergence][]string) [32]byte {
+	h := sha256.New()
+	for _, k := range []Divergence{DivergeDispatch, DivergePreempt, DivergeCapacity, DivergeBurst, DivergeRisk} {
+		lines := append([]string(nil), m[k]...)
+		sort.Strings(lines)
+		h.Write([]byte(strconv.Itoa(int(k)) + "\n"))
+		for _, l := range lines {
+			h.Write([]byte(l))
+			h.Write([]byte{10})
+		}
+	}
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+// Func is the policy, or nil for other: a snapshot decided by a policy
+// this build does not know cannot be replayed.
+func (p PolicyKind) Func() sched.Policy {
+	switch p {
+	case PolicyObjective:
+		return sched.Decide
+	case PolicyEDF:
+		return sched.EDF
+	case PolicyFIFO:
+		return sched.FIFO
+	}
+	return nil
+}
+
+// ChangeKey is a hash of the farm's own decisions, names and all, to tell
+// a tick that changed a decision from one that did not without redacting
+// it. It is kept in memory only and never written.
+func ChangeKey(d sched.Decisions) [32]byte { return hashOf(canonicalReplay(d)) }

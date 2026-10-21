@@ -19,12 +19,12 @@ import (
 // (DESIGN.md section 6.9). Adding a string field anywhere under a
 // record fails here.
 func TestRecordsHoldNoText(t *testing.T) {
-	for _, r := range []Record{Snapshot{}} {
+	for _, r := range []Record{Snapshot{}, BuildRecord{}, FarmRecord{}, RedactionRecord{}} {
 		if err := CheckType(reflect.TypeOf(r)); err != nil {
 			t.Fatal(err)
 		}
 	}
-	for _, e := range []Enum{Kind(0), Tier(0), Reason(0), Via(0), Channel(0), Planner(0), Surplus(0), Divergence(0), GOOS(0), GOARCH(0), GOAMD64(0)} {
+	for _, e := range []Enum{Kind(0), Tier(0), Reason(0), Via(0), Channel(0), Planner(0), Surplus(0), Divergence(0), GOOS(0), GOARCH(0), GOAMD64(0), PolicyKind(0)} {
 		tab := e.Table()
 		if len(tab) == 0 || tab[0] != "other" {
 			t.Errorf("%T's table does not begin with other", e)
