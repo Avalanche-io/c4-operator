@@ -228,7 +228,7 @@ func publishTools(ctx context.Context, o UpOptions) error {
 			return err
 		}
 		var out strings.Builder
-		err = farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: Project, Farm: true, TestedIn: o.Version})
+		err = farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: Project, Farm: true})
 		if err != nil {
 			why := strings.TrimSpace(out.String())
 			if why == "" {

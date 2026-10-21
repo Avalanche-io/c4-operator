@@ -4,6 +4,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
@@ -53,18 +54,24 @@ func TestPrebuiltToolsRead(t *testing.T) {
 	}
 }
 
-// A development build's tools carry no tool.lock, so none of their trees
-// counts as tested in a release.
-func TestNoReleaseTreesWithoutLocks(t *testing.T) {
+// Each tool's tree counts on its own: one with the release's tool.lock is
+// a release tree, one without is not, whatever the others carry.
+func TestReleaseTreesOnlyWithLocks(t *testing.T) {
+	locked := 0
 	for _, name := range tools.Names {
 		if f, _ := tools.Folder(name); f != nil {
 			if _, err := fs.Stat(f, "tool.lock"); err == nil {
-				t.Skipf("%s has a tool.lock: a release build", name)
+				locked++
 			}
 		}
 	}
 	trees, err := tools.ReleaseTrees("v0.1.0")
-	if err != nil || trees != nil {
-		t.Errorf("trees %v, err %v", trees, err)
+	if err != nil || len(trees) != locked {
+		t.Errorf("%d trees for %d locked folders, err %v", len(trees), locked, err)
+	}
+	for id, rel := range trees {
+		if rel != "v0.1.0" || !strings.HasPrefix(id, "c4") {
+			t.Errorf("%s: %s", id, rel)
+		}
 	}
 }

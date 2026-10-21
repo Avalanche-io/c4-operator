@@ -14,9 +14,6 @@ type ToolPublishRequest struct {
 	Farm bool `json:"farm,omitempty"`
 	// DryRun checks the tool and pins its images, writing nothing.
 	DryRun bool `json:"dryRun,omitempty"`
-	// TestedIn is ignored: whether a tree is one of the release's own
-	// tools, tested in it, is the server's to decide from the tree's ID.
-	TestedIn string `json:"testedIn,omitempty"`
 }
 
 // ToolTestState is a version's test run on the farm.
@@ -29,8 +26,6 @@ type ToolTestState struct {
 	State   string `json:"state"`
 	Seconds int64  `json:"seconds,omitempty"`
 	Reason  string `json:"reason,omitempty"`
-	// TestedIn is the release whose tests ran it (a release's own tool).
-	TestedIn string `json:"testedIn,omitempty"`
 }
 
 // ToolPublishResponse answers a publish.
@@ -45,6 +40,9 @@ type ToolPublishResponse struct {
 	View    string `json:"view,omitempty"`
 	Image   string `json:"image,omitempty"`
 	Scope   string `json:"scope,omitempty"`
+	// Release is the release the tree shipped in, for a release's own
+	// tool (published as the release built it; its test still runs).
+	Release string `json:"release,omitempty"`
 	// Lock is the tool.lock written (or, with DryRun, that would be).
 	Lock json.RawMessage `json:"lock,omitempty"`
 	// Test is the version's test; publish returns once its job exists,
@@ -81,7 +79,8 @@ type ToolVersionInfo struct {
 	Version string        `json:"version"`
 	View    string        `json:"view"`
 	Image   string        `json:"image,omitempty"`
-	By      string        `json:"by"`
+	By      string        `json:"by,omitempty"`
+	Release string        `json:"release,omitempty"`
 	At      string        `json:"at"`
 	Test    ToolTestState `json:"test"`
 }

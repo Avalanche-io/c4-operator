@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -184,9 +185,9 @@ func TestVersionsAreTrees(t *testing.T) {
 	}
 
 	// v1 leaves the versions kept in full: it still resolves, by name and
-	// by tree, and so does a published tree no version names
+	// by tree
 	tool := getTool(t, s, "show-a", "notes")
-	tool.Status.Earlier = []c4v1.ToolVersionRef{{Version: "v1", View: first.View, Image: first.Image, Untested: true}}
+	tool.Status.Earlier = []c4v1.ToolVersionRef{{Version: "v1", View: first.View, Image: first.Image, State: c4v1.ToolTestUntested}}
 	tool.Status.Versions = tool.Status.Versions[1:]
 	if err := s.Client.Status().Update(ctx, &tool); err != nil {
 		t.Fatal(err)
@@ -199,13 +200,7 @@ func TestVersionsAreTrees(t *testing.T) {
 	if _, _, err := s.toolAt(ctx, s.current(), "show-a", "notes", "v2"); err == nil {
 		t.Fatal("v2, whose test is running, resolved")
 	}
-	loose := untested("echo loose")
-	loose["tool.lock"] = `{"c4":"lock/1","images":{"` + busybox + `":"docker.io/library/` + busybox + `"}}`
-	lv := putTree(t, s, "show-a", loose)
-	if _, ref, err := s.toolAt(ctx, s.current(), "show-a", "notes", lv.String()); err != nil || ref.View != lv.String() || ref.Image != "docker.io/library/"+busybox {
-		t.Fatalf("@tree: %+v %v", ref, err)
-	}
-	if _, _, err := s.toolAt(ctx, s.current(), "show-a", "other", lv.String()); err == nil {
+	if _, _, err := s.toolAt(ctx, s.current(), "show-a", "other", first.View); err == nil {
 		t.Fatal("a tree resolved as another tool")
 	}
 	// a new version is numbered past the earlier ones
@@ -309,28 +304,93 @@ func TestFarmToolsSpreadWhenOffered(t *testing.T) {
 	}
 }
 
-// Only a tree the release built is tested in a release; the request
-// cannot say so.
+// A tree the release built is published as it is, its pins kept, and
+// booked as released; its test still runs on the farm, and the request
+// cannot change either.
 func TestReleaseToolsByTree(t *testing.T) {
 	s := toolFarm(t)
 	files := notesTool("echo hi > out.txt")
-	files["tool.lock"] = `{"c4":"lock/1","images":{"` + busybox + `":"docker.io/library/` + busybox + `"}}`
+	lock := `{"c4":"lock/1","images":{"` + busybox + `":"registry.example/` + busybox + `"}}`
+	files["tool.lock"] = lock
 	rel := putTree(t, s, "show-a", files)
 	s.ReleaseTrees = map[string]string{rel.String(): "v0.2.0"}
 	code, out := publish(t, s, "admin", "show-a", api.ToolPublishRequest{View: rel.String(), Farm: true})
-	if code != http.StatusCreated || out.View != rel.String() || out.Test.State != c4v1.ToolTestOK || out.Test.TestedIn != "v0.2.0" || out.Test.Job != "" {
+	if code != http.StatusCreated || out.View != rel.String() || out.Release != "v0.2.0" || out.Image != "registry.example/"+busybox ||
+		out.Test.State != c4v1.ToolTestRunning || out.Test.Job == "" {
 		t.Fatalf("a release's tool: %d %+v", code, out)
 	}
-	if tool := getTool(t, s, s.Namespace, "notes"); tool.Spec.View != rel.String() || tool.Status.Version != "v1" {
-		t.Fatalf("not offered: %+v", tool)
+	if tool := getTool(t, s, s.Namespace, "notes"); tool.Status.Version != "" {
+		t.Fatalf("offered before its test: %+v", tool.Status)
+	}
+	if ev := toolEvents(t, s, s.Namespace, "notes"); !strings.Contains(ev, "released v0.2.0, testing in") || strings.Contains(ev, "tested in") {
+		t.Fatalf("the book: %s", ev)
+	}
+	finishTest(t, s, out.Test.Job, "Succeeded", map[string]string{"out.txt": "hi"})
+	if tool := getTool(t, s, s.Namespace, "notes"); tool.Spec.View != rel.String() || tool.Status.Version != "v1" || tool.Status.Versions[0].Release != "v0.2.0" {
+		t.Fatalf("after its test: %+v", tool)
 	}
 	// c4 farm up again: the same version, nothing tested
 	if code, again := publish(t, s, "admin", "show-a", api.ToolPublishRequest{View: rel.String(), Farm: true}); code != http.StatusOK || again.Version != "v1" {
 		t.Fatalf("the release's tool again: %d %+v", code, again)
 	}
+	// any other tree is pinned by the farm and has no release
 	other := putTree(t, s, "show-a", notesTool("echo other > out.txt"))
-	if _, out := publish(t, s, "admin", "show-a", api.ToolPublishRequest{View: other.String(), Farm: true, TestedIn: "v0.2.0"}); out.Test.State != c4v1.ToolTestRunning || out.Test.TestedIn != "" {
-		t.Fatalf("a request said tested in release: %+v", out)
+	if _, out := publish(t, s, "admin", "show-a", api.ToolPublishRequest{View: other.String(), Farm: true}); out.Release != "" || out.Image != "docker.io/library/"+busybox {
+		t.Fatalf("another tree: %+v", out)
+	}
+}
+
+// Only a tree that was a version of the tool runs by its ID, and never one
+// whose test failed, even once it has left the versions kept in full.
+func TestToolByTreeOnlyAsAVersion(t *testing.T) {
+	s := toolFarm(t)
+	ctx := context.Background()
+	_, ok := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: putTree(t, s, "show-a", untested("echo ok")).String()})
+	// a tree with the tool's name, tool.lock and all, never published
+	loose := untested("echo loose")
+	loose["tool.lock"] = `{"c4":"lock/1","images":{"` + busybox + `":"docker.io/library/` + busybox + `"}}`
+	lv := putTree(t, s, "show-a", loose)
+	if _, _, err := s.toolAt(ctx, s.current(), "show-a", "notes", lv.String()); err == nil {
+		t.Fatal("an unpublished tree ran by its ID")
+	}
+	// a version whose test failed
+	_, bad := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: putTree(t, s, "show-a", notesTool("true")).String()})
+	finishTest(t, s, bad.Test.Job, "Failed", nil)
+	if _, _, err := s.toolAt(ctx, s.current(), "show-a", "notes", bad.View); err == nil {
+		t.Fatal("a failed version ran by its ID")
+	}
+	// ... and once more versions push it out of the kept ones
+	key := types.NamespacedName{Namespace: "show-a", Name: "notes"}
+	for i := 0; i < c4v1.MaxToolVersions; i++ {
+		ver := c4v1.ToolVersion{View: putTree(t, s, "show-a", untested(fmt.Sprintf("echo %d", i))).String(), Test: c4v1.ToolTest{State: c4v1.ToolTestUntested}}
+		if _, _, err := s.addVersion(ctx, key, ver); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tool := getTool(t, s, "show-a", "notes")
+	if len(tool.Status.Earlier) != 2 || tool.Status.Earlier[1].View != bad.View || tool.Status.Earlier[1].State != c4v1.ToolTestFailed {
+		t.Fatalf("earlier: %+v", tool.Status.Earlier)
+	}
+	if _, _, err := s.toolAt(ctx, s.current(), "show-a", "notes", bad.View); err == nil {
+		t.Fatal("a failed earlier version ran by its ID")
+	}
+	if _, ref, err := s.toolAt(ctx, s.current(), "show-a", "notes", ok.View); err != nil || ref.Version != "v1" {
+		t.Fatalf("an earlier offered version: %+v %v", ref, err)
+	}
+}
+
+// A publish refused after the Tool would have been made leaves no Tool.
+func TestRefusedPublishLeavesNoTool(t *testing.T) {
+	s := toolFarm(t)
+	files := notesTool("echo hi > out.txt")
+	files["tool.yaml"] = strings.Replace(files["tool.yaml"], "tree: test/", "tree: nowhere/", 1)
+	code, out := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: putTree(t, s, "show-a", files).String()})
+	if code != http.StatusUnprocessableEntity || len(out.Errors) != 1 || out.Errors[0].Path != "test.tree" {
+		t.Fatalf("publish: %d %+v", code, out)
+	}
+	var l c4v1.ToolList
+	if err := s.Client.List(context.Background(), &l); err != nil || len(l.Items) != 0 {
+		t.Fatalf("%d tools left, %v", len(l.Items), err)
 	}
 }
 

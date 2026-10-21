@@ -126,9 +126,6 @@ type PublishArgs struct {
 	Wait time.Duration
 	// Poll is how often the test's state is read (default 2s).
 	Poll time.Duration
-	// TestedIn publishes one of a release's own tools as tested in that
-	// release, running no test on the farm (c4 farm up, as the farm admin).
-	TestedIn string
 }
 
 // PublishTool uploads a tool's folder (only what the farm lacks), asks the
@@ -154,7 +151,7 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 		return err
 	}
 	var r api.ToolPublishResponse
-	req := api.ToolPublishRequest{View: v.ID.String(), Farm: a.Farm, DryRun: a.DryRun, TestedIn: a.TestedIn}
+	req := api.ToolPublishRequest{View: v.ID.String(), Farm: a.Farm, DryRun: a.DryRun}
 	if err := doChecked(ctx, c, "POST", "/tools/"+a.Project, req, &r); err != nil {
 		return err
 	}

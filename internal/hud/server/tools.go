@@ -392,23 +392,18 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The Tool: one name space with agent configurations.
+	// The Tool: one name space with agent configurations. It is made only
+	// once nothing is left to refuse, so a refused publish leaves none.
 	var obj c4v1.Tool
 	key := types.NamespacedName{Namespace: ns, Name: tool.Name}
 	err = s.Client.Get(ctx, key, &obj)
-	if apierrors.IsNotFound(err) {
-		obj = c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: tool.Name,
-			Labels: map[string]string{"app.kubernetes.io/managed-by": "c4-hud"}}}
-		if err = s.Client.Create(ctx, &obj); apierrors.IsAlreadyExists(err) {
-			err = s.Client.Get(ctx, key, &obj)
-		}
-	}
-	if err != nil {
+	exists := err == nil
+	if err != nil && !apierrors.IsNotFound(err) {
 		s.Log.Error(err, "tool publish", "tool", key.String())
-		fail(w, http.StatusBadGateway, "the farm could not record %s just now; try again shortly", tool.Name)
+		fail(w, http.StatusBadGateway, "the farm could not read %s just now; try again shortly", tool.Name)
 		return
 	}
-	if agentConfig(&obj) {
+	if exists && agentConfig(&obj) {
 		refuse(api.FieldError{Path: "name", Message: fmt.Sprintf("%s is an agent configuration on this farm; choose another name", tool.Name),
 			Fix: "rename the tool in tool.yaml"})
 		return
@@ -416,11 +411,9 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 
 	// The version, and its test.
 	ver := c4v1.ToolVersion{View: published.ID.String(), Image: out.Image, Title: tool.Title, Summary: tool.Summary,
-		Kind: tool.Kind, Project: project, By: actorOf(r, v), At: metav1.Now()}
+		Kind: tool.Kind, Project: project, Release: release, By: actorOf(r, v), At: metav1.Now()}
 	var req *api.SubmitRequest
 	switch {
-	case inRelease:
-		ver.Test = c4v1.ToolTest{State: c4v1.ToolTestOK, TestedIn: release}
 	case tool.Test == nil:
 		ver.Test = c4v1.ToolTest{State: c4v1.ToolTestUntested}
 	default:
@@ -440,13 +433,28 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		req.Project, req.Name = project, s.testJobName(ctx, projectNS, tool.Name, scope, ver.View)
 		ver.Test = c4v1.ToolTest{Job: projectNS + "/" + req.Name, State: c4v1.ToolTestRunning}
 	}
+	if !exists {
+		obj = c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: tool.Name,
+			Labels: map[string]string{"app.kubernetes.io/managed-by": "c4-hud"}}}
+		if err = s.Client.Create(ctx, &obj); apierrors.IsAlreadyExists(err) {
+			err = s.Client.Get(ctx, key, &obj)
+		}
+		if err != nil {
+			s.Log.Error(err, "tool publish", "tool", key.String())
+			fail(w, http.StatusBadGateway, "the farm could not record %s just now; try again shortly", tool.Name)
+			return
+		}
+	}
 	got, fresh, err := s.addVersion(ctx, key, ver)
 	if err != nil {
+		if !exists {
+			s.Client.Delete(ctx, &obj) // no version, no Tool
+		}
 		s.Log.Error(err, "tool publish: version", "tool", key.String())
 		fail(w, http.StatusBadGateway, "the farm could not record %s's version just now; try again shortly", tool.Name)
 		return
 	}
-	out.Version = got.Version
+	out.Version, out.Release = got.Version, got.Release
 	ts := testState(got.Test)
 	out.Test = &ts
 	if !fresh {
@@ -469,11 +477,12 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	note := fmt.Sprintf("%s %s published (%s), image %s", tool.Name, got.Version, published.ID, out.Image)
+	if got.Release != "" {
+		note += ", released " + got.Release
+	}
 	switch got.Test.State {
 	case c4v1.ToolTestRunning:
 		note += ", testing in " + got.Test.Job
-	case c4v1.ToolTestOK:
-		note += ", tested in release " + got.Test.TestedIn
 	case c4v1.ToolTestUntested:
 		note += ", untested"
 	}
@@ -494,18 +503,25 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 // addVersion records ver as the tool's next version, v<N> numbered in the
 // same write so two publishes at once cannot both be v5. A tree that is
 // already a version is that version, returned with fresh false; one whose
-// test failed is tested again, as the same version. Versions past
-// MaxToolVersions move to Earlier (a failed one is dropped: nothing ran it).
+// test failed is tested again, as the same version (from Earlier, as a new
+// one). Versions past MaxToolVersions move to Earlier with how their tests
+// ended, failed ones too, so a failed tree stays refused by its ID; past
+// MaxEarlierVersions the oldest go, and no longer resolve.
 func (s *Server) addVersion(ctx context.Context, key types.NamespacedName, ver c4v1.ToolVersion) (c4v1.ToolVersion, bool, error) {
 	for try := 0; ; try++ {
 		var obj c4v1.Tool
 		if err := s.Client.Get(ctx, key, &obj); err != nil {
 			return ver, false, err
 		}
-		for _, e := range obj.Status.Earlier {
-			if e.View == ver.View {
+		for i, e := range obj.Status.Earlier {
+			if e.View != ver.View {
+				continue
+			}
+			if e.State != c4v1.ToolTestFailed {
 				return earlierVersion(e), false, nil
 			}
+			obj.Status.Earlier = slices.Delete(obj.Status.Earlier, i, i+1)
+			break
 		}
 		got, again, n := ver, false, 0
 		for i := range obj.Status.Versions {
@@ -525,12 +541,13 @@ func (s *Server) addVersion(ctx context.Context, key types.NamespacedName, ver c
 			obj.Status.Versions = append(obj.Status.Versions, got)
 			if k := len(obj.Status.Versions) - c4v1.MaxToolVersions; k > 0 {
 				for _, x := range obj.Status.Versions[:k] {
-					if x.Test.State == c4v1.ToolTestOK || x.Test.State == c4v1.ToolTestUntested {
-						obj.Status.Earlier = append(obj.Status.Earlier, c4v1.ToolVersionRef{Version: x.Version, View: x.View,
-							Image: x.Image, Untested: x.Test.State == c4v1.ToolTestUntested})
-					}
+					obj.Status.Earlier = append(obj.Status.Earlier, c4v1.ToolVersionRef{Version: x.Version, View: x.View,
+						Image: x.Image, State: x.Test.State, Release: x.Release})
 				}
 				obj.Status.Versions = obj.Status.Versions[k:]
+				if e := len(obj.Status.Earlier) - c4v1.MaxEarlierVersions; e > 0 {
+					obj.Status.Earlier = obj.Status.Earlier[e:]
+				}
 			}
 		}
 		err := s.Client.Status().Update(ctx, &obj)
@@ -545,11 +562,7 @@ func (s *Server) addVersion(ctx context.Context, key types.NamespacedName, ver c
 
 // earlierVersion is an Earlier entry as a version.
 func earlierVersion(e c4v1.ToolVersionRef) c4v1.ToolVersion {
-	state := c4v1.ToolTestOK
-	if e.Untested {
-		state = c4v1.ToolTestUntested
-	}
-	return c4v1.ToolVersion{Version: e.Version, View: e.View, Image: e.Image, Test: c4v1.ToolTest{State: state}}
+	return c4v1.ToolVersion{Version: e.Version, View: e.View, Image: e.Image, Release: e.Release, Test: c4v1.ToolTest{State: e.State}}
 }
 
 // toolSpec is the Tool spec a version declares: its tree, what its units
@@ -851,10 +864,12 @@ func offered(ver *c4v1.ToolVersion) bool {
 }
 
 // toolAt is a published tool at a version, read from its tree in the
-// project's store (authoring.Farm's Tool): "" for the one in use, v<N>
-// for any version offered (the earlier ones too, so a job that ran one can
-// run it again), or a tree's C4 ID for any published tree of the tool the
-// project's store holds.
+// project's store (authoring.Farm's Tool): "" for the one in use, or v<N>
+// or a tree's C4 ID for any version offered, the earlier ones too, so a
+// job that ran one can run it again. Only a tree that was a version of
+// the tool resolves, and only one that passed its test or was offered
+// untested: a tree with the tool's name that was never published, or
+// whose test failed, is refused.
 func (s *Server) toolAt(ctx context.Context, m *model, project, name, version string) (*schema.Tool, authoring.ToolRef, error) {
 	tools, scope, err := s.projectTools(ctx, m, project)
 	if err != nil {
@@ -871,18 +886,6 @@ func (s *Server) toolAt(ctx context.Context, m *model, project, name, version st
 		version = t.Status.Version
 	}
 	ver := findVersion(&t, version)
-	if ver == nil && strings.HasPrefix(version, "c4") {
-		// A tree of the tool no version names here: the store's own.
-		tt, err := s.readPublished(ctx, project, version)
-		if err != nil {
-			return nil, authoring.ToolRef{}, fmt.Errorf("%w: %s has no tree %s in %s", authoring.ErrNoTool, name, version, project)
-		}
-		if tt.tool.Name != name {
-			return nil, authoring.ToolRef{}, fmt.Errorf("%w: tree %s is %s, not %s", authoring.ErrNoTool, version, tt.tool.Name, name)
-		}
-		ref := authoring.ToolRef{Name: name, Version: version, View: version, Image: tt.lock.Images[tt.tool.Runs.Image], Scope: scope[name]}
-		return tt.tool, ref, nil
-	}
 	if ver == nil {
 		return nil, authoring.ToolRef{}, fmt.Errorf("%w: %s has no %s in %s", authoring.ErrNoTool, name, version, project)
 	}
@@ -987,7 +990,7 @@ func summary(t c4v1.Tool, scope string) api.ToolSummary {
 }
 
 func testState(t c4v1.ToolTest) api.ToolTestState {
-	return api.ToolTestState{Job: t.Job, State: t.State, Seconds: t.Seconds, Reason: t.Reason, TestedIn: t.TestedIn}
+	return api.ToolTestState{Job: t.Job, State: t.State, Seconds: t.Seconds, Reason: t.Reason}
 }
 
 // handleTool is GET /tools/{project}/{tool}[?version=v<N>|c4…].

@@ -155,25 +155,32 @@ spec:
             properties:
               earlier:
                 description: |-
-                  Earlier are the versions that left Versions, oldest first: their
-                  trees, so tool@v<N> still resolves and a job that ran one can run
-                  it again.
+                  Earlier are the versions that left Versions, oldest first (at most
+                  MaxEarlierVersions): their trees and how their tests ended, so
+                  tool@v<N> and tool@<tree> still resolve a version that ran, and
+                  refuse one that failed.
                 items:
                   description: |-
                     ToolVersionRef is a version's tree and image, all a job needs to run
-                    it.
+                    it, and how its test ended.
                   properties:
                     image:
                       type: string
-                    untested:
-                      description: Untested is set for a version offered without a
-                        test that passed.
-                      type: boolean
+                    release:
+                      description: |-
+                        Release is the release the tree shipped in, for a release's own
+                        tool.
+                      type: string
+                    state:
+                      description: 'State is the version''s test state: ok, untested
+                        or failed.'
+                      type: string
                     version:
                       type: string
                     view:
                       type: string
                   required:
+                  - state
                   - version
                   - view
                   type: object
@@ -216,6 +223,12 @@ spec:
                       description: Project is the project whose store the tree was
                         published from.
                       type: string
+                    release:
+                      description: |-
+                        Release is the release the tree shipped in, for a release's own
+                        tool: the server knows their trees' IDs, and the tree is published
+                        as the release built it, tool.lock and all. Its test still runs.
+                      type: string
                     summary:
                       type: string
                     test:
@@ -243,13 +256,6 @@ spec:
                           - ok
                           - failed
                           - untested
-                          type: string
-                        testedIn:
-                          description: |-
-                            TestedIn is the release whose own tests ran the version, for the
-                            tools a release ships: the server knows their trees' IDs, and only
-                            a tree matching one is tested in its release. The farm runs no test
-                            of its own, and State is ok.
                           type: string
                       required:
                       - state

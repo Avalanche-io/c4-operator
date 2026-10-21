@@ -20,26 +20,35 @@ func CopyTo(dir, name string) (string, error) {
 }
 
 // ReleaseTrees are the prebuilt tools' trees by C4 ID, each mapped to
-// release: the IDs c4 farm up's folders have when it publishes them. They
-// are final only in a release build, whose folders carry the tool.lock the
-// release wrote; with any folder lacking one there are none.
+// release: the IDs c4 farm up's folders have when it publishes them. A
+// tree's ID is final only once its folder carries the tool.lock the
+// release wrote, so each folder is judged on its own: one without a lock
+// is left out, and the others still count.
 func ReleaseTrees(release string) (map[string]string, error) {
+	folders := map[string]fs.FS{}
+	for _, name := range Names {
+		f, err := Folder(name)
+		if err != nil {
+			return nil, err
+		}
+		folders[name] = f
+	}
+	return releaseTrees(release, folders)
+}
+
+func releaseTrees(release string, folders map[string]fs.FS) (map[string]string, error) {
 	tmp, err := os.MkdirTemp("", "c4-release-tools-")
 	if err != nil {
 		return nil, err
 	}
 	defer os.RemoveAll(tmp)
 	out := map[string]string{}
-	for _, name := range Names {
-		f, err := Folder(name)
-		if err != nil {
-			return nil, err
-		}
+	for name, f := range folders {
 		if _, err := fs.Stat(f, "tool.lock"); err != nil {
-			return nil, nil
+			continue
 		}
-		dir, err := CopyTo(tmp, name)
-		if err != nil {
+		dir := filepath.Join(tmp, name)
+		if err := os.CopyFS(dir, f); err != nil {
 			return nil, err
 		}
 		v, err := view.ScanDir(dir)

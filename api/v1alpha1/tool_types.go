@@ -63,27 +63,35 @@ type ToolStatus struct {
 	// MaxToolVersions), whether their tests passed or not.
 	// +optional
 	Versions []ToolVersion `json:"versions,omitempty"`
-	// Earlier are the versions that left Versions, oldest first: their
-	// trees, so tool@v<N> still resolves and a job that ran one can run
-	// it again.
+	// Earlier are the versions that left Versions, oldest first (at most
+	// MaxEarlierVersions): their trees and how their tests ended, so
+	// tool@v<N> and tool@<tree> still resolve a version that ran, and
+	// refuse one that failed.
 	// +optional
 	Earlier []ToolVersionRef `json:"earlier,omitempty"`
 }
 
 // MaxToolVersions bounds ToolStatus.Versions; the oldest go first, into
-// Earlier.
-const MaxToolVersions = 32
+// Earlier. MaxEarlierVersions bounds Earlier (a few hundred bytes each);
+// a version past both no longer resolves, and is refused.
+const (
+	MaxToolVersions    = 32
+	MaxEarlierVersions = 1000
+)
 
 // ToolVersionRef is a version's tree and image, all a job needs to run
-// it.
+// it, and how its test ended.
 type ToolVersionRef struct {
 	Version string `json:"version"`
 	View    string `json:"view"`
 	// +optional
 	Image string `json:"image,omitempty"`
-	// Untested is set for a version offered without a test that passed.
+	// State is the version's test state: ok, untested or failed.
+	State string `json:"state"`
+	// Release is the release the tree shipped in, for a release's own
+	// tool.
 	// +optional
-	Untested bool `json:"untested,omitempty"`
+	Release string `json:"release,omitempty"`
 }
 
 // ToolVersion is one publish of a tool.
@@ -105,6 +113,11 @@ type ToolVersion struct {
 	// Project is the project whose store the tree was published from.
 	// +optional
 	Project string `json:"project,omitempty"`
+	// Release is the release the tree shipped in, for a release's own
+	// tool: the server knows their trees' IDs, and the tree is published
+	// as the release built it, tool.lock and all. Its test still runs.
+	// +optional
+	Release string `json:"release,omitempty"`
 	// By is who published it, and At when.
 	By string      `json:"by"`
 	At metav1.Time `json:"at"`
@@ -129,12 +142,6 @@ type ToolTest struct {
 	// Reason says why it failed.
 	// +optional
 	Reason string `json:"reason,omitempty"`
-	// TestedIn is the release whose own tests ran the version, for the
-	// tools a release ships: the server knows their trees' IDs, and only
-	// a tree matching one is tested in its release. The farm runs no test
-	// of its own, and State is ok.
-	// +optional
-	TestedIn string `json:"testedIn,omitempty"`
 }
 
 // Tool test states (ToolTest.State).

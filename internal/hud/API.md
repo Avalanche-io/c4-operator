@@ -951,7 +951,7 @@ space. The schemas are served at `GET /schema/{submit,tool,lock}`.
 ```
 { view: c4id, farm?: bool, dryRun?: bool }
   ->  { ok, errors?: [ { path, message, fix } ], tool, version, view, image, scope, lock,
-        test: { job, state: running|ok|failed|untested, testedIn? } }
+        release?, test: { job, state: running|ok|failed|untested } }
 ```
 
 `view` is the folder's tree, already stored through `PUT /objects` and
@@ -968,6 +968,8 @@ publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
   refusal uses, and a tool an agent publishes with no `test`;
 - refuses a name an agent's configuration holds ("render is an agent
   configuration on this farm; choose another name");
+- writes the `Tool` only once nothing is left to refuse, so a refused
+  publish leaves none behind;
 - pins every image the tool names (`runs.image`, each sidecar's) by digest
   into `tool.lock` (`c4: lock/1`, `GET /schema/lock`), writing the
   published tree (`view` in the answer) with it, so the tree's ID covers
@@ -980,9 +982,10 @@ publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
 - with `dryRun`, answers `200` with the would-be `tool.lock` and `view`,
   and writes nothing;
 - takes a tree that is one of the release's own tools (the server knows
-  their IDs; the release builds them with `tool.lock` written) as it is,
-  tested in its release (`test: {state: ok, testedIn}`), and runs no test.
-  No other tree is tested in a release; the request cannot say so;
+  their IDs; the release builds each with its `tool.lock` written) as it
+  is, its pins kept, and books it as released (`release`). Its test runs
+  on the farm like any other's. No other tree is a release's, and the
+  request cannot say otherwise;
 - answers `200` with the version a tree already is, testing nothing again,
   unless that version's test failed, when it is tested again as the same
   version;
@@ -1021,7 +1024,7 @@ with no version offered yet is not listed.
 ```
 { name, title, summary, kind, version, view, image, scope, untested?,
   tool, params, paramSchema, frames?, needs?, test: { job, state, seconds?, reason? },
-  versions: [ { version, view, image, by, at, test } ], earlier?: [ { version, view, image, test } ] }
+  versions: [ { version, view, image, by, at, release?, test } ], earlier?: [ { version, view, image, release?, test } ] }
 ```
 
 A version of a tool (the one in use by default), by name or by tree:
@@ -1030,10 +1033,12 @@ to draw from; `params` as `tool.yaml` writes them; `paramSchema` the JSON
 Schema of a submission's `with` (a param is required when it has no
 default; `x-show` and `x-from` carry `show` and `from`, and a
 `RANGE_EXPR` has its pattern); and its test. `earlier` are the versions
-older than the last 32, by tree, which still run: a submission's
-`tool@v<N>` resolves them, and `tool@c4…` any published tree of the tool
-the project's store holds. `c4 farm tool publish` polls this until
-`test.state` is `ok` or `failed`.
+older than the last 32 (up to 1000 more), by tree and how their tests
+ended. A submission's `tool@v<N>` or `tool@c4…` resolves only a tree that
+was a version of the tool, and only one whose test passed or that was
+offered untested: a tree that was never published, or whose test failed,
+is refused, however its `tool.yaml` names it. `c4 farm tool publish`
+polls this until `test.state` is `ok` or `failed`.
 
 ## Relayed decisions
 
