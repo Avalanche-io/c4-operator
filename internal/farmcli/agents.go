@@ -10,9 +10,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
-	"text/tabwriter"
-
-	"github.com/Avalanche-io/c4-operator/internal/agent"
 )
 
 // AgentsArgs are `c4 farm agents add`'s.
@@ -25,68 +22,82 @@ type AgentsArgs struct {
 	// settings.json are in (default $CLAUDE_CONFIG_DIR, else ~/.claude).
 	ConfigDir string
 	Yes       bool
-	// AgentBin is the c4-agent the Stop hook runs (default c4-agent on
-	// PATH); Harness is the member store (default c4-agent's own).
+	// AgentBin is c4-agent, whose CLI keeps the members (default
+	// c4-agent on PATH).
 	AgentBin string
-	Harness  *agent.Harness
 }
 
 // hookCommand is what marks c4-agent's Stop hook in a settings.json.
 const hookCommand = "checkpoint --hook"
 
-func (a *AgentsArgs) harness() (*agent.Harness, error) {
-	if a.Harness != nil {
-		return a.Harness, nil
+// agentBin is c4-agent, by its absolute path, for the hook to name.
+func (a *AgentsArgs) agentBin() (string, error) {
+	if a.AgentBin != "" {
+		return a.AgentBin, nil
 	}
-	home, err := agent.DefaultHome()
+	p, err := exec.LookPath("c4-agent")
 	if err != nil {
-		return nil, err
+		return "", errors.New("c4-agent is not on PATH; brew install avalanche-io/tap/c4 installs it beside c4 farm")
 	}
-	return agent.New(&agent.Store{Dir: home}, agent.NewCLI()), nil
+	return filepath.Abs(p)
+}
+
+// agentCmd runs c4-agent and returns what it printed; its own message is
+// the error when it fails.
+func agentCmd(ctx context.Context, bin string, args ...string) (string, error) {
+	out, err := exec.CommandContext(ctx, bin, args...).CombinedOutput()
+	if err != nil {
+		msg := strings.TrimSpace(string(out))
+		if msg == "" {
+			msg = err.Error()
+		}
+		return "", fmt.Errorf("c4-agent %s: %s", args[0], msg)
+	}
+	return string(out), nil
 }
 
 // AddAgent is `c4 farm agents add NAME`: the Claude Code session becomes
-// a member the farm can run, and its config dir's settings.json gets the
-// Stop hook that saves each turn the member ends (shown, and asked once).
-// Both are idempotent.
+// a member the farm can run (c4-agent register), and its config dir's
+// settings.json gets c4-agent's Stop hook, which saves each turn the
+// member ends (shown, and asked once). Both are idempotent.
 func AddAgent(ctx context.Context, o Out, a AgentsArgs) error {
 	if a.Name == "" {
 		return errors.New("give the agent's name: c4 farm agents add NAME")
 	}
-	bin := a.AgentBin
-	if bin == "" {
-		p, err := exec.LookPath("c4-agent")
-		if err != nil {
-			return errors.New("c4-agent is not on PATH; brew install avalanche-io/tap/c4 installs it beside c4 farm")
-		}
-		if bin, err = filepath.Abs(p); err != nil {
-			return err
-		}
-	}
-	h, err := a.harness()
+	bin, err := a.agentBin()
 	if err != nil {
 		return err
+	}
+	cdArgs := []string{}
+	if a.ConfigDir != "" {
+		cdArgs = []string{"--config-dir", a.ConfigDir}
 	}
 	session := a.Session
 	if session == "" {
-		paths, err := agent.FindByAgentName(a.ConfigDir, a.Name)
+		out, err := agentCmd(ctx, bin, append([]string{"find", "--agent-name", a.Name}, cdArgs...)...)
 		if err != nil {
 			return err
 		}
-		if len(paths) == 0 {
+		first, _, _ := strings.Cut(strings.TrimSpace(out), "\n")
+		session, _, _ = strings.Cut(first, "\t")
+		if session == "" {
 			return fmt.Errorf("no Claude Code session names the agent %q; give its session with --session ID (claude --resume lists them)", a.Name)
 		}
-		session = strings.TrimSuffix(filepath.Base(paths[0]), ".jsonl")
 	}
-	m, err := h.Register(ctx, agent.RegisterOptions{Name: a.Name, Session: session, ConfigDir: a.ConfigDir})
-	if err != nil {
+	if _, err := agentCmd(ctx, bin, append([]string{"register", "--name", a.Name, "--session", session}, cdArgs...)...); err != nil {
 		return err
 	}
-	o.printf("member    %s · session %s\n", m.Name, m.Session)
+	o.printf("member    %s · session %s\n", a.Name, session)
 
-	cd, err := agent.ConfigDirOrDefault(a.ConfigDir)
-	if err != nil {
-		return err
+	cd := a.ConfigDir
+	if cd == "" {
+		if cd = os.Getenv("CLAUDE_CONFIG_DIR"); cd == "" {
+			home, err := os.UserHomeDir()
+			if err != nil {
+				return err
+			}
+			cd = filepath.Join(home, ".claude")
+		}
 	}
 	settings := filepath.Join(cd, "settings.json")
 	b, err := os.ReadFile(settings)
@@ -97,7 +108,11 @@ func AddAgent(ctx context.Context, o Out, a AgentsArgs) error {
 		o.printf("hook      already in %s\n", settings)
 		return nil
 	}
-	merged, added, err := withStopHook(b, bin)
+	frag, err := agentCmd(ctx, bin, "hooks")
+	if err != nil {
+		return err
+	}
+	merged, added, err := withStopHook(b, []byte(frag))
 	if err != nil {
 		return fmt.Errorf("%s: %w", settings, err)
 	}
@@ -126,11 +141,8 @@ func AddAgent(ctx context.Context, o Out, a AgentsArgs) error {
 
 // withStopHook is a settings.json with c4-agent's Stop hook added to its
 // hooks, every other key kept in the order written, and the group added.
-func withStopHook(settings []byte, bin string) ([]byte, string, error) {
-	frag, err := agent.HookSettings(bin)
-	if err != nil {
-		return nil, "", err
-	}
+func withStopHook(settings, frag []byte) ([]byte, string, error) {
+	var err error
 	var want struct {
 		Hooks struct {
 			Stop []json.RawMessage `json:"Stop"`
@@ -175,28 +187,20 @@ func withStopHook(settings []byte, bin string) ([]byte, string, error) {
 }
 
 // ListAgents is `c4 farm agents ls`: the members, whether each is busy,
-// idle or stopped, and its last saved turn.
+// idle or stopped, and its last saved turn, as c4-agent ls gives them.
 func ListAgents(ctx context.Context, o Out, a AgentsArgs) error {
-	h, err := a.harness()
+	bin, err := a.agentBin()
 	if err != nil {
 		return err
 	}
-	sts, err := h.Status(ctx)
+	out, err := agentCmd(ctx, bin, "ls")
 	if err != nil {
 		return err
 	}
-	if len(sts) == 0 {
+	if strings.Count(strings.TrimSpace(out), "\n") == 0 {
 		o.printf("no agents yet; c4 farm agents add NAME adds a Claude Code session\n")
 		return nil
 	}
-	tw := tabwriter.NewWriter(o.W, 2, 4, 2, ' ', 0)
-	fmt.Fprintln(tw, "AGENT\tSTATE\tSESSION\tLAST TURN SAVED")
-	for _, s := range sts {
-		last := "-"
-		if s.Last != nil {
-			last = o.Clock.At(s.Last.At)
-		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", s.Member.Name, s.State, s.Member.Session, last)
-	}
-	return tw.Flush()
+	o.printf("%s", out)
+	return nil
 }
