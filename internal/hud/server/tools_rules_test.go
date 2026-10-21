@@ -62,7 +62,7 @@ func TestWhoPublishesTools(t *testing.T) {
 		Unit: &api.UnitViewer{Namespace: "show-a", Job: "j", Unit: "0", Grant: "project"}}
 	view := putTree(t, s, "show-a", untested("echo hi"))
 	body := api.ToolPublishRequest{View: view.String()}
-	for as, want := range map[string]string{"artist": "pipeline TD or farm admin", "wrangler": "pipeline TD or farm admin", "unit": "a unit does not publish"} {
+	for as, want := range map[string]string{"artist": "takes the pipeline TD role", "wrangler": "takes the pipeline TD role", "unit": "a unit does not publish"} {
 		var out map[string]string
 		if code := call(t, s, http.MethodPost, "/api/v1/tools/show-a?as="+as, body, &out); code != http.StatusForbidden || !strings.Contains(out["error"], want) {
 			t.Errorf("%s: %d %v", as, code, out)

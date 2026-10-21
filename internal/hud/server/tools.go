@@ -224,11 +224,32 @@ func mayPublish(v *api.Viewer, farm bool) string {
 	case v.Unit != nil:
 		return "a unit does not publish tools, whatever its farm access; a pipeline TD publishes them"
 	case farm && v.Role != "farm-admin":
-		return "publishing a tool to the whole farm takes the farm admin role"
+		return "publishing a tool to the whole farm takes the farm admin role: the right to create tools in the operator's namespace, or a sign-in group the HUD maps to farm-admin (--hud-role-groups GROUP=farm-admin)"
 	case v.Role != "pipeline-td" && v.Role != "farm-admin":
-		return "publishing a tool takes the pipeline TD or farm admin role"
+		return "publishing a tool takes the pipeline TD role: c4-project-admin in the project (c4 farm invite NAME --project P --role project-admin), or a sign-in group the HUD maps to pipeline-td"
 	}
 	return ""
+}
+
+// publishRole is the viewer with the role RBAC gives them for publishing,
+// when their sign-in's groups give less: whoever may create tools in the
+// operator's namespace is a farm admin for it, and in the project's
+// namespace a pipeline TD. Development viewers keep their own roles.
+func (s *Server) publishRole(r *http.Request, v *api.Viewer, projectNS string) *api.Viewer {
+	if v.Unit != nil || s.DevViewers != nil || v.Role == "farm-admin" {
+		return v
+	}
+	may := func(ns string) bool {
+		return ns != "" && s.authorize(r.Context(), r, v, ns, "create", "tools", "") == nil
+	}
+	out := *v
+	switch {
+	case may(s.Namespace):
+		out.Role = "farm-admin"
+	case v.Role != "pipeline-td" && may(projectNS):
+		out.Role = "pipeline-td"
+	}
+	return &out
 }
 
 // agentConfig says whether a Tool is an agent's configuration: one no
@@ -273,13 +294,13 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		failBody(w, err)
 		return
 	}
-	if why := mayPublish(v, body.Farm); why != "" {
-		fail(w, http.StatusForbidden, "%s", why)
-		return
-	}
 	project, projectNS, err := s.project(m, v, r.PathValue("project"), "")
 	if err != nil || s.Stores == nil {
 		fail(w, http.StatusNotFound, "no project %s", r.PathValue("project"))
+		return
+	}
+	if why := mayPublish(s.publishRole(r, v, projectNS), body.Farm); why != "" {
+		fail(w, http.StatusForbidden, "%s", why)
 		return
 	}
 	ns, scope := projectNS, "project"

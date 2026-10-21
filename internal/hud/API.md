@@ -929,7 +929,14 @@ and what the difference would cost an hour at the pool's burst price.
 Every control is a POST with a JSON body. In the real backend each one is one
 Kubernetes write: the user must be allowed that write (a SubjectAccessReview
 for the verb and object), the HUD's service account makes it, and an Event on
-the object names the user. Success is `200` with:
+the object names the user. A refusal (`403`) says what the person tried in
+the farm's words, in which project, and the role for people that allows it
+with how to get it ("maya may not remove sh010-comp-v001 in saltmarsh: that
+takes the c4-wrangler role there (c4 farm invite maya --project saltmarsh
+--role wrangler, by a project admin)"). Publishing a tool reads the role
+from RBAC as well as from the sign-in's groups: whoever may create tools in
+the project is its pipeline TD, and in the operator's namespace a farm
+admin. Success is `200` with:
 
 ```
 { ok: true, message, job? | node? }

@@ -53,9 +53,46 @@ func (s *Server) authorize(ctx context.Context, r *http.Request, v *api.Viewer, 
 		return err
 	}
 	if !ok {
-		return fmt.Errorf("%s may not %s %s %s", v.User, verb, resource, name)
+		return errors.New(s.refusal(v.User, ns, verb, resource, name))
 	}
 	return nil
+}
+
+// actionWords is what a Kubernetes write does in the farm's words, and
+// the role for people (config/rbac/people.yaml) that allows it.
+var actionWords = map[string]struct{ does, role string }{
+	"create workjobs":         {"submit work", "c4-artist"},
+	"patch workjobs":          {"change %s (hold, boost, steer, requeue or decide)", "c4-artist"},
+	"delete workjobs":         {"remove %s", "c4-wrangler"},
+	"create materializations": {"submit work that reads a tree", "c4-artist"},
+	"create agentbundles":     {"run agents", "c4-artist"},
+	"patch agentbundles":      {"hold or resume %s", "c4-artist"},
+	"delete agentbundles":     {"remove %s", "c4-artist"},
+	"patch capacityrequests":  {"approve burst capacity", "c4-wrangler"},
+	"delete submitgrants":     {"revoke the grant %s", "c4-wrangler"},
+	"patch nodes":             {"disable or enable the node %s", ""},
+}
+
+// refusal says, in the farm's words, what a person may not do, where, and
+// how they would get the right to.
+func (s *Server) refusal(user, ns, verb, resource, name string) string {
+	where := ns
+	if m := s.current(); m != nil && m.nsProject[ns] != "" {
+		where = m.nsProject[ns]
+	}
+	w, ok := actionWords[verb+" "+resource]
+	if !ok {
+		return fmt.Sprintf("%s may not %s %s %s in %s; a farm admin can give the right", user, verb, resource, name, where)
+	}
+	does := w.does
+	if strings.Contains(does, "%s") {
+		does = fmt.Sprintf(does, name)
+	}
+	if w.role == "" {
+		return fmt.Sprintf("%s may not %s: that is a farm admin's, for the whole farm", user, does)
+	}
+	return fmt.Sprintf("%s may not %s in %s: that takes the %s role there (c4 farm invite %s --project %s --role %s, by a project admin)",
+		user, does, where, w.role, user, where, strings.TrimPrefix(w.role, "c4-"))
 }
 
 // Request bodies: a control's is small; an object list's and a view's are
