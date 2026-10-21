@@ -236,12 +236,16 @@ makes what the runner needs, and running it again makes nothing new:
   the machine's Node, with the host-runner toleration. A pool of that name
   that selects other machines, or runs someone else's work, is refused;
 - the runner folder, `<agents home>/runner/`: its `kubeconfig`, which reads
-  its token from `tokens/kube`, and `enrolled.json` (node, owner, pool).
+  its token from `tokens/kube`, and `enrolled.json` (node, owner, pool);
+- the blocks' own config directory, `<agents home>/blocks-env`, filled from
+  the base environment. `enroll` says whether its person has signed in
+  there yet (`blocksSignedIn` with `--json`), and how to, once.
 
 On an enrolled machine `c4-agent runner` needs no flags: it takes its node,
 owner and kubeconfig from the enrollment. It keeps its tokens there fresh
 itself, renewing each at half its 7-day life: `kube` for the farm's API,
-`hud` for the HUD, and `signer` for the certificate issuer. A machine left
+`hud` for the HUD (`--observe` uses it without `--hud-token-file`), and
+`signer` for the certificate issuer (`--signer`, likewise). A machine left
 off longer than a token's life says to enroll it again.
 
 - It registers a Node for the machine, labeled `c4.avalanche.io/host=<node>`

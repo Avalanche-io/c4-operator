@@ -80,6 +80,11 @@ type Enrolled struct {
 	Kubeconfig string   `json:"kubeconfig"`
 	Tokens     string   `json:"tokens"`
 	Made       []string `json:"made"`
+	// BlocksEnv is the config directory the machine's blocks run in, and
+	// BlocksSignedIn whether its person has signed in there yet (c4-agent
+	// enroll fills both; Enroll leaves them).
+	BlocksEnv      string `json:"blocksEnv,omitempty"`
+	BlocksSignedIn bool   `json:"blocksSignedIn"`
 }
 
 // Enroll enrolls a machine. Running it again changes nothing but the

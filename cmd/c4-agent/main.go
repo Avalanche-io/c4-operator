@@ -459,6 +459,9 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		if *signerToken == "" {
 			*signerToken = agent.TokenFile(tokens, "signer")
 		}
+		if *hudToken == "" {
+			*hudToken = agent.TokenFile(tokens, "hud")
+		}
 	}
 	if *kubeconfig != "" {
 		os.Setenv("KUBECONFIG", *kubeconfig)
@@ -611,6 +614,11 @@ func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	if err != nil {
 		return err
 	}
+	// the blocks' own config directory, and whether its person signed in
+	if e.BlocksEnv, err = agent.PrepareBlocksEnv(h.Store.Dir); err != nil {
+		return err
+	}
+	e.BlocksSignedIn, _ = agent.NewCLI().SignedIn(ctx, e.BlocksEnv)
 	if *asJSON {
 		enc := json.NewEncoder(out)
 		enc.SetIndent("", "  ")
@@ -620,7 +628,11 @@ func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	for _, m := range e.Made {
 		fmt.Fprintf(out, "  made %s\n", m)
 	}
-	fmt.Fprintf(out, "its kubeconfig: %s\nstart its runner: c4-agent runner\n", e.Kubeconfig)
+	fmt.Fprintf(out, "its kubeconfig: %s\n", e.Kubeconfig)
+	if !e.BlocksSignedIn {
+		fmt.Fprintf(out, "its blocks run in %s, not signed in yet: sign in there once, through Anthropic's own flow (CLAUDE_CONFIG_DIR=%s claude)\n", e.BlocksEnv, e.BlocksEnv)
+	}
+	fmt.Fprintln(out, "start its runner: c4-agent runner")
 	return nil
 }
 
