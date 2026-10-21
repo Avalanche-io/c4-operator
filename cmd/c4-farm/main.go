@@ -23,6 +23,8 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"golang.org/x/term"
+
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
 	"github.com/Avalanche-io/c4-operator/internal/localfarm"
@@ -979,11 +981,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 // an agent's tool.
 func isTerminal(r io.Reader) bool {
 	f, ok := r.(*os.File)
-	if !ok {
-		return false
-	}
-	fi, err := f.Stat()
-	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+	// a terminal, not merely a character device: a background job's stdin
+	// is /dev/null, which is one too, and nobody is there to answer
+	return ok && term.IsTerminal(int(f.Fd()))
 }
 
 // applyApps adds C4 to each application chosen at up or login (every
@@ -1003,11 +1003,8 @@ func applyApps(w io.Writer, on []string) {
 // without it, and its line says how to finish.
 func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx context.Context, o farmcli.Out) error {
 	return func(ctx context.Context, o farmcli.Out) error {
-		bin, err := exec.LookPath("c4-agent")
+		bin, err := releaseAgent(ctx)
 		if err != nil {
-			return errors.New("this machine runs no agents yet: c4-agent is not on PATH (brew install mrjoshuak/tap/c4 brings it; then c4 farm integrate on)")
-		}
-		if bin, err = filepath.Abs(bin); err != nil {
 			return err
 		}
 		e, err := localfarm.EnrollMachine(ctx, bin, owner, 4)
@@ -1031,6 +1028,38 @@ func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx conte
 		fmt.Fprintf(o.W, "agents    this machine (%s) is enrolled for %s's agents and its runner is started; they run here once you sign in where they run\n", e.Node, e.Owner)
 		return signInBlocks(e, stdin, stdout)
 	}
+}
+
+// releaseAgent is the c4-agent of this c4-farm's own release: the one
+// beside it (Homebrew installs them together), else the first on the PATH;
+// one too old to enroll a machine is named, not used.
+func releaseAgent(ctx context.Context) (string, error) {
+	bin := ""
+	if exe, err := os.Executable(); err == nil {
+		if p := filepath.Join(filepath.Dir(exe), "c4-agent"); fileExists(p) {
+			bin = p
+		}
+	}
+	if bin == "" {
+		p, err := exec.LookPath("c4-agent")
+		if err != nil {
+			return "", errors.New("this machine runs no agents yet: c4-agent is not beside c4-farm or on the PATH (brew install mrjoshuak/tap/c4 brings it; then c4 farm integrate on)")
+		}
+		bin = p
+	}
+	bin, _ = filepath.Abs(bin)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, bin, "help").CombinedOutput()
+	if !strings.Contains(string(out), "enroll") {
+		return "", fmt.Errorf("this machine runs no agents yet: %s is a c4-agent too old to enroll a machine (brew upgrade mrjoshuak/tap/c4, or put the c4-agent beside c4-farm first on the PATH; then c4 farm integrate on)", tilde(bin))
+	}
+	return bin, nil
+}
+
+func fileExists(p string) bool {
+	fi, err := os.Stat(p)
+	return err == nil && !fi.IsDir()
 }
 
 // signInBlocks signs the person in, once, where the machine's blocks run:

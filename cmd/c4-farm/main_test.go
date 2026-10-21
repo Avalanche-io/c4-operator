@@ -124,3 +124,19 @@ func TestC4PathNote(t *testing.T) {
 		t.Errorf("no c4: %q", n)
 	}
 }
+
+// A terminal is a terminal: /dev/null (a background job's stdin) and a
+// pipe are not, though /dev/null is a character device.
+func TestIsTerminal(t *testing.T) {
+	devnull, err := os.Open(os.DevNull)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer devnull.Close()
+	r, w, _ := os.Pipe()
+	defer r.Close()
+	defer w.Close()
+	if isTerminal(devnull) || isTerminal(r) || isTerminal(strings.NewReader("y\n")) {
+		t.Error("something that is not a terminal counts as one")
+	}
+}

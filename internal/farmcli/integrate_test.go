@@ -197,3 +197,18 @@ func TestOffKeepsAnMCPEntryC4DidNotAdd(t *testing.T) {
 		t.Errorf("off removed the person's entry: %s\n%s", c, out.String())
 	}
 }
+
+// When the input ends (a script, /dev/null, a closed pipe), nobody has
+// answered: nothing is turned on, and nothing is recorded, so the person is
+// asked when they are there.
+func TestChooseEndOfInputIsNoAnswer(t *testing.T) {
+	cfg := &Config{}
+	found := []Detected{
+		{Name: Claude, Found: true, Question: "q?", DefaultYes: true, Runner: true},
+		{Name: "blender", Found: true, Question: "panel?"},
+	}
+	on, err := Choose(cfg, found, "", false, true, Out{W: &bytes.Buffer{}, In: strings.NewReader("")})
+	if err != nil || len(on) != 0 || len(cfg.Integrations) != 0 {
+		t.Errorf("end of input: %v %v %v", on, err, cfg.Integrations)
+	}
+}

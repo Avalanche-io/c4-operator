@@ -5,6 +5,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -143,5 +144,23 @@ func TestAgentServicePathAndRestart(t *testing.T) {
 				t.Errorf("%s: restarted a running service: %v", goos, calls)
 			}
 		}
+	}
+}
+
+// A service installed from a HOME that is not the account's (a test's or
+// script's temp folder) would run in the real session from there: refused
+// before anything is written or loaded, unless named.
+func TestAgentServiceRefusesAForeignHome(t *testing.T) {
+	home := t.TempDir()
+	svc := &AgentService{FarmBin: "/f", AgentBin: "/a", Home: home, OS: runtime.GOOS}
+	if runtime.GOOS != "darwin" && runtime.GOOS != "linux" {
+		t.Skip("no service here")
+	}
+	err := svc.Start(context.Background(), Out{W: &bytes.Buffer{}})
+	if err == nil || !strings.Contains(err.Error(), "not this account's home") {
+		t.Fatalf("foreign home: %v", err)
+	}
+	if _, err := os.Stat(svc.path()); !os.IsNotExist(err) {
+		t.Error("the service file was written")
 	}
 }

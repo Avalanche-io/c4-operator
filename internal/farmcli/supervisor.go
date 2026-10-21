@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -341,8 +342,15 @@ func xmlEscape(s string) string {
 // Start installs the service and starts it, replacing one installed
 // before: c4 farm agent start.
 func (s *AgentService) Start(ctx context.Context, o Out) error {
+	real := s.Ctl == nil
 	if err := s.fill(); err != nil {
 		return err
+	}
+	// launchd and systemd act on the account's own session: a service
+	// installed from another HOME (a test's, a script's temp folder) would
+	// run there, in the real session, so it is refused unless named
+	if u, err := user.Current(); real && err == nil && u.HomeDir != "" && filepath.Clean(s.Home) != filepath.Clean(u.HomeDir) && os.Getenv("C4_AGENT_SERVICE_HOME") != s.Home {
+		return fmt.Errorf("HOME is %s, not this account's home (%s): the service would run your session's agents from there; set C4_AGENT_SERVICE_HOME=%s to mean it", s.Home, u.HomeDir, s.Home)
 	}
 	if err := os.MkdirAll(filepath.Dir(s.log()), 0o755); err != nil {
 		return err

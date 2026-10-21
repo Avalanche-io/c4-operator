@@ -1,6 +1,7 @@
 package farmcli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
@@ -344,6 +345,20 @@ func RunnerQuestion() string {
 		") so this machine is one of the farm's runners. c4 farm integrate off takes it out."
 }
 
+// enterYes is a question whose Enter is yes, answered by a person: only
+// a line they ended counts, so the end of input (a script, /dev/null, a
+// closed pipe) is no, never a yes nobody gave.
+func enterYes(o Out, q string) (yes, answered bool) {
+	o.printf("%s [Y/n] ", q)
+	line, err := bufio.NewReader(o.In).ReadString('\n')
+	if err != nil {
+		o.printf("\n")
+		return false, false
+	}
+	a := strings.ToLower(strings.TrimSpace(line))
+	return a == "" || a == "y" || a == "yes", true
+}
+
 // InsideAgent says this runs inside Claude Code (its CLAUDECODE
 // environment): an agent, not the person, whatever its flags say.
 func InsideAgent() bool { return os.Getenv("CLAUDECODE") != "" }
@@ -408,16 +423,30 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 			switch {
 			case !d.Found || d.Question == "":
 			case !answered && d.DefaultYes:
-				yes := o.confirm(d.Question)
+				// no answer (the input ended) records nothing: the person is
+				// asked when they are there
+				yes, gave := enterYes(o, d.Question)
+				if !gave {
+					continue
+				}
 				cfg.Integrations[d.Name] = yes
 				if d.Runner {
 					cfg.Integrations[RunnerKey] = yes
 				}
 			case !answered:
-				cfg.Integrations[d.Name] = ask(o, d.Question)
+				o.printf("%s [y/N] ", d.Question)
+				line, err := bufio.NewReader(o.In).ReadString('\n')
+				if err != nil {
+					o.printf("\n")
+					continue // the input ended: no answer, none recorded
+				}
+				a := strings.ToLower(strings.TrimSpace(line))
+				cfg.Integrations[d.Name] = a == "y" || a == "yes"
 			case on && d.Runner:
 				if _, asked := cfg.Integrations[RunnerKey]; !asked {
-					cfg.Integrations[RunnerKey] = o.confirm(RunnerQuestion())
+					if yes, gave := enterYes(o, RunnerQuestion()); gave {
+						cfg.Integrations[RunnerKey] = yes
+					}
 				}
 			}
 		}
