@@ -103,6 +103,9 @@ range, renderables and the files it reads) and a way to draw
   stage from a LOP network);
 - tag a file with the renderables that read it (`Dependency.renderables`:
   `None` when unknown, so every job carries it);
+- follow a USD file into what it reads in turn (`c4submit.usd.dependencies`:
+  USD's own resolver where the application has `pxr`, else the text
+  layers read directly, a binary layer named so the host can warn);
 - tell the artist how it read the scene (`warnings()`: that every file was
   sent because the application could not say which ones the jobs read).
 
