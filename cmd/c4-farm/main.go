@@ -113,7 +113,11 @@ func (m *multi) String() string     { return strings.Join(*m, ",") }
 func (m *multi) Set(v string) error { *m = append(*m, v); return nil }
 
 func main() {
-	if err := run(os.Args[1:], os.Stdout, os.Stdin); err != nil {
+	err := run(os.Args[1:], os.Stdout, os.Stdin)
+	switch {
+	case errors.Is(err, flag.ErrHelp):
+		// asked for help, given it: not an error
+	case err != nil:
 		fmt.Fprintln(os.Stderr, "c4 farm:", err)
 		os.Exit(1)
 	}
