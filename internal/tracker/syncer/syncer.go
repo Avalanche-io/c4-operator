@@ -667,6 +667,11 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "NoPerson", why)
 				return nil
 			}
+			// The job is submitted before its link is made: should making
+			// the link fail and the entity be renamed before the next
+			// pass, the retry names a second job, one nothing links to,
+			// owned and booked like any other. Making the link first
+			// would close that window.
 			var err error
 			got, err = s.Farm.Submit(ctx, farm.JobRequest{Namespace: jr.Namespace, Name: jr.Name, Spec: spec,
 				TrackerRef: t.Name + "/" + it.Ref.String(), For: person, Replaces: replaces})

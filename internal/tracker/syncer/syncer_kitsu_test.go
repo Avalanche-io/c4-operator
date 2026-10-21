@@ -597,3 +597,26 @@ func TestKitsuLostUploadAnswerMakesOneRevision(t *testing.T) {
 		t.Fatalf("review: %+v", r)
 	}
 }
+
+// Two lighting tasks on one shot share a handle; their jobs are told apart
+// by the tasks' refs.
+func TestKitsuSameHandleTwoJobs(t *testing.T) {
+	e := setupKitsu(t)
+	second := e.site.AddTask(e.shot, "Lighting", "ready", e.due.Format("2006-01-02"), 480)
+	e.pass()
+	if len(e.farm.Submitted) != 2 {
+		t.Fatalf("submitted %d", len(e.farm.Submitted))
+	}
+	a, b := e.farm.Submitted[0].Name, e.farm.Submitted[1].Name
+	for _, n := range []string{a, b} {
+		if !strings.HasPrefix(n, "kitsu-sh040-lighting-") || len(n) != len("kitsu-sh040-lighting-")+6 {
+			t.Fatalf("job name %q", n)
+		}
+	}
+	if a == b {
+		t.Fatalf("two tasks, one job name %q", a)
+	}
+	if want := syncer.JobName("kitsu", tracker.Item{Ref: kref(second), Name: "sh040 Lighting"}); a != want && b != want {
+		t.Fatalf("the second task's job is neither %s nor %s, want %s", a, b, want)
+	}
+}

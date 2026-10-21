@@ -566,6 +566,10 @@ func TestNames(t *testing.T) {
 		{"linear", tracker.Item{Ref: tracker.Ref{Type: "Issue", ID: "9c1d"}, Name: "ENG-12", NameUnique: true}, "linear-eng-12"},
 		// One that may repeat is told apart by its ref.
 		{"kitsu", tracker.Item{Ref: task, Name: "sh040 Lighting"}, "kitsu-sh040-lighting-" + hex(task)},
+		// A handle that cleans to nothing (a shot named in kanji) is no
+		// handle: the ID.
+		{"kitsu", tracker.Item{Ref: tracker.Ref{Type: "Task", ID: "7c1e"}, Name: "照明 ライティング"}, "kitsu-7c1e"},
+		{"kitsu", tracker.Item{Ref: tracker.Ref{Type: "Task", ID: "7c1e"}, Name: "--"}, "kitsu-7c1e"},
 		// No handle: the ID, as before.
 		{"ml", tracker.Item{Ref: tracker.Ref{Type: "Run", ID: "0a1b"}}, "ml-0a1b"},
 		// A long handle is cut, leaving room for -forecast.

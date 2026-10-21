@@ -377,6 +377,10 @@ func (i gIssue) item() tracker.Item {
 		Status: tracker.Status{Native: i.State.Name, Category: category(i.State.Type)},
 		Fields: map[string]string{"identifier": i.Identifier, "state": i.State.Name, "stateType": i.State.Type, "team": i.Team.Key},
 	}
+	// The identifier (eng-12) is unique in its team, a Linear Tracker's
+	// scope. An issue moved to another team is given a new one; its link
+	// keeps the job's name.
+	it.Name, it.NameUnique = strings.ToLower(i.Identifier), true
 	if i.DueDate != nil {
 		if t, err := time.Parse("2006-01-02", *i.DueDate); err == nil {
 			it.Due = &tracker.Due{At: t, DateOnly: true}

@@ -121,7 +121,8 @@ func (e *linearEnv) state() string { _, s := e.ws.Issue(e.issue.ID); return s }
 // completed state, and an idle pass writes nothing.
 func TestLinearReviewLoop(t *testing.T) {
 	e := setupLinear(t)
-	first := "linear-" + strings.ToLower(e.issue.ID)
+	// The job is named by the issue's identifier, unique in the team.
+	first := "linear-" + strings.ToLower(e.issue.Identifier)
 
 	// 1. The issue becomes a render job: 18:00 Los Angeles on its date.
 	e.pass()
@@ -135,7 +136,9 @@ func TestLinearReviewLoop(t *testing.T) {
 	if sub.Spec.DeadlineMode != "Tracking" || !sub.Spec.Deadline.Time.Equal(want) || sub.TrackerRef != "linear/Issue/"+e.issue.ID {
 		t.Fatalf("submitted: %+v (want %s)", sub, want)
 	}
-	first = sub.Name
+	if sub.Name != first {
+		t.Fatalf("the job is %s, want %s", sub.Name, first)
+	}
 
 	// 2. It runs: the issue moves to the team's first started state, and
 	// one card shows the job. An idle pass writes nothing.
