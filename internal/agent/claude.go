@@ -26,6 +26,17 @@ type Active struct {
 	Kind  string `json:"kind"` // interactive or background
 	Pid   int    `json:"pid"`
 	Cwd   string `json:"cwd"`
+	// StartedAt is when the session's process started, in Unix
+	// milliseconds: background work it launched before then has died.
+	StartedAt int64 `json:"startedAt,omitempty"`
+}
+
+// Started is when the session's process started (zero if unknown).
+func (a Active) Started() time.Time {
+	if a.StartedAt <= 0 {
+		return time.Time{}
+	}
+	return time.UnixMilli(a.StartedAt)
 }
 
 // Idle reports whether the session is waiting for input: at a turn

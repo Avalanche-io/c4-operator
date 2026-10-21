@@ -48,6 +48,11 @@ type Checkpoint struct {
 	// Note records anything unusual: a rewritten transcript, a lagging
 	// write.
 	Note string `json:"note,omitempty"`
+	// Background is the background work (agents, commands) still running
+	// when the session was stopped here, and so stopped with it: what it was
+	// doing and where its work so far is. The attempt that resumes the
+	// member is told.
+	Background []Background `json:"background,omitempty"`
 }
 
 const tailBytes = 4096

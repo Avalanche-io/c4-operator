@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"time"
 
@@ -87,6 +88,7 @@ func (b *PodBlock) pod() *corev1.Pod {
 
 // Run runs the attempt and returns its exit code.
 func (b *PodBlock) Run(ctx context.Context) (int, error) {
+	started := time.Now()
 	p := b.pod()
 	u := UnitDirs{Root: b.Out, Out: b.Out, Control: b.Env("C4_CONTROL"), PodInfo: b.Env("C4_PODINFO")}
 	st := &Store{Dir: filepath.Join(b.Out, SessionDir, "agents")}
@@ -140,10 +142,26 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 	} else {
 		return 1, err
 	}
+	// In print mode each turn is its own process: background work a turn
+	// left running ended with it. It is recorded, and the next turn told.
+	turnFrom, lost, recorded := started, "", map[string]bool{}
 	for {
 		if err := ExportSession(st, m, b.Out); err != nil {
 			return 1, err
 		}
+		bg, _ := OpenBackground(m.Transcript, turnFrom)
+		bg = slices.DeleteFunc(bg, func(w Background) bool { return recorded[w.ID] })
+		for _, w := range bg {
+			recorded[w.ID] = true
+		}
+		if len(bg) > 0 {
+			b.logf("%s: %d background task(s) were still running when its turn ended, and ended with it", m.Name, len(bg))
+			if err := recordLost(b.Out, bg); err != nil {
+				return 1, err
+			}
+			lost = lostText(bg) + "\n\n"
+		}
+		turnFrom = time.Now()
 		if msg, ok, err := takeNeeds(u); ok {
 			if err != nil {
 				b.logf("%s: reported missing information, but %v", m.Name, err)
@@ -168,16 +186,18 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 				b.logf("%s: waits for %s's answer without its slot; it yields with its session in its view", m.Name, a.To)
 				return PodBlockYielded, nil
 			}
-			if err := b.claude(ctx, append(append([]string{"-p", "--resume", m.Session}, flags...), "--", prompt), nil); err != nil {
+			if err := b.claude(ctx, append(append([]string{"-p", "--resume", m.Session}, flags...), "--", lost+prompt), nil); err != nil {
 				return 1, err
 			}
+			lost = ""
 			continue
 		}
 		if note, more := takeMore(u); more {
 			b.logf("%s: a part is done; next: %s", m.Name, note)
-			if err := b.claude(ctx, append(append([]string{"-p", "--resume", m.Session}, flags...), "--", partPrompt(note, u)), nil); err != nil {
+			if err := b.claude(ctx, append(append([]string{"-p", "--resume", m.Session}, flags...), "--", lost+partPrompt(note, u)), nil); err != nil {
 				return 1, err
 			}
+			lost = ""
 			continue
 		}
 		if takeDone(u) {

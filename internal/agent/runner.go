@@ -97,6 +97,10 @@ type Runner struct {
 	ViewSrc ViewSource
 
 	seen map[types.UID]bool
+	// bgSince is when the runner first saw a block idle over background
+	// work; bgLogged, the pods whose wait for it was logged.
+	bgSince  map[types.UID]time.Time
+	bgLogged map[types.UID]bool
 	// owned is why each pod may not run here ("" if it may).
 	owned map[types.UID]string
 	// refused are the pods whose refusal was logged.
@@ -159,6 +163,9 @@ func (r *Runner) Tick(ctx context.Context) error {
 	}
 	if r.owned == nil {
 		r.owned, r.refused = map[types.UID]string{}, map[types.UID]bool{}
+	}
+	if r.bgSince == nil {
+		r.bgSince, r.bgLogged = map[types.UID]time.Time{}, map[types.UID]bool{}
 	}
 	if err := r.heartbeat(ctx); err != nil {
 		return fmt.Errorf("node %s: %w", r.Node, err)
@@ -315,6 +322,10 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 	// state at a turn's end says how the model left its task: done,
 	// blocked, or working when it ended a part with more to come.)
 	if live && m.Block && p.Status.Phase == corev1.PodRunning && act.Idle() && r.turnSince(m, p) {
+		// background work it started reports first, or is recorded
+		if wait, err := r.awaitBackground(ctx, p, m, act); wait || err != nil {
+			return err
+		}
 		if err := r.Harness.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
 			return err
 		}
@@ -453,7 +464,12 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 	if _, ok := r.asked[p.UID]; !ok {
 		r.asked[p.UID] = r.now()
 	}
-	res, err := r.Harness.Yield(ctx, m.Name, r.YieldTimeout)
+	res, err := r.Harness.Yield(ctx, m.Name, r.YieldTimeout, r.harvestAt(p, r.asked[p.UID]))
+	if errors.Is(err, ErrBusy) && len(res.Waiting) > 0 && !r.bgLogged[p.UID] {
+		r.bgLogged[p.UID] = true
+		r.logf("%s: its yield waits for %d background task(s) to report, until %s", m.Name, len(res.Waiting),
+			r.harvestAt(p, r.asked[p.UID]).Local().Format("15:04:05"))
+	}
 	if errors.Is(err, ErrBusy) {
 		if r.HardStopAfter > 0 && r.now().Sub(r.asked[p.UID]) >= r.HardStopAfter {
 			cp, err := r.Harness.ForceStop(ctx, m.Name)
@@ -489,14 +505,18 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 			return err
 		}
 	}
-	r.logf("yielded %s (%s)", m.Name, why)
+	msg := "yielded at a turn boundary: " + why
+	if cp != nil && len(cp.Background) > 0 {
+		msg += fmt.Sprintf("; %d background task(s) were still running and were stopped, recorded in checkpoint %d", len(cp.Background), cp.Seq)
+	}
+	r.logf("yielded %s (%s)", m.Name, msg)
 	if err := r.saveSession(ctx, p, m); err != nil {
 		return err
 	}
 	if err := r.markDrained(ctx, p); err != nil {
 		return err
 	}
-	return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", "yielded at a turn boundary: "+why, 0)
+	return r.finish(ctx, p, corev1.PodSucceeded, "Yielded", msg, 0)
 }
 
 // yieldDisruption is the queue's mark on a drained pod (work/queue's

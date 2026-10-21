@@ -298,7 +298,7 @@ func TestKnownBackgroundSessionResumesWithoutFlags(t *testing.T) {
 	}
 	delete(e.fake.busyFor, sess)
 	e.fake.active[sess] = Active{SessionID: sess, Status: "idle", Kind: "background"}
-	if r, err := e.h.Yield(ctx, "lead", time.Second); err != nil || r.State != "stopped" {
+	if r, err := e.h.Yield(ctx, "lead", time.Second, time.Time{}); err != nil || r.State != "stopped" {
 		t.Fatalf("yield %+v %v", r, err)
 	}
 	for i := 0; i < 3; i++ {
@@ -310,7 +310,7 @@ func TestKnownBackgroundSessionResumesWithoutFlags(t *testing.T) {
 			t.Fatalf("resume %d passed flags %v to a known background session", i+2, f)
 		}
 		e.fake.active[sess] = Active{SessionID: sess, Status: "idle", Kind: "background"}
-		if _, err := e.h.Yield(ctx, "lead", time.Second); err != nil {
+		if _, err := e.h.Yield(ctx, "lead", time.Second, time.Time{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -401,14 +401,14 @@ func TestYield(t *testing.T) {
 	e.register("lead", sess)
 	ctx := context.Background()
 	// Not running: parked, nothing stopped.
-	if r, err := e.h.Yield(ctx, "lead", time.Second); err != nil || r.State != "parked" || len(e.fake.stops) != 0 {
+	if r, err := e.h.Yield(ctx, "lead", time.Second, time.Time{}); err != nil || r.State != "parked" || len(e.fake.stops) != 0 {
 		t.Fatalf("parked: %+v %v", r, err)
 	}
 	// Busy for a few polls, then idle: stopped after a yield checkpoint.
 	e.fake.active[sess] = Active{SessionID: sess, Status: "busy"}
 	e.fake.busyFor[sess] = 3
 	e.transcript(sess, turn(2))
-	r, err := e.h.Yield(ctx, "lead", time.Hour)
+	r, err := e.h.Yield(ctx, "lead", time.Hour, time.Time{})
 	if err != nil || r.State != "stopped" || r.Checkpoint == nil || r.Checkpoint.Event != "yield" {
 		t.Fatalf("yield: %+v %v", r, err)
 	}
@@ -418,7 +418,7 @@ func TestYield(t *testing.T) {
 	// Busy past the timeout: left running.
 	e.fake.active[sess] = Active{SessionID: sess, Status: "busy"}
 	e.fake.busyFor[sess] = 1 << 30
-	if _, err := e.h.Yield(ctx, "lead", 0); !errors.Is(err, ErrBusy) {
+	if _, err := e.h.Yield(ctx, "lead", 0, time.Time{}); !errors.Is(err, ErrBusy) {
 		t.Fatalf("busy: %v", err)
 	}
 	if len(e.fake.stops) != 1 {

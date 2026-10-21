@@ -29,6 +29,9 @@ if [ "$mode" = resume ] && [ ! -f "$tr" ]; then echo "No conversation found with
 echo '{"type":"assistant","message":{"id":"m","model":"opus","content":[{"type":"text","text":"a turn"}]}}' >> "$tr"
 echo "$mode $sid" >> "$FAKE_LOG"
 if [ -n "$FAKE_PROMPTS" ]; then printf '%s\n----\n' "$1" >> "$FAKE_PROMPTS"; fi
+if [ -n "$FAKE_BG" ] && [ "$(wc -l < "$FAKE_LOG")" -eq 1 ]; then
+  printf '{"type":"user","timestamp":"%s","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"toolu_bg","content":"Async agent launched successfully."}]},"toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"abg1","description":"%s"}}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$FAKE_BG" >> "$tr"
+fi
 if [ -n "$FAKE_ASK" ] && [ "$(wc -l < "$FAKE_LOG")" -eq 1 ]; then
   printf '{"id":"0#1","to":"%s","at":"%s"}\n' "$FAKE_ASK_TO" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$C4_OUTPUT/.c4/asking"; exit 0
 fi

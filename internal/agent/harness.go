@@ -187,6 +187,13 @@ func (h *Harness) Checkpoint(ctx context.Context, name, event string) (*Checkpoi
 }
 
 func (h *Harness) checkpointLocked(ctx context.Context, m *Member, event string) (*Checkpoint, bool, error) {
+	return h.checkpointStopping(ctx, m, event, nil)
+}
+
+// checkpointStopping saves a checkpoint as checkpointLocked does, recording
+// the background work the stop that follows cuts short (always a new
+// checkpoint when there is any).
+func (h *Harness) checkpointStopping(ctx context.Context, m *Member, event string, bg []Background) (*Checkpoint, bool, error) {
 	prev, err := h.Store.Last(m.Name)
 	if err != nil {
 		return nil, false, err
@@ -198,9 +205,10 @@ func (h *Harness) checkpointLocked(ctx context.Context, m *Member, event string)
 	if err != nil {
 		return nil, false, err
 	}
-	if prev != nil && cp.Offset == prev.Offset && cp.Note == "" && event == "stop" {
+	if prev != nil && cp.Offset == prev.Offset && cp.Note == "" && event == "stop" && len(bg) == 0 {
 		return prev, false, nil
 	}
+	cp.Background = bg
 	cp.Seq = 1
 	if last, _ := h.Store.Last(m.Name); last != nil {
 		cp.Seq = last.Seq + 1
@@ -322,6 +330,14 @@ func (h *Harness) Resume(ctx context.Context, name, prompt string) (ResumeResult
 	if err != nil {
 		return ResumeResult{}, err
 	}
+	if last, err := h.Store.Last(name); err == nil && last != nil && len(last.Background) > 0 {
+		// told once: the resume checkpoint below is the last one after this
+		if lost := lostText(last.Background); prompt == "" {
+			prompt = lost
+		} else {
+			prompt = lost + "\n\n" + prompt
+		}
+	}
 	flags := m.Flags
 	if known {
 		// A background session the CLI knows continues only with no flags.
@@ -359,13 +375,22 @@ type YieldResult struct {
 	// boundary) or "parked" (it was not running).
 	State      string
 	Checkpoint *Checkpoint
+	// Waiting is the background work a yield is still waiting for.
+	Waiting []Background
 }
 
 // Yield stops a member at its next turn boundary: at once if its session is
 // idle, else after its current turn, waiting up to timeout. It checkpoints
 // before stopping. A busy session that does not finish in time is left
 // running (ErrBusy).
-func (h *Harness) Yield(ctx context.Context, name string, timeout time.Duration) (YieldResult, error) {
+//
+// A session idle with background work still running (an agent or a
+// command it started) is not at a safe stop: stopping it would kill that
+// work. Until harvestAt the yield waits for it to report, as for a busy
+// turn (the session takes a new turn when it does). From harvestAt it
+// stops the session anyway, recording the work it cut short in the
+// checkpoint, so the attempt that resumes the member is told.
+func (h *Harness) Yield(ctx context.Context, name string, timeout time.Duration, harvestAt time.Time) (YieldResult, error) {
 	m, err := h.Store.Get(name)
 	if err != nil {
 		return YieldResult{}, err
@@ -380,9 +405,17 @@ func (h *Harness) Yield(ctx context.Context, name string, timeout time.Duration)
 			return YieldResult{State: "parked"}, nil
 		}
 		if a.Idle() {
-			return h.stopIdle(ctx, name)
-		}
-		if h.Now().After(deadline) {
+			bg, err := OpenBackground(m.Transcript, a.Started())
+			if err != nil {
+				return YieldResult{}, err
+			}
+			if len(bg) == 0 || !h.Now().Before(harvestAt) {
+				return h.stopIdle(ctx, name, bg)
+			}
+			if !h.Now().Before(deadline) {
+				return YieldResult{Waiting: bg}, fmt.Errorf("member %s: %w: %d background task(s) still running, waited %s; left running", name, ErrBusy, len(bg), timeout)
+			}
+		} else if !h.Now().Before(deadline) {
 			return YieldResult{}, fmt.Errorf("member %s: %w after %s; left running", name, ErrBusy, timeout)
 		}
 		select {
@@ -393,7 +426,7 @@ func (h *Harness) Yield(ctx context.Context, name string, timeout time.Duration)
 	}
 }
 
-func (h *Harness) stopIdle(ctx context.Context, name string) (YieldResult, error) {
+func (h *Harness) stopIdle(ctx context.Context, name string, bg []Background) (YieldResult, error) {
 	unlock, err := h.Store.Lock(name)
 	if err != nil {
 		return YieldResult{}, err
@@ -416,7 +449,7 @@ func (h *Harness) stopIdle(ctx context.Context, name string) (YieldResult, error
 	if _, err := waitStable(m.Transcript, h.SettleQuiet, h.SettleMax); err != nil {
 		return YieldResult{}, err
 	}
-	cp, _, err := h.checkpointLocked(ctx, m, "yield")
+	cp, _, err := h.checkpointStopping(ctx, m, "yield", bg)
 	if err != nil {
 		return YieldResult{}, err
 	}
@@ -424,6 +457,22 @@ func (h *Harness) stopIdle(ctx context.Context, name string) (YieldResult, error
 		return YieldResult{}, err
 	}
 	return YieldResult{State: "stopped", Checkpoint: cp}, nil
+}
+
+// RecordStop saves a checkpoint recording the background work a stop of
+// the member's session is about to cut short.
+func (h *Harness) RecordStop(ctx context.Context, name string, bg []Background) error {
+	unlock, err := h.Store.Lock(name)
+	if err != nil {
+		return err
+	}
+	defer unlock()
+	m, err := h.Store.Get(name)
+	if err != nil {
+		return err
+	}
+	_, _, err = h.checkpointStopping(ctx, m, "stop", bg)
+	return err
 }
 
 // ForceStop stops a member's session now, even mid-turn, after saving a
@@ -440,13 +489,21 @@ func (h *Harness) ForceStop(ctx context.Context, name string) (*Checkpoint, erro
 	if err != nil {
 		return nil, err
 	}
-	cp, _, err := h.checkpointLocked(ctx, m, "forced-stop")
+	live, a, err := h.live(ctx, m)
 	if err != nil {
 		return nil, err
 	}
-	if live, _, err := h.live(ctx, m); err != nil {
+	var bg []Background
+	if live {
+		if bg, err = OpenBackground(m.Transcript, a.Started()); err != nil {
+			return nil, err
+		}
+	}
+	cp, _, err := h.checkpointStopping(ctx, m, "forced-stop", bg)
+	if err != nil {
 		return nil, err
-	} else if live {
+	}
+	if live {
 		if err := h.Claude.Stop(ctx, m.ConfigDir, m.Session); err != nil {
 			return nil, err
 		}

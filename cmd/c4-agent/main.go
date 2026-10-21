@@ -201,7 +201,8 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 		if err := fs.Parse(reorder(args)); err != nil {
 			return err
 		}
-		res, err := h.Yield(ctx, fs.Arg(0), *timeout)
+		// background work gets the same wait, then is recorded and stopped
+		res, err := h.Yield(ctx, fs.Arg(0), *timeout, time.Now().Add(*timeout))
 		if err != nil {
 			return err
 		}

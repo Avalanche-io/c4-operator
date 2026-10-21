@@ -51,7 +51,7 @@ member.
 | `c4-agent register --name N --session ID` | adds a member (`--cwd`, `--config-dir`, `--flag` for resume flags, `--new-phase`)                                                  |
 | `c4-agent ls`                             | every member: busy, idle (at a turn boundary) or stopped, with its epoch and last checkpoint                                       |
 | `c4-agent resume NAME [PROMPT]`           | continues a stopped member's session in the background; refused while it runs (exit 3)                                             |
-| `c4-agent yield NAME [--timeout 10m]`     | stops a member at its next turn boundary, after a checkpoint; a busy member is left running if it does not finish in time (exit 5) |
+| `c4-agent yield NAME [--timeout 10m]`     | stops a member at its next turn boundary, after a checkpoint; a busy member is left running if it does not finish in time (exit 5); background work still running gets the same wait, then is recorded in the checkpoint and stopped |
 | `c4-agent checkpoint NAME`                | saves a checkpoint now                                                                                                             |
 | `c4-agent checkpoint --hook`              | the Stop hook: saves the turn that just ended; ignores sessions that are not members; always exits 0                               |
 | `c4-agent verify NAME`                    | checks the checkpoint chain against the transcript                                                                                 |
@@ -180,6 +180,39 @@ sessions live. It is a host runner.
 - After a restart of the machine, a new runner finds the pods still
   Running and their sessions stopped, and resumes each one from its last
   turn.
+
+**Background agents and commands survive a yield, or are recorded.** A
+session's turn can end with work still running beside it: a background
+subagent, or a command run in the background. Stopping the session kills
+that work. So a turn boundary with background work open is not yet a safe
+stop:
+- **The stop waits for it.** A yield, a block's end of turn, and
+  `c4-agent yield` keep the session running until the work reports (the
+  session takes a new turn with its result, and the stop comes at the end
+  of that turn).
+- **The wait is bounded.** It lasts `C4_YIELD_BACKGROUND_WAIT` (default
+  30 minutes), and never past the farm's own deadline for the stop: a
+  minute before a soft stop's `yield-by` (10 minutes after the request),
+  30 seconds before a deleting pod's grace ends. So the farm never has to
+  kill the session with its work unrecorded.
+- **What it cannot wait for is recorded.** Past the bound, the session is
+  stopped, and its checkpoint lists the work cut short (`background`: the
+  kind, what it was doing, and a subagent's own transcript, so its work so
+  far can be read). The pod's message says how many. When the member
+  resumes, its first prompt says what was stopped and where its
+  transcript is, so it can start again what it still needs. It is told
+  once.
+- **A hard stop** (`--hard-stop-after`) records the same before it stops
+  the session mid-turn.
+- **Open work** is read from the transcript: each launch the CLI reports
+  (an agent `async_launched`, a command with a `backgroundTaskId`) since
+  the session's process started, with no task notification for it and not
+  stopped with TaskStop. Work an earlier process started died with that
+  process.
+- **In a pod** (`c4-agent block-pod`, print mode), each turn is its own CLI
+  process, so background work a turn left running ended with it. The block
+  records it in `.c4/background-lost.json`, which goes with the unit's
+  output, and tells its next turn.
 
 The sessions run as the machine's own Claude Code sessions, under their
 holder's own sign-in, so no credential leaves the machine. So a runner
