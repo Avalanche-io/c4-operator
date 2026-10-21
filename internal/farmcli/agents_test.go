@@ -8,7 +8,6 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -106,39 +105,62 @@ func TestAddAgentAsksBeforeTheHook(t *testing.T) {
 	}
 }
 
-// c4 farm agents, with nothing after it, shows this machine's Claude Code
-// sessions read-only: what needs the person first, each state in a word,
-// and a last line that says who waits, or that nothing does.
+// fakeObserve is a c4-agent whose observe prints rows; old makes it one too
+// old to observe, which says so on stderr as c4-agent does.
+func fakeObserve(t *testing.T, rows string, old bool) string {
+	t.Helper()
+	bin := filepath.Join(t.TempDir(), "c4-agent")
+	script := "#!/bin/sh\n[ \"$1\" = observe ] || exit 2\n"
+	if old {
+		script += "echo 'c4-agent: unknown command \"observe\" (try c4-agent help)' >&2\nexit 1\n"
+	} else {
+		script += "cat <<'X'\n{\"observedAt\":\"2026-10-21T09:00:00Z\",\"sessions\":" + rows + "}\nX\n"
+	}
+	os.WriteFile(bin, []byte(script), 0o755)
+	return bin
+}
+
+// c4 farm agents, with nothing after it, shows this machine's sessions as
+// c4-agent observe reads them: what needs the person first, each state in
+// a word, what it has used, and what each waiting session asks.
 func TestSessionsShowsWhatNeedsYou(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "claude")
-	now := time.Date(2026, 10, 20, 19, 0, 0, 0, time.UTC)
-	started := now.Add(-90 * time.Minute).UnixMilli()
-	json := `[{"name":"tests","cwd":"/tmp/repo","kind":"background","status":"busy","state":"working","startedAt":` + strconv.FormatInt(started, 10) + `},
-{"name":"port","cwd":"/tmp/repo","kind":"background","status":"idle","state":"blocked","startedAt":` + strconv.FormatInt(started, 10) + `},
-{"sessionId":"4363d63d-ee8a-4f04","cwd":"/tmp","kind":"interactive","status":"idle","startedAt":` + strconv.FormatInt(started, 10) + `}]`
-	os.WriteFile(bin, []byte("#!/bin/sh\ncat <<'X'\n"+json+"\nX\n"), 0o755)
+	agent := fakeObserve(t, `[
+{"session":"0b5e7c52-8a6f-4d0e","name":"tests","kind":"background","running":true,"word":"working","cwd":"/tmp/repo","startedAt":"2026-10-21T07:30:00Z",
+ "usage":{"models":[{"model":"claude-opus-5-5","inputTokens":30000,"outputTokens":11000}]}},
+{"session":"1c6f8d63-9b70-4e1f","name":"port","kind":"background","running":true,"word":"needs you","needsYou":"Should I rename the package too?","cwd":"/tmp/repo","startedAt":"2026-10-21T07:30:00Z"},
+{"session":"4363d63d-ee8a-4f04","kind":"interactive","running":true,"word":"idle","cwd":"/tmp","startedAt":"2026-10-21T07:30:00Z"}]`, false)
+	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
 	var out bytes.Buffer
 	o := Out{W: &out, Clock: Clock{Now: func() time.Time { return now }}}
-	if err := Sessions(context.Background(), o, SessionsArgs{Claude: bin}); err != nil {
+	if err := Sessions(context.Background(), o, SessionsArgs{Agent: agent}); err != nil {
 		t.Fatal(err)
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if len(lines) != 6 || !strings.HasPrefix(lines[1], "port ") || !strings.Contains(lines[1], "needs you") ||
-		!strings.Contains(lines[2], "working") || !strings.HasPrefix(lines[3], "4363d63d") || !strings.Contains(lines[3], "1h 30m") ||
-		lines[5] != "port needs you." {
+		!strings.Contains(lines[2], "41k tokens") || !strings.HasPrefix(lines[3], "4363d63d") || !strings.Contains(lines[3], "1h 30m") ||
+		lines[5] != "port needs you: Should I rename the package too?" {
 		t.Errorf("agents:\n%s", out.String())
 	}
 }
 
+// With a c4-agent too old to observe, c4 farm agents reads claude agents
+// itself: states, without questions or usage.
+func TestSessionsFallBackToClaude(t *testing.T) {
+	claude := filepath.Join(t.TempDir(), "claude")
+	os.WriteFile(claude, []byte("#!/bin/sh\necho '[{\"name\":\"port\",\"sessionId\":\"1c6f8d63\",\"cwd\":\"/tmp\",\"kind\":\"background\",\"status\":\"idle\",\"state\":\"blocked\",\"startedAt\":1792534445663}]'\n"), 0o755)
+	var out bytes.Buffer
+	a := SessionsArgs{Agent: fakeObserve(t, "", true), Claude: claude}
+	if err := Sessions(context.Background(), Out{W: &out}, a); err != nil || !strings.HasSuffix(out.String(), "\nport needs you.\n") {
+		t.Errorf("%v\n%s", err, out.String())
+	}
+}
+
 // agents --open serves the HUD's web files, this machine's sessions as
-// GET /api/v1/observed, a snapshot the HUD can start on, and nothing of a
-// farm.
+// GET /api/v1/observed (each row as c4-agent observe gives it), a snapshot
+// the HUD can start on, and nothing of a farm.
 func TestSessionsServer(t *testing.T) {
-	dir := t.TempDir()
-	bin := filepath.Join(dir, "claude")
-	os.WriteFile(bin, []byte("#!/bin/sh\necho '[{\"name\":\"port\",\"sessionId\":\"0b5e7c52-8a6f\",\"cwd\":\"/tmp/repo\",\"kind\":\"background\",\"state\":\"blocked\",\"startedAt\":1792534445663}]'\n"), 0o755)
-	h, err := SessionsServer{Claude: bin}.Handler()
+	agent := fakeObserve(t, `[{"session":"0b5e7c52-8a6f","name":"port","kind":"background","running":true,"word":"needs you","needsYou":"Rename it too?","backgroundOpen":0}]`, false)
+	h, err := SessionsServer{Agent: agent}.Handler()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,8 +175,8 @@ func TestSessionsServer(t *testing.T) {
 		b, _ := io.ReadAll(resp.Body)
 		return resp.StatusCode, string(b)
 	}
-	if code, body := get("/api/v1/observed"); code != 200 || !strings.Contains(body, `"state":"waiting"`) || !strings.Contains(body, `"readOnly":true`) ||
-		!strings.Contains(body, `"adopt":"c4 farm agents add port"`) || !strings.Contains(body, `"session":"0b5e7c52"`) {
+	if code, body := get("/api/v1/observed"); code != 200 || !strings.Contains(body, `"word":"needs you"`) ||
+		!strings.Contains(body, `"needsYou":"Rename it too?"`) || !strings.Contains(body, `"backgroundOpen":0`) || !strings.Contains(body, `"machine":`) {
 		t.Errorf("observed %d %s", code, body)
 	}
 	if code, body := get("/api/v1/snapshot"); code != 200 || !strings.Contains(body, `"jobs":[]`) || !strings.Contains(body, `"allProjects":true`) {

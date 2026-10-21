@@ -9,98 +9,26 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/exec"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/hud"
 )
 
-// claudeSessions are the Claude Code sessions `claude agents --json` lists.
-func claudeSessions(ctx context.Context, bin string, all bool) ([]session, error) {
-	if bin == "" {
-		p, err := exec.LookPath("claude")
-		if err != nil {
-			return nil, errors.New("Claude Code (claude) is not on PATH; c4 farm agents shows its sessions")
-		}
-		bin = p
-	}
-	args := []string{"agents", "--json"}
-	if all {
-		args = append(args, "--all")
-	}
-	out, err := exec.CommandContext(ctx, bin, args...).Output()
-	if err != nil {
-		return nil, fmt.Errorf("claude agents: %w", err)
-	}
-	var ss []session
-	if err := json.Unmarshal(out, &ss); err != nil {
-		return nil, fmt.Errorf("claude agents: %w", err)
-	}
-	return ss, nil
-}
-
-// observedSession is one session as the HUD's sessions view reads it
-// (GET /api/v1/observed).
-type observedSession struct {
-	Session string `json:"session"`
-	Name    string `json:"name"`
-	Kind    string `json:"kind"`
-	// State is working, waiting, idle, done, stopped or limited.
-	State   string    `json:"state"`
-	Since   time.Time `json:"since"`
-	Started time.Time `json:"started"`
-	Cwd     string    `json:"cwd"`
-	OnFarm  bool      `json:"onFarm"`
-	// Adopt is the one step that puts it on the farm, as a command.
-	Adopt string `json:"adopt,omitempty"`
-}
-
-// observed is GET /api/v1/observed: this machine's sessions, read-only.
+// observed is GET /api/v1/observed: this machine's sessions, read-only,
+// each row as c4-agent observe gives it.
 type observed struct {
 	Now      time.Time         `json:"now"`
 	Machine  string            `json:"machine"`
-	Reader   string            `json:"reader"`
-	ReadOnly bool              `json:"readOnly"`
-	Sessions []observedSession `json:"sessions"`
-}
-
-// observedState is a session's state in the HUD's words.
-func (s session) observedState() string {
-	switch {
-	case s.State == "blocked":
-		return "waiting"
-	case s.State == "working", s.Status == "busy":
-		return "working"
-	case s.State == "done":
-		return "done"
-	case s.State == "stopped":
-		return "stopped"
-	}
-	return "idle"
-}
-
-func observe(ss []session, now time.Time) observed {
-	host, _ := os.Hostname()
-	out := observed{Now: now, Machine: host, Reader: "claude agents --json", ReadOnly: true, Sessions: []observedSession{}}
-	for _, s := range ss {
-		started := time.UnixMilli(s.StartedAt).UTC()
-		short := s.SessionID
-		if len(short) > 8 {
-			short = short[:8]
-		}
-		out.Sessions = append(out.Sessions, observedSession{Session: short, Name: s.label(), Kind: s.Kind, State: s.observedState(),
-			Since: started, Started: started, Cwd: s.Cwd, Adopt: "c4 farm agents add " + s.label()})
-	}
-	return out
+	Sessions []json.RawMessage `json:"sessions"`
 }
 
 // SessionsServer is `c4 farm agents --open`: the HUD's sessions view on
 // this machine, served on loopback with nothing behind it but `claude
 // agents`. It reads only, and a minimal snapshot lets the app start.
 type SessionsServer struct {
-	Claude string
-	All    bool
-	Now    func() time.Time
+	Agent, Claude string
+	All           bool
+	Now           func() time.Time
 }
 
 func (s SessionsServer) now() time.Time {
@@ -128,13 +56,18 @@ func (s SessionsServer) Handler() (http.Handler, error) {
 	mux := http.NewServeMux()
 	mux.Handle("GET /", http.FileServerFS(web))
 	mux.HandleFunc("GET /api/v1/observed", func(w http.ResponseWriter, r *http.Request) {
-		ss, err := claudeSessions(r.Context(), s.Claude, s.All)
+		rows, err := readSessions(r.Context(), SessionsArgs{Agent: s.Agent, Claude: s.Claude, All: s.All})
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusServiceUnavailable)
 			return
 		}
+		host, _ := os.Hostname()
+		doc := observed{Now: s.now().UTC(), Machine: host, Sessions: make([]json.RawMessage, 0, len(rows))}
+		for _, row := range rows {
+			doc.Sessions = append(doc.Sessions, row.Raw)
+		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(observe(ss, s.now().UTC()))
+		json.NewEncoder(w).Encode(doc)
 	})
 	mux.HandleFunc("GET /api/v1/snapshot", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
