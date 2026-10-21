@@ -121,7 +121,7 @@ type Names interface {
 // Line is the chain read aloud, as the HUD and c4 farm show it:
 //
 //	build github-7/3 by agent block, for joshua, under grant g-12, using
-//	joshua's sign-in, on abyss (joshua's) and the queue (Avalanche,
+//	joshua's sign-in, on laptop-1 (joshua's) and the queue (Avalanche,
 //	managed for Studio X)
 func (c *Chain) Line(n Names) string {
 	party := func(s string) string { return pick(s, n, func(n Names) string { return n.Party(s) }) }
