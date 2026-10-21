@@ -209,6 +209,17 @@ sessions live. It is a host runner.
   Running and their sessions stopped, and resumes each one from its last
   turn.
 
+**An idle member is woken for its messages.** A member idle between turns
+does not see a message until it takes a turn, and the CLI cannot put one
+into a running session. So when a member's pod has messages it has not read
+(steering from a person or the lead, a question to it, an answer to one of
+its own), the runner saves a checkpoint, stops the idle session at that turn
+boundary, and resumes it by its ID with the messages as its prompt. A
+question comes with the command to answer it (`c4-unit answer --dir <its
+unit directory> --ask <id> --answer ...`). The messages are then marked
+read, so it is woken once for them. A member mid-turn, or with background
+work open, is left alone; it is woken at its next idle turn boundary.
+
 **Background agents and commands survive a yield, or are recorded.** A
 session's turn can end with work still running beside it: a background
 subagent, or a command run in the background. Stopping the session kills

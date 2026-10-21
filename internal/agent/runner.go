@@ -304,6 +304,12 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 			r.logf("%s: safe points: %v", m.Name, err)
 		}
 	}
+	// a member idle between turns, with messages it has not read: wake it
+	if live && !m.Block && p.Status.Phase == corev1.PodRunning && act.Idle() {
+		if woke, err := r.wakeOnMessages(ctx, p, m, u); woke || err != nil {
+			return err
+		}
+	}
 	// a re-check past its time: stop it there, still needed
 	if live && m.Block && recheck(p) && p.Status.Phase == corev1.PodRunning && p.Status.StartTime != nil &&
 		r.now().Sub(p.Status.StartTime.Time) > recheckLimit(p) {

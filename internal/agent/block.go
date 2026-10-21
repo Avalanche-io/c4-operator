@@ -227,7 +227,7 @@ func blockFlagsFor(p *corev1.Pod, name, hookCommand string) ([]string, error) {
 // where its work and its control documents go.
 func blockPrompt(p *corev1.Pod, u UnitDirs) string {
 	var b strings.Builder
-	fmt.Fprintf(&b, "You are one block of a c4 plan job: block %s of job %s/%s. Work on your task alone; nobody will answer questions, so do not ask any.\n\n",
+	fmt.Fprintf(&b, "You are one block of a c4 plan job: block %s of job %s/%s. Work on your task, deciding what your brief leaves to you; when you lack a fact another unit of this job has, ask that unit as described below.\n\n",
 		podEnv(p, "C4_UNIT_NAME"), p.Namespace, p.Labels[c4v1.LabelJob])
 	fmt.Fprintf(&b, "Your task:\n%s\n\n", strings.TrimSpace(podEnv(p, EnvBlockPrompt)))
 	b.WriteString(whereThingsAre(p, u))
