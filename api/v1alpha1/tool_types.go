@@ -17,6 +17,10 @@ const HUDAudience = "c4.avalanche.io/hud"
 // Kubernetes API does not, so a token sent to the HUD is no use elsewhere.
 const HUDAPIAudience = "c4.avalanche.io/hud-api"
 
+// SignerAudience is the audience of a token for the farm's certificate
+// issuer, which accepts only it.
+const SignerAudience = "c4-signer"
+
 // Tool is what a unit works with beyond its image: a configuration
 // (MCP server definitions, settings, skills, plugins) as a view, and what
 // the unit may reach on the network (DESIGN 10.6, tools). A unit

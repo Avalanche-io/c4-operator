@@ -14,6 +14,7 @@
 //	c4-agent verify NAME
 //	c4-agent log NAME [-n 10]
 //	c4-agent hooks
+//	c4-agent enroll --owner USER [--node NAME] [--pool agent] [--slots N] [--kubeconfig K] [--context C]
 //	c4-agent runner --owner USER [--node NAME] [--slots N] [--label K=V]...
 //	c4-agent block-pod [--cwd DIR]
 //	c4-agent lease --name N --namespace NS --holder H --owner O --pool P [--ttl 8h] [--renew-before 15m] [--config-dir DIR]
@@ -44,6 +45,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/clientcmd"
+	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlconfig "sigs.k8s.io/controller-runtime/pkg/client/config"
 
@@ -290,6 +293,8 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 		}
 	case "runner":
 		return runRunner(ctx, h, fs, args, out)
+	case "enroll":
+		return runEnroll(ctx, h, fs, args, out)
 	case "hooks":
 		exe, err := os.Executable()
 		if err != nil {
@@ -354,6 +359,10 @@ const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
   verify NAME          check the checkpoint chain against the transcript
   log NAME [-n N]      recent checkpoints
   hooks                print the settings fragment that installs the Stop hook
+  enroll --owner USER [--node N] [--pool agent] [--slots N] [--kubeconfig K] [--context C]
+                       with the farm admin's access: make this machine's own
+                       account and a pool its owner owns, and write the
+                       runner's kubeconfig, so runner needs no flags
   runner --owner USER [--node N] [--slots N] [--label K=V]... [--every 5s] [--yield-timeout 1m]
                        run this machine's members for the farm's queue (a host
                        runner: a Node for the machine, member pods bound to it)
@@ -371,14 +380,21 @@ Exit codes: 3 running or already has a session, 4 a copy was started, 5 still bu
 // runRunner runs the host runner against the cluster in the current
 // kubeconfig.
 func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []string, out io.Writer) error {
-	host, _ := os.Hostname()
-	host = strings.ToLower(strings.Split(host, ".")[0])
-	node := fs.String("node", "c4-host-"+host, "the machine's Node name")
+	dir := agent.RunnerDir(h.Store.Dir)
+	enrolled, isEnrolled, err := agent.ReadEnrolled(dir)
+	if err != nil {
+		return err
+	}
+	defNode := defaultNode()
+	if isEnrolled {
+		defNode = enrolled.Node
+	}
+	node := fs.String("node", defNode, "the machine's Node name (default: the one it was enrolled as)")
 	slots := fs.Int("slots", 4, "members that may run here at once")
 	every := fs.Duration("every", 5*time.Second, "how often to check pods and sessions")
 	yieldTimeout := fs.Duration("yield-timeout", time.Minute, "how long one yield waits for a busy member before trying again")
 	hardStop := fs.Duration("hard-stop-after", 0, "stop a member mid-turn if it has not reached a turn boundary this long after a yield request (0: wait for the boundary)")
-	kubeconfig := fs.String("kubeconfig", "", "the runner's kubeconfig: the service account c4-hosts/<node> the farm admin issued for this machine (default: $KUBECONFIG or ~/.kube/config)")
+	kubeconfig := fs.String("kubeconfig", "", "the runner's kubeconfig: the service account c4-hosts/<node> the farm admin issued for this machine (default: the one c4-agent enroll wrote, else $KUBECONFIG or ~/.kube/config)")
 	slotsFile := fs.String("slots-file", "", "a file whose first line is the slots to offer now (and, after a space, why), written by a power reader; missing or unreadable means --slots")
 	unitsDir := fs.String("units-dir", "", "where each running unit's directory lives (its output root, control directory and podinfo; default the agents home's units/)")
 	store := fs.String("store", "", "a regional store replica (http://host:port) to store generator members' expansion documents in, so the queue can read them; without it a generator member adds nothing")
@@ -400,8 +416,11 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
+	if len(owners) == 0 && isEnrolled {
+		owners = multi{enrolled.Owner}
+	}
 	if len(owners) == 0 {
-		return errors.New("runner: --owner is required: the users whose jobs this machine runs")
+		return errors.New("runner: --owner is required: the users whose jobs this machine runs (or enroll the machine: c4-agent enroll --owner USER)")
 	}
 	set := map[string]string{}
 	for _, l := range lbls {
@@ -413,6 +432,14 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	}
 	if len(set) == 0 {
 		set["c4.avalanche.io/host"] = *node
+	}
+	// an enrolled machine signs in as itself, and keeps its own tokens
+	tokens := ""
+	if *kubeconfig == "" && isEnrolled && *node == enrolled.Node {
+		*kubeconfig, tokens = enrolled.Kubeconfig, enrolled.Tokens
+		if *signerToken == "" {
+			*signerToken = agent.TokenFile(tokens, "signer")
+		}
 	}
 	if *kubeconfig != "" {
 		os.Setenv("KUBECONFIG", *kubeconfig)
@@ -432,7 +459,7 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	if err != nil {
 		return err
 	}
-	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Owners: owners, Holder: *holder, Slots: *slots, YieldTimeout: *yieldTimeout, HardStopAfter: *hardStop,
+	r := &agent.Runner{Client: cl, Harness: h, Node: *node, Labels: set, Owners: owners, Holder: *holder, Slots: *slots, YieldTimeout: *yieldTimeout, HardStopAfter: *hardStop, Tokens: tokens,
 		Logf: func(f string, a ...any) { fmt.Fprintf(out, time.Now().Format("15:04:05 ")+f+"\n", a...) }}
 	if *blocksCwd != "" {
 		hook, err := blockHookCommand()
@@ -499,6 +526,83 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	}
 	fmt.Fprintf(out, "runner %s: %d slots, labels %v, the jobs of %s\n", *node, *slots, set, strings.Join(owners, ", "))
 	return r.Run(ctx, *every)
+}
+
+// defaultNode is the Node name a machine runs as unless told otherwise.
+func defaultNode() string {
+	host, _ := os.Hostname()
+	return "c4-host-" + strings.ToLower(strings.Split(host, ".")[0])
+}
+
+// runEnroll enrolls this machine on a farm, with the farm admin's access
+// (the local farm's own, for c4 farm up): its account, its pool and its
+// kubeconfig, in the agents home's runner folder, so `c4-agent runner`
+// then needs no flags.
+func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []string, out io.Writer) error {
+	owner := fs.String("owner", "", "the person whose work this machine runs (required)")
+	node := fs.String("node", defaultNode(), "the machine's Node name")
+	pool := fs.String("pool", "agent", "the pool to make for this machine, owned by --owner")
+	slots := fs.Int("slots", 4, "the pool's slots on this machine")
+	kubeconfig := fs.String("kubeconfig", "", "the farm admin's kubeconfig (default: $KUBECONFIG or ~/.kube/config)")
+	kubecontext := fs.String("context", "", "its context for the farm (default: its current context)")
+	asJSON := fs.Bool("json", false, "print what was enrolled as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *owner == "" {
+		return errors.New("enroll: --owner is required: the person whose work this machine runs")
+	}
+	rules := clientcmd.NewDefaultClientConfigLoadingRules()
+	if *kubeconfig != "" {
+		rules.ExplicitPath = *kubeconfig
+	}
+	cc := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(rules, &clientcmd.ConfigOverrides{CurrentContext: *kubecontext})
+	raw, err := cc.RawConfig()
+	if err != nil {
+		return err
+	}
+	if err := clientcmdapi.FlattenConfig(&raw); err != nil {
+		return err
+	}
+	name := *kubecontext
+	if name == "" {
+		name = raw.CurrentContext
+	}
+	kctx, ok := raw.Contexts[name]
+	if !ok || raw.Clusters[kctx.Cluster] == nil {
+		return fmt.Errorf("enroll: no farm in the kubeconfig's context %q", name)
+	}
+	cfg, err := cc.ClientConfig()
+	if err != nil {
+		return err
+	}
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		return err
+	}
+	if err := c4v1.AddToScheme(scheme); err != nil {
+		return err
+	}
+	cl, err := client.New(cfg, client.Options{Scheme: scheme})
+	if err != nil {
+		return err
+	}
+	e, err := agent.Enroll(ctx, cl, agent.EnrollOptions{Node: *node, Owner: *owner, Pool: *pool, Slots: *slots,
+		Dir: agent.RunnerDir(h.Store.Dir), Farm: raw.Clusters[kctx.Cluster]})
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(e)
+	}
+	fmt.Fprintf(out, "enrolled %s for %s's work, in the pool %s\n", e.Node, e.Owner, e.Pool)
+	for _, m := range e.Made {
+		fmt.Fprintf(out, "  made %s\n", m)
+	}
+	fmt.Fprintf(out, "its kubeconfig: %s\nstart its runner: c4-agent runner\n", e.Kubeconfig)
+	return nil
 }
 
 // readSlotsFile reads "N [reason...]" from path; anything unreadable gives

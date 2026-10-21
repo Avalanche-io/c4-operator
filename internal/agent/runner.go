@@ -49,6 +49,11 @@ type Runner struct {
 	// if the WorkJob that controls it is owned by one of them (owner.go).
 	// With none, it runs nothing.
 	Owners []string
+	// Tokens, when set, is the machine's tokens folder from enrolling it:
+	// the runner keeps each token there fresh itself (enroll.go).
+	Tokens    string
+	tokensDue time.Time
+	tokensErr string
 	// Slots is how many members may run here at once.
 	Slots int
 	// Capacity, when set, lowers the slots the node offers below Slots,
@@ -206,6 +211,12 @@ func (r *Runner) Tick(ctx context.Context) error {
 	}
 	if r.limitRead == nil {
 		r.limitRead = map[string]int64{}
+	}
+	if err := r.renewTokens(ctx); err != nil && err.Error() != r.tokensErr {
+		r.tokensErr = err.Error()
+		r.logf("its tokens: %v", err)
+	} else if err == nil {
+		r.tokensErr = ""
 	}
 	if err := r.heartbeat(ctx); err != nil {
 		return fmt.Errorf("node %s: %w", r.Node, err)

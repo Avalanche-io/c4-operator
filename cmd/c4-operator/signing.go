@@ -27,7 +27,7 @@ import (
 // signs as its own components with certificates it issues to itself.
 const (
 	// AudienceSigner is the token audience the issuer accepts.
-	AudienceSigner = "c4-signer"
+	AudienceSigner = c4v1.SignerAudience
 	caSecret       = "c4-signing-ca"
 	trustConfigMap = "c4-provenance"
 )

@@ -15,6 +15,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/rest"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/envtest"
@@ -27,7 +28,10 @@ import (
 	"github.com/Avalanche-io/c4-operator/work/sched"
 )
 
-var k8s client.Client
+var (
+	k8s    client.Client
+	k8sCfg *rest.Config
+)
 
 // The end-to-end test runs the queue, the bundle controller and the host
 // runner against a real API server (envtest). Claude Code is a fake: no
@@ -46,6 +50,7 @@ func TestMain(m *testing.M) {
 	if err != nil {
 		panic(err)
 	}
+	k8sCfg = cfg
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)
 	c4v1.AddToScheme(scheme)
