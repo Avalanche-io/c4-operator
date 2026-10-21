@@ -2,7 +2,7 @@
 // of the unit contract a script would otherwise spell out: progress, frame
 // previews, yielding at a checkpoint, and resuming.
 //
-//	c4-unit run                     run the tool in $C4_TOOLS/tool.yaml with the
+//	c4-unit run [--replay LOG]      run the tool in $C4_TOOLS/tool.yaml with the
 //	                                parameters in $C4_PARAMS: progress, previews,
 //	                                stalls and .c4/outcome from what it prints (run.go)
 //	                                on a re-check, a tool not of kind agent does not
@@ -146,6 +146,7 @@ func (e env) get(k string) string {
 
 func run(args []string, stdout io.Writer, e env) (int, error) {
 	fs := flag.NewFlagSet("c4-unit", flag.ContinueOnError)
+	replay := fs.String("replay", "", "with run: read a captured log through the tool's protocol and patterns and print what the runner would report, running nothing")
 	dir := fs.String("dir", "", "the unit's writable mount (default $C4_OUTPUT, or found from the mounts)")
 	width := fs.Int("width", 960, "preview width in pixels")
 	checkpoint := fs.String("checkpoint", "", "with safepoint: what the unit saved there (a step, a path, a session turn), for the record")
@@ -184,7 +185,10 @@ func run(args []string, stdout io.Writer, e env) (int, error) {
 	switch cmd {
 	case "run":
 		if len(pos) != 0 {
-			return 2, errors.New("usage: c4-unit run (the tool is $C4_TOOLS/tool.yaml, its parameters $C4_PARAMS)")
+			return 2, errors.New("usage: c4-unit run [--replay LOG] (the tool is $C4_TOOLS/tool.yaml, its parameters $C4_PARAMS)")
+		}
+		if *replay != "" {
+			return replayTool(e, *replay, stdout)
 		}
 		return runTool(e, stdout, e.errOut())
 	case "progress":

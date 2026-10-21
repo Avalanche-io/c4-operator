@@ -791,3 +791,48 @@ func TestRunRecheckPassesTheQuestionThrough(t *testing.T) {
 		t.Errorf("an agent tool did not run its re-check: %q %v", b, err)
 	}
 }
+
+// A replay reads a captured log through the tool's protocol and patterns,
+// running nothing, and says what the runner would have reported, and from
+// which line: the progress, the status, the frames, and the failure.
+func TestReplayALog(t *testing.T) {
+	r := newToolRun(t, `c4: tool/1
+name: x
+kind: frames
+runs: {image: c4/runtime-base, command: [bash, -c, 'touch $C4_TREE/ran']}
+progress:
+- {match: 'ALF_PROGRESS (\d+)%', percent: 1}
+errors:
+  licence: ['No licenses could be found']
+  retry: ['CUDA error']
+  ignore: ['^Warning:']
+`)
+	log := filepath.Join(t.TempDir(), "sm0140.log")
+	os.WriteFile(log, []byte("openjd_status: rendering frame 1001\nALF_PROGRESS 10%\nALF_PROGRESS 25%\nWarning: CUDA error in an unused pass\nc4_frame: 1001\nALF_PROGRESS 50%\nCUDA error: out of memory\nNo licenses could be found to run this application\nALF_PROGRESS 100%\n"), 0o644)
+	c, err := run([]string{"run", "--replay", log}, &r.out, r.env())
+	if err != nil || c != 0 {
+		t.Fatalf("exit %d: %v", c, err)
+	}
+	got := r.out.String()
+	for _, want := range []string{
+		"replay    sm0140.log · 9 lines",
+		"progress  10% · 25% · 50% · 100% (line 9)",
+		"status    rendering frame 1001 (line 1)",
+		"frames    1 frame finished",
+		`outcome   failed · licence · "No licenses could be found to run this application" (line 8)`,
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("no %q in\n%s", want, got)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(r.tree, "ran")); err == nil {
+		t.Error("a replay ran the tool")
+	}
+
+	os.WriteFile(log, []byte("all fine\n"), 0o644)
+	var clean strings.Builder
+	run([]string{"run", "--replay", log}, &clean, r.env())
+	if !strings.Contains(clean.String(), "progress  none") || !strings.Contains(clean.String(), "no failure reported") {
+		t.Errorf("a clean log:\n%s", clean.String())
+	}
+}
