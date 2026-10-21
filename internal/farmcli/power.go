@@ -3,10 +3,10 @@ package farmcli
 import (
 	"context"
 	"errors"
+	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/Avalanche-io/c4-operator/internal/agent"
 	"github.com/Avalanche-io/c4-operator/internal/power"
 )
 
@@ -26,9 +26,16 @@ type PowerArgs struct {
 // DefaultSlotsFile is where the power reader writes and the host runner
 // reads, unless told otherwise.
 func DefaultSlotsFile() (string, error) {
-	home, err := agent.DefaultHome()
-	if err != nil {
-		return "", err
+	// c4-agent's home, as agent.DefaultHome has it. Not imported: package
+	// agent pulls in the node daemon and its Unix-only cache, and c4-farm
+	// ships for Windows.
+	home := os.Getenv("C4_AGENT_HOME")
+	if home == "" {
+		h, err := os.UserHomeDir()
+		if err != nil {
+			return "", err
+		}
+		home = filepath.Join(h, ".c4", "agents")
 	}
 	return filepath.Join(home, "slots"), nil
 }
