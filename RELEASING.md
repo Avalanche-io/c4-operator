@@ -80,9 +80,10 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
     from the moment the draft is published (the repository is public
     already).
 13. Smoke test from a clean machine with the published images: `brew
-    install avalanche-io/tap/c4-farm` (once the C4 suite release has
-    written `c4.rb`, `brew install avalanche-io/tap/c4`), the
-    quickstart, and `kubectl apply -f
+    install avalanche-io/tap/c4-farm`, then `c4-farm` (help, exit 0),
+    `c4-agent help` and `c4-unit` (its usage, exit 2); once the C4 suite
+    release has written `c4.rb`, `brew install avalanche-io/tap/c4` and
+    `c4 farm agents`; the quickstart; and `kubectl apply -f
     https://github.com/Avalanche-io/c4-operator/releases/download/v0.1.0/install.yaml`.
 14. **Joshua, optional:** the repository description and topics (kubernetes,
     operator, csi, vfx, render-farm, content-addressed-storage, provenance,
