@@ -17,6 +17,11 @@ type SubmissionRequest struct {
 	// Explain adds what each job lowers to: its WorkJob's class, params,
 	// inputs, template and deadline.
 	Explain bool `json:"explain,omitempty"`
+	// Key, when set, answers the request once: a retry with the same key
+	// (after a timeout, a dropped connection) is given the jobs the first
+	// made, never a second set. A client makes one per submission it
+	// means, and sends it again on each retry.
+	Key string `json:"key,omitempty"`
 }
 
 // SubmissionResponse answers POST /submissions: 201 when the jobs are

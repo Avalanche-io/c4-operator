@@ -3,8 +3,6 @@ package server
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,10 +16,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
-	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // handleSubmission is POST /submissions: a submission checked, lowered to
@@ -120,6 +115,32 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	out.Warnings = plan.Warnings
+	if !body.DryRun && body.Key != "" {
+		// A request with a key is answered once: a retry is given the
+		// jobs the first made (submission_commit.go).
+		label := keyLabel(v.User, body.Key)
+		defer s.submitKeys.lock(label)()
+		jobs, record, pending, err := s.keyed(ctx, plan.Namespace, label)
+		switch {
+		case err != nil:
+			refuse(http.StatusServiceUnavailable, api.FieldError{Path: "key", Message: "the farm could not look this key up just now",
+				Fix: "try again in a moment, with the same key"})
+			return
+		case pending:
+			refuse(http.StatusConflict, api.FieldError{Path: "key", Message: "the submission sent with this key is still being made",
+				Fix: "ask again in a moment, with the same key"})
+			return
+		case len(jobs) > 0:
+			out.Jobs, out.OK, out.Record = jobs, true, record
+			names := make([]string, len(jobs))
+			for i, j := range jobs {
+				names[i] = plan.Project + "/" + j.Name
+			}
+			out.Message = fmt.Sprintf("%s: submitted already, with this key", strings.Join(names, ", "))
+			writeJSON(w, http.StatusOK, out)
+			return
+		}
+	}
 	var taken []string
 	for attempt := 0; ; attempt++ {
 		jobs, code, ferr := s.makeSubmission(r, v, m, plan, &body, &out)
@@ -129,7 +150,7 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 		}
 		var te takenError
 		if !errors.As(ferr.err, &te) || attempt >= 4 {
-			fe := s.farmWords(ferr.key, plan.Project, code, ferr.err)
+			fe := leftWords(s.farmWords(ferr.key, plan.Project, code, ferr.err), ferr.left, ferr.until)
 			if errors.As(ferr.err, &te) {
 				fe = fieldRefusal{api.FieldError{Path: "jobs." + ferr.key, Message: "job names kept being taken while the submission was made",
 					Fix: "submit it again"}, http.StatusConflict}
@@ -165,6 +186,10 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 type jobFailure struct {
 	key, name string
 	err       error
+	// left are the jobs a rollback could not delete; until is when the
+	// farm deletes those still held (submission_commit.go).
+	left  []string
+	until string
 }
 
 // makeSubmission checks every job of a plan as POST /jobs would, then
@@ -227,32 +252,9 @@ func (s *Server) makeSubmission(r *http.Request, v *api.Viewer, m *model, plan *
 		}
 		return jobs, http.StatusOK, nil
 	}
-	// The submission's record: who submitted which file, and the jobs.
-	names := make([]string, len(plan.Jobs))
-	for i, j := range plan.Jobs {
-		names[i] = j.Request.Name
-	}
-	sum := sha256.Sum256(body.Submission)
-	record, err := s.signControl(ctx, []string{plan.Project}, provenance.Subject{Name: "submission:" + out.Submission,
-		Digest: map[string]string{"sha256": hex.EncodeToString(sum[:])}},
-		controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r), Via: via(r),
-			Authorization: s.authorization("create", "workjobs", plan.Namespace, ""), Action: "submit",
-			Target: "submission:" + out.Submission, Change: map[string]any{"project": plan.Project, "jobs": names}})
-	if err != nil {
-		return nil, http.StatusServiceUnavailable, &jobFailure{key: plan.Jobs[0].Key, name: names[0], err: fmt.Errorf("the submission's record: %w", err)}
-	}
-	out.Record = record
-	for _, j := range plan.Jobs {
-		o := opts(j, record)
-		o.EstimateOptional = true
-		resp, code, err := s.createJob(r, v, m, *j.Request, o)
-		if err != nil {
-			s.rollback(ctx, r, v, plan.Namespace, jobs, j.Key)
-			return nil, code, &jobFailure{key: j.Key, name: j.Request.Name, err: err}
-		}
-		jobs = append(jobs, job(j, resp))
-	}
-	return jobs, http.StatusCreated, nil
+	// Made held, signed for once, released together; rolled back if
+	// any of it fails, whatever the client does (submission_commit.go).
+	return s.commitSubmission(r, v, m, plan, body, out, opts, job)
 }
 
 // planTogether plans a submission's drafts together (DryRunAll), else
@@ -270,20 +272,6 @@ func (s *Server) planTogether(ctx context.Context, drafts []*c4v1.WorkJob, proje
 		out[i] = *e
 	}
 	return out, nil
-}
-
-// rollback deletes the jobs a submission made before one of them failed,
-// so nothing of a refused submission is left behind, and books it.
-func (s *Server) rollback(ctx context.Context, r *http.Request, v *api.Viewer, ns string, made []api.SubmissionJob, failed string) {
-	for _, j := range made {
-		job := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: j.Name}}
-		if err := s.Client.Delete(ctx, job); err != nil && !apierrors.IsNotFound(err) {
-			s.Log.Error(err, "delete a refused submission's job", "job", ns+"/"+j.Name)
-			continue
-		}
-		s.record(ctx, job, "WorkJob", v.User, "Withdrawn", j.Name+": deleted, since its submission's "+failed+" was refused",
-			bookNote{actor: actorOf(r, v), kind: "submit"})
-	}
 }
 
 // fieldRefusal is a refusal and its status.

@@ -562,6 +562,12 @@ type createOpts struct {
 	// Book is a line added to the job's book entry (a submission's ID and
 	// note).
 	Book string
+	// Hold creates the job held (spec.nudge.hold), for a submission that
+	// releases its jobs together once all are made; such a job replaces
+	// no forecast, since the submission may yet be rolled back.
+	Hold bool
+	// Made, when set, receives the WorkJob as created (with its UID).
+	Made *c4v1.WorkJob
 }
 
 // takenError is a create refused because the job's name was taken
@@ -773,6 +779,15 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	for k, val := range o.Annotations {
 		job.Annotations[k] = val
 	}
+	if o.Hold {
+		if replaced != nil {
+			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("replaces %q: a submission's job replaces no forecast", replaced.Name)
+		}
+		if job.Spec.Nudge.Hold {
+			job.Annotations[AnnotationSubmissionHoldAsked] = "true"
+		}
+		job.Spec.Nudge.Hold = true
+	}
 	if body.AIUsage != nil {
 		raw, err := json.Marshal(body.AIUsage)
 		if err != nil {
@@ -836,6 +851,9 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 			return api.SubmitResponse{}, http.StatusConflict, takenError{fmt.Errorf("%v", err)}
 		}
 		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("%v", err)
+	}
+	if o.Made != nil {
+		*o.Made = *job.DeepCopy()
 	}
 	msg := fmt.Sprintf("%s: submitted, %s, %d input view%s", name, spec.Class, len(mats), plural(len(mats)))
 	if grant != nil {

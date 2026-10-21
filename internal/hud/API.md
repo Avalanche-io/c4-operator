@@ -863,7 +863,7 @@ and `-site` name the input it rebuilds and where, and the queue sets
 ### POST /submissions
 
 ```
-{ submission, dryRun?, explain? }
+{ submission, dryRun?, explain?, key? }
 ->
 { ok, dryRun?, errors?: [ { path, message, fix } ], submission, record?,
   jobs?: [ { key, namespace, name, tool, version, what, estimate?, estimateError?, after?: [name], link } ],
@@ -878,16 +878,32 @@ follows, its dues, trees, people, `for:` and `tracker:`), lowers each job
 to a `POST /jobs` request, and creates the jobs in the order written:
 `201`. `project` may be left out by a viewer with one project.
 
-It is all or nothing. Every job is checked as `POST /jobs` checks it
-before the first is made; if a create still fails, the jobs already made
-are deleted (and booked so) and the answer is the refusal, so a client
-that retries never makes duplicates. A name taken meanwhile is numbered
-past and the jobs made again, never reported. Every refusal is `{ path,
+It is all or nothing, whatever the client does. Every job is checked as
+`POST /jobs` checks it before the first is made. The jobs are created
+held, so none of their units runs, the submission is signed for once they
+all exist, and they are released together. If a create, the signature or
+the release fails, the jobs made are deleted, each only while it is still
+the job made, and booked so; a submission already signed for gets a
+signed withdrawal; a job that could not be deleted is named in the
+refusal. All of this goes on if the client hangs up. A HUD that stops
+midway leaves its jobs held and marked pending
+(`c4.avalanche.io/submission-pending`) until `submission.pendingFor` (10
+minutes, a project policy value), after which they are deleted with every
+job of their attempt. A name taken meanwhile is numbered past and the
+jobs made again, never reported. Every refusal is `{ path,
 message, fix }` in the farm's words, at a dotted path (`jobs.comp.after`,
 `jobs.movie` for a job the farm would not take): `422` for the file or the
 farm's policy, `403` without access, `404` for a project the viewer cannot
 see, `503` when the farm cannot make a job just now. A folder tree is
 refused beside the file's other errors.
+
+`key` makes a retry safe. A client names the submission it means (any
+text) and sends the same key on every retry: the request is answered
+once. A retry is given the jobs the first made (`200`, "submitted
+already, with this key"), or `409` at `key` while they are still being
+made, never a second set. Keys are the submitter's own. Without a key the
+same file sent twice is two submissions, the second numbered past the
+first. MCP's tools send one and give it back (`key`).
 
 With `dryRun` the jobs are planned together, each after the jobs it
 follows and competing for the same slots, so the last job's `eta` is when

@@ -144,6 +144,11 @@ type Server struct {
 	// retire is when to try again to delete each replaced forecast a
 	// failed delete left (replace.go); only Start's loop touches it.
 	retire map[string]retireTry
+	// sweepMu guards sweptAt, when sweepSubmissions last looked; keys
+	// serializes submissions sent with the same key.
+	sweepMu    sync.Mutex
+	sweptAt    time.Time
+	submitKeys keyLocks
 	// toolMu guards spread: the projects each farm-wide tool tree has been
 	// copied and granted into (tools.go).
 	toolMu sync.Mutex
@@ -268,6 +273,7 @@ func (s *Server) Start(ctx context.Context) error {
 			s.Log.Error(err, "collect")
 		}
 		s.sweepReplaced(ctx, time.Now())
+		s.sweepSubmissions(ctx, time.Now())
 		s.settleToolTests(ctx, s.current())
 		s.reconcileFarmTools(ctx, s.current())
 		select {
