@@ -1295,10 +1295,16 @@ cluster, where no NetworkPolicy applies.
   is not a key: it names the licence servers of the pools a job's
   licences come from, and goes with them.
 - **Each value** is a YAML list of rules. Each rule names exactly one of:
-  - `host`: a host name, or `*.domain` for the names under it. Hosts are
-    reached only through the farm's egress proxy, which checks each
-    request's host and port against the rule;
-  - `cidr`: an address block, reached directly;
+  - `host`: a host name, or `*.domain` for the names under it (not the
+    domain itself: write both to reach both). Hosts are reached only
+    through the farm's egress proxy, which checks each request's host and
+    port against the rule, resolves the name itself and dials the address
+    it checked. A name that resolves only to loopback, private, link-local
+    (the cloud metadata service among them), carrier-grade NAT or other
+    reserved addresses is refused, unless one of the unit's `cidr` rules
+    covers the address;
+  - `cidr`: an address block, reached directly, not through the proxy, so
+    the proxy's log has no entry for it;
   - `service`: a cluster service as `<namespace>/<name>`, reached directly
     (its pods).
 
@@ -1307,14 +1313,20 @@ cluster, where no NetworkPolicy applies.
 - **What a job gets.** A tool job's units (`spec.tool`) reach the union of
   the rules of the networks its tool declares, and nothing else. Their
   NetworkPolicy (`c4-job-tool-<job>`) allows each `cidr` and `service`
-  rule, the egress proxy when any rule is a `host`, and then DNS. With no
-  network declared it allows nothing at all, not even DNS: the units are
-  sealed, and their records say so. The proxy reads the networks from the
+  rule, and the egress proxy when any rule is a `host`. It allows DNS, and
+  only to the cluster's DNS servers (`k8s-app: kube-dns` in kube-system),
+  when a unit names something itself: a `cidr` or `service` rule. A unit
+  that reaches only hosts gets the proxy's cluster IP in `HTTPS_PROXY`
+  and no DNS. With no network declared the policy allows nothing at all,
+  not even DNS: the units are sealed, and their records say so. A job
+  with no `spec.tool` (a plain `POST /jobs` submission, a tracker's job)
+  is not a tool job and is not sealed by this. The proxy reads the networks from the
   job and this ConfigMap, so an admin's change applies to the next
   request a unit makes (after the proxy's short cache).
 - **A name the farm does not define** is refused when a tool is published
-  (`needs.network`: "fetch reaches studio-db, which this farm does not
-  define; a farm admin defines networks in the c4-networks ConfigMap"), and
+  (`needs.network`: "fetch declares network studio-db, which this farm
+  does not define: a farm admin adds it to the c4-networks ConfigMap in
+  c4-system (internal/hud/API.md, Networks)"), and
   holds a job's units with that reason in its `Tools` condition.
 - **A refused request** gets the proxy's 403 naming the line to add: the
   network that allows the host ("add needs: {network: [pypi]} to fetch's

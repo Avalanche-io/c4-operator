@@ -341,7 +341,7 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if _, missing := nets.Expand(names); len(missing) > 0 {
-			refuse(api.FieldError{Path: "needs.network", Message: egress.Missing(tool.Name, missing),
+			refuse(api.FieldError{Path: "needs.network", Message: egress.Missing(tool.Name, missing, s.Namespace),
 				Fix: "declare a network this farm defines, or ask a farm admin to define it"})
 			return
 		}

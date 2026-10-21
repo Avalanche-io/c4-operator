@@ -92,9 +92,14 @@ func (n Networks) Offering(host string, port int) []string {
 	return out
 }
 
-// Missing says, in the farm's words, which networks a tool names that the
-// farm does not define.
-func Missing(tool string, missing []string) string {
-	return fmt.Sprintf("%s reaches %s, which this farm does not define; a farm admin defines networks in the %s ConfigMap",
-		tool, strings.Join(missing, ", "), c4v1.NetworksConfigMap)
+// Missing says, in the farm's words, which networks a tool declares that
+// the farm does not define, and where an admin defines them: the
+// c4-networks ConfigMap in the operator's namespace ns.
+func Missing(tool string, missing []string, ns string) string {
+	what, it := "network", "it"
+	if len(missing) > 1 {
+		what, it = "networks", "them"
+	}
+	return fmt.Sprintf("%s declares %s %s, which this farm does not define: a farm admin adds %s to the %s ConfigMap in %s (internal/hud/API.md, Networks)",
+		tool, what, strings.Join(missing, ", "), it, c4v1.NetworksConfigMap, ns)
 }

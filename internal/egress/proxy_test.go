@@ -60,8 +60,9 @@ func TestProxy(t *testing.T) {
 	upAddr := strings.TrimPrefix(up.URL, "http://")
 	p := &Proxy{Log: logr.Discard(),
 		Resolve: fakeResolver{"127.0.0.1": {{Host: "api.search.example"}, {Host: "plain.example", Ports: []int32{80}}}},
+		Lookup: publicNames,
 		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if addr != "api.search.example:443" && addr != "plain.example:80" {
+			if addr != "203.0.113.10:443" && addr != "203.0.113.11:80" {
 				return nil, fmt.Errorf("dialed %s", addr)
 			}
 			var d net.Dialer
@@ -148,5 +149,69 @@ func TestRefusalNamesTheLine(t *testing.T) {
 	resp.Body.Close()
 	if resp.StatusCode != http.StatusForbidden || !strings.Contains(string(b), "not in tool search; to reach it, add needs: {network: [x]} to search's tool.yaml") {
 		t.Fatalf("%d %q", resp.StatusCode, b)
+	}
+}
+
+// publicNames resolves the tests' hosts to documentation addresses, which
+// are outside the ranges a host rule never reaches.
+func publicNames(_ context.Context, host string) ([]net.IP, error) {
+	switch host {
+	case "api.search.example":
+		return []net.IP{net.ParseIP("203.0.113.10")}, nil
+	case "plain.example":
+		return []net.IP{net.ParseIP("203.0.113.11")}, nil
+	}
+	return nil, fmt.Errorf("no such host %s", host)
+}
+
+// A host rule reaches only addresses outside the cluster's and the node's:
+// a name that resolves to loopback, a private block or the metadata
+// service is refused, unless a cidr rule of the unit covers the address,
+// and the proxy dials the address it checked.
+func TestProxyChecksWhereANameGoes(t *testing.T) {
+	names := map[string][]net.IP{
+		"loop.example":     {net.ParseIP("127.0.0.1")},
+		"metadata.example": {net.ParseIP("169.254.169.254")},
+		"inside.example":   {net.ParseIP("10.1.2.3")},
+		"mixed.example":    {net.ParseIP("10.1.2.3"), net.ParseIP("203.0.113.12")},
+	}
+	var dialed string
+	rules := []c4v1.ToolEgress{{Host: "*.example"}}
+	p := &Proxy{Log: logr.Discard(), Resolve: fakeResolver{"127.0.0.1": rules},
+		Lookup: func(_ context.Context, host string) ([]net.IP, error) { return names[host], nil },
+		Dial: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			dialed = addr
+			return nil, errors.New("not dialing in this test")
+		}}
+	srv := httptest.NewServer(p)
+	defer srv.Close()
+	proxyURL, _ := url.Parse(srv.URL)
+	c := &http.Client{Transport: &http.Transport{Proxy: http.ProxyURL(proxyURL)}}
+	get := func(host string) (int, string) {
+		t.Helper()
+		dialed = ""
+		resp, err := c.Get("http://" + host + "/")
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return resp.StatusCode, string(b)
+	}
+	for _, host := range []string{"loop.example", "metadata.example", "inside.example"} {
+		if code, b := get(host); code != http.StatusForbidden || !strings.Contains(b, "which a host rule never reaches") || dialed != "" {
+			t.Errorf("%s: %d %q, dialed %q", host, code, b, dialed)
+		}
+	}
+	if _, _ = get("mixed.example"); dialed != "203.0.113.12:80" {
+		t.Errorf("mixed: dialed %q", dialed)
+	}
+	// a cidr rule of the unit's covers the address: the unit means it
+	p.Resolve = fakeResolver{"127.0.0.1": append(rules, c4v1.ToolEgress{CIDR: "10.1.0.0/16"})}
+	if _, _ = get("inside.example"); dialed != "10.1.2.3:80" {
+		t.Errorf("inside, with a cidr rule: dialed %q", dialed)
+	}
+	if code, _ := get("loop.example"); code != http.StatusForbidden || dialed != "" {
+		t.Errorf("loop, with another cidr rule: %d, dialed %q", code, dialed)
 	}
 }

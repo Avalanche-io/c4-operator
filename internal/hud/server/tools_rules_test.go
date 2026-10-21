@@ -149,7 +149,7 @@ func TestPublishNetworks(t *testing.T) {
 	files["tool.yaml"] = strings.Replace(files["tool.yaml"], "params:", "needs: {network: [studio-db]}\nparams:", 1)
 	code, out := publish(t, s, "td", "show-a", api.ToolPublishRequest{View: putTree(t, s, "show-a", files).String()})
 	if code != http.StatusUnprocessableEntity || len(out.Errors) != 1 || out.Errors[0].Path != "needs.network" ||
-		out.Errors[0].Message != "notes reaches studio-db, which this farm does not define; a farm admin defines networks in the c4-networks ConfigMap" {
+		out.Errors[0].Message != "notes declares network studio-db, which this farm does not define: a farm admin adds it to the c4-networks ConfigMap in c4-system (internal/hud/API.md, Networks)" {
 		t.Fatalf("undefined network: %d %+v", code, out)
 	}
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: s.Namespace, Name: c4v1.NetworksConfigMap},

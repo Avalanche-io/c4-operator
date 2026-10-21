@@ -103,7 +103,9 @@ func TestTools(t *testing.T) {
 	e := np.Spec.Egress
 	if np.Spec.PodSelector.MatchLabels[c4v1.LabelTool] != "search" || len(e) != 3 ||
 		e[0].To[0].IPBlock == nil || e[0].To[0].IPBlock.CIDR != "203.0.113.0/24" || e[0].Ports[0].Port.IntValue() != 443 ||
-		e[1].To[0].PodSelector.MatchLabels["app"] != "searcher" || e[2].Ports[0].Port.IntValue() != 53 {
+		e[1].To[0].PodSelector.MatchLabels["app"] != "searcher" || e[2].Ports[0].Port.IntValue() != 53 ||
+		len(e[2].To) != 1 || e[2].To[0].PodSelector.MatchLabels["k8s-app"] != "kube-dns" ||
+		e[2].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != "kube-system" {
 		t.Fatalf("policy %+v", np.Spec)
 	}
 	if q.egressDenied(ctx, ns, p.Labels) {
@@ -151,7 +153,12 @@ func TestToolHostsGoThroughTheProxy(t *testing.T) {
 	q.EgressProxy = "c4-egress:3128"
 	tick(t, q)
 	p := podOfUnit(t, ns, "hosts", 1)
-	want := "http://c4-egress." + farmNS + ".svc:3128"
+	var proxySvc corev1.Service
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: farmNS, Name: "c4-egress"}, &proxySvc); err != nil || proxySvc.Spec.ClusterIP == "" {
+		t.Fatalf("the proxy's service: %v", err)
+	}
+	// the proxy by its cluster IP: a unit that reaches only hosts needs no DNS
+	want := "http://" + proxySvc.Spec.ClusterIP + ":3128"
 	if envOf(p.Spec.Containers[0], "HTTPS_PROXY") != want || envOf(p.Spec.Containers[0], "https_proxy") != want || envOf(p.Spec.Containers[0], "NO_PROXY") == "" {
 		t.Fatalf("lookup's env %v", p.Spec.Containers[0].Env)
 	}
@@ -160,9 +167,8 @@ func TestToolHostsGoThroughTheProxy(t *testing.T) {
 		t.Fatal(err)
 	}
 	e := np.Spec.Egress
-	if len(e) != 2 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "egress" ||
-		e[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != farmNS || e[0].Ports[0].Port.IntValue() != 3128 ||
-		e[1].Ports[0].Port.IntValue() != 53 {
+	if len(e) != 1 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "egress" ||
+		e[0].To[0].NamespaceSelector.MatchLabels["kubernetes.io/metadata.name"] != farmNS || e[0].Ports[0].Port.IntValue() != 3128 {
 		t.Fatalf("policy %+v", np.Spec)
 	}
 }
@@ -280,19 +286,22 @@ func TestToolJobsRunUnderTheirTool(t *testing.T) {
 	if np := policy("fetch-sealed"); len(np.Spec.Egress) != 0 || !q.egressDenied(ctx, ns, sealed.Labels) {
 		t.Fatalf("not sealed: %+v", np.Spec)
 	}
+	var proxySvc corev1.Service
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: farmNS, Name: "c4-egress"}, &proxySvc); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"fetch-declared", "fetch-test-1a2b3c4d"} {
 		p := podOfUnit(t, ns, name, 0)
 		e := policy(name).Spec.Egress
-		if p.Labels[c4v1.LabelTool] != "fetch" || envOf(p.Spec.Containers[0], "HTTPS_PROXY") != "http://c4-egress."+farmNS+".svc:3128" ||
-			len(e) != 2 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "egress" || e[0].Ports[0].Port.IntValue() != 3128 ||
-			e[1].Ports[0].Port.IntValue() != 53 {
+		if p.Labels[c4v1.LabelTool] != "fetch" || envOf(p.Spec.Containers[0], "HTTPS_PROXY") != "http://"+proxySvc.Spec.ClusterIP+":3128" ||
+			len(e) != 1 || e[0].To[0].PodSelector.MatchLabels["app.kubernetes.io/component"] != "egress" || e[0].Ports[0].Port.IntValue() != 3128 {
 			t.Fatalf("%s: labels %v, egress %+v", name, p.Labels, e)
 		}
 	}
 	if hasPod(t, ns, "fetch-missing", 0) {
 		t.Fatal("a unit ran with a network the farm does not define")
 	}
-	if c := meta.FindStatusCondition(get(t, ns, "fetch-missing").Status.Conditions, "Tools"); c == nil || !strings.Contains(c.Message, "studio-db, which this farm does not define") {
+	if c := meta.FindStatusCondition(get(t, ns, "fetch-missing").Status.Conditions, "Tools"); c == nil || !strings.Contains(c.Message, "declares network studio-db, which this farm does not define") {
 		t.Fatalf("Tools condition %+v", c)
 	}
 	// The Tool object's own policy, made for agents, leaves tool jobs' units out.

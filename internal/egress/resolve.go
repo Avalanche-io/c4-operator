@@ -96,7 +96,7 @@ func (c *Cluster) resolve(ctx context.Context, ip string) (Unit, []c4v1.ToolEgre
 			}
 			rules, missing := nets.Expand(j.Spec.Tool.Network)
 			if len(missing) > 0 {
-				return u, nil, errors.New(Missing(tool, missing))
+				return u, nil, errors.New(Missing(tool, missing, c.Namespace))
 			}
 			return u, rules, nil
 		}

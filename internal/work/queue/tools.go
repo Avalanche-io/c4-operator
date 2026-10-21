@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"fmt"
+	"net"
 	"sort"
 	"strconv"
 	"strings"
@@ -105,14 +106,28 @@ func (q *Queue) hudURL() string {
 	return fmt.Sprintf("http://%s.%s.svc:%d/api/v1", name, ns, port)
 }
 
-// proxyURL is the egress proxy's address for a unit's HTTPS_PROXY.
-func (q *Queue) proxyURL() string {
+// proxyURL is the egress proxy's address for a unit's HTTPS_PROXY: its
+// Service's cluster IP, so a unit that reaches only hosts needs no DNS
+// (the proxy resolves them), else the Service's name. byIP says which.
+func (q *Queue) proxyURL(ctx context.Context) (url string, byIP bool) {
 	ns, name, port, err := q.egressProxy()
 	if err != nil {
-		return ""
+		return "", false
 	}
-	return fmt.Sprintf("http://%s.%s.svc:%d", name, ns, port)
+	var svc corev1.Service
+	if err := q.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &svc); err == nil {
+		if ip := net.ParseIP(svc.Spec.ClusterIP); ip != nil {
+			return "http://" + net.JoinHostPort(ip.String(), strconv.Itoa(int(port))), true
+		}
+	}
+	return fmt.Sprintf("http://%s.%s.svc:%d", name, ns, port), false
 }
+
+// clusterDNS is the cluster's DNS servers as a policy peer: CoreDNS (or
+// kube-dns) in kube-system, by the label both carry.
+var clusterDNS = networkingv1.NetworkPolicyPeer{
+	NamespaceSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"kubernetes.io/metadata.name": "kube-system"}},
+	PodSelector:       &metav1.LabelSelector{MatchLabels: map[string]string{"k8s-app": "kube-dns"}}}
 
 // servicePeer is the pods a cluster service selects, as a policy peer.
 func (q *Queue) servicePeer(ctx context.Context, ns, name string) (networkingv1.NetworkPolicyPeer, error) {
@@ -209,7 +224,7 @@ func (q *Queue) jobToolReady(ctx context.Context, j *c4v1.WorkJob) (*c4v1.Tool, 
 	}
 	rules, missing := nets.Expand(j.Spec.Tool.Network)
 	if len(missing) > 0 {
-		return nil, false, egress.Missing(name, missing)
+		return nil, false, egress.Missing(name, missing, q.Namespace)
 	}
 	p := &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Name: name}, Spec: c4v1.ToolSpec{Egress: rules}}
 	if hostRules(p) && q.EgressProxy == "" {
@@ -231,7 +246,8 @@ func (q *Queue) jobToolReady(ctx context.Context, j *c4v1.WorkJob) (*c4v1.Tool, 
 
 // toolsPolicy is tool p's NetworkPolicy in namespace ns: egress to the
 // address blocks and services it lists, to the egress proxy if it lists
-// hosts, and with any rule the cluster's DNS; nothing else.
+// hosts, and the cluster's DNS servers when the unit names anything
+// itself; nothing else.
 func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*networkingv1.NetworkPolicy, error) {
 	// A tool job's units carry the tool's label too, under their job's
 	// own policy (jobToolPolicy), so this one leaves them out.
@@ -244,6 +260,7 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*netw
 			Egress:      []networkingv1.NetworkPolicyEgressRule{},
 		}}
 	tcp, udp := corev1.ProtocolTCP, corev1.ProtocolUDP
+	named := false
 	for _, e := range p.Spec.Egress {
 		var rule networkingv1.NetworkPolicyEgressRule
 		switch {
@@ -269,6 +286,7 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*netw
 			rule.Ports = append(rule.Ports, networkingv1.NetworkPolicyPort{Protocol: &tcp, Port: &pt})
 		}
 		np.Spec.Egress = append(np.Spec.Egress, rule)
+		named = true
 	}
 	if hostRules(p) {
 		pns, pname, port, err := q.egressProxy()
@@ -306,9 +324,14 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*netw
 		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{peer},
 			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &tcp, Port: &target}}})
 	}
-	if len(np.Spec.Egress) > 0 {
+	// DNS, from the cluster's DNS servers alone, for what a unit reaches by
+	// name itself: an address block or service rule, the HUD, or the proxy
+	// when it has no cluster IP. A unit that reaches only hosts names the
+	// proxy by its IP and needs none.
+	_, proxyByIP := q.proxyURL(ctx)
+	if named || p.Spec.C4 != "" || (hostRules(p) && !proxyByIP) {
 		dns := intstr.FromInt32(53)
-		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{
+		np.Spec.Egress = append(np.Spec.Egress, networkingv1.NetworkPolicyEgressRule{To: []networkingv1.NetworkPolicyPeer{clusterDNS},
 			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &udp, Port: &dns}, {Protocol: &tcp, Port: &dns}}})
 	}
 	return np, nil

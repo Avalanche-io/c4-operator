@@ -9,6 +9,7 @@ package egress
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -44,8 +45,80 @@ type Resolver interface {
 type Proxy struct {
 	Resolve Resolver
 	Log     logr.Logger
-	// Dial reaches upstream hosts (default net.Dialer).
+	// Dial reaches upstream hosts (default net.Dialer), at the address
+	// the proxy checked.
 	Dial func(ctx context.Context, network, addr string) (net.Conn, error)
+	// Lookup resolves a host's addresses (default the system resolver).
+	Lookup func(ctx context.Context, host string) ([]net.IP, error)
+}
+
+// inside are the addresses a host rule never reaches: what a name someone
+// else's DNS controls could point at to reach the cluster, the node or a
+// cloud's metadata service. A unit reaches one only through a cidr rule.
+var inside = func() []*net.IPNet {
+	var out []*net.IPNet
+	for _, c := range []string{
+		"0.0.0.0/8", "10.0.0.0/8", "100.64.0.0/10", "127.0.0.0/8", "169.254.0.0/16", "172.16.0.0/12",
+		"192.0.0.0/24", "192.168.0.0/16", "198.18.0.0/15", "224.0.0.0/4", "240.0.0.0/4",
+		"::/128", "::1/128", "fc00::/7", "fe80::/10", "ff00::/8", "64:ff9b::/96",
+	} {
+		_, n, _ := net.ParseCIDR(c)
+		out = append(out, n)
+	}
+	return out
+}()
+
+// reachable is the first of host's addresses the unit may reach: one
+// outside the cluster's and the node's ranges, or inside them only where
+// one of its cidr rules covers it. The proxy dials that address, not the
+// name again, so the name cannot point elsewhere in between.
+func (p *Proxy) reachable(ctx context.Context, host string, rules []c4v1.ToolEgress) (net.IP, error) {
+	ips := []net.IP{net.ParseIP(host)}
+	if ips[0] == nil {
+		look := p.Lookup
+		if look == nil {
+			look = func(ctx context.Context, host string) ([]net.IP, error) {
+				return net.DefaultResolver.LookupIP(ctx, "ip", host)
+			}
+		}
+		var err error
+		if ips, err = look(ctx, host); err != nil {
+			return nil, err
+		}
+	}
+	var refused []string
+	for _, ip := range ips {
+		if ip == nil {
+			continue
+		}
+		if !insideRange(ip) || coveredByCIDR(rules, ip) {
+			return ip, nil
+		}
+		refused = append(refused, ip.String())
+	}
+	if len(refused) == 0 {
+		return nil, fmt.Errorf("%s has no address", host)
+	}
+	return nil, fmt.Errorf("%s resolves to %s, inside the cluster's or the node's addresses, which a host rule never reaches; a cidr rule must name them",
+		host, strings.Join(refused, ", "))
+}
+
+func insideRange(ip net.IP) bool {
+	for _, n := range inside {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
+}
+
+func coveredByCIDR(rules []c4v1.ToolEgress, ip net.IP) bool {
+	for _, r := range rules {
+		if _, n, err := net.ParseCIDR(r.CIDR); err == nil && n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 func (p *Proxy) dial(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -136,12 +209,19 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, msg, http.StatusForbidden)
 		return
 	}
-	p.Log.Info("allowed", who...)
-	if r.Method == http.MethodConnect {
-		p.tunnel(w, r, net.JoinHostPort(host, strconv.Itoa(port)))
+	addrIP, err := p.reachable(r.Context(), host, rules)
+	if err != nil {
+		p.Log.Info("refused", append(who, "why", err.Error())...)
+		http.Error(w, "egress: "+err.Error(), http.StatusForbidden)
 		return
 	}
-	p.forward(w, r, net.JoinHostPort(host, strconv.Itoa(port)))
+	p.Log.Info("allowed", append(who, "address", addrIP.String())...)
+	addr := net.JoinHostPort(addrIP.String(), strconv.Itoa(port))
+	if r.Method == http.MethodConnect {
+		p.tunnel(w, r, addr)
+		return
+	}
+	p.forward(w, r, addr)
 }
 
 // tunnel joins the client to addr for a CONNECT.

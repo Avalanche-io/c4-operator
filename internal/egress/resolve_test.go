@@ -83,7 +83,7 @@ func TestToolJobNetworks(t *testing.T) {
 	if u, rules, err := r.Rules(ctx, "10.0.1.2"); err != nil || len(rules) != 0 {
 		t.Fatalf("sealed: %+v %v %v", u, rules, err)
 	}
-	if _, _, err := r.Rules(ctx, "10.0.1.3"); err == nil || !strings.Contains(err.Error(), "fetch reaches studio-db, which this farm does not define") {
+	if _, _, err := r.Rules(ctx, "10.0.1.3"); err == nil || !strings.Contains(err.Error(), "fetch declares network studio-db, which this farm does not define: a farm admin adds it to the c4-networks ConfigMap in c4-system") {
 		t.Fatalf("missing: %v", err)
 	}
 	if a := r.Advise(ctx, u, "pypi.org", 443); a != "add needs: {network: [pypi]} to fetch's tool.yaml and publish it again" {

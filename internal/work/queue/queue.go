@@ -1594,7 +1594,8 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		}
 		if tools != nil {
 			jobTool := v.mem.plan.Units[idx].Reasoning.Tools == ""
-			applyTools(pod, v.job.Name, tools, jobTool, q.proxyURL(), q.hudURL())
+			proxy, _ := q.proxyURL(ctx)
+			applyTools(pod, v.job.Name, tools, jobTool, proxy, q.hudURL())
 		}
 		q.leaseOutside(ctx, pod, p.spec.Name)
 		if err := q.Client.Create(ctx, pod); err != nil {

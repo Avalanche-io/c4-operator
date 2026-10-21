@@ -1751,8 +1751,11 @@ and a sweep planner that spawns trials are all generators.
       and selected by the job's own NetworkPolicy (`c4-job-tool-<job>`, owned
       by the job): with no network declared it allows nothing, so the units
       are sealed and count as sealed in their derivation records; with one,
-      it allows the egress proxy (hosts) or the addresses and services the
-      network lists, and DNS. The networks are the farm admin's
+      it allows the egress proxy (hosts), by its cluster IP, or the
+      addresses and services the network lists, and then DNS from the
+      cluster's DNS servers alone. The proxy resolves a host itself, dials
+      the address it checked, and never a cluster, node or metadata address
+      unless a cidr rule names it. The networks are the farm admin's
       (`c4-networks` in the operator's namespace, name to rules); the proxy
       reads a tool job's unit's networks from its job, not from the Tool
       object, so a test runs with its own version's network before it is
