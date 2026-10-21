@@ -548,6 +548,72 @@ func TestUnrealRefusesSomeoneElsesInit(t *testing.T) {
 	diff(t, "a refused plan", before, snapshot(t, fk.roots.Home))
 }
 
+// guard makes the fake home's Documents a folder the system guards, and
+// unreadable while Plan runs, so any look inside it fails.
+func guard(t *testing.T, fk *fake) (lock, unlock func()) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root reads a folder whatever its mode")
+	}
+	docs := filepath.Join(fk.roots.Home, "Documents")
+	mkdir(t, docs)
+	fk.roots.Guarded = []string{docs}
+	lock = func() { os.Chmod(docs, 0) }
+	unlock = func() { os.Chmod(docs, 0o755) }
+	t.Cleanup(unlock)
+	return lock, unlock
+}
+
+// A first on for Unreal, whose start-up script goes in ~/Documents, is
+// planned without looking there; Apply looks, after the yes. Once C4 is
+// in, its own record is the yes, and the second on and off look.
+func TestUnrealPlansWithoutLookingInDocuments(t *testing.T) {
+	fk := darwinApps(t)
+	lock, unlock := guard(t, fk)
+	f := find(t, &fk.roots, "unreal", "5.7")
+	init := filepath.Join(fk.roots.Home, "Documents", "UnrealEngine", "Python", "init_unreal.py")
+	lock()
+	c := plan(t, f, true)
+	unlock()
+	if !contains(c.Writes, init) || !strings.Contains(strings.Join(c.Notes, " "), "C4FarmExecutor") {
+		t.Errorf("a plan that didn't look: %v %v", c.Writes, c.Notes)
+	}
+	onOff(t, fk, f, nil)
+}
+
+// With someone else's init_unreal.py there, the plan can't know; Apply
+// finds it and refuses, changing nothing.
+func TestUnrealRefusesSomeoneElsesInitAtApply(t *testing.T) {
+	fk := darwinApps(t)
+	lock, unlock := guard(t, fk)
+	init := filepath.Join(fk.roots.Home, "Documents", "UnrealEngine", "Python", "init_unreal.py")
+	write(t, init, "import studio_tools\n")
+	before := snapshot(t, fk.roots.Home)
+	lock()
+	c := plan(t, find(t, &fk.roots, "unreal", "5.7"), true)
+	unlock()
+	if err := Apply(c); err == nil || !strings.Contains(err.Error(), "won't overwrite") {
+		t.Errorf("Apply: %v", err)
+	}
+	diff(t, "a refused apply", before, snapshot(t, fk.roots.Home))
+}
+
+// Only a layout with files under a guarded folder is planned without
+// looking: Blender's add-on, under ~/Library, is planned as before.
+func TestOnlyGuardedLayoutsSkipTheLook(t *testing.T) {
+	fk := darwinApps(t)
+	guard(t, fk)
+	if c := plan(t, find(t, &fk.roots, "blender", "5.2"), true); c.recheck {
+		t.Error("Blender's plan put off looking")
+	}
+	if c := plan(t, find(t, &fk.roots, "unreal", "5.7"), true); !c.recheck {
+		t.Error("Unreal's plan looked")
+	}
+	if c := plan(t, find(t, &fk.roots, "unreal", "5.7"), false); c.recheck {
+		t.Error("an off with nothing on put off looking")
+	}
+}
+
 func TestHoudiniOnOff(t *testing.T) {
 	fk := darwinApps(t)
 	onOff(t, fk, find(t, &fk.roots, "houdini", "21.0"), func(t *testing.T) {

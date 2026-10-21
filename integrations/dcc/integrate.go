@@ -36,6 +36,10 @@ type Change struct {
 	removes []fileRemove
 	stale   []string // c4's own temporary files or folders an earlier run left
 	rmdirs  []string // deepest first; each removed only if empty
+	// recheck says the plan didn't look in a folder the system guards;
+	// Apply plans found again, looking, before it changes anything.
+	recheck bool
+	found   Found
 }
 
 type fileWrite struct {
@@ -162,7 +166,13 @@ func Plan(f Found, on bool) (Change, error) {
 }
 
 // Plan says what turning C4 on or off in f would do, under these roots.
-func (r *Roots) Plan(f Found, on bool) (Change, error) {
+// Adding C4 for the first time where its files go under a folder the
+// system guards, it lists them without looking there: the person hasn't
+// said yes yet, and only a yes may lead there. Apply looks.
+func (r *Roots) Plan(f Found, on bool) (Change, error) { return r.plan(f, on, false) }
+
+// plan is Plan; look lets it read guarded folders.
+func (r *Roots) plan(f Found, on bool, look bool) (Change, error) {
 	shape := versionShape[f.Name]
 	if shape == nil {
 		return Change{}, fmt.Errorf("C4 has no integration for %q", f.Name)
@@ -186,6 +196,10 @@ func (r *Roots) Plan(f Found, on bool) (Change, error) {
 		return Change{}, err
 	}
 	others := r.others(f.Name, f.Version)
+	if on && !look && own == nil && r.guards(l) { // a manifest is an earlier yes
+		c.sketch(f, l)
+		return c, nil
+	}
 	if on {
 		err = c.planOn(f, l, own, others)
 	} else {
@@ -209,6 +223,71 @@ func (r *Roots) Plan(f Found, on bool) (Change, error) {
 	c.findStale(touched)
 	sort.Strings(c.Writes)
 	return c, nil
+}
+
+// guards says some file l puts in place is under a guarded folder.
+func (r *Roots) guards(l layout) bool {
+	in := func(p string) bool {
+		for _, g := range r.Guarded {
+			if p == g || strings.HasPrefix(p, g+string(filepath.Separator)) {
+				return true
+			}
+		}
+		return false
+	}
+	for p := range l.files {
+		if in(p) {
+			return true
+		}
+	}
+	for _, ed := range l.edits {
+		if in(ed.path) {
+			return true
+		}
+	}
+	return false
+}
+
+// sketch is a first on planned without reading anything in the layout's
+// folders: it writes every file the layout has. Apply plans again,
+// looking, and stops there if a file in the way isn't c4's.
+func (c *Change) sketch(f Found, l layout) {
+	c.recheck, c.found = true, f
+	for p := range l.files {
+		c.Writes = append(c.Writes, p)
+	}
+	for _, ed := range l.edits {
+		c.Writes = append(c.Writes, ed.path)
+	}
+	c.Writes = append(c.Writes, c.mpath)
+	if lock := filepath.Join(c.roots.manifestDir(), lockName); !fileExists(lock) {
+		c.Writes = append(c.Writes, lock)
+	}
+	sort.Strings(c.Writes)
+	c.Line = l.on
+	c.Notes = append(c.Notes, l.notes...)
+}
+
+// adopt records folders made for the lock before this plan as the
+// install's own, so off takes them out with the rest.
+func (c *Change) adopt(dirs []string) {
+	if c.final == nil || len(dirs) == 0 {
+		return
+	}
+	for _, m := range []*manifest{c.final, c.intent} {
+		have := map[string]bool{}
+		for _, d := range m.Dirs {
+			have[d] = true
+		}
+		ds := append([]string{}, m.Dirs...)
+		for _, d := range dirs {
+			if !have[d] {
+				ds = append(ds, d)
+			}
+		}
+		sort.Strings(ds)
+		m.Dirs = ds
+	}
 }
 
 func fileExists(p string) bool {
@@ -761,12 +840,13 @@ func markerOf(line string) string {
 // the manifest recorded before and after, and on off exactly the
 // manifest's files removed. It holds a lock in ~/.c4/integrations while it
 // works, so two runs of c4 never interleave. If anything on disk changed
-// since Plan (another run's manifests included), it stops and says so.
+// since Plan (another run's manifests included), it stops and says so. A
+// plan that didn't look in a guarded folder is made again, looking, first.
 func Apply(c Change) error {
 	if c.roots == nil {
 		return errors.New("apply a Change that Plan made")
 	}
-	if c.final == nil && len(c.edits) == 0 && len(c.removes) == 0 && len(c.stale) == 0 {
+	if !c.recheck && c.final == nil && len(c.edits) == 0 && len(c.removes) == 0 && len(c.stale) == 0 {
 		return nil // nothing to change
 	}
 	made := c.roots.missingDirs(c.roots.manifestDir())
@@ -774,7 +854,17 @@ func Apply(c Change) error {
 	if err != nil {
 		return err
 	}
-	cleanup, err := c.applyLocked()
+	var cleanup []string
+	if c.recheck { // the person has said yes: look in the guarded folder now
+		var looked Change
+		if looked, err = c.roots.plan(c.found, c.on, true); err == nil {
+			looked.adopt(made)
+			c = looked
+		}
+	}
+	if err == nil {
+		cleanup, err = c.applyLocked()
+	}
 	cleanup = append(cleanup, made...)
 	removeEmptyDirs(cleanup)
 	lk.release()

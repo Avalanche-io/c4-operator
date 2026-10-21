@@ -51,6 +51,11 @@ type Roots struct {
 	// Epic are the Epic Games Launcher's LauncherInstalled.dat files,
 	// which list the Unreal Engines it installed.
 	Epic []string
+	// Guarded are folders the system asks the person about before any
+	// program reads them: on macOS ~/Documents, ~/Desktop and ~/Downloads.
+	// A plan to add C4 where its files go under one lists them without
+	// looking there; Apply looks, after the person has said yes.
+	Guarded []string
 }
 
 // DefaultRoots are this machine's roots.
@@ -62,6 +67,9 @@ func DefaultRoots() Roots {
 		r.Apps = []string{"/Applications", filepath.Join(home, "Applications")}
 		r.Steam = []string{filepath.Join(home, "Library", "Application Support", "Steam", "steamapps", "common")}
 		r.Epic = []string{filepath.Join(home, "Library", "Application Support", "Epic", "UnrealEngineLauncher", "LauncherInstalled.dat")}
+		for _, d := range []string{"Documents", "Desktop", "Downloads"} {
+			r.Guarded = append(r.Guarded, filepath.Join(home, d))
+		}
 	case "windows":
 		r.Config = os.Getenv("APPDATA")
 		if r.Config == "" {
