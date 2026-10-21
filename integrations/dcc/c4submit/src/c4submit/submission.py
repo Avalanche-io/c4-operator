@@ -7,6 +7,7 @@ answers sooner, with errors of the same shape: ``{path, message, fix}``.
 
 import datetime
 import difflib
+import json
 import re
 from typing import Any, Dict, List
 
@@ -19,7 +20,7 @@ FORMAT = "submit/1"
 TOP = ("c4", "project", "shot", "name", "due", "tree", "root", "read", "tracker", "for", "note", "policy", "jobs")
 JOB = ("tool", "frames", "with", "after", "due", "size", "needs", "pools", "preview", "check", "approve",
        "wait", "answers", "uses", "plan", "each", "over", "combine", "measure", "retries", "maxParallel",
-       "chunk", "order", "follows", "policy")
+       "chunk", "order", "follows", "version", "policy")
 AFTER_HOW = ("frames", "all", "previous")
 
 # A job is named <stem>-<key>-vNNN, and a job's name is at most this long.
@@ -148,6 +149,12 @@ def check(doc: Any) -> List[Dict[str, str]]:
         if isinstance(by, str) and by.split(":", 1)[0] in ("person", "party", "role"):
             errs.append(error(f"{base}.answers.by", "a person is never asked mid-run: questions go to an agent",
                               "name an agent (lead, tool:<name> or unit:<name>); for a person's decision, add an approve step"))
+        if "version" in job:
+            v = job["version"]
+            ok = (isinstance(v, int) and not isinstance(v, bool) and v >= 1) or (isinstance(v, str) and re.fullmatch(r"v\d{3,}", v))
+            if not ok:
+                shown = f'"{v}"' if isinstance(v, str) else json.dumps(v)
+                errs.append(error(f"{base}.version", f"{shown} is not a version", "write the version as a number (4) or as v004"))
         if "combine" in job and "over" not in job:
             errs.append(error(f"{base}.combine", "combine needs over: the values it combines", "add over:, or remove combine"))
         if "due" in job:
