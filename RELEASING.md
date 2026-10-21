@@ -36,8 +36,15 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
 
 ### On GitHub
 
-5. **Joshua: create the repository** `github.com/Avalanche-io/c4-operator`,
-   private, empty (no README, license or .gitignore), default branch `main`.
+5. **Joshua: create the repositories.**
+   - `github.com/Avalanche-io/c4-operator`: private, empty (no README,
+     license or .gitignore), default branch `main`.
+   - `github.com/Avalanche-io/homebrew-tap`: public, with a README so it
+     has a `main` branch, and nothing else. The release writes
+     `Formula/c4-farm.rb` and `Formula/c4-agent.rb` there; the C4 suite
+     release writes `Formula/c4.rb`, which depends on both, so `brew
+     install avalanche-io/tap/c4` brings c4, `c4 farm`, c4-agent and
+     c4-unit.
 6. **Joshua: push `main`** from the prepared clone (history option B below,
    or `git push origin v2:main` for option A).
 7. **Joshua: settings.**
@@ -47,6 +54,11 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
      workflows to write packages (the release workflow pushes to GHCR with
      `GITHUB_TOKEN`).
    - Branches: protect `main`, requiring the `ci` checks.
+   - Secrets and variables, Actions: a repository secret
+     `HOMEBREW_TAP_TOKEN`, a fine-grained personal access token with
+     resource owner Avalanche-io, repository access only
+     `Avalanche-io/homebrew-tap`, and one permission, Contents: Read and
+     write. GoReleaser pushes the formulas with it; nothing else uses it.
 8. Wait for the `ci` workflow on `main` to pass: verify, unit and envtest,
    privileged Linux tests, build.
 
@@ -65,8 +77,12 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
 11. **Joshua: review and publish the draft release** (notes, `install.yaml`,
     archives, checksums).
 12. **Joshua: flip the repository public**: Settings, General, Change
-    visibility.
-13. Smoke test from a clean machine with the published images: the
+    visibility. The formulas download the release's archives, so `brew
+    install` works only from here on: after the draft is published and
+    the repository is public.
+13. Smoke test from a clean machine with the published images: `brew
+    install avalanche-io/tap/c4-farm` (once the C4 suite release has
+    written `c4.rb`, `brew install avalanche-io/tap/c4`), the
     quickstart, and `kubectl apply -f
     https://github.com/Avalanche-io/c4-operator/releases/download/v0.1.0/install.yaml`.
 14. **Joshua, optional:** the repository description and topics (kubernetes,
