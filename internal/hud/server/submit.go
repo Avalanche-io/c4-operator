@@ -687,8 +687,11 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		if err := s.Client.Get(ctx, types.NamespacedName{Namespace: u.Namespace, Name: u.Job}, &parent); err != nil {
 			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: its own job %s/%s: %v", v.User, u.Namespace, u.Job, err)
 		}
-		if u.JobUID == "" || string(parent.UID) != u.JobUID {
-			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: the unit's own job %s/%s was replaced", v.User, u.Namespace, u.Job)
+		if u.JobUID == "" {
+			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: its pod names no WorkJob as its controller, so its own job cannot be told from another of the name %s/%s", v.User, u.Namespace, u.Job)
+		}
+		if string(parent.UID) != u.JobUID {
+			return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s: the unit's own job %s/%s was replaced by another of the same name", v.User, u.Namespace, u.Job)
 		}
 		owner := parent.Annotations[c4v1.AnnotationOwner]
 		if owner == "" {

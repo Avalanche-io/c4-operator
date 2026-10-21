@@ -506,4 +506,11 @@ func TestAUnitsJobIsItsOwners(t *testing.T) {
 	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=stale", api.SubmitRequest{Project: "show-a", Name: "child3", Spec: spec}, &refused); code != http.StatusForbidden || !strings.Contains(refused["error"], "was replaced") {
 		t.Fatalf("a replaced job's unit submitted: %d %v", code, refused)
 	}
+	// a pod with no WorkJob controller: said as it is, not as a replacement
+	s.DevViewers["loose"] = &api.Viewer{User: "unit:show-a/port/2", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "port", Unit: "2", Grant: "project"}}
+	refused = nil
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=loose", api.SubmitRequest{Project: "show-a", Name: "child4", Spec: spec}, &refused); code != http.StatusForbidden || !strings.Contains(refused["error"], "names no WorkJob as its controller") {
+		t.Fatalf("a unit pod of no job controller: %d %v", code, refused)
+	}
 }
