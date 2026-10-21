@@ -292,7 +292,7 @@ td,th{text-align:left;padding:4px 8px;border-bottom:1px solid #eaeef2;font-size:
 <div class=sub>Issues labeled <span class=label>{{.Label}}</span> become jobs in {{.Project}}, for the person they are assigned to. c4 writes back here as GitHub's c4-sync app would, and never approves or merges.</div>
 <div class=card style="margin-top:14px">
 <b>New issue</b><br>
-<input type=text id=title placeholder="What needs doing, such as: Light sm0150 for review">
+<input type=text id=title placeholder="What needs doing">
 assigned to <select id=assignee>{{range .People}}<option value="{{.Login}}"{{if eq .Login $.As.Login}} selected{{end}}>{{.Person}}</option>{{end}}</select>
 <label><input type=checkbox id=labeled checked> <span class=label>{{.Label}}</span></label>
 <button class=go id=open>Submit new issue</button>
