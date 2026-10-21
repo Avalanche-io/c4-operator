@@ -19,10 +19,15 @@ TOOLS = os.path.normpath(os.path.join(os.path.dirname(__file__), "..", "tools"))
 
 
 def script(tool: str, name: str):
-    """A tool folder's script as a module, fresh for each test."""
+    """A tool folder's script as a module, fresh for each test. No
+    __pycache__ is left in the folder, which is what a TD publishes."""
     spec = importlib.util.spec_from_file_location(f"c4tool_{name}", os.path.join(TOOLS, tool, name + ".py"))
     mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
+    was, sys.dont_write_bytecode = sys.dont_write_bytecode, True
+    try:
+        spec.loader.exec_module(mod)
+    finally:
+        sys.dont_write_bytecode = was
     return mod
 
 
