@@ -413,7 +413,8 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 	}
 	if strings.HasPrefix(version, "v") {
 		// the release's own tools, built with their tool.lock: c4 farm
-		// up publishes these trees, tested in this release
+		// up publishes these trees as they are, booked as this release's;
+		// their tests run on the farm like any tool's
 		if srv.ReleaseTrees, err = tools.ReleaseTrees(version); err != nil {
 			return fmt.Errorf("the release's tools: %w", err)
 		}

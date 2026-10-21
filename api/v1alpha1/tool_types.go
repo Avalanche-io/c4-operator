@@ -146,8 +146,15 @@ type ToolVersionRef struct {
 	View    string `json:"view"`
 	// +optional
 	Image string `json:"image,omitempty"`
-	// State is the version's test state: ok, untested or failed.
-	State string `json:"state"`
+	// State is the version's test state: ok, untested or failed. Entries
+	// written before it was recorded have none: Untested says which of the
+	// two offered states they were (earlierVersion reads them so).
+	// +optional
+	State string `json:"state,omitempty"`
+	// Untested is how entries before State marked an untested version;
+	// read, never written.
+	// +optional
+	Untested bool `json:"untested,omitempty"`
 	// Release is the release the tree shipped in, for a release's own
 	// tool.
 	// +optional

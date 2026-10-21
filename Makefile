@@ -252,9 +252,10 @@ runtime-image-names:
 # The prebuilt tools' tool.lock files (tools/<name>/tool.lock), pinning
 # their images at VERSION by digest, as publishing does. The release build
 # writes them once the job images are pushed and before c4-farm is built,
-# so the tools c4-farm embeds are the trees c4 farm up publishes, tested in
-# the release. They are not committed: a development build has none, and
-# the farm pins the images when it publishes.
+# so the tools c4-farm embeds are the trees c4 farm up publishes, kept as
+# they are and booked as the release's (their tests still run on the
+# farm). They are not committed: a development build has none, and the
+# farm pins the images when it publishes.
 tool-locks:
 	go run ./hack/toollock -version $(VERSION)
 

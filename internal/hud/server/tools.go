@@ -407,7 +407,8 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// A release's own tool is published as the release built it, tool.lock
-	// and all, and tested in that release; any other tree is pinned here.
+	// and all, and booked as released; its test still runs on the farm.
+	// Any other tree is pinned here.
 	release, inRelease := s.ReleaseTrees[id.String()]
 	var published *c4view.View
 	var lockJSON []byte
@@ -519,9 +520,9 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 	}
 	got, fresh, err := s.addVersion(ctx, key, ver)
 	if err != nil {
-		if !exists {
-			s.Client.Delete(ctx, &obj) // no version, no Tool
-		}
+		// A Tool this left with no version is not deleted (another
+		// publish may be adding one to it): with an empty spec it is no
+		// agent's configuration, and the next publish of the name uses it.
 		s.Log.Error(err, "tool publish: version", "tool", key.String())
 		fail(w, http.StatusBadGateway, "the farm could not record %s's version just now; try again shortly", tool.Name)
 		return
@@ -577,8 +578,9 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 // already a version is that version, returned with fresh false; one whose
 // test failed is tested again, as the same version (from Earlier, as a new
 // one). Versions past MaxToolVersions move to Earlier with how their tests
-// ended, failed ones too, so a failed tree stays refused by its ID; past
-// MaxEarlierVersions the oldest go, and no longer resolve.
+// ended, failed ones too, so a failed tree stays refused by its ID (retire,
+// which keeps a version whose test is running); past MaxEarlierVersions
+// the oldest go, and no longer resolve.
 func (s *Server) addVersion(ctx context.Context, key types.NamespacedName, ver c4v1.ToolVersion) (c4v1.ToolVersion, bool, error) {
 	for try := 0; ; try++ {
 		var obj c4v1.Tool
@@ -611,16 +613,7 @@ func (s *Server) addVersion(ctx context.Context, key types.NamespacedName, ver c
 		if !again {
 			got.Version = fmt.Sprintf("v%d", n+1)
 			obj.Status.Versions = append(obj.Status.Versions, got)
-			if k := len(obj.Status.Versions) - c4v1.MaxToolVersions; k > 0 {
-				for _, x := range obj.Status.Versions[:k] {
-					obj.Status.Earlier = append(obj.Status.Earlier, c4v1.ToolVersionRef{Version: x.Version, View: x.View,
-						Image: x.Image, State: x.Test.State, Release: x.Release})
-				}
-				obj.Status.Versions = obj.Status.Versions[k:]
-				if e := len(obj.Status.Earlier) - c4v1.MaxEarlierVersions; e > 0 {
-					obj.Status.Earlier = obj.Status.Earlier[e:]
-				}
-			}
+			obj.Status.Versions, obj.Status.Earlier = retire(obj.Status.Versions, obj.Status.Earlier)
 		}
 		err := s.Client.Status().Update(ctx, &obj)
 		if err == nil {
@@ -632,9 +625,42 @@ func (s *Server) addVersion(ctx context.Context, key types.NamespacedName, ver c
 	}
 }
 
+// retire moves the oldest versions past MaxToolVersions to Earlier, with
+// how their tests ended. A version whose test is still running stays
+// where its result will be recorded, so for a while there may be more;
+// past MaxEarlierVersions the oldest earlier ones go.
+func retire(versions []c4v1.ToolVersion, earlier []c4v1.ToolVersionRef) ([]c4v1.ToolVersion, []c4v1.ToolVersionRef) {
+	over := len(versions) - c4v1.MaxToolVersions
+	if over <= 0 {
+		return versions, earlier
+	}
+	kept := versions[:0:0]
+	for _, x := range versions {
+		if over > 0 && x.Test.State != c4v1.ToolTestRunning {
+			earlier = append(earlier, c4v1.ToolVersionRef{Version: x.Version, View: x.View, Image: x.Image, State: x.Test.State, Release: x.Release})
+			over--
+			continue
+		}
+		kept = append(kept, x)
+	}
+	if e := len(earlier) - c4v1.MaxEarlierVersions; e > 0 {
+		earlier = earlier[e:]
+	}
+	return kept, earlier
+}
+
 // earlierVersion is an Earlier entry as a version.
 func earlierVersion(e c4v1.ToolVersionRef) c4v1.ToolVersion {
-	return c4v1.ToolVersion{Version: e.Version, View: e.View, Image: e.Image, Release: e.Release, Test: c4v1.ToolTest{State: e.State}}
+	state := e.State
+	if state == "" {
+		// Written before State was: only offered versions were kept,
+		// marked when untested.
+		state = c4v1.ToolTestOK
+		if e.Untested {
+			state = c4v1.ToolTestUntested
+		}
+	}
+	return c4v1.ToolVersion{Version: e.Version, View: e.View, Image: e.Image, Release: e.Release, Test: c4v1.ToolTest{State: state}}
 }
 
 // toolSpec is the Tool spec a version declares: its tree, what its units

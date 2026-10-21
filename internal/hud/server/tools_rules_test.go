@@ -552,3 +552,41 @@ func TestPublishWarnsOfARootImage(t *testing.T) {
 		}
 	}
 }
+
+// A version whose test is still running is not retired to Earlier, so its
+// result is recorded where it is; settled ones go, oldest first.
+func TestRetireKeepsRunningTests(t *testing.T) {
+	var vs []c4v1.ToolVersion
+	for i := 1; i <= c4v1.MaxToolVersions+2; i++ {
+		state := c4v1.ToolTestOK
+		if i == 1 {
+			state = c4v1.ToolTestRunning
+		}
+		vs = append(vs, c4v1.ToolVersion{Version: fmt.Sprintf("v%d", i), View: fmt.Sprintf("c4v%d", i), Test: c4v1.ToolTest{State: state}})
+	}
+	kept, earlier := retire(vs, nil)
+	if len(earlier) != 2 || earlier[0].Version != "v2" || earlier[1].Version != "v3" || kept[0].Version != "v1" || len(kept) != c4v1.MaxToolVersions {
+		t.Fatalf("kept %d from %s, earlier %+v", len(kept), kept[0].Version, earlier)
+	}
+	// all running: none retired, for now
+	for i := range vs {
+		vs[i].Test.State = c4v1.ToolTestRunning
+	}
+	if kept, earlier := retire(vs, nil); len(kept) != len(vs) || len(earlier) != 0 {
+		t.Fatalf("running retired: %d %d", len(kept), len(earlier))
+	}
+}
+
+// Earlier entries written before their state was recorded were offered
+// versions, marked when untested.
+func TestEarlierEntriesWithoutState(t *testing.T) {
+	if v := earlierVersion(c4v1.ToolVersionRef{Version: "v1", View: "c4a"}); v.Test.State != c4v1.ToolTestOK || !offered(&v) {
+		t.Fatalf("old entry: %+v", v.Test)
+	}
+	if v := earlierVersion(c4v1.ToolVersionRef{Version: "v2", View: "c4b", Untested: true}); v.Test.State != c4v1.ToolTestUntested {
+		t.Fatalf("old untested entry: %+v", v.Test)
+	}
+	if v := earlierVersion(c4v1.ToolVersionRef{Version: "v3", View: "c4c", State: c4v1.ToolTestFailed}); offered(&v) {
+		t.Fatal("a failed entry is offered")
+	}
+}

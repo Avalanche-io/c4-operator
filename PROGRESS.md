@@ -326,6 +326,7 @@
 | `tool-test-label` | 2026-10-25 | 2026-10-25 | Only the HUD marks a job a tool's publish test: c4-workjob-controls refuses anyone else setting, moving or removing c4.avalanche.io/tool-test, which hides a job's failures from the project and refuses its controls |
 | `owner-rights` | 2026-10-21 | 2026-10-21 | A unit of a job made under a person grant (a tracker sync, for the person) is bound by that grant: its job is refused for a pool or class the grant leaves out or once the grant lapses, and carries the grant and tracker label so the queue bounds it too. Test: TestAUnitsJobKeepsItsParentsGrant. |
 | `agent-units` | 2026-10-21 | 2026-10-21 | An agent wait is decided by the agent itself: the queue labels each unit pod with the agent it runs (c4.avalanche.io/agent, a bundle member name or block, never the template label), and the HUD lets a unit of the same job running the named agent decide its wait by its unit token, graded direct; X-C4-Agent stays, graded claimed. Tests: TestAgentWaitDecidedByItsUnit, TestUnitPodNamesItsAgent. |
+| `tools-review3` | 2026-10-21 | 2026-10-21 | Tools review 3: a version whose test runs is not retired to Earlier; no delete of a publish's empty Tool (no race, no forbidden verb); Earlier entries without state read as ok or untested; stale tested-in-release comments |
 
 Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
 c4 pseudo-version, so worktrees need nothing else; to build against a local c4
