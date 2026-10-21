@@ -99,6 +99,9 @@ func agentCmd(ctx context.Context, bin string, args ...string) (string, error) {
 	return string(out), nil
 }
 
+// Ask is ask, for the CLI: a yes-or-no question whose default is no.
+func Ask(o Out, q string) bool { return ask(o, q) }
+
 // ask is a yes-or-no question whose default is no: an empty line, end of
 // input or anything but yes is no.
 func ask(o Out, q string) bool {

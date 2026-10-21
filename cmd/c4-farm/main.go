@@ -3,6 +3,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"errors"
 	"flag"
@@ -80,8 +81,8 @@ Agents
   agents add [NAME]        make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first; no NAME lists the sessions to pick from)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
-  integrations             what this machine could add (Claude Code today), and which are on
-  integrate NAME on|off    add an integration, or take out everything it added
+  integrations             what this machine could add (Claude Code, and each application found), and which are on
+  integrate NAME on|off    add an integration, or take out everything it added (NAME@VERSION for one version; --show says what it would write)
   mcp                      serve the farm's tools to an agent over stdio
 
 Flags for every command: --farm NAME, --project NAME, --utc (times in UTC).
@@ -242,6 +243,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			// and no runner (that is the farm admin's to enroll)
 			(&farmcli.Integration{}).On(ctx, farmcli.Out{W: stdout})
 		}
+		applyApps(stdout, on)
 		if l := farmcli.IntegrateLine(cfg); l != "" {
 			fmt.Fprintf(stdout, "%s\n", l)
 		}
@@ -686,6 +688,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			in := farmcli.Integration{Runner: localRunner(o.Owner, stdin, stdout)}
 			in.On(ctx, farmcli.Out{W: stdout})
 		}
+		applyApps(stdout, on)
 		if l := farmcli.IntegrateLine(cfg); l != "" {
 			fmt.Fprintf(stdout, "%s\n", l)
 		}
@@ -805,38 +808,54 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		return nil
 
 	case "integrate":
+		show := fs.Bool("show", false, "say every file it would write or remove, and change nothing (an application's)")
+		yes := fs.Bool("yes", false, "change an application's setup without asking (needed where no one is at a terminal)")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
 		}
 		if len(pos) != 2 || (pos[1] != "on" && pos[1] != "off") {
-			return errors.New("usage: c4 farm integrate NAME on|off (c4 farm integrations lists them)")
-		}
-		if pos[0] != farmcli.Claude {
-			return fmt.Errorf("no integration %q here; c4 farm integrations lists them", pos[0])
+			return errors.New("usage: c4 farm integrate NAME[@VERSION] on|off [--show] (c4 farm integrations lists them)")
 		}
 		on := pos[1] == "on"
 		o := farmcli.Out{W: stdout}
-		in := farmcli.Integration{}
-		if _, f, err := cfg.Resolve(cm.farm); err == nil && f.Local && on {
-			in.Runner = localRunner(localfarm.DefaultOwner(), stdin, stdout)
-		}
-		if on {
-			err = in.On(ctx, o)
+		name, _, _ := strings.Cut(pos[0], "@")
+		if name != farmcli.Claude {
+			// an application's own setup changes: asked of each, at a terminal
+			var confirm func(string) bool
+			switch {
+			case *yes || *show:
+			case isTerminal(stdin):
+				in := farmcli.Out{W: stdout, In: bufio.NewReader(stdin)}
+				confirm = func(q string) bool { return farmcli.Ask(in, q) }
+			default:
+				return errors.New("c4 farm integrate asks before it changes an application's setup, and no one is at a terminal to answer; run it at one, or pass --yes (--show says what it would change)")
+			}
+			if err := farmcli.App(o, pos[0], on, *show, confirm); err != nil || *show {
+				return err
+			}
 		} else {
-			err = in.Off(ctx, o)
-		}
-		if err != nil {
-			return err
+			in := farmcli.Integration{}
+			if _, f, err := cfg.Resolve(cm.farm); err == nil && f.Local && on {
+				in.Runner = localRunner(localfarm.DefaultOwner(), stdin, stdout)
+			}
+			if on {
+				err = in.On(ctx, o)
+			} else {
+				err = in.Off(ctx, o)
+			}
+			if err != nil {
+				return err
+			}
 		}
 		if cfg.Integrations == nil {
 			cfg.Integrations = map[string]bool{}
 		}
-		cfg.Integrations[pos[0]] = on
+		cfg.Integrations[name] = on
 		if err := cfg.Save(); err != nil {
 			return err
 		}
-		if l := farmcli.IntegrateLine(cfg); l != "" {
+		if l := farmcli.IntegrateLine(cfg); l != "" && name == farmcli.Claude {
 			fmt.Fprintf(stdout, "%s\n", l)
 		}
 		return nil
@@ -907,6 +926,16 @@ func isTerminal(r io.Reader) bool {
 	}
 	fi, err := f.Stat()
 	return err == nil && fi.Mode()&os.ModeCharDevice != 0
+}
+
+// applyApps adds C4 to each application chosen at up or login (every
+// integration but Claude Code's, which has its own steps).
+func applyApps(w io.Writer, on []string) {
+	for _, name := range on {
+		if name != farmcli.Claude {
+			farmcli.App(farmcli.Out{W: w}, name, true, false, nil)
+		}
+	}
 }
 
 // localRunner makes this machine one of the local farm's runners for its

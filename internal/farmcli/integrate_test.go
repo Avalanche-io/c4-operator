@@ -7,13 +7,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/Avalanche-io/c4-operator/integrations/dcc"
 )
 
 // The integration's answer is asked once, at a terminal, of each one found
 // and unanswered; flags answer it in scripts; with no terminal nothing is
 // asked or recorded, and the install is minimal.
 func TestChooseAsksOnceAtATerminal(t *testing.T) {
-	found := []Detected{{Name: Claude, Found: true, Question: IntegrateQuestion(true)}}
+	found := []Detected{{Name: Claude, Found: true, Question: IntegrateQuestion(true), DefaultYes: true}}
 	var out bytes.Buffer
 	cfg := &Config{}
 	if on, err := Choose(cfg, found, "", false, false, Out{W: &out, In: strings.NewReader("y\n")}); err != nil || len(on) != 0 || len(cfg.Integrations) != 0 {
@@ -86,5 +88,34 @@ func TestIntegrationOnAndOff(t *testing.T) {
 	b, _ = os.ReadFile(settings)
 	if strings.Contains(string(b), "checkpoint") || !strings.Contains(string(b), "guard.sh") || !strings.Contains(out.String(), "loses PostToolUse and Stop") {
 		t.Errorf("off:\n%s\n%s", out.String(), b)
+	}
+}
+
+// An application's integration is asked about with no as the default (it
+// changes the application's own setup), Claude Code's with yes; one whose
+// versions all have C4 already is not asked; integrations lists each
+// version with its state.
+func TestChooseAppsDefaultNo(t *testing.T) {
+	found := []Detected{
+		{Name: Claude, Found: true, Question: "claude?", DefaultYes: true},
+		{Name: "blender", Found: true, Question: "Add C4 to Blender 5.2?", Versions: []dcc.Found{{Name: "blender", Version: "5.2", Title: "Blender 5.2", Status: dcc.StatusAvailable}}},
+		{Name: "nuke", Found: true, Versions: []dcc.Found{{Name: "nuke", Version: "17.0", Title: "Nuke 17.0", Status: dcc.StatusInstalled}}},
+	}
+	cfg := &Config{}
+	var out bytes.Buffer
+	on, err := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("\n\n")})
+	if err != nil || len(on) != 1 || on[0] != Claude || cfg.Integrations["blender"] {
+		t.Fatalf("enter, enter: %v %v %v", on, err, cfg.Integrations)
+	}
+	if s := out.String(); !strings.Contains(s, "claude? [Y/n]") || !strings.Contains(s, "Add C4 to Blender 5.2? [y/N]") || strings.Contains(s, "Nuke") {
+		t.Errorf("asked:\n%s", s)
+	}
+	if _, asked := cfg.Integrations["nuke"]; asked {
+		t.Error("nuke, with C4 in every version, was answered")
+	}
+	out.Reset()
+	Integrations(cfg, found, Out{W: &out})
+	if s := out.String(); !strings.Contains(s, "blender@5.2  available") || !strings.Contains(s, "nuke@17.0    installed") {
+		t.Errorf("integrations:\n%s", s)
 	}
 }

@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"text/tabwriter"
+
+	"github.com/Avalanche-io/c4-operator/integrations/dcc"
 )
 
 // IntegrateQuestion is asked once, on the first c4 farm up or login at a
@@ -196,23 +198,59 @@ type Detected struct {
 	Name, Title, Where string
 	Found              bool
 	// Question is what the person is asked before it is added, naming
-	// what it changes and where.
-	Question string
+	// what it changes and where; DefaultYes makes Enter yes (Claude Code,
+	// by Joshua's choice), else Enter is no (an application's own setup).
+	Question   string
+	DefaultYes bool
+	// Versions are an application's installed versions (integrations/dcc).
+	Versions []dcc.Found
 }
 
-// Detect lists the integrations this machine could take. Today that is
-// Claude Code; each DCC's (integrations/dcc) joins as it learns to install
-// and remove itself.
+// Detect lists the integrations this machine could take: Claude Code, and
+// each application integrations/dcc finds installed, by reading files only.
 // runner says this machine would also run the farm's agents.
 func Detect(runner bool) []Detected {
 	d := Detected{Name: Claude, Title: "Claude Code: the farm's tools, your agents' turns saved and shown, this machine as their runner",
-		Question: IntegrateQuestion(runner)}
+		Question: IntegrateQuestion(runner), DefaultYes: true}
 	if p, err := exec.LookPath("claude"); err == nil {
 		d.Found, d.Where = true, p
 	} else {
 		d.Where = "not found (https://claude.com/claude-code installs it)"
 	}
-	return []Detected{d}
+	return append([]Detected{d}, apps(dcc.Detect())...)
+}
+
+// apps groups an application's installed versions into one integration,
+// asked about once: what adding it changes in each version not yet done.
+func apps(found []dcc.Found) []Detected {
+	var out []Detected
+	byName := map[string]int{}
+	for _, f := range found {
+		i, ok := byName[f.Name]
+		if !ok {
+			byName[f.Name] = len(out)
+			out = append(out, Detected{Name: f.Name, Found: true, Where: f.Where})
+			i = len(out) - 1
+		}
+		out[i].Versions = append(out[i].Versions, f)
+	}
+	for i := range out {
+		var titles, lines []string
+		for _, f := range out[i].Versions {
+			titles = append(titles, f.Title)
+			if f.Status == dcc.StatusInstalled {
+				continue
+			}
+			if c, err := dcc.Plan(f, true); err == nil {
+				lines = append(lines, c.Line)
+			}
+		}
+		out[i].Title = andList(titles) + ": the C4 Farm panel, to submit from inside it"
+		if len(lines) > 0 {
+			out[i].Question = "Add C4 to " + andList(titles) + "? It " + strings.Join(lines, "; ") + ". c4 farm integrate " + out[i].Name + " off takes it out."
+		}
+	}
+	return out
 }
 
 // Choose settles which integrations are on. --integrate=NAMES turns those
@@ -245,14 +283,14 @@ func Choose(cfg *Config, found []Detected, integrate string, none, terminal bool
 		}
 	case terminal && o.In != nil:
 		for _, d := range found {
-			if _, answered := cfg.Integrations[d.Name]; answered || !d.Found {
+			if _, answered := cfg.Integrations[d.Name]; answered || !d.Found || d.Question == "" {
 				continue
 			}
-			q := d.Question
-			if q == "" {
-				q = d.Title + "?"
+			if d.DefaultYes {
+				cfg.Integrations[d.Name] = o.confirm(d.Question)
+			} else {
+				cfg.Integrations[d.Name] = ask(o, d.Question)
 			}
-			cfg.Integrations[d.Name] = o.confirm(q)
 		}
 	}
 	var on []string
@@ -288,8 +326,78 @@ func Integrations(cfg *Config, found []Detected, o Out) {
 		if on, ok := cfg.Integrations[d.Name]; ok {
 			state = map[bool]string{true: "on", false: "off"}[on]
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", d.Name, state, d.Where, d.Title)
+		if len(d.Versions) == 0 {
+			fmt.Fprintf(tw, "%s\t%s\t%s\t%s\n", d.Name, state, d.Where, d.Title)
+			continue
+		}
+		for _, f := range d.Versions {
+			fmt.Fprintf(tw, "%s@%s\t%s\t%s\t%s: the C4 Farm panel\n", f.Name, f.Version, f.Status, f.Where, f.Title)
+		}
 	}
 	tw.Flush()
-	o.printf("c4 farm integrate NAME on|off adds or takes one out\n")
+	o.printf("c4 farm integrate NAME[@VERSION] on|off adds or takes one out (--show says what it would write, and changes nothing)\n")
+}
+
+// App turns an application's integration on or off: on adds C4 to each
+// installed version not done yet (NAME@VERSION, one), off takes out each
+// one c4 recorded, even if the application is gone. Each change says what
+// it does, and what is left for the person; show says what each would
+// write or remove and changes nothing. confirm, when given, is asked of
+// each change first (nil: already agreed, as at up). A version that cannot
+// be done says why, and the others still are.
+func App(o Out, name string, on, show bool, confirm func(string) bool) error {
+	name, version, _ := strings.Cut(name, "@")
+	var found []dcc.Found
+	if on {
+		found = dcc.Detect()
+	} else {
+		found = dcc.Installed()
+	}
+	var mine []dcc.Found
+	for _, f := range found {
+		if f.Name == name && (version == "" || f.Version == version) {
+			mine = append(mine, f)
+		}
+	}
+	if len(mine) == 0 {
+		if on {
+			return fmt.Errorf("no %s found on this machine; c4 farm integrations lists what is", name)
+		}
+		o.printf("%s     c4 is in no version of it\n", name)
+		return nil
+	}
+	for _, f := range mine {
+		if on && f.Status == dcc.StatusInstalled {
+			o.printf("%s  has C4 already\n", f.Title)
+			continue
+		}
+		c, err := dcc.Plan(f, on)
+		if err != nil {
+			o.printf("%s  not changed: %v\n", f.Title, err)
+			continue
+		}
+		if show {
+			o.printf("%s  would: %s\n", f.Title, c.Line)
+			for _, w := range c.Writes {
+				o.printf("          writes  %s\n", tildePath(w))
+			}
+			for _, r := range c.Removes {
+				o.printf("          removes %s\n", tildePath(r))
+			}
+			continue
+		}
+		if confirm != nil && !confirm(f.Title+": "+c.Line+" Go ahead?") {
+			o.printf("%s  not changed\n", f.Title)
+			continue
+		}
+		if err := dcc.Apply(c); err != nil {
+			o.printf("%s  not changed: %v\n", f.Title, err)
+			continue
+		}
+		o.printf("%s  %s\n", f.Title, c.Line)
+		for _, n := range c.Notes {
+			o.printf("          then: %s\n", n)
+		}
+	}
+	return nil
 }
