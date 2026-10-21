@@ -383,7 +383,10 @@ across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
     block, and its file tools stay in its working folders;
   - `--tools` and `--allowedTools` from `C4_BLOCK_TOOLS`, under
     `--permission-mode dontAsk`, so a tool the job did not allow is refused,
-    never prompted for;
+    never prompted for. An allowlist bounds which tools an agent may use,
+    not what a permitted tool runs: `Bash(go:*)` still runs any Go program,
+    so what a block can reach is bounded by its folders, its network and its
+    credentials, not by the list alone;
   - `--settings` with the Stop hook (this binary's `checkpoint --hook`,
     with its agents home and `c4-unit`).
 - **A later attempt** (a rework, a yield) wakes the same session by its ID,

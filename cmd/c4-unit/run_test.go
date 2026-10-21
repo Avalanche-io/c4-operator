@@ -43,7 +43,6 @@ type toolRun struct {
 	out, errs syncBuffer
 	signals   chan os.Signal
 	minute    time.Duration
-	slow      time.Duration
 }
 
 func newToolRun(t *testing.T, toolYAML string) *toolRun {
@@ -74,7 +73,6 @@ func (r *toolRun) env() env {
 		minuteLen: r.minute,
 		stopGrace: 300 * time.Millisecond,
 		pollEvery: 20 * time.Millisecond,
-		slowRead:  r.slow,
 	}
 }
 
@@ -617,7 +615,8 @@ runs:
 `)
 	// the line the tool announces the secret on is read late, behind a
 	// backlog: as a loaded machine reads it
-	r.slow = time.Millisecond
+	testReadPause = time.Millisecond
+	t.Cleanup(func() { testReadPause = 0 })
 	if c := r.run(); c != 0 {
 		t.Fatalf("exit %d", c)
 	}
@@ -629,5 +628,90 @@ runs:
 	}
 	if !strings.Contains(log, "******** on stderr") || !strings.Contains(log, "******** on stdout") {
 		t.Errorf("the masked lines are missing:\n%s", log)
+	}
+}
+
+// A question a tool raises (c4_fail: question, or an errors.question
+// line) is raised as c4-unit needs raises one: exit 12, with the question
+// as the termination message, so the farm escalates it instead of spending
+// a retry.
+func TestRunRaisesAQuestion(t *testing.T) {
+	for name, tool := range map[string]string{
+		"protocol": "runs: {image: c4/runtime-base, command: [bash, -c, 'echo c4_fail: question which frame rate, 24 or 25; exit 3']}\n",
+		"pattern":  "runs: {image: c4/runtime-base, command: [bash, -c, 'echo Error: which frame rate, 24 or 25; exit 3']}\nerrors: {question: ['which frame rate']}\n",
+	} {
+		r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\n"+tool)
+		if c := r.run(); c != needsCode {
+			t.Errorf("%s: exit %d, want %d", name, c, needsCode)
+		}
+		o := r.outcome()
+		if o.Class != "question" || o.ExitCode != 3 {
+			t.Errorf("%s: outcome %+v", name, o)
+		}
+		if b, _ := os.ReadFile(r.vars["C4_TERMINATION_LOG"]); !strings.Contains(string(b), "which frame rate, 24 or 25") {
+			t.Errorf("%s: termination message %q", name, b)
+		}
+	}
+}
+
+// The strongest class stands, whichever source gives it: permanent, then
+// question, then licence, then retry. A later, weaker c4_fail line does not
+// overrule an earlier, stronger one, and a stronger class than the question
+// c4-unit needs raised means it is not escalated as one.
+func TestRunStrongestClassStands(t *testing.T) {
+	for _, c := range []struct {
+		name, script, errors string
+		class                string
+		code                 int
+	}{
+		{"protocol, stronger first", "echo c4_fail: permanent no such stage; echo c4_fail: retry flaky; exit 3", "", "permanent", 3},
+		{"question over licence", "echo No licenses could be found; echo c4_fail: question 24 or 25; exit 3", "errors: {licence: ['No licenses']}\n", "question", needsCode},
+		{"permanent over needs", `printf "the frame rate" > $C4_TERMINATION_LOG; echo c4_fail: permanent the stage is missing; exit 12`, "", "permanent", 1},
+	} {
+		r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, '"+c.script+"']}\n"+c.errors)
+		if code := r.run(); code != c.code {
+			t.Errorf("%s: exit %d, want %d", c.name, code, c.code)
+		}
+		if o := r.outcome(); o.Class != c.class {
+			t.Errorf("%s: %+v, want %s", c.name, o, c.class)
+		}
+	}
+}
+
+// A re-check runs nothing: a tool cannot tell whether its question still
+// applies, so the question stands as it was.
+func TestRunDoesNotReRunOnARecheck(t *testing.T) {
+	r := newToolRun(t, "c4: tool/1\nname: x\nkind: once\nruns: {image: c4/runtime-base, command: [bash, -c, 'touch $C4_TREE/ran']}\n")
+	r.vars["C4_RECHECK"], r.vars["C4_NEEDED"] = "1", "the delivery frame rate"
+	if c := r.run(); c != needsCode {
+		t.Fatalf("exit %d", c)
+	}
+	if _, err := os.Stat(filepath.Join(r.tree, "ran")); err == nil {
+		t.Error("the tool ran on a re-check")
+	}
+	if b, _ := os.ReadFile(r.vars["C4_TERMINATION_LOG"]); string(b) != "the delivery frame rate" {
+		t.Errorf("termination message %q", b)
+	}
+	if o := r.outcome(); o.Class != "question" {
+		t.Errorf("outcome %+v", o)
+	}
+}
+
+// An irregular chunk (C4_FRAMES 1001,1004,1010-1012) is its list of
+// frames: its bounds, its count, the label as the farm wrote it, and only
+// those frames counted.
+func TestIrregularChunk(t *testing.T) {
+	f, err := unitFrames(vars(map[string]string{"C4_FRAMES": "1001,1004,1010-1012", "C4_FRAME_START": "1001", "C4_FRAME_END": "1012"}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if f.start != 1001 || f.end != 1012 || f.count() != 5 || f.String() != "1001,1004,1010-1012" || !f.has(1004) || f.has(1005) {
+		t.Fatalf("frames %+v count %d", f, f.count())
+	}
+	if f, err := unitFrames(vars(map[string]string{"C4_FRAMES": "1-9:4,2"})); err != nil || f.count() != 4 || !f.has(9) || f.has(3) {
+		t.Fatalf("stepped list %+v %v", f, err)
+	}
+	if _, err := unitFrames(vars(map[string]string{"C4_FRAMES": "1001,x"})); err == nil {
+		t.Error("a bad list accepted")
 	}
 }

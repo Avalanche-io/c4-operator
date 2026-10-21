@@ -65,25 +65,49 @@ type outcome struct {
 	Stalled  bool   `json:"stalled,omitempty"`
 }
 
-// failClasses are the classes of a failure, strongest first: a missing
-// seat explains the errors that follow it, and a permanent error means a
-// retry cannot help.
-var failClasses = []string{"licence", "permanent", "question", "retry"}
+// failClasses are the classes of a failure, strongest first: a permanent
+// error means neither an answer nor a retry can help; a question means the
+// brief lacks a fact, which a seat or a retry cannot supply; a missing seat
+// explains the errors that follow it.
+var failClasses = []string{"permanent", "question", "licence", "retry"}
+
+// stronger reports whether class a outranks class b ("" ranks last).
+func stronger(a, b string) bool {
+	if a == "" || b == "" {
+		return a != ""
+	}
+	return slices.Index(failClasses, a) < slices.Index(failClasses, b)
+}
+
+// testReadPause, set only by tests, pauses before each line of the tool's
+// is read, as a loaded machine does.
+var testReadPause time.Duration
 
 // frames is the unit's chunk: start to end by step.
 type frames struct {
 	start, end, step int
 	known            bool
+	// list is an irregular chunk's frames (1001,1004,1010-1012), sorted;
+	// label is the chunk as the farm wrote it.
+	list  []int
+	label string
 }
 
 func (f frames) count() int {
-	if !f.known {
+	switch {
+	case !f.known:
 		return 0
+	case f.list != nil:
+		return len(f.list)
 	}
 	return (f.end-f.start)/f.step + 1
 }
 
 func (f frames) has(n int) bool {
+	if f.list != nil {
+		_, ok := slices.BinarySearch(f.list, n)
+		return ok
+	}
 	return f.known && n >= f.start && n <= f.end && (n-f.start)%f.step == 0
 }
 
@@ -91,6 +115,8 @@ func (f frames) String() string {
 	switch {
 	case !f.known:
 		return ""
+	case f.list != nil:
+		return f.label
 	case f.start == f.end:
 		return strconv.Itoa(f.start)
 	case f.step > 1:
@@ -100,8 +126,12 @@ func (f frames) String() string {
 }
 
 // unitFrames reads the chunk from C4_FRAME_START, C4_FRAME_END and
-// C4_FRAME_STEP, else from the label in C4_FRAMES.
+// C4_FRAME_STEP, else from the label in C4_FRAMES. A chunk that is not one
+// range (C4_FRAMES 1001,1004,1010-1012) is read as its list of frames.
 func unitFrames(e env) (frames, error) {
+	if label := e.get("C4_FRAMES"); strings.Contains(label, ",") {
+		return frameList(label)
+	}
 	s, en := e.get("C4_FRAME_START"), e.get("C4_FRAME_END")
 	if s == "" {
 		label := e.get("C4_FRAMES")
@@ -170,6 +200,18 @@ func runTool(e env, stdout, stderr io.Writer) (int, error) {
 		return setupCode, err
 	}
 	r := &runner{e: e, tree: tree, start: e.clock(), done: map[int]bool{}, previewed: map[int]bool{}}
+	if e.get("C4_RECHECK") == "1" {
+		// A tool cannot tell whether its question still applies, so a
+		// re-check runs nothing: the question stands as it was, for a
+		// person, the lead or the job's answerer.
+		needed := strings.TrimSpace(e.get("C4_NEEDED"))
+		if err := os.WriteFile(terminationLog(e), []byte(needed), 0o644); err != nil {
+			return 1, err
+		}
+		r.writeOutcome(outcome{Result: "failed", Class: "question", Reason: needed, ExitCode: needsCode})
+		fmt.Fprintln(stderr, "c4-unit: a re-check: a tool does not re-check its own question; it stands")
+		return needsCode, nil
+	}
 	cmd, err := r.prepare()
 	if err != nil {
 		r.writeOutcome(outcome{Result: "failed", Class: "permanent", Reason: err.Error(), ExitCode: setupCode})
@@ -655,6 +697,22 @@ wait:
 	code := exitCode(cmd.ProcessState, <-waitErr)
 	o := r.result(code, stalled, signalled)
 	r.writeOutcome(o)
+	switch {
+	case o.Class == "question":
+		// raised as c4-unit needs raises it: exit 12, the question as the
+		// termination message, so the farm escalates it rather than
+		// spending a retry
+		if code != needsCode {
+			if err := os.WriteFile(terminationLog(r.e), []byte(o.Reason), 0o644); err != nil {
+				return 1, err
+			}
+		}
+		return needsCode, nil
+	case code == needsCode && o.Result == "failed":
+		// a stronger class than the question c4-unit needs raised: not
+		// escalated as one
+		return 1, nil
+	}
 	if o.Result == "succeeded" {
 		r.setProgress(1)
 	}
@@ -681,15 +739,25 @@ func (r *runner) result(code int, stalled bool, signalled os.Signal) outcome {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	o := outcome{Result: "failed", ExitCode: code, Stalled: stalled}
+	// the strongest class any source gave, and its reason
+	type said struct{ class, reason string }
+	best := said{}
+	for _, s := range []said{{r.class, r.reason}, {r.patClass, r.patLine}} {
+		if stronger(s.class, best.class) {
+			best = s
+		}
+	}
+	if needed && stronger("question", best.class) {
+		best = said{"question", "the brief lacks information: " + needs}
+	}
 	switch {
 	case stalled:
 		o.Class, o.Reason = "retry", fmt.Sprintf("no output for %d minutes", r.tool.Stall.QuietMinutes)
-	case needed:
-		o.Class, o.Reason = "question", "the brief lacks information: "+needs
-	case r.class != "":
-		o.Class = r.class
-	case r.patClass != "":
-		o.Class = r.patClass
+	case best.class != "":
+		o.Class, o.Reason = best.class, best.reason
+		if o.Reason == "" && best.class == r.class {
+			o.Reason = r.patLine
+		}
 	case signalled == nil && r.tool.RetryOn != nil && len(r.tool.RetryOn.ExitCodes) > 0 && !slices.Contains(r.tool.RetryOn.ExitCodes, code):
 		o.Class, o.Reason = "permanent", fmt.Sprintf("exit status %d, which retryOn does not list", code)
 	default:
@@ -760,8 +828,8 @@ func (r *runner) read(src io.Reader, dst io.Writer) {
 }
 
 func (r *runner) line(l string, dst io.Writer) {
-	if r.e.slowRead > 0 {
-		time.Sleep(r.e.slowRead)
+	if testReadPause > 0 {
+		time.Sleep(testReadPause)
 	}
 	r.mu.Lock()
 	r.last = r.e.clock()
@@ -825,10 +893,11 @@ func (r *runner) protocol(l string) bool {
 	if v, ok := cutProto(l, "c4_fail"); ok {
 		class, reason, _ := strings.Cut(v, " ")
 		r.mu.Lock()
-		if slices.Contains(failClasses, class) {
+		if !slices.Contains(failClasses, class) {
+			class, reason = "retry", v
+		}
+		if r.class == "" || stronger(class, r.class) {
 			r.class, r.reason = class, strings.TrimSpace(reason)
-		} else {
-			r.class, r.reason = "retry", v
 		}
 		r.mu.Unlock()
 		return true
@@ -922,6 +991,9 @@ func (r *runner) frameDone(n int, path string) {
 
 // queuePreview queues a frame's preview, once per frame.
 func (r *runner) queuePreview(n int, path string) {
+	if !imageExts[strings.ToLower(filepath.Ext(path))] {
+		return // a frame's text or data output: nothing to show
+	}
 	if !filepath.IsAbs(path) {
 		path = filepath.Join(r.tree, path)
 	}
@@ -1210,3 +1282,41 @@ func lookPath(name, path string) (string, bool) {
 	}
 	return "", false
 }
+
+// frameList reads a range expression (1001,1004,1010-1012, 1-9:2) as its
+// frames.
+func frameList(label string) (frames, error) {
+	seen := map[int]bool{}
+	var list []int
+	for _, part := range strings.Split(label, ",") {
+		part = strings.TrimSpace(part)
+		rng, stepText, stepped := strings.Cut(part, ":")
+		a, b, ranged := strings.Cut(rng, "-")
+		start, err1 := strconv.Atoi(a)
+		end, err2 := start, error(nil)
+		if ranged {
+			end, err2 = strconv.Atoi(b)
+		}
+		step, err3 := 1, error(nil)
+		if stepped {
+			step, err3 = strconv.Atoi(stepText)
+		}
+		if err := errors.Join(err1, err2, err3); err != nil || step < 1 || end < start {
+			return frames{}, fmt.Errorf("the unit's frames %q are not a range expression", label)
+		}
+		for n := start; n <= end; n += step {
+			if !seen[n] {
+				seen[n] = true
+				list = append(list, n)
+			}
+		}
+	}
+	slices.Sort(list)
+	if len(list) == 0 {
+		return frames{}, fmt.Errorf("the unit's frames %q name none", label)
+	}
+	return frames{start: list[0], end: list[len(list)-1], step: 1, known: true, list: list, label: label}, nil
+}
+
+// imageExts are the files a preview can be made from.
+var imageExts = map[string]bool{".png": true, ".jpg": true, ".jpeg": true, ".exr": true, ".tif": true, ".tiff": true, ".dpx": true, ".hdr": true, ".tga": true}

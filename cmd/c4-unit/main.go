@@ -132,7 +132,6 @@ type env struct {
 	minuteLen time.Duration    // a stall's minute
 	stopGrace time.Duration    // SIGTERM to SIGKILL
 	pollEvery time.Duration    // how often the tree is read for frames
-	slowRead  time.Duration    // tests: a pause before each line of the tool's is read
 }
 
 func (e env) get(k string) string {

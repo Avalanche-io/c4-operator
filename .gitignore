@@ -15,6 +15,11 @@ hack/stress/out/
 /hack/sim/out/eta.csv
 /hack/sim/out/jobs.csv
 /c4-plan
+/c4-unit
+/c4-sync
+/c4-edges
+# local suite logs
+/tmp/
 
 # demo captures (hack/demo)
 hack/demo/out/
