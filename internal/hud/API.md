@@ -1084,6 +1084,33 @@ entity: { type, id, url? }, job?, owner?, state?, since, says, yours }`.
 running"), `entity.url` is where to look, and `yours` is true when the
 job is the viewer's: the HUD lists those on the viewer's own page.
 
+## People
+
+A Tracker's `spec.people` offers each tracker login as a C4 person (or
+`party:<name>`). That is the project's word, and alone it would let
+whoever edits the Tracker make any login decide as anyone. So a mapping
+counts once the person it names confirms it, as themselves, in the HUD:
+the HUD signs the offer and the confirmation as one control record (kind
+`people-confirm`) and writes a `TrackerPerson`, whose only writer it is
+(the `c4-tracker-people` policy). For `party:<name>`, a member of the
+party confirms. Never a tracker's sync, a unit or an agent: an agent may
+tell the person what is offered, and the person confirms it.
+
+| route                        | body or query                                | answer                                                                                                                                                                                                                                                                                        |
+| ---------------------------- | -------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `GET /people`                | `?tracker={ns}/{name}`, `?mine=1`, `?all=1`  | `{ entries }`: every offer in projects the viewer sees, `offered` or `confirmed` (`all` adds `revoked`)                                                                                                                                                                                       |
+| `POST /people`               | `{ project? \| namespace?, tracker, login }` | `{ ok, message, entry, record }`: the viewer confirms the login the Tracker offers as them. Confirming another person for a login revokes the first. `403` for anyone else, a sync, a unit or an agent (`X-C4-Client: mcp`, `X-C4-Agent`); `404` when the Tracker offers no one for the login |
+| `DELETE /people/{ns}/{name}` |                                              | `{ ok, message, entry, record }`: the person, a party member or a project admin takes it back, signed as `people-revoke`; the entry is kept, marked. `409` when revoked already                                                                                                               |
+
+An entry is `{ namespace, project, tracker, login, person, state, name?,
+confirmed?: { by, at, record }, revoked?, yours, lets }`; `lets` says what
+confirming lets the login do. A relayed decision's control record carries
+its `chain` (chain/1): `by` the tracker user, `for` the mapped person, and
+`under` the confirmation it rests on (`{ record, kind: people-map }`),
+`accountable`. A decision by a login nobody has confirmed still goes
+through, with `accountable: false` and a `gap` saying who has not
+confirmed it.
+
 ## Changes from the first draft of the contract
 
 | change                                    | why                                                                                                                                               |

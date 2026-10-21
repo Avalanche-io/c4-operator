@@ -164,7 +164,11 @@ Each Tracker says:
   Kitsu and Linear emails.
 
 **People.** A person's wait (`person:dana`) is served only by the tracker
-user `people` maps to `dana`. Anyone else's decision is refused and
+user `people` maps to `dana`. The map is the project's offer: each person
+confirms their own login in the HUD, on their own page (a party's, a
+member of it), and a decision relayed from a confirmed login names that
+confirmation. One from a login nobody has confirmed is relayed marked
+unaccountable until they do. Anyone else's decision is refused and
 recorded on the link. Roles never come from the tracker: a tracker admin
 cannot grant farm access. MLflow records no author for an alias or a tag.
 Its decisions are attributed to `mlflow-registry`, which you map to a

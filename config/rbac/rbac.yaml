@@ -203,6 +203,11 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [submitgrants]
   verbs: [get, list, watch, create, update, patch]
+# Confirmed tracker logins (internal/hud/API.md, People): the HUD is their
+# only writer, for the person signed in.
+- apiGroups: [c4.avalanche.io]
+  resources: [trackerpeople]
+  verbs: [get, list, watch, create, update, patch]
 - apiGroups: [c4.avalanche.io]
   resources: [trackers]
   verbs: [get, list, watch]

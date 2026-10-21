@@ -9,3 +9,4 @@ resources:
 - c4.avalanche.io_credentialleases.yaml
 - c4.avalanche.io_tools.yaml
 - c4.avalanche.io_submitgrants.yaml
+- c4.avalanche.io_trackerpeople.yaml

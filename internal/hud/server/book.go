@@ -161,6 +161,11 @@ func (s *Server) book(ctx context.Context, m *model, v *api.Viewer, only *jobRec
 				for _, ev := range s.events(ctx, ns, "SubmitGrant", "") {
 					add(bookItem{project: m.nsProject[ns], e: s.eventEntry(ev, api.BookObject{Type: "grant", Grant: ns + "/" + ev.InvolvedObject.Name})})
 				}
+				// A person's confirmation that a tracker login is them, and
+				// its revocation.
+				for _, ev := range s.events(ctx, ns, "TrackerPerson", "") {
+					add(bookItem{project: m.nsProject[ns], e: s.eventEntry(ev, api.BookObject{Type: "people", People: ns + "/" + ev.InvolvedObject.Name})})
+				}
 			}
 		}
 		for _, ns := range uniq(s.Namespace, metav1.NamespaceDefault) {

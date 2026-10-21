@@ -21,6 +21,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // Control records (DESIGN.md section 9.2): every action a person or agent
@@ -55,6 +56,10 @@ type controlPredicate struct {
 	// Relay is where a relayed decision came from: the tracker, the
 	// entity, the tracker user, the C4 person and the evidence's C4 ID.
 	Relay any `json:"relay,omitempty"`
+	// Chain is who acted for whom, under what (chain/1, schema/chain.go):
+	// a relayed decision's names the people-map confirmation it rests on,
+	// or says what is missing.
+	Chain *schema.Chain `json:"chain,omitempty"`
 }
 
 // via names the client: the MCP server says so in X-C4-Client; anything

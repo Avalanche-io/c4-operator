@@ -145,6 +145,13 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		f.mu.Unlock()
 		json.NewEncoder(w).Encode(api.CapacityForecast{At: &due, Jobs: []string{"show-a/sh050-light-forecast"},
 			Bursts: []api.ForecastBurst{{Pool: "cpu", Slots: 12, Live: 4, CostPerSlotHour: 0.5, ExtraCostPerHour: 4}}, Worse: []api.ForecastRisk{}})
+	case r.Method == "GET" && r.URL.Path == "/api/v1/people":
+		f.mu.Lock()
+		f.posts = append(f.posts, "GET "+r.URL.String())
+		f.mu.Unlock()
+		json.NewEncoder(w).Encode(api.PeopleList{Entries: []api.PeopleEntry{{Namespace: "show-a", Project: "show-a", Tracker: "github",
+			Login: "maya-gh", Person: "maya", State: "offered", Yours: true,
+			Lets: "decisions @maya-gh makes in tracker github are relayed as maya's, and serve maya's waits"}}})
 	case r.Method == "GET" && r.URL.Path == "/api/v1/held":
 		f.mu.Lock()
 		f.posts = append(f.posts, "GET "+r.URL.String())
@@ -615,5 +622,30 @@ func TestHeldWriteTools(t *testing.T) {
 	want := []string{"GET /api/v1/held?mine=1", `/api/v1/held/show-a/gh-issue-7/comment {"happened":false,"note":"not on the issue"}`}
 	if !slices.Equal(hud.posts, want) {
 		t.Fatalf("requests %q, want %q", hud.posts, want)
+	}
+}
+
+// The people map is listed through the HUD; there is no tool that confirms
+// a login, which only the person does, in the HUD.
+func TestPeopleMapTool(t *testing.T) {
+	hud := &fakeHUD{}
+	cs := session(t, hud, "tok-maya")
+	res, out := call(t, cs, "c4_list_people_map", map[string]any{"mine": true})
+	if es, _ := out["entries"].([]any); res.IsError || len(es) != 1 {
+		t.Fatalf("people: %v %q", out, text(res))
+	}
+	tools, err := cs.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tl := range tools.Tools {
+		if strings.Contains(tl.Name, "confirm_tracker_login") || strings.Contains(tl.Name, "people_confirm") {
+			t.Fatalf("an agent could confirm a login: %s", tl.Name)
+		}
+	}
+	hud.mu.Lock()
+	defer hud.mu.Unlock()
+	if !slices.Equal(hud.posts, []string{"GET /api/v1/people?mine=1"}) {
+		t.Fatalf("requests %q", hud.posts)
 	}
 }

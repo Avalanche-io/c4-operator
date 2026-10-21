@@ -721,10 +721,13 @@ type BookObject struct {
 	Job  string `json:"job,omitempty"`
 	// Grant is a submit grant, <namespace>/<name>.
 	Grant string `json:"grant,omitempty"`
-	Unit  *int   `json:"unit,omitempty"`
-	Node  string `json:"node,omitempty"`
-	Pool  string `json:"pool,omitempty"`
-	View  string `json:"view,omitempty"`
+	// People is a confirmed tracker login (a TrackerPerson),
+	// <namespace>/<name>.
+	People string `json:"people,omitempty"`
+	Unit   *int   `json:"unit,omitempty"`
+	Node   string `json:"node,omitempty"`
+	Pool   string `json:"pool,omitempty"`
+	View   string `json:"view,omitempty"`
 }
 
 // Signers of book entries.

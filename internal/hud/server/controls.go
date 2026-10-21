@@ -23,6 +23,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
+	"github.com/Avalanche-io/c4-operator/schema"
 	"github.com/Avalanche-io/c4-operator/work/forecast"
 	"github.com/Avalanche-io/c4-operator/work/order"
 )
@@ -693,6 +694,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	custody, actor := CustodyDirect, actorOf(r, v)
+	var chain *schema.Chain
 	standFor := ""
 	if body.Via == nil {
 		// Whom the wait names decides it, or someone the farm and the
@@ -708,7 +710,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if body.Via != nil {
-		grade, who, err := s.relayed(ctx, v, rec, wait, body.Via)
+		grade, who, ch, err := s.relayed(ctx, v, rec, wait, body.Via)
 		if err != nil {
 			var ge *errGrant
 			code := http.StatusForbidden
@@ -718,7 +720,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 			fail(w, code, "via: %v", err)
 			return
 		}
-		custody, actor = grade, who
+		custody, actor, chain = grade, who, ch
 	}
 	reply := ""
 	switch {
@@ -781,6 +783,7 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 			p.Actor = actor
 			p.Authenticated = "relayed by " + v.User + " (" + s.authenticatedBy(r) + ")"
 			p.Relay = body.Via
+			p.Chain = chain
 		}
 	})
 	if err != nil {

@@ -59,7 +59,7 @@ func start(t *testing.T) (*rest.Config, client.Client) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "host-pods.yaml", "../rbac/host-runner.yaml"}
+	files := []string{"node-writes.yaml", "workjob-owner.yaml", "workjob-controls.yaml", "host-runner.yaml", "lease-mounts.yaml", "submit-grants.yaml", "tracker-people.yaml", "host-pods.yaml", "../rbac/host-runner.yaml"}
 	if v := os.Getenv("POLICY_FILES"); v != "" {
 		files = strings.Split(v, ",")
 	}
@@ -617,4 +617,47 @@ func TestControlsOnlyFromTheHUD(t *testing.T) {
 	if err := hud.Create(ctx, mk("sm0140-light-v003", map[string]string{c4v1.AnnotationRequeue: "t:1"})); err != nil {
 		t.Errorf("the HUD creating a job with a control: %v", err)
 	}
+}
+
+// TestTrackerPeopleOnlyFromTheHUD: a person's confirmation that a tracker
+// login is them is written only by the HUD (the manager's account), so a
+// Tracker's author cannot make a login decide as anyone; it goes with its
+// namespace.
+func TestTrackerPeopleOnlyFromTheHUD(t *testing.T) {
+	cfg, admin := start(t)
+	ctx := context.Background()
+	admin.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}})
+	admin.Create(ctx, &rbacv1.ClusterRoleBinding{ObjectMeta: metav1.ObjectMeta{Name: "manager-admin"},
+		RoleRef:  rbacv1.RoleRef{APIGroup: "rbac.authorization.k8s.io", Kind: "ClusterRole", Name: "cluster-admin"},
+		Subjects: []rbacv1.Subject{{Kind: "ServiceAccount", Name: "c4-manager", Namespace: "c4-system"}}})
+	mc := rest.CopyConfig(cfg)
+	mc.Impersonate = rest.ImpersonationConfig{UserName: "system:serviceaccount:c4-system:c4-manager",
+		Groups: []string{"system:serviceaccounts", "system:serviceaccounts:c4-system", "system:authenticated"}}
+	s := runtime.NewScheme()
+	c4v1.AddToScheme(s)
+	hud, err := client.New(mc, client.Options{Scheme: s})
+	if err != nil {
+		t.Fatal(err)
+	}
+	entry := func(name, person string) *c4v1.TrackerPerson {
+		return &c4v1.TrackerPerson{ObjectMeta: metav1.ObjectMeta{Namespace: "widgets", Name: name},
+			Spec: c4v1.TrackerPersonSpec{Tracker: "github", Login: "dana", Person: person,
+				Offer:    c4v1.TrackerPersonOffer{From: "spec.people", Generation: 1},
+				Accepted: c4v1.TrackerPersonAct{By: person, At: metav1.Now()}}}
+	}
+	enforced(t, "c4-tracker-people", func(try int) error {
+		return admin.Create(ctx, entry(fmt.Sprintf("forged-%d", try), "dana"))
+	})
+	e := entry("github-dana", "dana")
+	eventually(t, "the HUD's entry", func() error { return hud.Create(ctx, e) })
+	if err := admin.Patch(ctx, e, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"person":"mallory"}}`))); err == nil {
+		t.Error("an entry was changed directly")
+	}
+	if err := admin.Delete(ctx, e); err == nil {
+		t.Error("an entry was erased directly")
+	}
+	if err := admin.Delete(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "widgets"}}); err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "an entry deleted with its namespace", func() error { return admin.Delete(ctx, e) })
 }

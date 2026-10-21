@@ -142,6 +142,8 @@ func Tools(c *Client) []Tool {
 			readOnly, c.listHeld),
 		tool("c4_confirm_write", "Confirm a held tracker write", "Say whether a held tracker write happened, after looking in the tracker: happened true and it is taken as written; false and it is written again on the sync's next pass (so say false only when it is not there, or it is made twice). The job's owner, or one allowed to change the job, answers; signed and recorded in the book.",
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.confirmWrite),
+		tool("c4_list_people_map", "List tracker logins and who they are", "The people maps of the trackers in projects you can see: each tracker login the project offers as a C4 person (or party), whether that person has confirmed it, and what confirming lets the login do (its decisions in the tracker relayed as that person's). Filter by tracker (namespace/name) or mine. Only the person confirms their own login, in the HUD, on their own page; an agent never confirms or accepts one for them, so tell the person what is offered and where to confirm it.",
+			readOnly, c.listPeople),
 		tool("c4_list_trackers", "List trackers", "The trackers (GitHub, Flow, ...) in the projects you can see: what each connects to, what it turns into jobs, whether it is connected and why not, how many people have let it submit work for them, and the person you act for's own grant to it. Use it to find the tracker to name in c4_grant.",
 			readOnly, c.listTrackers),
 		tool("c4_list_grants", "List grants", "Grants to trackers: by default the person you act for's own, or with tracker (namespace/name) who has let that tracker submit for them. Each shows its pools, classes, end, record, and whether it serves now and why not.",
@@ -968,5 +970,27 @@ func (c *Client) confirmWrite(ctx context.Context, _ *mcp.CallToolRequest, in Co
 	var out Done
 	err := c.do(ctx, "POST", "/held/"+url.PathEscape(in.Namespace)+"/"+url.PathEscape(in.Link)+"/"+url.PathEscape(in.Field),
 		api.ConfirmRequest{Happened: &in.Happened, Note: in.Note}, &out)
+	return nil, out, err
+}
+
+type ListPeopleIn struct {
+	Tracker string `json:"tracker,omitempty" jsonschema:"namespace/name: one tracker's people map"`
+	Mine    bool   `json:"mine,omitempty" jsonschema:"only the logins offered as the person you act for"`
+}
+
+func (c *Client) listPeople(ctx context.Context, _ *mcp.CallToolRequest, in ListPeopleIn) (*mcp.CallToolResult, api.PeopleList, error) {
+	q := url.Values{}
+	if in.Tracker != "" {
+		q.Set("tracker", in.Tracker)
+	}
+	if in.Mine {
+		q.Set("mine", "1")
+	}
+	p := "/people"
+	if len(q) > 0 {
+		p += "?" + q.Encode()
+	}
+	var out api.PeopleList
+	err := c.do(ctx, "GET", p, nil, &out)
 	return nil, out, err
 }

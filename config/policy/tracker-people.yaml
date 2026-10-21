@@ -1,0 +1,33 @@
+# A TrackerPerson is a person's own word that a tracker login is them, so
+# the login's decisions are relayed as theirs. Only the HUD writes one, for
+# the person signed in, with its signed control record
+# (internal/hud/server/people.go): nobody else creates, changes or deletes
+# it, so a Tracker's author cannot make a login decide as anyone, and a
+# revoked entry stays on the trail. An entry goes with its namespace: once
+# the namespace is being deleted, its entries may be deleted (by the
+# namespace controller). The signed records stay in the project's store.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: c4-tracker-people
+spec:
+  failurePolicy: Fail
+  matchConstraints:
+    resourceRules:
+    - apiGroups: [c4.avalanche.io]
+      apiVersions: ["*"]
+      operations: [CREATE, UPDATE, DELETE]
+      resources: [trackerpeople]
+  validations:
+  - expression: >-
+      request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager' ||
+      (request.operation == 'DELETE' && namespaceObject != null && has(namespaceObject.metadata.deletionTimestamp))
+    message: a tracker login is confirmed and revoked in the HUD, by the person, never written directly
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: c4-tracker-people
+spec:
+  policyName: c4-tracker-people
+  validationActions: [Deny]

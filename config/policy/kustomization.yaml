@@ -5,4 +5,5 @@ resources:
 - host-runner.yaml
 - lease-mounts.yaml
 - submit-grants.yaml
+- tracker-people.yaml
 - host-pods.yaml
