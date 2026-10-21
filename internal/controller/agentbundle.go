@@ -18,6 +18,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/jobspec"
 	"github.com/Avalanche-io/c4-operator/work/order"
 )
 
@@ -90,14 +91,16 @@ func JobForBundle(b *c4v1.AgentBundle) *c4v1.WorkJob {
 			// A member that fails is tried again on another runner, up to the
 			// default; a yield is never a failure.
 			Retries: ptr.To[int32](2),
-			Template: corev1.PodTemplateSpec{
+			// Restricted like every unit, so a namespace that enforces Pod
+			// Security restricted (a local farm's projects) admits it.
+			Template: jobspec.Restrict(corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"c4.avalanche.io/agent-bundle": b.Name}},
 				Spec: corev1.PodSpec{Containers: []corev1.Container{{
 					// A host runner runs the member's own Claude Code session and
 					// does not start this container; the image names what runs.
 					Name: "member", Image: "c4-agent",
 				}}},
-			},
+			}),
 		},
 	}
 	// The job is the bundle's owner's, so pools with owners and host
