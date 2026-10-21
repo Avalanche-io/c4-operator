@@ -943,6 +943,11 @@ func signInBlocks(ctx context.Context, e localfarm.Enrolled, stdin io.Reader, st
 		return nil
 	}
 	fmt.Fprintf(stdout, "agents    sign in where the agents' blocks run, apart from your own Claude Code: sign in, trust the folder, then /exit\n")
+	if e.BlocksFolder != "" {
+		if err := os.MkdirAll(e.BlocksFolder, 0o755); err != nil {
+			return err
+		}
+	}
 	cmd := exec.CommandContext(ctx, claude)
 	cmd.Dir = e.BlocksFolder
 	cmd.Env = append(os.Environ(), "CLAUDE_CONFIG_DIR="+e.BlocksEnv)
