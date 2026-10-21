@@ -47,13 +47,6 @@ Work
   types                    the prebuilt job types
   submit TYPE ASSET        plan a job, show the estimate, and submit it
   submit FILE              send a submission (c4: submit/1): its plan and estimate first (--dry-run, --explain)
-
-Tools
-  tools                    the tools you can submit
-  tool new KIND DIR        start a tool: a folder with a tool.yaml, a script and a test (frames or once)
-  tool test DIR            check a tool and run its test here, in Docker (--frames, --with K=V, --keep, --log FILE)
-  tool publish DIR         store a tool, test it on the farm, offer it to the project (--farm: every project)
-  tool show NAME           a published tool and its parameters
   ls                       the queue, in run order (--mine, --at-risk, --all)
   watch JOB                the job's progress, deadline and slack as they change
   open JOB                 open the job view in the HUD (--widget for the side widget)
@@ -63,6 +56,13 @@ Tools
   boost JOB N              ask for N times the slots its deadline needs (1 to 2)
   requeue JOB UNITS        run units again ("14", "0-9,14")
   get JOB|VIEW [PATH...] DIR   write a job's output under DIR, checking every C4 ID
+
+Tools
+  tools                    the tools you can submit
+  tool new KIND DIR        start a tool: a folder with a tool.yaml, a script and a test (frames or once)
+  tool test DIR            check a tool and run its test here, in Docker (--frames, --with K=V, --keep, --log FILE)
+  tool publish DIR         store a tool, test it on the farm, offer it to the project (--farm-wide: every project)
+  tool show NAME           a published tool and its parameters
 
 Trackers
   grant TRACKER            let a tracker submit work for you (--pools, --classes, --until 30d)
@@ -125,6 +125,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 	if strings.HasPrefix(version, "v") {
 		// the prebuilt job images are released with the binary
 		farmcli.ImageTag = version
+	} else {
+		farmcli.DevBuild = true
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

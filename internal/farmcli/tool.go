@@ -67,6 +67,25 @@ func (e *ToolError) Error() string {
 // this release.
 func ResolveImage(ref string) string { return schema.ImageRef(ref, ImageTag) }
 
+// DevBuild says this c4-farm is a development build, whose release images
+// are not published: tool test runs c4/<name> as this machine's
+// c4-<name>:dev, the image `c4 farm image load` gives a local farm.
+var DevBuild bool
+
+// devImage is the local image a development build runs for ref, when this
+// machine's Docker has it.
+func devImage(ctx context.Context, docker, ref string) (string, bool) {
+	name, ok := strings.CutPrefix(ref, "c4/")
+	if !DevBuild || !ok || strings.ContainsAny(name, ":@/") {
+		return "", false
+	}
+	local := "c4-" + name + ":dev"
+	if exec.CommandContext(ctx, docker, "image", "inspect", local).Run() != nil {
+		return "", false
+	}
+	return local, true
+}
+
 // paramValues are a unit's parameters: the tool's defaults, then the
 // test's, then the person's; a PATH becomes absolute under the tree.
 func paramValues(t *schema.Tool, tree string, with ...map[string]any) (map[string]any, error) {
@@ -186,6 +205,12 @@ func TestTool(ctx context.Context, o Out, a TestArgs) error {
 	}
 	if err := exec.CommandContext(ctx, docker, "version", "--format", "{{.Server.Version}}").Run(); err != nil {
 		return errors.New("Docker is not running: tool test runs the tool in Docker, as the farm does")
+	}
+	if a.Image == "" {
+		if local, ok := devImage(ctx, docker, t.Runs.Image); ok {
+			image = local
+			o.printf("image       %s, this machine's (a development build)\n", local)
+		}
 	}
 	if a.Log != "" {
 		return replayLog(ctx, o, docker, image, dir, a.Log)

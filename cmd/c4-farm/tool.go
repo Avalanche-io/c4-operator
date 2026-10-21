@@ -73,7 +73,7 @@ func toolCommand(ctx context.Context, fs *flag.FlagSet, args []string, stdout io
 
 	case "publish":
 		var a farmcli.PublishArgs
-		fs.BoolVar(&a.Farm, "farm", false, "publish to every project (the farm admin role)")
+		fs.BoolVar(&a.Farm, "farm-wide", false, "publish to every project (the farm admin role)")
 		fs.BoolVar(&a.DryRun, "dry-run", false, "check the tool on the farm and change nothing")
 		fs.DurationVar(&a.Wait, "wait", 15*time.Minute, "how long to wait for the farm's test run")
 		pos, err := parse(fs, args)
@@ -81,7 +81,7 @@ func toolCommand(ctx context.Context, fs *flag.FlagSet, args []string, stdout io
 			return err
 		}
 		if len(pos) != 1 {
-			return errors.New("usage: c4 farm tool publish DIR [--farm] [--dry-run]")
+			return errors.New("usage: c4 farm tool publish DIR [--farm-wide] [--dry-run]")
 		}
 		c, f, o, project, err := connect()
 		if err != nil {
