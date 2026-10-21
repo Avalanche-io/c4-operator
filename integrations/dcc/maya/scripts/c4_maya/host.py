@@ -23,7 +23,7 @@ Host requires.
 
 import os
 import re
-from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set
+from typing import Callable, Dict, Iterable, List, Optional, Sequence, Set, Tuple
 
 from c4submit import frames as framelib
 from c4submit import paths, seq
@@ -154,17 +154,6 @@ def uv_pattern(path: str, pattern: str = "") -> str:
     return os.path.join(d, base) if d else base
 
 
-def uv_tiles(pattern: str) -> List[str]:
-    """The files on disk a ``<U>``/``<V>`` pattern names, sorted."""
-    d, base = os.path.split(pattern)
-    rx = re.compile("".join(r"\d+" if _UV.fullmatch(p) else re.escape(p) for p in re.split(r"(<[uUvV]>)", base)))
-    try:
-        names = os.listdir(d or ".")
-    except OSError:
-        return []
-    return sorted(os.path.join(d, n) for n in names if rx.fullmatch(n) and os.path.isfile(os.path.join(d, n)))
-
-
 def frame_path(path: str) -> str:
     """An image or cache sequence's path with ``#`` for its frame: the last
     number in the file's name, at its padding. A path that already holds a
@@ -234,24 +223,36 @@ class MayaHost(Host):
 
     # --- what renders -------------------------------------------------------
 
-    def renderables(self) -> List[Renderable]:
+    def read(self) -> Tuple[str, List[Renderable]]:
+        """The master layer's range and the renderable layers, from one pass
+        over the layers: each is made current once to read its overrides
+        (range, renderable camera), then the artist's layer again."""
         layers = [n for n in render_layers() if _get(n + ".renderable", False)]
         if not layers:
-            return []
+            return self.frames(), []
         pad = int(_get(GLOBALS + ".extensionPadding", 4) or 4)
 
-        def read(layer: str):
-            return _span(), self.outputs(layer, pad)
+        def one(layer: str):
+            return _span(), self.outputs(layer, pad), self.camera()
 
-        seen = visit_layers(layers + ([MASTER] if MASTER not in layers else []), read)
+        seen = visit_layers(layers + ([MASTER] if MASTER not in layers else []), one)
         scene_range = seen[MASTER][0]
         out = []
         for layer in layers:
-            span, outputs = seen[layer]
+            span, outputs, cam = seen[layer]
             own = span if span and span != scene_range else None
             out.append(Renderable(name=layer, label=layer_label(layer), frames=own, outputs=outputs,
-                                  key=layer_key(layer), note="its own range" if own else ""))
-        return out
+                                  key=layer_key(layer), note="its own range" if own else "",
+                                  values={"scene.camera": cam} if cam else {}))
+        return str(scene_range), out
+
+    def renderables(self) -> List[Renderable]:
+        return self.read()[1]
+
+    def signature(self) -> str:
+        """The scene's path and unsaved state, and the workspace, which
+        relative paths resolve against."""
+        return super().signature() + "|" + self.workspace()
 
     def outputs(self, layer: str, pad: int = 4) -> List[str]:
         """The images a layer writes, as patterns: the render settings'
@@ -326,32 +327,34 @@ class MayaHost(Host):
         return out
 
     def _texture(self, node: str) -> List[str]:
-        """The files a file node reads: its tiles and frames as patterns."""
+        """The files a file node reads, as one pattern: Maya's own computed
+        pattern when it holds the tile or frame tokens, else the file's name
+        with its tile and frame numbers made tokens."""
         p = self.absolute(_get(node + ".fileTextureName", "") or "")
         if not p:
             return []
         mode = int(_get(node + ".uvTilingMode", TILES_OFF) or TILES_OFF)
+        frames = bool(_get(node + ".useFrameExtension", False))
+        if mode == TILES_OFF and not frames:
+            return [p]
         pattern = self.absolute(_get(node + ".computedFileTextureNamePattern", "") or "")
+        tiled_ok = mode == TILES_OFF or seq.has_tiles(pattern)
+        if pattern and tiled_ok and (not frames or seq.has_frames(pattern)):
+            return [pattern]
         if mode == TILES_UDIM:
             p = udim_path(p, pattern)
         elif mode in (TILES_ZBRUSH, TILES_MUDBOX):
             p = uv_pattern(p, pattern)
-        if _get(node + ".useFrameExtension", False):
+        if frames:
             p = frame_path(p)
-        return self._tiled(p)
+        return [p]
 
     @staticmethod
     def _tiled(p: str) -> List[str]:
-        """A path, or the tiles of a ``<U>``/``<V>`` (or Arnold ``<tile>``)
-        pattern, which c4submit does not expand itself. A pattern with no
-        tiles on disk stays as it is, so the check says it is missing."""
+        """An Arnold path: its ``<tile>`` is a Mudbox-style tile (``_u1_v1``)."""
         if not p:
             return []
-        if "<tile>" in p:
-            p = p.replace("<tile>", "_u<U>_v<V>")
-        if not _UV.search(p):
-            return [p]
-        return uv_tiles(p) or [p]
+        return [p.replace("<tile>", "_u<U>_v<V>")]
 
     def _references(self) -> List[tuple]:
         """(reference node, file, loaded) for each reference, nested ones too."""
@@ -382,7 +385,7 @@ class MayaHost(Host):
         out, seen = [], set()
         for raw in listed:
             p = self.absolute(raw)
-            if not p or _UV.search(p) or paths.same(p, scene) or p in plain or p in seen or os.path.isdir(p):
+            if not p or paths.same(p, scene) or p in plain or p in seen or os.path.isdir(p):
                 continue
             if any((seq.has_frames(x) or seq.has_tiles(x)) and seq.matches(x, p) for x in pats):
                 continue

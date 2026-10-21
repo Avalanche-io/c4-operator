@@ -285,6 +285,35 @@ def test_one_layer_ticked(tmp_path, farm):
     assert "18 found" in summary(), "only what fg reads: no caustics, no splash"
 
 
+def test_each_layer_renders_its_own_camera(tmp_path, farm):
+    host, _ = light_scene(tmp_path)
+    fm.camera("closeCam", renderable=False)
+    fm.state().overrides["rs_fg"].update({"closeCamShape.renderable": True, "shotCamShape.renderable": False})
+    w = panel.open_panel(host=host, farm=farm)
+    fm.settle(w)
+    assert value("c4p_camera") == "each render layer's own camera" and value("c4p_camera_linked") is True
+    fm.type_into("c4_layer_0", False)
+    assert value("c4p_camera") == "closeCam", "fg alone: its camera"
+    fm.type_into("c4_layer_0", True)
+    check(w)
+    jobs = w.checked.doc["jobs"]
+    assert jobs["render-beauty"]["with"]["camera"] == "shotCam" and jobs["render-fg"]["with"]["camera"] == "closeCam"
+    fm.type_into("c4p_camera", "witnessCam")
+    check(w)
+    assert {j["with"]["camera"] for j in w.checked.doc["jobs"].values()} == {"witnessCam"}, "typed: one for all"
+
+
+def test_a_file_no_ticked_layer_reads_is_left_out(tmp_path, farm):
+    host, _ = light_scene(tmp_path)
+    fm.node("transform", "trees")
+    fm.node("gpuCache", "treesShape", "trees", cacheFileName=str(tmp_path / "env" / "missing_trees.abc"),
+            useFrameExtension=False)
+    w = panel.open_panel(host=host, farm=farm)
+    fm.settle(w)
+    check(w)
+    assert w.checked.ok, "the trees are in no renderable layer, so their missing cache is not asked for"
+
+
 def test_no_renderable_layer(tmp_path, farm):
     host, _ = light_scene(tmp_path)
     for n in ("rs_beauty", "rs_fg"):

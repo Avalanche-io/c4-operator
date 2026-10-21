@@ -135,10 +135,11 @@ def _cmd(fn: Callable) -> Callable:
 def getAttr(plug: str):  # noqa: N802
     name, attr = plug.split(".", 1)
     n = _node(name)
-    if n.name == "defaultRenderGlobals":
-        o = _s.overrides.get(_s.current_layer, {})
-        if attr in o:
-            return o[attr]
+    o = _s.overrides.get(_s.current_layer, {})
+    if f"{n.name}.{attr}" in o:
+        return o[f"{n.name}.{attr}"]
+    if n.name == "defaultRenderGlobals" and attr in o:
+        return o[attr]
     if attr not in n.attrs:
         raise ValueError(f"No object matches name: {plug}")
     return n.attrs[attr]
@@ -704,14 +705,17 @@ def camera(name: str, renderable: bool = True) -> str:
     return name
 
 
-def layer(name: str, renderable: bool = True, members=(), **overrides) -> str:
-    """A render layer with its objects and its overrides of the render
-    settings (``startFrame=1001.0``)."""
+def layer(name: str, renderable: bool = True, members=(), plugs: Optional[Dict[str, Any]] = None,
+          **overrides) -> str:
+    """A render layer with its objects, its overrides of the render
+    settings (``startFrame=1001.0``) and of any other attribute
+    (``plugs={"shotCamShape.renderable": False}``)."""
     node("renderLayer", name, renderable=renderable)
     _s.members[name] = list(members)
-    if overrides:
-        _s.overrides[name] = {k: float(v) if isinstance(v, int) and not isinstance(v, bool) else v
-                              for k, v in overrides.items()}
+    o = {k: float(v) if isinstance(v, int) and not isinstance(v, bool) else v for k, v in overrides.items()}
+    o.update(plugs or {})
+    if o:
+        _s.overrides[name] = o
     return name
 
 

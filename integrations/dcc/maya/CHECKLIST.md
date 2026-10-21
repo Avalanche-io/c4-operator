@@ -160,8 +160,9 @@ needs Maya 2023 or later (Python 3.9); no C4 menu added" in the Script Editor.
    `editRenderLayerGlobals(currentRenderLayer=...)` to read its overrides of
    `defaultRenderGlobals.startFrame`/`endFrame`/`byFrameStep`, then makes the
    artist's layer current again. It then sets `cmds.file(modified=False)` if
-   the scene was unmodified before. Watch how long this takes in a heavy scene,
-   because switching layers applies their overrides.
+   the scene was unmodified before. Each read makes each layer current once,
+   reading its range, outputs and camera together. Watch how long this takes
+   in a heavy scene, because switching layers applies their overrides.
 2. **Layer names.** In Render Setup, layer beauty's node is `rs_beauty`. The
    job's `layer` is `rs_beauty`, and its key is `beauty`. **[guess]** that
    `Render -rl rs_beauty` renders the Render Setup layer beauty on the farm.
@@ -179,10 +180,12 @@ needs Maya 2023 or later (Python 3.9); no C4 menu added" in the Script Editor.
    gives the layer's first image path with `####` for the frame. Only the
    main image is listed, not Arnold's AOVs. Nothing depends on outputs today,
    because layers do not read each other.
-7. **The camera.** **[guess]** that the renderable camera is the one whose
-   shape's `renderable` is on (shotCam before persp). A layer that overrides
-   which camera is renderable still gets the one camera the master layer
-   says, because c4submit takes one camera per scene.
+7. **The camera.** In fg, override which camera is renderable (closeCam on,
+   shotCam off). **Expect:** Camera shows "each render layer's own camera".
+   With only fg ticked it shows closeCam, and the jobs render shotCam and
+   closeCam. Typing a camera sets one for every layer. **[guess]** that the
+   renderable camera is the one whose shape's `renderable` is on (shotCam
+   before persp), read with the layer current so its override applies.
 
 ## What the scene reads (each one a [guess] about node attributes)
 
@@ -200,22 +203,26 @@ change as stated.
    face assignments (`heron.f[0:99]`).
 3. **UDIM textures.** **Expect:** the three heron tiles. **[guess]** that
    `uvTilingMode` is 3 for UDIM (Mari), 1 for ZBrush and 2 for Mudbox, and
-   that `computedFileTextureNamePattern` holds `<UDIM>`. If it does not, the
-   last four-digit number from 1001 up in the file name is the tile.
+   that `computedFileTextureNamePattern` holds `<UDIM>` (used as it is when it
+   holds the tokens). If it does not, the last four-digit number from 1001 up
+   in the file name is the tile.
 4. **ZBrush and Mudbox tiles** (`_u0_v0`, `_u1_v1`). **Expect:** every tile
-   on disk is collected.
+   on disk is collected, from one pattern `_u<U>_v<V>` (or Maya's own
+   pattern when it holds `<U>` and `<V>`).
 5. **Image sequences.** **Expect:** all ten caustics frames. **[guess]** that
-   `useFrameExtension` marks a sequence. The frame is the last number in the
-   file's name, at its padding, and every frame on disk is collected,
-   whatever range the texture actually reads.
+   `useFrameExtension` marks a sequence and that Maya's computed pattern
+   holds `<f>`. Without one, the frame is the last number in the file's name,
+   at its padding. Every frame on disk is collected, whatever range the
+   texture actually reads.
 6. **Relative paths and variables.** **Expect:** `sourceimages/...` resolves
    against `workspace(query=True, rootDirectory=True)`, and `$SHOW/...`
    expands. Maya's own file-rule fallbacks (looking in `sourceimages` for a
    bare file name) are not followed.
 7. **Arnold.** `aiStandIn.dso`, `aiVolume.filename` and `aiImage.filename`,
    with `useFrameExtension` on the first two. **Expect:** the 48 standin
-   frames, the ten VDBs and the sky. An `aiImage` with `<tile>` is expanded
-   to its `_u1_v1` tiles. `.tx` files that Arnold makes beside textures are
+   frames, the ten VDBs and the sky. **[guess]** that Arnold's `<tile>` is a
+   Mudbox-style `_u1_v1` (so `bark<tile>.exr` reads `bark_u1_v1.exr`); the
+   host writes it as `_u<U>_v<V>`. `.tx` files that Arnold makes beside textures are
    not collected, so render with "Use existing .tx" off, or make them first.
 8. **Alembic and GPU caches.** `AlembicNode.abc_File` (and `abc_layerFiles`
    for layered caches) and `gpuCache.cacheFileName`. **Expect:** collected.

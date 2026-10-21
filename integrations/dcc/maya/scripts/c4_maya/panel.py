@@ -13,7 +13,6 @@ where their answers come back too. Submit is available only after a check
 passed and nothing has changed since.
 """
 
-import json
 import os
 import threading
 import time
@@ -39,6 +38,7 @@ TYPED = "At a time I type"
 STANDARD = "Standard"
 EACH_RANGE = "each render layer's own range"
 EACH_LAYER = "each ticked render layer"
+EACH_CAMERA = "each render layer's own camera"
 STALE = "Changed since the check: Check again before you submit."
 LOCAL_TOOLS = ("Setting C4_TOOL_PATH to the studio's tool folders lets this window draw the form and save "
                "the submission as a file, to submit when the farm takes it.")
@@ -394,12 +394,11 @@ class SubmitWindow:
         d = self.draft
         if d is None or not f.linked:
             return None
-        if f.param.source == "scene.renderables" and d.per_renderable:
-            picked = d.picked()
-            if len(picked) > 1:
-                return EACH_LAYER
-            if picked:
-                return picked[0].name   # the form's own value is as of the last scene read
+        if f.param.source == "scene.renderables" and len(d.picked()) > 1:
+            return EACH_LAYER
+        if f.param.source == "scene.camera" and d.per_renderable:
+            if len({d._derive(f.param.source, f.name, r) for r in d.picked()}) > 1:
+                return EACH_CAMERA
         if f.param.source in ("scene.frames", "shot.frames") and d.per_renderable:
             if len({d.job_frames(r) for r in d.picked()}) > 1:
                 return EACH_RANGE
@@ -533,11 +532,12 @@ class SubmitWindow:
 
     def signature(self) -> str:
         """Everything a check depends on, so a change since is seen: the
-        draft's own signature, and whether the scene has unsaved edits
-        (which only Maya knows, so the draft cannot see them)."""
+        draft's own signature (the scene as of its last read), and the
+        host's as it is now, so an edit made since that read counts without
+        reading the render layers again."""
         if self.draft is None:
             return ""
-        return self.draft.signature() + "\nunsaved=" + json.dumps(bool(self.host.is_modified()))
+        return self.draft.signature() + "\nnow=" + self.host.signature()
 
     def changed(self, name: str) -> None:
         """The artist edited a control (or pressed a button)."""

@@ -42,6 +42,31 @@ def test_reading_the_layers_leaves_the_artist_where_they_were(tmp_path):
     assert fm.state().modified is True, "the artist's own unsaved edits stay unsaved"
 
 
+def test_one_read_switches_each_layer_once(tmp_path):
+    host, _ = light_scene(tmp_path)
+    fm.state().switches = 0
+    frames, rs = host.read()
+    assert frames == "1001-1048" and [r.name for r in rs] == ["rs_beauty", "rs_fg"]
+    assert fm.state().switches == 3, "beauty, fg, then the master layer, current again"
+
+
+def test_each_layer_has_its_own_camera(tmp_path):
+    host, _ = light_scene(tmp_path)
+    fm.camera("closeCam", renderable=False)
+    fm.state().overrides["rs_fg"].update({"closeCamShape.renderable": True, "shotCamShape.renderable": False})
+    rs = by_name(host.renderables())
+    assert rs["rs_beauty"].values == {"scene.camera": "shotCam"}
+    assert rs["rs_fg"].values == {"scene.camera": "closeCam"}, "fg overrides which camera renders"
+    assert host.camera() == "shotCam", "the scene's, as the master layer has it"
+
+
+def test_the_signature_holds_the_workspace(tmp_path):
+    host, _ = light_scene(tmp_path)
+    before = host.signature()
+    fm.state().workspace = str(tmp_path / "elsewhere")
+    assert host.signature() != before, "relative paths now resolve elsewhere"
+
+
 def test_the_master_layer_when_it_is_renderable(tmp_path):
     host, _ = light_scene(tmp_path, master=True)
     rs = host.renderables()
@@ -150,16 +175,31 @@ def test_references_unloaded_and_with_copy_numbers(tmp_path):
     assert "sharedReferenceNode" not in deps
 
 
-def test_zbrush_and_mudbox_tiles_are_listed_as_files(tmp_path):
-    host, _ = light_scene(tmp_path)
+def test_zbrush_and_mudbox_tiles_are_one_pattern(tmp_path):
+    host, scene = light_scene(tmp_path)
     show = str(tmp_path)
     tex = os.path.join(show, "assets", "cliff")
     for u, v in ((1, 1), (2, 1), (1, 2)):
         write(os.path.join(tex, f"cliff_u{u}_v{v}.tif"))
     fm.mesh("cliff")
     fm.file_texture("cliff_tex", os.path.join(tex, "cliff_u1_v1.tif"), ["cliffShape"], tiling=2)
-    got = sorted(d.path for d in host.dependencies() if d.node == "cliff_tex")
-    assert got == [os.path.join(tex, n) for n in ("cliff_u1_v1.tif", "cliff_u1_v2.tif", "cliff_u2_v1.tif")]
+    deps = [d for d in host.dependencies() if d.node == "cliff_tex"]
+    assert [d.path for d in deps] == [os.path.join(tex, "cliff_u<U>_v<V>.tif")]
+    col = gather(show, scene, deps)
+    assert sorted(col.files) == ["assets/cliff/cliff_u1_v1.tif", "assets/cliff/cliff_u1_v2.tif",
+                                 "assets/cliff/cliff_u2_v1.tif", "seq/sm0140/maya/scenes/sm0140_light_v003.ma"]
+
+
+def test_maya_computed_pattern_wins(tmp_path):
+    host, _ = light_scene(tmp_path)
+    show = str(tmp_path)
+    fm.file_texture("ripples", os.path.join(show, "fx", "ripple.0001.exr"), sequence=True,
+                    pattern=os.path.join(show, "fx", "ripple.<f>.exr"))
+    fm.file_texture("plain", os.path.join(show, "fx", "plain.0001.exr"),
+                    pattern=os.path.join(show, "fx", "plain.<f>.exr"))
+    deps = {d.node: d.path for d in host.dependencies()}
+    assert deps["ripples"] == os.path.join(show, "fx", "ripple.<f>.exr")
+    assert deps["plain"] == os.path.join(show, "fx", "plain.0001.exr"), "not a sequence: the one file"
 
 
 def test_arnold_tile_token_and_a_missing_set(tmp_path):
@@ -168,9 +208,12 @@ def test_arnold_tile_token_and_a_missing_set(tmp_path):
     fm.ai_image("bark", os.path.join(show, "assets", "tree", "bark<tile>.exr"))
     deps = [d for d in host.dependencies() if d.node == "bark"]
     assert [d.path for d in deps] == [os.path.join(show, "assets", "tree", "bark_u<U>_v<V>.exr")], \
-        "none on disk: kept as a pattern, so the check says so"
+        "Arnold's <tile> is a Mudbox-style tile"
     col = gather(show, scene, deps)
     assert col.problems[0].path == "bark" and "no such file" in col.problems[0].message
+    write(os.path.join(show, "assets", "tree", "bark_u1_v1.exr"))
+    write(os.path.join(show, "assets", "tree", "bark_u2_v1.exr"))
+    assert len(gather(show, scene, deps).files) == 3
 
 
 def test_alembic_layers_and_gpu_caches(tmp_path):
