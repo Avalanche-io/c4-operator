@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 )
@@ -12,6 +13,8 @@ import (
 // signed record of the unit that wrote it, and whether it verifies.
 type traceRecord struct {
 	Verified bool   `json:"verified"`
+	Problem  string `json:"problem"`
+	Policy   string `json:"policy"`
 	Signer   string `json:"signer"`
 	SignedAt string `json:"signedAt"`
 	Record   string `json:"record"`
@@ -25,6 +28,7 @@ type traceRecord struct {
 			Invocation struct {
 				Job, Namespace, Unit, Attempt string
 			} `json:"invocation"`
+			AI      map[string]any `json:"ai"`
 			Runtime struct {
 				Node   string `json:"node"`
 				Images []struct {
@@ -37,9 +41,8 @@ type traceRecord struct {
 
 // traceInput is a tree the unit read: an upload, or a job's output.
 type traceInput struct {
-	View    string `json:"view"`
-	Job     string `json:"job"`
-	FromJob string `json:"fromJob"`
+	View       string `json:"view"`
+	ProducedBy string `json:"producedBy"`
 }
 
 // Trace is `c4 farm trace JOB FILE`: the file's signed record, whether it
@@ -56,8 +59,13 @@ func Trace(ctx context.Context, c *Client, o Out, project, ref, path string) err
 		return err
 	}
 	verdict := "verifies"
-	if !r.Verified {
+	switch {
+	case !r.Verified && r.Problem != "":
+		verdict = "DOES NOT VERIFY: " + r.Problem
+	case !r.Verified:
 		verdict = "DOES NOT VERIFY against the farm's signing roots"
+	case r.Policy != "":
+		verdict = "verifies, but " + r.Policy
 	}
 	o.printf("%s   %s   %s\n", r.File.Path, shortID(r.File.ID), verdict)
 	inv, rt := r.Statement.Predicate.Invocation, r.Statement.Predicate.Runtime
@@ -77,13 +85,26 @@ func Trace(ctx context.Context, c *Client, o Out, project, ref, path string) err
 	if t, err := time.Parse(time.RFC3339Nano, r.SignedAt); err == nil {
 		o.printf("  signed    %s · record %s\n", o.Clock.AtUTC(t), shortID(r.Record))
 	}
-	for _, in := range r.Lineage {
-		switch from := in.Job + in.FromJob; {
-		case from != "":
-			o.printf("  read      the output of %s · view %s\n", from, shortID(in.View))
-		default:
-			o.printf("  read      view %s, as uploaded\n", shortID(in.View))
+	if ai := r.Statement.Predicate.AI; len(ai) > 0 {
+		keys := make([]string, 0, len(ai))
+		for k := range ai {
+			keys = append(keys, k)
 		}
+		sort.Strings(keys)
+		var parts []string
+		for _, k := range keys {
+			if v, ok := ai[k].(string); ok && v != "" {
+				parts = append(parts, k+": "+v)
+			}
+		}
+		o.printf("  ai use    %s\n", strings.Join(parts, " · "))
+	}
+	for _, in := range r.Lineage {
+		if in.ProducedBy != "" {
+			o.printf("  read      the output of %s · view %s (c4 farm trace it the same way)\n", in.ProducedBy, shortID(in.View))
+			continue
+		}
+		o.printf("  read      view %s, as uploaded\n", shortID(in.View))
 	}
 	for _, im := range rt.Images {
 		o.printf("  image     %s\n", im.Digest)

@@ -406,8 +406,8 @@ func TestTraceAFile(t *testing.T) {
 				return
 			}
 			fmt.Fprintf(w, `{"verified":%v,"signer":"https://cccc.io/id/node/c4-local-worker2","signedAt":"2026-10-21T00:11:19Z","record":"c449jt8DzAk2GmnQ",
-				"file":{"id":"c44TARH9igh6Xrx5","path":"render/sm0140.1024.exr"},"lineage":[{"view":"c42JkXENgggchnoL"},{"view":"c4aaaabbbbccccdd","job":"sm0140-light-v001"}],
-				"statement":{"predicate":{"invocation":{"job":"sm0140-render-v001","unit":"23"},"runtime":{"node":"c4-local-worker2","images":[{"digest":"sha256:de81"}]}}}}`, verified)
+				"file":{"id":"c44TARH9igh6Xrx5","path":"render/sm0140.1024.exr"},"lineage":[{"view":"c42JkXENgggchnoL"},{"view":"c4aaaabbbbccccdd","producedBy":"saltmarsh/sm0140-light-v001"}],
+				"statement":{"predicate":{"invocation":{"job":"sm0140-render-v001","unit":"23"},"ai":{"use":"generated","model":"Depth Anything V2 Small"},"runtime":{"node":"c4-local-worker2","images":[{"digest":"sha256:de81"}]}}}}`, verified)
 		default:
 			http.NotFound(w, r)
 		}
@@ -421,7 +421,7 @@ func TestTraceAFile(t *testing.T) {
 	}
 	for _, want := range []string{"render/sm0140.1024.exr   c44T…Xrx5   verifies\n",
 		"  made by   saltmarsh/sm0140-render-v001 · unit 23 · node c4-local-worker2 · signed by the node\n",
-		"  read      view c42J…hnoL, as uploaded\n", "  read      the output of sm0140-light-v001 · view c4aa…ccdd\n", "  image     sha256:de81\n"} {
+		"  read      view c42J…hnoL, as uploaded\n", "  read      the output of saltmarsh/sm0140-light-v001 · view c4aa…ccdd (c4 farm trace it the same way)\n", "  ai use    model: Depth Anything V2 Small · use: generated\n", "  image     sha256:de81\n"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("no %q in\n%s", want, out.String())
 		}
