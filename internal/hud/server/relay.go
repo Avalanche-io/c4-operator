@@ -23,9 +23,9 @@ import (
 
 // Custody grades of a decision.
 const (
-	CustodyDirect              = "direct"
-	CustodyRelayed             = "relayed"
-	CustodyRelayedUnattributed = "relayed-unattributed"
+	CustodyDirect       = "direct"
+	CustodyRelayed      = "relayed"
+	CustodyRelayedParty = "relayed-party"
 	// CustodyStandIn: someone the farm and the project let stand in
 	// decided a person's wait for them (whomay.go).
 	CustodyStandIn = "stand-in"
