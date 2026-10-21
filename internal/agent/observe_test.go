@@ -274,3 +274,43 @@ func TestObserveClaimsTheLeadOfABackgroundSession(t *testing.T) {
 		t.Errorf("launches %+v", got)
 	}
 }
+
+// A transcript is read as it grows: each scan reads only the lines written
+// since the last, a line still being written waits for the next, and the
+// result is what one scan of the whole file gives. A shorter file is read
+// again from its start.
+func TestScanReadsOnlyWhatIsNew(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "s.jsonl")
+	turn := func(id string, in int64) string {
+		return fmt.Sprintf(`{"type":"assistant","message":{"id":%q,"model":"opus","usage":{"input_tokens":%d,"output_tokens":1},"content":[{"type":"text","text":"turn %s"}]}}`+"\n", id, in, id)
+	}
+	scan := func() sessionScan {
+		info, err := os.Stat(p)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return scanSessionCached(p, time.Time{}, info)
+	}
+	os.WriteFile(p, []byte(turn("a", 10)), 0o644)
+	if s := scan(); s.usage[0].InputTokens != 10 {
+		t.Fatalf("first %+v", s.usage)
+	}
+	whole := turn("b", 20)
+	f, _ := os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(whole[:30]) // half a line
+	f.Close()
+	if s := scan(); s.usage[0].InputTokens != 10 || s.lastText != "turn a" {
+		t.Fatalf("a half-written line was read: %+v %q", s.usage, s.lastText)
+	}
+	f, _ = os.OpenFile(p, os.O_APPEND|os.O_WRONLY, 0)
+	f.WriteString(whole[30:] + turn("b", 20)) // the rest, and the same message again
+	f.Close()
+	got := scan()
+	if want := scanSession(p, time.Time{}); got.usage[0] != want.usage[0] || got.lastText != want.lastText || got.usage[0].InputTokens != 30 {
+		t.Fatalf("grown %+v %q, whole file %+v %q", got.usage, got.lastText, want.usage, want.lastText)
+	}
+	os.WriteFile(p, []byte(turn("c", 5)), 0o644)
+	if s := scan(); s.usage[0].InputTokens != 5 {
+		t.Fatalf("a shorter file was not read again: %+v", s.usage)
+	}
+}

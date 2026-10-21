@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Avalanche-io/c4-operator/work/tokens"
+	"io"
 	"os"
 	"os/exec"
 	"slices"
@@ -343,168 +344,215 @@ type sessionScan struct {
 
 var scanCache = struct {
 	sync.Mutex
-	m map[string]cachedScan
-}{m: map[string]cachedScan{}}
+	m map[string]*scanner
+}{m: map[string]*scanner{}}
 
-type cachedScan struct {
-	size    int64
-	mod     time.Time
-	started time.Time
-	scan    sessionScan
-}
-
-// scanSessionCached scans a transcript once per change to it.
+// scanSessionCached scans a transcript as it grows: a transcript is only
+// ever appended to, so each call reads the lines written since the last
+// one, never the whole file again. One that shrank, or a session whose
+// process started anew, is read from its start.
 func scanSessionCached(path string, started time.Time, info os.FileInfo) sessionScan {
 	scanCache.Lock()
-	c, ok := scanCache.m[path]
-	scanCache.Unlock()
-	if ok && c.size == info.Size() && c.mod.Equal(info.ModTime()) && c.started.Equal(started) {
-		return c.scan
+	sc := scanCache.m[path]
+	if sc == nil || !sc.started.Equal(started) || info.Size() < sc.offset {
+		sc = newScanner(path, started)
+		scanCache.m[path] = sc
 	}
-	sc := scanSession(path, started)
-	scanCache.Lock()
-	scanCache.m[path] = cachedScan{size: info.Size(), mod: info.ModTime(), started: started, scan: sc}
 	scanCache.Unlock()
-	return sc
+	sc.mu.Lock()
+	defer sc.mu.Unlock()
+	if info.Size() != sc.size || !info.ModTime().Equal(sc.mod) {
+		sc.readMore()
+		sc.size, sc.mod = info.Size(), info.ModTime()
+	}
+	return sc.result()
 }
 
 // scanSession reads a transcript once for everything observing shows.
 func scanSession(path string, started time.Time) sessionScan {
-	var s sessionScan
-	f, err := os.Open(path)
+	sc := newScanner(path, started)
+	sc.readMore()
+	return sc.result()
+}
+
+// scanner reads a transcript a line at a time, from where it last stopped.
+type scanner struct {
+	mu      sync.Mutex
+	path    string
+	started time.Time
+	offset  int64 // past the last complete line read
+	size    int64
+	mod     time.Time
+	s       sessionScan
+	bg      *bgTracker
+	seen    map[string]bool
+	by      map[string]*ModelUsage
+	order   []string
+	pending map[string]string // tool use id -> tool name
+}
+
+func newScanner(path string, started time.Time) *scanner {
+	return &scanner{path: path, started: started, bg: newBgTracker(path, started), seen: map[string]bool{}, by: map[string]*ModelUsage{}}
+}
+
+// readMore reads the complete lines written since the last read; a line
+// still being written is left for the next.
+func (sc *scanner) readMore() {
+	f, err := os.Open(sc.path)
 	if err != nil {
-		return s
+		return
 	}
 	defer f.Close()
-	bg := newBgTracker(path, started)
-	seen := map[string]bool{}
-	by := map[string]*ModelUsage{}
-	var order []string
-	var pending map[string]string // tool use id -> tool name
-	sc := bufio.NewScanner(f)
-	sc.Buffer(make([]byte, 0, 1<<20), 64<<20)
-	for sc.Scan() {
-		line := sc.Bytes()
-		var rec struct {
-			Type              string          `json:"type"`
-			Timestamp         time.Time       `json:"timestamp"`
-			IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
-			Error             string          `json:"error"`
-			ToolUseResult     json.RawMessage `json:"toolUseResult"`
-			Message           json.RawMessage `json:"message"`
+	if _, err := f.Seek(sc.offset, io.SeekStart); err != nil {
+		return
+	}
+	br := bufio.NewReaderSize(f, 1<<20)
+	for {
+		line, err := br.ReadBytes('\n')
+		if err != nil {
+			return // EOF: a partial line waits
 		}
-		if json.Unmarshal(line, &rec) != nil {
-			continue
+		sc.offset += int64(len(line))
+		sc.line(line[:len(line)-1])
+	}
+}
+
+// line reads one record.
+func (sc *scanner) line(line []byte) {
+	s := &sc.s
+	var rec struct {
+		Type              string          `json:"type"`
+		Timestamp         time.Time       `json:"timestamp"`
+		IsAPIErrorMessage bool            `json:"isApiErrorMessage"`
+		Error             string          `json:"error"`
+		ToolUseResult     json.RawMessage `json:"toolUseResult"`
+		Message           json.RawMessage `json:"message"`
+	}
+	if json.Unmarshal(line, &rec) != nil {
+		return
+	}
+	sc.bg.feedRecord(line, rec.Type, rec.Timestamp, rec.Message, rec.ToolUseResult)
+	var msg struct {
+		ID      string          `json:"id"`
+		Model   string          `json:"model"`
+		Content json.RawMessage `json:"content"`
+		Usage   *struct {
+			Input      int64 `json:"input_tokens"`
+			Output     int64 `json:"output_tokens"`
+			CacheRead  int64 `json:"cache_read_input_tokens"`
+			CacheWrite int64 `json:"cache_creation_input_tokens"`
+		} `json:"usage"`
+	}
+	_ = json.Unmarshal(rec.Message, &msg)
+	var parts []struct {
+		Type      string `json:"type"`
+		Text      string `json:"text"`
+		ID        string `json:"id"`
+		Name      string `json:"name"`
+		ToolUseID string `json:"tool_use_id"`
+	}
+	_ = json.Unmarshal(msg.Content, &parts)
+	switch rec.Type {
+	case "assistant":
+		if rec.IsAPIErrorMessage {
+			if rec.Error != "rate_limit" {
+				for _, p := range parts {
+					if t := strings.TrimSpace(p.Text); p.Type == "text" && t != "" {
+						s.lastError = firstLine(t)
+					}
+				}
+			}
+			if rec.Error == "rate_limit" {
+				var text []string
+				for _, p := range parts {
+					if p.Type == "text" {
+						text = append(text, p.Text)
+					}
+				}
+				l := &UsageLimit{Text: strings.TrimSpace(strings.Join(text, " ")), At: rec.Timestamp}
+				l.Kind = limitKind(l.Text)
+				if t, ok := resetTime(l.Text, rec.Timestamp); ok {
+					l.Resets = t
+				}
+				s.limit, s.successAfterLimit = l, false
+			}
+			return
 		}
-		bg.feedRecord(line, rec.Type, rec.Timestamp, rec.Message, rec.ToolUseResult)
-		var msg struct {
-			ID      string          `json:"id"`
-			Model   string          `json:"model"`
-			Content json.RawMessage `json:"content"`
-			Usage   *struct {
-				Input      int64 `json:"input_tokens"`
-				Output     int64 `json:"output_tokens"`
-				CacheRead  int64 `json:"cache_read_input_tokens"`
-				CacheWrite int64 `json:"cache_creation_input_tokens"`
-			} `json:"usage"`
+		if msg.Model == syntheticModel {
+			return // the CLI's own filler ("No response requested."), not the model's
 		}
-		_ = json.Unmarshal(rec.Message, &msg)
-		var parts []struct {
-			Type      string `json:"type"`
-			Text      string `json:"text"`
-			ID        string `json:"id"`
-			Name      string `json:"name"`
-			ToolUseID string `json:"tool_use_id"`
+		if s.limit != nil {
+			s.successAfterLimit = true
 		}
-		_ = json.Unmarshal(msg.Content, &parts)
-		switch rec.Type {
-		case "assistant":
-			if rec.IsAPIErrorMessage {
-				if rec.Error != "rate_limit" {
-					for _, p := range parts {
-						if t := strings.TrimSpace(p.Text); p.Type == "text" && t != "" {
-							s.lastError = firstLine(t)
-						}
-					}
+		s.lastError = ""
+		if msg.Usage != nil && msg.Model != "" && msg.ID != "" && !sc.seen[msg.ID] {
+			sc.seen[msg.ID] = true
+			u := sc.by[msg.Model]
+			if u == nil {
+				u = &ModelUsage{Model: msg.Model}
+				sc.by[msg.Model], sc.order = u, append(sc.order, msg.Model)
+			}
+			u.InputTokens += msg.Usage.Input
+			u.OutputTokens += msg.Usage.Output
+			u.CacheReadTokens += msg.Usage.CacheRead
+			u.CacheWriteTokens += msg.Usage.CacheWrite
+		}
+		for _, p := range parts {
+			switch p.Type {
+			case "text":
+				if t := strings.TrimSpace(p.Text); t != "" {
+					s.lastText = lastLine(t)
+					sc.pending = nil
 				}
-				if rec.Error == "rate_limit" {
-					var text []string
-					for _, p := range parts {
-						if p.Type == "text" {
-							text = append(text, p.Text)
-						}
-					}
-					l := &UsageLimit{Text: strings.TrimSpace(strings.Join(text, " ")), At: rec.Timestamp}
-					l.Kind = limitKind(l.Text)
-					if t, ok := resetTime(l.Text, rec.Timestamp); ok {
-						l.Resets = t
-					}
-					s.limit, s.successAfterLimit = l, false
+			case "tool_use":
+				if sc.pending == nil {
+					sc.pending = map[string]string{}
 				}
-				continue
+				sc.pending[p.ID] = p.Name
 			}
-			if msg.Model == syntheticModel {
-				continue // the CLI's own filler ("No response requested."), not the model's
-			}
-			if s.limit != nil {
-				s.successAfterLimit = true
-			}
-			s.lastError = ""
-			if msg.Usage != nil && msg.Model != "" && msg.ID != "" && !seen[msg.ID] {
-				seen[msg.ID] = true
-				u := by[msg.Model]
-				if u == nil {
-					u = &ModelUsage{Model: msg.Model}
-					by[msg.Model], order = u, append(order, msg.Model)
+		}
+		if bytes.Contains(msg.Content, []byte("--bg")) {
+			s.bgLaunches = append(s.bgLaunches, claudeLaunches(msg.Content, rec.Timestamp)...)
+		}
+	case "user":
+		for _, p := range parts {
+			if p.Type == "tool_result" {
+				delete(sc.pending, p.ToolUseID)
+				if s.results == nil {
+					s.results = map[string]bool{}
 				}
-				u.InputTokens += msg.Usage.Input
-				u.OutputTokens += msg.Usage.Output
-				u.CacheReadTokens += msg.Usage.CacheRead
-				u.CacheWriteTokens += msg.Usage.CacheWrite
+				s.results[p.ToolUseID] = true
 			}
-			for _, p := range parts {
-				switch p.Type {
-				case "text":
-					if t := strings.TrimSpace(p.Text); t != "" {
-						s.lastText = lastLine(t)
-						pending = nil
-					}
-				case "tool_use":
-					if pending == nil {
-						pending = map[string]string{}
-					}
-					pending[p.ID] = p.Name
-				}
-			}
-			if bytes.Contains(msg.Content, []byte("--bg")) {
-				s.bgLaunches = append(s.bgLaunches, claudeLaunches(msg.Content, rec.Timestamp)...)
-			}
-		case "user":
-			for _, p := range parts {
-				if p.Type == "tool_result" {
-					delete(pending, p.ToolUseID)
-					if s.results == nil {
-						s.results = map[string]bool{}
-					}
-					s.results[p.ToolUseID] = true
-				}
-			}
-			if personSpoke(msg.Content, parts) {
-				// what the model asked before is answered
-				s.lastText = ""
-			}
+		}
+		if personSpoke(msg.Content, parts) {
+			// what the model asked before is answered
+			s.lastText = ""
 		}
 	}
-	for _, m := range order {
-		s.usage = append(s.usage, *by[m])
+}
+
+// result is what the lines read so far say.
+func (sc *scanner) result() sessionScan {
+	s := sc.s
+	s.usage = nil
+	for _, m := range sc.order {
+		s.usage = append(s.usage, *sc.by[m])
 	}
-	s.background = bg.open()
-	for _, name := range pending {
+	s.background = sc.bg.open()
+	s.pendingTools = nil
+	for _, name := range sc.pending {
 		if !strings.Contains(strings.Join(s.pendingTools, ","), name) {
 			s.pendingTools = append(s.pendingTools, name)
 		}
 	}
 	sort.Strings(s.pendingTools)
+	if sc.s.results != nil {
+		s.results = make(map[string]bool, len(sc.s.results))
+		for k, v := range sc.s.results {
+			s.results[k] = v
+		}
+	}
+	s.bgLaunches = append([]bgLaunch(nil), sc.s.bgLaunches...)
 	return s
 }
 
