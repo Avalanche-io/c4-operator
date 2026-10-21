@@ -267,7 +267,7 @@ func TestLoadIssues(t *testing.T) {
 	}))
 	defer srv.Close()
 	var out bytes.Buffer
-	if err := LoadIssues(context.Background(), Out{W: &out}, sc, srv.URL); err != nil {
+	if err := LoadIssues(context.Background(), Out{W: &out}, sc, srv.URL, ""); err != nil {
 		t.Fatal(err)
 	}
 	if got["as"] != "supervisor" || got["assignee"] != "artist" || !strings.Contains(out.String(), "#1 Light sm0150 for Thursday's review (by supervisor)") ||
@@ -276,7 +276,11 @@ func TestLoadIssues(t *testing.T) {
 	}
 	none := httptest.NewServer(http.NotFoundHandler())
 	defer none.Close()
-	if err := LoadIssues(context.Background(), Out{W: &out}, sc, none.URL); !errors.Is(err, ErrNoSandbox) {
+	// On a farm with an owner the issue is theirs, opened and assigned.
+	if err := LoadIssues(context.Background(), Out{W: &out}, sc, srv.URL, "noor"); err != nil || got["as"] != "noor" || got["assignee"] != "noor" {
+		t.Fatalf("an owner's farm sent %v: %v", got, err)
+	}
+	if err := LoadIssues(context.Background(), Out{W: &out}, sc, none.URL, ""); !errors.Is(err, ErrNoSandbox) {
 		t.Fatalf("no sandbox: %v", err)
 	}
 }

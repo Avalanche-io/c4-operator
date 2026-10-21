@@ -408,9 +408,14 @@ func submitStandIn(ctx context.Context, c *Client, clock Clock, scenario string,
 var ErrNoSandbox = errors.New("the local farm has no tracker to open issues in; `c4 farm up --tracker` adds one")
 
 // LoadIssues opens a scenario's issues in the stand-in GitHub, through
-// the HUD at hud, and prints what each does on the farm.
-func LoadIssues(ctx context.Context, o Out, sc Scenario, hud string) error {
+// the HUD at hud, and prints what each does on the farm. On a farm with an
+// owner, each is the owner's, opened by and assigned to them, so the whole
+// loop is one person's.
+func LoadIssues(ctx context.Context, o Out, sc Scenario, hud, owner string) error {
 	for _, is := range sc.Issues {
+		if owner != "" {
+			is.By, is.Assignee = owner, owner
+		}
 		body, err := json.Marshal(map[string]any{"as": is.By, "title": is.Title, "assignee": is.Assignee, "labels": is.Labels})
 		if err != nil {
 			return err

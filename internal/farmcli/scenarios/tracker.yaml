@@ -2,6 +2,8 @@
 # someone who would rather not click through the sandbox's page.
 #
 # The supervisor asks for sm0150's lighting and assigns it to the artist.
+# On a farm with an owner, the issue is the owner's instead, opened by and
+# assigned to them, so the whole loop is one person's.
 # The Tracker makes a job of it for the artist once the artist has let it
 # submit work for them (their page in the HUD); until then the sandbox
 # says so. The job is two short stand-in units and then the supervisor's
