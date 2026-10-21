@@ -1,1 +1,1 @@
-build github-7/3 by agent block, for joshua, under grant g-12, using joshua's sign-in, on laptop-1 (joshua's) and the queue (Avalanche, managed for Studio X)
+build github-7/3 by agent block, for kai, under grant g-12, using kai's sign-in, on laptop-1 (kai's) and the queue (Avalanche, managed for Studio X)

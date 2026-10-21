@@ -6,20 +6,20 @@
     "grade": "direct"
   },
   "for": {
-    "party": "joshua",
+    "party": "kai",
     "grade": "direct"
   },
   "using": [
     {
       "signIn": "saltmarsh/runner/laptop-1",
-      "holder": "joshua"
+      "holder": "kai"
     }
   ],
   "on": [
     {
       "deployment": "saltmarsh/runner/laptop-1",
       "binding": "c4125rcCGMbjcfGXhRJHPnd7TTpyWU4cppexRLNPqVmPJArS7ykSSU3PWFSRCL4tWpFoEZi4bUvGVM9ksqLAeG4mWf",
-      "owner": "joshua"
+      "owner": "kai"
     },
     {
       "deployment": "saltmarsh/component/queue",
