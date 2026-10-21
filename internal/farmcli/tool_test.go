@@ -13,10 +13,12 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/power"
 	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 	"github.com/Avalanche-io/c4-operator/schema"
 )
@@ -429,5 +431,33 @@ func TestTraceAFile(t *testing.T) {
 	verified = false
 	if err := Trace(context.Background(), c, Out{W: io.Discard}, "", "sm0140-render-v001", "render/sm0140.1024.exr"); err == nil {
 		t.Error("a record that does not verify passed")
+	}
+}
+
+// agent power writes the slots file each reading and prints a line only
+// when the slots change.
+func TestAgentPowerWritesTheSlotsFile(t *testing.T) {
+	f := filepath.Join(t.TempDir(), "slots")
+	readings := []power.Reading{{Percent: 30}, {Percent: 26}, {Percent: 24}, {Percent: 23}}
+	i := 0
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	read := func(context.Context) (power.Reading, error) {
+		r := readings[min(i, len(readings)-1)]
+		i++
+		if i == len(readings) {
+			cancel()
+		}
+		return r, nil
+	}
+	var out bytes.Buffer
+	if err := AgentPower(ctx, Out{W: &out}, PowerArgs{SlotsFile: f, Policy: power.DefaultPolicy(4), Every: time.Millisecond, Read: read}); err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(out.String(), "\n"); n != 2 || !strings.Contains(out.String(), "0 slots · battery 24%: stopped below 25%, resumes at 90%") {
+		t.Errorf("%d lines:\n%s", n, out.String())
+	}
+	if b, _ := os.ReadFile(f); string(b) != "0 battery 23%: stopped below 25%, resumes at 90%\n" {
+		t.Errorf("slots file %q", b)
 	}
 }

@@ -421,8 +421,20 @@ A run on the e2e cluster moved one session from a host to a pod and back, at saf
 The runner can lower the slots its machine offers, for example from the
 power headroom on a weak charger:
 - `c4-agent runner --slots-file <path>` reads one line, `N [why]`, written
-  by any power reader. `c4 farm agent`'s power duty will drive it
-  directly.
+  by any power reader.
+- `c4 farm agent power` is that reader for a laptop. It reads the battery
+  every minute and writes `~/.c4/agents/slots`, the file the runner reads
+  given `--slots-file ~/.c4/agents/slots`. Work stops when the battery,
+  not on power, falls below 25% (`--stop-below`). It resumes only once the
+  battery is back at 90% (`--resume-at`): a charger arriving at 30% doesn't
+  restart five agents that will run it flat again. On macOS a charger
+  counts only when power is arriving from it, so a loose plug that still
+  reads as attached doesn't hold the farm up. A machine with no battery
+  always offers `--slots`. `--once` reads and writes once, and prints what
+  it wrote:
+  ```
+  18:04 PDT  4 slots · battery 100%, on power → /Users/you/.c4/agents/slots
+  ```
 - The runner writes the node's `c4.avalanche.io/slot-limit` label and puts
   the reason in `c4.avalanche.io/capacity-reason`. The queue counts the
   node at that many slots, never more than its Pool's `slotsPerNode`.

@@ -24,6 +24,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
 	"github.com/Avalanche-io/c4-operator/internal/localfarm"
 	"github.com/Avalanche-io/c4-operator/internal/mcpserver"
+	"github.com/Avalanche-io/c4-operator/internal/power"
 )
 
 var version = "dev"
@@ -71,6 +72,7 @@ Trackers
   revoke NS/GRANT          take a grant back
 
 Agents
+  agent power              offer this machine's agent slots by its battery: stop below 25%, resume at 90% (--once to read it now)
   mcp                      serve the farm's tools to an agent over stdio
 
 Flags for every command: --farm NAME, --project NAME, --utc (times in UTC).
@@ -677,7 +679,25 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		return err
 
-	case "machine", "agent":
+	case "agent":
+		slotsFile := fs.String("slots-file", "", "the host runner's --slots-file (default ~/.c4/agents/slots)")
+		slots := fs.Int("slots", 4, "the slots to offer while work runs")
+		stopBelow := fs.Int("stop-below", 25, "stop work when the battery, not charging, falls below this percent")
+		resumeAt := fs.Int("resume-at", 90, "resume stopped work once the battery is back at this percent")
+		every := fs.Duration("every", time.Minute, "how often to read the battery")
+		once := fs.Bool("once", false, "read the battery, write the slots and stop")
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		if len(pos) != 1 || pos[0] != "power" {
+			return errors.New("usage: c4 farm agent power [--slots N] [--stop-below 25] [--resume-at 90] [--slots-file F] [--once]")
+		}
+		o := farmcli.Out{W: stdout, Clock: farmcli.Clock{UTC: cm.utc}}
+		return farmcli.AgentPower(ctx, o, farmcli.PowerArgs{SlotsFile: *slotsFile, Every: *every, Once: *once,
+			Policy: power.Policy{Slots: *slots, StopBelow: *stopBelow, ResumeAt: *resumeAt}})
+
+	case "machine":
 		return fmt.Errorf("%s is not in this build yet; `c4 farm up` makes a local farm, and `c4 farm login HUD-URL` signs in to a running one", cmd)
 	}
 	var names []string
