@@ -17,13 +17,18 @@ trap 'rm -rf "$STAGE"' EXIT
 
 python3 -I "$ROOT/hack/samples/saltmarsh.py" "$STAGE" --plates
 
+# the job images run as this machine's user, who owns the stage it
+# writes into (as 65532 they could not write a runner's folders), with a
+# HOME of their own
+AS="--user $(id -u):$(id -g) -e HOME=/tmp"
+
 # the marsh fog's .blend, built by Blender in the sim image
-docker run --rm --user 65532 -v "$STAGE/saltmarsh/sm0220_fx:/work" -w /work \
+docker run --rm $AS -v "$STAGE/saltmarsh/sm0220_fx:/work" -w /work \
   "$REG/c4-job-sim:$VERSION" blender -b --python fog_setup.py -- /work/fog.blend
 
 # style frames for the LoRA set: the sm0140 stage rendered small, one frame
 # per caption, in the hydra image
-docker run --rm --user 65532 -v "$STAGE:/samples" "$REG/c4-job-hydra:$VERSION" sh -euc '
+docker run --rm $AS -v "$STAGE:/samples" "$REG/c4-job-hydra:$VERSION" sh -euc '
   cd /samples/lora-saltmarsh/frames
   i=0
   for cap in style_*.txt; do
