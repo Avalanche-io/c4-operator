@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "/runner/",
+  "errors": [
+    {
+      "path": "using[0].signIn",
+      "message": "\"saltmarsh/component/queue\" is not a runner",
+      "fix": "write <farm>/runner/<name>: the host runner whose own sign-in was spent"
+    }
+  ]
+}

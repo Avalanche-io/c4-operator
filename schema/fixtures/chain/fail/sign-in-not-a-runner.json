@@ -1,0 +1,18 @@
+{
+  "act": "build",
+  "by": {
+    "person": "noor",
+    "grade": "direct"
+  },
+  "for": {
+    "party": "noor",
+    "grade": "direct"
+  },
+  "accountable": true,
+  "using": [
+    {
+      "signIn": "saltmarsh/component/queue",
+      "holder": "noor"
+    }
+  ]
+}

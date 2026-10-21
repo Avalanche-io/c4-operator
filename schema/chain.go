@@ -76,10 +76,13 @@ type Delegation struct {
 
 // Credential is one credential spent, and who holds it: a party, or a
 // subject that is not a party yet (which leaves the chain unaccountable).
+// SignIn is a person's own sign-in spent on a host runner, named by the
+// runner's deployment; no lease is made for it.
 type Credential struct {
 	Lease         string `json:"lease,omitempty"`
 	Licence       string `json:"licence,omitempty"`
 	Key           string `json:"key,omitempty"`
+	SignIn        string `json:"signIn,omitempty"`
 	Holder        string `json:"holder,omitempty"`
 	HolderSubject string `json:"holderSubject,omitempty"`
 }
@@ -196,10 +199,14 @@ func (c *Chain) Line(n Names) string {
 			case u.Key != "":
 				what = "key"
 			}
+			on := ""
+			if u.SignIn != "" {
+				on = " on " + dep(u.SignIn)
+			}
 			if u.Holder != "" {
-				us = append(us, party(u.Holder)+"'s "+what)
+				us = append(us, party(u.Holder)+"'s "+what+on)
 			} else {
-				us = append(us, "a "+what+" held by "+subject(u.HolderSubject))
+				us = append(us, "a "+what+" held by "+subject(u.HolderSubject)+on)
 			}
 		}
 		b.WriteString(", using " + and(us))

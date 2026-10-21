@@ -1,0 +1,20 @@
+# The tool format design's example, section 7.4, the farm's agent. Keep in step with it.
+c4: tool/1
+name: agent
+title: Claude Code
+summary: A Claude Code session works one task in your repository and hands back its change as a branch.
+kind: agent
+runs:
+  host:
+    has: [claude-code]
+    exe: {macos: c4-agent, linux: c4-agent, windows: c4-agent.exe}
+  image: c4/block
+  command: ["{{Run.Exe}}", block]
+params:
+- {name: task, type: STRING, userInterface: {control: MULTILINE_EDIT, label: Task}}
+- {name: model, type: STRING, default: "", show: advanced}
+- {name: effort, type: STRING, allowedValues: ["", low, medium, high, xhigh, max], default: "", show: advanced}
+- {name: allow, type: STRING, default: "Read Edit Write Glob Grep Bash(git:*)", show: advanced}
+needs: {network: [model-api]}
+reuse: never
+aiUsage: {model: "{{Param.model}}", task: "{{Param.task}}", oversight: the developer reviews the branch}

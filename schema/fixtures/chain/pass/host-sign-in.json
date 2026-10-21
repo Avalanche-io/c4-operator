@@ -1,0 +1,32 @@
+{
+  "act": "build",
+  "by": {
+    "unit": "textkit/port@5c1d7e/2",
+    "agent": "block",
+    "grade": "direct"
+  },
+  "for": {
+    "party": "joshua",
+    "grade": "direct"
+  },
+  "using": [
+    {
+      "signIn": "saltmarsh/runner/laptop-1",
+      "holder": "joshua"
+    }
+  ],
+  "on": [
+    {
+      "deployment": "saltmarsh/runner/laptop-1",
+      "binding": "c4125rcCGMbjcfGXhRJHPnd7TTpyWU4cppexRLNPqVmPJArS7ykSSU3PWFSRCL4tWpFoEZi4bUvGVM9ksqLAeG4mWf",
+      "owner": "joshua"
+    },
+    {
+      "deployment": "saltmarsh/component/queue",
+      "binding": "c45Gy9ZtiRXPiVYGnXjfAXCGyF2syDkNbwnZ4FPGRDWU7mBzUBtDFMm2VJ4DSSj2rY2Kx25g2WH5gzsA5RseHqHmLs",
+      "owner": "avalanche",
+      "runFor": "studio-x"
+    }
+  ],
+  "accountable": true
+}

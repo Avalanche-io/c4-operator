@@ -334,6 +334,11 @@
         "key": {
           "$ref": "#/$defs/id"
         },
+        "signIn": {
+          "type": "string",
+          "pattern": "^[a-z0-9][-a-z0-9.]*/runner/[^/\\s]+$",
+          "description": "A person's own sign-in spent on a host runner, named by the runner's deployment (<farm>/runner/<name>); no lease is made."
+        },
         "holder": {
           "$ref": "#/$defs/party"
         },
@@ -357,6 +362,11 @@
         {
           "required": [
             "key"
+          ]
+        },
+        {
+          "required": [
+            "signIn"
           ]
         }
       ],

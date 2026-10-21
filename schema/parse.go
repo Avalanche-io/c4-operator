@@ -784,6 +784,8 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		}
 	case "pattern chain by.deployment", "pattern chain on[].deployment":
 		return fmt.Sprintf("%s is not a deployment", quote(v)), "write <farm>/<kind>/<name>, kind one of component, node, runner, sync or import"
+	case "pattern chain using[].signIn":
+		return fmt.Sprintf("%s is not a runner", quote(v)), "write <farm>/runner/<name>: the host runner whose own sign-in was spent"
 	case "oneOf chain using[]":
 		return "a credential names who holds it", "add holder: (a party), or holderSubject: (who holds it, when not a party yet)"
 	case "pattern chain for.party":
