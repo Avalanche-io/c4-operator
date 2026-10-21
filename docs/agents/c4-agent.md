@@ -74,6 +74,12 @@ Each session gets:
   `stopped` when its session stopped first), and what it has used. A
   finished worker is listed for an hour; older ones are counted on its
   session's row (`workersDone`).
+- **the background sessions it started:** one started with `claude --bg`
+  through a session's Bash tool is listed after that session, with it as
+  `parent` and `parentClaimed: true`. Nothing records which session a launch
+  started, so the link is a match: a launch within 30 seconds before the
+  session started, the one that names it (`-n`, `--name`) when there are
+  several, and none when it is unclear.
 
 Without `--all` it lists the sessions that are running, and the ones that
 failed within the last day; an older failure is at rest. `--json` gives the same rows, with the machine's name, for a program

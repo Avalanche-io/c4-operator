@@ -2,6 +2,7 @@ package agent
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -140,6 +141,7 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 	}()
 	out = make([]Observed, len(keep))
 	workers := make([][]Observed, len(keep))
+	scans := make([]sessionScan, len(keep))
 	var wg sync.WaitGroup
 	work := make(chan int)
 	for w := 0; w < min(4, len(keep)); w++ {
@@ -150,7 +152,8 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 				out[i] = observe(configDir, keep[i], now)
 				if tr := out[i].Transcript; tr != "" {
 					if info, err := os.Stat(tr); err == nil {
-						workers[i] = workersOf(&out[i], scanSessionCached(tr, keep[i].Started(), info), now, all)
+						scans[i] = scanSessionCached(tr, keep[i].Started(), info)
+						workers[i] = workersOf(&out[i], scans[i], now, all)
 					}
 				}
 			}
@@ -178,10 +181,34 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 		}
 		return out[i].Name < out[j].Name
 	})
-	// each session's workers right after it
+	bySession := map[string]sessionScan{}
+	for i := range out {
+		bySession[out[i].Session] = scans[i]
+	}
+	claimParents(out, bySession)
+	// each session's workers right after it, then the sessions it started
 	rows := make([]Observed, 0, len(out))
-	for _, i := range idx {
+	placed := map[int]bool{}
+	var place func(i int)
+	place = func(i int) {
+		if placed[i] {
+			return
+		}
+		placed[i] = true
 		rows = append(append(rows, out[i]), workers[i]...)
+		for _, j := range idx {
+			if out[j].Parent == out[i].Session {
+				place(j)
+			}
+		}
+	}
+	for _, i := range idx {
+		if out[i].Parent == "" {
+			place(i)
+		}
+	}
+	for _, i := range idx {
+		place(i) // a claimed parent that is not listed
 	}
 	return rows, nil
 }
@@ -311,6 +338,7 @@ type sessionScan struct {
 	lastError         string          // the first line of an API error since its last words
 	pendingTools      []string        // tools called at the end with no result yet
 	results           map[string]bool // tool calls that have their result
+	bgLaunches        []bgLaunch      // claude --bg commands it ran
 }
 
 var scanCache = struct {
@@ -447,6 +475,9 @@ func scanSession(path string, started time.Time) sessionScan {
 					}
 					pending[p.ID] = p.Name
 				}
+			}
+			if bytes.Contains(msg.Content, []byte("--bg")) {
+				s.bgLaunches = append(s.bgLaunches, claudeLaunches(msg.Content, rec.Timestamp)...)
 			}
 		case "user":
 			for _, p := range parts {

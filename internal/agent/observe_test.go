@@ -236,3 +236,41 @@ func TestObserveWorkers(t *testing.T) {
 		t.Errorf("with --all: %d rows", len(all))
 	}
 }
+
+// A background session a lead started with `claude --bg` through its Bash
+// tool is listed after the lead, its link claimed: the launch is within
+// seconds before it started, and names it. One started long before any
+// launch has no parent.
+func TestObserveClaimsTheLeadOfABackgroundSession(t *testing.T) {
+	e := newEnv(t)
+	now := time.Now()
+	launch := now.Add(-10 * time.Minute)
+	const lead, port, other = "ffffffff-0000-4000-8000-000000000001", "ffffffff-0000-4000-8000-000000000002", "ffffffff-0000-4000-8000-000000000003"
+	e.transcript(lead, fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"m1","model":"opus","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"cd ~/src/shop && claude --bg -n port-notes \"port the notes\""}}]}}`+"\n", launch.UTC().Format(time.RFC3339Nano)))
+	e.transcript(port, `{"type":"assistant","message":{"id":"p1","model":"opus","content":[{"type":"text","text":"porting"}]}}`+"\n")
+	e.transcript(other, `{"type":"assistant","message":{"id":"o1","model":"opus","content":[{"type":"text","text":"earlier"}]}}`+"\n")
+	e.fake.active[lead] = Active{SessionID: lead, Name: "shop-lead", Kind: "interactive", Status: "idle", Cwd: e.cwd, StartedAt: now.Add(-time.Hour).UnixMilli()}
+	e.fake.active[port] = Active{SessionID: port, Name: "port-notes", Kind: "background", Status: "idle", Cwd: e.cwd, StartedAt: launch.Add(3 * time.Second).UnixMilli()}
+	e.fake.active[other] = Active{SessionID: other, Name: "older", Kind: "background", Status: "idle", Cwd: e.cwd, StartedAt: now.Add(-2 * time.Hour).UnixMilli()}
+
+	obs, err := e.h.Observe(context.Background(), e.configDir, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pos := map[string]int{}
+	for i, o := range obs {
+		pos[o.Session] = i
+	}
+	if p := obs[pos[port]]; p.Parent != lead || !p.ParentClaimed {
+		t.Errorf("port-notes: parent %q claimed %v", p.Parent, p.ParentClaimed)
+	}
+	if pos[port] != pos[lead]+1 {
+		t.Errorf("port-notes is not right after its lead: %v", pos)
+	}
+	if o := obs[pos[other]]; o.Parent != "" {
+		t.Errorf("an older session was given a parent: %q", o.Parent)
+	}
+	if got := claudeLaunches([]byte(`[{"type":"tool_use","name":"Bash","input":{"command":"claude --bg --name='a b' x; echo claude"}}]`), launch); len(got) != 1 || got[0].Name != "a b" {
+		t.Errorf("launches %+v", got)
+	}
+}

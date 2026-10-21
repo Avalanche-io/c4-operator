@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -157,4 +158,84 @@ func (s sessionScan) openBackground(toolUseID string) bool {
 		}
 	}
 	return false
+}
+
+// A background session a lead starts runs `claude --bg ...` through its
+// Bash tool. Neither the transcript nor the CLI records which session that
+// call started, so the link is a match: a launch within launchMatch before
+// the session started, the one naming it (-n or --name) when several do.
+// Its row says so (ParentClaimed).
+
+// launchMatch is how long before a background session started a lead's
+// launch may be, to be taken for its start.
+const launchMatch = 30 * time.Second
+
+type bgLaunch struct {
+	At   time.Time
+	Name string // its -n or --name, when it gives one
+}
+
+var claudeBg = regexp.MustCompile(`(?:^|[\s;&|(])claude\s[^;&|]*--bg\b`)
+var launchName = regexp.MustCompile(`(?:-n|--name)(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))`)
+
+// claudeLaunches are the claude --bg commands in an assistant message's
+// Bash calls.
+func claudeLaunches(content json.RawMessage, at time.Time) []bgLaunch {
+	var parts []struct {
+		Type  string `json:"type"`
+		Name  string `json:"name"`
+		Input struct {
+			Command string `json:"command"`
+		} `json:"input"`
+	}
+	if json.Unmarshal(content, &parts) != nil {
+		return nil
+	}
+	var out []bgLaunch
+	for _, p := range parts {
+		if p.Type != "tool_use" || p.Name != "Bash" {
+			continue
+		}
+		for _, loc := range claudeBg.FindAllStringIndex(p.Input.Command, -1) {
+			l := bgLaunch{At: at}
+			if m := launchName.FindStringSubmatch(p.Input.Command[loc[0]:]); m != nil {
+				l.Name = m[1] + m[2] + m[3]
+			}
+			out = append(out, l)
+		}
+	}
+	return out
+}
+
+// claimParents links each background session the CLI lists with no parent
+// to the session whose launch most likely started it.
+func claimParents(rows []Observed, scans map[string]sessionScan) {
+	for i := range rows {
+		b := &rows[i]
+		if b.Parent != "" || b.Kind != "background" || b.StartedAt == nil {
+			continue
+		}
+		var named, near []string
+		for session, sc := range scans {
+			if session == b.Session {
+				continue
+			}
+			for _, l := range sc.bgLaunches {
+				d := b.StartedAt.Sub(l.At)
+				if d < -5*time.Second || d > launchMatch {
+					continue
+				}
+				near = append(near, session)
+				if l.Name != "" && l.Name == b.Name {
+					named = append(named, session)
+				}
+			}
+		}
+		switch {
+		case len(named) == 1:
+			b.Parent, b.ParentClaimed = named[0], true
+		case len(named) == 0 && len(near) == 1:
+			b.Parent, b.ParentClaimed = near[0], true
+		}
+	}
 }
