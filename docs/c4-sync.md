@@ -68,10 +68,11 @@ any of the local farm's people: you open an issue labeled `c4` and assign
 it, you play the agent that opens the pull request, and you approve the
 pull request or request changes. Each step says what it does to the farm.
 The issue's job is submitted once its assignee has let the Tracker submit
-work for them on their own page in the HUD. The supervisor's review is the
-job's last wait, so the job is done when the pull request is approved. A
-request for changes makes the job's next version. `c4 farm samples load
-tracker` opens an issue for you.
+work for them on their own page in the HUD. The page acts as the farm's
+owner unless told otherwise, and the owner's review is the job's last wait
+(the supervisor's, on a farm with no owner), so the job is done when the
+pull request is approved. A request for changes makes the job's next
+version. `c4 farm samples load tracker` opens an issue for you.
 
 ## Install
 

@@ -98,3 +98,34 @@ func TestSyncImageIsReplaced(t *testing.T) {
 		t.Fatalf("replaced:\n%s", got)
 	}
 }
+
+// On a farm with an owner, the sandbox acts as the owner first, maps the
+// owner's login, and the owner reviews: the one person serves every wait.
+func TestSandboxOwner(t *testing.T) {
+	objs, err := TrackerObjects(Options{Owner: "noor"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, o := range objs {
+		switch o["kind"] {
+		case "Deployment":
+			args := strings.Join(o["spec"].(obj)["template"].(obj)["spec"].(obj)["containers"].([]obj)[0]["args"].([]string), " ")
+			if !strings.Contains(args, "--people=noor=noor,artist=artist,") {
+				t.Fatalf("args %s", args)
+			}
+		case "Tracker":
+			b, _ := json.Marshal(o)
+			var tr c4v1.Tracker
+			if err := json.Unmarshal(b, &tr); err != nil {
+				t.Fatal(err)
+			}
+			if tr.Spec.People["noor"] != "noor" || len(tr.Spec.People) != len(Viewers)+1 || tr.Spec.Intake[0].Job.Review.Server != "person:noor" {
+				t.Fatalf("tracker %+v review %+v", tr.Spec.People, tr.Spec.Intake[0].Job.Review)
+			}
+		}
+	}
+	_, people := sandboxPeople("artist")
+	if len(people) != len(Viewers) {
+		t.Fatalf("an owner named as a role is listed twice: %v", people)
+	}
+}

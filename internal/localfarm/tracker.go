@@ -39,7 +39,8 @@ const (
 	sandboxSecret = "c4-sandbox-local-hook"
 	// syncViewer is c4-sync's sign-in on a development farm's HUD.
 	syncViewer = c4v1.SyncDevViewer + "@wrangler=" + Project
-	// sandboxReviewer is who a sandbox job's review waits for.
+	// sandboxReviewer is who a sandbox job's review waits for on a farm
+	// with no owner; on a farm with one, the owner reviews.
 	sandboxReviewer = "supervisor"
 )
 
@@ -48,22 +49,38 @@ func SandboxPage(hud, person string) string {
 	return strings.TrimSuffix(hud, "/") + sandbox.Prefix + "?as=" + person
 }
 
-// sandboxPeople are the sandbox's logins: each of the local farm's
-// people, by the same name.
-func sandboxPeople() (flag string, people obj) {
+// sandboxPeople are the sandbox's logins: the farm's owner first, whom
+// the page acts as unless told otherwise, then each of the local farm's
+// roles, each by the same name.
+func sandboxPeople(owner string) (flag string, people obj) {
+	vs := Viewers
+	if owner != "" {
+		vs = append([]Viewer{OwnerViewer(owner)}, Viewers...)
+	}
 	var parts []string
 	people = obj{}
-	for _, v := range Viewers {
+	for _, v := range vs {
+		if _, ok := people[v.Name]; ok {
+			continue
+		}
 		parts = append(parts, v.Name+"="+v.Name)
 		people[v.Name] = v.Name
 	}
 	return strings.Join(parts, ","), people
 }
 
+// sandboxReviewerOf is who reviews a sandbox job: the farm's one person
+// where it has an owner, else the supervisor.
+func sandboxReviewerOf(o Options) string {
+	if o.Owner != "" {
+		return o.Owner
+	}
+	return sandboxReviewer
+}
+
 // SandboxJob is the job an issue becomes: two stand-in units, then the
-// job's own review, by the supervisor, which the pull request's review
-// serves.
-func SandboxJob() (c4v1.WorkJobSpec, error) {
+// job's own review, by reviewer, which the pull request's review serves.
+func SandboxJob(reviewer string) (c4v1.WorkJobSpec, error) {
 	pod, err := jobspec.Pod(jobspec.Container{Image: farmcli.StandInImage, Command: []string{"sh", "-euc"},
 		Args: []string{`echo "frames $C4_FRAMES: a stand-in for the issue's work"; sleep 20`}})
 	if err != nil {
@@ -71,17 +88,17 @@ func SandboxJob() (c4v1.WorkJobSpec, error) {
 	}
 	return c4v1.WorkJobSpec{Class: "render", Pools: []string{"cpu"}, Template: pod,
 		Params: map[string]string{"frames": "1001-1004", "chunk": "2", "estimateSeconds": "20"},
-		Review: &c4v1.WorkReviewSpec{Server: "person:" + sandboxReviewer, Choices: []string{"approve", "rework"},
+		Review: &c4v1.WorkReviewSpec{Server: "person:" + reviewer, Choices: []string{"approve", "rework"},
 			Ask: "Is the work for this issue ready?"}}, nil
 }
 
 // TrackerObjects are what --tracker adds after c4-sync is installed.
 func TrackerObjects(o Options) ([]obj, error) {
-	job, err := SandboxJob()
+	job, err := SandboxJob(sandboxReviewerOf(o))
 	if err != nil {
 		return nil, err
 	}
-	logins, people := sandboxPeople()
+	logins, people := sandboxPeople(o.Owner)
 	labels := obj{"app.kubernetes.io/name": sandboxName}
 	ctr := obj{"name": "sandbox", "image": "c4-sync", "command": []string{"/c4-sandbox-github"},
 		"args": []string{"--repo=" + SandboxRepo, "--people=" + logins, "--url=" + sandboxURL,
