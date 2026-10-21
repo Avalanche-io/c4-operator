@@ -1,0 +1,52 @@
+c4: tool/1
+name: katana-render
+title: Katana render
+summary: Renders one Render node of a saved Katana project over the job's frames with katana --batch, in the studio's own Katana image.
+kind: frames
+runs:
+  # The studio's own Katana image, with its renderer's plug-in: set this to it before publishing.
+  image: registry.example.com/katana:8.0
+  exe: python3
+  host:
+    has: [katana-8.0]
+    exe: {linux: python3, windows: py}
+  # katana_render.py runs katana --batch --katana-file=... --render-node=... -t ...
+  # and reports each frame's image.
+  command: ["{{Run.Exe}}", "{{Tool.Dir}}/katana_render.py", "{{Param.scene}}", "--node={{Param.node}}", "--threads={{Param.threads}}"]
+frames: {chunk: 4, order: binary}
+params:
+- name: scene
+  type: PATH
+  objectType: FILE
+  dataFlow: IN
+  description: The saved Katana project. A .py is run by Katana's script mode to build the project first, as the test does.
+  show: artist
+  from: scene.file
+  userInterface: {control: CHOOSE_INPUT_FILE, label: Project, fileFilters: [{label: Katana projects, patterns: ["*.katana"]}, {label: Project builder, patterns: ["*.py"]}]}
+- name: node
+  type: STRING
+  minLength: 1
+  description: The Render node to render, by name. Each ticked Render node is its own job.
+  show: artist
+  from: scene.renderables
+  userInterface: {control: LINE_EDIT, label: Render node}
+- name: threads
+  type: INT
+  default: 0
+  minValue: 0
+  maxValue: 128
+  description: The renderer's threads (--threads3d); 0 leaves them to the project.
+  show: advanced
+  affectsOutput: false
+  userInterface: {control: SPIN_BOX, label: Threads}
+previews: "**/*.$F4.exr"
+# A ceiling until a measured run says otherwise. When the farm counts
+# licence seats, add licences for Katana and its renderer and network: [licences].
+needs: {cpu: 16, memory: 64G}
+retries: 2
+reuse: exact
+test:
+  tree: test/
+  frames: 1001-1002
+  with: {scene: katana/build_project.py, node: Render_test}
+  expect: [render/test.1001.exr, render/test.1002.exr]

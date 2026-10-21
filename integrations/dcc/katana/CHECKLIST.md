@@ -126,7 +126,8 @@ added" in the terminal.
    `Render_` is dropped), named `sm0140-render-shadow-v001` by the farm.
    **[guess]** that the tool's `katana --batch --katana-file=...
    --render-node=Render_shadow -t 1001-1004` renders that node on the farm.
-   That is the tool's to get right, not the plug-in's.
+   That is the tool's to get right, not the plug-in's: see the
+   katana-render tool below.
 
 ## Check
 
@@ -190,10 +191,18 @@ For each item, press Check and Show file.
    **[guess]** that Katana resolves relative asset paths the same way. A
    studio asset resolver (asset IDs that are not paths) is not resolved, so
    those files are reported missing.
-6. **Known limits.** A USD stage's sublayers and references, the textures
-   inside a look file, and files an expression names on frames after the
-   first are not collected. Note any that a real project needs.
-7. **A large project** (thousands of nodes). **Expect:** ticking boxes stays
+6. **A USD stage's own files.** Point `marsh_usd` at a `.usda` that
+   sublayers a second layer, references a `.usd` and names a `<UDIM>`
+   texture. **Expect:** all of them collected, for both Render nodes (as
+   the marsh is), and the fog stage's files for Render_beauty only.
+   **[guess]** that Katana's Python has `pxr`, so USD's own resolver
+   follows binary layers too. Without it, a binary `.usd` layer is sent
+   and the check warns "… is binary USD and USD's Python is not available
+   here, so what it reads in turn was not collected".
+7. **Known limits.** The textures inside a look file, a live group's own
+   contents and files an expression names on frames after the first are
+   not collected. Note any that a real project needs.
+8. **A large project** (thousands of nodes). **Expect:** ticking boxes stays
    instant and Check starts within a few seconds. Each read walks every
    node's parameters.
 
@@ -208,3 +217,49 @@ For each item, press Check and Show file.
 3. Press **Submit**. **Expect:** a progress dialog "Submitting to the farm",
    then "Submitted to the farm:" with both jobs and how many files were sent.
    With the fake farm, `farm.submitted()` shows one submission with two jobs.
+
+## The katana-render tool (each one a [guess] about Katana's command line)
+
+Run these on the studio's Katana image (or a render machine) after setting
+`runs.image` in `tools/katana-render/tool.yaml`. `c4 farm tool test
+tools/katana-render` runs the tool's test as a unit runs it.
+
+1. **The test.** **Expect:** `c4 farm tool test` passes, with
+   `render/test.1001.exr` and `test.1002.exr` written and two `c4_frame:`
+   lines in the log. **[guess]** that `katana --script=build_project.py
+   OUT.katana` runs the script with `OUT.katana` last in `sys.argv`, and
+   that its calls build the project: `PrimitiveCreate` and `CameraCreate`
+   (with `transform.translate.z`), a `Merge` with named input ports, a
+   `RenderSettings` with `args.renderSettings.renderer` = `dl` (the
+   3Delight that Katana ships) and `cameraName`, a `RenderOutputDefine`
+   whose `locationType` is `file` and `renderLocation` is
+   `…/render/test.#.exr` (after `checkDynamicParameters()`), and a Render
+   node renamed `Render_test`. A parameter that is not there stops the
+   build with its name; fix `build_project.py` to match.
+2. **Python 3 to run the script.** **[guess]** that the studio's Katana
+   image has `python3` on the PATH (and a Windows render machine `py`).
+   If it does not, point `runs.exe` (and `runs.host.exe`) at a Python 3 the
+   image has; the script uses only the standard library.
+3. **The batch command.** **[guess]** that `katana --batch
+   --katana-file=<project> --render-node=<node> -t 1001-1004` renders that
+   Render node over those frames, and that `-t` also takes
+   `1001,1004,1007` for a stepped run. **[guess]** that `--threads3d=N`
+   sets the renderer's threads. **[guess]** that `$KATANA_ROOT/katana` is
+   the launcher (`katana.bat` on Windows).
+4. **Which frames are done.** **Expect** a `c4_frame:` line per frame.
+   Note the line Katana's log gives for each image it writes; the script
+   takes any absolute image path in the log that was written during the
+   run, and finds the rest under the job's tree when the batch ends.
+   Katana renders to a temporary folder and copies each output to its
+   render location; **[guess]** that the copy is done before the next
+   frame starts.
+5. **A failed render.** Break a texture path and render. **Expect:** the
+   unit fails. **[guess]** that `katana --batch` exits non-zero when a frame
+   fails. If it exits 0, the frame with no image still fails the unit.
+   Note the exact messages for a missing asset and a missing licence, and
+   add them to the tool's `errors.permanent` and `errors.licence`.
+6. **Path mapping.** Submit from a Windows machine whose project folder is
+   `S:\show`. **Expect:** the render reads its files under the job's tree.
+   **[guess]** that a `.katana` file is XML text (or gzipped XML) holding
+   each path as written, so a copy with the farm's paths in their place
+   renders the same project.

@@ -22,10 +22,7 @@ def Xform "marsh" (
 '''
 
 
-@pytest.fixture(autouse=True)
-def _no_pxr(monkeypatch):
-    # As in a Katana without USD's Python: the text layers are read here.
-    monkeypatch.setattr(usdlib, "_with_pxr", lambda path: None)
+# conftest reads USD files as text, as a Katana without USD's Python would.
 
 
 def marsh_files(show):
@@ -74,6 +71,17 @@ def test_no_usd_no_warnings_and_a_missing_stage_reads_nothing(tmp_path):
     deps = host.dependencies()
     assert not [d for d in deps if " > " in d.node], "the fixture's stages read nothing in turn; a missing one neither"
     assert host.warnings() == []
+
+
+def test_a_stage_usds_resolver_cannot_open_is_read_as_text(tmp_path, monkeypatch):
+    host, _, _ = light_project(tmp_path)
+    marsh_files(str(tmp_path))
+
+    def broken(path):
+        raise RuntimeError("Failed to open layer")
+    monkeypatch.setattr(usdlib, "_with_pxr", broken)
+    via = [d for d in host.dependencies() if d.node == "marsh_usd.fileName > marsh_set.usda"]
+    assert len(via) == 4, "the check goes on with what the text says"
 
 
 def test_the_warning_is_shown_with_the_check(tmp_path):

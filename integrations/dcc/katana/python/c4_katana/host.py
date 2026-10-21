@@ -64,7 +64,11 @@ def usd_dependencies(path: str, label: str, renderables: Optional[List[str]]) ->
     nothing here."""
     if not path.lower().endswith(USD_LAYERS) or seq.has_frames(path) or not os.path.isfile(path):
         return [], []
-    deps, unread = usdlib.dependencies(path, node=f"{label} > {os.path.basename(path)}")
+    node = f"{label} > {os.path.basename(path)}"
+    try:
+        deps, unread = usdlib.dependencies(path, node=node)
+    except Exception:  # noqa: BLE001 - USD's resolver raises on a layer it cannot open; read the text instead
+        deps, unread = usdlib.dependencies(path, node=node, use_pxr=False)
     for d in deps:
         d.renderables = None if renderables is None else list(renderables)
     return deps, unread
