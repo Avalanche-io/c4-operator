@@ -93,10 +93,24 @@ this folder's Go package (`dcc`), which carries every panel's files and
 `c4submit` inside `c4 farm` itself, so no checkout and no Python install is
 needed.
 
-- **Finding them** reads files only: application bundles' `Info.plist`s in
-  `/Applications`, `~/Applications` and Steam's library on macOS, Epic's
-  `LauncherInstalled.dat` for Unreal, and the usual install folders on
-  Linux and Windows. It never starts an application.
+- **Finding them** reads files and folder names only, and runs nothing:
+  - **Blender:** on macOS, the `CFBundleShortVersionString` in each
+    `Blender*.app`'s `Info.plist` (XML or binary) in `/Applications`,
+    `~/Applications` and Steam's library. If the plist can't be read, the
+    bundle's `Contents/Resources/<major.minor>` folder gives the version. On
+    Linux and Windows, the `<major.minor>` folder inside each install folder
+    and inside Steam's `Blender` folder.
+  - **Unreal:** the engines (`UE_<major.minor>` entries whose folder exists)
+    in the Epic Games Launcher's `LauncherInstalled.dat`. Plug-in entries
+    are skipped.
+  - **Houdini, Maya, Nuke and Katana:** the install folders' names
+    (`Houdini21.0.440`, `hfs21.0.440`, `maya2025`, `Nuke15.1v3`,
+    `Katana8.0v1`) in the usual places for each system. Katana is not looked
+    for on macOS, because it isn't made for it.
+
+  A later version may deliberately run an application's own command-line
+  entry point (`hython`, `mayapy`) for a version a folder name can't give.
+  That would be done only after a test on a real machine.
 - **On** shows each file it would write and asks first. The panel goes in
   `~/.c4/integrations/<name>/`, and the application gets a small pointer in
   a folder it already reads:
