@@ -461,3 +461,25 @@ func TestAgentPowerWritesTheSlotsFile(t *testing.T) {
 		t.Errorf("slots file %q", b)
 	}
 }
+
+// ls keeps finished jobs out of the queue, but says they are there and
+// how to take the newest home.
+func TestLsSaysWhatFinished(t *testing.T) {
+	now := time.Date(2026, 10, 20, 17, 0, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(api.Snapshot{Jobs: []api.Job{
+			{Namespace: "saltmarsh", Name: "sm0140-render-v001", Phase: "Succeeded", CreatedAt: now},
+			{Namespace: "saltmarsh", Name: "sm0140-notes-v001", Phase: "Succeeded", CreatedAt: now.Add(time.Minute)},
+		}})
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
+	var out bytes.Buffer
+	if err := Ls(context.Background(), c, Out{W: &out}, LsArgs{}); err != nil {
+		t.Fatal(err)
+	}
+	want := "no jobs waiting or running\n2 jobs finished (c4 farm ls --all lists them); the newest, saltmarsh/sm0140-notes-v001, finished: c4 farm get sm0140-notes-v001 DIR\n"
+	if !strings.HasSuffix(out.String(), want) {
+		t.Errorf("ls:\n%s", out.String())
+	}
+}

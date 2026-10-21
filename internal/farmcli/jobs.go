@@ -89,8 +89,9 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 	}
 	tw := tabwriter.NewWriter(o.W, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "RUN\tJOB\tDONE\tREADY\tDEADLINE\tSLACK\tOWNER")
-	n := 0
-	for _, j := range s.Jobs {
+	n, finished := 0, 0
+	var latest *api.Job
+	for i, j := range s.Jobs {
 		if a.Project != "" && j.Project != a.Project {
 			continue
 		}
@@ -98,6 +99,10 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 			continue
 		}
 		if !a.All && (j.Phase == "Succeeded" || j.Phase == "Failed") {
+			if latest == nil || j.CreatedAt.After(latest.CreatedAt) {
+				latest = &s.Jobs[i]
+			}
+			finished++
 			continue
 		}
 		late := j.Estimate.SlackSeconds < 0 || !j.Estimate.Feasible
@@ -128,7 +133,15 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 	}
 	tw.Flush()
 	if n == 0 {
-		o.printf("no jobs\n")
+		o.printf("no jobs waiting or running\n")
+	}
+	if latest != nil {
+		verb := "finished"
+		if latest.Phase == "Failed" {
+			verb = "failed"
+		}
+		o.printf("%s finished (c4 farm ls --all lists them); the newest, %s/%s, %s: c4 farm get %s DIR\n",
+			plural(finished, "job", "jobs"), latest.Namespace, latest.Name, verb, latest.Name)
 	}
 	return nil
 }
