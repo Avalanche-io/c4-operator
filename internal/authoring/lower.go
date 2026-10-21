@@ -189,8 +189,9 @@ func ToolRefusals(t *Tool) []Error {
 	var errs []Error
 	add := func(fix, format string, args ...any) { errs = append(errs, errf("tool", fix, format, args...)) }
 	n := t.Needs
-	if t.Kind != "frames" && t.Kind != "once" {
-		add("use a frames or once tool for now", "this farm cannot run %s tools yet", t.Kind)
+	agent := t.Kind == "agent"
+	if t.Kind != "frames" && t.Kind != "once" && !agent {
+		add("use a frames, once or agent tool for now", "this farm cannot run %s tools yet", t.Kind)
 	}
 	if len(n.Licences) > 0 {
 		add("use a version of the tool that declares none for now", "%s needs licences (%s), which this farm cannot count yet", t.Name, strings.Join(sortedKeys(n.Licences), ", "))
@@ -211,7 +212,7 @@ func ToolRefusals(t *Tool) []Error {
 	if n.Farm != "" {
 		add("use a version of the tool that does not for now", "%s acts on the farm (%s), which this farm cannot grant yet", t.Name, n.Farm)
 	}
-	if t.Runs.Image == "" {
+	if t.Runs.Image == "" && !agent {
 		add("use a version of the tool with an image for now", "%s runs only on hosts, which this farm cannot reach yet", t.Name)
 	}
 	return errs

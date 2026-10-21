@@ -29,8 +29,8 @@ func QueueDryRun(q *queue.Queue) DryRunFunc {
 // QueueDryRunAll plans drafts together with the work queue
 // (queue.DryRunAll), for Server.DryRunAll.
 func QueueDryRunAll(q *queue.Queue) DryRunAllFunc {
-	return func(ctx context.Context, jobs []*c4v1.WorkJob, project string, views map[string]string) ([]api.SubmitEstimate, error) {
-		ds, err := q.DryRunAll(ctx, jobs, project, views)
+	return func(ctx context.Context, jobs []*c4v1.WorkJob, project string, views map[string]string, tables map[string][]byte) ([]api.SubmitEstimate, error) {
+		ds, err := q.DryRunTables(ctx, jobs, project, views, tables)
 		switch {
 		case errors.Is(err, queue.ErrNoPlan):
 			return nil, fmt.Errorf("%w: %v", ErrNotPlanned, err)

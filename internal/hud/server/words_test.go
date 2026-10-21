@@ -55,7 +55,7 @@ func TestSubmissionWords(t *testing.T) {
 			t.Errorf("%v: %+v (%d)", c.err, fe.FieldError, fe.code)
 		}
 	}
-	s.DryRunAll = func(context.Context, []*c4v1.WorkJob, string, map[string]string) ([]api.SubmitEstimate, error) {
+	s.DryRunAll = func(context.Context, []*c4v1.WorkJob, string, map[string]string, map[string][]byte) ([]api.SubmitEstimate, error) {
 		return nil, errors.New("queue: view sm0140 has 3 units in pool cpu-show-a")
 	}
 	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()

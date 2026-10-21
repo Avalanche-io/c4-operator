@@ -1527,6 +1527,15 @@ and a sweep planner that spawns trials are all generators.
   ingests it, and reports its ID in a pod annotation, so children can start
   before the generator ends. No unit table travels through pod annotations or
   termination messages.
+- **A table stored at submit.** A graph job may start from a unit table
+  rather than a root generator: an expansion document stored in the
+  project's store when the job is submitted, named by its C4 ID in
+  `params.table` (`class.TableParam`). Its units are the job's first units,
+  at depth 0, and its planned units expand as any generator's do. Agent
+  work submitted through `POST /submissions` (a plan's blocks, or a single
+  task as a table of one) is a job of this kind. Until the store gives the
+  document back the job keeps its last status and is tried again, as with
+  any expansion document (`loading expansion documents`).
 - **Edges.** Children inherit the generator's dependents: whatever waited on
   the generator now waits on its children (all of them, unless the document
   names a subset). A child may depend on its siblings, as beauty depends on

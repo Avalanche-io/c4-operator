@@ -22,6 +22,10 @@ type SubmissionRequest struct {
 	// made, never a second set. A client makes one per submission it
 	// means, and sends it again on each retry.
 	Key string `json:"key,omitempty"`
+	// Plans are the plan files the submission's jobs name (plan:), by the
+	// path as written, as JSON. The farm never reads a plan from the tree:
+	// a plan the request does not carry is refused.
+	Plans map[string]json.RawMessage `json:"plans,omitempty"`
 }
 
 // SubmissionResponse answers POST /submissions: 201 when the jobs are

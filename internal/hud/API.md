@@ -1107,7 +1107,7 @@ and `-site` name the input it rebuilds and where, and the queue sets
 ### POST /submissions
 
 ```
-{ submission, dryRun?, explain?, key? }
+{ submission, dryRun?, explain?, key?, plans?: { <path>: <plan as JSON> } }
 ->
 { ok, dryRun?, errors?: [ { path, message, fix, reason? } ], submission, record?,
   jobs?: [ { key, namespace, name, tool, version, what, estimate?, estimateError?, after?: [name], link } ],
@@ -1218,13 +1218,44 @@ job. `note:` is the job's `c4.avalanche.io/note` and a line of its book
 entry, with the submission's ID. `c4.avalanche.io/derivation-class: exact`
 marks a job whose tool says `reuse: exact`.
 
+**Agent work.** A job that runs an `agent` tool, or a plan (`plan:`
+with `each`), is a `graph` job whose unit table is stored with it: the
+farm writes the table as an expansion document, stores it in the
+project's store before it creates the job, and names it in
+`params.table` (a dry run plans it without storing it). A single task is
+a table of one unit, named for the job's key; a plan's blocks are the
+table, read from the plan file the request carries in `plans` (by the
+path as written, as JSON; the farm never reads a plan from the tree, and
+a plan the request lacks is refused at `jobs.<key>.plan`: "port.plan.yaml
+was not sent with the submission"). The plan file's C4 ID is in the
+submission's record. Each unit is a block, a fresh agent session: a
+block's `params` named for the tool's parameters are its settings (its
+`reasoning` first, then those params, then the job's `with`, then the
+tool's defaults), set as the unit's `C4_BLOCK_PROMPT` (`task`),
+`C4_BLOCK_TOOLS` (`allow`), `C4_BLOCK_MODEL` and `C4_BLOCK_EFFORT`; other
+params stay facts of the plan, and a block may not set `C4_*` itself. The
+template, once for the job, is the tool's, with `C4_AGENT_BLOCK=1`,
+`C4_BLOCK_PROFILE` (the tool's name) and `C4_BLOCK_REPO`, the
+submission's `root`: the repository on the developer's machine, where a
+host runner gives each block its own worktree. A tool that runs on hosts
+goes to the farm's host pools the submitter may use (pools whose node
+selector names `c4.avalanche.io/host`, with no `owners` or the submitter
+among them); with none, a tool that also has an image runs as block pods
+on the class's pools, and one that runs only on hosts is refused: "no
+machine of yours runs agents on this farm yet". A planned block runs
+`each.tool`, any other the job's `tool:` (or `each.tool` when it names
+none); blocks running two different tools in one job are refused for now.
+Its `answers: {by: unit:<name>}` names one of its own blocks (for a single
+task, the job's key), since every block reasons.
+
 What the farm cannot run yet is refused in its words, not run otherwise:
-plans, checks, approvals, waits, a lead or a tool answering questions,
-generators and their children, units over more than frames, policy, a job that follows two,
-git trees, a `preview` other than `fml` and `none` (this farm orders only
-those), tools that need licences, the network beyond their licence
-servers, sidecars, a Kubernetes overlay, a gate, farm access, or only a
-host. `answers: {by: unit:<name>}` must name a unit of the job that
+plans of frames or once tools, checks, approvals, waits, a lead or a tool
+answering questions, generators and their children, units over more than
+frames, policy, a job that follows two, git trees, a `preview` other than
+`fml` and `none` (this farm orders only those), tools that need licences,
+the network beyond their licence servers (an agent's `model-api` is
+allowed), sidecars, a Kubernetes overlay, a gate, farm access, or only a
+host (except an agent tool). `answers: {by: unit:<name>}` must name a unit of the job that
 reasons: a frames or once job's units (`<key>/<n>` from 0) each run a
 procedure, so each is refused ("render/3 cannot answer questions: it runs
 a procedure"), as is a name that is no unit of the job. `warnings` are what it does differently meanwhile: a job that

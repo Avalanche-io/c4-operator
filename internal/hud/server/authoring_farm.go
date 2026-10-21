@@ -101,6 +101,18 @@ func (f *hudFarm) Location(project string) *time.Location {
 // nothing to check against; lowering refuses policy: for now.
 func (f *hudFarm) Policy(string) *authoring.FarmPolicy { return nil }
 
+// HostPools are the pools whose nodes are host runners (their node
+// selector names the host label), with the owners whose jobs they take.
+func (f *hudFarm) HostPools() []authoring.HostPool {
+	var out []authoring.HostPool
+	for _, p := range f.m.pools {
+		if _, ok := p.Spec.NodeSelector[authoring.HostLabel]; ok {
+			out = append(out, authoring.HostPool{Name: p.Name, Owners: p.Spec.Owners})
+		}
+	}
+	return out
+}
+
 // Trackers are the Trackers in the project's namespace.
 func (f *hudFarm) Trackers(project string) []string {
 	ns := f.Namespace(project)

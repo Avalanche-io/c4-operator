@@ -49,8 +49,9 @@ import (
 type DryRunFunc func(ctx context.Context, job *c4v1.WorkJob, project string) (api.SubmitEstimate, error)
 
 // DryRunAllFunc plans drafts together, each after the ones it depends
-// on; views are the view IDs of their input Materializations by name.
-type DryRunAllFunc func(ctx context.Context, jobs []*c4v1.WorkJob, project string, views map[string]string) ([]api.SubmitEstimate, error)
+// on; views are the view IDs of their input Materializations by name, and
+// tables the unit tables of agent work not stored yet, by C4 ID.
+type DryRunAllFunc func(ctx context.Context, jobs []*c4v1.WorkJob, project string, views map[string]string, tables map[string][]byte) ([]api.SubmitEstimate, error)
 
 // ErrNotPlanned is what a DryRunFunc returns (wrapped) when the queue has
 // not planned the farm yet; the HUD answers 503 and the client retries.

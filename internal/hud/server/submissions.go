@@ -78,7 +78,11 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	farm := s.farmFor(ctx, m)
-	plan, lerrs := authoring.Lower(sub, farm)
+	in := authoring.Inputs{Owner: v.User, Plans: map[string][]byte{}}
+	for path, p := range body.Plans {
+		in.Plans[path] = p
+	}
+	plan, lerrs := authoring.LowerWith(sub, farm, in)
 	// The farm reads trees by C4 ID; a folder is the front end's to upload.
 	// It is refused beside the file's other errors, not before them.
 	refusals := errs(lerrs)
@@ -181,7 +185,7 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 		}
 		taken = append(taken, ferr.name)
 		var again []authoring.Error
-		if plan, again = authoring.Lower(sub, authoring.Taking(farm, plan.Namespace, taken)); len(again) > 0 {
+		if plan, again = authoring.LowerWith(sub, authoring.Taking(farm, plan.Namespace, taken), in); len(again) > 0 {
 			refuse(http.StatusUnprocessableEntity, errs(again)...)
 			return
 		}
@@ -271,9 +275,17 @@ func (s *Server) makeSubmission(r *http.Request, v *api.Viewer, m *model, plan *
 		return api.SubmissionJob{Key: j.Key, Namespace: resp.Namespace, Name: resp.Name, Tool: j.Tool.Name, Version: j.Tool.Version,
 			What: what(j, resp.Estimate), Estimate: resp.Estimate, EstimateError: resp.EstimateError, After: j.After, Link: resp.Link}
 	}
+	// Agent work's unit tables: given to a dry run, stored before a job
+	// that names one is created.
+	tables := map[string][]byte{}
+	for i, j := range plan.Jobs {
+		if j.Table != nil {
+			tables[drafts[i].Spec.Params[class.TableParam]] = j.Table
+		}
+	}
 	var jobs []api.SubmissionJob
 	if body.DryRun {
-		ests, estErr := s.planTogether(ctx, drafts, plan.Project, views)
+		ests, estErr := s.planTogether(ctx, drafts, plan.Project, views, tables)
 		for i, j := range plan.Jobs {
 			resp := api.SubmitResponse{Namespace: plan.Namespace, Name: j.Request.Name, Link: "#/job/" + plan.Namespace + "/" + j.Request.Name}
 			if estErr != nil {
@@ -293,9 +305,9 @@ func (s *Server) makeSubmission(r *http.Request, v *api.Viewer, m *model, plan *
 
 // planTogether plans a submission's drafts together (DryRunAll), else
 // each alone.
-func (s *Server) planTogether(ctx context.Context, drafts []*c4v1.WorkJob, project string, views map[string]string) ([]api.SubmitEstimate, error) {
+func (s *Server) planTogether(ctx context.Context, drafts []*c4v1.WorkJob, project string, views map[string]string, tables map[string][]byte) ([]api.SubmitEstimate, error) {
 	if s.DryRunAll != nil {
-		return s.DryRunAll(ctx, drafts, project, views)
+		return s.DryRunAll(ctx, drafts, project, views, tables)
 	}
 	out := make([]api.SubmitEstimate, len(drafts))
 	for i, d := range drafts {
@@ -441,6 +453,31 @@ func (s *Server) viewStored(r *http.Request, project, view string) bool {
 	}
 	_, err = st.Head(r.Context(), id)
 	return err == nil
+}
+
+// storeTables puts agent work's unit tables in the project's store, where
+// the queue reads a job's table by the C4 ID its table param names.
+func (s *Server) storeTables(ctx context.Context, project string, tables map[string][]byte) error {
+	if s.Stores == nil {
+		return fmt.Errorf("this farm has no store for %s", project)
+	}
+	st, err := s.Stores(ctx, project)
+	if err != nil {
+		return err
+	}
+	if st == nil {
+		return fmt.Errorf("%s has no store", project)
+	}
+	for want, b := range tables {
+		id, err := st.PutBytes(ctx, b)
+		if err != nil {
+			return err
+		}
+		if id.String() != want {
+			return fmt.Errorf("a unit table stored as %s, not %s", id, want)
+		}
+	}
+	return nil
 }
 
 func isC4ID(s string) bool {

@@ -10,11 +10,13 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Avalanche-io/c4"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -157,6 +159,24 @@ func (s *Server) commitSubmission(r *http.Request, v *api.Viewer, m *model, plan
 	if body.Key != "" {
 		label = keyLabel(v.User, body.Key)
 	}
+	// Agent work's unit tables go in the project's store before any job
+	// that names one exists.
+	tables := map[string][]byte{}
+	var plans []string
+	for _, j := range plan.Jobs {
+		if j.Table != nil {
+			tables[c4.Identify(bytes.NewReader(j.Table)).String()] = j.Table
+		}
+		if j.PlanFile != "" && !slices.Contains(plans, j.PlanFile) {
+			plans = append(plans, j.PlanFile)
+		}
+	}
+	if len(tables) > 0 {
+		if err := s.storeTables(ctx, plan.Project, tables); err != nil {
+			s.Log.Error(err, "store a submission's unit tables", "submission", out.Submission)
+			return nil, http.StatusServiceUnavailable, &jobFailure{key: plan.Jobs[0].Key, name: plan.Jobs[0].Request.Name, err: errTransient, until: until}
+		}
+	}
 	var made []madeJob
 	fail := func(key, name string, code int, err error, record string) ([]api.SubmissionJob, int, *jobFailure) {
 		left := s.rollback(r, v, plan, made, key, record, attempt)
@@ -198,6 +218,10 @@ func (s *Server) commitSubmission(r *http.Request, v *api.Viewer, m *model, plan
 	change := map[string]any{"project": plan.Project, "jobs": names, "attempt": attempt}
 	if label != "" {
 		change["key"] = label
+	}
+	if len(plans) > 0 {
+		// what was submitted includes the plans it was read with
+		change["plans"] = plans
 	}
 	record, err := s.signControl(ctx, []string{plan.Project}, provenance.Subject{Name: "submission:" + out.Submission,
 		Digest: map[string]string{"sha256": hex.EncodeToString(sum[:])}},

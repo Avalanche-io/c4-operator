@@ -41,9 +41,9 @@ refusals:
   - path: jobs.port.answers.by
     message: a lead answering a job's questions cannot run on this farm yet
     fix: 'name a unit of the job: unit:<name>'
-  - path: jobs.port.plan
-    message: this farm cannot run plans yet
-    fix: submit the plan's blocks as jobs for now
+  - path: jobs.port.each.tool
+    message: this farm cannot run generator tools yet
+    fix: use a frames, once or agent tool for now
   - path: tree
     message: git trees cannot be submitted on this farm yet
     fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
@@ -51,16 +51,16 @@ refusals:
   - path: jobs.port.answers.by
     message: a tool answering a job's questions cannot run on this farm yet
     fix: 'name a unit of the job: unit:<name>'
-  - path: jobs.port.plan
-    message: this farm cannot run plans yet
-    fix: submit the plan's blocks as jobs for now
+  - path: jobs.port.each.tool
+    message: this farm cannot run generator tools yet
+    fix: use a frames, once or agent tool for now
   - path: tree
     message: git trees cannot be submitted on this farm yet
     fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
   answers-unit:
-  - path: jobs.port.plan
-    message: this farm cannot run plans yet
-    fix: submit the plan's blocks as jobs for now
+  - path: jobs.port.each.tool
+    message: this farm cannot run generator tools yet
+    fix: use a frames, once or agent tool for now
   - path: tree
     message: git trees cannot be submitted on this farm yet
     fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
@@ -95,7 +95,7 @@ refusals:
   expansion-uses:
   - path: jobs.light.tool
     message: this farm cannot run generator tools yet
-    fix: use a frames or once tool for now
+    fix: use a frames, once or agent tool for now
   - path: jobs.light.uses
     message: a generator's children cannot run on this farm yet
     fix: 'remove uses: for now'
@@ -118,7 +118,7 @@ refusals:
     fix: 'remove check: for now'
   - path: jobs.light.tool
     message: this farm cannot run generator tools yet
-    fix: use a frames or once tool for now
+    fix: use a frames, once or agent tool for now
   - path: jobs.light.uses
     message: a generator's children cannot run on this farm yet
     fix: 'remove uses: for now'
@@ -131,7 +131,7 @@ refusals:
     fix: 'remove check: for now'
   - path: jobs.light.tool
     message: this farm cannot run generator tools yet
-    fix: use a frames or once tool for now
+    fix: use a frames, once or agent tool for now
   - path: jobs.light.uses
     message: a generator's children cannot run on this farm yet
     fix: 'remove uses: for now'
@@ -143,9 +143,9 @@ refusals:
     message: pyro-sim needs licences (sesi/hbatch), which this farm cannot count yet
     fix: use a version of the tool that declares none for now
   plan-each:
-  - path: jobs.port.plan
-    message: this farm cannot run plans yet
-    fix: submit the plan's blocks as jobs for now
+  - path: jobs.port.each.tool
+    message: this farm cannot run generator tools yet
+    fix: use a frames, once or agent tool for now
   - path: tree
     message: git trees cannot be submitted on this farm yet
     fix: ask a farm admin to import the repository, and submit its tree by its C4 ID
@@ -157,9 +157,9 @@ refusals:
   - path: jobs.port.answers.by
     message: a tool answering a job's questions cannot run on this farm yet
     fix: 'name a unit of the job: unit:<name>'
-  - path: jobs.port.plan
-    message: this farm cannot run plans yet
-    fix: submit the plan's blocks as jobs for now
+  - path: jobs.port.each.tool
+    message: this farm cannot run generator tools yet
+    fix: use a frames, once or agent tool for now
   - path: jobs.port.uses
     message: a generator's children cannot run on this farm yet
     fix: 'remove uses: for now'

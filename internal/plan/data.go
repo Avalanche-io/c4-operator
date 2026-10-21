@@ -74,14 +74,24 @@ func Read(path string) (*Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	var f File
-	if err := readStrict(b, &f); err != nil {
+	p, err := Parse(b, filepath.Base(path))
+	if err != nil {
 		return nil, fmt.Errorf("%s: %w", path, err)
 	}
-	if f.Version != 1 {
-		return nil, fmt.Errorf("%s: plan version %d, want 1", path, f.Version)
+	return p, nil
+}
+
+// Parse reads a plan file's bytes, YAML or JSON (a plan sent with a
+// submission); file names it in the citations.
+func Parse(b []byte, file string) (*Plan, error) {
+	var f File
+	if err := readStrict(b, &f); err != nil {
+		return nil, err
 	}
-	return FromFile(&f, filepath.Base(path))
+	if f.Version != 1 {
+		return nil, fmt.Errorf("plan version %d, want 1", f.Version)
+	}
+	return FromFile(&f, file)
 }
 
 // FromFile builds a plan from a plan file's contents; file names it in the

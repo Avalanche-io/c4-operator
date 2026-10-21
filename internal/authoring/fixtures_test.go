@@ -28,6 +28,7 @@ type fixtureFarm struct {
 	PartiesL []string               `json:"parties"`
 	ToolsV   map[string]string      `json:"tools"`
 	Policies map[string]*FarmPolicy `json:"policies"`
+	Hosts    []HostPool             `json:"hostPools"`
 	tools    map[string]*Tool
 }
 
@@ -96,6 +97,7 @@ func (f *fixtureFarm) Namespace(p string) string {
 func (f *fixtureFarm) Cut(p, shot string) string   { return f.Projects[p].Shots[shot].Cut }
 func (f *fixtureFarm) Policy(p string) *FarmPolicy { return f.Policies[p] }
 func (f *fixtureFarm) Trackers(string) []string    { return nil }
+func (f *fixtureFarm) HostPools() []HostPool       { return f.Hosts }
 
 // The fixtures' milestones are on New York time.
 func (f *fixtureFarm) Location(string) *time.Location {
@@ -271,7 +273,18 @@ func TestLowerFixtures(t *testing.T) {
 			if len(perrs) > 0 {
 				t.Fatalf("parse: %v", perrs)
 			}
-			plan, lerrs := Lower(sub, farm)
+			// The plan files beside a submission go with it, as the front
+			// end sends them.
+			in := Inputs{Plans: map[string][]byte{}}
+			for _, j := range sub.Jobs {
+				if j.Plan == "" {
+					continue
+				}
+				if b, err := fs.ReadFile(schema.Fixtures(), "submit/pass/"+j.Plan); err == nil {
+					in.Plans[j.Plan] = b
+				}
+			}
+			plan, lerrs := LowerWith(sub, farm, in)
 			w, listed := want.Refusals[c.Name]
 			switch {
 			case listed && !reflect.DeepEqual(lerrs, w):

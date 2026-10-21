@@ -1,12 +1,14 @@
 package authoring
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"path"
 	"strings"
 	"time"
 
+	"github.com/Avalanche-io/c4"
 	corev1 "k8s.io/api/core/v1"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -58,6 +60,11 @@ type PlannedJob struct {
 	// Pinned is a job whose version the file gives: it is never numbered
 	// again.
 	Pinned bool
+	// Table is the unit table of agent work (class.TableParam), for the
+	// front end to store before the job is created; PlanFile is the C4 ID
+	// of the plan file it was read from, as sent.
+	Table    []byte
+	PlanFile string
 }
 
 // Count is n of a thing: "1 unit", "6 units".
@@ -94,18 +101,7 @@ func (j PlannedJob) What() string {
 // are Check's when it refuses, else what the farm cannot run yet, else
 // what lowering a job found; each list sorted by path.
 func Lower(sub *Submission, farm Farm) (*Plan, []Error) {
-	c, ok := newSubCtx(sub, farm)
-	if !ok {
-		return nil, sortErrors(c.errs)
-	}
-	c.check()
-	if len(c.errs) > 0 {
-		return nil, sortErrors(c.errs)
-	}
-	if errs := c.refusals(); len(errs) > 0 {
-		return nil, sortErrors(errs)
-	}
-	return c.lower()
+	return LowerWith(sub, farm, Inputs{})
 }
 
 // refusals are what the farm cannot run yet, in its words: it refuses the
@@ -129,11 +125,12 @@ func (c *subCtx) refusals() []Error {
 		if j.Policy != nil {
 			errs = append(errs, errf(p+".policy", "remove policy: for now", "policies cannot be applied on this farm yet"))
 		}
-		if j.Plan != "" {
-			errs = append(errs, errf(p+".plan", "submit the plan's blocks as jobs for now", "this farm cannot run plans yet"))
-		}
-		if r, ok := c.tools[j.Key]; ok && j.Tool != "" {
+		errs = append(errs, c.planRefusals(&j)...)
+		switch r, ok := c.tools[j.Key]; {
+		case ok && j.Tool != "":
 			errs = append(errs, prefix(p, ToolRefusals(r.tool))...)
+		case ok:
+			errs = append(errs, prefix(p+".each", ToolRefusals(r.tool))...)
 		}
 		if len(j.After) > 1 {
 			errs = append(errs, errf(p+".after", "follow one job, and have that one follow the other", "a job that follows two jobs cannot run on this farm yet"))
@@ -258,7 +255,17 @@ func (c *subCtx) lower() (*Plan, []Error) {
 			tj.inputs = append(tj.inputs, in)
 			pj.After = append(pj.After, after...)
 		}
-		req, jerrs := lowerTool(tj)
+		var req *api.SubmitRequest
+		var jerrs []Error
+		if c.agentWork(j) {
+			req, pj.Table, jerrs = c.lowerAgent(j, tj)
+			pj.Units = tableUnits(pj.Table)
+			if b, ok := c.in.Plans[j.Plan]; ok {
+				pj.PlanFile = c4.Identify(bytes.NewReader(b)).String()
+			}
+		} else {
+			req, jerrs = lowerTool(tj)
+		}
 		if len(jerrs) > 0 {
 			errs = append(errs, prefix(p, jerrs)...)
 			continue
@@ -286,7 +293,9 @@ func (c *subCtx) lower() (*Plan, []Error) {
 			pj.Annotations[queue.AnnotationDerivationClass] = "exact"
 		}
 		pj.Request = req
-		pj.Units = units(req)
+		if pj.Table == nil {
+			pj.Units = units(req)
+		}
 		plan.Jobs = append(plan.Jobs, pj)
 	}
 	if len(errs) > 0 {

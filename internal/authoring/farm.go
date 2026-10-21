@@ -56,6 +56,8 @@ type Farm interface {
 	// Trackers are the trackers the project is connected to, by name (nil:
 	// not known).
 	Trackers(project string) []string
+	// HostPools are the pools of host runners, which run agent work.
+	HostPools() []HostPool
 }
 
 // FarmPolicy is a project's policy as a submission sees it: the sets it

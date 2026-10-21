@@ -31,6 +31,7 @@ type subCtx struct {
 	jobs    map[string]*Job
 	tools   map[string]resolved
 	errs    []Error
+	in      Inputs
 }
 
 type resolved struct {
@@ -361,8 +362,13 @@ func (c *subCtx) checkJob(j *Job) {
 		if name, ok := strings.CutPrefix(a.By, "tool:"); ok {
 			c.tool(p+".answers.by", name)
 		}
-		if name, ok := strings.CutPrefix(a.By, "unit:"); ok && r.tool != nil && j.Tool != "" {
-			c.checkAnswerer(p, j, r.tool, name)
+		if name, ok := strings.CutPrefix(a.By, "unit:"); ok && r.tool != nil {
+			switch {
+			case c.agentWork(j):
+				c.checkAgentAnswerer(p, j, name)
+			case j.Tool != "":
+				c.checkAnswerer(p, j, r.tool, name)
+			}
 		}
 	}
 }
@@ -480,7 +486,8 @@ func (c *subCtx) checkWith(p string, t *Tool, j *Job) {
 		}
 		c.add(errf(p+".frames", "add frames: (as 1001-1240)", "%s needs frames: %s and %s follows no job with frames", j.Key, why, j.Key))
 	}
-	_, errs := resolve(t, j.With, "", frames, true)
+	// A plan's blocks complete their own settings (their task, say).
+	_, errs := resolve(t, j.With, "", frames, j.Plan == "")
 	c.errs = append(c.errs, prefix(p, errs)...)
 	if j.Size != "" {
 		if _, ok := t.Needs.Sizes[j.Size]; !ok {
