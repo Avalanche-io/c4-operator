@@ -1,5 +1,5 @@
 // Package source is a public source of trees pinned at a commit, as an
-// import reads it (MODELS.md, "Create"): a revision resolved once to a
+// import reads it (c4 farm import hf:...): a revision resolved once to a
 // commit, the files at that commit with the source's own hashes, and each
 // file's bytes stored in C4 storage only once they match those hashes.
 // The hubs (internal/source/huggingface) say how to reach each one; this
@@ -141,7 +141,8 @@ func Store(ctx context.Context, f File, body io.Reader, dir string, put Put) (Fe
 		check, want = sha1.New(), f.GitBlob
 		check.Write([]byte("blob " + strconv.FormatInt(f.Size, 10) + "\x00"))
 	}
-	n, err := io.Copy(io.MultiWriter(spool, id512, check), body)
+	// One byte past the size the source gave is enough to know it lied.
+	n, err := io.Copy(io.MultiWriter(spool, id512, check), io.LimitReader(body, f.Size+1))
 	if err != nil {
 		return Fetched{}, fmt.Errorf("%s: reading: %w", f.Path, err)
 	}

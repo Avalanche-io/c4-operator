@@ -7,13 +7,15 @@
 //   - GET /api/.../tree/<commit>?recursive=true lists the files with their
 //     git blob SHA-1, and a large file's LFS SHA-256 and Xet hash;
 //   - /<repo>/resolve/<commit>/<path> serves a file, often by redirect to
-//     a CDN, answering X-Repo-Commit (checked against the commit) and, for
-//     a large file, X-Linked-Etag (its SHA-256).
+//     a CDN, answering X-Repo-Commit (required, and checked against the
+//     commit) and, for a large file, X-Linked-Etag (its SHA-256).
 //
-// Every request reads the Hub's RateLimit headers and the client paces
-// itself before a window runs out, rather than waiting for a 429. A token,
-// when there is one, goes only to the Hub's own host, never to a CDN a
-// download is redirected to.
+// The token goes only on requests the client makes to the Hub's own host,
+// never on a redirect it follows. Redirects are followed one hop at a
+// time, https only, to the hosts the source allows, a few at most. URLs in
+// errors carry no query, since a CDN's are signed. Every request reads the
+// Hub's RateLimit headers, and the client paces itself before a window
+// runs out rather than waiting for a 429.
 package huggingface
 
 import (
@@ -37,6 +39,12 @@ import (
 // Endpoint is the Hub.
 const Endpoint = "https://huggingface.co"
 
+// Hosts are the hosts the Hub's downloads redirect to.
+var Hosts = []string{"huggingface.co", "*.huggingface.co", "*.hf.co"}
+
+// MaxHops is how many redirects a download may follow.
+const MaxHops = 5
+
 // Repository types.
 const (
 	Model   = "model"
@@ -45,13 +53,19 @@ const (
 
 // Client reads the Hub.
 type Client struct {
-	// Endpoint is the Hub's address (default Endpoint).
+	// Endpoint is the Hub's address (default Endpoint). It may carry a
+	// path prefix (a mirror at https://host/hub).
 	Endpoint string
+	// Hosts are the hosts a download may be redirected to: names, or
+	// *.suffix for any name under it (default Hosts). The Endpoint's own
+	// host is always allowed.
+	Hosts []string
 	// Token returns the bearer token, or "" to read anonymously. It is
 	// read on every request, so a leased token may rotate.
 	Token func(context.Context) (string, error)
 	// HTTP is the client (default one with no overall timeout: a large file
-	// takes as long as it takes, and the context bounds it).
+	// takes as long as it takes, and the context bounds it). Its own
+	// redirect policy is never used.
 	HTTP *http.Client
 	// Share is the part of each rate window this client may use, from 0
 	// to 1 (default 1): a farm leaves the rest to people at the same
@@ -62,14 +76,21 @@ type Client struct {
 	Sleep func(context.Context, time.Duration) error
 
 	mu      sync.Mutex
-	windows map[string]window
+	windows map[string]*window
+	// inflight counts requests admitted and not yet answered, by bucket:
+	// an answer's count of what is left predates them.
+	inflight map[string]int
 }
 
 // window is what the Hub last said of one rate bucket: how many requests
-// are left of its quota, and when it resets.
+// are left (less those admitted since), its quota if it said, and when it
+// resets.
 type window struct {
 	quota, left int
 	reset       time.Time
+	// fresh: the Hub's window has reset and this one counts from it,
+	// until an answer says how many are left.
+	fresh bool
 }
 
 func (c *Client) endpoint() string {
@@ -78,6 +99,17 @@ func (c *Client) endpoint() string {
 	}
 	return strings.TrimSuffix(c.Endpoint, "/")
 }
+
+func (c *Client) base() *url.URL {
+	u, err := url.Parse(c.endpoint())
+	if err != nil {
+		return &url.URL{}
+	}
+	return u
+}
+
+// url is the Hub's address for path p.
+func (c *Client) url(p string) string { return c.endpoint() + p }
 
 func (c *Client) now() time.Time {
 	if c.Now != nil {
@@ -100,11 +132,14 @@ func (c *Client) sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-func (c *Client) http() *http.Client {
+// client is the HTTP client, never following a redirect itself.
+func (c *Client) client() *http.Client {
+	hc := http.Client{}
 	if c.HTTP != nil {
-		return c.HTTP
+		hc = *c.HTTP
 	}
-	return &http.Client{Timeout: 0}
+	hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
+	return &hc
 }
 
 var repoName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$`)
@@ -135,44 +170,112 @@ func resolvePath(s source.Snapshot, file string) string {
 	return root + "/resolve/" + url.PathEscape(s.Commit) + "/" + strings.Join(segs, "/")
 }
 
+// redact is u as an error may show it: no query (a CDN's are signed) and
+// no user.
+func redact(u *url.URL) string {
+	if u == nil {
+		return ""
+	}
+	return u.Scheme + "://" + u.Host + u.EscapedPath()
+}
+
+// plain is err without the URL a url.Error carries, whose query may be a
+// signature.
+func plain(err error) error {
+	var ue *url.Error
+	if errors.As(err, &ue) {
+		return ue.Err
+	}
+	return err
+}
+
 // --- requests, paced ---
 
 // bucket is the rate bucket a request counts against: downloads are
 // resolvers, the rest the API.
-func bucket(p string) string {
-	if strings.Contains(p, "/resolve/") {
+func bucket(u string) string {
+	if strings.Contains(u, "/resolve/") {
 		return "resolvers"
 	}
 	return "api"
 }
 
 // pace waits, before a request of bucket b, until the window has room in
-// this client's share.
+// this client's share, and counts the request against it, so callers at
+// once do not all pass at the edge. Once the Hub's window resets, a fresh
+// one admits its quota when the Hub said it, else one request, whose
+// answer tells the rest how many are left. A window whose quota the Hub
+// did not say keeps one request in hand.
 func (c *Client) pace(ctx context.Context, b string) error {
-	c.mu.Lock()
-	w, ok := c.windows[b]
-	c.mu.Unlock()
-	if !ok || w.quota == 0 {
-		return nil
-	}
-	share := c.Share
-	if share <= 0 || share > 1 {
-		share = 1
-	}
-	// Keep what the share leaves to others, and one request in hand.
-	keep := w.quota - int(float64(w.quota)*share) + 1
-	if w.left > keep {
-		return nil
-	}
-	if d := w.reset.Sub(c.now()); d > 0 {
+	for {
+		c.mu.Lock()
+		w := c.windows[b]
+		if w == nil {
+			c.admit(b)
+			c.mu.Unlock()
+			return nil
+		}
+		keep := 1
+		if w.quota > 0 {
+			share := c.Share
+			if share <= 0 || share > 1 {
+				share = 1
+			}
+			// what the share leaves to others, and one request in hand
+			keep = w.quota - int(float64(w.quota)*share) + 1
+			// but never the whole quota, or nothing is ever sent
+			keep = min(keep, w.quota-1)
+		}
+		now := c.now()
+		if !now.Before(w.reset) && !w.fresh {
+			w.fresh = true
+			if w.quota > 0 {
+				w.left = w.quota
+			} else {
+				w.left = keep + 1
+			}
+		}
+		if w.left > keep {
+			w.left--
+			c.admit(b)
+			c.mu.Unlock()
+			return nil
+		}
+		d := w.reset.Sub(now)
+		if w.fresh {
+			// spent before the Hub has answered for the fresh window
+			d = probeWait
+		}
+		c.mu.Unlock()
 		if err := c.sleep(ctx, d); err != nil {
 			return err
 		}
+		c.mu.Lock()
+		if c.windows[b] == w && !w.fresh {
+			// waited what the Hub said: its window has reset
+			w.reset = time.Time{}
+		}
+		c.mu.Unlock()
 	}
+}
+
+// probeWait is how long a caller waits for the answer that tells a fresh
+// window's count.
+const probeWait = 100 * time.Millisecond
+
+// admit counts a request of bucket b in flight; c.mu is held.
+func (c *Client) admit(b string) {
+	if c.inflight == nil {
+		c.inflight = map[string]int{}
+	}
+	c.inflight[b]++
+}
+
+// answered takes a request of bucket b out of flight.
+func (c *Client) answered(b string) {
 	c.mu.Lock()
-	delete(c.windows, b)
+	c.inflight[b]--
 	c.mu.Unlock()
-	return nil
 }
 
 // RateLimit: "resolvers";r=2998;t=227 and RateLimit-Policy: "fixed
@@ -201,24 +304,34 @@ func (c *Client) observe(h http.Header) {
 	if len(names) == 0 {
 		return
 	}
-	b := names[0][1]
 	p := params(rl)
-	w := window{left: p["r"], reset: c.now().Add(time.Duration(p["t"]) * time.Second)}
+	b := names[0][1]
+	w := &window{left: p["r"], reset: c.now().Add(time.Duration(p["t"]) * time.Second)}
 	w.quota = params(h.Get("RateLimit-Policy"))["q"]
 	c.mu.Lock()
 	if c.windows == nil {
-		c.windows = map[string]window{}
+		c.windows = map[string]*window{}
 	}
+	// the Hub counted what it had seen; requests still in flight are not in
+	// its count
+	w.left -= c.inflight[b]
 	c.windows[b] = w
 	c.mu.Unlock()
 }
 
-// do sends a request to the Hub's own host, with the token, paced; a 429
-// waits out its window and tries again.
-func (c *Client) do(ctx context.Context, method, p string) (*http.Response, error) {
-	u := c.endpoint() + p
+// do sends a request to the Hub, u being on the Hub's own host, with the
+// token, paced, following no redirect; a 429 waits out its window and
+// tries again.
+func (c *Client) do(ctx context.Context, method, u string) (*http.Response, error) {
+	ru, err := url.Parse(u)
+	if err != nil {
+		return nil, err
+	}
+	if b := c.base(); ru.Scheme != b.Scheme || ru.Host != b.Host {
+		return nil, fmt.Errorf("huggingface: %s is not the Hub", redact(ru))
+	}
 	for attempt := 0; ; attempt++ {
-		if err := c.pace(ctx, bucket(p)); err != nil {
+		if err := c.pace(ctx, bucket(u)); err != nil {
 			return nil, err
 		}
 		req, err := http.NewRequestWithContext(ctx, method, u, nil)
@@ -234,12 +347,10 @@ func (c *Client) do(ctx context.Context, method, p string) (*http.Response, erro
 				req.Header.Set("Authorization", "Bearer "+tok)
 			}
 		}
-		hc := *c.http()
-		// A redirect is followed by Fetch itself, without the token.
-		hc.CheckRedirect = func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }
-		resp, err := hc.Do(req)
+		resp, err := c.client().Do(req)
+		c.answered(bucket(u))
 		if err != nil {
-			return nil, fmt.Errorf("huggingface: %s %s: %w", method, p, err)
+			return nil, fmt.Errorf("huggingface: %s %s: %w", method, redact(ru), plain(err))
 		}
 		c.observe(resp.Header)
 		if resp.StatusCode != http.StatusTooManyRequests || attempt >= 5 {
@@ -286,8 +397,8 @@ func failure(resp *http.Response, what string) error {
 	return fmt.Errorf("huggingface: %s: %s: %w", what, msg, kind)
 }
 
-func (c *Client) getJSON(ctx context.Context, p, what string, out any) (*http.Response, error) {
-	resp, err := c.do(ctx, http.MethodGet, p)
+func (c *Client) getJSON(ctx context.Context, u, what string, out any) (*http.Response, error) {
+	resp, err := c.do(ctx, http.MethodGet, u)
 	if err != nil {
 		return nil, err
 	}
@@ -322,10 +433,10 @@ func (c *Client) Resolve(ctx context.Context, repoType, repo, ref string) (sourc
 			License json.RawMessage `json:"license"`
 		} `json:"cardData"`
 	}
-	if _, err := c.getJSON(ctx, api+"/revision/"+url.PathEscape(ref), repo+"@"+ref, &info); err != nil {
+	if _, err := c.getJSON(ctx, c.url(api+"/revision/"+url.PathEscape(ref)), repo+"@"+ref, &info); err != nil {
 		return source.Snapshot{}, err
 	}
-	if len(info.SHA) != 40 {
+	if !commitSHA.MatchString(info.SHA) {
 		return source.Snapshot{}, fmt.Errorf("huggingface: %s@%s: the Hub gave no commit", repo, ref)
 	}
 	s := source.Snapshot{Source: "huggingface", Endpoint: c.endpoint(), RepoType: repoType, Repo: repo, Ref: ref,
@@ -346,7 +457,26 @@ func (c *Client) Resolve(ctx context.Context, repoType, repo, ref string) (sourc
 	return s, nil
 }
 
-// List fills s.Files with the files at s.Commit that f takes, by path.
+var commitSHA = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
+// checkPath refuses a listed path that is not a plain relative path: one
+// that is empty, absolute, has an empty, . or .. part, a backslash or a
+// NUL. Such a path would leave the tree it is written into.
+func checkPath(p string) error {
+	if p == "" || strings.HasPrefix(p, "/") || strings.ContainsAny(p, "\\\x00") {
+		return fmt.Errorf("huggingface: the listing names %q, which is not a plain relative path", p)
+	}
+	for _, seg := range strings.Split(p, "/") {
+		if seg == "" || seg == "." || seg == ".." {
+			return fmt.Errorf("huggingface: the listing names %q, which is not a plain relative path", p)
+		}
+	}
+	return nil
+}
+
+// List fills s.Files with the files at s.Commit that f takes, by path. A
+// listing with a path that is not plain and relative, or a path twice, is
+// refused whole.
 func (c *Client) List(ctx context.Context, s *source.Snapshot, f source.Filter) error {
 	if err := f.Check(); err != nil {
 		return err
@@ -366,16 +496,31 @@ func (c *Client) List(ctx context.Context, s *source.Snapshot, f source.Filter) 
 		} `json:"lfs"`
 		XetHash string `json:"xetHash"`
 	}
-	p := api + "/tree/" + url.PathEscape(s.Commit) + "?recursive=true"
+	u := c.url(api + "/tree/" + url.PathEscape(s.Commit) + "?recursive=true")
 	var files []source.File
-	for p != "" {
+	seenPage, seenPath := map[string]bool{}, map[string]bool{}
+	for u != "" {
+		if seenPage[u] {
+			return fmt.Errorf("huggingface: %s@%s: the listing's pages go round", s.Repo, s.Commit)
+		}
+		seenPage[u] = true
 		var page []entry
-		resp, err := c.getJSON(ctx, p, s.Repo+"@"+s.Commit+" files", &page)
+		resp, err := c.getJSON(ctx, u, s.Repo+"@"+s.Commit+" files", &page)
 		if err != nil {
 			return err
 		}
 		for _, e := range page {
-			if e.Type != "file" || !f.Takes(e.Path) {
+			if e.Type != "file" {
+				continue
+			}
+			if err := checkPath(e.Path); err != nil {
+				return err
+			}
+			if seenPath[e.Path] {
+				return fmt.Errorf("huggingface: the listing names %q twice", e.Path)
+			}
+			seenPath[e.Path] = true
+			if !f.Takes(e.Path) {
 				continue
 			}
 			file := source.File{Path: e.Path, Size: e.Size, GitBlob: e.OID, XetHash: e.XetHash}
@@ -384,7 +529,7 @@ func (c *Client) List(ctx context.Context, s *source.Snapshot, f source.Filter) 
 			}
 			files = append(files, file)
 		}
-		if p, err = c.next(resp.Header.Get("Link")); err != nil {
+		if u, err = c.next(resp.Header.Get("Link")); err != nil {
 			return err
 		}
 	}
@@ -395,22 +540,22 @@ func (c *Client) List(ctx context.Context, s *source.Snapshot, f source.Filter) 
 
 var linkNext = regexp.MustCompile(`<([^>]+)>\s*;\s*rel="next"`)
 
-// next is the path of a listing's next page, which must be on the Hub's
-// own host: the token goes nowhere else.
+// next is the URL of a listing's next page, which must be on the Hub's
+// own host and scheme: the token goes nowhere else.
 func (c *Client) next(link string) (string, error) {
 	m := linkNext.FindStringSubmatch(link)
 	if m == nil {
 		return "", nil
 	}
-	u, err := url.Parse(m[1])
+	b := c.base()
+	u, err := b.Parse(m[1])
 	if err != nil {
 		return "", err
 	}
-	base, _ := url.Parse(c.endpoint())
-	if u.IsAbs() && u.Host != base.Host {
-		return "", fmt.Errorf("huggingface: the next page is on %s, not the Hub", u.Host)
+	if u.Scheme != b.Scheme || u.Host != b.Host {
+		return "", fmt.Errorf("huggingface: the next page is at %s, not the Hub", redact(u))
 	}
-	return u.RequestURI(), nil
+	return u.String(), nil
 }
 
 // Access says, before anything is fetched, whether this client may read
@@ -426,7 +571,7 @@ func (c *Client) Access(ctx context.Context, s source.Snapshot) error {
 			small = f
 		}
 	}
-	resp, err := c.do(ctx, http.MethodHead, resolvePath(s, small.Path))
+	resp, err := c.do(ctx, http.MethodHead, c.url(resolvePath(s, small.Path)))
 	if err != nil {
 		return err
 	}
@@ -437,72 +582,110 @@ func (c *Client) Access(ctx context.Context, s source.Snapshot) error {
 	return nil
 }
 
+func redirect(code int) bool {
+	switch code {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther, http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	}
+	return false
+}
+
+// allowed says whether a download may be redirected to u: https (or
+// http, only from a Hub reached over http, a local one), to the Hub's own
+// host or one of Hosts.
+func (c *Client) allowed(u *url.URL) error {
+	b := c.base()
+	if u.Scheme != "https" && !(u.Scheme == "http" && b.Scheme == "http") {
+		return fmt.Errorf("a redirect to %s, which is not https", redact(u))
+	}
+	if u.Host == b.Host {
+		return nil
+	}
+	hosts := c.Hosts
+	if hosts == nil {
+		hosts = Hosts
+	}
+	name := u.Hostname()
+	for _, h := range hosts {
+		if suffix, ok := strings.CutPrefix(h, "*."); ok {
+			if strings.HasSuffix(name, "."+suffix) {
+				return nil
+			}
+		} else if name == h {
+			return nil
+		}
+	}
+	return fmt.Errorf("a redirect to %s, which this source does not allow", redact(u))
+}
+
 // Fetch reads one file of s and stores it through put, checked against
-// its hashes (source.Store), spooling in dir. A redirect to a CDN is
-// followed without the token.
+// its hashes (source.Store), spooling in dir. The Hub must say which
+// commit it serves (X-Repo-Commit), and every hop that says one must say
+// s.Commit. Redirects are followed one at a time, without the token, to
+// allowed hosts only.
 func (c *Client) Fetch(ctx context.Context, s source.Snapshot, f source.File, dir string, put source.Put) (source.Fetched, error) {
-	resp, err := c.do(ctx, http.MethodGet, resolvePath(s, f.Path))
+	what := s.Repo + "@" + s.Commit + ": " + f.Path
+	resp, err := c.do(ctx, http.MethodGet, c.url(resolvePath(s, f.Path)))
 	if err != nil {
 		return source.Fetched{}, err
 	}
-	defer resp.Body.Close()
-	what := s.Repo + "@" + s.Commit + ": " + f.Path
+	defer func() { resp.Body.Close() }()
 	if resp.StatusCode >= 400 {
 		return source.Fetched{}, failure(resp, what)
 	}
-	if got := resp.Header.Get("X-Repo-Commit"); got != "" && got != s.Commit {
+	got := resp.Header.Get("X-Repo-Commit")
+	if got == "" {
+		return source.Fetched{}, fmt.Errorf("huggingface: %s: the Hub did not say which commit it served: %w", what, source.ErrMoved)
+	}
+	if got != s.Commit {
 		return source.Fetched{}, fmt.Errorf("huggingface: %s: %s: %w", what, got, source.ErrMoved)
 	}
 	if etag := strings.Trim(resp.Header.Get("X-Linked-Etag"), `"`); f.SHA256 != "" && etag != "" && !strings.EqualFold(etag, f.SHA256) {
 		return source.Fetched{}, fmt.Errorf("huggingface: %s: the Hub's etag %s, its listing %s: %w", what, etag, f.SHA256, source.ErrMismatch)
 	}
-	body := resp.Body
-	switch resp.StatusCode {
-	case http.StatusOK:
-	case http.StatusFound, http.StatusTemporaryRedirect, http.StatusMovedPermanently, http.StatusSeeOther, http.StatusPermanentRedirect:
+	for hops := 0; redirect(resp.StatusCode); hops++ {
+		if hops >= MaxHops {
+			return source.Fetched{}, fmt.Errorf("huggingface: %s: more than %d redirects", what, MaxHops)
+		}
 		loc, err := resp.Location()
 		if err != nil {
 			return source.Fetched{}, fmt.Errorf("huggingface: %s: a redirect without a location", what)
 		}
-		cdn, err := c.download(ctx, loc)
+		if err := c.allowed(loc); err != nil {
+			return source.Fetched{}, fmt.Errorf("huggingface: %s: %w", what, err)
+		}
+		next, err := c.hop(ctx, loc)
 		if err != nil {
 			return source.Fetched{}, fmt.Errorf("huggingface: %s: %w", what, err)
 		}
-		defer cdn.Close()
-		body = cdn
-	default:
-		return source.Fetched{}, failure(resp, what)
-	}
-	return source.Store(ctx, f, body, dir, put)
-}
-
-// download follows a download's redirect. The token goes only to the
-// Hub's own host.
-func (c *Client) download(ctx context.Context, loc *url.URL) (io.ReadCloser, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, loc.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-	base, _ := url.Parse(c.endpoint())
-	if loc.Host == base.Host && c.Token != nil {
-		if tok, err := c.Token(ctx); err == nil && tok != "" {
-			req.Header.Set("Authorization", "Bearer "+tok)
+		resp.Body.Close()
+		resp = next
+		if h := resp.Header.Get("X-Repo-Commit"); h != "" && h != s.Commit {
+			return source.Fetched{}, fmt.Errorf("huggingface: %s: %s: %w", what, h, source.ErrMoved)
 		}
 	}
-	resp, err := c.http().Do(req)
+	if resp.StatusCode != http.StatusOK {
+		return source.Fetched{}, fmt.Errorf("huggingface: %s: the download answered %s", what, resp.Status)
+	}
+	return source.Store(ctx, f, resp.Body, dir, put)
+}
+
+// hop follows one redirect, without the token.
+func (c *Client) hop(ctx context.Context, u *url.URL) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
 		return nil, err
 	}
-	if resp.StatusCode != http.StatusOK {
-		defer resp.Body.Close()
-		return nil, fmt.Errorf("the download answered %s", resp.Status)
+	resp, err := c.client().Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("GET %s: %w", redact(u), plain(err))
 	}
-	return resp.Body, nil
+	return resp, nil
 }
 
-// Whoami is the Hub account the token reads as, "" when anonymous. A
-// gated repository's terms were accepted by that account, so the import
-// record names it.
+// Whoami is the Hub account the token reads as, "" when anonymous. An
+// import compares it with the account its lease names (accountMatchesLease)
+// and refuses when they differ; the record never names the account.
 func (c *Client) Whoami(ctx context.Context) (string, error) {
 	if c.Token == nil {
 		return "", nil
@@ -513,7 +696,7 @@ func (c *Client) Whoami(ctx context.Context) (string, error) {
 	var me struct {
 		Name string `json:"name"`
 	}
-	if _, err := c.getJSON(ctx, "/api/whoami-v2", "whoami", &me); err != nil {
+	if _, err := c.getJSON(ctx, c.url("/api/whoami-v2"), "whoami", &me); err != nil {
 		return "", err
 	}
 	return me.Name, nil

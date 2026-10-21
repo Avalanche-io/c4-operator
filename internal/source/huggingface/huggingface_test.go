@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -50,7 +51,8 @@ func hub(t *testing.T) *hftest.Server {
 }
 
 func client(s *hftest.Server, token string) *huggingface.Client {
-	return &huggingface.Client{Endpoint: s.URL, Token: func(context.Context) (string, error) { return token, nil }}
+	return &huggingface.Client{Endpoint: s.Endpoint, HTTP: s.Client(), Hosts: []string{"*." + hftest.Hub},
+		Token: func(context.Context) (string, error) { return token, nil }}
 }
 
 var files = map[string][]byte{
@@ -103,8 +105,8 @@ func TestResolveListFetch(t *testing.T) {
 			t.Fatalf("%s: %+v", f.Path, got)
 		}
 	}
-	if len(st.objs) != 4 || s.CDNAuth() != 0 {
-		t.Fatalf("stored %d, the CDN saw the token %d times", len(st.objs), s.CDNAuth())
+	if len(st.objs) != 4 || s.FollowedWithToken() != 0 {
+		t.Fatalf("stored %d, the CDN saw the token %d times", len(st.objs), s.FollowedWithToken())
 	}
 	if who, err := c.Whoami(context.Background()); err != nil || who != "noor" {
 		t.Fatalf("whoami %q %v", who, err)
@@ -269,18 +271,19 @@ func TestNotFound(t *testing.T) {
 	}
 }
 
-// One live read of a small public repository, anonymous, when asked for
-// (C4_HF_LIVE=1): the Hub answers as the fake does.
+// One live read of a small public test repository, anonymous, when asked
+// for (C4_HF_LIVE=1): a small file served by the Hub and a 450 KB LFS one
+// redirected to its CDN, both checked as the fake's are.
 func TestLiveSmallRepository(t *testing.T) {
 	if os.Getenv("C4_HF_LIVE") == "" {
 		t.Skip("set C4_HF_LIVE=1 to read the Hub")
 	}
 	c := &huggingface.Client{}
-	snap, err := c.Resolve(context.Background(), "", "depth-anything/Depth-Anything-V2-Small-hf", "main")
+	snap, err := c.Resolve(context.Background(), "", "hf-internal-testing/tiny-random-bert", "main")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := c.List(context.Background(), &snap, source.Filter{Include: []string{"config.json", "preprocessor_config.json"}}); err != nil {
+	if err := c.List(context.Background(), &snap, source.Filter{Include: []string{"config.json", "onnx/model.onnx"}}); err != nil {
 		t.Fatal(err)
 	}
 	if err := c.Access(context.Background(), snap); err != nil {
@@ -296,5 +299,213 @@ func TestLiveSmallRepository(t *testing.T) {
 	}
 	if len(st.objs) != 2 {
 		t.Fatalf("stored %d", len(st.objs))
+	}
+}
+
+func fetchAll(t *testing.T, c *huggingface.Client, snap source.Snapshot) (*store, error) {
+	t.Helper()
+	st := &store{}
+	for _, f := range snap.Files {
+		if _, err := c.Fetch(context.Background(), snap, f, t.TempDir(), st.put); err != nil {
+			return st, err
+		}
+	}
+	return st, nil
+}
+
+func snapshot(t *testing.T, s *hftest.Server, c *huggingface.Client, include ...string) source.Snapshot {
+	t.Helper()
+	snap, err := c.Resolve(context.Background(), "", "o/m", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := c.List(context.Background(), &snap, source.Filter{Include: include}); err != nil {
+		t.Fatal(err)
+	}
+	return snap
+}
+
+// A download goes only where the source allows, one hop at a time and a
+// few at most; nothing it was refused reaches the store.
+func TestRedirectsOnlyWhereAllowed(t *testing.T) {
+	for name, set := range map[string]func(*hftest.Server, *huggingface.Client){
+		"another host":          func(s *hftest.Server, _ *huggingface.Client) { s.CDNHost = "evil.example" },
+		"a look-alike host":     func(s *hftest.Server, _ *huggingface.Client) { s.CDNHost = "hub.example.evil.example" },
+		"the Hub's hosts alone": func(_ *hftest.Server, c *huggingface.Client) { c.Hosts = nil },
+		"too many hops":         func(s *hftest.Server, _ *huggingface.Client) { s.MultiHop = huggingface.MaxHops + 1 },
+	} {
+		s := hub(t)
+		s.Commit("model", "o/m", "main", files)
+		c := client(s, "hf_lease")
+		set(s, c)
+		st, err := fetchAll(t, c, snapshot(t, s, c, "model.safetensors"))
+		if err == nil || len(st.objs) != 0 {
+			t.Errorf("%s: %v, stored %d", name, err, len(st.objs))
+		}
+	}
+	s := hub(t)
+	s.Commit("model", "o/m", "main", files)
+	s.MultiHop = 2
+	c := client(s, "hf_lease")
+	if st, err := fetchAll(t, c, snapshot(t, s, c)); err != nil || len(st.objs) != 5 {
+		t.Fatalf("two hops within the limit: %v", err)
+	}
+}
+
+// The token goes only on the client's own requests to the Hub, never on a
+// redirect it follows: not to a CDN subdomain of the Hub, not on a
+// relative hop on the Hub itself.
+func TestTokenNeverOnAFollowedHop(t *testing.T) {
+	for _, sameHost := range []bool{false, true} {
+		s := hub(t)
+		s.Commit("model", "o/m", "main", files)
+		s.SameHostHop = sameHost
+		c := client(s, "hf_lease")
+		if _, err := fetchAll(t, c, snapshot(t, s, c)); err != nil {
+			t.Fatal(err)
+		}
+		if n := s.FollowedWithToken(); n != 0 {
+			t.Fatalf("same-host hop %v: %d followed requests carried the token", sameHost, n)
+		}
+	}
+}
+
+// A CDN's signed URL never appears in an error.
+func TestSignedURLsStayOutOfErrors(t *testing.T) {
+	for _, host := range []string{"evil.example", "down.hub.example"} {
+		s := hub(t)
+		s.Commit("model", "o/m", "main", files)
+		s.CDNHost = host
+		c := client(s, "")
+		_, err := fetchAll(t, c, snapshot(t, s, c, "model.safetensors"))
+		if err == nil || strings.Contains(err.Error(), "sig-secret") || strings.Contains(err.Error(), "Signature") {
+			t.Fatalf("%s: %v", host, err)
+		}
+	}
+}
+
+// The Hub must say which commit it served, and say the pinned one.
+func TestCommitRequired(t *testing.T) {
+	for name, set := range map[string]func(*hftest.Server){
+		"none":    func(s *hftest.Server) { s.NoCommit = true },
+		"another": func(s *hftest.Server) { s.LieCommit = strings.Repeat("e", 40) },
+	} {
+		s := hub(t)
+		s.Commit("model", "o/m", "main", files)
+		c := client(s, "")
+		snap := snapshot(t, s, c)
+		set(s)
+		if _, err := fetchAll(t, c, snap); !errors.Is(err, source.ErrMoved) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+}
+
+// A listing whose paths would leave the tree, or that names a path twice,
+// is refused whole.
+func TestListingPathsChecked(t *testing.T) {
+	for _, p := range []string{"", "/etc/passwd", "../up", "a/../../b", "a//b", "./a", "a\\b", "a\x00b", "config.json"} {
+		s := hub(t)
+		s.Commit("model", "o/m", "main", files)
+		s.ExtraEntries = []map[string]any{{"type": "file", "path": p, "size": 1, "oid": "aa"}}
+		c := client(s, "")
+		snap, err := c.Resolve(context.Background(), "", "o/m", "main")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := c.List(context.Background(), &snap, source.Filter{}); err == nil {
+			t.Errorf("%q was listed", p)
+		}
+	}
+}
+
+// A body longer than its file stops one byte past it.
+func TestOversizedBody(t *testing.T) {
+	s := hub(t)
+	s.Commit("model", "o/m", "main", files)
+	c := client(s, "")
+	snap := snapshot(t, s, c)
+	s.Oversize = 1 << 20
+	if st, err := fetchAll(t, c, snap); !errors.Is(err, source.ErrMismatch) || len(st.objs) != 0 {
+		t.Fatalf("%v, stored %d", err, len(st.objs))
+	}
+}
+
+// With no RateLimit-Policy the client still paces, keeping a request in
+// hand; callers at once are counted against the window together; a 429's
+// Retry-After is waited out.
+func TestPacingEdges(t *testing.T) {
+	s := hub(t)
+	s.Quota, s.NoPolicy = 3, true
+	many := map[string][]byte{}
+	for i := 0; i < 12; i++ {
+		many[strconv.Itoa(i)+".txt"] = []byte{byte(i)}
+	}
+	s.Commit("model", "o/m", "main", many)
+	var mu sync.Mutex
+	c := client(s, "")
+	c.Sleep = func(context.Context, time.Duration) error { mu.Lock(); defer mu.Unlock(); s.ResetWindow(); return nil }
+	snap := snapshot(t, s, c)
+	if _, err := c.Fetch(context.Background(), snap, snap.Files[0], t.TempDir(), (&store{}).put); err != nil {
+		t.Fatal(err)
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(snap.Files))
+	for _, f := range snap.Files[1:] {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, err := c.Fetch(context.Background(), snap, f, t.TempDir(), (&store{}).put)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if s.Throttled() != 0 {
+		t.Fatalf("throttled %d times", s.Throttled())
+	}
+
+	s2 := hub(t)
+	s2.Commit("model", "o/m", "main", files)
+	s2.Quota, s2.RetryAfter = 1, 300
+	var waited time.Duration
+	c2 := client(s2, "")
+	c2.Sleep = func(_ context.Context, d time.Duration) error { waited = max(waited, d); s2.ResetWindow(); return nil }
+	if _, err := client(s2, "").Resolve(context.Background(), "", "o/m", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c2.Resolve(context.Background(), "", "o/m", "main"); err != nil {
+		t.Fatal(err)
+	}
+	if waited != 300*time.Second {
+		t.Fatalf("waited at most %v; Retry-After said 300 s, longer than the window's 120", waited)
+	}
+}
+
+// A listing whose next page is itself is refused, not followed forever.
+func TestListingThatGoesRound(t *testing.T) {
+	s := hub(t)
+	s.Commit("model", "o/m", "main", files)
+	s.SelfNext = true
+	c := client(s, "")
+	snap, _ := c.Resolve(context.Background(), "", "o/m", "main")
+	if err := c.List(context.Background(), &snap, source.Filter{}); err == nil || !strings.Contains(err.Error(), "round") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// A signed-in account the Hub has not let in is refused as gated too.
+func TestGatedSignedIn(t *testing.T) {
+	s := hub(t)
+	rp, _ := s.Commit("model", "o/m", "main", files)
+	rp.Gated = "auto"
+	c := client(s, "hf_lease")
+	if err := c.Access(context.Background(), snapshot(t, s, c)); !errors.Is(err, source.ErrGated) || !strings.Contains(err.Error(), "authorized list") {
+		t.Fatalf("%v", err)
 	}
 }

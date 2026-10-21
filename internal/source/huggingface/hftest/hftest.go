@@ -8,14 +8,22 @@
 // whoami; the error codes (GatedRepo, RepoNotFound, RevisionNotFound,
 // EntryNotFound); and RateLimit headers on every answer, with a 429 once a
 // window is spent.
+//
+// It answers by name: the Hub at Hub (hub.example), its CDN at CDNHost
+// (cdn.hub.example, a subdomain, by default), any other name a test
+// redirects to at the CDN too. Client() is an HTTP client that reaches
+// those names. Its knobs make the Hub misbehave the ways a hostile or
+// broken one can.
 package hftest
 
 import (
+	"context"
 	"crypto/sha1"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -29,27 +37,57 @@ import (
 // with its SHA-256 and served by redirect to the CDN.
 const LFSThreshold = 64
 
-// Server is the fake Hub, and CDN the host large files redirect to.
+// Hub is the fake Hub's name.
+const Hub = "hub.example"
+
+// Signature is the query a CDN location carries, as a presigned URL does:
+// it must never appear in an error.
+const Signature = "X-Amz-Signature=sig-secret"
+
+// Server is the fake Hub and its CDN.
 type Server struct {
-	*httptest.Server
-	CDN *httptest.Server
+	hub, cdnSrv *httptest.Server
+	// Endpoint is the Hub's address for a client.
+	Endpoint string
 	// Tokens maps a token to its account.
 	Tokens map[string]string
 	// PageSize is how many entries a listing page holds (default 2, so
 	// tests page).
 	PageSize int
 	// Quota is each rate bucket's requests per window (0: unlimited).
-	Quota int
+	// NoPolicy leaves out RateLimit-Policy; RetryAfter sets Retry-After on
+	// a 429.
+	Quota      int
+	NoPolicy   bool
+	RetryAfter int
 
-	mu    sync.Mutex
-	repos map[string]*Repo
-	used  map[string]int
-	// CDNAuth counts CDN requests that carried a token: it must stay 0.
-	cdnAuth int
-	// corrupt serves wrong bytes for a path.
+	// CDNHost is where a large file's resolve redirects (default
+	// cdn.hub.example).
+	CDNHost string
+	// SameHostHop redirects first to a relative path on the Hub, which
+	// then redirects to the CDN, as a renamed repository does.
+	SameHostHop bool
+	// MultiHop is how many times the CDN redirects to itself before it
+	// serves.
+	MultiHop int
+	// LieCommit answers every resolve with this X-Repo-Commit; NoCommit
+	// answers with none.
+	LieCommit string
+	NoCommit  bool
+	// Oversize serves this many bytes more than a file has.
+	Oversize int
+	// ExtraEntries are added to a listing's first page as they are.
+	ExtraEntries []map[string]any
+	// SelfNext makes a listing's next page itself.
+	SelfNext bool
+
+	mu        sync.Mutex
+	repos     map[string]*Repo
+	used      map[string]int
+	followed  int // followed redirects that carried a token: must stay 0
+	throttled int
 	corrupt   map[string]bool
 	calls     []string
-	throttled int
 }
 
 // Repo is one repository.
@@ -66,14 +104,34 @@ type Repo struct {
 
 // New starts the fake Hub and its CDN.
 func New() *Server {
-	s := &Server{Tokens: map[string]string{}, PageSize: 2, repos: map[string]*Repo{}, used: map[string]int{}, corrupt: map[string]bool{}}
-	s.CDN = httptest.NewServer(http.HandlerFunc(s.cdn))
-	s.Server = httptest.NewServer(http.HandlerFunc(s.serve))
+	s := &Server{Tokens: map[string]string{}, PageSize: 2, CDNHost: "cdn." + Hub, Endpoint: "http://" + Hub,
+		repos: map[string]*Repo{}, used: map[string]int{}, corrupt: map[string]bool{}}
+	s.cdnSrv = httptest.NewServer(http.HandlerFunc(s.cdn))
+	s.hub = httptest.NewServer(http.HandlerFunc(s.serve))
 	return s
 }
 
 // Close stops both servers.
-func (s *Server) Close() { s.Server.Close(); s.CDN.Close() }
+func (s *Server) Close() { s.hub.Close(); s.cdnSrv.Close() }
+
+// Client reaches the fake's names: the Hub at Hub, every other name at
+// the CDN. A name starting down. never answers. It follows no redirect on its own.
+func (s *Server) Client() *http.Client {
+	hub, cdn := s.hub.Listener.Addr().String(), s.cdnSrv.Listener.Addr().String()
+	d := &net.Dialer{}
+	return &http.Client{Transport: &http.Transport{DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, _, _ := net.SplitHostPort(addr)
+		switch {
+		case strings.HasPrefix(host, "down."):
+			return nil, fmt.Errorf("hftest: %s is down", host)
+		case host == Hub:
+			return d.DialContext(ctx, network, hub)
+		case strings.HasSuffix(host, ".example"):
+			return d.DialContext(ctx, network, cdn)
+		}
+		return nil, fmt.Errorf("hftest: no such host %s", host)
+	}}}
+}
 
 // Commit adds a commit of files to the repository (owner/name, type model
 // or dataset) and points ref at it, returning its 40-hex SHA.
@@ -115,8 +173,9 @@ func (s *Server) Corrupt(path string) { s.mu.Lock(); s.corrupt[path] = true; s.m
 // ResetWindow starts every rate window afresh, as time passing does.
 func (s *Server) ResetWindow() { s.mu.Lock(); s.used = map[string]int{}; s.mu.Unlock() }
 
-// CDNAuth is how many CDN requests carried a token.
-func (s *Server) CDNAuth() int { s.mu.Lock(); defer s.mu.Unlock(); return s.cdnAuth }
+// FollowedWithToken is how many followed redirects (to the CDN, or a hop on
+// the Hub) carried a token.
+func (s *Server) FollowedWithToken() int { s.mu.Lock(); defer s.mu.Unlock(); return s.followed }
 
 // Throttled is how many requests were answered 429.
 func (s *Server) Throttled() int { s.mu.Lock(); defer s.mu.Unlock(); return s.throttled }
@@ -154,12 +213,11 @@ func (s *Server) rate(w http.ResponseWriter, bucket string) bool {
 		return true
 	}
 	s.used[bucket]++
-	left := s.Quota - s.used[bucket]
-	if left < 0 {
-		left = 0
-	}
+	left := max(s.Quota-s.used[bucket], 0)
 	w.Header().Set("RateLimit", fmt.Sprintf(`"%s";r=%d;t=120`, bucket, left))
-	w.Header().Set("RateLimit-Policy", fmt.Sprintf(`"fixed window";"%s";q=%d;w=300`, bucket, s.Quota))
+	if !s.NoPolicy {
+		w.Header().Set("RateLimit-Policy", fmt.Sprintf(`"fixed window";"%s";q=%d;w=300`, bucket, s.Quota))
+	}
 	return s.used[bucket] <= s.Quota
 }
 
@@ -176,12 +234,25 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.calls = append(s.calls, r.Method+" "+r.URL.RequestURI())
+	p := r.URL.EscapedPath()
+	if strings.HasPrefix(p, "/hop/") {
+		// a same-host hop: a client follows it without the token
+		if r.Header.Get("Authorization") != "" {
+			s.followed++
+		}
+		w.Header().Set("Location", "http://"+s.CDNHost+"/xet-bridge/"+strings.TrimPrefix(p, "/hop/")+"?"+Signature)
+		w.WriteHeader(http.StatusFound)
+		return
+	}
 	bucket := "api"
-	if strings.Contains(r.URL.Path, "/resolve/") {
+	if strings.Contains(p, "/resolve/") {
 		bucket = "resolvers"
 	}
 	if !s.rate(w, bucket) {
 		s.throttled++
+		if s.RetryAfter > 0 {
+			w.Header().Set("Retry-After", strconv.Itoa(s.RetryAfter))
+		}
 		errorAnswer(w, http.StatusTooManyRequests, "", "Too many requests")
 		return
 	}
@@ -190,7 +261,6 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		errorAnswer(w, http.StatusUnauthorized, "", "Invalid credentials in Authorization header")
 		return
 	}
-	p := r.URL.EscapedPath()
 	switch {
 	case p == "/api/whoami-v2":
 		if acct == "" {
@@ -279,11 +349,15 @@ func (s *Server) api(w http.ResponseWriter, r *http.Request, p, acct string) {
 		}
 		if start == 0 {
 			page = append(page, map[string]any{"type": "directory", "path": "onnx", "oid": "0000"})
+			page = append(page, s.ExtraEntries...)
 		}
-		if end < len(paths) {
+		switch {
+		case s.SelfNext:
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?%s>; rel="next"`, s.Endpoint, p, r.URL.RawQuery))
+		case end < len(paths):
 			q := r.URL.Query()
 			q.Set("cursor", strconv.Itoa(end))
-			w.Header().Set("Link", fmt.Sprintf(`<%s%s?%s>; rel="next"`, s.URL, p, q.Encode()))
+			w.Header().Set("Link", fmt.Sprintf(`<%s%s?%s>; rel="next"`, s.Endpoint, p, q.Encode()))
 		}
 		_ = json.NewEncoder(w).Encode(page)
 	default:
@@ -308,7 +382,13 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, p, acct string)
 		return
 	}
 	if rp.Gated != "" && !rp.Access[acct] {
-		errorAnswer(w, http.StatusUnauthorized, "GatedRepo", "Access to model "+rp.Name+" is restricted. You must have access to it and be authenticated to access it. Please log in.")
+		status := http.StatusUnauthorized
+		msg := "Access to model " + rp.Name + " is restricted. You must have access to it and be authenticated to access it. Please log in."
+		if acct != "" {
+			status = http.StatusForbidden
+			msg = "Access to model " + rp.Name + " is restricted and you are not in the authorized list. Visit https://" + Hub + "/" + rp.Name + " to ask for access."
+		}
+		errorAnswer(w, status, "GatedRepo", msg)
 		return
 	}
 	ref, _ := url.PathUnescape(parts[3])
@@ -323,17 +403,25 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, p, acct string)
 		errorAnswer(w, http.StatusNotFound, "EntryNotFound", path+" does not exist on \""+ref+"\"")
 		return
 	}
-	w.Header().Set("X-Repo-Commit", commit)
-	if s.corrupt[path] {
-		b = append([]byte("corrupt "), b...)[:len(b)]
+	switch {
+	case s.NoCommit:
+	case s.LieCommit != "":
+		w.Header().Set("X-Repo-Commit", s.LieCommit)
+	default:
+		w.Header().Set("X-Repo-Commit", commit)
 	}
 	if len(b) >= LFSThreshold {
 		w.Header().Set("X-Linked-Etag", `"`+sha(files[path])+`"`)
 		w.Header().Set("X-Linked-Size", strconv.Itoa(len(b)))
-		w.Header().Set("Location", s.CDN.URL+"/xet-bridge/"+commit+"/"+url.PathEscape(path))
+		if s.SameHostHop {
+			w.Header().Set("Location", "/hop/"+commit+"/"+url.PathEscape(path))
+		} else {
+			w.Header().Set("Location", "http://"+s.CDNHost+"/xet-bridge/"+commit+"/"+url.PathEscape(path)+"?"+Signature)
+		}
 		w.WriteHeader(http.StatusFound)
 		return
 	}
+	b = s.served(path, b)
 	w.Header().Set("Content-Length", strconv.Itoa(len(b)))
 	if r.Method == http.MethodHead {
 		return
@@ -341,12 +429,31 @@ func (s *Server) resolve(w http.ResponseWriter, r *http.Request, p, acct string)
 	_, _ = w.Write(b)
 }
 
-// cdn serves a large file's bytes from the redirect.
+// served is a file's bytes as the knobs serve them.
+func (s *Server) served(path string, b []byte) []byte {
+	if s.corrupt[path] {
+		b = append([]byte("corrupt "), b...)[:len(b)]
+	}
+	if s.Oversize > 0 {
+		b = append(append([]byte(nil), b...), make([]byte, s.Oversize)...)
+	}
+	return b
+}
+
+// cdn serves a large file's bytes from the redirect, after MultiHop
+// redirects to itself.
 func (s *Server) cdn(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if r.Header.Get("Authorization") != "" {
-		s.cdnAuth++
+		s.followed++
+	}
+	if n, _ := strconv.Atoi(r.URL.Query().Get("hop")); n < s.MultiHop {
+		q := r.URL.Query()
+		q.Set("hop", strconv.Itoa(n+1))
+		w.Header().Set("Location", "http://"+r.Host+r.URL.EscapedPath()+"?"+q.Encode())
+		w.WriteHeader(http.StatusFound)
+		return
 	}
 	parts := strings.SplitN(strings.TrimPrefix(r.URL.EscapedPath(), "/xet-bridge/"), "/", 2)
 	if len(parts) != 2 {
@@ -356,10 +463,7 @@ func (s *Server) cdn(w http.ResponseWriter, r *http.Request) {
 	path, _ := url.PathUnescape(parts[1])
 	for _, rp := range s.repos {
 		if b, ok := rp.commits[parts[0]][path]; ok {
-			if s.corrupt[path] {
-				b = append([]byte("corrupt "), b...)[:len(b)]
-			}
-			_, _ = w.Write(b)
+			_, _ = w.Write(s.served(path, b))
 			return
 		}
 	}
