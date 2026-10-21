@@ -37,6 +37,7 @@ find) if [ "$3" = scout ]; then printf '` + sessions[0] + `\t` + cd + `/projects
 register) echo "$3 $5" >>` + members + `; echo "$3: session $5, phase 0, epoch 0" ;;
 hooks) printf '{"hooks":{"PostToolUse":[{"matcher":"*","hooks":[{"type":"command","command":"BIN checkpoint --hook","timeout":10}]}],"Stop":[{"hooks":[{"type":"command","command":"BIN checkpoint --hook","timeout":30}]}]}}\n' ;;
 ls) echo "MEMBER  STATE  SESSION"; while read n s; do echo "$n  idle  $s"; done <` + members + ` ;;
+observe) cat ` + filepath.Join(dir, "observe.json") + ` ;;
 unregister) grep -v "^$3 " ` + members + ` >` + members + `.new; mv ` + members + `.new ` + members + ` ;;
 esac
 `
@@ -352,5 +353,41 @@ func TestSessionsFirstTouch(t *testing.T) {
 	if err := Sessions(context.Background(), Out{W: &out}, SessionsArgs{Agent: limited}); err != nil ||
 		!strings.HasSuffix(out.String(), "\nscout is at its limit and waits for it to reset, or for you\n") {
 		t.Errorf("at its limit: %v\n%s", err, out.String())
+	}
+}
+
+// agents add with no name lists the running sessions that are not agents
+// yet, and adds the one picked, by its own name; no terminal, no pick.
+func TestAddAgentPicksFromTheSessions(t *testing.T) {
+	member, free := "0b5e7c52-8a6f-4d0e-9b1c-3f2a4e6d8c10", "4f9c1a96-ce03-4c4d-8f5a-7d6e8c0b2a54"
+	cd, folder := t.TempDir(), t.TempDir()
+	bin, calls := fakeAgent(t, cd, folder, member, free)
+	var out bytes.Buffer
+	if err := AddAgent(context.Background(), Out{W: &out}, AgentsArgs{Name: "scout", ConfigDir: cd, Yes: true, AgentBin: bin}); err != nil {
+		t.Fatal(err)
+	}
+	os.WriteFile(filepath.Join(filepath.Dir(bin), "observe.json"), []byte(`{"sessions":[
+{"session":"`+member+`","name":"scout","running":true,"word":"working","cwd":"`+folder+`"},
+{"session":"`+free+`","name":"porter","running":true,"word":"idle","cwd":"`+folder+`"},
+{"session":"5a0d2ba7-df14-4d5e-9a6b-8e7f9d1c3b65","name":"gone","running":false,"word":"done"}]}`), 0o644)
+	a := AgentsArgs{ConfigDir: cd, AgentBin: bin}
+	o := Out{W: &out, In: strings.NewReader("1\n")}
+	if err := PickAgent(context.Background(), &o, &a); err == nil || !strings.Contains(err.Error(), "give the agent's name") {
+		t.Fatalf("no terminal: %v", err)
+	}
+	a.Terminal = true
+	out.Reset()
+	o = Out{W: &out, In: strings.NewReader("1\ny\n")}
+	if err := PickAgent(context.Background(), &o, &a); err != nil || a.Name != "porter" || a.Session != free {
+		t.Fatalf("pick: %v %+v\n%s", err, a, out.String())
+	}
+	if s := out.String(); strings.Contains(s, "scout") || strings.Contains(s, "gone") || !strings.Contains(s, "  1  porter · idle") || !strings.Contains(s, "Which one? [1-1]") {
+		t.Errorf("listed:\n%s", s)
+	}
+	if err := AddAgent(context.Background(), o, a); err != nil {
+		t.Fatalf("add after pick: %v\n%s", err, out.String())
+	}
+	if c, _ := os.ReadFile(calls); !strings.Contains(string(c), "register --name porter --session "+free) {
+		t.Errorf("c4-agent was asked:\n%s", c)
 	}
 }

@@ -77,7 +77,7 @@ Agents
   agent run                what the service runs: the power reader and c4-agent runner, restarted if it stops
   agent power              offer this machine's agent slots by its battery: stop below 25%, resume at 90% (--once to read it now)
   agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all, --open for the HUD)
-  agents add NAME          make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first)
+  agents add [NAME]        make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first; no NAME lists the sessions to pick from)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
   integrations             what this machine could add (Claude Code today), and which are on
@@ -872,6 +872,12 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			a := farmcli.AgentsArgs{Name: pos[1], Session: *session, ConfigDir: *configDir, Folder: *folder, Yes: *yes || integrated, Terminal: isTerminal(stdin)}
 			if pos[0] == "rm" {
 				return farmcli.RemoveAgent(ctx, o, a)
+			}
+			return farmcli.AddAgent(ctx, o, a)
+		case len(pos) == 1 && pos[0] == "add":
+			a := farmcli.AgentsArgs{ConfigDir: *configDir, Folder: *folder, Yes: *yes || cfg.Integrations[farmcli.Claude], Terminal: isTerminal(stdin)}
+			if err := farmcli.PickAgent(ctx, &o, &a); err != nil {
+				return err
 			}
 			return farmcli.AddAgent(ctx, o, a)
 		case len(pos) == 1 && pos[0] == "ls":

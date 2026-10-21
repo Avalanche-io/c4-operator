@@ -12,6 +12,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 )
 
@@ -252,6 +253,68 @@ func AddAgent(ctx context.Context, o Out, a AgentsArgs) error {
 		o.printf("installed %s; c4 farm agents rm %s takes them out\n", andList(added), a.Name)
 	}
 	o.printf("added     %s\n", a.Name)
+	return nil
+}
+
+// PickAgent is `c4 farm agents add` with no name, at a terminal: the
+// running sessions on this machine that are not agents yet, numbered, and
+// the person's pick, named as the session is (or as the person names it).
+// It fills Name and Session for AddAgent, which asks its own question
+// after. Nothing is changed here.
+func PickAgent(ctx context.Context, o *Out, a *AgentsArgs) error {
+	if !a.Terminal || o.In == nil {
+		return errors.New("give the agent's name: c4 farm agents add NAME (at a terminal, c4 farm agents add alone lists the sessions to pick from)")
+	}
+	// one reader for every answer, so none is lost to another's buffer
+	o.In = bufio.NewReader(o.In)
+	bin, err := a.agentBin()
+	if err != nil {
+		return err
+	}
+	rows, _, err := readSessions(ctx, SessionsArgs{Agent: bin})
+	if err != nil {
+		return err
+	}
+	members, err := listMembers(ctx, bin)
+	if err != nil {
+		return err
+	}
+	isMember := map[string]bool{}
+	for _, s := range members {
+		isMember[s] = true
+	}
+	var pick []row
+	for _, r := range rows {
+		if !r.ended() && !isMember[r.Session] {
+			pick = append(pick, r)
+		}
+	}
+	if len(pick) == 0 {
+		return errors.New("no running Claude Code session here that is not an agent already; start one with claude, then c4 farm agents add")
+	}
+	home, _ := os.UserHomeDir()
+	for i, r := range pick {
+		dir := r.Cwd
+		if home != "" && strings.HasPrefix(dir, home+string(filepath.Separator)) {
+			dir = "~" + dir[len(home):]
+		}
+		o.printf("%3d  %s · %s · %s\n", i+1, r.label(), r.Word, dir)
+	}
+	o.printf("Which one? [1-%d] ", len(pick))
+	line, _ := o.In.(*bufio.Reader).ReadString('\n')
+	n, err := strconv.Atoi(strings.TrimSpace(line))
+	if err != nil || n < 1 || n > len(pick) {
+		return errors.New("no session picked: nothing was changed")
+	}
+	r := pick[n-1]
+	a.Session, a.Name = r.Session, r.Name
+	if a.Name == "" {
+		o.printf("Name it: ")
+		line, _ := o.In.(*bufio.Reader).ReadString('\n')
+		if a.Name = strings.TrimSpace(line); a.Name == "" {
+			return errors.New("no name given: nothing was changed")
+		}
+	}
 	return nil
 }
 
