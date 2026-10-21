@@ -159,8 +159,8 @@ func TestTheWalk(t *testing.T) {
 	if d.Number != 1 || d.Message != "Issue #1 will become a job in saltmarsh for artist; watch it in the HUD." {
 		t.Fatalf("new issue: %+v", d)
 	}
-	says(t, e.page("supervisor"), "c4 hasn&#39;t been allowed to submit work for artist yet: allow it on your page in the HUD",
-		`href="/?as=artist#/me"`)
+	says(t, e.page("supervisor"), "c4 hasn&#39;t been allowed to submit work for artist yet: artist allows it on", `href="/?as=artist#/me">their page in the HUD`)
+	says(t, e.page("artist"), "c4 hasn&#39;t been allowed to submit work for artist yet: allow it on", `href="/?as=artist#/me">your page in the HUD`)
 
 	e.hud.set(func() { e.hud.granted["artist"] = true })
 	says(t, e.page("supervisor"), "Issue #1 will become a job in saltmarsh for artist;")

@@ -158,8 +158,13 @@ func (g *GitHub) issueSays(ctx context.Context, is githubtest.Issue, j *api.Job,
 		log.Printf("reading %s's grant: %v", assignee.Person, err)
 		return []line{{Text: "The HUD did not answer; this page asks again in a few seconds.", Warn: true}}
 	case !ok:
-		return []line{{Text: fmt.Sprintf("c4 hasn't been allowed to submit work for %s yet: allow it on your page in the HUD", assignee.Person),
-			Link: hudLink(assignee.Person, "me"), LinkText: assignee.Person + "'s page", Warn: true}}
+		s := line{Text: fmt.Sprintf("c4 hasn't been allowed to submit work for %s yet: allow it on", assignee.Person),
+			Link: hudLink(assignee.Person, "me"), LinkText: "your page in the HUD", Warn: true}
+		if assignee.Person != as.Person {
+			s.Text = fmt.Sprintf("c4 hasn't been allowed to submit work for %s yet: %s allows it on", assignee.Person, assignee.Person)
+			s.LinkText = "their page in the HUD"
+		}
+		return []line{s}
 	}
 	return []line{{Text: fmt.Sprintf("Issue #%d will become a job in %s for %s;", is.Number, g.cfg.Project, assignee.Person),
 		Link: hudLink(as.Person, "queue"), LinkText: "watch it in the HUD"}}

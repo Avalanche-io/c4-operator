@@ -14,6 +14,8 @@ package sandbox
 
 import (
 	"context"
+	"crypto/sha1"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -198,7 +200,8 @@ func (g *GitHub) Pull(ctx context.Context, in pullIn) (done, error) {
 	g.pulls[in.Issue] = n
 	g.mu.Unlock()
 	body := fmt.Sprintf("Closes #%d.\n\nC4-Job: %s/%s", in.Issue, g.cfg.Namespace, j.Name)
-	sha := fmt.Sprintf("%040x", time.Now().UnixNano())
+	h := sha1.Sum([]byte(fmt.Sprintf("%s/%s#%d %d", g.cfg.Owner, g.cfg.Repo, n, time.Now().UnixNano())))
+	sha := hex.EncodeToString(h[:])
 	g.gh.AddPull(n, is.Title, body, sha, g.cfg.Agent)
 	g.deliver("pull_request", g.pullPayload(n, "opened"))
 	return done{Number: n, Message: fmt.Sprintf("The agent opened pull request #%d for %s. Its review is the job's review: approve it, or request changes, once the job asks.", n, j.Name)}, nil
