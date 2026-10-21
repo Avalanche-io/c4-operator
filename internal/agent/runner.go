@@ -97,6 +97,11 @@ type Runner struct {
 	ViewSrc ViewSource
 
 	seen map[types.UID]bool
+	// limitRead is how far each member's transcript was read for usage
+	// limits; limitUntil and limitWhy, the hold one put on the machine.
+	limitRead  map[string]int64
+	limitUntil time.Time
+	limitWhy   string
 	// bgSince is when the runner first saw a block idle over background
 	// work; bgLogged, the pods whose wait for it was logged.
 	bgSince  map[types.UID]time.Time
@@ -166,6 +171,9 @@ func (r *Runner) Tick(ctx context.Context) error {
 	}
 	if r.bgSince == nil {
 		r.bgSince, r.bgLogged = map[types.UID]time.Time{}, map[types.UID]bool{}
+	}
+	if r.limitRead == nil {
+		r.limitRead = map[string]int64{}
 	}
 	if err := r.heartbeat(ctx); err != nil {
 		return fmt.Errorf("node %s: %w", r.Node, err)
@@ -303,6 +311,10 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		if err := r.relay(ctx, p, u); err != nil {
 			r.logf("%s: safe points: %v", m.Name, err)
 		}
+	}
+	// a turn that ended at a usage limit holds the machine's slots
+	if live && act.Idle() {
+		r.noteUsageLimits(m)
 	}
 	// a member idle between turns, with messages it has not read: wake it
 	if live && !m.Block && p.Status.Phase == corev1.PodRunning && act.Idle() {
@@ -687,6 +699,9 @@ func (r *Runner) capacity(ctx context.Context, n *corev1.Node) error {
 	if r.Capacity != nil {
 		slots, reason = r.Capacity()
 		slots = max(0, min(slots, r.Slots))
+	}
+	if held, why := r.limitHold(); held {
+		slots, reason = 0, why
 	}
 	if have, err := strconv.Atoi(n.Labels[c4v1.LabelSlotLimit]); err == nil && slots > have {
 		// Raise only once the higher value has held for RaiseAfter.

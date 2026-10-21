@@ -209,6 +209,19 @@ sessions live. It is a host runner.
   Running and their sessions stopped, and resumes each one from its last
   turn.
 
+**A usage limit is a capacity drop.** On a host runner every member signs
+in as the same person, so when one member's turn ends at a usage limit (the
+session, weekly or spend window, or a model's own), the machine has no
+capacity until it resets. The runner sees the CLI's rate-limit record in the
+transcript, and offers no slots until a minute past the reset the CLI gave.
+With no reset time (a spend limit, a model's limit), it tries again after
+`C4_USAGE_LIMIT_PROBE` (default 30 minutes). The node's capacity reason says
+so ("usage limit: You've hit your session limit · resets 1:10am ..."). The
+queue yields and holds members as for any drop in capacity, and brings them
+back when the slots return. In a pod, a turn that hits a limit ends the
+attempt with exit 75 and the limit as its message, not as the block giving
+up.
+
 **An idle member is woken for its messages.** A member idle between turns
 does not see a message until it takes a turn, and the CLI cannot put one
 into a running session. So when a member's pod has messages it has not read

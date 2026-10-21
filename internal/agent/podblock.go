@@ -63,6 +63,10 @@ const (
 	// PodBlockNeedsInformation: the brief lacks information only a person
 	// could give (the queue's NeedsInformation; c4-unit needs's status).
 	PodBlockNeedsInformation = 12
+	// PodBlockUsageLimit: the turn hit a usage limit; the termination
+	// message is the limit and when it resets. Not the block's failure: it
+	// runs again once the window resets, from its view (EX_TEMPFAIL).
+	PodBlockUsageLimit = 75
 )
 
 func (b *PodBlock) logf(format string, args ...any) {
@@ -160,6 +164,13 @@ func (b *PodBlock) Run(ctx context.Context) (int, error) {
 				return 1, err
 			}
 			lost = lostText(bg) + "\n\n"
+		}
+		if l, _, err := scanUsageLimit(m.Transcript, 0); err == nil && l != nil && !l.At.Before(turnFrom.Truncate(time.Second)) {
+			b.logf("%s: its turn hit a %s usage limit: %s", m.Name, l.Kind, l.Text)
+			if err := os.WriteFile(b.terminationLog(), []byte(l.Why()), 0o644); err != nil {
+				return 1, err
+			}
+			return PodBlockUsageLimit, nil
 		}
 		turnFrom = time.Now()
 		if msg, ok, err := takeNeeds(u); ok {

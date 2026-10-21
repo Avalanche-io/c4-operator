@@ -35,6 +35,9 @@ fi
 if [ -n "$FAKE_ASK" ] && [ "$(wc -l < "$FAKE_LOG")" -eq 1 ]; then
   printf '{"id":"0#1","to":"%s","at":"%s"}\n' "$FAKE_ASK_TO" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$C4_OUTPUT/.c4/asking"; exit 0
 fi
+if [ -n "$FAKE_LIMIT" ]; then
+  printf '{"type":"assistant","timestamp":"%s","isApiErrorMessage":true,"error":"rate_limit","apiErrorStatus":429,"message":{"role":"assistant","model":"<synthetic>","content":[{"type":"text","text":"%s"}]}}\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$FAKE_LIMIT" >> "$tr"; exit 0
+fi
 if [ -n "$FAKE_SLEEP" ]; then exec sleep "$FAKE_SLEEP"; fi
 if [ -n "$FAKE_QUIET" ]; then exit 0; fi
 if [ -n "$FAKE_WITHDRAW" ]; then echo "$FAKE_WITHDRAW" > "$C4_OUTPUT/.c4/withdraw"; exit 0; fi
