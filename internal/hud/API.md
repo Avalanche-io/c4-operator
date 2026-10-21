@@ -794,7 +794,11 @@ grant's record. It is refused, never created as the caller's own job:
 `403` when the caller is not a tracker's sync, `trackerRef` names no
 Tracker in the namespace, the person has no grant to it, the grant was
 revoked or has ended, or it does not cover the job's pools or class;
-`400` without `trackerRef`; `501` on a farm without grants installed.
+`400` without `trackerRef`; `501` on a farm without grants installed. A
+refusal answers `{ error, reason }`, `reason` being `no-grant`,
+`grant-lapsed` (revoked or ended), `grant-uncovered` (not the job's pools
+or class), `no-tracker`, `not-sync` or `not-installed`, so the sync tells
+the person what to do.
 `replaces` names a forecast job (`spec.forecast`) in the namespace that
 this real job replaces: once the job is made, the forecast is deleted and
 booked (kind `replaced`) with a signed control record of kind `replace`.

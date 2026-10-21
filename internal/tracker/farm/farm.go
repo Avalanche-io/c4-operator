@@ -142,6 +142,9 @@ type HUD struct {
 type APIError struct {
 	Status int
 	Msg    string
+	// Reason is which refusal it is, where the HUD says (a submission
+	// for a person: api.RefusedNoGrant and the rest).
+	Reason string
 	// Body is the answer as sent, for fields beside its error.
 	Body []byte
 }
@@ -193,10 +196,11 @@ func (h *HUD) do(ctx context.Context, method, path string, ctype string, body []
 	}
 	if resp.StatusCode >= 300 {
 		var e struct {
-			Error string `json:"error"`
+			Error  string `json:"error"`
+			Reason string `json:"reason"`
 		}
 		_ = json.Unmarshal(data, &e)
-		return &APIError{Status: resp.StatusCode, Msg: e.Error, Body: data}
+		return &APIError{Status: resp.StatusCode, Msg: e.Error, Reason: e.Reason, Body: data}
 	}
 	if raw, ok := out.(*[]byte); ok {
 		*raw = data

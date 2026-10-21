@@ -36,6 +36,9 @@ type Farm struct {
 	// Grants are the people who let the tracker submit for them; a
 	// submission for anyone else is refused 403, as the HUD refuses it.
 	Grants map[string]bool
+	// Refusal, when set, is how the HUD refuses every submission for a
+	// person (a revoked grant, a sync it does not know).
+	Refusal *farm.APIError
 	// Log is the farm's transition log; Oldest, when set, is where it
 	// begins (an older cursor is gone).
 	Log    []api.Transition
@@ -88,8 +91,11 @@ func (f *Farm) Submit(_ context.Context, r farm.JobRequest) (farm.JobRef, error)
 		}
 		return ref, nil
 	}
+	if r.For != "" && f.Refusal != nil {
+		return farm.JobRef{}, f.Refusal
+	}
 	if r.For != "" && !f.Grants[r.For] {
-		return farm.JobRef{}, &farm.APIError{Status: http.StatusForbidden, Msg: "no grant from " + r.For + " for tracker " + r.TrackerRef}
+		return farm.JobRef{}, &farm.APIError{Status: http.StatusForbidden, Reason: api.RefusedNoGrant, Msg: "no grant from " + r.For + " for tracker " + r.TrackerRef}
 	}
 	f.Submitted = append(f.Submitted, r)
 	owner := "c4-sync"

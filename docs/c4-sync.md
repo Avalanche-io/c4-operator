@@ -226,7 +226,11 @@ kubectl -n <ns> describe tracker <name>
 
 A Tracker reports `Ready`, `RateLimited` (with when it resumes) and
 `Intake` (`MilestoneCoversNothing` when a milestone rule names no
-`covers`, or an entity lacks a field it names; `NameTaken` when a job
+`covers`, or an entity lacks a field it names; `NoGrant`, `GrantLapsed` or
+`GrantUncovered` when a job for a person waits on their grant, which they
+give on their own page in the HUD or with `c4 farm grant <tracker>`;
+`Refused` when the HUD refused it for another reason, in its words;
+`NameTaken` when a job
 someone else made already has the name an entity's job would take, which
 c4-sync never adopts). `kubectl get milestones`
 shows each Milestone's due date, how many jobs it covers and their worst

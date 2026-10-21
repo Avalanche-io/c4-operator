@@ -311,13 +311,27 @@ type errGrant struct {
 
 func (e *errGrant) Error() string { return e.msg }
 
+// grantRefused is a submission for a person refused for a reason a
+// tracker's sync tells the person about (api.SubmitRefused): it answers
+// beside the error, and unwraps to its errGrant for the status.
+type grantRefused struct {
+	*errGrant
+	reason string
+}
+
+func (e *grantRefused) Unwrap() error { return e.errGrant }
+
+func refuseGrant(code int, reason, msg string) error {
+	return &grantRefused{&errGrant{code, msg}, reason}
+}
+
 // grantFor checks a submission for another person: only a tracker's sync
 // sends one, naming its Tracker in trackerRef, under the person's grant to
 // that Tracker, which must not have lapsed and must cover the job's pools
 // and class. It returns the grant.
 func (s *Server) grantFor(ctx context.Context, v *api.Viewer, ns string, body *api.SubmitRequest, spec *c4v1.WorkJobSpec) (*c4v1.SubmitGrant, error) {
 	if !s.isSync(v) {
-		return nil, &errGrant{http.StatusForbidden, "only a tracker's sync submits work for another person"}
+		return nil, refuseGrant(http.StatusForbidden, api.RefusedNotSync, "only a tracker's sync submits work for another person")
 	}
 	tracker, _, _ := strings.Cut(body.TrackerRef, "/")
 	if tracker == "" {
@@ -326,28 +340,28 @@ func (s *Server) grantFor(ctx context.Context, v *api.Viewer, ns string, body *a
 	var tr c4v1.Tracker
 	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: tracker}, &tr); err != nil {
 		if noGrants(err) {
-			return nil, &errGrant{http.StatusNotImplemented, "this farm has no trackers installed"}
+			return nil, refuseGrant(http.StatusNotImplemented, api.RefusedNotInstalled, "this farm has no trackers installed")
 		}
-		return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("no tracker %s in %s", tracker, ns)}
+		return nil, refuseGrant(http.StatusForbidden, api.RefusedNoTracker, fmt.Sprintf("no tracker %s in %s", tracker, ns))
 	}
 	g := &c4v1.SubmitGrant{}
 	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: c4v1.SubmitGrantName(tracker, body.For)}, g); err != nil {
 		if noGrants(err) {
-			return nil, &errGrant{http.StatusNotImplemented, "this farm has no submit grants installed"}
+			return nil, refuseGrant(http.StatusNotImplemented, api.RefusedNotInstalled, "this farm has no submit grants installed")
 		}
 		if apierrors.IsNotFound(err) {
-			return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("no grant from %s for tracker %s/%s", body.For, ns, tracker)}
+			return nil, refuseGrant(http.StatusForbidden, api.RefusedNoGrant, fmt.Sprintf("no grant from %s for tracker %s/%s", body.For, ns, tracker))
 		}
 		return nil, &errGrant{http.StatusInternalServerError, err.Error()}
 	}
 	if g.Spec.Person != body.For || g.Spec.Tracker != tracker {
-		return nil, &errGrant{http.StatusForbidden, fmt.Sprintf("no grant from %s for tracker %s/%s", body.For, ns, tracker)}
+		return nil, refuseGrant(http.StatusForbidden, api.RefusedNoGrant, fmt.Sprintf("no grant from %s for tracker %s/%s", body.For, ns, tracker))
 	}
 	if why := g.Lapsed(time.Now()); why != "" {
-		return nil, &errGrant{http.StatusForbidden, why}
+		return nil, refuseGrant(http.StatusForbidden, api.RefusedGrantLapsed, why)
 	}
 	if why := g.Uncovered(spec.Pools, spec.Class); why != "" {
-		return nil, &errGrant{http.StatusForbidden, why}
+		return nil, refuseGrant(http.StatusForbidden, api.RefusedGrantUncovered, why)
 	}
 	return g, nil
 }

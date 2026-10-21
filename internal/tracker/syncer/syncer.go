@@ -630,8 +630,8 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 			var err error
 			got, err = s.Farm.Submit(ctx, farm.JobRequest{Namespace: jr.Namespace, Name: jr.Name, Spec: spec,
 				TrackerRef: t.Name + "/" + it.Ref.String(), For: person, Replaces: replaces})
-			if refused(err) {
-				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, "NoGrant", noGrant(person, err))
+			if reason, msg, ok := refusal(err, t.Name, person); ok {
+				s.setTrackerCond(ctx, t, CondIntake, metav1.ConditionFalse, reason, msg)
 				return nil
 			}
 			if errors.Is(err, farm.ErrTaken) {
@@ -645,7 +645,9 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 				return fmt.Errorf("submitting %s for %s: %w", jr, it.Ref, err)
 			}
 			if person != "" {
-				s.clearTrackerCond(ctx, t, CondIntake, "NoGrant", "Granted", person+" lets this tracker submit work for them")
+				for _, was := range grantReasons {
+					s.clearTrackerCond(ctx, t, CondIntake, was, "Granted", person+" lets this tracker submit work for them")
+				}
 			}
 		}
 		if replaces != "" {
@@ -765,15 +767,27 @@ func forPerson(t *c4v1.Tracker, rule c4v1.TrackerIntake, it tracker.Item) (perso
 	return "", "intake for names neither a person nor the assignee"
 }
 
-// refused is the HUD declining to submit for a person: no grant (403),
-// or a HUD that does not take grants (501).
-func refused(err error) bool {
-	var ae *farm.APIError
-	return errors.As(err, &ae) && (ae.Status == http.StatusForbidden || ae.Status == http.StatusNotImplemented)
-}
+// grantReasons are the conditions a refused submission for a person sets,
+// each cleared once a submission goes through.
+var grantReasons = []string{"NoGrant", "GrantLapsed", "GrantUncovered", "Refused"}
 
-func noGrant(person string, err error) string {
-	return fmt.Sprintf("%s has not let this tracker submit work for them; they can grant it on the Tracker's page in the HUD (%v)", person, err)
+// refusal is the HUD declining to submit for a person, as a condition
+// reason and a sentence for the person: only a missing grant says the
+// person has not granted it, and how. Any other error is no refusal.
+func refusal(err error, tracker, person string) (reason, msg string, ok bool) {
+	var ae *farm.APIError
+	if !errors.As(err, &ae) || (ae.Status != http.StatusForbidden && ae.Status != http.StatusNotImplemented) {
+		return "", "", false
+	}
+	switch ae.Reason {
+	case api.RefusedNoGrant:
+		return "NoGrant", fmt.Sprintf("%s has not let tracker %s submit work for them: they grant it on their own page in the HUD, or with `c4 farm grant %s`", person, tracker, tracker), true
+	case api.RefusedGrantLapsed:
+		return "GrantLapsed", fmt.Sprintf("%s: they grant it again on their own page in the HUD, or with `c4 farm grant %s`", ae.Msg, tracker), true
+	case api.RefusedGrantUncovered:
+		return "GrantUncovered", fmt.Sprintf("%s: the job is not submitted until the grant covers it", ae.Msg), true
+	}
+	return "Refused", fmt.Sprintf("the HUD refused to submit work for %s: %s", person, ae.Msg), true
 }
 
 // ensureMilestone keeps the entity's Milestone: its due date, covering
@@ -1548,8 +1562,8 @@ func (s *Syncer) nextVersion(ctx context.Context, t *c4v1.Tracker, l *c4v1.Track
 	}
 	_, err := s.Farm.Submit(ctx, farm.JobRequest{Namespace: l.Namespace, Name: name, Spec: spec, Inputs: inputs,
 		Follows: prev, TrackerRef: t.Name + "/" + l.Spec.Ref.Type + "/" + l.Spec.Ref.ID, For: person})
-	if refused(err) {
-		s.setLinkCond(ctx, l, "Version", metav1.ConditionFalse, "NoGrant", noGrant(person, err))
+	if reason, msg, ok := refusal(err, t.Name, person); ok {
+		s.setLinkCond(ctx, l, "Version", metav1.ConditionFalse, reason, msg)
 		return nil
 	}
 	if err != nil {

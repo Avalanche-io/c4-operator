@@ -643,7 +643,8 @@ func TestSubmitForAPersonNeedsTheirGrant(t *testing.T) {
 	e.gh.Assign(7, "dana")
 	e.clock.add(time.Minute)
 	e.pass()
-	if c := intake(); c == nil || c.Reason != "NoGrant" || !strings.Contains(c.Message, "dana has not let this tracker") || len(e.farm.Submitted) != 0 {
+	if c := intake(); c == nil || c.Reason != "NoGrant" || !strings.Contains(c.Message, "dana has not let tracker gh") ||
+		!strings.Contains(c.Message, "c4 farm grant gh") || len(e.farm.Submitted) != 0 {
 		t.Fatalf("no grant: %+v, %d submitted", c, len(e.farm.Submitted))
 	}
 
@@ -810,5 +811,37 @@ func TestNameTakenIsNotAdopted(t *testing.T) {
 	var ls c4v1.TrackerLinkList
 	if err := e.k8s.List(context.Background(), &ls, client.InNamespace(ns)); err != nil || len(ls.Items) != 0 {
 		t.Fatalf("links: %d %v", len(ls.Items), err)
+	}
+}
+
+// Only a missing grant is reported as one. A grant that ended, or a HUD
+// refusing for another reason (a sync it does not know), says so in its
+// own words, never "has not let this tracker submit work".
+func TestRefusalsSayWhichTheyAre(t *testing.T) {
+	for _, c := range []struct {
+		err    *farm.APIError
+		reason string
+		says   string
+	}{
+		{&farm.APIError{Status: http.StatusForbidden, Reason: api.RefusedGrantLapsed, Msg: "dana revoked the grant from dana to tracker gh"},
+			"GrantLapsed", "dana revoked the grant from dana to tracker gh: they grant it again"},
+		{&farm.APIError{Status: http.StatusForbidden, Reason: api.RefusedGrantUncovered, Msg: "the grant from dana does not cover pool gpu (only cpu)"},
+			"GrantUncovered", "does not cover pool gpu"},
+		{&farm.APIError{Status: http.StatusForbidden, Reason: api.RefusedNotSync, Msg: "only a tracker's sync submits work for another person"},
+			"Refused", "the HUD refused to submit work for dana: only a tracker's sync"},
+		{&farm.APIError{Status: http.StatusNotImplemented, Reason: api.RefusedNotInstalled, Msg: "this farm has no submit grants installed"},
+			"Refused", "no submit grants installed"},
+	} {
+		e := setup(t, func(tr *c4v1.Tracker) { tr.Spec.Intake[0].For = &c4v1.TrackerFor{Person: "dana"} })
+		e.farm.Refusal = c.err
+		e.pass()
+		var tr c4v1.Tracker
+		if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "gh"}, &tr); err != nil {
+			t.Fatal(err)
+		}
+		cond := meta.FindStatusCondition(tr.Status.Conditions, syncer.CondIntake)
+		if cond == nil || cond.Reason != c.reason || !strings.Contains(cond.Message, c.says) || strings.Contains(cond.Message, "has not let") {
+			t.Errorf("%s: %+v", c.err.Reason, cond)
+		}
 	}
 }

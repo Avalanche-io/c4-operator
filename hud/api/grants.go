@@ -57,3 +57,27 @@ type GrantResponse struct {
 type GrantList struct {
 	Grants []Grant `json:"grants"`
 }
+
+// SubmitRefused is a submission for a person refused, with which refusal
+// it is, so a tracker's sync can tell the person what to do.
+type SubmitRefused struct {
+	Error  string `json:"error"`
+	Reason string `json:"reason"`
+}
+
+// Reasons a submission for a person is refused.
+const (
+	// RefusedNoGrant: the person has not let the Tracker submit for them.
+	RefusedNoGrant = "no-grant"
+	// RefusedGrantLapsed: their grant was revoked or has ended.
+	RefusedGrantLapsed = "grant-lapsed"
+	// RefusedGrantUncovered: the grant does not cover the job's pools or
+	// class.
+	RefusedGrantUncovered = "grant-uncovered"
+	// RefusedNoTracker: the job names no Tracker in its namespace.
+	RefusedNoTracker = "no-tracker"
+	// RefusedNotSync: only a tracker's sync submits for another person.
+	RefusedNotSync = "not-sync"
+	// RefusedNotInstalled: the farm has no Trackers or no grants.
+	RefusedNotInstalled = "not-installed"
+)

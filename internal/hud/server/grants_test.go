@@ -270,3 +270,40 @@ func TestGrantCLI(t *testing.T) {
 		t.Fatal("revoke takes namespace/name")
 	}
 }
+
+// A submission for a person refused answers which refusal it is, beside
+// the error, so the sync can tell the person what to do.
+func TestSubmitRefusalsSayWhich(t *testing.T) {
+	s := grantFarm(t)
+	spec := json.RawMessage(`{"class":"render","pools":["cpu"],"template":{"spec":{"containers":[{"name":"unit","image":"c4-job-hydra"}]}}}`)
+	submit := func(as string, body api.SubmitRequest) (int, api.SubmitRefused) {
+		t.Helper()
+		var out api.SubmitRefused
+		return call(t, s, http.MethodPost, "/api/v1/jobs?as="+as, body, &out), out
+	}
+	req := api.SubmitRequest{Project: "show-a", Name: "r1", Spec: spec, For: "maya", TrackerRef: "github/Issue/7"}
+	if code, out := submit(c4v1.SyncDevViewer, req); code != http.StatusForbidden || out.Reason != api.RefusedNoGrant {
+		t.Fatalf("no grant: %d %+v", code, out)
+	}
+	if code, out := submit("lee", req); code != http.StatusForbidden || out.Reason != api.RefusedNotSync {
+		t.Fatalf("not the sync: %d %+v", code, out)
+	}
+	req.TrackerRef = "jira/Issue/7"
+	if code, out := submit(c4v1.SyncDevViewer, req); code != http.StatusForbidden || out.Reason != api.RefusedNoTracker {
+		t.Fatalf("no tracker: %d %+v", code, out)
+	}
+	req.TrackerRef = "github/Issue/7"
+	var g api.GrantResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/grants?as=artist", api.GrantRequest{Project: "show-a", Tracker: "github", Pools: []string{"gpu"}}, &g); code != http.StatusOK {
+		t.Fatalf("grant: %d", code)
+	}
+	if code, out := submit(c4v1.SyncDevViewer, req); code != http.StatusForbidden || out.Reason != api.RefusedGrantUncovered {
+		t.Fatalf("uncovered: %d %+v", code, out)
+	}
+	if code := call(t, s, http.MethodDelete, "/api/v1/grants/show-a/"+g.Grant.Name+"?as=artist", nil, nil); code != http.StatusOK {
+		t.Fatalf("revoke: %d", code)
+	}
+	if code, out := submit(c4v1.SyncDevViewer, req); code != http.StatusForbidden || out.Reason != api.RefusedGrantLapsed || !strings.Contains(out.Error, "revoked") {
+		t.Fatalf("revoked: %d %+v", code, out)
+	}
+}

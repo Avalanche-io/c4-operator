@@ -523,6 +523,12 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out, code, err := s.createJob(r, v, m, body, createOpts{})
+	var gr *grantRefused
+	if errors.As(err, &gr) {
+		// Say which refusal it is, for the sync to tell the person.
+		writeJSON(w, code, api.SubmitRefused{Error: err.Error(), Reason: gr.reason})
+		return
+	}
 	if err != nil {
 		fail(w, code, "%s", err.Error())
 		return
@@ -687,7 +693,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 			if errors.As(err, &ge) {
 				code = ge.code
 			}
-			return api.SubmitResponse{}, code, fmt.Errorf("for %s: %v", body.For, err)
+			return api.SubmitResponse{}, code, fmt.Errorf("for %s: %w", body.For, err)
 		}
 		grant = g
 		job.Annotations[c4v1.AnnotationOwner] = body.For
