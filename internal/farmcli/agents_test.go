@@ -220,9 +220,38 @@ func TestSessionsShowsWhatNeedsYou(t *testing.T) {
 	}
 	lines := strings.Split(strings.TrimSpace(out.String()), "\n")
 	if len(lines) != 6 || !strings.HasPrefix(lines[1], "port ") || !strings.Contains(lines[1], "needs you") ||
-		!strings.Contains(lines[2], "41k tokens") || !strings.HasPrefix(lines[3], "4363d63d") || !strings.Contains(lines[3], "1h 30m") ||
+		!strings.Contains(lines[2], "85k tokens") || !strings.HasPrefix(lines[3], "4363d63d") || !strings.Contains(lines[3], "1h 30m") ||
 		lines[5] != "port needs you: Should I rename the package too?" {
 		t.Errorf("agents:\n%s", out.String())
+	}
+}
+
+// A session that ended a day ago or more folds into one line, which --all
+// opens; USED weighs cache reads at the model's rate, not as input.
+func TestSessionsFoldOldEndedAndWeighUse(t *testing.T) {
+	agent := fakeObserve(t, `[
+{"session":"0b5e7c52-8a6f-4d0e","name":"tests","kind":"background","running":true,"word":"working","cwd":"/tmp/repo","startedAt":"2026-10-21T07:30:00Z",
+ "usage":{"models":[{"model":"claude-opus-5-5","inputTokens":500,"outputTokens":100000,"cacheReadTokens":40000000,"cacheWriteTokens":400000}]}},
+{"session":"5d7e9f74-ac81-4a2b","name":"Teammate availability notification","kind":"background","running":false,"word":"failed","startedAt":"2026-08-07T09:00:00Z","lastActive":"2026-08-08T09:00:00Z"},
+{"session":"6e8fa085-bd92-4b3c","name":"yesterday","kind":"background","running":false,"word":"done","startedAt":"2026-10-21T06:00:00Z"}]`, false)
+	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
+	o := func(w *bytes.Buffer) Out { return Out{W: w, Clock: Clock{Now: func() time.Time { return now }}} }
+	var out bytes.Buffer
+	if err := Sessions(context.Background(), o(&out), SessionsArgs{Agent: agent}); err != nil {
+		t.Fatal(err)
+	}
+	s := out.String()
+	// 500 + 5*100k + 1.25*400k + 0.05*40M on Opus 5.5 = 3.0M, not 40.5M
+	if strings.Contains(s, "Teammate") || !strings.Contains(s, "yesterday") || !strings.Contains(s, "3.0M tokens") ||
+		!strings.Contains(s, "1 older session ended 74 days ago; c4 farm agents --all lists them") {
+		t.Errorf("agents:\n%s", s)
+	}
+	out.Reset()
+	if err := Sessions(context.Background(), o(&out), SessionsArgs{Agent: agent, All: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "Teammate") || strings.Contains(out.String(), "older session") {
+		t.Errorf("agents --all:\n%s", out.String())
 	}
 }
 

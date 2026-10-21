@@ -13,6 +13,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/work/tokens"
 )
 
 // row is one Claude Code session on this machine as `c4-agent observe
@@ -30,12 +32,36 @@ type row struct {
 	LastActive *time.Time `json:"lastActive,omitempty"`
 	Usage      *struct {
 		Models []struct {
-			InputTokens  int64 `json:"inputTokens"`
-			OutputTokens int64 `json:"outputTokens"`
+			Model            string `json:"model"`
+			InputTokens      int64  `json:"inputTokens"`
+			OutputTokens     int64  `json:"outputTokens"`
+			CacheReadTokens  int64  `json:"cacheReadTokens"`
+			CacheWriteTokens int64  `json:"cacheWriteTokens"`
 		} `json:"models"`
 	} `json:"usage,omitempty"`
 	Raw json.RawMessage `json:"-"`
 }
+
+// ended is a session that is over: failed, done or stopped, or no longer
+// running.
+func (r row) ended() bool {
+	return !r.Running || r.Word == "failed" || r.Word == "done" || r.Word == "stopped"
+}
+
+// last is when the session was last active, else when it started.
+func (r row) last() time.Time {
+	switch {
+	case r.LastActive != nil:
+		return *r.LastActive
+	case r.StartedAt != nil:
+		return *r.StartedAt
+	}
+	return time.Time{}
+}
+
+// oldEnded is how long ago an ended session must have last been active
+// to be history rather than state: c4 farm agents folds it into one line.
+const oldEnded = 24 * time.Hour
 
 // label is the session's name, else its short ID.
 func (r row) label() string {
@@ -48,15 +74,19 @@ func (r row) label() string {
 	return r.Session
 }
 
-// tokens are what the session has used, input and output, every model.
+// tokens are what the session has used, every model, as the farm counts
+// spend: each token class weighed by its price against base input
+// (work/tokens), so cache reads, a tenth of input or less, do not swell
+// it tenfold.
 func (r row) tokens() int64 {
-	var n int64
+	var n float64
 	if r.Usage != nil {
 		for _, m := range r.Usage.Models {
-			n += m.InputTokens + m.OutputTokens
+			n += tokens.Weighted(m.Model, tokens.Counts{Input: m.InputTokens, Output: m.OutputTokens,
+				CacheRead: m.CacheReadTokens, CacheWrite: m.CacheWriteTokens})
 		}
 	}
-	return n
+	return int64(n)
 }
 
 // SessionsArgs are `c4 farm agents`'s, with no subcommand.
@@ -167,8 +197,24 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 	if err != nil {
 		return err
 	}
+	now := o.Clock.now()
+	// a session that ended a day ago or more is history, not state: one
+	// line says it is there, and --all lists it
+	var old []row
+	if !a.All {
+		kept := rows[:0]
+		for _, r := range rows {
+			if r.ended() && now.Sub(r.last()) >= oldEnded {
+				old = append(old, r)
+				continue
+			}
+			kept = append(kept, r)
+		}
+		rows = kept
+	}
 	if len(rows) == 0 {
 		o.printf("no Claude Code sessions are running on this machine\n")
+		olderEnded(o, old, now)
 		return nil
 	}
 	// what needs the person first, then what is working, newest first
@@ -198,7 +244,6 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 		return started(rows[i]).After(started(rows[j]))
 	})
 	home, _ := os.UserHomeDir()
-	now := o.Clock.now()
 	tw := tabwriter.NewWriter(o.W, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "AGENT\tSTATE\tFOLDER\tUSED\tFOR")
 	var waiting []row
@@ -221,6 +266,7 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.label(), r.Word, dir, used, age)
 	}
 	tw.Flush()
+	olderEnded(o, old, now)
 	if len(waiting) == 0 {
 		o.printf("\nNothing needs you.\n")
 		return nil
@@ -234,6 +280,38 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 		o.printf("%s needs you.\n", r.label())
 	}
 	return nil
+}
+
+// olderEnded is the line for the ended sessions folded out of the list:
+// how many, and how long ago the latest ended.
+func olderEnded(o Out, old []row, now time.Time) {
+	if len(old) == 0 {
+		return
+	}
+	latest := old[0].last()
+	for _, r := range old[1:] {
+		if t := r.last(); t.After(latest) {
+			latest = t
+		}
+	}
+	what := "1 older session ended"
+	if len(old) > 1 {
+		what = fmt.Sprintf("%d older sessions ended, the latest", len(old))
+	}
+	ago := ""
+	if !latest.IsZero() {
+		ago = " " + daysAgo(now.Sub(latest))
+	}
+	o.printf("%s%s; c4 farm agents --all lists them\n", what, ago)
+}
+
+// daysAgo is a day or more as people say it: 1 day ago, 74 days ago.
+func daysAgo(d time.Duration) string {
+	n := int(d / (24 * time.Hour))
+	if n == 1 {
+		return "1 day ago"
+	}
+	return fmt.Sprintf("%d days ago", n)
 }
 
 // tokenCount is a token count as people read it: 950, 41k, 2.3M.
