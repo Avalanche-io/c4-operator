@@ -1,6 +1,6 @@
 # c4-operator v2: report
 
-This report covers the v2 redesign of c4-operator: what was built, what each phase proved in the end-to-end suite, what is designed and comes next, and the decisions that are Joshua's. The design is in [`DESIGN.md`](DESIGN.md); every number below comes from [`hack/e2e/out/results.md`](hack/e2e/out/results.md), [`hack/e2e/monorepo/RESULTS.md`](hack/e2e/monorepo/RESULTS.md) or [`hack/sim/out/results.md`](hack/sim/out/results.md), each reproducible by the script named there.
+This report covers the v2 redesign of c4-operator: what was built, what each phase proved in the end-to-end suite, what is designed and comes next, and the decisions that are the maintainer's. The design is in [`DESIGN.md`](DESIGN.md); every number below comes from [`hack/e2e/out/results.md`](hack/e2e/out/results.md), [`hack/e2e/monorepo/RESULTS.md`](hack/e2e/monorepo/RESULTS.md) or [`hack/sim/out/results.md`](hack/sim/out/results.md), each reproducible by the script named there.
 
 Method: an eight-worker, two-zone Kubernetes test cluster with a three-shard object store; each phase script builds its scenario, measures it and appends the results.
 
@@ -169,9 +169,9 @@ Also next: a `NEXT.md` giving each item above its purpose, the need it serves, i
 - P1 to P3 ran on earlier builds of the branch; P4 to P7 on one build (46ea151). The symlink fix between them changes the view IDs of trees with symlinks in subdirectories and no measured quantity.
 - Changes proposed for c4, c4d, c4git and c4-containers are listed in `PROGRESS.md`; none of those repositories was modified.
 
-## Decisions for Joshua
+## Decisions for the maintainer
 
-1. The release path: c4 is pinned to a master pseudo-version until a c4 release carries what the operator uses (the table below); the proposed image path is `ghcr.io/avalanche-io/c4-operator`, and `RELEASING.md` lists the steps that are Joshua's, including how the history is published.
+1. The release path: c4 is pinned to a master pseudo-version until a c4 release carries what the operator uses (the table below); the proposed image path is `ghcr.io/avalanche-io/c4-operator`, and `RELEASING.md` lists the steps that are the maintainer's, including how the history is published.
 2. The billing model: cluster-hours with container-hours, GPU-hours, or fixed production windows, and prices.
 3. Transport security between cache tiers (mTLS through a mesh, or the tiers' own certificates).
 4. Whether Direct mode (node daemons holding store credentials) stays a supported mode.

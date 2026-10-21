@@ -2,7 +2,7 @@
 # The GitHub demo's agent work (hack/demo/github.sh). By default the
 # agent is a script: the demo shows the tracker loop, not a model. With
 # DEMO_BLOCK=1 (set in the job's template) the build is a real block,
-# Claude Code run by c4-agent block-pod on the sign-in Joshua lends. A graph job: its
+# Claude Code run by c4-agent block-pod on the sign-in Noor lends. A graph job: its
 # root, plan, lays out one build block and a review wait for the
 # maintainer; the build writes a patch into the job's output view. A
 # version made from review comments (mounted at /c4/notes/note.md by

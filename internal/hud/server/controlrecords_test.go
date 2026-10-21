@@ -201,13 +201,13 @@ func TestUnitControlRecordIsTruthful(t *testing.T) {
 // unattributed. Both records still say "development viewer".
 func TestLoopbackDevViewerIsClaimed(t *testing.T) {
 	s, decide := decideFarm(t)
-	s.SinglePerson = "joshua"
+	s.SinglePerson = "noor"
 	for _, c := range []struct {
 		loopback bool
 		custody  string
 		says     string
 	}{
-		{true, CustodyClaimed, "claimed by the installer, joshua"},
+		{true, CustodyClaimed, "claimed by the installer, noor"},
 		{false, CustodyUnattributed, "not authenticated"},
 	} {
 		s.Loopback = c.loopback

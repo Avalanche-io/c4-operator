@@ -7,9 +7,9 @@
 # The agent's GitHub actions (opening the pull request, pushing) are this
 # script's. Its work is a script too (hack/demo/scene/agent.sh), or with
 # DEMO_BLOCK=1 a real block: Claude Code in the block image, on the
-# sign-in Joshua lends with his own lease, for jobs the Tracker submits for
-# him under the grant he gives it. The demo never gives either for him: it
-# prints what he runs and waits.
+# sign-in Noor lends with their own lease, for jobs the Tracker submits for
+# them under the grant they give it. The demo never gives either for them: it
+# prints what they run and waits.
 #
 #   1. a maintainer's issue, labeled c4:agent in a milestone with a due
 #      date, becomes an agent job whose deadline is the milestone's;
@@ -41,7 +41,7 @@ demo_sync github token demo-gh-token
 k -n "$NS" patch secret github --type=merge -p "{\"stringData\":{\"hook\":\"$HOOK_SECRET\"}}" >/dev/null
 # The job the Tracker submits: a script in the oiio image, or a block.
 if [ -n "${DEMO_BLOCK:-}" ]; then
-  FOR="    for: {person: joshua}"
+  FOR="    for: {person: noor}"
   RUN="      inputs: [{materialization: agent-scene, mountPath: /private/tmp/c4-out}]
       template:
         spec:
@@ -111,10 +111,10 @@ EOF
 mark "up" "cluster, project, fake GitHub, c4-sync ready; issue #7 due $DUE"
 if [ -n "${DEMO_BLOCK:-}" ]; then
   no_grant() { [ "$(k -n "$NS" get tracker github -o jsonpath='{.status.conditions[?(@.type=="Intake")].reason}')" = NoGrant ]; }
-  wait_until "the Tracker to say it has no grant from joshua" 120 no_grant
+  wait_until "the Tracker to say it has no grant from noor" 120 no_grant
   mark "0 no grant" "$(k -n "$NS" get tracker github -o jsonpath='{.status.conditions[?(@.type=="Intake")].message}')"
   demo_lent github
-  mark "0 lent" "Joshua granted tracker github and lent his sign-in (lease $LEASE, active)"
+  mark "0 lent" "Noor granted tracker github and lent their sign-in (lease $LEASE, active)"
 fi
 
 # --- run ------------------------------------------------------------------
@@ -191,10 +191,10 @@ lineage "$JOB" "$JOB2" "github/Issue/7"
 if [ -n "${DEMO_BLOCK:-}" ]; then
   for j in "$JOB" "$JOB2"; do
     o=$(k -n "$NS" get workjob "$j" -o jsonpath='{.metadata.annotations.c4\.avalanche\.io/owner} {.metadata.annotations.c4\.avalanche\.io/grant}')
-    case "$o" in "joshua "?*) ;; *) fail "$j is not Joshua's under his grant: $o" ;; esac
+    case "$o" in "noor "?*) ;; *) fail "$j is not Noor's under their grant: $o" ;; esac
     k -n "$NS" get workjob "$j" -o jsonpath='{.status.modelUsage}' | grep -q '"models"' || fail "$j's build recorded no model use"
   done
-  mark "block" "both versions are Joshua's under his grant; their builds ran as blocks on his lent sign-in (model use recorded)"
+  mark "block" "both versions are Noor's under their grant; their builds ran as blocks on their lent sign-in (model use recorded)"
 fi
 mark "checks" "reviews stand as dana wrote them; check run and status success on ${SHA2:0:10}; output ${VIEW:0:12}… published; $JOB2 follows $JOB, both carry the issue; nothing C4 wrote was a review or a merge"
 log "demo done: $SHOTS"
