@@ -11,6 +11,8 @@ Security `restricted`. Each carries `c4-unit` (`/usr/local/bin`), with
 make job-images                      # every image, OCI archives in bin/
 make job-images JOB_IMAGES=oiio      # one
 make job-images PUSH=1 REGISTRY=ghcr.io/avalanche-io VERSION=v0.1.0
+make job-images-dev                  # this machine's architecture, loaded as c4-job-<name>:dev
+
 make job-image-hydra-blender         # the amd64 fallback for hydra
 ```
 

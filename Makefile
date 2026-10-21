@@ -18,7 +18,7 @@ comma := ,
 JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-image-names tool-locks job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev job-image-names tool-locks job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -137,6 +137,18 @@ job-images:
 	    --label org.opencontainers.image.version=$(VERSION) \
 	    --label org.opencontainers.image.revision=$$(git rev-parse HEAD) \
 	    $(if $(PUSH),--push,--output type=oci$(comma)dest=bin/c4-job-$$i-$(VERSION).oci.tar) . || exit 1; \
+	done
+
+# The job images for this machine's architecture, loaded into its Docker as
+# c4-job-<name>:dev: what a development c4-farm's tool test runs and what
+# `c4 farm image load c4-job-<name>:dev` gives a local farm. Rebuild them
+# when cmd/c4-unit changes, since each image carries its own c4-unit.
+# JOB_IMAGES=oiio builds one.
+job-images-dev:
+	@for i in $(JOB_IMAGES); do \
+	  echo "build c4-job-$$i:dev (linux/$(ARCH))"; \
+	  docker buildx build --platform linux/$(ARCH) -f images/$$i/Dockerfile $(if $(JOBS),--build-arg JOBS=$(JOBS)) \
+	    -t c4-job-$$i:dev --label org.opencontainers.image.revision=$$(git rev-parse HEAD) --load . || exit 1; \
 	done
 
 # The fallback hydra image (Blender's Cycles reading USD), amd64 only.
