@@ -36,17 +36,14 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
 
 ### On GitHub
 
-5. **Joshua: create the repositories.**
-   - `github.com/Avalanche-io/c4-operator`: private, empty (no README,
-     license or .gitignore), default branch `main`.
-   - `github.com/Avalanche-io/homebrew-tap`: public, with a README so it
-     has a `main` branch, and nothing else. The release writes
-     `Formula/c4-farm.rb` and `Formula/c4-agent.rb` there; the C4 suite
-     release writes `Formula/c4.rb`, which depends on both, so `brew
-     install avalanche-io/tap/c4` brings c4, `c4 farm`, c4-agent and
-     c4-unit.
-6. **Joshua: push `main`** from the prepared clone (history option B below,
-   or `git push origin v2:main` for option A).
+5. **Joshua: create the tap repository** `github.com/Avalanche-io/homebrew-tap`:
+   public, with a README so it has a `main` branch, and nothing else. The
+   release writes `Formula/c4-farm.rb` and `Formula/c4-agent.rb` there; the
+   C4 suite release writes `Formula/c4.rb`, which depends on both, so `brew
+   install avalanche-io/tap/c4` brings c4, `c4 farm`, c4-agent and c4-unit.
+   The C4 lead owns the Homebrew release and its order with the suite's.
+6. Done already: `github.com/Avalanche-io/c4-operator` is public, with
+   `main` pushed.
 7. **Joshua: settings.**
    - Security: enable private vulnerability reporting (SECURITY.md points
      to it).
@@ -71,15 +68,17 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
    ```
    The `release` workflow builds and pushes the images and drafts the
    release.
-10. **Joshua: make the GHCR packages public**: Packages, `c4-operator`,
-    each `c4-job-*` and each `c4-runtime-*`, Package settings, Change
-    visibility, Public; and connect each to the repository if GitHub has not.
+10. **Joshua: check the GHCR packages are public**: Packages, `c4-operator`,
+    each `c4-job-*` and each `c4-runtime-*`. GHCR gives a new package its
+    own visibility, private unless the organization's default is public,
+    even when the repository is public; set any private one Public under
+    Package settings, Change visibility, and connect each to the repository
+    if GitHub has not. This is needed once, for the first release.
 11. **Joshua: review and publish the draft release** (notes, `install.yaml`,
     archives, checksums).
-12. **Joshua: flip the repository public**: Settings, General, Change
-    visibility. The formulas download the release's archives, so `brew
-    install` works only from here on: after the draft is published and
-    the repository is public.
+12. The formulas download the release's archives, so `brew install` works
+    from the moment the draft is published (the repository is public
+    already).
 13. Smoke test from a clean machine with the published images: `brew
     install avalanche-io/tap/c4-farm` (once the C4 suite release has
     written `c4.rb`, `brew install avalanche-io/tap/c4`), the
