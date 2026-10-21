@@ -148,17 +148,26 @@ when the CLI started a copy, 5 when a member is still busy.
 
 ## Installing the hook
 
-`c4-agent hooks` prints a settings fragment with one Stop hook. Per-turn
-checkpoints need it in the configuration directory's `settings.json`: add
-the fragment's `Stop` entry there. Sessions that are not members are
-ignored by the hook. This does not change how Claude Code itself is
-installed.
+`c4-agent hooks` prints a settings fragment with two hook groups: `Stop`,
+at the end of each turn, and `PostToolUse`, after each tool call, so a stop
+the farm asks for lands within a step. `c4 farm agents add` puts both in
+the member's folder's `.claude/settings.local.json`, never in a
+configuration directory's `settings.json`, and `c4 farm agents rm` takes
+them out. Sessions that are not members are ignored by the hook. This does
+not change how Claude Code itself is installed.
+
+Folder-local hooks reach a resumed member. Measured with Claude Code
+2.1.306 on a test session: a background session started in a folder with
+both groups in `.claude/settings.local.json` ran them, and so did its
+background resume with no flags, under the same session ID once the
+session was stopped. (Resuming one that still runs, idle, starts a copy
+under a new ID, as the harness expects; it stops a member first.)
 
 Giving the fragment with `--settings` instead does not work for members.
 Measured with Claude Code 2.1.302: hooks given that way do not carry into a
 background resume with no flags, which is the only resume that continues
 a session rather than starting a copy, so the hook never runs on a resumed
-member.
+member. Blocks are started fresh, so their `--settings` hooks hold.
 
 Without the hook, `c4-agent` still saves a checkpoint when it yields a
 member and before it resumes one, and one live copy, resume by session ID
