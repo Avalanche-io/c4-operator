@@ -21,7 +21,7 @@ JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 RUNTIME_IMAGES ?= base python oiio torch
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks job-image-hydra-blender install-yaml release-snapshot verify e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks job-image-hydra-blender install-yaml release-snapshot verify cross e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -40,6 +40,15 @@ verify:
 	git diff --exit-code -- api config/crd
 	kubectl kustomize config/default >/dev/null
 	kubectl kustomize config/release >/dev/null
+	$(MAKE) cross
+
+# The binaries that ship for other platforms than this machine's, built for
+# them: c4-farm for Windows, and what runs on Linux (the operator, the host
+# runner, the unit runner). A Unix-only package pulled into c4-farm breaks
+# the release, and only another platform's build shows it.
+cross:
+	GOOS=windows GOARCH=amd64 go build -o /dev/null ./cmd/c4-farm
+	GOOS=linux GOARCH=amd64 go build -o /dev/null ./cmd/c4-farm ./cmd/c4-unit ./cmd/c4-agent ./cmd/c4-operator
 
 generate:
 	$(CONTROLLER_GEN) object paths=./api/...
