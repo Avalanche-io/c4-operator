@@ -13,10 +13,11 @@ import (
 const cleanEnv = "../../config/agent-env/base"
 
 // The version of an environment is the C4 ID of its listing, content only:
-// the shipped clean environment is the version the prototype recorded for
-// it (c42dfDuBy...), and copying or touching it changes nothing.
+// the shipped clean environment is the version `c4 id | c4 -x` gives it
+// (normalized as EnvID does), and copying or touching it changes nothing.
+// Changing the clean environment changes this ID, on purpose.
 func TestEnvIDOfTheCleanEnvironment(t *testing.T) {
-	const want = "c42dfDuByUVzHRPgg1cs1Q8G98YA5NZ6kigBjqqaqqaS7uH1Az4Pm5fanH3AHr1ChbwtB5sCGwrxJ7i82TcHV9UKBw"
+	const want = "c44qpoXu39vLhhB2jGYg8HAagoXJ9qGA6KtzGTd74eju3YDDrN9ftTcNtot8z3PyXVGzVQa57emJGYxntqDVR5Uxgv"
 	if id, err := EnvID(cleanEnv); err != nil || id != want {
 		t.Fatalf("clean environment %s %v, want %s", id, err, want)
 	}

@@ -84,6 +84,16 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 			fmt.Fprintln(stderr, "c4-agent hook:", err)
 			return 0
 		}
+		if agent.HookEvent(input) == "PostToolUse" {
+			// after each tool call: a stop the farm asked for ends the turn
+			// at this step, not at the turn's own end
+			if why, ok, err := h.StopAsked(input); err != nil {
+				fmt.Fprintln(stderr, "c4-agent hook:", err)
+			} else if ok {
+				stdout.Write(agent.HookDecision(why))
+			}
+			return 0
+		}
 		cp, err := h.Hook(ctx, bytes.NewReader(input))
 		if err != nil {
 			fmt.Fprintln(stderr, "c4-agent hook:", err)

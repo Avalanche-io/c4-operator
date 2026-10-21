@@ -533,6 +533,11 @@ func (r *Runner) yield(ctx context.Context, p *corev1.Pod, m *Member) error {
 		}
 	}
 	msg := "yielded at a turn boundary: " + why
+	if at, ok := r.asked[p.UID]; ok {
+		// how long the stop took, from the farm's request to the member
+		// stopping: the latency every yield reports
+		msg += fmt.Sprintf("; stopped %s after it was asked", r.now().Sub(at).Truncate(time.Second))
+	}
 	if cp != nil && len(cp.Background) > 0 {
 		msg += fmt.Sprintf("; %d background task(s) were still running and were stopped, recorded in checkpoint %d", len(cp.Background), cp.Seq)
 	}

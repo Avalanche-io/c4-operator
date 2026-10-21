@@ -102,7 +102,7 @@ environment, never in a person's `~/.claude`:
 | `c4-agent checkpoint --hook`              | the Stop hook: saves the turn that just ended; ignores sessions that are not members; always exits 0                               |
 | `c4-agent verify NAME`                    | checks the checkpoint chain against the transcript                                                                                 |
 | `c4-agent log NAME [-n 10]`               | recent checkpoints                                                                                                                 |
-| `c4-agent hooks`                          | prints the settings fragment that installs the Stop hook                                                                           |
+| `c4-agent hooks`                          | prints the settings fragment that installs the hook: at each turn's end (Stop) and after each tool call (PostToolUse)             |
 
 Exit codes: 3 when the member is running (or already has a session), 4
 when the CLI started a copy, 5 when a member is still busy.
@@ -250,6 +250,16 @@ question comes with the command to answer it (`c4-unit answer --dir <its
 unit directory> --ask <id> --answer ...`). The messages are then marked
 read, so it is woken once for them. A member mid-turn, or with background
 work open, is left alone; it is woken at its next idle turn boundary.
+
+**A stop lands within a step, not a turn.** The farm stops a member only at
+a turn's end, and a turn can run for most of an hour. So the same hook also
+runs after every tool call (`PostToolUse`): when the farm has asked the
+member's unit to stop (the `c4.avalanche.io/yield` annotation in its
+podinfo), it tells the model to finish the step it is on, leave its work
+where it can be picked up, and end its turn. The turn's end is then the
+safe point the stop waits for. Every Yielded pod's message says how long
+the stop took from the farm's request ("stopped 4m30s after it was
+asked"), so the book carries each yield's latency.
 
 **Background agents and commands survive a yield, or are recorded.** A
 session's turn can end with work still running beside it: a background

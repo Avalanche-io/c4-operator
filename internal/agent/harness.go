@@ -589,7 +589,8 @@ func (h *Harness) Status(ctx context.Context) ([]MemberStatus, error) {
 }
 
 // HookSettings is the Claude Code settings fragment that runs the
-// harness's checkpoint at the end of every turn. exe is the path of the
+// harness's checkpoint at the end of every turn, and its check for a stop
+// the farm asked for after every tool call. exe is the path of the
 // c4-agent binary.
 func HookSettings(exe string) ([]byte, error) {
 	type hook struct {
@@ -598,8 +599,14 @@ func HookSettings(exe string) ([]byte, error) {
 		Timeout int    `json:"timeout"`
 	}
 	type group struct {
-		Hooks []hook `json:"hooks"`
+		Matcher string `json:"matcher,omitempty"`
+		Hooks   []hook `json:"hooks"`
 	}
-	s := map[string]map[string][]group{"hooks": {"Stop": {{Hooks: []hook{{Type: "command", Command: exe + " checkpoint --hook", Timeout: 30}}}}}}
+	// Stop: the turn's end, a safe point; PostToolUse: after each tool
+	// call, a stop the farm asked for ends the turn at that step
+	s := map[string]map[string][]group{"hooks": {
+		"Stop":        {{Hooks: []hook{{Type: "command", Command: exe + " checkpoint --hook", Timeout: 30}}}},
+		"PostToolUse": {{Matcher: "*", Hooks: []hook{{Type: "command", Command: exe + " checkpoint --hook", Timeout: 10}}}},
+	}}
 	return json.MarshalIndent(s, "", "  ")
 }

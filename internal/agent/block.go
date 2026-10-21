@@ -511,7 +511,8 @@ func replyDir(p *corev1.Pod, u UnitDirs) string {
 }
 
 // HookSettingsCommand is the --settings document that installs the
-// c4-agent Stop hook for one session, running command.
+// c4-agent hook for one session, running command at each turn's end and
+// after each tool call.
 func HookSettingsCommand(command string) ([]byte, error) {
 	if command == "" {
 		return nil, errors.New("no Stop hook command for block sessions (Runner.HookCommand)")
@@ -522,9 +523,15 @@ func HookSettingsCommand(command string) ([]byte, error) {
 		Timeout int    `json:"timeout"`
 	}
 	type group struct {
-		Hooks []hook `json:"hooks"`
+		Matcher string `json:"matcher,omitempty"`
+		Hooks   []hook `json:"hooks"`
 	}
-	s := map[string]map[string][]group{"hooks": {"Stop": {{Hooks: []hook{{Type: "command", Command: command, Timeout: 30}}}}}}
+	// Stop: the turn's end, a safe point; PostToolUse: after each tool
+	// call, a stop the farm asked for ends the turn at that step
+	s := map[string]map[string][]group{"hooks": {
+		"Stop":        {{Hooks: []hook{{Type: "command", Command: command, Timeout: 30}}}},
+		"PostToolUse": {{Matcher: "*", Hooks: []hook{{Type: "command", Command: command, Timeout: 10}}}},
+	}}
 	return json.Marshal(s)
 }
 
