@@ -79,6 +79,14 @@ const (
 	// admission from the request's user (or, for jobs the HUD creates for
 	// a signed-in viewer, by the HUD) and never changed afterwards.
 	AnnotationOwner = "c4.avalanche.io/owner"
+	// AnnotationOwnerGroups on a WorkJob or an AgentBundle is the owner's
+	// groups when it was made (a JSON list), so what a unit submits for
+	// the owner is checked against the owner's own rights. Set at
+	// admission like the owner (from the request's groups, by the HUD
+	// from the signed-in viewer's, or copied from a unit's own job) and
+	// never changed. Absent when the groups were not known, as for work a
+	// tracker's sync submits for a person.
+	AnnotationOwnerGroups = "c4.avalanche.io/owner-groups"
 	// AnnotationAcceptValidated on a WorkJob (a JSON list of
 	// WorkAcceptValidatedRequest; "true" on a farm with signing off)
 	// accepts a validated

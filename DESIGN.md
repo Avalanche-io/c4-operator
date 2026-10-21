@@ -661,6 +661,13 @@ credentials.
   reported once as a `ControlRefused` Warning event on the job, as is a
   control in an older plain form (`TOKEN:SET`, a node list, `"true"`),
   which names no record. A farm with signing off still reads those forms.
+- **A unit's job is its owner's.** A unit that submits a job submits it in
+  its own job's owner's name, so the job needs the owner's own right where
+  it goes, in every namespace: the API server is asked about the owner,
+  with the groups recorded when the owner's job was made
+  (`c4.avalanche.io/owner-groups`), never about the unit or the HUD. A job
+  made under a person's grant binds its children to that grant's pools
+  and classes.
 
 ### 6.3 Strict mode: no shared caches
 

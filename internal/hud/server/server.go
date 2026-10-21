@@ -410,7 +410,7 @@ func (s *Server) access(ctx context.Context, user string, groups []string) (*api
 	}
 	m := s.m
 	s.mu.Unlock()
-	v := &api.Viewer{User: user, Projects: []string{}, All: true, Role: RoleOf(groups, s.RoleGroups), Parties: PartiesOf(groups)}
+	v := &api.Viewer{User: user, Projects: []string{}, All: true, Role: RoleOf(groups, s.RoleGroups), Parties: PartiesOf(groups), Groups: groups}
 	if m != nil {
 		for _, p := range m.projects {
 			ok := false

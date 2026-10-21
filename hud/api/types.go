@@ -31,6 +31,9 @@ type Viewer struct {
 	// "cookie" (the installer's secret) or "open" (open development
 	// viewers). Never on the wire.
 	DevBy string `json:"-"`
+	// Groups are the groups the viewer signed in with, kept so the jobs
+	// the HUD makes for them record them. Never sent.
+	Groups []string `json:"-"`
 }
 
 // UnitViewer is a unit acting on c4 through the HUD: its job, and its

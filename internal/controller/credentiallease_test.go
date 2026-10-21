@@ -101,10 +101,11 @@ func TestCredentialLeaseEnds(t *testing.T) {
 // it there.
 func TestJobForBundleCarriesItsOwner(t *testing.T) {
 	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Name: "team", Namespace: "agents",
-		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "api"}},
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "api", c4v1.AnnotationOwnerGroups: `["leads"]`}},
 		Spec: c4v1.AgentBundleSpec{Pools: []string{"team"}, Members: []c4v1.AgentMemberSpec{{Name: "lead"}}}}
 	j := JobForBundle(b)
-	if j.Annotations[c4v1.AnnotationOwner] != "noor" || j.Annotations[c4v1.AnnotationSubmittedVia] != "api" {
+	// and its owner's groups, for what its members submit in their name
+	if j.Annotations[c4v1.AnnotationOwner] != "noor" || j.Annotations[c4v1.AnnotationSubmittedVia] != "api" || j.Annotations[c4v1.AnnotationOwnerGroups] != `["leads"]` {
 		t.Fatalf("annotations %v", j.Annotations)
 	}
 	b.Annotations = nil

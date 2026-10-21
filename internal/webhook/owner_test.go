@@ -130,8 +130,44 @@ func TestOwnerOfABundle(t *testing.T) {
 		t.Fatalf("owner %q, patches %v", got, resp.Patches)
 	}
 	for _, p := range resp.Patches {
-		if p.Path != "/metadata/annotations/c4.avalanche.io~1owner" && p.Path != "/metadata/annotations/c4.avalanche.io~1submitted-via" {
+		if p.Path != "/metadata/annotations/c4.avalanche.io~1owner" && p.Path != "/metadata/annotations/c4.avalanche.io~1submitted-via" && p.Path != "/metadata/annotations/c4.avalanche.io~1owner-groups" {
 			t.Errorf("patched %s", p.Path)
 		}
+	}
+}
+
+// With the owner the webhook records the requester's groups, so what a
+// unit later submits for them is checked with their own rights; groups a
+// client wrote are replaced, and a delegate's are kept.
+func TestOwnerRecordsGroups(t *testing.T) {
+	m := newOwner(t)
+	groupsOf := func(resp admission.Response) string {
+		t.Helper()
+		if !resp.Allowed {
+			t.Fatalf("denied: %v", resp.Result)
+		}
+		for _, p := range resp.Patches {
+			if p.Path == "/metadata/annotations/c4.avalanche.io~1owner-groups" {
+				return p.Value.(string)
+			}
+			if p.Path == "/metadata/annotations" {
+				g, _ := p.Value.(map[string]any)[c4v1.AnnotationOwnerGroups].(string)
+				return g
+			}
+		}
+		return "unpatched"
+	}
+	req := ownerRequest(t, "noor", admissionv1.Create, map[string]string{c4v1.AnnotationOwnerGroups: `["admins"]`})
+	req.UserInfo.Groups = []string{"comp-artists", "system:authenticated"}
+	if got := groupsOf(m.Handle(context.Background(), req)); got != `["comp-artists","system:authenticated"]` {
+		t.Errorf("a requester's groups: %s", got)
+	}
+	none := ownerRequest(t, "noor", admissionv1.Create, nil)
+	if got := groupsOf(m.Handle(context.Background(), none)); got != `[]` {
+		t.Errorf("a requester with no groups: %s", got)
+	}
+	delegated := ownerRequest(t, managerSA, admissionv1.Create, map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationOwnerGroups: `["comp-artists"]`})
+	if resp := m.Handle(context.Background(), delegated); !resp.Allowed || len(resp.Patches) != 0 {
+		t.Errorf("the manager's own record was changed: %v", resp.Patches)
 	}
 }

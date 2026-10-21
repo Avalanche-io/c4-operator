@@ -597,6 +597,41 @@ func unitRefusal(v *api.Viewer, err error) error {
 // meanwhile: a submission numbers its jobs again rather than report it.
 type takenError struct{ error }
 
+// ownerMay says why a unit of parent, owner's job, may not submit in ns
+// for owner, with its status: the API server is asked what owner's own
+// submission there would be, with the groups recorded when parent was
+// made, never the unit's rights or the HUD's. Where parent recorded no
+// groups only what owner is given by name counts, and the refusal says
+// so. On a single-person farm its one person always may.
+func (s *Server) ownerMay(ctx context.Context, parent *c4v1.WorkJob, owner, ns string) (int, error) {
+	if one := s.singlePersonFlag(); one != "" && owner == one {
+		return 0, nil
+	}
+	var groups []string
+	raw, known := parent.Annotations[c4v1.AnnotationOwnerGroups]
+	if known && json.Unmarshal([]byte(raw), &groups) != nil {
+		known, groups = false, nil
+	}
+	if s.Kube == nil {
+		if s.DevViewers != nil {
+			return 0, nil // development: no API server to ask
+		}
+		return http.StatusServiceUnavailable, fmt.Errorf("this HUD cannot ask whether %s may submit in %s", owner, ns)
+	}
+	ok, err := s.allowed(ctx, owner, groups, ns, "create", "workjobs", "")
+	if err != nil {
+		return http.StatusServiceUnavailable, fmt.Errorf("could not ask whether %s may submit in %s: %v", owner, ns, err)
+	}
+	if ok {
+		return 0, nil
+	}
+	why := fmt.Sprintf("%s may not submit in %s, so a unit of %s's job may not either", owner, ns, owner)
+	if !known {
+		why += fmt.Sprintf(" (%s's groups aren't known for a unit's submission, so only rights given to %s by name count)", owner, owner)
+	}
+	return http.StatusForbidden, errors.New(why)
+}
+
 // createJob checks and creates a job from a POST /jobs request for viewer
 // v, or plans it (body.DryRun), as handleSubmit and the submissions
 // endpoint do. code is the HTTP status, with err the refusal's message.
@@ -718,6 +753,12 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	if replaced != nil {
 		job.Annotations[c4v1.AnnotationReplaces] = replaced.Name
 	}
+	if v.Unit == nil && v.Groups != nil {
+		// the signed-in owner's groups, for what a unit of the job
+		// submits in their name later
+		b, _ := json.Marshal(v.Groups)
+		job.Annotations[c4v1.AnnotationOwnerGroups] = string(b)
+	}
 	var own *c4v1.WorkJob
 	if u := v.Unit; u != nil {
 		// a unit's job is its job's owner's, never the unit's own: the
@@ -737,22 +778,13 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 			return api.SubmitResponse{}, http.StatusForbidden, identityError{fmt.Errorf("%s: its own job %s/%s has no owner to submit for", v.User, u.Namespace, u.Job)}
 		}
 		// The job runs on the owner's runners and in the owner's name, so
-		// the owner must be able to make it there, not only the unit. In
-		// its parent's namespace the owner already did; elsewhere in the
-		// project the API server is asked about the owner by name (their
-		// own rights only: groups a sign-in carries are not known here).
-		if ns != parent.Namespace && s.Kube == nil && s.DevViewers == nil {
-			// no client to ask with: never taken as allowed
-			return api.SubmitResponse{}, http.StatusServiceUnavailable, fmt.Errorf("%s: cannot ask whether %s may create jobs in %s: the HUD has no API server client", v.User, owner, ns)
+		// the owner must be able to make it there themselves, not only the
+		// unit: in every namespace, its parent's too.
+		if code, err := s.ownerMay(ctx, &parent, owner, ns); err != nil {
+			return api.SubmitResponse{}, code, fmt.Errorf("%s: %v", v.User, err)
 		}
-		if ns != parent.Namespace && s.Kube != nil {
-			ok, err := s.allowed(ctx, owner, nil, ns, "create", "workjobs", "")
-			if err != nil {
-				return api.SubmitResponse{}, http.StatusServiceUnavailable, fmt.Errorf("%s: could not ask whether %s may create jobs in %s: %v", v.User, owner, ns, err)
-			}
-			if !ok {
-				return api.SubmitResponse{}, http.StatusForbidden, fmt.Errorf("%s submits for %s, who may not create jobs in %s: submit it in %s, or give %s the right there", v.User, owner, ns, parent.Namespace, owner)
-			}
+		if g, ok := parent.Annotations[c4v1.AnnotationOwnerGroups]; ok {
+			job.Annotations[c4v1.AnnotationOwnerGroups] = g
 		}
 		// A job a tracker's sync made for a person, under the person's
 		// grant: its children are bound by the same grant, so a unit
@@ -811,6 +843,8 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		}
 		grant = g
 		job.Annotations[c4v1.AnnotationOwner] = body.For
+		// the person's groups are not known to a tracker's sync
+		delete(job.Annotations, c4v1.AnnotationOwnerGroups)
 		job.Annotations[c4v1.AnnotationSubmittedVia] = c4v1.SyncDevViewer
 		job.Annotations[c4v1.AnnotationGrant] = grantRef(g)
 	}

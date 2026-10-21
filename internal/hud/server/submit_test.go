@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -485,6 +486,7 @@ func TestSubmitReplacesAForecast(t *testing.T) {
 // whose job is gone submits nothing.
 func TestAUnitsJobIsItsOwners(t *testing.T) {
 	s := submitFarm(t)
+	ownersMay(s) // what this tests is not the owner's right
 	ctx := context.Background()
 	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port", UID: "9c1d2e7f-port", Annotations: map[string]string{c4v1.AnnotationOwner: "lee"}},
 		Spec: c4v1.WorkJobSpec{Class: "agent", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
@@ -528,9 +530,21 @@ func TestAUnitsJobIsItsOwners(t *testing.T) {
 	}
 }
 
-// A unit submits in its owner's name, so outside its parent's namespace the
-// owner must be allowed to create jobs there; in the parent's namespace the
-// owner already was.
+// ownersMay makes s's API server allow every owner every write.
+func ownersMay(s *Server) {
+	kube := kfake.NewSimpleClientset()
+	kube.PrependReactor("create", "subjectaccessreviews", func(ktesting.Action) (bool, runtime.Object, error) {
+		return true, &authzv1.SubjectAccessReview{Status: authzv1.SubjectAccessReviewStatus{Allowed: true}}, nil
+	})
+	s.Kube = kube
+}
+
+// A unit submits in its owner's name, so the owner must be allowed to
+// create jobs where it submits, in its parent's namespace as anywhere: the
+// API server is asked about the owner with the groups recorded when the
+// parent was made, or by name alone, which the refusal says. On a
+// single-person farm its one person always may. The child keeps the
+// parent's groups.
 func TestAUnitsJobNeedsItsOwnersRight(t *testing.T) {
 	s := submitFarm(t)
 	ctx := context.Background()
@@ -540,35 +554,68 @@ func TestAUnitsJobNeedsItsOwnersRight(t *testing.T) {
 	kube := kfake.NewSimpleClientset()
 	kube.PrependReactor("create", "subjectaccessreviews", func(a ktesting.Action) (bool, runtime.Object, error) {
 		sar := a.(ktesting.CreateAction).GetObject().(*authzv1.SubjectAccessReview)
-		allowed := sar.Spec.User == "lee" && sar.Spec.ResourceAttributes.Namespace == "show-a-fx"
+		ns := sar.Spec.ResourceAttributes.Namespace
+		allowed := sar.Spec.User == "lee" || // lee by name, everywhere
+			sar.Spec.User == "rin" && ns == "show-a-fx" && slices.Contains(sar.Spec.Groups, "fx-artists") // rin through a group
 		return true, &authzv1.SubjectAccessReview{Status: authzv1.SubjectAccessReviewStatus{Allowed: allowed}}, nil
 	})
 	s.Kube = kube
 	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-2"},
 		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
-	for _, owner := range []string{"lee", "mallory"} {
-		parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port-" + owner, UID: types.UID("uid-" + owner),
-			Annotations: map[string]string{c4v1.AnnotationOwner: owner}},
+	parent := func(name, owner, groups string) {
+		ann := map[string]string{c4v1.AnnotationOwner: owner}
+		if groups != "" {
+			ann[c4v1.AnnotationOwnerGroups] = groups
+		}
+		p := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: name, UID: types.UID("uid-" + name), Annotations: ann},
 			Spec: c4v1.WorkJobSpec{Class: "agent", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
-		if err := s.Client.Create(ctx, parent); err != nil {
+		if err := s.Client.Create(ctx, p); err != nil {
 			t.Fatal(err)
 		}
-		s.DevViewers["unit-"+owner] = &api.Viewer{User: "unit:show-a/port-" + owner + "/0", Projects: []string{"show-a"},
-			Unit: &api.UnitViewer{Namespace: "show-a", Job: "port-" + owner, JobUID: string(parent.UID), Unit: "0", Grant: "project"}}
-		// in the parent's own namespace: no question asked, made
-		if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit-"+owner, api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: "here-" + owner, Spec: spec}, nil); code != http.StatusCreated {
-			t.Fatalf("%s: a child in its parent's namespace: %d", owner, code)
+		s.DevViewers["unit-"+name] = &api.Viewer{User: "unit:show-a/" + name + "/0", Projects: []string{"show-a"},
+			Unit: &api.UnitViewer{Namespace: "show-a", Job: name, JobUID: string(p.UID), Unit: "0", Grant: "project"}}
+	}
+	parent("port-lee", "lee", "")
+	parent("port-mallory", "mallory", "")
+	parent("port-rin", "rin", `["fx-artists"]`)
+	parent("port-rin-unknown", "rin", "")
+	submit := func(parent, ns, name string) (int, string) {
+		var out map[string]any
+		code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit-"+parent, api.SubmitRequest{Project: "show-a", Namespace: ns, Name: name, Spec: spec}, &out)
+		msg, _ := out["error"].(string)
+		return code, msg
+	}
+	for _, c := range []struct {
+		parent, ns, name string
+		code             int
+		says             string
+	}{
+		{"port-lee", "show-a", "here-lee", http.StatusCreated, ""},
+		{"port-lee", "show-a-fx", "there-lee", http.StatusCreated, ""},
+		{"port-mallory", "show-a", "here-mallory", http.StatusForbidden,
+			"mallory may not submit in show-a, so a unit of mallory's job may not either (mallory's groups aren't known for a unit's submission"},
+		{"port-rin", "show-a-fx", "there-rin", http.StatusCreated, ""},
+		{"port-rin", "show-a", "here-rin", http.StatusForbidden, "rin may not submit in show-a, so a unit of rin's job may not either"},
+		{"port-rin-unknown", "show-a-fx", "there-rin-unknown", http.StatusForbidden, "rin's groups aren't known for a unit's submission"},
+	} {
+		code, msg := submit(c.parent, c.ns, c.name)
+		if code != c.code || !strings.Contains(msg, c.says) {
+			t.Errorf("%s in %s: %d %q, want %d %q", c.parent, c.ns, code, msg, c.code, c.says)
+		}
+		if c.says != "" && c.name == "here-rin" && strings.Contains(msg, "aren't known") {
+			t.Errorf("rin's groups were recorded, yet the refusal says they aren't known: %q", msg)
 		}
 	}
-	// elsewhere in the project: lee may create jobs there, mallory may not
-	var out api.SubmitResponse
-	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit-lee", api.SubmitRequest{Project: "show-a", Namespace: "show-a-fx", Name: "there-lee", Spec: spec}, &out); code != http.StatusCreated {
-		t.Fatalf("lee's unit in show-a-fx: %d %+v", code, out)
+	var child c4v1.WorkJob
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a-fx", Name: "there-rin"}, &child); err != nil {
+		t.Fatal(err)
 	}
-	var refused map[string]string
-	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit-mallory", api.SubmitRequest{Project: "show-a", Namespace: "show-a-fx", Name: "there-mallory", Spec: spec}, &refused); code != http.StatusForbidden ||
-		!strings.Contains(refused["error"], "mallory, who may not create jobs in show-a-fx") {
-		t.Fatalf("mallory's unit made a job where mallory may not: %d %v", code, refused)
+	if child.Annotations[c4v1.AnnotationOwnerGroups] != `["fx-artists"]` {
+		t.Errorf("the child's recorded groups: %q", child.Annotations[c4v1.AnnotationOwnerGroups])
+	}
+	s.SinglePerson = "mallory"
+	if code, msg := submit("port-mallory", "show-a", "here-mallory"); code != http.StatusCreated {
+		t.Errorf("the one person of a single-person farm: %d %q", code, msg)
 	}
 }
 
@@ -598,6 +645,7 @@ func TestSubmitRefusesSpecTool(t *testing.T) {
 // the parent.
 func TestAUnitsJobKeepsItsParentsGrant(t *testing.T) {
 	s := submitFarm(t)
+	ownersMay(s) // what this tests is not the owner's right
 	ctx := context.Background()
 	g := &c4v1.SubmitGrant{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: c4v1.SubmitGrantName("github", "dana")},
 		Spec: c4v1.SubmitGrantSpec{Person: "dana", Tracker: "github", Pools: []string{"cpu"}, Classes: []string{"render"},
@@ -651,5 +699,33 @@ func TestAUnitsJobKeepsItsParentsGrant(t *testing.T) {
 	}
 	if code, msg := submit("after-revoke", "render", "cpu"); code != http.StatusForbidden || !strings.Contains(msg, "dana revoked the grant") {
 		t.Errorf("after the grant is revoked: %d %q", code, msg)
+	}
+}
+
+// A job the HUD makes for a signed-in person records the groups they
+// signed in with, for what its units later submit in their name; a
+// development viewer's job records none, and so names none.
+func TestHUDJobsRecordTheirOwnersGroups(t *testing.T) {
+	s := submitFarm(t)
+	ownersMay(s)
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-2"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/jobs", nil)
+	for _, c := range []struct {
+		name   string
+		groups []string
+		want   string
+	}{{"signed-in", []string{"fx-artists", "system:authenticated"}, `["fx-artists","system:authenticated"]`}, {"dev", nil, ""}} {
+		v := &api.Viewer{User: "rin", Projects: []string{"show-a"}, Groups: c.groups}
+		if _, code, err := s.createJob(r, v, s.current(), api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: c.name, Spec: spec}, createOpts{}); code != http.StatusCreated {
+			t.Fatalf("%s: %d %v", c.name, code, err)
+		}
+		var j c4v1.WorkJob
+		if err := s.Client.Get(context.Background(), types.NamespacedName{Namespace: "show-a", Name: c.name}, &j); err != nil {
+			t.Fatal(err)
+		}
+		if got := j.Annotations[c4v1.AnnotationOwnerGroups]; got != c.want {
+			t.Errorf("%s: recorded groups %q, want %q", c.name, got, c.want)
+		}
 	}
 }

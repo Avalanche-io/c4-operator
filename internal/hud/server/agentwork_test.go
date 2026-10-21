@@ -169,6 +169,7 @@ func TestSubmissionAgentPlan(t *testing.T) {
 // is unaffected; and once the project says anyone, the unit's passes too.
 func TestSubmissionLeadSubmitsAgentWork(t *testing.T) {
 	s := submissionFarm(t)
+	ownersMay(s) // what this tests is not the owner's right
 	ctx := context.Background()
 	agentToolIn(t, s)
 	s.DryRunAll = func(_ context.Context, jobs []*c4v1.WorkJob, _ string, _ map[string]string, _ map[string][]byte) ([]api.SubmitEstimate, error) {
@@ -226,6 +227,7 @@ func TestSubmissionLeadSubmitsAgentWork(t *testing.T) {
 // agent job once the project says anyone.
 func TestAUnitsAgentJobNeedsALead(t *testing.T) {
 	s := submitFarm(t)
+	ownersMay(s) // what this tests is not the owner's right
 	ctx := context.Background()
 	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port", UID: "uid-port",
 		Annotations: map[string]string{c4v1.AnnotationOwner: "noor"}},

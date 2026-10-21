@@ -2,6 +2,7 @@ package webhook
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"slices"
 
@@ -18,8 +19,10 @@ import (
 // the manager makes from it) are owned by whoever applied the bundle.
 // Delegates (the manager's own service account, which creates jobs for
 // signed-in HUD and MCP users after checking their permission, and for
-// bundles) may set the owner themselves. The c4-workjob-owner admission
-// policy keeps the owner from changing on either.
+// bundles) may set the owner themselves. With the owner it records the
+// requesting user's groups (c4.avalanche.io/owner-groups), so a unit's
+// submission for the owner is checked against the owner's own rights. The
+// c4-workjob-owner admission policy keeps both from changing on either.
 type Owner struct {
 	Delegates []string
 }
@@ -42,10 +45,12 @@ func (m *Owner) Handle(_ context.Context, req admission.Request) admission.Respo
 		ann = map[string]string{}
 	}
 	_, byUnit := ann[c4v1.AnnotationSubmittedByUnit]
-	if ann[c4v1.AnnotationOwner] == user && ann[c4v1.AnnotationSubmittedVia] == "api" && !byUnit {
+	groups := ownerGroups(req.UserInfo.Groups)
+	if ann[c4v1.AnnotationOwner] == user && ann[c4v1.AnnotationSubmittedVia] == "api" && !byUnit && ann[c4v1.AnnotationOwnerGroups] == groups {
 		return admission.Allowed("owner already the requester")
 	}
 	ann[c4v1.AnnotationOwner] = user
+	ann[c4v1.AnnotationOwnerGroups] = groups
 	ann[c4v1.AnnotationSubmittedVia] = "api"
 	// only the farm says a unit submitted it
 	delete(ann, c4v1.AnnotationSubmittedByUnit)
@@ -55,4 +60,14 @@ func (m *Owner) Handle(_ context.Context, req admission.Request) admission.Respo
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, raw)
+}
+
+// ownerGroups is the annotation value for groups: a JSON list, "[]" for
+// none.
+func ownerGroups(groups []string) string {
+	if groups == nil {
+		groups = []string{}
+	}
+	b, _ := json.Marshal(groups)
+	return string(b)
 }

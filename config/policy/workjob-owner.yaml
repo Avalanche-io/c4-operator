@@ -24,11 +24,13 @@ spec:
     expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
   validations:
   - expression: >-
-      ['c4.avalanche.io/owner', 'c4.avalanche.io/submitted-via', 'c4.avalanche.io/grant', 'c4.avalanche.io/submitted-by-unit'].all(k,
+      ['c4.avalanche.io/owner', 'c4.avalanche.io/owner-groups', 'c4.avalanche.io/submitted-via', 'c4.avalanche.io/grant', 'c4.avalanche.io/submitted-by-unit'].all(k,
         !(k in variables.before) || (k in variables.after && variables.after[k] == variables.before[k]))
-    message: a WorkJob's or AgentBundle's owner, how it was submitted, the grant it was submitted under and the unit that submitted it are set at creation and cannot change
+    message: a WorkJob's or AgentBundle's owner, the owner's groups, how it was submitted, the grant it was submitted under and the unit that submitted it are set at creation and cannot change
   - expression: "!('c4.avalanche.io/submitted-by-unit' in variables.after) || 'c4.avalanche.io/submitted-by-unit' in variables.before"
     message: only the farm says a unit submitted a job, when it creates it
+  - expression: "!('c4.avalanche.io/owner-groups' in variables.after) || 'c4.avalanche.io/owner-groups' in variables.before"
+    message: an owner's groups are recorded when the job is made, never added later
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding

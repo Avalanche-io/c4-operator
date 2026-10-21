@@ -104,6 +104,7 @@ func TestUndefinedNetworkRefusedAtSubmit(t *testing.T) {
 // limit, and a unit whose job has no tool submits only sealed jobs.
 func TestAUnitsJobIsNoWiderThanTheUnit(t *testing.T) {
 	s := sealFarm(t)
+	ownersMay(s) // what this tests is not the owner's right
 	ctx := context.Background()
 	for name, nets := range map[string][]string{"agent": {"model-api"}, "sealed": nil} {
 		spec := c4v1.WorkJobSpec{Class: "agent", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}
