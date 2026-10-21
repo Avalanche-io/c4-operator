@@ -356,6 +356,7 @@ def prepare(draft: Draft) -> Prepared:
             continue
         deps.append(d)
     col = collectlib.gather(draft.root, draft.scene_file, deps)
+    problems += [Problem("warning", "scene", w) for w in host.warnings()]
     return Prepared(draft=draft, doc=doc, collection=col, problems=problems, signature=draft.signature())
 
 

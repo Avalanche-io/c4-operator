@@ -366,3 +366,10 @@ def test_the_hosts_own_state_makes_a_check_stale(tmp_path, farm, nocache):
     host.modified = True          # an edit only the application knows of
     d.refresh()                   # the panel refreshes on the main thread
     assert c.stale()
+
+
+def test_a_hosts_warnings_reach_the_check(tmp_path, farm, nocache):
+    host = comp_scene(tmp_path)
+    host.warnings = lambda: ["every file was sent: the application could not say which ones the jobs read"]
+    c = Submitter(farm, cache=nocache).check(prepare(draft_for(host, farm)))
+    assert c.ok and "every file was sent: the application could not say which ones the jobs read" in c.warnings

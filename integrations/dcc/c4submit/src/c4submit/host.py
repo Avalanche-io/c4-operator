@@ -104,6 +104,13 @@ class Host:
         """Every file the scene reads, besides the scene file itself."""
         return []
 
+    def warnings(self) -> List[str]:
+        """What the artist should know about how the scene was read, asked
+        after ``dependencies()`` (for example, that every file was sent
+        because the application could not say which ones the jobs read).
+        Shown with the check's warnings."""
+        return []
+
     # --- production context ---------------------------------------------
 
     def project(self) -> str:
