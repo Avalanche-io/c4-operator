@@ -103,6 +103,9 @@ jobs:
         password: ${{ secrets.GITHUB_TOKEN }}
     - run: make tools
     - run: make tool-locks VERSION=${{ github.ref_name }}
+    # the tools tool-tests ran, which c4-farm and the operator name as
+    # tested in this release
+    - run: echo "C4_TESTED_TOOLS=$(make -s tested-tools)" >> "$GITHUB_ENV"
     - uses: goreleaser/goreleaser-action@v7
       with:
         version: "~> v2"

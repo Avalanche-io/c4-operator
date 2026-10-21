@@ -22,7 +22,9 @@ builds:
   goos: [linux, darwin]
   goarch: [amd64, arm64]
   flags: [-trimpath]
-  ldflags: ["-s -w -X main.version={{ .Tag }}"]
+  # the tools whose own tests the release ran (make tested-tools), which
+  # the HUD books as tested in it
+  ldflags: ["-s -w -X main.version={{ .Tag }} -X github.com/Avalanche-io/c4-operator/tools.tested={{ envOrDefault \"C4_TESTED_TOOLS\" \"\" }}"]
 
 - id: c4-farm
   main: ./cmd/c4-farm

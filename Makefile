@@ -21,7 +21,7 @@ JOB_IMAGES ?= oiio media usd ci train infer sim hydra
 RUNTIME_IMAGES ?= base python oiio torch
 LINUX_TEST_PKGS ?= ./internal/capture ./internal/layer ./internal/overlay ./internal/node
 
-.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks tool-tests job-image-hydra-blender install-yaml release-snapshot verify cross e2e e2e-down tools tutorials stress stress-quick
+.PHONY: all generate manifests test test-linux envtest build image images image-sync image-block sync-yaml demo-dailies demo-github demo-kitsu job-images job-images-dev runtime-images runtime-images-dev job-image-names runtime-image-names tool-locks tool-tests tested-tools job-image-hydra-blender install-yaml release-snapshot verify cross e2e e2e-down tools tutorials stress stress-quick
 
 all: generate manifests test build
 
@@ -265,6 +265,10 @@ tool-locks:
 # the farm fences a unit's network; it joins then, or once the farm brings
 # its model from C4 storage.
 TESTED_TOOLS ?= comp render sim transcode usd
+# The tools the release links as tested (tools.tested), comma-separated:
+# the release job runs only once tool-tests has passed for each of them.
+tested-tools:
+	@echo $(TESTED_TOOLS) | tr ' ' ,
 tool-tests:
 	@mkdir -p bin
 	go build -trimpath -ldflags="-X main.version=$(VERSION)" -o bin/c4-farm-tools ./cmd/c4-farm
