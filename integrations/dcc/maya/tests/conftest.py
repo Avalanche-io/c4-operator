@@ -24,3 +24,11 @@ def _fresh(monkeypatch, tmp_path):
     fakemaya.reset()
     yield
     fakemaya.reset()
+
+
+@pytest.fixture(autouse=True)
+def _usd_from_text(monkeypatch):
+    # The fake carries no USD, and another folder's fake pxr may linger in
+    # sys.modules: USD files are read as text, as without USD's Python.
+    from c4submit import usd
+    monkeypatch.setattr(usd, "_with_pxr", lambda path: None)

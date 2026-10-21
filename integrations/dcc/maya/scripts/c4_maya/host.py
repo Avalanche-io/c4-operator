@@ -369,7 +369,11 @@ class MayaHost(Host):
         nothing here."""
         if not path.lower().endswith(USD_LAYERS) or seq.has_frames(path) or not os.path.isfile(path):
             return []
-        deps, unread = usdlib.dependencies(path, node=f"{node} > {os.path.basename(path)}")
+        label = f"{node} > {os.path.basename(path)}"
+        try:
+            deps, unread = usdlib.dependencies(path, node=label)
+        except Exception:  # noqa: BLE001 - USD's resolver raises on a layer it cannot open; read the text instead
+            deps, unread = usdlib.dependencies(path, node=label, use_pxr=False)
         for d in deps:
             d.renderables = None if tags is None else list(tags)
             d.optional = optional

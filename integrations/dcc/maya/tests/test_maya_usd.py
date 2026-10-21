@@ -22,10 +22,7 @@ def Xform "marsh" (
 '''
 
 
-@pytest.fixture(autouse=True)
-def _no_pxr(monkeypatch):
-    # As in a Maya without USD's Python: the text layers are read here.
-    monkeypatch.setattr(usdlib, "_with_pxr", lambda path: None)
+# conftest reads USD files as text, as a Maya without USD's Python would.
 
 
 def marsh_files(show):
@@ -88,6 +85,17 @@ def test_a_reference_to_a_usd_file_brings_what_it_reads_for_every_layer(tmp_path
                                                  "assets/marsh/rocks.abc", "assets/marsh/tex/mud.<UDIM>.exr"]
     assert all(d.renderables is None for d in via), "a reference is read whenever the scene opens"
     assert all(d.optional for d in via), "an unloaded reference's files are warnings when missing, as it is"
+
+
+def test_a_stage_usds_resolver_cannot_open_is_read_as_text(tmp_path, monkeypatch):
+    host, _ = light_scene(tmp_path)
+    fm.usd_proxy("marsh", marsh_files(str(tmp_path)))
+
+    def broken(path):
+        raise RuntimeError("Failed to open layer")
+    monkeypatch.setattr(usdlib, "_with_pxr", broken)
+    via = [d for d in host.dependencies() if d.node == "marshShape > marsh_set.usda"]
+    assert len(via) == 4, "the check goes on with what the text says"
 
 
 def test_a_scene_without_usd_has_no_warnings(tmp_path):
