@@ -80,6 +80,9 @@ Each session gets:
   the session's `backgroundOpen` leaves out its workers listed. A session
   that ran workflow agents says so (`workflowsNotShown`); they are not read
   yet.
+- **its account:** `account`, a stable opaque label of the sign-in it runs
+  under (12 hex digits of a hash of its config folder): sessions that share
+  it share one usage window. It carries no path, email or account name.
 - **its turns,** its frames of work: each from the record that started it
   (a prompt, a notification, a steer) to its last, with its tokens and
   weighted tokens, oldest first; its latest 200 (`turns`, of `turnsTotal`).

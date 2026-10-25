@@ -214,3 +214,13 @@ func TestSessionTurns(t *testing.T) {
 		t.Errorf("the worker's turn: %d", w.Turn)
 	}
 }
+
+// Every row says which sign-in it runs under, as a stable opaque label:
+// the same folder gives the same label, another folder another, and the
+// label carries none of the path.
+func TestAccountIsOpaque(t *testing.T) {
+	a, b := accountOf("/Users/noor/.claude"), accountOf("/Users/noor/.c4/agents/blocks-env")
+	if len(a) != 12 || a == b || a != accountOf("/Users/noor/.claude/") || strings.Contains(a, "noor") {
+		t.Fatalf("labels %q %q", a, b)
+	}
+}

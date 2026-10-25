@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -11,6 +13,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"sort"
 	"strings"
@@ -69,6 +72,10 @@ type Observed struct {
 	Description   string         `json:"description,omitempty"`
 	WaitsOn       string         `json:"waitsOn,omitempty"`
 	WorkersDone   int            `json:"workersDone,omitempty"`
+	// Account says which Claude Code sign-in the session runs under, as a
+	// stable opaque label (accountOf): sessions that share it share one
+	// usage window. It names no path, email or account.
+	Account string `json:"account,omitempty"`
 	// Weighted is what it has used in input-equivalent tokens, each model's
 	// counts weighted as the farm weighs them (work/tokens), so every
 	// reader shows one number.
@@ -224,6 +231,10 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 	}
 	for _, i := range idx {
 		place(i) // a claimed parent that is not listed
+	}
+	acct := accountOf(configDir)
+	for i := range rows {
+		rows[i].Account = acct
 	}
 	return rows, nil
 }
@@ -659,6 +670,28 @@ func (sc *scanner) result() sessionScan {
 	s.turnsTotal = len(sc.s.turns)
 	s.toolTurn = sc.toolTurn
 	return s
+}
+
+// accountOf is the opaque label of a config folder's sign-in: the first
+// 12 hex digits of a SHA-256 of its absolute path ("" for the CLI's
+// default, which is CLAUDE_CONFIG_DIR or ~/.claude).
+func accountOf(configDir string) string {
+	if configDir == "" {
+		configDir = os.Getenv("CLAUDE_CONFIG_DIR")
+	}
+	if configDir == "" {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return ""
+		}
+		configDir = filepath.Join(home, ".claude")
+	}
+	abs, err := filepath.Abs(configDir)
+	if err != nil {
+		return ""
+	}
+	sum := sha256.Sum256([]byte(filepath.Clean(abs)))
+	return hex.EncodeToString(sum[:])[:12]
 }
 
 // TurnsShown is how many of a session's latest turns a row lists.
