@@ -16,6 +16,7 @@
 //	c4-agent log NAME [-n 10]
 //	c4-agent hooks
 //	c4-agent enroll --owner USER [--node NAME] [--pool agent] [--slots N] [--kubeconfig K] [--context C]
+//	c4-agent enroll-offer [--holder H] [--json]
 //	c4-agent runner --owner USER [--node NAME] [--slots N] [--label K=V]...
 //	c4-agent block-pod [--cwd DIR]
 //	c4-agent lease --name N --namespace NS --holder H --owner O --pool P [--ttl 8h] [--renew-before 15m] [--config-dir DIR]
@@ -317,6 +318,8 @@ func dispatch(ctx context.Context, h *agent.Harness, cmd string, args []string, 
 		return runRunner(ctx, h, fs, args, out)
 	case "enroll":
 		return runEnroll(ctx, h, fs, args, out)
+	case "enroll-offer":
+		return runEnrollOffer(ctx, h, fs, args, out)
 	case "hooks":
 		exe, err := os.Executable()
 		if err != nil {
@@ -386,6 +389,9 @@ const usage = `c4-agent: Claude Code sessions as members of an agent bundle.
                        with the farm admin's access: make this machine's own
                        account and a pool its owner owns, and write the
                        runner's kubeconfig, so runner needs no flags
+  enroll-offer [--holder H] [--json]
+                       offer this enrolled machine to the farm once, and print
+                       the code its holder gives it (c4 farm enroll)
   runner --owner USER [--node N] [--slots N] [--label K=V]... [--every 5s] [--yield-timeout 1m]
                        run this machine's members for the farm's queue (a host
                        runner: a Node for the machine, member pods bound to it)
@@ -514,6 +520,19 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 			fmt.Fprintf(out, "blocks run in %s, which is not signed in yet: sign in once there, through Anthropic's own flow (CLAUDE_CONFIG_DIR=%s claude)\n", r.BlocksEnv, r.BlocksEnv)
 		}
 	}
+	if *hud == "" && isEnrolled {
+		*hud = enrolled.HUD
+	}
+	if *hud != "" {
+		path := *hudToken
+		r.HUD = *hud
+		r.HUDToken = func() string {
+			b, _ := os.ReadFile(path)
+			return strings.TrimSpace(string(b))
+		}
+		// an enrolled machine offers itself until its holder enrolls it
+		r.Offer = isEnrolled && tokens != ""
+	}
 	if *observe {
 		if *hud == "" {
 			return errors.New("runner: --observe needs --hud, where the sessions are reported")
@@ -619,6 +638,7 @@ func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	kubeconfig := fs.String("kubeconfig", "", "the farm admin's kubeconfig (default: $KUBECONFIG or ~/.kube/config)")
 	kubecontext := fs.String("context", "", "its context for the farm (default: its current context)")
 	asJSON := fs.Bool("json", false, "print what was enrolled as JSON")
+	hudURL := fs.String("hud", "", "the farm's HUD (https://host:port), where the runner offers this machine for enrollment and reports its sessions")
 	if err := fs.Parse(args); err != nil {
 		return err
 	}
@@ -660,7 +680,7 @@ func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	if err != nil {
 		return err
 	}
-	e, err := agent.Enroll(ctx, cl, agent.EnrollOptions{ObserveConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"), Node: *node, Owner: *owner, Pool: *pool, Slots: *slots,
+	e, err := agent.Enroll(ctx, cl, agent.EnrollOptions{HUD: *hudURL, ObserveConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"), Node: *node, Owner: *owner, Pool: *pool, Slots: *slots,
 		Dir: agent.RunnerDir(h.Store.Dir), Farm: raw.Clusters[kctx.Cluster]})
 	if err != nil {
 		return err
@@ -689,6 +709,42 @@ func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		fmt.Fprintf(out, "its blocks run in %s with the config directory %s, which needs its person once, to sign in through Anthropic's own flow and trust the folder: cd %s && CLAUDE_CONFIG_DIR=%s claude\n", e.BlocksFolder, e.BlocksEnv, e.BlocksFolder, e.BlocksEnv)
 	}
 	fmt.Fprintln(out, "start its runner: c4-agent runner")
+	return nil
+}
+
+// runEnrollOffer offers this enrolled machine for enrollment, once, and
+// prints the code its holder gives the farm (c4 farm enroll), for c4 farm
+// up to do on the person's behalf.
+func runEnrollOffer(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []string, out io.Writer) error {
+	holder := fs.String("holder", "", "whose Claude Code sign-in this machine's runner uses (default: its enrolled owner)")
+	asJSON := fs.Bool("json", false, "print the offer as JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	e, ok, err := agent.ReadEnrolled(agent.RunnerDir(h.Store.Dir))
+	if err != nil {
+		return err
+	}
+	if !ok || e.HUD == "" {
+		return errors.New("enroll-offer: this machine is not enrolled with a HUD (c4-agent enroll --hud URL)")
+	}
+	if *holder == "" {
+		*holder = e.Owner
+	}
+	tok, _ := os.ReadFile(agent.TokenFile(e.Tokens, "hud"))
+	if len(strings.TrimSpace(string(tok))) == 0 {
+		return errors.New("enroll-offer: no HUD token yet: start the runner once, which makes it")
+	}
+	o, err := agent.OfferMachine(ctx, nil, e.HUD, strings.TrimSpace(string(tok)), e.Node, *holder)
+	if err != nil {
+		return err
+	}
+	if *asJSON {
+		enc := json.NewEncoder(out)
+		enc.SetIndent("", "  ")
+		return enc.Encode(o)
+	}
+	fmt.Fprintln(out, o.Message)
 	return nil
 }
 

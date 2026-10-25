@@ -128,7 +128,12 @@ type Runner struct {
 	observedErr      string
 	observedUnseen   bool
 	observing        atomic.Bool
-	obsMu            sync.Mutex
+	// Offer, with HUD, has the runner offer its machine for enrollment
+	// while no one owns it (offer.go).
+	Offer     bool
+	offerDue  time.Time
+	offerDone bool
+	obsMu     sync.Mutex
 	// Farm names the farm in this runner's deployment name
 	// (<farm>/runner/<node>), as its records name it.
 	Farm string
@@ -263,6 +268,7 @@ func (r *Runner) Tick(ctx context.Context) error {
 		return fmt.Errorf("node %s: %w", r.Node, err)
 	}
 	r.observeTick(ctx)
+	r.offerTick(ctx)
 	var pods corev1.PodList
 	if err := r.Client.List(ctx, &pods, client.HasLabels{c4v1.LabelJob}); err != nil {
 		return err

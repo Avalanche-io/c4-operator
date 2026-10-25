@@ -73,6 +73,8 @@ type EnrollOptions struct {
 	// ObserveConfigDir is the enrolling person's Claude Code config folder
 	// (Enrolled.ObserveConfigDir).
 	ObserveConfigDir string
+	// HUD is the farm's HUD (Enrolled.HUD).
+	HUD string
 }
 
 // Enrolled is what enrolling made or found.
@@ -97,6 +99,9 @@ type Enrolled struct {
 	// default): what the runner observes, though a service starts it
 	// without that person's environment.
 	ObserveConfigDir string `json:"observeConfigDir,omitempty"`
+	// HUD is the farm's HUD, where the runner offers the machine for
+	// enrollment and reports its sessions.
+	HUD string `json:"hud,omitempty"`
 }
 
 // Enroll enrolls a machine. Running it again changes nothing but the
@@ -108,7 +113,7 @@ func Enroll(ctx context.Context, c client.Client, o EnrollOptions) (Enrolled, er
 	if o.Slots <= 0 {
 		o.Slots = 1
 	}
-	e := Enrolled{ObserveConfigDir: o.ObserveConfigDir, Node: o.Node, Owner: o.Owner, Pool: o.Pool, Kubeconfig: filepath.Join(o.Dir, "kubeconfig"), Tokens: filepath.Join(o.Dir, "tokens")}
+	e := Enrolled{ObserveConfigDir: o.ObserveConfigDir, HUD: o.HUD, Node: o.Node, Owner: o.Owner, Pool: o.Pool, Kubeconfig: filepath.Join(o.Dir, "kubeconfig"), Tokens: filepath.Join(o.Dir, "tokens")}
 	if err := c.Get(ctx, types.NamespacedName{Name: HostsNamespace}, &corev1.Namespace{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			return e, fmt.Errorf("the farm has no %s namespace: its host runner access is not installed (config/rbac/host-runner.yaml)", HostsNamespace)

@@ -311,6 +311,17 @@ itself, renewing each at half its 7-day life: `kube` for the farm's API,
 `signer` for the certificate issuer (`--signer`, likewise). A machine left
 off longer than a token's life says to enroll it again.
 
+**Enrolled by its holder.** Enrolling the machine's account is the farm
+admin's act; making it someone's machine is its holder's (the person whose
+Claude Code sign-in its runner uses). With the HUD recorded at enroll
+(`--hud URL`), the runner offers the machine while no one owns it, as its
+own node, and logs the code the HUD gives, offering again before each code
+runs out (every 9 minutes); `c4-agent enroll-offer [--json]` makes one offer
+and prints its code, for `c4 farm up` to do on the person's behalf. The
+holder accepts with `c4 farm enroll <node> <code>` (or adds someone with
+`--for`), and the HUD writes the Node's owners. Until then the farm places
+no one's work on it.
+
 **As a service.** A runner a service starts (launchd, systemd) gets the
 system's bare PATH, so it adds its own folder and the usual install
 folders (`~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`) before it
