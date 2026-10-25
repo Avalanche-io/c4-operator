@@ -226,7 +226,7 @@ func Up(ctx context.Context, o UpOptions) error {
 		}
 	}
 	o.Timings.Mark("HUD")
-	if err := waitHUD(ctx, o.HUD(), 5*time.Minute); err != nil {
+	if err := waitHUD(ctx, o.HUD(), o.InstallerToken, 5*time.Minute); err != nil {
 		return err
 	}
 	// the networks tools declare (needs.network), before any tool's test runs
@@ -560,10 +560,19 @@ func waitJob(ctx context.Context, c client.Client, ns, name string, limit time.D
 	})
 }
 
-func waitHUD(ctx context.Context, hud string, limit time.Duration) error {
+// waitHUD waits for the HUD to answer a development viewer, with the
+// installer token it asks of one.
+func waitHUD(ctx context.Context, hud, installer string, limit time.Duration) error {
 	u := hud + "/api/v1/snapshot?as=wrangler"
 	return poll(ctx, limit, "the HUD", func() (bool, error) {
-		resp, err := http.Get(u)
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+		if err != nil {
+			return false, err
+		}
+		if installer != "" {
+			req.Header.Set(InstallerHeader, installer)
+		}
+		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
 			return false, nil
 		}

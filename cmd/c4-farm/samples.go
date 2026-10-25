@@ -53,7 +53,11 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 	fmt.Fprintf(stdout, "loading   %s: %s, onto %s\n", sc.Name, sc.Title, name)
 	if len(sc.Issues) > 0 {
 		// issues for the Tracker, not jobs: the farm's other work stays
-		if err := farmcli.LoadIssues(ctx, o, sc, f.HUD, f.Owner); err != nil {
+		inst, err := f.InstallerToken()
+		if err != nil {
+			return err
+		}
+		if err := farmcli.LoadIssues(ctx, o, sc, f.HUD, f.Owner, inst); err != nil {
 			return err
 		}
 		as := sc.Issues[0].By

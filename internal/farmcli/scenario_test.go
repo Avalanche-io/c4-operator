@@ -257,7 +257,9 @@ func TestLoadIssues(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got map[string]any
+	var installer string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		installer = r.Header.Get("X-C4-Installer")
 		if r.Method != http.MethodPost || r.URL.Path != "/sandbox/issues" || r.Header.Get("Content-Type") != "application/json" {
 			http.Error(w, "no", http.StatusMethodNotAllowed)
 			return
@@ -267,7 +269,7 @@ func TestLoadIssues(t *testing.T) {
 	}))
 	defer srv.Close()
 	var out bytes.Buffer
-	if err := LoadIssues(context.Background(), Out{W: &out}, sc, srv.URL, ""); err != nil {
+	if err := LoadIssues(context.Background(), Out{W: &out}, sc, srv.URL, "", ""); err != nil {
 		t.Fatal(err)
 	}
 	if got["as"] != "supervisor" || got["assignee"] != "artist" || !strings.Contains(out.String(), "#1 Light sm0150 for Thursday's review (by supervisor)") ||
@@ -276,11 +278,12 @@ func TestLoadIssues(t *testing.T) {
 	}
 	none := httptest.NewServer(http.NotFoundHandler())
 	defer none.Close()
-	// On a farm with an owner the issue is theirs, opened and assigned.
-	if err := LoadIssues(context.Background(), Out{W: &out}, sc, srv.URL, "noor"); err != nil || got["as"] != "noor" || got["assignee"] != "noor" {
-		t.Fatalf("an owner's farm sent %v: %v", got, err)
+	// On a farm with an owner the issue is theirs, opened and assigned,
+	// with the farm's installer token, as every request to its HUD has.
+	if err := LoadIssues(context.Background(), Out{W: &out}, sc, srv.URL, "noor", "t0ken"); err != nil || got["as"] != "noor" || got["assignee"] != "noor" || installer != "t0ken" {
+		t.Fatalf("an owner's farm sent %v with %q: %v", got, installer, err)
 	}
-	if err := LoadIssues(context.Background(), Out{W: &out}, sc, none.URL, ""); !errors.Is(err, ErrNoSandbox) {
+	if err := LoadIssues(context.Background(), Out{W: &out}, sc, none.URL, "", ""); !errors.Is(err, ErrNoSandbox) {
 		t.Fatalf("no sandbox: %v", err)
 	}
 }
