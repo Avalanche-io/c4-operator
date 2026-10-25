@@ -901,7 +901,7 @@ on the farm until a person carries it out:
   a, the default, a bundle holds the present moment alone. The ring lives
   in the manager's memory, so a restart empties it. Nothing leaves the
   farm at either tier.
-- **The tier** is the farm's setting, the ConfigMap `c4-telemetry` in
+- **The tier** is the farm's setting, the ConfigMap `c4-telemetry-setting` in
   `c4-system`, which only the manager writes (the admission policy
   `c4-telemetry-setting` refuses anyone else). `--telemetry-ring` is the
   tier a farm starts at before its admin sets one. `C4_TELEMETRY=off` in

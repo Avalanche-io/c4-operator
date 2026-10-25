@@ -1,4 +1,4 @@
-# The farm's telemetry setting (the ConfigMap c4-telemetry in c4-system)
+# The farm's telemetry setting (the ConfigMap c4-telemetry-setting in c4-system)
 # says how much telemetry the farm keeps (DESIGN.md section 6.9). Only the
 # manager writes it, from the farm admin's signed control in the HUD
 # (internal/hud/server/telemetry.go), so nobody with ConfigMap access in
@@ -20,7 +20,7 @@ spec:
       resources: [configmaps]
   matchConditions:
   - name: is-the-setting
-    expression: "(request.operation == 'DELETE' ? oldObject.metadata.name : object.metadata.name) == 'c4-telemetry'"
+    expression: "(request.operation == 'DELETE' ? oldObject.metadata.name : object.metadata.name) == 'c4-telemetry-setting'"
   validations:
   - expression: "request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'"
     message: the farm's telemetry setting is changed by the farm admin in the HUD (or c4 farm telemetry), never written directly

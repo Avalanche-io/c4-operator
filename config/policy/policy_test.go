@@ -741,7 +741,7 @@ func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
 		t.Fatal(err)
 	}
 	setting := func(tier string) *corev1.ConfigMap {
-		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "c4-telemetry"}, Data: map[string]string{"tier": tier}}
+		return &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: "c4-telemetry-setting"}, Data: map[string]string{"tier": tier}}
 	}
 	enforced(t, "c4-telemetry-setting", func(try int) error {
 		cm := setting(fmt.Sprint("b", try))

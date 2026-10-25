@@ -14,7 +14,7 @@ import (
 // admission policy c4-telemetry-setting refuses anyone else. Its data
 // holds the tier and the signed control record that last changed it, by
 // its C4 ID and whole, so the record stays with the setting it signs.
-const Setting = "c4-telemetry"
+const Setting = "c4-telemetry-setting"
 
 // LoadTier reads the farm's tier and the ID of the record that set it; ok
 // is false when the farm has none yet, and the install's preset applies.

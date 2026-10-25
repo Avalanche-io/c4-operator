@@ -411,7 +411,7 @@ rules:
 # any other writer.
 - apiGroups: [""]
   resources: [configmaps]
-  resourceNames: [c4-telemetry]
+  resourceNames: [c4-telemetry-setting]
   verbs: [get, update]
 - apiGroups: [""]
   resources: [configmaps]
