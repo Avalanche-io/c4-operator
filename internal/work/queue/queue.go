@@ -113,6 +113,8 @@ type Queue struct {
 	// unitsSealed is, per namespace this tick, why its units' default
 	// egress policy could not be written (nil: it is in place; tools.go).
 	unitsSealed map[string]error
+	// toolNets is each tool tree's declared networks, as read (tools.go).
+	toolNets map[string][]string
 	// Namespace is the operator's namespace, where the queue keeps the
 	// pointers to each project's saved calibrations (persist.go). Empty,
 	// or without Stores, calibrations are not saved.

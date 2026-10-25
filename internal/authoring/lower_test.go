@@ -104,7 +104,7 @@ func TestToolJobsRunUnderTheirTool(t *testing.T) {
 	}
 	job, test := lower()
 	for _, req := range []*api.SubmitRequest{job, test} {
-		if s := spec(req); s.Tool == nil || s.Tool.Name != "fetch" || len(s.Tool.Network) != 0 {
+		if s := spec(req); s.Tool == nil || s.Tool.Name != "fetch" || len(s.Tool.Network) != 0 || s.Tool.View != "c4view" {
 			t.Fatalf("undeclared: %+v", s.Tool)
 		}
 	}

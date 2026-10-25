@@ -441,10 +441,16 @@ spec:
                               description: |-
                                 Network names the networks the units may reach, as the farm admin
                                 defines them (the c4-networks ConfigMap in the operator's
-                                namespace). Empty: the units are sealed.
+                                namespace). Empty: the units are sealed. The queue holds the units
+                                while it names one the version (View) does not declare.
                               items:
                                 type: string
                               type: array
+                            view:
+                              description: |-
+                                View is the version's tree (its C4 ID), as the Tool records it: the
+                                version whose tool.yaml says which networks the job may claim.
+                              type: string
                           required:
                           - name
                           type: object

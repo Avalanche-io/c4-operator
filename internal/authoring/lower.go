@@ -154,7 +154,7 @@ func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 	// and then reaching only that (the queue's job policy and the egress
 	// proxy). A tool's test runs the same way.
 	spec := c4v1.WorkJobSpec{Class: "render", Params: cp, Pools: j.pools, MaxParallel: int32(j.maxPar), Measure: j.measure,
-		Tool:     &c4v1.WorkTool{Name: t.Name, Network: otherNetwork(t.Needs.Network)},
+		Tool:     &c4v1.WorkTool{Name: t.Name, Network: otherNetwork(t.Needs.Network), View: j.ref.View},
 		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{c}}}}
 	retries := j.retries
 	if retries == nil {

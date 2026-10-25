@@ -324,9 +324,14 @@ type WorkTool struct {
 	Name string `json:"name"`
 	// Network names the networks the units may reach, as the farm admin
 	// defines them (the c4-networks ConfigMap in the operator's
-	// namespace). Empty: the units are sealed.
+	// namespace). Empty: the units are sealed. The queue holds the units
+	// while it names one the version (View) does not declare.
 	// +optional
 	Network []string `json:"network,omitempty"`
+	// View is the version's tree (its C4 ID), as the Tool records it: the
+	// version whose tool.yaml says which networks the job may claim.
+	// +optional
+	View string `json:"view,omitempty"`
 }
 
 // WorkNudge is a person's bounded override.

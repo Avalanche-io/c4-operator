@@ -3,7 +3,9 @@ package queue
 import (
 	"context"
 	"fmt"
+	"io"
 	"net"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -15,9 +17,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/intstr"
+	"sigs.k8s.io/yaml"
+
+	"github.com/Avalanche-io/c4"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/egress"
+	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 // Tools (DESIGN 10.6). A unit that names a tool in its
@@ -177,7 +183,7 @@ func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.Tool, b
 			return nil, false, fmt.Sprintf("unit %d names tool %s, but %s runs under tool %s, and a tool job's units run under its tool alone: leave reasoning.tools out",
 				idx, name, v.job.Name, jt.Name)
 		}
-		return q.jobToolReady(ctx, v.job)
+		return q.jobToolReady(ctx, v)
 	}
 	if name == "" {
 		return nil, true, ""
@@ -224,8 +230,12 @@ func jobToolPolicyName(job string) string { return "c4-job-tool-" + job }
 // sealed. The
 // tool's tree is already one of the job's inputs, at ToolsMount, so
 // nothing is mounted here. It returns the tool as its units see it.
-func (q *Queue) jobToolReady(ctx context.Context, j *c4v1.WorkJob) (*c4v1.Tool, bool, string) {
+func (q *Queue) jobToolReady(ctx context.Context, v *view) (*c4v1.Tool, bool, string) {
+	j := v.job
 	name := j.Spec.Tool.Name
+	if why := q.claimedNetworks(ctx, v); why != "" {
+		return nil, false, why
+	}
 	nets := egress.Networks{}
 	if q.Namespace != "" {
 		var err error
@@ -253,6 +263,132 @@ func (q *Queue) jobToolReady(ctx context.Context, j *c4v1.WorkJob) (*c4v1.Tool, 
 		return nil, false, fmt.Sprintf("tool %s's network policy: %v", name, err)
 	}
 	return p, true, ""
+}
+
+// claimedNetworks checks a tool job's networks against what its tool's
+// version declares: needs.network in the tool.yaml of the tree the Tool
+// records as that version (spec.tool.view), not the job's own copy. So a
+// job written directly (a Tracker's template, a WorkJob made by hand) can
+// name a tool but never claim a network the tool did not declare. It says
+// why the units wait, or "" when they need not.
+func (q *Queue) claimedNetworks(ctx context.Context, v *view) string {
+	t := v.job.Spec.Tool
+	if len(t.Network) == 0 {
+		return "" // sealed: nothing claimed
+	}
+	what := func(ns []string) string {
+		if len(ns) == 1 {
+			return "network " + ns[0]
+		}
+		return "networks " + strings.Join(ns, ", ")
+	}
+	if t.View == "" {
+		return fmt.Sprintf("this job claims %s under tool %s but names no version of it, so the claim cannot be checked: submit it through the tool (c4 farm submit), which names the version",
+			what(t.Network), t.Name)
+	}
+	ver, err := q.toolVersion(ctx, v.job.Namespace, t.Name, t.View)
+	if err != nil {
+		return fmt.Sprintf("tool %s: %v", t.Name, err)
+	}
+	if ver == "" {
+		return fmt.Sprintf("this job claims %s under tool %s, but %s is not a version of %s: submit it through the tool (c4 farm submit)",
+			what(t.Network), t.Name, t.View, t.Name)
+	}
+	declared, err := q.declaredNetworks(ctx, v.project, t.View)
+	if err != nil {
+		return fmt.Sprintf("tool %s version %s: its tool.yaml cannot be read to check the job's networks: %v", t.Name, ver, err)
+	}
+	var extra []string
+	for _, n := range t.Network {
+		if !slices.Contains(declared, n) {
+			extra = append(extra, n)
+		}
+	}
+	if len(extra) > 0 {
+		return fmt.Sprintf("this job claims %s that tool %s version %s does not declare", what(extra), t.Name, ver)
+	}
+	return ""
+}
+
+// toolVersion is the version of tool name whose tree is view, as the Tool
+// records it (its versions, then the earlier ones): the job's namespace
+// first, then the operator's. "" when no Tool records it.
+func (q *Queue) toolVersion(ctx context.Context, ns, name, view string) (string, error) {
+	for _, in := range []string{ns, q.Namespace} {
+		if in == "" {
+			continue
+		}
+		var p c4v1.Tool
+		err := q.Client.Get(ctx, types.NamespacedName{Namespace: in, Name: name}, &p)
+		if apierrors.IsNotFound(err) {
+			continue
+		}
+		if err != nil {
+			return "", err
+		}
+		for _, x := range p.Status.Versions {
+			if x.View == view {
+				return x.Version, nil
+			}
+		}
+		for _, x := range p.Status.Earlier {
+			if x.View == view {
+				return x.Version, nil
+			}
+		}
+	}
+	return "", nil
+}
+
+// declaredNetworks is needs.network in the tool.yaml at the top of tree
+// view, read from project's store once per tree (a tree never changes).
+func (q *Queue) declaredNetworks(ctx context.Context, project, view string) ([]string, error) {
+	if n, ok := q.toolNets[view]; ok {
+		return n, nil
+	}
+	if q.Stores == nil {
+		return nil, fmt.Errorf("this farm has no store to read it from")
+	}
+	id, err := c4.Parse(view)
+	if err != nil {
+		return nil, fmt.Errorf("%q is not a C4 ID", view)
+	}
+	st, err := q.Stores(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	tree, err := c4view.Load(ctx, id, c4view.StoreRecords(st), 4)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range tree.Files {
+		if f.Path != "tool.yaml" {
+			continue
+		}
+		r, err := st.Open(f.ID)
+		if err != nil {
+			return nil, err
+		}
+		b, err := io.ReadAll(io.LimitReader(r, 1<<20))
+		r.Close()
+		if err != nil {
+			return nil, err
+		}
+		var doc struct {
+			Needs struct {
+				Network []string `json:"network"`
+			} `json:"needs"`
+		}
+		if err := yaml.Unmarshal(b, &doc); err != nil {
+			return nil, err
+		}
+		if q.toolNets == nil {
+			q.toolNets = map[string][]string{}
+		}
+		q.toolNets[view] = doc.Needs.Network
+		return doc.Needs.Network, nil
+	}
+	return nil, fmt.Errorf("the tree has no tool.yaml")
 }
 
 // toolsPolicy is tool p's NetworkPolicy in namespace ns: egress to the
