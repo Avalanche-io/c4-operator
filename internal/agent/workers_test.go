@@ -216,11 +216,22 @@ func TestSessionTurns(t *testing.T) {
 }
 
 // Every row says which sign-in it runs under, as a stable opaque label:
-// the same folder gives the same label, another folder another, and the
-// label carries none of the path.
+// the same folder gives the same label on this machine, another folder or
+// another machine another, and the label carries none of the path.
 func TestAccountIsOpaque(t *testing.T) {
-	a, b := accountOf("/Users/noor/.claude"), accountOf("/Users/noor/.c4/agents/blocks-env")
-	if len(a) != 12 || a == b || a != accountOf("/Users/noor/.claude/") || strings.Contains(a, "noor") {
+	home := t.TempDir()
+	salt := accountSalt(home)
+	a, b := accountOf(salt, "/Users/noor/.claude"), accountOf(salt, "/Users/noor/.c4/agents/blocks-env")
+	if len(a) != 12 || a == b || a != accountOf(salt, "/Users/noor/.claude/") || strings.Contains(a, "noor") {
 		t.Fatalf("labels %q %q", a, b)
+	}
+	if again := accountSalt(home); string(again) != string(salt) {
+		t.Error("the salt changed on a second read")
+	}
+	if info, err := os.Stat(filepath.Join(home, "account-salt")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Errorf("the salt file: %v %v", info, err)
+	}
+	if other := accountOf(accountSalt(t.TempDir()), "/Users/noor/.claude"); other == a {
+		t.Error("another machine gives the same label")
 	}
 }

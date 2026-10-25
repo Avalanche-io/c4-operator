@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -232,7 +234,7 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 	for _, i := range idx {
 		place(i) // a claimed parent that is not listed
 	}
-	acct := accountOf(configDir)
+	acct := accountOf(accountSalt(h.Store.Dir), configDir)
 	for i := range rows {
 		rows[i].Account = acct
 	}
@@ -673,9 +675,11 @@ func (sc *scanner) result() sessionScan {
 }
 
 // accountOf is the opaque label of a config folder's sign-in: the first
-// 12 hex digits of a SHA-256 of its absolute path ("" for the CLI's
-// default, which is CLAUDE_CONFIG_DIR or ~/.claude).
-func accountOf(configDir string) string {
+// 12 hex digits of an HMAC-SHA256 of its absolute path ("" for the CLI's
+// default, which is CLAUDE_CONFIG_DIR or ~/.claude), keyed by this
+// machine's own salt, so it is stable here and cannot be reversed by
+// guessing names elsewhere.
+func accountOf(salt []byte, configDir string) string {
 	if configDir == "" {
 		configDir = os.Getenv("CLAUDE_CONFIG_DIR")
 	}
@@ -690,8 +694,31 @@ func accountOf(configDir string) string {
 	if err != nil {
 		return ""
 	}
-	sum := sha256.Sum256([]byte(filepath.Clean(abs)))
-	return hex.EncodeToString(sum[:])[:12]
+	mac := hmac.New(sha256.New, salt)
+	mac.Write([]byte(filepath.Clean(abs)))
+	return hex.EncodeToString(mac.Sum(nil))[:12]
+}
+
+// accountSalt is this machine's random salt for account labels, kept in
+// the agents home (account-salt, 0600) and made on first use.
+func accountSalt(home string) []byte {
+	p := filepath.Join(home, "account-salt")
+	if b, err := os.ReadFile(p); err == nil && len(b) >= 32 {
+		return b
+	}
+	b := make([]byte, 32)
+	if _, err := rand.Read(b); err != nil {
+		return nil
+	}
+	if os.MkdirAll(home, 0o700) == nil {
+		if f, err := os.OpenFile(p, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600); err == nil {
+			f.Write(b)
+			f.Close()
+		} else if got, err := os.ReadFile(p); err == nil && len(got) >= 32 {
+			return got // made at the same moment by another
+		}
+	}
+	return b
 }
 
 // TurnsShown is how many of a session's latest turns a row lists.
