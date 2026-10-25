@@ -11,9 +11,11 @@ the image `ghcr.io/avalanche-io/c4-operator:vX.Y.Z` for linux/amd64 and
 linux/arm64, `install.yaml`, checksums, the Homebrew formulas (generated
 for reference, not pushed), and a draft GitHub release to review and
 publish by hand. Last it builds the sample set with the release's images
-and attaches it. `make release-snapshot` runs
-GoReleaser locally and publishes nothing; its `c4-farm` has no tool locks,
-so its farm pins the images when it publishes.
+and attaches it. If that step fails, the `samples` workflow (Actions,
+samples, Run workflow, with the tag) builds the tag's tree with main's
+build script and replaces the set's assets, so it can run again safely.
+`make release-snapshot` runs GoReleaser locally and publishes nothing; its
+`c4-farm` has no tool locks, so its farm pins the images when it publishes.
 
 ## v0.1.0 checklist
 

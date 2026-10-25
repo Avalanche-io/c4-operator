@@ -1,0 +1,61 @@
+# The sample set for a release that already exists, built and attached by
+# hand: Actions, samples, Run workflow, with the release's tag. It builds
+# that tag's own tree with main's hack/samples/build.sh (so a fix to the
+# build reaches a release whose own samples job failed, without moving its
+# tag), using the tag's images, and replaces the release's assets of the
+# same name, so running it again is safe. The release workflow's samples
+# job does the same for every new tag.
+name: samples
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: the release's tag, such as v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  packages: read
+
+# one at a time per tag: two runs would race to replace the same assets
+concurrency:
+  group: samples-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  samples:
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag }}
+    steps:
+    - name: The release exists
+      run: gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    # the tag's tree, and main's build script beside it
+    - uses: actions/checkout@v7
+      with:
+        ref: ${{ inputs.tag }}
+    - uses: actions/checkout@v7
+      with:
+        ref: main
+        path: .main
+    - run: cp .main/hack/samples/build.sh hack/samples/build.sh && rm -rf .main
+    - uses: actions/setup-go@v7
+      with:
+        go-version-file: go.mod
+    - uses: docker/login-action@v4
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ secrets.GITHUB_TOKEN }}
+    - run: |
+        go install github.com/Avalanche-io/c4/cmd/c4
+        python3 -m pip install --user "OpenImageIO==3.2.1.3"
+        echo "$HOME/go/bin" >>"$GITHUB_PATH"
+        echo "$HOME/.local/bin" >>"$GITHUB_PATH"
+    - run: hack/samples/build.sh "$TAG" bin/samples
+    - run: gh release upload "$TAG" "bin/samples/c4-samples-$TAG.tar.gz" "bin/samples/c4-samples-$TAG.tar.gz.c4" --clobber --repo "$GITHUB_REPOSITORY"
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
