@@ -17,6 +17,28 @@ build script and replaces the set's assets, so it can run again safely.
 `make release-snapshot` runs GoReleaser locally and publishes nothing; its
 `c4-farm` has no tool locks, so its farm pins the images when it publishes.
 
+## Upgrade notes
+
+What a farm running an earlier build must do, or will notice, on upgrade.
+
+- **Units have no network unless a tool declares one.** The queue now
+  writes `c4-units-deny-egress` in every namespace with units: every unit
+  pod, egress, no rule. Jobs that name no tool lose all network, DNS
+  included: a plain `POST /jobs` job, MCP's raw image form, a tracker's job
+  and any unit not naming a tool in `reasoning.tools`. Such a job says "this
+  job names no tool, so it has no network: name a tool that declares one".
+  Whatever a unit must reach goes in a tool's `needs.network`, as a network
+  the farm admin defines in `c4-networks` (internal/hud/API.md, Networks).
+- **Re-apply the egress proxy's manifest**, `config/egress/egress.yaml`
+  (part of `install.yaml`): its ClusterRole now lists nodes and
+  `servicecidrs`, which the proxy reads to refuse the cluster's own
+  addresses. Without it the proxy keeps only its fixed list.
+- **Apply the CRDs.** A WorkJob's `spec.tool` now carries the version's
+  tree (`view`) and cannot change after the job is made.
+- **Tool jobs made before the upgrade** that claim a network name no
+  version, so their units not yet released are held ("names no version of
+  it"). Submit them again through the tool (`c4 farm submit`).
+
 ## v0.1.0 checklist
 
 Agents prepare the repository; they do not create repositories, push, or

@@ -1789,7 +1789,11 @@ and a sweep planner that spawns trials are all generators.
       a cidr rule covers it on that port. `spec.tool` is set only by the
       HUD's lowering of a tool (a `POST /jobs` naming it is refused) and
       cannot change once the job exists; a unit of a tool job cannot name
-      another tool. The networks are the farm admin's
+      another tool. It names the version's tree (`spec.tool.view`), and
+      the queue releases a unit only while every network the job claims is
+      one that version's `tool.yaml` declares, read from the tree the Tool
+      records for it, so a job written directly (a Tracker's template) can
+      name a tool but never claim more than it declares. The networks are the farm admin's
       (`c4-networks` in the operator's namespace, name to rules); the proxy
       reads a tool job's unit's networks from its job, not from the Tool
       object, so a test runs with its own version's network before it is

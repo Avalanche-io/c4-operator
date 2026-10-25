@@ -253,6 +253,12 @@ folder as a C4 tree, pins its image by digest, runs the test again on the
 farm, and only then offers the tool to the project as `notes v1`. No image
 was built, and no cluster command was run.
 
+On the farm, too, a unit has no network unless its tool declares one
+(`needs: {network: [studio-api]}`, a network the farm admin defines). A job
+sent as a bare image and command, with no tool (the HUD's `POST /jobs`, or
+MCP's raw form), reaches nothing, and once its units run it says so: this
+job names no tool, so it has no network: name a tool that declares one.
+
 Now run it over the shot's geometry:
 
 ```sh
