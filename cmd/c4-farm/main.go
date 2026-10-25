@@ -588,15 +588,14 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 
 	case "samples":
 		from := fs.String("from", "", "a local sample archive instead of the release's")
-		localName := fs.String("name", localfarm.Name, "the local farm a scenario loads onto")
+		localName := fs.String("name", "", "the local farm a scenario loads onto (default the current farm, when it is local)")
 		dir := fs.String("dir", "", "where to unpack (default ~/c4-samples)")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
 		}
-		localfarm.Name = *localName
 		if len(pos) > 0 && pos[0] == "load" {
-			return loadScenario(ctx, stdout, cfg, cm.utc, pos[1:])
+			return loadScenario(ctx, stdout, cfg, cm.utc, *localName, pos[1:])
 		}
 		if len(pos) == 0 || pos[0] != "get" {
 			return errors.New("usage: c4 farm samples get [SET] [--dir DIR] [--from ARCHIVE], or c4 farm samples load [SCENARIO]")

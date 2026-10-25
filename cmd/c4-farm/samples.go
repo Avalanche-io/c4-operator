@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -14,8 +15,9 @@ import (
 )
 
 // loadScenario is `c4 farm samples load [SCENARIO]`: with no name, the
-// list; with one, the scenario loaded onto the local farm.
-func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, utc bool, args []string) error {
+// list; with one, the scenario loaded onto the local farm named (or the
+// current one).
+func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, utc bool, name string, args []string) error {
 	all, err := farmcli.Scenarios()
 	if err != nil {
 		return err
@@ -34,19 +36,21 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 	if err != nil {
 		return err
 	}
-	f, ok := cfg.Farms[localfarm.Name]
-	have, err := localfarm.Exists(localfarm.Name)
+	clusters, err := localfarm.Clusters()
 	if err != nil {
 		return err
 	}
-	if !ok || !have {
-		return errors.New("a scenario loads onto the local farm, and there is none; `c4 farm up` makes one")
+	name, f, err := scenarioFarm(cfg, clusters, name)
+	if err != nil {
+		return err
 	}
+	localfarm.Name = name
+	sc = localfarm.OnFarm(sc)
 	o := farmcli.Out{W: stdout, Clock: farmcli.Clock{UTC: utc}}
 	now := time.Now()
 	o.Clock.Now = func() time.Time { return now }
 
-	fmt.Fprintf(stdout, "loading   %s: %s\n", sc.Name, sc.Title)
+	fmt.Fprintf(stdout, "loading   %s: %s, onto %s\n", sc.Name, sc.Title, name)
 	if len(sc.Issues) > 0 {
 		// issues for the Tracker, not jobs: the farm's other work stays
 		if err := farmcli.LoadIssues(ctx, o, sc, f.HUD, f.Owner); err != nil {
@@ -88,4 +92,31 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 	fmt.Fprintf(stdout, "units     stand-ins: each takes the time the real work would and writes placeholder files\n")
 	fmt.Fprintf(stdout, "clock     deadlines count from %s, when the scenario loaded\n", o.Clock.AtUTC(now))
 	return nil
+}
+
+// scenarioFarm is the local farm a scenario loads onto: the one name
+// names, else the current farm when it is local, else the only local farm.
+// A local farm is one up made that is still running (clusters).
+func scenarioFarm(cfg *farmcli.Config, clusters []string, name string) (string, farmcli.Farm, error) {
+	var local []string
+	for _, n := range cfg.Names() {
+		if cfg.Farms[n].Local && slices.Contains(clusters, n) {
+			local = append(local, n)
+		}
+	}
+	switch {
+	case len(local) == 0:
+		return "", farmcli.Farm{}, errors.New("a scenario loads onto a local farm, and there is none; `c4 farm up` makes one")
+	case name != "":
+		if !slices.Contains(local, name) {
+			return "", farmcli.Farm{}, fmt.Errorf("there is no local farm %s; the local farms here: %s", name, strings.Join(local, ", "))
+		}
+	case slices.Contains(local, cfg.Current):
+		name = cfg.Current
+	case len(local) == 1:
+		name = local[0]
+	default:
+		return "", farmcli.Farm{}, fmt.Errorf("a scenario loads onto a local farm, and the current farm is not one; name one with --name: %s", strings.Join(local, ", "))
+	}
+	return name, cfg.Farms[name], nil
 }

@@ -109,6 +109,9 @@ type ScenarioIssue struct {
 
 // ScenarioFail is a node a job's units fail on.
 type ScenarioFail struct {
+	// Node is the node as kind names it after the cluster's name (worker,
+	// worker2, ...), so a scenario fits any local farm; the farm loading it
+	// gives the full name.
 	Node    string  `json:"node"`
 	After   float64 `json:"after"` // seconds
 	Message string  `json:"message"`

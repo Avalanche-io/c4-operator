@@ -74,7 +74,7 @@ func TestScenarios(t *testing.T) {
 		t.Errorf("training run %s %+v %v", tr.Class, tr.Params, tr.Deadline)
 	}
 	light := envOf(specs["sm0150-light-v004"])
-	if light["S_FAIL_NODE"] != "c4-local-worker2" || light["S_NAME"] != "sm0150" || light["S_OUT"] != "render" || light["S_PER_FRAME"] != "1" {
+	if light["S_FAIL_NODE"] != "worker2" || light["S_NAME"] != "sm0150" || light["S_OUT"] != "render" || light["S_PER_FRAME"] != "1" {
 		t.Errorf("sm0150 light env %v", light)
 	}
 	if specs["sm0160-light-v001"].Deadline != nil {

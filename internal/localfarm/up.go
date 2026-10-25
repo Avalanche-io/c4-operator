@@ -87,11 +87,16 @@ func (o UpOptions) logf(format string, a ...any) {
 
 // Exists reports whether the local farm's cluster exists.
 func Exists(name string) (bool, error) {
-	names, err := cluster.NewProvider().List()
+	names, err := Clusters()
 	if err != nil {
 		return false, err
 	}
 	return slices.Contains(names, name), nil
+}
+
+// Clusters is the kind clusters on this machine, the local farms among them.
+func Clusters() ([]string, error) {
+	return cluster.NewProvider().List()
 }
 
 // Up creates the local farm, or finishes one a previous run left half

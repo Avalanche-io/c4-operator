@@ -22,7 +22,7 @@ projects:
 
 # the bad node: every Saltmarsh lighting frame given to it fails
 defs:
-  heron: &heron {node: c4-local-worker2, after: 41, message: "read /show/geo/heron.usdc: input/output error"}
+  heron: &heron {node: worker2, after: 41, message: "read /show/geo/heron.usdc: input/output error"}
 
 jobs:
   - name: style-train-v003

@@ -22,10 +22,11 @@ func TestScenariosFitTheLocalFarm(t *testing.T) {
 			projects[p.Name] = true
 		}
 	}
-	// kind names workers <cluster>-worker, -worker2, ... in nodes' order
+	// kind names workers <cluster>-worker, -worker2, ... in nodes' order,
+	// and a scenario names them without the cluster's name
 	cpu := map[string]bool{}
 	for i, n := range nodes {
-		name := Name + "-worker"
+		name := "worker"
 		if i > 0 {
 			name += fmt.Sprint(i + 1)
 		}
@@ -51,6 +52,34 @@ func TestScenariosFitTheLocalFarm(t *testing.T) {
 				t.Errorf("%s/%s: fails on %s, not a cpu worker of the local farm", sc.Name, j.Name, j.Fail.Node)
 			}
 		}
+	}
+}
+
+// A scenario's failing node is named as the farm loading it has it, and
+// the scenario itself keeps its own name for the next farm.
+func TestOnFarm(t *testing.T) {
+	defer func(n string) { Name = n }(Name)
+	Name = "c4-walk"
+	sc, err := farmcli.LookupScenario("evening")
+	if err != nil {
+		t.Fatal(err)
+	}
+	on := OnFarm(sc)
+	n := 0
+	for i, j := range on.Jobs {
+		if j.Fail == nil {
+			continue
+		}
+		n++
+		if j.Fail.Node != "c4-walk-worker2" {
+			t.Errorf("%s fails on %s, not c4-walk-worker2", j.Name, j.Fail.Node)
+		}
+		if sc.Jobs[i].Fail.Node != "worker2" {
+			t.Errorf("the scenario's own %s now fails on %s", j.Name, sc.Jobs[i].Fail.Node)
+		}
+	}
+	if n == 0 {
+		t.Fatal("evening has no job that fails on a node")
 	}
 }
 

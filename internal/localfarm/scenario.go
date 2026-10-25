@@ -28,6 +28,24 @@ type Prepared struct {
 	Removed  int      // jobs left from an earlier load, deleted
 }
 
+// OnFarm is sc with each node its jobs fail on named as the local farm
+// has it: a scenario names a worker as kind does after the cluster's name
+// (worker2), and the farm's node has the cluster's name before it
+// (c4-local-worker2).
+func OnFarm(sc farmcli.Scenario) farmcli.Scenario {
+	jobs := make([]farmcli.ScenarioJob, len(sc.Jobs))
+	for i, j := range sc.Jobs {
+		if j.Fail != nil {
+			f := *j.Fail
+			f.Node = Name + "-" + f.Node
+			j.Fail = &f
+		}
+		jobs[i] = j
+	}
+	sc.Jobs = jobs
+	return sc
+}
+
 // Prepare readies the local farm for a scenario: the projects it adds,
 // each project's burst budget as the scenario sets it (the local farm's
 // otherwise), and none of any scenario's jobs from an earlier load, so
@@ -44,7 +62,7 @@ func Prepare(ctx context.Context, sc farmcli.Scenario, all []farmcli.Scenario) (
 		}
 		var n corev1.Node
 		if err := c.Get(ctx, types.NamespacedName{Name: j.Fail.Node}, &n); err != nil {
-			return out, fmt.Errorf("%s fails on node %s, which the local farm does not have: %w", j.Name, j.Fail.Node, err)
+			return out, fmt.Errorf("%s fails on node %s, which the local farm %s does not have: %w", j.Name, j.Fail.Node, Name, err)
 		}
 	}
 
