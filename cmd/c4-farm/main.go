@@ -86,6 +86,7 @@ Agents
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
   diagnose                 a redacted bundle of the farm's decisions for a bug report: no names, paths or contents (--show first)
+  telemetry                the farm's telemetry: its tier, what it keeps and its key; telemetry on|off|rotate, telemetry resolve PSEUDONYM
   integrations             what this machine could add (Claude Code, and each application found), and which are on
   integrate on|off         Claude Code's integration: the farm's tools, the agents' hooks, this machine as runner
   integrate APP            add the C4 Farm panel to an application (APP@VERSION for one; --show says each file); integrate off APP takes it out
@@ -844,6 +845,46 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		return farmcli.Diagnose(ctx, c, o, farmcli.DiagnoseArgs{Window: *window, Out: *out, Show: *show})
+
+	case "telemetry":
+		yes := fs.Bool("yes", false, "rotate without asking, where no one is at a terminal")
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		usage := errors.New("usage: c4 farm telemetry [on | off | rotate [--yes] | resolve PSEUDONYM]")
+		sub := ""
+		if len(pos) > 0 {
+			sub = pos[0]
+		}
+		switch {
+		case len(pos) > 2, (len(pos) == 2) != (sub == "resolve"), !slices.Contains([]string{"", "on", "off", "rotate", "resolve"}, sub):
+			return usage
+		case sub == "rotate" && !*yes:
+			// the decisions kept go with the old key, so the person says so
+			if !isTerminal(stdin) {
+				return errors.New("rotating the farm's telemetry key lets go of the decisions it keeps: pass --yes where no one is at a terminal")
+			}
+			if !farmcli.Ask(farmcli.Out{W: stdout, In: stdin}, "Rotate the farm's telemetry key? Pseudonyms from now on are unrelated to earlier ones, and the decisions the farm keeps are let go.") {
+				fmt.Fprintf(stdout, "nothing was changed\n")
+				return nil
+			}
+		}
+		c, _, o, _, err := connect()
+		if err != nil {
+			return err
+		}
+		switch sub {
+		case "resolve":
+			return farmcli.TelemetryResolve(ctx, c, o, pos[1])
+		case "on":
+			return farmcli.TelemetryTier(ctx, c, o, "b")
+		case "off":
+			return farmcli.TelemetryTier(ctx, c, o, "a")
+		case "rotate":
+			return farmcli.TelemetryRotate(ctx, c, o)
+		}
+		return farmcli.TelemetryStatus(ctx, c, o)
 
 	case "integrations":
 		if _, err := parse(fs, rest); err != nil {

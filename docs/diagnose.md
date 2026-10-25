@@ -51,6 +51,27 @@ default a bundle holds what the farm keeps. A farm keeps a ring of its recent
 decisions only when its manager runs with `--telemetry-ring`; without it, a
 bundle holds the present moment alone, and the bundle line says so.
 
+## The farm's telemetry
+
+`c4 farm telemetry` says what the farm keeps: its tier, how much of the ring
+it holds, and its key's epoch. Each change is a signed record, and each is
+the farm admin's to make:
+
+- `c4 farm telemetry on` keeps the farm's recent decisions, redacted, for a
+  bundle (tier b). Nothing leaves the farm.
+- `c4 farm telemetry off` keeps none (tier a). A bundle then holds the
+  present moment.
+- `c4 farm telemetry rotate` gives the key a new epoch. Pseudonyms after it
+  are unrelated to those before, and the decisions kept go with the old key,
+  so it asks first (`--yes` where no one is at a terminal).
+- `c4 farm telemetry resolve j.8f2a` says which job, project or pool a
+  pseudonym in a bundle stands for, among what the farm holds now and under
+  the key it was made with.
+
+Turning telemetry on and resolving a pseudonym are yours to do: the farm
+refuses them through an agent's tools, and `c4 farm` refuses them inside
+Claude Code. Turning it off works from anywhere.
+
 ## Sending nothing, guaranteed
 
 This release sends no telemetry at all: a bundle is a file you make and move
