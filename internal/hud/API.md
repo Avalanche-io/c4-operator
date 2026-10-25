@@ -1466,7 +1466,7 @@ cluster, where no NetworkPolicy applies.
   (`needs.network`: "fetch declares network studio-db, which this farm
   does not define: a farm admin adds it to the c4-networks ConfigMap in
   c4-system (internal/hud/API.md, Networks)"), and refused again when a
-  job naming it is submitted (`POST /jobs`, `POST /submissions`, a dry run
+  job naming it is submitted (`POST /submissions`, a tool's test, a dry run
   included: 422 with the same words), so a job is not made only to wait.
   A job made before the network was removed holds its units with that
   reason in its `Tools` condition.

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
@@ -49,10 +50,31 @@ func toolSpec(t *testing.T, nets ...string) json.RawMessage {
 	return b
 }
 
+// submitAs submits a job as viewer as. A spec naming a tool is made as the
+// HUD's lowering makes a tool's job (POST /jobs refuses spec.tool), so the
+// checks are those a submission's jobs and a tool's test meet.
 func submitAs(t *testing.T, s *Server, as, name string, spec json.RawMessage, dry bool) (int, string) {
 	t.Helper()
+	body := api.SubmitRequest{Project: "show-a", Name: name, Spec: spec, DryRun: dry}
+	var probe c4v1.WorkJobSpec
+	if err := json.Unmarshal(spec, &probe); err != nil {
+		t.Fatal(err)
+	}
+	if probe.Tool != nil {
+		r := httptest.NewRequest(http.MethodPost, "/api/v1/jobs?as="+as, nil)
+		v, err := s.viewer(r)
+		m := s.current()
+		if err != nil || m == nil {
+			t.Fatalf("viewer %v, model %v", err, m != nil)
+		}
+		_, code, err := s.createJob(r, v, m, body, createOpts{Lowered: true})
+		if err != nil {
+			return code, err.Error()
+		}
+		return code, ""
+	}
 	var out map[string]any
-	code := call(t, s, http.MethodPost, "/api/v1/jobs?as="+as, api.SubmitRequest{Project: "show-a", Name: name, Spec: spec, DryRun: dry}, &out)
+	code := call(t, s, http.MethodPost, "/api/v1/jobs?as="+as, body, &out)
 	msg, _ := out["error"].(string)
 	if msg == "" {
 		b, _ := json.Marshal(out)
@@ -113,5 +135,24 @@ func TestAUnitsJobIsNoWiderThanTheUnit(t *testing.T) {
 	// a person submits what a unit may not
 	if code, msg := submitAs(t, s, "wrangler", "person", toolSpec(t, "model-api"), false); code != http.StatusCreated {
 		t.Fatalf("a person's job: %d %s", code, msg)
+	}
+}
+
+// A malformed c4-networks refuses a job naming a network with a 422 that
+// says so, for a farm admin to fix, not a 503 to retry.
+func TestMalformedNetworksRefusedAtSubmit(t *testing.T) {
+	s := sealFarm(t)
+	ctx := context.Background()
+	var cm corev1.ConfigMap
+	if err := s.Client.Get(ctx, k8stypes.NamespacedName{Namespace: "c4-system", Name: c4v1.NetworksConfigMap}, &cm); err != nil {
+		t.Fatal(err)
+	}
+	cm.Data["model-api"] = "- {cidr: anthropic}"
+	if err := s.Client.Update(ctx, &cm); err != nil {
+		t.Fatal(err)
+	}
+	code, msg := submitAs(t, s, "wrangler", "fetch-model", toolSpec(t, "model-api"), true)
+	if code != http.StatusUnprocessableEntity || !strings.Contains(msg, "the c4-networks ConfigMap in c4-system is malformed") || !strings.Contains(msg, "farm admin") {
+		t.Fatalf("%d %s", code, msg)
 	}
 }

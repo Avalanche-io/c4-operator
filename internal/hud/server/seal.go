@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -50,6 +51,11 @@ func (s *Server) sealed(ctx context.Context, v *api.Viewer, spec *c4v1.WorkJobSp
 		return 0, nil
 	}
 	defined, err := egress.LoadNetworks(ctx, s.reader(), s.Namespace)
+	var bad *egress.MalformedError
+	if errors.As(err, &bad) {
+		// a farm admin's to fix, not something a retry mends
+		return http.StatusUnprocessableEntity, fmt.Errorf("tool %s: %v, so its networks cannot be checked: ask a farm admin to fix it", spec.Tool.Name, bad)
+	}
 	if err != nil {
 		return http.StatusServiceUnavailable, fmt.Errorf("tool %s: the farm's networks could not be read: %v", spec.Tool.Name, err)
 	}
