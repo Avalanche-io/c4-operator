@@ -287,13 +287,6 @@ enrolled for, when the pool has exactly one owner, and its units say so
 and no `node-owners` runs no one's work, and a job waiting for it says
 "no machine of <person>'s in pool <pool> has been enrolled".
 
-**On a local farm, don't give agent units the `c4` tool yet.** A local
-farm's HUD takes its development viewers (`?as=`) from any request that
-reaches it, and unit pods can reach it inside the cluster. A unit could
-then act as the farm's owner: answer its own job's gate, grant, or bind,
-each recorded as that person. Until development viewers need the
-installer's token, which `c4 farm up` will keep in your own `~/.c4/`,
-run agent work on a local farm without a `c4` tool grant.
 
 **Enrolling the machine, once.** With the farm admin's access (the local
 farm's own, which `c4 farm up` uses), `c4-agent enroll --owner <person>`
