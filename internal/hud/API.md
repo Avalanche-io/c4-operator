@@ -1255,9 +1255,9 @@ What the farm cannot run yet is refused in its words, not run otherwise:
 plans of frames or once tools, checks, approvals, waits, a lead or a tool
 answering questions, generators and their children, units over more than
 frames, policy, a job that follows two, git trees, a `preview` other than
-`fml` and `none` (this farm orders only those), tools that need licences,
-the network beyond their licence servers (an agent's `model-api` is
-allowed), sidecars, a Kubernetes overlay, a gate, farm access, or only a
+`fml` and `none` (this farm orders only those), tools that need licences
+(or name `network: [licences]`; a tool's other networks run, through
+its egress), sidecars, a Kubernetes overlay, a gate, farm access, or only a
 host (except an agent tool). `answers: {by: unit:<name>}` must name a unit of the job that
 reasons: a frames or once job's units (`<key>/<n>` from 0) each run a
 procedure, so each is refused ("render/3 cannot answer questions: it runs
