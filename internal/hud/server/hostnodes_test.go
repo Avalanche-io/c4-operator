@@ -118,7 +118,8 @@ func TestEnrollIsOfferAndAcceptance(t *testing.T) {
 	if e, _ := out["error"].(string); code != http.StatusForbidden || !strings.Contains(e, "c4 farm enroll laptop-1 --for lee") {
 		t.Fatalf("not the holder: %d %v", code, out)
 	}
-	if code, out := hostCall(t, s, http.MethodPost, "/api/v1/nodes/laptop-1/enroll", "dana", map[string]string{"code": strings.ToLower(c)}); code != http.StatusOK {
+	typed := strings.ToLower(c[:2] + " " + c[2:4] + c[5:]) // no dash, a space, lower case
+	if code, out := hostCall(t, s, http.MethodPost, "/api/v1/nodes/laptop-1/enroll", "dana", map[string]string{"code": typed}); code != http.StatusOK {
 		t.Fatalf("enroll: %d %v", code, out)
 	}
 	owners := func() string {

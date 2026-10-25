@@ -777,8 +777,9 @@ is, so no one enrolls a machine they do not hold.
   offer's record). Anyone but the holder is refused with how to be added
   (the holder runs `c4 farm enroll <node> --for <them>`), since another
   person's jobs spend the holder's sign-in only with the holder's consent.
-  A wrong code, a used one, an expired one, a unit or a service account
-  gets 403, and five wrong codes end the offer.
+  The code is read in any case, with or without its dash or spaces. A wrong
+  code, a used one, an expired one, a unit or a service account gets 403,
+  and five wrong codes end the offer.
 - The queue places a person's host work only on a Node that names them.
 
 ## GET /events

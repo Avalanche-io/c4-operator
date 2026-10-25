@@ -71,6 +71,22 @@ func newEnrollCode() (string, error) {
 	return string(out), nil
 }
 
+// normalCode reads a code as a person types or pastes it: any case, with or
+// without its dash, spaces and other separators ignored.
+func normalCode(c string) string {
+	var b strings.Builder
+	for _, r := range strings.ToUpper(c) {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+		}
+	}
+	s := b.String()
+	if len(s) == 8 {
+		s = s[:4] + "-" + s[4:]
+	}
+	return s
+}
+
 // handleEnrollOffer is POST /nodes/{node}/enroll-offer: a host runner
 // offers its machine for enrollment, with its own token, and gets the code
 // to show on the machine. A new offer replaces the last.
@@ -148,7 +164,7 @@ func (s *Server) handleNodeEnroll(w http.ResponseWriter, r *http.Request) {
 	s.offerMu.Lock()
 	offer, ok := s.offers[node]
 	valid := ok && time.Now().Before(offer.expires) &&
-		subtle.ConstantTimeCompare([]byte(strings.ToUpper(strings.TrimSpace(body.Code))), []byte(offer.code)) == 1
+		subtle.ConstantTimeCompare([]byte(normalCode(body.Code)), []byte(offer.code)) == 1
 	switch {
 	case valid && v.User != offer.holder:
 		// the holder's to agree to: the offer stands for them
