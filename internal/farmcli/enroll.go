@@ -21,6 +21,15 @@ type Enrollment struct {
 	Message string   `json:"message"`
 }
 
+// EnrollConsent refuses an acceptance from inside an agent, as Consent
+// refuses an install.
+func EnrollConsent(node string) error {
+	if InsideAgent() {
+		return fmt.Errorf("accepting a machine lets work run on it on your sign-in, so you run it, not an agent: in your own terminal, c4 farm enroll %s CODE", node)
+	}
+	return nil
+}
+
 // EnrollCode is a code as the runner shows it (XXXX-XXXX), from one typed
 // in lower case, with a space or without the dash.
 func EnrollCode(code string) (string, error) {
@@ -33,8 +42,13 @@ func EnrollCode(code string) (string, error) {
 
 // Enroll accepts node's offer with the code its runner shows, as the
 // caller: the machine becomes theirs, or, with forWhom, someone else's
-// too, whose jobs then spend the caller's sign-in.
+// too, whose jobs then spend the caller's sign-in. Never from inside an
+// agent: one that can read the runner's code must not accept the machine
+// for its person.
 func Enroll(ctx context.Context, c *Client, node, code, forWhom string) (Enrollment, error) {
+	if err := EnrollConsent(node); err != nil {
+		return Enrollment{}, err
+	}
 	code, err := EnrollCode(code)
 	if err != nil {
 		return Enrollment{}, err

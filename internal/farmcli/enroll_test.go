@@ -67,4 +67,15 @@ func TestEnroll(t *testing.T) {
 	if _, err := Enroll(ctx, c, "c4-host-studio", "ABCD-EFGH", ""); err == nil || !strings.Contains(err.Error(), "c4 farm enroll c4-host-studio --for sam") {
 		t.Errorf("not the holder: %v", err)
 	}
+
+	// an agent, even the holder's, accepts nothing and sends nothing
+	t.Setenv("CLAUDECODE", "1")
+	path = ""
+	c, _ = NewClient(Farm{HUD: srv.URL, As: "noor"})
+	if _, err := Enroll(ctx, c, "c4-host-studio", "ABCD-EFGH", ""); err == nil || !strings.Contains(err.Error(), "in your own terminal, c4 farm enroll c4-host-studio CODE") {
+		t.Errorf("inside an agent: %v", err)
+	}
+	if path != "" {
+		t.Errorf("inside an agent, sent %s", path)
+	}
 }

@@ -912,6 +912,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := need(pos, 2, "NODE CODE"); err != nil {
 			return err
 		}
+		if err := farmcli.EnrollConsent(pos[0]); err != nil {
+			return err
+		}
 		c, _, o, _, err := connect()
 		if err != nil {
 			return err
