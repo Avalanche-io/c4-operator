@@ -85,8 +85,9 @@ for the owner) the owner's grant to the tracker no longer serves.
 
 **Work a tracker makes for you.** A lease serves only its holder's own
 jobs, and jobs c4-sync makes are its own unless the Tracker submits them
-for you. Let it, as yourself: `c4 farm grant <tracker>` (or MCP
-`c4_grant`). Its jobs from your issues or tasks are then yours and get
+for you. Let it, as yourself: `c4 farm grant <tracker>` or the HUD. An
+agent only plans it (MCP `c4_grant` answers what the grant would allow and
+the command); it never grants for you. Its jobs from your issues or tasks are then yours and get
 your lease; `c4 farm revoke` takes it back (docs/c4-sync.md, `for`).
 
 ## The lease

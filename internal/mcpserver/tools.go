@@ -171,8 +171,8 @@ func Tools(c *Client) []Tool {
 			readOnly, c.capacityForecast),
 		tool("c4_approve_capacity", "Approve burst capacity", "Approve the burst capacity request waiting in a pool. This provisions paid capacity; check c4_capacity_and_cost first for its cost and the jobs it is for.",
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(true)}, c.approveCapacity),
-		tool("c4_grant", "Let a tracker submit work for you", "Let a production tracker's sync (a Tracker: GitHub, Flow, ...) submit work for the person you act for, so jobs it makes from their issues or tasks are theirs and what is theirs (a lease of their own sign-in) serves them. Only when that person asks: the grant is theirs, signed and recorded in the book. Optionally limit it to pools and job classes; it ends at until (30d by default, at most 90d). Granting again renews it.",
-			idempotent, c.grant),
+		tool("c4_grant", "Plan a grant to a tracker", "Plan a grant that would let a production tracker's sync (a Tracker: GitHub, Flow, ...) submit work for the person you act for, so jobs it makes from their issues or tasks are theirs and what is theirs (a lease of their own sign-in) serves them. It plans, never performs: an agent cannot grant for a person. It checks the tracker and returns what the grant would allow and the exact c4 farm grant command; show both to the person, who grants it as themselves, in the HUD or with that command. Optionally limit it to pools and job classes; it ends at until (30d by default, at most 90d). Granting again renews it.",
+			readOnly, c.grant),
 		tool("c4_list_held_writes", "List held tracker writes", "Writes to a production tracker (a comment, a status) that were interrupted where nothing can tell whether they happened, so they are held: never sent again on a guess. Each names the tracker entity (with its URL), the job, what it said and since when, and whether it is yours to confirm. Filter by job (namespace/name) or mine. Look in the tracker, then answer with c4_confirm_write.",
 			readOnly, c.listHeld),
 		tool("c4_confirm_write", "Confirm a held tracker write", "Say whether a held tracker write happened, after looking in the tracker: happened true and it is taken as written; false and it is written again on the sync's next pass (so say false only when it is not there, or it is made twice). The job's owner, or one allowed to change the job, answers; signed and recorded in the book.",
@@ -943,9 +943,99 @@ type GrantIn struct {
 	Until     string   `json:"until,omitempty" jsonschema:"when it ends: an RFC 3339 time or a span like 30d (default 30d, at most 90d)"`
 }
 
-func (c *Client) grant(ctx context.Context, _ *mcp.CallToolRequest, in GrantIn) (*mcp.CallToolResult, Done, error) {
-	return c.control(ctx, "/grants", api.GrantRequest{Project: in.Project, Namespace: in.Namespace, Tracker: in.Tracker,
-		Pools: in.Pools, Classes: in.Classes, Until: in.Until})
+// GrantPlan is a grant planned, never performed: what it would allow and
+// the command the person runs to grant it.
+type GrantPlan struct {
+	// Performed is always false: an agent plans a grant; the person grants.
+	Performed bool     `json:"performed"`
+	Project   string   `json:"project"`
+	Namespace string   `json:"namespace"`
+	Tracker   string   `json:"tracker"`
+	Site      string   `json:"site,omitempty"`
+	Pools     []string `json:"pools,omitempty"`
+	Classes   []string `json:"classes,omitempty"`
+	Until     string   `json:"until"`
+	// Renews is the person's own grant to the tracker this one renews.
+	Renews *api.Grant `json:"renews,omitempty"`
+	// Allows is what the grant would let the tracker do.
+	Allows string `json:"allows"`
+	// Command is what the person runs to grant it.
+	Command string `json:"command"`
+	Message string `json:"message"`
+}
+
+// grant plans a grant: it finds the tracker and says what the grant would
+// allow and how the person grants it. It never sends the grant; the HUD
+// refuses one from an agent.
+func (c *Client) grant(ctx context.Context, _ *mcp.CallToolRequest, in GrantIn) (*mcp.CallToolResult, GrantPlan, error) {
+	if in.Tracker == "" {
+		return nil, GrantPlan{}, fmt.Errorf("name the tracker to grant (from c4_list_trackers)")
+	}
+	var l api.TrackerList
+	if err := c.do(ctx, "GET", "/trackers", nil, &l); err != nil {
+		return nil, GrantPlan{}, err
+	}
+	var found []api.Tracker
+	for _, t := range l.Trackers {
+		if t.Name == in.Tracker && (in.Project == "" || t.Project == in.Project) && (in.Namespace == "" || t.Namespace == in.Namespace) {
+			found = append(found, t)
+		}
+	}
+	switch {
+	case len(found) == 0:
+		return nil, GrantPlan{}, fmt.Errorf("no tracker %s in the projects you can see (c4_list_trackers lists them)", in.Tracker)
+	case len(found) > 1:
+		return nil, GrantPlan{}, fmt.Errorf("tracker %s is in more than one project: name the project", in.Tracker)
+	}
+	t := found[0]
+	until := in.Until
+	if until == "" {
+		until = "30d"
+	}
+	p := GrantPlan{Project: t.Project, Namespace: t.Namespace, Tracker: t.Name, Site: t.Site, Pools: in.Pools, Classes: in.Classes, Until: until}
+	if t.Mine != nil && t.Mine.Revoked == nil {
+		p.Renews = t.Mine
+	}
+	var scope []string
+	if len(in.Pools) > 0 {
+		scope = append(scope, "only jobs in pools "+strings.Join(in.Pools, ", "))
+	}
+	if len(in.Classes) > 0 {
+		scope = append(scope, "only jobs of class "+strings.Join(in.Classes, ", "))
+	}
+	if len(scope) == 0 {
+		scope = append(scope, "any of its jobs in project "+t.Project)
+	}
+	where := t.Kind
+	if t.Site != "" {
+		where = t.Site
+	}
+	p.Allows = fmt.Sprintf("tracker %s (%s, project %s) would submit work for the person you act for, as them: jobs it makes from their issues or tasks are theirs, and what is theirs (a lease of their own sign-in) serves them; %s; for %s from when they grant it",
+		t.Name, where, t.Project, strings.Join(scope, "; "), until)
+	if p.Renews != nil {
+		p.Allows += fmt.Sprintf("; it renews their grant %s/%s", p.Renews.Namespace, p.Renews.Name)
+	}
+	cmd := []string{"c4", "farm", "grant", shellWord(t.Name), "--project", shellWord(t.Project)}
+	if len(in.Pools) > 0 {
+		cmd = append(cmd, "--pools", shellWord(strings.Join(in.Pools, ",")))
+	}
+	if len(in.Classes) > 0 {
+		cmd = append(cmd, "--classes", shellWord(strings.Join(in.Classes, ",")))
+	}
+	if in.Until != "" {
+		cmd = append(cmd, "--until", shellWord(in.Until))
+	}
+	p.Command = strings.Join(cmd, " ")
+	p.Message = "planned, not granted: an agent cannot grant for you. Ask the person to grant it in the HUD or run: " + p.Command
+	return nil, p, nil
+}
+
+// shellWord quotes s for a shell when it needs it.
+func shellWord(s string) string {
+	if s != "" && strings.Trim(s, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789._-,:/@+=") == "" {
+		return s
+	}
+	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
 }
 
 type ListGrantsIn struct {

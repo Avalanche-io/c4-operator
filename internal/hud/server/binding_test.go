@@ -112,6 +112,7 @@ func TestFarmBinding(t *testing.T) {
 		{"one person, run for someone", "wrangler", `{"owner": "noor", "to": "laptop-1/*", "runFor": "studio-x", "onePerson": true}`, nil, http.StatusBadRequest, "is not one person's"},
 		{"an artist", "artist", noor, nil, http.StatusForbidden, "may not create deploymentbindings"},
 		{"an agent", "wrangler", noor, map[string]string{"X-C4-Client": "mcp", "X-C4-Agent": "bot"}, http.StatusForbidden, "an agent cannot bind"},
+		{"an agent named from c4 farm", "wrangler", noor, map[string]string{"X-C4-Client": "c4-farm", "X-C4-Agent": "bot"}, http.StatusForbidden, "an agent cannot bind"},
 		{"no owner", "wrangler", `{"to": "laptop-1/*"}`, nil, http.StatusBadRequest, "owner:"},
 		{"not every deployment", "wrangler", `{"owner": "noor", "to": "laptop-1/node/w1"}`, nil, http.StatusBadRequest, "to: <farm>/*"},
 	} {

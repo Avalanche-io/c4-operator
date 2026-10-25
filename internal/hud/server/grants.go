@@ -6,7 +6,9 @@ package server
 // control record of kind grant. A tracker's sync then submits with
 // `for: <person>` and the person owns the job, so what is bound to them (a
 // lease of their own sign-in) serves it. The person, or a project admin,
-// revokes it; nobody grants for someone else.
+// revokes it; nobody grants for someone else, and no agent grants at all
+// (it may plan one; the person performs it). Revoking only narrows, so an
+// agent may revoke, and its record names the agent.
 
 import (
 	"context"
@@ -73,6 +75,14 @@ func grantView(g *c4v1.SubmitGrant, project string, now time.Time) api.Grant {
 	return out
 }
 
+// errAgentGrants is the refusal of a grant an agent asks for. An agent may
+// plan a grant but never perform one: the person grants, as themselves.
+const errAgentGrants = "an agent cannot grant for you: ask the person to grant it in the HUD or with c4 farm grant"
+
+// agentActs says the request comes through MCP or names an agent
+// (X-C4-Agent), from whatever client.
+func agentActs(r *http.Request) bool { return via(r) == "mcp" || claimedAgent(r) != "" }
+
 // noGrants is a farm without the kind installed (submit grants, or the
 // optional Tracker).
 func noGrants(err error) bool { return meta.IsNoMatchError(err) || runtime.IsNotRegisteredError(err) }
@@ -80,6 +90,10 @@ func noGrants(err error) bool { return meta.IsNoMatchError(err) || runtime.IsNot
 func (s *Server) handleGrant(w http.ResponseWriter, r *http.Request) {
 	v := s.withViewer(w, r)
 	if v == nil {
+		return
+	}
+	if agentActs(r) {
+		fail(w, http.StatusForbidden, errAgentGrants)
 		return
 	}
 	m := s.current()

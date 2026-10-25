@@ -147,7 +147,9 @@ Each Tracker says:
   owns the job, so what is theirs serves it, such as a lease of their own sign-in. They must
   first let the Tracker submit for them, which they do as themselves, not
   in the Tracker: `c4 farm grant <tracker>` (optionally `--pools`,
-  `--classes`, `--until 30d`), MCP `c4_grant`, or `POST /api/v1/grants`.
+  `--classes`, `--until 30d`), the HUD, or `POST /api/v1/grants`. An agent
+  never grants for them: MCP `c4_grant` only plans the grant and gives
+  the command, and the HUD refuses a grant through MCP or naming an agent.
   Until then nothing is submitted and the Tracker shows `NoGrant`; c4-sync
   never submits the job as its own instead. `c4 farm grants --tracker
   <ns>/<tracker>` shows who has granted it; `c4 farm revoke` takes a grant

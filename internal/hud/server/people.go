@@ -145,7 +145,7 @@ func (s *Server) handlePeopleConfirm(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusNotFound, "%v", err)
 		return
 	}
-	if s.isSync(v) || v.Unit != nil || via(r) == "mcp" || r.Header.Get("X-C4-Agent") != "" {
+	if s.isSync(v) || v.Unit != nil || agentActs(r) {
 		fail(w, http.StatusForbidden, "only the person confirms that a tracker login is them, as themselves in the HUD; a tracker's sync, a unit or an agent may not")
 		return
 	}

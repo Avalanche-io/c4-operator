@@ -273,7 +273,7 @@ func TestToolsAreNamedAndAnnotated(t *testing.T) {
 		}
 		readOnly := strings.HasPrefix(tl.Name, "c4_list") || strings.HasPrefix(tl.Name, "c4_get") || tl.Name == "c4_farm_status" ||
 			tl.Name == "c4_cache_tiers" || tl.Name == "c4_capacity_and_cost" || tl.Name == "c4_dependency_graph" || tl.Name == "c4_diff_views" || tl.Name == "c4_trace_file" || tl.Name == "c4_verify_custody" || tl.Name == "c4_read_book" ||
-			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me"
+			tl.Name == "c4_suggest_deadline" || tl.Name == "c4_deadline_options" || tl.Name == "c4_describe_tool" || tl.Name == "c4_needs_me" || tl.Name == "c4_grant"
 		if tl.Annotations.ReadOnlyHint != readOnly {
 			t.Errorf("tool %s: readOnlyHint %v", tl.Name, tl.Annotations.ReadOnlyHint)
 		}
@@ -582,13 +582,24 @@ func TestNoETAIsNotATime(t *testing.T) {
 	}
 }
 
-// A grant is the caller's own, through the HUD: given, listed, revoked.
+// An agent plans a grant and never performs one: c4_grant says what the
+// grant would allow and the command the person runs, and sends no grant.
+// Grants are listed and revoked through the HUD.
 func TestGrantTools(t *testing.T) {
 	hud := &fakeHUD{}
 	cs := session(t, hud, "tok-maya")
 	res, out := call(t, cs, "c4_grant", map[string]any{"project": "show-a", "tracker": "github", "pools": []string{"cpu"}, "until": "14d"})
 	if res.IsError {
 		t.Fatalf("grant: %v %q", out, text(res))
+	}
+	if out["performed"] != false || out["command"] != "c4 farm grant github --project show-a --pools cpu --until 14d" ||
+		!strings.Contains(fmt.Sprint(out["allows"]), "tracker github (github.com/petrelfinch/pipeline, project show-a) would submit work for the person you act for") ||
+		!strings.Contains(fmt.Sprint(out["allows"]), "only jobs in pools cpu; for 14d") ||
+		!strings.Contains(fmt.Sprint(out["message"]), "an agent cannot grant for you") {
+		t.Fatalf("grant plan: %v", out)
+	}
+	if res, out := call(t, cs, "c4_grant", map[string]any{"tracker": "jira"}); !res.IsError {
+		t.Fatalf("a plan for no tracker: %v", out)
 	}
 	res, out = call(t, cs, "c4_list_trackers", map[string]any{})
 	if ts, _ := out["trackers"].([]any); res.IsError || len(ts) != 1 {
@@ -604,8 +615,14 @@ func TestGrantTools(t *testing.T) {
 	}
 	hud.mu.Lock()
 	defer hud.mu.Unlock()
+	for _, p := range hud.posts {
+		if strings.HasPrefix(p, "/api/v1/grants ") {
+			t.Fatalf("c4_grant sent the grant: %s", p)
+		}
+	}
 	want := []string{
-		`/api/v1/grants {"project":"show-a","tracker":"github","pools":["cpu"],"until":"14d"}`,
+		"GET /api/v1/trackers",
+		"GET /api/v1/trackers",
 		"GET /api/v1/trackers",
 		"GET /api/v1/grants?tracker=show-a%2Fgithub",
 		"DELETE /api/v1/grants/show-a/github-ab12",

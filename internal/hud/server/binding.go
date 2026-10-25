@@ -127,7 +127,7 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 	case v.Unit != nil:
 		fail(w, http.StatusForbidden, "%s is a unit: the installer binds a farm to its owner", v.User)
 		return
-	case deciderOf(r, v).Agent != "" || s.isSync(v):
+	case agentActs(r) || s.isSync(v):
 		fail(w, http.StatusForbidden, "an agent cannot bind a farm to an owner: the installer does, as themselves")
 		return
 	case isDev(v) && !byInstaller(v):

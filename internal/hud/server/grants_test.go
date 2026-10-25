@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -18,10 +19,13 @@ import (
 	kfake "k8s.io/client-go/kubernetes/fake"
 	ktesting "k8s.io/client-go/testing"
 
+	"github.com/Avalanche-io/c4"
+
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 // grantFarm is submitFarm with a signer (so grants carry records), a
@@ -332,5 +336,84 @@ func TestSubmitTrackerURL(t *testing.T) {
 	req.TrackerURL = "javascript:alert(1)"
 	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", req, &out); code != http.StatusBadRequest {
 		t.Fatalf("a script: %d", code)
+	}
+}
+
+// An agent may plan a grant but never perform one: a grant through MCP, or
+// naming an agent from any client, is refused, and the same grant from the
+// person directly passes. Revoking only narrows, so an agent may revoke,
+// and the signed record names it.
+func TestAgentCannotGrant(t *testing.T) {
+	s := grantFarm(t)
+	ctx := context.Background()
+	ca, err := provenance.NewCA(time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.Signer, err = provenance.NewSigner(ctx, provenance.LocalIssuer(ca, provenance.ComponentIdentity("hud"), time.Hour)); err != nil {
+		t.Fatal(err)
+	}
+	roots := x509.NewCertPool()
+	roots.AddCert(ca.Cert)
+	do := func(method, path string, body any, headers map[string]string) (int, map[string]any) {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		r := httptest.NewRequest(method, path, bytes.NewReader(raw))
+		for k, v := range headers {
+			r.Header.Set(k, v)
+		}
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, r)
+		var out map[string]any
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	req := api.GrantRequest{Project: "show-a", Tracker: "github", Pools: []string{"cpu"}, Until: "7d"}
+	for _, h := range []map[string]string{
+		{"X-C4-Client": "mcp"},
+		{"X-C4-Client": "mcp", "X-C4-Agent": "planner-bot"},
+		{"X-C4-Agent": "planner-bot"},
+		{"X-C4-Client": "c4-farm", "X-C4-Agent": "planner-bot"},
+	} {
+		code, out := do(http.MethodPost, "/api/v1/grants?as=artist", req, h)
+		if msg, _ := out["error"].(string); code != http.StatusForbidden || msg != errAgentGrants {
+			t.Errorf("%v: %d %v, want 403 %q", h, code, out, errAgentGrants)
+		}
+	}
+	if gs := grants(t, s, "?as=artist"); len(gs) != 0 {
+		t.Fatalf("a refused grant was written: %+v", gs)
+	}
+	code, out := do(http.MethodPost, "/api/v1/grants?as=artist", req, map[string]string{"X-C4-Client": "c4-farm"})
+	if code != http.StatusOK {
+		t.Fatalf("the person's own grant: %d %v", code, out)
+	}
+	code, out = do(http.MethodDelete, "/api/v1/grants/show-a/"+c4v1.SubmitGrantName("github", "maya")+"?as=artist", nil,
+		map[string]string{"X-C4-Client": "mcp", "X-C4-Agent": "planner-bot"})
+	id, _ := out["record"].(string)
+	if code != http.StatusOK || id == "" {
+		t.Fatalf("an agent revoking: %d %v", code, out)
+	}
+	st, err := s.Stores(ctx, "show-a")
+	if err != nil {
+		t.Fatal(err)
+	}
+	cid, err := c4.Parse(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := c4view.ReadObject(st, cid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rv, err := provenance.VerifyBundle(data, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p controlPredicate
+	if err := json.Unmarshal(rv.Predicate, &p); err != nil {
+		t.Fatal(err)
+	}
+	if p.Action != "revoke" || p.Actor != "maya" || p.Via != "mcp" || p.Agent != "planner-bot" {
+		t.Errorf("revoke record: action %q, actor %q, via %q, agent %q", p.Action, p.Actor, p.Via, p.Agent)
 	}
 }

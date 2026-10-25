@@ -17,8 +17,8 @@ import (
 // their own sign-in) serves those jobs and nothing else does.
 //
 // People never write one. They grant and revoke as themselves through the
-// HUD (POST and DELETE /api/v1/grants, MCP c4_grant, c4 farm grant), which
-// signs each as a control record and is the only writer (the
+// HUD (POST and DELETE /api/v1/grants, c4 farm grant), which signs each as
+// a control record and is the only writer (the
 // c4-submit-grants policy). A revoked grant is kept, marked, for the trail.
 // +kubebuilder:object:root=true
 // +kubebuilder:printcolumn:name="Person",type=string,JSONPath=`.spec.person`
