@@ -29,7 +29,7 @@ func leadFarm(t *testing.T, now time.Time) *Server {
 		"host":  {User: HostAccountPrefix + "laptop-1"},
 		"dana":  {User: "dana", Projects: []string{}},
 		"noor":  {User: "noor", Projects: []string{}},
-		"admin": {User: "root", Projects: []string{}, All: true, Role: "farm-admin"}}}
+		"admin": {User: "root", Projects: []string{}, All: true, Role: "farm-admin"}}, DevViewersOpen: true}
 }
 
 func postObserved(t *testing.T, s *Server, sessions ...api.ObservedSession) {
