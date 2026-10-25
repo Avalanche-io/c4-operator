@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -77,19 +76,14 @@ func TestRefusedRunnerEnds(t *testing.T) {
 	}
 }
 
-// An enrolled machine no one owns offers itself, as its own runner, naming
-// its holder, and says the code; it offers again before the code runs out,
-// and not at all once someone has enrolled it.
-func TestRunnerOffersItsMachine(t *testing.T) {
+// An enrolled machine no one owns says so, and how to enroll it, again
+// before a code would run out; it makes no offer and writes no code (a
+// code in a log could leave the machine), and says nothing more once
+// someone has enrolled it.
+func TestRunnerSaysItIsNotEnrolled(t *testing.T) {
 	e := newEnv(t)
-	var offers []map[string]string
-	hud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var b map[string]string
-		json.NewDecoder(r.Body).Decode(&b)
-		b["path"], b["auth"] = r.URL.Path, r.Header.Get("Authorization")
-		offers = append(offers, b)
-		w.Write([]byte(`{"node":"laptop-1","code":"ABCD-EFGH","message":"to enroll laptop-1 as yours, give this code: ABCD-EFGH"}`))
-	}))
+	posts := 0
+	hud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { posts++ }))
 	defer hud.Close()
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "laptop-1"}}
 	c := fake.NewClientBuilder().WithScheme(runnerScheme(t)).WithObjects(node).Build()
@@ -99,23 +93,21 @@ func TestRunnerOffersItsMachine(t *testing.T) {
 		HUDToken: func() string { return "tok" }, Now: func() time.Time { return now }, Logf: func(f string, a ...any) { logs = append(logs, fmt.Sprintf(f, a...)) }}
 	r.offerTick(context.Background())
 	r.offerTick(context.Background()) // within OfferEvery: nothing more
-	if len(offers) != 1 || offers[0]["holder"] != "noor" || offers[0]["path"] != "/api/v1/nodes/laptop-1/enroll-offer" || offers[0]["auth"] != "Bearer tok" {
-		t.Fatalf("offers %v", offers)
-	}
-	if len(logs) != 1 || !strings.Contains(logs[0], "c4 farm enroll laptop-1 ABCD-EFGH") {
-		t.Fatalf("logs %q", logs)
+	if posts != 0 || len(logs) != 1 || !strings.Contains(logs[0], "c4-agent enroll-offer") || !strings.Contains(logs[0], "c4 farm enroll laptop-1 <code>") {
+		t.Fatalf("posts %d, logs %q", posts, logs)
 	}
 	now = now.Add(OfferEvery)
 	r.offerTick(context.Background())
-	if len(offers) != 2 {
-		t.Fatalf("no new offer after %s: %d", OfferEvery, len(offers))
+	if len(logs) != 2 {
+		t.Fatalf("not said again after %s: %q", OfferEvery, logs)
 	}
 	node.Annotations = map[string]string{c4v1.AnnotationNodeOwners: `["noor"]`}
 	c.Update(context.Background(), node)
 	now = now.Add(OfferEvery)
 	r.offerTick(context.Background())
+	now = now.Add(OfferEvery)
 	r.offerTick(context.Background())
-	if len(offers) != 2 || !r.offerDone {
-		t.Fatalf("an enrolled machine offered itself: %d offers", len(offers))
+	if len(logs) != 3 || !strings.Contains(logs[2], "is enrolled") || !r.offerDone || posts != 0 {
+		t.Fatalf("after enrolment: %q, %d posts", logs, posts)
 	}
 }

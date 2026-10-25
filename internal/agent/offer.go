@@ -76,32 +76,25 @@ func nodeOwned(n *corev1.Node) bool {
 	return json.Unmarshal([]byte(n.Annotations[c4v1.AnnotationNodeOwners]), &owners) == nil && len(owners) > 0
 }
 
-// offerTick offers the machine for enrollment while no one owns it, before
-// each code runs out, and says the code; once someone has enrolled it, it
-// says so once and offers no more.
+// offerTick says, while no one owns the machine, that it is not enrolled
+// and how to enroll it, before each would-be code runs out; once someone
+// has enrolled it, it says so once and no more. It never makes an offer or
+// writes a code itself: a code in a log could leave the machine with it (a
+// diagnostic bundle, a pasted log), so the code is shown only where it is
+// asked for, by c4-agent enroll-offer at the machine.
 func (r *Runner) offerTick(ctx context.Context) {
-	if !r.Offer || r.HUD == "" || r.offerDone || (!r.offerDue.IsZero() && r.now().Before(r.offerDue)) {
+	if !r.Offer || r.offerDone || (!r.offerDue.IsZero() && r.now().Before(r.offerDue)) {
 		return
 	}
 	var n corev1.Node
 	if err := r.Client.Get(ctx, types.NamespacedName{Name: r.Node}, &n); err != nil {
-		return // the heartbeat makes it; the next round offers
+		return // the heartbeat makes it; the next round looks again
 	}
 	if nodeOwned(&n) {
 		r.offerDone = true
 		r.logf("this machine is enrolled: the farm places its owners' work here")
 		return
 	}
-	token := ""
-	if r.HUDToken != nil {
-		token = r.HUDToken()
-	}
-	o, err := OfferMachine(ctx, r.HTTPClient, r.HUD, token, r.Node, r.holder())
-	if err != nil {
-		r.offerDue = r.now().Add(time.Minute)
-		r.logf("offering this machine: %v", err)
-		return
-	}
 	r.offerDue = r.now().Add(OfferEvery)
-	r.logf("this machine is not enrolled yet: %s, or run c4 farm enroll %s %s", o.Message, r.Node, o.Code)
+	r.logf("this machine is not enrolled yet, so the farm places no work here: on it, its holder runs c4-agent enroll-offer and gives the farm the code it shows (c4 farm enroll %s <code>); c4 farm up does both", r.Node)
 }
