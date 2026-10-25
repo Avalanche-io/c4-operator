@@ -10,7 +10,8 @@
 // and one past it is held to the limit, saying so. A job may tighten a
 // value its project or the farm sets, never loosen it: a shorter
 // pressAfter, a longer pressMargin or recheck.minInterval, a lower
-// recheck.max, recheck.seconds or asks.max. A looser job value is ignored.
+// recheck.max, recheck.seconds or asks.max, agents.submit lead. A looser
+// job value is ignored.
 package policy
 
 import (
@@ -62,6 +63,16 @@ const (
 	// SubmissionKeyFor is how long a submission's key answers a retry
 	// (24h): after it, the same key makes a new submission.
 	SubmissionKeyFor = "submission.keyFor"
+	// AgentsSubmit is who may submit agent work (lead): lead, only a
+	// person (a lead's own session signs in as one), so a worker may not
+	// start workers; anyone, a unit too.
+	AgentsSubmit = "agents.submit"
+)
+
+// The values of AgentsSubmit.
+const (
+	SubmitLead   = "lead"
+	SubmitAnyone = "anyone"
 )
 
 // SubmissionPendingFloor is the least submission.pendingFor: the HUD's
@@ -109,6 +120,7 @@ var tighter = map[string]func(a, b string) bool{
 	RecheckSeconds:      func(a, b string) bool { return num(a) <= num(b) },
 	YieldBackgroundWait: func(a, b string) bool { return dur(a) <= dur(b) },
 	AsksMax:             func(a, b string) bool { return num(a) <= num(b) },
+	AgentsSubmit:        func(a, b string) bool { return a == SubmitLead || a == b },
 }
 
 var defaults = map[string]string{
@@ -125,6 +137,7 @@ var defaults = map[string]string{
 	SubmissionPendingFor: "10m",
 	SubmissionSweepEvery: "1m",
 	SubmissionKeyFor:     "24h",
+	AgentsSubmit:         SubmitLead,
 }
 
 // limits are the farm's limits on a project's values, in each key's
@@ -355,6 +368,8 @@ func valid(key, s string) bool {
 	case AsksMax, RecheckSeconds:
 		n, err := strconv.Atoi(s)
 		return err == nil && n > 0
+	case AgentsSubmit:
+		return s == SubmitLead || s == SubmitAnyone
 	}
 	return true
 }

@@ -60,6 +60,8 @@ type PlannedJob struct {
 	// Pinned is a job whose version the file gives: it is never numbered
 	// again.
 	Pinned bool
+	// Agent is agent work: an agent tool's job, or a plan's.
+	Agent bool
 	// Table is the unit table of agent work (class.TableParam), for the
 	// front end to store before the job is created; PlanFile is the C4 ID
 	// of the plan file it was read from, as sent.
@@ -257,7 +259,7 @@ func (c *subCtx) lower() (*Plan, []Error) {
 		}
 		var req *api.SubmitRequest
 		var jerrs []Error
-		if c.agentWork(j) {
+		if pj.Agent = c.agentWork(j); pj.Agent {
 			req, pj.Table, jerrs = c.lowerAgent(j, tj)
 			pj.Units = tableUnits(pj.Table)
 			if b, ok := c.in.Plans[j.Plan]; ok {

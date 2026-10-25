@@ -1158,7 +1158,13 @@ handler serves both; a farm with no trackers is refused at `tracker`, one
 with no grants at `for`, once (`501`), as not available on this farm,
 never as a thing to retry. A unit's submission refused for who it is (its
 own job, that job's owner, what its tool grants) says so in its own words
-at `jobs.<key>` (`403`). A create the API turns away for the moment keeps
+at `jobs.<key>` (`403`). A worker may not start workers: while the
+project's `agents.submit` is `lead` (the default), a unit's agent work (a
+job of an agent tool, or of a plan) is refused at `jobs.<key>` (`403`),
+dry run or not: "a worker may not start workers: only a lead submits agent
+work". A person, a lead's own session among them, is not; nor is a unit's
+other work, nor a unit's agent work in a project that sets `agents.submit:
+anyone`. A create the API turns away for the moment keeps
 its class: `503`, try again.
 
 `key` makes a retry safe. A client names the submission it means (any

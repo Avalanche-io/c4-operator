@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 )
 
 // The agent tool as the release ships it.
@@ -41,6 +43,26 @@ needs: {network: [model-api]}
 reuse: never
 `
 
+// agentToolIn publishes the agent tool in show-a and gives the farm a
+// host pool for it.
+func agentToolIn(t *testing.T, s *Server) {
+	t.Helper()
+	ctx := context.Background()
+	view := putTree(t, s, "show-a", map[string]string{"tool.yaml": agentToolYAML}).String()
+	tool := &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "agent"}, Spec: c4v1.ToolSpec{View: view}}
+	if err := s.Client.Create(ctx, tool); err != nil {
+		t.Fatal(err)
+	}
+	image := "registry.example/block@sha256:" + strings.Repeat("b", 64)
+	tool.Status = c4v1.ToolStatus{Version: "v1", Image: image, Versions: []c4v1.ToolVersion{{Version: "v1", View: view, Image: image,
+		Test: c4v1.ToolTest{State: c4v1.ToolTestOK}}}}
+	if err := s.Client.Status().Update(ctx, tool); err != nil {
+		t.Fatal(err)
+	}
+	s.m.pools = append(s.m.pools, c4v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "laptop"},
+		Spec: c4v1.PoolSpec{NodeSelector: map[string]string{authoring.HostLabel: "laptop"}, SlotsPerNode: 4}})
+}
+
 // A plan of agent blocks through POST /submissions: the plan travels in
 // the request; a dry run plans its table without storing it; a real
 // submit stores the table, then creates a graph job naming it, on the
@@ -55,19 +77,7 @@ func TestSubmissionAgentPlan(t *testing.T) {
 	if s.Signer, err = provenance.NewSigner(ctx, provenance.LocalIssuer(ca, provenance.ComponentIdentity("hud"), time.Hour)); err != nil {
 		t.Fatal(err)
 	}
-	view := putTree(t, s, "show-a", map[string]string{"tool.yaml": agentToolYAML}).String()
-	tool := &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "agent"}, Spec: c4v1.ToolSpec{View: view}}
-	if err := s.Client.Create(ctx, tool); err != nil {
-		t.Fatal(err)
-	}
-	image := "registry.example/block@sha256:" + strings.Repeat("b", 64)
-	tool.Status = c4v1.ToolStatus{Version: "v1", Image: image, Versions: []c4v1.ToolVersion{{Version: "v1", View: view, Image: image,
-		Test: c4v1.ToolTest{State: c4v1.ToolTestOK}}}}
-	if err := s.Client.Status().Update(ctx, tool); err != nil {
-		t.Fatal(err)
-	}
-	s.m.pools = append(s.m.pools, c4v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "laptop"},
-		Spec: c4v1.PoolSpec{NodeSelector: map[string]string{authoring.HostLabel: "laptop"}, SlotsPerNode: 4}})
+	agentToolIn(t, s)
 	var tables [][]byte
 	s.DryRunAll = func(_ context.Context, jobs []*c4v1.WorkJob, _ string, _ map[string]string, given map[string][]byte) ([]api.SubmitEstimate, error) {
 		out := make([]api.SubmitEstimate, len(jobs))
@@ -150,5 +160,62 @@ func TestSubmissionAgentPlan(t *testing.T) {
 	_ = json.Compact(&sent, plan)
 	if pid := c4.Identify(bytes.NewReader(sent.Bytes())).String(); !bytes.Contains(env.DSSE.Payload, []byte(pid)) {
 		t.Fatalf("the record does not name the plan %s: %s", pid, env.DSSE.Payload)
+	}
+}
+
+// Only a lead submits agent work: while the project's agents.submit is
+// lead (the default), a unit's agent job is refused at its path, dry run
+// or not, and nothing is made. A person's passes; the unit's other work
+// is unaffected; and once the project says anyone, the unit's passes too.
+func TestSubmissionLeadSubmitsAgentWork(t *testing.T) {
+	s := submissionFarm(t)
+	ctx := context.Background()
+	agentToolIn(t, s)
+	s.DryRunAll = func(_ context.Context, jobs []*c4v1.WorkJob, _ string, _ map[string]string, _ map[string][]byte) ([]api.SubmitEstimate, error) {
+		return make([]api.SubmitEstimate, len(jobs)), nil
+	}
+	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port", UID: "uid-port",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor"}},
+		Spec: c4v1.WorkJobSpec{Class: "graph", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+	if err := s.Client.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/port/0", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "port", JobUID: string(parent.UID), Unit: "0", Grant: "project"}}
+	as := func(who string, body api.SubmissionRequest) (int, api.SubmissionResponse) {
+		t.Helper()
+		var out api.SubmissionResponse
+		code := call(t, s, http.MethodPost, "/api/v1/submissions?as="+who, body, &out)
+		return code, out
+	}
+	agent := []byte(`{"c4": "submit/1", "project": "show-a", "shot": "port", "root": "/src/textkit",
+	  "jobs": {"scan": {"tool": "agent", "with": {"task": "scan the port"}}}}`)
+
+	for _, dry := range []bool{true, false} {
+		code, out := as("unit", api.SubmissionRequest{Submission: agent, DryRun: dry})
+		if code != http.StatusForbidden || out.OK || len(out.Errors) != 1 || out.Errors[0].Path != "jobs.scan" ||
+			out.Errors[0].Message != "a worker may not start workers: only a lead submits agent work" {
+			t.Fatalf("a unit's agent work (dry run %v): %d %+v", dry, code, out)
+		}
+	}
+	var list c4v1.WorkJobList
+	if err := s.Client.List(ctx, &list); err != nil || len(list.Items) != 1 {
+		t.Fatalf("a refused submission made jobs: %d", len(list.Items))
+	}
+	if code, out := as("artist", api.SubmissionRequest{Submission: agent, DryRun: true}); code != http.StatusOK || !out.OK {
+		t.Fatalf("a person's agent work: %d %+v", code, out)
+	}
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	if code, out := as("unit", api.SubmissionRequest{Submission: submission(t, "proxies", tree), DryRun: true}); code != http.StatusOK || !out.OK {
+		t.Fatalf("a unit's other work: %d %+v", code, out)
+	}
+
+	for i := range s.m.projects {
+		if s.m.projects[i].Name == "show-a" {
+			s.m.projects[i].Spec.Work = &c4v1.ProjectWork{Policy: &c4v1.ProjectPolicy{Values: map[string]string{policy.AgentsSubmit: policy.SubmitAnyone}}}
+		}
+	}
+	if code, out := as("unit", api.SubmissionRequest{Submission: agent, DryRun: true}); code != http.StatusOK || !out.OK {
+		t.Fatalf("a unit's agent work with agents.submit anyone: %d %+v", code, out)
 	}
 }

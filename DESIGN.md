@@ -2142,6 +2142,15 @@ and a sweep planner that spawns trials are all generators.
       recheck.max, recheck.seconds or asks.max). A decision a value made
       names it, its value and where it came from (`policy: [{key, value,
       from}]`) in its record and its book entry.
+    - **Only a lead submits agent work.** A worker may not start
+      workers: `agents.submit` is `lead` by default, so `POST
+      /submissions` refuses a unit's agent job (an agent tool's, or a
+      plan's) at `jobs.<key>` (`403`), dry run or not; a person, a lead's
+      own session among them, is unaffected, and a unit's other work too.
+      A project allows more with `agents.submit: anyone`; `lead` is the
+      tighter, so a farm limit of `lead` holds every project to it. The
+      check reads the key where the call is checked, so allowing more is
+      a value change, never a code change.
     - **A usage limit is the model's capacity, not a failure.** A pod
       block's turn at a model's usage limit exits 75 with "usage limit:
       <the CLI's words> (until <RFC 3339>)". The queue spends no retry,

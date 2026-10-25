@@ -161,3 +161,27 @@ func TestSubmissionPendingForFloor(t *testing.T) {
 		t.Fatalf("over it: %v", d)
 	}
 }
+
+// agents.submit is lead unless a project says anyone; any other value is
+// ignored, and the farm refuses one. lead is the tighter, so a farm limit
+// of lead holds a project to it.
+func TestAgentsSubmit(t *testing.T) {
+	if v, from := Value(nil, nil, -1, AgentsSubmit); v != SubmitLead || from.Scope != "farm" {
+		t.Fatalf("default: %s %+v", v, from)
+	}
+	p := &c4v1.Project{ObjectMeta: metav1.ObjectMeta{Name: "show"},
+		Spec: c4v1.ProjectSpec{Work: &c4v1.ProjectWork{Policy: &c4v1.ProjectPolicy{Values: map[string]string{AgentsSubmit: SubmitAnyone}}}}}
+	if v, from := Value(nil, p, -1, AgentsSubmit); v != SubmitAnyone || from.Scope != "project" {
+		t.Fatalf("anyone: %s %+v", v, from)
+	}
+	p.Spec.Work.Policy.Values[AgentsSubmit] = "everyone"
+	if v, _ := Value(nil, p, -1, AgentsSubmit); v != SubmitLead {
+		t.Fatalf("an unknown value: %s", v)
+	}
+	if err := SetFarm(map[string]Setting{AgentsSubmit: {Value: "everyone"}}); err == nil {
+		t.Fatal("the farm took an unknown value")
+	}
+	if !tighter[AgentsSubmit](SubmitLead, SubmitAnyone) || tighter[AgentsSubmit](SubmitAnyone, SubmitLead) {
+		t.Fatal("lead is the tighter")
+	}
+}

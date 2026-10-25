@@ -106,6 +106,10 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 		refuse(http.StatusUnprocessableEntity, refusals...)
 		return
 	}
+	if refusals = leadSubmits(v, projectObject(m, plan.Project), plan); len(refusals) > 0 {
+		refuse(http.StatusForbidden, refusals...)
+		return
+	}
 	if !body.DryRun {
 		// A dry run plans without the tree's bytes; a job needs them.
 		for _, f := range views {
@@ -204,6 +208,28 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 	}
 	out.Message = fmt.Sprintf("%s: %s", strings.Join(names, ", "), verb)
 	writeJSON(w, code, out)
+}
+
+// leadSubmits refuses a unit's agent work, at each such job, while the
+// project's agents.submit is lead: a worker may not start workers. A
+// person, a lead's own session among them, is never refused here.
+func leadSubmits(v *api.Viewer, project *c4v1.Project, plan *authoring.Plan) []api.FieldError {
+	if v.Unit == nil {
+		return nil
+	}
+	if who, _ := policy.Value(nil, project, -1, policy.AgentsSubmit); who != policy.SubmitLead {
+		return nil
+	}
+	var out []api.FieldError
+	for _, j := range plan.Jobs {
+		if !j.Agent {
+			continue
+		}
+		out = append(out, api.FieldError{Path: "jobs." + j.Key,
+			Message: "a worker may not start workers: only a lead submits agent work",
+			Fix:     "hand it to your lead to submit; a project lets units submit agent work with agents.submit: anyone"})
+	}
+	return out
 }
 
 // pinned says whether the file gives a job's version.
