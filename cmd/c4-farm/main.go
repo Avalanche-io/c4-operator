@@ -679,6 +679,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := localfarm.Up(ctx, o); err != nil {
 			return err
 		}
+		if err := bindFarm(ctx, o.Options); err != nil {
+			return err
+		}
 		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner,
 			InstallerTokenFile: localfarm.InstallerTokenFile(localfarm.Name)}
 		cfg.Current = localfarm.Name
@@ -1055,6 +1058,22 @@ func applyApps(w io.Writer, on []string) {
 			farmcli.App(farmcli.Out{W: w}, name, true, false, nil)
 		}
 	}
+}
+
+// bindFarm binds the local farm, its HUD answering, to its owner as one
+// person's farm: every deployment of it, its records accruing to them. The
+// same owner again changes nothing; a farm bound to someone else is
+// refused, with how an owner changes.
+func bindFarm(ctx context.Context, o localfarm.Options) error {
+	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: o.Owner, Local: true,
+		InstallerTokenFile: localfarm.InstallerTokenFile(cmp.Or(o.Name, localfarm.Name))})
+	if err != nil {
+		return err
+	}
+	if _, err := farmcli.Bind(ctx, c, o.BindRequest()); err != nil {
+		return fmt.Errorf("the farm is up, but not bound to its owner %s: %v", o.Owner, err)
+	}
+	return nil
 }
 
 // localRunner makes this machine one of the local farm's runners for its
