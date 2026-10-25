@@ -143,3 +143,40 @@ func TestYieldBackgroundWait(t *testing.T) {
 		t.Fatalf("a tool unit: %q", v)
 	}
 }
+
+// Exit 75 is a usage limit only from a model's unit that says so in the
+// limit's words: a build that exits 75 (EX_TEMPFAIL), or a model's turn
+// that exits 75 without them, is an ordinary failure, never held.
+func TestUsageLimitOnlyFromAModel(t *testing.T) {
+	for _, c := range []struct{ name, unit, msg string }{
+		{"build", `{"name": "build"}`, "usage limit: the build said so"},
+		{"untold", `{"name": "cut", "reasoning": {"does": "model"}}`, "try again later"},
+	} {
+		ns, q, now := graphJob(t, c.name, func(time.Time) string { return c.unit }, 72*time.Hour)
+		hitUsageLimit(t, podOfUnit(t, ns, c.name, 1), *now, c.msg, "")
+		tick(t, q)
+		got := get(t, ns, c.name)
+		if len(got.Status.UsageLimits) != 0 || meta.FindStatusCondition(got.Status.Conditions, c4v1.ConditionUsageLimit) != nil {
+			t.Errorf("%s: held as a usage limit: %+v", c.name, got.Status.UsageLimits)
+		}
+	}
+}
+
+// A stated reset further off than a week holds the unit a week, and the
+// job says the time it gave was not taken as given.
+func TestUsageLimitResetIsBounded(t *testing.T) {
+	ns, q, now := graphJob(t, "faroff", func(time.Time) string {
+		return `{"name": "cut", "reasoning": {"does": "model"}}`
+	}, 72*time.Hour)
+	stated := now.Add(30 * 24 * time.Hour).Truncate(time.Second).UTC()
+	hitUsageLimit(t, podOfUnit(t, ns, "faroff", 1), *now, "usage limit: resets next month (until "+stated.Format(time.RFC3339)+")", "")
+	tick(t, q)
+	got := get(t, ns, "faroff")
+	l, ok := got.Status.UsageLimits["1"]
+	if want := now.Add(maxUsageWait).Truncate(time.Second); !ok || !l.Until.Time.Equal(want) {
+		t.Fatalf("held until %v, want %v", l.Until, want)
+	}
+	if c := meta.FindStatusCondition(got.Status.Conditions, c4v1.ConditionUsageLimit); c == nil || !strings.Contains(c.Message, "more than a week off, so the wait is held to that") {
+		t.Fatalf("condition %+v", c)
+	}
+}

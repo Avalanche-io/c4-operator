@@ -1085,7 +1085,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				m.foldedPod[p.UID] = true
 			}
 			v.done = append(v.done, p)
-		case p.Status.Phase == corev1.PodFailed && isUsageLimit(p):
+		case p.Status.Phase == corev1.PodFailed && isUsageLimit(v, idx, p):
 			// It hit a model's usage limit: the model's capacity, not the
 			// unit's failure (usagelimit.go).
 			q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6)

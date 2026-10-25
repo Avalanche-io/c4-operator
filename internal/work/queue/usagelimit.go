@@ -32,7 +32,23 @@ type usageRec struct {
 	why       string
 	at, until time.Time
 	probe     bool
+	// stated is the reset the unit gave, when it was further off than
+	// maxUsageWait and so not taken as given.
+	stated time.Time
 }
+
+// maxUsageWait bounds how long a stated reset holds a unit: the longest
+// window a provider's usage limit runs (a week today). The reset comes
+// from the unit's own termination message, so a wrong or far-off one
+// would otherwise hold the unit, and show in the forecast, for as long as
+// it said.
+const maxUsageWait = 7 * 24 * time.Hour
+
+// usageLimitPrefix starts a usage limit's termination message. Exit 75
+// alone is EX_TEMPFAIL, which ordinary tools use for "try again later",
+// so it is a usage limit only with these words, and only from a model's
+// unit (isUsageLimit).
+const usageLimitPrefix = "usage limit:"
 
 // usageLimitOf reads a failed pod's usage limit: why, in the limit's
 // words, and until when, if it said.
@@ -43,8 +59,8 @@ func usageLimitOf(p *corev1.Pod) (why string, until time.Time, ok bool) {
 			continue
 		}
 		why = strings.TrimSpace(t.Message)
-		if why == "" {
-			why = "usage limit: the model's (it did not say which)"
+		if !strings.HasPrefix(why, usageLimitPrefix) {
+			continue
 		}
 		if k := strings.LastIndex(why, " (until "); k >= 0 && strings.HasSuffix(why, ")") {
 			if u, err := time.Parse(time.RFC3339, why[k+len(" (until "):len(why)-1]); err == nil {
@@ -56,8 +72,13 @@ func usageLimitOf(p *corev1.Pod) (why string, until time.Time, ok bool) {
 	return "", time.Time{}, false
 }
 
-// isUsageLimit reports whether a failed pod hit a usage limit.
-func isUsageLimit(p *corev1.Pod) bool {
+// isUsageLimit reports whether unit idx's failed pod hit a model's usage
+// limit: only a model's unit can, and only one that says so in the
+// limit's words. Anything else that exits 75 is an ordinary failure.
+func isUsageLimit(v *view, idx int, p *corev1.Pod) bool {
+	if !modelUnit(v, idx) {
+		return false
+	}
 	_, _, ok := usageLimitOf(p)
 	return ok
 }
@@ -79,6 +100,9 @@ func (q *Queue) noteUsageLimit(ctx context.Context, v *view, idx int, p *corev1.
 		m.resume[idx] = tree
 	}
 	r := &usageRec{why: why, at: finishOf(p, now), until: until}
+	if limit := now.Add(maxUsageWait); until.After(limit) {
+		r.until, r.stated = limit, until
+	}
 	var uses []policy.Use
 	if until.IsZero() || !until.After(now) {
 		probe, use := policy.Duration(v.job, q.projectOf(v), idx, policy.UsageLimitProbe)
@@ -130,6 +154,9 @@ func (q *Queue) usageCondition(st *c4v1.WorkJobStatus, v *view) {
 	msg := "waiting for the model's usage limit to reset at " + forecast.Clock(first.until, q.Loc)
 	if first.probe {
 		msg = "waiting for the model's usage limit: trying again at " + forecast.Clock(first.until, q.Loc)
+	}
+	if !first.stated.IsZero() {
+		msg += fmt.Sprintf(" (it said %s, more than %s off, so the wait is held to that)", forecast.Clock(first.stated, q.Loc), "a week")
 	}
 	if n := len(idx); n > 1 {
 		msg = fmt.Sprintf("%s (%d units, the first)", msg, n)
