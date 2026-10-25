@@ -230,7 +230,9 @@ type jobFailure struct {
 func (s *Server) makeSubmission(r *http.Request, v *api.Viewer, m *model, plan *authoring.Plan, body *api.SubmissionRequest, out *api.SubmissionResponse) ([]api.SubmissionJob, int, *jobFailure) {
 	ctx := r.Context()
 	opts := func(j authoring.PlannedJob, record string) createOpts {
-		o := createOpts{Labels: j.Labels, Annotations: map[string]string{}}
+		// The request is authoring.Lower's, made here: its spec.tool is
+		// the farm's.
+		o := createOpts{Labels: j.Labels, Annotations: map[string]string{}, Lowered: true}
 		for k, val := range j.Annotations {
 			o.Annotations[k] = val
 		}

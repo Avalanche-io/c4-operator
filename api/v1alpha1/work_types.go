@@ -1712,6 +1712,7 @@ type HeavyRegion struct {
 // +kubebuilder:validation:XValidation:rule="self.metadata.name.size() <= 50",message="a WorkJob name is at most 50 characters (it labels and prefixes its unit pods)"
 // +kubebuilder:validation:XValidation:rule="has(self.spec.review) == has(oldSelf.spec.review) && (!has(self.spec.review) || self.spec.review == oldSelf.spec.review)",message="a job's review is set when it is created"
 // +kubebuilder:validation:XValidation:rule="has(self.spec.forecast) == has(oldSelf.spec.forecast)",message="a job is a forecast, or not, from when it is created: a real job replaces a forecast"
+// +kubebuilder:validation:XValidation:rule="has(self.spec.tool) == has(oldSelf.spec.tool) && (!has(self.spec.tool) || self.spec.tool == oldSelf.spec.tool)",message="the tool a job runs under, and its networks, are set when it is created"
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:shortName=wj
 // +kubebuilder:printcolumn:name="Class",type=string,JSONPath=`.spec.class`

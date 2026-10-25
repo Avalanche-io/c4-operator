@@ -211,6 +211,27 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"forecast":{"slotHours":"4"}}}`))); err == nil {
 		t.Error("a running job became a forecast")
 	}
+	// The tool a job runs under, and its networks, are set when it is
+	// created (DESIGN.md 10.6, Tool jobs run under their tool): neither
+	// added, widened nor removed later.
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"tool":{"name":"fetch","network":["studio-api"]}}}`))); err == nil {
+		t.Error("a tool was added to a running job")
+	}
+	tj := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "sm0140-fetch-v001",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "hud"}},
+		Spec: c4v1.WorkJobSpec{Class: "render", Tool: &c4v1.WorkTool{Name: "fetch"},
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
+	if err := c.Create(ctx, tj); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{`{"spec":{"tool":{"network":["studio-api"]}}}`, `{"spec":{"tool":{"name":"wide"}}}`, `{"spec":{"tool":null}}`} {
+		if err := c.Patch(ctx, tj, client.RawPatch(types.MergePatchType, []byte(p))); err == nil {
+			t.Errorf("a job's tool was changed: %s", p)
+		}
+	}
+	if err := c.Patch(ctx, tj, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"nudge":{"hold":true}}}`))); err != nil {
+		t.Errorf("an ordinary change to a tool job was refused: %v", err)
+	}
 
 	// a bundle's owner is fixed the same way: its member job carries it
 	b := &c4v1.AgentBundle{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "team",

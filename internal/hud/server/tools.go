@@ -477,7 +477,7 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if req != nil {
-		_, code, err := s.createJob(r, v, m, *req, createOpts{
+		_, code, err := s.createJob(r, v, m, *req, createOpts{Lowered: true,
 			Labels:      map[string]string{LabelToolTest: tool.Name},
 			Annotations: map[string]string{AnnotationToolTest: got.Version}})
 		if err != nil {

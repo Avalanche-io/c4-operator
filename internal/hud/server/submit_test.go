@@ -561,3 +561,22 @@ func TestAUnitsJobNeedsItsOwnersRight(t *testing.T) {
 		t.Fatalf("mallory's unit made a job where mallory may not: %d %v", code, refused)
 	}
 }
+
+// What a job runs under is the farm's to say: POST /jobs naming spec.tool
+// is refused, dry run or not, so a client cannot name a tool, or widen its
+// networks, by writing the spec itself; only the HUD's lowering of a
+// tool's submission sets it.
+func TestSubmitRefusesSpecTool(t *testing.T) {
+	s := submitFarm(t)
+	for _, dry := range []string{"true", "false"} {
+		body := `{"project": "show-a", "dryRun": ` + dry + `, "spec": {"class": "render", "tool": {"name": "fetch", "network": ["studio-api"]},
+			"template": {"spec": {"containers": [{"name": "unit", "image": "c4-job-hydra"}]}}}}`
+		var out struct {
+			Error string `json:"error"`
+		}
+		if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", []byte(body), &out); code != http.StatusBadRequest ||
+			!strings.Contains(out.Error, "spec.tool is set by the farm when it lowers a tool's submission") {
+			t.Errorf("dryRun %s: %d %q, want 400 refusing spec.tool", dry, code, out.Error)
+		}
+	}
+}

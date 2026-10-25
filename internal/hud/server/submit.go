@@ -568,6 +568,10 @@ type createOpts struct {
 	Hold bool
 	// Made, when set, receives the WorkJob as created (with its UID).
 	Made *c4v1.WorkJob
+	// Lowered says the HUD's own lowering of a tool (a submission's job,
+	// a tool's test) wrote the request, so its spec.tool is the farm's.
+	// Without it a request naming spec.tool is refused.
+	Lowered bool
 }
 
 // identityError is a unit's submission refused for who the unit is: its
@@ -601,6 +605,11 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		if err := class.Strict(body.Spec, &spec); err != nil {
 			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("spec: %v", err)
 		}
+	}
+	if spec.Tool != nil && !o.Lowered {
+		// What a job runs under is the farm's to say, from the tool's
+		// published version, never the client's.
+		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("spec.tool is set by the farm when it lowers a tool's submission: submit the tool by name (POST /submissions, c4 farm submit) rather than naming it in spec")
 	}
 	if spec.Class == "" {
 		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("spec.class is required: render, ci or ml")

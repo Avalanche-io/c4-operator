@@ -2038,6 +2038,10 @@ spec:
         - message: 'a job is a forecast, or not, from when it is created: a real job
             replaces a forecast'
           rule: has(self.spec.forecast) == has(oldSelf.spec.forecast)
+        - message: the tool a job runs under, and its networks, are set when it is
+            created
+          rule: has(self.spec.tool) == has(oldSelf.spec.tool) && (!has(self.spec.tool)
+            || self.spec.tool == oldSelf.spec.tool)
     served: true
     storage: true
     subresources:
