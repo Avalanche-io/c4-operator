@@ -75,11 +75,12 @@ The first time, a yes also opens Claude Code once, in the folder the farm's
 agents run in (`~/.c4/blocks`), apart from your own Claude Code: sign in,
 trust the folder, then `/exit`. Until then the agents wait, and `up` says so.
 
-The machine becomes yours as a device sign-in does: its runner offers it
-to the farm and shows a code, and the person whose Claude Code sign-in it
-uses gives the code back. That is you here, so `up` gives it for you. On
-another machine, its holder runs `c4 farm enroll NODE CODE` (`--for
-PERSON` lets someone else's work run there too, on the holder's sign-in).
+The machine becomes yours as a device sign-in does: it offers itself to
+the farm for a code, and the person whose Claude Code sign-in its runner
+uses gives the code back. That is you here, so `up` does both. On another
+machine, its holder runs `c4-agent enroll-offer` there and then `c4 farm
+enroll NODE CODE` (`--for PERSON` lets someone else's work run there too,
+on the holder's sign-in).
 Until a machine is someone's, the farm places no one's work on it.
 
 Saying no, or `c4 farm up --no-integrate`, adds nothing to Claude Code or

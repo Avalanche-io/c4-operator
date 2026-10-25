@@ -81,7 +81,7 @@ Agents
   agent run                what the service runs: the power reader and c4-agent runner, restarted if it stops
   agent power              offer this machine's agent slots by its battery: stop below 25%, resume at 90% (--once to read it now)
   agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all, --open for the HUD)
-  enroll NODE CODE         make a machine yours with the code its runner shows: your host work runs there (--for PERSON adds them, on your sign-in)
+  enroll NODE CODE         make a machine yours with the code c4-agent enroll-offer prints on it: your host work runs there (--for PERSON adds them, on your sign-in)
   agents add [NAME]        make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first; no NAME lists the sessions to pick from)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
@@ -1075,7 +1075,7 @@ func localRunner(owner, hud string, stdin io.Reader, stdout io.Writer) func(ctx 
 		}
 		if offers {
 			if err := acceptOffer(ctx, bin, owner, hud); err != nil {
-				return fmt.Errorf("%s's runner is started, but the machine is not yet %s's, so the farm places no host work on it: %v (its runner offers it again, and c4 farm enroll %s CODE takes the code it shows)", e.Node, owner, err, e.Node)
+				return fmt.Errorf("%s's runner is started, but the machine is not yet %s's, so the farm places no host work on it: %v (c4 farm integrate on tries again; or c4-agent enroll-offer prints a code, and c4 farm enroll %s CODE takes it)", e.Node, owner, err, e.Node)
 			}
 		}
 		// said only as it is: the runner runs the owner's agents once its
