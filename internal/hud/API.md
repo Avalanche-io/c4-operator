@@ -1031,7 +1031,7 @@ grant) is owned by the owner of the unit's own job, whose runners run it
 and who answers for it, and `c4.avalanche.io/submitted-by-unit` names the
 unit as a record names it (`<namespace>/<job>@<uid6>/<unit>`, the job's UID
 from the unit pod's controller reference); a unit whose job is gone, was
-made again under the same name, or has no owner, gets `403`. Outside its own job's namespace the owner must also be allowed to create workjobs there (the API server is asked about the owner by name), else `403` naming the owner; in that namespace the owner already was. Only the farm sets that annotation: the owner webhook
+made again under the same name, or has no owner, gets `403`. Outside its own job's namespace the owner must also be allowed to create workjobs there (the API server is asked about the owner by name), else `403` naming the owner; in that namespace the owner already was. A worker may not start workers: while the project's `agents.submit` is `lead` (the default), a unit's agent work (a class whose driver is the agent driver, a template whose pods are blocks, `C4_AGENT_BLOCK`, or a graph job naming a unit table, the shape a plan or an agent task lowers to) is `403`, dry run or not, `{ error: "a worker may not start workers: only a lead submits agent work", fix }`, the words `POST /submissions` refuses it in; a person's is not, nor a unit's in a project that sets `agents.submit: anyone`. Only the farm sets that annotation: the owner webhook
 drops anyone else's, and it cannot be added or changed later. `aiUsage` becomes
 the job's `c4.avalanche.io/ai-usage` annotation. `trackerRef`
 (`<tracker>/<type>/<id>`) is the tracker entity the job is made for: it

@@ -15,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4"
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/agent"
 	"github.com/Avalanche-io/c4-operator/internal/authoring"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/policy"
@@ -210,24 +211,62 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, code, out)
 }
 
-// leadSubmits refuses a unit's agent work, at each such job, while the
-// project's agents.submit is lead: a worker may not start workers. A
-// person, a lead's own session among them, is never refused here.
-func leadSubmits(v *api.Viewer, project *c4v1.Project, plan *authoring.Plan) []api.FieldError {
-	if v.Unit == nil {
-		return nil
+// The words a unit's agent work is refused in, by POST /submissions and
+// POST /jobs alike.
+const (
+	leadOnlyMessage = "a worker may not start workers: only a lead submits agent work"
+	leadOnlyFix     = "hand it to your lead to submit; a project lets units submit agent work with agents.submit: anyone"
+)
+
+// leadOnlyError is agent work refused to a unit (403).
+type leadOnlyError struct{}
+
+func (leadOnlyError) Error() string { return leadOnlyMessage }
+
+// leadOnly says whether viewer v is held to agents.submit lead in project:
+// a unit, in a project whose value is lead (the default). A person, a
+// lead's own session among them, never is.
+func leadOnly(v *api.Viewer, project *c4v1.Project) bool {
+	if v == nil || v.Unit == nil {
+		return false
 	}
-	if who, _ := policy.Value(nil, project, -1, policy.AgentsSubmit); who != policy.SubmitLead {
+	who, _ := policy.Value(nil, project, -1, policy.AgentsSubmit)
+	return who == policy.SubmitLead
+}
+
+// agentSpec says whether a job's spec is agent work: a class whose driver
+// is the agent driver, a template whose pods are blocks
+// (C4_AGENT_BLOCK), or a graph job whose units are a stored table, the
+// shape a plan or an agent task lowers to (and whose units may make
+// themselves blocks).
+func agentSpec(spec c4v1.WorkJobSpec) bool {
+	if d, err := class.Lookup(spec.Class); err == nil && d.Name() == "agent" {
+		return true
+	}
+	if spec.Class == "graph" && strings.TrimSpace(spec.Params[class.TableParam]) != "" {
+		return true
+	}
+	for _, c := range spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			if e.Name == agent.EnvBlock && e.Value != "" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// leadSubmits refuses a unit's agent work, at each such job, while the
+// project's agents.submit is lead: a worker may not start workers.
+func leadSubmits(v *api.Viewer, project *c4v1.Project, plan *authoring.Plan) []api.FieldError {
+	if !leadOnly(v, project) {
 		return nil
 	}
 	var out []api.FieldError
 	for _, j := range plan.Jobs {
-		if !j.Agent {
-			continue
+		if j.Agent {
+			out = append(out, api.FieldError{Path: "jobs." + j.Key, Message: leadOnlyMessage, Fix: leadOnlyFix})
 		}
-		out = append(out, api.FieldError{Path: "jobs." + j.Key,
-			Message: "a worker may not start workers: only a lead submits agent work",
-			Fix:     "hand it to your lead to submit; a project lets units submit agent work with agents.submit: anyone"})
 	}
 	return out
 }
@@ -380,6 +419,9 @@ func (s *Server) farmWords(key, name, project string, code int, err error) field
 			at, m, fix = "tracker", ge.msg+", so trackers are not available on this farm", "leave tracker: out on this farm"
 		}
 		return fieldRefusal{api.FieldError{Path: at, Message: m, Fix: fix}, ge.code}
+	}
+	if errors.As(err, new(leadOnlyError)) {
+		return fieldRefusal{api.FieldError{Path: path, Message: leadOnlyMessage, Fix: leadOnlyFix}, http.StatusForbidden}
 	}
 	var ie identityError
 	if errors.As(err, &ie) {

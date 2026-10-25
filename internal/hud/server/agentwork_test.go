@@ -219,3 +219,56 @@ func TestSubmissionLeadSubmitsAgentWork(t *testing.T) {
 		t.Fatalf("a unit's agent work with agents.submit anyone: %d %+v", code, out)
 	}
 }
+
+// POST /jobs holds a unit to the same rule: an agent-class job, or a job
+// whose pods are blocks, is refused in the same words while agents.submit
+// is lead; a person's is not, nor the unit's ordinary job, nor the unit's
+// agent job once the project says anyone.
+func TestAUnitsAgentJobNeedsALead(t *testing.T) {
+	s := submitFarm(t)
+	ctx := context.Background()
+	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port", UID: "uid-port",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor"}},
+		Spec: c4v1.WorkJobSpec{Class: "graph", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+	if err := s.Client.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/port/0", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "port", JobUID: string(parent.UID), Unit: "0", Grant: "project"}}
+	spec := func(class string, env ...corev1.EnvVar) json.RawMessage {
+		b, _ := json.Marshal(c4v1.WorkJobSpec{Class: class, Params: map[string]string{"frames": "1-2"},
+			Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "registry.example/block", Env: env}}}}})
+		return b
+	}
+	agentJob := spec("agent")
+	blocks := spec("graph", corev1.EnvVar{Name: "C4_AGENT_BLOCK", Value: "1"})
+
+	for name, sp := range map[string]json.RawMessage{"agent": agentJob, "blocks": blocks} {
+		for _, dry := range []bool{true, false} {
+			var refused map[string]string
+			code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit", api.SubmitRequest{Project: "show-a", Name: "child-" + name, Spec: sp, DryRun: dry}, &refused)
+			if code != http.StatusForbidden || refused["error"] != "a worker may not start workers: only a lead submits agent work" ||
+				!strings.Contains(refused["fix"], "agents.submit: anyone") {
+				t.Fatalf("a unit's %s job (dry run %v): %d %v", name, dry, code, refused)
+			}
+		}
+	}
+	var list c4v1.WorkJobList
+	if err := s.Client.List(ctx, &list); err != nil || len(list.Items) != 1 {
+		t.Fatalf("a refused job was made: %d", len(list.Items))
+	}
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Name: "lead-agent", Spec: agentJob}, nil); code != http.StatusCreated {
+		t.Fatalf("a person's agent job: %d", code)
+	}
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit", api.SubmitRequest{Project: "show-a", Name: "child-render", Spec: spec("render")}, nil); code != http.StatusCreated {
+		t.Fatalf("a unit's ordinary job: %d", code)
+	}
+	for i := range s.m.projects {
+		if s.m.projects[i].Name == "show-a" {
+			s.m.projects[i].Spec.Work = &c4v1.ProjectWork{Policy: &c4v1.ProjectPolicy{Values: map[string]string{policy.AgentsSubmit: policy.SubmitAnyone}}}
+		}
+	}
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=unit", api.SubmitRequest{Project: "show-a", Name: "child-agent", Spec: agentJob}, nil); code != http.StatusCreated {
+		t.Fatalf("a unit's agent job with agents.submit anyone: %d", code)
+	}
+}

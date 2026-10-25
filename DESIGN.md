@@ -2145,8 +2145,10 @@ and a sweep planner that spawns trials are all generators.
     - **Only a lead submits agent work.** A worker may not start
       workers: `agents.submit` is `lead` by default, so `POST
       /submissions` refuses a unit's agent job (an agent tool's, or a
-      plan's) at `jobs.<key>` (`403`), dry run or not; a person, a lead's
-      own session among them, is unaffected, and a unit's other work too.
+      plan's) at `jobs.<key>` (`403`), dry run or not, and `POST /jobs`
+      refuses one in the same words (an agent-class job, pods that are
+      blocks, or a graph job naming a unit table); a person, a lead's own
+      session among them, is unaffected, and a unit's other work too.
       A project allows more with `agents.submit: anyone`; `lead` is the
       tighter, so a farm limit of `lead` holds every project to it. The
       check reads the key where the call is checked, so allowing more is

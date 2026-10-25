@@ -537,6 +537,10 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, code, api.SubmitRefused{Error: err.Error(), Reason: gr.reason})
 		return
 	}
+	if errors.As(err, new(leadOnlyError)) {
+		writeJSON(w, code, map[string]string{"error": leadOnlyMessage, "fix": leadOnlyFix})
+		return
+	}
 	if err != nil {
 		fail(w, code, "%s", err.Error())
 		return
@@ -634,6 +638,10 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	ctx := r.Context()
 	if err := s.authorize(ctx, r, v, ns, "create", "workjobs", ""); err != nil {
 		return api.SubmitResponse{}, http.StatusForbidden, unitRefusal(v, err)
+	}
+	if agentSpec(spec) && leadOnly(v, projectObject(m, project)) {
+		// a worker may not start workers, by any door
+		return api.SubmitResponse{}, http.StatusForbidden, leadOnlyError{}
 	}
 
 	// input views become Materializations, one per view
