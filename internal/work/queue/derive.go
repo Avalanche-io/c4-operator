@@ -136,25 +136,37 @@ func unitContainers(j *c4v1.WorkJob, u class.Unit, digestOf map[string]string) [
 	return cs
 }
 
-// egressDenied reports whether a NetworkPolicy in the pod's namespace
-// selects it and allows no egress.
+// egressDenied reports whether the Kubernetes NetworkPolicies in the pod's
+// namespace deny it all egress: at least one egress policy selects it, and
+// none that selects it allows anything (policies add up, so one rule in
+// any of them is a way out). It reads only NetworkPolicy objects: a
+// cluster-wide or CNI-specific policy (Cilium's, an
+// AdminNetworkPolicy) is not seen, and a CNI that does not enforce
+// NetworkPolicy is not detected.
 func (q *Queue) egressDenied(ctx context.Context, ns string, podLabels map[string]string) bool {
 	var l networkingv1.NetworkPolicyList
 	if err := q.Client.List(ctx, &l, client.InNamespace(ns)); err != nil {
 		return false
 	}
+	denied := false
 	for _, np := range l.Items {
 		sel, err := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector)
-		if err != nil || !sel.Matches(labels.Set(podLabels)) || len(np.Spec.Egress) > 0 {
+		if err != nil || !sel.Matches(labels.Set(podLabels)) {
 			continue
 		}
+		egress := len(np.Spec.Egress) > 0
 		for _, t := range np.Spec.PolicyTypes {
-			if t == networkingv1.PolicyTypeEgress {
-				return true
-			}
+			egress = egress || t == networkingv1.PolicyTypeEgress
 		}
+		if !egress {
+			continue
+		}
+		if len(np.Spec.Egress) > 0 {
+			return false
+		}
+		denied = true
 	}
-	return false
+	return denied
 }
 
 // inputViews resolves the views a job mounts: each input's mount path
@@ -269,7 +281,7 @@ func (q *Queue) recordDerivation(ctx context.Context, v *view, idx int, p *corev
 		return
 	}
 	if sealed && !q.egressDenied(ctx, p.Namespace, p.Labels) {
-		sealed, why = false, "no network policy denies the pod egress"
+		sealed, why = false, "its NetworkPolicies allow the pod some egress, or none denies it egress"
 	}
 	declared := process.ParseClass(v.job.Annotations[AnnotationDerivationClass])
 	slots := max(1, u.Slots)

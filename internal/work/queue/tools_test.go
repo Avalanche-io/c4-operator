@@ -8,6 +8,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
+	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -315,5 +316,163 @@ func TestToolJobsRunUnderTheirTool(t *testing.T) {
 	sel, _ := metav1.LabelSelectorAsSelector(&wide.Spec.PodSelector)
 	if sel.Matches(labels.Set(sealed.Labels)) {
 		t.Fatal("the Tool's policy selects a tool job's unit")
+	}
+}
+
+// Every namespace with units denies the unit pods egress by default: a
+// job with no tool reaches nothing, a tool's policy only adds to that, a
+// tool job's unit stays sealed once its job's own policy is gone (the job
+// being deleted), and the queue puts the default back if it is removed.
+func TestUnitsDenyEgressByDefault(t *testing.T) {
+	ns, q, now, _ := graphFarm(t)
+	ctx := context.Background()
+	farmNS := ns + "-farm"
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
+		t.Fatal(err)
+	}
+	q.Namespace = farmNS
+	if err := k8s.Create(ctx, job(ns, "plain", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(4*time.Hour))); err != nil {
+		t.Fatal(err)
+	}
+	tj := job(ns, "fetch-sealed", "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(4*time.Hour))
+	tj.Spec.Tool = &c4v1.WorkTool{Name: "fetch"}
+	if err := k8s.Create(ctx, tj); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+
+	deny := func() networkingv1.NetworkPolicy {
+		t.Helper()
+		var np networkingv1.NetworkPolicy
+		if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: UnitsPolicyName}, &np); err != nil {
+			t.Fatal(err)
+		}
+		return np
+	}
+	np := deny()
+	want := []metav1.LabelSelectorRequirement{{Key: c4v1.LabelJob, Operator: metav1.LabelSelectorOpExists},
+		{Key: c4v1.LabelUnit, Operator: metav1.LabelSelectorOpExists}}
+	if len(np.Spec.PodSelector.MatchLabels) != 0 || len(np.Spec.PodSelector.MatchExpressions) != 2 ||
+		!equality.Semantic.DeepEqual(np.Spec.PodSelector.MatchExpressions, want) ||
+		len(np.Spec.PolicyTypes) != 1 || np.Spec.PolicyTypes[0] != networkingv1.PolicyTypeEgress || len(np.Spec.Egress) != 0 ||
+		len(np.OwnerReferences) != 0 {
+		t.Fatalf("default policy %+v %+v", np.ObjectMeta, np.Spec)
+	}
+	plain := podOfUnit(t, ns, "plain", 0)
+	if sel, _ := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector); !sel.Matches(labels.Set(plain.Labels)) || !q.egressDenied(ctx, ns, plain.Labels) {
+		t.Fatalf("a unit with no tool is not sealed: %v", plain.Labels)
+	}
+	// Not a unit: the default leaves other pods in the namespace alone.
+	if sel, _ := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector); sel.Matches(labels.Set{"app": "asset-db"}) {
+		t.Fatal("the default selects a pod that is not a unit")
+	}
+
+	// The job's own policy goes with the job; its unit is still sealed.
+	sealed := podOfUnit(t, ns, "fetch-sealed", 0)
+	if err := k8s.Delete(ctx, &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: jobToolPolicyName("fetch-sealed")}}); err != nil {
+		t.Fatal(err)
+	}
+	if !q.egressDenied(ctx, ns, sealed.Labels) {
+		t.Fatal("a tool job's unit opened when its job's policy went")
+	}
+
+	// Removed or widened, the default comes back as it was.
+	if err := k8s.Delete(ctx, &np); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if np := deny(); len(np.Spec.Egress) != 0 || len(np.Spec.PodSelector.MatchExpressions) != 2 {
+		t.Fatalf("not put back: %+v", np.Spec)
+	}
+	np = deny()
+	np.Spec.Egress = []networkingv1.NetworkPolicyEgressRule{{}}
+	if err := k8s.Update(ctx, &np); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if np := deny(); len(np.Spec.Egress) != 0 {
+		t.Fatalf("widened default kept: %+v", np.Spec)
+	}
+}
+
+// A policy that allows a unit some egress makes it unsealed, whatever
+// other policy denies it: policies add up.
+func TestEgressDeniedReadsEveryPolicy(t *testing.T) {
+	ns, q, _ := farm(t, "cpu", 1, 1)
+	ctx := context.Background()
+	unit := map[string]string{c4v1.LabelJob: "sh010", c4v1.LabelUnit: "0", c4v1.LabelTool: "fetch"}
+	if q.egressDenied(ctx, ns, unit) {
+		t.Fatal("sealed with no policy at all")
+	}
+	if err := q.ensurePolicy(ctx, unitsPolicy(ns)); err != nil {
+		t.Fatal(err)
+	}
+	if !q.egressDenied(ctx, ns, unit) {
+		t.Fatal("the default did not seal a unit")
+	}
+	// An ingress-only policy changes nothing.
+	ingress := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "ingress-only"},
+		Spec: networkingv1.NetworkPolicySpec{PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeIngress}}}
+	if err := k8s.Create(ctx, ingress); err != nil {
+		t.Fatal(err)
+	}
+	if !q.egressDenied(ctx, ns, unit) {
+		t.Fatal("an ingress policy unsealed a unit")
+	}
+	allow := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "allow-fetch"},
+		Spec: networkingv1.NetworkPolicySpec{PodSelector: metav1.LabelSelector{MatchLabels: map[string]string{c4v1.LabelTool: "fetch"}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress:      []networkingv1.NetworkPolicyEgressRule{{To: []networkingv1.NetworkPolicyPeer{{IPBlock: &networkingv1.IPBlock{CIDR: "203.0.113.0/24"}}}}}}}
+	if err := k8s.Create(ctx, allow); err != nil {
+		t.Fatal(err)
+	}
+	if q.egressDenied(ctx, ns, unit) {
+		t.Fatal("counted sealed while another policy allows it egress")
+	}
+	if !q.egressDenied(ctx, ns, map[string]string{c4v1.LabelJob: "sh010", c4v1.LabelUnit: "1"}) {
+		t.Fatal("a unit the allowing policy does not select is not sealed")
+	}
+}
+
+// Inside a tool job a unit cannot run under another tool: one an
+// expansion names waits, and the job says why; one naming the job's own
+// tool runs under it, as the job's.
+func TestToolJobUnitCannotNameAnotherTool(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	farmNS := ns + "-farm"
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
+		t.Fatal(err)
+	}
+	q.Namespace = farmNS
+	if err := k8s.Create(ctx, &c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "wide"},
+		Spec: c4v1.ToolSpec{Egress: []c4v1.ToolEgress{{CIDR: "0.0.0.0/0"}}}}); err != nil {
+		t.Fatal(err)
+	}
+	j := job(ns, "fetch-graph", "graph", "cpu-"+ns, nil, now.Add(8*time.Hour))
+	j.Spec.Tool = &c4v1.WorkTool{Name: "fetch"}
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	doc := putDoc(t, st, `{"version": 1, "units": [
+		{"name": "same", "reasoning": {"tools": "fetch"}},
+		{"name": "sneak", "reasoning": {"tools": "wide"}}]}`)
+	finishUnit(t, now, ns, "fetch-graph", 0, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	tick(t, q)
+	if hasPod(t, ns, "fetch-graph", 2) {
+		t.Fatal("a tool job's unit ran under another tool")
+	}
+	if c := meta.FindStatusCondition(get(t, ns, "fetch-graph").Status.Conditions, "Tools"); c == nil ||
+		!strings.Contains(c.Message, "names tool wide, but fetch-graph runs under tool fetch") {
+		t.Fatalf("Tools condition %+v", c)
+	}
+	p := podOfUnit(t, ns, "fetch-graph", 1)
+	if p.Labels[c4v1.LabelTool] != "fetch" || p.Labels[c4v1.LabelJobTool] != "true" || !q.egressDenied(ctx, ns, p.Labels) {
+		t.Fatalf("same: labels %v", p.Labels)
+	}
+	var np networkingv1.NetworkPolicy
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "c4-tools-wide"}, &np); err == nil {
+		t.Fatal("the other tool's policy was written")
 	}
 }

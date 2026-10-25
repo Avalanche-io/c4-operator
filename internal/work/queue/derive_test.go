@@ -23,7 +23,9 @@ import (
 const pinned = "busybox@sha256:0000000000000000000000000000000000000000000000000000000000000001"
 
 // derivationFarm has a resolved read-only input and, when sealed, a
-// network policy that denies egress to every pod.
+// network policy that denies egress to every pod; when not, one that
+// allows every pod all egress (beside the queue's default, which denies
+// units egress).
 func derivationFarm(t *testing.T, sealed bool) (string, *Queue, *time.Time) {
 	t.Helper()
 	ns, q, now := farm(t, "cpu", 2, 2)
@@ -40,6 +42,13 @@ func derivationFarm(t *testing.T, sealed bool) (string, *Queue, *time.Time) {
 	if sealed {
 		np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "deny-egress"},
 			Spec: networkingv1.NetworkPolicySpec{PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress}}}
+		if err := k8s.Create(ctx, np); err != nil {
+			t.Fatal(err)
+		}
+	} else {
+		np := &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "allow-egress"},
+			Spec: networkingv1.NetworkPolicySpec{PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+				Egress: []networkingv1.NetworkPolicyEgressRule{{}}}}
 		if err := k8s.Create(ctx, np); err != nil {
 			t.Fatal(err)
 		}
@@ -144,8 +153,8 @@ func TestDerivationVerifiedThenDemoted(t *testing.T) {
 	}
 }
 
-// Without a policy denying egress, an exact declaration reads as
-// validated, and status says why.
+// With a policy allowing egress (whatever else denies it), an exact
+// declaration reads as validated, and status says why.
 func TestUnsealedExactIsValidated(t *testing.T) {
 	ns, q, now := derivationFarm(t, false)
 	if err := k8s.Create(context.Background(), exactJob(ns, "sh302", *now)); err != nil {

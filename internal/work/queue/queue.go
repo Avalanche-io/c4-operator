@@ -110,6 +110,9 @@ type Queue struct {
 	HolderTransfer bool
 	pcReady        bool
 	pcMissing      bool // logged once
+	// unitsSealed is, per namespace this tick, why its units' default
+	// egress policy could not be written (nil: it is in place; tools.go).
+	unitsSealed map[string]error
 	// Namespace is the operator's namespace, where the queue keeps the
 	// pointers to each project's saved calibrations (persist.go). Empty,
 	// or without Stores, calibrations are not saved.
@@ -660,6 +663,10 @@ func (q *Queue) Tick(ctx context.Context) error {
 	for _, j := range jobs.Items {
 		phases[j.Namespace+"/"+j.Name] = j.Status.Phase
 	}
+	// Units reach nothing unless what they run under says so: every
+	// namespace with jobs or units, and every project's, keeps a policy
+	// denying its unit pods egress before a unit is released (tools.go).
+	q.unitsSealed = q.sealNamespaces(ctx, jobs.Items, pods.Items, nsProject)
 
 	seen := map[types.UID]bool{}
 	var views, fviews []*view
@@ -1561,6 +1568,11 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			continue
 		}
 		tools, ok, why := q.toolsReady(ctx, v, idx)
+		if err, checked := q.unitsSealed[v.job.Namespace]; !checked || err != nil {
+			// Never released into a namespace whose units would have
+			// open egress.
+			ok, why = false, unsealedWhy(v.job.Namespace, err)
+		}
 		if !ok {
 			// The job's status says so (condition Tools).
 			v.mem.toolsWait = why
@@ -1612,7 +1624,7 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			recheckPod(pod, v.mem.needs[idx], recheck, secs)
 		}
 		if tools != nil {
-			jobTool := v.mem.plan.Units[idx].Reasoning.Tools == ""
+			jobTool := v.job.Spec.Tool != nil
 			proxy, _ := q.proxyURL(ctx)
 			applyTools(pod, v.job.Name, tools, jobTool, proxy, q.hudURL())
 		}

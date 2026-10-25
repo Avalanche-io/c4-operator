@@ -31,8 +31,11 @@ import (
 // egress proxy (internal/egress, Queue.EgressProxy), which the policy allows
 // and the unit's HTTPS_PROXY and HTTP_PROXY name. A tool job's units
 // (spec.tool) run under its tool the same way, in the job's own policy and
-// with the networks the job names (jobToolReady). Other units run as
-// before.
+// with the networks the job names (jobToolReady); a unit of a tool job
+// cannot name another tool. Under all of these, every namespace with units
+// has a policy denying its unit pods egress (UnitsPolicyName), so a unit
+// reaches only what its tool allows, and a unit with no tool reaches
+// nothing.
 
 // ToolsMount is where a unit's tool view is mounted ($C4_TOOLS).
 const ToolsMount = "/etc/c4/tools"
@@ -167,7 +170,13 @@ func (q *Queue) toolObject(ctx context.Context, ns, name string) (*c4v1.Tool, er
 // (nil for none), and false with why while the unit must wait.
 func (q *Queue) toolsReady(ctx context.Context, v *view, idx int) (*c4v1.Tool, bool, string) {
 	name := v.mem.plan.Units[idx].Reasoning.Tools
-	if name == "" && v.job.Spec.Tool != nil {
+	if jt := v.job.Spec.Tool; jt != nil {
+		// A tool job's units run under its tool alone: a unit (or an
+		// expansion) naming another would reach what that one allows.
+		if name != "" && name != jt.Name {
+			return nil, false, fmt.Sprintf("unit %d names tool %s, but %s runs under tool %s, and a tool job's units run under its tool alone: leave reasoning.tools out",
+				idx, name, v.job.Name, jt.Name)
+		}
 		return q.jobToolReady(ctx, v.job)
 	}
 	if name == "" {
@@ -209,8 +218,10 @@ func jobToolPolicyName(job string) string { return "c4-job-tool-" + job }
 
 // jobToolReady prepares a tool job's units' tool (spec.tool): the networks
 // it declares, as the farm defines them, in the job's own NetworkPolicy,
-// which selects only the job's units and goes with the job. With no
-// network declared the policy allows nothing: the units are sealed. The
+// which selects only the job's units and goes with the job (the
+// namespace's UnitsPolicyName still denies them egress once it is gone).
+// With no network declared the policy allows nothing: the units are
+// sealed. The
 // tool's tree is already one of the job's inputs, at ToolsMount, so
 // nothing is mounted here. It returns the tool as its units see it.
 func (q *Queue) jobToolReady(ctx context.Context, j *c4v1.WorkJob) (*c4v1.Tool, bool, string) {
@@ -335,6 +346,61 @@ func (q *Queue) toolsPolicy(ctx context.Context, ns string, p *c4v1.Tool) (*netw
 			Ports: []networkingv1.NetworkPolicyPort{{Protocol: &udp, Port: &dns}, {Protocol: &tcp, Port: &dns}}})
 	}
 	return np, nil
+}
+
+// UnitsPolicyName is the NetworkPolicy in every namespace with units that
+// denies the unit pods egress. NetworkPolicies add up, so a unit reaches
+// what its tool's policy or its tool job's policy allows and nothing else;
+// a unit with neither, or whose job's policy is gone (a job being
+// deleted), reaches nothing.
+const UnitsPolicyName = "c4-units-deny-egress"
+
+// unitsPolicy is namespace ns's unit egress default: every unit pod (the
+// queue labels each with its job and its unit), egress, no rule.
+func unitsPolicy(ns string) *networkingv1.NetworkPolicy {
+	return &networkingv1.NetworkPolicy{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: UnitsPolicyName,
+		Labels: map[string]string{"app.kubernetes.io/managed-by": "c4-operator"}},
+		Spec: networkingv1.NetworkPolicySpec{
+			PodSelector: metav1.LabelSelector{MatchExpressions: []metav1.LabelSelectorRequirement{
+				{Key: c4v1.LabelJob, Operator: metav1.LabelSelectorOpExists},
+				{Key: c4v1.LabelUnit, Operator: metav1.LabelSelectorOpExists}}},
+			PolicyTypes: []networkingv1.PolicyType{networkingv1.PolicyTypeEgress},
+			Egress:      []networkingv1.NetworkPolicyEgressRule{},
+		}}
+}
+
+// sealNamespaces writes (or puts back) the unit egress default in every
+// namespace with a job or a unit pod, and in every project's namespace,
+// and says per namespace why it could not.
+func (q *Queue) sealNamespaces(ctx context.Context, jobs []c4v1.WorkJob, pods []corev1.Pod, nsProject map[string]string) map[string]error {
+	nss := map[string]bool{}
+	for i := range jobs {
+		nss[jobs[i].Namespace] = true
+	}
+	for i := range pods {
+		nss[pods[i].Namespace] = true
+	}
+	for ns := range nsProject {
+		nss[ns] = true
+	}
+	out := make(map[string]error, len(nss))
+	for ns := range nss {
+		err := q.ensurePolicy(ctx, unitsPolicy(ns))
+		out[ns] = err
+		if err != nil && !apierrors.IsNotFound(err) {
+			q.Log.Error(err, "unit egress policy", "namespace", ns)
+		}
+	}
+	return out
+}
+
+// unsealedWhy is why a unit in ns waits for its namespace's unit egress
+// default.
+func unsealedWhy(ns string, err error) string {
+	if err == nil {
+		return fmt.Sprintf("the policy denying %s's units egress (%s) is not written yet", ns, UnitsPolicyName)
+	}
+	return fmt.Sprintf("the policy denying %s's units egress (%s) cannot be written: %v", ns, UnitsPolicyName, err)
 }
 
 // ensureToolsPolicy makes or updates tool p's NetworkPolicy in ns.
