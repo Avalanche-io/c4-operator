@@ -31,7 +31,7 @@ func hostFarm(t *testing.T, objs ...runtime.Object) *Server {
 	return &Server{Loc: time.UTC, Log: zap.New(zap.WriteTo(&bytes.Buffer{})), m: &model{at: time.Now(), byKey: map[string]*jobRec{}, nsProject: map[string]string{}},
 		Client: fake.NewClientBuilder().WithScheme(sch).WithRuntimeObjects(objs...).Build(),
 		DevViewers: map[string]*api.Viewer{"host1": host("laptop-1"), "host2": host("laptop-2"),
-			"dana": {User: "dana", Projects: []string{}}, "lee": {User: "lee", Projects: []string{}}}}
+			"dana": {User: "dana", Projects: []string{}}, "lee": {User: "lee", Projects: []string{}}}, DevViewersOpen: true}
 }
 
 func hostCall(t *testing.T, s *Server, method, path, as string, body any) (int, map[string]any) {
