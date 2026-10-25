@@ -291,6 +291,7 @@
 | `install-edges` | 2026-10-20 | 2026-10-20 | Install edges: every /metrics refusal names the c4-metrics-reader role, and make image builds from a context of only what the Dockerfile copies, so a Docker without buildx works. Found by the first-run audit. Test: TestOperatorMetricsGuard. |
 | `owner-access` | 2026-10-21 | 2026-10-21 | A unit's job is made in its owner's name only where the owner may make jobs: outside the unit's own job's namespace the API server is asked about the owner by name, and refused in the farm's words otherwise. Found by review of abce0939. Test: TestAUnitsJobNeedsItsOwnersRight. |
 | `deadline-options-twins` | 2026-10-21 | 2026-10-21 | TestDeadlineOptions decides by the plan, not by rounding: comp and crowd were exact twins, so which one a tighter hero made late was a floating-point tie that linux arm64 CI broke the other way; comp now has ten minutes more slack. Passes 10 of 10 on arm64 and amd64. |
+| `enroll-agent` | 2026-10-25 | 2026-10-25 | `c4 farm enroll` refuses inside an agent, before it reads the farm's config, as an install does: an agent that can read a runner's code must not accept the machine for its person. It needs no terminal or `--yes`, since giving the code is the person's act; `up` and `integrate on`, which accept their own runner's offer, have already passed Consent. Test: TestEnroll. |
 
 Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
 c4 pseudo-version, so worktrees need nothing else; to build against a local c4
