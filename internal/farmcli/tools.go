@@ -379,8 +379,12 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	if err != nil {
 		return nil, err
 	}
+	plans, err := submissionPlans(doc, base)
+	if err != nil {
+		return nil, err
+	}
 	var plan api.SubmissionResponse
-	req := api.SubmissionRequest{Submission: body, DryRun: true, Explain: a.Explain}
+	req := api.SubmissionRequest{Submission: body, DryRun: true, Explain: a.Explain, Plans: plans}
 	if err := doChecked(ctx, c, "POST", "/submissions", req, &plan); err != nil {
 		return nil, err
 	}
@@ -428,6 +432,48 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 		o.printf("HUD       %s\n", c.Web(done.Jobs[n-1].Link, nil))
 	}
 	return &done, nil
+}
+
+// submissionPlans are the plan files the submission's jobs name (plan:),
+// read beside the submission and sent as JSON under the path as written:
+// the farm never reads a plan from the tree, and refuses a job whose plan
+// the request does not carry.
+func submissionPlans(doc *submissionDoc, base string) (map[string]json.RawMessage, error) {
+	var jobs map[string]struct {
+		Plan string `json:"plan"`
+	}
+	if json.Unmarshal(doc.vals["jobs"], &jobs) != nil {
+		return nil, nil // not a map of jobs: the farm says what is wrong
+	}
+	keys := make([]string, 0, len(jobs))
+	for k := range jobs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var plans map[string]json.RawMessage
+	for _, k := range keys {
+		p := jobs[k].Plan
+		if p == "" || plans[p] != nil {
+			continue
+		}
+		file := p
+		if !filepath.IsAbs(file) {
+			file = filepath.Join(base, file)
+		}
+		data, err := os.ReadFile(file)
+		if err != nil {
+			return nil, fmt.Errorf("jobs.%s.plan: %w", k, err)
+		}
+		raw, err := schema.ToJSON(data)
+		if err != nil {
+			return nil, fmt.Errorf("jobs.%s.plan: %s is not YAML or JSON: %w", k, p, err)
+		}
+		if plans == nil {
+			plans = map[string]json.RawMessage{}
+		}
+		plans[p] = raw
+	}
+	return plans, nil
 }
 
 // folderTree is a submission's tree from a folder on this machine: its
