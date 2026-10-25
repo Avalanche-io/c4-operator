@@ -428,3 +428,14 @@ func TestSessionsShowTheWorkerTree(t *testing.T) {
 		t.Errorf("the waiting worker:\n%s", out.String())
 	}
 }
+
+// c4-agent's own words for a missing Claude Code are said once, as they
+// are, not under two more prefixes.
+func TestSessionsClaudeNotInstalled(t *testing.T) {
+	bin := filepath.Join(t.TempDir(), "c4-agent")
+	os.WriteFile(bin, []byte("#!/bin/sh\necho \"c4-agent: Claude Code isn't installed here, or isn't on the PATH (C4_AGENT_CLAUDE names it)\" >&2; exit 1\n"), 0o755)
+	if err := Sessions(context.Background(), Out{W: &bytes.Buffer{}}, SessionsArgs{Agent: bin}); err == nil ||
+		err.Error() != "Claude Code isn't installed here, or isn't on the PATH (C4_AGENT_CLAUDE names it)" {
+		t.Errorf("no claude: %v", err)
+	}
+}

@@ -88,6 +88,9 @@ func GetSamples(ctx context.Context, o Out, a SamplesArgs) error {
 		name := "c4-samples-" + version + ".tar.gz"
 		if want == "" {
 			b, err := download(ctx, hc, SamplesBase+"/"+version+"/"+name+".c4", io.Discard, 1<<10)
+			if errors.Is(err, errNoAsset) {
+				return fmt.Errorf("release %s has no sample set attached yet: c4 farm samples load works without it, and --from ARCHIVE takes a set you have", version)
+			}
 			if err != nil {
 				return err
 			}
@@ -124,6 +127,9 @@ func GetSamples(ctx context.Context, o Out, a SamplesArgs) error {
 }
 
 // download GETs a URL into w (or, with limit > 0, returns up to limit bytes).
+// errNoAsset is a release with nothing of that name attached.
+var errNoAsset = errors.New("404 Not Found")
+
 func download(ctx context.Context, hc *http.Client, url string, w io.Writer, limit int64) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
@@ -134,6 +140,9 @@ func download(ctx context.Context, hc *http.Client, url string, w io.Writer, lim
 		return nil, fmt.Errorf("downloading %s: %w", url, err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, fmt.Errorf("downloading %s: %w", url, errNoAsset)
+	}
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("downloading %s: %s", url, resp.Status)
 	}

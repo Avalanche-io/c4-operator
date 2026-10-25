@@ -117,3 +117,18 @@ func TestReleaseFor(t *testing.T) {
 		t.Errorf("no release yet: %v", err)
 	}
 }
+
+// A release with no sample set attached says so in the farm's words, and
+// what works without it, rather than a bare 404.
+func TestGetSamplesMissingSet(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	old := SamplesBase
+	SamplesBase = srv.URL
+	defer func() { SamplesBase = old }()
+	var out bytes.Buffer
+	err := GetSamples(context.Background(), Out{W: &out}, SamplesArgs{Version: "v0.1.0", Dir: t.TempDir()})
+	if err == nil || err.Error() != "release v0.1.0 has no sample set attached yet: c4 farm samples load works without it, and --from ARCHIVE takes a set you have" {
+		t.Errorf("missing set: %v", err)
+	}
+}

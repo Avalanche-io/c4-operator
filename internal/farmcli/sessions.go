@@ -137,7 +137,8 @@ const installClaude = "Claude Code (claude) is not installed on this machine; in
 
 // claudeMissing says an error is Claude Code not being there.
 func claudeMissing(msg string) bool {
-	return strings.Contains(msg, "claude") && (strings.Contains(msg, "executable file not found") || strings.Contains(msg, "not found"))
+	m := strings.ToLower(msg)
+	return strings.Contains(m, "claude") && (strings.Contains(m, "not found") || strings.Contains(m, "isn't installed") || strings.Contains(m, "not installed"))
 }
 
 // readSessions are this machine's sessions: from c4-agent observe, or,
@@ -177,7 +178,11 @@ func readSessions(ctx context.Context, a SessionsArgs) (rows []row, observed boo
 			return rows, true, nil
 		case !strings.Contains(stderr.String(), "unknown command"):
 			msg := strings.TrimPrefix(strings.TrimSpace(stderr.String()), "c4-agent: ")
-			if claudeMissing(msg) {
+			switch {
+			case strings.HasPrefix(msg, "Claude Code "):
+				// c4-agent's own sentence for the person: said once, as it is
+				return nil, false, errors.New(msg)
+			case claudeMissing(msg):
 				return nil, false, errors.New(installClaude)
 			}
 			return nil, false, fmt.Errorf("c4-agent observe: %s", msg)
