@@ -1375,8 +1375,18 @@ cluster, where no NetworkPolicy applies.
 - **A name the farm does not define** is refused when a tool is published
   (`needs.network`: "fetch declares network studio-db, which this farm
   does not define: a farm admin adds it to the c4-networks ConfigMap in
-  c4-system (internal/hud/API.md, Networks)"), and
-  holds a job's units with that reason in its `Tools` condition.
+  c4-system (internal/hud/API.md, Networks)"), and refused again when a
+  job naming it is submitted (`POST /jobs`, `POST /submissions`, a dry run
+  included: 422 with the same words), so a job is not made only to wait.
+  A job made before the network was removed holds its units with that
+  reason in its `Tools` condition.
+- **A unit's job is no wider than the unit.** A job a unit submits, in any
+  namespace, reaches at most the networks its own job's tool declares; a
+  wider one is refused (403: "show-a/agent reaches only model-api, and
+  this job would reach huggingface; submit it as a person, or as a unit
+  whose tool declares it"). A unit whose job has no network submits only
+  sealed jobs. Pools are not bounded this way: they follow the owner's
+  rights and the pools' owners.
 - **A refused request** gets the proxy's 403 naming the line to add: the
   network that allows the host ("add needs: {network: [pypi]} to fetch's
   tool.yaml and publish it again"), or, when no network allows it, that a

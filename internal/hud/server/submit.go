@@ -700,6 +700,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	if replaced != nil {
 		job.Annotations[c4v1.AnnotationReplaces] = replaced.Name
 	}
+	var own *c4v1.WorkJob
 	if u := v.Unit; u != nil {
 		// a unit's job is its job's owner's, never the unit's own: the
 		// runners of that owner run it, and the owner answers for it
@@ -737,6 +738,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		}
 		job.Annotations[c4v1.AnnotationOwner] = owner
 		job.Annotations[c4v1.AnnotationSubmittedByUnit] = schema.UnitRef(u.Namespace, u.Job, u.JobUID, u.Unit)
+		own = &parent
 	}
 	if body.Shot != "" {
 		if errs := validation.IsValidLabelValue(body.Shot); len(errs) > 0 {
@@ -826,6 +828,9 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 			return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("aiUsage: %v", err)
 		}
 		job.Annotations[c4v1.AnnotationAIUsage] = string(raw)
+	}
+	if code, err := s.sealed(ctx, v, &job.Spec, own); err != nil {
+		return api.SubmitResponse{}, code, err
 	}
 
 	out := api.SubmitResponse{OK: true, DryRun: body.DryRun, Namespace: ns, Name: name, Project: project,
