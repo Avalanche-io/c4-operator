@@ -261,23 +261,23 @@ Custody of `renders/sh050-denoised/sh050-denoised.1004.exr`: verified True, comp
 
 | link | signed by | what it vouches for |
 |---|---|---|
-| task | node/c4-onboarding-worker2 | unit 3, attempt 1, of show-a/sh050-denoise-v002 ran on c4-onboarding-worker2 and wrote renders/sh050-denoised/sh050-denoised.1004.exr |
+| task | node/c4-operator-e2e-worker2 | unit 3, attempt 1, of show-a/sh050-denoise-v002 ran on c4-operator-e2e-worker2 and wrote renders/sh050-denoised/sh050-denoised.1004.exr |
 | resolution | component/controller | Materialization show-a/sh050-denoise-v002-from-sh050-render-v002 resolved to view c43g2jhDxTMd... (24 files) from c43g2jhDxTMd..., every object present |
 | job | component/queue | show-a/sh050-render-v002 ended Succeeded with output c43g2jhDxTMd... |
-| tasks | (summary) | 8 of 8 units' task records checked, 8 verified with the node that ran them as signer: node/c4-onboarding-worker (1), node/c4-onboarding-worker2 (2), node/c4-onboarding-worker5 (2), node/c4-onboarding-worker6 (3) |
+| tasks | (summary) | 8 of 8 units' task records checked, 8 verified with the node that ran them as signer: node/c4-operator-e2e-worker (1), node/c4-operator-e2e-worker2 (2), node/c4-operator-e2e-worker5 (2), node/c4-operator-e2e-worker6 (3) |
 | resolution | component/controller | Materialization show-a/p7-plates resolved to view c44CFdGjqsdd... (8 files) from c44CFdGjqsdd..., every object present |
 | ingest | sa/show-a/ingest | ingest of p7-plates as view c44CFdGjqsdd... |
 | job | component/queue | show-a/sh050-denoise-v002 ended Succeeded with output c43V3xJr4tdw... |
 | control | component/hud | workjob:show-a/sh050-denoise-v002: nudge by wrangler via mcp (development mode: not checked) |
 
-Task records were signed by 4 node identities: node/c4-onboarding-worker, node/c4-onboarding-worker2, node/c4-onboarding-worker5, node/c4-onboarding-worker6.
+Task records were signed by 4 node identities: node/c4-operator-e2e-worker, node/c4-operator-e2e-worker2, node/c4-operator-e2e-worker5, node/c4-operator-e2e-worker6.
 C2PA digitalSourceType: the render's frame algorithmicMedia, the denoised frame compositeWithTrainedAlgorithmicMedia.
 
 An agent asking the MCP server (c4_verify_custody, as the wrangler) got the same verdict in 26 ms (one tool call on an open session, from the request to the answer, including the HUD reading and verifying the job's records from the store): verified True, complete True, 8 signers.
 
 The signing CA (Secret `c4-signing-ca` in `c4-signing`, root 3E6624910D8CBEBD...) may be read by the manager: yes; by node daemons: no; by a task's service account: no. Pods mounting a signing secret: 0. Each node daemon's key never leaves its process.
 
-Checked outside the cluster with the root certificate only: the stored record says "verified: task/v1 record signed by https://cccc.io/id/node/c4-onboarding-worker2 at 2026-10-20T00:43:05Z (policy ok)". The same record with its AI use changed to "none" says "rejected: no trusted key signed this record".
+Checked outside the cluster with the root certificate only: the stored record says "verified: task/v1 record signed by https://cccc.io/id/node/c4-operator-e2e-worker2 at 2026-10-20T00:43:05Z (policy ok)". The same record with its AI use changed to "none" says "rejected: no trusted key signed this record".
 
 
 ## P1: overlay views, capture, CSI (2026-10-20T23:41Z, build f5654a3)
