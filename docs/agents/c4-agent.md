@@ -278,6 +278,14 @@ still read every pod, and bind a pending pod of anyone's to its own Node.
 Until the farm binds host pods itself and each runner reads only its own,
 a machine enrolled for one person can see another's work.
 
+**On a local farm, don't give agent units the `c4` tool yet.** A local
+farm's HUD takes its development viewers (`?as=`) from any request that
+reaches it, and unit pods can reach it inside the cluster. A unit could
+then act as the farm's owner: answer its own job's gate, grant, or bind,
+each recorded as that person. Until development viewers need the
+installer's token, which `c4 farm up` will keep in your own `~/.c4/`,
+run agent work on a local farm without a `c4` tool grant.
+
 **Enrolling the machine, once.** With the farm admin's access (the local
 farm's own, which `c4 farm up` uses), `c4-agent enroll --owner <person>`
 makes what the runner needs, and running it again makes nothing new:
