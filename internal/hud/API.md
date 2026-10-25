@@ -117,7 +117,9 @@ The farm at a glance. Also delivered by the event stream.
   incidents: [ { id, needsYou, title, detail?, count, countOf?, jobs: [ "ns/name" ], since, state,
                  checklist: [ { label, act?, href?, action?, job?, units?, done? } ] } ],
   observed?: [ { session, name?, kind, running, word, needsYou?, cwd?, startedAt?, lastActive?, turnAge?,
-                 backgroundOpen, usage?, limit?, transcript?, onFarm, machine, node, owners[], observedAt, postedAt } ],
+                 backgroundOpen, usage?, limit?, transcript?, onFarm, turnsTotal?, turn?, turnLimit?, parent?,
+                 parentClaimed?, description?, waitsOn?, agentType?, model?, depth?, workersDone?, account?, weighted?,
+                 machine, node, owners[], observedAt, postedAt } ],
   tiers: { tiers: [ { name, hitRate, requestsIn, upstreamRequests, bytesServed, shedRate, inflightFills } ],
            fanIn: { requesters, nodeRequests, peerRequests, regionalRequests, storeRequests },
            publishP50, publishP95, captureP50 },
@@ -203,7 +205,8 @@ the viewer's scope (1 is next).
              withdrawn?: { by, why, at, record? } } ],
   asks?: [ { id, from, to, text, at, answer?, cannot?, answered?, wait?, needs? } ],
   branches?: [ { unit, name?, repo, branch, base, head?, commits } ],
-  acks?: [ { kind, units, actor, assignee?, note?, at, record? } ]
+  acks?: [ { kind, units, actor, assignee?, note?, at, record? } ],
+  observed?, label?, account?, turnsTotal?
 }
 ```
 
@@ -713,7 +716,9 @@ A host runner's report of the Claude Code sessions on its machine,
 
 ```
 { machine, observedAt, owners: [ ... ], sessions: [ { session, name?, kind, running, word, needsYou?, cwd?, startedAt?,
-                                     lastActive?, turnAge?, backgroundOpen, usage?, limit?, transcript?, onFarm } ] }
+                                     lastActive?, turnAge?, backgroundOpen, usage?, limit?, transcript?, onFarm,
+                                     turns?: [ { index, start, end, tokens, weighted, state } ], turnsTotal?, turn?,
+                                     parent?, waitsOn?, account?, ... } ] }
 ```
 
 - Only the node's own runner may post: the service account
@@ -740,6 +745,48 @@ A host runner's report of the Claude Code sessions on its machine,
   "in use outside the queue", not free. It is a bare count, shown to
   anyone who sees the node, and never slots: the queue does not read it,
   so a person's own sessions never make the farm refuse their queued work.
+- A session's `turns` (its latest 200, oldest first, of `turnsTotal`) are
+  read on post but not repeated in the snapshot's rows: its lead entry
+  carries them.
+
+### Lead entries
+
+Each observed session (any row but a worker, `kind` `subagent` or
+`teammate`) is also one entry in the snapshot's `jobs`, drawn as the
+queue draws any job: `driver` and `class` `lead`, `observed: true`,
+`namespace` `observed:<node>` (a colon no Kubernetes namespace has, so no
+farm job shares the key), `name` the session, `label` its name, `account`
+its sign-in's opaque label (sessions that share it share one usage
+limit), `owner` the viewer, no project. Entries come after the farm's
+jobs, with `rank` 0 and no deadline: never ranked, planned or counted in
+incidents, and the queue does not read them. They have the observed rows'
+visibility exactly: the runner's owners see them, no one else.
+
+- Its turns are its frames. `GET /jobs/observed:<node>/<session>` answers
+  the job page's shape: `axis: { kind: turn, start, step: 1 }`, `start`
+  the first listed turn's number; groups `{ key: turn, generator: true,
+  spans: [work] }`, one unit per turn, and `{ key: work, parent: turn,
+  perBlock: true, sparse: true }`, one unit per worker at `pos` = the
+  worker's `turn` - `start` (a nested worker in its starter's row; one
+  started before the listed turns, or by an unknown call, at the nearest
+  listed row). Anyone who does not see the session gets 404.
+- States are the queue's words: a done turn `succeeded`, the turn in
+  flight `running`, a turn that ended on a call with no result `needs`
+  (its person's prompt), `waits` (on its lead) or `failed` (the session
+  stopped on an error). A worker: done `succeeded`, failed `failed`,
+  working `running`, waiting on its person `needs`, on its lead or idle
+  `waits`, stopped `held`. The phase is `Running` while the session is up,
+  `Queued` at its usage limit, else `Succeeded` or `Failed`.
+- The turns before the listed ones count in `units.total` and
+  `units.succeeded`, and `turnsTotal` is the session's turns in all, so a
+  session of 289 turns reads 289, not 200.
+- Turns to come exist only under a turn limit (`turnLimit` on the row;
+  observing reports none yet): then they are `planned`, the first
+  `generates` how many, and the ETA is the turns left at the measured time
+  per turn (p90 a sixth longer), after the reset when a usage limit holds
+  the session. With no limit there is none: `noEta`, and the HUD reads "N
+  turns so far". A session at its usage limit says in `estimate.message`
+  when the limit resets.
 
 ## GET /nodes/{node}/pods
 

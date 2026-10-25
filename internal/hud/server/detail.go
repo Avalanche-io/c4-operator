@@ -52,6 +52,13 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) (*model, *jobRec, *
 }
 
 func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.PathValue("ns"), observedNS) {
+		// an observed session's lead entry, not a WorkJob
+		if v := s.withViewer(w, r); v != nil {
+			s.handleObservedJob(w, r, v)
+		}
+		return
+	}
 	m, rec, _ := s.job(w, r)
 	if rec == nil {
 		return

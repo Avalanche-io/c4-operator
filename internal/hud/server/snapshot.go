@@ -196,7 +196,18 @@ func (s *Server) snapshot(m *model, v *api.Viewer) *api.Snapshot {
 	}
 	sort.Slice(snap.Usage.GPUHours, func(a, b int) bool { return snap.Usage.GPUHours[a].Project < snap.Usage.GPUHours[b].Project })
 	snap.Incidents = incidents(m, v, snap.Jobs)
+	// The viewer's own observed sessions, each also a lead entry among the
+	// jobs. They go in after the run order is ranked and the incidents are
+	// grouped, so neither counts them; they are drawn at the snapshot's
+	// time, and their turns travel on the entry's page, not again in every
+	// snapshot.
 	snap.Observed = s.observedSessions(m, v, time.Now())
+	for _, l := range s.observedLeads(snap.Observed, v, m.at) {
+		snap.Jobs = append(snap.Jobs, l.sum)
+	}
+	for i := range snap.Observed {
+		snap.Observed[i].Turns = nil
+	}
 	return snap
 }
 

@@ -130,12 +130,50 @@ type ObservedSession struct {
 	Limit          json.RawMessage `json:"limit,omitempty"`
 	Transcript     string          `json:"transcript,omitempty"`
 	// OnFarm: a member C4 runs (registered with c4-agent).
-	OnFarm     bool      `json:"onFarm"`
+	OnFarm bool `json:"onFarm"`
+	// Turns are a session's latest turns (at most 200, oldest first) of
+	// TurnsTotal, its frames of work; Turn, on a worker's row, is the
+	// turn of its starter's that started it. The snapshot's rows leave
+	// Turns out: the session's lead entry in jobs carries them.
+	Turns      []ObservedTurn `json:"turns,omitempty"`
+	TurnsTotal int            `json:"turnsTotal,omitempty"`
+	Turn       int            `json:"turn,omitempty"`
+	// TurnLimit caps a session's turns, when something it runs under
+	// (a workflow's lane) says so. Observing reads none yet; with one,
+	// the lead entry plans the turns to come and gives an ETA.
+	TurnLimit int `json:"turnLimit,omitempty"`
+	// Parent, on a worker's row or a background session's, is the session
+	// or worker that started it (ParentClaimed: matched, not recorded);
+	// WaitsOn is lead or person while a worker waits on one of them.
+	Parent        string `json:"parent,omitempty"`
+	ParentClaimed bool   `json:"parentClaimed,omitempty"`
+	Description   string `json:"description,omitempty"`
+	WaitsOn       string `json:"waitsOn,omitempty"`
+	AgentType     string `json:"agentType,omitempty"`
+	Model         string `json:"model,omitempty"`
+	Depth         int    `json:"depth,omitempty"`
+	WorkersDone   int    `json:"workersDone,omitempty"`
+	// Account is an opaque label of the sign-in a session runs under:
+	// sessions that share it share one usage limit.
+	Account    string    `json:"account,omitempty"`
+	Weighted   float64   `json:"weighted,omitempty"`
 	Machine    string    `json:"machine"`
 	Node       string    `json:"node"`
 	Owners     []string  `json:"owners"`
 	ObservedAt time.Time `json:"observedAt"`
 	PostedAt   time.Time `json:"postedAt"`
+}
+
+// ObservedTurn is one turn of an observed session, from the record that
+// started it to its last, with what it used. State is done, running (the
+// session works) or waiting (it ended on a call with no result).
+type ObservedTurn struct {
+	Index    int       `json:"index"`
+	Start    time.Time `json:"start"`
+	End      time.Time `json:"end"`
+	Tokens   int64     `json:"tokens"`
+	Weighted float64   `json:"weighted"`
+	State    string    `json:"state"`
 }
 
 // ObservedReport is POST /nodes/{node}/observed: a host runner's report of
@@ -661,6 +699,16 @@ type Job struct {
 	// their commits are the units' output, in the repository of the
 	// machine that ran them.
 	Branches []UnitBranch `json:"branches,omitempty"`
+	// Observed marks a lead entry: a Claude Code session one of the
+	// viewer's machines reports, drawn as a job whose turns are its frames
+	// (driver lead). It is shown only to the runner's owners and is never
+	// queued, ranked or planned. Label is the session's name, Account its
+	// sign-in's opaque label, and TurnsTotal its turns in all, those
+	// before the listed ones included.
+	Observed   bool   `json:"observed,omitempty"`
+	Label      string `json:"label,omitempty"`
+	Account    string `json:"account,omitempty"`
+	TurnsTotal int    `json:"turnsTotal,omitempty"`
 }
 
 // Ask is a question one unit asked another (or a wait unit asked the unit
