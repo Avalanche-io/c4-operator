@@ -1113,4 +1113,6 @@ type HostPodJob struct {
 	UID   string `json:"uid"`
 	Owner string `json:"owner"`
 	Grant string `json:"grant,omitempty"`
+	// Project is the project of the pod's namespace.
+	Project string `json:"project,omitempty"`
 }

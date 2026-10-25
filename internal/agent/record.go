@@ -9,8 +9,6 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
 
 	"github.com/Avalanche-io/c4"
 
@@ -108,27 +106,26 @@ func (r *Runner) chainOf(ctx context.Context, p *corev1.Pod) *schema.Chain {
 		using = schema.Credential{SignIn: dep, HolderSubject: "unknown"}
 	}
 	on := []schema.Deployment{{Deployment: dep, Owner: holder}}
-	var j c4v1.WorkJob
-	ref := metav1.GetControllerOf(p)
-	if ref == nil || ref.Kind != "WorkJob" || r.Client.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &j) != nil || j.UID != ref.UID {
+	j, why, err := r.jobOf(ctx, p)
+	if err != nil || why != "" {
 		return &schema.Chain{Act: "build", By: schema.Actor{Deployment: dep, Grade: schema.GradeDirect},
 			For:   schema.For{Subject: "pod " + p.Namespace + "/" + p.Name + ", of no job this runner can read", Grade: schema.GradeClaimed},
 			Using: []schema.Credential{using}, On: on, Gap: "the pod is not a unit of a job this runner can read"}
 	}
-	owner := j.Annotations[c4v1.AnnotationOwner]
+	owner, job := j.Owner, p.Namespace+"/"+j.Name
 	c := &schema.Chain{
 		Act:   "build",
-		By:    schema.Actor{Unit: schema.UnitRef(j.Namespace, j.Name, string(j.UID), p.Labels[c4v1.LabelUnit]), Agent: memberOf(p), Grade: schema.GradeDirect},
+		By:    schema.Actor{Unit: schema.UnitRef(p.Namespace, j.Name, j.UID, p.Labels[c4v1.LabelUnit]), Agent: memberOf(p), Grade: schema.GradeDirect},
 		For:   schema.For{Party: owner, Grade: schema.GradeDirect},
-		Under: []schema.Delegation{{Job: j.Namespace + "/" + j.Name, From: owner}},
+		Under: []schema.Delegation{{Job: job, From: owner, Grant: j.Grant}},
 		Using: []schema.Credential{using},
 		On:    on,
 	}
 	switch {
 	case owner == "":
-		c.For = schema.For{Subject: "no owner recorded on job " + j.Namespace + "/" + j.Name, Grade: schema.GradeClaimed}
-		c.Under = []schema.Delegation{{Job: j.Namespace + "/" + j.Name}}
-		c.Gap = "job " + j.Namespace + "/" + j.Name + " has no owner"
+		c.For = schema.For{Subject: "no owner recorded on job " + job, Grade: schema.GradeClaimed}
+		c.Under = []schema.Delegation{{Job: job}}
+		c.Gap = "job " + job + " has no owner"
 	default:
 		c.Gap = "deployment " + dep + " has no binding"
 	}
@@ -155,14 +152,14 @@ func (r *Runner) recordEnd(ctx context.Context, p *corev1.Pod) {
 	if r.Signer == nil {
 		return
 	}
-	var fresh corev1.Pod // the annotations the runner wrote since p was read
-	if err := r.Client.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: p.Name}, &fresh); err != nil || fresh.UID != p.UID {
+	fresh, ok := r.freshPod(ctx, p) // the annotations the runner wrote since p was read
+	if !ok {
 		return
 	}
 	if fresh.Annotations[c4v1.AnnotationOutputProvenance] != "" {
 		return
 	}
-	id, err := r.signRecord(ctx, &fresh, r.now())
+	id, err := r.signRecord(ctx, fresh, r.now())
 	if err != nil {
 		r.logf("%s/%s: task record: %v", p.Namespace, p.Name, err)
 		return
@@ -170,7 +167,7 @@ func (r *Runner) recordEnd(ctx context.Context, p *corev1.Pod) {
 	if id == "" {
 		return
 	}
-	if err := r.annotate(ctx, &fresh, map[string]string{c4v1.AnnotationOutputProvenance: id}); err != nil {
+	if err := r.annotate(ctx, fresh, map[string]string{c4v1.AnnotationOutputProvenance: id}); err != nil {
 		r.logf("%s/%s: task record %s: %v", p.Namespace, p.Name, id, err)
 		return
 	}

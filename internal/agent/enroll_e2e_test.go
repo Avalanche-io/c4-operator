@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
@@ -120,9 +122,25 @@ func TestEnrollAMachine(t *testing.T) {
 	if err := hc.Get(ctx, types.NamespacedName{Name: "agent-enroll"}, &c4v1.Pool{}); !apierrors.IsForbidden(err) {
 		t.Errorf("the machine's account reads pools: %v", err)
 	}
+	// it reads no pod from the API server: only its own, through the HUD
+	if err := hc.List(ctx, &corev1.PodList{}); !apierrors.IsForbidden(err) {
+		t.Errorf("the machine's account lists pods: %v", err)
+	}
+	if err := hc.Get(ctx, types.NamespacedName{Namespace: "default", Name: "anyone"}, &corev1.Pod{}); !apierrors.IsForbidden(err) {
+		t.Errorf("the machine's account gets a pod: %v", err)
+	}
+	hud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/nodes/"+node+"/pods" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Write([]byte(`{"node":"` + node + `","pods":[]}`))
+	}))
+	defer hud.Close()
 	now := time.Now()
 	h := agent.New(&agent.Store{Dir: home}, &fake{active: map[string]bool{}})
 	r := &agent.Runner{Client: hc, Harness: h, Node: node, Labels: pool.Spec.NodeSelector, Owners: []string{"sam"}, Slots: 2,
+		PodsThroughHUD: true, HUD: hud.URL, HUDToken: func() string { return "tok" },
 		Tokens: e.Tokens, Now: func() time.Time { return now }, Logf: t.Logf}
 	if err := r.Tick(ctx); err != nil {
 		t.Fatal(err)

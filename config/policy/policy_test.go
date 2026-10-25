@@ -15,6 +15,7 @@ import (
 	coordv1 "k8s.io/api/coordination/v1"
 	corev1 "k8s.io/api/core/v1"
 	rbacv1 "k8s.io/api/rbac/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -416,7 +417,9 @@ func TestHostRunnerWrites(t *testing.T) {
 	if err := bind("w1"); err == nil {
 		t.Error("the runner bound a pod to another node")
 	}
-	if err := bind("laptop-1"); err != nil {
+	// the queue creates host pods bound: a runner binds nothing, not even
+	// to itself
+	if err := bind("laptop-1"); !apierrors.IsForbidden(err) {
 		t.Errorf("binding to itself: %v", err)
 	}
 

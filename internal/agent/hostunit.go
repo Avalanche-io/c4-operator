@@ -326,6 +326,12 @@ func (r *Runner) projectOf(ctx context.Context, ns string) (string, error) {
 	if r.DocsProject != "" {
 		return r.DocsProject, nil
 	}
+	if r.readsHUD() {
+		if p := r.nsProject[ns]; p != "" {
+			return p, nil
+		}
+		return "namespace/" + ns, nil
+	}
 	var ps c4v1.ProjectList
 	if err := r.Client.List(ctx, &ps); err != nil {
 		return "", fmt.Errorf("the project of namespace %s: %w (set --store-project)", ns, err)

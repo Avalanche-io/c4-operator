@@ -7,11 +7,6 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
-	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/types"
-
-	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 )
 
 // refuses says why p may not run on this runner, or "" if it may: the
@@ -38,22 +33,11 @@ func (r *Runner) ownerCheck(ctx context.Context, p *corev1.Pod) (string, error) 
 	if len(r.Owners) == 0 {
 		return "this runner runs no one's work: start it with --owner", nil
 	}
-	ref := metav1.GetControllerOf(p)
-	if ref == nil || ref.Kind != "WorkJob" || ref.APIVersion != c4v1.GroupVersion.String() {
-		return "the pod is not a unit of a WorkJob", nil
+	j, why, err := r.jobOf(ctx, p)
+	if err != nil || why != "" {
+		return why, err
 	}
-	var j c4v1.WorkJob
-	err := r.Client.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &j)
-	if apierrors.IsNotFound(err) {
-		return fmt.Sprintf("its job %s/%s does not exist", p.Namespace, ref.Name), nil
-	}
-	if err != nil {
-		return "", fmt.Errorf("its job %s/%s: %w", p.Namespace, ref.Name, err)
-	}
-	if j.UID != ref.UID {
-		return fmt.Sprintf("its controller reference names an earlier job %s/%s", p.Namespace, ref.Name), nil
-	}
-	owner := j.Annotations[c4v1.AnnotationOwner]
+	owner := j.Owner
 	if slices.Contains(r.Owners, owner) {
 		return "", nil
 	}

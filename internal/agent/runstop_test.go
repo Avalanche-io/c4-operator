@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -109,5 +110,58 @@ func TestRunnerSaysItIsNotEnrolled(t *testing.T) {
 	r.offerTick(context.Background())
 	if len(logs) != 3 || !strings.Contains(logs[2], "is enrolled") || !r.offerDone || posts != 0 {
 		t.Fatalf("after enrolment: %q, %d posts", logs, posts)
+	}
+}
+
+// An enrolled runner reads its pods only through the HUD: it lists no pod
+// and reads no job from the API server, and judges each pod by the job the
+// HUD names with it, refusing another owner's.
+func TestRunnerReadsItsPodsThroughTheHUD(t *testing.T) {
+	e := newEnv(t)
+	yes := true
+	pod := func(name, job, uid string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: name, UID: types.UID("uid-" + name), Labels: map[string]string{c4v1.LabelJob: job},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: job, UID: types.UID(uid), Controller: &yes}}},
+			Spec: corev1.PodSpec{NodeName: "laptop-1", Containers: []corev1.Container{{Name: "member", Image: "c4-agent",
+				Env: []corev1.EnvVar{{Name: "C4_AGENT_MEMBER", Value: "lead"}}}}},
+			Status: corev1.PodStatus{Phase: corev1.PodPending}}
+	}
+	theirs := pod("theirs-0", "theirs", "u-theirs")
+	hud := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := json.Marshal(theirs)
+		fmt.Fprintf(w, `{"node":"laptop-1","pods":[{"pod":%s,"job":{"name":"theirs","uid":"u-theirs","owner":"ivo","project":"show-a"}}]}`, raw)
+	}))
+	defer hud.Close()
+	reads := 0
+	c := fake.NewClientBuilder().WithScheme(runnerScheme(t)).WithObjects(theirs.DeepCopy()).WithStatusSubresource(&corev1.Pod{}).WithInterceptorFuncs(interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*corev1.PodList); ok {
+				reads++
+			}
+			return c.List(ctx, list, opts...)
+		},
+		Get: func(ctx context.Context, c client.WithWatch, key client.ObjectKey, obj client.Object, opts ...client.GetOption) error {
+			switch obj.(type) {
+			case *c4v1.WorkJob, *corev1.Pod:
+				reads++
+			}
+			return c.Get(ctx, key, obj, opts...)
+		},
+	}).Build()
+	r := &Runner{Client: c, Harness: e.h, Node: "laptop-1", Labels: map[string]string{LabelHost: "laptop-1"}, Owners: []string{"noor"}, Slots: 2,
+		PodsThroughHUD: true, HUD: hud.URL, HUDToken: func() string { return "tok" }, Logf: t.Logf}
+	if err := r.Tick(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if reads != 0 {
+		t.Errorf("%d pod or job reads from the API server", reads)
+	}
+	var got corev1.Pod
+	c.Get(context.Background(), types.NamespacedName{Namespace: "show-a", Name: "theirs-0"}, &got)
+	if got.Status.Phase != corev1.PodFailed || got.Status.Reason != "NotTheOwner" || !strings.Contains(got.Status.Message, "is ivo's") {
+		t.Fatalf("theirs: %s %s %q", got.Status.Phase, got.Status.Reason, got.Status.Message)
+	}
+	if p, err := r.projectOf(context.Background(), "show-a"); err != nil || p != "show-a" {
+		t.Errorf("project %q %v", p, err)
 	}
 }

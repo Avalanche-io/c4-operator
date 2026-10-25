@@ -14,27 +14,26 @@ kind: ClusterRole
 metadata:
   name: c4-host-runner
 rules:
+# its own Node only (the node policy holds every write to the Node named
+# for its account); it never lists or watches the farm's machines
 - apiGroups: [""]
   resources: [nodes]
-  verbs: [get, list, watch, create, patch]
+  verbs: [get, create, patch]
 - apiGroups: [""]
   resources: [nodes/status]
   verbs: [patch]
+# its own pods, which it reads only through the HUD (GET
+# /api/v1/nodes/<node>/pods): it may not get, list or watch any pod here,
+# so its token reads nothing of anyone else's work, nor bind one (the
+# queue creates host pods bound). patch and delete are held by the pod
+# policy to pods bound to its Node; delete only finishes the deletion of
+# a pod the farm is already deleting, as a kubelet does.
 - apiGroups: [""]
   resources: [pods]
-  # delete: finishing the deletion of a pod the farm is deleting (the
-  # policy allows nothing else), as a kubelet does when its grace ends
-  verbs: [get, list, watch, patch, delete]
+  verbs: [patch, delete]
 - apiGroups: [""]
   resources: [pods/status]
   verbs: [patch]
-- apiGroups: [""]
-  resources: [pods/binding]
-  verbs: [create]
-- apiGroups: [c4.avalanche.io]
-  # read only: whose job a pod belongs to, from the job itself
-  resources: [workjobs]
-  verbs: [get, list, watch]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding

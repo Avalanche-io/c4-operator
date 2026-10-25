@@ -36,12 +36,13 @@ func unitOf(j *c4v1.WorkJob) []metav1.OwnerReference {
 	return []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: j.Name, UID: j.UID, Controller: &yes}}
 }
 
-// TestRunnerRunsOnlyItsOwnersJobs: a host runner binds a member pod only
-// when the WorkJob controlling it is its owner's, read from the job, not
-// the pod. A pod of another owner's job is never bound; one bound to the
-// runner's node by someone else fails NotTheOwner, as do a pod of no job
-// and one whose reference names an earlier job of the same name. The pod's
-// own owner annotation counts for nothing.
+// TestRunnerRunsOnlyItsOwnersJobs: a host runner runs a member pod bound
+// to its Node (the queue creates host pods bound) only when the WorkJob
+// controlling it is its owner's, read from the job, not the pod. Any other
+// pod bound to its Node fails NotTheOwner, as do a pod of no job and one
+// whose reference names an earlier job of the same name; a pod bound to no
+// node is not the runner's, and it binds nothing. The pod's own owner
+// annotation counts for nothing.
 func TestRunnerRunsOnlyItsOwnersJobs(t *testing.T) {
 	if k8s == nil {
 		t.Skip("no envtest binaries (make envtest)")
@@ -82,7 +83,7 @@ func TestRunnerRunsOnlyItsOwnersJobs(t *testing.T) {
 		}
 		return p
 	}
-	pod("mine-0", "", unitOf(mine))
+	pod("mine-0", host, unitOf(mine)) // the queue creates host pods bound
 	pod("theirs-0", "", unitOf(theirs))
 	pod("theirs-bound", host, unitOf(theirs))
 	pod("loose", host, nil)
@@ -98,11 +99,12 @@ func TestRunnerRunsOnlyItsOwnersJobs(t *testing.T) {
 		}
 		return &p
 	}
-	if p := get("mine-0"); p.Spec.NodeName != host {
-		t.Errorf("the owner's pod was not bound: %q", p.Spec.NodeName)
+	if p := get("mine-0"); p.Status.Reason == "NotTheOwner" {
+		t.Errorf("the owner's pod was refused: %s", p.Status.Message)
 	}
-	if p := get("theirs-0"); p.Spec.NodeName != "" {
-		t.Errorf("another owner's pod was bound to %s", p.Spec.NodeName)
+	// a pod bound to no node is not this runner's: it binds nothing
+	if p := get("theirs-0"); p.Spec.NodeName != "" || p.Status.Phase != corev1.PodPending {
+		t.Errorf("an unbound pod was touched: node %q, %s", p.Spec.NodeName, p.Status.Phase)
 	}
 	for name, want := range map[string]string{
 		"theirs-bound": "job " + ns + "/theirs is ivo's; this runner runs only the jobs of noor",
@@ -114,11 +116,11 @@ func TestRunnerRunsOnlyItsOwnersJobs(t *testing.T) {
 			t.Errorf("%s: %s %s %q, want Failed NotTheOwner %q", name, p.Status.Phase, p.Status.Reason, p.Status.Message, want)
 		}
 	}
-	// a pod refused before binding is logged once, not every tick
+	// a refused pod is failed once, then left alone
 	r.Tick(ctx)
 	n := 0
 	for _, l := range logs {
-		if strings.HasPrefix(l, "not binding "+ns+"/theirs-0") {
+		if strings.HasPrefix(l, "refusing "+ns+"/theirs-bound") {
 			n++
 		}
 	}

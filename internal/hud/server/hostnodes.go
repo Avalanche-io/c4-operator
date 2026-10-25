@@ -83,10 +83,18 @@ func (s *Server) handleHostPods(w http.ResponseWriter, r *http.Request) {
 		if ref := metav1.GetControllerOf(p); ref != nil && ref.Kind == "WorkJob" {
 			var j c4v1.WorkJob
 			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &j); err == nil && j.UID == ref.UID {
-				hp.Job = &api.HostPodJob{Name: j.Name, UID: string(j.UID), Owner: j.Annotations[c4v1.AnnotationOwner], Grant: j.Annotations[c4v1.AnnotationGrant]}
+				hp.Job = &api.HostPodJob{Name: j.Name, UID: string(j.UID), Owner: j.Annotations[c4v1.AnnotationOwner], Grant: j.Annotations[c4v1.AnnotationGrant], Project: projectOfNS(s.current(), p.Namespace)}
 			}
 		}
 		out.Pods = append(out.Pods, hp)
 	}
 	writeJSON(w, http.StatusOK, out)
+}
+
+// projectOfNS is the project listing a namespace ("" for none).
+func projectOfNS(m *model, ns string) string {
+	if m == nil {
+		return ""
+	}
+	return m.nsProject[ns]
 }

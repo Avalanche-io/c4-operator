@@ -271,13 +271,15 @@ any others that checkpoint:
 `c4-agent runner` is the other half, on the machine where the members'
 sessions live. It is a host runner.
 
-**On a farm with more than one person, keep host runners to one person's
-own machines for now.** Every write a host runner makes is held to its own
-machine (its Node, its Lease, the pods bound to it), and the farm creates
-each host pod already bound to a machine that runs its owner's work, so
-no pod waits for a runner to claim it. But a host runner can still read
-every pod: until each runner reads only its own, a machine enrolled for
-one person can see another's work.
+**What a host runner can see and do.** Every write it makes is held to its
+own machine: its Node, its Lease, the pods bound to it. The farm creates
+each host pod already bound to a machine that runs its owner's work, so a
+runner binds nothing. An enrolled runner reads its pods only through the
+HUD (`GET /api/v1/nodes/<node>/pods`), each with its job's owner, UID,
+grant and project. Its own token may not get, list or watch any pod,
+WorkJob or other Node, so a machine enrolled for one person reads nothing
+of anyone else's work. A runner started without a HUD reads the API server
+instead, which only a development farm's wider access allows.
 
 **Whose work a machine runs** is its Node's `c4.avalanche.io/node-owners`
 (a JSON list of names), which only the HUD writes, never the runner. A
@@ -340,8 +342,8 @@ exit status 78 and "this machine's enrollment has ended: enroll it again
 - It registers a Node for the machine, labeled `c4.avalanche.io/host=<node>`
   and tainted `c4.avalanche.io/host-runner` so only agent pods land there.
   It keeps the Node and its Lease fresh.
-- It runs the member pods the farm creates on its Node (an unbound one
-  whose nodeSelector matches the Node, from an older farm, it binds). When a pod
+- It runs only the member pods the farm creates bound to its Node, and
+  binds none. When a pod
   starts, it resumes the member's session with `c4-agent resume` (never a
   fresh one; a running member is adopted, not resumed twice). Then it
   reports the pod Running, with the member's epoch.
@@ -438,8 +440,8 @@ stop:
 The sessions run as the machine's own Claude Code sessions, under their
 holder's own sign-in, so no credential leaves the machine. So a runner
 runs only its owners' work:
-- `c4-agent runner --owner USER` (repeat for more; required) binds and runs
-  a pod only if the WorkJob that controls it is owned by one of them. It
+- `c4-agent runner --owner USER` (repeat for more; required) runs a pod
+  only if the WorkJob that controls it is owned by one of them. It
   reads the owner from the job, matched by the UID in the pod's controller
   reference, never from the pod. Anything else bound to its Node fails
   with reason `NotTheOwner`.

@@ -530,8 +530,10 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 			b, _ := os.ReadFile(path)
 			return strings.TrimSpace(string(b))
 		}
-		// an enrolled machine offers itself until its holder enrolls it
+		// an enrolled machine says until its holder enrolls it, and reads
+		// its pods only through the HUD
 		r.Offer = isEnrolled && tokens != ""
+		r.PodsThroughHUD = isEnrolled && tokens != ""
 	}
 	if *observe {
 		if *hud == "" {

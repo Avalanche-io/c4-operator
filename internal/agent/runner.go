@@ -15,7 +15,6 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -91,9 +90,15 @@ type Runner struct {
 	// run in the CLI's default one.
 	BlocksEnv, EnvSources string
 	stopping              bool
-	trustAsked            bool
-	baseEnv               string
-	blockEnvs             map[types.UID]string
+	// PodsThroughHUD has an enrolled runner read its pods through the HUD
+	// (podsource.go), never from the API server. jobs and nsProject are
+	// what the HUD said of each pod's job.
+	PodsThroughHUD bool
+	jobs           map[types.UID]podJob
+	nsProject      map[string]string
+	trustAsked     bool
+	baseEnv        string
+	blockEnvs      map[types.UID]string
 	// UnitBin is c4-unit, for the waits the runner opens for a block
 	// (default c4-unit on the PATH).
 	UnitBin string
@@ -269,35 +274,12 @@ func (r *Runner) Tick(ctx context.Context) error {
 	}
 	r.observeTick(ctx)
 	r.offerTick(ctx)
-	var pods corev1.PodList
-	if err := r.Client.List(ctx, &pods, client.HasLabels{c4v1.LabelJob}); err != nil {
+	pods, err := r.ownPods(ctx)
+	if err != nil {
 		return err
 	}
-	sel := labels.SelectorFromSet(r.Labels)
-	for i := range pods.Items {
-		p := &pods.Items[i]
-		if p.Spec.NodeName == "" && p.Status.Phase == corev1.PodPending && p.DeletionTimestamp == nil &&
-			sel.Matches(labels.Set(p.Spec.NodeSelector)) && memberOf(p) != "" {
-			why, err := r.refuses(ctx, p)
-			if err != nil {
-				r.logf("%s/%s: %v", p.Namespace, p.Name, err)
-				continue
-			}
-			if why != "" {
-				if !r.refused[p.UID] {
-					r.refused[p.UID] = true
-					r.logf("not binding %s/%s: %s", p.Namespace, p.Name, why)
-				}
-				continue
-			}
-			if err := r.bind(ctx, p); err != nil {
-				r.logf("bind %s/%s: %v", p.Namespace, p.Name, err)
-			}
-			continue
-		}
-		if p.Spec.NodeName != r.Node {
-			continue
-		}
+	for i := range pods {
+		p := &pods[i]
 		if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {
 			why, err := r.refuses(ctx, p)
 			if err != nil {
@@ -334,16 +316,6 @@ func memberOf(p *corev1.Pod) string {
 		return blockMember(p)
 	}
 	return ""
-}
-
-func (r *Runner) bind(ctx context.Context, p *corev1.Pod) error {
-	b := &corev1.Binding{ObjectMeta: metav1.ObjectMeta{Name: p.Name, Namespace: p.Namespace},
-		Target: corev1.ObjectReference{Kind: "Node", Name: r.Node}}
-	if err := r.Client.SubResource("binding").Create(ctx, p, b); err != nil {
-		return err
-	}
-	r.logf("bound %s/%s (member %s)", p.Namespace, p.Name, memberOf(p))
-	return nil
 }
 
 func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
