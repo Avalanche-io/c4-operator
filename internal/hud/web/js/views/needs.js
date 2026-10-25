@@ -75,7 +75,8 @@ export default {
     // sessions running outside the farm that asked their person something
     // (views/sessions.js), when something observes them
     const obs = state.observed !== false ? observed(ctx) : null;
-    const asking = obs ? (obs.sessions || []).filter((x) => stateOf(x) === 'waiting') : [];
+    // a worker that waits on its lead is the lead's to answer, not the person's
+    const asking = obs ? (obs.sessions || []).filter((x) => stateOf(x) === 'waiting' && x.waitsOn !== 'lead') : [];
     const n = questions.length + waiting.length + asking.length;
     return h('section', { class: 'd1 needsme', 'data-key': 'needs' },
       h('h1', null, 'Needs you'),

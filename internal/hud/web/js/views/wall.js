@@ -13,6 +13,7 @@ import { own } from '../../design/components/live.js';
 import { sweep, channelOf, samples, useHistory } from '../../design/components/timebase.js';
 import { shotsOf, shotKeyFn, shotGlance } from '../../design/components/dispatch.js';
 import { inFlight, retries } from '../../design/components/core.js';
+import { heldByPerson } from '../../design/components/words.js';
 
 const keyOf = (j) => `${j.namespace}/${j.name}`;
 const fin = (j) => j.phase === 'Succeeded';
@@ -72,10 +73,12 @@ function groupSub(g) {
   const gl = g.glance;
   const open = g.jobs.filter((j) => !fin(j));
   const held = open.length && open.every((j) => j.phase === 'Held');
+  // held only by open questions: they wait on them, not on a person's release
+  const asks = held && open.some((j) => !heldByPerson(j));
   const yielded = open.length && open.every((j) => j.phase === 'Yielded');
   const proj = g.project || (g.jobs[0] && g.jobs[0].project);
   if (g.late) return [`${proj} · late ${f.dur(-gl.slack)}`, true];
-  if (held) return [`${proj} · held`, false];
+  if (held) return [`${proj} · ${asks ? 'waits on a question' : 'held'}`, false];
   if (yielded) return [`${proj} · queued`, false];
   if (Number.isFinite(gl.slack) && gl.slack < 6 * 3600) return [`${proj} · ${f.signed(gl.slack)}`, false];
   return [`${proj}${gl.deadline ? ` · due ${f.clock(gl.deadline)}` : ''}`, false];

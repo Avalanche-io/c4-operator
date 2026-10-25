@@ -97,3 +97,36 @@ html[data-needs="urgent"] .top { box-shadow: inset 0 3px 0 var(--temp); }
 .ses .ses-act { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; }
 .ses .ses-cmd { display: flex; flex-direction: column; gap: 4px; max-width: 320px; font: 400 12px/1.4 var(--sans); text-align: right; }
 .ses .ses-cmd code { font: 400 12px/1.4 var(--mono); color: var(--paper); background: var(--well); padding: 4px 6px; user-select: all; }
+
+/* Your sessions: one quiet line per session that needs nothing */
+.ses-lines { border-top: 1px solid var(--rule-1); }
+.ses-line { display: grid; grid-template-columns: minmax(160px, 1.3fr) 110px minmax(180px, 2fr) 190px minmax(120px, 1fr); gap: 0 14px; align-items: baseline; padding: 7px 18px; border-bottom: 1px solid var(--rule-1); font: 400 13px/1.35 var(--sans); color: var(--ink-2); }
+.ses-line .nm { font: 500 13.5px/1.35 var(--mono); color: var(--paper); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ses-line .us { font: 400 12px/1.35 var(--mono); color: var(--ink-3); white-space: nowrap; }
+.ses-line .wh { font-size: 12px; color: var(--ink-3); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ses-adopt { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; margin-top: 18px; }
+.ses-adopt .ses-cmd { text-align: left; max-width: 520px; }
+.ses-old { margin-top: 14px; }
+.ses-old > button { background: none; border: 0; padding: 0; font: 400 13px/1.4 var(--sans); color: var(--ink-3); cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule-2); }
+.ses-old > .ses-lines { margin-top: 8px; }
+
+/* A lead's workers (views/sessions.js, LEAD.md stage 1): nested lines at
+   level 1, boxes at level 2; a worker linked by a guess has a dashed rule */
+.ses-kids { margin-left: 22px; border-left: 1px solid var(--rule-2); }
+.ses-line.ses-child { padding-left: 14px; }
+.ses-line.ses-child .nm { font-size: 12.5px; }
+.ses-guess { border-left: 1px dashed var(--rule-2); }
+.ses-more { background: none; border: 0; padding: 6px 14px; font: 400 12px/1.4 var(--sans); color: var(--ink-3); cursor: pointer; text-decoration: underline; text-decoration-color: var(--rule-2); }
+.ses-boxes { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 8px; padding: 10px 0 14px 22px; }
+.ses-box { background: var(--plate); border: 1px solid var(--rule-2); border-left: 3px solid var(--run); padding: 8px 10px; font: 400 12px/1.4 var(--sans); color: var(--ink-2); }
+.ses-box.asks-lead { border-left-color: var(--g13); }
+.ses-box.done { border-left-color: var(--done); }
+.ses-box.ses-guess { border-style: dashed; }
+.ses-box .bn { font: 500 13px/1.3 var(--mono); color: var(--paper); }
+.ses-box .bq { color: var(--paper); margin-top: 3px; }
+.ses-box .bu { font: 400 11px/1.3 var(--mono); color: var(--ink-3); margin-top: 4px; }
+.ses-outside { margin-top: 28px; }
+
+/* where a job came from, when a tracker submitted it (words.js fromTracker) */
+.d1-from { font: 400 13px/1.4 var(--sans); color: var(--ink-2); margin: -6px 0 8px; }
+.d1-from a, .qfrom a { color: inherit; text-decoration: underline; text-decoration-color: var(--rule-2); }

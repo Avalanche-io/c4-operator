@@ -14,7 +14,8 @@ import { bookList } from '../../design/components/ledger.js';
 import { lensFor } from '../lenses/index.js';
 import { classChip, phaseText, orderText, burstButton, failedUnits, personMark, deadlineSource } from './common.js';
 import { c4idEl } from '../../design/components/c4id.js';
-import { unitWords, how, reasoningWords } from '../../design/components/words.js';
+import { unitWords, how, reasoningWords, fromTracker } from '../../design/components/words.js';
+import { trackerLink } from './day1.js';
 import { markSVG, markEl } from '../../design/components/marks.js';
 import { planSheet } from '../../design/components/plansheet.js';
 import { heldSection } from './held.js';
@@ -292,7 +293,8 @@ export default {
         h('div', null,
           h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${j.project} / `, j.shot ? `shot ${j.shot} / ` : '', j.namespace),
           h('h1', null, j.name),
-          h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 && L >= 2 ? ` · #${j.rank} in run order` : ''}`, personMark(j) ? [' ', personMark(j)] : null)),
+          h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 && L >= 2 ? ` · #${j.rank} in run order` : ''}`, personMark(j) ? [' ', personMark(j)] : null,
+            fromTracker(j) ? [' · ', h('span', { class: 'qfrom' }, trackerLink(fromTracker(j)))] : null)),
         L >= 2 ? titleBlock(j, ctx.level >= 3 ? L : Math.min(L, 4)) : null),
       j.estimate.message && L >= 2 ? h('div', { class: 'warn' + (j.phase === 'Failed' ? ' red' : late ? ' risk' : ''), style: { marginBottom: '12px' }, role: 'status' },
         h('span', { class: j.phase === 'Failed' ? 't-fail' : late ? 't-risk' : '' }, j.estimate.message), L >= 4 ? burstButton(j) : null) : null,

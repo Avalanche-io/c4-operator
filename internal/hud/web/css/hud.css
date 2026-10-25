@@ -291,3 +291,9 @@ html[data-mode="2"] .qhead > :nth-child(4), html[data-mode="2"] .qhead > :nth-ch
 .needs .flag { width: 9px; height: 9px; background: linear-gradient(225deg, var(--paper) 0 32%, var(--fail) 32%); }
 .taken { color: var(--ink-2); }
 .taken .seal { width: 8px; height: 8px; border-radius: 50%; border: 1.5px solid var(--fail-pale); background: var(--fail-pale); }
+
+/* a farm replayed from a diagnostic bundle (app.js replayBadge) */
+.top .replay { position: absolute; left: 0; right: 0; top: 100%; z-index: 5; padding: 4px 18px; font: 400 12px/1.4 var(--sans); color: var(--ink-2); background: var(--plate); border-bottom: 1px dashed var(--rule-2); }
+.top .replay b { color: var(--paper); font-weight: 600; letter-spacing: var(--label-track); text-transform: uppercase; font-size: 11px; margin-right: 4px; }
+html[data-replay="1"] #main { padding-top: 26px; }
+.top .replay .unfaithful { color: var(--paper); }

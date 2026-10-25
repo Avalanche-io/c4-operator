@@ -13,10 +13,11 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { glance } from '../../design/components/core.js';
-import { jobWords } from '../../design/components/words.js';
+import { jobWords, fromTracker } from '../../design/components/words.js';
 import { markEl } from '../../design/components/marks.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
 import { decisions } from './controls.js';
+import { outsideQueue } from './sessions.js';
 
 const keyOf = (j) => `${j.namespace}/${j.name}`;
 
@@ -128,7 +129,10 @@ function jobRow(ctx, j, items) {
   const it = items ? incidentOf(items, keyOf(j)) : null;
   return h('a', { class: 'd1-job', href: ctx.href(`job/${keyOf(j)}`), 'data-key': 'j-' + keyOf(j) },
     h('div', null, h('div', { class: 'nm' }, j.name), h('div', { class: 'st ' + (it ? '' : w.cls) }, w.why ? `${w.word} ${w.why}` : w.word),
-      it ? h('div', { class: 'see' }, `see: ${it.title}`) : null),
+      it ? h('div', { class: 'see' }, `see: ${it.title}`) : null,
+      // the row is a link to the job, so where it came from is words here,
+      // and a link on the job's page
+      fromTracker(j) ? h('div', { class: 'see' }, fromTracker(j).text) : null),
     h('div', null, bar(g, late), h('div', { class: 'd1-pct' }, agent && !fin ? (g.left ? `about ${f.dur(g.left)} of work left` : '') : `${Math.round(g.done * 100)}% done`)),
     h('div', { class: 'd1-when' + (late ? ' late' : '') }, fin ? 'done' : e.noEta ? '–' : `~${f.when(e.etaP50)}`,
       h('small', null, fin ? '' : late ? `late: due ${f.when(dl)}` : dl ? `due ${f.when(dl)}` : 'no deadline')),
@@ -144,6 +148,9 @@ export function slotWords(s) {
   const agents = s.jobs.filter((j) => j.phase === 'Running').every(isAgent);
   return `${f.num(used)} running, ${f.num(total)} slots offered now: ${f.num(over)} ${over === 1 ? 'stops' : 'stop'} at the end of ${agents ? (over === 1 ? 'its turn' : 'their turns') : (over === 1 ? 'its next safe point' : 'their next safe points')}`;
 }
+
+// trackerLink: where a job came from, linked when it can be
+export const trackerLink = (t) => (t.href ? h('a', { href: t.href, target: t.href.startsWith('/') ? null : '_blank', rel: 'noopener' }, t.text) : t.text);
 
 const foot = () => h('div', { class: 'd1-foot' }, 'Level 1. Everything else is one click away: open any job for its frames, or change your level in the top bar.');
 
@@ -165,6 +172,7 @@ export const mine1 = {
       roots(ctx, items),
       h('h2', null, 'Working and waiting'),
       open.length ? open.map((j) => jobRow(ctx, j, items)) : h('div', { class: 'd1-quiet' }, 'Nothing is running for you right now.'),
+      outsideQueue(ctx),
       foot());
   },
 };
@@ -182,6 +190,7 @@ export const farm1 = {
       roots(ctx, items),
       h('h2', null, late.length ? `Projected late · ${f.num(late.length)}${late.length > list.length ? ` · the ${list.length} most at risk` : ''}` : 'Next in the queue'),
       list.map((j) => jobRow(ctx, j, items)),
+      outsideQueue(ctx),
       foot());
   },
 };
@@ -225,6 +234,7 @@ export const job1 = {
     return h('section', { class: 'd1', 'data-key': 'd1-job' },
       h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, all ? '← The farm' : '← My jobs')),
       h('h1', null, j.name),
+      fromTracker(j) ? h('p', { class: 'd1-from' }, trackerLink(fromTracker(j))) : null,
       h('p', { class: 'd1-sub ' + w.cls }, `${w.why ? `${w.word} ${w.why}` : w.word}${aw && e.noEta ? '' : ` · ${fin ? 'done' : e.noEta ? 'no ETA yet' : `ready ~${f.when(e.etaP50)}`}`}${dl ? ` · due ${f.when(dl)}` : ''}${late ? ' · projected late' : ''}`),
       items.length ? roots(ctx, items, { handled: false }) : null,
       decisions(ctx, j, k),

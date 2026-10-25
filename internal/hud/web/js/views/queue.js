@@ -13,7 +13,8 @@ import { glance, inFlight, retries } from '../../design/components/core.js';
 import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
 import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
-import { jobWords, tempWords, heldByPerson } from '../../design/components/words.js';
+import { jobWords, tempWords, heldByPerson, fromTracker } from '../../design/components/words.js';
+import { trackerLink } from './day1.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
 import { roots } from './day1.js';
 
@@ -154,6 +155,7 @@ function row(ctx, j, multiProject, sk) {
       h('div', { class: 'qmeta' },
         classChip(j, ctx.cls(j.class)), phase(j), seeOrMark(j),
         j.owner ? h('span', null, j.owner) : null,
+        fromTracker(j) ? h('span', { class: 'qfrom' }, trackerLink(fromTracker(j))) : null,
         multiProject ? h('span', { class: 'dimmer' }, j.project) : null,
         h('span', { class: 'dimmer' }, orderText(j.order)),
         j.blacklist && j.blacklist.length ? h('span', { class: 't-temp', title: 'Nodes this job will not use' }, `avoids ${j.blacklist.join(', ')}`) : null)),

@@ -128,7 +128,30 @@ function topBar() {
       h('span', { class: 'live', 'data-state': state.status, title: `Updates: ${state.status}` }),
       v ? h('a', { class: 'me-link', href: href('me'), title: 'Your page: the trackers that submit work for you' }, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
       v ? h('a', { href: viewAs(other) }, `View as ${other}`) : null,
-      h('button', { class: 'prefs-btn', 'data-prefs': 'open', 'aria-expanded': state.sheet ? 'true' : 'false', title: 'Preferences' }, 'Preferences')));
+      h('button', { class: 'prefs-btn', 'data-prefs': 'open', 'aria-expanded': state.sheet ? 'true' : 'false', title: 'Preferences' }, 'Preferences')),
+    replayBadge());
+}
+
+// replayBadge: on a farm replayed from a diagnostic bundle (hudmock
+// --bundle; GET /api/v1/replay), a line under the top bar saying so, which
+// snapshot this is, and that the names are pseudonyms. Asked once per
+// snapshot (`at` counts from 0, so it reads one more); a farm that is not
+// a replay answers 404, and is not asked again.
+function replayBadge() {
+  const s = state.snap;
+  if (!s || state.replay === false) return null;
+  if (state.replayAt !== s.now) {
+    state.replayAt = s.now;
+    // not a replay: nothing to draw, so nothing to render again
+    get('/replay').then((r) => { state.replay = r; render(); }, () => { state.replay = false; });
+  }
+  const r = state.replay;
+  if (r) document.documentElement.dataset.replay = '1';
+  else delete document.documentElement.dataset.replay;
+  if (!r) return null;
+  return h('div', { class: 'replay', role: 'status' },
+    h('b', null, 'Replay'), ` of diagnostic bundle ${String(r.bundle || '').slice(0, 8)} · snapshot ${Number(r.at) + 1} of ${r.of} · names are pseudonyms, times relative, money scaled`,
+    r.faithful === false ? h('span', { class: 'unfaithful' }, ' · not every decision reproduces from what the bundle holds') : null);
 }
 
 // ------------------------------------------------------------ preferences

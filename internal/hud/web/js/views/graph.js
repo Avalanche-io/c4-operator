@@ -10,6 +10,7 @@ import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { inFlight } from '../../design/components/core.js';
 import { c4idSVGEl } from '../../design/components/c4id.js';
+import { heldByPerson } from '../../design/components/words.js';
 
 const st = { data: null, now: null, busy: false };
 document.addEventListener('hud:changed', () => { st.now = null; });
@@ -110,21 +111,33 @@ function layout(data) {
   return { pos, height: y0, width, single, finished };
 }
 
+// phaseWord: a node's phase in words; a job held only on an open question
+// waits on it, not on a person's release
+function phaseWord(ctx, n) {
+  const j = n.phase === 'Held' ? ctx.job(n.id) : null;
+  if (!j || heldByPerson(j)) return n.phase;
+  const pressing = (j.needs || []).some((q) => q.state === 'pressing' && !q.supplied && !q.withdrawn);
+  return h('span', { class: pressing ? 't-temp' : 't-risk' }, 'waits on a question');
+}
+
 function nodeBox(ctx, n, p) {
   const j = ctx.job(n.id);
   const done = j ? j.units.succeeded / Math.max(1, j.units.total) : n.phase === 'Succeeded' ? 1 : 0;
   const run = j ? (inFlight(j.units)) / Math.max(1, j.units.total) : 0;
   const late = n.slackSeconds !== undefined && n.slackSeconds < 0 && n.phase !== 'Succeeded';
   const name = f.jobName(n.id);
-  const phaseCol = { Failed: 'var(--fail)', Held: 'var(--g16)', Succeeded: 'var(--done)', Running: 'var(--run)' }[n.phase] || 'var(--ink-3)';
+  // held on an open question (its job says so), not by a person: no pause
+  // bars, and the words the strip uses
+  const asks = n.phase === 'Held' && !!j && !heldByPerson(j);
+  const phaseCol = asks ? ((j.needs || []).some((q) => q.state === 'pressing' && !q.supplied && !q.withdrawn) ? 'var(--temp-text)' : 'var(--risk-text)') : { Failed: 'var(--fail)', Held: 'var(--g16)', Succeeded: 'var(--done)', Running: 'var(--run)' }[n.phase] || 'var(--ink-3)';
   return s('a', { href: ctx.href(`job/${n.id}`), 'data-key': n.id, class: 'gnode' + (n.critical ? ' crit' : '') },
     s('g', { class: 'gnode' + (n.critical ? ' crit' : ''), transform: `translate(${p.x} ${p.y})` },
       s('title', null, `${name}: ${n.phase}`),
       s('rect', { class: 'box' + (n.phase === 'Failed' ? ' failed' : late ? ' late' : ''), width: BW, height: BH }),
-      n.phase === 'Held' ? s('g', { fill: 'var(--g16)' }, s('rect', { x: BW - 52, y: 29, width: 1.6, height: 8 }), s('rect', { x: BW - 48.4, y: 29, width: 1.6, height: 8 })) : null,
+      n.phase === 'Held' && !asks ? s('g', { fill: 'var(--g16)' }, s('rect', { x: BW - 52, y: 29, width: 1.6, height: 8 }), s('rect', { x: BW - 48.4, y: 29, width: 1.6, height: 8 })) : null,
       s('text', { x: 10, y: 19, style: { 'font-weight': 650, 'font-size': '13px' } }, name.length > 27 ? name.slice(0, 26) + '…' : name),
       s('text', { x: BW - 10, y: 19, 'text-anchor': 'end', class: 'm', style: { 'text-transform': 'uppercase' } }, n.class),
-      s('text', { x: 10, y: 36, class: 'm', style: { fill: phaseCol } }, n.phase),
+      s('text', { x: 10, y: 36, class: 'm', style: { fill: phaseCol } }, asks ? 'waits on a question' : n.phase),
       n.deadline ? s('text', { x: BW - 10, y: 36, 'text-anchor': 'end', class: 'm' }, `due ${f.clock(n.deadline)}`) : null,
       n.etaP90 ? s('text', { x: 10, y: 52, class: 'm' }, `p90 ${f.clock(n.etaP90)}`) : s('text', { x: 10, y: 52, class: 'm' }, 'finished'),
       n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? s('text', { x: BW - 10, y: 52, 'text-anchor': 'end', class: 'm', style: { fill: late ? 'var(--risk)' : 'var(--pencil)' } }, `slack ${f.signed(n.slackSeconds)}`) : null,
@@ -196,7 +209,7 @@ export default {
         h('header', null, h('h2', null, 'Jobs with no dependencies')),
         h('table', { class: 'vt' }, h('tbody', null, singles.map((n) => h('tr', { 'data-key': n.id },
           h('td', null, h('a', { href: ctx.href(`job/${n.id}`) }, f.jobName(n.id))),
-          h('td', { class: 'mono dim' }, n.class), h('td', { class: 'dim' }, n.phase),
+          h('td', { class: 'mono dim' }, n.class), h('td', { class: 'dim' }, phaseWord(ctx, n)),
           h('td', { class: 'num' }, n.deadline ? `due ${f.clock(n.deadline)}` : ''),
           h('td', { class: 'num r ' + (n.slackSeconds < 0 && n.phase !== 'Succeeded' ? 't-risk pencil' : 'pencil') }, n.slackSeconds !== undefined && n.phase !== 'Succeeded' ? `slack ${f.signed(n.slackSeconds)}` : '')))))) : null));
   },

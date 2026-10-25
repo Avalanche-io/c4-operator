@@ -26,6 +26,7 @@ import { tok, glance, reducedMotion } from './core.js';
 import * as f from './fmt.js';
 import { ranges } from './rle.js';
 import { register, ms as cssMs } from './live.js';
+import { heldByPerson } from './words.js';
 
 // ------------------------------------------------------------ the sweep clock
 
@@ -113,7 +114,9 @@ export function channelOf(j, o = {}) {
   const e = j.estimate || {};
   const dl = j.objective && j.objective.deadline ? Date.parse(j.objective.deadline) : null;
   const fin = j.phase === 'Succeeded';
-  const extra = { Yielded: ' · queued', Blocked: ' · blocked on', Held: ' · held', Failed: ' · needs you', Queued: ' · queued' }[j.phase] || '';
+  // a job held only by an open question waits on it; a person's hold is held
+  const held = j.phase === 'Held' && !heldByPerson(j) ? ' · waits on a question' : ' · held';
+  const extra = { Yielded: ' · queued', Blocked: ' · blocked on', Held: held, Failed: ' · needs you', Queued: ' · queued' }[j.phase] || '';
   return {
     key: `${j.namespace}/${j.name}`, name: j.name,
     sub: `${Math.round(g.done * 100)}%${g.basis === 'units' ? ' by units' : ''}${extra} · ${j.class} · ${ORDER[j.order] || j.order}`,

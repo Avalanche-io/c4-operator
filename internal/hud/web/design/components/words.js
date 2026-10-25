@@ -137,3 +137,20 @@ export function reasoningWords(r, level = 3) {
   if (level >= 3 && r.tools) parts.push(`tools ${r.tools}`);
   return parts.join(' · ');
 }
+
+// fromTracker: where a job came from, when a tracker's sync submitted it:
+// { text: "from saltmarsh-flow Task 4414", href } (href only when the job
+// carries trackerURL: an http(s) URL or a path on the HUD's own host,
+// which the operator has already checked). Issues and pull requests read
+// with a #. Null for a job no tracker submitted.
+export function fromTracker(j) {
+  const ref = j && j.trackerRef;
+  if (!ref) return null;
+  const [tracker, type, ...rest] = String(ref).split('/');
+  const id = rest.join('/');
+  const hash = /^(issue|pullrequest|pull_request|pr|mergerequest)$/i.test(type || '') ? '#' : '';
+  const text = type && id ? `from ${tracker} ${type} ${hash}${id}` : `from ${ref}`;
+  const u = j.trackerURL || '';
+  const href = /^https?:\/\//i.test(u) || (u.startsWith('/') && !u.startsWith('//')) ? u : null;
+  return { text, href };
+}
