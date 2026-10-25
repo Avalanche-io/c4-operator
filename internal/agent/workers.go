@@ -177,6 +177,8 @@ func workersOf(o *Observed, sc sessionScan, now time.Time, all bool) []Observed 
 		}
 		row := Observed{Session: w.id, Name: w.meta.Description, Cwd: o.Cwd, Parent: parent, Description: w.meta.Description,
 			Kind: KindSubagent, AgentType: w.meta.AgentType, Model: w.meta.Model, Depth: max(w.meta.SpawnDepth, 1)}
+		row.Turn = parentScan.toolTurn[w.meta.ToolUseID]
+		row.Turns, row.TurnsTotal = own.turns, own.turnsTotal
 		teammate := own.teamName != "" || own.agentName != ""
 		if teammate {
 			row.Kind = KindTeammate
@@ -229,6 +231,7 @@ func workersOf(o *Observed, sc sessionScan, now time.Time, all bool) []Observed 
 			row.Word, row.Running = WordWorking, true
 			row.BackgroundOpen = len(own.background)
 		}
+		turnStates(row.Turns, row.Word == WordWorking, row.Word == WordWaiting)
 		if !all && !row.Running && old {
 			o.WorkersDone++
 			continue

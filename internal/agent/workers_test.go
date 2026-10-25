@@ -172,3 +172,45 @@ func TestHomeless(t *testing.T) {
 		}
 	}
 }
+
+// A session's turns are its frames: each from the record that started it
+// to its last, with the tokens it used; the latest is waiting when it ended
+// on a call with no result. A worker names the turn whose call started it.
+func TestSessionTurns(t *testing.T) {
+	e := newEnv(t)
+	now := time.Now()
+	start := now.Add(-time.Hour)
+	at := func(m int) string { return start.Add(time.Duration(m) * time.Minute).UTC().Format(time.RFC3339Nano) }
+	const lead = "44444444-0000-4000-8000-000000000001"
+	e.transcript(lead, ""+
+		`{"type":"user","timestamp":"`+at(1)+`","message":{"role":"user","content":"port the parser"}}`+"\n"+
+		`{"type":"assistant","timestamp":"`+at(2)+`","message":{"id":"a1","model":"opus","usage":{"input_tokens":100,"output_tokens":10},"content":[{"type":"tool_use","id":"t1","name":"Agent"}]}}`+"\n"+
+		`{"type":"user","timestamp":"`+at(3)+`","message":{"role":"user","content":[{"type":"tool_result","tool_use_id":"t1","content":"read"}]}}`+"\n"+
+		`{"type":"assistant","timestamp":"`+at(4)+`","message":{"id":"a2","model":"opus","usage":{"input_tokens":40},"content":[{"type":"text","text":"read it"}]}}`+"\n"+
+		`{"type":"user","timestamp":"`+at(10)+`","message":{"role":"user","content":"now run the tests"}}`+"\n"+
+		`{"type":"assistant","timestamp":"`+at(11)+`","message":{"id":"a3","model":"opus","usage":{"input_tokens":7},"content":[{"type":"tool_use","id":"x1","name":"Bash"}]}}`+"\n")
+	e.fake.active[lead] = Active{SessionID: lead, Name: "shop-ui", Kind: "interactive", Status: "idle", Cwd: e.cwd, StartedAt: start.UnixMilli()}
+	dir := filepath.Join(strings.TrimSuffix(e.transcriptPath(lead), ".jsonl"), "subagents")
+	os.MkdirAll(dir, 0o755)
+	os.WriteFile(filepath.Join(dir, "agent-w1.meta.json"), []byte(`{"description":"Read the spec","toolUseId":"t1","spawnDepth":1}`), 0o644)
+	os.WriteFile(filepath.Join(dir, "agent-w1.jsonl"), []byte(`{"type":"user","timestamp":"`+at(2)+`","message":{"role":"user","content":"read the spec"}}`+"\n"), 0o644)
+
+	obs, err := e.h.Observe(context.Background(), e.configDir, false, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := byName(obs)
+	l := got["shop-ui"]
+	if l.TurnsTotal != 2 || len(l.Turns) != 2 {
+		t.Fatalf("turns %+v", l.Turns)
+	}
+	if t1 := l.Turns[0]; t1.Index != 1 || t1.Tokens != 150 || t1.State != "done" || !t1.End.After(t1.Start) {
+		t.Errorf("turn 1 %+v", t1)
+	}
+	if t2 := l.Turns[1]; t2.Index != 2 || t2.Tokens != 7 || t2.State != "waiting" {
+		t.Errorf("turn 2 %+v", t2)
+	}
+	if w := got["Read the spec"]; w.Turn != 1 {
+		t.Errorf("the worker's turn: %d", w.Turn)
+	}
+}

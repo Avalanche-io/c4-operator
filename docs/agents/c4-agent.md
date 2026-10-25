@@ -80,6 +80,12 @@ Each session gets:
   the session's `backgroundOpen` leaves out its workers listed. A session
   that ran workflow agents says so (`workflowsNotShown`); they are not read
   yet.
+- **its turns,** its frames of work: each from the record that started it
+  (a prompt, a notification, a steer) to its last, with its tokens and
+  weighted tokens, oldest first; its latest 200 (`turns`, of `turnsTotal`).
+  The latest is `running` while the session works, `waiting` when it ended
+  on a call with no result, else `done`. A worker names the turn of its
+  starter's that started it (`turn`).
 - **the background sessions it started:** one started with `claude --bg`
   through a session's Bash tool is listed after that session, with it as
   `parent` and `parentClaimed: true`. Nothing records which session a launch

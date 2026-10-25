@@ -58,11 +58,17 @@ type Observed struct {
 	Model             string `json:"model,omitempty"`
 	Depth             int    `json:"depth,omitempty"`
 	WorkflowsNotShown bool   `json:"workflowsNotShown,omitempty"`
-	Parent            string `json:"parent,omitempty"`
-	ParentClaimed     bool   `json:"parentClaimed,omitempty"`
-	Description       string `json:"description,omitempty"`
-	WaitsOn           string `json:"waitsOn,omitempty"`
-	WorkersDone       int    `json:"workersDone,omitempty"`
+	// Turns are the session's latest turns (TurnsShown of TurnsTotal), its
+	// frames; Turn, on a worker's row, is the turn of its starter's that
+	// started it.
+	Turns         []ObservedTurn `json:"turns,omitempty"`
+	TurnsTotal    int            `json:"turnsTotal,omitempty"`
+	Turn          int            `json:"turn,omitempty"`
+	Parent        string         `json:"parent,omitempty"`
+	ParentClaimed bool           `json:"parentClaimed,omitempty"`
+	Description   string         `json:"description,omitempty"`
+	WaitsOn       string         `json:"waitsOn,omitempty"`
+	WorkersDone   int            `json:"workersDone,omitempty"`
 	// Weighted is what it has used in input-equivalent tokens, each model's
 	// counts weighted as the farm weighs them (work/tokens), so every
 	// reader shows one number.
@@ -254,6 +260,7 @@ func observe(configDir string, a Active, now time.Time) Observed {
 	if o.Running {
 		o.BackgroundOpen = len(sc.background)
 	}
+	o.Turns, o.TurnsTotal = sc.turns, sc.turnsTotal
 	if len(sc.usage) > 0 {
 		o.Usage = &ObservedUse{Models: sc.usage}
 		for _, m := range sc.usage {
@@ -299,7 +306,25 @@ func observe(configDir string, a Active, now time.Time) Observed {
 			o.NeedsYou = "its spend limit, which only you can raise: " + l.Text
 		}
 	}
+	turnStates(o.Turns, o.Word == WordWorking, len(sc.pendingTools) > 0 && o.Running)
 	return o
+}
+
+// turnStates sets each turn's state: every turn before the latest is done;
+// the latest is running while its session works, waiting when it ended on
+// a call with no result, else done.
+func turnStates(turns []ObservedTurn, working, waiting bool) {
+	for i := range turns {
+		turns[i].State = "done"
+	}
+	if n := len(turns); n > 0 {
+		switch {
+		case working:
+			turns[n-1].State = "running"
+		case waiting:
+			turns[n-1].State = "waiting"
+		}
+	}
 }
 
 // asks reports whether a model's last words end on a question.
@@ -349,6 +374,9 @@ type sessionScan struct {
 	results           map[string]bool // tool calls that have their result
 	bgLaunches        []bgLaunch      // claude --bg commands it ran
 	firstAt           time.Time       // its first record's time
+	turns             []ObservedTurn  // its turns, oldest first
+	toolTurn          map[string]int  // the turn each tool call was made in
+	turnsTotal        int             // how many turns it had in all
 	teamName          string          // a teammate's team, from its records
 	agentName         string          // a teammate's name, from its records
 }
@@ -426,6 +454,7 @@ type scanner struct {
 	// results map last handed out, copied again only once it grows.
 	launchIdx map[string]int
 	shared    map[string]bool
+	toolTurn  map[string]int // the turn each tool call was made in
 }
 
 func newScanner(path string, started time.Time) *scanner {
@@ -478,6 +507,9 @@ func (sc *scanner) line(line []byte) {
 	}
 	if s.agentName == "" && rec.AgentName != "" {
 		s.agentName = rec.AgentName
+	}
+	if n := len(s.turns); n > 0 && !rec.Timestamp.IsZero() && rec.Timestamp.After(s.turns[n-1].End) {
+		s.turns[n-1].End = rec.Timestamp
 	}
 	sc.bg.feedRecord(line, rec.Type, rec.Timestamp, rec.Message, rec.ToolUseResult)
 	var msg struct {
@@ -544,6 +576,11 @@ func (sc *scanner) line(line []byte) {
 			u.OutputTokens += msg.Usage.Output
 			u.CacheReadTokens += msg.Usage.CacheRead
 			u.CacheWriteTokens += msg.Usage.CacheWrite
+			if n := len(s.turns); n > 0 {
+				t := &s.turns[n-1]
+				t.Tokens += msg.Usage.Input + msg.Usage.Output + msg.Usage.CacheRead + msg.Usage.CacheWrite
+				t.Weighted += tokens.Weighted(msg.Model, tokens.Counts{Input: msg.Usage.Input, Output: msg.Usage.Output, CacheRead: msg.Usage.CacheRead, CacheWrite: msg.Usage.CacheWrite})
+			}
 		}
 		for _, p := range parts {
 			switch p.Type {
@@ -557,6 +594,10 @@ func (sc *scanner) line(line []byte) {
 					sc.pending = map[string]string{}
 				}
 				sc.pending[p.ID] = p.Name
+				if sc.toolTurn == nil {
+					sc.toolTurn = map[string]int{}
+				}
+				sc.toolTurn[p.ID] = len(s.turns)
 			}
 		}
 		if bytes.Contains(msg.Content, []byte("--bg")) {
@@ -569,6 +610,9 @@ func (sc *scanner) line(line []byte) {
 			}
 		}
 	case "user":
+		if startsTurn(msg.Content, parts) {
+			s.turns = append(s.turns, ObservedTurn{Index: len(s.turns) + 1, Start: rec.Timestamp, End: rec.Timestamp})
+		}
 		for _, p := range parts {
 			if p.Type == "tool_result" {
 				delete(sc.pending, p.ToolUseID)
@@ -611,7 +655,46 @@ func (sc *scanner) result() sessionScan {
 	}
 	s.results = sc.shared
 	s.bgLaunches = append([]bgLaunch(nil), sc.s.bgLaunches...)
+	s.turns = append([]ObservedTurn(nil), sc.s.turns[max(0, len(sc.s.turns)-TurnsShown):]...)
+	s.turnsTotal = len(sc.s.turns)
+	s.toolTurn = sc.toolTurn
 	return s
+}
+
+// TurnsShown is how many of a session's latest turns a row lists.
+const TurnsShown = 200
+
+// ObservedTurn is one turn of a session, a frame of its work: from the
+// record that started it (a prompt, a notification, a steer) to its last,
+// with what it used. State is the latest turn's: running while the
+// session works, waiting when it ended on a call with no result, done.
+type ObservedTurn struct {
+	Index    int       `json:"index"`
+	Start    time.Time `json:"start"`
+	End      time.Time `json:"end"`
+	Tokens   int64     `json:"tokens"`
+	Weighted float64   `json:"weighted"`
+	State    string    `json:"state"`
+}
+
+// startsTurn reports whether a user record starts a turn: anything but a
+// record that only carries tool results.
+func startsTurn(content json.RawMessage, parts []struct {
+	Type      string `json:"type"`
+	Text      string `json:"text"`
+	ID        string `json:"id"`
+	Name      string `json:"name"`
+	ToolUseID string `json:"tool_use_id"`
+}) bool {
+	if len(parts) == 0 {
+		return len(bytes.TrimSpace(content)) > 0
+	}
+	for _, p := range parts {
+		if p.Type != "tool_result" {
+			return true
+		}
+	}
+	return false
 }
 
 // syntheticModel marks a message the CLI wrote itself, not a model.
