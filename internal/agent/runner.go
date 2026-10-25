@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"strconv"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	coordv1 "k8s.io/api/coordination/v1"
@@ -125,6 +127,8 @@ type Runner struct {
 	observedAt       time.Time
 	observedErr      string
 	observedUnseen   bool
+	observing        atomic.Bool
+	obsMu            sync.Mutex
 	// Farm names the farm in this runner's deployment name
 	// (<farm>/runner/<node>), as its records name it.
 	Farm string

@@ -520,6 +520,9 @@ func runRunner(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 		}
 		path := *hudToken
 		r.Observe, r.HUD, r.ObserveConfigDir = true, *hud, os.Getenv("CLAUDE_CONFIG_DIR")
+		if r.ObserveConfigDir == "" && isEnrolled {
+			r.ObserveConfigDir = enrolled.ObserveConfigDir
+		}
 		r.HUDToken = func() string {
 			b, _ := os.ReadFile(path)
 			return strings.TrimSpace(string(b))
@@ -657,7 +660,7 @@ func runEnroll(ctx context.Context, h *agent.Harness, fs *flag.FlagSet, args []s
 	if err != nil {
 		return err
 	}
-	e, err := agent.Enroll(ctx, cl, agent.EnrollOptions{Node: *node, Owner: *owner, Pool: *pool, Slots: *slots,
+	e, err := agent.Enroll(ctx, cl, agent.EnrollOptions{ObserveConfigDir: os.Getenv("CLAUDE_CONFIG_DIR"), Node: *node, Owner: *owner, Pool: *pool, Slots: *slots,
 		Dir: agent.RunnerDir(h.Store.Dir), Farm: raw.Clusters[kctx.Cluster]})
 	if err != nil {
 		return err

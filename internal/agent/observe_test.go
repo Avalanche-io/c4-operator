@@ -246,7 +246,7 @@ func TestObserveClaimsTheLeadOfABackgroundSession(t *testing.T) {
 	now := time.Now()
 	launch := now.Add(-10 * time.Minute)
 	const lead, port, other = "ffffffff-0000-4000-8000-000000000001", "ffffffff-0000-4000-8000-000000000002", "ffffffff-0000-4000-8000-000000000003"
-	e.transcript(lead, fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"m1","model":"opus","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"cd ~/src/shop && claude --bg -n port-notes \"port the notes\""}}]}}`+"\n", launch.UTC().Format(time.RFC3339Nano)))
+	e.transcript(lead, fmt.Sprintf(`{"type":"assistant","timestamp":%q,"message":{"id":"m1","model":"opus","content":[{"type":"tool_use","id":"b1","name":"Bash","input":{"command":"claude --bg -n port-notes \"port the notes\""}}]}}`+"\n", launch.UTC().Format(time.RFC3339Nano)))
 	e.transcript(port, `{"type":"assistant","message":{"id":"p1","model":"opus","content":[{"type":"text","text":"porting"}]}}`+"\n")
 	e.transcript(other, `{"type":"assistant","message":{"id":"o1","model":"opus","content":[{"type":"text","text":"earlier"}]}}`+"\n")
 	e.fake.active[lead] = Active{SessionID: lead, Name: "shop-lead", Kind: "interactive", Status: "idle", Cwd: e.cwd, StartedAt: now.Add(-time.Hour).UnixMilli()}

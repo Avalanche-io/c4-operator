@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"time"
@@ -57,7 +58,14 @@ func (r *Runner) postObserved(ctx context.Context) error {
 	// paths on the machine stay on it: the folder's name says which
 	// project a session is in
 	for i := range obs {
-		obs[i].Transcript, obs[i].Cwd = "", filepath.Base(obs[i].Cwd)
+		o := &obs[i]
+		o.Transcript, o.Cwd = "", filepath.Base(o.Cwd)
+		o.NeedsYou, o.Description = homeless(o.NeedsYou), homeless(o.Description)
+		if o.Limit != nil {
+			l := *o.Limit
+			l.Text = homeless(l.Text)
+			o.Limit = &l
+		}
 	}
 	body, _ := json.Marshal(ObservedReport{Machine: Machine(), ObservedAt: r.now().UTC(), Owners: r.Owners, Sessions: obs})
 	u := strings.TrimRight(r.HUD, "/") + "/api/v1/nodes/" + url.PathEscape(r.Node) + "/observed"
@@ -111,14 +119,37 @@ func (r *Runner) observeTick(ctx context.Context) {
 	if !r.observedAt.IsZero() && r.now().Sub(r.observedAt) < every {
 		return
 	}
-	r.observedAt = r.now()
-	err := r.postObserved(ctx)
-	switch {
-	case err != nil && (r.observedErr == "" || r.observedErr != err.Error()):
-		r.observedErr = err.Error()
-		r.logf("reporting this machine's sessions: %v", err)
-	case err == nil && r.observedErr != "":
-		r.observedErr = ""
-		r.logf("reporting this machine's sessions again")
+	if !r.observing.CompareAndSwap(false, true) {
+		return // the last report is still being made
 	}
+	r.observedAt = r.now()
+	// beside the heartbeat, never in its way: a first pass over a large
+	// transcript must not hold up binding and running the farm's units
+	go func() {
+		defer r.observing.Store(false)
+		err := r.postObserved(ctx)
+		r.obsMu.Lock()
+		defer r.obsMu.Unlock()
+		switch {
+		case err != nil && (r.observedErr == "" || r.observedErr != err.Error()):
+			r.observedErr = err.Error()
+			r.logf("reporting this machine's sessions: %v", err)
+		case err == nil && r.observedErr != "":
+			r.observedErr = ""
+			r.logf("reporting this machine's sessions again")
+		}
+	}()
+}
+
+// homeRE finds a path under a person's home folder in free text.
+var homeRE = regexp.MustCompile(`(?:/Users|/home)/[^/\s"'` + "`" + `]+`)
+
+// homeless says paths under a home folder from ~, so free text that leaves
+// the machine (what a session last said, a limit's words) carries no one's
+// home path.
+func homeless(s string) string {
+	if home, err := os.UserHomeDir(); err == nil && home != "" {
+		s = strings.ReplaceAll(s, home, "~")
+	}
+	return homeRE.ReplaceAllString(s, "~")
 }

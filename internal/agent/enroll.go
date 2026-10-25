@@ -70,6 +70,9 @@ type EnrollOptions struct {
 	Dir string
 	// Farm is the farm's API server as the admin's kubeconfig has it.
 	Farm *clientcmdapi.Cluster
+	// ObserveConfigDir is the enrolling person's Claude Code config folder
+	// (Enrolled.ObserveConfigDir).
+	ObserveConfigDir string
 }
 
 // Enrolled is what enrolling made or found.
@@ -89,6 +92,11 @@ type Enrolled struct {
 	// whether the CLI trusts it in BlocksEnv yet.
 	BlocksFolder  string `json:"blocksFolder,omitempty"`
 	BlocksTrusted bool   `json:"blocksTrusted"`
+	// ObserveConfigDir is the Claude Code config folder of the person who
+	// enrolled the machine, as their own shell had it ("" for the CLI's
+	// default): what the runner observes, though a service starts it
+	// without that person's environment.
+	ObserveConfigDir string `json:"observeConfigDir,omitempty"`
 }
 
 // Enroll enrolls a machine. Running it again changes nothing but the
@@ -100,7 +108,7 @@ func Enroll(ctx context.Context, c client.Client, o EnrollOptions) (Enrolled, er
 	if o.Slots <= 0 {
 		o.Slots = 1
 	}
-	e := Enrolled{Node: o.Node, Owner: o.Owner, Pool: o.Pool, Kubeconfig: filepath.Join(o.Dir, "kubeconfig"), Tokens: filepath.Join(o.Dir, "tokens")}
+	e := Enrolled{ObserveConfigDir: o.ObserveConfigDir, Node: o.Node, Owner: o.Owner, Pool: o.Pool, Kubeconfig: filepath.Join(o.Dir, "kubeconfig"), Tokens: filepath.Join(o.Dir, "tokens")}
 	if err := c.Get(ctx, types.NamespacedName{Name: HostsNamespace}, &corev1.Namespace{}); err != nil {
 		if apierrors.IsNotFound(err) {
 			return e, fmt.Errorf("the farm has no %s namespace: its host runner access is not installed (config/rbac/host-runner.yaml)", HostsNamespace)

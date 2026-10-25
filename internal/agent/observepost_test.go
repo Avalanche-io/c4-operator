@@ -37,13 +37,20 @@ func TestRunnerPostsObservedSessions(t *testing.T) {
 	r, _ := hostRunner(t, e, hostPod())
 	now := time.Date(2026, 10, 21, 3, 0, 0, 0, time.UTC)
 	r.Now, r.Node, r.Owners = func() time.Time { return now }, "laptop-1", []string{"noor"}
-	r.observeTick(ctx)
+	// reports are made beside the heartbeat: wait for each
+	tick := func() {
+		r.observeTick(ctx)
+		for deadline := time.Now().Add(5 * time.Second); r.observing.Load() && time.Now().Before(deadline); {
+			time.Sleep(time.Millisecond)
+		}
+	}
+	tick()
 	if len(posts) != 0 {
 		t.Fatal("posted without --observe")
 	}
 	r.Observe, r.HUD, r.ObserveConfigDir, r.HUDToken = true, hud.URL, e.configDir, func() string { return "tok" }
-	r.observeTick(ctx)
-	r.observeTick(ctx) // within the minute: nothing more
+	tick()
+	tick() // within the minute: nothing more
 	if len(posts) != 1 || path != "/api/v1/nodes/laptop-1/observed" || auth != "Bearer tok" {
 		t.Fatalf("%d posts to %s with %q", len(posts), path, auth)
 	}
@@ -58,7 +65,7 @@ func TestRunnerPostsObservedSessions(t *testing.T) {
 		t.Fatalf("report %+v", posts[0])
 	}
 	now = now.Add(time.Minute)
-	r.observeTick(ctx)
+	tick()
 	if len(posts) != 2 {
 		t.Fatalf("%d posts after a minute", len(posts))
 	}

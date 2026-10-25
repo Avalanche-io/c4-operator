@@ -68,18 +68,27 @@ Each session gets:
 - **its workers:** each subagent or teammate it started is a row of its own,
   right after it, read from the session's `subagents` folder (each one's
   transcript and `.meta.json`): `parent` (the session, or the worker that
-  started it), `kind` (`subagent` or `teammate`), `description` (the line
-  its starter gave it, never its prompt), its state in a word (`working`
-  while its launch is open and its session runs, `done`, `failed`,
-  `stopped` when its session stopped first), and what it has used. A
-  finished worker is listed for an hour; older ones are counted on its
-  session's row (`workersDone`).
+  started it), `kind` (`subagent`, or `teammate` when its records name a
+  team), `description` (the line its starter gave it, never its prompt),
+  `agentType`, `model` and `depth`, its state in a word, and what it has
+  used. The words: `working` while its launch is open and its session
+  runs; `waiting`, with `waitsOn`, at a permission prompt (`person`) or
+  after asking its lead a question (`lead`); `idle`, a teammate with
+  nothing under way; `done`; `failed`; `stopped` when its session, or the
+  run that launched it, ended first. A finished worker is listed for an
+  hour; older ones are counted on its session's row (`workersDone`), and
+  the session's `backgroundOpen` leaves out its workers listed. A session
+  that ran workflow agents says so (`workflowsNotShown`); they are not read
+  yet.
 - **the background sessions it started:** one started with `claude --bg`
   through a session's Bash tool is listed after that session, with it as
   `parent` and `parentClaimed: true`. Nothing records which session a launch
-  started, so the link is a match: a launch within 30 seconds before the
-  session started, the one that names it (`-n`, `--name`) when there are
-  several, and none when it is unclear.
+  started, so the link is a match: one launch to one session, in the folder
+  the command ran in, started between the call and its result, never a
+  session the farm runs; a launch naming a session (`-n`, `--name`) takes
+  only that name, and unnamed launches take the rest in the order they
+  started. Only a command that is `claude` itself counts, not one that
+  mentions it.
 
 Without `--all` it lists the sessions that are running, and the ones that
 failed within the last day; an older failure is at rest. `--json` gives the same rows, with the machine's name, for a program

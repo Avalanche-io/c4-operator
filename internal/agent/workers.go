@@ -4,9 +4,9 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/work/tokens"
@@ -16,9 +16,10 @@ import (
 // subagent has its own transcript beside the session's, in
 // <session>/subagents/agent-<id>.jsonl, and a .meta.json naming its type,
 // its description, the tool call that started it (toolUseId), whether it
-// ran in the background, whether it finished, and for a nested one the
-// agent that started it (parentAgentId). Teammates have a name and no tool
-// call. Nothing is asked of the CLI; observing still only reads.
+// ran in the background, whether it finished, how deep it was started,
+// and for a nested one the agent that started it (parentAgentId). A
+// teammate's transcript says so in its records (teamName, agentName).
+// Nothing is asked of the CLI; observing still only reads.
 
 // Kinds of a worker row (Observed.Kind), beside a session's own.
 const (
@@ -26,120 +27,219 @@ const (
 	KindTeammate = "teammate"
 )
 
+// WordWaiting is a worker's word while it waits on someone (WaitsOn): its
+// person, at a permission prompt, or its lead, after a question.
+const WordWaiting = "waiting"
+
 // FinishedWorkersShownFor is how long a finished worker is listed without
 // --all; older ones are counted on their session's row (WorkersDone).
 const FinishedWorkersShownFor = time.Hour
 
+// WorkerQuietAfter is how long a worker's transcript may stand still before
+// a call at its end is taken for a prompt waiting on someone, and a
+// teammate with nothing under way for idle.
+const WorkerQuietAfter = 30 * time.Second
+
 type workerMeta struct {
-	AgentType     string `json:"agentType"`
-	Description   string `json:"description"`
-	Name          string `json:"name"`
-	ToolUseID     string `json:"toolUseId"`
-	SpawnDepth    int    `json:"spawnDepth"`
-	RequestShape  string `json:"requestShape"`
-	Finished      *bool  `json:"finished"`
-	ParentAgentID string `json:"parentAgentId"`
+	AgentType             string `json:"agentType"`
+	Description           string `json:"description"`
+	Name                  string `json:"name"`
+	Model                 string `json:"model"`
+	ToolUseID             string `json:"toolUseId"`
+	SpawnDepth            int    `json:"spawnDepth"`
+	RequestShape          string `json:"requestShape"`
+	RequestNonInteractive *bool  `json:"requestNonInteractive"`
+	Finished              *bool  `json:"finished"`
+	ParentAgentID         string `json:"parentAgentId"`
+}
+
+func (m workerMeta) finished() bool { return m.Finished != nil && *m.Finished }
+
+// interactive reports whether the worker could put a prompt before its
+// person: one in the foreground of a session that has one.
+func (m workerMeta) interactive() bool {
+	return m.RequestShape != "background" && (m.RequestNonInteractive == nil || !*m.RequestNonInteractive)
+}
+
+// metaCache keeps each .meta.json as last read, by its time, so a session
+// with hundreds of finished workers is not read again each minute.
+var metaCache = struct {
+	sync.Mutex
+	m map[string]cachedMeta
+}{m: map[string]cachedMeta{}}
+
+type cachedMeta struct {
+	mod  time.Time
+	meta workerMeta
+	used time.Time
+}
+
+func readMeta(path string, now time.Time) (workerMeta, bool) {
+	info, err := os.Stat(path)
+	if err != nil {
+		return workerMeta{}, false
+	}
+	metaCache.Lock()
+	defer metaCache.Unlock()
+	if c, ok := metaCache.m[path]; ok && c.mod.Equal(info.ModTime()) {
+		c.used = now
+		metaCache.m[path] = c
+		return c.meta, true
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return workerMeta{}, false
+	}
+	var m workerMeta
+	if json.Unmarshal(b, &m) != nil {
+		return workerMeta{}, false
+	}
+	for k, c := range metaCache.m {
+		if now.Sub(c.used) > ScanForgetAfter {
+			delete(metaCache.m, k)
+		}
+	}
+	metaCache.m[path] = cachedMeta{mod: info.ModTime(), meta: m, used: now}
+	return m, true
+}
+
+type worker struct {
+	id      string
+	meta    workerMeta
+	tr      string
+	info    os.FileInfo
+	scan    sessionScan
+	scanned bool
+}
+
+func (w *worker) scanOf() sessionScan {
+	if !w.scanned && w.info != nil {
+		w.scan, w.scanned = scanSessionCached(w.tr, time.Time{}, w.info), true
+	}
+	return w.scan
 }
 
 // workersOf lists the workers of the session row o (its transcript
 // scanned as sc), each as a row whose Parent is the session or the worker
 // that started it. Without all, a finished worker is listed only for
-// FinishedWorkersShownFor; the rest are counted in o.WorkersDone.
+// FinishedWorkersShownFor; the rest are counted in o.WorkersDone. The
+// session's BackgroundOpen then counts only background work that is not a
+// worker listed here.
 func workersOf(o *Observed, sc sessionScan, now time.Time, all bool) []Observed {
 	if o.Transcript == "" {
 		return nil
 	}
-	dir := filepath.Join(strings.TrimSuffix(o.Transcript, ".jsonl"), "subagents")
+	base := strings.TrimSuffix(o.Transcript, ".jsonl")
+	if isDir(filepath.Join(base, "workflows")) {
+		o.WorkflowsNotShown = true
+	}
+	dir := filepath.Join(base, "subagents")
 	metas, _ := filepath.Glob(filepath.Join(dir, "agent-*.meta.json"))
 	if len(metas) == 0 {
 		return nil
 	}
-	type worker struct {
-		id   string
-		meta workerMeta
-		tr   string
-		info os.FileInfo
-		scan sessionScan
-	}
-	ws := make([]*worker, 0, len(metas))
+	var order []*worker
 	byID := map[string]*worker{}
 	for _, m := range metas {
-		b, err := os.ReadFile(m)
-		if err != nil {
+		meta, ok := readMeta(m, now)
+		if !ok {
 			continue
 		}
-		w := &worker{id: strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "agent-"), ".meta.json")}
-		if json.Unmarshal(b, &w.meta) != nil {
-			continue
-		}
+		w := &worker{id: strings.TrimSuffix(strings.TrimPrefix(filepath.Base(m), "agent-"), ".meta.json"), meta: meta}
 		w.tr = filepath.Join(dir, "agent-"+w.id+".jsonl")
-		info, err := os.Stat(w.tr)
-		if err == nil {
+		if info, err := os.Stat(w.tr); err == nil {
 			w.info = info
 		}
-		finished := w.meta.Finished != nil && *w.meta.Finished
-		if !all && (finished || !o.Running) && w.meta.ParentAgentID == "" && (w.info == nil || now.Sub(w.info.ModTime()) > FinishedWorkersShownFor) {
-			// done and old: counted, not read
-			o.WorkersDone++
-			continue
-		}
-		if w.info != nil {
-			w.scan = scanSessionCached(w.tr, time.Time{}, w.info)
-		}
-		ws, byID[w.id] = append(ws, w), w
+		order, byID[w.id] = append(order, w), w
+	}
+	var leadStart time.Time
+	if o.StartedAt != nil {
+		leadStart = *o.StartedAt
 	}
 	var out []Observed
-	for _, w := range ws {
-		parentScan, parentRunning, parent := sc, o.Running, o.Session
-		if p := byID[w.meta.ParentAgentID]; p != nil {
-			parentScan, parent = p.scan, p.id
+	listedBackground := 0
+	for _, w := range order {
+		old := w.info == nil || now.Sub(w.info.ModTime()) > FinishedWorkersShownFor
+		if !all && old && (w.meta.finished() || !o.Running) {
+			o.WorkersDone++ // done and old: counted, not read
+			continue
 		}
-		row := Observed{Session: w.id, Name: w.meta.Description, Cwd: o.Cwd, Parent: parent, Description: w.meta.Description, Kind: KindSubagent}
-		if w.info != nil {
-			row.Transcript = w.tr
+		own := w.scanOf()
+		// its starter: the session, or the worker that started it, read
+		// even when that one is old and not listed itself
+		parent, parentScan, parentRunning := o.Session, sc, o.Running
+		if id := w.meta.ParentAgentID; id != "" {
+			parent, parentScan = id, sessionScan{}
+			if p := byID[id]; p != nil {
+				parentScan = p.scanOf()
+				parentRunning = o.Running && !p.meta.finished()
+			}
 		}
-		if w.meta.Name != "" && w.meta.ToolUseID == "" {
-			row.Kind, row.Name = KindTeammate, w.meta.Name
+		row := Observed{Session: w.id, Name: w.meta.Description, Cwd: o.Cwd, Parent: parent, Description: w.meta.Description,
+			Kind: KindSubagent, AgentType: w.meta.AgentType, Model: w.meta.Model, Depth: max(w.meta.SpawnDepth, 1)}
+		teammate := own.teamName != "" || own.agentName != ""
+		if teammate {
+			row.Kind = KindTeammate
+			if own.agentName != "" {
+				row.Name = own.agentName
+			}
 		}
 		if w.info != nil {
 			t := w.info.ModTime()
-			row.LastActive, row.TurnAge = &t, ageWords(now.Sub(t))
+			row.Transcript, row.LastActive, row.TurnAge = w.tr, &t, ageWords(now.Sub(t))
 		}
-		if len(w.scan.usage) > 0 {
-			row.Usage = &ObservedUse{Models: w.scan.usage}
-			for _, m := range w.scan.usage {
+		if len(own.usage) > 0 {
+			row.Usage = &ObservedUse{Models: own.usage}
+			for _, m := range own.usage {
 				row.Weighted += tokens.Weighted(m.Model, tokens.Counts{Input: m.InputTokens, Output: m.OutputTokens, CacheRead: m.CacheReadTokens, CacheWrite: m.CacheWriteTokens})
 			}
 		}
-		ended := w.meta.Finished != nil && *w.meta.Finished
+		// one launched before its session's process started was the last
+		// run's: what the session does now cannot end it
+		beforeResume := parent == o.Session && !leadStart.IsZero() && !own.firstAt.IsZero() && own.firstAt.Before(leadStart)
+		var ended bool
 		switch {
-		case ended:
-		case w.meta.ToolUseID == "":
-			// a teammate: its own transcript is all there is
+		case w.meta.finished():
+			ended = true
+		case teammate:
 			ended = !parentRunning
 		case w.meta.RequestShape == "background":
-			ended = !parentScan.openBackground(w.meta.ToolUseID)
+			ended = !beforeResume && !parentScan.openBackground(w.meta.ToolUseID)
 		default:
 			ended = parentScan.results[w.meta.ToolUseID]
 		}
+		quiet := w.info == nil || now.Sub(w.info.ModTime()) > WorkerQuietAfter
 		switch {
-		case ended && w.scan.lastError != "":
+		case ended && own.lastError != "":
 			row.Word = WordFailed
 		case ended:
 			row.Word = WordDone
-		case parentRunning:
-			row.Word, row.Running = WordWorking, true
-			row.BackgroundOpen = len(w.scan.background)
-		default:
-			// its session stopped with it still under way
+		case !parentRunning || beforeResume:
+			// its session, or the run that launched it, ended first
 			row.Word = WordStopped
+		case len(own.pendingTools) > 0 && quiet && w.meta.interactive():
+			row.Word, row.Running, row.WaitsOn = WordWaiting, true, "person"
+			row.NeedsYou = "it is waiting for your permission to run " + strings.Join(own.pendingTools, ", ")
+		case teammate && quiet && len(own.pendingTools) == 0:
+			row.Word, row.Running = WordIdle, true
+			if asks(own.lastText) {
+				row.Word, row.WaitsOn = WordWaiting, "lead"
+			}
+		default:
+			row.Word, row.Running = WordWorking, true
+			row.BackgroundOpen = len(own.background)
 		}
-		if !all && !row.Running && (row.LastActive == nil || now.Sub(*row.LastActive) > FinishedWorkersShownFor) {
+		if !all && !row.Running && old {
 			o.WorkersDone++
 			continue
 		}
+		if row.Running && parent == o.Session && w.meta.RequestShape == "background" && parentScan.openBackground(w.meta.ToolUseID) {
+			listedBackground++
+		}
 		out = append(out, row)
 	}
+	// background work the session started, less the workers listed here
+	o.BackgroundOpen = max(0, o.BackgroundOpen-listedBackground)
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].Running != out[j].Running {
 			return out[i].Running
@@ -158,84 +258,4 @@ func (s sessionScan) openBackground(toolUseID string) bool {
 		}
 	}
 	return false
-}
-
-// A background session a lead starts runs `claude --bg ...` through its
-// Bash tool. Neither the transcript nor the CLI records which session that
-// call started, so the link is a match: a launch within launchMatch before
-// the session started, the one naming it (-n or --name) when several do.
-// Its row says so (ParentClaimed).
-
-// launchMatch is how long before a background session started a lead's
-// launch may be, to be taken for its start.
-const launchMatch = 30 * time.Second
-
-type bgLaunch struct {
-	At   time.Time
-	Name string // its -n or --name, when it gives one
-}
-
-var claudeBg = regexp.MustCompile(`(?:^|[\s;&|(])claude\s[^;&|]*--bg\b`)
-var launchName = regexp.MustCompile(`(?:-n|--name)(?:=|\s+)(?:"([^"]+)"|'([^']+)'|(\S+))`)
-
-// claudeLaunches are the claude --bg commands in an assistant message's
-// Bash calls.
-func claudeLaunches(content json.RawMessage, at time.Time) []bgLaunch {
-	var parts []struct {
-		Type  string `json:"type"`
-		Name  string `json:"name"`
-		Input struct {
-			Command string `json:"command"`
-		} `json:"input"`
-	}
-	if json.Unmarshal(content, &parts) != nil {
-		return nil
-	}
-	var out []bgLaunch
-	for _, p := range parts {
-		if p.Type != "tool_use" || p.Name != "Bash" {
-			continue
-		}
-		for _, loc := range claudeBg.FindAllStringIndex(p.Input.Command, -1) {
-			l := bgLaunch{At: at}
-			if m := launchName.FindStringSubmatch(p.Input.Command[loc[0]:]); m != nil {
-				l.Name = m[1] + m[2] + m[3]
-			}
-			out = append(out, l)
-		}
-	}
-	return out
-}
-
-// claimParents links each background session the CLI lists with no parent
-// to the session whose launch most likely started it.
-func claimParents(rows []Observed, scans map[string]sessionScan) {
-	for i := range rows {
-		b := &rows[i]
-		if b.Parent != "" || b.Kind != "background" || b.StartedAt == nil {
-			continue
-		}
-		var named, near []string
-		for session, sc := range scans {
-			if session == b.Session {
-				continue
-			}
-			for _, l := range sc.bgLaunches {
-				d := b.StartedAt.Sub(l.At)
-				if d < -5*time.Second || d > launchMatch {
-					continue
-				}
-				near = append(near, session)
-				if l.Name != "" && l.Name == b.Name {
-					named = append(named, session)
-				}
-			}
-		}
-		switch {
-		case len(named) == 1:
-			b.Parent, b.ParentClaimed = named[0], true
-		case len(named) == 0 && len(near) == 1:
-			b.Parent, b.ParentClaimed = near[0], true
-		}
-	}
 }

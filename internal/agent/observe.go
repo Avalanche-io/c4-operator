@@ -50,11 +50,19 @@ type Observed struct {
 	// is the one line its starter gave it. WaitsOn is "lead" or "person"
 	// when it waits on one of them. WorkersDone, on a session's row, counts
 	// its finished workers not listed (workers.go).
-	Parent        string `json:"parent,omitempty"`
-	ParentClaimed bool   `json:"parentClaimed,omitempty"`
-	Description   string `json:"description,omitempty"`
-	WaitsOn       string `json:"waitsOn,omitempty"`
-	WorkersDone   int    `json:"workersDone,omitempty"`
+	// AgentType, Model and Depth, on a worker's row, are its agent type,
+	// the model it was asked for and how deep it was started (1: by the
+	// session). WorkflowsNotShown, on a session's row, says it ran workflow
+	// agents, which observing does not read yet.
+	AgentType         string `json:"agentType,omitempty"`
+	Model             string `json:"model,omitempty"`
+	Depth             int    `json:"depth,omitempty"`
+	WorkflowsNotShown bool   `json:"workflowsNotShown,omitempty"`
+	Parent            string `json:"parent,omitempty"`
+	ParentClaimed     bool   `json:"parentClaimed,omitempty"`
+	Description       string `json:"description,omitempty"`
+	WaitsOn           string `json:"waitsOn,omitempty"`
+	WorkersDone       int    `json:"workersDone,omitempty"`
 	// Weighted is what it has used in input-equivalent tokens, each model's
 	// counts weighted as the farm weighs them (work/tokens), so every
 	// reader shows one number.
@@ -186,7 +194,7 @@ func (h *Harness) Observe(ctx context.Context, configDir string, all bool, now t
 	for i := range out {
 		bySession[out[i].Session] = scans[i]
 	}
-	claimParents(out, bySession)
+	claimParents(out, bySession, now)
 	// each session's workers right after it, then the sessions it started
 	rows := make([]Observed, 0, len(out))
 	placed := map[int]bool{}
@@ -340,11 +348,15 @@ type sessionScan struct {
 	pendingTools      []string        // tools called at the end with no result yet
 	results           map[string]bool // tool calls that have their result
 	bgLaunches        []bgLaunch      // claude --bg commands it ran
+	firstAt           time.Time       // its first record's time
+	teamName          string          // a teammate's team, from its records
+	agentName         string          // a teammate's name, from its records
 }
 
 var scanCache = struct {
 	sync.Mutex
-	m map[string]*scanner
+	m     map[string]*scanner
+	swept time.Time
 }{m: map[string]*scanner{}}
 
 // scanSessionCached scans a transcript as it grows: a transcript is only
@@ -352,21 +364,40 @@ var scanCache = struct {
 // one, never the whole file again. One that shrank, or a session whose
 // process started anew, is read from its start.
 func scanSessionCached(path string, started time.Time, info os.FileInfo) sessionScan {
+	now := time.Now()
 	scanCache.Lock()
+	if now.Sub(scanCache.swept) > scanSweepEvery {
+		// a transcript no one asked about for a day is forgotten
+		for k, c := range scanCache.m {
+			if now.Sub(c.used) > ScanForgetAfter {
+				delete(scanCache.m, k)
+			}
+		}
+		scanCache.swept = now
+	}
 	sc := scanCache.m[path]
-	if sc == nil || !sc.started.Equal(started) || info.Size() < sc.offset {
+	if sc == nil || !sc.started.Equal(started) || info.Size() < sc.offset || (sc.info != nil && !os.SameFile(sc.info, info)) {
+		// new, or a session started anew, or a file shorter or replaced
 		sc = newScanner(path, started)
 		scanCache.m[path] = sc
 	}
+	sc.used = now
 	scanCache.Unlock()
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
 	if info.Size() != sc.size || !info.ModTime().Equal(sc.mod) {
 		sc.readMore()
-		sc.size, sc.mod = info.Size(), info.ModTime()
+		sc.size, sc.mod, sc.info = info.Size(), info.ModTime(), info
 	}
 	return sc.result()
 }
+
+// ScanForgetAfter is how long a transcript's scan is kept unasked for;
+// scanSweepEvery how often old ones are looked for.
+const (
+	ScanForgetAfter = 24 * time.Hour
+	scanSweepEvery  = time.Hour
+)
 
 // scanSession reads a transcript once for everything observing shows.
 func scanSession(path string, started time.Time) sessionScan {
@@ -389,6 +420,12 @@ type scanner struct {
 	by      map[string]*ModelUsage
 	order   []string
 	pending map[string]string // tool use id -> tool name
+	info    os.FileInfo       // the file last read, to know it again
+	used    time.Time         // when it was last asked for
+	// launchIdx finds a claude --bg launch by its call; shared is the
+	// results map last handed out, copied again only once it grows.
+	launchIdx map[string]int
+	shared    map[string]bool
 }
 
 func newScanner(path string, started time.Time) *scanner {
@@ -427,9 +464,20 @@ func (sc *scanner) line(line []byte) {
 		Error             string          `json:"error"`
 		ToolUseResult     json.RawMessage `json:"toolUseResult"`
 		Message           json.RawMessage `json:"message"`
+		TeamName          string          `json:"teamName"`
+		AgentName         string          `json:"agentName"`
 	}
 	if json.Unmarshal(line, &rec) != nil {
 		return
+	}
+	if s.firstAt.IsZero() && !rec.Timestamp.IsZero() {
+		s.firstAt = rec.Timestamp
+	}
+	if s.teamName == "" && rec.TeamName != "" {
+		s.teamName = rec.TeamName
+	}
+	if s.agentName == "" && rec.AgentName != "" {
+		s.agentName = rec.AgentName
 	}
 	sc.bg.feedRecord(line, rec.Type, rec.Timestamp, rec.Message, rec.ToolUseResult)
 	var msg struct {
@@ -512,7 +560,13 @@ func (sc *scanner) line(line []byte) {
 			}
 		}
 		if bytes.Contains(msg.Content, []byte("--bg")) {
-			s.bgLaunches = append(s.bgLaunches, claudeLaunches(msg.Content, rec.Timestamp)...)
+			for _, l := range claudeLaunches(msg.Content, rec.Timestamp) {
+				if sc.launchIdx == nil {
+					sc.launchIdx = map[string]int{}
+				}
+				sc.launchIdx[l.ID] = len(s.bgLaunches)
+				s.bgLaunches = append(s.bgLaunches, l)
+			}
 		}
 	case "user":
 		for _, p := range parts {
@@ -522,6 +576,9 @@ func (sc *scanner) line(line []byte) {
 					s.results = map[string]bool{}
 				}
 				s.results[p.ToolUseID] = true
+				if i, ok := sc.launchIdx[p.ToolUseID]; ok {
+					s.bgLaunches[i].ResultAt = rec.Timestamp
+				}
 			}
 		}
 		if personSpoke(msg.Content, parts) {
@@ -546,12 +603,13 @@ func (sc *scanner) result() sessionScan {
 		}
 	}
 	sort.Strings(s.pendingTools)
-	if sc.s.results != nil {
-		s.results = make(map[string]bool, len(sc.s.results))
+	if len(sc.s.results) != len(sc.shared) {
+		sc.shared = make(map[string]bool, len(sc.s.results))
 		for k, v := range sc.s.results {
-			s.results[k] = v
+			sc.shared[k] = v
 		}
 	}
+	s.results = sc.shared
 	s.bgLaunches = append([]bgLaunch(nil), sc.s.bgLaunches...)
 	return s
 }
