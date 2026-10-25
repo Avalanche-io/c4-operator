@@ -1452,9 +1452,11 @@ installed the list is empty.
 
 ## The farm binding
 
-The farm binding names whom the farm's records accrue to. The installer
-names the farm's owner once, at install (`c4 farm up --owner`), and the
-HUD binds every deployment of the farm to that owner. The binding is a
+The farm binding names whom the farm's records accrue to. `c4 farm up
+--owner` names a local farm's one person; the farm binding, a signed
+record, follows when `up` sends it (it does not yet). The installer binds
+the farm once, through this route, and the HUD binds every deployment of
+the farm to that owner. The binding is a
 `sign` grant over every record kind (task, resolution, decision, job,
 control, import and ingest). It is signed as a control record of kind
 `bind`, and kept as the cluster-scoped `DeploymentBinding` named `farm`.
@@ -1472,8 +1474,8 @@ follows this one, which a farm can't make yet.
 first binding names the farm. `runFor`, on a managed farm, is the party
 the owner runs it for: the provider owns the farm, and the record says
 who it is run for. `onePerson` says the farm is the owner's alone (see
-below); only `c4 farm up` says it, for a local farm, and it never goes
-with `runFor` (`400`).
+below); only a local farm's bind request says it, and it never goes with
+`runFor` (`400`).
 
 Who may bind:
 - A person signed in who may create `deploymentbindings`.

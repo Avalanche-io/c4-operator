@@ -7,13 +7,13 @@ import (
 // A DeploymentBinding says who owns deployments of the farm, and so whom
 // the records they sign accrue to: a sign grant from the owner to the
 // deployments (DESIGN.md section 9.2). The farm binding, named farm,
-// covers every deployment of the farm (to: <farm>/*) and is made at
-// install, when c4 farm up names the farm's owner. Bindings for single
+// covers every deployment of the farm (to: <farm>/*) and is made once,
+// when the installer binds the farm to its owner. Bindings for single
 // deployments (a node another party owns, a person's own Mac as a host
 // runner) refine it, never widen it.
 //
 // People never write one. The HUD makes it for the installer
-// (POST /api/v1/farm/binding, c4 farm up --owner), signs it as a control
+// (POST /api/v1/farm/binding), signs it as a control
 // record, and is the only writer (the c4-deployment-bindings policy). A
 // binding never changes: a new owner is a new binding that follows it.
 // +kubebuilder:object:root=true
@@ -48,7 +48,7 @@ type DeploymentBindingSpec struct {
 	// +optional
 	RunFor string `json:"runFor,omitempty"`
 	// OnePerson says the farm is one person's: the installer said so when
-	// they bound it (c4 farm up, on a local farm, and nowhere else), and
+	// they bound it (a local farm's bind request, and nowhere else), and
 	// the owner then holds every role there. Being bound to someone is
 	// not that: a shared farm's binding leaves it unset, and its people
 	// keep their own roles and waits. It never goes with RunFor.

@@ -21,7 +21,7 @@ import (
 )
 
 // The farm binding (DESIGN.md section 9.2): the installer names the farm's
-// owner once, at install (c4 farm up --owner), and the HUD binds every
+// owner once (POST /api/v1/farm/binding), and the HUD binds every
 // deployment of the farm to them, so the records the farm signs accrue to
 // someone. It is a signed control record (action bind) and a
 // DeploymentBinding named farm, which only the HUD writes and nobody
@@ -30,7 +30,7 @@ import (
 // built yet.
 //
 // Bound to someone is not one person: only a binding the installer marks
-// onePerson (c4 farm up, on a local farm) makes its owner the farm's one
+// onePerson (a local farm's bind request) makes its owner the farm's one
 // person, who holds every role. A shared farm bound to lee leaves lee in
 // lee's own roles, and stand-in to the farm's policy.
 
@@ -85,7 +85,7 @@ func (s *Server) handleFarmBinding(w http.ResponseWriter, r *http.Request) {
 	case err != nil:
 		fail(w, http.StatusInternalServerError, "%v", err)
 	case b == nil:
-		fail(w, http.StatusNotFound, "this farm has no owner bound yet: c4 farm up --owner names one")
+		fail(w, http.StatusNotFound, "this farm has no owner bound yet: the installer binds it (POST /api/v1/farm/binding)")
 	default:
 		writeJSON(w, http.StatusOK, api.FarmBindingResponse{OK: true, Binding: bindingView(b), Record: b.Spec.Record})
 	}

@@ -1126,14 +1126,16 @@ project whose store holds the content. A record that verifies but fails the
 policy is reported as such, so a node cannot speak for another node or for
 the queue.
 
-**The farm binding.** At install the farm's owner is named (`c4 farm up
---owner`). The HUD then binds every deployment of the farm to them: a
+**The farm binding.** `c4 farm up --owner` names a local farm's one
+person; the farm binding, a signed record, follows when the installer
+binds the farm (`POST /api/v1/farm/binding`; `up` does not send it yet).
+The HUD then binds every deployment of the farm to the owner: a
 `sign` grant over every record kind, made as a signed `bind` control
 record. It is kept as the DeploymentBinding `farm`, which only the HUD
 writes and nothing changes. A different owner later is an owner change, a
 new binding that follows the old one. Being bound to someone is not using
 the farm alone: who holds every role comes from a binding the installer
-marks `onePerson` (only `c4 farm up`, on a local farm, does), part of the
+marks `onePerson` (only a local farm's bind request does), part of the
 signed record, and from `--single-person-farm` only on a farm with no
 binding. A shared farm bound to a person leaves stand-in to its policy. Bindings for single deployments, such as a node another
 party owns, refine it later.

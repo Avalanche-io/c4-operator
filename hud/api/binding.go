@@ -12,7 +12,7 @@ type FarmBindingRequest struct {
 	// RunFor, on a managed farm, is the party the owner runs it for.
 	RunFor string `json:"runFor,omitempty"`
 	// OnePerson says the farm is one person's, the owner's, who then holds
-	// every role on it. Only c4 farm up says it, for a local farm; a
+	// every role on it. Only a local farm's bind request says it; a
 	// shared farm's binding leaves it unset. It never goes with RunFor.
 	OnePerson bool `json:"onePerson,omitempty"`
 }

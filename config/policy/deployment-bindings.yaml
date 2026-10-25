@@ -21,7 +21,7 @@ spec:
       resources: [deploymentbindings]
   validations:
   - expression: request.userInfo.username == 'system:serviceaccount:c4-system:c4-manager'
-    message: a farm's owner is bound in the HUD (c4 farm up --owner), never written directly
+    message: a farm's owner is bound in the HUD (POST /api/v1/farm/binding), never written directly
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
