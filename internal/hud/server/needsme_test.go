@@ -77,8 +77,8 @@ func TestNeedsMeIsOnlyWhatNeedsMe(t *testing.T) {
 	}
 
 	// The installer of a single-person farm is every role.
-	s.SinglePerson = "joshua"
-	solo := list(&api.Viewer{User: "joshua", All: true, Role: "producer"})
+	s.SinglePerson = "noor"
+	solo := list(&api.Viewer{User: "noor", All: true, Role: "producer"})
 	for _, w := range []string{"decision:show/sh010/2", "decision:show/sh010/5", "question:show/sh020/0"} {
 		found := false
 		for _, id := range ids(solo) {
