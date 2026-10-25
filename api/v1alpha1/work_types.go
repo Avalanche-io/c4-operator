@@ -173,6 +173,16 @@ const (
 	// TaintUnprovisioned marks a node that stands in for capacity not yet
 	// provisioned (the kind capacity simulator, section 10.12).
 	TaintUnprovisioned = "c4.avalanche.io/unprovisioned"
+	// TaintHostRunner is on every host runner's Node (c4-agent) and keeps
+	// ordinary pods off it. A host pool tolerates it; no other pool does.
+	TaintHostRunner = "c4.avalanche.io/host-runner"
+	// LabelHost on a host runner's Node is the Node's own name; the pool
+	// its machine was enrolled with selects it by this label.
+	LabelHost = "c4.avalanche.io/host"
+	// AnnotationOwnerBasis on a unit pod created on a machine no one has
+	// enrolled through the HUD says whose word its owner came from (its
+	// pool's), so nothing reads it as an enrolled machine's.
+	AnnotationOwnerBasis = "c4.avalanche.io/owner-basis"
 )
 
 // WorkJobSpec declares a job: its class, its units' parameters, its

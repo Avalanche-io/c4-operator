@@ -115,7 +115,7 @@ func TestBundleOnHostRunner(t *testing.T) {
 	host := ns + "-laptop-1"
 	sel := map[string]string{"c4.avalanche.io/host": host}
 	pool := &c4v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "agent-" + ns}, Spec: c4v1.PoolSpec{
-		NodeSelector: sel, SlotsPerNode: 2,
+		NodeSelector: sel, SlotsPerNode: 2, Owners: []string{"noor"},
 		Tolerations: []corev1.Toleration{{Key: agent.TaintHostRunner, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}}}
 	if err := k8s.Create(ctx, pool); err != nil {
 		t.Fatal(err)
@@ -372,7 +372,7 @@ func TestPowerCapShedsAtTurnBoundary(t *testing.T) {
 	}
 	host := ns + "-laptop-1"
 	sel := map[string]string{"c4.avalanche.io/host": host}
-	pool := &c4v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "agent-" + ns}, Spec: c4v1.PoolSpec{NodeSelector: sel, SlotsPerNode: 2,
+	pool := &c4v1.Pool{ObjectMeta: metav1.ObjectMeta{Name: "agent-" + ns}, Spec: c4v1.PoolSpec{NodeSelector: sel, SlotsPerNode: 2, Owners: []string{"noor"},
 		Tolerations: []corev1.Toleration{{Key: agent.TaintHostRunner, Operator: corev1.TolerationOpExists, Effect: corev1.TaintEffectNoSchedule}}}}
 	if err := k8s.Create(ctx, pool); err != nil {
 		t.Fatal(err)

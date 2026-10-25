@@ -327,6 +327,11 @@ func TestHostRunnerWrites(t *testing.T) {
 	if err := laptop.Create(ctx, node("laptop-1", nil)); err == nil {
 		t.Fatal("a Node without the host-runner taint was created")
 	}
+	posing := node("laptop-1", taint)
+	posing.Labels["c4.avalanche.io/host"] = "workstation-2"
+	if err := laptop.Create(ctx, posing); err == nil || !strings.Contains(err.Error(), "its own name as its c4.avalanche.io/host label") {
+		t.Fatalf("a Node under another machine's host label: %v", err)
+	}
 	owned := node("laptop-1", taint)
 	owned.Annotations = map[string]string{c4v1.AnnotationNodeOwners: "noor"}
 	if err := laptop.Create(ctx, owned); err == nil {
@@ -347,6 +352,9 @@ func TestHostRunnerWrites(t *testing.T) {
 	}
 	if err := patch(laptop, mine, `{"metadata":{"labels":{"c4.avalanche.io/pool":"gpu"}}}`); err == nil {
 		t.Error("the runner moved its Node to another pool")
+	}
+	if err := patch(laptop, mine, `{"metadata":{"annotations":{"c4.avalanche.io/node-owners":"noor"}}}`); err == nil {
+		t.Error("the runner named its Node's owners")
 	}
 	if err := patch(laptop, mine, `{"spec":{"taints":null}}`); err == nil {
 		t.Error("the runner removed its taint")

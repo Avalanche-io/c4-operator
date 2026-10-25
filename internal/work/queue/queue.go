@@ -1570,8 +1570,27 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 		if tools != nil {
 			v.mem.toolsWait = ""
 		}
+		node := ""
+		if p.host {
+			var why string
+			if node, why = p.hostNode(v.job.Annotations[c4v1.AnnotationOwner], d.Slots); node == "" {
+				// The job's status says so (condition Admitted).
+				v.mem.admitWait = startWait{reason: "NoMachine", msg: why, at: now}
+				q.Log.V(1).Info("no machine for a host pool's unit", "job", key, "unit", idx, "pool", p.spec.Name, "why", why)
+				continue
+			}
+		}
 		v.mem.attempts[idx]++
 		pod := q.podFor(v, idx, v.mem.attempts[idx], p)
+		basis := ""
+		if node != "" {
+			// Created bound: no runner binds it, and kube-scheduler never
+			// sees it.
+			pod.Spec.NodeName = node
+			if basis = p.basis(node); basis != "" {
+				pod.Annotations[c4v1.AnnotationOwnerBasis] = basis
+			}
+		}
 		if ids := v.waking[idx]; len(ids) > 0 {
 			// Woken only to answer (asks.go).
 			pod.Annotations[c4v1.AnnotationWake] = strings.Join(ids, ",")
@@ -1608,6 +1627,12 @@ func (q *Queue) act(ctx context.Context, now time.Time, dec sched.Decisions, vie
 			continue
 		}
 		v.mem.admitWait, v.mem.leaseWait = startWait{}, startWait{}
+		if node != "" {
+			p.free[node] -= d.Slots
+		}
+		if basis != "" {
+			q.recordDecision(ctx, v, idx, "placed", "on "+node+" ("+basis+")", "", now)
+		}
 		v.mem.launched[idx] = now
 		if recheck != "" {
 			q.startedRecheck(ctx, v, idx, recheck, now)

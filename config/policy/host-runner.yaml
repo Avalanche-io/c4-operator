@@ -2,7 +2,9 @@
 # verbs; these policies narrow them). A runner signs in as the service
 # account c4-hosts/<node> and may touch only:
 #
-# - its own Node: create it once with the host-runner taint; afterwards
+# - its own Node: create it once with the host-runner taint, its own name
+#   as any c4.avalanche.io/host label, and no c4.avalanche.io/node-owners
+#   annotation (whose work it runs is the HUD's to write); afterwards
 #   change only the labels c4.avalanche.io/slot-limit and the annotation
 #   c4.avalanche.io/capacity-reason (its power-driven capacity), and its
 #   status (heartbeat conditions, pods capacity);
@@ -60,6 +62,10 @@ spec:
     message: a host runner's Node is created with the c4.avalanche.io/host-runner taint
   - expression: "request.operation != 'CREATE' || !('c4.avalanche.io/node-owners' in variables.annAfter)"
     message: a host runner's owners are the people who enrolled its machine, which the farm records; its runner cannot name them
+  - expression: >-
+      request.operation != 'CREATE' || !('c4.avalanche.io/host' in variables.after) ||
+      variables.after['c4.avalanche.io/host'] == variables.host
+    message: a host runner's Node carries its own name as its c4.avalanche.io/host label
   - expression: >-
       request.operation == 'CREATE' || variables.sub == 'status' || (
         object.spec == oldObject.spec &&

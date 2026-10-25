@@ -25,7 +25,7 @@ import (
 
 // TaintHostRunner keeps ordinary pods off a host runner's node; the agent
 // pool's tolerations admit member pods.
-const TaintHostRunner = "c4.avalanche.io/host-runner"
+const TaintHostRunner = c4v1.TaintHostRunner
 
 // Runner is the host runner (docs/agents/c4-agent.md, Bundles on the
 // farm): it runs the members of agent bundles as the machine's own Claude

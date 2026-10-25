@@ -273,10 +273,19 @@ sessions live. It is a host runner.
 
 **On a farm with more than one person, keep host runners to one person's
 own machines for now.** Every write a host runner makes is held to its own
-machine (its Node, its Lease, the pods bound to it), but a host runner can
-still read every pod, and bind a pending pod of anyone's to its own Node.
-Until the farm binds host pods itself and each runner reads only its own,
-a machine enrolled for one person can see another's work.
+machine (its Node, its Lease, the pods bound to it), and the farm creates
+each host pod already bound to a machine that runs its owner's work, so
+no pod waits for a runner to claim it. But a host runner can still read
+every pod: until each runner reads only its own, a machine enrolled for
+one person can see another's work.
+
+**Whose work a machine runs** is its Node's `c4.avalanche.io/node-owners`
+(a JSON list of names), which only the HUD writes, never the runner. A
+machine enrolled before that runs the work of the person its pool was
+enrolled for, when the pool has exactly one owner, and its units say so
+(`c4.avalanche.io/owner-basis`). A machine of a pool with several owners
+and no `node-owners` runs no one's work, and a job waiting for it says
+"no machine of <person>'s in pool <pool> has been enrolled".
 
 **On a local farm, don't give agent units the `c4` tool yet.** A local
 farm's HUD takes its development viewers (`?as=`) from any request that
@@ -338,7 +347,8 @@ exit status 78 and "this machine's enrollment has ended: enroll it again
 - It registers a Node for the machine, labeled `c4.avalanche.io/host=<node>`
   and tainted `c4.avalanche.io/host-runner` so only agent pods land there.
   It keeps the Node and its Lease fresh.
-- It binds member pods whose nodeSelector matches the Node. When a pod
+- It runs the member pods the farm creates on its Node (an unbound one
+  whose nodeSelector matches the Node, from an older farm, it binds). When a pod
   starts, it resumes the member's session with `c4-agent resume` (never a
   fresh one; a running member is adopted, not resumed twice). Then it
   reports the pod Running, with the member's epoch.

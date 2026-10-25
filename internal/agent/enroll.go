@@ -37,7 +37,7 @@ const (
 	// HostsNamespace holds each host runner's account.
 	HostsNamespace = "c4-hosts"
 	// LabelHost names a host runner's Node; its pool selects it.
-	LabelHost = "c4.avalanche.io/host"
+	LabelHost = c4v1.LabelHost
 	// TokenLifetime is how long each token a runner holds lasts. The
 	// runner renews each at half its life, so a machine that was off for
 	// less than half of it signs in again on its own.
