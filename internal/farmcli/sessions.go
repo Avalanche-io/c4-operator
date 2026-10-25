@@ -41,8 +41,16 @@ type row struct {
 	} `json:"usage,omitempty"`
 	// Weighted is observe's own weighted count, when it carries one: the
 	// CLI and the HUD read it ahead of their own sum, so they cannot drift.
-	Weighted *float64        `json:"weighted,omitempty"`
-	Raw      json.RawMessage `json:"-"`
+	Weighted *float64 `json:"weighted,omitempty"`
+	// Parent, on a worker's row, is the session or worker that started it;
+	// Description is the line its starter gave it; WaitsOn says whom it
+	// waits on ("lead" or "person"); WorkersDone, on a session's row,
+	// counts its finished workers observe does not list.
+	Parent      string          `json:"parent,omitempty"`
+	Description string          `json:"description,omitempty"`
+	WaitsOn     string          `json:"waitsOn,omitempty"`
+	WorkersDone int             `json:"workersDone,omitempty"`
+	Raw         json.RawMessage `json:"-"`
 }
 
 // ended is a session that is over: failed, done or stopped, or no longer
@@ -65,6 +73,26 @@ func (r row) last() time.Time {
 // oldEnded is how long ago an ended session must have last been active
 // to be history rather than state: c4 farm agents folds it into one line.
 const oldEnded = 24 * time.Hour
+
+// who names a row where it waits on the person: a worker by its line.
+func (r row) who() string {
+	if r.Parent != "" {
+		return r.workerLabel()
+	}
+	return r.label()
+}
+
+// workerLabel is a worker's line from its starter, kept short.
+func (r row) workerLabel() string {
+	l := r.Description
+	if l == "" {
+		l = r.label()
+	}
+	if len(l) > 48 {
+		l = l[:47] + "…"
+	}
+	return l
+}
 
 // label is the session's name, else its short ID.
 func (r row) label() string {
@@ -226,6 +254,22 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 		return err
 	}
 	now := o.Clock.now()
+	// workers sit under the session (or worker) that started them; the
+	// list, its sort and its folding are of the leads alone
+	listed := map[string]bool{}
+	for _, r := range rows {
+		listed[r.Session] = true
+	}
+	workers := map[string][]row{}
+	leads := rows[:0:0]
+	for _, r := range rows {
+		if r.Parent != "" && listed[r.Parent] {
+			workers[r.Parent] = append(workers[r.Parent], r)
+			continue
+		}
+		leads = append(leads, r)
+	}
+	rows = leads
 	// a session that ended a day ago or more is history, not state: one
 	// line says it is there, and --all lists it
 	var old []row
@@ -275,10 +319,7 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 	tw := tabwriter.NewWriter(o.W, 0, 4, 2, ' ', 0)
 	fmt.Fprintln(tw, "AGENT\tSTATE\tFOLDER\tUSED\tFOR")
 	var waiting []row
-	for _, r := range rows {
-		if r.Word == "needs you" || r.Word == "at its limit" {
-			waiting = append(waiting, r)
-		}
+	line := func(r row, label string) {
 		dir := r.Cwd
 		if home != "" && strings.HasPrefix(dir, home+string(filepath.Separator)) {
 			dir = "~" + dir[len(home):]
@@ -291,7 +332,34 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 		if r.StartedAt != nil {
 			age = Span(now.Sub(*r.StartedAt).Truncate(time.Minute))
 		}
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", r.label(), r.Word, dir, used, age)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\n", label, r.Word, dir, used, age)
+	}
+	// a session's live workers, indented under it (theirs under them), its
+	// finished ones folded into a count
+	var under func(parent string, done, depth int)
+	under = func(parent string, done, depth int) {
+		pad := strings.Repeat("  ", depth)
+		for _, w := range workers[parent] {
+			if w.ended() {
+				done++
+				continue
+			}
+			if w.Word == "needs you" || w.WaitsOn == "person" {
+				waiting = append(waiting, w)
+			}
+			line(w, pad+"· "+w.workerLabel())
+			under(w.Session, w.WorkersDone, depth+1)
+		}
+		if done > 0 {
+			fmt.Fprintf(tw, "%s· %s\t\t\t\t\n", pad, plural(done, "worker finished", "workers finished"))
+		}
+	}
+	for _, r := range rows {
+		if r.Word == "needs you" || r.Word == "at its limit" {
+			waiting = append(waiting, r)
+		}
+		line(r, r.label())
+		under(r.Session, r.WorkersDone, 1)
 	}
 	tw.Flush()
 	olderEnded(o, old, now)
@@ -309,17 +377,17 @@ func Sessions(ctx context.Context, o Out, a SessionsArgs) error {
 	for _, r := range waiting {
 		if r.Word == "at its limit" {
 			if r.NeedsYou != "" {
-				o.printf("%s is at its limit: %s\n", r.label(), r.NeedsYou)
+				o.printf("%s is at its limit: %s\n", r.who(), r.NeedsYou)
 				continue
 			}
-			o.printf("%s is at its limit and waits for it to reset, or for you\n", r.label())
+			o.printf("%s is at its limit and waits for it to reset, or for you\n", r.who())
 			continue
 		}
 		if r.NeedsYou != "" {
-			o.printf("%s needs you: %s\n", r.label(), r.NeedsYou)
+			o.printf("%s needs you: %s\n", r.who(), r.NeedsYou)
 			continue
 		}
-		o.printf("%s needs you.\n", r.label())
+		o.printf("%s needs you.\n", r.who())
 	}
 	return nil
 }

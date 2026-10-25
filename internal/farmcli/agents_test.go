@@ -391,3 +391,40 @@ func TestAddAgentPicksFromTheSessions(t *testing.T) {
 		t.Errorf("c4-agent was asked:\n%s", c)
 	}
 }
+
+// A lead's workers sit indented under it, their own workers under them;
+// finished ones fold into a count, and only the leads are sorted. A worker
+// waiting on the person is among what needs them.
+func TestSessionsShowTheWorkerTree(t *testing.T) {
+	agent := fakeObserve(t, `[
+{"session":"aaaa1111","name":"lead","kind":"background","running":true,"word":"working","cwd":"/tmp/repo","startedAt":"2026-10-21T07:30:00Z","workersDone":1},
+{"session":"w1","kind":"subagent","running":true,"word":"working","parent":"aaaa1111","description":"read the scheduler's tests"},
+{"session":"w2","kind":"subagent","running":true,"word":"needs you","parent":"aaaa1111","description":"rename the package","waitsOn":"person","needsYou":"Rename it to sched too?"},
+{"session":"w2a","kind":"subagent","running":true,"word":"working","parent":"w2","description":"grep the callers"},
+{"session":"w3","kind":"subagent","running":false,"word":"done","parent":"aaaa1111","description":"list the files"},
+{"session":"bbbb2222","name":"other","kind":"background","running":true,"word":"idle","cwd":"/tmp","startedAt":"2026-10-21T08:00:00Z"}]`, false)
+	now := time.Date(2026, 10, 21, 9, 0, 0, 0, time.UTC)
+	var out bytes.Buffer
+	if err := Sessions(context.Background(), Out{W: &out, Clock: Clock{Now: func() time.Time { return now }}}, SessionsArgs{Agent: agent}); err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(out.String(), "\n")
+	at := func(prefix string) int {
+		for i, l := range lines {
+			if strings.HasPrefix(l, prefix) {
+				return i
+			}
+		}
+		return -1
+	}
+	lead, w1, w2, w2a, done, other := at("lead "), at("  · read the scheduler's tests"), at("  · rename the package"), at("    · grep the callers"), at("  · 2 workers finished"), at("other ")
+	if lead < 0 || w1 != lead+1 || w2 != lead+2 || w2a != lead+3 || done != lead+4 || other != lead+5 {
+		t.Errorf("the tree (%d %d %d %d %d %d):\n%s", lead, w1, w2, w2a, done, other, out.String())
+	}
+	if at("list the files") >= 0 || at("w1 ") >= 0 {
+		t.Errorf("a finished worker or a worker as a lead:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "rename the package needs you: Rename it to sched too?") {
+		t.Errorf("the waiting worker:\n%s", out.String())
+	}
+}
