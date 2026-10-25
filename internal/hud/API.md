@@ -764,7 +764,7 @@ is, so no one enrolls a machine they do not hold.
 - **The offer:** the node's own runner posts `{ holder }` (whose Claude
   Code sign-in it uses) with its own token, and gets `{ code, expires,
   record }`: a code of eight letters (`XXXX-XXXX`, no look-alike letters)
-  that stands for 10 minutes, which the runner shows on the machine. A
+  that stands for 10 minutes, shown at the machine (`c4-agent enroll-offer`). A
   new offer replaces the last. The offer is signed (`control/v1`,
   `enroll-offer`, by the node's account).
 - **The acceptance:** the machine's holder (the person whose Claude Code

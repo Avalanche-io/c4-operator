@@ -20,7 +20,7 @@ import (
 
 // Enrolling a machine is an offer and an acceptance, as a device sign-in
 // is. The machine offers, with its own runner's token: the HUD holds a
-// short one-time code for it, which the runner shows on the machine. A
+// short one-time code for it, shown at the machine (c4-agent enroll-offer). A
 // person accepts with that code, signed in as themselves: only someone who
 // can see the machine's screen has it, which is the proof that they hold
 // the machine. The HUD then writes the Node's owners (its runner cannot)
@@ -137,7 +137,7 @@ func (s *Server) handleEnrollOffer(w http.ResponseWriter, r *http.Request) {
 }
 
 // handleNodeEnroll is POST /nodes/{node}/enroll {code}: a person accepts a
-// machine's offer, with the code it shows. They become one of its owners;
+// machine's offer, with the code shown at it. They become one of its owners;
 // the act is signed (control/v1, enroll, by and for the person, naming the
 // offer), and the HUD writes the Node's owners. When the machine's runner
 // uses someone else's sign-in, the answer says so.
@@ -179,7 +179,7 @@ func (s *Server) handleNodeEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 	s.offerMu.Unlock()
 	if !valid {
-		fail(w, http.StatusForbidden, "no standing offer from %s with that code: start its runner, which shows a new one", node)
+		fail(w, http.StatusForbidden, "no standing offer from %s with that code: on it, run c4-agent enroll-offer for a new one", node)
 		return
 	}
 	if v.User != offer.holder {
