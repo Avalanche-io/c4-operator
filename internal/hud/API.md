@@ -741,6 +741,46 @@ A host runner's report of the Claude Code sessions on its machine,
   anyone who sees the node, and never slots: the queue does not read it,
   so a person's own sessions never make the farm refuse their queued work.
 
+## GET /nodes/{node}/pods
+
+A host runner's own pods: the unit pods bound to its Node, for that node's
+runner alone (the service account `c4-hosts/<node>`; anyone else gets
+403). A host runner reads no pod from the API server, so its token reads
+nothing of anyone else's work.
+
+```
+{ node, pods: [ { pod: <the Pod as the API server has it>, job?: { name, uid, owner, grant? } } ] }
+```
+
+`job` is the WorkJob that controls the pod, matched by UID (a job made
+again under the same name is another): whose work it is, and the grant
+it was submitted under, which the runner's records name.
+
+## POST /nodes/{node}/enroll-offer and POST /nodes/{node}/enroll
+
+Enrolling a machine is an offer and an acceptance, as a device sign-in
+is, so no one enrolls a machine they do not hold.
+
+- **The offer:** the node's own runner posts `{ holder }` (whose Claude
+  Code sign-in it uses) with its own token, and gets `{ code, expires,
+  record }`: a code of eight letters (`XXXX-XXXX`, no look-alike letters)
+  that stands for 10 minutes, which the runner shows on the machine. A
+  new offer replaces the last. The offer is signed (`control/v1`,
+  `enroll-offer`, by the node's account).
+- **The acceptance:** the machine's holder (the person whose Claude Code
+  sign-in its runner uses), signed in as themselves, posts `{ code }`, or
+  `{ code, for }` to add someone else. With the standing code, once, the
+  holder, or the person they name, becomes one of the machine's owners:
+  the HUD writes the Node's `c4.avalanche.io/node-owners`, a JSON list of
+  names (its runner cannot, at its creation or after), and signs the act
+  (`control/v1`, `enroll`, by the holder, for the owner added, naming the
+  offer's record). Anyone but the holder is refused with how to be added
+  (the holder runs `c4 farm enroll <node> --for <them>`), since another
+  person's jobs spend the holder's sign-in only with the holder's consent.
+  A wrong code, a used one, an expired one, a unit or a service account
+  gets 403, and five wrong codes end the offer.
+- The queue places a person's host work only on a Node that names them.
+
 ## GET /events
 
 Server-sent events. One event type:

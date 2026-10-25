@@ -14,6 +14,12 @@ const LabelAgentMember = "c4.avalanche.io/agent-member"
 // request.)
 const LabelSlotLimit = "c4.avalanche.io/slot-limit"
 
+// AnnotationNodeOwners on a host runner's Node lists, comma-separated, the
+// people whose work it runs: each enrolled it, accepting the machine's offer
+// with its code, and the HUD wrote them. Its runner cannot set or change
+// it; the queue places a person's host work only on a Node that names them.
+const AnnotationNodeOwners = "c4.avalanche.io/node-owners"
+
 // AnnotationCapacityReason on a Node says why its slots are lowered, in
 // plain words ("power: 38 of 40 W, battery 48% on a 39 W adapter").
 const AnnotationCapacityReason = "c4.avalanche.io/capacity-reason"

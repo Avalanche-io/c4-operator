@@ -58,6 +58,8 @@ spec:
       request.operation != 'CREATE' ||
       (has(object.spec.taints) && object.spec.taints.exists(t, t.key == 'c4.avalanche.io/host-runner' && t.effect == 'NoSchedule'))
     message: a host runner's Node is created with the c4.avalanche.io/host-runner taint
+  - expression: "request.operation != 'CREATE' || !('c4.avalanche.io/node-owners' in variables.annAfter)"
+    message: a host runner's owners are the people who enrolled its machine, which the farm records; its runner cannot name them
   - expression: >-
       request.operation == 'CREATE' || variables.sub == 'status' || (
         object.spec == oldObject.spec &&

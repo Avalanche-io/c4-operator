@@ -327,12 +327,20 @@ func TestHostRunnerWrites(t *testing.T) {
 	if err := laptop.Create(ctx, node("laptop-1", nil)); err == nil {
 		t.Fatal("a Node without the host-runner taint was created")
 	}
+	owned := node("laptop-1", taint)
+	owned.Annotations = map[string]string{c4v1.AnnotationNodeOwners: "noor"}
+	if err := laptop.Create(ctx, owned); err == nil {
+		t.Fatal("a runner named its own owners")
+	}
 	mine := node("laptop-1", taint)
 	if err := laptop.Create(ctx, mine); err != nil {
 		t.Fatalf("its own Node: %v", err)
 	}
 	patch := func(c client.Client, o client.Object, body string) error {
 		return c.Patch(ctx, o, client.RawPatch(types.MergePatchType, []byte(body)))
+	}
+	if err := patch(laptop, mine, `{"metadata":{"annotations":{"c4.avalanche.io/node-owners":"noor"}}}`); err == nil {
+		t.Error("a runner added its own owners after registering")
 	}
 	if err := patch(laptop, mine, `{"metadata":{"labels":{"c4.avalanche.io/slot-limit":"1"},"annotations":{"c4.avalanche.io/capacity-reason":"on battery"}}}`); err != nil {
 		t.Errorf("slot-limit and capacity-reason: %v", err)

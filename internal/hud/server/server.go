@@ -171,6 +171,12 @@ type Server struct {
 	// machine's sessions, by node, in memory only (observed.go).
 	obsMu    sync.Mutex
 	observed map[string]observedReport
+	// offerMu guards offers: each machine's standing enrollment offer
+	// (enroll.go). They live in this HUD's memory: a restart drops them
+	// (the runner offers again), and a HUD with more than one replica must
+	// move them to an object only the HUD writes.
+	offerMu sync.Mutex
+	offers  map[string]enrollOffer
 }
 
 // Queue is what the HUD asks the work queue (*queue.Queue).
@@ -193,6 +199,9 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/snapshot", s.handleSnapshot)
 	mux.HandleFunc("GET /api/v1/needs-me", s.handleNeedsMe)
 	mux.HandleFunc("POST /api/v1/nodes/{node}/observed", s.handleObserved)
+	mux.HandleFunc("GET /api/v1/nodes/{node}/pods", s.handleHostPods)
+	mux.HandleFunc("POST /api/v1/nodes/{node}/enroll-offer", s.handleEnrollOffer)
+	mux.HandleFunc("POST /api/v1/nodes/{node}/enroll", s.handleNodeEnroll)
 	mux.HandleFunc("GET /api/v1/events", s.handleEvents)
 	mux.HandleFunc("GET /api/v1/graph", s.handleGraph)
 	mux.HandleFunc("GET /api/v1/book", s.handleBook)

@@ -1037,3 +1037,27 @@ type ForecastChange struct {
 	Start  *string `json:"start,omitempty"`
 	Exists *string `json:"exists,omitempty"`
 }
+
+// HostPods is GET /nodes/{node}/pods: the unit pods bound to a host
+// runner's Node, for that runner alone.
+type HostPods struct {
+	Node string    `json:"node"`
+	Pods []HostPod `json:"pods"`
+}
+
+// HostPod is one of them: the pod as the API server has it (JSON), and
+// what the runner needs of its job.
+type HostPod struct {
+	Pod json.RawMessage `json:"pod"`
+	Job *HostPodJob     `json:"job,omitempty"`
+}
+
+// HostPodJob is a host pod's job: its owner (whose work it is), its UID (a
+// job made again under the same name is another) and the grant it was
+// submitted under, if any.
+type HostPodJob struct {
+	Name  string `json:"name"`
+	UID   string `json:"uid"`
+	Owner string `json:"owner"`
+	Grant string `json:"grant,omitempty"`
+}
