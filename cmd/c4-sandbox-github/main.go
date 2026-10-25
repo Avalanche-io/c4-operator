@@ -38,7 +38,7 @@ func parse(args []string, stderr io.Writer) (sandbox.Config, string, error) {
 	fs.StringVar(&c.Hook, "hook", "", "where deliveries go: c4-sync's /webhooks/{namespace}/{tracker} (empty: none; c4-sync polls)")
 	fs.StringVar(&c.HookSecret, "hook-secret", os.Getenv("C4_SANDBOX_HOOK_SECRET"), "the secret deliveries are signed with (C4_SANDBOX_HOOK_SECRET)")
 	fs.StringVar(&c.HUD, "hud", "http://c4-hud.c4-system.svc", "the HUD, as the sandbox reaches it")
-	fs.StringVar(&c.HUDAs, "hud-as", "wrangler", "the HUD viewer the sandbox reads jobs as (a development farm's ?as=)")
+	tokenFile := fs.String("hud-token-file", os.Getenv("C4_HUD_TOKEN_FILE"), "a file holding the sandbox's own token for the HUD (its service account's, audience c4.avalanche.io/hud-api), reread on every request (C4_HUD_TOKEN_FILE)")
 	fs.StringVar(&c.Project, "project", "saltmarsh", "the project the Tracker is in")
 	fs.StringVar(&c.Namespace, "namespace", "", "the Tracker's namespace (default the project)")
 	fs.StringVar(&c.Tracker, "tracker", "sandbox", "the Tracker's name")
@@ -52,6 +52,13 @@ func parse(args []string, stderr io.Writer) (sandbox.Config, string, error) {
 	}
 	if c.Namespace == "" {
 		c.Namespace = c.Project
+	}
+	if *tokenFile != "" {
+		f := *tokenFile
+		c.HUDToken = func() (string, error) {
+			b, err := os.ReadFile(f)
+			return strings.TrimSpace(string(b)), err
+		}
 	}
 	for _, p := range strings.Split(*people, ",") {
 		if p = strings.TrimSpace(p); p == "" {

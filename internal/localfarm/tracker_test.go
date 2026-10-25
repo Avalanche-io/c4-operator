@@ -129,3 +129,46 @@ func TestSandboxOwner(t *testing.T) {
 		t.Fatalf("an owner named as a role is listed twice: %v", people)
 	}
 }
+
+// The stand-in GitHub reads the HUD as itself: its own service account, a
+// projected token for the HUD alone, and a role that only reads the
+// project's jobs, so it can change nothing and is never a person.
+func TestSandboxReadsAsItself(t *testing.T) {
+	objs, err := TrackerObjects(Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sa, role, binding bool
+	for _, o := range objs {
+		m := o["metadata"].(obj)
+		switch o["kind"] {
+		case "ServiceAccount":
+			sa = m["name"] == sandboxName
+		case "Role":
+			if m["name"] != sandboxName {
+				continue
+			}
+			role = true
+			for _, r := range o["rules"].([]obj) {
+				for _, v := range r["verbs"].([]string) {
+					if v != "get" && v != "list" {
+						t.Errorf("the sandbox may %s", v)
+					}
+				}
+			}
+		case "RoleBinding":
+			binding = binding || m["name"] == sandboxName
+		case "Deployment":
+			spec := o["spec"].(obj)["template"].(obj)["spec"].(obj)
+			args := strings.Join(spec["containers"].([]obj)[0]["args"].([]string), " ")
+			b, _ := json.Marshal(spec["volumes"])
+			if spec["serviceAccountName"] != sandboxName || !strings.Contains(args, "--hud-token-file=/var/run/c4-sandbox/token") ||
+				strings.Contains(args, "--hud-as") || !strings.Contains(string(b), c4v1.HUDAPIAudience) {
+				t.Fatalf("deployment %v args %s", spec["serviceAccountName"], args)
+			}
+		}
+	}
+	if !sa || !role || !binding {
+		t.Fatalf("service account %v, role %v, binding %v", sa, role, binding)
+	}
+}

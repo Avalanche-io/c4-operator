@@ -57,9 +57,11 @@ type Config struct {
 	// Hook is where deliveries go (c4-sync's /webhooks/{ns}/{tracker}),
 	// signed with HookSecret. Empty: none, and c4-sync polls.
 	Hook, HookSecret string
-	// HUD is the HUD's API base as the sandbox reaches it, and HUDAs the
-	// viewer it reads jobs as (a development farm's ?as=).
-	HUD, HUDAs string
+	// HUD is the HUD's API base as the sandbox reaches it. The sandbox reads
+	// it as itself, with HUDToken (its service account's token for the HUD,
+	// read on every request); it never acts as a person.
+	HUD      string
+	HUDToken func() (string, error)
 	// Project, Namespace and Tracker are where the Tracker is.
 	Project, Namespace, Tracker string
 	// People are who a person may act as; Agent is the login the agent's
@@ -84,9 +86,6 @@ type GitHub struct {
 func New(cfg Config) *GitHub {
 	if cfg.Agent == "" {
 		cfg.Agent = "c4-agent"
-	}
-	if cfg.HUDAs == "" {
-		cfg.HUDAs = "wrangler"
 	}
 	gh := githubtest.Unstarted(cfg.Owner, cfg.Repo)
 	gh.Token, gh.URL = cfg.Token, cfg.URL
@@ -310,17 +309,19 @@ func (g *GitHub) issueOf(pull int) int {
 	return 0
 }
 
-// hud reads the HUD API as viewer as; a 404 is no answer and no error.
-func (g *GitHub) hud(ctx context.Context, path, as string, out any) (bool, error) {
-	u := strings.TrimSuffix(g.cfg.HUD, "/") + "/api/v1" + path
-	if strings.Contains(u, "?") {
-		u += "&as=" + url.QueryEscape(as)
-	} else {
-		u += "?as=" + url.QueryEscape(as)
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+// hud reads the HUD API as the sandbox itself; a 404 is no answer and no
+// error.
+func (g *GitHub) hud(ctx context.Context, path string, out any) (bool, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(g.cfg.HUD, "/")+"/api/v1"+path, nil)
 	if err != nil {
 		return false, err
+	}
+	if g.cfg.HUDToken != nil {
+		tok, err := g.cfg.HUDToken()
+		if err != nil {
+			return false, fmt.Errorf("the sandbox's HUD token: %w", err)
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 	resp, err := g.hc.Do(req)
 	if err != nil {
@@ -349,7 +350,7 @@ func (g *GitHub) job(ctx context.Context, issue int) *api.Job {
 			name = fmt.Sprintf("%s-v%03d", base, v)
 		}
 		var j api.Job
-		ok, err := g.hud(ctx, "/jobs/"+g.cfg.Namespace+"/"+name, g.cfg.HUDAs, &j)
+		ok, err := g.hud(ctx, "/jobs/"+g.cfg.Namespace+"/"+name, &j)
 		if err != nil || !ok {
 			break
 		}
@@ -358,15 +359,16 @@ func (g *GitHub) job(ctx context.Context, issue int) *api.Job {
 	return last
 }
 
-// granted says whether person has let the Tracker submit work for them.
+// granted says whether person has let the Tracker submit work for them:
+// an active grant of theirs among the Tracker's, as the sandbox sees them.
 func (g *GitHub) granted(ctx context.Context, person string) (bool, error) {
-	var l api.TrackerList
-	if _, err := g.hud(ctx, "/trackers", person, &l); err != nil {
+	var l api.GrantList
+	if _, err := g.hud(ctx, "/grants?tracker="+url.QueryEscape(g.cfg.Namespace+"/"+g.cfg.Tracker), &l); err != nil {
 		return false, err
 	}
-	for _, t := range l.Trackers {
-		if t.Namespace == g.cfg.Namespace && t.Name == g.cfg.Tracker {
-			return t.Mine != nil && t.Mine.Active, nil
+	for _, gr := range l.Grants {
+		if gr.Person == person && gr.Active {
+			return true, nil
 		}
 	}
 	return false, nil

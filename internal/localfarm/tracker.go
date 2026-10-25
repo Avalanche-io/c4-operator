@@ -103,12 +103,15 @@ func TrackerObjects(o Options) ([]obj, error) {
 	ctr := obj{"name": "sandbox", "image": "c4-sync", "command": []string{"/c4-sandbox-github"},
 		"args": []string{"--repo=" + SandboxRepo, "--people=" + logins, "--url=" + sandboxURL,
 			"--hook=http://c4-sync.c4-system.svc/webhooks/" + Project + "/" + SandboxTracker,
-			"--project=" + Project, "--tracker=" + SandboxTracker, "--hud=http://c4-hud.c4-system.svc"},
+			"--project=" + Project, "--tracker=" + SandboxTracker, "--hud=http://c4-hud.c4-system.svc",
+			// it reads the HUD as itself, never as a person
+			"--hud-token-file=/var/run/c4-sandbox/token"},
 		"env": []obj{
 			{"name": "C4_SANDBOX_TOKEN", "valueFrom": obj{"secretKeyRef": obj{"name": sandboxName, "key": "token"}}},
 			{"name": "C4_SANDBOX_HOOK_SECRET", "valueFrom": obj{"secretKeyRef": obj{"name": sandboxName, "key": "hook"}}},
 		},
 		"ports":           []obj{{"containerPort": 8080}},
+		"volumeMounts":    []obj{{"name": "hud-token", "mountPath": "/var/run/c4-sandbox", "readOnly": true}},
 		"readinessProbe":  obj{"httpGet": obj{"path": "/healthz", "port": 8080}},
 		"securityContext": obj{"allowPrivilegeEscalation": false, "readOnlyRootFilesystem": true, "capabilities": obj{"drop": []string{"ALL"}}},
 	}
@@ -118,8 +121,22 @@ func TrackerObjects(o Options) ([]obj, error) {
 		{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": meta(sandboxName, "namespace", "c4-system"),
 			"spec": obj{"replicas": 1, "selector": obj{"matchLabels": labels},
 				"template": obj{"metadata": obj{"labels": labels}, "spec": obj{
-					"securityContext": obj{"runAsNonRoot": true, "runAsUser": 65532, "seccompProfile": obj{"type": "RuntimeDefault"}},
-					"containers":      []obj{ctr}}}}},
+					"serviceAccountName": sandboxName,
+					"securityContext":    obj{"runAsNonRoot": true, "runAsUser": 65532, "seccompProfile": obj{"type": "RuntimeDefault"}},
+					"containers":         []obj{ctr},
+					// a token for the HUD alone, short-lived and rotated by the
+					// kubelet, as c4-sync's is
+					"volumes": []obj{{"name": "hud-token", "projected": obj{"sources": []obj{{"serviceAccountToken": obj{
+						"path": "token", "audience": c4v1.HUDAPIAudience, "expirationSeconds": 3600}}}}}}}}}},
+		{"apiVersion": "v1", "kind": "ServiceAccount", "metadata": meta(sandboxName, "namespace", "c4-system")},
+		// What the sandbox reads, as itself: the project's jobs, which is
+		// also what makes the HUD show it the project (and its Tracker's
+		// grants). Nothing it could change.
+		{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": meta(sandboxName, "namespace", Project),
+			"rules": []obj{{"apiGroups": []string{"c4.avalanche.io"}, "resources": []string{"workjobs"}, "verbs": []string{"get", "list"}}}},
+		{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": meta(sandboxName, "namespace", Project),
+			"roleRef":  obj{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": sandboxName},
+			"subjects": []obj{{"kind": "ServiceAccount", "name": sandboxName, "namespace": "c4-system"}}},
 		{"apiVersion": "v1", "kind": "Service", "metadata": meta(sandboxName, "namespace", "c4-system"),
 			"spec": obj{"selector": labels, "ports": []obj{{"port": 8080, "targetPort": 8080}}}},
 		// The Tracker's credentials, in the project, readable by c4-sync

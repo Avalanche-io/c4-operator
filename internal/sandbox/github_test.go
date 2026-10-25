@@ -15,31 +15,38 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/tracker/github/githubtest"
 )
 
-// fakeHUD answers the two questions the page asks: a job, and whether a
-// person has granted the Tracker.
+// fakeHUD answers the two questions the page asks, of the sandbox itself
+// (its own token, never ?as=): a job, and the Tracker's grants.
 type fakeHUD struct {
 	mu      sync.Mutex
 	jobs    map[string]api.Job
 	granted map[string]bool
+	// refused counts requests that came as anyone but the sandbox.
+	refused int
 }
 
 func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	if r.Header.Get("Authorization") != "Bearer sandbox-token" || r.URL.Query().Has("as") {
+		f.refused++
+		http.Error(w, "development viewers need this machine's installer token", http.StatusUnauthorized)
+		return
+	}
 	switch {
 	case strings.HasPrefix(r.URL.Path, "/api/v1/jobs/saltmarsh/"):
 		j, ok := f.jobs[strings.TrimPrefix(r.URL.Path, "/api/v1/jobs/saltmarsh/")]
-		if !ok || r.URL.Query().Get("as") != "wrangler" {
+		if !ok {
 			http.NotFound(w, r)
 			return
 		}
 		_ = json.NewEncoder(w).Encode(j)
-	case r.URL.Path == "/api/v1/trackers":
-		t := api.Tracker{Namespace: "saltmarsh", Name: "sandbox", Project: "saltmarsh", Kind: "github", Ready: true}
-		if f.granted[r.URL.Query().Get("as")] {
-			t.Mine = &api.Grant{Person: r.URL.Query().Get("as"), Active: true}
+	case r.URL.Path == "/api/v1/grants" && r.URL.Query().Get("tracker") == "saltmarsh/sandbox":
+		l := api.GrantList{Grants: []api.Grant{{Person: "dana", Tracker: "sandbox", Active: true}}}
+		for p, ok := range f.granted {
+			l.Grants = append(l.Grants, api.Grant{Person: p, Tracker: "sandbox", Active: ok})
 		}
-		_ = json.NewEncoder(w).Encode(api.TrackerList{Trackers: []api.Tracker{t}})
+		_ = json.NewEncoder(w).Encode(l)
 	default:
 		http.NotFound(w, r)
 	}
@@ -105,7 +112,7 @@ func setup(t *testing.T) *env {
 	ks := httptest.NewServer(hk)
 	t.Cleanup(ks.Close)
 	g := New(Config{Owner: "petrel-finch", Repo: "saltmarsh", Token: "tok", URL: "http://sandbox", Hook: ks.URL, HookSecret: "hook-secret",
-		HUD: hs.URL, Project: "saltmarsh", Namespace: "saltmarsh", Tracker: "sandbox",
+		HUD: hs.URL, HUDToken: func() (string, error) { return "sandbox-token", nil }, Project: "saltmarsh", Namespace: "saltmarsh", Tracker: "sandbox",
 		People: []Person{{Login: "artist", Person: "artist"}, {Login: "supervisor", Person: "supervisor"}}})
 	srv := httptest.NewServer(g.Handler())
 	t.Cleanup(srv.Close)
@@ -258,5 +265,20 @@ func TestRefusals(t *testing.T) {
 	var is []githubtest.Issue
 	if err := json.NewDecoder(resp.Body).Decode(&is); err != nil || len(is) != 1 || is[0].HTMLURL != "/sandbox/issues/1" || is[0].Assignees[0].Login != "artist" {
 		t.Fatalf("issues %+v %v", is, err)
+	}
+}
+
+// The sandbox reads the HUD as itself: every request carries its own token
+// and none names a person (?as=), which no pod may claim.
+func TestReadsAsItself(t *testing.T) {
+	e := setup(t)
+	e.post("issues", map[string]any{"as": "supervisor", "title": "x", "assignee": "artist", "labels": []string{"c4"}})
+	e.hud.set(func() { e.hud.jobs["sandbox-1"] = api.Job{Namespace: "saltmarsh", Name: "sandbox-1", Phase: "Running"} })
+	e.page("supervisor")
+	e.post("pulls", map[string]any{"as": "artist", "issue": 1})
+	e.hud.mu.Lock()
+	defer e.hud.mu.Unlock()
+	if e.hud.refused != 0 {
+		t.Fatalf("%d requests came as someone else", e.hud.refused)
 	}
 }
