@@ -55,7 +55,7 @@ Work
   submit FILE              send a submission (c4: submit/1): its plan and estimate first (--dry-run, --explain)
   ls                       the queue, in run order (--mine, --at-risk, --all)
   watch JOB                the job's progress, deadline and slack as they change
-  open JOB                 open the job view in the HUD (--widget for the side widget)
+  open [JOB]               open the job view in the HUD (--widget for the side widget); no JOB, what is waiting on you
   deadline JOB WHEN        move a job's deadline (18:00, fri 18:00, +3h, suggested)
   hold JOB [--stop]        hold a job; --stop also stops its running units
   release JOB              release a held job
@@ -436,19 +436,22 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
-		if err := need(pos, 1, "JOB [--widget]"); err != nil {
-			return err
+		if len(pos) > 1 {
+			return errors.New("usage: c4 farm open [JOB] [--widget]")
 		}
-		c, _, o, project, err := connect()
+		c, f, o, project, err := connect()
 		if err != nil {
 			return err
 		}
-		u, err := farmcli.Open(ctx, c, project, pos[0], *widget)
-		if err != nil {
-			return err
+		// no JOB: what is waiting on you
+		u := c.Web("needs", nil)
+		if len(pos) == 1 {
+			if u, err = farmcli.Open(ctx, c, project, pos[0], *widget); err != nil {
+				return err
+			}
 		}
 		fmt.Fprintln(o.W, u)
-		return openURL(u)
+		return openSignedIn(ctx, f, u)
 
 	case "deadline":
 		pos, err := parse(fs, rest)
@@ -585,7 +588,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		mcpserver.Version = version
-		return mcpserver.Serve(ctx, &mcpserver.Client{Base: c.Base, Token: c.Token, As: c.As, Agent: *agent}, &mcp.StdioTransport{})
+		return mcpserver.Serve(ctx, &mcpserver.Client{Base: c.Base, Token: c.Token, As: c.As, Installer: c.Installer, Agent: *agent}, &mcp.StdioTransport{})
 
 	case "samples":
 		from := fs.String("from", "", "a local sample archive instead of the release's")
@@ -665,6 +668,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := localfarm.CheckDocker(ctx); err != nil {
 			return err
 		}
+		if o.InstallerToken, err = localfarm.InstallerToken(localfarm.Name); err != nil {
+			return err
+		}
 		// the tracker is offered once, on the farm's first up
 		first := true
 		if have, err := localfarm.Exists(localfarm.Name); err == nil {
@@ -673,7 +679,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := localfarm.Up(ctx, o); err != nil {
 			return err
 		}
-		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner}
+		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner,
+			InstallerTokenFile: localfarm.InstallerTokenFile(localfarm.Name)}
 		cfg.Current = localfarm.Name
 		ui := upIntegration{integrate: *integrateOn, none: *integrateOff, stdin: stdin, stdout: stdout,
 			detect: farmcli.Detect(true), runner: localRunner(o.Owner, o.HUD(), stdin, stdout)}
@@ -687,7 +694,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := ui.apply(ctx, cfg, on, wasOn); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "HUD       %s\n", localfarm.NeedsLink(o.HUD(), v))
+		fmt.Fprintf(stdout, "HUD       %s   (c4 farm open opens it signed in)\n", localfarm.NeedsLink(o.HUD(), v))
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)\n")
 		if o.Tracker || localfarm.HasTracker(ctx) {
 			fmt.Fprintf(stdout, "tracker   %s   a stand-in for GitHub; nothing leaves this machine\n", localfarm.SandboxPage(o.HUD(), v.Name))
@@ -699,7 +706,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if *noOpen {
 			return nil
 		}
-		return openURL(localfarm.NeedsLink(o.HUD(), v))
+		return openSignedIn(ctx, cfg.Farms[localfarm.Name], localfarm.NeedsLink(o.HUD(), v))
 
 	case "down":
 		localName := fs.String("name", localfarm.Name, "the local farm to delete")
@@ -712,6 +719,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		home, _ := os.UserHomeDir()
 		serves := home != "" && localfarm.RunnerServes(home, localfarm.Name)
 		if err := localfarm.Down(localfarm.Name); err != nil {
+			return err
+		}
+		if err := localfarm.RemoveInstallerToken(localfarm.Name); err != nil {
 			return err
 		}
 		if serves {
@@ -744,11 +754,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return nil
 		}
 		// The HUD is where up put it.
-		hud := localfarm.Options{}.HUD()
+		hud, inst := localfarm.Options{}.HUD(), ""
 		if f, ok := cfg.Farms[localfarm.Name]; ok && f.HUD != "" {
-			hud = f.HUD
+			hud, inst = f.HUD, f.InstallerTokenFile
 		}
-		c, err := farmcli.NewClient(farmcli.Farm{HUD: hud, As: "wrangler"})
+		c, err := farmcli.NewClient(farmcli.Farm{HUD: hud, As: "wrangler", InstallerTokenFile: inst})
 		if err != nil {
 			return err
 		}
@@ -1133,7 +1143,7 @@ func acceptOffer(ctx context.Context, bin, owner, hud string) error {
 	if err != nil {
 		return err
 	}
-	c, err := farmcli.NewClient(farmcli.Farm{HUD: hud, As: owner, Local: true})
+	c, err := farmcli.NewClient(farmcli.Farm{HUD: hud, As: owner, Local: true, InstallerTokenFile: localfarm.InstallerTokenFile(localfarm.Name)})
 	if err != nil {
 		return err
 	}
@@ -1179,6 +1189,21 @@ func signInBlocks(e localfarm.Enrolled, stdin io.Reader, stdout io.Writer) error
 }
 
 // openURL opens a link in the default browser.
+// openSignedIn opens u, a page of farm f's HUD, in the browser. On a local
+// farm it goes by a one-time code the installer token gets, which the HUD
+// trades for its cookie, so the token is never in an address or the
+// browser's history.
+func openSignedIn(ctx context.Context, f farmcli.Farm, u string) error {
+	c, err := farmcli.NewClient(f)
+	if err != nil {
+		return err
+	}
+	if u, err = farmcli.SignedIn(ctx, c, u); err != nil {
+		return err
+	}
+	return openURL(u)
+}
+
 func openURL(u string) error {
 	var cmd *exec.Cmd
 	switch runtime.GOOS {

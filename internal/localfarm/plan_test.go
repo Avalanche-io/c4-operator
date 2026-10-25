@@ -92,7 +92,7 @@ func TestFarmObjects(t *testing.T) {
 			}
 		}
 	}
-	if strings.Join(kinds, ",") != "Secret,Namespace,Project,Pool,Pool,Pool,Service,ConfigMap" {
+	if strings.Join(kinds, ",") != "Secret,Secret,Namespace,Project,Pool,Pool,Pool,Service,ConfigMap" {
 		t.Fatalf("order %v", kinds)
 	}
 	if slots != 6 || burst != 4 {

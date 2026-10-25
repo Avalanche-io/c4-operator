@@ -30,6 +30,9 @@ type Client struct {
 	// As selects a development viewer (?as=) on HUDs started with
 	// --hud-dev-viewers. Never used in production.
 	As string
+	// Installer is a local farm's installer token (X-C4-Installer), which
+	// its HUD asks of a development viewer.
+	Installer string
 	// Agent names the agent using this client; the HUD books its
 	// controls as "agent/NAME for USER" (X-C4-Agent).
 	Agent string
@@ -81,6 +84,9 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	req.Header.Set("Accept", "application/json")
 	// The HUD notes the client in its signed control records.
 	req.Header.Set("X-C4-Client", "mcp")
+	if c.Installer != "" {
+		req.Header.Set("X-C4-Installer", c.Installer)
+	}
 	if c.Agent != "" {
 		req.Header.Set("X-C4-Agent", c.Agent)
 	}

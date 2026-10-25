@@ -259,7 +259,7 @@ func publishTools(ctx context.Context, o UpOptions) error {
 	if o.Owner != "" {
 		as = o.Owner
 	}
-	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: as, Local: true})
+	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: as, Local: true, InstallerTokenFile: InstallerTokenFile(o.name())})
 	if err != nil {
 		return err
 	}

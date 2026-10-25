@@ -66,7 +66,7 @@ project   saltmarsh   you: sam
 owner     sam, who plays every role here
 claude    has the farm's tools (c4-farm in ~/.claude.json); c4 farm integrate off takes it all out
 agents    this machine (c4-host-laptop) is enrolled for sam's agents and its runner is started; they run here once you sign in where they run
-HUD       http://127.0.0.1:30080/?as=sam#/needs
+HUD       http://127.0.0.1:30080/?as=sam#/needs   (c4 farm open opens it signed in)
 roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)
 time      up in 1m4s: cluster 41s, operator 12s, store 6s, tools 4s
 ```
@@ -82,6 +82,12 @@ machine, its holder runs `c4-agent enroll-offer` there and then `c4 farm
 enroll NODE CODE` (`--for PERSON` lets someone else's work run there too,
 on the holder's sign-in).
 Until a machine is someone's, the farm places no one's work on it.
+
+The HUD takes you, or any role, only from you: `up` keeps a token in
+`~/.c4/c4-local/installer-token` that only you can read, and every `c4
+farm` command sends it. The browser `up` opens is signed in by a one-time
+code, and so is any `c4 farm open`. The farm's own jobs can reach the HUD,
+but never that file, so a job cannot act as you or as a role.
 
 Saying no, or `c4 farm up --no-integrate`, adds nothing to Claude Code or
 this machine. Run without a terminal (a script, CI), `up` asks nothing,

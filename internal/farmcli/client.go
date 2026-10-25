@@ -17,7 +17,10 @@ type Client struct {
 	Base  string
 	As    string
 	Token string
-	HTTP  *http.Client
+	// Installer is a local farm's installer token, sent as X-C4-Installer:
+	// its HUD takes a development viewer (As) only with it.
+	Installer string
+	HTTP      *http.Client
 }
 
 // NewClient makes a client for a farm.
@@ -26,7 +29,11 @@ func NewClient(f Farm) (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{Base: strings.TrimSuffix(f.HUD, "/"), As: f.As, Token: tok,
+	inst, err := f.InstallerToken()
+	if err != nil {
+		return nil, fmt.Errorf("the local farm's installer token: %w (c4 farm up makes it again)", err)
+	}
+	return &Client{Base: strings.TrimSuffix(f.HUD, "/"), As: f.As, Token: tok, Installer: inst,
 		HTTP: &http.Client{Timeout: 0}}, nil
 }
 
@@ -61,6 +68,9 @@ func (c *Client) request(ctx context.Context, method, path string, body io.Reade
 	}
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-C4-Client", "c4-farm")
+	if c.Installer != "" {
+		req.Header.Set("X-C4-Installer", c.Installer)
+	}
 	if ctype != "" {
 		req.Header.Set("Content-Type", ctype)
 	}

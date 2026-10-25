@@ -25,6 +25,10 @@ type Farm struct {
 	// Owner is who owns a local farm and plays every role on it; up keeps
 	// it unless --owner changes it.
 	Owner string `json:"owner,omitempty"`
+	// InstallerTokenFile, on a local farm, is the installer token up made
+	// (~/.c4/<farm>/installer-token): the HUD takes a development viewer
+	// only from a request that carries it.
+	InstallerTokenFile string `json:"installerTokenFile,omitempty"`
 }
 
 // Config is ~/.c4/farm.yaml.
@@ -116,6 +120,14 @@ func (c *Config) Resolve(name string) (string, Farm, error) {
 }
 
 // Token reads the farm's bearer token, if it has one.
+// InstallerToken is the local farm's installer token, if it has one.
+func (f Farm) InstallerToken() (string, error) {
+	if f.InstallerTokenFile == "" {
+		return "", nil
+	}
+	return Farm{TokenFile: f.InstallerTokenFile}.Token()
+}
+
 func (f Farm) Token() (string, error) {
 	if f.TokenFile == "" {
 		return "", nil

@@ -121,6 +121,10 @@ type Options struct {
 	// Tracker adds the stand-in GitHub and c4-sync (c4 farm up --tracker):
 	// c4-sync's sign-in, and the sandbox's page at the HUD's /sandbox/.
 	Tracker bool
+	// InstallerToken is the farm's installer token (InstallerToken), which
+	// the manager's HUD asks of every development viewer; empty in a plan,
+	// which shows where it goes and never the token.
+	InstallerToken string
 }
 
 // BindRequest is the farm binding a local farm asks its HUD for
@@ -272,9 +276,16 @@ func ProjectObjects(p ProjectSpec) []obj {
 // the store's credentials, the project and its namespace, the pools, the
 // HUD's NodePort and the site for the map.
 func Farm(o Options) []obj {
+	// the installer token, for the manager's pod alone
+	token := o.InstallerToken
+	if token == "" {
+		token = "(made by up, kept in " + InstallerTokenFile(o.name()) + ")"
+	}
 	out := []obj{
 		{"apiVersion": "v1", "kind": "Secret", "metadata": meta("local-store", "namespace", "c4-system"),
 			"stringData": obj{"AWS_ACCESS_KEY_ID": quickstart.StoreKey, "AWS_SECRET_ACCESS_KEY": quickstart.StoreSecret}},
+		{"apiVersion": "v1", "kind": "Secret", "metadata": meta(InstallerSecret, "namespace", "c4-system"),
+			"stringData": obj{"token": token}},
 	}
 	out = append(out, ProjectObjects(ProjectSpec{Name: Project, Title: "Saltmarsh (feature), Petrel & Finch"})...)
 	for _, p := range Pools {
@@ -318,6 +329,8 @@ func ManagerArgs(o Options) []string {
 	if o.Tracker {
 		args = append(args, "--hud-sandbox="+sandboxURL)
 	}
+	// development viewers only with the installer's token
+	args = append(args, "--hud-installer-token-file="+installerMount+"/token")
 	return args
 }
 
@@ -333,7 +346,7 @@ func ManagerPatch(o Options, args []string) []byte {
 	for _, a := range args {
 		drop := false
 		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz=", "--hud-plain-registries=", "--single-person-farm=",
-			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox="} {
+			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox=", "--hud-installer-token-file="} {
 			if strings.HasPrefix(a, f) {
 				drop = true
 			}
@@ -343,14 +356,16 @@ func ManagerPatch(o Options, args []string) []byte {
 		}
 	}
 	c := obj{"name": "manager", "args": append(keep, ManagerArgs(o)...),
-		"volumeMounts": []obj{{"name": "sites", "mountPath": "/etc/c4/sites", "readOnly": true}}}
+		"volumeMounts": []obj{{"name": "sites", "mountPath": "/etc/c4/sites", "readOnly": true},
+			{"name": "installer", "mountPath": installerMount, "readOnly": true}}}
 	if o.OperatorImage != "" {
 		c["image"] = o.OperatorImage
 		c["imagePullPolicy"] = "IfNotPresent"
 	}
 	p := obj{"spec": obj{"template": obj{"spec": obj{
 		"containers": []obj{c},
-		"volumes":    []obj{{"name": "sites", "configMap": obj{"name": "c4-sites"}}},
+		"volumes": []obj{{"name": "sites", "configMap": obj{"name": "c4-sites"}},
+			{"name": "installer", "secret": obj{"secretName": InstallerSecret, "defaultMode": 0o400}}},
 	}}}}
 	b, _ := json.Marshal(p)
 	return b
