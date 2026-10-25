@@ -23,13 +23,18 @@ type FarmBinding struct {
 	Owner  string `json:"owner"`
 	To     string `json:"to"`
 	RunFor string `json:"runFor,omitempty"`
-	// OnePerson: the owner is the farm's one person, holding every role.
-	OnePerson bool      `json:"onePerson,omitempty"`
-	For       []string  `json:"for"`
-	Start     time.Time `json:"start"`
-	By        string    `json:"by"`
-	Record    string    `json:"record,omitempty"`
-	Follows   string    `json:"follows,omitempty"`
+	// OnePerson: the installer bound the farm as the owner's alone.
+	OnePerson bool `json:"onePerson,omitempty"`
+	// OnePersonInEffect is whether the owner holds every role now: only
+	// on a HUD reached with this machine's installer token. OnePersonNote
+	// says so in words for the farm page, for a onePerson binding.
+	OnePersonInEffect bool      `json:"onePersonInEffect,omitempty"`
+	OnePersonNote     string    `json:"onePersonNote,omitempty"`
+	For               []string  `json:"for"`
+	Start             time.Time `json:"start"`
+	By                string    `json:"by"`
+	Record            string    `json:"record,omitempty"`
+	Follows           string    `json:"follows,omitempty"`
 }
 
 // FarmBindingResponse answers a bind or GET /api/v1/farm/binding.

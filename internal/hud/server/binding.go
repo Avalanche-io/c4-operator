@@ -41,9 +41,24 @@ var farmTo = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/\*$`)
 // binding.
 var boundKinds = []string{"task/v1", "resolution/v1", "decision/v1", "job/v1", "control/v1", "import/v1", "ingest/v1"}
 
-func bindingView(b *c4v1.DeploymentBinding) *api.FarmBinding {
-	return &api.FarmBinding{Owner: b.Spec.Owner, To: b.Spec.To, RunFor: b.Spec.RunFor, OnePerson: b.Spec.OnePerson, For: b.Spec.For,
+// The words a farm binding's view gives its onePerson, in effect or not.
+const (
+	onePersonInEffect    = "while this HUD is reached only with this machine's installer token"
+	onePersonNotInEffect = "not in effect: this HUD has no installer token"
+)
+
+// bindingView is the binding as the HUD shows it, with whether its
+// onePerson holds now: only on a HUD guarded by an installer token.
+func (s *Server) bindingView(b *c4v1.DeploymentBinding) *api.FarmBinding {
+	out := &api.FarmBinding{Owner: b.Spec.Owner, To: b.Spec.To, RunFor: b.Spec.RunFor, OnePerson: b.Spec.OnePerson, For: b.Spec.For,
 		Start: b.Spec.Start.Time, By: b.Spec.By, Record: b.Spec.Record, Follows: b.Spec.Follows}
+	if b.Spec.SingleOwner() != "" {
+		out.OnePersonInEffect, out.OnePersonNote = s.installerGuarded(), onePersonNotInEffect
+		if out.OnePersonInEffect {
+			out.OnePersonNote = onePersonInEffect
+		}
+	}
+	return out
 }
 
 // farmBinding reads the farm binding: nil, nil when there is none.
@@ -64,12 +79,16 @@ func (s *Server) farmBinding(ctx context.Context) (*c4v1.DeploymentBinding, erro
 
 // singlePerson is the person who holds every role on this farm: the farm
 // binding's owner where the installer bound it as one person's
-// (onePerson), no one on a farm bound any other way, and
-// --single-person-farm on a farm with no binding.
+// (onePerson) and the HUD is guarded by an installer token; no one on a
+// farm bound any other way, or on a HUD without the token; and
+// --single-person-farm (singlePersonFlag) on a farm with no binding.
 func (s *Server) singlePerson(ctx context.Context) string {
 	b, err := s.farmBinding(ctx)
 	if err != nil || b == nil {
-		return s.SinglePerson
+		return s.singlePersonFlag()
+	}
+	if !s.installerGuarded() {
+		return ""
 	}
 	return b.Spec.SingleOwner()
 }
@@ -87,7 +106,7 @@ func (s *Server) handleFarmBinding(w http.ResponseWriter, r *http.Request) {
 	case b == nil:
 		fail(w, http.StatusNotFound, "this farm has no owner bound yet: the installer binds it (POST /api/v1/farm/binding)")
 	default:
-		writeJSON(w, http.StatusOK, api.FarmBindingResponse{OK: true, Binding: bindingView(b), Record: b.Spec.Record})
+		writeJSON(w, http.StatusOK, api.FarmBindingResponse{OK: true, Binding: s.bindingView(b), Record: b.Spec.Record})
 	}
 }
 
@@ -111,8 +130,11 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 	case deciderOf(r, v).Agent != "" || s.isSync(v):
 		fail(w, http.StatusForbidden, "an agent cannot bind a farm to an owner: the installer does, as themselves")
 		return
-	case s.DevViewers != nil && !s.Loopback:
-		fail(w, http.StatusForbidden, "on a HUD the network reaches, a development viewer is no one: sign in to bind the farm, or bind it from a HUD only this machine reaches")
+	case isDev(v) && !byInstaller(v):
+		fail(w, http.StatusForbidden, "without this machine's installer token, a development viewer is no one: sign in to bind the farm, or bind it with the installer token")
+		return
+	case body.OnePerson && !s.installerGuarded():
+		fail(w, http.StatusForbidden, "onePerson: this HUD has no installer token, so the farm is not one person's")
 		return
 	case body.Owner == "" || len(body.Owner) > 253 || strings.ContainsAny(body.Owner, " \t\r\n"):
 		fail(w, http.StatusBadRequest, "owner: the farm's owner, a person or an organization, without spaces")
@@ -139,7 +161,7 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 	}
 	if old != nil {
 		if old.Spec.Owner == body.Owner && old.Spec.To == body.To && old.Spec.RunFor == body.RunFor && old.Spec.OnePerson == body.OnePerson {
-			writeJSON(w, http.StatusOK, api.FarmBindingResponse{OK: true, Existing: true, Binding: bindingView(old), Record: old.Spec.Record,
+			writeJSON(w, http.StatusOK, api.FarmBindingResponse{OK: true, Existing: true, Binding: s.bindingView(old), Record: old.Spec.Record,
 				Message: fmt.Sprintf("this farm is already bound to %s", old.Spec.Owner)})
 			return
 		}
@@ -155,8 +177,8 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 		Owner: body.Owner, To: body.To, RunFor: body.RunFor, OnePerson: body.OnePerson, For: boundKinds,
 		Start: metav1.NewTime(time.Now().UTC().Truncate(time.Second)), By: actorOf(r, v)}}
 	custody := CustodyDirect
-	if s.DevViewers != nil {
-		// a loopback HUD's development viewer: the installer's word
+	if isDev(v) {
+		// a development viewer on the installer's secret: their word
 		custody = CustodyClaimed
 	}
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
@@ -180,7 +202,7 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 	}
 	msg := fmt.Sprintf("%s binds every deployment of %s to %s", v.User, strings.TrimSuffix(b.Spec.To, "/*"), describeOwner(b))
 	s.record(ctx, b, "DeploymentBinding", v.User, "Bound", msg+"; record "+shortID(id), bookNote{actor: actorOf(r, v), kind: "bind", record: id})
-	writeJSON(w, http.StatusOK, api.FarmBindingResponse{OK: true, Message: msg, Binding: bindingView(b), Record: id})
+	writeJSON(w, http.StatusOK, api.FarmBindingResponse{OK: true, Message: msg, Binding: s.bindingView(b), Record: id})
 }
 
 func describeOwner(b *c4v1.DeploymentBinding) string {

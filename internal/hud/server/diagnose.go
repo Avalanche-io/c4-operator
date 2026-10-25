@@ -37,7 +37,7 @@ func (s *Server) handleDiagnose(w http.ResponseWriter, r *http.Request) {
 	if v == nil {
 		return
 	}
-	if why := mayDiagnose(v, s.SinglePerson); why != "" {
+	if why := mayDiagnose(v, s.singlePersonFlag()); why != "" {
 		fail(w, http.StatusForbidden, "%s", why)
 		return
 	}

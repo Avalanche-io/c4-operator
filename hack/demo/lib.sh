@@ -177,13 +177,14 @@ demo_hud() {
   local want cur
   cur=$(k -n c4-system get deploy c4-manager -o jsonpath='{.spec.template.spec.containers[0].args}')
   # The demo's flags replace their own kind; flags it does not set (another
-  # team's, on the shared cluster) stay.
+  # team's, on the shared cluster) stay. A demo harness: open development
+  # viewers (--hud-dev-viewers-open), anyone who reaches the HUD is any viewer.
   want=$(python3 -c '
 import json, sys
 cur, ours = json.loads(sys.argv[1] or "[\"manager\"]"), sys.argv[2:]
 own = {a.split("=")[0] for a in ours}
 print(json.dumps(cur[:1] + [a for a in cur[1:] if a.split("=")[0] not in own] + ours, separators=(",", ":")))
-' "$cur" --capacity-provider=kind-sim --work-policy=objective "--hud-dev-viewers=$DEMO_VIEWERS" --tz=America/Los_Angeles \
+' "$cur" --capacity-provider=kind-sim --work-policy=objective "--hud-dev-viewers=$DEMO_VIEWERS" --hud-dev-viewers-open --tz=America/Los_Angeles \
     ${DEMO_BLOCK:+--holder-transfer=allow})
   if [ "$(echo "$cur" | tr -d ' ')" != "$want" ]; then
     printf '%s' "$cur" >"$SHOTS/.manager-args"

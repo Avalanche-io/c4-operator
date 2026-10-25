@@ -39,7 +39,8 @@ func (s *Server) needsMe(r *http.Request, v *api.Viewer, snap *api.Snapshot) *ap
 	out := &api.NeedsMe{Now: snap.Now, Viewer: v, Items: []api.NeedsMeItem{}}
 	ctx := r.Context()
 	who := deciderOf(r, v)
-	single := s.SinglePerson != "" && v.User == s.SinglePerson
+	one := s.singlePersonFlag()
+	single := one != "" && v.User == one
 	mayChange := map[string]bool{}
 	may := func(j *api.Job) bool {
 		k := j.Namespace + "/" + j.Name

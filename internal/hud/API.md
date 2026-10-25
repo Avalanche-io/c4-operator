@@ -51,10 +51,12 @@ or project it into a pod. The API server refuses such a token, so a token
 sent to the HUD is no use anywhere else. Any other token is reviewed at the
 API server's own audience. A viewer sees the projects with a namespace where
 it may list WorkJobs (SubjectAccessReview, cached for a minute). The mock, and
-the real backend started with `--hud-dev-viewers` (tests and demos only), take
-`?as=artist` or `?as=wrangler` on any request instead, including the event
-stream and object URLs. An `?as=` that names no configured viewer gets 400
-naming the ones there are; no `?as=` is the wrangler. A development viewer
+the real backend started with `--hud-dev-viewers` (local farms, tests and
+demos), take `?as=artist` or `?as=wrangler` on any request instead, including
+the event stream and object URLs, but on the real backend only with this
+machine's installer token (see "Development viewers and the installer
+token" below). An `?as=` that names no configured viewer gets 400
+naming the ones there are. A development viewer
 has no RBAC behind it, so its role's rights stand in:
 - every role but facilities may change jobs and mounts in the projects it
   sees;
@@ -62,10 +64,60 @@ has no RBAC behind it, so its role's rights stand in:
   submissions;
 - facilities, wranglers and farm admins disable nodes.
 
-A development viewer's control records say "development viewer". On a HUD
-listening only on loopback (`--hud-addr 127.0.0.1:…`) they are claimed by
-the installer (`--single-person-farm`), graded `claimed`. Elsewhere they are
+A development viewer's control records say "development viewer". On the
+installer's secret (the token or its cookie) they are claimed by the
+installer, graded `claimed`, and authenticated as "installer's secret on
+this machine (claimed)". With open development viewers they are
 `unattributed`.
+
+### Development viewers and the installer token
+
+A local farm's manager runs with `--hud-dev-viewers`, and the farm's own
+pods, a unit's among them, reach the HUD through its Service. So a
+development viewer is honoured only for a request that carries this
+machine's installer secret:
+
+- `X-C4-Installer: <token>`, the token in the manager's
+  `--hud-installer-token-file` (hex; a trailing newline is ignored), or
+- this farm's installer cookie, which a browser gets for the token through
+  a single-use code (below), or
+- anything, when the manager runs with `--hud-dev-viewers-open`: anyone who
+  reaches the HUD is any viewer (development and tests only; the e2e and
+  demo harnesses use it).
+
+The manager refuses to start with `--hud-dev-viewers` and neither
+`--hud-installer-token-file` nor `--hud-dev-viewers-open`. A new token
+takes a restart.
+
+Without the secret, a request with `?as=` gets `401` "development viewers
+need this machine's installer token: run c4 farm open". A request without
+`?as=` signs in as on a farm with no development viewers (a bearer token,
+a unit's token, the SSO proxy), and is refused if it has none: it is
+never the wrangler by default.
+
+| route                          | answer                                                                                                                                                                                                                                                            |
+| ------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /installer/code`         | `{ code }`: a random single-use code, good for two minutes, at most a few outstanding. Needs `X-C4-Installer`; the cookie is not enough (`401`)                                                                                                                   |
+| `GET /installer?code=C&next=N` | (not under `/api/v1`) a good, unused code sets the cookie and answers `303` to `N`, a path on this HUD (`#/` route kept), or to `/` for anything else (`//host`, `/\host`, a URL); a bad, used or expired code answers `401` and says to run `c4 farm open` again |
+
+The cookie is `c4_installer_<id>`, `<id>` the first 8 hex digits of the
+token's SHA-256, so two farms on one machine keep theirs apart; the HUD
+reads no other. Its value is HMAC-SHA256 of "c4 installer cookie" keyed
+with the token, never the token, so a new token voids it. It is
+`HttpOnly`, `SameSite=Strict`, `Path=/`, kept a year.
+
+A write (any method but GET, HEAD and OPTIONS) that the cookie alone
+authorizes must also carry `X-C4-HUD: 1` (or `X-C4-Installer`), else
+`403` "a write from the browser needs the HUD's own page". Another site's
+page cannot send a custom header without a CORS preflight, and the HUD
+answers none: it sends no `Access-Control-Allow-*` header anywhere.
+
+On a HUD with an installer token, `--single-person-farm` and a farm
+binding's `onePerson` hold; on one without, neither does (with open
+development viewers, only the flag, for tests).
+
+hudmock is a separate program and keeps open ?as= viewers for stills and
+tutorials.
 
 `viewer.role` sets the mode and level a new viewer starts at: `artist`,
 `supervisor`, `producer`, `wrangler`, `farm-admin`, `facilities` or
@@ -1479,13 +1531,14 @@ below); only a local farm's bind request says it, and it never goes with
 
 Who may bind:
 - A person signed in who may create `deploymentbindings`.
-- On a HUD listening only on loopback, a development viewer with the
-  wrangler or farm-admin role. That binding is graded `claimed`.
+- A development viewer with the wrangler or farm-admin role, on the
+  installer's secret (token or cookie). That binding is graded `claimed`.
 
 Refused (`403`): a unit, an agent (an MCP client naming one, or a tracker's
-sync), and a development viewer on a HUD the network reaches.
+sync), and a development viewer without the installer's secret (open
+development viewers).
 
-A binding is `{ owner, to, runFor?, onePerson?, for, start, by, record, follows? }`.
+A binding is `{ owner, to, runFor?, onePerson?, onePersonInEffect?, onePersonNote?, for, start, by, record, follows? }`.
 `record` is the signed bind record's C4 ID. The DeploymentBinding also
 carries the record itself (`spec.signed`), so a farm with no project
 store yet still has the proof. Every project's store keeps a copy.
@@ -1493,7 +1546,13 @@ store yet still has the proof. Every project's store keeps a copy.
 Being bound to someone is not using the farm alone. Only a binding the
 installer marks `onePerson` makes its owner the farm's one person, who
 holds every role, as `--single-person-farm` names someone on a farm with
-no binding. That person may decide a wait addressed to a role, signed as
+no binding, and only on a HUD guarded by an installer token (not one with
+open development viewers). There, `onePerson` is accepted at bind and
+honoured at use; elsewhere a bind with it is refused, `403` "onePerson:
+this HUD has no installer token, so the farm is not one person's". For a
+`onePerson` binding the view adds `onePersonInEffect` and
+`onePersonNote`: "while this HUD is reached only with this machine's
+installer token", or "not in effect: this HUD has no installer token". That person may decide a wait addressed to a role, signed as
 standing in for that role (`for: role:wrangler`). A wait for another
 person stays that person's, and standing in for them is the farm's policy
 (`decide.standIn`), as on any farm. The `onePerson` flag is part of the

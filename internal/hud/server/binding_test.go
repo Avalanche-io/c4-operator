@@ -21,11 +21,12 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 )
 
-// bindFarm is a loopback HUD that signs, with no binding yet.
+// bindFarm is a HUD that signs, its development viewers guarded by an
+// installer token, with no binding yet.
 func bindFarm(t *testing.T) (*Server, *x509.CertPool) {
 	t.Helper()
 	s := farm(t)
-	s.Loopback = true
+	s.DevViewersOpen, s.InstallerToken = false, []byte(testInstallerToken)
 	ca, err := provenance.NewCA(time.Now())
 	if err != nil {
 		t.Fatal(err)
@@ -42,8 +43,11 @@ func bindFarm(t *testing.T) (*Server, *x509.CertPool) {
 	return s, roots
 }
 
+// bindCall calls the binding route as a development viewer, with the
+// installer token unless headers set InstallerHeader (empty: none).
 func bindCall(s *Server, method, as, body string, headers map[string]string) (int, map[string]any) {
 	r := httptest.NewRequest(method, "/api/v1/farm/binding?as="+as, strings.NewReader(body))
+	r.Header.Set(InstallerHeader, testInstallerToken)
 	for k, v := range headers {
 		r.Header.Set(k, v)
 	}
@@ -55,8 +59,8 @@ func bindCall(s *Server, method, as, body string, headers map[string]string) (in
 }
 
 // The installer binds every deployment of the farm to its owner, once:
-// the binding is a signed control record (bind), graded claimed on a
-// loopback HUD; binding again to the same owner changes nothing; another
+// the binding is a signed control record (bind), graded claimed on the
+// installer's secret; binding again to the same owner changes nothing; another
 // owner is refused, pointing to an owner change.
 func TestFarmBinding(t *testing.T) {
 	s, roots := bindFarm(t)
@@ -118,16 +122,16 @@ func TestFarmBinding(t *testing.T) {
 	}
 }
 
-// A development viewer binds nothing on a HUD the network reaches (it is
-// no one there), and a unit never binds a farm.
+// A development viewer without the installer's secret binds nothing (it
+// is no one), and a unit never binds a farm.
 func TestFarmBindingNeedsTheInstaller(t *testing.T) {
 	s, _ := bindFarm(t)
-	s.Loopback = false
-	if code, out := bindCall(s, http.MethodPost, "wrangler", `{"owner": "noor", "to": "laptop-1/*"}`, nil); code != http.StatusForbidden ||
+	s.DevViewersOpen, s.InstallerToken = true, nil
+	if code, out := bindCall(s, http.MethodPost, "wrangler", `{"owner": "noor", "to": "laptop-1/*"}`, map[string]string{InstallerHeader: ""}); code != http.StatusForbidden ||
 		!strings.Contains(out["error"].(string), "a development viewer is no one") {
-		t.Errorf("a network HUD's development viewer: %d %v", code, out)
+		t.Errorf("an open development viewer: %d %v", code, out)
 	}
-	s.Loopback = true
+	s.DevViewersOpen, s.InstallerToken = false, []byte(testInstallerToken)
 	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/sh040-light-v007/3", Projects: []string{"show-a"},
 		Unit: &api.UnitViewer{Namespace: "show-a", Job: "sh040-light-v007", Unit: "3", Grant: "project"}}
 	if code, out := bindCall(s, http.MethodPost, "unit", `{"owner": "noor", "to": "laptop-1/*"}`, nil); code != http.StatusForbidden ||

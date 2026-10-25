@@ -29,9 +29,11 @@ func TestNeedsMeIsOnlyWhatNeedsMe(t *testing.T) {
 			{Unit: 2, Name: "deliver", Text: "the codec", State: "supplied", Supplied: "ProRes"}}},
 	}, Capacity: []api.Capacity{{Pool: "spot", Slots: 8, Reason: "sh020 misses", State: "PendingApproval"},
 		{Pool: "spot-b", Slots: 4, State: "Provisioning"}}}
-	s := &Server{DevViewers: map[string]*api.Viewer{}}
+	s := &Server{DevViewersOpen: true, DevViewers: map[string]*api.Viewer{}}
 	list := func(v *api.Viewer) []api.NeedsMeItem {
-		return s.needsMe(httptest.NewRequest("GET", "/api/v1/needs-me", nil), v, snap).Items
+		dev := *v
+		dev.DevBy = devOpen // as the open test farm resolves ?as=
+		return s.needsMe(httptest.NewRequest("GET", "/api/v1/needs-me", nil), &dev, snap).Items
 	}
 	ids := func(items []api.NeedsMeItem) []string {
 		var out []string

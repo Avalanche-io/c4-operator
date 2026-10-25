@@ -834,11 +834,19 @@ Each control record says how its actor was let act:
 It names the client that carried the act (the web app, MCP, `c4 farm` or
 c4-sync) and the agent the client says acts, graded `claimed`.
 
+A development viewer (`?as=`, `--hud-dev-viewers`) needs this machine's
+installer secret: the token from `--hud-installer-token-file` in
+`X-C4-Installer`, or the cookie a browser gets for it through a single-use
+code (`c4 farm open`). The listen address decides nothing: a farm's own
+pods reach the HUD through its Service. Without the secret, `?as=` is
+refused and a request naming no viewer signs in as on any farm. Only
+`--hud-dev-viewers-open` (development and test harnesses) lets anyone be
+any viewer, and the manager refuses dev viewers with neither.
+
 A development viewer's record still says "development viewer":
-- On a HUD whose listen address is loopback only, it is claimed by the
-  installer (`--single-person-farm`), because only processes on that machine
-  reach it.
-- On any HUD the network reaches, it is unattributed.
+- On the installer's secret, it is claimed by the installer, authenticated
+  as "installer's secret on this machine (claimed)".
+- With open development viewers, it is unattributed.
 
 ### 6.9 Telemetry: what C4 writes about itself
 Telemetry is anything C4 produces about how it behaved, for someone outside
@@ -1957,7 +1965,8 @@ and a sweep planner that spawns trials are all generators.
     role:wrangler`, by the installer). Roles only: a wait for another
     person stays theirs, under `decide.standIn` as anywhere. It is a
     setting the local farm makes, never inferred from where the HUD
-    listens, nor from whom the farm is bound to.
+    listens, nor from whom the farm is bound to, and it holds only on a
+    HUD guarded by the installer token.
   - **Replies.** A wait with `reply: true` asks for content with its
     decision: a text, a file, an edited plan. The decision carries it as
     a view (`reply.view`, or `reply.text`, which the HUD stores as a view

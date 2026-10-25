@@ -26,6 +26,11 @@ type Viewer struct {
 	// Solo: the farm is this one person's (a local farm's installer), so
 	// the HUD opens on what needs them.
 	Solo bool `json:"solo,omitempty"`
+	// DevBy is set, on the server only, when the viewer is a development
+	// viewer (?as=): how the request was let use one, "token" or
+	// "cookie" (the installer's secret) or "open" (open development
+	// viewers). Never on the wire.
+	DevBy string `json:"-"`
 }
 
 // UnitViewer is a unit acting on c4 through the HUD: its job, and its

@@ -280,7 +280,8 @@ regional_pod_metric() {
 # kind-sim capacity provider, development HUD viewers, the farm's time zone.
 farm_manager() {
   local policy=${1:-objective} want
-  want="[\"manager\",\"--capacity-provider=kind-sim\",\"--work-policy=$policy\",\"--hud-dev-viewers=wrangler=*;artist=show-a\",\"--tz=America/Los_Angeles\"]"
+  # a test harness: open development viewers, anyone who reaches the HUD is any viewer
+  want="[\"manager\",\"--capacity-provider=kind-sim\",\"--work-policy=$policy\",\"--hud-dev-viewers=wrangler=*;artist=show-a\",\"--hud-dev-viewers-open\",\"--tz=America/Los_Angeles\"]"
   if [ "$(k -n c4-system get deploy c4-manager -o jsonpath='{.spec.template.spec.containers[0].args}' | tr -d ' ')" != "$want" ]; then
     k -n c4-system patch deploy c4-manager --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/template/spec/containers/0/args\",\"value\":$want}]" >/dev/null
   fi

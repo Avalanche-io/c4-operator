@@ -109,9 +109,9 @@ func (s *Server) authenticatedBy(r *http.Request, v *api.Viewer) string {
 	switch {
 	case v != nil && v.Unit != nil:
 		return fmt.Sprintf("the unit's pod token (TokenReview, audience %s), pod of unit %s of %s/%s", c4v1.HUDAudience, v.Unit.Unit, v.Unit.Namespace, v.Unit.Job)
-	case s.DevViewers != nil && s.Loopback:
-		return fmt.Sprintf("development viewer (?as=%s) on a HUD listening only on loopback: claimed by the installer, %s", devName(r), s.installer())
-	case s.DevViewers != nil:
+	case byInstaller(v):
+		return fmt.Sprintf("development viewer (?as=%s), installer's secret on this machine (claimed): %s", devName(r), s.installer())
+	case isDev(v):
 		return fmt.Sprintf("development viewer (?as=%s), not authenticated", devName(r))
 	case s.TrustProxy && r.Header.Get("X-Forwarded-User") != "":
 		return "SSO proxy (X-Forwarded-User, with the proxy's secret)"
@@ -148,7 +148,7 @@ func (s *Server) authorization(v *api.Viewer, verb, resource, ns, name string) s
 	switch {
 	case v != nil && v.Unit != nil:
 		return fmt.Sprintf("unit grant: its tool grants c4: %s; the HUD allowed %s %s %s, checked by the HUD, not by Kubernetes RBAC", v.Unit.Grant, verb, resource, target)
-	case s.DevViewers != nil:
+	case isDev(v):
 		return fmt.Sprintf("development mode: role %s may %s %s %s, checked by the HUD, not by Kubernetes RBAC", devRole(v), verb, resource, target)
 	}
 	return fmt.Sprintf("SubjectAccessReview: %s %s %s allowed", verb, resource, target)

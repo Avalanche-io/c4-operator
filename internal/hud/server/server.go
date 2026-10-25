@@ -83,15 +83,25 @@ type Server struct {
 	// Loc is the farm's time zone, for times inside sentences the HUD
 	// writes (control confirmations). Every time field on the wire is UTC.
 	Loc *time.Location
-	// DevViewers enables ?as= with these viewers (tests and demos only).
+	// DevViewers enables ?as= with these viewers (tests and demos only),
+	// for a request that carries InstallerToken or its cookie, or for
+	// anyone with DevViewersOpen (installer.go).
 	DevViewers map[string]*api.Viewer
+	// InstallerToken is this machine's installer secret
+	// (--hud-installer-token-file): X-C4-Installer carries it, and the
+	// browser a cookie derived from it.
+	InstallerToken []byte
+	// DevViewersOpen makes anyone who reaches the HUD any development
+	// viewer, as before the installer token (--hud-dev-viewers-open,
+	// development and tests only).
+	DevViewersOpen bool
 	// Sandbox is a development farm's stand-in tracker (c4 farm up --tracker),
 	// served at /sandbox/ on the HUD's own port; only with DevViewers.
 	Sandbox *url.URL
-	// Loopback is whether the HUD listens only on a loopback address. A
-	// development viewer there is the installer (SinglePerson names
-	// them), graded claimed, since only processes on this machine reach
-	// it; elsewhere it is unattributed.
+	// Loopback is whether the HUD listens only on a loopback address. It
+	// is informational: who a development viewer is rests on the
+	// installer's secret (installer.go), never on the listen address,
+	// which a cluster's Service can reach around.
 	Loopback bool
 	// TrustProxy reads X-Forwarded-User and X-Forwarded-Groups from an
 	// SSO proxy in front of the HUD.
@@ -158,9 +168,15 @@ type Server struct {
 	retire map[string]retireTry
 	// sweepMu guards sweptAt, when sweepSubmissions last looked; keys
 	// serializes submissions sent with the same key.
-	sweepMu    sync.Mutex
-	sweptAt    time.Time
-	submitKeys keyLocks
+	// installerMu guards installerCodes, the outstanding single-use
+	// codes and when each lapses; clock, when set, is the time they use
+	// (tests).
+	installerMu    sync.Mutex
+	installerCodes map[string]time.Time
+	clock          func() time.Time
+	sweepMu        sync.Mutex
+	sweptAt        time.Time
+	submitKeys     keyLocks
 	// fresh holds jobs read past the model (fresh.go).
 	fresh freshJobs
 	// toolMu guards spread: the projects each farm-wide tool tree has been
@@ -248,6 +264,8 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/held", s.handleHeld)
 	mux.HandleFunc("GET /api/v1/farm/binding", s.handleFarmBinding)
 	mux.HandleFunc("POST /api/v1/farm/binding", s.handleBind)
+	mux.HandleFunc("POST /api/v1/installer/code", s.handleInstallerCode)
+	mux.HandleFunc("GET /installer", s.handleInstaller)
 	mux.HandleFunc("GET /api/v1/diagnose", s.handleDiagnose)
 	mux.HandleFunc("GET /api/v1/telemetry", s.handleTelemetry)
 	mux.HandleFunc("POST /api/v1/telemetry/resolve", s.handleTelemetryResolve)
@@ -331,23 +349,8 @@ var errUnauthenticated = errors.New("sign in: send a bearer token, or reach the 
 
 // viewer resolves who is asking.
 func (s *Server) viewer(r *http.Request) (*api.Viewer, error) {
-	if s.DevViewers != nil {
-		as := r.URL.Query().Get("as")
-		v, ok := s.DevViewers[as]
-		if !ok && as != "" {
-			names := make([]string, 0, len(s.DevViewers))
-			for n := range s.DevViewers {
-				names = append(names, n)
-			}
-			slices.Sort(names)
-			return nil, badViewer(fmt.Sprintf("no development viewer %q here: ?as= one of %s", as, strings.Join(names, ", ")))
-		}
-		if !ok {
-			v, ok = s.DevViewers["wrangler"]
-		}
-		if ok {
-			return s.expand(v), nil
-		}
+	if v, err := s.devViewer(r); v != nil || err != nil {
+		return v, err
 	}
 	var user string
 	var groups []string
@@ -464,19 +467,24 @@ type badViewer string
 func (e badViewer) Error() string { return string(e) }
 
 // withViewer resolves the viewer or answers 401 (400 for an unknown
-// development viewer).
+// development viewer, 403 for a browser's write without the HUD's
+// header).
 func (s *Server) withViewer(w http.ResponseWriter, r *http.Request) *api.Viewer {
 	v, err := s.viewer(r)
 	var bad badViewer
+	var forbidden forbiddenViewer
 	switch {
 	case errors.As(err, &bad):
 		fail(w, http.StatusBadRequest, "%v", err)
+		return nil
+	case errors.As(err, &forbidden):
+		fail(w, http.StatusForbidden, "%v", err)
 		return nil
 	case err != nil:
 		fail(w, http.StatusUnauthorized, "%v", err)
 		return nil
 	}
-	if s.SinglePerson != "" && v.User == s.SinglePerson && !v.Solo {
+	if one := s.singlePersonFlag(); one != "" && v.User == one && !v.Solo {
 		// A copy: dev viewers are shared.
 		solo := *v
 		solo.Solo = true
@@ -596,7 +604,7 @@ func (s *Server) sandboxProxy() http.Handler {
 		pr.SetURL(s.Sandbox)
 		pr.Out.URL.Path, pr.Out.URL.RawPath = pr.In.URL.Path, pr.In.URL.RawPath
 		pr.Out.Host = s.Sandbox.Host
-		for _, h := range []string{"Authorization", "Cookie", "X-Forwarded-User", "X-Forwarded-Groups", ProxySecretHeader} {
+		for _, h := range []string{"Authorization", "Cookie", "X-Forwarded-User", "X-Forwarded-Groups", ProxySecretHeader, InstallerHeader, HUDHeader} {
 			pr.Out.Header.Del(h)
 		}
 	}}

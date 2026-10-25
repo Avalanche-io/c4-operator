@@ -107,7 +107,8 @@ func farm(t *testing.T) *Server {
 			map[string]string{annoActor: "jo", annoBookKind: "capacity-approved"}),
 	)
 	return &Server{Kube: kube, Namespace: "c4-system", Loc: time.UTC, Log: zap.New(zap.WriteTo(&bytes.Buffer{})), m: m,
-		Sites: []api.Site{{Name: "burbank", Label: "Burbank", Region: "burbank", Kind: "onprem", Localities: []string{"burbank-r1"}}},
+		Sites:          []api.Site{{Name: "burbank", Label: "Burbank", Region: "burbank", Kind: "onprem", Localities: []string{"burbank-r1"}}},
+		DevViewersOpen: true,
 		DevViewers: map[string]*api.Viewer{
 			"wrangler": {User: "dana", Projects: []string{"show-a", "show-b"}, All: true},
 			"artist":   {User: "maya", Projects: []string{"show-a"}}}}

@@ -54,8 +54,9 @@ func TestDevViewerRoleRights(t *testing.T) {
 		{"artist", "show-a", "delete", "submitgrants", false},
 		{"producer", "show-a", "delete", "submitgrants", true},
 	} {
-		v := s.expand(s.DevViewers[c.as])
-		err := s.authorize(ctx, r, v, c.ns, c.verb, c.resource, "x")
+		v := *s.expand(s.DevViewers[c.as])
+		v.DevBy = devOpen
+		err := s.authorize(ctx, r, &v, c.ns, c.verb, c.resource, "x")
 		if (err == nil) != c.ok {
 			t.Errorf("%s %s %s in %q: %v, want allowed %v", c.as, c.verb, c.resource, c.ns, err, c.ok)
 		}
@@ -195,28 +196,30 @@ func TestUnitControlRecordIsTruthful(t *testing.T) {
 	}
 }
 
-// A development viewer on a HUD that listens only on loopback is the
-// installer, graded claimed: any local process can open it as any role,
-// so it is not direct. On a HUD the network reaches, the viewer is
+// A development viewer on the installer's secret is the installer,
+// graded claimed: whoever holds this machine's token may open it as any
+// role, so it is not direct. With open development viewers the viewer is
 // unattributed. Both records still say "development viewer".
-func TestLoopbackDevViewerIsClaimed(t *testing.T) {
+func TestInstallerDevViewerIsClaimed(t *testing.T) {
 	s, decide := decideFarm(t)
 	s.SinglePerson = "noor"
+	s.InstallerToken = []byte(testInstallerToken)
 	for _, c := range []struct {
-		loopback bool
-		custody  string
-		says     string
+		open    bool
+		headers map[string]string
+		custody string
+		says    string
 	}{
-		{true, CustodyClaimed, "claimed by the installer, noor"},
-		{false, CustodyUnattributed, "not authenticated"},
+		{false, map[string]string{InstallerHeader: testInstallerToken}, CustodyClaimed, "installer's secret on this machine (claimed): noor"},
+		{true, nil, CustodyUnattributed, "not authenticated"},
 	} {
-		s.Loopback = c.loopback
-		code, p := decide(decideRequest("wrangler", nil))
+		s.DevViewersOpen = c.open
+		code, p := decide(decideRequest("wrangler", c.headers))
 		if code != http.StatusOK {
-			t.Fatalf("loopback %v: %d", c.loopback, code)
+			t.Fatalf("open %v: %d", c.open, code)
 		}
 		if p.Custody != c.custody || !strings.Contains(p.Authenticated, "development viewer") || !strings.Contains(p.Authenticated, c.says) {
-			t.Errorf("loopback %v: custody %q, authenticated %q; want %q and %q", c.loopback, p.Custody, p.Authenticated, c.custody, c.says)
+			t.Errorf("open %v: custody %q, authenticated %q; want %q and %q", c.open, p.Custody, p.Authenticated, c.custody, c.says)
 		}
 	}
 }

@@ -59,7 +59,7 @@ func grantUntil(s string, now time.Time) (time.Time, error) {
 // isSync says the viewer is a tracker's sync (c4-sync), the only caller
 // that may submit for another person.
 func (s *Server) isSync(v *api.Viewer) bool {
-	return v.User == c4v1.SyncAccount || (s.DevViewers != nil && v.User == c4v1.SyncDevViewer)
+	return v.User == c4v1.SyncAccount || (isDev(v) && v.User == c4v1.SyncDevViewer)
 }
 
 func grantView(g *c4v1.SubmitGrant, project string, now time.Time) api.Grant {
@@ -265,7 +265,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	if g.Spec.Person != v.User {
 		// Development viewers are not checked; only a farm-wide one may
 		// stand in for an admin there.
-		if s.DevViewers != nil && !v.All {
+		if isDev(v) && !v.All {
 			fail(w, http.StatusForbidden, "only %s, or a project admin, revokes their grant", g.Spec.Person)
 			return
 		}

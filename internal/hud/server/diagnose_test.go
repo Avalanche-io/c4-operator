@@ -35,7 +35,7 @@ func diagnoseServer(key func(context.Context) (telemetry.Key, error), tier ring.
 		cfg := sched.DefaultConfig()
 		r.Note(s, before, cfg, sched.Decide(s, st, cfg))
 	}
-	srv := &Server{SinglePerson: "dana", DevViewers: map[string]*api.Viewer{
+	srv := &Server{SinglePerson: "dana", DevViewersOpen: true, DevViewers: map[string]*api.Viewer{
 		"admin":    {User: "noor", All: true, Role: "farm-admin"},
 		"wrangler": {User: "sam", All: true, Role: "wrangler"},
 		"owner":    {User: "dana", All: true, Role: "artist"},

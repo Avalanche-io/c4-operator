@@ -38,7 +38,7 @@ func TestObservedSessions(t *testing.T) {
 			{ObjectMeta: metav1.ObjectMeta{Name: "studio"}, Spec: c4v1.PoolSpec{NodeSelector: map[string]string{"pool": "studio"},
 				Owners: []string{"dana", "lee", "sam"}}}}}
 	host := func(n string) *api.Viewer { return &api.Viewer{User: HostAccountPrefix + n} }
-	s := &Server{Loc: time.UTC, Log: zap.New(zap.WriteTo(&bytes.Buffer{})), m: m, DevViewers: map[string]*api.Viewer{
+	s := &Server{Loc: time.UTC, Log: zap.New(zap.WriteTo(&bytes.Buffer{})), m: m, DevViewersOpen: true, DevViewers: map[string]*api.Viewer{
 		"host1": host("laptop-1"), "host2": host("laptop-2"), "host3": host("studio-1"),
 		"dana":  {User: "dana", Projects: []string{}},
 		"sam":   {User: "sam", Projects: []string{}},
@@ -153,7 +153,7 @@ func TestUsedOutsideTheQueue(t *testing.T) {
 		pools: []c4v1.Pool{{ObjectMeta: metav1.ObjectMeta{Name: "agent-dana"},
 			Spec:   c4v1.PoolSpec{NodeSelector: map[string]string{"pool": "agent-dana"}, Owners: []string{"dana"}, SlotsPerNode: 4},
 			Status: c4v1.PoolStatus{Slots: 4, Used: 1}}}}
-	s := &Server{Loc: time.UTC, Log: zap.New(zap.WriteTo(&bytes.Buffer{})), m: m, DevViewers: map[string]*api.Viewer{
+	s := &Server{Loc: time.UTC, Log: zap.New(zap.WriteTo(&bytes.Buffer{})), m: m, DevViewersOpen: true, DevViewers: map[string]*api.Viewer{
 		"host": {User: HostAccountPrefix + "laptop-1"},
 		"maya": {User: "maya", Projects: []string{}}}}
 	look := func() (api.Pool, api.Node) {

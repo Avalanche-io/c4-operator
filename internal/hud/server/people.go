@@ -269,7 +269,7 @@ func (s *Server) handlePeopleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	authz := "the person the login is (" + tp.Spec.Person + ")"
 	if !speaksAs(v, tp.Spec.Person) {
-		if s.DevViewers != nil && !v.All {
+		if isDev(v) && !v.All {
 			fail(w, http.StatusForbidden, "only %s, or a project admin, revokes it", whoIs(tp.Spec.Person))
 			return
 		}

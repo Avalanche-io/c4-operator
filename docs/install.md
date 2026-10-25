@@ -109,7 +109,9 @@ on every request), or call
 it with Kubernetes bearer tokens; every viewer sees the projects whose
 namespaces they may list WorkJobs in, and every control is checked against
 their permissions. `--hud-dev-viewers` skips sign-in and is for local trials
-only.
+only: it needs `--hud-installer-token-file` (only requests carrying that
+machine's token, or the browser cookie made from it, are development
+viewers) or `--hud-dev-viewers-open` (anyone is, for tests).
 
 To place nodes on the HUD's map, label them with
 `topology.kubernetes.io/region` and `topology.kubernetes.io/zone` and give

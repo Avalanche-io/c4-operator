@@ -40,7 +40,7 @@ func (s *Server) direct(r *http.Request, v *api.Viewer) string {
 // telemetryAdmin answers 403 or 503 and returns false unless the viewer
 // may use the telemetry controls and the farm has a ring.
 func (s *Server) telemetryAdmin(w http.ResponseWriter, v *api.Viewer) bool {
-	if why := mayDiagnose(v, s.SinglePerson); why != "" {
+	if why := mayDiagnose(v, s.singlePersonFlag()); why != "" {
 		fail(w, http.StatusForbidden, "%s", "the farm's telemetry takes the farm admin role")
 		return false
 	}

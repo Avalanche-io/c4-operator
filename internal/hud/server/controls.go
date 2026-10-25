@@ -37,7 +37,7 @@ func (s *Server) authorize(ctx context.Context, r *http.Request, v *api.Viewer, 
 		// A unit: what its tool grants (units.go).
 		return s.unitMay(v, ns, resource, name)
 	}
-	if s.DevViewers != nil {
+	if isDev(v) {
 		return s.devMay(v, ns, verb, resource)
 	}
 	var groups []string
@@ -603,7 +603,7 @@ func (s *Server) handleDisable(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	name := r.PathValue("name")
-	if !v.All && s.DevViewers != nil {
+	if !v.All && isDev(v) {
 		fail(w, http.StatusForbidden, "%s may not disable nodes", v.User)
 		return
 	}
@@ -781,11 +781,11 @@ func (s *Server) handleDecide(w http.ResponseWriter, r *http.Request) {
 	}
 	custody, actor := CustodyDirect, actorOf(r, v)
 	var chain *schema.Chain
-	if s.DevViewers != nil && v.Unit == nil {
-		// No one signed in: the installer's word on loopback, else no
-		// one's.
+	if isDev(v) && v.Unit == nil {
+		// No one signed in: the installer's word on their secret, else
+		// no one's.
 		custody = CustodyUnattributed
-		if s.Loopback {
+		if byInstaller(v) {
 			custody = CustodyClaimed
 		}
 	}

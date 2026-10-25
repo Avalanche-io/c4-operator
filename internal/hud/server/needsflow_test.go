@@ -127,6 +127,7 @@ func TestSupplyAndWithdrawReachTheUnit(t *testing.T) {
 
 	s := &Server{Client: kc, Kube: kfake.NewSimpleClientset(), Namespace: "c4-system", Loc: time.UTC,
 		Log: zap.New(zap.WriteTo(&bytes.Buffer{})), Signer: signer("hud"), Stores: stores,
+		DevViewersOpen: true,
 		DevViewers: map[string]*api.Viewer{
 			"wrangler": {User: "dana", Projects: []string{"show"}, All: true},
 			"artist":   {User: "maya", Projects: []string{"show"}}}}

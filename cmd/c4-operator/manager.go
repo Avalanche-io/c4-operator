@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"errors"
 	"flag"
 	"fmt"
@@ -96,6 +97,8 @@ func runManager(args []string) error {
 	provider := fs.String("capacity-provider", "", "fulfil CapacityRequests in-process, comma-separated: kind-sim (tests), provisioning-request (Cluster Autoscaler); empty for an external provider")
 	hudAddr := fs.String("hud-addr", ":8090", "HUD listen address (empty disables the HUD)")
 	hudDev := fs.String("hud-dev-viewers", "", "development only: viewers selected by ?as=, as name[@role]=project|project;... (* for all projects; a name that is a role, such as wrangler, has that role)")
+	hudInstaller := fs.String("hud-installer-token-file", "", "with --hud-dev-viewers: a file holding this machine's installer token (hex); a development viewer (?as=) is honoured only for a request carrying it (X-C4-Installer) or the browser cookie made from it")
+	hudDevOpen := fs.Bool("hud-dev-viewers-open", false, "with --hud-dev-viewers and no installer token: anyone who reaches the HUD is any viewer (development and tests only)")
 	hudSandbox := fs.String("hud-sandbox", "", "development only, with --hud-dev-viewers: the stand-in tracker's URL (c4 farm up --tracker), served at /sandbox/ on the HUD's port")
 	hudProxy := fs.Bool("hud-trust-proxy", false, "read the viewer from X-Forwarded-User and X-Forwarded-Groups (an SSO proxy in front of the HUD); needs --hud-proxy-secret-file")
 	hudProxySecret := fs.String("hud-proxy-secret-file", "", "a file holding the secret the SSO proxy sends in X-C4-Proxy-Secret on every request; a request naming a viewer without it is refused")
@@ -234,7 +237,11 @@ func runManager(args []string) error {
 		if err != nil {
 			return err
 		}
-		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, proxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, *hudSandbox, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}); err != nil {
+		installer, err := installerToken(*hudDev, *hudInstaller, *hudDevOpen)
+		if err != nil {
+			return err
+		}
+		if err := addHUD(mgr, kube, q, stores, sig, *hudAddr, *hudDev, proxy, *hudSites, *hudRoles, *farmTZ, *namespace, *tierToken, *standIn, *singlePerson, *hudSandbox, hudImages{registry: *hudImageRegistry, tag: *hudImageTag, plain: splitList(*hudPlainRegistries)}, devGuard{token: installer, open: *hudDevOpen}); err != nil {
 			return err
 		}
 	}
@@ -320,7 +327,42 @@ func proxySecret(trust bool, file string) ([]byte, error) {
 	return b, nil
 }
 
-func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy []byte, sites, roles, tz, namespace, tierToken, standIn, singlePerson, sandbox string, images hudImages) error {
+// devGuard is what lets a request use the development viewers: the
+// installer token, or open viewers (development and tests only).
+type devGuard struct {
+	token []byte
+	open  bool
+}
+
+// installerToken reads --hud-installer-token-file. Development viewers
+// fail closed: --hud-dev-viewers needs the token, or
+// --hud-dev-viewers-open to say anyone who reaches the HUD is any viewer.
+func installerToken(dev, file string, open bool) ([]byte, error) {
+	switch {
+	case dev == "" && (file != "" || open):
+		return nil, errors.New("--hud-installer-token-file and --hud-dev-viewers-open are for --hud-dev-viewers")
+	case dev == "":
+		return nil, nil
+	case file == "" && !open:
+		return nil, errors.New("--hud-dev-viewers needs --hud-installer-token-file, so only this machine's installer is a development viewer; or --hud-dev-viewers-open, where anyone who reaches the HUD is any viewer (development and tests only)")
+	case file == "":
+		return nil, nil
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, fmt.Errorf("--hud-installer-token-file: %w", err)
+	}
+	b = bytes.TrimSpace(b)
+	if len(b) < 32 {
+		return nil, errors.New("--hud-installer-token-file: the token is shorter than 32 hex digits")
+	}
+	if _, err := hex.DecodeString(string(b)); err != nil {
+		return nil, fmt.Errorf("--hud-installer-token-file: the token is not hex: %w", err)
+	}
+	return b, nil
+}
+
+func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores queue.StoreFunc, sig *signing, addr, dev string, proxy []byte, sites, roles, tz, namespace, tierToken, standIn, singlePerson, sandbox string, images hudImages, guard devGuard) error {
 	if standIn != "allow" && standIn != "deny" {
 		return fmt.Errorf("--decide-stand-in: allow or deny, not %q", standIn)
 	}
@@ -368,8 +410,9 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		if err != nil {
 			return err
 		}
-		// Whether only this machine reaches the HUD is its listen
-		// address's to say, never a request's.
+		srv.InstallerToken, srv.DevViewersOpen = guard.token, guard.open
+		// Informational only: who a development viewer is rests on the
+		// installer token, never on the listen address.
 		srv.Loopback = loopbackOnly(addr)
 	}
 	if sandbox != "" {

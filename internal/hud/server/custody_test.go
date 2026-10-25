@@ -130,8 +130,9 @@ func newCustodyFarm(t *testing.T) (*custodyFarm, string) {
 		t.Fatal(err)
 	}
 	f.srv = &Server{Client: f.k, Kube: kube, Namespace: "c4-system", Loc: time.UTC, Signer: hudSigner, Log: zap.New(zap.WriteTo(&bytes.Buffer{})),
-		Stores:     func(context.Context, string) (*storeurl.Sharded, error) { return st, nil },
-		DevViewers: map[string]*api.Viewer{"wrangler": {User: "wrangler", All: true}}}
+		Stores:         func(context.Context, string) (*storeurl.Sharded, error) { return st, nil },
+		DevViewersOpen: true,
+		DevViewers:     map[string]*api.Viewer{"wrangler": {User: "wrangler", All: true}}}
 	m := &model{byKey: map[string]*jobRec{}, projects: []c4v1.Project{{ObjectMeta: metav1.ObjectMeta{Name: "show-a"}}}}
 	for _, j := range []c4v1.WorkJob{render, denoise} {
 		rec := &jobRec{job: j, key: j.Namespace + "/" + j.Name, project: "show-a"}
