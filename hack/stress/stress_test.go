@@ -356,16 +356,16 @@ func TestReproGangBurstRoom(t *testing.T) {
 	}
 }
 
-// Found by the stress grid, for a decision (it changes R for every job):
-// under TailAware a job's work must be done by T - t_path, as if its
-// critical path came after all of its work, so the critical path is
-// counted twice. A single two-hour unit due in three hours, with its slot
-// free, is planned to finish at W/A + t_path = 4h and reported at risk;
-// it finishes at 2h. Graham's bound for list scheduling counts the
-// critical path's own work once: finish <= (W - t_path*k)/A + t_path,
-// with k the slots of the units on the path.
+// Regression, found by the stress grid: under TailAware a job's work had
+// to be done by T - t_path, as if its critical path came after all of
+// its work, so the critical path was counted twice. A single two-hour
+// unit due in three hours, with its slot free, was planned to finish at
+// W/A + t_path = 4h and reported at risk; it finishes at 2h. AtRisk,
+// LateBy and the ETA now use Graham's bound, which counts the critical
+// path's own work once: finish <= (W - t_path*k)/A + t_path, with k the
+// slots of the units on the path. Planning and bursts keep the
+// conservative tail.
 func TestReproTailDoubleCount(t *testing.T) {
-	skipRepro(t, "sched modeling issue tail-double-count (found by hack/stress): TailAware plans W/A + t_path; proposed (W - t_path*k)/A + t_path; awaiting a decision")
 	j := rjob("one", "p", 1, 2*3600, 2*3600, 3*time.Hour)
 	s := sched.Snapshot{Now: t0r, Pools: []sched.Pool{{Name: "cpu", Slots: 4}}, Jobs: []sched.Job{j}}
 	st := sched.Decide(s, &sched.State{}, sched.DefaultConfig()).Jobs["one"]
