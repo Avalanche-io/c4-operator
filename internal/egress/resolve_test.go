@@ -2,12 +2,16 @@ package egress
 
 import (
 	"context"
+	"errors"
+	"net"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
@@ -57,21 +61,28 @@ func TestToolJobNetworks(t *testing.T) {
 	scheme := runtime.NewScheme()
 	clientgoscheme.AddToScheme(scheme)
 	c4v1.AddToScheme(scheme)
+	ctl := true
 	pod := func(name, ip, job string) *corev1.Pod {
 		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: name,
-			Labels: map[string]string{c4v1.LabelJob: job, c4v1.LabelUnit: "0", c4v1.LabelTool: "fetch", c4v1.LabelJobTool: "true"}},
+			Labels:          map[string]string{c4v1.LabelJob: job, c4v1.LabelUnit: "0", c4v1.LabelTool: "fetch", c4v1.LabelJobTool: "true"},
+			OwnerReferences: []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: job, UID: types.UID("uid-" + job), Controller: &ctl}}},
 			Status: corev1.PodStatus{Phase: corev1.PodRunning, PodIP: ip}}
 	}
 	job := func(name string, network ...string) *c4v1.WorkJob {
-		return &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: name},
+		return &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: name, UID: types.UID("uid-" + name)},
 			Spec: c4v1.WorkJobSpec{Tool: &c4v1.WorkTool{Name: "fetch", Network: network}}}
 	}
+	// a unit of an earlier job of the name: the job now there is not its
+	stale := pod("r0", "10.0.1.4", "fetch-again")
+	stale.OwnerReferences[0].UID = "uid-before"
 	nets := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: c4v1.NetworksConfigMap},
-		Data: map[string]string{"studio-api": "- {host: api.studio.example, ports: [443]}", "pypi": "- {host: pypi.org}\n- {host: files.pythonhosted.org}"}}
+		Data: map[string]string{"studio-api": "- {host: api.studio.example, ports: [443]}", "pypi": "- {host: pypi.org}\n- {host: files.pythonhosted.org}",
+			// wider networks that also allow pypi.org: the advice names the narrowest
+			"anything": "- {host: pypi.org}\n- {host: files.pythonhosted.org}\n- {host: \"*.studio.example\"}\n- {host: \"*.python.org\"}", "python": "- {host: pypi.org}\n- {host: files.pythonhosted.org}\n- {host: docs.python.org}"}}
 	c := fake.NewClientBuilder().WithScheme(scheme).
 		WithIndex(&corev1.Pod{}, "status.podIP", func(o client.Object) []string { return []string{o.(*corev1.Pod).Status.PodIP} }).
 		WithObjects(nets, pod("d0", "10.0.1.1", "fetch-declared"), pod("s0", "10.0.1.2", "fetch-sealed"), pod("m0", "10.0.1.3", "fetch-missing"),
-			job("fetch-declared", "studio-api"), job("fetch-sealed"), job("fetch-missing", "studio-db"),
+			job("fetch-declared", "studio-api"), job("fetch-sealed"), job("fetch-missing", "studio-db"), stale, job("fetch-again", "pypi"),
 			// a Tool object of the name allows more: it does not apply
 			&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "fetch"}, Spec: c4v1.ToolSpec{Egress: []c4v1.ToolEgress{{Host: "*.example"}}}}).Build()
 	r := &Cluster{Client: c, Namespace: "c4-system"}
@@ -85,6 +96,9 @@ func TestToolJobNetworks(t *testing.T) {
 	}
 	if _, _, err := r.Rules(ctx, "10.0.1.3"); err == nil || !strings.Contains(err.Error(), "fetch declares network studio-db, which this farm does not define: a farm admin adds it to the c4-networks ConfigMap in c4-system") {
 		t.Fatalf("missing: %v", err)
+	}
+	if _, _, err := r.Rules(ctx, "10.0.1.4"); err == nil || !strings.Contains(err.Error(), "was replaced by another of the same name") {
+		t.Fatalf("stale: %v", err)
 	}
 	if a := r.Advise(ctx, u, "pypi.org", 443); a != "add needs: {network: [pypi]} to fetch's tool.yaml and publish it again" {
 		t.Fatalf("advice: %q", a)
@@ -104,9 +118,72 @@ func TestParseNetworks(t *testing.T) {
 	if err != nil || len(n["pypi"]) != 2 || n["db"][0].Service != "pipeline/db" {
 		t.Fatalf("%v %v", n, err)
 	}
-	for _, bad := range []map[string]string{{"x": "host: a"}, {"x": "- {host: a, cidr: 10.0.0.0/8}"}, {"x": "- {ports: [1]}"}, {"Bad": "- {host: a}"}, {"licences": "- {host: a}"}, {"x": "- {hostname: a}"}} {
+	for _, bad := range []map[string]string{{"x": "host: a"}, {"x": "- {host: a, cidr: 10.0.0.0/8}"}, {"x": "- {ports: [1]}"}, {"Bad": "- {host: a}"}, {"licences": "- {host: a}"}, {"x": "- {hostname: a}"},
+		// syntax: a host, a wildcard, a block, a service, a port
+		{"x": "- {host: \"api studio\"}"}, {"x": "- {host: \"*\"}"}, {"x": "- {host: \"*.com\"}"}, {"x": "- {host: \"a.*.example\"}"},
+		{"x": "- {cidr: 10.0.0.0/33}"}, {"x": "- {cidr: studio}"}, {"x": "- {service: db}"}, {"x": "- {service: Pipeline/db}"},
+		{"x": "- {host: a.example, ports: [0]}"}, {"x": "- {host: a.example, ports: [70000]}"}} {
 		if _, err := ParseNetworks(bad); err == nil {
 			t.Errorf("%v parsed", bad)
 		}
+	}
+}
+
+// A malformed ConfigMap is a MalformedError: the admin's to fix, which a
+// caller can tell from the API server being unreachable.
+func TestLoadNetworksMalformed(t *testing.T) {
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: "c4-system", Name: c4v1.NetworksConfigMap},
+		Data: map[string]string{"studio-api": "- {cidr: studio}"}}).Build()
+	_, err := LoadNetworks(context.Background(), c, "c4-system")
+	var me *MalformedError
+	if !errors.As(err, &me) || !strings.Contains(err.Error(), "the c4-networks ConfigMap in c4-system is malformed: network studio-api: cidr") {
+		t.Fatalf("%v", err)
+	}
+}
+
+// The cluster's own addresses: each node's pod blocks and addresses, and
+// the service blocks.
+func TestClusterRanges(t *testing.T) {
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1"}, Spec: corev1.NodeSpec{PodCIDR: "198.51.100.0/24", PodCIDRs: []string{"198.51.100.0/24", "fd00:10::/64"}},
+			Status: corev1.NodeStatus{Addresses: []corev1.NodeAddress{{Type: corev1.NodeExternalIP, Address: "203.0.113.40"}, {Type: corev1.NodeHostName, Address: "n1"}}}},
+		&networkingv1.ServiceCIDR{ObjectMeta: metav1.ObjectMeta{Name: "kubernetes"}, Spec: networkingv1.ServiceCIDRSpec{CIDRs: []string{"192.0.2.0/24"}}}).Build()
+	r := &Cluster{Client: c, Namespace: "c4-system"}
+	in := func(ip string) bool {
+		for _, n := range r.Ranges(context.Background()) {
+			if n.Contains(net.ParseIP(ip)) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, ip := range []string{"198.51.100.9", "fd00:10::9", "203.0.113.40", "192.0.2.10"} {
+		if !in(ip) {
+			t.Errorf("%s is not counted the cluster's", ip)
+		}
+	}
+	if in("203.0.113.41") {
+		t.Error("a node's neighbour counted as the node")
+	}
+}
+
+// The networks that allow a request, narrowest first: a rule naming the
+// host before a wildcard (a longer domain first), ports before any port,
+// fewer rules, then the name.
+func TestOfferingNarrowestFirst(t *testing.T) {
+	n := Networks{
+		"all-studio": {{Host: "*.studio.example"}},
+		"api-render": {{Host: "*.render.studio.example"}},
+		"api":        {{Host: "api.render.studio.example"}, {Host: "cdn.studio.example"}},
+		"api-tls":    {{Host: "api.render.studio.example", Ports: []int32{443}}, {Host: "a.example"}, {Host: "b.example"}},
+		"other":      {{Host: "pypi.org"}},
+	}
+	got := strings.Join(n.Offering("api.render.studio.example", 443), ",")
+	if got != "api-tls,api,api-render,all-studio" {
+		t.Fatalf("offering %s", got)
 	}
 }

@@ -177,10 +177,13 @@ func TestProxyChecksWhereANameGoes(t *testing.T) {
 		"sixtofour.example": {net.ParseIP("2002:7f00:1::1")},      // 6to4 of 127.0.0.1
 		"teredo.example":    {net.ParseIP("2001:0:4136:e378::1")}, // Teredo
 		"mapped.example":    {net.ParseIP("::ffff:169.254.169.254")},
+		"nat64.example":     {net.ParseIP("64:ff9b:1::a01:203")}, // local-use NAT64 of 10.1.2.3
+		"compat.example":    {net.ParseIP("::10.1.2.3")},         // IPv4-compatible
+		"pod.example":       {net.ParseIP("198.51.100.7")},       // the cluster's own, by its Ranger
 	}
 	var dialed string
 	rules := []c4v1.ToolEgress{{Host: "*.example"}}
-	p := &Proxy{Log: logr.Discard(), Resolve: fakeResolver{"127.0.0.1": rules},
+	p := &Proxy{Log: logr.Discard(), Resolve: rangedResolver{fakeResolver{"127.0.0.1": rules}, "198.51.100.0/24"},
 		Lookup: func(_ context.Context, host string) ([]net.IP, error) {
 			if host == "down.example" {
 				return nil, errors.New("server misbehaving")
@@ -206,7 +209,8 @@ func TestProxyChecksWhereANameGoes(t *testing.T) {
 		resp.Body.Close()
 		return resp.StatusCode, string(b)
 	}
-	for _, host := range []string{"loop.example", "metadata.example", "inside.example", "sixtofour.example", "teredo.example", "mapped.example"} {
+	for _, host := range []string{"loop.example", "metadata.example", "inside.example", "sixtofour.example", "teredo.example", "mapped.example",
+		"nat64.example", "compat.example", "pod.example"} {
 		if code, b := get(host); code != http.StatusForbidden || !strings.Contains(b, "which a host rule never reaches") || dialed != "" {
 			t.Errorf("%s: %d %q, dialed %q", host, code, b, dialed)
 		}
@@ -226,4 +230,20 @@ func TestProxyChecksWhereANameGoes(t *testing.T) {
 	if code, _ := get("loop.example"); code != http.StatusForbidden || dialed != "" {
 		t.Errorf("loop, with another cidr rule: %d, dialed %q", code, dialed)
 	}
+	// a cidr rule covers the address only on its ports
+	p.Resolve = fakeResolver{"127.0.0.1": append(rules, c4v1.ToolEgress{CIDR: "10.1.0.0/16", Ports: []int32{5432}})}
+	if code, b := get("inside.example"); code != http.StatusForbidden || dialed != "" || !strings.Contains(b, "cover them on port 80") {
+		t.Errorf("inside, with a cidr rule on another port: %d %q, dialed %q", code, b, dialed)
+	}
+}
+
+// rangedResolver knows the cluster's own address block.
+type rangedResolver struct {
+	fakeResolver
+	cidr string
+}
+
+func (r rangedResolver) Ranges(context.Context) []*net.IPNet {
+	_, n, _ := net.ParseCIDR(r.cidr)
+	return []*net.IPNet{n}
 }

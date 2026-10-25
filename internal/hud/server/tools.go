@@ -335,6 +335,13 @@ func (s *Server) handlePublishTool(w http.ResponseWriter, r *http.Request) {
 	}
 	if names := otherNetwork(tool.Needs.Network); len(names) > 0 {
 		nets, err := egress.LoadNetworks(ctx, s.Client, s.Namespace)
+		var bad *egress.MalformedError
+		if errors.As(err, &bad) {
+			// Not something a retry mends: the farm admin fixes it.
+			refuse(api.FieldError{Path: "needs.network", Message: bad.Error() + ", so no network can be checked",
+				Fix: "ask a farm admin to fix it (internal/hud/API.md, Networks)"})
+			return
+		}
 		if err != nil {
 			s.Log.Error(err, "tool publish: networks")
 			fail(w, http.StatusBadGateway, "the farm's networks cannot be read just now; try again shortly")

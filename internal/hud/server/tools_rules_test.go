@@ -152,9 +152,20 @@ func TestPublishNetworks(t *testing.T) {
 		out.Errors[0].Message != "notes declares network studio-db, which this farm does not define: a farm admin adds it to the c4-networks ConfigMap in c4-system (internal/hud/API.md, Networks)" {
 		t.Fatalf("undefined network: %d %+v", code, out)
 	}
+	// A malformed c4-networks is the admin's to fix, not a "try again".
 	cm := &corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: s.Namespace, Name: c4v1.NetworksConfigMap},
-		Data: map[string]string{"studio-db": "- {host: db.studio.example, ports: [5432]}"}}
+		Data: map[string]string{"studio-db": "- {cidr: studio-db}"}}
 	if err := s.Client.Create(ctx, cm); err != nil {
+		t.Fatal(err)
+	}
+	code, out = publish(t, s, "td", "show-a", api.ToolPublishRequest{View: putTree(t, s, "show-a", files).String()})
+	if code != http.StatusUnprocessableEntity || len(out.Errors) != 1 || out.Errors[0].Path != "needs.network" ||
+		!strings.Contains(out.Errors[0].Message, "the c4-networks ConfigMap in c4-system is malformed: network studio-db: cidr") ||
+		!strings.Contains(out.Errors[0].Fix, "farm admin") {
+		t.Fatalf("malformed networks: %d %+v", code, out)
+	}
+	cm.Data = map[string]string{"studio-db": "- {host: db.studio.example, ports: [5432]}"}
+	if err := s.Client.Update(ctx, cm); err != nil {
 		t.Fatal(err)
 	}
 	code, out = publish(t, s, "td", "show-a", api.ToolPublishRequest{View: putTree(t, s, "show-a", files).String()})

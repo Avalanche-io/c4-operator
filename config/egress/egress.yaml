@@ -26,6 +26,14 @@ rules:
 - apiGroups: [c4.avalanche.io]
   resources: [workjobs]
   verbs: [get]
+# The cluster's own addresses, which a host rule never reaches: the nodes'
+# pod blocks and addresses, and the service blocks.
+- apiGroups: [""]
+  resources: [nodes]
+  verbs: [list]
+- apiGroups: [networking.k8s.io]
+  resources: [servicecidrs]
+  verbs: [list]
 ---
 # The networks the farm admin defines (c4-networks), in the operator's
 # namespace alone.

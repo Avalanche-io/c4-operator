@@ -4,11 +4,14 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"sync"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -28,6 +31,10 @@ type Cluster struct {
 
 	mu   sync.Mutex
 	seen map[string]answer
+
+	rangesMu sync.Mutex
+	ranges   []*net.IPNet
+	rangesAt time.Time
 }
 
 type answer struct {
@@ -87,6 +94,15 @@ func (c *Cluster) resolve(ctx context.Context, ip string) (Unit, []c4v1.ToolEgre
 			if err := c.Client.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: u.Job}, &j); err != nil {
 				return u, nil, fmt.Errorf("job %s/%s: %w", p.Namespace, u.Job, err)
 			}
+			// The job by its UID, not only its name: a job made again
+			// under the name may declare other networks.
+			owner := metav1.GetControllerOf(&p)
+			if owner == nil || owner.Kind != "WorkJob" || owner.Name != u.Job {
+				return u, nil, fmt.Errorf("unit %s/%s names no WorkJob %s as its controller", p.Namespace, p.Name, u.Job)
+			}
+			if owner.UID != j.UID {
+				return u, nil, fmt.Errorf("job %s/%s was replaced by another of the same name; unit %s is not its", p.Namespace, u.Job, p.Name)
+			}
 			if j.Spec.Tool == nil || j.Spec.Tool.Name != tool {
 				return u, nil, fmt.Errorf("job %s/%s does not run under tool %s", p.Namespace, u.Job, tool)
 			}
@@ -133,4 +149,61 @@ func (c *Cluster) Advise(ctx context.Context, u Unit, host string, port int) str
 	}
 	return fmt.Sprintf("ask a farm admin to define a network for %s:%d in the %s ConfigMap, then add needs: {network: [<its name>]} to %s's tool.yaml",
 		host, port, c4v1.NetworksConfigMap, u.Tool)
+}
+
+// Ranges are the cluster's own addresses, beside the fixed ones the proxy
+// never lets a host rule reach: each node's pod address blocks and its
+// addresses, and the service address blocks (ServiceCIDR objects, where
+// the cluster has them). They are read again after a minute; a read that
+// fails keeps what was read before.
+func (c *Cluster) Ranges(ctx context.Context) []*net.IPNet {
+	c.rangesMu.Lock()
+	defer c.rangesMu.Unlock()
+	if c.rangesAt.IsZero() || c.now().Sub(c.rangesAt) >= time.Minute {
+		if r, err := c.readRanges(ctx); err == nil {
+			c.ranges = r
+		}
+		c.rangesAt = c.now()
+	}
+	return c.ranges
+}
+
+func (c *Cluster) readRanges(ctx context.Context) ([]*net.IPNet, error) {
+	var out []*net.IPNet
+	add := func(cidr string) {
+		if _, n, err := net.ParseCIDR(cidr); err == nil {
+			out = append(out, n)
+		}
+	}
+	host := func(addr string) {
+		if ip := net.ParseIP(addr); ip != nil {
+			bits := 8 * len(ip)
+			if ip4 := ip.To4(); ip4 != nil {
+				ip, bits = ip4, 32
+			}
+			out = append(out, &net.IPNet{IP: ip, Mask: net.CIDRMask(bits, bits)})
+		}
+	}
+	var nodes corev1.NodeList
+	if err := c.Client.List(ctx, &nodes); err != nil {
+		return nil, err
+	}
+	for _, n := range nodes.Items {
+		add(n.Spec.PodCIDR)
+		for _, p := range n.Spec.PodCIDRs {
+			add(p)
+		}
+		for _, a := range n.Status.Addresses {
+			host(a.Address)
+		}
+	}
+	var svc networkingv1.ServiceCIDRList
+	if err := c.Client.List(ctx, &svc); err == nil {
+		for _, s := range svc.Items {
+			for _, b := range s.Spec.CIDRs {
+				add(b)
+			}
+		}
+	}
+	return out, nil
 }
