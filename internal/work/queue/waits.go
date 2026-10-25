@@ -91,7 +91,7 @@ func imageWait(v *view) string {
 					image = sc.Image
 				}
 			}
-			why := w.Message
+			why := pullWhy(w.Message, image)
 			if why == "" {
 				why = w.Reason
 			}
@@ -100,6 +100,35 @@ func imageWait(v *view) string {
 		}
 	}
 	return ""
+}
+
+// pullWhy is a failed pull's cause in a few words: the runtime's message
+// ("rpc error: code = NotFound desc = failed to pull and unpack image ...:
+// failed to resolve reference ...: not found") runs to hundreds of
+// characters and names the image three times. Known causes read as the
+// farm says them; anything else keeps the runtime's last clause.
+func pullWhy(msg, image string) string {
+	reg := "its registry"
+	if i := strings.Index(image, "/"); i > 0 && strings.ContainsAny(image[:i], ".:") {
+		reg = image[:i]
+	}
+	low := strings.ToLower(msg)
+	switch {
+	case msg == "":
+		return ""
+	case strings.Contains(low, "not found") || strings.Contains(low, "manifest unknown"):
+		return "not found in " + reg
+	case strings.Contains(low, "unauthorized") || strings.Contains(low, "401") || strings.Contains(low, "denied"):
+		return reg + " refused access to it"
+	case strings.Contains(low, "no such host") || strings.Contains(low, "connection refused") || strings.Contains(low, "i/o timeout"):
+		return reg + " cannot be reached"
+	case strings.HasPrefix(low, "back-off pulling image"):
+		return "the last pull failed; it is waiting to try again"
+	}
+	if i := strings.LastIndex(msg, ": "); i >= 0 && i+2 < len(msg) {
+		return msg[i+2:]
+	}
+	return msg
 }
 
 func pullFailed(reason string) bool {

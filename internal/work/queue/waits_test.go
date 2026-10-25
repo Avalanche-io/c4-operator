@@ -108,3 +108,20 @@ func TestRefusalWords(t *testing.T) {
 		}
 	}
 }
+
+// A failed pull's cause reads in a few words, not the runtime's message.
+func TestPullWhy(t *testing.T) {
+	const img = "c4-local-registry:5000/c4-job-missing:dev"
+	for _, c := range []struct{ msg, image, want string }{
+		{`rpc error: code = NotFound desc = failed to pull and unpack image "` + img + `": failed to resolve reference "` + img + `": ` + img + `: not found`, img, "not found in c4-local-registry:5000"},
+		{`failed to authorize: failed to fetch anonymous token: unexpected status: 401 Unauthorized`, "registry.studio.example/render:4", "registry.studio.example refused access to it"},
+		{`dial tcp: lookup registry.studio.example: no such host`, "registry.studio.example/render:4", "registry.studio.example cannot be reached"},
+		{`Back-off pulling image "busybox"`, "busybox", "the last pull failed; it is waiting to try again"},
+		{`something odd happened: the disk is full`, "busybox", "the disk is full"},
+		{"", "busybox", ""},
+	} {
+		if got := pullWhy(c.msg, c.image); got != c.want {
+			t.Errorf("pullWhy(%q) = %q, want %q", c.msg, got, c.want)
+		}
+	}
+}
