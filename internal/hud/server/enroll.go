@@ -136,6 +136,9 @@ func (s *Server) handleEnrollOffer(w http.ResponseWriter, r *http.Request) {
 		"message": fmt.Sprintf("to enroll %s as yours, sign in to the farm and give this code within %s: %s", node, EnrollOfferFor, code)})
 }
 
+// errAgentEnrolls is the refusal of an enrollment an agent accepts.
+const errAgentEnrolls = "an agent cannot enroll a machine for you: its holder enrolls it with c4 farm enroll"
+
 // handleNodeEnroll is POST /nodes/{node}/enroll {code}: a person accepts a
 // machine's offer, with the code shown at it. They become one of its owners;
 // the act is signed (control/v1, enroll, by and for the person, naming the
@@ -148,6 +151,12 @@ func (s *Server) handleNodeEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 	if v.Unit != nil || strings.HasPrefix(v.User, "system:") {
 		fail(w, http.StatusForbidden, "only a person enrolls a machine, with their own sign-in; %s is not one", v.User)
+		return
+	}
+	// Accepting decides whose jobs spend whose sign-in, a delegation: an
+	// agent never makes it, and is refused before the code is tried.
+	if agentActs(r) {
+		fail(w, http.StatusForbidden, errAgentEnrolls)
 		return
 	}
 	node := r.PathValue("node")

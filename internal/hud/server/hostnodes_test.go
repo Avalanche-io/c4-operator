@@ -91,8 +91,9 @@ func TestHostRunnerReadsOnlyItsOwnPods(t *testing.T) {
 // its own token and gets a code, and its holder (whose sign-in the runner
 // uses) accepts with that code, once. The HUD writes the Node's owners as a
 // JSON list. Anyone but the holder is refused with how to be added; the
-// holder adds them (for). A wrong code, a second use, five wrong codes and
-// anyone but the machine's own runner offering are refused.
+// holder adds them (for). A wrong code, a second use, five wrong codes,
+// anyone but the machine's own runner offering, and an agent accepting are
+// refused; the runner's own offer is not an agent's.
 func TestEnrollIsOfferAndAcceptance(t *testing.T) {
 	s := hostFarm(t, hostNode("laptop-1"))
 	offerAs := func(as, holder string) (int, string) {
@@ -118,6 +119,24 @@ func TestEnrollIsOfferAndAcceptance(t *testing.T) {
 	if e, _ := out["error"].(string); code != http.StatusForbidden || !strings.Contains(e, "c4 farm enroll laptop-1 --for lee") {
 		t.Fatalf("not the holder: %d %v", code, out)
 	}
+	// an agent never accepts, with the right code or for someone: through
+	// MCP, or named from c4 farm; the code stands for the holder
+	for _, h := range []map[string]string{{"X-C4-Client": "mcp"}, {"X-C4-Client": "c4-farm", "X-C4-Agent": "planner-bot"}} {
+		for _, body := range []map[string]string{{"code": c}, {"code": c, "for": "lee"}} {
+			raw, _ := json.Marshal(body)
+			r := httptest.NewRequest(http.MethodPost, "/api/v1/nodes/laptop-1/enroll?as=dana", bytes.NewReader(raw))
+			for k, v := range h {
+				r.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			s.Handler().ServeHTTP(w, r)
+			var out map[string]any
+			json.Unmarshal(w.Body.Bytes(), &out)
+			if e, _ := out["error"].(string); w.Code != http.StatusForbidden || e != errAgentEnrolls {
+				t.Fatalf("an agent enrolling (%v, %v): %d %v", h, body, w.Code, out)
+			}
+		}
+	}
 	typed := strings.ToLower(c[:2] + " " + c[2:4] + c[5:]) // no dash, a space, lower case
 	if code, out := hostCall(t, s, http.MethodPost, "/api/v1/nodes/laptop-1/enroll", "dana", map[string]string{"code": typed}); code != http.StatusOK {
 		t.Fatalf("enroll: %d %v", code, out)
@@ -133,8 +152,10 @@ func TestEnrollIsOfferAndAcceptance(t *testing.T) {
 	if code, _ := hostCall(t, s, http.MethodPost, "/api/v1/nodes/laptop-1/enroll", "dana", map[string]string{"code": c}); code != http.StatusForbidden {
 		t.Fatalf("a code was used twice: %d", code)
 	}
-	// the holder adds lee
-	_, c = offerAs("host1", "dana")
+	// the holder adds lee; the runner's own offer is not an agent's
+	if code, c = offerAs("host1", "dana"); code != http.StatusOK {
+		t.Fatalf("the runner offering again: %d", code)
+	}
 	if code, out := hostCall(t, s, http.MethodPost, "/api/v1/nodes/laptop-1/enroll", "dana", map[string]string{"code": c, "for": "lee"}); code != http.StatusOK ||
 		!strings.Contains(out["message"].(string), "lee's jobs spend dana's sign-in") {
 		t.Fatalf("for lee: %d %v", code, out)

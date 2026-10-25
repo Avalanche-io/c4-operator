@@ -880,7 +880,13 @@ is, so no one enrolls a machine they do not hold.
   person's jobs spend the holder's sign-in only with the holder's consent.
   The code is read in any case, with or without its dash or spaces. A wrong
   code, a used one, an expired one, a unit or a service account gets 403,
-  and five wrong codes end the offer.
+  and five wrong codes end the offer. Accepting decides whose jobs spend
+  whose sign-in, so an agent never accepts, for the holder or for anyone
+  they name: through MCP (`X-C4-Client: mcp`), or naming an agent
+  (`X-C4-Agent`) from any client, it gets 403 "an agent cannot enroll a
+  machine for you: its holder enrolls it with c4 farm enroll", before the
+  code is tried (the offer stands). The offer, with the runner's own
+  token, is not an agent's and is unaffected.
 - The queue places a person's host work only on a Node that names them.
 
 ## GET /events
