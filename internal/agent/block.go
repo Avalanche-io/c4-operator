@@ -512,9 +512,12 @@ func replyDir(p *corev1.Pod, u UnitDirs) string {
 	return ""
 }
 
-// HookSettingsCommand is the --settings document that installs the
-// c4-agent hook for one session, running command at each turn's end and
-// after each tool call.
+// HookSettingsCommand is the --settings document a block's session runs
+// with: the c4-agent hook, run at each turn's end and after each tool call,
+// and C4_AGENT_BLOCK=1 in the session's environment, so its commands, its
+// MCP servers and its hooks know they run inside a block, not in the lead
+// (the CLI and MCP refuse agent work there). The CLI keeps settings with a
+// background session, so a resumed block has it too.
 func HookSettingsCommand(command string) ([]byte, error) {
 	if command == "" {
 		return nil, errors.New("no Stop hook command for block sessions (Runner.HookCommand)")
@@ -530,10 +533,13 @@ func HookSettingsCommand(command string) ([]byte, error) {
 	}
 	// Stop: the turn's end, a safe point; PostToolUse: after each tool
 	// call, a stop the farm asked for ends the turn at that step
-	s := map[string]map[string][]group{"hooks": {
-		"Stop":        {{Hooks: []hook{{Type: "command", Command: command, Timeout: 30}}}},
-		"PostToolUse": {{Matcher: "*", Hooks: []hook{{Type: "command", Command: command, Timeout: 10}}}},
-	}}
+	s := map[string]any{
+		"hooks": map[string][]group{
+			"Stop":        {{Hooks: []hook{{Type: "command", Command: command, Timeout: 30}}}},
+			"PostToolUse": {{Matcher: "*", Hooks: []hook{{Type: "command", Command: command, Timeout: 10}}}},
+		},
+		"env": map[string]string{EnvBlock: "1"},
+	}
 	return json.Marshal(s)
 }
 

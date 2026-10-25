@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -64,6 +65,36 @@ func TestHooksRunAfterEachTool(t *testing.T) {
 		if len(s.Hooks["Stop"]) != 1 || len(s.Hooks["PostToolUse"]) != 1 || s.Hooks["PostToolUse"][0].Matcher != "*" {
 			t.Errorf("%s: %s", name, b)
 		}
+	}
+}
+
+// A block's session, on a host or in a pod, has C4_AGENT_BLOCK=1 in its
+// environment from the settings it starts with, so the CLI and MCP inside
+// it can refuse agent work that only a lead may start.
+func TestABlockSessionKnowsItIsABlock(t *testing.T) {
+	flags, err := blockFlagsFor(hostPod(), "practice.j.u", "c4-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.Index(flags, "--settings")
+	if i < 0 || i+1 >= len(flags) {
+		t.Fatalf("no --settings in %v", flags)
+	}
+	var s struct {
+		Env map[string]string `json:"env"`
+	}
+	if err := json.Unmarshal([]byte(flags[i+1]), &s); err != nil {
+		t.Fatal(err)
+	}
+	if s.Env[EnvBlock] != "1" {
+		t.Fatalf("the block's settings set no %s: %s", EnvBlock, flags[i+1])
+	}
+	m, err := HookSettings("c4-agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(m), EnvBlock) {
+		t.Fatalf("a member's settings mark it a block: %s", m)
 	}
 }
 

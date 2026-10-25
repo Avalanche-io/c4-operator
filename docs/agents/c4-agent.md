@@ -568,7 +568,15 @@ across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
     so what a block can reach is bounded by its folders, its network and its
     credentials, not by the list alone;
   - `--settings` with the Stop hook (this binary's `checkpoint --hook`,
-    with its agents home and `c4-unit`).
+    with its agents home and `c4-unit`) and `C4_AGENT_BLOCK=1` in the
+    session's environment, so its commands and MCP servers know they run in
+    a block (a block pod's session has it from the pod too). The CLI and MCP
+    refuse agent work there, and the HUD refuses it from a unit's own token.
+    A block pod reaches the HUD only with that token, so the rule holds
+    there. A host block runs as its owner, on a machine with the owner's
+    sign-in, and could unset the variable and reach the HUD as them, so on
+    a host the rule is kept by the agent, not enforced. That is enough for
+    what it guards against, runaway fan-out on the owner's own spend.
   - its own config directory, never the person's `~/.claude`: the
     agents home's `blocks-env` (`--blocks-env`), filled from the agent
     environment the block names (`C4_AGENT_ENV`, the release's base when it
