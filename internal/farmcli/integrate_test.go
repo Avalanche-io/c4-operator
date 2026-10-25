@@ -155,6 +155,7 @@ func TestChooseOffersUpdates(t *testing.T) {
 		delete(cfg.Integrations, "blender@"+v+"#"+dcc.Release())
 		cfg.Integrations["blender@"+v+"#0123456789abcdef"] = false
 	}
+	cfg.Integrations["blender@4.5"] = false // as an earlier c4 kept it
 	out.Reset()
 	if on, _ := Choose(cfg, found, "", false, true, Out{W: &out, In: strings.NewReader("n\n")}); len(on) != 0 || out.Len() == 0 || len(cfg.Integrations) != 4 || cfg.Integrations["blender@4.5#0123456789abcdef"] {
 		t.Errorf("a newer release: %v %v\n%s", on, cfg.Integrations, out.String())

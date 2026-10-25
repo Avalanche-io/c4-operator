@@ -548,8 +548,8 @@ func offerUpdates(cfg *Config, d Detected, o Out) []string {
 		if a == "y" || a == "yes" {
 			out = append(out, f.Name+"@"+f.Version)
 		} else {
-			for k := range cfg.Integrations { // an earlier release's no
-				if strings.HasPrefix(k, f.Name+"@"+f.Version+"#") {
+			for k := range cfg.Integrations { // an earlier release's no, or one kept by version alone
+				if k == f.Name+"@"+f.Version || strings.HasPrefix(k, f.Name+"@"+f.Version+"#") {
 					delete(cfg.Integrations, k)
 				}
 			}
