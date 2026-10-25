@@ -178,7 +178,8 @@ func runManager(args []string) error {
 	if *holderTransfer != "allow" && *holderTransfer != "disallow" {
 		return fmt.Errorf("--holder-transfer: %q, want allow or disallow", *holderTransfer)
 	}
-	if err := (&controller.CredentialLeaseReconciler{Client: mgr.GetClient(), HolderTransfer: *holderTransfer == "allow", SinglePerson: *singlePerson}).SetupWithManager(mgr); err != nil {
+	leaseOnePerson := guardedSinglePerson(*singlePerson, *hudAddr, *hudDev, *hudInstaller, *hudDevOpen)
+	if err := (&controller.CredentialLeaseReconciler{Client: mgr.GetClient(), HolderTransfer: *holderTransfer == "allow", SinglePerson: leaseOnePerson}).SetupWithManager(mgr); err != nil {
 		return err
 	}
 	var q *queue.Queue
@@ -332,6 +333,19 @@ func proxySecret(trust bool, file string) ([]byte, error) {
 type devGuard struct {
 	token []byte
 	open  bool
+}
+
+// guardedSinglePerson is --single-person-farm as the lease controller may
+// take it: the same fact the HUD honours only where the installer's
+// secret guards its development viewers (or they are declared open, in
+// development and tests). Without that, a farm would be one person's for
+// leases while it is not for waits. (A farm binding's onePerson is the
+// HUD's to read; the controller takes only the flag.)
+func guardedSinglePerson(flag, hudAddr, dev, tokenFile string, open bool) string {
+	if hudAddr == "" || dev == "" || (tokenFile == "" && !open) {
+		return ""
+	}
+	return flag
 }
 
 // installerToken reads --hud-installer-token-file. Development viewers

@@ -120,7 +120,10 @@ func (s *Server) devViewer(r *http.Request) (*api.Viewer, error) {
 		return nil, errNeedInstaller
 	case how == "":
 		return nil, nil
-	case how == byInstallerCookie && isWrite(r.Method) && r.Header.Get(HUDHeader) != "1" && r.Header.Get(InstallerHeader) == "":
+	// A valid header is read before the cookie (installerAuth), so a
+	// cookie write here carries no valid token: it needs the HUD's own
+	// header, whatever else it sends.
+	case how == byInstallerCookie && isWrite(r.Method) && r.Header.Get(HUDHeader) != "1":
 		return nil, errBrowserWrite
 	}
 	v, ok := s.DevViewers[as]

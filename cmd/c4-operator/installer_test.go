@@ -40,3 +40,24 @@ func TestInstallerTokenFailsClosed(t *testing.T) {
 		t.Errorf("no dev viewers: %q %v", tok, err)
 	}
 }
+
+// The lease controller takes --single-person-farm only where the HUD
+// would: its development viewers guarded by the installer's secret, or
+// declared open.
+func TestGuardedSinglePerson(t *testing.T) {
+	for _, c := range []struct {
+		hud, dev, file string
+		open           bool
+		want           string
+	}{
+		{":8090", "noor@farm-admin=*", "/etc/c4/installer/token", false, "noor"},
+		{":8090", "noor@farm-admin=*", "", true, "noor"},
+		{":8090", "noor@farm-admin=*", "", false, ""},
+		{":8090", "", "", false, ""},
+		{"", "noor@farm-admin=*", "/etc/c4/installer/token", false, ""},
+	} {
+		if got := guardedSinglePerson("noor", c.hud, c.dev, c.file, c.open); got != c.want {
+			t.Errorf("guardedSinglePerson(hud %q, dev %q, file %q, open %v) = %q, want %q", c.hud, c.dev, c.file, c.open, got, c.want)
+		}
+	}
+}

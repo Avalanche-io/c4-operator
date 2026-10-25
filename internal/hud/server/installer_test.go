@@ -219,6 +219,11 @@ func TestCookieWritesNeedTheHUDHeader(t *testing.T) {
 	if code != http.StatusForbidden || out["error"] != "a write from the browser needs the HUD's own page" {
 		t.Fatalf("a cookie-only write: %d %v", code, out)
 	}
+	// a wrong installer header is no header: the write still needs the HUD's
+	code, out = bindCall(s, http.MethodPost, "wrangler", body, map[string]string{InstallerHeader: "not-the-token", "Cookie": cookie})
+	if code != http.StatusForbidden || out["error"] != "a write from the browser needs the HUD's own page" {
+		t.Fatalf("a cookie write with a wrong installer header: %d %v", code, out)
+	}
 	code, out = bindCall(s, http.MethodPost, "wrangler", body, map[string]string{InstallerHeader: "", "Cookie": cookie, HUDHeader: "1"})
 	if code != http.StatusOK {
 		t.Fatalf("a cookie write from the HUD's page: %d %v", code, out)
