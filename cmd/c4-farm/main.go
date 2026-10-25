@@ -81,6 +81,7 @@ Agents
   agent run                what the service runs: the power reader and c4-agent runner, restarted if it stops
   agent power              offer this machine's agent slots by its battery: stop below 25%, resume at 90% (--once to read it now)
   agents                   the Claude Code sessions on this machine, read-only: each one's state, and what needs you (--all, --open for the HUD)
+  enroll NODE CODE         make a machine yours with the code its runner shows: your host work runs there (--for PERSON adds them, on your sign-in)
   agents add [NAME]        make a Claude Code session an agent the farm can run, with c4-agent's hooks in its folder (asked first; no NAME lists the sessions to pick from)
   agents rm NAME           take out what agents add put in
   agents ls                your agents: busy, idle or stopped, and the last turn saved
@@ -675,7 +676,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner}
 		cfg.Current = localfarm.Name
 		ui := upIntegration{integrate: *integrateOn, none: *integrateOff, stdin: stdin, stdout: stdout,
-			detect: farmcli.Detect(true), runner: localRunner(o.Owner, stdin, stdout)}
+			detect: farmcli.Detect(true), runner: localRunner(o.Owner, o.HUD(), stdin, stdout)}
 		on, wasOn, err := ui.choose(cfg)
 		if err != nil {
 			return err
@@ -880,7 +881,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			}
 			if runner {
 				// the farm's own owner, whose work this machine runs
-				in.Runner = localRunner(cmp.Or(f.Owner, localfarm.DefaultOwner()), stdin, stdout)
+				in.Runner = localRunner(cmp.Or(f.Owner, localfarm.DefaultOwner()), f.HUD, stdin, stdout)
 				cfg.Integrations[farmcli.RunnerKey] = true
 			}
 			if on {
@@ -900,6 +901,26 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if l := farmcli.IntegrateLine(cfg); l != "" && name == farmcli.Claude {
 			fmt.Fprintf(stdout, "%s\n", l)
 		}
+		return nil
+
+	case "enroll":
+		forWhom := fs.String("for", "", "enroll it for someone else too, whose jobs then spend your sign-in (only the machine's holder may)")
+		pos, err := parse(fs, rest)
+		if err != nil {
+			return err
+		}
+		if err := need(pos, 2, "NODE CODE"); err != nil {
+			return err
+		}
+		c, _, o, _, err := connect()
+		if err != nil {
+			return err
+		}
+		e, err := farmcli.Enroll(ctx, c, pos[0], pos[1], *forWhom)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(o.W, "%s\nowners    %s\n", e.Message, strings.Join(e.Owners, ", "))
 		return nil
 
 	case "agents":
@@ -1026,21 +1047,33 @@ func applyApps(w io.Writer, on []string) {
 // localRunner makes this machine one of the local farm's runners for its
 // owner, as the Claude Code integration does on a local farm: c4-agent
 // enroll, then the agent service (c4 farm agent start), which runs the
-// power reader and the host runner. It never stops up: the farm is a farm
-// without it, and its line says how to finish.
-func localRunner(owner string, stdin io.Reader, stdout io.Writer) func(ctx context.Context, o farmcli.Out) error {
+// power reader and the host runner. The owner is the machine's holder
+// (its runner uses their sign-in), so the runner's offer of the machine is
+// accepted as them, with no step for the person. It never stops up: the
+// farm is a farm without it, and its line says how to finish.
+func localRunner(owner, hud string, stdin io.Reader, stdout io.Writer) func(ctx context.Context, o farmcli.Out) error {
 	return func(ctx context.Context, o farmcli.Out) error {
 		bin, err := releaseAgent(ctx)
 		if err != nil {
 			return err
 		}
-		e, err := localfarm.EnrollMachine(ctx, bin, owner, 4)
+		// a c4-agent that offers its machine is told the HUD to offer it at
+		offers := strings.Contains(agentHelp(ctx, bin), "enroll-offer")
+		if !offers {
+			hud = ""
+		}
+		e, err := localfarm.EnrollMachine(ctx, bin, owner, hud, 4)
 		if err != nil {
 			return fmt.Errorf("this machine runs no agents yet: %v (c4 farm integrate on tries again)", err)
 		}
 		svc := &farmcli.AgentService{AgentBin: bin, Slots: 4}
 		if err := svc.Start(ctx, farmcli.Out{W: io.Discard}); err != nil {
 			return fmt.Errorf("%s is enrolled, but its runner did not start: %v (c4 farm agent start tries again)", e.Node, err)
+		}
+		if offers {
+			if err := acceptOffer(ctx, bin, owner, hud); err != nil {
+				return fmt.Errorf("%s's runner is started, but the machine is not yet %s's, so the farm places no host work on it: %v (its runner offers it again, and c4 farm enroll %s CODE takes the code it shows)", e.Node, owner, err, e.Node)
+			}
 		}
 		// said only as it is: the runner runs the owner's agents once its
 		// blocks have their folder and a sign-in there
@@ -1075,13 +1108,34 @@ func releaseAgent(ctx context.Context) (string, error) {
 		bin = p
 	}
 	bin, _ = filepath.Abs(bin)
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	out, _ := exec.CommandContext(ctx, bin, "help").CombinedOutput()
-	if !strings.Contains(string(out), "enroll") {
+	if !strings.Contains(agentHelp(ctx, bin), "enroll") {
 		return "", fmt.Errorf("this machine runs no agents yet: %s is a c4-agent too old to enroll a machine (brew upgrade mrjoshuak/tap/c4, or put the c4-agent beside c4-farm first on the PATH; then c4 farm integrate on)", tilde(bin))
 	}
 	return bin, nil
+}
+
+// agentHelp is c4-agent's help, which names the commands it has.
+func agentHelp(ctx context.Context, bin string) string {
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	out, _ := exec.CommandContext(ctx, bin, "help").CombinedOutput()
+	return string(out)
+}
+
+// acceptOffer has the machine's runner offer it, and accepts the offer as
+// owner, the machine's holder: the code goes from the runner to the farm
+// on this machine, never through anyone's hands.
+func acceptOffer(ctx context.Context, bin, owner, hud string) error {
+	offer, err := localfarm.OfferMachine(ctx, bin)
+	if err != nil {
+		return err
+	}
+	c, err := farmcli.NewClient(farmcli.Farm{HUD: hud, As: owner, Local: true})
+	if err != nil {
+		return err
+	}
+	_, err = farmcli.Enroll(ctx, c, offer.Node, offer.Code, "")
+	return err
 }
 
 func fileExists(p string) bool {
