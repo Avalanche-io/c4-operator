@@ -14,7 +14,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Dict, List, Optional
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from c4submit import frames as framelib
 from c4submit import submission
@@ -322,6 +322,7 @@ class FakeFarm:
 class _Handler(BaseHTTPRequestHandler):
     farm: FakeFarm = None  # type: ignore
     token: str = ""
+    installer: str = ""
 
     def log_message(self, *a):  # quiet
         pass
@@ -341,6 +342,8 @@ class _Handler(BaseHTTPRequestHandler):
     def _route(self, method: str) -> None:
         if self.token and self.headers.get("Authorization") != "Bearer " + self.token:
             return self._send(401, {"error": "sign in to the farm"})
+        if self.installer and "as" in parse_qs(urlparse(self.path).query) and self.headers.get("X-C4-Installer") != self.installer:
+            return self._send(401, {"error": "development viewers need this machine's installer token: run c4 farm open"})
         parts = [unquote(p) for p in urlparse(self.path).path.split("/") if p]
         if parts[:2] != ["api", "v1"]:
             return self._send(404, {"error": "not found"})
@@ -391,9 +394,11 @@ class Served:
         self.server.server_close()
 
 
-def serve(farm: FakeFarm, token: str = "") -> Served:
-    """The fake farm over HTTP on a free localhost port, in a thread."""
-    handler = type("Handler", (_Handler,), {"farm": farm, "token": token})
+def serve(farm: FakeFarm, token: str = "", installer: str = "") -> Served:
+    """The fake farm over HTTP on a free localhost port, in a thread.
+    installer, when set, is a local farm's installer token: a request
+    naming a development viewer (?as=) without it is refused."""
+    handler = type("Handler", (_Handler,), {"farm": farm, "token": token, "installer": installer})
     srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
     return Served(srv)

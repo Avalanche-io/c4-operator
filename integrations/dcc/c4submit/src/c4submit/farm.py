@@ -9,7 +9,10 @@ the farm ``c4 farm`` talks to (``~/.c4/farm.yaml``, see farmconfig.py):
 - ``C4_HUD_TOKEN`` or ``C4_HUD_TOKEN_FILE``: the artist's bearer token (the
   file is read on every request, so a rotated token takes effect);
 - ``C4_HUD_AS``: a development viewer, for a local farm started for
-  development (``c4 farm up``); a studio's farm refuses it.
+  development (``c4 farm up``); a studio's farm refuses it;
+- ``C4_HUD_INSTALLER_TOKEN_FILE``: this machine's installer token, which a
+  local farm asks of every request naming a development viewer (sent as
+  ``X-C4-Installer``; ``c4 farm up`` writes it, and farm.yaml names it).
 
 The routes are API.md's: ``GET /tools/{project}`` and
 ``/tools/{project}/{tool}``, ``GET /projects/{project}``, and ``POST
@@ -62,6 +65,7 @@ class Farm:
         self._token = token if token is not None else os.environ.get("C4_HUD_TOKEN")
         self._token_file = token_file or os.environ.get("C4_HUD_TOKEN_FILE") or cfg.get("tokenFile")
         self.viewer = viewer if viewer is not None else (os.environ.get("C4_HUD_AS") or str(cfg.get("as") or ""))
+        self._installer_file = os.environ.get("C4_HUD_INSTALLER_TOKEN_FILE") or str(cfg.get("installerTokenFile") or "")
         #: the project the farm's config names, for a host that names none
         self.default_project = str(cfg.get("project") or "")
         self.client = client
@@ -75,6 +79,17 @@ class Farm:
             except OSError as e:
                 raise FarmError(0, f"cannot read the token file {self._token_file}: {e.strerror or e}") from None
         return self._token or ""
+
+    def _installer(self) -> str:
+        """This machine's installer token, read on every request, or ""."""
+        if not self._installer_file:
+            return ""
+        try:
+            with open(self._installer_file, encoding="utf-8") as f:
+                return f.read().strip()
+        except OSError as e:
+            raise FarmError(0, f"cannot read this machine's installer token ({self._installer_file}: "
+                               f"{e.strerror or e}); run c4 farm open") from None
 
     def request(self, method: str, path: str, body: Any = None, data: Any = None, length: Optional[int] = None,
                 query: Optional[dict] = None, ctype: str = "application/json") -> bytes:
@@ -93,6 +108,9 @@ class Farm:
         tok = self._bearer()
         if tok:
             headers["Authorization"] = "Bearer " + tok
+        inst = self._installer()
+        if inst:
+            headers["X-C4-Installer"] = inst
         req = urllib.request.Request(url, data=data, method=method, headers=headers)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:

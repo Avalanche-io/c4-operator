@@ -94,3 +94,36 @@ def test_the_project_falls_back_to_the_farms(config, monkeypatch):
     monkeypatch.setenv("C4_PROJECT", "textkit")
     assert Host().project() == "textkit"
     assert Host(env={}).project() == "", "a host given its own environment reads nothing else"
+
+
+def test_a_local_farm_gets_this_machines_installer_token(config, tmp_path, monkeypatch):
+    fake = FakeFarm()
+    served = serve(fake, installer="ab" * 32)
+    try:
+        monkeypatch.setenv("HOME", str(tmp_path))
+        written = WRITTEN.replace("http://127.0.0.1:30180", served.url).replace(
+            "    local: true\n", "    local: true\n    installerTokenFile: ~/.c4/demo/installer-token\n")
+        config.write_text(written)
+        assert farmconfig.resolve()["installerTokenFile"] == str(tmp_path / ".c4" / "demo" / "installer-token")
+        with pytest.raises(FarmError) as e:
+            Farm().tools("saltmarsh")
+        assert e.value.message.startswith("cannot read this machine's installer token") and "c4 farm open" in e.value.message
+        (tmp_path / ".c4" / "demo").mkdir(parents=True)
+        (tmp_path / ".c4" / "demo" / "installer-token").write_text("ab" * 32 + "\n")
+        assert [t["name"] for t in Farm().tools("saltmarsh")] == ["nuke-comp", "karma", "transcode"]
+        config.write_text(WRITTEN.replace("http://127.0.0.1:30180", served.url))
+        with pytest.raises(FarmError) as e:
+            Farm().tools("saltmarsh")
+        assert e.value.status == 401 and "installer token: run c4 farm open" in e.value.message
+        monkeypatch.setenv("C4_HUD", served.url)
+        monkeypatch.setenv("C4_HUD_AS", "wrangler")
+        monkeypatch.setenv("C4_HUD_INSTALLER_TOKEN_FILE", str(tmp_path / ".c4" / "demo" / "installer-token"))
+        assert Farm().tools("saltmarsh"), "a launcher's environment can name the token too"
+    finally:
+        served.close()
+
+
+def test_a_shared_farm_sends_no_installer_header(config, monkeypatch):
+    farm = Farm()
+    monkeypatch.setenv("C4_FARM", "studio")
+    assert Farm()._installer() == "" and farm._installer() == ""

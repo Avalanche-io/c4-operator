@@ -72,6 +72,7 @@ In short:
 | `C4_HUD`                              | the farm's HUD URL                                                                                                                                                               |
 | `C4_HUD_TOKEN_FILE` or `C4_HUD_TOKEN` | your sign-in token (the file is reread on every request)                                                                                                                         |
 | `C4_HUD_AS`                           | a development viewer, for a local farm made with `c4 farm up` (a studio's farm refuses it)                                                                                       |
+| `C4_HUD_INSTALLER_TOKEN_FILE` | this machine's installer token, which a local farm asks for with every development viewer (farm.yaml's `installerTokenFile` names it; `c4 farm open` writes it) |
 | `C4_PROJECT`                          | the project                                                                                                                                                                      |
 | `C4_ROOT`                             | the folder on this machine that is the top of the project's tree (the farm mounts it as `/show` or the project's root path); default the project's root path when it exists here |
 | `C4_SHOT`, or `SHOT`                  | the shot                                                                                                                                                                         |

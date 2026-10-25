@@ -7,11 +7,13 @@
     current: studio
     farms:
       studio: {hud: https://c4.petrelfinch.example, tokenFile: ~/.c4/studio.token, project: saltmarsh}
-      demo: {hud: http://127.0.0.1:30180, as: wrangler, local: true}
+      demo: {hud: http://127.0.0.1:30180, as: wrangler, local: true,
+             installerTokenFile: ~/.c4/demo/installer-token}
 
 The farm is picked as ``c4 farm`` picks it: ``$C4_FARM``, else the current
 farm, else the only one. ``as`` is a development viewer, which only a
-local farm started for development accepts.
+local farm started for development accepts, and only from a request
+carrying this machine's installer token (``installerTokenFile``).
 """
 
 import os
@@ -92,7 +94,8 @@ def resolve(name: str = "") -> Optional[Dict[str, Any]]:
         return None
     out = dict(farm)
     out["name"] = name
-    tf = out.get("tokenFile")
-    if isinstance(tf, str) and tf.startswith("~/"):
-        out["tokenFile"] = os.path.join(os.path.expanduser("~"), tf[2:])
+    for k in ("tokenFile", "installerTokenFile"):
+        v = out.get(k)
+        if isinstance(v, str) and v.startswith("~/"):
+            out[k] = os.path.join(os.path.expanduser("~"), v[2:])
     return out
