@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"path"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -180,8 +181,10 @@ func lowerTool(j toolJob) (*api.SubmitRequest, []Error) {
 // ToolRefusals are what about a tool this farm cannot run yet, at path
 // "tool": the farm refuses the job rather than run something other than
 // what the tool says. A declared network is not refused: the units reach
-// it and nothing else (WorkJobSpec.Tool). A unit's network to its licence
-// servers goes with the licences.
+// it and nothing else (WorkJobSpec.Tool). The licence servers
+// (network: [licences]) are, since licences are not counted yet: dropped,
+// the units would run without the servers the tool says it needs. A tool
+// that declares licences is refused for them already.
 func ToolRefusals(t *Tool) []Error {
 	var errs []Error
 	add := func(fix, format string, args ...any) { errs = append(errs, errf("tool", fix, format, args...)) }
@@ -191,6 +194,10 @@ func ToolRefusals(t *Tool) []Error {
 	}
 	if len(n.Licences) > 0 {
 		add("use a version of the tool that declares none for now", "%s needs licences (%s), which this farm cannot count yet", t.Name, strings.Join(sortedKeys(n.Licences), ", "))
+	}
+	if len(n.Licences) == 0 && slices.Contains(n.Network, "licences") {
+		// (with licences, the refusal above says it)
+		add("use a version of the tool whose needs.network leaves licences out for now", "%s reaches its licence servers (network: [licences]), and licence servers are not counted yet", t.Name)
 	}
 	if len(t.Runs.Sidecars) > 0 {
 		add("use a version of the tool without sidecars for now", "%s runs sidecars, which this farm cannot start yet", t.Name)

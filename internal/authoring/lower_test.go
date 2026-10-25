@@ -44,7 +44,8 @@ func TestRequestsAndLimits(t *testing.T) {
 }
 
 // A tool is refused for each thing this farm cannot run yet, in the
-// farm's words; a declared network is not one.
+// farm's words; a declared network is not one, but the licence servers
+// (network: [licences]) are, since licences are not counted yet.
 func TestToolRefusals(t *testing.T) {
 	tl := &Tool{Name: "sim", Kind: "frames", Gate: "merge"}
 	tl.Runs.Image = "c4/runtime-base"
@@ -52,6 +53,7 @@ func TestToolRefusals(t *testing.T) {
 	tl.Needs.Farm = "read"
 	errs := ToolRefusals(tl)
 	want := []string{
+		"sim reaches its licence servers (network: [licences]), and licence servers are not counted yet",
 		"sim passes the merge gate, which this farm cannot hold yet",
 		"sim acts on the farm (read), which this farm cannot grant yet",
 	}
@@ -65,14 +67,14 @@ func TestToolRefusals(t *testing.T) {
 	}
 	ok := &Tool{Name: "karma", Kind: "frames"}
 	ok.Runs.Image = "c4/houdini"
-	ok.Needs.Network = []string{"licences"}
+	ok.Needs.Network = []string{"pypi"}
 	if errs := ToolRefusals(ok); len(errs) != 0 {
-		t.Fatalf("network to licence servers alone: %v", errs)
+		t.Fatalf("a declared network: %v", errs)
 	}
 }
 
-// A tool job runs under its tool: the networks it declares (not the
-// licence servers, which go with licences) or none, sealed. A tool's test
+// A tool job runs under its tool: the networks it declares or none,
+// sealed. A tool's test
 // job is lowered the same way, so a declared network applies to it too.
 func TestToolJobsRunUnderTheirTool(t *testing.T) {
 	tl := &Tool{Name: "fetch", Kind: "once"}
@@ -106,7 +108,7 @@ func TestToolJobsRunUnderTheirTool(t *testing.T) {
 			t.Fatalf("undeclared: %+v", s.Tool)
 		}
 	}
-	tl.Needs.Network = []string{"licences", "studio-api"}
+	tl.Needs.Network = []string{"studio-api"}
 	job, test = lower()
 	for _, req := range []*api.SubmitRequest{job, test} {
 		if s := spec(req); s.Tool == nil || len(s.Tool.Network) != 1 || s.Tool.Network[0] != "studio-api" {
