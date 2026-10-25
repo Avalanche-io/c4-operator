@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"time"
 
@@ -25,11 +26,12 @@ import (
 // one job in the raw form, an image and its command, which goes to POST
 // /jobs as it is.
 type SubmitIn struct {
-	Submission     json.RawMessage `json:"submission,omitempty" jsonschema:"the submission (c4: submit/1) as a JSON object: project, shot, due, tree, and jobs by key, each a tool with its frames and with; GET /api/v1/schema/submit is its schema"`
-	SubmissionYAML string          `json:"submission_yaml,omitempty" jsonschema:"the same submission as YAML text, as a person writes it; jobs keep the order written"`
-	DryRun         bool            `json:"dry_run,omitempty" jsonschema:"check and plan only: return each job's estimate (units, ETA p50 and p90, slack, on track or not), create nothing. Do this first and show the person the estimate"`
-	Explain        bool            `json:"explain,omitempty" jsonschema:"also return what each job lowers to in the operator (class, inputs, image, units), as text"`
-	Key            string          `json:"key,omitempty" jsonschema:"always pass one: a short name of your own for this submission (the same one on every retry of it, a new one for the next): a retry after an error or a timeout is then answered with the jobs the farm made, never a second set"`
+	Submission     json.RawMessage            `json:"submission,omitempty" jsonschema:"the submission (c4: submit/1) as a JSON object: project, shot, due, tree, and jobs by key, each a tool with its frames and with; GET /api/v1/schema/submit is its schema"`
+	SubmissionYAML string                     `json:"submission_yaml,omitempty" jsonschema:"the same submission as YAML text, as a person writes it; jobs keep the order written"`
+	DryRun         bool                       `json:"dry_run,omitempty" jsonschema:"check and plan only: return each job's estimate (units, ETA p50 and p90, slack, on track or not), create nothing. Do this first and show the person the estimate"`
+	Explain        bool                       `json:"explain,omitempty" jsonschema:"also return what each job lowers to in the operator (class, inputs, image, units), as text"`
+	Key            string                     `json:"key,omitempty" jsonschema:"always pass one: a short name of your own for this submission (the same one on every retry of it, a new one for the next): a retry after an error or a timeout is then answered with the jobs the farm made, never a second set"`
+	Plans          map[string]json.RawMessage `json:"plans,omitempty" jsonschema:"the plan files the submission's jobs name with plan:, by the path as written, each the plan as a JSON object (version, blocks). The farm never reads a plan from anywhere else: send every one the jobs name"`
 
 	// The raw form: one job, an image and its command, instead of a
 	// submission. It names no tool, so its units have no network.
@@ -93,19 +95,23 @@ type SubmitOut struct {
 	Key        string           `json:"key,omitempty" jsonschema:"the key this submission was sent with: send it again with the same submission if you retry, so nothing is made twice"`
 }
 
-// submitSchema is SubmitIn's schema, with submission an object: the
-// document's bytes are kept as sent (json.RawMessage), so its jobs keep
-// the order written.
+// submitSchema is SubmitIn's schema, with submission an object and plans
+// an object of objects: the documents' bytes are kept as sent
+// (json.RawMessage), so the jobs keep the order written.
 func submitSchema() *jsonschema.Schema {
 	s, err := jsonschema.For[SubmitIn](nil)
 	if err != nil {
 		panic(err)
 	}
-	desc := ""
-	if p := s.Properties["submission"]; p != nil {
-		desc = p.Description
+	desc := func(name string) string {
+		if p := s.Properties[name]; p != nil {
+			return p.Description
+		}
+		return ""
 	}
-	s.Properties["submission"] = &jsonschema.Schema{Type: "object", Description: desc}
+	s.Properties["submission"] = &jsonschema.Schema{Type: "object", Description: desc("submission")}
+	s.Properties["plans"] = &jsonschema.Schema{Type: "object", Description: desc("plans"),
+		AdditionalProperties: &jsonschema.Schema{Type: "object"}}
 	return s
 }
 
@@ -135,7 +141,43 @@ func (c *Client) submitJob(ctx context.Context, _ *mcp.CallToolRequest, in Submi
 	case len(doc) == 0:
 		return nil, SubmitOut{}, errors.New("a submission is required: submission (an object, c4: submit/1) or submission_yaml (text); or one job in the raw form, class and image")
 	}
-	return c.postSubmission(ctx, doc, in.DryRun, in.Explain, in.Key)
+	if out, ok := missingPlans(doc, in.Plans); !ok {
+		return nil, out, nil
+	}
+	return c.postSubmission(ctx, doc, in.Plans, in.DryRun, in.Explain, in.Key)
+}
+
+// missingPlans answers a submission whose jobs name a plan (plan:) that
+// plans does not carry, at each such job, before the farm is asked; ok is
+// false when there is one.
+func missingPlans(doc json.RawMessage, plans map[string]json.RawMessage) (SubmitOut, bool) {
+	var sub struct {
+		Jobs map[string]struct {
+			Plan string `json:"plan"`
+		} `json:"jobs"`
+	}
+	if json.Unmarshal(doc, &sub) != nil {
+		return SubmitOut{}, true // the farm says what is wrong with it
+	}
+	keys := make([]string, 0, len(sub.Jobs))
+	for k := range sub.Jobs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	var out SubmitOut
+	for _, k := range keys {
+		p := sub.Jobs[k].Plan
+		if p == "" || plans[p] != nil {
+			continue
+		}
+		out.Errors = append(out.Errors, api.FieldError{Path: "jobs." + k + ".plan", Message: p + " was not sent with the submission",
+			Fix: fmt.Sprintf("pass the plan file's content, as a JSON object, in plans under %q", p)})
+	}
+	if len(out.Errors) == 0 {
+		return SubmitOut{}, true
+	}
+	out.Message = fmt.Sprintf("the submission names %s it did not send: nothing was asked of the farm", map[bool]string{true: "a plan", false: "plans"}[len(out.Errors) == 1])
+	return out, false
 }
 
 // submitTimeout bounds one submission's call: more than the two minutes
@@ -150,7 +192,7 @@ const submitTimeout = 3 * time.Minute
 // A submission is sent with a key, the caller's or one made here, which
 // the answer carries: sent again on a retry, it gets the jobs the first
 // made rather than a second set.
-func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun, explain bool, key string) (*mcp.CallToolResult, SubmitOut, error) {
+func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, plans map[string]json.RawMessage, dryRun, explain bool, key string) (*mcp.CallToolResult, SubmitOut, error) {
 	if !dryRun && key == "" {
 		b := make([]byte, 12)
 		_, _ = rand.Read(b)
@@ -160,7 +202,7 @@ func (c *Client) postSubmission(ctx context.Context, doc json.RawMessage, dryRun
 	// Longer than the HUD takes to make a submission and roll it back.
 	sctx, cancel := context.WithTimeout(ctx, submitTimeout)
 	defer cancel()
-	err := c.do(sctx, "POST", "/submissions", api.SubmissionRequest{Submission: doc, DryRun: dryRun, Explain: explain, Key: key}, &r)
+	err := c.do(sctx, "POST", "/submissions", api.SubmissionRequest{Submission: doc, DryRun: dryRun, Explain: explain, Key: key, Plans: plans}, &r)
 	var ae *APIError
 	if errors.As(err, &ae) && json.Unmarshal(ae.Body, &r) == nil && len(r.Errors) > 0 {
 		err = nil

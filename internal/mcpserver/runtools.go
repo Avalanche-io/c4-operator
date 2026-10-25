@@ -460,7 +460,7 @@ func (c *Client) runHandler(rt runTool, s *mcp.Server) mcp.ToolHandler {
 		if err != nil {
 			return toolError(err), nil
 		}
-		_, out, err := c.postSubmission(ctx, doc, in.DryRun, in.Explain, in.Key)
+		_, out, err := c.postSubmission(ctx, doc, nil, in.DryRun, in.Explain, in.Key)
 		if err != nil {
 			return toolError(err), nil
 		}

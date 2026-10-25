@@ -1124,6 +1124,13 @@ Input:
       "description": "raw form: the class's parameters: render frames (1001-1048), chunk, order (binary); ci shards, target; ml ranks, steps, checkpointEvery",
       "type": "object"
     },
+    "plans": {
+      "additionalProperties": {
+        "type": "object"
+      },
+      "description": "the plan files the submission's jobs name with plan:, by the path as written, each the plan as a JSON object (version, blocks). The farm never reads a plan from anywhere else: send every one the jobs name",
+      "type": "object"
+    },
     "pools": {
       "description": "raw form: pools the units may use; default the class's",
       "items": {
