@@ -132,7 +132,10 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 		if why := stuck(&j); why != "" {
 			// It cannot run, so it is not ready at any time.
 			ready, slack = "stuck", "-"
-			whys = append(whys, j.Namespace+"/"+j.Name+": "+why)
+			whys = append(whys, "stuck "+j.Namespace+"/"+j.Name+": "+why)
+		} else if why := heldWithoutNetwork(&j); why != "" {
+			ready, slack = "held", "-"
+			whys = append(whys, "held "+j.Namespace+"/"+j.Name+": "+why)
 		}
 		fmt.Fprintf(tw, "%s\t%s/%s\t%s\t%s\t%s\t%s\t%s\n", rank, j.Namespace, j.Name, done, ready, due, slack, j.Owner)
 		n++
@@ -150,7 +153,7 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 			plural(finished, "job", "jobs"), latest.Namespace, latest.Name, verb, latest.Name)
 	}
 	for _, w := range whys {
-		o.printf("stuck %s\n", w)
+		o.printf("%s\n", w)
 	}
 	return nil
 }
@@ -168,6 +171,18 @@ func stuck(j *api.Job) string {
 		return n.Message
 	}
 	return ""
+}
+
+// heldWithoutNetwork says why a job that names no tool waits on a person
+// with nothing running, its units having failed: they had no network,
+// which may be why. "" for every other job, a job with no tool that runs
+// fine without a network among them.
+func heldWithoutNetwork(j *api.Job) string {
+	n := j.NeedsPerson
+	if j.NoNetwork == "" || n == nil || n.Reason != "failed" || j.Units.Running > 0 {
+		return ""
+	}
+	return n.Message + "; " + j.NoNetwork
 }
 
 // Watch prints a job's title block whenever it changes, until the job

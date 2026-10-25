@@ -19,6 +19,16 @@ const LabelJobTool = "c4.avalanche.io/job-tool"
 // service, ports}.
 const NetworksConfigMap = "c4-networks"
 
+// ConditionNetwork on a job says its units reach no network because the
+// job names no tool (Reason NoTool, Message NoToolNoNetwork): set once
+// such a unit has run, so a person whose unit could not reach something
+// reads why where they look.
+const ConditionNetwork = "Network"
+
+// NoToolNoNetwork is the farm's one sentence for a unit with no network
+// because its job names no tool.
+const NoToolNoNetwork = "this job names no tool, so it has no network: name a tool that declares one"
+
 // HUDAudience is the audience of the token a unit with a c4 grant holds:
 // the HUD accepts it, the Kubernetes API does not.
 const HUDAudience = "c4.avalanche.io/hud"

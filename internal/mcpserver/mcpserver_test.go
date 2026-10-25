@@ -882,3 +882,22 @@ func TestSubmitFailureCarriesTheKey(t *testing.T) {
 		t.Fatalf("%q", text(res))
 	}
 }
+
+// The raw form's image says, where an agent reads it, that such a job
+// names no tool and so has no network.
+func TestRawFormSaysItHasNoNetwork(t *testing.T) {
+	for _, tl := range Tools(nil) {
+		if tl.Def.Name != "c4_submit_job" {
+			continue
+		}
+		b, _ := json.Marshal(tl.Def.InputSchema)
+		var sch map[string]any
+		json.Unmarshal(b, &sch)
+		d, _ := asMap(asMap(sch["properties"])["image"])["description"].(string)
+		if !strings.Contains(d, "names no tool, so it has no network") || !strings.Contains(d, "name a tool that declares one") {
+			t.Fatalf("image: %q", d)
+		}
+		return
+	}
+	t.Fatal("no c4_submit_job")
+}

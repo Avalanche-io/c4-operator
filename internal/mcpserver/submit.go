@@ -32,7 +32,7 @@ type SubmitIn struct {
 	Key            string          `json:"key,omitempty" jsonschema:"always pass one: a short name of your own for this submission (the same one on every retry of it, a new one for the next): a retry after an error or a timeout is then answered with the jobs the farm made, never a second set"`
 
 	// The raw form: one job, an image and its command, instead of a
-	// submission.
+	// submission. It names no tool, so its units have no network.
 	Project  string            `json:"project,omitempty" jsonschema:"raw form: the project; may be omitted when you see only one"`
 	Name     string            `json:"name,omitempty" jsonschema:"raw form: the job's name; default <shot>-<stage>-vNNN, the next version"`
 	Type     string            `json:"type,omitempty" jsonschema:"raw form: the job type it is (render, usd, sim, comp, transcode, ci, lora, infer, agent)"`
@@ -42,7 +42,7 @@ type SubmitIn struct {
 	Params   map[string]string `json:"params,omitempty" jsonschema:"raw form: the class's parameters: render frames (1001-1048), chunk, order (binary); ci shards, target; ml ranks, steps, checkpointEvery"`
 	Deadline string            `json:"deadline,omitempty" jsonschema:"raw form: RFC 3339; omit to have the farm suggest one"`
 	Pools    []string          `json:"pools,omitempty" jsonschema:"raw form: pools the units may use; default the class's"`
-	Image    string            `json:"image,omitempty" jsonschema:"raw form: the container image each unit runs"`
+	Image    string            `json:"image,omitempty" jsonschema:"raw form: the container image each unit runs. A raw-form job names no tool, so it has no network (no DNS, no model provider, no HUD): name a tool that declares one, in the submission form, when a unit must reach anything"`
 	Command  []string          `json:"command,omitempty" jsonschema:"raw form: the command each unit runs"`
 	Args     []string          `json:"args,omitempty"`
 	Env      map[string]string `json:"env,omitempty" jsonschema:"raw form: environment for each unit (C4_ variables are set by the queue)"`

@@ -1074,7 +1074,7 @@ Input:
       "type": "boolean"
     },
     "image": {
-      "description": "raw form: the container image each unit runs",
+      "description": "raw form: the container image each unit runs. A raw-form job names no tool, so it has no network (no DNS, no model provider, no HUD): name a tool that declares one, in the submission form, when a unit must reach anything",
       "type": "string"
     },
     "inputs": {

@@ -334,3 +334,22 @@ func TestSnapshotGates(t *testing.T) {
 		}
 	}
 }
+
+// A job that names no tool carries the farm's sentence for its units'
+// missing network once the queue says so; a tool job never does.
+func TestJobSaysItHasNoNetwork(t *testing.T) {
+	s := farm(t)
+	rec := s.m.byKey["show-a/sh040-light-v007"]
+	if got := s.jobSummary(s.m, rec).NoNetwork; got != "" {
+		t.Fatalf("before any unit ran: %q", got)
+	}
+	rec.job.Status.Conditions = []metav1.Condition{{Type: c4v1.ConditionNetwork, Status: metav1.ConditionFalse, Reason: "NoTool",
+		Message: c4v1.NoToolNoNetwork}}
+	if got := s.jobSummary(s.m, rec).NoNetwork; got != "this job names no tool, so it has no network: name a tool that declares one" {
+		t.Fatalf("no tool: %q", got)
+	}
+	rec.job.Spec.Tool = &c4v1.WorkTool{Name: "fetch"}
+	if got := s.jobSummary(s.m, rec).NoNetwork; got != "" {
+		t.Fatalf("a tool job: %q", got)
+	}
+}

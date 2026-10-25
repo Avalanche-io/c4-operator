@@ -17,6 +17,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/storeurl"
+	c4view "github.com/Avalanche-io/c4-operator/internal/view"
 )
 
 // A unit that names a tool waits for the tool's view, then
@@ -235,7 +237,7 @@ func TestToolGrantsC4(t *testing.T) {
 // do not apply. A tool's test job runs the same way. A network the farm
 // does not define holds the units, and the job says why.
 func TestToolJobsRunUnderTheirTool(t *testing.T) {
-	ns, q, now, _ := graphFarm(t)
+	ns, q, now, st := graphFarm(t)
 	ctx := context.Background()
 	farmNS := ns + "-farm"
 	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
@@ -254,10 +256,11 @@ func TestToolJobsRunUnderTheirTool(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	tree := publishVersion(t, st, ns, "fetch", "v1", "needs: {network: [studio-api, studio-db]}")
 	mk := func(name string, network ...string) {
 		t.Helper()
 		j := job(ns, name, "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(4*time.Hour))
-		j.Spec.Tool = &c4v1.WorkTool{Name: "fetch", Network: network}
+		j.Spec.Tool = &c4v1.WorkTool{Name: "fetch", Network: network, View: tree}
 		if err := k8s.Create(ctx, j); err != nil {
 			t.Fatal(err)
 		}
@@ -361,6 +364,15 @@ func TestUnitsDenyEgressByDefault(t *testing.T) {
 	plain := podOfUnit(t, ns, "plain", 0)
 	if sel, _ := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector); !sel.Matches(labels.Set(plain.Labels)) || !q.egressDenied(ctx, ns, plain.Labels) {
 		t.Fatalf("a unit with no tool is not sealed: %v", plain.Labels)
+	}
+	// The job says so where a person looks, in one sentence; a tool job
+	// does not.
+	if c := meta.FindStatusCondition(get(t, ns, "plain").Status.Conditions, c4v1.ConditionNetwork); c == nil ||
+		c.Reason != "NoTool" || c.Message != "this job names no tool, so it has no network: name a tool that declares one" {
+		t.Fatalf("plain's Network condition %+v", c)
+	}
+	if c := meta.FindStatusCondition(get(t, ns, "fetch-sealed").Status.Conditions, c4v1.ConditionNetwork); c != nil {
+		t.Fatalf("a tool job says it names no tool: %+v", c)
 	}
 	// Not a unit: the default leaves other pods in the namespace alone.
 	if sel, _ := metav1.LabelSelectorAsSelector(&np.Spec.PodSelector); sel.Matches(labels.Set{"app": "asset-db"}) {
@@ -474,5 +486,102 @@ func TestToolJobUnitCannotNameAnotherTool(t *testing.T) {
 	var np networkingv1.NetworkPolicy
 	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: "c4-tools-wide"}, &np); err == nil {
 		t.Fatal("the other tool's policy was written")
+	}
+}
+
+// publishVersion records version ver of Tool name in ns (made already) as
+// a tree whose tool.yaml is doc, stored in st, as publishing does, and
+// returns the tree's C4 ID.
+func publishVersion(t *testing.T, st *storeurl.Sharded, ns, name, ver, doc string) string {
+	t.Helper()
+	tree := storeToolTree(t, st, doc)
+	ctx := context.Background()
+	var p c4v1.Tool
+	if err := k8s.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &p); err != nil {
+		t.Fatal(err)
+	}
+	p.Status.Versions = append(p.Status.Versions, c4v1.ToolVersion{Version: ver, View: tree, By: "noor", At: metav1.Now(),
+		Test: c4v1.ToolTest{State: c4v1.ToolTestUntested}})
+	if err := k8s.Status().Update(ctx, &p); err != nil {
+		t.Fatal(err)
+	}
+	return tree
+}
+
+// storeToolTree stores a tree holding only tool.yaml (doc) and returns
+// its C4 ID.
+func storeToolTree(t *testing.T, st *storeurl.Sharded, doc string) string {
+	t.Helper()
+	ctx := context.Background()
+	id, err := st.PutBytes(ctx, []byte(doc))
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := c4view.NewNode("")
+	root.Files["tool.yaml"] = c4view.FileEntry("tool.yaml", int64(len(doc)), id, false)
+	v := c4view.FromNode(root)
+	for _, rec := range v.Records() {
+		if _, err := st.PutBytes(ctx, rec.Data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return v.ID.String()
+}
+
+// A tool job's networks are checked against what its tool's version
+// declares, as the Tool records the version, not the job's own copy: a
+// job written directly claiming a network the version does not declare is
+// held, and says so; one naming no version, or a tree that is no version
+// of the tool, is held too; a job claiming what the version declares is
+// released.
+func TestToolJobClaimsOnlyDeclaredNetworks(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	farmNS := ns + "-farm"
+	if err := k8s.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: farmNS}}); err != nil {
+		t.Fatal(err)
+	}
+	q.Namespace, q.EgressProxy = farmNS, "c4-egress:3128"
+	for _, o := range []client.Object{
+		&corev1.Service{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: "c4-egress"},
+			Spec: corev1.ServiceSpec{Selector: map[string]string{"app.kubernetes.io/component": "egress"}, Ports: []corev1.ServicePort{{Port: 3128}}}},
+		&corev1.ConfigMap{ObjectMeta: metav1.ObjectMeta{Namespace: farmNS, Name: c4v1.NetworksConfigMap},
+			Data: map[string]string{"studio-api": "- {host: api.studio.example, ports: [443]}", "pypi": "- {host: pypi.org}"}},
+		&c4v1.Tool{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: "fetch"}},
+	} {
+		if err := k8s.Create(ctx, o); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tree := publishVersion(t, st, ns, "fetch", "v2", "c4: tool/1\nname: fetch\nneeds: {network: [studio-api]}\n")
+	forged := storeToolTree(t, st, "needs: {network: [studio-api, pypi]}")
+	mk := func(name, view string, network ...string) {
+		t.Helper()
+		j := job(ns, name, "render", "cpu-"+ns, map[string]string{"frames": "1-1"}, now.Add(4*time.Hour))
+		j.Spec.Tool = &c4v1.WorkTool{Name: "fetch", Network: network, View: view}
+		if err := k8s.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mk("fetch-matches", tree, "studio-api")
+	mk("fetch-claims", tree, "studio-api", "pypi")
+	mk("fetch-noview", "", "studio-api")
+	mk("fetch-forged", forged, "studio-api", "pypi")
+	tick(t, q)
+
+	if !hasPod(t, ns, "fetch-matches", 0) {
+		t.Fatal("a job claiming what its version declares was held")
+	}
+	for job, want := range map[string]string{
+		"fetch-claims": "this job claims network pypi that tool fetch version v2 does not declare",
+		"fetch-noview": "this job claims network studio-api under tool fetch but names no version of it",
+		"fetch-forged": "is not a version of fetch",
+	} {
+		if hasPod(t, ns, job, 0) {
+			t.Errorf("%s ran", job)
+		}
+		if c := meta.FindStatusCondition(get(t, ns, job).Status.Conditions, "Tools"); c == nil || c.Status != metav1.ConditionFalse || !strings.Contains(c.Message, want) {
+			t.Errorf("%s: Tools condition %+v, want %q", job, c, want)
+		}
 	}
 }

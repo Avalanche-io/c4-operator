@@ -30,3 +30,24 @@ func TestStuckJobsReadAsStuck(t *testing.T) {
 		}
 	}
 }
+
+// A job that names no tool says it has no network only when it is held
+// for its failed units with nothing running, never while it runs or when
+// nothing failed.
+func TestHeldWithoutNetwork(t *testing.T) {
+	say := "this job names no tool, so it has no network: name a tool that declares one"
+	held := &api.Job{NoNetwork: say, NeedsPerson: &api.NeedsPerson{Reason: "failed", Message: "2 units failed"}}
+	if got := heldWithoutNetwork(held); got != "2 units failed; "+say {
+		t.Fatalf("held: %q", got)
+	}
+	for _, j := range []*api.Job{
+		{NoNetwork: say},
+		{NoNetwork: say, NeedsPerson: &api.NeedsPerson{Reason: "failed"}, Units: api.Counts{Running: 1}},
+		{NoNetwork: say, NeedsPerson: &api.NeedsPerson{Reason: "approval"}},
+		{NeedsPerson: &api.NeedsPerson{Reason: "failed", Message: "2 units failed"}},
+	} {
+		if got := heldWithoutNetwork(j); got != "" {
+			t.Errorf("%+v: %q", j, got)
+		}
+	}
+}

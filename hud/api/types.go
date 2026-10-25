@@ -668,6 +668,10 @@ type Job struct {
 	Work Work `json:"work"`
 	// NeedsPerson is set while the job waits on a person.
 	NeedsPerson *NeedsPerson `json:"needsPerson,omitempty"`
+	// NoNetwork is set once a unit of a job that names no tool has run:
+	// the farm's sentence for why it reached no network (its Network
+	// condition).
+	NoNetwork string `json:"noNetwork,omitempty"`
 	// Measure is the job's own measure of done, when it declares one.
 	Measure *Measure `json:"measure,omitempty"`
 	// Spend splits what the job cost between procedural and model units.

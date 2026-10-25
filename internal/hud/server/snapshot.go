@@ -278,6 +278,9 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNeedsPerson); c != nil && c.Status == metav1.ConditionTrue {
 		aj.NeedsPerson = &api.NeedsPerson{Reason: strings.ToLower(c.Reason), Message: c.Message, Since: c.LastTransitionTime.Time.UTC()}
 	}
+	if c := meta.FindStatusCondition(st.Conditions, c4v1.ConditionNetwork); c != nil && c.Status == metav1.ConditionFalse && j.Spec.Tool == nil {
+		aj.NoNetwork = c.Message
+	}
 	for k, n := range st.Needs {
 		i, err := strconv.Atoi(k)
 		if err != nil {

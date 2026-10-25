@@ -131,6 +131,12 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	} else {
 		meta.RemoveStatusCondition(&st.Conditions, "Tools")
 	}
+	if noNetworkRan(v) {
+		// Its units reach nothing (the namespace's unit egress default):
+		// said where a person looks once one of them has run.
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: c4v1.ConditionNetwork, Status: metav1.ConditionFalse,
+			Reason: "NoTool", Message: c4v1.NoToolNoNetwork, ObservedGeneration: v.job.Generation})
+	}
 	n := len(m.plan.Units)
 	st.Order = strings.ToLower(m.plan.OrderName)
 	// Each unit is in one state. Units holding a slot are preflight,
@@ -434,4 +440,18 @@ func (q *Queue) heavy(v *view) []c4v1.HeavyRegion {
 			From: int32(m.plan.Axis.Start + r.Lo), To: int32(m.plan.Axis.Start + r.Hi), Factor: fmt.Sprintf("%.1f", r.Factor)})
 	}
 	return out
+}
+
+// noNetworkRan says whether a unit of a job that names no tool, and that
+// names none itself, has run: such a unit reached no network.
+func noNetworkRan(v *view) bool {
+	if v.job.Spec.Tool != nil || v.mem.plan == nil {
+		return false
+	}
+	for idx, n := range v.mem.attempts {
+		if n > 0 && idx < len(v.mem.plan.Units) && v.mem.plan.Units[idx].Reasoning.Tools == "" {
+			return true
+		}
+	}
+	return false
 }
