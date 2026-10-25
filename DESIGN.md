@@ -1702,6 +1702,22 @@ and a sweep planner that spawns trials are all generators.
       allows those, plus DNS when there is any rule. A tool with no
       egress allows nothing, so its units are sealed, which the derivation
       record counts. The owner writes the allow-list.
+    - **No network unless declared.** Under every tool's policy, each
+      namespace with units has the queue's `c4-units-deny-egress`: it
+      selects every unit pod (`c4.avalanche.io/job` and
+      `c4.avalanche.io/unit` both present) for egress and allows
+      nothing. Policies add up, so a unit reaches what its tool's or its
+      tool job's policy allows and nothing else, and a unit that names no
+      tool reaches nothing: no DNS, no HUD, no model provider. The queue
+      writes it before it releases a unit in the namespace (until then the
+      unit waits, and the job's `Tools` condition says why) and puts it
+      back each pass if it is removed or changed. It belongs to no job, so
+      a tool job's units stay sealed while the job is deleted and its own
+      policy goes first. A unit counts as sealed in its derivation record
+      when at least one egress policy selects it and none that does allows
+      anything; only NetworkPolicy objects are read, so a CNI that does
+      not enforce them, or a cluster-wide policy of another kind, is not
+      seen.
     - **`sidecars`** are servers that run beside the unit for its whole
       run: MCP servers, a headless browser (`{name, image, args?, env?,
       port}`). They are native sidecars, started before the unit and
@@ -1721,7 +1737,7 @@ and a sweep planner that spawns trials are all generators.
       `Lease` while it waits for a credential lease. Each says what to
       do, and sets NeedsPerson (`Permission`, `Quota` or `Stuck`); a
       refusal that stops recurring for two minutes is over. Units that
-      name no tool run as before.
+      name no tool run as before, with no network.
     - **Tokens:** no unit pod holds a Kubernetes API token (10.2). A
       tool's `c4` says what its units may do with c4 itself, through
       the HUD and so MCP.
@@ -1766,8 +1782,14 @@ and a sweep planner that spawns trials are all generators.
       it allows the egress proxy (hosts), by its cluster IP, or the
       addresses and services the network lists, and then DNS from the
       cluster's DNS servers alone. The proxy resolves a host itself, dials
-      the address it checked, and never a cluster, node or metadata address
-      unless a cidr rule names it. The networks are the farm admin's
+      the address it checked, and refuses one in the private, loopback,
+      link-local (metadata), carrier-grade NAT and reserved ranges, the
+      IPv6 forms that carry an IPv4 address, and the cluster's own blocks
+      it can read (nodes' pod blocks and addresses, ServiceCIDRs), unless
+      a cidr rule covers it on that port. `spec.tool` is set only by the
+      HUD's lowering of a tool (a `POST /jobs` naming it is refused) and
+      cannot change once the job exists; a unit of a tool job cannot name
+      another tool. The networks are the farm admin's
       (`c4-networks` in the operator's namespace, name to rules); the proxy
       reads a tool job's unit's networks from its job, not from the Tool
       object, so a test runs with its own version's network before it is
@@ -2871,7 +2893,8 @@ without what tells one unit from another, such as frames or shards):
   `c4.avalanche.io/derivation-class` (`exact`, `validated` or `volatile`,
   the default);
 - whether its pods were sealed: images pinned by digest, no host network or
-  paths, no environment from secrets, and a network policy denying egress;
+  paths, no environment from secrets, and network policies that deny
+  egress (one selects the pod for egress and none allows it any);
 - how many re-runs of the same process on the same inputs wrote the same
   output, and how many wrote another.
 

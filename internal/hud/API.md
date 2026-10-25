@@ -1015,7 +1015,7 @@ makes a link only when its target stays inside the folder it writes to.
   estimateError? }
 ```
 
-`spec` is a WorkJob spec (`c4.avalanche.io/v1alpha1`). The request and its spec are read strictly: a field neither has is `400`, naming it. The body is at most 1 MiB. The HUD names the
+`spec` is a WorkJob spec (`c4.avalanche.io/v1alpha1`). The request and its spec are read strictly: a field neither has is `400`, naming it. `spec.tool` is `400` too: the farm sets it when it lowers a tool's submission (`POST /submissions`), and the units of a job without it reach no network unless they name a tool (Networks, below). The body is at most 1 MiB. The HUD names the
 job `<shot>-<stage>-vNNN` (stage defaults to type) when `name` is empty, one version past the latest
 such job in the namespace; makes a Materialization for each input view
 (named from the view's ID, so the same view is one Materialization);
@@ -1272,7 +1272,8 @@ publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
   and the farm's (an `emits` naming no tool, a format string naming no
   parameter), each with its dotted path and fix, as `422 { errors }`;
 - refuses, at `tool`, what the farm cannot run yet (sidecars, farm access,
-  a Kubernetes overlay, licences), in the words a submission's refusal
+  a Kubernetes overlay, licences, and `network: [licences]`: "licence
+  servers are not counted yet"), in the words a submission's refusal
   uses, and a tool an agent publishes with no `test`;
 - refuses, at `needs.network`, a network the farm does not define. The farm
   admin defines networks in the `c4-networks` ConfigMap in the operator's
@@ -1280,7 +1281,9 @@ publishes, whatever its tool's `needs.farm`. Otherwise `403`. Publishing:
   (`- {host: api.studio.example, ports: [443]}`, or `cidr`, or `service:
   <namespace>/<name>`). A tool's jobs, its test's included, reach the
   networks it declares and nothing else; one that declares none is
-  sealed;
+  sealed. A `c4-networks` the farm cannot read as networks is refused
+  here too (`422`, "the c4-networks ConfigMap in c4-system is malformed:
+  ..."), for a farm admin to fix, not retried;
 - refuses a name an agent's configuration holds ("render is an agent
   configuration on this farm; choose another name");
 - writes the `Tool` only once nothing is left to refuse, so a refused
@@ -1392,7 +1395,8 @@ cluster, where no NetworkPolicy applies.
 - **Keys** are network names, as tools write them in `needs.network`:
   lower-case letters, digits and `-`, starting with a letter. `licences`
   is not a key: it names the licence servers of the pools a job's
-  licences come from, and goes with them.
+  licences come from, and goes with them. Licences are not counted yet,
+  so a tool declaring `network: [licences]` is refused at publish.
 - **Each value** is a YAML list of rules. Each rule names exactly one of:
   - `host`: a host name, or `*.domain` for the names under it (not the
     domain itself: write both to reach both). Hosts are reached only
@@ -1400,17 +1404,25 @@ cluster, where no NetworkPolicy applies.
     port against the rule, resolves the name itself and dials the address
     it checked. A name that resolves only to loopback, private, link-local
     (the cloud metadata service among them), carrier-grade NAT, the IPv6
-    forms that carry an IPv4 address (6to4, Teredo, NAT64) or other
-    reserved addresses is refused (403), unless one of the unit's `cidr`
-    rules covers the address. A name that does not resolve answers 502
-    ("could not resolve"), not a refusal;
+    forms that carry an IPv4 address (6to4, Teredo, NAT64 well-known and
+    local-use, IPv4-compatible) or other reserved addresses, or to the
+    cluster's own addresses as the proxy reads them (each node's pod
+    blocks and addresses, and the ServiceCIDR blocks where the cluster
+    has those objects), is refused (403), unless one of the unit's `cidr`
+    rules covers the address on the request's port. A cluster whose
+    service block is not published as a ServiceCIDR and lies outside the
+    private ranges is not known to the proxy. A name that does not
+    resolve answers 502 ("could not resolve"), not a refusal;
   - `cidr`: an address block, reached directly, not through the proxy, so
     the proxy's log has no entry for it;
   - `service`: a cluster service as `<namespace>/<name>`, reached directly
     (its pods).
 
-  `ports` limits a rule to those TCP ports; with none, any port (a host
-  rule's proxy requests are then allowed on any port).
+  `ports` limits a rule to those TCP ports (1 to 65535); with none, any
+  port (a host rule's proxy requests are then allowed on any port). The
+  syntax is checked when the ConfigMap is read: a host is a DNS name (or
+  an address), a wildcard is `*.` before a domain with a dot in it, a
+  `cidr` an address block, a `service` `<namespace>/<name>`.
 - **What a job gets.** A tool job's units (`spec.tool`) reach the union of
   the rules of the networks its tool declares, and nothing else. Their
   NetworkPolicy (`c4-job-tool-<job>`) allows each `cidr` and `service`
@@ -1419,11 +1431,37 @@ cluster, where no NetworkPolicy applies.
   when a unit names something itself: a `cidr` or `service` rule. A unit
   that reaches only hosts gets the proxy's cluster IP in `HTTPS_PROXY`
   and no DNS. With no network declared the policy allows nothing at all,
-  not even DNS: the units are sealed, and their records say so. A job
-  with no `spec.tool` (a plain `POST /jobs` submission, a tracker's job)
-  is not a tool job and is not sealed by this. The proxy reads the networks from the
-  job and this ConfigMap, so an admin's change applies to the next
-  request a unit makes (after the proxy's short cache).
+  not even DNS: the units are sealed, and their records say so. The
+  proxy reads the networks from the job (the one the unit's pod names as
+  its controller, by UID) and this ConfigMap, so an admin's change
+  applies to the next request a unit makes (after the proxy's short
+  cache). `spec.tool` is the farm's: the HUD sets it when it lowers a
+  tool's submission or test, refuses it in a `POST /jobs` body (`400`),
+  and a job's `spec.tool` cannot be added, changed or removed after it
+  is created.
+- **What every other unit gets: nothing.** Every namespace with units
+  has a NetworkPolicy, `c4-units-deny-egress`, written by the queue
+  before it releases a unit there and put back if it is removed or
+  changed:
+
+  ```yaml
+  spec:
+    podSelector:
+      matchExpressions:
+      - {key: c4.avalanche.io/job, operator: Exists}
+      - {key: c4.avalanche.io/unit, operator: Exists}
+    policyTypes: [Egress]
+  ```
+
+  It selects every unit pod and allows no egress. NetworkPolicies add up,
+  so a unit reaches what its tool job's policy or its tool's policy
+  (`c4-tools-<tool>`, for an agent's `reasoning.tools`) allows, and
+  nothing else. A job with no `spec.tool` and no unit naming a tool (a
+  plain `POST /jobs` submission, MCP's raw image form, a tracker's job)
+  has no network at all: no DNS, no HUD, no model provider. A tool job's
+  units stay sealed while the job is deleted, after its own policy is
+  gone. Inside a tool job a unit cannot name another tool in
+  `reasoning.tools`: it holds, and the job's `Tools` condition says why.
 - **A name the farm does not define** is refused when a tool is published
   (`needs.network`: "fetch declares network studio-db, which this farm
   does not define: a farm admin adds it to the c4-networks ConfigMap in
@@ -1440,12 +1478,16 @@ cluster, where no NetworkPolicy applies.
   sealed jobs. Pools are not bounded this way: they follow the owner's
   rights and the pools' owners.
 - **A refused request** gets the proxy's 403 naming the line to add: the
-  network that allows the host ("add needs: {network: [pypi]} to fetch's
-  tool.yaml and publish it again"), or, when no network allows it, that a
-  farm admin must define one first.
-- A malformed value (not a list, or a rule naming none or two of host,
-  cidr and service) makes every lookup fail with the network's name, so a
-  unit holds rather than runs with less or more than its tool says.
+  narrowest network that allows the host (a rule naming the host before a
+  wildcard, ports before any port, then the network with fewer rules:
+  "add needs: {network: [pypi]} to fetch's tool.yaml and publish it
+  again"), or, when no network allows it, that a farm admin must define
+  one first.
+- A malformed value (not a list, a rule naming none or two of host,
+  cidr and service, or one whose syntax is wrong) makes every lookup fail
+  with the network's name, so a unit holds rather than runs with less or
+  more than its tool says, and a publish that declares a network is
+  refused (`422`) until a farm admin fixes it.
 
 ## Relayed decisions
 
