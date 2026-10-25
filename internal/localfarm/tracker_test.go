@@ -12,8 +12,10 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
-// --tracker gives c4-sync its HUD sign-in and the HUD the sandbox, and
-// ManagerPatch replaces an earlier --hud-sandbox rather than adding one.
+// --tracker gives the HUD the sandbox, and ManagerPatch replaces an
+// earlier --hud-sandbox rather than adding one. c4-sync is no development
+// viewer: it signs in with its own projected token, as on any farm, since
+// a pod never holds the installer's.
 func TestTrackerManagerArgs(t *testing.T) {
 	plain := strings.Join(ManagerArgs(Options{}), " ")
 	if strings.Contains(plain, "--hud-sandbox") || strings.Contains(plain, c4v1.SyncDevViewer) {
@@ -21,8 +23,12 @@ func TestTrackerManagerArgs(t *testing.T) {
 	}
 	args := ManagerArgs(Options{Tracker: true})
 	if !slices.Contains(args, "--hud-sandbox=http://c4-sandbox-github.c4-system.svc:8080") ||
-		!slices.Contains(args, "--hud-dev-viewers="+DevViewers("")+";c4-sync@wrangler=saltmarsh") {
+		!slices.Contains(args, "--hud-dev-viewers="+DevViewers("")) || strings.Contains(strings.Join(args, " "), c4v1.SyncDevViewer) {
 		t.Fatalf("a farm with one: %q", args)
+	}
+	sync := strings.Join(syncArgs(Options{}), " ")
+	if !strings.Contains(sync, "--hud-token-file=/var/run/c4-sync/token") || strings.Contains(sync, "--hud-dev-viewer") {
+		t.Fatalf("c4-sync's arguments: %s", sync)
 	}
 	var p struct {
 		Spec struct {

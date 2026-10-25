@@ -37,8 +37,6 @@ const (
 	// for a stand-in that only c4-sync on this farm reaches.
 	sandboxToken  = "c4-sandbox-local-token"
 	sandboxSecret = "c4-sandbox-local-hook"
-	// syncViewer is c4-sync's sign-in on a development farm's HUD.
-	syncViewer = c4v1.SyncDevViewer + "@wrangler=" + Project
 	// sandboxReviewer is who a sandbox job's review waits for on a farm
 	// with no owner; on a farm with one, the owner reviews.
 	sandboxReviewer = "supervisor"
@@ -142,8 +140,11 @@ func TrackerObjects(o Options) ([]obj, error) {
 		// The Tracker's credentials, in the project, readable by c4-sync
 		// by name only.
 		{"apiVersion": "v1", "kind": "Secret", "metadata": meta("sandbox-github", "namespace", Project), "stringData": secret},
+		// and the project's jobs, which the HUD lets c4-sync submit and
+		// change as itself (docs/c4-sync.md), as a project on any farm does
 		{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": meta("c4-sync-sandbox", "namespace", Project),
-			"rules": []obj{{"apiGroups": []string{""}, "resources": []string{"secrets"}, "resourceNames": []string{"sandbox-github"}, "verbs": []string{"get"}}}},
+			"rules": []obj{{"apiGroups": []string{""}, "resources": []string{"secrets"}, "resourceNames": []string{"sandbox-github"}, "verbs": []string{"get"}},
+				{"apiGroups": []string{"c4.avalanche.io"}, "resources": []string{"workjobs"}, "verbs": []string{"get", "list", "watch", "create", "patch"}}}},
 		{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": meta("c4-sync-sandbox", "namespace", Project),
 			"roleRef":  obj{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "c4-sync-sandbox"},
 			"subjects": []obj{{"kind": "ServiceAccount", "name": "c4-sync", "namespace": "c4-system"}}},
@@ -162,11 +163,12 @@ func TrackerObjects(o Options) ([]obj, error) {
 	}, nil
 }
 
-// syncArgs are c4-sync's arguments on the local farm: the HUD's
-// development sign-in, links to the HUD as this machine reaches it, and a
-// short pass, and the farm's zone for the times it writes.
+// syncArgs are c4-sync's arguments on the local farm: its own projected
+// token for the HUD, as on any farm (a pod never holds the installer's),
+// links to the HUD as this machine reaches it, a short pass, and the
+// farm's zone for the times it writes.
 func syncArgs(o Options) []string {
-	args := []string{"--hud=http://c4-hud.c4-system.svc", "--hud-dev-viewer=" + c4v1.SyncDevViewer,
+	args := []string{"--hud=http://c4-hud.c4-system.svc", "--hud-token-file=/var/run/c4-sync/token",
 		"--hud-public-url=" + o.HUD(), "--interval=10s"}
 	if o.TZ != "" {
 		args = append(args, "--tz="+o.TZ)

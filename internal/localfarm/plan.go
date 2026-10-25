@@ -309,11 +309,7 @@ func Farm(o Options) []obj {
 
 // ManagerArgs are what the local farm adds to the manager's arguments.
 func ManagerArgs(o Options) []string {
-	viewers := DevViewers(o.Owner)
-	if o.Tracker {
-		viewers += ";" + syncViewer
-	}
-	args := []string{"--hud-dev-viewers=" + viewers, "--capacity-provider=kind-sim", "--hud-sites=/etc/c4/sites/sites.json"}
+	args := []string{"--hud-dev-viewers=" + DevViewers(o.Owner), "--capacity-provider=kind-sim", "--hud-sites=/etc/c4/sites/sites.json"}
 	if o.TZ != "" {
 		args = append(args, "--tz="+o.TZ)
 	}
