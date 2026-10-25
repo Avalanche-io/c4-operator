@@ -1,0 +1,2 @@
+# A fixed test value for the installer token, not a secret (internal/hud/server/installer_test.go).
+3ea887bf65b5934a3c0c60eed4a094afa4c53940:internal/hud/server/installer_test.go:generic-api-key:27
