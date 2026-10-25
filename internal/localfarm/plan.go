@@ -17,6 +17,7 @@ import (
 	"sigs.k8s.io/yaml"
 
 	"github.com/Avalanche-io/c4-operator/config/samples/quickstart"
+	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
 // Name is the local farm's cluster: c4-local, or what --name gives, so two farms
@@ -120,6 +121,15 @@ type Options struct {
 	// Tracker adds the stand-in GitHub and c4-sync (c4 farm up --tracker):
 	// c4-sync's sign-in, and the sandbox's page at the HUD's /sandbox/.
 	Tracker bool
+}
+
+// BindRequest is the farm binding a local farm asks its HUD for
+// (POST /api/v1/farm/binding): every deployment of the farm bound to its
+// owner, said to be one person's, so the owner holds every role there. A
+// local farm is the only place that is said: a shared farm's binding
+// leaves onePerson unset.
+func (o Options) BindRequest() api.FarmBindingRequest {
+	return api.FarmBindingRequest{Owner: o.Owner, To: o.name() + "/*", OnePerson: true}
 }
 
 // HUD is the HUD's address on this machine.

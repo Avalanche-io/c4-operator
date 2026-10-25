@@ -4,7 +4,9 @@
 # signed control record (internal/hud/server/binding.go). Nobody else
 # creates, changes or deletes one, so no one can make a farm accountable to
 # someone who never bound it, or take a binding off the trail. A binding
-# never changes: a new owner is a new binding that follows it.
+# never changes (the CRD's spec rule): a new owner is a new binding that
+# follows it, and so is marking a farm one person's (onePerson), which
+# only the installer says, at bind time.
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicy
 metadata:

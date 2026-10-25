@@ -28,6 +28,11 @@ import (
 // changes. Binding again to the same owner is a no-op; a different owner
 // is an owner change, a new binding that follows this one, which is not
 // built yet.
+//
+// Bound to someone is not one person: only a binding the installer marks
+// onePerson (c4 farm up, on a local farm) makes its owner the farm's one
+// person, who holds every role. A shared farm bound to lee leaves lee in
+// lee's own roles, and stand-in to the farm's policy.
 
 // farmTo is a farm binding's deployments: every one of the farm.
 var farmTo = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/\*$`)
@@ -37,7 +42,7 @@ var farmTo = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]{0,61}[a-z0-9])?/\*$`)
 var boundKinds = []string{"task/v1", "resolution/v1", "decision/v1", "job/v1", "control/v1", "import/v1", "ingest/v1"}
 
 func bindingView(b *c4v1.DeploymentBinding) *api.FarmBinding {
-	return &api.FarmBinding{Owner: b.Spec.Owner, To: b.Spec.To, RunFor: b.Spec.RunFor, For: b.Spec.For,
+	return &api.FarmBinding{Owner: b.Spec.Owner, To: b.Spec.To, RunFor: b.Spec.RunFor, OnePerson: b.Spec.OnePerson, For: b.Spec.For,
 		Start: b.Spec.Start.Time, By: b.Spec.By, Record: b.Spec.Record, Follows: b.Spec.Follows}
 }
 
@@ -58,8 +63,9 @@ func (s *Server) farmBinding(ctx context.Context) (*c4v1.DeploymentBinding, erro
 }
 
 // singlePerson is the person who holds every role on this farm: the farm
-// binding's owner where the farm is bound to someone who runs it
-// themselves, else --single-person-farm on a farm with no binding.
+// binding's owner where the installer bound it as one person's
+// (onePerson), no one on a farm bound any other way, and
+// --single-person-farm on a farm with no binding.
 func (s *Server) singlePerson(ctx context.Context) string {
 	b, err := s.farmBinding(ctx)
 	if err != nil || b == nil {
@@ -85,7 +91,8 @@ func (s *Server) handleFarmBinding(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleBind answers POST /api/v1/farm/binding {owner, to, runFor?}.
+// handleBind answers POST /api/v1/farm/binding {owner, to, runFor?,
+// onePerson?}.
 func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 	v := s.withViewer(w, r)
 	if v == nil {
@@ -93,7 +100,7 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 	}
 	var body api.FarmBindingRequest
 	if err := decodeBody(r, &body); err != nil {
-		fail(w, http.StatusBadRequest, "send {owner, to, runFor?}: %v", err)
+		fail(w, http.StatusBadRequest, "send {owner, to, runFor?, onePerson?}: %v", err)
 		return
 	}
 	body.Owner, body.RunFor = strings.TrimSpace(body.Owner), strings.TrimSpace(body.RunFor)
@@ -116,6 +123,9 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 	case len(body.RunFor) > 253 || strings.ContainsAny(body.RunFor, " \t\r\n"):
 		fail(w, http.StatusBadRequest, "runFor: the party a managed farm is run for, without spaces")
 		return
+	case body.OnePerson && body.RunFor != "":
+		fail(w, http.StatusBadRequest, "onePerson: a farm run for %s is not one person's", body.RunFor)
+		return
 	}
 	ctx := r.Context()
 	if err := s.authorize(ctx, r, v, "", "create", "deploymentbindings", c4v1.FarmBindingName); err != nil {
@@ -128,7 +138,7 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if old != nil {
-		if old.Spec.Owner == body.Owner && old.Spec.To == body.To && old.Spec.RunFor == body.RunFor {
+		if old.Spec.Owner == body.Owner && old.Spec.To == body.To && old.Spec.RunFor == body.RunFor && old.Spec.OnePerson == body.OnePerson {
 			writeJSON(w, http.StatusOK, api.FarmBindingResponse{OK: true, Existing: true, Binding: bindingView(old), Record: old.Spec.Record,
 				Message: fmt.Sprintf("this farm is already bound to %s", old.Spec.Owner)})
 			return
@@ -142,7 +152,7 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	b := &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName}, Spec: c4v1.DeploymentBindingSpec{
-		Owner: body.Owner, To: body.To, RunFor: body.RunFor, For: boundKinds,
+		Owner: body.Owner, To: body.To, RunFor: body.RunFor, OnePerson: body.OnePerson, For: boundKinds,
 		Start: metav1.NewTime(time.Now().UTC().Truncate(time.Second)), By: actorOf(r, v)}}
 	custody := CustodyDirect
 	if s.DevViewers != nil {
@@ -152,7 +162,7 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
 		Authorization: s.authorization(v, "create", "deploymentbindings", "", c4v1.FarmBindingName), Action: "bind",
 		Target: "deploymentbinding:" + c4v1.FarmBindingName, Custody: custody,
-		Change: map[string]any{"owner": b.Spec.Owner, "to": b.Spec.To, "runFor": b.Spec.RunFor, "right": "sign", "for": b.Spec.For, "start": b.Spec.Start.Time}}
+		Change: map[string]any{"owner": b.Spec.Owner, "to": b.Spec.To, "runFor": b.Spec.RunFor, "onePerson": b.Spec.OnePerson, "right": "sign", "for": b.Spec.For, "start": b.Spec.Start.Time}}
 	id, rec, err := s.signRecord(ctx, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": sha256JSON(b.Spec)}}, pred)
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)
@@ -174,8 +184,11 @@ func (s *Server) handleBind(w http.ResponseWriter, r *http.Request) {
 }
 
 func describeOwner(b *c4v1.DeploymentBinding) string {
-	if b.Spec.RunFor != "" {
+	switch {
+	case b.Spec.RunFor != "":
 		return b.Spec.Owner + ", who runs it for " + b.Spec.RunFor
+	case b.Spec.OnePerson:
+		return b.Spec.Owner + ", its one person"
 	}
 	return b.Spec.Owner
 }

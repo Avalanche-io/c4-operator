@@ -11,7 +11,8 @@ import (
 // The one-person view lists what waits for the viewer and nothing else: a
 // wait for them or a party they speak for, not someone else's; bursts
 // waiting for approval; pressing first, then by the time left. On a
-// single-person farm the installer gets every role's waits.
+// single-person farm the installer gets every role's waits, and still no
+// other person's.
 func TestNeedsMeIsOnlyWhatNeedsMe(t *testing.T) {
 	now := time.Date(2026, 10, 20, 9, 0, 0, 0, time.UTC)
 	at := func(m int) *time.Time { x := now.Add(time.Duration(m) * time.Minute); return &x }
@@ -76,16 +77,22 @@ func TestNeedsMeIsOnlyWhatNeedsMe(t *testing.T) {
 		t.Fatalf("an artist's list %v", ids(artist))
 	}
 
-	// The installer of a single-person farm is every role.
+	// The installer of a single-person farm is every role, but not every
+	// person: maya's own wait stays hers.
 	s.SinglePerson = "noor"
 	solo := list(&api.Viewer{User: "noor", All: true, Role: "producer"})
-	for _, w := range []string{"decision:show/sh010/2", "decision:show/sh010/5", "question:show/sh020/0"} {
+	for _, w := range []string{"decision:show/sh010/5", "question:show/sh020/0"} {
 		found := false
 		for _, id := range ids(solo) {
 			found = found || id == w
 		}
 		if !found {
 			t.Fatalf("the installer's list %v lacks %s", ids(solo), w)
+		}
+	}
+	for _, id := range ids(solo) {
+		if id == "decision:show/sh010/2" {
+			t.Fatalf("the installer's list %v has maya's own wait", ids(solo))
 		}
 	}
 }

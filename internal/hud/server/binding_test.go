@@ -84,6 +84,9 @@ func TestFarmBinding(t *testing.T) {
 	if p.Action != "bind" || p.Custody != CustodyClaimed || p.Via != "c4-farm" || !strings.Contains(p.Authenticated, "development viewer") {
 		t.Errorf("the bind record: %+v", p)
 	}
+	if ch, _ := p.Change.(map[string]any); ch == nil || ch["onePerson"] != false || b.Spec.OnePerson {
+		t.Errorf("a binding that does not say one person: change %v, spec %+v", p.Change, b.Spec)
+	}
 
 	code, again := bindCall(s, http.MethodPost, "wrangler", noor, nil)
 	if code != http.StatusOK || again["existing"] != true || again["record"] != out["record"] {
@@ -101,6 +104,8 @@ func TestFarmBinding(t *testing.T) {
 	}{
 		{"another owner", "wrangler", `{"owner": "mallory", "to": "laptop-1/*"}`, nil, http.StatusConflict, "a new binding that follows this one"},
 		{"the same owner, run for someone", "wrangler", `{"owner": "noor@petrelfinch.example", "to": "laptop-1/*", "runFor": "studio-x"}`, nil, http.StatusConflict, "owner change"},
+		{"the same owner, now one person", "wrangler", `{"owner": "noor@petrelfinch.example", "to": "laptop-1/*", "onePerson": true}`, nil, http.StatusConflict, "owner change"},
+		{"one person, run for someone", "wrangler", `{"owner": "noor", "to": "laptop-1/*", "runFor": "studio-x", "onePerson": true}`, nil, http.StatusBadRequest, "is not one person's"},
 		{"an artist", "artist", noor, nil, http.StatusForbidden, "may not create deploymentbindings"},
 		{"an agent", "wrangler", noor, map[string]string{"X-C4-Client": "mcp", "X-C4-Agent": "bot"}, http.StatusForbidden, "an agent cannot bind"},
 		{"no owner", "wrangler", `{"to": "laptop-1/*"}`, nil, http.StatusBadRequest, "owner:"},
@@ -131,9 +136,11 @@ func TestFarmBindingNeedsTheInstaller(t *testing.T) {
 	}
 }
 
-// Who holds every role comes from the farm binding where there is one: its
-// owner on a farm they run themselves, no one on a managed farm. Only a
-// farm with no binding falls back to --single-person-farm.
+// Who holds every role comes from the farm binding where there is one:
+// its owner only where the installer bound the farm as one person's
+// (onePerson), no one on a farm merely bound to someone or run for
+// someone else. Only a farm with no binding falls back to
+// --single-person-farm.
 func TestSinglePersonFromTheBinding(t *testing.T) {
 	s, _ := bindFarm(t)
 	s.SinglePerson = "from-the-flag"
@@ -146,14 +153,94 @@ func TestSinglePersonFromTheBinding(t *testing.T) {
 	if err := s.Client.Create(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.singlePerson(ctx); got != "noor" {
-		t.Errorf("bound to noor: %q", got)
+	if got, owner := s.singlePerson(ctx), b.Spec.SingleOwner(); got != "" || owner != "" {
+		t.Errorf("bound to noor, not as one person: %q, SingleOwner %q, want no single person", got, owner)
+	}
+	b.Spec.OnePerson = true
+	if err := s.Client.Update(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if got, owner := s.singlePerson(ctx), b.Spec.SingleOwner(); got != "noor" || owner != "noor" {
+		t.Errorf("bound to noor as one person: %q, SingleOwner %q", got, owner)
 	}
 	b.Spec.RunFor = "studio-x"
 	if err := s.Client.Update(ctx, b); err != nil {
 		t.Fatal(err)
 	}
-	if got := s.singlePerson(ctx); got != "" {
-		t.Errorf("a managed farm: %q, want no single person", got)
+	if got, owner := s.singlePerson(ctx), b.Spec.SingleOwner(); got != "" || owner != "" {
+		t.Errorf("a managed farm: %q, SingleOwner %q, want no single person", got, owner)
+	}
+}
+
+// A shared farm an admin bound to lee is not lee's alone: lee decides
+// neither a role's wait nor another person's, and stand-in stays the
+// farm's policy. Bound as one person's, lee holds every role, so decides
+// a role's wait for that role, and their own; another person's wait is
+// still that person's.
+func TestBoundIsNotOnePerson(t *testing.T) {
+	s, _ := bindFarm(t)
+	ctx := context.Background()
+	lee := Decider{User: "lee", Role: "farm-admin"}
+	b := &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "lee", To: "studio-1/*", For: boundKinds, Start: metav1.Now(), By: "ivo"}}
+	if err := s.Client.Create(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	for _, server := range []string{"person:dana", "person:wrangler"} {
+		if as, err := s.mayDecide("show-a", server, lee); err == nil || !strings.Contains(err.Error(), "decide.standIn: deny") {
+			t.Errorf("a shared farm bound to lee: lee decides %s (as %q, %v)", server, as, err)
+		}
+	}
+	if as, err := s.mayDecide("show-a", "person:lee", lee); err != nil || as != "" {
+		t.Errorf("lee's own wait: %q %v", as, err)
+	}
+
+	b.Spec.OnePerson = true
+	if err := s.Client.Update(ctx, b); err != nil {
+		t.Fatal(err)
+	}
+	if as, err := s.mayDecide("show-a", "person:wrangler", lee); err != nil || as != "role:wrangler" {
+		t.Errorf("one person, a role's wait: %q %v", as, err)
+	}
+	if as, err := s.mayDecide("show-a", "person:lee", lee); err != nil || as != "" {
+		t.Errorf("one person, their own wait: %q %v", as, err)
+	}
+	if as, err := s.mayDecide("show-a", "person:dana", lee); err == nil {
+		t.Errorf("one person decides dana's own wait, as %q", as)
+	}
+	if as, err := s.mayDecide("show-a", "person:wrangler", Decider{User: "dana", Role: "farm-admin"}); err == nil {
+		t.Errorf("someone else takes the one person's roles, as %q", as)
+	}
+}
+
+// The installer binding a farm as one person's says so in the signed
+// record, and the binding carries it.
+func TestOnePersonBinding(t *testing.T) {
+	s, roots := bindFarm(t)
+	code, out := bindCall(s, http.MethodPost, "wrangler", `{"owner": "noor", "to": "c4-local/*", "onePerson": true}`, nil)
+	if code != http.StatusOK || out["binding"].(map[string]any)["onePerson"] != true {
+		t.Fatalf("bind as one person: %d %v", code, out)
+	}
+	var b c4v1.DeploymentBinding
+	if err := s.Client.Get(context.Background(), types.NamespacedName{Name: c4v1.FarmBindingName}, &b); err != nil {
+		t.Fatal(err)
+	}
+	v, err := provenance.VerifyBundle(b.Spec.Signed, roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var p controlPredicate
+	json.Unmarshal(v.Predicate, &p)
+	if ch, _ := p.Change.(map[string]any); !b.Spec.OnePerson || ch == nil || ch["onePerson"] != true {
+		t.Fatalf("the one-person binding: change %v, spec %+v", p.Change, b.Spec)
+	}
+	if got := s.singlePerson(context.Background()); got != "noor" {
+		t.Errorf("single person: %q", got)
+	}
+	if code, again := bindCall(s, http.MethodPost, "wrangler", `{"owner": "noor", "to": "c4-local/*", "onePerson": true}`, nil); code != http.StatusOK || again["existing"] != true {
+		t.Errorf("binding again as one person: %d %v", code, again)
+	}
+	if code, shared := bindCall(s, http.MethodPost, "wrangler", `{"owner": "noor", "to": "c4-local/*"}`, nil); code != http.StatusConflict {
+		t.Errorf("rebinding without one person changed nothing: %d %v", code, shared)
 	}
 }

@@ -47,6 +47,13 @@ type DeploymentBindingSpec struct {
 	// +kubebuilder:validation:MaxLength=253
 	// +optional
 	RunFor string `json:"runFor,omitempty"`
+	// OnePerson says the farm is one person's: the installer said so when
+	// they bound it (c4 farm up, on a local farm, and nowhere else), and
+	// the owner then holds every role there. Being bound to someone is
+	// not that: a shared farm's binding leaves it unset, and its people
+	// keep their own roles and waits. It never goes with RunFor.
+	// +optional
+	OnePerson bool `json:"onePerson,omitempty"`
 	// For lists the record kinds the deployments sign under it.
 	// +kubebuilder:validation:MinItems=1
 	For []string `json:"for"`
@@ -70,10 +77,12 @@ type DeploymentBindingSpec struct {
 const FarmBindingName = "farm"
 
 // SingleOwner is the person a farm binding makes the farm's one person,
-// who holds every role: its owner, on a farm its owner runs; "" on a
-// managed farm, which is run for someone else.
+// who holds every role: its owner, where the installer bound the farm as
+// one person's (OnePerson); "" on any other farm, a shared one bound to
+// someone or a managed one run for someone else, where stand-in is the
+// farm's policy.
 func (s *DeploymentBindingSpec) SingleOwner() string {
-	if s.RunFor != "" {
+	if !s.OnePerson || s.RunFor != "" {
 		return ""
 	}
 	return s.Owner

@@ -1463,15 +1463,17 @@ Only the HUD writes a binding (the `c4-deployment-bindings` policy), and a
 binding never changes. A new owner is an owner change: a new binding that
 follows this one, which a farm can't make yet.
 
-| route                | body                     | answer                                                                                                                                      |
-| -------------------- | ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------- |
-| `POST /farm/binding` | `{ owner, to, runFor? }` | `{ ok, message, binding, record }`; binding again to the same owner answers `existing: true` and changes nothing; `409` for any other owner |
-| `GET /farm/binding`  |                          | `{ ok, binding, record }`; `404` while the farm has no owner bound                                                                          |
+| route                | body                                 | answer                                                                                                                                                          |
+| -------------------- | ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `POST /farm/binding` | `{ owner, to, runFor?, onePerson? }` | `{ ok, message, binding, record }`; binding again the same way answers `existing: true` and changes nothing; `409` for any other owner, `runFor` or `onePerson` |
+| `GET /farm/binding`  |                                      | `{ ok, binding, record }`; `404` while the farm has no owner bound                                                                                              |
 
 `to` is `<farm>/*`, every deployment of the farm (`laptop-1/*`). The
 first binding names the farm. `runFor`, on a managed farm, is the party
 the owner runs it for: the provider owns the farm, and the record says
-who it is run for.
+who it is run for. `onePerson` says the farm is the owner's alone (see
+below); only `c4 farm up` says it, for a local farm, and it never goes
+with `runFor` (`400`).
 
 Who may bind:
 - A person signed in who may create `deploymentbindings`.
@@ -1481,15 +1483,21 @@ Who may bind:
 Refused (`403`): a unit, an agent (an MCP client naming one, or a tracker's
 sync), and a development viewer on a HUD the network reaches.
 
-A binding is `{ owner, to, runFor?, for, start, by, record, follows? }`.
+A binding is `{ owner, to, runFor?, onePerson?, for, start, by, record, follows? }`.
 `record` is the signed bind record's C4 ID. The DeploymentBinding also
 carries the record itself (`spec.signed`), so a farm with no project
 store yet still has the proof. Every project's store keeps a copy.
 
-The binding also says who holds every role. On a farm its owner runs
-(no `runFor`), the owner may decide a wait addressed to any role, as
-`--single-person-farm` names someone on a farm with no binding. A managed
-farm has no such person.
+Being bound to someone is not using the farm alone. Only a binding the
+installer marks `onePerson` makes its owner the farm's one person, who
+holds every role, as `--single-person-farm` names someone on a farm with
+no binding. That person may decide a wait addressed to a role, signed as
+standing in for that role (`for: role:wrangler`). A wait for another
+person stays that person's, and standing in for them is the farm's policy
+(`decide.standIn`), as on any farm. The `onePerson` flag is part of the
+signed bind record's `change`, and like the owner it never changes in
+place. A shared farm bound to lee, without `onePerson`, has no such
+person: lee keeps lee's own roles and waits. A managed farm never has one.
 
 ## Held tracker writes
 

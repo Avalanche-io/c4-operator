@@ -731,6 +731,16 @@ func TestBindingsOnlyFromTheHUD(t *testing.T) {
 	if err := hud.Update(ctx, changed); err == nil || !strings.Contains(err.Error(), "a new owner is a new binding") {
 		t.Errorf("the HUD changed a binding in place: %v", err)
 	}
+	// Nor does a binding become one person's later: onePerson is the
+	// installer's word at bind time, like the owner.
+	solo := b.DeepCopy()
+	solo.Spec.OnePerson = true
+	if err := admin.Update(ctx, solo); err == nil {
+		t.Error("an admin made a shared farm one person's")
+	}
+	if err := hud.Update(ctx, solo); err == nil || !strings.Contains(err.Error(), "a new owner is a new binding") {
+		t.Errorf("the HUD made a binding one person's in place: %v", err)
+	}
 	if err := admin.Delete(ctx, b); err == nil {
 		t.Error("an admin deleted the farm binding")
 	}

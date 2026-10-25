@@ -170,8 +170,9 @@ func TestWhoMayDecide(t *testing.T) {
 	}
 
 	// On a single-person farm the installer plays every role: they decide
-	// a wait addressed to one of them, recorded for that role, by them.
-	// On a shared farm the same decision is refused.
+	// a wait addressed to one of them, recorded for that role, by them,
+	// but not another person's own wait. On a shared farm the role's
+	// decision is refused too.
 	rec.job.Status.Waits = append(rec.job.Status.Waits, c4v1.WorkWait{Unit: 6, Name: "triage", Server: "person:wrangler", Since: &since, Blocking: true})
 	reset()
 	setPolicy("", "")
@@ -186,6 +187,11 @@ func TestWhoMayDecide(t *testing.T) {
 	}
 	if p := record(out); p.Custody != CustodyStandIn || p.For != "role:wrangler" || p.Actor != "maya" {
 		t.Fatalf("local farm record: %+v", p)
+	}
+	// Roles only: a wait for another person stays theirs, even for the
+	// installer, and stand-in is the farm's policy as anywhere.
+	if code, out := post("artist", "decide", ruling, false); code != http.StatusForbidden || !strings.Contains(out["error"].(string), "decide.standIn: deny") {
+		t.Fatalf("the installer decides dana's own wait on a local farm: %d %v", code, out)
 	}
 	if code, out := post("wrangler", "decide", `{"unit": "ruling", "do": "approve"}`, false); code != http.StatusOK {
 		t.Fatalf("dana still decides her own: %d %v", code, out)

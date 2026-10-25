@@ -2,6 +2,7 @@ package server
 
 import (
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -30,8 +31,9 @@ func (s *Server) handleNeedsMe(w http.ResponseWriter, r *http.Request) {
 //   - a unit's open question goes to its job's owner (escalation.to's
 //     default), or, for a job with no owner, to anyone who may change it;
 //   - a wait goes to whom it names (decide.by), and on a single-person
-//     farm to its installer, whatever role it names; standing in for
-//     someone is not something that needs them;
+//     farm to its installer, whatever role it names; a wait for another
+//     person stays theirs, and standing in for someone is not something
+//     that needs them;
 //   - a burst goes to whoever may approve the request.
 func (s *Server) needsMe(r *http.Request, v *api.Viewer, snap *api.Snapshot) *api.NeedsMe {
 	out := &api.NeedsMe{Now: snap.Now, Viewer: v, Items: []api.NeedsMeItem{}}
@@ -96,7 +98,7 @@ func (s *Server) needsMe(r *http.Request, v *api.Viewer, snap *api.Snapshot) *ap
 				// A wait that names no one goes where its job's questions go.
 				mine = mine && (j.Owner == "" || j.Owner == v.User)
 			}
-			if !mine && !(single && kind == "person") {
+			if !mine && !(single && kind == "person" && slices.Contains(api.Roles, named)) {
 				continue
 			}
 			if !may(j) {

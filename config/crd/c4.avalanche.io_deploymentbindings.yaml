@@ -80,6 +80,14 @@ spec:
                   type: string
                 minItems: 1
                 type: array
+              onePerson:
+                description: |-
+                  OnePerson says the farm is one person's: the installer said so when
+                  they bound it (c4 farm up, on a local farm, and nowhere else), and
+                  the owner then holds every role there. Being bound to someone is
+                  not that: a shared farm's binding leaves it unset, and its people
+                  keep their own roles and waits. It never goes with RunFor.
+                type: boolean
               owner:
                 description: |-
                   Owner is the party the deployments' records accrue to: a person

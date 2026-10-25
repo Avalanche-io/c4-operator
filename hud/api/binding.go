@@ -11,19 +11,25 @@ type FarmBindingRequest struct {
 	To string `json:"to"`
 	// RunFor, on a managed farm, is the party the owner runs it for.
 	RunFor string `json:"runFor,omitempty"`
+	// OnePerson says the farm is one person's, the owner's, who then holds
+	// every role on it. Only c4 farm up says it, for a local farm; a
+	// shared farm's binding leaves it unset. It never goes with RunFor.
+	OnePerson bool `json:"onePerson,omitempty"`
 }
 
 // FarmBinding is the farm's owner as bound: every deployment's records
 // accrue to Owner.
 type FarmBinding struct {
-	Owner   string    `json:"owner"`
-	To      string    `json:"to"`
-	RunFor  string    `json:"runFor,omitempty"`
-	For     []string  `json:"for"`
-	Start   time.Time `json:"start"`
-	By      string    `json:"by"`
-	Record  string    `json:"record,omitempty"`
-	Follows string    `json:"follows,omitempty"`
+	Owner  string `json:"owner"`
+	To     string `json:"to"`
+	RunFor string `json:"runFor,omitempty"`
+	// OnePerson: the owner is the farm's one person, holding every role.
+	OnePerson bool      `json:"onePerson,omitempty"`
+	For       []string  `json:"for"`
+	Start     time.Time `json:"start"`
+	By        string    `json:"by"`
+	Record    string    `json:"record,omitempty"`
+	Follows   string    `json:"follows,omitempty"`
 }
 
 // FarmBindingResponse answers a bind or GET /api/v1/farm/binding.

@@ -183,6 +183,18 @@ func TestOwnerIsTheSinglePerson(t *testing.T) {
 	}
 }
 
+// A local farm binds to its owner as one person's farm, the only binding
+// that says so.
+func TestBindIsOnePerson(t *testing.T) {
+	r := Options{Owner: "noor@petrelfinch.example", Name: "c4-local-2"}.BindRequest()
+	if r.Owner != "noor@petrelfinch.example" || r.To != "c4-local-2/*" || !r.OnePerson || r.RunFor != "" {
+		t.Errorf("bind request %+v", r)
+	}
+	if r := (Options{Owner: "noor"}).BindRequest(); r.To != Name+"/*" || !r.OnePerson {
+		t.Errorf("default farm's bind request %+v", r)
+	}
+}
+
 // The owner's name is one the farm can record and no role's: an address's
 // local part, a Windows user without its domain, GitHub's private address
 // without its number, lowercase, with what else a name carries made '-'.
