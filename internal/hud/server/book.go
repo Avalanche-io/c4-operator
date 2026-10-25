@@ -71,7 +71,12 @@ func (s *Server) handleBook(w http.ResponseWriter, r *http.Request) {
 	}
 	var only *jobRec
 	if key := r.URL.Query().Get("job"); key != "" {
-		only = m.byKey[key]
+		ns, name, _ := strings.Cut(key, "/")
+		var err error
+		if only, err = s.lookup(r.Context(), m, ns, name); err != nil {
+			fail(w, http.StatusServiceUnavailable, "could not read job %s: %v", key, err)
+			return
+		}
 		if only == nil || !v.Sees(only.project) {
 			fail(w, http.StatusNotFound, "no job %s", key)
 			return

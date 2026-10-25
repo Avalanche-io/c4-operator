@@ -161,6 +161,8 @@ type Server struct {
 	sweepMu    sync.Mutex
 	sweptAt    time.Time
 	submitKeys keyLocks
+	// fresh holds jobs read past the model (fresh.go).
+	fresh freshJobs
 	// toolMu guards spread: the projects each farm-wide tool tree has been
 	// copied and granted into (tools.go).
 	toolMu sync.Mutex

@@ -55,6 +55,9 @@ type jobRec struct {
 	// work is JobSummary.work, computed once per collection.
 	work    api.Work
 	hasWork bool
+	// fresh is a job read from the API server that the model has not
+	// collected yet (fresh.go).
+	fresh bool
 }
 
 // collect reads the farm. Metrics are scraped every fifth call.
@@ -89,23 +92,7 @@ func (s *Server) collect(ctx context.Context) error {
 	}
 	prev := s.current()
 	for i := range jobs.Items {
-		j := jobs.Items[i]
-		rec := &jobRec{job: j, key: j.Namespace + "/" + j.Name, project: m.nsProject[j.Namespace]}
-		if rec.project == "" {
-			rec.project = "namespace/" + j.Namespace
-		}
-		if d, err := class.Lookup(j.Spec.Class); err == nil {
-			rec.driver = d
-			if p, _ := s.planOf(rec.key); p != nil {
-				rec.plan = p
-			} else if old := prevPlan(prev, rec.key, j.Generation); old != nil {
-				rec.plan = old
-			} else {
-				rec.plan, rec.planErr = d.Plan(&j)
-			}
-		} else {
-			rec.planErr = err
-		}
+		rec := s.jobRecord(m, prev, jobs.Items[i])
 		m.jobs = append(m.jobs, rec)
 		m.byKey[rec.key] = rec
 	}
@@ -139,6 +126,30 @@ func (s *Server) collect(ctx context.Context) error {
 	s.version++
 	s.mu.Unlock()
 	return nil
+}
+
+// jobRecord is a job as the model holds it: its project and its plan, the
+// queue's when it has one, else the previous model's for the same
+// generation, else planned here.
+func (s *Server) jobRecord(m, prev *model, j c4v1.WorkJob) *jobRec {
+	rec := &jobRec{job: j, key: j.Namespace + "/" + j.Name, project: m.nsProject[j.Namespace]}
+	if rec.project == "" {
+		rec.project = "namespace/" + j.Namespace
+	}
+	d, err := class.Lookup(j.Spec.Class)
+	if err != nil {
+		rec.planErr = err
+		return rec
+	}
+	rec.driver = d
+	if p, _ := s.planOf(rec.key); p != nil {
+		rec.plan = p
+	} else if old := prevPlan(prev, rec.key, j.Generation); old != nil {
+		rec.plan = old
+	} else {
+		rec.plan, rec.planErr = d.Plan(&j)
+	}
+	return rec
 }
 
 func prevPlan(prev *model, key string, gen int64) *class.Plan {

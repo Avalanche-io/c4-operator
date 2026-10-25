@@ -263,7 +263,7 @@ func (s *Server) handlePeopleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	tp := &c4v1.TrackerPerson{}
-	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, tp); err != nil {
+	if err := s.reader().Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, tp); err != nil {
 		fail(w, http.StatusNotFound, "no confirmed login %s/%s", ns, name)
 		return
 	}

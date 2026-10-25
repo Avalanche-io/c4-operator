@@ -257,7 +257,7 @@ func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	}
 	ctx := r.Context()
 	g := &c4v1.SubmitGrant{}
-	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, g); err != nil {
+	if err := s.reader().Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, g); err != nil {
 		fail(w, http.StatusNotFound, "no grant %s/%s", ns, name)
 		return
 	}

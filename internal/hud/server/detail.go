@@ -38,9 +38,14 @@ func (s *Server) job(w http.ResponseWriter, r *http.Request) (*model, *jobRec, *
 		fail(w, http.StatusServiceUnavailable, "the HUD is still reading the farm")
 		return nil, nil, nil
 	}
-	rec := m.byKey[r.PathValue("ns")+"/"+r.PathValue("name")]
+	ns, name := r.PathValue("ns"), r.PathValue("name")
+	rec, err := s.lookup(r.Context(), m, ns, name)
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "could not read job %s/%s: %v", ns, name, err)
+		return nil, nil, nil
+	}
 	if rec == nil || !v.Sees(rec.project) {
-		fail(w, http.StatusNotFound, "no job %s/%s", r.PathValue("ns"), r.PathValue("name"))
+		fail(w, http.StatusNotFound, "no job %s/%s", ns, name)
 		return nil, nil, nil
 	}
 	return m, rec, v
@@ -66,6 +71,9 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 	out["expansions"] = []any{}
 	out["edges"] = []any{}
 	out["riskUnits"] = ""
+	if rec.fresh {
+		out["fresh"] = true
+	}
 	if rec.plan == nil {
 		out["axis"] = map[string]any{"kind": "segment"}
 		out["groups"] = []any{}
