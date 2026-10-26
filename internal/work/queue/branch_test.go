@@ -116,20 +116,41 @@ func TestUnitSummaryInStatus(t *testing.T) {
 	}
 }
 
-// A job of a thousand blocks, each with a 4 KiB summary, keeps its
-// summaries in status well inside a WorkJob's size.
+// A job of many blocks keeps its summaries in status well inside a
+// WorkJob's size: excerpts within a budget, the newest units first, older
+// ones keeping only their document's ID, and no more than maxSummaries
+// units at all.
 func TestUnitSummariesStaySmall(t *testing.T) {
-	m := &jobMem{}
+	m := &jobMem{summaries: map[int]c4v1.WorkUnitSummary{}}
 	text := []byte(strings.Repeat("é", 2<<10)) // 4 KiB on one line
-	m.summaries = map[int]c4v1.WorkUnitSummary{}
-	for i := range 1000 {
+	for i := range 3000 {
 		m.summaries[i] = c4v1.WorkUnitSummary{Excerpt: excerpt(text, maxExcerpt), Doc: viewID(fmt.Sprint(i)), Attempt: 3}
 	}
-	b, err := json.Marshal(m.summaryStatus())
+	st := m.summaryStatus()
+	b, err := json.Marshal(st)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(b) > 384<<10 {
-		t.Fatalf("1000 summaries take %d KiB of status", len(b)>>10)
+	if len(b) > 320<<10 {
+		t.Fatalf("3000 summaries take %d KiB of status", len(b)>>10)
+	}
+	if len(st) != maxSummaries {
+		t.Fatalf("%d units kept, want %d", len(st), maxSummaries)
+	}
+	if s := st["2999"]; s.Excerpt == "" || s.Doc == "" {
+		t.Fatalf("the newest unit lost its excerpt: %+v", s)
+	}
+	if s, ok := st["1001"]; !ok || s.Excerpt != "" || s.Doc != viewID("1001") {
+		t.Fatalf("an older unit past the budget: %+v %v", s, ok)
+	}
+	if _, ok := st["999"]; ok {
+		t.Fatal("a unit past the count was kept")
+	}
+	total := 0
+	for _, s := range st {
+		total += len(s.Excerpt)
+	}
+	if total > excerptBudget {
+		t.Fatalf("excerpts take %d bytes", total)
 	}
 }

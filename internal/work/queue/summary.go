@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sort"
 	"strconv"
 	"unicode/utf8"
 
@@ -28,6 +29,15 @@ import (
 
 // maxExcerpt bounds a summary's excerpt in the job's status, in bytes.
 const maxExcerpt = 200
+
+// A job's status keeps excerpts for at most excerptBudget bytes in all,
+// and summaries for at most maxSummaries units, the newest units (the
+// highest indices: a lead's latest workers) first. Past the budget a unit
+// keeps its document's ID, which readers fetch; past the count, none.
+const (
+	excerptBudget = 64 << 10
+	maxSummaries  = 2000
+)
 
 // maxSummaryDoc bounds what the queue reads of a stored summary; the
 // runners store at most 4 KiB.
@@ -140,8 +150,22 @@ func (m *jobMem) summaryStatus() map[string]c4v1.WorkUnitSummary {
 	if len(m.summaries) == 0 {
 		return nil
 	}
-	out := make(map[string]c4v1.WorkUnitSummary, len(m.summaries))
-	for i, s := range m.summaries {
+	idx := make([]int, 0, len(m.summaries))
+	for i := range m.summaries {
+		idx = append(idx, i)
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(idx)))
+	if len(idx) > maxSummaries {
+		idx = idx[:maxSummaries]
+	}
+	out := make(map[string]c4v1.WorkUnitSummary, len(idx))
+	left := excerptBudget
+	for _, i := range idx {
+		s := m.summaries[i]
+		if len(s.Excerpt) > left {
+			s.Excerpt = "" // its document has it
+		}
+		left -= len(s.Excerpt)
 		out[strconv.Itoa(i)] = s
 	}
 	return out

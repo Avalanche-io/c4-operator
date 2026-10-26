@@ -489,7 +489,9 @@ type WorkJobStatus struct {
 	// UnitSummaries maps a unit's index to the summary of its task its
 	// last finished attempt wrote (.c4/done): the unit's own words, not
 	// something the farm checked. Status keeps an excerpt and the stored
-	// document's ID, so a job with many units stays small.
+	// document's ID, so a job with many units stays small: excerpts for at
+	// most 64 KiB in all and summaries for at most 2,000 units, the newest
+	// units first; past the budget a unit keeps only its document's ID.
 	// +optional
 	UnitSummaries map[string]WorkUnitSummary `json:"unitSummaries,omitempty"`
 	// Verdicts lists the most recent verdicts review units wrote, each
