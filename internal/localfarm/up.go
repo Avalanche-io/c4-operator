@@ -287,7 +287,7 @@ func publishTools(ctx context.Context, o UpOptions) error {
 		for wait := 2 * time.Second; ; wait *= 2 {
 			out.Reset()
 			err = farmcli.PublishTool(ctx, c, farmcli.Out{W: &out}, farmcli.PublishArgs{Dir: dir, Project: Project, Farm: true, NoWait: true})
-			if err == nil || wait > 16*time.Second || !strings.Contains(out.String()+err.Error(), "try again shortly") {
+			if err == nil || wait > 16*time.Second || !retryable(out.String()+err.Error()) {
 				break
 			}
 			select {
@@ -375,6 +375,13 @@ func publishTools(ctx context.Context, o UpOptions) error {
 		o.logf("tools     not published: %s\n", l)
 	}
 	return nil
+}
+
+// retryable says a publish failed for a moment, not for good: the farm
+// asked to be tried again, or the store did not answer yet (the first
+// publish of a new farm can reach it before it serves).
+func retryable(said string) bool {
+	return strings.Contains(said, "try again shortly") || strings.Contains(said, "store:") || strings.Contains(said, "connection refused")
 }
 
 // andList is names as a sentence lists them: "a", "a and b", "a, b and c".

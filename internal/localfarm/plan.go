@@ -480,3 +480,27 @@ func OwnerName(raw string) (string, error) {
 	}
 	return name, nil
 }
+
+// Capacity is the farm's capacity as up says it: its nodes and slots, and
+// the burst pool it rents only when a deadline needs it, simulated here.
+func Capacity() string {
+	slots := map[string]int{}
+	burst := 0
+	for _, p := range Pools {
+		slots[p.Name] = p.SlotsPerNode
+		burst += p.BurstMaxNodes * p.SlotsPerNode
+	}
+	owned, n := 0, 0
+	for _, nd := range nodes {
+		if nd.burst {
+			continue
+		}
+		n++
+		owned += slots[nd.pool]
+	}
+	line := fmt.Sprintf("%d nodes · %d slots", n, owned)
+	if burst > 0 {
+		line += fmt.Sprintf(", and %d more it rents only when a deadline needs them (a simulated cloud)", burst)
+	}
+	return line
+}

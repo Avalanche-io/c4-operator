@@ -39,7 +39,7 @@ var version = "dev"
 const usage = `c4 farm: submit work to a C4 farm, watch it, and take its output home.
 
 The local farm
-  up [--as ROLE]           make a farm on this machine in Docker and open its HUD (--port N if 30080 is taken)
+  up [--as ROLE]           make a farm on this machine in Docker and open its HUD (another farm's ports taken, it takes free ones)
   down                     delete the local farm
   status                   the local farm's nodes, slots and sign-ins
   image load IMAGE...      push images from this machine's Docker into the local farm's registry
@@ -400,6 +400,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		fs.BoolVar(&a.Mine, "mine", false, "only your jobs")
 		fs.BoolVar(&a.AtRisk, "at-risk", false, "only jobs that will miss their deadlines")
 		fs.BoolVar(&a.All, "all", false, "include finished jobs")
+		fs.BoolVar(&a.ToolTests, "tool-tests", false, "also the farm's tests of its tools, which publishing a tool runs")
 		if _, err := parse(fs, rest); err != nil {
 			return err
 		}
@@ -470,8 +471,12 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 				return err
 			}
 		}
-		fmt.Fprintln(o.W, u)
-		return openSignedIn(ctx, f, u)
+		if err := openSignedIn(ctx, f, u); err != nil {
+			return err
+		}
+		// the link is the page, and signs no other browser in
+		fmt.Fprintf(o.W, "opened    in your browser, signed in: %s\n", u)
+		return nil
 
 	case "deadline":
 		pos, err := parse(fs, rest)
@@ -716,7 +721,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "\nfarm      %s   4 nodes · 6 slots, 4 more to rent · store ready\n", localfarm.Name)
+		fmt.Fprintf(stdout, "\nfarm      %s   %s · store ready\n", localfarm.Name, localfarm.Capacity())
 		fmt.Fprintf(stdout, "project   %s   you: %s\n", localfarm.Project, v.Name)
 		fmt.Fprintf(stdout, "owner     %s, who plays every role here\n", o.Owner)
 		if err := ui.apply(ctx, cfg, on, wasOn); err != nil {

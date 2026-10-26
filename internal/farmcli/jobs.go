@@ -79,6 +79,9 @@ type LsArgs struct {
 	Mine    bool
 	AtRisk  bool
 	All     bool // include finished jobs
+	// ToolTests includes the farm's tests of its tools, which publishing a
+	// tool runs: the farm's work, not the person's
+	ToolTests bool
 }
 
 // Ls prints the queue in run order.
@@ -97,6 +100,9 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 			continue
 		}
 		if a.Mine && (s.Viewer == nil || j.Owner != s.Viewer.User) {
+			continue
+		}
+		if j.ToolTest != "" && !a.ToolTests {
 			continue
 		}
 		if !a.All && (j.Phase == "Succeeded" || j.Phase == "Failed") {

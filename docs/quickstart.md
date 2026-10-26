@@ -64,7 +64,7 @@ Connect Claude Code to this farm? It adds the farm's tools to Claude Code (~/.cl
 ```
 
 ```
-farm      c4-local   4 nodes · 6 slots, 4 more to rent · store ready
+farm      c4-local   3 nodes · 6 slots, and 4 more it rents only when a deadline needs them (a simulated cloud) · store ready
 project   saltmarsh   you: sam
 owner     sam, who plays every role here
 claude    has the farm's tools (c4-farm in ~/.claude.json); c4 farm integrate off takes it all out

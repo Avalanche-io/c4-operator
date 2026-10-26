@@ -25,7 +25,7 @@ import (
 // passed through, so every caller acts as itself.
 func runMCP(args []string) error {
 	fs := flag.NewFlagSet("mcp", flag.ExitOnError)
-	hud := fs.String("hud", env("C4_HUD", "http://127.0.0.1:30080"), "the HUD's address")
+	hud := fs.String("hud", env("C4_HUD", ""), "the HUD's address (or C4_HUD); c4 farm mcp finds a farm you signed in to")
 	tokenFile := fs.String("token-file", "", "file holding the bearer token sent to the HUD (stdio only; over HTTP each request sends its own, and one without is refused)")
 	as := fs.String("as", "", "development only: the viewer to ask as, on a HUD started with --hud-dev-viewers")
 	agent := fs.String("agent", "", "the agent's name; the farm's book records its controls as agent/NAME for the user")
@@ -44,6 +44,10 @@ func runMCP(args []string) error {
 	}
 	if *toolsMD {
 		return toolsMarkdown(os.Stdout)
+	}
+	// no assumed address: 30080 may be another farm's
+	if *hud == "" {
+		return errors.New("mcp: --hud (or C4_HUD) names the HUD to serve; c4 farm mcp finds a farm you signed in to")
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()

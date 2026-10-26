@@ -543,3 +543,32 @@ func TestUnitNetworkFollowsTheTool(t *testing.T) {
 		t.Errorf("declared: %s", open)
 	}
 }
+
+// The farm's tests of its tools are the farm's work, not the person's: ls
+// leaves them out, finished or not, unless --tool-tests asks for them.
+func TestLsLeavesOutToolTests(t *testing.T) {
+	now := time.Date(2026, 10, 20, 17, 0, 0, 0, time.UTC)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(api.Snapshot{Jobs: []api.Job{
+			{Namespace: "saltmarsh", Name: "sm0140-render-v001", Phase: "Running", CreatedAt: now},
+			{Namespace: "saltmarsh", Name: "comp-farmtest-207760c4", Phase: "Failed", ToolTest: "comp", CreatedAt: now},
+			{Namespace: "saltmarsh", Name: "render-farmtest-1a2b3c4d", Phase: "Running", ToolTest: "render", CreatedAt: now},
+		}})
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
+	var out bytes.Buffer
+	if err := Ls(context.Background(), c, Out{W: &out}, LsArgs{All: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "sm0140-render-v001") || strings.Contains(out.String(), "farmtest") {
+		t.Errorf("ls --all:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Ls(context.Background(), c, Out{W: &out}, LsArgs{All: true, ToolTests: true}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "comp-farmtest-207760c4") || !strings.Contains(out.String(), "render-farmtest-1a2b3c4d") {
+		t.Errorf("ls --all --tool-tests:\n%s", out.String())
+	}
+}

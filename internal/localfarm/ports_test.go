@@ -51,3 +51,26 @@ func TestResolvePortsForANewFarm(t *testing.T) {
 		t.Errorf("defaults free: %d %s", o.HUDHostPort, o.HUD())
 	}
 }
+
+// up's farm line is the farm's own pools: its nodes and slots, and the
+// burst pool, said as what it is.
+func TestCapacity(t *testing.T) {
+	if got := Capacity(); got != "3 nodes · 6 slots, and 4 more it rents only when a deadline needs them (a simulated cloud)" {
+		t.Errorf("capacity %q", got)
+	}
+}
+
+// A publish the store did not answer yet is tried again, as one the farm
+// asks to be tried again; a refusal for good is not.
+func TestRetryable(t *testing.T) {
+	for said, want := range map[string]bool{
+		"the farm could not record comp's version just now; try again shortly":                                               true,
+		`store: Head "http://garage-s3.c4-store:3900/quickstart/c4/x": dial tcp 10.96.0.5:3900: connect: connection refused`: true,
+		"comp did not pass its test on the farm":                                                                             false,
+		"comp cannot be pinned: its image is not in the farm's registry":                                                     false,
+	} {
+		if retryable(said) != want {
+			t.Errorf("%q: %v", said, !want)
+		}
+	}
+}
