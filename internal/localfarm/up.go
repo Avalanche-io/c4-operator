@@ -63,7 +63,13 @@ const (
 )
 
 // CheckDocker makes sure Docker runs with enough memory and CPUs.
+// lookDocker finds the docker command (a variable, for tests).
+var lookDocker = exec.LookPath
+
 func CheckDocker(ctx context.Context) error {
+	if _, err := lookDocker("docker"); err != nil {
+		return errors.New("c4 farm up needs Docker, and none is installed: install Docker Desktop (docker.com), OrbStack or Colima, then run c4 farm up again")
+	}
 	out, err := exec.CommandContext(ctx, "docker", "info", "--format", "{{.MemTotal}} {{.NCPU}}").Output()
 	if err != nil {
 		return errors.New("Docker is not running: start Docker Desktop (or another Docker engine) and try again")

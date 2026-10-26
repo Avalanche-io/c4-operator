@@ -326,3 +326,20 @@ func TestLoadScenarioWaitsForItsProjects(t *testing.T) {
 		t.Errorf("a project that never comes: %v", err)
 	}
 }
+
+// A ci job's plan says it runs with no network, before a test that
+// fetches its dependencies fails inside the job.
+func TestCIPlanSaysNoNetwork(t *testing.T) {
+	srv := httptest.NewServer(&fakeHUD{})
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "td"})
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "go.mod"), []byte("module example\n"), 0o644)
+	var out bytes.Buffer
+	if _, err := Submit(context.Background(), c, Out{W: &out}, SubmitArgs{Type: "ci", Asset: dir, Project: "saltmarsh", DryRun: true}); err != nil {
+		t.Fatalf("%v\n%s", err, out.String())
+	}
+	if !strings.Contains(out.String(), "  note      "+ciNoNetwork) {
+		t.Errorf("no network note in\n%s", out.String())
+	}
+}

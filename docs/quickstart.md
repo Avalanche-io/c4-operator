@@ -49,8 +49,9 @@ machine only.
 
 ## 3. Start the farm
 
-You need Docker Desktop running, with at least 6 GB of memory and 4 CPUs
-(Settings → Resources).
+You need Docker running (Docker Desktop, OrbStack or Colima), with at least
+6 GB of memory and 4 CPUs (in Docker Desktop, Settings → Resources). kind
+and kubectl are not needed: kind is built in.
 
 ```sh
 c4 farm up
@@ -124,7 +125,9 @@ usd        once    v1    Flatten and check a USD stage · farm-wide
 ```
 
 Repository tests and LoRA training run too, as the farm's built-in jobs
-(`c4 farm submit ci DIR`, `c4 farm submit lora DIR`).
+(`c4 farm submit ci DIR`, `c4 farm submit lora DIR`). ci runs with no
+network: stage dependencies in the folder, or name a tool that declares the
+network they come from.
 
 ## 4. Get the sample shot
 

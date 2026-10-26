@@ -75,7 +75,8 @@ itself.
 
 ## Quickstart
 
-With Docker:
+With Docker (Docker Desktop, OrbStack or Colima; kind and kubectl are not
+needed, kind is built in):
 
 ```sh
 brew install mrjoshuak/tap/c4

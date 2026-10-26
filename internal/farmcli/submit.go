@@ -367,6 +367,11 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 		o.printf("  files     %s found%s · %s · %s\n", plural(int(tot.Files), "file", "files"), from, Bytes(tot.Bytes), upl)
 	}
 	o.printPlan(plan.Estimate, planErr)
+	// a repository's own tests name no tool, so they run with no network:
+	// say it before a test that fetches fails inside the job
+	if spec.Class == "ci" {
+		o.printf("  note      %s\n", ciNoNetwork)
+	}
 	if line, ok := orderLines[spec.Params["order"]]; ok && spec.Class == "render" && frameCount(spec.Params["frames"]) > 2 {
 		o.printf("  order     %s\n", line)
 	}
@@ -407,6 +412,9 @@ func rendererName(r string) string {
 }
 
 // printPlan prints the estimate and deadline lines of a plan.
+// ciNoNetwork is what a ci job's plan says of its network.
+const ciNoNetwork = "ci runs with no network: stage dependencies in the folder, or name a tool that declares the network they come from"
+
 func (o Out) printPlan(e *api.SubmitEstimate, planErr error) {
 	if e == nil {
 		msg := "the farm has not planned yet; it estimates the job once it is queued"
