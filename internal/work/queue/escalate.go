@@ -114,7 +114,9 @@ func (q *Queue) press(ctx context.Context, v *view, i int, n *needsRec, now time
 	var why string
 	var use policy.Use
 	switch {
-	case !by.IsZero() && !now.Before(by.Add(-margin)):
+	// Not on a guess: the class default (NoHistory) does not say an
+	// answer now costs the deadline.
+	case !by.IsZero() && !now.Before(by.Add(-margin)) && !v.sum.NoHistory:
 		why = fmt.Sprintf("blocks %s; %s misses %s (%s) unless answered by %s", v.blocksWhat(i), v.job.Name, label,
 			forecast.Clock(dl, q.Loc), forecast.Clock(by, q.Loc))
 		use = mu

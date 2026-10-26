@@ -20,6 +20,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/view"
+	"github.com/Avalanche-io/c4-operator/work/forecast"
 )
 
 // SubmitArgs are `c4 farm submit`'s arguments.
@@ -380,7 +381,7 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	} else {
 		o.printf("  files     %s found%s%s · %s · %s\n", plural(int(tot.Files), "file", "files"), from, leftOut(scan.left), Bytes(tot.Bytes), upl)
 	}
-	o.printPlan(plan.Estimate, planErr)
+	o.printPlan(plan.Estimate, planErr, spec.Class)
 	// a repository's own tests name no tool, so they run with no network:
 	// say it before a test that fetches fails inside the job
 	if spec.Class == "ci" {
@@ -455,13 +456,23 @@ func rendererName(r string) string {
 // ciNoNetwork is what a ci job's plan says of its network.
 const ciNoNetwork = "ci runs a repository's pytest or Go tests with no network: stage dependencies in the folder, or name a tool that declares the network they come from"
 
-func (o Out) printPlan(e *api.SubmitEstimate, planErr error) {
+// An estimate that rests on the class default (NoHistory) says so in
+// place of a finish and a slack: a guess shows neither a ready time nor a
+// miss. class names the units ("frames" for a render).
+func (o Out) printPlan(e *api.SubmitEstimate, planErr error, class string) {
 	if e == nil {
 		msg := "the farm has not planned yet; it estimates the job once it is queued"
 		if planErr == nil {
 			msg = "none"
 		}
 		o.printf("  estimate  %s\n", msg)
+		return
+	}
+	if e.NoHistory {
+		o.printf("  estimate  %s\n", forecast.NoHistory(class))
+		if e.Deadline != nil {
+			o.printf("  deadline  %s\n", o.deadlineWords(e))
+		}
 		return
 	}
 	if e.ETA50 != nil {
@@ -472,13 +483,7 @@ func (o Out) printPlan(e *api.SubmitEstimate, planErr error) {
 		o.printf("  estimate  %s\n", line)
 	}
 	if e.Deadline != nil {
-		d := o.Clock.AtUTC(*e.Deadline)
-		switch e.DeadlineSource {
-		case "suggested":
-			d = "~" + d + ", suggested by the farm"
-		case "class":
-			d += ", the class's turnaround"
-		}
+		d := o.deadlineWords(e)
 		slack := time.Duration(e.SlackSeconds) * time.Second
 		switch {
 		case !e.Feasible || e.SlackSeconds < 0:
@@ -496,6 +501,18 @@ func (o Out) printPlan(e *api.SubmitEstimate, planErr error) {
 	if e.Message != "" {
 		o.printf("  note      %s\n", e.Message)
 	}
+}
+
+// deadlineWords is a plan's deadline and where it came from.
+func (o Out) deadlineWords(e *api.SubmitEstimate) string {
+	d := o.Clock.AtUTC(*e.Deadline)
+	switch e.DeadlineSource {
+	case "suggested":
+		d = "~" + d + ", suggested by the farm"
+	case "class":
+		d += ", the class's turnaround"
+	}
+	return d
 }
 
 // WaitStore waits until the project's store answers through the HUD (a

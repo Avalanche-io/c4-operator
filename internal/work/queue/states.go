@@ -223,6 +223,9 @@ func risk(now time.Time, v *view, js sched.JobState, e *c4v1.WorkEstimate) strin
 	switch {
 	case now.After(d):
 		return c4v1.RiskMissed
+	case js.NoHistory:
+		// A guess (the class default) does not put a job at risk.
+		return c4v1.RiskNone
 	case !js.Feasible || at(e.ETA50):
 		return c4v1.RiskWillMiss
 	case js.AtRisk || at(q):
@@ -245,14 +248,15 @@ func plannedDeadline(v *view, js sched.JobState) time.Time {
 // by (p90; p95 for a suggested deadline, which the farm sets at p95), so
 // slack, ETA and risk agree. The scheduler's Slack is at all attainable
 // capacity and only decides Feasible: shown, it read "+7h" beside a late
-// ETA. ok is false without a deadline or a shown band: then it is unset.
+// ETA. ok is false without a deadline or a shown band, or while the
+// estimate rests on the class default (NoHistory): then it is unset.
 func shownSlack(v *view, js sched.JobState, e *c4v1.WorkEstimate) (int64, bool) {
 	d := plannedDeadline(v, js)
 	f := e.ETA90
 	if v.source == "suggested" && e.ETA95 != nil {
 		f = e.ETA95
 	}
-	if d.IsZero() || f == nil {
+	if d.IsZero() || f == nil || js.NoHistory {
 		return 0, false
 	}
 	return int64(d.Sub(f.Time).Seconds()), true

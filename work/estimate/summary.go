@@ -63,6 +63,17 @@ type Summary struct {
 	Unevaluated   int
 	Stratum       Stratum
 	Calibrated    bool
+	// NoHistory says the estimate rests on the class default: more than
+	// half of W is predicted from it (Source ClassDefault, or a
+	// generator's default fan-out), which happens only while no unit of
+	// the job has finished or outrun its prediction and its keys have no
+	// history, stated estimate or profile for most of their positions.
+	// Such a figure is a guess, not a forecast; the first units to finish
+	// set the estimate. It is "more than half", not "all", because a
+	// previous version of the shot (SetProfile) may cover a few positions
+	// only: the farm's own two-frame test of a shot is such a profile.
+	// False for a summary of no work.
+	NoHistory bool
 }
 
 // Plus combines two independent summaries. Calibrated percentiles add
@@ -76,6 +87,13 @@ func (s Summary) Plus(o Summary) Summary {
 		Queued:      s.Queued + o.Queued,
 		Running:     s.Running + o.Running,
 		Unevaluated: s.Unevaluated + o.Unevaluated,
+	}
+	// The parts' guesses are not kept, so the larger part decides.
+	switch {
+	case s.W >= o.W:
+		r.NoHistory = s.NoHistory
+	default:
+		r.NoHistory = o.NoHistory
 	}
 	if s.Calibrated && o.Calibrated {
 		r.W50, r.W80, r.W90, r.W95 = s.W50+o.W50, s.W80+o.W80, s.W90+o.W90, s.W95+o.W95
@@ -183,6 +201,7 @@ func (e *Estimator) RemainderAt(p Pred, done, elapsed, progress float64) (float6
 func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 	e.SetRunning(run)
 	var s Summary
+	var guess float64 // the part of W predicted from the class default
 	// Maps are summed in first-seen order, so the result does not depend
 	// on map iteration order (floating-point addition is not associative).
 	corr := map[RegionID]float64{}
@@ -199,6 +218,9 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		}
 		f := rem / p.Mean * u.slots() * u.exists()
 		s.W += p.Mean * f
+		if p.Source == ClassDefault {
+			guess += p.Mean * f
+		}
 		if _, ok := corr[p.Region]; !ok {
 			regions = append(regions, p.Region)
 		}
@@ -217,6 +239,9 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		p := e.Predict(r.Key, r.Pos)
 		rem, sd := e.RemainderAt(p, r.Done, r.Elapsed, r.Progress)
 		s.W += rem * r.slots()
+		if p.Source == ClassDefault && r.Progress < ProgressMin {
+			guess += rem * r.slots()
+		}
 		indVar += (sd * r.slots()) * (sd * r.slots())
 		s.Running++
 		if r.Gen != "" {
@@ -232,6 +257,9 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		g := e.Generator(k)
 		G := genW[k]
 		s.W += G * g.Mean
+		if e.genDefault(k) {
+			guess += G * g.Mean
+		}
 		indVar += G*g.PerSD*g.PerSD + (G*g.MeanSD)*(G*g.MeanSD)
 		s.Unevaluated += n
 	}
@@ -240,6 +268,7 @@ func (e *Estimator) Summarize(queued []Unit, run []RunningUnit) Summary {
 		v += corr[r] * corr[r]
 	}
 	s.Sigma = math.Sqrt(v)
+	s.NoHistory = s.W > 0 && guess > s.W/2
 	s.Stratum = e.stratum(queued, run)
 	if !s.calibrate(e.cfg.Calibration) {
 		s.normal(e.z())

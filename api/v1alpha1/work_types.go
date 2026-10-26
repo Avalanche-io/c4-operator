@@ -1940,6 +1940,13 @@ type WorkEstimate struct {
 	SlackSeconds        int64  `json:"slackSeconds,omitempty"`
 	Feasible            bool   `json:"feasible,omitempty"`
 	AtRisk              bool   `json:"atRisk,omitempty"`
+	// NoHistory says the estimate rests on the class default: nothing of
+	// the job has been measured, and there is no history, stated estimate
+	// or shot profile for most of its work. The ETAs are then a guess:
+	// the job is not at risk on them, slackSeconds is unset, and the first
+	// units to finish set the estimate.
+	// +optional
+	NoHistory bool `json:"noHistory,omitempty"`
 	// Risk is the deadline risk a person is shown: none, atRisk (the
 	// band at the job's quantile, 0.95 for a suggested deadline and 0.9
 	// otherwise, ends after the deadline, or the scheduler's conservative

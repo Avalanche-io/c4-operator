@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -198,5 +199,88 @@ func TestDryRunAll(t *testing.T) {
 	}
 	if both[0].Reused != 0 || both[1].Reused != 0 {
 		t.Fatalf("reused with no book: %d %d", both[0].Reused, both[1].Reused)
+	}
+}
+
+// A render with no history plans on the class default (ten minutes a
+// frame): it is not shown late on that guess, and its message says the
+// first frames set the estimate, in the farm's time zone.
+func TestDryRunWithNoHistory(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 3, 2)
+	q.Loc, _ = time.LoadLocation("America/Los_Angeles")
+	ctx := context.Background()
+	tick(t, q)
+	draft := job(ns, "", "render", "cpu-"+ns, map[string]string{"frames": "1001-1048"}, now.Add(30*time.Minute))
+	dr, err := q.DryRun(ctx, draft, "namespace/"+ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dr.Estimate.NoHistory || !dr.Feasible || dr.AtRisk {
+		t.Fatalf("no history: NoHistory %v feasible %v at risk %v", dr.Estimate.NoHistory, dr.Feasible, dr.AtRisk)
+	}
+	want := ns + "/dry-run-0 is due Fri 02:30 PDT (09:30 UTC). It has no history yet: the first frames set the estimate."
+	if dr.Message != want {
+		t.Fatalf("message\n got %q\nwant %q", dr.Message, want)
+	}
+	// With a guess of its own the same job is late, said in local time.
+	stated := draft.DeepCopy()
+	stated.Spec.Params["estimateSeconds"] = "600"
+	if dr, err := q.DryRun(ctx, stated, "namespace/"+ns); err != nil || dr.Estimate.NoHistory || !dr.AtRisk ||
+		!strings.Contains(dr.Message, "will miss Fri 02:30 PDT (09:30 UTC) by about") {
+		t.Fatalf("estimateSeconds: %+v %v", dr, err)
+	}
+}
+
+// Finish scores far below zero (jobs that took seconds against minutes
+// predicted, as the farm's own test does) calibrate a band no sooner than
+// now plus the critical path: a 48-frame job never reads as ready now.
+func TestCalibratedBandIsNeverInstant(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 3, 2)
+	ctx := context.Background()
+	tick(t, q)
+	for range 100 {
+		q.fcal.add("namespace/"+ns, "render", false, forecast.FinishKey{Class: "render", Stage: 0}, -5.5)
+	}
+	for _, est := range []string{"", "600"} {
+		draft := job(ns, "", "render", "cpu-"+ns, map[string]string{"frames": "1001-1048"}, now.Add(2*time.Hour))
+		if est != "" {
+			draft.Spec.Params["estimateSeconds"] = est
+		}
+		dr, err := q.DryRun(ctx, draft, "namespace/"+ns)
+		if err != nil {
+			t.Fatal(err)
+		}
+		floor := now.Add(time.Duration(dr.Estimate.TPath * float64(time.Second)))
+		if dr.Estimate.TPath < 300 || dr.Band.P50.Before(floor) || dr.Band.P90.Before(floor) {
+			t.Fatalf("estimateSeconds %q: band %s to %s, critical path %.0fs from %s", est, dr.Band.P50, dr.Band.P90, dr.Estimate.TPath, *now)
+		}
+	}
+}
+
+// A job that starts on the class default leaves no calibration score from
+// the moments before its first unit finished: a guess's error says
+// nothing of the forecast's.
+func TestGuessLeavesNoCalibration(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 2, 2)
+	ctx := context.Background()
+	// Due in 15 minutes: on the default, ten minutes a frame, it would read late.
+	j := job(ns, "sh044", "render", "cpu-"+ns, map[string]string{"frames": "1001-1008"}, now.Add(15*time.Minute))
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	if st := get(t, ns, "sh044").Status.Estimate; st == nil || !st.NoHistory || st.Risk != c4v1.RiskNone || st.SlackSeconds != 0 {
+		t.Fatalf("status estimate on the class default: %+v", st)
+	}
+	runAll(t, q, now, ns, "sh044", 6*time.Second, func(i int) string { return "" })
+	own := q.fcal.own[[2]string{"namespace/" + ns, "render"}]
+	if own == nil || own.Count(forecast.FinishKey{Class: "render", Stage: forecast.AnyStage}) == 0 {
+		t.Fatal("no finish scores after the job succeeded")
+	}
+	if n := own.Count(forecast.FinishKey{Class: "render", Stage: 0}); n != 0 {
+		t.Fatalf("%d finish scores from before the first frame finished", n)
+	}
+	if st := get(t, ns, "sh044").Status.Estimate; st != nil && st.NoHistory {
+		t.Fatal("still NoHistory after its frames ran")
 	}
 }

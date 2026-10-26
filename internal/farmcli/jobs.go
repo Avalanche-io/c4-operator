@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/work/forecast"
 )
 
 // Snapshot reads the farm as the user sees it.
@@ -114,7 +115,7 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 			finished++
 			continue
 		}
-		late := j.Estimate.SlackSeconds < 0 || !j.Estimate.Feasible
+		late := (j.Estimate.SlackSeconds < 0 || !j.Estimate.Feasible) && !j.Estimate.NoHistory
 		if a.AtRisk && !late {
 			continue
 		}
@@ -141,6 +142,11 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 			if late {
 				slack += " late"
 			}
+		}
+		if j.Estimate.NoHistory {
+			// A guess: no ready time and no slack, until the first units
+			// finish.
+			ready, slack = "-", "no history yet"
 		}
 		if why := stuck(&j); why != "" {
 			// It cannot run, so it is not ready at any time.
@@ -256,11 +262,16 @@ func titleBlock(cl Clock, j *api.Job) string {
 	}
 	if why := stuck(j); why != "" {
 		parts = append(parts, "stuck: "+why)
+	} else if j.Estimate.NoHistory && j.Phase != "Succeeded" {
+		parts = append(parts, forecast.NoHistory(j.Class))
 	} else if !j.Estimate.EtaP50.IsZero() && j.Phase != "Succeeded" {
 		parts = append(parts, "ready ~"+cl.At(j.Estimate.EtaP50)+" · ~"+cl.At(j.Estimate.EtaP90))
 	}
 	if d := j.Objective.Deadline; d != nil {
-		parts = append(parts, "deadline "+cl.At(*d), "slack ~"+Span(time.Duration(j.Estimate.SlackSeconds)*time.Second))
+		parts = append(parts, "deadline "+cl.At(*d))
+		if !j.Estimate.NoHistory || j.Phase == "Succeeded" {
+			parts = append(parts, "slack ~"+Span(time.Duration(j.Estimate.SlackSeconds)*time.Second))
+		}
 	}
 	if j.Output != nil && j.Output.View != "" {
 		parts = append(parts, "output "+ShortID(j.Output.View))

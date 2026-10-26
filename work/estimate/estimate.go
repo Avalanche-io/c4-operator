@@ -586,6 +586,16 @@ type GenEstimate struct {
 	Children                     float64
 }
 
+// genDefault reports whether genKey's fan-out is the class default: no
+// history prior and no generator of the key expanded in this job.
+func (e *Estimator) genDefault(genKey string) bool {
+	if _, ok := e.genPriors[genKey]; ok {
+		return false
+	}
+	f := e.fan[genKey]
+	return f == nil || f.children.n == 0 && f.work.n == 0
+}
+
 // Generator returns the fan-out estimate for genKey.
 //
 // Before any generator of the key has been evaluated in this job, it is

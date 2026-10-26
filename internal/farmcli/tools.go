@@ -561,7 +561,7 @@ func (o Out) printJobs(jobs []api.SubmissionJob, tree *folderTree) {
 		}
 		switch {
 		case j.Estimate != nil:
-			o.printPlan(j.Estimate, nil)
+			o.printPlan(j.Estimate, nil, "")
 		case j.EstimateError != "":
 			o.printf("  estimate  none yet: %s\n", j.EstimateError)
 		}

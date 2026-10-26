@@ -142,6 +142,11 @@ type SubmitEstimate struct {
 	Feasible       bool              `json:"feasible"`
 	AtRisk         bool              `json:"atRisk"`
 	Calibrated     bool              `json:"calibrated,omitempty"`
+	// NoHistory says the estimate rests on the class default: the ETAs
+	// are its guess, there is no slack, the job is not at risk, and
+	// Message says the first units set the estimate. Show that, not a
+	// finish.
+	NoHistory bool `json:"noHistory,omitempty"`
 	// Reused is how many units would reuse an earlier run's output rather
 	// than run (at most: a share runs anyway to verify).
 	Reused  int    `json:"reused,omitempty"`

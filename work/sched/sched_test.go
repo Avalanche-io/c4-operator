@@ -1539,3 +1539,41 @@ func TestEvictedJobReportsWhatThePlanProduces(t *testing.T) {
 		t.Fatalf("message %q", c.Message)
 	}
 }
+
+// A job whose estimate rests on the class default is not late on that
+// guess: no risk, no burst, and a message that says the first units set
+// the estimate. Measured, the same job is late again.
+func TestNoHistoryIsNotLate(t *testing.T) {
+	s := burstSnapshot()
+	s.Jobs[0].Estimate.NoHistory = true
+	d := Decide(s, &State{}, DefaultConfig())
+	js := d.Jobs["sh040-fx-v003"]
+	if js.AtRisk || !js.Feasible || js.LateBy != 0 || js.Burst != nil || js.Stage != nil || !js.NoHistory {
+		t.Fatalf("%+v", js)
+	}
+	if len(d.Bursts) != 0 {
+		t.Fatalf("bursts %+v", d.Bursts)
+	}
+	for _, c := range d.Capacity {
+		if c.Slots != 0 {
+			t.Fatalf("capacity for a guess: %+v", c)
+		}
+	}
+	want := "sh040-fx-v003 is due Mon 22:00 UTC. It has no history yet: the first frames set the estimate."
+	if js.Message != want {
+		t.Fatalf("message\n got %q\nwant %q", js.Message, want)
+	}
+	if count(d, "sh040-fx-v003") == 0 {
+		t.Fatal("a job with no history is still planned and released")
+	}
+	// Past its deadline it has missed it, guess or not.
+	s.Jobs[0].Deadline = t0.Add(-10 * time.Minute)
+	js = Decide(s, &State{}, DefaultConfig()).Jobs["sh040-fx-v003"]
+	if !strings.HasPrefix(js.Message, "sh040-fx-v003 is past its deadline Mon 11:50 UTC by 10m; no history yet") {
+		t.Fatalf("past the deadline: %q", js.Message)
+	}
+	s = burstSnapshot()
+	if js := Decide(s, &State{}, DefaultConfig()).Jobs["sh040-fx-v003"]; !js.AtRisk || js.Burst == nil || js.NoHistory {
+		t.Fatalf("measured: %+v", js)
+	}
+}

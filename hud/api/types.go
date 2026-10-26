@@ -639,6 +639,12 @@ type Estimate struct {
 	// Risk is the deadline risk a person is shown: none, atRisk,
 	// willMiss or missed (WorkEstimate.Risk).
 	Risk string `json:"risk,omitempty"`
+	// NoHistory says the estimate rests on the class default
+	// (WorkEstimate.NoHistory): little is known of the job's cost until
+	// its first units finish. The ETAs are then the class default's guess,
+	// SlackSeconds is 0 and the job is not at risk; show "no history yet:
+	// the first frames set the estimate" in place of a slack.
+	NoHistory bool `json:"noHistory,omitempty"`
 }
 
 type Input struct {

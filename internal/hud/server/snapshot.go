@@ -397,6 +397,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		aj.Estimate.EtaP80, aj.Estimate.EtaP95 = s.timePtr(e.ETA80), s.timePtr(e.ETA95)
 		aj.Estimate.Calibrated = e.Calibrated
 		aj.Estimate.Risk = e.Risk
+		aj.Estimate.NoHistory = e.NoHistory
 		for _, h := range e.HeavyRegions {
 			aj.HeavyRegions = append(aj.HeavyRegions, api.Heavy{From: int(h.From), To: int(h.To), Factor: num(h.Factor)})
 		}

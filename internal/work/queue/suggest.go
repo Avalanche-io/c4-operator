@@ -255,7 +255,7 @@ func (q *Queue) suggest(ctx context.Context, now time.Time, snap sched.Snapshot,
 // candidate is the policy's deadline for a job now, and the band it was
 // computed with. It is zero when the job has no forecast.
 func (q *Queue) candidate(now time.Time, snap sched.Snapshot, v *view, p forecast.Policy) (time.Time, forecast.Band) {
-	return candidateIn(q.Policy, q.Cfg, now, snap, v.key, v.job.CreationTimestamp.Time, v.mem.readyAt, p, q.adjustFor(v))
+	return candidateIn(q.Policy, q.schedCfg(), now, snap, v.key, v.job.CreationTimestamp.Time, v.mem.readyAt, p, q.adjustFor(v))
 }
 
 // candidateIn is the policy's deadline for job key of snap: for an

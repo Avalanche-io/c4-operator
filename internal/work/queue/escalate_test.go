@@ -641,3 +641,27 @@ func TestNeedsBesideARealFailure(t *testing.T) {
 		t.Fatalf("answered a finished job: %+v, phase %s, pod %v", n, got.Status.Phase, hasPod(t, ns, "both", 1))
 	}
 }
+
+// A question is not pressed on a guess: while nothing of the job is
+// measured, the class default does not say an answer now costs the
+// deadline, so it waits for pressAfter like any other.
+func TestNeedsNotPressedOnTheClassDefault(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 1)
+	ctx := context.Background()
+	// Ten minutes a frame by default, due in twenty: pressing at once, if
+	// the default were believed.
+	if err := k8s.Create(ctx, job(ns, "sh045", "render", "cpu-"+ns, map[string]string{"frames": "1-2"}, now.Add(20*time.Minute))); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	failNeeding(t, podOfUnit(t, ns, "sh045", 0), *now, "the delivery frame rate", false)
+	tick(t, q)
+	tick(t, q)
+	got := get(t, ns, "sh045")
+	if st := got.Status.Estimate; st == nil || !st.NoHistory {
+		t.Fatalf("estimate %+v, want NoHistory", st)
+	}
+	if n := got.Status.Needs["0"]; n.State != needsRaised || n.PressingAt != nil {
+		t.Fatalf("pressed on a guess: %+v", n)
+	}
+}

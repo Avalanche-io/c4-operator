@@ -53,7 +53,8 @@ func timePtr(t time.Time) *time.Time {
 }
 
 // estimateOf turns the queue's dry run into the API's estimate. Slack is
-// the deadline less the median finish, as the job view shows it.
+// the deadline less the shown finish, as the job view shows it; an
+// estimate that rests on the class default (NoHistory) has none.
 func estimateOf(d queue.DryRun) api.SubmitEstimate {
 	w50 := d.Estimate.W50
 	if w50 == 0 {
@@ -63,11 +64,12 @@ func estimateOf(d queue.DryRun) api.SubmitEstimate {
 		Units: d.Units, Work50: w50, Work90: d.Estimate.W90,
 		ETA50: timePtr(d.Band.P50), ETA80: timePtr(d.Band.P80), ETA90: timePtr(d.Band.P90), ETA95: timePtr(d.Band.P95),
 		Deadline: timePtr(d.Deadline), DeadlineSource: d.DeadlineSource,
-		Feasible: d.Feasible, AtRisk: d.AtRisk, Calibrated: d.Estimate.Calibrated, Message: d.Message, Reused: d.Reused,
+		Feasible: d.Feasible, AtRisk: d.AtRisk, Calibrated: d.Estimate.Calibrated, NoHistory: d.Estimate.NoHistory,
+		Message: d.Message, Reused: d.Reused,
 	}
 	// slack against the shown p90, as a running job's (queue report.go;
 	// p95 for a suggested deadline)
-	if f := d.Band.P90; !d.Deadline.IsZero() && !f.IsZero() {
+	if f := d.Band.P90; !d.Deadline.IsZero() && !f.IsZero() && !e.NoHistory {
 		if d.DeadlineSource == "suggested" && !d.Band.P95.IsZero() {
 			f = d.Band.P95
 		}

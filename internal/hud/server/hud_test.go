@@ -22,6 +22,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/queue"
 )
 
 // farm is a small farm of two projects: show-a renders a shot (four
@@ -484,5 +485,50 @@ func TestProjectRootInSnapshot(t *testing.T) {
 	}
 	if roots["show-a"] != "/show" || roots["show-b"] != "/mnt/shows/b" {
 		t.Fatalf("roots %v", roots)
+	}
+}
+
+// An estimate that rests on the class default says so, in the job's
+// estimate and in a plan's, with no slack: the guess is not a miss.
+func TestNoHistoryInSnapshot(t *testing.T) {
+	s := farm(t)
+	now := s.m.at
+	eta, due := metav1.NewTime(now.Add(38*time.Minute)), metav1.NewTime(now.Add(27*time.Minute))
+	j := c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "sm0140-render", CreationTimestamp: metav1.Time{Time: now}},
+		Spec: c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1001-1024"}, Deadline: &due},
+		Status: c4v1.WorkJobStatus{Phase: "Running", Units: c4v1.UnitCounts{Total: 24, Queued: 24},
+			Estimate: &c4v1.WorkEstimate{Feasible: true, NoHistory: true, Risk: c4v1.RiskNone, ETA50: &eta, ETA90: &eta}}}
+	d, err := class.Lookup("render")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := d.Plan(&j)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rec := &jobRec{job: j, key: "show-a/sm0140-render", project: "show-a", plan: plan, driver: d}
+	s.m.jobs = append(s.m.jobs, rec)
+	s.m.byKey[rec.key] = rec
+	var snap api.Snapshot
+	if code := get(t, s, "/api/v1/snapshot?as=wrangler", &snap); code != 200 {
+		t.Fatalf("snapshot: %d", code)
+	}
+	found := false
+	for _, x := range snap.Jobs {
+		if x.Name == "sm0140-render" {
+			found = true
+			if e := x.Estimate; !e.NoHistory || !e.Feasible || e.SlackSeconds != 0 || e.Risk != c4v1.RiskNone {
+				t.Fatalf("estimate %+v", e)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("sm0140-render not in the snapshot")
+	}
+	var dr queue.DryRun
+	dr.Estimate.NoHistory, dr.Feasible, dr.Deadline = true, true, due.Time
+	dr.Band.P50, dr.Band.P90 = eta.Time, eta.Time
+	if e := estimateOf(dr); !e.NoHistory || e.SlackSeconds != 0 || e.ETA50 == nil {
+		t.Fatalf("plan %+v", e)
 	}
 }

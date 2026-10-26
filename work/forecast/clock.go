@@ -22,3 +22,15 @@ func Clock(t time.Time, loc *time.Location) string {
 	}
 	return s + " (" + ut.Format("15:04") + " UTC)"
 }
+
+// NoHistory is what a person is shown in place of a finish or a slack
+// while a job's estimate rests on its class default
+// (estimate.Summary.NoHistory): "no history yet: the first frames set the
+// estimate" for a render, "units" for other classes.
+func NoHistory(class string) string {
+	units := "units"
+	if class == "render" {
+		units = "frames"
+	}
+	return "no history yet: the first " + units + " set the estimate"
+}

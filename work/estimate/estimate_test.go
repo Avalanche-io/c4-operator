@@ -374,3 +374,74 @@ func TestExistsWeightsWork(t *testing.T) {
 		t.Fatalf("W %v and %v (unevaluated %d)", sure.W, half.W, half.Unevaluated)
 	}
 }
+
+func TestNoHistoryWhileTheClassDefaultCarriesTheEstimate(t *testing.T) {
+	frames := func() []Unit {
+		var q []Unit
+		for p := range 24 {
+			q = append(q, Unit{Key: "beauty", Pos: p})
+		}
+		return q
+	}
+	all := func(d float64) map[int]float64 {
+		m := map[int]float64{}
+		for p := range 24 {
+			m[p] = d
+		}
+		return m
+	}
+	guesses := map[string]func(e *Estimator) []RunningUnit{
+		"nothing measured, no prior": func(e *Estimator) []RunningUnit { return nil },
+		// The farm's own two-frame test of the shot profiles 2 of 24.
+		"a profile of two frames": func(e *Estimator) []RunningUnit { e.SetProfile("beauty", map[int]float64{0: 2, 1: 2}); return nil },
+		"a running unit within the default": func(e *Estimator) []RunningUnit {
+			return []RunningUnit{{Unit: Unit{Key: "beauty", Pos: 0}, Elapsed: 30}}
+		},
+	}
+	known := map[string]func(e *Estimator) []RunningUnit{
+		"a finished unit":     func(e *Estimator) []RunningUnit { e.Observe("beauty", 0, 8); return nil },
+		"another key's unit":  func(e *Estimator) []RunningUnit { e.Observe("shadow", 0, 8); return nil },
+		"a history prior":     func(e *Estimator) []RunningUnit { e.SetPrior("beauty", Prior{Mean: 8, SD: 2}); return nil },
+		"a profile of all 24": func(e *Estimator) []RunningUnit { e.SetProfile("beauty", all(8)); return nil },
+		"a unit past the default": func(e *Estimator) []RunningUnit {
+			return []RunningUnit{{Unit: Unit{Key: "beauty", Pos: 0}, Elapsed: 900}}
+		},
+	}
+	sum := func(set func(e *Estimator) []RunningUnit) Summary {
+		e := New(DefaultConfig())
+		run := set(e)
+		q := frames()
+		if len(run) > 0 {
+			q = q[1:]
+		}
+		return e.Summarize(q, run)
+	}
+	for name, set := range guesses {
+		if !sum(set).NoHistory {
+			t.Errorf("%s: want NoHistory", name)
+		}
+	}
+	for name, set := range known {
+		if sum(set).NoHistory {
+			t.Errorf("%s: NoHistory set", name)
+		}
+	}
+	if s := New(DefaultConfig()).Summarize(nil, nil); s.NoHistory {
+		t.Error("a summary of no work is not a guess")
+	}
+	guess, measured := sum(guesses["nothing measured, no prior"]), sum(known["a history prior"])
+	if !guess.Plus(Summary{}).NoHistory || guess.Plus(measured).NoHistory != (guess.W > measured.W) {
+		t.Error("Plus: the larger part decides")
+	}
+	// An unexpanded generator with no fan-out history is a guess too;
+	// one with history is not.
+	gen := []Unit{{Key: "shot", Pos: 0, Gen: "shot"}}
+	e := New(DefaultConfig())
+	if s := e.Summarize(gen, nil); !s.NoHistory {
+		t.Error("a generator with the default fan-out: want NoHistory")
+	}
+	e.SetGenPrior("shot", GenPrior{Children: Prior{Mean: 24, SD: 4}, Work: Prior{Mean: 2000, SD: 500}, Longest: Prior{Mean: 100, SD: 20}})
+	if s := e.Summarize(gen, nil); s.NoHistory {
+		t.Error("a generator with fan-out history: NoHistory set")
+	}
+}

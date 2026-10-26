@@ -146,7 +146,8 @@ function row(ctx, j, multiProject, sk) {
     fin ? h('span', { class: 'sub' }, `done ${f.clock(e.etaP90, false)}`)
       : h('span', { class: 'sub' }, 'p90 ', h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, f.clock(e.etaP90, false))))
     : h('div', { class: 'qdue' }, h('span', { class: 'dimmer' }, '–'), h('span', { class: 'sub' }, fin ? `done ${f.clock(e.etaP90, false)}` : 'no deadline'));
-  const slack = dl && !fin && Number.isFinite(e.slackSeconds)
+  const slack = dl && !fin && e.noHistory ? h('div', { class: 'qslack none' }, h('small', null, 'no history yet'))
+    : dl && !fin && Number.isFinite(e.slackSeconds)
     ? h('div', { class: 'qslack' + (late ? ' late' : '') }, h('span', { class: late && !passed ? 'pencil' : '' }, f.signed(e.slackSeconds)), h('small', null, late ? (passed ? 'past due' : 'projected late') : 'slack'))
     : h('div', { class: 'qslack none' }, '–');
   return h('div', { class: `qr${fin ? ' fin' : ''}${late ? ' late' : ''}${heldByPerson(j) ? ' held' : ''}`, 'data-key': k, role: 'listitem' },

@@ -593,3 +593,43 @@ func TestSubmitTypedNameIsTheStem(t *testing.T) {
 		t.Errorf("submission %v", doc)
 	}
 }
+
+// A job whose estimate rests on the class default shows no ready time, no
+// slack and no miss: in its plan, in ls and in watch's line.
+func TestNoHistoryShowsNoMiss(t *testing.T) {
+	la, _ := time.LoadLocation("America/Los_Angeles")
+	now := time.Date(2026, 10, 19, 18, 0, 0, 0, time.UTC)
+	o := func(w *bytes.Buffer) Out {
+		return Out{W: w, Clock: Clock{Loc: la, Now: func() time.Time { return now }}}
+	}
+	eta, due := now.Add(38*time.Minute), now.Add(27*time.Minute)
+	guess := &api.SubmitEstimate{Units: 24, ETA50: &eta, ETA90: &eta, Deadline: &due, DeadlineSource: "spec", Feasible: true, NoHistory: true,
+		Message: "saltmarsh/sm0140-render-v001 is due Mon 11:27 PDT (18:27 UTC). It has no history yet: the first frames set the estimate."}
+	var out bytes.Buffer
+	o(&out).printPlan(guess, nil, "render")
+	want := "  estimate  no history yet: the first frames set the estimate\n  deadline  11:27 PDT today (18:27 UTC)\n"
+	if out.String() != want {
+		t.Errorf("plan\n got %q\nwant %q", out.String(), want)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(api.Snapshot{Jobs: []api.Job{{Namespace: "saltmarsh", Name: "sm0140-render-v001", Class: "render", Phase: "Running",
+			CreatedAt: now, Objective: api.Objective{Deadline: &due}, Estimate: api.Estimate{EtaP50: eta, EtaP90: eta, Feasible: true, NoHistory: true}}}})
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
+	out.Reset()
+	if err := Ls(context.Background(), c, o(&out), LsArgs{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "no history yet") || strings.Contains(out.String(), "late") || strings.Contains(out.String(), "11:38") {
+		t.Errorf("ls:\n%s", out.String())
+	}
+	out.Reset()
+	if err := Ls(context.Background(), c, o(&out), LsArgs{AtRisk: true}); err != nil || strings.Contains(out.String(), "sm0140") {
+		t.Errorf("ls --at-risk lists a guess: %v\n%s", err, out.String())
+	}
+	j := api.Job{Class: "render", Phase: "Running", Objective: api.Objective{Deadline: &due}, Estimate: api.Estimate{EtaP50: eta, EtaP90: eta, NoHistory: true}}
+	if line := titleBlock(o(&out).Clock, &j); !strings.Contains(line, "no history yet: the first frames set the estimate") || strings.Contains(line, "slack") || strings.Contains(line, "ready") {
+		t.Errorf("watch: %q", line)
+	}
+}

@@ -408,7 +408,11 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	e, raw := q.estimateFor(now, v, js)
 	if m := v.mem; m.plan != nil && !isForecast(v.job) {
-		m.noteFinish(now, len(m.millis), len(m.plan.Units), raw.P50)
+		if !v.sum.NoHistory {
+			// A guess's error says nothing of the forecast's: kept, it
+			// would pull every later band of the class toward now.
+			m.noteFinish(now, len(m.millis), len(m.plan.Units), raw.P50)
+		}
 	}
 	st.Estimate = e
 	return st
@@ -421,7 +425,7 @@ func (q *Queue) estimateFor(now time.Time, v *view, js sched.JobState) (*c4v1.Wo
 		RemainingWork: int64(v.sum.W), RemainingWorkP90: int64(v.sum.W90),
 		RequiredSlots: fmt.Sprintf("%.2f", js.Required), AttainableSlots: fmt.Sprintf("%.2f", js.Attainable),
 		RunningSlots: int32(js.RunningSlots),
-		Feasible:     js.Feasible, AtRisk: js.AtRisk,
+		Feasible:     js.Feasible, AtRisk: js.AtRisk, NoHistory: js.NoHistory,
 	}
 	// The message is a warning: kept only when the job is at risk.
 	if js.AtRisk || !js.Feasible {

@@ -121,7 +121,7 @@ func (q *Queue) DryRunTables(ctx context.Context, jobs []*c4v1.WorkJob, project 
 	}
 
 	q.mu.Lock()
-	snap, policy, cfg := q.lastSnap, q.Policy, q.Cfg
+	snap, policy, cfg := q.lastSnap, q.Policy, q.schedCfg()
 	if snap.Now.IsZero() || policy == nil {
 		q.mu.Unlock()
 		return nil, ErrNoPlan
@@ -218,7 +218,8 @@ func (q *Queue) DryRunTables(ctx context.Context, jobs []*c4v1.WorkJob, project 
 			o.Suggestion.NextSession = &metav1.Time{Time: r.pol.NextSession(o.Deadline.Add(time.Minute))}
 		}
 		o.Feasible, o.AtRisk = js.Feasible, js.AtRisk
-		if js.AtRisk || !js.Feasible {
+		// The message is a warning, or says the estimate is a guess.
+		if js.AtRisk || !js.Feasible || js.NoHistory {
 			o.Message = js.Message
 		}
 	}

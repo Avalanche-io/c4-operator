@@ -124,7 +124,7 @@ func (q *Queue) DeadlineOptions(job string, at []time.Time, sees func(project st
 	// snapshot is rebuilt every tick, never changed in place, and each
 	// what-if copies the jobs it changes.
 	q.mu.Lock()
-	snap, pol, policy, cfg, adj, policies := q.lastSnap, q.lastPol[job], q.Policy, q.Cfg, q.lastAdj[job], q.policies
+	snap, pol, policy, cfg, adj, policies := q.lastSnap, q.lastPol[job], q.Policy, q.schedCfg(), q.lastAdj[job], q.policies
 	q.mu.Unlock()
 	if snap.Now.IsZero() || policy == nil {
 		return nil, ErrNoPlan

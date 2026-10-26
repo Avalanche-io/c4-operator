@@ -106,7 +106,8 @@ func unitName(u UnitID) string {
 func summaryOf(e Estimate) estimate.Summary {
 	return estimate.Summary{W: float64(e.W), Sigma: float64(e.Sigma), W90: float64(e.W90), W50: float64(e.W50), W80: float64(e.W80), W95: float64(e.W95),
 		TPath: float64(e.TPath), Queued: int(e.Queued), Running: int(e.Running), Unevaluated: int(e.Unevaluated),
-		Stratum: estimate.Stratum{Sampled: int8(e.Sampled), Measured: int8(e.Measured), Open: int8(e.Open)}, Calibrated: e.Calibrated}
+		Stratum: estimate.Stratum{Sampled: int8(e.Sampled), Measured: int8(e.Measured), Open: int8(e.Open)}, Calibrated: e.Calibrated,
+		NoHistory: e.NoHistory}
 }
 
 func stateDocOf(st State, at func(RelTime) time.Time) sched.StateDoc {

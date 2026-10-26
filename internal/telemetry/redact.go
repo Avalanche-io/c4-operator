@@ -120,7 +120,8 @@ func (r *Redactor) Redact(s sched.Snapshot, st *sched.State, cfg sched.Config, d
 func (r *Redactor) estimate(e estimate.Summary) Estimate {
 	return Estimate{W: r.real(e.W), Sigma: r.real(e.Sigma), W90: r.real(e.W90), W50: r.real(e.W50), W80: r.real(e.W80), W95: r.real(e.W95),
 		TPath: r.real(e.TPath), Queued: Int(e.Queued), Running: Int(e.Running), Unevaluated: Int(e.Unevaluated),
-		Sampled: Int(e.Stratum.Sampled), Measured: Int(e.Stratum.Measured), Open: Int(e.Stratum.Open), Calibrated: e.Calibrated}
+		Sampled: Int(e.Stratum.Sampled), Measured: Int(e.Stratum.Measured), Open: Int(e.Stratum.Open), Calibrated: e.Calibrated,
+		NoHistory: e.NoHistory}
 }
 
 func (r *Redactor) real(x float64) Real {

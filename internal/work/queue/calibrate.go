@@ -96,9 +96,10 @@ func keepPoint(finished, total int) bool {
 }
 
 // notePoint keeps the job's summary at this moment, once per finished
-// count.
+// count. A summary that rests on the class default (NoHistory) is not
+// kept: how far a guess was off says nothing of the estimator's spread.
 func (m *jobMem) notePoint(now time.Time, finished, total int, s estimate.Summary) {
-	if finished < 0 || total <= 0 || finished >= total || len(m.calPts) >= calPointsMax {
+	if finished < 0 || total <= 0 || finished >= total || len(m.calPts) >= calPointsMax || s.NoHistory {
 		return
 	}
 	if n := len(m.calPts); n > 0 && m.calPts[n-1].finished >= finished {
@@ -266,10 +267,32 @@ func (q *Queue) shown(v *view, now time.Time, raw forecast.Band) forecast.Band {
 	return raw
 }
 
+// adjustFor is the finish calibration of a job's band, or nil when its
+// project and class have too few scores. A calibrated band ends no sooner
+// than now plus the job's critical path, as Display's does: every
+// remaining unit must finish. Scores far below zero (jobs that finished in
+// seconds against minutes predicted) would otherwise show a job of 48
+// frames ready now.
 func (q *Queue) adjustFor(v *view) func(time.Time, forecast.Band) forecast.Band {
 	total := 0
 	if v.mem.plan != nil {
 		total = len(v.mem.plan.Units)
 	}
-	return q.fcal.adjust(v.project, v.job.Spec.Class, q.shareHist[v.project], forecast.StageOf(len(v.mem.millis), total))
+	adj := q.fcal.adjust(v.project, v.job.Spec.Class, q.shareHist[v.project], forecast.StageOf(len(v.mem.millis), total))
+	if adj == nil {
+		return nil
+	}
+	return func(now time.Time, b forecast.Band) forecast.Band {
+		out := adj(now, b)
+		if out.IsZero() {
+			return out
+		}
+		floor := now.Add(time.Duration(v.sum.TPath * float64(time.Second)))
+		for _, t := range []*time.Time{&out.P50, &out.P80, &out.P90, &out.P95} {
+			if t.Before(floor) {
+				*t = floor
+			}
+		}
+		return out
+	}
 }

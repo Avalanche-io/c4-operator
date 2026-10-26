@@ -295,11 +295,17 @@ type JobState struct {
 	// Feasible: the job finishes by its deadline with all attainable
 	// capacity. AtRisk: it misses at its planned share.
 	Feasible, AtRisk bool
-	ETA50, ETA90     time.Time
-	LateBy           time.Duration
-	Rank             int
-	Message          string
-	Burst            *BurstSuggestion
+	// NoHistory is the job's Estimate.NoHistory: its estimate rests on
+	// the class default. Before its deadline such a job reports Feasible,
+	// not AtRisk and no LateBy, is offered no burst or stage, and its
+	// Message says the first units set the estimate. ETA50 and ETA90 are
+	// still the plan's, from the guess.
+	NoHistory    bool
+	ETA50, ETA90 time.Time
+	LateBy       time.Duration
+	Rank         int
+	Message      string
+	Burst        *BurstSuggestion
 	// Deadline is the deadline the job was planned for: its own, or
 	// earlier for a dependent job (see Job.After), and then DeadlineFor
 	// names that dependent. Zero for a job with no deadline.

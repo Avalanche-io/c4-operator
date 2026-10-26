@@ -129,6 +129,9 @@ type Estimate struct {
 	Queued, Running, Unevaluated        Int
 	Sampled, Measured, Open             Int
 	Calibrated                          bool
+	// NoHistory: the estimate rests on the class default, which the
+	// policy does not treat as late (estimate.Summary.NoHistory).
+	NoHistory bool `json:",omitempty"`
 }
 
 // PoolSources is the ways to get a job's inputs to one pool.

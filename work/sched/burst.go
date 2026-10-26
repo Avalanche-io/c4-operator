@@ -39,6 +39,11 @@ import (
 // would have at the share the plan leaves it now, above the lateness it
 // reports, is marked Floor, and its message and capacity request say so.
 //
+// A job whose estimate rests on the class default (Summary.NoHistory) is
+// no candidate: its lateness is a guess, and buying capacity or moving
+// inputs against a guess spends money on nothing known. It reports no
+// risk either (report).
+//
 // Each burst pool's request is its current request plus approved
 // additions. It shrinks only after the pool has had idle provisioned
 // slots for ScaleDownAfter, and then by the idle count.
@@ -50,7 +55,7 @@ func (a *alloc) burst() {
 	}
 	var cands []*jobCtx
 	for _, jc := range a.jobs {
-		if jc.hasDeadline && jc.atRisk && jc.T > 0 && jc.deficit > 0 && !jc.j.Hold && !jc.j.HoldStop {
+		if jc.hasDeadline && jc.atRisk && jc.T > 0 && jc.deficit > 0 && !jc.j.Hold && !jc.j.HoldStop && !jc.j.Estimate.NoHistory {
 			cands = append(cands, jc)
 		}
 	}
@@ -312,6 +317,12 @@ func (a *alloc) report() {
 		v := jc.view()
 		st.AtRisk = v.atRisk
 		st.LateBy = v.lateBy
+		st.NoHistory = jc.j.Estimate.NoHistory
+		if st.NoHistory && jc.hasDeadline && jc.T > 0 {
+			// A guess does not make a job late: it is planned as it is, and
+			// reads neither at risk nor infeasible until units are measured.
+			st.Feasible, st.AtRisk, st.LateBy = true, false, 0
+		}
 		st.Burst = jc.burst
 		st.Stage = jc.stage
 		if jc.hasDeadline {
@@ -355,12 +366,19 @@ func (a *alloc) message(jc *jobCtx, st JobState) string {
 	if jc.noPool {
 		return fmt.Sprintf("%s cannot run: no pool can run it (none of %s is in the farm); due %s.", id, strings.Join(jc.j.Pools, ", "), due)
 	}
+	guess := forecast.NoHistory(jc.j.Class)
 	if jc.T <= 0 {
 		more := "with no capacity planned for it"
-		if v.finish90 > 0 && !math.IsInf(v.finish90, 1) {
+		switch {
+		case jc.j.Estimate.NoHistory:
+			more = guess
+		case v.finish90 > 0 && !math.IsInf(v.finish90, 1):
 			more = fmt.Sprintf("about %s more at current capacity", human(secs(v.finish90)))
 		}
 		return fmt.Sprintf("%s is past %s by %s; %s.", id, past, human(secs(-jc.T)), more)
+	}
+	if jc.j.Estimate.NoHistory {
+		return fmt.Sprintf("%s is due %s. It has %s.", id, due, guess)
 	}
 	sg := jc.burst
 	if !v.atRisk {

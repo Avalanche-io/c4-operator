@@ -721,10 +721,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	q.placeJobs(ctx, views, poolInfo)
 	q.noteSafepoints(views, now)
 	snap := q.snapshot(now, poolInfo, projects.Items, views)
-	cfg := q.Cfg
-	if cfg.Loc == nil {
-		cfg.Loc = q.Loc
-	}
+	cfg := q.schedCfg()
 	var before sched.StateDoc
 	if q.Recorder != nil {
 		before = q.st.Doc()
@@ -1408,6 +1405,18 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	}
 	v.sum, v.est = s, e
 	v.mem.notePoint(now, len(v.mem.millis), len(plan.Units), s)
+}
+
+// schedCfg is the policy's configuration as every plan reads it: Cfg,
+// in the farm's time zone unless Cfg names one. A dry run planned with
+// Cfg alone wrote its messages in UTC ("will miss Mon 18:27 UTC") beside
+// a plan in local time.
+func (q *Queue) schedCfg() sched.Config {
+	cfg := q.Cfg
+	if cfg.Loc == nil {
+		cfg.Loc = q.Loc
+	}
+	return cfg
 }
 
 // snapshot builds the policy's input.
