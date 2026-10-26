@@ -12,15 +12,13 @@ that.
 ## 1. Install `c4 farm`
 
 ```sh
-brew install mrjoshuak/tap/c4
+brew install mrjoshuak/tap/c4-farm mrjoshuak/tap/c4-agent
 ```
 
-This installs the `c4` command and its farm tools; `c4 farm` runs
-`c4-farm`. If you installed `c4` another way before, `which -a c4` should
-list Homebrew's first; an older `c4` ahead of it has no `c4 farm` (`c4-farm`
-says so). Or take a `c4-farm` binary for your machine from the
-[release page](https://github.com/Avalanche-io/c4-operator/releases) and
-write `c4-farm` wherever this guide writes `c4 farm`.
+This installs `c4-farm` and the farm tools it uses. Write `c4-farm`
+wherever this guide writes `c4 farm`; it takes the same commands. Or take a
+`c4-farm` binary for your machine from the
+[release page](https://github.com/Avalanche-io/c4-operator/releases).
 
 ## 2. See your own agents
 

@@ -69,24 +69,25 @@ where C4 goes further, is in
 The HUD's documentation, its walkthroughs (five farms scheduled by the
 operator's own policy, from one artist's home lab to a facility of four
 rooms on four continents), its screenshots and the synthetic farm that
-drives them live in the companion repository
-[c4-hud](https://github.com/Avalanche-io/c4-hud), which becomes the
-documentation site. The operator embeds and serves the HUD itself.
+drives them live in the companion repository c4-hud, which will be
+published as the documentation site. The operator embeds and serves the HUD
+itself.
 
 ## Quickstart
 
 With Docker:
 
 ```sh
-brew install mrjoshuak/tap/c4
-c4 farm up
+brew install mrjoshuak/tap/c4-farm mrjoshuak/tap/c4-agent
+c4-farm up
 ```
 
 That is a whole farm on your machine: render nodes, a store, the operator,
 the HUD and a sign-in for every role. [docs/quickstart.md](docs/quickstart.md)
 continues from there: a sample shot rendered and watched in the HUD, its
 deadline moved, its frames taken home with every file checked, and a tool of
-your own written, tested and published.
+your own written, tested and published. The guide writes `c4 farm`;
+`c4-farm` takes the same commands.
 
 To install on a cluster of your own, see [docs/install.md](docs/install.md).
 Releases attach one `install.yaml`, and the image is
@@ -137,15 +138,18 @@ not yet built.
 
 ## Documentation
 
-| document                                     | what it covers                                                            |
-| -------------------------------------------- | ------------------------------------------------------------------------- |
-| [docs/quickstart.md](docs/quickstart.md)     | a farm on your machine, a render, and your first tool                     |
-| [docs/install.md](docs/install.md)           | requirements, install, projects, pools, the HUD, hardening for production |
-| [DESIGN.md](DESIGN.md)                       | the design of record                                                      |
-| [REPORT-v2.md](REPORT-v2.md)                 | what each phase proved, the numbers, the Scion comparison, open decisions |
-| [docs/agents/tools.md](docs/agents/tools.md) | the MCP tools, generated from the server                                  |
-| [skills/c4-farm](skills/c4-farm/SKILL.md)    | a skill for agents that operate the farm                                  |
-| [PROGRESS.md](PROGRESS.md)                   | branches, release blockers, proposed changes to the c4 suite              |
+| document                                           | what it covers                                                            |
+| -------------------------------------------------- | ------------------------------------------------------------------------- |
+| [docs/quickstart.md](docs/quickstart.md)           | a farm on your machine, a render, and your first tool                     |
+| [docs/install.md](docs/install.md)                 | requirements, install, projects, pools, the HUD, hardening for production |
+| [DESIGN.md](DESIGN.md)                             | the design of record                                                      |
+| [REPORT-v2.md](REPORT-v2.md)                       | what each phase proved, the numbers, the Scion comparison, open decisions |
+| [docs/agents/tools.md](docs/agents/tools.md)       | the MCP tools, generated from the server                                  |
+| [docs/agents/c4-agent.md](docs/agents/c4-agent.md) | agent work and tool units on a machine outside the cluster                |
+| [docs/c4-sync.md](docs/c4-sync.md)                 | keeping a tracker and the farm in step                                    |
+| [docs/diagnose.md](docs/diagnose.md)               | diagnostic bundles and the farm's telemetry                               |
+| [skills/c4-farm](skills/c4-farm/SKILL.md)          | a skill for agents that operate the farm                                  |
+| [PROGRESS.md](PROGRESS.md)                         | branches, release blockers, proposed changes to the c4 suite              |
 
 ## Development
 
@@ -185,13 +189,24 @@ c4-operator ingest       hash a directory into a project's store; print its view
 c4-operator import-git   import a git history (with c4git assets) as views, changesets and chains
 c4-operator mcp          the farm's MCP server, over stdio or Streamable HTTP
 c4-operator tree-id      the view ID of a directory
+c4-operator egress-proxy the farm's egress proxy: a job reaches only the networks its tool declares
+
+c4-farm                  `c4 farm`: submit work, watch it, move its deadline, take its output home; up makes a farm on this machine
+c4-agent                 the host runner and unit runner, for agent work and tool units on a machine outside the cluster
+c4-unit                  the helper every job image carries: progress, frame previews, yielding at a checkpoint, resuming
+c4-sync                  keeps a tracker (Flow, GitHub, Kitsu, MLflow) and the farm in step
+c4-plan                  turns a plan into a job's expansion document
+c4-edges                 runs an edge source over a tree and writes the edges it finds
+c4-sandbox-github        the local farm's stand-in GitHub, for the tracker demo
 ```
 
 ## Layout
 
 ```
-api/v1alpha1/          Materialization, Project, WorkJob, Pool, CapacityRequest
-cmd/c4-operator/       the one binary
+api/v1alpha1/          Materialization, Project, WorkJob, Pool, CapacityRequest, Tool, Tracker,
+                       TrackerPerson, TrackerLink, SubmitGrant, AgentBundle, CredentialLease,
+                       DeploymentBinding, Milestone
+cmd/                   c4-operator and the commands above
 internal/view/         views, records, filters, changesets, chains, diffs
 internal/tier/         the content API, fetcher, server, uploader
 internal/fill/         coalesced, streamed fills with admission limits
@@ -208,6 +223,13 @@ internal/hud/          web app, API types, backend
 internal/mcpserver/    MCP tools over the HUD API
 internal/provenance/   signers, certificates, records, verification, C2PA and OMC exports
 internal/gitimport/    git history -> views, changesets, chains
+internal/farmcli/      `c4 farm`, the user command
+internal/localfarm/    `c4 farm up`'s farm on this machine
+internal/authoring/    submissions and plans, the two authoring formats
+internal/agent/        the harness that makes a Claude Code session farm work
+internal/tracker/      what c4-sync knows about any tracker
+internal/egress/       the egress proxy
+internal/telemetry/    what the farm keeps about how it behaved, and diagnostic bundles
 config/                kustomize: default (local images), release (GHCR), samples
 hack/e2e/              the end-to-end suite: cluster setup and phase scripts
 hack/sim/              the scheduling simulation
@@ -234,7 +256,7 @@ push by push).
 
 c4-operator follows semantic versioning; before 1.0, a minor version may
 change the API, the manifests and the record formats. It builds against c4
-master (`v1.0.17-0.20261016134402-db4c7bec2376`, commit db4c7be) and moves
+master (`v1.0.17-0.20261021011131-b3a6f2dd9280`, commit b3a6f2d) and moves
 to the c4 release that carries those APIs when it ships.
 
 The operator is rebuilt from a 2017 design by Joshua Kolden, who also wrote
