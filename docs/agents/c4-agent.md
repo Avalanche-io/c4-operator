@@ -612,7 +612,10 @@ across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
     it beside the block's branch, reading the whole text from the store. It is the
     block's own words, not something the farm checked. A block the CLI
     reports `done` that wrote none fails (**BlockGaveUp**, "the block ended
-    without its summary in .c4/done");
+    without its summary in .c4/done"), and so does one whose session is
+    lost before it finishes, killed or its CLI gone while the runner runs
+    on (**SessionLost**): never read as done, its next attempt resumes the
+    same session;
   - otherwise it gave up, and the attempt fails (**BlockGaveUp**), for the
     job's retries or a person.
 - **A yield waits for the farm's decision.** A block asked to yield (a

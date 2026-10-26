@@ -366,6 +366,23 @@ func TestBlockOnHostRunner(t *testing.T) {
 	if p := get(asked); p.Status.Phase != corev1.PodRunning || len(cli.prompts[session]) != before+1 || !strings.Contains(cli.prompts[session][before], "part 2") {
 		t.Fatalf("after continue: %s, prompts %d -> %d", p.Status.Phase, before, len(cli.prompts[session]))
 	}
+
+	// its session is lost mid-task (killed, or the CLI gone) while the
+	// runner runs on: the attempt fails, saying so, never reads as done,
+	// and the next attempt resumes the same session
+	cli.mu.Lock()
+	delete(cli.state, session)
+	cli.mu.Unlock()
+	tick()
+	if p := get(asked); p.Status.Phase != corev1.PodFailed || p.Status.Reason != "SessionLost" || !strings.Contains(p.Status.Message, "without its summary in .c4/done") {
+		t.Fatalf("a lost session: %s %s %q", p.Status.Phase, p.Status.Reason, p.Status.Message)
+	}
+	started := cli.n
+	again := pod("count-a7", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "Run again."})
+	tick()
+	if p := get(again); p.Status.Phase != corev1.PodRunning || cli.n != started || cli.state[session] != "working" {
+		t.Fatalf("the re-run: %s, sessions %d -> %d", p.Status.Phase, started, cli.n)
+	}
 }
 
 // docStore keeps the documents a runner stores.

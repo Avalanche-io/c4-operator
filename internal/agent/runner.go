@@ -532,9 +532,17 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		}
 		// The session ended on its own: the member finished. A generator
 		// member leaves its expansion document for the queue, a review
-		// member its verdict.
+		// member its verdict, a model member its token use.
 		if err := r.storeControlDocs(ctx, p, m, u); err != nil {
 			return err
+		}
+		// A block finishes only with its summary: one whose session ended
+		// without it (killed, or its CLI gone, while the runner ran on)
+		// was lost before it finished, and its next attempt resumes it.
+		if m.Block && !takeDone(u) {
+			r.logf("%s: its session ended without its summary in .c4/done: lost before it finished", m.Name)
+			return r.finish(ctx, p, corev1.PodFailed, "SessionLost",
+				"the block's session ended without its summary in .c4/done: it was stopped or lost before it finished; the next attempt resumes its session", 1)
 		}
 		return r.finish(ctx, p, corev1.PodSucceeded, "Completed", "the member's session ended", 0)
 	}
