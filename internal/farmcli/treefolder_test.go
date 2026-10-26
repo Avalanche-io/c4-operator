@@ -104,3 +104,27 @@ func TestAgentMaySend(t *testing.T) {
 		}
 	}
 }
+
+// The agent chooses its own folder, so a project that is the whole disk,
+// the home folder or above it is no project: from one, nothing is sent.
+func TestAgentMaySendNotFromHomeOrDisk(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("CLAUDECODE", "1")
+	proj := filepath.Join(home, "shows", "saltmarsh")
+	os.MkdirAll(filepath.Join(proj, "sm0140"), 0o755)
+	os.WriteFile(filepath.Join(proj, ".c4project"), nil, 0o644)
+
+	t.Chdir(filepath.Join(proj, "sm0140"))
+	if err := agentMaySend(filepath.Join(proj, "sm0140")); err != nil {
+		t.Errorf("a project under home: %v", err)
+	}
+	// a .c4project in home itself makes home the project: too broad
+	os.WriteFile(filepath.Join(home, ".c4project"), nil, 0o644)
+	for _, dir := range []string{home, "/", filepath.Dir(home)} {
+		t.Chdir(dir)
+		if err := agentMaySend(proj); err == nil || !strings.Contains(err.Error(), "never a whole disk or home") {
+			t.Errorf("working in %s: %v", dir, err)
+		}
+	}
+}

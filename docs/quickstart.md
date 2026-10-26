@@ -95,7 +95,11 @@ adds nothing, and says so. Either way `c4 farm integrations` lists what it
 could add, and `c4 farm integrate on` adds it later. An agent cannot turn
 it on for you: from inside Claude Code, `c4 farm integrate` and `c4 farm
 agents add` refuse and print the command for you to run in your own
-terminal.
+terminal. There, `c4 farm submit` also sends a folder only from within the
+project the agent works in, never a whole disk or home. That keeps `c4`
+from being the easy way for a misled agent to send your files, and it
+catches mistakes; an agent with a shell has other ways, so it is a guard,
+not a boundary.
 
 That is a farm, not a demo of one: render nodes in two pools (`cpu` and
 `gpu`), a burst pool the farm rents from only when a deadline needs it, a

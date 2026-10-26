@@ -576,8 +576,12 @@ func (o Out) printFiles(t *folderTree) {
 
 // agentMaySend refuses, inside an agent, an asset's folder outside the
 // project the agent works in (the nearest .c4project above its folder,
-// else that folder). A person chose the folder by typing it; an agent may
-// have been steered to one by something it read.
+// else that folder), and a project that is the whole disk, the home folder
+// or above it, since the agent chooses its own folder. A person chose the
+// folder by typing it; an agent may have been steered to one by something
+// it read. It keeps c4 from being the easy way for such an agent to send
+// files, and catches honest mistakes; an agent with a shell has others, so
+// it is not a boundary.
 func agentMaySend(root string) error {
 	if !InsideAgent() {
 		return nil
@@ -590,10 +594,30 @@ func agentMaySend(root string) error {
 	if err != nil {
 		return err
 	}
-	if !insideFolder(work, root) {
-		return fmt.Errorf("%s: an agent cannot send a folder outside the one it works in (%s): run it yourself at a terminal", tildePath(root), tildePath(work))
+	if tooBroad(work) || !insideFolder(work, root) {
+		return fmt.Errorf("%s: an agent cannot send a folder outside the one it works in (%s): run it yourself at a terminal (c4 sends a project's folder, never a whole disk or home)", tildePath(root), tildePath(work))
 	}
 	return nil
+}
+
+// tooBroad says a folder is no project's: the root of a disk, the home
+// folder, or a folder the home folder is inside.
+func tooBroad(dir string) bool {
+	d, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		return true
+	}
+	if d == filepath.Dir(d) {
+		return true // a disk's root
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	if h, err := filepath.EvalSymlinks(home); err == nil {
+		home = h
+	}
+	return insideFolder(d, home)
 }
 
 // insideFolder says dir is base or within it, links resolved: a link
