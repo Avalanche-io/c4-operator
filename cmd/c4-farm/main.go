@@ -675,7 +675,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		integrateOn := fs.String("integrate", "", "the integrations to add, without asking: claude (c4 farm integrations lists them)")
 		integrateOff := fs.Bool("no-integrate", false, "the minimal install: no integration added, without asking")
 		owner := fs.String("owner", "", "for a new farm: who owns it and plays every role on it (default the name in your git user.email, else your login); an existing farm keeps its owner")
-		trackerOn := fs.Bool("tracker", false, "add a stand-in GitHub and c4-sync: issues you open become jobs, its reviews serve them (nothing leaves this machine)")
+		trackerOn := fs.Bool("tracker", false, "add c4-sync and stand-ins for GitHub and Flow: issues and Tasks become jobs, their reviews serve them (nothing leaves this machine)")
 		syncInstall := fs.String("sync-install", "", "c4-sync's install manifest, with --tracker (default this release's)")
 		syncImage := fs.String("sync-image", "", "the c4-sync image, with --tracker; one only in this machine's Docker (c4-sync:dev) is pushed to the farm's registry")
 		if _, err := parse(fs, rest); err != nil {
