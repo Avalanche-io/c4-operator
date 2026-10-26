@@ -896,6 +896,10 @@ it was submitted under, which the runner's records name. On a lead's job,
 `addedBy` is the C4 ID of the control record of the lead's act that added
 the pod's unit (the submission that made the job, or the append that holds
 the unit's index), which the worker's chain names (`kind: lead-worker`).
+Only the HUD writes a job's `c4.avalanche.io/submission-record`, and once
+set it never changes (`c4-workjob-controls`, `c4-workjob-owner`); an
+append's act is its `control`, the HUD's signed record of the request, and
+a unit past the first workers in no signed append names none.
 
 ## POST /nodes/{node}/enroll-offer and POST /nodes/{node}/enroll
 
@@ -1139,9 +1143,15 @@ way a submission's plan is, so the farm checks them as any agent work:
   workers under the lead's turn ("turn N").
 - `key` is required: the same key again adds nothing more and answers as
   the first call did.
+- The job is the person's: on a one-person farm, a role's call (artist,
+  wrangler) finds and makes its person's one job, as `POST /jobs` makes a
+  role's job its person's.
+- `root` is the lead's repository on its machine: an absolute folder,
+  never a disk or a home folder itself. The host runner holds it to a
+  project's folder with links resolved (a guard, not a boundary).
 
 Refused: a unit's token (a worker may not start workers), no session in
-the agent header (`400`), another person's or another session's job
+the agent header or a `root` that is no project's (`400`), another person's or another session's job
 (`403`), a closed or closing job (`409`), workers the farm cannot run
 (`422`, at their paths), more than 16 workers in one call.
 

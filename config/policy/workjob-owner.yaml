@@ -30,9 +30,9 @@ spec:
   validations:
   - expression: >-
       ['c4.avalanche.io/owner', 'c4.avalanche.io/owner-groups', 'c4.avalanche.io/submitted-via', 'c4.avalanche.io/grant', 'c4.avalanche.io/grant-tracker', 'c4.avalanche.io/submitted-by-unit', 'c4.avalanche.io/submitted-as',
-       'c4.avalanche.io/lead-session'].all(k,
+       'c4.avalanche.io/lead-session', 'c4.avalanche.io/submission-record'].all(k,
         !(k in variables.before) || (k in variables.after && variables.after[k] == variables.before[k]))
-    message: a WorkJob's or AgentBundle's owner, the owner's groups, how it was submitted, the role it was submitted as, the grant it was submitted under, the unit that submitted it and the lead it was made for are set at creation and cannot change
+    message: a WorkJob's or AgentBundle's owner, the owner's groups, how it was submitted, the role it was submitted as, the grant it was submitted under, the unit that submitted it, the lead it was made for and the record of the submission that made it are set once and cannot change
   - expression: "!('c4.avalanche.io/submitted-by-unit' in variables.after) || 'c4.avalanche.io/submitted-by-unit' in variables.before"
     message: only the farm says a unit submitted a job, when it creates it
   - expression: "!('c4.avalanche.io/owner-groups' in variables.after) || 'c4.avalanche.io/owner-groups' in variables.before"

@@ -133,6 +133,44 @@ func TestBlockBranchStartsAtItsBase(t *testing.T) {
 	}
 }
 
+// A lead names the folder its workers work in, so the runner holds it to
+// a project's: never the home folder or a folder above it, links
+// resolved. A project inside the home folder is fine.
+func TestBlockRepoIsAProjectsFolder(t *testing.T) {
+	ctx := context.Background()
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	gitT(t, home, "init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(home, "README"), []byte("hi\n"), 0o644)
+	gitT(t, home, "add", ".")
+	gitT(t, home, "commit", "-q", "-m", "start")
+	pod := func(repo string) *corev1.Pod {
+		p := hostPod()
+		p.Labels[c4v1.LabelJob] = "port"
+		p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: EnvBlock, Value: "1"},
+			corev1.EnvVar{Name: EnvBlockRepo, Value: repo}, corev1.EnvVar{Name: "C4_UNIT_NAME", Value: "notes"})
+		return p
+	}
+	link := filepath.Join(t.TempDir(), "looks-like-a-project")
+	if err := os.Symlink(home, link); err != nil {
+		t.Fatal(err)
+	}
+	for _, repo := range []string{home, filepath.Dir(home), "/", link} {
+		if _, _, err := ensureBranch(ctx, pod(repo)); err == nil || !strings.Contains(err.Error(), "which is no project's") {
+			t.Errorf("repository %s: %v", repo, err)
+		}
+	}
+	proj := filepath.Join(home, "src", "textkit")
+	os.MkdirAll(proj, 0o755)
+	gitT(t, proj, "init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(proj, "README"), []byte("hi\n"), 0o644)
+	gitT(t, proj, "add", ".")
+	gitT(t, proj, "commit", "-q", "-m", "start")
+	if _, ok, err := ensureBranch(ctx, pod(proj)); err != nil || !ok {
+		t.Fatalf("a project inside the home folder: %v %v", ok, err)
+	}
+}
+
 // Blocks run in a clean config directory of their own, filled from the
 // agent environment each asks for (the base when it names none), without
 // the environment's hooks (a block's own settings carry them), never the

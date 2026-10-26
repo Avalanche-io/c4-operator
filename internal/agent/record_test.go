@@ -177,7 +177,8 @@ func TestLeadWorkerChainNamesItsAdd(t *testing.T) {
 		Annotations: map[string]string{c4v1.AnnotationOwner: "dana", c4v1.AnnotationLeadSession: "session-1", "c4.avalanche.io/submission-record": first}}}
 	plain := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "dana-plain", UID: types.UID("5c1d7e00-0000-4000-8000-0000000000bb"),
 		Annotations: map[string]string{c4v1.AnnotationOwner: "dana", "c4.avalanche.io/submission-record": other}}}
-	lead.Status.Appends = []c4v1.WorkAppend{{Key: "call-2", First: 4, Units: 2, Control: appended, Record: id("the queue's decision")}}
+	lead.Status.Appends = []c4v1.WorkAppend{{Key: "call-2", First: 4, Units: 2, Control: appended, Record: id("the queue's decision")},
+		{Key: "call-3", First: 6, Units: 1, Record: id("an unsigned append's decision")}}
 	r, c := hostRunner(t, e, hostPod())
 	for _, j := range []*c4v1.WorkJob{lead, plain} {
 		if err := c.Create(ctx, j); err != nil {
@@ -203,7 +204,7 @@ func TestLeadWorkerChainNamesItsAdd(t *testing.T) {
 		j    *c4v1.WorkJob
 		unit string
 		want string
-	}{{lead, "2", first}, {lead, "5", appended}, {plain, "2", ""}} {
+	}{{lead, "2", first}, {lead, "5", appended}, {lead, "6", ""}, {lead, "9", ""}, {plain, "2", ""}} {
 		ch := r.chainOf(ctx, podOf(c.j, c.unit))
 		if got := added(ch); got != c.want || ch.Under[0].Job != "show-a/"+c.j.Name {
 			t.Errorf("%s unit %s: added by %q, want %q; under %+v", c.j.Name, c.unit, got, c.want, ch.Under)

@@ -125,3 +125,39 @@ func TestLeadWorkers(t *testing.T) {
 		t.Fatalf("a refused call made a job: %v %d", err, len(list.Items))
 	}
 }
+
+// A lead's job is found and named by the owner its job would get: on a
+// one-person farm, its person whatever role the session signed in as, so a
+// role's calls all reach the person's one job; on a shared farm, the
+// viewer itself.
+func TestLeadJobOwner(t *testing.T) {
+	ctx := context.Background()
+	one, shared := roleFarm(t, true), roleFarm(t, false)
+	// the artist role, signed in on the installer's secret as a request is
+	artist := *one.DevViewers["artist"]
+	artist.DevBy = byInstallerToken
+	if got := one.ownerFor(ctx, &artist); got != "noor" {
+		t.Errorf("a role on a one-person farm: %q", got)
+	}
+	if got := shared.ownerFor(ctx, &artist); got != "artist" {
+		t.Errorf("a role on a shared farm: %q", got)
+	}
+	if leadJobName("noor", "session-1", 1) == leadJobName("artist", "session-1", 1) {
+		t.Error("two owners' leads share a job name")
+	}
+}
+
+// The folder a lead names for its workers is a repository on its machine:
+// absolute, never a disk's root or a home folder itself.
+func TestLeadRoot(t *testing.T) {
+	for root, want := range map[string]string{
+		"": "", "/Users/dana/src/textkit": "", "/home/dana/textkit": "", `C:\Users\dana\src\textkit`: "",
+		"src/textkit": "not an absolute folder", "/": "a whole disk", `C:\`: "a whole disk",
+		"/Users/dana": "a home folder", "/home/dana/": "a home folder", `C:\Users\dana`: "a home folder",
+	} {
+		got := checkLeadRoot(root)
+		if (want == "") != (got == "") || !strings.Contains(got, want) {
+			t.Errorf("%q: %q, want %q", root, got, want)
+		}
+	}
+}

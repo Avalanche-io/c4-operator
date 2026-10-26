@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"path"
 	"regexp"
 	"strconv"
 	"strings"
@@ -78,6 +80,10 @@ func (s *Server) handleLeadWorkers(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "key: give each call a key of its own, so a retry adds nothing twice")
 		return
 	}
+	if msg := checkLeadRoot(req.Root); msg != "" {
+		fail(w, http.StatusBadRequest, "%s", msg)
+		return
+	}
 	if msg := checkLeadWorkers(req.Workers); msg != "" {
 		fail(w, http.StatusBadRequest, "%s", msg)
 		return
@@ -123,9 +129,10 @@ func (s *Server) handleLeadWorkers(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, out)
 		return
 	}
-	open, n := openLeadJob(m, req.Project, v.User, session)
+	owner := s.ownerFor(r.Context(), v)
+	open, n := openLeadJob(m, req.Project, owner, session)
 	if open == nil {
-		out, code, err := s.makeLeadJob(r, v, m, pl, req, session, n)
+		out, code, err := s.makeLeadJob(r, v, m, pl, req, owner, session, n)
 		var te takenError
 		if !errors.As(err, &te) {
 			if err != nil {
@@ -137,7 +144,7 @@ func (s *Server) handleLeadWorkers(w http.ResponseWriter, r *http.Request) {
 		}
 		// made by a call this model has not seen yet: add to it, if it is
 		// this lead's
-		name := leadJobName(v.User, session, n)
+		name := leadJobName(owner, session, n)
 		j, gerr := s.liveJob(r.Context(), pl.Namespace, name)
 		if gerr != nil {
 			fail(w, http.StatusConflict, "%s was made meanwhile but cannot be read: %v; try again", name, gerr)
@@ -159,6 +166,30 @@ func (s *Server) handleLeadWorkers(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, code, out)
+}
+
+// homeFolder finds a folder that is a person's home folder itself.
+var homeFolder = regexp.MustCompile(`^(/Users|/home)/[^/]+/?$|^[A-Za-z]:[/\\]Users[/\\][^/\\]+[/\\]?$`)
+
+// checkLeadRoot says what is wrong with the folder a lead names for its
+// workers' worktrees, or "": an absolute folder, not a disk's root or a
+// home folder. The host runner holds it to a project's folder with links
+// resolved; this refuses the plain mistakes first.
+func checkLeadRoot(root string) string {
+	if root == "" {
+		return ""
+	}
+	clean := path.Clean(strings.ReplaceAll(root, "\\", "/"))
+	drive := len(clean) >= 2 && clean[1] == ':' // a Windows folder: C:/...
+	switch {
+	case !strings.HasPrefix(clean, "/") && !drive:
+		return fmt.Sprintf("root: %q is not an absolute folder: name the lead's repository on its machine", root)
+	case clean == "/" || (drive && len(clean) <= 3):
+		return fmt.Sprintf("root: %q is a whole disk: name the lead's repository, not its disk", root)
+	case homeFolder.MatchString(root) || homeFolder.MatchString(clean):
+		return fmt.Sprintf("root: %q is a home folder: name the lead's repository inside it", root)
+	}
+	return ""
 }
 
 // checkLeadWorkers says what is wrong with a call's workers, or "".
@@ -240,6 +271,16 @@ func workerName(desc, key string, i int) string {
 	return n + "-" + hex.EncodeToString(h[:2])
 }
 
+// ownerFor is who owns the jobs viewer v makes, as createJob says it: on
+// a one-person farm, its person whatever role v signed in as
+// (roleOwner); else v itself.
+func (s *Server) ownerFor(ctx context.Context, v *api.Viewer) string {
+	if one := s.roleOwner(ctx, v); one != "" {
+		return one
+	}
+	return v.User
+}
+
 // leadJobName is the name of a person's lead's nth job: from a hash of the
 // person and the full session, so two people's leads never share a name,
 // and numbered after the first, since a closed job is never reopened.
@@ -272,13 +313,13 @@ func openLeadJob(m *model, project, owner, session string) (open *c4v1.WorkJob, 
 // makeLeadJob makes the lead's job from the call's lowered plan through
 // the submission's path: one job, named for the lead, its lead's session
 // on it and its questions answered by that lead.
-func (s *Server) makeLeadJob(r *http.Request, v *api.Viewer, m *model, pl *authoring.Plan, req api.LeadWorkersRequest, session string, n int) (api.LeadWorkersResponse, int, error) {
+func (s *Server) makeLeadJob(r *http.Request, v *api.Viewer, m *model, pl *authoring.Plan, req api.LeadWorkersRequest, owner, session string, n int) (api.LeadWorkersResponse, int, error) {
 	var none api.LeadWorkersResponse
 	if len(pl.Jobs) != 1 || pl.Jobs[0].Request == nil {
 		return none, http.StatusInternalServerError, errors.New("the lead's workers did not lower to one job")
 	}
 	j := &pl.Jobs[0]
-	j.Request.Name = leadJobName(v.User, session, n)
+	j.Request.Name = leadJobName(owner, session, n)
 	j.Request.LeadSession = session
 	var spec map[string]any
 	if err := json.Unmarshal(j.Request.Spec, &spec); err != nil {

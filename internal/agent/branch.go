@@ -79,6 +79,10 @@ func ensureBranch(ctx context.Context, p *corev1.Pod) (UnitBranch, bool, error) 
 	if !ok {
 		return b, false, nil
 	}
+	if repoTooBroad(b.Repo) {
+		// a lead names the folder: never the whole disk or the home folder
+		return b, false, fmt.Errorf("its repository %s is a whole disk, the home folder or a folder above it, which is no project's: a worker works in a project's folder", b.Repo)
+	}
 	top, err := gitLine(ctx, b.Repo, "rev-parse", "--show-toplevel")
 	if err != nil {
 		return b, false, nil // not a repository: no branch of its own
@@ -134,6 +138,30 @@ func branchBase(ctx context.Context, repo, want string) (string, error) {
 		return "", fmt.Errorf("its base %s is not a commit in %s", want, repo)
 	}
 	return base, nil
+}
+
+// repoTooBroad says a block's repository is no project's folder: a disk's
+// root, the home folder, or a folder the home folder is inside, links
+// resolved (as c4 farm's own folder guard says, internal/farmcli). A
+// lead's call names the folder, so the runner holds it to one; it is a
+// guard against a wrong or steered folder, not a boundary.
+func repoTooBroad(repo string) bool {
+	d, err := filepath.EvalSymlinks(repo)
+	if err != nil {
+		d = filepath.Clean(repo)
+	}
+	if !filepath.IsAbs(d) || d == filepath.Dir(d) {
+		return true
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return false
+	}
+	if h, err := filepath.EvalSymlinks(home); err == nil {
+		home = h
+	}
+	rel, err := filepath.Rel(d, home)
+	return err == nil && filepath.IsLocal(rel) || rel == "."
 }
 
 // excludeWorktrees keeps the runner's worktrees (under repo, a folder in
