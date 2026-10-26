@@ -2222,6 +2222,20 @@ and a sweep planner that spawns trials are all generators.
       yield and a `usage-limit` decision, says so (condition
       `UsageLimit`), and resumes the unit from its view. Host runners
       take their slots away until the reset themselves.
+    - **A usage limit holds the account.** The queue knows a unit's
+      account before releasing it by the credential lease its job's
+      template mounts: one holder's sign-in, serving only the holder's
+      own jobs. Once a unit on a lease hits a limit, every model unit of
+      every job on that lease waits until the same reset (the later, of
+      two), spending no attempt and keeping its view. The hold is the
+      hitting unit's one `usage-limit` decision, which names the account,
+      and its `status.usageLimits` entry records the account
+      (`account`, an opaque label, as the HUD's is), so a restart
+      rebuilds it. A job that waits on it says so in `UsageLimit`:
+      "waiting for the model's usage limit on the job's account to reset
+      at ... (unit cut of job lim hit it)", naming the job only in its
+      own project, else "another job on the same account". A job with no
+      lease, or with several, holds only its own units.
     - **A person answering on purpose** (a creative approval) is a step
       in the graph: a wait or a verdict, decided as above.
   - **Agents answer agents** (Joshua). A unit that
