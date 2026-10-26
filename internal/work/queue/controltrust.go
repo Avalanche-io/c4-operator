@@ -23,7 +23,7 @@ import (
 
 // Controls are carried out on their records (DESIGN.md section 9.2). The
 // HUD signs each decide, supply, steer, acknowledgement, withdrawal, append,
-// requeue, allowed node and acceptance of a validated input before it
+// close, requeue, allowed node and acceptance of a validated input before it
 // writes the request, and the request names its record. With
 // signing on (Roots set), the queue acts on a request only if that record
 // verifies against the farm's roots, was signed by the HUD, is a control
@@ -64,6 +64,10 @@ var controlKinds = []controlKind{
 	// is checked (appends.go).
 	{key: c4v1.AnnotationAppend, action: func(map[string]any) string { return "append" },
 		fields: []string{"key", "document", "units", "turn"}, last: func(*jobMem) string { return "" }},
+	// A lead's job is closed once, on its first trusted request
+	// (lead.go), so every one is checked until then.
+	{key: c4v1.AnnotationClose, action: func(map[string]any) string { return "close" },
+		fields: []string{"why"}, last: func(*jobMem) string { return "" }},
 	// An acceptance holds until a newer one, so every one is checked.
 	{key: c4v1.AnnotationAcceptValidated, action: func(map[string]any) string { return "accept-validated" },
 		fields: []string{"accept"}, last: func(*jobMem) string { return "" }},

@@ -93,6 +93,7 @@ func runManager(args []string) error {
 	retry := fs.Duration("retry", time.Minute, "recheck interval for Materializations that failed for a reason that may heal")
 	work := fs.Bool("work", true, "run the work queue (WorkJobs, Pools, CapacityRequests)")
 	tick := fs.Duration("work-tick", 2*time.Second, "work queue decision period")
+	leadIdle := fs.Duration("lead-idle-close", queue.DefaultLeadIdleClose, "how long a lead's job may stay idle, every worker ended and none added, before the farm closes it")
 	unitPriority := fs.String("unit-priority-class", "c4-unit", "PriorityClass for unit pods (preemptionPolicy Never: only c4 preempts them); empty sets none")
 	policy := fs.String("work-policy", "objective", "scheduling policy: objective, edf, fifo")
 	hudService := fs.String("hud-service", "c4-hud:80", "the HUD's Service, [<namespace>/]<service>:<port>: units whose tool grants c4 reach it")
@@ -215,7 +216,8 @@ func runManager(args []string) error {
 			// node daemons (without the HUD, units are estimated from
 			// elapsed time alone).
 			Progress: &queue.ProgressCache{}, Safepoints: &queue.SafepointCache{}, PriorityClass: *unitPriority,
-			HolderTransfer: *holderTransfer == "allow", EgressProxy: *egressProxy, HUDService: *hudService}
+			HolderTransfer: *holderTransfer == "allow", EgressProxy: *egressProxy, HUDService: *hudService,
+			LeadIdleClose: *leadIdle}
 		// The farm's telemetry ring (DESIGN.md section 6.9): the queue tells
 		// it each decision; the HUD writes bundles from it. Its key is read,
 		// or made, the first time it is needed.

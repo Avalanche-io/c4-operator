@@ -64,6 +64,10 @@ type Queue struct {
 	// CaptureWait bounds how long a finished unit waits for its capture
 	// annotation before it counts as done without one.
 	CaptureWait time.Duration
+	// LeadIdleClose is how long a lead's job may stay idle, every worker
+	// ended and none added, before the farm closes it (lead.go); 0 is
+	// DefaultLeadIdleClose.
+	LeadIdleClose time.Duration
 
 	mu      sync.Mutex
 	folds   int
@@ -241,6 +245,8 @@ type jobMem struct {
 	// appends are the owner's additions of units applied, in order, by
 	// key (appends.go).
 	appends []appendRec
+	// lead is a lead's job's idle time and closing (lead.go).
+	lead leadMem
 	// branches are units' git branches, as their runners last recorded
 	// them (branch.go).
 	branches map[int]c4v1.WorkUnitBranch
@@ -428,6 +434,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.loadAsks(st)
 	m.loadLoops(st)
 	m.loadAppends(st)
+	m.loadLead(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
 		m.yields = append(m.yields, yieldRecord{Unit: int(y.Unit), At: y.At.Time, Reason: y.Reason, View: y.View})
@@ -852,6 +859,9 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	q.applyWithdraws(ctx, v, ctl, now)
 	// The owner adding units to the running job (appends.go).
 	q.applyAppends(ctx, v, ctl, now)
+	// A lead's job closed by its person or lead, or idle too long
+	// (lead.go).
+	q.applyClose(ctx, v, ctl, now)
 	// Nodes a person allowed again leave the automatic blacklist.
 	for _, n := range allowedNodes(ctl, m, q.Roots == nil) {
 		if m.blacklist[n] {

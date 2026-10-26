@@ -113,6 +113,8 @@ func (q *Queue) appendWith(ctx context.Context, v *view, r c4v1.WorkAppendReques
 		err = fmt.Errorf("the document %q is not a C4 ID", r.Document)
 	case v.driver.Name() != "graph":
 		err = fmt.Errorf("%s is a %s job: only a graph job takes units while it runs", v.job.Name, v.job.Spec.Class)
+	case m.lead.closed != nil:
+		err = fmt.Errorf("%s is closed (%s): a closed lead's job takes no more workers; make a new job for them", v.job.Name, m.lead.closed.Why)
 	case phase == "Succeeded" || phase == "Failed":
 		err = fmt.Errorf("%s has finished (%s): a finished job takes no more units", v.job.Name, strings.ToLower(phase))
 	default:
@@ -120,6 +122,8 @@ func (q *Queue) appendWith(ctx context.Context, v *view, r c4v1.WorkAppendReques
 		if ex, err = q.checkUnits(v, appendRoot, appendParent(m.plan), doc, true); err == nil {
 			m.plan.Apply(appendRoot, ex)
 			x.Units = len(ex.Units)
+			// a lead's job is not idle while its new workers run (lead.go)
+			m.lead.idleSince = time.Time{}
 		}
 	}
 	if err != nil {
