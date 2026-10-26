@@ -113,6 +113,12 @@ a decision's evidence (the note a rework mounts) goes to the project's
 store, which the HUD lets in as it lets in a tree to read. That is the same
 SubjectAccessReview the HUD applies to people.
 
+Grant it as one Role and one RoleBinding in each project namespace c4-sync
+syncs, binding only c4-sync's service account, with `create` on
+`materializations` (and the WorkJob verbs above). Never use a ClusterRole:
+that would let c4-sync make Materializations in every project, synced or
+not. `c4 farm up` makes exactly this Role for the local farm's project.
+
 ## Connect a tracker
 
 Each project that syncs with a tracker creates three things in its own
