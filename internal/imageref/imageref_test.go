@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 
@@ -84,5 +85,38 @@ func TestNodeDigest(t *testing.T) {
 	}
 	if _, ok := NodeDigest(nodes, "alpine:3"); ok {
 		t.Fatal("alpine has no digest on the node")
+	}
+}
+
+// A token realm is the registry's to name, but only one it may send the
+// HUD to: https, or http where allowed, and never this machine, the
+// cluster's network or a metadata service on another host.
+func TestRealmReachable(t *testing.T) {
+	z := &Resolver{}
+	for _, c := range []struct {
+		registry, realm, want string
+	}{
+		{"registry.studio.example", "http://169.254.169.254/latest/meta-data", "not https"},
+		{"registry.studio.example", "https://169.254.169.254/token", "on this machine or the cluster's network"},
+		{"registry.studio.example", "https://10.96.0.1/token", "on this machine or the cluster's network"},
+		{"registry.studio.example", "https://[fd00::1]/token", "on this machine or the cluster's network"},
+		{"registry.studio.example", "https://100.64.0.7/token", "on this machine or the cluster's network"},
+		{"registry.studio.example", "file:///etc/passwd", "not https"},
+		{"registry.studio.example", "https://127.0.0.1:5001/token", "on this machine or the cluster's network"},
+		{"127.0.0.1:5000", "http://127.0.0.1:5001/token", ""},
+		{"10.0.0.5:5000", "https://10.0.0.5/token", ""},
+		{"registry.studio.example", "https://203.0.113.9/token", ""},
+	} {
+		realm, err := url.Parse(c.realm)
+		if err != nil {
+			t.Fatal(err)
+		}
+		err = z.realmReachable(context.Background(), c.registry, realm)
+		switch {
+		case c.want == "" && err != nil:
+			t.Errorf("%s from %s: %v", c.realm, c.registry, err)
+		case c.want != "" && (err == nil || !strings.Contains(err.Error(), c.want)):
+			t.Errorf("%s from %s: %v, want %q", c.realm, c.registry, err, c.want)
+		}
 	}
 }

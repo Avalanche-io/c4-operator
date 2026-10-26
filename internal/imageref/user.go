@@ -115,7 +115,7 @@ func (z *Resolver) fetch(ctx context.Context, r Ref, path, accepts string) ([]by
 		resp.Body.Close()
 		switch {
 		case resp.StatusCode == http.StatusUnauthorized && token == "":
-			if token, err = z.token(ctx, resp.Header.Get("WWW-Authenticate")); err != nil {
+			if token, err = z.token(ctx, host, resp.Header.Get("WWW-Authenticate")); err != nil {
 				return nil, fmt.Errorf("the registry %s: %w", host, err)
 			}
 			continue
