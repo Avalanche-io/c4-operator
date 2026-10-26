@@ -192,3 +192,57 @@ func TestOwnerDropsARoleClaim(t *testing.T) {
 		t.Fatalf("the farm's own was changed: %v", resp.Patches)
 	}
 }
+
+// leadRequest is ownerRequest's job, answered by its lead.
+func leadRequest(t *testing.T, user string, ann map[string]string) admission.Request {
+	t.Helper()
+	job := &c4v1.WorkJob{
+		TypeMeta:   metav1.TypeMeta{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob"},
+		ObjectMeta: metav1.ObjectMeta{Name: "session-1", Namespace: "saltmarsh", Annotations: ann},
+		Spec:       c4v1.WorkJobSpec{Class: "graph", Answers: &c4v1.WorkAnswers{By: c4v1.AnswersByLead}},
+	}
+	raw, err := json.Marshal(job)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return admission.Request{AdmissionRequest: admissionv1.AdmissionRequest{
+		Operation: admissionv1.Create,
+		UserInfo:  authnv1.UserInfo{Username: user},
+		Object:    runtime.RawExtension{Raw: raw},
+	}}
+}
+
+// Only the farm says a job is a lead's: anyone else's claim is dropped,
+// even with the owner already the requester, and a job answered by its
+// lead is refused unless the farm made it a lead's.
+func TestOwnerLeadSession(t *testing.T) {
+	m := newOwner(t)
+	resp := m.Handle(context.Background(), ownerRequest(t, "ivo", admissionv1.Create, map[string]string{
+		c4v1.AnnotationOwner: "ivo", c4v1.AnnotationSubmittedVia: "api", c4v1.AnnotationOwnerGroups: "[]", c4v1.AnnotationLeadSession: "session-1"}))
+	dropped := false
+	for _, p := range resp.Patches {
+		dropped = dropped || (p.Operation == "remove" && p.Path == "/metadata/annotations/c4.avalanche.io~1lead-session")
+	}
+	if !resp.Allowed || !dropped {
+		t.Fatalf("a lead claim stood: %v %v", resp.Allowed, resp.Patches)
+	}
+	for _, tc := range []struct {
+		user string
+		ann  map[string]string
+	}{
+		{"ivo", nil},
+		{"ivo", map[string]string{c4v1.AnnotationLeadSession: "session-1"}},
+		{managerSA, map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "mcp"}},
+	} {
+		resp := m.Handle(context.Background(), leadRequest(t, tc.user, tc.ann))
+		if resp.Allowed || resp.Result == nil || resp.Result.Message != c4v1.NoLeadMessage {
+			t.Fatalf("%s %v: answers by lead allowed: %v %v", tc.user, tc.ann, resp.Allowed, resp.Result)
+		}
+	}
+	// the farm's own lead's job stands as made
+	resp = m.Handle(context.Background(), leadRequest(t, managerSA, map[string]string{
+		c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "mcp", c4v1.AnnotationLeadSession: "session-1"}))
+	if !resp.Allowed || len(resp.Patches) != 0 {
+		t.Fatalf("the farm's lead's job was changed: %v %v %v", resp.Allowed, resp.Result, resp.Patches)
+	}
+}

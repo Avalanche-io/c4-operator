@@ -205,6 +205,28 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"nudge":{"hold":true}}}`))); err != nil {
 		t.Errorf("an ordinary change was refused: %v", err)
 	}
+	// A job is a lead's from its creation, and only a lead's job is
+	// answered by its lead.
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"metadata":{"annotations":{"c4.avalanche.io/lead-session":"session-1"}}}`))); err == nil {
+		t.Error("a job was made a lead's after it was made")
+	}
+	if err := c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"answers":{"by":"lead"}}}`))); err == nil || !strings.Contains(err.Error(), c4v1.NoLeadMessage) {
+		t.Errorf("a job with no lead said its lead answers it: %v", err)
+	}
+	lj := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: "session-1",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "mcp", c4v1.AnnotationLeadSession: "session-1"}},
+		Spec: c4v1.WorkJobSpec{Class: "graph", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
+	if err := c.Create(ctx, lj); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{`{"metadata":{"annotations":{"c4.avalanche.io/lead-session":"session-2"}}}`, `{"metadata":{"annotations":{"c4.avalanche.io/lead-session":null}}}`} {
+		if err := c.Patch(ctx, lj, client.RawPatch(types.MergePatchType, []byte(p))); err == nil {
+			t.Errorf("a lead's job's session was changed: %s", p)
+		}
+	}
+	if err := c.Patch(ctx, lj, client.RawPatch(types.MergePatchType, []byte(`{"spec":{"answers":{"by":"lead"}}}`))); err != nil {
+		t.Errorf("a lead's job answered by its lead: %v", err)
+	}
 	// A job's review is set when it is created (DESIGN.md 10.6, The job's
 	// review): added later, it
 	// would not fit the plan the queue has replayed.
@@ -692,7 +714,7 @@ func TestControlsOnlyFromTheHUD(t *testing.T) {
 	enforced(t, "c4-workjob-controls", func(try int) error {
 		return patch(admin, c4v1.AnnotationDecide, fmt.Sprintf(`{"token":"t%d"}`, try))
 	})
-	for _, k := range []string{c4v1.AnnotationSupply, c4v1.AnnotationSteer, c4v1.AnnotationRequeue, c4v1.AnnotationAcks, c4v1.AnnotationAllowNodes, c4v1.AnnotationAcceptValidated, c4v1.AnnotationWithdrawNeeds, c4v1.AnnotationAppend, c4v1.AnnotationControlRecords} {
+	for _, k := range []string{c4v1.AnnotationSupply, c4v1.AnnotationSteer, c4v1.AnnotationRequeue, c4v1.AnnotationAcks, c4v1.AnnotationAllowNodes, c4v1.AnnotationAcceptValidated, c4v1.AnnotationWithdrawNeeds, c4v1.AnnotationAppend, c4v1.AnnotationClose, c4v1.AnnotationControlRecords} {
 		if err := patch(admin, k, "x"); err == nil {
 			t.Errorf("%s written directly", k)
 		}

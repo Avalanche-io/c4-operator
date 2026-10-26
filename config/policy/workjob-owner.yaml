@@ -2,7 +2,11 @@
 # /mutate-workjob webhook from the requesting user, or by the manager for
 # jobs it creates for HUD and MCP users and for bundles), and never
 # changes: the HUD's "My shots", the book, the job's signed record, pools
-# with owners and host runners all read it. An AgentBundle's owner
+# with owners and host runners all read it. A lead's job is a lead's from
+# its creation (c4.avalanche.io/lead-session, set by the HUD for the
+# person's own session): the session it names never changes, and no job
+# becomes a lead's later. Only a lead's job is answered by its lead
+# (spec.answers.by lead). An AgentBundle's owner
 # (/mutate-agentbundle) is fixed the same way, since its member jobs carry
 # it. So is the role a one-person farm's person submitted it as
 # (c4.avalanche.io/submitted-as), which only the HUD sets.
@@ -25,9 +29,10 @@ spec:
     expression: "has(object.metadata.annotations) ? object.metadata.annotations : {}"
   validations:
   - expression: >-
-      ['c4.avalanche.io/owner', 'c4.avalanche.io/owner-groups', 'c4.avalanche.io/submitted-via', 'c4.avalanche.io/grant', 'c4.avalanche.io/grant-tracker', 'c4.avalanche.io/submitted-by-unit', 'c4.avalanche.io/submitted-as'].all(k,
+      ['c4.avalanche.io/owner', 'c4.avalanche.io/owner-groups', 'c4.avalanche.io/submitted-via', 'c4.avalanche.io/grant', 'c4.avalanche.io/grant-tracker', 'c4.avalanche.io/submitted-by-unit', 'c4.avalanche.io/submitted-as',
+       'c4.avalanche.io/lead-session'].all(k,
         !(k in variables.before) || (k in variables.after && variables.after[k] == variables.before[k]))
-    message: a WorkJob's or AgentBundle's owner, the owner's groups, how it was submitted, the role it was submitted as, the grant it was submitted under and the unit that submitted it are set at creation and cannot change
+    message: a WorkJob's or AgentBundle's owner, the owner's groups, how it was submitted, the role it was submitted as, the grant it was submitted under, the unit that submitted it and the lead it was made for are set at creation and cannot change
   - expression: "!('c4.avalanche.io/submitted-by-unit' in variables.after) || 'c4.avalanche.io/submitted-by-unit' in variables.before"
     message: only the farm says a unit submitted a job, when it creates it
   - expression: "!('c4.avalanche.io/owner-groups' in variables.after) || 'c4.avalanche.io/owner-groups' in variables.before"
@@ -36,6 +41,10 @@ spec:
     message: the tracker whose grant bounds a job is set when the job is made, never added later
   - expression: "!('c4.avalanche.io/submitted-as' in variables.after) || 'c4.avalanche.io/submitted-as' in variables.before"
     message: the role a job was submitted as is set when the job is made, never added later
+  - expression: "!('c4.avalanche.io/lead-session' in variables.after) || 'c4.avalanche.io/lead-session' in variables.before"
+    message: a job is a lead's from when the farm makes it for the lead's session, never made one later
+  - expression: "!(has(object.spec.answers) && has(object.spec.answers.by) && object.spec.answers.by == 'lead') || 'c4.avalanche.io/lead-session' in variables.after"
+    message: "this job has no lead: it was not made by a lead's c4_agent"
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingAdmissionPolicyBinding
