@@ -68,6 +68,10 @@ type Config struct {
 	// part (opening the pull request) is played as.
 	People []Person
 	Agent  string
+	// FlowKey, when set, adds the stand-in Flow (flow.go): the only key
+	// its API script (c4-sync) is let in with. FlowTracker is the Tracker
+	// that reads it (default FlowTracker).
+	FlowKey, FlowTracker string
 }
 
 // GitHub is the sandbox.
@@ -80,6 +84,7 @@ type GitHub struct {
 	next int
 	// pulls maps an issue to the pull request opened for it.
 	pulls map[int]int
+	flow  *flowSite
 }
 
 // New makes the sandbox. Its links point at the page, under Prefix.
@@ -95,11 +100,19 @@ func New(cfg Config) *GitHub {
 		gh.AddUser(p.Login, p.Name, "")
 	}
 	gh.AddUser(cfg.Agent, "the agent (you play it here)", "")
-	return &GitHub{cfg: cfg, gh: gh, hc: &http.Client{Timeout: 3 * time.Second}, next: 1, pulls: map[int]int{}}
+	if cfg.FlowTracker == "" {
+		cfg.FlowTracker = FlowTracker
+	}
+	g := &GitHub{cfg: cfg, gh: gh, hc: &http.Client{Timeout: 3 * time.Second}, next: 1, pulls: map[int]int{}}
+	if cfg.FlowKey != "" {
+		g.flow = newFlow(cfg, g)
+	}
+	return g
 }
 
 // Handler serves the API (/repos/, /users/), the page (Prefix) and
-// /healthz.
+// /healthz; with the stand-in Flow, its API (FlowAPI) and page
+// (FlowPrefix) too.
 func (g *GitHub) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.Handle("/repos/", g.gh.Handler())
@@ -109,6 +122,9 @@ func (g *GitHub) Handler() http.Handler {
 	mux.HandleFunc("POST "+Prefix+"pulls", g.openPull)
 	mux.HandleFunc("POST "+Prefix+"reviews", g.review)
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte("ok\n")) })
+	if g.flow != nil {
+		g.flow.routes(mux)
+	}
 	return mux
 }
 
@@ -359,11 +375,11 @@ func (g *GitHub) job(ctx context.Context, issue int) *api.Job {
 	return last
 }
 
-// granted says whether person has let the Tracker submit work for them:
+// granted says whether person has let a Tracker submit work for them:
 // an active grant of theirs among the Tracker's, as the sandbox sees them.
-func (g *GitHub) granted(ctx context.Context, person string) (bool, error) {
+func (g *GitHub) granted(ctx context.Context, tracker, person string) (bool, error) {
 	var l api.GrantList
-	if _, err := g.hud(ctx, "/grants?tracker="+url.QueryEscape(g.cfg.Namespace+"/"+g.cfg.Tracker), &l); err != nil {
+	if _, err := g.hud(ctx, "/grants?tracker="+url.QueryEscape(g.cfg.Namespace+"/"+tracker), &l); err != nil {
 		return false, err
 	}
 	for _, gr := range l.Grants {

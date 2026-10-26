@@ -152,7 +152,7 @@ func (g *GitHub) issueSays(ctx context.Context, is githubtest.Issue, j *api.Job,
 		return []line{{Text: fmt.Sprintf("Issue #%d is job %s in %s for %s: %s.", is.Number, j.Name, g.cfg.Project, assignee.Person, jobWords(j)),
 			Link: hudLink(as.Person, "job/"+j.Namespace+"/"+j.Name), LinkText: "watch it in the HUD"}}
 	}
-	ok, err := g.granted(ctx, assignee.Person)
+	ok, err := g.granted(ctx, g.cfg.Tracker, assignee.Person)
 	switch {
 	case err != nil:
 		log.Printf("reading %s's grant: %v", assignee.Person, err)

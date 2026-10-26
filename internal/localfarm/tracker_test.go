@@ -3,12 +3,14 @@ package localfarm
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 
 	"sigs.k8s.io/yaml"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/sandbox"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 )
 
@@ -54,18 +56,21 @@ func TestTrackerObjects(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var tr c4v1.Tracker
+	trackers := map[string]c4v1.Tracker{}
 	kinds := map[string]bool{}
 	for _, o := range objs {
 		kinds[o["kind"].(string)] = true
 		if o["kind"] != "Tracker" {
 			continue
 		}
+		var tr c4v1.Tracker
 		b, _ := json.Marshal(o)
 		if err := yaml.UnmarshalStrict(b, &tr); err != nil {
 			t.Fatalf("not a Tracker: %v", err)
 		}
+		trackers[tr.Name] = tr
 	}
+	tr := trackers[SandboxTracker]
 	for _, k := range []string{"Secret", "Deployment", "Service", "Role", "RoleBinding", "Tracker"} {
 		if !kinds[k] {
 			t.Errorf("no %s", k)
@@ -91,6 +96,28 @@ func TestTrackerObjects(t *testing.T) {
 	}
 	if !strings.Contains(string(YAML(objs)), "C4_SANDBOX_TOKEN") {
 		t.Fatal("the sandbox does not read its token from the Secret")
+	}
+
+	// The stand-in Flow: ready lighting Tasks become four units rendering
+	// into the shot's plate, then the dailies review the Version serves.
+	fl := trackers[sandbox.FlowTracker]
+	if fl.Spec.Kind != "flow" || fl.Spec.Endpoint != sandboxURL+sandbox.FlowAPI || fl.Spec.Scope["project"] != strconv.Itoa(sandbox.FlowProject) ||
+		fl.Spec.Scope["site_url"] != (Options{}).HUD()+"/sandbox/flow" || fl.Spec.Credential.Secret.Name != "sandbox-flow" {
+		t.Fatalf("flow tracker %+v", fl.Spec)
+	}
+	in = fl.Spec.Intake[0]
+	if in.For == nil || !in.For.Assignee || in.Rework != "nextVersion" || in.Match.Fields["sg_status_list"] != "rdy" {
+		t.Fatalf("flow intake %+v", in)
+	}
+	plan, err = d.Plan(&c4v1.WorkJob{Spec: *in.Job})
+	if err != nil || len(plan.Units) != 4 || len(in.Job.Inputs) != 1 || in.Job.Inputs[0].Materialization != SandboxFlowPlate || in.Job.Inputs[0].ReadOnly {
+		t.Fatalf("flow job: %d units, inputs %+v, %v", len(plan.Units), in.Job.Inputs, err)
+	}
+	if fl.Spec.VerdictsIn["status:apr"] != "approve" || fl.Spec.VerdictsIn["status:fix"] != "rework" {
+		t.Fatalf("verdicts %v", fl.Spec.VerdictsIn)
+	}
+	if !strings.Contains(string(YAML(objs)), "C4_SANDBOX_FLOW_KEY") {
+		t.Fatal("the sandbox does not read the Flow key from the Secret")
 	}
 }
 

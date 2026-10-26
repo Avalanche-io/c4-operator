@@ -1,8 +1,9 @@
 // Command c4-sandbox-github is the local farm's stand-in GitHub (c4 farm
 // up --tracker; internal/sandbox): the GitHub REST API c4-sync speaks, from
 // GitHub's published shapes, and a page at /sandbox/ where a newcomer acts
-// as the farm's people. It keeps everything in memory and reaches nothing
-// outside the farm.
+// as the farm's people; with --flow-key, a stand-in Flow Production
+// Tracking site beside it (its API at /flow, its page at /sandbox/flow/).
+// It keeps everything in memory and reaches nothing outside the farm.
 package main
 
 import (
@@ -43,6 +44,8 @@ func parse(args []string, stderr io.Writer) (sandbox.Config, string, error) {
 	fs.StringVar(&c.Namespace, "namespace", "", "the Tracker's namespace (default the project)")
 	fs.StringVar(&c.Tracker, "tracker", "sandbox", "the Tracker's name")
 	fs.StringVar(&c.Agent, "agent", "c4-agent", "the login the agent's part is played as")
+	fs.StringVar(&c.FlowKey, "flow-key", os.Getenv("C4_SANDBOX_FLOW_KEY"), "adds a stand-in Flow Production Tracking site (API at /flow, page at /sandbox/flow/) whose API script takes only this key (C4_SANDBOX_FLOW_KEY)")
+	fs.StringVar(&c.FlowTracker, "flow-tracker", "sandbox-flow", "the Tracker that reads the stand-in Flow")
 	if err := fs.Parse(args); err != nil {
 		return c, "", err
 	}

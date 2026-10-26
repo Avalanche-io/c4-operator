@@ -41,10 +41,11 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		_ = json.NewEncoder(w).Encode(j)
-	case r.URL.Path == "/api/v1/grants" && r.URL.Query().Get("tracker") == "saltmarsh/sandbox":
-		l := api.GrantList{Grants: []api.Grant{{Person: "dana", Tracker: "sandbox", Active: true}}}
+	case r.URL.Path == "/api/v1/grants" && strings.HasPrefix(r.URL.Query().Get("tracker"), "saltmarsh/sandbox"):
+		tr := strings.TrimPrefix(r.URL.Query().Get("tracker"), "saltmarsh/")
+		l := api.GrantList{Grants: []api.Grant{{Person: "dana", Tracker: tr, Active: true}}}
 		for p, ok := range f.granted {
-			l.Grants = append(l.Grants, api.Grant{Person: p, Tracker: "sandbox", Active: ok})
+			l.Grants = append(l.Grants, api.Grant{Person: p, Tracker: tr, Active: ok})
 		}
 		_ = json.NewEncoder(w).Encode(l)
 	default:

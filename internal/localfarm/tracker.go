@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -23,11 +24,13 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/tracker/syncer"
 )
 
-// The tracker `c4 farm up --tracker` adds: a stand-in GitHub on the farm
-// (internal/sandbox, run from c4-sync's image), c4-sync, and a Tracker in
-// Saltmarsh whose issues labeled c4 become jobs for the person they are
-// assigned to. The page is at the HUD's /sandbox/; nothing leaves this
-// machine.
+// The trackers `c4 farm up --tracker` adds: a stand-in GitHub and a
+// stand-in Flow Production Tracking on the farm (internal/sandbox, run from
+// c4-sync's image), c4-sync, and two Trackers in Saltmarsh: issues labeled
+// c4 become jobs for the person they are assigned to, and lighting Tasks
+// set ready become renders whose output is published back as a Version
+// for review. The pages are at the HUD's /sandbox/ and /sandbox/flow/;
+// nothing leaves this machine.
 const (
 	SandboxTracker = "sandbox"
 	SandboxRepo    = "petrel-finch/saltmarsh"
@@ -37,6 +40,11 @@ const (
 	// for a stand-in that only c4-sync on this farm reaches.
 	sandboxToken  = "c4-sandbox-local-token"
 	sandboxSecret = "c4-sandbox-local-hook"
+	// sandboxFlowKey is the stand-in Flow's API script key, as fixed.
+	sandboxFlowKey = "c4-sandbox-local-flow-key"
+	// SandboxFlowPlate is the materialization a stand-in Flow job renders
+	// into: the shot's plate, which c4 farm samples load flow uploads.
+	SandboxFlowPlate = "sandbox-flow-plate"
 	// sandboxReviewer is who a sandbox job's review waits for on a farm
 	// with no owner; on a farm with one, the owner reviews.
 	sandboxReviewer = "supervisor"
@@ -85,9 +93,54 @@ func SandboxJob(reviewer string) (c4v1.WorkJobSpec, error) {
 			Ask: "Is the work for this issue ready?"}}, nil
 }
 
+// sandboxFlowRender is a stand-in Flow job's unit: it renders its frames
+// into the shot's plate, a placeholder EXR and a preview PNG each (the
+// HUD's preview/<frame>.png, which c4-sync uploads as the Version's
+// still). A version made from the supervisor's note (mounted at
+// /c4/notes/note.md) renders cooler and keeps the note, so it is other
+// content with its own C4 ID.
+const sandboxFlowRender = `look=warm png=$S_WARM
+if [ -f /c4/notes/note.md ]; then look=cool png=$S_COOL; cp /c4/notes/note.md /show/render-note.md; fi
+mkdir -p /show/render /show/preview
+f=$C4_FRAME_START
+while [ "$f" -le "$C4_FRAME_END" ]; do
+  sleep 6
+  echo "stand-in frame $f of sh040 lighting ($look)" >"/show/render/sh040_lgt.$f.exr"
+  echo "$png" | base64 -d >"/show/preview/$f.png"
+  f=$((f + 1))
+done
+echo "frames $C4_FRAMES rendered ($look)"`
+
+// SandboxFlowJob is the job a ready lighting Task becomes: eight frames in
+// four units, rendered into the shot's plate, then the dailies review by
+// reviewer, which the Version's status in Flow serves.
+func SandboxFlowJob(reviewer string) (c4v1.WorkJobSpec, error) {
+	pod, err := jobspec.Pod(jobspec.Container{Image: farmcli.StandInImage, Command: []string{"sh", "-euc"},
+		Args: []string{sandboxFlowRender}, Env: map[string]string{"S_WARM": previewWarm, "S_COOL": previewCool}})
+	if err != nil {
+		return c4v1.WorkJobSpec{}, err
+	}
+	return c4v1.WorkJobSpec{Class: "render", Pools: []string{"cpu"}, Template: pod,
+		Params: map[string]string{"frames": "1001-1008", "chunk": "2", "estimateSeconds": "12"},
+		Inputs: []c4v1.WorkInput{{Materialization: SandboxFlowPlate, MountPath: "/show"}},
+		Review: &c4v1.WorkReviewSpec{Server: "person:" + reviewer, Choices: []string{"approve", "rework"},
+			Ask: "Dailies: approve sh040 lighting?"}}, nil
+}
+
+// The stand-in render's stills, 64x36 PNGs: a lit sphere, warm, and cooler
+// after the note.
+const (
+	previewWarm = "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAIAAAC2bqvFAAAC8ElEQVR42u2W2WsTYRTF71/igkVi7J60jTVd06ZpY0ybpo1dNAld0qYlLa3VNNjGhZa2SCW4YAsuVAWXgogbgijom4i++CLim+CbL/4B+sNAHnVm4AsOBA6Xyx2Y79w7555vZIfFbWrITqvH1JDdxV5TQ/aU+kwNKSrvNDVkb2XA1BCLvcfUkH3VIVND9jv6TQ0pqR00NaTUGTY1pLw+mje8zQy+yQy8Xu97sRZ6vBR8kO7cmj+0MeO5EHcZfqdUNg3nBx82oh83o8R3V8J08vL8EXq4t+i/ccJ7ecq9Fmsy9lqxuUZV4/3VyKfrQ5+3Rr/cihHJqdAD3+Hh2cDtlI+PsB53nYvWJfscel8uVa3jqgHjr3fGvt2f+L49SSSnwndAS0+Wg3cX/NfmOjKTLcvDDamBA3pfLjVtE0qBZpg6vH88mv75dIZIToU6+/BspZdNQEUXE60rI42nBmunu+263i+O9oQ6oBN0j3KYPex/vUoSyalQ5+nz1d7t0103T3ov5RoIVo14y7QfIbXeaXVgxga+wHBHmfYjxOmbVQdUjtZ17UAiYB9qL9V+hNT559QBn0EnulxostMW9ZRoP0IaupLqgNPj93Bl3v+8B9LHDh7vrR4/XHHUXaz9CGnqTqkD+oYlk0YtKP4vN/HSUD36meq2s8H9Lqv2I6S5Z0Ed4MeM0QlaZ1/xHCI5Feo83Zz1oH7Wd5Hxh2ri/spIW0lfs1X7EdISSqsD00UhqJxNZd44JpGcCnWewn51tPFMxIn6EwEb/sP4aUD7EWIp2qUOaAN9QxSfgTF+TySnQp2nzB728/0O3DPmK0f9sAfaj1DbAGA7cRgmjdNzWxHJqVBH9yiH2cN+zFcR/iMeXezz0QDAH/F4hp0FORU8h61F9yiH2Rtjn6cGmDFcuWWzIKeCY+I5bC26zynnP20gC3TCfw6Ru5bbCr/HMfGc7NYaoJ7vBgCMmTd/Cty1TD1H3TD7fDegAoUGCg0UGjB5A78BxTjd7N5iumMAAAAASUVORK5CYII="
+	previewCool = "iVBORw0KGgoAAAANSUhEUgAAAEAAAAAkCAIAAAC2bqvFAAAC0UlEQVR42u2W+0uacRTGz1+yC4vhbhHtFtE22sU077dMzUuZlmlqqV1c5kLKitzIxYQagwYb7Mf9h/uYbD9ur8JX9oLwcDicF97vc573Oef7yjWDUdeQ63dNuobcvG/RNeTWsE3XkKERp64ht0fduoYYHvl0DbnzxK9ryL2xoK4hD8bndA0ZnojqGjLyfL5veFdrVGsnlb3jt7v1zXKtUNrN5rdT6UI8udrzO2V0crE/ODj6WD8+I9bqp3SyUz2kh/ViJZPbTKbWYvGV3l4rD18lVWP/sHnUaJ18OG+cXhDJqdAD36G0tZdbL6cyxXhiNRxNzgSi3b5cHr9JqQaM3zc/Nz9dnrW+Esmp8B3wEh9hrVhJZzcSS7nI/PJscL7bl8vTqbRS4BlUh3fr4vv5lx9EcirUmYftnX0moe2i5Xx0IRUILbi9oa7eL2PmrDrgE3yPc9Ae9pfffhLJqVDnablyUNioXo1BPnbVgMcXstq92o+QcUteHdC4hy9gtXu0HyETtoI64HK83tUMuDxBi82j/Qh55iipA3sGn3S1hZzu2WmrS/sR8sK1pQ4IzL6HK3r/8x4Ihhe9/rDdOWOadmg/QiY9ZXXA37BEadyC4/9yE0diS/jH7Q0ywUaTTfsR8tJXUQf4oTE+gS7zys4hklOh3mafKeJ+9k9wLu7zhx0uv9niMk7ZtB8hr/1VdUBdHILLmVT0ZmMSyalQ52mbfXwlFEngfpcnwP5BfhrQfoQYhm6oA97A38jMnoFxB+RUqPMU7WHvD8TYnjaHD/fDHmg/Qm0DAIHZMCjNpue2IpJToY7vcQ7aw57ZNVuc3bLvRwOA/ciO555CbyI5FXYOU4vvcQ7a98a+Tw2gMVy5ZTsgp8LGZOcwtfj+j3P+0wY6wCf85xC5a7mt8Awbs71zTD1S73cDAMbozZ8Cd21b9d/Ue2bf7wZUYNDAoIFBAzpv4Bde6M18ECLfvgAAAABJRU5ErkJggg=="
+)
+
 // TrackerObjects are what --tracker adds after c4-sync is installed.
 func TrackerObjects(o Options) ([]obj, error) {
 	job, err := SandboxJob(sandboxReviewerOf(o))
+	if err != nil {
+		return nil, err
+	}
+	flowJob, err := SandboxFlowJob(sandboxReviewerOf(o))
 	if err != nil {
 		return nil, err
 	}
@@ -102,6 +155,7 @@ func TrackerObjects(o Options) ([]obj, error) {
 		"env": []obj{
 			{"name": "C4_SANDBOX_TOKEN", "valueFrom": obj{"secretKeyRef": obj{"name": sandboxName, "key": "token"}}},
 			{"name": "C4_SANDBOX_HOOK_SECRET", "valueFrom": obj{"secretKeyRef": obj{"name": sandboxName, "key": "hook"}}},
+			{"name": "C4_SANDBOX_FLOW_KEY", "valueFrom": obj{"secretKeyRef": obj{"name": sandboxName, "key": "flow"}}},
 		},
 		"ports":           []obj{{"containerPort": 8080}},
 		"volumeMounts":    []obj{{"name": "hud-token", "mountPath": "/var/run/c4-sandbox", "readOnly": true}},
@@ -110,7 +164,8 @@ func TrackerObjects(o Options) ([]obj, error) {
 	}
 	secret := obj{"token": sandboxToken, "hook": sandboxSecret}
 	return []obj{
-		{"apiVersion": "v1", "kind": "Secret", "metadata": meta(sandboxName, "namespace", "c4-system"), "stringData": secret},
+		{"apiVersion": "v1", "kind": "Secret", "metadata": meta(sandboxName, "namespace", "c4-system"),
+			"stringData": obj{"token": sandboxToken, "hook": sandboxSecret, "flow": sandboxFlowKey}},
 		{"apiVersion": "apps/v1", "kind": "Deployment", "metadata": meta(sandboxName, "namespace", "c4-system"),
 			"spec": obj{"replicas": 1, "selector": obj{"matchLabels": labels},
 				"template": obj{"metadata": obj{"labels": labels}, "spec": obj{
@@ -135,10 +190,11 @@ func TrackerObjects(o Options) ([]obj, error) {
 		// The Tracker's credentials, in the project, readable by c4-sync
 		// by name only.
 		{"apiVersion": "v1", "kind": "Secret", "metadata": meta("sandbox-github", "namespace", Project), "stringData": secret},
+		{"apiVersion": "v1", "kind": "Secret", "metadata": meta("sandbox-flow", "namespace", Project), "stringData": obj{"key": sandboxFlowKey}},
 		// and the project's jobs, which the HUD lets c4-sync submit and
 		// change as itself (docs/c4-sync.md), as a project on any farm does
 		{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": meta("c4-sync-sandbox", "namespace", Project),
-			"rules": []obj{{"apiGroups": []string{""}, "resources": []string{"secrets"}, "resourceNames": []string{"sandbox-github"}, "verbs": []string{"get"}},
+			"rules": []obj{{"apiGroups": []string{""}, "resources": []string{"secrets"}, "resourceNames": []string{"sandbox-github", "sandbox-flow"}, "verbs": []string{"get"}},
 				{"apiGroups": []string{"c4.avalanche.io"}, "resources": []string{"workjobs"}, "verbs": []string{"get", "list", "watch", "create", "patch"}}}},
 		{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": meta("c4-sync-sandbox", "namespace", Project),
 			"roleRef":  obj{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "c4-sync-sandbox"},
@@ -155,6 +211,23 @@ func TrackerObjects(o Options) ([]obj, error) {
 				"intake": []obj{{"match": obj{"type": "Issue", "labels": []string{sandbox.Label}}, "as": "job",
 					"for": obj{"assignee": true}, "rework": "nextVersion", "job": job}},
 				"statusOut": obj{"commitStatus": true, "fieldSeconds": 30}}},
+		// The stand-in Flow: its API on the sandbox, links to its page as
+		// this machine reaches it through the HUD, statuses as a default
+		// site has them, read from its event log.
+		{"apiVersion": "c4.avalanche.io/v1alpha1", "kind": "Tracker",
+			"metadata": obj{"name": sandbox.FlowTracker, "namespace": Project},
+			"spec": obj{"kind": "flow", "endpoint": sandboxURL + sandbox.FlowAPI,
+				"scope": obj{"project": strconv.Itoa(sandbox.FlowProject), "script": "c4-sync", "review_status": "rev",
+					"id_field": "sg_c4_id", "eta_field": "sg_c4_eta", "link_field": "sg_c4_link", "spend_field": "sg_c4_spend",
+					"site_url": o.HUD() + strings.TrimSuffix(sandbox.FlowPrefix, "/")},
+				"credential": obj{"secret": obj{"name": "sandbox-flow", "key": "key"}},
+				"events":     obj{"mode": "eventlog", "pollSeconds": 5, "resyncSeconds": 300},
+				"rate":       obj{"perSecond": "50", "burst": 100},
+				"people":     people,
+				"intake": []obj{{"match": obj{"type": "Task", "fields": obj{"sg_status_list": "rdy", "step.Step.short_name": "LGT"}},
+					"as": "job", "for": obj{"assignee": true}, "rework": "nextVersion", "job": flowJob}},
+				"statusOut":  obj{"states": obj{"running": "ip", "rework": "ip", "in-review": "rev", "needs-person": "hld"}, "fieldSeconds": 15},
+				"verdictsIn": obj{"status:apr": "approve", "status:fix": "rework"}}},
 	}, nil
 }
 
@@ -231,7 +304,7 @@ func upTracker(ctx context.Context, c client.Client, o UpOptions) error {
 	} else if s := syncImage.FindSubmatch(m); s != nil {
 		img = string(s[2])
 	}
-	o.logf("tracker   c4-sync and a stand-in GitHub (%s): nothing leaves this machine\n", SandboxRepo)
+	o.logf("tracker   c4-sync, a stand-in GitHub (%s) and a stand-in Flow: nothing leaves this machine\n", SandboxRepo)
 	if err := applyAll(ctx, c, m); err != nil {
 		return fmt.Errorf("installing c4-sync: %w", err)
 	}
