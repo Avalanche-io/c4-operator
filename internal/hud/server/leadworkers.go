@@ -83,7 +83,7 @@ func (s *Server) handleLeadWorkers(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "%s", msg)
 		return
 	}
-	if msg := checkLeadWorkers(req.Workers); msg != "" {
+	if msg := checkLeadWorkers(req.Workers, maxLeadWorkers); msg != "" {
 		fail(w, http.StatusBadRequest, "%s", msg)
 		return
 	}
@@ -191,13 +191,14 @@ func checkLeadRoot(root string) string {
 	return ""
 }
 
-// checkLeadWorkers says what is wrong with a call's workers, or "".
-func checkLeadWorkers(ws []api.LeadWorker) string {
+// checkLeadWorkers says what is wrong with a call's workers, at most n,
+// or "".
+func checkLeadWorkers(ws []api.LeadWorker, n int) string {
 	switch {
 	case len(ws) == 0:
 		return "workers: give at least one worker, its description and its prompt"
-	case len(ws) > maxLeadWorkers:
-		return fmt.Sprintf("workers: %d in one call; give at most %d, and call again for more", len(ws), maxLeadWorkers)
+	case len(ws) > n:
+		return fmt.Sprintf("workers: %d in one call; give at most %d, and call again for more", len(ws), n)
 	}
 	for i, w := range ws {
 		switch {

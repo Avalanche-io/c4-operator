@@ -251,12 +251,14 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	aj.Units = api.Counts{Total: int(u.Total), Queued: int(u.Queued), Blocked: int(u.Blocked), Running: int(u.Running),
 		Retrying: int(u.Retrying), Succeeded: int(u.Succeeded), Failed: int(u.Failed), Held: int(u.Held),
 		Preflight: int(u.Preflight), Backoff: int(u.Backoff), Egress: int(u.Egress), Accepted: int(u.Accepted), Waits: int(u.Waits),
-		Unevaluated: int(u.Planned), Planned: int(u.Planned), Flagged: int(u.Flagged), Locked: int(u.Locked), Reused: int(u.Reused), Superseded: int(u.Superseded), Needs: int(u.Needs)}
+		Unevaluated: int(u.Planned), Planned: int(u.Planned), Flagged: int(u.Flagged), Locked: int(u.Locked), Reused: int(u.Reused), Superseded: int(u.Superseded), Needs: int(u.Needs),
+		Withdrawn: int(u.Withdrawn)}
 	us := st.UnitStates
 	aj.UnitStates = api.States{Queued: us["queued"], Blocked: us["blocked"], Running: us["running"], Retrying: us["retrying"],
 		Succeeded: us["succeeded"], Failed: us["failed"], Preflight: us["preflight"], Backoff: us["backoff"],
 		Egress: us["egress"], Accepted: us["accepted"], Waits: us["waits"],
-		Unevaluated: us["planned"], Planned: us["planned"], Flagged: us["flagged"], Locked: us["locked"], Superseded: us["superseded"], Needs: us["needs"]}
+		Unevaluated: us["planned"], Planned: us["planned"], Flagged: us["flagged"], Locked: us["locked"], Superseded: us["superseded"], Needs: us["needs"],
+		Held: us["held"], Withdrawn: us["withdrawn"]}
 	if sp := st.Spend; sp != nil {
 		f := func(x string) float64 { v, _ := strconv.ParseFloat(x, 64); return v }
 		aj.Spend = &api.Spend{ModelUnits: int(sp.ModelUnits), ProceduralUnits: int(sp.ProceduralUnits), ModelTokens: sp.ModelTokens, UnpricedTokens: sp.UnpricedTokens,
@@ -284,6 +286,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 	}
 	aj.Held = heldBy(m, j)
 	aj.Lead = leadOf(st.Lead)
+	aj.Plan = leadPlanOf(st.Plan)
 	for k, n := range st.Needs {
 		i, err := strconv.Atoi(k)
 		if err != nil {

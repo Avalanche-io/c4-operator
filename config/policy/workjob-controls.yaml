@@ -1,11 +1,12 @@
 # The controls people and agents give a running job (requeue, allow
 # nodes, acknowledge, decide, steer, supply or withdraw a unit's question,
-# accept a validated input, add units to a graph job, close a lead's job)
-# are annotations on the WorkJob that the queue carries out with the actor
-# they name. Only the manager's account writes them: the HUD (and MCP,
-# through it) checks who may give each control, signs it and books it, so
-# it is the one place a control enters the farm. Anyone else with patch on
-# a WorkJob could otherwise decide a person's wait as any actor, unsigned.
+# accept a validated input, add units to a graph job, plan or close a
+# lead's job) are annotations on the WorkJob that the queue carries out
+# with the actor they name. Only the manager's account writes them: the
+# HUD (and MCP, through it) checks who may give each control, signs it and
+# books it, so it is the one place a control enters the farm. Anyone else
+# with patch on a WorkJob could otherwise decide a person's wait as any
+# actor, unsigned.
 # The list of a job's control records is the HUD's too: no one else may
 # add a record to it, or drop one. So is the record of the submission that
 # made a job (c4.avalanche.io/submission-record), which a lead's workers'
@@ -35,7 +36,7 @@ spec:
       ['c4.avalanche.io/requeue', 'c4.avalanche.io/allow-nodes', 'c4.avalanche.io/acks',
        'c4.avalanche.io/decide', 'c4.avalanche.io/steer', 'c4.avalanche.io/supply',
        'c4.avalanche.io/accept-validated', 'c4.avalanche.io/withdraw-needs', 'c4.avalanche.io/append',
-       'c4.avalanche.io/close', 'c4.avalanche.io/control-records', 'c4.avalanche.io/submission-record']
+       'c4.avalanche.io/plan', 'c4.avalanche.io/close', 'c4.avalanche.io/control-records', 'c4.avalanche.io/submission-record']
   - name: labelsBefore
     expression: "request.operation == 'CREATE' || !has(oldObject.metadata.labels) ? {} : oldObject.metadata.labels"
   - name: labelsAfter

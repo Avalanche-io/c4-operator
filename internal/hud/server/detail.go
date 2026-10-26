@@ -206,6 +206,13 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if u.Gate != "" {
 			e["gate"] = u.Gate
 		}
+		if w := u.Withdrawn; w != nil {
+			// its lead retired it: why, and the units that replace it
+			e["withdrawn"] = map[string]any{"why": w.Why, "replacements": w.By, "edit": w.Edit}
+		}
+		if u.OrderKey > 0 {
+			e["orderKey"] = u.OrderKey
+		}
 		if reused[i] && st == "succeeded" {
 			// a mark, not a state: committed green with the reuse mark
 			e["reused"] = true
@@ -241,7 +248,7 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		if st == "blocked" {
 			// what it waits on first, for "blocked on <x>"
 			for _, a := range u.After {
-				if a >= 0 && a < n && states[a] != "succeeded" && states[a] != "accepted" && states[a] != "superseded" {
+				if a >= 0 && a < n && states[a] != "succeeded" && states[a] != "accepted" && states[a] != "superseded" && states[a] != "withdrawn" {
 					on := plan.Units[a].Name
 					if on == "" {
 						on = plan.Units[a].Label
@@ -476,7 +483,7 @@ func unitStateMap(st *c4v1.WorkJobStatus, n int) []string {
 	for i := range out {
 		out[i] = "queued"
 	}
-	for _, name := range []string{"planned", "blocked", "locked", "waits", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "needs", "accepted", "superseded", "succeeded"} {
+	for _, name := range []string{"planned", "held", "blocked", "locked", "waits", "flagged", "backoff", "preflight", "retrying", "running", "egress", "failed", "needs", "accepted", "superseded", "withdrawn", "succeeded"} {
 		idx, _ := order.DecodeSet(st.UnitStates[name])
 		for _, i := range idx {
 			if i >= 0 && i < n {

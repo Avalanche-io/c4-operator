@@ -486,6 +486,10 @@ type Counts struct {
 	// Needs counts units stopped on an open question (Job.Needs): not
 	// failed; the job is held until each is answered or withdrawn.
 	Needs int `json:"needs,omitempty"`
+	// Withdrawn counts units its lead withdrew before they started
+	// (c4_plan): done for what follows them, never run. Held also counts
+	// the units its lead planned and has not released.
+	Withdrawn int `json:"withdrawn,omitempty"`
 }
 
 type States struct {
@@ -506,6 +510,10 @@ type States struct {
 	Locked      string `json:"locked,omitempty"`
 	Superseded  string `json:"superseded,omitempty"`
 	Needs       string `json:"needs,omitempty"`
+	// Held are the units its lead planned and has not released, and
+	// Withdrawn those it retired before they started (c4_plan).
+	Held      string `json:"held,omitempty"`
+	Withdrawn string `json:"withdrawn,omitempty"`
 }
 
 type Objective struct {
@@ -697,6 +705,9 @@ type Job struct {
 	// Lead is set on a lead's job (c4.avalanche.io/lead-session): whether
 	// its lead may still add workers, and when and why it closed.
 	Lead *Lead `json:"lead,omitempty"`
+	// Plan is what its lead's edits to its plan did (c4_plan): the latest
+	// calls, the units withdrawn and the order.
+	Plan *LeadPlan `json:"plan,omitempty"`
 	// NoNetwork is set once a unit of a job that names no tool has run:
 	// the farm's sentence for why it reached no network (its Network
 	// condition).

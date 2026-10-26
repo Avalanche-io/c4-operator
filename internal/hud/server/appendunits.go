@@ -346,8 +346,8 @@ func appendedBefore(j *c4v1.WorkJob, pending []c4v1.WorkAppendRequest, plan *cla
 
 // planFor is the job's unit table as the queue has it now, else as the
 // HUD last read it; nil if that is of another generation, or behind what
-// the job's status says was added (the units of the latest expansion or
-// append are not in it yet).
+// the job's status says was added (the units of the latest expansion,
+// append or plan call are not in it yet).
 func (s *Server) planFor(rec *jobRec, j *c4v1.WorkJob) *class.Plan {
 	p, gen := s.planOf(rec.key)
 	if p == nil {
@@ -368,6 +368,13 @@ func (s *Server) planFor(rec *jobRec, j *c4v1.WorkJob) *class.Plan {
 	for _, a := range j.Status.Appends {
 		if int(a.First+a.Units) > n {
 			return nil
+		}
+	}
+	if pl := j.Status.Plan; pl != nil {
+		for _, x := range pl.Recent {
+			if int(x.First+x.Units) > n {
+				return nil
+			}
 		}
 	}
 	return p

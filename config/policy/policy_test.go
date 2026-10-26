@@ -714,7 +714,7 @@ func TestControlsOnlyFromTheHUD(t *testing.T) {
 	enforced(t, "c4-workjob-controls", func(try int) error {
 		return patch(admin, c4v1.AnnotationDecide, fmt.Sprintf(`{"token":"t%d"}`, try))
 	})
-	for _, k := range []string{c4v1.AnnotationSupply, c4v1.AnnotationSteer, c4v1.AnnotationRequeue, c4v1.AnnotationAcks, c4v1.AnnotationAllowNodes, c4v1.AnnotationAcceptValidated, c4v1.AnnotationWithdrawNeeds, c4v1.AnnotationAppend, c4v1.AnnotationClose, c4v1.AnnotationControlRecords, "c4.avalanche.io/submission-record"} {
+	for _, k := range []string{c4v1.AnnotationSupply, c4v1.AnnotationSteer, c4v1.AnnotationRequeue, c4v1.AnnotationAcks, c4v1.AnnotationAllowNodes, c4v1.AnnotationAcceptValidated, c4v1.AnnotationWithdrawNeeds, c4v1.AnnotationAppend, c4v1.AnnotationPlan, c4v1.AnnotationClose, c4v1.AnnotationControlRecords, "c4.avalanche.io/submission-record"} {
 		if err := patch(admin, k, "x"); err == nil {
 			t.Errorf("%s written directly", k)
 		}

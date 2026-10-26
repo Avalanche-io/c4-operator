@@ -257,6 +257,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/steer", s.handleSteer)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/units", s.handleAppendUnits)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/close", s.handleClose)
+	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/plan", s.handlePlan)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/supply", s.handleSupply)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/needs/{unit}/withdraw", s.handleWithdrawNeeds)
 	mux.HandleFunc("POST /api/v1/jobs/{ns}/{name}/blacklist", s.handleBlacklist)

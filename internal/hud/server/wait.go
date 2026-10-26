@@ -32,7 +32,7 @@ const (
 
 // endedStates are a unit's final states; a unit in needs stopped on a
 // question.
-var endedStates = map[string]bool{"succeeded": true, "failed": true, "superseded": true, "accepted": true}
+var endedStates = map[string]bool{"succeeded": true, "failed": true, "superseded": true, "accepted": true, "withdrawn": true}
 
 // handleWait is GET /jobs/{ns}/{name}/wait?unit=U[&unit=U...][&any=true]
 // [&within=25s]: it answers when every unit named (or, with any, one of
@@ -129,19 +129,25 @@ func unitRefs(rec *jobRec, refs []string) (idx []int, bad string) {
 	return idx, ""
 }
 
-// pendingNames are the units of the job's appends the queue has not
-// applied yet: named in its HUD-only append requests whose key status does
-// not list.
+// pendingNames are the units of the job's appends and plan calls the
+// queue has not applied yet: named in its HUD-only append requests whose
+// key status does not list, and in its plan requests after the last it
+// carried out.
 func pendingNames(j *c4v1.WorkJob) map[string]bool {
+	out := map[string]bool{}
+	for _, r := range pendingPlans(j)[:0] {
+		for _, n := range r.Units {
+			out[n] = true
+		}
+	}
 	var reqs []c4v1.WorkAppendRequest
 	if json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationAppend]), &reqs) != nil || len(reqs) == 0 {
-		return nil
+		return out
 	}
 	done := map[string]bool{}
 	for _, a := range j.Status.Appends {
 		done[a.Key] = true
 	}
-	out := map[string]bool{}
 	for _, r := range reqs {
 		if done[r.Key] {
 			continue
