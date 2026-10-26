@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/agent"
 )
 
@@ -407,6 +408,99 @@ func TestHookSteer(t *testing.T) {
 	_, stdout, _ = runCLI(t, hook, "checkpoint", "--hook")
 	if strings.Contains(stdout, "v3 plates") || !strings.Contains(stdout, `"continue":false`) {
 		t.Fatalf("a stop: %q", stdout)
+	}
+}
+
+// After each tool call, what was sent to a block's unit while it worked
+// reaches it at once, not only at the end of its turn: the PostToolUse
+// hook hands it to the model, which is told its tool call ran as usual.
+// The hook starts c4-unit only when the control directory holds a message
+// past what the unit has seen, so a tool call with nothing new costs no
+// process. A session outside a unit hears nothing, and a stop the farm
+// asked for at that step leaves the message for the attempt that resumes
+// it.
+func TestHookSteerAtToolCall(t *testing.T) {
+	_, work := setup(t)
+	root := t.TempDir()
+	unit, log := filepath.Join(root, "c4-unit"), filepath.Join(root, "unit.log")
+	if err := os.WriteFile(unit, []byte(fakeUnit), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("C4_UNIT_BIN", unit)
+	t.Setenv("FAKE_UNIT_LOG", log)
+	t.Setenv("C4_PODINFO", "")
+	// the fake prints this whenever it is run, so the steps below say
+	// whether the hook ran it at all
+	t.Setenv("FAKE_STEER", `{"seq":1,"at":"2026-10-26T10:40:00Z","actor":"noor","text":"keep the C extension out of scope"}`)
+	hook := `{"session_id":"` + sid + `","hook_event_name":"PostToolUse","tool_name":"Bash"}`
+	if code, _, e := runCLI(t, "", "register", "--name", "lead", "--session", sid, "--cwd", work); code != 0 {
+		t.Fatalf("register: %d %s", code, e)
+	}
+	// a session that is not a unit's member hears nothing
+	if code, stdout, _ := runCLI(t, hook, "checkpoint", "--hook"); code != 0 || stdout != "" {
+		t.Fatalf("outside a unit: %d %q", code, stdout)
+	}
+
+	st := &agent.Store{Dir: os.Getenv("C4_AGENT_HOME")}
+	m, err := st.Get("lead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.UnitDir = filepath.Join(root, "units", "pod-uid-1")
+	if err := st.Put(m); err != nil {
+		t.Fatal(err)
+	}
+	u := agent.UnitDirsAt(m.UnitDir)
+	for _, d := range []string{filepath.Join(u.Out, ".c4"), u.Control} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	steer := func(msgs string) {
+		t.Helper()
+		if err := os.WriteFile(filepath.Join(u.Control, "steer"), []byte(msgs), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	// in a unit never steered: no message, and no c4-unit
+	if _, stdout, _ := runCLI(t, hook, "checkpoint", "--hook"); stdout != "" {
+		t.Fatalf("no steer file: %q", stdout)
+	}
+
+	// a message: it reaches the model after this tool call
+	steer(`[{"seq":1,"at":"2026-10-26T10:40:00Z","actor":"noor","text":"keep the C extension out of scope"}]`)
+	code, stdout, _ := runCLI(t, hook, "checkpoint", "--hook")
+	var got struct {
+		Decision string `json:"decision"`
+		Reason   string `json:"reason"`
+	}
+	if code != 0 || json.Unmarshal([]byte(stdout), &got) != nil || got.Decision != "block" ||
+		!strings.Contains(got.Reason, "noor: keep the C extension out of scope") || !strings.Contains(got.Reason, "Your last tool call ran as usual") {
+		t.Fatalf("a message at a tool call: %d %q", code, stdout)
+	}
+	if b, _ := os.ReadFile(log); len(b) != 0 {
+		t.Fatalf("a tool call announced a safe point: %q", b)
+	}
+
+	// seen (c4-unit marks it): the next tool call says nothing
+	if err := os.WriteFile(filepath.Join(u.Out, ".c4", "steer-seen"), []byte("1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, stdout, _ := runCLI(t, hook, "checkpoint", "--hook"); stdout != "" {
+		t.Fatalf("a message already seen: %q", stdout)
+	}
+
+	// the farm asked the unit to stop: the step ends the turn, and the
+	// new message waits
+	steer(`[{"seq":1,"at":"2026-10-26T10:40:00Z","actor":"noor","text":"keep the C extension out of scope"},{"seq":2,"at":"2026-10-26T10:41:00Z","actor":"noor","text":"use the v3 plates"}]`)
+	t.Setenv("FAKE_STEER", `{"seq":2,"at":"2026-10-26T10:41:00Z","actor":"noor","text":"use the v3 plates"}`)
+	if err := os.WriteFile(u.PodInfo, []byte(c4v1.AnnotationYield+`="capacity: a deadline needs the slot"`+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, _ = runCLI(t, hook, "checkpoint", "--hook")
+	if strings.Contains(stdout, "v3 plates") || !strings.Contains(stdout, "end your turn now") {
+		t.Fatalf("a stop at a tool call: %q", stdout)
 	}
 }
 

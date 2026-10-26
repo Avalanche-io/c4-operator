@@ -1078,7 +1078,7 @@ Input:
 
 ## c4_steer
 
-Send a message to one unit of a job while it runs, without stopping it: a change of direction, a hint, a correction. The unit reads it at its next safe point (an agent block at the end of its turn). A unit not running yet gets it when it starts; a finished one takes none. Delivered and read status are in c4_get_job's steers.
+Send a message to one unit of a job while it runs, without stopping it: a change of direction, a hint, a correction. The unit reads it at its next safe point (an agent block after its next tool call, or at the end of its turn if that comes first). A unit not running yet gets it when it starts; a finished one takes none. Delivered and read status are in c4_get_job's steers.
 
 Input:
 

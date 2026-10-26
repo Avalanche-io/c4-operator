@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/agent"
+	"github.com/Avalanche-io/c4-operator/internal/node"
 )
 
 // stopCode is c4-unit safepoint's exit status when the farm asked the unit
@@ -40,16 +41,9 @@ const safepointWait = 8 * time.Second
 // the session's environment. Outside a unit, or without c4-unit on the
 // PATH, it does nothing. It never fails the hook.
 func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agent.Checkpoint, stdout, stderr io.Writer) {
-	var env []string
-	out := os.Getenv("C4_OUTPUT")
-	if os.Getenv("C4_PODINFO") == "" {
-		dir := unitDirOf(h, input)
-		if dir == "" {
-			return
-		}
-		u := agent.UnitDirsAt(dir)
-		out = u.Out
-		env = append(os.Environ(), "C4_OUTPUT="+u.Out, "C4_CONTROL="+u.Control, "C4_PODINFO="+u.PodInfo)
+	env, out, _, ok := unitEnv(h, input)
+	if !ok {
+		return
 	}
 	// the turn's tokens first: a stop at this safe point ends the session
 	if out != "" {
@@ -57,13 +51,10 @@ func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agen
 			fmt.Fprintln(stderr, "c4-agent hook: usage:", err)
 		}
 	}
-	bin := os.Getenv("C4_UNIT_BIN")
-	if bin == "" {
-		var err error
-		if bin, err = exec.LookPath("c4-unit"); err != nil {
-			fmt.Fprintln(stderr, "c4-agent hook: in a farm unit but c4-unit is not on the PATH; no safe point announced")
-			return
-		}
+	bin, ok := unitBin()
+	if !ok {
+		fmt.Fprintln(stderr, "c4-agent hook: in a farm unit but c4-unit is not on the PATH; no safe point announced")
+		return
 	}
 	ref := safepointRef(input, cp)
 	ctx, cancel := context.WithTimeout(ctx, 2*safepointWait)
@@ -93,8 +84,82 @@ func hookSafepoint(ctx context.Context, h *agent.Harness, input []byte, cp *agen
 	case err != nil:
 		fmt.Fprintln(stderr, "c4-agent hook: c4-unit safepoint:", err)
 	}
-	hookSteer(ctx, bin, env, out, stdout, stderr)
+	hookSteer(ctx, bin, env, out, false, stdout, stderr)
 }
+
+// unitEnv is the environment c4-unit runs in for the session's unit, its
+// output root and its control directory: the hook's own in a pod, the unit
+// directory the host runner recorded for the session's member on a host.
+// ok is false outside a unit.
+func unitEnv(h *agent.Harness, input []byte) (env []string, out, control string, ok bool) {
+	if os.Getenv("C4_PODINFO") != "" {
+		return nil, os.Getenv("C4_OUTPUT"), os.Getenv("C4_CONTROL"), true // nil: the hook's own environment
+	}
+	dir := unitDirOf(h, input)
+	if dir == "" {
+		return nil, "", "", false
+	}
+	u := agent.UnitDirsAt(dir)
+	return append(os.Environ(), "C4_OUTPUT="+u.Out, "C4_CONTROL="+u.Control, "C4_PODINFO="+u.PodInfo), u.Out, u.Control, true
+}
+
+// steerWaiting reports whether the unit has a message it has not seen:
+// one in control/steer numbered past .c4/steer-seen. It runs after every
+// tool call, so it starts no process; c4-unit still reads and marks them.
+func steerWaiting(control, out string) bool {
+	if control == "" {
+		return false
+	}
+	b, err := os.ReadFile(filepath.Join(control, "steer"))
+	if err != nil {
+		return false
+	}
+	var msgs []struct {
+		Seq int `json:"seq"`
+	}
+	if json.Unmarshal(b, &msgs) != nil {
+		return true // c4-unit says what is wrong with it
+	}
+	seen, _ := node.ReadSteerSeen(out)
+	for _, m := range msgs {
+		if m.Seq > seen {
+			return true
+		}
+	}
+	return false
+}
+
+// unitBin is the c4-unit the hook runs.
+func unitBin() (string, bool) {
+	if bin := os.Getenv("C4_UNIT_BIN"); bin != "" {
+		return bin, true
+	}
+	bin, err := exec.LookPath("c4-unit")
+	return bin, err == nil
+}
+
+// hookSteerAtTool delivers, after a tool call, what was sent to the unit
+// while it worked, so a steer reaches the model at its next tool call, not
+// only at the end of its turn. The messages are marked seen as they are
+// read, so each is delivered once, here or at the turn's end. Outside a
+// unit it does nothing.
+func hookSteerAtTool(ctx context.Context, h *agent.Harness, input []byte, stdout, stderr io.Writer) {
+	env, out, control, ok := unitEnv(h, input)
+	if !ok || !steerWaiting(control, out) {
+		return
+	}
+	bin, ok := unitBin()
+	if !ok {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, steerAtToolWait)
+	defer cancel()
+	hookSteer(ctx, bin, env, out, true, stdout, stderr)
+}
+
+// steerAtToolWait bounds the steer read after a tool call, well inside the
+// hook's 10-second timeout.
+const steerAtToolWait = 5 * time.Second
 
 // hookAsk puts a turn's question to another unit (.c4/ask.json:
 // {"to": "unit:<name>", "ask": "..."}; to defaults to the job's answerer)
@@ -194,7 +259,9 @@ func takeTurnFile(out, name string, v any) (ok bool, err error) {
 // person's message is passed on; a question from another unit comes with
 // how to answer it; an answer to the block's own open question closes it.
 // A turn the farm stops leaves them for the attempt that resumes it.
-func hookSteer(ctx context.Context, bin string, env []string, out string, stdout, stderr io.Writer) {
+// atTool is a delivery after a tool call, which the session reads before
+// its next step.
+func hookSteer(ctx context.Context, bin string, env []string, out string, atTool bool, stdout, stderr io.Writer) {
 	var raw strings.Builder
 	cmd := exec.CommandContext(ctx, bin, "steer", "--json")
 	cmd.Stdout, cmd.Stderr = &raw, stderr
@@ -213,11 +280,13 @@ func hookSteer(ctx context.Context, bin string, env []string, out string, stdout
 	if len(lines) == 0 {
 		return
 	}
-	reason, _ := json.Marshal(map[string]any{
-		"decision": "block",
-		"reason": "Messages for you arrived while you worked:\n" + strings.Join(lines, "\n") +
-			"\nTake them into account and carry on with your task, then end your turn as before.",
-	})
+	text := "Messages for you arrived while you worked:\n" + strings.Join(lines, "\n") +
+		"\nTake them into account and carry on with your task, then end your turn as before."
+	if atTool {
+		text = "Your last tool call ran as usual. Messages for you arrived while you worked:\n" + strings.Join(lines, "\n") +
+			"\nTake them into account in what you do next, and carry on with your task."
+	}
+	reason, _ := json.Marshal(map[string]any{"decision": "block", "reason": text})
 	fmt.Fprintln(stdout, string(reason))
 }
 

@@ -94,12 +94,17 @@ func run(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.
 		}
 		if agent.HookEvent(input) == "PostToolUse" {
 			// after each tool call: a stop the farm asked for ends the turn
-			// at this step, not at the turn's own end
-			if why, ok, err := h.StopAsked(input); err != nil {
+			// at this step, not at the turn's own end; else what was sent
+			// to the unit reaches it now
+			why, ok, err := h.StopAsked(input)
+			switch {
+			case err != nil:
 				fmt.Fprintln(stderr, "c4-agent hook:", err)
-			} else if ok {
+			case ok:
 				stdout.Write(agent.HookDecision(why))
+				return 0 // its messages wait for the attempt that resumes it
 			}
+			hookSteerAtTool(ctx, h, input, stdout, stderr)
 			return 0
 		}
 		cp, err := h.Hook(ctx, bytes.NewReader(input))

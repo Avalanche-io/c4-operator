@@ -653,13 +653,23 @@ renders the light it was given.
 
 ### Steering a running block
 
-A person can message a running block (HUD steer, MCP `c4_steer`). The
-messages reach the unit's control directory. At the end of every turn
-that goes on, the Stop hook reads the new ones (`c4-unit steer`, which
-marks them seen) and keeps the session from stopping, with the messages
-as what to do next. So the block takes them into account in the same
-attempt. A turn the farm stops at reads none, and they wait for the
-attempt that resumes it.
+A person or the lead can message a running block (HUD steer, MCP
+`c4_steer`). The messages reach the unit's control directory, and the
+block reads each one once, at whichever comes first:
+- **After its next tool call.** The PostToolUse hook reads the new ones
+  (`c4-unit steer`, which marks them seen) and hands them to the model
+  with its tool's result, so a correction lands at the next step, not at
+  the turn's end. A block inside one long tool call (a ten-minute build)
+  gets them when that call ends. A tool call with nothing unseen starts no
+  process: the hook compares the control directory's messages with
+  `.c4/steer-seen` itself.
+- **At the end of a turn that goes on.** The Stop hook reads them the same
+  way and keeps the session from stopping, with the messages as what to do
+  next.
+
+So the block takes them into account in the same attempt. A step or a
+turn the farm stops at reads none, and they wait for the attempt that
+resumes it.
 
 ## Blocks in containers, and sessions as views
 
