@@ -31,8 +31,8 @@ Kubernetes system. C4 is short for The Cinema Content Creation Cloud
 - **Every output is a version, every step is signed.** A frame traces back to
   the render that made it, the files it read and the model it used, without
   anyone keeping a spreadsheet.
-- **Only what needs you comes first.** The HUD puts the one question or
-  decision that needs a person on top, and reports what the farm handled on
+- **Only what needs you comes first.** The HUD puts the questions and
+  decisions that need a person on top, and reports what the farm handled on
   its own, instead of someone watching the queue all night.
 - **Agents are first-class work.** Claude Code sessions run on the farm like
   any other job, checkpointed at every turn, and agents get the same controls
@@ -42,8 +42,9 @@ Kubernetes system. C4 is short for The Cinema Content Creation Cloud
 
 ## Quickstart: render a shot by its deadline
 
-You need Docker (Docker Desktop, OrbStack or Colima). You don't need any
-Kubernetes tools; `c4 farm up` brings its own.
+You need Docker (Docker Desktop, OrbStack or Colima) with at least 6 GB of
+memory and 4 CPUs. You don't need any Kubernetes tools; `c4 farm up` brings
+its own.
 
 ```sh
 brew install mrjoshuak/tap/c4
@@ -61,9 +62,10 @@ cd ~/c4-samples/saltmarsh
 c4 farm submit render sm0140/sm0140.usda --frames 1001-1024 --set width=960
 ```
 
-This fetches a sample shot (79 MB) and renders 24 frames of it with Blender's
-Cycles, at 960 pixels wide to keep it quick. Before anything runs, `submit`
-prints its plan: the files it uploads, the estimate and the deadline.
+This fetches a sample shot (79 MB). Before anything runs, `submit` prints its
+plan: the files it uploads, the estimate and the deadline. Press Enter to
+submit, and it renders 24 frames with Blender's Cycles, at 960 pixels wide to
+keep it quick.
 
 ```sh
 c4 farm open sm0140-light-v001
@@ -109,7 +111,8 @@ details.
   and which one needs you. Running agents as farm jobs:
   [docs/agents/c4-agent.md](docs/agents/c4-agent.md).
 - **CI:** `c4 farm submit ci .` runs a Python or Go repository's tests in
-  shards. Results caching across commits is coming.
+  shards, with no network: dependencies come with the folder. Results caching
+  across commits is coming.
 - **Machine learning:** training that yields its GPUs at a checkpoint, and
   inference over every frame. First-job guides are coming.
 

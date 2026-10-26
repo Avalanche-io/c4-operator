@@ -26,7 +26,7 @@ Each release attaches one manifest with the CRDs, the operator and its
 RBAC, pointing at the release's image on GHCR:
 
 ```sh
-kubectl apply -f https://github.com/Avalanche-io/c4-operator/releases/download/v0.1.0/install.yaml
+kubectl apply -f https://github.com/Avalanche-io/c4-operator/releases/download/v0.2.1/install.yaml
 kubectl -n c4-system rollout status deploy/c4-manager
 kubectl -n c4-system rollout status ds/c4-node
 kubectl -n c4-system rollout status deploy/c4-regional
@@ -38,7 +38,7 @@ or, from a checkout of the release tag, with kustomize:
 kubectl apply -k config/release
 ```
 
-The image is `ghcr.io/avalanche-io/c4-operator:v0.1.0`, one image for every
+The image is `ghcr.io/avalanche-io/c4-operator:v0.2.1`, one image for every
 component, for `linux/amd64` and `linux/arm64`.
 
 What it installs:
@@ -231,7 +231,7 @@ with the queue in charge: see [Run work](#run-work). `kind delete cluster
 ## Uninstall
 
 ```sh
-kubectl delete -f https://github.com/Avalanche-io/c4-operator/releases/download/v0.1.0/install.yaml
+kubectl delete -f https://github.com/Avalanche-io/c4-operator/releases/download/v0.2.1/install.yaml
 ```
 
 Deleting the CRDs deletes every Project, Materialization and WorkJob. The
@@ -240,8 +240,8 @@ stores are not touched.
 ## Build your own images
 
 ```sh
-make images REGISTRY=registry.example.com/you VERSION=v0.1.0 PUSH=1
-make install-yaml REGISTRY=registry.example.com/you VERSION=v0.1.0   # bin/install.yaml
+make images REGISTRY=registry.example.com/you VERSION=v0.2.1 PUSH=1
+make install-yaml REGISTRY=registry.example.com/you VERSION=v0.2.1   # bin/install.yaml
 ```
 
 `make images` cross-compiles each platform's binary and builds one
