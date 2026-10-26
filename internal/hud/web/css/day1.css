@@ -130,3 +130,6 @@ html[data-needs="urgent"] .top { box-shadow: inset 0 3px 0 var(--temp); }
 /* where a job came from, when a tracker submitted it (words.js fromTracker) */
 .d1-from { font: 400 13px/1.4 var(--sans); color: var(--ink-2); margin: -6px 0 8px; }
 .d1-from a, .qfrom a { color: inherit; text-decoration: underline; text-decoration-color: var(--rule-2); }
+.ses-note { padding: 4px 18px 8px 36px; font: 400 12px/1.4 var(--sans); color: var(--ink-3); border-bottom: 1px solid var(--rule-1); }
+.signin .signin-cmd { font: 500 15px/1.4 var(--mono); color: var(--paper); background: var(--plate); border: 1px solid var(--rule-2); padding: 10px 14px; margin: 4px 0 14px; display: inline-block; }
+.signin .small { font-size: 12px; }

@@ -1,5 +1,9 @@
 // HUD API client. The mock takes the viewer as ?as=; the real backend uses
-// a bearer token and ignores it.
+// a bearer token, or on a local farm the installer's cookie, which
+// `c4 farm open` sets. Every write says it comes from the HUD's own page
+// (X-C4-HUD): a page on another localhost port cannot send that header
+// without a preflight the farm refuses, so it cannot post to a control
+// with the cookie.
 
 const params = new URLSearchParams(location.search);
 export const as = params.get('as') || '';
@@ -10,31 +14,36 @@ function withViewer(path) {
   return path + (path.includes('?') ? '&' : '?') + 'as=' + encodeURIComponent(as);
 }
 
+// failed: the server's words for a refusal, and its status
+async function failed(r) {
+  const body = await r.json().catch(() => ({}));
+  const e = new Error(body.error || `${r.status} ${r.statusText}`);
+  e.status = r.status;
+  return e;
+}
+
 export async function get(path) {
   const r = await fetch(withViewer('/api/v1' + path), { headers: { Accept: 'application/json' } });
-  if (!r.ok) {
-    const body = await r.json().catch(() => ({}));
-    throw new Error(body.error || `${r.status} ${r.statusText}`);
-  }
+  if (!r.ok) throw await failed(r);
   return r.json();
 }
+
+const WRITE = { 'X-C4-HUD': '1' };
 
 export async function post(path, body) {
   const r = await fetch(withViewer('/api/v1' + path), {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...WRITE },
     body: JSON.stringify(body || {}),
   });
-  const out = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(out.error || `${r.status} ${r.statusText}`);
-  return out;
+  if (!r.ok) throw await failed(r);
+  return r.json().catch(() => ({}));
 }
 
 export async function del(path) {
-  const r = await fetch(withViewer('/api/v1' + path), { method: 'DELETE', headers: { Accept: 'application/json' } });
-  const out = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(out.error || `${r.status} ${r.statusText}`);
-  return out;
+  const r = await fetch(withViewer('/api/v1' + path), { method: 'DELETE', headers: { Accept: 'application/json', ...WRITE } });
+  if (!r.ok) throw await failed(r);
+  return r.json().catch(() => ({}));
 }
 
 export function objectURL(url) {
@@ -56,7 +65,7 @@ function loadFonts() {
 // subscribe delivers snapshots: from the event stream, or once in static mode.
 export function subscribe(onSnapshot, onStatus) {
   if (staticMode) {
-    loadFonts().then(() => get('/snapshot')).then(onSnapshot, (e) => onStatus('error', e.message));
+    loadFonts().then(() => get('/snapshot')).then(onSnapshot, (e) => onStatus('error', e.message, e.status));
     return;
   }
   let es;
@@ -66,7 +75,7 @@ export function subscribe(onSnapshot, onStatus) {
   // stream (a proxy that buffers event streams would otherwise hold it).
   get('/snapshot').then((s) => { if (!streamed) onSnapshot(s); }, () => {});
   const poll = () => {
-    get('/snapshot').then((s) => { onSnapshot(s); onStatus('polling'); }, (e) => onStatus('error', e.message));
+    get('/snapshot').then((s) => { onSnapshot(s); onStatus('polling'); }, (e) => onStatus('error', e.message, e.status));
   };
   const open = () => {
     es = new EventSource(withViewer('/api/v1/events'));

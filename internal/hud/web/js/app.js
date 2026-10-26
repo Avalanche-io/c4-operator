@@ -565,9 +565,20 @@ subscribe((snap) => {
   // the viewer is known now: their preferences apply
   if (me() !== was) applyPrefs();
   render();
-}, (st, msg) => {
+}, (st, msg, code) => {
   state.status = staticMode ? 'static' : st;
-  if (st === 'error' && !state.snap) document.getElementById('main').textContent = `The farm did not answer: ${msg}`;
+  if (st !== 'error' || state.snap) return;
+  // a local farm answers only a browser its machine signed in: say how,
+  // calmly; the page keeps asking, and loads once c4 farm open has run
+  const main = document.getElementById('main');
+  if (code === 401) {
+    main.replaceChildren(h('section', { class: 'd1 signin', 'data-key': 'signin' },
+      h('h1', null, 'Open this HUD from the farm’s machine'),
+      h('p', { class: 'd1-sub' }, 'This farm’s HUD answers a browser its own machine opened. On the machine that runs the farm, run:'),
+      h('pre', { class: 'signin-cmd' }, h('code', null, 'c4 farm open')),
+      h('p', { class: 'dim' }, 'It opens this page signed in. Nothing to type here: the machine’s key never goes in a link.'),
+      h('p', { class: 'dim small' }, msg)));
+  } else main.textContent = `The farm did not answer: ${msg}`;
 });
 
 export { as };

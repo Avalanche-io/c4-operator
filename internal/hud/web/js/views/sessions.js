@@ -128,6 +128,17 @@ function crew(s) {
     done ? `${done} done` : ''].filter(Boolean).join(', ');
 }
 
+// modelName: claude-opus-5-5 as Opus 5.5; anything else as it is
+const modelName = (m) => {
+  const x = /^claude-([a-z]+)-(\d+)-(\d+)/.exec(String(m || ''));
+  return x ? `${x[1][0].toUpperCase()}${x[1].slice(1)} ${x[2]}.${x[3]}` : m || '';
+};
+// about: a worker's line to hover: what it was asked, its agent type and
+// the model it was asked for
+const about = (s) => [s.description, s.agentType ? `agent type: ${s.agentType}` : '', s.model ? `model: ${modelName(s.model)}` : ''].filter(Boolean).join('\n') || null;
+// unseen: a lead that ran workflow agents, which observing does not read yet
+const unseen = (s) => (s.workflowsNotShown ? h('div', { class: 'ses-note', 'data-key': 'wf-' + s.session }, 'It ran workflow agents; those are not shown here yet.') : null);
+
 // line: a session that needs nothing, in one quiet line, with the workers
 // it started nested under it
 function line(ctx, s, depth = 0) {
@@ -135,7 +146,7 @@ function line(ctx, s, depth = 0) {
   const u = usage(s);
   const c = crew(s);
   const own = h('div', { class: 'ses-line' + (depth ? ' ses-child' : '') + (s.parentClaimed ? ' ses-guess' : ''), 'data-key': 'ses-' + s.session },
-    h('span', { class: 'nm', title: s.description || null }, s.name),
+    h('span', { class: 'nm', title: about(s) }, s.name),
     h('span', { class: 'st ' + (stateOf(s) === 'waiting' && s.waitsOn === 'lead' ? '' : cls) }, stateOf(s) === 'waiting' && s.waitsOn === 'lead' ? 'waits on its lead' : w),
     h('span', { class: 'dt' }, [depth && s.description ? s.description : rest, c, s.onFarm ? 'on the farm' : ''].filter(Boolean).join(' · ')),
     h('span', { class: 'us', title: u ? u.title : null }, u ? u.text : ''),
@@ -143,8 +154,8 @@ function line(ctx, s, depth = 0) {
   const ks = kidsOf(s);
   // nothing nested unless a worker is at work: a lead whose workers all
   // finished is summed up on its own line, and opened from Your sessions
-  if (!ks.some((k) => !ended(k)) && !st.open.has('kids:' + s.session)) return own;
-  return [own, ctx.level >= 2 ? boxes(ctx, s, ks) : nested(ctx, s, ks, depth)];
+  if (!ks.some((k) => !ended(k)) && !st.open.has('kids:' + s.session)) return unseen(s) ? [own, unseen(s)] : own;
+  return [own, unseen(s), ctx.level >= 2 ? boxes(ctx, s, ks) : nested(ctx, s, ks, depth)];
 }
 
 // nested: a lead's workers at level 1, one line each; finished ones and
@@ -173,12 +184,12 @@ function boxes(ctx, s, ks) {
       const [w, cls] = word(k);
       const u = usage(k);
       const lead = stateOf(k) === 'waiting' && k.waitsOn === 'lead';
-      return h('div', { class: 'ses-box' + (lead ? ' asks-lead' : '') + (k.parentClaimed ? ' ses-guess' : ''), 'data-key': 'box-' + k.session },
+      return h('div', { class: 'ses-box' + (lead ? ' asks-lead' : '') + (k.parentClaimed ? ' ses-guess' : ''), 'data-key': 'box-' + k.session, title: about(k) },
         h('div', { class: 'bn' }, k.name),
         h('div', { class: 'bd' }, k.description || k.kind),
         h('div', { class: 'bs ' + (lead ? '' : cls) }, lead ? 'waits on its lead' : w),
         k.needsYou ? h('div', { class: 'bq' }, `“${k.needsYou}”`) : null,
-        h('div', { class: 'bu', title: u ? u.title : null }, [k.kind, u ? u.text : ''].filter(Boolean).join(' · ')));
+        h('div', { class: 'bu', title: u ? u.title : null }, [k.agentType || k.kind, modelName(k.model), u ? u.text : ''].filter(Boolean).join(' · ')));
     }),
     done ? h('div', { class: 'ses-box done' }, h('div', { class: 'bn' }, `${done} done`), h('div', { class: 'bd' }, 'finished workers')) : null);
 }
