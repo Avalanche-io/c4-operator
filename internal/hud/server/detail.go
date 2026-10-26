@@ -133,6 +133,11 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		out["interruptions"] = is
 		out["interrupted"] = rec.job.Status.Interrupted
 	}
+	older := rec.job.Status.ModelUsageOlder
+	if older != nil {
+		// the older model units' use, summed: their rows say folded
+		out["usageOlder"] = older
+	}
 
 	states := unitStateMap(&rec.job.Status, n)
 	attempts := parseAttempts(rec.job.Status.Attempts)
@@ -219,6 +224,9 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 		}
 		if us, ok := rec.job.Status.ModelUsage[strconv.Itoa(i)]; ok {
 			e["usage"] = us
+		} else if older != nil && i < int(older.Below) && rec.driver != nil && class.DoesOf(rec.driver, u) == class.DoesModel {
+			// an older model unit's use is in the job's usageOlder
+			e["usageFolded"] = true
 		}
 		if len(u.Claims) > 0 {
 			var on []string

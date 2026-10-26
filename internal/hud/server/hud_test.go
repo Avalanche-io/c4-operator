@@ -405,6 +405,56 @@ func TestAgentSummaryInDetail(t *testing.T) {
 	}
 }
 
+// A big job's status lists its newest model units' usage and folds the
+// older ones into one sum: the detail gives the sum, and each older
+// unit's row says it is folded rather than showing no usage.
+func TestFoldedUsageInDetail(t *testing.T) {
+	s := farm(t)
+	j := c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "research", CreationTimestamp: metav1.Time{Time: s.m.at.Add(-time.Hour)}},
+		Spec: c4v1.WorkJobSpec{Class: "agent", Params: map[string]string{"members": "survey,port,check", "bundle": "research"}},
+		Status: c4v1.WorkJobStatus{Phase: "Running", Units: c4v1.UnitCounts{Total: 3, Succeeded: 3},
+			ModelUsage: map[string]c4v1.WorkUnitUsage{"2": {InputTokens: 1200, Cost: "0.2500"}},
+			ModelUsageOlder: &c4v1.WorkUsageFold{Below: 2, Units: 2, WorkUnitUsage: c4v1.WorkUnitUsage{InputTokens: 2400, Cost: "0.5000",
+				Models: []c4v1.WorkModelTokens{{Model: "claude-opus-5-5", InputTokens: 2400, Cost: "0.5000"}}}}}}
+	d, err := class.Lookup("agent")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := d.Plan(&j)
+	if err != nil || len(plan.Units) != 3 {
+		t.Fatalf("plan: %v", err)
+	}
+	rec := &jobRec{job: j, key: "show-a/research", project: "show-a", plan: plan, driver: d}
+	s.m.jobs = append(s.m.jobs, rec)
+	s.m.byKey[rec.key] = rec
+	var got struct {
+		UsageOlder *c4v1.WorkUsageFold `json:"usageOlder"`
+		UnitList   []struct {
+			I           int                 `json:"i"`
+			Usage       *c4v1.WorkUnitUsage `json:"usage"`
+			UsageFolded bool                `json:"usageFolded"`
+		} `json:"unitList"`
+	}
+	if code := get(t, s, "/api/v1/jobs/show-a/research?as=artist", &got); code != 200 {
+		t.Fatalf("detail: %d", code)
+	}
+	if o := got.UsageOlder; o == nil || o.Below != 2 || o.Units != 2 || o.InputTokens != 2400 || o.Cost != "0.5000" || len(o.Models) != 1 {
+		t.Fatalf("usageOlder %+v", o)
+	}
+	if len(got.UnitList) != 3 {
+		t.Fatalf("%d units", len(got.UnitList))
+	}
+	for _, u := range got.UnitList {
+		folded := u.I < 2
+		if u.UsageFolded != folded || (u.Usage != nil) == folded {
+			t.Fatalf("unit %d: folded %v, usage %+v", u.I, u.UsageFolded, u.Usage)
+		}
+	}
+	if u := got.UnitList[2].Usage; u.InputTokens != 1200 || u.Cost != "0.2500" {
+		t.Fatalf("the newest unit's usage %+v", u)
+	}
+}
+
 func TestCappedNodeInSnapshot(t *testing.T) {
 	s := farm(t)
 	s.m.nodes[0].Labels[c4v1.LabelSlotLimit] = "1"
