@@ -146,9 +146,12 @@ const (
 	ConditionAgentWork = "AgentWork"
 	// LabelShot groups a shot's jobs (the HUD's shot view).
 	LabelShot = "c4.avalanche.io/shot"
-	// LabelToolTest on a tool's test job names the tool it tests. Its
-	// outcome is the tool's: it takes no requeue or acceptance, and a
-	// new publish tests the tool again.
+	// LabelToolTest on a tool's test job names the tool it tests: the
+	// farm's test of a published tool, on the tool's own small fixture. Its
+	// outcome is the tool's: it takes no requeue or acceptance, and a new
+	// publish tests the tool again. The queue learns nothing from it (no
+	// class history, shot history or calibration), since a fixture's
+	// frames say nothing of production work.
 	LabelToolTest = "c4.avalanche.io/tool-test"
 	// LabelMilestone on a WorkJob joins it to the Milestone of that name
 	// in its namespace, whatever the Milestone's selector: a submission

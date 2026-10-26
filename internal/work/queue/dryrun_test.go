@@ -284,3 +284,31 @@ func TestGuessLeavesNoCalibration(t *testing.T) {
 		t.Fatal("still NoHistory after its frames ran")
 	}
 }
+
+// The farm's tests of its tools (c4 farm up publishes each, and every
+// frames tool lowers to the render class) are no history of production
+// work: after two of them, frames of two seconds, a 48-frame render still
+// plans on no history, and is never ready now.
+func TestDryRunAfterTheFarmsToolTests(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 3, 2)
+	ctx := context.Background()
+	for _, name := range []string{"render-farmtest-1a2b3c4d", "comp-farmtest-5e6f7a8b"} {
+		j := job(ns, name, "render", "cpu-"+ns, map[string]string{"frames": "1001-1002"}, time.Time{})
+		j.Labels = map[string]string{c4v1.LabelToolTest: strings.Split(name, "-")[0]}
+		if err := k8s.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+		runAll(t, q, now, ns, name, 2*time.Second, func(i int) string { return "" })
+	}
+	if _, ok := q.classPrior("namespace/"+ns, "render"); ok {
+		t.Fatal("the farm's tool tests became the render class's history")
+	}
+	draft := job(ns, "", "render", "cpu-"+ns, map[string]string{"frames": "1001-1048"}, now.Add(2*time.Hour))
+	dr, err := q.DryRun(ctx, draft, "namespace/"+ns)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dr.Estimate.NoHistory || dr.Band.P50.Before(now.Add(10*time.Minute)) {
+		t.Fatalf("after the tool tests: NoHistory %v, ready %s at %s", dr.Estimate.NoHistory, dr.Band.P50, *now)
+	}
+}

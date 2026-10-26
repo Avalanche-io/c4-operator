@@ -1073,12 +1073,16 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 			if !m.succeeded[idx] {
 				m.succeeded[idx] = true
 				m.millis[idx] = runMillis(p, now)
-				q.noteDuration(v.project, v.job.Spec.Class, float64(m.millis[idx])/1000)
+				if !fixture(v.job) {
+					q.noteDuration(v.project, v.job.Spec.Class, float64(m.millis[idx])/1000)
+				}
 				if idx < len(m.plan.Units) {
 					// A rerun (a rework, or a review after one) against the
 					// unit's first pass: what reruns of its key cost.
 					if first := m.firstMillis[idx]; first > 0 {
-						q.noteRerun(v.project, v.job.Spec.Class, m.plan.Units[idx].Key, float64(m.millis[idx])/float64(first))
+						if !fixture(v.job) {
+							q.noteRerun(v.project, v.job.Spec.Class, m.plan.Units[idx].Key, float64(m.millis[idx])/float64(first))
+						}
 					} else if m.millis[idx] > 0 {
 						if m.firstMillis == nil {
 							m.firstMillis = map[int]int64{}

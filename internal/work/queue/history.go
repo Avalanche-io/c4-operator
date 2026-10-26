@@ -43,7 +43,7 @@ type shotProfile struct {
 func (q *Queue) noteProfiles(v *view) {
 	m := v.mem
 	shot := v.job.Labels[c4v1.LabelShot]
-	if m.profiled || shot == "" || m.plan == nil || !isFinished(v) || len(m.succeeded) < len(m.plan.Units) {
+	if m.profiled || shot == "" || m.plan == nil || !isFinished(v) || len(m.succeeded) < len(m.plan.Units) || fixture(v.job) {
 		return
 	}
 	m.profiled = true

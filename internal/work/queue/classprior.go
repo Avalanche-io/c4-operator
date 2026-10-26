@@ -4,6 +4,7 @@ import (
 	"math"
 	"sort"
 
+	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
@@ -23,6 +24,15 @@ const (
 	classDurKept = 256
 	classDurMin  = 3
 )
+
+// fixture reports whether a job is the farm's test of a published tool
+// (c4v1.LabelToolTest). Its units run the tool's own small fixture (two
+// frames of a test stage at 64 pixels wide, say), so the queue learns
+// nothing from them: kept, the tests c4 farm up runs (every frames tool
+// lowers to the render class) became the render class's history, and a
+// production render of 48 frames was planned at their few seconds a
+// frame, ready at once.
+func fixture(j *c4v1.WorkJob) bool { return j.Labels[c4v1.LabelToolTest] != "" }
 
 // classDurations are a project's recent unit durations, by class.
 type classDurations map[string][]float64

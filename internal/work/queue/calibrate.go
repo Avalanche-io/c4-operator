@@ -137,7 +137,7 @@ func remainingAfter(t time.Time, ends map[int]time.Time, millis map[int]int64, s
 // learn turns a succeeded job's kept moments into calibration scores.
 func (q *Queue) learn(v *view) {
 	m := v.mem
-	if m.learned || m.plan == nil {
+	if m.learned || m.plan == nil || fixture(v.job) {
 		return
 	}
 	m.learned = true
@@ -246,7 +246,7 @@ func (m *jobMem) noteFinish(now time.Time, finished, total int, rawP50 time.Time
 // learnFinish scores a succeeded job's kept medians against its finish.
 func (q *Queue) learnFinish(v *view) {
 	m := v.mem
-	if m.finLearned || m.finished.IsZero() {
+	if m.finLearned || m.finished.IsZero() || fixture(v.job) {
 		return
 	}
 	m.finLearned = true
