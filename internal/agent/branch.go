@@ -99,9 +99,9 @@ func ensureBranch(ctx context.Context, p *corev1.Pod) (UnitBranch, bool, error) 
 		b.Base, _ = gitLine(ctx, b.Repo, "config", "--get", key)
 		return b, true, nil
 	}
-	base, err := gitLine(ctx, b.Repo, "rev-parse", "HEAD")
+	base, err := branchBase(ctx, b.Repo, podEnv(p, EnvBlockBase))
 	if err != nil {
-		return b, false, fmt.Errorf("%s has no commit to branch from: %w", b.Repo, err)
+		return b, false, err
 	}
 	if _, err := gitLine(ctx, b.Repo, "worktree", "add", "-b", b.Branch, b.Dir, base); err != nil {
 		return b, false, err
@@ -111,6 +111,29 @@ func ensureBranch(ctx context.Context, p *corev1.Pod) (UnitBranch, bool, error) 
 	}
 	b.Base = base
 	return b, true, nil
+}
+
+// branchBase is the commit a block's new branch starts from: the one its
+// pod names (C4_BLOCK_BASE), which must be a commit in repo, else the
+// repository's HEAD.
+func branchBase(ctx context.Context, repo, want string) (string, error) {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		base, err := gitLine(ctx, repo, "rev-parse", "HEAD")
+		if err != nil {
+			return "", fmt.Errorf("%s has no commit to branch from: %w", repo, err)
+		}
+		return base, nil
+	}
+	// a name from the lead, never an option to git
+	if strings.HasPrefix(want, "-") || strings.ContainsAny(want, " \t\n") {
+		return "", fmt.Errorf("its base %q is not a commit in %s", want, repo)
+	}
+	base, err := gitLine(ctx, repo, "rev-parse", "--verify", "--quiet", "--end-of-options", want+"^{commit}")
+	if err != nil || base == "" {
+		return "", fmt.Errorf("its base %s is not a commit in %s", want, repo)
+	}
+	return base, nil
 }
 
 // excludeWorktrees keeps the runner's worktrees (under repo, a folder in

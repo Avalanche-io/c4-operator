@@ -546,6 +546,7 @@ across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
 | `C4_AGENT_BLOCK`   | the job's template                                                | `1`: the pod is a block                                                                             |
 | `C4_BLOCK_PROMPT`  | the template, or a unit's `env` in its document (the unit's wins) | the block's task                                                                                    |
 | `C4_BLOCK_REPO`    | the template                                                      | the project's working tree on the host                                                              |
+| `C4_BLOCK_BASE`    | a lead's `c4_agent`, or a unit                                     | the commit its branch starts from (default: the repository's `HEAD` at the first attempt); one that is not a commit in the repository fails the attempt (NoBranch) |
 | `C4_BLOCK_TOOLS`   | the template                                                      | the tools it may use, space separated (default `Read Edit Write Glob Grep Bash(git:*) Bash(go:*)`)  |
 | `C4_BLOCK_MODEL`   | the template or a unit                                            | the model, when not the CLI's default                                                               |
 | `C4_BLOCK_EFFORT`  | the template or a unit                                            | the effort level (`--effort`: low, medium, high, xhigh, max), when not the CLI's default            |

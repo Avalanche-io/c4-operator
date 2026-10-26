@@ -91,6 +91,48 @@ func TestBlockWorksOnItsOwnBranch(t *testing.T) {
 	}
 }
 
+// A block's branch starts from the commit its pod names (a lead's HEAD
+// when it submitted the worker), not wherever the repository's HEAD has
+// moved since. A base that is not a commit in the repository, or that
+// looks like an option to git, is refused and makes no branch; a later
+// attempt keeps the base its branch started from.
+func TestBlockBranchStartsAtItsBase(t *testing.T) {
+	ctx := context.Background()
+	repo := t.TempDir()
+	gitT(t, repo, "init", "-q", "-b", "main")
+	os.WriteFile(filepath.Join(repo, "README"), []byte("hello\n"), 0o644)
+	gitT(t, repo, "add", ".")
+	gitT(t, repo, "commit", "-q", "-m", "start")
+	lead := gitT(t, repo, "rev-parse", "HEAD")
+	os.WriteFile(filepath.Join(repo, "README"), []byte("hello again\n"), 0o644)
+	gitT(t, repo, "commit", "-q", "-am", "moved on")
+
+	pod := func(unit, base string) *corev1.Pod {
+		p := hostPod()
+		p.Labels[c4v1.LabelJob] = "port"
+		p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: EnvBlock, Value: "1"},
+			corev1.EnvVar{Name: EnvBlockRepo, Value: repo}, corev1.EnvVar{Name: "C4_UNIT_NAME", Value: unit},
+			corev1.EnvVar{Name: EnvBlockBase, Value: base})
+		return p
+	}
+	b, ok, err := ensureBranch(ctx, pod("lexer", lead[:12]))
+	if err != nil || !ok || b.Base != lead || gitT(t, b.Dir, "rev-parse", "HEAD") != lead {
+		t.Fatalf("from its base: %+v %v %v", b, ok, err)
+	}
+	if again, _, err := ensureBranch(ctx, pod("lexer", "main")); err != nil || again.Base != lead {
+		t.Fatalf("a later attempt moved its base: %+v %v", again, err)
+	}
+	for _, bad := range []string{"0123456789abcdef0123456789abcdef01234567", "no-such-branch", "--output=/tmp/x", "main extra"} {
+		_, _, err := ensureBranch(ctx, pod("parser", bad))
+		if err == nil || !strings.Contains(err.Error(), "is not a commit in") {
+			t.Errorf("base %q: %v", bad, err)
+		}
+		if _, err := gitLine(ctx, repo, "rev-parse", "--verify", "--quiet", "refs/heads/c4/port/parser"); err == nil {
+			t.Fatalf("base %q made a branch", bad)
+		}
+	}
+}
+
 // Blocks run in a clean config directory of their own, filled from the
 // agent environment each asks for (the base when it names none), without
 // the environment's hooks (a block's own settings carry them), never the

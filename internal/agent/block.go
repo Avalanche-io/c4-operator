@@ -36,6 +36,7 @@ import (
 //	C4_AGENT_BLOCK=1         the pod is a block
 //	C4_BLOCK_PROMPT          the block's task
 //	C4_BLOCK_REPO            the project's working tree on this host
+//	C4_BLOCK_BASE            the commit its branch starts from (a lead's HEAD); unset, the repository's HEAD at the first attempt
 //	C4_BLOCK_TOOLS           the tools it may use without asking, space separated
 //	C4_BLOCK_MODEL           the model, when not the CLI's default
 //	C4_BLOCK_EFFORT          the effort level (low, medium, high, xhigh, max), when not the CLI's default
@@ -45,6 +46,7 @@ const (
 	EnvBlock        = "C4_AGENT_BLOCK"
 	EnvBlockPrompt  = "C4_BLOCK_PROMPT"
 	EnvBlockRepo    = "C4_BLOCK_REPO"
+	EnvBlockBase    = "C4_BLOCK_BASE"
 	EnvBlockTools   = "C4_BLOCK_TOOLS"
 	EnvBlockModel   = "C4_BLOCK_MODEL"
 	EnvBlockEffort  = "C4_BLOCK_EFFORT"
