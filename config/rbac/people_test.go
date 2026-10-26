@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	authorizationv1 "k8s.io/api/authorization/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -92,6 +93,18 @@ func TestPeopleRoles(t *testing.T) {
 		return sar.Status.Allowed
 	}
 	const c4 = "c4.avalanche.io"
+	// The authorizer reads roles and bindings from a cache that lags the
+	// writes above: wait until each person is allowed what all three roles
+	// give, so a denial below is the role's, not the cache's.
+	for _, user := range []string{"maya", "wren", "adele"} {
+		deadline := time.Now().Add(15 * time.Second)
+		for !may(user, "show-a", "list", c4, "workjobs") {
+			if time.Now().After(deadline) {
+				t.Fatalf("%s's binding was never seen", user)
+			}
+			time.Sleep(100 * time.Millisecond)
+		}
+	}
 	for _, x := range []struct {
 		verb, group, resource   string
 		artist, wrangler, admin bool
