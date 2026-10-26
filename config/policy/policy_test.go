@@ -673,6 +673,31 @@ func TestControlsOnlyFromTheHUD(t *testing.T) {
 	if err := hud.Create(ctx, mk("sm0140-light-v003", map[string]string{c4v1.AnnotationRequeue: "t:1"})); err != nil {
 		t.Errorf("the HUD creating a job with a control: %v", err)
 	}
+
+	// the publish-test label hides a job's failures: only the HUD sets it
+	const toolTest = "c4.avalanche.io/tool-test"
+	labelled := func(name string) *c4v1.WorkJob {
+		j := mk(name, nil)
+		j.Labels = map[string]string{toolTest: "fetch"}
+		return j
+	}
+	if err := admin.Create(ctx, labelled("sm0140-light-v004")); err == nil || !strings.Contains(err.Error(), "only the HUD marks a job a tool's publish test") {
+		t.Errorf("an ordinary job created as a tool's test: %v", err)
+	}
+	if err := c4Patch(ctx, admin, j, fmt.Sprintf(`{"metadata":{"labels":{%q:"fetch"}}}`, toolTest)); err == nil {
+		t.Error("a job relabelled as a tool's test")
+	}
+	tj := labelled("sm0140-light-v005")
+	if err := hud.Create(ctx, tj); err != nil {
+		t.Fatalf("the HUD making a tool's test: %v", err)
+	}
+	if err := c4Patch(ctx, admin, tj, fmt.Sprintf(`{"metadata":{"labels":{%q:null}}}`, toolTest)); err == nil {
+		t.Error("a tool's test unlabelled by someone other than the HUD")
+	}
+}
+
+func c4Patch(ctx context.Context, c client.Client, o client.Object, body string) error {
+	return c.Patch(ctx, o, client.RawPatch(types.MergePatchType, []byte(body)))
 }
 
 // TestTrackerPeopleOnlyFromTheHUD: a person's confirmation that a tracker

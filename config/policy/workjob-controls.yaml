@@ -33,7 +33,19 @@ spec:
        'c4.avalanche.io/decide', 'c4.avalanche.io/steer', 'c4.avalanche.io/supply',
        'c4.avalanche.io/accept-validated', 'c4.avalanche.io/withdraw-needs',
        'c4.avalanche.io/control-records']
+  - name: labelsBefore
+    expression: "request.operation == 'CREATE' || !has(oldObject.metadata.labels) ? {} : oldObject.metadata.labels"
+  - name: labelsAfter
+    expression: "has(object.metadata.labels) ? object.metadata.labels : {}"
   validations:
+  # A tool's publish test is its publisher's: the HUD hides its failures
+  # from the project and refuses its controls by this label, so only the
+  # HUD, which makes those jobs, may set it, and no one may move it.
+  - expression: >-
+      ('c4.avalanche.io/tool-test' in variables.labelsBefore) == ('c4.avalanche.io/tool-test' in variables.labelsAfter) &&
+      (!('c4.avalanche.io/tool-test' in variables.labelsAfter) ||
+        variables.labelsBefore['c4.avalanche.io/tool-test'] == variables.labelsAfter['c4.avalanche.io/tool-test'])
+    message: "only the HUD marks a job a tool's publish test (c4.avalanche.io/tool-test): publish the tool, and the HUD makes its test"
   - expression: >-
       variables.controls.all(k,
         (k in variables.before) == (k in variables.after) &&
