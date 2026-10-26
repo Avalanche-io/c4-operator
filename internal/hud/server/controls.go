@@ -703,22 +703,33 @@ func (s *Server) handleApprove(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "%v", err)
 		return
 	}
-	patch := client.MergeFrom(cr.DeepCopy())
-	before := sha256JSON(cr.Spec)
-	cr.Spec.Approved = true
-	// The approval is recorded in the stores of the projects whose jobs
-	// the capacity is for.
+	// A CapacityRequest is the farm's, but what it spends is the projects'
+	// whose jobs it serves: the approver must be able to change every one
+	// of those jobs, so no one approves spend for a project they can't
+	// act in. The approval is recorded in those projects' stores, naming
+	// them.
 	m := s.current()
 	var projects []string
 	for _, key := range cr.Spec.Jobs {
-		if jr := m.byKey[key]; jr != nil && !slices.Contains(projects, jr.project) {
+		jr := m.byKey[key]
+		if jr == nil {
+			continue
+		}
+		if err := s.authorize(ctx, r, v, jr.job.Namespace, "patch", "workjobs", jr.job.Name); err != nil {
+			fail(w, http.StatusForbidden, "this burst serves jobs in %s, where you can't approve", jr.project)
+			return
+		}
+		if !slices.Contains(projects, jr.project) {
 			projects = append(projects, jr.project)
 		}
 	}
+	patch := client.MergeFrom(cr.DeepCopy())
+	before := sha256JSON(cr.Spec)
+	cr.Spec.Approved = true
 	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
 		Authorization: s.authorization(v, "patch", "capacityrequests", "", cr.Name), Action: "approve-capacity",
 		Target: "capacityrequest:" + cr.Name,
-		Change: map[string]any{"pool": pool, "slots": cr.Spec.Slots, "jobs": cr.Spec.Jobs, "estimatedCost": cr.Spec.EstimatedCost}}
+		Change: map[string]any{"pool": pool, "slots": cr.Spec.Slots, "jobs": cr.Spec.Jobs, "estimatedCost": cr.Spec.EstimatedCost, "projects": projects}}
 	id, err := s.signControl(ctx, projects, provenance.Subject{Name: pred.Target, Digest: map[string]string{"sha256": before}}, pred)
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "control record: %v", err)

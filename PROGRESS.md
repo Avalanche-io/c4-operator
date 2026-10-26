@@ -377,6 +377,7 @@
 | `branch-dir` | 2026-10-26 | 2026-10-26 | A unit's branch in a job's status no longer keeps its worktree's folder (`dir`): the worktree goes once the unit is done, the pod's record still carries it, and nothing read it from status, so a job of many units keeps a smaller status. Tests: TestUnitBranchInStatus. |
 | `hold-verified` | 2026-10-26 | 2026-10-26 | A usage hold counts a lease's holder only when the farm verified its creator is that holder (HolderVerified), so a lease someone else made, naming a holder and copying their sign-in label, is its own account |
 | `usage-budget` | 2026-10-26 | 2026-10-26 | status.modelUsage lists the 500 newest model units in at most 256 KiB and folds every older one into status.modelUsageOlder (below, units, sums), so a 50000-unit job stays within etcd while spend totals stay exact across restarts; the HUD job detail gives usageOlder and marks older rows usageFolded. |
+| `approve-scope` | 2026-10-26 | 2026-10-26 | A burst is approved only by someone who may change every job it serves; otherwise 403 names the project, and the signed control names the projects checked |
 
 Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
 c4 pseudo-version, so worktrees need nothing else; to build against a local c4

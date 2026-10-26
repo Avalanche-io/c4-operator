@@ -391,3 +391,40 @@ func TestOwnerHoldsEveryRole(t *testing.T) {
 		}
 	}
 }
+
+// A burst is approved only by someone who may act in every project whose
+// jobs it serves: a producer of show-a may approve show-a's burst but not
+// one serving show-b's job, and is told which project stops them. The
+// signed record names the projects it was checked against.
+func TestApproveIsScopedToTheBurstsProjects(t *testing.T) {
+	s, _ := decideFarm(t)
+	s.DevViewers["producer"] = &api.Viewer{User: "pat", Role: "producer", Projects: []string{"show-a"}}
+	ctx := context.Background()
+	scheme := runtime.NewScheme()
+	clientgoscheme.AddToScheme(scheme)
+	c4v1.AddToScheme(scheme)
+	s.Client = fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&c4v1.CapacityRequest{ObjectMeta: metav1.ObjectMeta{Name: "burst-a-approve-1"}, Spec: c4v1.CapacityRequestSpec{Pool: "burst-a", Slots: 4,
+			Jobs: []string{"show-a/sh040-light-v007"}, EstimatedCost: "12.00"}},
+		&c4v1.CapacityRequest{ObjectMeta: metav1.ObjectMeta{Name: "burst-b-approve-1"}, Spec: c4v1.CapacityRequestSpec{Pool: "burst-b", Slots: 4,
+			Jobs: []string{"show-a/sh040-light-v007", "show-b/ep104-crowd"}, EstimatedCost: "20.00"}}).Build()
+	approve := func(pool, as string) (int, string) {
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/v1/capacity/"+pool+"/approve?as="+as, nil))
+		return w.Code, w.Body.String()
+	}
+	if code, body := approve("burst-b", "producer"); code != http.StatusForbidden || !strings.Contains(body, "this burst serves jobs in show-b, where you can't approve") {
+		t.Errorf("show-a's producer approves a burst serving show-b: %d %s", code, body)
+	}
+	var cr c4v1.CapacityRequest
+	if err := s.Client.Get(ctx, k8stypes.NamespacedName{Name: "burst-b-approve-1"}, &cr); err != nil || cr.Spec.Approved {
+		t.Fatalf("a refused approval approved it: %v %v", err, cr.Spec.Approved)
+	}
+	if code, body := approve("burst-a", "producer"); code != http.StatusOK {
+		t.Errorf("show-a's producer approves show-a's burst: %d %s", code, body)
+	}
+	code, body := approve("burst-b", "wrangler")
+	if code != http.StatusOK || !strings.Contains(body, "record") {
+		t.Fatalf("a wrangler of both projects approves: %d %s", code, body)
+	}
+}
