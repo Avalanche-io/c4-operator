@@ -40,7 +40,8 @@ func TestScenarios(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(all) != 3 || all[0].Name != "evening" || all[1].Name != "tight-deadline" || all[2].Name != "tracker" || len(all[2].Issues) != 1 {
+	if len(all) != 4 || all[0].Name != "evening" || all[1].Name != "flow" || len(all[1].Shots) != 1 || all[2].Name != "tight-deadline" ||
+		all[3].Name != "tracker" || len(all[3].Issues) != 1 {
 		t.Fatalf("scenarios %+v", all)
 	}
 	clock := eastern(t)
@@ -341,5 +342,52 @@ func TestCIPlanSaysNoNetwork(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "  note      "+ciNoNetwork) {
 		t.Errorf("no network note in\n%s", out.String())
+	}
+}
+
+// A scenario's shots: each plate is uploaded as a view, made the Flow
+// jobs' plate, and its Task added in the stand-in Flow through the HUD,
+// due its days from loading; a farm whose sandbox has no Flow says how to
+// add one.
+func TestLoadShots(t *testing.T) {
+	sc, err := LookupScenario("flow")
+	if err != nil {
+		t.Fatal(err)
+	}
+	hud := &fakeHUD{}
+	var got map[string]any
+	mux := http.NewServeMux()
+	mux.Handle("/", hud)
+	mux.HandleFunc("POST /sandbox/flow/shots", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&got)
+		_, _ = w.Write([]byte(`{"number":4411,"message":"sh040 Lighting is waiting."}`))
+	})
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+	client := func(as string) (*Client, error) { return NewClient(Farm{HUD: srv.URL, As: as}) }
+	var plate string
+	setPlate := func(_ context.Context, v string) error { plate = v; return nil }
+	var out bytes.Buffer
+	clock := eastern(t)
+	if err := LoadShots(context.Background(), Out{W: &out, Clock: clock}, sc, srv.URL, "", "", "saltmarsh", client, setPlate); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(plate, "c4") || hud.puts != 3 {
+		t.Fatalf("plate %q, %d files sent", plate, hud.puts)
+	}
+	due := clock.now().AddDate(0, 0, 4).Format("2006-01-02")
+	if got["as"] != "supervisor" || got["assignee"] != "artist" || got["shot"] != "sh040" || got["step"] != "LGT" || got["due"] != due ||
+		!strings.Contains(out.String(), "Task 4411 (by supervisor)") {
+		t.Fatalf("sent %v, printed %q", got, out.String())
+	}
+	if err := LoadShots(context.Background(), Out{W: io.Discard, Clock: clock}, sc, srv.URL, "noor", "", "saltmarsh", client, setPlate); err != nil ||
+		got["as"] != "noor" || got["assignee"] != "noor" {
+		t.Fatalf("an owner's farm sent %v: %v", got, err)
+	}
+	none := httptest.NewServer(hud)
+	defer none.Close()
+	if err := LoadShots(context.Background(), Out{W: io.Discard, Clock: clock}, sc, none.URL, "", "", "saltmarsh",
+		func(as string) (*Client, error) { return NewClient(Farm{HUD: none.URL, As: as}) }, setPlate); !errors.Is(err, ErrNoFlow) {
+		t.Fatalf("no stand-in Flow: %v", err)
 	}
 }

@@ -59,6 +59,9 @@ type Scenario struct {
 	// Issues are opened in the local farm's stand-in GitHub (c4 farm up
 	// --tracker), in order, for the Tracker to make jobs of.
 	Issues []ScenarioIssue `json:"issues,omitempty"`
+	// Shots are Tasks added in the local farm's stand-in Flow, each with
+	// its plate, for the Flow Tracker to make jobs of once set ready.
+	Shots []ScenarioShot `json:"shots,omitempty"`
 }
 
 // ScenarioProject is a project a scenario adds.
@@ -105,6 +108,20 @@ type ScenarioIssue struct {
 	Title    string   `json:"title"`
 	Assignee string   `json:"assignee,omitempty"`
 	Labels   []string `json:"labels,omitempty"`
+}
+
+// ScenarioShot is a Task a scenario adds in the stand-in Flow: on a shot,
+// by a local sign-in, assigned to one, due some days from loading. Its
+// plate (Reads, placeholder files) is uploaded and becomes the
+// materialization the Tracker's jobs render into.
+type ScenarioShot struct {
+	By       string   `json:"by"`
+	Shot     string   `json:"shot"`
+	Task     string   `json:"task"`
+	Step     string   `json:"step"`
+	Assignee string   `json:"assignee"`
+	DueDays  int      `json:"dueDays"`
+	Reads    []string `json:"reads"`
 }
 
 // ScenarioFail is a node a job's units fail on.
@@ -159,11 +176,19 @@ func LookupScenario(name string) (Scenario, error) {
 }
 
 func (sc Scenario) check() error {
-	if sc.Name == "" || sc.Title == "" || len(sc.Jobs)+len(sc.Issues) == 0 {
-		return fmt.Errorf("a scenario needs a name, a title, and jobs or issues")
+	n := 0
+	for _, k := range []int{len(sc.Jobs), len(sc.Issues), len(sc.Shots)} {
+		if k > 0 {
+			n++
+		}
 	}
-	if len(sc.Jobs) > 0 && len(sc.Issues) > 0 {
-		return fmt.Errorf("a scenario has jobs or issues, not both")
+	if sc.Name == "" || sc.Title == "" || n != 1 {
+		return fmt.Errorf("a scenario needs a name, a title, and jobs, issues or shots, only one of them")
+	}
+	for _, s := range sc.Shots {
+		if s.By == "" || s.Shot == "" || s.Task == "" || s.Step == "" || s.Assignee == "" || s.DueDays < 1 || len(s.Reads) == 0 {
+			return fmt.Errorf("a shot needs by, shot, task, step, assignee, dueDays and the files of its plate")
+		}
 	}
 	for _, is := range sc.Issues {
 		if is.By == "" || is.Title == "" {
@@ -374,33 +399,8 @@ func submitStandIn(ctx context.Context, c *Client, clock Clock, scenario string,
 	if err != nil {
 		return nil, nil, err
 	}
-	dir, err := os.MkdirTemp("", "c4-scenario-")
+	v, err := placeholders(ctx, c, j.Project, scenario, j.Shot, j.Reads)
 	if err != nil {
-		return nil, nil, err
-	}
-	defer os.RemoveAll(dir)
-	for _, p := range j.Reads {
-		f := filepath.Join(dir, filepath.FromSlash(p))
-		if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
-			return nil, nil, err
-		}
-		body := fmt.Sprintf("placeholder for %s, shot %s (c4 farm samples load %s)\n", p, j.Shot, scenario)
-		if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
-			return nil, nil, err
-		}
-	}
-	v, err := view.ScanDir(dir)
-	if err != nil {
-		return nil, nil, err
-	}
-	need, err := missingIDs(ctx, c, j.Project, v.Objects())
-	if err != nil {
-		return nil, nil, err
-	}
-	if _, _, err := upload(ctx, c, j.Project, dir, v, need); err != nil {
-		return nil, nil, err
-	}
-	if err := recordView(ctx, c, j.Project, v); err != nil {
 		return nil, nil, err
 	}
 	raw, err := json.Marshal(spec)
@@ -412,7 +412,7 @@ func submitStandIn(ctx context.Context, c *Client, clock Clock, scenario string,
 		ai = t.AIUsage
 	}
 	req := api.SubmitRequest{Project: j.Project, Name: j.Name, Type: t.Name, Stage: t.Stage, Shot: j.Shot, Spec: raw,
-		Inputs: []api.SubmitInput{{View: v.ID.String(), MountPath: t.Mount}}, AIUsage: ai}
+		Inputs: []api.SubmitInput{{View: v, MountPath: t.Mount}}, AIUsage: ai}
 	for _, a := range j.After {
 		// as c4 farm submit --after: one upstream job at /in, several at /in/<job>
 		mp := "/in"
@@ -431,6 +431,46 @@ func submitStandIn(ctx context.Context, c *Client, clock Clock, scenario string,
 	return &done, nil, nil
 }
 
+// ErrNoFlow is a farm whose sandbox has no stand-in Flow for a scenario's
+// shots: one made before it had one, or without --tracker.
+var ErrNoFlow = errors.New("the local farm has no stand-in Flow to add shots in; `c4 farm up --tracker` adds one")
+
+// placeholders uploads a tree of placeholder files (paths, slash
+// separated) to the project's store, records it as a view, and returns
+// the view's C4 ID.
+func placeholders(ctx context.Context, c *Client, project, scenario, shot string, paths []string) (string, error) {
+	dir, err := os.MkdirTemp("", "c4-scenario-")
+	if err != nil {
+		return "", err
+	}
+	defer os.RemoveAll(dir)
+	for _, p := range paths {
+		f := filepath.Join(dir, filepath.FromSlash(p))
+		if err := os.MkdirAll(filepath.Dir(f), 0o755); err != nil {
+			return "", err
+		}
+		body := fmt.Sprintf("placeholder for %s, shot %s (c4 farm samples load %s)\n", p, shot, scenario)
+		if err := os.WriteFile(f, []byte(body), 0o644); err != nil {
+			return "", err
+		}
+	}
+	v, err := view.ScanDir(dir)
+	if err != nil {
+		return "", err
+	}
+	need, err := missingIDs(ctx, c, project, v.Objects())
+	if err != nil {
+		return "", err
+	}
+	if _, _, err := upload(ctx, c, project, dir, v, need); err != nil {
+		return "", err
+	}
+	if err := recordView(ctx, c, project, v); err != nil {
+		return "", err
+	}
+	return v.ID.String(), nil
+}
+
 // ErrNoSandbox is a farm without the stand-in GitHub a scenario's issues
 // go to.
 var ErrNoSandbox = errors.New("the local farm has no tracker to open issues in; `c4 farm up --tracker` adds one")
@@ -444,39 +484,89 @@ func LoadIssues(ctx context.Context, o Out, sc Scenario, hud, owner, installer s
 		if owner != "" {
 			is.By, is.Assignee = owner, owner
 		}
-		body, err := json.Marshal(map[string]any{"as": is.By, "title": is.Title, "assignee": is.Assignee, "labels": is.Labels})
+		out, err := sandboxPost(ctx, hud, installer, "/sandbox/issues",
+			map[string]any{"as": is.By, "title": is.Title, "assignee": is.Assignee, "labels": is.Labels})
 		if err != nil {
-			return err
-		}
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(hud, "/")+"/sandbox/issues", bytes.NewReader(body))
-		if err != nil {
-			return err
-		}
-		req.Header.Set("Content-Type", "application/json")
-		if installer != "" {
-			req.Header.Set("X-C4-Installer", installer)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return err
-		}
-		var out struct {
-			Number  int    `json:"number"`
-			Message string `json:"message"`
-			Error   string `json:"error"`
-		}
-		err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out)
-		resp.Body.Close()
-		switch {
-		case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusBadGateway:
-			// a HUD with no sandbox behind it, or one not yet up
-			return ErrNoSandbox
-		case err != nil:
-			return fmt.Errorf("opening %q: %s", is.Title, resp.Status)
-		case out.Error != "":
-			return fmt.Errorf("opening %q: %s", is.Title, out.Error)
+			return fmt.Errorf("opening %q: %w", is.Title, err)
 		}
 		fmt.Fprintf(o.W, "issue     #%d %s (by %s)\n          %s\n", out.Number, is.Title, is.By, out.Message)
+	}
+	return nil
+}
+
+// sandboxDone is the sandbox's answer to an action.
+type sandboxDone struct {
+	Number  int    `json:"number"`
+	Message string `json:"message"`
+	Error   string `json:"error"`
+}
+
+// sandboxPost does an action on the sandbox's page through the HUD.
+func sandboxPost(ctx context.Context, hud, installer, path string, in any) (sandboxDone, error) {
+	var out sandboxDone
+	body, err := json.Marshal(in)
+	if err != nil {
+		return out, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(hud, "/")+path, bytes.NewReader(body))
+	if err != nil {
+		return out, err
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if installer != "" {
+		req.Header.Set("X-C4-Installer", installer)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return out, err
+	}
+	err = json.NewDecoder(io.LimitReader(resp.Body, 64<<10)).Decode(&out)
+	resp.Body.Close()
+	switch {
+	case resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed || resp.StatusCode == http.StatusBadGateway:
+		// a HUD with no sandbox behind it, or one not yet up
+		return out, ErrNoSandbox
+	case err != nil:
+		return out, errors.New(resp.Status)
+	case out.Error != "":
+		return out, errors.New(out.Error)
+	}
+	return out, nil
+}
+
+// LoadShots adds a scenario's shots in the stand-in Flow, through the HUD
+// at hud: each shot's plate is uploaded to project as client, plate makes
+// it the materialization the Flow Tracker's jobs render into, and the
+// Task is added, waiting. On a farm with an owner, each is the owner's,
+// added by and assigned to them.
+func LoadShots(ctx context.Context, o Out, sc Scenario, hud, owner, installer, project string,
+	client func(as string) (*Client, error), plate func(ctx context.Context, view string) error) error {
+	for _, s := range sc.Shots {
+		if owner != "" {
+			s.By, s.Assignee = owner, owner
+		}
+		c, err := client(s.By)
+		if err != nil {
+			return err
+		}
+		v, err := placeholders(ctx, c, project, sc.Name, s.Shot, s.Reads)
+		if err != nil {
+			return fmt.Errorf("%s's plate: %w", s.Shot, err)
+		}
+		if err := plate(ctx, v); err != nil {
+			return fmt.Errorf("%s's plate: %w", s.Shot, err)
+		}
+		fmt.Fprintf(o.W, "plate     %s: %d placeholder files, view %s\n", s.Shot, len(s.Reads), shortID(v))
+		due := o.Clock.now().AddDate(0, 0, s.DueDays).Format("2006-01-02")
+		out, err := sandboxPost(ctx, hud, installer, "/sandbox/flow/shots",
+			map[string]any{"as": s.By, "shot": s.Shot, "task": s.Task, "step": s.Step, "assignee": s.Assignee, "due": due})
+		if errors.Is(err, ErrNoSandbox) {
+			return ErrNoFlow
+		}
+		if err != nil {
+			return fmt.Errorf("adding %s %s: %w", s.Shot, s.Task, err)
+		}
+		fmt.Fprintf(o.W, "task      %s %s, Task %d (by %s)\n          %s\n", s.Shot, s.Task, out.Number, s.By, out.Message)
 	}
 	return nil
 }

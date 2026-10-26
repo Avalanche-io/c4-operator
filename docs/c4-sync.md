@@ -74,6 +74,17 @@ owner unless told otherwise, and the owner's review is the job's last wait
 pull request is approved. A request for changes makes the job's next
 version. `c4 farm samples load tracker` opens an issue for you.
 
+Beside it is a stand-in for Flow Production Tracking, built from
+Autodesk's published REST shapes. Its page is the HUD's `/sandbox/flow/`.
+`c4 farm samples load flow` uploads a placeholder plate for shot sh040 and
+adds its lighting Task, waiting and assigned. On the page you set the Task
+ready, and the Tracker `sandbox-flow` makes it a render job once the
+assignee has let that Tracker submit work for them. The Task then shows the
+job's status, ETA, link and spend. When the frames are done, the render
+comes back as a Version in pending review, with its still, frames and C4
+ID. Approving the Version passes the job's review. Asking for a fix, with
+a note, makes the next version, with the note as its input.
+
 ## Install
 
 From a release (one manifest with the two CRDs, RBAC, the Deployment and

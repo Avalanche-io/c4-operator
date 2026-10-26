@@ -1,0 +1,27 @@
+# A lighting Task in the local farm's stand-in Flow Production Tracking
+# (c4 farm up --tracker), for the dailies loop: Flow in, render, Version
+# back for review, a note back as the next version.
+#
+# The supervisor adds sh040's lighting Task, waiting, assigned to the
+# artist and due in four days, and the shot's plate is uploaded as the
+# view the render writes into. On a farm with an owner, the Task is the
+# owner's, added by and assigned to them, so the whole loop is one
+# person's. Nothing runs until someone sets the Task ready on the
+# stand-in Flow's page (/sandbox/flow/) and the artist has let the Flow
+# Tracker submit work for them (their page in the HUD). Then the Task
+# becomes a render of frames 1001-1008, its status, ETA, link and spend
+# come back to Flow, and v001 is published with its still for review.
+name: flow
+title: a lighting Task in the sandbox Flow
+summary: sh040 lighting waits in Flow; set it ready and it renders, publishes v001 for review, and a note makes v002
+shots:
+- by: supervisor
+  shot: sh040
+  task: Lighting
+  step: LGT
+  assignee: artist
+  dueDays: 4
+  reads:
+  - plate/sh040_plate.1001.exr
+  - plate/sh040_plate.1008.exr
+  - layout/sh040_cam.usda

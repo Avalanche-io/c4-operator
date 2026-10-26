@@ -181,3 +181,18 @@ func projectReady(ctx context.Context, c client.Client, name string) (bool, erro
 	}
 	return false, nil
 }
+
+// FlowPlate makes view the plate the stand-in Flow's jobs render into
+// (SandboxFlowPlate, in Saltmarsh); farmcli.ErrNoSandbox on a farm
+// without the sandbox.
+func FlowPlate(ctx context.Context, view string) error {
+	c, err := kubeClient(Name)
+	if err != nil {
+		return err
+	}
+	if !HasTracker(ctx) {
+		return farmcli.ErrNoSandbox
+	}
+	return applyAll(ctx, c, YAML([]obj{{"apiVersion": "c4.avalanche.io/v1alpha1", "kind": "Materialization",
+		"metadata": meta(SandboxFlowPlate, "namespace", Project), "spec": obj{"source": obj{"id": view}}}}))
+}

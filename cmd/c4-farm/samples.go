@@ -65,6 +65,21 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 		fmt.Fprintf(stdout, "sandbox   the stand-in tracker: c4 farm open, then /sandbox/ in that window\n")
 		return nil
 	}
+	if len(sc.Shots) > 0 {
+		// Tasks in the stand-in Flow, each with its plate
+		inst, err := f.InstallerToken()
+		if err != nil {
+			return err
+		}
+		client := func(as string) (*farmcli.Client, error) {
+			return farmcli.NewClient(farmcli.Farm{HUD: f.HUD, As: as, Local: true, InstallerTokenFile: f.InstallerTokenFile})
+		}
+		if err := farmcli.LoadShots(ctx, o, sc, f.HUD, f.Owner, inst, localfarm.Project, client, localfarm.FlowPlate); err != nil {
+			return err
+		}
+		fmt.Fprintf(stdout, "sandbox   the stand-in Flow: c4 farm open, then /sandbox/flow/ in that window\n")
+		return nil
+	}
 	p, err := localfarm.Prepare(ctx, sc, all)
 	if err != nil {
 		return err
