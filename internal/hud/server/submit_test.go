@@ -988,3 +988,20 @@ func TestARoleOnASharedFarmOwnsItsJob(t *testing.T) {
 		t.Errorf("annotations %v, want the artist's, as no role", j.Annotations)
 	}
 }
+
+// ownerFor is the owner a viewer's own work gets and is found by: the
+// one person for a role on a one-person farm, the viewer everywhere else.
+func TestOwnerFor(t *testing.T) {
+	ctx := context.Background()
+	artist := &api.Viewer{User: "artist", DevBy: byInstallerToken}
+	noor := &api.Viewer{User: "noor", DevBy: byInstallerToken}
+	if got := roleFarm(t, true).ownerFor(ctx, artist); got != "noor" {
+		t.Errorf("a role on a one-person farm: %q, want noor", got)
+	}
+	if got := roleFarm(t, true).ownerFor(ctx, noor); got != "noor" {
+		t.Errorf("the person as themselves: %q, want noor", got)
+	}
+	if got := roleFarm(t, false).ownerFor(ctx, artist); got != "artist" {
+		t.Errorf("a role on a shared farm: %q, want artist", got)
+	}
+}

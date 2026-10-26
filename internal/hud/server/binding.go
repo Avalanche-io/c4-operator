@@ -126,6 +126,18 @@ func (s *Server) roleOwner(ctx context.Context, v *api.Viewer) string {
 	return one
 }
 
+// ownerFor is who owns the work v makes or looks up in its own name (not
+// a unit's, not for another person): the farm's one person where v is a
+// role's sign-in on a one-person farm (roleOwner), else v. Every path
+// that makes a viewer's work or finds it again resolves the owner here,
+// so a role finds what it made.
+func (s *Server) ownerFor(ctx context.Context, v *api.Viewer) string {
+	if one := s.roleOwner(ctx, v); one != "" {
+		return one
+	}
+	return v.User
+}
+
 // handleFarmBinding answers GET /api/v1/farm/binding.
 func (s *Server) handleFarmBinding(w http.ResponseWriter, r *http.Request) {
 	v := s.withViewer(w, r)

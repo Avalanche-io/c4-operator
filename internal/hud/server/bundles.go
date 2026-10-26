@@ -134,11 +134,10 @@ func (s *Server) checkBundle(r *http.Request, m *model, v *api.Viewer, ns string
 		// serve them run its members (JobForBundle copies it to the job).
 		Annotations: map[string]string{c4v1.AnnotationOwner: v.User, c4v1.AnnotationSubmittedVia: submittedVia(r)}},
 		Spec: c4v1.AgentBundleSpec{MaxRunning: body.MaxRunning, Pools: body.Pools, Suspend: body.Suspend}}
-	owner := v.User
-	if one := s.roleOwner(r.Context(), v); one != "" {
+	owner := s.ownerFor(r.Context(), v)
+	if owner != v.User {
 		// a one-person farm's person, as a role, as a job is (createJob)
-		owner = one
-		b.Annotations[c4v1.AnnotationOwner] = one
+		b.Annotations[c4v1.AnnotationOwner] = owner
 		b.Annotations[c4v1.AnnotationSubmittedAs] = devRole(v)
 	}
 	if len(body.Members) == 0 {

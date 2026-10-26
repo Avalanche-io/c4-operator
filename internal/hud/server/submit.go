@@ -778,11 +778,11 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		b, _ := json.Marshal(v.Groups)
 		job.Annotations[c4v1.AnnotationOwnerGroups] = string(b)
 	}
-	if one := s.roleOwner(ctx, v); one != "" && body.For == "" {
+	if owner := s.ownerFor(ctx, v); owner != v.User && body.For == "" {
 		// A role's sign-in on a one-person farm is that person acting in
 		// the role: the person owns the job, so their leases and pools
 		// serve it, and the role stays as how they acted.
-		job.Annotations[c4v1.AnnotationOwner] = one
+		job.Annotations[c4v1.AnnotationOwner] = owner
 		job.Annotations[c4v1.AnnotationSubmittedAs] = devRole(v)
 	}
 	var own *c4v1.WorkJob
