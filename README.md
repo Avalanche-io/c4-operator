@@ -38,12 +38,9 @@ all data in C4 content addressed. C4 has been in continuous development since
   as people, through MCP.
 - **Runs where you are.** On a laptop in Docker, or on your studio's
   Kubernetes cluster, with the same `c4 farm` commands.
-- **Built on Kubernetes, the standard way to run software across many
-  machines.** Every major cloud offers it ready-made and most IT teams
-  already know it, so your farm runs on infrastructure you can hire for,
-  monitor and grow with standard tools, not a proprietary render-manager
-  stack. Machines join and leave without reconfiguring the farm, and work on
-  a machine that fails is retried on another.
+- **Built on Kubernetes.** Battle-tested distributed computing, with the
+  whole farm (projects, pools, tools) described as code you can review,
+  version and reproduce, instead of hand-built render servers.
 
 ## Quickstart: render a shot by its deadline
 
