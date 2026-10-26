@@ -1248,7 +1248,149 @@ spec:
                   type: object
                 description: |-
                   ModelUsage maps each model unit's index to its token use and cost
-                  over all its attempts.
+                  over all its attempts, for the job's newest model units (the
+                  highest indices: a lead's latest workers): at most 500 of them, and
+                  256 KiB in all. Older units are folded into ModelUsageOlder.
+                type: object
+              modelUsageOlder:
+                description: |-
+                  ModelUsageOlder is the use of the model units ModelUsage no longer
+                  lists, summed, so the two together are every model unit's and
+                  Spend's totals never change by a unit being folded.
+                properties:
+                  below:
+                    description: |-
+                      Below is where the fold ends: every model unit with a lower index
+                      is folded, and every one at or above it is listed in ModelUsage.
+                      Units counts the folded units that have run.
+                    format: int32
+                    type: integer
+                  cacheReadTokens:
+                    format: int64
+                    type: integer
+                  cacheWriteTokens:
+                    format: int64
+                    type: integer
+                  cost:
+                    description: |-
+                      Cost of the priced tokens, and SlotCost of the unit's slot time,
+                      decimal strings in US dollars.
+                    type: string
+                  costSource:
+                    description: |-
+                      CostSource says where the price came from (a metering proxy, a
+                      price table).
+                    type: string
+                  estimatedCost:
+                    description: EstimatedCost is the unpriced tokens at published
+                      rates.
+                    type: string
+                  inputTokens:
+                    format: int64
+                    type: integer
+                  models:
+                    items:
+                      description: WorkModelTokens is one model's tokens in a unit.
+                      properties:
+                        cacheReadTokens:
+                          format: int64
+                          type: integer
+                        cacheWriteTokens:
+                          format: int64
+                          type: integer
+                        cost:
+                          description: Cost of its priced tokens; absent when none
+                            were priced.
+                          type: string
+                        estimatedCost:
+                          description: |-
+                            EstimatedCost is its unpriced tokens at its published rates;
+                            Unpriceable says the model's rates are not known.
+                          type: string
+                        inputTokens:
+                          format: int64
+                          type: integer
+                        model:
+                          type: string
+                        outputTokens:
+                          format: int64
+                          type: integer
+                        unpriceable:
+                          type: boolean
+                        unpricedTokens:
+                          format: int64
+                          type: integer
+                        unpricedWeightedTokens:
+                          format: int64
+                          type: integer
+                        weightedTokens:
+                          format: int64
+                          type: integer
+                      required:
+                      - model
+                      type: object
+                    type: array
+                  outputTokens:
+                    format: int64
+                    type: integer
+                  reasoning:
+                    description: |-
+                      Reasoning is what the unit's latest attempt reasoned with, as its
+                      runner observed it (c4-unit usage, c4-agent's Stop hook).
+                    properties:
+                      does:
+                        type: string
+                      effort:
+                        type: string
+                      efforts:
+                        items:
+                          type: string
+                        type: array
+                      mcpServers:
+                        items:
+                          type: string
+                        type: array
+                      model:
+                        type: string
+                      models:
+                        items:
+                          type: string
+                        type: array
+                      thinking:
+                        type: string
+                      toolNames:
+                        items:
+                          type: string
+                        type: array
+                      tools:
+                        type: string
+                    type: object
+                  slotCost:
+                    type: string
+                  slotHours:
+                    description: |-
+                      SlotHours is the unit's slot time over its attempts, a decimal
+                      string.
+                    type: string
+                  units:
+                    format: int32
+                    type: integer
+                  unpricedTokens:
+                    format: int64
+                    type: integer
+                  unpricedWeightedTokens:
+                    format: int64
+                    type: integer
+                  usageError:
+                    description: |-
+                      UsageError says why an attempt's usage document was refused (an
+                      unknown field, say): its tokens are not counted.
+                    type: string
+                  weightedTokens:
+                    format: int64
+                    type: integer
+                required:
+                - below
                 type: object
               needs:
                 additionalProperties:

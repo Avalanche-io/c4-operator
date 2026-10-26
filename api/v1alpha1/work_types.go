@@ -656,9 +656,16 @@ type WorkJobStatus struct {
 	// +optional
 	Spend *WorkSpend `json:"spend,omitempty"`
 	// ModelUsage maps each model unit's index to its token use and cost
-	// over all its attempts.
+	// over all its attempts, for the job's newest model units (the
+	// highest indices: a lead's latest workers): at most 500 of them, and
+	// 256 KiB in all. Older units are folded into ModelUsageOlder.
 	// +optional
 	ModelUsage map[string]WorkUnitUsage `json:"modelUsage,omitempty"`
+	// ModelUsageOlder is the use of the model units ModelUsage no longer
+	// lists, summed, so the two together are every model unit's and
+	// Spend's totals never change by a unit being folded.
+	// +optional
+	ModelUsageOlder *WorkUsageFold `json:"modelUsageOlder,omitempty"`
 	// Interruptions lists the most recent attempts the farm stopped (a
 	// drain, an eviction, a preemption, a node going away): they spent no
 	// retry and run again. Interrupted counts them all.
@@ -1063,6 +1070,22 @@ type WorkInputSubstitute struct {
 	Substitute string `json:"substitute"`
 	Site       string `json:"site"`
 	Recompute  string `json:"recompute"`
+}
+
+// WorkUsageFold is the use of the model units a job's status no longer
+// lists one by one, summed over the units and their attempts: totals,
+// and each model's. A unit is folded for good, and its later attempts
+// are added here.
+type WorkUsageFold struct {
+	// Below is where the fold ends: every model unit with a lower index
+	// is folded, and every one at or above it is listed in ModelUsage.
+	// Units counts the folded units that have run.
+	Below int32 `json:"below"`
+	// +optional
+	Units int32 `json:"units,omitempty"`
+	// The sums, as a unit's. Reasoning and CostSource are a unit's own
+	// and are not kept; UsageError is the latest folded unit's.
+	WorkUnitUsage `json:",inline"`
 }
 
 // WorkUnitUsage is one model unit's use of models over its attempts:
