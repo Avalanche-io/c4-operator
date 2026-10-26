@@ -74,3 +74,33 @@ func TestSubmitTreeOutsideItsFolder(t *testing.T) {
 		t.Errorf("inside, --yes: %v", err)
 	}
 }
+
+// Inside an agent, `c4 farm submit TOOL ASSET` sends an asset's folder
+// only from within the project the agent works in (the nearest
+// .c4project above its folder); outside an agent, the person typed it.
+func TestAgentMaySend(t *testing.T) {
+	root := t.TempDir()
+	project := filepath.Join(root, "saltmarsh")
+	shot := filepath.Join(project, "sm0140")
+	other := filepath.Join(root, "elsewhere")
+	for _, d := range []string{shot, other} {
+		os.MkdirAll(d, 0o755)
+	}
+	os.WriteFile(filepath.Join(project, ".c4project"), nil, 0o644)
+	t.Chdir(shot)
+	t.Setenv("CLAUDECODE", "")
+	if err := agentMaySend(other); err != nil {
+		t.Errorf("a person: %v", err)
+	}
+	t.Setenv("CLAUDECODE", "1")
+	for _, in := range []string{project, shot} {
+		if err := agentMaySend(in); err != nil {
+			t.Errorf("an agent, %s: %v", in, err)
+		}
+	}
+	for _, out := range []string{other, root} {
+		if err := agentMaySend(out); err == nil || !strings.Contains(err.Error(), "an agent cannot send a folder outside the one it works in") {
+			t.Errorf("an agent, %s: %v", out, err)
+		}
+	}
+}

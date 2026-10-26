@@ -267,6 +267,9 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	if err != nil {
 		return nil, err
 	}
+	if err := agentMaySend(root); err != nil {
+		return nil, err
+	}
 	opt := a.Options
 	opt.Asset, opt.Shot = rel, a.Shot
 	if info, err := os.Stat(a.Asset); err == nil && info.IsDir() {

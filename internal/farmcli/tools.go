@@ -574,6 +574,28 @@ func (o Out) printFiles(t *folderTree) {
 	o.printf("  files     %s · %s · %s\n", found, Bytes(tot.Bytes), upl)
 }
 
+// agentMaySend refuses, inside an agent, an asset's folder outside the
+// project the agent works in (the nearest .c4project above its folder,
+// else that folder). A person chose the folder by typing it; an agent may
+// have been steered to one by something it read.
+func agentMaySend(root string) error {
+	if !InsideAgent() {
+		return nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return err
+	}
+	work, _, err := FindRoot(cwd, "")
+	if err != nil {
+		return err
+	}
+	if !insideFolder(work, root) {
+		return fmt.Errorf("%s: an agent cannot send a folder outside the one it works in (%s): run it yourself at a terminal", tildePath(root), tildePath(work))
+	}
+	return nil
+}
+
 // insideFolder says dir is base or within it, links resolved: a link
 // inside base that leads out of it is outside.
 func insideFolder(base, dir string) bool {
@@ -641,6 +663,9 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	}
 	root, rel, err := FindRoot(target, a.Root)
 	if err != nil {
+		return nil, err
+	}
+	if err := agentMaySend(root); err != nil {
 		return nil, err
 	}
 	if pattern != "" {
