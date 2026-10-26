@@ -79,6 +79,9 @@ func grantView(g *c4v1.SubmitGrant, project string, now time.Time) api.Grant {
 // plan a grant but never perform one: the person grants, as themselves.
 const errAgentGrants = "an agent cannot grant for you: ask the person to grant it in the HUD or with c4 farm grant"
 
+// errUnitRevokes is the refusal of a revoke a unit's own token asks for.
+const errUnitRevokes = "a unit cannot revoke a person's grant: the person, or a project admin, revokes it"
+
 // agentActs says the request comes through MCP or names an agent
 // (X-C4-Agent), from whatever client.
 func agentActs(r *http.Request) bool { return via(r) == "mcp" || claimedAgent(r) != "" }
@@ -92,7 +95,9 @@ func (s *Server) handleGrant(w http.ResponseWriter, r *http.Request) {
 	if v == nil {
 		return
 	}
-	if agentActs(r) {
+	// An honest agent says so (agentActs); a block pod is known by its
+	// own token, whatever it says.
+	if agentActs(r) || v.Unit != nil {
 		fail(w, http.StatusForbidden, errAgentGrants)
 		return
 	}
@@ -256,6 +261,12 @@ func (s *Server) handleGrants(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleRevoke(w http.ResponseWriter, r *http.Request) {
 	v := s.withViewer(w, r)
 	if v == nil {
+		return
+	}
+	if v.Unit != nil {
+		// A unit holds no one's grant, so it revokes none: a block pod
+		// would otherwise take back what a person gave.
+		fail(w, http.StatusForbidden, errUnitRevokes)
 		return
 	}
 	m := s.current()

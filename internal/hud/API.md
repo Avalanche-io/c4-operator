@@ -1602,7 +1602,11 @@ owner holds every role, so the client, not the role, is what tells the
 person from an agent acting for them. MCP's `c4_grant` only plans: it
 answers what the grant would allow and the `c4 farm grant` command the
 person runs. Revoking only narrows, so an agent may revoke; the `revoke`
-record names the client (`via`) and the agent (`agent`).
+record names the client (`via`) and the agent (`agent`). Those headers
+are what an honest client says of itself; a unit's own pod token is
+known whatever it says, so a unit can neither grant (the same `403`)
+nor revoke a person's grant (`403`, "a unit cannot revoke a person's
+grant: the person, or a project admin, revokes it").
 
 | route                        | body or query                                                   | answer                                                                                                                                                                                                           |
 | ---------------------------- | --------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

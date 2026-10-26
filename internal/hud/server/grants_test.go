@@ -417,3 +417,35 @@ func TestAgentCannotGrant(t *testing.T) {
 		t.Errorf("revoke record: action %q, actor %q, via %q, agent %q", p.Action, p.Actor, p.Via, p.Agent)
 	}
 }
+
+// A block pod is known by its own token, whatever its client says: it
+// can neither grant for a person nor take back what a person gave.
+func TestAUnitCannotGrant(t *testing.T) {
+	s := grantFarm(t)
+	s.DevViewers["unit"] = &api.Viewer{User: "unit", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "sh010", Unit: "0", Grant: "project"}}
+	do := func(method, path string, body any) (int, map[string]any) {
+		t.Helper()
+		raw, _ := json.Marshal(body)
+		w := httptest.NewRecorder()
+		s.Handler().ServeHTTP(w, httptest.NewRequest(method, path, bytes.NewReader(raw)))
+		var out map[string]any
+		json.Unmarshal(w.Body.Bytes(), &out)
+		return w.Code, out
+	}
+	req := api.GrantRequest{Project: "show-a", Tracker: "github", Pools: []string{"cpu"}, Until: "7d"}
+	code, out := do(http.MethodPost, "/api/v1/grants?as=unit", req)
+	if msg, _ := out["error"].(string); code != http.StatusForbidden || msg != errAgentGrants {
+		t.Fatalf("a unit granting: %d %v, want 403 %q", code, out, errAgentGrants)
+	}
+	if code, out := do(http.MethodPost, "/api/v1/grants?as=artist", req); code != http.StatusOK {
+		t.Fatalf("the person's grant: %d %v", code, out)
+	}
+	code, out = do(http.MethodDelete, "/api/v1/grants/show-a/"+c4v1.SubmitGrantName("github", "maya")+"?as=unit", nil)
+	if msg, _ := out["error"].(string); code != http.StatusForbidden || msg != errUnitRevokes {
+		t.Fatalf("a unit revoking: %d %v, want 403 %q", code, out, errUnitRevokes)
+	}
+	if gs := grants(t, s, "?as=artist"); len(gs) != 1 {
+		t.Fatalf("the person's grant after a unit tried to revoke it: %+v", gs)
+	}
+}
