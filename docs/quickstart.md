@@ -127,7 +127,10 @@ usd        once    v1    Flatten and check a USD stage · farm-wide
 Repository tests and LoRA training run too, as the farm's built-in jobs
 (`c4 farm submit ci DIR`, `c4 farm submit lora DIR`). ci runs a
 repository's pytest or Go tests with no network: stage dependencies in the
-folder, or name a tool that declares the network they come from.
+folder, or name a tool that declares the network they come from. A
+checkout goes up as git would keep it: never `.git`, and nothing the
+repository's own `.gitignore` files leave out (your global excludes don't
+count, so the tree has one ID on every machine). `--all` sends those too.
 
 ## 4. Get the sample shot
 
