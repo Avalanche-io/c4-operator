@@ -2,6 +2,7 @@ package flow_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -315,4 +316,51 @@ func TestPublishUnknownArtist(t *testing.T) {
 	if u, ok := s.Get("Version", vid)["user"]; ok {
 		t.Fatalf("user: %v", u)
 	}
+}
+
+// Spend goes to a currency field as a number, which a site requires (the
+// fake refuses a string there, as a site does); an ETA written empty
+// clears the field.
+func TestSpendIsANumberAndETAClears(t *testing.T) {
+	s := site(t)
+	task := s.AddTask(s.AddShot("sh040"), "Lighting", "LGT", "ip", "2026-10-23", s.AddUser("pat", "Pat", ""))
+	c := tracker.Config{Endpoint: s.URL, Token: func(context.Context) (string, error) { return s.Key, nil },
+		Scope: map[string]string{"project": strconv.Itoa(s.Project().ID), "script": "c4-sync", "eta_field": "sg_c4_eta", "spend_field": "sg_c4_spend"}}
+	a, err := flow.New(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	on := tracker.Ref{Type: "Task", ID: strconv.Itoa(task.ID)}
+	if _, err := a.Apply(ctx, tracker.Write{On: on, Kind: "update", Fields: map[string]string{"sg_c4_spend": "0.0016", "sg_c4_eta": "2026-10-23T20:00:00Z"}}); err != nil {
+		t.Fatal(err)
+	}
+	if f := s.Get("Task", task.ID); f["sg_c4_spend"] != 0.0016 || f["sg_c4_eta"] != "2026-10-23T20:00:00Z" {
+		t.Fatalf("task: %v", f)
+	}
+	if _, err := a.Apply(ctx, tracker.Write{On: on, Kind: "update", Fields: map[string]string{"sg_c4_eta": ""}}); err != nil {
+		t.Fatal(err)
+	}
+	if v, ok := s.Get("Task", task.ID)["sg_c4_eta"]; !ok || v != nil {
+		t.Fatalf("the ETA was not cleared: %v", v)
+	}
+	// a string where the site types a number is refused
+	req, _ := http.NewRequest(http.MethodPost, s.URL+"/api/v1.1/auth/access_token", strings.NewReader("grant_type=client_credentials&client_id=c4-sync&client_secret="+s.Key))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tok struct {
+		AccessToken string `json:"access_token"`
+	}
+	_ = json.NewDecoder(resp.Body).Decode(&tok)
+	resp.Body.Close()
+	req, _ = http.NewRequest(http.MethodPut, s.URL+"/api/v1.1/entity/tasks/"+on.ID, strings.NewReader(`{"sg_c4_spend":"0.0016"}`))
+	req.Header.Set("Authorization", "Bearer "+tok.AccessToken)
+	req.Header.Set("Content-Type", "application/json")
+	if resp, err = http.DefaultClient.Do(req); err != nil || resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("a string spend: %v %v", resp.Status, err)
+	}
+	resp.Body.Close()
 }

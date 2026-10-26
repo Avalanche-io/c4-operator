@@ -661,7 +661,20 @@ func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, erro
 	case "update":
 		body := map[string]any{}
 		for k, v := range w.Fields {
-			if v != "" {
+			switch {
+			case v == "" && k == a.etaField:
+				// a job no longer running has no ETA: clear it, so a
+				// finished Task does not show a stale one
+				body[k] = nil
+			case v == "":
+			case k == a.spendField:
+				// a currency field takes a number
+				n, err := strconv.ParseFloat(v, 64)
+				if err != nil {
+					return tracker.Ref{}, fmt.Errorf("flow: spend %q: %w", v, err)
+				}
+				body[k] = n
+			default:
 				body[k] = v
 			}
 		}

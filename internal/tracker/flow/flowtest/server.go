@@ -593,10 +593,19 @@ func decode(body []byte) (map[string]any, *apiErr) {
 		}
 		var x any
 		_ = json.Unmarshal(v, &x)
+		if _, isNum := x.(float64); numberFields[k] && x != nil && !isNum {
+			// a site refuses a string in a number or currency field
+			return nil, &apiErr{400, 103, "Bad Request", fmt.Sprintf("%s: a number is expected, got %s", k, v)}
+		}
 		out[k] = x
 	}
 	return out, nil
 }
+
+// numberFields are the fields typed as numbers on the fake site: the
+// Version's frames, and the currency field a site admin makes for C4's
+// spend (FLOW.md).
+var numberFields = map[string]bool{"sg_first_frame": true, "sg_last_frame": true, "sg_c4_spend": true}
 
 func selfPath(r *Record) string { return fmt.Sprintf("/api/v1.1/entity/%s/%d", plural[r.Type], r.ID) }
 

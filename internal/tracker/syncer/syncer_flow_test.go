@@ -329,9 +329,16 @@ func TestFlowDailiesLoop(t *testing.T) {
 	e.job(second.Name, func(j *api.Job) { j.Phase = "Succeeded" })
 	w = len(e.site.Writes())
 	e.pass()
+	e.clock.add(time.Hour)
+	e.pass()
 	e.pass()
 	if got := len(e.site.Writes()); got != w {
 		t.Fatalf("done wrote %d times: done is not C4's to write", got-w)
+	}
+	// and no stale ETA: a job with none clears the field, never leaves the
+	// render's
+	if got, ok := e.site.Get("Task", e.task.ID)["sg_c4_eta"]; !ok || got != nil {
+		t.Fatalf("the finished Task's ETA: %v", got)
 	}
 	if n := e.scriptVersionWrites(); n != 0 {
 		t.Fatalf("c4-sync changed a Version %d times after publishing it", n)
@@ -801,7 +808,7 @@ func TestFlowArtistFramesSpend(t *testing.T) {
 	if v.Fields["frame_range"] != "1001-1240" {
 		t.Fatalf("frames: %v", v.Fields["frame_range"])
 	}
-	if got := e.site.Get("Task", e.task.ID)["sg_c4_spend"]; got != "12.75" {
+	if got := e.site.Get("Task", e.task.ID)["sg_c4_spend"]; got != 12.75 {
 		t.Fatalf("the Task's spend: %v", got)
 	}
 	// the map's offer alone names nobody

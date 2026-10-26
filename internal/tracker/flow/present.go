@@ -2,6 +2,7 @@ package flow
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -53,8 +54,9 @@ func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracke
 	if a.spendField != "" && s.Spend > 0 {
 		// One number in the pools' currency, so a currency field sums in
 		// the site's reports; it moves every tick, so it is continuous and
-		// written at most every fieldSeconds.
-		spend := fmt.Sprintf("%.2f", s.Spend)
+		// written at most every fieldSeconds. Four places, so a short job
+		// at a low rate is not written as nothing; the site shows its own.
+		spend := strconv.FormatFloat(s.Spend, 'f', 4, 64)
 		out = append(out, tracker.FieldWrite{
 			Field: "spend", Value: "spend", Continuous: spend,
 			Build: func(tracker.Written) tracker.Write {
