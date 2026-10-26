@@ -65,9 +65,9 @@ func TestFarmCLIAgainstTheHUD(t *testing.T) {
 		t.Fatalf("submit: %v\n%s", err, out.String())
 	}
 	got := out.String()
-	for _, want := range []string{"sm0140-light-v001   render · 4 frames · Cycles · pool cpu", "4 files found from sm0140.usda",
+	for _, want := range []string{"sm0140-render-v001   render · 4 frames · Cycles · pool cpu", "4 files found from sm0140.usda",
 		"4 to upload", "ready ~14:52 PDT  (p90 ~15:04 PDT)", "deadline  18:00 PDT today (Sat 01:00 UTC) · slack ~3h 8m",
-		"uploaded  4 files", "queued    show-a/sm0140-light-v001", "?as=artist#/job/show-a/sm0140-light-v001"} {
+		"uploaded  4 files", "queued    show-a/sm0140-render-v001", "?as=artist#/job/show-a/sm0140-render-v001"} {
 		if !strings.Contains(got, want) {
 			t.Errorf("output lacks %q:\n%s", want, got)
 		}
@@ -100,7 +100,7 @@ func TestFarmCLIAgainstTheHUD(t *testing.T) {
 	if _, err := farmcli.Submit(context.Background(), c, o, args); err != nil {
 		t.Fatalf("resubmit: %v\n%s", err, out.String())
 	}
-	if got := out.String(); !strings.Contains(got, "sm0140-light-v002") || !strings.Contains(got, "3 already on the farm · 1 to upload") ||
+	if got := out.String(); !strings.Contains(got, "sm0140-render-v002") || !strings.Contains(got, "3 already on the farm · 1 to upload") ||
 		!strings.Contains(got, "uploaded  1 file ·") {
 		t.Fatalf("resubmit output:\n%s", got)
 	}
