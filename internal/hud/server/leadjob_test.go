@@ -220,3 +220,23 @@ func TestSupplyLeadQuestion(t *testing.T) {
 		}
 	}
 }
+
+// A lead's job grows by its own lead, or its person directly: a header
+// naming another session adds nothing, and says whose job it is.
+func TestAppendToLeadJob(t *testing.T) {
+	s := leadJobFarm(t, nil)
+	code, body := appendPost(s, "noor-lead", "wrangler", worker1, leadHeader("session-2"))
+	if code != http.StatusForbidden || !strings.Contains(body,
+		"noor-lead is the job of lead session session-1, and the agent header (X-C4-Agent) names session session-2: only that lead, or dana with no agent header, adds workers to it") {
+		t.Fatalf("another session: %d %s", code, body)
+	}
+	if _, reqs := liveAppends(t, s); len(reqs) != 0 {
+		t.Fatalf("a refused append was listed: %+v", reqs)
+	}
+	if code, body := appendPost(s, "noor-lead", "wrangler", worker1, leadHeader("session-1")); code != http.StatusCreated {
+		t.Fatalf("its lead: %d %s", code, body)
+	}
+	if code, body := appendPost(s, "noor-lead", "wrangler", strings.NewReplacer(`"k1"`, `"k2"`, "worker-1", "worker-2").Replace(worker1), nil); code != http.StatusCreated {
+		t.Fatalf("its person: %d %s", code, body)
+	}
+}

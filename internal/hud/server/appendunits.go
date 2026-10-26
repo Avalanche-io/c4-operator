@@ -128,6 +128,13 @@ func (s *Server) appendOnce(ctx context.Context, r *http.Request, v *api.Viewer,
 	case owner != v.User:
 		return none, http.StatusForbidden, fmt.Errorf("%s is %s's job: only %s, or an agent of theirs, adds units to it", j.Name, owner, owner)
 	}
+	if j.Annotations[c4v1.AnnotationLeadSession] != "" {
+		// A lead's job grows by its own lead, or its person directly;
+		// never from another session (leadjob.go).
+		if why := leadActRefusal(r, v, j, "adds workers to it"); why != "" {
+			return none, http.StatusForbidden, errors.New(why)
+		}
+	}
 	if err := s.authorize(ctx, r, v, j.Namespace, "patch", "workjobs", j.Name); err != nil {
 		return none, http.StatusForbidden, err
 	}
