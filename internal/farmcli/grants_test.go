@@ -33,3 +33,39 @@ func TestGrantSaysItsEndLocally(t *testing.T) {
 		t.Errorf("grant:\n%s", s)
 	}
 }
+
+// c4 farm grant TRACKER with no project named takes the project the
+// tracker belongs to when only one has it, and names the projects when
+// more than one does; a project named is used as named.
+func TestGrantFindsTheTrackersProject(t *testing.T) {
+	trackers := []api.Tracker{{Namespace: "saltmarsh", Name: "sandbox", Project: "saltmarsh"}, {Namespace: "glassworks", Name: "flow", Project: "glassworks"}}
+	var asked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/trackers":
+			json.NewEncoder(w).Encode(api.TrackerList{Trackers: trackers})
+		case "/api/v1/grants":
+			var req api.GrantRequest
+			json.NewDecoder(r.Body).Decode(&req)
+			asked = append(asked, req.Project)
+			json.NewEncoder(w).Encode(api.GrantResponse{Message: "granted", Grant: api.Grant{Namespace: req.Project, Name: req.Tracker}})
+		}
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "noor"})
+	ctx := context.Background()
+	o := Out{W: &bytes.Buffer{}}
+	if err := Grant(ctx, c, o, "", api.GrantRequest{Tracker: "sandbox"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := Grant(ctx, c, o, "glassworks", api.GrantRequest{Tracker: "sandbox"}); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(asked, ",") != "saltmarsh,glassworks" {
+		t.Errorf("granted in %v", asked)
+	}
+	trackers = append(trackers, api.Tracker{Namespace: "copperline", Name: "sandbox", Project: "copperline"})
+	if err := Grant(ctx, c, o, "", api.GrantRequest{Tracker: "sandbox"}); err == nil || err.Error() != "tracker sandbox is in more than one project (copperline, saltmarsh): name one with --project" {
+		t.Errorf("two projects: %v", err)
+	}
+}

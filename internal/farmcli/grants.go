@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -16,6 +17,14 @@ import (
 func Grant(ctx context.Context, c *Client, o Out, project string, req api.GrantRequest) error {
 	if req.Project == "" && req.Namespace == "" {
 		req.Project = project
+	}
+	// no project named: the tracker's own, when only one project has it
+	if req.Project == "" && req.Namespace == "" {
+		p, err := trackerProject(ctx, c, req.Tracker)
+		if err != nil {
+			return err
+		}
+		req.Project = p
 	}
 	var r api.GrantResponse
 	if err := c.Do(ctx, "POST", "/grants", req, &r); err != nil {
@@ -80,4 +89,29 @@ func Revoke(ctx context.Context, c *Client, o Out, ref string) error {
 	}
 	o.printf("%s\n", r.Message)
 	return nil
+}
+
+// trackerProject is the project a tracker named name belongs to, when only
+// one has a tracker of that name; "" when none does, for the farm to say
+// what is wrong.
+func trackerProject(ctx context.Context, c *Client, name string) (string, error) {
+	var l api.TrackerList
+	if err := c.Do(ctx, "GET", "/trackers", nil, &l); err != nil {
+		return "", nil
+	}
+	var in []string
+	for _, t := range l.Trackers {
+		if t.Name == name || t.Namespace+"/"+t.Name == name {
+			in = append(in, t.Project)
+		}
+	}
+	slices.Sort(in)
+	in = slices.Compact(in)
+	switch len(in) {
+	case 0:
+		return "", nil
+	case 1:
+		return in[0], nil
+	}
+	return "", fmt.Errorf("tracker %s is in more than one project (%s): name one with --project", name, strings.Join(in, ", "))
 }

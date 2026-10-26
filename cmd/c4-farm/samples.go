@@ -83,7 +83,7 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 		}
 	}
 	if p.Removed > 0 {
-		fmt.Fprintf(stdout, "removed   %d jobs of an earlier scenario\n", p.Removed)
+		fmt.Fprintf(stdout, "removed   %s of an earlier scenario\n", map[bool]string{true: "1 job", false: fmt.Sprintf("%d jobs", p.Removed)}[p.Removed == 1])
 	}
 	client := func(as string) (*farmcli.Client, error) {
 		return farmcli.NewClient(farmcli.Farm{HUD: f.HUD, As: as, Local: true, InstallerTokenFile: f.InstallerTokenFile})

@@ -321,7 +321,7 @@ func LoadScenario(ctx context.Context, o Out, sc Scenario, client func(as string
 		if err != nil {
 			return err
 		}
-		done, deadline, err := submitStandIn(ctx, c, o.Clock, sc.Name, j)
+		done, deadline, err := submitSeen(ctx, c, o.Clock, sc.Name, j)
 		if err != nil {
 			return fmt.Errorf("%s/%s: %w", j.Project, j.Name, err)
 		}
@@ -340,6 +340,31 @@ func LoadScenario(ctx context.Context, o Out, sc Scenario, client func(as string
 
 // submitStandIn uploads a job's placeholder tree and submits it; it
 // returns the deadline it set, if any.
+// ProjectWait is how long a job is sent again while the farm does not
+// see its project yet: a project a scenario has just added takes a moment
+// to reach the HUD.
+var ProjectWait = time.Minute
+
+// projectRetry is how often it is sent again meanwhile.
+var projectRetry = 2 * time.Second
+
+// submitSeen submits a stand-in, sending it again while the farm answers
+// that its project is not there yet.
+func submitSeen(ctx context.Context, c *Client, clock Clock, scenario string, j ScenarioJob) (*api.SubmitResponse, *time.Time, error) {
+	end := time.Now().Add(ProjectWait)
+	for {
+		done, deadline, err := submitStandIn(ctx, c, clock, scenario, j)
+		if err == nil || !strings.Contains(err.Error(), "no project "+j.Project) || time.Now().After(end) {
+			return done, deadline, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, nil, ctx.Err()
+		case <-time.After(projectRetry):
+		}
+	}
+}
+
 func submitStandIn(ctx context.Context, c *Client, clock Clock, scenario string, j ScenarioJob) (*api.SubmitResponse, *time.Time, error) {
 	t, err := LookupType(j.Type)
 	if err != nil {

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Avalanche-io/c4"
 
@@ -114,6 +115,9 @@ type fakeHUD struct {
 	jobs []api.SubmitRequest
 	as   []string
 	puts int
+	// lag is how many more submissions to each project the farm refuses
+	// with "no project", as it does while a project just added reaches it
+	lag map[string]int
 }
 
 func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -142,6 +146,12 @@ func (f *fakeHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case r.Method == http.MethodPost && p == "/jobs":
 		var req api.SubmitRequest
 		json.NewDecoder(r.Body).Decode(&req)
+		if f.lag[req.Project] != 0 {
+			f.lag[req.Project]--
+			w.WriteHeader(http.StatusNotFound)
+			json.NewEncoder(w).Encode(map[string]string{"error": "no project " + req.Project})
+			return
+		}
 		f.jobs = append(f.jobs, req)
 		f.as = append(f.as, r.URL.Query().Get("as"))
 		json.NewEncoder(w).Encode(api.SubmitResponse{OK: true, Namespace: req.Project, Name: req.Name, Project: req.Project})
@@ -285,5 +295,34 @@ func TestLoadIssues(t *testing.T) {
 	}
 	if err := LoadIssues(context.Background(), Out{W: &out}, sc, none.URL, "", ""); !errors.Is(err, ErrNoSandbox) {
 		t.Fatalf("no sandbox: %v", err)
+	}
+}
+
+// A project a scenario has just added takes a moment to reach the farm: a
+// job for it is sent again while the farm says it has no such project,
+// and a project that never comes ends the load in the farm's words.
+func TestLoadScenarioWaitsForItsProjects(t *testing.T) {
+	defer func(w, r time.Duration) { ProjectWait, projectRetry = w, r }(ProjectWait, projectRetry)
+	ProjectWait, projectRetry = time.Second, time.Millisecond
+	hud := &fakeHUD{lag: map[string]int{"glassworks": 3, "copperline": 1}}
+	srv := httptest.NewServer(hud)
+	defer srv.Close()
+	sc, err := LookupScenario("evening")
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := func(as string) (*Client, error) { return NewClient(Farm{HUD: srv.URL, As: as}) }
+	if err := LoadScenario(context.Background(), Out{W: io.Discard, Clock: eastern(t)}, sc, client); err != nil {
+		t.Fatal(err)
+	}
+	if len(hud.jobs) != 6 {
+		t.Fatalf("%d jobs", len(hud.jobs))
+	}
+
+	ProjectWait = 20 * time.Millisecond
+	hud.jobs, hud.lag = nil, map[string]int{"glassworks": -1}
+	err = LoadScenario(context.Background(), Out{W: io.Discard, Clock: eastern(t)}, sc, client)
+	if err == nil || !strings.Contains(err.Error(), "glassworks/gw010-light-v007: no project glassworks") {
+		t.Errorf("a project that never comes: %v", err)
 	}
 }
