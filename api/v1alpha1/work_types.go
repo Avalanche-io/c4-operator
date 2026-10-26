@@ -186,6 +186,12 @@ const (
 	// (status.withdrawn). The unit runs again without an answer, with the
 	// reason in $C4_WITHDRAWN.
 	AnnotationWithdrawNeeds = "c4.avalanche.io/withdraw-needs"
+	// AnnotationAppend on a graph WorkJob carries its owner's additions to
+	// its unit table while it runs: a JSON list of WorkAppendRequest, each
+	// naming the stored expansion document of the units it adds. The
+	// queue applies each key once (status.appends), the units after the
+	// job's existing ones, as a generator's expansion adds its children.
+	AnnotationAppend = "c4.avalanche.io/append"
 	// AnnotationRecheck on a unit pod says it is an extra attempt of a unit
 	// that stopped for information, started only to re-check its question
 	// ($C4_RECHECK): the value is why. Exit 0 withdraws the question, with
@@ -483,6 +489,12 @@ type WorkJobStatus struct {
 	// (DESIGN 10.6).
 	// +optional
 	Expansions []WorkExpansion `json:"expansions,omitempty"`
+	// Appends lists every addition of units its owner made while it ran
+	// (AnnotationAppend), in the order the queue applied them: with
+	// Expansions, what a restart replays to rebuild the unit table, and
+	// the keys the queue will not apply again.
+	// +optional
+	Appends []WorkAppend `json:"appends,omitempty"`
 	// UnitOutputs maps the index of a unit another unit reads (fromUnit)
 	// to its captured output view.
 	// +optional
@@ -814,6 +826,52 @@ type WorkExpansion struct {
 	// generator failed.
 	// +optional
 	Error string `json:"error,omitempty"`
+}
+
+// WorkAppend is one addition of units to a running job: its document
+// added Units units, indexes First to First+Units-1, after every unit the
+// job had.
+type WorkAppend struct {
+	// Key is the request's idempotency key: the queue applies a key once.
+	Key string `json:"key"`
+	// Document is the C4 ID of the expansion document of the units.
+	Document string      `json:"document"`
+	First    int32       `json:"first"`
+	Units    int32       `json:"units"`
+	At       metav1.Time `json:"at"`
+	// Control is the C4 ID of the HUD's signed control record of the
+	// request (action append).
+	// +optional
+	Control string `json:"control,omitempty"`
+	// Record is the C4 ID of the queue's signed decision (kind append).
+	// +optional
+	Record string `json:"record,omitempty"`
+	// Error says why the queue refused the units; it added none.
+	// +optional
+	Error string `json:"error,omitempty"`
+}
+
+// WorkAppendRequest asks the queue to add units to a running graph job
+// (AnnotationAppend, a JSON list of them).
+type WorkAppendRequest struct {
+	// Token makes each request distinct (base-36 nanoseconds).
+	Token string `json:"token"`
+	// Key is the caller's idempotency key: a request again with the same
+	// key adds nothing more.
+	Key string `json:"key"`
+	// Document is the C4 ID of the stored expansion document (version 1)
+	// whose units are added.
+	Document string `json:"document"`
+	// Units are the names of the units the document adds.
+	Units []string `json:"units"`
+	// Turn is the lead's turn that started these units, if it said.
+	// +optional
+	Turn  *int32      `json:"turn,omitempty"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// Record is the C4 ID of the signed control record.
+	// +optional
+	Record string `json:"record,omitempty"`
 }
 
 // WorkSpend is a job's spend: slot time priced at its pools' rates, and

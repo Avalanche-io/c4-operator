@@ -359,6 +359,56 @@ spec:
                   - units
                   type: object
                 type: array
+              appends:
+                description: |-
+                  Appends lists every addition of units its owner made while it ran
+                  (AnnotationAppend), in the order the queue applied them: with
+                  Expansions, what a restart replays to rebuild the unit table, and
+                  the keys the queue will not apply again.
+                items:
+                  description: |-
+                    WorkAppend is one addition of units to a running job: its document
+                    added Units units, indexes First to First+Units-1, after every unit the
+                    job had.
+                  properties:
+                    at:
+                      format: date-time
+                      type: string
+                    control:
+                      description: |-
+                        Control is the C4 ID of the HUD's signed control record of the
+                        request (action append).
+                      type: string
+                    document:
+                      description: Document is the C4 ID of the expansion document
+                        of the units.
+                      type: string
+                    error:
+                      description: Error says why the queue refused the units; it
+                        added none.
+                      type: string
+                    first:
+                      format: int32
+                      type: integer
+                    key:
+                      description: 'Key is the request''s idempotency key: the queue
+                        applies a key once.'
+                      type: string
+                    record:
+                      description: Record is the C4 ID of the queue's signed decision
+                        (kind append).
+                      type: string
+                    units:
+                      format: int32
+                      type: integer
+                  required:
+                  - at
+                  - document
+                  - first
+                  - key
+                  - units
+                  type: object
+                type: array
               asks:
                 description: |-
                   Asks are the latest questions the job's units asked one another,
