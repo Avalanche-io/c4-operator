@@ -91,8 +91,15 @@ type Output struct {
 	Custody string // the provenance view's URL
 	Follows string // the job this version follows; "" for the first
 	// Preview is a still of the output for trackers that review one (a
-	// Kitsu preview); nil when the farm has none.
+	// Kitsu preview, a Flow Version's thumbnail); nil when the farm has none.
 	Preview *Still
+	// FirstFrame and LastFrame are the frames the output covers, when the
+	// job has frames.
+	FirstFrame, LastFrame int
+	// By is the tracker user the work is for: the job's person as the
+	// Tracker's people map names them. "" when the map names no one, or
+	// the person has not confirmed their login.
+	By string
 }
 
 // Still is one image of an output: a frame's preview proxy.

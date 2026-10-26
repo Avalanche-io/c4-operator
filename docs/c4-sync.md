@@ -15,7 +15,7 @@ may change. Its place in the design is DESIGN.md section 15.2.
 | tracker                  | `kind`   | work in                                             | review out                                                           | decisions back                                   |
 | ------------------------ | -------- | --------------------------------------------------- | -------------------------------------------------------------------- | ------------------------------------------------ |
 | GitHub                   | `github` | labeled issues; milestone `due_on`                  | one comment; a check run per commit; commit statuses                 | pull request reviews; check-run buttons          |
-| Flow Production Tracking | `flow`   | Tasks by field; `due_date` (a date)                 | Task status and two fields; a Version per output                     | Version status changes and Notes                 |
+| Flow Production Tracking | `flow`   | Tasks by field; `due_date` (a date)                 | Task status and fields; a Version with its still per output          | Version status changes and Notes                 |
 | Kitsu                    | `kitsu`  | tasks by type, status and shot; `due_date` (a date) | comments carrying the task's status; task data; a preview per output | a person's comment moving the task out of review |
 | MLflow                   | `mlflow` | scheduled runs; `c4.deadline` tag                   | run status and `c4.*` tags; a model version per output               | the approve alias; a review tag                  |
 | Linear                   | `linear` | labeled issues; `dueDate` (a date)                  | workflow state by type; one status card; an attachment per output    | state changes by people, with their comments     |
@@ -293,6 +293,26 @@ risk. A TrackerLink's status shows:
 An MLflow server refuses a `c4://<view>` source whose path is empty, and
 accepts `c4:///<view>`. That is why c4-sync publishes the second form.
 See integrations/mlflow-c4/README.md.
+
+## Flow Production Tracking
+
+- **Matching.** Intake rules match Task fields as the site stores them,
+  including a linked entity's field (`step.Step.short_name: LGT`).
+- **Publishing.** Each output is a Version on the Task's shot or asset, in
+  `scope.review_status`, carrying the output view's C4 ID
+  (`scope.id_field`), the job and its provenance; its frames
+  (`sg_first_frame`, `sg_last_frame`, `frame_range`); the artist the work
+  is for (`user`), once that person has confirmed their login in the HUD,
+  and never the API script; and a still of the output (the middle frame's
+  preview proxy), uploaded as the Version's thumbnail in Flow's three
+  upload steps. A Version left without its still by an interrupted
+  publish gets it on the next pass.
+- **On the Task**, besides its status: the ETA (`scope.eta_field`), the
+  job's link (`scope.link_field`) and what the job has spent so far
+  (`scope.spend_field`), one number in the pools' currency, written at
+  most every `statusOut.fieldSeconds`. The site admin creates the fields.
+- **Links** written to C4 point at `scope.site_url` when people reach
+  the site at another address than c4-sync does.
 
 ## Kitsu
 

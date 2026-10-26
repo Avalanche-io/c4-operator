@@ -33,6 +33,9 @@ type Farm struct {
 	Previews     map[string][]byte
 	PreviewCalls int
 	PreviewFails int
+	// FrameRanges are jobs' output frames, first and last, by
+	// namespace/name.
+	FrameRanges map[string][2]int
 	// Grants are the people who let the tracker submit for them; a
 	// submission for anyone else is refused 403, as the HUD refuses it.
 	Grants map[string]bool
@@ -255,6 +258,17 @@ func (f *Farm) Preview(_ context.Context, j farm.JobRef) (string, []byte, error)
 		return "", nil, farm.ErrNotFound
 	}
 	return j.Name + ".png", b, nil
+}
+
+// Frames returns the job's range from FrameRanges.
+func (f *Farm) Frames(_ context.Context, j farm.JobRef) (int, int, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r, ok := f.FrameRanges[j.Namespace+"/"+j.Name]
+	if !ok {
+		return 0, 0, farm.ErrNotFound
+	}
+	return r[0], r[1], nil
 }
 
 func (f *Farm) JobURL(j farm.JobRef) string {

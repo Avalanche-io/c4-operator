@@ -975,6 +975,7 @@ func (s *Syncer) baseState(l *c4v1.TrackerLink) tracker.LinkState {
 func (s *Syncer) linkState(l *c4v1.TrackerLink, sum Summary) tracker.LinkState {
 	ls := s.baseState(l)
 	ls.State, ls.Words, ls.Title, ls.Why = sum.State, sum.Words(), sum.Title(nil), sum.Why
+	ls.Spend = sum.Spend
 	ls.Active, ls.ETA, ls.AtRisk, ls.Deadline = sum.Active(), sum.ETA, sum.AtRisk(), sum.Deadline
 	ls.DeadlineSource = deadlineSource(sum)
 	if w := sum.Wait; w != nil {
@@ -1055,7 +1056,7 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	}
 	// Publish before presenting: a published review entity (a Flow
 	// Version) is what the presentation then points at.
-	if err := s.publish(ctx, c, l, jr, sum); errors.Is(err, errStillWaiting) {
+	if err := s.publish(ctx, c, t, l, j, jr, sum); errors.Is(err, errStillWaiting) {
 		// Nothing is presented either: the review the publish makes is
 		// what the presentation points at.
 		return nil
@@ -1516,7 +1517,7 @@ func (s *Syncer) remember(ctx context.Context, l *c4v1.TrackerLink, field, value
 // at: when its review wait opens, or when it is done. Each output view is
 // published once. Where publishing makes the entity people review (a Flow
 // Version), that becomes the link's review.
-func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr farm.JobRef, sum Summary) error {
+func (s *Syncer) publish(ctx context.Context, c *conn, t *c4v1.Tracker, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, sum Summary) error {
 	if sum.Output == "" || (sum.State != StateInReview && sum.State != StateDone && sum.State != StateDoneAccepted) {
 		return nil
 	}
@@ -1539,6 +1540,18 @@ func (s *Syncer) publish(ctx context.Context, c *conn, l *c4v1.TrackerLink, jr f
 		return err
 	}
 	out.Preview = still
+	if fr, ok := s.Farm.(farm.Framer); ok {
+		if first, last, err := fr.Frames(ctx, jr); err == nil {
+			out.FirstFrame, out.LastFrame = first, last
+		}
+	}
+	// The artist, by the people map run in reverse: only a login its person
+	// has confirmed, so the tracker never names someone on the map's word.
+	if j != nil && j.Owner != "" {
+		if u := trackerUser(t, j.Owner); u != "" && s.confirmed(ctx, t, u, j.Owner) {
+			out.By = u
+		}
+	}
 	ref, err := c.adapter.Publish(ctx, on, out, tracker.WriteKey(l.Namespace+"/"+l.Name, "publish", sum.Output))
 	if err != nil {
 		return err
@@ -1727,4 +1740,17 @@ func (s *Syncer) setTrackerCond(ctx context.Context, t *c4v1.Tracker, typ string
 	}); err != nil {
 		s.Log.Error(err, "tracker condition", "tracker", key(t))
 	}
+}
+
+// confirmed says whether person has confirmed, in the HUD, that tracker
+// login u is them (a TrackerPerson, accepted and not revoked): the Tracker's
+// people map alone is only its offer.
+func (s *Syncer) confirmed(ctx context.Context, t *c4v1.Tracker, u, person string) bool {
+	var tp c4v1.TrackerPerson
+	key := client.ObjectKey{Namespace: t.Namespace, Name: c4v1.TrackerPersonName(t.Name, u, person)}
+	if err := s.Client.Get(ctx, key, &tp); err != nil {
+		return false
+	}
+	return tp.Spec.Tracker == t.Name && tp.Spec.Login == u && tp.Spec.Person == person &&
+		!tp.Spec.Accepted.At.IsZero() && tp.Standing()
 }

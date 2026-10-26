@@ -35,6 +35,10 @@ type LinkState struct {
 	// Loc is the zone the tracker's readers read times in (the project's),
 	// for When; nil is UTC.
 	Loc *time.Location
+	// Spend is what the job has cost so far, in the pools' currency: slot
+	// time at its pools' rates and model tokens at their prices. 0: not
+	// priced.
+	Spend float64
 }
 
 // WaitState is the open wait the tracker serves.

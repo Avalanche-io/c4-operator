@@ -2,9 +2,9 @@
 # c4-sync). Ready lighting Tasks become render jobs whose deadline is
 # 14:00 Los Angeles time on the Task's due date (Flow stores dates without
 # times). Work states go to the Task: its status from the map below, the
-# ETA and job link in two custom fields the site admin creates. Each
+# ETA, job link and spend in custom fields the site admin creates. Each
 # render publishes a Version in pending review carrying its output view's
-# C4 ID; the supervisor's status change and notes on the Version come back
+# C4 ID, its frames, its still and the artist; the supervisor's status change and notes on the Version come back
 # as the dailies decision. A rework makes the next version, which follows
 # the last with the note as its input. c4-sync never sets an approval.
 #
@@ -27,6 +27,10 @@ spec:
     id_field: sg_c4_id
     eta_field: sg_c4_eta
     link_field: sg_c4_link
+    # what the job has spent, one number in the pools' currency (a
+    # currency field sums in Flow's reports); the breakdown is behind the
+    # job's link
+    spend_field: sg_c4_spend
   credential:
     lease: saltmarsh-flow-script
     secret: {name: saltmarsh-flow-script, key: key}

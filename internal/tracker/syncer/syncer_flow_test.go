@@ -143,7 +143,10 @@ func (e *flowEnv) scriptVersionWrites() int {
 	for _, ev := range e.site.All("EventLogEntry") {
 		u, _ := ev.Fields["user"].(flowtest.Link)
 		ent, _ := ev.Fields["entity"].(flowtest.Link)
-		if u.Type == "ApiUser" && ent.Type == "Version" && ev.Fields["event_type"] == "Shotgun_Version_Change" {
+		// the still's upload completes the publish: Flow sets a field
+		// only once the Version exists
+		if u.Type == "ApiUser" && ent.Type == "Version" && ev.Fields["event_type"] == "Shotgun_Version_Change" &&
+			ev.Fields["attribute_name"] != "image" {
 			n++
 		}
 	}
@@ -230,6 +233,7 @@ func TestFlowDailiesLoop(t *testing.T) {
 	// 4. The render finishes and its dailies wait opens: the output is
 	// published as v001 in pending review, with its C4 ID.
 	e.job(first, func(j *api.Job) { j.Output = &api.Output{View: "c4OutputV001"} })
+	e.farm.Previews = map[string][]byte{ns + "/" + first: []byte("\x89PNG\r\n\x1a\nv1")}
 	e.farm.OpenWait(ns, first, "dailies", "person:dana", "approve", "rework", "accept")
 	e.pass()
 	vs := e.versions()
@@ -237,6 +241,9 @@ func TestFlowDailiesLoop(t *testing.T) {
 		t.Fatalf("versions: %d", len(vs))
 	}
 	v1 := vs[0]
+	if got := e.site.Upload("Version", v1.ID, "image"); string(got) != "\x89PNG\r\n\x1a\nv1" {
+		t.Fatalf("v001's still: %q", got)
+	}
 	if v1.Fields["code"] != "sh040_lgt_v001" || v1.Fields["sg_status_list"] != "rev" || v1.Fields["sg_c4_id"] != "c4OutputV001" ||
 		v1.Fields["sg_task"].(flowtest.Link).ID != e.task.ID || !strings.Contains(v1.Fields["description"].(string), "Provenance:") {
 		t.Fatalf("v001: %v", v1.Fields)
@@ -329,8 +336,8 @@ func TestFlowDailiesLoop(t *testing.T) {
 	if n := e.scriptVersionWrites(); n != 0 {
 		t.Fatalf("c4-sync changed a Version %d times after publishing it", n)
 	}
-	if e.farm.PreviewCalls != 0 {
-		t.Fatalf("a Flow publish fetched %d stills it does not upload", e.farm.PreviewCalls)
+	if e.farm.PreviewCalls != 2 {
+		t.Fatalf("two publishes fetched %d stills, want one each", e.farm.PreviewCalls)
 	}
 	if e.site.Get("Version", v1.ID)["sg_status_list"] != "fix" || e.site.Get("Version", vs[1].ID)["sg_status_list"] != "apr" {
 		t.Fatal("the supervisor's statuses must stand")
@@ -745,5 +752,61 @@ func TestFlowNamesStayWithTheLink(t *testing.T) {
 	}
 	if got := rework(old, "flow-"+tid); got != "flow-"+tid+"-v002" {
 		t.Fatalf("an old link's v002 is %s", got)
+	}
+}
+
+// The Version names the artist the work is for, by the people map run in
+// reverse, only once they have confirmed the login in the HUD; it carries
+// the job's frames; and the Task carries the job's spend, as one number.
+func TestFlowArtistFramesSpend(t *testing.T) {
+	publish := func(t *testing.T, confirmed bool) (*flowEnv, *flowtest.Record) {
+		t.Helper()
+		var opts []func(*fake.ClientBuilder)
+		if confirmed {
+			opts = append(opts, func(b *fake.ClientBuilder) {
+				b.WithObjects(&c4v1.TrackerPerson{
+					ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: c4v1.TrackerPersonName("flow", "dana", "dana")},
+					Spec: c4v1.TrackerPersonSpec{Tracker: "flow", Login: "dana", Person: "dana",
+						Accepted: c4v1.TrackerPersonAct{By: "dana", At: metav1.Now()}}})
+			})
+		}
+		e := setupFlow(t, opts...)
+		var tr c4v1.Tracker
+		if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+			t.Fatal(err)
+		}
+		tr.Spec.Scope["spend_field"] = "sg_c4_spend"
+		if err := e.k8s.Update(context.Background(), &tr); err != nil {
+			t.Fatal(err)
+		}
+		e.pass()
+		name := e.jobName()
+		e.farm.FrameRanges = map[string][2]int{ns + "/" + name: {1001, 1008}}
+		e.job(name, func(j *api.Job) {
+			j.Phase, j.Owner = "Running", "dana"
+			j.Spend = &api.Spend{ModelSlotCost: 1.25, ProceduralSlotCost: 10, TokenCost: 1.5}
+			j.Output = &api.Output{View: "c4OutputV001"}
+		})
+		e.farm.OpenWait(ns, name, "dailies", "person:dana", "approve", "rework", "accept")
+		e.pass()
+		vs := e.versions()
+		if len(vs) != 1 {
+			t.Fatalf("versions: %d", len(vs))
+		}
+		return e, vs[0]
+	}
+	e, v := publish(t, true)
+	if u, _ := v.Fields["user"].(flowtest.Link); u.ID != e.dana.ID {
+		t.Fatalf("the Version's user is %v, want the artist", v.Fields["user"])
+	}
+	if v.Fields["frame_range"] != "1001-1008" {
+		t.Fatalf("frames: %v", v.Fields["frame_range"])
+	}
+	if got := e.site.Get("Task", e.task.ID)["sg_c4_spend"]; got != "12.75" {
+		t.Fatalf("the Task's spend: %v", got)
+	}
+	// the map's offer alone names nobody
+	if _, v := publish(t, false); v.Fields["user"] != nil {
+		t.Fatalf("an unconfirmed login named the artist: %v", v.Fields["user"])
 	}
 }

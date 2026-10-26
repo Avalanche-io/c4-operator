@@ -13,6 +13,11 @@
 //     page[number], page[size] as query parameters;
 //   - POST /api/v1.1/entity/{entity} (create) and PUT .../{id} (update);
 //   - GET /api/v1.1/entity/notes/{id}/thread_contents;
+//   - uploads in three steps: GET .../{entity}/{id}/{field}/_upload?
+//     filename= answers upload info (data) and links (upload,
+//     complete_upload); a PUT to links.upload carries the bytes; a POST of
+//     {upload_info, upload_data} to links.complete_upload sets the field
+//     (image to a URL, any other field to an attachment) and answers 204;
 //   - records as {type, id, attributes, relationships, links}, lists as
 //     {data, links: {self, next}}, errors as {errors: [{status, code,
 //     title, detail}]}.
@@ -79,7 +84,20 @@ type Server struct {
 	calls   []Call
 	tokenN  int
 	project int
+	// uploads are the bytes a PUT sent, by upload id, until completed;
+	// files are completed uploads, by type/id/field.
+	uploads map[string]upload
+	files   map[string][]byte
 }
+
+type upload struct {
+	typ, field, name string
+	id               int
+	data             []byte
+}
+
+// noContent is a route's answer with no body (204).
+type noContent struct{}
 
 var plural = map[string]string{
 	"Project": "projects", "Shot": "shots", "Asset": "assets", "Sequence": "sequences",
@@ -113,7 +131,8 @@ func (s *Server) Handler() http.Handler { return http.HandlerFunc(s.serve) }
 
 func newServer() *Server {
 	s := &Server{Script: "c4-sync", Key: "s3cretkey", TokenSeconds: 600, now: time.Now,
-		next: map[string]int{}, recs: map[string]map[int]*Record{}, tokens: map[string]time.Time{}}
+		next: map[string]int{}, recs: map[string]map[int]*Record{}, tokens: map[string]time.Time{},
+		uploads: map[string]upload{}, files: map[string][]byte{}}
 	s.Server = httptest.NewUnstartedServer(http.HandlerFunc(s.serve))
 	s.mu.Lock()
 	s.project = s.add("Project", map[string]any{"name": "Saltmarsh"}, nil).ID
@@ -281,6 +300,16 @@ func (s *Server) Writes() []Call {
 	return out
 }
 
+// Upload returns the file a completed upload set on a record's field, or
+// nil.
+func (s *Server) Upload(typ string, id int, field string) []byte {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.files[fileKey(typ, id, field)]
+}
+
+func fileKey(typ string, id int, field string) string { return fmt.Sprintf("%s/%d/%s", typ, id, field) }
+
 // ExpireTokens makes every access token expire now.
 func (s *Server) ExpireTokens() {
 	s.mu.Lock()
@@ -379,6 +408,10 @@ func (s *Server) serve(w http.ResponseWriter, r *http.Request) {
 		writeErr(w, *e)
 		return
 	}
+	if _, ok := out.(noContent); ok {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
 	if r.Method == http.MethodPost && !strings.HasSuffix(r.URL.Path, "/_search") {
 		w.WriteHeader(http.StatusCreated)
 	}
@@ -473,8 +506,72 @@ func (s *Server) route(r *http.Request, body []byte, who Link) (any, *apiErr) {
 			}
 		}
 		return map[string]any{"data": data, "links": map[string]string{"self": r.URL.Path}}, nil
+	case len(p) == 5 && p[4] == "_upload":
+		return s.upload(r, typ, atoi(p[2]), p[3], body, who)
 	}
 	return nil, notFound
+}
+
+// upload serves the three steps of an upload to a record's field.
+func (s *Server) upload(r *http.Request, typ string, id int, field string, body []byte, who Link) (any, *apiErr) {
+	rec := s.recs[typ][id]
+	if rec == nil {
+		return nil, &apiErr{404, 104, "Not Found", "Record not found"}
+	}
+	path := r.URL.Path
+	q := r.URL.Query()
+	switch r.Method {
+	case http.MethodGet:
+		name := q.Get("filename")
+		if name == "" {
+			return nil, &apiErr{400, 103, "Bad Request", "filename is required"}
+		}
+		s.next["upload"]++
+		uid := fmt.Sprintf("upload-%d", s.next["upload"])
+		s.uploads[uid] = upload{typ: typ, id: id, field: field, name: name}
+		kind := "Attachment"
+		if field == "image" || field == "filmstrip_image" {
+			kind = "Thumbnail"
+		}
+		return map[string]any{
+			"data": map[string]any{"timestamp": s.now().UTC().Format(time.RFC3339), "upload_type": kind,
+				"upload_id": uid, "storage_service": "sg", "original_filename": name, "multipart_upload": false},
+			"links": map[string]string{
+				"upload":          path + "?upload_id=" + uid + "&filename=" + url.QueryEscape(name),
+				"complete_upload": path,
+			}}, nil
+	case http.MethodPut:
+		u, ok := s.uploads[q.Get("upload_id")]
+		if !ok || u.typ != typ || u.id != id || u.field != field {
+			return nil, &apiErr{400, 103, "Bad Request", "no such upload"}
+		}
+		u.data = append([]byte(nil), body...)
+		s.uploads[q.Get("upload_id")] = u
+		return map[string]any{"data": map[string]any{"upload_id": q.Get("upload_id"), "original_filename": u.name}}, nil
+	case http.MethodPost:
+		var in struct {
+			Info map[string]any `json:"upload_info"`
+			Data map[string]any `json:"upload_data"`
+		}
+		if err := json.Unmarshal(body, &in); err != nil || in.Info == nil {
+			return nil, &apiErr{400, 103, "Bad Request", "body: {upload_info, upload_data}"}
+		}
+		uid, _ := in.Info["upload_id"].(string)
+		u, ok := s.uploads[uid]
+		if !ok || u.typ != typ || u.id != id || u.field != field || u.data == nil {
+			return nil, &apiErr{400, 103, "Bad Request", "no such upload, or its bytes never came"}
+		}
+		delete(s.uploads, uid)
+		s.files[fileKey(typ, id, field)] = u.data
+		var v any = fmt.Sprintf("/thumbnail/%s/%d/%s", plural[typ], id, url.PathEscape(u.name))
+		if u.field != "image" && u.field != "filmstrip_image" {
+			v = map[string]any{"type": "Attachment", "name": u.name, "link_type": "upload", "content_type": http.DetectContentType(u.data),
+				"url": fmt.Sprintf("/file_serve/attachment/%s/%d/%s", plural[typ], id, url.PathEscape(u.name))}
+		}
+		_ = s.update(typ, id, map[string]any{field: v}, who)
+		return noContent{}, nil
+	}
+	return nil, &apiErr{405, 103, "Method Not Allowed", r.Method}
 }
 
 func decode(body []byte) (map[string]any, *apiErr) {

@@ -17,8 +17,10 @@
 //
 // Scope keys: project (the Project id), script (the API script's name;
 // the credential Secret holds its key), and optionally review_status
-// (default rev), id_field (default sg_c4_id), eta_field and link_field
-// (written only when named: custom fields the site admin creates).
+// (default rev), id_field (default sg_c4_id), eta_field, link_field and
+// spend_field (written only when named: custom fields the site admin
+// creates), and site_url (where people reach the site, for links; default
+// the endpoint).
 package flow
 
 import (
@@ -64,7 +66,9 @@ type Adapter struct {
 	hc      *http.Client
 	now     func() time.Time
 
-	reviewStatus, idField, etaField, linkField string
+	reviewStatus, idField, etaField, linkField, spendField string
+	// site is where people reach the site, for the links written to C4.
+	site string
 
 	mu      sync.Mutex
 	token   string
@@ -87,7 +91,8 @@ func New(c tracker.Config) (*Adapter, error) {
 	}
 	a := &Adapter{c: c, base: base, project: p, script: c.Scope["script"], hc: c.HTTPClient, now: c.Now,
 		reviewStatus: or(c.Scope["review_status"], "rev"), idField: or(c.Scope["id_field"], "sg_c4_id"),
-		etaField: c.Scope["eta_field"], linkField: c.Scope["link_field"], people: map[string]tracker.Person{}}
+		etaField: c.Scope["eta_field"], linkField: c.Scope["link_field"], spendField: c.Scope["spend_field"],
+		site: strings.TrimSuffix(or(c.Scope["site_url"], base), "/"), people: map[string]tracker.Person{}}
 	if a.hc == nil {
 		a.hc = &http.Client{Timeout: 30 * time.Second}
 	}
@@ -108,7 +113,7 @@ func (a *Adapter) Kind() string { return Kind }
 
 func (a *Adapter) Capabilities() tracker.Capabilities {
 	return tracker.Capabilities{EventLog: true, Webhooks: true, EditableComments: true, CustomFields: true,
-		DateOnlyDue: true, PublishForReview: true, Mentions: true}
+		DateOnlyDue: true, PublishForReview: true, PublishPreview: true, Mentions: true}
 }
 
 // --- HTTP ---
@@ -361,7 +366,7 @@ var taskFields = []string{"content", "due_date", "sg_status_list", "entity", "st
 
 func (a *Adapter) taskItem(r record) tracker.Item {
 	it := tracker.Item{
-		Ref:    tracker.Ref{Type: "Task", ID: strconv.Itoa(r.ID), URL: a.base + "/detail/Task/" + strconv.Itoa(r.ID)},
+		Ref:    tracker.Ref{Type: "Task", ID: strconv.Itoa(r.ID), URL: a.site + "/detail/Task/" + strconv.Itoa(r.ID)},
 		Title:  r.str("content"),
 		Status: tracker.Status{Native: r.str("sg_status_list")},
 		Fields: map[string]string{},
@@ -407,7 +412,7 @@ func (a *Adapter) Get(ctx context.Context, ref tracker.Ref) (tracker.Item, error
 		if err != nil {
 			return tracker.Item{}, err
 		}
-		return tracker.Item{Ref: tracker.Ref{Type: "Version", ID: ref.ID, URL: a.base + "/detail/Version/" + ref.ID},
+		return tracker.Item{Ref: tracker.Ref{Type: "Version", ID: ref.ID, URL: a.site + "/detail/Version/" + ref.ID},
 			Title: r.str("code"), Status: tracker.Status{Native: r.str("sg_status_list")},
 			Fields: map[string]string{"c4_id": r.str(a.idField)}}, nil
 	}
@@ -528,7 +533,7 @@ func (a *Adapter) Decisions(ctx context.Context, on tracker.Ref, since time.Time
 		ev, _ := json.Marshal(map[string]any{"event": e, "notes": notes})
 		out = append(out, tracker.Decision{
 			On:     on,
-			Source: tracker.Ref{Type: "EventLogEntry", ID: strconv.Itoa(e.ID), URL: a.base + "/detail/EventLogEntry/" + strconv.Itoa(e.ID)},
+			Source: tracker.Ref{Type: "EventLogEntry", ID: strconv.Itoa(e.ID), URL: a.site + "/detail/EventLogEntry/" + strconv.Itoa(e.ID)},
 			By:     who, Native: "status:" + code, Body: body, At: at, Evidence: ev,
 		})
 	}
@@ -722,13 +727,19 @@ func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Outpu
 	}
 	tid, _ := strconv.Atoi(on.ID)
 	task := link{Type: "Task", ID: tid}
-	found, _, err := a.search(ctx, "Version", [][]any{{"sg_task", "is", task}, {a.idField, "is", out.View}}, []string{"code"}, "", "")
+	found, _, err := a.search(ctx, "Version", [][]any{{"sg_task", "is", task}, {a.idField, "is", out.View}}, []string{"code", "image"}, "", "")
 	if err != nil {
 		return tracker.Ref{}, err
 	}
 	if len(found) > 0 {
+		// The Version a crash left: its thumbnail too, if it never went up.
+		if out.Preview != nil && isNull(found[0].Attributes["image"]) {
+			if err := a.upload(ctx, "Version", found[0].ID, "image", *out.Preview); err != nil {
+				return tracker.Ref{}, err
+			}
+		}
 		id := strconv.Itoa(found[0].ID)
-		return tracker.Ref{Type: "Version", ID: id, URL: a.base + "/detail/Version/" + id}, nil
+		return tracker.Ref{Type: "Version", ID: id, URL: a.site + "/detail/Version/" + id}, nil
 	}
 	t, err := a.read(ctx, "Task", on.ID, taskFields)
 	if err != nil {
@@ -749,14 +760,29 @@ func (a *Adapter) Publish(ctx context.Context, on tracker.Ref, out tracker.Outpu
 	if a.linkField != "" {
 		in[a.linkField] = out.JobURL
 	}
+	if out.FirstFrame != 0 || out.LastFrame != 0 {
+		in["sg_first_frame"], in["sg_last_frame"] = out.FirstFrame, out.LastFrame
+		in["frame_range"] = fmt.Sprintf("%d-%d", out.FirstFrame, out.LastFrame)
+	}
+	if out.By != "" {
+		// The artist the work is for, not the API script.
+		if hs, err := a.searchAll(ctx, "HumanUser", [][]any{{"login", "is", out.By}}, []string{"login"}, "id"); err == nil && len(hs) > 0 {
+			in["user"] = link{Type: "HumanUser", ID: hs[0].ID}
+		}
+	}
 	var res struct {
 		Data record `json:"data"`
 	}
 	if err := a.do(ctx, http.MethodPost, entityPath("Version"), "", in, &res); err != nil {
 		return tracker.Ref{}, err
 	}
+	if out.Preview != nil {
+		if err := a.upload(ctx, "Version", res.Data.ID, "image", *out.Preview); err != nil {
+			return tracker.Ref{}, err
+		}
+	}
 	id := strconv.Itoa(res.Data.ID)
-	return tracker.Ref{Type: "Version", ID: id, URL: a.base + "/detail/Version/" + id}, nil
+	return tracker.Ref{Type: "Version", ID: id, URL: a.site + "/detail/Version/" + id}, nil
 }
 
 // VersionCode names a Version as studios commonly do: entity, step, and a
@@ -847,4 +873,81 @@ func (a *Adapter) withAssignees(ctx context.Context, it tracker.Item, r record) 
 		it.Assignees = append(it.Assignees, p)
 	}
 	return it, nil
+}
+
+func isNull(raw json.RawMessage) bool {
+	s := strings.TrimSpace(string(raw))
+	return s == "" || s == "null"
+}
+
+// upload sets a file field of a record (a Version's image, its
+// sg_uploaded_movie) by Flow's three-step upload: ask for an upload URL,
+// PUT the bytes there (the site itself, or object storage, which takes no
+// token), then complete it, answered 204.
+func (a *Adapter) upload(ctx context.Context, typ string, id int, field string, f tracker.Still) error {
+	var info struct {
+		Data  map[string]any `json:"data"`
+		Links struct {
+			Upload         string `json:"upload"`
+			CompleteUpload string `json:"complete_upload"`
+		} `json:"links"`
+	}
+	p := entityPath(typ) + "/" + strconv.Itoa(id) + "/" + field + "/_upload?filename=" + url.QueryEscape(f.Name)
+	if err := a.do(ctx, http.MethodGet, p, "", nil, &info); err != nil {
+		return fmt.Errorf("flow: uploading %s to %s %d: %w", f.Name, typ, id, err)
+	}
+	if info.Links.Upload == "" || info.Links.CompleteUpload == "" {
+		return fmt.Errorf("flow: uploading %s to %s %d: the site gave no upload links", f.Name, typ, id)
+	}
+	up := info.Links.Upload
+	onSite := strings.HasPrefix(up, "/")
+	if onSite {
+		up = a.base + up
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPut, up, bytes.NewReader(f.Data))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", contentType(f.Name))
+	req.ContentLength = int64(len(f.Data))
+	if onSite {
+		tok, err := a.accessToken(ctx, false)
+		if err != nil {
+			return err
+		}
+		req.Header.Set("Authorization", "Bearer "+tok)
+	}
+	resp, err := a.hc.Do(req)
+	if err != nil {
+		return fmt.Errorf("flow: uploading %s: %w", f.Name, err)
+	}
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+	resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("flow: uploading %s: %s", f.Name, errText(resp.Status, data))
+	}
+	// An upload to the site answers data the completion carries too.
+	var got struct {
+		Data map[string]any `json:"data"`
+	}
+	if json.Unmarshal(data, &got) == nil {
+		for k, v := range got.Data {
+			info.Data[k] = v
+		}
+	}
+	return a.do(ctx, http.MethodPost, info.Links.CompleteUpload, "", map[string]any{"upload_info": info.Data, "upload_data": map[string]any{}}, nil)
+}
+
+func contentType(name string) string {
+	switch strings.ToLower(name[strings.LastIndex(name, ".")+1:]) {
+	case "png":
+		return "image/png"
+	case "jpg", "jpeg":
+		return "image/jpeg"
+	case "mov":
+		return "video/quicktime"
+	case "mp4":
+		return "video/mp4"
+	}
+	return "application/octet-stream"
 }

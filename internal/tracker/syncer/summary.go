@@ -38,7 +38,9 @@ type Summary struct {
 	Question bool
 	// ETA is the finish a person is shown (p80 when the band has it, else
 	// p90); nil when the job has none.
-	ETA      *time.Time
+	ETA *time.Time
+	// Spend is the job's spend so far (Job.Spend), in the pools' currency.
+	Spend    float64
 	Risk     string
 	Deadline *time.Time
 	Source   string // the deadline's source: spec, suggested, class
@@ -68,6 +70,9 @@ func Summarize(j *api.Job, review string, reworking bool) Summary {
 			t := j.Estimate.EtaP90
 			s.ETA = &t
 		}
+	}
+	if sp := j.Spend; sp != nil {
+		s.Spend = sp.TokenCost + sp.ModelSlotCost + sp.ProceduralSlotCost
 	}
 	for i := range j.Waits {
 		w := &j.Waits[i]

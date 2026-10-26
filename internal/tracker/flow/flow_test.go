@@ -248,3 +248,71 @@ func TestTaskAssignees(t *testing.T) {
 		t.Fatalf("listed %+v %v", items, err)
 	}
 }
+
+// A Version carries what a TD and the player read: the still, uploaded in
+// Flow's three steps, the frame range, and the artist (never the script).
+// A Version a crash left without its still gets it on the next publish.
+func TestPublishStillFramesArtist(t *testing.T) {
+	s := site(t)
+	pat := s.AddUser("pat", "Pat", "")
+	dana := s.AddUser("dana", "Dana", "dana@example.com")
+	task := s.AddTask(s.AddShot("sh040"), "Lighting", "LGT", "ip", "2026-10-23", pat)
+	a := adapter(t, s, s.Key, nil)
+	ctx := context.Background()
+	png := []byte("\x89PNG\r\n\x1a\nstill")
+	out := tracker.Output{Name: "work/flow-1", Version: 1, View: "c4view", JobURL: "https://hud/#/job/work/flow-1",
+		FirstFrame: 1001, LastFrame: 1008, By: "dana", Preview: &tracker.Still{Name: "sh040.1008.png", Data: png}}
+	on := tracker.Ref{Type: "Task", ID: strconv.Itoa(task.ID)}
+	v, err := a.Publish(ctx, on, out, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vid, _ := strconv.Atoi(v.ID)
+	f := s.Get("Version", vid)
+	if f["sg_first_frame"] != 1001.0 || f["sg_last_frame"] != 1008.0 || f["frame_range"] != "1001-1008" {
+		t.Fatalf("frames: %v", f)
+	}
+	if u, _ := f["user"].(flowtest.Link); u.ID != dana.ID {
+		t.Fatalf("the Version's user is %v, want the artist", f["user"])
+	}
+	if got := s.Upload("Version", vid, "image"); string(got) != string(png) {
+		t.Fatalf("the still: %q", got)
+	}
+	if img, _ := f["image"].(string); img == "" {
+		t.Fatal("the Version's image is not set")
+	}
+
+	// a crash between the create and the upload: the next publish finds
+	// the Version and sends only its still
+	s.Set(flowtest.Link{Type: "Version", ID: vid}, map[string]any{"image": nil}, pat)
+	out.Preview = &tracker.Still{Name: "sh040.1008.png", Data: []byte("\x89PNG\r\n\x1a\nagain")}
+	again, err := a.Publish(ctx, on, out, "k")
+	if err != nil || again.ID != v.ID || len(s.All("Version")) != 1 {
+		t.Fatalf("republish: %v %v %d", again, err, len(s.All("Version")))
+	}
+	if got := s.Upload("Version", vid, "image"); string(got) != "\x89PNG\r\n\x1a\nagain" {
+		t.Fatalf("the still after the crash: %q", got)
+	}
+	// with the still in place, a publish uploads nothing more
+	n := len(s.Writes())
+	if _, err := a.Publish(ctx, on, out, "k"); err != nil || len(s.Writes()) != n {
+		t.Fatalf("a published Version was written again: %v, %d writes", err, len(s.Writes())-n)
+	}
+}
+
+// A login with no HumanUser leaves the Version's user empty: never the
+// script, never a guess.
+func TestPublishUnknownArtist(t *testing.T) {
+	s := site(t)
+	task := s.AddTask(s.AddShot("sh040"), "Lighting", "LGT", "ip", "2026-10-23", s.AddUser("pat", "Pat", ""))
+	a := adapter(t, s, s.Key, nil)
+	v, err := a.Publish(context.Background(), tracker.Ref{Type: "Task", ID: strconv.Itoa(task.ID)},
+		tracker.Output{Name: "work/flow-1", Version: 1, View: "c4view", By: "nobody"}, "k")
+	if err != nil {
+		t.Fatal(err)
+	}
+	vid, _ := strconv.Atoi(v.ID)
+	if u, ok := s.Get("Version", vid)["user"]; ok {
+		t.Fatalf("user: %v", u)
+	}
+}

@@ -50,6 +50,18 @@ func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracke
 			},
 		})
 	}
+	if a.spendField != "" && s.Spend > 0 {
+		// One number in the pools' currency, so a currency field sums in
+		// the site's reports; it moves every tick, so it is continuous and
+		// written at most every fieldSeconds.
+		spend := fmt.Sprintf("%.2f", s.Spend)
+		out = append(out, tracker.FieldWrite{
+			Field: "spend", Value: "spend", Continuous: spend,
+			Build: func(tracker.Written) tracker.Write {
+				return tracker.Write{On: s.Ref, Kind: "update", Fields: map[string]string{a.spendField: spend}}
+			},
+		})
+	}
 	if s.Why != "" {
 		out = append(out, tracker.FieldWrite{
 			Field: "note", Value: s.State + "|" + s.Why,

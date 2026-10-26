@@ -156,7 +156,8 @@ func (d *demo) snapshot() view {
 		v.Events++
 		u, _ := e.Fields["user"].(flowtest.Link)
 		ent, _ := e.Fields["entity"].(flowtest.Link)
-		if u.Type == "ApiUser" && ent.Type == "Version" && e.Fields["event_type"] == "Shotgun_Version_Change" {
+		if u.Type == "ApiUser" && ent.Type == "Version" && e.Fields["event_type"] == "Shotgun_Version_Change" &&
+			e.Fields["attribute_name"] != "image" { // the still completes the publish
 			v.ScriptVersionChanges++
 		}
 	}
