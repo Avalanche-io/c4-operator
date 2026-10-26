@@ -212,10 +212,11 @@ func (s *Server) handleSubmission(w http.ResponseWriter, r *http.Request) {
 }
 
 // The words a unit's agent work is refused in, by POST /submissions and
-// POST /jobs alike.
+// POST /jobs alike; the queue says the same of a unit's job that expands
+// into agent units.
 const (
-	leadOnlyMessage = "a worker may not start workers: only a lead submits agent work"
-	leadOnlyFix     = "hand it to your lead to submit; a project lets units submit agent work with agents.submit: anyone"
+	leadOnlyMessage = c4v1.LeadOnlyMessage
+	leadOnlyFix     = c4v1.LeadOnlyFix
 )
 
 // leadOnlyError is agent work refused to a unit (403).

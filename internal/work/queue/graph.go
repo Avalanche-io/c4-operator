@@ -17,6 +17,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
@@ -167,17 +168,20 @@ func (q *Queue) expand(ctx context.Context, v *view, idx int, p *corev1.Pod, now
 		}
 		return true, q.expandWith(ctx, v, idx, id, doc, now).Error != ""
 	}
-	x.Record = q.recordExpansion(ctx, v, x, now)
+	x.Record = q.recordExpansion(ctx, v, x, now, leadOnlyError{})
 	m.expansions = append(m.expansions, x)
 	return true, false
 }
 
 // checkExpansion is what document doc would add under unit gen, or why it
 // cannot.
-func checkExpansion(v *view, gen int, doc []byte) (*class.Expansion, error) {
+func (q *Queue) checkExpansion(v *view, gen int, doc []byte) (*class.Expansion, error) {
 	m := v.mem
 	first := len(m.plan.Units)
 	ex, err := class.Expand(v.driver, v.job, m.plan.Units[gen], doc, m.plan.Names(), first)
+	if err == nil {
+		err = q.leadExpands(v, ex)
+	}
 	if err == nil && first+len(ex.Units) > class.MaxUnits {
 		err = fmt.Errorf("the expansion would make %d units, over %d", first+len(ex.Units), class.MaxUnits)
 	}
@@ -199,21 +203,24 @@ func checkExpansion(v *view, gen int, doc []byte) (*class.Expansion, error) {
 func (q *Queue) expandWith(ctx context.Context, v *view, gen int, id string, doc []byte, now time.Time) expansionRec {
 	m := v.mem
 	x := expansionRec{Unit: gen, First: len(m.plan.Units), At: now, Doc: id}
-	if ex, err := checkExpansion(v, gen, doc); err != nil {
+	var lead leadOnlyError
+	if ex, err := q.checkExpansion(v, gen, doc); err != nil {
 		x.Error = err.Error()
+		errors.As(err, &lead)
 	} else {
 		m.plan.Apply(gen, ex)
 		x.Units = len(ex.Units)
 	}
-	x.Record = q.recordExpansion(ctx, v, x, now)
+	x.Record = q.recordExpansion(ctx, v, x, now, lead)
 	m.expansions = append(m.expansions, x)
 	q.Log.Info("expanded", "job", v.key, "unit", gen, "units", x.Units, "document", x.Doc, "error", x.Error)
 	return x
 }
 
 // recordExpansion signs an expansion: the generator, its document and
-// what it added (decision/v1, kind expand).
-func (q *Queue) recordExpansion(ctx context.Context, v *view, x expansionRec, now time.Time) string {
+// what it added (decision/v1, kind expand). A refusal of a unit's agent
+// work (lead) also names the agent units, the fix and the policy value.
+func (q *Queue) recordExpansion(ctx context.Context, v *view, x expansionRec, now time.Time, lead leadOnlyError) string {
 	if q.Signer == nil {
 		return ""
 	}
@@ -227,6 +234,11 @@ func (q *Queue) recordExpansion(ctx context.Context, v *view, x expansionRec, no
 	}
 	if x.Error != "" {
 		pred["error"] = x.Error
+	}
+	if len(lead.units) > 0 {
+		pred["agentUnits"], pred["fix"] = lead.units, c4v1.LeadOnlyFix
+		pred["policy"], pred["scheduler"] = policy.Record(lead.use), q.PolicyName
+		pred["submittedByUnit"] = v.job.Annotations[c4v1.AnnotationSubmittedByUnit]
 	}
 	rec, err := provenance.SignStatement(ctx, q.Signer, provenance.PredicateDecision, subjects, pred, now)
 	if err == nil {

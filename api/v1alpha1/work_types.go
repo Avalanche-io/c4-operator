@@ -103,6 +103,12 @@ const (
 	// that submitted a job as part of its own work. Its owner is the owner
 	// of the unit's job, who is accountable for it; only the farm sets it.
 	AnnotationSubmittedByUnit = "c4.avalanche.io/submitted-by-unit"
+	// ConditionAgentWork, False with reason LeadOnly, on a job a unit
+	// submitted says the queue refused agent units its generator's
+	// expansion would have added, while the project's agents.submit is
+	// lead: the message is LeadOnlyMessage and LeadOnlyFix. Absent
+	// otherwise.
+	ConditionAgentWork = "AgentWork"
 	// LabelShot groups a shot's jobs (the HUD's shot view).
 	LabelShot = "c4.avalanche.io/shot"
 	// LabelMilestone on a WorkJob joins it to the Milestone of that name
@@ -196,6 +202,14 @@ const (
 	// enrolled through the HUD says whose word its owner came from (its
 	// pool's), so nothing reads it as an enrolled machine's.
 	AnnotationOwnerBasis = "c4.avalanche.io/owner-basis"
+)
+
+// The farm's words for a unit's agent work refused while its project's
+// agents.submit is lead: by the HUD at submit, and by the queue when a
+// unit's job expands into agent units (ConditionAgentWork).
+const (
+	LeadOnlyMessage = "a worker may not start workers: only a lead submits agent work"
+	LeadOnlyFix     = "hand it to your lead to submit; a project lets units submit agent work with agents.submit: anyone"
 )
 
 // WorkJobSpec declares a job: its class, its units' parameters, its

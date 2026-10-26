@@ -305,7 +305,7 @@ func (q *Queue) judge(ctx context.Context, v *view, idx int, doc []byte) ([]acti
 			if len(it.Expand) == 0 || expand != nil {
 				return nil, nil, d, fmt.Errorf("a verdict carries one expansion document")
 			}
-			if _, err := checkExpansion(v, idx, it.Expand); err != nil {
+			if _, err := q.checkExpansion(v, idx, it.Expand); err != nil {
 				return nil, nil, d, fmt.Errorf("the verdict's expansion: %w", err)
 			}
 			expand = it.Expand

@@ -1178,7 +1178,13 @@ job of an agent tool, or of a plan) is refused at `jobs.<key>` (`403`),
 dry run or not: "a worker may not start workers: only a lead submits agent
 work". A person, a lead's own session among them, is not; nor is a unit's
 other work, nor a unit's agent work in a project that sets `agents.submit:
-anyone`. A create the API turns away for the moment keeps
+anyone`. A unit's job that only becomes agent work while it runs (a
+generator whose expansion document adds blocks or bundle members) is
+held by the queue instead: it adds none of those units, its generator
+fails, and the job's condition `AgentWork` (False, reason `LeadOnly`)
+reads "a worker may not start workers: only a lead submits agent work"
+with the fix "hand it to your lead to submit; a project lets units submit
+agent work with agents.submit: anyone". A create the API turns away for the moment keeps
 its class: `503`, try again.
 
 `key` makes a retry safe. A client names the submission it means (any

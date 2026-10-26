@@ -143,6 +143,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	} else {
 		meta.RemoveStatusCondition(&st.Conditions, c4v1.ConditionGrant)
 	}
+	agentWorkCondition(&st, v)
 	n := len(m.plan.Units)
 	st.Order = strings.ToLower(m.plan.OrderName)
 	// Each unit is in one state. Units holding a slot are preflight,

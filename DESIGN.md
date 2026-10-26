@@ -2163,7 +2163,16 @@ and a sweep planner that spawns trials are all generators.
       refuses one in the same words (an agent-class job, pods that are
       blocks, or a graph job naming a unit table); a person, a lead's own
       session among them, is unaffected, and a unit's other work too.
-      A project allows more with `agents.submit: anyone`; `lead` is the
+      What submit cannot see, the queue refuses when it reads an
+      expansion: a job a unit submitted
+      (`c4.avalanche.io/submitted-by-unit`) whose generator, or a
+      review's verdict, would
+      add agent units (`C4_AGENT_BLOCK` or `C4_AGENT_MEMBER` in a unit's
+      environment) adds none of them. The expansion is refused in the
+      same words, the generator fails, the signed expand decision names
+      the agent units, the fix and the policy value, and the job's
+      condition `AgentWork` (False, `LeadOnly`) says why until a person
+      acts. A project allows more with `agents.submit: anyone`; `lead` is the
       tighter, so a farm limit of `lead` holds every project to it. The
       check reads the key where the call is checked, so allowing more is
       a value change, never a code change.
