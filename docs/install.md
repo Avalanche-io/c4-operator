@@ -1,6 +1,6 @@
 # Installing c4-operator
 
-This is c4-operator v0.1; the API group `c4.avalanche.io/v1alpha1` may change
+This is c4-operator v0.2; the API group `c4.avalanche.io/v1alpha1` may change
 before 1.0. To try it locally, follow the [quickstart](quickstart.md); this
 page is for a cluster of your own.
 
