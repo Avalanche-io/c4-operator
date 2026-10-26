@@ -1369,7 +1369,9 @@ what one unit runs, its parameters and its test. Publishing stores it as a
 `Tool` in the project's namespace, or in the operator's for the whole farm,
 and offers it to submissions (`POST /submissions`) and to agents (MCP).
 Tools and agent configurations are both `Tool` objects and share one name
-space. The schemas are served at `GET /schema/{submit,tool,lock}`.
+space. The schemas are served at `GET /schema/{submit,tool,lock,card}`; a
+tree's card (`.c4/card.yaml`, `c4: card/1`) says what the tree is, where it
+came from and its licence.
 
 ### POST /tools/{project}
 

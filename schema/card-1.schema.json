@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cccc.io/schema/card-1.schema.json",
+  "title": "C4 tree card (c4: card/1)",
+  "description": "A tree's card, .c4/card.yaml at the tree's root: what the tree is, where it came from and under what licence. Forms and records show it; nothing enforces it. The tree's identity is its C4 ID, card included, so two snapshots of one repository are two trees.",
+  "type": "object",
+  "required": ["c4", "name"],
+  "additionalProperties": false,
+  "properties": {
+    "c4": {"const": "card/1"},
+    "name": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,62}$", "description": "The tree's short name, as tools and images name it (depth-anything-v2-small)."},
+    "title": {"type": "string", "minLength": 1, "maxLength": 200, "description": "The tree's name in words (Depth Anything V2, small)."},
+    "format": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,40}$", "description": "How a runtime reads the tree: hf-transformers, diffusers, gguf, onnx, python, or another runtime's name."},
+    "base": {"$ref": "#/$defs/c4id", "description": "The tree this one was made from (a LoRA's base model), by its C4 ID."},
+    "source": {
+      "description": "Where the tree came from: a hub at a pinned commit, or a job on the farm (job:). Left out for a tree a person uploaded, which is kept data, not a cache.",
+      "type": "object",
+      "if": {"required": ["job"]},
+      "then": {"$ref": "#/$defs/jobSource"},
+      "else": {"$ref": "#/$defs/hubSource"}
+    },
+    "licence": {
+      "description": "The tree's licence, as information: an SPDX ID, or the address of its terms (terms:).",
+      "type": "object",
+      "if": {"required": ["terms"]},
+      "then": {"type": "object", "required": ["terms"], "additionalProperties": false, "properties": {"terms": {"type": "string", "pattern": "^https://\\S+$"}}},
+      "else": {"type": "object", "required": ["spdx"], "additionalProperties": false, "properties": {"spdx": {"type": "string", "pattern": "^[A-Za-z0-9.+-]+( (AND|OR|WITH) [A-Za-z0-9.+-]+)*$"}}}
+    }
+  },
+  "$defs": {
+    "c4id": {"type": "string", "pattern": "^c4[1-9A-HJ-NP-Za-km-z]{88}$"},
+    "hubSource": {
+      "type": "object",
+      "required": ["hub", "repo", "revision"],
+      "additionalProperties": false,
+      "properties": {
+        "hub": {"type": "string", "pattern": "^[a-z][a-z0-9-]{0,40}$", "description": "The source, by its name on the farm (huggingface)."},
+        "type": {"enum": ["model", "dataset"], "description": "What kind of repository it is on the hub. Default model."},
+        "repo": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*/[A-Za-z0-9][A-Za-z0-9._-]*$", "description": "owner/name on the hub."},
+        "revision": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "The commit the import read, never a branch or a tag: a ref is resolved once, before anything is fetched."},
+        "files": {
+          "type": "object",
+          "description": "Each file by its path in the tree: the hub's own hash beside its C4 ID.",
+          "propertyNames": {"type": "string", "minLength": 1},
+          "additionalProperties": {
+            "type": "object",
+            "required": ["c4"],
+            "anyOf": [{"required": ["sha256"]}, {"required": ["gitBlob"]}],
+            "additionalProperties": false,
+            "properties": {
+              "c4": {"$ref": "#/$defs/c4id"},
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$", "description": "A large file's SHA-256, as the hub lists it."},
+              "gitBlob": {"type": "string", "pattern": "^[0-9a-f]{40}$", "description": "A small file's git blob hash, as the hub lists it."}
+            }
+          }
+        }
+      }
+    },
+    "jobSource": {
+      "type": "object",
+      "required": ["job"],
+      "additionalProperties": false,
+      "properties": {
+        "job": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]*/[a-z0-9][a-z0-9.-]*@[0-9a-f-]{36}$", "description": "The job that made the tree: <project>/<job>@<uid>. Its lineage is in the job's records."}
+      }
+    }
+  }
+}

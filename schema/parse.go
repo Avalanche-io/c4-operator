@@ -51,6 +51,19 @@ func ParseLock(b []byte) (*Lock, []Error) {
 // it.
 func LockSchema() []byte { return slices.Clone(lock) }
 
+// ParseCard reads a tree's card (CardPath) and checks its shape.
+func ParseCard(b []byte) (*Card, []Error) {
+	var c Card
+	if errs := parse(b, "card", &c); errs != nil {
+		return nil, errs
+	}
+	return &c, nil
+}
+
+// CardSchema is the JSON Schema of a tree's card, as GET /schema/card
+// serves it.
+func CardSchema() []byte { return slices.Clone(card) }
+
 // ToJSON reads YAML (JSON is YAML) and writes it as JSON, keeping keys in
 // the order written. Aliases are resolved, timestamps stay the strings
 // written, and a key written twice is an error.
@@ -139,6 +152,9 @@ func writeJSON(w *bytes.Buffer, n *yaml.Node) error {
 	return nil
 }
 
+//go:embed card-1.schema.json
+var card []byte
+
 //go:embed lock-1.schema.json
 var lock []byte
 
@@ -151,7 +167,7 @@ var (
 func schemaFor(format string) (*jsonschema.Schema, error) {
 	resolvedOnce.Do(func() {
 		schemas = map[string]*jsonschema.Schema{}
-		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "chain": chainSchema} {
+		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "card": card, "chain": chainSchema} {
 			s := new(jsonschema.Schema)
 			if err := json.Unmarshal(b, s); err != nil {
 				resolveErr = fmt.Errorf("schema %s: %w", f, err)
@@ -212,7 +228,7 @@ func dedupe(errs []Error) []Error {
 	return out
 }
 
-var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "chain": "a chain"}
+var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "card": "a card", "chain": "a chain"}
 
 // nouns name the $defs in errors: "frame" is not a field of a job.
 var nouns = map[string]string{
@@ -711,6 +727,15 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 			}
 			return fmt.Sprintf("%s: for names a party by its name alone", quote(v)), "write for: " + name
 		}
+	// A tree's card.
+	case "pattern card source.revision":
+		return fmt.Sprintf("%s is not a commit", quote(v)), "pin the commit the import read (40 hex characters), never a branch or a tag"
+	case "anyOf card source.files.*":
+		return "a file needs the hub's own hash beside its C4 ID", "add sha256: (a large file) or gitBlob: (a small one), as the hub lists it"
+	case "pattern card source.job":
+		return fmt.Sprintf("%s is not a job", quote(v)), "write the job that made the tree as <project>/<job>@<uid>"
+	case "pattern card licence.terms":
+		return fmt.Sprintf("%s is not an https address", quote(v)), "write the address of the terms, starting https://"
 	case "pattern submit jobs.*.plan":
 		// a plan is read beside the submission and sent with it, so it
 		// may name nothing outside the submission's folder
@@ -816,7 +841,7 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		return "an unaccountable chain says why", "add gap: the first link that failed, in words"
 	case kind == "required" && len(path) == 1 && ctx["field"] == "c4":
 		return "the file has no c4 field, so it is not " + rootNoun[c.format],
-			fmt.Sprintf("add c4: %s as the first line", map[string]string{"submit": "submit/1", "tool": "tool/1", "lock": "lock/1"}[c.format])
+			fmt.Sprintf("add c4: %s as the first line", map[string]string{"submit": "submit/1", "tool": "tool/1", "lock": "lock/1", "card": "card/1"}[c.format])
 	case kind == "const" && sh == "c4":
 		return fmt.Sprintf("%v is not a format this farm reads", v), fmt.Sprintf("this farm reads %v", ctx["want"])
 	case kind == "pattern" && (field == "frames" || strings.HasSuffix(sh, ".frames") || field == "preview"):

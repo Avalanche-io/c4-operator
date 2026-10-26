@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "source.files.model.safetensors",
+      "message": "a file needs the hub's own hash beside its C4 ID",
+      "fix": "add sha256: (a large file) or gitBlob: (a small one), as the hub lists it"
+    }
+  ],
+  "schemaMentions": "anyOf"
+}

@@ -1,0 +1,9 @@
+# Each file keeps the hub's own hash beside its C4 ID.
+c4: card/1
+name: depth-anything-v2-small
+source:
+  hub: huggingface
+  repo: depth-anything/Depth-Anything-V2-Small-hf
+  revision: fb74b306732e6a6e46717dda098df3471eb818ae
+  files:
+    model.safetensors: {c4: c41GAy5grWwjpX6NZ7U61ECBnf6oHTVku81FU8eBHGMXN9bwtBttZDHWB74UW6sU535D6Wan8HwyetEVhjwhpJf99L}

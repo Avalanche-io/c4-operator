@@ -1,0 +1,4 @@
+# A tree made on the farm names its job with the job's UID: a job made again under the name is another.
+c4: card/1
+name: sm-grade-lora
+source: {job: saltmarsh/sm-grade-lora-v003}

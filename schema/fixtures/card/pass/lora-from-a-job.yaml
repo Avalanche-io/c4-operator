@@ -1,0 +1,8 @@
+# A tree made on the farm: a lora job's output, naming its base.
+c4: card/1
+name: sm-grade-lora
+title: Saltmarsh grade, a LoRA
+format: diffusers
+base: c41ht8A1ze7inzbhfLeis9SYoK2dsN9dAaQkapdkd1Gtw6A8n9EUTsigZLJra5SpkbBaHirPbpjwbyxoVFh5RE43Xx
+source: {job: saltmarsh/sm-grade-lora-v003@6f1c2a9e-3b7d-4c55-9a0e-2d8f4b1c7e30}
+licence: {terms: https://studio.example/licences/internal}

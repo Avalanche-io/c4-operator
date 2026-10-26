@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "source.revision",
+      "message": "\"main\" is not a commit",
+      "fix": "pin the commit the import read (40 hex characters), never a branch or a tag"
+    }
+  ],
+  "schemaMentions": "revision"
+}

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "licence.terms",
+      "message": "\"www.example.com/terms\" is not an https address",
+      "fix": "write the address of the terms, starting https://"
+    }
+  ],
+  "schemaMentions": "terms"
+}

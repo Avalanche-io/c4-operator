@@ -515,6 +515,53 @@ type Lock struct {
 	Images map[string]string `json:"images"`
 }
 
+// CardPath is where a tree's card sits: a path no repository's own files
+// use, so an imported repository's own card.yaml stays its own.
+const CardPath = ".c4/card.yaml"
+
+// Card is a tree's card (c4: card/1): what the tree is, where it came from
+// and under what licence. Forms and records show it; nothing enforces it.
+type Card struct {
+	C4    string `json:"c4"`
+	Name  string `json:"name"`
+	Title string `json:"title,omitempty"`
+	// Format is how a runtime reads the tree (hf-transformers, diffusers,
+	// gguf, onnx, python).
+	Format string `json:"format,omitempty"`
+	// Base is the tree this one was made from, by its C4 ID.
+	Base    string       `json:"base,omitempty"`
+	Source  *CardSource  `json:"source,omitempty"`
+	Licence *CardLicence `json:"licence,omitempty"`
+}
+
+// CardSource is where a tree came from: a hub at a pinned commit (Hub,
+// Repo, Revision), or the job that made it (Job). None: a person uploaded
+// it, so it is kept data, not a cache.
+type CardSource struct {
+	Hub      string              `json:"hub,omitempty"`
+	Type     string              `json:"type,omitempty"`
+	Repo     string              `json:"repo,omitempty"`
+	Revision string              `json:"revision,omitempty"`
+	Files    map[string]CardFile `json:"files,omitempty"`
+	// Job is <project>/<job>@<uid>.
+	Job string `json:"job,omitempty"`
+}
+
+// CardFile is one file of a hub source: the hub's own hash beside its C4
+// ID (SHA256 for a large file, GitBlob for a small one).
+type CardFile struct {
+	C4      string `json:"c4"`
+	SHA256  string `json:"sha256,omitempty"`
+	GitBlob string `json:"gitBlob,omitempty"`
+}
+
+// CardLicence is a tree's licence, as information: an SPDX ID, or the
+// address of its terms.
+type CardLicence struct {
+	SPDX  string `json:"spdx,omitempty"`
+	Terms string `json:"terms,omitempty"`
+}
+
 // orderedObject reads a JSON object's keys in order, with each value raw.
 func orderedObject(b []byte) ([]string, []json.RawMessage, error) {
 	d := json.NewDecoder(bytes.NewReader(b))

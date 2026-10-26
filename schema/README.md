@@ -12,22 +12,24 @@ wraps a tool writes Kubernetes objects:
   `affectsOutput`), what it reads and writes, what it needs, how its progress
   and errors are read, and a test.
 
-| file                         | what it is                                                                                   |
-| ---------------------------- | -------------------------------------------------------------------------------------------- |
-| `submit-1.schema.json`       | JSON Schema 2020-12 for a submission, served as `GET /schema/submit`                         |
-| `tool-1.schema.json`         | JSON Schema 2020-12 for a tool, served as `GET /schema/tool`                                 |
-| `fixtures/farm.yaml`         | the farm the fixtures are checked against: projects, milestones, people, roles, tools        |
-| `fixtures/submit/pass/`      | every worked submission in the format's design, and every fragment wrapped whole             |
-| `fixtures/submit/slice1.yaml` | the passing submissions slice 1 cannot lower yet, each with its exact refusals; the rest it runs |
-| `fixtures/submit/fail/`      | submissions that must be refused, each with `<case>.expect.json`                             |
-| `fixtures/tool/pass/<tool>/` | every worked tool, the snippets wrapped whole, and the tools the submissions name            |
-| `fixtures/tool/fail/`        | tools that must be refused, each with `<case>.expect.json`                                   |
-| `chain-1.schema.json`        | JSON Schema for the accountability chain (`chain/1`) every signed record and book entry carries; `chain.go` has its type, `ParseChain` and `Line`, the chain read aloud |
-| `fixtures/chain/`            | chains that pass (each with its `.line.txt`, read with `names.yaml`) and chains refused, with their errors |
-| `lock-1.schema.json`         | JSON Schema for `tool.lock` (`c4: lock/1`): each image a tool names, pinned by digest        |
-| `types.go`                   | `Submission`, `Tool`, `Lock` and their parts, as the lowering, the runner and the CLI read them |
-| `parse.go`                   | `ParseSubmission`, `ParseTool`, `ParseLock`, `ToJSON`: the shape checked, errors in the farm's words |
-| `schema.go`                  | the embedded schemas and fixtures: `SubmitSchema()`, `ToolSchema()`, `LockSchema()`, `Fixtures()`, `Cases()` |
+| file                          | what it is                                                                                                                                                                        |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `submit-1.schema.json`        | JSON Schema 2020-12 for a submission, served as `GET /schema/submit`                                                                                                              |
+| `tool-1.schema.json`          | JSON Schema 2020-12 for a tool, served as `GET /schema/tool`                                                                                                                      |
+| `fixtures/farm.yaml`          | the farm the fixtures are checked against: projects, milestones, people, roles, tools                                                                                             |
+| `fixtures/submit/pass/`       | every worked submission in the format's design, and every fragment wrapped whole                                                                                                  |
+| `fixtures/submit/slice1.yaml` | the passing submissions slice 1 cannot lower yet, each with its exact refusals; the rest it runs                                                                                  |
+| `fixtures/submit/fail/`       | submissions that must be refused, each with `<case>.expect.json`                                                                                                                  |
+| `fixtures/tool/pass/<tool>/`  | every worked tool, the snippets wrapped whole, and the tools the submissions name                                                                                                 |
+| `fixtures/tool/fail/`         | tools that must be refused, each with `<case>.expect.json`                                                                                                                        |
+| `chain-1.schema.json`         | JSON Schema for the accountability chain (`chain/1`) every signed record and book entry carries; `chain.go` has its type, `ParseChain` and `Line`, the chain read aloud           |
+| `fixtures/chain/`             | chains that pass (each with its `.line.txt`, read with `names.yaml`) and chains refused, with their errors                                                                        |
+| `lock-1.schema.json`          | JSON Schema for `tool.lock` (`c4: lock/1`): each image a tool names, pinned by digest                                                                                             |
+| `card-1.schema.json`          | JSON Schema for a tree's card, `.c4/card.yaml` (`c4: card/1`): what the tree is, its source at a pinned commit or the job that made it, its licence; served as `GET /schema/card` |
+| `fixtures/card/`              | cards that pass (a hub import, a job's output, an upload) and cards refused, with their errors                                                                                    |
+| `types.go`                    | `Submission`, `Tool`, `Lock`, `Card` and their parts, as the lowering, the runner and the CLI read them                                                                           |
+| `parse.go`                    | `ParseSubmission`, `ParseTool`, `ParseLock`, `ParseCard`, `ToJSON`: the shape checked, errors in the farm's words                                                                 |
+| `schema.go`                   | the embedded schemas and fixtures: `SubmitSchema()`, `ToolSchema()`, `LockSchema()`, `CardSchema()`, `Fixtures()`, `Cases()`                                                      |
 
 ## Two checkers, one set of answers
 

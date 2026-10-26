@@ -85,7 +85,7 @@ type Case struct {
 func Cases() ([]Case, error) {
 	fsys := Fixtures()
 	var out []Case
-	for _, format := range []string{"submit", "tool", "chain"} {
+	for _, format := range []string{"submit", "tool", "chain", "card"} {
 		for _, pass := range []bool{true, false} {
 			dir := path.Join(format, map[bool]string{true: "pass", false: "fail"}[pass])
 			entries, err := fs.ReadDir(fsys, dir)

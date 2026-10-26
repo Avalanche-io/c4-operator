@@ -47,7 +47,7 @@ func cases(t *testing.T) []Case {
 }
 
 func TestFixtures(t *testing.T) {
-	schemas := map[string]*jsonschema.Resolved{"submit": resolve(t, SubmitSchema()), "tool": resolve(t, ToolSchema()), "chain": resolve(t, ChainSchema())}
+	schemas := map[string]*jsonschema.Resolved{"submit": resolve(t, SubmitSchema()), "tool": resolve(t, ToolSchema()), "chain": resolve(t, ChainSchema()), "card": resolve(t, CardSchema())}
 	counts := map[string]int{}
 	for _, c := range cases(t) {
 		t.Run(c.Format+"/"+map[bool]string{true: "pass", false: "fail"}[c.Pass]+"/"+c.Name, func(t *testing.T) {

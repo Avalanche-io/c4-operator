@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "source.job",
+      "message": "\"saltmarsh/sm-grade-lora-v003\" is not a job",
+      "fix": "write the job that made the tree as <project>/<job>@<uid>"
+    }
+  ],
+  "schemaMentions": "job"
+}
