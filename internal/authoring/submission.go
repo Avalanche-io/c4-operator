@@ -152,10 +152,12 @@ func (c *subCtx) refusals() []Error {
 			}
 		}
 		if a := j.Answers; a != nil {
-			// Only a unit of the job answers its questions for now.
+			// Only a unit of the job answers its questions for now; a lead
+			// answers only its own job, which a submission never is (a
+			// lead's c4_agent makes it, POST /jobs with leadSession).
 			switch {
 			case a.By == "lead":
-				errs = append(errs, errf(p+".answers.by", "name a unit of the job: unit:<name>", "a lead answering a job's questions cannot run on this farm yet"))
+				errs = append(errs, errf(p+".answers.by", "name a unit of the job: unit:<name>", c4v1.NoLeadMessage))
 			case strings.HasPrefix(a.By, "tool:"):
 				errs = append(errs, errf(p+".answers.by", "name a unit of the job: unit:<name>", "a tool answering a job's questions cannot run on this farm yet"))
 			case len(a.With) > 0:

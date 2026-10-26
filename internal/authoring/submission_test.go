@@ -210,14 +210,15 @@ func TestLowerNeedsPinnedImage(t *testing.T) {
 // answers: {by: unit:<name>} must name a unit of the job that reasons: a
 // frames or once tool's units (<key>/<n> from 0) each run a procedure, so
 // each is refused at the check, as is a name that is no unit of the job;
-// a lead or a tool answering stays refused, in the farm's words.
+// a lead answers only its own job, which a submission's never is, and a
+// tool answering stays refused, in the farm's words.
 func TestLowerAnswers(t *testing.T) {
 	for by, want := range map[string]string{
 		"unit:lead":      `no unit "lead" in proxies`,
 		"unit:proxies/9": `no unit "proxies/9" in proxies`,
 		"unit:proxies/2": "proxies/2 cannot answer questions: it runs a procedure",
 		"unit:4":         "proxies/4 cannot answer questions: it runs a procedure",
-		"lead":           "a lead answering a job's questions cannot run on this farm yet",
+		"lead":           "this job has no lead: it was not made by a lead's c4_agent",
 		"tool:shot-lead": "a tool answering a job's questions cannot run on this farm yet",
 	} {
 		_, errs := lowerDoc(t, `c4: submit/1

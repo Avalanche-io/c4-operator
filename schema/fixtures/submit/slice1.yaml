@@ -39,7 +39,7 @@ refusals:
     fix: use a version of the tool that declares none for now
   answers-lead:
   - path: jobs.port.answers.by
-    message: a lead answering a job's questions cannot run on this farm yet
+    message: "this job has no lead: it was not made by a lead's c4_agent"
     fix: 'name a unit of the job: unit:<name>'
   - path: jobs.port.each.tool
     message: this farm cannot run generator tools yet
