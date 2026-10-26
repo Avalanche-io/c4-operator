@@ -94,52 +94,86 @@ func (q *Queue) planJob(ctx context.Context, v *view) (*class.Plan, error) {
 	}
 	// Expansions and appends replay in the order they were applied: by
 	// where each began in the table. Of two that began at the same place,
-	// one added nothing, and it came first.
-	as := m.appends
-	nextAppend := func(x *expansionRec) bool {
-		return len(as) > 0 && (x == nil || as[0].First < x.First || as[0].First == x.First && x.Units > 0)
+	// one added nothing, and it came first. A lead's plan calls replay
+	// after the expansions and appends each was applied after (plans.go).
+	if err := q.loadPlanLog(ctx, v); err != nil {
+		return nil, err
 	}
-	replayAppends := func(x *expansionRec) error {
-		for ; nextAppend(x); as = as[1:] {
-			a := as[0]
-			if a.Error != "" {
-				continue
+	xs, as := m.expansions, m.appends
+	appendNext := func() bool {
+		return len(as) > 0 && (len(xs) == 0 || as[0].First < xs[0].First || as[0].First == xs[0].First && xs[0].Units > 0)
+	}
+	replayAppend1 := func() error {
+		a := as[0]
+		as = as[1:]
+		if a.Error != "" {
+			return nil
+		}
+		doc, err := q.expansionDoc(ctx, v.project, m, a.Doc)
+		if err != nil {
+			return errLoading{err}
+		}
+		return replayAppend(v.driver, j, p, a, doc)
+	}
+	replayExpansion1 := func() error {
+		x := xs[0]
+		xs = xs[1:]
+		if x.Error != "" || x.Doc == "" {
+			return nil
+		}
+		doc, err := q.expansionDoc(ctx, v.project, m, x.Doc)
+		if err != nil {
+			return errLoading{err}
+		}
+		if x.Unit < 0 || x.Unit >= len(p.Units) || x.First != len(p.Units) {
+			return fmt.Errorf("expansion of unit %d does not fit the plan (it began at %d, the plan has %d units)", x.Unit, x.First, len(p.Units))
+		}
+		ex, err := class.Expand(v.driver, j, p.Units[x.Unit], doc, p.Names(), x.First)
+		if err != nil {
+			return fmt.Errorf("replaying the expansion of unit %d: %w", x.Unit, err)
+		}
+		if len(ex.Units) != x.Units {
+			return fmt.Errorf("replaying the expansion of unit %d: %d units, recorded %d", x.Unit, len(ex.Units), x.Units)
+		}
+		p.Apply(x.Unit, ex)
+		return nil
+	}
+	// replay replays expansions and appends until wantX and wantA of each
+	// are, in their order.
+	replay := func(wantX, wantA int) error {
+		wantX, wantA = min(wantX, len(m.expansions)), min(wantA, len(m.appends))
+		for {
+			needX, needA := len(m.expansions)-len(xs) < wantX, len(m.appends)-len(as) < wantA
+			var err error
+			switch {
+			case needA && (!needX || appendNext()):
+				err = replayAppend1()
+			case needX:
+				err = replayExpansion1()
+			default:
+				return nil
 			}
-			doc, err := q.expansionDoc(ctx, v.project, m, a.Doc)
 			if err != nil {
-				return errLoading{err}
-			}
-			if err := replayAppend(v.driver, j, p, a, doc); err != nil {
 				return err
 			}
 		}
-		return nil
 	}
-	for i := range m.expansions {
-		x := m.expansions[i]
-		if err := replayAppends(&x); err != nil {
+	for _, x := range m.plans {
+		if err := replay(x.Expansions, x.Appends); err != nil {
 			return nil, err
 		}
-		if x.Error != "" || x.Doc == "" {
+		if x.Error != "" {
 			continue
 		}
 		doc, err := q.expansionDoc(ctx, v.project, m, x.Doc)
 		if err != nil {
 			return nil, errLoading{err}
 		}
-		if x.Unit < 0 || x.Unit >= len(p.Units) || x.First != len(p.Units) {
-			return nil, fmt.Errorf("expansion of unit %d does not fit the plan (it began at %d, the plan has %d units)", x.Unit, x.First, len(p.Units))
+		if err := replayPlan(j, p, x, doc); err != nil {
+			return nil, err
 		}
-		ex, err := class.Expand(v.driver, j, p.Units[x.Unit], doc, p.Names(), x.First)
-		if err != nil {
-			return nil, fmt.Errorf("replaying the expansion of unit %d: %w", x.Unit, err)
-		}
-		if len(ex.Units) != x.Units {
-			return nil, fmt.Errorf("replaying the expansion of unit %d: %d units, recorded %d", x.Unit, len(ex.Units), x.Units)
-		}
-		p.Apply(x.Unit, ex)
 	}
-	if err := replayAppends(nil); err != nil {
+	if err := replay(len(m.expansions), len(m.appends)); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -301,8 +335,11 @@ func expansionStatus(xs []expansionRec) []c4v1.WorkExpansion {
 }
 
 // done reports whether unit i no longer holds anything up: it succeeded,
-// or failed and a person accepted it.
-func (m *jobMem) done(i int) bool { return m.succeeded[i] || m.accepted[i] || m.superseded[i] }
+// or failed and a person accepted it, or a review superseded it, or its
+// lead withdrew it (plans.go).
+func (m *jobMem) done(i int) bool {
+	return m.succeeded[i] || m.accepted[i] || m.superseded[i] || m.withdrawnUnit(i)
+}
 
 // unitWaits sorts the job's unfinished units that are not running into
 // runnable ones, in dispatch order, and blocked ones (waiting on a unit of
@@ -336,6 +373,9 @@ func unitWaits(plan *class.Plan, m *jobMem, v *view) (runnable, blocked []int, s
 	for _, idx := range plan.Order {
 		if m.succeeded[idx] || m.failed[idx] || m.superseded[idx] || v.finishing[idx] {
 			continue
+		}
+		if u := plan.Units[idx]; u.Withdrawn != nil || u.Held {
+			continue // retired, or not released yet: neither runnable nor waiting (plans.go)
 		}
 		if _, ok := v.running[idx]; ok {
 			continue

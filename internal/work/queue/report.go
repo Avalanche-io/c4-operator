@@ -156,11 +156,18 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	var lockedU []int
 	var succ, egress, fail, flag, accepted, pre, run, retry, backoff, queued, planned, blockedU, waits, superseded, asking []int
+	var withdrawn, heldU []int
 	for i := 0; i < n; i++ {
 		_, running := v.running[i]
-		switch {
+		switch u := m.plan.Units[i]; {
+		case u.Withdrawn != nil:
+			// its lead retired it before it started (plans.go)
+			withdrawn = append(withdrawn, i)
 		case m.superseded[i]:
 			superseded = append(superseded, i)
+		case u.Held && !running:
+			// planned by its lead, not released yet
+			heldU = append(heldU, i)
 		case !running && !m.succeeded[i] && !m.failed[i] && !v.finishing[i] && m.attempts[i] == 0 && m.plan.Units[i].Generator && !m.expanded(i):
 			planned = append(planned, i)
 		case v.openWaits[i]:
@@ -200,17 +207,19 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		Failed: int32(len(fail)), Accepted: int32(len(accepted)), Preflight: int32(len(pre)),
 		Running: int32(len(run)), Retrying: int32(len(retry)), Backoff: int32(len(backoff)), Queued: int32(len(queued)),
 		Planned: int32(len(planned)), Blocked: int32(len(blockedU)), Flagged: int32(len(flag)), Waits: int32(len(waits)),
-		Locked: int32(len(lockedU)), Superseded: int32(len(superseded)), Needs: int32(len(asking))}
+		Locked: int32(len(lockedU)), Superseded: int32(len(superseded)), Needs: int32(len(asking)),
+		Withdrawn: int32(len(withdrawn)), Held: int32(len(heldU))}
 	switch {
 	case v.blocked:
 		st.Units.Blocked, st.Units.Queued, st.Units.Backoff = int32(len(queued)+len(backoff)+len(blockedU)), 0, 0
 	case held:
-		st.Units.Held, st.Units.Queued = int32(len(queued)), 0
+		st.Units.Held, st.Units.Queued = int32(len(queued)+len(heldU)), 0
 	}
 	st.UnitStates = map[string]string{}
 	for name, set := range map[string][]int{"succeeded": succ, "egress": egress, "failed": fail, "accepted": accepted,
 		"preflight": pre, "running": run, "retrying": retry, "backoff": backoff, "queued": queued,
-		"planned": planned, "blocked": blockedU, "flagged": flag, "waits": waits, "locked": lockedU, "superseded": superseded, "needs": asking} {
+		"planned": planned, "blocked": blockedU, "flagged": flag, "waits": waits, "locked": lockedU, "superseded": superseded, "needs": asking,
+		"withdrawn": withdrawn, "held": heldU} {
 		if len(set) > 0 {
 			st.UnitStates[name] = order.EncodeSet(set)
 		}
@@ -304,6 +313,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	st.Expansions = expansionStatus(m.expansions)
 	st.Appends = appendStatus(m.appends)
+	st.Plan = planStatus(m)
 	st.Holds = holdsStatus(v)
 	st.Gates = v.gates
 	st.Verdicts = verdictStatus(m)
@@ -344,8 +354,16 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		st.Started = &metav1.Time{Time: m.started.Truncate(time.Second)}
 	}
 
-	// Accepted and superseded units count as done: nothing waits on them.
-	finished := len(succ) + len(accepted) + len(superseded)
+	// Accepted, superseded and withdrawn units count as done: nothing
+	// waits on them. Units its lead holds, and those waiting on them, run
+	// once it releases them; a closed lead's job releases nothing more, so
+	// they never run, and count as done too (plans.go).
+	finished := len(succ) + len(accepted) + len(superseded) + len(withdrawn)
+	parked := parkedUnits(m.plan, m, heldU, blockedU)
+	if m.lead.closed != nil {
+		finished += parked
+	}
+	v.parked = m.lead.closed == nil && parked > 0 && finished+parked == n && active == 0
 	switch {
 	case isForecast(v.job):
 		// It never runs: a real job replaces it (forecast.go).

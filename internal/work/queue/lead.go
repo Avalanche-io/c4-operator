@@ -174,9 +174,9 @@ func (q *Queue) leadStatus(st *c4v1.WorkJobStatus, v *view, now time.Time) {
 		m.lead.idleSince = time.Time{}
 		l.State, cond.Reason = c4v1.LeadWorking, c4v1.LeadWorking
 		cond.Message = "open: a worker waits for an answer"
-	case st.Phase == "Succeeded" || st.Phase == "Failed":
-		// Every unit has ended: nothing to place, and its lead may add
-		// more.
+	case st.Phase == "Succeeded" || st.Phase == "Failed" || v.parked:
+		// Every unit has ended, or waits for its lead to release it
+		// (plans.go): nothing to place, and its lead may add more.
 		st.Phase = "Running"
 		if m.lead.idleSince.IsZero() {
 			m.lead.idleSince = now
@@ -186,6 +186,10 @@ func (q *Queue) leadStatus(st *c4v1.WorkJobStatus, v *view, now time.Time) {
 		cond.Reason = c4v1.LeadIdle
 		cond.Message = fmt.Sprintf("every worker has ended: nothing to place, waiting for its lead to add workers or close it; it closes by itself at %s if none is added",
 			closes.UTC().Format(time.RFC3339))
+		if v.parked {
+			cond.Message = fmt.Sprintf("every worker left is planned and held: nothing to place until its lead releases them (c4_plan), or closes it; it closes by itself at %s if none is released or added",
+				closes.UTC().Format(time.RFC3339))
+		}
 	default:
 		m.lead.idleSince = time.Time{}
 		l.State, cond.Reason = c4v1.LeadWorking, c4v1.LeadWorking

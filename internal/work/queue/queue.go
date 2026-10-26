@@ -248,6 +248,11 @@ type jobMem struct {
 	// appends are the owner's additions of units applied, in order, by
 	// key (appends.go).
 	appends []appendRec
+	// plans are its lead's plan calls applied, in order; planToken the
+	// last request's token, planLog the stored log of them, and planLoad
+	// the log to read before the table is replayed (plans.go).
+	plans                        []planRec
+	planToken, planLog, planLoad string
 	// lead is a lead's job's idle time and closing (lead.go).
 	lead leadMem
 	// branches are units' git branches, as their runners last recorded
@@ -440,6 +445,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.loadAsks(st)
 	m.loadLoops(st)
 	m.loadAppends(st)
+	m.loadPlans(st)
 	m.loadLead(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
@@ -549,7 +555,10 @@ type view struct {
 	finishing       map[int]bool // succeeded, waiting for capture
 	preflight       map[int]bool // live pods still preparing
 	runnable        []int
-	blocked         bool
+	// parked: every unit of the open lead's job left is held, or waits on
+	// a held one, and nothing runs (plans.go).
+	parked  bool
+	blocked bool
 	// after lists the jobs it waits on that have not succeeded (keys).
 	after []string
 	// stuckOn names a dependency that failed: the job cannot start.
@@ -879,6 +888,8 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	q.applyWithdraws(ctx, v, ctl, now)
 	// The owner adding units to the running job (appends.go).
 	q.applyAppends(ctx, v, ctl, now)
+	// Its lead editing its plan (plans.go).
+	q.applyPlans(ctx, v, ctl, now)
 	// A lead's job closed by its person or lead, or idle too long
 	// (lead.go).
 	q.applyClose(ctx, v, ctl, now)
@@ -1433,6 +1444,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		}
 	}
 	s.TPath = criticalPath(plan, v.mem, rem, func(key string) float64 { return e.Generator(key).Longest })
+	orderRunnable(plan, v, rem)
 	if len(rem) <= 2000 {
 		// Units that must take turns for what they claim run one after
 		// another.
@@ -1552,8 +1564,18 @@ func schedJob(v *view, free int) sched.Job {
 
 func isFinished(v *view) bool {
 	plan := v.mem.plan
+	if plan == nil {
+		return false
+	}
+	// A unit its lead withdrew is done (plans.go).
+	withdrawn := 0
+	for i := range plan.Units {
+		if plan.Units[i].Withdrawn != nil {
+			withdrawn++
+		}
+	}
 	// A question re-checked keeps it in the policy's view (escalate.go).
-	return plan != nil && len(v.mem.succeeded)+len(v.mem.failed)+len(v.stuck) >= len(plan.Units) && len(v.running) == 0 && len(v.rechecking) == 0
+	return len(v.mem.succeeded)+len(v.mem.failed)+len(v.stuck)+withdrawn >= len(plan.Units) && len(v.running) == 0 && len(v.rechecking) == 0
 }
 
 // act creates pods for dispatched units and stops preempted ones.
