@@ -1,4 +1,4 @@
-# C4: the render farm that runs by deadline
+# The Cinema Content Creation Cloud - Kubernetes Operator
 
 [![release](https://img.shields.io/github/v/release/Avalanche-io/c4-operator)](https://github.com/Avalanche-io/c4-operator/releases)
 [![ci](https://github.com/Avalanche-io/c4-operator/actions/workflows/ci.yaml/badge.svg)](https://github.com/Avalanche-io/c4-operator/actions/workflows/ci.yaml)
@@ -11,10 +11,9 @@ is named by what's in it, so each one leaves storage about once, however many
 machines read it. Every output is a version, and every step the farm takes is
 signed by whoever took it.
 
-C4 IDs are SMPTE ST 2114, authored by Joshua Kolden and public since 2015. This
-release continues a design that began as a 2011 cloud queue and a 2017
-Kubernetes system. C4 is short for The Cinema Content Creation Cloud
-([cccc.io](https://cccc.io)).
+The foundation of C4 is the standardized ID system (SMPTE ST 2114), which makes
+all data in C4 content addressed. C4 has been in continuous development since
+2011, and adopted Kubernetes as its task management platform in 2017.
 
 ![A shot in the C4 HUD: one row per frame, the work flowing from simulation to delivery](docs/images/hud-job-render-binary-order.webp)
 
@@ -39,6 +38,12 @@ Kubernetes system. C4 is short for The Cinema Content Creation Cloud
   as people, through MCP.
 - **Runs where you are.** On a laptop in Docker, or on your studio's
   Kubernetes cluster, with the same `c4 farm` commands.
+- **Built on Kubernetes, the standard way to run software across many
+  machines.** Every major cloud offers it ready-made and most IT teams
+  already know it, so your farm runs on infrastructure you can hire for,
+  monitor and grow with standard tools, not a proprietary render-manager
+  stack. Machines join and leave without reconfiguring the farm, and work on
+  a machine that fails is retried on another.
 
 ## Quickstart: render a shot by its deadline
 

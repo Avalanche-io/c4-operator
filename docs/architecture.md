@@ -190,6 +190,6 @@ change the API, the manifests and the record formats. It builds against c4
 master (`v1.0.17-0.20261021011131-b3a6f2dd9280`, commit b3a6f2d) and moves
 to the c4 release that carries those APIs when it ships.
 
-C4 IDs are SMPTE ST 2114, authored by Joshua Kolden and public since 2015.
-This release continues a design that began as a 2011 cloud queue and a 2017
-Kubernetes system.
+C4 IDs are SMPTE ST 2114, public since 2015. C4 has been in continuous
+development since 2011, and adopted Kubernetes as its task management platform
+in 2017.
