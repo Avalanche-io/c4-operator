@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -17,6 +18,7 @@ import (
 	"runtime"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -637,8 +639,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		archive := fs.String("image-archive", "", "an operator image archive to load into the cluster (a development build)")
 		image := fs.String("image", "", "the operator image the cluster runs, with --image-archive")
 		noOpen := fs.Bool("no-open", false, "don't open the HUD")
-		port := fs.Int("port", localfarm.HUDPort, "the HUD's port on this machine")
-		storePort := fs.Int("store-port", localfarm.StorePort, "the store's port on this machine")
+		port := fs.Int("port", 0, "for a new farm, the HUD's port on this machine (default 30080, or the next free one); an existing farm keeps its own")
+		storePort := fs.Int("store-port", 0, "for a new farm, the store's port on this machine (default 30900, or the next free one); an existing farm keeps its own")
 		registryPort := fs.Int("registry-port", localfarm.RegistryPort, "the farm's image registry's port on this machine")
 		integrateOn := fs.String("integrate", "", "the integrations to add, without asking: claude (c4 farm integrations lists them)")
 		integrateOff := fs.Bool("no-integrate", false, "the minimal install: no integration added, without asking")
@@ -693,6 +695,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		first := true
 		if have, err := localfarm.Exists(localfarm.Name); err == nil {
 			first = !have
+		}
+		// the ports the farm has (an existing one's, from its node) or, for
+		// a new one, free ones: never an assumed 30080 another farm holds
+		if err := localfarm.ResolvePorts(ctx, &o.Options, !first, func(f string, a ...any) { fmt.Fprintf(stdout, f, a...) }); err != nil {
+			return err
 		}
 		if err := localfarm.Up(ctx, o); err != nil {
 			return err
@@ -803,10 +810,16 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			fmt.Fprintf(stdout, "no local farm; `c4 farm up` makes one\n")
 			return nil
 		}
-		// The HUD is where up put it.
+		// The HUD is where up put it, and where the farm's node maps it.
 		hud, inst := localfarm.Options{}.HUD(), ""
 		if f, ok := cfg.Farms[localfarm.Name]; ok && f.HUD != "" {
 			hud, inst = f.HUD, f.InstallerTokenFile
+		}
+		if p, _, err := localfarm.MappedPorts(ctx, localfarm.Name); err == nil && p != 0 {
+			if real := (localfarm.Options{HUDHostPort: p}).HUD(); real != hud {
+				fmt.Fprintf(stdout, "note      farm.yaml has %s's HUD at %s, and its node maps it to %s; c4 farm up --name %s records it\n", localfarm.Name, hud, real, localfarm.Name)
+				hud = real
+			}
 		}
 		c, err := farmcli.NewClient(farmcli.Farm{HUD: hud, As: "wrangler", InstallerTokenFile: inst})
 		if err != nil {
@@ -815,7 +828,15 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		s, err := farmcli.Snapshot(ctx, c)
 		if err != nil {
 			// a farm whose HUD does not answer is not well: a script sees it
-			return fmt.Errorf("the local farm %s is running, and its HUD does not answer yet: %v", localfarm.Name, err)
+			why := err.Error()
+			if u, perr := url.Parse(hud); perr == nil {
+				if p, _ := strconv.Atoi(u.Port()); p != 0 {
+					if owner := localfarm.PortOwner(ctx, p); owner != "" && owner != localfarm.Name {
+						why += fmt.Sprintf("; 127.0.0.1:%d belongs to %s", p, owner)
+					}
+				}
+			}
+			return fmt.Errorf("the local farm %s is running, and its HUD does not answer yet: %s", localfarm.Name, why)
 		}
 		fmt.Fprintf(stdout, "farm      %s   %d nodes · %d of %d slots in use · %d units waiting\n", localfarm.Name, len(s.Nodes), s.Farm.SlotsUsed, s.Farm.SlotsTotal, s.Farm.QueuedUnits)
 		fmt.Fprintf(stdout, "HUD       %s   c4 farm open opens it signed in\n", hud)
