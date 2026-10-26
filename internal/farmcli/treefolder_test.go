@@ -123,7 +123,7 @@ func TestAgentMaySendNotFromHomeOrDisk(t *testing.T) {
 	os.WriteFile(filepath.Join(home, ".c4project"), nil, 0o644)
 	for _, dir := range []string{home, "/", filepath.Dir(home)} {
 		t.Chdir(dir)
-		if err := agentMaySend(proj); err == nil || !strings.Contains(err.Error(), "never a whole disk or home") {
+		if err := agentMaySend(proj); err == nil || !strings.Contains(err.Error(), "sends nothing from it, since that is a whole disk or home: run it from the project's own folder (cd "+tildePath(proj)+")") {
 			t.Errorf("working in %s: %v", dir, err)
 		}
 	}

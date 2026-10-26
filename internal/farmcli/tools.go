@@ -594,7 +594,10 @@ func agentMaySend(root string) error {
 	if err != nil {
 		return err
 	}
-	if tooBroad(work) || !insideFolder(work, root) {
+	switch {
+	case tooBroad(work):
+		return fmt.Errorf("an agent working in %s sends nothing from it, since that is a whole disk or home: run it from the project's own folder (cd %s), or yourself at a terminal", tildePath(work), tildePath(root))
+	case !insideFolder(work, root):
 		return fmt.Errorf("%s: an agent cannot send a folder outside the one it works in (%s): run it yourself at a terminal (c4 sends a project's folder, never a whole disk or home)", tildePath(root), tildePath(work))
 	}
 	return nil
