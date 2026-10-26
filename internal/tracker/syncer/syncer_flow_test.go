@@ -781,7 +781,6 @@ func TestFlowArtistFramesSpend(t *testing.T) {
 		}
 		e.pass()
 		name := e.jobName()
-		e.farm.FrameRanges = map[string][2]int{ns + "/" + name: {1001, 1008}}
 		e.job(name, func(j *api.Job) {
 			j.Phase, j.Owner = "Running", "dana"
 			j.Spend = &api.Spend{ModelSlotCost: 1.25, ProceduralSlotCost: 10, TokenCost: 1.5}
@@ -799,7 +798,7 @@ func TestFlowArtistFramesSpend(t *testing.T) {
 	if u, _ := v.Fields["user"].(flowtest.Link); u.ID != e.dana.ID {
 		t.Fatalf("the Version's user is %v, want the artist", v.Fields["user"])
 	}
-	if v.Fields["frame_range"] != "1001-1008" {
+	if v.Fields["frame_range"] != "1001-1240" {
 		t.Fatalf("frames: %v", v.Fields["frame_range"])
 	}
 	if got := e.site.Get("Task", e.task.ID)["sg_c4_spend"]; got != "12.75" {

@@ -381,33 +381,6 @@ func (h *HUD) Book(ctx context.Context, since int64, limit int) (api.Transitions
 // previewMax is the largest still a tracker is given: a proxy, not a plate.
 const previewMax = 16 << 20
 
-// Framer is a farm that says which frames a job's output covers.
-type Framer interface {
-	Frames(ctx context.Context, j JobRef) (first, last int, err error)
-}
-
-// Frames is the job's frame range, from its preview's frames (a job with
-// frames lists every one, previewed or not); ErrNotFound for a job with
-// none.
-func (h *HUD) Frames(ctx context.Context, j JobRef) (int, int, error) {
-	var p struct {
-		Frames []struct {
-			Frame int `json:"frame"`
-		} `json:"frames"`
-	}
-	if err := h.doJSON(ctx, http.MethodGet, jobPath(j)+"/preview", nil, &p); err != nil {
-		return 0, 0, err
-	}
-	if len(p.Frames) == 0 {
-		return 0, 0, ErrNotFound
-	}
-	first, last := p.Frames[0].Frame, p.Frames[0].Frame
-	for _, f := range p.Frames {
-		first, last = min(first, f.Frame), max(last, f.Frame)
-	}
-	return first, last, nil
-}
-
 // Preview reads the job's frames (GET /jobs/{ns}/{name}/preview) and
 // fetches the middle rendered one's preview proxy from the project's
 // store, checked against its C4 ID, so what a tracker shows is the frame

@@ -45,6 +45,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 	"github.com/Avalanche-io/c4-operator/internal/tracker/farm"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/work/order"
 )
 
 // Condition types on Tracker and TrackerLink.
@@ -1056,7 +1057,7 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	}
 	// Publish before presenting: a published review entity (a Flow
 	// Version) is what the presentation then points at.
-	if err := s.publish(ctx, c, t, l, j, jr, sum); errors.Is(err, errStillWaiting) {
+	if err := s.publish(ctx, c, t, rule, l, j, jr, sum); errors.Is(err, errStillWaiting) {
 		// Nothing is presented either: the review the publish makes is
 		// what the presentation points at.
 		return nil
@@ -1517,7 +1518,7 @@ func (s *Syncer) remember(ctx context.Context, l *c4v1.TrackerLink, field, value
 // at: when its review wait opens, or when it is done. Each output view is
 // published once. Where publishing makes the entity people review (a Flow
 // Version), that becomes the link's review.
-func (s *Syncer) publish(ctx context.Context, c *conn, t *c4v1.Tracker, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, sum Summary) error {
+func (s *Syncer) publish(ctx context.Context, c *conn, t *c4v1.Tracker, rule c4v1.TrackerIntake, l *c4v1.TrackerLink, j *api.Job, jr farm.JobRef, sum Summary) error {
 	if sum.Output == "" || (sum.State != StateInReview && sum.State != StateDone && sum.State != StateDoneAccepted) {
 		return nil
 	}
@@ -1540,9 +1541,10 @@ func (s *Syncer) publish(ctx context.Context, c *conn, t *c4v1.Tracker, l *c4v1.
 		return err
 	}
 	out.Preview = still
-	if fr, ok := s.Farm.(farm.Framer); ok {
-		if first, last, err := fr.Frames(ctx, jr); err == nil {
-			out.FirstFrame, out.LastFrame = first, last
+	// The frames the rule asks of every job it makes, this one's too.
+	if rule.Job != nil {
+		if fs, err := order.ParseFrames(rule.Job.Params["frames"]); err == nil {
+			out.FirstFrame, out.LastFrame = fs[0], fs[len(fs)-1]
 		}
 	}
 	// The artist, by the people map run in reverse: only a login its person
