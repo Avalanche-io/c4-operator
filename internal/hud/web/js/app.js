@@ -12,6 +12,7 @@ import * as md from './mode.js';
 import * as lvl from './level.js';
 import { mine1, farm1, job1, pools1 } from './views/day1.js';
 import { incidents, needsTier } from '../design/components/incidents.js';
+import { farmCheck } from '../design/components/words.js';
 import * as prefs from './prefs.js';
 import { installC4ID } from '../design/components/c4id.js';
 import queue from './views/queue.js';
@@ -97,7 +98,8 @@ const ctx = {
   href,
   go(hash) { location.hash = '#/' + hash; },
   refresh: () => render(),
-  job(key) { return state.snap && state.snap.jobs.find((j) => `${j.namespace}/${j.name}` === key); },
+  // (a link to one of the farm's own tool tests still opens it)
+  job(key) { return state.snap && [...state.snap.jobs, ...(state.snap.checks || [])].find((j) => `${j.namespace}/${j.name}` === key); },
   cls(name) { return state.snap && state.snap.classes.find((c) => c.name === name); },
   toast,
 };
@@ -547,12 +549,28 @@ document.addEventListener('hud:refresh', () => render());
 // canvases and SVG drawn from tok() redraw in the new scheme
 window.addEventListener('c4:scheme', () => { if (state.route) render(); });
 document.addEventListener('hud:changed', () => {
-  get('/snapshot').then((snap) => { f.setClock(snap.now); state.snap = snap; render(); }, () => {});
+  get('/snapshot').then((snap) => { f.setClock(snap.now); setSnap(snap); render(); }, () => {});
 });
+
+// own: the snapshot as the person's: the farm's own tool tests are its
+// setup, not anyone's work, so they leave every list and count (as
+// snap.checks, for the Farm setup section) unless the queue asks for them
+function own(snap) {
+  const all = snap.jobs || [];
+  const checks = all.filter(farmCheck);
+  if (!checks.length) return snap;
+  const shown = state.route && state.route.name === 'queue' && state.route.q.checks === '1';
+  return { ...snap, jobs: shown ? all : all.filter((j) => !farmCheck(j)), checks };
+}
+function setSnap(snap) {
+  state.raw = snap;
+  state.snap = own(snap);
+}
 
 window.addEventListener('hashchange', () => {
   const prev = state.route;
   state.route = parseRoute();
+  if (state.raw) state.snap = own(state.raw);
   render();
   if (!prev || prev.name !== state.route.name) document.getElementById('main').focus({ preventScroll: true });
 });
@@ -561,7 +579,7 @@ state.route = parseRoute();
 subscribe((snap) => {
   f.setClock(snap.now);
   const was = me();
-  state.snap = snap;
+  setSnap(snap);
   // the viewer is known now: their preferences apply
   if (me() !== was) applyPrefs();
   render();
@@ -576,8 +594,7 @@ subscribe((snap) => {
       h('h1', null, 'Open this HUD from the farm’s machine'),
       h('p', { class: 'd1-sub' }, 'This farm’s HUD answers a browser its own machine opened. On the machine that runs the farm, run:'),
       h('pre', { class: 'signin-cmd' }, h('code', null, 'c4 farm open')),
-      h('p', { class: 'dim' }, 'It opens this page signed in. Nothing to type here: the machine’s key never goes in a link.'),
-      h('p', { class: 'dim small' }, msg)));
+      h('p', { class: 'dim' }, 'It opens this page signed in. Nothing to type here: the machine’s key never goes in a link.')));
   } else main.textContent = `The farm did not answer: ${msg}`;
 });
 

@@ -93,7 +93,17 @@ export const heldByPerson = (j) => j.phase === 'Held' && !(j.needs || []).some((
 // "blocked on comp", "waits for license-nuke", "held", "needs you" (the
 // caller's personMark says why), else its phase in the vocabulary.
 const PHASE = { Queued: 'queued', Running: 'rendering', Blocked: 'blocked on', Held: 'held', Yielded: 'queued', Succeeded: 'done', Failed: 'needs you' };
+// farmCheck: a job the farm runs to test a tool it publishes
+// (<tool>-farmtest-<hex>): the farm's setup, never a person's work
+export const farmCheck = (j) => !!(j && j.toolTest);
+
 export function jobWords(j) {
+  // a tool's test speaks for the tool: it never needs a person
+  if (farmCheck(j)) {
+    if (j.phase === 'Failed') return { word: 'its test failed', cls: '', why: `: ${j.toolTest} is not offered` };
+    if (j.phase === 'Succeeded') return { word: 'tested', cls: 'settled', why: '' };
+    return { word: 'testing', cls: '', why: '' };
+  }
   const short = (k) => String(k).split('/').pop();
   if (j.phase === 'Blocked') return { word: 'blocked on', cls: '', why: (j.dependsOn || []).map(short).join(', ') || 'earlier work' };
   // held on an open question, not by a person: it waits on the answer

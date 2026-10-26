@@ -18,6 +18,7 @@ import { markEl } from '../../design/components/marks.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
 import { decisions } from './controls.js';
 import { outsideQueue } from './sessions.js';
+import { farmSetup } from './setup.js';
 
 const keyOf = (j) => `${j.namespace}/${j.name}`;
 
@@ -67,11 +68,12 @@ export function rootCard(ctx, it) {
     h('div', { class: 'n' }, f.num(it.count), h('small', null, it.unit)));
 }
 
-export function roots(ctx, items, { handled = true } = {}) {
+// (empty: nothing is listed below, so nothing is "on its way")
+export function roots(ctx, items, { handled = true, empty = false } = {}) {
   const needs = items.filter((x) => x.sev === 'needs'), done = items.filter((x) => x.sev === 'handled');
   return [
     h('h2', null, needs.length ? `Needs you · ${needs.length}` : 'Needs you'),
-    needs.length ? needs.map((x) => rootCard(ctx, x)) : h('div', { class: 'd1-quiet' }, 'Nothing needs you. Everything below is on its way.'),
+    needs.length ? needs.map((x) => rootCard(ctx, x)) : h('div', { class: 'd1-quiet' }, empty ? 'Nothing needs you.' : 'Nothing needs you. Everything below is on its way.'),
     handled && done.length ? [h('h2', null, `The farm is handling · ${done.length}`), done.map((x) => rootCard(ctx, x))] : null,
   ];
 }
@@ -154,6 +156,10 @@ export const trackerLink = (t) => (t.href ? h('a', { href: t.href, target: t.hre
 
 const foot = () => h('div', { class: 'd1-foot' }, 'Level 1. Everything else is one click away: open any job for its frames, or change your level in the top bar.');
 
+// firstJob: where a farm with nothing on it sends a newcomer next
+// (FIRST-JOB.md will give each kind of project its own first job)
+const firstJob = () => h('span', null, 'Submit a job: ', h('code', null, 'c4 farm submit'), ', or see the quickstart.');
+
 // ------------------------------------------------------------ views
 
 export const mine1 = {
@@ -168,11 +174,12 @@ export const mine1 = {
     const open = jobs.filter((j) => j.phase !== 'Succeeded').sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
     return h('section', { class: 'd1', 'data-key': 'd1-mine' },
       h('h1', null, own ? 'My jobs' : 'Jobs in your projects'),
-      h('p', { class: 'd1-sub' }, `${open.length} working or waiting · the farm runs them by their deadlines`),
-      roots(ctx, items),
+      h('p', { class: 'd1-sub' }, open.length ? `${open.length} working or waiting · the farm runs them by their deadlines` : 'No jobs yet'),
+      roots(ctx, items, { empty: !open.length }),
       h('h2', null, 'Working and waiting'),
-      open.length ? open.map((j) => jobRow(ctx, j, items)) : h('div', { class: 'd1-quiet' }, 'Nothing is running for you right now.'),
+      open.length ? open.map((j) => jobRow(ctx, j, items)) : h('div', { class: 'd1-quiet' }, 'Nothing is running for you right now. ', firstJob()),
       outsideQueue(ctx),
+      farmSetup(ctx),
       foot());
   },
 };
@@ -186,11 +193,12 @@ export const farm1 = {
     const list = (late.length ? late : open).slice(0, 8);
     return h('section', { class: 'd1', 'data-key': 'd1-farm' },
       h('h1', null, 'The farm'),
-      h('p', { class: 'd1-sub' }, `${f.num(open.length)} jobs working or waiting · ${late.length ? `${f.num(late.length)} projected late` : 'every deadline holds'} · ${slotWords(s)}`),
-      roots(ctx, items),
+      h('p', { class: 'd1-sub' }, open.length ? `${f.count(open.length, 'job')} working or waiting · ${late.length ? `${f.num(late.length)} projected late` : 'every deadline holds'} · ${slotWords(s)}` : `No jobs yet · ${slotWords(s)}`),
+      roots(ctx, items, { empty: !open.length }),
       h('h2', null, late.length ? `Projected late · ${f.num(late.length)}${late.length > list.length ? ` · the ${list.length} most at risk` : ''}` : 'Next in the queue'),
-      list.map((j) => jobRow(ctx, j, items)),
+      list.length ? list.map((j) => jobRow(ctx, j, items)) : h('div', { class: 'd1-quiet' }, 'Nothing is running on the farm yet. ', firstJob()),
       outsideQueue(ctx),
+      farmSetup(ctx),
       foot());
   },
 };

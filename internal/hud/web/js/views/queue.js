@@ -14,6 +14,7 @@ import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
 import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
 import { jobWords, tempWords, heldByPerson, fromTracker } from '../../design/components/words.js';
+import { farmSetup } from './setup.js';
 import { trackerLink } from './day1.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
 import { roots } from './day1.js';
@@ -362,7 +363,7 @@ export default {
         h('div', null,
           h('div', { class: 'crumbs' }, `Farm / ${s.viewer.allProjects ? 'all projects' : s.viewer.projects.join(' · ')} / run order`),
           h('h1', { id: 'qtitle' }, 'The farm'),
-          h('div', { class: 'meta' }, `${allOpen.length} jobs working or waiting, in run order. Each job's deadline and estimate set the order; nobody sets priorities.`)),
+          h('div', { class: 'meta' }, `${f.count(allOpen.length, 'job')} working or waiting, in run order. Each job's deadline and estimate set the order; nobody sets priorities.`)),
         h('div', { class: 'titleblock' },
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Now'), h('span', { class: 'val' }, f.clockSec(s.now)), h('span', { class: 'sub' }, `${f.dateLine(s.now)} · ${f.offsetLabel()}`)),
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'On time'), h('span', { class: 'val' }, String(withDl.length - late.length), h('small', null, `of ${withDl.length}`)), h('span', { class: 'sub' }, 'with a deadline')),
@@ -392,7 +393,8 @@ export default {
           jobs.length ? h('div', { class: 'qlist', role: 'list', 'aria-label': 'Jobs in run order' }, triage ? hot.map((j) => row(ctx, j, multiProject, sk)) : open.map((j) => row(ctx, j, multiProject, sk))) : empty('No jobs match this filter.'),
           triage ? folded(ctx, open.filter((j) => !hot.includes(j))) : null,
           fin.length ? h('div', { class: 'qdiv' }, h('span', { class: 'lab' }, `Finished · ${fin.length}`), h('span', { class: 'sub' }, 'kept while later jobs still read their output')) : null,
-          fin.length ? h('div', { class: 'qlist fin', role: 'list', 'aria-label': 'Finished jobs' }, fin.map((j) => row(ctx, j, multiProject, sk))) : null)));
+          fin.length ? h('div', { class: 'qlist fin', role: 'list', 'aria-label': 'Finished jobs' }, fin.map((j) => row(ctx, j, multiProject, sk))) : null)),
+      farmSetup(ctx));
   },
 
   after(ctx, root) {
