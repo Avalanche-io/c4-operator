@@ -17,6 +17,10 @@ all data in C4 content addressed. C4 has been in continuous development since
 
 ![A shot in the C4 HUD: one row per frame, the work flowing from simulation to delivery](docs/images/hud-job-render-binary-order.webp)
 
+[![Watch the four-minute tour of the HUD](docs/images/intro-poster.jpg)](https://cccc.io/operator/)
+
+Watch the four-minute tour of the HUD.
+
 ## Why C4
 
 - **Deadlines, not priorities.** You say when a job is due, and the farm works
