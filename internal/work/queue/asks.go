@@ -15,7 +15,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 )
 
-// Questions between units (DESIGN.md 10.6, Agents answer agents; Joshua:
+// Questions between units (DESIGN.md 10.6, Agents answer agents;
 // "the thing answering may be an agent not a human"). A unit that lacks a
 // fact another unit of its job has asks it (c4-unit ask --to unit:<name>);
 // the node daemon relays the unit's questions and answers as pod

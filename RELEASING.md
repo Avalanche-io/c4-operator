@@ -42,16 +42,16 @@ What a farm running an earlier build must do, or will notice, on upgrade.
 ## v0.1.0 checklist
 
 Agents prepare the repository; they do not create repositories, push, or
-change anything on GitHub. Everything marked **Joshua** is his to do.
+change anything on GitHub. Everything marked **Maintainer** is the maintainer's to do.
 
 ### Before publishing
 
-1. **Joshua: approve how the history is published** (see
+1. **Maintainer: approve how the history is published** (see
    [History](#history)). Recommended: option B.
-2. **Joshua: approve the image path** `ghcr.io/avalanche-io/c4-operator`. A
+2. **Maintainer: approve the image path** `ghcr.io/avalanche-io/c4-operator`. A
    different path means editing `config/release/kustomization.yaml`,
    `.goreleaser.yaml`, `Makefile` (`REGISTRY`) and the docs.
-3. **Joshua: confirm the license and contacts**: Apache-2.0, "Copyright 2026
+3. **Maintainer: confirm the license and contacts**: Apache-2.0, "Copyright 2026
    Joshua Ian Kolden" (as in c4 and c4git), and `c4dev@avalanche.io` for
    security reports and conduct (as in c4).
 4. Agent: follow `docs/quickstart.md` word for word with `c4 farm up` on a
@@ -69,7 +69,7 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
    This release pushes nothing to the tap and generates no formula.
 6. Done already: `github.com/Avalanche-io/c4-operator` is public, with
    `main` pushed.
-7. **Joshua: settings.**
+7. **Maintainer: settings.**
    - Security: enable private vulnerability reporting (SECURITY.md points
      to it).
    - Actions: allow GitHub Actions; under Workflow permissions, allow
@@ -81,20 +81,20 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
 
 ### The release
 
-9. **Joshua: tag and push.**
+9. **Maintainer: tag and push.**
    ```sh
    git tag -a v0.1.0 -m "c4-operator v0.1.0"
    git push origin v0.1.0
    ```
    The `release` workflow builds and pushes the images and drafts the
    release.
-10. **Joshua: check the GHCR packages are public**: Packages, `c4-operator`,
+10. **Maintainer: check the GHCR packages are public**: Packages, `c4-operator`,
     each `c4-job-*` and each `c4-runtime-*`. GHCR gives a new package its
     own visibility, private unless the organization's default is public,
     even when the repository is public; set any private one Public under
     Package settings, Change visibility, and connect each to the repository
     if GitHub has not. This is needed once, for the first release.
-11. **Joshua: review and publish the draft release** (notes, `install.yaml`,
+11. **Maintainer: review and publish the draft release** (notes, `install.yaml`,
     archives, checksums).
 12. **The C4 lead: the tap.** Once the draft is published, it builds the
     C4 suite on this release and writes the suite's `c4.rb` to the tap;
@@ -104,7 +104,7 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
     help`, `c4-unit` (its usage, exit 2) and `c4 farm agents`; the
     quickstart; and `kubectl apply -f
     https://github.com/Avalanche-io/c4-operator/releases/download/v0.1.0/install.yaml`.
-14. **Joshua, optional:** the repository description and topics (kubernetes,
+14. **Maintainer, optional:** the repository description and topics (kubernetes,
     operator, csi, vfx, render-farm, content-addressed-storage, provenance,
     mcp), the cccc.io link, and pinning it on his profile.
 
@@ -122,7 +122,7 @@ The history was audited on 2026-10-16 (60 commits, branches `mvp` and `v2`;
   as a UI reference).
 - No large files: the largest blob is 1.4 MiB; the packed repository is
   26 MiB.
-- Every commit is by "Joshua Kolden <joshua@avalanche.io>".
+- Every commit is by the maintainer's own Git identity.
 - One internal working note from the development sessions,
   `HANDOFF-v2.md`, is in the history from its introduction (be24446) to
   157703c. It was not written for publication. The public history was made

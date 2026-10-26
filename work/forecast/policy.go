@@ -72,7 +72,7 @@ func DefaultPolicy() Policy {
 }
 
 // DefaultQuantile is the finish percentile a suggested deadline meets by
-// default (Joshua, 2026-10-18: suggest generously; padding is not a
+// default (2026-10-18: suggest generously; padding is not a
 // cost).
 const DefaultQuantile = 0.95
 

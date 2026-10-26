@@ -39,7 +39,7 @@ module and build caches under the same folder.
 ## Choices, and why
 
 - **hydra: usdrecord with Cycles' Hydra delegate is the primary recipe.**
-  It is what Joshua approved, and it is the same shape as every studio
+  It is what the maintainer approved, and it is the same shape as every studio
   renderer: USD in, a Hydra delegate, EXR out. It is also the only Cycles
   path for arm64. Nothing ships it prebuilt: the usd-core wheel has no
   imaging, no command-line tools and no Linux arm64 build (26.8 is
