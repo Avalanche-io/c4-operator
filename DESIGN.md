@@ -1611,6 +1611,26 @@ and a sweep planner that spawns trials are all generators.
   append (agent units on a job a unit submitted, a name taken, a job that
   finished) adds nothing and lists why. A unit adds no units, to its own
   job or another: its lead does.
+- **A lead's job.** A lead (a person's own Claude Code session that puts
+  workers on the farm with `c4_agent`) has a graph job made for it, named
+  for the session and owned by its person: the HUD makes it on `POST /jobs`
+  with `leadSession`, from that session (its agent header names it,
+  graded claimed), and records it in `c4.avalanche.io/lead-session`, which
+  only the farm sets and nothing changes later. Each call appends workers.
+  Workers come and go between the lead's turns, so the job does not finish
+  when they have: it stays Running with nothing to place, `Idle`, "waiting
+  for its lead" (status `lead`, condition `Open`), until it is closed. Its
+  person or its lead closes it (`POST /jobs/{ns}/{name}/close`, signed,
+  carried in `c4.avalanche.io/close`), or the farm does once it has been
+  idle for the farm's idle close (`--lead-idle-close`, 24h) with no
+  worker added, as its own signed act ("idle 24h, no worker since <time>");
+  never the session ending, since sessions are resumed. A closed job is
+  never reopened: it takes no more workers (the lead makes a new job) and
+  finishes as any job does. Its spec may say its lead answers its
+  questions (`answers: {by: lead}`), and only such a job may: each
+  question a unit stops for is then `for: lead:<session>` (else
+  `person:<owner>`), answered by that lead through its person's client or
+  by the person directly, never from another session.
 - **Rounds:** iteration that is
   not spelled as nesting. A generator may be a bounded loop:
   `rounds: {max, until?}` on a planned unit of a document, or the job params
