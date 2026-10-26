@@ -1,0 +1,41 @@
+name: A project to take on, or to propose
+description: Claim a project from docs/projects.md, or propose a new one for the list.
+labels: [project]
+body:
+  - type: markdown
+    attributes:
+      value: "[Projects you could take on](https://github.com/Avalanche-io/c4-operator/blob/main/docs/projects.md) lists each project's goal, the contract it must meet, where it plugs in and its size. Open one issue per project; the issue is where its design and progress are kept."
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Taking one on, or proposing one
+      options:
+        - taking on a project from the list
+        - proposing a new project for the list
+    validations:
+      required: true
+  - type: input
+    id: project
+    attributes:
+      label: The project
+      description: Its name as the list gives it, or a short name for a new one.
+      placeholder: "e.g. a tracker adapter for Kitsu"
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: What you will build
+      description: The goal in your words, the files or interfaces you expect to touch, and how you will show it meets the contract (the tests it passes, what you will run it against).
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: For a new project, its contract
+      description: What it must do and must never do, where it plugs in, and how anyone can check it. A project with a contract someone else could test is one others can review.
+  - type: textarea
+    id: more
+    attributes:
+      label: Anything else
+      description: What you would need from the maintainers, and whether others could join you.

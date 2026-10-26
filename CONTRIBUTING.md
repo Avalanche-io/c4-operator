@@ -14,10 +14,27 @@ make verify       # gofmt, go vet, generated code and CRDs in step, manifests re
 make test-linux   # overlay, layer and capture tests in a privileged Linux container
 ```
 
-`hack/e2e/up.sh` brings up the eight-worker kind cluster the phase scripts
-(`hack/e2e/p1.sh` to `p7.sh`) run on; see the README. The HUD runs against a
+`go run ./hack/sim` runs the scheduling simulation. The HUD runs against a
 synthetic farm with no cluster: the mock that serves it lives in
 [c4-hud](https://github.com/Avalanche-io/c4-hud).
+
+## The end-to-end suite
+
+The end-to-end phases run on an eight-worker kind cluster:
+
+```sh
+hack/e2e/up.sh      # kind (8 workers, 2 zones), MinIO, the operator, projects
+hack/e2e/p1.sh      # views, capture, CSI
+hack/e2e/p2.sh      # tiers and herds
+hack/e2e/p3.sh      # isolation
+hack/e2e/p5.sh      # the work queue (sets up pools; run before p4, p6, p7)
+hack/e2e/p4.sh      # monorepo CI
+hack/e2e/p7.sh      # provenance
+hack/e2e/p6.sh      # the MCP evaluation
+```
+
+What they measured is in [docs/results.md](docs/results.md), and how the
+parts fit in [docs/architecture.md](docs/architecture.md).
 
 To work against a local checkout of the c4 module, use an uncommitted
 `go.work` (`go work init . ../c4`) rather than a `replace` in `go.mod`.
