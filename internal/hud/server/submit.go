@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode"
 
 	"github.com/Avalanche-io/c4"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -678,6 +679,9 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("spec.template needs a container: the image each unit runs")
 	}
 	spec.Template = jobspec.Restrict(spec.Template)
+	if code, err := leadRefusal(r, v, body, &spec); err != nil {
+		return api.SubmitResponse{}, code, err
+	}
 	name := body.Name
 	if name == "" {
 		stage := body.Stage
@@ -771,6 +775,9 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 	if replaced != nil {
 		job.Annotations[c4v1.AnnotationReplaces] = replaced.Name
+	}
+	if body.LeadSession != "" {
+		job.Annotations[c4v1.AnnotationLeadSession] = body.LeadSession
 	}
 	if v.Unit == nil && v.Groups != nil {
 		// the signed-in owner's groups, for what a unit of the job
@@ -994,6 +1001,9 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		*o.Made = *job.DeepCopy()
 	}
 	msg := fmt.Sprintf("%s: submitted, %s, %d input view%s", name, spec.Class, len(mats), plural(len(mats)))
+	if body.LeadSession != "" {
+		msg += fmt.Sprintf(", the job of lead session %s", body.LeadSession)
+	}
 	if grant != nil {
 		msg += fmt.Sprintf(", for %s under their grant to tracker %s", grant.Spec.Person, grant.Spec.Tracker)
 	}
@@ -1015,6 +1025,41 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 	}
 	out.Message = msg
 	return out, http.StatusCreated, nil
+}
+
+// maxLeadSession bounds a lead's session ID, as the agent header that must
+// name it is read (claimedAgent).
+const maxLeadSession = 64
+
+// leadRefusal says why a request may not make a lead's job, or say its
+// lead answers it, with its status (DESIGN 10.6, A lead's job). A lead's
+// job is a person's own, made from the lead's session: the agent header
+// names the session the request does (claimed: the session's word, the
+// person's sign-in the identity). Only such a job is answered by its
+// lead.
+func leadRefusal(r *http.Request, v *api.Viewer, body api.SubmitRequest, spec *c4v1.WorkJobSpec) (int, error) {
+	s := body.LeadSession
+	if s == "" {
+		if a := spec.Answers; a != nil && a.By == c4v1.AnswersByLead {
+			return http.StatusBadRequest, errors.New(c4v1.NoLeadMessage)
+		}
+		return 0, nil
+	}
+	switch h := claimedAgent(r); {
+	case len(s) > maxLeadSession || strings.TrimSpace(s) != s || strings.ContainsFunc(s, unicode.IsControl):
+		return http.StatusBadRequest, fmt.Errorf("leadSession: the lead's session ID, at most %d characters with no spaces around it", maxLeadSession)
+	case v.Unit != nil:
+		return http.StatusForbidden, errors.New("a unit cannot make a lead's job: a lead is a person's own session")
+	case body.For != "":
+		return http.StatusBadRequest, errors.New("a lead's job is its own person's: leadSession and for are not given together")
+	case spec.Class != "graph":
+		return http.StatusBadRequest, fmt.Errorf("a lead's job is a graph job, which takes its lead's workers as they come: spec.class graph, not %s", spec.Class)
+	case h == "":
+		return http.StatusForbidden, fmt.Errorf("leadSession %s: the request names no session in its agent header (X-C4-Agent), so it is not that lead's; make the job from the lead's own session", s)
+	case h != s:
+		return http.StatusForbidden, fmt.Errorf("leadSession %s: the agent header (X-C4-Agent) names session %s; a lead's job is made from that lead's own session", s, h)
+	}
+	return 0, nil
 }
 
 func (s *Server) dryRun(ctx context.Context, job *c4v1.WorkJob, project string) (*api.SubmitEstimate, error) {

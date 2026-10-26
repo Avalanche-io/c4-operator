@@ -135,6 +135,9 @@ func (s *Server) appendOnce(ctx context.Context, r *http.Request, v *api.Viewer,
 	if out, ok := appendedBefore(j, reqs, s.planFor(rec, j), req.Key); ok {
 		return out, http.StatusOK, nil
 	}
+	if why := closedRefusal(j); why != "" {
+		return none, http.StatusConflict, errors.New(why)
+	}
 	if p := j.Status.Phase; p == "Succeeded" || p == "Failed" {
 		return none, http.StatusConflict, fmt.Errorf("%s has finished (%s): a finished job takes no more units; submit another job for them", j.Name, strings.ToLower(p))
 	}

@@ -1186,6 +1186,10 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "%s", why)
 		return
 	}
+	if why := leadQuestionRefusal(r, v, j, ref, "answers it"); why != "" {
+		fail(w, http.StatusForbidden, "%s", why)
+		return
+	}
 	need := j.Status.Needs[strconv.Itoa(idx)]
 	patch := client.MergeFrom(j.DeepCopy())
 	before := queue.SpecDigest(j)
@@ -1289,6 +1293,10 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 	}
 	if why := questionRefusal(j, len(rec.plan.Units), idx, nameAt(rec, idx), ref, "has no open question"); why != "" {
 		fail(w, http.StatusConflict, "%s", why)
+		return
+	}
+	if why := leadQuestionRefusal(r, v, j, ref, "withdraws it"); why != "" {
+		fail(w, http.StatusForbidden, "%s", why)
 		return
 	}
 	need := j.Status.Needs[strconv.Itoa(idx)]

@@ -688,6 +688,9 @@ type Job struct {
 	Work Work `json:"work"`
 	// NeedsPerson is set while the job waits on a person.
 	NeedsPerson *NeedsPerson `json:"needsPerson,omitempty"`
+	// Lead is set on a lead's job (c4.avalanche.io/lead-session): whether
+	// its lead may still add workers, and when and why it closed.
+	Lead *Lead `json:"lead,omitempty"`
 	// NoNetwork is set once a unit of a job that names no tool has run:
 	// the farm's sentence for why it reached no network (its Network
 	// condition).
@@ -777,10 +780,13 @@ type UnitBranch struct {
 // text, By who, at SuppliedAt) or withdrawn (Withdrawn). RaisedAt is At;
 // AnswerBy is the latest an answer can come with the job on time.
 type Needs struct {
-	Unit           int             `json:"unit"`
-	Name           string          `json:"name,omitempty"`
-	Text           string          `json:"text"`
-	Why            string          `json:"why,omitempty"`
+	Unit int    `json:"unit"`
+	Name string `json:"name,omitempty"`
+	Text string `json:"text"`
+	Why  string `json:"why,omitempty"`
+	// For is whose question it is: lead:<session> on a job its lead
+	// answers, else person:<name>, the job's owner.
+	For            string          `json:"for,omitempty"`
 	At             time.Time       `json:"at"`
 	Record         string          `json:"record,omitempty"`
 	State          string          `json:"state"`
@@ -796,6 +802,43 @@ type Needs struct {
 	SuppliedAt     *time.Time      `json:"suppliedAt,omitempty"`
 	SuppliedRecord string          `json:"suppliedRecord,omitempty"`
 	Withdrawn      *NeedsWithdrawn `json:"withdrawn,omitempty"`
+}
+
+// Lead is a lead's job's state (status.lead): Working (it has workers to
+// run), Idle (every worker has ended: nothing to place, it waits for its
+// lead, and closes by itself at ClosesAt if none is added) or Closed.
+type Lead struct {
+	Session   string     `json:"session"`
+	State     string     `json:"state"`
+	IdleSince *time.Time `json:"idleSince,omitempty"`
+	ClosesAt  *time.Time `json:"closesAt,omitempty"`
+	Closed    *Closed    `json:"closed,omitempty"`
+}
+
+// Closed is when a lead's job was closed, by whom (the person, their
+// lead's agent, or c4 for the farm's idle close) and why, with the
+// signed records of the request and of the queue's decision.
+type Closed struct {
+	At      time.Time `json:"at"`
+	By      string    `json:"by"`
+	Why     string    `json:"why"`
+	Control string    `json:"control,omitempty"`
+	Record  string    `json:"record,omitempty"`
+}
+
+// CloseRequest is the body of POST /jobs/{ns}/{name}/close, which may be
+// empty: Why is the closer's reason, kept in status and the book.
+type CloseRequest struct {
+	Why string `json:"why,omitempty"`
+}
+
+// CloseResponse answers POST /jobs/{ns}/{name}/close: State is closing
+// (the queue has not carried it out yet) or closed.
+type CloseResponse struct {
+	OK      bool   `json:"ok"`
+	State   string `json:"state"`
+	Record  string `json:"record,omitempty"`
+	Message string `json:"message"`
 }
 
 // NeedsRechecks are a block's re-checks of its question: how many ran, the

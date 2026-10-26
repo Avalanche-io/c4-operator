@@ -283,6 +283,7 @@ func (s *Server) jobSummary(m *model, r *jobRec) api.Job {
 		aj.NoNetwork = c.Message
 	}
 	aj.Held = heldBy(m, j)
+	aj.Lead = leadOf(st.Lead)
 	for k, n := range st.Needs {
 		i, err := strconv.Atoi(k)
 		if err != nil {
@@ -789,7 +790,7 @@ func needsOf(n c4v1.WorkNeeds) api.Needs {
 	default:
 		state = "raised"
 	}
-	an := api.Needs{Text: n.Text, Why: n.Why, At: n.At.Time.UTC(), Record: n.Record, State: state, RaisedAt: n.At.Time.UTC(),
+	an := api.Needs{Text: n.Text, Why: n.Why, For: n.For, At: n.At.Time.UTC(), Record: n.Record, State: state, RaisedAt: n.At.Time.UTC(),
 		AnswerBy: at(n.AnswerBy), PressingAt: at(n.PressingAt), PressingWhy: n.PressingWhy, PressingRecord: n.PressingRecord, About: n.About,
 		Supplied: n.Supplied, By: n.By, SuppliedAt: at(n.SuppliedAt), SuppliedRecord: n.SuppliedRecord}
 	if r := n.Rechecks; r != nil {

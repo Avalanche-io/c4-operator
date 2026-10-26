@@ -113,6 +113,13 @@ type SubmitRequest struct {
 	// replaces (spec.forecast, DESIGN.md 10.12): it is deleted once
 	// this one is made, and the book says so.
 	Replaces string `json:"replaces,omitempty"`
+	// LeadSession makes the job a lead's: the session ID of the person's
+	// own Claude Code session whose c4_agent puts workers on it
+	// (annotation c4.avalanche.io/lead-session). The request carries the
+	// agent header (X-C4-Agent) naming the same session. Such a job stays
+	// open between its lead's workers until it is closed, and may say its
+	// lead answers its questions (spec.answers.by lead).
+	LeadSession string `json:"leadSession,omitempty"`
 }
 
 // SubmitEstimate is what the farm expects of a job before it runs.
