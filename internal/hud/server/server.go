@@ -227,6 +227,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}", s.handleJob)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/units/{i}", s.handleUnit)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/wait", s.handleWait)
+	mux.HandleFunc("POST /api/v1/lead/workers", s.handleLeadWorkers)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/preview", s.handlePreview)
 	mux.HandleFunc("GET /api/v1/jobs/{ns}/{name}/deadline-options", s.handleDeadlineOptions)
 	mux.HandleFunc("GET /api/v1/objects/{project}/{id}", s.handleObject)

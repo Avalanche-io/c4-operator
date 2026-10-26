@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -257,6 +258,13 @@ func (c *subCtx) lowerAgent(j *Job, tj toolJob) (*api.SubmitRequest, []byte, []E
 	return out, table, nil
 }
 
+// baseParam is a plan block's param naming the commit its branch starts
+// from (C4_BLOCK_BASE): a lead sets it to its HEAD for each worker.
+const baseParam = "base"
+
+// fullCommit is a git commit's full ID.
+var fullCommit = regexp.MustCompile(`^[0-9a-f]{40}$`)
+
 // agentTable is a job's unit table: its plan's blocks, or its task as one
 // unit. A block's params named for the tool's parameters are its with:
 // its reasoning, then its params, then the job's with, then the tool's
@@ -292,6 +300,16 @@ func (c *subCtx) agentTable(j *Job, t *Tool, job map[string]any) (*class.Doc, []
 				errs = append(errs, errf("plan", "give a block's settings as params named for the tool's parameters",
 					"block %s sets %s, which only the farm sets", u.Name, k))
 			}
+		}
+		if b, ok := u.Params[baseParam]; ok {
+			// the commit its branch starts from: the farm's setting, not
+			// the tool's, and only ever a commit, never a ref that moves
+			if !fullCommit.MatchString(b) {
+				errs = append(errs, errf("plan", "give a block's base as the full 40-character ID of a commit",
+					"block %s's base %q is not a full commit ID", u.Name, b))
+				continue
+			}
+			u.Env["C4_BLOCK_BASE"] = b
 		}
 		blockSettings(u, t, job, u.Params)
 	}

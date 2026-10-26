@@ -202,6 +202,31 @@ jobs:
 	}
 }
 
+// A block's base, the commit its branch starts from (a lead's HEAD for
+// each worker), is the farm's setting: a full commit ID reaches the block
+// as C4_BLOCK_BASE; a ref or a short ID, which could move or mean two
+// commits, is refused.
+func TestLowerAgentPlanBase(t *testing.T) {
+	head := strings.Repeat("ab12", 10)
+	lower := func(base string) (*Plan, []Error) {
+		planFile := []byte("version: 1\nblocks:\n- {name: review-1, planned: false, params: {task: \"review the design\", base: \"" + base + "\"}}\n")
+		return lowerAgentDoc(t, agentFarm(t), "c4: submit/1\nproject: textkit\nshot: port\nroot: /Users/dev/textkit\njobs:\n  port: {tool: agent, plan: lead.plan.yaml}\n",
+			Inputs{Owner: "dev", Plans: map[string][]byte{"lead.plan.yaml": planFile}})
+	}
+	plan, errs := lower(head)
+	if len(errs) > 0 {
+		t.Fatal(errs)
+	}
+	if u := tableOf(t, plan.Jobs[0]).Units[0]; u.Env["C4_BLOCK_BASE"] != head || u.Env["C4_BLOCK_PROMPT"] != "review the design" {
+		t.Fatalf("the block's base: %+v", u.Env)
+	}
+	for _, bad := range []string{"main", "ab12ab12", strings.Repeat("AB12", 10)} {
+		if _, errs := lower(bad); len(errs) != 1 || !strings.Contains(errs[0].Message, "is not a full commit ID") {
+			t.Errorf("base %q: %v", bad, errs)
+		}
+	}
+}
+
 // What the farm refuses about agent work, in its words.
 func TestLowerAgentRefusals(t *testing.T) {
 	f := agentFarm(t)
