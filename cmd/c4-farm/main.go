@@ -331,6 +331,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		fs.Var(&after, "after", "wait for this job and mount its output (repeatable)")
 		fs.BoolVar(&a.DryRun, "dry-run", false, "show the plan and change nothing")
 		fs.BoolVar(&a.Yes, "yes", false, "don't ask before submitting")
+		fs.BoolVar(&a.All, "all", false, "send every file of the folder, those .gitignore leaves out too (never .git); for a person at a terminal")
 		explain := fs.Bool("explain", false, "with a submission file: show what each job becomes on the farm, and change nothing")
 		pos, err := parse(fs, rest)
 		if err != nil {
@@ -348,7 +349,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 				o.In = nil
 			}
 			_, err = farmcli.SubmitFile(ctx, c, o, farmcli.SubmitFileArgs{Path: pos[0], Project: project, DryRun: a.DryRun, Explain: *explain, Yes: a.Yes,
-				Terminal: isTerminal(stdin)})
+				Terminal: isTerminal(stdin), All: a.All})
 			return err
 		}
 		switch {
@@ -372,6 +373,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			a.Options.Pools = strings.Split(*pools, ",")
 		}
 		a.After = after
+		a.Terminal = isTerminal(stdin)
 		c, f, o, project, err := connect()
 		if err != nil {
 			return err
@@ -399,7 +401,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		return farmcli.ListTools(ctx, c, o, project)
 
 	case "tool":
-		return toolCommand(ctx, fs, rest, stdout, connect)
+		return toolCommand(ctx, fs, rest, stdout, isTerminal(stdin), connect)
 
 	case "ls":
 		var a farmcli.LsArgs

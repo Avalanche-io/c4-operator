@@ -123,6 +123,10 @@ type PublishArgs struct {
 	Project string
 	Farm    bool // to every project (the farm admin role)
 	DryRun  bool
+	// All sends the folder's every file but .git's, .gitignore's too;
+	// Terminal says a person is at one, as All needs
+	All      bool
+	Terminal bool
 	// Wait bounds the wait for the farm's test run.
 	Wait time.Duration
 	// Poll is how often the test's state is read (default 2s).
@@ -140,10 +144,14 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 	if err != nil {
 		return err
 	}
-	v, err := view.ScanDir(a.Dir)
+	if err := allowAll(a.All, a.Terminal); err != nil {
+		return err
+	}
+	scan, err := scanUpload(ctx, a.Dir, a.All)
 	if err != nil {
 		return err
 	}
+	v := scan.v
 	need, err := missingIDs(ctx, c, a.Project, v.Objects())
 	if err != nil {
 		return err
@@ -170,8 +178,8 @@ func PublishTool(ctx context.Context, c *Client, o Out, a PublishArgs) error {
 		return printFieldErrors(o, r.Errors)
 	}
 	tot := v.Totals()
-	o.printf("%s %s   %s · %s, %d to upload · image %s\n", t.Name, r.Version, shortID(r.View), plural(int(tot.Files), "file", "files"),
-		len(need), r.Image)
+	o.printf("%s %s   %s · %s%s, %d to upload · image %s\n", t.Name, r.Version, shortID(r.View), plural(int(tot.Files), "file", "files"),
+		leftOut(scan.left), len(need), r.Image)
 	if a.DryRun {
 		return nil
 	}
@@ -259,12 +267,17 @@ type SubmitFileArgs struct {
 	Explain  bool
 	Yes      bool
 	Terminal bool
+	// All sends a folder's every file but .git's, .gitignore's too
+	All bool
 }
 
 // SubmitFile sends a submission (c4: submit/1): a local tree is uploaded
 // first (only what the farm lacks) and named by its ID; the farm checks it
 // and shows the plan; on confirmation it submits.
 func SubmitFile(ctx context.Context, c *Client, o Out, a SubmitFileArgs) (*api.SubmissionResponse, error) {
+	if err := allowAll(a.All, a.Terminal); err != nil {
+		return nil, err
+	}
 	data, err := os.ReadFile(a.Path)
 	if err != nil {
 		return nil, err
@@ -379,7 +392,7 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 			}
 		}
 		var err error
-		if tree, err = scanTree(ctx, c, project, dir); err != nil {
+		if tree, err = scanTree(ctx, c, project, dir, a.All); err != nil {
 			return nil, fmt.Errorf("tree %s: %w", t, err)
 		}
 		doc.setString("tree", tree.v.ID.String())
@@ -510,20 +523,22 @@ func submissionPlans(doc *submissionDoc, base string) (map[string]json.RawMessag
 type folderTree struct {
 	dir       string
 	v         *view.View
+	left      int // files .gitignore left out
 	need      map[c4.ID]bool
 	needBytes int64
 }
 
-func scanTree(ctx context.Context, c *Client, project, dir string) (*folderTree, error) {
-	v, err := view.ScanDir(dir)
+func scanTree(ctx context.Context, c *Client, project, dir string, all bool) (*folderTree, error) {
+	scan, err := scanUpload(ctx, dir, all)
 	if err != nil {
 		return nil, err
 	}
+	v := scan.v
 	need, err := missingIDs(ctx, c, project, v.Objects())
 	if err != nil {
 		return nil, err
 	}
-	t := &folderTree{dir: dir, v: v, need: need}
+	t := &folderTree{dir: dir, v: v, left: scan.left, need: need}
 	for _, ob := range v.Objects() {
 		if need[ob.ID] {
 			t.needBytes += ob.Size
@@ -566,7 +581,7 @@ func (o Out) printFiles(t *folderTree) {
 	if abs, err := filepath.Abs(dir); err == nil {
 		dir = abs
 	}
-	found := plural(int(tot.Files), "file", "files") + " in " + tildePath(dir)
+	found := plural(int(tot.Files), "file", "files") + " in " + tildePath(dir) + leftOut(t.left)
 	if have := int(tot.UniqueObjects) - len(t.need); have > 0 {
 		o.printf("  files     %s · %d already on the farm · %s\n", found, have, upl)
 		return
@@ -770,7 +785,7 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	if err != nil {
 		return nil, err
 	}
-	return submitDoc(ctx, c, o, d, "", SubmitFileArgs{Project: a.Project, DryRun: a.DryRun, Yes: a.Yes})
+	return submitDoc(ctx, c, o, d, "", SubmitFileArgs{Project: a.Project, DryRun: a.DryRun, Yes: a.Yes, All: a.All})
 }
 
 // shotOf is the shot an asset belongs to: the first name along the tree's

@@ -37,6 +37,10 @@ type SubmitArgs struct {
 	Options  Options
 	DryRun   bool
 	Yes      bool
+	// All sends the folder's every file but .git's, .gitignore's too;
+	// Terminal says a person is at one, as All needs
+	All      bool
+	Terminal bool
 }
 
 // Out is where a command talks to the person.
@@ -225,6 +229,9 @@ func recordView(ctx context.Context, c *Client, project string, v *view.View) er
 // Submit plans a job from a type and an asset, shows the plan, and on
 // confirmation uploads what the farm lacks and submits it.
 func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitResponse, error) {
+	if err := allowAll(a.All, a.Terminal); err != nil {
+		return nil, err
+	}
 	// a tool published to the project runs as a submission; the farm's
 	// prebuilt types below are the fallback for a farm without tools
 	if a.Template == "" {
@@ -294,10 +301,11 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	}
 
 	// name the tree here, as the farm will
-	v, err := view.ScanDir(root)
+	scan, err := scanUpload(ctx, root, a.All)
 	if err != nil {
 		return nil, err
 	}
+	v := scan.v
 	tot := v.Totals()
 	need, err := missingIDs(ctx, c, a.Project, v.Objects())
 	if err != nil {
@@ -362,9 +370,9 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 		upl += " (" + Bytes(needBytes) + ")"
 	}
 	if have > 0 {
-		o.printf("  files     %s found%s · %d already on the farm · %s\n", plural(int(tot.Files), "file", "files"), from, have, upl)
+		o.printf("  files     %s found%s%s · %d already on the farm · %s\n", plural(int(tot.Files), "file", "files"), from, leftOut(scan.left), have, upl)
 	} else {
-		o.printf("  files     %s found%s · %s · %s\n", plural(int(tot.Files), "file", "files"), from, Bytes(tot.Bytes), upl)
+		o.printf("  files     %s found%s%s · %s · %s\n", plural(int(tot.Files), "file", "files"), from, leftOut(scan.left), Bytes(tot.Bytes), upl)
 	}
 	o.printPlan(plan.Estimate, planErr)
 	// a repository's own tests name no tool, so they run with no network:

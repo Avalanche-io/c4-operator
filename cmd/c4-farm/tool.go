@@ -29,7 +29,8 @@ func submissionFile(p string) bool {
 type connectFunc func() (*farmcli.Client, farmcli.Farm, farmcli.Out, string, error)
 
 // toolCommand is `c4 farm tool new|test|publish|show`.
-func toolCommand(ctx context.Context, fs *flag.FlagSet, args []string, stdout io.Writer, connect connectFunc) error {
+// terminal says a person is at one, as --all needs.
+func toolCommand(ctx context.Context, fs *flag.FlagSet, args []string, stdout io.Writer, terminal bool, connect connectFunc) error {
 	const use = "usage: c4 farm tool new KIND DIR | test DIR | publish DIR | show NAME"
 	if len(args) == 0 {
 		return errors.New(use)
@@ -76,6 +77,7 @@ func toolCommand(ctx context.Context, fs *flag.FlagSet, args []string, stdout io
 		fs.BoolVar(&a.Farm, "farm-wide", false, "publish to every project (the farm admin role)")
 		fs.BoolVar(&a.DryRun, "dry-run", false, "check the tool on the farm and change nothing")
 		fs.DurationVar(&a.Wait, "wait", 15*time.Minute, "how long to wait for the farm's test run")
+		fs.BoolVar(&a.All, "all", false, "send every file of the folder, those .gitignore leaves out too (never .git); for a person at a terminal")
 		pos, err := parse(fs, args)
 		if err != nil {
 			return err
@@ -90,7 +92,7 @@ func toolCommand(ctx context.Context, fs *flag.FlagSet, args []string, stdout io
 		if a.Project, err = farmcli.ResolveProject(ctx, c, project, f.Project); err != nil {
 			return err
 		}
-		a.Dir = pos[0]
+		a.Dir, a.Terminal = pos[0], terminal
 		if f.Local {
 			// publishing takes the TD role (farm admin for every
 			// project); on the local farm you hold every role

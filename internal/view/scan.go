@@ -29,7 +29,12 @@ func HashFile(p string) (c4.ID, int64, error) {
 // hashing every regular file. `c4-operator tree-id` uses it so a pod can
 // check that its mount is exactly the view in its Materialization's
 // status.
-func ScanDir(dir string) (*View, error) {
+func ScanDir(dir string) (*View, error) { return ScanDirKeep(dir, nil) }
+
+// ScanDirKeep is ScanDir over only what keep keeps: keep is asked of each
+// path under dir (slash-separated, relative to it), and a directory it
+// does not keep is not read. A nil keep keeps everything.
+func ScanDirKeep(dir string, keep func(rel string, isDir bool) bool) (*View, error) {
 	root := NewNode("")
 	type job struct {
 		path string
@@ -47,6 +52,12 @@ func ScanDir(dir string) (*View, error) {
 			return nil
 		}
 		rel = filepath.ToSlash(rel)
+		if keep != nil && !keep(rel, d.IsDir()) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
 		parent, name := SplitPath(rel)
 		info, err := d.Info()
 		if err != nil {
