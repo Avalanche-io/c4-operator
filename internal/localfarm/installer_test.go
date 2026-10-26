@@ -67,7 +67,7 @@ func TestInstallerTokenReachesTheManager(t *testing.T) {
 		t.Fatalf("args %v", ManagerArgs(o))
 	}
 	p := string(ManagerPatch(o, []string{"manager", "--hud-installer-token-file=/old"}))
-	for _, want := range []string{`"mountPath":"/etc/c4/installer"`, `"secretName":"c4-installer-token"`, `"defaultMode":256`} {
+	for _, want := range []string{`"mountPath":"/etc/c4/installer"`, `"secretName":"c4-installer-token"`, `"defaultMode":288`, `"fsGroup":65532`} {
 		if !strings.Contains(p, want) {
 			t.Errorf("no %s in the patch %s", want, p)
 		}

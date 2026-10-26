@@ -358,10 +358,15 @@ func ManagerPatch(o Options, args []string) []byte {
 		c["image"] = o.OperatorImage
 		c["imagePullPolicy"] = "IfNotPresent"
 	}
+	// the token's file is the manager's group's to read: the manager runs
+	// as 65532 (config/manager), and without fsGroup a Secret's files are
+	// root's alone, so 0400 or 0440 is unreadable to it (as the regional
+	// replicas do, config/regional)
 	p := obj{"spec": obj{"template": obj{"spec": obj{
-		"containers": []obj{c},
+		"securityContext": obj{"fsGroup": managerUser},
+		"containers":      []obj{c},
 		"volumes": []obj{{"name": "sites", "configMap": obj{"name": "c4-sites"}},
-			{"name": "installer", "secret": obj{"secretName": InstallerSecret, "defaultMode": 0o400}}},
+			{"name": "installer", "secret": obj{"secretName": InstallerSecret, "defaultMode": 0o440}}},
 	}}}}
 	b, _ := json.Marshal(p)
 	return b

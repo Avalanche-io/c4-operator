@@ -23,6 +23,9 @@ const (
 	InstallerSecret = "c4-installer-token"
 	// installerMount is where the manager's pod mounts it.
 	installerMount = "/etc/c4/installer"
+	// managerUser is the user, and with fsGroup the group, the manager's
+	// pod runs as (config/manager/manager.yaml).
+	managerUser = 65532
 	// InstallerHeader carries the token on the CLI's requests.
 	InstallerHeader = "X-C4-Installer"
 )

@@ -22,6 +22,7 @@ import (
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
 	"k8s.io/apimachinery/pkg/types"
 	utilyaml "k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/clientcmd"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
@@ -226,7 +227,7 @@ func Up(ctx context.Context, o UpOptions) error {
 		}
 	}
 	o.Timings.Mark("HUD")
-	if err := waitHUD(ctx, o.HUD(), o.InstallerToken, 5*time.Minute); err != nil {
+	if err := waitHUD(ctx, c, o.HUD(), o.InstallerToken, 5*time.Minute); err != nil {
 		return err
 	}
 	// the networks tools declare (needs.network), before any tool's test runs
@@ -397,7 +398,16 @@ func kubeClient(name string) (client.Client, error) {
 	// The client logs nothing a user should see; without a logger it
 	// prints a warning and a stack trace.
 	ctrllog.SetLogger(logr.Discard())
-	return client.New(rc, client.Options{})
+	c, err := client.New(rc, client.Options{})
+	if err != nil {
+		return nil, err
+	}
+	// and reads a crashing container's last log line, for what up says
+	cs, err := kubernetes.NewForConfig(rc)
+	if err != nil {
+		return c, nil
+	}
+	return logClient{Client: c, cs: cs}, nil
 }
 
 // Down deletes the local farm.
@@ -536,20 +546,6 @@ func applyAll(ctx context.Context, c client.Client, data []byte) error {
 	return nil
 }
 
-func waitDeployment(ctx context.Context, c client.Client, ns, name string, limit time.Duration) error {
-	return poll(ctx, limit, "deployment "+name, func() (bool, error) {
-		var d appsv1.Deployment
-		if err := c.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &d); err != nil {
-			return false, nil
-		}
-		want := int32(1)
-		if d.Spec.Replicas != nil {
-			want = *d.Spec.Replicas
-		}
-		return d.Status.ObservedGeneration >= d.Generation && d.Status.UpdatedReplicas == want && d.Status.AvailableReplicas == want, nil
-	})
-}
-
 func waitJob(ctx context.Context, c client.Client, ns, name string, limit time.Duration) error {
 	return poll(ctx, limit, "job "+name, func() (bool, error) {
 		var j batchv1.Job
@@ -557,27 +553,6 @@ func waitJob(ctx context.Context, c client.Client, ns, name string, limit time.D
 			return false, nil
 		}
 		return j.Status.Succeeded > 0, nil
-	})
-}
-
-// waitHUD waits for the HUD to answer a development viewer, with the
-// installer token it asks of one.
-func waitHUD(ctx context.Context, hud, installer string, limit time.Duration) error {
-	u := hud + "/api/v1/snapshot?as=wrangler"
-	return poll(ctx, limit, "the HUD", func() (bool, error) {
-		req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
-		if err != nil {
-			return false, err
-		}
-		if installer != "" {
-			req.Header.Set(InstallerHeader, installer)
-		}
-		resp, err := http.DefaultClient.Do(req)
-		if err != nil {
-			return false, nil
-		}
-		resp.Body.Close()
-		return resp.StatusCode == http.StatusOK, nil
 	})
 }
 
