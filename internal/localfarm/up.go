@@ -246,7 +246,11 @@ func Up(ctx context.Context, o UpOptions) error {
 		}
 	}
 	o.Timings.Mark("tools")
-	return publishTools(ctx, o)
+	if err := publishTools(ctx, o); err != nil {
+		return err
+	}
+	// an earlier publish's failed tests, now that a newer one has run
+	return tidyToolTests(ctx, c, o)
 }
 
 // publishTools publishes the release's own tools (the folders c4-farm
