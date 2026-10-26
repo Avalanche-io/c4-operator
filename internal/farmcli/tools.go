@@ -672,8 +672,6 @@ func doChecked(ctx context.Context, c *Client, method, path string, in, out any)
 // finds it) and whose first input path parameter is the asset.
 func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a SubmitArgs) (*api.SubmissionResponse, error) {
 	switch {
-	case a.Name != "":
-		return nil, errors.New("--name: a tool's job is named <shot>-<stage>-vNNN; set --shot or --stage instead")
 	case len(a.After) > 0:
 		return nil, errors.New("--after: write a submission file, whose jobs follow each other with after:")
 	case a.Options.Image != "":
@@ -758,6 +756,11 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	doc := map[string]any{"c4": "submit/1", "project": a.Project, "tree": root, "jobs": map[string]any{key: job}}
 	if shot != "" {
 		doc["shot"] = shot
+	}
+	// --name is the stem of the job's name, NAME-<stage>-vNNN, the
+	// submission's own (default the shot)
+	if a.Name != "" {
+		doc["name"] = a.Name
 	}
 	if a.Deadline != "" {
 		doc["due"] = a.Deadline

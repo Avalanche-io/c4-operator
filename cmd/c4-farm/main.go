@@ -319,7 +319,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		var sets, after multi
 		fs.StringVar(&a.Options.Frames, "frames", "", "the frame range, for example 1001-1048")
 		fs.StringVar(&a.Deadline, "deadline", "", "when it is due: 18:00, fri 18:00, +3h, RFC 3339, or suggested (the default)")
-		fs.StringVar(&a.Name, "name", "", "the job's name (default <shot>-<stage>-vNNN, the next version)")
+		fs.StringVar(&a.Name, "name", "", "the stem of the job's name: NAME-<stage>-vNNN, the next version (default the shot); on a farm without its tool published, the job's exact name")
 		fs.StringVar(&a.Shot, "shot", "", "the shot (default from the asset's name)")
 		fs.StringVar(&a.Stage, "stage", "", "the pipeline stage, the middle of the default name (default the type's: light, layout, fx, comp, review, ...)")
 		fs.StringVar(&a.Options.Renderer, "renderer", "", "cycles (default), karma-xpu, karma-cpu, prman, arnold, vray")

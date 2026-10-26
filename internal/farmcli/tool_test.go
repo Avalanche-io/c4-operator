@@ -572,3 +572,24 @@ func TestLsLeavesOutToolTests(t *testing.T) {
 		t.Errorf("ls --all --tool-tests:\n%s", out.String())
 	}
 }
+
+// --name over a published tool is the stem of the job's name, the
+// submission's own, as it is for a submission file; never refused.
+func TestSubmitTypedNameIsTheStem(t *testing.T) {
+	hud := &toolsHUD{}
+	srv := httptest.NewServer(hud)
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "plates"), 0o755)
+	os.WriteFile(filepath.Join(dir, "plates", "sm0140.1001.exr"), []byte("plate"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".c4project"), nil, 0o644)
+	a := SubmitArgs{Type: "proxies", Name: "rt-full", Asset: filepath.Join(dir, "plates", "sm0140.$F4.exr"), Project: "saltmarsh",
+		Options: Options{Frames: "1001-1048"}, Yes: true}
+	if _, err := Submit(context.Background(), c, Out{W: io.Discard}, a); err != nil {
+		t.Fatal(err)
+	}
+	if doc := hud.submissions[0]["submission"].(map[string]any); doc["name"] != "rt-full" || doc["shot"] != "sm0140" {
+		t.Errorf("submission %v", doc)
+	}
+}
