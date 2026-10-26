@@ -2989,8 +2989,9 @@ field and the record will change with it.
   suspect, which usually means bad hardware rather than a bad job.
 - **Causes.** A job's failures and flags are
   grouped by cause in `status.causes`: a unit's exit (its code, the
-  container's reason such as OOMKilled, the first line of its message with
-  numbers blurred), a node that failed units up to the job's limit, a
+  container's reason such as OOMKilled, the last line of its message with
+  numbers of two digits or more blurred; a unit that writes no message
+  leaves its log's tail there), a node that failed units up to the job's limit, a
   review's reason, information a brief lacked. Each records the units it
   touched (a unit set), how many attempts, a sample, its first and last
   time, up to four nodes, and what the farm did: retried, failed,

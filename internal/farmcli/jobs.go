@@ -4,6 +4,8 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -144,7 +146,7 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 			// It cannot run, so it is not ready at any time.
 			ready, slack = "stuck", "-"
 			whys = append(whys, "stuck "+j.Namespace+"/"+j.Name+": "+why)
-		} else if why := heldWithoutNetwork(&j); why != "" {
+		} else if why := heldFailed(&j); why != "" {
 			ready, slack = "held", "-"
 			whys = append(whys, "held "+j.Namespace+"/"+j.Name+": "+why)
 		}
@@ -184,17 +186,40 @@ func stuck(j *api.Job) string {
 	return ""
 }
 
-// heldWithoutNetwork says why a job that names no tool waits on a person
-// with nothing running, its units having failed: they had no network,
-// which may be why. "" for every other job, a job with no tool that runs
-// fine without a network among them.
-func heldWithoutNetwork(j *api.Job) string {
+// heldFailed says why a job waits on a person with nothing running, its
+// units having failed: the farm's message, then what the units said as
+// they failed (its causes, the most common first). A job that names no
+// tool adds that it had no network only when that may be why: a unit
+// failed reaching something, or none said why. "" for every other job.
+func heldFailed(j *api.Job) string {
 	n := j.NeedsPerson
-	if j.NoNetwork == "" || n == nil || n.Reason != "failed" || j.Units.Running > 0 {
+	if n == nil || n.Reason != "failed" || j.Units.Running > 0 {
 		return ""
 	}
-	return n.Message + "; " + j.NoNetwork
+	var exits []api.Cause
+	for _, c := range j.Causes {
+		if c.Kind == "exit" {
+			exits = append(exits, c)
+		}
+	}
+	sort.SliceStable(exits, func(a, b int) bool { return exits[a].Count > exits[b].Count })
+	why, sep, said, reached := n.Message, "; why: ", false, false
+	for _, c := range exits[:min(2, len(exits))] {
+		why += sep + c.Title
+		sep = ", or "
+	}
+	for _, c := range exits {
+		said = said || strings.Contains(c.Title, ": ")
+		reached = reached || networkWords.MatchString(c.Title)
+	}
+	if j.NoNetwork != "" && (reached || !said) {
+		why += "; " + j.NoNetwork
+	}
+	return why
 }
+
+// networkWords are what a program says when it could not reach a host.
+var networkWords = regexp.MustCompile(`(?i)dial|no such host|resolv|connection (refused|reset|timed out)|network is unreachable|timed? ?out|could not connect|failed to connect|unable to connect|proxy|tls handshake`)
 
 // Watch prints a job's title block whenever it changes, until the job
 // finishes or ctx ends.

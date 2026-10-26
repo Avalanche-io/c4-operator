@@ -362,6 +362,7 @@
 | `ls-rows` | 2026-10-26 | 2026-10-26 | c4 farm ls lists every job the snapshot holds, Running and Blocked, with its stuck line, with or without --all: a test, from a walk that saw only the header |
 | `e2e-ports2` | 2026-10-26 | 2026-10-26 | The e2e farm publishes the HUD on 31080, the signer on 31081 and its shards on 31900-31902 by default, outside the ports a person's c4 farm up takes, and its HUD screenshots go to its own port |
 | `role-owner` | 2026-10-26 | 2026-10-26 | On a one-person farm a role viewer's job and bundle are owned by the farm's one person, with the role kept in a frozen `c4.avalanche.io/submitted-as` and the submission record's `by: {person, role}`; a shared farm is unchanged. Tests: TestARoleSubmitsForTheOnePerson, TestARoleOnASharedFarmOwnsItsJob, TestSubmissionRecordNamesThePersonAndRole, TestOwnerDropsARoleClaim, TestWorkJobSubmittedAsIsFixed. |
+| `held-cause` | 2026-10-26 | 2026-10-26 | A failed unit's cause carries what it said last, its log's tail when it wrote no message, and c4 farm ls names it for a held job; the no-network sentence comes only when a unit failed reaching a host or said nothing |
 
 Worktrees live under `.worktrees/` (ignored by git). `go.mod` requires a published
 c4 pseudo-version, so worktrees need nothing else; to build against a local c4

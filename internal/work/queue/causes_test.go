@@ -117,3 +117,31 @@ func TestCausesAreBounded(t *testing.T) {
 		t.Fatalf("%d causes, %d dropped", len(m.causes), m.causesDropped)
 	}
 }
+
+// A unit's containers leave the tail of their log as their message when
+// they write none, and a cause takes its last line: what a program says
+// last is why it failed ("no pytest configuration ..."), not the first
+// line it logged.
+func TestCauseIsTheLastLineSaid(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	ctx := context.Background()
+	j := job(ns, "ci4521", "render", "cpu-"+ns, map[string]string{"frames": "1-1", "chunk": "1"}, now.Add(4*time.Hour))
+	j.Spec.Retries = ptr.To[int32](0)
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	p := podOfUnit(t, ns, "ci4521", 0)
+	for _, c := range p.Spec.Containers {
+		if c.TerminationMessagePolicy != corev1.TerminationMessageFallbackToLogsOnError {
+			t.Fatalf("container %s: termination message policy %q", c.Name, c.TerminationMessagePolicy)
+		}
+	}
+	failWith(t, p, *now, 2, "Error", "c4-test: looking for tests in /work\nc4-test: no pytest configuration, tests/ folder or go.mod\n")
+	tick(t, q)
+	st := get(t, ns, "ci4521").Status
+	want := "exit 2: c4-test: no pytest configuration, tests/ folder or go.mod"
+	if len(st.Causes) != 1 || st.Causes[0].Title != want {
+		t.Fatalf("causes %+v, want the title %q", st.Causes, want)
+	}
+}

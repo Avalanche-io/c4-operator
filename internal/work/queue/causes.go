@@ -2,7 +2,7 @@ package queue
 
 // Cause groups (DESIGN.md 10.14, Causes). A job's failures and flags, grouped
 // by a cause the queue has the facts for: a unit's exit (code, the
-// container's reason, the first line of its message), a node that failed
+// container's reason, the last line of its message), a node that failed
 // the job's units up to its limit, a review's reason, information a brief
 // lacked. Each group keeps the units it touched, its first and last time,
 // and what the farm did, so the HUD shows one incident per cause and a
@@ -36,12 +36,20 @@ type causeRec struct {
 	units map[int]bool
 }
 
-var causeDigits = regexp.MustCompile(`\d+`)
+// causeDigits are the numbers a cause blurs: runs of two digits or more
+// (frames, sizes, ports, times), not the one digit in a name like c4-test
+// or python3.
+var causeDigits = regexp.MustCompile(`\d{2,}`)
 
-// causeText is a message as a cause sees it: its first line, numbers
+// causeText is a message as a cause sees it: its last line, numbers
 // blurred, bounded, so the same failure on frame 1001 and 1002 is one cause.
+// The last line, because a unit's message is the tail of its log when it
+// wrote none (podFor), and a program says why it failed last.
 func causeText(s string) string {
-	s, _, _ = strings.Cut(strings.TrimSpace(s), "\n")
+	s = strings.TrimSpace(s)
+	if i := strings.LastIndexByte(s, '\n'); i >= 0 {
+		s = strings.TrimSpace(s[i+1:])
+	}
 	s = causeDigits.ReplaceAllString(s, "#")
 	if len(s) > 80 {
 		s = s[:80]
@@ -51,7 +59,7 @@ func causeText(s string) string {
 
 // exitCause is the cause of a failed pod: the first container that ended
 // in error (a setup container's marked so), its code, its reason
-// (OOMKilled, Error) and the first line of its message; else the pod's
+// (OOMKilled, Error) and the last line of its message; else the pod's
 // own reason.
 func exitCause(p *corev1.Pod) (key, title string) {
 	look := func(sts []corev1.ContainerStatus, setup bool) (string, string, bool) {

@@ -31,23 +31,36 @@ func TestStuckJobsReadAsStuck(t *testing.T) {
 	}
 }
 
-// A job that names no tool says it has no network only when it is held
-// for its failed units with nothing running, never while it runs or when
-// nothing failed.
-func TestHeldWithoutNetwork(t *testing.T) {
+// A job held for its failed units says what they said as they failed. One
+// that names no tool adds that it has no network only when that may be
+// why (a unit failed reaching a host, or none said why), never while it
+// runs or when nothing failed.
+func TestHeldFailed(t *testing.T) {
 	say := "this job names no tool, so it has no network: name a tool that declares one"
-	held := &api.Job{NoNetwork: say, NeedsPerson: &api.NeedsPerson{Reason: "failed", Message: "2 units failed"}}
-	if got := heldWithoutNetwork(held); got != "2 units failed; "+say {
-		t.Fatalf("held: %q", got)
-	}
-	for _, j := range []*api.Job{
-		{NoNetwork: say},
-		{NoNetwork: say, NeedsPerson: &api.NeedsPerson{Reason: "failed"}, Units: api.Counts{Running: 1}},
-		{NoNetwork: say, NeedsPerson: &api.NeedsPerson{Reason: "approval"}},
-		{NeedsPerson: &api.NeedsPerson{Reason: "failed", Message: "2 units failed"}},
+	failed := &api.NeedsPerson{Reason: "failed", Message: "2 units failed"}
+	bare := []api.Cause{{Kind: "exit", Title: "exit 2", Count: 2}}
+	empty := []api.Cause{{Kind: "exit", Title: "exit 2: no pytest configuration, tests/ folder or go.mod", Count: 6},
+		{Kind: "node", Title: "node worker2 failed 3 units", Count: 3},
+		{Kind: "exit", Title: "exit 137 OOMKilled", Count: 1}}
+	fetch := []api.Cause{{Kind: "exit", Title: "exit 1: dial tcp: lookup proxy.golang.org: no such host", Count: 2}}
+	for _, c := range []struct {
+		j    *api.Job
+		want string
+	}{
+		{&api.Job{NoNetwork: say, NeedsPerson: failed}, "2 units failed; " + say},
+		{&api.Job{NoNetwork: say, NeedsPerson: failed, Causes: bare}, "2 units failed; why: exit 2; " + say},
+		{&api.Job{NoNetwork: say, NeedsPerson: failed, Causes: empty},
+			"2 units failed; why: exit 2: no pytest configuration, tests/ folder or go.mod, or exit 137 OOMKilled"},
+		{&api.Job{NoNetwork: say, NeedsPerson: failed, Causes: fetch},
+			"2 units failed; why: exit 1: dial tcp: lookup proxy.golang.org: no such host; " + say},
+		{&api.Job{NeedsPerson: failed, Causes: fetch}, "2 units failed; why: exit 1: dial tcp: lookup proxy.golang.org: no such host"},
+		{&api.Job{NeedsPerson: failed}, "2 units failed"},
+		{&api.Job{NoNetwork: say}, ""},
+		{&api.Job{NoNetwork: say, NeedsPerson: failed, Units: api.Counts{Running: 1}}, ""},
+		{&api.Job{NoNetwork: say, NeedsPerson: &api.NeedsPerson{Reason: "approval"}}, ""},
 	} {
-		if got := heldWithoutNetwork(j); got != "" {
-			t.Errorf("%+v: %q", j, got)
+		if got := heldFailed(c.j); got != c.want {
+			t.Errorf("%+v:\n got %q\nwant %q", c.j.Causes, got, c.want)
 		}
 	}
 }

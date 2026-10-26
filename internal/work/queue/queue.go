@@ -1983,6 +1983,17 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	}
 	for c := range pod.Spec.Containers {
 		pod.Spec.Containers[c].Env = append(pod.Spec.Containers[c].Env, env...)
+		// A container that fails without writing its termination message
+		// leaves the tail of its log there instead, so the job's causes
+		// say what it said (exitCause), not only its exit code.
+		if pod.Spec.Containers[c].TerminationMessagePolicy == "" {
+			pod.Spec.Containers[c].TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
+		}
+	}
+	for c := range pod.Spec.InitContainers {
+		if pod.Spec.InitContainers[c].TerminationMessagePolicy == "" {
+			pod.Spec.InitContainers[c].TerminationMessagePolicy = corev1.TerminationMessageFallbackToLogsOnError
+		}
 	}
 	// The first container holds the unit's slots.
 	if len(pod.Spec.Containers) > 0 {
