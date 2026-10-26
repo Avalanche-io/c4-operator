@@ -65,10 +65,21 @@ func (s *Server) needsMe(r *http.Request, v *api.Viewer, snap *api.Snapshot) *ap
 			if !may(j) || MayControl("supply", "", who) != nil {
 				continue
 			}
+			toLead := strings.HasPrefix(n.For, "lead:")
+			if toLead && n.State != "pressing" && (j.Lead == nil || j.Lead.State != "Closed") {
+				// A lead's question is its lead's: it shows under the
+				// lead's box, not here, until it presses (its lead has not
+				// answered in time) or the lead's job is closed.
+				continue
+			}
 			unit := n.Unit
 			name := n.Name
 			if name == "" {
 				name = "unit " + strconv.Itoa(unit)
+			}
+			title := name + " in " + j.Name + " asks you"
+			if toLead {
+				title = name + " in " + j.Name + " asked its lead, which has not answered"
 			}
 			state, severity := "raised", "warning"
 			if n.State == "pressing" {
@@ -79,7 +90,7 @@ func (s *Server) needsMe(r *http.Request, v *api.Viewer, snap *api.Snapshot) *ap
 				since = n.At
 			}
 			out.Items = append(out.Items, api.NeedsMeItem{ID: "question:" + key + "/" + strconv.Itoa(unit), Kind: "question",
-				Job: key, Project: j.Project, Unit: &unit, UnitName: n.Name, Title: name + " in " + j.Name + " asks you",
+				Job: key, Project: j.Project, Unit: &unit, UnitName: n.Name, Title: title,
 				Ask: n.Text, Why: n.Why, State: state, Severity: severity, Since: since, AnswerBy: n.AnswerBy, PressingWhy: n.PressingWhy,
 				Href: "job/" + key, Actions: []api.NeedsMeAction{
 					{Act: "Supply", Action: "supply", Path: base + "/supply", Body: map[string]any{"unit": unit}},

@@ -784,6 +784,11 @@ it), so a listed button is never refused.
 - `id` is `question:<ns>/<job>/<unit>`, `decision:<ns>/<job>/<unit>` or
   `burst:<pool>`.
 - `title` reads "comp in sm0140 asks you", as the question's incident does.
+- A lead's question (`for: lead:<session>`) is its lead's, shown under the
+  lead's box: it is left out here while only raised, and listed once it
+  presses (its lead has not answered within `escalation.pressAfter`, or the
+  job's deadline needs it) or the lead's job is closed. It then reads "docs
+  in lead-a asked its lead, which has not answered".
 - `state` is `raised` or `pressing` for a question, `open` for a decision,
   `pending` for a burst; `severity` is `urgent` once pressing, else
   `warning`.

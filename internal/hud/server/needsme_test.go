@@ -98,3 +98,40 @@ func TestNeedsMeIsOnlyWhatNeedsMe(t *testing.T) {
 		}
 	}
 }
+
+// A lead's question is its lead's: it stays out of its person's list
+// while only raised, and reaches them once it presses (the lead has not
+// answered in time) or the lead's job is closed. A person's question on
+// the same job is theirs at once.
+func TestNeedsMeLeavesALeadsQuestionsToItsLead(t *testing.T) {
+	now := time.Date(2026, 10, 26, 9, 0, 0, 0, time.UTC)
+	open := &api.Lead{Session: "session-1", State: "Working"}
+	closed := &api.Lead{Session: "session-2", State: "Closed"}
+	snap := &api.Snapshot{Now: now, Jobs: []api.Job{
+		{Namespace: "show", Name: "lead-a", Owner: "noor", Lead: open, Needs: []api.Needs{
+			{Unit: 0, Name: "port", Text: "which branch?", For: "lead:session-1", State: "raised", RaisedAt: now.Add(-time.Minute)},
+			{Unit: 1, Name: "docs", Text: "which style?", For: "lead:session-1", State: "pressing", RaisedAt: now.Add(-time.Hour), PressingWhy: "open an hour"},
+			{Unit: 2, Name: "keys", Text: "the API key", For: "person:noor", State: "raised", RaisedAt: now.Add(-time.Minute)}}},
+		{Namespace: "show", Name: "lead-b", Owner: "noor", Lead: closed, Needs: []api.Needs{
+			{Unit: 0, Name: "tests", Text: "skip the slow ones?", For: "lead:session-2", State: "raised", RaisedAt: now.Add(-time.Minute)}}},
+	}}
+	s := &Server{DevViewersOpen: true, DevViewers: map[string]*api.Viewer{}}
+	v := &api.Viewer{User: "noor", All: true, Role: "producer", DevBy: devOpen}
+	got := map[string]string{}
+	for _, it := range s.needsMe(httptest.NewRequest("GET", "/api/v1/needs-me", nil), v, snap).Items {
+		got[it.ID] = it.Title
+	}
+	want := map[string]string{
+		"question:show/lead-a/1": "docs in lead-a asked its lead, which has not answered",
+		"question:show/lead-a/2": "keys in lead-a asks you",
+		"question:show/lead-b/0": "tests in lead-b asked its lead, which has not answered",
+	}
+	if len(got) != len(want) {
+		t.Fatalf("noor's list %v, want %v", got, want)
+	}
+	for id, title := range want {
+		if got[id] != title {
+			t.Errorf("%s: %q, want %q", id, got[id], title)
+		}
+	}
+}
