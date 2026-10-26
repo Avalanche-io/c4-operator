@@ -711,6 +711,11 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 			}
 			return fmt.Sprintf("%s: for names a party by its name alone", quote(v)), "write for: " + name
 		}
+	case "pattern submit jobs.*.plan":
+		// a plan is read beside the submission and sent with it, so it
+		// may name nothing outside the submission's folder
+		return fmt.Sprintf("%s is not a path inside the submission's folder", quote(v)),
+			"write it relative to the submission, with forward slashes and no .., as plans/port.plan.yaml"
 	case "pattern submit root":
 		return fmt.Sprintf("%s is not an absolute path", quote(v)), "write the folder the tree came from, as S:/shows/saltmarsh or /Users/noor/shows/saltmarsh"
 	case "dependentRequired submit jobs.*.combine":

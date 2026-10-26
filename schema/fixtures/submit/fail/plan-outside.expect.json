@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "errors": [
+    {
+      "path": "jobs.port.plan",
+      "message": "\"../keys/port.plan.yaml\" is not a path inside the submission's folder",
+      "fix": "write it relative to the submission, with forward slashes and no .., as plans/port.plan.yaml"
+    }
+  ],
+  "schemaMentions": "plan"
+}

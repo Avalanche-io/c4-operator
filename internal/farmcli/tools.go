@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -456,11 +457,18 @@ func submissionPlans(doc *submissionDoc, base string) (map[string]json.RawMessag
 		if p == "" || plans[p] != nil {
 			continue
 		}
-		file := p
-		if !filepath.IsAbs(file) {
-			file = filepath.Join(base, file)
+		// Only a file inside the submission's folder is read, never through
+		// a link out of it: a submission from someone else's tree must not
+		// send this machine's other files to the farm.
+		if strings.Contains(p, `\`) || !filepath.IsLocal(filepath.FromSlash(p)) {
+			return nil, fmt.Errorf("jobs.%s.plan: %s is not a path inside the submission's folder: write it relative to the submission, with forward slashes and no .., as plans/port.plan.yaml", k, p)
 		}
-		data, err := os.ReadFile(file)
+		f, err := os.OpenInRoot(base, filepath.FromSlash(p))
+		if err != nil {
+			return nil, fmt.Errorf("jobs.%s.plan: %w", k, err)
+		}
+		data, err := io.ReadAll(io.LimitReader(f, 1<<20))
+		f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("jobs.%s.plan: %w", k, err)
 		}

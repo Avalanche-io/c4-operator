@@ -1,0 +1,7 @@
+# A plan is read beside the submission and sent with it, so it names nothing outside its folder.
+c4: submit/1
+project: textkit
+shot: port
+tree: .
+jobs:
+  port: {tool: agent, plan: ../keys/port.plan.yaml}

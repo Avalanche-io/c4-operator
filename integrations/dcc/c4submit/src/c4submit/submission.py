@@ -28,6 +28,10 @@ JOB_NAME_MAX = 50
 KEY = re.compile(r"^[a-z][a-z0-9-]{0,39}$")
 _TOOL = re.compile(r"^[a-z][a-z0-9-]*(@(v\d+|c4[1-9A-HJ-NP-Za-km-z]{88}))?$")
 _MILESTONE = re.compile(r"^[a-z][a-z0-9-]*$")
+# a path inside the submission's folder: no leading /, ~ or drive, no ..
+# segment, forward slashes (schema/submit-1.schema.json, jobs.*.plan)
+_PLAN_SEG = r"(?:[^/\\:.][^/\\:]*|\.|\.[^/\\:.][^/\\:]*|\.\.[^/\\:]+)"
+_PLAN = re.compile(r"^(?:[^/\\:.~][^/\\:]*|\.|\.[^/\\:.][^/\\:]*|\.\.[^/\\:]+)(?:/" + _PLAN_SEG + r")*$")
 _DAY = r"(mon|tue|wed|thu|fri|sat|sun)"
 _DUE_TIME = re.compile(r"^(%s\s+)?([01]?\d|2[0-3]):[0-5]\d$" % _DAY, re.I)
 _DUE_REL = re.compile(r"^\+\d+(\.\d+)?[mhd]$")
@@ -135,6 +139,10 @@ def check(doc: Any) -> List[Dict[str, str]]:
             errs.append(error(base, "a job needs a tool, or a plan with each", "add tool: <name>; c4 farm tools lists them"))
         elif "tool" in job and not (isinstance(job["tool"], str) and _TOOL.match(job["tool"])):
             errs.append(error(f"{base}.tool", f'"{job["tool"]}" is not a tool name', "a tool's name, or name@v4, or name@<C4 ID>"))
+        if "plan" in job and isinstance(job["plan"], str) and job["plan"] and not _PLAN.match(job["plan"]):
+            # a plan is read beside the submission and sent with it
+            errs.append(error(f"{base}.plan", f'"{job["plan"]}" is not a path inside the submission\'s folder',
+                              "write it relative to the submission, with forward slashes and no .., as plans/port.plan.yaml"))
         if "frames" in job and framelib.check(job["frames"]):
             fr = str(job["frames"])
             errs.append(error(f"{base}.frames", f'"{fr}" is not a frame list',

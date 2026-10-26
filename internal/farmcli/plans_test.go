@@ -74,3 +74,38 @@ func TestSubmitSendsPlans(t *testing.T) {
 		t.Errorf("a missing plan: %v, sent %d", err, len(sent))
 	}
 }
+
+// A plan is read only from inside the submission's folder: a path that
+// leaves it, or a link out of it, is refused before anything is read or
+// sent, so a submission from someone else's tree never sends this
+// machine's other files to the farm.
+func TestSubmitReadsPlansOnlyInsideItsFolder(t *testing.T) {
+	var sent int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent++
+		w.WriteHeader(http.StatusCreated)
+		json.NewEncoder(w).Encode(api.SubmissionResponse{})
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "noor"})
+	ctx := context.Background()
+
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.yaml")
+	os.WriteFile(secret, []byte("token: not-for-the-farm\n"), 0o600)
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "plans"), 0o755)
+	if err := os.Symlink(secret, filepath.Join(dir, "plans", "linked.plan.yaml")); err != nil {
+		t.Skip(err)
+	}
+	file := filepath.Join(dir, "port.yaml")
+	for _, p := range []string{secret, "../" + filepath.Base(outside) + "/secret.yaml", "plans/../../x.plan.yaml", "plans/linked.plan.yaml"} {
+		os.WriteFile(file, []byte("c4: submit/1\nproject: textkit\nshot: port\njobs:\n  port: {tool: agent, plan: '"+p+"'}\n"), 0o644)
+		sent = 0
+		var out bytes.Buffer
+		_, err := SubmitFile(ctx, c, Out{W: &out}, SubmitFileArgs{Path: file, Yes: true})
+		if err == nil || sent != 0 || strings.Contains(err.Error()+out.String(), "not-for-the-farm") {
+			t.Errorf("plan %s: %v, %d requests, %s", p, err, sent, out.String())
+		}
+	}
+}

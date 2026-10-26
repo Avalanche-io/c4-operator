@@ -179,7 +179,7 @@
           "propertyNames": {"$ref": "#/$defs/toolName"},
           "additionalProperties": {"$ref": "#/$defs/use"}
         },
-        "plan": {"type": "string", "minLength": 1, "description": "A plan file in c4-plan's format, relative to the submission."},
+        "plan": {"type": "string", "minLength": 1, "pattern": "^(?:[^/\\\\:.~][^/\\\\:]*|\\.|\\.[^/\\\\:.][^/\\\\:]*|\\.\\.[^/\\\\:]+)(?:/(?:[^/\\\\:.][^/\\\\:]*|\\.|\\.[^/\\\\:.][^/\\\\:]*|\\.\\.[^/\\\\:]+))*$", "description": "A plan file in c4-plan's format, relative to the submission and inside its folder, with forward slashes (plans/port.plan.yaml)."},
         "each": {
           "type": "object",
           "additionalProperties": false,
