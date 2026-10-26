@@ -314,7 +314,7 @@ func TestFailedToolTestPointsToPublish(t *testing.T) {
 	tick(t, q)
 	tick(t, q)
 	c := meta.FindStatusCondition(get(t, ns, "comp-farmtest-v1").Status.Conditions, c4v1.ConditionNeedsPerson)
-	want := "1 units failed after their retries; fix the tool comp, then c4 farm tool publish again, which tests it again"
+	want := "1 unit failed after its retries; fix the tool comp, then c4 farm tool publish again, which tests it again"
 	if c == nil || c.Reason != c4v1.NeedsFailed || c.Message != want {
 		t.Fatalf("got %+v, want the message %q", c, want)
 	}

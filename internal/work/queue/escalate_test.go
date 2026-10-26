@@ -628,7 +628,7 @@ func TestNeedsBesideARealFailure(t *testing.T) {
 	// The failure is the reason a person is needed, its remedy requeue or
 	// accept; the question is mentioned beside it.
 	c := meta.FindStatusCondition(got.Status.Conditions, c4v1.ConditionNeedsPerson)
-	if c == nil || c.Reason != c4v1.NeedsFailed || c.Message != "1 units failed after their retries; requeue, take or accept them; a unit waits for information too" {
+	if c == nil || c.Reason != c4v1.NeedsFailed || c.Message != "1 unit failed after its retries; requeue, take or accept it; a unit waits for information too" {
 		t.Fatalf("needs person %+v", c)
 	}
 	// An answer never reopens the finished job.

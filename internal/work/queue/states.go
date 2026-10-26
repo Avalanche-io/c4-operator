@@ -267,10 +267,11 @@ func needsPerson(st *c4v1.WorkJobStatus, v *view, approval *c4v1.CapacityRequest
 	case waiting > 0:
 		// A failure is the reason even beside open questions: requeue or
 		// accept it, then answer them.
-		reason, msg = c4v1.NeedsFailed, fmt.Sprintf("%d units failed after their retries; requeue, take or accept them", waiting)
+		failed := plural(waiting, "1 unit failed after its retries", fmt.Sprintf("%d units failed after their retries", waiting))
+		reason, msg = c4v1.NeedsFailed, failed+"; requeue, take or accept "+plural(waiting, "it", "them")
 		if t := v.job.Labels[c4v1.LabelToolTest]; t != "" {
 			// A tool's test takes no requeue: its outcome is the tool's.
-			msg = fmt.Sprintf("%d units failed after their retries; fix the tool %s, then c4 farm tool publish again, which tests it again", waiting, t)
+			msg = failed + "; fix the tool " + t + ", then c4 farm tool publish again, which tests it again"
 		}
 		if len(open) > 0 {
 			msg += fmt.Sprintf("; %s for information too", plural(len(open), "a unit waits", fmt.Sprintf("%d units wait", len(open))))
