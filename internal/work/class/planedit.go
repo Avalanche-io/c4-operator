@@ -359,12 +359,15 @@ func (p *Plan) ApplyPlan(gen int, e *PlanEdits) {
 			if !slices.Contains(u.After, i) || slices.Contains(w.By, k) {
 				continue
 			}
+			// a copy: the unit may share its list with the edits read
+			after := slices.Clone(u.After)
 			for _, b := range w.By {
-				if !slices.Contains(u.After, b) {
-					u.After = append(u.After, b)
+				if !slices.Contains(after, b) {
+					after = append(after, b)
 				}
 			}
-			sort.Ints(u.After)
+			sort.Ints(after)
+			u.After = after
 		}
 	}
 	for _, r := range e.Remove {

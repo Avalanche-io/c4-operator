@@ -182,3 +182,22 @@ func TestPlanEditsRefused(t *testing.T) {
 		}
 	}
 }
+
+// Edits read once apply the same to a copy of the table and then to the
+// table itself, as the queue checks them on a copy first: rewiring a
+// unit of the plan that follows a replaced one changes neither the edits
+// nor another table.
+func TestPlanEditsApplyTwice(t *testing.T) {
+	job, p := leadPlan(t)
+	e := readPlan(t, job, p, `{"version": 1, "units": [
+		{"name": "docs-1"}, {"name": "index", "after": ["parser", "docs", "glossary"]}, {"name": "glossary"}],
+		"split": [{"unit": "docs", "into": ["docs-1"]}]}`, nil)
+	c := p.Clone()
+	c.ApplyPlan(0, e)
+	p.ApplyPlan(0, e)
+	for _, q := range []*Plan{c, p} {
+		if got := q.Units[5].After; !slices.Equal(got, []int{1, 2, 4, 6}) {
+			t.Fatalf("index after %v, want parser, docs, docs-1 and glossary", got)
+		}
+	}
+}
