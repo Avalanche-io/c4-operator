@@ -115,6 +115,29 @@ const (
 	// that submitted a job as part of its own work. Its owner is the owner
 	// of the unit's job, who is accountable for it; only the farm sets it.
 	AnnotationSubmittedByUnit = "c4.avalanche.io/submitted-by-unit"
+	// AnnotationLeadSession on a WorkJob names the lead it was made for:
+	// the session ID of the person's own Claude Code session whose c4_agent
+	// puts workers on the farm (DESIGN 10.6, A lead's job). The HUD sets it
+	// when it makes the job for that person with the agent header
+	// (X-C4-Agent) naming the same session: the session's word, graded
+	// claimed, while the person's sign-in is the identity. It is set at
+	// creation only, and never changed, removed or added later; on a job
+	// anyone but the farm creates it is dropped. A job with it stays open
+	// while its lead may add workers, until it is closed
+	// (AnnotationClose, status.lead), and only such a job may say its lead
+	// answers its questions (spec.answers.by lead).
+	AnnotationLeadSession = "c4.avalanche.io/lead-session"
+	// AnnotationClose on a lead's job carries the request to close it: a
+	// JSON list of WorkCloseRequest, signed by the HUD. The queue carries
+	// out the first it trusts (status.lead.closed); the job then finishes
+	// as any job does once its units have.
+	AnnotationClose = "c4.avalanche.io/close"
+	// ConditionOpen on a lead's job says whether its lead may still add
+	// workers: True with reason Working while it has units to run, True
+	// with reason Idle once every unit has ended (nothing to place: it
+	// waits for its lead), False with reason Closed once closed. Absent on
+	// any other job.
+	ConditionOpen = "Open"
 	// ConditionAgentWork, False with reason LeadOnly, on a job a unit
 	// submitted says the queue refused agent units its generator's
 	// expansion would have added, while the project's agents.submit is
@@ -234,6 +257,20 @@ const (
 	LeadOnlyFix     = "hand it to your lead to submit; a project lets units submit agent work with agents.submit: anyone"
 )
 
+// NoLeadMessage is the farm's refusal of answers: {by: lead} on a job
+// without AnnotationLeadSession, by the HUD at submit and by admission.
+const NoLeadMessage = "this job has no lead: it was not made by a lead's c4_agent"
+
+// The reasons of ConditionOpen, and the states of status.lead.
+const (
+	LeadWorking = "Working"
+	LeadIdle    = "Idle"
+	LeadClosed  = "Closed"
+)
+
+// AnswersByLead is spec.answers.by for a job its lead answers.
+const AnswersByLead = "lead"
+
 // WorkJobSpec declares a job: its class, its units' parameters, its
 // objective, where it may run, its inputs and outputs, and the pod each
 // unit runs.
@@ -310,6 +347,13 @@ type WorkJobSpec struct {
 	// +optional
 	Forecast *WorkForecast `json:"forecast,omitempty"`
 
+	// Answers says who answers the questions the job's units stop for
+	// (NeedsInformation): by lead, the lead the job was made for
+	// (AnnotationLeadSession), and only on such a job. Without it a
+	// person answers them, and the answerer param names a unit that does.
+	// +optional
+	Answers *WorkAnswers `json:"answers,omitempty"`
+
 	// Inputs are C4 views mounted into every unit.
 	// +optional
 	Inputs []WorkInput `json:"inputs,omitempty"`
@@ -381,6 +425,13 @@ type WorkTool struct {
 	// version whose tool.yaml says which networks the job may claim.
 	// +optional
 	View string `json:"view,omitempty"`
+}
+
+// WorkAnswers names who answers a job's units' questions.
+type WorkAnswers struct {
+	// By is lead: the job's lead (AnnotationLeadSession).
+	// +kubebuilder:validation:Enum=lead
+	By string `json:"by"`
 }
 
 // WorkNudge is a person's bounded override.
@@ -499,6 +550,10 @@ type WorkJobStatus struct {
 	// the keys the queue will not apply again.
 	// +optional
 	Appends []WorkAppend `json:"appends,omitempty"`
+	// Lead is a lead's job's state (AnnotationLeadSession): open while its
+	// lead may add workers, and when and why it was closed.
+	// +optional
+	Lead *WorkLead `json:"lead,omitempty"`
 	// UnitOutputs maps the index of a unit another unit reads (fromUnit)
 	// to its captured output view.
 	// +optional
@@ -853,6 +908,59 @@ type WorkAppend struct {
 	// Error says why the queue refused the units; it added none.
 	// +optional
 	Error string `json:"error,omitempty"`
+}
+
+// WorkLead is a lead's job's state. Until it is closed the job stays
+// Running whatever its units have done, so its lead may add workers to
+// it; once closed it finishes as any job does.
+type WorkLead struct {
+	// Session is the lead's session ID (AnnotationLeadSession).
+	Session string `json:"session"`
+	// State is Working (it has units to run), Idle (every unit has ended:
+	// nothing to place, it waits for its lead) or Closed.
+	// +kubebuilder:validation:Enum=Working;Idle;Closed
+	State string `json:"state"`
+	// IdleSince is when its last unit ended, while it is Idle.
+	// +optional
+	IdleSince *metav1.Time `json:"idleSince,omitempty"`
+	// ClosesAt is when it closes by itself if its lead adds nothing: the
+	// farm's idle close after IdleSince.
+	// +optional
+	ClosesAt *metav1.Time `json:"closesAt,omitempty"`
+	// Closed says when it was closed, by whom and why.
+	// +optional
+	Closed *WorkClose `json:"closed,omitempty"`
+}
+
+// WorkClose is a lead's job's closing: by its person or their lead (a
+// close request), or by the farm when it was idle too long (By c4).
+type WorkClose struct {
+	At metav1.Time `json:"at"`
+	// By is the actor of the close request, or c4 for the farm.
+	By  string `json:"by"`
+	Why string `json:"why"`
+	// Control is the C4 ID of the HUD's signed control record of the
+	// request (action close); none for the farm's.
+	// +optional
+	Control string `json:"control,omitempty"`
+	// Record is the C4 ID of the queue's signed decision (kind close).
+	// +optional
+	Record string `json:"record,omitempty"`
+}
+
+// WorkCloseRequest asks the queue to close a lead's job
+// (AnnotationClose, a JSON list of them).
+type WorkCloseRequest struct {
+	// Token makes each request distinct (base-36 nanoseconds).
+	Token string `json:"token"`
+	// Why is the closer's reason, if they gave one.
+	// +optional
+	Why   string      `json:"why,omitempty"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// Record is the C4 ID of the signed control record.
+	// +optional
+	Record string `json:"record,omitempty"`
 }
 
 // WorkAppendRequest asks the queue to add units to a running graph job
@@ -1477,6 +1585,11 @@ type WorkNeeds struct {
 	// +optional
 	Why string      `json:"why,omitempty"`
 	At  metav1.Time `json:"at"`
+	// For is whose question it is: lead:<session> on a job its lead
+	// answers (spec.answers.by lead), else person:<name>, the job's
+	// owner.
+	// +optional
+	For string `json:"for,omitempty"`
 	// Record is the C4 ID of the signed record.
 	// +optional
 	Record string `json:"record,omitempty"`

@@ -63,6 +63,21 @@ spec:
               objective, where it may run, its inputs and outputs, and the pod each
               unit runs.
             properties:
+              answers:
+                description: |-
+                  Answers says who answers the questions the job's units stop for
+                  (NeedsInformation): by lead, the lead the job was made for
+                  (AnnotationLeadSession), and only on such a job. Without it a
+                  person answers them, and the answerer param names a unit that does.
+                properties:
+                  by:
+                    description: 'By is lead: the job''s lead (AnnotationLeadSession).'
+                    enum:
+                    - lead
+                    type: string
+                required:
+                - by
+                type: object
               avoidNodes:
                 description: |-
                   AvoidNodes are nodes a person took out of this job's use; the queue
@@ -1000,6 +1015,64 @@ spec:
                   - unit
                   type: object
                 type: array
+              lead:
+                description: |-
+                  Lead is a lead's job's state (AnnotationLeadSession): open while its
+                  lead may add workers, and when and why it was closed.
+                properties:
+                  closed:
+                    description: Closed says when it was closed, by whom and why.
+                    properties:
+                      at:
+                        format: date-time
+                        type: string
+                      by:
+                        description: By is the actor of the close request, or c4 for
+                          the farm.
+                        type: string
+                      control:
+                        description: |-
+                          Control is the C4 ID of the HUD's signed control record of the
+                          request (action close); none for the farm's.
+                        type: string
+                      record:
+                        description: Record is the C4 ID of the queue's signed decision
+                          (kind close).
+                        type: string
+                      why:
+                        type: string
+                    required:
+                    - at
+                    - by
+                    - why
+                    type: object
+                  closesAt:
+                    description: |-
+                      ClosesAt is when it closes by itself if its lead adds nothing: the
+                      farm's idle close after IdleSince.
+                    format: date-time
+                    type: string
+                  idleSince:
+                    description: IdleSince is when its last unit ended, while it is
+                      Idle.
+                    format: date-time
+                    type: string
+                  session:
+                    description: Session is the lead's session ID (AnnotationLeadSession).
+                    type: string
+                  state:
+                    description: |-
+                      State is Working (it has units to run), Idle (every unit has ended:
+                      nothing to place, it waits for its lead) or Closed.
+                    enum:
+                    - Working
+                    - Idle
+                    - Closed
+                    type: string
+                required:
+                - session
+                - state
+                type: object
               measure:
                 description: Measure is the latest reading of the job's measure of
                   done.
@@ -1190,6 +1263,12 @@ spec:
                       format: date-time
                       type: string
                     by:
+                      type: string
+                    for:
+                      description: |-
+                        For is whose question it is: lead:<session> on a job its lead
+                        answers (spec.answers.by lead), else person:<name>, the job's
+                        owner.
                       type: string
                     pressingAt:
                       description: |-

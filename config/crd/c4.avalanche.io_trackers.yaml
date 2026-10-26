@@ -196,6 +196,21 @@ spec:
                         Job is the WorkJob spec a matched entity is submitted with. Its
                         deadline and deadline mode are set from Deadline.
                       properties:
+                        answers:
+                          description: |-
+                            Answers says who answers the questions the job's units stop for
+                            (NeedsInformation): by lead, the lead the job was made for
+                            (AnnotationLeadSession), and only on such a job. Without it a
+                            person answers them, and the answerer param names a unit that does.
+                          properties:
+                            by:
+                              description: 'By is lead: the job''s lead (AnnotationLeadSession).'
+                              enum:
+                              - lead
+                              type: string
+                          required:
+                          - by
+                          type: object
                         avoidNodes:
                           description: |-
                             AvoidNodes are nodes a person took out of this job's use; the queue
