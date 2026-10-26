@@ -288,7 +288,7 @@ func (f *flowSite) view(ctx context.Context, as Person) flowView {
 		shot, _ := r.Fields["entity"].(flowtest.Link)
 		step, _ := r.Fields["step"].(flowtest.Link)
 		ft := flowTask{ID: r.ID, Shot: shot.Name, Name: str(r.Fields["content"]), Step: step.Name, Status: str(r.Fields["sg_status_list"]),
-			Due: str(r.Fields["due_date"]), ETA: str(r.Fields["sg_c4_eta"]), Link: str(r.Fields["sg_c4_link"]), Spend: str(r.Fields["sg_c4_spend"]),
+			Due: str(r.Fields["due_date"]), ETA: str(r.Fields["sg_c4_eta"]), Link: str(r.Fields["sg_c4_link"]), Spend: str(f.site.Get("Shot", shot.ID)["sg_c4_spend"]),
 			Versions: versions[r.ID]}
 		var assignee Person
 		for _, l := range linksOf(r.Fields["task_assignees"]) {
@@ -409,7 +409,7 @@ code{font-size:12px;color:#374151} select{font:inherit} #flash{display:none} #fl
 </div>
 <main>
 <h1>{{.Project}} · Shots</h1>
-<div class=sub>Lighting Tasks set ready become render jobs in {{.Project}} for the person assigned (Tracker {{.Tracker}}). c4-sync writes the Task's status, ETA, job link and spend, and publishes each render as a Version in pending review. It never sets an approval.</div>
+<div class=sub>Lighting Tasks set ready become render jobs in {{.Project}} for the person assigned (Tracker {{.Tracker}}). c4-sync writes the Task's status, ETA and job link, and the shot's total spend, and publishes each render as a Version in pending review. It never sets an approval.</div>
 <div id=flash class=says></div>
 <div id=live>{{template "live" .}}</div>
 </main>
@@ -447,7 +447,7 @@ setInterval(refresh, 4000);
 </script>
 {{end}}
 {{define "live"}}{{range .Tasks}}<div class=card id="Task{{.ID}}">
-<table><tr><th>Shot</th><th>Task</th><th>Status</th><th>Assigned</th><th>Due</th><th>C4 ETA</th><th>C4 spend</th><th>C4 job</th></tr>
+<table><tr><th>Shot</th><th>Task</th><th>Status</th><th>Assigned</th><th>Due</th><th>C4 ETA</th><th>C4 spend (the shot's)</th><th>C4 job</th></tr>
 <tr><td><b>{{.Shot}}</b></td><td>{{.Name}} <span class=sub>{{.Step}}</span></td><td><span class="st st-{{.Status}}">{{.Status}}</span></td><td>{{.Assign}}</td><td>{{.Due}}</td>
 <td>{{.ETA}}</td><td>{{.Spend}}</td><td>{{if link .Link}}<a href="{{.Link}}">the job in the HUD</a>{{else}}{{.Link}}{{end}}</td></tr></table>
 {{range .Says}}<div class="says{{if .Warn}} warn{{end}}">{{.Text}}{{if .Link}} <a href="{{.Link}}">{{.LinkText}}</a>{{end}}</div>{{end}}

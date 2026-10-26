@@ -67,6 +67,8 @@ type Adapter struct {
 	now     func() time.Time
 
 	reviewStatus, idField, etaField, linkField, spendField string
+	// spendOn is where spend goes: the Task's shot (default) or the Task.
+	spendOn string
 	// site is where people reach the site, for the links written to C4.
 	site string
 
@@ -89,9 +91,12 @@ func New(c tracker.Config) (*Adapter, error) {
 	if c.Scope["script"] == "" {
 		return nil, errors.New("flow: scope.script (the API script's name) is required")
 	}
+	if on := c.Scope["spend_on"]; on != "" && on != "shot" && on != "task" {
+		return nil, fmt.Errorf("flow: scope.spend_on is shot or task, got %q", on)
+	}
 	a := &Adapter{c: c, base: base, project: p, script: c.Scope["script"], hc: c.HTTPClient, now: c.Now,
 		reviewStatus: or(c.Scope["review_status"], "rev"), idField: or(c.Scope["id_field"], "sg_c4_id"),
-		etaField: c.Scope["eta_field"], linkField: c.Scope["link_field"], spendField: c.Scope["spend_field"],
+		etaField: c.Scope["eta_field"], linkField: c.Scope["link_field"], spendField: c.Scope["spend_field"], spendOn: or(c.Scope["spend_on"], "shot"),
 		site: strings.TrimSuffix(or(c.Scope["site_url"], base), "/"), people: map[string]tracker.Person{}}
 	if a.hc == nil {
 		a.hc = &http.Client{Timeout: 30 * time.Second}

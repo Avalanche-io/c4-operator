@@ -766,7 +766,7 @@ func TestFlowNamesStayWithTheLink(t *testing.T) {
 // reverse, only once they have confirmed the login in the HUD; it carries
 // the job's frames; and the Task carries the job's spend, as one number.
 func TestFlowArtistFramesSpend(t *testing.T) {
-	publish := func(t *testing.T, confirmed bool) (*flowEnv, *flowtest.Record) {
+	publish := func(t *testing.T, confirmed bool, spendOn string) (*flowEnv, *flowtest.Record) {
 		t.Helper()
 		var opts []func(*fake.ClientBuilder)
 		if confirmed {
@@ -783,6 +783,9 @@ func TestFlowArtistFramesSpend(t *testing.T) {
 			t.Fatal(err)
 		}
 		tr.Spec.Scope["spend_field"] = "sg_c4_spend"
+		if spendOn != "" {
+			tr.Spec.Scope["spend_on"] = spendOn
+		}
 		if err := e.k8s.Update(context.Background(), &tr); err != nil {
 			t.Fatal(err)
 		}
@@ -801,18 +804,75 @@ func TestFlowArtistFramesSpend(t *testing.T) {
 		}
 		return e, vs[0]
 	}
-	e, v := publish(t, true)
+	e, v := publish(t, true, "")
 	if u, _ := v.Fields["user"].(flowtest.Link); u.ID != e.dana.ID {
 		t.Fatalf("the Version's user is %v, want the artist", v.Fields["user"])
 	}
 	if v.Fields["frame_range"] != "1001-1240" {
 		t.Fatalf("frames: %v", v.Fields["frame_range"])
 	}
-	if got := e.site.Get("Task", e.task.ID)["sg_c4_spend"]; got != 12.75 {
-		t.Fatalf("the Task's spend: %v", got)
+	// spend goes on the Shot, a total naming no one; a Task is one
+	// artist's, so it carries spend only when the Tracker says so
+	shot := e.site.Get("Task", e.task.ID)["entity"].(flowtest.Link)
+	if got, task := e.site.Get("Shot", shot.ID)["sg_c4_spend"], e.site.Get("Task", e.task.ID)["sg_c4_spend"]; got != 12.75 || task != nil {
+		t.Fatalf("the Shot's spend %v, the Task's %v", got, task)
+	}
+	e, _ = publish(t, true, "task")
+	if got, sh := e.site.Get("Task", e.task.ID)["sg_c4_spend"], e.site.Get("Shot", shot.ID)["sg_c4_spend"]; got != 12.75 || sh != nil {
+		t.Fatalf("spend_on task: the Task's spend %v, the Shot's %v", got, sh)
 	}
 	// the map's offer alone names nobody
-	if _, v := publish(t, false); v.Fields["user"] != nil {
+	if _, v := publish(t, false, ""); v.Fields["user"] != nil {
 		t.Fatalf("an unconfirmed login named the artist: %v", v.Fields["user"])
+	}
+}
+
+// A Shot's spend is every version's: what v001 spent stays in the total
+// after a note makes v002, which adds its own.
+func TestFlowShotSpendKeepsEarlierVersions(t *testing.T) {
+	e := setupFlow(t)
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	tr.Spec.Scope["spend_field"] = "sg_c4_spend"
+	if err := e.k8s.Update(context.Background(), &tr); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	first := e.jobName()
+	e.job(first, func(j *api.Job) {
+		j.Phase, j.Spend, j.Output = "Running", &api.Spend{ProceduralSlotCost: 2}, &api.Output{View: "c4OutputV001"}
+	})
+	e.farm.OpenWait(ns, first, "dailies", "person:dana", "approve", "rework", "accept")
+	e.pass()
+	shot := e.site.Get("Task", e.task.ID)["entity"].(flowtest.Link)
+	if got := e.site.Get("Shot", shot.ID)["sg_c4_spend"]; got != 2.0 {
+		t.Fatalf("v001's spend on the Shot: %v", got)
+	}
+	e.clock.add(time.Minute)
+	e.site.Set(flowtest.Link{Type: "Version", ID: e.versions()[0].ID}, map[string]any{"sg_status_list": "fix"}, e.dana)
+	e.pass()
+	if len(e.farm.Submitted) != 2 {
+		t.Fatalf("submitted %d", len(e.farm.Submitted))
+	}
+	if l := e.link(); l.Status.SpentBefore == "" || l.Status.Parent == nil || l.Status.Parent.ID != strconv.Itoa(shot.ID) {
+		t.Fatalf("link status: spentBefore %q, parent %+v", l.Status.SpentBefore, l.Status.Parent)
+	}
+	e.job(e.farm.Submitted[1].Name, func(j *api.Job) { j.Phase, j.Spend = "Running", &api.Spend{ProceduralSlotCost: 3} })
+	e.clock.add(time.Hour)
+	e.pass()
+	if got := e.site.Get("Shot", shot.ID)["sg_c4_spend"]; got != 5.0 {
+		t.Fatalf("v001 and v002 on the Shot: %v", got)
+	}
+	// a link made before links kept their parent reads it from Flow once
+	l := e.link()
+	l.Status.Parent = nil
+	if err := e.k8s.Status().Update(context.Background(), l); err != nil {
+		t.Fatal(err)
+	}
+	e.pass()
+	if p := e.link().Status.Parent; p == nil || p.Type != "Shot" || p.ID != strconv.Itoa(shot.ID) {
+		t.Fatalf("parent read back: %+v", p)
 	}
 }

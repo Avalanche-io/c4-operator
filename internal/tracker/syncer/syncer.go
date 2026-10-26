@@ -97,6 +97,9 @@ type conn struct {
 	// loc is the zone the tracker's readers read times in: its project's,
 	// read at each pass.
 	loc *time.Location
+	// parentSpend is each parent entity's total this pass (type/id): the
+	// spend of every link on it, every version.
+	parentSpend map[string]float64
 }
 
 func (s *Syncer) now() time.Time {
@@ -314,6 +317,12 @@ func (s *Syncer) pass(ctx context.Context, t *c4v1.Tracker, c *conn) error {
 	sort.SliceStable(links, func(a, b int) bool {
 		return slack(jobs[links[a].Name]) < slack(jobs[links[b].Name])
 	})
+	c.parentSpend = map[string]float64{}
+	for _, l := range links {
+		if p := l.Status.Parent; p != nil {
+			c.parentSpend[p.Type+"/"+p.ID] += linkSpend(l, jobs[l.Name])
+		}
+	}
 	s.mu.Lock()
 	dirty := make(map[string]bool, len(c.dirty))
 	for k := range c.dirty {
@@ -738,6 +747,11 @@ func (s *Syncer) intakeItem(ctx context.Context, t *c4v1.Tracker, idx int, rule 
 		if err := s.Client.Create(ctx, l); err != nil && !apierrors.IsAlreadyExists(err) {
 			return err
 		}
+		if it.Parent != nil {
+			if err := s.setParent(ctx, l, it.Parent); err != nil {
+				return err
+			}
+		}
 		if why != "" {
 			s.setLinkCond(ctx, l, "Deadline", metav1.ConditionFalse, "NotFromTracker", why)
 		}
@@ -976,7 +990,7 @@ func (s *Syncer) baseState(l *c4v1.TrackerLink) tracker.LinkState {
 func (s *Syncer) linkState(l *c4v1.TrackerLink, sum Summary) tracker.LinkState {
 	ls := s.baseState(l)
 	ls.State, ls.Words, ls.Title, ls.Why = sum.State, sum.Words(), sum.Title(nil), sum.Why
-	ls.Spend = sum.Spend
+	ls.Spend = spentBefore(l) + sum.Spend
 	ls.Active, ls.ETA, ls.AtRisk, ls.Deadline = sum.Active(), sum.ETA, sum.AtRisk(), sum.Deadline
 	ls.DeadlineSource = deadlineSource(sum)
 	if w := sum.Wait; w != nil {
@@ -1067,8 +1081,15 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	if err := s.reviewHead(ctx, c, l, fresh); err != nil {
 		return err
 	}
+	if err := s.recordParent(ctx, c, l); err != nil {
+		return err
+	}
 	ls := s.linkState(l, sum)
 	ls.Loc, ls.Title = c.loc, sum.Title(c.loc)
+	if p := l.Status.Parent; p != nil {
+		ls.Parent = &tracker.Ref{Type: p.Type, ID: p.ID, URL: p.URL}
+		ls.ParentSpend = c.parentSpend[p.Type+"/"+p.ID]
+	}
 	cfg := tracker.PresentConfig{States: t.Spec.StatusOut.States, CheckName: t.Spec.StatusOut.CheckName,
 		CommitStatus: t.Spec.StatusOut.CommitStatus}
 	now, every := s.now(), seconds(t.Spec.StatusOut.FieldSeconds, 300)
@@ -1662,10 +1683,47 @@ func (s *Syncer) nextVersion(ctx context.Context, t *c4v1.Tracker, l *c4v1.Track
 	if err := s.Client.Patch(ctx, l, client.MergeFrom(before)); err != nil {
 		return err
 	}
+	// what the replaced job spent stays the link's
+	spent := spentBefore(l) + jobSpend(j)
 	return s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) {
 		st.Versions = append(st.Versions, prev)
 		st.Review, st.ReviewHead, st.State = nil, "", StateQueued
+		if spent > 0 {
+			st.SpentBefore = strconv.FormatFloat(spent, 'f', 6, 64)
+		}
 	})
+}
+
+// spentBefore is what a link's earlier versions spent.
+func spentBefore(l *c4v1.TrackerLink) float64 {
+	v, _ := strconv.ParseFloat(l.Status.SpentBefore, 64)
+	return v
+}
+
+// linkSpend is what a link's jobs have spent, every version.
+func linkSpend(l *c4v1.TrackerLink, j *api.Job) float64 { return spentBefore(l) + jobSpend(j) }
+
+// recordParent records the entity a link's tracker entity belongs to, for
+// a presenter that writes there, read once from the tracker; a link
+// recorded at intake has it already.
+func (s *Syncer) recordParent(ctx context.Context, c *conn, l *c4v1.TrackerLink) error {
+	pp, ok := c.presenter.(tracker.ParentPresenter)
+	if !ok || !pp.PresentsOnParent() || l.Status.Parent != nil {
+		return nil
+	}
+	it, err := c.adapter.Get(ctx, tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL})
+	if err != nil || it.Parent == nil {
+		return err
+	}
+	return s.setParent(ctx, l, it.Parent)
+}
+
+func (s *Syncer) setParent(ctx context.Context, l *c4v1.TrackerLink, p *tracker.Ref) error {
+	want := c4v1.TrackerRef{Type: p.Type, ID: p.ID, URL: p.URL}
+	if l.Status.Parent != nil && *l.Status.Parent == want {
+		return nil
+	}
+	return s.patchLinkStatus(ctx, l, func(st *c4v1.TrackerLinkStatus) { st.Parent = &want })
 }
 
 func clip(s string, n int) string {

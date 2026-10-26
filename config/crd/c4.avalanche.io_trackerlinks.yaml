@@ -191,6 +191,22 @@ spec:
                 description: ExternalVersion is the entity's version (updatedAt, etag)
                   last read.
                 type: string
+              parent:
+                description: |-
+                  Parent is the entity the tracker entity belongs to (a Flow Task's
+                  Shot or Asset), as the tracker last said, where a total is kept on
+                  it.
+                properties:
+                  id:
+                    type: string
+                  type:
+                    type: string
+                  url:
+                    type: string
+                required:
+                - id
+                - type
+                type: object
               review:
                 description: |-
                   Review is the entity under review for this link, once there is one
@@ -211,6 +227,11 @@ spec:
                   ReviewHead is the head commit of the entity under review as last
                   read; it is read again only when the tracker reports a change, or
                   at a resync.
+                type: string
+              spentBefore:
+                description: |-
+                  SpentBefore is what the jobs in Versions spent, in the pools'
+                  currency (a decimal), recorded as each was replaced.
                 type: string
               state:
                 description: |-

@@ -35,10 +35,15 @@ type LinkState struct {
 	// Loc is the zone the tracker's readers read times in (the project's),
 	// for When; nil is UTC.
 	Loc *time.Location
-	// Spend is what the job has cost so far, in the pools' currency: slot
-	// time at its pools' rates and model tokens at their prices. 0: not
-	// priced.
+	// Spend is what the link's jobs have cost so far, every version, in
+	// the pools' currency: slot time at their pools' rates and model
+	// tokens at their prices. 0: not priced.
 	Spend float64
+	// Parent is the entity the tracker entity belongs to (a Task's Shot),
+	// when the link has recorded it, and ParentSpend the total of every
+	// link on it: a total that names no one person.
+	Parent      *Ref
+	ParentSpend float64
 }
 
 // WaitState is the open wait the tracker serves.
@@ -87,6 +92,13 @@ type PresentConfig struct {
 	States       map[string]string // summary state to the tracker's status
 	CheckName    string
 	CommitStatus bool
+}
+
+// ParentPresenter is a presenter that writes on the tracker entity's
+// parent (the spend total on a Flow Shot), so the syncer records each
+// link's parent and totals what it presents there.
+type ParentPresenter interface {
+	PresentsOnParent() bool
 }
 
 // Presenter is how an adapter shows a link's state. Every adapter is also

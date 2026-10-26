@@ -80,7 +80,8 @@ Autodesk's published REST shapes. Its page is the HUD's `/sandbox/flow/`.
 adds its lighting Task, waiting and assigned. On the page you set the Task
 ready, and the Tracker `sandbox-flow` makes it a render job once the
 assignee has let that Tracker submit work for them. The Task then shows the
-job's status, ETA, link and spend. When the frames are done, the render
+job's status, ETA and link, and the shot shows what its jobs have spent.
+When the frames are done, the render
 comes back as a Version in pending review, with its still, frames and C4
 ID. Approving the Version passes the job's review. Asking for a fix, with
 a note, makes the next version, with the note as its input.
@@ -326,10 +327,16 @@ See integrations/mlflow-c4/README.md.
   preview proxy), uploaded as the Version's thumbnail in Flow's three
   upload steps. A Version left without its still by an interrupted
   publish gets it on the next pass.
-- **On the Task**, besides its status: the ETA (`scope.eta_field`), the
-  job's link (`scope.link_field`) and what the job has spent so far
-  (`scope.spend_field`), one number in the pools' currency, written at
-  most every `statusOut.fieldSeconds`. The site admin creates the fields.
+- **On the Task**, besides its status: the ETA (`scope.eta_field`),
+  cleared when the job has none, and the job's link
+  (`scope.link_field`).
+- **Spend** (`scope.spend_field`) is one number in the pools' currency:
+  what every C4 job on the Task's Shot or Asset has spent, every version,
+  written there at most every `statusOut.fieldSeconds`. A Task is one
+  artist's assignment, and its spend is per-person spend on a page
+  everyone on the site reads, so it goes on the Task only when the
+  Tracker sets `scope.spend_on: task`. The site admin creates the
+  fields.
 - **Links** written to C4 point at `scope.site_url` when people reach
   the site at another address than c4-sync does.
 

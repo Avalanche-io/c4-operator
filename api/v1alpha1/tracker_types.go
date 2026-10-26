@@ -359,6 +359,15 @@ type TrackerLinkStatus struct {
 	// oldest first (a rework that made a next version).
 	// +optional
 	Versions []string `json:"versions,omitempty"`
+	// Parent is the entity the tracker entity belongs to (a Flow Task's
+	// Shot or Asset), as the tracker last said, where a total is kept on
+	// it.
+	// +optional
+	Parent *TrackerRef `json:"parent,omitempty"`
+	// SpentBefore is what the jobs in Versions spent, in the pools'
+	// currency (a decimal), recorded as each was replaced.
+	// +optional
+	SpentBefore string `json:"spentBefore,omitempty"`
 	// ReviewHead is the head commit of the entity under review as last
 	// read; it is read again only when the tracker reports a change, or
 	// at a resync.

@@ -71,9 +71,7 @@ func Summarize(j *api.Job, review string, reworking bool) Summary {
 			s.ETA = &t
 		}
 	}
-	if sp := j.Spend; sp != nil {
-		s.Spend = sp.TokenCost + sp.ModelSlotCost + sp.ProceduralSlotCost
-	}
+	s.Spend = jobSpend(j)
 	for i := range j.Waits {
 		w := &j.Waits[i]
 		if w.Do == "" && w.Since != nil && review != "" && w.Name == review {
@@ -184,4 +182,13 @@ func waitKey(w *api.Wait) string {
 		return ""
 	}
 	return fmt.Sprintf("%d:%s", w.Unit, w.WaitsFor)
+}
+
+// jobSpend is what a job has cost so far: model tokens and slot time, at
+// their prices and its pools' rates.
+func jobSpend(j *api.Job) float64 {
+	if j == nil || j.Spend == nil {
+		return 0
+	}
+	return j.Spend.TokenCost + j.Spend.ModelSlotCost + j.Spend.ProceduralSlotCost
 }

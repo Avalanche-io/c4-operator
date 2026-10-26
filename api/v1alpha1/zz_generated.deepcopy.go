@@ -1891,6 +1891,11 @@ func (in *TrackerLinkStatus) DeepCopyInto(out *TrackerLinkStatus) {
 		*out = make([]string, len(*in))
 		copy(*out, *in)
 	}
+	if in.Parent != nil {
+		in, out := &in.Parent, &out.Parent
+		*out = new(TrackerRef)
+		**out = **in
+	}
 	if in.Written != nil {
 		in, out := &in.Written, &out.Written
 		*out = make(map[string]TrackerWritten, len(*in))
