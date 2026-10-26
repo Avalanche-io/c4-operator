@@ -23,7 +23,7 @@ var (
 // JobType is a prebuilt job type: what `c4 farm submit TYPE` makes.
 type JobType struct {
 	Name    string
-	Stage   string // the middle of the default job name
+	Stage   string // the middle of a scenario's job names
 	Class   string // render, ci or ml
 	Summary string
 	Image   string // c4-job-<image>

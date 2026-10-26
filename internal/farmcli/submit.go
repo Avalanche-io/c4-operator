@@ -31,7 +31,7 @@ type SubmitArgs struct {
 	Project  string
 	Name     string
 	Shot     string
-	Stage    string // the middle of the default name; default the type's
+	Stage    string // the middle of the default name; default the tool's
 	Deadline string
 	After    []string
 	Options  Options
@@ -244,6 +244,8 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 			}
 		case !notFound(err):
 			return nil, err
+		default:
+			o.notOffered(ctx, c, a.Project, a.Type)
 		}
 	}
 	var spec c4v1.WorkJobSpec
@@ -321,9 +323,13 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	if err != nil {
 		return nil, err
 	}
+	// named as the tool names it: a tool's job takes the tool's name as
+	// its stage, and the farm's prebuilt tools share the types' names, so
+	// a job submitted while its tool is still testing on a new farm is
+	// named as it will be once the test passes
 	stage := a.Stage
 	if stage == "" {
-		stage = t.Stage
+		stage = t.Name
 	}
 	req := api.SubmitRequest{Project: a.Project, Name: a.Name, Type: t.Name, Stage: stage, Shot: shot, Spec: raw,
 		Inputs: []api.SubmitInput{{View: v.ID.String(), MountPath: t.Mount}}, AIUsage: t.AIUsage, DryRun: true}
@@ -412,6 +418,32 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	o.printf("queued    %s/%s\n", done.Namespace, done.Name)
 	o.printf("HUD       %s\n", c.Web(done.Link, nil))
 	return &done, nil
+}
+
+// notOffered says why a type runs as the farm's built-in job when the
+// project has a tool of its name: no version of it is offered yet, since
+// its test is running (a new farm's first minutes) or failed.
+func (o Out) notOffered(ctx context.Context, c *Client, project, name string) {
+	if _, ok := types[name]; !ok {
+		return
+	}
+	t, err := LookupTool(ctx, c, project, name, "v1")
+	if err != nil {
+		return
+	}
+	state := ""
+	if t.Test != nil {
+		state = t.Test.State
+	}
+	if n := len(t.Versions); n > 0 {
+		state = t.Versions[n-1].Test.State
+	}
+	switch state {
+	case c4v1.ToolTestRunning, "":
+		o.printf("tool      %s is still testing on the farm, so this runs the built-in %s; the job's name is the same\n", name, name)
+	case c4v1.ToolTestFailed:
+		o.printf("tool      %s's test failed on the farm, so this runs the built-in %s (c4 farm ls --tool-tests shows the test)\n", name, name)
+	}
 }
 
 func rendererName(r string) string {
