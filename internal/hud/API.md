@@ -1130,6 +1130,10 @@ way a submission's plan is, so the farm checks them as any agent work:
   closed one, never reopened), owned by the person, with
   `c4.avalanche.io/lead-session` and `answers: {by: lead}`, its workers its
   table (`created: true`, each unit with its index).
+- **A lead's job ends when it is closed,** never by running dry: with
+  every worker ended it is `Idle`, still running, until its person or its
+  lead closes it (`POST /jobs/{ns}/{name}/close`, `c4_close_lead`) or the
+  farm does after its idle close. The next call then makes a new job.
 - **A later call adds its workers** to the lead's open job through
   `POST /jobs/{ns}/{name}/units`, signed once for the call. Until the queue
   has read it, `state` is `pending` and the units have no index; the same
