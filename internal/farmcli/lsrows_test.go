@@ -42,3 +42,26 @@ func TestLsListsEveryJob(t *testing.T) {
 		}
 	}
 }
+
+// A late job's slack reads "~2h 34m late": "late" carries the sign, so the
+// span has none.
+func TestLsLateSlackHasNoMinus(t *testing.T) {
+	now := time.Date(2026, 10, 26, 10, 0, 0, 0, time.UTC)
+	dl := now.Add(-time.Hour)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(api.Snapshot{Jobs: []api.Job{
+			{Namespace: "saltmarsh", Name: "sm0170-depth-v001", Phase: "Running", CreatedAt: now, Owner: "noor",
+				Objective: api.Objective{Deadline: &dl},
+				Estimate:  api.Estimate{EtaP50: now.Add(94 * time.Minute), SlackSeconds: -(2*3600 + 34*60)}},
+		}})
+	}))
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
+	var out bytes.Buffer
+	if err := Ls(context.Background(), c, Out{W: &out}, LsArgs{}); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(out.String(), "~2h 34m late") || strings.Contains(out.String(), "~-") {
+		t.Errorf("want ~2h 34m late, no minus:\n%s", out.String())
+	}
+}

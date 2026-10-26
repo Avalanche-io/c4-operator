@@ -130,7 +130,12 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 			if j.Objective.Source == "suggested" {
 				due = "~" + due
 			}
-			slack = "~" + Span(time.Duration(j.Estimate.SlackSeconds)*time.Second)
+			s := time.Duration(j.Estimate.SlackSeconds) * time.Second
+			if s < 0 {
+				// "late" carries the sign; "~-2h late" would say it twice.
+				s = -s
+			}
+			slack = "~" + Span(s)
 			if late {
 				slack += " late"
 			}
