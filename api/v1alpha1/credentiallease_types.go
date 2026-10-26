@@ -20,6 +20,13 @@ import (
 // where the farm turns it on (the manager's --holder-transfer).
 
 // Lease modes.
+// LabelAccount on a CredentialLease is the opaque label of the sign-in it
+// leases: the holder's machine's salted label for that Claude Code config
+// folder, the one its runner reports with the sessions it observes. Two
+// leases of one sign-in share it, so the queue holds them together when
+// that sign-in reaches its usage limit; it names no path or address.
+const LabelAccount = "c4.avalanche.io/account"
+
 const (
 	LeaseTransfer       = "transfer"
 	LeaseResident       = "resident"

@@ -222,3 +222,32 @@ func TestAgentHonoursTheFarm(t *testing.T) {
 		t.Fatalf("state %q", l.Status.State)
 	}
 }
+
+// The holder's agent stamps the lease with its sign-in's account label,
+// on a new lease and on one it brings in line, keeping labels others set.
+func TestAgentLabelsTheLeaseWithItsAccount(t *testing.T) {
+	s := runtime.NewScheme()
+	clientgoscheme.AddToScheme(s)
+	c4v1.AddToScheme(s)
+	old := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: "practice", Name: "noor-old", Labels: map[string]string{"example.com/team": "comp"}}}
+	c := fake.NewClientBuilder().WithScheme(s).WithStatusSubresource(&c4v1.CredentialLease{}).WithObjects(old).Build()
+	ctx := context.Background()
+	for _, name := range []string{"noor-new", "noor-old"} {
+		a := &Agent{Client: c, Namespace: "practice", Name: name, Labels: map[string]string{c4v1.LabelAccount: "a1b2c3d4e5f6"},
+			Spec: c4v1.CredentialLeaseSpec{Account: "anthropic", Holder: "noor"}}
+		l, err := a.ensure(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var got c4v1.CredentialLease
+		if err := c.Get(ctx, types.NamespacedName{Namespace: "practice", Name: name}, &got); err != nil {
+			t.Fatal(err)
+		}
+		if got.Labels[c4v1.LabelAccount] != "a1b2c3d4e5f6" || l.Labels[c4v1.LabelAccount] != "a1b2c3d4e5f6" {
+			t.Fatalf("%s: labels %v", name, got.Labels)
+		}
+		if name == "noor-old" && got.Labels["example.com/team"] != "comp" {
+			t.Fatalf("an existing label was dropped: %v", got.Labels)
+		}
+	}
+}

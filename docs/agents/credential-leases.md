@@ -39,6 +39,13 @@ c4-agent lease --context my-farm --namespace practice --name noor-claude \
 It prints one line per renewal, saying when the lease is good until. Stop
 it with Ctrl-C or SIGTERM, and the Secret is deleted.
 
+The lease carries its sign-in's account label (`c4.avalanche.io/account`):
+an opaque label of the config folder, keyed by the machine's own salt,
+the same one its runner reports beside observed sessions. It names no path
+or address. Two leases of one sign-in on one machine (one per namespace)
+share it, so when that sign-in reaches its usage limit the farm holds all
+their work for the same reset.
+
 | flag             | meaning                                                                                       |
 | ---------------- | --------------------------------------------------------------------------------------------- |
 | `--name`         | the lease, whose Secret is `c4-lease-<name>`                                                  |

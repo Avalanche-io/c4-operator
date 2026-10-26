@@ -699,6 +699,15 @@ func accountOf(salt []byte, configDir string) string {
 	return hex.EncodeToString(mac.Sum(nil))[:12]
 }
 
+// AccountLabel is the opaque label of a config folder's sign-in on this
+// machine ("" for the CLI's default folder), with the agents home's salt:
+// the label observing reports, and a lease of that sign-in carries
+// (c4.avalanche.io/account), so the farm can tell two leases of one
+// sign-in apart from two sign-ins without learning either's path.
+func AccountLabel(home, configDir string) string {
+	return accountOf(accountSalt(home), configDir)
+}
+
 // accountSalt is this machine's random salt for account labels, kept in
 // the agents home (account-salt, 0600) and made on first use.
 func accountSalt(home string) []byte {

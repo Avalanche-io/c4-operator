@@ -822,7 +822,14 @@ func runLease(ctx context.Context, args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "c4-agent lease:", err)
 		return 1
 	}
-	a := &lease.Agent{Client: cl, Namespace: *ns, Name: *name, Source: src,
+	var labels map[string]string
+	if home, err := agent.DefaultHome(); err == nil {
+		// the sign-in's opaque label, so its leases are one account's
+		if acct := agent.AccountLabel(home, *configDir); acct != "" {
+			labels = map[string]string{c4v1.LabelAccount: acct}
+		}
+	}
+	a := &lease.Agent{Client: cl, Namespace: *ns, Name: *name, Source: src, Labels: labels,
 		Spec: c4v1.CredentialLeaseSpec{Account: *account, Holder: *holder, BoundTo: c4v1.LeaseBinding{Owners: owners},
 			Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: pools},
 			TTL: metav1.Duration{Duration: *ttl}, RenewBefore: metav1.Duration{Duration: *renewBefore}},

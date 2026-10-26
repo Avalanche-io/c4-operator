@@ -23,7 +23,9 @@ type Agent struct {
 	Namespace string
 	Name      string
 	Spec      c4v1.CredentialLeaseSpec
-	Source    Source
+	// Labels are set on the lease (its account label, LabelAccount).
+	Labels map[string]string
+	Source Source
 	// Retry is how often it looks again for a renewed sign-in when the one
 	// it has expires within RenewBefore (default a minute).
 	Retry time.Duration
@@ -110,13 +112,19 @@ func (a *Agent) farmEnded(ctx context.Context, l *c4v1.CredentialLease) (string,
 
 // ensure creates the lease, or brings an existing one's spec in line.
 func (a *Agent) ensure(ctx context.Context) (*c4v1.CredentialLease, error) {
-	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: a.Namespace, Name: a.Name}, Spec: a.Spec}
+	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: a.Namespace, Name: a.Name, Labels: a.Labels}, Spec: a.Spec}
 	err := a.Client.Create(ctx, l)
 	if apierrors.IsAlreadyExists(err) {
 		if err := a.Client.Get(ctx, types.NamespacedName{Namespace: a.Namespace, Name: a.Name}, l); err != nil {
 			return nil, err
 		}
 		l.Spec = a.Spec
+		for k, v := range a.Labels {
+			if l.Labels == nil {
+				l.Labels = map[string]string{}
+			}
+			l.Labels[k] = v
+		}
 		if err = a.Client.Update(ctx, l); err == nil {
 			// a new run of the agent issues the lease afresh
 			orig := l.DeepCopy()
