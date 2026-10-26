@@ -10,6 +10,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -294,5 +295,27 @@ func TestShownSlackUsesThePlannedDeadline(t *testing.T) {
 	v.obj.Deadline = now.Add(5 * time.Hour)
 	if got, _ := shownSlack(v, sched.JobState{}, e); got != 2*3600 {
 		t.Fatalf("slack %d, want 7200 against the job's own deadline", got)
+	}
+}
+
+// A tool's test that fails says to fix the tool and publish it again,
+// which tests it again: it takes no requeue, so it never offers one.
+func TestFailedToolTestPointsToPublish(t *testing.T) {
+	ns, q, now := farm(t, "cpu", 1, 4)
+	ctx := context.Background()
+	j := job(ns, "comp-farmtest-v1", "render", "cpu-"+ns, map[string]string{"frames": "1-1", "chunk": "1"}, now.Add(4*time.Hour))
+	j.Spec.Retries = ptr.To[int32](0)
+	j.Labels = map[string]string{c4v1.LabelToolTest: "comp"}
+	if err := k8s.Create(ctx, j); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	failWith(t, podOfUnit(t, ns, "comp-farmtest-v1", 0), *now, 1, "Error", "")
+	tick(t, q)
+	tick(t, q)
+	c := meta.FindStatusCondition(get(t, ns, "comp-farmtest-v1").Status.Conditions, c4v1.ConditionNeedsPerson)
+	want := "1 units failed after their retries; fix the tool comp, then c4 farm tool publish again, which tests it again"
+	if c == nil || c.Reason != c4v1.NeedsFailed || c.Message != want {
+		t.Fatalf("got %+v, want the message %q", c, want)
 	}
 }

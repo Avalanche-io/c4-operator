@@ -51,7 +51,7 @@ const (
 	lockFile = "tool.lock"
 	// LabelToolTest on a test job names the tool it tests, and
 	// AnnotationToolTest the version.
-	LabelToolTest      = "c4.avalanche.io/tool-test"
+	LabelToolTest      = c4v1.LabelToolTest
 	AnnotationToolTest = "c4.avalanche.io/tool-test-version"
 )
 
