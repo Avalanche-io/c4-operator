@@ -222,6 +222,12 @@ const (
 	// queue applies each key once (status.appends), the units after the
 	// job's existing ones, as a generator's expansion adds its children.
 	AnnotationAppend = "c4.avalanche.io/append"
+	// AnnotationPlan on a lead's job carries its lead's edits to its plan
+	// (c4_plan): a JSON list of WorkPlanRequest, each naming the stored
+	// plan document of one call's edits. The queue applies each key once,
+	// in token order (status.plan), through the checks a generator's
+	// expansion takes.
+	AnnotationPlan = "c4.avalanche.io/plan"
 	// AnnotationRecheck on a unit pod says it is an extra attempt of a unit
 	// that stopped for information, started only to re-check its question
 	// ($C4_RECHECK): the value is why. Exit 0 withdraws the question, with
@@ -476,7 +482,9 @@ type WorkJobStatus struct {
 	// its output is being captured and added to the job's output),
 	// succeeded (the output is added and recorded), failed (failed after
 	// its retries: a person must act) and accepted (failed, and a person
-	// accepted it, so nothing waits on it).
+	// accepted it, so nothing waits on it); held (its lead planned it and
+	// has not released it, so it does not run) and withdrawn (its lead
+	// retired it before it started: it never runs, and counts as done).
 	// +optional
 	UnitStates map[string]string `json:"unitStates,omitempty"`
 	// Attempts per unit index, for units tried more than once
@@ -553,6 +561,11 @@ type WorkJobStatus struct {
 	// the keys the queue will not apply again.
 	// +optional
 	Appends []WorkAppend `json:"appends,omitempty"`
+	// Plan is what its lead's edits to its plan (AnnotationPlan) did: the
+	// latest calls, the stored log of every call that a restart replays,
+	// the units withdrawn and the order its lead gave.
+	// +optional
+	Plan *WorkPlan `json:"plan,omitempty"`
 	// Lead is a lead's job's state (AnnotationLeadSession): open while its
 	// lead may add workers, and when and why it was closed.
 	// +optional
@@ -918,6 +931,98 @@ type WorkAppend struct {
 	// Error says why the queue refused the units; it added none.
 	// +optional
 	Error string `json:"error,omitempty"`
+}
+
+// WorkPlan is what a lead's edits to its job's plan did (c4_plan). Every
+// call applied is in the stored log, which a restart replays with the
+// job's expansions and appends; status keeps the latest few, so hundreds
+// of edits stay small.
+type WorkPlan struct {
+	// Edits counts the calls applied, refused ones included.
+	Edits int32 `json:"edits"`
+	// Token is the token of the last request carried out.
+	// +optional
+	Token string `json:"token,omitempty"`
+	// Log is the C4 ID of the stored log of every call applied, oldest
+	// first (a JSON list of WorkPlanEdit).
+	// +optional
+	Log string `json:"log,omitempty"`
+	// Recent are the latest calls applied, oldest first: at most 16.
+	// +optional
+	Recent []WorkPlanEdit `json:"recent,omitempty"`
+	// Withdrawn maps the index of each unit an edit withdrew (withdraw,
+	// split, merge) to why and the units that replace it: the newest 256.
+	// Every withdrawn unit is in unitStates withdrawn.
+	// +optional
+	Withdrawn map[string]WorkWithdrawnUnit `json:"withdrawn,omitempty"`
+	// Order is the order key of each unit its lead ordered ("index:key"
+	// pairs, comma-separated): among the job's ready units the lower key
+	// is released first, units without one after them, and the critical
+	// path breaks ties.
+	// +optional
+	Order string `json:"order,omitempty"`
+}
+
+// WorkPlanEdit is one c4_plan call applied: its document added Units
+// units, indexes First to First+Units-1, and made the rest of its edits.
+type WorkPlanEdit struct {
+	// Key is the call's idempotency key: the queue applies a key once.
+	Key string `json:"key"`
+	// Document is the C4 ID of the plan document.
+	Document string      `json:"document"`
+	First    int32       `json:"first"`
+	Units    int32       `json:"units"`
+	At       metav1.Time `json:"at"`
+	// Expansions and Appends count the job's expansions and appends
+	// applied before it: where a restart replays it among them.
+	// +optional
+	Expansions int32 `json:"expansions,omitempty"`
+	// +optional
+	Appends int32 `json:"appends,omitempty"`
+	// Control is the C4 ID of the HUD's signed control record of the
+	// request (action plan).
+	// +optional
+	Control string `json:"control,omitempty"`
+	// Record is the C4 ID of the queue's signed decision (kind plan).
+	// +optional
+	Record string `json:"record,omitempty"`
+	// Error says why the queue refused the edits; it made none of them.
+	// +optional
+	Error string `json:"error,omitempty"`
+}
+
+// WorkWithdrawnUnit is a unit an edit withdrew: it never runs, and counts
+// as done for the units after it, which now follow its replacements.
+type WorkWithdrawnUnit struct {
+	// Why is the lead's reason, or what replaced it.
+	Why string `json:"why"`
+	// Replacements are the units that replace it (an index set), none for
+	// a plain withdraw.
+	// +optional
+	Replacements string `json:"replacements,omitempty"`
+	// Edit is the key of the call that withdrew it.
+	Edit string `json:"edit"`
+}
+
+// WorkPlanRequest asks the queue to apply a lead's edits to its job's
+// plan (AnnotationPlan, a JSON list of them).
+type WorkPlanRequest struct {
+	// Token makes each request distinct (base-36 nanoseconds); the queue
+	// applies requests in token order.
+	Token string `json:"token"`
+	// Key is the caller's idempotency key: a request again with the same
+	// key changes nothing more.
+	Key string `json:"key"`
+	// Document is the C4 ID of the stored plan document (version 1).
+	Document string `json:"document"`
+	// Units are the names of the units the document adds.
+	// +optional
+	Units []string    `json:"units,omitempty"`
+	Actor string      `json:"actor"`
+	At    metav1.Time `json:"at"`
+	// Record is the C4 ID of the signed control record.
+	// +optional
+	Record string `json:"record,omitempty"`
 }
 
 // WorkLead is a lead's job's state. Until it is closed the job stays
@@ -1434,10 +1539,17 @@ type UnitCounts struct {
 	Succeeded int32 `json:"succeeded,omitempty"`
 	Failed    int32 `json:"failed,omitempty"`
 	Accepted  int32 `json:"accepted,omitempty"`
-	Held      int32 `json:"held,omitempty"`
+	// Held counts units that would run and are held: queued units of a
+	// held job (spec.nudge.hold), and units its lead planned and has not
+	// released (c4_plan; unitStates held).
+	Held int32 `json:"held,omitempty"`
 	// Superseded units ended because a review chose others: done, not
 	// accepted, and out of the job's output.
 	Superseded int32 `json:"superseded,omitempty"`
+	// Withdrawn counts units its lead withdrew before they started
+	// (c4_plan): done for what follows them, and never run.
+	// +optional
+	Withdrawn int32 `json:"withdrawn,omitempty"`
 	// Needs counts units stopped on a question nobody has answered or
 	// withdrawn yet: not failed, the job held until it heals.
 	// +optional

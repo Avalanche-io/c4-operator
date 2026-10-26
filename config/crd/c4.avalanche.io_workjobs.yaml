@@ -1580,6 +1580,115 @@ spec:
                   Phase is Queued, Running, Blocked, Held, Succeeded or Failed; or
                   Forecast for a forecast job (spec.forecast), which never runs.
                 type: string
+              plan:
+                description: |-
+                  Plan is what its lead's edits to its plan (AnnotationPlan) did: the
+                  latest calls, the stored log of every call that a restart replays,
+                  the units withdrawn and the order its lead gave.
+                properties:
+                  edits:
+                    description: Edits counts the calls applied, refused ones included.
+                    format: int32
+                    type: integer
+                  log:
+                    description: |-
+                      Log is the C4 ID of the stored log of every call applied, oldest
+                      first (a JSON list of WorkPlanEdit).
+                    type: string
+                  order:
+                    description: |-
+                      Order is the order key of each unit its lead ordered ("index:key"
+                      pairs, comma-separated): among the job's ready units the lower key
+                      is released first, units without one after them, and the critical
+                      path breaks ties.
+                    type: string
+                  recent:
+                    description: 'Recent are the latest calls applied, oldest first:
+                      at most 16.'
+                    items:
+                      description: |-
+                        WorkPlanEdit is one c4_plan call applied: its document added Units
+                        units, indexes First to First+Units-1, and made the rest of its edits.
+                      properties:
+                        appends:
+                          format: int32
+                          type: integer
+                        at:
+                          format: date-time
+                          type: string
+                        control:
+                          description: |-
+                            Control is the C4 ID of the HUD's signed control record of the
+                            request (action plan).
+                          type: string
+                        document:
+                          description: Document is the C4 ID of the plan document.
+                          type: string
+                        error:
+                          description: Error says why the queue refused the edits;
+                            it made none of them.
+                          type: string
+                        expansions:
+                          description: |-
+                            Expansions and Appends count the job's expansions and appends
+                            applied before it: where a restart replays it among them.
+                          format: int32
+                          type: integer
+                        first:
+                          format: int32
+                          type: integer
+                        key:
+                          description: 'Key is the call''s idempotency key: the queue
+                            applies a key once.'
+                          type: string
+                        record:
+                          description: Record is the C4 ID of the queue's signed decision
+                            (kind plan).
+                          type: string
+                        units:
+                          format: int32
+                          type: integer
+                      required:
+                      - at
+                      - document
+                      - first
+                      - key
+                      - units
+                      type: object
+                    type: array
+                  token:
+                    description: Token is the token of the last request carried out.
+                    type: string
+                  withdrawn:
+                    additionalProperties:
+                      description: |-
+                        WorkWithdrawnUnit is a unit an edit withdrew: it never runs, and counts
+                        as done for the units after it, which now follow its replacements.
+                      properties:
+                        edit:
+                          description: Edit is the key of the call that withdrew it.
+                          type: string
+                        replacements:
+                          description: |-
+                            Replacements are the units that replace it (an index set), none for
+                            a plain withdraw.
+                          type: string
+                        why:
+                          description: Why is the lead's reason, or what replaced
+                            it.
+                          type: string
+                      required:
+                      - edit
+                      - why
+                      type: object
+                    description: |-
+                      Withdrawn maps the index of each unit an edit withdrew (withdraw,
+                      split, merge) to why and the units that replace it: the newest 256.
+                      Every withdrawn unit is in unitStates withdrawn.
+                    type: object
+                required:
+                - edits
+                type: object
               preemptions:
                 description: Preemptions counts units stopped or asked to yield to
                   make room.
@@ -2057,7 +2166,9 @@ spec:
                   its output is being captured and added to the job's output),
                   succeeded (the output is added and recorded), failed (failed after
                   its retries: a person must act) and accepted (failed, and a person
-                  accepted it, so nothing waits on it).
+                  accepted it, so nothing waits on it); held (its lead planned it and
+                  has not released it, so it does not run) and withdrawn (its lead
+                  retired it before it started: it never runs, and counts as done).
                 type: object
               unitSummaries:
                 additionalProperties:
@@ -2113,6 +2224,10 @@ spec:
                     format: int32
                     type: integer
                   held:
+                    description: |-
+                      Held counts units that would run and are held: queued units of a
+                      held job (spec.nudge.hold), and units its lead planned and has not
+                      released (c4_plan; unitStates held).
                     format: int32
                     type: integer
                   locked:
@@ -2164,6 +2279,12 @@ spec:
                     type: integer
                   waits:
                     description: Waits counts wait units waiting for their decision.
+                    format: int32
+                    type: integer
+                  withdrawn:
+                    description: |-
+                      Withdrawn counts units its lead withdrew before they started
+                      (c4_plan): done for what follows them, and never run.
                     format: int32
                     type: integer
                 type: object
