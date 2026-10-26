@@ -3,7 +3,7 @@
 // named on its command line, printing each result as one JSON line. The
 // P6 e2e uses it against the live HUD.
 //
-//	mcpcheck --server "bin/c4-operator mcp --hud http://127.0.0.1:30080 --as wrangler" \
+//	mcpcheck --server "bin/c4-operator mcp --hud http://127.0.0.1:31080 --as wrangler" \
 //	    'c4_farm_status {}' 'c4_list_jobs {"at_risk_only": true}'
 package main
 

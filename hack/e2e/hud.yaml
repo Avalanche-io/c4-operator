@@ -1,5 +1,5 @@
 # The e2e HUD: a NodePort on the control plane (kind maps it to
-# 127.0.0.1:30080 on the host).
+# 127.0.0.1:31080 on the host, moved by E2E_PORT_OFFSET in lib.sh).
 apiVersion: v1
 kind: Service
 metadata: {name: c4-hud-e2e, namespace: c4-system}
@@ -10,7 +10,7 @@ spec:
   - {name: hud, port: 8090, targetPort: 8090, nodePort: 30080}
 ---
 # The certificate issuer, for importers and ingests run from the host
-# (kind maps it to 127.0.0.1:30081).
+# (kind maps it to 127.0.0.1:31081, moved by E2E_PORT_OFFSET).
 apiVersion: v1
 kind: Service
 metadata: {name: c4-signer-e2e, namespace: c4-system}

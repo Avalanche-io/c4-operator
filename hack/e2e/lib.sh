@@ -6,8 +6,11 @@ CLUSTER=${CLUSTER:-c4-operator-e2e}
 CTX=kind-$CLUSTER
 # E2E_PORT_OFFSET moves every port the farm publishes on this machine (the
 # HUD, the signer, the three MinIO shards), so a second e2e cluster can run
-# beside another. A multiple of 10; 0 keeps 30080, 30081 and 30900-30902.
-PO=${E2E_PORT_OFFSET:-0}
+# beside another. A multiple of 10. The default, 1000, puts the HUD on 31080,
+# the signer on 31081 and the shards on 31900-31902, outside the ports a
+# person's `c4 farm up` takes (30080 and 30900), so the two never collide;
+# 0 keeps the old 30080, 30081 and 30900-30902.
+PO=${E2E_PORT_OFFSET:-1000}
 if [ $((PO % 10)) -ne 0 ]; then echo "E2E_PORT_OFFSET must be a multiple of 10" >&2; exit 2; fi
 HUD_PORT=$((30080 + PO))
 SIGNER_PORT=$((30081 + PO))

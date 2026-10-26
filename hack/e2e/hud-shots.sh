@@ -12,7 +12,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 out="${HUD_SHOTS_OUT:-$root/../c4-hud/docs/hud/live}"
-base="${HUD_URL:-http://127.0.0.1:30080}/"
+base="${HUD_URL:-http://127.0.0.1:31080}/"
 mkdir -p "$out"
 chrome="${CHROME:-}"
 if [[ -z "$chrome" ]]; then
