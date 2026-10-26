@@ -525,6 +525,31 @@ func TestKitsuForecastFollowsTheEstimation(t *testing.T) {
 }
 
 // inReview takes the first job to its review with an output and a still.
+// The Task's data carries what the job has spent, as one number on the
+// fields' throttle, and a finished job leaves no stale ETA.
+func TestKitsuSpendAndNoStaleETA(t *testing.T) {
+	e := setupKitsu(t)
+	e.update(func(tr *c4v1.Tracker) { tr.Spec.Scope["spend_field"] = "c4_spend" })
+	first := e.firstJob
+	e.pass()
+	eta := e.clock.now().Add(5 * time.Hour)
+	e.job(first, func(j *api.Job) {
+		j.Phase, j.Estimate.EtaP80 = "Running", &eta
+		j.Spend = &api.Spend{ModelSlotCost: 1.25, ProceduralSlotCost: 10, TokenCost: 1.5}
+	})
+	e.pass()
+	if d := e.site.Task(e.task).Data; d["c4_spend"] != 12.75 || d["c4_eta"] != eta.UTC().Format(time.RFC3339) {
+		t.Fatalf("while running: %#v", d)
+	}
+	e.job(first, func(j *api.Job) { j.Phase, j.Estimate.EtaP80 = "Succeeded", nil })
+	e.pass()
+	e.clock.add(time.Hour)
+	e.pass()
+	if v, ok := e.site.Task(e.task).Data["c4_eta"]; !ok || v != nil {
+		t.Fatalf("the finished Task's ETA: %#v", e.site.Task(e.task).Data)
+	}
+}
+
 func (e *kitsuEnv) inReview() {
 	e.t.Helper()
 	e.pass()

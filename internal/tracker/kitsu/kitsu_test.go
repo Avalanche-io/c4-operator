@@ -275,6 +275,35 @@ func TestDataUpdateMerges(t *testing.T) {
 	}
 }
 
+// The Task's ETA is cleared when a job has none (Zou keeps a key set to
+// null), not left stale; other empty values are still not written; the
+// spend is a number, so a number descriptor sums and sorts.
+func TestDataUpdateClearsTheETAAndSpendIsANumber(t *testing.T) {
+	sh := newShow(t)
+	a := sh.adapter(t, map[string]string{"eta_field": "c4_eta", "link_field": "c4_link", "spend_field": "c4_spend"})
+	ctx := context.Background()
+	on := tracker.Ref{Type: "Task", ID: sh.task}
+	if _, err := a.Apply(ctx, tracker.Write{On: on, Kind: "update", Fields: map[string]string{"c4_eta": "2026-10-22T01:00:00Z", "c4_link": "https://hud", "c4_spend": "0.0016"}}); err != nil {
+		t.Fatal(err)
+	}
+	if d := sh.site.Task(sh.task).Data; d["c4_spend"] != 0.0016 {
+		t.Fatalf("spend: %#v", d["c4_spend"])
+	}
+	if _, err := a.Apply(ctx, tracker.Write{On: on, Kind: "update", Fields: map[string]string{"c4_eta": "", "c4_link": ""}}); err != nil {
+		t.Fatal(err)
+	}
+	d := sh.site.Task(sh.task).Data
+	if v, ok := d["c4_eta"]; !ok || v != nil {
+		t.Fatalf("the ETA was not cleared: %#v", d)
+	}
+	if d["c4_link"] != "https://hud" || d["c4_spend"] != 0.0016 {
+		t.Fatalf("an empty link cleared the data: %#v", d)
+	}
+	if _, err := a.Apply(ctx, tracker.Write{On: on, Kind: "update", Fields: map[string]string{"c4_spend": "a lot"}}); err == nil {
+		t.Fatal("a spend that is not a number was written")
+	}
+}
+
 // A mention names the person as Kitsu reads it: "@First Last" and a space.
 // An edit keeps the comment and is idempotent.
 func TestMentionAndEdit(t *testing.T) {

@@ -2,6 +2,7 @@ package kitsu
 
 import (
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
@@ -20,7 +21,8 @@ var defaultFlags = map[string]string{"running": "is_wip", "rework": "is_wip", "i
 //     never (approval is the supervisor's), and nothing when the Task is
 //     in that status already (a publish moved it to review);
 //   - the ETA and the job link in the Task's data, when the Tracker names
-//     the keys (scope eta_field, link_field);
+//     the keys (scope eta_field, link_field), and what the job has spent
+//     under scope spend_field;
 //   - one comment when a person is needed or the job failed, with the
 //     cause, edited in place as the cause changes.
 func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracker.FieldWrite {
@@ -61,6 +63,19 @@ func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracke
 					f[a.linkField] = s.JobURL
 				}
 				return tracker.Write{On: s.Ref, Kind: "update", Fields: f}
+			},
+		})
+	}
+	if a.spendField != "" && s.Spend > 0 {
+		// One number in the pools' currency, as Flow writes it; it moves
+		// every tick, so it is continuous and written at most every
+		// fieldSeconds. Four places, so a short job at a low rate is not
+		// written as nothing.
+		spend := strconv.FormatFloat(s.Spend, 'f', 4, 64)
+		out = append(out, tracker.FieldWrite{
+			Field: "spend", Value: "spend", Continuous: spend,
+			Build: func(tracker.Written) tracker.Write {
+				return tracker.Write{On: s.Ref, Kind: "update", Fields: map[string]string{a.spendField: spend}}
 			},
 		})
 	}

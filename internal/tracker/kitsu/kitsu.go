@@ -79,7 +79,7 @@ type Adapter struct {
 	hc      *http.Client
 	now     func() time.Time
 
-	reviewStatus, etaField, linkField string
+	reviewStatus, etaField, linkField, spendField string
 
 	mu          sync.Mutex
 	projectID   string
@@ -101,7 +101,7 @@ func New(c tracker.Config) (*Adapter, error) {
 		return nil, errors.New("kitsu: scope.project (the production's id or name) is required")
 	}
 	a := &Adapter{c: c, site: site, api: site + "/api", project: c.Scope["project"], hc: c.HTTPClient, now: c.Now,
-		reviewStatus: c.Scope["review_status"], etaField: c.Scope["eta_field"], linkField: c.Scope["link_field"],
+		reviewStatus: c.Scope["review_status"], etaField: c.Scope["eta_field"], linkField: c.Scope["link_field"], spendField: c.Scope["spend_field"],
 		people: map[string]tracker.Person{}}
 	if a.hc == nil {
 		a.hc = &http.Client{Timeout: 30 * time.Second}
@@ -978,7 +978,8 @@ func (a *Adapter) post(ctx context.Context, taskID, statusID, text string) (comm
 //     name (Fields["task_status"]) or flag (Fields["flag"]); none when the
 //     Task is in that status already;
 //   - update: keys of the Task's data (Zou merges them in); an empty
-//     value is not written;
+//     ETA is cleared (null), any other empty value is not written, and
+//     the spend is a number;
 //   - comment, note: a comment on the Task in its current status, or with
 //     Note.Replace, new text for that comment;
 //   - mention: a comment that @-mentions Fields["user"] (an email), so
@@ -1014,7 +1015,20 @@ func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, erro
 	case "update":
 		data := map[string]any{}
 		for k, v := range w.Fields {
-			if v != "" {
+			switch {
+			case v == "" && k == a.etaField:
+				// a job no longer running has no ETA: clear it (Zou keeps
+				// a key set to null), so a finished Task shows none
+				data[k] = nil
+			case v == "":
+			case k == a.spendField:
+				// one number, so a number descriptor sums and sorts
+				n, err := strconv.ParseFloat(v, 64)
+				if err != nil {
+					return tracker.Ref{}, fmt.Errorf("kitsu: spend %q: %w", v, err)
+				}
+				data[k] = n
+			default:
 				data[k] = v
 			}
 		}

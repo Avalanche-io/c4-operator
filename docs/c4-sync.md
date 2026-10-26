@@ -360,9 +360,12 @@ job does afterwards.
   the decision. Its text, with the notes and replies written on the task
   since the review opened, is the decision's note, and with
   `rework: nextVersion` the next version's input.
-- **The ETA and link** go to the task's data under `scope.eta_field` and
-  `scope.link_field`. Kitsu shows them where a production manager adds
-  Task metadata descriptors with those names.
+- **The ETA, link and spend** go to the task's data under
+  `scope.eta_field`, `scope.link_field` and `scope.spend_field`. Kitsu
+  shows them where a production manager adds Task metadata descriptors
+  with those names (a number descriptor for the spend). The spend is one
+  number in the pools' currency, as Flow's, written at most every
+  `statusOut.fieldSeconds`; a finished job's ETA is cleared, not left.
 - **Bids.** A task's `estimation` is in minutes; a forecast rule sizes by
   it (`forecast: {field: estimation, perUnit: "0.05"}`).
 - **Text.** Kitsu posts a comment again on a shot's other tasks when it
