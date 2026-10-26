@@ -716,6 +716,27 @@ fan-out of reviewers). The farm runs each as a block:
 - **Only a lead calls it.** Inside a block (`C4_AGENT_BLOCK=1`) it refuses
   before anything is sent, and the HUD refuses a unit's own token.
 
+### A lead plans ahead
+
+A lead that knows one task and can only name the rest plans them in its
+job with `c4_plan`, and changes the plan as it learns. One call carries a
+list of edits, applied together, or none if the farm refuses one:
+- **`add`** a planned worker, as `c4_agent` takes one, with `work`, the
+  lead's estimate in seconds. It is **held**: it does not run until a
+  `release` names it, and the units after it wait for it.
+- **`split`** a unit that has not started into several, **`merge`**
+  several into one, or **`withdraw`** one with why. Whatever followed a
+  replaced unit follows its replacements.
+- **`order`** the units to run first among the job's ready ones, and
+  **`edge`** to add or remove an ordering.
+- **Nothing is renumbered.** A replaced or withdrawn unit stays in the job,
+  `withdrawn`, naming what replaced it; it never runs, and counts as done
+  for the units after it. A running unit is not changed: steer it.
+
+The job is the one `c4_agent` made (`job`, as it returned it), and units
+are named by name or index. The answer gives the units the call added, with
+their indexes once the queue has applied it.
+
 ### A lead waits for its workers
 
 A lead waits for the workers it put on the farm the way it waits for any

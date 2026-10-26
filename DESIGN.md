@@ -1631,6 +1631,54 @@ and a sweep planner that spawns trials are all generators.
   question a unit stops for is then `for: lead:<session>` (else
   `person:<owner>`), answered by that lead through its person's client or
   by the person directly, never from another session.
+- **A lead's plan.** A lead plans ahead in its own job and changes the plan
+  as it learns (`c4_plan`, `POST /jobs/{ns}/{name}/plan`; LEAD.md stage 3).
+  One call carries a list of edits applied together or not at all: `add`
+  a planned unit, `split` a unit that has not started into several,
+  `merge` several into one, `withdraw` one with why, `release` held units,
+  give the `order` among the job's ready units, and add or remove an
+  `edge`. It is the act a generator performs from inside the job, made
+  from outside it, and recorded the same way: the call is one plan
+  document, the expansion document extended with `split`, `merge`,
+  `withdraw`, `release`, `order`, `held` units and edges to `remove` (a
+  generator's document, or an append's, may carry none of these), stored
+  in the project's store and named by one signed control record (action
+  `plan`) and the HUD-only `c4.avalanche.io/plan`. The queue applies each
+  call once, in token order, through the expansion's checks and its own,
+  and signs the outcome (decision/v1, kind `plan`).
+  - **Identities never move.** A unit is its index everywhere (status,
+    process keys, labels, `C4_UNIT`). A split's or merge's replacements
+    take the next indexes, under the job's root as appended units do; the
+    units they replace stay, in a final state, `withdrawn`, naming them
+    (none for a withdraw). Whatever followed a replaced unit now follows
+    its replacements; a replacement waits on what the unit it replaces
+    waited on, is held if it was, and takes its order key. A withdrawn
+    unit never runs and counts as done for what follows it, as a
+    superseded one does. Only a unit that has not started is split,
+    merged, withdrawn, ordered or given an edge; a running one is refused
+    in the farm's words ("comp/3 is running; withdraw it after it ends, or
+    steer it"), and so is one another unit still reads.
+  - **Held.** A planned unit is not runnable until released. Today's
+    `planned` is a generator not yet evaluated, which runs; held is the
+    lead's not yet, which does not, a generator or not. The scheduler sees
+    a held unit as neither runnable nor waiting, and gives it no work to
+    ration; the units after it wait on it as on any unit. A lead's job
+    whose units left are all held, or wait on held ones, is `Idle`; once
+    it is closed they never run, and count as done.
+  - **Order.** An order lists units first first, each taking the next key
+    from 1, every other unit's key cleared. Among the job's ready units the
+    queue releases the lower key first, units without one after them, and
+    the longer chain of remaining work after a unit breaks a tie; a job
+    whose ready units have no key keeps its dispatch order. Across jobs
+    the farm decides, as before.
+  - **Records, not caps.** Status keeps the latest 16 calls, the newest
+    256 withdrawn units' reasons and replacements, and the order keys
+    (`status.plan`); the store keeps every call. The log of every call
+    applied is a document in the project's store, written before the edits
+    are made and named by `status.plan.log`, each call with the counts of
+    expansions and appends applied before it; a restart reads it and
+    replays the calls among them in the order they were applied, and
+    applies no key twice. Unit states gain `held` and `withdrawn`.
 - **Rounds:** iteration that is
   not spelled as nesting. A generator may be a bounded loop:
   `rounds: {max, until?}` on a planned unit of a document, or the job params
