@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,6 +37,8 @@ type podJob struct {
 	Owner   string `json:"owner"`
 	Grant   string `json:"grant,omitempty"`
 	Project string `json:"project,omitempty"`
+	// AddedBy is, on a lead's job, the record that added the pod's unit.
+	AddedBy string `json:"addedBy,omitempty"`
 }
 
 // readsHUD reports whether the runner reads its pods through the HUD.
@@ -140,7 +143,11 @@ func (r *Runner) jobOf(ctx context.Context, p *corev1.Pod) (j podJob, why string
 	if w.UID != ref.UID {
 		return podJob{}, fmt.Sprintf("its controller reference names an earlier job %s/%s", p.Namespace, ref.Name), nil
 	}
-	return podJob{Name: w.Name, UID: string(w.UID), Owner: w.Annotations[c4v1.AnnotationOwner], Grant: w.Annotations[c4v1.AnnotationGrant]}, "", nil
+	j = podJob{Name: w.Name, UID: string(w.UID), Owner: w.Annotations[c4v1.AnnotationOwner], Grant: w.Annotations[c4v1.AnnotationGrant]}
+	if i, err := strconv.Atoi(p.Labels[c4v1.LabelUnit]); err == nil {
+		j.AddedBy = w.LeadWorkerRecord(i)
+	}
+	return j, "", nil
 }
 
 // freshPod is a pod as the farm has it now, with what the runner wrote to

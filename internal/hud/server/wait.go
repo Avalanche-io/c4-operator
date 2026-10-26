@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"net/http"
 	"strconv"
@@ -67,7 +68,7 @@ func (s *Server) handleWait(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusNotFound, "no unit %s in job %s/%s", bad, ns, name)
 			return
 		}
-		ans := waitAnswer(m, rec, idx, anyOne)
+		ans := waitAnswer(m, rec, idx, refs, anyOne)
 		if ans.Done || !time.Now().Before(deadline) {
 			for k := range ans.Units {
 				s.fillResult(r.Context(), m, rec, &ans.Units[k])
@@ -96,12 +97,14 @@ func (s *Server) handleWait(w http.ResponseWriter, r *http.Request) {
 }
 
 // unitRefs resolves units named by name, index or #index; bad is the first
-// that names none.
+// that names none. A unit the job's owner has just added, which the queue
+// has not read yet, is pending (-1), not missing.
 func unitRefs(rec *jobRec, refs []string) (idx []int, bad string) {
 	if rec.plan == nil {
 		return nil, refs[0]
 	}
 	units := rec.plan.Units
+	pending := pendingNames(&rec.job)
 	for _, ref := range refs {
 		i, ok := -1, false
 		for k := range units {
@@ -115,6 +118,9 @@ func unitRefs(rec *jobRec, refs []string) (idx []int, bad string) {
 				i, ok = n, true
 			}
 		}
+		if !ok && pending[ref] {
+			i, ok = -1, true
+		}
 		if !ok {
 			return nil, ref
 		}
@@ -123,14 +129,44 @@ func unitRefs(rec *jobRec, refs []string) (idx []int, bad string) {
 	return idx, ""
 }
 
+// pendingNames are the units of the job's appends the queue has not
+// applied yet: named in its HUD-only append requests whose key status does
+// not list.
+func pendingNames(j *c4v1.WorkJob) map[string]bool {
+	var reqs []c4v1.WorkAppendRequest
+	if json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationAppend]), &reqs) != nil || len(reqs) == 0 {
+		return nil
+	}
+	done := map[string]bool{}
+	for _, a := range j.Status.Appends {
+		done[a.Key] = true
+	}
+	out := map[string]bool{}
+	for _, r := range reqs {
+		if done[r.Key] {
+			continue
+		}
+		for _, n := range r.Units {
+			out[n] = true
+		}
+	}
+	return out
+}
+
 // waitAnswer is each named unit's state and whether the wait is over: at
 // once when one stops on a question (it waits on its answerer); else, with
 // anyOne, when one has ended, and without, when all have.
-func waitAnswer(m *model, rec *jobRec, idx []int, anyOne bool) api.WaitAnswer {
+func waitAnswer(m *model, rec *jobRec, idx []int, refs []string, anyOne bool) api.WaitAnswer {
 	states := unitStateMap(&rec.job.Status, len(rec.plan.Units))
 	var ans api.WaitAnswer
 	asked, some, all := false, false, true
-	for _, i := range idx {
+	for k, i := range idx {
+		if i < 0 {
+			// added, not yet read by the queue
+			all = false
+			ans.Units = append(ans.Units, api.UnitResult{Job: rec.job.Namespace + "/" + rec.job.Name, Unit: -1, Name: refs[k], State: "pending"})
+			continue
+		}
 		u := rec.plan.Units[i]
 		res := api.UnitResult{Job: rec.job.Namespace + "/" + rec.job.Name, Unit: i, Name: u.Name, Label: u.Label, State: states[i]}
 		switch {
@@ -151,7 +187,7 @@ func waitAnswer(m *model, rec *jobRec, idx []int, anyOne bool) api.WaitAnswer {
 // whole of it, from the store), its branch, its run time and how it ended,
 // or the question it stopped on.
 func (s *Server) fillResult(ctx context.Context, m *model, rec *jobRec, res *api.UnitResult) {
-	if res.Settled == "" {
+	if res.Settled == "" || res.Unit < 0 {
 		return
 	}
 	key := strconv.Itoa(res.Unit)
@@ -172,7 +208,7 @@ func (s *Server) fillResult(ctx context.Context, m *model, rec *jobRec, res *api
 		res.Summary = out
 	}
 	if n, ok := st.Needs[key]; ok && res.Settled == "asks" {
-		res.Question = &api.UnitQuestion{Kind: "needs", Text: n.Text, Why: n.Why, At: n.At.Time}
+		res.Question = &api.UnitQuestion{Kind: "needs", Text: n.Text, Why: n.Why, At: n.At.Time, For: n.For}
 	}
 	if p := unitPod(m, rec, res.Unit); p != nil && (p.Status.Phase == corev1.PodSucceeded || p.Status.Phase == corev1.PodFailed) {
 		res.Ended = &api.UnitEnded{Phase: string(p.Status.Phase), Reason: p.Status.Reason, Message: p.Status.Message}

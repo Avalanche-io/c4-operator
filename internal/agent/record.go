@@ -121,6 +121,11 @@ func (r *Runner) chainOf(ctx context.Context, p *corev1.Pod) *schema.Chain {
 		Using: []schema.Credential{using},
 		On:    on,
 	}
+	if _, err := c4.Parse(j.AddedBy); err == nil {
+		// a lead's worker: the act of its lead that added it, whose record
+		// names the lead's session (LEAD.md stage 2)
+		c.Under = append(c.Under, schema.Delegation{Record: j.AddedBy, Kind: "lead-worker"})
+	}
 	switch {
 	case owner == "":
 		c.For = schema.For{Subject: "no owner recorded on job " + job, Grade: schema.GradeClaimed}

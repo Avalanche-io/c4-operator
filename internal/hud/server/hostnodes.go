@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -84,6 +85,9 @@ func (s *Server) handleHostPods(w http.ResponseWriter, r *http.Request) {
 			var j c4v1.WorkJob
 			if err := s.Client.Get(ctx, types.NamespacedName{Namespace: p.Namespace, Name: ref.Name}, &j); err == nil && j.UID == ref.UID {
 				hp.Job = &api.HostPodJob{Name: j.Name, UID: string(j.UID), Owner: j.Annotations[c4v1.AnnotationOwner], Grant: j.Annotations[c4v1.AnnotationGrant], Project: projectOfNS(s.current(), p.Namespace)}
+				if i, err := strconv.Atoi(p.Labels[c4v1.LabelUnit]); err == nil {
+					hp.Job.AddedBy = j.LeadWorkerRecord(i)
+				}
 			}
 		}
 		out.Pods = append(out.Pods, hp)

@@ -80,10 +80,32 @@ func TestHostRunnerReadsOnlyItsOwnPods(t *testing.T) {
 	if p.Name != "port-0" || got.Pods[0].Job == nil || got.Pods[0].Job.Owner != "dana" || got.Pods[0].Job.UID != "9c1d2e7f-port" || got.Pods[0].Job.Grant != "c4grant" {
 		t.Fatalf("pod %s job %+v", p.Name, got.Pods[0].Job)
 	}
+	if got.Pods[0].Job.AddedBy != "" {
+		t.Fatalf("a job that is not a lead's names an add: %+v", got.Pods[0].Job)
+	}
 	for _, as := range []string{"host2", "dana"} {
 		if code, _ := hostCall(t, s, http.MethodGet, "/api/v1/nodes/laptop-1/pods", as, nil); code != http.StatusForbidden {
 			t.Errorf("%s read laptop-1's pods: %d", as, code)
 		}
+	}
+}
+
+// On a lead's job, each pod comes with the record of its lead's act that
+// added its unit, for the worker's chain: the append that holds its index.
+func TestHostPodsNameTheirLeadsAdd(t *testing.T) {
+	yes := true
+	job := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "lead-1a2b3c4d5e", UID: "9c1d2e7f-lead",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "dana", c4v1.AnnotationLeadSession: "session-1", "c4.avalanche.io/submission-record": "c4first"}},
+		Status: c4v1.WorkJobStatus{Appends: []c4v1.WorkAppend{{Key: "call-2", First: 2, Units: 1, Record: "c4append"}}}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "lead-u2", Labels: map[string]string{c4v1.LabelJob: job.Name, c4v1.LabelUnit: "2"},
+		OwnerReferences: []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: job.Name, UID: job.UID, Controller: &yes}}},
+		Spec: corev1.PodSpec{NodeName: "laptop-1", Containers: []corev1.Container{{Name: "member", Image: "c4-agent"}}}}
+	s := hostFarm(t, job, pod)
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/api/v1/nodes/laptop-1/pods?as=host1", nil))
+	var got api.HostPods
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil || len(got.Pods) != 1 || got.Pods[0].Job == nil || got.Pods[0].Job.AddedBy != "c4append" {
+		t.Fatalf("%d %s", w.Code, w.Body.String())
 	}
 }
 

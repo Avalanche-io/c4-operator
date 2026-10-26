@@ -79,6 +79,24 @@ func TestWaitForUnits(t *testing.T) {
 		t.Fatalf("one asks while two run: %+v", a)
 	}
 
+	// a unit its owner has just added, which the queue has not read yet,
+	// is pending, not missing; once the queue lists the key, a name its
+	// table lacks is missing again
+	rec.job.Annotations = map[string]string{c4v1.AnnotationAppend: `[{"token":"t1","key":"call-2","document":"c4doc","units":["implement"],"actor":"wrangler"}]`}
+	a = api.WaitAnswer{}
+	if code := get(t, s, job+"&unit=implement&unit=3&any=true", &a); code != 200 || !a.Done || a.Units[0].State != "pending" || a.Units[0].Settled != "" {
+		t.Fatalf("a pending unit: %d %+v", code, a)
+	}
+	a = api.WaitAnswer{}
+	if get(t, s, job+"&unit=implement", &a); a.Done {
+		t.Fatalf("waiting on a pending unit alone: %+v", a)
+	}
+	rec.job.Status.Appends = []c4v1.WorkAppend{{Key: "call-2", First: 10, Units: 1}}
+	if code := get(t, s, job+"&unit=implement", nil); code != 404 {
+		t.Fatalf("applied, yet not in the table: %d", code)
+	}
+	rec.job.Annotations, rec.job.Status.Appends = nil, nil
+
 	// the window holds an unsettled wait, then answers as things stand
 	start := time.Now()
 	a = api.WaitAnswer{}

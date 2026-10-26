@@ -162,3 +162,55 @@ func TestChainHolderIsTheRunners(t *testing.T) {
 	}
 	valid("no job", ch)
 }
+
+// A lead's worker's chain names the act of its lead that added it: the
+// submission that made the lead's job, for its first workers, or the
+// append that added it, by its index; a job that is not a lead's names
+// none. The chain stays chain/1.
+func TestLeadWorkerChainNamesItsAdd(t *testing.T) {
+	ctx := context.Background()
+	e := newEnv(t)
+	yes := true
+	id := func(s string) string { return c4.Identify(strings.NewReader(s)).String() }
+	first, appended, other := id("the submission"), id("the append"), id("another job's submission")
+	lead := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "lead-1a2b3c4d5e", UID: types.UID("5c1d7e00-0000-4000-8000-0000000000aa"),
+		Annotations: map[string]string{c4v1.AnnotationOwner: "dana", c4v1.AnnotationLeadSession: "session-1", "c4.avalanche.io/submission-record": first}}}
+	plain := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "dana-plain", UID: types.UID("5c1d7e00-0000-4000-8000-0000000000bb"),
+		Annotations: map[string]string{c4v1.AnnotationOwner: "dana", "c4.avalanche.io/submission-record": other}}}
+	lead.Status.Appends = []c4v1.WorkAppend{{Key: "call-2", First: 4, Units: 2, Record: appended}}
+	r, c := hostRunner(t, e, hostPod())
+	for _, j := range []*c4v1.WorkJob{lead, plain} {
+		if err := c.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+	}
+	r.Farm, r.Node, r.Owners, r.Holder = "saltmarsh", "laptop-1", []string{"dana"}, "dana"
+	podOf := func(j *c4v1.WorkJob, unit string) *corev1.Pod {
+		p := hostPod()
+		p.Labels[c4v1.LabelUnit] = unit
+		p.OwnerReferences = []metav1.OwnerReference{{APIVersion: c4v1.GroupVersion.String(), Kind: "WorkJob", Name: j.Name, UID: j.UID, Controller: &yes}}
+		return p
+	}
+	added := func(ch *schema.Chain) string {
+		for _, d := range ch.Under {
+			if d.Kind == "lead-worker" {
+				return d.Record
+			}
+		}
+		return ""
+	}
+	for _, c := range []struct {
+		j    *c4v1.WorkJob
+		unit string
+		want string
+	}{{lead, "2", first}, {lead, "5", appended}, {plain, "2", ""}} {
+		ch := r.chainOf(ctx, podOf(c.j, c.unit))
+		if got := added(ch); got != c.want || ch.Under[0].Job != "show-a/"+c.j.Name {
+			t.Errorf("%s unit %s: added by %q, want %q; under %+v", c.j.Name, c.unit, got, c.want, ch.Under)
+		}
+		b, _ := json.Marshal(ch)
+		if _, errs := schema.ParseChain(b); len(errs) > 0 {
+			t.Errorf("%s unit %s: not chain/1: %v\n%s", c.j.Name, c.unit, errs, b)
+		}
+	}
+}

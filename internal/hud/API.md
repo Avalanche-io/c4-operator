@@ -887,12 +887,15 @@ runner alone (the service account `c4-hosts/<node>`; anyone else gets
 nothing of anyone else's work.
 
 ```
-{ node, pods: [ { pod: <the Pod as the API server has it>, job?: { name, uid, owner, grant? } } ] }
+{ node, pods: [ { pod: <the Pod as the API server has it>, job?: { name, uid, owner, grant?, project?, addedBy? } } ] }
 ```
 
 `job` is the WorkJob that controls the pod, matched by UID (a job made
 again under the same name is another): whose work it is, and the grant
-it was submitted under, which the runner's records name.
+it was submitted under, which the runner's records name. On a lead's job,
+`addedBy` is the C4 ID of the control record of the lead's act that added
+the pod's unit (the submission that made the job, or the append that holds
+the unit's index), which the worker's chain names (`kind: lead-worker`).
 
 ## POST /nodes/{node}/enroll-offer and POST /nodes/{node}/enroll
 
@@ -1104,6 +1107,43 @@ claimed), with the right to change the job. Refusals:
 | `403`  | an agent header naming another session ("session-1 is the job of lead session session-1, and the agent header (X-C4-Agent) names session session-2: only that lead, or dana with no agent header, closes it") |
 | `422`  | a job made for no lead ("sh040-light-v007 is not a lead's job: it finishes once its units have, and is never closed")                                                                                         |
 | `400`  | a `why` over 1000 bytes                                                                                                                                                                                       |
+
+### POST /lead/workers
+
+```
+{ project?, root?, tool?, workers: [ { name?, description, prompt, agent?, model?, effort?, base?, after?: [name] } ],
+  turn?, key }
+-> { job, created?, units: [ { name, index? } ], state, error?, record?, warnings?, message }
+```
+
+A lead (a person's own Claude Code session, through its MCP client, with
+the agent header `X-C4-Agent` naming the session) puts workers on the
+farm: `c4_agent`. Each call's workers are lowered as a plan's blocks, the
+way a submission's plan is, so the farm checks them as any agent work:
+- **The first call makes the lead's job** through the submission's own
+  path (checked, signed, held and released): a graph job in `project`,
+  named for the person and the full session (`lead-<hash>`, `-2` after a
+  closed one, never reopened), owned by the person, with
+  `c4.avalanche.io/lead-session` and `answers: {by: lead}`, its workers its
+  table (`created: true`, each unit with its index).
+- **A later call adds its workers** to the lead's open job through
+  `POST /jobs/{ns}/{name}/units`, signed once for the call. Until the queue
+  has read it, `state` is `pending` and the units have no index; the same
+  call again (its `key`) answers with them once `added`. A call that finds
+  the job made meanwhile by a call the HUD had not seen yet adds to it,
+  only if it is the person's and the session's.
+- Each worker is a fresh session from its `prompt` alone; `description` is
+  what the HUD shows; `name` its unit name (default: from the
+  description, with a mark of the call); `base` the **full** commit ID its
+  branch starts from (a ref or a short ID is refused); `turn` groups the
+  workers under the lead's turn ("turn N").
+- `key` is required: the same key again adds nothing more and answers as
+  the first call did.
+
+Refused: a unit's token (a worker may not start workers), no session in
+the agent header (`400`), another person's or another session's job
+(`403`), a closed or closing job (`409`), workers the farm cannot run
+(`422`, at their paths), more than 16 workers in one call.
 
 ## Submitting
 

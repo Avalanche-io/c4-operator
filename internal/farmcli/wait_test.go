@@ -115,14 +115,14 @@ func TestWaitForAQuestion(t *testing.T) {
 			return
 		}
 		json.NewEncoder(w).Encode(api.WaitAnswer{Done: true, Units: []api.UnitResult{{Job: "show-a/lead-3f2a", Unit: 3, Name: "converge", State: "needs", Settled: "asks",
-			Question: &api.UnitQuestion{Kind: "needs", Text: "which plate version is final", Why: "v2 and v3 both exist"}}}})
+			Question: &api.UnitQuestion{Kind: "needs", Text: "which plate version is final", Why: "v2 and v3 both exist", For: "lead:aaaaaaaa"}}}})
 	})
 	var out, errs bytes.Buffer
 	err := Wait(context.Background(), c, Out{W: &out}, "show-a", WaitArgs{Units: []string{"lead-3f2a/converge"}, Retry: 10 * time.Millisecond, Errs: &errs})
 	if code := exitOf(t, err); code != WaitAsks {
 		t.Fatalf("exit %d\n%s", code, out.String())
 	}
-	for _, want := range []string{"question  which plate version is final", "why       v2 and v3 both exist", "answer    with c4_supply (job show-a/lead-3f2a, unit converge)"} {
+	for _, want := range []string{"question  which plate version is final", "why       v2 and v3 both exist", "for       lead:aaaaaaaa", "answer    with c4_supply (job show-a/lead-3f2a, unit converge)"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("lacks %q:\n%s", want, out.String())
 		}

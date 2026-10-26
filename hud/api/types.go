@@ -1186,6 +1186,9 @@ type HostPodJob struct {
 	Grant string `json:"grant,omitempty"`
 	// Project is the project of the pod's namespace.
 	Project string `json:"project,omitempty"`
+	// AddedBy is, on a lead's job, the C4 ID of the control record that
+	// added the pod's unit (the submission, or an append).
+	AddedBy string `json:"addedBy,omitempty"`
 }
 
 // WaitAnswer is GET /jobs/{ns}/{name}/wait: the units waited on, each as it
@@ -1243,4 +1246,7 @@ type UnitQuestion struct {
 	Text string    `json:"text"`
 	Why  string    `json:"why,omitempty"`
 	At   time.Time `json:"at"`
+	// For is whose question it is: lead:<session> (its lead answers it)
+	// or person:<name>.
+	For string `json:"for,omitempty"`
 }

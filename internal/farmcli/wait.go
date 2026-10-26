@@ -278,6 +278,9 @@ func printWait(o Out, order []string, results map[string]api.UnitResult, asJSON,
 			if q.Why != "" {
 				o.printf("  why       %s\n", q.Why)
 			}
+			if q.For != "" {
+				o.printf("  for       %s\n", q.For)
+			}
 			o.printf("  answer    with c4_supply (job %s, unit %s)\n", u.Job, name)
 		}
 		if s := u.Summary; s != nil {

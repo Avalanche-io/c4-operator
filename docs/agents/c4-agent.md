@@ -687,6 +687,35 @@ So the block takes them into account in the same attempt. A step or a
 turn the farm stops at reads none, and they wait for the attempt that
 resumes it.
 
+### A lead starts workers on the farm
+
+A lead, a person's own Claude Code session with the farm's MCP server,
+starts workers with `c4_agent` where it would start subagents: one
+(`prompt`, `description`), or several started together (`workers`, as a
+fan-out of reviewers). The farm runs each as a block:
+- **A fresh session from its brief alone.** It sees nothing of the lead's
+  conversation; restricted mode keeps the machine's settings, CLAUDE.md and
+  MCP servers from it.
+- **A branch of its own from the lead's commit.** `c4_agent` reads the
+  lead's `HEAD` (or `base`) in the lead's folder and sends its full ID, so
+  the worker starts where the lead was even if a branch moves. Work the
+  lead has not committed is named in a warning: the worker will not see
+  it, so commit a design before reviewers start on it.
+- **In the lead's own job.** The first call makes it (`POST /lead/workers`,
+  internal/hud/API.md), later calls add to it, and its workers' records
+  name the lead's act that added each (`kind: lead-worker`). The lead's
+  session reaches the farm as a claim in the agent header (read from
+  Claude Code's own session file, or its environment); the identity is the
+  person's sign-in. `c4_close_lead` closes the job; the farm closes an
+  idle one after a day; the next call then makes a new one.
+- **It answers quickly.** It waits up to 3 minutes and returns each
+  worker's result (its summary in its own words, its branch, how it
+  ended, or the question it stopped on, answered with `c4_supply`), or
+  the units still running and the `c4 farm wait` command to wait with;
+  `background` answers at once.
+- **Only a lead calls it.** Inside a block (`C4_AGENT_BLOCK=1`) it refuses
+  before anything is sent, and the HUD refuses a unit's own token.
+
 ### A lead waits for its workers
 
 A lead waits for the workers it put on the farm the way it waits for any

@@ -68,6 +68,23 @@ func (c *Client) url(path string) string {
 	return u
 }
 
+// agentKey carries, in a call's context, the agent its requests name
+// (X-C4-Agent) in place of the client's: a lead's tools name its session.
+type agentKey struct{}
+
+// asAgent is ctx with its requests naming agent.
+func asAgent(ctx context.Context, agent string) context.Context {
+	return context.WithValue(ctx, agentKey{}, agent)
+}
+
+// agentOf is the agent ctx's requests name, else def.
+func agentOf(ctx context.Context, def string) string {
+	if a, ok := ctx.Value(agentKey{}).(string); ok && a != "" {
+		return a
+	}
+	return def
+}
+
 func (c *Client) do(ctx context.Context, method, path string, body, out any) error {
 	var rd io.Reader
 	if body != nil {
@@ -87,8 +104,8 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 	if c.Installer != "" {
 		req.Header.Set("X-C4-Installer", c.Installer)
 	}
-	if c.Agent != "" {
-		req.Header.Set("X-C4-Agent", c.Agent)
+	if a := agentOf(ctx, c.Agent); a != "" {
+		req.Header.Set("X-C4-Agent", a)
 	}
 	if body != nil {
 		req.Header.Set("Content-Type", "application/json")
