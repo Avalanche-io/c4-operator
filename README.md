@@ -11,9 +11,10 @@ is named by what's in it, so each one leaves storage about once, however many
 machines read it. Every output is a version, and every step the farm takes is
 signed by whoever took it.
 
-C4 IDs are SMPTE ST 2114, written by Joshua Kolden and public since 2015; this
-is the major release of a design that goes back to 2011. C4 is short for The
-Cinema Content Creation Cloud ([cccc.io](https://cccc.io)).
+C4 IDs are SMPTE ST 2114, authored by Joshua Kolden and public since 2015. This
+release continues a design that began as a 2011 cloud queue and a 2017
+Kubernetes system. C4 is short for The Cinema Content Creation Cloud
+([cccc.io](https://cccc.io)).
 
 ![A shot in the C4 HUD: one row per frame, the work flowing from simulation to delivery](docs/images/hud-job-render-binary-order.webp)
 
