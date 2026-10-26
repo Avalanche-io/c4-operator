@@ -323,15 +323,18 @@ func TestAccountHoldNamesOnlyWithinTheProject(t *testing.T) {
 // An account is a holder's sign-in: two leases of one sign-in under one
 // holder are one account, so one's limit holds the other's units too.
 // The sign-in label alone is never the account, since a holder writes
-// it: two holders who share a label are held apart. A lease with no
-// label is its own account.
+// it: two holders who share a label are held apart. The holder counts
+// only when the farm verified the lease was made by its holder: one made
+// by someone else, naming that holder and copying their label, is its
+// own account. A lease with no label is its own account.
 func TestTheAccountIsTheHoldersSignIn(t *testing.T) {
 	ns, q, now, _ := graphFarm(t)
 	ctx := context.Background()
 	pool := "cpu-" + ns
-	for name, l := range map[string][2]string{
-		"noor-a": {"noor", "signin-1"}, "noor-b": {"noor", "signin-1"}, "ivo-a": {"ivo", "signin-1"},
-		"noor-c": {"noor", ""}, "noor-d": {"noor", ""},
+	for name, l := range map[string][3]string{
+		// holder, sign-in label, the farm's HolderVerified
+		"noor-a": {"noor", "signin-1", "True"}, "noor-b": {"noor", "signin-1", "True"}, "ivo-a": {"ivo", "signin-1", "True"},
+		"posed": {"noor", "signin-1", "False"}, "noor-c": {"noor", "", "True"}, "noor-d": {"noor", "", "True"},
 	} {
 		activeLease(t, ns, name, pool, *now)
 		var cl c4v1.CredentialLease
@@ -345,6 +348,11 @@ func TestTheAccountIsTheHoldersSignIn(t *testing.T) {
 		if err := k8s.Update(ctx, &cl); err != nil {
 			t.Fatal(err)
 		}
+		meta.SetStatusCondition(&cl.Status.Conditions, metav1.Condition{Type: c4v1.ConditionHolderVerified,
+			Status: metav1.ConditionStatus(l[2]), Reason: "Test", ObservedGeneration: cl.Generation})
+		if err := k8s.Status().Update(ctx, &cl); err != nil {
+			t.Fatal(err)
+		}
 	}
 	key := func(lease string) string {
 		spec := &corev1.PodSpec{Volumes: []corev1.Volume{{Name: "lease",
@@ -356,6 +364,9 @@ func TestTheAccountIsTheHoldersSignIn(t *testing.T) {
 	}
 	if a, b := key("noor-a"), key("ivo-a"); a == b {
 		t.Errorf("two holders sharing a label share an account %q", a)
+	}
+	if p := key("posed"); p == "" || p == key("noor-a") {
+		t.Errorf("a lease another made, naming noor with her label, joined her account %q", p)
 	}
 	if c, d := key("noor-c"), key("noor-d"); c == "" || c == d || c == key("noor-a") {
 		t.Errorf("unlabelled leases: %q and %q, want each its own", c, d)

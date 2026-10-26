@@ -72,8 +72,12 @@ type accountHold struct {
 // leases of one sign-in share a hold; it is never the sign-in label
 // alone, which the holder writes, so no one can tie their limits to
 // another person's work. A lease with no sign-in label is its own
-// account. The label is a hash, as the HUD's is of a sign-in, so status
-// and messages carry no lease or holder name.
+// account. The holder counts only when the farm verified it (the lease's
+// creator is its holder, HolderVerified), since spec.holder is the
+// creator's own words: a lease someone else made, naming a holder and
+// copying their label, is its own account. The label is a hash, as the
+// HUD's is of a sign-in, so status and messages carry no lease or holder
+// name.
 func (q *Queue) leaseAccount(ctx context.Context, ns string, spec *corev1.PodSpec) string {
 	names := map[string]bool{}
 	for _, name := range leaseVolumes(spec) {
@@ -86,7 +90,7 @@ func (q *Queue) leaseAccount(ctx context.Context, ns string, spec *corev1.PodSpe
 		key := "lease\x00" + ns + "/" + name
 		var l c4v1.CredentialLease
 		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &l); err == nil {
-			if a := l.Labels[c4v1.LabelAccount]; a != "" && l.Spec.Holder != "" {
+			if a := l.Labels[c4v1.LabelAccount]; a != "" && l.Spec.Holder != "" && holderVerified(&l) {
 				key = "account\x00" + l.Spec.Holder + "\x00" + a
 			}
 		}
@@ -94,6 +98,14 @@ func (q *Queue) leaseAccount(ctx context.Context, ns string, spec *corev1.PodSpe
 		return hex.EncodeToString(sum[:])[:12]
 	}
 	return ""
+}
+
+// holderVerified reports whether the farm found lease l made by its
+// holder, for the lease as it is now (its condition observed this
+// generation).
+func holderVerified(l *c4v1.CredentialLease) bool {
+	c := meta.FindStatusCondition(l.Status.Conditions, c4v1.ConditionHolderVerified)
+	return c != nil && c.Status == metav1.ConditionTrue && c.ObservedGeneration == l.Generation
 }
 
 // maxUsageWait bounds how long a stated reset holds a unit: the longest

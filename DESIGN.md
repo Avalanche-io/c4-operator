@@ -2228,8 +2228,11 @@ and a sweep planner that spawns trials are all generators.
       account is the lease's holder and the sign-in its lease agent
       stamps on it (`c4.avalanche.io/account`), so a holder's leases of
       one sign-in share a hold; never the sign-in label alone, which the
-      holder writes, so two holders are never held together. A lease with
-      no sign-in label is its own account. Once a unit on an account hits
+      holder writes, so two holders are never held together. The holder
+      counts only when the farm verified the lease's creator is its
+      holder (`HolderVerified`), so a lease made by someone else is its
+      own account, whatever holder and label it names. A lease with no
+      sign-in label is its own account. Once a unit on an account hits
       a limit, every model unit of every job on it waits until the same
       reset (the later, of
       two), spending no attempt and keeping its view. The hold is the
