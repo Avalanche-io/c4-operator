@@ -2032,6 +2032,12 @@ spec:
                     said, when it hit, and until when the unit waits (Probe when the limit
                     did not say, and the wait is usage.limitProbe).
                   properties:
+                    account:
+                      description: |-
+                        Account is an opaque label of the model account the unit hit the
+                        limit on (its credential lease), when it ran on one: every unit on
+                        that account, in any job, waits until the same reset.
+                      type: string
                     at:
                       format: date-time
                       type: string

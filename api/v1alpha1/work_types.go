@@ -1532,7 +1532,8 @@ const (
 const UsageLimitExitCode = 75
 
 // ConditionUsageLimit is True while units of the job wait for a model's
-// usage limit to reset; its message says until when.
+// usage limit to reset, their own or one another unit on their account
+// hit; its message says until when.
 const ConditionUsageLimit = "UsageLimit"
 
 // WorkUsageLimit is a unit held for a model's usage limit: what the limit
@@ -1544,6 +1545,11 @@ type WorkUsageLimit struct {
 	Until metav1.Time `json:"until"`
 	// +optional
 	Probe bool `json:"probe,omitempty"`
+	// Account is an opaque label of the model account the unit hit the
+	// limit on (its credential lease), when it ran on one: every unit on
+	// that account, in any job, waits until the same reset.
+	// +optional
+	Account string `json:"account,omitempty"`
 }
 
 // Withdrawn is the reason of a re-check attempt (AnnotationRecheck) whose
