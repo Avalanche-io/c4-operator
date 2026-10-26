@@ -27,7 +27,13 @@ import (
 // store lacks is uploaded, the view the farm records has the same ID, the
 // job is created owned by the viewer, and the files come back with their
 // IDs checked.
+// asAPerson runs a test of the CLI as a person at a shell would, whatever
+// shell runs the suite (an agent's included): inside Claude Code the CLI
+// refuses some sends.
+func asAPerson(t *testing.T) { t.Setenv("CLAUDECODE", "") }
+
 func TestFarmCLIAgainstTheHUD(t *testing.T) {
+	asAPerson(t)
 	s := submitFarm(t)
 	la, _ := time.LoadLocation("America/Los_Angeles")
 	now := time.Date(2026, 10, 23, 14, 10, 0, 0, la)
@@ -139,6 +145,7 @@ func TestUnknownAPICallIsJSON404(t *testing.T) {
 // CLI uploads the folder, the farm runs its test (played here), the CLI
 // waits for the result, and the tool is then listed and described.
 func TestFarmCLIPublishesATool(t *testing.T) {
+	asAPerson(t)
 	s := toolFarm(t)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -193,6 +200,7 @@ func TestFarmCLIPublishesATool(t *testing.T) {
 // jobs in the order written, and they are created with the folder as the
 // submission's root.
 func TestFarmCLISubmitsAFile(t *testing.T) {
+	asAPerson(t)
 	s := submissionFarm(t)
 	ts := httptest.NewServer(s.Handler())
 	defer ts.Close()
@@ -210,7 +218,7 @@ func TestFarmCLISubmitsAFile(t *testing.T) {
 	if err != nil || len(plan.Jobs) != 2 || plan.Jobs[0].Name != "sm0140-proxies-v001" || plan.Jobs[1].Name != "sm0140-movie-v001" {
 		t.Fatalf("plan %+v %v\n%s", plan, err, out.String())
 	}
-	if !strings.Contains(out.String(), "  files     2 files found · ") || strings.Contains(out.String(), "uploaded") || !strings.Contains(out.String(), "sm0140-movie-v001   ") || !strings.Contains(out.String(), "note      ") {
+	if !strings.Contains(out.String(), "  files     2 files in "+dir+" · ") || strings.Contains(out.String(), "uploaded") || !strings.Contains(out.String(), "sm0140-movie-v001   ") || !strings.Contains(out.String(), "note      ") {
 		t.Errorf("plan output:\n%s", out.String())
 	}
 	out.Reset()
