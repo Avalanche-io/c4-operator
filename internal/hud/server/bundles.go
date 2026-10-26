@@ -75,6 +75,11 @@ func (s *Server) handleBundleCreate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	out.Namespace = ns
+	if leadOnly(v, projectObject(m, project)) {
+		// a bundle starts agents: a worker may not start workers, by any door
+		refuse(http.StatusForbidden, api.FieldError{Path: "members", Message: leadOnlyMessage, Fix: leadOnlyFix})
+		return
+	}
 	ctx := r.Context()
 	b, errs, warnings := s.checkBundle(r, m, v, ns, body)
 	out.Warnings = warnings
@@ -354,7 +359,7 @@ func (s *Server) liveBundle(w http.ResponseWriter, r *http.Request) (*c4v1.Agent
 // stop at their next turn's end and the bundle goes.
 func (s *Server) handleBundleDelete(w http.ResponseWriter, r *http.Request) {
 	b, _, v := s.liveBundle(w, r)
-	if b == nil {
+	if b == nil || unitOnOthersBundle(w, v, b) {
 		return
 	}
 	ctx := r.Context()
@@ -371,12 +376,25 @@ func (s *Server) handleBundleDelete(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "message": b.Name + ": stopped and removed", "record": id})
 }
 
+const errUnitBundles = "a unit cannot hold or remove a person's agents: the person, or a project admin, does"
+
+// unitOnOthersBundle refuses a unit's hold or removal of a bundle that is
+// not its own, as a unit revokes no person's grant: a block pod would
+// otherwise stop what a person started. It says whether it refused.
+func unitOnOthersBundle(w http.ResponseWriter, v *api.Viewer, b *c4v1.AgentBundle) bool {
+	if v == nil || v.Unit == nil || b.Annotations[c4v1.AnnotationOwner] == v.User {
+		return false
+	}
+	fail(w, http.StatusForbidden, errUnitBundles)
+	return true
+}
+
 // handleBundleSuspend is POST /bundles/{project}/{name}/suspend
 // {suspend}: hold the bundle (its members stop at their next turn's end)
 // or let it run again.
 func (s *Server) handleBundleSuspend(w http.ResponseWriter, r *http.Request) {
 	b, _, v := s.liveBundle(w, r)
-	if b == nil {
+	if b == nil || unitOnOthersBundle(w, v, b) {
 		return
 	}
 	var body struct {

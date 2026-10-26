@@ -12,6 +12,7 @@ import (
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/hud/api"
+	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 )
 
 // bundleFarm adds an agent pool that runs maya's work, served by a runner
@@ -110,5 +111,66 @@ func TestBundleEndpoint(t *testing.T) {
 	if code, out := post(`{"members": ["research"]}`); code != http.StatusUnprocessableEntity || out.Errors[0].Fix != "c4 farm up makes one for this machine" ||
 		!strings.Contains(out.Errors[0].Message, "runs only the agents of noor") {
 		t.Fatalf("someone else's pool: %d %+v", code, out.Errors)
+	}
+}
+
+// A bundle starts agents, so a unit is held to agents.submit lead there
+// as at /submissions, and holds or removes no person's bundle; a person,
+// and a unit where the project says anyone, still start one.
+func TestAUnitsBundleNeedsALead(t *testing.T) {
+	s := bundleFarm(t)
+	ctx := context.Background()
+	parent := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "port", UID: "uid-port",
+		Annotations: map[string]string{c4v1.AnnotationOwner: "maya"}},
+		Spec: c4v1.WorkJobSpec{Class: "graph", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+	if err := s.Client.Create(ctx, parent); err != nil {
+		t.Fatal(err)
+	}
+	s.DevViewers["unit"] = &api.Viewer{User: "unit:show-a/port/0", Projects: []string{"show-a"},
+		Unit: &api.UnitViewer{Namespace: "show-a", Job: "port", JobUID: string(parent.UID), Unit: "0", Grant: "project"}}
+	for _, dry := range []string{"true", "false"} {
+		var out api.BundleResponse
+		code := call(t, s, http.MethodPost, "/api/v1/bundles/show-a?as=unit", []byte(`{"members": ["research"], "dryRun": `+dry+`}`), &out)
+		if code != http.StatusForbidden || out.OK || len(out.Errors) != 1 || out.Errors[0].Message != leadOnlyMessage ||
+			!strings.Contains(out.Errors[0].Fix, "agents.submit: anyone") {
+			t.Fatalf("a unit's bundle (dry run %s): %d %+v", dry, code, out)
+		}
+	}
+	var list c4v1.AgentBundleList
+	if err := s.Client.List(ctx, &list); err != nil || len(list.Items) != 0 {
+		t.Fatalf("a refused bundle was made: %d", len(list.Items))
+	}
+
+	// A person's bundle: the unit may neither hold nor remove it.
+	if code := call(t, s, http.MethodPost, "/api/v1/bundles/show-a?as=artist", []byte(`{"members": ["research"]}`), nil); code != http.StatusCreated {
+		t.Fatalf("a person's bundle: %d", code)
+	}
+	for _, c := range []struct{ method, path string }{
+		{http.MethodPost, "/api/v1/bundles/show-a/agents/suspend?as=unit"},
+		{http.MethodDelete, "/api/v1/bundles/show-a/agents?as=unit"},
+	} {
+		var refused map[string]string
+		var body any
+		if c.method == http.MethodPost {
+			body = []byte(`{"suspend": true}`)
+		}
+		if code := call(t, s, c.method, c.path, body, &refused); code != http.StatusForbidden || refused["error"] != errUnitBundles {
+			t.Fatalf("%s %s: %d %v", c.method, c.path, code, refused)
+		}
+	}
+	var b c4v1.AgentBundle
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "agents"}, &b); err != nil || b.Spec.Suspend {
+		t.Fatalf("the person's bundle after the unit's tries: %v suspend %v", err, b.Spec.Suspend)
+	}
+
+	// agents.submit: anyone lets the unit start one.
+	for i := range s.m.projects {
+		if s.m.projects[i].Name == "show-a" {
+			s.m.projects[i].Spec.Work = &c4v1.ProjectWork{Policy: &c4v1.ProjectPolicy{Values: map[string]string{policy.AgentsSubmit: policy.SubmitAnyone}}}
+		}
+	}
+	var out api.BundleResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/bundles/show-a?as=unit", []byte(`{"members": ["research"], "dryRun": true}`), &out); code == http.StatusForbidden {
+		t.Fatalf("a unit's bundle with agents.submit anyone: %d %+v", code, out)
 	}
 }
