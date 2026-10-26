@@ -1186,7 +1186,7 @@ func (s *Server) handleSupply(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "%s", why)
 		return
 	}
-	if why := leadQuestionRefusal(r, v, j, ref, "answers it"); why != "" {
+	if why := s.leadQuestionRefusal(r, v, j, ref, "answers it"); why != "" {
 		fail(w, http.StatusForbidden, "%s", why)
 		return
 	}
@@ -1295,7 +1295,7 @@ func (s *Server) handleWithdrawNeeds(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusConflict, "%s", why)
 		return
 	}
-	if why := leadQuestionRefusal(r, v, j, ref, "withdraws it"); why != "" {
+	if why := s.leadQuestionRefusal(r, v, j, ref, "withdraws it"); why != "" {
 		fail(w, http.StatusForbidden, "%s", why)
 		return
 	}

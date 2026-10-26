@@ -240,3 +240,22 @@ func TestAppendToLeadJob(t *testing.T) {
 		t.Fatalf("its person: %d %s", code, body)
 	}
 }
+
+// On a one-person farm a role's sign-in is that person acting in the
+// role (ownerFor): it adds workers to, and closes, the person's lead's
+// job, as the person would.
+func TestARoleActsForItsPersonsLead(t *testing.T) {
+	s := leadJobFarm(t, nil)
+	b := &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "dana", To: "laptop-1/*", OnePerson: true, For: []string{"task/v1"}, Start: metav1.Now(), By: "dana"}}
+	if err := s.Client.Create(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	s.DevViewersOpen, s.InstallerToken = false, []byte("test-token")
+	s.DevViewers["artist"] = &api.Viewer{User: "artist", Projects: []string{"show-a"}}
+	h := leadHeader("session-1")
+	h[InstallerHeader] = "test-token"
+	if code, msg, raw := post(t, s, "/api/v1/jobs/show-a/noor-lead/close", "artist", api.CloseRequest{Why: "done"}, h); code != http.StatusOK || !strings.Contains(string(raw), `"state":"closing"`) {
+		t.Fatalf("the role's close: %d %q %s", code, msg, raw)
+	}
+}

@@ -35,15 +35,17 @@ const maxCloseWhy = 1000
 // leadActRefusal says why request r, made as viewer v, may not act for job
 // j's lead or its person ("" when it may): act is what it would do, as in
 // "closes it". The person may, directly or with the agent header naming
-// the job's session; no one else, and no other session, may.
-func leadActRefusal(r *http.Request, v *api.Viewer, j *c4v1.WorkJob, act string) string {
+// the job's session; no one else, and no other session, may. The person is
+// v as ownerFor resolves it, so a role's sign-in on a one-person farm acts
+// for that farm's person.
+func (s *Server) leadActRefusal(r *http.Request, v *api.Viewer, j *c4v1.WorkJob, act string) string {
 	owner, session := j.Annotations[c4v1.AnnotationOwner], j.Annotations[c4v1.AnnotationLeadSession]
 	switch h := claimedAgent(r); {
 	case v.Unit != nil:
 		return fmt.Sprintf("a unit is not %s's lead: only its person, or that lead, %s", j.Name, act)
 	case owner == "":
 		return fmt.Sprintf("%s has no owner on record, so no one %s", j.Name, act)
-	case v.User != owner:
+	case s.ownerFor(r.Context(), v) != owner:
 		return fmt.Sprintf("%s is %s's job, made for their lead (session %s): only %s, or that lead, %s", j.Name, owner, session, owner, act)
 	case h != "" && h != session:
 		return fmt.Sprintf("%s is the job of lead session %s, and the agent header (X-C4-Agent) names session %s: only that lead, or %s with no agent header, %s",
@@ -57,14 +59,15 @@ func leadActRefusal(r *http.Request, v *api.Viewer, j *c4v1.WorkJob, act string)
 // when the question is j's lead's (spec.answers.by lead): "" when it may,
 // or when the question is a person's, whom the control's own rules serve.
 // A lead's question is answered by that lead, through its person's client
-// with the agent header naming its session, or by the person directly.
-func leadQuestionRefusal(r *http.Request, v *api.Viewer, j *c4v1.WorkJob, ref, act string) string {
+// with the agent header naming its session, or by the person directly
+// (as ownerFor resolves the viewer).
+func (s *Server) leadQuestionRefusal(r *http.Request, v *api.Viewer, j *c4v1.WorkJob, ref, act string) string {
 	owner, session := j.Annotations[c4v1.AnnotationOwner], j.Annotations[c4v1.AnnotationLeadSession]
 	if session == "" || j.Spec.Answers == nil || j.Spec.Answers.By != c4v1.AnswersByLead {
 		return ""
 	}
 	switch h := claimedAgent(r); {
-	case owner == "" || v.User != owner:
+	case owner == "" || s.ownerFor(r.Context(), v) != owner:
 		return fmt.Sprintf("unit %q's question is for %s's lead (session %s): only %s, or that lead, %s", ref, or(owner, "its person"), session, or(owner, "its person"), act)
 	case h != "" && h != session:
 		return fmt.Sprintf("unit %q's question is for the lead of session %s, and the agent header (X-C4-Agent) names session %s: only that lead, or %s with no agent header, %s",
@@ -137,7 +140,7 @@ func (s *Server) handleClose(w http.ResponseWriter, r *http.Request) {
 			fail(w, http.StatusUnprocessableEntity, "%s is not a lead's job: it finishes once its units have, and is never closed", j.Name)
 			return
 		}
-		if why := leadActRefusal(r, v, j, "closes it"); why != "" {
+		if why := s.leadActRefusal(r, v, j, "closes it"); why != "" {
 			fail(w, http.StatusForbidden, "%s", why)
 			return
 		}

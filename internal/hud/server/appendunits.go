@@ -125,13 +125,13 @@ func (s *Server) appendOnce(ctx context.Context, r *http.Request, v *api.Viewer,
 	switch owner := j.Annotations[c4v1.AnnotationOwner]; {
 	case owner == "":
 		return none, http.StatusForbidden, fmt.Errorf("%s has no owner on record, so no one adds units to it", j.Name)
-	case owner != v.User:
+	case owner != s.ownerFor(ctx, v):
 		return none, http.StatusForbidden, fmt.Errorf("%s is %s's job: only %s, or an agent of theirs, adds units to it", j.Name, owner, owner)
 	}
 	if j.Annotations[c4v1.AnnotationLeadSession] != "" {
 		// A lead's job grows by its own lead, or its person directly;
 		// never from another session (leadjob.go).
-		if why := leadActRefusal(r, v, j, "adds workers to it"); why != "" {
+		if why := s.leadActRefusal(r, v, j, "adds workers to it"); why != "" {
 			return none, http.StatusForbidden, errors.New(why)
 		}
 	}
