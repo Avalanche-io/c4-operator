@@ -537,6 +537,29 @@ be read. `ended` is how the current pod's attempt
 ended, in its runner's words (`Completed`, or `BlockGaveUp` with why). `expandedInto` is a unit set. `events[].type` is `Normal` or
 `Warning`, as in Kubernetes Events.
 
+## GET /jobs/{ns}/{name}/wait?unit={u}[&unit={u}...][&any=true][&within={d}]
+
+```
+{ done, units: [ { job, unit, name?, label?, state, settled?,
+                   summary?: { excerpt?, text?, textError?, by: "unit", attempt?, doc, error? },
+                   branch?: { unit, name?, repo, branch, base, head?, commits },
+                   durationSeconds?, ended?: { phase, reason?, message? },
+                   question?: { kind, text, why?, at } } ] }
+```
+
+A long poll for a lead's wait (`c4 farm wait`). Each `unit` is a unit's name
+or index. It answers as soon as every unit named, or with `any=true` one of
+them, has **settled**: `ended` (succeeded, failed, superseded or accepted)
+or `asks` (stopped on a question, which `question` gives; answer it with
+`c4_supply`). Otherwise it answers when `within` has passed (default 25s,
+at most 5m, inside common proxy timeouts) with `done: false` and the units
+as they stand. A settled unit carries what a lead acts on: its summary (the
+unit's own words, `text` the whole of it from the store), its branch, its
+run time and how its attempt ended. The HUD answers from its own picture of
+the farm, looked at each second, so a waiting lead never polls the farm.
+`404` names a unit the job lacks or a job that is gone; a viewer sees only
+jobs in projects it may see.
+
 ## GET /jobs/{ns}/{name}/preview
 
 ```

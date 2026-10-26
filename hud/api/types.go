@@ -1144,3 +1144,60 @@ type HostPodJob struct {
 	// Project is the project of the pod's namespace.
 	Project string `json:"project,omitempty"`
 }
+
+// WaitAnswer is GET /jobs/{ns}/{name}/wait: the units waited on, each as it
+// stands, and whether the wait is over (one of them, with any, or all of
+// them settled: ended, or stopped on a question).
+type WaitAnswer struct {
+	Done  bool         `json:"done"`
+	Units []UnitResult `json:"units"`
+}
+
+// UnitResult is one unit as a lead's wait reads it: its state, and once it
+// settles, how: its result (its summary, in its own words, and its
+// branch) or the question it stopped on.
+type UnitResult struct {
+	// Job is the unit's job, namespace/name.
+	Job   string `json:"job"`
+	Unit  int    `json:"unit"`
+	Name  string `json:"name,omitempty"`
+	Label string `json:"label,omitempty"`
+	State string `json:"state"`
+	// Settled is "ended" or "asks" once the unit settles, else empty.
+	Settled         string        `json:"settled,omitempty"`
+	Summary         *UnitSummary  `json:"summary,omitempty"`
+	Branch          *UnitBranch   `json:"branch,omitempty"`
+	DurationSeconds float64       `json:"durationSeconds,omitempty"`
+	Ended           *UnitEnded    `json:"ended,omitempty"`
+	Question        *UnitQuestion `json:"question,omitempty"`
+}
+
+// UnitSummary is the summary of its task a unit wrote (.c4/done): By is
+// always "unit", its own words, not something the farm checked. Text is
+// the whole of it from the store, or TextError says why it could not be
+// read; Error says why the queue could not read it.
+type UnitSummary struct {
+	Excerpt   string `json:"excerpt,omitempty"`
+	Text      string `json:"text,omitempty"`
+	TextError string `json:"textError,omitempty"`
+	By        string `json:"by"`
+	Attempt   int32  `json:"attempt,omitempty"`
+	Doc       string `json:"doc"`
+	Error     string `json:"error,omitempty"`
+}
+
+// UnitEnded is how a unit's last attempt ended, in its runner's words.
+type UnitEnded struct {
+	Phase   string `json:"phase"`
+	Reason  string `json:"reason,omitempty"`
+	Message string `json:"message,omitempty"`
+}
+
+// UnitQuestion is what a unit stopped for: information only someone else
+// could give (NeedsInformation), answered with c4_supply.
+type UnitQuestion struct {
+	Kind string    `json:"kind"`
+	Text string    `json:"text"`
+	Why  string    `json:"why,omitempty"`
+	At   time.Time `json:"at"`
+}

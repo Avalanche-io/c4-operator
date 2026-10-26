@@ -683,6 +683,29 @@ So the block takes them into account in the same attempt. A step or a
 turn the farm stops at reads none, and they wait for the attempt that
 resumes it.
 
+### A lead waits for its workers
+
+A lead waits for the workers it put on the farm the way it waits for any
+background work: it runs `c4 farm wait` as a background command, and Claude
+Code tells it when the command exits. The command exits once:
+
+```
+c4 farm wait lead-3f2a/review-1 lead-3f2a/review-2 lead-3f2a/review-3 --any
+```
+
+- A unit is `job/unit` or `namespace/job/unit`, by its name or its index.
+  Without `--any` it waits for all of them; with it, for the first.
+- It prints each unit that settled: its state and run time; its summary,
+  marked as the unit's own words; its branch (commits, base and head); and
+  how a failed attempt ended. A unit that stopped on a question prints the
+  question and how to answer it (`c4_supply`).
+- Exit 0 when what settled succeeded, 1 when one failed, 10 when one asks
+  something, 2 when `--timeout` passed first (it prints what is still
+  waiting). `--json` prints the same as the HUD's wait answer.
+- It long-polls the HUD (`GET /jobs/{ns}/{name}/wait`, at most one request
+  per job at a time), so nothing polls the farm, and it waits through a HUD
+  that stops answering, saying so once.
+
 ## Blocks in containers, and sessions as views
 
 A block can run in a unit pod as well as on a host runner. Its session
