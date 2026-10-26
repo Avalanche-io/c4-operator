@@ -64,6 +64,11 @@ const (
 	// of the verdict it wrote (.c4/verdict.json), stored by the node daemon
 	// at capture.
 	AnnotationOutputVerdict = "c4.avalanche.io/output-verdict"
+	// AnnotationOutputSummary on a finished unit's pod is the C4 ID of the
+	// summary of its task it wrote (.c4/done, the unit's own words, cut to
+	// node.MaxSummary with home paths written from ~), stored at capture
+	// or by the host runner.
+	AnnotationOutputSummary = "c4.avalanche.io/output-summary"
 	// AnnotationOutputMeasure on a finished unit pod is the C4 ID of the
 	// measure reading it wrote (.c4/measure.json), stored at capture.
 	AnnotationOutputMeasure = "c4.avalanche.io/output-measure"
@@ -481,6 +486,11 @@ type WorkJobStatus struct {
 	// are its output.
 	// +optional
 	UnitBranches map[string]WorkUnitBranch `json:"unitBranches,omitempty"`
+	// UnitSummaries maps a unit's index to the summary of its task its
+	// last finished attempt wrote (.c4/done): the unit's own words, not
+	// something the farm checked, cut to 4 KiB.
+	// +optional
+	UnitSummaries map[string]WorkUnitSummary `json:"unitSummaries,omitempty"`
 	// Verdicts lists the most recent verdicts review units wrote, each
 	// carried out once.
 	// +optional
@@ -705,6 +715,17 @@ type WorkUnitBranch struct {
 	Head    string `json:"head,omitempty"`
 	Commits int32  `json:"commits"`
 	// Attempt is the attempt that recorded it.
+	// +optional
+	Attempt int32 `json:"attempt,omitempty"`
+}
+
+// WorkUnitSummary is a unit's own summary of its task.
+type WorkUnitSummary struct {
+	// Text is what the unit wrote, as the farm keeps it.
+	Text string `json:"text"`
+	// Doc is the C4 ID of the stored summary (AnnotationOutputSummary).
+	Doc string `json:"doc"`
+	// Attempt is the attempt that wrote it.
 	// +optional
 	Attempt int32 `json:"attempt,omitempty"`
 }

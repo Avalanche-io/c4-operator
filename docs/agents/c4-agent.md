@@ -599,12 +599,19 @@ across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
     note is withdrawn), the runner wakes the same session for that part, in
     the same attempt, so every part's end is a safe point and a turn
     boundary;
-  - if the block wrote **`.c4/done`** (its one-line summary), or the CLI
-    reports it `done`, the pod is **Completed**. Its control documents come
-    from its own output directory only; block sessions share their folder,
-    so the folder's `.c4/` never counts. The block's own word decides: the
-    CLI's state is a reading of its last message, which can call a finished
-    task blocked;
+  - if the block wrote **`.c4/done`** (its one-line summary), the pod is
+    **Completed**. Its control documents come from its own output directory
+    only; block sessions share their folder, so the folder's `.c4/` never
+    counts. The block's own word decides: the CLI's state is a reading of
+    its last message, which can call a finished task blocked;
+  - the summary is the block's result, on a host as in a pod: the runner
+    stores it (trimmed, cut to 4 KiB, home paths written from `~`) and
+    names it on the pod (`c4.avalanche.io/output-summary`), and the queue
+    keeps it in the job's status (`unitSummaries`), where `c4_get_unit`,
+    the HUD and a lead's wait read it beside the block's branch. It is the
+    block's own words, not something the farm checked. A block the CLI
+    reports `done` that wrote none fails (**BlockGaveUp**, "the block ended
+    without its summary in .c4/done");
   - otherwise it gave up, and the attempt fails (**BlockGaveUp**), for the
     job's retries or a person.
 - **A yield waits for the farm's decision.** A block asked to yield (a

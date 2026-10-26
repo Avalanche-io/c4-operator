@@ -309,6 +309,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 		}
 	}
 	st.UnitBranches = m.branchStatus()
+	st.UnitSummaries = m.summaryStatus()
 	for _, y := range m.yields[max(0, len(m.yields)-8):] {
 		st.Yields = append(st.Yields, c4v1.WorkYield{Unit: int32(y.Unit), At: metav1.Time{Time: y.At.Truncate(time.Second)}, Reason: y.Reason, View: y.View})
 	}

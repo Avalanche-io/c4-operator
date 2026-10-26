@@ -244,13 +244,18 @@ type relayState struct {
 
 // controlDocs are the documents a member leaves for the farm, as a pod
 // leaves them in its .c4/ (node/control.go): a generator's expansion
-// document, a review unit's verdict, a measure of the job's done, and a
-// model unit's token use.
-var controlDocs = []struct{ file, what, annotation string }{
-	{"expand.json", "expansion document", c4v1.AnnotationOutputExpand},
-	{"verdict.json", "verdict", c4v1.AnnotationOutputVerdict},
-	{"measure.json", "measure", c4v1.AnnotationOutputMeasure},
-	{"usage.json", "token use", c4v1.AnnotationOutputUsage},
+// document, a review unit's verdict, a measure of the job's done, a model
+// unit's token use, and a block's summary of its task. clean, when set, is
+// what the farm keeps of it.
+var controlDocs = []struct {
+	file, what, annotation string
+	clean                  func([]byte) []byte
+}{
+	{"expand.json", "expansion document", c4v1.AnnotationOutputExpand, nil},
+	{"verdict.json", "verdict", c4v1.AnnotationOutputVerdict, nil},
+	{"measure.json", "measure", c4v1.AnnotationOutputMeasure, nil},
+	{"usage.json", "token use", c4v1.AnnotationOutputUsage, nil},
+	{"done", "summary", c4v1.AnnotationOutputSummary, node.Summary},
 }
 
 // storeControlDocs stores the control documents a member wrote and names
@@ -271,6 +276,11 @@ func (r *Runner) storeControlDocs(ctx context.Context, p *corev1.Pod, m *Member,
 		data, from, err := readControlDoc(cd.file, dirs...)
 		if err != nil {
 			return err
+		}
+		if from != "" && cd.clean != nil {
+			if data = cd.clean(data); len(data) == 0 {
+				continue
+			}
 		}
 		if from == "" {
 			continue

@@ -370,7 +370,7 @@ A JobSummary with these fields added:
   axis: { kind, start?, step?, labels?, batch? },
   groups: [ { key, label, units, generator?, spans?, parent? } ],
   unitList?: [ { i, label, state, attempts, node?, group, pos, risk?,
-                 name?, reasoning?, usage?, reused?, parent?, exists?, blockedOn?, claims?, lockedBy?, review?, safepoint?, stopping?, branch?,
+                 name?, reasoning?, usage?, reused?, parent?, exists?, blockedOn?, claims?, lockedBy?, review?, safepoint?, stopping?, branch?, summary?,
                  work: { spent, expected }, reads?: [ { job, units } ], eta? } ],
   riskUnits,
   progress: { "<i>": { fraction, measured } },
@@ -395,6 +395,7 @@ A JobSummary with these fields added:
 | `unitList[].state`     | a `unitStates` key, or `held`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | `unitList[].preflight` | for a unit in `preflight`: `{ step, bytes?, of? }`; `step` is `place` (waiting for a node), `stage` (inputs), `fetch` (cache), `image`, `license` or `start`. The node daemon and class drivers report steps in the pod's `c4.avalanche.io/preflight` annotation; otherwise the step comes from the pod's status                                                                                                                                                                                                                                                                                                                                                |
 | `unitList[].egress`    | for a unit in `egress`: `{ bytes?, of?, sealed, folded, verified }`; `sealed` once the output is captured (it has a C4 ID); the bytes come from the pod's `c4.avalanche.io/egress` annotation                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| `unitList[].summary`   | the summary of its task the unit's last finished attempt wrote (`.c4/done`), from `status.unitSummaries`: `{ text, by: "unit", attempt, doc }`. It is the unit's own words, not something the farm checked; `doc` is the stored document's C4 ID, and `text` is cut to 4 KiB with home paths written from `~` |
 | `unitList[].branch`    | the unit's git branch, as in the snapshot's `branches`: `{ repo, branch, base, head, commits }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 | `unitList[].ack`       | for a failed unit someone took: `{ kind, actor, assignee?, note?, at, record? }`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
 | `unitList[].accepted`  | for an accepted unit: who accepted it and when, the same shape                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -520,11 +521,17 @@ fraction its latest checkpoint saved.
 { i, label, state,
   attempts: [ { n, node, start, end?, exitCode?, reason? } ],
   estimateSeconds, durationSeconds?, logTail[], events: [ { type, reason, message, at } ],
-  outputChangeset?, expandedInto? }
+  outputChangeset?, expandedInto?,
+  branch?: { repo, branch, base, head, commits },
+  summary?: { text, by: "unit", attempt, doc },
+  ended?: { phase, reason, message } }
 ```
 
 `durationSeconds` is the run time of the last attempt, or the elapsed time of
-a running one. `expandedInto` is a unit set. `events[].type` is `Normal` or
+a running one. `branch` and `summary` are as in the job's `unitList`, and
+stay after the unit's pods are gone: a block's result is its summary (the
+unit's own words) and its branch. `ended` is how the current pod's attempt
+ended, in its runner's words (`Completed`, or `BlockGaveUp` with why). `expandedInto` is a unit set. `events[].type` is `Normal` or
 `Warning`, as in Kubernetes Events.
 
 ## GET /jobs/{ns}/{name}/preview

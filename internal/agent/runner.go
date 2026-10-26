@@ -440,7 +440,12 @@ func (r *Runner) handle(ctx context.Context, p *corev1.Pod) error {
 		case more:
 			r.parts[p.UID] = note
 			r.logf("%s: a part is done; next: %s", m.Name, note)
-		case !act.Done() && !takeDone(u):
+		case !takeDone(u) && act.Done():
+			// the summary is the block's result, on a host as in a pod
+			r.logf("%s: ended without its summary in .c4/done; stopped its session", m.Name)
+			return r.finish(ctx, p, corev1.PodFailed, "BlockGaveUp",
+				"the block ended without its summary in .c4/done (the CLI reports it done); its transcript says why", 1)
+		case !takeDone(u):
 			r.logf("%s: ended its turn without finishing its task (%s); stopped its session", m.Name, act.State)
 			return r.finish(ctx, p, corev1.PodFailed, "BlockGaveUp",
 				fmt.Sprintf("the block ended its turn without finishing its task or noting a next part (the CLI reports it %s); its transcript says why", act.State), 1)

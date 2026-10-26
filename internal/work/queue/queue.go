@@ -241,6 +241,8 @@ type jobMem struct {
 	// branches are units' git branches, as their runners last recorded
 	// them (branch.go).
 	branches map[int]c4v1.WorkUnitBranch
+	// summaries are units' own summaries of their tasks (summary.go).
+	summaries map[int]c4v1.WorkUnitSummary
 	// gateSince is when each unit waiting for a gate joined its line.
 	gateSince map[int]time.Time
 	// measure is the latest reading of the job's measure (measure.go).
@@ -454,6 +456,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 		}
 	}
 	m.loadBranches(st)
+	m.loadSummaries(st)
 	for _, x := range st.Interruptions {
 		m.interruptions = append(m.interruptions, interruptRec{Unit: int(x.Unit), At: x.At.Time, Reason: x.Reason, Node: x.Node})
 	}
@@ -986,6 +989,10 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				continue
 			}
 			if !q.noteSpend(ctx, v, idx, p, pools, float64(runMillis(p, now))/3.6e6) {
+				v.finishing[idx] = true
+				continue
+			}
+			if !q.noteSummary(ctx, v, idx, p) {
 				v.finishing[idx] = true
 				continue
 			}

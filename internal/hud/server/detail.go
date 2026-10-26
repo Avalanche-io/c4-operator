@@ -191,7 +191,10 @@ func (s *Server) jobDetail(m *model, rec *jobRec) map[string]any {
 			e["name"] = u.Name
 		}
 		if b, ok := rec.job.Status.UnitBranches[strconv.Itoa(i)]; ok {
-			e["branch"] = map[string]any{"repo": b.Repo, "branch": b.Branch, "base": b.Base, "head": b.Head, "commits": b.Commits}
+			e["branch"] = branchOut(b)
+		}
+		if sm, ok := rec.job.Status.UnitSummaries[strconv.Itoa(i)]; ok {
+			e["summary"] = summaryOut(sm)
 		}
 		if u.Gate != "" {
 			e["gate"] = u.Gate
@@ -497,6 +500,17 @@ func boolInt(b bool) int {
 	return 0
 }
 
+// branchOut is a unit's git branch as the HUD shows it.
+func branchOut(b c4v1.WorkUnitBranch) map[string]any {
+	return map[string]any{"repo": b.Repo, "branch": b.Branch, "base": b.Base, "head": b.Head, "commits": b.Commits}
+}
+
+// summaryOut is a unit's summary of its task as the HUD shows it: by the
+// unit, its own words, not something the farm checked.
+func summaryOut(s c4v1.WorkUnitSummary) map[string]any {
+	return map[string]any{"text": s.Text, "by": "unit", "attempt": s.Attempt, "doc": s.Doc}
+}
+
 // handleUnit is GET /jobs/{ns}/{name}/units/{i}: the unit's current pod,
 // its log tail and its events.
 func (s *Server) handleUnit(w http.ResponseWriter, r *http.Request) {
@@ -516,6 +530,12 @@ func (s *Server) handleUnit(w http.ResponseWriter, r *http.Request) {
 		"estimateSeconds": math.Round(est.Predict(u.Key, u.Pos).Mean), "logTail": []string{}, "events": []map[string]any{}}
 	if i < len(rec.job.Status.UnitMillis) && rec.job.Status.UnitMillis[i] > 0 {
 		out["durationSeconds"] = math.Round(float64(rec.job.Status.UnitMillis[i]) / 1000)
+	}
+	if b, ok := rec.job.Status.UnitBranches[strconv.Itoa(i)]; ok {
+		out["branch"] = branchOut(b)
+	}
+	if sm, ok := rec.job.Status.UnitSummaries[strconv.Itoa(i)]; ok {
+		out["summary"] = summaryOut(sm)
 	}
 	if ix, err := s.index(r.Context(), rec); err == nil && ix != nil && ix.Units[i] != "" {
 		if t, err := s.trace(r.Context(), m, rec, ix.Units[i], ""); err == nil {
@@ -547,6 +567,10 @@ func (s *Server) handleUnit(w http.ResponseWriter, r *http.Request) {
 			out["durationSeconds"] = math.Round(m.at.Sub(pod.Status.StartTime.Time).Seconds())
 		}
 		out["attempts"] = []map[string]any{att}
+		if ph := pod.Status.Phase; ph == corev1.PodSucceeded || ph == corev1.PodFailed {
+			// how the attempt ended, in the runner's words
+			out["ended"] = map[string]any{"phase": string(ph), "reason": pod.Status.Reason, "message": pod.Status.Message}
+		}
 		if cs := pod.Annotations[c4v1.AnnotationOutputChangeset]; cs != "" {
 			out["outputChangeset"] = cs
 		}

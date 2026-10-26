@@ -11,10 +11,11 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
 	"strings"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/node"
 )
 
 // ObservedReport is what observing a machine reports: the machine as its
@@ -141,15 +142,5 @@ func (r *Runner) observeTick(ctx context.Context) {
 	}()
 }
 
-// homeRE finds a path under a person's home folder in free text.
-var homeRE = regexp.MustCompile(`(?:/Users|/home)/[^/\s"'` + "`" + `]+`)
-
-// homeless says paths under a home folder from ~, so free text that leaves
-// the machine (what a session last said, a limit's words) carries no one's
-// home path.
-func homeless(s string) string {
-	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		s = strings.ReplaceAll(s, home, "~")
-	}
-	return homeRE.ReplaceAllString(s, "~")
-}
+// homeless says paths under a home folder from ~ (node.Homeless).
+func homeless(s string) string { return node.Homeless(s) }

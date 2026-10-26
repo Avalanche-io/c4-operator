@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -61,5 +62,39 @@ func TestUnitBranchInStatus(t *testing.T) {
 	tick(t, fresh)
 	if b := get(t, ns, "port").Status.UnitBranches["0"]; b.Head != "h2" || b.Commits != 3 {
 		t.Fatalf("after a restart: %+v", b)
+	}
+}
+
+// A block's summary of its task, stored and named on its pod, is in the
+// job's status once the pod succeeds, as the unit's own words, cut to
+// 4 KiB; a restart keeps it after the pods are gone.
+func TestUnitSummaryInStatus(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	if err := k8s.Create(ctx, job(ns, "port", "ci", "cpu-"+ns, map[string]string{"shards": "2"}, time.Time{})); err != nil {
+		t.Fatal(err)
+	}
+	tick(t, q)
+	id := putDoc(t, st, "Ported the tokenizer; 3 commits on c4/port/0.")
+	*now = now.Add(time.Minute)
+	finish(t, podOfUnit(t, ns, "port", 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputSummary: id})
+	long := putDoc(t, st, strings.Repeat("x", 5000))
+	finish(t, podOfUnit(t, ns, "port", 1), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputSummary: long})
+	tick(t, q)
+	sums := get(t, ns, "port").Status.UnitSummaries
+	if s := sums["0"]; s.Text != "Ported the tokenizer; 3 commits on c4/port/0." || s.Doc != id || s.Attempt != 1 {
+		t.Fatalf("unit 0's summary: %+v", s)
+	}
+	if s := sums["1"]; len(s.Text) != 4<<10 || s.Doc != long {
+		t.Fatalf("unit 1's summary is %d bytes", len(s.Text))
+	}
+
+	if err := k8s.DeleteAllOf(ctx, &corev1.Pod{}, client.InNamespace(ns), client.MatchingLabels{c4v1.LabelJob: "port"}); err != nil {
+		t.Fatal(err)
+	}
+	fresh := &Queue{Client: q.Client, Policy: q.Policy, Cfg: q.Cfg, Log: q.Log, Now: q.Now, CaptureWait: q.CaptureWait, Stores: q.Stores}
+	tick(t, fresh)
+	if s := get(t, ns, "port").Status.UnitSummaries["0"]; s.Doc != id {
+		t.Fatalf("after a restart: %+v", s)
 	}
 }

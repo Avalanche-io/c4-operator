@@ -20,11 +20,14 @@ import (
 // review unit's verdict.
 var controlDocs = []struct {
 	file, annotation string
+	// clean, when set, is what the farm keeps of the document
+	clean func([]byte) []byte
 }{
-	{"expand.json", c4v1.AnnotationOutputExpand},
-	{"verdict.json", c4v1.AnnotationOutputVerdict},
-	{"measure.json", c4v1.AnnotationOutputMeasure},
-	{"usage.json", c4v1.AnnotationOutputUsage},
+	{"expand.json", c4v1.AnnotationOutputExpand, nil},
+	{"verdict.json", c4v1.AnnotationOutputVerdict, nil},
+	{"measure.json", c4v1.AnnotationOutputMeasure, nil},
+	{"usage.json", c4v1.AnnotationOutputUsage, nil},
+	{"done", c4v1.AnnotationOutputSummary, Summary},
 }
 
 // maxControlDoc bounds a control document, in bytes.
@@ -50,6 +53,11 @@ func storeControlDocs(ctx context.Context, sink captureSink, project, upper stri
 		}
 		if len(data) > maxControlDoc {
 			return nil, fmt.Errorf(".c4/%s is over %d bytes", cd.file, maxControlDoc)
+		}
+		if cd.clean != nil {
+			if data = cd.clean(data); len(data) == 0 {
+				continue
+			}
 		}
 		id := c4.Identify(bytes.NewReader(data))
 		if err := sink.PutBytes(ctx, project, id, data); err != nil {

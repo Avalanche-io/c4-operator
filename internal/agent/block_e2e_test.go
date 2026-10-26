@@ -204,11 +204,17 @@ func TestBlockOnHostRunner(t *testing.T) {
 	if p := get(first); p.Status.Phase != corev1.PodRunning {
 		t.Fatalf("while working: %s", p.Status.Phase)
 	}
-	endTurn(session, nil)
+	endTurn(session, map[string]string{"done": "  Counted the letters; the tests are in /Users/noor/src/textkit/count_test.go.\n"})
 	tick()
 	p := get(first)
 	if p.Status.Phase != corev1.PodSucceeded || p.Status.Reason != "Completed" || len(cli.stops) != 1 || cli.stops[0] != session {
 		t.Fatalf("done: %s %s, stops %v", p.Status.Phase, p.Status.Reason, cli.stops)
+	}
+	// its summary is stored, trimmed, with no one's home path, and named
+	// on the pod for the queue
+	want := c4.Identify(strings.NewReader("Counted the letters; the tests are in ~/src/textkit/count_test.go.")).String()
+	if got := p.Annotations[c4v1.AnnotationOutputSummary]; got != want {
+		t.Errorf("summary %q, want %q", got, want)
 	}
 	if p.Annotations[c4v1.AnnotationOutputVerdict] != "" {
 		t.Error("the shared folder's stale verdict was taken as the block's")
@@ -231,7 +237,7 @@ func TestBlockOnHostRunner(t *testing.T) {
 	if m2.Epoch != m.Epoch+1 || m2.UnitDir == m.UnitDir || !strings.Contains(re, m2.UnitDir) {
 		t.Errorf("epoch %d -> %d, unit dir %s -> %s", m.Epoch, m2.Epoch, m.UnitDir, m2.UnitDir)
 	}
-	endTurn(session, map[string]string{"verdict.json": `{"version":1,"verdict":"pass"}`})
+	endTurn(session, map[string]string{"verdict.json": `{"version":1,"verdict":"pass"}`, "done": "Count ignores case."})
 	tick()
 	if p := get(second); p.Status.Phase != corev1.PodSucceeded || p.Annotations[c4v1.AnnotationOutputVerdict] == "" {
 		t.Fatalf("rework done: %s, verdict %q", p.Status.Phase, p.Annotations[c4v1.AnnotationOutputVerdict])
@@ -262,6 +268,17 @@ func TestBlockOnHostRunner(t *testing.T) {
 		t.Fatalf("done by its own word: %s %s", p.Status.Phase, p.Status.Reason)
 	}
 
+	// the CLI reads it done, but the block left no summary: on a host, as
+	// in a pod, the summary is its result, so the attempt fails and says
+	// why
+	nosum := pod("count-a3c", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "And again."})
+	tick()
+	endTurn(session, nil)
+	tick()
+	if p := get(nosum); p.Status.Phase != corev1.PodFailed || p.Status.Reason != "BlockGaveUp" || !strings.Contains(p.Status.Message, "ended without its summary in .c4/done") {
+		t.Fatalf("no summary: %s %s %q", p.Status.Phase, p.Status.Reason, p.Status.Message)
+	}
+
 	// a block in parts: a part done with a note of the next wakes the same
 	// session for it, in the same attempt, and the last part ends the pod
 	parts := pod("count-a4", corev1.EnvVar{Name: agent.EnvBlockRework, Value: "In two parts."})
@@ -284,7 +301,7 @@ func TestBlockOnHostRunner(t *testing.T) {
 	if p := get(parts); p.Status.Phase != corev1.PodRunning {
 		t.Fatalf("the old turn ended the new part: %s", p.Status.Phase)
 	}
-	endTurn(session, nil)
+	endTurn(session, map[string]string{"done": "Both parts are done."})
 	tick()
 	if p := get(parts); p.Status.Phase != corev1.PodSucceeded || p.Status.Reason != "Completed" {
 		t.Fatalf("after the last part: %s %s", p.Status.Phase, p.Status.Reason)
