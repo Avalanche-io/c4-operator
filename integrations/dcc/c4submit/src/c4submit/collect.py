@@ -134,11 +134,22 @@ def gather(root: str, scene_file: str, deps: Iterable[Dependency]) -> Collection
                                     "set C4_ROOT to the folder the farm mounts as the project's root (for example /show)"))
         return col
 
+    real_root = os.path.realpath(root)
+
     def add(path: str, who: str) -> None:
         rel = relative(root, path)
         if rel is None:
             col.problems.append(Problem("error", who or path, f"{path} is outside the project folder {col.root}",
                                         f"move it under {col.root}; a job reads only its tree"))
+            return
+        # The spelling is under the root; what is read must be too. A link
+        # (to the file, or to a folder on the way) that leads out of the
+        # project would send this machine's other files to the farm.
+        real = os.path.realpath(path)
+        if relative(real_root, real) is None:
+            col.problems.append(Problem("error", who or path, f"{path} is a link to {norm(real)}, outside the project folder {col.root}",
+                                        "copy the file into the project folder instead of linking to it; "
+                                        "c4 sends only files under the project folder"))
             return
         if rel not in col.files:
             col.files[rel] = File(rel=rel, abs=path)
