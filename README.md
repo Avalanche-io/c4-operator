@@ -37,7 +37,8 @@ whoever did it.
 
 ## Quickstart: render a shot by its deadline
 
-You need Docker (Docker Desktop, OrbStack or Colima).
+You need Docker (Docker Desktop, OrbStack or Colima). Kind and kubectl are
+not needed; kind is built in.
 
 ```sh
 brew install mrjoshuak/tap/c4
