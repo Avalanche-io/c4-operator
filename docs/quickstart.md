@@ -19,7 +19,8 @@ This installs the `c4` command and its farm tools; `c4 farm` runs
 `c4-farm`. If you installed `c4` another way before, `which -a c4` should
 list Homebrew's first; an older `c4` ahead of it has no `c4 farm`. If you
 installed the separate `c4-farm` and `c4-agent` formulas, remove them first
-(`brew uninstall c4-farm c4-agent`). Or take a `c4-farm` binary for your
+(`brew uninstall c4-farm c4-agent`); if brew then says c4 is installed but
+not linked, run `brew link mrjoshuak/tap/c4`. Or take a `c4-farm` binary for your
 machine from the
 [release page](https://github.com/Avalanche-io/c4-operator/releases) and
 write `c4-farm` wherever this guide writes `c4 farm`.
