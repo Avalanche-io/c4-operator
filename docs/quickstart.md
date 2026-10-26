@@ -37,7 +37,7 @@ port    needs you  ~/src/textkit  41k   2h 10m
 docs    working    ~/src/textkit  12k   25m
 review  idle       ~/src/site     950   3h 5m
 
-port needs you: Should I rename the package too?
+port needs you: it asks: Should I rename the package too?
 ```
 
 One line per Claude Code session on this machine: its state in a word,
@@ -125,9 +125,9 @@ usd        once    v1    Flatten and check a USD stage · farm-wide
 ```
 
 Repository tests and LoRA training run too, as the farm's built-in jobs
-(`c4 farm submit ci DIR`, `c4 farm submit lora DIR`). ci runs with no
-network: stage dependencies in the folder, or name a tool that declares the
-network they come from.
+(`c4 farm submit ci DIR`, `c4 farm submit lora DIR`). ci runs a
+repository's pytest or Go tests with no network: stage dependencies in the
+folder, or name a tool that declares the network they come from.
 
 ## 4. Get the sample shot
 

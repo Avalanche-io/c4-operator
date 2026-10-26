@@ -413,7 +413,7 @@ func rendererName(r string) string {
 
 // printPlan prints the estimate and deadline lines of a plan.
 // ciNoNetwork is what a ci job's plan says of its network.
-const ciNoNetwork = "ci runs with no network: stage dependencies in the folder, or name a tool that declares the network they come from"
+const ciNoNetwork = "ci runs a repository's pytest or Go tests with no network: stage dependencies in the folder, or name a tool that declares the network they come from"
 
 func (o Out) printPlan(e *api.SubmitEstimate, planErr error) {
 	if e == nil {

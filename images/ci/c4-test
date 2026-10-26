@@ -49,6 +49,8 @@ if [ -f go.mod ]; then
 fi
 
 if [ "$ran" -eq 0 ]; then
+  # no attempt can do better, so the farm is told not to try again
+  echo "c4_fail: permanent ci runs pytest (pytest.ini, pyproject.toml, setup.cfg or a tests/ folder) and Go (go.mod); this repository has neither"
   echo "c4-test: no pytest configuration, tests/ folder or go.mod in $(pwd)" >&2
   exit 2
 fi
