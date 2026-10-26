@@ -13,7 +13,7 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { glance } from '../../design/components/core.js';
-import { jobWords, fromTracker } from '../../design/components/words.js';
+import { jobWords, fromTracker, ended } from '../../design/components/words.js';
 import { markEl } from '../../design/components/marks.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
 import { decisions } from './controls.js';
@@ -123,8 +123,8 @@ function memberWord(j, u) {
 
 function jobRow(ctx, j, items) {
   const e = j.estimate || {}, agent = isAgent(j), g = agent ? agentGlance(j) : glance(j);
-  const fin = j.phase === 'Succeeded';
-  const late = !fin && e.slackSeconds < 0;
+  const fin = j.phase === 'Succeeded', failed = j.phase === 'Failed';
+  const late = !ended(j) && e.slackSeconds < 0;
   const w = (agent && !fin && agentWords(j)) || jobWords(j);
   const dl = j.objective && j.objective.deadline;
   // a job folded into a root item points to it, instead of its own red
@@ -136,8 +136,8 @@ function jobRow(ctx, j, items) {
       // and a link on the job's page
       fromTracker(j) ? h('div', { class: 'see' }, fromTracker(j).text) : null),
     h('div', null, bar(g, late), h('div', { class: 'd1-pct' }, agent && !fin ? (g.left ? `about ${f.dur(g.left)} of work left` : '') : `${Math.round(g.done * 100)}% done`)),
-    h('div', { class: 'd1-when' + (late ? ' late' : '') }, fin ? 'done' : e.noEta ? '–' : `~${f.when(e.etaP50)}`,
-      h('small', null, fin ? '' : late ? `late: due ${f.when(dl)}` : dl ? `due ${f.when(dl)}` : 'no deadline')),
+    h('div', { class: 'd1-when' + (late ? ' late' : '') + (failed ? ' failed' : '') }, fin ? 'done' : failed ? 'failed' : e.noEta ? '–' : `~${f.when(e.etaP50)}`,
+      h('small', null, fin ? '' : failed ? 'nothing runs until you act' : late ? `late: due ${f.when(dl)}` : dl ? `due ${f.when(dl)}` : 'no deadline')),
     h('div', { class: 'd1-act' }, h('span', { class: 'btn small' }, 'Open')));
 }
 
@@ -171,13 +171,19 @@ export const mine1 = {
     const own = jobs.length > 0;
     if (!own) jobs = s.jobs.filter((j) => (v.projects || []).includes(j.project));
     const items = incidents(s, jobs).filter((x) => x.sev === 'needs');
-    const open = jobs.filter((j) => j.phase !== 'Succeeded').sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
+    const open = jobs.filter((j) => !ended(j)).sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
+    // the finished ones, the newest first: a few, so a done job does not
+    // simply vanish from the person's day
+    const at = (j) => Date.parse((j.estimate || {}).etaP90) || 0;
+    const fin = jobs.filter(ended).sort((a, b) => at(b) - at(a)).slice(0, 5);
     return h('section', { class: 'd1', 'data-key': 'd1-mine' },
       h('h1', null, own ? 'My jobs' : 'Jobs in your projects'),
-      h('p', { class: 'd1-sub' }, open.length ? `${open.length} working or waiting · the farm runs them by their deadlines` : 'No jobs yet'),
+      h('p', { class: 'd1-sub' }, open.length ? `${open.length} working or waiting · the farm runs them by their deadlines` : jobs.length ? 'Nothing working or waiting' : 'No jobs yet'),
       roots(ctx, items, { empty: !open.length }),
       h('h2', null, 'Working and waiting'),
-      open.length ? open.map((j) => jobRow(ctx, j, items)) : h('div', { class: 'd1-quiet' }, 'Nothing is running for you right now. ', firstJob()),
+      open.length ? open.map((j) => jobRow(ctx, j, items))
+        : h('div', { class: 'd1-quiet' }, 'Nothing is running for you right now. ', jobs.length ? 'Submit another with c4 farm submit.' : firstJob()),
+      fin.length ? [h('h2', null, `Finished · ${f.num(fin.length)}`), fin.map((j) => jobRow(ctx, j, items))] : null,
       outsideQueue(ctx),
       farmSetup(ctx),
       foot());
@@ -188,7 +194,7 @@ export const farm1 = {
   render(ctx) {
     const s = ctx.snap;
     const items = incidents(s);
-    const open = s.jobs.filter((j) => j.phase !== 'Succeeded').sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
+    const open = s.jobs.filter((j) => !ended(j)).sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
     const late = open.filter((j) => (j.estimate || {}).slackSeconds < 0);
     const list = (late.length ? late : open).slice(0, 8);
     return h('section', { class: 'd1', 'data-key': 'd1-farm' },

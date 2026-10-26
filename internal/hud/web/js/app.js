@@ -128,7 +128,7 @@ function topBar() {
     detail(),
     h('div', { class: 'who' },
       h('span', { class: 'live', 'data-state': state.status, title: `Updates: ${state.status}` }),
-      v ? h('a', { class: 'me-link', href: href('me'), title: 'Your page: the trackers that submit work for you' }, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
+      v ? h('a', { class: 'me-link', href: href('me'), title: 'Your page: the trackers that submit work for you' }, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, v.solo ? 'your farm' : `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
       v ? h('a', { href: viewAs(other) }, `View as ${other}`) : null,
       h('button', { class: 'prefs-btn', 'data-prefs': 'open', 'aria-expanded': state.sheet ? 'true' : 'false', title: 'Preferences' }, 'Preferences')),
     replayBadge());

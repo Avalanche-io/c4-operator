@@ -12,7 +12,7 @@ import { glance, inFlight, retries } from '../../design/components/core.js';
 import { buildSheet } from '../../design/components/stack.js';
 import { phaseText, deadlineSource } from './common.js';
 import { c4idEl } from '../../design/components/c4id.js';
-import { tempWords, heldByPerson } from '../../design/components/words.js';
+import { tempWords, heldByPerson, ended } from '../../design/components/words.js';
 
 const st = { details: new Map(), graph: null, at: -Infinity, busy: false };
 document.addEventListener('hud:changed', () => { st.at = -Infinity; });
@@ -118,10 +118,10 @@ export default {
     const me = snap.viewer.user;
     let mine = snap.jobs.filter((j) => j.owner === me);
     const own_ = mine.length > 0;
-    if (!own_) mine = snap.jobs.filter((j) => j.phase !== 'Succeeded').slice(0, 6);
+    if (!own_) mine = snap.jobs.filter((j) => !ended(j)).slice(0, 6);
     ensure(ctx, mine);
     const rest = snap.jobs.filter((j) => !mine.includes(j));
-    const active = mine.filter((j) => j.phase !== 'Succeeded');
+    const active = mine.filter((j) => !ended(j));
     const late = active.filter((j) => j.objective && j.objective.deadline && j.estimate.slackSeconds < 0);
     return h('section', { class: 'sheet mine', 'data-key': 'mine', 'aria-label': 'My shots' },
       h('div', { class: 'sheethead' },

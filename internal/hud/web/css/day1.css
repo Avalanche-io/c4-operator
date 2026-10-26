@@ -41,6 +41,7 @@
 .d1-when { font: 400 16px/1.3 var(--mono); color: var(--paper); }
 .d1-when small { display: block; font: 400 12px/1.3 var(--sans); color: var(--ink-3); }
 .d1-when.late { color: var(--risk-text); }
+.d1-when.failed { color: var(--fail-text); }
 .d1-act { text-align: right; }
 
 .d1-stages { display: grid; gap: 14px; margin-top: 8px; }

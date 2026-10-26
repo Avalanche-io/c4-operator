@@ -173,7 +173,7 @@ export default {
       usageSection(snap),
       h('div', { class: 'vsec' },
         h('header', null, h('h2', null, 'Savings: bytes avoided today'),
-          h('span', { class: 'dim' }, 'Not billed. Bytes mounted into pods minus bytes fetched from the store: what content addressing, the cache tiers and the overlays saved.')),
+          h('span', { class: 'dim' }, 'Not billed. Bytes the farm’s units read minus bytes fetched from the store: what content addressing, the cache tiers and the overlays saved.')),
         h('div', { class: 'figs', style: { alignItems: 'flex-end' } },
           h('div', { class: 'fig' }, h('div', { class: 'lab' }, snap.viewer.allProjects ? 'Farm' : 'Farm, all projects'), h('div', { class: 'big' }, f.bytes(fm.bytesAvoided)),
             h('div', { class: 'dim num', style: { fontSize: '11px', marginTop: '4px' } }, `${f.pct(fm.bytesAvoided / fm.bytesMaterialized)} of ${f.bytes(fm.bytesMaterialized)} mounted`)),

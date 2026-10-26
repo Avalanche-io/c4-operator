@@ -97,6 +97,11 @@ const PHASE = { Queued: 'queued', Running: 'rendering', Blocked: 'blocked on', H
 // (<tool>-farmtest-<hex>): the farm's setup, never a person's work
 export const farmCheck = (j) => !!(j && j.toolTest);
 
+// ended: a job nothing more runs for. Succeeded, or Failed: its spent
+// units wait on a person (requeue or accept, in Needs you), and the job is
+// no longer working or waiting. Either belongs with the finished jobs.
+export const ended = (j) => !!j && (j.phase === 'Succeeded' || j.phase === 'Failed');
+
 export function jobWords(j) {
   // a tool's test speaks for the tool: it never needs a person
   if (farmCheck(j)) {

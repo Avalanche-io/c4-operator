@@ -15,7 +15,7 @@ export default {
     const t = ctx.snap.tiers;
     const fi = t.fanIn;
     const steps = [
-      ['Pods', fi.requesters, 'running units reading their views'],
+      ['Readers', fi.requesters, 'running units reading their views'],
       ['Node daemons', fi.nodeRequests, 'object requests into the node tier'],
       ['Peers', fi.peerRequests, 'node misses, sent to rendezvous home peers'],
       ['Regional', fi.regionalRequests, 'peer misses'],

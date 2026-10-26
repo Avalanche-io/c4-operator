@@ -2,7 +2,7 @@
 
 import { h, s } from '../dom.js';
 import * as f from '../fmt.js';
-import { jobWords, who, heldByPerson } from '../../design/components/words.js';
+import { jobWords, who, heldByPerson, farmCheck } from '../../design/components/words.js';
 
 export const key = (j) => `${j.namespace}/${j.name}`;
 
@@ -108,6 +108,8 @@ const NEEDS = {
   permission: () => 'no permission', review: () => 'a check escalated it', decision: (j) => { const w = (j.waits || []).find((x) => x.needsYou && !x.do); return w ? `${who(w.waitsFor)} to decide` : 'a decision'; },
 };
 export function personMark(j) {
+  // a tool's test is the tool's to fix, never a person's (views/setup.js)
+  if (farmCheck(j)) return null;
   const np = j.needsPerson;
   if (np) {
     const what = (NEEDS[np.reason] || (() => np.reason))(j);

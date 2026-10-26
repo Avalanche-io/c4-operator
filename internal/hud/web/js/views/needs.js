@@ -22,6 +22,7 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get, objectURL } from '../api.js';
 import { incidents } from '../../design/components/incidents.js';
+import { ended } from '../../design/components/words.js';
 import { rootCard } from './day1.js';
 import { decisions } from './controls.js';
 import { observed, stateOf } from './sessions.js';
@@ -70,7 +71,7 @@ export default {
       : s.jobs.filter((j) => (j.waits || []).some(mineWait));
     const settled = items.filter((x) => x.state === 'resolved');
     const elsewhere = items.filter((x) => x.sev === 'needs' && !x.id.startsWith('needsinformation:') && !x.id.startsWith('decision:') && !x.id.startsWith('review:'));
-    const open = s.jobs.filter((j) => j.phase !== 'Succeeded');
+    const open = s.jobs.filter((j) => !ended(j));
     const working = open.filter((j) => j.phase === 'Running').length;
     // sessions running outside the farm that asked their person something
     // (views/sessions.js), when something observes them

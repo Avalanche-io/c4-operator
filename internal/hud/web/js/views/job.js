@@ -291,7 +291,8 @@ export default {
     return h('section', { class: 'sheet', 'data-key': 'sheet-' + k, 'aria-label': `Sheet ${sheetTitle}` },
       h('div', { class: 'sheethead' },
         h('div', null,
-          h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${j.project} / `, j.shot ? `shot ${j.shot} / ` : '', j.namespace),
+          // the namespace only when it is not the project's own name
+          h('div', { class: 'crumbs' }, h('a', { href: ctx.href('queue') }, 'Farm'), ` / ${j.project}`, j.shot ? ` / shot ${j.shot}` : '', j.namespace !== j.project ? ` / ${j.namespace}` : ''),
           h('h1', null, j.name),
           h('div', { class: 'meta' }, classChip(j, cls), ' ', phaseText(j), ` · ${orderText(j.order)} · ${j.pools.join(' + ')}${j.owner ? ' · ' + j.owner : ''}${j.rank > 0 && L >= 2 ? ` · #${j.rank} in run order` : ''}`, personMark(j) ? [' ', personMark(j)] : null,
             fromTracker(j) ? [' · ', h('span', { class: 'qfrom' }, trackerLink(fromTracker(j)))] : null)),

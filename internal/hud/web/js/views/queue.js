@@ -13,7 +13,7 @@ import { glance, inFlight, retries } from '../../design/components/core.js';
 import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
 import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
-import { jobWords, tempWords, heldByPerson, fromTracker } from '../../design/components/words.js';
+import { jobWords, tempWords, heldByPerson, fromTracker, ended, farmCheck } from '../../design/components/words.js';
 import { farmSetup } from './setup.js';
 import { trackerLink } from './day1.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
@@ -97,6 +97,7 @@ function holdMark() {
 }
 
 function phase(j) {
+  if (farmCheck(j)) { const w = jobWords(j); return h('span', { class: 'q-ph ' + w.cls }, w.word); }
   if (heldByPerson(j)) return h('span', { class: 'q-ph held' }, holdMark(), 'held');
   if (j.phase === 'Failed') return h('span', { class: 'q-ph t-fail' }, 'needs you');
   const run = j.driver === 'agent' ? 'working' : 'rendering';
@@ -127,7 +128,7 @@ function row(ctx, j, multiProject, sk) {
     inFlight(u) ? h('span', { class: 't-run' }, `${inFlight(u)} ${j.driver === 'agent' ? 'working' : 'rendering'}`) : null,
     retries(u) ? h('span', { class: 't-temp' }, tempWords(u)) : null,
     asks.length ? h('span', { class: asks.some((n) => n.state === 'pressing') ? 't-temp' : 't-risk' }, `${asks.length} ${asks.length === 1 ? 'asks' : 'ask'} you`) : null,
-    failed ? h('span', { class: 't-fail' }, `${failed} ${failed === 1 ? 'needs' : 'need'} you`) : null,
+    failed && !farmCheck(j) ? h('span', { class: 't-fail' }, `${failed} ${failed === 1 ? 'needs' : 'need'} you`) : null,
     u.unevaluated || u.planned ? `${f.num(u.unevaluated || u.planned)} expected` : null,
   ].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]));
   const b = e.burst;
@@ -137,7 +138,7 @@ function row(ctx, j, multiProject, sk) {
       h('span', null, `+${b.slots} ${b.pool}`), h('b', null, f.money(b.cost))));
   } else if (heldByPerson(j)) {
     act.push(h('button', { class: 'btn small', 'data-action': 'release', 'data-job': k }, 'Release'));
-  } else if (failed > 0) {
+  } else if (failed > 0 && !farmCheck(j)) {
     act.push(h('button', { class: 'btn small', 'data-action': 'requeue', 'data-job': k, 'data-units': failedUnits(j) }, `Requeue ${failed} failed`));
   }
   const dueCell = dl ? h('div', { class: 'qdue' },
@@ -149,7 +150,7 @@ function row(ctx, j, multiProject, sk) {
     ? h('div', { class: 'qslack' + (late ? ' late' : '') }, h('span', { class: late && !passed ? 'pencil' : '' }, f.signed(e.slackSeconds)), h('small', null, late ? (passed ? 'past due' : 'projected late') : 'slack'))
     : h('div', { class: 'qslack none' }, '–');
   return h('div', { class: `qr${fin ? ' fin' : ''}${late ? ' late' : ''}${heldByPerson(j) ? ' held' : ''}`, 'data-key': k, role: 'listitem' },
-    h('div', { class: 'qrank' }, j.rank > 0 && !fin ? String(j.rank) : ''),
+    h('div', { class: 'qrank' }, j.rank > 0 && !ended(j) ? String(j.rank) : ''),
     own('pylon', 'qpy:' + k, { glance: glance(j), w: 30, h: 46, mode: 'mini' }, { class: 'qpy' }),
     h('div', { class: 'qname' },
       h('a', { class: 'jn', href: ctx.href(`job/${j.namespace}/${j.name}`) }, j.name),
@@ -295,34 +296,63 @@ function simpleRow(ctx, j, rank) {
       h('span', { class: 'big' }, `${Math.round(g.done * 100)}%`),
       h('span', { class: 'sub' }, fin ? `${f.num(u.total)} ${unitWord(j)}, all done` : `${f.num(u.succeeded)} of ${f.num(u.total)} ${unitWord(j)}`,
         inFlight(u) ? [' · ', h('span', { class: 't-run' }, `${inFlight(u)} rendering`)] : null,
-        u.failed ? [' · ', h('span', { class: 't-fail' }, `${u.failed} ${u.failed === 1 ? 'needs' : 'need'} you`)] : null)),
+        u.failed && !farmCheck(j) ? [' · ', h('span', { class: 't-fail' }, `${u.failed} ${u.failed === 1 ? 'needs' : 'need'} you`)] : null)),
     h('div', { class: 'stack2' },
       fin ? [h('span', { class: 'bigs' }, 'done'), h('span', { class: 'sub' }, `finished ${f.clock(e.etaP90, false)}`)]
+        // a failed tool test is the tool's: it is not offered until it passes
+        : j.phase === 'Failed' && farmCheck(j) ? [h('span', { class: 'bigs' }, 'failed'), h('span', { class: 'sub' }, `${j.toolTest} is not offered`)]
+        // a failed job runs nothing more until its person acts
+        : j.phase === 'Failed' ? [h('span', { class: 'bigs t-fail' }, 'failed'), h('span', { class: 'sub' }, 'stopped: nothing runs until you act')]
         : waiting && j.phase === 'Blocked' ? [h('span', { class: 'bigs' }, '\u2013'), h('span', { class: 'sub' }, `blocked on ${jobWords(j).why}`)]
           : [h('span', { class: 'bigs' }, f.approx(e.remainingSeconds)), h('span', { class: 'sub' }, 'ready ', h('span', { class: 'pencil' + (late ? ' t-risk' : '') }, `~${f.clock(e.etaP50, false)}`))]),
     h('div', { class: 'stack2' },
       h('span', { class: 'big' + (late ? ' t-risk' : '') }, dl ? f.clock(dl, false) : '\u2013'),
-      h('span', { class: 'sub' }, fin ? 'was due' : dl ? (late ? 'due; projected late' : 'due') : 'no deadline')));
+      h('span', { class: 'sub' }, ended(j) ? (dl ? 'was due' : 'no deadline') : dl ? (late ? 'due; projected late' : 'due') : 'no deadline')));
+}
+
+// whose: whose jobs the list shows. Someone who sees the whole farm sees
+// everyone's, or only their own (?who=mine); anyone else sees their own.
+function whose(ctx) {
+  const v = ctx.snap.viewer || {};
+  if (!v.allProjects) return null;
+  return ctx.route.q.who === 'mine' ? 'mine' : 'all';
+}
+const isMine = (ctx) => (j) => j.owner === (ctx.snap.viewer || {}).user;
+function whoToggle(ctx) {
+  const w = whose(ctx);
+  if (!w) return null;
+  const q = ctx.route.q;
+  return h('span', { class: 'seg who', role: 'group', 'aria-label': 'Whose jobs' },
+    h('a', { class: 'btn small', href: qhref(ctx, { ...q, who: 'mine' }), 'aria-pressed': w === 'mine' ? 'true' : 'false' }, 'Mine'),
+    h('a', { class: 'btn small', href: qhref(ctx, { ...q, who: '' }), 'aria-pressed': w === 'all' ? 'true' : 'false' }, 'Everyone'));
+}
+// the finished jobs, the newest first
+const newest = (a, b) => (f.ms((b.estimate || {}).etaP90) || 0) - (f.ms((a.estimate || {}).etaP90) || 0);
+function finished(fin) {
+  const failed = fin.some((j) => j.phase === 'Failed' && !farmCheck(j));
+  return h('div', { class: 'qdiv' }, h('span', { class: 'lab' }, `Finished · ${fin.length}`),
+    h('span', { class: 'sub' }, failed ? 'the newest first; a failed one waits for you in Needs you' : 'the newest first'));
 }
 
 function simple(ctx) {
   const s = ctx.snap, v = s.viewer || {};
   let jobs = v.allProjects ? s.jobs : s.jobs.filter((j) => j.owner === v.user);
   if (!jobs.length) jobs = s.jobs;
-  const open = jobs.filter((j) => j.phase !== 'Succeeded').sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
-  const fin = jobs.filter((j) => j.phase === 'Succeeded');
+  if (whose(ctx) === 'mine') jobs = jobs.filter(isMine(ctx));
+  const open = jobs.filter((j) => !ended(j)).sort((a, b) => (a.rank || 1e9) - (b.rank || 1e9));
+  const fin = jobs.filter(ended).sort(newest);
   return h('section', { class: 'sheet qsheet', 'data-key': 'farm-simple', 'aria-labelledby': 'qtitle' },
     h('div', { class: 'sheethead' },
       h('div', null,
         h('div', { class: 'crumbs' }, `Farm / ${v.allProjects ? 'all projects' : (v.projects || []).join(' \u00b7 ')}${v.allProjects ? '' : ' / ' + (v.user || '')}`),
         h('h1', { id: 'qtitle' }, v.allProjects ? 'The farm' : 'My jobs'),
-        h('div', { class: 'meta' }, `${open.length} job${open.length === 1 ? '' : 's'} working or waiting, in the order the farm will run them. Deadlines set the order; nobody sets priorities.`))),
+        h('div', { class: 'meta' }, `${open.length} job${open.length === 1 ? '' : 's'} working or waiting, in the order the farm will run them. Deadlines set the order; nobody sets priorities.`, whoToggle(ctx) ? [' ', whoToggle(ctx)] : null))),
     qroots(ctx),
     h('div', { class: 'neat qneat' },
       h('div', { class: 'sq-row head', 'aria-hidden': 'true' },
         ['#', '', 'Job', 'Progress', 'Ready by', 'Due'].map((x) => h('span', { class: 'lab' }, x))),
       h('div', { role: 'list', 'aria-label': 'Jobs in run order' }, open.map((j, i) => simpleRow(ctx, j, i + 1))),
-      fin.length ? h('div', { class: 'qdiv' }, h('span', { class: 'lab' }, `Finished \u00b7 ${fin.length}`), h('span', { class: 'sub' }, 'kept while later jobs still read their output')) : null,
+      fin.length ? finished(fin) : null,
       fin.length ? h('div', { role: 'list', 'aria-label': 'Finished jobs' }, fin.slice(0, 12).map((j) => simpleRow(ctx, j, 0))) : null));
 }
 
@@ -338,17 +368,17 @@ export default {
     const flt = q.class || 'all';
     const sk = shotKeyFn(s.jobs);
     const shotF = q.shot || '';
-    const inScope = s.jobs.filter((j) => matches(ctx, j, flt));
+    const inScope = s.jobs.filter((j) => matches(ctx, j, flt) && (whose(ctx) !== 'mine' || isMine(ctx)(j)));
     const shots = shotsOf(s.jobs);
     const fShot = shots.find((x) => x.key === shotF);
     const jobs = shotF ? inScope.filter((j) => sk(j) === shotF || (fShot && fShot.deliveries.includes(j))) : inScope;
     const multiProject = s.viewer.projects.length > 1;
-    const open = jobs.filter((j) => j.phase !== 'Succeeded');
-    const fin = jobs.filter((j) => j.phase === 'Succeeded');
+    const open = jobs.filter((j) => !ended(j));
+    const fin = jobs.filter(ended).sort(newest);
     // under load, the rows that matter: late, or folded into a root item
     const triage = ITEMS.length > TRIAGE && q.triage !== 'off';
     const hot = triage ? open.filter((j) => isLate(j) || incidentOf(ITEMS, keyOf(j))) : open;
-    const allOpen = s.jobs.filter((j) => j.phase !== 'Succeeded');
+    const allOpen = s.jobs.filter((j) => !ended(j));
     const withDl = allOpen.filter((j) => j.objective && j.objective.deadline);
     const late = withDl.filter(isLate);
     const counts = Object.fromEntries(FILTERS.map(([k]) => [k, s.jobs.filter((j) => matches(ctx, j, k)).length]));
@@ -363,7 +393,7 @@ export default {
         h('div', null,
           h('div', { class: 'crumbs' }, `Farm / ${s.viewer.allProjects ? 'all projects' : s.viewer.projects.join(' · ')} / run order`),
           h('h1', { id: 'qtitle' }, 'The farm'),
-          h('div', { class: 'meta' }, `${f.count(allOpen.length, 'job')} working or waiting, in run order. Each job's deadline and estimate set the order; nobody sets priorities.`)),
+          h('div', { class: 'meta' }, `${f.count(allOpen.length, 'job')} working or waiting, in run order. Each job's deadline and estimate set the order; nobody sets priorities.`, whoToggle(ctx) ? [' ', whoToggle(ctx)] : null)),
         h('div', { class: 'titleblock' },
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'Now'), h('span', { class: 'val' }, f.clockSec(s.now)), h('span', { class: 'sub' }, `${f.dateLine(s.now)} · ${f.offsetLabel()}`)),
           h('div', { class: 'cell' }, h('span', { class: 'lab' }, 'On time'), h('span', { class: 'val' }, String(withDl.length - late.length), h('small', null, `of ${withDl.length}`)), h('span', { class: 'sub' }, 'with a deadline')),
@@ -392,7 +422,7 @@ export default {
           head(),
           jobs.length ? h('div', { class: 'qlist', role: 'list', 'aria-label': 'Jobs in run order' }, triage ? hot.map((j) => row(ctx, j, multiProject, sk)) : open.map((j) => row(ctx, j, multiProject, sk))) : empty('No jobs match this filter.'),
           triage ? folded(ctx, open.filter((j) => !hot.includes(j))) : null,
-          fin.length ? h('div', { class: 'qdiv' }, h('span', { class: 'lab' }, `Finished · ${fin.length}`), h('span', { class: 'sub' }, 'kept while later jobs still read their output')) : null,
+          fin.length ? finished(fin) : null,
           fin.length ? h('div', { class: 'qlist fin', role: 'list', 'aria-label': 'Finished jobs' }, fin.map((j) => row(ctx, j, multiProject, sk))) : null)),
       farmSetup(ctx));
   },
