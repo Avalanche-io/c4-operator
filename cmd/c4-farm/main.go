@@ -339,7 +339,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			if a.Yes {
 				o.In = nil
 			}
-			_, err = farmcli.SubmitFile(ctx, c, o, farmcli.SubmitFileArgs{Path: pos[0], Project: project, DryRun: a.DryRun, Explain: *explain, Yes: a.Yes})
+			_, err = farmcli.SubmitFile(ctx, c, o, farmcli.SubmitFileArgs{Path: pos[0], Project: project, DryRun: a.DryRun, Explain: *explain, Yes: a.Yes,
+				Terminal: isTerminal(stdin)})
 			return err
 		}
 		switch {

@@ -250,13 +250,15 @@ func shortID(id string) string {
 	return id[:4] + "…" + id[len(id)-4:]
 }
 
-// SubmitFileArgs are `c4 farm submit FILE`'s.
+// SubmitFileArgs are `c4 farm submit FILE`'s. Terminal says a person is
+// at one to confirm what is sent.
 type SubmitFileArgs struct {
-	Path    string
-	Project string
-	DryRun  bool
-	Explain bool
-	Yes     bool
+	Path     string
+	Project  string
+	DryRun   bool
+	Explain  bool
+	Yes      bool
+	Terminal bool
 }
 
 // SubmitFile sends a submission (c4: submit/1): a local tree is uploaded
@@ -364,6 +366,17 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 		dir := t
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(base, dir)
+		}
+		// a folder outside the submission's own is sent only on the yes of
+		// a person who has seen it named: a submission from someone else's
+		// tree must not send this machine's other files
+		if base != "" && !insideFolder(base, dir) {
+			switch {
+			case InsideAgent():
+				return nil, fmt.Errorf("tree %s: an agent cannot send a folder outside the submission: run it yourself at a terminal", t)
+			case a.Yes || !a.Terminal:
+				return nil, fmt.Errorf("tree %s is outside the submission's folder: run it at a terminal to confirm the folder, or write the submission inside it", t)
+			}
 		}
 		var err error
 		if tree, err = scanTree(ctx, c, project, dir); err != nil {
@@ -541,19 +554,45 @@ func (o Out) printJobs(jobs []api.SubmissionJob, tree *folderTree) {
 	o.printf("\n")
 }
 
-// printFiles is the files line of a plan: what the folder holds, and what
-// of it the farm lacks.
+// printFiles is the files line of a plan: the folder, what it holds, and
+// what of it the farm lacks. The folder is named, since a yes uploads it.
 func (o Out) printFiles(t *folderTree) {
 	tot := t.v.Totals()
 	upl := plural(len(t.need), "to upload", "to upload")
 	if len(t.need) > 0 {
 		upl += " (" + Bytes(t.needBytes) + ")"
 	}
+	dir := t.dir
+	if abs, err := filepath.Abs(dir); err == nil {
+		dir = abs
+	}
+	found := plural(int(tot.Files), "file", "files") + " in " + tildePath(dir)
 	if have := int(tot.UniqueObjects) - len(t.need); have > 0 {
-		o.printf("  files     %s found · %d already on the farm · %s\n", plural(int(tot.Files), "file", "files"), have, upl)
+		o.printf("  files     %s · %d already on the farm · %s\n", found, have, upl)
 		return
 	}
-	o.printf("  files     %s found · %s · %s\n", plural(int(tot.Files), "file", "files"), Bytes(tot.Bytes), upl)
+	o.printf("  files     %s · %s · %s\n", found, Bytes(tot.Bytes), upl)
+}
+
+// insideFolder says dir is base or within it, links resolved: a link
+// inside base that leads out of it is outside.
+func insideFolder(base, dir string) bool {
+	b, err := filepath.Abs(base)
+	if err == nil {
+		b, err = filepath.EvalSymlinks(b)
+	}
+	if err != nil {
+		return false
+	}
+	d, err := filepath.Abs(dir)
+	if err == nil {
+		d, err = filepath.EvalSymlinks(d)
+	}
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(b, d)
+	return err == nil && filepath.IsLocal(rel)
 }
 
 // localTree says a submission's tree is a folder on this machine, not a C4

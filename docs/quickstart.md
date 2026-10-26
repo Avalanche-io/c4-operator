@@ -137,7 +137,7 @@ c4 farm submit render ~/c4-samples/saltmarsh/sm0140/sm0140.usda --frames 1001-10
 
 ```
 sm0140-render-v001   48 frames in 48 units
-  files     12 files found · 1.2 MB · 12 to upload (1.2 MB)
+  files     12 files in ~/c4-samples/saltmarsh · 1.2 MB · 12 to upload (1.2 MB)
   estimate  ready ~15:42 PDT  (p90 ~15:51 PDT)
   deadline  16:30 PDT today (23:30 UTC) · slack ~39m
 

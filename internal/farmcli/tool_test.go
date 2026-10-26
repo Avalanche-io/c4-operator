@@ -315,6 +315,10 @@ func TestToolsPublishAndSubmitAgainstTheHUD(t *testing.T) {
 	if tree, _ := hud.submissions[0]["submission"].(map[string]any)["tree"].(string); !strings.HasPrefix(tree, "c4") {
 		t.Errorf("the folder was not named by its ID: %q", tree)
 	}
+	// the folder a yes uploads is named
+	if !strings.Contains(out.String(), "  files     1 file in "+tildePath(filepath.Join(sub, "shot"))+" · ") {
+		t.Errorf("the files line does not name its folder:\n%s", out.String())
+	}
 	if !strings.Contains(out.String(), "sm0140-proxies-v001   Proxies and previews · 48 frames") || !strings.Contains(out.String(), "queued    saltmarsh/sm0140-proxies-v001") {
 		t.Errorf("submit:\n%s", out.String())
 	}
