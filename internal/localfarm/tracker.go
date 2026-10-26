@@ -42,11 +42,6 @@ const (
 	sandboxReviewer = "supervisor"
 )
 
-// SandboxPage is the sandbox's page on the HUD's port, as person.
-func SandboxPage(hud, person string) string {
-	return strings.TrimSuffix(hud, "/") + sandbox.Prefix + "?as=" + person
-}
-
 // sandboxPeople are the sandbox's logins: the farm's owner first, whom
 // the page acts as unless told otherwise, then each of the local farm's
 // roles, each by the same name.

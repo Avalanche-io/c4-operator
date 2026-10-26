@@ -60,11 +60,9 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 		if err := farmcli.LoadIssues(ctx, o, sc, f.HUD, f.Owner, inst); err != nil {
 			return err
 		}
-		as := sc.Issues[0].By
-		if f.Owner != "" {
-			as = f.Owner
-		}
-		fmt.Fprintf(stdout, "sandbox   %s\n", localfarm.SandboxPage(f.HUD, as))
+		// a command, not a link: the page is the HUD's, which takes a
+		// browser c4 farm open has signed in
+		fmt.Fprintf(stdout, "sandbox   the stand-in tracker: c4 farm open, then /sandbox/ in that window\n")
 		return nil
 	}
 	p, err := localfarm.Prepare(ctx, sc, all)

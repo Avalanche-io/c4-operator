@@ -720,7 +720,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		fmt.Fprintf(stdout, "HUD       %s   c4 farm open, any time, opens it signed in\n", o.HUD())
 		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm open --as ROLE)\n")
 		if o.Tracker || localfarm.HasTracker(ctx) {
-			fmt.Fprintf(stdout, "tracker   %s   a stand-in for GitHub; nothing leaves this machine\n", localfarm.SandboxPage(o.HUD(), v.Name))
+			// a command, not a link: the page is the HUD's, which takes a
+			// browser c4 farm open has signed in
+			fmt.Fprintf(stdout, "tracker   the stand-in tracker: c4 farm open, then /sandbox/ in that window; a stand-in for GitHub, and nothing leaves this machine\n")
 		} else if first {
 			fmt.Fprintf(stdout, "try a tracker: c4 farm up --tracker\n")
 		}
