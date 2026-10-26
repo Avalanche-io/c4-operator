@@ -1823,7 +1823,11 @@ func (q *Queue) podFor(v *view, idx, attempt int, p *pool) *corev1.Pod {
 	pod.Labels[c4v1.LabelUnit] = strconv.Itoa(idx)
 	pod.Labels[c4v1.LabelPool] = p.spec.Name
 	// Which agent the unit runs is the queue's to say, never the
-	// template's.
+	// template's. The label lets the HUD take the unit as that agent for
+	// an agent: wait on its own job, graded direct. Direct proves which
+	// unit decided; which agent that unit runs is the job author's own
+	// declaration (C4_AGENT_MEMBER in the plan, C4_AGENT_BLOCK=1 in the
+	// template), which cannot reach past the owner's own job.
 	delete(pod.Labels, c4v1.LabelAgent)
 	if a := unitAgent(tpl.Spec, u); a != "" {
 		pod.Labels[c4v1.LabelAgent] = a

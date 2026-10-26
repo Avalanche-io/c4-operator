@@ -1643,6 +1643,14 @@ it, `relay` is `via`, and `custody` is `relayed`, or
 a person (a model registry, which names no person). A decision made in the
 HUD is `direct`.
 
+An `agent:` wait is decided by the agent it names: a unit of the same job
+whose pod the queue labelled as running that agent
+(`c4.avalanche.io/agent`), by its own unit token, graded `direct`; or an
+MCP client naming the agent in `X-C4-Agent`, graded `claimed`. `direct`
+proves which unit decided. Which agent that unit runs is the job author's
+own declaration (`C4_AGENT_MEMBER` in the plan, `C4_AGENT_BLOCK=1` in the
+template), which cannot reach past the owner's own job.
+
 ## Grants
 
 A person lets a Tracker submit work for them (docs/c4-sync.md, `for`), so
