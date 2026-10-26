@@ -2,6 +2,7 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
@@ -31,8 +32,9 @@ import (
 //
 // (a single model's counts at the top level are read the same way).
 // Status keeps the job's totals and model share of spend, tokens no price
-// came with, and each model unit's use by model. A share rising on work
-// that should be mechanical is what the HUD can flag.
+// came with, and each of its newest model units' use by model, the older
+// ones' summed (foldUsage). A share rising on work that should be
+// mechanical is what the HUD can flag.
 
 type modelUse struct {
 	Model            string   `json:"model"`
@@ -173,25 +175,168 @@ func (q *Queue) noteSpend(ctx context.Context, v *view, idx int, p *corev1.Pod, 
 	return true
 }
 
-// spendStatus is the job's spend and its model units' usage.
-func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
+// A job's status keeps each model unit's usage for at most maxUsage
+// units and usageBudget bytes of JSON in all, the newest units (the
+// highest indices: a lead's latest workers) first, and folds every older
+// unit into one sum (status.modelUsageOlder), so a job of thousands of
+// model units stays a fraction of what etcd holds and its totals never
+// change by a unit being folded. An entry is about 300 bytes with one
+// model and no observed reasoning, more with several models or a long
+// tool list: 500 thin entries are 150 KiB, and the budget holds a job of
+// fat ones.
+const (
+	maxUsage    = 500
+	usageBudget = 256 << 10
+)
+
+// doesModel is whether unit i does model work, as its spend counts it.
+func doesModel(v *view, i int) bool {
 	m := v.mem
-	if len(m.spend) == 0 && m.procBase == 0 && m.procHours == 0 {
-		return nil, nil
+	return i < len(m.plan.Units) && v.driver != nil && class.DoesOf(v.driver, m.plan.Units[i]) == class.DoesModel
+}
+
+// unitUse is a spend's status entry and what it adds to the job's
+// totals.
+type unitUse struct {
+	u                c4v1.WorkUnitUsage
+	cost, est, w, uw float64
+	unknown          bool
+}
+
+func (s *unitSpend) use() unitUse {
+	x := unitUse{u: c4v1.WorkUnitUsage{SlotCost: money(s.slotCost), SlotHours: hours(s.slotHours), CostSource: s.costSource, Reasoning: s.reasoning, UsageError: s.usageErr}}
+	u := &x.u
+	var names []string
+	for name := range s.models {
+		names = append(names, name)
 	}
-	isModel := func(i int) bool {
-		return i < len(m.plan.Units) && v.driver != nil && class.DoesOf(v.driver, m.plan.Units[i]) == class.DoesModel
+	sort.Strings(names)
+	for _, name := range names {
+		t := s.models[name]
+		u.InputTokens += t.Input
+		u.OutputTokens += t.Output
+		u.CacheReadTokens += t.CacheRead
+		u.CacheWriteTokens += t.CacheWrite
+		u.UnpricedTokens += t.unpriced
+		x.cost += t.cost
+		x.est += t.estCost
+		tw := tokens.Weighted(name, t.Counts)
+		x.w += tw
+		x.uw += t.unpricedW
+		x.unknown = x.unknown || t.unknown
+		mt := c4v1.WorkModelTokens{Model: name, InputTokens: t.Input, OutputTokens: t.Output, CacheReadTokens: t.CacheRead,
+			CacheWriteTokens: t.CacheWrite, WeightedTokens: int64(math.Round(tw)), UnpricedTokens: t.unpriced,
+			UnpricedWeightedTokens: int64(math.Round(t.unpricedW)), Unpriceable: t.unknown}
+		if t.cost > 0 || t.unpriced == 0 {
+			mt.Cost = money(t.cost)
+		}
+		if t.estCost > 0 {
+			mt.EstimatedCost = money(t.estCost)
+		}
+		u.Models = append(u.Models, mt)
 	}
-	// The units of each kind that have run.
-	mu, pu := 0, 0
+	u.Cost = money(x.cost)
+	if x.est > 0 {
+		u.EstimatedCost = money(x.est)
+	}
+	u.WeightedTokens, u.UnpricedWeightedTokens = int64(math.Round(x.w)), int64(math.Round(x.uw))
+	return x
+}
+
+// fold adds o's spend to s, model by model.
+func (s *unitSpend) fold(o *unitSpend) {
+	s.slotCost += o.slotCost
+	s.slotHours += o.slotHours
+	for name, t := range o.models {
+		if s.models == nil {
+			s.models = map[string]*tokenUse{}
+		}
+		f := s.models[name]
+		if f == nil {
+			f = &tokenUse{}
+			s.models[name] = f
+		}
+		f.Input += t.Input
+		f.Output += t.Output
+		f.CacheRead += t.CacheRead
+		f.CacheWrite += t.CacheWrite
+		f.cost += t.cost
+		f.unpriced += t.unpriced
+		f.unpricedW += t.unpricedW
+		f.estCost += t.estCost
+		f.unknown = f.unknown || t.unknown
+	}
+	if o.usageErr != "" {
+		s.usageErr = o.usageErr
+	}
+}
+
+// foldUsage folds model units out of m.spend into m.older: every one
+// below m.olderBelow, and, newest first, every one past the count or the
+// budget, which moves olderBelow up past them. A unit is folded for good:
+// a later attempt of a folded unit (a requeue, or a unit that ran long,
+// such as a lead) is folded in as it is written, so what memory holds is
+// what status says, and a reload counts nothing twice. It returns the
+// entries of the units kept.
+func foldUsage(v *view) map[int]unitUse {
+	m := v.mem
+	var idx []int
+	for i := range m.spend {
+		if doesModel(v, i) {
+			idx = append(idx, i)
+		}
+	}
+	sort.Sort(sort.Reverse(sort.IntSlice(idx)))
+	kept := make(map[int]unitUse, min(len(idx), maxUsage))
+	left := usageBudget
+	for n, i := range idx {
+		if i >= m.olderBelow && n < maxUsage {
+			x := m.spend[i].use()
+			b, _ := json.Marshal(x.u)
+			size := len(b) + len(strconv.Itoa(i)) + 4 // its key, quoted, a colon and a comma
+			if size <= left {
+				left -= size
+				kept[i] = x
+				continue
+			}
+		}
+		// This unit and every older one are folded.
+		if m.older == nil {
+			m.older = &unitSpend{}
+		}
+		for _, j := range idx[n:] {
+			m.older.fold(m.spend[j])
+			delete(m.spend, j)
+		}
+		m.olderBelow = max(m.olderBelow, i+1)
+		break
+	}
+	return kept
+}
+
+// spendStatus is the job's spend, its newest model units' usage, and the
+// fold of the older ones.
+func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage, *c4v1.WorkUsageFold) {
+	m := v.mem
+	if len(m.spend) == 0 && m.older == nil && m.procBase == 0 && m.procHours == 0 {
+		return nil, nil, nil
+	}
+	kept := foldUsage(v)
+	// The units of each kind that have run, and the model units of them
+	// folded.
+	mu, pu, folded := 0, 0, 0
 	for i := range m.plan.Units {
 		if !m.succeeded[i] && !m.failed[i] && m.attempts[i] == 0 && m.spend[i] == nil {
 			continue
 		}
-		if isModel(i) {
-			mu++
-		} else {
+		switch {
+		case !doesModel(v, i):
 			pu++
+		case i < m.olderBelow:
+			mu++
+			folded++
+		default:
+			mu++
 		}
 	}
 	proc, procHours, modelHours := m.procBase, m.procHours, 0.0
@@ -199,62 +344,39 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 	var raw, unpriced int64
 	var weighted, unpricedW, tokenCost, estCost, modelSlot float64
 	unknown := false
+	add := func(s *unitSpend, x unitUse) {
+		u := x.u
+		modelSlot += s.slotCost
+		modelHours += s.slotHours
+		all.Input += u.InputTokens
+		all.Output += u.OutputTokens
+		all.CacheRead += u.CacheReadTokens
+		all.CacheWrite += u.CacheWriteTokens
+		raw += u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheWriteTokens
+		unpriced += u.UnpricedTokens
+		weighted += x.w
+		unpricedW += x.uw
+		tokenCost += x.cost
+		estCost += x.est
+		unknown = unknown || x.unknown
+	}
 	usage := map[string]c4v1.WorkUnitUsage{}
 	for idx, s := range m.spend {
-		if !isModel(idx) {
+		if !doesModel(v, idx) {
 			proc += s.slotCost
 			procHours += s.slotHours
 			continue
 		}
-		modelSlot += s.slotCost
-		modelHours += s.slotHours
-		u := c4v1.WorkUnitUsage{SlotCost: money(s.slotCost), SlotHours: hours(s.slotHours), CostSource: s.costSource, Reasoning: s.reasoning, UsageError: s.usageErr}
-		var names []string
-		for name := range s.models {
-			names = append(names, name)
-		}
-		sort.Strings(names)
-		cost, est, w, uw := 0.0, 0.0, 0.0, 0.0
-		for _, name := range names {
-			t := s.models[name]
-			u.InputTokens += t.Input
-			u.OutputTokens += t.Output
-			u.CacheReadTokens += t.CacheRead
-			u.CacheWriteTokens += t.CacheWrite
-			u.UnpricedTokens += t.unpriced
-			cost += t.cost
-			est += t.estCost
-			tw := tokens.Weighted(name, t.Counts)
-			w += tw
-			uw += t.unpricedW
-			unknown = unknown || t.unknown
-			mt := c4v1.WorkModelTokens{Model: name, InputTokens: t.Input, OutputTokens: t.Output, CacheReadTokens: t.CacheRead,
-				CacheWriteTokens: t.CacheWrite, WeightedTokens: int64(math.Round(tw)), UnpricedTokens: t.unpriced,
-				UnpricedWeightedTokens: int64(math.Round(t.unpricedW)), Unpriceable: t.unknown}
-			if t.cost > 0 || t.unpriced == 0 {
-				mt.Cost = money(t.cost)
-			}
-			if t.estCost > 0 {
-				mt.EstimatedCost = money(t.estCost)
-			}
-			u.Models = append(u.Models, mt)
-			all.Input += t.Input
-			all.Output += t.Output
-			all.CacheRead += t.CacheRead
-			all.CacheWrite += t.CacheWrite
-		}
-		u.Cost = money(cost)
-		if est > 0 {
-			u.EstimatedCost = money(est)
-		}
-		u.WeightedTokens, u.UnpricedWeightedTokens = int64(math.Round(w)), int64(math.Round(uw))
-		raw += u.InputTokens + u.OutputTokens + u.CacheReadTokens + u.CacheWriteTokens
-		unpriced += u.UnpricedTokens
-		weighted += w
-		unpricedW += uw
-		tokenCost += cost
-		estCost += est
-		usage[strconv.Itoa(idx)] = u
+		x := kept[idx]
+		add(s, x)
+		usage[strconv.Itoa(idx)] = x.u
+	}
+	var older *c4v1.WorkUsageFold
+	if m.older != nil {
+		x := m.older.use()
+		add(m.older, x)
+		x.u.CostSource, x.u.Reasoning = "", nil
+		older = &c4v1.WorkUsageFold{Below: int32(m.olderBelow), Units: int32(folded), WorkUnitUsage: x.u}
 	}
 	// The model share counts reported costs, and for tokens no price came
 	// with, their estimate at the model's published rates; a model it
@@ -283,35 +405,42 @@ func spendStatus(v *view) (*c4v1.WorkSpend, map[string]c4v1.WorkUnitUsage) {
 	if len(usage) == 0 {
 		usage = nil
 	}
-	return out, usage
+	return out, usage, older
 }
 
 func money(x float64) string { return fmt.Sprintf("%.4f", x) }
 
 func hours(x float64) string { return fmt.Sprintf("%.4f", x) }
 
-// loadSpend restores what status recorded: each model unit's use, and
-// the procedural units' slot cost as a total.
+// loadSpend restores what status recorded: each listed model unit's use,
+// the fold of the older ones, and the procedural units' slot cost as a
+// total.
 func (m *jobMem) loadSpend(st *c4v1.WorkJobStatus) {
 	f := func(x string) float64 { v, _ := strconv.ParseFloat(x, 64); return v }
 	if s := st.Spend; s != nil {
 		m.procBase, m.procHours = f(s.ProceduralSlotCost), f(s.ProceduralSlotHours)
 	}
-	for k, u := range st.ModelUsage {
-		i, err := strconv.Atoi(k)
-		if err != nil {
-			continue
-		}
+	spendOf := func(u c4v1.WorkUnitUsage) *unitSpend {
 		s := &unitSpend{slotCost: f(u.SlotCost), slotHours: f(u.SlotHours), costSource: u.CostSource, reasoning: u.Reasoning, usageErr: u.UsageError, models: map[string]*tokenUse{}}
 		for _, mt := range u.Models {
 			s.models[mt.Model] = &tokenUse{Counts: tokens.Counts{Input: mt.InputTokens, Output: mt.OutputTokens, CacheRead: mt.CacheReadTokens,
 				CacheWrite: mt.CacheWriteTokens}, unpriced: mt.UnpricedTokens, unpricedW: float64(mt.UnpricedWeightedTokens),
 				cost: f(mt.Cost), estCost: f(mt.EstimatedCost), unknown: mt.Unpriceable}
 		}
+		return s
+	}
+	for k, u := range st.ModelUsage {
+		i, err := strconv.Atoi(k)
+		if err != nil {
+			continue
+		}
 		if m.spend == nil {
 			m.spend = map[int]*unitSpend{}
 		}
-		m.spend[i] = s
+		m.spend[i] = spendOf(u)
+	}
+	if o := st.ModelUsageOlder; o != nil {
+		m.older, m.olderBelow = spendOf(o.WorkUnitUsage), int(o.Below)
 	}
 }
 

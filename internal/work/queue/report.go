@@ -257,7 +257,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 	}
 	st.Measure = measureStatus(v)
 	st.Reused, st.Units.Reused = reusedStatus(m)
-	st.Spend, st.ModelUsage = spendStatus(v)
+	st.Spend, st.ModelUsage, st.ModelUsageOlder = spendStatus(v)
 	short := measureShort(v, st.Measure)
 	v.measureShort = ""
 	if short && len(succ)+len(accepted) == n && len(pre)+len(run)+len(retry)+len(egress) == 0 {

@@ -264,8 +264,11 @@ type jobMem struct {
 	reused map[int]string
 	// spend is each unit's spend since the queue started, spentPod the
 	// pods counted, and spendBase and usageBase what status recorded
-	// before (spend.go).
+	// before (spend.go). older is the fold of the model units below
+	// olderBelow, which spend no longer holds (foldUsage).
 	spend               map[int]*unitSpend
+	older               *unitSpend
+	olderBelow          int
 	spentPod            map[types.UID]bool
 	procBase, procHours float64
 	// firstMillis is each unit's first pass run time, to price its reruns

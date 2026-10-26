@@ -1895,8 +1895,11 @@ and a sweep planner that spawns trials are all generators.
     - the model share of spend, with its basis: `priced`, `estimated` (some
       at published rates) or `partial` (some of a model with no known
       price, left out). `status.modelUsage` has each model unit's tokens
-    by model. The HUD's job summary shows `spend`, and its unit list
-    `kind` and `usage`.
+    by model, for the newest 500 model units (in 256 KiB); older units
+    are folded into one sum, `status.modelUsageOlder`, so a job of many
+    units stays within what etcd holds and its totals never change. The
+    HUD's job summary shows `spend`, and its unit list `kind` and
+    `usage` (`usageFolded` for an older unit).
   - **Reuse** is C4-native memoization, which Argo's string-keyed one
     cannot be.
     - **What is reused.** A procedural unit ready to run reuses an earlier
