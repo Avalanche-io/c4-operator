@@ -828,13 +828,20 @@ func TestTelemetrySettingOnlyFromTheManager(t *testing.T) {
 		cm := setting(fmt.Sprint("b", try))
 		err := admin.Create(ctx, cm)
 		if err == nil {
-			// made before the policy was in force: take it away again
-			admin.Delete(ctx, cm)
+			// made before the policy was in force: take it away again, as
+			// the manager, whom the policy lets delete it once it is
+			manager.Delete(ctx, cm)
 		}
 		return err
 	})
 	cm := setting("a")
-	eventually(t, "the manager's setting", func() error { return manager.Create(ctx, cm) })
+	eventually(t, "the manager's setting", func() error {
+		// a probe the policy came into force under may still be there
+		if err := manager.Delete(ctx, setting("")); err != nil && !apierrors.IsNotFound(err) {
+			return err
+		}
+		return manager.Create(ctx, cm)
+	})
 	if err := admin.Patch(ctx, cm, client.RawPatch(types.MergePatchType, []byte(`{"data":{"tier":"b"}}`))); err == nil {
 		t.Error("the tier was raised directly")
 	}
