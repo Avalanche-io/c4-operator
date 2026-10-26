@@ -155,9 +155,11 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		return nil
 	}
-	if strings.HasPrefix(version, "v") {
-		// the prebuilt job images are released with the binary
-		farmcli.ImageTag = version
+	// the prebuilt job images are released with the binary; a checkout's
+	// build (v0.2.1-7-g936f40f6) runs the release it descends from
+	if tag, dev := farmcli.ReleaseOf(version); tag != "" {
+		farmcli.ImageTag = tag
+		farmcli.DevBuild = dev
 	} else {
 		farmcli.DevBuild = true
 	}
@@ -684,7 +686,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		tz := localfarm.LocalTZ()
 		lat, lon := localfarm.Place(tz)
 		o := localfarm.UpOptions{Options: localfarm.Options{TZ: tz, Lat: lat, Lon: lon, OperatorImage: *image, HUDHostPort: *port, StoreHostPort: *storePort,
-			RegistryHostPort: *registryPort, LocalImages: !strings.HasPrefix(version, "v") && *install != "", Owner: *owner, Tracker: *trackerOn},
+			RegistryHostPort: *registryPort, LocalImages: farmcli.DevBuild && *install != "", Owner: *owner, Tracker: *trackerOn},
 			Install: *install, Version: version, ImageArchive: *archive, SyncInstall: *syncInstall, SyncImage: *syncImage, Log: stdout,
 			Timings: &localfarm.Timings{}}
 		// the owner is chosen when the farm is made, and kept after

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -21,8 +22,8 @@ var ErrNoRelease = errors.New("no c4-operator release is published yet")
 // uses: its own version, or for a development build ("dev", a commit) the
 // latest published release, with dev set so the caller can say so.
 func ReleaseFor(ctx context.Context, hc *http.Client, version string) (tag string, dev bool, err error) {
-	if strings.HasPrefix(version, "v") {
-		return version, false, nil
+	if tag, dev := ReleaseOf(version); tag != "" {
+		return tag, dev, nil
 	}
 	if hc == nil {
 		hc = http.DefaultClient
@@ -53,3 +54,17 @@ func ReleaseFor(ctx context.Context, hc *http.Client, version string) (tag strin
 	}
 	return r.Tag, true, nil
 }
+
+// ReleaseOf is the release a build's version names, and whether the build
+// is a development one: v0.2.1 is that release, v0.2.1-7-g936f40f6 (git
+// describe, a checkout ahead of it) and v0.2.1-dirty development builds of
+// it, which run its images; "" for a version that names no release (dev).
+func ReleaseOf(v string) (string, bool) {
+	m := releaseVersion.FindStringSubmatch(v)
+	if m == nil {
+		return "", true
+	}
+	return m[1], m[2] != "" || m[3] != ""
+}
+
+var releaseVersion = regexp.MustCompile(`^(v[0-9]+\.[0-9]+\.[0-9]+)(-[0-9]+-g[0-9a-f]+)?(-dirty)?$`)

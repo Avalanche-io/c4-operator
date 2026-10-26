@@ -62,3 +62,20 @@ func TestLocalFarmForStatusAndDown(t *testing.T) {
 		t.Errorf("none: %v", err)
 	}
 }
+
+// A build's version names the release whose job images it runs: a release
+// is itself, a checkout ahead of one (git describe) or a dirty tree runs
+// that release's images as a development build, and dev names none.
+func TestReleaseOf(t *testing.T) {
+	for v, want := range map[string]struct {
+		tag string
+		dev bool
+	}{
+		"v0.2.1": {"v0.2.1", false}, "v0.2.1-7-g936f40f6": {"v0.2.1", true}, "v0.2.1-7-g936f40f6-dirty": {"v0.2.1", true},
+		"v0.2.1-dirty": {"v0.2.1", true}, "dev": {"", true}, "936f40f6": {"", true},
+	} {
+		if tag, dev := farmcli.ReleaseOf(v); tag != want.tag || dev != want.dev {
+			t.Errorf("%s: %q %v", v, tag, dev)
+		}
+	}
+}
