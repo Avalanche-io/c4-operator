@@ -1593,6 +1593,24 @@ and a sweep planner that spawns trials are all generators.
   - The `graph` class is a job whose plan is one generator (a plan
     importer, test discovery, a sweep planner); its units run the job's
     template, told apart by `$C4_UNIT_NAME` and their `env`.
+- **Appending units.** A graph job's owner may add units to it while it
+  runs: a signed edit that appends units to the job's table, the same
+  document a generator writes. A lead's job grows this way, one worker per
+  call. `POST /jobs/{ns}/{name}/units` (internal/hud/API.md) takes an
+  expansion document's units and an idempotency key; the HUD checks them
+  as the queue will, stores the document, signs the request (control,
+  action `append`) and lists it in `c4.avalanche.io/append`, which only
+  the HUD writes. The queue applies each key once, through the
+  expansion's own check (names, edges, the lead-only rule, the bound): the
+  units follow the table's last index, under the job's root (unit 0, at
+  depth 1, as the root's own children), with no dependents, so nothing that
+  waited on the root waits on them and only the job's review comes after
+  them. Each key's outcome is signed (decision/v1, kind `append`) and
+  listed in status `appends`; a restart replays appends and expansions in
+  the order they began in the table, and applies no key twice. A refused
+  append (agent units on a job a unit submitted, a name taken, a job that
+  finished) adds nothing and lists why. A unit adds no units, to its own
+  job or another: its lead does.
 - **Rounds:** iteration that is
   not spelled as nesting. A generator may be a bounded loop:
   `rounds: {max, until?}` on a planned unit of a document, or the job params
