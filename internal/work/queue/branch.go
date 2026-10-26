@@ -27,6 +27,7 @@ func (m *jobMem) noteBranch(idx int, p *corev1.Pod) {
 		return
 	}
 	b.Attempt = int32(attemptOf(p))
+	b.Dir = "" // the worktree goes with the unit; status stays small for many units
 	if cur, ok := m.branches[idx]; ok && cur.Attempt > b.Attempt {
 		return
 	}

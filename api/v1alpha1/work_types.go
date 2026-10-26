@@ -787,9 +787,9 @@ type WorkOutput struct {
 }
 
 // WorkUnitBranch is a unit's git branch: the repository on the machine
-// that ran it, the worktree it worked in (gone once the unit is done), the
-// branch, the commit it started from and its last, and how many commits
-// it made.
+// that ran it, the worktree it worked in (gone once the unit is done, so
+// the pod's record carries it and the job's status does not), the branch,
+// the commit it started from and its last, and how many commits it made.
 type WorkUnitBranch struct {
 	Repo   string `json:"repo"`
 	Dir    string `json:"dir,omitempty"`

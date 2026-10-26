@@ -30,8 +30,8 @@ func TestUnitBranchInStatus(t *testing.T) {
 	finish(t, p, corev1.PodFailed, *now, time.Minute, map[string]string{c4v1.AnnotationOutputBranch: first})
 	tick(t, q)
 	b, ok := get(t, ns, "port").Status.UnitBranches["0"]
-	if !ok || b.Branch != "c4/port/0" || b.Head != "h1" || b.Commits != 1 || b.Repo != "/Users/sam/src/textkit" || b.Attempt != 1 {
-		t.Fatalf("after the failed attempt: %+v (%v)", b, ok)
+	if !ok || b.Branch != "c4/port/0" || b.Head != "h1" || b.Commits != 1 || b.Repo != "/Users/sam/src/textkit" || b.Attempt != 1 || b.Dir != "" {
+		t.Fatalf("after the failed attempt (its worktree is not kept in status): %+v (%v)", b, ok)
 	}
 	if _, ok := get(t, ns, "port").Status.UnitBranches["1"]; ok {
 		t.Fatal("a unit with no branch has one in status")
