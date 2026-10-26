@@ -721,7 +721,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 		// A limit a job hit later in the round holds the account's
 		// units in the jobs read before it, and their wait is in the
 		// estimate.
-		if q.holdAccounts(v, now) {
+		if q.holdAccounts(ctx, v, now) {
 			q.estimate(v, now)
 		}
 	}
@@ -1254,7 +1254,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	q.serveWaits(v, now)
 	applyHolds(v)
 	v.holdUsageLimits(now)
-	q.holdAccounts(v, now)
+	q.holdAccounts(ctx, v, now)
 	q.estimate(v, now)
 	q.escalate(ctx, v, phases, now)
 	return v

@@ -2224,9 +2224,14 @@ and a sweep planner that spawns trials are all generators.
       take their slots away until the reset themselves.
     - **A usage limit holds the account.** The queue knows a unit's
       account before releasing it by the credential lease its job's
-      template mounts: one holder's sign-in, serving only the holder's
-      own jobs. Once a unit on a lease hits a limit, every model unit of
-      every job on that lease waits until the same reset (the later, of
+      template mounts, which serves only the holder's own jobs. The
+      account is the lease's holder and the sign-in its lease agent
+      stamps on it (`c4.avalanche.io/account`), so a holder's leases of
+      one sign-in share a hold; never the sign-in label alone, which the
+      holder writes, so two holders are never held together. A lease with
+      no sign-in label is its own account. Once a unit on an account hits
+      a limit, every model unit of every job on it waits until the same
+      reset (the later, of
       two), spending no attempt and keeping its view. The hold is the
       hitting unit's one `usage-limit` decision, which names the account,
       and its `status.usageLimits` entry records the account

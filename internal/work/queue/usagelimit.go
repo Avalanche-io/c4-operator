@@ -13,6 +13,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/meta"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
@@ -66,9 +67,14 @@ type accountHold struct {
 
 // leaseAccount is the opaque label of the account a pod spec in namespace
 // ns runs under: its credential lease's, when it mounts exactly one, else
-// "". The label is a hash of the lease, as the HUD's is of a sign-in, so
-// status and messages carry no lease or holder name.
-func leaseAccount(ns string, spec *corev1.PodSpec) string {
+// "". The account is the lease's holder and the sign-in it carries
+// (c4v1.LabelAccount, which the holder's lease agent stamps), so two
+// leases of one sign-in share a hold; it is never the sign-in label
+// alone, which the holder writes, so no one can tie their limits to
+// another person's work. A lease with no sign-in label is its own
+// account. The label is a hash, as the HUD's is of a sign-in, so status
+// and messages carry no lease or holder name.
+func (q *Queue) leaseAccount(ctx context.Context, ns string, spec *corev1.PodSpec) string {
 	names := map[string]bool{}
 	for _, name := range leaseVolumes(spec) {
 		names[name] = true
@@ -77,7 +83,14 @@ func leaseAccount(ns string, spec *corev1.PodSpec) string {
 		return ""
 	}
 	for name := range names {
-		sum := sha256.Sum256([]byte("lease\x00" + ns + "/" + name))
+		key := "lease\x00" + ns + "/" + name
+		var l c4v1.CredentialLease
+		if err := q.Client.Get(ctx, types.NamespacedName{Namespace: ns, Name: name}, &l); err == nil {
+			if a := l.Labels[c4v1.LabelAccount]; a != "" && l.Spec.Holder != "" {
+				key = "account\x00" + l.Spec.Holder + "\x00" + a
+			}
+		}
+		sum := sha256.Sum256([]byte(key))
 		return hex.EncodeToString(sum[:])[:12]
 	}
 	return ""
@@ -160,7 +173,7 @@ func (q *Queue) noteUsageLimit(ctx context.Context, v *view, idx int, p *corev1.
 	m.usage[idx] = r
 	m.yields = append(m.yields, yieldRecord{Unit: idx, At: r.at, Reason: why, View: tree})
 	fields := map[string]any{"until": r.until.UTC().Format(time.RFC3339)}
-	if r.account = leaseAccount(p.Namespace, &p.Spec); r.account != "" {
+	if r.account = q.leaseAccount(ctx, p.Namespace, &p.Spec); r.account != "" {
 		// The account's every unit waits too: decided here, once.
 		fields["account"] = r.account
 		q.holdAccount(r, v.key, v.project, m, idx)
@@ -205,8 +218,8 @@ func (q *Queue) releaseAccounts(now time.Time) {
 // account is held, until it resets, and reports whether it held any. Run
 // again on a view, it holds what was added since (a limit another job hit
 // later in the tick).
-func (q *Queue) holdAccounts(v *view, now time.Time) bool {
-	h := q.accounts[leaseAccount(v.job.Namespace, &v.job.Spec.Template.Spec)]
+func (q *Queue) holdAccounts(ctx context.Context, v *view, now time.Time) bool {
+	h := q.accounts[q.leaseAccount(ctx, v.job.Namespace, &v.job.Spec.Template.Spec)]
 	if h == nil || !h.until.After(now) || len(v.runnable) == 0 {
 		return false
 	}
