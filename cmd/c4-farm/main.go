@@ -734,9 +734,20 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		return openSignedIn(ctx, cfg.Farms[localfarm.Name], localfarm.NeedsLink(o.HUD(), v))
 
 	case "down":
-		localName := fs.String("name", localfarm.Name, "the local farm to delete")
+		localName := fs.String("name", "", "the local farm to delete (default the current farm, when it is local)")
 		if _, err := parse(fs, rest); err != nil {
 			return err
+		}
+		// with no --name, the current local farm, never a guess: another
+		// person's farm may run on this machine too
+		if *localName == "" {
+			clusters, err := localfarm.Clusters()
+			if err != nil {
+				return err
+			}
+			if *localName, _, err = localFarm(cfg, clusters, "", "down deletes"); err != nil {
+				return err
+			}
 		}
 		localfarm.Name = *localName
 		// this machine's runner goes with the farm only if it serves this
@@ -761,13 +772,27 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := cfg.Save(); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "the local farm is gone\n")
+		fmt.Fprintf(stdout, "the local farm %s is gone\n", localfarm.Name)
 		return nil
 
 	case "status":
-		localName := fs.String("name", localfarm.Name, "the local farm")
+		localName := fs.String("name", "", "the local farm (default the current farm, when it is local)")
 		if _, err := parse(fs, rest); err != nil {
 			return err
+		}
+		if *localName == "" {
+			clusters, err := localfarm.Clusters()
+			if err != nil {
+				return err
+			}
+			*localName, _, err = localFarm(cfg, clusters, "", "status reports on")
+			if errors.Is(err, errNoLocalFarm) {
+				fmt.Fprintf(stdout, "no local farm; `c4 farm up` makes one\n")
+				return nil
+			}
+			if err != nil {
+				return err
+			}
 		}
 		localfarm.Name = *localName
 		have, err := localfarm.Exists(localfarm.Name)
@@ -789,8 +814,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		s, err := farmcli.Snapshot(ctx, c)
 		if err != nil {
-			fmt.Fprintf(stdout, "cluster   %s is running; the HUD does not answer yet: %v\n", localfarm.Name, err)
-			return nil
+			// a farm whose HUD does not answer is not well: a script sees it
+			return fmt.Errorf("the local farm %s is running, and its HUD does not answer yet: %v", localfarm.Name, err)
 		}
 		fmt.Fprintf(stdout, "farm      %s   %d nodes · %d of %d slots in use · %d units waiting\n", localfarm.Name, len(s.Nodes), s.Farm.SlotsUsed, s.Farm.SlotsTotal, s.Farm.QueuedUnits)
 		fmt.Fprintf(stdout, "HUD       %s   c4 farm open opens it signed in\n", hud)

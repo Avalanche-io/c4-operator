@@ -96,10 +96,21 @@ func loadScenario(ctx context.Context, stdout io.Writer, cfg *farmcli.Config, ut
 	return nil
 }
 
-// scenarioFarm is the local farm a scenario loads onto: the one name
-// names, else the current farm when it is local, else the only local farm.
-// A local farm is one up made that is still running (clusters).
+// scenarioFarm is the local farm a scenario loads onto (localFarm).
 func scenarioFarm(cfg *farmcli.Config, clusters []string, name string) (string, farmcli.Farm, error) {
+	return localFarm(cfg, clusters, name, "a scenario loads onto")
+}
+
+// errNoLocalFarm is localFarm's answer when no local farm runs here.
+var errNoLocalFarm = errors.New("no local farm")
+
+// localFarm is the local farm a command (does: "a scenario loads onto")
+// means: the one name names, else the current farm when it is local, else
+// the only local farm; with several and none current, it names them and
+// asks for --name, never guessing one, as another person's farm on this
+// machine may be one of them. A local farm is one up made that is still
+// running (clusters).
+func localFarm(cfg *farmcli.Config, clusters []string, name, does string) (string, farmcli.Farm, error) {
 	var local []string
 	for _, n := range cfg.Names() {
 		if cfg.Farms[n].Local && slices.Contains(clusters, n) {
@@ -108,7 +119,7 @@ func scenarioFarm(cfg *farmcli.Config, clusters []string, name string) (string, 
 	}
 	switch {
 	case len(local) == 0:
-		return "", farmcli.Farm{}, errors.New("a scenario loads onto a local farm, and there is none; `c4 farm up` makes one")
+		return "", farmcli.Farm{}, fmt.Errorf("%s a local farm, and there is none; `c4 farm up` makes one: %w", does, errNoLocalFarm)
 	case name != "":
 		if !slices.Contains(local, name) {
 			return "", farmcli.Farm{}, fmt.Errorf("there is no local farm %s; the local farms here: %s", name, strings.Join(local, ", "))
@@ -118,7 +129,7 @@ func scenarioFarm(cfg *farmcli.Config, clusters []string, name string) (string, 
 	case len(local) == 1:
 		name = local[0]
 	default:
-		return "", farmcli.Farm{}, fmt.Errorf("a scenario loads onto a local farm, and the current farm is not one; name one with --name: %s", strings.Join(local, ", "))
+		return "", farmcli.Farm{}, fmt.Errorf("%s a local farm, and the current farm is not one; name one with --name: %s", does, strings.Join(local, ", "))
 	}
 	return name, cfg.Farms[name], nil
 }

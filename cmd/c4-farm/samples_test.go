@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -40,5 +41,24 @@ func TestScenarioFarm(t *testing.T) {
 		case tc.err == "" && (err != nil || got != tc.want):
 			t.Errorf("%s: %q, %v; want %q", tc.why, got, err, tc.want)
 		}
+	}
+}
+
+// status and down mean the current local farm too, never a guess at
+// c4-local: with another person's farm on this machine and the current
+// farm not local, they name the farms and ask for --name.
+func TestLocalFarmForStatusAndDown(t *testing.T) {
+	cfg := &farmcli.Config{Current: "c4-walk", Farms: map[string]farmcli.Farm{
+		"c4-local": {Local: true}, "c4-walk": {Local: true}, "studio": {HUD: "https://farm.studio.example"}}}
+	both := []string{"c4-local", "c4-walk"}
+	if got, _, err := localFarm(cfg, both, "", "down deletes"); err != nil || got != "c4-walk" {
+		t.Errorf("the current farm: %q %v", got, err)
+	}
+	cfg.Current = "studio"
+	if _, _, err := localFarm(cfg, both, "", "down deletes"); err == nil || err.Error() != "down deletes a local farm, and the current farm is not one; name one with --name: c4-local, c4-walk" {
+		t.Errorf("two, none current: %v", err)
+	}
+	if _, _, err := localFarm(cfg, nil, "", "status reports on"); !errors.Is(err, errNoLocalFarm) {
+		t.Errorf("none: %v", err)
 	}
 }
