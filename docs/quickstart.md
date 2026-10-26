@@ -69,8 +69,8 @@ project   saltmarsh   you: sam
 owner     sam, who plays every role here
 claude    has the farm's tools (c4-farm in ~/.claude.json); c4 farm integrate off takes it all out
 agents    this machine (c4-host-laptop) is enrolled for sam's agents and its runner is started; they run here once you sign in where they run
-HUD       http://127.0.0.1:30080/?as=sam#/needs   (c4 farm open opens it signed in)
-roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)
+HUD       http://127.0.0.1:30080   c4 farm open, any time, opens it signed in
+roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm open --as ROLE)
 time      up in 1m4s: cluster 41s, operator 12s, store 6s, tools 4s
 ```
 

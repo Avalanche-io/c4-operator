@@ -55,7 +55,7 @@ Work
   submit FILE              send a submission (c4: submit/1): its plan and estimate first (--dry-run, --explain)
   ls                       the queue, in run order (--mine, --at-risk, --all)
   watch JOB                the job's progress, deadline and slack as they change
-  open [JOB]               open the job view in the HUD (--widget for the side widget); no JOB, what is waiting on you
+  open [JOB]               open the job view in the HUD (--widget for the side widget); no JOB, what is waiting on you (--as ROLE: a local farm's role)
   deadline JOB WHEN        move a job's deadline (18:00, fri 18:00, +3h, suggested)
   hold JOB [--stop]        hold a job; --stop also stops its running units
   release JOB              release a held job
@@ -439,16 +439,27 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 
 	case "open":
 		widget := fs.Bool("widget", false, "the side widget, for a second monitor")
+		as := fs.String("as", "", "on a local farm, open it as one of its roles to try that view: artist, supervisor, wrangler, admin, facilities or td")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
 		}
 		if len(pos) > 1 {
-			return errors.New("usage: c4 farm open [JOB] [--widget]")
+			return errors.New("usage: c4 farm open [JOB] [--widget] [--as ROLE]")
 		}
 		c, f, o, project, err := connect()
 		if err != nil {
 			return err
+		}
+		if *as != "" {
+			if !f.Local {
+				return errors.New("--as opens a local farm's role; a studio's farm opens as you")
+			}
+			v, err := localfarm.LookupViewer(*as)
+			if err != nil {
+				return err
+			}
+			c.As = v.Name
 		}
 		// no JOB: what is waiting on you
 		u := c.Web("needs", nil)
@@ -704,8 +715,10 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := ui.apply(ctx, cfg, on, wasOn); err != nil {
 			return err
 		}
-		fmt.Fprintf(stdout, "HUD       %s   (c4 farm open opens it signed in)\n", localfarm.NeedsLink(o.HUD(), v))
-		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm up --as ROLE opens one)\n")
+		// a command, not a link: the HUD takes a browser only once c4 farm
+		// open has signed it in, and a printed sign-in lapses in minutes
+		fmt.Fprintf(stdout, "HUD       %s   c4 farm open, any time, opens it signed in\n", o.HUD())
+		fmt.Fprintf(stdout, "roles     artist, supervisor, wrangler, admin, facilities, td, to try their views (c4 farm open --as ROLE)\n")
 		if o.Tracker || localfarm.HasTracker(ctx) {
 			fmt.Fprintf(stdout, "tracker   %s   a stand-in for GitHub; nothing leaves this machine\n", localfarm.SandboxPage(o.HUD(), v.Name))
 		} else if first {
@@ -778,9 +791,9 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return nil
 		}
 		fmt.Fprintf(stdout, "farm      %s   %d nodes · %d of %d slots in use · %d units waiting\n", localfarm.Name, len(s.Nodes), s.Farm.SlotsUsed, s.Farm.SlotsTotal, s.Farm.QueuedUnits)
-		fmt.Fprintf(stdout, "HUD       %s\n", hud)
+		fmt.Fprintf(stdout, "HUD       %s   c4 farm open opens it signed in\n", hud)
 		for _, v := range localfarm.Viewers {
-			fmt.Fprintf(stdout, "  %-10s %s\n", v.Name, localfarm.Link(hud, v))
+			fmt.Fprintf(stdout, "  %-10s c4 farm open --as %s\n", v.Name, v.Name)
 		}
 		return nil
 
