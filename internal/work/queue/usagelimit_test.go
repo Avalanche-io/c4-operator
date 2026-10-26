@@ -180,3 +180,141 @@ func TestUsageLimitResetIsBounded(t *testing.T) {
 		t.Fatalf("condition %+v", c)
 	}
 }
+
+// leasedGraphJob starts a graph job of owner noor's whose template mounts
+// credential lease lease.
+func leasedGraphJob(t *testing.T, ns, name, lease string, now time.Time) {
+	t.Helper()
+	j := job(ns, name, "graph", "cpu-"+ns, nil, now.Add(72*time.Hour))
+	j.Annotations = map[string]string{c4v1.AnnotationOwner: "noor"}
+	spec := &j.Spec.Template.Spec
+	spec.Volumes = []corev1.Volume{{Name: "lease", VolumeSource: corev1.VolumeSource{Secret: &corev1.SecretVolumeSource{SecretName: c4v1.LeaseSecretPrefix + lease}}}}
+	spec.Containers[0].VolumeMounts = []corev1.VolumeMount{{Name: "lease", MountPath: "/etc/c4/lease", ReadOnly: true}}
+	if err := k8s.Create(context.Background(), j); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// activeLease is noor's active holder-transfer lease name, for pool.
+func activeLease(t *testing.T, ns, name, pool string, now time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	l := &c4v1.CredentialLease{ObjectMeta: metav1.ObjectMeta{Namespace: ns, Name: name}, Spec: c4v1.CredentialLeaseSpec{
+		Account: "anthropic", Holder: "noor", BoundTo: c4v1.LeaseBinding{Owners: []string{"noor"}},
+		Mode: c4v1.LeaseHolderTransfer, Target: c4v1.LeaseTarget{Pools: []string{pool}},
+		TTL: metav1.Duration{Duration: 72 * time.Hour}, RenewBefore: metav1.Duration{Duration: 10 * time.Minute}}}
+	if err := k8s.Create(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+	exp := metav1.NewTime(now.Add(72 * time.Hour))
+	l.Status = c4v1.CredentialLeaseStatus{State: c4v1.LeaseActive, ExpiresAt: &exp}
+	if err := k8s.Status().Update(ctx, l); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A usage limit is the account's: once a unit on a credential lease hits
+// it, every model unit of a job on that lease waits until the same reset,
+// spending no attempt, in the same round and across a restart; the job
+// says which unit hit it, and the account is never named. A job on
+// another lease, and a unit that is not a model's, run on.
+func TestUsageLimitHoldsTheAccount(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	q.HolderTransfer = true
+	pool := "cpu-" + ns
+	activeLease(t, ns, "acct-1", pool, *now)
+	activeLease(t, ns, "acct-2", pool, *now)
+	// "held" is read before "lim" each round
+	leasedGraphJob(t, ns, "lim", "acct-1", *now)
+	leasedGraphJob(t, ns, "held", "acct-1", *now)
+	leasedGraphJob(t, ns, "other", "acct-2", *now)
+	tick(t, q)
+	for name, units := range map[string]string{
+		"lim":   `{"name": "cut", "reasoning": {"does": "model"}}`,
+		"held":  `{"name": "draft"}, {"name": "polish", "after": ["draft"], "reasoning": {"does": "model"}}`,
+		"other": `{"name": "prep"}, {"name": "cut", "after": ["prep"], "reasoning": {"does": "model"}}`,
+	} {
+		doc := putDoc(t, st, `{"version": 1, "units": [`+units+`]}`)
+		finish(t, podOfUnit(t, ns, name, 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputExpand: doc})
+	}
+	tick(t, q)
+	// lim's cut hits the limit in the round held's draft and other's prep
+	// finish, which would release the model units after them
+	until := now.Add(2 * time.Hour).Truncate(time.Second).UTC()
+	hitUsageLimit(t, podOfUnit(t, ns, "lim", 1), *now, "usage limit: You've hit your limit (until "+until.Format(time.RFC3339)+")", "")
+	finishUnit(t, now, ns, "held", 1, nil)
+	finishUnit(t, now, ns, "other", 1, nil)
+	tick(t, q)
+	tick(t, q)
+	check := func(when string) {
+		t.Helper()
+		if hasPod(t, ns, "held", 2) || hasPod(t, ns, "lim", 1) {
+			t.Fatalf("%s: a unit on the held account ran", when)
+		}
+		if !hasPod(t, ns, "other", 2) {
+			t.Fatalf("%s: a unit on another account did not run", when)
+		}
+		lim, held, other := get(t, ns, "lim"), get(t, ns, "held"), get(t, ns, "other")
+		a := lim.Status.UsageLimits["1"].Account
+		if a == "" || strings.Contains(a, "acct") {
+			t.Fatalf("%s: account %q", when, a)
+		}
+		c := meta.FindStatusCondition(held.Status.Conditions, c4v1.ConditionUsageLimit)
+		if c == nil || !strings.HasPrefix(c.Message, "waiting for the model's usage limit on the job's account to reset at ") ||
+			!strings.HasSuffix(c.Message, " (unit cut of job lim hit it)") || strings.Contains(c.Message, "acct") {
+			t.Fatalf("%s: held's condition %+v", when, c)
+		}
+		if len(held.Status.UsageLimits) != 0 || strings.Contains(held.Status.Attempts, "2:") {
+			t.Fatalf("%s: held's limits %+v, attempts %q", when, held.Status.UsageLimits, held.Status.Attempts)
+		}
+		// its waiting unit is still work to do, after the reset
+		if e := held.Status.Estimate; e == nil || e.RemainingWork <= 0 || e.ETA50 == nil || !e.ETA50.Time.After(until) {
+			t.Fatalf("%s: held's estimate %+v, want an ETA after the reset %s", when, held.Status.Estimate, until)
+		}
+		if meta.FindStatusCondition(other.Status.Conditions, c4v1.ConditionUsageLimit) != nil {
+			t.Fatalf("%s: other is held", when)
+		}
+		// the account's hold is decided once, by the unit that hit it
+		if len(decisionsOf(lim, "usage-limit")) != 1 || len(decisionsOf(held, "usage-limit")) != 0 {
+			t.Fatalf("%s: decisions %+v, %+v", when, decisionsOf(lim, "usage-limit"), decisionsOf(held, "usage-limit"))
+		}
+	}
+	check("held")
+	q = newQueueFrom(q)
+	q.HolderTransfer = true
+	*now = now.Add(time.Hour)
+	tick(t, q)
+	tick(t, q)
+	check("after a restart")
+	*now = until.Add(time.Second)
+	tick(t, q)
+	tick(t, q)
+	if !hasPod(t, ns, "held", 2) || !hasPod(t, ns, "lim", 1) {
+		t.Fatal("not run after the reset")
+	}
+	if c := meta.FindStatusCondition(get(t, ns, "held").Status.Conditions, c4v1.ConditionUsageLimit); c != nil {
+		t.Fatalf("still held: %+v", c)
+	}
+}
+
+// A job waiting on its account's limit names the unit that hit it only
+// when that unit's job is in its own project; otherwise it says another
+// job on the same account hit it.
+func TestAccountHoldNamesOnlyWithinTheProject(t *testing.T) {
+	until := time.Date(2026, 10, 16, 11, 0, 0, 0, time.UTC)
+	h := &accountHold{usageRec: usageRec{until: until}, job: "studio/lim", project: "show-a", mem: newMem(), unit: 1}
+	v := &view{job: &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "studio", Name: "held"}}, project: "show-a",
+		accountWait: map[int]*accountHold{2: h, 3: h}}
+	q := &Queue{}
+	if got := q.accountMessage(v); !strings.HasSuffix(got, " (unit 1 of job lim hit it; 2 units wait)") {
+		t.Fatalf("same project: %q", got)
+	}
+	v.project = "show-b"
+	if got := q.accountMessage(v); !strings.HasSuffix(got, " (another job on the same account hit it; 2 units wait)") || strings.Contains(got, "job lim") {
+		t.Fatalf("another project: %q", got)
+	}
+	h.probe = true
+	if got := q.accountMessage(v); !strings.HasPrefix(got, "waiting for the model's usage limit on the job's account: trying again at ") {
+		t.Fatalf("probe: %q", got)
+	}
+}

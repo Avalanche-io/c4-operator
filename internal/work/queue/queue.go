@@ -120,6 +120,9 @@ type Queue struct {
 	unitsSealed map[string]error
 	// toolNets is each tool tree's declared networks, as read (tools.go).
 	toolNets map[string][]string
+	// accounts are the model accounts held for a usage limit, by label,
+	// until it resets (usagelimit.go).
+	accounts map[string]*accountHold
 	// Namespace is the operator's namespace, where the queue keeps the
 	// pointers to each project's saved calibrations (persist.go). Empty,
 	// or without Stores, calibrations are not saved.
@@ -598,6 +601,9 @@ type view struct {
 	// measureShort says how a finished job falls short of its required
 	// measure (measure.go).
 	measureShort string
+	// accountWait are the units waiting on a usage limit another unit hit
+	// on their account (usagelimit.go).
+	accountWait map[int]*accountHold
 }
 
 type runInfo struct {
@@ -692,6 +698,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 	// denying its unit pods egress before a unit is released (tools.go).
 	q.unitsSealed = q.sealNamespaces(ctx, jobs.Items, pods.Items, nsProject)
 
+	q.releaseAccounts(now)
 	seen := map[types.UID]bool{}
 	var views, fviews []*view
 	for i := range jobs.Items {
@@ -709,6 +716,14 @@ func (q *Queue) Tick(ctx context.Context) error {
 		}
 		views = append(views, v)
 		q.noteProfiles(v)
+	}
+	for _, v := range views {
+		// A limit a job hit later in the round holds the account's
+		// units in the jobs read before it, and their wait is in the
+		// estimate.
+		if q.holdAccounts(v, now) {
+			q.estimate(v, now)
+		}
 	}
 	q.releaseOrphans(ctx, podsByJob, phases)
 	for uid := range q.jobs {
@@ -769,6 +784,11 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 		m = newMem()
 		m.load(&j.Spec, &j.Status)
 		q.jobs[j.UID] = m
+		project := nsProject[j.Namespace]
+		if project == "" {
+			project = "namespace/" + j.Namespace
+		}
+		q.loadAccounts(j.Namespace+"/"+j.Name, project, m)
 	}
 	v := &view{job: j, key: j.Namespace + "/" + j.Name, mem: m, pods: map[int]*corev1.Pod{},
 		running: map[int]runInfo{}, finishing: map[int]bool{}, preflight: map[int]bool{}}
@@ -1234,6 +1254,7 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	q.serveWaits(v, now)
 	applyHolds(v)
 	v.holdUsageLimits(now)
+	q.holdAccounts(v, now)
 	q.estimate(v, now)
 	q.escalate(ctx, v, phases, now)
 	return v
@@ -1337,6 +1358,9 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		// a unit waiting for a usage limit runs again once it resets
 		queued = append(queued, unit(idx))
 	}
+	for idx := range v.accountWait {
+		queued = append(queued, unit(idx))
+	}
 	for idx, r := range v.running {
 		ru := estimate.RunningUnit{Unit: unit(idx), Elapsed: math.Max(0, now.Sub(r.started).Seconds())}
 		if pod := v.pods[idx]; pod != nil {
@@ -1381,6 +1405,10 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	for idx, r := range v.mem.usage {
 		u := plan.Units[idx]
 		rem[idx] = math.Max(0, r.until.Sub(now).Seconds()) + math.Max(0, e.Predict(u.Key, u.Pos).Mean-retained(idx))
+	}
+	for idx, h := range v.accountWait {
+		u := plan.Units[idx]
+		rem[idx] = math.Max(0, h.until.Sub(now).Seconds()) + math.Max(0, e.Predict(u.Key, u.Pos).Mean-retained(idx))
 	}
 	for idx, r := range v.running {
 		u := plan.Units[idx]

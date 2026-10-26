@@ -2,6 +2,8 @@ package queue
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strconv"
@@ -27,6 +29,18 @@ import (
 // say, usage.limitProbe), then runs again from that view. The job says so
 // (condition UsageLimit), and the wait is a yield and a decision in the
 // book. Host runners handle their own limits (no slots until the reset).
+//
+// A limit is the account's, not the unit's: once one unit on a model
+// account hits it, every unit on that account waits until the same reset.
+// The queue knows a unit's account before releasing it by the credential
+// lease its job's template mounts (lease.go): a lease is one holder's one
+// sign-in, and serves only the holder's own jobs, so the hold reaches no
+// one else's work. A unit that hit a limit on a lease holds the account,
+// queue-wide (Queue.accounts), and every model unit of a job that mounts
+// that lease is kept out of what may run, spending no attempt and keeping
+// its view, until the reset. The account is recorded in the limit's
+// status, so a restart rebuilds the hold. A job with no lease, or with
+// several, holds only its own units.
 
 type usageRec struct {
 	why       string
@@ -35,6 +49,38 @@ type usageRec struct {
 	// stated is the reset the unit gave, when it was further off than
 	// maxUsageWait and so not taken as given.
 	stated time.Time
+	// account is the opaque label of the account it hit the limit on
+	// (leaseAccount), or "".
+	account string
+}
+
+// accountHold is an account held for a usage limit: the limit, and the
+// unit that hit it (unit of job, in project; mem is its job's memory, for
+// the unit's name).
+type accountHold struct {
+	usageRec
+	job, project string
+	mem          *jobMem
+	unit         int
+}
+
+// leaseAccount is the opaque label of the account a pod spec in namespace
+// ns runs under: its credential lease's, when it mounts exactly one, else
+// "". The label is a hash of the lease, as the HUD's is of a sign-in, so
+// status and messages carry no lease or holder name.
+func leaseAccount(ns string, spec *corev1.PodSpec) string {
+	names := map[string]bool{}
+	for _, name := range leaseVolumes(spec) {
+		names[name] = true
+	}
+	if len(names) != 1 {
+		return ""
+	}
+	for name := range names {
+		sum := sha256.Sum256([]byte("lease\x00" + ns + "/" + name))
+		return hex.EncodeToString(sum[:])[:12]
+	}
+	return ""
 }
 
 // maxUsageWait bounds how long a stated reset holds a unit: the longest
@@ -113,8 +159,71 @@ func (q *Queue) noteUsageLimit(ctx context.Context, v *view, idx int, p *corev1.
 	}
 	m.usage[idx] = r
 	m.yields = append(m.yields, yieldRecord{Unit: idx, At: r.at, Reason: why, View: tree})
-	q.recordPolicyDecision(ctx, v, idx, "usage-limit", why, now, uses, map[string]any{"until": r.until.UTC().Format(time.RFC3339)})
-	q.Log.Info("usage limit", "job", v.key, "unit", idx, "why", why, "until", r.until)
+	fields := map[string]any{"until": r.until.UTC().Format(time.RFC3339)}
+	if r.account = leaseAccount(p.Namespace, &p.Spec); r.account != "" {
+		// The account's every unit waits too: decided here, once.
+		fields["account"] = r.account
+		q.holdAccount(r, v.key, v.project, m, idx)
+	}
+	q.recordPolicyDecision(ctx, v, idx, "usage-limit", why, now, uses, fields)
+	q.Log.Info("usage limit", "job", v.key, "unit", idx, "why", why, "until", r.until, "account", r.account)
+}
+
+// holdAccount holds r's account until r resets, for unit idx of job (in
+// project, its memory m). Of two limits on one account, the later reset
+// holds.
+func (q *Queue) holdAccount(r *usageRec, job, project string, m *jobMem, idx int) {
+	if h := q.accounts[r.account]; h != nil && !r.until.After(h.until) {
+		return
+	}
+	if q.accounts == nil {
+		q.accounts = map[string]*accountHold{}
+	}
+	q.accounts[r.account] = &accountHold{usageRec: *r, job: job, project: project, mem: m, unit: idx}
+}
+
+// loadAccounts rebuilds, from a job's limits loaded from its status, the
+// accounts they hold.
+func (q *Queue) loadAccounts(job, project string, m *jobMem) {
+	for i, r := range m.usage {
+		if r.account != "" {
+			q.holdAccount(r, job, project, m, i)
+		}
+	}
+}
+
+// releaseAccounts ends the holds whose limits have reset.
+func (q *Queue) releaseAccounts(now time.Time) {
+	for a, h := range q.accounts {
+		if !h.until.After(now) {
+			delete(q.accounts, a)
+		}
+	}
+}
+
+// holdAccounts keeps out of what may run the model units of a job whose
+// account is held, until it resets, and reports whether it held any. Run
+// again on a view, it holds what was added since (a limit another job hit
+// later in the tick).
+func (q *Queue) holdAccounts(v *view, now time.Time) bool {
+	h := q.accounts[leaseAccount(v.job.Namespace, &v.job.Spec.Template.Spec)]
+	if h == nil || !h.until.After(now) || len(v.runnable) == 0 {
+		return false
+	}
+	n := len(v.accountWait)
+	keep := v.runnable[:0]
+	for _, i := range v.runnable {
+		if !modelUnit(v, i) {
+			keep = append(keep, i)
+			continue
+		}
+		if v.accountWait == nil {
+			v.accountWait = map[int]*accountHold{}
+		}
+		v.accountWait[i] = h
+	}
+	v.runnable = keep
+	return len(v.accountWait) > n
 }
 
 // holdUsageLimits keeps the units waiting for a usage limit out of what
@@ -141,8 +250,13 @@ func (v *view) holdUsageLimits(now time.Time) {
 // usageCondition sets or clears the job's UsageLimit condition.
 func (q *Queue) usageCondition(st *c4v1.WorkJobStatus, v *view) {
 	m := v.mem
-	if len(m.usage) == 0 {
+	if len(m.usage) == 0 && len(v.accountWait) == 0 {
 		meta.RemoveStatusCondition(&st.Conditions, c4v1.ConditionUsageLimit)
+		return
+	}
+	if len(m.usage) == 0 {
+		meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: c4v1.ConditionUsageLimit, Status: metav1.ConditionTrue,
+			Reason: "UsageLimit", Message: q.accountMessage(v), ObservedGeneration: v.job.Generation})
 		return
 	}
 	idx := make([]int, 0, len(m.usage))
@@ -158,11 +272,39 @@ func (q *Queue) usageCondition(st *c4v1.WorkJobStatus, v *view) {
 	if !first.stated.IsZero() {
 		msg += fmt.Sprintf(" (it said %s, more than %s off, so the wait is held to that)", forecast.Clock(first.stated, q.Loc), "a week")
 	}
-	if n := len(idx); n > 1 {
+	if n := len(idx) + len(v.accountWait); n > 1 {
 		msg = fmt.Sprintf("%s (%d units, the first)", msg, n)
 	}
 	meta.SetStatusCondition(&st.Conditions, metav1.Condition{Type: c4v1.ConditionUsageLimit, Status: metav1.ConditionTrue,
 		Reason: "UsageLimit", Message: msg, ObservedGeneration: v.job.Generation})
+}
+
+// accountMessage says what a job whose units wait on a limit another unit
+// hit on its account waits for. It names that unit and its job only in
+// the job's own project, whose viewers may see it; the account is never
+// named.
+func (q *Queue) accountMessage(v *view) string {
+	var h *accountHold
+	for _, x := range v.accountWait {
+		h = x
+	}
+	msg := "waiting for the model's usage limit on the job's account to reset at " + forecast.Clock(h.until, q.Loc)
+	if h.probe {
+		msg = "waiting for the model's usage limit on the job's account: trying again at " + forecast.Clock(h.until, q.Loc)
+	}
+	who := "another job on the same account"
+	if h.project == v.project {
+		job, _ := strings.CutPrefix(h.job, v.job.Namespace+"/")
+		unit := fmt.Sprintf("unit %d", h.unit)
+		if p := h.mem.plan; p != nil && h.unit < len(p.Units) && unitName(p, h.unit) != "" {
+			unit = "unit " + unitName(p, h.unit)
+		}
+		who = unit + " of job " + job
+	}
+	if n := len(v.accountWait); n > 1 {
+		return fmt.Sprintf("%s (%s hit it; %d units wait)", msg, who, n)
+	}
+	return msg + " (" + who + " hit it)"
 }
 
 // usageStatus is status.usageLimits.
@@ -173,7 +315,7 @@ func usageStatus(m *jobMem) map[string]c4v1.WorkUsageLimit {
 	out := map[string]c4v1.WorkUsageLimit{}
 	for i, r := range m.usage {
 		out[strconv.Itoa(i)] = c4v1.WorkUsageLimit{Why: r.why, At: metav1.Time{Time: r.at.Truncate(time.Second)},
-			Until: metav1.Time{Time: r.until.Truncate(time.Second)}, Probe: r.probe}
+			Until: metav1.Time{Time: r.until.Truncate(time.Second)}, Probe: r.probe, Account: r.account}
 	}
 	return out
 }
@@ -188,7 +330,7 @@ func (m *jobMem) loadUsage(st *c4v1.WorkJobStatus) {
 		if m.usage == nil {
 			m.usage = map[int]*usageRec{}
 		}
-		m.usage[i] = &usageRec{why: w.Why, at: w.At.Time, until: w.Until.Time, probe: w.Probe}
+		m.usage[i] = &usageRec{why: w.Why, at: w.At.Time, until: w.Until.Time, probe: w.Probe, account: w.Account}
 	}
 }
 
