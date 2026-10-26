@@ -58,20 +58,20 @@ This fetches a sample shot (79 MB) and renders 24 frames of it with Cycles.
 The plan shows the files it uploads, the estimate and the deadline.
 
 ```sh
-c4 farm open sm0140-render-v001
+c4 farm open sm0140-light-v001
 ```
 
 The HUD opens in your browser, signed in. The frames fill in coarse to fine
 (first, last, middle, then the quarters), so the whole shot plays early.
 
 ```sh
-c4 farm deadline sm0140-render-v001 +45m
+c4 farm deadline sm0140-light-v001 +45m
 ```
 
 The farm re-plans around the new deadline. There is no priority to set.
 
 ```sh
-c4 farm get sm0140-render-v001 render ~/renders/sm0140
+c4 farm get sm0140-light-v001 render ~/renders/sm0140
 ```
 
 The frames come home, every file checked against its C4 ID. The whole run
