@@ -90,6 +90,14 @@ type Doc struct {
 	// after each merge writes a document of edges alone, so the job's
 	// graph follows its code.
 	Edges []DocEdge `json:"edges,omitempty"`
+	// A lead's plan document (c4_plan, planedit.go) also splits, merges,
+	// withdraws, releases and orders units, holds the units it adds and
+	// removes edges; a generator's document does none of these.
+	Split    []DocSplit    `json:"split,omitempty"`
+	Merge    []DocMerge    `json:"merge,omitempty"`
+	Withdraw []DocWithdraw `json:"withdraw,omitempty"`
+	Release  []string      `json:"release,omitempty"`
+	Order    []string      `json:"order,omitempty"`
 }
 
 // DocEdge is one ordering: To runs after From, with where it was read.
@@ -97,6 +105,8 @@ type DocEdge struct {
 	From string          `json:"from"`
 	To   string          `json:"to"`
 	Cite json.RawMessage `json:"cite,omitempty"`
+	// Remove, in a lead's plan document, takes the ordering away.
+	Remove bool `json:"remove,omitempty"`
 }
 
 // DocUnit is one unit of an expansion document.
@@ -125,6 +135,9 @@ type DocUnit struct {
 	Wait *DocWait `json:"wait,omitempty"`
 	// Rounds makes a planned unit a loop's first round (rounds.go).
 	Rounds *DocRounds `json:"rounds,omitempty"`
+	// Held, in a lead's plan document, holds the unit until its lead
+	// releases it.
+	Held bool `json:"held,omitempty"`
 }
 
 // DocWait is a wait unit's server: person:<id>, party:<name> or
@@ -216,6 +229,18 @@ func Expand(d Driver, job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]
 // with one already taken, an edge or input to a name it cannot find, a
 // cycle, an exists outside 0 to 1, or nesting deeper than the job allows.
 func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]int, first int) (*Expansion, error) {
+	d, err := readDoc(doc)
+	if err != nil {
+		return nil, err
+	}
+	if what := d.planOnly(); what != "" {
+		return nil, fmt.Errorf("%s: only a lead's plan (c4_plan) does that, not a generator's document or an append", what)
+	}
+	return expandDoc(job, gen, d, names, first)
+}
+
+// readDoc reads an expansion document, version 1, strictly.
+func readDoc(doc []byte) (*Doc, error) {
 	if len(doc) > MaxExpandDoc {
 		return nil, fmt.Errorf("expansion document of %d bytes, over %d", len(doc), MaxExpandDoc)
 	}
@@ -226,6 +251,40 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 	if d.Version != 1 {
 		return nil, fmt.Errorf("expansion document version %d, want 1", d.Version)
 	}
+	return &d, nil
+}
+
+// planOnly names the first of a lead's plan edits document d makes, or
+// "".
+func (d *Doc) planOnly() string {
+	switch {
+	case len(d.Split) > 0:
+		return "split"
+	case len(d.Merge) > 0:
+		return "merge"
+	case len(d.Withdraw) > 0:
+		return "withdraw"
+	case len(d.Release) > 0:
+		return "release"
+	case len(d.Order) > 0:
+		return "order"
+	}
+	for _, u := range d.Units {
+		if u.Held {
+			return "unit " + u.Name + " is held"
+		}
+	}
+	for _, e := range d.Edges {
+		if e.Remove {
+			return "an edge from " + e.From + " to " + e.To + " is removed"
+		}
+	}
+	return ""
+}
+
+// expandDoc is document d's units and edges under gen, as ExpandDocument
+// reads them; it leaves an edge to remove to the plan (planedit.go).
+func expandDoc(job *c4v1.WorkJob, gen Unit, d *Doc, names map[string]int, first int) (*Expansion, error) {
 	maxDepth, err := intParam(job, "maxExpandDepth", MaxExpandDepth, 1, 64)
 	if err != nil {
 		return nil, err
@@ -270,7 +329,7 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 	for i, du := range d.Units {
 		u := Unit{Index: first + i, Name: prefix + du.Name, Label: du.Label, Key: du.Key, Pos: i, Slots: du.Slots,
 			Generator: du.Planned, Exists: 1, Parent: gen.Index, Depth: gen.Depth + 1,
-			Work: du.Work, WorkSD: du.WorkSD, Group: du.Group, Holds: du.Holds, Params: du.Params, Gate: du.Gate}
+			Work: du.Work, WorkSD: du.WorkSD, Group: du.Group, Holds: du.Holds, Params: du.Params, Gate: du.Gate, Held: du.Held}
 		if u.Label == "" {
 			u.Label = u.Name
 		}
@@ -373,6 +432,9 @@ func ExpandDocument(job *c4v1.WorkJob, gen Unit, doc []byte, names map[string]in
 		}
 	}
 	for _, e := range d.Edges {
+		if e.Remove {
+			continue
+		}
 		f, ok1 := resolve(e.From)
 		t, ok2 := resolve(e.To)
 		switch {

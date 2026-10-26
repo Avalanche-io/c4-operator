@@ -78,6 +78,25 @@ type Unit struct {
 	Wait *Wait
 	// Rounds makes a generator one round of a bounded loop (rounds.go).
 	Rounds *Rounds
+
+	// A lead's plan (c4_plan, planedit.go). Held: its lead planned the
+	// unit and has not released it, so it is not runnable and is no work
+	// to ration. Withdrawn: its lead retired it before it started, alone
+	// or replaced by others; it never runs, and counts as done for the
+	// units after it. OrderKey orders the job's ready units: the lower
+	// first, those without one (0) after them.
+	Held      bool
+	Withdrawn *Withdrawal
+	OrderKey  int
+}
+
+// Withdrawal is why a unit was withdrawn and what replaces it.
+type Withdrawal struct {
+	Why string
+	// By are the units that replace it, none for a plain withdraw.
+	By []int
+	// Edit is the key of the plan call that withdrew it.
+	Edit string
 }
 
 // Wait is what a wait unit waits for.
