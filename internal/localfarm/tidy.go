@@ -3,71 +3,111 @@ package localfarm
 import (
 	"context"
 	"fmt"
-	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
-// toolTestLabel names, on a tool's test job, the tool it tests.
-const toolTestLabel = "c4.avalanche.io/tool-test"
+// A farm made before tool tests went quiet kept a failed test of an
+// older version of a tool as a Needs-you item a person could neither
+// acknowledge nor requeue. up removes those, and only those.
+const (
+	// toolTestLabel names, on a tool's test job, the tool it tests, and
+	// toolTestVersion the version it tests.
+	toolTestLabel   = "c4.avalanche.io/tool-test"
+	toolTestVersion = "c4.avalanche.io/tool-test-version"
+	// farmNamespace holds the farm's own tools (a farm-wide publish).
+	farmNamespace = "c4-system"
+)
 
-// supersededTests are the failed tool tests a newer test of the same tool
-// in the same namespace has replaced: the farm's own leftovers from an
-// earlier publish (an older image, an older tree), never a person's work,
-// which up removes so they do not sit in Needs-you. Each is
-// namespace/name, with the tool it tested.
-func supersededTests(jobs []unstructured.Unstructured) (old []unstructured.Unstructured) {
-	newest := map[string]int64{} // namespace/tool: the latest test's creation
-	for _, j := range jobs {
-		tool := j.GetLabels()[toolTestLabel]
-		if tool == "" {
-			continue
-		}
-		k := j.GetNamespace() + "/" + tool
-		if t := j.GetCreationTimestamp().Unix(); t > newest[k] {
-			newest[k] = t
-		}
-	}
-	for _, j := range jobs {
-		tool := j.GetLabels()[toolTestLabel]
-		if tool == "" {
-			continue
-		}
-		phase, _, _ := unstructured.NestedString(j.Object, "status", "phase")
-		if phase == "Failed" && j.GetCreationTimestamp().Unix() < newest[j.GetNamespace()+"/"+tool] {
-			old = append(old, j)
-		}
-	}
-	sort.Slice(old, func(a, b int) bool {
-		return old[a].GetNamespace()+old[a].GetName() < old[b].GetNamespace()+old[b].GetName()
-	})
-	return old
+var toolKind = schema.GroupVersionKind{Group: "c4.avalanche.io", Version: "v1alpha1", Kind: "Tool"}
+
+// staleTest is a failed tool test a newer published version replaced.
+type staleTest struct {
+	job         unstructured.Unstructured
+	tool        string
+	tested, now string
 }
 
-// tidyToolTests removes the farm's superseded failed tool tests and says
-// what it removed, in one line.
+// versionN is v<N>'s N; 0 for anything else.
+func versionN(v string) int {
+	n, err := strconv.Atoi(strings.TrimPrefix(v, "v"))
+	if err != nil || !strings.HasPrefix(v, "v") {
+		return 0
+	}
+	return n
+}
+
+// newestVersions are each tool's newest published version, by
+// namespace/name, from its status (version, and versions newest last).
+func newestVersions(tools []unstructured.Unstructured) map[string]string {
+	out := map[string]string{}
+	for _, t := range tools {
+		best, _, _ := unstructured.NestedString(t.Object, "status", "version")
+		vs, _, _ := unstructured.NestedSlice(t.Object, "status", "versions")
+		for _, v := range vs {
+			if m, ok := v.(map[string]any); ok {
+				if s, _ := m["version"].(string); versionN(s) > versionN(best) {
+					best = s
+				}
+			}
+		}
+		if best != "" {
+			out[t.GetNamespace()+"/"+t.GetName()] = best
+		}
+	}
+	return out
+}
+
+// staleTests are the failed tool tests whose tool has a newer published
+// version than the one they tested: the tool in the job's own namespace (a
+// project's tool), else the farm's. A passed test, a test of the newest
+// version, a test whose versions cannot be read, and every job that is not
+// a tool test stay.
+func staleTests(jobs []unstructured.Unstructured, newest map[string]string) []staleTest {
+	var out []staleTest
+	for _, j := range jobs {
+		tool := j.GetLabels()[toolTestLabel]
+		tested := j.GetAnnotations()[toolTestVersion]
+		phase, _, _ := unstructured.NestedString(j.Object, "status", "phase")
+		if tool == "" || phase != "Failed" || versionN(tested) == 0 {
+			continue
+		}
+		now, ok := newest[j.GetNamespace()+"/"+tool]
+		if !ok {
+			now = newest[farmNamespace+"/"+tool]
+		}
+		if versionN(now) > versionN(tested) {
+			out = append(out, staleTest{job: j, tool: tool, tested: tested, now: now})
+		}
+	}
+	sort.Slice(out, func(a, b int) bool {
+		return out[a].job.GetNamespace()+out[a].job.GetName() < out[b].job.GetNamespace()+out[b].job.GetName()
+	})
+	return out
+}
+
+// tidyToolTests removes the farm's stale failed tool tests, saying each.
+// Their signed records stay in the store; only the job goes.
 func tidyToolTests(ctx context.Context, c client.Client, o UpOptions) error {
-	var l unstructured.UnstructuredList
-	l.SetGroupVersionKind(workJobKind.GroupVersion().WithKind("WorkJobList"))
-	if err := c.List(ctx, &l, client.HasLabels{toolTestLabel}); err != nil {
-		return nil // a farm without them, or not yet: nothing to tidy
+	var jobs, tools unstructured.UnstructuredList
+	jobs.SetGroupVersionKind(workJobKind.GroupVersion().WithKind("WorkJobList"))
+	tools.SetGroupVersionKind(toolKind.GroupVersion().WithKind("ToolList"))
+	if err := c.List(ctx, &jobs, client.HasLabels{toolTestLabel}); err != nil {
+		return nil // a farm without them yet: nothing to tidy
 	}
-	old := supersededTests(l.Items)
-	var tools []string
-	for i := range old {
-		if err := c.Delete(ctx, &old[i]); err != nil && !strings.Contains(err.Error(), "not found") {
-			return fmt.Errorf("removing %s/%s, a failed test of an older %s: %w", old[i].GetNamespace(), old[i].GetName(), old[i].GetLabels()[toolTestLabel], err)
-		}
-		if t := old[i].GetLabels()[toolTestLabel]; !slices.Contains(tools, t) {
-			tools = append(tools, t)
-		}
+	if err := c.List(ctx, &tools); err != nil {
+		return nil
 	}
-	if len(old) > 0 {
-		o.logf("tools     removed %s of an older %s, since a newer one ran (c4 farm tools shows each tool's newest)\n",
-			map[bool]string{true: "1 failed test", false: fmt.Sprintf("%d failed tests", len(old))}[len(old) == 1], andList(tools))
+	for _, s := range staleTests(jobs.Items, newestVersions(tools.Items)) {
+		if err := c.Delete(ctx, &s.job); err != nil && !strings.Contains(err.Error(), "not found") {
+			return fmt.Errorf("removing %s/%s, the failed test of %s %s: %w", s.job.GetNamespace(), s.job.GetName(), s.tool, s.tested, err)
+		}
+		o.logf("tools     removed the failed test of %s %s (%s/%s); %s replaced it\n", s.tool, s.tested, s.job.GetNamespace(), s.job.GetName(), s.now)
 	}
 	return nil
 }
