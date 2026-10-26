@@ -23,8 +23,8 @@ import (
 
 // Controls are carried out on their records (DESIGN.md section 9.2). The
 // HUD signs each decide, supply, steer, acknowledgement, withdrawal, append,
-// plan, close, requeue, allowed node and acceptance of a validated input before it
-// writes the request, and the request names its record. With
+// plan, close, requeue, allowed node and acceptance of a validated input
+// before it writes the request, and the request names its record. With
 // signing on (Roots set), the queue acts on a request only if that record
 // verifies against the farm's roots, was signed by the HUD, is a control
 // record for this job, and names the same action, actor, unit, token and

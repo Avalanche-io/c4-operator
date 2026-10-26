@@ -135,7 +135,7 @@ func unitRefs(rec *jobRec, refs []string) (idx []int, bad string) {
 // carried out.
 func pendingNames(j *c4v1.WorkJob) map[string]bool {
 	out := map[string]bool{}
-	for _, r := range pendingPlans(j)[:0] {
+	for _, r := range pendingPlans(j) {
 		for _, n := range r.Units {
 			out[n] = true
 		}
