@@ -435,6 +435,9 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	return &done, nil
 }
 
+// maxPlanBytes is the most a plan file may be.
+const maxPlanBytes = 1 << 20
+
 // submissionPlans are the plan files the submission's jobs name (plan:),
 // read beside the submission and sent as JSON under the path as written:
 // the farm never reads a plan from the tree, and refuses a job whose plan
@@ -467,10 +470,15 @@ func submissionPlans(doc *submissionDoc, base string) (map[string]json.RawMessag
 		if err != nil {
 			return nil, fmt.Errorf("jobs.%s.plan: %w", k, err)
 		}
-		data, err := io.ReadAll(io.LimitReader(f, 1<<20))
+		// one byte past the limit says the file is over it: a plan is sent
+		// whole or refused, never cut short
+		data, err := io.ReadAll(io.LimitReader(f, maxPlanBytes+1))
 		f.Close()
 		if err != nil {
 			return nil, fmt.Errorf("jobs.%s.plan: %w", k, err)
+		}
+		if len(data) > maxPlanBytes {
+			return nil, fmt.Errorf("jobs.%s.plan: %s is over 1 MiB, the most a plan may be: split its blocks into more than one plan", k, p)
 		}
 		raw, err := schema.ToJSON(data)
 		if err != nil {

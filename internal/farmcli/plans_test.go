@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -98,7 +99,15 @@ func TestSubmitReadsPlansOnlyInsideItsFolder(t *testing.T) {
 	if err := os.Symlink(secret, filepath.Join(dir, "plans", "linked.plan.yaml")); err != nil {
 		t.Skip(err)
 	}
+	// a plan over the limit is refused whole, never sent cut short
+	big := append([]byte("version: 1\nblocks:\n"), bytes.Repeat([]byte("- {name: b}\n"), maxPlanBytes/12+1)...)
+	os.WriteFile(filepath.Join(dir, "plans", "big.plan.yaml"), big, 0o644)
 	file := filepath.Join(dir, "port.yaml")
+	os.WriteFile(file, []byte("c4: submit/1\nproject: textkit\nshot: port\njobs:\n  port: {tool: agent, plan: plans/big.plan.yaml}\n"), 0o644)
+	if _, err := SubmitFile(ctx, c, Out{W: io.Discard}, SubmitFileArgs{Path: file, Yes: true}); err == nil || sent != 0 || !strings.Contains(err.Error(), "is over 1 MiB") {
+		t.Errorf("a plan over 1 MiB: %v, %d requests", err, sent)
+	}
+
 	for _, p := range []string{secret, "../" + filepath.Base(outside) + "/secret.yaml", "plans/../../x.plan.yaml", "plans/linked.plan.yaml"} {
 		os.WriteFile(file, []byte("c4: submit/1\nproject: textkit\nshot: port\njobs:\n  port: {tool: agent, plan: '"+p+"'}\n"), 0o644)
 		sent = 0
