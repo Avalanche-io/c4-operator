@@ -607,8 +607,9 @@ across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
   - the summary is the block's result, on a host as in a pod: the runner
     stores it (trimmed, cut to 4 KiB, home paths written from `~`) and
     names it on the pod (`c4.avalanche.io/output-summary`), and the queue
-    keeps it in the job's status (`unitSummaries`), where `c4_get_unit`,
-    the HUD and a lead's wait read it beside the block's branch. It is the
+    keeps its first line and the document's ID in the job's status
+    (`unitSummaries`), where `c4_get_unit`, the HUD and a lead's wait find
+    it beside the block's branch, reading the whole text from the store. It is the
     block's own words, not something the farm checked. A block the CLI
     reports `done` that wrote none fails (**BlockGaveUp**, "the block ended
     without its summary in .c4/done");

@@ -3,6 +3,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math"
 	"net/http"
 	"path"
@@ -11,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -505,10 +507,49 @@ func branchOut(b c4v1.WorkUnitBranch) map[string]any {
 	return map[string]any{"repo": b.Repo, "branch": b.Branch, "base": b.Base, "head": b.Head, "commits": b.Commits}
 }
 
-// summaryOut is a unit's summary of its task as the HUD shows it: by the
-// unit, its own words, not something the farm checked.
+// summaryOut is a unit's summary of its task as the HUD shows it in a
+// list: by the unit, its own words, not something the farm checked; its
+// excerpt, and why it could not be read when it could not.
 func summaryOut(s c4v1.WorkUnitSummary) map[string]any {
-	return map[string]any{"text": s.Text, "by": "unit", "attempt": s.Attempt, "doc": s.Doc}
+	out := map[string]any{"excerpt": s.Excerpt, "by": "unit", "attempt": s.Attempt, "doc": s.Doc}
+	if s.Error != "" {
+		out["error"] = s.Error
+	}
+	return out
+}
+
+// maxSummaryText bounds the summary text the HUD returns, in bytes, as the
+// runners store it.
+const maxSummaryText = 4 << 10
+
+// summaryText is a unit's whole summary, read from the project's store by
+// its document's ID and checked against it.
+func (s *Server) summaryText(ctx context.Context, project string, sm c4v1.WorkUnitSummary) (string, error) {
+	if sm.Error != "" || sm.Doc == "" {
+		return "", errors.New("no stored summary")
+	}
+	id, err := c4.Parse(sm.Doc)
+	if err != nil || s.Stores == nil {
+		return "", errors.New("the summary cannot be read here")
+	}
+	st, err := s.Stores(ctx, project)
+	if err != nil || st == nil {
+		return "", errors.New("the project's store cannot be read")
+	}
+	data, err := c4view.ReadObject(st, id)
+	if err != nil {
+		return "", errors.New("the store does not have the summary")
+	}
+	if c4.Identify(bytes.NewReader(data)) != id {
+		return "", errors.New("the stored summary does not match its ID")
+	}
+	if len(data) > maxSummaryText {
+		data = data[:maxSummaryText]
+		for len(data) > 0 && !utf8.Valid(data) {
+			data = data[:len(data)-1]
+		}
+	}
+	return string(data), nil
 }
 
 // handleUnit is GET /jobs/{ns}/{name}/units/{i}: the unit's current pod,
@@ -535,7 +576,13 @@ func (s *Server) handleUnit(w http.ResponseWriter, r *http.Request) {
 		out["branch"] = branchOut(b)
 	}
 	if sm, ok := rec.job.Status.UnitSummaries[strconv.Itoa(i)]; ok {
-		out["summary"] = summaryOut(sm)
+		so := summaryOut(sm)
+		if text, err := s.summaryText(r.Context(), rec.project, sm); err == nil {
+			so["text"] = text
+		} else if sm.Error == "" {
+			so["textError"] = err.Error()
+		}
+		out["summary"] = so
 	}
 	if ix, err := s.index(r.Context(), rec); err == nil && ix != nil && ix.Units[i] != "" {
 		if t, err := s.trace(r.Context(), m, rec, ix.Units[i], ""); err == nil {

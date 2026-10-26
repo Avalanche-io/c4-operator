@@ -2,6 +2,8 @@ package queue
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -66,27 +68,42 @@ func TestUnitBranchInStatus(t *testing.T) {
 }
 
 // A block's summary of its task, stored and named on its pod, is in the
-// job's status once the pod succeeds, as the unit's own words, cut to
-// 4 KiB; a restart keeps it after the pods are gone.
+// job's status once the pod succeeds: its first line, cut short, and the
+// stored document's ID, so a job of many units stays small; a restart
+// keeps it after the pods are gone. A summary that can never be read (a
+// bad ID, a document the store lacks) is kept with why, and the unit and
+// its job still end.
 func TestUnitSummaryInStatus(t *testing.T) {
 	ns, q, now, st := graphFarm(t)
 	ctx := context.Background()
-	if err := k8s.Create(ctx, job(ns, "port", "ci", "cpu-"+ns, map[string]string{"shards": "2"}, time.Time{})); err != nil {
+	if err := k8s.Create(ctx, job(ns, "port", "ci", "cpu-"+ns, map[string]string{"shards": "4"}, time.Time{})); err != nil {
 		t.Fatal(err)
 	}
 	tick(t, q)
-	id := putDoc(t, st, "Ported the tokenizer; 3 commits on c4/port/0.")
-	*now = now.Add(time.Minute)
-	finish(t, podOfUnit(t, ns, "port", 0), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputSummary: id})
+	id := putDoc(t, st, "Ported the tokenizer; 3 commits on c4/port/0.\nThe parser is next.")
 	long := putDoc(t, st, strings.Repeat("x", 5000))
-	finish(t, podOfUnit(t, ns, "port", 1), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputSummary: long})
+	*now = now.Add(time.Minute)
+	for i, ann := range []string{id, long, "not-a-c4-id", viewID("never stored")} {
+		finish(t, podOfUnit(t, ns, "port", i), corev1.PodSucceeded, *now, time.Minute, map[string]string{c4v1.AnnotationOutputSummary: ann})
+	}
 	tick(t, q)
-	sums := get(t, ns, "port").Status.UnitSummaries
-	if s := sums["0"]; s.Text != "Ported the tokenizer; 3 commits on c4/port/0." || s.Doc != id || s.Attempt != 1 {
+	tick(t, q)
+	got := get(t, ns, "port")
+	sums := got.Status.UnitSummaries
+	if s := sums["0"]; s.Excerpt != "Ported the tokenizer; 3 commits on c4/port/0." || s.Doc != id || s.Attempt != 1 || s.Error != "" {
 		t.Fatalf("unit 0's summary: %+v", s)
 	}
-	if s := sums["1"]; len(s.Text) != 4<<10 || s.Doc != long {
-		t.Fatalf("unit 1's summary is %d bytes", len(s.Text))
+	if s := sums["1"]; len(s.Excerpt) != 200 || s.Doc != long {
+		t.Fatalf("unit 1's excerpt is %d bytes", len(s.Excerpt))
+	}
+	if s := sums["2"]; s.Excerpt != "" || !strings.Contains(s.Error, "is not a C4 ID") {
+		t.Fatalf("a bad ID: %+v", s)
+	}
+	if s := sums["3"]; s.Excerpt != "" || !strings.Contains(s.Error, "the store does not have its summary") {
+		t.Fatalf("a document the store lacks: %+v", s)
+	}
+	if got.Status.Phase != "Succeeded" {
+		t.Fatalf("a summary that cannot be read held the job: %s", got.Status.Phase)
 	}
 
 	if err := k8s.DeleteAllOf(ctx, &corev1.Pod{}, client.InNamespace(ns), client.MatchingLabels{c4v1.LabelJob: "port"}); err != nil {
@@ -96,5 +113,23 @@ func TestUnitSummaryInStatus(t *testing.T) {
 	tick(t, fresh)
 	if s := get(t, ns, "port").Status.UnitSummaries["0"]; s.Doc != id {
 		t.Fatalf("after a restart: %+v", s)
+	}
+}
+
+// A job of a thousand blocks, each with a 4 KiB summary, keeps its
+// summaries in status well inside a WorkJob's size.
+func TestUnitSummariesStaySmall(t *testing.T) {
+	m := &jobMem{}
+	text := []byte(strings.Repeat("é", 2<<10)) // 4 KiB on one line
+	m.summaries = map[int]c4v1.WorkUnitSummary{}
+	for i := range 1000 {
+		m.summaries[i] = c4v1.WorkUnitSummary{Excerpt: excerpt(text, maxExcerpt), Doc: viewID(fmt.Sprint(i)), Attempt: 3}
+	}
+	b, err := json.Marshal(m.summaryStatus())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(b) > 384<<10 {
+		t.Fatalf("1000 summaries take %d KiB of status", len(b)>>10)
 	}
 }

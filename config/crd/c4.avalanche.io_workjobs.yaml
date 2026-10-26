@@ -1791,18 +1791,23 @@ spec:
                     doc:
                       description: Doc is the C4 ID of the stored summary (AnnotationOutputSummary).
                       type: string
-                    text:
-                      description: Text is what the unit wrote, as the farm keeps
-                        it.
+                    error:
+                      description: Error says why the summary could not be read, when
+                        it could not.
+                      type: string
+                    excerpt:
+                      description: |-
+                        Excerpt is the summary's first line, at most 200 bytes; the whole
+                        text is the stored document, Doc.
                       type: string
                   required:
                   - doc
-                  - text
                   type: object
                 description: |-
                   UnitSummaries maps a unit's index to the summary of its task its
                   last finished attempt wrote (.c4/done): the unit's own words, not
-                  something the farm checked, cut to 4 KiB.
+                  something the farm checked. Status keeps an excerpt and the stored
+                  document's ID, so a job with many units stays small.
                 type: object
               units:
                 description: Units counts units by state.

@@ -488,7 +488,8 @@ type WorkJobStatus struct {
 	UnitBranches map[string]WorkUnitBranch `json:"unitBranches,omitempty"`
 	// UnitSummaries maps a unit's index to the summary of its task its
 	// last finished attempt wrote (.c4/done): the unit's own words, not
-	// something the farm checked, cut to 4 KiB.
+	// something the farm checked. Status keeps an excerpt and the stored
+	// document's ID, so a job with many units stays small.
 	// +optional
 	UnitSummaries map[string]WorkUnitSummary `json:"unitSummaries,omitempty"`
 	// Verdicts lists the most recent verdicts review units wrote, each
@@ -721,13 +722,18 @@ type WorkUnitBranch struct {
 
 // WorkUnitSummary is a unit's own summary of its task.
 type WorkUnitSummary struct {
-	// Text is what the unit wrote, as the farm keeps it.
-	Text string `json:"text"`
+	// Excerpt is the summary's first line, at most 200 bytes; the whole
+	// text is the stored document, Doc.
+	// +optional
+	Excerpt string `json:"excerpt,omitempty"`
 	// Doc is the C4 ID of the stored summary (AnnotationOutputSummary).
 	Doc string `json:"doc"`
 	// Attempt is the attempt that wrote it.
 	// +optional
 	Attempt int32 `json:"attempt,omitempty"`
+	// Error says why the summary could not be read, when it could not.
+	// +optional
+	Error string `json:"error,omitempty"`
 }
 
 // WorkYield is one yield of a checkpointing unit.
