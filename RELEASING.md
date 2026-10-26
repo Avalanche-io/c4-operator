@@ -62,14 +62,11 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
 ### On GitHub
 
 5. The tap is `github.com/mrjoshuak/homebrew-tap` (`mrjoshuak/tap`), which
-   exists already, until Avalanche-io is part of the service offering. The
-   C4 lead runs the Homebrew release from its own machine: it writes
-   `Formula/c4-farm.rb` and `Formula/c4-agent.rb` from the release's
-   checksums (c4toolkit `scripts/farm-formulas.sh`) and the suite's
-   `Formula/c4.rb`, which depends on both, so `brew install
-   mrjoshuak/tap/c4` brings c4, `c4 farm`, c4-agent and c4-unit. The
-   release pushes nothing to the tap and needs no token for it; GoReleaser
-   generates the two formulas into `dist/homebrew` only, as a reference.
+   exists already, until Avalanche-io is part of the service offering. It
+   holds one formula, the C4 suite's `Formula/c4.rb`, which carries the
+   farm tools, so `brew install mrjoshuak/tap/c4` brings c4, `c4 farm`,
+   c4-agent and c4-unit. The C4 lead writes it from the suite's release.
+   This release pushes nothing to the tap and generates no formula.
 6. Done already: `github.com/Avalanche-io/c4-operator` is public, with
    `main` pushed.
 7. **Joshua: settings.**
@@ -99,15 +96,13 @@ change anything on GitHub. Everything marked **Joshua** is his to do.
     if GitHub has not. This is needed once, for the first release.
 11. **Joshua: review and publish the draft release** (notes, `install.yaml`,
     archives, checksums).
-12. **The C4 lead: the tap.** Once the draft is published, it writes
-    `c4-farm.rb` and `c4-agent.rb` to the tap from the release's checksums,
-    then the suite's `c4.rb`; `brew install` works from then on (the
-    repository is public already).
+12. **The C4 lead: the tap.** Once the draft is published, it builds the
+    C4 suite on this release and writes the suite's `c4.rb` to the tap;
+    `brew install` works from then on (the repository is public already).
 13. Smoke test from a clean machine with the published images: `brew
-    install mrjoshuak/tap/c4-farm`, then `c4-farm` (help, exit 0),
-    `c4-agent help` and `c4-unit` (its usage, exit 2); once the C4 suite
-    release has written `c4.rb`, `brew install mrjoshuak/tap/c4` and
-    `c4 farm agents`; the quickstart; and `kubectl apply -f
+    install mrjoshuak/tap/c4`, then `c4 farm` (help, exit 0), `c4-agent
+    help`, `c4-unit` (its usage, exit 2) and `c4 farm agents`; the
+    quickstart; and `kubectl apply -f
     https://github.com/Avalanche-io/c4-operator/releases/download/v0.1.0/install.yaml`.
 14. **Joshua, optional:** the repository description and topics (kubernetes,
     operator, csi, vfx, render-farm, content-addressed-storage, provenance,
