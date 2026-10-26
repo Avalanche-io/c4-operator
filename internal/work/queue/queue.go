@@ -238,6 +238,9 @@ type jobMem struct {
 	expansions []expansionRec
 	docs       map[string][]byte
 	unitOut    map[int]string
+	// appends are the owner's additions of units applied, in order, by
+	// key (appends.go).
+	appends []appendRec
 	// branches are units' git branches, as their runners last recorded
 	// them (branch.go).
 	branches map[int]c4v1.WorkUnitBranch
@@ -424,6 +427,7 @@ func (m *jobMem) load(spec *c4v1.WorkJobSpec, st *c4v1.WorkJobStatus) {
 	m.loadCauses(st)
 	m.loadAsks(st)
 	m.loadLoops(st)
+	m.loadAppends(st)
 	// Yields and preemptions before a restart stay in the record.
 	for _, y := range st.Yields {
 		m.yields = append(m.yields, yieldRecord{Unit: int(y.Unit), At: y.At.Time, Reason: y.Reason, View: y.View})
@@ -846,6 +850,8 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 	// questions (needs.go).
 	q.applySupplies(ctx, v, ctl, now)
 	q.applyWithdraws(ctx, v, ctl, now)
+	// The owner adding units to the running job (appends.go).
+	q.applyAppends(ctx, v, ctl, now)
 	// Nodes a person allowed again leave the automatic blacklist.
 	for _, n := range allowedNodes(ctl, m, q.Roots == nil) {
 		if m.blacklist[n] {

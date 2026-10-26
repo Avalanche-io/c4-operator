@@ -296,6 +296,7 @@ func (q *Queue) status(now time.Time, dec sched.Decisions, v *view) c4v1.WorkJob
 			Kind: d.Kind, Reason: d.Reason, For: d.For, Record: d.Record, Policy: d.Policy})
 	}
 	st.Expansions = expansionStatus(m.expansions)
+	st.Appends = appendStatus(m.appends)
 	st.Holds = holdsStatus(v)
 	st.Gates = v.gates
 	st.Verdicts = verdictStatus(m)

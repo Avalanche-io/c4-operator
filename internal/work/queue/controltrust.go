@@ -22,7 +22,7 @@ import (
 )
 
 // Controls are carried out on their records (DESIGN.md section 9.2). The
-// HUD signs each decide, supply, steer, acknowledgement, withdrawal,
+// HUD signs each decide, supply, steer, acknowledgement, withdrawal, append,
 // requeue, allowed node and acceptance of a validated input before it
 // writes the request, and the request names its record. With
 // signing on (Roots set), the queue acts on a request only if that record
@@ -60,6 +60,10 @@ var controlKinds = []controlKind{
 		fields: []string{"units"}, last: func(m *jobMem) string { return m.requeued }},
 	{key: c4v1.AnnotationAllowNodes, action: func(map[string]any) string { return "allow-node" },
 		fields: []string{"node"}, last: func(m *jobMem) string { return m.allowed }},
+	// An append is applied once by its key, not its token, so every one
+	// is checked (appends.go).
+	{key: c4v1.AnnotationAppend, action: func(map[string]any) string { return "append" },
+		fields: []string{"key", "document", "units", "turn"}, last: func(*jobMem) string { return "" }},
 	// An acceptance holds until a newer one, so every one is checked.
 	{key: c4v1.AnnotationAcceptValidated, action: func(map[string]any) string { return "accept-validated" },
 		fields: []string{"accept"}, last: func(*jobMem) string { return "" }},

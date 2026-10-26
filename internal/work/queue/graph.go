@@ -92,7 +92,34 @@ func (q *Queue) planJob(ctx context.Context, v *view) (*class.Plan, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, x := range m.expansions {
+	// Expansions and appends replay in the order they were applied: by
+	// where each began in the table. Of two that began at the same place,
+	// one added nothing, and it came first.
+	as := m.appends
+	nextAppend := func(x *expansionRec) bool {
+		return len(as) > 0 && (x == nil || as[0].First < x.First || as[0].First == x.First && x.Units > 0)
+	}
+	replayAppends := func(x *expansionRec) error {
+		for ; nextAppend(x); as = as[1:] {
+			a := as[0]
+			if a.Error != "" {
+				continue
+			}
+			doc, err := q.expansionDoc(ctx, v.project, m, a.Doc)
+			if err != nil {
+				return errLoading{err}
+			}
+			if err := replayAppend(v.driver, j, p, a, doc); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	for i := range m.expansions {
+		x := m.expansions[i]
+		if err := replayAppends(&x); err != nil {
+			return nil, err
+		}
 		if x.Error != "" || x.Doc == "" {
 			continue
 		}
@@ -111,6 +138,9 @@ func (q *Queue) planJob(ctx context.Context, v *view) (*class.Plan, error) {
 			return nil, fmt.Errorf("replaying the expansion of unit %d: %d units, recorded %d", x.Unit, len(ex.Units), x.Units)
 		}
 		p.Apply(x.Unit, ex)
+	}
+	if err := replayAppends(nil); err != nil {
+		return nil, err
 	}
 	return p, nil
 }
@@ -176,9 +206,19 @@ func (q *Queue) expand(ctx context.Context, v *view, idx int, p *corev1.Pod, now
 // checkExpansion is what document doc would add under unit gen, or why it
 // cannot.
 func (q *Queue) checkExpansion(v *view, gen int, doc []byte) (*class.Expansion, error) {
+	return q.checkUnits(v, gen, v.mem.plan.Units[gen], doc, false)
+}
+
+// checkUnits is what document doc would add under parent (unit gen of the
+// plan, as it is evaluated), or why it cannot. Appended units (appends.go)
+// hold up nothing that waited on their parent: they have no dependents.
+func (q *Queue) checkUnits(v *view, gen int, parent class.Unit, doc []byte, appended bool) (*class.Expansion, error) {
 	m := v.mem
 	first := len(m.plan.Units)
-	ex, err := class.Expand(v.driver, v.job, m.plan.Units[gen], doc, m.plan.Names(), first)
+	ex, err := class.Expand(v.driver, v.job, parent, doc, m.plan.Names(), first)
+	if err == nil && appended {
+		ex.Dependents = nil
+	}
 	if err == nil {
 		err = q.leadExpands(v, ex)
 	}
