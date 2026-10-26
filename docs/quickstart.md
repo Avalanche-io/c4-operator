@@ -146,7 +146,7 @@ c4 farm submit render ~/c4-samples/saltmarsh/sm0140/sm0140.usda --frames 1001-10
 ```
 
 ```
-sm0140-light-v001   48 frames in 48 units
+sm0140-render-v001   48 frames in 48 units
   files     12 files in ~/c4-samples/saltmarsh · 1.2 MB · 12 to upload (1.2 MB)
   estimate  ready ~15:42 PDT  (p90 ~15:51 PDT)
   deadline  16:30 PDT today (23:30 UTC) · slack ~39m
@@ -168,10 +168,10 @@ land.
 ## 6. Watch it
 
 ```sh
-c4 farm watch sm0140-light-v001
+c4 farm watch sm0140-render-v001
 ```
 
-Or open the job in the HUD (`c4 farm open sm0140-light-v001`). The frames
+Or open the job in the HUD (`c4 farm open sm0140-render-v001`). The frames
 render coarse to fine, in binary order: first and last, then the middle,
 then the quarters, so the whole shot can be played early. Each frame shows
 its preview as it lands.
@@ -181,7 +181,7 @@ its preview as it lands.
 Production says the shot is for Friday's review, not this afternoon:
 
 ```sh
-c4 farm deadline sm0140-light-v001 "fri 18:00"
+c4 farm deadline sm0140-render-v001 "fri 18:00"
 ```
 
 There is no priority to set, on this farm or any other C4 farm. A deadline
@@ -191,7 +191,7 @@ once, and every job's slack shows the result.
 ## 8. Take the frames home
 
 ```sh
-c4 farm get sm0140-light-v001 render ~/renders/sm0140
+c4 farm get sm0140-render-v001 render ~/renders/sm0140
 ```
 
 ```
@@ -283,7 +283,7 @@ is the tree it left. The node that ran the unit signed a record of it.
 
 ## 10. Read a file's history
 
-In the HUD, open `sm0140-light-v001`, click its output view, pick a frame
+In the HUD, open `sm0140-render-v001`, click its output view, pick a frame
 and choose **Provenance**. Each step from the frame back to your upload is a
 record signed by whoever did it: the node that rendered it, the farm's queue
 and controller, you. Anyone holding the files can check the chain, with no
@@ -298,7 +298,7 @@ otherwise:
 c4 farm integrate on
 ```
 
-Then ask, for example, "which frames of sm0140-light-v001 are done, and
+Then ask, for example, "which frames of sm0140-render-v001 are done, and
 will it make its deadline?" The agent has your access and nothing more. The
 tools it gets are listed in [docs/agents/tools.md](agents/tools.md), and
 every tool you publish appears among them, as `c4_run_<tool>`, even one

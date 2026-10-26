@@ -59,7 +59,7 @@ whether to connect Claude Code to the farm. Say no if you don't use it;
 ```sh
 c4 farm samples get
 cd ~/c4-samples/saltmarsh
-c4 farm submit render sm0140/sm0140.usda --frames 1001-1024 --set width=960
+c4 farm submit render sm0140/sm0140.usda --stage render --frames 1001-1024 --set width=960
 ```
 
 This fetches a sample shot (79 MB). Before anything runs, `submit` prints its
@@ -68,20 +68,20 @@ submit, and it renders 24 frames with Blender's Cycles, at 960 pixels wide to
 keep it quick.
 
 ```sh
-c4 farm open sm0140-light-v001
+c4 farm open sm0140-render-v001
 ```
 
 The HUD opens in your browser, signed in. The frames fill in coarse to fine
 (first, last, middle, then the quarters), so the whole shot plays early.
 
 ```sh
-c4 farm deadline sm0140-light-v001 +45m
+c4 farm deadline sm0140-render-v001 +45m
 ```
 
 The farm re-plans around the new deadline. There is no priority to set.
 
 ```sh
-c4 farm get sm0140-light-v001 render ~/renders/sm0140
+c4 farm get sm0140-render-v001 render ~/renders/sm0140
 ```
 
 The render step's frames come home, every file checked against its C4 ID. The

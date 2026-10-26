@@ -26,7 +26,7 @@ Each release attaches one manifest with the CRDs, the operator and its
 RBAC, pointing at the release's image on GHCR:
 
 ```sh
-kubectl apply -f https://github.com/Avalanche-io/c4-operator/releases/download/v0.2.1/install.yaml
+kubectl apply -f https://github.com/Avalanche-io/c4-operator/releases/latest/download/install.yaml
 kubectl -n c4-system rollout status deploy/c4-manager
 kubectl -n c4-system rollout status ds/c4-node
 kubectl -n c4-system rollout status deploy/c4-regional
@@ -38,20 +38,20 @@ or, from a checkout of the release tag, with kustomize:
 kubectl apply -k config/release
 ```
 
-The image is `ghcr.io/avalanche-io/c4-operator:v0.2.1`, one image for every
+The image is `ghcr.io/avalanche-io/c4-operator:<tag>`, the release's tag, for example v0.2.1: one image for every
 component, for `linux/amd64` and `linux/arm64`.
 
 What it installs:
 
-| object                                            | role                                                                                                   |
-| ------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
-| CRDs `Project`, `Materialization`, `WorkJob`, `Pool`, `CapacityRequest` | the API (`c4.avalanche.io/v1alpha1`)                                                                   |
-| Deployment `c4-manager` (namespace `c4-system`)   | controllers, the work queue, the HUD (port 8090), the pod webhook, the provenance certificate issuer   |
-| DaemonSet `c4-node`                               | the CSI driver `c4.avalanche.io`, the node cache and the peer tier, capture, task records             |
-| Deployment `c4-regional`                          | the regional cache tier                                                                                |
-| Namespace `c4-signing`                            | the provenance signing CA, readable only by the manager                                                |
-| ValidatingAdmissionPolicy `c4-node-writes`        | node daemons may change only output annotations of pods on their own node                              |
-| Services `c4-hud`, `c4-signer`, `c4-regional`     | the HUD, the certificate issuer, the regional tier                                                     |
+| object                                                                  | role                                                                                                 |
+| ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| CRDs `Project`, `Materialization`, `WorkJob`, `Pool`, `CapacityRequest` | the API (`c4.avalanche.io/v1alpha1`)                                                                 |
+| Deployment `c4-manager` (namespace `c4-system`)                         | controllers, the work queue, the HUD (port 8090), the pod webhook, the provenance certificate issuer |
+| DaemonSet `c4-node`                                                     | the CSI driver `c4.avalanche.io`, the node cache and the peer tier, capture, task records            |
+| Deployment `c4-regional`                                                | the regional cache tier                                                                              |
+| Namespace `c4-signing`                                                  | the provenance signing CA, readable only by the manager                                              |
+| ValidatingAdmissionPolicy `c4-node-writes`                              | node daemons may change only output annotations of pods on their own node                            |
+| Services `c4-hud`, `c4-signer`, `c4-regional`                           | the HUD, the certificate issuer, the regional tier                                                   |
 
 ## Set up a project
 
@@ -231,7 +231,7 @@ with the queue in charge: see [Run work](#run-work). `kind delete cluster
 ## Uninstall
 
 ```sh
-kubectl delete -f https://github.com/Avalanche-io/c4-operator/releases/download/v0.2.1/install.yaml
+kubectl delete -f https://github.com/Avalanche-io/c4-operator/releases/latest/download/install.yaml
 ```
 
 Deleting the CRDs deletes every Project, Materialization and WorkJob. The
@@ -240,7 +240,7 @@ stores are not touched.
 ## Build your own images
 
 ```sh
-make images REGISTRY=registry.example.com/you VERSION=v0.2.1 PUSH=1
+make images REGISTRY=registry.example.com/you VERSION=v0.2.1 PUSH=1   # the release's tag, for example v0.2.1
 make install-yaml REGISTRY=registry.example.com/you VERSION=v0.2.1   # bin/install.yaml
 ```
 
