@@ -110,6 +110,22 @@ func (s *Server) everyRole(ctx context.Context, v *api.Viewer) bool {
 	return one != "" && v.User == one
 }
 
+// roleOwner is who owns what development viewer v submits: the farm's
+// one person, where v is a role's sign-in (artist, wrangler) on a
+// single-person farm, since a role is not a party and that person is the
+// one acting in it. "" where v's work is its own: the person signed in
+// as themselves, a unit, a tracker's sync, anyone on a shared farm.
+func (s *Server) roleOwner(ctx context.Context, v *api.Viewer) string {
+	if !isDev(v) || v.Unit != nil || s.isSync(v) {
+		return ""
+	}
+	one := s.singlePerson(ctx)
+	if one == "" || v.User == one {
+		return ""
+	}
+	return one
+}
+
 // handleFarmBinding answers GET /api/v1/farm/binding.
 func (s *Server) handleFarmBinding(w http.ResponseWriter, r *http.Request) {
 	v := s.withViewer(w, r)

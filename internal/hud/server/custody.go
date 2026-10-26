@@ -66,6 +66,16 @@ type controlPredicate struct {
 	// a relayed decision's names the people-map confirmation it rests on,
 	// or says what is missing.
 	Chain *schema.Chain `json:"chain,omitempty"`
+	// By is the person who answers for a submission and the role they
+	// acted in (submit only): a one-person farm's person signed in as a
+	// role's development viewer, the actor (c4v1.AnnotationSubmittedAs).
+	By *actedBy `json:"by,omitempty"`
+}
+
+// actedBy is a control record's by: a person, and the role they acted in.
+type actedBy struct {
+	Person string `json:"person"`
+	Role   string `json:"role"`
 }
 
 // Grades of how far a record's link is evidenced, beside the custody

@@ -1074,7 +1074,16 @@ when the spec has no deadline; and stamps `c4.avalanche.io/owner` (the
 viewer), `c4.avalanche.io/submitted-via` (`hud` or `mcp`), and the labels
 `c4.avalanche.io/shot`, `c4.avalanche.io/job-type` and
 `c4.avalanche.io/stage` (which, with the shot, key the shot history a job's
-estimate starts from). A job a unit submits (with its pod's token and a `c4`
+estimate starts from). On a single-person farm (a `onePerson` binding or
+`--single-person-farm`, on a HUD guarded by an installer token) a role's
+development viewer, such as `?as=artist` or `?as=wrangler`, is the farm's
+one person acting in that role: a role is not a party, so the job is that
+person's (`c4.avalanche.io/owner`), and their leases and pools serve it,
+and `c4.avalanche.io/submitted-as` names the role. Only the farm sets it,
+when it makes the job; the owner webhook drops anyone else's, and it never
+changes or goes. A bundle (`POST /bundles`) is the same, and its job
+carries both. On a shared farm a role's viewer owns its job, as any
+viewer does. A job a unit submits (with its pod's token and a `c4`
 grant) is owned by the owner of the unit's own job, whose runners run it
 and who answers for it, and `c4.avalanche.io/submitted-by-unit` names the
 unit as a record names it (`<namespace>/<job>@<uid6>/<unit>`, the job's UID
@@ -1274,7 +1283,9 @@ Each job carries two identities: `c4.avalanche.io/submission`, the C4 ID
 of the file (the compact JSON sent), and `c4.avalanche.io/submission-record`,
 the ID of the signed record of submitting it (`record`; kind `submit`),
 so the same file sent twice is two submissions, the next versions of each
-job. `note:` is the job's `c4.avalanche.io/note` and a line of its book
+job. Its `actor` is who signed in; where that is a role's viewer on a
+single-person farm, the record adds `by: { person, role }`, the farm's
+one person who owns the jobs and the role they submitted as. `note:` is the job's `c4.avalanche.io/note` and a line of its book
 entry, with the submission's ID. `c4.avalanche.io/derivation-class: exact`
 marks a job whose tool says `reuse: exact`.
 

@@ -134,6 +134,13 @@ func (s *Server) checkBundle(r *http.Request, m *model, v *api.Viewer, ns string
 		// serve them run its members (JobForBundle copies it to the job).
 		Annotations: map[string]string{c4v1.AnnotationOwner: v.User, c4v1.AnnotationSubmittedVia: submittedVia(r)}},
 		Spec: c4v1.AgentBundleSpec{MaxRunning: body.MaxRunning, Pools: body.Pools, Suspend: body.Suspend}}
+	owner := v.User
+	if one := s.roleOwner(r.Context(), v); one != "" {
+		// a one-person farm's person, as a role, as a job is (createJob)
+		owner = one
+		b.Annotations[c4v1.AnnotationOwner] = one
+		b.Annotations[c4v1.AnnotationSubmittedAs] = devRole(v)
+	}
 	if len(body.Members) == 0 {
 		errs = append(errs, api.FieldError{Path: "members", Message: "a bundle needs at least one agent",
 			Fix: "name the agents to run (c4 farm agents ls lists them)"})
@@ -182,14 +189,14 @@ func (s *Server) checkBundle(r *http.Request, m *model, v *api.Viewer, ns string
 		switch {
 		case i < 0:
 			refused = append(refused, "pool "+name+" does not exist")
-		case len(m.pools[i].Spec.Owners) > 0 && !slices.Contains(m.pools[i].Spec.Owners, v.User):
+		case len(m.pools[i].Spec.Owners) > 0 && !slices.Contains(m.pools[i].Spec.Owners, owner):
 			refused = append(refused, "pool "+name+" runs only the agents of "+strings.Join(m.pools[i].Spec.Owners, ", "))
 		default:
 			serving = append(serving, m.pools[i])
 		}
 	}
 	if len(serving) == 0 {
-		errs = append(errs, api.FieldError{Path: "pools", Message: "no pool runs agents for " + v.User + " yet (" + strings.Join(refused, "; ") + ")",
+		errs = append(errs, api.FieldError{Path: "pools", Message: "no pool runs agents for " + owner + " yet (" + strings.Join(refused, "; ") + ")",
 			Fix: "c4 farm up makes one for this machine"})
 		return b, errs, warnings
 	}

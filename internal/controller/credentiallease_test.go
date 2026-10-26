@@ -108,6 +108,14 @@ func TestJobForBundleCarriesItsOwner(t *testing.T) {
 	if j.Annotations[c4v1.AnnotationOwner] != "noor" || j.Annotations[c4v1.AnnotationSubmittedVia] != "api" || j.Annotations[c4v1.AnnotationOwnerGroups] != `["leads"]` {
 		t.Fatalf("annotations %v", j.Annotations)
 	}
+	if _, ok := j.Annotations[c4v1.AnnotationSubmittedAs]; ok {
+		t.Fatalf("a role from nowhere: %v", j.Annotations)
+	}
+	// and the role a one-person farm's person made it as
+	b.Annotations[c4v1.AnnotationSubmittedAs] = "artist"
+	if j := JobForBundle(b); j.Annotations[c4v1.AnnotationSubmittedAs] != "artist" {
+		t.Fatalf("the role is not carried: %v", j.Annotations)
+	}
 	b.Annotations = nil
 	if j := JobForBundle(b); j.Annotations[c4v1.AnnotationOwner] != "" {
 		t.Fatalf("an owner from nowhere: %v", j.Annotations)

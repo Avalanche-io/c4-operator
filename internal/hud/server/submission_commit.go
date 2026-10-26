@@ -223,11 +223,15 @@ func (s *Server) commitSubmission(r *http.Request, v *api.Viewer, m *model, plan
 		// what was submitted includes the plans it was read with
 		change["plans"] = plans
 	}
+	pred := controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
+		Authorization: s.authorization(v, "create", "workjobs", plan.Namespace, ""), Action: "submit",
+		Target: "submission:" + out.Submission, Change: change}
+	if first := made[0].job.Annotations; first[c4v1.AnnotationSubmittedAs] != "" {
+		// a one-person farm's person, as a role: who the jobs were made for
+		pred.By = &actedBy{Person: first[c4v1.AnnotationOwner], Role: first[c4v1.AnnotationSubmittedAs]}
+	}
 	record, err := s.signControl(ctx, []string{plan.Project}, provenance.Subject{Name: "submission:" + out.Submission,
-		Digest: map[string]string{"sha256": hex.EncodeToString(sum[:])}},
-		controlPredicate{Actor: v.User, Authenticated: s.authenticatedBy(r, v), Via: via(r), Agent: claimedAgent(r),
-			Authorization: s.authorization(v, "create", "workjobs", plan.Namespace, ""), Action: "submit",
-			Target: "submission:" + out.Submission, Change: change})
+		Digest: map[string]string{"sha256": hex.EncodeToString(sum[:])}}, pred)
 	if err != nil {
 		s.Log.Error(err, "sign a submission", "submission", out.Submission)
 		return fail(plan.Jobs[0].Key, names[0], http.StatusServiceUnavailable, errTransient, "")

@@ -111,6 +111,10 @@ func JobForBundle(b *c4v1.AgentBundle) *c4v1.WorkJob {
 		if via := b.Annotations[c4v1.AnnotationSubmittedVia]; via != "" {
 			j.Annotations[c4v1.AnnotationSubmittedVia] = via
 		}
+		if as := b.Annotations[c4v1.AnnotationSubmittedAs]; as != "" {
+			// the role the owner made the bundle as
+			j.Annotations[c4v1.AnnotationSubmittedAs] = as
+		}
 		if g, ok := b.Annotations[c4v1.AnnotationOwnerGroups]; ok {
 			// the owner's groups, as the bundle recorded them
 			j.Annotations[c4v1.AnnotationOwnerGroups] = g

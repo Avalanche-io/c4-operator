@@ -45,16 +45,19 @@ func (m *Owner) Handle(_ context.Context, req admission.Request) admission.Respo
 		ann = map[string]string{}
 	}
 	_, byUnit := ann[c4v1.AnnotationSubmittedByUnit]
+	_, asRole := ann[c4v1.AnnotationSubmittedAs]
 	groups := ownerGroups(req.UserInfo.Groups)
-	if ann[c4v1.AnnotationOwner] == user && ann[c4v1.AnnotationSubmittedVia] == "api" && !byUnit && ann[c4v1.AnnotationOwnerGroups] == groups {
+	if ann[c4v1.AnnotationOwner] == user && ann[c4v1.AnnotationSubmittedVia] == "api" && !byUnit && !asRole && ann[c4v1.AnnotationOwnerGroups] == groups {
 		return admission.Allowed("owner already the requester")
 	}
 	ann[c4v1.AnnotationOwner] = user
 	ann[c4v1.AnnotationOwnerGroups] = groups
 	ann[c4v1.AnnotationSubmittedVia] = "api"
-	// only the farm says a unit submitted it, and under whose grant
+	// only the farm says a unit submitted it, under whose grant, and as
+	// which role
 	delete(ann, c4v1.AnnotationSubmittedByUnit)
 	delete(ann, c4v1.AnnotationGrantTracker)
+	delete(ann, c4v1.AnnotationSubmittedAs)
 	obj.SetAnnotations(ann)
 	raw, err := obj.MarshalJSON()
 	if err != nil {

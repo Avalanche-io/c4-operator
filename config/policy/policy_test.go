@@ -267,6 +267,39 @@ func TestWorkJobOwnerIsFixed(t *testing.T) {
 	}
 }
 
+// The role a one-person farm's person submitted a job as is set when the
+// job is made: never changed, removed, or added to a job made without one.
+func TestWorkJobSubmittedAsIsFixed(t *testing.T) {
+	_, c := start(t)
+	ctx := context.Background()
+	c.Create(ctx, &corev1.Namespace{ObjectMeta: metav1.ObjectMeta{Name: "saltmarsh"}})
+	mk := func(name string, ann map[string]string) *c4v1.WorkJob {
+		j := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "saltmarsh", Name: name, Annotations: ann},
+			Spec: c4v1.WorkJobSpec{Class: "render", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "u", Image: "x"}}}}}}
+		if err := c.Create(ctx, j); err != nil {
+			t.Fatal(err)
+		}
+		return j
+	}
+	patch := func(j *c4v1.WorkJob, p string) error {
+		return c.Patch(ctx, j, client.RawPatch(types.MergePatchType, []byte(p)))
+	}
+	j := mk("sm0140-light-v001", map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "hud", c4v1.AnnotationSubmittedAs: "artist"})
+	enforced(t, "c4-workjob-owner", func(try int) error {
+		return patch(j, fmt.Sprintf(`{"metadata":{"annotations":{"c4.avalanche.io/submitted-as":"wrangler%d"}}}`, try))
+	})
+	if err := patch(j, `{"metadata":{"annotations":{"c4.avalanche.io/submitted-as":null}}}`); err == nil {
+		t.Error("the role a job was submitted as was removed")
+	}
+	if err := patch(j, `{"spec":{"nudge":{"hold":true}}}`); err != nil {
+		t.Errorf("an ordinary change was refused: %v", err)
+	}
+	plain := mk("sm0140-light-v002", map[string]string{c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "hud"})
+	if err := patch(plain, `{"metadata":{"annotations":{"c4.avalanche.io/submitted-as":"artist"}}}`); err == nil {
+		t.Error("a job was said, after its creation, to be submitted as a role")
+	}
+}
+
 // TestSubmitGrantsOnlyFromTheHUD: a person's grant to a Tracker is written
 // only by the HUD (the manager's account), never directly, so a Tracker's
 // author cannot forge or erase one.

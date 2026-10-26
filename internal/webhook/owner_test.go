@@ -171,3 +171,24 @@ func TestOwnerRecordsGroups(t *testing.T) {
 		t.Errorf("the manager's own record was changed: %v", resp.Patches)
 	}
 }
+
+// Only the farm says which role a one-person farm's person submitted a
+// job as: anyone else's claim is dropped, even with the owner already the
+// requester; the farm's own stands.
+func TestOwnerDropsARoleClaim(t *testing.T) {
+	m := newOwner(t)
+	resp := m.Handle(context.Background(), ownerRequest(t, "ivo", admissionv1.Create, map[string]string{
+		c4v1.AnnotationOwner: "ivo", c4v1.AnnotationSubmittedVia: "api", c4v1.AnnotationSubmittedAs: "wrangler"}))
+	dropped := false
+	for _, p := range resp.Patches {
+		dropped = dropped || (p.Operation == "remove" && p.Path == "/metadata/annotations/c4.avalanche.io~1submitted-as")
+	}
+	if !resp.Allowed || !dropped {
+		t.Fatalf("a role claim stood: %v %v", resp.Allowed, resp.Patches)
+	}
+	resp = m.Handle(context.Background(), ownerRequest(t, managerSA, admissionv1.Create, map[string]string{
+		c4v1.AnnotationOwner: "noor", c4v1.AnnotationSubmittedVia: "hud", c4v1.AnnotationSubmittedAs: "artist"}))
+	if !resp.Allowed || len(resp.Patches) != 0 {
+		t.Fatalf("the farm's own was changed: %v", resp.Patches)
+	}
+}

@@ -874,3 +874,117 @@ func TestHeldJobsAndTheirParents(t *testing.T) {
 		t.Errorf("a job with no held child: %+v", other)
 	}
 }
+
+// roleFarm is a farm guarded by an installer token, bound to noor (as
+// one person's farm or not), signed into as a local farm is: noor as
+// themselves, and the artist and wrangler roles' viewers.
+func roleFarm(t *testing.T, onePerson bool) *Server {
+	t.Helper()
+	s := bundleFarm(t)
+	b := &c4v1.DeploymentBinding{ObjectMeta: metav1.ObjectMeta{Name: c4v1.FarmBindingName},
+		Spec: c4v1.DeploymentBindingSpec{Owner: "noor", To: "laptop-1/*", OnePerson: onePerson, For: []string{"task/v1"}, Start: metav1.Now(), By: "noor"}}
+	if err := s.Client.Create(context.Background(), b); err != nil {
+		t.Fatal(err)
+	}
+	s.DevViewersOpen, s.InstallerToken = false, []byte("test-token")
+	s.DevViewers["noor"] = &api.Viewer{User: "noor", Projects: []string{"show-a", "show-b"}, All: true, Role: "farm-admin"}
+	s.DevViewers["artist"] = &api.Viewer{User: "artist", Projects: []string{"show-a"}}
+	s.DevViewers["wrangler"] = &api.Viewer{User: "wrangler", Projects: []string{"show-a", "show-b"}, All: true}
+	// the agent pool runs noor's work
+	s.m.pools[len(s.m.pools)-1].Spec.Owners = []string{"noor"}
+	return s
+}
+
+// roleSubmit posts body to path as development viewer as, with the
+// installer token.
+func roleSubmit(t *testing.T, s *Server, path, as string, body any) (int, string) {
+	t.Helper()
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, path+"?as="+as, bytes.NewReader(raw))
+	r.Header.Set(InstallerHeader, "test-token")
+	w := httptest.NewRecorder()
+	s.Handler().ServeHTTP(w, r)
+	return w.Code, w.Body.String()
+}
+
+func roleJobSpec(t *testing.T) json.RawMessage {
+	t.Helper()
+	spec, err := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-2"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return spec
+}
+
+// A role is not a party: on a one-person farm, a job submitted as the
+// artist or the wrangler is noor's, so noor's leases and pools serve it,
+// and the role it was submitted as stays on it. noor signed in as
+// themselves submits as no role. A bundle is the same.
+func TestARoleSubmitsForTheOnePerson(t *testing.T) {
+	s := roleFarm(t, true)
+	ctx := context.Background()
+	for _, c := range []struct{ as, owner, role string }{
+		{"artist", "noor", "artist"},
+		{"wrangler", "noor", "wrangler"},
+		{"noor", "noor", ""},
+	} {
+		name := "sm0140-" + c.as
+		code, out := roleSubmit(t, s, "/api/v1/jobs", c.as, api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: name, Spec: roleJobSpec(t)})
+		if code != http.StatusCreated {
+			t.Fatalf("as %s: %d %s", c.as, code, out)
+		}
+		var j c4v1.WorkJob
+		if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: name}, &j); err != nil {
+			t.Fatal(err)
+		}
+		as, ok := j.Annotations[c4v1.AnnotationSubmittedAs]
+		if j.Annotations[c4v1.AnnotationOwner] != c.owner || as != c.role || ok != (c.role != "") || j.Annotations[c4v1.AnnotationSubmittedVia] != "hud" {
+			t.Errorf("as %s: annotations %v, want owner %s as %q", c.as, j.Annotations, c.owner, c.role)
+		}
+	}
+
+	// noor's pool runs the artist's agents: they are noor's
+	code, out := roleSubmit(t, s, "/api/v1/bundles/show-a", "artist", map[string]any{"members": []string{"research"}})
+	if code != http.StatusCreated {
+		t.Fatalf("a bundle as the artist: %d %s", code, out)
+	}
+	var b c4v1.AgentBundle
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "agents"}, &b); err != nil {
+		t.Fatal(err)
+	}
+	if b.Annotations[c4v1.AnnotationOwner] != "noor" || b.Annotations[c4v1.AnnotationSubmittedAs] != "artist" {
+		t.Errorf("the artist's bundle: %v", b.Annotations)
+	}
+
+	// the artist replaces the forecast it made: it is noor's, and so is
+	// the artist's
+	fspec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Forecast: &c4v1.WorkForecast{SlotHours: "4"}})
+	if code, out := roleSubmit(t, s, "/api/v1/jobs", "artist", api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: "sm0140-guess", Spec: fspec}); code != http.StatusCreated {
+		t.Fatalf("a forecast as the artist: %d %s", code, out)
+	}
+	if code, out := roleSubmit(t, s, "/api/v1/jobs", "artist", api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: "sm0140-real",
+		Replaces: "sm0140-guess", Spec: roleJobSpec(t)}); code != http.StatusCreated {
+		t.Errorf("the artist replacing its own forecast: %d %s", code, out)
+	}
+}
+
+// On a shared farm, bound to noor but not as one person's, a role's
+// viewer owns what it submits, and submits as no role.
+func TestARoleOnASharedFarmOwnsItsJob(t *testing.T) {
+	s := roleFarm(t, false)
+	ctx := context.Background()
+	if code, out := roleSubmit(t, s, "/api/v1/jobs", "artist", api.SubmitRequest{Project: "show-a", Namespace: "show-a", Name: "sm0140-artist", Spec: roleJobSpec(t)}); code != http.StatusCreated {
+		t.Fatalf("as the artist: %d %s", code, out)
+	}
+	var j c4v1.WorkJob
+	if err := s.Client.Get(ctx, types.NamespacedName{Namespace: "show-a", Name: "sm0140-artist"}, &j); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := j.Annotations[c4v1.AnnotationSubmittedAs]; j.Annotations[c4v1.AnnotationOwner] != "artist" || ok {
+		t.Errorf("annotations %v, want the artist's, as no role", j.Annotations)
+	}
+}

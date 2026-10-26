@@ -165,7 +165,8 @@ func (s *Server) handleWithdraw(w http.ResponseWriter, r *http.Request) {
 }
 
 // mayRetire says whether v may replace or withdraw forecast f: only one
-// who could have made it. That is its owner; the sync for the Tracker it
+// who could have made it. That is its owner (on a one-person farm, its
+// one person signed in as any role, roleOwner); the sync for the Tracker it
 // came from; or the sync submitting under a grant from its owner (grant,
 // for a replacement made under one; otherwise any grant of the owner's in
 // the namespace that serves now). It returns which, in words, for the
@@ -174,6 +175,9 @@ func (s *Server) mayRetire(ctx context.Context, v *api.Viewer, f *c4v1.WorkJob, 
 	owner := f.Annotations[c4v1.AnnotationOwner]
 	if owner != "" && v.User == owner {
 		return "the forecast's owner", nil
+	}
+	if owner != "" && s.roleOwner(ctx, v) == owner {
+		return "the forecast's owner, as " + devRole(v), nil
 	}
 	if s.isSync(v) {
 		if tr := f.Labels[c4v1.LabelTracker]; tr != "" {

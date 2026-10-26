@@ -104,6 +104,13 @@ const (
 	// c4-sync (a tracker's, for a person under their grant), or api
 	// (anything else that wrote the WorkJob directly).
 	AnnotationSubmittedVia = "c4.avalanche.io/submitted-via"
+	// AnnotationSubmittedAs on a WorkJob or an AgentBundle is the role
+	// (artist, wrangler, ...) a one-person farm's person submitted it as,
+	// signed in as that role's development viewer. A role is not a party:
+	// the person owns the job (AnnotationOwner), and this keeps how they
+	// acted. Only the farm sets it, when it creates the job, and it never
+	// changes or goes.
+	AnnotationSubmittedAs = "c4.avalanche.io/submitted-as"
 	// AnnotationSubmittedByUnit names the unit (<namespace>/<job>/<unit>)
 	// that submitted a job as part of its own work. Its owner is the owner
 	// of the unit's job, who is accountable for it; only the farm sets it.

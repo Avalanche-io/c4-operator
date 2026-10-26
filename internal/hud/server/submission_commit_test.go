@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Avalanche-io/c4"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -685,5 +686,72 @@ func TestFailedLeftoverDoesNotBlockTheKey(t *testing.T) {
 	}
 	if n := s.submitKeys.size(); n != 0 {
 		t.Fatalf("%d key locks kept", n)
+	}
+}
+
+// submitRecord reads the predicate of a submission's signed record.
+func submitRecord(t *testing.T, s *Server, id string) controlPredicate {
+	t.Helper()
+	st, err := s.Stores(context.Background(), "show-a")
+	if err != nil || st == nil {
+		t.Fatal(err)
+	}
+	rid, err := c4.Parse(id)
+	if err != nil {
+		t.Fatalf("record %q: %v", id, err)
+	}
+	rr, err := st.Open(rid)
+	if err != nil {
+		t.Fatalf("the record is not in the store: %v", err)
+	}
+	defer rr.Close()
+	var env struct {
+		DSSE struct {
+			Payload []byte `json:"payload"`
+		} `json:"dsseEnvelope"`
+	}
+	if err := json.NewDecoder(rr).Decode(&env); err != nil {
+		t.Fatal(err)
+	}
+	var stmt struct {
+		Predicate controlPredicate `json:"predicate"`
+	}
+	if err := json.Unmarshal(env.DSSE.Payload, &stmt); err != nil {
+		t.Fatal(err)
+	}
+	return stmt.Predicate
+}
+
+// A one-person farm's person submitting as a role: the submission's
+// record says by whom, in which role, and the jobs are the person's. On
+// a shared farm the record has no by, and the jobs stay the viewer's.
+func TestSubmissionRecordNamesThePersonAndRole(t *testing.T) {
+	s, _ := commitFarm(t)
+	tree := putTree(t, s, "show-a", map[string]string{"plates/sm0140.1001.exr": "plate"}).String()
+	body := api.SubmissionRequest{Submission: submission(t, "proxies-movie", tree)}
+
+	code, out := submit(t, s, body) // ?as=artist is maya
+	if code != http.StatusCreated || out.Record == "" {
+		t.Fatalf("shared: %d %+v", code, out)
+	}
+	if p := submitRecord(t, s, out.Record); p.By != nil || p.Actor != "maya" {
+		t.Errorf("shared: the record's actor %q, by %+v", p.Actor, p.By)
+	}
+	if j := workJob(t, s, out.Jobs[0].Name); j.Annotations[c4v1.AnnotationOwner] != "maya" || j.Annotations[c4v1.AnnotationSubmittedAs] != "" {
+		t.Errorf("shared: %v", j.Annotations)
+	}
+
+	s.SinglePerson = "noor"
+	code, out = submit(t, s, body)
+	if code != http.StatusCreated || out.Record == "" {
+		t.Fatalf("one person's: %d %+v", code, out)
+	}
+	if p := submitRecord(t, s, out.Record); p.By == nil || *p.By != (actedBy{Person: "noor", Role: "artist"}) || p.Actor != "maya" {
+		t.Errorf("one person's: the record's actor %q, by %+v", p.Actor, p.By)
+	}
+	for _, sj := range out.Jobs {
+		if j := workJob(t, s, sj.Name); j.Annotations[c4v1.AnnotationOwner] != "noor" || j.Annotations[c4v1.AnnotationSubmittedAs] != "artist" {
+			t.Errorf("one person's %s: %v", sj.Name, j.Annotations)
+		}
 	}
 }
