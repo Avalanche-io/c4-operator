@@ -12,6 +12,10 @@ import * as f from '../fmt.js';
 // ("1 unit is out of retries (0): <the tool's words>. Open them, …")
 function why(j) {
   const m = ((j.needsPerson || {}).message || '').replace(/\s*Open them, requeue, assign or accept\.?$/, '');
+  // the farm's own sentence ("1 unit failed after its retries; fix the tool
+  // X, then c4 farm tool publish again …") carries no words of the tool's:
+  // the line says it failed, and the command shows why
+  if (/failed after (its|their) retries/.test(m)) return '';
   const i = m.indexOf(': ');
   // (the tool's own label, "the transcode tool's test: …", is said already)
   return (i >= 0 ? m.slice(i + 2) : m).replace(/^(the )?[\w-]+( tool['’]s)? test( failed)?:\s*/i, '').replace(/\.$/, '');
