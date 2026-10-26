@@ -1,7 +1,6 @@
 package server
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -152,7 +151,7 @@ func (s *Server) handleLeadWorkers(w http.ResponseWriter, r *http.Request) {
 		}
 		open = j
 	}
-	if msg := leadActRefusal(r, v, open, "adds workers to it"); msg != "" {
+	if msg := s.leadActRefusal(r, v, open, "adds workers to it"); msg != "" {
 		fail(w, http.StatusForbidden, "%s", msg)
 		return
 	}
@@ -269,16 +268,6 @@ func workerName(desc, key string, i int) string {
 	}
 	h := sha256.Sum256([]byte(key + "\x00" + strconv.Itoa(i)))
 	return n + "-" + hex.EncodeToString(h[:2])
-}
-
-// ownerFor is who owns the jobs viewer v makes, as createJob says it: on
-// a one-person farm, its person whatever role v signed in as
-// (roleOwner); else v itself.
-func (s *Server) ownerFor(ctx context.Context, v *api.Viewer) string {
-	if one := s.roleOwner(ctx, v); one != "" {
-		return one
-	}
-	return v.User
 }
 
 // leadJobName is the name of a person's lead's nth job: from a hash of the
