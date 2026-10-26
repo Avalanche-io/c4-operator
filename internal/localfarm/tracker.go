@@ -195,7 +195,10 @@ func TrackerObjects(o Options) ([]obj, error) {
 		// change as itself (docs/c4-sync.md), as a project on any farm does
 		{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "Role", "metadata": meta("c4-sync-sandbox", "namespace", Project),
 			"rules": []obj{{"apiGroups": []string{""}, "resources": []string{"secrets"}, "resourceNames": []string{"sandbox-github", "sandbox-flow"}, "verbs": []string{"get"}},
-				{"apiGroups": []string{"c4.avalanche.io"}, "resources": []string{"workjobs"}, "verbs": []string{"get", "list", "watch", "create", "patch"}}}},
+				{"apiGroups": []string{"c4.avalanche.io"}, "resources": []string{"workjobs"}, "verbs": []string{"get", "list", "watch", "create", "patch"}},
+				// a decision's evidence (the note a rework mounts) goes to
+				// the project's store, which the HUD lets in as it lets in a tree
+				{"apiGroups": []string{"c4.avalanche.io"}, "resources": []string{"materializations"}, "verbs": []string{"create"}}}},
 		{"apiVersion": "rbac.authorization.k8s.io/v1", "kind": "RoleBinding", "metadata": meta("c4-sync-sandbox", "namespace", Project),
 			"roleRef":  obj{"apiGroup": "rbac.authorization.k8s.io", "kind": "Role", "name": "c4-sync-sandbox"},
 			"subjects": []obj{{"kind": "ServiceAccount", "name": "c4-sync", "namespace": "c4-system"}}},

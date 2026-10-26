@@ -108,8 +108,10 @@ c4-sync calls the HUD at `--hud` (default in the manifest:
 `http://c4-hud.c4-system.svc`) with a projected service-account token that
 the kubelet rotates. The HUD must allow its service account
 (`system:serviceaccount:c4-system:c4-sync`) to create and patch WorkJobs
-in each project namespace it syncs. That is the same SubjectAccessReview
-the HUD applies to people.
+in each project namespace it syncs, and to create Materializations there:
+a decision's evidence (the note a rework mounts) goes to the project's
+store, which the HUD lets in as it lets in a tree to read. That is the same
+SubjectAccessReview the HUD applies to people.
 
 ## Connect a tracker
 
