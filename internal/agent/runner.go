@@ -126,13 +126,23 @@ type Runner struct {
 	Observe          bool
 	ObserveConfigDir string
 	ObserveEvery     time.Duration
-	HUD              string
-	HUDToken         func() string
-	HTTPClient       *http.Client
-	observedAt       time.Time
-	observedErr      string
-	observedUnseen   bool
-	observing        atomic.Bool
+	// SoonEvery is how soon the runner looks again while a block pod waits
+	// to start (default 1s): a lead's worker starts within a second of
+	// the farm placing it, not at the next ordinary tick. A pod pending
+	// longer than soonFor waits for something else (its folder trusted, an
+	// environment), and the runner goes back to its ordinary pace.
+	SoonEvery time.Duration
+	// pendingSince is when each block pod was first seen waiting to start;
+	// soon is whether one still is, within soonFor.
+	pendingSince   map[types.UID]time.Time
+	soon           bool
+	HUD            string
+	HUDToken       func() string
+	HTTPClient     *http.Client
+	observedAt     time.Time
+	observedErr    string
+	observedUnseen bool
+	observing      atomic.Bool
 	// Offer, with HUD, has the runner offer its machine for enrollment
 	// while no one owns it (offer.go).
 	Offer     bool
@@ -226,9 +236,55 @@ func (r *Runner) Run(ctx context.Context, every time.Duration) error {
 			}
 			cancel()
 			return nil
-		case <-time.After(every):
+		case <-time.After(r.nextWait(every)):
 		}
 	}
+}
+
+// soonFor is how long a block pod waiting to start keeps the runner
+// looking every SoonEvery.
+const soonFor = time.Minute
+
+// blocksStarting reports whether a block pod is waiting to start and was
+// first seen so within soonFor, and forgets pods no longer waiting.
+func (r *Runner) blocksStarting(pods []corev1.Pod, now time.Time) bool {
+	if r.pendingSince == nil {
+		r.pendingSince = map[types.UID]time.Time{}
+	}
+	seen := map[types.UID]bool{}
+	soon := false
+	for i := range pods {
+		p := &pods[i]
+		if !isBlock(p) || p.Status.Phase != corev1.PodPending || p.DeletionTimestamp != nil {
+			continue
+		}
+		seen[p.UID] = true
+		first, ok := r.pendingSince[p.UID]
+		if !ok {
+			first = now
+			r.pendingSince[p.UID] = now
+		}
+		soon = soon || now.Sub(first) < soonFor
+	}
+	for uid := range r.pendingSince {
+		if !seen[uid] {
+			delete(r.pendingSince, uid)
+		}
+	}
+	return soon
+}
+
+// nextWait is how long Run waits before its next tick: SoonEvery while a
+// block pod has just begun waiting to start, else every.
+func (r *Runner) nextWait(every time.Duration) time.Duration {
+	soon := r.SoonEvery
+	if soon <= 0 {
+		soon = time.Second
+	}
+	if r.soon && soon < every {
+		return soon
+	}
+	return every
 }
 
 // ErrEnrollAgain is a runner's end when the farm no longer takes its
@@ -278,6 +334,7 @@ func (r *Runner) Tick(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	r.soon = r.blocksStarting(pods, r.now())
 	for i := range pods {
 		p := &pods[i]
 		if p.Status.Phase != corev1.PodSucceeded && p.Status.Phase != corev1.PodFailed {

@@ -540,6 +540,10 @@ host as **blocks**: each unit is its own Claude Code session, which the
 runner starts for the unit's first attempt and resumes by its session ID
 for every later one, so each unit starts fresh and keeps its own context
 across reworks and yields. `c4-agent runner --blocks-cwd DIR` turns it on.
+While a block waits to start, the runner looks again every second, for
+that block's first minute of waiting, rather than at its ordinary pace
+(`--every`, 5 seconds), so a lead's worker starts within about a second
+of the farm placing it.
 
 | variable           | set by                                                            | what                                                                                                |
 | ------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------- |

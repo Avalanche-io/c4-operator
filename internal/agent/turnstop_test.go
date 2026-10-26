@@ -9,6 +9,8 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
@@ -127,5 +129,50 @@ func TestYieldReportsItsLatency(t *testing.T) {
 	}
 	if got := getPod(t, c); got.Status.Reason != "Yielded" || !strings.Contains(got.Status.Message, "stopped 4m30s after it was asked") {
 		t.Fatalf("%s %q", got.Status.Reason, got.Status.Message)
+	}
+}
+
+// While a block pod waits to start, the runner looks again within a
+// second rather than at its ordinary pace, so a lead's worker starts as
+// soon as the farm places it; a pod waiting longer than soonFor waits for
+// something else, and the pace goes back. Running pods, members that are
+// not blocks, and pods being deleted never hurry it.
+func TestRunnerLooksSoonWhileABlockWaits(t *testing.T) {
+	r := &Runner{}
+	now := time.Date(2026, 10, 26, 12, 0, 0, 0, time.UTC)
+	block := func(uid string, phase corev1.PodPhase) corev1.Pod {
+		p := hostPod()
+		p.UID = types.UID(uid)
+		p.Spec.Containers[0].Env = append(p.Spec.Containers[0].Env, corev1.EnvVar{Name: EnvBlock, Value: "1"})
+		p.Status.Phase = phase
+		return *p
+	}
+	member := hostPod()
+	member.UID, member.Status.Phase = "m", corev1.PodPending
+	if r.blocksStarting([]corev1.Pod{block("a", corev1.PodRunning), *member}, now) {
+		t.Fatal("a running block or a member hurried the runner")
+	}
+	if r.nextWait(5*time.Second) != 5*time.Second {
+		t.Fatal("no hurry, yet a short wait")
+	}
+	r.soon = r.blocksStarting([]corev1.Pod{block("b", corev1.PodPending)}, now)
+	if !r.soon || r.nextWait(5*time.Second) != time.Second {
+		t.Fatalf("a block waiting to start: soon %v, wait %s", r.soon, r.nextWait(5*time.Second))
+	}
+	if r.SoonEvery = 300 * time.Millisecond; r.nextWait(5*time.Second) != 300*time.Millisecond {
+		t.Fatal("SoonEvery")
+	}
+	if r.nextWait(200*time.Millisecond) != 200*time.Millisecond {
+		t.Fatal("an ordinary pace already faster")
+	}
+	// still waiting after a minute: it waits for something else
+	if r.blocksStarting([]corev1.Pod{block("b", corev1.PodPending)}, now.Add(soonFor)) {
+		t.Fatal("a pod waiting past soonFor still hurries the runner")
+	}
+	// one being deleted does not, and a pod gone is forgotten
+	gone := block("c", corev1.PodPending)
+	gone.DeletionTimestamp = &metav1.Time{Time: now}
+	if r.blocksStarting([]corev1.Pod{gone}, now) || len(r.pendingSince) != 0 {
+		t.Fatalf("a deleted pod: %v", r.pendingSince)
 	}
 }
