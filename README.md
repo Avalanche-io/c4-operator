@@ -4,12 +4,16 @@
 [![ci](https://github.com/Avalanche-io/c4-operator/actions/workflows/ci.yaml/badge.svg)](https://github.com/Avalanche-io/c4-operator/actions/workflows/ci.yaml)
 [![license](https://img.shields.io/badge/license-Apache%202.0-blue)](LICENSE)
 
-C4 runs rendering, CI, machine learning and AI agents as one farm, on the
-Kubernetes you already have or on a laptop. It is built for media production
-first. Work is scheduled by deadline, not by hand-set priority. Every file is
-named by what's in it, so each one leaves storage about once, however many
-machines read it. Every output is a version, and every step is signed by
-whoever did it.
+C4 is a render farm for media production that runs on the Kubernetes you
+already have, or on a laptop. The same farm also runs CI, machine learning and
+AI agents. Work is scheduled by deadline, not by hand-set priority. Every file
+is named by what's in it, so each one leaves storage about once, however many
+machines read it. Every output is a version, and every step the farm takes is
+signed by whoever took it.
+
+C4 IDs are SMPTE ST 2114, written by Joshua Kolden and public since 2015; this
+is the major release of a design that goes back to 2011. C4 is short for The
+Cinema Content Creation Cloud ([cccc.io](https://cccc.io)).
 
 ![A shot in the C4 HUD: one row per frame, the work flowing from simulation to delivery](docs/images/hud-job-render-binary-order.webp)
 
@@ -17,8 +21,8 @@ whoever did it.
 
 - **Deadlines, not priorities.** You say when a job is due, and the farm works
   out the order. Nobody re-ranks priority numbers when a delivery slips. In a
-  five-week simulation, deadline ordering missed about 44% fewer render
-  deadlines than manual priorities.
+  five-week simulation, ordering by deadline missed about 44% fewer render
+  deadlines than hand-set priorities.
 - **Data moves once.** Every file has a C4 ID (SMPTE ST 2114), so the farm
   knows it already has something before it copies it. Machines no longer each
   fetch their own copy: 64 render pods reading one shot cost the store 42
@@ -27,18 +31,18 @@ whoever did it.
   the render that made it, the files it read and the model it used, without
   anyone keeping a spreadsheet.
 - **Only what needs you comes first.** The HUD puts the one question or
-  decision that needs a person on top, and lets the farm handle the rest. No
-  more watching a queue.
+  decision that needs a person on top, and reports what the farm handled on
+  its own, instead of someone watching the queue all night.
 - **Agents are first-class work.** Claude Code sessions run on the farm like
-  any other job, checkpointed at every turn, with the same controls as people
-  through MCP.
+  any other job, checkpointed at every turn, and agents get the same controls
+  as people, through MCP.
 - **Runs where you are.** On a laptop in Docker, or on your studio's
-  Kubernetes cluster, with the same commands.
+  Kubernetes cluster, with the same `c4 farm` commands.
 
 ## Quickstart: render a shot by its deadline
 
-You need Docker (Docker Desktop, OrbStack or Colima). Kind and kubectl are
-not needed; kind is built in.
+You need Docker (Docker Desktop, OrbStack or Colima). You don't need any
+Kubernetes tools; `c4 farm up` brings its own.
 
 ```sh
 brew install mrjoshuak/tap/c4
@@ -46,7 +50,9 @@ c4 farm up
 ```
 
 `up` makes a whole farm on your machine: render nodes, a store, the HUD and a
-sign-in for you. It takes about a minute and a half.
+sign-in for you. It takes about a minute and a half. The first time, it asks
+whether to connect Claude Code to the farm. Say no if you don't use it;
+`c4 farm integrate on` adds it later.
 
 ```sh
 c4 farm samples get
@@ -54,8 +60,9 @@ cd ~/c4-samples/saltmarsh
 c4 farm submit render sm0140/sm0140.usda --frames 1001-1024 --set width=960
 ```
 
-This fetches a sample shot (79 MB) and renders 24 frames of it with Cycles.
-The plan shows the files it uploads, the estimate and the deadline.
+This fetches a sample shot (79 MB) and renders 24 frames of it with Blender's
+Cycles, at 960 pixels wide to keep it quick. Before anything runs, `submit`
+prints its plan: the files it uploads, the estimate and the deadline.
 
 ```sh
 c4 farm open sm0140-light-v001
@@ -74,8 +81,8 @@ The farm re-plans around the new deadline. There is no priority to set.
 c4 farm get sm0140-light-v001 render ~/renders/sm0140
 ```
 
-The frames come home, every file checked against its C4 ID. The whole run
-takes about five minutes.
+The render step's frames come home, every file checked against its C4 ID. The
+whole run takes about five minutes.
 
 [docs/quickstart.md](docs/quickstart.md) goes further: a tool of your own,
 provenance, and agents.
@@ -93,6 +100,10 @@ details.
 
 ## Other kinds of work
 
+- **From your DCC:** submit panels for Nuke, Houdini, Maya, Blender, Katana
+  and Unreal, each added with `c4 farm integrate APP`, are in preview: each is
+  tested against its application's API and comes with a checklist for the
+  real application ([integrations/dcc](integrations/dcc/README.md)).
 - **Agents:** `c4 farm agents` shows the Claude Code sessions on your machine
   and which one needs you. Running agents as farm jobs:
   [docs/agents/c4-agent.md](docs/agents/c4-agent.md).
@@ -119,10 +130,6 @@ details.
 - [Projects you could take on](docs/projects.md): self-contained work with a
   clear contract, from renderer tool kits to tracker adapters.
 - [SECURITY.md](SECURITY.md): reporting a security problem privately.
-
-C4 IDs are SMPTE ST 2114, authored by Joshua Kolden and public since 2015.
-This is the major release of a design that goes back to 2011.
-C4 is short for The Cinema Content Creation Cloud ([cccc.io](https://cccc.io)).
 
 **Status:** v0.2, API `c4.avalanche.io/v1alpha1`.
 
