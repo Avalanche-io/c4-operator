@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -90,12 +91,12 @@ func scanUpload(ctx context.Context, dir string, all bool) (uploadScan, error) {
 func gitListed(ctx context.Context, dir string) (map[string]bool, error) {
 	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "git", "-C", dir, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
+	if err := gitIn(ctx, dir, "rev-parse", "--is-inside-work-tree").Run(); err != nil {
 		return nil, nil
 	}
 	// --exclude-per-directory reads .gitignore alone: not core.excludesFile
 	// nor .git/info/exclude, which differ from one machine to the next
-	out, err := exec.CommandContext(ctx, "git", "-C", dir, "-c", "core.quotePath=off", "ls-files", "-z",
+	out, err := gitIn(ctx, dir, "-c", "core.untrackedCache=false", "ls-files", "-z",
 		"--cached", "--others", "--exclude-per-directory=.gitignore").Output()
 	if err != nil {
 		var ee *exec.ExitError
@@ -116,6 +117,16 @@ func gitListed(ctx context.Context, dir string) (map[string]bool, error) {
 		return nil, nil
 	}
 	return listed, nil
+}
+
+// gitIn is git run in dir, a folder that may be someone else's: a
+// tarball's .git/config may set core.fsmonitor, a command git runs when it
+// reads the index, and the person is only sending the folder. The system's
+// config is not read, so the rule is the same on every machine.
+func gitIn(ctx context.Context, dir string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", dir, "-c", "core.fsmonitor=false"}, args...)...)
+	cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1")
+	return cmd
 }
 
 // allowAll refuses --all where no person chose it: it sends what the

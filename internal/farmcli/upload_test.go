@@ -86,6 +86,22 @@ func TestUploadKeepsWhatGitKeeps(t *testing.T) {
 	}
 }
 
+// A folder handed over with its .git is only sent: a core.fsmonitor its
+// config sets is never run.
+func TestUploadRunsNoCommandTheFolderNames(t *testing.T) {
+	dir := gitRepo(t)
+	ran := filepath.Join(t.TempDir(), "ran")
+	hook := filepath.Join(t.TempDir(), "fsmonitor.sh")
+	os.WriteFile(hook, []byte("#!/bin/sh\ntouch "+ran+"\n"), 0o755)
+	if out, err := exec.Command("git", "-C", dir, "config", "core.fsmonitor", hook).CombinedOutput(); err != nil {
+		t.Fatalf("%v\n%s", err, out)
+	}
+	scanned(t, dir, false)
+	if _, err := os.Stat(ran); err == nil {
+		t.Error("the folder's core.fsmonitor ran")
+	}
+}
+
 // A folder that is no git working tree is sent whole.
 func TestUploadOfAFolderOutsideGitIsWhole(t *testing.T) {
 	dir := t.TempDir()
