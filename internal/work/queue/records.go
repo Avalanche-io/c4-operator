@@ -123,9 +123,11 @@ func (q *Queue) sealJob(ctx context.Context, v *view, st *c4v1.WorkJobStatus, no
 	if f := v.job.Spec.Follows; f != "" {
 		pred["follows"] = v.job.Namespace + "/" + f
 	}
-	// Whose work it is, how it came, and the grant it came under: a job a
-	// tracker submitted for a person names the person's grant record.
-	for key, anno := range map[string]string{"owner": c4v1.AnnotationOwner, "submittedVia": c4v1.AnnotationSubmittedVia, "grant": c4v1.AnnotationGrant} {
+	// Whose work it is, how it came, the role its person acted as (on a
+	// one-person farm), and the grant it came under: a job a tracker
+	// submitted for a person names the person's grant record.
+	for key, anno := range map[string]string{"owner": c4v1.AnnotationOwner, "submittedVia": c4v1.AnnotationSubmittedVia,
+		"submittedAs": c4v1.AnnotationSubmittedAs, "grant": c4v1.AnnotationGrant} {
 		if val := v.job.Annotations[anno]; val != "" {
 			pred[key] = val
 		}
