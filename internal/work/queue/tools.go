@@ -314,7 +314,8 @@ func (q *Queue) claimedNetworks(ctx context.Context, v *view) string {
 // records it (its versions, then the earlier ones): the job's namespace
 // first, then the operator's. "" when no Tool records it.
 func (q *Queue) toolVersion(ctx context.Context, ns, name, view string) (string, error) {
-	for _, in := range []string{ns, q.Namespace} {
+	// a farm tool only in the operator's namespace, as every lookup of one
+	for _, in := range c4v1.ToolNamespaces(ns, q.Namespace, name) {
 		if in == "" {
 			continue
 		}
