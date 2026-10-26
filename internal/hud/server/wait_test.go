@@ -71,6 +71,14 @@ func TestWaitForUnits(t *testing.T) {
 		t.Fatalf("a running unit has a result: %+v", a.Units[0])
 	}
 
+	// a question ends a wait on all of them at once: the unit that asked
+	// waits on its answerer, so the others' running does not hold it
+	a = api.WaitAnswer{}
+	get(t, s, job+"&unit=4&unit=8&unit=5", &a)
+	if !a.Done || a.Units[1].Settled != "asks" || a.Units[0].State != "running" || a.Units[2].State != "running" || a.Units[0].Settled != "" {
+		t.Fatalf("one asks while two run: %+v", a)
+	}
+
 	// the window holds an unsettled wait, then answers as things stand
 	start := time.Now()
 	a = api.WaitAnswer{}

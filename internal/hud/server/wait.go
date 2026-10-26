@@ -35,8 +35,9 @@ var endedStates = map[string]bool{"succeeded": true, "failed": true, "superseded
 
 // handleWait is GET /jobs/{ns}/{name}/wait?unit=U[&unit=U...][&any=true]
 // [&within=25s]: it answers when every unit named (or, with any, one of
-// them) has ended or stopped on a question, or when within has passed,
-// with each unit as it stands. A unit is named by its name or its index.
+// them) has ended, at once when any of them stops on a question (it
+// waits on its answerer), or when within has passed, with each unit as it
+// stands. A unit is named by its name or its index.
 func (s *Server) handleWait(w http.ResponseWriter, r *http.Request) {
 	m, rec, _ := s.job(w, r)
 	if rec == nil {
@@ -122,10 +123,13 @@ func unitRefs(rec *jobRec, refs []string) (idx []int, bad string) {
 	return idx, ""
 }
 
-// waitAnswer is each named unit's state and whether the wait is over.
+// waitAnswer is each named unit's state and whether the wait is over: at
+// once when one stops on a question (it waits on its answerer); else, with
+// anyOne, when one has ended, and without, when all have.
 func waitAnswer(m *model, rec *jobRec, idx []int, anyOne bool) api.WaitAnswer {
 	states := unitStateMap(&rec.job.Status, len(rec.plan.Units))
-	ans := api.WaitAnswer{Done: !anyOne}
+	var ans api.WaitAnswer
+	asked, some, all := false, false, true
 	for _, i := range idx {
 		u := rec.plan.Units[i]
 		res := api.UnitResult{Job: rec.job.Namespace + "/" + rec.job.Name, Unit: i, Name: u.Name, Label: u.Label, State: states[i]}
@@ -134,15 +138,12 @@ func waitAnswer(m *model, rec *jobRec, idx []int, anyOne bool) api.WaitAnswer {
 			res.Settled = "ended"
 		case res.State == "needs":
 			res.Settled = "asks"
+			asked = true
 		}
-		if anyOne && res.Settled != "" {
-			ans.Done = true
-		}
-		if !anyOne && res.Settled == "" {
-			ans.Done = false
-		}
+		some, all = some || res.Settled != "", all && res.Settled != ""
 		ans.Units = append(ans.Units, res)
 	}
+	ans.Done = asked || (anyOne && some) || (!anyOne && all)
 	return ans
 }
 

@@ -54,8 +54,11 @@ type waitJob struct {
 	units []string
 }
 
-// Wait waits until the units named settle (with Any, one of them), prints
-// each, and returns an *Exit with its code.
+// Wait waits until the units named settle (with Any, one of them), or at
+// once when one stops on a question, prints each, and returns an *Exit
+// with its code. A question ends any wait: the unit that asked waits on
+// the lead, who answers with c4_supply and waits again on those still
+// open.
 func Wait(ctx context.Context, c *Client, o Out, project string, a WaitArgs) error {
 	if a.Within <= 0 {
 		a.Within = 25 * time.Second
@@ -99,7 +102,7 @@ func Wait(ctx context.Context, c *Client, o Out, project string, a WaitArgs) err
 			continue
 		}
 		quiet = false
-		settledOne := false
+		settledOne, asked := false, false
 		for path, ans := range answers {
 			j := jobs[path]
 			for k, u := range ans.Units {
@@ -107,12 +110,27 @@ func Wait(ctx context.Context, c *Client, o Out, project string, a WaitArgs) err
 					results[path+"\x00"+j.units[k]] = u
 				}
 				settledOne = settledOne || u.Settled != ""
+				asked = asked || u.Settled == "asks"
 			}
 			if ans.Done {
 				delete(open, path)
 			}
 		}
-		if a.Any && settledOne {
+		if asked && len(open) > 0 {
+			// how the others stand, without waiting for them
+			now := a
+			now.Within, now.Any = time.Millisecond, false
+			if more, err := waitRound(ctx, c, jobs, open, now); err == nil {
+				for path, ans := range more {
+					for k, u := range ans.Units {
+						if k < len(jobs[path].units) {
+							results[path+"\x00"+jobs[path].units[k]] = u
+						}
+					}
+				}
+			}
+		}
+		if asked || (a.Any && settledOne) {
 			break
 		}
 	}
@@ -184,8 +202,8 @@ func waitRound(ctx context.Context, c *Client, jobs map[string]*waitJob, open ma
 			continue
 		}
 		out[g.path] = g.ans
-		if a.Any && g.ans.Done {
-			cancel() // the others are not needed
+		if g.ans.Done && (a.Any || answerAsks(g.ans)) {
+			cancel() // the others are not needed now
 		}
 	}
 	if len(out) == 0 && first != nil {
@@ -196,6 +214,17 @@ func waitRound(ctx context.Context, c *Client, jobs map[string]*waitJob, open ma
 		return nil, first
 	}
 	return out, nil
+}
+
+// answerAsks reports whether one of an answer's units stopped on a
+// question.
+func answerAsks(ans api.WaitAnswer) bool {
+	for _, u := range ans.Units {
+		if u.Settled == "asks" {
+			return true
+		}
+	}
+	return false
 }
 
 // waitCode is the exit code for what settled.

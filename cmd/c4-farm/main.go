@@ -57,7 +57,7 @@ Work
   submit FILE              send a submission (c4: submit/1): its plan and estimate first (--dry-run, --explain)
   ls                       the queue, in run order (--mine, --at-risk, --all)
   watch JOB                the job's progress, deadline and slack as they change
-  wait UNIT...             wait until units end or stop on a question, then print what to act on (job/unit; --any for the first, --json, --timeout D); exit 0 done, 1 failed, 2 timed out, 10 a question
+  wait UNIT...             wait until units end (--any: the first), or one stops on a question, then print what to act on (job/unit; --json, --timeout D); exit 0 done, 1 failed, 2 timed out, 10 a question
   open [JOB]               open the job view in the HUD (--widget for the side widget); no JOB, what is waiting on you (--as ROLE: a local farm's role)
   deadline JOB WHEN        move a job's deadline (18:00, fri 18:00, +3h, suggested)
   hold JOB [--stop]        hold a job; --stop also stops its running units

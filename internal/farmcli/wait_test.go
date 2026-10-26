@@ -132,6 +132,37 @@ func TestWaitForAQuestion(t *testing.T) {
 	}
 }
 
+// A question ends a wait on all of them at once, not when the others end:
+// the asker waits on the lead. The other job's long request is dropped,
+// and a quick look says how its unit stands, so the lead sees the
+// question, its unit, and who is still running.
+func TestWaitAQuestionEndsAWaitOnAll(t *testing.T) {
+	c := fakeWaitHUD(t, func(w http.ResponseWriter, r *http.Request, job string) {
+		if job == "lead-9c1d" {
+			if r.URL.Query().Get("within") != "1ms" {
+				<-r.Context().Done() // still running, a long window
+				return
+			}
+			json.NewEncoder(w).Encode(api.WaitAnswer{Units: []api.UnitResult{{Job: "show-a/lead-9c1d", Unit: 4, Name: "review-4", State: "running"}}})
+			return
+		}
+		json.NewEncoder(w).Encode(api.WaitAnswer{Done: true, Units: []api.UnitResult{
+			{Job: "show-a/lead-3f2a", Unit: 1, Name: "review-1", State: "running"},
+			{Job: "show-a/lead-3f2a", Unit: 3, Name: "converge", State: "needs", Settled: "asks", Question: &api.UnitQuestion{Kind: "needs", Text: "keep the old flag?"}}}})
+	})
+	var out bytes.Buffer
+	start := time.Now()
+	err := Wait(context.Background(), c, Out{W: &out}, "show-a", WaitArgs{Units: []string{"lead-3f2a/review-1", "lead-3f2a/converge", "lead-9c1d/review-4"}})
+	if code := exitOf(t, err); code != WaitAsks || time.Since(start) > 5*time.Second {
+		t.Fatalf("exit %d after %s\n%s", code, time.Since(start), out.String())
+	}
+	for _, want := range []string{"show-a/lead-3f2a/converge  needs", "question  keep the old flag?", "show-a/lead-3f2a/review-1  running", "show-a/lead-9c1d/review-4  running"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("lacks %q:\n%s", want, out.String())
+		}
+	}
+}
+
 // A unit the job lacks is an error at once; a timeout prints what is
 // still waiting and exits 2; a name that is not job/unit is refused.
 func TestWaitRefusesAndTimesOut(t *testing.T) {

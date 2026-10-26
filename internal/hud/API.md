@@ -551,7 +551,8 @@ A long poll for a lead's wait (`c4 farm wait`). Each `unit` is a unit's name
 or index. It answers as soon as every unit named, or with `any=true` one of
 them, has **settled**: `ended` (succeeded, failed, superseded or accepted)
 or `asks` (stopped on a question, which `question` gives; answer it with
-`c4_supply`). Otherwise it answers when `within` has passed (default 25s,
+`c4_supply`). A unit that asks ends the wait at once, `any` or not: it
+waits on its answerer, so the others still running do not hold it. Otherwise it answers when `within` has passed (default 25s,
 at most 5m, inside common proxy timeouts) with `done: false` and the units
 as they stand. A settled unit carries what a lead acts on: its summary (the
 unit's own words, `text` the whole of it from the store), its branch, its

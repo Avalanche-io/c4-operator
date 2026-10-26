@@ -694,7 +694,10 @@ c4 farm wait lead-3f2a/review-1 lead-3f2a/review-2 lead-3f2a/review-3 --any
 ```
 
 - A unit is `job/unit` or `namespace/job/unit`, by its name or its index.
-  Without `--any` it waits for all of them; with it, for the first.
+  Without `--any` it waits for all of them; with it, for the first. A
+  unit that stops on a question ends the wait at once either way, with
+  how the others stand: it waits on the lead, who answers with
+  `c4_supply` and runs `c4 farm wait` again on those still open.
 - It prints each unit that settled: its state and run time; its summary,
   marked as the unit's own words; its branch (commits, base and head); and
   how a failed attempt ended. A unit that stopped on a question prints the
