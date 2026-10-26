@@ -78,16 +78,15 @@ itself.
 With Docker:
 
 ```sh
-brew install mrjoshuak/tap/c4-farm mrjoshuak/tap/c4-agent
-c4-farm up
+brew install mrjoshuak/tap/c4
+c4 farm up
 ```
 
 That is a whole farm on your machine: render nodes, a store, the operator,
 the HUD and a sign-in for every role. [docs/quickstart.md](docs/quickstart.md)
 continues from there: a sample shot rendered and watched in the HUD, its
 deadline moved, its frames taken home with every file checked, and a tool of
-your own written, tested and published. The guide writes `c4 farm`;
-`c4-farm` takes the same commands.
+your own written, tested and published.
 
 To install on a cluster of your own, see [docs/install.md](docs/install.md).
 Releases attach one `install.yaml`, and the image is
