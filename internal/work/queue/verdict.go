@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"math"
 	"slices"
@@ -20,6 +21,7 @@ import (
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
+	"github.com/Avalanche-io/c4-operator/internal/work/policy"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
@@ -172,6 +174,9 @@ func (m *jobMem) verdictDone(uid string) bool {
 type verdictRec struct {
 	c4v1.WorkVerdict
 	pod string
+	// lead is a refusal of the verdict's expansion as a unit's agent work,
+	// which its signed record names as the generator's does.
+	lead leadOnlyError
 }
 
 // flagged reports whether a review escalated unit i to a person, who has
@@ -220,6 +225,7 @@ func (q *Queue) carryOut(ctx context.Context, v *view, idx int, p *corev1.Pod, i
 	acts, expand, d, err := q.judge(ctx, v, idx, doc)
 	if err != nil {
 		rec.Error = err.Error()
+		errors.As(err, &rec.lead)
 	}
 	rec.Verdict, rec.Select = d.Verdict, d.Select.String()
 	var expandID string
@@ -642,6 +648,10 @@ func (q *Queue) recordVerdict(ctx context.Context, v *view, rec verdictRec, acts
 	}
 	if rec.Error != "" {
 		pred["error"] = rec.Error
+	}
+	if len(rec.lead.units) > 0 {
+		pred["agentUnits"], pred["fix"] = rec.lead.units, c4v1.LeadOnlyFix
+		pred["policy"], pred["scheduler"] = policy.Record(rec.lead.use), q.PolicyName
 	}
 	subjects := []provenance.Subject{jobSubject(v.job)}
 	if cid, err := c4.Parse(rec.Document); err == nil {
