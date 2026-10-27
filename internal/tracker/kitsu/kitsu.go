@@ -977,16 +977,16 @@ func (a *Adapter) post(ctx context.Context, taskID, statusID, text string) (comm
 //   - status: a comment on the Task that moves it to a status, by short
 //     name (Fields["task_status"]) or flag (Fields["flag"]); none when the
 //     Task is in that status already;
-//   - update: keys of the Task's data (Zou merges them in); an empty
-//     ETA is cleared (null), any other empty value is not written, and
-//     the spend is a number;
+//   - update: keys of the Task's data, or of another entity's (a shot's
+//     spend total), which Zou merges in; an empty ETA is cleared (null),
+//     any other empty value is not written, and the spend is a number;
 //   - comment, note: a comment on the Task in its current status, or with
 //     Note.Replace, new text for that comment;
 //   - mention: a comment that @-mentions Fields["user"] (an email), so
 //     Kitsu notifies them.
 func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, error) {
-	if w.On.Type != "Task" {
-		return tracker.Ref{}, fmt.Errorf("kitsu: write on %s: %w", w.On.Type, tracker.ErrUnsupported)
+	if w.On.Type != "Task" && w.Kind != "update" {
+		return tracker.Ref{}, fmt.Errorf("kitsu: %s on %s: %w", w.Kind, w.On.Type, tracker.ErrUnsupported)
 	}
 	switch w.Kind {
 	case "status":
@@ -1035,7 +1035,12 @@ func (a *Adapter) Apply(ctx context.Context, w tracker.Write) (tracker.Ref, erro
 		if len(data) == 0 {
 			return tracker.Ref{}, nil // an empty data object would clear the Task's data
 		}
-		if err := a.do(ctx, http.MethodPut, "/data/tasks/"+url.PathEscape(w.On.ID), map[string]any{"data": data}, nil); err != nil {
+		path := "/data/tasks/" + url.PathEscape(w.On.ID)
+		if w.On.Type != "Task" {
+			// a shot, an asset, a sequence: Zou's entities, data merged
+			path = "/data/entities/" + url.PathEscape(w.On.ID)
+		}
+		if err := a.do(ctx, http.MethodPut, path, map[string]any{"data": data}, nil); err != nil {
 			return tracker.Ref{}, err
 		}
 		return w.On, nil

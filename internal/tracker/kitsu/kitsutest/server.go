@@ -8,8 +8,8 @@
 //   - GET /api/data/{projects,task-status,task-types,entity-types,
 //     entities,tasks,persons} with column filters (a JSON array is an IN
 //     filter), plain arrays without page; GET .../{id}; PUT
-//     /api/data/tasks/{id} (data is merged; an empty data object clears
-//     it, as Zou does);
+//     /api/data/tasks/{id} and PUT /api/data/entities/{id} (data is
+//     merged; an empty data object clears it, as Zou does);
 //   - GET /api/data/tasks/{id}/full, with the entity, its type, sequence
 //     and episode nested;
 //   - GET /api/data/tasks/{id}/comments, newest first, with the author,
@@ -69,6 +69,7 @@ type Status struct {
 // Entity is a shot, sequence, episode or asset.
 type Entity struct {
 	ID, Name, ParentID, TypeID, ProjectID string
+	Data                                  map[string]any
 }
 
 // Task is one task.
@@ -548,6 +549,9 @@ func (s *Server) route(r *http.Request, path string, body []byte, who *Person) (
 		return out, 200, e
 	case len(p) >= 2 && p[0] == "data" && p[1] == "tasks":
 		return s.tasksRoute(r, p[2:], q, body, who)
+	case put && len(p) == 3 && p[0] == "data" && p[1] == "entities":
+		out, e := s.putEntity(p[2], body, who)
+		return out, 200, e
 	case put && len(p) == 3 && p[0] == "data" && p[1] == "comments":
 		out, e := s.editComment(p[2], body, who)
 		return out, 200, e
@@ -694,8 +698,56 @@ func (s *Server) entityJSON(e *Entity) map[string]any {
 	if e.ParentID != "" {
 		parent = e.ParentID
 	}
+	data := map[string]any{}
+	for k, v := range e.Data {
+		data[k] = v
+	}
 	return map[string]any{"id": e.ID, "name": e.Name, "parent_id": parent, "entity_type_id": e.TypeID,
-		"project_id": e.ProjectID, "status": "running", "data": map[string]any{}, "canceled": false, "type": "Entity"}
+		"project_id": e.ProjectID, "status": "running", "data": data, "canceled": false, "type": "Entity"}
+}
+
+// putEntity merges data into an entity's, as Zou's EntityResource.put
+// does (a copy of the entity's data, updated by the request's); an empty
+// object leaves it as it is there, unlike a task's.
+func (s *Server) putEntity(id string, body []byte, who *Person) (any, *apiErr) {
+	e := s.entities[id]
+	if e == nil {
+		return nil, notFound()
+	}
+	if !s.inTeam(who, e.ProjectID) {
+		return nil, forbidden()
+	}
+	if !manager(who) && who.Role != "supervisor" {
+		return nil, forbidden()
+	}
+	var in struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(body, &in); err != nil {
+		return nil, zouErr(400, "Wrong parameters.")
+	}
+	if e.Data == nil {
+		e.Data = map[string]any{}
+	}
+	for k, v := range in.Data {
+		e.Data[k] = v
+	}
+	return s.entityJSON(e), nil
+}
+
+// EntityData is a copy of an entity's data.
+func (s *Server) EntityData(id string) map[string]any {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	e := s.entities[id]
+	if e == nil {
+		return nil
+	}
+	out := map[string]any{}
+	for k, v := range e.Data {
+		out[k] = v
+	}
+	return out
 }
 
 func (s *Server) personFull(p *Person) map[string]any {

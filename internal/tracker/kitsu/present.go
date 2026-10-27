@@ -21,8 +21,8 @@ var defaultFlags = map[string]string{"running": "is_wip", "rework": "is_wip", "i
 //     never (approval is the supervisor's), and nothing when the Task is
 //     in that status already (a publish moved it to review);
 //   - the ETA and the job link in the Task's data, when the Tracker names
-//     the keys (scope eta_field, link_field), and what the job has spent
-//     under scope spend_field;
+//     the keys (scope eta_field, link_field), and the shot's spend total
+//     in the shot's data under scope spend_field (where the syncer says);
 //   - one comment when a person is needed or the job failed, with the
 //     cause, edited in place as the cause changes.
 func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracker.FieldWrite {
@@ -66,19 +66,18 @@ func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracke
 			},
 		})
 	}
-	// Spend goes where the syncer says (SpendOn): the shot's total, which
-	// this adapter does not write yet; a task's own only were the syncer
-	// to say the task (spend_on: task, refused for now).
-	if a.spendField != "" && s.SpendOn != nil && *s.SpendOn == s.Ref && s.SpendTotal > 0 {
+	// Spend goes where the syncer says (SpendOn): the shot's total, into
+	// the shot's data, which names no one person.
+	if a.spendField != "" && s.SpendOn != nil && s.SpendTotal > 0 {
 		// One number in the pools' currency, as Flow writes it; it moves
 		// every tick, so it is continuous and written at most every
 		// fieldSeconds. Four places, so a short job at a low rate is not
 		// written as nothing.
-		spend := strconv.FormatFloat(s.SpendTotal, 'f', 4, 64)
+		spend, at := strconv.FormatFloat(s.SpendTotal, 'f', 4, 64), *s.SpendOn
 		out = append(out, tracker.FieldWrite{
-			Field: "spend", Value: "spend", Continuous: spend,
+			Field: "spend", Value: at.Type + "/" + at.ID, Continuous: spend,
 			Build: func(tracker.Written) tracker.Write {
-				return tracker.Write{On: s.Ref, Kind: "update", Fields: map[string]string{a.spendField: spend}}
+				return tracker.Write{On: at, Kind: "update", Fields: map[string]string{a.spendField: spend}}
 			},
 		})
 	}

@@ -530,15 +530,15 @@ func TestKitsuForecastFollowsTheEstimation(t *testing.T) {
 func TestKitsuSpendAndNoStaleETA(t *testing.T) {
 	e := setupKitsu(t)
 	// a task is one artist's: its spend is never written to it (spend_on:
-	// task is refused for now); the shot's total, which Kitsu does not
-	// write yet, so the task gets none
+	// task is refused for now); the shot's total goes in the shot's data
 	e.update(func(tr *c4v1.Tracker) { tr.Spec.Scope["spend_field"] = "c4_spend" })
 	first := e.firstJob
 	e.pass()
 	e.job(first, func(j *api.Job) { j.Phase, j.Spend = "Running", &api.Spend{ProceduralSlotCost: 10} })
 	e.pass()
-	if v, ok := e.site.Task(e.task).Data["c4_spend"]; ok {
-		t.Fatalf("a task's spend by default: %v", v)
+	shot := e.site.Task(e.task).EntityID
+	if v, ok := e.site.Task(e.task).Data["c4_spend"]; ok || e.site.EntityData(shot)["c4_spend"] != 10.0 {
+		t.Fatalf("by default: the task's spend %v, the shot's %v", v, e.site.EntityData(shot)["c4_spend"])
 	}
 	e.update(func(tr *c4v1.Tracker) { tr.Spec.Scope["spend_on"] = "task" })
 	e.pass()
@@ -657,5 +657,30 @@ func TestKitsuSameHandleTwoJobs(t *testing.T) {
 	}
 	if want := syncer.JobName("kitsu", tracker.Item{Ref: kref(second), Name: "sh040 Lighting"}); a != want && b != want {
 		t.Fatalf("the second task's job is neither %s nor %s, want %s", a, b, want)
+	}
+}
+
+// The shot's spend is the total of every task's job on it, in the shot's
+// data; no task carries one.
+func TestKitsuShotSpendTotals(t *testing.T) {
+	e := setupKitsu(t)
+	e.update(func(tr *c4v1.Tracker) { tr.Spec.Scope["spend_field"] = "c4_spend" })
+	shot := e.site.Task(e.task).EntityID
+	second := e.site.AddTask(shot, "Lighting", "ready", e.clock.now().AddDate(0, 0, 4).Format("2006-01-02"), 480, e.artist.ID)
+	e.pass()
+	if len(e.farm.Submitted) != 2 {
+		t.Fatalf("submitted %d", len(e.farm.Submitted))
+	}
+	for i, c := range []float64{2, 3.5} {
+		e.job(e.farm.Submitted[i].Name, func(j *api.Job) { j.Phase, j.Spend = "Running", &api.Spend{ProceduralSlotCost: c} })
+	}
+	e.pass()
+	if got := e.site.EntityData(shot)["c4_spend"]; got != 5.5 {
+		t.Fatalf("the shot's total: %v", got)
+	}
+	for _, task := range []string{e.task, second} {
+		if v, ok := e.site.Task(task).Data["c4_spend"]; ok {
+			t.Fatalf("task %s carries spend %v", task, v)
+		}
 	}
 }
