@@ -66,6 +66,11 @@ type PlanOut struct {
 	Record   string      `json:"record,omitempty"`
 	Warnings []string    `json:"warnings,omitempty"`
 	Message  string      `json:"message"`
+	// Forecast is what the scheduler forecasts for the job with the
+	// edits, beside it without them, as the farm first answered the call;
+	// none when it could not answer at once (then the job's plan.forecast
+	// has it after the next tick).
+	Forecast *api.PlanForecast `json:"forecast,omitempty"`
 }
 
 // plan is c4_plan.
@@ -134,11 +139,18 @@ func (c *Client) plan(ctx context.Context, _ *mcp.CallToolRequest, in PlanIn) (*
 	// comes back with its index
 	path := "/jobs/" + url.PathEscape(ns) + "/" + url.PathEscape(name) + "/plan"
 	var ans api.PlanResponse
+	// The first answer's forecast is the dry run of these edits, beside
+	// the job without them; once applied the farm forecasts the job as it
+	// is, with nothing to compare.
+	var fc *api.PlanForecast
 	applied := time.Now().Add(agentAddedWithin)
 	for {
 		ans = api.PlanResponse{}
 		if err := c.do(ctx, "POST", path, req, &ans); err != nil {
 			return nil, none, err
+		}
+		if fc == nil || fc.Before == nil && ans.Forecast != nil {
+			fc = ans.Forecast
 		}
 		if ans.State != "pending" || !time.Now().Before(applied) {
 			break
@@ -152,7 +164,13 @@ func (c *Client) plan(ctx context.Context, _ *mcp.CallToolRequest, in PlanIn) (*
 	if ans.State == "refused" {
 		return nil, none, fmt.Errorf("the farm refused the plan, and made none of its edits: %s", ans.Error)
 	}
-	out := PlanOut{Job: in.Job, State: ans.State, Record: ans.Record, Warnings: warnings, Message: ans.Message}
+	out := PlanOut{Job: in.Job, State: ans.State, Record: ans.Record, Warnings: warnings, Message: ans.Message, Forecast: fc}
+	switch {
+	case fc != nil && fc.Change != "":
+		out.Message = strings.TrimSuffix(out.Message, "; "+api.ForecastLater) + "; " + fc.Change
+	case fc == nil && strings.HasSuffix(out.Message, api.ForecastLater):
+		out.Message += ": c4_get_job reads it, in the job's plan.forecast"
+	}
 	for _, u := range ans.Units {
 		out.Units = append(out.Units, AgentUnit{Name: u.Name, Index: u.Index, Ref: in.Job + "/" + u.Name})
 	}

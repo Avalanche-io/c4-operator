@@ -89,3 +89,65 @@ func TestPlanTool(t *testing.T) {
 		t.Fatal("a refused call was sent")
 	}
 }
+
+// c4_plan answers with the farm's first forecast of the call, the job
+// before its edits and with them, and says the change; once applied the
+// farm forecasts the job as it is, with nothing to compare. When the farm
+// could not forecast at once, the answer says where to read it after the
+// next tick, and c4_get_job gives the job's latest.
+func TestPlanToolForecast(t *testing.T) {
+	repo, _ := leadRepo(t)
+	t.Setenv("CLAUDE_CONFIG_DIR", t.TempDir())
+	t.Setenv("CLAUDE_PID", "")
+	t.Setenv("CLAUDE_CODE_SESSION_ID", "aaaaaaaa-0000-4000-8000-000000000001")
+	t.Setenv("CLAUDE_PROJECT_DIR", repo)
+	t.Setenv("C4_AGENT_BLOCK", "")
+	change := "withdrawing docs brings ready to Mon 14:20 UTC, 40 min earlier (p90 Mon 15:05 UTC)"
+	first := &api.PlanForecast{Before: &api.PlanEstimate{}, After: api.PlanEstimate{NoHistory: true}, Change: change}
+	applied := &api.PlanForecast{Change: "withdrawing docs, applied: ready Mon 14:25 UTC"}
+	var answers []api.PlanResponse
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			json.NewEncoder(w).Encode(map[string]any{"name": "lead-1a2b3c4d5e", "plan": api.LeadPlan{Edits: 1, Forecast: applied}})
+			return
+		}
+		ans := answers[0]
+		if len(answers) > 1 {
+			answers = answers[1:]
+		}
+		json.NewEncoder(w).Encode(ans)
+	}))
+	defer srv.Close()
+	c := &Client{Base: srv.URL}
+	ctx := context.Background()
+	in := PlanIn{Job: "show-a/lead-1a2b3c4d5e", Edits: []PlanEditIn{{Withdraw: &api.PlanWithdraw{Unit: "docs", Why: "the parser documents itself"}}}}
+
+	answers = []api.PlanResponse{{State: "pending", Message: "lead-1a2b3c4d5e: plan to be applied", Forecast: first},
+		{State: "applied", Message: "lead-1a2b3c4d5e: plan applied", Forecast: applied}}
+	_, out, err := c.plan(ctx, nil, in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Forecast == nil || out.Forecast.Before == nil || !out.Forecast.After.NoHistory || out.Message != "lead-1a2b3c4d5e: plan applied; "+change {
+		t.Fatalf("the answer: %+v", out)
+	}
+
+	// No forecast at first: the applied one, and its change.
+	answers = []api.PlanResponse{{State: "pending", Message: "lead-1a2b3c4d5e: plan to be applied; " + api.ForecastLater},
+		{State: "applied", Message: "lead-1a2b3c4d5e: plan applied", Forecast: applied}}
+	if _, out, err = c.plan(ctx, nil, in); err != nil || out.Forecast == nil || out.Forecast.Before != nil || out.Forecast.Change != applied.Change ||
+		out.Message != "lead-1a2b3c4d5e: plan applied; "+applied.Change {
+		t.Fatalf("applied only: %v %+v", err, out)
+	}
+
+	// None at all: read it after the next tick.
+	answers = []api.PlanResponse{{State: "applied", Message: "lead-1a2b3c4d5e: plan applied; " + api.ForecastLater}}
+	if _, out, err = c.plan(ctx, nil, in); err != nil || out.Forecast != nil ||
+		out.Message != "lead-1a2b3c4d5e: plan applied; "+api.ForecastLater+": c4_get_job reads it, in the job's plan.forecast" {
+		t.Fatalf("none: %v %+v", err, out)
+	}
+	_, job, err := c.getJob(ctx, nil, GetJobIn{JobRef: JobRef{Namespace: "show-a", Name: "lead-1a2b3c4d5e"}})
+	if err != nil || job.Plan == nil || job.Plan.Forecast == nil || job.Plan.Forecast.Change != applied.Change {
+		t.Fatalf("c4_get_job: %v %+v", err, job.Plan)
+	}
+}

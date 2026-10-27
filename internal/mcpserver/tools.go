@@ -153,7 +153,7 @@ func Tools(c *Client) []Tool {
 			idempotent, c.steer),
 		tool("c4_agent", "Start workers on the farm", "Start a worker, or several at once (workers), as you would start subagents: the farm runs each as a fresh Claude Code session from its brief alone (it sees nothing of this conversation), on a branch of its own from your HEAD (base), in your own job, which the first call makes and later calls add to. It waits up to 3 minutes and returns each worker's result: its summary in its own words, its branch, how it ended, or the question it stopped on (answer with c4_supply). Workers still running come back with their units: wait for them with c4 farm wait as a background command. background answers at once. Commit what the workers need first: they start from a commit. Only a lead, a person's own session, starts workers; a worker cannot.",
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.agent),
-		tool("c4_plan", "Plan ahead in your job", "Plan your job ahead and change the plan as you learn, in one call of edits applied together (or none, if the farm refuses one, in its words): add a planned worker (held: it does not run until a release names it; work is your estimate), split a unit that has not started into several or merge several into one (whatever followed them follows the replacements), withdraw one with why, release held ones, give the order among your ready units, or add or remove an edge (to runs after from). A unit keeps its index: a replaced or withdrawn one stays in the job as withdrawn, naming what replaced it. A running unit is not changed: steer it (c4_steer). job is the one c4_agent returned; units are named by name or index. Signed and recorded in the book. Only a lead plans; a worker cannot.",
+		tool("c4_plan", "Plan ahead in your job", "Plan your job ahead and change the plan as you learn, in one call of edits applied together (or none, if the farm refuses one, in its words): add a planned worker (held: it does not run until a release names it; work is your estimate), split a unit that has not started into several or merge several into one (whatever followed them follows the replacements), withdraw one with why, release held ones, give the order among your ready units, or add or remove an edge (to runs after from). A unit keeps its index: a replaced or withdrawn one stays in the job as withdrawn, naming what replaced it. A running unit is not changed: steer it (c4_steer). job is the one c4_agent returned; units are named by name or index. It answers with the forecast, before the edits and with them: when the plan is ready (p50, p90) against its deadline, its critical path, how many workers can run at once on your machines, and each unit with no history yet and where its estimate comes from (agent-env: the same agent environment and tool; work: your estimate; class-default: a guess). Signed and recorded in the book. Only a lead plans; a worker cannot.",
 			&mcp.ToolAnnotations{DestructiveHint: boolPtr(false), OpenWorldHint: boolPtr(false)}, c.plan),
 		tool("c4_close_lead", "Close your lead job", "Close the job c4_agent made for this session: it takes no more workers and finishes once its workers have. The next c4_agent makes a new job. The farm also closes an idle one after a day. Signed and recorded in the book.",
 			idempotent, c.closeLead),
@@ -437,6 +437,8 @@ type GetJobOut struct {
 	Waits  []api.Wait  `json:"waits,omitempty"`
 	Needs  []api.Needs `json:"needs,omitempty"`
 	Steers []api.Steer `json:"steers,omitempty"`
+	// Plan is a lead's job's plan, with its latest forecast.
+	Plan *api.LeadPlan `json:"plan,omitempty"`
 }
 
 func (c *Client) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobIn) (*mcp.CallToolResult, GetJobOut, error) {
@@ -455,7 +457,7 @@ func (c *Client) getJob(ctx context.Context, _ *mcp.CallToolRequest, in GetJobIn
 	out := GetJobOut{Job: row(j), Objective: asMap(d["objective"]), Estimate: asMap(d["estimate"]),
 		HeavyRegions: asMaps(d["heavyRegions"]), Inputs: asMaps(d["inputs"]), UnitStates: asMap(d["unitStates"]),
 		Pools: j.Pools, DependsOn: j.DependsOn, Blacklist: j.Blacklist, Work: j.Work,
-		Waits: j.Waits, Needs: j.Needs, Steers: j.Steers}
+		Waits: j.Waits, Needs: j.Needs, Steers: j.Steers, Plan: j.Plan}
 	if o := asMap(d["output"]); len(o) > 0 {
 		out.Output = o
 	}
