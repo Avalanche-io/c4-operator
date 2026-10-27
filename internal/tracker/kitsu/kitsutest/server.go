@@ -717,7 +717,9 @@ func (s *Server) putEntity(id string, body []byte, who *Person) (any, *apiErr) {
 	if !s.inTeam(who, e.ProjectID) {
 		return nil, forbidden()
 	}
-	if !manager(who) && who.Role != "supervisor" {
+	// a supervisor writes only its own department's descriptors on a
+	// site; the shot's spend is a manager's write
+	if !manager(who) {
 		return nil, forbidden()
 	}
 	var in struct {

@@ -383,8 +383,10 @@ job does afterwards.
   `statusOut.fieldSeconds`: the total of every C4 job on the shot (or
   asset), every version, in the shot's data, which Kitsu merges, so
   nothing else there is touched. A production manager shows it with a
-  Shot metadata descriptor (a number) of that name. Never the task's own,
-  which is one person's.
+  Shot metadata descriptor (a number) of that name, and the bot writes it
+  with the manager role setup gives it. Each of the shot's tasks writes
+  the same total, at most every `statusOut.fieldSeconds`. Never the
+  task's own, which is one person's.
 - **Bids.** A task's `estimation` is in minutes; a forecast rule sizes by
   it (`forecast: {field: estimation, perUnit: "0.05"}`).
 - **Text.** Kitsu posts a comment again on a shot's other tasks when it
