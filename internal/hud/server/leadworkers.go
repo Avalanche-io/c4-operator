@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"path"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -131,6 +132,19 @@ func (s *Server) handleLeadWorkers(w http.ResponseWriter, r *http.Request) {
 	owner := s.ownerFor(r.Context(), v)
 	open, n := openLeadJob(m, req.Project, owner, session)
 	if open == nil {
+		// made a moment ago, before the HUD's picture caught up: the job
+		// this call would make, read from the API server, is the one
+		if j, err := s.liveJob(r.Context(), pl.Namespace, leadJobName(owner, session, n)); err == nil &&
+			j.Annotations[c4v1.AnnotationLeadSession] == session && j.Annotations[c4v1.AnnotationOwner] == owner && closedRefusal(j) == "" {
+			open = j
+		}
+	}
+	if open == nil {
+		if msg := afterOutside(req); msg != "" {
+			// the call makes the job: there is nothing earlier to follow
+			fail(w, http.StatusUnprocessableEntity, "%s", msg)
+			return
+		}
 		out, code, err := s.makeLeadJob(r, v, m, pl, req, owner, session, n)
 		var te takenError
 		if !errors.As(err, &te) {
@@ -341,6 +355,28 @@ func (s *Server) makeLeadJob(r *http.Request, v *api.Viewer, m *model, pl *autho
 	return resp, http.StatusCreated, nil
 }
 
+// afterOutside says which worker of a call follows a name that is none of
+// the call's workers ("" when none does): on the call that makes the
+// lead's job, there are no earlier workers, so it is a mistake to say.
+func afterOutside(req api.LeadWorkersRequest) string {
+	names := map[string]bool{}
+	for i, w := range req.Workers {
+		n := w.Name
+		if n == "" {
+			n = workerName(w.Description, req.Key, i)
+		}
+		names[n] = true
+	}
+	for i, w := range req.Workers {
+		for _, a := range w.After {
+			if !names[a] {
+				return fmt.Sprintf("workers[%d].after: %s is not a worker of this call, and this lead has no job yet, so no earlier worker to wait for", i, a)
+			}
+		}
+	}
+	return ""
+}
+
 // leadUnits are the workers of the call that made a lead's job, at the
 // indexes its table gave them.
 func leadUnits(req api.LeadWorkersRequest) []api.AppendedUnit {
@@ -363,13 +399,27 @@ func (s *Server) addLeadWorkers(r *http.Request, v *api.Viewer, j *c4v1.WorkJob,
 		return none, http.StatusInternalServerError, errors.New("the lead's workers did not lower to one table")
 	}
 	var table struct {
-		Units json.RawMessage `json:"units"`
+		Units []class.DocUnit `json:"units"`
 	}
-	if err := json.Unmarshal(pl.Jobs[0].Table, &table); err != nil {
+	if err := json.Unmarshal(pl.Jobs[0].Table, &table); err != nil || len(table.Units) != len(req.Workers) {
+		return none, http.StatusInternalServerError, fmt.Errorf("the lead's workers lowered to %d units, not %d: %v", len(table.Units), len(req.Workers), err)
+	}
+	// Lowering keeps only the edges between this call's workers; the ones
+	// to the job's earlier workers go back on, and the queue resolves them
+	// against the job as it does any expansion's.
+	for i, w := range req.Workers {
+		for _, a := range w.After {
+			if !slices.Contains(table.Units[i].After, a) {
+				table.Units[i].After = append(table.Units[i].After, a)
+			}
+		}
+	}
+	units, err := json.Marshal(table.Units)
+	if err != nil {
 		return none, http.StatusInternalServerError, err
 	}
 	// the turn is already on each unit, as on the job's first workers
-	ans, code, err := s.appendUnits(r.Context(), r, v, j.Namespace, j.Name, api.AppendUnitsRequest{Units: table.Units, Key: req.Key})
+	ans, code, err := s.appendUnits(r.Context(), r, v, j.Namespace, j.Name, api.AppendUnitsRequest{Units: units, Key: req.Key})
 	if err != nil {
 		return none, code, err
 	}

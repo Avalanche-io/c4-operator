@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -88,7 +89,7 @@ func TestLeadWorkers(t *testing.T) {
 
 	// a later call: its workers are added to the same job
 	next := api.LeadWorkersRequest{Project: "show-a", Root: "/Users/dev/textkit", Key: "call-2", Workers: []api.LeadWorker{
-		{Name: "implement", Description: "Implement the parser", Prompt: "Implement docs/designs/parser.md.", Base: base}}}
+		{Name: "implement", Description: "Implement the parser", Prompt: "Implement docs/designs/parser.md.", Base: base, After: []string{"review-design"}}}}
 	code, msg, body = post(t, s, "/api/v1/lead/workers", "artist", next, leadHeader("session-1"))
 	out = api.LeadWorkersResponse{}
 	_ = json.Unmarshal(body, &out)
@@ -98,6 +99,23 @@ func TestLeadWorkers(t *testing.T) {
 	j = liveJob(t, s, name)
 	if !strings.Contains(j.Annotations[c4v1.AnnotationAppend], `"implement"`) || !strings.Contains(j.Annotations[c4v1.AnnotationAppend], `"call-2"`) {
 		t.Fatalf("the append: %s", j.Annotations[c4v1.AnnotationAppend])
+	}
+	// it waits on the first call's worker: the edge outlives the lowering
+	var reqs []c4v1.WorkAppendRequest
+	if err := json.Unmarshal([]byte(j.Annotations[c4v1.AnnotationAppend]), &reqs); err != nil || len(reqs) != 1 {
+		t.Fatalf("append requests: %v %s", err, j.Annotations[c4v1.AnnotationAppend])
+	}
+	did, _ := c4.Parse(reqs[0].Document)
+	dr, err := st.Open(did)
+	if err != nil {
+		t.Fatalf("the append's document: %v", err)
+	}
+	buf.Reset()
+	_, _ = buf.ReadFrom(dr)
+	dr.Close()
+	var added class.Doc
+	if err := json.Unmarshal(buf.Bytes(), &added); err != nil || len(added.Units) != 1 || !slices.Contains(added.Units[0].After, "review-design") {
+		t.Fatalf("the appended worker's after: %v %s", err, buf.Bytes())
 	}
 	if err := s.Client.List(ctx, &list); err != nil || len(list.Items) != 1 {
 		t.Fatalf("a later call made a job: %v %d", err, len(list.Items))
@@ -116,6 +134,9 @@ func TestLeadWorkers(t *testing.T) {
 		{"no workers", api.LeadWorkersRequest{Project: "show-a", Key: "k"}, leadHeader("session-1"), http.StatusBadRequest, "at least one worker"},
 		{"a ref as base", api.LeadWorkersRequest{Project: "show-a", Key: "k", Workers: []api.LeadWorker{{Description: "x", Prompt: "y", Base: "main"}}},
 			leadHeader("session-2"), http.StatusUnprocessableEntity, "is not a full commit ID"},
+		{"a first call waiting on an earlier worker", api.LeadWorkersRequest{Project: "show-a", Key: "k2", Workers: []api.LeadWorker{
+			{Name: "fix", Description: "x", Prompt: "y", Base: base, After: []string{"review-design"}}}},
+			leadHeader("session-2"), http.StatusUnprocessableEntity, "review-design is not a worker of this call, and this lead has no job yet"},
 	} {
 		if code, msg, _ := post(t, s, "/api/v1/lead/workers", "artist", c.req, c.headers); code != c.code || !strings.Contains(msg, c.want) {
 			t.Errorf("%s: %d %q", c.name, code, msg)

@@ -1251,7 +1251,10 @@ way a submission's plan is, so the farm checks them as any agent work:
   only if it is the person's and the session's.
 - Each worker is a fresh session from its `prompt` alone; `description` is
   what the HUD shows; `name` its unit name (default: from the
-  description, with a mark of the call); `base` the **full** commit ID its
+  description, with a mark of the call); `after` the workers it waits for,
+  of this call or, on a later call, any of the job's (the queue resolves
+  them; on the call that makes the job a name outside it is refused, there
+  being no earlier worker); `base` the **full** commit ID its
   branch starts from (a ref or a short ID is refused); `turn` groups the
   workers under the lead's turn ("turn N").
 - `key` is required: the same key again adds nothing more and answers as
