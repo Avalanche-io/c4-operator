@@ -114,8 +114,9 @@ func (s *Server) planEdits(ctx context.Context, r *http.Request, v *api.Viewer, 
 	if err != nil {
 		return none, http.StatusUnprocessableEntity, err
 	}
+	said := planSaid(req, names)
 	for range 4 {
-		out, code, err := s.planOnce(ctx, r, v, rec, req.Key, doc, names)
+		out, code, err := s.planOnce(ctx, r, v, m, rec, req.Key, doc, names, said)
 		if !apierrors.IsConflict(err) {
 			return out, code, err
 		}
@@ -126,8 +127,9 @@ func (s *Server) planEdits(ctx context.Context, r *http.Request, v *api.Viewer, 
 }
 
 // planOnce is one try of planEdits on the job as it is now; a conflict
-// writing it is returned as the API's, to try again.
-func (s *Server) planOnce(ctx context.Context, r *http.Request, v *api.Viewer, rec *jobRec, key string, doc []byte, names []string) (api.PlanResponse, int, error) {
+// writing it is returned as the API's, to try again. said is what the
+// edits are, in words, for the forecast's change.
+func (s *Server) planOnce(ctx context.Context, r *http.Request, v *api.Viewer, m *model, rec *jobRec, key string, doc []byte, names []string, said string) (api.PlanResponse, int, error) {
 	var none api.PlanResponse
 	j, err := s.liveJob(ctx, rec.job.Namespace, rec.job.Name)
 	if err != nil {
@@ -140,7 +142,7 @@ func (s *Server) planOnce(ctx context.Context, r *http.Request, v *api.Viewer, r
 		return none, http.StatusForbidden, err
 	}
 	reqs := pendingPlans(j)
-	if out, ok := s.plannedBefore(ctx, rec, j, reqs, key); ok {
+	if out, ok := s.plannedBefore(ctx, m, rec, j, reqs, key, said); ok {
 		return out, http.StatusOK, nil
 	}
 	if why := closedRefusal(j); why != "" {
@@ -203,6 +205,12 @@ func (s *Server) planOnce(ctx context.Context, r *http.Request, v *api.Viewer, r
 	out := api.PlanResponse{Record: id, Document: docID, State: "pending", Message: msg}
 	for _, n := range names {
 		out.Units = append(out.Units, api.AppendedUnit{Name: n})
+	}
+	// The job as it is with the calls before this one, and then this one:
+	// a dry run, not waiting for the queue to apply it.
+	var why string
+	if out.Forecast, why = s.planForecast(ctx, m, rec, j, reqs, [][]byte{doc}, said); out.Forecast == nil {
+		out.Message += "; " + why
 	}
 	return out, http.StatusCreated, nil
 }
@@ -450,16 +458,25 @@ func pendingPlans(j *c4v1.WorkJob) []c4v1.WorkPlanRequest {
 }
 
 // plannedBefore answers a call whose key is already listed: pending, or
-// as the queue applied it, with the indexes of the units it added. A call
-// older than status's recent list is found in the stored log.
-func (s *Server) plannedBefore(ctx context.Context, rec *jobRec, j *c4v1.WorkJob, pending []c4v1.WorkPlanRequest, key string) (api.PlanResponse, bool) {
-	for _, r := range pending {
+// as the queue applied it, with the indexes of the units it added, and
+// the forecast: a pending call's as planOnce gives it, an applied one's
+// from the job as it is. A call older than status's recent list is found
+// in the stored log.
+func (s *Server) plannedBefore(ctx context.Context, m *model, rec *jobRec, j *c4v1.WorkJob, pending []c4v1.WorkPlanRequest, key, said string) (api.PlanResponse, bool) {
+	for k, r := range pending {
 		if r.Key != key {
 			continue
 		}
 		out := api.PlanResponse{Record: r.Record, Document: r.Document, State: "pending", Message: fmt.Sprintf("%s: plan to be applied", j.Name)}
 		for _, n := range r.Units {
 			out.Units = append(out.Units, api.AppendedUnit{Name: n})
+		}
+		why := api.ForecastLater
+		if doc, err := s.storedPlan(ctx, rec, r.Document); err == nil {
+			out.Forecast, why = s.planForecast(ctx, m, rec, j, pending[:k], [][]byte{doc}, said)
+		}
+		if out.Forecast == nil {
+			out.Message += "; " + why
 		}
 		return out, true
 	}
@@ -500,6 +517,10 @@ func (s *Server) plannedBefore(ctx context.Context, rec *jobRec, j *c4v1.WorkJob
 	out.Message = fmt.Sprintf("%s: plan applied", j.Name)
 	if len(names) > 0 {
 		out.Message += ", adding " + strings.Join(names, ", ")
+	}
+	var why string
+	if out.Forecast, why = s.planForecast(ctx, m, rec, j, nil, nil, said); out.Forecast == nil {
+		out.Message += "; " + why
 	}
 	return out, true
 }

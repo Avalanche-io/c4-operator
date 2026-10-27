@@ -91,6 +91,96 @@ type PlanResponse struct {
 	State   string `json:"state"`
 	Error   string `json:"error,omitempty"`
 	Message string `json:"message"`
+	// Forecast is what the scheduler forecasts for the job with the edits
+	// applied; none while it cannot be answered at once (Message says the
+	// forecast follows on the next tick, and the job's plan.forecast has
+	// it then), or for a refused call.
+	Forecast *PlanForecast `json:"forecast,omitempty"`
+}
+
+// ForecastLater is what a plan call's answer says when the queue cannot
+// forecast the plan at once.
+const ForecastLater = "the forecast follows on the next tick"
+
+// PlanForecast is what the scheduler forecasts for a lead's job: a dry
+// run of the job with the edits applied, as of the farm's last look
+// (AsOf). A held unit counts as released: it is the plan's forecast.
+type PlanForecast struct {
+	AsOf time.Time `json:"asOf"`
+	// Before is the job before the call's edits and After with them: for
+	// a call the queue has not applied, the job as it is with the calls
+	// before it and then its own; once applied, After is the job as it
+	// is, and there is no Before.
+	Before *PlanEstimate `json:"before,omitempty"`
+	After  PlanEstimate  `json:"after"`
+	// Change says what the edits do to when the plan is ready, against
+	// its deadline, in plain words: "withdrawing docs brings ready to Mon
+	// 14:20 PDT (21:20 UTC), 40 min earlier (p90 Mon 15:05 PDT (22:05
+	// UTC)), 2 h 55 min before its deadline Mon 18:00 PDT (Tue 01:00 UTC)".
+	Change string `json:"change,omitempty"`
+}
+
+// PlanEstimate is one forecast of a lead's job.
+type PlanEstimate struct {
+	// Ready50 and Ready90 are when the plan is ready, at the 50th and
+	// 90th percentile.
+	Ready50 *time.Time `json:"ready50,omitempty"`
+	Ready90 *time.Time `json:"ready90,omitempty"`
+	// Deadline is the deadline it is planned for, and SlackSeconds the
+	// time from Ready90 to it (0 without one, or with NoHistory).
+	Deadline     *time.Time `json:"deadline,omitempty"`
+	SlackSeconds int64      `json:"slackSeconds"`
+	Feasible     bool       `json:"feasible"`
+	AtRisk       bool       `json:"atRisk"`
+	// NoHistory says the estimate rests on the class default: the ready
+	// times are a guess, and Message says the first workers set it.
+	NoHistory bool   `json:"noHistory,omitempty"`
+	Message   string `json:"message,omitempty"`
+	// CriticalPath is the chain of units left whose work decides when the
+	// plan is ready, first first.
+	CriticalPath []PlanUnitEstimate `json:"criticalPath"`
+	// Capacity is how many of its workers can run at once.
+	Capacity PlanCapacity `json:"capacity"`
+	// Unmeasured are its units left with no history of their own in the
+	// job, each with where its estimate comes from (PlanUnitEstimate.From).
+	Unmeasured []PlanUnitEstimate `json:"unmeasured,omitempty"`
+}
+
+// PlanUnitEstimate is one unit of a forecast: its name, its index (none
+// for a unit a call the queue has not applied adds), its predicted time
+// left in seconds, and, for an unmeasured unit, where that comes from:
+// agent-env (the runs of the same agent environment and tool), work (the
+// lead's estimate), estimate (the job's estimateSeconds), history (the
+// class's runs in the project), job-median (the job's other units),
+// profile (the shot's previous version) or class-default (a guess).
+type PlanUnitEstimate struct {
+	Name    string  `json:"name,omitempty"`
+	Index   *int    `json:"index,omitempty"`
+	Seconds float64 `json:"seconds"`
+	From    string  `json:"from,omitempty"`
+}
+
+// PlanCapacity is how many of a lead's job's workers can run at once on
+// the machines and pools it uses.
+type PlanCapacity struct {
+	// Workers is how many can run at once: the slots the scheduler can
+	// give the job, in workers.
+	Workers int `json:"workers"`
+	// Slots are its pools' slots, and Pools the pools.
+	Slots int      `json:"slots"`
+	Pools []string `json:"pools,omitempty"`
+	// Machines are the machines of those pools that run its work, with
+	// their slots, and Power why a machine's slots are lowered, where it
+	// says ("power: 38 of 40 W, battery 48% on a 39 W adapter").
+	Machines []PlanMachine `json:"machines,omitempty"`
+}
+
+// PlanMachine is one machine a lead's job runs on.
+type PlanMachine struct {
+	Name  string `json:"name"`
+	Pool  string `json:"pool"`
+	Slots int    `json:"slots"`
+	Power string `json:"power,omitempty"`
 }
 
 // LeadPlan is what a lead's edits to its job's plan did (Job.Plan).
@@ -107,6 +197,10 @@ type LeadPlan struct {
 	// Order is each ordered unit's key, "index:key" pairs: among the
 	// job's ready units the lower key runs first.
 	Order string `json:"order,omitempty"`
+	// Forecast is the latest forecast of the plan, the job as it is with
+	// the calls the queue has not applied yet: on the job's detail (GET
+	// /jobs/{ns}/{name}) only, when the queue answers at once.
+	Forecast *PlanForecast `json:"forecast,omitempty"`
 }
 
 // PlanCall is one call applied: it added Units units from First, or was

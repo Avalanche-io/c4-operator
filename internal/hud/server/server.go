@@ -124,6 +124,9 @@ type Server struct {
 	// DryRunAll plans a submission's jobs together (POST /submissions);
 	// nil plans each alone with DryRun.
 	DryRunAll DryRunAllFunc
+	// PlanForecast forecasts a lead's job with its plan calls applied
+	// (POST /jobs/{ns}/{name}/plan); nil answers none.
+	PlanForecast PlanForecastFunc
 	// AgentEnv is the version (C4 ID) of the agent environment blocks
 	// run in by default ($C4_AGENT_ENV); "" sets none.
 	AgentEnv string

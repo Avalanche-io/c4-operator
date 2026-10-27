@@ -65,7 +65,20 @@ func (s *Server) handleJob(w http.ResponseWriter, r *http.Request) {
 	if rec == nil {
 		return
 	}
-	writeJSON(w, http.StatusOK, s.jobDetail(m, rec))
+	out := s.jobDetail(m, rec)
+	if rec.job.Annotations[c4v1.AnnotationLeadSession] != "" && s.PlanForecast != nil {
+		// A lead's job carries its plan's latest forecast: the job as it
+		// is with the calls the queue has not applied yet (planforecast.go).
+		if f, _ := s.planForecast(r.Context(), m, rec, &rec.job, pendingPlans(&rec.job), nil, ""); f != nil {
+			p, _ := out["plan"].(map[string]any)
+			if p == nil {
+				p = map[string]any{}
+			}
+			p["forecast"] = f
+			out["plan"] = p
+		}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // jobDetail is GET /jobs/{ns}/{name}: the summary plus the job view's
