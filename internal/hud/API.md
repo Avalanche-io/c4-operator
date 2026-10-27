@@ -293,7 +293,7 @@ the viewer's scope (1 is next).
 | `steers`                              | the latest messages sent to the job's units while they ran (DESIGN 10.6, steering): `seq` numbers a unit's messages, `delivered` is when one reached a pod of the unit, `seen` that the unit read it                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
 | `needs`                               | the units that stopped because their brief lacked information only a person could give (an error that can heal, not a question): what each asked for, why and what about. `state` is `raised` (the rest of the job runs on), `pressing` (urgent: `pressingWhy` says why, from the plan or its age), `supplied` (`supplied` is the text, `by` who: a person or `unit:<ns>/<job>/<unit>`, the job's answerer) or `withdrawn` (`withdrawn.by` who, and why: by default the asking unit, on a re-check, or one of the people who may control the job). `answerBy` is the latest an answer can come with the job on time. `rechecks` (model units only) are the block's re-checks of its question, `usedUp` once all have run. An open one is an incident (`needsinformation`, `severity` warning, urgent once pressing) whose steps supply or withdraw it `for` is whose question it is: `lead:<session>` on a lead's job that its lead answers (`spec.answers.by: lead`), else `person:<owner>`                                                             |
 | `lead`                                | a lead's job (`c4.avalanche.io/lead-session`): `state` is `Working` (it has workers to run), `Idle` (every worker has ended: nothing to place, the job stays `Running`, waiting for its lead, and closes by itself at `closesAt`, `idleSince` plus the farm's idle close, if none is added) or `Closed` (`closed` says when, `by` whom, the person, their lead's agent or `c4` for the farm, and `why`, with the request's `control` record and the queue's `record`). The job's `Open` condition says the same in words                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-| `plan`                                | a lead's edits to its job's plan (`c4_plan`, `POST /jobs/{ns}/{name}/plan`): `edits` counts the calls applied; `recent` are the latest 16 (`first` and `units`: the indexes a call added; `error`: why the queue refused it, making none of its edits), and `log` the C4 ID of the stored log of every call; `withdrawn` says, for the newest 256 withdrawn units, why and which units replace them (`replacements`, an index set; none for a plain withdraw) and the call (`edit`); `order` is each ordered unit's key (`index:key` pairs): among the job's ready units the lower key runs first, units without one after them, and the longer chain of work after a unit breaks a tie                                                                                                                                                                                                                                                                                                                                                                  |
+| `plan`                                | a lead's edits to its job's plan (`c4_plan`, `POST /jobs/{ns}/{name}/plan`): `edits` counts the calls applied; `recent` are the latest 16 (`first` and `units`: the indexes a call added; `error`: why the queue refused it, making none of its edits), and `log` the C4 ID of the stored log of every call; `withdrawn` says, for the newest 256 withdrawn units, why and which units replace them (`replacements`, an index set; none for a plain withdraw) and the call (`edit`); `order` is each ordered unit's key (`index:key` pairs): among the job's ready units the lower key runs first, units without one after them, and the longer chain of work after a unit breaks a tie; on the job's detail, `forecast` is the plan's latest forecast, as `POST /jobs/{ns}/{name}/plan` answers it (none while the queue cannot answer at once)                                                                                                                                                                                                         |
 | `branches`                            | the git branches the job's blocks worked on, one per unit, from `status.unitBranches`: a block on a host works in its own worktree of the developer's repository (`repo`, on the machine that ran it), on `branch` from `base` to `head`, and its `commits` are its output. The latest attempt's record is kept, and stays after the unit's pods are gone, so `c4 farm get` prints it. A unit that ran in a container has none yet                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `causes`                              | the job's failures and flags grouped by cause, newest last (status.causes): `{ kind, key, title, units, count, sample, first, last, nodes?, did?, to? }`. `kind` is `exit` (a unit's code, reason and first message line), `node` (a node that failed units up to the job's limit, kept off it), `verdict` (a review's reason) or `needs`; `did` is what the farm did (`retried`, `failed`, `blacklisted`, `reworked`, `escalated`, `accepted`). Failed jobs' incidents are grouped by the latest cause whose units failed                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `asks`                                | the latest questions the job's units asked one another (`c4-unit ask`; `id` is `<unit>#<n>`, or `w<unit>` for a wait unit served by a unit), from and to unit indexes (`to` -1 when none could answer), and the `answer` or why it `cannot` be answered, once `answered`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
@@ -1145,7 +1145,12 @@ all, so a lead plans ahead and changes the plan as it learns.
 unit: { worker: { name?, description, prompt, agent?, model?, effort?, base?, after? }, work? }
     | { unit: { name, after?, work?, env?, inputs?, ... } }   // an expansion document's unit
 ->
-{ units?: [ { name, index? } ], record, document, state, error?, message }
+{ units?: [ { name, index? } ], record, document, state, error?, message,
+  forecast?: { asOf, before?: estimate, after: estimate, change? } }
+estimate: { ready50?, ready90?, deadline?, slackSeconds, feasible, atRisk, noHistory?, message?,
+            criticalPath: [ { name?, index?, seconds } ],
+            capacity: { workers, slots, pools?, machines?: [ { name, pool, slots, power? } ] },
+            unmeasured?: [ { name?, index?, seconds, from } ] }
 ```
 
 Each edit gives exactly one of its fields; a `ref` names a unit by its name
@@ -1200,6 +1205,53 @@ appends in their order. Hundreds of calls keep status small.
 the farm's words, and it made none of the edits). The same `key` again
 answers `200` with the state now, listing nothing more; a call older than
 status's latest 16 is found in the stored log.
+
+**The forecast answers.** Every answer carries what the scheduler now
+forecasts for the job with the edits applied (`forecast`), without
+waiting for the queue to apply them. It is a dry run, the machinery a
+submission's plan uses before submit: the job as the queue's last tick
+left it, with the calls it has not applied yet and then this one, planned
+against the farm as that tick saw it (`asOf`), writing and signing
+nothing. `after` is the job with the call's edits and `before` without
+them; once the call is applied, `after` is the job as it is and there is
+no `before`. A held unit counts as released: it is the plan's forecast,
+so a planned unit moves it when it is added, not when it is released.
+Each estimate says:
+
+- **when the plan is ready**, `ready50` and `ready90`, against the
+  `deadline` it is planned for (`slackSeconds` from `ready90`);
+- **its critical path**, `criticalPath`: the chain of units left whose work
+  decides it, first first, each with its name, its index (none for a unit
+  a call the queue has not applied adds) and its time left in seconds;
+- **how many workers can run at once**, `capacity`: `workers`, the slots
+  the scheduler can give the job in workers, and `slots`, its `pools`'
+  slots; `machines` are the ready machines of those pools that run its
+  person's work (a host runner's only when they are one of its owners),
+  each with its slots and, where its slots are lowered, `power`, its words
+  for why ("power: 38 of 40 W, battery 48% on a 39 W adapter");
+- **every unit with no estimate**, `unmeasured`: each unit left whose kind
+  nothing in the job has measured yet, with its time left and `from`,
+  where that comes from. Agent work has no shot: a worker is estimated
+  from the runs of the same agent environment and tool (`agent-env`: its
+  `C4_AGENT_ENV` version and its tool, each finished block's run time kept
+  under that key in the project's calibrations, the farm's tool tests
+  excepted), then from the lead's `work` (`work`), then from its class:
+  `history` (the class's runs in the project) or `class-default`, a guess.
+  `estimate` is the job's `estimateSeconds`, `job-median` its other units'
+  times, `profile` a shot's previous version. While a guess decides the
+  estimate, `noHistory` is set and `message` says "no history yet: the
+  first workers set the estimate", in place of a slack.
+
+`change` says what the edits do, in plain words, local time with UTC
+beside it: "withdrawing docs brings ready to Mon 14:20 PDT (21:20 UTC), 40
+min earlier (p90 Mon 15:05 PDT (22:05 UTC)), 2 h 55 min before its
+deadline Mon 18:00 PDT (Tue 01:00 UTC)"; an applied call's says "adding
+parse, applied: ready ...". When the queue cannot answer at once (a tick
+holds it past a moment, or it has not planned the job yet) there is no
+`forecast`, and `message` ends "the forecast follows on the next tick";
+the job's detail (`GET /jobs/{ns}/{name}`) then carries the latest in
+`plan.forecast`, the job as it is with the calls not applied yet. A
+refused call has none.
 
 A lead's job whose units left are all held, or wait on held ones, is idle
 (`lead.state` `Idle`, "every worker left is planned and held: nothing to

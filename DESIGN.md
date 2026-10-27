@@ -1679,6 +1679,33 @@ and a sweep planner that spawns trials are all generators.
     expansions and appends applied before it; a restart reads it and
     replays the calls among them in the order they were applied, and
     applies no key twice. Unit states gain `held` and `withdrawn`.
+  - **The forecast answers.** Every call answers with what the scheduler
+    now forecasts for the job with its edits applied, beside the job
+    without them, and the change in plain words ("withdrawing docs brings
+    ready to Mon 14:20 PDT (21:20 UTC), 40 min earlier ..."): when the
+    plan is ready (p50, p90) against its deadline, its critical path by
+    name and index, how many of its workers can run at once on the
+    machines and pools it uses (slots, and power where a machine says
+    it), and every unit with no history of its own in the job, with where
+    its estimate comes from. It is a dry run, the machinery a
+    submission's plan uses before submit: the job as the last tick left
+    it, with the calls the queue has not applied yet and then this one,
+    planned against the farm as that tick saw it and answered "as of"
+    then; it does not wait for the queue to apply the call. Once applied,
+    the forecast is the job's. A held unit counts as released, so a
+    planned unit moves the forecast when it is added. When the queue
+    cannot answer at once (a tick holds it), the answer says the forecast
+    follows on the next tick, and the job's detail carries the latest.
+  - **Agent work's estimate key.** Agent work has no shot. A unit with no
+    history of its own in its job is estimated from the runs of the same
+    agent environment and tool (its `C4_AGENT_ENV` version and its tool,
+    `C4_BLOCK_PROFILE`), then from its lead's `work`, then from its class,
+    and the forecast says which (`agent-env`, `work`, `history`,
+    `class-default`). Each finished block's run time is kept under that
+    key beside its class's, in the project's calibrations, so the next
+    lead's plan has history; the farm's tool tests leave none, as they
+    leave no class history. While the class default decides the estimate
+    the answer says "no history yet: the first workers set the estimate".
 - **Rounds:** iteration that is
   not spelled as nesting. A generator may be a bounded loop:
   `rounds: {max, until?}` on a planned unit of a document, or the job params
