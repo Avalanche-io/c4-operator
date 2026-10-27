@@ -1701,10 +1701,13 @@ and a sweep planner that spawns trials are all generators.
     agent environment and tool (its `C4_AGENT_ENV` version and its tool,
     `C4_BLOCK_PROFILE`), then from its lead's `work`, then from its class,
     and the forecast says which (`agent-env`, `work`, `history`,
-    `class-default`). Each finished block's run time is kept under that
-    key beside its class's, in the project's calibrations, so the next
-    lead's plan has history; the farm's tool tests leave none, as they
-    leave no class history. While the class default decides the estimate
+    `class-default`). The history is the key's, shared by every block of
+    that environment and tool; a lead's `work` is each unit's own, so two
+    workers of one tool with different `work` are priced apart until
+    their environment has history. Each finished block's run time is kept
+    under that key beside its class's, in the project's calibrations, so
+    the next lead's plan has history; the farm's tool tests leave none, as
+    they leave no class history. While the class default decides the estimate
     the answer says "no history yet: the first workers set the estimate".
 - **Rounds:** iteration that is
   not spelled as nesting. A generator may be a bounded loop:
