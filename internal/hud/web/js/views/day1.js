@@ -13,7 +13,7 @@ import { h } from '../dom.js';
 import * as f from '../fmt.js';
 import { get } from '../api.js';
 import { glance } from '../../design/components/core.js';
-import { jobWords, fromTracker, ended } from '../../design/components/words.js';
+import { jobWords, fromTracker, ended, asksOf } from '../../design/components/words.js';
 import { markEl } from '../../design/components/marks.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
 import { decisions } from './controls.js';
@@ -99,12 +99,14 @@ function agentGlance(j) {
 // agentWords: an agent bundle in its own words: working, or paused at a
 // turn's end for capacity, or waiting for your answer
 function agentWords(j) {
-  const open = (j.needs || []).filter((n) => !n.supplied && !n.withdrawn);
+  const { mine: open, lead } = asksOf(j);
   const run = j.units ? j.units.running || 0 : 0;
   if (open.length) {
     const p = open.some((n) => n.state === 'pressing');
     return { word: run ? `working · ${open[0].name || 'an agent'} waits for your answer` : 'waits for your answer', cls: p ? 't-temp' : 't-risk', why: '' };
   }
+  // asked its lead: the lead's to answer, so plain ink, never yours
+  if (lead.length) return { word: run ? `working · ${lead[0].name || 'an agent'} asked its lead` : 'waits on its lead', cls: '', why: '' };
   if (j.phase === 'Running') return { word: `working${j.units.total > 1 ? ` · ${run} of ${j.units.total} agents` : ''}`, cls: 't-run', why: '' };
   if (/checkpoint/.test((j.estimate || {}).noEta || '')) return { word: "paused at a turn's end", cls: '', why: '· resumes from its checkpoint when capacity returns' };
   return null;
@@ -116,7 +118,9 @@ const isAgent = (j) => j.driver === 'agent';
 function memberWord(j, u) {
   if (u.state === 'succeeded') return 'done';
   if (u.state === 'running' || u.state === 'preflight') return 'working';
-  if (u.state === 'needs' || (j.needs || []).some((n) => n.unit === u.i && !n.supplied && !n.withdrawn)) return 'asks you';
+  const { mine, lead } = asksOf(j);
+  if (lead.some((n) => n.unit === u.i)) return 'asks its lead';
+  if (u.state === 'needs' || mine.some((n) => n.unit === u.i)) return 'asks you';
   if (u.state === 'failed') return 'needs you';
   return (u.attempts || u.epoch) || /checkpoint/.test((j.estimate || {}).noEta || '') ? 'paused' : 'queued';
 }

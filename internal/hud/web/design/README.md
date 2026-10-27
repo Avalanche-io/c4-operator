@@ -58,7 +58,7 @@ the URL, else the stored preference, else the system's; a change fires
 `c4:scheme` and the canvases redraw. Captures name the scheme, since
 headless Chrome prefers light.
 
-**The rule (Joshua).** A hue is a state family. A pale (dim) tint means
+**The rule.** A hue is a state family. A pale (dim) tint means
 that state is true, but there is mitigating context worth showing. Pale
 green: the frames are done, but not yet in your output folder because they
 are still copying. Pale blue: the rendering family, still in preflight. Pale
@@ -67,12 +67,12 @@ failure a person has acknowledged, or accepted (bad frames accepted so the
 job is not blocked), so nobody has to act now. Pale orchid: at risk, not late
 yet. A new edge case takes the pale of its family's hue, never a new hue.
 Every state also has a shape, so none rests on color alone. Approved by
-Joshua (see
+the maintainer (see
 [docs/intro/palette/state-colors.html](../../docs/intro/palette/state-colors.html)).
 The table lists today's cases; they are examples of the rule, not its
 definition.
 
-**Orange: something is wrong, and it may still resolve itself (Joshua).**
+**Orange: something is wrong, and it may still resolve itself.**
 A retry may fix a frame; another agent's work may answer a question. Either
 may also turn permanent: the frame fails (red), or the question must be
 answered. So a question a unit stopped for is drawn in the hue of a
@@ -90,9 +90,9 @@ leaves.
 opacity over the ground (`color-mix(in srgb, var(--done) 48%,
 var(--ground))`, exactly what a 48% alpha composites to), so the same rule
 reads on black and on white. On the dark field it lands within ΔE 1.1 of
-the dim tints Joshua approved (#276639, #294b80, #824e22, #77251e, #593652).
+the dim tints the maintainer approved (#276639, #294b80, #824e22, #77251e, #593652).
 
-**The translation rule: one set of rules, two schemes** (light: approved by Joshua on
+**The translation rule: one set of rules, two schemes** (light: approved by the maintainer on
 2026-10-18, next to the dark scheme's approval). The light scheme inverts fills and lines: white
 ground, black ink, the same hues.
 

@@ -1,7 +1,7 @@
 // C4ID: the HUD's C4 ID mark, a thin wrapper around the c4-mark package
 // (vendored, pinned: design/vendor/c4-mark, hack/sync-c4-mark.sh).
 //
-// A C4 ID shows as the c4 logo in corner brackets (Joshua's pick, F), in
+// A C4 ID shows as the c4 logo in corner brackets (the maintainer's pick, F), in
 // ink: an ID is verification metadata, not a state (design/README.md).
 // Hover or focus shows c4… and the ID's last eight characters, with the full
 // ID in the tooltip; click, Enter or Space copies it; on touch a tap shows

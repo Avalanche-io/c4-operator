@@ -97,6 +97,17 @@ const PHASE = { Queued: 'queued', Running: 'rendering', Blocked: 'blocked on', H
 // (<tool>-farmtest-<hex>): the farm's setup, never a person's work
 export const farmCheck = (j) => !!(j && j.toolTest);
 
+// yours: whether a job's open question is the person's to answer. One a
+// unit asked its lead (for: lead:<session>) is the lead's while only
+// raised; it becomes the person's once pressing, or once the lead's job has
+// closed, as the farm's Needs you has it.
+export const yours = (j, n) => !String(n.for || '').startsWith('lead:') || n.state === 'pressing' || !!(j && j.lead && j.lead.closed);
+// asksOf: a job's open questions, split into the person's and its lead's
+export function asksOf(j) {
+  const open = ((j && j.needs) || []).filter((n) => !n.supplied && !n.withdrawn);
+  return { mine: open.filter((n) => yours(j, n)), lead: open.filter((n) => !yours(j, n)) };
+}
+
 // ended: a job nothing more runs for. Succeeded, or Failed: its spent
 // units wait on a person (requeue or accept, in Needs you), and the job is
 // no longer working or waiting. Either belongs with the finished jobs.
@@ -112,8 +123,10 @@ export function jobWords(j) {
   const short = (k) => String(k).split('/').pop();
   if (j.phase === 'Blocked') return { word: 'blocked on', cls: '', why: (j.dependsOn || []).map(short).join(', ') || 'earlier work' };
   // held on an open question, not by a person: it waits on the answer
-  const asks = (j.needs || []).filter((n) => !n.supplied && !n.withdrawn);
+  const { mine: asks, lead: leadAsks } = asksOf(j);
   if (j.phase === 'Held' && asks.length) return { word: 'waits on a question', cls: asks.some((n) => n.state === 'pressing') ? 't-temp' : 't-risk', why: '' };
+  // a question its lead answers is the lead's: plain ink, never yours
+  if (j.phase === 'Held' && leadAsks.length) return { word: 'waits on its lead', cls: '', why: '' };
   if (j.phase === 'Held') return { word: 'held', cls: 't-magenta', why: '' };
   const open = (j.waits || []).filter((w) => !w.do);
   const run = j.units ? (j.units.running || 0) + (j.units.retrying || 0) + (j.units.preflight || 0) : 0;

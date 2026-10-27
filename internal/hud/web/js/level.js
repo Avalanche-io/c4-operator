@@ -13,7 +13,7 @@
 // role's default. Depth is never locked: a peek shows the next level for one
 // thing, and the switch is always in the top bar.
 //
-// Advancement (Joshua: "Point it out once, then leave the door open"): each
+// Advancement (the rule: "Point it out once, then leave the door open"): each
 // level is offered at most once per person, ever, when their use suggests
 // it. Taken or declined, it is never offered again. No badges, no streaks,
 // no progress toward the next level.

@@ -13,7 +13,7 @@ import { glance, inFlight, retries } from '../../design/components/core.js';
 import { seal } from '../../design/components/ledger.js';
 import { batchStrip, datumBar, DATUM_TICKS, datumX, DATUM_X, shotsOf, shotKeyFn, burstDecision, viewerSeal } from '../../design/components/dispatch.js';
 import { classChip, orderText, failedUnits, empty, personMark } from './common.js';
-import { jobWords, tempWords, heldByPerson, fromTracker, ended, farmCheck } from '../../design/components/words.js';
+import { jobWords, tempWords, heldByPerson, fromTracker, ended, farmCheck, asksOf } from '../../design/components/words.js';
 import { farmSetup } from './setup.js';
 import { trackerLink } from './day1.js';
 import { incidents, incidentOf } from '../../design/components/incidents.js';
@@ -49,8 +49,9 @@ const st = { dismissed: new Set() };
 // whether any job on the farm belongs to a shot: else no Shot column
 let SHOTS = true;
 
-// openQuestions: the questions a job's units stopped for, still open
-const openQuestions = (j) => (j.needs || []).filter((n) => !n.supplied && !n.withdrawn);
+// openQuestions: the questions a job's units stopped for, still open, that
+// are the person's (words.js yours: one its lead answers is the lead's)
+const openQuestions = (j) => asksOf(j).mine;
 
 // scaleWords: the sheet's scale, in the units of the work on it
 function scaleWords(ctx, jobs) {
@@ -122,12 +123,13 @@ function row(ctx, j, multiProject, sk) {
   const passed = dl && Date.parse(dl) < f.now() && !fin;
   // a unit stopped for a question is failed to the API: it is said as the
   // question it is, in its tier's hue, and is not requeued
-  const asks = openQuestions(j), failed = u.failed || 0;
+  const asks = openQuestions(j), leadAsks = asksOf(j).lead, failed = u.failed || 0;
   const capt = fin ? `${f.num(u.succeeded)} done` : [
     `${f.num(u.succeeded)}/${f.num(u.total)}`,
     inFlight(u) ? h('span', { class: 't-run' }, `${inFlight(u)} ${j.driver === 'agent' ? 'working' : 'rendering'}`) : null,
     retries(u) ? h('span', { class: 't-temp' }, tempWords(u)) : null,
     asks.length ? h('span', { class: asks.some((n) => n.state === 'pressing') ? 't-temp' : 't-risk' }, `${asks.length} ${asks.length === 1 ? 'asks' : 'ask'} you`) : null,
+    leadAsks.length ? h('span', null, `${leadAsks.length} ${leadAsks.length === 1 ? 'asks' : 'ask'} its lead`) : null,
     failed && !farmCheck(j) ? h('span', { class: 't-fail' }, `${failed} ${failed === 1 ? 'needs' : 'need'} you`) : null,
     u.unevaluated || u.planned ? `${f.num(u.unevaluated || u.planned)} expected` : null,
   ].filter(Boolean).flatMap((x, i) => (i ? [' · ', x] : [x]));

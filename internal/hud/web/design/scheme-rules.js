@@ -2,7 +2,7 @@
 // generated from this file (design/gen-tokens.mjs, `make tokens`), and
 // the contrast test (test/contrast.test.mjs) evaluates the same rules.
 //
-// Anchors: the dark ramp and the five state hues, as Joshua approved them.
+// Anchors: the dark ramp and the five state hues, as the maintainer approved them.
 // Rules, the same for every scheme:
 //   1. The ramp runs from the ground to the ink. Dark is the anchor ramp;
 //      light mirrors it in CIELAB lightness (L* becomes 100 - L*, the cool

@@ -83,7 +83,7 @@ export function withMode(n) {
 
 // "Show me more": one offer at a time, when the next mode answers a
 // question the viewer now has. Each mode is offered once per person, ever
-// (Joshua: point it out once, then leave the door open).
+// (the rule: point it out once, then leave the door open).
 const okey = (viewer, n) => `c4hud:offer-mode:${(viewer && viewer.user) || 'anyone'}:${n}`;
 function silenced(viewer, n) {
   try {
