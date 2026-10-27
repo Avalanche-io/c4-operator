@@ -23,6 +23,27 @@ if [ -n "$(git -C "$src" status --porcelain -- web)" ]; then
   exit 1
 fi
 
+# A hand edit to internal/hud/web is lost at the next sync: refuse while a
+# file differs both from what the c4-hud commit VERSION names copied and
+# from what this sync copies (a ported edit matches the latter). Port the
+# edit to c4-hud first; SYNC_FORCE=1 overwrites on purpose.
+prev=$(awk '{print $2}' "$dst/VERSION" 2>/dev/null || true)
+if [ -n "$prev" ] && [ -z "${SYNC_FORCE:-}" ] && git -C "$src" cat-file -e "$prev^{commit}" 2>/dev/null; then
+  was=$(mktemp -d)
+  trap 'rm -rf "${was:?}"' EXIT
+  git -C "$src" archive "$prev" web | tar -x -C "$was"
+  # ported: the hand edit's own hunks are in this sync's source already, so
+  # taking them back out of it applies cleanly
+  # (diff exits 1 on any difference: under pipefail only patch's status counts)
+  ported() { { diff -u "$was/web/$1" "$1" || true; } | patch -R --dry-run -s -f -o /dev/null "$src/web/$1" >/dev/null 2>&1; }
+  edited=$(cd "$dst" && find . -type f ! -name VERSION | sort | while read -r f; do cmp -s "$f" "$was/web/$f" || cmp -s "$f" "$src/web/$f" || ported "$f" || echo "${f#./}"; done)
+  if [ -n "$edited" ]; then
+    echo "sync-hud: internal/hud/web was edited by hand since c4-hud ${prev:0:7}; port these to c4-hud first (or SYNC_FORCE=1 to overwrite):" >&2
+    echo "$edited" | sed 's/^/  /' >&2
+    exit 1
+  fi
+fi
+
 # What the manager embeds (internal/hud/embed.go): the app, its fonts, and
 # the design system without its fixtures. The intro (web/intro) is not
 # part of the HUD.
