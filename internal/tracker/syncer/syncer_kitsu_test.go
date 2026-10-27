@@ -529,14 +529,25 @@ func TestKitsuForecastFollowsTheEstimation(t *testing.T) {
 // fields' throttle, and a finished job leaves no stale ETA.
 func TestKitsuSpendAndNoStaleETA(t *testing.T) {
 	e := setupKitsu(t)
+	// a task is one artist's: its spend is written only by opt-in
+	// (spend_on: task); by default the shot's total, which Kitsu does not
+	// write yet, so the task gets none
 	e.update(func(tr *c4v1.Tracker) { tr.Spec.Scope["spend_field"] = "c4_spend" })
 	first := e.firstJob
+	e.pass()
+	e.job(first, func(j *api.Job) { j.Phase, j.Spend = "Running", &api.Spend{ProceduralSlotCost: 10} })
+	e.pass()
+	if v, ok := e.site.Task(e.task).Data["c4_spend"]; ok {
+		t.Fatalf("a task's spend by default: %v", v)
+	}
+	e.update(func(tr *c4v1.Tracker) { tr.Spec.Scope["spend_on"] = "task" })
 	e.pass()
 	eta := e.clock.now().Add(5 * time.Hour)
 	e.job(first, func(j *api.Job) {
 		j.Phase, j.Estimate.EtaP80 = "Running", &eta
 		j.Spend = &api.Spend{ModelSlotCost: 1.25, ProceduralSlotCost: 10, TokenCost: 1.5}
 	})
+	e.clock.add(time.Hour) // past the field throttle since the opt-in's first write
 	e.pass()
 	if d := e.site.Task(e.task).Data; d["c4_spend"] != 12.75 || d["c4_eta"] != eta.UTC().Format(time.RFC3339) {
 		t.Fatalf("while running: %#v", d)

@@ -146,6 +146,10 @@ func (s *Syncer) conn(t *c4v1.Tracker) (*conn, error) {
 		k := *ws
 		cfg.WebhookSecret = func(ctx context.Context) ([]byte, error) { return s.secret(ctx, ns, k) }
 	}
+	// spend_on is shared by every adapter: where the spend field goes
+	if on := t.Spec.Scope["spend_on"]; on != "" && on != "shot" && on != "task" {
+		return nil, fmt.Errorf("scope.spend_on is shot or task, got %q", on)
+	}
 	a, err := tracker.New(t.Spec.Kind, cfg)
 	if err != nil {
 		return nil, err
@@ -1081,14 +1085,17 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	if err := s.reviewHead(ctx, c, l, fresh); err != nil {
 		return err
 	}
-	if err := s.recordParent(ctx, c, l); err != nil {
+	if err := s.recordParent(ctx, t, c, l); err != nil {
 		return err
 	}
 	ls := s.linkState(l, sum)
 	ls.Loc, ls.Title = c.loc, sum.Title(c.loc)
-	if p := l.Status.Parent; p != nil {
-		ls.Parent = &tracker.Ref{Type: p.Type, ID: p.ID, URL: p.URL}
-		ls.ParentSpend = c.parentSpend[p.Type+"/"+p.ID]
+	switch p := l.Status.Parent; {
+	case spendOnTask(t):
+		ls.SpendOn, ls.SpendTotal = &ls.Ref, ls.Spend
+	case p != nil:
+		ls.SpendOn = &tracker.Ref{Type: p.Type, ID: p.ID, URL: p.URL}
+		ls.SpendTotal = c.parentSpend[p.Type+"/"+p.ID]
 	}
 	cfg := tracker.PresentConfig{States: t.Spec.StatusOut.States, CheckName: t.Spec.StatusOut.CheckName,
 		CommitStatus: t.Spec.StatusOut.CommitStatus}
@@ -1703,12 +1710,15 @@ func spentBefore(l *c4v1.TrackerLink) float64 {
 // linkSpend is what a link's jobs have spent, every version.
 func linkSpend(l *c4v1.TrackerLink, j *api.Job) float64 { return spentBefore(l) + jobSpend(j) }
 
-// recordParent records the entity a link's tracker entity belongs to, for
-// a presenter that writes there, read once from the tracker; a link
-// recorded at intake has it already.
-func (s *Syncer) recordParent(ctx context.Context, c *conn, l *c4v1.TrackerLink) error {
-	pp, ok := c.presenter.(tracker.ParentPresenter)
-	if !ok || !pp.PresentsOnParent() || l.Status.Parent != nil {
+// spendOnTask says the Tracker puts spend on the entity itself
+// (scope spend_on: task), not on its parent.
+func spendOnTask(t *c4v1.Tracker) bool { return t.Spec.Scope["spend_on"] == "task" }
+
+// recordParent records the entity a link's tracker entity belongs to,
+// where its spend total goes, read once from the tracker; a link made at
+// intake has it already.
+func (s *Syncer) recordParent(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.TrackerLink) error {
+	if t.Spec.Scope["spend_field"] == "" || spendOnTask(t) || l.Status.Parent != nil {
 		return nil
 	}
 	it, err := c.adapter.Get(ctx, tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL})

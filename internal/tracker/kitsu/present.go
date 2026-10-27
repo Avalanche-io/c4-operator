@@ -66,12 +66,15 @@ func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracke
 			},
 		})
 	}
-	if a.spendField != "" && s.Spend > 0 {
+	// Spend goes where the syncer says (SpendOn): the shot's total by
+	// default, which this adapter does not write yet, so only a Tracker
+	// with spend_on: task gets the task's own.
+	if a.spendField != "" && s.SpendOn != nil && *s.SpendOn == s.Ref && s.SpendTotal > 0 {
 		// One number in the pools' currency, as Flow writes it; it moves
 		// every tick, so it is continuous and written at most every
 		// fieldSeconds. Four places, so a short job at a low rate is not
 		// written as nothing.
-		spend := strconv.FormatFloat(s.Spend, 'f', 4, 64)
+		spend := strconv.FormatFloat(s.SpendTotal, 'f', 4, 64)
 		out = append(out, tracker.FieldWrite{
 			Field: "spend", Value: "spend", Continuous: spend,
 			Build: func(tracker.Written) tracker.Write {

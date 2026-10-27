@@ -205,7 +205,13 @@ Each Tracker says:
   For Linear, a move to a completed-type state approves whatever the team
   calls it; name any other state (`state:Changes Requested: rework`);
 - `people`: tracker users mapped to C4 people: GitHub and Flow logins,
-  Kitsu and Linear emails.
+  Kitsu and Linear emails;
+- `scope.spend_field` and `scope.spend_on` (Flow and Kitsu): the field
+  that carries what C4 has spent, and where it goes. `shot`, the default,
+  writes the total of every C4 job on the entity's shot or asset, every
+  version. `task` writes the task's own, which is one artist's spend on a
+  page everyone on the tracker reads; set it only where the organisation
+  has decided its people's spend is shown.
 
 **Job names.** A job is named by the Tracker and the handle people use for
 its entity, so the HUD reads as the tracker does: `gh-7` for issue 7,
@@ -367,12 +373,14 @@ job does afterwards.
   the decision. Its text, with the notes and replies written on the task
   since the review opened, is the decision's note, and with
   `rework: nextVersion` the next version's input.
-- **The ETA, link and spend** go to the task's data under
-  `scope.eta_field`, `scope.link_field` and `scope.spend_field`. Kitsu
-  shows them where a production manager adds Task metadata descriptors
-  with those names (a number descriptor for the spend). The spend is one
-  number in the pools' currency, as Flow's, written at most every
-  `statusOut.fieldSeconds`; a finished job's ETA is cleared, not left.
+- **The ETA and link** go to the task's data under `scope.eta_field` and
+  `scope.link_field`. Kitsu shows them where a production manager adds
+  Task metadata descriptors with those names; a finished job's ETA is
+  cleared, not left. **The spend** (`scope.spend_field`, a number
+  descriptor) is one number in the pools' currency, as Flow's, written at
+  most every `statusOut.fieldSeconds`, on the task only with
+  `scope.spend_on: task`. The shot's total, the default, is not written
+  to Kitsu yet.
 - **Bids.** A task's `estimation` is in minutes; a forecast rule sizes by
   it (`forecast: {field: estimation, perUnit: "0.05"}`).
 - **Text.** Kitsu posts a comment again on a shot's other tasks when it

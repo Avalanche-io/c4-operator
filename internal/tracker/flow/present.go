@@ -9,10 +9,6 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/tracker"
 )
 
-// PresentsOnParent: the spend total goes on the Task's Shot or Asset,
-// unless the Tracker puts it on the Task (spend_on: task).
-func (a *Adapter) PresentsOnParent() bool { return a.spendField != "" && a.spendOn != "task" }
-
 // Present shows a link's state in Flow, on the Task:
 //   - its status, from the Tracker's statusOut.states map (site codes
 //     differ, so nothing is assumed); a state the map leaves out, and done
@@ -58,17 +54,10 @@ func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracke
 	// Spend: one number in the pools' currency, so a currency field sums
 	// in the site's reports; it moves every tick, so it is continuous and
 	// written at most every fieldSeconds. Four places, so a short job at a
-	// low rate is not written as nothing; the site shows its own. On the
-	// Shot by default, the total of every job on its Tasks: a Task is one
-	// artist's assignment, and its spend is per-person spend on a page the
-	// whole site reads, so it goes there only when the Tracker says
-	// spend_on: task.
-	on, total := s.Parent, s.ParentSpend
-	if a.spendOn == "task" {
-		on, total = &s.Ref, s.Spend
-	}
-	if a.spendField != "" && on != nil && total > 0 {
-		spend, at := strconv.FormatFloat(total, 'f', 4, 64), *on
+	// low rate is not written as nothing; the site shows its own. Where it
+	// goes is the syncer's (SpendOn): the Shot's total by default.
+	if a.spendField != "" && s.SpendOn != nil && s.SpendTotal > 0 {
+		spend, at := strconv.FormatFloat(s.SpendTotal, 'f', 4, 64), *s.SpendOn
 		out = append(out, tracker.FieldWrite{
 			Field: "spend", Value: at.Type + "/" + at.ID, Continuous: spend,
 			Build: func(tracker.Written) tracker.Write {
