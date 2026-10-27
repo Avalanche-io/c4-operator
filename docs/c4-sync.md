@@ -209,9 +209,11 @@ Each Tracker says:
 - `scope.spend_field` and `scope.spend_on` (Flow and Kitsu): the field
   that carries what C4 has spent, and where it goes. `shot`, the default,
   writes the total of every C4 job on the entity's shot or asset, every
-  version. `task` writes the task's own, which is one artist's spend on a
-  page everyone on the tracker reads; set it only where the organisation
-  has decided its people's spend is shown.
+  version. `task` is refused for now, and spend goes on the shot: a
+  task's spend names one person, on a page everyone on the tracker reads.
+  It will be allowed only where the organisation shares per-person spend
+  (`spend.people.view: people`), with each write recorded as that
+  person's figures sent; the Tracker's `Spend` condition says so;
 
 **Job names.** A job is named by the Tracker and the handle people use for
 its entity, so the HUD reads as the tracker does: `gh-7` for issue 7,
@@ -340,9 +342,9 @@ See integrations/mlflow-c4/README.md.
   what every C4 job on the Task's Shot or Asset has spent, every version,
   written there at most every `statusOut.fieldSeconds`. A Task is one
   artist's assignment, and its spend is per-person spend on a page
-  everyone on the site reads, so it goes on the Task only when the
-  Tracker sets `scope.spend_on: task`. The site admin creates the
-  fields.
+  everyone on the site reads, so it never goes on the Task
+  (`scope.spend_on: task` is refused for now). The site admin creates
+  the fields.
 - **Links** written to C4 point at `scope.site_url` when people reach
   the site at another address than c4-sync does.
 
@@ -378,9 +380,8 @@ job does afterwards.
   Task metadata descriptors with those names; a finished job's ETA is
   cleared, not left. **The spend** (`scope.spend_field`, a number
   descriptor) is one number in the pools' currency, as Flow's, written at
-  most every `statusOut.fieldSeconds`, on the task only with
-  `scope.spend_on: task`. The shot's total, the default, is not written
-  to Kitsu yet.
+  most every `statusOut.fieldSeconds`: the shot's total, never the
+  task's own (one person's). Kitsu does not write the shot's total yet.
 - **Bids.** A task's `estimation` is in minutes; a forecast rule sizes by
   it (`forecast: {field: estimation, perUnit: "0.05"}`).
 - **Text.** Kitsu posts a comment again on a shot's other tasks when it

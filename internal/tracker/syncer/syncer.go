@@ -55,6 +55,9 @@ const (
 	CondSynced      = "Synced"
 	CondDiverged    = "Diverged"
 	CondIntake      = "Intake"
+	// CondSpend on a Tracker: where its spend goes, when that is not
+	// where the Tracker asked (spend_on: task, refused for now).
+	CondSpend = "Spend"
 	// CondUnconfirmed on a TrackerLink: a write to the tracker was
 	// interrupted, and nothing can tell whether it happened; it is held
 	// for a person (internal/hud/API.md, Held tracker writes).
@@ -209,6 +212,7 @@ func (s *Syncer) Sync(ctx context.Context, t *c4v1.Tracker) error {
 		return err
 	}
 	c.loc = s.zone(ctx, t.Namespace)
+	s.spendCond(ctx, t)
 	if now := s.now(); now.Before(c.until) {
 		s.setTrackerCond(ctx, t, CondRateLimited, metav1.ConditionTrue, "RateLimited",
 			"waiting until "+c.until.UTC().Format(time.RFC3339))
@@ -1090,10 +1094,7 @@ func (s *Syncer) reconcile(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v
 	}
 	ls := s.linkState(l, sum)
 	ls.Loc, ls.Title = c.loc, sum.Title(c.loc)
-	switch p := l.Status.Parent; {
-	case spendOnTask(t):
-		ls.SpendOn, ls.SpendTotal = &ls.Ref, ls.Spend
-	case p != nil:
+	if p := l.Status.Parent; p != nil {
 		ls.SpendOn = &tracker.Ref{Type: p.Type, ID: p.ID, URL: p.URL}
 		ls.SpendTotal = c.parentSpend[p.Type+"/"+p.ID]
 	}
@@ -1710,15 +1711,28 @@ func spentBefore(l *c4v1.TrackerLink) float64 {
 // linkSpend is what a link's jobs have spent, every version.
 func linkSpend(l *c4v1.TrackerLink, j *api.Job) float64 { return spentBefore(l) + jobSpend(j) }
 
-// spendOnTask says the Tracker puts spend on the entity itself
-// (scope spend_on: task), not on its parent.
-func spendOnTask(t *c4v1.Tracker) bool { return t.Spec.Scope["spend_on"] == "task" }
+// spendCond says on the Tracker where its spend goes when it asked for
+// the entity itself (spend_on: task). That is refused for now: a Task's
+// spend names one person, and it may go to a tracker only where the
+// organisation shares per-person spend (spend.people.view: people) and
+// each write is signed as that person's figures sent, neither of which
+// exists yet. So spend goes on the Shot, as by default.
+func (s *Syncer) spendCond(ctx context.Context, t *c4v1.Tracker) {
+	if t.Spec.Scope["spend_field"] == "" || t.Spec.Scope["spend_on"] != "task" {
+		if meta.FindStatusCondition(t.Status.Conditions, CondSpend) != nil {
+			s.setTrackerCond(ctx, t, CondSpend, metav1.ConditionTrue, "OnTheShot", "spend goes on the Shot")
+		}
+		return
+	}
+	s.setTrackerCond(ctx, t, CondSpend, metav1.ConditionFalse, "PerPersonSpendOff",
+		fmt.Sprintf("spend on a Task names one person; %s doesn't share per-person spend (spend.people.view), so spend goes on the Shot", t.Namespace))
+}
 
 // recordParent records the entity a link's tracker entity belongs to,
 // where its spend total goes, read once from the tracker; a link made at
 // intake has it already.
 func (s *Syncer) recordParent(ctx context.Context, t *c4v1.Tracker, c *conn, l *c4v1.TrackerLink) error {
-	if t.Spec.Scope["spend_field"] == "" || spendOnTask(t) || l.Status.Parent != nil {
+	if t.Spec.Scope["spend_field"] == "" || l.Status.Parent != nil {
 		return nil
 	}
 	it, err := c.adapter.Get(ctx, tracker.Ref{Type: l.Spec.Ref.Type, ID: l.Spec.Ref.ID, URL: l.Spec.Ref.URL})

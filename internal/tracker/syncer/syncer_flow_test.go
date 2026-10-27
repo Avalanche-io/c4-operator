@@ -817,9 +817,20 @@ func TestFlowArtistFramesSpend(t *testing.T) {
 	if got, task := e.site.Get("Shot", shot.ID)["sg_c4_spend"], e.site.Get("Task", e.task.ID)["sg_c4_spend"]; got != 12.75 || task != nil {
 		t.Fatalf("the Shot's spend %v, the Task's %v", got, task)
 	}
+	// spend_on: task is refused for now (no per-person spend setting, no
+	// signed record of the write): the spend stays on the Shot, and the
+	// Tracker says why
 	e, _ = publish(t, true, "task")
-	if got, sh := e.site.Get("Task", e.task.ID)["sg_c4_spend"], e.site.Get("Shot", shot.ID)["sg_c4_spend"]; got != 12.75 || sh != nil {
+	if got, sh := e.site.Get("Task", e.task.ID)["sg_c4_spend"], e.site.Get("Shot", shot.ID)["sg_c4_spend"]; got != nil || sh != 12.75 {
 		t.Fatalf("spend_on task: the Task's spend %v, the Shot's %v", got, sh)
+	}
+	var tr c4v1.Tracker
+	if err := e.k8s.Get(context.Background(), client.ObjectKey{Namespace: ns, Name: "flow"}, &tr); err != nil {
+		t.Fatal(err)
+	}
+	if c := meta.FindStatusCondition(tr.Status.Conditions, syncer.CondSpend); c == nil || c.Reason != "PerPersonSpendOff" ||
+		!strings.Contains(c.Message, "spend on a Task names one person") {
+		t.Fatalf("the Tracker's spend condition: %+v", c)
 	}
 	// the map's offer alone names nobody
 	if _, v := publish(t, false, ""); v.Fields["user"] != nil {

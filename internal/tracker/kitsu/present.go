@@ -66,9 +66,9 @@ func (a *Adapter) Present(s tracker.LinkState, c tracker.PresentConfig) []tracke
 			},
 		})
 	}
-	// Spend goes where the syncer says (SpendOn): the shot's total by
-	// default, which this adapter does not write yet, so only a Tracker
-	// with spend_on: task gets the task's own.
+	// Spend goes where the syncer says (SpendOn): the shot's total, which
+	// this adapter does not write yet; a task's own only were the syncer
+	// to say the task (spend_on: task, refused for now).
 	if a.spendField != "" && s.SpendOn != nil && *s.SpendOn == s.Ref && s.SpendTotal > 0 {
 		// One number in the pools' currency, as Flow writes it; it moves
 		// every tick, so it is continuous and written at most every

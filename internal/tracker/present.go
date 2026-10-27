@@ -40,12 +40,12 @@ type LinkState struct {
 	// tokens at their prices. 0: not priced.
 	Spend float64
 	// SpendOn is where the Tracker's spend field is written, and
-	// SpendTotal what goes there: by default the entity's parent (a Task's
-	// Shot) and the total of every link on it, a total that names no one
-	// person; the entity itself and Spend only with scope spend_on: task,
-	// since a Task is one artist's assignment and its spend is per-person
-	// spend on a page the whole tracker reads. nil: nowhere yet (no
-	// parent recorded). The syncer decides it for every adapter.
+	// SpendTotal what goes there: the entity's parent (a Task's Shot) and
+	// the total of every link on it, a total that names no one person.
+	// Never the entity itself for now: a Task is one artist's assignment,
+	// and its spend is per-person spend on a page the whole tracker reads
+	// (scope spend_on: task is refused). nil: nowhere yet (no parent
+	// recorded). The syncer decides it for every adapter.
 	SpendOn    *Ref
 	SpendTotal float64
 }

@@ -31,8 +31,8 @@ spec:
     # what C4's jobs on the shot have spent, every version, one number in
     # the pools' currency (a currency field sums in Flow's reports); the
     # breakdown is behind each job's link. It goes on the Shot: a Task is
-    # one artist's assignment, and spend_on: task would put per-person
-    # spend on a page the whole site reads.
+    # one artist's assignment, and its spend would be per-person spend on
+    # a page the whole site reads (spend_on: task is refused for now).
     spend_field: sg_c4_spend
     spend_on: shot
   credential:
