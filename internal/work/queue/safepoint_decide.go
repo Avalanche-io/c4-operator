@@ -389,7 +389,7 @@ func (q *Queue) doNotDisrupt(v *view, idx int) time.Duration {
 		return 0
 	}
 	u := v.mem.plan.Units[idx]
-	pr := v.est.Predict(u.Key, u.Pos)
+	pr := v.est.Predict(v.estKey(idx), u.Pos)
 	run := time.Duration((pr.Mean + 2*pr.SD()) * float64(time.Second))
 	if time.Duration(pr.Mean*float64(time.Second)) < doNotDisruptAfter {
 		return 0

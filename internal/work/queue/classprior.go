@@ -3,6 +3,7 @@ package queue
 import (
 	"math"
 	"sort"
+	"strconv"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
@@ -107,6 +108,16 @@ func median(sorted []float64) float64 {
 // A unit of agent work with no history of its own in its job is
 // estimated from that window first, then from its lead's estimate (its
 // work), then from its class's.
+//
+// The window is the key's, shared by every block of the environment and
+// tool: it is evidence about them all. A lead's estimate is not. A lead's
+// workers share their tool's unit key, so a key's first worker's work
+// priced every worker of the key, the large refactor and the small docs
+// fix alike, and so did the forecast of each plan call. A unit that
+// carries its own work, where its environment and tool have no history
+// yet, is priced under a key of its own (workKey) by that work; its run
+// time is still kept under its environment's key, and once that has
+// history the unit is priced by it, under the shared key again.
 
 // agentKeyPrefix marks a window of agent work among the classes'.
 const agentKeyPrefix = "agent-env/"
@@ -145,19 +156,87 @@ func agentKey(job *c4v1.WorkJob, u class.Unit) string {
 
 // agentPriors gives each key of the job's agent work that has no prior
 // yet the history of its agent environment and tool in the project (else
-// the farm's shared one), when enough of it has run.
-func (q *Queue) agentPriors(e *estimate.Estimator, v *view, hasPrior map[string]bool, from map[string]string) {
-	for _, u := range v.mem.plan.Units {
-		if hasPrior[u.Key] {
+// the farm's shared one), when enough of it has run. It returns, by
+// index, the keys of their own (workKey) it gives two kinds of unit: one
+// that carries its own work where its environment has no such history,
+// and one whose key another environment's history prices already. The
+// rest keep their keys, so a job whose environment has history, or that
+// is not agent work, adds none. A generator keeps its key, its fan-out being
+// its key's, and so does a unit with a profile of its shot, or whose key
+// the job's estimateSeconds prices.
+func (q *Queue) agentPriors(e *estimate.Estimator, v *view, hasPrior map[string]bool, from map[string]string, profiled map[string]map[int]float64) map[int]string {
+	var keys map[int]string
+	own := func(i int, u class.Unit) string {
+		if keys == nil {
+			keys = map[int]string{}
+		}
+		keys[i] = workKey(u.Key, i)
+		return keys[i]
+	}
+	// histOf is the environment whose history prices each unit key, and
+	// hist each environment's history, looked up once.
+	histOf := map[string]string{}
+	type found struct {
+		p  estimate.Prior
+		ok bool
+	}
+	hist := map[string]found{}
+	// A unit's environment key is its job's but for the unit's own
+	// C4_AGENT_ENV, and none for a member's unit (agentKey): made once for
+	// each version, not once a unit.
+	envKeys := map[string]string{}
+	for i, u := range v.mem.plan.Units {
+		if from[u.Key] == FromEstimate {
 			continue
 		}
-		k := agentKey(v.job, u)
-		if k == "" {
+		version, member := "", false
+		for _, ev := range u.Env {
+			switch {
+			case ev.Name == "C4_AGENT_ENV" && ev.Value != "":
+				version = ev.Value
+			case ev.Name == "C4_AGENT_MEMBER" && ev.Value != "":
+				member = true
+			}
+		}
+		k, seen := envKeys[version]
+		if !seen && !member {
+			k = agentKey(v.job, u)
+			envKeys[version] = k
+		}
+		if member || k == "" || histOf[u.Key] == k {
 			continue
 		}
-		if p, ok := q.classPrior(v.project, k); ok {
-			e.SetPrior(u.Key, p)
-			hasPrior[u.Key], from[u.Key] = true, FromAgentEnv
+		h, seen := hist[k]
+		if !seen {
+			h.p, h.ok = q.classPrior(v.project, k)
+			hist[k] = h
+		}
+		switch {
+		case h.ok && !hasPrior[u.Key]:
+			e.SetPrior(u.Key, h.p)
+			hasPrior[u.Key], from[u.Key], histOf[u.Key] = true, FromAgentEnv, k
+		case u.Generator || profiled[u.Key] != nil:
+		case h.ok:
+			// Its key is another environment's: its own, priced by its own.
+			key := own(i, u)
+			e.SetPrior(key, h.p)
+			hasPrior[key], from[key] = true, FromAgentEnv
+		case u.Work > 0:
+			own(i, u)
 		}
 	}
+	return keys
+}
+
+// workKey is unit idx's key of its own: its unit key and its index, which
+// no unit key spells.
+func workKey(key string, idx int) string { return key + "\x00work/" + strconv.Itoa(idx) }
+
+// estKey is the key the estimator prices unit idx of the job under, as
+// the estimate last left it: its unit key, or its own (agentPriors).
+func (v *view) estKey(idx int) string {
+	if k, ok := v.workKeys[idx]; ok {
+		return k
+	}
+	return v.mem.plan.Units[idx].Key
 }

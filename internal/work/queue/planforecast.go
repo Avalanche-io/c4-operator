@@ -232,11 +232,12 @@ func (q *Queue) forecastWith(v *view, docs [][]byte, snap sched.Snapshot, policy
 	for _, i := range idxs {
 		u := plan.Units[i]
 		out.Agent = out.Agent || agentKey(v.job, u) != ""
-		if isWait(plan, i) || w.est.Count(u.Key) > 0 {
+		k := w.estKey(i)
+		if isWait(plan, i) || w.est.Count(k) > 0 {
 			continue
 		}
 		ue := unit(i)
-		ue.From = estimateFrom(w.est.Predict(u.Key, u.Pos).Source, w.priorFrom[u.Key])
+		ue.From = estimateFrom(w.est.Predict(k, u.Pos).Source, w.priorFrom[k])
 		out.Unmeasured = append(out.Unmeasured, ue)
 	}
 	// The message is a warning, or says the estimate is a guess, as a

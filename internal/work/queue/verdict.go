@@ -842,18 +842,18 @@ func (q *Queue) expectedRework(v *view, e *estimate.Estimator) ([]estimate.Unit,
 				continue
 			}
 			p, chain := 1.0, 0.0
-			mean, frac := e.Predict(ju.Key, ju.Pos).Mean, q.reworkFrac(v.project, class, ju.Key)
+			mean, frac := e.Predict(v.estKey(a), ju.Pos).Mean, q.reworkFrac(v.project, class, ju.Key)
 			for k := passes; k < defaultMaxPasses; k++ {
 				p *= r
-				extra = append(extra, estimate.Unit{Key: ju.Key, Pos: ju.Pos, Slots: ju.Slots, Exists: p, Done: max(0, 1-frac) * mean})
+				extra = append(extra, estimate.Unit{Key: v.estKey(a), Pos: ju.Pos, Slots: ju.Slots, Exists: p, Done: max(0, 1-frac) * mean})
 				chain += p * frac * mean
 			}
 			longest = math.Max(longest, chain)
 			pNone *= 1 - r
 		}
 		if pAny := 1 - pNone; pAny > 0 {
-			mean, frac := e.Predict(u.Key, u.Pos).Mean, q.reworkFrac(v.project, class, u.Key)
-			extra = append(extra, estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots, Exists: pAny, Done: max(0, 1-frac) * mean})
+			mean, frac := e.Predict(v.estKey(i), u.Pos).Mean, q.reworkFrac(v.project, class, u.Key)
+			extra = append(extra, estimate.Unit{Key: v.estKey(i), Pos: u.Pos, Slots: u.Slots, Exists: pAny, Done: max(0, 1-frac) * mean})
 			path[i] = longest + pAny*frac*mean
 		}
 	}

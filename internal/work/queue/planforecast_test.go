@@ -3,6 +3,7 @@ package queue
 import (
 	"context"
 	"errors"
+	"fmt"
 	"math"
 	"slices"
 	"strings"
@@ -201,5 +202,84 @@ func TestPlanForecastDryRun(t *testing.T) {
 	q.mu.Unlock()
 	if !errors.Is(err, ErrBusy) {
 		t.Fatalf("while a tick runs: %v", err)
+	}
+}
+
+// A lead's workers share their tool's key, but each carries its own
+// work: with no history of their environment and tool, each is priced by
+// its own, in the forecast of a plan call and in the job's estimate,
+// rather than every worker by the first's. Once the environment has
+// history, both are priced by it.
+func TestWorkerWorkEstimate(t *testing.T) {
+	ns, q, now, st := graphFarm(t)
+	ctx := context.Background()
+	project := "namespace/" + ns
+	const plan = `{"version": 1, "units": [{"name": "docs", "key": "agent"%s, "work": 300},
+		{"name": "refactor", "key": "agent"%s, "work": 3600}]}`
+	held := []byte(fmt.Sprintf(plan, `, "held": true`, `, "held": true`))
+	lead := agentLead(t, ns, "lead", "env-v1", q, *now, nil)
+
+	// No history: each worker by its own work, the refactor the critical
+	// path and the plan ready after it.
+	_, f, err := q.ForecastPlan(ctx, lead, nil, [][]byte{held})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if u := unmeasured(t, f, "docs"); u.From != FromWork || math.Abs(u.Seconds-300) > 1 {
+		t.Fatalf("docs: %+v", u)
+	}
+	if u := unmeasured(t, f, "refactor"); u.From != FromWork || math.Abs(u.Seconds-3600) > 1 {
+		t.Fatalf("refactor: %+v", u)
+	}
+	if n := len(f.Path); n == 0 || f.Path[n-1].Name != "refactor" || math.Abs(f.Estimate.TPath-3600) > 60 ||
+		!f.Band.P50.After(now.Add(55*time.Minute)) {
+		t.Fatalf("path %+v, critical path %.0fs, ready %s", f.Path, f.Estimate.TPath, f.Band.P50)
+	}
+
+	// The job's own estimate, once the call is applied.
+	planTo(t, ns, "lead", c4v1.WorkPlanRequest{Key: "k1", Document: putDoc(t, st, fmt.Sprintf(plan, "", "")), Units: []string{"docs", "refactor"}})
+	tick(t, q)
+	v := q.jobs[lead.UID].last
+	names := v.mem.plan.Names()
+	docs, refactor := names["docs"], names["refactor"]
+	if math.Abs(v.rem[docs]-300) > 1 || math.Abs(v.rem[refactor]-3600) > 1 || math.Abs(v.sum.TPath-3600) > 60 {
+		t.Fatalf("the job's estimate: docs %.0fs, refactor %.0fs, critical path %.0fs", v.rem[docs], v.rem[refactor], v.sum.TPath)
+	}
+
+	// Twenty minutes a worker in env-v1: both by that history, the next
+	// lead's forecast and this job's estimate alike.
+	for range 3 {
+		q.noteDuration(project, agentKeyPrefix+"env-v1/agent", 1200)
+	}
+	next := agentLead(t, ns, "next", "env-v1", q, *now, nil)
+	if _, f, err = q.ForecastPlan(ctx, next, nil, [][]byte{held}); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"docs", "refactor"} {
+		if u := unmeasured(t, f, name); u.From != FromAgentEnv || math.Abs(u.Seconds-1200) > 5 {
+			t.Fatalf("%s with history: %+v", name, u)
+		}
+	}
+	v = q.jobs[lead.UID].last
+	if math.Abs(v.rem[docs]-1200) > 5 || math.Abs(v.rem[refactor]-1200) > 5 || len(v.workKeys) != 0 {
+		t.Fatalf("the job's estimate with history: docs %.0fs, refactor %.0fs, own keys %v", v.rem[docs], v.rem[refactor], v.workKeys)
+	}
+
+	// Workers of the key in other environments: each by its own
+	// environment's history, else by its own work, not by env-v1's.
+	for range 3 {
+		q.noteDuration(project, agentKeyPrefix+"env-v2/agent", 600)
+	}
+	mixed := []byte(`{"version": 1, "units": [{"name": "docs", "key": "agent", "held": true, "work": 300},
+		{"name": "port", "key": "agent", "held": true, "work": 3600, "env": {"C4_AGENT_ENV": "env-v2"}},
+		{"name": "lint", "key": "agent", "held": true, "work": 120, "env": {"C4_AGENT_ENV": "env-v3"}}]}`)
+	if _, f, err = q.ForecastPlan(ctx, next, nil, [][]byte{mixed}); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]UnitEstimate{"docs": {Seconds: 1200, From: FromAgentEnv},
+		"port": {Seconds: 600, From: FromAgentEnv}, "lint": {Seconds: 120, From: FromWork}} {
+		if u := unmeasured(t, f, name); u.From != want.From || math.Abs(u.Seconds-want.Seconds) > 5 {
+			t.Fatalf("%s: %+v, want %.0fs from %s", name, u, want.Seconds, want.From)
+		}
 	}
 }

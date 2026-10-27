@@ -575,10 +575,13 @@ type view struct {
 	sum   estimate.Summary
 	est   *estimate.Estimator
 	// rem is each unit's remaining work, in seconds, as the estimate
-	// last left it, and priorFrom where each unit key's prior came from
-	// (planforecast.go).
+	// last left it, and priorFrom where the prior of each key the
+	// estimator prices came from (planforecast.go).
 	rem       map[int]float64
 	priorFrom map[string]string
+	// workKeys are the keys of their own the estimate gave units, by
+	// index (classprior.go, estKey).
+	workKeys map[int]string
 	// source is where the effective deadline comes from: spec,
 	// suggested or class.
 	source string
@@ -1309,10 +1312,10 @@ func (q *Queue) estimate(v *view, now time.Time) {
 			break
 		}
 	}
-	// Agent work: its environment's history before its lead's estimate
-	// (classprior.go).
-	q.agentPriors(e, v, hasPrior, from)
-	unitPriors(e, plan, hasPrior)
+	// Agent work: its environment's history before its lead's estimate,
+	// each unit's own (classprior.go).
+	v.workKeys = q.agentPriors(e, v, hasPrior, from, byKey)
+	unitPriors(e, plan, v.workKeys, hasPrior)
 	for k := range hasPrior {
 		if from[k] == "" {
 			from[k] = FromWork
@@ -1322,10 +1325,10 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		// No guess from the job and no shot history: what the class's
 		// units took in the project, rather than the class default.
 		if p, ok := q.classPrior(v.project, v.job.Spec.Class); ok {
-			for _, u := range plan.Units {
-				if !hasPrior[u.Key] {
-					e.SetPrior(u.Key, p)
-					hasPrior[u.Key], from[u.Key] = true, FromHistory
+			for i := range plan.Units {
+				if k := v.estKey(i); !hasPrior[k] {
+					e.SetPrior(k, p)
+					hasPrior[k], from[k] = true, FromHistory
 				}
 			}
 		}
@@ -1352,7 +1355,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	sort.Ints(idxs)
 	for _, i := range idxs {
 		u := plan.Units[i]
-		e.Observe(u.Key, u.Pos, float64(took[i])/1000)
+		e.Observe(v.estKey(i), u.Pos, float64(took[i])/1000)
 	}
 	var queued []estimate.Unit
 	var run []estimate.RunningUnit
@@ -1364,11 +1367,11 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		if v.mem.firstMillis[idx] <= 0 {
 			return 0
 		}
-		return max(0, 1-q.reworkFrac(v.project, v.job.Spec.Class, u.Key)) * e.Predict(u.Key, u.Pos).Mean
+		return max(0, 1-q.reworkFrac(v.project, v.job.Spec.Class, u.Key)) * e.Predict(v.estKey(idx), u.Pos).Mean
 	}
 	unit := func(idx int) estimate.Unit {
 		u := plan.Units[idx]
-		eu := estimate.Unit{Key: u.Key, Pos: u.Pos, Slots: u.Slots, Exists: u.Exists, Done: retained(idx)}
+		eu := estimate.Unit{Key: v.estKey(idx), Pos: u.Pos, Slots: u.Slots, Exists: u.Exists, Done: retained(idx)}
 		if u.Generator && !v.mem.expanded(idx) {
 			eu.Gen = u.Key
 		}
@@ -1418,16 +1421,16 @@ func (q *Queue) estimate(v *view, now time.Time) {
 	v.runRem = map[int]float64{}
 	for _, idx := range v.runnable {
 		u := plan.Units[idx]
-		rem[idx] = e.Predict(u.Key, u.Pos).Mean - retained(idx)
+		rem[idx] = e.Predict(v.estKey(idx), u.Pos).Mean - retained(idx)
 	}
 	for idx := range v.locked {
 		u := plan.Units[idx]
-		rem[idx] = e.Predict(u.Key, u.Pos).Mean - retained(idx)
+		rem[idx] = e.Predict(v.estKey(idx), u.Pos).Mean - retained(idx)
 	}
 	for _, idx := range v.waiting {
 		if !v.stuck[idx] {
 			u := plan.Units[idx]
-			rem[idx] = e.Predict(u.Key, u.Pos).Mean
+			rem[idx] = e.Predict(v.estKey(idx), u.Pos).Mean
 			if isWait(plan, idx) {
 				rem[idx] = waitRemaining(plan, v.mem, idx, now)
 			}
@@ -1437,16 +1440,16 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		rem[idx] = waitRemaining(plan, v.mem, idx, now)
 		if !isWait(plan, idx) {
 			u := plan.Units[idx]
-			rem[idx] += math.Max(0, e.Predict(u.Key, u.Pos).Mean-retained(idx))
+			rem[idx] += math.Max(0, e.Predict(v.estKey(idx), u.Pos).Mean-retained(idx))
 		}
 	}
 	for idx, r := range v.mem.usage {
 		u := plan.Units[idx]
-		rem[idx] = math.Max(0, r.until.Sub(now).Seconds()) + math.Max(0, e.Predict(u.Key, u.Pos).Mean-retained(idx))
+		rem[idx] = math.Max(0, r.until.Sub(now).Seconds()) + math.Max(0, e.Predict(v.estKey(idx), u.Pos).Mean-retained(idx))
 	}
 	for idx, h := range v.accountWait {
 		u := plan.Units[idx]
-		rem[idx] = math.Max(0, h.until.Sub(now).Seconds()) + math.Max(0, e.Predict(u.Key, u.Pos).Mean-retained(idx))
+		rem[idx] = math.Max(0, h.until.Sub(now).Seconds()) + math.Max(0, e.Predict(v.estKey(idx), u.Pos).Mean-retained(idx))
 	}
 	for idx, r := range v.running {
 		u := plan.Units[idx]
@@ -1454,7 +1457,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		if pod := v.pods[idx]; pod != nil {
 			progress, _ = q.Progress.Get(pod.Namespace, pod.Name, now)
 		}
-		rem[idx], _ = e.RemainderAt(e.Predict(u.Key, u.Pos), retained(idx), math.Max(0, now.Sub(r.started).Seconds()), progress)
+		rem[idx], _ = e.RemainderAt(e.Predict(v.estKey(idx), u.Pos), retained(idx), math.Max(0, now.Sub(r.started).Seconds()), progress)
 		v.runRem[idx] = rem[idx]
 	}
 	for idx, d := range reworkPath {

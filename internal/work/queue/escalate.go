@@ -184,7 +184,7 @@ func (v *view) downstream(i int) float64 {
 		u := plan.Units[x]
 		d := 0.0
 		if !isWait(plan, x) {
-			d = e.Predict(u.Key, u.Pos).Mean
+			d = e.Predict(v.estKey(x), u.Pos).Mean
 		}
 		if u.Generator && !m.expanded(x) {
 			d += e.Generator(u.Key).Longest

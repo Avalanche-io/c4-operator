@@ -438,9 +438,13 @@ func criticalPath(plan *class.Plan, m *jobMem, rem map[int]float64, genLongest f
 
 // unitPriors sets the estimator's priors from units that carry their own
 // (an expansion document's work): a key's first such unit sets the key's
-// per-unit prior, a generator's its fan-out prior.
-func unitPriors(e *estimate.Estimator, plan *class.Plan, hasPrior map[string]bool) {
-	for _, u := range plan.Units {
+// per-unit prior, a generator's its fan-out prior. A unit given a key of
+// its own (keys, by index; classprior.go) sets its own.
+func unitPriors(e *estimate.Estimator, plan *class.Plan, keys map[int]string, hasPrior map[string]bool) {
+	for i, u := range plan.Units {
+		if k, ok := keys[i]; ok {
+			u.Key = k
+		}
 		if u.Work <= 0 || hasPrior[u.Key] {
 			continue
 		}

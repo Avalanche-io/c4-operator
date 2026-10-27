@@ -134,7 +134,7 @@ func predicted(v *view, idx int) time.Duration {
 		return 0
 	}
 	u := v.mem.plan.Units[idx]
-	return time.Duration(v.est.Predict(u.Key, u.Pos).Mean * float64(time.Second))
+	return time.Duration(v.est.Predict(v.estKey(idx), u.Pos).Mean * float64(time.Second))
 }
 
 func remaining(v *view, idx int, now time.Time) time.Duration {
