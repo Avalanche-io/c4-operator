@@ -255,6 +255,10 @@ type jobMem struct {
 	planToken, planLog, planLoad string
 	// lead is a lead's job's idle time and closing (lead.go).
 	lead leadMem
+	// last is the job as the last tick saw it, and forecast the last
+	// forecast of its lead's plan (planforecast.go).
+	last     *view
+	forecast *planForecastMem
 	// branches are units' git branches, as their runners last recorded
 	// them (branch.go).
 	branches map[int]c4v1.WorkUnitBranch
@@ -570,6 +574,11 @@ type view struct {
 	pools []string
 	sum   estimate.Summary
 	est   *estimate.Estimator
+	// rem is each unit's remaining work, in seconds, as the estimate
+	// last left it, and priorFrom where each unit key's prior came from
+	// (planforecast.go).
+	rem       map[int]float64
+	priorFrom map[string]string
 	// source is where the effective deadline comes from: spec,
 	// suggested or class.
 	source string
@@ -727,6 +736,7 @@ func (q *Queue) Tick(ctx context.Context) error {
 			continue
 		}
 		views = append(views, v)
+		v.mem.last = v
 		q.noteProfiles(v)
 	}
 	for _, v := range views {
@@ -1109,6 +1119,10 @@ func (q *Queue) observe(ctx context.Context, j *c4v1.WorkJob, pods []*corev1.Pod
 				m.millis[idx] = runMillis(p, now)
 				if !fixture(v.job) {
 					q.noteDuration(v.project, v.job.Spec.Class, float64(m.millis[idx])/1000)
+					if idx < len(m.plan.Units) {
+						// agent work's own history (classprior.go)
+						q.noteDuration(v.project, agentKey(v.job, m.plan.Units[idx]), float64(m.millis[idx])/1000)
+					}
 				}
 				if idx < len(m.plan.Units) {
 					// A rerun (a rework, or a review after one) against the
@@ -1287,14 +1301,23 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		e.SetProfile(key, byPos)
 	}
 	hasPrior := map[string]bool{}
+	from := map[string]string{}
 	if plan.Prior != nil {
 		for _, u := range plan.Units {
 			e.SetPrior(u.Key, *plan.Prior)
-			hasPrior[u.Key] = true
+			hasPrior[u.Key], from[u.Key] = true, FromEstimate
 			break
 		}
 	}
+	// Agent work: its environment's history before its lead's estimate
+	// (classprior.go).
+	q.agentPriors(e, v, hasPrior, from)
 	unitPriors(e, plan, hasPrior)
+	for k := range hasPrior {
+		if from[k] == "" {
+			from[k] = FromWork
+		}
+	}
 	if plan.Prior == nil && len(byKey) == 0 {
 		// No guess from the job and no shot history: what the class's
 		// units took in the project, rather than the class default.
@@ -1302,11 +1325,12 @@ func (q *Queue) estimate(v *view, now time.Time) {
 			for _, u := range plan.Units {
 				if !hasPrior[u.Key] {
 					e.SetPrior(u.Key, p)
-					hasPrior[u.Key] = true
+					hasPrior[u.Key], from[u.Key] = true, FromHistory
 				}
 			}
 		}
 	}
+	v.priorFrom = from
 	q.forecastPriors(e, v)
 	noteExpansions(e, plan, v.mem)
 	// A unit's key learns from its first pass: a rerun (a rework, which
@@ -1444,6 +1468,7 @@ func (q *Queue) estimate(v *view, now time.Time) {
 		}
 	}
 	s.TPath = criticalPath(plan, v.mem, rem, func(key string) float64 { return e.Generator(key).Longest })
+	v.rem = rem
 	orderRunnable(plan, v, rem)
 	if len(rem) <= 2000 {
 		// Units that must take turns for what they claim run one after

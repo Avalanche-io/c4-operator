@@ -34,3 +34,7 @@ func NoHistory(class string) string {
 	}
 	return "no history yet: the first " + units + " set the estimate"
 }
+
+// NoWorkerHistory is NoHistory for agent work, whose units are a lead's
+// workers.
+const NoWorkerHistory = "no history yet: the first workers set the estimate"

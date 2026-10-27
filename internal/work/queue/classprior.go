@@ -5,6 +5,7 @@ import (
 	"sort"
 
 	c4v1 "github.com/Avalanche-io/c4-operator/api/v1alpha1"
+	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/work/estimate"
 )
 
@@ -96,4 +97,67 @@ func median(sorted []float64) float64 {
 		return sorted[n/2]
 	}
 	return (sorted[n/2-1] + sorted[n/2]) / 2
+}
+
+// Agent work has no shot: its history is its agent environment's. A
+// block's run time is kept under the version of the agent environment it
+// runs in (C4_AGENT_ENV, its own, else its job's) and the tool that runs
+// it (C4_BLOCK_PROFILE), in the same window as a class's, and saved with
+// it; the farm's tool tests leave none, as they leave no class history.
+// A unit of agent work with no history of its own in its job is
+// estimated from that window first, then from its lead's estimate (its
+// work), then from its class's.
+
+// agentKeyPrefix marks a window of agent work among the classes'.
+const agentKeyPrefix = "agent-env/"
+
+// agentKey is the history key of unit u of job: its agent environment's
+// version and its tool, or "" for a unit that runs no block. A block
+// whose job names no environment runs the release's base, keyed "base".
+func agentKey(job *c4v1.WorkJob, u class.Unit) string {
+	if unitAgent(job.Spec.Template.Spec, u) != "block" {
+		return ""
+	}
+	version, tool := "", ""
+	for _, c := range job.Spec.Template.Spec.Containers {
+		for _, e := range c.Env {
+			switch e.Name {
+			case "C4_AGENT_ENV":
+				version = e.Value
+			case "C4_BLOCK_PROFILE":
+				tool = e.Value
+			}
+		}
+	}
+	for _, e := range u.Env {
+		if e.Name == "C4_AGENT_ENV" && e.Value != "" {
+			version = e.Value
+		}
+	}
+	if version == "" {
+		version = "base"
+	}
+	if tool == "" {
+		tool = job.Spec.Params["key"]
+	}
+	return agentKeyPrefix + version + "/" + tool
+}
+
+// agentPriors gives each key of the job's agent work that has no prior
+// yet the history of its agent environment and tool in the project (else
+// the farm's shared one), when enough of it has run.
+func (q *Queue) agentPriors(e *estimate.Estimator, v *view, hasPrior map[string]bool, from map[string]string) {
+	for _, u := range v.mem.plan.Units {
+		if hasPrior[u.Key] {
+			continue
+		}
+		k := agentKey(v.job, u)
+		if k == "" {
+			continue
+		}
+		if p, ok := q.classPrior(v.project, k); ok {
+			e.SetPrior(u.Key, p)
+			hasPrior[u.Key], from[u.Key] = true, FromAgentEnv
+		}
+	}
 }
