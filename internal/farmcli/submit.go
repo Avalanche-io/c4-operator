@@ -333,7 +333,12 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	if stage == "" {
 		stage = t.Name
 	}
-	req := api.SubmitRequest{Project: a.Project, Name: a.Name, Type: t.Name, Stage: stage, Shot: shot, Spec: raw,
+	// work on no shot (a repository's tests) is named for its tree
+	stem := ""
+	if shot == "" && a.Name == "" {
+		stem = treeStem(ctx, root)
+	}
+	req := api.SubmitRequest{Project: a.Project, Name: a.Name, Type: t.Name, Stage: stage, Shot: shot, Stem: stem, Spec: raw,
 		Inputs: []api.SubmitInput{{View: v.ID.String(), MountPath: t.Mount}}, AIUsage: t.AIUsage, DryRun: true}
 	for _, j := range a.After {
 		// one upstream job is at /in; several are at /in/<job>
@@ -344,7 +349,7 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 		req.Inputs = append(req.Inputs, api.SubmitInput{FromJob: j, MountPath: mp, ReadOnly: true})
 	}
 	var plan api.SubmitResponse
-	planErr := c.Do(ctx, "POST", "/jobs", req, &plan)
+	planErr := postJob(ctx, c, &req, &plan)
 	var ae *APIError
 	if planErr != nil && !(errors.As(planErr, &ae) && ae.Status == 503) {
 		return nil, planErr
@@ -413,7 +418,7 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	// be taken meanwhile by another submit, and is said if so
 	req.DryRun = false
 	var done api.SubmitResponse
-	if err := c.Do(ctx, "POST", "/jobs", req, &done); err != nil {
+	if err := postJob(ctx, c, &req, &done); err != nil {
 		var ae *APIError
 		if errors.As(err, &ae) && ae.Status == http.StatusConflict && a.Name != "" {
 			return nil, fmt.Errorf("--name %s: %s is already a job; leave --name out for the next version", a.Name, a.Name)
@@ -454,6 +459,19 @@ func (o Out) notOffered(ctx context.Context, c *Client, project, name string) {
 	case c4v1.ToolTestFailed:
 		o.printf("tool      %s's test failed on the farm, so this runs the built-in %s (c4 farm ls --tool-tests shows the test)\n", name, name)
 	}
+}
+
+// postJob is POST /jobs. A farm older than the stem refuses the field:
+// the request is sent again without it, and the job is named as that farm
+// names it.
+func postJob(ctx context.Context, c *Client, req *api.SubmitRequest, out *api.SubmitResponse) error {
+	err := c.Do(ctx, "POST", "/jobs", req, out)
+	var ae *APIError
+	if req.Stem != "" && errors.As(err, &ae) && ae.Status == http.StatusBadRequest && strings.Contains(ae.Msg, `unknown field "stem"`) {
+		req.Stem = ""
+		err = c.Do(ctx, "POST", "/jobs", req, out)
+	}
+	return err
 }
 
 func rendererName(r string) string {

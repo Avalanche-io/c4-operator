@@ -129,6 +129,49 @@ func gitIn(ctx context.Context, dir string, args ...string) *exec.Cmd {
 	return cmd
 }
 
+// treeStem is the stem of the jobs of work on no shot (SUBMIT's name):
+// the repository's name, from its origin remote, so two checkouts of one
+// repository share one series; else the folder's name. "" when neither
+// makes a name.
+func treeStem(ctx context.Context, dir string) string {
+	abs, err := filepath.Abs(dir)
+	if err != nil {
+		return ""
+	}
+	name := filepath.Base(abs)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if out, err := gitIn(ctx, abs, "remote", "get-url", "origin").Output(); err == nil {
+		// https://host/team/textkit.git, git@host:team/textkit.git, a path
+		u := strings.TrimSuffix(strings.TrimRight(strings.TrimSpace(string(out)), "/"), ".git")
+		if i := strings.LastIndexAny(u, "/:\\"); i < len(u)-1 {
+			name = u[i+1:]
+		}
+	}
+	stem := jobStem(name)
+	if len(stem) > 40 {
+		stem = strings.TrimRight(stem[:40], "-")
+	}
+	return stem
+}
+
+// jobStem is s as a stem of job names: lower-case letters, digits and -.
+func jobStem(s string) string {
+	var b strings.Builder
+	dash := false
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r >= 'a' && r <= 'z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+			dash = false
+		case !dash && b.Len() > 0:
+			b.WriteByte('-')
+			dash = true
+		}
+	}
+	return strings.TrimRight(b.String(), "-")
+}
+
 // allowAll refuses --all where no person chose it: it sends what the
 // repository's .gitignore leaves out, and an agent may have been steered
 // to a folder by something it read.

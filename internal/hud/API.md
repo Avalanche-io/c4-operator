@@ -1381,7 +1381,7 @@ makes a link only when its target stays inside the folder it writes to.
 ### POST /jobs
 
 ```
-{ project? | namespace?, name?, type?, stage?, shot?, spec, inputs?: [ { view? | fromJob?, mountPath, readOnly? } ],
+{ project? | namespace?, name?, type?, stage?, shot?, stem?, spec, inputs?: [ { view? | fromJob?, mountPath, readOnly? } ],
   aiUsage?, trackerRef?, trackerURL?, follows?, due?, for?, leadSession?, dryRun? }
 ->
 { ok, dryRun?, namespace, name, project, link, message, materializations?,
@@ -1393,7 +1393,9 @@ makes a link only when its target stays inside the folder it writes to.
 
 `spec` is a WorkJob spec (`c4.avalanche.io/v1alpha1`). The request and its spec are read strictly: a field neither has is `400`, naming it. `spec.tool` is `400` too: the farm sets it when it lowers a tool's submission (`POST /submissions`), and the units of a job without it reach no network unless they name a tool (Networks, below). The body is at most 1 MiB. The HUD names the
 job `<shot>-<stage>-vNNN` (stage defaults to type) when `name` is empty, one version past the latest
-such job in the namespace; makes a Materialization for each input view
+such job in the namespace (work on no shot, a repository's tests, takes `stem`, the tree's own name
+as the client knows it: `textkit-ci-v001`), and past a name another submit took meanwhile; a `name`
+given and taken is `409`, "NAME is already a job; leave the name out for the next version"; makes a Materialization for each input view
 (named from the view's ID, so the same view is one Materialization);
 adds `fromJob` inputs to `dependsOn`; sets the deadline mode to `Suggested`
 when the spec has no deadline; and stamps `c4.avalanche.io/owner` (the

@@ -291,6 +291,27 @@ func TestSubmitNamesTheNextVersion(t *testing.T) {
 	}
 }
 
+// Work on no shot is named for the tree's stem the client sends; a shot,
+// when there is one, is the stem.
+func TestSubmitNamesWorkOnNoShotForItsTree(t *testing.T) {
+	s := submitFarm(t)
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "ci",
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-ci"}}}}})
+	for _, c := range []struct {
+		req  api.SubmitRequest
+		want string
+	}{{api.SubmitRequest{Project: "show-a", Stage: "ci", Stem: "textkit", Spec: spec}, "textkit-ci-v001"},
+		// the model has not read the first yet: numbered past it
+		{api.SubmitRequest{Project: "show-a", Stage: "ci", Stem: "textkit", Spec: spec}, "textkit-ci-v002"},
+		{api.SubmitRequest{Project: "show-a", Stage: "ci", Stem: "webapp", Spec: spec}, "webapp-ci-v001"},
+		{api.SubmitRequest{Project: "show-a", Stage: "light", Shot: "sh040", Stem: "textkit", Spec: spec}, "sh040-light-v008"}} {
+		var out api.SubmitResponse
+		if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", c.req, &out); code != http.StatusCreated || out.Name != c.want {
+			t.Errorf("%+v: %d %s, want %s", c.req.Stem, code, out.Name, c.want)
+		}
+	}
+}
+
 // Two submits at once: the version the farm would name is taken by a job
 // its model has not read yet. The farm numbers past it rather than refuse;
 // a name the submitter gave is refused in words, never the API server's.

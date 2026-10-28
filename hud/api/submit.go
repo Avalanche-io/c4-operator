@@ -81,6 +81,11 @@ type SubmitRequest struct {
 	// review, train, ...), the middle of its default name; default Type.
 	Stage string `json:"stage,omitempty"`
 	Shot  string `json:"shot,omitempty"`
+	// Stem is the start of the default name of work on no shot (a
+	// repository's tests): the tree's own name, as the client knows it
+	// (the repository's, from its origin remote, else the folder's). The
+	// shot is the stem when there is one.
+	Stem string `json:"stem,omitempty"`
 	// Spec is the WorkJob's spec (c4.avalanche.io/v1alpha1 WorkJobSpec)
 	// as JSON. Its inputs may name Materializations already in the
 	// namespace; Inputs below add views and jobs.

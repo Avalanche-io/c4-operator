@@ -396,6 +396,12 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 			return nil, fmt.Errorf("tree %s: %w", t, err)
 		}
 		doc.setString("tree", tree.v.ID.String())
+		// work on no shot (a repository's tests) is named for its tree
+		if doc.str("name") == "" && doc.str("shot") == "" {
+			if st := treeStem(ctx, dir); st != "" {
+				doc.setString("name", st)
+			}
+		}
 		// the paths the tree's scenes hold were written under it, unless
 		// the file says where they were written
 		if abs, err := filepath.Abs(dir); err == nil && doc.str("root") == "" {
@@ -781,6 +787,12 @@ func SubmitTool(ctx context.Context, c *Client, o Out, t *api.ToolDetail, a Subm
 	// submission's own (default the shot)
 	if a.Name != "" {
 		doc["name"] = a.Name
+	}
+	// work on no shot (a repository's tests) is named for its tree
+	if shot == "" && a.Name == "" {
+		if st := treeStem(ctx, root); st != "" {
+			doc["name"] = st
+		}
 	}
 	if a.Deadline != "" {
 		doc["due"] = a.Deadline

@@ -726,7 +726,11 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		if stage == "" {
 			stage = body.Type
 		}
-		name = nextName(m, ns, body.Shot, stage, o.Taken)
+		stem := body.Shot
+		if stem == "" {
+			stem = body.Stem
+		}
+		name = nextName(m, ns, stem, stage, o.Taken)
 	}
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
 		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("name %q: %s", name, strings.Join(errs, "; "))
