@@ -280,11 +280,39 @@ func TestSubmit(t *testing.T) {
 func TestSubmitNamesTheNextVersion(t *testing.T) {
 	s := submitFarm(t)
 	// farm() has show-a/sh040-light-v007
-	if got := nextName(s.m, "show-a", "sh040", "light"); got != "sh040-light-v008" {
+	if got := nextName(s.m, "show-a", "sh040", "light", nil); got != "sh040-light-v008" {
 		t.Fatalf("next %s", got)
 	}
-	if got := nextName(s.m, "show-b", "sh040", "light"); got != "sh040-light-v001" {
+	if got := nextName(s.m, "show-b", "sh040", "light", nil); got != "sh040-light-v001" {
 		t.Fatalf("next in another namespace %s", got)
+	}
+	if got := nextName(s.m, "show-a", "sh040", "light", []string{"sh040-light-v008"}); got != "sh040-light-v009" {
+		t.Fatalf("next past a name taken meanwhile %s", got)
+	}
+}
+
+// Two submits at once: the version the farm would name is taken by a job
+// its model has not read yet. The farm numbers past it rather than refuse;
+// a name the submitter gave is refused in words, never the API server's.
+func TestSubmitNumbersPastANameTakenMeanwhile(t *testing.T) {
+	s := submitFarm(t)
+	ctx := context.Background()
+	spec, _ := json.Marshal(c4v1.WorkJobSpec{Class: "render", Params: map[string]string{"frames": "1-2"},
+		Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "c4-job-hydra"}}}}})
+	// another client's job, made a moment ago: the model has sh040-light-v007
+	other := &c4v1.WorkJob{ObjectMeta: metav1.ObjectMeta{Namespace: "show-a", Name: "sh040-light-v008"},
+		Spec: c4v1.WorkJobSpec{Class: "render", Template: corev1.PodTemplateSpec{Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "unit", Image: "x"}}}}}}
+	if err := s.Client.Create(ctx, other); err != nil {
+		t.Fatal(err)
+	}
+	var out api.SubmitResponse
+	if code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Shot: "sh040", Stage: "light", Spec: spec}, &out); code != http.StatusCreated || out.Name != "sh040-light-v009" {
+		t.Fatalf("farm-named: %d %s", code, out.Name)
+	}
+	var refused map[string]any
+	code := call(t, s, http.MethodPost, "/api/v1/jobs?as=artist", api.SubmitRequest{Project: "show-a", Name: "sh040-light-v008", Spec: spec}, &refused)
+	if msg, _ := refused["error"].(string); code != http.StatusConflict || msg != "sh040-light-v008 is already a job; leave the name out for the next version" {
+		t.Errorf("named: %d %v", code, refused)
 	}
 }
 

@@ -491,14 +491,28 @@ func (s *Server) handleViewFiles(w http.ResponseWriter, r *http.Request) {
 
 // nextName is <shot>-<stage>-vNNN, one version past the latest job of
 // that shot and stage in the namespace (authoring.NextName).
-func nextName(m *model, ns, shot, stage string) string {
-	var names []string
+func nextName(m *model, ns, shot, stage string, taken []string) string {
+	names := append([]string(nil), taken...)
 	for _, rec := range m.jobs {
 		if rec.job.Namespace == ns {
 			names = append(names, rec.job.Name)
 		}
 	}
 	return authoring.NextName(names, shot, stage)
+}
+
+// takenName is the job name a takenError's create found taken; "" when
+// the error does not say.
+func takenName(err error) string {
+	var te takenError
+	if errors.As(err, &te) {
+		err = te.error
+	}
+	var se *apierrors.StatusError
+	if errors.As(err, &se) && se.Status().Details != nil {
+		return se.Status().Details.Name
+	}
+	return ""
 }
 
 // inputMaterialization names the Materialization of an input view: the
@@ -532,7 +546,28 @@ func (s *Server) handleSubmit(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusBadRequest, "body: %v", err)
 		return
 	}
-	out, code, err := s.createJob(r, v, m, body, createOpts{})
+	var o createOpts
+	out, code, err := s.createJob(r, v, m, body, o)
+	// a name the farm chose, taken meanwhile by a job the model has not
+	// read yet (another client's submit a moment before): numbered past
+	// it, as a submission is
+	for attempt := 0; errors.As(err, new(takenError)) && body.Name == "" && attempt < 4; attempt++ {
+		n := takenName(err)
+		if n == "" {
+			break
+		}
+		o.Taken = append(o.Taken, n)
+		out, code, err = s.createJob(r, v, m, body, o)
+	}
+	if errors.As(err, new(takenError)) {
+		// never the API server's words: say which name, and what to do
+		msg := "job names kept being taken while this was submitted: submit it again"
+		if body.Name != "" {
+			msg = fmt.Sprintf("%s is already a job; leave the name out for the next version", body.Name)
+		}
+		fail(w, http.StatusConflict, "%s", msg)
+		return
+	}
 	var gr *grantRefused
 	if errors.As(err, &gr) {
 		// Say which refusal it is, for the sync to tell the person.
@@ -579,6 +614,9 @@ type createOpts struct {
 	// a tool's test) wrote the request, so its spec.tool is the farm's.
 	// Without it a request naming spec.tool is refused.
 	Lowered bool
+	// Taken are names found taken meanwhile: a job the farm names is
+	// numbered past them.
+	Taken []string
 }
 
 // identityError is a unit's submission refused for who the unit is: its
@@ -688,7 +726,7 @@ func (s *Server) createJob(r *http.Request, v *api.Viewer, m *model, body api.Su
 		if stage == "" {
 			stage = body.Type
 		}
-		name = nextName(m, ns, body.Shot, stage)
+		name = nextName(m, ns, body.Shot, stage, o.Taken)
 	}
 	if errs := validation.IsDNS1123Subdomain(name); len(errs) > 0 {
 		return api.SubmitResponse{}, http.StatusBadRequest, fmt.Errorf("name %q: %s", name, strings.Join(errs, "; "))

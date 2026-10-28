@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -408,13 +409,20 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	if sent > 0 {
 		o.printf("uploaded  %s · %s\n", plural(sent, "file", "files"), Bytes(sentBytes))
 	}
+	// the farm names the job, the version past its latest: the plan's may
+	// be taken meanwhile by another submit, and is said if so
 	req.DryRun = false
-	if req.Name == "" && plan.Name != "" {
-		req.Name = plan.Name
-	}
 	var done api.SubmitResponse
 	if err := c.Do(ctx, "POST", "/jobs", req, &done); err != nil {
+		var ae *APIError
+		if errors.As(err, &ae) && ae.Status == http.StatusConflict && a.Name != "" {
+			return nil, fmt.Errorf("--name %s: %s is already a job; leave --name out for the next version", a.Name, a.Name)
+		}
 		return nil, err
+	}
+	if plan.Name != "" && done.Name != plan.Name && a.Name == "" {
+		// another submit took the version the plan showed
+		o.printf("name      %s was taken a moment ago, so this is %s\n", plan.Name, done.Name)
 	}
 	o.printf("queued    %s/%s\n", done.Namespace, done.Name)
 	o.printf("HUD       %s\n", c.Web(done.Link, nil))

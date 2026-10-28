@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -71,5 +72,57 @@ func TestSubmitWhileTheToolTestsIsNamedAsTheTool(t *testing.T) {
 		if !strings.HasPrefix(out.String(), want) || !strings.Contains(out.String(), "sm0140-render-v001   render · 48 frames") {
 			t.Errorf("%s: plan:\n%s", state, out.String())
 		}
+	}
+}
+
+// racingHUD is testingHUD where another submit takes the version the
+// plan showed, between the plan and the submit.
+type racingHUD struct {
+	testingHUD
+}
+
+func (h *racingHUD) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if strings.TrimPrefix(r.URL.Path, "/api/v1") != "/jobs" {
+		h.testingHUD.ServeHTTP(w, r)
+		return
+	}
+	var req api.SubmitRequest
+	json.NewDecoder(r.Body).Decode(&req)
+	h.jobs = append(h.jobs, req)
+	switch {
+	case req.DryRun:
+		json.NewEncoder(w).Encode(api.SubmitResponse{OK: true, DryRun: true, Namespace: "saltmarsh", Name: "sm0140-render-v002"})
+	case req.Name != "":
+		http.Error(w, req.Name+" is already a job; leave the name out for the next version", http.StatusConflict)
+	default:
+		json.NewEncoder(w).Encode(api.SubmitResponse{OK: true, Namespace: "saltmarsh", Name: "sm0140-render-v003"})
+	}
+}
+
+// The farm names the job, so a version taken between the plan and the
+// submit is the next one, and said; a name the person gave that is taken
+// is refused in --name's words.
+func TestSubmitSaysAVersionTakenMeanwhile(t *testing.T) {
+	hud := &racingHUD{testingHUD{state: "running"}}
+	srv := httptest.NewServer(hud)
+	defer srv.Close()
+	c, _ := NewClient(Farm{HUD: srv.URL, As: "artist"})
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "sm0140"), 0o755)
+	os.WriteFile(filepath.Join(dir, "sm0140", "sm0140.usda"), []byte("#usda 1.0\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, ".c4project"), nil, 0o644)
+	a := SubmitArgs{Type: "render", Asset: filepath.Join(dir, "sm0140", "sm0140.usda"), Project: "saltmarsh",
+		Options: Options{Frames: "1001-1002"}, Yes: true}
+	var out bytes.Buffer
+	done, err := Submit(context.Background(), c, Out{W: &out}, a)
+	if err != nil || done.Name != "sm0140-render-v003" || hud.jobs[len(hud.jobs)-1].Name != "" {
+		t.Fatalf("%v %+v %+v\n%s", err, done, hud.jobs, out.String())
+	}
+	if !strings.Contains(out.String(), "name      sm0140-render-v002 was taken a moment ago, so this is sm0140-render-v003\n") {
+		t.Errorf("plan:\n%s", out.String())
+	}
+	a.Name = "sm0140-render-v002"
+	if _, err := Submit(context.Background(), c, Out{W: io.Discard}, a); err == nil || err.Error() != "--name sm0140-render-v002: sm0140-render-v002 is already a job; leave --name out for the next version" {
+		t.Errorf("a taken --name: %v", err)
 	}
 }
