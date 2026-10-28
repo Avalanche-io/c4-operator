@@ -146,8 +146,16 @@ func Ls(ctx context.Context, c *Client, o Out, a LsArgs) error {
 		}
 		done := fmt.Sprintf("%d of %d", j.Units.Succeeded, j.Units.Total)
 		ready, due, slack := "-", "-", "-"
-		if !j.Estimate.EtaP50.IsZero() {
+		switch {
+		case j.Estimate.NoETA != "":
+			// no time to show: the snapshot's own stands in for one
+			ready = noETAWord(j.Estimate.NoETA)
+		case !j.Estimate.EtaP50.IsZero():
 			ready = "~" + o.Clock.At(j.Estimate.EtaP50)
+		}
+		if j.Objective.Deadline == nil && j.Objective.Mode == "Suggested" {
+			// the farm suggests one once it has planned the job
+			due = "suggested"
 		}
 		if d := j.Objective.Deadline; d != nil {
 			due = o.Clock.At(*d)
@@ -320,8 +328,25 @@ func Control(ctx context.Context, c *Client, o Out, project, ref, verb string, b
 	if err := c.Do(ctx, "POST", jobPath(j)+"/"+verb, body, &r); err != nil {
 		return err
 	}
-	o.printf("%s\n", r.Message)
+	if o.W != nil {
+		o.printf("%s\n", r.Message)
+	}
 	return nil
+}
+
+// noETAWord is a job's reason for no ready time (Estimate.NoETA), as
+// ls's READY column says it: planning until the queue has planned it.
+func noETAWord(why string) string {
+	switch why {
+	case "no estimate yet":
+		return "planning"
+	case "waiting for capacity":
+		return "waiting"
+	case "no deadline, so none projected":
+		return "-"
+	}
+	w, _, _ := strings.Cut(why, ":")
+	return w
 }
 
 // Deadline moves a job's deadline, read on the local clock.
@@ -333,7 +358,11 @@ func Deadline(ctx context.Context, c *Client, o Out, project, ref, when string) 
 	if err != nil {
 		return err
 	}
-	if err := Control(ctx, c, o, project, ref, "nudge", map[string]any{"deadline": t.UTC().Format(time.RFC3339)}); err != nil {
+	// the farm's words name its own clock; the deadline is said once, on
+	// this one
+	quiet := o
+	quiet.W = nil
+	if err := Control(ctx, c, quiet, project, ref, "nudge", map[string]any{"deadline": t.UTC().Format(time.RFC3339)}); err != nil {
 		return err
 	}
 	o.printf("deadline  %s\n", o.Clock.AtUTC(t))
