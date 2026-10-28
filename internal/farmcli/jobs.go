@@ -2,6 +2,7 @@ package farmcli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -49,6 +50,26 @@ func ResolveProject(ctx context.Context, c *Client, given, def string) (string, 
 
 // findJob finds a job by ns/name, or by name in the user's projects.
 func findJob(ctx context.Context, c *Client, project, ref string) (*api.Job, error) {
+	// a job the farm accepted a moment ago reaches the snapshot within
+	// about a second (JobLag)
+	end := time.Now().Add(JobLag)
+	for {
+		j, err := findJobIn(ctx, c, project, ref)
+		if err == nil || !errors.Is(err, errNoJob) || time.Now().After(end) {
+			return j, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(jobPoll):
+		}
+	}
+}
+
+// errNoJob is a job the snapshot does not hold.
+var errNoJob = errors.New("no job")
+
+func findJobIn(ctx context.Context, c *Client, project, ref string) (*api.Job, error) {
 	s, err := Snapshot(ctx, c)
 	if err != nil {
 		return nil, err
@@ -67,7 +88,7 @@ func findJob(ctx context.Context, c *Client, project, ref string) (*api.Job, err
 	case 1:
 		return hits[0], nil
 	case 0:
-		return nil, fmt.Errorf("no job %s in your projects (c4 farm ls lists them)", ref)
+		return nil, fmt.Errorf("%w %s in your projects (c4 farm ls lists them)", errNoJob, ref)
 	}
 	return nil, fmt.Errorf("%s is in more than one namespace; give namespace/name", ref)
 }

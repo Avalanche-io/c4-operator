@@ -418,6 +418,7 @@ func Submit(ctx context.Context, c *Client, o Out, a SubmitArgs) (*api.SubmitRes
 	}
 	o.printf("queued    %s/%s\n", done.Namespace, done.Name)
 	o.printf("HUD       %s\n", c.Web(done.Link, nil))
+	awaitJobs(ctx, c, done.Namespace+"/"+done.Name)
 	return &done, nil
 }
 

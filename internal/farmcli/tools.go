@@ -458,6 +458,11 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	if n := len(done.Jobs); n > 0 && done.Jobs[n-1].Link != "" {
 		o.printf("HUD       %s\n", c.Web(done.Jobs[n-1].Link, nil))
 	}
+	var made []string
+	for _, j := range done.Jobs {
+		made = append(made, j.Namespace+"/"+j.Name)
+	}
+	awaitJobs(ctx, c, made...)
 	return &done, nil
 }
 

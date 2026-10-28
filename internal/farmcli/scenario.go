@@ -341,6 +341,14 @@ func LoadScenario(ctx context.Context, o Out, sc Scenario, client func(as string
 	for _, j := range sc.Jobs {
 		width = max(width, len(j.Project)+1+len(j.Name))
 	}
+	var last *Client
+	var made []string
+	// ls straight after a load lists what it made
+	defer func() {
+		if last != nil {
+			awaitJobs(ctx, last, made...)
+		}
+	}()
 	for i, j := range sc.Jobs {
 		c, err := client(j.As)
 		if err != nil {
@@ -359,6 +367,7 @@ func LoadScenario(ctx context.Context, o Out, sc Scenario, client func(as string
 			head = ""
 		}
 		o.printf("%-9s %-*s   %s · %s\n", head, width, done.Namespace+"/"+done.Name, j.what(), due)
+		last, made = c, append(made, done.Namespace+"/"+done.Name)
 	}
 	return nil
 }

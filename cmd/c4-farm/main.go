@@ -868,7 +868,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			}
 			return fmt.Errorf("the local farm %s is running, and its HUD does not answer yet: %s", localfarm.Name, why)
 		}
-		fmt.Fprintf(stdout, "farm      %s   %d nodes · %d of %d slots in use · %d units waiting\n", localfarm.Name, len(s.Nodes), s.Farm.SlotsUsed, s.Farm.SlotsTotal, s.Farm.QueuedUnits)
+		fmt.Fprintf(stdout, "farm      %s   %s\n", localfarm.Name, farmcli.FarmLine(s))
 		fmt.Fprintf(stdout, "HUD       %s   c4 farm open opens it signed in\n", hud)
 		for _, v := range localfarm.Viewers {
 			fmt.Fprintf(stdout, "  %-10s c4 farm open --as %s\n", v.Name, v.Name)
