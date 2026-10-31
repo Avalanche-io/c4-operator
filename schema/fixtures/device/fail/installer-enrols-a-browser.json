@@ -1,0 +1,25 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c43uiYf8PZbmgeWb2HEWXAK5hcj1dvLTVxaUjEWhLUhU1wBvjQWaJYzTuoNrcwx7dSiwWDrnec9se3bsaqD2u8xefS",
+      "digest": {
+        "c4": "c43uiYf8PZbmgeWb2HEWXAK5hcj1dvLTVxaUjEWhLUhU1wBvjQWaJYzTuoNrcwx7dSiwWDrnec9se3bsaqD2u8xefS"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "noor",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEckWZN_LX4FYzmUYkjC3u_oyTDEpe0I9_W_2UgBlAIWHJAo5sxs6vnafvsCe8wOydByQEjLdXIKmsm2ya1EA-sA",
+    "protection": "hardware",
+    "kind": "browser",
+    "label": "noor's Mac",
+    "evidence": "installer",
+    "nonce": "lpMxih0E_SLcS4w4uYHPyg",
+    "requestedAt": "2026-10-31T20:02:11Z",
+    "proof": "hOh-Z-lKmOG2knGb3Jq0wEZFMAzdpLi9FifnzwPcLbdeuRWpY5hxzZja4QHPrdVoI_hsBg1SiNUs6f1UrXca1Q",
+    "signedAt": "2026-10-31T20:02:11.4Z"
+  }
+}

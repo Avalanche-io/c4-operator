@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "pattern",
+  "errors": [
+    {
+      "path": "predicate.proof",
+      "message": "the proof is not a P-256 signature",
+      "fix": "write the raw r||s (64 bytes, low S) as base64url without padding"
+    }
+  ]
+}

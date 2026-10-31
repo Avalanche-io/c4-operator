@@ -1,0 +1,16 @@
+{
+  "by": "schema",
+  "schemaMentions": "const",
+  "errors": [
+    {
+      "path": "predicate.chain.by",
+      "message": "confirmed is a person's touch on their own device",
+      "fix": "use grade: signed"
+    },
+    {
+      "path": "predicate.chain.by.grade",
+      "message": "a unit's or an agent's act is signed with its own key, not \"confirmed\"",
+      "fix": "use grade: signed"
+    }
+  ]
+}

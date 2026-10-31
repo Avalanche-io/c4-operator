@@ -50,8 +50,12 @@ type Bundle struct {
 }
 
 // VerificationMaterial carries the signer's certificate chain, leaf first.
+// A confirmed act (act/v1) has two signatures over its one payload, the
+// device key's and then its touch key's, each with its key ID; the touch
+// key's chain is TouchCertificateChain.
 type VerificationMaterial struct {
-	X509CertificateChain CertificateChain `json:"x509CertificateChain"`
+	X509CertificateChain  CertificateChain  `json:"x509CertificateChain"`
+	TouchCertificateChain *CertificateChain `json:"touchCertificateChain,omitempty"`
 }
 
 // CertificateChain is DER certificates, leaf first.

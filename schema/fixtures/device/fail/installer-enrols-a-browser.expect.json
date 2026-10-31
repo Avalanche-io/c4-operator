@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "enum",
+  "errors": [
+    {
+      "path": "predicate.kind",
+      "message": "the installer token enrols the owner's own keys at the terminal, never a browser",
+      "fix": "enrol the browser with the owner's key: evidence: owner"
+    }
+  ]
+}

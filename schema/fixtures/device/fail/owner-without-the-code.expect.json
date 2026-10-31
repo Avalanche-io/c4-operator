@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "code",
+  "errors": [
+    {
+      "path": "predicate",
+      "message": "a browser the owner enrolled keeps the hash of its one-time code",
+      "fix": "add code: the SHA-256 of the code"
+    }
+  ]
+}

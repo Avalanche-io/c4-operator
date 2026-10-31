@@ -1,0 +1,40 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "workjob:saltmarsh/sm0140-comp-v003@9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10",
+      "digest": {
+        "sha256": "d4d8ec0a1ef54e5baf954bfdf5cf893e607ec4173d17a3d52e47de2c43d7c292"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/act/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "act": "hold",
+    "params": {
+      "reason": "waiting on the new plate"
+    },
+    "nonce": "9qmok2WenScpkFURfYffsg",
+    "signer": "https://cccc.io/id/agent/assistant",
+    "chain": {
+      "by": {
+        "agent": "assistant",
+        "grade": "signed"
+      },
+      "for": {
+        "party": "noor",
+        "grade": "signed"
+      },
+      "under": [
+        {
+          "grant": "c41wpUfAnWAdCGWRZ2c4V7H386MVg4qziXhdnnb9obSzR9Xbu9aV3WbYVwzU8Zxs27kf6xzkmjY5ogWrxMdZuDb8Ju",
+          "kind": "sign",
+          "from": "noor",
+          "to": "agent assistant"
+        }
+      ]
+    },
+    "signedAt": "2026-10-31T21:40:07Z"
+  }
+}

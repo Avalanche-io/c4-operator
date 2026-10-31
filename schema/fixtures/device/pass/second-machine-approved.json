@@ -1,0 +1,26 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c44qdjqswEQb9R1mGjj9BQFxLQNeRrA93antzmfEdv6Q3DZJYqUmjeGwyA6b1qCuZbFAtdGvFi77hCa9ehSirg9c7w",
+      "digest": {
+        "c4": "c44qdjqswEQb9R1mGjj9BQFxLQNeRrA93antzmfEdv6Q3DZJYqUmjeGwyA6b1qCuZbFAtdGvFi77hCa9ehSirg9c7w"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "noor",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEs-asjQM2_g4_-zKWWu9TzXEKZiMws_BktTn-Nju5LTt-jQhjGPEvVn7FIXDboKJTi3M-I_ltBfnyDUyfgAVXSw",
+    "protection": "software-file",
+    "kind": "linux",
+    "label": "noor's Linux laptop",
+    "evidence": "approval",
+    "approval": "c42RVz6kZoF5zsYGCbgVbfHdQCqtLKNAQgU7mJ7GYz4KxFtKBzerYEBfP6M8tYrdhJw7K15aJUDrEjJksXyPe9uNsX",
+    "nonce": "zWhh-Ix7AmcOucn_YHmzLw",
+    "requestedAt": "2026-10-31T20:30:00Z",
+    "proof": "QzHommxNtH_P9z3pxFIuPe8f_7Lo1O-bZ-LGwk3MpE4wYVCrA9xQRMOo8p3AGrV_uEo_EtIPQoBinIc05nawRQ",
+    "signedAt": "2026-10-31T20:30:00.4Z"
+  }
+}

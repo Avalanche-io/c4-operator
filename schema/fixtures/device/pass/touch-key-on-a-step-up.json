@@ -1,0 +1,28 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c42CWm9XPZWtnq8944AaGmkPwF2Ajds4LrWXmFjWFVbkamkGoPsJdwEFg9uXjSsqSG7jbV28xuL3uPLcPRGRRgEaDz",
+      "digest": {
+        "c4": "c42CWm9XPZWtnq8944AaGmkPwF2Ajds4LrWXmFjWFVbkamkGoPsJdwEFg9uXjSsqSG7jbV28xuL3uPLcPRGRRgEaDz"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "dana",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEx2Zakxj0PCL7dgApgnzMfc3AlqgQno9nqIX_ccc2SExv7licl8mBMOhE6C8uwJJZy2SY_uZuthhx_T8x2PClag",
+    "protection": "hardware",
+    "kind": "mac",
+    "label": "dana's Mac, Touch ID",
+    "touchFor": "c45Qdc9pV9W2iTFwPA1yckYUcmgvHk5tBWAjC9ibft8k2jRYc3QNsig9djLyyXQnukMNWkeqGd4jecXWGXdKgNbrKR",
+    "evidence": "id-token",
+    "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6InNzby0yMDI2LTEwIn0.eyJhY3IiOiJwaHJoIiwiYW1yIjpbInB3ZCIsImh3ayJdLCJhdWQiOiJjNC1zYWx0bWFyc2giLCJhdXRoX3RpbWUiOjE3OTM0ODI3OTAsImVtYWlsIjoiZGFuYUBzdHVkaW8uZXhhbXBsZSIsImV4cCI6MTc5MzQ4NjQwMCwiaWF0IjoxNzkzNDgyODAwLCJpc3MiOiJodHRwczovL3Nzby5zdHVkaW8uZXhhbXBsZSIsIm5vbmNlIjoiYzQyQ1dtOVhQWld0bnE4OTQ0QWFHbWtQd0YyQWpkczRMcldYbUZqV0ZWYmthbWtHb1BzSmR3RUZnOXVYalNzcVNHN2piVjI4eHVMM3VQTGNQUkdSUmdFYUR6Iiwic3ViIjoiMDB1MmRhbmEifQ.-yfvn8ShRPzV9QBLM8eqgK3NK2bZqoNjQppxmF5dIRQ",
+    "providerKey": "c41XTDxYDxbWpYNFsuRSqZgGMq44NSntvhit3n8VBLJSC4iThQqB4hpD9tvNTwdWKrD3sGjMkJ9vYrPxeMephia4vE",
+    "nonce": "WxIjuTEZQMxeFFwTSIkF-A",
+    "requestedAt": "2026-10-31T21:44:40Z",
+    "proof": "w-lYE1xE7YT5C88cq624geWtZxSf0Wg12tNby9pK3ohy1Pqm2URwf_HxveUQrWQJjbXioGT5qy-yNeVkUDv-3w",
+    "signedAt": "2026-10-31T21:44:40.4Z"
+  }
+}

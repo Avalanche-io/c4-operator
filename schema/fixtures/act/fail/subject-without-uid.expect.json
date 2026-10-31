@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "anyOf",
+  "errors": [
+    {
+      "path": "subject[0]",
+      "message": "an act names what it is on by its UID and its version, or by its C4 ID",
+      "fix": "write <kind>:<project>/<name>@<uid> with the sha256 of its spec as the farm served it, or name content by its c4 digest"
+    }
+  ]
+}

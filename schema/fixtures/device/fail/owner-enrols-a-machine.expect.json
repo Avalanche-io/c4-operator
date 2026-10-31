@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "const",
+  "errors": [
+    {
+      "path": "predicate.kind",
+      "message": "the owner's key enrols a browser with a one-time code, never another machine",
+      "fix": "use evidence: approval for another machine, approved from the first"
+    }
+  ]
+}

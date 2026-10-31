@@ -4,7 +4,7 @@
   "errors": [
     {
       "path": "by.grade",
-      "message": "\"verified\" is not one of claimed, direct, relayed, signed",
+      "message": "\"verified\" is not one of claimed, confirmed, direct, relayed, signed",
       "fix": "use one of them"
     }
   ]

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "nonce",
+  "errors": [
+    {
+      "path": "predicate.nonce",
+      "message": "\"c2hvcnQ\" is not a nonce",
+      "fix": "write 16 random bytes as base64url: 22 characters, no padding"
+    }
+  ]
+}

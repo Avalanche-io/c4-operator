@@ -1,0 +1,26 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c41XipzJH789MoFMP8ZvVHZ85zt5ifQ9VTD6LADyPgYJRPhaBCb6rJMwKhXo9zCn9qPE6o7ay6bVRuHSWDAydQy8EN",
+      "digest": {
+        "c4": "c41XipzJH789MoFMP8ZvVHZ85zt5ifQ9VTD6LADyPgYJRPhaBCb6rJMwKhXo9zCn9qPE6o7ay6bVRuHSWDAydQy8EN"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "noor",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEwGxpMB3nEos_6yYU4fo4JFpAeCUjL6PnFornCS8Rm0pdISokgs0WSTPGPqZd_pZrazHAna2qdcfevckCsekqew",
+    "protection": "hardware",
+    "kind": "mac",
+    "label": "noor's Mac, Touch ID",
+    "touchFor": "c43uiYf8PZbmgeWb2HEWXAK5hcj1dvLTVxaUjEWhLUhU1wBvjQWaJYzTuoNrcwx7dSiwWDrnec9se3bsaqD2u8xefS",
+    "evidence": "installer",
+    "nonce": "WmIsus37RGyy59iUorvDQg",
+    "requestedAt": "2026-10-31T20:02:13Z",
+    "proof": "fgd6g-7iDXpXtsCq25c6R9hCyrHUitkCzEA7I27DcYpT6ClIQYkiwDBNZrtFnJfIJI8lFl130dRKunMUeTnJOA",
+    "signedAt": "2026-10-31T20:02:13.4Z"
+  }
+}

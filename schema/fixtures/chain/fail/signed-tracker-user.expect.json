@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "not",
+  "errors": [
+    {
+      "path": "by.user",
+      "message": "a tracker user's decision is relayed: the relay signed it, not them",
+      "fix": "use grade: relayed"
+    }
+  ]
+}

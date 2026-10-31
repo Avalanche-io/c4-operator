@@ -66,6 +66,10 @@ type controlPredicate struct {
 	// a relayed decision's names the people-map confirmation it rests on,
 	// or says what is missing.
 	Chain *schema.Chain `json:"chain,omitempty"`
+	// Act is the act/v1 this record carried out, by its payload hash and
+	// its record's C4 ID; the record matches its subject, action and
+	// params exactly (schema.ActCitation).
+	Act *schema.ActCitation `json:"act,omitempty"`
 	// By is the person who answers for a submission and the role they
 	// acted in (submit only): a one-person farm's person signed in as a
 	// role's development viewer, the actor (c4v1.AnnotationSubmittedAs).
@@ -85,6 +89,13 @@ type actedBy struct {
 const (
 	CustodyClaimed      = "claimed"
 	CustodyUnattributed = "unattributed"
+)
+
+// Grades of an act signed by its actor's own key (act/v1): signed, and
+// confirmed when a person's touch key signed it too.
+const (
+	CustodySigned    = schema.GradeSigned
+	CustodyConfirmed = schema.GradeConfirmed
 )
 
 // clients are the HUD's own clients, as they name themselves in

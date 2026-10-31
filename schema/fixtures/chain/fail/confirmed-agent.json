@@ -1,0 +1,12 @@
+{
+  "act": "build",
+  "by": {
+    "agent": "assistant",
+    "grade": "confirmed"
+  },
+  "for": {
+    "party": "noor",
+    "grade": "direct"
+  },
+  "accountable": true
+}

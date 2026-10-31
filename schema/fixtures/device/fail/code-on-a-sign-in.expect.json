@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "not",
+  "errors": [
+    {
+      "path": "predicate.code",
+      "message": "code is not the evidence this record says",
+      "fix": "remove code, or set evidence: to what it is"
+    }
+  ]
+}

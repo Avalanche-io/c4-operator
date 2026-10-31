@@ -1,0 +1,26 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c42nK28waGYnhdtT6syw4uorucgGf7STLwyju5QpBdkMWSBRwo99SDsD1jjuZtkfaoVCJYrgvJeLFmsadwFo7tsphE",
+      "digest": {
+        "c4": "c42nK28waGYnhdtT6syw4uorucgGf7STLwyju5QpBdkMWSBRwo99SDsD1jjuZtkfaoVCJYrgvJeLFmsadwFo7tsphE"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "noor",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEYL5McruqxeotJyrWAdGYGL4jA3vFYorOIbnSZlpEVJsPWPuDR9lu9FhgNMKcHwF8iOnxU6u-j0JIByK0xUjhaQ",
+    "protection": "software-browser",
+    "kind": "linux",
+    "label": "Firefox on a Mac",
+    "evidence": "owner",
+    "code": "9f92f960206b383330990a88d51f143aaaafbab5f426773b3d8ac7e200fdaac9",
+    "nonce": "FVWZCfueo-o5v_UKXkd7AQ",
+    "requestedAt": "2026-10-31T20:02:40Z",
+    "proof": "sFtVzbD6ndLkFNw29O63JmQs_sFlxIvw9pVlei-_fs8WEc2knNbiy1e7GzQdrik_2Z7I4tWqkC7AiepnpUtX3w",
+    "signedAt": "2026-10-31T20:02:40.4Z"
+  }
+}

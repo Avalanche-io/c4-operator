@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "signedAt",
+  "errors": [
+    {
+      "path": "predicate.signedAt",
+      "message": "\"2026-10-31T14:40:07-07:00\" is not a time in UTC",
+      "fix": "write RFC 3339 in UTC, as 2026-10-31T21:40:00Z"
+    }
+  ]
+}

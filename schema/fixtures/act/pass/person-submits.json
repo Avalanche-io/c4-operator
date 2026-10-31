@@ -1,0 +1,31 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "submission:saltmarsh",
+      "digest": {
+        "c4": "c42HG1VRQWdu5YczABNzhjaVnEA7rv9EJdHktdzCBq2DRpqbXuUqMZpCzM7mJhvHwdGHbf13GunmEns7SVqtUFpYma"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/act/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "act": "submit",
+    "params": "c43TPr2AA6uUafSrayVXHkCf7AP4uJtH4Pz4pdtV7bhwH4rJoZX9H4c9MjEZzbeRnyJTUiwjXD2FLWeXzpaF1GNA3r",
+    "device": "c43uiYf8PZbmgeWb2HEWXAK5hcj1dvLTVxaUjEWhLUhU1wBvjQWaJYzTuoNrcwx7dSiwWDrnec9se3bsaqD2u8xefS",
+    "nonce": "dphYFRhZq3uN55mpDGrH6Q",
+    "signer": "https://cccc.io/id/user/noor",
+    "chain": {
+      "by": {
+        "person": "noor",
+        "grade": "signed"
+      },
+      "for": {
+        "party": "noor",
+        "grade": "signed"
+      }
+    },
+    "signedAt": "2026-10-31T21:40:07Z"
+  }
+}

@@ -114,11 +114,12 @@
     "grade": {
       "enum": [
         "claimed",
+        "confirmed",
         "direct",
         "relayed",
         "signed"
       ],
-      "description": "How strongly the link is evidenced."
+      "description": "How strongly the link is evidenced: signed, the actor's own key signed the act; confirmed, signed and a person touched their device for it; relayed, a tracker's relay signed it, naming the person; direct and claimed, the HUD's word (records made before personal keys keep them)."
     },
     "by": {
       "type": "object",
@@ -201,7 +202,38 @@
           "if": {
             "properties": {
               "grade": {
-                "const": "signed"
+                "enum": [
+                  "signed",
+                  "confirmed"
+                ]
+              }
+            },
+            "required": [
+              "grade"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "deployment"
+                  ]
+                },
+                {
+                  "required": [
+                    "user"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "grade": {
+                "const": "confirmed"
               }
             },
             "required": [

@@ -1,0 +1,699 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cccc.io/schema/act-1.schema.json",
+  "title": "C4 act statement (act/v1)",
+  "description": "One act, signed by its actor's own key: what it is on, the verb, its parameters, who acted for whom under what, the farm it was made for and a nonce. It is an in-toto statement in a DSSE envelope, as every C4 record is. The HUD carries the act out and its control record cites it ({payload, record}), matching its subject, act and params exactly. This schema checks the statement's shape; who may sign it, the device or grant in force and replay are the verifier's.",
+  "type": "object",
+  "required": [
+    "_type",
+    "subject",
+    "predicateType",
+    "predicate"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_type": {
+      "const": "https://in-toto.io/Statement/v1"
+    },
+    "subject": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/subject"
+      },
+      "description": "What the act is on, exactly one."
+    },
+    "predicateType": {
+      "const": "https://cccc.io/provenance/act/v1"
+    },
+    "predicate": {
+      "$ref": "#/$defs/act"
+    }
+  },
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "digest"
+      ],
+      "description": "An object by its kind, name and UID with the sha256 of its spec as the farm served it (workjob:show-a/comp-v003@<uid>), or content by its C4 ID (a submission, an output, a device). Never a bare name, which comes back when an object is made again. An act that makes something is on what it is made in: the project, or the farm (farm:<farm ID> with that ID as its c4 digest).",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*:[^\\s@]+(@[0-9a-f][0-9a-f-]*)?$",
+          "description": "<kind>:<namespace>/<name>@<uid>, <kind>:<name>@<uid> for an object outside a project, or <kind>:<what> for content."
+        },
+        "digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "minProperties": 1,
+          "properties": {
+            "sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "An object's spec: the SHA-256 of its JSON, as the farm serves it beside the object (a job's is queue.SpecDigest)."
+            },
+            "c4": {
+              "$ref": "#/$defs/id"
+            },
+            "sha512": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{128}$",
+              "description": "The SHA-512 the C4 ID encodes, for tools that know only in-toto digests."
+            }
+          }
+        }
+      },
+      "anyOf": [
+        {
+          "properties": {
+            "name": {
+              "pattern": "@[0-9a-f][0-9a-f-]*$"
+            },
+            "digest": {
+              "required": [
+                "sha256"
+              ]
+            }
+          }
+        },
+        {
+          "properties": {
+            "digest": {
+              "required": [
+                "c4"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "act": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "farm",
+        "act",
+        "params",
+        "nonce",
+        "signer",
+        "chain",
+        "signedAt"
+      ],
+      "properties": {
+        "farm": {
+          "$ref": "#/$defs/id",
+          "description": "The farm's ID: the C4 ID of its signing CA's root certificate (DER). An act made for one farm never verifies at another."
+        },
+        "act": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "The verb: exactly the action of the control record that carries it out (approve, hold, grant, submit)."
+        },
+        "params": {
+          "oneOf": [
+            {
+              "type": "object"
+            },
+            {
+              "$ref": "#/$defs/id"
+            }
+          ],
+          "description": "The request's parameters as JSON, or the C4 ID of their canonical form (RFC 8785) when large. The verifier compares the canonical forms, so key order and spacing never matter; an act with no parameters has {}."
+        },
+        "as": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "The role the person acted in, where one applies: noor as artist."
+        },
+        "device": {
+          "$ref": "#/$defs/id",
+          "description": "A person's act: the device that signed it, the C4 ID of the device key's DER SubjectPublicKeyInfo, as the leaf's urn:c4:device: names it. For a confirmed act, the device key's, never the touch key's."
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$",
+          "description": "16 random bytes the signer makes, base64url without padding."
+        },
+        "signer": {
+          "type": "string",
+          "pattern": "^https://cccc\\.io/id/(user|agent|unit|sa)/\\S+$",
+          "description": "Who signed: the identity in the leaf certificate. It is by itself, except for a relayed act, which the tracker's relay signs."
+        },
+        "chain": {
+          "$ref": "#/$defs/actChain"
+        },
+        "signedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "When the signer signed, by its own clock, RFC 3339 in UTC. The farm refuses an act more than five minutes from its own clock."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "chain": {
+                "properties": {
+                  "by": {
+                    "required": [
+                      "person"
+                    ]
+                  }
+                },
+                "required": [
+                  "by"
+                ]
+              }
+            },
+            "required": [
+              "chain"
+            ]
+          },
+          "then": {
+            "properties": {
+              "signer": {
+                "pattern": "^https://cccc\\.io/id/user/"
+              },
+              "chain": {
+                "properties": {
+                  "by": {
+                    "properties": {
+                      "grade": {
+                        "enum": [
+                          "signed",
+                          "confirmed"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "required": [
+              "device"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "chain": {
+                "properties": {
+                  "by": {
+                    "required": [
+                      "user"
+                    ]
+                  }
+                },
+                "required": [
+                  "by"
+                ]
+              }
+            },
+            "required": [
+              "chain"
+            ]
+          },
+          "then": {
+            "properties": {
+              "signer": {
+                "pattern": "^https://cccc\\.io/id/sa/"
+              },
+              "chain": {
+                "properties": {
+                  "by": {
+                    "properties": {
+                      "grade": {
+                        "const": "relayed"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "not": {
+              "required": [
+                "device"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "chain": {
+                "properties": {
+                  "by": {
+                    "required": [
+                      "unit"
+                    ]
+                  }
+                },
+                "required": [
+                  "by"
+                ]
+              }
+            },
+            "required": [
+              "chain"
+            ]
+          },
+          "then": {
+            "properties": {
+              "signer": {
+                "pattern": "^https://cccc\\.io/id/unit/"
+              },
+              "chain": {
+                "properties": {
+                  "by": {
+                    "properties": {
+                      "grade": {
+                        "const": "signed"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "not": {
+              "required": [
+                "device"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "chain": {
+                "properties": {
+                  "by": {
+                    "required": [
+                      "agent"
+                    ],
+                    "not": {
+                      "required": [
+                        "unit"
+                      ]
+                    }
+                  }
+                },
+                "required": [
+                  "by"
+                ]
+              }
+            },
+            "required": [
+              "chain"
+            ]
+          },
+          "then": {
+            "properties": {
+              "signer": {
+                "pattern": "^https://cccc\\.io/id/agent/"
+              },
+              "chain": {
+                "properties": {
+                  "by": {
+                    "properties": {
+                      "grade": {
+                        "const": "signed"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "not": {
+              "required": [
+                "device"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "actChain": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "by",
+        "for"
+      ],
+      "description": "Who acted (by), for whom (for), under what (under) and using what (using), as chain/1 has them. The deployments that carry the act out and whether it is accountable are the control record's, not the actor's.",
+      "properties": {
+        "by": {
+          "$ref": "#/$defs/by",
+          "not": {
+            "required": [
+              "deployment"
+            ]
+          }
+        },
+        "for": {
+          "$ref": "#/$defs/for"
+        },
+        "under": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/delegation"
+          },
+          "description": "The delegations, outermost first, that let by act for for: an agent's grant, a relay's people-map confirmation."
+        },
+        "using": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/credential"
+          }
+        }
+      }
+    },
+    "party": {
+      "type": "string",
+      "pattern": "^[^\\s:]+$",
+      "description": "A party's name in the farm's party list: a person or an organization."
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^c4[1-9A-HJ-NP-Za-km-z]{88}$",
+      "description": "A record's C4 ID."
+    },
+    "grade": {
+      "enum": [
+        "claimed",
+        "confirmed",
+        "direct",
+        "relayed",
+        "signed"
+      ],
+      "description": "How strongly the link is evidenced: signed, the actor's own key signed the act; confirmed, signed and a person touched their device for it; relayed, a tracker's relay signed it, naming the person; direct and claimed, the HUD's word (records made before personal keys keep them)."
+    },
+    "by": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grade"
+      ],
+      "description": "The immediate actor: a person, a unit (with its agent, if one), a deployment acting by rule, or a tracker user relayed. Never required to be a party.",
+      "properties": {
+        "person": {
+          "$ref": "#/$defs/party"
+        },
+        "unit": {
+          "type": "string",
+          "pattern": "^[a-z0-9][-a-z0-9]*/[a-z0-9][-a-z0-9.]*@[0-9a-f]+/[0-9]+$",
+          "description": "<project>/<job>@<job UID>/<unit index>, so a reused job name cannot be mistaken for it."
+        },
+        "agent": {
+          "type": "string",
+          "minLength": 1
+        },
+        "deployment": {
+          "$ref": "#/$defs/deploymentName"
+        },
+        "rule": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The rule a deployment acted by."
+        },
+        "tracker": {
+          "type": "string",
+          "minLength": 1
+        },
+        "user": {
+          "type": "string",
+          "minLength": 1,
+          "description": "A tracker's user, for a relayed act."
+        },
+        "grade": {
+          "$ref": "#/$defs/grade"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "person"
+          ]
+        },
+        {
+          "required": [
+            "unit"
+          ]
+        },
+        {
+          "required": [
+            "agent"
+          ]
+        },
+        {
+          "required": [
+            "deployment"
+          ]
+        },
+        {
+          "required": [
+            "user"
+          ]
+        }
+      ],
+      "dependentRequired": {
+        "user": [
+          "tracker"
+        ],
+        "rule": [
+          "deployment"
+        ]
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "grade": {
+                "enum": [
+                  "signed",
+                  "confirmed"
+                ]
+              }
+            },
+            "required": [
+              "grade"
+            ]
+          },
+          "then": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "deployment"
+                  ]
+                },
+                {
+                  "required": [
+                    "user"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "grade": {
+                "const": "confirmed"
+              }
+            },
+            "required": [
+              "grade"
+            ]
+          },
+          "then": {
+            "required": [
+              "person"
+            ]
+          }
+        }
+      ]
+    },
+    "for": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grade"
+      ],
+      "description": "The party the act was for; a subject that is not a party leaves the chain unattributed.",
+      "properties": {
+        "party": {
+          "$ref": "#/$defs/party"
+        },
+        "subject": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who the act was for when that is not a party (a service account, an unmapped sign-in)."
+        },
+        "grade": {
+          "$ref": "#/$defs/grade"
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "party"
+          ]
+        },
+        {
+          "required": [
+            "subject"
+          ]
+        }
+      ]
+    },
+    "delegation": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "One delegation: a grant, a membership, job ownership, a policy value and who set it, or a mapping record.",
+      "properties": {
+        "grant": {
+          "$ref": "#/$defs/id"
+        },
+        "membership": {
+          "$ref": "#/$defs/id"
+        },
+        "job": {
+          "type": "string",
+          "minLength": 1
+        },
+        "policy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "record": {
+          "$ref": "#/$defs/id"
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The grant's kind (submit, sign) or the record's (people-map)."
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who delegated: a party, or where a policy value came from."
+        },
+        "to": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "grant"
+          ]
+        },
+        {
+          "required": [
+            "membership"
+          ]
+        },
+        {
+          "required": [
+            "job"
+          ]
+        },
+        {
+          "required": [
+            "policy"
+          ]
+        },
+        {
+          "required": [
+            "record"
+          ]
+        }
+      ]
+    },
+    "credential": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "lease": {
+          "$ref": "#/$defs/id"
+        },
+        "licence": {
+          "$ref": "#/$defs/id"
+        },
+        "key": {
+          "$ref": "#/$defs/id"
+        },
+        "signIn": {
+          "type": "string",
+          "pattern": "^[a-z0-9][-a-z0-9.]*/runner/[^/\\s]+$",
+          "description": "A person's own sign-in spent on a host runner, named by the runner's deployment (<farm>/runner/<name>); no lease is made."
+        },
+        "holder": {
+          "$ref": "#/$defs/party"
+        },
+        "holderSubject": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Who holds it when that is not a party yet; the chain is then unaccountable."
+        }
+      },
+      "oneOf": [
+        {
+          "required": [
+            "lease"
+          ]
+        },
+        {
+          "required": [
+            "licence"
+          ]
+        },
+        {
+          "required": [
+            "key"
+          ]
+        },
+        {
+          "required": [
+            "signIn"
+          ]
+        }
+      ],
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "required": [
+                "holder"
+              ]
+            },
+            {
+              "required": [
+                "holderSubject"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "deploymentName": {
+      "type": "string",
+      "pattern": "^[a-z0-9][-a-z0-9.]*/(component|node|runner|sync|import)/[^/\\s]+$",
+      "description": "<farm>/<kind>/<name>, kind one of component, node, runner, sync (one per tracker) or import."
+    }
+  }
+}

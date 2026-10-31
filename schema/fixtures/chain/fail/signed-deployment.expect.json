@@ -1,10 +1,10 @@
 {
   "by": "schema",
-  "schemaMentions": "person",
+  "schemaMentions": "not",
   "errors": [
     {
-      "path": "by",
-      "message": "signed is for a party's own key: a deployment's or an agent's own record is direct",
+      "path": "by.deployment",
+      "message": "a deployment's own record is direct: signed and confirmed are for an act signed with its actor's own key",
       "fix": "use grade: direct"
     }
   ]

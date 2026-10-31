@@ -1,0 +1,41 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "workjob:saltmarsh/sm0140-comp-v003@9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10",
+      "digest": {
+        "sha256": "d4d8ec0a1ef54e5baf954bfdf5cf893e607ec4173d17a3d52e47de2c43d7c292"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/act/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "act": "supply",
+    "params": {
+      "need": "plate",
+      "path": "plates/sm0140_v2.$F4.exr"
+    },
+    "nonce": "g_JTXUwZWHcDg09o4WQ7zQ",
+    "signer": "https://cccc.io/id/unit/saltmarsh/sm0140-light/7@9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10/1",
+    "chain": {
+      "by": {
+        "unit": "saltmarsh/sm0140-light@9b2e4d/7",
+        "agent": "block",
+        "grade": "confirmed"
+      },
+      "for": {
+        "party": "dana",
+        "grade": "signed"
+      },
+      "under": [
+        {
+          "job": "saltmarsh/sm0140-light",
+          "kind": "ownership",
+          "from": "dana"
+        }
+      ]
+    },
+    "signedAt": "2026-10-31T21:40:07Z"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "not",
+  "errors": [
+    {
+      "path": "predicate.chain.by.deployment",
+      "message": "an act is never by rule: a deployment's own decision is its own record, not an act",
+      "fix": "name who acted: a person, a unit, an agent or a tracker user"
+    }
+  ]
+}

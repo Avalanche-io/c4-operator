@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "maxItems",
+  "errors": [
+    {
+      "path": "subject",
+      "message": "a record is on one subject",
+      "fix": "keep one; an act on several things is several acts"
+    }
+  ]
+}

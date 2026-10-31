@@ -1243,7 +1243,7 @@ func paramSchema(params []schema.Param) map[string]any {
 }
 
 // handleSchema is GET /schema/{format}: the submit/1, tool/1, lock/1 and
-// card/1 JSON Schemas.
+// card/1 JSON Schemas, and the act/v1 and device/v1 records'.
 func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 	var b []byte
 	switch r.PathValue("format") {
@@ -1255,8 +1255,12 @@ func (s *Server) handleSchema(w http.ResponseWriter, r *http.Request) {
 		b = schema.LockSchema()
 	case "card":
 		b = schema.CardSchema()
+	case "act":
+		b = schema.ActSchema()
+	case "device":
+		b = schema.DeviceSchema()
 	default:
-		fail(w, http.StatusNotFound, "no schema %s: there are submit, tool, lock and card", r.PathValue("format"))
+		fail(w, http.StatusNotFound, "no schema %s: there are submit, tool, lock, card, act and device", r.PathValue("format"))
 		return
 	}
 	w.Header().Set("Content-Type", "application/schema+json")

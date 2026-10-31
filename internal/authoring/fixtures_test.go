@@ -120,7 +120,7 @@ func cases(t *testing.T) []schema.Case {
 // the failing ones the schema refuses with exactly their errors.
 func TestParseFixtures(t *testing.T) {
 	for _, c := range cases(t) {
-		if c.Format == "chain" || c.Format == "card" { // a chain and a tree's card are not lowering inputs
+		if c.Format != "submit" && c.Format != "tool" { // only submissions and tools are lowering inputs
 			continue
 		}
 		t.Run(c.Format+"/"+c.Name, func(t *testing.T) {

@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "agent",
+  "errors": [
+    {
+      "path": "predicate.signer",
+      "message": "\"https://cccc.io/id/user/noor\" does not sign an agent's act: the agent signs it (agent/<agent>)",
+      "fix": "write the agent's identity, https://cccc.io/id/agent/assistant"
+    }
+  ]
+}

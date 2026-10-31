@@ -1,0 +1,28 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c44xQzMNb8P4V3Wt2s1VN1AMSEA2N16Ms8NYgCpF1YJz1mZRXjWBQWpVhaVHGhvd6die3JmB9ZQVoMxNY1yPyMarD6",
+      "digest": {
+        "c4": "c44xQzMNb8P4V3Wt2s1VN1AMSEA2N16Ms8NYgCpF1YJz1mZRXjWBQWpVhaVHGhvd6die3JmB9ZQVoMxNY1yPyMarD6"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "noor",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEF6k2NwqzYpuP2lkBc_SQUI4lH9nPZXDZ8QZV11Nt7cOquzaB9-R9iZHYZzjbGEy21kBTU44PCZwE2CMP6lPeuw",
+    "protection": "software-browser",
+    "kind": "browser",
+    "label": "Safari on a Mac",
+    "evidence": "id-token",
+    "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6InNzby0yMDI2LTEwIn0.eyJhdWQiOiJjNC1zYWx0bWFyc2giLCJlbWFpbCI6Im5vb3JAc3R1ZGlvLmV4YW1wbGUiLCJleHAiOjE3OTM0ODY0MDAsImlhdCI6MTc5MzQ4MjgwMCwiaXNzIjoiaHR0cHM6Ly9zc28uc3R1ZGlvLmV4YW1wbGUiLCJub25jZSI6ImM0NHhRek1OYjhQNFYzV3QyczFWTjFBTVNFQTJOMTZNczhOWWdDcEYxWUp6MW1aUlhqV0JRV3BWaGFWSEdodmQ2ZGllM0ptQjlaUVZvTXhOWTF5UHlNYXJENiIsInN1YiI6IjAwdTFub29yIn0.uEuibSTBxks2dZNnCFl9F8lx0QXA3jDjBnfLWsrmgj8",
+    "providerKey": "c41XTDxYDxbWpYNFsuRSqZgGMq44NSntvhit3n8VBLJSC4iThQqB4hpD9tvNTwdWKrD3sGjMkJ9vYrPxeMephia4vE",
+    "renews": "c42LdpWD21rsbCLV6YnbJKAMRi8aRfgyPShr7MptiByKmu7vUmGYvKgx8uXHcKCk947D9U34hXCEWypURjKCurS3FE",
+    "nonce": "Um74e8b8wK_mlfErc_dPlQ",
+    "requestedAt": "2026-11-01T09:30:02Z",
+    "proof": "na6OKSkYyi04QxPnqGgVhHBFnv9GQ_exSziCrP1u8IVvsmnLjg6r6hRqTp8szL-8nItxyfptjzBOvKhjPSNE4g",
+    "signedAt": "2026-11-01T09:30:02.4Z"
+  }
+}

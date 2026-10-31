@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cccc.io/schema/device-1.schema.json",
+  "title": "C4 device record (device/v1)",
+  "description": "One of a person's device keys, enrolled at a farm: the public key, its protection, what kind of device holds it, the evidence it was certified on and the device's own signature over its enrolment request. The people's issuer signs it (component/issuer) and keeps it in the farm's index. A touch key is a device of its own, naming the device key it confirms for. A renewal is a record of its own, naming the record it renews.",
+  "type": "object",
+  "required": [
+    "_type",
+    "subject",
+    "predicateType",
+    "predicate"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_type": {
+      "const": "https://in-toto.io/Statement/v1"
+    },
+    "subject": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/subject"
+      }
+    },
+    "predicateType": {
+      "const": "https://cccc.io/provenance/device/v1"
+    },
+    "predicate": {
+      "$ref": "#/$defs/device"
+    }
+  },
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "digest"
+      ],
+      "description": "The device: device:<device ID>, with the device ID as its c4 digest.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^device:c4[1-9A-HJ-NP-Za-km-z]{88}$"
+        },
+        "digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "c4"
+          ],
+          "properties": {
+            "c4": {
+              "$ref": "#/$defs/id"
+            },
+            "sha512": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{128}$"
+            }
+          }
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "farm",
+        "person",
+        "key",
+        "protection",
+        "kind",
+        "evidence",
+        "nonce",
+        "requestedAt",
+        "proof",
+        "signedAt"
+      ],
+      "properties": {
+        "farm": {
+          "$ref": "#/$defs/id",
+          "description": "The farm's ID, as an act's."
+        },
+        "person": {
+          "$ref": "#/$defs/party",
+          "description": "Whose device it is: the leaf certifies it as user/<person>."
+        },
+        "key": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{122}$",
+          "description": "The public key: its DER SubjectPublicKeyInfo, ECDSA P-256 with the point uncompressed (91 bytes), base64url without padding. The device ID is the C4 ID of those 91 bytes."
+        },
+        "protection": {
+          "enum": [
+            "hardware",
+            "software-browser",
+            "software-file"
+          ],
+          "description": "Where the key lives, as every act it signs shows: the Secure Enclave or a TPM, a non-extractable WebCrypto key, or a file only the person's account can read. The device states it; nothing proves it."
+        },
+        "kind": {
+          "enum": [
+            "browser",
+            "mac",
+            "windows",
+            "linux"
+          ]
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "description": "The device in words, as the person's device list shows it: Safari on a Mac."
+        },
+        "touchFor": {
+          "$ref": "#/$defs/id",
+          "description": "A touch key: the device key it confirms acts for. Its signature beside that key's makes an act confirmed."
+        },
+        "evidence": {
+          "enum": [
+            "id-token",
+            "installer",
+            "owner",
+            "approval"
+          ],
+          "description": "What the issuer certified the key on: id-token, the studio's sign-in provider (idToken, whose nonce is the device ID); installer, a one-person farm's owner over loopback, once, before any owner key exists; owner, a browser the owner's key enrolled with a one-time code (code); approval, a confirmed act of the person's from another device (approval)."
+        },
+        "idToken": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$",
+          "description": "The ID token, as the provider issued it: compact JWS. Its nonce is the device ID, its audience the farm's client ID."
+        },
+        "providerKey": {
+          "$ref": "#/$defs/id",
+          "description": "The C4 ID of the provider's key (its JWK, canonical) that signed idToken, kept in the farm's index the first time it is seen."
+        },
+        "code": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "The SHA-256 of the one-time code the owner's CLI opened the HUD with, so the CLI finds the key its code enrolled."
+        },
+        "approval": {
+          "$ref": "#/$defs/id",
+          "description": "The C4 ID of the confirmed act that approved this device."
+        },
+        "renews": {
+          "$ref": "#/$defs/id",
+          "description": "A renewal: the record it renews. The key is the same; the evidence is fresh."
+        },
+        "nonce": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{22}$",
+          "description": "16 random bytes the signer makes, base64url without padding."
+        },
+        "requestedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "When the device made its enrolment request, by its own clock."
+        },
+        "proof": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{86}$",
+          "description": "The key's own signature over its enrolment request: ECDSA P-256 with SHA-256, raw r||s (64 bytes, low S), base64url, over the canonical JSON (RFC 8785) of {farm, person, key, touchFor if any, nonce, requestedAt}."
+        },
+        "signedAt": {
+          "type": "string",
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$",
+          "description": "When the issuer signed the record."
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "evidence": {
+                "const": "id-token"
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          },
+          "then": {
+            "required": [
+              "idToken",
+              "providerKey"
+            ]
+          },
+          "else": {
+            "not": {
+              "anyOf": [
+                {
+                  "required": [
+                    "idToken"
+                  ]
+                },
+                {
+                  "required": [
+                    "providerKey"
+                  ]
+                }
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidence": {
+                "const": "owner"
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          },
+          "then": {
+            "required": [
+              "code"
+            ],
+            "properties": {
+              "kind": {
+                "const": "browser"
+              }
+            }
+          },
+          "else": {
+            "not": {
+              "required": [
+                "code"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidence": {
+                "const": "approval"
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          },
+          "then": {
+            "required": [
+              "approval"
+            ]
+          },
+          "else": {
+            "not": {
+              "required": [
+                "approval"
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evidence": {
+                "const": "installer"
+              }
+            },
+            "required": [
+              "evidence"
+            ]
+          },
+          "then": {
+            "properties": {
+              "kind": {
+                "enum": [
+                  "mac",
+                  "windows",
+                  "linux"
+                ]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^c4[1-9A-HJ-NP-Za-km-z]{88}$",
+      "description": "A record's C4 ID."
+    },
+    "party": {
+      "type": "string",
+      "pattern": "^[^\\s:]+$",
+      "description": "A party's name in the farm's party list: a person or an organization."
+    }
+  }
+}

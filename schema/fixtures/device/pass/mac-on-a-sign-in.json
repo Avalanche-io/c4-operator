@@ -1,0 +1,27 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c45Qdc9pV9W2iTFwPA1yckYUcmgvHk5tBWAjC9ibft8k2jRYc3QNsig9djLyyXQnukMNWkeqGd4jecXWGXdKgNbrKR",
+      "digest": {
+        "c4": "c45Qdc9pV9W2iTFwPA1yckYUcmgvHk5tBWAjC9ibft8k2jRYc3QNsig9djLyyXQnukMNWkeqGd4jecXWGXdKgNbrKR"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/device/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "person": "dana",
+    "key": "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE50lVv1ZyPZ0rGz4PSc8xa13D_IMrJ_GwjKwqWqffbWJ7Ctne7yVO5lQVhU3-7KfbPxpLD7fqQiUtDuKPddf78g",
+    "protection": "hardware",
+    "kind": "mac",
+    "label": "dana's Mac, c4 2.1",
+    "evidence": "id-token",
+    "idToken": "eyJhbGciOiJSUzI1NiIsImtpZCI6InNzby0yMDI2LTEwIn0.eyJhdWQiOiJjNC1zYWx0bWFyc2giLCJlbWFpbCI6ImRhbmFAc3R1ZGlvLmV4YW1wbGUiLCJleHAiOjE3OTM0ODY0MDAsImlhdCI6MTc5MzQ4MjgwMCwiaXNzIjoiaHR0cHM6Ly9zc28uc3R1ZGlvLmV4YW1wbGUiLCJub25jZSI6ImM0NVFkYzlwVjlXMmlURndQQTF5Y2tZVWNtZ3ZIazV0QldBakM5aWJmdDhrMmpSWWMzUU5zaWc5ZGpMeXlYUW51a01OV2tlcUdkNGplY1hXR1hkS2dOYnJLUiIsInN1YiI6IjAwdTJkYW5hIn0.KvTHNmMmDNu_o7zdN7j_iwq6BuGJ2T6gaSQSH4pYUxY",
+    "providerKey": "c41XTDxYDxbWpYNFsuRSqZgGMq44NSntvhit3n8VBLJSC4iThQqB4hpD9tvNTwdWKrD3sGjMkJ9vYrPxeMephia4vE",
+    "nonce": "VfW_f8mFcxT6rCEIDytHlg",
+    "requestedAt": "2026-10-31T21:30:02Z",
+    "proof": "uXY8Lp-Si3qPnm86sdWoVxlMk-rpa0_9QuY2MB09zyIbcIiFDyHfeWtKGcXcMwrAA3ViDCo6msnXL659ormGaw",
+    "signedAt": "2026-10-31T21:30:02.4Z"
+  }
+}

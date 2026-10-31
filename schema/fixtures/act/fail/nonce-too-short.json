@@ -1,0 +1,34 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "workjob:saltmarsh/sm0140-comp-v003@9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10",
+      "digest": {
+        "sha256": "d4d8ec0a1ef54e5baf954bfdf5cf893e607ec4173d17a3d52e47de2c43d7c292"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/act/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "act": "approve",
+    "params": {
+      "note": "the edge of frame 1012 reads now"
+    },
+    "as": "comp-supervisor",
+    "device": "c44xQzMNb8P4V3Wt2s1VN1AMSEA2N16Ms8NYgCpF1YJz1mZRXjWBQWpVhaVHGhvd6die3JmB9ZQVoMxNY1yPyMarD6",
+    "nonce": "c2hvcnQ",
+    "signer": "https://cccc.io/id/user/noor",
+    "chain": {
+      "by": {
+        "person": "noor",
+        "grade": "signed"
+      },
+      "for": {
+        "party": "noor",
+        "grade": "signed"
+      }
+    },
+    "signedAt": "2026-10-31T21:40:07Z"
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "device:c44qdjqswEQb9R1mGjj9BQFxLQNeRrA93antzmfEdv6Q3DZJYqUmjeGwyA6b1qCuZbFAtdGvFi77hCa9ehSirg9c7w",
+      "digest": {
+        "c4": "c44qdjqswEQb9R1mGjj9BQFxLQNeRrA93antzmfEdv6Q3DZJYqUmjeGwyA6b1qCuZbFAtdGvFi77hCa9ehSirg9c7w"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/act/v1",
+  "predicate": {
+    "farm": "c44idf4JMNHVz2qxyvz7f6uEYWzv4JCZ9sAfgtubwd7WeHAXcGjbK4pUuZtQ5uoUoafSYNFdhgUWohqTkLtNMvYjBy",
+    "act": "remove-device",
+    "params": {
+      "from": "2026-10-30T18:00:00Z"
+    },
+    "device": "c43uiYf8PZbmgeWb2HEWXAK5hcj1dvLTVxaUjEWhLUhU1wBvjQWaJYzTuoNrcwx7dSiwWDrnec9se3bsaqD2u8xefS",
+    "nonce": "EWzV2CSWC8gNJQirw2OgTA",
+    "signer": "https://cccc.io/id/user/noor",
+    "chain": {
+      "by": {
+        "person": "noor",
+        "grade": "confirmed"
+      },
+      "for": {
+        "party": "noor",
+        "grade": "confirmed"
+      }
+    },
+    "signedAt": "2026-10-31T21:40:07Z"
+  }
+}

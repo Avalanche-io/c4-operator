@@ -167,7 +167,7 @@ var (
 func schemaFor(format string) (*jsonschema.Schema, error) {
 	resolvedOnce.Do(func() {
 		schemas = map[string]*jsonschema.Schema{}
-		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "card": card, "chain": chainSchema} {
+		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "card": card, "chain": chainSchema, "act": actSchema, "device": deviceSchema} {
 			s := new(jsonschema.Schema)
 			if err := json.Unmarshal(b, s); err != nil {
 				resolveErr = fmt.Errorf("schema %s: %w", f, err)
@@ -228,7 +228,7 @@ func dedupe(errs []Error) []Error {
 	return out
 }
 
-var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "card": "a card", "chain": "a chain"}
+var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "card": "a card", "chain": "a chain", "act": "an act statement", "device": "a device record"}
 
 // nouns name the $defs in errors: "frame" is not a field of a job.
 var nouns = map[string]string{
@@ -236,6 +236,7 @@ var nouns = map[string]string{
 	"use": "a use", "needs": "needs", "runs": "runs", "param": "a parameter", "userInterface": "userInterface",
 	"progressRule": "a progress rule", "fileFilter": "a file filter",
 	"by": "by", "for": "for", "delegation": "a delegation", "credential": "a credential", "deployment": "a deployment",
+	"subject": "a subject", "act": "an act", "actChain": "an act's chain", "device": "a device record",
 }
 
 // elem is one step of a path: a key, or an index (key "").
@@ -470,6 +471,10 @@ func (c *checker) walk(v any, s *jsonschema.Schema, path []elem, shape []string,
 	if arr, isArr := v.([]any); isArr {
 		if s.MinItems != nil && len(arr) < *s.MinItems {
 			m, f := c.say("empty", shape, path, v, nil)
+			fail(m, f, path)
+		}
+		if s.MaxItems != nil && len(arr) > *s.MaxItems {
+			m, f := c.say("maxItems", shape, path, v, map[string]any{"max": *s.MaxItems})
 			fail(m, f, path)
 		}
 		if s.UniqueItems {
@@ -810,10 +815,75 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		return "an accountable chain's deployments each name their binding and owner", "add binding and owner (the farm binding covers every deployment), or set accountable: false"
 	case "forbidden chain using[].holderSubject":
 		return "an accountable chain's credentials are each held by a party", "name the holder's party, or set accountable: false"
-	case "required chain by":
+	case "required chain by", "required act predicate.chain.by":
 		if ctx["field"] == "person" {
-			return "signed is for a party's own key: a deployment's or an agent's own record is direct", "use grade: direct"
+			return "confirmed is a person's touch on their own device", "use grade: signed"
 		}
+	case "forbidden chain by.deployment":
+		return "a deployment's own record is direct: signed and confirmed are for an act signed with its actor's own key", "use grade: direct"
+	case "forbidden chain by.user", "forbidden act predicate.chain.by.user":
+		return "a tracker user's decision is relayed: the relay signed it, not them", "use grade: relayed"
+	// An act statement.
+	case "forbidden act predicate.chain.by.deployment":
+		return "an act is never by rule: a deployment's own decision is its own record, not an act", "name who acted: a person, a unit, an agent or a tracker user"
+	case "anyOf act subject[]":
+		return "an act names what it is on by its UID and its version, or by its C4 ID",
+			"write <kind>:<project>/<name>@<uid> with the sha256 of its spec as the farm served it, or name content by its c4 digest"
+	case "pattern act subject[].name":
+		return fmt.Sprintf("%s is not a subject", quote(v)), "write <kind>:<project>/<name>@<uid>, or <kind>:<what> for content named by its C4 ID"
+	case "pattern act predicate.signer":
+		return fmt.Sprintf("%s does not sign %s", quote(v), actorWords(c.at([]elem{{key: "predicate"}, {key: "chain"}, {key: "by"}}))),
+			signerFix(c.at([]elem{{key: "predicate"}, {key: "chain"}, {key: "by"}}))
+	case "required act predicate":
+		switch ctx["field"] {
+		case "device":
+			return "a person's act names the device that signed it", "add device: the device key's ID, as its certificate names it"
+		case "nonce":
+			return "an act needs a nonce", "add nonce: 16 random bytes, base64url"
+		case "farm":
+			return "an act names the farm it was made for", "add farm: the C4 ID of the farm CA's root certificate"
+		}
+	case "forbidden act predicate.device":
+		return "only a person's own device signs with a device key", "remove device: a unit, an agent or a relay signs with its own certificate"
+	case "enum act predicate.chain.by.grade":
+		if by, _ := c.at(path[:len(path)-1]).(map[string]any); by != nil && by["person"] != nil {
+			return fmt.Sprintf("a person's act is signed, or confirmed with a touch, not %s", quote(v)), "use grade: signed, or confirmed when the touch key signed it too"
+		}
+	case "const act predicate.chain.by.grade":
+		if by, _ := c.at(path[:len(path)-1]).(map[string]any); by != nil && by["user"] != nil {
+			return fmt.Sprintf("a tracker user's decision is relayed, not %s", quote(v)), "use grade: relayed"
+		}
+		return fmt.Sprintf("a unit's or an agent's act is signed with its own key, not %s", quote(v)), "use grade: signed"
+	case "pattern act predicate.nonce", "pattern device predicate.nonce":
+		return fmt.Sprintf("%s is not a nonce", quote(v)), "write 16 random bytes as base64url: 22 characters, no padding"
+	case "pattern act predicate.signedAt", "pattern device predicate.signedAt", "pattern device predicate.requestedAt":
+		return fmt.Sprintf("%s is not a time in UTC", quote(v)), "write RFC 3339 in UTC, as 2026-10-31T21:40:00Z"
+	case "maxItems act subject", "maxItems device subject":
+		return "a record is on one subject", "keep one; an act on several things is several acts"
+	// A device record.
+	case "pattern device predicate.key":
+		return "the key is not a P-256 public key", "write its DER SubjectPublicKeyInfo, the point uncompressed (91 bytes), as base64url without padding"
+	case "pattern device predicate.proof":
+		return "the proof is not a P-256 signature", "write the raw r||s (64 bytes, low S) as base64url without padding"
+	case "required device predicate":
+		switch ctx["field"] {
+		case "idToken", "providerKey":
+			return "a key certified on a sign-in keeps the ID token and the provider's key", "add idToken: the token as issued, and providerKey: the C4 ID of the key that signed it"
+		case "code":
+			return "a browser the owner enrolled keeps the hash of its one-time code", "add code: the SHA-256 of the code"
+		case "approval":
+			return "a device approved from another names the act that approved it", "add approval: the C4 ID of the confirmed act"
+		}
+	case "forbidden device predicate.idToken", "forbidden device predicate.providerKey", "forbidden device predicate.code", "forbidden device predicate.approval":
+		return fmt.Sprintf("%s is not the evidence this record says", field), fmt.Sprintf("remove %s, or set evidence: to what it is", field)
+	case "const device predicate.kind":
+		return "the owner's key enrols a browser with a one-time code, never another machine", "use evidence: approval for another machine, approved from the first"
+	case "enum device predicate.kind":
+		if ev, _ := c.at([]elem{{key: "predicate"}, {key: "evidence"}}).(string); ev == EvidenceInstaller {
+			return "the installer token enrols the owner's own keys at the terminal, never a browser", "enrol the browser with the owner's key: evidence: owner"
+		}
+	case "pattern device subject[].name":
+		return fmt.Sprintf("%s is not a device", quote(v)), "write device:<device ID>"
 	case "pattern chain by.deployment", "pattern chain on[].deployment":
 		return fmt.Sprintf("%s is not a deployment", quote(v)), "write <farm>/<kind>/<name>, kind one of component, node, runner, sync or import"
 	case "pattern chain using[].signIn":
@@ -909,3 +979,37 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 	}
 	return fmt.Sprintf("%s is not valid", field), "see GET /schema/" + c.format
 }
+
+// actorWords is an act's by in words, for a signer that doesn't match it.
+func actorWords(by any) string {
+	b, _ := by.(map[string]any)
+	switch {
+	case b["person"] != nil:
+		return "a person's act: their own device signs it (user/<person>)"
+	case b["user"] != nil:
+		return "a tracker user's act: the tracker's relay signs it (sa/<project>/<account>)"
+	case b["unit"] != nil:
+		return "a unit's act: the unit signs it (unit/<project>/<job>/<unit>@<uid>/<attempt>)"
+	case b["agent"] != nil:
+		return "an agent's act: the agent signs it (agent/<agent>)"
+	}
+	return "this act"
+}
+
+func signerFix(by any) string {
+	b, _ := by.(map[string]any)
+	switch {
+	case b["person"] != nil:
+		return fmt.Sprintf("write the person's identity, %suser/%v", identityBase, b["person"])
+	case b["user"] != nil:
+		return "write the relay's identity, " + identityBase + "sa/<project>/<account>"
+	case b["unit"] != nil:
+		return "write the unit's identity, " + identityBase + "unit/<project>/<job>/<unit>@<uid>/<attempt>"
+	case b["agent"] != nil:
+		return fmt.Sprintf("write the agent's identity, %sagent/%v", identityBase, b["agent"])
+	}
+	return "write the identity its certificate names"
+}
+
+// identityBase is provenance.IdentityBase, which this package cannot import.
+const identityBase = "https://cccc.io/id/"

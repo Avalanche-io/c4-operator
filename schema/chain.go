@@ -31,12 +31,16 @@ type Chain struct {
 	Gap         string       `json:"gap,omitempty"`
 }
 
-// Grades say how strongly a link is evidenced.
+// Grades say how strongly a link is evidenced: signed, the actor's own
+// key; confirmed, signed with a person's touch key too; relayed, a
+// tracker's relay; direct and claimed, the HUD's word, which records made
+// before personal keys keep.
 const (
-	GradeClaimed = "claimed"
-	GradeDirect  = "direct"
-	GradeRelayed = "relayed"
-	GradeSigned  = "signed"
+	GradeClaimed   = "claimed"
+	GradeConfirmed = "confirmed"
+	GradeDirect    = "direct"
+	GradeRelayed   = "relayed"
+	GradeSigned    = "signed"
 )
 
 // Actor is the chain's by: a person, a unit (with its agent), a deployment

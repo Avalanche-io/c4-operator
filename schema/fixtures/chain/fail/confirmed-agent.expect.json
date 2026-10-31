@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "person",
+  "errors": [
+    {
+      "path": "by",
+      "message": "confirmed is a person's touch on their own device",
+      "fix": "use grade: signed"
+    }
+  ]
+}

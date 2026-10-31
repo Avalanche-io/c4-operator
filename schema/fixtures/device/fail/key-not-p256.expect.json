@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "pattern",
+  "errors": [
+    {
+      "path": "predicate.key",
+      "message": "the key is not a P-256 public key",
+      "fix": "write its DER SubjectPublicKeyInfo, the point uncompressed (91 bytes), as base64url without padding"
+    }
+  ]
+}

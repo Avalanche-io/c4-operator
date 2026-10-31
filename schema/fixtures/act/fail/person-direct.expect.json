@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "enum",
+  "errors": [
+    {
+      "path": "predicate.chain.by.grade",
+      "message": "a person's act is signed, or confirmed with a touch, not \"direct\"",
+      "fix": "use grade: signed, or confirmed when the touch key signed it too"
+    }
+  ]
+}

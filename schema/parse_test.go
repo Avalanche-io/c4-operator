@@ -25,6 +25,12 @@ func TestParseFixtures(t *testing.T) {
 			case "card":
 				cd, e := ParseCard(c.Doc)
 				parsed, errs = cd, e
+			case "act":
+				a, e := ParseAct(c.Doc)
+				parsed, errs = a, e
+			case "device":
+				d, e := ParseDevice(c.Doc)
+				parsed, errs = d, e
 			default:
 				tl, e := ParseTool(c.Doc)
 				parsed, errs = tl, e
@@ -52,7 +58,7 @@ func TestParseFixtures(t *testing.T) {
 // validator accept and refuse the same fixtures.
 func TestParsersAgreeWithTheSchema(t *testing.T) {
 	for _, c := range cases(t) {
-		rs := resolve(t, map[string][]byte{"submit": SubmitSchema(), "tool": ToolSchema(), "chain": ChainSchema(), "card": CardSchema()}[c.Format])
+		rs := resolve(t, map[string][]byte{"submit": SubmitSchema(), "tool": ToolSchema(), "chain": ChainSchema(), "card": CardSchema(), "act": ActSchema(), "device": DeviceSchema()}[c.Format])
 		validErr := rs.Validate(value(t, c.Doc))
 		var errs []Error
 		switch c.Format {
@@ -62,6 +68,10 @@ func TestParsersAgreeWithTheSchema(t *testing.T) {
 			_, errs = ParseChain(c.Doc)
 		case "card":
 			_, errs = ParseCard(c.Doc)
+		case "act":
+			_, errs = ParseAct(c.Doc)
+		case "device":
+			_, errs = ParseDevice(c.Doc)
 		default:
 			_, errs = ParseTool(c.Doc)
 		}

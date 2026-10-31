@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "providerKey",
+  "errors": [
+    {
+      "path": "predicate",
+      "message": "a key certified on a sign-in keeps the ID token and the provider's key",
+      "fix": "add idToken: the token as issued, and providerKey: the C4 ID of the key that signed it"
+    }
+  ]
+}
