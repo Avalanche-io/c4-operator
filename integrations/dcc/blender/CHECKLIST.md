@@ -267,6 +267,12 @@ farm.
    does with "Auto Run Python Scripts" off, the default. **[guess]**: that is
    how the artist sees it too; a studio that runs scripts adds `-y` in its
    copy of `blender-render.sh`.
+7. A file whose image and linked library are absolute paths on the artist's
+   project volume (not `//`), submitted with that volume as the project's
+   folder. **Expect:** the unit's log has a `path map:` line for each, and
+   the frames show the texture and the linked asset. **[guess]**: that
+   `Library.reload()` after its `filepath` changes loads what the file
+   links, in Blender 4.2 to 5.2.
 
 ## Installed by `c4 farm integrate blender on`
 

@@ -124,7 +124,14 @@ which:
 - renders each of the unit's frames, and prints `c4_frame` with the file's
   path once it is on disk;
 - refuses, as a permanent failure, a scene, view layer or camera the file
-  does not have, naming the ones it has.
+  does not have, naming the ones it has;
+- before rendering, points each absolute path the file reads (images,
+  linked libraries, movie clips, sounds, Alembic and USD caches, OpenVDB
+  volumes, fonts, the sequencer's strips) at the job's tree, by the farm's
+  path map (`C4_PATH_MAP`) from the artist's machine's root, as Nuke's
+  filename filter and Maya's `dirmap` do, and reloads a linked library from
+  its new place. Paths relative to the file (`//`) need nothing, and each
+  path it changes is in the unit's log.
 
 Frames go where the scene's output path says, from the file's folder, with
 two changes. When the scene has more than one view layer to render, each
@@ -137,7 +144,8 @@ the `.blend` beside it, which is how the test needs no binary file in git.
 
 Not handled yet: a compositor's File Output nodes write where the file says,
 without a folder per view layer; a scene whose compositor combines several
-view layers renders with only the job's on. Python in the file (drivers,
+view layers renders with only the job's on. A linked library's own absolute paths
+(an image the library uses) are the library's: they are not mapped. Python in the file (drivers,
 scripts) runs only as far as Blender allows without auto-run, as on an
 artist's machine with Blender's defaults.
 

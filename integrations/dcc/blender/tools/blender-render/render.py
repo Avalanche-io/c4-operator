@@ -16,6 +16,13 @@ path says, resolved from the file's folder, with two changes:
   folder named for it (``render/bg/sh010_1001.exr``), so the jobs of one
   scene's view layers do not write the same files.
 
+Before anything renders, every absolute path the file reads (images,
+linked libraries, movie clips, sounds, caches, volumes, fonts, the
+sequencer's strips) is mapped from the artist's machine to the job's tree,
+by the farm's path map (``C4_PATH_MAP``), as Nuke's filename filter and
+Maya's dirmap do; a linked library is loaded again from its new place.
+Paths relative to the file (``//``) need nothing.
+
 Each frame rendered and found on disk is a ``c4_frame: <frame> <path>``
 line, with ``openjd_progress``. A scene, view layer or camera the file does
 not have is ``c4_fail: permanent``.
@@ -27,7 +34,14 @@ reason.
 
 import os
 import sys
-from typing import Dict, List, Mapping, Optional, Sequence
+from typing import Dict, List, Mapping, Optional, Sequence, Tuple
+
+# c4tool.py, beside this script, is a copy of integrations/dcc/toolkit/c4tool.py.
+_HERE = os.path.dirname(os.path.abspath(globals().get("__file__") or sys.argv[0]))
+if _HERE not in sys.path:
+    sys.path.insert(0, _HERE)
+
+from c4tool import map_path, read_path_map  # noqa: E402
 
 #: The engine choices, as the tool's ``engine`` parameter names them.
 ENGINES = ("file", "CYCLES", "EEVEE", "WORKBENCH")
@@ -134,6 +148,59 @@ def output_path(filepath: str, blend_dir: str, tree: str, view_layer: str, layer
     return p
 
 
+# --- the farm's path map (OpenJD pathmapping-1.0) -----------------------------------------
+
+#: The data-blocks whose ``filepath`` is a file the render reads.
+_FILE_BLOCKS = ("images", "libraries", "movieclips", "sounds", "cache_files", "volumes", "fonts")
+
+
+def _strips(scene):
+    ed = getattr(scene, "sequence_editor", None)
+    if ed is None:
+        return []
+    # strips_all from Blender 4.4 on, sequences_all before
+    return list(getattr(ed, "strips_all", None) or getattr(ed, "sequences_all", None) or [])
+
+
+def _mapped(path: str, rules) -> Optional[str]:
+    """An absolute path as the farm has it, or None when it stays: a path
+    relative to the file (``//``), Blender's own (``<builtin>``), or one no
+    rule maps."""
+    if not path or path.startswith("//") or path.startswith("<"):
+        return None
+    out = map_path(path, rules)
+    return out if out != path else None
+
+
+def map_file_paths(bpy, rules: List[Tuple[str, str, str]]) -> List[str]:
+    """Points every absolute path the open file reads at the farm's copy,
+    and returns what changed (``old -> new``), for the unit's log. A linked
+    library is reloaded from its new place, so what it links is there when
+    the frames render."""
+    if not rules:
+        return []
+    changed: List[str] = []
+    for name in _FILE_BLOCKS:
+        for block in getattr(bpy.data, name, ()):
+            if getattr(block, "library", None) is not None:
+                continue  # its path is the linked file's to say
+            new = _mapped(getattr(block, "filepath", ""), rules)
+            if new is None:
+                continue
+            changed.append(f"{block.filepath} -> {new}")
+            block.filepath = new
+            if name == "libraries":
+                block.reload()
+    for scene in bpy.data.scenes:
+        for strip in _strips(scene):
+            for attr in ("filepath", "directory"):
+                new = _mapped(getattr(strip, attr, "") or "", rules)
+                if new is not None:
+                    changed.append(f"{getattr(strip, attr)} -> {new}")
+                    setattr(strip, attr, new)
+    return changed
+
+
 # --- the file --------------------------------------------------------------------------
 
 def _names(coll) -> str:
@@ -209,6 +276,8 @@ def main() -> int:
         opts = parse_args(sys.argv)
         frames = unit_frames(os.environ)
         tree = os.environ.get("C4_TREE") or os.path.dirname(bpy.data.filepath)
+        for line in map_file_paths(bpy, read_path_map(os.environ.get("C4_PATH_MAP", ""))):
+            print(f"openjd_status: path map: {line}", flush=True)
         scene = prepare(bpy, opts, tree)
         render(bpy, scene, frames)
     except Refusal as e:

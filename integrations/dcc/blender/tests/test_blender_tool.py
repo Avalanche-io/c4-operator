@@ -260,3 +260,63 @@ def test_the_panel_fills_the_shipped_tool(tmp_path, monkeypatch):
     assert jobs["render-bg"]["with"] == {"blend": "sh010/lighting/sh010_lighting_v003.blend", "scene": "sh010",
                                          "view_layer": "bg", "camera": "CAM_sh010"}
     assert jobs["render-fg"]["with"]["view_layer"] == "fg"
+
+
+# --- the farm's path map ----------------------------------------------------------------
+
+class _Library(bf.ID):
+    def __init__(self, name, filepath):
+        super().__init__(name, filepath=filepath)
+        self.reloads = 0
+
+    def reload(self):
+        self.reloads += 1
+
+
+def test_absolute_paths_are_mapped_to_the_tree(tmp_path):
+    """The artist's absolute paths read from the job's tree, as Nuke's filename
+    filter and Maya's dirmap do; paths relative to the file, Blender's own,
+    other roots and linked data stay as they are."""
+    pm = tmp_path / "path-map.json"
+    pm.write_text('{"version": "pathmapping-1.0", "path_mapping_rules": ['
+                  '{"source_path_format": "WINDOWS", "source_path": "S:\\\\shows\\\\saltmarsh", "destination_path": "/show"},'
+                  '{"source_path_format": "POSIX", "source_path": "/Volumes/saltmarsh", "destination_path": "/show"}]}')
+    data = bf.Data(filepath="/show/sh010/lighting/sh010_lighting_v003.blend")
+    plate = bf.Image("plate", filepath="/Volumes/saltmarsh/sh010/plates/sh010_plate.1001.exr")
+    tex = bf.Image("tex", filepath="S:\\shows\\saltmarsh\\assets\\rock\\rock_albedo.<UDIM>.exr")
+    rel = bf.Image("rel", filepath="//../tex/grain.exr")
+    other = bf.Image("other", filepath="/mnt/library/hdri/studio.exr")
+    linked = bf.Image("linked", filepath="/Volumes/saltmarsh/assets/rock/rock_rough.exr")
+    lib = _Library("rock.blend", "/Volumes/saltmarsh/assets/rock/rock.blend")
+    linked.library = lib
+    data.images.extend([plate, tex, rel, other, linked])
+    data.libraries.append(lib)
+    data.cache_files.append(bf.ID("sim", filepath="/Volumes/saltmarsh/sh010/fx/sim.abc"))
+    data.fonts.append(bf.ID("Bfont", filepath="<builtin>"))
+    s = bf.Scene("sh010")
+    s.sequence_editor = bf.Struct(strips_all=[bf.Struct(name="bg", directory="/Volumes/saltmarsh/sh010/bg/"),
+                                              bf.Struct(name="vo", filepath="//audio/vo.wav")])
+    data.scenes.append(s)
+    bpy = types.SimpleNamespace(data=data)
+
+    changed = R.map_file_paths(bpy, R.read_path_map(str(pm)))
+    assert plate.filepath == "/show/sh010/plates/sh010_plate.1001.exr"
+    assert tex.filepath == "/show/assets/rock/rock_albedo.<UDIM>.exr", "a Windows root, either slash, any case"
+    assert lib.filepath == "/show/assets/rock/rock.blend" and lib.reloads == 1, "a library loads again from the tree"
+    assert data.cache_files[0].filepath == "/show/sh010/fx/sim.abc"
+    assert s.sequence_editor.strips_all[0].directory == "/show/sh010/bg/"
+    assert rel.filepath == "//../tex/grain.exr" and s.sequence_editor.strips_all[1].filepath == "//audio/vo.wav"
+    assert other.filepath == "/mnt/library/hdri/studio.exr", "a root the artist did not submit from stays"
+    assert linked.filepath == "/Volumes/saltmarsh/assets/rock/rock_rough.exr", "a linked image is its library's to say"
+    assert data.fonts[0].filepath == "<builtin>"
+    assert len(changed) == 5 and changed[0].endswith("-> /show/sh010/plates/sh010_plate.1001.exr")
+
+    # mapped once, already the farm's: nothing more to do
+    assert R.map_file_paths(bpy, R.read_path_map(str(pm))) == [] and lib.reloads == 1
+
+
+def test_no_path_map_changes_nothing():
+    data = bf.Data(filepath="/show/a.blend")
+    data.images.append(bf.Image("plate", filepath="/Volumes/saltmarsh/plate.exr"))
+    assert R.map_file_paths(types.SimpleNamespace(data=data), R.read_path_map("")) == []
+    assert data.images[0].filepath == "/Volumes/saltmarsh/plate.exr"
