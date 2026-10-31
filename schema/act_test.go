@@ -55,7 +55,7 @@ func TestCanonicalNumbers(t *testing.T) {
 // units, where an emoji comes before U+FB33 though its UTF-8 sorts after.
 func TestCanonical(t *testing.T) {
 	for in, want := range map[string]string{
-		`{"numbers": [333333333.33333329, 1E30, 4.50, 2e-3, 0.000000000000000000000000001], "string": "\u20ac$\u000F\u000aA'\u0042\u0022\u005c\\\"\/", "literals": [null, true, false]}`:                                          `{"literals":[null,true,false],"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27],"string":"€$\u000f\nA'B\"\\\\\"/"}`,
+		`{"numbers": [333333333.3333333, 1E30, 4.50, 2e-3, 0.000000000000000000000000001], "string": "\u20ac$\u000F\u000aA'\u0042\u0022\u005c\\\"\/", "literals": [null, true, false]}`:                                           `{"literals":[null,true,false],"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27],"string":"€$\u000f\nA'B\"\\\\\"/"}`,
 		`{"\u20ac": "Euro Sign", "\r": "Carriage Return", "\ufb33": "Hebrew Letter Dalet With Dagesh", "1": "One", "\ud83d\ude00": "Emoji: Grinning Face", "\u0080": "Control", "\u00f6": "Latin Small Letter O With Diaeresis"}`: "{\"\\r\":\"Carriage Return\",\"1\":\"One\",\"\u0080\":\"Control\",\"ö\":\"Latin Small Letter O With Diaeresis\",\"€\":\"Euro Sign\",\"😀\":\"Emoji: Grinning Face\",\"\ufb33\":\"Hebrew Letter Dalet With Dagesh\"}",
 		`{"b": [], "a": {"d": {}, "c": "<&>\u2028"}}`: "{\"a\":{\"c\":\"<&>\u2028\",\"d\":{}},\"b\":[]}",
 	} {
@@ -67,9 +67,27 @@ func TestCanonical(t *testing.T) {
 			t.Errorf("%s:\n got  %s\n want %s", in, got, want)
 		}
 	}
-	for _, bad := range []string{`{"a": 1, "a": 2}`, "\"\xff\"", `{"a": 1} {}`} {
+	// Refused, so two values never share a canonical form: a number a
+	// double can't hold as written (RFC 8785's own 333333333.33333329
+	// among them, which is why the example above writes 333333333.3333333),
+	// and a lone surrogate, which Go would read as U+FFFD.
+	for _, bad := range []string{`{"a": 1, "a": 2}`, "\"\xff\"", `{"a": 1} {}`,
+		`{"n": 12345678901234567890}`, `{"n": 12345678901234567891}`, `[333333333.33333329]`, `[9007199254740993]`, `[0.1000000000000000000001]`,
+		`{"s": "\ud800"}`, `{"s": "\udc00"}`, `{"s": "\ud800x"}`, `{"s": "\ud800\u0041"}`, `{"\ud800": 1}`} {
 		if _, err := Canonical([]byte(bad)); err == nil {
 			t.Errorf("%q: canonical, want refused", bad)
+		}
+	}
+}
+
+func TestCanonicalKeeps(t *testing.T) {
+	for in, want := range map[string]string{
+		`[9007199254740991, -9007199254740991, 1e21, 0.1, 4.50, 1E30]`: `[9007199254740991,-9007199254740991,1e+21,0.1,4.5,1e+30]`,
+		`{"s": "\ud83d\ude00 \ufffd \\ud800"}`:                         `{"s":"😀 � \\ud800"}`,
+	} {
+		got, err := Canonical([]byte(in))
+		if err != nil || string(got) != want {
+			t.Errorf("%s: got %s, %v; want %s", in, got, err, want)
 		}
 	}
 }

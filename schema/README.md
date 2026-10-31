@@ -85,7 +85,11 @@ is (`https://cccc.io/provenance/act/v1`).
   canonical form when large. Two sets of parameters match when their
   `ParamsID`s do: the C4 ID of `Canonical` (RFC 8785), so key order, spacing
   and `1012.0` against `1012` never matter. A browser gets the same bytes from
-  `JSON.stringify` of a key-sorted value.
+  `JSON.stringify` of a key-sorted value. So that two different values never
+  share a form, a number a double can't hold exactly as written (an integer
+  past 2^53, more digits than a double keeps) and a lone surrogate escape are
+  refused, as I-JSON (RFC 7493) rules them out: send such a number as a
+  string.
 - **`signedAt`** is when the signer signed, RFC 3339 in UTC, the time every
   C4 record carries. The farm refuses an act more than five minutes from its
   own clock. **`nonce`** is 16 random bytes, base64url.

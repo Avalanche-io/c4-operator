@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/big"
 	"slices"
 	"strconv"
 	"strings"
@@ -207,11 +208,18 @@ func DeviceID(spki []byte) string { return c4.Identify(bytes.NewReader(spki)).St
 // Canonical writes JSON in its canonical form, RFC 8785 (JCS): no
 // whitespace, object keys sorted by their UTF-16 code units, strings with
 // only the escapes JSON requires, and numbers as ECMAScript writes them. A
-// browser gets the same bytes from JSON.stringify of a key-sorted value. A
-// key written twice, or text that isn't UTF-8, is refused.
+// browser gets the same bytes from JSON.stringify of a key-sorted value.
+// Refused, so two different values never share a form: a key written
+// twice, text that isn't UTF-8, an unpaired surrogate escape, and a number
+// a double can't hold exactly as written (an integer past 2^53, more
+// digits than a double keeps), which I-JSON (RFC 7493) rules out. Send
+// such a number as a string.
 func Canonical(b []byte) ([]byte, error) {
 	if !utf8.Valid(b) {
 		return nil, errors.New("canonical JSON: the text is not UTF-8")
+	}
+	if err := surrogatesPaired(b); err != nil {
+		return nil, fmt.Errorf("canonical JSON: %w", err)
 	}
 	d := json.NewDecoder(bytes.NewReader(b))
 	d.UseNumber()
@@ -242,7 +250,15 @@ func canonValue(d *json.Decoder, w *bytes.Buffer) error {
 		if err != nil {
 			return fmt.Errorf("%s is not a number JSON can carry", x)
 		}
-		w.WriteString(esNumber(f))
+		out := esNumber(f)
+		// The canonical form must mean exactly the number written: 4.50
+		// is 4.5, but 12345678901234567891 is not 12345678901234567000.
+		written, ok1 := new(big.Rat).SetString(string(x))
+		canon, ok2 := new(big.Rat).SetString(out)
+		if !ok1 || !ok2 || written.Cmp(canon) != 0 {
+			return fmt.Errorf("%s is more exact than a double holds: send it as a string", x)
+		}
+		w.WriteString(out)
 	case json.Delim:
 		switch x {
 		case '[':
@@ -295,6 +311,42 @@ func canonValue(d *json.Decoder, w *bytes.Buffer) error {
 		}
 		if _, err := d.Token(); err != nil { // the closing delimiter
 			return err
+		}
+	}
+	return nil
+}
+
+// surrogatesPaired refuses a \u escape of a lone UTF-16 surrogate, which
+// Go's decoder would read as U+FFFD, the same as a real U+FFFD.
+func surrogatesPaired(b []byte) error {
+	in := false
+	for i := 0; i < len(b); i++ {
+		switch c := b[i]; {
+		case c == '"':
+			in = !in
+		case in && c == '\\' && i+1 < len(b):
+			if b[i+1] != 'u' || i+5 >= len(b) {
+				i++
+				continue
+			}
+			r, err := strconv.ParseUint(string(b[i+2:i+6]), 16, 16)
+			if err != nil {
+				return errors.New("a \\u escape needs four hex digits")
+			}
+			i += 5
+			switch {
+			case r >= 0xDC00 && r <= 0xDFFF:
+				return fmt.Errorf("\\u%04x is half of a surrogate pair, alone", r)
+			case r >= 0xD800 && r <= 0xDBFF:
+				low := uint64(0)
+				if i+6 < len(b) && b[i+1] == '\\' && b[i+2] == 'u' {
+					low, _ = strconv.ParseUint(string(b[i+3:i+7]), 16, 16)
+				}
+				if low < 0xDC00 || low > 0xDFFF {
+					return fmt.Errorf("\\u%04x is half of a surrogate pair, alone", r)
+				}
+				i += 6
+			}
 		}
 	}
 	return nil
