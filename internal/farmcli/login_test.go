@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people/peopletest"
 )
 
@@ -115,5 +117,74 @@ func TestLoginCertifiesThisMachinesKey(t *testing.T) {
 	e.IDToken = f.SSO.Token(time.Now(), peopletest.DanaSub, deviceID(key), nil)
 	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/enroll", e, nil); err == nil {
 		t.Error("a token for another key certified this one")
+	}
+}
+
+// loginAs signs dana in on a studio farm, through the loopback flow, and
+// returns the client, the farm's config and her keys on this machine.
+func loginAs(t *testing.T, f *peopletest.Farm) (*Client, *people.Config, keystore.Store) {
+	t.Helper()
+	auth := &fakeAuth{sso: f.SSO, codes: map[string]url.Values{}, sub: peopletest.DanaSub}
+	provider := httptest.NewServer(auth)
+	t.Cleanup(provider.Close)
+	c, err := NewClient(Farm{HUD: f.Server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := PeopleConfig(context.Background(), c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	_, err = Login(context.Background(), c, LoginArgs{Store: st, Farm: cfg, Provider: provider.Client(),
+		Endpoints: OIDCEndpoints{Authorization: provider.URL + "/authorize", Token: provider.URL + "/token"},
+		Open: func(u string) error {
+			resp, err := provider.Client().Get(u)
+			if err == nil {
+				resp.Body.Close()
+			}
+			return err
+		}, Wait: 10 * time.Second})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c, cfg, st
+}
+
+// The CLI reads the people's index itself and tells its person of a
+// device enrolled as them since, its ID token checked against the
+// provider key the index booked; it says each once. A head that goes back
+// from one it saw signed is refused.
+func TestNewDevicesAreToldFromTheIndex(t *testing.T) {
+	f := peopletest.Studio(t)
+	c, cfg, st := loginAs(t, f)
+	ctx := context.Background()
+	if ns, err := NewDevices(ctx, c, st, cfg); err != nil || len(ns) != 0 {
+		t.Fatalf("before another device: %v %+v", err, ns)
+	}
+	// another device signs in as dana
+	d := peopletest.NewDevice(t)
+	e := f.Enrolment(t, d, "dana", "", "browser")
+	e.IDToken = f.SSO.Token(time.Now(), peopletest.DanaSub, d.ID, nil)
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/enroll", e, nil); err != nil {
+		t.Fatal(err)
+	}
+	ns, err := NewDevices(ctx, c, st, cfg)
+	if err != nil || len(ns) != 1 || ns[0].Device != d.ID || ns[0].Problem != "" || ns[0].Kind != "browser" {
+		t.Fatalf("the new device: %v %+v", err, ns)
+	}
+	if !strings.Contains(ns[0].String(), "a new device signed in as you: dana's browser (browser)") {
+		t.Errorf("said: %s", ns[0])
+	}
+	if again, err := NewDevices(ctx, c, st, cfg); err != nil || len(again) != 0 {
+		t.Errorf("told twice: %v %+v", err, again)
+	}
+	// this machine saw a head further on than the farm now serves
+	w, _ := loadWatch(st)
+	w.HeadPosition += 5
+	w.Position = w.HeadPosition
+	saveWatch(st, w)
+	if _, err := NewDevices(ctx, c, st, cfg); !errors.Is(err, ErrIndexRollback) {
+		t.Errorf("a head that goes back: %v", err)
 	}
 }
