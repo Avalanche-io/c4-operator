@@ -78,13 +78,13 @@ func TestPeopleHeadMovesOnce(t *testing.T) {
 	if one.ID != "c4first" || one.Position != 1 {
 		t.Fatalf("head %+v", one)
 	}
-	if err := h.Write(ctx, one, people.HeadState{ID: "c4second", Position: 2}); err != nil {
+	if err := h.Write(ctx, one, people.HeadState{ID: "c4second", Position: 2, Signed: []byte("the issuer's signature")}); err != nil {
 		t.Fatal(err)
 	}
 	if err := h.Write(ctx, one, people.HeadState{ID: "c4stale", Position: 2}); !errors.Is(err, people.ErrMoved) {
 		t.Errorf("a write from a stale head: %v", err)
 	}
-	if two, _ := h.Read(ctx); two.ID != "c4second" || two.Position != 2 {
+	if two, _ := h.Read(ctx); two.ID != "c4second" || two.Position != 2 || string(two.Signed) != "the issuer's signature" {
 		t.Errorf("head %+v", two)
 	}
 }

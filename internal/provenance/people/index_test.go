@@ -43,9 +43,26 @@ func (r *rig) forge(e *people.Entry, record []byte, prev string, pos int64) {
 	}
 	id := c4.Identify(strings.NewReader(string(b))).String()
 	r.store.Put(ctx, id, b)
-	if err := r.head.Write(ctx, h, people.HeadState{ID: id, Position: pos}); err != nil {
+	if err := r.head.Write(ctx, h, people.HeadState{ID: id, Position: pos, Signed: r.signedHead("issuer", id, pos)}); err != nil {
 		r.t.Fatal(err)
 	}
+}
+
+// signedHead is a head signed as component/<as>, as a forger holding that
+// key would sign it.
+func (r *rig) signedHead(as, id string, pos int64) []byte {
+	r.t.Helper()
+	ctx := context.Background()
+	s, err := provenance.NewSigner(ctx, provenance.LocalIssuer(r.farm.CA, provenance.ComponentIdentity(as), time.Hour))
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	b, err := provenance.SignStatement(ctx, s, people.PredicateIndexHead, []provenance.Subject{{Name: "people-index:" + r.farm.ID, Digest: map[string]string{"c4": id}}},
+		map[string]any{"farm": r.farm.ID, "head": id, "position": pos}, r.now)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return b
 }
 
 // The index's hash links are checked: an entry whose bytes no longer hash
@@ -122,7 +139,7 @@ func TestForkedHeadAtTheSamePosition(t *testing.T) {
 	}
 	h, _ := r.head.Read(ctx)
 	_, ids, _ := r.index.Entries(ctx, 0)
-	if err := r.head.Write(ctx, h, people.HeadState{ID: ids[0], Position: h.Position}); err != nil {
+	if err := r.head.Write(ctx, h, people.HeadState{ID: ids[0], Position: h.Position, Signed: r.signedHead("issuer", ids[0], h.Position)}); err != nil {
 		t.Fatal(err)
 	}
 	defer func() {
@@ -232,4 +249,33 @@ func TestEntriesAgreeWithTheirRecords(t *testing.T) {
 			t.Errorf("read: %v", err)
 		}
 	})
+}
+
+// The head is signed by the people's issuer, and covers every entry
+// through their links: a head written with only the head Secret's
+// credentials, unsigned, signed by another component, or carrying the
+// issuer's signature over another head, is refused.
+func TestHeadSignedByTheIssuer(t *testing.T) {
+	r := studio(t)
+	r.signIn(newDev(t), "dana", danaSub)
+	ctx := context.Background()
+	h, _ := r.head.Read(ctx)
+	_, ids, _ := r.index.Entries(ctx, 0)
+	if err := r.reread(); err != nil {
+		t.Fatalf("the issuer's own head: %v", err)
+	}
+	for name, forged := range map[string]people.HeadState{
+		"unsigned":                     {ID: h.ID, Position: h.Position},
+		"signed by the HUD":            {ID: h.ID, Position: h.Position, Signed: r.signedHead("hud", h.ID, h.Position)},
+		"another head's signature":     {ID: ids[1], Position: 2, Signed: h.Signed},
+		"a signature at another place": {ID: h.ID, Position: h.Position, Signed: r.signedHead("issuer", h.ID, h.Position+1)},
+	} {
+		cur, _ := r.head.Read(ctx)
+		if err := r.head.Write(ctx, cur, forged); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.reread(); !errors.Is(err, people.ErrIndex) {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
 }

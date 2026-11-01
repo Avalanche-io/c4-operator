@@ -139,12 +139,64 @@ type Store interface {
 	Get(ctx context.Context, id string) ([]byte, error)
 }
 
-// HeadState is the index's head: the last entry's C4 ID and position, and
-// the version a Write must be given to move it.
+// HeadState is the index's head: the last entry's C4 ID and position, the
+// issuer's signature over them, and the version a Write must be given to
+// move it.
 type HeadState struct {
 	ID       string
 	Position int64
-	Version  string
+	// Signed is a bundle the people's issuer signed (component/issuer),
+	// naming the farm, the head and its position (PredicateIndexHead).
+	Signed  []byte
+	Version string
+}
+
+// PredicateIndexHead is the people's index's head as the issuer signed
+// it. Every entry is linked to the head by its C4 ID, so the signature
+// covers them all: whoever holds only the store's or the head Secret's
+// credentials can't add, change or drop an entry. It doesn't stop a
+// rollback to an older head the issuer signed, or a compromised manager,
+// which holds the issuer's key (DESIGN.md section 9.2).
+const PredicateIndexHead = "https://cccc.io/provenance/people-index/v1"
+
+// headPredicate is what a signed head says.
+type headPredicate struct {
+	Farm     string `json:"farm"`
+	Head     string `json:"head"`
+	Position int64  `json:"position"`
+}
+
+// signHead signs a head as the issuer.
+func (x *Index) signHead(ctx context.Context, sign func(context.Context) (*provenance.Signer, error), id string, pos int64, now time.Time) ([]byte, error) {
+	s, err := sign(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return provenance.SignStatement(ctx, s, PredicateIndexHead, []provenance.Subject{{Name: "people-index:" + x.Farm, Digest: map[string]string{"c4": id}}},
+		headPredicate{Farm: x.Farm, Head: id, Position: pos}, now)
+}
+
+// checkHead checks a head is the one the issuer signed for this farm.
+func (x *Index) checkHead(h HeadState) error {
+	if h.Position == 0 && h.ID == "" {
+		return nil
+	}
+	if len(h.Signed) == 0 {
+		return fmt.Errorf("%w: the head is not signed by the people's issuer", ErrIndex)
+	}
+	v, err := provenance.VerifyBundle(h.Signed, x.Roots)
+	if err != nil {
+		return fmt.Errorf("%w: the head's signature: %v", ErrIndex, err)
+	}
+	var p headPredicate
+	json.Unmarshal(v.Predicate, &p)
+	switch {
+	case v.PredicateType != PredicateIndexHead || v.Identity != provenance.ComponentIdentity("issuer"):
+		return fmt.Errorf("%w: the head is signed by %s, not the people's issuer", ErrIndex, v.Identity)
+	case v.Farm != x.Farm || p.Farm != x.Farm || p.Head != h.ID || p.Position != h.Position:
+		return fmt.Errorf("%w: the head names entry %.16s at %d, and its signature %.16s at %d", ErrIndex, h.ID, h.Position, p.Head, p.Position)
+	}
+	return nil
 }
 
 // ErrMoved means another writer moved the head first.
@@ -249,6 +301,9 @@ func (x *Index) Sync(ctx context.Context) error {
 func (x *Index) sync(ctx context.Context) error {
 	h, err := x.Head.Read(ctx)
 	if err != nil {
+		return err
+	}
+	if err := x.checkHead(h); err != nil {
 		return err
 	}
 	have := int64(len(x.entries))
@@ -499,7 +554,7 @@ const maxAppendTries = 8
 // builds again, so build's checks always see what came before. The
 // records go to the store before the entries, and the entries before the
 // head, so the head never names what the store lacks.
-func (x *Index) append(ctx context.Context, now time.Time, build func() ([]pending, error)) ([]*Entry, error) {
+func (x *Index) append(ctx context.Context, now time.Time, sign func(context.Context) (*provenance.Signer, error), build func() ([]pending, error)) ([]*Entry, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	for try := 0; ; try++ {
@@ -544,7 +599,11 @@ func (x *Index) append(ctx context.Context, now time.Time, build func() ([]pendi
 			}
 			out, ids = append(out, e), append(ids, prev)
 		}
-		err = x.Head.Write(ctx, from, HeadState{ID: prev, Position: pos})
+		signed, err := x.signHead(ctx, sign, prev, pos, now)
+		if err != nil {
+			return nil, err
+		}
+		err = x.Head.Write(ctx, from, HeadState{ID: prev, Position: pos, Signed: signed})
 		if errors.Is(err, ErrMoved) && try < maxAppendTries {
 			continue
 		}

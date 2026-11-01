@@ -146,7 +146,8 @@ func (s shardStore) Get(ctx context.Context, id string) ([]byte, error) {
 }
 
 // secretHead is the index's head: the Secret c4-people-index, its last
-// entry's C4 ID and position, written by resourceVersion.
+// entry's C4 ID and position and the issuer's signature over them,
+// written by resourceVersion.
 type secretHead struct {
 	kube kubernetes.Interface
 	ns   string
@@ -164,12 +165,12 @@ func (h *secretHead) Read(ctx context.Context) (people.HeadState, error) {
 	if err != nil {
 		return people.HeadState{}, fmt.Errorf("%s: position: %w", peopleIndexSecret, err)
 	}
-	return people.HeadState{ID: string(sec.Data["head"]), Position: pos, Version: sec.ResourceVersion}, nil
+	return people.HeadState{ID: string(sec.Data["head"]), Position: pos, Signed: sec.Data["signed"], Version: sec.ResourceVersion}, nil
 }
 
 func (h *secretHead) Write(ctx context.Context, from, to people.HeadState) error {
 	sec := &corev1.Secret{ObjectMeta: metav1.ObjectMeta{Name: peopleIndexSecret, Namespace: h.ns, ResourceVersion: from.Version},
-		Data: map[string][]byte{"head": []byte(to.ID), "position": []byte(strconv.FormatInt(to.Position, 10))}}
+		Data: map[string][]byte{"head": []byte(to.ID), "position": []byte(strconv.FormatInt(to.Position, 10)), "signed": to.Signed}}
 	var err error
 	if from.Version == "" {
 		_, err = h.kube.CoreV1().Secrets(h.ns).Create(ctx, sec, metav1.CreateOptions{})

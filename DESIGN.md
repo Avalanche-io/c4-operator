@@ -1219,6 +1219,21 @@ signing namespace, moved by resourceVersion. It also books:
 - one-person codes and countersignatures, approvals, and a device seen
   renewing from two addresses within an hour.
 
+**What holds the index together.**
+- **Each entry is checked against what it books** whenever the index is
+  read: its device, person, code, record and expiry are its record's, and
+  no act is booked twice.
+- **The head is signed** by the issuer as `component/issuer`. It names
+  the last entry by C4 ID, so the signature covers every entry. Whoever
+  holds only the store's or the head Secret's credentials can't add,
+  change or drop one.
+- **What the signature doesn't stop:**
+  - **A compromised manager,** which holds the issuer's key.
+  - **A rollback to an older head** the issuer signed.
+
+  K4's CLI keeps the last head it saw and refuses one that goes back, and
+  slice 2's sealed book covers both.
+
 A device is in force by the index's order: enrolled, not removed, and
 renewed within 90 days. Each entry says the order is the issuer's own
 (`order: issuer`), until slice 2's farm book adopts the index.

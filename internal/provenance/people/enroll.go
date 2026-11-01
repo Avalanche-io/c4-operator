@@ -190,7 +190,7 @@ func (i *Issuer) enrollSignIn(r *http.Request, e *Enrolment) (*Certified, error)
 	}
 	p.Evidence, p.IDToken, p.ProviderKey = schema.EvidenceIDToken, e.IDToken, in.keyID
 	x := i.Index
-	es, err := x.append(ctx, now, func() ([]pending, error) {
+	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
 		if err := x.unseen(device); err != nil {
 			return nil, err
 		}
@@ -265,7 +265,7 @@ func (i *Issuer) enrollApproved(r *http.Request, e *Enrolment) (*Certified, erro
 	}
 	p.Evidence, p.Approval = schema.EvidenceApproval, e.Approval
 	x := i.Index
-	es, err := x.append(ctx, now, func() ([]pending, error) {
+	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
 		if err := x.unseen(device); err != nil {
 			return nil, err
 		}
@@ -348,7 +348,7 @@ func (i *Issuer) renew(r *http.Request, e *Enrolment) (*Certified, error) {
 		}
 	}
 	addr := i.addr(r)
-	es, err := x.append(ctx, now, func() ([]pending, error) {
+	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
 		d := x.at(int64(len(x.entries)))[device]
 		switch {
 		case d == nil:
@@ -474,7 +474,7 @@ func (i *Issuer) setting(ctx context.Context) (*Setting, error) {
 	if err != nil || ok {
 		return s, err
 	}
-	_, err = x.append(ctx, i.now(), func() ([]pending, error) {
+	_, err = x.append(ctx, i.now(), i.sign, func() ([]pending, error) {
 		if _, ok := stands(); ok {
 			return nil, nil
 		}

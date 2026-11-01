@@ -138,7 +138,7 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 	// as it stands when the act is booked: a removal booked a moment
 	// before refuses the removed device's act. The act is taken once only
 	// after they pass, so a refused act isn't used up.
-	es, err := x.append(ctx, now, func() ([]pending, error) {
+	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
 		if err := x.checkAct(v, int64(len(x.entries))); err != nil {
 			return nil, err
 		}

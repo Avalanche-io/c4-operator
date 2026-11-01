@@ -131,7 +131,7 @@ func (i *Issuer) handleOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	x := i.Index
-	es, err := x.append(ctx, now, func() ([]pending, error) {
+	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
 		if x.ownerRecord() != nil {
 			return nil, refuse(http.StatusConflict, "this farm's owner is enrolled already: the installer token enrols the owner once, and the owner's key enrols the browser (c4 farm open)")
 		}
@@ -210,7 +210,7 @@ func (i *Issuer) handleBrowser(w http.ResponseWriter, r *http.Request) {
 	hash := CodeHash(e.Code)
 	p.Evidence, p.Code = schema.EvidenceOwner, hash
 	x := i.Index
-	es, err := x.append(ctx, now, func() ([]pending, error) {
+	es, err := x.append(ctx, now, i.sign, func() ([]pending, error) {
 		c := x.code(hash)
 		switch {
 		case c == nil:
