@@ -1141,6 +1141,36 @@ project whose store holds the content. A record that verifies but fails the
 policy is reported as such, so a node cannot speak for another node or for
 the queue.
 
+**Acts signed with the actor's own key** (PEOPLE-KEYS-2, slice K1). A
+person's device key is ECDSA P-256, since no Secure Enclave or TPM makes
+Ed25519 keys; the CA, still Ed25519, certifies it with the device's ID
+(`urn:c4:device:<C4 ID of its key>`) in the leaf, and an agent's leaf names
+its grant (`urn:c4:grant:<id>`). The verifier picks the rule by the leaf's
+key type:
+- **A farm part's Ed25519 leaf** passes as before.
+- **A device's P-256 leaf** signs alone: one signature, raw `r||s` with a
+  low S, so each signature has one form.
+- **A confirmed act** is exactly two signatures, the device key's and then
+  its touch key's, each keyed by its leaf's fingerprint; any other
+  signature refuses it.
+
+An `act/v1` must be signed by the identity in its `signer` field, for the
+farm it chains to (the C4 ID of the CA certificate), naming the device or
+grant its leaf names, and graded `confirmed` exactly when a touch key
+signed it. The kinds DESIGN 6 forbids an agent (grant, revoke, adopt a
+violation, accept a binding, change strict accountability, send, decide a
+person's wait) are a person's, whoever else signs them, and the touch list
+needs `confirmed`; `provenance.ActNeeds` is that list, by verb and params.
+The farm takes each act once by the SHA-256 of its payload, kept while its
+certificates live, and refuses one signed more than five minutes from its
+clock (`VerifyAct`). A control record that carries an act out cites it
+(`act`: payload hash and record) and is on the act's own subject, the job
+by UID with its spec's digest before the change (`queue.SpecDigest`, which
+the HUD serves as each job's `specDigest`), with the act's params;
+`CheckCitation` compares them and refuses a second citation. Until slice
+K8, a request without an act is still taken and graded as before. A device
+record (`device/v1`) is the people's issuer's (`component/issuer`).
+
 **The farm binding.** `c4 farm up --owner` names a local farm's one
 person; the farm binding, a signed record, follows when the installer
 binds the farm (`POST /api/v1/farm/binding`; `up` does not send it yet).
