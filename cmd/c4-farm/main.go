@@ -10,6 +10,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"net/url"
 	"os"
 	"os/exec"
@@ -29,6 +30,7 @@ import (
 
 	"github.com/Avalanche-io/c4-operator/hud/api"
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
+	"github.com/Avalanche-io/c4-operator/internal/keystore"
 	"github.com/Avalanche-io/c4-operator/internal/localfarm"
 	"github.com/Avalanche-io/c4-operator/internal/mcpserver"
 	"github.com/Avalanche-io/c4-operator/internal/power"
@@ -46,7 +48,7 @@ The local farm
 
 Farms
   use FARM                 switch the current farm
-  login HUD-URL            add a farm and sign in (--token-file, or --as on a local farm)
+  login HUD-URL            add a farm and sign in (--token-file, or --as on a local farm); a studio farm signs this machine's key in through your browser
   whoami                   who the farm sees you as, and your projects
 
 Work
@@ -225,6 +227,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		tokenFile := fs.String("token-file", "", "a file holding your bearer token")
 		integrateOn := fs.String("integrate", "", "the integrations to add, without asking: claude")
 		integrateOff := fs.Bool("no-integrate", false, "add no integration, without asking")
+		port := fs.Int("port", 0, "the loopback port the sign-in comes back to (default any free one); fix it to forward it over SSH from a machine with a browser")
 		pos, err := parse(fs, rest)
 		if err != nil {
 			return err
@@ -259,6 +262,7 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		fmt.Fprintf(stdout, "signed in to %s as %s · projects %s\n", n, s.Viewer.User, strings.Join(s.Viewer.Projects, ", "))
+		loginKey(ctx, c, farmcli.KeysFor(n), *port, isTerminal(stdin) && !farmcli.InsideAgent(), stdout)
 		switch in := (&farmcli.Integration{Record: cfg.Integrations}); {
 		case slices.Contains(on, farmcli.Claude):
 			// a farm signed in to, not made here: its tools in Claude Code,
@@ -1410,6 +1414,33 @@ func signInBlocks(e localfarm.Enrolled, stdin io.Reader, stdout io.Writer) error
 		return fmt.Errorf("the blocks' sign-in did not finish (%v); run %s", err, step)
 	}
 	return nil
+}
+
+// loginKey enrols this machine's key at a studio farm's people's issuer
+// (PEOPLE-KEYS-2 3.2): the person signs in at the farm's sign-in provider
+// in their browser, and the ID token, whose nonce is the key's device ID,
+// certifies the key. Only a person at a terminal signs in; a farm with no
+// provider, or none, enrols nothing here. It never fails login: reads ride
+// the token file until the farm takes the key's read session (K3b), and
+// its line says how to finish.
+func loginKey(ctx context.Context, c *farmcli.Client, st keystore.Store, port int, person bool, stdout io.Writer) {
+	cfg, err := farmcli.PeopleConfig(ctx, c)
+	if err != nil || cfg.Provider == nil {
+		return
+	}
+	if !person {
+		fmt.Fprintf(stdout, "key       this machine's key is not enrolled: run c4 farm login yourself, at a terminal, to sign in at %s\n", cfg.Provider.Issuer)
+		return
+	}
+	hc := &http.Client{Timeout: 30 * time.Second}
+	ep, err := farmcli.Discover(ctx, hc, cfg.Provider.Issuer)
+	if err == nil {
+		_, err = farmcli.Login(ctx, c, farmcli.LoginArgs{Store: st, Farm: cfg, Endpoints: ep, Provider: hc, Open: openURL, Port: port,
+			Say: func(format string, a ...any) { fmt.Fprintf(stdout, format, a...) }})
+	}
+	if err != nil {
+		fmt.Fprintf(stdout, "key       this machine's key is not enrolled: %v (c4 farm login again)\n", err)
+	}
 }
 
 // openSignedIn opens u, a page of farm f's HUD, in the browser. On a local

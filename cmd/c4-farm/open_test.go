@@ -2,10 +2,14 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Avalanche-io/c4-operator/internal/farmcli"
+	"github.com/Avalanche-io/c4-operator/internal/keystore"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people/peopletest"
 )
 
 // c4 farm open --as ROLE opens a local farm's role, and only a role it
@@ -32,5 +36,32 @@ func TestOpenAsARole(t *testing.T) {
 	}
 	if err := run([]string{"open", "--as", "artist", "--farm", "studio"}, &out, strings.NewReader("")); err == nil || !strings.Contains(err.Error(), "--as opens a local farm's role") {
 		t.Errorf("a studio's farm: %v", err)
+	}
+}
+
+// login enrols this machine's key only for a person at a terminal: from
+// an agent or a script it says how to finish, and on a farm with no
+// sign-in provider it says nothing.
+func TestLoginKeyOnlyAtATerminal(t *testing.T) {
+	f := peopletest.Studio(t)
+	c, err := farmcli.NewClient(farmcli.Farm{HUD: f.Server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	var out bytes.Buffer
+	loginKey(context.Background(), c, st, 0, false, &out)
+	if !strings.Contains(out.String(), "run c4 farm login yourself, at a terminal") || st.Has(keystore.Device) {
+		t.Errorf("not at a terminal: %q (a key made: %v)", out.String(), st.Has(keystore.Device))
+	}
+	one := peopletest.OnePerson(t)
+	oc, err := farmcli.NewClient(farmcli.Farm{HUD: one.Server.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out.Reset()
+	loginKey(context.Background(), oc, st, 0, true, &out)
+	if out.Len() != 0 || st.Has(keystore.Device) {
+		t.Errorf("a farm with no provider: %q", out.String())
 	}
 }
