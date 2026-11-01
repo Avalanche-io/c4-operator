@@ -5,6 +5,10 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+
+	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/hud/api"
 )
 
 // A machine is enrolled as someone's by its runner's offer and its
@@ -58,7 +62,11 @@ func Enroll(ctx context.Context, c *Client, node, code, forWhom string) (Enrollm
 		body["for"] = forWhom
 	}
 	var e Enrollment
-	if err := c.Do(ctx, "POST", "/nodes/"+url.PathEscape(node)+"/enroll", body, &e); err != nil {
+	// the machine by the C4 ID of the code it shows, which only that
+	// offer has: an act that takes a touch
+	sum := c4.Identify(strings.NewReader(code)).String()
+	on := &api.ActOn{Name: "node:" + node, Digest: map[string]string{"c4": sum}}
+	if err := c.DoAct(ctx, "POST", "/nodes/"+url.PathEscape(node)+"/enroll", "enroll", on, body, &e); err != nil {
 		return Enrollment{}, err
 	}
 	return e, nil

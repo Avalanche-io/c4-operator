@@ -325,7 +325,8 @@ func Control(ctx context.Context, c *Client, o Out, project, ref, verb string, b
 	var r struct {
 		Message string `json:"message"`
 	}
-	if err := c.Do(ctx, "POST", jobPath(j)+"/"+verb, body, &r); err != nil {
+	// the control is the person's act on the job as they saw it
+	if err := c.DoAct(ctx, "POST", jobPath(j)+"/"+verb, verb, JobActOn(j), body, &r); err != nil {
 		return err
 	}
 	if o.W != nil {

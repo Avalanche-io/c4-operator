@@ -72,6 +72,26 @@ func TestActsCarryTheSignedAct(t *testing.T) {
 		t.Errorf("the act: %+v %+v (params %s, body %s)", a.Predicate, a.Subject, want, sent)
 	}
 
+	// a request with no body (a revoke's DELETE) sends none, and signs {}
+	o.mux.HandleFunc("DELETE /api/v1/x", func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		got, bodies = append(got, r.Header.Get(ActHeader)), append(bodies, b)
+		w.Write([]byte("{}"))
+	})
+	if err := o.client.DoAct(ctx, "DELETE", "/x", "revoke", on, nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ = base64.StdEncoding.DecodeString(got[1])
+	vr, err = provenance.VerifyBundle(raw, o.scratch.Roots)
+	if err != nil {
+		t.Fatal(err)
+	}
+	a, _ = schema.ParseAct(vr.Payload)
+	if p, e := schema.ParamsID(a.Predicate.Params); len(bodies[1]) != 0 || e != nil || p != func() string { id, _ := schema.ParamsID([]byte("{}")); return id }() {
+		t.Errorf("a bodyless act: body %q, params %s", bodies[1], a.Predicate.Params)
+	}
+	got, bodies = got[:1], bodies[:1]
+
 	// bind takes a touch, and a file store has no touch key
 	for range 2 {
 		if err := o.client.DoAct(ctx, "POST", "/x", "bind", on, body, nil); err != nil {

@@ -452,7 +452,12 @@ func submitDoc(ctx context.Context, c *Client, o Out, doc *submissionDoc, base s
 	}
 	var done api.SubmissionResponse
 	req.DryRun, req.Explain = false, false
-	if err := doChecked(ctx, c, "POST", "/submissions", req, &done); err != nil {
+	// the submission is the person's act on its project
+	err = c.DoAct(ctx, "POST", "/submissions", "submit", ProjectActOn(ctx, c, project), req, &done, http.StatusUnprocessableEntity)
+	if ae := (*APIError)(nil); errors.As(err, &ae) && ae.Status == http.StatusUnprocessableEntity {
+		err = nil
+	}
+	if err != nil {
 		return nil, err
 	}
 	if len(done.Errors) > 0 {

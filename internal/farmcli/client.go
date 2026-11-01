@@ -155,6 +155,12 @@ func (c *Client) doAt(ctx context.Context, prefix, method, path string, in, out 
 		return err
 	}
 	defer resp.Body.Close()
+	return answer(resp, out, also)
+}
+
+// answer decodes a JSON answer into out. Answers whose status is in also
+// are decoded too, and returned with an APIError.
+func answer(resp *http.Response, out any, also []int) error {
 	if resp.StatusCode >= 300 {
 		for _, s := range also {
 			if resp.StatusCode == s && out != nil {

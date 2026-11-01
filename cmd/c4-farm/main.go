@@ -192,10 +192,18 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		// this machine's keys there, once a run, for a person at a
 		// terminal: renewed in time, and new devices of theirs told, on
 		// stderr so a command's output stays its own
-		if !kept && isTerminal(stdin) && !farmcli.InsideAgent() {
+		present := isTerminal(stdin) && !farmcli.InsideAgent()
+		if !kept && present {
 			kept = true
 			farmcli.KeepKeys(ctx, c, farmcli.KeepArgs{Store: farmcli.KeysFor(name), Open: openURL,
 				Say: func(format string, a ...any) { fmt.Fprintf(os.Stderr, format, a...) }})
+		}
+		// the person's acts, signed with their keys when they are here to
+		// sign them; a local farm's role view acts as its owner in that role
+		c.Acts = &farmcli.Acts{Store: farmcli.KeysFor(name), Present: present,
+			Say: func(format string, a ...any) { fmt.Fprintf(os.Stderr, "act       "+format, a...) }}
+		if f.Owner != "" && f.As != "" && f.As != f.Owner {
+			c.Acts.As = f.As
 		}
 		o := farmcli.Out{W: stdout, In: stdin, Clock: farmcli.Clock{UTC: cm.utc}}
 		return c, f, o, cm.project, nil
@@ -360,7 +368,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 				project = f.Project
 			}
 			if a.Yes {
-				o.In = nil
+				// no one confirms, so no one signs: as before, unsigned
+				o.In, c.Acts.Present = nil, false
 			}
 			_, err = farmcli.SubmitFile(ctx, c, o, farmcli.SubmitFileArgs{Path: pos[0], Project: project, DryRun: a.DryRun, Explain: *explain, Yes: a.Yes,
 				Terminal: isTerminal(stdin), All: a.All})
@@ -396,7 +405,8 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		if a.Yes {
-			o.In = nil
+			// no one confirms, so no one signs: as before, unsigned
+			o.In, c.Acts.Present = nil, false
 		}
 		_, err = farmcli.Submit(ctx, c, o, a)
 		return err

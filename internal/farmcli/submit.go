@@ -465,11 +465,13 @@ func (o Out) notOffered(ctx context.Context, c *Client, project, name string) {
 // the request is sent again without it, and the job is named as that farm
 // names it.
 func postJob(ctx context.Context, c *Client, req *api.SubmitRequest, out *api.SubmitResponse) error {
-	err := c.Do(ctx, "POST", "/jobs", req, out)
+	// a submission is the person's act on the project
+	on := ProjectActOn(ctx, c, req.Project)
+	err := c.DoAct(ctx, "POST", "/jobs", "submit", on, req, out)
 	var ae *APIError
 	if req.Stem != "" && errors.As(err, &ae) && ae.Status == http.StatusBadRequest && strings.Contains(ae.Msg, `unknown field "stem"`) {
 		req.Stem = ""
-		err = c.Do(ctx, "POST", "/jobs", req, out)
+		err = c.DoAct(ctx, "POST", "/jobs", "submit", on, req, out)
 	}
 	return err
 }

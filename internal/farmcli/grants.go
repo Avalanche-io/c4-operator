@@ -27,7 +27,8 @@ func Grant(ctx context.Context, c *Client, o Out, project string, req api.GrantR
 		req.Project = p
 	}
 	var r api.GrantResponse
-	if err := c.Do(ctx, "POST", "/grants", req, &r); err != nil {
+	// a grant is an act on its project, and takes a touch
+	if err := c.DoAct(ctx, "POST", "/grants", "grant", ProjectActOn(ctx, c, req.Project), req, &r); err != nil {
 		return err
 	}
 	// the farm writes the end in UTC; say it as every other time is said,
@@ -84,10 +85,28 @@ func Revoke(ctx context.Context, c *Client, o Out, ref string) error {
 		return fmt.Errorf("name the grant as namespace/name (c4 farm grants lists them)")
 	}
 	var r api.GrantResponse
-	if err := c.Do(ctx, "DELETE", "/grants/"+url.PathEscape(ns)+"/"+url.PathEscape(name), nil, &r); err != nil {
+	if err := c.DoAct(ctx, "DELETE", "/grants/"+url.PathEscape(ns)+"/"+url.PathEscape(name), "revoke", grantActOn(ctx, c, ns, name), nil, &r); err != nil {
 		return err
 	}
 	o.printf("%s\n", r.Message)
+	return nil
+}
+
+// grantActOn is a grant as an act revoking it names it, from the list of
+// grants; nil when the farm serves none.
+func grantActOn(ctx context.Context, c *Client, ns, name string) *api.ActOn {
+	if c.Acts == nil || !c.Acts.Present {
+		return nil
+	}
+	var l api.GrantList
+	if err := c.Do(ctx, "GET", "/grants", nil, &l); err != nil {
+		return nil
+	}
+	for _, g := range l.Grants {
+		if g.Namespace == ns && g.Name == name {
+			return g.ActOn
+		}
+	}
 	return nil
 }
 

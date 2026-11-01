@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
@@ -127,31 +128,72 @@ func (a *Acts) once(kind, format string, v ...any) {
 // DoAct is Do for a request that is a person's act on the subject on: it
 // carries the act, signed with this machine's keys (Acts), when a person
 // is here to sign it, and goes as before otherwise.
-func (c *Client) DoAct(ctx context.Context, method, path, act string, on *api.ActOn, in, out any) error {
-	b, err := json.Marshal(in)
-	if err != nil {
-		return err
+//
+// A request with no body (in nil) sends none, and its act's params are
+// {}, as the HUD reads an empty body.
+func (c *Client) DoAct(ctx context.Context, method, path, act string, on *api.ActOn, in, out any, also ...int) error {
+	var b []byte
+	params := []byte("{}")
+	if in != nil {
+		var err error
+		if b, err = json.Marshal(in); err != nil {
+			return err
+		}
+		params = b
 	}
-	h, err := c.Acts.header(ctx, c, act, on, b)
+	h, err := c.Acts.header(ctx, c, act, on, params)
 	switch {
 	case errors.Is(err, errNotSigned):
 		h = ""
 	case err != nil:
 		return err
 	}
-	return c.send(ctx, apiPrefix, method, path, b, h, out)
+	return c.send(ctx, apiPrefix, method, path, b, h, out, also...)
+}
+
+// JobActOn is a job as an act on it names it: workjob:<ns>/<name>@<uid>
+// at the spec digest the farm served; nil from a farm that serves neither.
+func JobActOn(j *api.Job) *api.ActOn {
+	if j == nil || j.UID == "" || j.SpecDigest == "" {
+		return nil
+	}
+	s := provenance.ActSubject("workjob", j.Namespace, j.Name, j.UID, j.SpecDigest)
+	return &api.ActOn{Name: s.Name, Digest: s.Digest}
+}
+
+// ProjectActOn is a project as an act that makes something in it names
+// it, from the snapshot; nil when the farm serves none.
+func ProjectActOn(ctx context.Context, c *Client, project string) *api.ActOn {
+	if c.Acts == nil || !c.Acts.Present || project == "" {
+		return nil
+	}
+	s, err := Snapshot(ctx, c)
+	if err != nil {
+		return nil
+	}
+	for _, p := range s.Projects {
+		if p.Name == project {
+			return p.ActOn
+		}
+	}
+	return nil
 }
 
 // send is doAt with the body as bytes and an act to carry, if any.
-func (c *Client) send(ctx context.Context, prefix, method, path string, body []byte, act string, out any) error {
+func (c *Client) send(ctx context.Context, prefix, method, path string, body []byte, act string, out any, also ...int) error {
 	cctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	req, err := http.NewRequestWithContext(cctx, method, c.urlAt(prefix, path), bytes.NewReader(body))
+	var rd io.Reader
+	ctype := ""
+	if body != nil {
+		rd, ctype = bytes.NewReader(body), "application/json"
+	}
+	req, err := http.NewRequestWithContext(cctx, method, c.urlAt(prefix, path), rd)
 	if err != nil {
 		return err
 	}
 	req.ContentLength = int64(len(body))
-	c.headers(req, "application/json")
+	c.headers(req, ctype)
 	if act != "" {
 		req.Header.Set(ActHeader, act)
 	}
@@ -160,11 +202,5 @@ func (c *Client) send(ctx context.Context, prefix, method, path string, body []b
 		return fmt.Errorf("the farm at %s is unreachable: %v", c.Base, err)
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode >= 300 {
-		return apiError(resp)
-	}
-	if out == nil {
-		return nil
-	}
-	return json.NewDecoder(resp.Body).Decode(out)
+	return answer(resp, out, also)
 }
