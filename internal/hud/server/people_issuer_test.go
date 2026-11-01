@@ -66,6 +66,30 @@ func TestPeopleIssuerHearsTheCaller(t *testing.T) {
 	}
 }
 
+// The people's issuer hears where a request came from: the SSO proxy's
+// X-Forwarded-For only on a request carrying the proxy's secret, and the
+// remote address on any other, whose X-Forwarded-For anyone could write.
+func TestPeopleIssuerTrustsForwardedForFromTheProxy(t *testing.T) {
+	s := farm(t)
+	s.TrustProxy, s.ProxySecret = true, []byte("a-proxy-secret-for-tests")
+	var got string
+	s.People = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { got = people.ClientAddrFrom(r.Context()) })
+	for _, c := range []struct {
+		headers map[string]string
+		want    string
+	}{
+		{map[string]string{"X-Forwarded-For": "198.51.100.7, 10.0.0.2", ProxySecretHeader: "a-proxy-secret-for-tests"}, "198.51.100.7"},
+		{map[string]string{"X-Forwarded-For": "198.51.100.7"}, "192.0.2.1"},
+		{map[string]string{"X-Forwarded-For": "198.51.100.7", ProxySecretHeader: "a guess"}, "192.0.2.1"},
+	} {
+		got = ""
+		icall(s, "GET", "/issuer/v1/people/config", c.headers)
+		if got != c.want {
+			t.Errorf("%v: the issuer heard %q, want %q", c.headers, got, c.want)
+		}
+	}
+}
+
 // An open development viewer, which anyone who reaches the HUD may be, is
 // no one's caller.
 func TestOpenDevViewerIsNoCaller(t *testing.T) {

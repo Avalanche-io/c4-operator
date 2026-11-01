@@ -333,6 +333,11 @@ func (s *Server) proxyGuard(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		secret := r.Header.Get(ProxySecretHeader)
 		r.Header.Del(ProxySecretHeader)
+		if s.TrustProxy && len(s.ProxySecret) > 0 && subtle.ConstantTimeCompare([]byte(secret), s.ProxySecret) == 1 {
+			// The proxy sent this request: its X-Forwarded-For names the
+			// client, which the people's issuer reads (peopleissuer.go).
+			r = r.WithContext(context.WithValue(r.Context(), proxiedKey{}, true))
+		}
 		named := r.Header.Get("X-Forwarded-User") != "" || r.Header.Get("X-Forwarded-Groups") != ""
 		switch {
 		case !named:

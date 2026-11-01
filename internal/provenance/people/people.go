@@ -155,7 +155,25 @@ func (i *Issuer) admin(ctx context.Context, person string) bool {
 	return i.Admin != nil && person != "" && i.Admin(ctx, person)
 }
 
+type addrKey struct{}
+
+// WithClientAddr says where a request came from, as the HUD knows it: the
+// SSO proxy's X-Forwarded-For on a request with the proxy's secret, its
+// remote address otherwise. It is for the two-places notice only.
+func WithClientAddr(ctx context.Context, addr string) context.Context {
+	return context.WithValue(ctx, addrKey{}, addr)
+}
+
+// ClientAddrFrom is the address WithClientAddr put in ctx, or "".
+func ClientAddrFrom(ctx context.Context) string {
+	a, _ := ctx.Value(addrKey{}).(string)
+	return a
+}
+
 func (i *Issuer) addr(r *http.Request) string {
+	if a := ClientAddrFrom(r.Context()); a != "" {
+		return a
+	}
 	if i.ClientAddr != nil {
 		return i.ClientAddr(r)
 	}
