@@ -39,8 +39,9 @@ type signing struct {
 	hud        *provenance.Signer
 	roots      []byte // PEM trust bundle
 	pool       *x509.CertPool
-	// people is the people's issuer (people.go), served beside the
-	// workload issuer and through the HUD; nil where the install names no
+	// people is the people's issuer (people.go), in the manager beside the
+	// workload issuer and served only at the HUD's origin; the issuer's
+	// listener stays the workloads'. Nil where the install names no
 	// people's store.
 	people http.Handler
 }
@@ -144,15 +145,8 @@ func issuerRunnable(s *signing, kube kubernetes.Interface, projects client.Reade
 		}
 		return signerIdentity(ctx, projects, id, namespace)
 	}}
-	// The people's issuer is beside the workload issuer: /v1/people/ on the
-	// same listener (PEOPLE-KEYS-2 3.1).
-	mux := http.NewServeMux()
-	mux.Handle("/v1/certificate", iss)
-	if s.people != nil {
-		mux.Handle("/v1/people/", s.people)
-	}
 	return everyReplica(func(ctx context.Context) error {
-		hs := &http.Server{Addr: addr, Handler: mux, ReadHeaderTimeout: 10 * time.Second}
+		hs := &http.Server{Addr: addr, Handler: iss, ReadHeaderTimeout: 10 * time.Second}
 		go func() {
 			<-ctx.Done()
 			sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

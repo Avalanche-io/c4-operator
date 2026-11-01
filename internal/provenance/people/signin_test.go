@@ -3,6 +3,7 @@ package people_test
 import (
 	"context"
 	"crypto/x509"
+	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
@@ -384,6 +385,65 @@ func TestBookedTokenCheckedAtItsPosition(t *testing.T) {
 		p.IDToken = r.sso.token(r.now, danaSub, d.id, over)
 		if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
 			t.Errorf("%s passed", name)
+		}
+	}
+}
+
+// Reads need a caller (review probe P6). With no one signed in, the
+// index, its records and the device lists are refused. A device record's
+// ID token and the addresses the issuer saw go to that person and the
+// farm's admins; anyone else gets the record without them, labelled
+// redacted.
+func TestReadsNeedACaller(t *testing.T) {
+	r := studio(t)
+	c := r.signIn(newDev(t), "dana", danaSub)
+	r.signIn(newDev(t), "noor", noorSub)
+	r.caller = ""
+	for _, path := range []string{"/v1/people/index", "/v1/people/records/" + c.Record, "/v1/people/devices?person=dana"} {
+		if code, _ := r.call("GET", path, "", nil, nil); code != http.StatusUnauthorized {
+			t.Errorf("%s with no caller: %d", path, code)
+		}
+	}
+	if code, _ := r.call("GET", "/v1/people/config", "", nil, nil); code != http.StatusOK {
+		t.Errorf("the config with no caller: %d", code)
+	}
+	whole := func() (string, *people.IndexPage) {
+		_, body := r.call("GET", "/v1/people/records/"+c.Record, "", nil, nil)
+		var page people.IndexPage
+		r.call("GET", "/v1/people/index", "", nil, &page)
+		return body, &page
+	}
+	addrOf := func(page *people.IndexPage) (string, people.Redacted) {
+		for _, e := range page.Entries {
+			if e.Entry.Kind == people.KindDevice && e.Entry.Person == "dana" {
+				return e.Entry.Addr, e.Redacted
+			}
+		}
+		return "", nil
+	}
+	r.caller = "noor"
+	body, page := whole()
+	var red people.RedactedRecord
+	if err := json.Unmarshal([]byte(body), &red); err != nil || red.Device == nil || red.Device.Predicate.IDToken != "" || len(red.Redacted) != 1 || red.Redacted[0] != "idToken" {
+		t.Errorf("noor read dana's record: %.200s", body)
+	}
+	if addr, red := addrOf(page); addr != "" || len(red) != 1 {
+		t.Errorf("noor read dana's address %q (%v)", addr, red)
+	}
+	for _, who := range []string{"dana", "noor-as-admin"} {
+		r.caller = who
+		if who == "noor-as-admin" {
+			r.caller = "noor"
+			r.iss.Admin = func(_ context.Context, p string) bool { return p == "noor" }
+		}
+		body, page := whole()
+		if v, err := provenance.VerifyBundle([]byte(body), r.farm.Roots); err != nil {
+			t.Errorf("%s read dana's record: %v", who, err)
+		} else if d, _ := schema.ParseDevice(v.Payload); d.Predicate.IDToken == "" {
+			t.Errorf("%s read dana's record without its token", who)
+		}
+		if addr, red := addrOf(page); addr == "" || red != nil {
+			t.Errorf("%s read dana's address %q (%v)", who, addr, red)
 		}
 	}
 }

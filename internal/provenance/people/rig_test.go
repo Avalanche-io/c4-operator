@@ -114,6 +114,8 @@ type rig struct {
 	now   time.Time
 	// addr is the address requests come from.
 	addr string
+	// caller is whom the HUD signed in for each request; "" for no one.
+	caller string
 }
 
 // studio is a studio farm signing in at the fake provider: dana is an
@@ -121,6 +123,7 @@ type rig struct {
 func studio(t *testing.T) *rig {
 	r := newRig(t)
 	r.iss.Provider = people.Provider{Issuer: ssoIssuer, ClientID: clientID}
+	r.caller = "dana"
 	return r
 }
 
@@ -145,6 +148,7 @@ func onePerson(t *testing.T) *rig {
 	r.iss.Owner = func(context.Context) string { return "noor" }
 	r.iss.InstallerToken = []byte(installerToken)
 	r.iss.Admin = func(_ context.Context, p string) bool { return p == "noor" }
+	r.caller = "noor"
 	return r
 }
 
@@ -200,6 +204,9 @@ func (r *rig) call(method, path, host string, body any, out any, hdr ...string) 
 		b, _ = json.Marshal(v)
 	}
 	req := httptest.NewRequest(method, path, bytes.NewReader(b))
+	if r.caller != "" {
+		req = req.WithContext(people.WithCaller(req.Context(), r.caller))
+	}
 	if host != "" {
 		req.Host = host
 	}

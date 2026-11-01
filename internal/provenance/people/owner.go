@@ -258,6 +258,10 @@ type CodeState struct {
 
 // handleCode answers GET /v1/people/codes/{sha256 of the code}.
 func (i *Issuer) handleCode(w http.ResponseWriter, r *http.Request) {
+	if _, err := caller(r); err != nil && !i.installer(r) {
+		fail(w, refuse(http.StatusUnauthorized, "a code is read back with this machine's installer token (%s), or signed in", InstallerHeader))
+		return
+	}
 	hash := r.PathValue("code")
 	x := i.Index
 	x.mu.Lock()

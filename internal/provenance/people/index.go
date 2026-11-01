@@ -784,4 +784,24 @@ func (x *Index) Entries(ctx context.Context, from int64) ([]*Entry, []string, er
 	return append([]*Entry(nil), x.entries[from:]...), append([]string(nil), x.ids[from:]...), nil
 }
 
+// entryByID is the entry with this C4 ID.
+func (x *Index) entryByID(id string) (*Entry, bool) {
+	for k, e := range x.entries {
+		if x.ids[k] == id {
+			return e, true
+		}
+	}
+	return nil, false
+}
+
+// books reports whether an entry books the record with this C4 ID.
+func (x *Index) books(id string) bool {
+	for _, e := range x.entries {
+		if e.Record == id {
+			return true
+		}
+	}
+	return false
+}
+
 func c4id(b []byte) string { return c4.Identify(bytes.NewReader(b)).String() }

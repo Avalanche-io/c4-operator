@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // LeafTTL is how long a person's leaf lives (PEOPLE-KEYS-2 2.1): a
@@ -297,42 +298,155 @@ func (i *Issuer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		Owner:  i.owner(r.Context()), OwnerEnrolled: enrolled, LeafTTL: LeafTTL.String(), Lapse: Lapse.String()})
 }
 
-// IndexPage is the index from a position on.
+// Reads need a caller (PEOPLE-KEYS-2 7): the person the HUD signed in,
+// which it puts in the request's context (WithCaller). A device record's
+// ID token and every address the issuer saw go only to that device's
+// person and the farm's admins; anyone else gets the record without them,
+// labelled as redacted. The config alone is for anyone, since a device
+// reads it before it has a key.
+
+type callerKey struct{}
+
+// WithCaller says whom a read is for: the person the HUD signed in.
+func WithCaller(ctx context.Context, person string) context.Context {
+	return context.WithValue(ctx, callerKey{}, person)
+}
+
+// CallerFrom is the person WithCaller put in ctx, or "".
+func CallerFrom(ctx context.Context) string {
+	p, _ := ctx.Value(callerKey{}).(string)
+	return p
+}
+
+// caller is a read's caller, or a refusal.
+func caller(r *http.Request) (string, error) {
+	if p := CallerFrom(r.Context()); p != "" {
+		return p, nil
+	}
+	return "", refuse(http.StatusUnauthorized, "the people's index is read signed in: through the HUD, as yourself")
+}
+
+// sees reports whether caller may read person's ID tokens and addresses:
+// the person themselves, or an admin.
+func (i *Issuer) sees(ctx context.Context, caller, person string) bool {
+	return caller == person || i.admin(ctx, caller)
+}
+
+// Redacted is what a read leaves out, by field name.
+type Redacted []string
+
+// redact is e as caller may read it.
+func (i *Issuer) redact(ctx context.Context, caller string, e *Entry) (*Entry, Redacted) {
+	if (e.Addr == "" && len(e.Seen) == 0) || i.sees(ctx, caller, e.Person) {
+		return e, nil
+	}
+	c := *e
+	var out Redacted
+	if c.Addr != "" {
+		c.Addr, out = "", append(out, "addr")
+	}
+	if len(c.Seen) > 0 {
+		c.Seen, out = nil, append(out, "seen")
+	}
+	return &c, out
+}
+
+// IndexPage is the index from a position on, and its head as the issuer
+// signed it, which a client keeps so it can refuse a head that goes back.
 type IndexPage struct {
 	Farm     string       `json:"farm"`
 	Order    string       `json:"order"`
 	Position int64        `json:"position"`
+	Head     string       `json:"head,omitempty"`
+	Signed   []byte       `json:"signed,omitempty"`
 	Entries  []IndexEntry `json:"entries"`
 }
 
-// IndexEntry is one entry and its C4 ID.
+// IndexEntry is one entry and its C4 ID. Redacted names what the caller
+// may not read; the ID is the entry's as booked.
 type IndexEntry struct {
-	ID    string `json:"id"`
-	Entry *Entry `json:"entry"`
+	ID       string   `json:"id"`
+	Entry    *Entry   `json:"entry"`
+	Redacted Redacted `json:"redacted,omitempty"`
 }
 
 func (i *Issuer) handleIndex(w http.ResponseWriter, r *http.Request) {
+	who, err := caller(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	from, _ := strconv.ParseInt(r.URL.Query().Get("from"), 10, 64)
 	es, ids, err := i.Index.Entries(r.Context(), from)
 	if err != nil {
 		fail(w, err)
 		return
 	}
+	h, err := i.Index.Head.Read(r.Context())
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	page := IndexPage{Farm: i.Farm(), Order: OrderIssuer, Position: from + int64(len(es)), Entries: []IndexEntry{}}
+	if h.Position == page.Position {
+		page.Head, page.Signed = h.ID, h.Signed
+	}
 	for k := range es {
-		page.Entries = append(page.Entries, IndexEntry{ID: ids[k], Entry: es[k]})
+		e, red := i.redact(r.Context(), who, es[k])
+		page.Entries = append(page.Entries, IndexEntry{ID: ids[k], Entry: e, Redacted: red})
 	}
 	writeJSON(w, http.StatusOK, page)
 }
 
-// handleRecord serves a record or entry the index names, by C4 ID, as
-// stored: a device record, an act, a provider's key or an entry.
+// RedactedRecord is a record the caller may not read whole: a device
+// record without its ID token, or an entry without its addresses.
+type RedactedRecord struct {
+	Record   string         `json:"record"`
+	Redacted Redacted       `json:"redacted"`
+	Device   *schema.Device `json:"device,omitempty"`
+	Entry    *Entry         `json:"entry,omitempty"`
+}
+
+// handleRecord serves a record or entry the index names, by C4 ID: as
+// stored, to a caller who may read it whole; redacted otherwise.
 func (i *Issuer) handleRecord(w http.ResponseWriter, r *http.Request) {
-	b, err := i.Index.Store.Get(r.Context(), r.PathValue("id"))
-	if errors.Is(err, ErrNotFound) {
-		fail(w, refuse(http.StatusNotFound, "no record %.16s", r.PathValue("id")))
+	who, err := caller(r)
+	if err != nil {
+		fail(w, err)
 		return
 	}
+	id := r.PathValue("id")
+	x := i.Index
+	x.mu.Lock()
+	err = x.sync(r.Context())
+	var dev *schema.Device
+	var entry *Entry
+	booked := false
+	if err == nil {
+		dev = x.devices[id]
+		entry, booked = x.entryByID(id)
+		booked = booked || x.books(id)
+	}
+	x.mu.Unlock()
+	switch {
+	case err != nil:
+		fail(w, err)
+		return
+	case !booked:
+		fail(w, refuse(http.StatusNotFound, "the index books no record %.16s", id))
+		return
+	case dev != nil && dev.Predicate.IDToken != "" && !i.sees(r.Context(), who, dev.Predicate.Person):
+		c := *dev
+		c.Predicate.IDToken = ""
+		writeJSON(w, http.StatusOK, RedactedRecord{Record: id, Redacted: Redacted{"idToken"}, Device: &c})
+		return
+	case entry != nil:
+		if e, red := i.redact(r.Context(), who, entry); red != nil {
+			writeJSON(w, http.StatusOK, RedactedRecord{Record: id, Redacted: red, Entry: e})
+			return
+		}
+	}
+	b, err := x.Store.Get(r.Context(), id)
 	if err != nil {
 		fail(w, err)
 		return
@@ -361,6 +475,11 @@ type DeviceView struct {
 }
 
 func (i *Issuer) handleDevices(w http.ResponseWriter, r *http.Request) {
+	who, err := caller(r)
+	if err != nil {
+		fail(w, err)
+		return
+	}
 	person := r.URL.Query().Get("person")
 	x := i.Index
 	x.mu.Lock()
@@ -381,7 +500,8 @@ func (i *Issuer) handleDevices(w http.ResponseWriter, r *http.Request) {
 			Countersigned: d.countersigns > 0}
 		for _, e := range x.entries {
 			if e.Kind == KindFlag && e.Device == d.id {
-				dv.Flags = append(dv.Flags, e)
+				f, _ := i.redact(r.Context(), who, e)
+				dv.Flags = append(dv.Flags, f)
 			}
 		}
 		out = append(out, dv)

@@ -307,7 +307,7 @@ func (s *Server) Handler() http.Handler {
 		})
 	}
 	if s.People != nil {
-		p := http.StripPrefix("/issuer", s.People)
+		p := http.StripPrefix("/issuer", s.peopleIssuer())
 		mux.Handle("GET /issuer/v1/people/", p)
 		mux.Handle("POST /issuer/v1/people/", p)
 	}
