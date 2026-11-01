@@ -1,9 +1,11 @@
 package people_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -131,4 +133,103 @@ func TestForkedHeadAtTheSamePosition(t *testing.T) {
 	if err := r.index.Sync(ctx); !errors.Is(err, people.ErrIndex) || !strings.Contains(err.Error(), "rewritten") {
 		t.Errorf("a forked head: %v", err)
 	}
+}
+
+// Each entry is checked against the record it books when the index is
+// read, and an entry that says what its record doesn't is refused (review
+// probe P4). Each forgery below cites an act signed by dana and put in the
+// store, but never booked: an approval citing a removal; the approval
+// naming another person, another key, or a longer life; a removal naming
+// another device than its act. The faithful entry passes; and an act
+// booked twice is refused.
+func TestEntriesAgreeWithTheirRecords(t *testing.T) {
+	type acts struct {
+		r               *rig
+		approve, remove string
+		newKey, junk    string
+		head            string
+		pos             int64
+	}
+	prepare := func(t *testing.T) acts {
+		r := studio(t)
+		laptop, touch, junk := newDev(t), newDev(t), newDev(t)
+		k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
+		r.signIn(junk, "dana", danaSub)
+		e := r.enrolment(touch, "dana", laptop.id, "mac")
+		e.IDToken = r.sso.token(r.now, danaSub, touch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"pwd", "otp"}})
+		var tc people.Certified
+		if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
+			t.Fatalf("touch: %d %s", code, body)
+		}
+		k.Touch = r.key(touch, &tc)
+		newKey := newDev(t).id
+		put := func(b []byte) string {
+			id := c4.Identify(bytes.NewReader(b)).String()
+			r.store.Put(context.Background(), id, b)
+			return id
+		}
+		a := acts{r: r, newKey: newKey, junk: junk.id,
+			approve: put(r.act(k, "dana", "approve-machine", deviceSubject(newKey), map[string]string{}, true)),
+			remove:  put(r.act(k, "dana", "remove-device", deviceSubject(junk.id), nil, false))}
+		h, _ := r.head.Read(context.Background())
+		a.head, a.pos = h.ID, h.Position
+		return a
+	}
+	approval := func(a acts) *people.Entry {
+		return &people.Entry{Kind: people.KindApproval, Record: a.approve, Device: a.newKey, Person: "dana", By: "dana",
+			Expires: a.r.now.Add(people.ApprovalTTL).UTC().Format(time.RFC3339Nano)}
+	}
+	removal := func(a acts) *people.Entry {
+		return &people.Entry{Kind: people.KindRemoval, Record: a.remove, Device: a.junk, Person: "dana", By: "dana"}
+	}
+	for name, c := range map[string]struct {
+		forge func(a acts) *people.Entry
+		ok    bool
+	}{
+		"the faithful approval": {approval, true},
+		"the faithful removal":  {removal, true},
+		"an approval citing a removal": {func(a acts) *people.Entry {
+			e := approval(a)
+			e.Record = a.remove
+			return e
+		}, false},
+		"an approval for another person": {func(a acts) *people.Entry {
+			e := approval(a)
+			e.Person, e.By = "noor", "noor"
+			return e
+		}, false},
+		"an approval for another key": {func(a acts) *people.Entry {
+			e := approval(a)
+			e.Device = newDev(t).id
+			return e
+		}, false},
+		"an approval that lasts longer": {func(a acts) *people.Entry {
+			e := approval(a)
+			e.Expires = a.r.now.Add(48 * time.Hour).UTC().Format(time.RFC3339Nano)
+			return e
+		}, false},
+		"a removal of another device": {func(a acts) *people.Entry {
+			e := removal(a)
+			e.Device = a.newKey
+			return e
+		}, false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			a := prepare(t)
+			a.r.forge(c.forge(a), nil, a.head, a.pos+1)
+			err := a.r.reread()
+			if c.ok != (err == nil) || err != nil && !errors.Is(err, people.ErrIndex) {
+				t.Errorf("read: %v", err)
+			}
+		})
+	}
+	t.Run("an act booked twice", func(t *testing.T) {
+		a := prepare(t)
+		a.r.forge(approval(a), nil, a.head, a.pos+1)
+		h, _ := a.r.head.Read(context.Background())
+		a.r.forge(approval(a), nil, h.ID, h.Position+1)
+		if err := a.r.reread(); !errors.Is(err, people.ErrIndex) || !strings.Contains(err.Error(), "twice") {
+			t.Errorf("read: %v", err)
+		}
+	})
 }

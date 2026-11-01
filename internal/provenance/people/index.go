@@ -320,12 +320,28 @@ func (x *Index) entry(ctx context.Context, id string) (*Entry, error) {
 	return &e, nil
 }
 
-// load checks the record an entry books, and keeps a device record.
+// load checks an entry against the record it books, and keeps a device
+// record. An entry says nothing its record doesn't: its device and person
+// are the device record's; a provider key's kid is its JWK's; an act's
+// verb is the entry's kind, its signer the entry's by, and its subject
+// and params the entry's device, person, code, record and from; an
+// approval is confirmed; a code's or an approval's expiry is its TTL from
+// when it was booked, and it was booked within ActSkew of being signed.
+// A setting is the install's, and books no record.
 func (x *Index) load(ctx context.Context, e *Entry) error {
-	if e.Record == "" {
-		if e.Kind == KindFlag || e.Kind == KindSetting && e.Grade == GradeInstall {
-			return nil
+	switch e.Kind {
+	case KindFlag:
+		if e.Record != "" || e.Flag != FlagTwoPlaces || x.at(int64(len(x.entries)))[e.Device] == nil {
+			return fmt.Errorf("a flag is %s, of a device the index books, and books no record", FlagTwoPlaces)
 		}
+		return nil
+	case KindSetting:
+		if e.Record != "" || e.Grade != GradeInstall || e.Issuer == "" || e.ClientID == "" {
+			return errors.New("a sign-in provider setting is the install's, with an issuer and a client ID, and books no record")
+		}
+		return nil
+	}
+	if e.Record == "" {
 		return fmt.Errorf("a %s entry books no record", e.Kind)
 	}
 	b, err := x.Store.Get(ctx, e.Record)
@@ -350,23 +366,94 @@ func (x *Index) load(ctx context.Context, e *Entry) error {
 		}
 		x.devices[e.Record], x.raw[e.Record] = d, b
 	case KindProviderKey:
-		if _, err := parseJWK(b); err != nil {
-			return err
-		}
-	default:
-		// An act the issuer took: still the act it was, signed as it was.
-		v, err := provenance.VerifyBundle(b, x.Roots)
+		k, err := parseJWK(b)
 		if err != nil {
 			return err
 		}
-		if v.PredicateType != provenance.PredicateAct {
-			return fmt.Errorf("a %s entry books a %s record, not an act", e.Kind, v.PredicateType)
+		if k.KeyID != e.KeyID || e.Issuer == "" {
+			return fmt.Errorf("the entry names key %q of %q, its JWK %q", e.KeyID, e.Issuer, k.KeyID)
 		}
-		if x.acts == nil {
-			x.acts = map[string]bool{}
-		}
-		x.acts[provenance.PayloadHash(v.Payload)] = true
+	default:
+		return x.loadAct(e, b)
 	}
+	return nil
+}
+
+// actKinds is the verb each act entry books.
+var actKinds = map[string]string{KindRemoval: ActRemoveDevice, KindCode: ActBrowserCode, KindCountersign: ActCountersign, KindApproval: ActApprove}
+
+// loadAct checks an act entry against its act: still the act it was,
+// signed as it was, and saying what the entry says.
+func (x *Index) loadAct(e *Entry, b []byte) error {
+	verb, ok := actKinds[e.Kind]
+	if !ok {
+		return fmt.Errorf("an entry of kind %q", e.Kind)
+	}
+	v, err := provenance.VerifyBundle(b, x.Roots)
+	if err != nil {
+		return err
+	}
+	if v.PredicateType != provenance.PredicateAct {
+		return fmt.Errorf("a %s entry books a %s record, not an act", e.Kind, v.PredicateType)
+	}
+	a, errs := schema.ParseAct(v.Payload)
+	if errs != nil {
+		return fmt.Errorf("not an act: %s: %s", errs[0].Path, errs[0].Message)
+	}
+	p := a.Predicate
+	var params map[string]string
+	json.Unmarshal(p.Params, &params)
+	subject := a.Subject[0]
+	device := ""
+	if id := subject.Digest["c4"]; subject.Name == "device:"+id {
+		device = id
+	}
+	onFarm := subject.Name == "farm:"+x.Farm && subject.Digest["c4"] == x.Farm
+	lives := e.expires().Sub(e.at())
+	says := func(ok bool, what string) error {
+		if ok {
+			return nil
+		}
+		return fmt.Errorf("the %s entry and its %s act disagree on %s", e.Kind, p.Act, what)
+	}
+	if err := says(p.Act == verb, "the verb"); err != nil {
+		return err
+	}
+	if err := says(p.Chain.By.Person != "" && e.By == p.Chain.By.Person, "who made it"); err != nil {
+		return err
+	}
+	if d := e.at().Sub(v.SignedAt); d > provenance.ActSkew || d < -provenance.ActSkew {
+		return fmt.Errorf("the %s entry was booked %s from when its act was signed", e.Kind, d.Round(time.Second))
+	}
+	switch e.Kind {
+	case KindRemoval:
+		if device != "" {
+			d := x.at(int64(len(x.entries)))[device]
+			err = says(e.Device == device && params["person"] == "" && d != nil && d.person() == e.Person, "the device and whose it is")
+		} else {
+			err = says(onFarm && e.Device == "" && params["person"] == e.Person, "whose devices")
+		}
+		if err == nil {
+			err = says(e.From == params["from"], "from")
+		}
+	case KindCode:
+		err = says(onFarm && e.Code == params["code"] && e.Person == e.By && lives == CodeTTL, "the code, whose it is and when it lapses")
+	case KindCountersign:
+		err = says(device != "" && e.Device == device && e.Of == params["record"] && e.Person == e.By, "the device and the record")
+	case KindApproval:
+		err = says(device != "" && e.Device == device && e.Person == e.By && v.Confirmed() && lives == ApprovalTTL, "the device, whose it is, the touch and when it lapses")
+	}
+	if err != nil {
+		return err
+	}
+	hash := provenance.PayloadHash(v.Payload)
+	if x.acts[hash] {
+		return fmt.Errorf("act %.16s is booked twice", hash)
+	}
+	if x.acts == nil {
+		x.acts = map[string]bool{}
+	}
+	x.acts[hash] = true
 	return nil
 }
 
