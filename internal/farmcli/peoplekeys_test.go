@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -179,5 +180,36 @@ func TestApproveAMachineWithATouch(t *testing.T) {
 	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
 	if _, err := ApproveDevice(ctx, c, st, o.ID(), "laptop"); err == nil {
 		t.Error("an approval of something that is no device ID")
+	}
+}
+
+// up's keys step: the owner's key enrolled and answered, the same again
+// with it pinned; a farm whose owner key is not the pinned one is refused,
+// as is nothing from a farm with no people's issuer, which up goes on
+// without.
+func TestUpKeysPinsTheOwnersKey(t *testing.T) {
+	o := newOwnerIssuer(t)
+	ctx := context.Background()
+	st := keystore.Store{Dir: filepath.Join(t.TempDir(), "keys"), FileOnly: true}
+	out, err := UpKeys(ctx, o.client, st, "noor", "", false)
+	if err != nil || out.Owner == nil || out.Touch != nil {
+		t.Fatalf("up: %v %+v", err, out)
+	}
+	if again, err := UpKeys(ctx, o.client, st, "noor", out.Owner.Device, false); err != nil || again.Owner.Device != out.Owner.Device {
+		t.Errorf("up again, pinned: %v %+v", err, again)
+	}
+	other := "c4" + out.Owner.Device[2:len(out.Owner.Device)-1] + "x"
+	if _, err := UpKeys(ctx, o.client, st, "noor", other, false); !errors.Is(err, ErrOwnerKey) {
+		t.Errorf("another owner key than the pinned one: %v", err)
+	}
+
+	srv := httptest.NewServer(http.NotFoundHandler())
+	defer srv.Close()
+	c, err := NewClient(Farm{HUD: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UpKeys(ctx, c, st, "noor", "", true); !errors.Is(err, ErrNoIssuer) {
+		t.Errorf("a farm with no people's issuer: %v", err)
 	}
 }

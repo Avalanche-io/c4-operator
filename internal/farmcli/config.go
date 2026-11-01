@@ -29,6 +29,11 @@ type Farm struct {
 	// (~/.c4/<farm>/installer-token): the HUD takes a development viewer
 	// only from a request that carries it.
 	InstallerTokenFile string `json:"installerTokenFile,omitempty"`
+	// OwnerKey, on a local farm, is the device ID of the owner's key up
+	// enrolled there: pinned here, outside the cluster, so a key the
+	// cluster later claims as the owner's that doesn't match is refused
+	// (PEOPLE-KEYS-2 3.3).
+	OwnerKey string `json:"ownerKey,omitempty"`
 }
 
 // Config is ~/.c4/farm.yaml.

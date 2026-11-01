@@ -742,11 +742,17 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		if err := localfarm.Up(ctx, o); err != nil {
 			return err
 		}
+		// the owner's keys, before the farm is bound with them and before
+		// any integration acts as them; the owner key is pinned here
+		ownerKey, err := upKeys(ctx, o.Options, cfg.Farms[localfarm.Name].OwnerKey, isTerminal(stdin) && !farmcli.InsideAgent(), stdout)
+		if err != nil {
+			return err
+		}
 		if err := bindFarm(ctx, o.Options); err != nil {
 			return err
 		}
 		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner,
-			InstallerTokenFile: localfarm.InstallerTokenFile(localfarm.Name)}
+			InstallerTokenFile: localfarm.InstallerTokenFile(localfarm.Name), OwnerKey: ownerKey}
 		cfg.Current = localfarm.Name
 		ui := upIntegration{integrate: *integrateOn, none: *integrateOff, stdin: stdin, stdout: stdout,
 			detect: farmcli.Detect(true), runner: localRunner(o.Owner, o.HUD(), stdin, stdout)}
@@ -803,6 +809,10 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 			return err
 		}
 		if err := localfarm.RemoveInstallerToken(localfarm.Name); err != nil {
+			return err
+		}
+		// its keys on this machine, which no other farm knows
+		if err := os.RemoveAll(farmcli.KeysFor(localfarm.Name).Dir); err != nil {
 			return err
 		}
 		if serves {
@@ -1221,6 +1231,34 @@ func applyApps(w io.Writer, on []string) {
 			farmcli.App(farmcli.Out{W: w}, name, true, false, nil)
 		}
 	}
+}
+
+// upKeys enrols the owner's keys at the local farm's people's issuer, on
+// the installer token, and answers the owner key's device ID, checked
+// against the one pinned. A farm whose operator serves no people's issuer
+// keeps what was pinned. touch is whether the person is here to give a
+// touch key's proof.
+func upKeys(ctx context.Context, o localfarm.Options, pinned string, touch bool, stdout io.Writer) (string, error) {
+	name := cmp.Or(o.Name, localfarm.Name)
+	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: o.Owner, Local: true, InstallerTokenFile: localfarm.InstallerTokenFile(name)})
+	if err != nil {
+		return "", err
+	}
+	out, err := farmcli.UpKeys(ctx, c, farmcli.KeysFor(name), o.Owner, pinned, touch)
+	if errors.Is(err, farmcli.ErrNoIssuer) {
+		return pinned, nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("the farm is up, but its owner's keys are not enrolled: %w", err)
+	}
+	if out.Owner.Device != pinned {
+		line := "and your touch key, for the acts that ask for your touch"
+		if out.Touch == nil {
+			line = "no touch key yet, so the acts that ask for your touch go unsigned for now"
+		}
+		fmt.Fprintf(stdout, "keys      %s's key on this machine is the farm's owner key (%s), %s\n", o.Owner, farmcli.ShortDevice(out.Owner.Device), line)
+	}
+	return out.Owner.Device, nil
 }
 
 // bindFarm binds the local farm, its HUD answering, to its owner as one

@@ -109,6 +109,40 @@ func deviceCert(c *people.Certified) provenance.DeviceCert {
 	return provenance.DeviceCert{Identity: c.Identity, Device: c.Device, Chain: c.Chain}
 }
 
+// ErrNoIssuer means the farm serves no people's issuer: its operator is
+// from before personal keys, or it names no people's store.
+var ErrNoIssuer = errors.New("this farm serves no people's issuer")
+
+// ErrOwnerKey means the farm's owner key is not the one this machine
+// pinned when up enrolled it.
+var ErrOwnerKey = errors.New("the farm's owner key is not the one this machine enrolled")
+
+// UpKeys is c4 farm up's keys step on a local farm: the owner's device key
+// and touch key enrolled (EnrolOwner), and the owner key checked against
+// the one pinned, when one is. It answers ErrNoIssuer from a farm without
+// a people's issuer, which up goes on without. touch is whether the person
+// is at a terminal to give it: a touch key's proof asks for their touch,
+// and an agent's or a script's up never puts that on their screen, so it
+// enrols the device key alone and touch-list acts go unsigned.
+func UpKeys(ctx context.Context, c *Client, st keystore.Store, owner, pinned string, touch bool) (*people.OwnerCertified, error) {
+	if _, err := PeopleConfig(ctx, c); err != nil {
+		var ae *APIError
+		if errors.As(err, &ae) && ae.Status == http.StatusNotFound {
+			return nil, ErrNoIssuer
+		}
+		return nil, err
+	}
+	out, err := enrolOwner(ctx, c, st, owner, touch)
+	if err != nil {
+		return nil, err
+	}
+	if pinned != "" && out.Owner.Device != pinned {
+		return nil, fmt.Errorf("%w: it is %s, and this machine pinned %s when up enrolled it; if the farm was made again, remove its keys (%s) and run up again",
+			ErrOwnerKey, ShortDevice(out.Owner.Device), ShortDevice(pinned), st.Dir)
+	}
+	return out, nil
+}
+
 // EnrolOwner is c4 farm up's step on a one-person farm (3.3): the owner's
 // device key and touch key, made here at the terminal if they aren't, and
 // enrolled on the installer token, once; their certificates are kept
@@ -116,6 +150,10 @@ func deviceCert(c *people.Certified) provenance.DeviceCert {
 // enrols the device key alone. A farm whose owner is enrolled already
 // answers with the certificates this machine kept.
 func EnrolOwner(ctx context.Context, c *Client, st keystore.Store, owner string) (*people.OwnerCertified, error) {
+	return enrolOwner(ctx, c, st, owner, true)
+}
+
+func enrolOwner(ctx context.Context, c *Client, st keystore.Store, owner string, withTouch bool) (*people.OwnerCertified, error) {
 	cfg, err := PeopleConfig(ctx, c)
 	if err != nil {
 		return nil, err
@@ -137,7 +175,12 @@ func EnrolOwner(ctx context.Context, c *Client, st keystore.Store, owner string)
 		return nil, err
 	}
 	body := people.OwnerEnrolment{Owner: devEnrol}
-	touch, err := st.Key(keystore.Touch)
+	// no touch key is made unless the person is there to give its proof
+	var touch keystore.Key
+	err = keystore.ErrNoTouch
+	if withTouch {
+		touch, err = st.Key(keystore.Touch)
+	}
 	switch {
 	case errors.Is(err, keystore.ErrNoTouch):
 		// touch-list acts go unsigned until a touch key is enrolled

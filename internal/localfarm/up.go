@@ -194,6 +194,12 @@ func Up(ctx context.Context, o UpOptions) error {
 		return err
 	}
 	o.logf("operator  installing\n")
+	// the install's people's store Secret is empty; Farm's carries the
+	// store's credentials, and applying the empty one after it, as a run
+	// of up again does, would take them away from a manager starting then
+	if install, err = withoutObject(install, "Secret", "c4-signing", "c4-people-store"); err != nil {
+		return err
+	}
 	if err := applyAll(ctx, c, install); err != nil {
 		return fmt.Errorf("installing the operator: %w", err)
 	}
@@ -527,6 +533,27 @@ func Docs(data []byte) ([]*unstructured.Unstructured, error) {
 		}
 		out = append(out, &unstructured.Unstructured{Object: m})
 	}
+}
+
+// withoutObject is a manifest without one object.
+func withoutObject(data []byte, kind, ns, name string) ([]byte, error) {
+	objs, err := Docs(data)
+	if err != nil {
+		return nil, err
+	}
+	var out bytes.Buffer
+	for _, u := range objs {
+		if u.GetKind() == kind && u.GetNamespace() == ns && u.GetName() == name {
+			continue
+		}
+		b, err := yaml.Marshal(u.Object)
+		if err != nil {
+			return nil, err
+		}
+		out.WriteString("---\n")
+		out.Write(b)
+	}
+	return out.Bytes(), nil
 }
 
 // applyAll server-side applies every object, CRDs and namespaces first,

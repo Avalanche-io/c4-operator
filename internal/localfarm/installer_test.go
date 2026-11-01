@@ -87,3 +87,30 @@ func TestInstallerTokenReachesTheManager(t *testing.T) {
 		t.Errorf("the plan's Secret:\n%s", plan)
 	}
 }
+
+// The people's issuer comes up with the farm: the manager names the
+// farm's store under people/, once however often it is patched; its
+// credentials are a Secret in the signing namespace; and the install's own
+// empty one is left out, so a run of up again never blanks them.
+func TestPeopleIssuerComesUpWithTheFarm(t *testing.T) {
+	o := Options{Owner: "noor"}
+	if !slices.Contains(ManagerArgs(o), "--people-store="+PeopleStore) {
+		t.Fatalf("args %v", ManagerArgs(o))
+	}
+	if p := string(ManagerPatch(o, []string{"manager", "--people-store=s3://old/"})); strings.Contains(p, "s3://old/") || strings.Count(p, "--people-store=") != 1 {
+		t.Errorf("patch %s", p)
+	}
+	y := string(YAML(Farm(o)))
+	if !strings.Contains(y, "name: c4-people-store\n  namespace: c4-signing") || !strings.Contains(y, "AWS_SECRET_ACCESS_KEY") {
+		t.Errorf("no people's store Secret:\n%s", y)
+	}
+	install := []byte("apiVersion: v1\nkind: Secret\nmetadata:\n  name: c4-people-store\n  namespace: c4-signing\n---\napiVersion: v1\nkind: Secret\nmetadata:\n  name: c4-signing-ca\n  namespace: c4-signing\n")
+	out, err := withoutObject(install, "Secret", "c4-signing", "c4-people-store")
+	if err != nil {
+		t.Fatal(err)
+	}
+	objs, err := Docs(out)
+	if err != nil || len(objs) != 1 || objs[0].GetName() != "c4-signing-ca" {
+		t.Errorf("the install without the empty Secret: %v\n%s", err, out)
+	}
+}

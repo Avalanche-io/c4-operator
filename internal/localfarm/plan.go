@@ -286,6 +286,10 @@ func Farm(o Options) []obj {
 			"stringData": obj{"AWS_ACCESS_KEY_ID": quickstart.StoreKey, "AWS_SECRET_ACCESS_KEY": quickstart.StoreSecret}},
 		{"apiVersion": "v1", "kind": "Secret", "metadata": meta(InstallerSecret, "namespace", "c4-system"),
 			"stringData": obj{"token": token}},
+		// the people's issuer's store credentials, which only the manager
+		// reads, in the signing namespace
+		{"apiVersion": "v1", "kind": "Secret", "metadata": meta("c4-people-store", "namespace", "c4-signing"),
+			"stringData": obj{"AWS_ACCESS_KEY_ID": quickstart.StoreKey, "AWS_SECRET_ACCESS_KEY": quickstart.StoreSecret}},
 	}
 	out = append(out, ProjectObjects(ProjectSpec{Name: Project, Title: "Saltmarsh (feature), Petrel & Finch"})...)
 	for _, p := range Pools {
@@ -327,8 +331,15 @@ func ManagerArgs(o Options) []string {
 	}
 	// development viewers only with the installer's token
 	args = append(args, "--hud-installer-token-file="+installerMount+"/token")
+	// the people's issuer (PEOPLE-KEYS-2 3.3): up enrols the owner's keys
+	// there on the installer token, then binds the farm with them
+	args = append(args, "--people-store="+PeopleStore)
 	return args
 }
+
+// PeopleStore is where the people's issuer keeps device records and its
+// index: the farm's Garage bucket, under people/.
+const PeopleStore = "s3://quickstart/people/?endpoint=http://garage-s3.c4-store:3900"
 
 func indentLines(s, by string) string {
 	return by + strings.ReplaceAll(s, "\n", "\n"+by)
@@ -342,7 +353,7 @@ func ManagerPatch(o Options, args []string) []byte {
 	for _, a := range args {
 		drop := false
 		for _, f := range []string{"--hud-dev-viewers=", "--capacity-provider=", "--hud-sites=", "--tz=", "--hud-plain-registries=", "--single-person-farm=",
-			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox=", "--hud-installer-token-file="} {
+			"--hud-image-registry=", "--hud-image-tag=", "--hud-sandbox=", "--hud-installer-token-file=", "--people-store="} {
 			if strings.HasPrefix(a, f) {
 				drop = true
 			}
