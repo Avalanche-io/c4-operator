@@ -31,3 +31,22 @@
 285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/touch-key-on-a-step-up.json:generic-api-key:15
 285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/touch-key-on-a-step-up.json:generic-api-key:22
 285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/touch-key-on-a-step-up.json:jwt:21
+# The passkey fixtures in schema/fixtures/device: public keys, C4 IDs and made-up sign-in tokens for example people, not secrets.
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/no-proof.json:generic-api-key:15
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/no-proof.json:generic-api-key:21
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/no-proof.json:jwt:20
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-not-a-touch-key.json:generic-api-key:15
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-not-a-touch-key.json:generic-api-key:21
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-not-a-touch-key.json:jwt:20
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-origin-not-https.json:generic-api-key:15
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-origin-not-https.json:generic-api-key:22
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-origin-not-https.json:jwt:21
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-with-a-raw-proof.json:generic-api-key:15
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-with-a-raw-proof.json:generic-api-key:22
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/fail/passkey-with-a-raw-proof.json:jwt:21
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/browser-for-a-passkey.json:generic-api-key:15
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/browser-for-a-passkey.json:generic-api-key:21
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/browser-for-a-passkey.json:jwt:20
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/passkey-on-a-step-up.json:generic-api-key:15
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/passkey-on-a-step-up.json:generic-api-key:22
+e1b32cd144e64ccc99854b650c152a19b699aa2d:schema/fixtures/device/pass/passkey-on-a-step-up.json:jwt:21
