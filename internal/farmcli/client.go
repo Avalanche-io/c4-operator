@@ -21,6 +21,9 @@ type Client struct {
 	// its HUD takes a development viewer (As) only with it.
 	Installer string
 	HTTP      *http.Client
+	// Acts signs the person's acts this client sends (DoAct); nil sends
+	// them unsigned.
+	Acts *Acts
 }
 
 // NewClient makes a client for a farm.
@@ -79,6 +82,16 @@ func (c *Client) requestAt(ctx context.Context, prefix, method, path string, bod
 	if size >= 0 && body != nil {
 		req.ContentLength = size
 	}
+	c.headers(req, ctype)
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("the farm at %s is unreachable: %v", c.Base, err)
+	}
+	return resp, nil
+}
+
+// headers are every request's: who the client is and its credentials.
+func (c *Client) headers(req *http.Request, ctype string) {
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("X-C4-Client", "c4-farm")
 	if c.Installer != "" {
@@ -90,11 +103,6 @@ func (c *Client) requestAt(ctx context.Context, prefix, method, path string, bod
 	if c.Token != "" {
 		req.Header.Set("Authorization", "Bearer "+c.Token)
 	}
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return nil, fmt.Errorf("the farm at %s is unreachable: %v", c.Base, err)
-	}
-	return resp, nil
 }
 
 func apiError(resp *http.Response) error {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -54,17 +55,17 @@ func TestUpBindsTheFarmToItsOwner(t *testing.T) {
 	ctx := context.Background()
 
 	o := localfarm.Options{Name: "c4-walk", Owner: "noor", HUDHostPort: port}
-	if err := bindFarm(ctx, o); err != nil {
+	if err := bindFarm(ctx, o, false, io.Discard); err != nil {
 		t.Fatal(err)
 	}
 	if bound == nil || bound.Owner != "noor" || bound.To != "c4-walk/*" || !bound.OnePerson || bound.RunFor != "" {
 		t.Fatalf("bound %+v", bound)
 	}
-	if err := bindFarm(ctx, o); err != nil {
+	if err := bindFarm(ctx, o, false, io.Discard); err != nil {
 		t.Errorf("the same owner again: %v", err)
 	}
 	o.Owner = "sam"
-	err = bindFarm(ctx, o)
+	err = bindFarm(ctx, o, false, io.Discard)
 	if err == nil || !strings.Contains(err.Error(), "not bound to its owner sam") || !strings.Contains(err.Error(), "bound to noor, its one person") {
 		t.Errorf("another owner: %v", err)
 	}

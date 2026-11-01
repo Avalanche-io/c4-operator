@@ -761,11 +761,12 @@ func run(args []string, stdout io.Writer, stdin io.Reader) error {
 		}
 		// the owner's keys, before the farm is bound with them and before
 		// any integration acts as them; the owner key is pinned here
-		ownerKey, err := upKeys(ctx, o.Options, cfg.Farms[localfarm.Name].OwnerKey, isTerminal(stdin) && !farmcli.InsideAgent(), stdout)
+		present := isTerminal(stdin) && !farmcli.InsideAgent()
+		ownerKey, err := upKeys(ctx, o.Options, cfg.Farms[localfarm.Name].OwnerKey, present, stdout)
 		if err != nil {
 			return err
 		}
-		if err := bindFarm(ctx, o.Options); err != nil {
+		if err := bindFarm(ctx, o.Options, present, stdout); err != nil {
 			return err
 		}
 		cfg.Farms[localfarm.Name] = farmcli.Farm{HUD: o.HUD(), As: v.Name, Project: localfarm.Project, Local: true, Owner: o.Owner,
@@ -1282,12 +1283,18 @@ func upKeys(ctx context.Context, o localfarm.Options, pinned string, touch bool,
 // person's farm: every deployment of it, its records accruing to them. The
 // same owner again changes nothing; a farm bound to someone else is
 // refused, with how an owner changes.
-func bindFarm(ctx context.Context, o localfarm.Options) error {
+//
+// The binding is the owner's first act, signed with their keys when they
+// are at the terminal (present): with the touch key too, where up made one.
+func bindFarm(ctx context.Context, o localfarm.Options, present bool, stdout io.Writer) error {
+	name := cmp.Or(o.Name, localfarm.Name)
 	c, err := farmcli.NewClient(farmcli.Farm{HUD: o.HUD(), As: o.Owner, Local: true,
-		InstallerTokenFile: localfarm.InstallerTokenFile(cmp.Or(o.Name, localfarm.Name))})
+		InstallerTokenFile: localfarm.InstallerTokenFile(name)})
 	if err != nil {
 		return err
 	}
+	c.Acts = &farmcli.Acts{Store: farmcli.KeysFor(name), Present: present,
+		Say: func(format string, a ...any) { fmt.Fprintf(stdout, "binding   "+format, a...) }}
 	if _, err := farmcli.Bind(ctx, c, o.BindRequest()); err != nil {
 		return fmt.Errorf("the farm is up, but not bound to its owner %s: %v", o.Owner, err)
 	}
