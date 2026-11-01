@@ -134,6 +134,10 @@ type Signature struct {
 	Sig   string `json:"sig"`
 }
 
+// PAE is DSSE's pre-authentication encoding of a payload: the bytes every
+// signature in an envelope signs. A device signs it with SignP256.
+func PAE(payloadType string, payload []byte) []byte { return pae(payloadType, payload) }
+
 // pae is DSSE's pre-authentication encoding.
 func pae(payloadType string, payload []byte) []byte {
 	var b bytes.Buffer

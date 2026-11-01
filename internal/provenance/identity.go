@@ -2,7 +2,10 @@ package provenance
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
 	"crypto/ed25519"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/x509"
@@ -15,6 +18,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // Every entity that does work signs its own records (DESIGN.md section
@@ -122,16 +127,52 @@ func ParseCA(certPEM, keyPEM []byte) (*CA, error) {
 	return &CA{Cert: cert, Key: key}, nil
 }
 
-// Issue binds pub to identity for ttl.
-func (ca *CA) Issue(pub ed25519.PublicKey, identity string, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
-	u, err := url.Parse(identity)
-	if err != nil || !strings.HasPrefix(identity, IdentityBase) {
+// Issue binds pub to identity for ttl. pub is a farm part's Ed25519 key
+// or a device's ECDSA P-256 key; the CA itself is Ed25519 either way.
+func (ca *CA) Issue(pub crypto.PublicKey, identity string, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
+	return ca.IssueLeaf(pub, identity, "", "", ttl, now)
+}
+
+// IssueLeaf is Issue with a leaf's further URI SANs (LeafURIs): the device
+// a person's key is, or the grant an agent or CI job acts under. A device
+// key is P-256, and the device it names must be its own key's ID, so a
+// leaf can never name another device.
+func (ca *CA) IssueLeaf(pub crypto.PublicKey, identity, device, grant string, ttl time.Duration, now time.Time) (*x509.Certificate, error) {
+	if !strings.HasPrefix(identity, IdentityBase) {
 		return nil, fmt.Errorf("identity %q is not under %s", identity, IdentityBase)
+	}
+	switch k := pub.(type) {
+	case ed25519.PublicKey:
+		if len(k) != ed25519.PublicKeySize {
+			return nil, errors.New("an Ed25519 key is 32 bytes")
+		}
+		if device != "" {
+			return nil, errors.New("a device key is P-256, not Ed25519")
+		}
+	case *ecdsa.PublicKey:
+		if k.Curve != elliptic.P256() {
+			return nil, errors.New("a device key is P-256")
+		}
+	default:
+		return nil, fmt.Errorf("a leaf's key is Ed25519 or ECDSA P-256, not %T", pub)
+	}
+	if device != "" {
+		spki, err := x509.MarshalPKIXPublicKey(pub)
+		if err != nil {
+			return nil, err
+		}
+		if own := schema.DeviceID(spki); device != own {
+			return nil, fmt.Errorf("the leaf names device %s, but its key is device %s", device, own)
+		}
+	}
+	uris, err := LeafURIs(identity, device, grant)
+	if err != nil {
+		return nil, fmt.Errorf("identity %q is not under %s: %v", identity, IdentityBase, err)
 	}
 	tmpl := &x509.Certificate{
 		SerialNumber: serial(),
 		Subject:      pkix.Name{CommonName: identity},
-		URIs:         []*url.URL{u},
+		URIs:         uris,
 		NotBefore:    now.Add(-time.Minute),
 		NotAfter:     now.Add(ttl),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
