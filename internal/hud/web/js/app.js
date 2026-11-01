@@ -30,7 +30,7 @@ import yourPage from './views/me.js';
 import needsYou from './views/needs.js';
 import sessions from './views/sessions.js';
 import { learnJobs } from './act.js';
-import { start as startSigning } from './enrol.js';
+import { start as startSigning, status as signing } from './enrol.js';
 
 const VIEWS = { queue, job, pools, workers: pools, map, tiers, graph, cost, wall, widget, mine, catalog, me: yourPage, needs: needsYou, sessions };
 // each view and the mode it arrives at (docs/intro/ladder.md)
@@ -131,10 +131,20 @@ function topBar() {
     h('div', { class: 'who' },
       h('span', { class: 'live', 'data-state': state.status, title: `Updates: ${state.status}` }),
       v ? h('a', { class: 'me-link', href: href('me'), title: 'Your page: the trackers that submit work for you' }, h('span', { class: 'mono' }, v.user), ' ', h('span', { class: 'lab' }, v.solo ? 'your farm' : `${role} \u00b7 ${v.allProjects ? 'all projects' : v.projects.join(', ')}`)) : null,
+      deviceNotice(),
       v ? h('a', { href: viewAs(other) }, `View as ${other}`) : null,
       h('button', { class: 'prefs-btn', 'data-prefs': 'open', 'aria-expanded': state.sheet ? 'true' : 'false', title: 'Preferences' }, 'Preferences')),
     replayBadge());
 }
+
+// deviceNotice: a device the person hasn't seen signed in as them, or one
+// of theirs seen from two places at once (enrol.js); their page says which
+const deviceNotice = () => {
+  const n = signing.notices;
+  if (!n) return null;
+  const words = n.twice.length ? 'a device of yours was seen from two places' : n.fresh.length === 1 ? 'a new device signed in as you' : `${n.fresh.length} new devices signed in as you`;
+  return h('a', { class: 'device-notice', href: href('me'), title: 'Your devices, on your page: remove any that isn’t yours' }, words);
+};
 
 // replayBadge: on a farm replayed from a diagnostic bundle (hudmock
 // --bundle; GET /api/v1/replay), a line under the top bar saying so, which
@@ -587,7 +597,7 @@ subscribe((snap) => {
   // the viewer is known now: their preferences apply, and this browser's
   // key is enrolled or renewed for them (enrol.js)
   if (me() !== was) applyPrefs();
-  if (!staticMode && snap.viewer) startSigning(snap.viewer.user);
+  if (!staticMode && snap.viewer) startSigning(snap.viewer);
   render();
 }, (st, msg, code) => {
   state.status = staticMode ? 'static' : st;

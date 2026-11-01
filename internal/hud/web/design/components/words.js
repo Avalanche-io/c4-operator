@@ -182,3 +182,24 @@ export function fromTracker(j) {
   const href = /^https?:\/\//i.test(u) || (u.startsWith('/') && !u.startsWith('//')) ? u : null;
   return { text, href };
 }
+
+// actBy: who took an act a record cites, and how it was signed
+// (PEOPLE-KEYS-2 K3), in the words every view shows: "dana, signed in
+// Safari on macOS, software key". e.act is what the farm read from the
+// act's own record: { grade, kind, label?, protection, as? }. A person's
+// record from before personal keys has none, and says so: "signed by the
+// HUD for dana". Anything else is its actor and signer as before.
+const KEY_KIND = { hardware: 'hardware key', 'software-browser': 'software key', 'software-file': 'key in a file' };
+const DEVICE_KIND = { browser: 'a browser', mac: 'a Mac', windows: 'a Windows PC', linux: 'a Linux machine' };
+export function actBy(e) {
+  if (!e) return '';
+  const a = e.act;
+  if (a) {
+    const who = a.as ? `${e.actor} as ${a.as}` : e.actor;
+    const how = [`signed in ${a.label || DEVICE_KIND[a.kind] || a.kind}`, KEY_KIND[a.protection] || a.protection];
+    if (a.grade === 'confirmed') how.push('confirmed with a touch');
+    return `${who}, ${how.join(', ')}`;
+  }
+  if (e.signer === 'hud' && e.actor) return `signed by the HUD for ${e.actor}`;
+  return `${e.actor || ''}${e.signer ? ' · ' + e.signer : ''}`;
+}

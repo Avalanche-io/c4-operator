@@ -154,6 +154,10 @@ canvas[data-player] { background: var(--g02); }
 /* Your page (views/me.js): the trackers that submit work for you */
 .who .me-link { color: inherit; text-decoration: none; }
 .who .me-link:hover .mono, .who .me-link:focus-visible .mono { text-decoration: underline; }
+/* a device the person hasn't seen signed in as them (enrol.js): a thing to
+   check, not a failure, so the risk tone; their page says which */
+.who .device-notice { color: var(--risk-text); text-decoration: none; }
+.who .device-notice:hover, .who .device-notice:focus-visible { text-decoration: underline; }
 .me .grow { display: flex; align-items: center; gap: 16px; padding: 10px 14px; background: var(--plate); outline: var(--hair) solid var(--rule-2); margin-bottom: 8px; }
 .me .grow.off { opacity: .62; }
 .me .gmain { flex: 1; font: 400 14px/1.4 var(--sans); }

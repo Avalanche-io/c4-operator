@@ -63,11 +63,13 @@ function load(ctx) {
 const dv = { list: null, err: null, at: null, busy: false };
 document.addEventListener('hud:changed', () => { dv.at = null; });
 
+// loadDevices: the person's devices; on a one-person farm the owner's,
+// whichever role views the page. Shown here, none is new to them any more.
 function loadDevices(ctx, user) {
   if (dv.busy || dv.at === ctx.snap.now) return;
   dv.busy = true;
   dv.at = ctx.snap.now;
-  enrol.devices(user).then((d) => { dv.list = d.devices || []; dv.err = null; }, (e) => { dv.err = e.message; })
+  enrol.devices(enrol.status.person || user).then((d) => { dv.list = d.devices || []; dv.err = null; enrol.seen(dv.list); }, (e) => { dv.err = e.message; })
     .finally(() => { dv.busy = false; ctx.refresh(); });
 }
 

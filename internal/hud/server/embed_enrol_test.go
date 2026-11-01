@@ -190,16 +190,17 @@ enrol.stubs({
   now: () => Date.now(),
   hidden: () => true,
   changed: () => {},
+  local: () => ({ getItem: () => null, setItem: () => {} }),
 });
 const out = {};
-await enrol.start(i.person);
+await enrol.start({ user: i.person });
 if (went) {
   // the provider sends the page back with a code, and the page loads again
   const u = new URL(went);
   Object.assign(out, { nonce: u.searchParams.get('nonce'), prompt: u.searchParams.get('prompt'), clientID: u.searchParams.get('client_id') });
   enrol.reset();
   loc.search = '?code=from-the-provider&state=' + u.searchParams.get('state');
-  await enrol.start(i.person);
+  await enrol.start({ user: i.person });
 }
 Object.assign(out, { enrolled: enrol.status.state, device: enrol.status.device, expires: enrol.status.expires, message: enrol.status.message });
 if (i.job) {

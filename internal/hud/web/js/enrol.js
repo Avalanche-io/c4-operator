@@ -17,7 +17,11 @@
 //         (prompt=none, an authorization code with PKCE); a provider that
 //         wants the person to sign in first leaves a Sign in button on
 //         their page, never a loop of redirects
-//   - signs every act with it (act.js useSigner)
+//   - signs every act with it (act.js useSigner), as the person: on a
+//     one-person farm the farm's owner, with the role they view in (a
+//     role's sign-in, artist or wrangler) as the act's `as`
+//   - tells the person when a device they haven't seen signs in as them,
+//     or one of theirs is seen from two places at once (notices)
 //   - renews it before its leaf ends: on its own proof on a one-person
 //     farm; on a studio farm by the same round trip, taken when the page
 //     is out of sight so nothing the person is typing is lost
@@ -37,7 +41,7 @@ const RETURN = 'c4-hud-sign-in';
 //     | sign-in (the provider wants the person to sign in) | open (a
 //     one-person farm, opened without a code) | refused (the issuer's words
 //     in message)
-export const status = { state: 'starting', device: null, expires: null, person: null, message: null };
+export const status = { state: 'starting', device: null, expires: null, person: null, message: null, notices: null };
 
 // deps: what the flow touches outside itself, so a test can stand in for
 // each (the issuer, the provider, the key store, the address bar, the
@@ -60,6 +64,7 @@ const real = {
   session: () => globalThis.sessionStorage,
   now: () => Date.now(),
   hidden: () => document.hidden,
+  local: () => globalThis.localStorage,
   changed: () => document.dispatchEvent(new CustomEvent('hud:refresh')),
 };
 let deps = real;
@@ -173,15 +178,16 @@ const ASK = new Set(['login_required', 'interaction_required', 'consent_required
 
 // ------------------------------------------------------------ the flow
 
-let cfg = null, rec = null, person = null, timer = null;
+let cfg = null, rec = null, person = null, as = null, timer = null;
 
 // use: sign with a certified key from now on, and renew it in time; a key
 // just certified waits a minute at least, so a browser clock hours off the
 // issuer's never renews back to back
 function use(r, fresh) {
   const c = r.certified;
-  useSigner({ key: r.key, chain: c.chain.map(unb64), farm: c.farm, user: c.person, identity: c.identity, device: c.device });
+  useSigner({ key: r.key, chain: c.chain.map(unb64), farm: c.farm, user: c.person, identity: c.identity, device: c.device, as: as || undefined });
   set({ state: 'signing', device: c.device, expires: c.expires, person: c.person, message: null });
+  notices();
   clearTimeout(timer);
   const left = Date.parse(c.expires) - deps.now();
   timer = setTimeout(renewNow, Math.max(fresh ? 60 * 1000 : 0, left - RENEW_BEFORE));
@@ -250,17 +256,49 @@ async function enrol(code) {
   }
 }
 
-// start: enrol or renew this browser's key for the person viewing, once
-// per page
+// ------------------------------------------------------------ notices
+
+// A device the person hasn't seen yet, signed in as them, and any device
+// of theirs seen from two places at once (PEOPLE-KEYS-2 7). This browser
+// remembers the devices it has shown them, per farm and person; the first
+// time it reads the list it takes it as seen, so a new browser doesn't
+// announce the devices that were there before it.
+const SEEN = 'c4-hud-seen-devices';
+const seenKey = () => `${SEEN}:${cfg.farm}:${person}`;
+
+async function notices() {
+  try {
+    const list = (await devices(person)).devices || [];
+    const raw = deps.local().getItem(seenKey());
+    const seen = new Set(raw ? JSON.parse(raw) : list.map((d) => d.device));
+    if (!raw) deps.local().setItem(seenKey(), JSON.stringify([...seen]));
+    const fresh = list.filter((d) => !seen.has(d.device) && d.device !== status.device);
+    const twice = list.filter((d) => (d.flags || []).length);
+    set({ notices: fresh.length || twice.length ? { fresh, twice } : null });
+  } catch (e) {
+    // the list is a courtesy here; the person's page reads it again
+  }
+}
+
+// seen: the person has seen their devices (their page shows them): no
+// device in the list is new to them any more
+export function seen(list) {
+  if (!cfg || !person) return;
+  deps.local().setItem(seenKey(), JSON.stringify(list.map((d) => d.device)));
+  if (status.notices) set({ notices: status.notices.twice.length ? { fresh: [], twice: status.notices.twice } : null });
+}
+
+// start: enrol or renew this browser's key for the person viewing (the
+// snapshot's viewer), once per page
 let started = null;
-export function start(user) {
-  if (!user || started) return started;
-  started = run(user).catch((e) => refused(e));
+export function start(viewer) {
+  if (!viewer || !viewer.user || started) return started;
+  started = run(viewer).catch((e) => refused(e));
   return started;
 }
 
-async function run(user) {
-  person = user;
+async function run(viewer) {
+  person = viewer.user;
   if (!globalThis.indexedDB || !globalThis.crypto || !globalThis.crypto.subtle) return set({ state: 'off' });
   try {
     cfg = await call('/config');
@@ -268,6 +306,12 @@ async function run(user) {
     // a farm that runs no issuer: acts go unsigned, as before
     if (e.status === 404) return set({ state: 'off' });
     throw e;
+  }
+  // a one-person farm's acts are its owner's, whichever role's sign-in
+  // views the HUD; the farm takes them as the owner's in that role
+  if (cfg.owner && cfg.owner !== viewer.user) {
+    person = cfg.owner;
+    as = viewer.role || viewer.user;
   }
   rec = await deps.deviceKey(cfg.farm);
   set({ device: rec.device });
@@ -343,7 +387,7 @@ export async function remove({ device, all }) {
 // reset: forget this page's flow (tests)
 export function reset() {
   clearTimeout(timer);
-  started = cfg = rec = person = null;
-  Object.assign(status, { state: 'starting', device: null, expires: null, person: null, message: null });
+  started = cfg = rec = person = as = null;
+  Object.assign(status, { state: 'starting', device: null, expires: null, person: null, message: null, notices: null });
   useSigner(null);
 }

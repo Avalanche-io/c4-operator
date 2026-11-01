@@ -23,7 +23,6 @@ export const STATEMENT_TYPE = 'https://in-toto.io/Statement/v1';
 export const ACT_TYPE = 'https://cccc.io/provenance/act/v1';
 export const PAYLOAD_TYPE = 'application/vnd.in-toto+json';
 export const BUNDLE_TYPE = 'application/vnd.cccc.attestation.v1+json';
-export const IDENTITY_BASE = 'https://cccc.io/id/';
 
 const enc = new TextEncoder();
 const subtle = () => globalThis.crypto.subtle;
@@ -126,36 +125,46 @@ export function lowS(sig) {
 // ------------------------------------------------------------ the act
 
 // statement: an act/v1 statement as the signer states it. A person's act
-// is by them and for them (the chain's by and for), signed; the leaf's
-// identity is its signer.
-export function statement({ farm, subject, act, params, user, identity, device, as, signedAt, nonce }) {
+// is by them and for them (the chain's by and for), signed, or confirmed
+// when a touch signs it too (K9); the leaf's identity is its signer,
+// copied from what the issuer certified, never computed here.
+export function statement({ farm, subject, act, params, user, identity, device, as, signedAt, nonce, grade = 'signed' }) {
+  if (!identity) throw new Error('an act names the identity its key was certified as: enrol the key first');
   const predicate = { farm, act, params };
   if (as) predicate.as = as;
   if (device) predicate.device = device;
   Object.assign(predicate, {
     nonce,
     // the leaf's identity exactly, as the issuer certified it
-    signer: identity || IDENTITY_BASE + 'user/' + encodeURIComponent(user),
-    chain: { by: { person: user, grade: 'signed' }, for: { party: user, grade: 'signed' } },
+    signer: identity,
+    chain: { by: { person: user, grade }, for: { party: user, grade } },
     signedAt,
   });
   return { _type: STATEMENT_TYPE, subject: [subject], predicateType: ACT_TYPE, predicate };
 }
 
 // signAct: an act's bundle, the base64 of which X-C4-Act carries. signer
-// is { key, chain, farm, user, identity, device }: the device's private
-// CryptoKey, its certificate chain (DER, leaf first), the farm's ID, the
-// person, the identity its leaf names and the device ID.
-export async function signAct(signer, { subject, act, params, as }, now = new Date()) {
+// is { key, chain, farm, user, identity, device, as? }: the device's
+// private CryptoKey, its certificate chain (DER, leaf first), the farm's
+// ID, the person, the identity its leaf names, the device ID, and on a
+// one-person farm the role the person acts in.
+//
+// touch is the place K9's passkey takes: given the bytes signed, it
+// answers a second signature { keyid, sig }, and the act is confirmed
+// rather than signed. Nothing passes one yet.
+export async function signAct(signer, { subject, act, params, as }, now = new Date(), { touch } = {}) {
   const nonce = globalThis.crypto.getRandomValues(new Uint8Array(16));
   const st = statement({ farm: signer.farm, subject, act, params: params === undefined ? {} : params, user: signer.user, identity: signer.identity,
-    device: signer.device, as, signedAt: now.toISOString(), nonce: b64url(nonce) });
+    device: signer.device, as: as || signer.as, signedAt: now.toISOString(), nonce: b64url(nonce), grade: touch ? 'confirmed' : 'signed' });
   const payload = enc.encode(JSON.stringify(st));
-  const sig = await signRaw(signer.key, pae(PAYLOAD_TYPE, payload));
+  const signed = pae(PAYLOAD_TYPE, payload);
+  const sig = await signRaw(signer.key, signed);
   const keyid = hex(new Uint8Array(await subtle().digest('SHA-256', signer.chain[0])));
+  const signatures = [{ keyid, sig: b64(sig) }];
+  if (touch) signatures.push(await touch(signed));
   const bundle = {
     mediaType: BUNDLE_TYPE,
-    dsseEnvelope: { payloadType: PAYLOAD_TYPE, payload: b64(payload), signatures: [{ keyid, sig: b64(sig) }] },
+    dsseEnvelope: { payloadType: PAYLOAD_TYPE, payload: b64(payload), signatures },
     verificationMaterial: { x509CertificateChain: { certificates: signer.chain.map((c) => ({ rawBytes: b64(c) })) } },
   };
   return enc.encode(JSON.stringify(bundle));
