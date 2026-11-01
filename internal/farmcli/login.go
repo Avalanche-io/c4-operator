@@ -1,0 +1,206 @@
+package farmcli
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/keystore"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+)
+
+// c4 farm login (PEOPLE-KEYS-2 3.2, K4): the person signs in at the
+// studio's sign-in provider in their browser, as they would anyway, and
+// this machine's key is certified on the ID token. The CLI makes its key
+// first and sends the provider its device ID as the nonce, so the token
+// names this key and no other (a loopback redirect, RFC 8252, with PKCE).
+// There is no device flow: no provider takes a nonce in one, so on a
+// machine with no browser the person forwards the loopback port over SSH.
+
+// OIDCEndpoints are a sign-in provider's endpoints, as its discovery names
+// them.
+type OIDCEndpoints struct {
+	Authorization string `json:"authorization_endpoint"`
+	Token         string `json:"token_endpoint"`
+}
+
+// Discover reads a provider's endpoints from its discovery document.
+func Discover(ctx context.Context, hc *http.Client, issuer string) (OIDCEndpoints, error) {
+	var e OIDCEndpoints
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimSuffix(issuer, "/")+"/.well-known/openid-configuration", nil)
+	if err != nil {
+		return e, err
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return e, fmt.Errorf("the sign-in provider %s: %w", issuer, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return e, fmt.Errorf("the sign-in provider %s: %s", issuer, resp.Status)
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&e); err != nil {
+		return e, err
+	}
+	if e.Authorization == "" || e.Token == "" {
+		return e, fmt.Errorf("the sign-in provider %s names no authorization or token endpoint", issuer)
+	}
+	return e, nil
+}
+
+// LoginArgs are c4 farm login's.
+type LoginArgs struct {
+	// Store is the farm's keys on this machine.
+	Store keystore.Store
+	// Person is who signs in, as the farm names them.
+	Person string
+	// Farm is the people's issuer's config: the farm's ID and its provider.
+	Farm *people.Config
+	// Endpoints are the provider's (Discover); Provider reaches it.
+	Endpoints OIDCEndpoints
+	Provider  *http.Client
+	// Open opens the person's browser at a URL.
+	Open func(string) error
+	// Port is the loopback port to listen on; 0 picks one. A machine with
+	// no browser fixes it, and the person forwards it over SSH.
+	Port int
+	// Wait bounds the sign-in.
+	Wait time.Duration
+	// Say tells the person what to do.
+	Say func(format string, a ...any)
+}
+
+// Login signs the person in at the farm's provider and enrols this
+// machine's device key on the ID token, keeping its certificate beside it.
+func Login(ctx context.Context, c *Client, a LoginArgs) (*people.Certified, error) {
+	if a.Farm == nil || a.Farm.Provider == nil {
+		return nil, errors.New("this farm has no sign-in provider: a one-person farm's key is c4 farm up's")
+	}
+	key, err := a.Store.Key(keystore.Device)
+	if err != nil {
+		return nil, err
+	}
+	token, err := signIn(ctx, a, deviceID(key))
+	if err != nil {
+		return nil, err
+	}
+	e, err := enrolment(key, a.Farm.Farm, a.Person, "")
+	if err != nil {
+		return nil, err
+	}
+	e.IDToken = token
+	var cert people.Certified
+	if err := c.Issuer(ctx, http.MethodPost, "/v1/people/enroll", e, &cert); err != nil {
+		return nil, fmt.Errorf("enrolling this machine's key: %w", err)
+	}
+	if err := saveCert(a.Store, keystore.Device, &cert); err != nil {
+		return nil, err
+	}
+	return &cert, nil
+}
+
+// signIn runs the provider's authorization code flow on a loopback
+// redirect, with PKCE (S256) and nonce, and returns the ID token.
+func signIn(ctx context.Context, a LoginArgs, nonce string) (string, error) {
+	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", a.Port))
+	if err != nil {
+		return "", fmt.Errorf("listening on 127.0.0.1:%d for the sign-in: %w", a.Port, err)
+	}
+	defer ln.Close()
+	redirect := fmt.Sprintf("http://127.0.0.1:%d/callback", ln.Addr().(*net.TCPAddr).Port)
+	state, verifier := randomURL(16), randomURL(32)
+	sum := sha256.Sum256([]byte(verifier))
+	q := url.Values{"response_type": {"code"}, "client_id": {a.Farm.Provider.ClientID}, "redirect_uri": {redirect},
+		"scope": {"openid"}, "state": {state}, "nonce": {nonce},
+		"code_challenge": {base64.RawURLEncoding.EncodeToString(sum[:])}, "code_challenge_method": {"S256"}}
+	auth := a.Endpoints.Authorization + "?" + q.Encode()
+
+	got := make(chan url.Values, 1)
+	srv := &http.Server{ReadHeaderTimeout: 10 * time.Second, Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/callback" {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintln(w, "Signed in. You can close this tab and go back to the terminal.")
+		select {
+		case got <- r.URL.Query():
+		default:
+		}
+	})}
+	go srv.Serve(ln)
+	defer srv.Close()
+
+	if a.Say != nil {
+		a.Say("sign in   %s\n", auth)
+		a.Say("          no browser here? from your own machine: ssh -L %d:127.0.0.1:%d <this machine>, then open that address there\n",
+			ln.Addr().(*net.TCPAddr).Port, ln.Addr().(*net.TCPAddr).Port)
+	}
+	if a.Open != nil {
+		a.Open(auth)
+	}
+	wait := a.Wait
+	if wait == 0 {
+		wait = 5 * time.Minute
+	}
+	var back url.Values
+	select {
+	case back = <-got:
+	case <-time.After(wait):
+		return "", errors.New("no sign-in came back in time: run c4 farm login again")
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	if e := back.Get("error"); e != "" {
+		return "", fmt.Errorf("the sign-in provider refused: %s %s", e, back.Get("error_description"))
+	}
+	if back.Get("state") != state {
+		return "", errors.New("the sign-in came back for another request: run c4 farm login again")
+	}
+	return exchange(ctx, a, back.Get("code"), redirect, verifier)
+}
+
+// exchange trades the authorization code for the ID token, as a public
+// client: the PKCE verifier proves it is the client that asked.
+func exchange(ctx context.Context, a LoginArgs, code, redirect, verifier string) (string, error) {
+	form := url.Values{"grant_type": {"authorization_code"}, "code": {code}, "redirect_uri": {redirect},
+		"client_id": {a.Farm.Provider.ClientID}, "code_verifier": {verifier}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, a.Endpoints.Token, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	hc := a.Provider
+	if hc == nil {
+		hc = http.DefaultClient
+	}
+	resp, err := hc.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("the sign-in provider's token endpoint: %w", err)
+	}
+	defer resp.Body.Close()
+	var out struct {
+		IDToken string `json:"id_token"`
+		Error   string `json:"error"`
+	}
+	json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&out)
+	if resp.StatusCode != http.StatusOK || out.IDToken == "" {
+		return "", fmt.Errorf("the sign-in provider gave no ID token: %s %s", resp.Status, out.Error)
+	}
+	return out.IDToken, nil
+}
+
+func randomURL(n int) string {
+	b := make([]byte, n)
+	rand.Read(b)
+	return base64.RawURLEncoding.EncodeToString(b)
+}
