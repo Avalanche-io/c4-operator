@@ -169,7 +169,7 @@ type Act struct {
 	Confirmed bool
 }
 
-// JobUID and JobSpecDigest are the scratch job an act is on by default,
+// JobUID is the UID of the scratch job an act is on by default,
 // show-a/sh040-light-v007.
 const JobUID = "9b2e4d71-0c3a-4f8e-a6d2-5b1e7c9f3a10"
 
