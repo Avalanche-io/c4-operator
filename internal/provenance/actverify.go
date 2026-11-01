@@ -200,10 +200,17 @@ func checkAct(v *Verified) (*schema.Act, error) {
 		return nil, fmt.Errorf("%s is a person's act: a unit, an agent, a CI job or a relay may plan it, and a person makes it", p.Act)
 	}
 	if need.Touch && !v.Confirmed() {
-		return nil, fmt.Errorf("%s needs the person's touch: it is confirmed, signed by the device key and its touch key", p.Act)
+		return nil, fmt.Errorf("%s %w: it is confirmed, signed by the device key and its touch key", p.Act, ErrNeedsTouch)
 	}
 	return a, nil
 }
+
+// ErrNeedsTouch means an act's kind is on the touch list and no touch key
+// signed it. checkAct checks it last, so an act refused for it alone has
+// passed every other rule: the people's issuer books a sign-in provider
+// setting refused only for it as signed, not confirmed, until the touch
+// is built (PEOPLE-KEYS-2 10.4 item 12).
+var ErrNeedsTouch = errors.New("needs the person's touch")
 
 // unitSigns reports whether a unit's identity,
 // unit/<ns>/<job>/<unit>@<uid>/<attempt>, is the unit a chain names,
