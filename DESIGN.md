@@ -1327,8 +1327,13 @@ names no system store keeps none, and nothing else changes.
   sealed segment that names it (`Book.PositionOf`), and whether a grant,
   binding, device or membership was in force when it was made is answered
   by sealed position (`Book.InForce`), at the time that position was
-  sealed, never by the record's own `signedAt`, by one rule the people's
-  index uses too (`farmbook.DevicesInForce`). An entry a book adopted keeps
+  sealed, never by the record's own `signedAt`, by one rule for every kind
+  that the people's index uses too (`farmbook.InForceAt`,
+  `DevicesInForce`). The rule takes its time explicitly: a verifier passes
+  the time its position was sealed (`Book.InForce`), and a live decision
+  (taking an act, renewing) its own clock, so a time-based end such as a
+  device's lapse refuses at once on a quiet book, not only after the next
+  seal. An entry a book adopted keeps
   its own time, so a device that lapsed before the book stays lapsed.
   An entry whose record's `signedAt` falls outside its window (from five
   minutes before the queue first saw it pending to five after) is flagged
