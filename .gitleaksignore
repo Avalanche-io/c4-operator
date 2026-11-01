@@ -1,2 +1,33 @@
 # A fixed test value for the installer token, not a secret (internal/hud/server/installer_test.go).
 3ea887bf65b5934a3c0c60eed4a094afa4c53940:internal/hud/server/installer_test.go:generic-api-key:27
+# Personal keys' schema fixtures: public keys and made-up sign-in tokens for example people at studio.example, not secrets (schema/fixtures/device).
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/code-on-a-sign-in.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/code-on-a-sign-in.json:generic-api-key:21
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/code-on-a-sign-in.json:jwt:20
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/installer-enrols-a-browser.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/key-not-p256.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/key-not-p256.json:generic-api-key:21
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/key-not-p256.json:jwt:20
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/owner-enrols-a-machine.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/owner-without-the-code.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/proof-in-der.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/proof-in-der.json:generic-api-key:21
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/proof-in-der.json:jwt:20
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/sign-in-without-the-provider-key.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/fail/sign-in-without-the-provider-key.json:jwt:20
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/browser-on-a-sign-in.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/browser-on-a-sign-in.json:generic-api-key:21
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/browser-on-a-sign-in.json:jwt:20
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/browser-the-owner-enrolled.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/mac-on-a-sign-in.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/mac-on-a-sign-in.json:generic-api-key:21
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/mac-on-a-sign-in.json:jwt:20
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/owner-at-farm-up.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/owner-touch-key-at-farm-up.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/renewal.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/renewal.json:generic-api-key:21
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/renewal.json:jwt:20
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/second-machine-approved.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/touch-key-on-a-step-up.json:generic-api-key:15
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/touch-key-on-a-step-up.json:generic-api-key:22
+285024538a6530be0b15cbd622e62d343ed9c736:schema/fixtures/device/pass/touch-key-on-a-step-up.json:jwt:21
