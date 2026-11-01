@@ -462,3 +462,56 @@ func TestEntriesChain(t *testing.T) {
 		t.Error("an entry written in the book's order")
 	}
 }
+
+// page is the book as the HUD's route serves it after since, read by a
+// fresh reader, as a HUD that restarted (or whoever controls it) would.
+func (r *rig) page(since int64) *farmbook.Page {
+	r.t.Helper()
+	v, err := r.reader().View(r.ctx, r.now)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return farmbook.NewPage(v, since, 1000)
+}
+
+// A client checks each page against the last head it kept: a page that
+// goes on from it is taken; one served from a rolled-back head, or with an
+// entry changed, is refused, though every segment on it verifies.
+func TestClientRefusesARolledBackPage(t *testing.T) {
+	r := newRig(t)
+	key := "submitgrant:saltmarsh/dana-flow"
+	r.book(r.control(r.hud, "grant", key, grantChange("dana", r.now.Add(time.Hour)), r.now), nil)
+	r.seal()
+	older, _ := r.ptr.Read(r.ctx)
+	r.book(r.control(r.hud, "revoke", key, map[string]any{"person": "dana"}, r.now), nil)
+	r.seal()
+	var last farmbook.LastHead
+	last, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, last, r.page(0))
+	if err != nil || last.Number != 2 || last.Position != 2 {
+		t.Fatalf("the first read: %+v, %v", last, err)
+	}
+	// Nothing new: the same head comes back, and is taken.
+	if again, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, last, r.page(last.Position)); err != nil || again != last {
+		t.Errorf("a read with nothing new: %+v, %v", again, err)
+	}
+	// The head rolled back to before the revocation.
+	newest, _ := r.ptr.Read(r.ctx)
+	r.ptr.Set(older)
+	if _, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, last, r.page(last.Position)); !errors.Is(err, farmbook.ErrRollback) {
+		t.Errorf("a rolled-back page: %v", err)
+	}
+	r.ptr.Set(newest)
+	// The next read goes on from the kept head.
+	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor"}, r.now), nil)
+	r.seal()
+	p := r.page(last.Position)
+	next, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, last, p)
+	if err != nil || next.Number != 3 || len(p.Entries) != 1 {
+		t.Fatalf("the next read: %+v, %v", next, err)
+	}
+	// An entry changed on the way is refused.
+	p.Entries[0].Entry = []byte(strings.Replace(string(p.Entries[0].Entry), "noor", "dana", 1))
+	if _, err := farmbook.CheckPage(r.farm.ID, r.farm.Roots, last, p); !errors.Is(err, farmbook.ErrBook) {
+		t.Errorf("a changed entry: %v", err)
+	}
+}

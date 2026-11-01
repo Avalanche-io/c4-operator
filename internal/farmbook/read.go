@@ -42,6 +42,7 @@ type LastHead struct {
 	Number   int64  `json:"number"`
 	Segment  string `json:"segment,omitempty"`
 	Position int64  `json:"position"`
+	Entry    string `json:"entry,omitempty"`
 }
 
 // After checks that h may follow the last head: not an older segment, and
@@ -136,7 +137,7 @@ func (b *Book) Head() Head {
 // Last is the book's head as a LastHead, for a reader to keep.
 func (b *Book) Last() LastHead {
 	h := b.Head()
-	return LastHead{Number: h.Number, Segment: h.Segment, Position: h.Position}
+	return LastHead{Number: h.Number, Segment: h.Segment, Position: h.Position, Entry: h.Entry}
 }
 
 // Segments are the segments sealing positions after since, and always the
