@@ -64,8 +64,16 @@ rules:
   resources: [secrets]
   resourceNames: [c4-system-store]
   verbs: [get]
+# The farm book's State (its sealed head and pending entries) and the
+# sealer's own head, each moved by resourceVersion: the HUD and the
+# people's issuer list entries in the State, and only the queue's sealer
+# moves its own head.
+- apiGroups: [""]
+  resources: [secrets]
+  resourceNames: [c4-farm-book, c4-farm-book-sealer]
+  verbs: [get, update]
 # create cannot be limited by name; the namespace holds nothing else but
-# the people's issuer's and the system store's Secrets.
+# the people's issuer's, the system store's and the farm book's Secrets.
 - apiGroups: [""]
   resources: [secrets]
   verbs: [create]

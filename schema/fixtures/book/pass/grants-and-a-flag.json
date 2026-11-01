@@ -25,7 +25,8 @@
         "record": "c42Q6oEXujz3WNJE1xaTz49MSiGxtUBx4iMPsyjgdf4oyVBLRzSYCqdMxCta43ttaUrCEyEH9f6C3Tkqfknjw9VPyP",
         "signedAt": "2026-11-01T09:00:00Z",
         "from": "2026-11-01T15:55:58Z",
-        "to": "2026-11-01T16:05:02Z"
+        "to": "2026-11-01T16:05:02Z",
+        "reason": "window"
       }
     ],
     "signedAt": "2026-11-01T16:00:02Z"

@@ -79,9 +79,11 @@ type Entry struct {
 	By       string `json:"by,omitempty"`
 	Settings string `json:"settings,omitempty"`
 	// Person and Device are whom the entry is about: a grant's person, a
-	// binding's owner, a device's person and key.
-	Person string `json:"person,omitempty"`
-	Device string `json:"device,omitempty"`
+	// binding's owner, a device's person and key; TouchFor is a touch
+	// key's device, as its device record names it.
+	Person   string `json:"person,omitempty"`
+	Device   string `json:"device,omitempty"`
+	TouchFor string `json:"touchFor,omitempty"`
 	// Expires is when what the entry books stops being in force by itself:
 	// a grant's until.
 	Expires string `json:"expires,omitempty"`
@@ -92,10 +94,11 @@ func (e *Entry) expires() time.Time {
 	return t
 }
 
-// ParseEntry reads an entry's shared fields.
+// ParseEntry reads an entry's shared fields, each from the key that names
+// it exactly: a key in another case is no field of it.
 func ParseEntry(raw []byte) (*Entry, error) {
 	var e Entry
-	if err := json.Unmarshal(raw, &e); err != nil {
+	if err := exactFields(raw, &e); err != nil {
 		return nil, fmt.Errorf("not a book entry: %w", err)
 	}
 	return &e, nil
@@ -145,18 +148,65 @@ type State struct {
 	Version string
 }
 
-// Pointer holds the State. The manager's is a ConfigMap in its namespace
-// (ConfigMapPointer), written by resourceVersion, so writers and the
-// sealer move it one at a time.
+// Pointer holds the State. The manager's is the Secret c4-farm-book in
+// the signing namespace (SecretPointer), written by resourceVersion, so
+// writers and the sealer move it one at a time.
 type Pointer interface {
 	Read(ctx context.Context) (State, error)
 	// Write moves the State from from to to, or fails with ErrMoved.
 	Write(ctx context.Context, from, to State) error
 }
 
-// MaxPending bounds the entries waiting for the seal; a writer past it is
-// refused until the queue seals.
-const MaxPending = 4096
+// MaxPending bounds the entries waiting for the seal: a writer past it is
+// refused until the queue seals, and the queue drops any listed past it.
+// MaxSeal is how many one seal takes; the rest wait for the next.
+const (
+	MaxPending = 4096
+	MaxSeal    = 512
+)
+
+// SealerState is the sealer's own record of what it sealed: its last head,
+// and whether it adopted a people's index. It is kept apart from the
+// State, where a writer of the State can't reach it (the Secret
+// c4-farm-book-sealer), so a State rolled back, forked or emptied is put
+// right from it, never sealed over, and adoption happens once.
+type SealerState struct {
+	Head    Head   `json:"head"`
+	Adopted bool   `json:"adopted,omitempty"`
+	Version string `json:"-"`
+}
+
+// SealerStore keeps the SealerState.
+type SealerStore interface {
+	Read(ctx context.Context) (SealerState, error)
+	// Write moves it from from to to, or fails with ErrMoved.
+	Write(ctx context.Context, from, to SealerState) error
+}
+
+// MemorySealer is a SealerStore in memory.
+type MemorySealer struct {
+	mu sync.Mutex
+	s  SealerState
+	n  int
+}
+
+func (m *MemorySealer) Read(context.Context) (SealerState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.s, nil
+}
+
+func (m *MemorySealer) Write(_ context.Context, from, to SealerState) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if from.Version != m.s.Version {
+		return ErrMoved
+	}
+	m.n++
+	to.Version = fmt.Sprint(m.n)
+	m.s = to
+	return nil
+}
 
 // MemoryStore is a Store in memory.
 type MemoryStore struct {
@@ -235,26 +285,4 @@ func canonical(v any) ([]byte, string, error) {
 		return nil, "", err
 	}
 	return b, c4id(b), nil
-}
-
-// place gives a pending entry its position, the entry before it and the
-// book's order, keeping every other field as written, and returns it as
-// stored.
-func place(raw []byte, farm string, pos int64, prev string) ([]byte, string, error) {
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
-		return nil, "", err
-	}
-	set := func(k string, v any) {
-		b, _ := json.Marshal(v)
-		m[k] = b
-	}
-	set("farm", farm)
-	set("position", pos)
-	set("order", OrderBook)
-	delete(m, "prev")
-	if prev != "" {
-		set("prev", prev)
-	}
-	return canonical(m)
 }

@@ -18,9 +18,7 @@
     "refused": [
       {
         "submission": "c43yM4HHckx6dszqAJ985GqrU1oqgLdK7v7ud1uvWQBHxhzjm5H3oZ9qsQ9FF24ywgiLEaLf6NQLwyy86b1iwibEjq",
-        "kind": "control",
-        "record": "c45JUaJFsk7CTeJoPZ5d97uyTcj19a2eB2NXjsZCnjb6j3rXxc8QMcv9Fntv6vgpcRzMFVYRfezbhnDoo19LAS7xRD",
-        "why": "the entry names person dana, its record noor"
+        "reason": "disagrees"
       }
     ],
     "signedAt": "2026-11-01T16:00:00Z"

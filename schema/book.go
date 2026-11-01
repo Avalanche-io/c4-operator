@@ -54,22 +54,36 @@ type BookSegmentPredicate struct {
 }
 
 // BookRefusal is an entry the seal refused: never sealed, never counted.
+// It carries only the entry's C4 ID and a reason from a fixed set
+// (BookReasons), so nothing a writer wrote is copied into a segment.
 type BookRefusal struct {
 	Submission string `json:"submission"`
-	Kind       string `json:"kind,omitempty"`
-	Record     string `json:"record,omitempty"`
-	Why        string `json:"why"`
+	Reason     string `json:"reason"`
 }
 
-// BookFlag is a sealed entry whose record says it was signed outside the
-// window its position allows: after From and before To.
+// BookReasons are the reasons a seal refuses an entry.
+var BookReasons = []string{"missing", "malformed", "not-pending", "other-farm", "unknown-kind", "unsigned", "booked",
+	"record-missing", "unverified", "wrong-signer", "disagrees", "not-in-force", "over-limit", "rejected"}
+
+// BookFlag is a sealed entry the queue flagged (Reason): one whose record
+// says it was signed outside its window, after From and before To; one
+// whose record says nothing of when; or an adopted entry today's checks
+// refuse.
 type BookFlag struct {
 	Position int64  `json:"position"`
-	Record   string `json:"record"`
-	SignedAt string `json:"signedAt"`
-	From     string `json:"from"`
-	To       string `json:"to"`
+	Reason   string `json:"reason"`
+	Record   string `json:"record,omitempty"`
+	SignedAt string `json:"signedAt,omitempty"`
+	From     string `json:"from,omitempty"`
+	To       string `json:"to,omitempty"`
 }
+
+// Reasons a sealed entry is flagged.
+const (
+	FlagWindow    = "window"
+	FlagNoTime    = "no-time"
+	FlagUnchecked = "unchecked"
+)
 
 // BookAdopted names the people's index a book's first segment adopted.
 type BookAdopted struct {

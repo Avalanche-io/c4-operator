@@ -15,7 +15,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"slices"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/Avalanche-io/c4"
@@ -40,6 +42,25 @@ func (s *Server) keepFarmRecord(ctx context.Context, action string, rec []byte) 
 	if err := s.FarmBook.Store.Put(ctx, id, rec); err != nil {
 		s.Log.Error(err, "keep a control record for the farm book", "record", id)
 	}
+}
+
+// offerEvery is how often one node's enrolment offers are booked: a host
+// runner offering again and again books one in that time, so no runner can
+// flood the book (the offers themselves are kept in memory, as before).
+const offerEvery = time.Minute
+
+// offersBooked is when each node's last offer was booked.
+var offersBooked sync.Map // node -> time.Time
+
+// bookOffer books a node's enrolment offer, at most once each offerEvery.
+func (s *Server) bookOffer(ctx context.Context, node, record string) {
+	now := time.Now()
+	if last, ok := offersBooked.Load(node); ok && now.Sub(last.(time.Time)) < offerEvery {
+		s.Log.Info("an enrolment offer not booked: the node offered within the minute", "node", node)
+		return
+	}
+	offersBooked.Store(node, now)
+	s.bookFarm(ctx, record)
 }
 
 // bookFarm writes the entry for a farm-level act's control record, kept
@@ -67,9 +88,10 @@ func (s *Server) bookFarm(ctx context.Context, record string) {
 
 // handleFarmBook is GET /book/farm?since=<position>&limit=: the signed
 // segments after since, the entries they seal and the entries pending the
-// seal. Device entries' addresses go only to their person and the farm's
-// admins; anyone else gets them redacted, labelled (PEOPLE-KEYS-2 10.4
-// item 19).
+// seal. A device entry's addresses are in its private part, which goes
+// only to its person and the farm's admins; anyone else gets the entry
+// without it, labelled, and it still checks against its ID (PEOPLE-KEYS-2
+// 10.4 item 19).
 func (s *Server) handleFarmBook(w http.ResponseWriter, r *http.Request) {
 	v := s.withViewer(w, r)
 	if v == nil {
@@ -126,12 +148,15 @@ func (s *Server) handleFarmBook(w http.ResponseWriter, r *http.Request) {
 			if isControlEntry(es[k].Entry) {
 				continue
 			}
-			raw, red, err := people.RedactEntry(es[k].Entry, sees)
+			private, red, err := people.Private(ctx, s.FarmBookReader.Store, es[k].Entry, sees)
 			if err != nil {
 				fail(w, http.StatusInternalServerError, "entry %d: %v", es[k].Position, err)
 				return
 			}
-			es[k].Entry, es[k].Redacted = raw, red
+			es[k].Private, es[k].Redacted = private, red
+			if slices.Contains(red, farmbook.RedactedEntry) {
+				es[k].Entry = nil
+			}
 		}
 	}
 	writeJSON(w, http.StatusOK, page)

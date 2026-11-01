@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/x509"
 	"errors"
 	"fmt"
 	"time"
@@ -17,17 +18,20 @@ import (
 // The farm book (internal/farmbook, DESIGN.md section 9.2), in the
 // installation's system store (--system-store). It runs only where the
 // install names that store, so no existing farm changes. Its entries,
-// segments and the records they cite go to the store by C4 ID; its State
-// is the ConfigMap c4-farm-book in the operator's namespace; the store's
-// credentials are the Secret c4-system-store in the signing namespace,
-// which only the manager reads, as the people's store's are. The queue
+// segments and the records they cite go to the store by C4 ID. Its State
+// (c4-farm-book), the sealer's own head (c4-farm-book-sealer) and the
+// store's credentials (c4-system-store) are Secrets in the signing
+// namespace, which only the manager reads and writes, by name. The queue
 // seals it; the HUD and the people's issuer write it.
 const systemStoreSecret = "c4-system-store"
 
 // farmBook is the farm book's parts in the manager.
 type farmBook struct {
+	farm   string
+	roots  *x509.CertPool
 	store  farmbook.Store
 	ptr    farmbook.Pointer
+	own    farmbook.SealerStore
 	reader *farmbook.Reader
 	sealer *farmbook.Sealer
 }
@@ -52,7 +56,7 @@ func checkFarmBookFlags(store string, every time.Duration, signing bool) error {
 // checks the HUD's control entries and the people's issuer's entries;
 // legacy, when set, is a people's index kept before the book, which the
 // first seal adopts.
-func newFarmBook(ctx context.Context, s *signing, kube kubernetes.Interface, mgr ctrl.Manager, signingNS, namespace, store string, every time.Duration) (*farmBook, error) {
+func newFarmBook(ctx context.Context, s *signing, kube kubernetes.Interface, mgr ctrl.Manager, signingNS, store string, every time.Duration) (*farmBook, error) {
 	if store == "" || s.ca == nil {
 		return nil, nil
 	}
@@ -69,16 +73,25 @@ func newFarmBook(ctx context.Context, s *signing, kube kubernetes.Interface, mgr
 		return nil, fmt.Errorf("--system-store: %w", err)
 	}
 	farm := farmOf(s)
-	b := &farmBook{store: shardStore{st}}
-	b.ptr = &farmbook.ConfigMapPointer{Client: mgr.GetClient(), Reader: mgr.GetAPIReader(), Namespace: namespace}
-	b.reader = &farmbook.Reader{Farm: farm, Roots: s.pool, Store: b.store, Pointer: b.ptr}
-	b.sealer = &farmbook.Sealer{Farm: farm, Roots: s.pool, Store: b.store, Pointer: b.ptr, Signer: s.queue, Every: every,
+	b := &farmBook{store: shardStore{st}, farm: farm, roots: s.pool}
+	// The manager's client reads Secrets uncached.
+	b.ptr = &farmbook.SecretPointer{Client: mgr.GetClient(), Namespace: signingNS}
+	b.own = &farmbook.SecretSealer{Client: mgr.GetClient(), Namespace: signingNS}
+	b.reader = b.newReader()
+	b.sealer = &farmbook.Sealer{Farm: farm, Roots: s.pool, Store: b.store, Pointer: b.ptr, Own: b.own, Signer: s.queue, Every: every,
 		Log: ctrl.Log.WithName("farm-book"),
 		Checkers: func() []farmbook.Checker {
 			return []farmbook.Checker{&farmbook.ControlChecker{Farm: farm, Roots: s.pool, Store: b.store},
 				people.NewBookChecker(farm, s.pool, b.store)}
 		}}
 	return b, nil
+}
+
+// newReader is a reader of the book in the manager: it reads the sealed
+// book to the sealer's own head, so a State rolled back never takes it
+// back, across its restarts too.
+func (b *farmBook) newReader() *farmbook.Reader {
+	return &farmbook.Reader{Farm: b.farm, Roots: b.roots, Store: b.store, Pointer: b.ptr, Own: b.own}
 }
 
 // writer is the HUD's way into the book, or nil.

@@ -61,10 +61,14 @@ type Certified struct {
 	// computes it.
 	Identity string `json:"identity"`
 	Device   string `json:"device"`
-	// Record is the device record's C4 ID, and Position its entry's.
-	Record   string `json:"record"`
-	Position int64  `json:"position"`
-	Order    string `json:"order"`
+	// Record is the device record's C4 ID, and Position its entry's. With
+	// a farm book the entry is pending its seal: Order is pending, and
+	// Provisional says the position may change when the queue seals it,
+	// within seconds.
+	Record      string `json:"record"`
+	Position    int64  `json:"position"`
+	Order       string `json:"order"`
+	Provisional bool   `json:"provisional,omitempty"`
 	// Chain is DER, leaf first, then the farm CA.
 	Chain   [][]byte  `json:"chain"`
 	Expires time.Time `json:"expires"`
@@ -163,7 +167,7 @@ func (i *Issuer) certify(pub *ecdsa.PublicKey, person, device string, e *Entry, 
 		return nil, err
 	}
 	return &Certified{Farm: i.Farm(), Identity: provenance.CertIdentity(leaf), Device: device, Record: e.Record, Position: e.Position,
-		Order: e.Order, Chain: [][]byte{leaf.Raw, i.CA.Cert.Raw}, Expires: leaf.NotAfter}, nil
+		Order: e.Order, Provisional: e.Order == OrderPending, Chain: [][]byte{leaf.Raw, i.CA.Cert.Raw}, Expires: leaf.NotAfter}, nil
 }
 
 // handleEnroll certifies a new device on an ID token, or on a booked

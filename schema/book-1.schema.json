@@ -128,25 +128,32 @@
       "additionalProperties": false,
       "required": [
         "submission",
-        "why"
+        "reason"
       ],
+      "description": "An entry written for the seal that the queue refused, by its C4 ID and a reason from a fixed set: nothing the writer wrote is copied in, so no input can make a segment that doesn't hold together. The queue's log has the detail.",
       "properties": {
         "submission": {
           "$ref": "#/$defs/id",
           "description": "The C4 ID of the entry as it was written for the seal."
         },
-        "kind": {
-          "type": "string",
-          "maxLength": 64
-        },
-        "record": {
-          "$ref": "#/$defs/id",
-          "description": "The record the entry cited."
-        },
-        "why": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 1000
+        "reason": {
+          "enum": [
+            "missing",
+            "malformed",
+            "not-pending",
+            "other-farm",
+            "unknown-kind",
+            "unsigned",
+            "booked",
+            "record-missing",
+            "unverified",
+            "wrong-signer",
+            "disagrees",
+            "not-in-force",
+            "over-limit",
+            "rejected"
+          ],
+          "description": "missing: not in the store; malformed: not the canonical JSON of an entry of its kind (a key in another case, written twice or unknown); not-pending: written with a position; other-farm; unknown-kind; unsigned: its writer's signature missing or wrong; booked: booked already; record-missing, unverified, wrong-signer: the record it cites; disagrees: it says something its record doesn't; not-in-force: its signer's device or touch key isn't in force; over-limit: past the entries a seal takes; rejected: any other check."
         }
       }
     },
@@ -155,15 +162,21 @@
       "additionalProperties": false,
       "required": [
         "position",
-        "record",
-        "signedAt",
-        "from",
-        "to"
+        "reason"
       ],
+      "description": "A sealed entry the queue flagged: it counts, and is flagged.",
       "properties": {
         "position": {
           "type": "integer",
           "minimum": 1
+        },
+        "reason": {
+          "enum": [
+            "window",
+            "no-time",
+            "unchecked"
+          ],
+          "description": "window: its record says it was signed outside the window around when the queue first saw it pending; no-time: its record says nothing of when it was signed; unchecked: an adopted entry today's checks refuse, which counts for nothing."
         },
         "record": {
           "$ref": "#/$defs/id"
@@ -174,11 +187,11 @@
         },
         "from": {
           "$ref": "#/$defs/time",
-          "description": "The earliest its position allows: the segment before's seal, less the time a record may wait to be booked."
+          "description": "The earliest the window allows: when the queue first saw the entry pending, less the time a record may wait to be booked."
         },
         "to": {
           "$ref": "#/$defs/time",
-          "description": "The latest its position allows: this segment's seal, plus the clocks' skew."
+          "description": "The latest the window allows: when the queue first saw the entry pending, plus the clocks' skew."
         }
       }
     },

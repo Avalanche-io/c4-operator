@@ -375,31 +375,33 @@ func (i *Issuer) Sees(ctx context.Context, caller, person string) bool {
 	return caller != "" && i.sees(ctx, caller, person)
 }
 
-// RedactEntry is a booked entry, as stored, as a caller reads it: whole
-// when it carries no addresses or sees says the caller may read its
-// person's; otherwise without addr and seen, which Redacted names. Every
-// other field is as stored.
-func RedactEntry(raw []byte, sees func(person string) bool) (json.RawMessage, Redacted, error) {
+// Private is what a caller may read of a booked entry's private part (its
+// addresses), by the rule above: the part, as stored, when sees says the
+// caller may read its person's; otherwise Redacted names what is left out.
+// An entry with no private part has nothing to leave out. An entry from
+// before private parts, with its addresses in it, is withheld whole from
+// anyone else ("entry"): its ID would give them away.
+func Private(ctx context.Context, store Store, raw []byte, sees func(person string) bool) (json.RawMessage, Redacted, error) {
 	var e Entry
 	if err := json.Unmarshal(raw, &e); err != nil {
 		return nil, nil, err
 	}
-	if (e.Addr == "" && len(e.Seen) == 0) || sees(e.Person) {
-		return raw, nil, nil
+	switch {
+	case e.Addr != "" || len(e.Seen) > 0:
+		if sees(e.Person) {
+			return nil, nil, nil
+		}
+		return nil, Redacted{"entry"}, nil
+	case e.Private == "":
+		return nil, nil, nil
+	case !sees(e.Person):
+		return nil, Redacted{"private"}, nil
 	}
-	var m map[string]json.RawMessage
-	if err := json.Unmarshal(raw, &m); err != nil {
+	b, err := store.Get(ctx, e.Private)
+	if err != nil {
 		return nil, nil, err
 	}
-	var out Redacted
-	for _, f := range []string{"addr", "seen"} {
-		if _, ok := m[f]; ok {
-			delete(m, f)
-			out = append(out, f)
-		}
-	}
-	b, err := json.Marshal(m)
-	return b, out, err
+	return b, nil, nil
 }
 
 // Redacted is what a read leaves out, by field name.
@@ -432,12 +434,15 @@ type IndexPage struct {
 	Entries  []IndexEntry `json:"entries"`
 }
 
-// IndexEntry is one entry and its C4 ID. Redacted names what the caller
-// may not read; the ID is the entry's as booked.
+// IndexEntry is one entry and its C4 ID, as booked. Private is its
+// private part, for a caller who may read it; Redacted names what the
+// caller may not. An entry with a private part checks against its ID
+// either way.
 type IndexEntry struct {
-	ID       string   `json:"id"`
-	Entry    *Entry   `json:"entry"`
-	Redacted Redacted `json:"redacted,omitempty"`
+	ID       string          `json:"id"`
+	Entry    *Entry          `json:"entry"`
+	Private  json.RawMessage `json:"private,omitempty"`
+	Redacted Redacted        `json:"redacted,omitempty"`
 }
 
 func (i *Issuer) handleIndex(w http.ResponseWriter, r *http.Request) {
@@ -475,7 +480,15 @@ func (i *Issuer) handleIndex(w http.ResponseWriter, r *http.Request) {
 	}
 	for k := range es {
 		e, red := i.redact(r.Context(), who, es[k])
-		page.Entries = append(page.Entries, IndexEntry{ID: ids[k], Entry: e, Redacted: red})
+		ie := IndexEntry{ID: ids[k], Entry: e, Redacted: red}
+		if p := es[k].Private; p != "" {
+			if i.sees(r.Context(), who, es[k].Person) {
+				ie.Private, _ = x.Store.Get(r.Context(), p)
+			} else {
+				ie.Redacted = append(ie.Redacted, "private")
+			}
+		}
+		page.Entries = append(page.Entries, ie)
 	}
 	writeJSON(w, http.StatusOK, page)
 }
@@ -583,6 +596,11 @@ func (i *Issuer) handleDevices(w http.ResponseWriter, r *http.Request) {
 		for _, e := range x.all() {
 			if e.Kind == KindFlag && e.Device == d.id {
 				f, _ := i.redact(r.Context(), who, e)
+				if f == e && e.Private != "" && i.sees(r.Context(), who, e.Person) {
+					c := *e
+					c.Seen = x.seenOf(e)
+					f = &c
+				}
 				dv.Flags = append(dv.Flags, f)
 			}
 		}

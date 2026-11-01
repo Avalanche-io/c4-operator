@@ -135,11 +135,37 @@ type Entry struct {
 	// Flag and Seen: what was flagged, and what was seen (KindFlag).
 	Flag string   `json:"flag,omitempty"`
 	Seen []string `json:"seen,omitempty"`
+	// TouchFor is a touch key's device, as its device record names it
+	// (KindDevice).
+	TouchFor string `json:"touchFor,omitempty"`
+	// Private is the C4 ID of the entry's private part (privatePart): the
+	// addresses a device was seen at, kept out of the entry with a random
+	// salt, so the entry's ID says nothing of them. Only the device's
+	// person and the farm's admins read it (10.4 item 19). Addr and Seen
+	// are written into an entry only by an index from before private
+	// parts.
+	Private string `json:"private,omitempty"`
+	// Sig is the people's issuer's signature over the entry as written
+	// pending (book-entry/v1, component/issuer), on a farm with a farm
+	// book: the queue seals only what the issuer wrote.
+	Sig json.RawMessage `json:"sig,omitempty"`
+
+	// counts is when the entry counts from: its seal, or for an entry a
+	// book adopted, or one in the issuer's own order, its own at.
+	counts time.Time
 }
 
 func (e *Entry) at() time.Time {
 	t, _ := time.Parse(time.RFC3339Nano, e.At)
 	return t
+}
+
+// time is when the entry counts from.
+func (e *Entry) time() time.Time {
+	if !e.counts.IsZero() {
+		return e.counts
+	}
+	return e.at()
 }
 
 func (e *Entry) expires() time.Time {
@@ -311,6 +337,20 @@ type Index struct {
 	head *farmbook.Segment
 	// pendActs are the payload hashes of the acts pending entries book.
 	pendActs map[string]bool
+	// written are the IDs of the entries read, as their writer wrote them
+	// (writtenID), sealed and pending: an entry is booked once.
+	written, pendWritten map[string]bool
+	// priv are the private parts the entries name, by C4 ID.
+	priv map[string]privatePart
+	// unchecked are the positions of sealed entries that no longer check
+	// (the farm's roots changed): kept in the book, counting for nothing,
+	// as the queue's sealer does too.
+	unchecked []int64
+	// fbook is the sealed farm book as last read, for the time each
+	// position was sealed; sealing, set while the queue's checker admits
+	// an entry, is the time of the seal it goes into.
+	fbook   *farmbook.Book
+	sealing time.Time
 	// devices are the device records the index books, by record ID.
 	devices map[string]*schema.Device
 	// raw are the device records' bundles, by record ID.
@@ -428,6 +468,43 @@ func (x *Index) entry(ctx context.Context, id string) (*Entry, error) {
 // entry is read at its position less one: the entries sealed before it,
 // and, for a pending entry, the pending ones before it.
 func (x *Index) load(ctx context.Context, e *Entry, pending bool) error {
+	// An entry written for a farm book is the issuer's, signed, and booked
+	// once, whatever its kind; its addresses are in its private part.
+	written := ""
+	if inBook(e) {
+		id, _, err := x.checkSig(e)
+		if err != nil {
+			return err
+		}
+		if x.written[id] || x.pendWritten[id] {
+			return farmbook.Refuse(farmbook.ReasonBooked, fmt.Errorf("entry %.16s is booked already", id))
+		}
+		if e.Addr != "" || len(e.Seen) > 0 {
+			return farmbook.Refuse(farmbook.ReasonMalformed, errors.New("an entry keeps its addresses in its private part"))
+		}
+		written = id
+	}
+	if err := x.loadPrivate(ctx, e); err != nil {
+		return err
+	}
+	if err := x.loadKind(ctx, e, pending); err != nil {
+		return err
+	}
+	if written != "" {
+		set := &x.written
+		if pending {
+			set = &x.pendWritten
+		}
+		if *set == nil {
+			*set = map[string]bool{}
+		}
+		(*set)[written] = true
+	}
+	return nil
+}
+
+// loadKind checks an entry of its kind against what it books.
+func (x *Index) loadKind(ctx context.Context, e *Entry, pending bool) error {
 	switch e.Kind {
 	case KindFlag:
 		if e.Record != "" || e.Flag != FlagTwoPlaces || x.at(e.Position - 1)[e.Device] == nil {
@@ -459,6 +536,9 @@ func (x *Index) load(ctx context.Context, e *Entry, pending bool) error {
 		spki, _ := d.Predicate.PublicKey()
 		if schema.DeviceID(spki) != e.Device || d.Predicate.Person != e.Person {
 			return fmt.Errorf("the entry names device %.16s of %s, its record %.16s of %s", e.Device, e.Person, schema.DeviceID(spki), d.Predicate.Person)
+		}
+		if (e.TouchFor != "" || inBook(e)) && e.TouchFor != d.Predicate.TouchFor {
+			return fmt.Errorf("the entry names touchFor %.16s, its record %.16s", e.TouchFor, d.Predicate.TouchFor)
 		}
 		if x.devices == nil {
 			x.devices, x.raw = map[string]*schema.Device{}, map[string][]byte{}
@@ -618,7 +698,7 @@ func (x *Index) append(ctx context.Context, now time.Time, sign func(context.Con
 	x.mu.Lock()
 	defer x.mu.Unlock()
 	if x.Book != nil {
-		return x.appendBook(ctx, now, build)
+		return x.appendBook(ctx, now, sign, build)
 	}
 	for try := 0; ; try++ {
 		if err := x.sync(ctx); err != nil {
@@ -636,16 +716,13 @@ func (x *Index) append(ctx context.Context, now time.Time, sign func(context.Con
 			continue
 		}
 		prev, pos := from.ID, from.Position
+		if err := x.prepare(ctx, ps); err != nil {
+			return nil, err
+		}
 		var out []*Entry
 		var ids []string
 		for _, p := range ps {
 			e := p.entry
-			if p.record != nil {
-				e.Record = c4id(p.record)
-				if err := x.Store.Put(ctx, e.Record, p.record); err != nil {
-					return nil, err
-				}
-			}
 			pos++
 			e.Farm, e.Position, e.Prev, e.Order, e.At = x.Farm, pos, prev, OrderIssuer, now.UTC().Format(time.RFC3339Nano)
 			raw, err := json.Marshal(e)
@@ -719,41 +796,44 @@ type device struct {
 	addr         string
 	removed      bool
 	countersigns int
+	state        *farmbook.DeviceState
 }
 
 func (d *device) person() string { return d.rec.Predicate.Person }
 
 // Lapse is how long a device may go without renewing before it lapses
 // (PEOPLE-KEYS-2 7): it makes a new key on its next sign-in.
-const Lapse = 90 * 24 * time.Hour
+const Lapse = farmbook.DeviceLapse
 
-// at is every device the index books up to position pos, as of then:
-// removed from the removal's position on, a person-wide removal reaching
-// only the devices enrolled before it.
+// at is every device the index books up to position pos, as of then, by
+// the rule the farm book uses too (farmbook.DeviceStates): removed from
+// the removal's position on, a person-wide removal reaching only the
+// devices enrolled before it.
 func (x *Index) at(pos int64) map[string]*device {
-	devs := map[string]*device{}
-	for _, e := range x.upTo(pos) {
+	es := x.upTo(pos)
+	var evs []farmbook.DeviceEvent
+	for k, e := range es {
 		switch e.Kind {
 		case KindDevice:
-			d := devs[e.Device]
-			if d == nil {
-				d = &device{id: e.Device, first: e.Position}
-				devs[e.Device] = d
-			}
-			if d.removed {
+			rec := x.devices[e.Record]
+			if rec == nil {
 				continue
 			}
-			d.record, d.rec, d.last, d.lastAt, d.addr = e.Record, x.devices[e.Record], e.Position, e.at(), e.Addr
+			evs = append(evs, farmbook.DeviceEvent{Device: e.Device, Person: rec.Predicate.Person, TouchFor: rec.Predicate.TouchFor,
+				Position: e.Position, Time: e.time(), Ref: k})
 		case KindRemoval:
-			for _, d := range devs {
-				if d.id == e.Device || e.Device == "" && d.person() == e.Person {
-					d.removed = true
-				}
-			}
-		case KindCountersign:
-			if d := devs[e.Device]; d != nil && d.record == e.Of {
-				d.countersigns++
-			}
+			evs = append(evs, farmbook.DeviceEvent{Removal: true, Device: e.Device, Person: e.Person, Position: e.Position, Ref: k})
+		}
+	}
+	devs := map[string]*device{}
+	for id, st := range farmbook.DeviceStates(evs) {
+		e := es[st.Ref]
+		devs[id] = &device{id: id, record: e.Record, rec: x.devices[e.Record], first: st.First, last: st.Last, lastAt: st.LastTime,
+			addr: x.addrOf(e), removed: st.Removed, state: st}
+	}
+	for _, e := range es {
+		if d := devs[e.Device]; e.Kind == KindCountersign && d != nil && d.record == e.Of {
+			d.countersigns++
 		}
 	}
 	return devs
@@ -761,28 +841,43 @@ func (x *Index) at(pos int64) map[string]*device {
 
 // inForce is the devices in force at position pos and time at: not
 // removed, renewed within Lapse of at, and, for a touch key, its device
-// key in force too.
+// key in force too (farmbook.DevicesInForce).
 func (x *Index) inForce(pos int64, at time.Time) map[string]*device {
 	devs := x.at(pos)
-	out := map[string]*device{}
+	states := map[string]*farmbook.DeviceState{}
 	for id, d := range devs {
-		if !d.removed && at.Sub(d.lastAt) <= Lapse {
-			out[id] = d
-		}
+		states[id] = d.state
 	}
-	for id, d := range out {
-		if t := d.rec.Predicate.TouchFor; t != "" && out[t] == nil {
-			delete(out, id)
-		}
+	out := map[string]*device{}
+	for id := range farmbook.DevicesInForce(states, at) {
+		out[id] = devs[id]
 	}
 	return out
+}
+
+// addrOf is where an entry says its device was seen: its private part's
+// address, or an entry's own from before private parts.
+func (x *Index) addrOf(e *Entry) string {
+	if e.Addr != "" {
+		return e.Addr
+	}
+	return x.priv[e.Private].Addr
+}
+
+// seenOf is what a flag entry says was seen.
+func (x *Index) seenOf(e *Entry) []string {
+	if len(e.Seen) > 0 {
+		return e.Seen
+	}
+	return x.priv[e.Private].Seen
 }
 
 // DevicesAt is the device records in force at position pos and time at,
 // the latest of each device: what CheckTouchKey reads, and what a verifier
 // checks a person's act against at the act's position. With a farm book,
-// pos is a book position, judged by sealed entries only: a position past
-// the sealed head is farmbook.ErrNotSealed.
+// pos is a book position, judged by sealed entries only, at the time pos
+// was sealed (at is the issuer's own order's): a position past the sealed
+// head is farmbook.ErrNotSealed.
 func (x *Index) DevicesAt(ctx context.Context, pos int64, at time.Time) ([]*schema.Device, error) {
 	x.mu.Lock()
 	defer x.mu.Unlock()
@@ -793,7 +888,7 @@ func (x *Index) DevicesAt(ctx context.Context, pos int64, at time.Time) ([]*sche
 		return nil, err
 	}
 	var out []*schema.Device
-	for _, d := range x.inForce(pos, at) {
+	for _, d := range x.inForce(pos, x.timeAt(pos, at)) {
 		out = append(out, d.rec)
 	}
 	return out, nil
@@ -835,7 +930,7 @@ func (x *Index) verifiable(pos int64) error {
 // checkAct is CheckAct on the index as this process has read it.
 func (x *Index) checkAct(v *provenance.Verified, pos int64) error {
 	var devs []*schema.Device
-	for _, d := range x.inForce(pos, v.SignedAt) {
+	for _, d := range x.inForce(pos, x.timeAt(pos, v.SignedAt)) {
 		devs = append(devs, d.rec)
 	}
 	person, ok := strings.CutPrefix(v.Identity, provenance.IdentityBase+"user/")

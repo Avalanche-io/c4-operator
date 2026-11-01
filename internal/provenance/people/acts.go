@@ -52,8 +52,10 @@ const (
 type Booked struct {
 	Record   string `json:"record"`
 	Position int64  `json:"position"`
-	Grade    string `json:"grade"`
-	Entry    *Entry `json:"entry"`
+	// Provisional says the position is pending the farm book's seal.
+	Provisional bool   `json:"provisional,omitempty"`
+	Grade       string `json:"grade"`
+	Entry       *Entry `json:"entry"`
 }
 
 func (i *Issuer) handleAct(w http.ResponseWriter, r *http.Request) {
@@ -168,7 +170,7 @@ func (i *Issuer) takeAct(r *http.Request, data []byte) (*Booked, error) {
 		return nil, err
 	}
 	e := es[0]
-	return &Booked{Record: e.Record, Position: e.Position, Grade: grade, Entry: e}, nil
+	return &Booked{Record: e.Record, Position: e.Position, Provisional: e.Order == OrderPending, Grade: grade, Entry: e}, nil
 }
 
 // removal books a device's removal, or all of a person's devices': by the

@@ -15,6 +15,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/farmbook"
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // rig is a farm with a HUD and a queue that sign as themselves, the
@@ -28,6 +29,7 @@ type rig struct {
 	queue  *provenance.Signer
 	store  *farmbook.MemoryStore
 	ptr    *farmbook.MemoryPointer
+	own    *farmbook.MemorySealer
 	sealer *farmbook.Sealer
 	writer *farmbook.Writer
 }
@@ -53,11 +55,11 @@ func newRig(t *testing.T) *rig {
 	t.Helper()
 	now := time.Now().UTC().Truncate(time.Second)
 	r := &rig{t: t, ctx: context.Background(), farm: provtest.NewFarm(t, now.Add(-2*time.Hour)), now: now,
-		store: &farmbook.MemoryStore{}, ptr: &farmbook.MemoryPointer{}}
+		store: &farmbook.MemoryStore{}, ptr: &farmbook.MemoryPointer{}, own: &farmbook.MemorySealer{}}
 	r.hud = signer(t, r.farm, provenance.ComponentIdentity("hud"))
 	r.queue = signer(t, r.farm, provenance.ComponentIdentity("queue"))
 	r.writer = &farmbook.Writer{Store: r.store, Pointer: r.ptr}
-	r.sealer = &farmbook.Sealer{Farm: r.farm.ID, Roots: r.farm.Roots, Store: r.store, Pointer: r.ptr, Signer: r.queue, Log: logr.Discard(),
+	r.sealer = &farmbook.Sealer{Farm: r.farm.ID, Roots: r.farm.Roots, Store: r.store, Pointer: r.ptr, Own: r.own, Signer: r.queue, Log: logr.Discard(),
 		Now: func() time.Time { return r.now },
 		Checkers: func() []farmbook.Checker {
 			return []farmbook.Checker{&farmbook.ControlChecker{Farm: r.farm.ID, Roots: r.farm.Roots, Store: r.store}, &deviceChecker{}}
@@ -121,13 +123,20 @@ func grantChange(person string, until time.Time) map[string]any {
 	return map[string]any{"person": person, "tracker": "flow", "pools": []string{"render"}, "until": until}
 }
 
-// deviceChecker stands in for the people's issuer's checker: it admits
-// device and removal entries as written.
+// deviceChecker stands in for the people's issuer's checker: it reads
+// device and removal entries strictly and admits them as written.
 type deviceChecker struct{}
 
 func (deviceChecker) Kinds() []string { return []string{"device", "removal"} }
-func (deviceChecker) Admit(context.Context, *farmbook.Entry, []byte) (time.Time, error) {
-	return time.Time{}, nil
+func (deviceChecker) Admit(_ context.Context, raw []byte, p farmbook.Placement) ([]byte, time.Time, error) {
+	var e farmbook.Entry
+	if err := farmbook.Strict(raw, &e); err != nil {
+		return nil, time.Time{}, err
+	}
+	e.Farm, e.Position, e.Prev, e.Order = p.Farm, p.Position, p.Prev, p.Order
+	b, _ := json.Marshal(&e)
+	c, err := schema.Canonical(b)
+	return c, time.Now(), err
 }
 
 // An entry whose record says something else is refused at the seal, never
@@ -150,7 +159,7 @@ func TestEntryDisagreeingWithItsRecordRefused(t *testing.T) {
 		c["note"] = what // a record of its own each time
 		r.book(r.control(r.hud, "grant", "submitgrant:saltmarsh/dana-flow", c, r.now), edit)
 		res := r.seal()
-		if len(res.Refused) != 1 || !strings.Contains(res.Refused[0].Why, "disagree on "+what) {
+		if len(res.Refused) != 1 || res.Refused[0].Reason != farmbook.ReasonDisagrees {
 			t.Errorf("an entry disagreeing on %s: refused %+v", what, res.Refused)
 		}
 	}
@@ -182,13 +191,13 @@ func TestEntryCitingAnUnverifiedRecordRefused(t *testing.T) {
 		t.Fatal(err)
 	}
 	res := r.seal()
-	whys := []string{"doesn't verify", "the policy wants https://cccc.io/id/component/hud", "not a farm-level act"}
+	whys := []string{farmbook.ReasonUnverified, farmbook.ReasonWrongSigner, farmbook.ReasonRejected}
 	if len(res.Refused) != len(whys) {
 		t.Fatalf("refused %+v", res.Refused)
 	}
 	for k, why := range whys {
-		if !strings.Contains(res.Refused[k].Why, why) {
-			t.Errorf("refusal %d: %q, want %q", k, res.Refused[k].Why, why)
+		if res.Refused[k].Reason != why {
+			t.Errorf("refusal %d: %q, want %q", k, res.Refused[k].Reason, why)
 		}
 	}
 	if n := len(r.read().Entries(0)); n != 0 {
@@ -203,7 +212,7 @@ func TestRecordBookedOnce(t *testing.T) {
 	r.book(rec, nil)
 	r.seal()
 	r.book(rec, nil)
-	if res := r.seal(); len(res.Refused) != 1 || !strings.Contains(res.Refused[0].Why, "booked already") {
+	if res := r.seal(); len(res.Refused) != 1 || res.Refused[0].Reason != farmbook.ReasonBooked {
 		t.Fatalf("booked twice: %+v", res)
 	}
 }
@@ -246,14 +255,27 @@ func TestSegmentLinkChecked(t *testing.T) {
 	}
 }
 
-// A segment signed by anyone but the queue is refused.
+// A segment signed by anyone but the queue is refused: the sealer won't
+// keep one it signed with another key, and a reader refuses one planted.
 func TestSegmentSignedByTheQueueOnly(t *testing.T) {
 	r := newRig(t)
 	r.sealer.Signer = r.hud
 	r.book(r.control(r.hud, "bind", "deploymentbinding:farm", map[string]any{"owner": "noor"}, r.now), nil)
-	if _, err := r.sealer.Seal(r.ctx); err == nil {
-		t.Error("the sealer kept a segment it signed as the HUD")
+	if _, err := r.sealer.Seal(r.ctx); err == nil || !strings.Contains(err.Error(), "component/queue") {
+		t.Errorf("the sealer kept a segment it signed as the HUD: %v", err)
 	}
+	if st, _ := r.ptr.Read(r.ctx); st.Head.Number != 0 {
+		t.Errorf("the head moved to %d", st.Head.Number)
+	}
+	p := schema.BookSegmentPredicate{Farm: r.farm.ID, Number: 1, First: 1, Last: 0, Entries: []string{}}
+	signed, err := provenance.SignStatement(r.ctx, r.hud, provenance.PredicateBook,
+		[]provenance.Subject{{Name: "farm:" + r.farm.ID, Digest: map[string]string{"c4": r.farm.ID}}}, p, r.now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := provtest.ID(string(signed))
+	r.store.Put(r.ctx, id, signed)
+	r.ptr.Set(farmbook.State{Head: farmbook.Head{Segment: id, Number: 1}})
 	if _, _, err := r.reader().Sync(r.ctx); !errors.Is(err, farmbook.ErrBook) || !strings.Contains(err.Error(), "component/queue") {
 		t.Errorf("a segment the HUD signed: %v", err)
 	}
@@ -351,8 +373,8 @@ func TestInForceAcrossARemoval(t *testing.T) {
 	key := "submitgrant:saltmarsh/dana-flow"
 	device := provtest.ID("dana's laptop key")
 	other := provtest.ID("dana's desk key")
-	write := func(e map[string]any) {
-		e["order"], e["at"] = farmbook.OrderPending, r.now.Format(time.RFC3339Nano)
+	write := func(e *farmbook.Entry) {
+		e.Order, e.At = farmbook.OrderPending, r.now.Format(time.RFC3339Nano)
 		if _, err := r.writer.Append(r.ctx, farmbook.Submission{Entry: e}); err != nil {
 			t.Fatal(err)
 		}
@@ -361,9 +383,9 @@ func TestInForceAcrossARemoval(t *testing.T) {
 	}
 	r.book(r.control(r.hud, "grant", key, grantChange("dana", r.now.Add(10*time.Second)), r.now), nil)
 	r.seal()                                                                              // 1: the grant
-	write(map[string]any{"kind": "device", "device": device, "person": "dana"})           // 2
-	write(map[string]any{"kind": "device", "device": other, "person": "dana"})            // 3
-	write(map[string]any{"kind": "removal", "device": device, "person": "dana"})          // 4
+	write(&farmbook.Entry{Kind: "device", Device: device, Person: "dana"})                // 2
+	write(&farmbook.Entry{Kind: "device", Device: other, Person: "dana"})                 // 3
+	write(&farmbook.Entry{Kind: "removal", Device: device, Person: "dana"})               // 4
 	r.book(r.control(r.hud, "revoke", key, map[string]any{"person": "dana"}, r.now), nil) // 5
 	r.seal()
 	b := r.read()
@@ -427,8 +449,8 @@ func TestSignedAtOutsideItsWindowFlagged(t *testing.T) {
 		t.Fatalf("flags %+v", flags)
 	}
 	from, _ := time.Parse(time.RFC3339Nano, flags[0].From)
-	if want := first.Add(-provenance.ActSkew); !from.Equal(want) {
-		t.Errorf("the window opens at %s, want the seal before less the skew, %s", from, want)
+	if want := r.now.Add(-provenance.ActSkew); !from.Equal(want) || flags[0].Reason != farmbook.FlagWindow {
+		t.Errorf("the window opens at %s, want when the sealer first saw the entry less the skew, %s", from, want)
 	}
 	if on, _ := r.read().InForce(farmbook.ForceGrant, key, 2); on == nil {
 		t.Error("a flagged grant is still booked, and in force at its position")

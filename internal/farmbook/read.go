@@ -31,7 +31,10 @@ type Sealed struct {
 	Entry    *Entry
 	Segment  int64
 	SealedAt time.Time
-	Pending  bool
+	// Time is when the entry counts from: its seal, or for an entry a book
+	// adopted, the time its own index booked it.
+	Time    time.Time
+	Pending bool
 }
 
 // LastHead is the last head a reader accepted. A client keeps it between
@@ -99,6 +102,8 @@ func checkSegment(farm string, roots *x509.CertPool, id string, signed []byte, p
 		return nil, fmt.Errorf("%w: segment %d seals %d to %d with %d entries, after position %d", ErrBook, p.Number, p.First, p.Last, len(p.Entries), wantFirst-1)
 	case p.Adopted != nil && p.Number != 1:
 		return nil, fmt.Errorf("%w: segment %d adopts an index; only the first may", ErrBook, p.Number)
+	case prev != nil && v.SignedAt.Before(prev.SignedAt):
+		return nil, fmt.Errorf("%w: segment %d is sealed before the segment it follows", ErrBook, p.Number)
 	}
 	subject := st.Subject[0]
 	if n := len(p.Entries); n > 0 {
@@ -221,7 +226,13 @@ func (b *Book) add(ctx context.Context, st Store, roots *x509.CertPool, id strin
 		if err != nil {
 			return err
 		}
-		news = append(news, &Sealed{ID: eid, Raw: raw, Entry: e, Segment: s.Number, SealedAt: s.SignedAt})
+		t := s.SignedAt
+		if s.Adopted != nil {
+			// An adopted entry counts from when its own index booked it, so a
+			// device that lapsed before the book doesn't come back.
+			t, _ = time.Parse(time.RFC3339Nano, e.At)
+		}
+		news = append(news, &Sealed{ID: eid, Raw: raw, Entry: e, Segment: s.Number, SealedAt: s.SignedAt, Time: t})
 		last = eid
 	}
 	b.segments = append(b.segments, s)
@@ -328,6 +339,11 @@ type Reader struct {
 	Roots   *x509.CertPool
 	Store   Store
 	Pointer Pointer
+	// Own, set in the manager, is the sealer's own head (SealerState): the
+	// reader reads the sealed book to it, never to a head the State names
+	// that the sealer didn't seal, and so keeps the last head across its
+	// own restarts.
+	Own SealerStore
 
 	mu   sync.Mutex
 	book *Book
@@ -359,6 +375,16 @@ func (r *Reader) Sync(ctx context.Context) (*Book, State, error) {
 	st, err := r.Pointer.Read(ctx)
 	if err != nil {
 		return nil, State{}, err
+	}
+	if r.Own != nil {
+		own, err := r.Own.Read(ctx)
+		if err != nil {
+			return nil, State{}, err
+		}
+		if own.Head.Number < st.Head.Number {
+			return nil, State{}, fmt.Errorf("%w: the State names segment %d, and the sealer sealed to %d", ErrBook, st.Head.Number, own.Head.Number)
+		}
+		st.Head = own.Head
 	}
 	if err := r.last.After(st.Head); err != nil {
 		return nil, State{}, err
@@ -402,7 +428,7 @@ func (r *Reader) View(ctx context.Context, now time.Time) (*View, error) {
 		}
 		pos++
 		e.Position = pos
-		v.pending = append(v.pending, &Sealed{ID: id, Raw: raw, Entry: e, SealedAt: now, Pending: true})
+		v.pending = append(v.pending, &Sealed{ID: id, Raw: raw, Entry: e, SealedAt: now, Time: now, Pending: true})
 	}
 	return v, nil
 }
@@ -508,26 +534,22 @@ func inForce(es []*Sealed, kind, key string, at time.Time) (*Sealed, error) {
 	return on, nil
 }
 
-// deviceInForce is the device's latest record in force: enrolled, not
-// removed, renewed within DeviceLapse.
+// deviceInForce is the device's latest entry in force at time at, by the
+// rule the people's index uses too (DevicesInForce).
 func deviceInForce(es []*Sealed, device string, at time.Time) *Sealed {
-	var on *Sealed
-	removed := false
-	for _, s := range es {
+	var evs []DeviceEvent
+	for k, s := range es {
 		e := s.Entry
 		switch e.Kind {
 		case "device":
-			if e.Device == device && !removed {
-				on = s
-			}
+			evs = append(evs, DeviceEvent{Device: e.Device, Person: e.Person, TouchFor: e.TouchFor, Position: e.Position, Time: s.Time, Ref: k})
 		case "removal":
-			if on != nil && (e.Device == device || e.Device == "" && e.Person == on.Entry.Person) {
-				removed = true
-			}
+			evs = append(evs, DeviceEvent{Removal: true, Device: e.Device, Person: e.Person, Position: e.Position, Ref: k})
 		}
 	}
-	if removed || on == nil || at.Sub(on.SealedAt) > DeviceLapse {
+	d := DevicesInForce(DeviceStates(evs), at)[device]
+	if d == nil {
 		return nil
 	}
-	return on
+	return es[d.Ref]
 }

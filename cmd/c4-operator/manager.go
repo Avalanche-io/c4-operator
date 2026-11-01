@@ -184,7 +184,7 @@ func runManager(args []string) error {
 	if err := checkFarmBookFlags(*systemStore, *farmBookSeal, sig.ca != nil); err != nil {
 		return err
 	}
-	book, err := newFarmBook(ctx, sig, kube, mgr, *signingNS, *namespace, *systemStore, *farmBookSeal)
+	book, err := newFarmBook(ctx, sig, kube, mgr, *signingNS, *systemStore, *farmBookSeal)
 	if err != nil {
 		return err
 	}
@@ -490,7 +490,7 @@ func addHUD(mgr ctrl.Manager, kube kubernetes.Interface, q *queue.Queue, stores 
 		// serves the book through a reader of its own, which keeps the last
 		// head it saw.
 		srv.FarmBook = book.writer()
-		srv.FarmBookReader = &farmbook.Reader{Farm: book.reader.Farm, Roots: book.reader.Roots, Store: book.store, Pointer: book.ptr}
+		srv.FarmBookReader = book.newReader()
 	}
 	if iss, ok := sig.people.(*people.Issuer); ok {
 		// Where the HUD listens only on a loopback address, a request's

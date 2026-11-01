@@ -202,12 +202,14 @@ func TestTwoPlacesFlagged(t *testing.T) {
 		t.Fatalf("renew: %d %s", code, body)
 	}
 	flags := r.entries(people.KindFlag)
-	if len(flags) != 1 || flags[0].Flag != people.FlagTwoPlaces || flags[0].Device != d.id || len(flags[0].Seen) != 2 {
+	// What was seen is in the flag's private part, not the entry its ID
+	// covers; dana reads it in her device list.
+	if len(flags) != 1 || flags[0].Flag != people.FlagTwoPlaces || flags[0].Device != d.id || len(flags[0].Seen) != 0 || flags[0].Private == "" {
 		t.Fatalf("flags %+v", flags)
 	}
 	var list struct{ Devices []people.DeviceView }
 	r.call("GET", "/v1/people/devices?person=dana", "", nil, &list)
-	if len(list.Devices) != 1 || len(list.Devices[0].Flags) != 1 {
+	if len(list.Devices) != 1 || len(list.Devices[0].Flags) != 1 || len(list.Devices[0].Flags[0].Seen) != 2 {
 		t.Errorf("devices %+v", list.Devices)
 	}
 }
@@ -421,10 +423,16 @@ func TestReadsNeedACaller(t *testing.T) {
 		r.call("GET", "/v1/people/index", "", nil, &page)
 		return body, &page
 	}
+	// An address is in the entry's private part, given to whoever may
+	// read it.
 	addrOf := func(page *people.IndexPage) (string, people.Redacted) {
 		for _, e := range page.Entries {
 			if e.Entry.Kind == people.KindDevice && e.Entry.Person == "dana" {
-				return e.Entry.Addr, e.Redacted
+				var part struct {
+					Addr string `json:"addr"`
+				}
+				json.Unmarshal(e.Private, &part)
+				return part.Addr + e.Entry.Addr, e.Redacted
 			}
 		}
 		return "", nil

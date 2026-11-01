@@ -5,6 +5,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
@@ -122,51 +123,78 @@ type ControlChecker struct {
 
 func (c *ControlChecker) Kinds() []string { return []string{KindControl} }
 
-func (c *ControlChecker) Admit(ctx context.Context, e *Entry, _ []byte) (time.Time, error) {
-	if e.Record == "" {
-		return time.Time{}, fmt.Errorf("a control entry cites its control record")
+func (c *ControlChecker) Admit(ctx context.Context, raw []byte, p Placement) ([]byte, time.Time, error) {
+	var e Entry
+	if err := Strict(raw, &e); err != nil {
+		return nil, time.Time{}, err
+	}
+	if err := placeable(&e, p); err != nil {
+		return nil, time.Time{}, err
+	}
+	if e.Kind != KindControl {
+		return nil, time.Time{}, Refuse(ReasonUnknownKind, errors.New("not a control entry"))
+	}
+	if !IsC4ID(e.Record) {
+		return nil, time.Time{}, Refuse(ReasonRecordGone, errors.New("a control entry cites its control record by C4 ID"))
 	}
 	if c.booked[e.Record] {
-		return time.Time{}, fmt.Errorf("control record %.16s is booked already", e.Record)
+		return nil, time.Time{}, Refuse(ReasonBooked, fmt.Errorf("control record %.16s is booked already", e.Record))
 	}
 	rec, err := c.Store.Get(ctx, e.Record)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("control record %.16s: %v", e.Record, err)
+		return nil, time.Time{}, Refuse(ReasonRecordGone, fmt.Errorf("control record %.16s: %v", e.Record, err))
 	}
 	if got := c4id(rec); got != e.Record {
-		return time.Time{}, fmt.Errorf("control record %.16s hashes to %.16s", e.Record, got)
+		return nil, time.Time{}, Refuse(ReasonRecordGone, fmt.Errorf("control record %.16s hashes to %.16s", e.Record, got))
 	}
 	v, err := provenance.VerifyBundle(rec, c.Roots)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("control record %.16s doesn't verify: %v", e.Record, err)
+		return nil, time.Time{}, Refuse(ReasonUnverified, fmt.Errorf("control record %.16s doesn't verify: %v", e.Record, err))
 	}
 	if v.PredicateType != provenance.PredicateControl {
-		return time.Time{}, fmt.Errorf("a control entry cites a %s record", v.PredicateType)
+		return nil, time.Time{}, Refuse(ReasonUnverified, fmt.Errorf("a control entry cites a %s record", v.PredicateType))
 	}
 	if err := provenance.CheckSigner(v); err != nil {
-		return time.Time{}, fmt.Errorf("control record %.16s: %v", e.Record, err)
+		return nil, time.Time{}, Refuse(ReasonWrongSigner, fmt.Errorf("control record %.16s: %v", e.Record, err))
 	}
 	if v.Farm != c.Farm {
-		return time.Time{}, fmt.Errorf("control record %.16s is signed under farm %.16s", e.Record, v.Farm)
+		return nil, time.Time{}, Refuse(ReasonOtherFarm, fmt.Errorf("control record %.16s is signed under farm %.16s", e.Record, v.Farm))
 	}
 	want, err := controlEntry(v.Predicate)
 	if err != nil {
-		return time.Time{}, err
+		return nil, time.Time{}, Refuse(ReasonRejected, err)
 	}
 	for _, d := range []struct{ what, entry, record string }{
 		{"the act", e.Act, want.Act}, {"the subject", e.Subject, want.Subject}, {"who acted", e.By, want.By},
 		{"the person", e.Person, want.Person}, {"the expiry", e.Expires, want.Expires}, {"the change", e.Settings, want.Settings},
-		{"the device", e.Device, ""},
+		{"the device", e.Device, ""}, {"the touch key", e.TouchFor, ""},
 	} {
 		if d.entry != d.record {
-			return time.Time{}, fmt.Errorf("the entry and its control record disagree on %s: %q, and the record %q", d.what, d.entry, d.record)
+			return nil, time.Time{}, Refuse(ReasonDisagrees, fmt.Errorf("the entry and its control record disagree on %s: %.80q, and the record %.80q", d.what, d.entry, d.record))
 		}
+	}
+	e.Farm, e.Position, e.Prev, e.Order = p.Farm, p.Position, p.Prev, p.Order
+	sealed, _, err := canonical(&e)
+	if err != nil {
+		return nil, time.Time{}, err
 	}
 	if c.booked == nil {
 		c.booked = map[string]bool{}
 	}
 	c.booked[e.Record] = true
-	return v.SignedAt, nil
+	return sealed, v.SignedAt, nil
+}
+
+// placeable checks an entry may be placed at p: written pending, with no
+// position or entry before it and this farm's or no farm; or, given again
+// as sealed, already at p.
+func placeable(e *Entry, p Placement) error {
+	pending := e.Order == OrderPending && e.Position == 0 && e.Prev == "" && (e.Farm == "" || e.Farm == p.Farm)
+	placed := e.Order == p.Order && e.Position == p.Position && e.Prev == p.Prev && e.Farm == p.Farm
+	if !pending && !placed {
+		return Refuse(ReasonNotPending, errors.New("an entry is written pending, with no position"))
+	}
+	return nil
 }
 
 // IsControlAct reports whether the book takes a control record of this

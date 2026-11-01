@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -16,6 +17,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/provenance"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
 	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // booked is a rig whose index is kept in a farm book: the book's store and
@@ -24,6 +26,7 @@ type booked struct {
 	*rig
 	store  *farmbook.MemoryStore
 	ptr    *farmbook.MemoryPointer
+	own    *farmbook.MemorySealer
 	sealer *farmbook.Sealer
 }
 
@@ -31,18 +34,18 @@ type booked struct {
 // any, is r's own Head, which the book adopts when legacy is set.
 func inBook(r *rig, legacy *people.Index) *booked {
 	r.t.Helper()
-	b := &booked{rig: r, store: &farmbook.MemoryStore{}, ptr: &farmbook.MemoryPointer{}}
+	b := &booked{rig: r, store: &farmbook.MemoryStore{}, ptr: &farmbook.MemoryPointer{}, own: &farmbook.MemorySealer{}}
 	queue, err := provenance.NewSigner(context.Background(), func(_ context.Context, pub ed25519.PublicKey) ([]*x509.Certificate, error) {
-		c, err := r.farm.CA.Issue(pub, provenance.ComponentIdentity("queue"), 48*time.Hour, r.farm.Now)
+		c, err := r.farm.CA.Issue(pub, provenance.ComponentIdentity("queue"), 48*time.Hour, r.now)
 		return []*x509.Certificate{c, r.farm.CA.Cert}, err
 	})
 	if err != nil {
 		r.t.Fatal(err)
 	}
 	r.index = &people.Index{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store, Head: r.head,
-		Book: &farmbook.Reader{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store, Pointer: b.ptr}}
+		Book: &farmbook.Reader{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store, Pointer: b.ptr, Own: b.own}}
 	r.iss.Index = r.index
-	b.sealer = &farmbook.Sealer{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store, Pointer: b.ptr, Signer: queue, Log: logr.Discard(),
+	b.sealer = &farmbook.Sealer{Farm: r.farm.ID, Roots: r.farm.Roots, Store: b.store, Pointer: b.ptr, Own: b.own, Signer: queue, Log: logr.Discard(),
 		Now: func() time.Time { return r.now },
 		Checkers: func() []farmbook.Checker {
 			return []farmbook.Checker{people.NewBookChecker(r.farm.ID, r.farm.Roots, b.store),
@@ -224,16 +227,18 @@ func TestTouchKeyMustNameTheSigner(t *testing.T) {
 		t.Errorf("an act the issuer refused was left pending: %v", st.Pending)
 	}
 	// Written into the book around the issuer, the queue refuses it.
-	approval := func(act []byte) farmbook.Submission {
-		return farmbook.Submission{Record: act, Entry: &people.Entry{Kind: people.KindApproval, Device: target.id, Person: "dana", By: "dana",
+	// Written into the book around the issuer, but signed with its key, as
+	// a writer holding it could: the queue still checks what it says.
+	approval := func(act []byte, device string) farmbook.Submission {
+		return farmbook.Submission{Record: act, Entry: b.asIssuer(&people.Entry{Kind: people.KindApproval, Device: device, Person: "dana", By: "dana",
 			Order: people.OrderPending, Farm: b.farm.ID, At: b.now.Format(time.RFC3339Nano), Expires: b.now.Add(people.ApprovalTTL).Format(time.RFC3339Nano),
-			Record: provtest.ID(string(act))}}
+			Record: provtest.ID(string(act))})}
 	}
-	if _, err := (&farmbook.Writer{Store: b.store, Pointer: b.ptr}).Append(context.Background(), approval(wrong)); err != nil {
+	if _, err := (&farmbook.Writer{Store: b.store, Pointer: b.ptr}).Append(context.Background(), approval(wrong, target.id)); err != nil {
 		t.Fatal(err)
 	}
 	res := b.seal()
-	if len(res.Refused) != 1 || !strings.Contains(res.Refused[0].Why, "not a touch key for device") || res.Segment.Last != res.Segment.First-1 {
+	if len(res.Refused) != 1 || res.Refused[0].Reason != farmbook.ReasonNotInForce || res.Segment.Last != res.Segment.First-1 {
 		t.Fatalf("the seal: refused %+v, sealed %d to %d", res.Refused, res.Segment.First, res.Segment.Last)
 	}
 	// The real touch key passes both.
@@ -245,12 +250,32 @@ func TestTouchKeyMustNameTheSigner(t *testing.T) {
 	other := newDev(t)
 	b.now = b.now.Add(time.Second)
 	right := b.act(k, "dana", "approve-machine", deviceSubject(other.id), map[string]string{}, true)
-	sub := approval(right)
-	sub.Entry.(*people.Entry).Device = other.id
+	sub := approval(right, other.id)
 	if _, err := (&farmbook.Writer{Store: b.store, Pointer: b.ptr}).Append(context.Background(), sub); err != nil {
 		t.Fatal(err)
 	}
 	if res := b.seal(); len(res.Refused) != 0 || res.Segment.Last != res.Segment.First+1 {
 		t.Fatalf("the seal, confirmed by dana's touch key: refused %+v, sealed %d to %d", res.Refused, res.Segment.First, res.Segment.Last)
 	}
+}
+
+// asIssuer signs an entry as the people's issuer signs one it writes for
+// the farm book (book-entry/v1), over the entry as written, pending.
+func (b *booked) asIssuer(e *people.Entry) *people.Entry {
+	b.t.Helper()
+	s, err := provenance.NewSigner(context.Background(), provenance.LocalIssuer(b.farm.CA, provenance.ComponentIdentity("issuer"), time.Hour))
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	c := *e
+	c.Sig, c.Position, c.Prev, c.Order, c.Farm = nil, 0, "", people.OrderPending, b.farm.ID
+	raw, _ := json.Marshal(&c)
+	canon, _ := schema.Canonical(raw)
+	sig, err := provenance.SignStatement(context.Background(), s, provenance.PredicateBookEntry,
+		[]provenance.Subject{{Name: "book-entry:" + e.Kind, Digest: map[string]string{"c4": provtest.ID(string(canon))}}}, map[string]string{"farm": b.farm.ID, "kind": e.Kind}, b.now)
+	if err != nil {
+		b.t.Fatal(err)
+	}
+	e.Sig, _ = schema.Canonical(sig)
+	return e
 }
