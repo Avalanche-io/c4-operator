@@ -402,6 +402,9 @@ func TestApproveTakesItsAct(t *testing.T) {
 			on = p.Burst.Approve
 		}
 	}
+	if on == nil || on.Name != "capacityrequest:burst-a-approve-1@7a1c0000-b0a5" {
+		t.Fatalf("the waiting request: %+v", on)
+	}
 	send := func(a string) int {
 		code, _, _ := g.send(t, http.MethodPost, "/api/v1/capacity/burst-a/approve?as=wrangler", nil, a, "show-a", nil)
 		return code
@@ -567,5 +570,43 @@ func TestActsAreCheckedAgainstThePeoplesIndex(t *testing.T) {
 	s.PeopleIndex = nil
 	if code := send(sign(owner)); code != http.StatusOK {
 		t.Errorf("without the index: %d", code)
+	}
+}
+
+// An act refused only for want of the person's touch says so, for a
+// client to ask for it and sign again; any other refusal doesn't.
+func TestNeedsTouchRefusalSaysSo(t *testing.T) {
+	s, _ := bindFarm(t)
+	g := newActRig(t, s)
+	dana := g.f.Person(t, "dana", true)
+	headers := map[string]string{InstallerHeader: testInstallerToken}
+	on := actOn(provenance.Subject{Name: "farm:" + g.f.ID, Digest: map[string]string{"c4": g.f.ID}})
+	body := map[string]any{"owner": "dana", "to": "laptop-1/*"}
+	code, out, _ := g.send(t, http.MethodPost, "/api/v1/farm/binding?as=wrangler", body, g.act(t, dana, on, "bind", body, false), "show-a", headers)
+	if code != http.StatusForbidden || out["needs"] != "confirmed" {
+		t.Errorf("a bind without the touch: %d %v", code, out)
+	}
+	code, out, _ = g.send(t, http.MethodPost, "/api/v1/farm/binding?as=wrangler", body, g.act(t, dana, otherDigest(on), "bind", body, true), "show-a", headers)
+	if code != http.StatusForbidden || out["needs"] != nil {
+		t.Errorf("another refusal: %d %v", code, out)
+	}
+}
+
+// The product's list of what each act needs is served, so no client
+// keeps its own.
+func TestActNeedsAreServed(t *testing.T) {
+	s := farm(t)
+	var out api.ActNeeds
+	if code := call(t, s, http.MethodGet, "/api/v1/acts/needs?as=artist", nil, &out); code != http.StatusOK {
+		t.Fatalf("needs: %d", code)
+	}
+	if n := out.Acts["grant"]; !n.Person || !n.Touch {
+		t.Errorf("grant: %+v", n)
+	}
+	if n := out.Acts["revoke"]; !n.Person || n.Touch {
+		t.Errorf("revoke: %+v", n)
+	}
+	if _, ok := out.Acts["submit"]; ok || out.Params["decide"] == "" || out.Params["remove-device"] == "" {
+		t.Errorf("acts %v, params %v", out.Acts, out.Params)
 	}
 }

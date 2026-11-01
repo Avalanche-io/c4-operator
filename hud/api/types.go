@@ -1294,3 +1294,20 @@ type ActOn struct {
 	Name   string            `json:"name"`
 	Digest map[string]string `json:"digest"`
 }
+
+// ActNeeds answers GET /api/v1/acts/needs: what each act kind needs of its
+// signer, the product's list. A kind not in Acts needs neither a person
+// nor a touch; one in Params needs what its params make it (in words).
+type ActNeeds struct {
+	Acts   map[string]ActNeed `json:"acts"`
+	Params map[string]string  `json:"params"`
+}
+
+// ActNeed is what one act kind needs: a person (no unit, agent, CI job or
+// relay may make it), a touch (the confirmed grade), and whether a
+// tracker's relay may carry it for a person.
+type ActNeed struct {
+	Person  bool `json:"person,omitempty"`
+	Touch   bool `json:"touch,omitempty"`
+	Relayed bool `json:"relayed,omitempty"`
+}

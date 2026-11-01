@@ -1025,8 +1025,8 @@ in `X-C4-Act`: each job control, and the endpoints below.
     confirmation, its `revokeOn`.
   - **A held tracker write** (`confirm-write`, `deny-write`): on the write,
     its `actOn` (`trackerlink:<namespace>/<link>#<field>@<uid>`).
-  - **Approving a burst** (`approve-capacity`): on the pool's
-    `burst.approve`, the capacity request that waits.
+  - **Approving a burst** (`approve-capacity`): on the capacity request
+    that waits, the pool's `burst.approve` (`capacityrequest:<name>@<uid>`).
   - **The farm binding** (`bind`): on the farm, the snapshot's
     `farm.actOn` (`farm:<farm ID>`, the farm ID its `c4` digest).
   - **Enrolling a host runner** (`enroll`): on `node:<name>`, with the C4
@@ -1039,7 +1039,13 @@ in `X-C4-Act`: each job control, and the endpoints below.
   its certificate lives on.
 - **Touch-list acts are confirmed:** `grant`, `bind`, `people-confirm`,
   `enroll` and `approve-capacity` are signed with the person's touch key
-  too (PEOPLE-KEYS-2 4.3).
+  too (PEOPLE-KEYS-2 4.3). One refused only for want of the touch answers
+  `403` with `needs: confirmed`, for the client to ask for it and sign
+  again.
+- **`GET /api/v1/acts/needs`** serves what each kind needs, the product's
+  list: `{ acts: { <kind>: { person?, touch?, relayed? } }, params:
+  { <kind>: words } }`. A kind not in `acts` needs neither; one in `params`
+  needs what its params make it. A client signs by it and keeps no copy.
 - **A submit's record is signed once its job is made,** so an attempt
   numbered past a name taken meanwhile never cites the act twice; it
   answers in `record`. A plan (`dryRun`, `explain`) takes no act.

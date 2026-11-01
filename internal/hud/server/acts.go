@@ -133,7 +133,7 @@ func (s *Server) citeAct(ctx context.Context, r *http.Request, v *api.Viewer, su
 		}
 	}
 	if _, _, err := provenance.VerifyAct(data, s.trust(ctx).roots, time.Now(), s.actsSeen()); err != nil {
-		return nil, fmt.Errorf("%w: %v", errAct, err)
+		return nil, fmt.Errorf("%w: %w", errAct, err)
 	}
 	return &citedAct{cite: &schema.ActCitation{Payload: provenance.PayloadHash(vr.Payload), Record: c4.Identify(bytes.NewReader(data)).String()},
 		params: p.Params, grade: p.Chain.By.Grade, on: subject}, nil
@@ -234,7 +234,8 @@ func heldSubject(l *c4v1.TrackerLink, field string, wr c4v1.TrackerWritten) prov
 
 // capacitySubject is a capacity request as an act approving it names it.
 func capacitySubject(cr *c4v1.CapacityRequest) provenance.Subject {
-	return provenance.ActSubject("capacityrequest", "", cr.Name, string(cr.UID), sha256JSON(cr.Spec))
+	// the farm's, in no project: capacityrequest:<name>@<uid>
+	return provenance.Subject{Name: "capacityrequest:" + cr.Name + "@" + string(cr.UID), Digest: map[string]string{"sha256": sha256JSON(cr.Spec)}}
 }
 
 // enrollSubject is a host runner's offer as an act enrolling it names it:
@@ -243,6 +244,21 @@ func capacitySubject(cr *c4v1.CapacityRequest) provenance.Subject {
 // code makes the act this offer's.
 func enrollSubject(node, code string) provenance.Subject {
 	return provenance.Subject{Name: "node:" + node, Digest: map[string]string{"c4": c4.Identify(strings.NewReader(normalCode(code))).String()}}
+}
+
+// handleActNeeds is GET /api/v1/acts/needs: what each act kind needs of
+// its signer, so a client asks for a touch before it signs and keeps no
+// list of its own.
+func (s *Server) handleActNeeds(w http.ResponseWriter, r *http.Request) {
+	if v := s.withViewer(w, r); v == nil {
+		return
+	}
+	acts, params := provenance.ActNeedsList()
+	out := api.ActNeeds{Acts: map[string]api.ActNeed{}, Params: params}
+	for k, n := range acts {
+		out.Acts[k] = api.ActNeed{Person: n.Person, Touch: n.Touch, Relayed: n.Relayed}
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 // actOn is a subject as the API serves it.

@@ -41,6 +41,7 @@ import (
 	"github.com/Avalanche-io/c4-operator/internal/telemetry/ring"
 	"github.com/Avalanche-io/c4-operator/internal/work/class"
 	"github.com/Avalanche-io/c4-operator/internal/work/queue"
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // Server is the HUD backend.
@@ -291,6 +292,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("DELETE /api/v1/grants/{ns}/{name}", s.handleRevoke)
 	mux.HandleFunc("GET /api/v1/trackers", s.handleTrackers)
 	mux.HandleFunc("GET /api/v1/people", s.handlePeople)
+	mux.HandleFunc("GET /api/v1/acts/needs", s.handleActNeeds)
 	mux.HandleFunc("POST /api/v1/people", s.handlePeopleConfirm)
 	mux.HandleFunc("DELETE /api/v1/people/{ns}/{name}", s.handlePeopleRevoke)
 	mux.HandleFunc("GET /api/v1/held", s.handleHeld)
@@ -512,7 +514,15 @@ func writeJSON(w http.ResponseWriter, code int, v any) {
 }
 
 func fail(w http.ResponseWriter, code int, format string, args ...any) {
-	writeJSON(w, code, map[string]string{"error": fmt.Sprintf(format, args...)})
+	out := map[string]string{"error": fmt.Sprintf(format, args...)}
+	for _, a := range args {
+		// an act refused only for want of the person's touch: a client
+		// asks for it and signs again (PEOPLE-KEYS-2 4.3)
+		if err, ok := a.(error); ok && errors.Is(err, provenance.ErrNeedsTouch) {
+			out["needs"] = schema.GradeConfirmed
+		}
+	}
+	writeJSON(w, code, out)
 }
 
 // badViewer is a request that names a viewer that isn't there (400).

@@ -124,6 +124,17 @@ func ActNeeds(act string, params json.RawMessage, at time.Time) ActNeed {
 	return ActNeed{}
 }
 
+// ActNeedsList is the product's list (actNeeds) and, for each kind whose
+// need turns on its params, how ActNeeds reads them, for a client to show
+// and sign by; it keeps no copy of its own.
+func ActNeedsList() (map[string]ActNeed, map[string]string) {
+	return maps.Clone(actNeeds), map[string]string{
+		"decide":         "a person's, which a tracker's relay may carry; an agent decides a wait that names it (params.waitsFor agent:<name>)",
+		"accountability": "a person's; confirmed, unless it turns strict accountability fully on (mode strict, every on-key refuse)",
+		"remove-device":  "a person's; confirmed when params.from is before the act",
+	}
+}
+
 // strictestAccountability reports whether an accountability setting
 // turns strict accountability on and nothing down: mode strict, and any
 // on-key refuse.
