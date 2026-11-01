@@ -199,3 +199,7 @@ canvas[data-player] { background: var(--g02); }
 
 /* your page: a login to confirm, its two buttons side by side */
 .me .gbtns { display: flex; gap: 6px; flex: none; }
+
+/* A one-person farm's passkey approval (views/me.js): the device ID's short
+   form, large, to compare with what the farm's machine prints */
+.me .short-id { font-size: 28px; letter-spacing: .12em; margin: 4px 0 8px; color: var(--ink); }

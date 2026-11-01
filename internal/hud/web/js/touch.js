@@ -26,9 +26,14 @@
 // with the person's account to their other devices, so the HUD states it as
 // a software key; one bound to this device's authenticator, as hardware.
 //
-// On a one-person farm there is no provider to step up at: a touch key
-// comes from c4 farm up, and a browser's passkey from a touch on that one
-// (K4's CLI). The person's page says so.
+// On a one-person farm there is no provider to step up at: the browser's
+// passkey is approved instead by a touch on the touch key c4 farm up made,
+// at the farm's machine (K4: c4 farm device approve <device ID>). The page
+// shows that command with the passkey's device ID, and its short form to
+// compare with what the machine shows: the comparison is the check, so the
+// page never adds the device's kind or label, which are only what a
+// machine says of itself. The page then watches the people's index for
+// the approval, and the passkey signs its enrolment citing it.
 
 import { b64, b64url, unb64, canonical, c4id, hex, savePasskey, useToucher } from './act.js';
 import * as enrol from './enrol.js';
@@ -43,6 +48,7 @@ const real = {
   get: (o) => navigator.credentials.get(o),
   save: savePasskey,
   origin: () => location.origin,
+  wait: () => new Promise((ok) => setTimeout(ok, 3000)),
 };
 let deps = real;
 export function stubs(d) { deps = d ? { ...real, ...d } : real; }
@@ -53,14 +59,23 @@ export const passkey = () => { const r = enrol.current().rec; return (r && r.pas
 export const ready = () => { const p = passkey(); return !!(p && p.certified && Date.parse(p.certified.expires) > Date.now()); };
 
 // where: whether this browser can make a touch key here, and if not why
+// via: approval on a one-person farm (the farm's machine approves it),
+// else a step-up sign-in
 export function where() {
   const { cfg } = enrol.current();
   if (!cfg) return { can: false };
-  if (!cfg.provider) return { can: false, why: 'one-person' };
   if (!cfg.webauthn) return { can: false, why: 'no-origin' };
   if (cfg.webauthn.origin !== deps.origin()) return { can: false, why: 'other-origin', origin: cfg.webauthn.origin };
-  return { can: true };
+  return { can: true, via: cfg.provider ? 'step-up' : 'approval' };
 }
+
+// The command that approves a passkey on a one-person farm, at the farm's
+// machine, and the short form of a device ID both screens show, as the CLI
+// prints it: the ID's first eight characters after c4, in two groups of
+// four (K4 item 5)
+export const APPROVE = 'c4 farm device approve';
+export const shortID = (id) => `${id.slice(2, 6)} ${id.slice(6, 10)}`;
+export const approveCommand = (pk) => `${APPROVE} ${pk.device}`;
 
 // begin: make this browser's passkey and send the person to the step-up
 export async function begin({ others = [] } = {}) {
@@ -81,8 +96,46 @@ export async function begin({ others = [] } = {}) {
   const ad = new Uint8Array(cred.response.getAuthenticatorData());
   const pk = { credentialId: b64url(new Uint8Array(cred.rawId)), spki: b64url(spki), device: await c4id(spki), label,
     backedUp: !!(ad[32] & BACKUP_ELIGIBLE) };
+  if (w.via === 'approval') {
+    // the index is read from here on for the approval naming it
+    enrol.refreshed(await deps.save(cfg.farm, { ...pk, since: cfg.position || 0 }));
+    awaitApproval();
+    return null;
+  }
   enrol.refreshed(await deps.save(cfg.farm, pk));
   return enrol.stepUpFor(pk.device);
+}
+
+// awaitApproval: watch the people's index for the approval naming this
+// browser's passkey; found, the passkey waits for the person's press
+// (finish). One watch at a time, while the page is open.
+let watching = null;
+export function awaitApproval() {
+  const pk = passkey();
+  if (!pk || pk.certified) return null;
+  if (pk.approval) { enrol.status.touch = 'finish'; return null; }
+  enrol.status.touch = 'approve';
+  if (watching) return watching;
+  watching = (async () => {
+    try {
+      for (;;) {
+        const { cfg } = enrol.current();
+        const p = passkey();
+        if (!cfg || !p || p.certified) return;
+        const x = await enrol.read(`/index?from=${p.since || 0}`).catch(() => null);
+        const a = x && (x.entries || []).map((e) => e.entry).find((e) => e && e.kind === 'approval' && e.device === p.device);
+        if (a) {
+          enrol.refreshed(await deps.save(cfg.farm, { ...p, approval: a.record }));
+          enrol.status.touch = 'finish';
+          return;
+        }
+        await deps.wait();
+      }
+    } finally {
+      watching = null;
+    }
+  })();
+  return watching;
 }
 
 // others: the credential IDs of the person's other passkeys, from their
@@ -117,12 +170,13 @@ async function assertion(pk, challenge) {
     signature: new Uint8Array(a.response.signature) };
 }
 
-// finish: after the step-up, the passkey signs its enrolment, at the
-// person's press, and the issuer certifies it as their touch key
+// finish: after the step-up, or the approval at the farm's machine, the
+// passkey signs its enrolment, at the person's press, and the issuer
+// certifies it as their touch key
 export async function finish() {
   const { cfg, rec, person, stepUp } = enrol.current();
   const pk = rec && rec.passkey;
-  if (!pk || !stepUp) throw new Error('Sign in again first: a touch key is certified on a fresh sign-in.');
+  if (!pk || !(stepUp || pk.approval)) throw new Error(cfg && !cfg.provider ? 'Approve it on the farm’s machine first.' : 'Sign in again first: a touch key is certified on a fresh sign-in.');
   const req = { ...enrol.request(cfg.farm, person, unb64(pk.spki)), touchFor: rec.device };
   const a = await assertion(pk, await sha256(enc.encode(canonical(req))));
   const c = await enrol.post('/enroll', {
@@ -132,7 +186,7 @@ export async function finish() {
     protection: pk.backedUp ? 'software-browser' : 'hardware',
     kind: 'browser',
     label: `${pk.label} passkey`,
-    idToken: stepUp.idToken,
+    ...(stepUp ? { idToken: stepUp.idToken } : { approval: pk.approval }),
   });
   enrol.refreshed(await deps.save(cfg.farm, { ...pk, certified: c }));
   enrol.status.touch = null;

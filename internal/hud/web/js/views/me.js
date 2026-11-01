@@ -86,6 +86,7 @@ document.addEventListener('click', async (e) => {
   if (!b) return;
   e.preventDefault();
   if (b.dataset.device === 'sign-in') return enrol.signInNow();
+  if (b.dataset.device === 'touch-copy') return navigator.clipboard.writeText(b.dataset.cmd).catch(() => {});
   b.disabled = true;
   try {
     if (b.dataset.device === 'touch-begin') await touch.begin({ others: await touch.others(dv.list || []) });
@@ -140,13 +141,24 @@ function touchLine() {
   const w = touch.where();
   const pk = touch.passkey();
   if (touch.ready()) return h('p', null, `Your touch key is this browser’s passkey. ${TOUCH_LIST}, with your fingerprint, face or PIN.`);
-  if (w.why === 'one-person') return h('p', { class: 'dim' }, 'Your touch key is the one c4 farm up made at the terminal. Approving a passkey for this browser from it comes with the c4 command line; until then, acts that need a touch are taken without one here.');
   if (w.why === 'no-origin') return h('p', { class: 'dim' }, 'This farm doesn’t take passkeys yet: its admin sets the HUD’s address (--hud-origin) first. Until then, acts that need a touch are taken without one.');
   if (w.why === 'other-origin') return h('p', { class: 'dim' }, `A passkey works only at the address it was made for: open the HUD at ${w.origin} to make your touch key.`);
-  if (s.touch === 'finish' && pk) return h('p', null, 'You signed in again. Now confirm with your passkey to finish your touch key. ',
+  // a one-person farm: the farm's machine approves the passkey
+  if (pk && !pk.certified && w.via === 'approval') touch.awaitApproval();
+  if (s.touch === 'approve' && pk) {
+    const cmd = touch.approveCommand(pk);
+    return h('div', { class: 'touch-approve' },
+      h('p', null, 'On the farm’s machine, run:'),
+      h('pre', { class: 'signin-cmd' }, h('code', null, cmd)),
+      h('p', null, h('button', { class: 'btn small', 'data-device': 'touch-copy', 'data-cmd': cmd }, 'Copy')),
+      h('p', null, 'Approve it only if the farm’s machine shows:'),
+      h('p', { class: 'short-id mono' }, touch.shortID(pk.device)),
+      h('p', { class: 'dim' }, 'This page goes on by itself once it’s approved.'));
+  }
+  if (s.touch === 'finish' && pk) return h('p', null, w.via === 'approval' ? 'The farm’s machine approved it. ' : 'You signed in again. ', 'Now confirm with your passkey to finish your touch key. ',
     h('button', { class: 'btn small primary', 'data-device': 'touch-finish' }, 'Finish your touch key'));
   return h('p', null, s.touch === 'refused' ? h('span', { class: 't-fail' }, `${s.touchMessage} `) : null,
-    `This browser has no touch key yet. ${TOUCH_LIST}. Making one takes a passkey and one full sign-in, once. `,
+    `This browser has no touch key yet. ${TOUCH_LIST}. Making one takes a passkey and ${w.via === 'approval' ? 'one command on the farm’s machine' : 'one full sign-in'}, once. `,
     h('button', { class: 'btn small', 'data-device': 'touch-begin' }, s.touch === 'refused' ? 'Try again' : 'Make a touch key'));
 }
 
