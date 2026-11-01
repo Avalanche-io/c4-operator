@@ -783,8 +783,8 @@ answers `404`.
 ```
 { farm, since, head: { segment, number, position, entry },
   segments: [ <book/v1 bundle> ],
-  entries: [ { id, position, segment, entry, redacted? } ],
-  pending: [ { id, position, entry, redacted? } ],
+  entries: [ { id, position, segment, entry, private?, redacted? } ],
+  pending: [ { id, position, entry, private?, redacted? } ],
   more?, next }
 ```
 
@@ -798,14 +798,28 @@ answers `404`.
   `control` for one of the HUD's control records (with `act`, `subject`,
   `by`, `person`, `expires` and `settings`, the C4 ID of the record's
   change), or one of the people's index's kinds (`device`, `removal`,
-  `setting` and the rest).
+  `setting` and the rest), each with `sig`, the people's issuer's signature
+  over it as written.
 - `pending` are the entries waiting for the seal, at provisional positions.
   The HUD and the people's issuer judge with them; no verifier counts them.
   The queue seals every `--farm-book-seal` (2 seconds by default, never more
   than 30).
-- A device entry's addresses go only to its person and the farm's admins.
-  Anyone else gets the entry without `addr` and `seen`, and `redacted` names
-  what was left out. A redacted entry is checked by its ID alone.
+- A device entry keeps the addresses it saw out of its hashed form, in a
+  private part (`{ salt, addr?, seen? }`) it names by C4 ID (`private` in
+  the entry): a salted commitment, so its ID says nothing of them.
+  `private` beside the entry is that part, for the device's person and the
+  farm's admins; anyone else gets `redacted: ["private"]`. Every entry
+  checks against its ID either way, and a given private part against the
+  ID its entry names. An adopted entry from before private parts, with its
+  address in it, is withheld whole from anyone else (`entry: null`,
+  `redacted: ["entry"]`).
+- A segment's `refused` lists each entry it refused by its C4 ID and a
+  `reason`: `missing`, `malformed`, `not-pending`, `other-farm`,
+  `unknown-kind`, `unsigned`, `booked`, `record-missing`, `unverified`,
+  `wrong-signer`, `disagrees`, `not-in-force`, `over-limit` or `rejected`.
+  Its `flags` list sealed entries by position and `reason`: `window` (with
+  `signedAt`, `from` and `to`), `no-time`, or `unchecked` (an adopted entry
+  today's checks refuse, which counts for nothing).
 - Whole segments are returned until about `limit` entries (1000 by default,
   at most 5000). `more` says the page stopped before the head: read again
   from `next`.
@@ -813,13 +827,16 @@ answers `404`.
   the queue signed verifies by itself. A client keeps the last head it
   accepted and reads from `since` set to that head's position; the Go reader
   (`farmbook.CheckPage`, with `farmbook.LastHead`) checks the page follows
-  it and refuses one that goes back or forks. `409` when this HUD's own
-  reader finds the book rewritten or rolled back.
+  it and refuses one that goes back or forks, and never panics on what a
+  page holds. `409` when this HUD's own reader finds the book rewritten,
+  or a State naming a segment the sealer never sealed.
 - Signed-in people read it; a unit is refused.
 
-The entries and segments are in the system store by C4 ID; the ConfigMap
-`c4-farm-book` in the operator's namespace holds the sealed head and the
-pending entries' IDs, written by resourceVersion. Any HUD replica serves it.
+The entries, private parts and segments are in the system store by C4
+ID. The Secret `c4-farm-book` in the signing namespace holds the State, the
+sealed head and the pending entries' IDs, written by resourceVersion; the
+Secret `c4-farm-book-sealer` holds the sealer's own head, which the HUD
+reads the book to. Any HUD replica serves it.
 
 ## GET /needs-me
 
@@ -2396,7 +2413,7 @@ position, order, chain, expires }`.
 | `POST /v1/people/browser`     | `Enrolment` with `code`, kind `browser`            | `Certified`, evidence `owner`: the code the owner's key booked, within a minute, once. A device key only: `403` for any `touchFor`                                                                                                                                                                                                                                                                                           | the web app opened by `c4 farm open` (K3)    |
 | `GET /v1/people/codes/{hash}` |                                                    | `{ state: waiting \| enrolled \| lapsed, expires, device?, record?, position?, key?, label? }` for the SHA-256 of a code: the key the code enrolled, for the CLI to compare with the one it saw made. Signed in, or on `X-C4-Installer`                                                                                                                                                                                      | `c4 farm open` (K4)                          |
 | `POST /v1/people/acts`        | an `act/v1` bundle                                 | `{ record, position, grade, entry }`: the act booked in the index (below)                                                                                                                                                                                                                                                                                                                                                    | the HUD's device page (K3), the CLI (K4)     |
-| `GET /v1/people/index`        | `?from={position}`                                 | `{ farm, order, position, head?, signed?, entries: [{ id, entry, redacted? }] }`: the entries after `from`, in order, and the head as the issuer signed it, which a client keeps so it can refuse a head that goes back                                                                                                                                                                                                      | the CLI's new-device notices (K4), verifiers |
+| `GET /v1/people/index`        | `?from={position}`                                 | `{ farm, order, position, head?, signed?, entries: [{ id, entry, private?, redacted? }] }`: the entries after `from`, in order, and the head as the issuer signed it, which a client keeps so it can refuse a head that goes back                                                                                                                                                                                            | the CLI's new-device notices (K4), verifiers |
 | `GET /v1/people/records/{id}` |                                                    | a record or entry the index books, by C4 ID, as stored; or `{ record, redacted, device? \| entry? }` without what the caller may not read                                                                                                                                                                                                                                                                                    | verifiers                                    |
 | `GET /v1/people/devices`      | `?person={name}`                                   | `{ farm, position, devices: [{ device, record, person, kind, label?, protection, evidence, touchFor?, enrolled, renewed, renewedAt, countersigned?, flags? }] }`: the devices in force now                                                                                                                                                                                                                                   | each person's device page (K3)               |
 
@@ -2454,11 +2471,18 @@ its C4 ID:
 
 ```
 { farm, position, prev?, order: "issuer", at, kind, record?, device?, person?, by?,
-  addr?, issuer?, kid?, clientID?, grade?, from?, code?, of?, expires?, flag?, seen? }
+  issuer?, kid?, clientID?, grade?, from?, code?, of?, expires?, flag?, touchFor?,
+  private?, sig? }
 ```
 
 - **`prev`** is the C4 ID of the entry before, so the entries form a hash
   chain.
+- **`private`** is the C4 ID of the entry's private part, `{ salt, addr?,
+  seen? }`: where a device was seen, salted so the entry's ID says nothing
+  of it. The page gives the part (`private` beside the entry) only to the
+  device's person and the farm's admins. An index from before private parts
+  wrote `addr` and `seen` into the entry itself; anyone else gets such an
+  entry without them, labelled.
 - **The head** is the Secret `c4-people-index` in the signing namespace,
   moved by resourceVersion. It holds the last entry's ID and position, and
   the issuer's signature over them (`component/issuer`, predicate
@@ -2494,8 +2518,9 @@ its C4 ID:
     `prev`, and the queue checks it as every read does and seals it, giving
     it the book's position and the entry before it (`order: book`);
   - a response's `position` (an enrolment's, a booked act's) is then
-    provisional, `order: pending`, until the queue seals it, within
-    seconds;
+    provisional, `order: pending` and `provisional: true`, until the queue
+    seals it, within seconds;
+  - each entry is signed by the issuer as written (`sig`, book-entry/v1);
   - `GET /v1/people/index` returns the sealed entries at their book
     positions, `order: book`, and the book's head segment as the queue
     signed it (`head`, `signed`);

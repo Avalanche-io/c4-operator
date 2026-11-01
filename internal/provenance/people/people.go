@@ -370,7 +370,7 @@ func (i *Issuer) sees(ctx context.Context, caller, person string) bool {
 
 // Sees reports whether caller may read person's ID tokens and addresses:
 // the person themselves, or an admin. The farm book's reads at the HUD
-// keep the same rule (RedactEntry).
+// keep the same rule (Private).
 func (i *Issuer) Sees(ctx context.Context, caller, person string) bool {
 	return caller != "" && i.sees(ctx, caller, person)
 }

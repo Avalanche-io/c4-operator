@@ -178,11 +178,18 @@ signs, as `component/queue`:
   before, as signed, so a rewrite of any past segment shows;
 - **`first`, `last` and `entries`** are the positions it seals and each
   entry's C4 ID. Each entry names the one before it (`prev`) too;
-- **`refused`** are entries written for the seal whose record didn't
-  verify, wasn't signed by its signer, or said something else. They never
-  count;
-- **`flags`** are entries whose record says it was signed outside the window
-  its position allows. They count, and are flagged;
+- **`refused`** are entries written for the seal that didn't check, each by
+  its C4 ID and a reason from a fixed set (`missing`, `malformed`,
+  `not-pending`, `other-farm`, `unknown-kind`, `unsigned`, `booked`,
+  `record-missing`, `unverified`, `wrong-signer`, `disagrees`,
+  `not-in-force`, `over-limit`, `rejected`): nothing a writer wrote is
+  copied in, so no input can make a segment that doesn't hold together.
+  They never count;
+- **`flags`** are sealed entries by position and reason: `window`, whose
+  record says it was signed outside the window around when the queue first
+  saw it pending; `no-time`, whose record says nothing of when; and
+  `unchecked`, an adopted entry today's checks refuse. They count, but an
+  `unchecked` one counts for nothing;
 - **`adopted`** marks the first segment of a farm whose people's issuer
   kept its own index first: that index's entries, unchanged, in the
   issuer's order.

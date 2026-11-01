@@ -1285,28 +1285,56 @@ names no system store keeps none, and nothing else changes.
   C4 isn't booked: slice 2's violations show it (S2c).
 - **Who writes it:** the HUD and the people's issuer. A writer stores the
   record an entry cites, then the entry, pending, then lists it in the
-  book's one mutable object, the ConfigMap `c4-farm-book` (by
-  resourceVersion). The HUD books an act once the write that carries it out
-  has succeeded.
+  book's State, the Secret `c4-farm-book` in the signing namespace (by
+  resourceVersion, `resourceNames`-scoped RBAC). The HUD books an act once
+  the write that carries it out has succeeded, and a node's enrolment
+  offers at most once a minute. Every entry the people's issuer writes is
+  signed by it as written (`book-entry/v1`, `component/issuer`); a control
+  entry is the HUD's by matching its HUD-signed record field by field.
 - **Who seals it:** the leader-elected queue, alone. Every
-  `--farm-book-seal` (2 seconds by default, never more than 30) it checks
-  each pending entry against the record it cites: the record verifies,
-  passes the signer policy (`CheckSigner`), and says the same as the entry
-  (act, subject, actor, person, device, expiry and change; for the people's
-  entries, everything the index checks). An entry that doesn't is refused,
-  never sealed, logged, and listed in the segment that refused it. The rest
-  get their position and the C4 ID of the entry before them, and the run is
-  one segment (`book/v1`, `schema/book-1.schema.json`), signed as
-  `component/queue`, naming the segment before it.
+  `--farm-book-seal` (2 seconds by default, never more than 30) it takes up
+  to 512 pending entries (any listed past 4096, or not a C4 ID, or twice,
+  are dropped and logged) and checks each:
+  - **It reads the entry strictly:** the canonical JSON of exactly its
+    kind's fields, every key as the field names it, none unknown or twice.
+    Go's decoder would match "ACT" as "act", so an entry checked as a revoke
+    could otherwise be sealed as a grant.
+  - **It checks it against its record:** the record verifies, passes the
+    signer policy (`CheckSigner`), and says the same as the entry (act,
+    subject, actor, person, device, touch key, expiry and change; for the
+    people's entries, the issuer's signature and everything the index
+    checks). Every entry is booked once, of whatever kind.
+  - **It seals what it checked:** the entry it seals is built again from
+    the checked value, with its position and the C4 ID of the entry before
+    it, never from the bytes written.
+
+  An entry that doesn't check is refused, never sealed, logged, and listed
+  in the segment by its C4 ID and a reason from a fixed set: nothing a
+  writer wrote is copied in. The segment (`book/v1`,
+  `schema/book-1.schema.json`) is checked against its schema before it is
+  signed as `component/queue`, and again, signed, before the head moves.
+  Its time is never before the segment it follows.
+- **The sealer never signs a fork.** It keeps its own last head, and
+  whether it adopted, in the Secret `c4-farm-book-sealer`, which only it
+  moves, and in memory. It seals only after that head, moving it before
+  the State's. A State whose head went back, forked or was emptied is put
+  back at the sealer's head; one naming a segment the sealer never sealed
+  is refused; a sealer's own head lowered under it is refused. The readers
+  in the manager (the HUD's, the issuer's) read the sealed book to the
+  sealer's head, never to one the State names, so they keep it across
+  their restarts too.
 - **The book is the time** (DESIGN 5.4). A record counts from the first
   sealed segment that names it (`Book.PositionOf`), and whether a grant,
   binding, device or membership was in force when it was made is answered
   by sealed position (`Book.InForce`), at the time that position was
-  sealed, never by the record's own `signedAt`. A record whose `signedAt`
-  falls outside the window its position allows (from the seal before less
-  five minutes, to its own seal plus five) is flagged in its segment, not
-  refused (`Book.Flags`); refusing is slice 3's. The seal interval is how
-  fine that time is.
+  sealed, never by the record's own `signedAt`, by one rule the people's
+  index uses too (`farmbook.DevicesInForce`). An entry a book adopted keeps
+  its own time, so a device that lapsed before the book stays lapsed.
+  An entry whose record's `signedAt` falls outside its window (from five
+  minutes before the queue first saw it pending to five after) is flagged
+  in its segment, not refused (`Book.Flags`, reason `window`), and so is one
+  whose record says nothing of when (`no-time`); refusing is slice 3's. The
+  seal interval is how fine that time is.
 - **Pending and sealed.** Before an entry is sealed, the HUD and the
   people's issuer judge a request against the sealed book and the pending
   entries (`View`), so a removal or revocation counts at once. A verifier
@@ -1315,9 +1343,9 @@ names no system store keeps none, and nothing else changes.
 - **What stops a rollback, and what doesn't.** Each segment is signed and
   names the one before, so rewriting any past entry or segment shows:
   every reader refuses it. Signing alone doesn't stop a rollback: whoever
-  can write `c4-farm-book` can point it back at an older segment the queue
+  can write the State can point it back at an older segment the queue
   signed, and that segment verifies by itself. What stops it is the
-  reader's last head. `Reader.Last` and `LastHead` are the last head a
+  reader's last head, and the sealer's own. `Reader.Last` and `LastHead` are the last head a
   reader accepted; a client keeps it (K4's CLI, on disk) and checks each
   page against it (`CheckPage`), refusing a head that goes back or forks
   (`ErrRollback`). The HUD's own reader does the same. Nor does signing
@@ -1331,10 +1359,24 @@ names no system store keeps none, and nothing else changes.
   own prev links, in the issuer's order (`adopted` in that segment). Their
   records are copied to the system store. The issuer waits until then, and
   the old head Secret is left as it was. The entries after them are in the
-  book's order.
-- **Reading it:** `GET /book/farm?since=` (internal/hud/API.md). Device
-  entries' addresses go only to their person and the farm's admins, and
-  anyone else reads them redacted, labelled.
+  book's order. Adoption happens once, ever: the sealer records it. An
+  adopted entry today's checks refuse is adopted all the same, flagged
+  `unchecked`, and counts for nothing; it never stops the book.
+- **A sealed entry that no longer checks** (the farm's roots changed) is
+  kept, since it is sealed, and counts for nothing, by one policy at the
+  issuer and at the sealer: neither stops.
+- **Reading it:** `GET /book/farm?since=` (internal/hud/API.md). A device
+  entry keeps the addresses it saw out of its hashed form, as a private
+  part with a random salt, named by its C4 ID: a salted commitment. The part
+  goes only to the device's person and the farm's admins; anyone else reads
+  the entry without it, labelled, and the entry still checks against its
+  ID, so a client checks every entry (`CheckPage`). Without the salt, an
+  address could be found from the entry's ID by trying a /16. The same
+  holds for `/v1/people/index`. An adopted entry from before private parts,
+  with its address in it, is withheld whole from anyone else.
+- **Not yet:** a client can't tell a withheld head from a quiet farm, so a
+  compromised HUD could hide a revocation. A signed "head as of" each
+  interval, and clients refusing a stale one, comes with K8.
 - **Beside it:** K8's shared replay store can live in the same system store
   (PEOPLE-KEYS-2 10.4 item 17); nothing in the book stands in its way.
 
