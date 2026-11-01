@@ -1,7 +1,9 @@
 package provenance
 
 import (
+	"bytes"
 	"context"
+	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/x509"
 	"encoding/base64"
@@ -10,6 +12,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Avalanche-io/c4"
 )
 
 // Predicate types. Each names what kind of entity signs it.
@@ -121,7 +125,26 @@ type Verified struct {
 	Subjects      []Subject
 	Predicate     json.RawMessage
 	SignedAt      time.Time
+	// Payload is the DSSE payload as signed; PayloadHash of it is the key
+	// the farm takes an act once by.
+	Payload []byte
+	// Farm is the farm the signer's certificate chains to: the C4 ID of
+	// the CA certificate that issued its leaf (FarmID).
+	Farm string
+	// Device is the device a person's leaf names, its own key's ID, and
+	// Grant the grant an agent's or a CI job's leaf names.
+	Device string
+	Grant  string
+	// TouchDevice is a confirmed act's touch key, by its device ID: the
+	// second of its two signatures.
+	TouchDevice string
+	// Expires is when the first of the signer's certificates ends: how
+	// long the farm keeps the record's payload hash.
+	Expires time.Time
 }
+
+// Confirmed reports whether a person's touch key signed the record too.
+func (v *Verified) Confirmed() bool { return v.TouchDevice != "" }
 
 // Subject returns the digest of the named subject.
 func (v *Verified) Subject(name string) string {
@@ -168,8 +191,17 @@ func VerifyRecord(data []byte, roots *x509.CertPool, legacy map[string]ed25519.P
 // roots at the time the record claims.
 var ErrChain = errors.New("the signer's certificate does not chain to a trusted root")
 
-// VerifyBundle checks a bundle: the certificate chain to roots at the
-// record's signing time, then the signature with the leaf's key.
+// VerifyBundle checks a bundle: the signatures with the leaf's key, then
+// the certificate chain to roots at the record's signing time.
+//
+// The leaf's key type picks the rule. A farm part's Ed25519 leaf passes
+// when any signature in the envelope is its own, as before personal keys.
+// A device's P-256 leaf signs alone: exactly one signature, its own,
+// keyed by its leaf's fingerprint. A confirmed act, whose bundle carries a
+// touch key's chain, has exactly two: the device key's, then the touch
+// key's, each keyed by its leaf's fingerprint. An extra, missing or
+// unknown signature, or two in the other order, refuses the record; it
+// is never skipped (PEOPLE-KEYS-2 10.4 item 5).
 func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	var b Bundle
 	if err := json.Unmarshal(data, &b); err != nil {
@@ -181,38 +213,59 @@ func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	if b.DSSEEnvelope.PayloadType != PayloadType {
 		return nil, fmt.Errorf("payload type %q", b.DSSEEnvelope.PayloadType)
 	}
-	certs := b.VerificationMaterial.X509CertificateChain.Certificates
-	if len(certs) == 0 {
-		return nil, errors.New("no certificate")
-	}
-	leaf, err := x509.ParseCertificate(certs[0].RawBytes)
+	leaf, inter, err := parseChain(b.VerificationMaterial.X509CertificateChain)
 	if err != nil {
 		return nil, err
-	}
-	inter := x509.NewCertPool()
-	for _, c := range certs[1:] {
-		if ic, err := x509.ParseCertificate(c.RawBytes); err == nil {
-			inter.AddCert(ic)
-		}
 	}
 	payload, err := base64.StdEncoding.DecodeString(b.DSSEEnvelope.Payload)
 	if err != nil {
 		return nil, err
 	}
-	pub, ok := leaf.PublicKey.(ed25519.PublicKey)
-	if !ok {
-		return nil, errors.New("the signer's key is not Ed25519")
-	}
-	signed := false
-	for _, s := range b.DSSEEnvelope.Signatures {
-		sig, err := base64.StdEncoding.DecodeString(s.Sig)
-		if err == nil && ed25519.Verify(pub, pae(b.DSSEEnvelope.PayloadType, payload), sig) {
-			signed = true
-			break
+	msg := PAE(b.DSSEEnvelope.PayloadType, payload)
+	sigs := b.DSSEEnvelope.Signatures
+	var touch *x509.Certificate
+	var touchInter *x509.CertPool
+	_, device := leaf.PublicKey.(*ecdsa.PublicKey)
+	switch {
+	case b.VerificationMaterial.TouchCertificateChain != nil:
+		if touch, touchInter, err = parseChain(*b.VerificationMaterial.TouchCertificateChain); err != nil {
+			return nil, fmt.Errorf("touch key: %w", err)
 		}
-	}
-	if !signed {
-		return nil, ErrUntrusted
+		if _, ok := touch.PublicKey.(*ecdsa.PublicKey); !ok || !device {
+			return nil, fmt.Errorf("%w: a confirmed act is signed by a person's device key and touch key, both P-256", ErrUntrusted)
+		}
+		if len(sigs) != 2 {
+			return nil, fmt.Errorf("%w: a confirmed act has exactly two signatures, the device key's and then the touch key's, not %d", ErrUntrusted, len(sigs))
+		}
+		if err := signedBy(leaf, sigs[0], msg); err != nil {
+			return nil, fmt.Errorf("the first signature, the device key's: %w", err)
+		}
+		if err := signedBy(touch, sigs[1], msg); err != nil {
+			return nil, fmt.Errorf("the second signature, the touch key's: %w", err)
+		}
+	case device:
+		if len(sigs) != 1 {
+			return nil, fmt.Errorf("%w: a device key signs alone, with exactly one signature, not %d", ErrUntrusted, len(sigs))
+		}
+		if err := signedBy(leaf, sigs[0], msg); err != nil {
+			return nil, err
+		}
+	default:
+		pub, ok := leaf.PublicKey.(ed25519.PublicKey)
+		if !ok {
+			return nil, errors.New("the signer's key is neither Ed25519 nor P-256")
+		}
+		signed := false
+		for _, s := range sigs {
+			sig, err := base64.StdEncoding.DecodeString(s.Sig)
+			if err == nil && ed25519.Verify(pub, msg, sig) {
+				signed = true
+				break
+			}
+		}
+		if !signed {
+			return nil, ErrUntrusted
+		}
 	}
 	var st AnyStatement
 	if err := json.Unmarshal(payload, &st); err != nil {
@@ -230,18 +283,104 @@ func VerifyBundle(data []byte, roots *x509.CertPool) (*Verified, error) {
 	// The certificate must have been valid when the record says it was
 	// signed. Without a timestamp authority or a transparency log, that
 	// time is the signer's own claim (DESIGN.md section 9.2).
-	if _, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: inter, CurrentTime: when.SignedAt,
-		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning}}); err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrChain, err)
+	farm, err := chainsAt(leaf, inter, roots, when.SignedAt)
+	if err != nil {
+		return nil, err
 	}
-	return &Verified{Identity: CertIdentity(leaf), PredicateType: st.PredicateType, Subjects: st.Subject,
-		Predicate: st.Predicate, SignedAt: when.SignedAt}, nil
+	v := &Verified{Identity: CertIdentity(leaf), PredicateType: st.PredicateType, Subjects: st.Subject,
+		Predicate: st.Predicate, SignedAt: when.SignedAt, Payload: payload, Farm: farm,
+		Device: CertDevice(leaf), Grant: CertGrant(leaf), Expires: leaf.NotAfter}
+	if v.Device != "" && v.Device != CertDeviceID(leaf) {
+		return nil, fmt.Errorf("%w: the leaf names device %s, but its key is device %s", ErrUntrusted, v.Device, CertDeviceID(leaf))
+	}
+	if touch == nil {
+		return v, nil
+	}
+	// The touch key is the same person's, on the same farm, and was valid
+	// when the act was signed; its device record names the device it
+	// confirms for (CheckTouchKey, against the device records).
+	if st.PredicateType != PredicateAct {
+		return nil, fmt.Errorf("%w: only an act is confirmed with a touch, not a %s record", ErrUntrusted, st.PredicateType)
+	}
+	touchFarm, err := chainsAt(touch, touchInter, roots, when.SignedAt)
+	if err != nil {
+		return nil, fmt.Errorf("touch key: %w", err)
+	}
+	switch {
+	case touchFarm != farm:
+		return nil, fmt.Errorf("%w: the touch key is another farm's", ErrUntrusted)
+	case CertIdentity(touch) != v.Identity:
+		return nil, fmt.Errorf("%w: the touch key is %s's, the device key %s's", ErrUntrusted, CertIdentity(touch), v.Identity)
+	case v.Device == "" || CertDevice(touch) != CertDeviceID(touch):
+		return nil, fmt.Errorf("%w: a confirmed act's leaves each name their own device", ErrUntrusted)
+	case CertDevice(touch) == v.Device:
+		return nil, fmt.Errorf("%w: the touch key is the device key itself", ErrUntrusted)
+	}
+	v.TouchDevice = CertDevice(touch)
+	if touch.NotAfter.Before(v.Expires) {
+		v.Expires = touch.NotAfter
+	}
+	return v, nil
 }
+
+// parseChain reads a certificate chain: its leaf, and the rest as
+// intermediates.
+func parseChain(chain CertificateChain) (*x509.Certificate, *x509.CertPool, error) {
+	certs := chain.Certificates
+	if len(certs) == 0 {
+		return nil, nil, errors.New("no certificate")
+	}
+	leaf, err := x509.ParseCertificate(certs[0].RawBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	inter := x509.NewCertPool()
+	for _, c := range certs[1:] {
+		if ic, err := x509.ParseCertificate(c.RawBytes); err == nil {
+			inter.AddCert(ic)
+		}
+	}
+	return leaf, inter, nil
+}
+
+// chainsAt checks that leaf chains to roots at the time the record claims
+// and returns its farm.
+func chainsAt(leaf *x509.Certificate, inter, roots *x509.CertPool, at time.Time) (string, error) {
+	chains, err := leaf.Verify(x509.VerifyOptions{Roots: roots, Intermediates: inter, CurrentTime: at,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning}})
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrChain, err)
+	}
+	if len(chains[0]) < 2 {
+		return "", fmt.Errorf("%w: the leaf is a root", ErrChain)
+	}
+	return FarmID(chains[0][1]), nil
+}
+
+// signedBy checks one signature of an envelope against a device's leaf:
+// keyed by the leaf's fingerprint, in its one form (VerifyP256).
+func signedBy(leaf *x509.Certificate, s Signature, msg []byte) error {
+	if s.KeyID != Fingerprint(leaf) {
+		return fmt.Errorf("%w: signature key ID %.16s is not its leaf's fingerprint", ErrUntrusted, s.KeyID)
+	}
+	sig, err := base64.StdEncoding.DecodeString(s.Sig)
+	if err != nil {
+		return fmt.Errorf("%w: the signature is not base64", ErrSignatureForm)
+	}
+	return VerifyP256(leaf.PublicKey.(*ecdsa.PublicKey), msg, sig)
+}
+
+// FarmID is a farm's ID: the C4 ID of its CA's certificate (DER), the CA
+// that issues its leaves. It differs per farm, and an act names the farm
+// it was made for by it (PEOPLE-KEYS-2 10.4 item 7).
+func FarmID(ca *x509.Certificate) string { return c4.Identify(bytes.NewReader(ca.Raw)).String() }
 
 // CheckSigner applies the farm's policy: who may sign each kind of record.
 // A task record must be signed by the node it says it ran on; decisions of
 // the controller, the queue and the HUD by those components; imports and
-// ingests by a workload identity.
+// ingests by a workload identity; device records by the people's issuer;
+// an act by the identity in its signer field, with the kinds that need a
+// person or a touch (ActNeeds) refused to anyone else.
 func CheckSigner(v *Verified) error {
 	want := ""
 	switch v.PredicateType {
@@ -260,7 +399,14 @@ func CheckSigner(v *Verified) error {
 	case PredicateJob, PredicateDecision:
 		want = ComponentIdentity("queue")
 	case PredicateControl:
+		// The HUD's, citing the act it carried out (CheckCitation).
 		want = ComponentIdentity("hud")
+	case PredicateAct:
+		// The actor's own key, or a tracker's relay (checkAct).
+		_, err := checkAct(v)
+		return err
+	case PredicateDevice:
+		want = ComponentIdentity("issuer")
 	case PredicateImport, PredicateIngest:
 		if strings.HasPrefix(v.Identity, IdentityBase+"sa/") {
 			return nil

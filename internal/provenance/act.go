@@ -82,6 +82,15 @@ func certURN(c *x509.Certificate, prefix string) string {
 // SubjectPublicKeyInfo. A person's leaf must name it (CertDevice).
 func CertDeviceID(c *x509.Certificate) string { return schema.DeviceID(c.RawSubjectPublicKeyInfo) }
 
+// ActSubject is what an act on an object names: the object by kind, name
+// and UID, never a bare name, which comes back when the object is made
+// again, with the SHA-256 of its spec as the farm served it
+// (workjob:show-a/sh040-light-v007@<uid>). A job's digest is
+// queue.SpecDigest, the same the HUD serves beside the job.
+func ActSubject(kind, namespace, name, uid, specDigest string) Subject {
+	return Subject{Name: kind + ":" + namespace + "/" + name + "@" + uid, Digest: map[string]string{"sha256": specDigest}}
+}
+
 // PayloadHash is the key the farm takes each act once by: the SHA-256 of
 // the DSSE payload as signed, never the envelope's C4 ID, which a
 // re-encoded envelope or signature would change.
