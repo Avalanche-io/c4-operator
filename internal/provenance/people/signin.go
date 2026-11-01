@@ -399,13 +399,16 @@ func parseJWK(b []byte) (*jose.JSONWebKey, error) {
 	return &k, nil
 }
 
-// VerifyBookedToken checks a device record's ID token against the
-// provider key the index booked for it, as a verifier reading the index
-// later does: the provider may have rotated the key away since, so the
-// booked copy is what it trusts, the farm's word (PEOPLE-KEYS-2 3.1).
-// It checks the signature and the nonce, the device ID; the claims were
-// checked when the token was taken.
-func VerifyBookedToken(d *schema.DevicePredicate, jwk []byte) error {
+// CheckBookedToken checks a device record's ID token as a verifier reading
+// the index later does (PEOPLE-KEYS-2 3.1, 7): its signature against the
+// provider key the index booked for it, since the provider may have
+// rotated the key away and the booked copy is what the verifier trusts,
+// the farm's word; its issuer and audience against the provider setting
+// in force at the record's position (azp too, when it names more than one
+// audience or any azp); its nonce, the record's device ID; and its
+// subject, a sign-in of the record's person in the sign-ins in force
+// there. Expiry is not checked: the token was fresh when it was taken.
+func CheckBookedToken(d *schema.DevicePredicate, jwk []byte, set Provider, ins StaticSignIns) error {
 	k, err := parseJWK(jwk)
 	if err != nil {
 		return err
@@ -422,14 +425,70 @@ func VerifyBookedToken(d *schema.DevicePredicate, jwk []byte) error {
 		return err
 	}
 	var c struct {
-		Nonce string `json:"nonce"`
+		Issuer  string          `json:"iss"`
+		Subject string          `json:"sub"`
+		Aud     json.RawMessage `json:"aud"`
+		AZP     string          `json:"azp"`
+		Nonce   string          `json:"nonce"`
 	}
 	if err := json.Unmarshal(payload, &c); err != nil {
 		return err
 	}
+	var aud []string
+	if json.Unmarshal(c.Aud, &aud) != nil {
+		var one string
+		json.Unmarshal(c.Aud, &one)
+		aud = []string{one}
+	}
 	spki, _ := d.PublicKey()
-	if c.Nonce != schema.DeviceID(spki) {
+	switch {
+	case set.Issuer == "" || c.Issuer != set.Issuer:
+		return fmt.Errorf("the token is from %q, and the provider in force at its record was %q", c.Issuer, set.Issuer)
+	case !slices.Contains(aud, set.ClientID):
+		return fmt.Errorf("the token is for %v, not the farm's client %s", aud, set.ClientID)
+	case (len(aud) > 1 || c.AZP != "") && c.AZP != set.ClientID:
+		return fmt.Errorf("the token was issued to %q (azp), not the farm's client %s", c.AZP, set.ClientID)
+	case c.Nonce != schema.DeviceID(spki):
 		return fmt.Errorf("the token's nonce %q is not the record's device", c.Nonce)
+	case ins.Person(c.Issuer, c.Subject) != d.Person:
+		return fmt.Errorf("subject %q at %s was not %s's sign-in at the record's position", c.Subject, c.Issuer, d.Person)
 	}
 	return nil
+}
+
+// VerifyBookedToken checks the ID token of a device record the index
+// books (CheckBookedToken), against the provider key it names and the
+// setting and sign-ins in force at its position.
+func (x *Index) VerifyBookedToken(ctx context.Context, record string) error {
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if err := x.sync(ctx); err != nil {
+		return err
+	}
+	e, d := x.find(KindDevice, record), x.devices[record]
+	if e == nil || d == nil {
+		return fmt.Errorf("the index books no device record %.16s", record)
+	}
+	if d.Predicate.Evidence != schema.EvidenceIDToken {
+		return fmt.Errorf("device record %.16s was certified on %s, not an ID token", record, d.Predicate.Evidence)
+	}
+	jwk, err := x.Store.Get(ctx, d.Predicate.ProviderKey)
+	if err != nil || !x.booked(KindProviderKey, d.Predicate.ProviderKey) {
+		return fmt.Errorf("the provider key %.16s is not booked: %v", d.Predicate.ProviderKey, err)
+	}
+	set := x.settingAt(e.Position)
+	if set == nil {
+		return fmt.Errorf("no sign-in provider is in force at position %d", e.Position)
+	}
+	ins := StaticSignIns{}
+	if id := x.signInsAt(e.Position); id != "" {
+		b, err := x.Store.Get(ctx, id)
+		if err != nil {
+			return err
+		}
+		if ins, err = parseSignIns(b); err != nil {
+			return err
+		}
+	}
+	return CheckBookedToken(&d.Predicate, jwk, set.Provider, ins)
 }

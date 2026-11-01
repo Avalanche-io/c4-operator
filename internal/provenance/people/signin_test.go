@@ -56,8 +56,7 @@ func TestEnrolOnASignIn(t *testing.T) {
 	if errs != nil || dr.Predicate.Evidence != schema.EvidenceIDToken || dr.Predicate.Person != "dana" {
 		t.Fatalf("record %+v %v", dr, errs)
 	}
-	jwk, _ := r.store.Get(context.Background(), keys[0].Record)
-	if dr.Predicate.ProviderKey != keys[0].Record || people.VerifyBookedToken(&dr.Predicate, jwk) != nil {
+	if dr.Predicate.ProviderKey != keys[0].Record || r.index.VerifyBookedToken(context.Background(), devs[0].Record) != nil {
 		t.Errorf("the record's token doesn't verify against the booked key %s", keys[0].Record)
 	}
 	// A second device of dana's signed by the same provider key books no
@@ -345,5 +344,46 @@ func TestSignInsBookedWhenTheyChange(t *testing.T) {
 	}
 	if err := r.reread(); err != nil {
 		t.Error(err)
+	}
+}
+
+// A booked record's ID token is checked later, by a verifier, against the
+// provider setting and the sign-ins in force at the record's position, not
+// only for its signature and nonce (review probe P5): dana's token on a
+// record naming noor is refused, and so is a token for another issuer or
+// audience with the same key and nonce.
+func TestBookedTokenCheckedAtItsPosition(t *testing.T) {
+	r := studio(t)
+	ctx := context.Background()
+	d := newDev(t)
+	c := r.signIn(d, "dana", danaSub)
+	if err := r.index.VerifyBookedToken(ctx, c.Record); err != nil {
+		t.Fatalf("dana's own record: %v", err)
+	}
+	jwk, _ := r.store.Get(ctx, r.entries(people.KindProviderKey)[0].Record)
+	b, _ := r.store.Get(ctx, c.Record)
+	v, _ := provenance.VerifyBundle(b, r.farm.Roots)
+	dr, _ := schema.ParseDevice(v.Payload)
+	set := people.Provider{Issuer: ssoIssuer, ClientID: clientID}
+	ins := r.iss.SignIns.(people.StaticSignIns)
+	if err := people.CheckBookedToken(&dr.Predicate, jwk, set, ins); err != nil {
+		t.Fatalf("the faithful record: %v", err)
+	}
+	p := dr.Predicate
+	p.Person = "noor"
+	if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
+		t.Error("dana's token passed on a record naming noor")
+	}
+	for name, over := range map[string]map[string]any{
+		"another issuer":   {"iss": "https://sso.other.example"},
+		"another audience": {"aud": "some-other-app"},
+		"another azp":      {"aud": []string{clientID, "some-other-app"}, "azp": "some-other-app"},
+		"noor's subject":   {"sub": noorSub},
+	} {
+		p := dr.Predicate
+		p.IDToken = r.sso.token(r.now, danaSub, d.id, over)
+		if err := people.CheckBookedToken(&p, jwk, set, ins); err == nil {
+			t.Errorf("%s passed", name)
+		}
 	}
 }
