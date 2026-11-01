@@ -210,6 +210,11 @@ func TestActKindsThatNeedAPersonOrATouch(t *testing.T) {
 		{"a person approves a burst without a touch", dana, provtest.Act{Act: "approve-capacity"}, false},
 		{"a person approves a burst with a touch", dana, provtest.Act{Act: "approve-capacity", Confirmed: true}, true},
 		{"a person approves, silent", dana, provtest.Act{Act: "approve"}, true},
+		{"an agent confirms a held write", agent, provtest.Act{Act: "confirm-write"}, false},
+		{"a unit denies a held write", unit, provtest.Act{Act: "deny-write"}, false},
+		{"a relay confirms a held write", relay, provtest.Act{Act: "confirm-write"}, false},
+		{"a person confirms a held write, silent", dana, provtest.Act{Act: "confirm-write"}, true},
+		{"a person denies a held write, silent", dana, provtest.Act{Act: "deny-write"}, true},
 	} {
 		v, err := provenance.VerifyBundle(f.SignAct(t, c.key, c.act), f.Roots)
 		if err != nil {

@@ -81,6 +81,11 @@ var actNeeds = map[string]ActNeed{
 	// and silent (DESIGN 6: revoke).
 	"revoke":        personOnly,
 	"people-revoke": personOnly,
+	// What a person saw in the tracker: a held write happened, or didn't.
+	// A person's attestation, which sends and gives away nothing, so
+	// silent.
+	"confirm-write": personOnly,
+	"deny-write":    personOnly,
 }
 
 // ActNeeds is what an act of this kind, with these params, made at this
