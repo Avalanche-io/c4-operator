@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -240,5 +241,30 @@ func TestEnrolmentOffersBookedOnceAMinute(t *testing.T) {
 	}
 	if st, _ := b.ptr.Read(ctx); len(st.Pending) != 1 {
 		t.Errorf("three offers in a minute booked %d entries", len(st.Pending))
+	}
+}
+
+// A private part given with a page must be the one its entry names: a
+// part swapped for another, or given with an entry that names none, is
+// refused by a client's check.
+func TestPrivatePartCheckedAgainstItsEntry(t *testing.T) {
+	b := newBookHUD(t)
+	signsIn(b.s)
+	ctx := context.Background()
+	part := []byte(`{"addr":"192.0.2.10","salt":"bm9vcm9yZGFuYXNhbHQ"}`)
+	b.store.Put(ctx, c4id(part), part)
+	e := &people.Entry{Kind: "device", Device: "c4" + strings.Repeat("1", 88), Person: "dana", Private: c4id(part), Order: farmbook.OrderPending,
+		At: time.Now().UTC().Format(time.RFC3339Nano)}
+	if _, err := b.s.FarmBook.Append(ctx, farmbook.Submission{Entry: e}); err != nil {
+		t.Fatal(err)
+	}
+	b.seal(t)
+	p := b.page(t, 0, "", map[string]string{"Authorization": "Bearer dana-token"})
+	if _, err := farmbook.CheckPage(b.farm, b.roots, farmbook.LastHead{}, p); err != nil || len(p.Entries[0].Private) == 0 {
+		t.Fatalf("dana's own page: %v", err)
+	}
+	p.Entries[0].Private = json.RawMessage(`{"addr":"203.0.113.9","salt":"bm9vcm9yZGFuYXNhbHQ"}`)
+	if _, err := farmbook.CheckPage(b.farm, b.roots, farmbook.LastHead{}, p); !errors.Is(err, farmbook.ErrBook) {
+		t.Errorf("a private part swapped: %v", err)
 	}
 }
