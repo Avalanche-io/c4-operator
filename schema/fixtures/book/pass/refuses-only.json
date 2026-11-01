@@ -1,0 +1,28 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "farm:c44wvFdcMZDF7ErGUmXZQmHgV1LgyipdQQd6VTu13sNHdRr1rwdRSRYq5ExzTHbS7zWhMGEGNoqN48nAUgAdFPoxjt",
+      "digest": {
+        "c4": "c44wvFdcMZDF7ErGUmXZQmHgV1LgyipdQQd6VTu13sNHdRr1rwdRSRYq5ExzTHbS7zWhMGEGNoqN48nAUgAdFPoxjt"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/book/v1",
+  "predicate": {
+    "farm": "c44wvFdcMZDF7ErGUmXZQmHgV1LgyipdQQd6VTu13sNHdRr1rwdRSRYq5ExzTHbS7zWhMGEGNoqN48nAUgAdFPoxjt",
+    "number": 1,
+    "first": 1,
+    "last": 0,
+    "entries": [],
+    "refused": [
+      {
+        "submission": "c43yM4HHckx6dszqAJ985GqrU1oqgLdK7v7ud1uvWQBHxhzjm5H3oZ9qsQ9FF24ywgiLEaLf6NQLwyy86b1iwibEjq",
+        "kind": "control",
+        "record": "c45JUaJFsk7CTeJoPZ5d97uyTcj19a2eB2NXjsZCnjb6j3rXxc8QMcv9Fntv6vgpcRzMFVYRfezbhnDoo19LAS7xRD",
+        "why": "the entry names person dana, its record noor"
+      }
+    ],
+    "signedAt": "2026-11-01T16:00:00Z"
+  }
+}

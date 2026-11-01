@@ -1,0 +1,11 @@
+{
+  "by": "check",
+  "note": "The shape cannot say a segment after the first needs prev; a reader of the book refuses it (internal/farmbook).",
+  "errors": [
+    {
+      "path": "predicate.prev",
+      "message": "segment 2 names no segment before it",
+      "fix": "add prev: the C4 ID of segment 1, as signed"
+    }
+  ]
+}

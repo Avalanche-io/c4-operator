@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "pattern",
+  "errors": [
+    {
+      "path": "subject[0].name",
+      "message": "\"book:c44wvFdcMZDF7ErGUmXZQmHgV1LgyipdQQd6VTu13sNHdRr1rwdRSRYq5ExzTHbS7zWhMGEGNoqN48nAUgAdFPoxjt\" is not the book's last entry",
+      "fix": "write book:<farm>@<position> with the entry's C4 ID, or farm:<farm> before the book holds any entry"
+    }
+  ]
+}

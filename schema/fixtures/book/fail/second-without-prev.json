@@ -1,0 +1,23 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "book:c44wvFdcMZDF7ErGUmXZQmHgV1LgyipdQQd6VTu13sNHdRr1rwdRSRYq5ExzTHbS7zWhMGEGNoqN48nAUgAdFPoxjt@4",
+      "digest": {
+        "c4": "c44kDSdL8L9oqQtyciJP3BWPdiDSfXApyZmRrxb1g7rFHwaK68W48Kb93T1AMHYbewmD117RiYQmGw63ddPSo74ozb"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/book/v1",
+  "predicate": {
+    "farm": "c44wvFdcMZDF7ErGUmXZQmHgV1LgyipdQQd6VTu13sNHdRr1rwdRSRYq5ExzTHbS7zWhMGEGNoqN48nAUgAdFPoxjt",
+    "number": 2,
+    "first": 3,
+    "last": 4,
+    "entries": [
+      "c45QygXjif8tFLZfo4Dq96Mn52F99nq9d5qVcZuZxEJHpLe7PSzFE8xUiYUbiArSsgRumQQHniNf6d6aEUjU99ZGMX",
+      "c44kDSdL8L9oqQtyciJP3BWPdiDSfXApyZmRrxb1g7rFHwaK68W48Kb93T1AMHYbewmD117RiYQmGw63ddPSo74ozb"
+    ],
+    "signedAt": "2026-11-01T16:00:02Z"
+  }
+}

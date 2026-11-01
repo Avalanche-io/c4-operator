@@ -1819,7 +1819,8 @@ space. The schemas are served at `GET /schema/{submit,tool,lock,card}`; a
 tree's card (`.c4/card.yaml`, `c4: card/1`) says what the tree is, where it
 came from and its licence. `GET /schema/act` and `GET /schema/device` serve
 the records of personal keys: an act signed by its actor's own key, and a
-person's device key as the farm enrolled it (`schema/README.md`).
+person's device key as the farm enrolled it (`schema/README.md`). `GET
+/schema/book` serves a farm book segment (`book/v1`, `GET /book/farm`).
 
 ### POST /tools/{project}
 

@@ -30,6 +30,8 @@ wraps a tool writes Kubernetes objects:
 | `act-1.schema.json`                 | JSON Schema for an act statement (`act/v1`): one act, signed by its actor's own key, which the HUD's control record cites; served as `GET /schema/act`                                                           |
 | `device-1.schema.json`              | JSON Schema for a device record (`device/v1`): one of a person's device keys as the farm enrolled it; served as `GET /schema/device`                                                                             |
 | `fixtures/act/`, `fixtures/device/` | acts that pass (a person's, a confirmed one, an agent's, a unit's, a relayed one, a submission, a device removal) and device records (each with a real P-256 key and proof), and both refused, with their errors |
+| `book-1.schema.json`                | JSON Schema for a farm book segment (`book/v1`): one sealed run of the farm-wide log of farm-level acts, signed by the queue; served as `GET /schema/book`; `book.go` has its type and `ParseBookSegment`        |
+| `fixtures/book/`                    | segments that pass (grants with a flag, the people's index adopted, refusals only) and segments refused, with their errors                                                                                       |
 | `act.go`                            | `Act`, `Device`, `ParseAct`, `ParseDevice`, `ParamsID`, `DeviceID`, and `Canonical`, canonical JSON (RFC 8785)                                                                                                   |
 | `types.go`                          | `Submission`, `Tool`, `Lock`, `Card` and their parts, as the lowering, the runner and the CLI read them                                                                                                          |
 | `parse.go`                          | `ParseSubmission`, `ParseTool`, `ParseLock`, `ParseCard`, `ToJSON`: the shape checked, errors in the farm's words                                                                                                |
@@ -161,3 +163,30 @@ the SHA-256 of `ProofMessage`. A renewal is a record of its own, naming the reco
 `proof` is the key's own signature over its enrolment request, the canonical
 JSON of `{farm, person, key, touchFor, nonce, requestedAt}`
 (`ProofMessage`); `go test ./schema` verifies every fixture's.
+
+## The farm book: book/v1
+
+The farm book is the farm-wide, hash-linked log of farm-level acts
+(`internal/farmbook`). The HUD and the people's issuer write its entries;
+the leader-elected queue checks each against the record it cites and seals
+them. **A segment** (`https://cccc.io/provenance/book/v1`) is what the queue
+signs, as `component/queue`:
+- **its subject** is the book's last entry as the segment leaves it,
+  `book:<farm>@<position>` with that entry's C4 ID, or the farm itself,
+  `farm:<farm>`, before the book holds any entry;
+- **`number`** counts from 1, and **`prev`** is the C4 ID of the segment
+  before, as signed, so a rewrite of any past segment shows;
+- **`first`, `last` and `entries`** are the positions it seals and each
+  entry's C4 ID. Each entry names the one before it (`prev`) too;
+- **`refused`** are entries written for the seal whose record didn't
+  verify, wasn't signed by its signer, or said something else. They never
+  count;
+- **`flags`** are entries whose record says it was signed outside the window
+  its position allows. They count, and are flagged;
+- **`adopted`** marks the first segment of a farm whose people's issuer
+  kept its own index first: that index's entries, unchanged, in the
+  issuer's order.
+
+What the schema can't say: a segment after the first needs `prev`, `last`
+is `first` plus the entries less one, and the entries chain. A reader of
+the book checks those.

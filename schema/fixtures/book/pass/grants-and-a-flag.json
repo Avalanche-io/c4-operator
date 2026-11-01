@@ -1,0 +1,33 @@
+{
+  "_type": "https://in-toto.io/Statement/v1",
+  "subject": [
+    {
+      "name": "book:c44wvFdcMZDF7ErGUmXZQmHgV1LgyipdQQd6VTu13sNHdRr1rwdRSRYq5ExzTHbS7zWhMGEGNoqN48nAUgAdFPoxjt@4",
+      "digest": {
+        "c4": "c44kDSdL8L9oqQtyciJP3BWPdiDSfXApyZmRrxb1g7rFHwaK68W48Kb93T1AMHYbewmD117RiYQmGw63ddPSo74ozb"
+      }
+    }
+  ],
+  "predicateType": "https://cccc.io/provenance/book/v1",
+  "predicate": {
+    "farm": "c44wvFdcMZDF7ErGUmXZQmHgV1LgyipdQQd6VTu13sNHdRr1rwdRSRYq5ExzTHbS7zWhMGEGNoqN48nAUgAdFPoxjt",
+    "number": 2,
+    "prev": "c43zgYypChpFGLLtrfi7QY7U1Sfdw41FTqq8sHRPjXVm9tS1cKu1sbcykWdyp1S4uvmpH4dSJSoi4MCJmBVn8dBwC3",
+    "first": 3,
+    "last": 4,
+    "entries": [
+      "c45QygXjif8tFLZfo4Dq96Mn52F99nq9d5qVcZuZxEJHpLe7PSzFE8xUiYUbiArSsgRumQQHniNf6d6aEUjU99ZGMX",
+      "c44kDSdL8L9oqQtyciJP3BWPdiDSfXApyZmRrxb1g7rFHwaK68W48Kb93T1AMHYbewmD117RiYQmGw63ddPSo74ozb"
+    ],
+    "flags": [
+      {
+        "position": 4,
+        "record": "c42Q6oEXujz3WNJE1xaTz49MSiGxtUBx4iMPsyjgdf4oyVBLRzSYCqdMxCta43ttaUrCEyEH9f6C3Tkqfknjw9VPyP",
+        "signedAt": "2026-11-01T09:00:00Z",
+        "from": "2026-11-01T15:55:58Z",
+        "to": "2026-11-01T16:05:02Z"
+      }
+    ],
+    "signedAt": "2026-11-01T16:00:02Z"
+  }
+}

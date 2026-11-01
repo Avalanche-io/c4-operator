@@ -1,0 +1,11 @@
+{
+  "by": "schema",
+  "schemaMentions": "const",
+  "errors": [
+    {
+      "path": "predicate.adopted.order",
+      "message": "an adopted index keeps the people's issuer's own order",
+      "fix": "write order: issuer; the entries after it are in the book's"
+    }
+  ]
+}

@@ -14,6 +14,8 @@ import (
 	"time"
 
 	"github.com/Avalanche-io/c4"
+
+	"github.com/Avalanche-io/c4-operator/schema"
 )
 
 // Predicate types. Each names what kind of entity signs it.
@@ -39,6 +41,10 @@ const (
 	// PredicateIngest: a directory ingested as a view. Signed by the
 	// ingesting workload's identity.
 	PredicateIngest = "https://cccc.io/provenance/ingest/v1"
+	// PredicateBook: one sealed segment of the farm book, the farm-wide log
+	// of farm-level acts (internal/farmbook). Signed by the queue, which
+	// seals it.
+	PredicateBook = schema.BookPredicateType
 )
 
 // BundleMediaType identifies an attestation bundle: a DSSE envelope and the
@@ -427,7 +433,7 @@ func CheckSigner(v *Verified) error {
 		}
 	case PredicateResolution:
 		want = ComponentIdentity("controller")
-	case PredicateJob, PredicateDecision:
+	case PredicateJob, PredicateDecision, PredicateBook:
 		want = ComponentIdentity("queue")
 	case PredicateControl:
 		// The HUD's, citing the act it carried out (CheckCitation).

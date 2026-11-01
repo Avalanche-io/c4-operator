@@ -1,0 +1,218 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://cccc.io/schema/book-1.schema.json",
+  "title": "C4 farm book segment (book/v1)",
+  "description": "One sealed segment of a farm's book: the farm-wide, hash-linked log of farm-level acts. The HUD and the people's issuer write the entries, and the leader-elected queue checks each against the record it cites and seals them, signing the segment as component/queue. A segment names the segment before it, so changing any past segment changes every one after it. An entry counts from the first segment that seals it: its position is the book's time.",
+  "type": "object",
+  "required": [
+    "_type",
+    "subject",
+    "predicateType",
+    "predicate"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "_type": {
+      "const": "https://in-toto.io/Statement/v1"
+    },
+    "subject": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 1,
+      "items": {
+        "$ref": "#/$defs/subject"
+      }
+    },
+    "predicateType": {
+      "const": "https://cccc.io/provenance/book/v1"
+    },
+    "predicate": {
+      "$ref": "#/$defs/segment"
+    }
+  },
+  "$defs": {
+    "subject": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "digest"
+      ],
+      "description": "The book's last entry as this segment leaves it: book:<farm>@<position>, with the entry's C4 ID as its c4 digest; or, before the book holds any entry, the farm: farm:<farm>, with the farm's ID.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^(book:c4[1-9A-HJ-NP-Za-km-z]{88}@[1-9][0-9]*|farm:c4[1-9A-HJ-NP-Za-km-z]{88})$"
+        },
+        "digest": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "c4"
+          ],
+          "properties": {
+            "c4": {
+              "$ref": "#/$defs/id"
+            }
+          }
+        }
+      }
+    },
+    "segment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "farm",
+        "number",
+        "first",
+        "last",
+        "entries",
+        "signedAt"
+      ],
+      "properties": {
+        "farm": {
+          "$ref": "#/$defs/id",
+          "description": "The farm's ID: the C4 ID of the farm CA's certificate, as an act's."
+        },
+        "number": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The segment's number, from 1, one more than the segment it names."
+        },
+        "prev": {
+          "$ref": "#/$defs/id",
+          "description": "The C4 ID of the segment before, as signed. The first segment has none."
+        },
+        "first": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "The position of the first entry it seals: one more than the last the segment before sealed."
+        },
+        "last": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "The position of the last entry it seals; one less than first when it seals none and only refuses."
+        },
+        "entries": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/id"
+          },
+          "description": "The C4 ID of each entry it seals, first to last. Each entry names the entry before it (prev) and its position."
+        },
+        "refused": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/refusal"
+          },
+          "description": "Entries written for the seal that it refused: they never count."
+        },
+        "flags": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/flag"
+          },
+          "description": "Entries it sealed whose record says it was signed outside the window their position allows. They count, and are flagged."
+        },
+        "adopted": {
+          "$ref": "#/$defs/adopted"
+        },
+        "signedAt": {
+          "$ref": "#/$defs/time",
+          "description": "When the queue sealed it: the time every position it seals is judged at."
+        }
+      }
+    },
+    "refusal": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "submission",
+        "why"
+      ],
+      "properties": {
+        "submission": {
+          "$ref": "#/$defs/id",
+          "description": "The C4 ID of the entry as it was written for the seal."
+        },
+        "kind": {
+          "type": "string",
+          "maxLength": 64
+        },
+        "record": {
+          "$ref": "#/$defs/id",
+          "description": "The record the entry cited."
+        },
+        "why": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1000
+        }
+      }
+    },
+    "flag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "position",
+        "record",
+        "signedAt",
+        "from",
+        "to"
+      ],
+      "properties": {
+        "position": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "record": {
+          "$ref": "#/$defs/id"
+        },
+        "signedAt": {
+          "$ref": "#/$defs/time",
+          "description": "When the record says it was signed: its signer's claim."
+        },
+        "from": {
+          "$ref": "#/$defs/time",
+          "description": "The earliest its position allows: the segment before's seal, less the time a record may wait to be booked."
+        },
+        "to": {
+          "$ref": "#/$defs/time",
+          "description": "The latest its position allows: this segment's seal, plus the clocks' skew."
+        }
+      }
+    },
+    "adopted": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "head",
+        "position",
+        "order"
+      ],
+      "description": "The first segment of a farm whose people's issuer kept its own index before the book: it seals that index's entries unchanged, as the book's first, under their own prev links.",
+      "properties": {
+        "head": {
+          "$ref": "#/$defs/id",
+          "description": "The index's last entry, as its head named it."
+        },
+        "position": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "order": {
+          "const": "issuer"
+        }
+      }
+    },
+    "id": {
+      "type": "string",
+      "pattern": "^c4[1-9A-HJ-NP-Za-km-z]{88}$",
+      "description": "A record's C4 ID."
+    },
+    "time": {
+      "type": "string",
+      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]{1,9})?Z$"
+    }
+  }
+}

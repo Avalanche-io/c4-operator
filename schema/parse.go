@@ -167,7 +167,7 @@ var (
 func schemaFor(format string) (*jsonschema.Schema, error) {
 	resolvedOnce.Do(func() {
 		schemas = map[string]*jsonschema.Schema{}
-		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "card": card, "chain": chainSchema, "act": actSchema, "device": deviceSchema} {
+		for f, b := range map[string][]byte{"submit": submit, "tool": tool, "lock": lock, "card": card, "chain": chainSchema, "act": actSchema, "device": deviceSchema, "book": bookSchema} {
 			s := new(jsonschema.Schema)
 			if err := json.Unmarshal(b, s); err != nil {
 				resolveErr = fmt.Errorf("schema %s: %w", f, err)
@@ -228,7 +228,7 @@ func dedupe(errs []Error) []Error {
 	return out
 }
 
-var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "card": "a card", "chain": "a chain", "act": "an act statement", "device": "a device record"}
+var rootNoun = map[string]string{"submit": "a submission", "tool": "a tool", "lock": "a tool.lock", "card": "a card", "chain": "a chain", "act": "an act statement", "device": "a device record", "book": "a book segment"}
 
 // nouns name the $defs in errors: "frame" is not a field of a job.
 var nouns = map[string]string{
@@ -237,6 +237,7 @@ var nouns = map[string]string{
 	"progressRule": "a progress rule", "fileFilter": "a file filter",
 	"by": "by", "for": "for", "delegation": "a delegation", "credential": "a credential", "deployment": "a deployment",
 	"subject": "a subject", "act": "an act", "actChain": "an act's chain", "device": "a device record", "webauthn": "a passkey",
+	"segment": "a book segment", "refusal": "a refusal", "flag": "a flag", "adopted": "adopted",
 }
 
 // elem is one step of a path: a key, or an index (key "").
@@ -892,6 +893,11 @@ func (c *checker) say(kind string, shape []string, path []elem, v any, ctx map[s
 		if ev, _ := c.at([]elem{{key: "predicate"}, {key: "evidence"}}).(string); ev == EvidenceInstaller {
 			return "the installer token enrols the owner's own keys at the terminal, never a browser", "enrol the browser with the owner's key: evidence: owner"
 		}
+	// A farm book segment.
+	case "pattern book subject[].name":
+		return fmt.Sprintf("%s is not the book's last entry", quote(v)), "write book:<farm>@<position> with the entry's C4 ID, or farm:<farm> before the book holds any entry"
+	case "const book predicate.adopted.order":
+		return "an adopted index keeps the people's issuer's own order", "write order: issuer; the entries after it are in the book's"
 	case "pattern device subject[].name":
 		return fmt.Sprintf("%s is not a device", quote(v)), "write device:<device ID>"
 	case "pattern chain by.deployment", "pattern chain on[].deployment":
