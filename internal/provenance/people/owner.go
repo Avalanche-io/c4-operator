@@ -1,0 +1,293 @@
+package people
+
+import (
+	"crypto/ecdsa"
+	"crypto/sha256"
+	"encoding/hex"
+	"net"
+	"net/http"
+	"net/url"
+	"strings"
+	"time"
+
+	"github.com/Avalanche-io/c4-operator/schema"
+)
+
+// A one-person farm (PEOPLE-KEYS-2 3.3, 10.4 item 13). There is no sign-in
+// provider: the person is the farm's owner, and their acts rest on their
+// own machine. c4 farm up enrols the owner's key and touch key once, over
+// loopback, with the installer token as evidence; the issuer refuses that
+// path once an owner key exists. After that the owner's key enrols the
+// browser: the CLI makes a one-time code, books its SHA-256 in a signed
+// act (browser-code), and opens the HUD with it; the browser presents the
+// code with its key within CodeTTL, over loopback; the CLI reads back the
+// key the code enrolled and countersigns it (countersign-device). A code
+// someone else used first shows as a key the CLI didn't see the browser
+// make.
+
+// CodeTTL is how long a one-time code works.
+const CodeTTL = time.Minute
+
+// loopback reports whether a request was made to a loopback address, as a
+// browser or the CLI on the farm's own machine makes it: its Host, and its
+// Origin when it has one, are 127.0.0.0/8, ::1 or localhost. A local
+// farm's HUD is published on 127.0.0.1 only. A request through the farm's
+// Service names the Service, and a page on any other site its own origin.
+// A program in the cluster can claim a loopback Host; the code, a secret
+// that works once for a minute, is what it would lack.
+func loopback(r *http.Request) bool {
+	if !loopbackHost(r.Host) {
+		return false
+	}
+	if o := r.Header.Get("Origin"); o != "" {
+		u, err := url.Parse(o)
+		if err != nil || !loopbackHost(u.Host) {
+			return false
+		}
+	}
+	return true
+}
+
+func loopbackHost(hostport string) bool {
+	h := hostport
+	if host, _, err := net.SplitHostPort(hostport); err == nil {
+		h = host
+	}
+	h = strings.Trim(h, "[]")
+	if h == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(h)
+	return ip != nil && ip.IsLoopback()
+}
+
+// OwnerEnrolment is c4 farm up's request: the owner's key, and the touch
+// key made at the terminal beside it, whose touchFor is the owner's key.
+type OwnerEnrolment struct {
+	Owner Enrolment  `json:"owner"`
+	Touch *Enrolment `json:"touch,omitempty"`
+}
+
+// OwnerCertified is the owner's key's certificate and its touch key's.
+type OwnerCertified struct {
+	Owner *Certified `json:"owner"`
+	Touch *Certified `json:"touch,omitempty"`
+}
+
+// handleOwner enrols a one-person farm's owner over loopback on the
+// installer token (evidence installer), once.
+func (i *Issuer) handleOwner(w http.ResponseWriter, r *http.Request) {
+	ctx, now := r.Context(), i.now()
+	owner := i.owner(ctx)
+	switch {
+	case !loopback(r):
+		fail(w, refuse(http.StatusForbidden, "the owner is enrolled over loopback, from the farm's own machine"))
+		return
+	case len(i.InstallerToken) == 0 || owner == "":
+		fail(w, refuse(http.StatusForbidden, "this is not a one-person farm: its people enrol on a sign-in"))
+		return
+	case !i.installer(r):
+		fail(w, refuse(http.StatusForbidden, "the owner is enrolled with this machine's installer token (%s)", InstallerHeader))
+		return
+	}
+	var req OwnerEnrolment
+	if err := decode(r, &req); err != nil {
+		fail(w, err)
+		return
+	}
+	type key struct {
+		e      *Enrolment
+		p      *schema.DevicePredicate
+		device string
+		pub    *ecdsa.PublicKey
+	}
+	var keys []key
+	for _, e := range []*Enrolment{&req.Owner, req.Touch} {
+		if e == nil {
+			continue
+		}
+		if e.IDToken != "" || e.Approval != "" || e.Code != "" {
+			fail(w, refuse(http.StatusBadRequest, "the owner's keys are enrolled on the installer token alone"))
+			return
+		}
+		p, pub, device, err := i.predicate(e, now)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		if p.Person != owner {
+			fail(w, refuse(http.StatusForbidden, "this farm is %s's, and the request is %s's", owner, p.Person))
+			return
+		}
+		p.Evidence = schema.EvidenceInstaller
+		keys = append(keys, key{e, p, device, pub})
+	}
+	switch {
+	case keys[0].p.TouchFor != "":
+		fail(w, refuse(http.StatusBadRequest, "the owner's key is a device key, not a touch key"))
+		return
+	case len(keys) == 2 && keys[1].p.TouchFor != keys[0].device:
+		fail(w, refuse(http.StatusBadRequest, "the touch key confirms for the owner's key %.16s (touchFor)", keys[0].device))
+		return
+	}
+	x := i.Index
+	es, err := x.append(ctx, now, func() ([]pending, error) {
+		if x.ownerRecord() != nil {
+			return nil, refuse(http.StatusConflict, "this farm's owner is enrolled already: the installer token enrols the owner once, and the owner's key enrols the browser (c4 farm open)")
+		}
+		var ps []pending
+		for _, k := range keys {
+			if err := x.unseen(k.device); err != nil {
+				return nil, err
+			}
+			rec, err := i.deviceRecord(ctx, k.p, k.device, now)
+			if err != nil {
+				return nil, err
+			}
+			ps = append(ps, pending{entry: &Entry{Kind: KindDevice, Device: k.device, Person: owner, Addr: i.addr(r)}, record: rec})
+		}
+		return ps, nil
+	})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	var certs []*Certified
+	for n, k := range keys {
+		c, err := i.certify(k.pub, owner, k.device, es[n], now)
+		if err != nil {
+			fail(w, err)
+			return
+		}
+		certs = append(certs, c)
+	}
+	out := OwnerCertified{Owner: certs[0]}
+	if len(certs) == 2 {
+		out.Touch = certs[1]
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// CodeHash is how a one-time code is booked and read back: the SHA-256 of
+// the code as the CLI made it, hex.
+func CodeHash(code string) string {
+	h := sha256.Sum256([]byte(code))
+	return hex.EncodeToString(h[:])
+}
+
+// handleBrowser enrols the browser the owner's CLI opened with a one-time
+// code (evidence owner): over loopback, within CodeTTL of the code's
+// booking, once.
+func (i *Issuer) handleBrowser(w http.ResponseWriter, r *http.Request) {
+	ctx, now := r.Context(), i.now()
+	if !loopback(r) {
+		fail(w, refuse(http.StatusForbidden, "a one-time code works only on loopback: open the HUD from the farm's own machine (c4 farm open)"))
+		return
+	}
+	var e Enrolment
+	if err := decode(r, &e); err != nil {
+		fail(w, err)
+		return
+	}
+	if e.Code == "" || e.IDToken != "" || e.Approval != "" {
+		fail(w, refuse(http.StatusBadRequest, "a browser presents the one-time code it was opened with (code), and nothing else"))
+		return
+	}
+	p, pub, device, err := i.predicate(&e, now)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	hash := CodeHash(e.Code)
+	p.Evidence, p.Code = schema.EvidenceOwner, hash
+	x := i.Index
+	es, err := x.append(ctx, now, func() ([]pending, error) {
+		c := x.code(hash)
+		switch {
+		case c == nil:
+			return nil, refuse(http.StatusForbidden, "that code is not this farm's: open the HUD with c4 farm open")
+		case now.After(c.expires()):
+			return nil, refuse(http.StatusForbidden, "that code lapsed at %s: a code works for %s; run c4 farm open again", c.Expires, CodeTTL)
+		case x.codeUsed(hash) != nil:
+			return nil, refuse(http.StatusForbidden, "that code enrolled a browser already: run c4 farm open again")
+		case p.Person != c.Person:
+			return nil, refuse(http.StatusForbidden, "that code is %s's, and the request is %s's", c.Person, p.Person)
+		}
+		if err := x.unseen(device); err != nil {
+			return nil, err
+		}
+		rec, err := i.deviceRecord(ctx, p, device, now)
+		if err != nil {
+			return nil, err
+		}
+		return []pending{{entry: &Entry{Kind: KindDevice, Device: device, Person: p.Person, Addr: i.addr(r)}, record: rec}}, nil
+	})
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	c, err := i.certify(pub, p.Person, device, es[0], now)
+	if err != nil {
+		fail(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, c)
+}
+
+// CodeState is what the CLI reads back for its code: waiting, enrolled
+// (with the key the code enrolled, which the CLI compares with the one it
+// saw the browser make) or lapsed.
+type CodeState struct {
+	State    string `json:"state"`
+	Expires  string `json:"expires"`
+	Device   string `json:"device,omitempty"`
+	Record   string `json:"record,omitempty"`
+	Position int64  `json:"position,omitempty"`
+	Key      string `json:"key,omitempty"`
+	Label    string `json:"label,omitempty"`
+}
+
+// handleCode answers GET /v1/people/codes/{sha256 of the code}.
+func (i *Issuer) handleCode(w http.ResponseWriter, r *http.Request) {
+	hash := r.PathValue("code")
+	x := i.Index
+	x.mu.Lock()
+	defer x.mu.Unlock()
+	if err := x.sync(r.Context()); err != nil {
+		fail(w, err)
+		return
+	}
+	c := x.code(hash)
+	if c == nil {
+		fail(w, refuse(http.StatusNotFound, "no code %.16s is booked", hash))
+		return
+	}
+	out := CodeState{State: "waiting", Expires: c.Expires}
+	if e := x.codeUsed(hash); e != nil {
+		d := x.devices[e.Record]
+		out = CodeState{State: "enrolled", Expires: c.Expires, Device: e.Device, Record: e.Record, Position: e.Position, Key: d.Predicate.Key, Label: d.Predicate.Label}
+	} else if i.now().After(c.expires()) {
+		out.State = "lapsed"
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// code is the booked code with this hash.
+func (x *Index) code(hash string) *Entry {
+	for _, e := range x.entries {
+		if e.Kind == KindCode && e.Code == hash {
+			return e
+		}
+	}
+	return nil
+}
+
+// codeUsed is the device entry a code enrolled, or nil.
+func (x *Index) codeUsed(hash string) *Entry {
+	for _, e := range x.entries {
+		if d := x.devices[e.Record]; e.Kind == KindDevice && d != nil && d.Predicate.Code == hash && d.Predicate.Renews == "" {
+			return e
+		}
+	}
+	return nil
+}

@@ -5,6 +5,8 @@ go 1.26.7
 require (
 	github.com/Avalanche-io/c4 v1.0.17-0.20261021011131-b3a6f2dd9280
 	github.com/container-storage-interface/spec v1.13.0
+	github.com/coreos/go-oidc/v3 v3.21.0
+	github.com/go-jose/go-jose/v4 v4.1.4
 	github.com/go-logr/logr v1.4.4
 	github.com/google/jsonschema-go v0.4.3
 	github.com/modelcontextprotocol/go-sdk v1.8.0

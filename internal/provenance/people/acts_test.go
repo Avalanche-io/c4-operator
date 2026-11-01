@@ -1,0 +1,211 @@
+package people_test
+
+import (
+	"context"
+	"errors"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/Avalanche-io/c4-operator/internal/provenance"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/people"
+	"github.com/Avalanche-io/c4-operator/internal/provenance/provtest"
+	"github.com/Avalanche-io/c4-operator/schema"
+)
+
+// book sends a signed act to the issuer.
+func (r *rig) book(act []byte, host string) (int, string, *people.Booked) {
+	var b people.Booked
+	code, body := r.call("POST", "/v1/people/acts", host, act, &b)
+	return code, body, &b
+}
+
+// checkAt checks an act against the device records in force at pos.
+func (r *rig) checkAt(act []byte, pos int64) error {
+	r.t.Helper()
+	v, err := provenance.VerifyBundle(act, r.farm.Roots)
+	if err != nil {
+		r.t.Fatal(err)
+	}
+	return r.index.CheckAct(context.Background(), v, pos)
+}
+
+// A removed device's certificates are no longer in force from the
+// removal's position: an act it signed checks at a position before the
+// removal and not at or after it, though its leaf still chains. It
+// can't renew, and its key can't come back. Removing someone else's
+// device takes an admin.
+func TestRemovedDeviceOutOfForce(t *testing.T) {
+	r := studio(t)
+	d, other := newDev(t), newDev(t)
+	k := r.key(d, r.signIn(d, "noor", noorSub))
+	ko := r.key(other, r.signIn(other, "noor", noorSub))
+	approve := r.act(k, "noor", "approve", provenance.Subject{}, nil, false)
+	before, _ := r.index.Position(context.Background())
+	if err := r.checkAt(approve, before); err != nil {
+		t.Fatalf("before the removal: %v", err)
+	}
+	dana := newDev(t)
+	kd := r.key(dana, r.signIn(dana, "dana", danaSub))
+	if code, body, _ := r.book(r.act(ko, "noor", "remove-device", deviceSubject(dana.id), nil, false), ""); code != http.StatusForbidden || !strings.Contains(body, "an admin") {
+		t.Errorf("noor removed dana's device: %d %s", code, body)
+	}
+	code, body, b := r.book(r.act(ko, "noor", "remove-device", deviceSubject(d.id), nil, false), "")
+	if code != http.StatusOK || b.Entry.Kind != people.KindRemoval || b.Entry.Device != d.id || b.Entry.Person != "noor" || b.Entry.By != "noor" {
+		t.Fatalf("remove: %d %s", code, body)
+	}
+	if err := r.checkAt(approve, b.Position); !errors.Is(err, people.ErrNotInForce) {
+		t.Errorf("at the removal's position: %v", err)
+	}
+	if err := r.checkAt(approve, before); err != nil {
+		t.Errorf("before the removal, after it was booked: %v", err)
+	}
+	if code, body, _ := r.renew(d, "noor", noorSub); code != http.StatusForbidden || !strings.Contains(body, "removed") {
+		t.Errorf("a removed device renewed: %d %s", code, body)
+	}
+	e := r.enrolment(d, "noor", "", "browser")
+	e.IDToken = r.sso.token(r.now, noorSub, d.id, nil)
+	if code, _ := r.call("POST", "/v1/people/enroll", "", e, nil); code != http.StatusConflict {
+		t.Errorf("a removed key enrolled again: %d", code)
+	}
+	// An admin removes all of a person's devices at once; one enrolled
+	// after stays.
+	if code, body, _ := r.book(r.act(kd, "dana", "remove-device", r.farmSubject(), map[string]string{"person": "noor"}, false), ""); code != http.StatusOK {
+		t.Fatalf("remove all of noor's: %d %s", code, body)
+	}
+	later := newDev(t)
+	r.signIn(later, "noor", noorSub)
+	pos, _ := r.index.Position(context.Background())
+	devs, _ := r.index.DevicesAt(context.Background(), pos, r.now)
+	if n := countPerson(devs, "noor"); n != 1 {
+		t.Errorf("noor has %d devices in force after the removal and one sign-in", n)
+	}
+}
+
+func countPerson(devs []*schema.Device, person string) int {
+	n := 0
+	for _, d := range devs {
+		if d.Predicate.Person == person {
+			n++
+		}
+	}
+	return n
+}
+
+// A person's act whose leaf names a device the index never booked is a
+// forgery: the leaf chains, and still nothing is in force behind it.
+func TestLeafWithoutRecordIsAForgery(t *testing.T) {
+	r := studio(t)
+	scratch := r.farm.Person(t, "dana", false)
+	act := r.farm.SignAct(t, scratch, provtest.Act{SignedAt: r.now})
+	if err := r.checkAt(act, 0); !errors.Is(err, people.ErrNotInForce) || !strings.Contains(err.Error(), "forgery") {
+		t.Errorf("a leaf with no record: %v", err)
+	}
+}
+
+// The sign-in provider setting is an admin's signed act. It is on the
+// touch list; until the touch is built it is booked as signed, not
+// confirmed. From then on it is the provider in force, and the install's
+// preset no longer replaces it. A person who isn't an admin can't set it.
+func TestProviderSettingIsASignedAct(t *testing.T) {
+	r := studio(t)
+	dana, noor := newDev(t), newDev(t)
+	kd := r.key(dana, r.signIn(dana, "dana", danaSub))
+	kn := r.key(noor, r.signIn(noor, "noor", noorSub))
+	next := map[string]string{"issuer": "https://login.studio.example", "clientID": "c4-farm-2"}
+	if code, body, _ := r.book(r.act(kn, "noor", "set-sign-in-provider", r.farmSubject(), next, false), ""); code != http.StatusForbidden || !strings.Contains(body, "not an admin") {
+		t.Errorf("noor set the provider: %d %s", code, body)
+	}
+	code, body, b := r.book(r.act(kd, "dana", "set-sign-in-provider", r.farmSubject(), next, false), "")
+	if code != http.StatusOK || b.Grade != people.GradeSigned || b.Entry.Grade != people.GradeSigned || b.Entry.Issuer != next["issuer"] {
+		t.Fatalf("set: %d %s", code, body)
+	}
+	var cfg people.Config
+	r.call("GET", "/v1/people/config", "", nil, &cfg)
+	if cfg.Provider == nil || cfg.Provider.Issuer != next["issuer"] || cfg.Provider.Grade != people.GradeSigned {
+		t.Errorf("config %+v", cfg.Provider)
+	}
+	// A token from the old provider no longer certifies anyone.
+	d := newDev(t)
+	e := r.enrolment(d, "dana", "", "browser")
+	e.IDToken = r.sso.token(r.now, danaSub, d.id, nil)
+	if code, _ := r.call("POST", "/v1/people/enroll", "", e, nil); code == http.StatusOK {
+		t.Error("the old provider's token certified a key after the setting changed")
+	}
+	if n := len(r.entries(people.KindSetting)); n != 2 {
+		t.Errorf("%d settings booked", n)
+	}
+	// The same act sent twice is taken once.
+	act := r.act(kd, "dana", "set-sign-in-provider", r.farmSubject(), next, false)
+	r.book(act, "")
+	if code, _, _ := r.book(act, ""); code != http.StatusConflict {
+		t.Errorf("an act taken twice: %d", code)
+	}
+}
+
+// A touch key on a second device is enrolled on a touch from an existing
+// touch key: a confirmed approve-machine act naming the new key, then the
+// new key enrols with evidence approval. An approval only signed, without
+// the touch, is refused; so is an approval used for another key, or after
+// it lapses. The new touch key then confirms the person's acts, checked
+// against the index (CheckTouchKey).
+func TestTouchKeyByApproval(t *testing.T) {
+	r := studio(t)
+	laptop, laptopTouch := newDev(t), newDev(t)
+	k := r.key(laptop, r.signIn(laptop, "dana", danaSub))
+	e := r.enrolment(laptopTouch, "dana", laptop.id, "mac")
+	e.IDToken = r.sso.token(r.now, danaSub, laptopTouch.id, map[string]any{"auth_time": r.now.Unix(), "amr": []string{"hwk", "pin"}})
+	var tc people.Certified
+	if code, body := r.call("POST", "/v1/people/enroll", "", e, &tc); code != http.StatusOK {
+		t.Fatalf("the first touch key: %d %s", code, body)
+	}
+	k.Touch = r.key(laptopTouch, &tc)
+
+	desk := newDev(t)
+	kdesk := r.key(desk, r.signIn(desk, "dana", danaSub))
+	deskTouch := newDev(t)
+	if code, _, _ := r.book(r.act(k, "dana", "approve-machine", deviceSubject(deskTouch.id), map[string]string{}, false), ""); code != http.StatusForbidden {
+		t.Errorf("an untouched approval: %d", code)
+	}
+	code, body, b := r.book(r.act(k, "dana", "approve-machine", deviceSubject(deskTouch.id), map[string]string{}, true), "")
+	if code != http.StatusOK || b.Entry.Kind != people.KindApproval {
+		t.Fatalf("approve: %d %s", code, body)
+	}
+	wrong := newDev(t)
+	ew := r.enrolment(wrong, "dana", desk.id, "mac")
+	ew.Approval = b.Record
+	if code, _ := r.call("POST", "/v1/people/enroll", "", ew, nil); code != http.StatusForbidden {
+		t.Errorf("an approval used for another key: %d", code)
+	}
+	ed := r.enrolment(deskTouch, "dana", desk.id, "mac")
+	ed.Approval = b.Record
+	var dc people.Certified
+	if code, body := r.call("POST", "/v1/people/enroll", "", ed, &dc); code != http.StatusOK {
+		t.Fatalf("enrol on the approval: %d %s", code, body)
+	}
+	kdesk.Touch = r.key(deskTouch, &dc)
+	grant := r.act(kdesk, "dana", "grant", provenance.Subject{}, map[string]string{"to": "agent assistant"}, true)
+	pos, _ := r.index.Position(context.Background())
+	if err := r.checkAt(grant, pos); err != nil {
+		t.Errorf("a grant confirmed with the new touch key: %v", err)
+	}
+	// The desk's touch key confirms for the desk, not the laptop.
+	k.Touch = kdesk.Touch
+	if err := r.checkAt(r.act(k, "dana", "grant", provenance.Subject{}, nil, true), pos); err == nil {
+		t.Error("the desk's touch key confirmed the laptop's act")
+	}
+	// An approval works for ApprovalTTL.
+	k.Touch = r.key(laptopTouch, &tc)
+	late := newDev(t)
+	code, body, lb := r.book(r.act(k, "dana", "approve-machine", deviceSubject(late.id), map[string]string{}, true), "")
+	if code != http.StatusOK {
+		t.Fatalf("approve: %d %s", code, body)
+	}
+	r.now = r.now.Add(people.ApprovalTTL + time.Second)
+	el := r.enrolment(late, "dana", "", "linux")
+	el.Approval = lb.Record
+	if code, body := r.call("POST", "/v1/people/enroll", "", el, nil); code != http.StatusForbidden || !strings.Contains(body, "lapsed") {
+		t.Errorf("a lapsed approval: %d %s", code, body)
+	}
+}
